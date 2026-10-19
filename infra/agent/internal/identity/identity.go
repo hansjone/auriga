@@ -208,11 +208,10 @@ func ParseCertPEM(pemBytes []byte) ([]*x509.Certificate, error) {
 
 // PublicKeysEqual reports whether cert's ECDSA public key matches priv.
 func PublicKeysEqual(cert *x509.Certificate, priv *ecdsa.PrivateKey) bool {
-	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
-	if !ok || priv == nil {
+	if cert == nil || priv == nil {
 		return false
 	}
-	return pub.X.Cmp(priv.X) == 0 && pub.Y.Cmp(priv.Y) == 0 && pub.Curve == priv.Curve
+	return priv.PublicKey.Equal(cert.PublicKey)
 }
 
 func atomicWrite(path string, data []byte, private bool) error {

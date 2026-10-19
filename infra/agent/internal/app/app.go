@@ -125,7 +125,7 @@ func runAgent(args []string, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	driver := runtime.NewFake()
 	rec := reconciler.New(store, driver, logger, cfg.MaxConcurrentPrepare)

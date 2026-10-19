@@ -85,7 +85,7 @@ func currentUserSID() (*windows.SID, error) {
 		if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
 			return nil, err
 		}
-		defer token.Close()
+		defer func() { _ = token.Close() }()
 		tu, err := token.GetTokenUser()
 		if err != nil {
 			return nil, err

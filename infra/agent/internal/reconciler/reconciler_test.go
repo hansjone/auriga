@@ -18,7 +18,7 @@ func TestReconcilerRunningAndStopped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	drv := runtime.NewFake()
 	rec := reconciler.New(store, drv, nil, 2)
 	defer rec.Close()

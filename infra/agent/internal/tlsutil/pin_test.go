@@ -59,8 +59,8 @@ func TestPipeTLSPin(t *testing.T) {
 	}
 
 	c1, c2 := net.Pipe()
-	defer c1.Close()
-	defer c2.Close()
+	defer func() { _ = c1.Close() }()
+	defer func() { _ = c2.Close() }()
 
 	errCh := make(chan error, 1)
 	go func() {

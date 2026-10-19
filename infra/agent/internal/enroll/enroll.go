@@ -91,7 +91,7 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial enrollment: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := nodev1.NewNodeEnrollmentServiceClient(conn)
 	resp, err := client.Join(ctx, &nodev1.JoinRequest{
@@ -144,7 +144,7 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open state: %w", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	meta := state.NodeMeta{
 		NodeID:          mat.NodeID,
 		ControlEndpoint: mat.ControlEndpoint,
@@ -206,7 +206,7 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 		owned = true
 	}
 	if owned {
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 	}
 	meta, err := st.GetNodeMeta()
 	if err != nil {
@@ -257,7 +257,7 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 	if err != nil {
 		return nil, fmt.Errorf("dial renew: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := nodev1.NewNodeEnrollmentServiceClient(conn)
 	resp, err := client.RenewCertificate(ctx, &nodev1.RenewCertificateRequest{

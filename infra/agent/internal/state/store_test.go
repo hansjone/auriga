@@ -32,13 +32,13 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err := store.PutDesired(spec); err != nil {
 		t.Fatal(err)
 	}
-	store.Close()
+	_ = store.Close()
 
 	store2, err := state.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 	s2, err := store2.GetDesired("i1")
 	if err != nil || s2 == nil || s2.Generation != 3 {
 		t.Fatalf("%v %v", s2, err)

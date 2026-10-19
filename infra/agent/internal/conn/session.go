@@ -237,7 +237,7 @@ func (s *Session) runOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial control: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := nodev1.NewNodeControlServiceClient(conn)
 	stream, err := client.Session(ctx)

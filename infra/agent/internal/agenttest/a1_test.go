@@ -123,7 +123,7 @@ func TestExpiredCertificateRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	driver := runtime.NewFake()
 	rec := reconciler.New(store, driver, logger, 2)
 	defer rec.Close()
@@ -177,7 +177,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	driver := runtime.NewFake()
 	rec := reconciler.New(store, driver, logger, 2)
 	defer rec.Close()
@@ -246,7 +246,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	}
 
 	cancel()
-	<-errCh
+	_ = <-errCh
 
 	fw.SetDropNextSession(true)
 	ctx2, cancel2 := context.WithCancel(context.Background())
@@ -307,13 +307,13 @@ func TestReconcilerPhasesAndRestartRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.Close()
-	store.Close()
+	_ = store.Close()
 
 	store2, err := state.Open(agentDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store2.Close()
+	defer func() { _ = store2.Close() }()
 	got, err := store2.GetDesired("inst_r1")
 	if err != nil || got == nil || got.Generation != 1 {
 		t.Fatalf("desired not persisted: %#v %v", got, err)
