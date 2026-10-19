@@ -148,6 +148,23 @@ public final class WorkspaceAdmin {
               time(service.clock.instant()),
               store.tenant(),
               id);
+          if (row.get("node_id") != null) {
+            long generation = previous.getGeneration() + 1;
+            var command =
+                DeleteInstance.newBuilder()
+                    .setInstanceId(id.toString())
+                    .setGeneration(generation)
+                    .setPurgeData(purge)
+                    .build();
+            store.jdbc.update(
+                "INSERT INTO workspace_job(id,tenant_id,instance_id,kind,due_at,command,generation) VALUES(?,?,?,'delete',?,?,?)",
+                UuidV7.next(service.clock),
+                store.tenant(),
+                id,
+                time(service.clock.instant()),
+                command.toByteArray(),
+                generation);
+          }
           if (row.get("node_id") == null)
             service.publish(
                 "instance.deleted",
@@ -200,20 +217,42 @@ public final class WorkspaceAdmin {
   }
 
   public void revoke(UUID id) {
+    revoke(id, false);
+  }
+
+  public void revoke(UUID id, boolean force) {
     store.tx(
         () -> {
           store.lock();
+          // Same lock order as a session: lease first, then node/instances.
+          store.jdbc.update(
+              "DELETE FROM node_session WHERE tenant_id=? AND node_id=?", store.tenant(), id);
           store.node(id);
-          if (store.jdbc.queryForObject(
-                  "SELECT count(*) FROM instance WHERE tenant_id=? AND node_id=? AND (NOT deleted OR phase<>'absent')",
-                  Long.class,
-                  store.tenant(),
-                  id)
-              > 0) throw new AurigaException(NODE_NOT_EMPTY);
+          if (!force
+              && store.jdbc.queryForObject(
+                      "SELECT count(*) FROM instance WHERE tenant_id=? AND node_id=? AND (NOT deleted OR phase<>'absent')",
+                      Long.class,
+                      store.tenant(),
+                      id)
+                  > 0) throw new AurigaException(NODE_NOT_EMPTY);
           store.jdbc.update(
               "UPDATE node SET revoked=true,schedulable=false WHERE tenant_id=? AND id=?",
               store.tenant(),
               id);
+          int affected =
+              force
+                  ? store.jdbc.update(
+                      "UPDATE instance SET migration_pending=true,ready=false WHERE tenant_id=? AND node_id=? AND NOT deleted",
+                      store.tenant(),
+                      id)
+                  : 0;
+          service.audit(
+              auriga.common.audit.AuditEntry.builder("workspace.node.revoke")
+                  .target("node", id.toString())
+                  .detail("force", force)
+                  .detail("instancesPendingMigration", affected)
+                  .build());
+          service.nodeRevokedAfterCommit(id);
           return null;
         });
   }

@@ -43,18 +43,8 @@ public final class WorkspaceStore {
   }
 
   public void register(UUID id, String kind, UUID tenant) {
-    if (org.springframework.transaction.support.TransactionSynchronizationManager
-            .isActualTransactionActive()
-        && tenant.equals(TenantContext.require())) {
-      TenantTransactionManager.verifyTransactionTenant();
-      jdbc.update(
-          "INSERT INTO workspace_registry(id,tenant_id,resource_tenant,kind) VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING",
-          id,
-          TenantContext.PLATFORM_TENANT,
-          tenant,
-          kind);
-      return;
-    }
+    // This directory is platform metadata. Never insert a platform row in a tenant transaction:
+    // ON CONFLICT also checks row visibility, which an INSERT-only tenant policy cannot grant.
     in(
         TenantContext.PLATFORM_TENANT,
         () ->

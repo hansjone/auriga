@@ -15,6 +15,7 @@ import auriga.workspace.api.WorkspaceInputs;
 import auriga.workspace.app.*;
 import auriga.workspace.domain.*;
 import auriga.workspace.grpc.*;
+import auriga.workspace.persistence.NodeSessionLease;
 import auriga.workspace.persistence.WorkspaceStore;
 import com.google.protobuf.ByteString;
 import io.grpc.*;
@@ -44,6 +45,7 @@ class WorkspaceIntegrationTest {
   NodeSessions sessions;
   NodeCa ca;
   KeyPair caKey;
+  WorkspaceInputs inputs;
   final WorkspacePolicy policy = new WorkspacePolicy().maxConcurrentStarts(1);
   InstanceQuota quota =
       InstanceQuota.newBuilder().setMaxInstances(1).setAlwaysOnAllowed(true).build();
@@ -99,7 +101,7 @@ class WorkspaceIntegrationTest {
                                     .setVersion("1.0.0"))))
             .setProfile(Profile.newBuilder().setListenPort(7860))
             .build();
-    WorkspaceInputs inputs =
+    inputs =
         new WorkspaceInputs() {
           public Member member(UUID tid, UUID id) {
             return Member.newBuilder()
@@ -176,6 +178,207 @@ class WorkspaceIntegrationTest {
         .setHostname("example-node")
         .setAgentVersion("1.0.0")
         .build();
+  }
+
+  @Test
+  void platformRegistryWorksInsideTenantTransactionAndSeparatesResourceKinds() {
+    UUID id = UuidV7.next();
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () -> {
+                  store.register(id, "instance", tenant);
+                  store.register(id, "instance", tenant);
+                  assertEquals(
+                      0L,
+                      store.jdbc.queryForObject(
+                          "SELECT count(*) FROM workspace_registry WHERE id=?", Long.class, id));
+                  assertEquals(tenant, store.route(id, "instance"));
+                  assertEquals(
+                      "common.unauthenticated",
+                      assertThrows(AurigaException.class, () -> store.route(id, "token"))
+                          .errorCode()
+                          .code());
+                  return null;
+                }));
+  }
+
+  @Test
+  void leasesDoNotHoldPoolConnectionsAndFenceExpiredHolders() throws Exception {
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    // A two-connection pool must support more idle sessions than connections.
+    try (var pool = new com.zaxxer.hikari.HikariDataSource()) {
+      pool.setDataSource(store.jdbc.getDataSource());
+      pool.setMaximumPoolSize(2);
+      pool.setMinimumIdle(0);
+      pool.setConnectionTimeout(1000);
+      var small = new WorkspaceStore(new JdbcTemplate(pool), new TenantTransactionManager(pool));
+      List<NodeSessionLease> leases = new ArrayList<>();
+      for (int i = 0; i < 5; i++) {
+        UUID n =
+            i == 0
+                ? node
+                : UUID.fromString(
+                    enrollment.join(joinRequest(token().token(), TestPki.key())).getNodeId());
+        var lease = new NodeSessionLease(small, tenant, n, UuidV7.next());
+        lease.acquire();
+        leases.add(lease);
+        assertEquals(0, pool.getHikariPoolMXBean().getActiveConnections());
+      }
+      var replacement = new NodeSessionLease(small, tenant, node, UuidV7.next());
+      assertEquals(
+          "common.conflict",
+          assertThrows(AurigaException.class, replacement::acquire).errorCode().code());
+      small.in(
+          tenant,
+          () ->
+              small.jdbc.update(
+                  "UPDATE node_session SET expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE tenant_id=? AND node_id=?",
+                  tenant,
+                  node));
+      replacement.acquire();
+      assertEquals(
+          "common.conflict",
+          assertThrows(AurigaException.class, () -> leases.getFirst().guard(() -> true))
+              .errorCode()
+              .code());
+      leases.getFirst().release();
+      assertTrue(replacement.guard(() -> true));
+      replacement.release();
+      for (var lease : leases) lease.release();
+    }
+  }
+
+  @Test
+  void durableRestartResultsBackoffAndDeleteAcknowledgement() throws Exception {
+    UUID node =
+        UUID.fromString(enrollment.join(joinRequest(token().token(), TestPki.key())).getNodeId());
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    store.in(
+        tenant,
+        () ->
+            store.jdbc.update(
+                "UPDATE instance SET node_id=? WHERE tenant_id=? AND id=?",
+                node,
+                tenant,
+                instance));
+    UUID holder = UuidV7.next();
+    var lease = new NodeSessionLease(store, tenant, node, holder);
+    lease.acquire();
+    var delivery = new NodeDeliveries(store, clock);
+    TenantContext.run(tenant, () -> service.operate(instance, actor(), "restart"));
+    UUID job = null;
+    for (int attempt = 1; attempt <= 5; attempt++) {
+      var claimed = lease.guard(() -> delivery.claim(node, holder, Set.of()));
+      assertEquals(1, claimed.size());
+      var d = claimed.getFirst();
+      if (job == null) job = d.id();
+      else assertEquals(job, d.id());
+      assertEquals(attempt, d.attempt());
+      assertTrue(lease.guard(() -> delivery.claim(node, holder, Set.of(d.id()))).isEmpty());
+      var failed =
+          CommandResult.newBuilder()
+              .setCommandId(d.id().toString())
+              .setInstanceId(instance.toString())
+              .setOk(false)
+              .build();
+      lease.guard(
+          () -> {
+            delivery.result(node, holder, d, failed);
+            return null;
+          });
+      assertTrue(lease.guard(() -> delivery.claim(node, holder, Set.of())).isEmpty());
+      var row =
+          store.in(
+              tenant,
+              () ->
+                  store.one(
+                      "SELECT * FROM workspace_job WHERE tenant_id=? AND id=?", tenant, d.id()));
+      assertArrayEquals(failed.toByteArray(), (byte[]) row.get("result"));
+      clock.now = clock.now.plusSeconds(301);
+    }
+    assertTrue(lease.guard(() -> delivery.claim(node, holder, Set.of())).isEmpty());
+    UUID exhausted = job;
+    assertEquals(
+        true,
+        store.in(
+            tenant,
+            () ->
+                store
+                    .one(
+                        "SELECT * FROM workspace_job WHERE tenant_id=? AND id=?", tenant, exhausted)
+                    .get("failed")));
+    TenantContext.run(
+        tenant, () -> new WorkspaceAdmin(service, inputs).delete(instance, false, owner));
+    var deletion = lease.guard(() -> delivery.claim(node, holder, Set.of())).getFirst();
+    assertEquals("delete", deletion.kind());
+    var absent =
+        InstanceStatus.newBuilder()
+            .setInstanceId(instance.toString())
+            .setObservedGeneration(deletion.generation())
+            .setPhase(InstancePhase.INSTANCE_PHASE_ABSENT)
+            .build();
+    lease.guard(
+        () -> {
+          delivery.deleted(node, holder, deletion, absent);
+          return null;
+        });
+    assertTrue(lease.guard(() -> delivery.claim(node, holder, Set.of())).isEmpty());
+    lease.release();
+  }
+
+  @Test
+  void forceRevocationRejectsOrdinaryNonemptyRevokeAndInvalidatesStreamAndCertificate()
+      throws Exception {
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    var leaf = NodeCa.parse(joined.getCertificateChain().toByteArray());
+    var fake = new FakeNode();
+    var context = Context.current().withValue(NodeSessions.PEER, leaf);
+    context.call(() -> sessions.session(fake));
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    store.in(
+        tenant,
+        () ->
+            store.jdbc.update(
+                "UPDATE instance SET node_id=?,ready=true WHERE tenant_id=? AND id=?",
+                node,
+                tenant,
+                instance));
+    TenantContext.run(
+        tenant,
+        () -> {
+          var admin = new WorkspaceAdmin(service, inputs);
+          assertEquals(
+              "workspace.node_not_empty",
+              assertThrows(AurigaException.class, () -> admin.revoke(node)).errorCode().code());
+          assertFalse(fake.error.isDone());
+          admin.revoke(node, true);
+        });
+    assertEquals(Status.Code.UNAUTHENTICATED, fake.error.get(5, TimeUnit.SECONDS).getCode());
+    assertEquals(true, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+    assertEquals(false, store.in(tenant, () -> store.instance(instance).get("ready")));
+    assertEquals(
+        "common.unauthenticated",
+        assertThrows(AurigaException.class, () -> enrollment.identity(leaf)).errorCode().code());
+    var rejected = new FakeNode();
+    context.call(() -> sessions.session(rejected));
+    assertEquals(Status.Code.UNAUTHENTICATED, rejected.error.get(5, TimeUnit.SECONDS).getCode());
+    assertEquals(
+        1L,
+        store.in(
+            tenant,
+            () ->
+                store.jdbc.queryForObject(
+                    "SELECT count(*) FROM outbox_event WHERE tenant_id=? AND event_type=? AND subject_key=?",
+                    Long.class,
+                    tenant,
+                    EventEnvelope.AUDIT_TYPE,
+                    node.toString())));
   }
 
   @Test

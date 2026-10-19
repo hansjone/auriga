@@ -1,12 +1,10 @@
 CREATE TABLE workspace_registry (
   id uuid PRIMARY KEY, tenant_id uuid NOT NULL, resource_tenant uuid NOT NULL,
-  kind text NOT NULL CHECK (kind IN ('tenant','node','token'))
+  kind text NOT NULL CHECK (kind IN ('tenant','node','token','instance'))
 );
 SELECT auriga_enable_tenant_rls('workspace_registry');
--- A tenant may atomically register only its own resource route. Reads remain platform-scoped.
-CREATE POLICY workspace_registry_register_own ON workspace_registry FOR INSERT
-  WITH CHECK (tenant_id='00000000-0000-0000-0000-000000000000'::uuid
-              AND resource_tenant=auriga_current_tenant());
+-- Platform routing metadata, accessed only in explicit PLATFORM_TENANT transactions.
+-- It carries no credentials; every lookup is followed by tenant-scoped resource authorization.
 
 CREATE TABLE node (
   id uuid PRIMARY KEY, tenant_id uuid NOT NULL, name text NOT NULL, hostname text NOT NULL,
@@ -19,6 +17,13 @@ CREATE TABLE node (
   joined_at timestamptz NOT NULL, UNIQUE(tenant_id,id)
 );
 SELECT auriga_enable_tenant_rls('node');
+
+CREATE TABLE node_session (
+  id uuid PRIMARY KEY,tenant_id uuid NOT NULL,node_id uuid NOT NULL,holder uuid NOT NULL,
+  expires_at timestamptz NOT NULL,UNIQUE(tenant_id,node_id),
+  FOREIGN KEY(tenant_id,node_id) REFERENCES node(tenant_id,id)
+);
+SELECT auriga_enable_tenant_rls('node_session');
 
 CREATE TABLE join_token (
   id uuid PRIMARY KEY, tenant_id uuid NOT NULL, name text,
@@ -64,6 +69,8 @@ CREATE TABLE workspace_job (
   id uuid PRIMARY KEY, tenant_id uuid NOT NULL, instance_id uuid NOT NULL,
   kind text NOT NULL CHECK(kind IN ('wake','restart','delete')), due_at timestamptz NOT NULL,
   command bytea, done boolean NOT NULL DEFAULT false,
+  attempts integer NOT NULL DEFAULT 0,failed boolean NOT NULL DEFAULT false,result bytea,
+  last_error text,dispatched_session uuid,sent_at timestamptz,generation bigint NOT NULL DEFAULT 0,
   FOREIGN KEY(tenant_id,instance_id) REFERENCES instance(tenant_id,id)
 );
 CREATE INDEX workspace_job_due ON workspace_job(tenant_id,due_at) WHERE NOT done;

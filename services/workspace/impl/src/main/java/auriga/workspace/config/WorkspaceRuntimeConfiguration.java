@@ -156,14 +156,18 @@ public class WorkspaceRuntimeConfiguration {
 
   @Bean
   NodeGrpcServer workspaceNodeServer(
-      NodeEnrollment enrollment, NodeSessions sessions, Environment env) {
+      NodeEnrollment enrollment,
+      NodeSessions sessions,
+      Environment env,
+      ObjectProvider<io.micrometer.core.instrument.MeterRegistry> metrics) {
     return new NodeGrpcServer(
         env.getProperty("auriga.workspace.node-server.host", "127.0.0.1"),
         env.getProperty("auriga.workspace.node-server.port", Integer.class, 0),
         Path.of(env.getRequiredProperty("auriga.workspace.tls-certificate-file")).toFile(),
         Path.of(env.getRequiredProperty("auriga.workspace.tls-private-key-file")).toFile(),
         enrollment,
-        sessions);
+        sessions,
+        metrics.getIfAvailable(io.micrometer.core.instrument.simple.SimpleMeterRegistry::new));
   }
 
   @Bean

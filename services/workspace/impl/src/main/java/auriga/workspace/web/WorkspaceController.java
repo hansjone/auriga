@@ -163,8 +163,9 @@ public class WorkspaceController implements MeApi, AdminRuntimesApi {
   @AdminOnly
   @RequiresPermission("workspace.nodes.admin")
   @DeleteMapping("/admin/nodes/{id}")
-  public ResponseEntity<Void> revokeNode(@PathVariable UUID id) {
-    admin.revoke(id);
+  public ResponseEntity<Void> revokeNode(
+      @PathVariable UUID id, @RequestParam(defaultValue = "false") boolean force) {
+    admin.revoke(id, force);
     sessions.revoke(id);
     return ResponseEntity.noContent().build();
   }

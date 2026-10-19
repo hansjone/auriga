@@ -92,7 +92,12 @@ public final class NodeEnrollment {
     UUID tokenId;
     String secret;
     try {
-      String[] parts = request.getToken().split("\\.", -1);
+      String value = request.getToken();
+      if (value.length() != 80
+          || value.charAt(36) != '.'
+          || !value.substring(37).matches("[A-Za-z0-9_-]{43}"))
+        throw new IllegalArgumentException();
+      String[] parts = value.split("\\.", -1);
       if (parts.length != 2 || parts[1].length() != 43) throw new IllegalArgumentException();
       tokenId = UUID.fromString(parts[0]);
       secret = parts[1];
@@ -101,22 +106,6 @@ public final class NodeEnrollment {
     }
     UUID tenant = store.route(tokenId, "token");
     UUID node = UuidV7.next(clock);
-    valid(
-        request.getSealingPublicKey().size() == 32
-            && !request.getSealingPublicKey().equals(ByteString.copyFrom(new byte[32])));
-    valid(
-        org.bouncycastle.math.ec.rfc7748.X25519.calculateAgreement(
-            WorkspaceCrypto.random(32),
-            0,
-            request.getSealingPublicKey().toByteArray(),
-            0,
-            new byte[32],
-            0));
-    valid(
-        Set.of("linux", "windows").contains(request.getOs())
-            && Set.of("amd64", "arm64").contains(request.getArch())
-            && request.getHostname().length() <= 255
-            && request.getAgentVersion().length() <= 128);
     JoinResponse response =
         store.in(
             tenant,
@@ -133,6 +122,22 @@ public final class NodeEnrollment {
                   || !MessageDigest.isEqual(
                       (byte[]) token.get("secret_hash"), WorkspaceCrypto.hash(secret)))
                 throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+              valid(
+                  request.getSealingPublicKey().size() == 32
+                      && !request.getSealingPublicKey().equals(ByteString.copyFrom(new byte[32])));
+              valid(
+                  org.bouncycastle.math.ec.rfc7748.X25519.calculateAgreement(
+                      WorkspaceCrypto.random(32),
+                      0,
+                      request.getSealingPublicKey().toByteArray(),
+                      0,
+                      new byte[32],
+                      0));
+              valid(
+                  Set.of("linux", "windows").contains(request.getOs())
+                      && Set.of("amd64", "arm64").contains(request.getArch())
+                      && request.getHostname().length() <= 255
+                      && request.getAgentVersion().length() <= 128);
               X509Certificate leaf = ca.issue(request.getCsr().toByteArray(), node);
               store.register(node, "node", tenant);
               store.jdbc.update(
@@ -186,8 +191,13 @@ public final class NodeEnrollment {
             return null;
           });
       return node;
-    } catch (RuntimeException e) {
-      throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    } catch (org.springframework.dao.DataAccessException
+        | org.springframework.transaction.TransactionException e) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    } catch (AurigaException e) {
+      if (e.errorCode() == CommonErrors.NOT_FOUND)
+        throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+      throw e;
     } catch (Exception e) {
       throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     }

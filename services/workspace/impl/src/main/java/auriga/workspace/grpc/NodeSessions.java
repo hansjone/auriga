@@ -2,17 +2,16 @@ package auriga.workspace.grpc;
 
 import static auriga.workspace.persistence.WorkspaceStore.*;
 
-import auriga.common.context.TenantContext;
 import auriga.common.error.*;
 import auriga.common.grpc.GrpcErrors;
 import auriga.contracts.node.v1.*;
 import auriga.workspace.app.*;
 import auriga.workspace.domain.WorkspaceCrypto;
+import auriga.workspace.persistence.NodeSessionLease;
 import com.google.protobuf.Duration;
 import io.grpc.*;
 import io.grpc.stub.StreamObserver;
 import java.security.cert.X509Certificate;
-import java.sql.Connection;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,9 +27,19 @@ public final class NodeSessions implements AutoCloseable {
     this.enrollment = enrollment;
     this.workspace = workspace;
     workspace.onChanged(this::dispatch);
+    workspace.onNodeRevoked(this::revoke);
   }
 
   public StreamObserver<SessionRequest> session(StreamObserver<SessionResponse> output) {
+    try {
+      return openSession(output);
+    } catch (RuntimeException e) {
+      output.onError(NodeGrpcServer.status(e));
+      return ignored();
+    }
+  }
+
+  private StreamObserver<SessionRequest> openSession(StreamObserver<SessionResponse> output) {
     X509Certificate leaf = PEER.get();
     if (leaf == null) {
       output.onError(GrpcErrors.toStatus(new AurigaException(CommonErrors.UNAUTHENTICATED)));
@@ -39,6 +48,7 @@ public final class NodeSessions implements AutoCloseable {
     UUID node = enrollment.identity(leaf), tenant = enrollment.store.route(node, "node");
     Session session = new Session(node, tenant, leaf, output);
     synchronized (sessions) {
+      if (session.closed) return ignored();
       Session previous = sessions.remove(node);
       if (previous != null) previous.fail(new AurigaException(CommonErrors.CONFLICT));
       try {
@@ -79,9 +89,11 @@ public final class NodeSessions implements AutoCloseable {
   }
 
   public void expire() {
-    for (var s : List.copyOf(sessions.values()))
+    for (var s : List.copyOf(sessions.values())) {
+      s.checkTimeouts();
       if (s.seen.isBefore(workspace.clock.instant().minusSeconds(60)))
         s.fail(new AurigaException(CommonErrors.UNAVAILABLE));
+    }
   }
 
   public void revoke(UUID node) {
@@ -101,7 +113,13 @@ public final class NodeSessions implements AutoCloseable {
     final StreamObserver<SessionResponse> output;
     volatile Instant seen = workspace.clock.instant();
     boolean hello, inventory, closed;
-    Connection lease;
+    final UUID holder = auriga.common.persistence.UuidV7.next();
+    final NodeSessionLease lease;
+    final NodeOutput outbound;
+    final NodeDeliveries deliveries = new NodeDeliveries(enrollment.store, workspace.clock);
+    final Map<UUID, NodeDeliveries.Delivery> inFlight = new HashMap<>();
+    UUID specCursor;
+    boolean acquired;
     final Map<String, Long> sent = new HashMap<>();
 
     Session(UUID node, UUID tenant, X509Certificate leaf, StreamObserver<SessionResponse> output) {
@@ -109,60 +127,37 @@ public final class NodeSessions implements AutoCloseable {
       this.tenant = tenant;
       this.leaf = leaf;
       this.output = output;
+      this.lease = new NodeSessionLease(enrollment.store, tenant, node, holder);
+      this.outbound =
+          new NodeOutput(
+              output,
+              this::fail,
+              () -> onError(io.grpc.Status.CANCELLED.asRuntimeException()),
+              workspace.clock);
     }
 
     void acquire() {
-      try {
-        lease = enrollment.store.jdbc.getDataSource().getConnection();
-        try (var statement = lease.prepareStatement("SELECT pg_try_advisory_lock(?)")) {
-          statement.setLong(1, node.getMostSignificantBits() ^ node.getLeastSignificantBits());
-          try (var result = statement.executeQuery()) {
-            result.next();
-            if (!result.getBoolean(1)) throw new AurigaException(CommonErrors.CONFLICT);
-          }
-        }
-      } catch (Exception e) {
-        release();
-        if (e instanceof AurigaException a) throw a;
-        throw new AurigaException(CommonErrors.UNAVAILABLE);
-      }
+      lease.acquire();
+      acquired = true;
     }
 
     void release() {
-      if (lease != null)
-        try {
-          try (var statement = lease.prepareStatement("SELECT pg_advisory_unlock(?)")) {
-            statement.setLong(1, node.getMostSignificantBits() ^ node.getLeastSignificantBits());
-            statement.execute();
-          }
-          lease.close();
-        } catch (Exception e) {
-          org.slf4j.LoggerFactory.getLogger(getClass())
-              .warn("Cannot release node session lease", e);
-          try {
-            lease.abort(Runnable::run);
-          } catch (Exception ignored) {
-            /* close below remains mandatory */
-          }
-        } finally {
-          if (lease != null)
-            try {
-              lease.close();
-            } catch (Exception e) {
-              org.slf4j.LoggerFactory.getLogger(getClass())
-                  .warn("Cannot close node lease connection", e);
-            }
-          lease = null;
-        }
+      if (!acquired) return;
+      acquired = false;
+      try {
+        lease.release();
+      } catch (RuntimeException e) {
+        org.slf4j.LoggerFactory.getLogger(getClass()).warn("Cannot release node session lease", e);
+      }
     }
 
     @Override
     public synchronized void onNext(SessionRequest request) {
       if (closed) return;
       try {
+        java.util.List<SessionResponse> responses = new java.util.ArrayList<>();
         enrollment.identity(leaf);
-        TenantContext.run(
-            tenant,
+        lease.guard(
             () -> {
               if (!hello) {
                 if (!request.hasHello())
@@ -194,7 +189,7 @@ public final class NodeSessions implements AutoCloseable {
                             tenant,
                             node));
                 hello = true;
-                output.onNext(
+                responses.add(
                     SessionResponse.newBuilder()
                         .setWelcome(
                             Welcome.newBuilder()
@@ -210,9 +205,18 @@ public final class NodeSessions implements AutoCloseable {
                   inventory = true;
                   for (var status : request.getInventory().getInstancesList())
                     workspace.status(node, status);
-                  dispatch();
-                } else if (request.hasStatus()) workspace.status(node, request.getStatus());
-                else if (request.hasWake()) workspace.wake(node, request.getWake());
+                } else if (request.hasStatus()) {
+                  workspace.status(node, request.getStatus());
+                  if (request.getStatus().getPhase() == InstancePhase.INSTANCE_PHASE_ABSENT) {
+                    for (var delivery : List.copyOf(inFlight.values()))
+                      if (delivery.instance().toString().equals(request.getStatus().getInstanceId())
+                          && delivery.kind().equals("delete")
+                          && delivery.generation() == request.getStatus().getObservedGeneration()) {
+                        deliveries.deleted(node, holder, delivery, request.getStatus());
+                        inFlight.remove(delivery.id());
+                      }
+                  }
+                } else if (request.hasWake()) workspace.wake(node, request.getWake());
                 else if (request.hasUsage())
                   enrollment.store.tx(
                       () -> {
@@ -241,84 +245,92 @@ public final class NodeSessions implements AutoCloseable {
                         }
                         return null;
                       });
-                else if (request.hasResult())
-                  enrollment.store.tx(
-                      () -> {
-                        var result = request.getResult();
-                        UUID command, id;
-                        try {
-                          command = UUID.fromString(result.getCommandId());
-                          id = UUID.fromString(result.getInstanceId());
-                        } catch (IllegalArgumentException e) {
-                          return null;
-                        }
-                        if (result.getOk())
-                          enrollment.store.jdbc.update(
-                              "UPDATE workspace_job SET done=true WHERE tenant_id=? AND id=? AND instance_id=? AND instance_id IN (SELECT id FROM instance WHERE tenant_id=? AND node_id=?)",
-                              tenant,
-                              command,
-                              id,
-                              tenant,
-                              node);
-                        return null;
-                      });
-                else if (!request.hasLog())
+                else if (request.hasResult()) {
+                  var result = request.getResult();
+                  UUID id;
+                  try {
+                    id = UUID.fromString(result.getCommandId());
+                  } catch (IllegalArgumentException e) {
+                    return null;
+                  }
+                  var delivery = inFlight.get(id);
+                  if (delivery != null
+                      && delivery.kind().equals("restart")
+                      && delivery.instance().toString().equals(result.getInstanceId())) {
+                    deliveries.result(node, holder, delivery, result);
+                    inFlight.remove(id);
+                  }
+                } else if (!request.hasLog())
                   throw new AurigaException(CommonErrors.VALIDATION_FAILED);
               }
               seen = workspace.clock.instant();
+              return null;
             });
+        for (var response : responses) if (!outbound.send(response)) return;
+        if (request.hasInventory()) dispatch();
       } catch (RuntimeException e) {
         fail(e);
       }
     }
 
-    synchronized void dispatch() {
-      if (closed || !inventory) return;
+    synchronized void checkTimeouts() {
+      if (closed) return;
+      outbound.checkStalled();
+      if (closed) return;
+      var overdue =
+          inFlight.values().stream()
+              .filter(d -> !d.deadline().isAfter(workspace.clock.instant()))
+              .toList();
+      if (overdue.isEmpty()) return;
       try {
-        enrollment.identity(leaf);
-        enrollment.store.in(
-            tenant,
+        lease.guard(
             () -> {
-              for (var row :
-                  enrollment.store.jdbc.queryForList(
-                      "SELECT * FROM instance WHERE tenant_id=? AND node_id=?", tenant, node)) {
-                var spec = WorkspaceService.spec(row);
-                String id = spec.getInstanceId();
-                if ((boolean) row.get("deleted") && "absent".equals(row.get("phase"))) continue;
-                if ((boolean) row.get("deleted")) {
-                  output.onNext(
-                      SessionResponse.newBuilder()
-                          .setDelete(
-                              DeleteInstance.newBuilder()
-                                  .setInstanceId(id)
-                                  .setGeneration(spec.getGeneration())
-                                  .setPurgeData((boolean) row.get("purge_data")))
-                          .build());
-                } else if (!Objects.equals(sent.get(id), spec.getGeneration())) {
-                  output.onNext(
-                      SessionResponse.newBuilder()
-                          .setApply(ApplySpec.newBuilder().setSpec(spec))
-                          .build());
-                  sent.put(id, spec.getGeneration());
-                }
-              }
-              for (var job :
-                  enrollment.store.jdbc.queryForList(
-                      "SELECT j.command FROM workspace_job j JOIN instance i ON i.id=j.instance_id AND i.tenant_id=j.tenant_id WHERE j.tenant_id=? AND i.node_id=? AND j.kind='restart' AND NOT j.done AND j.due_at<=?",
-                      tenant,
-                      node,
-                      time(workspace.clock.instant()))) {
-                try {
-                  output.onNext(
-                      SessionResponse.newBuilder()
-                          .setCommand(Command.parseFrom((byte[]) job.get("command")))
-                          .build());
-                } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-                  throw new IllegalStateException(e);
-                }
-              }
+              for (var delivery : overdue) deliveries.timeout(node, holder, delivery);
               return null;
             });
+      } catch (RuntimeException e) {
+        fail(e);
+        return;
+      }
+      fail(new AurigaException(CommonErrors.UNAVAILABLE));
+    }
+
+    synchronized void dispatch() {
+      if (closed || !inventory) return;
+      checkTimeouts();
+      if (closed) return;
+      try {
+        enrollment.identity(leaf);
+        var messages =
+            lease.guard(
+                () -> {
+                  List<SessionResponse> frames = new ArrayList<>();
+                  var rows =
+                      enrollment.store.jdbc.queryForList(
+                          "SELECT * FROM instance WHERE tenant_id=? AND node_id=? AND NOT deleted AND (?::uuid IS NULL OR id>?) ORDER BY id LIMIT 64",
+                          tenant,
+                          node,
+                          specCursor,
+                          specCursor);
+                  for (var row : rows) {
+                    var spec = WorkspaceService.spec(row);
+                    String id = spec.getInstanceId();
+                    if (!Objects.equals(sent.get(id), spec.getGeneration())) {
+                      frames.add(
+                          SessionResponse.newBuilder()
+                              .setApply(ApplySpec.newBuilder().setSpec(spec))
+                              .build());
+                      sent.put(id, spec.getGeneration());
+                    }
+                  }
+                  specCursor = rows.size() < 64 ? null : (UUID) rows.getLast().get("id");
+                  for (var delivery : deliveries.claim(node, holder, inFlight.keySet())) {
+                    inFlight.put(delivery.id(), delivery);
+                    frames.add(delivery.message());
+                  }
+                  return frames;
+                });
+        for (var message : messages) if (!outbound.send(message)) break;
       } catch (RuntimeException e) {
         fail(e);
       }
@@ -329,7 +341,7 @@ public final class NodeSessions implements AutoCloseable {
       closed = true;
       sessions.remove(node, this);
       release();
-      output.onError(GrpcErrors.toStatus(error));
+      if (outbound != null) outbound.terminate(NodeGrpcServer.status(error));
     }
 
     @Override
@@ -338,6 +350,7 @@ public final class NodeSessions implements AutoCloseable {
       closed = true;
       sessions.remove(node, this);
       release();
+      outbound.terminate(null);
     }
 
     @Override
@@ -346,7 +359,7 @@ public final class NodeSessions implements AutoCloseable {
       closed = true;
       sessions.remove(node, this);
       release();
-      output.onCompleted();
+      outbound.terminate(null);
     }
   }
 }

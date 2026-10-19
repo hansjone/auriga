@@ -16,7 +16,7 @@ combined 中设置 `AURIGA_WORKSPACE_ENABLED=true` 后启用。默认关闭，�
 - `auriga.workspace.control-endpoint`：节点可访问的 HTTPS 地址，如 `https://platform.example.com:7443`；入网和续期均使用该节点监听器。
 - `auriga.workspace.node-server.host`、`port`：默认 `127.0.0.1` 和 `0`。实际部署需要将端口与上述公开地址配置一致。测试只用随机端口。
 
-workspace 数据源默认池大小为 20。每条活跃节点会话持有一个 PostgreSQL advisory lock 连接；部署容量应为节点连接与业务事务留出余量。该锁让不同副本也不能同时控制同一个节点。同进程重连关闭旧会话（`common.conflict` / ABORTED）；其他副本持锁时，新连接被拒绝并由节点退避重试。
+workspace 数据源默认池大小为 20。节点会话使用数据库 node_session 的 60 秒租约，获取、续租和释放均为短事务，不长期占用连接。持有者 UUID 防止过期会话继续写入；租约与管理操作统一先取租户锁，再取租约行锁。同进程重连替换旧流，其他副本上的未过期租约返回 common.conflict。
 
 迁移路径为 `classpath:db/migration/workspace`，运行 common 迁移后再运行 workspace Flyway。独立部署时也必须设置该迁移路径、schema 和迁移角色。所有 workspace 表启用 FORCE RLS；运行时操作通过 `TenantTransactionManager` 绑定当前租户。`workspace_registry` 的平台租户记录仅用于从不透明令牌或节点证书定位租户，不包含令牌密钥。
 
@@ -38,17 +38,17 @@ combined 通过 `WorkspaceInputs` 调用 org；独立部署通过生成的 org g
 
 节点监听器启用 TLS，允许无客户端证书的 Join，其他 RPC 必须通过本 CA、节点 URI SAN、有效期、数据库吊销状态和当前证书序列号校验。它独立于 common 的内部服务 JWT 监听器，节点服务不作为 `BindableService` bean 暴露给后者。续期证书有效期为 30 天，且不超过 CA 到期时间；旧证书序列号立即失效，现有会话会断开并用新证书重连。
 
-代理先发 Hello，再发 Inventory；收到 Welcome 后下发规格。重复规格按代数去重，重连重发全量。状态只接受该节点拥有的实例、且已观察代数等于当前代数的报告。未知实例报告被忽略并告警。命令使用持久 job id，对账时重发直到成功确认。
+代理先发 Hello，再发 Inventory；收到 Welcome 后下发规格。重复规格按代数去重，重连重发全量。状态只接受该节点拥有的实例、且已观察代数等于当前代数的报告。未知实例报告被忽略并告警。restart 命令按持久 job id 去重，DeleteInstance 按实例代数确认。结果、尝试次数和错误落库；每次最多等待两分钟，失败后按 5、10、20、40、80 秒退避，最多五次。发送队列最多 128 帧或 4 MiB，不读超过 30 秒会断开；未确认命令重连后仍受持久重试预算约束。
 
 每 5 秒逐租户运行决策。闲置回收同时要求插件四项计数和节点 CPU 活动均为空闲，而且两路观测仍新鲜；缺失观测不触发回收。常驻实例不回收。闹钟持久化到作业表，用 `FOR UPDATE SKIP LOCKED` 领取，提前两分钟改变期望状态；准入满保留作业等待重试。节点超过 60 秒未上报标记离线并将实例标为待迁移，不伪造停止状态。资源/版本改变产生待重启规格，实例空闲时发送持久化的 apply_pending 重启命令。
 
-本人接口每次检查主人；只有带 `workspace.instances.admin` 的管理台主体可以代操作，其他人返回 404。SSE 返回初始状态并轮询数据库变化，60 秒到期后客户端重新鉴权连接。插件实例令牌只用于 `/instance/self` 和 `/instance/heartbeat`，不能用来调用用户或管理接口。
+本人接口每次检查主人；只有带 `workspace.instances.admin` 的管理台主体可以代操作，其他人返回 404。SSE 返回初始状态，每 5 秒轮询数据库；每用户最多 4 条、每进程最多 128 条连接，60 秒到期后客户端重新鉴权连接。插件实例令牌只用于 `/instance/self` 和 `/instance/heartbeat`，不能用来调用用户或管理接口。
 
 ## 验证与范围外接线
 
 ```powershell
 .\mvnw.cmd -pl services/workspace/impl -am '-Dtest=WorkspaceUnitTest,WorkspaceSurfaceTest,WorkspaceIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
-.\mvnw.cmd -pl services/architecture-tests,services/platform-app -am '-Dtest=WorkspaceUnitTest,WorkspaceSurfaceTest,ServiceBoundariesTest' '-Dsurefire.failIfNoSpecifiedTests=false' verify
+.\mvnw.cmd -pl services/architecture-tests,services/platform-app -am '-Dtest=WorkspaceUnitTest,WorkspaceSurfaceTest,WorkspaceHardeningTest,ServiceBoundariesTest' '-Dsurefire.failIfNoSpecifiedTests=false' verify
 ```
 
 集成测试使用 test-support 的嵌入式 PostgreSQL、独立迁移/运行时角色，以及随机端口的真实 TLS gRPC 假节点。需要允许 PostgreSQL 在本机启动子进程。当前 Codex Windows 沙箱中 `pg_ctl` 创建受限令牌失败，需由主控在可启动嵌入式 PostgreSQL 的环境重跑，不能把启动失败视为用例通过。
@@ -56,3 +56,13 @@ combined 通过 `WorkspaceInputs` 调用 org；独立部署通过生成的 org g
 当前 A1 `infra/agent/internal/conn/session.go` 的 Hello 尚未填 `capacity`。服务允许入网/会话建立，但容量未知时保持实例 scheduling；主控需在代理侧补齐契约已有的容量上报，才能完成真实 A1 的实例分配验证。A1 reconciler 的删除 ABSENT 和失败报告还没有填 observed_generation，需要补齐已有字段才能完成对应代数的里程碑确认；服务不接受未确认代数的删除结果来释放容量。真实运行时、签名制品、面板签名清单和 IAM 身份公钥由相应生产流程配置，不在本任务内生成。
 
 迁移执行本身属于后续工作；这里仅保存待迁移标记和目标节点请求，不直接改节点分配或搬动实例数据。实例路由 KV 的完整发布/更新与 edge 对接，以及 ai-gateway 专用令牌签发仍需对应模块接线。
+
+## 第三轮安全加固
+
+`workspace_registry` 只保存平台路由元数据，通过显式平台租户的独立事务访问，继续受 FORCE RLS 保护。实例使用 `instance` 类型，入网令牌使用 `token` 类型。路由提交与业务提交分开，业务回滚可能留下不含凭据的孤儿路由；认证仍验证租户业务记录，失败关闭。
+
+Join 按传输层来源 IP 使用令牌桶（每来源突发 10、每秒补 1；每进程突发 100、每秒补 20），连续失败五次冷却 30 秒。来源缓存最多 4096 项；令牌格式和长度检查先于数据库与密码计算。监控计数器为 `auriga.workspace.join.accepted/rejected/failures`，不使用 IP 标签。数据库不可用返回 UNAVAILABLE。
+
+CA 私钥加载时拒绝符号链接、非普通文件及共享权限：POSIX 不允许 group/others 权限；Windows ACL 只信任所有者、SYSTEM 和 Administrators。证书序列号 DER 编码不超过 20 字节。
+
+普通吊销要求节点无实例。应用层 `WorkspaceAdmin.revoke(id, true)` 支持强制吊销：事务内禁用节点、删除会话租约、标记实例待迁移并写 outbox 审计，提交后断开本进程流；跨副本后续操作由租约拒绝。只读 REST 契约尚未定义 force 参数，现有 DELETE 仍走普通吊销；需主控增加可选布尔 force 参数并重新生成接口后接线。

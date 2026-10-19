@@ -27,6 +27,8 @@ public final class NodeGrpcServer implements SmartLifecycle, AutoCloseable {
   private final NodeSessions sessions;
   private Server server;
   private ExecutorService executor;
+  private static final Context.Key<String> SOURCE = Context.key("workspace-join-source");
+  private final JoinRateLimiter joinLimiter;
 
   public NodeGrpcServer(
       String host,
@@ -35,12 +37,38 @@ public final class NodeGrpcServer implements SmartLifecycle, AutoCloseable {
       File key,
       NodeEnrollment enrollment,
       NodeSessions sessions) {
+    this(
+        host,
+        port,
+        certificate,
+        key,
+        enrollment,
+        sessions,
+        new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+  }
+
+  public NodeGrpcServer(
+      String host,
+      int port,
+      File certificate,
+      File key,
+      NodeEnrollment enrollment,
+      NodeSessions sessions,
+      io.micrometer.core.instrument.MeterRegistry metrics) {
     this.host = host;
     this.port = port;
     this.certificate = certificate;
     this.key = key;
     this.enrollment = enrollment;
     this.sessions = sessions;
+    this.joinLimiter = new JoinRateLimiter(enrollment.clock, metrics);
+  }
+
+  public static StatusRuntimeException status(Throwable error) {
+    if (error instanceof org.springframework.dao.DataAccessException
+        || error instanceof org.springframework.transaction.TransactionException)
+      return GrpcErrors.toStatus(new AurigaException(CommonErrors.UNAVAILABLE));
+    return GrpcErrors.toStatus(error);
   }
 
   @Override
@@ -61,16 +89,28 @@ public final class NodeGrpcServer implements SmartLifecycle, AutoCloseable {
               try {
                 if (call.getMethodDescriptor()
                     .getFullMethodName()
-                    .equals(NodeEnrollmentServiceGrpc.getJoinMethod().getFullMethodName()))
-                  return next.startCall(call, headers);
+                    .equals(NodeEnrollmentServiceGrpc.getJoinMethod().getFullMethodName())) {
+                  var address = call.getAttributes().get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR);
+                  String source =
+                      address instanceof InetSocketAddress ip && ip.getAddress() != null
+                          ? ip.getAddress().getHostAddress()
+                          : "unknown";
+                  joinLimiter.admit(source);
+                  return Contexts.interceptCall(
+                      Context.current().withValue(SOURCE, source), call, headers, next);
+                }
                 SSLSession tlsSession = call.getAttributes().get(Grpc.TRANSPORT_ATTR_SSL_SESSION);
                 if (tlsSession == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
                 X509Certificate leaf = (X509Certificate) tlsSession.getPeerCertificates()[0];
                 enrollment.identity(leaf);
                 return Contexts.interceptCall(
                     Context.current().withValue(NodeSessions.PEER, leaf), call, headers, next);
-              } catch (Exception e) {
+              } catch (javax.net.ssl.SSLPeerUnverifiedException | ClassCastException e) {
                 var status = GrpcErrors.toStatus(new AurigaException(CommonErrors.UNAUTHENTICATED));
+                call.close(status.getStatus(), status.getTrailers());
+                return new ServerCall.Listener<>() {};
+              } catch (RuntimeException e) {
+                var status = status(e);
                 call.close(status.getStatus(), status.getTrailers());
                 return new ServerCall.Listener<>() {};
               }
@@ -82,9 +122,11 @@ public final class NodeGrpcServer implements SmartLifecycle, AutoCloseable {
             public void join(JoinRequest request, StreamObserver<JoinResponse> out) {
               try {
                 out.onNext(enrollment.join(request));
+                joinLimiter.succeeded(SOURCE.get());
                 out.onCompleted();
               } catch (RuntimeException e) {
-                out.onError(GrpcErrors.toStatus(e));
+                joinLimiter.failed(SOURCE.get());
+                out.onError(status(e));
               }
             }
 
@@ -96,7 +138,7 @@ public final class NodeGrpcServer implements SmartLifecycle, AutoCloseable {
                 out.onNext(enrollment.renew(enrollment.identity(leaf), leaf, request));
                 out.onCompleted();
               } catch (RuntimeException e) {
-                out.onError(GrpcErrors.toStatus(e));
+                out.onError(status(e));
               }
             }
           };

@@ -31,6 +31,8 @@ public final class WorkspaceService {
   public final WorkspaceTemplates templates;
   private final WorkspaceCrypto crypto;
   private final EventPublisher events;
+  private final auriga.common.audit.AuditLogger audits;
+  private volatile java.util.function.Consumer<UUID> revoked = node -> {};
   public final Clock clock;
   private volatile Runnable changed = () -> {};
 
@@ -46,11 +48,30 @@ public final class WorkspaceService {
     this.templates = templates;
     this.crypto = crypto;
     this.events = events;
+    this.audits = new auriga.common.audit.OutboxAuditLogger(events);
     this.clock = clock;
   }
 
   public void onChanged(Runnable changed) {
     this.changed = changed;
+  }
+
+  public void onNodeRevoked(java.util.function.Consumer<UUID> listener) {
+    revoked = listener;
+  }
+
+  public void audit(auriga.common.audit.AuditEntry entry) {
+    audits.record(entry);
+  }
+
+  public void nodeRevokedAfterCommit(UUID node) {
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCommit() {
+            revoked.accept(node);
+          }
+        });
   }
 
   public NodeEnrollment.Token joinToken(
@@ -140,7 +161,7 @@ public final class WorkspaceService {
           }
           admission(policy.getMaxConcurrentStarts());
           UUID id = UuidV7.next(clock);
-          store.register(id, "token", tenant);
+          store.register(id, "instance", tenant);
           InstanceSpec base =
               templates.get(defaultVersion(policy.getDefaultDshVersion()), null, null, null);
           Resources resources = resources(base.getResources(), quota);
@@ -405,6 +426,16 @@ public final class WorkspaceService {
   }
 
   private void queueRestart(UUID id, String reason) {
+    long generation = ((Number) store.instance(id).get("generation")).longValue();
+    // Automatic reconciliation must not reset the retry budget for the same generation.
+    if (reason.equals("apply_pending")
+        && store.jdbc.queryForObject(
+                "SELECT count(*) FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='restart' AND generation=?",
+                Long.class,
+                store.tenant(),
+                id,
+                generation)
+            > 0) return;
     Command command =
         Command.newBuilder()
             .setCommandId(UuidV7.next(clock).toString())
@@ -415,12 +446,13 @@ public final class WorkspaceService {
                     .setReason(reason))
             .build();
     store.jdbc.update(
-        "INSERT INTO workspace_job(id,tenant_id,instance_id,kind,due_at,command) SELECT ?,?,?,'restart',?,? WHERE NOT EXISTS(SELECT 1 FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='restart' AND NOT done)",
+        "INSERT INTO workspace_job(id,tenant_id,instance_id,kind,due_at,command,generation) SELECT ?,?,?,'restart',?,?,? WHERE NOT EXISTS(SELECT 1 FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='restart' AND NOT done)",
         UUID.fromString(command.getCommandId()),
         store.tenant(),
         id,
         time(clock.instant()),
         command.toByteArray(),
+        generation,
         store.tenant(),
         id);
   }
@@ -706,7 +738,7 @@ public final class WorkspaceService {
         throw new IllegalArgumentException();
       UUID id = UUID.fromString(token.substring(4, token.indexOf('.')));
       // The signed node template carries tenant identity; API authentication uses the registry.
-      UUID tenant = store.route(id, "token");
+      UUID tenant = store.route(id, "instance");
       return store.in(
           tenant,
           () -> {
@@ -716,7 +748,13 @@ public final class WorkspaceService {
               throw new AurigaException(CommonErrors.UNAUTHENTICATED);
             return row;
           });
-    } catch (RuntimeException e) {
+    } catch (org.springframework.dao.DataAccessException
+        | org.springframework.transaction.TransactionException e) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    } catch (AurigaException e) {
+      if (e.errorCode() == CommonErrors.UNAVAILABLE) throw e;
+      throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    } catch (IllegalArgumentException e) {
       throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     }
   }

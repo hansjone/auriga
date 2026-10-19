@@ -14,6 +14,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequestMapping("/api/workspace/v1")
 public class WorkspaceSseController implements AutoCloseable {
   private final WorkspaceQueries queries;
+  private final SseLimits limits = new SseLimits();
+  private final Set<SseEmitter> active = ConcurrentHashMap.newKeySet();
   private final ScheduledExecutorService executor =
       Executors.newSingleThreadScheduledExecutor(
           Thread.ofVirtual().name("workspace-sse").factory());
@@ -26,13 +28,23 @@ public class WorkspaceSseController implements AutoCloseable {
   @AuthenticatedOnly
   public SseEmitter events(@PathVariable UUID id) {
     var actor = WorkspaceController.actor();
-    var initial = queries.owned(id, actor);
+    var release = limits.acquire(actor.tenantId() + "/" + actor.subject());
+    auriga.workspace.web.model.Instance initial;
+    try {
+      initial = queries.owned(id, actor);
+    } catch (RuntimeException e) {
+      release.run();
+      throw e;
+    }
     UUID tenant = TenantContext.require();
     SseEmitter emitter = new SseEmitter(60000L);
+    active.add(emitter);
     java.util.concurrent.atomic.AtomicReference<ScheduledFuture<?>> future =
         new java.util.concurrent.atomic.AtomicReference<>();
     Runnable cancel =
         () -> {
+          release.run();
+          active.remove(emitter);
           var f = future.get();
           if (f != null) f.cancel(false);
         };
@@ -67,15 +79,17 @@ public class WorkspaceSseController implements AutoCloseable {
       emitter.send(SseEmitter.event().name("instance").data(initial));
       previous.set(auriga.workspace.app.WorkspaceService.JSON.writeValueAsString(initial));
     } catch (Exception e) {
+      cancel.run();
       emitter.completeWithError(e);
       return emitter;
     }
-    future.set(executor.scheduleWithFixedDelay(send, 1, 1, TimeUnit.SECONDS));
+    future.set(executor.scheduleWithFixedDelay(send, 5, 5, TimeUnit.SECONDS));
     return emitter;
   }
 
   @Override
   public void close() {
+    for (var emitter : List.copyOf(active)) emitter.complete();
     executor.shutdownNow();
   }
 }

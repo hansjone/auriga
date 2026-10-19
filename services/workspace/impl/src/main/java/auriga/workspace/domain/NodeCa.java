@@ -57,6 +57,7 @@ public final class NodeCa {
 
   public static NodeCa load(Path certificate, Path privateKey, Clock clock) {
     try {
+      SecretFilePermissions.check(privateKey);
       var ca = parse(Files.readAllBytes(certificate));
       String pem = Files.readString(privateKey, StandardCharsets.US_ASCII);
       byte[] der =
@@ -125,7 +126,8 @@ public final class NodeCa {
       valid(expires.isAfter(now.plusSeconds(86400)));
       var algorithm = new AlgorithmIdentifier(X9ObjectIdentifiers.ecdsa_with_SHA256);
       var tbs = new V3TBSCertificateGenerator();
-      tbs.setSerialNumber(new ASN1Integer(new java.math.BigInteger(1, WorkspaceCrypto.random(20))));
+      tbs.setSerialNumber(
+          new ASN1Integer(new java.math.BigInteger(1, WorkspaceCrypto.random(19)).setBit(0)));
       tbs.setSignature(algorithm);
       tbs.setIssuer(X500Name.getInstance(ca.getSubjectX500Principal().getEncoded()));
       tbs.setSubject(new X500Name("CN=auriga-node"));
