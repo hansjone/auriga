@@ -71,8 +71,9 @@ export function assertManifestShape(m) {
   assertSafePath(/** @type {string} */ (manifest.entry));
   if (
     !(
-      /** @type {string} */ (manifest.entry) in
-      /** @type {object} */ (manifest.integrity)
+      /** @type {string} */ (
+        (manifest.entry) in /** @type {object} */ (manifest.integrity)
+      )
     )
   )
     throw bad('entry missing integrity');
