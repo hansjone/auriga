@@ -1,0 +1,13 @@
+packages:
+  - web/*
+  - clients/*
+minimumReleaseAgeExclude:
+  - '@intlify/core-base@11.4.16'
+  - '@intlify/devtools-types@11.4.16'
+  - '@intlify/message-compiler@11.4.16'
+  - '@intlify/shared@11.4.16'
+  - vue-i18n@11.4.16
+allowBuilds:
+  esbuild: true
+lockfileDir: web
+saveExact: true

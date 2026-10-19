@@ -1,0 +1,35 @@
+{
+  "name": "auriga",
+  "private": true,
+  "packageManager": "pnpm@11.28.6",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "gen:api": "pnpm --filter @auriga/shared gen:api",
+    "gen:steps": "pnpm --filter @auriga/shared gen:steps && pnpm --filter auriga-dsh gen:steps",
+    "format": "prettier --write web clients *.json *.yaml *.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@types/node": "22.19.0",
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/test-utils": "2.5.1",
+    "eslint": "9.39.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-vue": "10.11.1",
+    "json-schema-to-typescript": "16.0.0",
+    "jsdom": "26.1.0",
+    "openapi-typescript": "7.13.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.2",
+    "vite": "7.3.1",
+    "vitest": "3.2.4",
+    "vue-tsc": "3.3.13"
+  }
+}

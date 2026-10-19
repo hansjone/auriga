@@ -1,0 +1,46 @@
+:root,
+:host,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --auriga-bg: #040b13;
+  --auriga-surface: rgba(20, 38, 56, 0.54);
+  --auriga-text: #c8d1de;
+  --auriga-muted: #8d9aab;
+  --auriga-border: rgba(150, 182, 208, 0.18);
+  --auriga-accent: #3d7fae;
+  --el-color-primary: var(--auriga-accent);
+  --el-bg-color: var(--auriga-bg);
+  --el-bg-color-overlay: #0b2236;
+  --el-text-color-primary: var(--auriga-text);
+  --el-text-color-regular: var(--auriga-text);
+  --el-border-color: var(--auriga-border);
+  --el-fill-color-blank: var(--auriga-surface);
+}
+[data-theme='light'],
+:host([data-theme='light']) {
+  color-scheme: light;
+  --auriga-bg: #edf3f7;
+  --auriga-surface: rgba(255, 255, 255, 0.64);
+  --auriga-text: #172d40;
+  --auriga-muted: #526b80;
+  --auriga-border: rgba(48, 89, 121, 0.2);
+  --auriga-accent: #306c98;
+  --el-bg-color-overlay: #fff;
+}
+body {
+  margin: 0;
+  background: var(--auriga-bg);
+  color: var(--auriga-text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+.auriga-glass {
+  box-sizing: border-box;
+  color: var(--auriga-text);
+  background: var(--auriga-surface);
+  border: 1px solid var(--auriga-border);
+  border-radius: 28px;
+  padding: 2.5rem;
+  backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.45);
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@auriga/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./theme.css": "./src/theme.css"
+  },
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "build": "vite build",
+    "gen:api": "node scripts/gen-api.mjs",
+    "gen:steps": "json2ts -i ../../contracts/identity/steps.schema.json -o src/generated/steps.d.ts --unreachableDefinitions && prettier --write src/generated/steps.d.ts"
+  },
+  "dependencies": {
+    "vue": "3.5.44",
+    "vue-i18n": "11.4.16"
+  }
+}
