@@ -17,6 +17,7 @@
     <mybatis-plus.version>3.5.17</mybatis-plus.version>
     <jnats.version>2.26.4</jnats.version>
     <json-schema-validator.version>3.0.8</json-schema-validator.version>
+    <webauthn.version>2.7.0</webauthn.version>
   </properties>
   <modules>
     <module>services/contracts</module>
@@ -93,6 +94,11 @@
         <groupId>com.networknt</groupId>
         <artifactId>json-schema-validator</artifactId>
         <version>${json-schema-validator.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.yubico</groupId>
+        <artifactId>webauthn-server-core</artifactId>
+        <version>${webauthn.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

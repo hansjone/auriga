@@ -8,6 +8,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.time.*;
 import java.util.*;
+import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.*;
 import org.springframework.boot.context.properties.bind.*;
 import org.springframework.context.annotation.*;
@@ -132,9 +133,37 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  TeamAccounts iamTeamAccounts(
+      IamStore store, Secrets secrets, Clock clock, EventPublisher events) {
+    return new TeamAccounts(store, secrets, clock, events);
+  }
+
+  @Bean
+  TeamPasskeys iamTeamPasskeys(
+      IamStore store, Secrets secrets, Clock clock, EventPublisher events) {
+    return new TeamPasskeys(store, secrets, clock, events);
+  }
+
+  @Bean
+  QrChallenges iamQrChallenges(IamStore store, Clock clock) {
+    return new QrChallenges(store, clock);
+  }
+
+  @Bean
+  IdentityConnector teamAccountConnector(
+      TeamAccounts accounts, TeamPasskeys passkeys, QrChallenges qr, TokenService tokens) {
+    return new TeamAccountConnector(accounts, passkeys, qr, tokens.issuer());
+  }
+
+  @Bean
   @ConditionalOnMissingBean(IdentityPolicyHooks.class)
-  IdentityPolicyHooks iamIdentityPolicyHooks() {
-    return new IdentityPolicyHooks() {};
+  IdentityPolicyHooks iamIdentityPolicyHooks(TeamAccounts accounts) {
+    return new IdentityPolicyHooks() {
+      @Override
+      public boolean verifyMfa(UUID account, tools.jackson.databind.JsonNode input) {
+        return accounts.verifyMfaInput(account, input);
+      }
+    };
   }
 
   public record RemoteRegistration(URI url, List<String> sharedKeys) {}
@@ -168,6 +197,7 @@ public class IamRuntimeConfiguration {
       ContractSchemas schemas,
       ConnectorRegistry registry,
       EmergencyAccounts emergency,
+      TeamAccounts teamAccounts,
       SessionManager sessions,
       IdentityPolicyHooks hooks,
       EventPublisher events,
@@ -180,6 +210,7 @@ public class IamRuntimeConfiguration {
         schemas,
         registry,
         emergency,
+        teamAccounts,
         sessions,
         hooks,
         events,

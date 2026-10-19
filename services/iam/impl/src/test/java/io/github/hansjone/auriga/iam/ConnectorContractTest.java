@@ -12,6 +12,18 @@ class ConnectorContractTest {
   private final ContractSchemas schemas = new ContractSchemas();
 
   @Test
+  void teamAccountDescriptorValidatesAgainstContract() {
+    var accounts = mock(TeamAccounts.class);
+    var passkeys = mock(TeamPasskeys.class);
+    var qr = mock(QrChallenges.class);
+    var connector =
+        new TeamAccountConnector(accounts, passkeys, qr, "https://portal.example.com");
+    schemas.validate(
+        "identity/connector.schema.json#/$defs/ConnectorDescriptor", connector.descriptor());
+    assertEquals("team-account", connector.descriptor().path("type").asString());
+  }
+
+  @Test
   void rejectsDuplicateAndIncompatibleSpiDescriptors() {
     var registry = new ConnectorRegistry(schemas, List.of(new EmergencyConnector()));
     assertThrows(RuntimeException.class, () -> registry.register(new EmergencyConnector()));

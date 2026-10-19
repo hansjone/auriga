@@ -10,6 +10,19 @@
   <artifactId>iam-impl</artifactId>
   <dependencies>
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId><version>1.83</version></dependency>
+    <dependency>
+      <groupId>com.yubico</groupId>
+      <artifactId>webauthn-server-core</artifactId>
+    </dependency>
+    <!-- yubico webauthn exposes com.fasterxml.jackson checked exceptions on its JSON helpers -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
     <dependency><groupId>io.github.hansjone.auriga</groupId><artifactId>test-support</artifactId><version>${project.version}</version><scope>test</scope></dependency>
     <dependency>

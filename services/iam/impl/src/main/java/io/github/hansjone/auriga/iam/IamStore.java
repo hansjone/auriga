@@ -25,7 +25,12 @@ public final class IamStore {
           "emergency_account",
           "oauth_grant",
           "account_link_log",
-          "rate_limit");
+          "rate_limit",
+          "team_account",
+          "team_totp",
+          "team_passkey",
+          "team_ceremony",
+          "qr_challenge");
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
 

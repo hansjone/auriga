@@ -153,6 +153,38 @@ RLS、事务回滚和限速。数据库测试在 Windows 沙箱可能因 pg_ctl 
 失败，不能把内存测试当成 RLS 已通过。
 
 安装器、edge 的代理地址头、org 的邀请兑换/属性映射，以及多服务独立 DataSource
-装配需要主控接线；本任务没有修改 common 或 contracts。NATS KV 适配、内置团队账号
-及其 MFA/QR 页面、身份头 Ed25519 密钥服务、完整管理面 CRUD 和 OIDC 认证测试尚未提供。
-现有 KV TTL 在读取时执行，过期数据的物理清理由后续维护任务处理。
+装配需要主控接线。NATS KV 适配、身份头 Ed25519 密钥服务、完整管理面 CRUD 和 OIDC
+认证测试尚未提供。现有 KV TTL 在读取时执行，过期数据的物理清理由后续维护任务处理。
+
+## 团队账号（team-account）
+
+内置连接器类型 `team-account`，与应急账号同级，经 `ConnectorRegistry` 注册（Spring bean
+`teamAccountConnector`）。`configSchema` 必填：
+
+| 字段 | 说明 |
+|---|---|
+| `rpId` | WebAuthn RP ID（主机名或 IP） |
+| `origins` | 允许的 WebAuthn origin 列表（如 `https://portal.example.com`） |
+| `primaryStep` | 可选：`form`（默认）/ `qr` / `webauthn`，决定 begin 第一步 |
+
+口令使用 Argon2id（与应急账号相同：64 MiB、3 次迭代）。登录事务内多步：
+`form` 口令 → 若已绑定 TOTP 则 `form`/`totp` → `done(profile)`；连接器上报的
+`mfaPerformed` 对 team-account 直接采信（不必开 `trustExternalMfa`）。
+`invite_only` 时 begin 带邀请码则返回 `register` 表单；兑换走
+`IdentityPolicyHooks.consumeInvitation`，并在 profile 上附带 `accountId`（B6
+过渡约定）。兑换失败会回滚已写入的 `team_account` 凭据行。
+
+本人接口（需登录会话）：
+
+- `/me`、`/me/sessions/**`、`/me/identities/**`、`/me/password`
+- `/me/mfa`、`/me/mfa/totp/enrollment/**`、`DELETE /me/mfa/totp`
+- `/me/passkeys/**`（WebAuthn，依赖 `com.yubico:webauthn-server-core`）
+- `/me/devices/**`（复用 B2 `device` 表；吊销后 OAuth 刷新拒绝）
+
+扫码：`primaryStep=qr` 或连接器返回 `qr` 步骤；手机端
+`GET/POST /login/qr/{challengeId}`（已登录）确认两位比对码；发起端用 poll / SSE
+推进。平台 SSE 骨架（B2）已接上；比对码错误码 `iam.qr_match_mismatch`。
+
+存储表（V3）：`team_account`、`team_totp`、`team_passkey`、`team_ceremony`、
+`qr_challenge`。无 TOTP 的新账号在政策要求 MFA 时不会死卡在 `platform_totp`，
+可先完成登录再经 `/me/mfa` 登记。

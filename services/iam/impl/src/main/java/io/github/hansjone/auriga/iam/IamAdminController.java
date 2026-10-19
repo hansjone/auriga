@@ -39,7 +39,9 @@ public class IamAdminController {
                         "source",
                         c instanceof RemoteConnector
                             ? "remote"
-                            : c instanceof EmergencyConnector ? "builtin" : "plugin"))
+                            : c instanceof EmergencyConnector || c instanceof TeamAccountConnector
+                                ? "builtin"
+                                : "plugin"))
             .toList());
   }
 

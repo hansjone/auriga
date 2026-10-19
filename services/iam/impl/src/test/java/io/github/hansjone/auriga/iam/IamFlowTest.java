@@ -184,7 +184,15 @@ class IamFlowTest {
             store, new PostgresSessionKv(store, schemas, clock), tokens, clock, events, audit);
     emergency = new EmergencyAccounts(store, secrets, clock, false);
     enrollment = emergency.install(tenant);
-    registry = new ConnectorRegistry(schemas, List.of(new EmergencyConnector()));
+    TeamAccounts teamAccounts = new TeamAccounts(store, secrets, clock, events);
+    TeamPasskeys teamPasskeys = new TeamPasskeys(store, secrets, clock, events);
+    QrChallenges qr = new QrChallenges(store, clock);
+    registry =
+        new ConnectorRegistry(
+            schemas,
+            List.of(
+                new EmergencyConnector(),
+                new TeamAccountConnector(teamAccounts, teamPasskeys, qr, tokens.issuer())));
     login =
         new LoginManager(
             store,
@@ -192,8 +200,20 @@ class IamFlowTest {
             schemas,
             registry,
             emergency,
+            teamAccounts,
             sessions,
-            new IdentityPolicyHooks() {},
+            new IdentityPolicyHooks() {
+              @Override
+              public boolean verifyMfa(java.util.UUID account, JsonNode input) {
+                return teamAccounts.verifyMfaInput(account, input);
+              }
+
+              @Override
+              public boolean consumeInvitation(
+                  String code, java.util.UUID provider, JsonNode profile) {
+                return code != null && !code.isBlank() && code.equals("invite-ok");
+              }
+            },
             events,
             audit,
             clock,

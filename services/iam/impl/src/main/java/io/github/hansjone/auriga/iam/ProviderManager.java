@@ -91,15 +91,18 @@ public final class ProviderManager {
     result.put("id", row.path("providerId").asString());
     result.remove("providerId");
     String type = row.path("connectorType").asString();
-    JsonNode config =
-        Json.MAPPER.readTree(
-            secrets.decrypt(
-                row.path("config").asString(),
-                "provider:" + TenantContext.require() + ":" + row.path("providerId").asString()));
+    JsonNode config = decryptedConfig(row);
     result.set("config", mask(config, registry.get(type).descriptor().path("configSchema")));
     result.put(
         "callbackUrl", issuer + "/api/iam/v1/login/callback/" + row.path("providerId").asString());
     return result;
+  }
+
+  ObjectNode decryptedConfig(ObjectNode row) {
+    return Json.read(
+        secrets.decrypt(
+            row.path("config").asString(),
+            "provider:" + TenantContext.require() + ":" + row.path("providerId").asString()));
   }
 
   private JsonNode mask(JsonNode value, JsonNode schema) {
