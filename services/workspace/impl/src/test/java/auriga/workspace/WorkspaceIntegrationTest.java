@@ -62,7 +62,7 @@ class WorkspaceIntegrationTest {
                 .dataSource(roles.owner().dataSource())
                 .schemas("workspace")
                 .defaultSchema("workspace")
-                .locations("classpath:db/migration/workspace")
+                .locations("classpath:db/workspace")
                 .load())
         .migrate();
     store =

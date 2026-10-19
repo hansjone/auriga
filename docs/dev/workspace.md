@@ -18,7 +18,7 @@ combined 中设置 `AURIGA_WORKSPACE_ENABLED=true` 后启用。默认关闭，�
 
 workspace 数据源默认池大小为 20。节点会话使用数据库 node_session 的 60 秒租约，获取、续租和释放均为短事务，不长期占用连接。持有者 UUID 防止过期会话继续写入；租约与管理操作统一先取租户锁，再取租约行锁。同进程重连替换旧流，其他副本上的未过期租约返回 common.conflict。
 
-迁移路径为 `classpath:db/migration/workspace`，运行 common 迁移后再运行 workspace Flyway。独立部署时也必须设置该迁移路径、schema 和迁移角色。所有 workspace 表启用 FORCE RLS；运行时操作通过 `TenantTransactionManager` 绑定当前租户。`workspace_registry` 的平台租户记录仅用于从不透明令牌或节点证书定位租户，不包含令牌密钥。
+迁移路径为 `classpath:db/workspace`，运行 common 迁移后再运行 workspace Flyway。独立部署时也必须设置该迁移路径、schema 和迁移角色。所有 workspace 表启用 FORCE RLS；运行时操作通过 `TenantTransactionManager` 绑定当前租户。`workspace_registry` 的平台租户记录仅用于从不透明令牌或节点证书定位租户，不包含令牌密钥。
 
 combined 通过 `WorkspaceInputs` 调用 org；独立部署通过生成的 org gRPC 存根和 common 服务令牌拦截器调用，另需配置 `auriga.remote.org.target`、`auriga.workspace.org-client-certificate-file`、`org-client-key-file`、`org-ca-file`，以及 common 的 `ServiceTokenProvider`。org 必须在代租户白名单中允许 `svc:workspace`。
 

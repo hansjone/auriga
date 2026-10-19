@@ -44,7 +44,7 @@ public class PlatformWorkspaceConfiguration {
                   .dataSource(migration)
                   .schemas("workspace")
                   .defaultSchema("workspace")
-                  .locations("classpath:db/migration/workspace")
+                  .locations("classpath:db/workspace")
                   .load())
           .migrate();
     }
