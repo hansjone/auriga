@@ -57,7 +57,7 @@ func ProbeHealth(ctx context.Context, client *http.Client, t InstanceTarget) Hea
 		res.Err = err.Error()
 		return res
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	res.HTTPOK = resp.StatusCode >= 200 && resp.StatusCode < 300
 	res.Ready = res.HTTPOK && res.ProcessOK
 	if !res.HTTPOK {
