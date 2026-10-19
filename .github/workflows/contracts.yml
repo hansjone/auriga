@@ -1,0 +1,48 @@
+name: Contracts
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+          cache-dependency-path: services/contracts/package-lock.json
+      - name: Install pinned contract tools
+        working-directory: services/contracts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Buf
+        env:
+          BUF_VERSION: '1.74.0'
+        run: |
+          curl --fail --silent --show-error --location "https://github.com/bufbuild/buf/releases/download/v$BUF_VERSION/buf-Linux-x86_64" -o "$RUNNER_TEMP/buf"
+          chmod +x "$RUNNER_TEMP/buf"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Protobuf lint
+        working-directory: contracts
+        run: buf lint
+      - name: Protobuf compatibility against main
+        working-directory: contracts
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet refs/remotes/origin/main && git cat-file -e origin/main:contracts/buf.yaml 2>/dev/null; then
+            buf breaking --against '../.git#branch=origin/main,subdir=contracts'
+          else
+            echo 'No contracts baseline on main yet; skipping initial breaking check.'
+          fi
+      - name: OpenAPI lint (four contracts)
+        working-directory: services/contracts
+        run: npm run lint-openapi
+      - name: Strict JSON Schema 2020-12 compilation
+        working-directory: services/contracts
+        run: npm run check-schemas
