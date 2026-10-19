@@ -12,5 +12,5 @@
 | K2 common 公共库 | 未开始 | |
 | S1 DSH mcp-client | 完成（Codex） | 原生 mcp-client 支持 Streamable HTTP 和自定义请求头，但不透传 DSH 会话；会话相关的团队工具由插件注册后转发（ADR 0016）。原型在本地分支 spike/s1-mcp-client |
 | S2 面板 Web Component | 完成（Sonnet） | 托管和连接两种模式都在真实 DSH 0.2.0-rc.2 里挂载成功，样式隔离自检 6/6；连接模式由插件验签后经本机路由提供，设备令牌不进页面（ADR 0017）。原型在本地分支 spike/s2-panel |
-| S3 Windows 原生隔离 | 进行中（Codex） | 在 GitHub Actions 的 Windows 虚拟机里跑，不动开发机 |
-| S4 DSH 运行时制品 | 进行中（Codex） | |
+| S3 Windows 原生隔离 | 进行中（Codex 返工） | 第一轮 CI：账号、Job 内存 / CPU、进程树、垫片接管、WFP 按 SID 放行 / 拒绝、ACL 通过；审查发现 Job 可被实例撤销、根目录联接点等设计问题，正在返工 |
+| S4 DSH 运行时制品 | 完成（Codex） | Node + DSH + 锁定依赖打成 tar.gz（约 180 MB 压缩）；Windows / Linux 断网、只读目录启动通过；可在 Windows 交叉打 Linux 包且可复现（ADR 0019）。原型在 spike/s4-dsh-runtime 分支 |
