@@ -1,24 +1,55 @@
 # auriga-dsh
 
-An independent MIT-licensed DSH plugin skeleton for Node.js 22 or later.
+MIT-licensed DSH plugin for Node.js 22+. Package name: **auriga-dsh** (not published by default).
 
 Set `AURIGA_MODE` before initialization:
 
-- `standalone` (default): local identity providers and emergency access, without a platform connection.
-- `managed`: a platform-managed DSH instance.
-- `connect`: a local DSH installation connected to a team platform.
+- `standalone` (default): local emergency account + pluggable JS identity connectors, single owner, no platform connection.
+- `managed`: platform-managed DSH instance (stub).
+- `connect`: local DSH connected to a team platform (stub).
 
-The entry point selects an empty implementation. Authentication, DSH hooks,
-network requests, and panel loading are planned for later tasks.
-Unknown modes fail initialization.
+Standalone auth runtime:
 
-Protocol major version: **1** (`Auriga-Protocol: 1`). The platform supports the
-current and previous protocol majors; version 1 currently has minimum 1.
-See ../../contracts/plugin/README.md for the protocol contract.
+```js
+import initialize, { enrollEmergency } from 'auriga-dsh';
 
-Run `node --test` in this directory. From the monorepo root, run
-`pnpm --filter auriga-dsh gen:steps` to regenerate the committed JSDoc types
-from the identity steps JSON Schema, including unreachable definitions.
-The package has no runtime dependencies and can be copied or published independently.
+const { create } = initialize();
+const runtime = await create({
+  config: {
+    // First successful login becomes the owner. When exposing a public OIDC IdP,
+    // ALWAYS set `owner` so a random visitor cannot claim the instance.
+    owner: {
+      providers: ['emergency'], // provider id and/or connector type
+      // subject: 'alice',
+      // email: 'alice@example.com',
+    },
+    connectors: [
+      {
+        type: 'emergency',
+        id: 'emergency',
+        config: enrollEmergency('alice', process.env.PASSWORD),
+      },
+      // {
+      //   type: 'oidc',
+      //   id: 'company-oidc',
+      //   config: { issuer, clientId, clientSecret },
+      // },
+    ],
+  },
+});
+```
+
+Prefer signing in once with the **emergency** account before enabling public OIDC. See `docs/dev/dsh-plugin.md` for connector SPI, Argon2 floors, DNS pinning, CSRF, and error codes.
+
+Protocol major version: **1** (`Auriga-Protocol: 1`). See `../../contracts/plugin/README.md`.
+
+```powershell
+node --test "test/**/*.test.js"
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+```
+
+Runtime dependencies: `@noble/hashes` (Argon2id), `undici` (DNS-pinned OIDC fetch).
+
+`pnpm --filter auriga-dsh gen:steps`
 
 Copyright (c) 2026 hansjone. See [LICENSE](LICENSE).
