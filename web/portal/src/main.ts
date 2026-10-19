@@ -1,18 +1,22 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
-import { createRouter, createWebHistory } from 'vue-router';
 import 'element-plus/dist/index.css';
 import '@auriga/shared/theme.css';
-import { createAurigaI18n } from '@auriga/shared';
+import { createAurigaI18n, enableAurigaMock } from '@auriga/shared';
 import App from './App.vue';
-import Home from './Home.vue';
-createApp(App)
-  .use(createPinia())
-  .use(
-    createRouter({
-      history: createWebHistory(),
-      routes: [{ path: '/', component: Home }],
-    }),
-  )
-  .use(createAurigaI18n())
-  .mount('#app');
+import { router } from './router';
+import { bindApiRouter } from './api';
+
+async function boot() {
+  if (import.meta.env.VITE_AURIGA_MOCK === '1') {
+    await enableAurigaMock();
+  }
+  bindApiRouter(router);
+  createApp(App)
+    .use(createPinia())
+    .use(router)
+    .use(createAurigaI18n())
+    .mount('#app');
+}
+
+void boot();

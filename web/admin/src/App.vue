@@ -8,6 +8,13 @@
   place-items: center;
   padding: 1rem;
   box-sizing: border-box;
-  background: radial-gradient(ellipse at 50% 25%, #0b22342e, transparent 70%);
+  background:
+    radial-gradient(80% 60% at 50% 38%, #0b2234 0%, rgba(11, 34, 52, 0) 70%),
+    linear-gradient(180deg, #06121d 0%, var(--auriga-bg) 100%);
+}
+.stage:has(.admin-shell) {
+  display: block;
+  padding: 0;
+  place-items: unset;
 }
 </style>
