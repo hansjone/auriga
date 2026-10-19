@@ -33,6 +33,10 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 | `controlEndpoint` | `AURIGA_AGENT_CONTROL_ENDPOINT` | 覆盖入网返回的 NodeControl 地址 |
 | `agentVersion` | `AURIGA_AGENT_VERSION` | Hello / Join 上报的版本 |
 | `allowInsecure` | `AURIGA_AGENT_ALLOW_INSECURE` | 允许明文端点（仅本地开发） |
+| （run 标志） | `AURIGA_AGENT_INGRESS_LISTEN` | 多机 ingress TCP 地址，如 `192.0.2.20:7443` |
+| （run 标志） | `AURIGA_AGENT_INGRESS_LOCAL` | 单机 socket/管道路径；默认 Unix `<agentDir>/ingress.sock`、Windows `auriga-agent-ingress` |
+| — | `AURIGA_AGENT_FILE_TICKET_KEYS` | 文件票据公钥 JWKS；默认 `<agentDir>/file-ticket-keys.json` |
+| — | `AURIGA_AGENT_IDENTITY_KEYS` | 身份头验签公钥 JWKS；默认 `<agentDir>/identity-keys.json` |
 
 配置项前缀约定：`auriga.agent.*` / `AURIGA_AGENT_*`。
 
@@ -56,6 +60,21 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 - mTLS 会话：Hello、Inventory、心跳、断线指数退避（带抖动）重连、Welcome 超时、重连后全量对账
 - 本地状态（bbolt）：期望规格 + 实际状态，重启可恢复；每次加载核对 CA 指纹
 - 对账状态机 + **假驱动**（内存模拟 Ensure/Start/Stop；真 Docker 留给 A2）
+
+## A3 实例入口与观测
+
+`run` 在入网凭据可用时启动 ingress + observer：
+
+| 项 | 说明 |
+|---|---|
+| 入口 | 只接受 URI SAN 为 `auriga://edge` 的客户端证书；多机 `--ingress-listen` / `AURIGA_AGENT_INGRESS_LISTEN`；单机 Unix socket 或 Windows 命名管道（`AURIGA_AGENT_INGRESS_LOCAL`） |
+| `/i/<id>/…` | 反代到实例；验签后转发 `Auriga-Identity`，伪造头剥掉 |
+| `/files/<id>/…` | workspace 签发的 Ed25519 文件票据（`file-ticket-keys.json` / `AURIGA_AGENT_FILE_TICKET_KEYS`）；路径防逃逸；zip UTF-8 标志 |
+| `/logs/<id>` | 实例日志尾部；滚动默认 50 MB |
+| `/metrics` | Prometheus 文本指标 |
+| 观测 | 健康探活、5 分钟 CPU 活动、ops-cron/schedule 下次唤醒（含时区）、Linux cgroup；上报经 `observer.Reporter`（当前记日志，接 Session 待主控接线） |
+
+实例注册表与观测目标列表目前为空，需 runtime/reconciler 提供上游地址与根目录后由主控接线。
 
 ## 测试
 
