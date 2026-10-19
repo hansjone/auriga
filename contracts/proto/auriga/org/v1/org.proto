@@ -98,6 +98,8 @@ message BatchGetMembersResponse {
 }
 
 service AuthorizationService {
+  // 超管上限检查：授予者能否把这些角色（或这个组的有效权限）授给别人。iam 改服务账号、身份源属性映射时也调用它。
+  rpc CheckGrant(CheckGrantRequest) returns (CheckGrantResponse);
   // iam 签发访问令牌时调用，结果写进令牌的 roles / perms。
   rpc GetEffectivePermissions(GetEffectivePermissionsRequest) returns (GetEffectivePermissionsResponse);
   // 需要按资源细粒度判断时调用。
@@ -115,6 +117,21 @@ message GetEffectivePermissionsResponse {
   repeated string role_keys = 3;
   // 权限 key，例如 `org.members.write`、`workspace.instances.admin`。
   repeated string permissions = 4;
+}
+
+message CheckGrantRequest {
+  string tenant_id = 1;
+  // 授予者账号 id。
+  string grantor_id = 2;
+  repeated string role_ids = 3;
+  // 可选：要检查的组（把人加入组、属性映射到组时）。
+  string group_id = 4;
+}
+
+message CheckGrantResponse {
+  bool allowed = 1;
+  // 超出授予者权限的权限 key。
+  repeated string exceeding_permissions = 2;
 }
 
 message CheckPermissionRequest {
@@ -142,7 +159,7 @@ message Invitation {
   string invitation_id = 1;
   string tenant_id = 2;
   MemberType member_type = 3;
-  repeated string role_keys = 4;
+  repeated string role_ids = 4;
   repeated string group_ids = 5;
   // 限定受邀人的邮箱，可为空。
   string email = 6;
@@ -196,22 +213,24 @@ message Quota {
   ModelQuota model = 2;
 }
 
+// 合并后的有效配额：字段不设置（has_xxx 为 false）表示"不限"。
 message InstanceQuota {
-  int64 cpu_millis = 1;
-  int64 memory_mb = 2;
-  int64 disk_gb = 3;
-  int64 max_instances = 4;
+  optional int64 cpu_millis = 1;
+  optional int64 memory_mb = 2;
+  optional int64 disk_gb = 3;
+  // 0 表示不允许有实例。
+  optional int64 max_instances = 4;
   // 允许常驻（不做闲置回收）。
   bool always_on_allowed = 5;
 }
 
 message ModelQuota {
-  // 每月预算，百万分之一货币单位；0 表示不限。
-  int64 monthly_budget_micros = 1;
+  // 每月预算，百万分之一货币单位。
+  optional int64 monthly_budget_micros = 1;
   // ISO 4217，例如 `CNY`、`USD`。
   string currency = 2;
-  // 每日 token 上限；0 表示不限。
-  int64 daily_tokens = 3;
+  // 每日 token 上限。
+  optional int64 daily_tokens = 3;
 }
 
 // 策略。调用方：workspace（`workspace`）、egress（`egress`）等。

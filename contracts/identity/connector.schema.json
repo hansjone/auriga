@@ -6,7 +6,7 @@
     "ConnectorDescriptor": {
       "type": "object",
       "properties": {
-        "type": { "description": "连接器类型，全局唯一，例如 `team-account`、`emergency`、`oidc`、`example-sso`。", "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "type": { "description": "连接器类型，全局唯一，例如 `team-account`、`emergency`、`oidc`、`example-sso`。远程连接器的类型必须以 `remote-` 开头，平台拒绝与内置或已有类型重名。", "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
         "spiVersion": { "description": "实现的 SPI 主版本。平台拒绝加载不兼容的版本。", "const": "1" },
         "version": { "description": "连接器自己的版本号。", "type": "string" },
         "displayName": { "$ref": "steps.schema.json#/$defs/LocalizedText" },

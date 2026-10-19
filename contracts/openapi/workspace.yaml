@@ -5,7 +5,9 @@ info:
   description: |
     工作空间：每人的 DSH 实例（打开、启停、状态）、管理员的实例和节点管理、入网令牌，
     以及实例里的插件（实例令牌）和用户电脑上的插件（设备令牌）调用的接口。
-    浏览器打开实例的入口是 edge 上的 `/i/<实例 id>/`；本服务负责决定实例何时启动、停止。
+    浏览器打开实例的入口是 edge 上的实例地址（entryUrl）；本服务负责决定实例何时启动、停止。
+    **实例操作的授权**：`/instances/{instanceId}/**` 只允许实例主人，或有 workspace.instances.admin 权限的管理台会话；
+    其他人一律返回 404（不泄露实例是否存在）。
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -65,6 +67,7 @@ paths:
     get:
       tags: [instances]
       operationId: getInstance
+      x-authorization: 实例主人，或 workspace.instances.admin
       description: 主人或有 workspace.instances.read 权限的人可以查看。
       responses:
         '200':
@@ -79,6 +82,7 @@ paths:
     get:
       tags: [instances]
       operationId: streamInstance
+      x-authorization: 实例主人，或 workspace.instances.admin
       summary: 订阅实例状态（SSE）
       description: '每次状态变化发 `event: instance`，data 是 Instance 的 JSON。连接建立时先发一次当前状态。'
       responses:
@@ -93,6 +97,7 @@ paths:
     post:
       tags: [instances]
       operationId: startInstance
+      x-authorization: 实例主人，或 workspace.instances.admin
       responses:
         '202':
           description: 已接受
@@ -106,6 +111,7 @@ paths:
     post:
       tags: [instances]
       operationId: stopInstance
+      x-authorization: 实例主人，或 workspace.instances.admin
       responses:
         '202':
           description: 已接受
@@ -118,6 +124,7 @@ paths:
     post:
       tags: [instances]
       operationId: restartInstance
+      x-authorization: 实例主人，或 workspace.instances.admin
       description: 有待重启的变更（pendingRestart）时，用户可以自己选时机重启。
       responses:
         '202':
@@ -131,6 +138,7 @@ paths:
     get:
       tags: [admin-instances]
       operationId: listInstances
+      x-admin-only: true
       x-permission: workspace.instances.read
       parameters:
         - name: ownerId
@@ -161,6 +169,7 @@ paths:
     patch:
       tags: [admin-instances]
       operationId: updateInstance
+      x-admin-only: true
       x-permission: workspace.instances.admin
       requestBody:
         required: true
@@ -183,6 +192,7 @@ paths:
     delete:
       tags: [admin-instances]
       operationId: deleteInstance
+      x-admin-only: true
       x-permission: workspace.instances.admin
       parameters:
         - name: purgeData
@@ -196,6 +206,7 @@ paths:
     get:
       tags: [admin-nodes]
       operationId: listNodes
+      x-admin-only: true
       x-permission: workspace.nodes.read
       responses:
         '200':
@@ -213,6 +224,7 @@ paths:
     get:
       tags: [admin-nodes]
       operationId: getNode
+      x-admin-only: true
       x-permission: workspace.nodes.read
       responses:
         '200':
@@ -224,6 +236,7 @@ paths:
     patch:
       tags: [admin-nodes]
       operationId: updateNode
+      x-admin-only: true
       x-permission: workspace.nodes.admin
       requestBody:
         required: true
@@ -244,6 +257,7 @@ paths:
     delete:
       tags: [admin-nodes]
       operationId: revokeNode
+      x-admin-only: true
       x-permission: workspace.nodes.admin
       description: 吊销节点证书。节点上还有实例时 409 workspace.node_not_empty（先 drain 并迁走）。
       responses:
@@ -255,6 +269,7 @@ paths:
     post:
       tags: [admin-nodes]
       operationId: drainNode
+      x-admin-only: true
       x-permission: workspace.nodes.admin
       description: 不再调度新实例到这个节点；已有实例在空闲时迁走。
       responses:
@@ -267,6 +282,7 @@ paths:
     get:
       tags: [admin-nodes]
       operationId: listJoinTokens
+      x-admin-only: true
       x-permission: workspace.nodes.admin
       responses:
         '200':
@@ -281,6 +297,7 @@ paths:
     post:
       tags: [admin-nodes]
       operationId: createJoinToken
+      x-admin-only: true
       x-permission: workspace.nodes.admin
       requestBody:
         content:
@@ -308,6 +325,7 @@ paths:
     delete:
       tags: [admin-nodes]
       operationId: deleteJoinToken
+      x-admin-only: true
       x-permission: workspace.nodes.admin
       parameters:
         - name: tokenId
@@ -322,6 +340,7 @@ paths:
     get:
       tags: [admin-runtimes]
       operationId: listRuntimes
+      x-admin-only: true
       x-permission: workspace.runtimes.read
       responses:
         '200':
@@ -338,6 +357,7 @@ paths:
     put:
       tags: [admin-runtimes]
       operationId: setDefaultRuntime
+      x-admin-only: true
       x-permission: workspace.runtimes.write
       description: 切换默认 DSH 版本。已有实例的规格代数加一并标为 pendingRestart，按灰度策略在空闲时重启。
       requestBody:
@@ -605,7 +625,7 @@ components:
           required: [id, displayName, tenantName]
         mcpServers:
           type: object
-          description: '键是写进 DSH 配置的名字。用访问令牌鉴权（Authorization: Bearer）。'
+          description: '键是写进 DSH 配置的名字。地址必须与平台 apiBase 同源，用 aud=auriga.ai-gateway 的访问令牌鉴权（Authorization: Bearer）；插件拒绝其他地址。'
           additionalProperties:
             type: object
             properties:
@@ -613,7 +633,7 @@ components:
             required: [url]
         modelProviders:
           type: object
-          description: 键是写进 DSH 配置的名字。OpenAI 兼容接口，用访问令牌鉴权。
+          description: 键是写进 DSH 配置的名字。OpenAI 兼容接口，地址必须与平台 apiBase 同源，用 aud=auriga.ai-gateway 的访问令牌鉴权。
           additionalProperties:
             type: object
             properties:
@@ -634,7 +654,7 @@ components:
             manifestUrl: { type: string, format: uri }
             keys:
               type: array
-              description: 面板签名公钥（JWKS 子集，同 identity-keys.schema.json 的 keys）。
-              items: { type: object }
+              description: 面板签名公钥（Ed25519 JWK）。
+              items: { $ref: '../plugin/identity-keys.schema.json#/properties/keys/items' }
           required: [manifestUrl, keys]
       required: [protocol, account, mcpServers, modelProviders, panel]

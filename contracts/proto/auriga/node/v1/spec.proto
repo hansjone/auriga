@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package auriga.node.v1;
 
+import "google/protobuf/timestamp.proto";
+
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
 option java_multiple_files = true;
 option java_package = "io.github.hansjone.auriga.contracts.node.v1";
@@ -57,9 +59,10 @@ message DshRuntime {
   string digest = 3;
   // 下载地址（平台内部地址，需要节点证书）。
   string url = 4;
-  // 平台对 digest 的 Ed25519 签名。
+  // 已废弃，用 signed：只签 digest 不能防回滚和冒充。保留字段号。
   bytes signature = 5;
   string signing_kid = 6;
+  SignedArtifact signed = 8;
   // Docker 驱动用的实例镜像，必须带 digest：`<仓库>@sha256:…`。原生进程驱动为空。
   string image = 7;
 }
@@ -91,11 +94,12 @@ message PluginRef {
   // 插件包的 `sha256:<十六进制>`。
   string digest = 4;
   string url = 5;
-  // 平台对 digest 的 Ed25519 签名。
+  // 已废弃，用 signed。
   bytes signature = 6;
   string signing_kid = 7;
   // false 表示安装但关闭。
   bool enabled = 8;
+  SignedArtifact signed = 9;
 }
 
 message Profile {
@@ -121,7 +125,10 @@ message ConfigPatch {
 // 引用 Secrets 里的哪个机密。
 enum TokenRef {
   TOKEN_REF_UNSPECIFIED = 0;
+  // 实例令牌：只能调用 workspace 的 /instance/**。
   TOKEN_REF_INSTANCE_TOKEN = 1;
+  // ai-gateway 令牌：只能调用团队 MCP 和团队模型。
+  TOKEN_REF_AI_GATEWAY_TOKEN = 2;
 }
 
 message McpServer {
@@ -160,11 +167,14 @@ message Secrets {
   SealedSecret instance_token = 1;
   // 校验 edge 身份头的公钥：当前 + 下一把，按 kid 选用。
   repeated IdentityPublicKey identity_keys = 2;
+  // ai-gateway 令牌（团队 MCP、团队模型用），用节点封装公钥加密。
+  SealedSecret ai_gateway_token = 3;
 }
 
 // 只有目标节点能解开的机密。
 // 算法 `hpke-x25519-sha256-aes256gcm`：RFC 9180，DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM，Base 模式；
-// info 为 `auriga/sealed/v1/<instance_id>`。
+// info 为 `auriga/sealed/v1/<instance_id>/<机密名>`（机密名即 Secrets 里的字段名，例如 instance_token），
+// aad 为规格代数的十进制字符串。节点在封装密钥轮换的过渡期内保留旧私钥。
 message SealedSecret {
   string alg = 1;
   // 节点封装公钥的 SHA-256（十六进制前 16 位），用于判断是否是给本节点的。
@@ -180,7 +190,31 @@ message IdentityPublicKey {
   string alg = 2;
   // 原始 32 字节公钥。
   bytes public_key = 3;
-  // 可选：生效和过期时间（Unix 秒，0 表示不限）。
-  int64 not_before = 4;
-  int64 not_after = 5;
+  // 可选：生效和过期时间，不设置表示不限。
+  google.protobuf.Timestamp not_before = 4;
+  google.protobuf.Timestamp not_after = 5;
+}
+
+// 制品签名声明。平台用制品签名密钥对它的 JCS（RFC 8785）规范化 JSON 签名（Ed25519），
+// 而不是只签 digest：防止已签名的旧版本被回滚使用、或一个已签名制品冒充另一种制品。
+// 节点代理记住每类制品（purpose + name + os + arch）已用过的最高版本，拒绝更低版本（显式降级指令除外）。
+message ArtifactStatement {
+  // `agent` | `dsh_runtime` | `plugin`
+  string purpose = 1;
+  string name = 2;
+  string version = 3;
+  // `linux` | `windows` | `any`
+  string os = 4;
+  // `amd64` | `arm64` | `any`
+  string arch = 5;
+  // `sha256:<十六进制>`
+  string digest = 6;
+  google.protobuf.Timestamp issued_at = 7;
+}
+
+message SignedArtifact {
+  ArtifactStatement statement = 1;
+  // 对 statement 的 JCS JSON 的 Ed25519 签名。
+  bytes signature = 2;
+  string signing_kid = 3;
 }

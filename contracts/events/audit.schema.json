@@ -9,7 +9,7 @@
         "actor": {
           "type": "object",
           "properties": {
-            "type": { "enum": ["user", "service_account", "device", "instance", "system"] },
+            "type": { "enum": ["user", "service_account", "device", "instance", "node", "system"] },
             "id": { "type": ["string", "null"] },
             "ip": { "type": "string" },
             "userAgent": { "type": "string" },

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "NATS KV auriga-sessions 的值",
-  "description": "键：cookie 原值的 SHA-256（小写十六进制）。iam 在登录、续期、换新访问令牌时写入，吊销时删除；edge 只读，没命中再调 iam SessionService.IntrospectSession。KV 条目的 TTL 等于会话的闲置过期时间。",
+  "description": "键：cookie 原值的 SHA-256（小写十六进制）。iam 在登录、续期、换新访问令牌时写入，吊销时删除；edge 只读，没命中再调 iam SessionService.IntrospectSession。KV 条目的 TTL 等于会话的闲置过期时间；edge 对有请求的会话按节流（同一会话最多每 5 分钟一次）调用 iam `SessionService.TouchSession` 续期，iam 改写 KV 条目。",
   "type": "object",
   "properties": {
     "sessionId": { "type": "string", "format": "uuid" },
@@ -12,8 +12,11 @@
     "accessTokenExpiresAt": { "type": "string", "format": "date-time" },
     "expiresAt": { "description": "会话绝对过期时间。", "type": "string", "format": "date-time" },
     "idleExpiresAt": { "type": "string", "format": "date-time" },
+    "mfa": { "description": "本次登录做过多因素验证。edge 据此执行 login 策略的 adminRequireMfa。", "type": "boolean" },
+    "authTime": { "type": "string", "format": "date-time" },
+    "stepUpAt": { "description": "最近一次二次验证时间。", "type": "string", "format": "date-time" },
     "csrfHash": { "description": "该会话 CSRF 令牌的 SHA-256，edge 用来校验 X-Auriga-CSRF。", "type": "string" }
   },
-  "required": ["sessionId", "accountId", "tenantId", "audience", "accessToken", "accessTokenExpiresAt", "expiresAt", "idleExpiresAt", "csrfHash"],
+  "required": ["sessionId", "accountId", "tenantId", "audience", "accessToken", "accessTokenExpiresAt", "expiresAt", "idleExpiresAt", "csrfHash", "mfa", "authTime"],
   "additionalProperties": false
 }

@@ -12,6 +12,9 @@ option java_package = "io.github.hansjone.auriga.contracts.node.v1";
 
 // workspace ↔ 节点代理的控制通道（workspace 提供服务端）。
 //
+// - 节点身份以 mTLS 证书的 URI SAN（`auriga://node/<id>`）为准：Hello.node_id 与之不符时断开；
+//   节点上报的实例状态如果不属于该节点（workspace 没有把它调度到这里），一律忽略并告警。
+//
 // - 节点代理主动连接（单机走本机 socket / 命名管道，多机走 mTLS gRPC），工作节点不用开入站端口。
 // - 一个节点同时只有一个会话；同一节点建立新会话时 workspace 关闭旧会话。
 // - 节点代理连上后先发 Hello，再发全量 Inventory；workspace 回 Welcome 后开始下发。
@@ -67,14 +70,16 @@ message Hello {
   string boot_id = 10;
   // 节点本机时间，workspace 用来估算时钟偏差（超过 5 秒告警）。
   google.protobuf.Timestamp node_time = 11;
+  // 当前封装公钥的 key_id（见 SealedSecret.key_id），workspace 据此知道该用哪把公钥加密。
+  string sealing_key_id = 12;
 }
 
 message Capacity {
   int64 cpu_millis = 1;
   int64 memory_mb = 2;
   int64 disk_gb = 3;
-  // 本地策略允许的最大实例数，0 表示不限。
-  int64 max_instances = 4;
+  // 本地策略允许的最大实例数，不设置表示不限。
+  optional int64 max_instances = 4;
 }
 
 // 本机所有托管实例的实际状态。连上和重连时全量发送一次。
@@ -121,11 +126,19 @@ message InstanceStatus {
   bool ready = 4;
   // 渲染结果的摘要，变了才需要重启。
   string render_digest = 5;
-  // PENDING_RESTART 的原因：`dsh_version`、`plugins`、`config`、`resources`。
-  repeated string restart_reasons = 6;
+  // PENDING_RESTART 的原因。
+  repeated RestartReason restart_reasons = 6;
   InstanceError error = 7;
   google.protobuf.Timestamp started_at = 8;
   google.protobuf.Timestamp updated_at = 9;
+}
+
+enum RestartReason {
+  RESTART_REASON_UNSPECIFIED = 0;
+  RESTART_REASON_DSH_VERSION = 1;
+  RESTART_REASON_PLUGINS = 2;
+  RESTART_REASON_CONFIG = 3;
+  RESTART_REASON_RESOURCES = 4;
 }
 
 message InstanceError {
@@ -291,7 +304,8 @@ message UpdateAgent {
   string url = 2;
   // `sha256:<十六进制>`
   string digest = 3;
-  // 平台对 digest 的 Ed25519 签名。
+  // 已废弃，用 signed（purpose=agent）。
   bytes signature = 4;
   string signing_kid = 5;
+  SignedArtifact signed = 6;
 }

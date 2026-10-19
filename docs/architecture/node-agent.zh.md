@@ -51,7 +51,7 @@
 ### 3.1 入网
 
 1. 管理员在管理台"节点"页生成一次性入网令牌（默认 1 小时有效）。
-2. 在新主机上执行 `auriga-agent join --server https://平台地址 --token <令牌>`。
+2. 在新主机上执行 `auriga-agent join --server https://平台地址 --token <令牌> --ca-sha256 <平台 CA 指纹>`。
 3. 节点代理在本机生成密钥对，用令牌换取 workspace 内置 CA 签发的**节点证书**；之后一律用证书做 mTLS，令牌作废。
 4. 证书 30 天有效，到期前 7 天自动续期；管理员可以在管理台吊销某个节点。
 
@@ -314,7 +314,7 @@ Linux 默认 `<data>` = `/var/lib/auriga`，Windows 默认 `%ProgramData%\auriga
 
 | 项 | 来源 | 上报 |
 |---|---|---|
-| 健康 | 实例的 `/_health`（由插件提供）+ 进程或容器状态 | `InstanceStatus.ready` |
+| 健康 | 实例的 `/_auriga/health`（由插件提供）+ 进程或容器状态 | `InstanceStatus.ready` |
 | 活动 | 插件上报"执行中的轮次 / 终端 / IM 机器人"计数（直接报给平台）；节点代理补充最近 5 分钟的 CPU 使用，用来发现插件看不到的后台进程 | workspace 合并后判断闲置 |
 | 定时任务 | 监听实例里的 `ops-cron/store.json`、`storages/schedule.json` 文件变化，解析 cron（含时区）算出下次触发时间 | `WakeSchedule` |
 | 资源 | cgroup（Linux / 容器）、Job Object 统计（Windows） | `NodeUsage`，同时在 ingress 上提供 Prometheus 指标 |

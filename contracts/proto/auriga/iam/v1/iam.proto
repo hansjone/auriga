@@ -17,6 +17,29 @@ service SessionService {
   rpc IntrospectSession(IntrospectSessionRequest) returns (IntrospectSessionResponse);
   // 吊销会话。调用方：org、ops（停用、离职）。
   rpc RevokeSessions(RevokeSessionsRequest) returns (RevokeSessionsResponse);
+  // 会话续期（顺延闲置过期时间并改写 NATS KV）。调用方：edge，同一会话最多每 5 分钟一次。
+  rpc TouchSession(TouchSessionRequest) returns (TouchSessionResponse);
+}
+
+message TouchSessionRequest {
+  string session_token = 1;
+  SessionAudience audience = 2;
+}
+
+message TouchSessionResponse {
+  bool active = 1;
+  google.protobuf.Timestamp idle_expires_at = 2;
+}
+
+enum RevokeReason {
+  REVOKE_REASON_UNSPECIFIED = 0;
+  REVOKE_REASON_LOGOUT = 1;
+  REVOKE_REASON_USER = 2;
+  REVOKE_REASON_ADMIN = 3;
+  REVOKE_REASON_USER_DISABLED = 4;
+  REVOKE_REASON_USER_OFFBOARDED = 5;
+  REVOKE_REASON_SECURITY = 6;
+  REVOKE_REASON_EXPIRED = 7;
 }
 
 enum SessionAudience {
@@ -53,6 +76,8 @@ message Session {
   // 本次登录做过多因素验证。
   bool mfa = 6;
   google.protobuf.Timestamp created_at = 7;
+  // 最近一次二次验证时间，未做过时不设置。
+  google.protobuf.Timestamp step_up_at = 10;
   // 绝对过期时间。
   google.protobuf.Timestamp expires_at = 8;
   // 闲置过期时间（有活动时顺延）。
@@ -64,8 +89,8 @@ message RevokeSessionsRequest {
   string account_id = 2;
   // 为空表示该账号的全部会话。
   repeated string session_ids = 3;
-  // `user_disabled`、`user_offboarded`、`admin`、`security`。
-  string reason = 4;
+  // 与 events/identity.schema.json 的 reason 对应。
+  RevokeReason reason = 4;
   // 同时吊销该账号的设备凭据。
   bool include_devices = 5;
 }
@@ -123,6 +148,8 @@ service IdentityHeaderKeyService {
   rpc GetSigningKeys(GetSigningKeysRequest) returns (GetSigningKeysResponse);
   // 只含公钥。调用方：workspace（写进实例规格）。
   rpc GetPublicKeys(GetPublicKeysRequest) returns (GetPublicKeysResponse);
+  // 轮换规则：NEXT 只有在所有运行中实例的规格都已包含它（或超过传播期，默认 24 小时）后才切成 CURRENT；
+  // 紧急吊销时旧密钥直接变 REVOKED，workspace 立即下发不含它的规格。
 }
 
 enum KeyState {
@@ -133,12 +160,14 @@ enum KeyState {
   KEY_STATE_NEXT = 2;
   // 已停止签名，公钥保留到过期，之后移除。
   KEY_STATE_RETIRING = 3;
+  // 已吊销（私钥疑似泄漏）：实例必须立即删除这个 kid。
+  KEY_STATE_REVOKED = 4;
 }
 
 message SigningKey {
   string kid = 1;
   KeyState state = 2;
-  // Ed25519 私钥种子（32 字节）。GetPublicKeys 里为空。
+  // Ed25519 私钥种子（32 字节）。
   bytes private_key = 3;
   // Ed25519 公钥（32 字节）。
   bytes public_key = 4;
@@ -154,6 +183,16 @@ message GetSigningKeysResponse {
 
 message GetPublicKeysRequest {}
 
+// 公钥（不含私钥字段，避免误传私钥）。
+message PublicKey {
+  string kid = 1;
+  KeyState state = 2;
+  // Ed25519 公钥（32 字节）。
+  bytes public_key = 3;
+  google.protobuf.Timestamp not_before = 4;
+  google.protobuf.Timestamp not_after = 5;
+}
+
 message GetPublicKeysResponse {
-  repeated SigningKey keys = 1;
+  repeated PublicKey keys = 1;
 }

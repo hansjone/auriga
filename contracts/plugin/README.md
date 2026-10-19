@@ -25,8 +25,11 @@ Auriga-Identity: <JWS 紧凑格式>
 1. 按 `kid` 从身份头公钥文件里找公钥，验签；找不到 kid 时重新读一次文件再试；
 2. 检查 `aud` 等于本实例 id、`sub` 等于主人 id（`AURIGA_OWNER_ID`）、`pv` 是支持的版本；
 3. 检查 `iat`、`exp`，允许 5 秒时钟偏差；
-4. 检查 `htm` 等于请求方法、`htu` 等于请求路径（实例看到的路径，不含查询串）；
+4. 检查 `htm` 等于请求方法、`htu` 等于请求路径。`htu` 的定义：节点代理转发给实例时请求行里的**原始** path——已去掉 `/i/<实例 id>` 前缀、不做百分号解码、不含查询串；
+   `jti` 只用于日志关联，插件不要求去重（重放窗口由 `exp`、`aud`、`htm`、`htu` 限制）；
 5. 任一项不通过返回 401，不泄露原因细节；节点代理的健康检查路径 `/_auriga/health` 除外。
+
+WebSocket 只在升级时校验一次身份头；edge 收到 `identity.session_revoked` 后必须立即关闭该会话（`sid`）的全部 WebSocket 连接。
 
 ### 身份头公钥文件
 
@@ -47,7 +50,7 @@ Auriga-Identity: <JWS 紧凑格式>
 | `DSH_HOME` | DSH 数据目录 |
 | `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` | 出网代理 |
 
-- **健康检查**：插件在 DSH 端口上提供 `GET /_auriga/health`（不要求身份头，只回 `{"status":"ok","ready":true,"protocol":1,"pluginVersion":"…"}`），节点代理据此判断 ready。
+- **健康检查**：插件在 DSH 端口上提供 `GET /_auriga/health`（节点代理设计文档里的 `/_health` 即指它）（不要求身份头，只回 `{"status":"ok","ready":true,"protocol":1,"pluginVersion":"…"}`），节点代理据此判断 ready。
 - **心跳**：插件每 30 秒、以及活动计数变化时（2 秒去抖）调用 `POST {AURIGA_PLATFORM_URL}/api/workspace/v1/instance/heartbeat`，`Authorization: Bearer <实例令牌>`，上报执行中的轮次、打开的终端、在线的 IM 机器人数量，见 `contracts/openapi/workspace.yaml`。workspace 合并节点代理的 CPU 观测后判断闲置。
 - **团队 SDK**：插件向其他 DSH 插件提供 `ctx.get('auriga')`，只有它是对插件承诺稳定的接口；SDK 的接口定义随 P1 发布，版本跟协议主版本走。
 
@@ -61,7 +64,9 @@ Auriga-Identity: <JWS 紧凑格式>
 4. **刷新令牌就是设备凭据**：每次刷新都轮换；插件在本机加密保存（Windows 用 DPAPI，macOS 用钥匙串，Linux 用权限 0600 的文件 + 本机密钥）；
 5. 用户或管理员在"我的设备"里吊销后，刷新返回 `invalid_grant`，插件清除本地凭据并提示重新登录；
 6. 登录后插件调用 `GET /api/workspace/v1/connect/manifest` 取团队 MCP、团队模型和面板信息，按清单接入；
-7. 连接模式下插件只放行来自本机 loopback 的访问。平台的 CORS 白名单放行 DSH Desktop 的来源 `dsh-app://app` 和 loopback 来源。
+7. 连接模式下插件只放行来自本机 loopback 的访问，并校验 `Host` 必须是 `127.0.0.1`、`[::1]` 或 `localhost`（加端口），防 DNS 重绑定。平台的 CORS 白名单放行 DSH Desktop 的来源 `dsh-app://app` 和 loopback 来源，但对 loopback 来源不返回 `Access-Control-Allow-Credentials`，只接受设备 Bearer 令牌。
+8. 批准设备时，门户的确认页必须让用户**手动输入或逐字核对** `user_code`，并显示发起端的 IP 和大致位置；批准要求 10 分钟内做过二次验证（防设备码钓鱼）。
+9. 调团队 MCP 和团队模型用 `aud=auriga.ai-gateway` 的访问令牌（用刷新令牌按 RFC 8707 `resource` 参数换取）；清单里的 MCP 和模型地址必须与平台 `apiBase` 同源，插件拒绝其他地址。
 
 ## 5. 团队面板加载
 
@@ -69,6 +74,8 @@ Auriga-Identity: <JWS 紧凑格式>
 
 - 平台在 `/panel/` 下提供面板文件，入口是 `GET /panel/manifest.json`，格式见 `panel-manifest.schema.json`：版本、协议、入口脚本、每个文件的 SRI 摘要、平台签名。
 - 签名：Ed25519，对去掉 `signature` 字段后的清单做 JCS（RFC 8785）规范化再签。面板签名公钥由连接清单 `panel.keys` 下发。
+- 防回滚：清单带 `issuedAt` 和 `expiresAt`；插件拒绝过期的清单，也拒绝版本号低于已加载版本的清单。
+- 文件路径只能是 `integrity` 里列出的相对路径（不含 `..`），`entry` 和 `styles` 必须都在 `integrity` 里。
 - **托管模式**：同源加载，按清单里的 `integrity` 用 SRI 校验脚本。
 - **连接模式**：插件下载清单和文件，先验签、再逐个校验摘要，然后从本机加载（例如经 `dsh-app://`）；校验失败拒绝加载。
 - 自定义元素名 `auriga-team-panel`，用 Shadow DOM 隔离样式。宿主（插件的面板外壳）设置元素属性 `context`：

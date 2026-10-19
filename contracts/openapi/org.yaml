@@ -5,7 +5,8 @@ info:
   description: |
     组织与权限：租户、成员、组、角色（权限集合）和角色绑定、策略、配额、邀请。成员 id 等于 iam 账号 id。
     授权规则：**授予的权限不能超过授予者自己的权限**（超管上限），否则 403 `org.grant_exceeds_own`。
-    `/admin/**` 之外的接口给门户用；管理类接口要求相应权限（x-permission）。
+    `/admin/**` 之外的接口给门户用；`/admin/**` 只接受管理台会话（访问令牌 ctx=admin，见 x-admin-only），并要求相应权限（x-permission）。
+    超管上限同样适用于间接授权：把成员加入组、改组的上级、身份源的属性映射到组时，组的有效权限必须是操作者权限的子集。
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -39,6 +40,16 @@ paths:
                   tenant: { $ref: '#/components/schemas/Tenant' }
                   permissions: { type: array, items: { type: string } }
                 required: [member, tenant, permissions]
+  /me/quota:
+    get:
+      tags: [quotas]
+      operationId: getMyEffectiveQuota
+      responses:
+        '200':
+          description: 我的有效配额（合并后）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
   /tenant:
     get:
       tags: [tenant]
@@ -49,9 +60,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Tenant' }
+  /admin/tenant:
     patch:
       tags: [tenant]
       operationId: updateTenant
+      x-admin-only: true
       x-permission: org.tenant.write
       requestBody:
         required: true
@@ -71,10 +84,11 @@ paths:
               schema: { $ref: '#/components/schemas/Tenant' }
 
   # ---------------- 成员 ----------------
-  /members:
+  /admin/members:
     get:
       tags: [members]
       operationId: listMembers
+      x-admin-only: true
       x-permission: org.members.read
       parameters:
         - name: q
@@ -103,12 +117,13 @@ paths:
                   items: { type: array, items: { $ref: '#/components/schemas/Member' } }
                   nextCursor: { type: string }
                 required: [items]
-  /members/{accountId}:
+  /admin/members/{accountId}:
     parameters:
       - $ref: '#/components/parameters/AccountId'
     get:
       tags: [members]
       operationId: getMember
+      x-admin-only: true
       x-permission: org.members.read
       responses:
         '200':
@@ -122,6 +137,7 @@ paths:
     patch:
       tags: [members]
       operationId: updateMember
+      x-admin-only: true
       x-permission: org.members.write
       parameters:
         - $ref: 'common.yaml#/components/parameters/IfMatch'
@@ -142,12 +158,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
         '412': { $ref: 'common.yaml#/components/responses/PreconditionFailed' }
-  /members/{accountId}/disable:
+  /admin/members/{accountId}/disable:
     parameters:
       - $ref: '#/components/parameters/AccountId'
     post:
       tags: [members]
       operationId: disableMember
+      x-admin-only: true
       x-permission: org.members.write
       description: 发 user.disabled。不能停用自己，不能停用最后一个超管（409 org.last_owner）。
       requestBody:
@@ -161,12 +178,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
-  /members/{accountId}/enable:
+  /admin/members/{accountId}/enable:
     parameters:
       - $ref: '#/components/parameters/AccountId'
     post:
       tags: [members]
       operationId: enableMember
+      x-admin-only: true
       x-permission: org.members.write
       responses:
         '200':
@@ -174,12 +192,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
-  /members/{accountId}/offboard:
+  /admin/members/{accountId}/offboard:
     parameters:
       - $ref: '#/components/parameters/AccountId'
     post:
       tags: [members]
       operationId: offboardMember
+      x-admin-only: true
       x-permission: org.members.offboard
       description: 离职。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。
       requestBody:
@@ -198,12 +217,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Member' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
-  /members/{accountId}/role-bindings:
+  /admin/members/{accountId}/role-bindings:
     parameters:
       - $ref: '#/components/parameters/AccountId'
     get:
       tags: [roles]
       operationId: listMemberRoleBindings
+      x-admin-only: true
       x-permission: org.roles.read
       description: 成员直接获得和经组获得的角色绑定。
       responses:
@@ -218,10 +238,11 @@ paths:
                 required: [items]
 
   # ---------------- 组 ----------------
-  /groups:
+  /admin/groups:
     get:
       tags: [groups]
       operationId: listGroups
+      x-admin-only: true
       x-permission: org.groups.read
       parameters:
         - name: q
@@ -243,6 +264,7 @@ paths:
     post:
       tags: [groups]
       operationId: createGroup
+      x-admin-only: true
       x-permission: org.groups.write
       requestBody:
         required: true
@@ -255,12 +277,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Group' }
-  /groups/{groupId}:
+  /admin/groups/{groupId}:
     parameters:
       - $ref: '#/components/parameters/GroupId'
     get:
       tags: [groups]
       operationId: getGroup
+      x-admin-only: true
       x-permission: org.groups.read
       responses:
         '200':
@@ -272,6 +295,7 @@ paths:
     patch:
       tags: [groups]
       operationId: updateGroup
+      x-admin-only: true
       x-permission: org.groups.write
       requestBody:
         required: true
@@ -287,17 +311,19 @@ paths:
     delete:
       tags: [groups]
       operationId: deleteGroup
+      x-admin-only: true
       x-permission: org.groups.write
       description: 有子组时 409 org.group_not_empty。成员移出、该组的角色绑定和配额一并删除。
       responses:
         '204': { description: 已删除 }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
-  /groups/{groupId}/members:
+  /admin/groups/{groupId}/members:
     parameters:
       - $ref: '#/components/parameters/GroupId'
     get:
       tags: [groups]
       operationId: listGroupMembers
+      x-admin-only: true
       x-permission: org.groups.read
       parameters:
         - $ref: 'common.yaml#/components/parameters/Limit'
@@ -313,28 +339,36 @@ paths:
                   items: { type: array, items: { $ref: '#/components/schemas/Member' } }
                   nextCursor: { type: string }
                 required: [items]
-  /groups/{groupId}/members/{accountId}:
+  /admin/groups/{groupId}/members/{accountId}:
     parameters:
       - $ref: '#/components/parameters/GroupId'
       - $ref: '#/components/parameters/AccountId'
     put:
       tags: [groups]
       operationId: addGroupMember
+      x-admin-only: true
       x-permission: org.groups.write
       responses:
         '204': { description: 已加入（发 user.updated，有效权限变化时另发 user.permissions_changed） }
+        '403':
+          description: 组的有效权限超出操作者自己的权限（org.grant_exceeds_own）
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
     delete:
       tags: [groups]
       operationId: removeGroupMember
+      x-admin-only: true
       x-permission: org.groups.write
       responses:
         '204': { description: 已移出 }
 
   # ---------------- 权限和角色 ----------------
-  /permissions:
+  /admin/permissions:
     get:
       tags: [roles]
       operationId: listPermissions
+      x-admin-only: true
       x-permission: org.roles.read
       responses:
         '200':
@@ -346,10 +380,11 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: '#/components/schemas/Permission' } }
                 required: [items]
-  /roles:
+  /admin/roles:
     get:
       tags: [roles]
       operationId: listRoles
+      x-admin-only: true
       x-permission: org.roles.read
       responses:
         '200':
@@ -364,6 +399,7 @@ paths:
     post:
       tags: [roles]
       operationId: createRole
+      x-admin-only: true
       x-permission: org.roles.write
       requestBody:
         required: true
@@ -377,12 +413,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Role' }
         '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
-  /roles/{roleId}:
+  /admin/roles/{roleId}:
     parameters:
       - $ref: '#/components/parameters/RoleId'
     get:
       tags: [roles]
       operationId: getRole
+      x-admin-only: true
       x-permission: org.roles.read
       responses:
         '200':
@@ -393,6 +430,7 @@ paths:
     patch:
       tags: [roles]
       operationId: updateRole
+      x-admin-only: true
       x-permission: org.roles.write
       description: 内置角色不能改（409 org.role_builtin）。
       requestBody:
@@ -411,14 +449,16 @@ paths:
     delete:
       tags: [roles]
       operationId: deleteRole
+      x-admin-only: true
       x-permission: org.roles.write
       responses:
         '204': { description: 已删除，相关绑定一并删除 }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
-  /role-bindings:
+  /admin/role-bindings:
     get:
       tags: [roles]
       operationId: listRoleBindings
+      x-admin-only: true
       x-permission: org.roles.read
       parameters:
         - name: roleId
@@ -440,6 +480,7 @@ paths:
     post:
       tags: [roles]
       operationId: createRoleBinding
+      x-admin-only: true
       x-permission: org.roles.grant
       requestBody:
         required: true
@@ -458,10 +499,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RoleBinding' }
         '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
-  /role-bindings/{bindingId}:
+  /admin/role-bindings/{bindingId}:
     delete:
       tags: [roles]
       operationId: deleteRoleBinding
+      x-admin-only: true
       x-permission: org.roles.grant
       description: 不能撤销最后一个超管（409 org.last_owner）。
       parameters:
@@ -474,7 +516,7 @@ paths:
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
 
   # ---------------- 策略 ----------------
-  /policies/{key}:
+  /admin/policies/{key}:
     parameters:
       - name: key
         in: path
@@ -483,6 +525,7 @@ paths:
     get:
       tags: [policies]
       operationId: getPolicy
+      x-admin-only: true
       x-permission: org.policies.read
       responses:
         '200':
@@ -495,6 +538,7 @@ paths:
     put:
       tags: [policies]
       operationId: putPolicy
+      x-admin-only: true
       x-permission: org.policies.write
       parameters:
         - $ref: 'common.yaml#/components/parameters/IfMatch'
@@ -517,10 +561,11 @@ paths:
         '412': { $ref: 'common.yaml#/components/responses/PreconditionFailed' }
 
   # ---------------- 配额 ----------------
-  /quotas/default:
+  /admin/quotas/default:
     get:
       tags: [quotas]
       operationId: getDefaultQuota
+      x-admin-only: true
       x-permission: org.quotas.read
       responses:
         '200':
@@ -531,6 +576,7 @@ paths:
     put:
       tags: [quotas]
       operationId: putDefaultQuota
+      x-admin-only: true
       x-permission: org.quotas.write
       requestBody:
         required: true
@@ -543,12 +589,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Quota' }
-  /groups/{groupId}/quota:
+  /admin/groups/{groupId}/quota:
     parameters:
       - $ref: '#/components/parameters/GroupId'
     get:
       tags: [quotas]
       operationId: getGroupQuota
+      x-admin-only: true
       x-permission: org.quotas.read
       responses:
         '200':
@@ -560,6 +607,7 @@ paths:
     put:
       tags: [quotas]
       operationId: putGroupQuota
+      x-admin-only: true
       x-permission: org.quotas.write
       requestBody:
         required: true
@@ -575,15 +623,17 @@ paths:
     delete:
       tags: [quotas]
       operationId: deleteGroupQuota
+      x-admin-only: true
       x-permission: org.quotas.write
       responses:
         '204': { description: 已删除 }
-  /members/{accountId}/quota:
+  /admin/members/{accountId}/quota:
     parameters:
       - $ref: '#/components/parameters/AccountId'
     get:
       tags: [quotas]
       operationId: getMemberQuota
+      x-admin-only: true
       x-permission: org.quotas.read
       responses:
         '200':
@@ -595,6 +645,7 @@ paths:
     put:
       tags: [quotas]
       operationId: putMemberQuota
+      x-admin-only: true
       x-permission: org.quotas.write
       requestBody:
         required: true
@@ -610,17 +661,19 @@ paths:
     delete:
       tags: [quotas]
       operationId: deleteMemberQuota
+      x-admin-only: true
       x-permission: org.quotas.write
       responses:
         '204': { description: 已删除 }
-  /members/{accountId}/quota/effective:
+  /admin/members/{accountId}/quota/effective:
     parameters:
       - $ref: '#/components/parameters/AccountId'
     get:
       tags: [quotas]
       operationId: getEffectiveQuota
+      x-admin-only: true
       x-permission: org.quotas.read
-      description: 成员覆盖 → 所在组（多个组时每项取最大值）→ 租户默认，逐项合并。本人也可以查自己的。
+      description: 成员覆盖 → 所在组 → 租户默认，逐项合并：某层没设置（字段不出现）就看下一层；多个组时取最宽松的值，"不限"最宽松。本人查自己的用 /me/quota。
       responses:
         '200':
           description: 合并后的配额
@@ -629,10 +682,11 @@ paths:
               schema: { $ref: '#/components/schemas/Quota' }
 
   # ---------------- 邀请 ----------------
-  /invitations:
+  /admin/invitations:
     get:
       tags: [invitations]
       operationId: listInvitations
+      x-admin-only: true
       x-permission: org.invitations.read
       parameters:
         - name: status
@@ -654,6 +708,7 @@ paths:
     post:
       tags: [invitations]
       operationId: createInvitation
+      x-admin-only: true
       x-permission: org.invitations.write
       parameters:
         - $ref: 'common.yaml#/components/parameters/IdempotencyKey'
@@ -676,10 +731,11 @@ paths:
                       url: { type: string, format: uri }
                     required: [code, url]
         '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
-  /invitations/{invitationId}:
+  /admin/invitations/{invitationId}:
     delete:
       tags: [invitations]
       operationId: revokeInvitation
+      x-admin-only: true
       x-permission: org.invitations.write
       parameters:
         - name: invitationId
@@ -877,7 +933,7 @@ components:
       required: [key, version, value, updatedAt]
     Quota:
       type: object
-      description: 各字段都可省略；合并时省略的字段取下一层的值。
+      description: 各字段都可省略；省略表示"这一层不设置"。值为 null 表示"不限"。合并时"不限"优先于任何具体数值。
       properties:
         instance:
           type: object
@@ -885,14 +941,14 @@ components:
             cpuMillis: { type: integer, minimum: 100 }
             memoryMb: { type: integer, minimum: 256 }
             diskGb: { type: integer, minimum: 1 }
-            maxInstances: { type: integer, minimum: 0 }
+            maxInstances: { type: [integer, 'null'], minimum: 0, description: 0 表示不允许有实例；null 表示不限。 }
             alwaysOnAllowed: { type: boolean }
         model:
           type: object
           properties:
-            monthlyBudgetMicros: { type: integer, minimum: 0, description: 每月预算，百万分之一货币单位；0 表示不限。 }
+            monthlyBudgetMicros: { type: [integer, 'null'], minimum: 0, description: 每月预算，百万分之一货币单位；null 表示不限。 }
             currency: { type: string, pattern: '^[A-Z]{3}$' }
-            dailyTokens: { type: integer, minimum: 0 }
+            dailyTokens: { type: [integer, 'null'], minimum: 0, description: null 表示不限。 }
     InvitationInput:
       type: object
       properties:

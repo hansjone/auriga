@@ -6,11 +6,19 @@ info:
     远程连接器：不会写 Java 的一方可以用任何语言写一个小服务实现这些接口，在管理台登记地址后，
     就和进程内连接器一样出现在类型列表里。语义与 Java SPI 相同，数据结构见 connector.schema.json。
 
+    **传输**：只允许 https（登记时校验）。
+
     **请求签名**（每个请求都有）：
     - `Auriga-Timestamp`：Unix 秒。连接器拒绝与本机时间相差超过 300 秒的请求。
+    - `Auriga-Nonce`：随机 128 位（base64url）。连接器在 300 秒内拒绝重复的 nonce。
     - `Auriga-Signature`：`v1=<十六进制 HMAC-SHA256>`，密钥是登记时生成的共享密钥，
-      签名串为 `<Auriga-Timestamp>.<方法>.<路径>.<请求体原文>`（GET 时请求体为空串）。
+      签名串为 `<Auriga-Timestamp>.<Auriga-Nonce>.<方法>.<Host>.<路径>.<请求体原文>`（GET 时请求体为空串）。
+      轮换密钥期间平台会同时带两个 `v1=`（逗号分隔），连接器任一匹配即可。
     - 连接器也可以要求 mTLS，与签名同时使用。
+
+    **响应签名**：连接器的每个响应都带 `Auriga-Timestamp` 和 `Auriga-Signature`，
+    签名串为 `<Auriga-Timestamp>.<请求的 Auriga-Nonce>.<HTTP 状态码>.<响应体原文>`。平台验签失败一律当作 fail 步骤，
+    防止中间人伪造 done 步骤。
 
     **超时**：平台对每次调用设 10 秒超时；超时或 5xx 视为 fail 步骤（code `iam.connector_unavailable`）。
     请求体里的 config 含已解密的机密字段，连接器不得记录到日志。

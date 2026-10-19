@@ -33,7 +33,7 @@
       "properties": {
         "type": { "const": "qr" },
         "content": { "description": "要编码进二维码的字符串（通常是 URL）。", "type": "string", "maxLength": 2048 },
-        "matchCode": { "type": "string", "pattern": "^[0-9]{2}$" },
+        "matchCode": { "description": "两位比对码。手机端确认时必须**输入**这两位数字（不是从候选里选）。", "type": "string", "pattern": "^[0-9]{2}$" },
         "status": { "enum": ["waiting", "scanned"], "default": "waiting" },
         "expiresAt": { "type": "string", "format": "date-time" },
         "pollIntervalMs": { "description": "不支持 SSE 时的轮询间隔。", "type": "integer", "minimum": 500, "default": 2000 },
@@ -151,7 +151,7 @@
       "type": "object",
       "properties": {
         "type": { "const": "complete" },
-        "redirectTo": { "type": "string", "format": "uri-reference" }
+        "redirectTo": { "description": "只能是本平台的绝对路径（不能以 // 或 /\\ 开头），服务端另做规范化。", "type": "string", "pattern": "^/(?![/\\\\])[^\\s]*$" }
       },
       "required": ["type", "redirectTo"],
       "additionalProperties": false

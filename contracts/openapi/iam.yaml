@@ -5,7 +5,11 @@ info:
   description: |
     身份认证：登录事务（按步骤协议驱动）、会话、本人的身份 / 多因素 / 设备、设备授权确认、身份源管理、服务账号。
     OIDC / OAuth 2.0 标准端点（/oauth2/*、/.well-known/openid-configuration、/userinfo）按标准实现，不在这里定义。
-    `/admin/**` 只接受管理台源上的会话，并要求相应权限（见各操作的 x-permission）。
+    `/admin/**` 只接受管理台源上的会话（访问令牌 ctx=admin，见 x-admin-only），并要求相应权限（见各操作的 x-permission）。
+
+    **登录事务和发起端绑定**：创建事务时下发 cookie `__Host-auriga_login_tx`（纯 HTTP 部署为 `auriga_login_tx`；HttpOnly，SameSite=Lax，
+    Path=/api/iam/v1/login/），值是随机数，事务里只存它的哈希。`/login/transactions/{txId}/**` 和回调都必须带与事务绑定的这个 cookie，
+    否则一律 404（不区分"不存在"和"不属于你"）。txId 本身不是凭据。
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -148,13 +152,16 @@ paths:
       tags: [login]
       operationId: loginCallbackPost
       summary: 回调（POST 绑定，例如 SAML、Apple）
+      description: |
+        跨站 POST 不会带 SameSite=Lax 的事务 cookie：iam 把表单参数暂存（5 分钟、一次性，按随机 resume 键），
+        然后 303 跳到同源的 GET /login/callback/{providerId}?resume=<键>，在 GET 里校验事务 cookie 后继续。
       security: []
       requestBody:
         content:
           application/x-www-form-urlencoded:
             schema: { type: object, additionalProperties: { type: string } }
       responses:
-        '302': { description: 回到登录页 }
+        '303': { description: 跳到同源 GET 回调继续 }
   /login/qr/{challengeId}:
     parameters:
       - name: challengeId
@@ -165,7 +172,9 @@ paths:
       tags: [login]
       operationId: getQrChallenge
       summary: 手机扫码后查看登录请求（内置扫码）
-      description: 手机端已登录；返回发起端信息和三个候选比对码，用户选出和电脑上一致的那个。
+      description: |
+        手机端已登录；返回发起端信息，用户在手机上**输入**电脑上显示的两位比对码。
+        purpose 为 link 或 stepup 时，手机端的账号必须等于事务所属的账号，否则 403。
       responses:
         '200':
           description: 登录请求
@@ -193,8 +202,9 @@ paths:
               required: [matchCode]
       responses:
         '204': { description: 已确认，发起端的事务继续 }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '409':
-          description: 比对码不对（iam.qr_match_mismatch，挑战作废）或已过期
+          description: 比对码不对（iam.qr_match_mismatch，挑战立即作废，发起端需重新扫码）或已过期
           content:
             application/problem+json:
               schema: { $ref: 'common.yaml#/components/schemas/Problem' }
@@ -494,19 +504,23 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DeviceRequest' }
         '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
   /device/{userCode}/approve:
     parameters:
       - $ref: '#/components/parameters/UserCode'
     post:
       tags: [device]
       operationId: approveDeviceRequest
+      description: 要求 10 分钟内做过二次验证（否则 403 iam.step_up_required）；页面必须让用户手动输入或逐字核对 userCode，并显示发起端 IP。
       requestBody:
         content:
           application/json:
             schema: { type: object, properties: { deviceName: { type: string, maxLength: 64 } } }
       responses:
         '204': { description: 已批准，设备轮询 /oauth2/token 即可拿到令牌 }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
   /device/{userCode}/deny:
     parameters:
       - $ref: '#/components/parameters/UserCode'
@@ -521,6 +535,7 @@ paths:
     get:
       tags: [admin-providers]
       operationId: listConnectorTypes
+      x-admin-only: true
       x-permission: iam.providers.read
       responses:
         '200':
@@ -536,6 +551,7 @@ paths:
     post:
       tags: [admin-providers]
       operationId: registerRemoteConnector
+      x-admin-only: true
       x-permission: iam.providers.write
       requestBody:
         required: true
@@ -544,7 +560,7 @@ paths:
             schema:
               type: object
               properties:
-                baseUrl: { type: string, format: uri }
+                baseUrl: { type: string, format: uri, pattern: '^https://' }
               required: [baseUrl]
       responses:
         '201':
@@ -558,10 +574,34 @@ paths:
                   sharedSecret: { type: string }
                 required: [connector, sharedSecret]
         '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+  /admin/connectors/remote/{type}/rotate-secret:
+    post:
+      tags: [admin-providers]
+      operationId: rotateRemoteConnectorSecret
+      x-admin-only: true
+      x-permission: iam.providers.write
+      description: 生成新的共享密钥，只返回这一次。过渡期（默认 24 小时）内平台同时用新旧两个密钥签名，之后旧密钥作废。
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 新密钥
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sharedSecret: { type: string }
+                  oldSecretExpiresAt: { type: string, format: date-time }
+                required: [sharedSecret, oldSecretExpiresAt]
   /admin/connectors/remote/{type}:
     delete:
       tags: [admin-providers]
       operationId: unregisterRemoteConnector
+      x-admin-only: true
       x-permission: iam.providers.write
       parameters:
         - name: type
@@ -579,6 +619,7 @@ paths:
     get:
       tags: [admin-providers]
       operationId: listProviders
+      x-admin-only: true
       x-permission: iam.providers.read
       responses:
         '200':
@@ -593,6 +634,7 @@ paths:
     post:
       tags: [admin-providers]
       operationId: createProvider
+      x-admin-only: true
       x-permission: iam.providers.write
       parameters:
         - $ref: 'common.yaml#/components/parameters/IdempotencyKey'
@@ -616,6 +658,7 @@ paths:
     get:
       tags: [admin-providers]
       operationId: getProvider
+      x-admin-only: true
       x-permission: iam.providers.read
       responses:
         '200':
@@ -629,6 +672,7 @@ paths:
     patch:
       tags: [admin-providers]
       operationId: updateProvider
+      x-admin-only: true
       x-permission: iam.providers.write
       description: JSON Merge Patch。config 里没给的机密字段保持原值。
       parameters:
@@ -651,6 +695,7 @@ paths:
     delete:
       tags: [admin-providers]
       operationId: deleteProvider
+      x-admin-only: true
       x-permission: iam.providers.write
       description: 应急账号不能删除（409 iam.provider_builtin）；还有账号只能用它登录时 409 iam.provider_in_use。
       responses:
@@ -662,6 +707,7 @@ paths:
     post:
       tags: [admin-providers]
       operationId: testProvider
+      x-admin-only: true
       x-permission: iam.providers.write
       summary: 校验配置并试连外部系统
       responses:
@@ -676,7 +722,8 @@ paths:
     get:
       tags: [admin-providers]
       operationId: searchProviderDirectory
-      x-permission: org.invitations.write
+      x-admin-only: true
+      x-permission: iam.directory.search
       summary: 在身份源的目录里搜人（邀请时用；连接器需支持 directory 能力）
       parameters:
         - name: q
@@ -701,6 +748,7 @@ paths:
     get:
       tags: [admin-accounts]
       operationId: listAccounts
+      x-admin-only: true
       x-permission: iam.accounts.read
       parameters:
         - name: q
@@ -729,6 +777,7 @@ paths:
     get:
       tags: [admin-accounts]
       operationId: getAccount
+      x-admin-only: true
       x-permission: iam.accounts.read
       responses:
         '200':
@@ -743,6 +792,7 @@ paths:
     post:
       tags: [admin-accounts]
       operationId: resetAccountMfa
+      x-admin-only: true
       x-permission: iam.accounts.write
       description: 清除 TOTP 和 Passkey，下次登录要求重新设置；同时吊销全部会话。
       responses:
@@ -757,6 +807,7 @@ paths:
     delete:
       tags: [admin-accounts]
       operationId: unlinkAccountIdentity
+      x-admin-only: true
       x-permission: iam.accounts.write
       responses:
         '204': { description: 已解绑 }
@@ -767,6 +818,7 @@ paths:
     get:
       tags: [admin-accounts]
       operationId: listAccountSessions
+      x-admin-only: true
       x-permission: iam.accounts.read
       responses:
         '200':
@@ -784,6 +836,7 @@ paths:
     post:
       tags: [admin-accounts]
       operationId: revokeAccountSessions
+      x-admin-only: true
       x-permission: iam.accounts.write
       requestBody:
         content:
@@ -799,6 +852,7 @@ paths:
     get:
       tags: [admin-accounts]
       operationId: getEmergencyAccount
+      x-admin-only: true
       x-permission: iam.emergency.read
       responses:
         '200':
@@ -810,6 +864,7 @@ paths:
     post:
       tags: [admin-accounts]
       operationId: rotateEmergencyAccount
+      x-admin-only: true
       x-permission: iam.emergency.write
       description: 重新生成应急账号的口令和 TOTP 密钥。只返回这一次；通知所有超管。
       responses:
@@ -831,6 +886,7 @@ paths:
     get:
       tags: [admin-service-accounts]
       operationId: listServiceAccounts
+      x-admin-only: true
       x-permission: iam.service_accounts.read
       responses:
         '200':
@@ -845,6 +901,7 @@ paths:
     post:
       tags: [admin-service-accounts]
       operationId: createServiceAccount
+      x-admin-only: true
       x-permission: iam.service_accounts.write
       requestBody:
         required: true
@@ -863,6 +920,7 @@ paths:
     get:
       tags: [admin-service-accounts]
       operationId: getServiceAccount
+      x-admin-only: true
       x-permission: iam.service_accounts.read
       responses:
         '200':
@@ -873,6 +931,7 @@ paths:
     patch:
       tags: [admin-service-accounts]
       operationId: updateServiceAccount
+      x-admin-only: true
       x-permission: iam.service_accounts.write
       requestBody:
         required: true
@@ -888,6 +947,7 @@ paths:
     delete:
       tags: [admin-service-accounts]
       operationId: deleteServiceAccount
+      x-admin-only: true
       x-permission: iam.service_accounts.write
       responses:
         '204': { description: 已删除，所有密钥失效 }
@@ -897,6 +957,7 @@ paths:
     post:
       tags: [admin-service-accounts]
       operationId: createServiceAccountSecret
+      x-admin-only: true
       x-permission: iam.service_accounts.write
       description: 生成 client_credentials 用的密钥，只返回这一次。
       requestBody:
@@ -920,6 +981,7 @@ paths:
     delete:
       tags: [admin-service-accounts]
       operationId: deleteServiceAccountSecret
+      x-admin-only: true
       x-permission: iam.service_accounts.write
       parameters:
         - $ref: '#/components/parameters/ServiceAccountId'
@@ -935,9 +997,21 @@ paths:
     post:
       tags: [admin-keys]
       operationId: rotateIdentityHeaderKey
+      x-admin-only: true
       x-permission: iam.keys.write
-      summary: 立即轮换 edge 身份头签名密钥
-      description: 生成新的 NEXT 密钥并把现有 NEXT 提升为 CURRENT。实例在下一次规格下发时拿到新公钥，不需要重启。
+      summary: 轮换 edge 身份头签名密钥
+      description: |
+        mode=scheduled：生成新的 NEXT；只有在所有运行中实例的规格都已包含它（或超过固定传播期，默认 24 小时）之后，edge 才把它切成 CURRENT，旧的转为 RETIRING。
+        mode=compromise：立即把当前密钥标为 REVOKED，edge 改用新密钥，下发规格让实例立即删除被吊销的 kid（来不及更新的实例会暂时 401，这是预期）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { type: string, enum: [scheduled, compromise] }
+              required: [mode]
       responses:
         '202': { description: 已开始轮换 }
 
@@ -967,7 +1041,8 @@ components:
       name: userCode
       in: path
       required: true
-      schema: { type: string }
+      description: 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。
+      schema: { type: string, pattern: '^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$' }
   securitySchemes:
     bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
   schemas:
@@ -988,8 +1063,7 @@ components:
         providerId: { $ref: 'common.yaml#/components/schemas/Uuid' }
         purpose: { type: string, enum: [login, link, stepup], default: login }
         invitationCode: { type: string }
-        returnTo: { type: string, format: uri-reference, description: 完成后回到哪里；只接受本平台的相对路径。 }
-        audience: { type: string, enum: [portal, admin], default: portal, description: 会话发给门户还是管理台。 }
+        returnTo: { type: string, pattern: '^/(?![/\\])[^\s]*$', description: 完成后回到哪里；只接受本平台的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化。会话发给门户还是管理台由 edge 按 Host 决定。 }
       required: [providerId]
     LoginTransaction:
       type: object
@@ -1019,9 +1093,8 @@ components:
             location: { type: string, description: 按 IP 粗略推断的位置，可能为空。 }
           required: [ip]
         purpose: { type: string, enum: [login, link, stepup] }
-        matchCandidates: { type: array, items: { type: string, pattern: '^[0-9]{2}$' }, minItems: 3, maxItems: 3 }
         expiresAt: { type: string, format: date-time }
-      required: [challengeId, initiator, purpose, matchCandidates, expiresAt]
+      required: [challengeId, initiator, purpose, expiresAt]
     Me:
       type: object
       properties:
@@ -1131,8 +1204,10 @@ components:
             platform: { type: string }
             clientVersion: { type: string }
             ip: { type: string }
+            location: { type: string, description: 按 IP 粗略推断的位置，可能为空。 }
+          required: [ip]
         expiresAt: { type: string, format: date-time }
-      required: [userCode, clientId, clientName, scopes, expiresAt]
+      required: [userCode, clientId, clientName, scopes, device, expiresAt]
     ConnectorType:
       type: object
       properties:
@@ -1146,19 +1221,22 @@ components:
       description: 身份源实例的准入策略（身份源设计第六节）。
       properties:
         mode: { type: string, enum: [invite_only, auto_provision, linked_only], default: invite_only }
+        trustExternalMfa: { type: boolean, default: false, description: 是否信任连接器上报的 mfaPerformed；false 时平台按 mfa 设置自己补验证。 }
         autoProvisionRules:
           type: array
-          description: mode=auto_provision 时，外部属性满足任一规则即自动开通。
+          description: mode=auto_provision 时，外部属性满足任一规则即自动开通。规则用到 email 时，ExternalProfile.emailVerified 不为 true 一律不匹配。
           items:
             type: object
             properties:
               attribute: { type: string, description: '外部属性路径，例如 `email`、`organization.department`、`attributes.groups`。' }
               operator: { type: string, enum: [equals, suffix, prefix, in, contains] }
               value: { oneOf: [{ type: string }, { type: array, items: { type: string } }] }
+              requireVerified: { type: boolean, default: true, description: attribute 有对应的"已验证"标记时（例如 email ↔ emailVerified），要求已验证。 }
             required: [attribute, operator, value]
         defaultMemberType: { type: string, enum: [member, external], default: member }
         attributeMapping:
           type: array
+          description: 映射到组时，保存配置前检查组的有效权限是否在操作者权限之内（超管上限，org.grant_exceeds_own）。
           items:
             type: object
             properties:
@@ -1222,16 +1300,15 @@ components:
       properties:
         name: { type: string, maxLength: 64 }
         description: { type: string, maxLength: 500 }
-        roleIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' }, description: 角色在 org 管理；授予时同样受"不超过自己的权限"限制。 }
         enabled: { type: boolean, default: true }
       required: [name]
+      description: 服务账号的角色在 org 用角色绑定管理（subject.type=service_account），这里不重复保存。
     ServiceAccount:
       type: object
       properties:
         id: { $ref: 'common.yaml#/components/schemas/Uuid' }
         name: { type: string }
         description: { type: string }
-        roleIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
         enabled: { type: boolean }
         clientId: { type: string }
         secrets:
@@ -1245,4 +1322,4 @@ components:
               lastUsedAt: { type: string, format: date-time }
             required: [secretId, createdAt]
         createdAt: { type: string, format: date-time }
-      required: [id, name, roleIds, enabled, clientId, secrets, createdAt]
+      required: [id, name, enabled, clientId, secrets, createdAt]

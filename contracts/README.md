@@ -23,6 +23,7 @@
 - **主版本**写在路径里：REST 是 `/api/<服务>/v1`，protobuf 包是 `auriga.<域>.v1`，插件协议是 `Auriga-Protocol: 1`，事件用信封的 `dataversion`。
 - 一个主版本内**只做兼容修改**：加可选字段、加接口、加枚举值、加事件类型。不能删字段、改字段含义或类型、把可选改成必填、改 URL。
 - 客户端必须忽略不认识的字段和枚举值（枚举值未知时按"未知"处理，不报错）。
+- JSON Schema 里的 `additionalProperties: false` 只给**生产方**自测用（防止写错字段名）；消费方（服务、edge、插件、连接器）校验收到的数据时必须放宽为允许额外字段，否则以后加字段就成了不兼容修改。
 - 不兼容的修改要开新主版本，旧版本至少保留一个发布周期。插件协议例外：平台同时支持当前和上一个主版本（用户电脑上的插件升级慢）。
 - CI 检查：`buf lint`、`buf breaking`（FILE 级）、OpenAPI lint 和 diff、JSON Schema 校验。
 
@@ -45,18 +46,20 @@
 
 | 调用方 | 凭据 | 说明 |
 |---|---|---|
-| 浏览器（门户） | cookie `auriga_session` | 不透明随机值；HttpOnly，SameSite=Lax，有 TLS 时 Secure |
-| 浏览器（管理台，独立源） | cookie `auriga_admin_session` | 同上，只在管理台的源上下发 |
-| 浏览器的写请求 | cookie `auriga_csrf` + 请求头 `X-Auriga-CSRF` | `POST` / `PUT` / `PATCH` / `DELETE` 时 edge 检查：请求头等于 cookie，且它的 SHA-256 等于会话记录里的 `csrfHash`（见 `kv/session.schema.json`） |
+| 浏览器（门户） | cookie `__Host-auriga_session` | 不透明随机值；HttpOnly，Secure，SameSite=Lax，Path=/，不带 Domain。纯 HTTP 部署（只有 IP、没有 TLS）浏览器不接受 `__Host-` 前缀，退回名字 `auriga_session`（不带 Secure），由 edge 配置决定；服务看不到 cookie |
+| 浏览器（管理台，独立源） | cookie `__Host-auriga_admin_session` | 同上，只在管理台的源上下发。会话发给门户还是管理台由 edge **按请求的 Host** 决定，不接受客户端指定 |
+| 浏览器的写请求 | cookie `__Host-auriga_csrf` + 请求头 `X-Auriga-CSRF` | `POST` / `PUT` / `PATCH` / `DELETE` 时 edge 检查：请求头等于 cookie，且它的 SHA-256 等于会话记录里的 `csrfHash`（见 `kv/session.schema.json`） |
 | edge → 业务服务 | `Authorization: Bearer <访问令牌>` | edge 校验会话后换成 iam 签发的访问令牌（JWT，5 分钟，见 `auth/access-token.schema.json`）。业务服务只认 Bearer，不认 cookie |
-| 服务账号、外部系统 | OAuth 2.0 client credentials 换到的访问令牌 | `ptyp=service_account` |
+| 服务账号、外部系统 | OAuth 2.0 client credentials 换到的访问令牌 | `ptyp=service_account`、`ctx=service`；角色由 org 的角色绑定管理 |
 | 服务 → 服务（gRPC） | 元数据 `authorization: Bearer <服务令牌>` | 合并部署时是本地调用，不经过网络；分开部署时另加 mTLS |
 | DSH 实例 → 平台 | `Authorization: Bearer ait_…`（实例令牌） | 不透明，每实例一个，可吊销；edge 原样转给 workspace 校验 |
 | 平台 → DSH 实例 | 请求头 `Auriga-Identity`（edge 签名的身份头） | 见 `plugin/README.md` |
-| 用户电脑上的插件 | 设备凭据：设备授权流程（RFC 8628）换到的刷新令牌 | 访问令牌 `ptyp=device`、带 `did`；见 `plugin/README.md` |
+| 用户电脑上的插件 | 设备凭据：设备授权流程（RFC 8628）换到的刷新令牌 | 访问令牌 `ptyp=device`、`ctx=device`、带 `did`，权限只限 `auriga.connect` 范围；调 ai-gateway 时另换 `aud=auriga.ai-gateway` 的令牌。见 `plugin/README.md` |
+| 节点代理、edge、workspace 之间 | 证书 URI SAN | 内置 CA 签发的证书用 SAN 区分身份：`auriga://node/<id>`、`auriga://edge/<id>`、`auriga://workspace`。节点代理的 ingress 只接受 edge 的 SAN；workspace 以证书 SAN 为准认定节点 id |
 | 节点代理 | 节点证书（mTLS） | 入网时用一次性令牌换取，见 `proto/auriga/node/v1/enrollment.proto` |
 
-- 访问令牌签名算法 ES256，iam 在 `/.well-known/openid-configuration` 和 `/oauth2/jwks` 发布公钥；服务自行校验，不回调 iam。
+- 访问令牌按 RFC 9068：JOSE 头 `typ: at+jwt`，ES256；iam 在 `/.well-known/openid-configuration` 和 `/oauth2/jwks` 发布公钥；服务自行校验 typ、iss、aud、exp，不回调 iam。发给第三方 OIDC 客户端的令牌 `aud` 只有客户端 id，平台服务拒绝。
+- 访问令牌的 `ctx` 区分来源（portal / admin / device / service）。OpenAPI 里所有 `/admin/**` 操作都标了 `x-admin-only: true`，只接受 `ctx=admin`，由 common 库统一检查；"近期做过二次验证"用令牌的 `stepup_time` 判断（默认 10 分钟）。
 - 身份头用 Ed25519（EdDSA），密钥由 iam 管理、edge 签名、节点代理把公钥写进实例。
 - OIDC 和 OAuth 2.0 的标准端点（`/oauth2/authorize`、`/oauth2/token`、`/oauth2/device_authorization`、`/oauth2/jwks`、`/userinfo`、`/.well-known/openid-configuration`）由 iam 提供，按标准实现，不在 OpenAPI 里重复定义。
 - 租户：令牌里的 `tid` 决定租户。登录前按访问的主机名解析租户（org `TenantService.ResolveTenantByHost`），私有部署只有一个默认租户。
@@ -72,7 +75,9 @@
 | `/panel/` | 团队面板静态文件（见 `plugin/README.md`） |
 | 其他 | 门户 / 管理台静态文件 |
 
-管理台用独立的源（例如 `admin.example.com`），`/api/*/v1/admin/**` 只接受管理台源上的会话。
+管理台用独立的源（例如 `admin.example.com`），`/api/*/v1/admin/**` 只接受管理台源上的会话（edge 检查）和 `ctx=admin` 的令牌（服务检查）。
+
+单机安装、在 localhost 访问时，平台对 loopback 来源**不返回** `Access-Control-Allow-Credentials`，只放行带设备 Bearer 令牌的跨源请求。
 
 ## NATS
 
