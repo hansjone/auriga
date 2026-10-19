@@ -171,7 +171,7 @@ func (s *Server) readFile(w http.ResponseWriter, r *http.Request, root, rel stri
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil {
 		return err
@@ -203,7 +203,7 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request, root, rel str
 			return err
 		}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := io.Copy(f, r.Body); err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func (s *Server) zipTree(w http.ResponseWriter, root, rel string) error {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="export.zip"`)
 	zw := zip.NewWriter(w)
-	defer zw.Close()
+	defer func() { _ = zw.Close() }()
 	return filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err

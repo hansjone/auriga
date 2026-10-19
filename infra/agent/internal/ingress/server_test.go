@@ -125,30 +125,32 @@ func startTestIngress(t *testing.T, reg *MapRegistry, tickets *TicketVerifier, i
 	go func() { _ = srv.ServeTLSForTest(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
 
+	edge := edgeCert
+	clientTLS := &tls.Config{
+		Certificates:       []tls.Certificate{edge},
+		RootCAs:            pool,
+		ServerName:         "localhost",
+		InsecureSkipVerify: true, // gitleaks:allow — per-test self-signed CA
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return &edge, nil
+		},
+	}
 	// Wait until accept works.
-	deadline := time.Now().Add(3 * time.Second)
+	ready := false
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{
-			Certificates:       []tls.Certificate{edgeCert},
-			RootCAs:            pool,
-			InsecureSkipVerify: true, // gitleaks:allow — test only, pin via RootCAs of self-signed
-		})
+		c, err := tls.Dial("tcp", ln.Addr().String(), clientTLS.Clone())
 		if err == nil {
 			_ = c.Close()
+			ready = true
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-
-	edge := edgeCert // capture for callback
-	tlsCfg := &tls.Config{
-		RootCAs:    pool,
-		ServerName: "localhost",
-		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			return &edge, nil
-		},
-		InsecureSkipVerify: true, // gitleaks:allow — per-test self-signed CA
+	if !ready {
+		t.Fatal("ingress TLS not ready")
 	}
+	tlsCfg := clientTLS
 	base := "https://" + ln.Addr().String()
 	client := &http.Client{
 		Transport: roundTripBase{
@@ -177,7 +179,6 @@ func (r roundTripBase) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestMTLS_RejectsNonEdge(t *testing.T) {
-	t.Parallel()
 	ca := newTestCA(t)
 	nodeCert, _ := ca.issue(t, "node", "auriga://node/n1", false, true)
 	otherCert, _ := ca.issue(t, "other", "auriga://node/other", true, false)
@@ -209,7 +210,6 @@ func TestMTLS_RejectsNonEdge(t *testing.T) {
 }
 
 func TestProxy_StripsForgedIdentity(t *testing.T) {
-	t.Parallel()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +262,6 @@ func TestProxy_StripsForgedIdentity(t *testing.T) {
 }
 
 func TestFiles_TicketAndPathEscape(t *testing.T) {
-	t.Parallel()
 	priv, pub, kid := testTicketKeys(t)
 	fixed := time.Now()
 	v := &TicketVerifier{Keys: map[string]ed25519.PublicKey{kid: pub}, Now: func() time.Time { return fixed }}
@@ -306,7 +305,7 @@ func TestFiles_TicketAndPathEscape(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(resp.Body)
 		var p Problem
 		_ = json.Unmarshal(body, &p)
@@ -349,7 +348,7 @@ func TestFiles_TicketAndPathEscape(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		var pe Problem
 		_ = json.Unmarshal(bodyBytes, &pe)
@@ -360,7 +359,6 @@ func TestFiles_TicketAndPathEscape(t *testing.T) {
 }
 
 func TestLogs_Tail(t *testing.T) {
-	t.Parallel()
 	root := t.TempDir()
 	logPath := filepath.Join(root, "out.log")
 	if err := os.WriteFile(logPath, []byte("line1\nline2\n"), 0o600); err != nil {
@@ -372,7 +370,7 @@ func TestLogs_Tail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(b), "line2") {
 		t.Fatalf("got %q", b)
@@ -380,14 +378,13 @@ func TestLogs_Tail(t *testing.T) {
 }
 
 func TestMetrics(t *testing.T) {
-	t.Parallel()
 	reg := NewMapRegistry()
 	_, client, _ := startTestIngress(t, reg, &TicketVerifier{Keys: map[string]ed25519.PublicKey{}}, nil)
 	resp, err := client.Get("/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(b), "auriga_agent_ingress_requests_total") {
 		t.Fatalf("metrics: %s", b)
@@ -402,7 +399,7 @@ func TestRollingWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	for i := 0; i < 10; i++ {
 		if _, err := fmt.Fprintf(w, "xxxxxxxxxxxxxxxx"); err != nil {
 			t.Fatal(err)

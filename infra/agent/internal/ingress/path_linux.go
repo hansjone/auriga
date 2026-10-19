@@ -27,7 +27,7 @@ func OpenBeneath(root, rel string, flags int, mode os.FileMode) (*os.File, error
 	if err != nil {
 		return nil, fmt.Errorf("%s: open root: %w", CodePathInvalid, err)
 	}
-	defer unix.Close(dirfd)
+	defer func() { _ = unix.Close(dirfd) }()
 
 	how := &unix.OpenHow{
 		Flags:   uint64(flags) | unix.O_CLOEXEC,
@@ -58,7 +58,7 @@ func openBeneathWalk(rootFD int, absRoot, clean string, flags int, mode os.FileM
 	owned := false
 	defer func() {
 		if owned && cur != rootFD {
-			unix.Close(cur)
+			_ = unix.Close(cur)
 		}
 	}()
 	for i, p := range parts {
@@ -74,7 +74,7 @@ func openBeneathWalk(rootFD int, absRoot, clean string, flags int, mode os.FileM
 			return nil, fmt.Errorf("%s: openat walk: %w", CodePathEscape, err)
 		}
 		if owned && cur != rootFD {
-			unix.Close(cur)
+			_ = unix.Close(cur)
 		}
 		cur = fd
 		owned = true

@@ -31,16 +31,16 @@ func (c CgroupCollector) CollectNode() (NodeResources, error) {
 	if err != nil {
 		return out, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var totalKB, availKB int64
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.HasPrefix(line, "MemTotal:") {
-			fmt.Sscanf(line, "MemTotal: %d", &totalKB)
+			_, _ = fmt.Sscanf(line, "MemTotal: %d", &totalKB)
 		}
 		if strings.HasPrefix(line, "MemAvailable:") {
-			fmt.Sscanf(line, "MemAvailable: %d", &availKB)
+			_, _ = fmt.Sscanf(line, "MemAvailable: %d", &availKB)
 		}
 	}
 	if totalKB > 0 {
@@ -64,7 +64,7 @@ func (c CgroupCollector) CollectInstance(t InstanceTarget) (InstanceResources, e
 		for _, line := range strings.Split(string(b), "\n") {
 			if strings.HasPrefix(line, "usage_usec ") {
 				var usec int64
-				fmt.Sscanf(line, "usage_usec %d", &usec)
+				_, _ = fmt.Sscanf(line, "usage_usec %d", &usec)
 				out.CPUMillis = usec / 1000
 			}
 		}

@@ -71,10 +71,7 @@ func New(cfg Config) *Server {
 
 func (s *Server) withEdgeGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/metrics" {
-			// Metrics stay on the same listener but still require edge mTLS
-			// (TLS VerifyConnection already enforced). Allow through.
-		}
+		// All paths (including /metrics) require edge mTLS when TLS is used.
 		if r.TLS != nil && !requireEdgePeer(r) {
 			writeProblem(w, http.StatusUnauthorized, CodeUnauthorized, "Unauthorized", "edge client certificate required")
 			return
