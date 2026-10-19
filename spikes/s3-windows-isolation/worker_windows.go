@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -144,6 +145,7 @@ func worker(args []string) {
 		return
 	case "pids":
 		var children []*exec.Cmd
+		var childPIDs []uint32
 		defer func() {
 			for _, c := range children {
 				_ = c.Process.Kill()
@@ -152,13 +154,22 @@ func worker(args []string) {
 		}()
 		for i := 0; i < 12; i++ {
 			c := exec.Command(os.Args[0], "_work", out+"-"+strconv.Itoa(i), "sleep")
+			if len(a) == 0 || a[0] != "inherit-console" {
+				c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+			}
 			if e := c.Start(); e != nil {
 				result["spawnError"] = e.Error()
+				var code syscall.Errno
+				if errors.As(e, &code) {
+					result["spawnWin32Error"] = uint32(code)
+				}
 				break
 			}
 			children = append(children, c)
+			childPIDs = append(childPIDs, uint32(c.Process.Pid))
 		}
 		result["childrenStarted"] = len(children)
+		result["childPIDs"] = childPIDs
 		_ = writeJSON(out, result)
 		time.Sleep(10 * time.Second)
 		return
@@ -180,12 +191,19 @@ func identityExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	r.check("batch_logon_primary_token", u.User.Sid.String() == f.sid.String(), u.User.Sid.String())
-	for _, kind := range []uint32{2, 10} {
+	for _, kind := range []uint32{2} {
 		t, le := logon(f.Name, f.password, kind)
 		if t != 0 {
 			_ = t.Close()
 		}
 		r.check(fmt.Sprintf("deny_logon_type_%d", kind), le != nil && containsError(le, windows.ERROR_LOGON_TYPE_NOT_GRANTED), errorString(le))
+	}
+	rights, re := accountRightNames(f.sid)
+	if re != nil {
+		return re
+	}
+	for _, name := range []string{"SeBatchLogonRight", "SeDenyInteractiveLogonRight", "SeDenyRemoteInteractiveLogonRight"} {
+		r.check("LSA_"+name, slices.Contains(rights, name), rights)
 	}
 	data, e := runWork(f, "identity")
 	if e != nil {
@@ -255,7 +273,7 @@ func jobExperiment(o options, r *Result) (err error) {
 	}
 	defer func() { err = join(err, f.close()) }()
 	// Each limit has its own job, so one failure cannot masquerade as another limit.
-	for _, kind := range []string{"memory", "cpu", "pids", "tree"} {
+	for _, kind := range []string{"memory", "cpu", "pids-console", "pids", "tree"} {
 		e = jobCase(f, r, kind)
 		if e != nil {
 			r.check(kind+"_setup", false, e.Error())
@@ -268,7 +286,7 @@ func jobCase(f *fixture, r *Result, kind string) error {
 	if kind == "memory" {
 		memory = 96 << 20
 	}
-	if kind == "pids" {
+	if kind == "pids" || kind == "pids-console" {
 		pids = 4
 	}
 	if kind == "cpu" {
@@ -283,6 +301,9 @@ func jobCase(f *fixture, r *Result, kind string) error {
 	out := filepath.Join(f.Dir, kind+".json")
 	exe := probePath(f.o)
 	args := []string{"_work", out, kind}
+	if kind == "pids-console" {
+		args = []string{"_work", out, "pids", "inherit-console"}
+	}
 	if kind == "tree" {
 		exe = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
 		node := filepath.Join(f.o.Root, "tools", "node.exe")
@@ -316,21 +337,50 @@ func jobCase(f *fixture, r *Result, kind string) error {
 		elapsed := time.Since(start).Seconds()
 		fraction := float64(a.User+a.Kernel) / 1e7 / elapsed / float64(runtime.NumCPU())
 		r.check("cpu_hard_cap_10_percent", we == nil && ae == nil && fraction > 0.015 && fraction < 0.18, map[string]any{"hostFraction": fraction, "wallSeconds": elapsed, "logicalCPUs": runtime.NumCPU(), "accounting": a, "error": errorString(join(we, ae))})
-	case "pids":
+	case "pids", "pids-console":
 		if e = awaitFile(out, 10*time.Second); e != nil {
 			return e
 		}
-		var data map[string]any
+		var data struct {
+			ChildrenStarted uint32   `json:"childrenStarted"`
+			ChildPIDs       []uint32 `json:"childPIDs"`
+			SpawnWin32Error uint32   `json:"spawnWin32Error"`
+			SpawnError      string   `json:"spawnError"`
+		}
 		if e = readJSON(out, &data); e != nil {
 			return e
 		}
-		ids, e := jobPIDs(h)
-		if e != nil {
+		var limits windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+		if e = windows.QueryInformationJobObject(h, 9, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits)), nil); e != nil {
 			return e
 		}
-		count, _ := data["childrenStarted"].(float64)
-		_, denied := data["spawnError"]
-		r.check("active_process_limit_4", count == 3 && denied && len(ids) <= 4, map[string]any{"worker": data, "jobPIDs": ids})
+		var samples []processLimitSample
+		ok := false
+		until := time.Now().Add(2 * time.Second)
+		for {
+			ids, pe := jobPIDs(h)
+			if pe != nil {
+				return pe
+			}
+			a, ae := jobAccounting(h)
+			if ae != nil {
+				return ae
+			}
+			sample := processLimitSample{RawPIDs: ids, Active: a.Active, Processes: inspectProcesses(ids)}
+			samples = append(samples, sample)
+			ok = processLimitSatisfied(limits.BasicLimitInformation.ActiveProcessLimit, p.ProcessId, data.ChildPIDs, data.SpawnWin32Error, sample) && data.ChildrenStarted == uint32(len(data.ChildPIDs))
+			if ok || time.Now().After(until) {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		evidence := map[string]any{"worker": data, "configuredLimit": limits.BasicLimitInformation.ActiveProcessLimit, "samples": samples, "consolePolicy": "CREATE_NO_WINDOW for every workload child; no process name is exempt from the limit"}
+		if kind == "pids-console" {
+			evidence["consolePolicy"] = "original default console behavior, diagnostic comparison only"
+			r.observe("original_console_process_limit_diagnostics", evidence)
+		} else {
+			r.check("active_process_limit_4", ok && limits.BasicLimitInformation.ActiveProcessLimit == 4, evidence)
+		}
 	case "tree":
 		if e = awaitFile(out, 10*time.Second); e != nil {
 			return e

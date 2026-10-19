@@ -121,6 +121,10 @@ func cleanupExperiment(o options, r *Result) error {
 					present, fe := filterPresent(h, g)
 					r.check("filter_absent_"+key, fe == nil && !present, errorString(fe))
 				}
+				for _, kind := range []string{"SubLayer", "Provider"} {
+					owned, oe := wfpOwnedObjects(h, kind, "Auriga S3 "+j.Name)
+					r.check("WFP_"+kind+"_namespace_empty_"+j.Name, oe == nil && len(owned) == 0, map[string]any{"keys": owned, "error": errorString(oe), "policy": "built-in sublayer reused; no private provider created"})
+				}
 				closeEngine(h)
 			}
 		}
@@ -172,8 +176,32 @@ func rightsAbsent(sidString string) error {
 		}
 		return fmt.Errorf("remaining LSA rights: %d", count)
 	}
-	if v == 0xc0000034 {
+	if status32(v) == 0xc0000034 {
 		return nil
 	}
 	return fmt.Errorf("LsaEnumerateAccountRights: 0x%x", v)
+}
+func accountRightNames(sid *windows.SID) ([]string, error) {
+	var h uintptr
+	oa := lsaObject{}
+	oa.Length = uint32(unsafe.Sizeof(oa))
+	if e := statusCall(adv.NewProc("LsaOpenPolicy"), 0, uintptr(unsafe.Pointer(&oa)), 0x800, uintptr(unsafe.Pointer(&h))); e != nil {
+		return nil, e
+	}
+	defer adv.NewProc("LsaClose").Call(h)
+	var rights *lsaString
+	var count uint32
+	v, _, _ := adv.NewProc("LsaEnumerateAccountRights").Call(h, uintptr(unsafe.Pointer(sid)), uintptr(unsafe.Pointer(&rights)), uintptr(unsafe.Pointer(&count)))
+	if status32(v) == 0xc0000034 {
+		return nil, nil
+	}
+	if v != 0 {
+		return nil, fmt.Errorf("LsaEnumerateAccountRights: 0x%08x", status32(v))
+	}
+	defer adv.NewProc("LsaFreeMemory").Call(uintptr(unsafe.Pointer(rights)))
+	names := make([]string, 0, count)
+	for _, right := range unsafe.Slice(rights, int(count)) {
+		names = append(names, windows.UTF16ToString(unsafe.Slice(right.Buffer, int(right.Length)/2)))
+	}
+	return names, nil
 }

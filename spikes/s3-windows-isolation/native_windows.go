@@ -26,11 +26,14 @@ var userenv = windows.NewLazySystemDLL("userenv.dll")
 
 func u16(s string) *uint16 { return windows.StringToUTF16Ptr(s) }
 
+// Windows DWORD/HRESULT/NTSTATUS returns are 32-bit even when an x64 thunk sign-extends RAX.
+func status32(v uintptr) uint32 { return uint32(v) }
+
 //go:uintptrescapes
 func statusCall(p *windows.LazyProc, args ...uintptr) error {
 	v, _, _ := p.Call(args...)
 	if v != 0 {
-		return fmt.Errorf("%s: 0x%08x", p.Name, v)
+		return fmt.Errorf("%s: 0x%08x", p.Name, status32(v))
 	}
 	return nil
 }
@@ -216,7 +219,7 @@ func accountRights(sid *windows.SID, names []string, remove bool) error {
 	defer adv.NewProc("LsaClose").Call(h)
 	if remove {
 		v, _, _ := adv.NewProc("LsaRemoveAccountRights").Call(h, uintptr(unsafe.Pointer(sid)), 1, 0, 0)
-		if v == 0 || v == 0xc0000034 {
+		if status32(v) == 0 || status32(v) == 0xc0000034 {
 			return nil
 		}
 		return fmt.Errorf("LsaRemoveAccountRights: 0x%x", v)

@@ -2,6 +2,18 @@
 
 这是独立技术原型，不接入生产驱动，不进主分支。真实实验结果由 GitHub Actions 的一次性 Windows VM 产生；本机的编译通过不代表隔离通过。
 
+## 第二轮修复（2026-10-19）
+
+第一轮已在 Server 2025（build 26100）和 Server 2022（build 20348）运行，Node 均为 v22.23.3。以下改动针对第一轮证据，修复后的特权行为仍需主控重新跑 CI：
+
+- WFP 将返回值收窄为 DWORD，兼容 `0xffffffff80320003` 的符号扩展；该码表示过滤器不存在。删除后立即再查过滤器，总清理还枚举本次显示名前缀的子层/提供者。原型使用内置默认子层且不创建私有提供者，不删除共享对象。
+- 进程数保留原控制台行为的诊断对照，再用 `CREATE_NO_WINDOW` 负载作严格判定。证据包含每个 PID 的镜像名、是否存活、查询错误、Job 活动计数及创建失败码。原始列表长度不等于活动进程数，活着的 conhost 没有名称豁免。第一轮只有 PID 数字，无法事后确认额外进程的身份；第二轮的对照证据用于区分 conhost 和已终止的拒绝创建进程。
+- RDP 禁止策略改查账号 LSA 权限。`LogonUser` 只用支持的交互类型 2 作拒绝验证，不再传入类型 10；策略存在不能替代真实 RDP 会话的端到端测试。
+- 配额 ACL 通过卷 GUID 作用于真实卷根及专用数据目录，避免只修改宿主挂载点的重解析项。写入基线必须成功才配置配额；文件已不存在时清理成功。
+- AppContainer 使用 `CreateEnvironmentBlock(..., FALSE)` 提取必要系统/profile 字段，过滤任意父进程环境及凭据，补全 `LOCALAPPDATA`，排序并验证 Unicode 双零环境块。profile 由 SYSTEM 创建，其基础路径来自 SYSTEM 原生环境；底层实例 token 不变。每种配置附带环境键及启动阶段诊断，仍须 CI 确认该组合可正常创建 LowBox。
+
+第一轮 Server 2022 的内存实验还出现一次超时（已触碰 44 MiB、峰值提交约 96.9 MiB），不能称为两个 OS 的内存测试都通过。第二轮保留原内存负载及判据，须一并复核，不因其他修复掩盖该结果。
+
 ## 本机允许的操作
 
 在本 worktree 中进入本目录，仅运行：
@@ -49,17 +61,17 @@ go test -v ./...
 
 每项使用随机运行前缀、本地账号、单独的专用本地组。口令含 32 字节随机熵，仅存在进程内存和匿名 stdin 管道；不写文件、参数、环境或日志。LSA 对账号 SID 授予 `SeBatchLogonRight`，明确拒绝交互和 RDP 登录。
 
-必须证明：batch `LogonUser` 成功，交互类型 2、RDP 类型 10 返回 1385，`CreateProcessAsUser` 子进程实际 SID 正确，令牌无 Administrators、直接加入的本地组只有专用组。保留 `CreateProcessWithLogonW` 在同样拒绝策略下的比较结果和调用者特权列表。提升后的管理员缺少服务特权属于比较证据，不直接推断 SYSTEM 也不可用。
+必须证明：batch `LogonUser` 成功，交互类型 2 返回 1385，LSA 明确列出 `SeBatchLogonRight`、`SeDenyInteractiveLogonRight`、`SeDenyRemoteInteractiveLogonRight`；`CreateProcessAsUser` 子进程实际 SID 正确，令牌无 Administrators、直接加入的本地组只有专用组。保留 `CreateProcessWithLogonW` 在同样拒绝策略下的比较结果和调用者特权列表。提升后的管理员缺少服务特权属于比较证据，不直接推断 SYSTEM 也不可用。`LogonUser` 不支持远程交互类型 10，详见[支持的登录类型](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)。本轮未增加网络登录权策略。
 
 服务方案优先验证 `LogonUser(LOGON32_LOGON_BATCH)` + `CreateProcessAsUser`。后者通常要求调用者持有 `SeIncreaseQuotaPrivilege`，还可能要求 `SeAssignPrimaryTokenPrivilege`；SYSTEM 服务持有这些权限。`CreateProcessWithLogonW` 不要求这些调用者特权，但账号需要本地交互登录权限，且不能从 LocalSystem 调用，和本实验的禁止交互策略冲突。见 [CreateProcessAsUser](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw)、[CreateProcessWithLogonW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createprocesswithlogonw)。
 
 ### 2. Job Object
 
-四个独立 Job 分别测量，均先挂起创建、加入 Job、再恢复，禁止 breakaway：
+四类行为用独立 Job 分别测量，另加原控制台行为的诊断对照；均先挂起创建、加入 Job、再恢复，禁止 breakaway：
 
 - Job 总提交内存限制 96 MiB，Go 负载尝试分配并触碰 192 MiB，要求确实启动后非零退出；结合证据排查其他崩溃原因。
 - CPU 硬上限 1000/10000，所有逻辑 CPU 跑忙循环，读取 Job 用户态+内核态累计 CPU 时间，除以墙钟和逻辑核数。当前容差要求整机占比在 1.5%–18%，原始值全部保留；共享 VM 的调度噪声需要人工复核。
-- 活跃进程限制 4，父进程应只能派生 3 个存活子进程，再派生失败；Job PID 列表不能超过 4。
+- 活跃进程限制 4，先记录原控制台模式的 PID 诊断，再明确用无控制台方式启动 3 个存活子进程；第四个创建须返回 1816。Job 读回上限及活动计数须为 4、四个负载 PID 均在 Job 中且存活，不得出现额外活进程。原始列表可短暂带有已终止进程，需结合逐 PID 状态判断；活着的 conhost 同样计入。
 - `cmd → Node → Go` 三层 PID 都必须出现在 Job 中，`TerminateJobObject` 后等待预先打开的三个进程句柄全部进入结束状态，避免 PID 重用误判。
 
 参见 [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)、[CPU rate control](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_cpu_rate_control_information)。
@@ -86,13 +98,13 @@ go test -v ./...
 
 ### 6. NTFS 按用户配额
 
-用 diskpart 创建 128 MiB 临时可扩展 VHD，挂载到本次运行的子目录，格式化 NTFS。先由实例账号成功写入 32 MiB并删除，再在该临时卷执行 `fsutil quota enforce/modify`，为该账号设置 4 MiB 阈值与硬上限。再次以该账号写入，必须在 32 MiB之前得到磁盘满/配额相关 Win32 错误；权限拒绝不算配额有效。保留 quota query 输出。
+用 diskpart 创建 128 MiB 临时可扩展 VHD，挂载到本次运行的子目录，格式化 NTFS。通过卷 GUID 对卷根及 `probe-data` 设置 ACL，并记录数据目录实际 SDDL。先由实例账号成功写入 32 MiB并删除，再在该临时卷执行 `fsutil quota enforce/modify`，为该账号设置 4 MiB 阈值与硬上限；基线失败即停止，不能继续配置配额并作结论。再次以该账号写入，必须在 32 MiB之前得到磁盘满/配额相关 Win32 错误；权限拒绝不算配额有效。保留 quota query 输出。
 
 镜像不能创建/挂载 VHD 或配置配额时报告 `unsupported`。最后从独立存储查询确认 VHD 已卸载，再删除其文件；卷内配额索引随卷销毁。不修改系统卷。参见 [fsutil quota](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-quota)。
 
 ### 7. AppContainer
 
-底层仍用实例 batch token，叠加 `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`，实查子进程的用户 SID 和 `TokenIsAppContainer`。只对该 profile SID 授予专用 scratch 目录访问，并设置可继承 low integrity label，复制公开 Node 可执行文件。
+底层仍用实例 batch token，叠加 `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`，实查子进程的用户 SID 和 `TokenIsAppContainer`。只对该 profile SID 授予专用 scratch 目录访问，并设置可继承 low integrity label，复制公开 Node 可执行文件。启动前验证 Node 绝对路径存在；原生环境块先复制再 `DestroyEnvironmentBlock`，仅保留必要字段，包含 profile 解析所需的 `LOCALAPPDATA`/`USERPROFILE`。输出环境键及 Unicode/双零标记，不输出凭据或整个环境。参见 [CreateEnvironmentBlock](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-createenvironmentblock)、[AppContainer 的 profile 环境](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)。
 
 依次比较：无 capability；`internetClient` + `internetClientServer` + `privateNetworkClientServer`；增加 `CheckNetIsolation -a` 出站回环豁免；如果镜像支持，再在有界 Job 内启动 `CheckNetIsolation -is` 临时入站开发豁免。逐项测 Node 启动、`cmd /c` shell、`listen(0,'127.0.0.1')`、宿主连接和 AppContainer 反连宿主。监听与连接是两个独立观察；出站 `-a` 不等于宿主能连接入站监听。参见 [IPC 回环方向](https://learn.microsoft.com/en-us/windows/apps/develop/communication/interprocess-communication)、[SECURITY_CAPABILITIES](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-security_capabilities)。
 

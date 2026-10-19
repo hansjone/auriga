@@ -41,7 +41,7 @@ func exemptionState(name string) (bool, error) {
 
 func deleteProfile(name string) error {
 	v, _, _ := userenv.NewProc("DeleteAppContainerProfile").Call(uintptr(unsafe.Pointer(u16(name))))
-	if v == 0 || v == 0x80070002 {
+	if status32(v) == 0 || status32(v) == 0x80070002 {
 		return nil
 	}
 	return fmt.Errorf("DeleteAppContainerProfile: 0x%x", v)
@@ -71,12 +71,22 @@ func appLaunch(token windows.Token, exe string, args []string, dir string, sid *
 	si.Cb = uint32(unsafe.Sizeof(si))
 	si.ProcThreadAttributeList = attrs.List()
 	p := &process{}
-	env := minimalEnv(dir)
+	if !filepath.IsAbs(exe) {
+		return nil, fmt.Errorf("Node executable path must be absolute")
+	}
+	if _, e = os.Stat(exe); e != nil {
+		return nil, fmt.Errorf("Node executable: %w", e)
+	}
+	env, _, e := appEnvironment(token, dir)
+	if e != nil {
+		return nil, e
+	}
 	e = windows.CreateProcessAsUser(token, u16(exe), u16(windows.ComposeCommandLine(append([]string{exe}, args...))), nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NO_WINDOW, &env[0], u16(dir), &si.StartupInfo, &p.ProcessInformation)
 	runtime.KeepAlive(sc)
 	runtime.KeepAlive(caps)
+	runtime.KeepAlive(env)
 	if e != nil {
-		return nil, e
+		return nil, fmt.Errorf("CreateProcessAsUser(AppContainer, Unicode environment): %w", e)
 	}
 	if e = windows.AssignProcessToJobObject(job, p.Process); e != nil {
 		p.kill()
@@ -89,13 +99,6 @@ func appLaunch(token windows.Token, exe string, args []string, dir string, sid *
 		return nil, e
 	}
 	return p, nil
-}
-func minimalEnv(dir string) []uint16 {
-	var block []uint16
-	for _, v := range []string{"SystemRoot=" + os.Getenv("SystemRoot"), "WINDIR=" + os.Getenv("SystemRoot"), "PATH=" + filepath.Join(os.Getenv("SystemRoot"), "System32"), "TEMP=" + dir, "TMP=" + dir} {
-		block = append(block, windows.StringToUTF16(v)...)
-	}
-	return append(block, 0)
 }
 func appContainerExperiment(o options, r *Result) (err error) {
 	f, e := newFixture(o, "c")
@@ -162,6 +165,24 @@ setTimeout(()=>process.exit(),15000);save();`
 	if e = os.WriteFile(script, []byte(source), 0600); e != nil {
 		return e
 	}
+	// Establish that the copied executable and its ACL work for the same account before
+	// adding LowBox attributes, so a missing image/ordinary ACL failure is not misdiagnosed.
+	baselineJob, be := f.job(f.Job+"-node-baseline", 256<<20, 4, 0)
+	if be != nil {
+		return be
+	}
+	defer windows.CloseHandle(baselineJob)
+	baseline, bpe := launch(f.token, node, []string{"--version"}, appDir, baselineJob)
+	if bpe != nil {
+		return fmt.Errorf("Node plain-account baseline: %w", bpe)
+	}
+	code, bwe := baseline.wait(5 * time.Second)
+	baseline.kill()
+	baseline.close()
+	r.check("Node_plain_account_baseline", bwe == nil && code == 0, map[string]any{"exit": code, "error": errorString(bwe)})
+	if bwe != nil || code != 0 {
+		return fmt.Errorf("Node plain-account baseline failed")
+	}
 	host, e := listening("tcp4", "127.0.0.1:0")
 	if e != nil {
 		return e
@@ -219,6 +240,11 @@ setTimeout(()=>process.exit(),15000);save();`
 	return nil
 }
 func appCase(f *fixture, r *Result, name, node, script, dir, hostPort string, sid *windows.SID, caps []string) error {
+	_, metadata, ee := appEnvironment(f.token, dir)
+	if ee != nil {
+		return ee
+	}
+	r.observe(name+"_environment", metadata)
 	h, e := f.job(f.Job+"-"+name, 256<<20, 12, 0)
 	if e != nil {
 		return e

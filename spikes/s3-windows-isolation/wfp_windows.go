@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -101,10 +102,17 @@ func filterPresent(h windows.Handle, g windows.GUID) (bool, error) {
 		defer fw.NewProc("FwpmFreeMemory0").Call(uintptr(unsafe.Pointer(&p)))
 		return true, nil
 	}
-	if v == 0x80320003 {
+	return wfpPresence(v, 0x80320003, "FwpmFilterGetByKey0")
+}
+func wfpPresence(v uintptr, notFound uint32, operation string) (bool, error) {
+	code := status32(v)
+	if code == 0 {
+		return true, nil
+	}
+	if code == notFound {
 		return false, nil
 	}
-	return false, fmt.Errorf("FwpmFilterGetByKey0: 0x%x", v)
+	return false, fmt.Errorf("%s: 0x%08x", operation, code)
 }
 func removeFilters(keys []string) error {
 	h, e := engine(false)
@@ -120,11 +128,46 @@ func removeFilters(keys []string) error {
 			continue
 		}
 		v, _, _ := fw.NewProc("FwpmFilterDeleteByKey0").Call(uintptr(h), uintptr(unsafe.Pointer(&g)))
-		if v != 0 && v != 0x80320003 {
-			err = join(err, fmt.Errorf("delete WFP filter %s: 0x%x", k, v))
+		_, de := wfpPresence(v, 0x80320003, "FwpmFilterDeleteByKey0")
+		err = join(err, de)
+		present, qe := filterPresent(h, g)
+		err = join(err, qe)
+		if qe == nil && present {
+			err = join(err, fmt.Errorf("WFP filter still present after delete: %s", k))
 		}
 	}
 	return err
+}
+
+// The prototype uses the built-in default sublayer and no provider. Audit by our unique
+// display-name namespace; never delete shared Windows objects to make cleanup pass.
+func wfpOwnedObjects(h windows.Handle, kind, prefix string) ([]string, error) {
+	var enum windows.Handle
+	if e := statusCall(fw.NewProc("Fwpm"+kind+"CreateEnumHandle0"), uintptr(h), 0, uintptr(unsafe.Pointer(&enum))); e != nil {
+		return nil, e
+	}
+	defer fw.NewProc("Fwpm"+kind+"DestroyEnumHandle0").Call(uintptr(h), uintptr(enum))
+	var owned []string
+	for {
+		var entries **struct {
+			Key     windows.GUID
+			Display displayData
+		}
+		var count uint32
+		e := statusCall(fw.NewProc("Fwpm"+kind+"Enum0"), uintptr(h), uintptr(enum), 100, uintptr(unsafe.Pointer(&entries)), uintptr(unsafe.Pointer(&count)))
+		if e != nil {
+			return nil, e
+		}
+		for _, entry := range unsafe.Slice(entries, int(count)) {
+			if strings.HasPrefix(windows.UTF16PtrToString(entry.Display.Name), prefix) {
+				owned = append(owned, entry.Key.String())
+			}
+		}
+		fw.NewProc("FwpmFreeMemory0").Call(uintptr(unsafe.Pointer(&entries)))
+		if count < 100 {
+			return owned, nil
+		}
+	}
 }
 func addUserFilter(f *fixture, h windows.Handle, layer windows.GUID, allow bool, port uint16, persistent bool) (windows.GUID, error) {
 	key, e := windows.GenerateGUID()

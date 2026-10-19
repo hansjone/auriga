@@ -67,16 +67,34 @@ func quotaExperiment(o options, r *Result) (err error) {
 		return fmt.Errorf("refuse quota: temporary volume not independently identified (temporary=%q parent=%q system=%q): %w", tempGUID, parentGUID, systemGUID, join(join(ge, pe), join(pge, sge)))
 	}
 	r.check("temporary_NTFS_volume", true, map[string]any{"fileSystem": "NTFS", "serial": serial, "temporaryVolume": tempGUID, "parentVolume": parentGUID, "systemVolume": systemGUID})
-	if e = dacl(mount, instanceACL(f.sid.String())); e != nil {
+	// SetNamedSecurityInfo on the mount-point name can update the host reparse-point ACL.
+	// Address the mounted volume itself by GUID, then explicitly protect its data directory.
+	if e = dacl(tempGUID, instanceACL(f.sid.String())); e != nil {
 		return e
 	}
-	target := filepath.Join(mount, "large.bin")
+	dataDir := tempGUID + "probe-data"
+	if e = os.MkdirAll(dataDir, 0700); e != nil {
+		return e
+	}
+	if e = dacl(dataDir, instanceACL(f.sid.String())); e != nil {
+		return e
+	}
+	sd, se := windows.GetNamedSecurityInfo(dataDir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if se != nil {
+		return se
+	}
+	r.observe("quota_data_ACL", map[string]any{"sddl": sd.String(), "instanceSID": f.sid.String(), "volumeRoot": tempGUID})
+	target := filepath.Join(mount, "probe-data", "large.bin")
 	baseline, e := runWork(f, "write", target)
 	if e != nil {
 		return e
 	}
-	r.check("write_baseline_before_quota", baseline["denied"] == false && baseline["bytesWritten"] == float64(32<<20), baseline)
-	if e = os.Remove(target); e != nil {
+	baselineOK := baseline["denied"] == false && baseline["bytesWritten"] == float64(32<<20)
+	r.check("write_baseline_before_quota", baselineOK, baseline)
+	if !baselineOK {
+		return fmt.Errorf("quota baseline write failed; quota was not enabled: %v", baseline)
+	}
+	if e = removeExistingFile(target); e != nil {
 		return e
 	}
 	for _, args := range [][]string{{"quota", "enforce", mount + `\`}, {"quota", "modify", mount + `\`, "4194304", "4194304", f.Name}} {
@@ -99,6 +117,13 @@ func quotaExperiment(o options, r *Result) (err error) {
 	out, e = command("fsutil.exe", "quota", "query", mount+`\`)
 	r.observe("quota_query", map[string]any{"output": out, "error": errorString(e)})
 	return nil
+}
+func removeExistingFile(path string) error {
+	e := os.Remove(path)
+	if os.IsNotExist(e) {
+		return nil
+	}
+	return e
 }
 func volumeGUID(path string) (string, error) {
 	var name [windows.MAX_PATH]uint16
