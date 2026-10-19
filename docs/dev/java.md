@@ -29,7 +29,7 @@ Windows Wrapper 用 JDK 源文件启动下载器，让引导下载与 Maven 使�
 根 POM 直接聚合全部 Java 模块：
 
 - `services/contracts`：从根目录只读契约生成的 Java/gRPC 和 HTTP 类型。
-- `services/common`：公共基础设施占位，不能依赖服务。
+- `services/common`：租户、outbox 与事件、审计、错误、安全、gRPC、可观测等公共基础设施（见 `common.md`），不能依赖服务。
 - `services/{iam,org,workspace,resource,knowledge,collab,audit,ops}/{api,impl}`：
   每个服务的公开接口和实现，artifactId 如 `iam-api`、`iam-impl`。
 - `services/test-support`：嵌入式 PostgreSQL 17 的 JUnit 5/Spring 基座。

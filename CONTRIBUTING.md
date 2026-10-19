@@ -4,6 +4,8 @@ Thanks for your interest. The project is in early development; large changes sho
 
 ## Ground rules
 
+Read [docs/dev/conventions.md](docs/dev/conventions.md) (coding conventions, in Chinese) before writing code.
+
 - **Contracts first.** Interfaces between components live in [`contracts/`](contracts/README.md).
   Change the contract in the same pull request as the code, and keep changes backward compatible
   within a major version (CI runs `buf breaking` and an OpenAPI diff).
