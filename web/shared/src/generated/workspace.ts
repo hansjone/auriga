@@ -1093,7 +1093,7 @@ export interface operations {
         content: {
           'application/json': components['schemas']['JoinToken'] & {
             token: string;
-            /** @description 平台 CA 证书的 SHA-256 指纹（十六进制）。 */
+            /** @description 平台 CA 证书 SubjectPublicKeyInfo（DER）的 SHA-256，小写十六进制；与 enrollment.proto 的 --ca-sha256 一致。 */
             caSha256: string;
             /** @description 例如 `auriga-agent join --server https://… --token … --ca-sha256 …`。 */
             command: string;
