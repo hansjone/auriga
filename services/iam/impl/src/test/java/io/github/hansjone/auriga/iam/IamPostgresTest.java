@@ -38,8 +38,8 @@ class IamPostgresTest {
   void allBusinessTablesForceRlsAndRuntimeCannotDisableIt() {
     var tables =
         jdbc.queryForList(
-            "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam' AND relname IN ('account','idp_provider','identity','login_tx','session','session_kv','device','signing_key','emergency_account','oauth_grant','account_link_log','rate_limit')");
-    assertEquals(12, tables.size());
+            "SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam' AND relname IN ('account','idp_provider','identity','login_tx','session','session_kv','device','signing_key','emergency_account','oauth_grant','account_link_log','rate_limit','team_account','team_totp','team_passkey','team_ceremony','qr_challenge')");
+    assertEquals(17, tables.size());
     tables.forEach(
         t -> {
           assertEquals(true, t.get("relrowsecurity"));

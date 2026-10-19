@@ -3,7 +3,6 @@ package io.github.hansjone.auriga.iam;
 import io.github.hansjone.auriga.common.security.*;
 import io.github.hansjone.auriga.iam.web.model.CreateLoginTransaction;
 import jakarta.servlet.http.*;
-import java.time.*;
 import java.util.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -24,13 +23,22 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   private final RequestIdentity requests;
   private final IamStore store;
   private final SessionManager sessions;
+  private final QrChallenges qr;
+  private final Secrets secrets;
 
   public IamLoginController(
-      LoginManager login, RequestIdentity requests, IamStore store, SessionManager sessions) {
+      LoginManager login,
+      RequestIdentity requests,
+      IamStore store,
+      SessionManager sessions,
+      QrChallenges qr,
+      Secrets secrets) {
     this.login = login;
     this.requests = requests;
     this.store = store;
     this.sessions = sessions;
+    this.qr = qr;
+    this.secrets = secrets;
   }
 
   @GetMapping("/login/providers")
@@ -57,8 +65,26 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
                                         "order",
                                         p.path("display").path("order").asInt(100),
                                         "primaryStep",
-                                        "form"))
+                                        primaryStep(p)))
                             .toList())));
+  }
+
+  private String primaryStep(ObjectNode provider) {
+    if (!provider.path("connectorType").asString().equals("team-account")) return "form";
+    try {
+      ObjectNode cfg =
+          Json.read(
+              secrets.decrypt(
+                  provider.path("config").asString(),
+                  "provider:"
+                      + io.github.hansjone.auriga.common.context.TenantContext.require()
+                      + ":"
+                      + provider.path("providerId").asString()));
+      String step = cfg.path("primaryStep").asString("form");
+      return Set.of("form", "qr", "webauthn").contains(step) ? step : "form";
+    } catch (RuntimeException e) {
+      return "form";
+    }
   }
 
   @PostMapping("/login/transactions")
@@ -203,6 +229,57 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
               "not_found",
               404);
           sessions.revokeOne(row, "user");
+          return null;
+        });
+  }
+
+  @GetMapping("/login/qr/{challengeId}")
+  @AuthenticatedOnly
+  public ObjectNode qrChallenge(@PathVariable String challengeId) {
+    var principal = AuthorizationRules.currentPrincipal().orElseThrow();
+    return store.tx(
+        () -> {
+          ObjectNode view = qr.get(challengeId);
+          ObjectNode row = qr.row(challengeId, true);
+          String purpose = row.path("purpose").asString("login");
+          if (!purpose.equals("login"))
+            IamError.require(
+                principal.subject().equals(row.path("accountId").asString("")), "forbidden", 403);
+          qr.markScanned(challengeId, principal.subject());
+          return view;
+        });
+  }
+
+  @PostMapping("/login/qr/{challengeId}/confirm")
+  @AuthenticatedOnly
+  @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+  public void confirmQr(@PathVariable String challengeId, @RequestBody JsonNode body) {
+    var principal = AuthorizationRules.currentPrincipal().orElseThrow();
+    store.tx(
+        () -> {
+          ObjectNode row = qr.row(challengeId, true);
+          IamError.require(row != null, "not_found", 404);
+          String purposeAccount =
+              row.path("purpose").asString("login").equals("login")
+                  ? null
+                  : row.path("accountId").asString(null);
+          qr.confirm(
+              challengeId,
+              body.path("matchCode").asString(""),
+              principal.subject(),
+              purposeAccount);
+          return null;
+        });
+  }
+
+  @PostMapping("/login/qr/{challengeId}/reject")
+  @AuthenticatedOnly
+  @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+  public void rejectQr(@PathVariable String challengeId) {
+    var principal = AuthorizationRules.currentPrincipal().orElseThrow();
+    store.tx(
+        () -> {
+          qr.reject(challengeId, principal.subject());
           return null;
         });
   }

@@ -22,6 +22,7 @@ public final class LoginManager {
   private final ContractSchemas schemas;
   private final ConnectorRegistry connectors;
   private final EmergencyAccounts emergency;
+  private final TeamAccounts teamAccounts;
   private final SessionManager sessions;
   private final IdentityPolicyHooks hooks;
   private final EventPublisher events;
@@ -35,6 +36,7 @@ public final class LoginManager {
       ContractSchemas schemas,
       ConnectorRegistry connectors,
       EmergencyAccounts emergency,
+      TeamAccounts teamAccounts,
       SessionManager sessions,
       IdentityPolicyHooks hooks,
       EventPublisher events,
@@ -46,6 +48,7 @@ public final class LoginManager {
     this.schemas = schemas;
     this.connectors = connectors;
     this.emergency = emergency;
+    this.teamAccounts = teamAccounts;
     this.sessions = sessions;
     this.hooks = hooks;
     this.events = events;
@@ -109,6 +112,11 @@ public final class LoginManager {
           store.insert("login_tx", UuidV7.next().toString(), tx, clock.instant().plusSeconds(300));
           // Retrieval uses the generated transaction id, with no caller-controlled key.
           tx.put("txId", tx.path("id").asString());
+          if (provider.path("connectorType").asString().equals("team-account")
+              && !tx.path("invitationCode").asString("").isBlank()) {
+            tx.put("state", secrets.encrypt(Json.object("canRegister", true).toString(), aad(tx)));
+            store.save("login_tx", tx);
+          }
           Result applied;
           try {
             applied =
@@ -208,9 +216,10 @@ public final class LoginManager {
             return store.atomic(
                 () -> {
                   if (input.path("formId").asString("").equals("platform_totp")) {
+                    UUID pending = UUID.fromString(tx.path("pendingAccount").asString());
                     IamError.require(
-                        hooks.verifyMfa(
-                            UUID.fromString(tx.path("pendingAccount").asString()), input),
+                        teamAccounts.verifyMfaInput(pending, input)
+                            || hooks.verifyMfa(pending, input),
                         "invalid_credentials",
                         401);
                     return finish(
@@ -348,11 +357,17 @@ public final class LoginManager {
         account != null && account.path("status").asString().equals("active"),
         "account_disabled",
         403);
+    boolean team = provider.path("connectorType").asString().equals("team-account");
+    // Built-in team-account MFA (TOTP / Passkey / QR) is performed by the connector itself.
     boolean mfa =
         coreMfa
-            || policy.path("trustExternalMfa").asBoolean(false)
-                && profile.path("mfaPerformed").asBoolean();
-    if (!mfa && !policy.path("mfa").asString("new_device").equals("never")) {
+            || profile.path("mfaPerformed").asBoolean()
+                && (team || policy.path("trustExternalMfa").asBoolean(false));
+    boolean teamNeedsPlatformTotp = team && teamAccounts.hasTotp(UUID.fromString(accountId));
+    if (!mfa
+        && !policy.path("mfa").asString("new_device").equals("never")
+        && (!team || teamNeedsPlatformTotp)) {
+      // Team accounts without enrolled TOTP skip platform MFA (enroll via /me/mfa).
       tx.put("pendingAccount", accountId);
       tx.put("pendingProfile", secrets.encrypt(profile.toString(), aad(tx)));
       tx.set(
@@ -369,12 +384,18 @@ public final class LoginManager {
     }
     if (identity == null) {
       if (tx.path("newAccount").asBoolean() && store.get("account", accountId, false) == null) {
-        if (policy.path("mode").asString().equals("invite_only"))
-          IamError.require(
+        if (policy.path("mode").asString().equals("invite_only")) {
+          ObjectNode inviteProfile =
+              profile.isObject() ? ((ObjectNode) profile).deepCopy() : Json.object();
+          inviteProfile.put("accountId", accountId);
+          boolean redeemed =
               hooks.consumeInvitation(
-                  tx.path("invitationCode").asString(), UUID.fromString(pid), profile),
-              "admission_denied",
-              403);
+                  tx.path("invitationCode").asString(), UUID.fromString(pid), inviteProfile);
+          if (!redeemed) {
+            if (team) teamAccounts.abandonRegistration(pid, subject);
+            throw IamError.error("admission_denied", 403);
+          }
+        }
         store.insert("account", accountId, account, null);
       }
       identity =
