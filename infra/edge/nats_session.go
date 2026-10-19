@@ -23,12 +23,12 @@ const (
 // NATSSessionStore reads the auriga-sessions KV bucket and listens for
 // identity.session_revoked events to cancel long-lived connections.
 type NATSSessionStore struct {
-	mu         sync.RWMutex
-	nc         *nats.Conn
-	kv         jetstream.KeyValue
-	log        *slog.Logger
-	onRevoke   func(sessionID string)
-	cancel     context.CancelFunc
+	mu          sync.RWMutex
+	nc          *nats.Conn
+	kv          jetstream.KeyValue
+	log         *slog.Logger
+	onRevoke    func(sessionID string)
+	cancel      context.CancelFunc
 	revokeReady chan struct{}
 }
 
