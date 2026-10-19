@@ -19,4 +19,10 @@ func main() {
 	if err := cmd.Run(); err != nil {
 		panic(err)
 	}
+	// Proto comments are copied into generated code; normalise them so the gofmt check stays green.
+	fmt := exec.Command("gofmt", "-w", filepath.Join("gen", "auriga"))
+	fmt.Stdout, fmt.Stderr = os.Stdout, os.Stderr
+	if err := fmt.Run(); err != nil {
+		panic(err)
+	}
 }

@@ -14,7 +14,6 @@ option java_package = "io.github.hansjone.auriga.contracts.node.v1";
 //
 // - 节点身份以 mTLS 证书的 URI SAN（`auriga://node/<id>`）为准：Hello.node_id 与之不符时断开；
 //   节点上报的实例状态如果不属于该节点（workspace 没有把它调度到这里），一律忽略并告警。
-//
 // - 节点代理主动连接（单机走本机 socket / 命名管道，多机走 mTLS gRPC），工作节点不用开入站端口。
 // - 一个节点同时只有一个会话；同一节点建立新会话时 workspace 关闭旧会话。
 // - 节点代理连上后先发 Hello，再发全量 Inventory；workspace 回 Welcome 后开始下发。
