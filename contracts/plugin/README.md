@@ -10,7 +10,7 @@ DSH 插件 `auriga-dsh`（npm，MIT）和平台之间的约定。三种模式见
 
 ## 2. 身份头（平台 → 实例，托管模式）
 
-浏览器访问 `/i/<实例 id>/…` 时，edge 校验会话、确认会话账号是实例主人，然后经节点代理把请求转给实例，并加上身份头：
+浏览器访问实例地址（`https://<实例 id>.<实例域>/…`，只有 IP 的部署是 `/i/<实例 id>/…`，见 contracts/README.md 的路由一节）时，edge 校验实例 cookie 和对应的门户会话、确认会话账号是实例主人，然后经节点代理把请求转给实例，并加上身份头：
 
 ```
 Auriga-Identity: <JWS 紧凑格式>
@@ -18,14 +18,14 @@ Auriga-Identity: <JWS 紧凑格式>
 
 - JOSE 头：`{"alg":"EdDSA","kid":"<密钥编号>","typ":"auriga-id+jwt"}`，Ed25519 签名。
 - 声明见 `identity-token.schema.json`：`iss="auriga-edge"`、`aud=<实例 id>`、`sub=<账号 id>`、`tid`、`sid`、`iat`、`exp`（不超过 iat + 60 秒）、`jti`、`htm`、`htu`、`pv=1`。
-- edge 转发前**删除**客户端带来的 `Auriga-Identity`、`Authorization`，以及名字以 `auriga_` 开头的 cookie（平台会话不进实例）。
+- edge 转发前**删除**客户端带来的 `Auriga-Identity`、`Authorization`，以及名字含 `auriga_` 的 cookie（包括 `__Host-auriga_inst`，平台凭据不进实例）。
 
 插件（门锁）对每个 HTTP 请求和 WebSocket 升级请求必须：
 
 1. 按 `kid` 从身份头公钥文件里找公钥，验签；找不到 kid 时重新读一次文件再试；
 2. 检查 `aud` 等于本实例 id、`sub` 等于主人 id（`AURIGA_OWNER_ID`）、`pv` 是支持的版本；
 3. 检查 `iat`、`exp`，允许 5 秒时钟偏差；
-4. 检查 `htm` 等于请求方法、`htu` 等于请求路径。`htu` 的定义：节点代理转发给实例时请求行里的**原始** path——已去掉 `/i/<实例 id>` 前缀、不做百分号解码、不含查询串；
+4. 检查 `htm` 等于请求方法、`htu` 等于请求路径。`htu` 的定义：节点代理转发给实例时请求行里的**原始** path——同源模式下已去掉 `/i/<实例 id>` 前缀、不做百分号解码、不含查询串；
    `jti` 只用于日志关联，插件不要求去重（重放窗口由 `exp`、`aud`、`htm`、`htu` 限制）；
 5. 任一项不通过返回 401，不泄露原因细节；节点代理的健康检查路径 `/_auriga/health` 除外。
 

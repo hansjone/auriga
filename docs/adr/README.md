@@ -19,3 +19,4 @@
 | [0013](0013-external-systems.md) | 外部系统不并入平台，经 API 打通 | 已采纳 |
 | [0014](0014-communication-and-tokens.md) | 服务间通信和身份令牌 | 已采纳 |
 | [0015](0015-contracts-first.md) | 契约优先 | 已采纳 |
+| [0020](0020-instance-origin-isolation.md) | 实例使用独立的源 | 已采纳 |

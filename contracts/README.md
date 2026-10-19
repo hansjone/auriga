@@ -71,9 +71,15 @@
 | `/api/iam/v1/`、`/oauth2/`、`/.well-known/`、`/userinfo` | iam |
 | `/api/org/v1/` | org |
 | `/api/workspace/v1/` | workspace |
-| `/i/<实例 id>/` | 节点代理 ingress → DSH 实例（加身份头） |
+| `/open/<实例 id>` | edge：校验门户会话和主人，签一次性票据，302 到实例地址 |
 | `/panel/` | 团队面板静态文件（见 `plugin/README.md`） |
 | 其他 | 门户 / 管理台静态文件 |
+
+**实例用独立的源**（ADR 0020）：实例地址是 `https://<实例 id>.<实例域>/`（例如实例域 `i.example.com`，需要通配符 DNS 和通配符证书），edge 按 Host 把请求经节点代理 ingress 转给实例并加身份头。
+- 进入实例：门户打开 `/open/<实例 id>` → edge 校验门户会话、确认是主人 → 签一次性票据（60 秒、只能用一次、绑定会话 sid 和实例 id）→ 302 到 `https://<实例 id>.<实例域>/_auriga/ticket?t=<票据>` → edge 换成实例 cookie `__Host-auriga_inst`（HttpOnly、Secure、SameSite=Lax、只对这个实例的源有效，内容绑定 sid 和实例 id）→ 302 到 `/`。
+- edge 每次请求都检查实例 cookie 对应的门户会话仍然有效；会话吊销后实例 cookie 立即失效。实例来源的请求永远拿不到门户和管理台的 cookie。
+- 平台的 CORS **永不放行**实例来源；同站的写请求还要过 CSRF 检查（实例页面读不到门户源的 `__Host-auriga_csrf`）。
+- 只有 IP、没有域名的部署无法做子域：退回同源路径 `/i/<实例 id>/`，实例里的代码可以借用户的门户会话调非管理接口——这是已知的弱隔离，和 Windows 原生隔离一样只面向互相信任的团队，安装向导和文档里要写明。
 
 管理台用独立的源（例如 `admin.example.com`），`/api/*/v1/admin/**` 只接受管理台源上的会话（edge 检查）和 `ctx=admin` 的令牌（服务检查）。
 

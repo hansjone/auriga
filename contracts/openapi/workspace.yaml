@@ -5,7 +5,7 @@ info:
   description: |
     工作空间：每人的 DSH 实例（打开、启停、状态）、管理员的实例和节点管理、入网令牌，
     以及实例里的插件（实例令牌）和用户电脑上的插件（设备令牌）调用的接口。
-    浏览器打开实例的入口是 edge 上的实例地址（entryUrl）；本服务负责决定实例何时启动、停止。
+    浏览器打开实例的入口是 entryUrl（`/open/<实例 id>`，由 edge 换票后跳到实例自己的子域，见 contracts/README.md）；本服务负责决定实例何时启动、停止。
     **实例操作的授权**：`/instances/{instanceId}/**` 只允许实例主人，或有 workspace.instances.admin 权限的管理台会话；
     其他人一律返回 404（不泄露实例是否存在）。
   license:
@@ -505,7 +505,7 @@ components:
         lastActivityAt: { type: string, format: date-time }
         idleStopAt: { type: string, format: date-time, description: 按当前闲置状态预计的回收时间。 }
         nextWakeAt: { type: string, format: date-time }
-        entryUrl: { type: string, description: '浏览器入口，形如 `/i/<实例 id>/`。' }
+        entryUrl: { type: string, description: '浏览器入口：门户上的 `/open/<实例 id>`（edge 换票后跳到实例子域；只有 IP 的部署直接是 `/i/<实例 id>/`）。' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
       required: [id, tenantId, ownerId, name, runtime, desired, phase, ready, generation, observedGeneration, pendingRestart, alwaysOn, dshVersion, resources, node, error, entryUrl, createdAt, updatedAt]
