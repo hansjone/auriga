@@ -33,8 +33,10 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - name: Vet, test, and build every workspace module
         run: |
+          # Race detector needs cgo; the Linux runner has gcc, Windows does not.
+          race=""; if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
           for module in gen edge ai-gateway egress agent ctl; do
-            (cd "$module" && go vet ./... && go test -count=1 -timeout=10m ./... && go build ./...) || exit 1
+            (cd "$module" && go vet ./... && go test $race -count=1 -timeout=10m ./... && go build ./...) || exit 1
           done
   lint:
     runs-on: ubuntu-latest

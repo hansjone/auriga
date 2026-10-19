@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/hansjone/auriga/infra/agent/internal/app"
 )
 
 func TestVersionAndJSONLog(t *testing.T) {
+	app.Version = version
 	var out, logs bytes.Buffer
-	if err := run([]string{"--version"}, &out, &logs); err != nil {
+	if err := app.RunCLI([]string{"--version"}, &out, &logs); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "auriga-agent "+version) {
@@ -18,7 +21,8 @@ func TestVersionAndJSONLog(t *testing.T) {
 	if logs.Len() != 0 {
 		t.Fatal("version must not initialize services")
 	}
-	if err := run(nil, &out, &logs); err != nil {
+	logs.Reset()
+	if err := app.RunCLI(nil, &out, &logs); err != nil {
 		t.Fatal(err)
 	}
 	var record map[string]any
