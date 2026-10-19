@@ -72,7 +72,7 @@ export function assertManifestShape(m) {
   if (
     !(
       /** @type {string} */ (
-        (manifest.entry) in /** @type {object} */ (manifest.integrity)
+        manifest.entry in /** @type {object} */ (manifest.integrity)
       )
     )
   )
