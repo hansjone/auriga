@@ -12,7 +12,7 @@
     <spring-boot.version>4.1.1</spring-boot.version>
     <grpc.version>1.85.0</grpc.version>
     <protobuf.version>4.33.0</protobuf.version>
-    <postgres-binaries.version>17.11.0</postgres-binaries.version>
+    <postgres-binaries.version>18.6.0</postgres-binaries.version>
     <embedded-postgres.version>2.2.2</embedded-postgres.version>
   </properties>
   <modules>
