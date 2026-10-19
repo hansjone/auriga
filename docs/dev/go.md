@@ -2,8 +2,11 @@
 
 使用 Go 1.27，命令从仓库根进入 `infra/` 后执行。
 `go.work` 包含 `gen`、`edge`、`ai-gateway`、`egress`、`agent`、`ctl`，
-模块前缀为 `github.com/hansjone/auriga/infra/`。服务骨架仅支持 `--version`
-和标准库 slog JSON 日志，agent 的 internal 子目录仅预留位置。
+模块前缀为 `github.com/hansjone/auriga/infra/`。
+
+`edge` 已实现接入网关骨架（Host 路由、会话→Bearer、CSRF、限流、静态、
+TLS 模式、身份头签发、`/open` 票据）；配置与运维说明见 [edge.md](edge.md)。
+其余 Go 服务骨架仍以 `--version` + slog JSON 为主；agent 的 internal 子目录仅预留位置。
 
 ## 生成契约
 
