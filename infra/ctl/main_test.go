@@ -29,7 +29,17 @@ func TestVersionAndJSONLog(t *testing.T) {
 }
 
 func TestInvalidArguments(t *testing.T) {
-	for _, args := range [][]string{{"unknown"}, {"dev", "--pg-port=0"}, {"dev", "--pg-port=70000"}, {"dev", "--nats-port=-1"}, {"dev", "unexpected"}} {
+	for _, args := range [][]string{
+		{"unknown"},
+		{"dev", "--pg-port=0"},
+		{"dev", "--pg-port=70000"},
+		{"dev", "--nats-port=-1"},
+		{"dev", "unexpected"},
+		{"start", "--pg-port=0"},
+		{"start", "unexpected"},
+		{"stop", "unexpected"},
+		{"status", "unexpected"},
+	} {
 		var out, logs bytes.Buffer
 		if err := run(context.Background(), args, &out, &logs); err == nil {
 			t.Fatalf("accepted %v", args)

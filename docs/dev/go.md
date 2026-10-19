@@ -33,32 +33,24 @@ CI 在 Ubuntu / Windows 运行生成同步检查、gofmt、vet、test、build，
 
 ## 本地开发数据服务
 
+完整命令、数据目录、角色清单与安全注意见 [ctl.md](ctl.md)。
+
 ```powershell
 Set-Location infra
 go run ./ctl dev
+go run ./ctl start
+go run ./ctl status
+go run ./ctl stop
 # 可选：
 go run ./ctl dev --pg-port 15434 --nats-port 14223 --data-dir ../.dev
 ```
 
-前台启动 PostgreSQL 17（`127.0.0.1:15433`）和内嵌 NATS JetStream
-（`127.0.0.1:14222`），按 Ctrl+C 一起停。仅适合本机开发，NATS 无认证。
-首次下载 PostgreSQL 二进制需要联网。数据库名 `auriga`、开发超级用户 `auriga_dev`，
-使用随机 256 位口令，保存在仓库根 `.dev/credentials.env`（`PGPASSWORD=...`）。
-启动完成后打印 PostgreSQL / NATS 连接串，终端内容含开发口令。
-重启复用口令和数据，不执行任何业务迁移。
+- `dev`：前台启动 PostgreSQL 17（`127.0.0.1:15433`）和内嵌 NATS JetStream（`127.0.0.1:14222`），Ctrl+C 停。
+- `start` / `stop` / `status`：同一套组件的后台管理；`status` 退出码 `0`=运行中、`3`=已停止。
+- 仅适合本机开发：NATS 无认证，只听 loopback。首次下载 PostgreSQL 二进制需要联网。
+- 库名 `auriga`、开发超级用户 `auriga_dev`；各业务 schema/角色见 ctl.md。口令分别在
+  `.dev/credentials.env` 与 `.dev/service-roles.json`（权限收紧）。`dev` 终端会打印带口令的 URL；
+  `start`/`status` 不打印明文口令。不执行业务迁移（Flyway 由服务自己跑）。
 
-从当前目录向上找 `contracts/buf.yaml` 确定仓库根。
-`--data-dir` / `AURIGA_DEV_DIR` 可覆盖数据根，此时编译后的 ctl 可在仓库外运行。
-
-- `.dev/pg`：PostgreSQL 数据；`.dev/nats`：JetStream 数据。
-- `.dev/cache`：下载缓存，用 `--cache-dir` / `AURIGA_PG_CACHE_DIR` 覆盖。
-- `.dev/runtime/pg`：可重建的解压运行目录，用 `--runtime-dir` / `AURIGA_PG_RUNTIME_DIR` 覆盖。
-  embedded-postgres 每次会删除重建此目录，勿指定含需保留文件的目录；代码拒绝与缓存/数据重叠。
-- 参数优先于环境变量，两个端口必须不同且在 1–65535 内。
-- `dev.lock` 阻止同目录同时起两套服务。强制终止后，先确认 PostgreSQL 已停止，再清理遗留锁。
-  正常 Ctrl+C 会移除锁。已有数据库缺失/损坏口令文件时拒绝覆盖。
-
-集成测试用随机 loopback 端口和临时目录，验证 PostgreSQL 主版本/超级用户、真实 SQL、
-JetStream 持久化、重启、目录锁及 NATS 启动失败的清理；结束时检查端口释放。
-Windows 受限沙箱不能访问用户临时目录时，可在命令进程内把 TMP 指向工作区临时目录。
-不要求 Docker，不启动常驻进程。
+`--data-dir` / `AURIGA_DEV_DIR` 可覆盖数据根。`dev.lock`（含持有者 pid）阻止同目录双开；
+强制结束后先确认进程已停再清锁，或对该目录执行 `ctl stop`。
