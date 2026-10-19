@@ -54,16 +54,6 @@ public class OrgRuntimeConfiguration {
   }
 
   @Bean
-  OrgPortalController orgPortalController(OrgService org) {
-    return new OrgPortalController(org);
-  }
-
-  @Bean
-  OrgAdminController orgAdminController(OrgService org) {
-    return new OrgAdminController(org);
-  }
-
-  @Bean
   BindableService orgTenantGrpc(OrgService org) {
     return new OrgGrpcServices.TenantGrpc(org);
   }
