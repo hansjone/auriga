@@ -5,7 +5,7 @@ import java.security.SecureRandom;
 import java.time.*;
 import tools.jackson.databind.node.ObjectNode;
 
-/** Built-in QR login challenges with two-digit match codes. */
+/** Built-in QR login state machine; public initiation is disabled pending the scan contract. */
 public final class QrChallenges {
   private final IamStore store;
   private final Clock clock;
@@ -24,7 +24,7 @@ public final class QrChallenges {
       String userAgent,
       String portalBase) {
     String challengeId = UuidV7.next().toString();
-    String matchCode = String.format("%02d", random.nextInt(100));
+    String matchCode = String.format(java.util.Locale.ROOT, "%06d", random.nextInt(1_000_000));
     Instant expires = clock.instant().plusSeconds(300);
     ObjectNode row =
         store.insert(
@@ -82,12 +82,19 @@ public final class QrChallenges {
   }
 
   public ObjectNode row(String challengeId, boolean lock) {
-    return store.get("qr_challenge", challengeId, lock);
+    ObjectNode row = store.get("qr_challenge", challengeId, lock);
+    return row == null || expired(row) ? null : row;
   }
 
   public void markScanned(String challengeId, String accountId) {
     ObjectNode row = store.get("qr_challenge", challengeId, true);
     IamError.require(row != null && !expired(row), "not_found", 404);
+    IamError.require(
+        row.path("status").asString().equals("waiting")
+            || row.path("status").asString().equals("scanned")
+                && row.path("scannerAccountId").asString().equals(accountId),
+        "external_denied",
+        403);
     if (row.path("status").asString().equals("waiting")) {
       row.put("status", "scanned");
       row.put("scannerAccountId", accountId);
@@ -99,6 +106,11 @@ public final class QrChallenges {
       String challengeId, String matchCode, String accountId, String purposeAccountId) {
     ObjectNode row = store.get("qr_challenge", challengeId, true);
     IamError.require(row != null && !expired(row), "not_found", 404);
+    IamError.require(
+        row.path("status").asString().equals("scanned")
+            && row.path("scannerAccountId").asString().equals(accountId),
+        "external_denied",
+        403);
     String purpose = row.path("purpose").asString("login");
     if (!purpose.equals("login"))
       IamError.require(
@@ -116,6 +128,11 @@ public final class QrChallenges {
   public void reject(String challengeId, String accountId) {
     ObjectNode row = store.get("qr_challenge", challengeId, true);
     IamError.require(row != null && !expired(row), "not_found", 404);
+    IamError.require(
+        row.path("status").asString().equals("scanned")
+            && row.path("scannerAccountId").asString().equals(accountId),
+        "external_denied",
+        403);
     row.put("status", "rejected");
     row.put("scannerAccountId", accountId);
     store.save("qr_challenge", row);

@@ -156,8 +156,12 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
-  IdentityConnector oidcConnector() {
-    return new OidcConnector();
+  IdentityConnector oidcConnector(
+      @org.springframework.beans.factory.annotation.Value(
+              "${auriga.iam.oidc.allow-local-http:false}")
+          boolean allowLocalHttp,
+      Clock clock) {
+    return new OidcConnector(allowLocalHttp, clock);
   }
 
   @Bean

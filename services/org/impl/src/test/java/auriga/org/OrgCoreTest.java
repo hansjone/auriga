@@ -160,6 +160,109 @@ class OrgCoreTest {
     assertEquals(1, events.ofType("user.created").size());
   }
 
+  private ObjectNode preflightInvitation(UUID owner, UUID provider) {
+    return store.tenant(
+        TENANT,
+        () ->
+            withActor(
+                owner,
+                () ->
+                    svc.createInvitation(
+                        "alice@example.com",
+                        "Alice",
+                        "member",
+                        List.of(OrgIds.ROLE_MEMBER),
+                        List.of(),
+                        provider == null ? List.of() : List.of(provider),
+                        clock.instant().plusSeconds(3600),
+                        1)));
+  }
+
+  @Test
+  void invitationPreflightIsReadOnlyAndRedemptionStillWorks() {
+    UUID owner = seedOwner(), provider = UuidV7.next(), account = UuidV7.next();
+    var invitation = preflightInvitation(owner, provider);
+    String code = invitation.path("code").asString();
+    var hooks = new OrgIdentityPolicyHooks(svc);
+    TenantContext.run(
+        TENANT,
+        () -> {
+          assertTrue(hooks.validateInvitation(code, provider));
+          assertTrue(hooks.validateInvitation(code, provider));
+          assertFalse(hooks.validateInvitation(code, UuidV7.next()));
+          store.tx(
+              () -> {
+                assertEquals(
+                    0,
+                    store
+                        .jdbc()
+                        .queryForObject(
+                            "SELECT uses FROM invitation WHERE tenant_id=? AND id=?",
+                            Integer.class,
+                            TENANT,
+                            UUID.fromString(invitation.path("id").asString())));
+                return null;
+              });
+          assertTrue(
+              hooks.consumeInvitation(
+                  code,
+                  provider,
+                  OrgJson.object("accountId", account.toString(), "displayName", "Alice")));
+          assertFalse(hooks.validateInvitation(code, provider));
+        });
+    assertTrue(store.tenant(TENANT, () -> store.member(account)).isPresent());
+  }
+
+  @Test
+  void invitationPreflightRejectsInvalidStatesAndOtherTenant() {
+    UUID owner = seedOwner(), provider = UuidV7.next();
+    var hooks = new OrgIdentityPolicyHooks(svc);
+    var active = preflightInvitation(owner, provider);
+    String code = active.path("code").asString();
+    assertFalse(hooks.validateInvitation(code, provider));
+    TenantContext.run(
+        UUID.randomUUID(), () -> assertFalse(hooks.validateInvitation(code, provider)));
+    TenantContext.run(
+        TENANT,
+        () -> {
+          assertFalse(hooks.validateInvitation("missing", provider));
+          assertFalse(hooks.validateInvitation("", provider));
+          assertFalse(hooks.validateInvitation(null, provider));
+          for (String state : List.of("expired", "used", "revoked")) {
+            var invitation = preflightInvitation(owner, provider);
+            store.tx(
+                () -> {
+                  UUID id = UUID.fromString(invitation.path("id").asString());
+                  if (state.equals("expired"))
+                    store
+                        .jdbc()
+                        .update(
+                            "UPDATE invitation SET expires_at=? WHERE tenant_id=? AND id=?",
+                            java.sql.Timestamp.from(clock.instant()),
+                            TENANT,
+                            id);
+                  else if (state.equals("used"))
+                    store
+                        .jdbc()
+                        .update(
+                            "UPDATE invitation SET uses=max_uses WHERE tenant_id=? AND id=?",
+                            TENANT,
+                            id);
+                  else
+                    store
+                        .jdbc()
+                        .update(
+                            "UPDATE invitation SET status='revoked' WHERE tenant_id=? AND id=?",
+                            TENANT,
+                            id);
+                  return null;
+                });
+            assertFalse(
+                hooks.validateInvitation(invitation.path("code").asString(), provider), state);
+          }
+        });
+  }
+
   @Test
   void disablePublishesUserDisabled() {
     UUID owner = seedOwner();

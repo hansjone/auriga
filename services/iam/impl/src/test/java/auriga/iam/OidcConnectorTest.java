@@ -2,13 +2,15 @@ package auriga.iam;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import auriga.common.error.AurigaException;
 import com.nimbusds.jose.*;
-import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jose.crypto.RSASSASigner;
+import com.nimbusds.jose.jwk.*;
+import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
 import java.net.*;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
@@ -20,12 +22,20 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 class OidcConnectorTest {
-  private static final byte[] HMAC_KEY = new byte[32];
-
-  static {
-    Arrays.fill(HMAC_KEY, (byte) 7);
-  }
-
+  private RSAKey signingKey;
+  private RSAKey advertisedKey;
+  private java.util.concurrent.ExecutorService executor;
+  private String infoSub = "alice";
+  private boolean infoVerified = true;
+  private boolean signedVerified = true;
+  private java.util.function.UnaryOperator<JWTClaimsSet> tokenClaims =
+      java.util.function.UnaryOperator.identity();
+  private String tokenEndpoint;
+  private String tokenOverride;
+  private boolean largeDiscovery;
+  private boolean largeToken;
+  private boolean largeUserinfo;
+  private boolean largeJwks;
   private final Clock clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
   private final ContractSchemas schemas = new ContractSchemas();
   private HttpServer server;
@@ -37,22 +47,35 @@ class OidcConnectorTest {
 
   @BeforeEach
   void startIdp() throws Exception {
+    signingKey = new RSAKeyGenerator(2048).keyID("test-key").generate();
+    advertisedKey = signingKey;
     downDiscovery = false;
     verifiers.clear();
     codes.clear();
     expectedNonce.set("");
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.setExecutor(Executors.newCachedThreadPool());
+    executor = Executors.newCachedThreadPool();
+    server.setExecutor(executor);
     issuer = "http://127.0.0.1:" + server.getAddress().getPort();
     server.createContext("/.well-known/openid-configuration", this::discovery);
     server.createContext("/token", this::token);
     server.createContext("/userinfo", this::userinfo);
+    server.createContext(
+        "/jwks",
+        ex ->
+            respond(
+                ex,
+                200,
+                largeJwks
+                    ? Json.object("large", "x".repeat(OidcHttp.MAX_BODY))
+                    : Json.read(new JWKSet(advertisedKey.toPublicJWK()).toString())));
     server.start();
   }
 
   @AfterEach
   void stopIdp() {
     if (server != null) server.stop(0);
+    if (executor != null) executor.shutdownNow();
   }
 
   private void discovery(com.sun.net.httpserver.HttpExchange ex) throws java.io.IOException {
@@ -61,16 +84,22 @@ class OidcConnectorTest {
       ex.close();
       return;
     }
+    if (largeDiscovery) {
+      respond(ex, 200, Json.object("data", "x".repeat(OidcHttp.MAX_BODY)));
+      return;
+    }
     respond(
         ex,
         200,
         Json.object(
+            "jwks_uri",
+            issuer + "/jwks",
             "issuer",
             issuer,
             "authorization_endpoint",
             issuer + "/authorize",
             "token_endpoint",
-            issuer + "/token",
+            tokenEndpoint == null ? issuer + "/token" : tokenEndpoint,
             "userinfo_endpoint",
             issuer + "/userinfo"));
   }
@@ -85,6 +114,10 @@ class OidcConnectorTest {
       return;
     }
     codes.remove(code);
+    if (largeToken) {
+      respond(ex, 200, Json.object("data", "x".repeat(OidcHttp.MAX_BODY)));
+      return;
+    }
     try {
       respond(
           ex,
@@ -95,14 +128,16 @@ class OidcConnectorTest {
               "token_type",
               "Bearer",
               "id_token",
-              idToken(
-                  issuer,
-                  expectedNonce.get(),
-                  "example-client",
-                  "alice",
-                  "Alice Example",
-                  "alice@example.com")));
-    } catch (JOSEException e) {
+              tokenOverride != null
+                  ? tokenOverride
+                  : idToken(
+                      issuer,
+                      expectedNonce.get(),
+                      "example-client",
+                      "alice",
+                      "Alice Example",
+                      "alice@example.com")));
+    } catch (JOSEException | java.text.ParseException e) {
       throw new java.io.IOException(e);
     }
   }
@@ -114,36 +149,35 @@ class OidcConnectorTest {
       ex.close();
       return;
     }
+    if (largeUserinfo) {
+      respond(ex, 200, Json.object("data", "x".repeat(OidcHttp.MAX_BODY)));
+      return;
+    }
     respond(
         ex,
         200,
         Json.object(
             "sub",
-            "alice",
+            infoSub,
             "name",
             "Alice Example",
             "email",
             "alice@example.com",
             "email_verified",
-            true));
+            infoVerified));
   }
 
   private static void respond(com.sun.net.httpserver.HttpExchange ex, int status, JsonNode json)
       throws java.io.IOException {
     byte[] body = json.toString().getBytes(StandardCharsets.UTF_8);
     ex.getResponseHeaders().add("Content-Type", "application/json");
-    ex.sendResponseHeaders(status, body.length);
+    ex.sendResponseHeaders(status, body.length > OidcHttp.MAX_BODY ? 0 : body.length);
     ex.getResponseBody().write(body);
     ex.close();
   }
 
   private OidcConnector connector() {
-    return new OidcConnector(
-        HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build(),
-        clock);
+    return new OidcConnector(true, clock);
   }
 
   private ObjectNode config() {
@@ -319,12 +353,224 @@ class OidcConnectorTest {
     assertEquals("iam.connector_unavailable", fail.path("step").path("code").asString());
   }
 
-  private static String idToken(
-      String issuer, String nonce, String clientId, String sub, String name, String email)
-      throws JOSEException {
+  private JsonNode authenticate(OidcConnector connector) {
+    JsonNode begin = connector.begin(ctx(null), config());
+    String code = UUID.randomUUID().toString();
+    codes.add(code);
+    verifiers.put(code, begin.path("state").path("codeVerifier").asString());
+    expectedNonce.set(begin.path("state").path("nonce").asString());
+    return connector.advance(
+        ctx(begin.path("state")),
+        config(),
+        Json.object(
+            "type",
+            "callback",
+            "params",
+            Json.object("code", code, "state", begin.path("state").path("oauthState").asString())));
+  }
+
+  @Test
+  void jwksWrongSigningKeyIsRejected() throws Exception {
+    advertisedKey = new RSAKeyGenerator(2048).keyID("test-key").generate();
+    assertEquals(
+        "iam.external_denied", authenticate(connector()).path("step").path("code").asString());
+  }
+
+  @Test
+  void unsignedAndHmacTokensAreRejected() throws Exception {
+    tokenOverride =
+        new com.nimbusds.jwt.PlainJWT(new JWTClaimsSet.Builder().subject("alice").build())
+            .serialize();
+    assertEquals(
+        "iam.external_denied", authenticate(connector()).path("step").path("code").asString());
+    byte[] secret = new byte[32];
+    new java.security.SecureRandom().nextBytes(secret);
     SignedJWT jwt =
         new SignedJWT(
-            new JWSHeader(JWSAlgorithm.HS256),
+            new JWSHeader(JWSAlgorithm.HS256), new JWTClaimsSet.Builder().subject("alice").build());
+    jwt.sign(new com.nimbusds.jose.crypto.MACSigner(secret));
+    tokenOverride = jwt.serialize();
+    assertEquals(
+        "iam.external_denied", authenticate(connector()).path("step").path("code").asString());
+  }
+
+  @Test
+  void mismatchedUserinfoSubjectIsRejected() {
+    infoSub = "mallory";
+    assertEquals(
+        "iam.external_denied", authenticate(connector()).path("step").path("code").asString());
+  }
+
+  @Test
+  void signedEmailClaimsCannotBeOverwritten() {
+    infoVerified = false;
+    assertTrue(
+        authenticate(connector()).path("step").path("profile").path("emailVerified").asBoolean());
+  }
+
+  @Test
+  void insecureIssuerAndPrivateAddressesAreRejected() throws Exception {
+    assertEquals(
+        "common.validation_failed",
+        assertThrows(AurigaException.class, () -> new OidcConnector().validateConfig(config()))
+            .errorCode()
+            .code());
+    var transport = new OidcHttp(false);
+    for (String ip :
+        List.of(
+            "127.0.0.1",
+            "10.0.0.1", // gitleaks:allow
+            "169.254.169.254",
+            "172.16.0.1", // gitleaks:allow
+            "192.168.0.1", // gitleaks:allow
+            "100.64.0.1",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:127.0.0.1")) {
+      assertFalse(OidcHttp.publicAddress(InetAddress.getByName(ip)), ip);
+      assertThrows(UnknownHostException.class, () -> transport.resolve(ip), ip);
+    }
+    assertEquals(
+        "common.validation_failed",
+        assertThrows(
+                AurigaException.class,
+                () -> new OidcHttp(true).validate(URI.create("http://192.0.2.1")))
+            .errorCode()
+            .code());
+  }
+
+  @Test
+  void crossOriginDiscoveryEndpointCanCompleteLogin() {
+    tokenEndpoint = "http://localhost:" + server.getAddress().getPort() + "/token";
+    assertEquals("done", authenticate(connector()).path("step").path("type").asString());
+  }
+
+  @Test
+  void insecureDiscoveredEndpointIsStillRejected() {
+    tokenEndpoint = "http://idp.example.com/token";
+    assertEquals(
+        "common.validation_failed",
+        assertThrows(AurigaException.class, () -> connector().validateConfig(config()))
+            .errorCode()
+            .code());
+  }
+
+  @Test
+  void manualEndpointOverridesCannotBypassDiscovery() {
+    var config = config();
+    config.put("token_endpoint", "https://other.example.com/token");
+    var registry = new ConnectorRegistry(schemas, List.of(connector()));
+    assertEquals(
+        "common.validation_failed",
+        assertThrows(AurigaException.class, () -> registry.validate("oidc", config))
+            .errorCode()
+            .code());
+  }
+
+  @Test
+  void productionDiscoveryAcceptsHttpsEndpointsOnDifferentOrigins() throws Exception {
+    var http = org.mockito.Mockito.mock(OidcHttp.class);
+    org.mockito.Mockito.doCallRealMethod().when(http).validate(org.mockito.ArgumentMatchers.any());
+    org.mockito.Mockito.when(
+            http.send(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("GET"),
+                org.mockito.ArgumentMatchers.isNull(),
+                org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(
+            new OidcHttp.Response(
+                200,
+                Json.object(
+                        "issuer",
+                        "https://idp.example.com",
+                        "authorization_endpoint",
+                        "https://authorize.example.com/auth",
+                        "token_endpoint",
+                        "https://tokens.example.com/token",
+                        "userinfo_endpoint",
+                        "https://profile.example.com/userinfo",
+                        "jwks_uri",
+                        "https://keys.example.com/jwks")
+                    .toString()));
+    var document = new OidcMetadata(http, clock).get("https://idp.example.com");
+    assertEquals("tokens.example.com", document.tokenEndpoint().getHost());
+    assertEquals("keys.example.com", document.jwksUri().getHost());
+    assertEquals("profile.example.com", document.userinfoEndpoint().getHost());
+  }
+
+  @Test
+  void oversizedDiscoveryIsRejected() {
+    largeDiscovery = true;
+    assertEquals(
+        "iam.connector_unavailable",
+        assertThrows(AurigaException.class, () -> connector().validateConfig(config()))
+            .errorCode()
+            .code());
+  }
+
+  @Test
+  void oversizedTokenUserinfoAndJwksAreRejected() {
+    largeToken = true;
+    assertEquals(
+        "iam.connector_unavailable",
+        authenticate(connector()).path("step").path("code").asString());
+    largeToken = false;
+    largeUserinfo = true;
+    assertEquals(
+        "iam.connector_unavailable",
+        authenticate(connector()).path("step").path("code").asString());
+    largeUserinfo = false;
+    largeJwks = true;
+    assertEquals(
+        "iam.connector_unavailable",
+        authenticate(connector()).path("step").path("code").asString());
+  }
+
+  @Test
+  void userinfoCannotElevateSignedEmailVerification() {
+    signedVerified = false;
+    infoVerified = true;
+    assertFalse(
+        authenticate(connector()).path("step").path("profile").path("emailVerified").asBoolean());
+  }
+
+  @Test
+  void signedWrongIssuerAudienceNonceAndExpiredTokensAreRejected() {
+    List<java.util.function.UnaryOperator<JWTClaimsSet>> invalid =
+        List.of(
+            c -> new JWTClaimsSet.Builder(c).issuer("https://other.example.com").build(),
+            c -> new JWTClaimsSet.Builder(c).audience("other-client").build(),
+            c -> new JWTClaimsSet.Builder(c).claim("nonce", "wrong-nonce").build(),
+            c ->
+                new JWTClaimsSet.Builder(c)
+                    .expirationTime(Date.from(clock.instant().minusSeconds(31)))
+                    .build(),
+            c ->
+                new JWTClaimsSet.Builder(c)
+                    .audience(List.of("example-client", "other-client"))
+                    .claim("azp", "other-client")
+                    .build());
+    for (var mutation : invalid) {
+      tokenClaims = mutation;
+      assertEquals(
+          "iam.external_denied", authenticate(connector()).path("step").path("code").asString());
+    }
+  }
+
+  @Test
+  void transportRejectsPrivateLiteralAtSocketResolution() {
+    assertThrows(
+        UnknownHostException.class,
+        () -> new OidcHttp(false).send(URI.create("https://127.0.0.1:1"), "GET", null, Map.of()));
+  }
+
+  private String idToken(
+      String issuer, String nonce, String clientId, String sub, String name, String email)
+      throws JOSEException, java.text.ParseException {
+    SignedJWT jwt =
+        new SignedJWT(
+            new JWSHeader.Builder(JWSAlgorithm.RS256).keyID("test-key").build(),
             new JWTClaimsSet.Builder()
                 .issuer(issuer)
                 .subject(sub)
@@ -332,11 +578,12 @@ class OidcConnectorTest {
                 .claim("nonce", nonce)
                 .claim("name", name)
                 .claim("email", email)
-                .claim("email_verified", true)
+                .claim("email_verified", signedVerified)
                 .expirationTime(Date.from(Instant.parse("2026-06-01T01:00:00Z")))
                 .issueTime(Date.from(Instant.parse("2026-06-01T00:00:00Z")))
                 .build());
-    jwt.sign(new MACSigner(HMAC_KEY));
+    jwt = new SignedJWT(jwt.getHeader(), tokenClaims.apply(jwt.getJWTClaimsSet()));
+    jwt.sign(new RSASSASigner(signingKey));
     return jwt.serialize();
   }
 

@@ -170,9 +170,12 @@ RLS、事务回滚和限速。数据库测试在 Windows 沙箱可能因 pg_ctl 
 口令使用 Argon2id（与应急账号相同：64 MiB、3 次迭代）。登录事务内多步：
 `form` 口令 → 若已绑定 TOTP 则 `form`/`totp` → `done(profile)`；连接器上报的
 `mfaPerformed` 对 team-account 直接采信（不必开 `trustExternalMfa`）。
-`invite_only` 时 begin 带邀请码则返回 `register` 表单；兑换走
-`IdentityPolicyHooks.consumeInvitation`，并在 profile 上附带 `accountId`（B6
-过渡约定）。兑换失败会回滚已写入的 `team_account` 凭据行。
+`invite_only` 时必须由 `IdentityPolicyHooks.validateInvitation` 只读预校验通过，
+才展示 `register` 表单；提交注册时再次校验，避免无效邀请触发 Argon2 或账号探测。
+该 hook 默认拒绝；org 的 `OrgIdentityPolicyHooks` 已接入租户内的只读预校验，检查
+邀请存在、active、未过期、未耗尽使用次数及 provider 约束，不刷新状态或核销。
+最终兑换仍走 `consumeInvitation`，并在 profile 上
+附带 `accountId`。兑换失败会回滚已写入的 `team_account` 凭据行。
 
 本人接口（需登录会话）：
 
@@ -181,13 +184,36 @@ RLS、事务回滚和限速。数据库测试在 Windows 沙箱可能因 pg_ctl 
 - `/me/passkeys/**`（WebAuthn，依赖 `com.yubico:webauthn-server-core`）
 - `/me/devices/**`（复用 B2 `device` 表；吊销后 OAuth 刷新拒绝）
 
-扫码：`primaryStep=qr` 或连接器返回 `qr` 步骤；手机端
-`GET/POST /login/qr/{challengeId}`（已登录）确认两位比对码；发起端用 poll / SSE
-推进。平台 SSE 骨架（B2）已接上；比对码错误码 `iam.qr_match_mismatch`。
+扫码入口目前返回 `iam.external_denied`：只读契约固定两位码且没有 POST 扫描操作，
+尚不能安全启用。GET challenge 仅查看，不再标记已扫描。内部状态机采用六位码，
+要求扫描者与确认者一致、仅接受 scanned 状态，失败和拒绝均不可恢复。确认端还会
+检查活动会话的 MFA 状态；错码失败状态先提交，再返回 `iam.qr_match_mismatch`，
+避免异常回滚导致挑战复活。poll 检查挑战过期，不计入凭据限速桶。
+主控需更新 QR 契约及客户端，再增加 POST 扫描操作并恢复入口。
 
 存储表（V3）：`team_account`、`team_totp`、`team_passkey`、`team_ceremony`、
-`qr_challenge`。无 TOTP 的新账号在政策要求 MFA 时不会死卡在 `platform_totp`，
-可先完成登录再经 `/me/mfa` 登记。
+`qr_challenge`。策略为 always 或 new_device 时，尚未登记任何二因子的团队账号在
+口令通过后进入 `first_totp` 表单，只能登记首个 TOTP，确认成功前不发放会话。
+新注册账号同样在邀请码预校验、口令设置后进入此流程，最终兑换在登记确认时执行。
+登记密钥加密保存在绑定浏览器的五分钟登录事务中，仅在读取该事务的表单时解密显示；
+不写入持久化 step 明文。确认时再次加锁检查没有 TOTP 或 Passkey，防止覆盖已有因子。
+尚未完成注册的口令记录绑定登记事务：失败或取消时清理，超时后可重新注册；旧事务的
+延迟清理只能删除属于自己的临时记录，不会删除替代事务的凭据或已绑定身份的账号。
+new_device 当前保守地每次验证。仅有 Passkey
+的账号在口令后必须完成对应账号的断言。stepup 即使策略为 never 也要求二因子。
+
+本人接口的 TOTP / Passkey 登记开始、确认均复用 `RequiresRecentStepUp`，业务入口同时校验同租户、
+同账号、带 sessionId 的十分钟内 step-up；新增二因子后撤销其他会话，并经 outbox 发出
+`identity.mfa_changed`。用户通知订阅方仍需主控接线。已有 TOTP 不允许直接覆盖，返回
+`common.conflict`；当前只读契约没有旧码字段，不能安全实现旧码核验式重置。
+首次登记例外仅在已验证口令的登录事务中有效，不放宽本人接口的权限，也不签发临时
+普通会话。首个 TOTP 校验成功后才签发 MFA 会话或完成原有会话的 step-up，并吊销
+其他旧会话。Passkey 登记和断言均要求 UV=required，
+yubico 校验认证器 UV 标志；凭据查询还校验 userHandle。
+
+限速用户名使用 strip + 小写；后续 TOTP 优先按服务端解析的账号分桶（五次/五分钟），
+无账号步骤按事务分桶，用户名阶段十次/五分钟，IP 额度保留。缺失账号仍执行一次
+真实 Argon2 matches。显示名服务端限制 64 字符并拒绝控制字符和格式控制符。
 
 ## 通用 OIDC / OAuth 2.0（oidc）
 
@@ -208,10 +234,37 @@ RLS、事务回滚和限速。数据库测试在 Windows 沙箱可能因 pg_ctl 
 `claimMapping` 可选键：`subject`、`displayName`、`email`、`emailVerified`、`phone`。
 
 保存配置时会校验 JSON Schema，并尝试拉取 issuer 发现文档；发现失败返回
-`iam.connector_unavailable` / `iam.invalid_config`。回调里坏 state、坏 PKCE、IdP
+`iam.connector_unavailable` / `common.validation_failed`。回调里坏 state、坏 PKCE、IdP
 `error` 参数或拒绝换票 → `iam.external_denied`。外部调用只记 host / 结果 / 耗时，
 不记凭据与响应体。
 
 管理台：`POST/GET/PATCH/DELETE /api/iam/v1/admin/providers` 可创建、查看、更新
 （含启停）、停用 `connectorType=oidc` 实例。PATCH 对 config 做 merge；未提交的
 `x-secret` 占位字段保持原值。
+
+B34 安全约束：OIDC 上游默认必须 HTTPS；从 issuer discovery 返回的
+authorization/token/userinfo/JWKS 端点允许跨域，各请求仍执行相同的地址过滤和响应限制。
+当前配置 schema 不支持手工覆盖端点，传入这类字段会拒绝；不能借手工覆盖绕过发现。
+仅本地开发可显式配置
+`auriga.iam.oidc.allow-local-http=true`，允许 localhost / 127.0.0.1 / ::1 的回环端点；
+该开关不放行其他内网地址。平台自己的 HTTP/IP 部署不受此上游限制影响。
+出站使用 Apache HttpClient 5 的连接层 DnsResolver，逐个检查解析出的地址，拒绝私有、
+回环、链路本地、CGNAT 和 IPv6 过渡地址。连接直接使用已校验的解析结果，禁止重定向、
+自动重试和 cookie。每次请求关闭连接，响应解压后至多读取 1 MiB，超限立即取消请求。
+
+id_token 使用发现文档里的同源 JWKS 验签，接受 RS256（至少 2048 位）和 ES256/P-256，
+拒绝 none、HMAC、私钥 JWK、错误 kid/用途/算法和未理解的 crit，并校验 issuer、aud、
+azp、nonce、exp、iat、nbf、sub；openid 流程缺少 id_token 时拒绝。JWKS 每次验证重新读取，
+可跟随上游密钥轮换。userinfo.sub 必须等于签名 sub，已有签名 claim 不允许覆盖，
+协议保留 claim 不从 userinfo 导入。参照
+[OIDC Core 3.1.3.7 和 5.3.2](https://openid.net/specs/openid-connect-core-1_0.html)。
+
+PATCH 改 issuer 必须同时提供非空且不同于旧值的 clientSecret，掩码占位不算重新提供；
+审计只记录修改字段名，不记录配置值。既有契约未定义的 username_taken 已折叠为
+`iam.invalid_credentials`；invalid_username/invalid_password/invalid_config 使用
+`common.validation_failed`，provider_unavailable 使用 `common.not_found`，
+builtin_provider 使用 `common.forbidden`。设备和 Passkey 的名称校验同样返回
+`common.validation_failed`，没有新增错误码。
+
+限速与找不到对象分别使用 `common.rate_limited`、`common.not_found`，登录准入拒绝仍为
+`iam.admission_denied`，该码已补入身份连接器契约的通用码列表。

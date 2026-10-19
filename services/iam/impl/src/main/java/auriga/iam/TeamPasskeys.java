@@ -34,6 +34,7 @@ public final class TeamPasskeys {
   }
 
   public ObjectNode beginRegistration(UUID accountId, String displayName, JsonNode config) {
+    CredentialAuthorization.requireRecent(accountId, clock);
     RelyingParty rp = relyingParty(config, accountId);
     PublicKeyCredentialCreationOptions options =
         rp.startRegistration(
@@ -48,7 +49,7 @@ public final class TeamPasskeys {
                 .authenticatorSelection(
                     AuthenticatorSelectionCriteria.builder()
                         .residentKey(ResidentKeyRequirement.PREFERRED)
-                        .userVerification(UserVerificationRequirement.PREFERRED)
+                        .userVerification(UserVerificationRequirement.REQUIRED)
                         .build())
                 .build());
     String registrationId = UuidV7.next().toString();
@@ -84,6 +85,8 @@ public final class TeamPasskeys {
 
   public ObjectNode completeRegistration(
       UUID accountId, String registrationId, String name, JsonNode credential, JsonNode config) {
+    CredentialAuthorization.requireRecent(accountId, clock);
+    store.lock("team-totp-enroll:" + accountId);
     ObjectNode ceremony = store.get("team_ceremony", registrationId, true);
     IamError.require(
         ceremony != null
@@ -163,7 +166,7 @@ public final class TeamPasskeys {
                 StartAssertionOptions.builder()
                     .username(
                         accountId == null ? Optional.empty() : Optional.of(accountId.toString()))
-                    .userVerification(UserVerificationRequirement.PREFERRED)
+                    .userVerification(UserVerificationRequirement.REQUIRED)
                     .build());
     String challengeId = UuidV7.next().toString();
     Instant expires = clock.instant().plusSeconds(300);
@@ -219,7 +222,12 @@ public final class TeamPasskeys {
                       .response(
                           PublicKeyCredential.parseAssertionResponseJson(credential.toString()))
                       .build());
-      IamError.require(result.isSuccess(), "invalid_credentials", 401);
+      IamError.require(result.isSuccess() && result.isUserVerified(), "invalid_credentials", 401);
+      IamError.require(
+          ceremony.path("accountId").asString("").isEmpty()
+              || ceremony.path("accountId").asString().equals(result.getUsername()),
+          "invalid_credentials",
+          401);
       String accountId = result.getUsername();
       ObjectNode passkey =
           store.all("team_passkey").stream()
@@ -261,8 +269,7 @@ public final class TeamPasskeys {
 
   public ObjectNode rename(UUID accountId, String passkeyId, String name) {
     ObjectNode row = requireOwned(accountId, passkeyId);
-    IamError.require(
-        name != null && !name.isBlank() && name.length() <= 64, "invalid_password", 400);
+    IamError.validate(name != null && !name.isBlank() && name.length() <= 64);
     row.put("name", name);
     store.save("team_passkey", row);
     return view(row);
@@ -382,6 +389,10 @@ public final class TeamPasskeys {
       String id = credentialId.getBase64Url();
       return store.all("team_passkey").stream()
           .filter(p -> p.path("credentialId").asString().equals(id))
+          .filter(
+              p ->
+                  new ByteArray(uuidBytes(UUID.fromString(p.path("accountId").asString())))
+                      .equals(userHandle))
           .filter(
               p ->
                   accountFilter == null

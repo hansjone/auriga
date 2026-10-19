@@ -114,7 +114,11 @@ public final class LoginManager {
           tx.put("txId", tx.path("id").asString());
           if (provider.path("connectorType").asString().equals("team-account")
               && !tx.path("invitationCode").asString("").isBlank()) {
-            tx.put("state", secrets.encrypt(Json.object("canRegister", true).toString(), aad(tx)));
+            boolean valid =
+                hooks.validateInvitation(
+                    tx.path("invitationCode").asString(), UUID.fromString(pid));
+            IamError.require(valid, "admission_denied", 403);
+            tx.put("state", secrets.encrypt(Json.object("canRegister", valid).toString(), aad(tx)));
             store.save("login_tx", tx);
           }
           Result applied;
@@ -167,7 +171,9 @@ public final class LoginManager {
         () -> {
           ObjectNode tx = transaction(id, binding);
           if (tx.path("status").asString().equals("pending")) {
+            abandonFirstRegistration(tx, provider(tx.path("providerId").asString()));
             tx.put("status", "cancelled");
+            tx.remove("firstTotpSecret");
             tx.set("step", Json.object("type", "fail", "code", "iam.login_tx_cancelled"));
             store.save("login_tx", tx);
           }
@@ -191,15 +197,35 @@ public final class LoginManager {
             fail(tx, provider, "iam.login_tx_expired", "expired");
             return new Result(view(tx, provider), null, null);
           }
-          store.limit("login-ip:" + tx.path("ip").asString(), clock.instant(), 60);
-          store.limit(
-              "login-provider:"
-                  + provider.path("providerId").asString()
-                  + ":"
-                  + input.path("values").path("username").asString(""),
-              clock.instant(),
-              10);
           String expected = tx.path("step").path("type").asString();
+          if (!input.path("type").asString().equals("poll")) {
+            store.limit("login-ip:" + tx.path("ip").asString(), clock.instant(), 60);
+            String username =
+                input.path("values").path("username").asString("").strip().toLowerCase(Locale.ROOT);
+            String account = tx.path("pendingAccount").asString("");
+            if (account.isEmpty()
+                && tx.has("state")
+                && provider.path("connectorType").asString().equals("team-account")) {
+              JsonNode state =
+                  Json.MAPPER.readTree(secrets.decrypt(tx.path("state").asString(), aad(tx)));
+              String knownUser = state.path("username").asString("");
+              if (!knownUser.isBlank()) {
+                UUID knownAccount =
+                    teamAccounts.accountIdFor(provider.path("providerId").asString(), knownUser);
+                if (knownAccount != null) account = knownAccount.toString();
+              }
+            }
+            String bucket =
+                !account.isBlank()
+                    ? "account:" + account
+                    : expected.equals("form") && !username.isBlank()
+                        ? "user:" + username
+                        : "tx:" + id;
+            store.limit(
+                "login-provider:" + provider.path("providerId").asString() + ":" + bucket,
+                clock.instant(),
+                account.isBlank() ? 10 : 5);
+          }
           IamError.require(
               expected.equals(input.path("type").asString())
                   || expected.equals("redirect") && trustedCallback
@@ -215,6 +241,50 @@ public final class LoginManager {
           try {
             return store.atomic(
                 () -> {
+                  if (input.path("formId").asString("").equals("first_totp")) {
+                    IamError.require(
+                        provider.path("connectorType").asString().equals("team-account")
+                            && tx.has("firstTotpSecret")
+                            && tx.has("pendingProfile"),
+                        "invalid_step_input",
+                        400);
+                    UUID account = UUID.fromString(tx.path("pendingAccount").asString());
+                    if (tx.path("newAccount").asBoolean()) {
+                      JsonNode profile =
+                          Json.read(secrets.decrypt(tx.path("pendingProfile").asString(), aad(tx)));
+                      teamAccounts.lockPendingRegistration(
+                          provider.path("providerId").asString(),
+                          profile.path("subject").asString(),
+                          tx.path("id").asString());
+                    }
+                    teamAccounts.enrollFirstTotp(
+                        account,
+                        secrets.decrypt(
+                            tx.path("firstTotpSecret").asString(), aad(tx) + ":first-totp"),
+                        input.path("values").path("otp").asString(""));
+                    tx.remove("firstTotpSecret");
+                    for (ObjectNode session : store.all("session"))
+                      if (session.path("accountId").asString().equals(account.toString())
+                          && !session
+                              .path("sessionId")
+                              .asString()
+                              .equals(tx.path("sessionId").asString(""))
+                          && !session.path("revoked").asBoolean())
+                        sessions.revokeOne(session, "security");
+                    return finish(
+                        tx,
+                        provider,
+                        Json.read(secrets.decrypt(tx.path("pendingProfile").asString(), aad(tx))),
+                        true);
+                  }
+                  if (provider.path("connectorType").asString().equals("team-account")
+                      && input.path("formId").asString("").equals("register"))
+                    IamError.require(
+                        hooks.validateInvitation(
+                            tx.path("invitationCode").asString(),
+                            UUID.fromString(provider.path("providerId").asString())),
+                        "admission_denied",
+                        403);
                   if (input.path("formId").asString("").equals("platform_totp")) {
                     UUID pending = UUID.fromString(tx.path("pendingAccount").asString());
                     IamError.require(
@@ -249,7 +319,12 @@ public final class LoginManager {
                   return apply(tx, provider, connectors.result(result), emergencyLogin);
                 });
           } catch (AurigaException e) {
-            fail(tx, provider, e.errorCode().code(), "failed");
+            String code = e.errorCode().code();
+            if (provider.path("connectorType").asString().equals("team-account")
+                && code.equals("common.validation_failed")) {
+              code = "iam.invalid_credentials";
+            }
+            fail(tx, provider, code, "failed");
             return new Result(view(tx, provider), null, null);
           } catch (RuntimeException e) {
             fail(tx, provider, "iam.connector_unavailable", "failed");
@@ -365,11 +440,23 @@ public final class LoginManager {
                 && (team || policy.path("trustExternalMfa").asBoolean(false));
     boolean teamNeedsPlatformTotp = team && teamAccounts.hasTotp(UUID.fromString(accountId));
     if (!mfa
-        && !policy.path("mfa").asString("new_device").equals("never")
-        && (!team || teamNeedsPlatformTotp)) {
-      // Team accounts without enrolled TOTP skip platform MFA (enroll via /me/mfa).
+        && (!policy.path("mfa").asString("new_device").equals("never")
+            || purpose.equals("stepup"))) {
       tx.put("pendingAccount", accountId);
       tx.put("pendingProfile", secrets.encrypt(profile.toString(), aad(tx)));
+      if (team && !teamAccounts.hasMfa(UUID.fromString(accountId))) {
+        if (tx.path("newAccount").asBoolean())
+          teamAccounts.pendingRegistrationUntil(
+              pid,
+              subject,
+              tx.path("id").asString(),
+              Instant.parse(tx.path("expiresAt").asString()));
+        tx.put("firstTotpSecret", secrets.encrypt(Totp.generate(), aad(tx) + ":first-totp"));
+        tx.set("step", firstTotpStep(null));
+        store.save("login_tx", tx);
+        return new Result(view(tx, provider), null, null);
+      }
+      IamError.require(!team || teamNeedsPlatformTotp, "mfa_required", 403);
       tx.set(
           "step",
           Json.object(
@@ -490,6 +577,7 @@ public final class LoginManager {
             .build());
     tx.put("status", "completed");
     tx.remove("pendingProfile");
+    tx.remove("firstTotpSecret");
     tx.remove("state");
     tx.set("step", Json.object("type", "complete", "redirectTo", tx.path("returnTo").asString()));
     store.save("login_tx", tx);
@@ -525,10 +613,12 @@ public final class LoginManager {
   }
 
   private void fail(ObjectNode tx, ObjectNode provider, String code, String status) {
+    abandonFirstRegistration(tx, provider);
     tx.put("status", status);
     tx.set("step", Json.object("type", "fail", "code", code));
     tx.remove("state");
     tx.remove("pendingProfile");
+    tx.remove("firstTotpSecret");
     store.save("login_tx", tx);
     events.publish(
         "identity.login_failed",
@@ -549,6 +639,20 @@ public final class LoginManager {
             .target("login_tx", tx.path("id").asString())
             .failure(code)
             .build());
+  }
+
+  private void abandonFirstRegistration(ObjectNode tx, ObjectNode provider) {
+    if (tx.path("newAccount").asBoolean()
+        && tx.path("step").path("formId").asString("").equals("first_totp")
+        && tx.has("pendingProfile")
+        && provider.path("connectorType").asString().equals("team-account")
+        && store.get("account", tx.path("pendingAccount").asString(), false) == null) {
+      JsonNode profile = Json.read(secrets.decrypt(tx.path("pendingProfile").asString(), aad(tx)));
+      teamAccounts.abandonPendingRegistration(
+          provider.path("providerId").asString(),
+          profile.path("subject").asString(),
+          tx.path("id").asString());
+    }
   }
 
   private ObjectNode client(ObjectNode tx) {
@@ -614,7 +718,12 @@ public final class LoginManager {
   }
 
   private ObjectNode view(ObjectNode tx, ObjectNode p) {
-    schemas.validate("identity/steps.schema.json#/$defs/ClientStep", tx.path("step"));
+    JsonNode step = tx.path("step");
+    if (tx.path("status").asString().equals("pending") && tx.has("firstTotpSecret"))
+      step =
+          firstTotpStep(
+              secrets.decrypt(tx.path("firstTotpSecret").asString(), aad(tx) + ":first-totp"));
+    schemas.validate("identity/steps.schema.json#/$defs/ClientStep", step);
     return Json.object(
         "id",
         tx.path("id").asString(),
@@ -631,9 +740,49 @@ public final class LoginManager {
             "displayName",
             p.path("display").path("name")),
         "step",
-        tx.path("step"),
+        step,
         "expiresAt",
         tx.path("expiresAt").asString());
+  }
+
+  private ObjectNode firstTotpStep(String secret) {
+    var fields = new ArrayList<ObjectNode>();
+    if (secret != null)
+      fields.add(
+          Json.object(
+              "name",
+              "enrollment",
+              "kind",
+              "info",
+              "label",
+              Json.object(
+                  "en",
+                  "Add this secret to your authenticator: " + secret,
+                  "zh-CN",
+                  "请将此密钥添加到验证器：" + secret)));
+    fields.add(
+        Json.object(
+            "name",
+            "otp",
+            "kind",
+            "otp",
+            "required",
+            true,
+            "label",
+            Json.object("en", "Authenticator code", "zh-CN", "验证器代码"),
+            "pattern",
+            "^[0-9]{6}$",
+            "autocomplete",
+            "one-time-code"));
+    return Json.object(
+        "type",
+        "form",
+        "formId",
+        "first_totp",
+        "title",
+        Json.object("en", "Set up your first authenticator", "zh-CN", "登记首个验证器"),
+        "fields",
+        fields);
   }
 
   static String safeReturn(String path) {

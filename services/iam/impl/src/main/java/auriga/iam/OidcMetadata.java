@@ -1,7 +1,6 @@
 package auriga.iam;
 
 import java.net.URI;
-import java.net.http.*;
 import java.time.*;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,7 +10,6 @@ import tools.jackson.databind.JsonNode;
 /** Lazily loads and caches OIDC discovery documents. Secrets are never logged. */
 final class OidcMetadata {
   private static final Duration TTL = Duration.ofMinutes(10);
-  private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
   record Document(
       String issuer,
@@ -21,16 +19,18 @@ final class OidcMetadata {
       URI jwksUri,
       Instant fetchedAt) {}
 
-  private final HttpClient http;
+  private final OidcHttp http;
   private final Clock clock;
   private final ConcurrentHashMap<String, Document> cache = new ConcurrentHashMap<>();
 
-  OidcMetadata(HttpClient http, Clock clock) {
+  OidcMetadata(OidcHttp http, Clock clock) {
     this.http = http;
     this.clock = clock;
   }
 
   Document get(String issuer) {
+    requireIssuerUri(issuer);
+    http.validate(URI.create(issuer));
     String key = normalizeIssuer(issuer);
     Document cached = cache.get(key);
     if (cached != null && cached.fetchedAt().plus(TTL).isAfter(clock.instant())) return cached;
@@ -72,13 +72,7 @@ final class OidcMetadata {
     String outcome = "failure";
     URI discovery = URI.create(issuer + "/.well-known/openid-configuration");
     try {
-      HttpRequest request =
-          HttpRequest.newBuilder(discovery)
-              .timeout(TIMEOUT)
-              .header("Accept", "application/json")
-              .GET()
-              .build();
-      HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+      OidcHttp.Response response = http.send(discovery, "GET", null, java.util.Map.of());
       IamError.require(response.statusCode() == 200, "connector_unavailable", 502);
       JsonNode body = Json.MAPPER.readTree(response.body());
       String docIssuer = normalizeIssuer(body.path("issuer").asString(""));
@@ -90,9 +84,6 @@ final class OidcMetadata {
       URI jwks = absolute(issuer, body.path("jwks_uri").asString(""));
       outcome = "success";
       return new Document(issuer, authorization, token, userinfo, jwks, clock.instant());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw IamError.error("connector_unavailable", 502);
     } catch (java.io.IOException e) {
       throw IamError.error("connector_unavailable", 502);
     } finally {
@@ -105,12 +96,13 @@ final class OidcMetadata {
     }
   }
 
-  private static URI absolute(String issuer, String value) {
+  private URI absolute(String issuer, String value) {
     if (value == null || value.isBlank()) return null;
     URI uri = URI.create(value);
     if (!uri.isAbsolute()) uri = URI.create(issuer + (value.startsWith("/") ? value : "/" + value));
-    IamError.require(
-        "https".equals(uri.getScheme()) || "http".equals(uri.getScheme()), "invalid_config", 400);
+    http.validate(uri);
+    // These endpoints come from the authenticated issuer's discovery document, not overrides.
+    // The transport still enforces HTTPS and filters each address at socket resolution.
     return uri;
   }
 }
