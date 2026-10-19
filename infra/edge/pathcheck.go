@@ -38,25 +38,15 @@ func sanitizeRequestPath(r *http.Request) (string, bool) {
 	return cleaned, true
 }
 
-// instancePathOK allows normal instance app paths (including //, ;, %2f) but still rejects traversal.
+// instancePathOK allows normal instance app paths (including //, ;, %2f, and names like a..b)
+// but still rejects path segments that are exactly ".." (and encoded forms of that segment).
 func instancePathOK(r *http.Request) bool {
 	if r == nil || r.URL == nil {
 		return false
 	}
-	p := r.URL.Path
-	if strings.Contains(p, "/../") || strings.HasSuffix(p, "/..") || strings.Contains(p, `\..`) {
+	if hasDotDotSegment(r.URL.Path) {
 		return false
 	}
-	if path.Clean(p) != p && !strings.Contains(p, "/../") {
-		// Clean changed path — only reject when .. was involved
-		if strings.Contains(p, "..") {
-			return false
-		}
-	}
-	if strings.Contains(p, "..") {
-		return false
-	}
-	// Encoded dot-dot
 	for _, raw := range []string{r.URL.RawPath, r.RequestURI} {
 		if raw == "" {
 			continue
@@ -65,11 +55,30 @@ func instancePathOK(r *http.Request) bool {
 			raw = raw[:i]
 		}
 		lower := strings.ToLower(raw)
-		if strings.Contains(lower, "%2e%2e") || strings.Contains(lower, "..") {
+		// Encoded segment ".." only — not substrings inside filenames.
+		if strings.Contains(lower, "/%2e%2e/") || strings.HasSuffix(lower, "/%2e%2e") ||
+			strings.HasPrefix(lower, "%2e%2e/") || lower == "%2e%2e" ||
+			strings.Contains(lower, "/%2e./") || strings.Contains(lower, "/%.%2e/") {
+			return false
+		}
+		if hasDotDotSegment(raw) {
 			return false
 		}
 	}
 	return true
+}
+
+func hasDotDotSegment(p string) bool {
+	if p == "" {
+		return false
+	}
+	p = strings.ReplaceAll(p, `\`, "/")
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func hasEncodedSep(r *http.Request) bool {

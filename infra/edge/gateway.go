@@ -55,9 +55,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		return nil, err
 	}
 	hub := NewSessionConnHub()
-	if ms, ok := sessions.(*MemorySessionStore); ok {
-		ms.OnRevoke = hub.CancelSession
-	}
+	wireSessionRevoke(sessions, hub.CancelSession)
 	g := &Gateway{
 		Cfg:          cfg,
 		Log:          log,
@@ -369,7 +367,7 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		return
 	}
 	domain := openNonceCookieDomain(g.Cfg.InstanceParentDomain)
-	setOpenNonceCookie(w, g.Cfg.SecureCookies, domain, nonce, 60)
+	setOpenNonceCookie(w, g.Cfg.SecureCookies, domain, instanceID, nonce, 60)
 	loc := g.ticketRedirectURL(r, instanceID, ticket.Token)
 	http.Redirect(w, r, loc, http.StatusFound)
 }
@@ -500,7 +498,7 @@ func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceI
 		return
 	}
 	domain := openNonceCookieDomain(g.Cfg.InstanceParentDomain)
-	nonceName := openNonceCookieName(g.Cfg.SecureCookies, domain)
+	nonceName := openNonceCookieName(g.Cfg.SecureCookies, domain, instanceID)
 	nonce := getCookie(r, nonceName)
 	if nonce == "" {
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket_nav", "Forbidden", "open nonce cookie required", rid))
@@ -514,11 +512,11 @@ func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceI
 	sum := sha256.Sum256([]byte(nonce))
 	got := hex.EncodeToString(sum[:])
 	if ticket.NonceHash == "" || !strings.EqualFold(got, ticket.NonceHash) {
-		clearOpenNonceCookie(w, g.Cfg.SecureCookies, domain)
+		clearOpenNonceCookie(w, g.Cfg.SecureCookies, domain, instanceID)
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket_nav", "Forbidden", "open nonce mismatch", rid))
 		return
 	}
-	clearOpenNonceCookie(w, g.Cfg.SecureCookies, domain)
+	clearOpenNonceCookie(w, g.Cfg.SecureCookies, domain, instanceID)
 	if ticket.InstanceID != instanceID {
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket", "Forbidden", "ticket instance mismatch", rid))
 		return

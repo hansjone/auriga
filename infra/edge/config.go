@@ -203,6 +203,13 @@ func (c Config) validate() error {
 		if ah == parent || strings.HasSuffix(ah, suffix) {
 			return fmt.Errorf("instanceParentDomain %q would capture adminHost %q as an instance host", c.InstanceParentDomain, c.AdminHost)
 		}
+		// Nonce Domain cookie must cover the portal host or browsers drop it.
+		cookieDomain := openNonceCookieDomain(parent)
+		if cookieDomain != "" {
+			if ph != cookieDomain && !strings.HasSuffix(ph, "."+cookieDomain) {
+				return fmt.Errorf("portalHost %q is not under open-nonce cookie Domain %q derived from instanceParentDomain %q", c.PortalHost, cookieDomain, c.InstanceParentDomain)
+			}
+		}
 	}
 	for _, p := range c.TrustedProxies {
 		p = strings.TrimSpace(p)

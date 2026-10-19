@@ -36,7 +36,14 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
-  IamStore iamStore(javax.sql.DataSource source, TenantTransactionManager manager) {
+  @ConditionalOnMissingBean(IamStore.class)
+  IamStore iamStore(
+      org.springframework.beans.factory.ListableBeanFactory beans,
+      TenantTransactionManager manager) {
+    javax.sql.DataSource source =
+        beans.containsBean("iamDataSource")
+            ? beans.getBean("iamDataSource", javax.sql.DataSource.class)
+            : beans.getBean(javax.sql.DataSource.class);
     return new IamStore(new JdbcTemplate(source), manager);
   }
 
@@ -82,8 +89,23 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
-  SessionKv iamSessionKv(IamStore store, ContractSchemas schemas, Clock clock) {
-    return new PostgresSessionKv(store, schemas, clock);
+  @ConditionalOnMissingBean(SessionKv.class)
+  SessionKv iamSessionKv(
+      IamStore store,
+      ContractSchemas schemas,
+      Clock clock,
+      org.springframework.beans.factory.ObjectProvider<io.nats.client.Connection> nats,
+      Environment env) {
+    SessionKv postgres = new PostgresSessionKv(store, schemas, clock);
+    // Check flag before resolving Connection — getIfAvailable() would eagerly start NATS.
+    if (!env.getProperty("auriga.iam.session-kv-nats", Boolean.class, true)) {
+      return postgres;
+    }
+    io.nats.client.Connection connection = nats.getIfAvailable();
+    if (connection == null) {
+      return postgres;
+    }
+    return new CompositeSessionKv(postgres, new NatsSessionKv(connection, schemas));
   }
 
   @Bean
@@ -92,9 +114,12 @@ public class IamRuntimeConfiguration {
       SessionKv kv,
       TokenService tokens,
       Clock clock,
-      EventPublisher events,
+      @org.springframework.beans.factory.annotation.Qualifier("iamEventPublisher")
+          org.springframework.beans.factory.ObjectProvider<EventPublisher> iamEvents,
+      org.springframework.beans.factory.ObjectProvider<EventPublisher> events,
       AuditLogger audit) {
-    return new SessionManager(store, kv, tokens, clock, events, audit);
+    return new SessionManager(
+        store, kv, tokens, clock, iamEvents.getIfAvailable(events::getObject), audit);
   }
 
   @Bean
@@ -209,7 +234,9 @@ public class IamRuntimeConfiguration {
       TeamAccounts teamAccounts,
       SessionManager sessions,
       IdentityPolicyHooks hooks,
-      EventPublisher events,
+      @org.springframework.beans.factory.annotation.Qualifier("iamEventPublisher")
+          org.springframework.beans.factory.ObjectProvider<EventPublisher> iamEvents,
+      org.springframework.beans.factory.ObjectProvider<EventPublisher> events,
       AuditLogger audit,
       Clock clock,
       TokenService tokens) {
@@ -222,7 +249,7 @@ public class IamRuntimeConfiguration {
         teamAccounts,
         sessions,
         hooks,
-        events,
+        iamEvents.getIfAvailable(events::getObject),
         audit,
         clock,
         tokens.issuer());
@@ -296,6 +323,8 @@ public class IamRuntimeConfiguration {
               org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping>
           mappings)
       throws Exception {
+    // Scope to IAM HTTP surface so combined assemblies can also register orgApiChain.
+    http.securityMatcher("/api/iam/**");
     return auriga.common.security.AurigaWebSecurity.build(
         http,
         decoder,
