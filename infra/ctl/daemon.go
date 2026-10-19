@@ -232,7 +232,9 @@ func runStatus(dataDir string, out io.Writer) error {
 		return err
 	}
 	if !running {
-		fmt.Fprintf(out, "Status: stopped\nData directory: %s\n", dataDir)
+		if _, err := fmt.Fprintf(out, "Status: stopped\nData directory: %s\n", dataDir); err != nil {
+			return err
+		}
 		return errStatusStopped{}
 	}
 	_, err = fmt.Fprintf(out,
