@@ -1,4 +1,4 @@
-﻿package agenttest_test
+package agenttest_test
 
 import (
 	"context"
