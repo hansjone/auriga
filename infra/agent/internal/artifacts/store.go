@@ -118,9 +118,13 @@ func (s *Store) Ensure(ctx context.Context, holder, url, digest string, maxBytes
 	if err := s.Policy.AllowArtifactURL(url); err != nil {
 		return "", err
 	}
+	cap := s.Policy.MaxArtifactBytes
+	if cap <= 0 {
+		cap = policy.DefaultMaxArtifactBytes
+	}
 	limit := maxBytes
-	if limit <= 0 {
-		limit = s.Policy.MaxArtifactBytes
+	if limit <= 0 || limit > cap {
+		limit = cap
 	}
 
 	path := filepath.Join(s.Root, "sha256", hexDig)
@@ -245,6 +249,44 @@ func (s *Store) ReleaseAll(holder string) error {
 			e.LastUsed = now
 			refs[dig] = e
 		}
+	}
+	return s.saveRefsLocked(refs)
+}
+
+// SyncHolders releases digests previously held by holder that are not in want.
+// want digests may be "sha256:…" or bare hex. Call after Ensure on upgrade.
+func (s *Store) SyncHolders(holder string, want []string) error {
+	if err := validateHolder(holder); err != nil {
+		return err
+	}
+	keep := make(map[string]struct{}, len(want))
+	for _, d := range want {
+		hexDig, err := NormalizeDigest(d)
+		if err != nil {
+			return err
+		}
+		keep[hexDig] = struct{}{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	refs, err := s.loadRefsLocked()
+	if err != nil {
+		return err
+	}
+	now := s.Now().UTC()
+	for dig, e := range refs {
+		if e.Holders == nil {
+			continue
+		}
+		if _, held := e.Holders[holder]; !held {
+			continue
+		}
+		if _, ok := keep[dig]; ok {
+			continue
+		}
+		delete(e.Holders, holder)
+		e.LastUsed = now
+		refs[dig] = e
 	}
 	return s.saveRefsLocked(refs)
 }

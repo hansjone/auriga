@@ -199,6 +199,88 @@ func TestReleaseAll(t *testing.T) {
 	}
 }
 
+func TestRedirectOutsideAllowlistRejected(t *testing.T) {
+	p := policy.Default()
+	p.AllowedArtifactURLPrefixes = []string{"https://artifacts.example.com/"}
+	body := []byte("redir-body")
+	sum := sha256.Sum256(body)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+
+	st := artifacts.New(t.TempDir(), p)
+	st.Client = &http.Client{
+		CheckRedirect: st.Client.CheckRedirect,
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Host == "artifacts.example.com" {
+				return &http.Response{
+					StatusCode: http.StatusFound,
+					Header:     http.Header{"Location": []string{"https://evil.example.com/x"}},
+					Body:       io.NopCloser(strings.NewReader("")),
+					Request:    req,
+				}, nil
+			}
+			t.Fatalf("unexpected host %s", req.URL.Host)
+			return nil, nil
+		}),
+	}
+	_, err := st.Ensure(context.Background(), "h1", "https://artifacts.example.com/start", digest, 0)
+	if err == nil {
+		t.Fatal("expected redirect reject")
+	}
+}
+
+func TestEnsureMaxBytesTakesPolicyMin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(make([]byte, 50))
+	}))
+	t.Cleanup(srv.Close)
+	pol := anyPol()
+	pol.MaxArtifactBytes = 10
+	st := artifacts.New(t.TempDir(), pol)
+	st.Client = srv.Client()
+	sum := sha256.Sum256(make([]byte, 50))
+	// Caller asks for 1MiB but policy cap is 10 — must still reject.
+	_, err := st.Ensure(context.Background(), "h1", srv.URL+"/big", "sha256:"+hex.EncodeToString(sum[:]), 1<<20)
+	if err == nil || !strings.Contains(err.Error(), "max size") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSyncHoldersReleasesOldDigest(t *testing.T) {
+	oldBody := []byte("old-art")
+	newBody := []byte("new-art")
+	oldSum := sha256.Sum256(oldBody)
+	newSum := sha256.Sum256(newBody)
+	oldDig := "sha256:" + hex.EncodeToString(oldSum[:])
+	newDig := "sha256:" + hex.EncodeToString(newSum[:])
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "new") {
+			_, _ = w.Write(newBody)
+			return
+		}
+		_, _ = w.Write(oldBody)
+	}))
+	t.Cleanup(srv.Close)
+	st := artifacts.New(t.TempDir(), anyPol())
+	st.Client = srv.Client()
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	st.Now = func() time.Time { return now }
+
+	if _, err := st.Ensure(context.Background(), "inst_u", srv.URL+"/old", oldDig, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Ensure(context.Background(), "inst_u", srv.URL+"/new", newDig, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SyncHolders("inst_u", []string{newDig}); err != nil {
+		t.Fatal(err)
+	}
+	st.Now = func() time.Time { return now.Add(8 * 24 * time.Hour) }
+	n, err := st.GC(false)
+	if err != nil || n != 1 {
+		t.Fatalf("GC after sync: %d %v", n, err)
+	}
+}
+
 func TestCorruptRefsRebuild(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "refs.json"), []byte("{not-json"), 0o600); err != nil {

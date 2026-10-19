@@ -138,6 +138,13 @@ func TestRejectYAMLInjectionAndReservedEnv(t *testing.T) {
 	if _, err := renderer.Render(spec, opt); err == nil {
 		t.Fatal("newline in env value")
 	}
+	for _, key := range []string{"PATH", "HTTPS_PROXY", "LD_AUDIT", "NODE_PATH"} {
+		spec = base()
+		spec.Profile.Env = map[string]string{key: "x"}
+		if _, err := renderer.Render(spec, opt); err == nil {
+			t.Fatalf("reserved env %s", key)
+		}
+	}
 }
 
 func TestUnsealWrongGenerationFails(t *testing.T) {

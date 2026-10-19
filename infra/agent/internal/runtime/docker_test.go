@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -18,12 +19,14 @@ import (
 )
 
 type fakeEngine struct {
-	mu       sync.Mutex
-	creates  []map[string]any
-	networks []map[string]any
-	pulls    []string
-	started  []string
-	pullErr  string
+	mu           sync.Mutex
+	creates      []map[string]any
+	networks     []map[string]any
+	pulls        []string
+	started      []string
+	pullErr      string
+	inspectWrong bool // RepoDigests omit the requested digest
+	lastInspect  string
 }
 
 func (f *fakeEngine) handler() http.Handler {
@@ -45,12 +48,32 @@ func (f *fakeEngine) handler() http.Handler {
 		_, _ = w.Write([]byte(`{"status":"Pull complete"}` + "\n"))
 	})
 	mux.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/json") {
-			dig := "sha256:" + strings.Repeat("ab", 32)
-			_, _ = w.Write([]byte(`{"Id":"` + dig + `","RepoDigests":["registry.example.com/auriga/dsh@` + dig + `"]}`))
+		if !strings.HasSuffix(r.URL.Path, "/json") {
+			http.NotFound(w, r)
 			return
 		}
-		http.NotFound(w, r)
+		// Path is /images/<escaped-ref>/json — ref is repo@sha256:… (manifest digest).
+		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/images/"), "/json")
+		if unesc, err := url.PathUnescape(name); err == nil {
+			name = unesc
+		}
+		f.mu.Lock()
+		f.lastInspect = name
+		wrong := f.inspectWrong
+		f.mu.Unlock()
+
+		manifestDig := "sha256:" + strings.Repeat("ab", 32)
+		if _, dig, ok := strings.Cut(name, "@"); ok {
+			manifestDig = dig
+		}
+		// Real Engine: Id is config digest, distinct from manifest digest in RepoDigests.
+		configID := "sha256:" + strings.Repeat("cd", 32)
+		repoDigests := `["registry.example.com/auriga/dsh@` + manifestDig + `"]`
+		if wrong {
+			other := "sha256:" + strings.Repeat("ef", 32)
+			repoDigests = `["registry.example.com/auriga/dsh@` + other + `"]`
+		}
+		_, _ = w.Write([]byte(`{"Id":"` + configID + `","RepoDigests":` + repoDigests + `}`))
 	})
 	mux.HandleFunc("/networks/create", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -226,6 +249,47 @@ func TestPullStreamError(t *testing.T) {
 	err := client.PullImage(context.Background(), "registry.example.com/auriga/dsh@sha256:"+strings.Repeat("ab", 32))
 	if err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPullRejectsDigestMismatch(t *testing.T) {
+	fake := &fakeEngine{inspectWrong: true}
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	client, _ := runtime.DialEngine(srv.URL, time.Second)
+	img := "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32)
+	err := client.PullImage(context.Background(), img)
+	if err == nil || !strings.Contains(err.Error(), "missing digest") {
+		t.Fatalf("got %v", err)
+	}
+	fake.mu.Lock()
+	got := fake.lastInspect
+	fake.mu.Unlock()
+	if got != img {
+		t.Fatalf("inspect target=%q want full ref %q", got, img)
+	}
+}
+
+func TestNewDockerZeroPolicyDeniesImages(t *testing.T) {
+	fake := &fakeEngine{}
+	srv := httptest.NewServer(fake.handler())
+	t.Cleanup(srv.Close)
+	d, err := runtime.NewDocker(runtime.DockerConfig{Host: srv.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Policy.AllowAnyImage {
+		t.Fatal("zero policy must not AllowAnyImage")
+	}
+	err = d.Ensure(context.Background(), &runtime.Spec{
+		InstanceID: "inst_z",
+		Image:      "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32),
+		HomeBind:   t.TempDir(),
+		MetaBind:   t.TempDir(),
+		HostUID:    200001,
+	}, nil)
+	if err == nil {
+		t.Fatal("expected deny without allowlist")
 	}
 }
 

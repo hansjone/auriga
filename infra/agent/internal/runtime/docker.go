@@ -40,6 +40,7 @@ type DockerConfig struct {
 }
 
 // NewDocker dials the Engine API.
+// Zero-value Policy uses deny-by-default Default(); AllowAnyImage is never implied.
 func NewDocker(cfg DockerConfig) (*Docker, error) {
 	host := cfg.Host
 	if host == "" {
@@ -50,23 +51,46 @@ func NewDocker(cfg DockerConfig) (*Docker, error) {
 		return nil, err
 	}
 	d := NewDockerWithClient(client, cfg.DataRoot)
-	if cfg.Policy.MaxCPUMillis > 0 || len(cfg.Policy.AllowedImageRepos) > 0 || cfg.Policy.AllowAnyImage {
-		d.Policy = cfg.Policy
-	}
+	d.Policy = normalizeDockerPolicy(cfg.Policy)
 	return d, nil
 }
 
 // NewDockerWithClient wraps an existing EngineClient (tests / custom dial).
+// Policy defaults to deny-all images; tests must set AllowAnyImage or AllowedImageRepos explicitly.
 func NewDockerWithClient(client *EngineClient, dataRoot string) *Docker {
-	p := policy.Default()
-	p.AllowAnyImage = true // tests; production passes Policy via DockerConfig
 	return &Docker{
 		Client:    client,
 		DataRoot:  dataRoot,
-		Policy:    p,
+		Policy:    policy.Default(),
 		endpoints: make(map[string]string),
 		ports:     make(map[string]uint32),
 	}
+}
+
+// normalizeDockerPolicy fills resource caps from Default when zero.
+// AllowAnyImage stays false unless the caller set it (tests only).
+func normalizeDockerPolicy(p policy.Policy) policy.Policy {
+	def := policy.Default()
+	if p.MaxCPUMillis <= 0 {
+		p.MaxCPUMillis = def.MaxCPUMillis
+	}
+	if p.MaxMemoryMB <= 0 {
+		p.MaxMemoryMB = def.MaxMemoryMB
+	}
+	if p.MaxPIDs <= 0 {
+		p.MaxPIDs = def.MaxPIDs
+	}
+	if p.MaxArtifactBytes <= 0 {
+		p.MaxArtifactBytes = def.MaxArtifactBytes
+	}
+	if p.ArtifactConnectTimeout <= 0 {
+		p.ArtifactConnectTimeout = def.ArtifactConnectTimeout
+	}
+	if p.ArtifactTotalTimeout <= 0 {
+		p.ArtifactTotalTimeout = def.ArtifactTotalTimeout
+	}
+	p.AllowedArtifactURLPrefixes = policy.NormalizeURLPrefixes(p.AllowedArtifactURLPrefixes)
+	return p
 }
 
 func (d *Docker) Name() string { return "docker" }

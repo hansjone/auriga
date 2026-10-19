@@ -97,6 +97,7 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		}
 
 		if p.Artifacts != nil {
+			var wantDigests []string
 			for _, pl := range full.Plugins {
 				if pl == nil || pl.Url == "" || pl.Digest == "" {
 					continue
@@ -104,12 +105,18 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, pl.Url, pl.Digest, 0); err != nil {
 					return fmt.Errorf("plugin %s: %w", pl.Name, err)
 				}
+				wantDigests = append(wantDigests, pl.Digest)
 			}
 			if dsh := full.GetDsh(); dsh != nil && dsh.Url != "" && dsh.Digest != "" && dsh.Image == "" {
 				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, dsh.Url, dsh.Digest, 0); err != nil {
 					return fmt.Errorf("dsh runtime: %w", err)
 				}
+				wantDigests = append(wantDigests, dsh.Digest)
 			}
+			if err := p.Artifacts.SyncHolders(full.InstanceId, wantDigests); err != nil {
+				return fmt.Errorf("artifacts sync: %w", err)
+			}
+			_, _ = p.Artifacts.GC(false)
 		}
 
 		rend, err := renderer.Render(full, renderer.Options{

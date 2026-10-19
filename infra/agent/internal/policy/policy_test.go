@@ -22,6 +22,40 @@ func TestAllowArtifactURL(t *testing.T) {
 	}
 }
 
+func TestArtifactURLPrefixNeedsTrailingSlash(t *testing.T) {
+	p := policy.Default()
+	// Without trailing slash normalization, https://a.example.com would match a.example.com.evil.
+	p.AllowedArtifactURLPrefixes = []string{"https://a.example.com"}
+	if err := p.AllowArtifactURL("https://a.example.com/pkg"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AllowArtifactURL("https://a.example.com.evil/pkg"); err == nil {
+		t.Fatal("host suffix bypass")
+	}
+	if err := p.AllowArtifactURL("https://a.example.comx/pkg"); err == nil {
+		t.Fatal("path prefix bypass")
+	}
+}
+
+func TestLoadNormalizesPrefixesAndClearsAllowAny(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent-policy.yaml")
+	raw := []byte("allowedArtifactURLPrefixes:\n  - https://cdn.example.com\nallowAnyImage: true\nallowAnyArtifact: true\n")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.AllowedArtifactURLPrefixes) != 1 || p.AllowedArtifactURLPrefixes[0] != "https://cdn.example.com/" {
+		t.Fatalf("prefixes=%v", p.AllowedArtifactURLPrefixes)
+	}
+	if p.AllowAnyImage || p.AllowAnyArtifact {
+		t.Fatal("AllowAny* must be cleared on Load")
+	}
+}
+
 func TestAllowImageAndClamp(t *testing.T) {
 	p := policy.Default()
 	p.AllowedImageRepos = []string{"registry.example.com/auriga/"}

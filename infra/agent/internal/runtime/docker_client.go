@@ -167,11 +167,12 @@ func (c *EngineClient) PullImage(ctx context.Context, image string) error {
 			}
 		}
 	}
-	insp, err := c.ImageInspect(ctx, digest)
+	// Inspect the full repo@sha256:… reference. Manifest digest ≠ image config Id.
+	insp, err := c.ImageInspect(ctx, image)
 	if err != nil {
 		return err
 	}
-	if !imageHasDigest(insp, digest) {
+	if !imageHasRepoDigest(insp, image, digest) {
 		return fmt.Errorf("docker: pulled image missing digest %s", digest)
 	}
 	return nil
@@ -192,17 +193,19 @@ func (c *EngineClient) ImageInspect(ctx context.Context, nameOrDigest string) (m
 	return out, nil
 }
 
-func imageHasDigest(insp map[string]any, want string) bool {
-	if insp == nil {
+// imageHasRepoDigest checks RepoDigests for the pinned manifest digest.
+// Image Id is the config digest and must not be compared to the manifest digest.
+func imageHasRepoDigest(insp map[string]any, imageRef, wantDigest string) bool {
+	if insp == nil || wantDigest == "" {
 		return false
-	}
-	if id, _ := insp["Id"].(string); id == want {
-		return true
 	}
 	repos, _ := insp["RepoDigests"].([]any)
 	for _, r := range repos {
 		s, _ := r.(string)
-		if strings.Contains(s, "@"+want) {
+		if s == imageRef {
+			return true
+		}
+		if strings.HasSuffix(s, "@"+wantDigest) {
 			return true
 		}
 	}

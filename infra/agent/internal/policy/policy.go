@@ -84,7 +84,31 @@ func Load(path string) (Policy, error) {
 	if p.ArtifactTotalTimeout <= 0 {
 		p.ArtifactTotalTimeout = 10 * time.Minute
 	}
+	p.AllowedArtifactURLPrefixes = NormalizeURLPrefixes(p.AllowedArtifactURLPrefixes)
+	// AllowAny* from YAML is ignored in production loads — only tests set them in code.
+	p.AllowAnyArtifact = false
+	p.AllowAnyImage = false
 	return p, nil
+}
+
+// NormalizeURLPrefixes ensures each prefix ends with "/" so HasPrefix cannot
+// match a longer host/path (e.g. https://a.example.com vs https://a.example.com.evil/).
+func NormalizeURLPrefixes(prefixes []string) []string {
+	if len(prefixes) == 0 {
+		return prefixes
+	}
+	out := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !strings.HasSuffix(p, "/") {
+			p += "/"
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // ClampResources returns min(requested, policy max). Zero request uses a small default then clamps.
@@ -132,7 +156,7 @@ func (p Policy) AllowArtifactURL(raw string) error {
 		return fmt.Errorf("policy: no allowedArtifactURLPrefixes configured")
 	}
 	full := u.String()
-	for _, prefix := range p.AllowedArtifactURLPrefixes {
+	for _, prefix := range NormalizeURLPrefixes(p.AllowedArtifactURLPrefixes) {
 		if prefix != "" && strings.HasPrefix(full, prefix) {
 			return nil
 		}

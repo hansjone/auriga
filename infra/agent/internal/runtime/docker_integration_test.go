@@ -8,13 +8,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 )
 
 // Integration test against a real Docker Engine. Skipped in default CI
 // (build tag docker). Run: go test -tags docker ./internal/runtime/ -count=1
 func TestDockerIntegrationSmoke(t *testing.T) {
-	d, err := runtime.NewDocker(runtime.DockerConfig{Timeout: 30 * time.Second})
+	pol := policy.Default()
+	pol.AllowAnyImage = true // integration only
+	d, err := runtime.NewDocker(runtime.DockerConfig{Timeout: 30 * time.Second, Policy: pol})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,11 +31,13 @@ func TestDockerIntegrationSmoke(t *testing.T) {
 		t.Skip("set AURIGA_TEST_IMAGE=repo@sha256:… to run")
 	}
 	home := t.TempDir()
+	meta := t.TempDir()
 	spec := &runtime.Spec{
 		InstanceID: "itest",
 		Generation: 1,
 		Image:      image,
 		HomeBind:   home,
+		MetaBind:   meta,
 		HostUID:    200001,
 		CPUMillis:  500,
 		MemoryMB:   256,

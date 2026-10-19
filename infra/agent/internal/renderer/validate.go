@@ -38,13 +38,26 @@ func validateEnvKey(k string) error {
 		return fmt.Errorf("renderer: invalid env key %q", k)
 	}
 	upper := strings.ToUpper(k)
-	if strings.HasPrefix(upper, "AURIGA_") || upper == "DSH_HOME" ||
-		upper == "LD_PRELOAD" || upper == "LD_LIBRARY_PATH" ||
-		upper == "NODE_OPTIONS" || upper == "OPENSSL_CONF" ||
-		strings.HasPrefix(upper, "PYTHON") || upper == "HOME" {
+	if isReservedEnvKey(upper) {
 		return fmt.Errorf("renderer: reserved env key %q", k)
 	}
 	return nil
+}
+
+func isReservedEnvKey(upper string) bool {
+	switch upper {
+	case "DSH_HOME", "HOME", "PATH", "OPENSSL_CONF",
+		"NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS",
+		"SSL_CERT_FILE", "SSL_CERT_DIR":
+		return true
+	}
+	if strings.HasPrefix(upper, "AURIGA_") ||
+		strings.HasPrefix(upper, "PYTHON") ||
+		strings.HasPrefix(upper, "LD_") ||
+		strings.HasSuffix(upper, "_PROXY") {
+		return true
+	}
+	return false
 }
 
 func validateIdentity(id, field string) error {
