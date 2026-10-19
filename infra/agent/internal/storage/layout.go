@@ -18,8 +18,8 @@ const (
 // Layout creates and migrates instance directories under <data>/instances/<id>/.
 type Layout struct {
 	InstancesDir string
-	// Chown, when set, changes ownership of instance dirs to the instance host uid/gid.
-	// On systems without privilege this may be a no-op stub.
+	// Chown, when set, changes ownership of instance dirs to the instance host uid/gid
+	// without following symlinks (Lchown).
 	Chown func(path string, uid, gid int) error
 }
 
@@ -33,10 +33,13 @@ type Paths struct {
 
 // For returns paths for instanceID without creating them.
 func (l *Layout) For(instanceID string) (Paths, error) {
-	if err := validateInstanceID(instanceID); err != nil {
+	if err := ValidateInstanceID(instanceID); err != nil {
 		return Paths{}, err
 	}
 	root := filepath.Join(l.InstancesDir, instanceID)
+	if err := AssertUnderRoot(l.InstancesDir, root); err != nil {
+		return Paths{}, err
+	}
 	return Paths{
 		Root:  root,
 		Home:  filepath.Join(root, "home"),
@@ -51,13 +54,14 @@ func (l *Layout) Ensure(instanceID string, uid, gid int) (Paths, error) {
 	if err != nil {
 		return Paths{}, err
 	}
-	for _, dir := range []string{
+	dirs := []string{
 		p.Root, p.Home, p.Meta, p.Trash,
 		filepath.Join(p.Home, ".dsh"),
 		filepath.Join(p.Home, ".memwiki"),
 		filepath.Join(p.Home, ".auriga"),
 		filepath.Join(p.Home, "workspace"),
-	} {
+	}
+	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return Paths{}, fmt.Errorf("storage: mkdir %s: %w", dir, err)
 		}
@@ -69,7 +73,7 @@ func (l *Layout) Ensure(instanceID string, uid, gid int) (Paths, error) {
 		}
 	}
 	if uid > 0 && l.Chown != nil {
-		for _, dir := range []string{p.Root, p.Home, p.Meta, p.Trash} {
+		for _, dir := range dirs {
 			if err := l.Chown(dir, uid, gid); err != nil {
 				return Paths{}, fmt.Errorf("storage: chown %s: %w", dir, err)
 			}
@@ -99,7 +103,6 @@ func (l *Layout) SchemaVersion(instanceID string) (uint32, error) {
 }
 
 // Migrate runs idempotent steps until local schema >= want.
-// Migrations are local-only (no network / other hosts).
 func (l *Layout) Migrate(instanceID string, want uint32) error {
 	if want == 0 {
 		return nil
@@ -114,14 +117,10 @@ func (l *Layout) Migrate(instanceID string, want uint32) error {
 	}
 	for cur < want {
 		next := cur + 1
-		if next > CurrentSchema && next > want {
-			return fmt.Errorf("storage: unknown schema version %d", next)
-		}
 		switch next {
 		case 1:
 			// v1 is the initial layout; Ensure already created it.
 		default:
-			// Future steps go here; unknown versions above CurrentSchema fail.
 			if next > CurrentSchema {
 				return fmt.Errorf("storage: cannot migrate to schema %d (agent supports %d)", want, CurrentSchema)
 			}
@@ -168,7 +167,7 @@ func (l *Layout) DiskUsageMB(instanceID string) (int64, error) {
 	return (total + (1<<20 - 1)) >> 20, nil
 }
 
-// SoftQuotaExceeded reports whether usage exceeds diskGB (soft limit when project quotas unavailable).
+// SoftQuotaExceeded reports whether usage exceeds diskGB.
 func (l *Layout) SoftQuotaExceeded(instanceID string, diskGB int64) (bool, int64, error) {
 	if diskGB <= 0 {
 		return false, 0, nil
@@ -179,14 +178,4 @@ func (l *Layout) SoftQuotaExceeded(instanceID string, diskGB int64) (bool, int64
 	}
 	limitMB := diskGB * 1024
 	return used > limitMB, used, nil
-}
-
-func validateInstanceID(id string) error {
-	if id == "" {
-		return fmt.Errorf("storage: empty instance id")
-	}
-	if strings.Contains(id, "..") || strings.ContainsAny(id, `/\`) {
-		return fmt.Errorf("storage: invalid instance id")
-	}
-	return nil
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
@@ -41,10 +42,14 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	art := artifacts.New(filepath.Join(root, "artifacts"))
+	pol := policy.Default()
+	pol.AllowAnyArtifact = true
+	art := artifacts.New(filepath.Join(root, "artifacts"), pol)
 	art.Client = srv.Client()
 	layout := &storage.Layout{InstancesDir: filepath.Join(root, "instances")}
+	uids := storage.NewUIDTable(filepath.Join(root, "agent"))
 	inner := runtime.NewFake()
+	imgDig := "sha256:" + hex.EncodeToString(sum[:])
 	specs := memSpecs{
 		"prep1": &nodev1.InstanceSpec{
 			InstanceId: "prep1",
@@ -52,10 +57,10 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 			OwnerId:    "u1",
 			TenantId:   "t1",
 			Dsh: &nodev1.DshRuntime{
-				Image: "registry.example.com/dsh@sha256:" + hex.EncodeToString(sum[:]),
+				Image: "registry.example.com/auriga/dsh@" + imgDig,
 			},
 			Plugins: []*nodev1.PluginRef{{
-				Name: "auriga-dsh", Version: "1.0.0", Url: srv.URL, Digest: digest, Enabled: true,
+				Name: "auriga-dsh", Version: "1.0.0", Url: srv.URL + "/p", Digest: digest, Enabled: true,
 			}},
 			Resources: &nodev1.Resources{CpuMillis: 1000, MemoryMb: 512, Pids: 128},
 			Profile:   &nodev1.Profile{ListenPort: 7860},
@@ -69,8 +74,11 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 		Specs:          specs,
 		Artifacts:      art,
 		Layout:         layout,
+		UIDs:           uids,
+		Policy:         policy.Default(),
 		SealingPrivate: priv,
 		PlatformURL:    "https://edge.example.com",
+		Chown:          storage.Lchown,
 	}
 	if err := prep.Ensure(context.Background(), &runtime.Spec{InstanceID: "prep1", Generation: 1}, &runtime.Rendered{}); err != nil {
 		t.Fatal(err)
@@ -82,5 +90,8 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(art.Root, "sha256", hex.EncodeToString(sum[:]))); err != nil {
 		t.Fatal("artifact missing:", err)
+	}
+	if err := prep.Remove(context.Background(), "prep1"); err != nil {
+		t.Fatal(err)
 	}
 }

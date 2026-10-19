@@ -26,6 +26,7 @@ type Spec struct {
 	PIDs       int64
 	HostUID    int
 	HomeBind   string // host path mounted at /home/dsh
+	MetaBind   string // host meta path mounted read-only at /run/auriga
 	ListenPort uint32
 	Env        map[string]string
 	Labels     map[string]string

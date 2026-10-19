@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
+	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -21,17 +22,17 @@ type SpecSource interface {
 }
 
 // Preparing wraps an inner Driver and performs artifact fetch, directory
-// setup, and config render before Ensure. This lets the A1 reconciler keep
-// calling Ensure with a minimal Spec while A2 still prepares the instance.
+// setup, and config render before Ensure.
 type Preparing struct {
 	Inner          Driver
 	Specs          SpecSource
 	Artifacts      *artifacts.Store
 	Layout         *storage.Layout
+	UIDs           *storage.UIDTable
+	Policy         policy.Policy
 	SealingPrivate [32]byte
 	PlatformURL    string
-	// Chown sets directory ownership; optional.
-	Chown func(path string, uid, gid int) error
+	Chown          func(path string, uid, gid int) error
 }
 
 func (p *Preparing) Name() string {
@@ -52,16 +53,31 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	if s == nil {
 		return fmt.Errorf("preparing: nil spec")
 	}
+	if err := storage.ValidateInstanceID(s.InstanceID); err != nil {
+		return err
+	}
 	full, err := p.Specs.GetDesired(s.InstanceID)
 	if err != nil {
 		return err
 	}
 	if full == nil {
-		// Fall through for tests that only pass runtime.Spec.
 		return p.Inner.Ensure(ctx, s, r)
 	}
+	if err := storage.ValidateInstanceID(full.InstanceId); err != nil {
+		return err
+	}
 
-	uid := HostUIDFor(full.InstanceId)
+	uid := s.HostUID
+	if p.UIDs != nil {
+		uid, err = p.UIDs.Allocate(full.InstanceId)
+		if err != nil {
+			return err
+		}
+	}
+	if uid < 200000 {
+		return fmt.Errorf("preparing: missing uid allocation")
+	}
+
 	if p.Layout != nil {
 		if p.Chown != nil {
 			p.Layout.Chown = p.Chown
@@ -80,18 +96,17 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 			}
 		}
 
-		// Artifacts: plugin packages and (when not using image) runtime archive.
 		if p.Artifacts != nil {
 			for _, pl := range full.Plugins {
 				if pl == nil || pl.Url == "" || pl.Digest == "" {
 					continue
 				}
-				if _, err := p.Artifacts.Ensure(ctx, pl.Url, pl.Digest); err != nil {
+				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, pl.Url, pl.Digest, 0); err != nil {
 					return fmt.Errorf("plugin %s: %w", pl.Name, err)
 				}
 			}
 			if dsh := full.GetDsh(); dsh != nil && dsh.Url != "" && dsh.Digest != "" && dsh.Image == "" {
-				if _, err := p.Artifacts.Ensure(ctx, dsh.Url, dsh.Digest); err != nil {
+				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, dsh.Url, dsh.Digest, 0); err != nil {
 					return fmt.Errorf("dsh runtime: %w", err)
 				}
 			}
@@ -102,6 +117,9 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 			HomeDir:        paths.Home,
 			PlatformURL:    p.PlatformURL,
 			SealingPrivate: p.SealingPrivate,
+			OwnerUID:       uid,
+			OwnerGID:       uid,
+			Chown:          p.Chown,
 		})
 		if err != nil {
 			return err
@@ -116,6 +134,7 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 			return err
 		}
 		s.HomeBind = paths.Home
+		s.MetaBind = paths.Meta
 		s.HostUID = uid
 		s.Generation = full.Generation
 		s.Labels = full.Labels
@@ -124,6 +143,8 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 			s.MemoryMB = full.Resources.MemoryMb
 			s.PIDs = full.Resources.Pids
 		}
+		cpu, mem, pids := p.Policy.ClampResources(s.CPUMillis, s.MemoryMB, s.PIDs)
+		s.CPUMillis, s.MemoryMB, s.PIDs = cpu, mem, pids
 		if full.GetProfile() != nil {
 			s.ListenPort = full.Profile.ListenPort
 		}
@@ -144,6 +165,12 @@ func (p *Preparing) Stop(ctx context.Context, id string, grace time.Duration) er
 func (p *Preparing) Remove(ctx context.Context, id string) error {
 	if err := p.Inner.Remove(ctx, id); err != nil {
 		return err
+	}
+	if p.Artifacts != nil {
+		_ = p.Artifacts.ReleaseAll(id)
+	}
+	if p.UIDs != nil {
+		_ = p.UIDs.Release(id)
 	}
 	if p.Layout != nil {
 		_ = p.Layout.Remove(id)

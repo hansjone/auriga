@@ -127,34 +127,86 @@ func (c *EngineClient) Ping(ctx context.Context) error {
 }
 
 func (c *EngineClient) PullImage(ctx context.Context, image string) error {
-	// image must be repo@sha256:… — Engine verifies digest.
 	q := url.Values{}
 	repo, digest, ok := strings.Cut(image, "@")
-	if ok {
-		q.Set("fromImage", repo)
-		q.Set("tag", digest)
-	} else {
-		name, tag, found := strings.Cut(image, ":")
-		if !found {
-			name, tag = image, "latest"
-		}
-		q.Set("fromImage", name)
-		q.Set("tag", tag)
+	if !ok || !strings.HasPrefix(digest, "sha256:") {
+		return fmt.Errorf("docker: image must be repo@sha256:…")
 	}
+	q.Set("fromImage", repo)
+	q.Set("tag", digest)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/images/create?"+q.Encode(), nil)
 	if err != nil {
 		return err
 	}
-	resp, err := c.HTTP.Do(req)
+	// Pulls use a long timeout independent of short Engine ops.
+	client := *c.HTTP
+	client.Timeout = 30 * time.Minute
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("docker: pull %s: status %d", image, resp.StatusCode)
 	}
+	dec := json.NewDecoder(resp.Body)
+	for {
+		var msg map[string]any
+		if err := dec.Decode(&msg); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("docker: pull stream: %w", err)
+		}
+		if errMsg, _ := msg["error"].(string); errMsg != "" {
+			return fmt.Errorf("docker: pull: %s", errMsg)
+		}
+		if detail, ok := msg["errorDetail"].(map[string]any); ok {
+			if m, _ := detail["message"].(string); m != "" {
+				return fmt.Errorf("docker: pull: %s", m)
+			}
+		}
+	}
+	insp, err := c.ImageInspect(ctx, digest)
+	if err != nil {
+		return err
+	}
+	if !imageHasDigest(insp, digest) {
+		return fmt.Errorf("docker: pulled image missing digest %s", digest)
+	}
 	return nil
+}
+
+func (c *EngineClient) ImageInspect(ctx context.Context, nameOrDigest string) (map[string]any, error) {
+	raw, status, err := c.doJSON(ctx, http.MethodGet, "/images/"+url.PathEscape(nameOrDigest)+"/json", nil, http.StatusOK, http.StatusNotFound)
+	if status == http.StatusNotFound {
+		return nil, fmt.Errorf("docker: image not found after pull")
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func imageHasDigest(insp map[string]any, want string) bool {
+	if insp == nil {
+		return false
+	}
+	if id, _ := insp["Id"].(string); id == want {
+		return true
+	}
+	repos, _ := insp["RepoDigests"].([]any)
+	for _, r := range repos {
+		s, _ := r.(string)
+		if strings.Contains(s, "@"+want) {
+			return true
+		}
+	}
+	return false
 }
 
 type containerCreateResponse struct {

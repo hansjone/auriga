@@ -44,10 +44,35 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
-func TestRejectPathEscape(t *testing.T) {
+func TestRejectPathEscapeAndDot(t *testing.T) {
 	l := &storage.Layout{InstancesDir: t.TempDir()}
-	if _, err := l.Ensure("../evil", 0, 0); err == nil {
-		t.Fatal("expected error")
+	for _, id := range []string{"../evil", ".", "..", "", "a/b", "a\\b", "a:b", " a", ".hidden"} {
+		if _, err := l.Ensure(id, 0, 0); err == nil {
+			t.Fatalf("expected reject for %q", id)
+		}
+		if err := l.Remove(id); err == nil {
+			t.Fatalf("Remove(%q) should fail", id)
+		}
+	}
+}
+
+func TestChownRecursiveHome(t *testing.T) {
+	l := &storage.Layout{InstancesDir: t.TempDir()}
+	seen := map[string]bool{}
+	l.Chown = func(path string, uid, gid int) error {
+		seen[filepath.Base(path)] = true
+		if uid != 200001 || gid != 200001 {
+			t.Fatalf("uid/gid %d/%d", uid, gid)
+		}
+		return nil
+	}
+	if _, err := l.Ensure("inst_ch", 200001, 200001); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"home", "meta", "workspace", ".dsh"} {
+		if !seen[name] {
+			t.Fatalf("missing chown of %s: %v", name, seen)
+		}
 	}
 }
 
@@ -57,16 +82,14 @@ func TestSoftQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	big := make([]byte, 2<<20) // 2 MiB
+	big := make([]byte, 2<<20)
 	if err := os.WriteFile(filepath.Join(p.Home, "workspace", "blob"), big, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// diskGB=0 → no limit
 	over, _, err := l.SoftQuotaExceeded("q1", 0)
 	if err != nil || over {
 		t.Fatalf("no limit: over=%v err=%v", over, err)
 	}
-	// 1 GB limit, 2 MiB used → not over
 	over, used, err := l.SoftQuotaExceeded("q1", 1)
 	if err != nil || over || used < 2 {
 		t.Fatalf("under: over=%v used=%d err=%v", over, used, err)

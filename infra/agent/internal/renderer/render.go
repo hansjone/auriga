@@ -13,37 +13,61 @@ import (
 	"strings"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"gopkg.in/yaml.v3"
+)
+
+// Container paths for files mounted read-only at /run/auriga.
+const (
+	ContainerMetaRoot       = "/run/auriga"
+	ContainerIdentityKeys   = ContainerMetaRoot + "/identity-keys.json"
+	ContainerInstanceToken  = ContainerMetaRoot + "/instance.token"
+	ContainerAIGatewayToken = ContainerMetaRoot + "/ai-gateway.token"
+	ContainerEnvFile        = ContainerMetaRoot + "/env"
+	ContainerCordisPatch    = ContainerMetaRoot + "/cordis.patch.yml"
+	ContainerPackageJSON    = ContainerMetaRoot + "/package.json"
+	ContainerDSHHome        = "/home/dsh/.dsh"
 )
 
 // Result is the rendered digest and key file paths (never log secret contents).
 type Result struct {
-	Digest            string
-	IdentityKeysFile  string
-	InstanceTokenFile string
-	EnvFile           string
-	CordisPatchFile   string
-	PackageJSONFile   string
+	Digest             string
+	IdentityKeysFile   string
+	InstanceTokenFile  string
+	AIGatewayTokenFile string
+	EnvFile            string
+	CordisPatchFile    string
+	PackageJSONFile    string
 }
 
 // Options controls where files are written.
 type Options struct {
-	// MetaDir is instances/<id>/meta.
-	MetaDir string
-	// HomeDir is instances/<id>/home (DSH_HOME becomes home/.dsh).
-	HomeDir string
-	// PlatformURL is AURIGA_PLATFORM_URL (edge internal entry).
-	PlatformURL string
-	// SealingPrivate decrypts SealedSecret fields; required when secrets are sealed.
+	MetaDir        string
+	HomeDir        string
+	PlatformURL    string
 	SealingPrivate [32]byte
-	// RestrictFile tightens permissions on secret files (default chmod 0600).
-	RestrictFile func(path string) error
+	RestrictFile   func(path string) error
+	// OwnerUID/GID set after write for secret files (0 = skip).
+	OwnerUID int
+	OwnerGID int
+	Chown    func(path string, uid, gid int) error
 }
 
 // Render writes meta/ config from spec. Same spec → same digest.
-// Secret values are written only to restricted files and never returned.
 func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	if spec == nil || spec.InstanceId == "" {
 		return Result{}, fmt.Errorf("renderer: missing instance")
+	}
+	if err := validateIdentity(spec.InstanceId, "instanceId"); err != nil {
+		return Result{}, err
+	}
+	if err := validateIdentity(spec.OwnerId, "ownerId"); err != nil {
+		return Result{}, err
+	}
+	if err := validateIdentity(spec.TenantId, "tenantId"); err != nil {
+		return Result{}, err
+	}
+	if err := validatePlatformURL(opt.PlatformURL); err != nil {
+		return Result{}, err
 	}
 	if opt.MetaDir == "" {
 		return Result{}, fmt.Errorf("renderer: MetaDir required")
@@ -66,43 +90,57 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	}
 
 	pkgPath := filepath.Join(opt.MetaDir, "package.json")
-	if err := writeAtomic(pkgPath, buildPackageJSON(spec), 0o644, nil); err != nil {
+	if err := writeAtomic(pkgPath, buildPackageJSON(spec), 0o644, nil, opt); err != nil {
 		return Result{}, err
 	}
 	cordisPath := filepath.Join(opt.MetaDir, "cordis.patch.yml")
-	if err := writeAtomic(cordisPath, buildCordisPatch(spec, opt), 0o644, nil); err != nil {
+	cordisRaw, err := buildCordisPatch(spec)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := writeAtomic(cordisPath, cordisRaw, 0o644, nil, opt); err != nil {
 		return Result{}, err
 	}
 	keysPath := filepath.Join(opt.MetaDir, "identity-keys.json")
-	if err := writeAtomic(keysPath, buildIdentityKeys(spec), 0o644, nil); err != nil {
+	if err := writeAtomic(keysPath, buildIdentityKeys(spec), 0o644, nil, opt); err != nil {
 		return Result{}, err
 	}
 	tokenPath := filepath.Join(opt.MetaDir, "instance.token")
-	if err := writeAtomic(tokenPath, instanceToken, 0o600, restrict); err != nil {
+	if err := writeAtomic(tokenPath, instanceToken, 0o400, restrict, opt); err != nil {
 		return Result{}, err
 	}
+	var gwPath string
 	if len(aiGatewayToken) > 0 {
-		gwPath := filepath.Join(opt.MetaDir, "ai-gateway.token")
-		if err := writeAtomic(gwPath, aiGatewayToken, 0o600, restrict); err != nil {
+		gwPath = filepath.Join(opt.MetaDir, "ai-gateway.token")
+		if err := writeAtomic(gwPath, aiGatewayToken, 0o400, restrict, opt); err != nil {
 			return Result{}, err
 		}
 	}
 	envPath := filepath.Join(opt.MetaDir, "env")
-	if err := writeAtomic(envPath, buildEnvFile(spec, opt, keysPath, tokenPath), 0o644, nil); err != nil {
+	envRaw, err := buildEnvFile(spec, opt)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := writeAtomic(envPath, envRaw, 0o644, nil, opt); err != nil {
 		return Result{}, err
 	}
 
-	digest, err := digestFiles(pkgPath, cordisPath, keysPath, envPath, tokenPath)
+	digestPaths := []string{pkgPath, cordisPath, keysPath, envPath, tokenPath}
+	if gwPath != "" {
+		digestPaths = append(digestPaths, gwPath)
+	}
+	digest, err := digestFiles(digestPaths...)
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{
-		Digest:            digest,
-		IdentityKeysFile:  keysPath,
-		InstanceTokenFile: tokenPath,
-		EnvFile:           envPath,
-		CordisPatchFile:   cordisPath,
-		PackageJSONFile:   pkgPath,
+		Digest:             digest,
+		IdentityKeysFile:   keysPath,
+		InstanceTokenFile:  tokenPath,
+		AIGatewayTokenFile: gwPath,
+		EnvFile:            envPath,
+		CordisPatchFile:    cordisPath,
+		PackageJSONFile:    pkgPath,
 	}, nil
 }
 
@@ -144,57 +182,108 @@ func buildPackageJSON(spec *nodev1.InstanceSpec) []byte {
 	return append(raw, '\n')
 }
 
-func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) []byte {
-	var b strings.Builder
-	b.WriteString("# generated by auriga-agent; do not edit\n")
+func buildCordisPatch(spec *nodev1.InstanceSpec) ([]byte, error) {
+	doc := map[string]any{}
 	port := uint32(7860)
 	if spec.GetProfile() != nil && spec.Profile.ListenPort != 0 {
 		port = spec.Profile.ListenPort
 	}
-	_, _ = fmt.Fprintf(&b, "server:\n  host: 127.0.0.1\n  port: %d\n", port)
-	b.WriteString("plugins:\n  auriga-dsh:\n    mode: managed\n    disableNativeInstall: true\n")
+	doc["server"] = map[string]any{"host": "127.0.0.1", "port": int(port)}
+	doc["plugins"] = map[string]any{
+		"auriga-dsh": map[string]any{
+			"mode":                 "managed",
+			"disableNativeInstall": true,
+		},
+	}
 	if prof := spec.GetProfile(); prof != nil {
-		if len(prof.McpServers) > 0 {
-			b.WriteString("mcpServers:\n")
-			names := sortedKeysMap(prof.McpServers)
-			for _, name := range names {
-				srv := prof.McpServers[name]
-				tokenFile := tokenFileForRef(opt.MetaDir, srv.GetTokenRef())
-				_, _ = fmt.Fprintf(&b, "  %s:\n", yamlKey(name))
-				_, _ = fmt.Fprintf(&b, "    url: %q\n", srv.GetUrl())
-				b.WriteString("    transport: streamable-http\n")
-				b.WriteString("    headers:\n")
-				_, _ = fmt.Fprintf(&b, "      Authorization: !!js/function \"() => 'Bearer ' + require('fs').readFileSync(%q,'utf8').trim()\"\n", tokenFile)
-			}
-		}
-		if len(prof.ModelProviders) > 0 {
-			b.WriteString("modelProviders:\n")
-			names := sortedKeysMap(prof.ModelProviders)
-			for _, name := range names {
-				mp := prof.ModelProviders[name]
-				tokenFile := tokenFileForRef(opt.MetaDir, mp.GetTokenRef())
-				_, _ = fmt.Fprintf(&b, "  %s:\n", yamlKey(name))
-				_, _ = fmt.Fprintf(&b, "    baseUrl: %q\n", mp.GetBaseUrl())
-				_, _ = fmt.Fprintf(&b, "    apiKey: !!js/function \"() => require('fs').readFileSync(%q,'utf8').trim()\"\n", tokenFile)
-				if len(mp.Models) > 0 {
-					b.WriteString("    models:\n")
-					for _, m := range mp.Models {
-						_, _ = fmt.Fprintf(&b, "      - id: %q\n", m.GetId())
-						if m.GetDisplayName() != "" {
-							_, _ = fmt.Fprintf(&b, "        displayName: %q\n", m.GetDisplayName())
-						}
-					}
-				}
-			}
-		}
 		for _, p := range prof.Patches {
 			if p == nil {
 				continue
 			}
-			_, _ = fmt.Fprintf(&b, "# patch %s = %s\n", p.Path, p.ValueJson)
+			if err := validatePatch(p.Path, p.ValueJson); err != nil {
+				return nil, err
+			}
+		}
+		if len(prof.Patches) > 0 {
+			patches := make([]map[string]string, 0, len(prof.Patches))
+			for _, p := range prof.Patches {
+				if p == nil {
+					continue
+				}
+				patches = append(patches, map[string]string{"path": p.Path, "valueJson": p.ValueJson})
+			}
+			doc["aurigaPatches"] = patches
+		}
+		if len(prof.McpServers) > 0 {
+			mcp := map[string]any{}
+			for _, name := range sortedKeysMap(prof.McpServers) {
+				if err := rejectUnsafeString("mcp.name", name); err != nil {
+					return nil, err
+				}
+				srv := prof.McpServers[name]
+				if err := rejectUnsafeString("mcp.url", srv.GetUrl()); err != nil {
+					return nil, err
+				}
+				tokenFile := ContainerInstanceToken
+				if srv.GetTokenRef() == nodev1.TokenRef_TOKEN_REF_AI_GATEWAY_TOKEN {
+					tokenFile = ContainerAIGatewayToken
+				}
+				mcp[name] = map[string]any{
+					"url":       srv.GetUrl(),
+					"transport": "streamable-http",
+					"headers": map[string]string{
+						// Token is read from a file path; value is not embedded.
+						"Authorization": "Bearer ${file:" + tokenFile + "}",
+					},
+				}
+			}
+			doc["mcpServers"] = mcp
+		}
+		if len(prof.ModelProviders) > 0 {
+			mps := map[string]any{}
+			for _, name := range sortedKeysMap(prof.ModelProviders) {
+				if err := rejectUnsafeString("model.name", name); err != nil {
+					return nil, err
+				}
+				mp := prof.ModelProviders[name]
+				if err := rejectUnsafeString("model.baseUrl", mp.GetBaseUrl()); err != nil {
+					return nil, err
+				}
+				tokenFile := ContainerInstanceToken
+				if mp.GetTokenRef() == nodev1.TokenRef_TOKEN_REF_AI_GATEWAY_TOKEN {
+					tokenFile = ContainerAIGatewayToken
+				}
+				entry := map[string]any{
+					"baseUrl": mp.GetBaseUrl(),
+					"apiKey":  "${file:" + tokenFile + "}",
+				}
+				if len(mp.Models) > 0 {
+					models := make([]map[string]any, 0, len(mp.Models))
+					for _, m := range mp.Models {
+						if err := rejectUnsafeString("model.id", m.GetId()); err != nil {
+							return nil, err
+						}
+						if err := rejectUnsafeString("model.displayName", m.GetDisplayName()); err != nil {
+							return nil, err
+						}
+						item := map[string]any{"id": m.GetId()}
+						if m.GetDisplayName() != "" {
+							item["displayName"] = m.GetDisplayName()
+						}
+						models = append(models, item)
+					}
+					entry["models"] = models
+				}
+				mps[name] = entry
+			}
+			doc["modelProviders"] = mps
 		}
 	}
-	return []byte(b.String())
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func buildIdentityKeys(spec *nodev1.InstanceSpec) []byte {
@@ -238,56 +327,54 @@ func buildIdentityKeys(spec *nodev1.InstanceSpec) []byte {
 	return append(raw, '\n')
 }
 
-func buildEnvFile(spec *nodev1.InstanceSpec, opt Options, keysPath, tokenPath string) []byte {
-	dshHome := filepath.Join(opt.HomeDir, ".dsh")
-	if opt.HomeDir == "" {
-		dshHome = ""
-	}
+func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 	lines := []string{
 		"AURIGA_MODE=managed",
 		"AURIGA_PROTOCOL=1",
-		fmt.Sprintf("AURIGA_INSTANCE_ID=%s", spec.InstanceId),
-		fmt.Sprintf("AURIGA_OWNER_ID=%s", spec.OwnerId),
-		fmt.Sprintf("AURIGA_TENANT_ID=%s", spec.TenantId),
-		fmt.Sprintf("AURIGA_PLATFORM_URL=%s", opt.PlatformURL),
-		fmt.Sprintf("AURIGA_IDENTITY_KEYS_FILE=%s", keysPath),
-		fmt.Sprintf("AURIGA_INSTANCE_TOKEN_FILE=%s", tokenPath),
-		fmt.Sprintf("DSH_HOME=%s", dshHome),
+		"AURIGA_INSTANCE_ID=" + spec.InstanceId,
+		"AURIGA_OWNER_ID=" + spec.OwnerId,
+		"AURIGA_TENANT_ID=" + spec.TenantId,
+		"AURIGA_PLATFORM_URL=" + opt.PlatformURL,
+		"AURIGA_IDENTITY_KEYS_FILE=" + ContainerIdentityKeys,
+		"AURIGA_INSTANCE_TOKEN_FILE=" + ContainerInstanceToken,
+		"DSH_HOME=" + ContainerDSHHome,
 	}
 	if net := spec.GetNetwork(); net != nil {
 		if net.EgressProxy != "" {
+			if err := rejectUnsafeString("egressProxy", net.EgressProxy); err != nil {
+				return nil, err
+			}
 			lines = append(lines,
-				fmt.Sprintf("HTTPS_PROXY=%s", net.EgressProxy),
-				fmt.Sprintf("HTTP_PROXY=%s", net.EgressProxy),
+				"HTTPS_PROXY="+net.EgressProxy,
+				"HTTP_PROXY="+net.EgressProxy,
 			)
 		}
 		if len(net.Allow) > 0 {
-			lines = append(lines, fmt.Sprintf("NO_PROXY=%s", strings.Join(net.Allow, ",")))
+			for _, a := range net.Allow {
+				if err := rejectUnsafeString("network.allow", a); err != nil {
+					return nil, err
+				}
+			}
+			lines = append(lines, "NO_PROXY="+strings.Join(net.Allow, ","))
 		}
 	}
 	if prof := spec.GetProfile(); prof != nil {
 		keys := sortedKeys(prof.Env)
 		for _, k := range keys {
-			// Never allow overriding secret-bearing vars from profile.env.
-			if strings.Contains(strings.ToUpper(k), "TOKEN") || strings.Contains(strings.ToUpper(k), "SECRET") {
-				continue
+			if err := validateEnvKey(k); err != nil {
+				return nil, err
 			}
-			lines = append(lines, fmt.Sprintf("%s=%s", k, prof.Env[k]))
+			v := prof.Env[k]
+			if err := rejectUnsafeString("env."+k, v); err != nil {
+				return nil, err
+			}
+			lines = append(lines, k+"="+v)
 		}
 	}
-	return []byte(strings.Join(lines, "\n") + "\n")
+	return []byte(strings.Join(lines, "\n") + "\n"), nil
 }
 
-func tokenFileForRef(metaDir string, ref nodev1.TokenRef) string {
-	switch ref {
-	case nodev1.TokenRef_TOKEN_REF_AI_GATEWAY_TOKEN:
-		return filepath.Join(metaDir, "ai-gateway.token")
-	default:
-		return filepath.Join(metaDir, "instance.token")
-	}
-}
-
-func writeAtomic(path string, data []byte, mode os.FileMode, restrict func(string) error) error {
+func writeAtomic(path string, data []byte, mode os.FileMode, restrict func(string) error, opt Options) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp.*")
 	if err != nil {
@@ -310,16 +397,21 @@ func writeAtomic(path string, data []byte, mode os.FileMode, restrict func(strin
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if restrict != nil {
-		if err := restrict(tmpPath); err != nil {
-			return err
-		}
-	}
+	// Windows cannot rename over a read-only / ACL-restricted target.
+	_ = os.Chmod(path, 0o600)
+	_ = os.Remove(path)
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
 	if restrict != nil {
-		return restrict(path)
+		if err := restrict(path); err != nil {
+			return err
+		}
+	}
+	if opt.OwnerUID > 0 && opt.Chown != nil {
+		if err := opt.Chown(path, opt.OwnerUID, opt.OwnerGID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -331,7 +423,7 @@ func digestFiles(paths ...string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		_, _ = h.Write([]byte(p))
+		_, _ = h.Write([]byte(filepath.Base(p)))
 		_, _ = h.Write([]byte{0})
 		_, _ = h.Write(raw)
 		_, _ = h.Write([]byte{0})
@@ -355,17 +447,4 @@ func sortedKeysMap[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func yamlKey(s string) string {
-	if s == "" {
-		return `""`
-	}
-	for _, c := range s {
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
-			continue
-		}
-		return fmt.Sprintf("%q", s)
-	}
-	return s
 }

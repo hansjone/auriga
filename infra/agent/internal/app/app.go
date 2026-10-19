@@ -17,6 +17,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/conn"
 	"github.com/hansjone/auriga/infra/agent/internal/enroll"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
@@ -136,18 +137,30 @@ func runAgent(args []string, logs io.Writer) error {
 	if os.Getenv("AURIGA_AGENT_DRIVERS") == "" && *configPath == "" && driverName == "fake" {
 		driverName = "docker"
 	}
-	inner, err := runtime.SelectDriver(driverName, runtime.DockerConfig{DataRoot: cfg.DataRoot})
+	polPath := os.Getenv("AURIGA_AGENT_POLICY_FILE")
+	if polPath == "" {
+		polPath = filepath.Join(cfg.DataRoot, "agent-policy.yaml")
+	}
+	pol, err := policy.Load(polPath)
+	if err != nil {
+		return fmt.Errorf("load policy: %w", err)
+	}
+	inner, err := runtime.SelectDriver(driverName, runtime.DockerConfig{DataRoot: cfg.DataRoot, Policy: pol})
 	if err != nil {
 		return err
 	}
 	driver := runtime.Driver(inner)
 	if driverName != "fake" {
+		art := artifacts.New(cfg.ArtifactsDir(), pol)
 		prep := &runtime.Preparing{
 			Inner:       inner,
 			Specs:       store,
-			Artifacts:   artifacts.New(cfg.ArtifactsDir()),
+			Artifacts:   art,
 			Layout:      &storage.Layout{InstancesDir: cfg.InstancesDir()},
+			UIDs:        storage.NewUIDTable(cfg.AgentDir()),
+			Policy:      pol,
 			PlatformURL: cfg.Server,
+			Chown:       storage.Lchown,
 		}
 		if mat, loadErr := identity.Load(cfg.AgentDir()); loadErr == nil {
 			prep.SealingPrivate = mat.SealingPrivate

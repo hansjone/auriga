@@ -33,6 +33,7 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 | `controlEndpoint` | `AURIGA_AGENT_CONTROL_ENDPOINT` | 覆盖入网返回的 NodeControl 地址 |
 | `agentVersion` | `AURIGA_AGENT_VERSION` | Hello / Join 上报的版本 |
 | `allowInsecure` | `AURIGA_AGENT_ALLOW_INSECURE` | 允许明文端点（仅本地开发） |
+| （策略文件） | `AURIGA_AGENT_POLICY_FILE` | 默认 `<dataRoot>/agent-policy.yaml`；镜像/制品白名单与资源上限 |
 
 配置项前缀约定：`auriga.agent.*` / `AURIGA_AGENT_*`。
 
@@ -40,33 +41,47 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 
 Docker Engine 地址遵循 `DOCKER_HOST`（`unix:///var/run/docker.sock`、`npipe:////./pipe/docker_engine`、`tcp://127.0.0.1:2375`）。节点代理通过 Engine HTTP API 操作，不调用 `docker` CLI。
 
+本地策略示例（`agent-policy.yaml`）：
+
+```yaml
+allowedArtifactURLPrefixes:
+  - https://artifacts.example.com/
+allowedImageRepos:
+  - registry.example.com/auriga/
+maxCPUMillis: 8000
+maxMemoryMB: 16384
+maxPIDs: 2048
+maxArtifactBytes: 2147483648
+```
+
 ## 目录布局（`<dataRoot>`）
 
 ```
 <dataRoot>/
-├─ agent/          state.db、node.key、node.crt、ca.crt、sealing.key
+├─ agent/          state.db、证书、sealing.key、instance-uids.json、agent-policy.yaml（可选）
 ├─ artifacts/
-│  └─ sha256/<hex> 内容寻址制品（只读）；refs.json 引用计数
-├─ instances/<id>/
-│  ├─ home/        .dsh .memwiki .auriga workspace（绑进容器 /home/dsh）
-│  ├─ meta/        package.json、cordis.patch.yml、env、identity-keys.json、instance.token、schema-version
+│  └─ sha256/<hex> 内容寻址制品（只读）；refs.json 按实例 holder 引用
+├─ instances/<id>/   # id: ^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$
+│  ├─ home/        绑进容器 /home/dsh（rw）
+│  ├─ meta/        绑进容器 /run/auriga（ro）；令牌 0400
 │  └─ trash/
 └─ backups/
 ```
 
 各凭据文件先写临时文件并同步，再原子 rename；顺序为 `node.key`、`sealing.key`、`ca.crt`、`node.crt`，防止私钥写入失败时发布新证书并搭配旧私钥。这不是多文件事务：强制重新入网中断仍可能留下新私钥配旧证书，需要重新入网恢复。Unix `0600`；Windows 从当前进程令牌取得用户 SID，设置受保护的 DACL，仅授予 SYSTEM、Administrators、当前用户完整权限，不保留继承项。
 
-`instance.token` / `ai-gateway.token` 仅写在 `meta/`，权限收紧（0600），内容不进日志。
+`instance.token` / `ai-gateway.token` 仅写在 `meta/`，权限收紧（0400 / DACL），内容不进日志；环境变量里是容器路径 `/run/auriga/…`。
 
 运行时由单个续期协程立即检查一次，此后默认每小时检查；重连不另行发起续期。失败以连接配置的最小退避（默认 1 秒）起步，指数增长到 30 分钟并加抖动，达到上限后仍持续退避；成功后恢复检查间隔。续期成功写盘，下次建立会话时重新加载新证书。退出前等待续期协程结束，再关闭状态存储。
 
 ## A2 范围
 
-- **Docker / Podman 驱动**：Engine API；非 root（宿主机 uid 自 200000 映射）、只读根、`cap-drop ALL`、`no-new-privileges`、内存/CPU/进程上限；每实例 internal 网络；标签 `auriga.instance` / `auriga.generation`
-- **制品**：按 URL + `sha256:…` 下载校验缓存，失败不保留；引用计数 + 7 天 GC
-- **配置渲染**：确定性写出 profile / cordis / env / identity-keys / 令牌；HPKE 解封规格内密文
-- **目录**：§8.1 布局、`schema-version` 迁移、软配额统计
-- 假驱动保留给测试；真 Docker 集成测试：`go test -tags docker ./internal/runtime/`
+- **Docker / Podman 驱动**：Engine API；持久 uid（`instance-uids.json`）、只读根、`cap-drop ALL`、`no-new-privileges`、资源取 min(规格, 策略)；Mounts（home + meta:ro）；拉镜像解析错误流并核对 digest
+- **制品**：https 白名单、大小上限、连接/总超时分开；篡改缓存会重下；按实例 Release；7 天 GC
+- **配置渲染**：`yaml.v3` 结构化生成；拒绝换行/`!!`；禁止覆盖 `AURIGA_*`/`DSH_HOME`；HPKE 解封
+- **策略**：`internal/policy` 镜像/制品白名单与资源上限（本地最后一道关）
+- **目录**：§8.1、严格实例 id、Lchown、软配额
+- 假驱动保留给测试；真 Docker：`go test -tags docker ./internal/runtime/`
 
 ## 测试
 
