@@ -1,2 +1,2 @@
-/** Public in-process contracts for the org service. */
+/** Public Java SPI for the org service (local merge-deploy wiring). */
 package io.github.hansjone.auriga.org.api;
