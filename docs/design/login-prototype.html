@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DSH Team 登录</title>
+<style>
+  :root {
+    --bg-0: #040b13;
+    --bg-1: #071624;
+    --bg-2: #0b2236;
+    --text: #c8d1de;
+    --text-dim: #8d9aab;
+    --text-faint: #5f6d7e;
+    --glass: rgba(20, 38, 56, 0.34);
+    --glass-strong: rgba(24, 44, 64, 0.5);
+    --edge: rgba(150, 182, 208, 0.13);
+    --edge-hi: rgba(190, 214, 232, 0.16);
+    --accent: #3d7fae;
+    --accent-2: #2c6690;
+    --accent-text: #dbe4ee;
+    --qr-tile: #b9c5d2;
+    --qr-ink: #0a1520;
+    --ok: #5aa58a;
+    --radius-card: 28px;
+    --ease: cubic-bezier(.22, .8, .24, 1);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg-0);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* ---------- 科技背景：节点网络 + 透视网格 + HUD ---------- */
+  .sea {
+    position: fixed; inset: 0; z-index: 0;
+    background:
+      radial-gradient(80% 60% at 50% 38%, #0b2234 0%, rgba(11, 34, 52, 0) 70%),
+      linear-gradient(180deg, #06121d 0%, var(--bg-0) 100%);
+  }
+  canvas#net { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(90% 80% at 50% 45%, rgba(0,0,0,0) 55%, rgba(2, 6, 11, .7) 100%);
+  }
+  /* 细扫描线纹理（极淡） */
+  .scan-tex {
+    position: absolute; inset: 0; pointer-events: none; opacity: .35;
+    background: repeating-linear-gradient(180deg, rgba(140, 180, 210, .035) 0 1px, transparent 1px 3px);
+  }
+  /* 屏幕四角 HUD */
+  .hud { position: fixed; inset: 18px; z-index: 1; pointer-events: none; font: 11px/1.5 var(--mono); color: var(--text-faint); letter-spacing: .08em; }
+  .hud i { position: absolute; width: 22px; height: 22px; border-color: rgba(140, 178, 206, .28); border-style: solid; border-width: 0; }
+  .hud i.tl { left: 0; top: 0; border-left-width: 1px; border-top-width: 1px; }
+  .hud i.tr { right: 0; top: 0; border-right-width: 1px; border-top-width: 1px; }
+  .hud i.bl { left: 0; bottom: 0; border-left-width: 1px; border-bottom-width: 1px; }
+  .hud i.br { right: 0; bottom: 0; border-right-width: 1px; border-bottom-width: 1px; }
+  .hud .meta-tr { position: absolute; right: 34px; top: 4px; text-align: right; }
+  .hud .meta-bl { position: absolute; left: 34px; bottom: 4px; }
+  .hud .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #4f9a7f; margin-right: 6px; vertical-align: 1px; }
+
+  /* ---------- 布局 ---------- */
+  .stage {
+    position: relative; z-index: 1; height: 100%;
+    display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 16px;
+  }
+  .brand {
+    position: fixed; top: 28px; left: 32px; z-index: 2;
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 600; letter-spacing: .02em; color: var(--text);
+    font-size: 15px;
+  }
+  .brand svg { width: 26px; height: 26px; }
+
+  /* ---------- 液态玻璃卡片 ---------- */
+  .card {
+    position: relative;
+    width: min(380px, 100%);
+    padding: 30px 30px 26px;
+    border-radius: var(--radius-card);
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    backdrop-filter: blur(22px) saturate(150%);
+    border: 1px solid var(--edge);
+    box-shadow: 0 30px 80px -30px rgba(0, 0, 0, .7), inset 0 1px 0 var(--edge-hi);
+    transition: transform .7s var(--ease), opacity .7s var(--ease), filter .7s var(--ease);
+    will-change: transform;
+  }
+  .card::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(160deg, rgba(200, 222, 240, .07) 0%, rgba(200, 222, 240, 0) 32%);
+  }
+  .card.leaving { transform: scale(1.06); opacity: 0; filter: blur(8px); }
+
+  /* 分段切换 */
+  .seg {
+    position: relative; display: grid; grid-template-columns: 1fr 1fr;
+    padding: 4px; border-radius: 14px;
+    background: rgba(8, 18, 28, .45); border: 1px solid rgba(150, 182, 208, .08);
+    margin-bottom: 24px;
+  }
+  .seg button {
+    position: relative; z-index: 1; border: 0; background: none; cursor: pointer;
+    font: inherit; font-size: 14px; color: var(--text-dim);
+    height: 34px; border-radius: 10px; transition: color .3s;
+  }
+  .seg button[aria-selected="true"] { color: var(--text); }
+  .seg .thumb {
+    position: absolute; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px);
+    border-radius: 10px; background: rgba(120, 160, 192, .16);
+    border: 1px solid rgba(170, 200, 224, .12);
+    transition: transform .45s var(--ease);
+  }
+  .seg[data-pos="1"] .thumb { transform: translateX(100%); }
+
+  /* 视图切换 */
+  .views { position: relative; }
+  .view {
+    transition: opacity .35s var(--ease), transform .45s var(--ease);
+  }
+  .view[hidden] { display: block; position: absolute; inset: 0 0 auto 0; opacity: 0; transform: translateY(8px); pointer-events: none; visibility: hidden; }
+
+  /* 二维码 */
+  .qr-wrap {
+    position: relative; width: 220px; height: 220px; margin: 0 auto;
+    border-radius: 22px; padding: 14px; background: var(--qr-tile);
+    overflow: hidden;
+    transition: transform .5s var(--ease);
+  }
+  .qr-wrap canvas { width: 100%; height: 100%; display: block; transition: filter .5s var(--ease), opacity .5s var(--ease); }
+  .scanline {
+    position: absolute; left: 10px; right: 10px; height: 46px; top: -46px;
+    background: linear-gradient(180deg, rgba(61, 127, 174, 0), rgba(61, 127, 174, .22));
+    border-bottom: 1px solid rgba(44, 102, 144, .35);
+    animation: scan 3.2s var(--ease) infinite;
+  }
+  @keyframes scan { 0% { top: -46px; } 70%, 100% { top: 100%; } }
+  .qr-over {
+    position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 6px;
+    background: rgba(8, 20, 31, .72); color: var(--text);
+    opacity: 0; transition: opacity .45s var(--ease); pointer-events: none;
+  }
+  .qr-wrap[data-state="scanned"] canvas,
+  .qr-wrap[data-state="expired"] canvas,
+  .qr-wrap[data-state="done"] canvas { filter: blur(6px); opacity: .5; }
+  .qr-wrap[data-state="scanned"] .scanline,
+  .qr-wrap[data-state="expired"] .scanline,
+  .qr-wrap[data-state="done"] .scanline { display: none; }
+  .qr-wrap[data-state="scanned"] .over-scanned,
+  .qr-wrap[data-state="expired"] .over-expired,
+  .qr-wrap[data-state="done"] .over-done { opacity: 1; pointer-events: auto; }
+  .match { font-size: 64px; font-weight: 600; letter-spacing: .06em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .over-hint { font-size: 13px; color: var(--text-dim); }
+  .refresh {
+    width: 54px; height: 54px; border-radius: 50%; border: 1px solid var(--edge);
+    background: rgba(120, 160, 192, .14); color: var(--text); cursor: pointer;
+    display: grid; place-items: center; transition: transform .5s var(--ease), background .3s;
+  }
+  .refresh:hover { background: rgba(120, 160, 192, .22); }
+  .refresh:active { transform: rotate(-180deg); }
+  .check { width: 60px; height: 60px; }
+  .check circle { stroke: var(--ok); stroke-width: 2.5; fill: none; stroke-dasharray: 170; stroke-dashoffset: 170; }
+  .check path { stroke: var(--ok); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 40; stroke-dashoffset: 40; }
+  .qr-wrap[data-state="done"] .check circle { animation: draw .6s var(--ease) forwards; }
+  .qr-wrap[data-state="done"] .check path { animation: draw .4s .45s var(--ease) forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+
+  .caption { text-align: center; margin: 18px 0 0; font-size: 14px; color: var(--text-dim); min-height: 20px; }
+
+  /* 其他方式 */
+  .alt { display: flex; justify-content: center; gap: 14px; margin-top: 22px; }
+  .icon-btn {
+    width: 44px; height: 44px; border-radius: 14px; cursor: pointer;
+    display: grid; place-items: center; color: var(--text-dim);
+    background: rgba(120, 160, 192, .08); border: 1px solid rgba(150, 182, 208, .1);
+    transition: background .25s, color .25s, transform .25s var(--ease);
+  }
+  .icon-btn:hover { background: rgba(120, 160, 192, .16); color: var(--text); transform: translateY(-1px); }
+  .icon-btn svg { width: 22px; height: 22px; }
+
+  /* 表单 */
+  .title { font-size: 20px; font-weight: 600; margin: 4px 0 20px; text-align: center; }
+  .field { position: relative; margin-bottom: 12px; }
+  .field input {
+    width: 100%; height: 46px; padding: 0 14px; border-radius: 13px;
+    background: rgba(8, 18, 28, .45); border: 1px solid rgba(150, 182, 208, .12);
+    color: var(--text); font: inherit; font-size: 15px; outline: none;
+    transition: border-color .25s, background .25s;
+  }
+  .field input::placeholder { color: var(--text-faint); }
+  .field input:focus { border-color: rgba(120, 170, 206, .42); background: rgba(10, 22, 34, .6); }
+  .otp { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 4px 0 12px; }
+  .otp input { text-align: center; padding: 0; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .otp-wrap { overflow: hidden; max-height: 0; opacity: 0; transition: max-height .5s var(--ease), opacity .4s var(--ease); }
+  .otp-wrap.open { max-height: 80px; opacity: 1; }
+  .primary {
+    width: 100%; height: 46px; border: 0; border-radius: 13px; cursor: pointer;
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    color: var(--accent-text); font: inherit; font-size: 15px; font-weight: 600;
+    margin-top: 6px; transition: filter .2s, transform .2s var(--ease);
+  }
+  .primary:hover { filter: brightness(1.06); }
+  .primary:active { transform: scale(.985); }
+  .primary:disabled { opacity: .45; cursor: default; filter: none; }
+  .back {
+    display: block; margin: 16px auto 0; border: 0; background: none; cursor: pointer;
+    color: var(--text-dim); font: inherit; font-size: 13px;
+  }
+  .back:hover { color: var(--text); }
+
+  /* 通行密钥 */
+  .pk { display: grid; place-items: center; padding: 8px 0 4px; }
+  .pk-ring {
+    position: relative; width: 132px; height: 132px; border-radius: 50%;
+    display: grid; place-items: center; cursor: pointer;
+    background: rgba(120, 160, 192, .1); border: 1px solid rgba(150, 182, 208, .14);
+    color: var(--text); transition: transform .3s var(--ease), background .3s;
+  }
+  .pk-ring:hover { background: rgba(120, 160, 192, .16); }
+  .pk-ring svg { width: 58px; height: 58px; }
+  .pk-ring::after {
+    content: ""; position: absolute; inset: -1px; border-radius: 50%;
+    border: 1px solid rgba(120, 170, 206, .35); opacity: 0; transform: scale(1);
+  }
+  .pk-ring.pressing::after { animation: ripple 1.2s var(--ease) infinite; }
+  @keyframes ripple { from { opacity: .7; transform: scale(1); } to { opacity: 0; transform: scale(1.35); } }
+
+  /* ---------- 手机确认页 ---------- */
+  .phone-frame {
+    width: 360px; max-width: 100%; height: 720px; max-height: calc(100vh - 32px);
+    border-radius: 44px; padding: 10px; position: relative;
+    background: rgba(6, 14, 22, .6); border: 1px solid rgba(150, 182, 208, .12);
+    box-shadow: 0 40px 100px -40px rgba(0, 0, 0, .8);
+  }
+  .phone {
+    position: relative; height: 100%; border-radius: 36px; overflow: hidden;
+    background: linear-gradient(180deg, #0b2236, #050d16);
+    display: flex; flex-direction: column; padding: 56px 22px 28px;
+  }
+  .phone .who { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+  .avatar {
+    width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(120, 160, 192, .16); border: 1px solid rgba(150, 182, 208, .14);
+    font-weight: 600;
+  }
+  .phone h2 { font-size: 24px; font-weight: 600; margin: 0 0 18px; }
+  .device {
+    border-radius: 18px; padding: 14px 16px; background: rgba(20, 38, 56, .45);
+    border: 1px solid var(--edge); font-size: 14px; display: grid; gap: 8px;
+  }
+  .device div { display: flex; justify-content: space-between; color: var(--text-dim); }
+  .device b { color: var(--text); font-weight: 500; }
+  .pick-label { margin: 26px 0 12px; font-size: 14px; color: var(--text-dim); }
+  .picks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .pick {
+    height: 72px; border-radius: 18px; cursor: pointer;
+    background: rgba(20, 38, 56, .45); border: 1px solid var(--edge);
+    color: var(--text); font: inherit; font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums;
+    transition: background .25s, border-color .25s, transform .25s var(--ease);
+  }
+  .pick:active { transform: scale(.96); }
+  .pick[aria-pressed="true"] { background: rgba(61, 127, 174, .28); border-color: rgba(120, 170, 206, .45); }
+  .phone .spacer { flex: 1; }
+  .phone .deny { margin-top: 14px; text-align: center; color: var(--text-dim); font-size: 14px; background: none; border: 0; font: inherit; cursor: pointer; }
+  .phone-done {
+    position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 14px;
+    background: linear-gradient(180deg, #0b2236, #050d16);
+    opacity: 0; pointer-events: none; transition: opacity .5s var(--ease);
+  }
+  .phone-done.show { opacity: 1; pointer-events: auto; }
+  .phone-done .check circle { animation: draw .6s var(--ease) forwards; }
+  .phone-done .check path { animation: draw .4s .45s var(--ease) forwards; }
+
+  /* ---------- 原型控制条（只用于评审） ---------- */
+  .proto {
+    position: fixed; right: 16px; bottom: 16px; z-index: 5;
+    display: flex; gap: 6px; padding: 6px; border-radius: 14px;
+    background: rgba(6, 14, 22, .7); border: 1px solid rgba(150, 182, 208, .12);
+    font-size: 12px;
+  }
+  .proto button {
+    border: 0; border-radius: 9px; padding: 7px 10px; cursor: pointer;
+    background: rgba(120, 160, 192, .1); color: var(--text-dim); font: inherit;
+  }
+  .proto button:hover { color: var(--text); }
+  .proto .sep { width: 1px; background: rgba(150, 182, 208, .14); margin: 4px 2px; }
+
+
+  /* ---------- 科技感：卡片取景框、等宽字、二维码解码 ---------- */
+  :root { --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace; }
+  .card .corner { position: absolute; width: 16px; height: 16px; border: 0 solid rgba(150, 190, 218, .42); pointer-events: none; }
+  .card .corner.tl { left: -1px; top: -1px; border-left-width: 1.5px; border-top-width: 1.5px; border-top-left-radius: var(--radius-card); }
+  .card .corner.tr { right: -1px; top: -1px; border-right-width: 1.5px; border-top-width: 1.5px; border-top-right-radius: var(--radius-card); }
+  .card .corner.bl { left: -1px; bottom: -1px; border-left-width: 1.5px; border-bottom-width: 1.5px; border-bottom-left-radius: var(--radius-card); }
+  .card .corner.br { right: -1px; bottom: -1px; border-right-width: 1.5px; border-bottom-width: 1.5px; border-bottom-right-radius: var(--radius-card); }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: center; margin: -6px 2px 16px;
+    font: 10.5px/1 var(--mono); letter-spacing: .14em; color: var(--text-faint); text-transform: uppercase;
+  }
+  .card-head .live::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #4f9a7f; margin-right: 7px; vertical-align: 1px; }
+  .match, .pick, .otp input { font-family: var(--mono); }
+  .qr-frame { position: relative; width: 236px; height: 236px; margin: 0 auto; display: grid; place-items: center; }
+  .qr-frame::before, .qr-frame::after, .qr-frame > .b1, .qr-frame > .b2 {
+    content: ""; position: absolute; width: 20px; height: 20px; border: 0 solid rgba(120, 172, 208, .55);
+  }
+  .qr-frame::before { left: 0; top: 0; border-left-width: 2px; border-top-width: 2px; }
+  .qr-frame::after { right: 0; top: 0; border-right-width: 2px; border-top-width: 2px; }
+  .qr-frame > .b1 { left: 0; bottom: 0; border-left-width: 2px; border-bottom-width: 2px; }
+  .qr-frame > .b2 { right: 0; bottom: 0; border-right-width: 2px; border-bottom-width: 2px; }
+  .qr-frame .qr-wrap { width: 212px; height: 212px; border-radius: 14px; }
+  .ttl { margin-top: 10px; text-align: center; font: 11px/1 var(--mono); letter-spacing: .12em; color: var(--text-faint); }
+  .ttl b { color: var(--text-dim); font-weight: 500; }
+  .ttl-bar { height: 2px; width: 160px; margin: 8px auto 0; border-radius: 2px; background: rgba(140, 178, 206, .12); overflow: hidden; }
+  .ttl-bar > span { display: block; height: 100%; width: 100%; background: rgba(110, 166, 204, .55); transform-origin: left; }
+
+  @media (max-width: 520px) {
+    .brand { top: 18px; left: 18px; }
+    .card { padding: 26px 20px 22px; }
+    .qr-wrap { width: 200px; height: 200px; }
+    .proto { left: 16px; right: 16px; justify-content: center; flex-wrap: wrap; }
+    /* 真机上确认页就是整页，不画手机外框 */
+    .stage:has(#mobile:not([hidden])) { padding: 0; }
+    .phone-frame { width: 100%; height: 100%; max-height: none; border-radius: 0; padding: 0; border: 0; box-shadow: none; background: none; }
+    .phone { border-radius: 0; padding: 64px 20px 96px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="sea" aria-hidden="true">
+  <canvas id="net"></canvas>
+  <div class="scan-tex"></div>
+  <div class="vignette"></div>
+</div>
+<div class="hud" aria-hidden="true">
+  <i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>
+  <div class="meta-tr"><span id="clock">--:--:--</span> · NODE 01</div>
+  <div class="meta-bl"><span class="dot"></span>SECURE · TLS 1.3</div>
+</div>
+</div>
+
+<div class="brand">
+  <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <path d="M16 2.5 27.7 9.25v13.5L16 29.5 4.3 22.75V9.25z" fill="rgba(120,160,192,.12)" stroke="rgba(150,190,218,.5)" stroke-width="1.2"/>
+    <g stroke="#8fb3cf" stroke-width="1.2"><path d="M16 9.5v6.5M16 16l-5.6 3.2M16 16l5.6 3.2"/></g>
+    <g fill="#a9c6dc"><circle cx="16" cy="9.5" r="1.8"/><circle cx="10.4" cy="19.2" r="1.8"/><circle cx="21.6" cy="19.2" r="1.8"/><circle cx="16" cy="16" r="1.3"/></g>
+  </svg>
+  DSH Team
+</div>
+
+<main class="stage">
+  <!-- 电脑端登录 -->
+  <section class="card" id="desk" aria-label="登录">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+    <div class="card-head"><span class="live">Auth</span><span id="sid">SID 7F3A·29C1</span></div>
+    <div class="views">
+      <!-- 扫码 -->
+      <div class="view" id="v-qr">
+        <div class="seg" id="seg" data-pos="0" role="tablist">
+          <span class="thumb"></span>
+          <button role="tab" aria-selected="true" data-src="corp">公司账号</button>
+          <button role="tab" aria-selected="false" data-src="team">团队账号</button>
+        </div>
+        <div class="qr-frame"><span class="b1"></span><span class="b2"></span>
+        <div class="qr-wrap" id="qr" data-state="wait">
+          <canvas id="qrc" width="384" height="384" aria-label="登录二维码"></canvas>
+          <div class="scanline"></div>
+          <div class="qr-over over-scanned"><div class="match" id="match">47</div><div class="over-hint">在手机上选这个数字</div></div>
+          <div class="qr-over over-expired">
+            <button class="refresh" id="refresh" aria-label="刷新二维码">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+            </button>
+          </div>
+          <div class="qr-over over-done">
+            <svg class="check" viewBox="0 0 60 60"><circle cx="30" cy="30" r="27"/><path d="M18 31l8 8 16-17"/></svg>
+          </div>
+        </div>
+        </div>
+        <div class="ttl"><b id="ttl">02:00</b></div>
+        <div class="ttl-bar"><span id="ttlBar"></span></div>
+        <p class="caption" id="cap">用公司 App 扫码</p>
+        <div class="alt">
+          <button class="icon-btn" data-go="v-pk" aria-label="通行密钥" title="通行密钥">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 11v3a6 6 0 0 1-1.5 4"/><path d="M8.5 9.5A4 4 0 0 1 16 11v2a10 10 0 0 1-.9 4.1"/><path d="M5.5 13.5V11a6.5 6.5 0 0 1 11-4.7"/><path d="M19 10.3c.3.8.5 1.6.5 2.5v.7"/><path d="M8.5 13.5a8 8 0 0 1-1 3.8"/></svg>
+          </button>
+          <button class="icon-btn" data-go="v-pw" aria-label="密码登录" title="密码登录">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l2 2M18 5l2 2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 通行密钥 -->
+      <div class="view" id="v-pk" hidden>
+        <div class="title">通行密钥</div>
+        <div class="pk">
+          <button class="pk-ring" id="pkBtn" aria-label="使用通行密钥登录">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M12 11v3a6 6 0 0 1-1.5 4"/><path d="M8.5 9.5A4 4 0 0 1 16 11v2a10 10 0 0 1-.9 4.1"/><path d="M5.5 13.5V11a6.5 6.5 0 0 1 11-4.7"/><path d="M19 10.3c.3.8.5 1.6.5 2.5v.7"/><path d="M8.5 13.5a8 8 0 0 1-1 3.8"/></svg>
+          </button>
+        </div>
+        <p class="caption" id="pkCap">点一下，用手机或本机指纹确认</p>
+        <button class="back" data-go="v-qr">返回扫码</button>
+      </div>
+
+      <!-- 密码 -->
+      <div class="view" id="v-pw" hidden>
+        <div class="title">密码登录</div>
+        <form id="pwForm" autocomplete="off">
+          <div class="field"><input id="u" placeholder="用户名" autocomplete="username"></div>
+          <div class="field"><input id="p" type="password" placeholder="密码" autocomplete="current-password"></div>
+          <div class="otp-wrap" id="otpWrap">
+            <div class="otp field" id="otp">
+              <input inputmode="numeric" maxlength="1" aria-label="验证码第 1 位"><input inputmode="numeric" maxlength="1" aria-label="验证码第 2 位"><input inputmode="numeric" maxlength="1" aria-label="验证码第 3 位"><input inputmode="numeric" maxlength="1" aria-label="验证码第 4 位"><input inputmode="numeric" maxlength="1" aria-label="验证码第 5 位"><input inputmode="numeric" maxlength="1" aria-label="验证码第 6 位">
+            </div>
+          </div>
+          <button class="primary" id="pwBtn" type="submit">继续</button>
+        </form>
+        <button class="back" data-go="v-qr">返回扫码</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 手机确认页 -->
+  <section class="phone-frame" id="mobile" hidden aria-label="手机确认">
+    <div class="phone">
+      <div class="who"><div class="avatar">张</div><div><div>张三</div><div style="font-size:13px;color:var(--text-dim)">团队账号</div></div></div>
+      <h2>登录到这台电脑？</h2>
+      <div class="device">
+        <div><span>设备</span><b>Chrome · Windows</b></div>
+        <div><span>位置</span><b>洛杉矶 · 76.32.x.x</b></div>
+        <div><span>时间</span><b>刚刚</b></div>
+      </div>
+      <div class="pick-label">选电脑屏幕上的数字</div>
+      <div class="picks" id="picks">
+        <button class="pick" aria-pressed="false">13</button>
+        <button class="pick" aria-pressed="false">47</button>
+        <button class="pick" aria-pressed="false">82</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="primary" id="confirm" disabled>确认登录</button>
+      <button class="deny">不是我</button>
+      <div class="phone-done" id="phoneDone">
+        <svg class="check" viewBox="0 0 60 60"><circle cx="30" cy="30" r="27"/><path d="M18 31l8 8 16-17"/></svg>
+        <div>已登录</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="proto" aria-label="原型控制">
+  <button data-p="desk">电脑</button>
+  <button data-p="mobile">手机确认</button>
+  <span class="sep"></span>
+  <button data-p="scan">模拟扫码</button>
+  <button data-p="ok">模拟确认</button>
+  <button data-p="expire">二维码过期</button>
+</nav>
+
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- 节点网络 + 透视网格 ---------- */
+  const cv = document.getElementById('net');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, nodes = [];
+  let mx = -9999, my = -9999, px = 0, py = 0, tx = 0, ty = 0;
+  const LINK = 160;
+
+  function resize() {
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const n = Math.round(Math.min(130, (W * H) / 11000));
+    nodes = Array.from({ length: n }, () => ({
+      x: Math.random() * W, y: Math.random() * H * 0.78,
+      vx: (Math.random() - 0.5) * 0.22, vy: (Math.random() - 0.5) * 0.22,
+      r: 0.8 + Math.random() * 1.3,
+    }));
+  }
+  addEventListener('resize', resize);
+  addEventListener('pointermove', (e) => {
+    mx = e.clientX; my = e.clientY;
+    px = (e.clientX / W - 0.5) * 2; py = (e.clientY / H - 0.5) * 2;
+  });
+  addEventListener('pointerleave', () => { mx = my = -9999; });
+  resize();
+
+  function grid(t) {
+    // 下半屏透视网格：水平线向观察者匀速流动，竖线汇聚到地平线
+    const horizon = H * 0.62, vx = W / 2 - tx * 40;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, horizon, W, H - horizon); ctx.clip();
+    const fade = ctx.createLinearGradient(0, horizon, 0, H);
+    fade.addColorStop(0, 'rgba(120, 170, 206, 0)');
+    fade.addColorStop(1, 'rgba(120, 170, 206, .24)');
+    ctx.strokeStyle = fade; ctx.lineWidth = 1;
+    const rows = 14, speed = (t * 0.12) % 1;
+    for (let i = 0; i < rows; i++) {
+      const k = (i + speed) / rows, y = horizon + Math.pow(k, 2.2) * (H - horizon);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+    for (let i = -18; i <= 18; i++) {
+      ctx.beginPath(); ctx.moveTo(vx + i * 14, horizon); ctx.lineTo(vx + i * (W / 9), H); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const t0 = performance.now();
+  function frame(now) {
+    const t = (now - t0) / 1000;
+    tx += (px - tx) * 0.04; ty += (py - ty) * 0.04;
+    ctx.clearRect(0, 0, W, H);
+    grid(t);
+    for (const p of nodes) {
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < -20) p.x = W + 20; if (p.x > W + 20) p.x = -20;
+      if (p.y < -20) p.y = H * 0.78; if (p.y > H * 0.78) p.y = -20;
+      const dx = mx - p.x, dy = my - p.y, d = Math.hypot(dx, dy);
+      if (d < 180) { p.x += dx * 0.0035; p.y += dy * 0.0035; }   // 鼠标轻微吸附
+    }
+    ctx.lineWidth = 1;
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j], d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (d < LINK) {
+          ctx.strokeStyle = `rgba(130, 178, 212, ${(1 - d / LINK) * 0.3})`;
+          ctx.beginPath(); ctx.moveTo(a.x - tx * 10, a.y - ty * 8); ctx.lineTo(b.x - tx * 10, b.y - ty * 8); ctx.stroke();
+        }
+      }
+      const dm = Math.hypot(a.x - mx, a.y - my);
+      if (dm < 180) {
+        ctx.strokeStyle = `rgba(150, 196, 226, ${(1 - dm / 180) * 0.3})`;
+        ctx.beginPath(); ctx.moveTo(a.x - tx * 10, a.y - ty * 8); ctx.lineTo(mx, my); ctx.stroke();
+      }
+    }
+    for (const p of nodes) {
+      ctx.fillStyle = 'rgba(176, 206, 228, .7)';
+      ctx.beginPath(); ctx.arc(p.x - tx * 10, p.y - ty * 8, p.r, 0, Math.PI * 2); ctx.fill();
+    }
+    if (!reduce) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  const clock = document.getElementById('clock');
+  const tick = () => { clock.textContent = new Date().toTimeString().slice(0, 8); };
+  tick(); setInterval(tick, 1000);
+
+  /* ---------- 假二维码（只为展示外观） ---------- */
+  const qc = document.getElementById('qrc');
+  function drawQR(seed) {
+    const g = qc.getContext('2d');
+    const N = 29, S = qc.width, m = S / N;
+    let s = seed;
+    const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+    const grid = Array.from({ length: N }, () => Array.from({ length: N }, () => rnd() > 0.52));
+    const finder = (r, c) => {
+      for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) {
+        const y = r + i - 1, x = c + j - 1;
+        if (y >= 0 && y < N && x >= 0 && x < N) grid[y][x] = null;
+      }
+    };
+    finder(0, 0); finder(0, N - 7); finder(N - 7, 0);
+    for (let i = 8; i < N - 8; i++) { grid[6][i] = i % 2 === 0; grid[i][6] = i % 2 === 0; }
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--qr-ink');
+    // "解码"效果：模块按随机顺序在 ~700ms 内逐个浮现，定位角最后落定
+    const cells = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (grid[y][x]) cells.push([x, y, rnd()]);
+    cells.sort((a, b) => a[2] - b[2]);
+    const pad = m * 0.08, rr = m * 0.32;
+    const start = performance.now(), dur = reduce ? 0 : 700, token = (drawQR.token = (drawQR.token || 0) + 1);
+    let done = 0;
+    const step = (now) => {
+      if (token !== drawQR.token) return;
+      const want = dur ? Math.min(cells.length, Math.ceil(cells.length * (now - start) / dur)) : cells.length;
+      for (; done < want; done++) { const [x, y] = cells[done]; roundRect(g, x * m + pad, y * m + pad, m - pad * 2, m - pad * 2, rr); }
+      if (done < cells.length) requestAnimationFrame(step);
+      else { eye(0, 0); eye(0, N - 7); eye(N - 7, 0); }
+    };
+    const eye = (r, c) => {
+      const X = c * m, Y = r * m;
+      g.save();
+      roundRect(g, X, Y, m * 7, m * 7, m * 2);
+      g.globalCompositeOperation = 'destination-out';
+      roundRect(g, X + m, Y + m, m * 5, m * 5, m * 1.4);
+      g.restore();
+      roundRect(g, X + m * 2, Y + m * 2, m * 3, m * 3, m * 0.9);
+    };
+    requestAnimationFrame(step);
+  }
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath();
+    g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); g.fill();
+  }
+  let seed = 20261017;
+  drawQR(seed);
+
+  /* ---------- 状态机 ---------- */
+  const qr = document.getElementById('qr');
+  const cap = document.getElementById('cap');
+  const seg = document.getElementById('seg');
+  const desk = document.getElementById('desk');
+  let src = 'corp', timer = null;
+  const captions = {
+    corp: { wait: '用公司 App 扫码', scanned: '', expired: '二维码已过期', done: '' },
+    team: { wait: '用手机相机扫码', scanned: '', expired: '二维码已过期', done: '' },
+  };
+  // 二维码 2 分钟有效：等宽倒计时 + 进度条
+  const ttl = document.getElementById('ttl'), ttlBar = document.getElementById('ttlBar');
+  let expiresAt = 0;
+  setInterval(() => {
+    const left = Math.max(0, expiresAt - Date.now());
+    const live = qr.dataset.state === 'wait';
+    ttl.textContent = live ? `${String(Math.floor(left / 60000)).padStart(2, '0')}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}` : '--:--';
+    ttlBar.style.transform = `scaleX(${live ? left / 120000 : 0})`;
+  }, 250);
+  function setState(st) {
+    qr.dataset.state = st;
+    cap.textContent = captions[src][st];
+    clearTimeout(timer);
+    if (st === 'wait') { expiresAt = Date.now() + 120000; timer = setTimeout(() => setState('expired'), 120000); }
+    if (st === 'done') timer = setTimeout(() => {
+      desk.classList.add('leaving');
+      setTimeout(() => { desk.classList.remove('leaving'); setState('wait'); }, 1400);
+    }, 1100);
+  }
+  seg.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    src = b.dataset.src;
+    seg.dataset.pos = src === 'team' ? '1' : '0';
+    seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+    qr.style.transform = 'scale(.96)';
+    setTimeout(() => { drawQR(seed += 7919); qr.style.transform = ''; setState('wait'); }, 180);
+  });
+  document.getElementById('refresh').addEventListener('click', () => { drawQR(seed += 104729); setState('wait'); });
+  setState('wait');
+
+  /* 视图切换 */
+  const views = ['v-qr', 'v-pk', 'v-pw'].map((id) => document.getElementById(id));
+  function go(id) { views.forEach((v) => { v.hidden = v.id !== id; }); }
+  document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => go(b.dataset.go)));
+
+  /* 通行密钥 */
+  const pkBtn = document.getElementById('pkBtn'), pkCap = document.getElementById('pkCap');
+  pkBtn.addEventListener('click', () => {
+    pkBtn.classList.add('pressing'); pkCap.textContent = '等待确认…';
+    setTimeout(() => { pkBtn.classList.remove('pressing'); pkCap.textContent = '点一下，用手机或本机指纹确认'; }, 2600);
+  });
+
+  /* 密码 + 验证码 */
+  const otpWrap = document.getElementById('otpWrap');
+  const otp = [...document.querySelectorAll('#otp input')];
+  document.getElementById('pwForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!otpWrap.classList.contains('open')) { otpWrap.classList.add('open'); setTimeout(() => otp[0].focus(), 250); document.getElementById('pwBtn').textContent = '登录'; }
+  });
+  otp.forEach((inp, i) => {
+    inp.addEventListener('input', () => { inp.value = inp.value.replace(/\D/g, ''); if (inp.value && otp[i + 1]) otp[i + 1].focus(); });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Backspace' && !inp.value && otp[i - 1]) otp[i - 1].focus(); });
+  });
+
+  /* 手机确认页 */
+  const mobile = document.getElementById('mobile');
+  const picks = [...document.querySelectorAll('.pick')];
+  const confirmBtn = document.getElementById('confirm');
+  const phoneDone = document.getElementById('phoneDone');
+  picks.forEach((p) => p.addEventListener('click', () => {
+    picks.forEach((x) => x.setAttribute('aria-pressed', String(x === p)));
+    confirmBtn.disabled = false;
+  }));
+  confirmBtn.addEventListener('click', () => {
+    phoneDone.classList.remove('show'); void phoneDone.offsetWidth; phoneDone.classList.add('show');
+    setTimeout(() => phoneDone.classList.remove('show'), 2600);
+  });
+
+  /* 原型控制 */
+  document.querySelector('.proto').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const p = b.dataset.p;
+    if (p === 'desk') { mobile.hidden = true; desk.hidden = false; }
+    if (p === 'mobile') { desk.hidden = true; mobile.hidden = false; }
+    if (p === 'scan') { mobile.hidden = true; desk.hidden = false; go('v-qr'); setState('scanned'); }
+    if (p === 'ok') { mobile.hidden = true; desk.hidden = false; go('v-qr'); setState('done'); }
+    if (p === 'expire') { mobile.hidden = true; desk.hidden = false; go('v-qr'); setState('expired'); }
+  });
+})();
+</script>
+</body>
+</html>
