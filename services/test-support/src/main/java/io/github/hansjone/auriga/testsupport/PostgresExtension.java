@@ -49,6 +49,115 @@ public final class PostgresExtension implements BeforeAllCallback, ParameterReso
     return sharedServer().database(testClass);
   }
 
+  /**
+   * Creates (idempotently) a login role that is neither superuser nor BYPASSRLS, owning {@code
+   * schema} in the test class's database, with {@code search_path} set to that schema: the shape of
+   * a production service role. Needed to test row level security, which superusers bypass.
+   */
+  public static ServiceRole serviceRole(Class<?> testClass, String role, String schema) {
+    if (!role.matches("[a-z][a-z0-9_]*") || !schema.matches("[a-z][a-z0-9_]*")) {
+      throw new IllegalArgumentException("role and schema must be plain identifiers");
+    }
+    Database database = database(testClass);
+    try (var connection = database.dataSource().getConnection();
+        var statement = connection.createStatement()) {
+      statement.execute(
+          "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '"
+              + role
+              + "') THEN CREATE ROLE "
+              + role
+              + " LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE; END IF; END $$");
+      statement.execute("CREATE SCHEMA IF NOT EXISTS " + schema + " AUTHORIZATION " + role);
+      statement.execute("ALTER ROLE " + role + " SET search_path = " + schema);
+    } catch (SQLException e) {
+      throw new IllegalStateException("Cannot create service role " + role, e);
+    }
+    String url = database.jdbcUrl().replace("user=postgres", "user=" + role);
+    if (url.equals(database.jdbcUrl())) {
+      url = url + (url.contains("?") ? "&" : "?") + "user=" + role;
+    }
+    var dataSource = new org.postgresql.ds.PGSimpleDataSource();
+    dataSource.setURL(url);
+    return new ServiceRole(role, schema, url, dataSource);
+  }
+
+  /** Spring datasource properties connecting as a {@link #serviceRole}. */
+  public static void serviceRoleProperties(
+      Class<?> testClass, String role, String schema, DynamicPropertyRegistry registry) {
+    ServiceRole serviceRole = serviceRole(testClass, role, schema);
+    registry.add("spring.datasource.url", serviceRole::jdbcUrl);
+    registry.add("spring.datasource.username", () -> role);
+    registry.add("spring.datasource.password", () -> "");
+  }
+
+  public record ServiceRole(String role, String schema, String jdbcUrl, DataSource dataSource) {}
+
+  /**
+   * Production shape with separate roles: {@code owner} owns the schema and runs migrations; {@code
+   * runtime} (what the service connects as) may only use the schema and read/write rows
+   * (SELECT/INSERT/UPDATE/DELETE on the owner's tables, sequences), no DDL, never table owner.
+   */
+  public record ServiceRoles(ServiceRole owner, ServiceRole runtime) {}
+
+  public static ServiceRoles serviceRoles(
+      Class<?> testClass, String owner, String runtime, String schema) {
+    ServiceRole ownerRole = serviceRole(testClass, owner, schema);
+    if (!runtime.matches("[a-z][a-z0-9_]*")) {
+      throw new IllegalArgumentException("runtime role must be a plain identifier");
+    }
+    Database database = database(testClass);
+    try (var connection = database.dataSource().getConnection();
+        var statement = connection.createStatement()) {
+      statement.execute(
+          "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '"
+              + runtime
+              + "') THEN CREATE ROLE "
+              + runtime
+              + " LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE; END IF; END $$");
+      statement.execute("GRANT USAGE ON SCHEMA " + schema + " TO " + runtime);
+      statement.execute(
+          "ALTER DEFAULT PRIVILEGES FOR ROLE "
+              + owner
+              + " IN SCHEMA "
+              + schema
+              + " GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "
+              + runtime);
+      statement.execute(
+          "ALTER DEFAULT PRIVILEGES FOR ROLE "
+              + owner
+              + " IN SCHEMA "
+              + schema
+              + " GRANT USAGE, SELECT ON SEQUENCES TO "
+              + runtime);
+      statement.execute("ALTER ROLE " + runtime + " SET search_path = " + schema);
+    } catch (SQLException e) {
+      throw new IllegalStateException("Cannot create runtime role " + runtime, e);
+    }
+    String url = database.jdbcUrl().replace("user=postgres", "user=" + runtime);
+    if (url.equals(database.jdbcUrl())) {
+      url = url + (url.contains("?") ? "&" : "?") + "user=" + runtime;
+    }
+    var dataSource = new org.postgresql.ds.PGSimpleDataSource();
+    dataSource.setURL(url);
+    return new ServiceRoles(ownerRole, new ServiceRole(runtime, schema, url, dataSource));
+  }
+
+  /** Datasource as the runtime role, Flyway as the owner role. */
+  public static void serviceRolesProperties(
+      Class<?> testClass,
+      String owner,
+      String runtime,
+      String schema,
+      DynamicPropertyRegistry registry) {
+    ServiceRoles roles = serviceRoles(testClass, owner, runtime, schema);
+    registry.add("spring.datasource.url", roles.runtime()::jdbcUrl);
+    registry.add("spring.datasource.username", () -> runtime);
+    registry.add("spring.datasource.password", () -> "");
+    registry.add("spring.flyway.url", roles.owner()::jdbcUrl);
+    registry.add("spring.flyway.user", () -> owner);
+    registry.add("spring.flyway.password", () -> "");
+  }
+
   @Override
   public boolean supportsParameter(ParameterContext parameter, ExtensionContext context) {
     return parameter.getParameter().getType() == Database.class

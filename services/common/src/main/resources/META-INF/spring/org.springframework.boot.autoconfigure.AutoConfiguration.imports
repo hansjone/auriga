@@ -1,0 +1,6 @@
+io.github.hansjone.auriga.common.autoconfigure.AurigaCoreAutoConfiguration
+io.github.hansjone.auriga.common.autoconfigure.AurigaSecurityAutoConfiguration
+io.github.hansjone.auriga.common.autoconfigure.AurigaPersistenceAutoConfiguration
+io.github.hansjone.auriga.common.autoconfigure.AurigaPersistenceGuardAutoConfiguration
+io.github.hansjone.auriga.common.autoconfigure.AurigaEventsAutoConfiguration
+io.github.hansjone.auriga.common.autoconfigure.AurigaGrpcAutoConfiguration
