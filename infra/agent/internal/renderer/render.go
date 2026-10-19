@@ -151,7 +151,7 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) []byte {
 	if spec.GetProfile() != nil && spec.Profile.ListenPort != 0 {
 		port = spec.Profile.ListenPort
 	}
-	b.WriteString(fmt.Sprintf("server:\n  host: 127.0.0.1\n  port: %d\n", port))
+	_, _ = fmt.Fprintf(&b, "server:\n  host: 127.0.0.1\n  port: %d\n", port)
 	b.WriteString("plugins:\n  auriga-dsh:\n    mode: managed\n    disableNativeInstall: true\n")
 	if prof := spec.GetProfile(); prof != nil {
 		if len(prof.McpServers) > 0 {
@@ -160,11 +160,11 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) []byte {
 			for _, name := range names {
 				srv := prof.McpServers[name]
 				tokenFile := tokenFileForRef(opt.MetaDir, srv.GetTokenRef())
-				b.WriteString(fmt.Sprintf("  %s:\n", yamlKey(name)))
-				b.WriteString(fmt.Sprintf("    url: %q\n", srv.GetUrl()))
+				_, _ = fmt.Fprintf(&b, "  %s:\n", yamlKey(name))
+				_, _ = fmt.Fprintf(&b, "    url: %q\n", srv.GetUrl())
 				b.WriteString("    transport: streamable-http\n")
 				b.WriteString("    headers:\n")
-				b.WriteString(fmt.Sprintf("      Authorization: !!js/function \"() => 'Bearer ' + require('fs').readFileSync(%q,'utf8').trim()\"\n", tokenFile))
+				_, _ = fmt.Fprintf(&b, "      Authorization: !!js/function \"() => 'Bearer ' + require('fs').readFileSync(%q,'utf8').trim()\"\n", tokenFile)
 			}
 		}
 		if len(prof.ModelProviders) > 0 {
@@ -173,15 +173,15 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) []byte {
 			for _, name := range names {
 				mp := prof.ModelProviders[name]
 				tokenFile := tokenFileForRef(opt.MetaDir, mp.GetTokenRef())
-				b.WriteString(fmt.Sprintf("  %s:\n", yamlKey(name)))
-				b.WriteString(fmt.Sprintf("    baseUrl: %q\n", mp.GetBaseUrl()))
-				b.WriteString(fmt.Sprintf("    apiKey: !!js/function \"() => require('fs').readFileSync(%q,'utf8').trim()\"\n", tokenFile))
+				_, _ = fmt.Fprintf(&b, "  %s:\n", yamlKey(name))
+				_, _ = fmt.Fprintf(&b, "    baseUrl: %q\n", mp.GetBaseUrl())
+				_, _ = fmt.Fprintf(&b, "    apiKey: !!js/function \"() => require('fs').readFileSync(%q,'utf8').trim()\"\n", tokenFile)
 				if len(mp.Models) > 0 {
 					b.WriteString("    models:\n")
 					for _, m := range mp.Models {
-						b.WriteString(fmt.Sprintf("      - id: %q\n", m.GetId()))
+						_, _ = fmt.Fprintf(&b, "      - id: %q\n", m.GetId())
 						if m.GetDisplayName() != "" {
-							b.WriteString(fmt.Sprintf("        displayName: %q\n", m.GetDisplayName()))
+							_, _ = fmt.Fprintf(&b, "        displayName: %q\n", m.GetDisplayName())
 						}
 					}
 				}
@@ -191,7 +191,7 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) []byte {
 			if p == nil {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("# patch %s = %s\n", p.Path, p.ValueJson))
+			_, _ = fmt.Fprintf(&b, "# patch %s = %s\n", p.Path, p.ValueJson)
 		}
 	}
 	return []byte(b.String())

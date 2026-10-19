@@ -96,7 +96,7 @@ func (c *EngineClient) doJSON(ctx context.Context, method, path string, in any, 
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, resp.StatusCode, err
@@ -149,7 +149,7 @@ func (c *EngineClient) PullImage(ctx context.Context, image string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("docker: pull %s: status %d", image, resp.StatusCode)

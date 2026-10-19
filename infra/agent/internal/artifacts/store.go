@@ -99,7 +99,7 @@ func (s *Store) Ensure(ctx context.Context, url, digest string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("artifacts: download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("artifacts: download status %d", resp.StatusCode)
 	}
@@ -235,7 +235,7 @@ func (s *Store) verifyFile(path, hexDig string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return err

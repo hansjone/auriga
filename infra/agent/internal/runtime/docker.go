@@ -172,10 +172,8 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	}
 	d.mu.Lock()
 	d.ports[s.InstanceID] = port
-	if r != nil && r.Digest != "" {
-		// digest recorded by caller; nothing to store here
-	}
 	d.mu.Unlock()
+	_ = r
 	return nil
 }
 
