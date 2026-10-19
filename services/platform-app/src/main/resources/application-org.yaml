@@ -1,0 +1,20 @@
+# Standalone org assembly in platform-app.
+auriga:
+  service:
+    name: org
+    schema: org
+  errors:
+    message-bundles: [messages/org-errors]
+  security:
+    jwt:
+      issuer: ${AURIGA_IAM_ISSUER:}
+      jwk-set-uri: ${AURIGA_IAM_JWK_SET_URI:}
+    public-paths:
+      - /actuator/health
+      - /actuator/health/**
+      - /error
+      - /api/org/v1/invitations/preview/**
+spring:
+  flyway:
+    schemas: org
+    locations: classpath:db/org
