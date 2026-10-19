@@ -23,6 +23,22 @@ class ConnectorContractTest {
   }
 
   @Test
+  void oidcDescriptorValidatesAgainstContract() {
+    var connector = new OidcConnector();
+    schemas.validate(
+        "identity/connector.schema.json#/$defs/ConnectorDescriptor", connector.descriptor());
+    assertEquals("oidc", connector.descriptor().path("type").asString());
+    assertTrue(
+        connector
+            .descriptor()
+            .path("configSchema")
+            .path("properties")
+            .path("clientSecret")
+            .path("x-secret")
+            .asBoolean());
+  }
+
+  @Test
   void rejectsDuplicateAndIncompatibleSpiDescriptors() {
     var registry = new ConnectorRegistry(schemas, List.of(new EmergencyConnector()));
     assertThrows(RuntimeException.class, () -> registry.register(new EmergencyConnector()));

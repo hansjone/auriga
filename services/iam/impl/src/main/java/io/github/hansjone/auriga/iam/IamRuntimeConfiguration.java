@@ -156,6 +156,11 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IdentityConnector oidcConnector() {
+    return new OidcConnector();
+  }
+
+  @Bean
   @ConditionalOnMissingBean(IdentityPolicyHooks.class)
   IdentityPolicyHooks iamIdentityPolicyHooks(TeamAccounts accounts) {
     return new IdentityPolicyHooks() {

@@ -188,3 +188,30 @@ RLS、事务回滚和限速。数据库测试在 Windows 沙箱可能因 pg_ctl 
 存储表（V3）：`team_account`、`team_totp`、`team_passkey`、`team_ceremony`、
 `qr_challenge`。无 TOTP 的新账号在政策要求 MFA 时不会死卡在 `platform_totp`，
 可先完成登录再经 `/me/mfa` 登记。
+
+## 通用 OIDC / OAuth 2.0（oidc）
+
+内置连接器类型 `oidc`，经 `ConnectorRegistry` 注册（Spring bean `oidcConnector`）。
+同一租户可配置多个实例。登录为 authorization code + PKCE（S256）；回调地址固定为
+`ctx.callbackUrl`（`{issuer}/api/iam/v1/login/callback/{providerId}`）。
+
+`configSchema` 字段：
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `issuer` | 是 | IdP issuer URL；元数据从 `{issuer}/.well-known/openid-configuration` 懒加载并缓存约 10 分钟 |
+| `clientId` | 是 | 客户端 id |
+| `clientSecret` | 是 | 客户端密钥（`x-secret`，加密保存、管理台不回显） |
+| `scopes` | 否 | 默认 `openid profile email` |
+| `claimMapping` | 否 | 将 ExternalProfile 字段映射到 IdP claim 名；默认 `sub` / `name` / `email` / `email_verified` / `phone_number` |
+
+`claimMapping` 可选键：`subject`、`displayName`、`email`、`emailVerified`、`phone`。
+
+保存配置时会校验 JSON Schema，并尝试拉取 issuer 发现文档；发现失败返回
+`iam.connector_unavailable` / `iam.invalid_config`。回调里坏 state、坏 PKCE、IdP
+`error` 参数或拒绝换票 → `iam.external_denied`。外部调用只记 host / 结果 / 耗时，
+不记凭据与响应体。
+
+管理台：`POST/GET/PATCH/DELETE /api/iam/v1/admin/providers` 可创建、查看、更新
+（含启停）、停用 `connectorType=oidc` 实例。PATCH 对 config 做 merge；未提交的
+`x-secret` 占位字段保持原值。

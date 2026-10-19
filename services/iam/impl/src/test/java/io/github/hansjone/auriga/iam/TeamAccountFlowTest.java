@@ -411,11 +411,14 @@ class TeamAccountFlowTest {
                   "192.0.2.10",
                   "desktop",
                   "https://portal.example.com");
+          String wrong =
+              String.format(
+                  "%02d", (Integer.parseInt(other.path("matchCode").asString()) + 1) % 100);
           assertThrows(
               Exception.class,
               () ->
                   qr.confirm(
-                      other.path("challengeId").asString(), "00", UuidV7.next().toString(), null));
+                      other.path("challengeId").asString(), wrong, UuidV7.next().toString(), null));
           return null;
         });
   }
