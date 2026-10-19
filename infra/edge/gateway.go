@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const maxAPIBodyBytes = 1 << 20 // 1 MiB
+const maxAPIBodyBytes = 1 << 20 // 1 MiB — only /api/**
 
 // Gateway is the edge HTTP handler.
 type Gateway struct {
@@ -25,6 +25,7 @@ type Gateway struct {
 	Tickets  TicketStore
 	Signer   IdentitySigner
 	Limiter  *TokenBucketLimiter
+	Conns    *SessionConnHub
 	Now      func() time.Time
 
 	iamURL       *url.URL
@@ -53,6 +54,10 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	if err != nil {
 		return nil, err
 	}
+	hub := NewSessionConnHub()
+	if ms, ok := sessions.(*MemorySessionStore); ok {
+		ms.OnRevoke = hub.CancelSession
+	}
 	g := &Gateway{
 		Cfg:          cfg,
 		Log:          log,
@@ -63,6 +68,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		Tickets:      tickets,
 		Signer:       signer,
 		Limiter:      NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, cfg.RateLimit.PathPrefix),
+		Conns:        hub,
 		Now:          time.Now,
 		iamURL:       iamURL,
 		orgURL:       orgURL,
@@ -88,6 +94,16 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(context.WithValue(r.Context(), ctxKeyClientIP, clientIP))
 	host := requestHost(r)
 
+	// Instance host first: only reject traversal; do not apply portal/admin path strictness (N1).
+	if instID, ok := g.instanceIDFromHost(host); ok {
+		if !instancePathOK(r) {
+			writeProblem(w, problem(http.StatusBadRequest, "edge.bad_path", "Bad Request", "path traversal rejected", rid))
+			return
+		}
+		g.serveInstance(w, r, instID, "", clientIP, rid)
+		return
+	}
+
 	path, ok := sanitizeRequestPath(r)
 	if !ok {
 		writeProblem(w, problem(http.StatusBadRequest, "edge.bad_path", "Bad Request", "unsafe or non-normalized path", rid))
@@ -98,12 +114,6 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		r2.URL.Path = path
 		r2.URL.RawPath = ""
 		r = r2
-	}
-
-	// Instance host: <instanceId>.<parent>
-	if instID, ok := g.instanceIDFromHost(host); ok {
-		g.serveInstance(w, r, instID, "", clientIP, rid)
-		return
 	}
 
 	audience, knownHost := normalizeAudience(host, g.Cfg.PortalHost, g.Cfg.AdminHost)
@@ -123,6 +133,11 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if instID == "" {
 			writeProblem(w, problem(http.StatusNotFound, "edge.not_found", "Not Found", "", rid))
+			return
+		}
+		// Path-based instance traffic still uses portal host; only reject .. in the instance suffix.
+		if strings.Contains(suffix, "..") {
+			writeProblem(w, problem(http.StatusBadRequest, "edge.bad_path", "Bad Request", "path traversal rejected", rid))
 			return
 		}
 		g.serveInstance(w, r, instID, suffix, clientIP, rid)
@@ -196,9 +211,7 @@ func (g *Gateway) matchUpstream(path string) *url.URL {
 }
 
 func isAdminAPIPath(path string) bool {
-	// /api/<svc>/v1/admin/**
 	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	// api, svc, v1, admin, ...
 	if len(parts) < 4 {
 		return false
 	}
@@ -217,7 +230,6 @@ func (g *Gateway) isPublicPath(path string) bool {
 			}
 			continue
 		}
-		// Exact prefix entry: /userinfo matches /userinfo and /userinfo/..., not /userinfoXYZ
 		if path == p || strings.HasPrefix(path, p+"/") {
 			return true
 		}
@@ -226,7 +238,7 @@ func (g *Gateway) isPublicPath(path string) bool {
 }
 
 func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.URL, audience, clientIP, rid string) {
-	if err := g.checkUpgradeOrigin(r); err != nil {
+	if err := g.checkUpgradeOriginAPI(r, audience); err != nil {
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_origin", "Forbidden", err.Error(), rid))
 		return
 	}
@@ -254,7 +266,6 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 	}
 	if sess != nil && isWriteMethod(r.Method) {
 		if public {
-			// Public write paths must not inherit the session Bearer (login CSRF / confused deputy).
 			bearer = ""
 		} else {
 			if err := g.checkCSRF(r, sess); err != nil {
@@ -271,11 +282,21 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 		}
 	}
 
-	if r.Body != nil && r.Body != http.NoBody {
+	if strings.HasPrefix(r.URL.Path, "/api/") && r.Body != nil && r.Body != http.NoBody {
 		r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
 	}
 
-	proxy := newReverseProxy(target)
+	if sess != nil && isUpgradeRequest(r) {
+		deadline := sess.ExpiresAt
+		if !sess.IdleExpiresAt.IsZero() && (deadline.IsZero() || sess.IdleExpiresAt.Before(deadline)) {
+			deadline = sess.IdleExpiresAt
+		}
+		ctx, stop := g.Conns.Attach(r.Context(), sess.SessionID, deadline)
+		defer stop()
+		r = r.WithContext(ctx)
+	}
+
+	proxy := newReverseProxy(target, false)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
@@ -288,7 +309,6 @@ func (g *Gateway) loadSession(r *http.Request, audience string) (*Session, error
 	name := cookieName(g.Cfg.SecureCookies, sessionCookieBase(audience))
 	raw := getCookie(r, name)
 	if raw == "" {
-		// also try non-secure name when secure expected? no — config decides.
 		return nil, ErrSessionNotFound
 	}
 	return g.Sessions.Get(r.Context(), HashCookie(raw))
@@ -336,11 +356,20 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
 	}
-	ticket, err := g.Tickets.Issue(sess.SessionID, sess.AccountID, sess.TenantID, instanceID, 60*time.Second)
+	nonce, err := randomID(24)
+	if err != nil {
+		writeProblem(w, problem(http.StatusInternalServerError, "edge.ticket_error", "Internal Server Error", "cannot issue nonce", rid))
+		return
+	}
+	sum := sha256.Sum256([]byte(nonce))
+	nonceHash := hex.EncodeToString(sum[:])
+	ticket, err := g.Tickets.Issue(sess.SessionID, sess.AccountID, sess.TenantID, instanceID, nonceHash, 60*time.Second, sess.ExpiresAt)
 	if err != nil {
 		writeProblem(w, problem(http.StatusInternalServerError, "edge.ticket_error", "Internal Server Error", "cannot issue ticket", rid))
 		return
 	}
+	domain := openNonceCookieDomain(g.Cfg.InstanceParentDomain)
+	setOpenNonceCookie(w, g.Cfg.SecureCookies, domain, nonce, 60)
 	loc := g.ticketRedirectURL(r, instanceID, ticket.Token)
 	http.Redirect(w, r, loc, http.StatusFound)
 }
@@ -354,7 +383,6 @@ func (g *Gateway) ticketRedirectURL(r *http.Request, instanceID, token string) s
 		host := instanceID + "." + g.Cfg.InstanceParentDomain
 		return scheme + "://" + host + "/_auriga/ticket?t=" + url.QueryEscape(token)
 	}
-	// path-based fallback
 	return scheme + "://" + requestHost(r) + "/i/" + instanceID + "/_auriga/ticket?t=" + url.QueryEscape(token)
 }
 
@@ -376,23 +404,20 @@ func (g *Gateway) instanceIDFromHost(host string) (string, bool) {
 }
 
 func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instanceID, pathSuffix, clientIP, rid string) {
-	// Determine path as seen by instance (htu).
 	instPath := r.URL.Path
 	if pathSuffix != "" {
-		// path-based /i/<id>/...
 		instPath = pathSuffix
 		if instPath == "" {
 			instPath = "/"
 		}
 	}
 
-	// Ticket redeem
 	if strings.HasPrefix(instPath, "/_auriga/ticket") {
 		g.redeemTicket(w, r, instanceID, rid)
 		return
 	}
 
-	if err := g.checkUpgradeOrigin(r); err != nil {
+	if err := g.checkUpgradeOriginInstance(r, instanceID); err != nil {
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_origin", "Forbidden", err.Error(), rid))
 		return
 	}
@@ -408,11 +433,6 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "instance cookie required", rid))
 		return
 	}
-	// Portal session must still be valid
-	// We don't have cookie raw for portal on instance origin — binding carries session id;
-	// look up by scanning is not available. Skeleton: store sessionId in binding and require
-	// a SessionStore that can GetBySessionID, OR re-validate via introspect.
-	// For B7 skeleton: keep a side map in MemorySessionStore keyed by sessionId for lookup.
 	sess, err := getSessionByID(g.Sessions, r.Context(), binding.SessionID)
 	if err != nil || sess.Valid(g.Now().UTC(), "portal") != nil {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session invalid", rid))
@@ -449,12 +469,20 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		writeProblem(w, problem(http.StatusBadGateway, "edge.bad_ingress", "Bad Gateway", "invalid ingress", rid))
 		return
 	}
-	proxy := newReverseProxy(ingress)
+
+	deadline := sess.ExpiresAt
+	if !sess.IdleExpiresAt.IsZero() && (deadline.IsZero() || sess.IdleExpiresAt.Before(deadline)) {
+		deadline = sess.IdleExpiresAt
+	}
+	ctx, stop := g.Conns.Attach(r.Context(), sess.SessionID, deadline)
+	defer stop()
+	r = r.WithContext(ctx)
+
+	proxy := newReverseProxy(ingress, true)
 	tp := ensureTraceparent(r)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
-		// path-based: strip /i/<id> prefix already reflected in instPath
 		if pathSuffix != "" {
 			pr.Out.URL.Path = instPath
 			pr.Out.URL.RawPath = ""
@@ -466,13 +494,16 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 }
 
 func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceID, rid string) {
-	if !g.ticketNavigationOK(r) {
-		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket_nav", "Forbidden", "ticket redeem requires navigation from portal", rid))
-		return
-	}
 	t := r.URL.Query().Get("t")
 	if t == "" {
 		writeProblem(w, problem(http.StatusBadRequest, "edge.bad_ticket", "Bad Request", "missing ticket", rid))
+		return
+	}
+	domain := openNonceCookieDomain(g.Cfg.InstanceParentDomain)
+	nonceName := openNonceCookieName(g.Cfg.SecureCookies, domain)
+	nonce := getCookie(r, nonceName)
+	if nonce == "" {
+		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket_nav", "Forbidden", "open nonce cookie required", rid))
 		return
 	}
 	ticket, err := g.Tickets.Redeem(t)
@@ -480,33 +511,31 @@ func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceI
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.bad_ticket", "Unauthorized", err.Error(), rid))
 		return
 	}
+	sum := sha256.Sum256([]byte(nonce))
+	got := hex.EncodeToString(sum[:])
+	if ticket.NonceHash == "" || !strings.EqualFold(got, ticket.NonceHash) {
+		clearOpenNonceCookie(w, g.Cfg.SecureCookies, domain)
+		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket_nav", "Forbidden", "open nonce mismatch", rid))
+		return
+	}
+	clearOpenNonceCookie(w, g.Cfg.SecureCookies, domain)
 	if ticket.InstanceID != instanceID {
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_ticket", "Forbidden", "ticket instance mismatch", rid))
 		return
 	}
-	binding, err := g.Tickets.BindInstance(ticket.SessionID, ticket.AccountID, ticket.TenantID, ticket.InstanceID)
+	expiresAt := ticket.SessionExpiresAt
+	if expiresAt.IsZero() {
+		if sess, err := getSessionByID(g.Sessions, r.Context(), ticket.SessionID); err == nil && sess != nil {
+			expiresAt = sess.ExpiresAt
+		}
+	}
+	binding, err := g.Tickets.BindInstance(ticket.SessionID, ticket.AccountID, ticket.TenantID, ticket.InstanceID, expiresAt)
 	if err != nil {
 		writeProblem(w, problem(http.StatusInternalServerError, "edge.ticket_error", "Internal Server Error", "", rid))
 		return
 	}
 	setInstanceCookie(w, g.Cfg.SecureCookies, binding.CookieRaw, 0)
 	http.Redirect(w, r, "/", http.StatusFound)
-}
-
-// ticketNavigationOK mitigates login CSRF: redeem must look like a portal→instance navigation.
-func (g *Gateway) ticketNavigationOK(r *http.Request) bool {
-	if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
-		u, err := url.Parse(ref)
-		if err == nil && strings.EqualFold(u.Hostname(), g.Cfg.PortalHost) {
-			return true
-		}
-	}
-	switch strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site"))) {
-	case "same-site", "same-origin":
-		return true
-	default:
-		return false
-	}
 }
 
 func (g *Gateway) lookupInstBinding(r *http.Request) (*InstBinding, error) {
@@ -518,36 +547,68 @@ func (g *Gateway) lookupInstBinding(r *http.Request) (*InstBinding, error) {
 	return g.Tickets.LookupInstance(raw)
 }
 
-func (g *Gateway) checkUpgradeOrigin(r *http.Request) error {
+func (g *Gateway) checkUpgradeOriginAPI(r *http.Request, audience string) error {
 	if !isUpgradeRequest(r) {
 		return nil
 	}
-	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if origin == "" {
-		return errString("upgrade requires Origin")
+	oh, err := parseOriginHost(r)
+	if err != nil {
+		return err
 	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Hostname() == "" {
-		return errString("upgrade invalid Origin")
-	}
-	oh := strings.ToLower(u.Hostname())
-	reqHost := requestHost(r)
-	if oh == reqHost {
-		return nil
-	}
-	if oh == strings.ToLower(g.Cfg.PortalHost) || oh == strings.ToLower(g.Cfg.AdminHost) {
-		return nil
-	}
-	if _, ok := g.instanceIDFromHost(oh); ok {
-		return nil
+	switch audience {
+	case "portal":
+		if oh == strings.ToLower(g.Cfg.PortalHost) {
+			return nil
+		}
+	case "admin":
+		if oh == strings.ToLower(g.Cfg.AdminHost) {
+			return nil
+		}
 	}
 	return errString("upgrade Origin not allowed")
 }
 
+func (g *Gateway) checkUpgradeOriginInstance(r *http.Request, instanceID string) error {
+	if !isUpgradeRequest(r) {
+		return nil
+	}
+	oh, err := parseOriginHost(r)
+	if err != nil {
+		return err
+	}
+	reqHost := requestHost(r)
+	if oh != reqHost {
+		return errString("upgrade Origin not allowed")
+	}
+	// Path-based: request host is portal; origin must be portal and path already scoped to this instance.
+	if g.Cfg.InstanceParentDomain == "" {
+		if oh == strings.ToLower(g.Cfg.PortalHost) {
+			return nil
+		}
+		return errString("upgrade Origin not allowed")
+	}
+	id, ok := g.instanceIDFromHost(oh)
+	if !ok || id != instanceID {
+		return errString("upgrade Origin not allowed")
+	}
+	return nil
+}
+
+func parseOriginHost(r *http.Request) (string, error) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return "", errString("upgrade requires Origin")
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Hostname() == "" {
+		return "", errString("upgrade invalid Origin")
+	}
+	return strings.ToLower(u.Hostname()), nil
+}
+
 func isUpgradeRequest(r *http.Request) bool {
-	return strings.EqualFold(r.Header.Get("Connection"), "Upgrade") ||
-		strings.EqualFold(r.Header.Get("Upgrade"), "websocket") ||
-		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+	// N4: require explicit websocket upgrade, not merely Connection: upgrade (e.g. h2c).
+	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
 }
 
 func stripInstanceSetCookie(resp *http.Response) error {

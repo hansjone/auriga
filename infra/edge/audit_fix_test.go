@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -74,6 +75,7 @@ func TestAudit1_InstanceSetCookieStripped(t *testing.T) {
 		"22222222-2222-2222-2222-222222222222",
 		"33333333-3333-3333-3333-333333333333",
 		instID,
+		time.Now().Add(time.Hour),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -174,21 +176,28 @@ func TestAudit3_PublicWriteNoSessionBearer(t *testing.T) {
 		t.Fatalf("public write must not inject session bearer, got %q", gotAuth)
 	}
 
-	// /userinfoXYZ must not be treated as public (exact /userinfo only)
-	gotAuth = "unset"
-	cfg2, sessions2, routes2, tickets2, signer2, _ := testEnv(t)
-	cfg2.Upstreams["org"] = upstream.URL
-	gw2 := newTestGateway(t, cfg2, sessions2, routes2, tickets2, signer2)
-	req = httptest.NewRequest(http.MethodGet, "http://portal.example.com/userinfoXYZ", nil)
+	if gw.isPublicPath("/userinfoXYZ") {
+		t.Fatal("/userinfoXYZ must not match public prefix /userinfo")
+	}
+	if !gw.isPublicPath("/userinfo") {
+		t.Fatal("/userinfo must remain public")
+	}
+	if !gw.isPublicPath("/userinfo/email") {
+		t.Fatal("/userinfo/email should be under /userinfo/")
+	}
+
+	// Exact /userinfo remains public (no session → still 200 to upstream, no bearer).
+	gotAuth = "sentinel"
+	req = httptest.NewRequest(http.MethodGet, "http://portal.example.com/userinfo", nil)
 	req.Host = "portal.example.com"
 	req.RemoteAddr = "192.0.2.10:1"
 	rr = httptest.NewRecorder()
-	gw2.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized && rr.Code != http.StatusNotFound {
-		// Not an API upstream match either → static/404; must not reach org with bearer.
-		if rr.Code == 200 && gotAuth == "Bearer access-token-abc" {
-			t.Fatal("userinfoXYZ must not be public with bearer")
-		}
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("/userinfo public got %d", rr.Code)
+	}
+	if gotAuth != "" {
+		t.Fatalf("/userinfo without session should not inject bearer, got %q", gotAuth)
 	}
 }
 
@@ -216,7 +225,7 @@ func TestAudit4_IgnoreClientIPHeadersFromTrustedProxy(t *testing.T) {
 	}
 }
 
-func TestAudit5_TicketRedeemWithoutPortalNavRejected(t *testing.T) {
+func TestAudit5_TicketRedeemWithoutNonceRejected(t *testing.T) {
 	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
 	cfg.SecureCookies = false
 	instID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -248,11 +257,11 @@ func TestAudit5_TicketRedeemWithoutPortalNavRejected(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "http://"+host+"/_auriga/ticket?t="+url.QueryEscape(ticket), nil)
 	req.Host = host
 	req.RemoteAddr = "192.0.2.10:1"
-	// No Referer / Sec-Fetch-Site — login CSRF vector
+	req.Header.Set("Sec-Fetch-Site", "same-site") // alone is not enough
 	rr = httptest.NewRecorder()
 	gw.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
-		t.Fatalf("redeem without nav: %d", rr.Code)
+		t.Fatalf("redeem without nonce: %d", rr.Code)
 	}
 	var prob Problem
 	_ = json.Unmarshal(rr.Body.Bytes(), &prob)
@@ -261,12 +270,61 @@ func TestAudit5_TicketRedeemWithoutPortalNavRejected(t *testing.T) {
 	}
 }
 
+func TestAudit5_SameSiteMaliciousInstanceNavRejected(t *testing.T) {
+	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
+	cfg.SecureCookies = false
+	instA := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	instB := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	hostA := instA + ".i.example.com"
+	hostB := instB + ".i.example.com"
+	for _, id := range []string{instA, instB} {
+		h := id + ".i.example.com"
+		routes.Put(&InstanceRoute{
+			InstanceID: id,
+			TenantID:   "33333333-3333-3333-3333-333333333333",
+			OwnerID:    "22222222-2222-2222-2222-222222222222",
+			Host:       &h,
+			Ingress:    "http://127.0.0.1:9",
+			State:      "running",
+			UpdatedAt:  time.Now(),
+		})
+	}
+	putPortalSession(sessions, "portal-sess", "csrf", "tok")
+	gw := newTestGateway(t, cfg, sessions, routes, tickets, signer)
+
+	// Attacker issues ticket for their instance (nonce lands in attacker's browser only).
+	req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/open/"+instA, nil)
+	req.Host = "portal.example.com"
+	req.RemoteAddr = "192.0.2.10:1"
+	req.AddCookie(&http.Cookie{Name: "auriga_session", Value: "portal-sess"})
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("open %d", rr.Code)
+	}
+	loc, _ := url.Parse(rr.Header().Get("Location"))
+	ticket := loc.Query().Get("t")
+
+	// Victim is navigated from another same-site instance page (has same-site, no attacker nonce).
+	req = httptest.NewRequest(http.MethodGet, "http://"+hostA+"/_auriga/ticket?t="+url.QueryEscape(ticket), nil)
+	req.Host = hostA
+	req.RemoteAddr = "192.0.2.10:1"
+	req.Header.Set("Sec-Fetch-Site", "same-site")
+	req.Header.Set("Referer", "https://"+hostB+"/")
+	rr = httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("same-site malicious nav: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestAudit6_TicketAndBindingSweep(t *testing.T) {
 	store := NewMemoryTicketStore()
 	fixed := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	store.now = func() time.Time { return fixed }
+	sessExp := fixed.Add(30 * time.Minute)
 
-	tok, err := store.Issue("s", "a", "t", "i", time.Second)
+	tok, err := store.Issue("s", "a", "t", "i", "noncehash", time.Second, sessExp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,11 +339,14 @@ func TestAudit6_TicketAndBindingSweep(t *testing.T) {
 	store.mu.Unlock()
 
 	store.now = func() time.Time { return fixed }
-	b, err := store.BindInstance("s", "a", "t", "i")
+	b, err := store.BindInstance("s", "a", "t", "i", sessExp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.now = func() time.Time { return fixed.Add(defaultBindingTTL + time.Second) }
+	if !b.ExpiresAt.Equal(sessExp) {
+		t.Fatalf("binding expiry %v want session %v", b.ExpiresAt, sessExp)
+	}
+	store.now = func() time.Time { return sessExp.Add(time.Second) }
 	if _, err := store.LookupInstance(b.CookieRaw); err == nil {
 		t.Fatal("expired binding should fail")
 	}
@@ -315,6 +376,91 @@ func TestAudit8_UpgradeBadOriginRejected(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("got %d", rr.Code)
 	}
+}
+
+func TestAudit8_UpgradeFromOtherInstanceRejected(t *testing.T) {
+	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(upstream.Close)
+	cfg.Upstreams["org"] = upstream.URL
+	cookieRaw := "portal-session-cookie-value"
+	csrfRaw := "csrf-token-value"
+	putPortalSession(sessions, cookieRaw, csrfRaw, "access-token-abc")
+	gw := newTestGateway(t, cfg, sessions, routes, tickets, signer)
+
+	otherInst := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/api/org/v1/groups", nil)
+	req.Host = "portal.example.com"
+	req.RemoteAddr = "192.0.2.10:1"
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Origin", "https://"+otherInst+".i.example.com")
+	req.AddCookie(&http.Cookie{Name: "__Host-auriga_session", Value: cookieRaw})
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("other instance origin on portal API: %d", rr.Code)
+	}
+}
+
+func TestAudit8_SessionRevokeCancelsAttachedConn(t *testing.T) {
+	hub := NewSessionConnHub()
+	ctx, stop := hub.Attach(context.Background(), "sid-1", time.Time{})
+	defer stop()
+	hub.CancelSession("sid-1")
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("expected context canceled after revoke")
+	}
+}
+
+func TestAuditN1_InstanceAllowsEncodedSlash(t *testing.T) {
+	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
+	cfg.SecureCookies = false
+	instID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	host := instID + ".i.example.com"
+	var sawPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath = r.URL.RequestURI()
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(upstream.Close)
+	routes.Put(&InstanceRoute{
+		InstanceID: instID,
+		TenantID:   "33333333-3333-3333-3333-333333333333",
+		OwnerID:    "22222222-2222-2222-2222-222222222222",
+		Host:       &host,
+		Ingress:    upstream.URL,
+		State:      "running",
+		UpdatedAt:  time.Now(),
+	})
+	putPortalSession(sessions, "portal-sess", "csrf", "tok")
+	binding, err := tickets.BindInstance(
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+		"33333333-3333-3333-3333-333333333333",
+		instID,
+		time.Now().Add(time.Hour),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := newTestGateway(t, cfg, sessions, routes, tickets, signer)
+	req := httptest.NewRequest(http.MethodGet, "http://"+host+"/files/a%2Fb", nil)
+	req.Host = host
+	req.RemoteAddr = "192.0.2.10:1"
+	req.URL.Path = "/files/a/b"
+	req.URL.RawPath = "/files/a%2Fb"
+	req.RequestURI = "/files/a%2Fb"
+	req.AddCookie(&http.Cookie{Name: "auriga_inst", Value: binding.CookieRaw})
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("instance encoded slash: %d %s", rr.Code, rr.Body.String())
+	}
+	_ = sawPath
 }
 
 func TestAudit9_ConfigRejectsDangerousValues(t *testing.T) {

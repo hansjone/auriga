@@ -6,20 +6,19 @@ import (
 	"time"
 )
 
-const (
-	defaultBindingTTL = 12 * time.Hour
-	ticketSweepEvery  = 64 // purge expired entries every N mutations
-)
+const ticketSweepEvery = 64 // purge expired entries every N mutations
 
 // Ticket binds a one-time open grant to a portal session and instance.
 type Ticket struct {
-	Token      string
-	SessionID  string
-	AccountID  string
-	TenantID   string
-	InstanceID string
-	ExpiresAt  time.Time
-	Used       bool
+	Token            string
+	SessionID        string
+	AccountID        string
+	TenantID         string
+	InstanceID       string
+	NonceHash        string
+	SessionExpiresAt time.Time
+	ExpiresAt        time.Time
+	Used             bool
 }
 
 // InstBinding is the server-side value behind __Host-auriga_inst.
@@ -35,9 +34,9 @@ type InstBinding struct {
 
 // TicketStore issues one-time tickets and instance cookie bindings.
 type TicketStore interface {
-	Issue(sessionID, accountID, tenantID, instanceID string, ttl time.Duration) (*Ticket, error)
+	Issue(sessionID, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error)
 	Redeem(token string) (*Ticket, error)
-	BindInstance(sessionID, accountID, tenantID, instanceID string) (*InstBinding, error)
+	BindInstance(sessionID, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error)
 	LookupInstance(cookieRaw string) (*InstBinding, error)
 }
 
@@ -57,18 +56,20 @@ func NewMemoryTicketStore() *MemoryTicketStore {
 	}
 }
 
-func (m *MemoryTicketStore) Issue(sessionID, accountID, tenantID, instanceID string, ttl time.Duration) (*Ticket, error) {
+func (m *MemoryTicketStore) Issue(sessionID, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error) {
 	tok, err := randomID(24)
 	if err != nil {
 		return nil, err
 	}
 	t := &Ticket{
-		Token:      tok,
-		SessionID:  sessionID,
-		AccountID:  accountID,
-		TenantID:   tenantID,
-		InstanceID: instanceID,
-		ExpiresAt:  m.now().UTC().Add(ttl),
+		Token:            tok,
+		SessionID:        sessionID,
+		AccountID:        accountID,
+		TenantID:         tenantID,
+		InstanceID:       instanceID,
+		NonceHash:        nonceHash,
+		SessionExpiresAt: sessionExpiresAt,
+		ExpiresAt:        m.now().UTC().Add(ttl),
 	}
 	m.mu.Lock()
 	m.tickets[tok] = t
@@ -99,10 +100,13 @@ func (m *MemoryTicketStore) Redeem(token string) (*Ticket, error) {
 	return &cp, nil
 }
 
-func (m *MemoryTicketStore) BindInstance(sessionID, accountID, tenantID, instanceID string) (*InstBinding, error) {
+func (m *MemoryTicketStore) BindInstance(sessionID, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error) {
 	raw, err := randomID(24)
 	if err != nil {
 		return nil, err
+	}
+	if expiresAt.IsZero() {
+		expiresAt = m.now().UTC().Add(12 * time.Hour)
 	}
 	b := &InstBinding{
 		Token:      raw,
@@ -111,7 +115,7 @@ func (m *MemoryTicketStore) BindInstance(sessionID, accountID, tenantID, instanc
 		TenantID:   tenantID,
 		InstanceID: instanceID,
 		CookieRaw:  raw,
-		ExpiresAt:  m.now().UTC().Add(defaultBindingTTL),
+		ExpiresAt:  expiresAt.UTC(),
 	}
 	m.mu.Lock()
 	m.bindings[raw] = b

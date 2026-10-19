@@ -10,6 +10,7 @@ import (
 const (
 	maxRateBuckets   = 10000
 	bucketIdleExpire = 15 * time.Minute
+	rateSweepEvery   = 128
 )
 
 // TokenBucketLimiter is a simple per-key token bucket.
@@ -20,6 +21,7 @@ type TokenBucketLimiter struct {
 	prefix  string
 	buckets map[string]*bucket
 	now     func() time.Time
+	ops     int
 }
 
 type bucket struct {
@@ -54,7 +56,10 @@ func (l *TokenBucketLimiter) Allow(key, path string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
-	l.evictLocked(now)
+	l.ops++
+	if l.ops%rateSweepEvery == 0 || len(l.buckets) >= maxRateBuckets {
+		l.evictLocked(now)
+	}
 	b, ok := l.buckets[key]
 	if !ok {
 		b = &bucket{tokens: l.burst, last: now}

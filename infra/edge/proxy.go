@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// Shared reverse-proxy transport (reused across requests).
-var proxyTransport http.RoundTripper = &http.Transport{
+// Shared reverse-proxy transports (reused across requests).
+var apiProxyTransport http.RoundTripper = &http.Transport{
 	Proxy: http.ProxyFromEnvironment,
 	DialContext: (&net.Dialer{
 		Timeout:   10 * time.Second,
@@ -24,13 +24,33 @@ var proxyTransport http.RoundTripper = &http.Transport{
 	ExpectContinueTimeout: 1 * time.Second,
 }
 
-func newReverseProxy(target *url.URL) *httputil.ReverseProxy {
+// Instance upstreams may stream or take longer before first byte (agents, uploads).
+var instanceProxyTransport http.RoundTripper = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:   true,
+	MaxIdleConns:        100,
+	MaxIdleConnsPerHost: 32,
+	IdleConnTimeout:     90 * time.Second,
+	TLSHandshakeTimeout: 10 * time.Second,
+	// No ResponseHeaderTimeout — long-poll / slow agent first byte is allowed.
+	ExpectContinueTimeout: 1 * time.Second,
+}
+
+func newReverseProxy(target *url.URL, instance bool) *httputil.ReverseProxy {
+	tr := apiProxyTransport
+	if instance {
+		tr = instanceProxyTransport
+	}
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.Out.Host = target.Host
 		},
-		Transport: proxyTransport,
+		Transport: tr,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			writeProblem(w, problem(http.StatusBadGateway, "edge.upstream_error", "Bad Gateway", "upstream unavailable", requestID(r)))
 		},

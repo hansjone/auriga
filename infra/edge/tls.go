@@ -40,10 +40,10 @@ func (s *Server) Run(ctx context.Context) error {
 	srv := &http.Server{
 		Handler:           s.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
-		BaseContext:       func(net.Listener) context.Context { return ctx },
+		// No ReadTimeout: large/slow instance uploads must not be cut at 30s.
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+		BaseContext:    func(net.Listener) context.Context { return ctx },
 	}
 	go func() {
 		<-ctx.Done()

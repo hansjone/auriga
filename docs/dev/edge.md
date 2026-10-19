@@ -121,14 +121,14 @@ JWKS 子集（含 `d` 私钥种子，选 `state=CURRENT`）：
 
 ## `/open` 与实例骨架
 
-1. 门户 `GET|POST /open/<instanceId>`：校验门户会话 + 所有权（`RouteStore.ownerId`）→ 一次性票据（60s、单次、绑 sid+instance）→ 302 到实例源 `/_auriga/ticket?t=…`。
-2. 兑换票据：要求 `Referer` 为门户 Host，或 `Sec-Fetch-Site` 为 `same-site` / `same-origin`（缓解 login CSRF）→ 设置实例 cookie → 302 `/`。
-3. 实例 Host（或无父域时的门户 `/i/<id>/…`）：验实例 cookie + 门户会话仍有效 → 签身份头 → 反代到路由里的 `ingress`；响应中剥离实例发出的 `auriga_*` / `__Host-*` `Set-Cookie`。
-4. WebSocket Upgrade：校验 `Origin` 为本站（门户 / 管理台 / 当前实例 Host）。
+1. 门户 `GET|POST /open/<instanceId>`：校验门户会话 + 所有权 → 下发一次性 `auriga_open_nonce` cookie（有父域时 Domain 覆盖 portal+实例）→ 票据存 nonce 哈希 → 302 到实例 `/_auriga/ticket?t=…`。
+2. 兑换票据：校验 nonce cookie 与票据哈希一致（不能只靠 Sec-Fetch-Site）→ binding 有效期对齐会话 `ExpiresAt` → 设置实例 cookie → 302 `/`。
+3. 实例 Host（或无父域时的门户 `/i/<id>/…`）：验实例 cookie + 门户会话仍有效 → 签身份头 → 反代；剥 `auriga_*` / `__Host-*` Set-Cookie。实例路径只拒 `..`，不套用 portal 的严格规范化（允许 `%2f` 等应用路径）。
+4. WebSocket：`Upgrade: websocket` 才做 Origin 检查；portal/admin API 只接受自身 Origin；实例只接受该实例自己的 Origin。会话附着到长连接，吊销/到期会 cancel。
 
-内存票据用完即删、过期清理；实例 binding 带 TTL；限流 bucket 按空闲淘汰，IPv6 按 /64 归并。
+内存票据用完即删；限流 bucket 定期/满额淘汰，IPv6 按 /64 归并。`ReadTimeout` 不设（大上传）；实例反代无短 `ResponseHeaderTimeout`；1MiB body 上限仅 `/api/`。
 
-**不做**（留给 E2）：经节点代理 ingress 的生产长连接 / mTLS 会话、会话吊销时主动掐断已建立的 WebSocket、冷启动页、NATS `auriga-routes` 实时同步。
+**不做**（留给 E2）：经节点代理 ingress 的生产 mTLS、冷启动页、NATS `auriga-routes` 实时同步。
 
 ## TLS
 
