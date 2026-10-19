@@ -1,0 +1,10 @@
+extends:
+  - recommended
+rules:
+  # 操作用 operationId + description 说明，不强制 summary / 标签说明
+  operation-summary: off
+  tag-description: off
+  # 401 / 403 / 429 等通用错误在 contracts/README.md 统一约定，不在每个操作上重复
+  operation-4xx-response: off
+  # 跳转类回调端点只有 302
+  operation-2xx-response: off

@@ -1,0 +1,1248 @@
+openapi: 3.1.0
+info:
+  title: Auriga iam
+  version: 1.0.0
+  description: |
+    身份认证：登录事务（按步骤协议驱动）、会话、本人的身份 / 多因素 / 设备、设备授权确认、身份源管理、服务账号。
+    OIDC / OAuth 2.0 标准端点（/oauth2/*、/.well-known/openid-configuration、/userinfo）按标准实现，不在这里定义。
+    `/admin/**` 只接受管理台源上的会话，并要求相应权限（见各操作的 x-permission）。
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: /api/iam/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: login
+  - name: me
+  - name: device
+  - name: admin-providers
+  - name: admin-accounts
+  - name: admin-service-accounts
+  - name: admin-keys
+paths:
+  # ---------------- 登录 ----------------
+  /login/providers:
+    get:
+      tags: [login]
+      operationId: listLoginProviders
+      summary: 登录页可选的身份源
+      security: []
+      parameters:
+        - name: purpose
+          in: query
+          schema: { type: string, enum: [login, link], default: login }
+      responses:
+        '200':
+          description: 已启用的身份源，按显示顺序
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/LoginProvider' } }
+                required: [items]
+  /login/transactions:
+    post:
+      tags: [login]
+      operationId: createLoginTransaction
+      summary: 开始一次登录（或绑定、补验证）
+      description: |
+        返回第一步。会给发起端下发 cookie `auriga_login_tx`（绑定事务和浏览器，扫码类防转发）。
+        purpose=link / stepup 时需要已登录。
+      security: [{}, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLoginTransaction' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginTransaction' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
+  /login/transactions/{txId}:
+    parameters:
+      - $ref: '#/components/parameters/TxId'
+    get:
+      tags: [login]
+      operationId: getLoginTransaction
+      security: [{}, { bearerAuth: [] }]
+      responses:
+        '200':
+          description: 当前状态和步骤
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginTransaction' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+    delete:
+      tags: [login]
+      operationId: cancelLoginTransaction
+      security: [{}, { bearerAuth: [] }]
+      responses:
+        '204': { description: 已取消 }
+  /login/transactions/{txId}/events:
+    parameters:
+      - $ref: '#/components/parameters/TxId'
+    get:
+      tags: [login]
+      operationId: streamLoginTransaction
+      summary: 订阅事务变化（SSE）
+      description: |
+        每次步骤变化发一个 `event: step`，data 是 LoginTransaction 的 JSON；事务结束（完成、失败、过期、取消）后发
+        `event: end` 并关闭。qr、device 步骤用它等待手机确认。
+      security: [{}, { bearerAuth: [] }]
+      responses:
+        '200':
+          description: 事件流
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /login/transactions/{txId}/advance:
+    parameters:
+      - $ref: '#/components/parameters/TxId'
+    post:
+      tags: [login]
+      operationId: advanceLoginTransaction
+      summary: 提交输入，推进到下一步
+      description: 完成时响应里 step.type=complete，并下发会话 cookie（经 edge 原样转给浏览器）。
+      security: [{}, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../identity/steps.schema.json#/$defs/StepInput' }
+      responses:
+        '200':
+          description: 下一步
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginTransaction' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+        '409':
+          description: 事务已结束或已过期（iam.login_tx_expired、iam.login_tx_finished）
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
+  /login/callback/{providerId}:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    get:
+      tags: [login]
+      operationId: loginCallbackGet
+      summary: 跳转类身份源的固定回调地址
+      description: 用查询参数和 `auriga_login_tx` cookie 推进事务，然后 302 回登录页（完成时回 redirectTo）。
+      security: []
+      responses:
+        '302': { description: 回到登录页 }
+    post:
+      tags: [login]
+      operationId: loginCallbackPost
+      summary: 回调（POST 绑定，例如 SAML、Apple）
+      security: []
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema: { type: object, additionalProperties: { type: string } }
+      responses:
+        '302': { description: 回到登录页 }
+  /login/qr/{challengeId}:
+    parameters:
+      - name: challengeId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [login]
+      operationId: getQrChallenge
+      summary: 手机扫码后查看登录请求（内置扫码）
+      description: 手机端已登录；返回发起端信息和三个候选比对码，用户选出和电脑上一致的那个。
+      responses:
+        '200':
+          description: 登录请求
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrChallenge' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+  /login/qr/{challengeId}/confirm:
+    parameters:
+      - name: challengeId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [login]
+      operationId: confirmQrChallenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                matchCode: { type: string, pattern: '^[0-9]{2}$' }
+              required: [matchCode]
+      responses:
+        '204': { description: 已确认，发起端的事务继续 }
+        '409':
+          description: 比对码不对（iam.qr_match_mismatch，挑战作废）或已过期
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+  /login/qr/{challengeId}/reject:
+    parameters:
+      - name: challengeId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [login]
+      operationId: rejectQrChallenge
+      responses:
+        '204': { description: 已拒绝 }
+  /logout:
+    post:
+      tags: [login]
+      operationId: logout
+      responses:
+        '204': { description: 已退出，cookie 已清除 }
+
+  # ---------------- 本人 ----------------
+  /me:
+    get:
+      tags: [me]
+      operationId: getMe
+      responses:
+        '200':
+          description: 当前账号
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+  /me/sessions:
+    get:
+      tags: [me]
+      operationId: listMySessions
+      responses:
+        '200':
+          description: 我的会话
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/SessionView' } }
+                required: [items]
+  /me/sessions/{sessionId}:
+    delete:
+      tags: [me]
+      operationId: revokeMySession
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      responses:
+        '204': { description: 已吊销 }
+  /me/sessions/revoke-others:
+    post:
+      tags: [me]
+      operationId: revokeMyOtherSessions
+      responses:
+        '200':
+          description: 吊销了几个
+          content:
+            application/json:
+              schema: { type: object, properties: { revoked: { type: integer } }, required: [revoked] }
+  /me/identities:
+    get:
+      tags: [me]
+      operationId: listMyIdentities
+      description: 绑定新身份用 POST /login/transactions（purpose=link）。
+      responses:
+        '200':
+          description: 我绑定的身份
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/IdentityView' } }
+                required: [items]
+  /me/identities/{identityId}:
+    delete:
+      tags: [me]
+      operationId: unlinkMyIdentity
+      description: 需要 10 分钟内做过二次验证，否则 403 iam.step_up_required；不能解绑最后一个身份（409 iam.last_identity）。
+      parameters:
+        - name: identityId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      responses:
+        '204': { description: 已解绑 }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /me/password:
+    put:
+      tags: [me]
+      operationId: changeMyPassword
+      description: 只适用于团队账号身份。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                currentPassword: { type: string }
+                newPassword: { type: string, minLength: 10, maxLength: 256 }
+              required: [currentPassword, newPassword]
+      responses:
+        '204': { description: 已修改，其他会话被吊销 }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+  /me/mfa:
+    get:
+      tags: [me]
+      operationId: getMyMfa
+      responses:
+        '200':
+          description: 多因素状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MfaStatus' }
+  /me/mfa/totp/enrollment:
+    post:
+      tags: [me]
+      operationId: beginTotpEnrollment
+      responses:
+        '201':
+          description: 新的 TOTP 密钥（只返回这一次），确认前不生效
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TotpEnrollment' }
+  /me/mfa/totp/enrollment/{enrollmentId}/confirm:
+    post:
+      tags: [me]
+      operationId: confirmTotpEnrollment
+      parameters:
+        - name: enrollmentId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { code: { type: string, pattern: '^[0-9]{6}$' } }, required: [code] }
+      responses:
+        '204': { description: 已启用（替换旧的） }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+  /me/mfa/totp:
+    delete:
+      tags: [me]
+      operationId: deleteTotp
+      description: 需要近期二次验证；策略要求必须有多因素时不能删除最后一种（409 iam.mfa_required）。
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /me/passkeys:
+    get:
+      tags: [me]
+      operationId: listMyPasskeys
+      responses:
+        '200':
+          description: 我的 Passkey
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Passkey' } }
+                required: [items]
+  /me/passkeys/registration:
+    post:
+      tags: [me]
+      operationId: beginPasskeyRegistration
+      responses:
+        '201':
+          description: WebAuthn 注册参数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registrationId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+                  publicKey: { type: object, description: PublicKeyCredentialCreationOptionsJSON }
+                required: [registrationId, publicKey]
+  /me/passkeys/registration/{registrationId}/complete:
+    post:
+      tags: [me]
+      operationId: completePasskeyRegistration
+      parameters:
+        - name: registrationId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                credential: { type: object, description: RegistrationResponseJSON }
+              required: [credential]
+      responses:
+        '201':
+          description: 已添加
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Passkey' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+  /me/passkeys/{passkeyId}:
+    parameters:
+      - name: passkeyId
+        in: path
+        required: true
+        schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    patch:
+      tags: [me]
+      operationId: renameMyPasskey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { name: { type: string, maxLength: 64 } }, required: [name] }
+      responses:
+        '200':
+          description: 已改名
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Passkey' }
+    delete:
+      tags: [me]
+      operationId: deleteMyPasskey
+      responses:
+        '204': { description: 已删除 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /me/devices:
+    get:
+      tags: [me]
+      operationId: listMyDevices
+      responses:
+        '200':
+          description: 我的设备（连接模式插件、命令行）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Device' } }
+                required: [items]
+  /me/devices/{deviceId}:
+    parameters:
+      - name: deviceId
+        in: path
+        required: true
+        schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    patch:
+      tags: [me]
+      operationId: renameMyDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { name: { type: string, maxLength: 64 } }, required: [name] }
+      responses:
+        '200':
+          description: 已改名
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Device' }
+    delete:
+      tags: [me]
+      operationId: revokeMyDevice
+      description: 吊销设备凭据（刷新令牌），设备上的插件需要重新登录。
+      responses:
+        '204': { description: 已吊销 }
+
+  # ---------------- 设备授权确认（RFC 8628 的用户侧） ----------------
+  /device/{userCode}:
+    parameters:
+      - $ref: '#/components/parameters/UserCode'
+    get:
+      tags: [device]
+      operationId: getDeviceRequest
+      summary: 门户 /device 页查看待确认的设备
+      responses:
+        '200':
+          description: 设备请求
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceRequest' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+  /device/{userCode}/approve:
+    parameters:
+      - $ref: '#/components/parameters/UserCode'
+    post:
+      tags: [device]
+      operationId: approveDeviceRequest
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { deviceName: { type: string, maxLength: 64 } } }
+      responses:
+        '204': { description: 已批准，设备轮询 /oauth2/token 即可拿到令牌 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /device/{userCode}/deny:
+    parameters:
+      - $ref: '#/components/parameters/UserCode'
+    post:
+      tags: [device]
+      operationId: denyDeviceRequest
+      responses:
+        '204': { description: 已拒绝 }
+
+  # ---------------- 管理：身份源 ----------------
+  /admin/connectors:
+    get:
+      tags: [admin-providers]
+      operationId: listConnectorTypes
+      x-permission: iam.providers.read
+      responses:
+        '200':
+          description: 可用的连接器类型（内置、Java 插件、远程）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ConnectorType' } }
+                required: [items]
+  /admin/connectors/remote:
+    post:
+      tags: [admin-providers]
+      operationId: registerRemoteConnector
+      x-permission: iam.providers.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseUrl: { type: string, format: uri }
+              required: [baseUrl]
+      responses:
+        '201':
+          description: 已登记。sharedSecret 只返回这一次，填到远程连接器里
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connector: { $ref: '#/components/schemas/ConnectorType' }
+                  sharedSecret: { type: string }
+                required: [connector, sharedSecret]
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+  /admin/connectors/remote/{type}:
+    delete:
+      tags: [admin-providers]
+      operationId: unregisterRemoteConnector
+      x-permission: iam.providers.write
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 已删除 }
+        '409':
+          description: 还有身份源实例在用（iam.connector_in_use）
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+  /admin/providers:
+    get:
+      tags: [admin-providers]
+      operationId: listProviders
+      x-permission: iam.providers.read
+      responses:
+        '200':
+          description: 身份源实例
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Provider' } }
+                required: [items]
+    post:
+      tags: [admin-providers]
+      operationId: createProvider
+      x-permission: iam.providers.write
+      parameters:
+        - $ref: 'common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderInput' }
+      responses:
+        '201':
+          description: 已创建
+          headers:
+            ETag: { $ref: 'common.yaml#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+  /admin/providers/{providerId}:
+    parameters:
+      - $ref: '#/components/parameters/ProviderId'
+    get:
+      tags: [admin-providers]
+      operationId: getProvider
+      x-permission: iam.providers.read
+      responses:
+        '200':
+          description: 身份源实例（机密字段不回显）
+          headers:
+            ETag: { $ref: 'common.yaml#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+    patch:
+      tags: [admin-providers]
+      operationId: updateProvider
+      x-permission: iam.providers.write
+      description: JSON Merge Patch。config 里没给的机密字段保持原值。
+      parameters:
+        - $ref: 'common.yaml#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/ProviderPatch' }
+      responses:
+        '200':
+          description: 已更新
+          headers:
+            ETag: { $ref: 'common.yaml#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Provider' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '412': { $ref: 'common.yaml#/components/responses/PreconditionFailed' }
+    delete:
+      tags: [admin-providers]
+      operationId: deleteProvider
+      x-permission: iam.providers.write
+      description: 应急账号不能删除（409 iam.provider_builtin）；还有账号只能用它登录时 409 iam.provider_in_use。
+      responses:
+        '204': { description: 已删除 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /admin/providers/{providerId}/test:
+    parameters:
+      - $ref: '#/components/parameters/ProviderId'
+    post:
+      tags: [admin-providers]
+      operationId: testProvider
+      x-permission: iam.providers.write
+      summary: 校验配置并试连外部系统
+      responses:
+        '200':
+          description: 结果
+          content:
+            application/json:
+              schema: { $ref: '../identity/connector.schema.json#/$defs/ValidateConfigResult' }
+  /admin/providers/{providerId}/directory/search:
+    parameters:
+      - $ref: '#/components/parameters/ProviderId'
+    get:
+      tags: [admin-providers]
+      operationId: searchProviderDirectory
+      x-permission: org.invitations.write
+      summary: 在身份源的目录里搜人（邀请时用；连接器需支持 directory 能力）
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - $ref: 'common.yaml#/components/parameters/Limit'
+      responses:
+        '200':
+          description: 结果
+          content:
+            application/json:
+              schema: { $ref: '../identity/connector.schema.json#/$defs/DirectoryResult' }
+        '409':
+          description: 连接器不支持 directory（iam.capability_unsupported）
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+
+  # ---------------- 管理：账号 ----------------
+  /admin/accounts:
+    get:
+      tags: [admin-accounts]
+      operationId: listAccounts
+      x-permission: iam.accounts.read
+      parameters:
+        - name: q
+          in: query
+          description: 按显示名、邮箱、外部主体搜索。
+          schema: { type: string }
+        - name: providerId
+          in: query
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        - $ref: 'common.yaml#/components/parameters/Limit'
+        - $ref: 'common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 账号列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Account' } }
+                  nextCursor: { type: string }
+                required: [items]
+  /admin/accounts/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [admin-accounts]
+      operationId: getAccount
+      x-permission: iam.accounts.read
+      responses:
+        '200':
+          description: 账号详情
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountDetail' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+  /admin/accounts/{accountId}/mfa/reset:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [admin-accounts]
+      operationId: resetAccountMfa
+      x-permission: iam.accounts.write
+      description: 清除 TOTP 和 Passkey，下次登录要求重新设置；同时吊销全部会话。
+      responses:
+        '204': { description: 已重置 }
+  /admin/accounts/{accountId}/identities/{identityId}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+      - name: identityId
+        in: path
+        required: true
+        schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    delete:
+      tags: [admin-accounts]
+      operationId: unlinkAccountIdentity
+      x-permission: iam.accounts.write
+      responses:
+        '204': { description: 已解绑 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /admin/accounts/{accountId}/sessions:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [admin-accounts]
+      operationId: listAccountSessions
+      x-permission: iam.accounts.read
+      responses:
+        '200':
+          description: 会话
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/SessionView' } }
+                required: [items]
+  /admin/accounts/{accountId}/sessions/revoke:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [admin-accounts]
+      operationId: revokeAccountSessions
+      x-permission: iam.accounts.write
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { includeDevices: { type: boolean, default: false } } }
+      responses:
+        '200':
+          description: 吊销了几个
+          content:
+            application/json:
+              schema: { type: object, properties: { revoked: { type: integer } }, required: [revoked] }
+  /admin/emergency:
+    get:
+      tags: [admin-accounts]
+      operationId: getEmergencyAccount
+      x-permission: iam.emergency.read
+      responses:
+        '200':
+          description: 应急账号状态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmergencyAccount' }
+  /admin/emergency/rotate:
+    post:
+      tags: [admin-accounts]
+      operationId: rotateEmergencyAccount
+      x-permission: iam.emergency.write
+      description: 重新生成应急账号的口令和 TOTP 密钥。只返回这一次；通知所有超管。
+      responses:
+        '200':
+          description: 新的凭据
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  password: { type: string }
+                  totpSecret: { type: string }
+                  otpauthUri: { type: string }
+                required: [username, password, totpSecret, otpauthUri]
+
+  # ---------------- 管理：服务账号 ----------------
+  /admin/service-accounts:
+    get:
+      tags: [admin-service-accounts]
+      operationId: listServiceAccounts
+      x-permission: iam.service_accounts.read
+      responses:
+        '200':
+          description: 服务账号
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ServiceAccount' } }
+                required: [items]
+    post:
+      tags: [admin-service-accounts]
+      operationId: createServiceAccount
+      x-permission: iam.service_accounts.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceAccountInput' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceAccount' }
+  /admin/service-accounts/{serviceAccountId}:
+    parameters:
+      - $ref: '#/components/parameters/ServiceAccountId'
+    get:
+      tags: [admin-service-accounts]
+      operationId: getServiceAccount
+      x-permission: iam.service_accounts.read
+      responses:
+        '200':
+          description: 服务账号
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceAccount' }
+    patch:
+      tags: [admin-service-accounts]
+      operationId: updateServiceAccount
+      x-permission: iam.service_accounts.write
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/ServiceAccountInput' }
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceAccount' }
+    delete:
+      tags: [admin-service-accounts]
+      operationId: deleteServiceAccount
+      x-permission: iam.service_accounts.write
+      responses:
+        '204': { description: 已删除，所有密钥失效 }
+  /admin/service-accounts/{serviceAccountId}/secrets:
+    parameters:
+      - $ref: '#/components/parameters/ServiceAccountId'
+    post:
+      tags: [admin-service-accounts]
+      operationId: createServiceAccountSecret
+      x-permission: iam.service_accounts.write
+      description: 生成 client_credentials 用的密钥，只返回这一次。
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { expiresAt: { type: string, format: date-time } } }
+      responses:
+        '201':
+          description: 新密钥
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secretId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+                  clientId: { type: string }
+                  clientSecret: { type: string }
+                  expiresAt: { type: string, format: date-time }
+                required: [secretId, clientId, clientSecret]
+  /admin/service-accounts/{serviceAccountId}/secrets/{secretId}:
+    delete:
+      tags: [admin-service-accounts]
+      operationId: deleteServiceAccountSecret
+      x-permission: iam.service_accounts.write
+      parameters:
+        - $ref: '#/components/parameters/ServiceAccountId'
+        - name: secretId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      responses:
+        '204': { description: 已删除 }
+
+  # ---------------- 管理：密钥 ----------------
+  /admin/keys/identity-header/rotate:
+    post:
+      tags: [admin-keys]
+      operationId: rotateIdentityHeaderKey
+      x-permission: iam.keys.write
+      summary: 立即轮换 edge 身份头签名密钥
+      description: 生成新的 NEXT 密钥并把现有 NEXT 提升为 CURRENT。实例在下一次规格下发时拿到新公钥，不需要重启。
+      responses:
+        '202': { description: 已开始轮换 }
+
+components:
+  parameters:
+    TxId:
+      name: txId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    ProviderId:
+      name: providerId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    ServiceAccountId:
+      name: serviceAccountId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    UserCode:
+      name: userCode
+      in: path
+      required: true
+      schema: { type: string }
+  securitySchemes:
+    bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
+  schemas:
+    LoginProvider:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        connectorType: { type: string }
+        displayName: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        buttonText: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        icon: { type: string }
+        order: { type: integer }
+        primaryStep: { type: string, enum: [redirect, qr, form, webauthn, device], description: 第一步的类型，登录页据此决定布局（例如直接显示二维码）。 }
+      required: [id, connectorType, displayName, order, primaryStep]
+    CreateLoginTransaction:
+      type: object
+      properties:
+        providerId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        purpose: { type: string, enum: [login, link, stepup], default: login }
+        invitationCode: { type: string }
+        returnTo: { type: string, format: uri-reference, description: 完成后回到哪里；只接受本平台的相对路径。 }
+        audience: { type: string, enum: [portal, admin], default: portal, description: 会话发给门户还是管理台。 }
+      required: [providerId]
+    LoginTransaction:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        status: { type: string, enum: [pending, completed, failed, expired, cancelled] }
+        purpose: { type: string, enum: [login, link, stepup] }
+        provider:
+          type: object
+          properties:
+            id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+            connectorType: { type: string }
+            displayName: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+          required: [id, connectorType, displayName]
+        step: { $ref: '../identity/steps.schema.json#/$defs/ClientStep' }
+        expiresAt: { type: string, format: date-time }
+      required: [id, status, purpose, provider, step, expiresAt]
+    QrChallenge:
+      type: object
+      properties:
+        challengeId: { type: string }
+        initiator:
+          type: object
+          properties:
+            ip: { type: string }
+            userAgent: { type: string }
+            location: { type: string, description: 按 IP 粗略推断的位置，可能为空。 }
+          required: [ip]
+        purpose: { type: string, enum: [login, link, stepup] }
+        matchCandidates: { type: array, items: { type: string, pattern: '^[0-9]{2}$' }, minItems: 3, maxItems: 3 }
+        expiresAt: { type: string, format: date-time }
+      required: [challengeId, initiator, purpose, matchCandidates, expiresAt]
+    Me:
+      type: object
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        session: { $ref: '#/components/schemas/SessionView' }
+        identities: { type: array, items: { $ref: '#/components/schemas/IdentityView' } }
+        mfa: { $ref: '#/components/schemas/MfaStatus' }
+      required: [account, session, identities, mfa]
+    Account:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        tenantId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        displayName: { type: string }
+        email: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        createdAt: { type: string, format: date-time }
+        lastLoginAt: { type: string, format: date-time }
+      required: [id, tenantId, displayName, status, createdAt]
+    AccountDetail:
+      type: object
+      properties:
+        account: { $ref: '#/components/schemas/Account' }
+        identities: { type: array, items: { $ref: '#/components/schemas/IdentityView' } }
+        mfa: { $ref: '#/components/schemas/MfaStatus' }
+        activeSessions: { type: integer }
+        devices: { type: array, items: { $ref: '#/components/schemas/Device' } }
+      required: [account, identities, mfa, activeSessions, devices]
+    SessionView:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        audience: { type: string, enum: [portal, admin] }
+        current: { type: boolean, description: 是否是发起本请求的会话。 }
+        providerId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        mfa: { type: boolean }
+        ip: { type: string }
+        userAgent: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+      required: [id, audience, current, providerId, mfa, createdAt, expiresAt]
+    IdentityView:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        provider:
+          type: object
+          properties:
+            id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+            connectorType: { type: string }
+            displayName: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+          required: [id, connectorType, displayName]
+        subjectHint: { type: string, description: 部分遮挡的外部主体，便于用户辨认。 }
+        displayName: { type: string }
+        email: { type: string }
+        linkedAt: { type: string, format: date-time }
+        lastLoginAt: { type: string, format: date-time }
+      required: [id, provider, linkedAt]
+    MfaStatus:
+      type: object
+      properties:
+        totp: { type: boolean }
+        passkeys: { type: integer }
+        required: { type: boolean, description: 策略是否要求本账号必须有多因素。 }
+      required: [totp, passkeys, required]
+    TotpEnrollment:
+      type: object
+      properties:
+        enrollmentId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        secret: { type: string, description: Base32。 }
+        otpauthUri: { type: string }
+        expiresAt: { type: string, format: date-time }
+      required: [enrollmentId, secret, otpauthUri, expiresAt]
+    Passkey:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time }
+        backedUp: { type: boolean, description: 是否是可同步的 Passkey。 }
+      required: [id, name, createdAt]
+    Device:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        name: { type: string }
+        kind: { type: string, enum: [dsh_connect, cli] }
+        platform: { type: string, description: '例如 `windows/amd64`。' }
+        clientVersion: { type: string }
+        createdAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        lastIp: { type: string }
+      required: [id, name, kind, createdAt]
+    DeviceRequest:
+      type: object
+      properties:
+        userCode: { type: string }
+        clientId: { type: string }
+        clientName: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        scopes: { type: array, items: { type: string } }
+        device:
+          type: object
+          properties:
+            name: { type: string }
+            platform: { type: string }
+            clientVersion: { type: string }
+            ip: { type: string }
+        expiresAt: { type: string, format: date-time }
+      required: [userCode, clientId, clientName, scopes, expiresAt]
+    ConnectorType:
+      type: object
+      properties:
+        descriptor: { $ref: '../identity/connector.schema.json#/$defs/ConnectorDescriptor' }
+        source: { type: string, enum: [builtin, plugin, remote] }
+        remoteUrl: { type: string, format: uri }
+        loadError: { type: string, description: 插件加载失败或 SPI 版本不兼容时的原因。 }
+      required: [descriptor, source]
+    AdmissionPolicy:
+      type: object
+      description: 身份源实例的准入策略（身份源设计第六节）。
+      properties:
+        mode: { type: string, enum: [invite_only, auto_provision, linked_only], default: invite_only }
+        autoProvisionRules:
+          type: array
+          description: mode=auto_provision 时，外部属性满足任一规则即自动开通。
+          items:
+            type: object
+            properties:
+              attribute: { type: string, description: '外部属性路径，例如 `email`、`organization.department`、`attributes.groups`。' }
+              operator: { type: string, enum: [equals, suffix, prefix, in, contains] }
+              value: { oneOf: [{ type: string }, { type: array, items: { type: string } }] }
+            required: [attribute, operator, value]
+        defaultMemberType: { type: string, enum: [member, external], default: member }
+        attributeMapping:
+          type: array
+          items:
+            type: object
+            properties:
+              from: { type: string }
+              to: { type: string, enum: [displayName, email, group] }
+              match: { type: string, description: to=group 时，外部值等于它才映射。 }
+              groupId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+            required: [from, to]
+        mfa: { type: string, enum: [never, always, new_device], default: new_device }
+        sessionTtlSeconds: { type: integer, minimum: 300, default: 604800 }
+        idleTimeoutSeconds: { type: integer, minimum: 300, default: 86400 }
+        externalSessionCheckSeconds: { type: integer, minimum: 0, default: 0, description: 0 表示不复核；需要连接器支持 session_check。 }
+    ProviderDisplay:
+      type: object
+      properties:
+        name: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        buttonText: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        icon: { type: string }
+        order: { type: integer, default: 100 }
+      required: [name]
+    ProviderInput:
+      type: object
+      properties:
+        connectorType: { type: string }
+        display: { $ref: '#/components/schemas/ProviderDisplay' }
+        config: { type: object, description: 按连接器的 configSchema 校验。 }
+        enabled: { type: boolean, default: true }
+        admission: { $ref: '#/components/schemas/AdmissionPolicy' }
+      required: [connectorType, display, config]
+    ProviderPatch:
+      type: object
+      properties:
+        display: { $ref: '#/components/schemas/ProviderDisplay' }
+        config: { type: object }
+        enabled: { type: boolean }
+        admission: { $ref: '#/components/schemas/AdmissionPolicy' }
+    Provider:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        connectorType: { type: string }
+        builtin: { type: boolean, description: 内置实例（应急账号）不能删除。 }
+        display: { $ref: '#/components/schemas/ProviderDisplay' }
+        config: { type: object, description: '机密字段不回显，只返回 `{"x-secret-set": true}` 占位。' }
+        enabled: { type: boolean }
+        admission: { $ref: '#/components/schemas/AdmissionPolicy' }
+        callbackUrl: { type: string, format: uri, description: 填到外部系统里的回调地址。 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, connectorType, builtin, display, config, enabled, admission, callbackUrl, createdAt, updatedAt]
+    EmergencyAccount:
+      type: object
+      properties:
+        username: { type: string }
+        totpConfigured: { type: boolean }
+        lastLoginAt: { type: string, format: date-time }
+        rotatedAt: { type: string, format: date-time }
+      required: [username, totpConfigured]
+    ServiceAccountInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        roleIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' }, description: 角色在 org 管理；授予时同样受"不超过自己的权限"限制。 }
+        enabled: { type: boolean, default: true }
+      required: [name]
+    ServiceAccount:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        name: { type: string }
+        description: { type: string }
+        roleIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+        enabled: { type: boolean }
+        clientId: { type: string }
+        secrets:
+          type: array
+          items:
+            type: object
+            properties:
+              secretId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+              createdAt: { type: string, format: date-time }
+              expiresAt: { type: string, format: date-time }
+              lastUsedAt: { type: string, format: date-time }
+            required: [secretId, createdAt]
+        createdAt: { type: string, format: date-time }
+      required: [id, name, roleIds, enabled, clientId, secrets, createdAt]

@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auriga 身份源连接器 SPI v1",
+  "description": "连接器和平台核心之间的数据结构。Java 插件（进程内）、远程连接器（HTTP）、插件离线版的 JS 连接器都用同样的语义。连接器只把外部协议翻译成 ExternalProfile：不碰数据库、不发会话、不判断谁能进。",
+  "$defs": {
+    "ConnectorDescriptor": {
+      "type": "object",
+      "properties": {
+        "type": { "description": "连接器类型，全局唯一，例如 `team-account`、`emergency`、`oidc`、`example-sso`。", "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+        "spiVersion": { "description": "实现的 SPI 主版本。平台拒绝加载不兼容的版本。", "const": "1" },
+        "version": { "description": "连接器自己的版本号。", "type": "string" },
+        "displayName": { "$ref": "steps.schema.json#/$defs/LocalizedText" },
+        "description": { "$ref": "steps.schema.json#/$defs/LocalizedText" },
+        "icon": { "description": "图标：https 地址或 data URI（SVG / PNG，≤ 32 KB）。", "type": "string" },
+        "vendor": { "type": "string" },
+        "docsUrl": { "type": "string", "format": "uri" },
+        "steps": {
+          "description": "可能返回的步骤类型（不含 done、fail）。",
+          "type": "array",
+          "items": { "enum": ["redirect", "qr", "form", "webauthn", "device"] },
+          "uniqueItems": true
+        },
+        "capabilities": {
+          "description": "可选能力：directory（搜人、离职同步）、session_check（复核外部会话）、credential（下游凭据）。",
+          "type": "array",
+          "items": { "enum": ["directory", "session_check", "credential"] },
+          "uniqueItems": true
+        },
+        "configSchema": {
+          "description": "身份源实例配置的 JSON Schema（2020-12）。管理台按它生成表单；标了 `\"x-secret\": true` 的字段加密保存、不回显。",
+          "type": "object"
+        },
+        "multipleInstances": { "description": "同一租户能否配置多个实例。", "type": "boolean", "default": true }
+      },
+      "required": ["type", "spiVersion", "displayName", "steps", "configSchema"],
+      "additionalProperties": false
+    },
+    "LoginContext": {
+      "description": "平台核心传给连接器的上下文。",
+      "type": "object",
+      "properties": {
+        "txId": { "type": "string", "format": "uuid" },
+        "tenantId": { "type": "string", "format": "uuid" },
+        "providerId": { "type": "string", "format": "uuid" },
+        "purpose": { "description": "login 登录；link 给当前账号绑定新身份；stepup 已登录后补一次验证。", "enum": ["login", "link", "stepup"] },
+        "locale": { "type": "string" },
+        "clientIp": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "callbackUrl": { "description": "该身份源实例固定的回调地址（跳转类流程用），不接受参数指定。", "type": "string", "format": "uri" },
+        "state": { "description": "连接器上一次返回的私有状态，平台核心加密保存在登录事务里原样带回。第一次调用为 null。", "type": ["object", "null"] },
+        "expiresAt": { "description": "登录事务过期时间（创建后 5 分钟）。", "type": "string", "format": "date-time" }
+      },
+      "required": ["txId", "tenantId", "providerId", "purpose", "locale", "callbackUrl", "state", "expiresAt"],
+      "additionalProperties": false
+    },
+    "ProviderConfig": {
+      "description": "身份源实例配置，结构由 ConnectorDescriptor.configSchema 定义。传给连接器时机密字段已解密。",
+      "type": "object"
+    },
+    "BeginRequest": {
+      "type": "object",
+      "properties": {
+        "ctx": { "$ref": "#/$defs/LoginContext" },
+        "config": { "$ref": "#/$defs/ProviderConfig" }
+      },
+      "required": ["ctx", "config"],
+      "additionalProperties": false
+    },
+    "AdvanceRequest": {
+      "type": "object",
+      "properties": {
+        "ctx": { "$ref": "#/$defs/LoginContext" },
+        "config": { "$ref": "#/$defs/ProviderConfig" },
+        "input": { "$ref": "steps.schema.json#/$defs/StepInput" }
+      },
+      "required": ["ctx", "config", "input"],
+      "additionalProperties": false
+    },
+    "ConnectorResult": {
+      "description": "begin / advance 的返回。state 会被平台保存并在下次调用时放进 ctx.state；最大 16 KB。",
+      "type": "object",
+      "properties": {
+        "step": { "$ref": "steps.schema.json#/$defs/ConnectorStep" },
+        "state": { "type": ["object", "null"] }
+      },
+      "required": ["step"],
+      "additionalProperties": false
+    },
+    "ValidateConfigRequest": {
+      "type": "object",
+      "properties": { "config": { "$ref": "#/$defs/ProviderConfig" } },
+      "required": ["config"],
+      "additionalProperties": false
+    },
+    "ValidateConfigResult": {
+      "description": "JSON Schema 校验之外的语义校验（例如 issuer 能否访问）。",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "description": "JSON Pointer，例如 `/clientId`。", "type": "string" },
+              "code": { "type": "string" },
+              "message": { "$ref": "steps.schema.json#/$defs/LocalizedText" }
+            },
+            "required": ["path", "code"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["ok"],
+      "additionalProperties": false
+    },
+    "IdentityRef": {
+      "description": "平台已保存的一个外部身份，供可选能力使用。",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "attributes": { "type": "object" },
+        "externalSessionRef": { "type": "string" }
+      },
+      "required": ["subject"],
+      "additionalProperties": false
+    },
+    "DirectoryEntry": {
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "organization": { "$ref": "steps.schema.json#/$defs/ExternalProfile/properties/organization" },
+        "active": { "description": "外部系统里是否在职 / 可用。", "type": "boolean" }
+      },
+      "required": ["subject"],
+      "additionalProperties": false
+    },
+    "DirectorySearchRequest": {
+      "type": "object",
+      "properties": {
+        "config": { "$ref": "#/$defs/ProviderConfig" },
+        "query": { "type": "string", "minLength": 1 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+      },
+      "required": ["config", "query"],
+      "additionalProperties": false
+    },
+    "DirectoryLookupRequest": {
+      "type": "object",
+      "properties": {
+        "config": { "$ref": "#/$defs/ProviderConfig" },
+        "subjects": { "type": "array", "items": { "type": "string" }, "maxItems": 500 }
+      },
+      "required": ["config", "subjects"],
+      "additionalProperties": false
+    },
+    "DirectoryResult": {
+      "type": "object",
+      "properties": { "items": { "type": "array", "items": { "$ref": "#/$defs/DirectoryEntry" } } },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "SessionCheckRequest": {
+      "type": "object",
+      "properties": {
+        "config": { "$ref": "#/$defs/ProviderConfig" },
+        "identity": { "$ref": "#/$defs/IdentityRef" }
+      },
+      "required": ["config", "identity"],
+      "additionalProperties": false
+    },
+    "SessionCheckResult": {
+      "type": "object",
+      "properties": {
+        "valid": { "type": "boolean" },
+        "recheckAfterSeconds": { "type": "integer", "minimum": 60 }
+      },
+      "required": ["valid"],
+      "additionalProperties": false
+    },
+    "CredentialIssueRequest": {
+      "type": "object",
+      "properties": {
+        "config": { "$ref": "#/$defs/ProviderConfig" },
+        "identity": { "$ref": "#/$defs/IdentityRef" },
+        "audience": { "description": "目标系统标识（管理台登记的凭据目标）。", "type": "string" }
+      },
+      "required": ["config", "identity", "audience"],
+      "additionalProperties": false
+    },
+    "DownstreamCredential": {
+      "description": "下游凭据。优先由平台代发请求、把它注入请求头，凭据不进实例。",
+      "type": "object",
+      "properties": {
+        "headers": { "description": "要注入请求的请求头。", "type": "object", "additionalProperties": { "type": "string" } },
+        "cookies": { "type": "object", "additionalProperties": { "type": "string" } },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["expiresAt"],
+      "additionalProperties": false
+    }
+  }
+}

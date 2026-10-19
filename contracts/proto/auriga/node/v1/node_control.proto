@@ -1,0 +1,297 @@
+syntax = "proto3";
+
+package auriga.node.v1;
+
+import "auriga/node/v1/spec.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
+option java_multiple_files = true;
+option java_package = "io.github.hansjone.auriga.contracts.node.v1";
+
+// workspace ↔ 节点代理的控制通道（workspace 提供服务端）。
+//
+// - 节点代理主动连接（单机走本机 socket / 命名管道，多机走 mTLS gRPC），工作节点不用开入站端口。
+// - 一个节点同时只有一个会话；同一节点建立新会话时 workspace 关闭旧会话。
+// - 节点代理连上后先发 Hello，再发全量 Inventory；workspace 回 Welcome 后开始下发。
+// - 心跳：节点代理按 Welcome.heartbeat_interval（默认 15 秒）发 NodeUsage；workspace 60 秒收不到就把节点标为失联，
+//   但不据此认定实例已停。
+// - 重连：指数退避，1 秒起、最长 30 秒；重连后重新发 Hello 和全量 Inventory，由 workspace 对账。
+service NodeControlService {
+  rpc Session(stream SessionRequest) returns (stream SessionResponse);
+}
+
+// 节点代理 → workspace（设计文档里的 AgentMessage）。
+message SessionRequest {
+  oneof body {
+    Hello hello = 1;
+    Inventory inventory = 2;
+    InstanceStatus status = 3;
+    NodeUsage usage = 4;
+    WakeSchedule wake = 5;
+    CommandResult result = 6;
+    LogChunk log = 7;
+  }
+}
+
+// workspace → 节点代理（设计文档里的 ControlMessage）。
+message SessionResponse {
+  oneof body {
+    Welcome welcome = 1;
+    ApplySpec apply = 2;
+    DeleteInstance delete = 3;
+    Command command = 4;
+    PolicyHint policy = 5;
+    UpdateAgent update = 6;
+  }
+}
+
+// ---------- 节点代理 → workspace ----------
+
+message Hello {
+  string node_id = 1;
+  string agent_version = 2;
+  // 本消息集合的协议版本，当前为 1。
+  uint32 protocol_version = 3;
+  // `linux` | `windows`
+  string os = 4;
+  // `amd64` | `arm64`
+  string arch = 5;
+  string hostname = 6;
+  // 本节点可用的驱动（已通过本地策略）。
+  repeated RuntimeKind drivers = 7;
+  Capacity capacity = 8;
+  map<string, string> labels = 9;
+  // 节点代理进程每次启动生成的随机 id，用于识别重启。
+  string boot_id = 10;
+  // 节点本机时间，workspace 用来估算时钟偏差（超过 5 秒告警）。
+  google.protobuf.Timestamp node_time = 11;
+}
+
+message Capacity {
+  int64 cpu_millis = 1;
+  int64 memory_mb = 2;
+  int64 disk_gb = 3;
+  // 本地策略允许的最大实例数，0 表示不限。
+  int64 max_instances = 4;
+}
+
+// 本机所有托管实例的实际状态。连上和重连时全量发送一次。
+message Inventory {
+  repeated InstanceStatus instances = 1;
+  // 本地制品缓存（DSH 运行时、插件包），用于预热和清理决策。
+  repeated CachedArtifact artifacts = 2;
+}
+
+message CachedArtifact {
+  // `sha256:<十六进制>`
+  string digest = 1;
+  int64 size_bytes = 2;
+  // 引用它的实例数。
+  int64 references = 3;
+}
+
+enum InstancePhase {
+  INSTANCE_PHASE_UNSPECIFIED = 0;
+  // 本节点上没有这个实例。
+  INSTANCE_PHASE_ABSENT = 1;
+  // 下载制品、建账号和目录、渲染配置。
+  INSTANCE_PHASE_PREPARING = 2;
+  // 实例目录版本低于规格时依次迁移。
+  INSTANCE_PHASE_MIGRATING = 3;
+  // 驱动启动、等健康检查。
+  INSTANCE_PHASE_STARTING = 4;
+  INSTANCE_PHASE_RUNNING = 5;
+  // 规格变了且需要重启；等 workspace 发 restart（节点代理不会自己打断用户）。
+  INSTANCE_PHASE_PENDING_RESTART = 6;
+  INSTANCE_PHASE_STOPPING = 7;
+  INSTANCE_PHASE_STOPPED = 8;
+  INSTANCE_PHASE_DELETING = 9;
+  // 出错，带原因；按退避重试，连续 5 次失败后停止重试。
+  INSTANCE_PHASE_FAILED = 10;
+}
+
+message InstanceStatus {
+  string instance_id = 1;
+  InstancePhase phase = 2;
+  // 已经应用的规格代数。
+  int64 observed_generation = 3;
+  // 健康检查通过且插件就绪。
+  bool ready = 4;
+  // 渲染结果的摘要，变了才需要重启。
+  string render_digest = 5;
+  // PENDING_RESTART 的原因：`dsh_version`、`plugins`、`config`、`resources`。
+  repeated string restart_reasons = 6;
+  InstanceError error = 7;
+  google.protobuf.Timestamp started_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message InstanceError {
+  // 错误码，例如 `agent.artifact_digest_mismatch`、`agent.policy_denied`、`agent.health_timeout`。
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+  // 已连续失败次数。
+  uint32 attempts = 4;
+  google.protobuf.Timestamp next_retry_at = 5;
+}
+
+message NodeUsage {
+  google.protobuf.Timestamp sampled_at = 1;
+  NodeResources node = 2;
+  repeated InstanceUsage instances = 3;
+}
+
+message NodeResources {
+  int64 cpu_millis_used = 1;
+  int64 memory_mb_used = 2;
+  int64 disk_gb_used = 3;
+  int64 disk_gb_free = 4;
+}
+
+message InstanceUsage {
+  string instance_id = 1;
+  int64 cpu_millis = 2;
+  int64 memory_mb = 3;
+  int64 disk_mb = 4;
+  int64 pids = 5;
+  int64 net_rx_bytes = 6;
+  int64 net_tx_bytes = 7;
+  // 最近 5 分钟有没有明显的 CPU 活动，用来发现插件看不到的后台进程。
+  bool recent_cpu_active = 8;
+}
+
+// 实例下次定时任务触发时间（节点代理解析实例里的定时任务文件算出，含时区）。
+message WakeSchedule {
+  string instance_id = 1;
+  // 不设置表示没有待触发的定时任务。
+  google.protobuf.Timestamp next_wake_at = 2;
+  // 来源文件，例如 `ops-cron`、`schedule`。
+  string source = 3;
+}
+
+message CommandResult {
+  string command_id = 1;
+  string instance_id = 2;
+  bool ok = 3;
+  InstanceError error = 4;
+  // 命令的输出，例如快照的位置和大小。
+  map<string, string> output = 5;
+}
+
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  LOG_STREAM_STDOUT = 1;
+  LOG_STREAM_STDERR = 2;
+}
+
+message LogChunk {
+  // 对应的 TailLog 命令。
+  string command_id = 1;
+  string instance_id = 2;
+  LogStream stream = 3;
+  bytes data = 4;
+  // 这是该命令的最后一块。
+  bool eof = 5;
+}
+
+// ---------- workspace → 节点代理 ----------
+
+message Welcome {
+  string node_id = 1;
+  google.protobuf.Timestamp server_time = 2;
+  uint32 protocol_version = 3;
+  google.protobuf.Duration heartbeat_interval = 4;
+}
+
+// 创建或更新实例。节点代理按本地策略校验，不通过就拒绝并上报 FAILED（code `agent.policy_denied`）。
+message ApplySpec {
+  InstanceSpec spec = 1;
+}
+
+message DeleteInstance {
+  string instance_id = 1;
+  // 删除时对应的规格代数（只删 generation 不大于它的实例，防止乱序）。
+  int64 generation = 2;
+  // true：连实例目录一起删除；false：只删运行时资源，保留数据。
+  bool purge_data = 3;
+}
+
+message Command {
+  // workspace 生成的唯一 id，CommandResult 用它对应。
+  string command_id = 1;
+  // 节点级命令（drain）时为空。
+  string instance_id = 2;
+  oneof kind {
+    RestartCommand restart = 3;
+    SnapshotCommand snapshot = 4;
+    RestoreCommand restore = 5;
+    ArchiveCommand archive = 6;
+    ExportCommand export = 7;
+    TailLogCommand tail_log = 8;
+    DrainCommand drain = 9;
+  }
+}
+
+message RestartCommand {
+  // 优雅停止的等待时间。
+  google.protobuf.Duration grace = 1;
+  // `apply_pending`（应用待重启的规格）、`user`、`admin`、`recover`。
+  string reason = 2;
+}
+
+// 实例目录打包（tar + zstd）。M5 细化。
+message SnapshotCommand {
+  // true 时在线快照（先让插件刷盘），否则先停实例。
+  bool online = 1;
+  // 上传地址（预签名，限时）。为空时保存在节点本地 backups 目录。
+  string upload_url = 2;
+}
+
+message RestoreCommand {
+  // 快照位置（本地路径或预签名下载地址）。
+  string source = 1;
+  // 快照的 `sha256:<十六进制>`。
+  string digest = 2;
+}
+
+// 打包后移到冷存储，删除本地目录。M5 细化。
+message ArchiveCommand {
+  string upload_url = 1;
+}
+
+// 导出给本人。M5 细化。
+message ExportCommand {
+  string upload_url = 1;
+}
+
+message TailLogCommand {
+  // 先返回最后多少行。
+  uint32 lines = 1;
+  // 是否继续跟随。
+  bool follow = 2;
+  // 跟随的最长时间，到点发 eof。
+  google.protobuf.Duration max_duration = 3;
+}
+
+// 节点不再接收新实例（已有实例不受影响）。
+message DrainCommand {}
+
+// 平台侧限制。节点本地策略仍然优先。
+message PolicyHint {
+  // 同时处于准备或启动中的实例上限。
+  uint32 max_concurrent_prepare = 1;
+}
+
+// 节点代理自升级。
+message UpdateAgent {
+  string version = 1;
+  string url = 2;
+  // `sha256:<十六进制>`
+  string digest = 3;
+  // 平台对 digest 的 Ed25519 签名。
+  bytes signature = 4;
+  string signing_kid = 5;
+}

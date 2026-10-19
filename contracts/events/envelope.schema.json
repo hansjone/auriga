@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auriga 事件信封 v1",
+  "description": "CloudEvents 1.0 结构化 JSON 格式，加 Auriga 扩展属性。NATS 消息体就是这个 JSON；消息头 `Nats-Msg-Id` 等于 id（JetStream 去重窗口），消费方另按 id 落库去重。",
+  "type": "object",
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "id": { "description": "UUIDv7，outbox 写入时生成。", "type": "string", "format": "uuid" },
+    "source": { "description": "产生事件的服务，形如 `auriga/<服务>`，例如 `auriga/org`。", "type": "string", "pattern": "^auriga/[a-z][a-z0-9-]*$" },
+    "type": { "description": "事件类型，例如 `user.disabled`。NATS 主题是 `auriga.evt.<type>`。", "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$" },
+    "time": { "description": "业务发生时间（不是投递时间）。", "type": "string", "format": "date-time" },
+    "subject": { "description": "主要资源 id，例如账号 id、实例 id。", "type": "string" },
+    "datacontenttype": { "const": "application/json" },
+    "dataversion": { "description": "扩展属性：data 的结构版本，同一 type 内只做兼容修改时不变。", "type": "string", "pattern": "^[0-9]+$" },
+    "tenantid": { "description": "扩展属性：租户 id。", "type": "string", "format": "uuid" },
+    "traceparent": { "description": "扩展属性：W3C 追踪上下文。", "type": "string" },
+    "data": { "description": "按 type 对应的 schema，见 events/README.md。", "type": "object" }
+  },
+  "required": ["specversion", "id", "source", "type", "time", "datacontenttype", "dataversion", "tenantid", "data"],
+  "additionalProperties": false
+}

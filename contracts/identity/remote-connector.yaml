@@ -1,0 +1,157 @@
+openapi: 3.1.0
+info:
+  title: Auriga remote identity connector
+  version: 1.0.0
+  description: |
+    远程连接器：不会写 Java 的一方可以用任何语言写一个小服务实现这些接口，在管理台登记地址后，
+    就和进程内连接器一样出现在类型列表里。语义与 Java SPI 相同，数据结构见 connector.schema.json。
+
+    **请求签名**（每个请求都有）：
+    - `Auriga-Timestamp`：Unix 秒。连接器拒绝与本机时间相差超过 300 秒的请求。
+    - `Auriga-Signature`：`v1=<十六进制 HMAC-SHA256>`，密钥是登记时生成的共享密钥，
+      签名串为 `<Auriga-Timestamp>.<方法>.<路径>.<请求体原文>`（GET 时请求体为空串）。
+    - 连接器也可以要求 mTLS，与签名同时使用。
+
+    **超时**：平台对每次调用设 10 秒超时；超时或 5xx 视为 fail 步骤（code `iam.connector_unavailable`）。
+    请求体里的 config 含已解密的机密字段，连接器不得记录到日志。
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: https://connector.example.com
+    description: 连接器在管理台登记的地址
+security:
+  - signedRequest: []
+paths:
+  /descriptor:
+    get:
+      operationId: getDescriptor
+      responses:
+        '200':
+          description: 连接器描述
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/ConnectorDescriptor' }
+        default: { $ref: '#/components/responses/Error' }
+  /validate-config:
+    post:
+      operationId: validateConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'connector.schema.json#/$defs/ValidateConfigRequest' }
+      responses:
+        '200':
+          description: 校验结果
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/ValidateConfigResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /begin:
+    post:
+      operationId: begin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'connector.schema.json#/$defs/BeginRequest' }
+      responses:
+        '200':
+          description: 第一步
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/ConnectorResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /advance:
+    post:
+      operationId: advance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'connector.schema.json#/$defs/AdvanceRequest' }
+      responses:
+        '200':
+          description: 下一步
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/ConnectorResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /directory/search:
+    post:
+      operationId: directorySearch
+      description: 可选能力 directory。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'connector.schema.json#/$defs/DirectorySearchRequest' }
+      responses:
+        '200':
+          description: 搜索结果
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/DirectoryResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /directory/lookup:
+    post:
+      operationId: directoryLookup
+      description: 可选能力 directory。按 subject 批量查询（离职同步用）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'connector.schema.json#/$defs/DirectoryLookupRequest' }
+      responses:
+        '200':
+          description: 查询结果
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/DirectoryResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /session/check:
+    post:
+      operationId: sessionCheck
+      description: 可选能力 session_check。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'connector.schema.json#/$defs/SessionCheckRequest' }
+      responses:
+        '200':
+          description: 复核结果
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/SessionCheckResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /credential/issue:
+    post:
+      operationId: credentialIssue
+      description: 可选能力 credential。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: 'connector.schema.json#/$defs/CredentialIssueRequest' }
+      responses:
+        '200':
+          description: 下游凭据
+          content:
+            application/json:
+              schema: { $ref: 'connector.schema.json#/$defs/DownstreamCredential' }
+        default: { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    signedRequest:
+      type: apiKey
+      in: header
+      name: Auriga-Signature
+      description: 'HMAC-SHA256 请求签名，配合 Auriga-Timestamp 头，算法见上方说明。'
+  responses:
+    Error:
+      description: 错误
+      content:
+        application/problem+json:
+          schema: { $ref: '../openapi/common.yaml#/components/schemas/Problem' }

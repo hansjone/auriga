@@ -1,0 +1,186 @@
+syntax = "proto3";
+
+package auriga.node.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
+option java_multiple_files = true;
+option java_package = "io.github.hansjone.auriga.contracts.node.v1";
+
+// 实例规格：workspace 决定"实例应该是什么样"，节点代理负责在本机变成那个样子。
+// 同样的规格必须渲染出同样的文件（确定性）。见 docs/architecture/node-agent.zh.md 第四、七节。
+message InstanceSpec {
+  // 实例 id（不是用户 id；一个人以后可以有多个实例）。
+  string instance_id = 1;
+  string tenant_id = 2;
+  // 实例主人的账号 id。插件只放行身份头里 sub 等于它的请求。
+  string owner_id = 3;
+  // 规格代数：每次规格变化加一。节点代理上报 observed_generation；两者相等且 ready 才算变更完成。
+  // 重复下发同一代数必须是安全的（幂等）。
+  int64 generation = 4;
+  RuntimeKind runtime = 5;
+  DshRuntime dsh = 6;
+  Resources resources = 7;
+  repeated PluginRef plugins = 8;
+  Profile profile = 9;
+  Network network = 10;
+  Storage storage = 11;
+  Secrets secrets = 12;
+  DesiredState desired = 13;
+  // 附加标签，Docker 驱动写成容器标签 `auriga.label.<键>`。
+  map<string, string> labels = 14;
+}
+
+enum RuntimeKind {
+  RUNTIME_KIND_UNSPECIFIED = 0;
+  // Docker 或 Podman（兼容 Docker API）。
+  RUNTIME_KIND_DOCKER = 1;
+  // Linux 原生进程（systemd-run）。
+  RUNTIME_KIND_LINUX_PROCESS = 2;
+  // Windows 原生进程（本地账号 + 垫片进程 + Job Object）。
+  RUNTIME_KIND_WINDOWS_PROCESS = 3;
+}
+
+enum DesiredState {
+  DESIRED_STATE_UNSPECIFIED = 0;
+  DESIRED_STATE_RUNNING = 1;
+  DESIRED_STATE_STOPPED = 2;
+}
+
+// DSH 运行时制品：Node + 指定版本的 DSH + 依赖，按 OS / 架构各一份，平台签名。
+// 节点上不在运行时执行 npm install。
+message DshRuntime {
+  // 制品 id，例如 `dsh-0.2.0+node22.19-linux-amd64`。
+  string artifact_id = 1;
+  // DSH 版本，例如 `0.2.0`。
+  string version = 2;
+  // 压缩包的 `sha256:<十六进制>`。
+  string digest = 3;
+  // 下载地址（平台内部地址，需要节点证书）。
+  string url = 4;
+  // 平台对 digest 的 Ed25519 签名。
+  bytes signature = 5;
+  string signing_kid = 6;
+  // Docker 驱动用的实例镜像，必须带 digest：`<仓库>@sha256:…`。原生进程驱动为空。
+  string image = 7;
+}
+
+message Resources {
+  // CPU 上限，千分之一核（2000 = 2 核）。
+  int64 cpu_millis = 1;
+  int64 memory_mb = 2;
+  int64 disk_gb = 3;
+  // 进程数上限。
+  int64 pids = 4;
+}
+
+// 资源中心的插件等级：L0 核心（随部署固定）… L4 个人上传。
+enum PluginLevel {
+  PLUGIN_LEVEL_UNSPECIFIED = 0;
+  PLUGIN_LEVEL_L0 = 1;
+  PLUGIN_LEVEL_L1 = 2;
+  PLUGIN_LEVEL_L2 = 3;
+  PLUGIN_LEVEL_L3 = 4;
+  PLUGIN_LEVEL_L4 = 5;
+}
+
+message PluginRef {
+  // npm 包名，例如 `auriga-dsh`。
+  string name = 1;
+  string version = 2;
+  PluginLevel level = 3;
+  // 插件包的 `sha256:<十六进制>`。
+  string digest = 4;
+  string url = 5;
+  // 平台对 digest 的 Ed25519 签名。
+  bytes signature = 6;
+  string signing_kid = 7;
+  // false 表示安装但关闭。
+  bool enabled = 8;
+}
+
+message Profile {
+  // DSH 在实例内监听的端口。
+  uint32 listen_port = 1;
+  // 渲染进 `cordis.patch.yml` 的条目，按顺序应用。
+  repeated ConfigPatch patches = 2;
+  // 团队 MCP 服务，键是 DSH 配置里的名字。
+  map<string, McpServer> mcp_servers = 3;
+  // 团队模型提供商，键是 DSH 配置里的名字。只改带平台标记的条目，不碰用户自己的模型。
+  map<string, ModelProvider> model_providers = 4;
+  // 额外环境变量（不放机密）。平台自己的变量见 contracts/plugin/README.md。
+  map<string, string> env = 5;
+}
+
+message ConfigPatch {
+  // 配置路径，例如 `plugins.auriga-dsh.mode`。
+  string path = 1;
+  // JSON 编码的值。
+  string value_json = 2;
+}
+
+// 引用 Secrets 里的哪个机密。
+enum TokenRef {
+  TOKEN_REF_UNSPECIFIED = 0;
+  TOKEN_REF_INSTANCE_TOKEN = 1;
+}
+
+message McpServer {
+  // Streamable HTTP 地址。
+  string url = 1;
+  TokenRef token_ref = 2;
+}
+
+message ModelProvider {
+  // OpenAI 兼容接口的 base URL。
+  string base_url = 1;
+  TokenRef token_ref = 2;
+  repeated ModelInfo models = 3;
+}
+
+message ModelInfo {
+  string id = 1;
+  string display_name = 2;
+  int64 context_window = 3;
+}
+
+message Network {
+  // 出网代理地址，渲染成 HTTPS_PROXY / HTTP_PROXY。
+  string egress_proxy = 1;
+  // 允许直连的 `主机:端口`（edge 内部入口、egress），其他一律拒绝。
+  repeated string allow = 2;
+}
+
+message Storage {
+  // 实例目录版本；低于它时启动前依次迁移。
+  uint32 schema_version = 1;
+}
+
+message Secrets {
+  // 实例令牌，用节点封装公钥加密。
+  SealedSecret instance_token = 1;
+  // 校验 edge 身份头的公钥：当前 + 下一把，按 kid 选用。
+  repeated IdentityPublicKey identity_keys = 2;
+}
+
+// 只有目标节点能解开的机密。
+// 算法 `hpke-x25519-sha256-aes256gcm`：RFC 9180，DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM，Base 模式；
+// info 为 `auriga/sealed/v1/<instance_id>`。
+message SealedSecret {
+  string alg = 1;
+  // 节点封装公钥的 SHA-256（十六进制前 16 位），用于判断是否是给本节点的。
+  string key_id = 2;
+  // HPKE 封装的密钥。
+  bytes enc = 3;
+  bytes ciphertext = 4;
+}
+
+message IdentityPublicKey {
+  string kid = 1;
+  // 固定为 `EdDSA`（Ed25519）。
+  string alg = 2;
+  // 原始 32 字节公钥。
+  bytes public_key = 3;
+  // 可选：生效和过期时间（Unix 秒，0 表示不限）。
+  int64 not_before = 4;
+  int64 not_after = 5;
+}

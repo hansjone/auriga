@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auriga 登录步骤协议 v1",
+  "description": "连接器和平台核心之间（ConnectorStep）、平台核心和登录页之间（ClientStep）传递的步骤，以及登录页提交的输入（StepInput）。前端只认步骤类型，不认连接器。",
+  "$defs": {
+    "LocalizedText": {
+      "description": "按语言给出的文案，键是 BCP 47 语言标签。至少要有 `en`；前端按当前语言选，没有就用 `en`。",
+      "type": "object",
+      "properties": { "en": { "type": "string" } },
+      "required": ["en"],
+      "additionalProperties": { "type": "string" },
+      "examples": [{ "en": "Password", "zh-CN": "口令" }]
+    },
+    "RedirectStep": {
+      "description": "跳转到外部地址（OIDC、OAuth、SAML、CAS、微信等），外部系统回调平台固定的回调地址后继续。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "redirect" },
+        "url": { "type": "string", "format": "uri" },
+        "method": { "enum": ["GET", "POST"], "default": "GET" },
+        "params": {
+          "description": "method=POST 时用自动提交表单发送的字段（例如 SAML 的 SAMLRequest、RelayState）。",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["type", "url"],
+      "additionalProperties": false
+    },
+    "QrStep": {
+      "description": "显示二维码和两位比对码；登录页订阅事务事件（SSE），手机确认后继续。比对码防止二维码被转发到别人的浏览器登录。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "qr" },
+        "content": { "description": "要编码进二维码的字符串（通常是 URL）。", "type": "string", "maxLength": 2048 },
+        "matchCode": { "type": "string", "pattern": "^[0-9]{2}$" },
+        "status": { "enum": ["waiting", "scanned"], "default": "waiting" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "pollIntervalMs": { "description": "不支持 SSE 时的轮询间隔。", "type": "integer", "minimum": 500, "default": 2000 },
+        "hint": { "$ref": "#/$defs/LocalizedText" }
+      },
+      "required": ["type", "content", "matchCode", "expiresAt"],
+      "additionalProperties": false
+    },
+    "FormField": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$" },
+        "kind": { "enum": ["text", "password", "email", "tel", "otp", "select", "checkbox", "hidden", "info"] },
+        "label": { "$ref": "#/$defs/LocalizedText" },
+        "placeholder": { "$ref": "#/$defs/LocalizedText" },
+        "help": { "$ref": "#/$defs/LocalizedText" },
+        "required": { "type": "boolean", "default": false },
+        "autocomplete": { "description": "HTML autocomplete 值，例如 `username`、`current-password`、`one-time-code`。", "type": "string" },
+        "pattern": { "type": "string" },
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 1 },
+        "options": {
+          "description": "kind=select 时的选项。",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "value": { "type": "string" }, "label": { "$ref": "#/$defs/LocalizedText" } },
+            "required": ["value", "label"],
+            "additionalProperties": false
+          }
+        },
+        "value": { "description": "默认值；kind=hidden 时原样提交。kind=info 时不用。", "type": ["string", "boolean"] }
+      },
+      "required": ["name", "kind"],
+      "additionalProperties": false
+    },
+    "FormStep": {
+      "description": "按字段定义渲染表单（口令、LDAP、TOTP、注册资料等），提交后继续。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "form" },
+        "formId": { "description": "表单标识，提交时原样带回，例如 `password`、`totp`、`register`。", "type": "string" },
+        "title": { "$ref": "#/$defs/LocalizedText" },
+        "description": { "$ref": "#/$defs/LocalizedText" },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/FormField" }, "minItems": 1 },
+        "submitLabel": { "$ref": "#/$defs/LocalizedText" },
+        "error": { "description": "上一次提交的错误（整表）。", "$ref": "#/$defs/StepError" },
+        "fieldErrors": {
+          "description": "上一次提交的字段错误，键是字段名。",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/StepError" }
+        }
+      },
+      "required": ["type", "formId", "fields"],
+      "additionalProperties": false
+    },
+    "StepError": {
+      "type": "object",
+      "properties": {
+        "code": { "description": "错误码，例如 `iam.invalid_credentials`。", "type": "string" },
+        "message": { "$ref": "#/$defs/LocalizedText" }
+      },
+      "required": ["code"],
+      "additionalProperties": false
+    },
+    "WebAuthnStep": {
+      "description": "调用浏览器 WebAuthn 接口（Passkey）。publicKey 是 WebAuthn Level 3 的 JSON 形式（PublicKeyCredentialRequestOptionsJSON / PublicKeyCredentialCreationOptionsJSON）。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "webauthn" },
+        "ceremony": { "enum": ["get", "create"] },
+        "publicKey": { "type": "object" }
+      },
+      "required": ["type", "ceremony", "publicKey"],
+      "additionalProperties": false
+    },
+    "DeviceStep": {
+      "description": "设备码流程（RFC 8628）：显示用户码，在另一台已登录的设备上确认。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "device" },
+        "userCode": { "type": "string" },
+        "verificationUri": { "type": "string", "format": "uri" },
+        "verificationUriComplete": { "type": "string", "format": "uri" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "intervalSeconds": { "type": "integer", "minimum": 1, "default": 5 }
+      },
+      "required": ["type", "userCode", "verificationUri", "expiresAt"],
+      "additionalProperties": false
+    },
+    "DoneStep": {
+      "description": "连接器拿到了外部身份，交给平台核心。只出现在连接器返回里，不会发给登录页。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "done" },
+        "profile": { "$ref": "#/$defs/ExternalProfile" }
+      },
+      "required": ["type", "profile"],
+      "additionalProperties": false
+    },
+    "FailStep": {
+      "description": "出错。登录页按 code 显示统一的错误文案；retryable=true 时提供重试按钮。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "fail" },
+        "code": { "type": "string" },
+        "message": { "$ref": "#/$defs/LocalizedText" },
+        "retryable": { "type": "boolean", "default": false }
+      },
+      "required": ["type", "code"],
+      "additionalProperties": false
+    },
+    "CompleteStep": {
+      "description": "登录完成，会话 cookie 已下发。只出现在发给登录页的步骤里。",
+      "type": "object",
+      "properties": {
+        "type": { "const": "complete" },
+        "redirectTo": { "type": "string", "format": "uri-reference" }
+      },
+      "required": ["type", "redirectTo"],
+      "additionalProperties": false
+    },
+    "ConnectorStep": {
+      "description": "连接器的 begin / advance 返回的步骤。",
+      "oneOf": [
+        { "$ref": "#/$defs/RedirectStep" },
+        { "$ref": "#/$defs/QrStep" },
+        { "$ref": "#/$defs/FormStep" },
+        { "$ref": "#/$defs/WebAuthnStep" },
+        { "$ref": "#/$defs/DeviceStep" },
+        { "$ref": "#/$defs/DoneStep" },
+        { "$ref": "#/$defs/FailStep" }
+      ]
+    },
+    "ClientStep": {
+      "description": "平台核心发给登录页的步骤。核心可能在连接器的步骤之后追加自己的步骤（多因素、绑定已有账号、注册资料）。",
+      "oneOf": [
+        { "$ref": "#/$defs/RedirectStep" },
+        { "$ref": "#/$defs/QrStep" },
+        { "$ref": "#/$defs/FormStep" },
+        { "$ref": "#/$defs/WebAuthnStep" },
+        { "$ref": "#/$defs/DeviceStep" },
+        { "$ref": "#/$defs/CompleteStep" },
+        { "$ref": "#/$defs/FailStep" }
+      ]
+    },
+    "StepInput": {
+      "description": "推进登录事务的输入。",
+      "oneOf": [
+        {
+          "description": "跳转类流程的回调参数（查询参数或 POST 表单）。由平台的回调端点生成，登录页不直接提交。",
+          "type": "object",
+          "properties": {
+            "type": { "const": "callback" },
+            "params": { "type": "object", "additionalProperties": { "type": "string" } }
+          },
+          "required": ["type", "params"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "form" },
+            "formId": { "type": "string" },
+            "values": { "type": "object", "additionalProperties": { "type": ["string", "boolean"] } }
+          },
+          "required": ["type", "formId", "values"],
+          "additionalProperties": false
+        },
+        {
+          "description": "WebAuthn 结果（AuthenticationResponseJSON / RegistrationResponseJSON）。",
+          "type": "object",
+          "properties": {
+            "type": { "const": "webauthn" },
+            "credential": { "type": "object" }
+          },
+          "required": ["type", "credential"],
+          "additionalProperties": false
+        },
+        {
+          "description": "轮询（qr、device 步骤在不支持 SSE 时使用）。",
+          "type": "object",
+          "properties": { "type": { "const": "poll" } },
+          "required": ["type"],
+          "additionalProperties": false
+        },
+        {
+          "description": "带外事件，由平台核心生成，例如手机扫码确认（name=`qr_confirmed`）。",
+          "type": "object",
+          "properties": {
+            "type": { "const": "event" },
+            "name": { "type": "string" },
+            "data": { "type": "object" }
+          },
+          "required": ["type", "name"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ExternalProfile": {
+      "description": "连接器翻译出来的外部身份。连接器只负责翻译，不判断谁能进。",
+      "type": "object",
+      "properties": {
+        "subject": { "description": "外部主体 id，在同一个身份源实例里唯一且稳定（微信用 unionid，没有时用 openid）。", "type": "string", "minLength": 1, "maxLength": 255 },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "emailVerified": { "type": "boolean" },
+        "phone": { "type": "string" },
+        "organization": {
+          "type": "object",
+          "properties": {
+            "company": { "type": "string" },
+            "department": { "type": "string" },
+            "departmentPath": { "type": "array", "items": { "type": "string" } },
+            "employeeId": { "type": "string" },
+            "title": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "attributes": { "description": "原始声明或属性，用于准入规则和属性映射；不放凭据。", "type": "object" },
+        "mfaPerformed": { "description": "本次外部登录已经做过多因素验证。", "type": "boolean", "default": false },
+        "authTime": { "type": "string", "format": "date-time" },
+        "externalSessionRef": { "description": "外部会话的引用，供 session_check 能力复核；不放凭据本身。", "type": "string" }
+      },
+      "required": ["subject"],
+      "additionalProperties": false
+    }
+  }
+}

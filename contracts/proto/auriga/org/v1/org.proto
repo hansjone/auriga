@@ -1,0 +1,234 @@
+syntax = "proto3";
+
+package auriga.org.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/org/v1;orgv1";
+option java_multiple_files = true;
+option java_package = "io.github.hansjone.auriga.contracts.org.v1";
+
+// org 的内部接口。调用方必须带服务令牌。
+
+service TenantService {
+  rpc GetTenant(GetTenantRequest) returns (GetTenantResponse);
+  // 登录前按主机名解析租户。调用方：edge、iam。私有部署没有匹配时返回默认租户。
+  rpc ResolveTenantByHost(ResolveTenantByHostRequest) returns (ResolveTenantByHostResponse);
+}
+
+message Tenant {
+  string tenant_id = 1;
+  // 短名，例如 `default`。
+  string slug = 2;
+  string display_name = 3;
+  // 默认语言，例如 `zh-CN`。
+  string locale = 4;
+  repeated string hosts = 5;
+}
+
+message GetTenantRequest {
+  string tenant_id = 1;
+}
+
+message GetTenantResponse {
+  Tenant tenant = 1;
+}
+
+message ResolveTenantByHostRequest {
+  string host = 1;
+}
+
+message ResolveTenantByHostResponse {
+  Tenant tenant = 1;
+}
+
+enum MemberType {
+  MEMBER_TYPE_UNSPECIFIED = 0;
+  // 正式成员。
+  MEMBER_TYPE_MEMBER = 1;
+  // 外部协作者（按信任程度区分，不按登录方式区分）。
+  MEMBER_TYPE_EXTERNAL = 2;
+}
+
+enum MemberStatus {
+  MEMBER_STATUS_UNSPECIFIED = 0;
+  MEMBER_STATUS_ACTIVE = 1;
+  MEMBER_STATUS_DISABLED = 2;
+  // 已离职：不能登录，数据按离职流程处理。
+  MEMBER_STATUS_OFFBOARDED = 3;
+}
+
+message Member {
+  // 与 iam 账号 id 相同。
+  string account_id = 1;
+  string tenant_id = 2;
+  string display_name = 3;
+  string email = 4;
+  MemberType member_type = 5;
+  MemberStatus status = 6;
+  repeated string group_ids = 7;
+  // 角色的 key，例如 `owner`、`admin`、`member`。
+  repeated string role_keys = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+service MemberService {
+  rpc GetMember(GetMemberRequest) returns (GetMemberResponse);
+  rpc BatchGetMembers(BatchGetMembersRequest) returns (BatchGetMembersResponse);
+}
+
+message GetMemberRequest {
+  string tenant_id = 1;
+  string account_id = 2;
+}
+
+message GetMemberResponse {
+  Member member = 1;
+}
+
+message BatchGetMembersRequest {
+  string tenant_id = 1;
+  // 最多 500 个；不存在的 id 不返回、不报错。
+  repeated string account_ids = 2;
+}
+
+message BatchGetMembersResponse {
+  repeated Member members = 1;
+}
+
+service AuthorizationService {
+  // iam 签发访问令牌时调用，结果写进令牌的 roles / perms。
+  rpc GetEffectivePermissions(GetEffectivePermissionsRequest) returns (GetEffectivePermissionsResponse);
+  // 需要按资源细粒度判断时调用。
+  rpc CheckPermission(CheckPermissionRequest) returns (CheckPermissionResponse);
+}
+
+message GetEffectivePermissionsRequest {
+  string tenant_id = 1;
+  string account_id = 2;
+}
+
+message GetEffectivePermissionsResponse {
+  MemberType member_type = 1;
+  MemberStatus status = 2;
+  repeated string role_keys = 3;
+  // 权限 key，例如 `org.members.write`、`workspace.instances.admin`。
+  repeated string permissions = 4;
+}
+
+message CheckPermissionRequest {
+  string tenant_id = 1;
+  string account_id = 2;
+  string permission = 3;
+  // 可选：资源，形如 `<类型>/<id>`，例如 `group/<id>`。
+  string resource = 4;
+}
+
+message CheckPermissionResponse {
+  bool allowed = 1;
+  // 不允许时的原因码。
+  string reason = 2;
+}
+
+// 邀请。调用方：iam（登录事务里带邀请码时）。
+service InvitationService {
+  rpc ResolveInvitation(ResolveInvitationRequest) returns (ResolveInvitationResponse);
+  // 兑换邀请：建成员并发 user.created。同一账号重复兑换同一邀请是幂等的。
+  rpc RedeemInvitation(RedeemInvitationRequest) returns (RedeemInvitationResponse);
+}
+
+message Invitation {
+  string invitation_id = 1;
+  string tenant_id = 2;
+  MemberType member_type = 3;
+  repeated string role_keys = 4;
+  repeated string group_ids = 5;
+  // 限定受邀人的邮箱，可为空。
+  string email = 6;
+  string display_name = 7;
+  google.protobuf.Timestamp expires_at = 8;
+  // 剩余可用次数。
+  int64 remaining_uses = 9;
+  // 允许用哪些身份源兑换，空表示不限。
+  repeated string provider_ids = 10;
+}
+
+message ResolveInvitationRequest {
+  string code = 1;
+}
+
+message ResolveInvitationResponse {
+  // 邀请无效（不存在、过期、用完、已撤销）时为空，并在 reason 里给原因码。
+  Invitation invitation = 1;
+  string reason = 2;
+}
+
+message RedeemInvitationRequest {
+  string code = 1;
+  string account_id = 2;
+  string display_name = 3;
+  string email = 4;
+  string provider_id = 5;
+}
+
+message RedeemInvitationResponse {
+  Member member = 1;
+}
+
+// 配额。调用方：workspace（实例规格）、ai-gateway（模型预算）。
+service QuotaService {
+  // 按 成员覆盖 → 组 → 租户默认 合并后的结果。
+  rpc GetEffectiveQuota(GetEffectiveQuotaRequest) returns (GetEffectiveQuotaResponse);
+}
+
+message GetEffectiveQuotaRequest {
+  string tenant_id = 1;
+  string account_id = 2;
+}
+
+message GetEffectiveQuotaResponse {
+  Quota quota = 1;
+}
+
+message Quota {
+  InstanceQuota instance = 1;
+  ModelQuota model = 2;
+}
+
+message InstanceQuota {
+  int64 cpu_millis = 1;
+  int64 memory_mb = 2;
+  int64 disk_gb = 3;
+  int64 max_instances = 4;
+  // 允许常驻（不做闲置回收）。
+  bool always_on_allowed = 5;
+}
+
+message ModelQuota {
+  // 每月预算，百万分之一货币单位；0 表示不限。
+  int64 monthly_budget_micros = 1;
+  // ISO 4217，例如 `CNY`、`USD`。
+  string currency = 2;
+  // 每日 token 上限；0 表示不限。
+  int64 daily_tokens = 3;
+}
+
+// 策略。调用方：workspace（`workspace`）、egress（`egress`）等。
+service PolicyService {
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+}
+
+message GetPolicyRequest {
+  string tenant_id = 1;
+  // 策略键，见 openapi/org.yaml 的 PolicyKey。
+  string key = 2;
+}
+
+message GetPolicyResponse {
+  string key = 1;
+  // 每次修改加一。
+  int64 version = 2;
+  // 策略内容，结构见 openapi/org.yaml 里对应的 schema。
+  google.protobuf.Struct value = 3;
+}

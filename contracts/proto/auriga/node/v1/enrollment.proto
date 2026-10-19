@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package auriga.node.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
+option java_multiple_files = true;
+option java_package = "io.github.hansjone.auriga.contracts.node.v1";
+
+// 节点入网（workspace 提供）。
+//
+// 流程：管理员在管理台生成一次性入网令牌（默认 1 小时有效），同时拿到平台 CA 证书的 SHA-256 指纹。
+// 新主机执行 `auriga-agent join --server <地址> --token <令牌> --ca-sha256 <指纹>`：
+// 节点代理用指纹校验服务端证书（类似 kubeadm 的 discovery hash），然后调用 Join。
+// 单机安装包在安装时自动完成入网，走本机 socket / 命名管道。
+service NodeEnrollmentService {
+  // 用一次性令牌换节点证书。令牌用过即作废。只需服务端 TLS。
+  rpc Join(JoinRequest) returns (JoinResponse);
+  // 续期节点证书（到期前 7 天自动调用）。需要用当前节点证书做 mTLS。
+  rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+}
+
+message JoinRequest {
+  // 入网令牌，形如 `<令牌 id>.<密钥>`。
+  string token = 1;
+  // PKCS#10 证书签名请求（DER）。密钥对在节点本机生成，私钥不出节点。推荐 ECDSA P-256。
+  bytes csr = 2;
+  // 节点的封装公钥（X25519，32 字节），workspace 用它加密下发给本节点的机密（见 SealedSecret）。
+  bytes sealing_public_key = 3;
+  string hostname = 4;
+  // `linux` | `windows`
+  string os = 5;
+  // `amd64` | `arm64`
+  string arch = 6;
+  string agent_version = 7;
+}
+
+message JoinResponse {
+  string node_id = 1;
+  // 节点证书链（PEM），第一张是节点证书。证书的 URI SAN 为 `auriga://node/<node_id>`。
+  bytes certificate_chain = 2;
+  // 平台内置 CA 证书（PEM），节点代理用它校验 workspace 和 edge。
+  bytes ca_bundle = 3;
+  // NodeControl 的地址，例如 `https://platform.example.com:7443`；单机时是 `unix:///…` 或 `npipe:////./pipe/…`。
+  string control_endpoint = 4;
+  google.protobuf.Timestamp certificate_expires_at = 5;
+}
+
+message RenewCertificateRequest {
+  bytes csr = 1;
+  // 可选：同时轮换封装公钥。为空表示不变。
+  bytes sealing_public_key = 2;
+}
+
+message RenewCertificateResponse {
+  bytes certificate_chain = 1;
+  google.protobuf.Timestamp certificate_expires_at = 2;
+}

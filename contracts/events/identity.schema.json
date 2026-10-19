@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "identity.* 事件（由 iam 发布）",
+  "$defs": {
+    "Client": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["web", "admin", "device", "cli"] },
+        "ip": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "deviceId": { "type": "string", "format": "uuid" }
+      },
+      "required": ["kind"],
+      "additionalProperties": false
+    },
+    "IdentityLogin": {
+      "description": "type `identity.login`：登录成功。connectorType=emergency 时 collab 通知所有超管。",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string", "format": "uuid" },
+        "identityId": { "type": "string", "format": "uuid" },
+        "providerId": { "type": "string", "format": "uuid" },
+        "connectorType": { "type": "string" },
+        "sessionId": { "type": "string", "format": "uuid" },
+        "mfa": { "description": "本次登录做过多因素验证（外部或平台）。", "type": "boolean" },
+        "newDevice": { "type": "boolean" },
+        "client": { "$ref": "#/$defs/Client" }
+      },
+      "required": ["accountId", "identityId", "providerId", "connectorType", "sessionId", "mfa", "client"],
+      "additionalProperties": false
+    },
+    "IdentityLoginFailed": {
+      "description": "type `identity.login_failed`：登录失败（凭据错误、准入拒绝、账号停用、事务过期等）。不含口令等凭据。",
+      "type": "object",
+      "properties": {
+        "providerId": { "type": ["string", "null"], "format": "uuid" },
+        "connectorType": { "type": ["string", "null"] },
+        "accountId": { "description": "能确定账号时填写。", "type": ["string", "null"], "format": "uuid" },
+        "code": { "description": "失败原因码，例如 `iam.invalid_credentials`。", "type": "string" },
+        "client": { "$ref": "#/$defs/Client" }
+      },
+      "required": ["providerId", "connectorType", "accountId", "code", "client"],
+      "additionalProperties": false
+    },
+    "IdentityLinked": {
+      "description": "type `identity.linked`：账号绑定了新身份（含首次登录建账号时的第一个身份）。",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string", "format": "uuid" },
+        "identityId": { "type": "string", "format": "uuid" },
+        "providerId": { "type": "string", "format": "uuid" },
+        "connectorType": { "type": "string" },
+        "actorId": { "type": ["string", "null"], "format": "uuid" }
+      },
+      "required": ["accountId", "identityId", "providerId", "connectorType", "actorId"],
+      "additionalProperties": false
+    },
+    "IdentityUnlinked": {
+      "description": "type `identity.unlinked`：解绑身份（不能解绑最后一个）。",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string", "format": "uuid" },
+        "identityId": { "type": "string", "format": "uuid" },
+        "providerId": { "type": "string", "format": "uuid" },
+        "connectorType": { "type": "string" },
+        "actorId": { "type": ["string", "null"], "format": "uuid" }
+      },
+      "required": ["accountId", "identityId", "providerId", "connectorType", "actorId"],
+      "additionalProperties": false
+    },
+    "IdentityMfaChanged": {
+      "description": "type `identity.mfa_changed`：TOTP / Passkey 增加、删除或被管理员重置。",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string", "format": "uuid" },
+        "method": { "enum": ["totp", "passkey"] },
+        "change": { "enum": ["added", "removed", "reset"] },
+        "actorId": { "type": ["string", "null"], "format": "uuid" }
+      },
+      "required": ["accountId", "method", "change", "actorId"],
+      "additionalProperties": false
+    },
+    "IdentitySessionRevoked": {
+      "description": "type `identity.session_revoked`：会话或设备凭据被吊销。iam 已删除 NATS KV 里的会话缓存，edge 收到后清本地内存缓存。",
+      "type": "object",
+      "properties": {
+        "accountId": { "type": "string", "format": "uuid" },
+        "sessionIds": { "description": "空数组表示该账号的全部会话。", "type": "array", "items": { "type": "string", "format": "uuid" } },
+        "deviceIds": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+        "reason": { "enum": ["logout", "user", "admin", "user_disabled", "user_offboarded", "security", "expired"] },
+        "actorId": { "type": ["string", "null"], "format": "uuid" }
+      },
+      "required": ["accountId", "sessionIds", "reason", "actorId"],
+      "additionalProperties": false
+    }
+  }
+}

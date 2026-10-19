@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "审计记录（各服务发布，audit 收集）",
+  "description": "信封 type 固定为 `audit.recorded`，NATS 主题 `auriga.audit.<服务>`（不走 auriga.evt）。common 库提供统一的写入接口，和业务数据同一事务写入 outbox。",
+  "$defs": {
+    "AuditRecorded": {
+      "type": "object",
+      "properties": {
+        "actor": {
+          "type": "object",
+          "properties": {
+            "type": { "enum": ["user", "service_account", "device", "instance", "system"] },
+            "id": { "type": ["string", "null"] },
+            "ip": { "type": "string" },
+            "userAgent": { "type": "string" },
+            "sessionId": { "type": "string" }
+          },
+          "required": ["type", "id"],
+          "additionalProperties": false
+        },
+        "action": { "description": "`<服务>.<资源>.<动作>`，例如 `org.member.disable`、`iam.provider.update`。", "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){2,}$" },
+        "target": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "id": { "type": "string" },
+            "name": { "type": "string" }
+          },
+          "required": ["type", "id"],
+          "additionalProperties": false
+        },
+        "result": { "enum": ["success", "failure", "denied"] },
+        "errorCode": { "type": "string" },
+        "changes": { "description": "变更前后的值（机密字段只记字段名，不记值）。", "type": "object" },
+        "details": { "type": "object" },
+        "requestId": { "type": "string" }
+      },
+      "required": ["actor", "action", "result"],
+      "additionalProperties": false
+    }
+  }
+}

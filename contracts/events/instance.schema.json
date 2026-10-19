@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "instance.* 事件（由 workspace 发布）",
+  "description": "实例生命周期的里程碑，供审计、计量（运行时长）、通知使用。细粒度的阶段变化走 NodeControl 和 workspace 接口，不发事件。",
+  "$defs": {
+    "InstanceRef": {
+      "type": "object",
+      "properties": {
+        "instanceId": { "type": "string", "format": "uuid" },
+        "ownerId": { "type": "string", "format": "uuid" },
+        "nodeId": { "type": ["string", "null"], "format": "uuid" },
+        "generation": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["instanceId", "ownerId", "nodeId", "generation"],
+      "additionalProperties": false
+    },
+    "InstanceCreated": {
+      "description": "type `instance.created`。",
+      "type": "object",
+      "properties": {
+        "instance": { "$ref": "#/$defs/InstanceRef" },
+        "runtime": { "enum": ["docker", "linux_process", "windows_process"] },
+        "dshVersion": { "type": "string" },
+        "actorId": { "type": ["string", "null"], "format": "uuid" }
+      },
+      "required": ["instance", "runtime", "dshVersion", "actorId"],
+      "additionalProperties": false
+    },
+    "InstanceStarted": {
+      "description": "type `instance.started`：实例进入 running 且 ready。",
+      "type": "object",
+      "properties": {
+        "instance": { "$ref": "#/$defs/InstanceRef" },
+        "reason": { "enum": ["user", "admin", "wake", "always_on", "recover"] },
+        "coldStartMs": { "description": "从决定启动到 ready 的耗时。", "type": "integer", "minimum": 0 }
+      },
+      "required": ["instance", "reason"],
+      "additionalProperties": false
+    },
+    "InstanceStopped": {
+      "description": "type `instance.stopped`：实例停止。",
+      "type": "object",
+      "properties": {
+        "instance": { "$ref": "#/$defs/InstanceRef" },
+        "reason": { "enum": ["idle", "user", "admin", "user_disabled", "restart", "node_lost", "crashed"] },
+        "runningSeconds": { "description": "本次运行时长（计量用）。", "type": "integer", "minimum": 0 }
+      },
+      "required": ["instance", "reason", "runningSeconds"],
+      "additionalProperties": false
+    },
+    "InstanceFailed": {
+      "description": "type `instance.failed`：节点代理连续 5 次失败后停止重试。",
+      "type": "object",
+      "properties": {
+        "instance": { "$ref": "#/$defs/InstanceRef" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "required": ["instance", "code"],
+      "additionalProperties": false
+    },
+    "InstanceDeleted": {
+      "description": "type `instance.deleted`。",
+      "type": "object",
+      "properties": {
+        "instance": { "$ref": "#/$defs/InstanceRef" },
+        "dataPurged": { "type": "boolean" },
+        "actorId": { "type": ["string", "null"], "format": "uuid" }
+      },
+      "required": ["instance", "dataPurged", "actorId"],
+      "additionalProperties": false
+    }
+  }
+}

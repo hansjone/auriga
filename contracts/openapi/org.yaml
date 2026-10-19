@@ -1,0 +1,924 @@
+openapi: 3.1.0
+info:
+  title: Auriga org
+  version: 1.0.0
+  description: |
+    组织与权限：租户、成员、组、角色（权限集合）和角色绑定、策略、配额、邀请。成员 id 等于 iam 账号 id。
+    授权规则：**授予的权限不能超过授予者自己的权限**（超管上限），否则 403 `org.grant_exceeds_own`。
+    `/admin/**` 之外的接口给门户用；管理类接口要求相应权限（x-permission）。
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: /api/org/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: me
+  - name: tenant
+  - name: members
+  - name: groups
+  - name: roles
+  - name: policies
+  - name: quotas
+  - name: invitations
+paths:
+  /me:
+    get:
+      tags: [me]
+      operationId: getMyMembership
+      responses:
+        '200':
+          description: 我的成员资料和有效权限（前端据此显示菜单；权限检查仍在服务端）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member: { $ref: '#/components/schemas/Member' }
+                  tenant: { $ref: '#/components/schemas/Tenant' }
+                  permissions: { type: array, items: { type: string } }
+                required: [member, tenant, permissions]
+  /tenant:
+    get:
+      tags: [tenant]
+      operationId: getTenant
+      responses:
+        '200':
+          description: 当前租户
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+    patch:
+      tags: [tenant]
+      operationId: updateTenant
+      x-permission: org.tenant.write
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string, maxLength: 100 }
+                locale: { type: string }
+                hosts: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Tenant' }
+
+  # ---------------- 成员 ----------------
+  /members:
+    get:
+      tags: [members]
+      operationId: listMembers
+      x-permission: org.members.read
+      parameters:
+        - name: q
+          in: query
+          description: 按显示名、邮箱搜索。
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/MemberStatus' }
+        - name: memberType
+          in: query
+          schema: { $ref: '#/components/schemas/MemberType' }
+        - name: groupId
+          in: query
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        - $ref: 'common.yaml#/components/parameters/Limit'
+        - $ref: 'common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成员列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Member' } }
+                  nextCursor: { type: string }
+                required: [items]
+  /members/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [members]
+      operationId: getMember
+      x-permission: org.members.read
+      responses:
+        '200':
+          description: 成员
+          headers:
+            ETag: { $ref: 'common.yaml#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+    patch:
+      tags: [members]
+      operationId: updateMember
+      x-permission: org.members.write
+      parameters:
+        - $ref: 'common.yaml#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string, maxLength: 100 }
+                email: { type: string }
+                memberType: { $ref: '#/components/schemas/MemberType' }
+      responses:
+        '200':
+          description: 已更新（发 user.updated）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '412': { $ref: 'common.yaml#/components/responses/PreconditionFailed' }
+  /members/{accountId}/disable:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [members]
+      operationId: disableMember
+      x-permission: org.members.write
+      description: 发 user.disabled。不能停用自己，不能停用最后一个超管（409 org.last_owner）。
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { reason: { type: string, maxLength: 500 } } }
+      responses:
+        '200':
+          description: 已停用
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /members/{accountId}/enable:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [members]
+      operationId: enableMember
+      x-permission: org.members.write
+      responses:
+        '200':
+          description: 已启用（发 user.enabled）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+  /members/{accountId}/offboard:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    post:
+      tags: [members]
+      operationId: offboardMember
+      x-permission: org.members.offboard
+      description: 离职。发 user.offboarded，后续的导出、归档、转交由各服务按事件处理。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                handoverTo: { $ref: 'common.yaml#/components/schemas/Uuid' }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: 已离职
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /members/{accountId}/role-bindings:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [roles]
+      operationId: listMemberRoleBindings
+      x-permission: org.roles.read
+      description: 成员直接获得和经组获得的角色绑定。
+      responses:
+        '200':
+          description: 角色绑定
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/RoleBinding' } }
+                required: [items]
+
+  # ---------------- 组 ----------------
+  /groups:
+    get:
+      tags: [groups]
+      operationId: listGroups
+      x-permission: org.groups.read
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: parentId
+          in: query
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      responses:
+        '200':
+          description: 组
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Group' } }
+                required: [items]
+    post:
+      tags: [groups]
+      operationId: createGroup
+      x-permission: org.groups.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupInput' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+  /groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [groups]
+      operationId: getGroup
+      x-permission: org.groups.read
+      responses:
+        '200':
+          description: 组
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+    patch:
+      tags: [groups]
+      operationId: updateGroup
+      x-permission: org.groups.write
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/GroupInput' }
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+    delete:
+      tags: [groups]
+      operationId: deleteGroup
+      x-permission: org.groups.write
+      description: 有子组时 409 org.group_not_empty。成员移出、该组的角色绑定和配额一并删除。
+      responses:
+        '204': { description: 已删除 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /groups/{groupId}/members:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [groups]
+      operationId: listGroupMembers
+      x-permission: org.groups.read
+      parameters:
+        - $ref: 'common.yaml#/components/parameters/Limit'
+        - $ref: 'common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 组成员
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Member' } }
+                  nextCursor: { type: string }
+                required: [items]
+  /groups/{groupId}/members/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/AccountId'
+    put:
+      tags: [groups]
+      operationId: addGroupMember
+      x-permission: org.groups.write
+      responses:
+        '204': { description: 已加入（发 user.updated，有效权限变化时另发 user.permissions_changed） }
+    delete:
+      tags: [groups]
+      operationId: removeGroupMember
+      x-permission: org.groups.write
+      responses:
+        '204': { description: 已移出 }
+
+  # ---------------- 权限和角色 ----------------
+  /permissions:
+    get:
+      tags: [roles]
+      operationId: listPermissions
+      x-permission: org.roles.read
+      responses:
+        '200':
+          description: 权限目录（各服务注册）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+                required: [items]
+  /roles:
+    get:
+      tags: [roles]
+      operationId: listRoles
+      x-permission: org.roles.read
+      responses:
+        '200':
+          description: 角色（内置 + 自定义）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Role' } }
+                required: [items]
+    post:
+      tags: [roles]
+      operationId: createRole
+      x-permission: org.roles.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleInput' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+  /roles/{roleId}:
+    parameters:
+      - $ref: '#/components/parameters/RoleId'
+    get:
+      tags: [roles]
+      operationId: getRole
+      x-permission: org.roles.read
+      responses:
+        '200':
+          description: 角色
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+    patch:
+      tags: [roles]
+      operationId: updateRole
+      x-permission: org.roles.write
+      description: 内置角色不能改（409 org.role_builtin）。
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/RoleInput' }
+      responses:
+        '200':
+          description: 已更新（受影响成员发 user.permissions_changed）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+    delete:
+      tags: [roles]
+      operationId: deleteRole
+      x-permission: org.roles.write
+      responses:
+        '204': { description: 已删除，相关绑定一并删除 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /role-bindings:
+    get:
+      tags: [roles]
+      operationId: listRoleBindings
+      x-permission: org.roles.read
+      parameters:
+        - name: roleId
+          in: query
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        - $ref: 'common.yaml#/components/parameters/Limit'
+        - $ref: 'common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 角色绑定
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/RoleBinding' } }
+                  nextCursor: { type: string }
+                required: [items]
+    post:
+      tags: [roles]
+      operationId: createRoleBinding
+      x-permission: org.roles.grant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roleId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+                subject: { $ref: '#/components/schemas/BindingSubject' }
+              required: [roleId, subject]
+      responses:
+        '201':
+          description: 已授予（发 user.permissions_changed）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleBinding' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+  /role-bindings/{bindingId}:
+    delete:
+      tags: [roles]
+      operationId: deleteRoleBinding
+      x-permission: org.roles.grant
+      description: 不能撤销最后一个超管（409 org.last_owner）。
+      parameters:
+        - name: bindingId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      responses:
+        '204': { description: 已撤销 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+
+  # ---------------- 策略 ----------------
+  /policies/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/PolicyKey' }
+    get:
+      tags: [policies]
+      operationId: getPolicy
+      x-permission: org.policies.read
+      responses:
+        '200':
+          description: 策略
+          headers:
+            ETag: { $ref: 'common.yaml#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+    put:
+      tags: [policies]
+      operationId: putPolicy
+      x-permission: org.policies.write
+      parameters:
+        - $ref: 'common.yaml#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value: { $ref: '#/components/schemas/PolicyValue' }
+              required: [value]
+      responses:
+        '200':
+          description: 已保存（version 加一）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Policy' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '412': { $ref: 'common.yaml#/components/responses/PreconditionFailed' }
+
+  # ---------------- 配额 ----------------
+  /quotas/default:
+    get:
+      tags: [quotas]
+      operationId: getDefaultQuota
+      x-permission: org.quotas.read
+      responses:
+        '200':
+          description: 租户默认配额
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+    put:
+      tags: [quotas]
+      operationId: putDefaultQuota
+      x-permission: org.quotas.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Quota' }
+      responses:
+        '200':
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+  /groups/{groupId}/quota:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [quotas]
+      operationId: getGroupQuota
+      x-permission: org.quotas.read
+      responses:
+        '200':
+          description: 组配额（只含设置了的字段）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+    put:
+      tags: [quotas]
+      operationId: putGroupQuota
+      x-permission: org.quotas.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Quota' }
+      responses:
+        '200':
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+    delete:
+      tags: [quotas]
+      operationId: deleteGroupQuota
+      x-permission: org.quotas.write
+      responses:
+        '204': { description: 已删除 }
+  /members/{accountId}/quota:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [quotas]
+      operationId: getMemberQuota
+      x-permission: org.quotas.read
+      responses:
+        '200':
+          description: 成员覆盖（只含设置了的字段）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+    put:
+      tags: [quotas]
+      operationId: putMemberQuota
+      x-permission: org.quotas.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Quota' }
+      responses:
+        '200':
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+    delete:
+      tags: [quotas]
+      operationId: deleteMemberQuota
+      x-permission: org.quotas.write
+      responses:
+        '204': { description: 已删除 }
+  /members/{accountId}/quota/effective:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [quotas]
+      operationId: getEffectiveQuota
+      x-permission: org.quotas.read
+      description: 成员覆盖 → 所在组（多个组时每项取最大值）→ 租户默认，逐项合并。本人也可以查自己的。
+      responses:
+        '200':
+          description: 合并后的配额
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quota' }
+
+  # ---------------- 邀请 ----------------
+  /invitations:
+    get:
+      tags: [invitations]
+      operationId: listInvitations
+      x-permission: org.invitations.read
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, used, expired, revoked] }
+        - $ref: 'common.yaml#/components/parameters/Limit'
+        - $ref: 'common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 邀请
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Invitation' } }
+                  nextCursor: { type: string }
+                required: [items]
+    post:
+      tags: [invitations]
+      operationId: createInvitation
+      x-permission: org.invitations.write
+      parameters:
+        - $ref: 'common.yaml#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationInput' }
+      responses:
+        '201':
+          description: 已创建。code 和 url 只在创建时返回
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/Invitation' }
+                  - type: object
+                    properties:
+                      code: { type: string }
+                      url: { type: string, format: uri }
+                    required: [code, url]
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+  /invitations/{invitationId}:
+    delete:
+      tags: [invitations]
+      operationId: revokeInvitation
+      x-permission: org.invitations.write
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      responses:
+        '204': { description: 已撤销 }
+  /invitations/preview/{code}:
+    get:
+      tags: [invitations]
+      operationId: previewInvitation
+      summary: 邀请页用：不需要登录
+      security: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 邀请概要（不含受邀人信息以外的内部数据）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  reason: { type: string, enum: [expired, used, revoked, not_found], description: valid=false 时的原因。 }
+                  tenantName: { type: string }
+                  inviterName: { type: string }
+                  memberType: { $ref: '#/components/schemas/MemberType' }
+                  email: { type: string, description: 限定的受邀邮箱（部分遮挡）。 }
+                  providerIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+                  expiresAt: { type: string, format: date-time }
+                required: [valid]
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
+
+components:
+  parameters:
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    RoleId:
+      name: roleId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+  securitySchemes:
+    bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
+  schemas:
+    Tenant:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        slug: { type: string }
+        displayName: { type: string }
+        locale: { type: string }
+        hosts: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+      required: [id, slug, displayName, locale, hosts, createdAt]
+    MemberType:
+      type: string
+      enum: [member, external]
+    MemberStatus:
+      type: string
+      enum: [active, disabled, offboarded]
+    Member:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        displayName: { type: string }
+        email: { type: string }
+        memberType: { $ref: '#/components/schemas/MemberType' }
+        status: { $ref: '#/components/schemas/MemberStatus' }
+        groupIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+        roleKeys: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+        disabledAt: { type: string, format: date-time }
+        offboardedAt: { type: string, format: date-time }
+      required: [id, displayName, memberType, status, groupIds, roleKeys, createdAt]
+    GroupInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        parentId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      required: [name]
+    Group:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        name: { type: string }
+        description: { type: string }
+        parentId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        memberCount: { type: integer }
+        source: { type: string, enum: [manual, mapped], description: mapped 表示由身份源属性映射维护。 }
+        createdAt: { type: string, format: date-time }
+      required: [id, name, memberCount, source, createdAt]
+    Permission:
+      type: object
+      properties:
+        key: { type: string, description: '`<服务>.<资源>.<动作>`，例如 `org.members.write`。' }
+        service: { type: string }
+        description: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        sensitive: { type: boolean, description: 高危权限，授予时界面要二次确认。 }
+      required: [key, service, description, sensitive]
+    RoleInput:
+      type: object
+      properties:
+        key: { type: string, pattern: '^[a-z][a-z0-9_]{1,62}$', description: 创建后不能改。 }
+        name: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        description: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        permissions: { type: array, items: { type: string } }
+      required: [key, name, permissions]
+    Role:
+      type: object
+      description: 内置角色 owner（超管）、admin、member、external 不能修改或删除。
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        key: { type: string }
+        name: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        description: { $ref: 'common.yaml#/components/schemas/LocalizedText' }
+        builtin: { type: boolean }
+        permissions: { type: array, items: { type: string } }
+        bindingCount: { type: integer }
+      required: [id, key, name, builtin, permissions, bindingCount]
+    BindingSubject:
+      type: object
+      properties:
+        type: { type: string, enum: [member, group, service_account] }
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      required: [type, id]
+    RoleBinding:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        roleId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        roleKey: { type: string }
+        subject: { $ref: '#/components/schemas/BindingSubject' }
+        via: { type: string, enum: [direct, group], description: 在成员视图里，经组获得的绑定标 group。 }
+        grantedBy: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        createdAt: { type: string, format: date-time }
+      required: [id, roleId, roleKey, subject, createdAt]
+    PolicyKey:
+      type: string
+      enum: [workspace, egress, login]
+    WorkspacePolicy:
+      type: object
+      description: 策略键 workspace。
+      properties:
+        idleMinutes: { type: integer, minimum: 5, default: 30, description: 四个闲置条件都满足多久后回收。 }
+        wakeOnSchedule: { type: boolean, default: true, description: 有定时任务时到点唤醒。 }
+        alwaysOnRequiresApproval: { type: boolean, default: true }
+        maxConcurrentStarts: { type: integer, minimum: 1, default: 4, description: 准入：同时冷启动的上限，超出返回 429。 }
+        defaultDshVersion: { type: string }
+        allowPersonalPlugins: { type: boolean, default: true, description: 是否允许 L4 个人插件。 }
+    EgressPolicy:
+      type: object
+      description: 策略键 egress。解析到内网地址的目标一律拒绝，不能通过策略放开。
+      properties:
+        categories:
+          type: array
+          description: 允许的分类（分类清单由 egress 维护，例如 package_registries、code_hosting、model_providers、search）。
+          items: { type: string }
+        allowDomains: { type: array, items: { type: string }, description: '额外允许的域名，支持 `*.example.com`。' }
+        denyDomains: { type: array, items: { type: string } }
+    LoginPolicy:
+      type: object
+      description: 策略键 login（全租户的登录要求，身份源实例的准入策略在 iam）。
+      properties:
+        requireMfa: { type: boolean, default: false }
+        adminRequireMfa: { type: boolean, default: true }
+        maxSessionsPerAccount: { type: integer, minimum: 1, default: 20 }
+    PolicyValue:
+      oneOf:
+        - { $ref: '#/components/schemas/WorkspacePolicy' }
+        - { $ref: '#/components/schemas/EgressPolicy' }
+        - { $ref: '#/components/schemas/LoginPolicy' }
+    Policy:
+      type: object
+      properties:
+        key: { $ref: '#/components/schemas/PolicyKey' }
+        version: { type: integer }
+        value: { $ref: '#/components/schemas/PolicyValue' }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      required: [key, version, value, updatedAt]
+    Quota:
+      type: object
+      description: 各字段都可省略；合并时省略的字段取下一层的值。
+      properties:
+        instance:
+          type: object
+          properties:
+            cpuMillis: { type: integer, minimum: 100 }
+            memoryMb: { type: integer, minimum: 256 }
+            diskGb: { type: integer, minimum: 1 }
+            maxInstances: { type: integer, minimum: 0 }
+            alwaysOnAllowed: { type: boolean }
+        model:
+          type: object
+          properties:
+            monthlyBudgetMicros: { type: integer, minimum: 0, description: 每月预算，百万分之一货币单位；0 表示不限。 }
+            currency: { type: string, pattern: '^[A-Z]{3}$' }
+            dailyTokens: { type: integer, minimum: 0 }
+    InvitationInput:
+      type: object
+      properties:
+        email: { type: string, description: 限定受邀人邮箱（可选）。 }
+        displayName: { type: string }
+        memberType: { $ref: '#/components/schemas/MemberType' }
+        roleIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+        groupIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+        providerIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' }, description: 允许用哪些身份源兑换，空表示不限。 }
+        expiresAt: { type: string, format: date-time }
+        maxUses: { type: integer, minimum: 1, default: 1 }
+      required: [memberType]
+    Invitation:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        status: { type: string, enum: [active, used, expired, revoked] }
+        email: { type: string }
+        displayName: { type: string }
+        memberType: { $ref: '#/components/schemas/MemberType' }
+        roleIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+        groupIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+        providerIds: { type: array, items: { $ref: 'common.yaml#/components/schemas/Uuid' } }
+        maxUses: { type: integer }
+        uses: { type: integer }
+        expiresAt: { type: string, format: date-time }
+        createdBy: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        createdAt: { type: string, format: date-time }
+      required: [id, status, memberType, roleIds, groupIds, providerIds, maxUses, uses, expiresAt, createdBy, createdAt]

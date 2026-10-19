@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auriga 访问令牌声明 v1",
+  "description": "iam 签发的 JWT（JWS，ES256，头部带 kid），有效期 5 分钟。业务服务用 iam 的 JWKS 自行校验，并检查 iss、aud、exp。权限在签发时从 org 取（GetEffectivePermissions），最长 5 分钟内有效；收到 user.permissions_changed 后 iam 会让 edge 尽快换新令牌。",
+  "type": "object",
+  "properties": {
+    "iss": { "description": "平台的 issuer URL，等于 OIDC 发现文档里的 issuer。", "type": "string", "format": "uri" },
+    "sub": { "description": "主体 id：账号 id、服务账号 id。", "type": "string" },
+    "aud": { "description": "固定包含 `auriga`；签给第三方 OIDC 客户端的令牌另带客户端 id。", "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
+    "exp": { "type": "integer" },
+    "iat": { "type": "integer" },
+    "nbf": { "type": "integer" },
+    "jti": { "type": "string" },
+    "tid": { "description": "租户 id。", "type": "string", "format": "uuid" },
+    "ptyp": { "description": "主体类型。", "enum": ["user", "service_account", "device"] },
+    "sid": { "description": "浏览器会话 id（ptyp=user 时）。", "type": "string", "format": "uuid" },
+    "did": { "description": "设备 id（ptyp=device 时）。", "type": "string", "format": "uuid" },
+    "mtyp": { "description": "成员类型（ptyp=user / device 时）。", "enum": ["member", "external"] },
+    "roles": { "type": "array", "items": { "type": "string" } },
+    "perms": { "description": "有效权限 key。", "type": "array", "items": { "type": "string" } },
+    "amr": { "description": "本次登录用的验证方式（RFC 8176），例如 pwd、otp、hwk、ext（外部身份源）。", "type": "array", "items": { "type": "string" } },
+    "scope": { "description": "OAuth scope，空格分隔。", "type": "string" },
+    "name": { "description": "显示名。", "type": "string" },
+    "locale": { "type": "string" }
+  },
+  "required": ["iss", "sub", "aud", "exp", "iat", "jti", "tid", "ptyp"],
+  "additionalProperties": true
+}

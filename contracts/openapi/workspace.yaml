@@ -1,0 +1,640 @@
+openapi: 3.1.0
+info:
+  title: Auriga workspace
+  version: 1.0.0
+  description: |
+    工作空间：每人的 DSH 实例（打开、启停、状态）、管理员的实例和节点管理、入网令牌，
+    以及实例里的插件（实例令牌）和用户电脑上的插件（设备令牌）调用的接口。
+    浏览器打开实例的入口是 edge 上的 `/i/<实例 id>/`；本服务负责决定实例何时启动、停止。
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: /api/workspace/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: me
+  - name: instances
+  - name: admin-instances
+  - name: admin-nodes
+  - name: admin-runtimes
+  - name: instance-api
+  - name: connect
+paths:
+  # ---------------- 本人 ----------------
+  /me/instances:
+    get:
+      tags: [me]
+      operationId: listMyInstances
+      responses:
+        '200':
+          description: 我的实例（目前每人一个）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Instance' } }
+                required: [items]
+  /me/instance/open:
+    post:
+      tags: [me]
+      operationId: openMyInstance
+      summary: 打开我的默认实例
+      description: |
+        没有实例时按配额创建；已停止时启动（desired=running）。立即返回，前端用 `/instances/{id}/events` 等 ready，
+        然后跳到 entryUrl。准入满时返回 429 `workspace.admission_full` 和 Retry-After。
+      responses:
+        '200':
+          description: 实例（可能还在启动）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenResult' }
+        '403':
+          description: 账号停用、外部协作者不允许实例等（workspace.not_allowed）
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
+
+  # ---------------- 实例（本人或管理员） ----------------
+  /instances/{instanceId}:
+    parameters:
+      - $ref: '#/components/parameters/InstanceId'
+    get:
+      tags: [instances]
+      operationId: getInstance
+      description: 主人或有 workspace.instances.read 权限的人可以查看。
+      responses:
+        '200':
+          description: 实例
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+  /instances/{instanceId}/events:
+    parameters:
+      - $ref: '#/components/parameters/InstanceId'
+    get:
+      tags: [instances]
+      operationId: streamInstance
+      summary: 订阅实例状态（SSE）
+      description: '每次状态变化发 `event: instance`，data 是 Instance 的 JSON。连接建立时先发一次当前状态。'
+      responses:
+        '200':
+          description: 事件流
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /instances/{instanceId}/start:
+    parameters:
+      - $ref: '#/components/parameters/InstanceId'
+    post:
+      tags: [instances]
+      operationId: startInstance
+      responses:
+        '202':
+          description: 已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
+  /instances/{instanceId}/stop:
+    parameters:
+      - $ref: '#/components/parameters/InstanceId'
+    post:
+      tags: [instances]
+      operationId: stopInstance
+      responses:
+        '202':
+          description: 已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+  /instances/{instanceId}/restart:
+    parameters:
+      - $ref: '#/components/parameters/InstanceId'
+    post:
+      tags: [instances]
+      operationId: restartInstance
+      description: 有待重启的变更（pendingRestart）时，用户可以自己选时机重启。
+      responses:
+        '202':
+          description: 已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+
+  # ---------------- 管理：实例 ----------------
+  /admin/instances:
+    get:
+      tags: [admin-instances]
+      operationId: listInstances
+      x-permission: workspace.instances.read
+      parameters:
+        - name: ownerId
+          in: query
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        - name: nodeId
+          in: query
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        - name: phase
+          in: query
+          schema: { $ref: '#/components/schemas/InstancePhase' }
+        - $ref: 'common.yaml#/components/parameters/Limit'
+        - $ref: 'common.yaml#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 实例列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Instance' } }
+                  nextCursor: { type: string }
+                required: [items]
+  /admin/instances/{instanceId}:
+    parameters:
+      - $ref: '#/components/parameters/InstanceId'
+    patch:
+      tags: [admin-instances]
+      operationId: updateInstance
+      x-permission: workspace.instances.admin
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                alwaysOn: { type: boolean }
+                resourcesOverride: { $ref: '#/components/schemas/Resources' }
+                dshVersionPin: { type: [string, 'null'], description: 固定 DSH 版本；null 表示跟随默认。 }
+                nodeId: { type: [string, 'null'], format: uuid, description: 迁移到指定节点（下次启动时生效）。 }
+      responses:
+        '200':
+          description: 已更新（规格代数加一；需要重启的变化标为 pendingRestart）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+    delete:
+      tags: [admin-instances]
+      operationId: deleteInstance
+      x-permission: workspace.instances.admin
+      parameters:
+        - name: purgeData
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '202': { description: 已接受（发 instance.deleted） }
+
+  # ---------------- 管理：节点 ----------------
+  /admin/nodes:
+    get:
+      tags: [admin-nodes]
+      operationId: listNodes
+      x-permission: workspace.nodes.read
+      responses:
+        '200':
+          description: 节点
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Node' } }
+                required: [items]
+  /admin/nodes/{nodeId}:
+    parameters:
+      - $ref: '#/components/parameters/NodeId'
+    get:
+      tags: [admin-nodes]
+      operationId: getNode
+      x-permission: workspace.nodes.read
+      responses:
+        '200':
+          description: 节点
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+        '404': { $ref: 'common.yaml#/components/responses/NotFound' }
+    patch:
+      tags: [admin-nodes]
+      operationId: updateNode
+      x-permission: workspace.nodes.admin
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                labels: { type: object, additionalProperties: { type: string } }
+                schedulable: { type: boolean }
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+    delete:
+      tags: [admin-nodes]
+      operationId: revokeNode
+      x-permission: workspace.nodes.admin
+      description: 吊销节点证书。节点上还有实例时 409 workspace.node_not_empty（先 drain 并迁走）。
+      responses:
+        '204': { description: 已吊销 }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+  /admin/nodes/{nodeId}/drain:
+    parameters:
+      - $ref: '#/components/parameters/NodeId'
+    post:
+      tags: [admin-nodes]
+      operationId: drainNode
+      x-permission: workspace.nodes.admin
+      description: 不再调度新实例到这个节点；已有实例在空闲时迁走。
+      responses:
+        '202':
+          description: 已接受
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+  /admin/join-tokens:
+    get:
+      tags: [admin-nodes]
+      operationId: listJoinTokens
+      x-permission: workspace.nodes.admin
+      responses:
+        '200':
+          description: 未用、未过期的入网令牌（不含令牌值）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/JoinToken' } }
+                required: [items]
+    post:
+      tags: [admin-nodes]
+      operationId: createJoinToken
+      x-permission: workspace.nodes.admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                ttlMinutes: { type: integer, minimum: 5, maximum: 1440, default: 60 }
+      responses:
+        '201':
+          description: 已创建。token 和 command 只返回这一次
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/JoinToken' }
+                  - type: object
+                    properties:
+                      token: { type: string }
+                      caSha256: { type: string, description: 平台 CA 证书的 SHA-256 指纹（十六进制）。 }
+                      command: { type: string, description: '例如 `auriga-agent join --server https://… --token … --ca-sha256 …`。' }
+                    required: [token, caSha256, command]
+  /admin/join-tokens/{tokenId}:
+    delete:
+      tags: [admin-nodes]
+      operationId: deleteJoinToken
+      x-permission: workspace.nodes.admin
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+      responses:
+        '204': { description: 已作废 }
+
+  # ---------------- 管理：DSH 运行时 ----------------
+  /admin/runtimes:
+    get:
+      tags: [admin-runtimes]
+      operationId: listRuntimes
+      x-permission: workspace.runtimes.read
+      responses:
+        '200':
+          description: 可用的 DSH 运行时制品和默认版本
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  defaultVersion: { type: string }
+                  items: { type: array, items: { $ref: '#/components/schemas/Runtime' } }
+                required: [defaultVersion, items]
+  /admin/runtimes/default:
+    put:
+      tags: [admin-runtimes]
+      operationId: setDefaultRuntime
+      x-permission: workspace.runtimes.write
+      description: 切换默认 DSH 版本。已有实例的规格代数加一并标为 pendingRestart，按灰度策略在空闲时重启。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { version: { type: string } }, required: [version] }
+      responses:
+        '204': { description: 已切换 }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+
+  # ---------------- 实例里的插件调用（实例令牌） ----------------
+  /instance/self:
+    get:
+      tags: [instance-api]
+      operationId: getInstanceSelf
+      security: [{ instanceToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/AurigaProtocol'
+      responses:
+        '200':
+          description: 本实例的身份和平台信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  instanceId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+                  ownerId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+                  tenantId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+                  generation: { type: integer }
+                  protocol: { $ref: '#/components/schemas/ProtocolInfo' }
+                required: [instanceId, ownerId, tenantId, generation, protocol]
+        '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '426': { $ref: '#/components/responses/ProtocolUnsupported' }
+  /instance/heartbeat:
+    post:
+      tags: [instance-api]
+      operationId: postInstanceHeartbeat
+      summary: 插件上报活动（每 30 秒，以及计数变化时）
+      security: [{ instanceToken: [] }]
+      parameters:
+        - $ref: '#/components/parameters/AurigaProtocol'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HeartbeatRequest' }
+      responses:
+        '200':
+          description: 已收到
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeartbeatResponse' }
+        '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '426': { $ref: '#/components/responses/ProtocolUnsupported' }
+
+  # ---------------- 连接模式（设备令牌） ----------------
+  /connect/manifest:
+    get:
+      tags: [connect]
+      operationId: getConnectManifest
+      summary: 连接模式插件的接入清单
+      description: 需要 ptyp=device 的访问令牌（设备授权流程获得）。
+      parameters:
+        - $ref: '#/components/parameters/AurigaProtocol'
+      responses:
+        '200':
+          description: 清单
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectManifest' }
+        '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '426': { $ref: '#/components/responses/ProtocolUnsupported' }
+
+components:
+  parameters:
+    InstanceId:
+      name: instanceId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema: { $ref: 'common.yaml#/components/schemas/Uuid' }
+    AurigaProtocol:
+      name: Auriga-Protocol
+      in: header
+      required: true
+      description: 插件协议主版本。
+      schema: { type: integer, minimum: 1 }
+  responses:
+    ProtocolUnsupported:
+      description: 插件协议版本过旧（plugin.protocol_unsupported），params 里有 current 和 minSupported
+      content:
+        application/problem+json:
+          schema: { $ref: 'common.yaml#/components/schemas/Problem' }
+  securitySchemes:
+    bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
+    instanceToken: { $ref: 'common.yaml#/components/securitySchemes/instanceToken' }
+  schemas:
+    InstancePhase:
+      type: string
+      description: 与 NodeControl 的 InstancePhase 对应；scheduling 是还没分配到节点。
+      enum: [scheduling, absent, preparing, migrating, starting, running, pending_restart, stopping, stopped, deleting, failed]
+    Resources:
+      type: object
+      properties:
+        cpuMillis: { type: integer, minimum: 100 }
+        memoryMb: { type: integer, minimum: 256 }
+        diskGb: { type: integer, minimum: 1 }
+    Instance:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        tenantId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        ownerId: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        name: { type: string }
+        runtime: { type: string, enum: [docker, linux_process, windows_process] }
+        desired: { type: string, enum: [running, stopped] }
+        phase: { $ref: '#/components/schemas/InstancePhase' }
+        ready: { type: boolean }
+        generation: { type: integer }
+        observedGeneration: { type: integer }
+        pendingRestart: { type: boolean }
+        pendingRestartReasons: { type: array, items: { type: string, enum: [dsh_version, plugins, config, resources] } }
+        alwaysOn: { type: boolean }
+        dshVersion: { type: string }
+        resources: { $ref: '#/components/schemas/Resources' }
+        node:
+          type: [object, 'null']
+          properties:
+            id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+            name: { type: string }
+          required: [id, name]
+        error:
+          type: [object, 'null']
+          properties:
+            code: { type: string }
+            message: { type: string }
+            attempts: { type: integer }
+          required: [code]
+        lastActivityAt: { type: string, format: date-time }
+        idleStopAt: { type: string, format: date-time, description: 按当前闲置状态预计的回收时间。 }
+        nextWakeAt: { type: string, format: date-time }
+        entryUrl: { type: string, description: '浏览器入口，形如 `/i/<实例 id>/`。' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, tenantId, ownerId, name, runtime, desired, phase, ready, generation, observedGeneration, pendingRestart, alwaysOn, dshVersion, resources, node, error, entryUrl, createdAt, updatedAt]
+    OpenResult:
+      type: object
+      properties:
+        instance: { $ref: '#/components/schemas/Instance' }
+        created: { type: boolean }
+      required: [instance, created]
+    Node:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        name: { type: string }
+        hostname: { type: string }
+        os: { type: string, enum: [linux, windows] }
+        arch: { type: string, enum: [amd64, arm64] }
+        agentVersion: { type: string }
+        drivers: { type: array, items: { type: string, enum: [docker, linux_process, windows_process] } }
+        status: { type: string, enum: [online, offline, draining, revoked] }
+        schedulable: { type: boolean }
+        labels: { type: object, additionalProperties: { type: string } }
+        capacity:
+          type: object
+          properties:
+            cpuMillis: { type: integer }
+            memoryMb: { type: integer }
+            diskGb: { type: integer }
+            maxInstances: { type: integer }
+        usage:
+          type: object
+          properties:
+            cpuMillisUsed: { type: integer }
+            memoryMbUsed: { type: integer }
+            diskGbUsed: { type: integer }
+            instancesRunning: { type: integer }
+            instancesTotal: { type: integer }
+        clockSkewMs: { type: integer, description: 绝对值超过 5000 时管理台告警。 }
+        lastSeenAt: { type: string, format: date-time }
+        certificateExpiresAt: { type: string, format: date-time }
+        joinedAt: { type: string, format: date-time }
+      required: [id, name, hostname, os, arch, agentVersion, drivers, status, schedulable, labels, capacity, joinedAt]
+    JoinToken:
+      type: object
+      properties:
+        id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        name: { type: string }
+        expiresAt: { type: string, format: date-time }
+        createdBy: { $ref: 'common.yaml#/components/schemas/Uuid' }
+        createdAt: { type: string, format: date-time }
+      required: [id, expiresAt, createdBy, createdAt]
+    Runtime:
+      type: object
+      properties:
+        version: { type: string, description: DSH 版本。 }
+        artifacts:
+          type: array
+          items:
+            type: object
+            properties:
+              artifactId: { type: string }
+              os: { type: string, enum: [linux, windows] }
+              arch: { type: string, enum: [amd64, arm64] }
+              digest: { type: string }
+              sizeBytes: { type: integer }
+              image: { type: string, description: Docker 驱动的实例镜像（带 digest）。 }
+            required: [artifactId, os, arch, digest]
+        instances: { type: integer, description: 正在使用该版本的实例数。 }
+        createdAt: { type: string, format: date-time }
+      required: [version, artifacts, instances, createdAt]
+    ProtocolInfo:
+      type: object
+      properties:
+        current: { type: integer }
+        minSupported: { type: integer }
+      required: [current, minSupported]
+    HeartbeatRequest:
+      type: object
+      properties:
+        pluginVersion: { type: string }
+        dshVersion: { type: string }
+        activity:
+          type: object
+          description: 插件看到的活动；workspace 另外合并节点代理观测到的 CPU 活动。四个条件都为空闲才算闲置。
+          properties:
+            runningTurns: { type: integer, minimum: 0, description: 正在执行的对话轮次。 }
+            openTerminals: { type: integer, minimum: 0 }
+            activeImBots: { type: integer, minimum: 0, description: 在线的 IM 机器人连接。 }
+            connectedClients: { type: integer, minimum: 0, description: 打开着的浏览器 / 桌面端连接。 }
+            lastInteractionAt: { type: string, format: date-time, description: 最近一次用户操作。 }
+          required: [runningTurns, openTerminals, activeImBots, connectedClients]
+        health:
+          type: object
+          properties:
+            ok: { type: boolean }
+            problems: { type: array, items: { type: string } }
+          required: [ok]
+      required: [pluginVersion, dshVersion, activity, health]
+    HeartbeatResponse:
+      type: object
+      properties:
+        serverTime: { type: string, format: date-time }
+        protocol: { $ref: '#/components/schemas/ProtocolInfo' }
+        nextHeartbeatSeconds: { type: integer, default: 30 }
+        pendingRestart: { type: boolean, description: 有待重启的变更，插件可以在界面提示用户。 }
+      required: [serverTime, protocol, nextHeartbeatSeconds]
+    ConnectManifest:
+      type: object
+      properties:
+        protocol: { $ref: '#/components/schemas/ProtocolInfo' }
+        account:
+          type: object
+          properties:
+            id: { $ref: 'common.yaml#/components/schemas/Uuid' }
+            displayName: { type: string }
+            tenantName: { type: string }
+          required: [id, displayName, tenantName]
+        mcpServers:
+          type: object
+          description: '键是写进 DSH 配置的名字。用访问令牌鉴权（Authorization: Bearer）。'
+          additionalProperties:
+            type: object
+            properties:
+              url: { type: string, format: uri }
+            required: [url]
+        modelProviders:
+          type: object
+          description: 键是写进 DSH 配置的名字。OpenAI 兼容接口，用访问令牌鉴权。
+          additionalProperties:
+            type: object
+            properties:
+              baseUrl: { type: string, format: uri }
+              models:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    displayName: { type: string }
+                    contextWindow: { type: integer }
+                  required: [id]
+            required: [baseUrl, models]
+        panel:
+          type: object
+          properties:
+            manifestUrl: { type: string, format: uri }
+            keys:
+              type: array
+              description: 面板签名公钥（JWKS 子集，同 identity-keys.schema.json 的 keys）。
+              items: { type: object }
+          required: [manifestUrl, keys]
+      required: [protocol, account, mcpServers, modelProviders, panel]

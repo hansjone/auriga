@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NATS KV auriga-routes 的值",
+  "description": "键：实例 id。workspace 在实例调度、启停、迁移时写入，删除实例时删除；edge 只读，用来把 `/i/<实例 id>/` 反代到对应节点代理的 ingress。",
+  "type": "object",
+  "properties": {
+    "instanceId": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "ownerId": { "description": "只有主人能访问；edge 在签身份头前先检查会话的账号等于它。", "type": "string", "format": "uuid" },
+    "nodeId": { "type": "string", "format": "uuid" },
+    "ingress": { "description": "节点代理 ingress 地址：`https://<主机>:<端口>`，单机时 `unix:///…` 或 `npipe:////./pipe/…`。", "type": "string" },
+    "state": { "description": "edge 据此决定是直接反代、显示启动页还是触发冷启动。", "enum": ["running", "starting", "stopped", "failed"] },
+    "generation": { "type": "integer", "minimum": 0 },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "required": ["instanceId", "tenantId", "ownerId", "nodeId", "ingress", "state", "generation", "updatedAt"],
+  "additionalProperties": false
+}

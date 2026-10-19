@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NATS KV auriga-sessions 的值",
+  "description": "键：cookie 原值的 SHA-256（小写十六进制）。iam 在登录、续期、换新访问令牌时写入，吊销时删除；edge 只读，没命中再调 iam SessionService.IntrospectSession。KV 条目的 TTL 等于会话的闲置过期时间。",
+  "type": "object",
+  "properties": {
+    "sessionId": { "type": "string", "format": "uuid" },
+    "accountId": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "audience": { "enum": ["portal", "admin"] },
+    "accessToken": { "description": "当前可用的访问令牌（JWT）。剩余有效期不足 60 秒时 edge 调 IntrospectSession 换新。", "type": "string" },
+    "accessTokenExpiresAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "description": "会话绝对过期时间。", "type": "string", "format": "date-time" },
+    "idleExpiresAt": { "type": "string", "format": "date-time" },
+    "csrfHash": { "description": "该会话 CSRF 令牌的 SHA-256，edge 用来校验 X-Auriga-CSRF。", "type": "string" }
+  },
+  "required": ["sessionId", "accountId", "tenantId", "audience", "accessToken", "accessTokenExpiresAt", "expiresAt", "idleExpiresAt", "csrfHash"],
+  "additionalProperties": false
+}

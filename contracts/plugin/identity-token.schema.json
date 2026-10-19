@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auriga-Identity 身份头 v1",
+  "description": "edge 签发、实例里的插件校验的 JWS（紧凑格式，EdDSA / Ed25519）。校验规则见 plugin/README.md 第 2 节。",
+  "$defs": {
+    "Header": {
+      "type": "object",
+      "properties": {
+        "alg": { "const": "EdDSA" },
+        "kid": { "type": "string", "minLength": 1 },
+        "typ": { "const": "auriga-id+jwt" }
+      },
+      "required": ["alg", "kid", "typ"]
+    },
+    "Claims": {
+      "type": "object",
+      "properties": {
+        "iss": { "const": "auriga-edge" },
+        "aud": { "description": "实例 id。", "type": "string", "format": "uuid" },
+        "sub": { "description": "账号 id，必须等于实例主人。", "type": "string", "format": "uuid" },
+        "tid": { "type": "string", "format": "uuid" },
+        "sid": { "description": "浏览器会话 id。", "type": "string", "format": "uuid" },
+        "name": { "description": "显示名（仅用于界面）。", "type": "string" },
+        "mtyp": { "enum": ["member", "external"] },
+        "iat": { "type": "integer" },
+        "exp": { "description": "不超过 iat + 60。", "type": "integer" },
+        "jti": { "type": "string" },
+        "htm": { "description": "HTTP 方法（WebSocket 升级为 GET）。", "type": "string" },
+        "htu": { "description": "实例看到的请求路径，不含查询串。", "type": "string" },
+        "pv": { "description": "插件协议主版本。", "const": 1 }
+      },
+      "required": ["iss", "aud", "sub", "tid", "sid", "iat", "exp", "jti", "htm", "htu", "pv"]
+    }
+  }
+}

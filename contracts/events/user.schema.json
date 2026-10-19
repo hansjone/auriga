@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "user.* 事件（由 org 发布）",
+  "description": "成员（用户）在租户里的生命周期。userId 与 iam 账号 id 相同。actorId 是操作人，系统自动操作时为 null。",
+  "$defs": {
+    "Actor": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "MemberSnapshot": {
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "format": "uuid" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "memberType": { "enum": ["member", "external"] },
+        "status": { "enum": ["active", "disabled", "offboarded"] },
+        "groupIds": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+        "roleKeys": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["userId", "displayName", "memberType", "status", "groupIds", "roleKeys"],
+      "additionalProperties": false
+    },
+    "UserCreated": {
+      "description": "type `user.created`：成员建立（兑换邀请、自动开通、管理员添加）。",
+      "type": "object",
+      "properties": {
+        "member": { "$ref": "#/$defs/MemberSnapshot" },
+        "via": { "enum": ["invitation", "auto_provision", "admin", "import"] },
+        "invitationId": { "type": "string", "format": "uuid" },
+        "actorId": { "$ref": "#/$defs/Actor" }
+      },
+      "required": ["member", "via", "actorId"],
+      "additionalProperties": false
+    },
+    "UserUpdated": {
+      "description": "type `user.updated`：资料、类型、组变化。带完整快照和变化的字段名。",
+      "type": "object",
+      "properties": {
+        "member": { "$ref": "#/$defs/MemberSnapshot" },
+        "changed": { "type": "array", "items": { "enum": ["displayName", "email", "memberType", "groupIds"] }, "minItems": 1 },
+        "actorId": { "$ref": "#/$defs/Actor" }
+      },
+      "required": ["member", "changed", "actorId"],
+      "additionalProperties": false
+    },
+    "UserDisabled": {
+      "description": "type `user.disabled`：停用。iam 吊销会话和设备凭据，workspace 停实例，edge 清缓存。",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "format": "uuid" },
+        "reason": { "type": "string" },
+        "actorId": { "$ref": "#/$defs/Actor" }
+      },
+      "required": ["userId", "actorId"],
+      "additionalProperties": false
+    },
+    "UserEnabled": {
+      "description": "type `user.enabled`：重新启用。",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "format": "uuid" },
+        "actorId": { "$ref": "#/$defs/Actor" }
+      },
+      "required": ["userId", "actorId"],
+      "additionalProperties": false
+    },
+    "UserOffboarded": {
+      "description": "type `user.offboarded`：离职。除 user.disabled 的效果外，resource 转交发布内容，ops 启动离职流程（导出、归档）。",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "format": "uuid" },
+        "handoverTo": { "description": "接手人。", "type": ["string", "null"], "format": "uuid" },
+        "reason": { "type": "string" },
+        "actorId": { "$ref": "#/$defs/Actor" }
+      },
+      "required": ["userId", "handoverTo", "actorId"],
+      "additionalProperties": false
+    },
+    "UserDeleted": {
+      "description": "type `user.deleted`：数据删除流程完成后发出，各服务删除或匿名化本地副本。",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "format": "uuid" },
+        "actorId": { "$ref": "#/$defs/Actor" }
+      },
+      "required": ["userId", "actorId"],
+      "additionalProperties": false
+    },
+    "UserPermissionsChanged": {
+      "description": "type `user.permissions_changed`：角色绑定或所属组变化导致有效权限变化。iam 让该用户现有的访问令牌尽快刷新（不等 5 分钟过期）。",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "format": "uuid" },
+        "roleKeys": { "type": "array", "items": { "type": "string" } },
+        "actorId": { "$ref": "#/$defs/Actor" }
+      },
+      "required": ["userId", "roleKeys", "actorId"],
+      "additionalProperties": false
+    }
+  }
+}

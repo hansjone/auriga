@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: Auriga common components
+  version: 1.0.0
+  description: 各服务 OpenAPI 共用的组件。约定见 contracts/README.md。
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+paths: {}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: iam 签发的访问令牌（ES256）。浏览器请求由 edge 用会话换成访问令牌后转给服务。
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: auriga_session
+      description: 门户会话 cookie，只在 edge 上校验。管理台用 auriga_admin_session。
+    instanceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: 实例令牌（`ait_` 开头），只能调用 `/api/workspace/v1/instance/**`。
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: 上一页响应里的 nextCursor。
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 128 }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: 资源的 ETag；不匹配返回 412。
+      schema: { type: string }
+  headers:
+    ETag:
+      description: 资源版本。
+      schema: { type: string }
+    RetryAfter:
+      description: 多少秒后重试。
+      schema: { type: integer }
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    LocalizedText:
+      $ref: '../identity/steps.schema.json#/$defs/LocalizedText'
+    Problem:
+      description: RFC 9457 问题详情。
+      type: object
+      properties:
+        type: { type: string, format: uri-reference, default: about:blank }
+        title: { type: string, description: 英文短标题。 }
+        status: { type: integer }
+        detail: { type: string, description: 按 Accept-Language 返回的说明。 }
+        instance: { type: string, format: uri-reference }
+        code: { type: string, description: '机器可读的错误码，形如 `<域>.<snake_case>`。', examples: [iam.login_tx_expired] }
+        params: { type: object, description: 错误文案里的参数。 }
+        errors:
+          type: array
+          description: 字段级错误（validation_failed 时）。
+          items: { $ref: '#/components/schemas/FieldError' }
+        traceId: { type: string }
+      required: [title, status, code]
+    FieldError:
+      type: object
+      properties:
+        field: { type: string, description: 'JSON Pointer，例如 `/email`。' }
+        code: { type: string }
+        message: { type: string }
+      required: [field, code]
+    Empty:
+      type: object
+      additionalProperties: false
+  responses:
+    BadRequest:
+      description: 请求无效（common.validation_failed 等）。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthenticated:
+      description: 没有登录或凭据无效（common.unauthenticated）。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: 没有权限（common.forbidden 或更具体的码）。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 资源不存在（common.not_found）。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: 状态冲突（common.conflict 等）。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    PreconditionFailed:
+      description: If-Match 不匹配（common.precondition_failed）。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    RateLimited:
+      description: 太频繁（common.rate_limited）。
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }

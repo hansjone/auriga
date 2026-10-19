@@ -1,0 +1,109 @@
+# Auriga 契约（v1）
+
+`contracts/` 是组件之间接口的**唯一来源**（ADR 0015）。Java、Go、TypeScript 类型都从这里生成，不手写；实现和契约不一致时以契约为准。
+
+## 目录
+
+| 路径 | 内容 | 格式 |
+|---|---|---|
+| `openapi/common.yaml` | 公共组件：错误、分页、鉴权方式 | OpenAPI 3.1 |
+| `openapi/iam.yaml` | iam 对外接口：登录事务、会话、本人的身份 / 多因素 / 设备、身份源管理、服务账号 | OpenAPI 3.1 |
+| `openapi/org.yaml` | org 对外接口：租户、成员、组、角色、策略、配额、邀请 | OpenAPI 3.1 |
+| `openapi/workspace.yaml` | workspace 对外接口：实例、节点、入网令牌；实例和连接模式插件调用的接口 | OpenAPI 3.1 |
+| `proto/auriga/node/v1` | workspace ↔ 节点代理：入网、NodeControl 双向流、实例规格 | protobuf（buf） |
+| `proto/auriga/iam/v1`、`proto/auriga/org/v1` | iam、org 的内部 gRPC 接口 | protobuf |
+| `events/` | NATS 事件：信封和 `user.*`、`identity.*`、`instance.*`、`audit.*` | JSON Schema 2020-12 |
+| `identity/` | 身份源步骤协议、连接器描述、远程连接器 HTTP 接口 | JSON Schema、OpenAPI |
+| `plugin/` | 插件协议：身份头、身份头公钥文件、实例环境变量、心跳、设备登录、面板加载 | Markdown、JSON Schema |
+| `auth/` | 访问令牌（JWT）声明 | JSON Schema |
+| `kv/` | NATS KV 里跨服务共享的数据（会话缓存、实例路由） | JSON Schema |
+
+## 版本与兼容
+
+- **主版本**写在路径里：REST 是 `/api/<服务>/v1`，protobuf 包是 `auriga.<域>.v1`，插件协议是 `Auriga-Protocol: 1`，事件用信封的 `dataversion`。
+- 一个主版本内**只做兼容修改**：加可选字段、加接口、加枚举值、加事件类型。不能删字段、改字段含义或类型、把可选改成必填、改 URL。
+- 客户端必须忽略不认识的字段和枚举值（枚举值未知时按"未知"处理，不报错）。
+- 不兼容的修改要开新主版本，旧版本至少保留一个发布周期。插件协议例外：平台同时支持当前和上一个主版本（用户电脑上的插件升级慢）。
+- CI 检查：`buf lint`、`buf breaking`（FILE 级）、OpenAPI lint 和 diff、JSON Schema 校验。
+
+## 通用约定（REST 和事件）
+
+| 项 | 约定 |
+|---|---|
+| ID | UUIDv7，小写带连字符的字符串（`format: uuid`）。账号 id 和成员 id 是同一个值 |
+| 时间 | RFC 3339，UTC，例如 `2026-10-19T08:00:00Z`；时长用整数秒，字段名带 `Seconds` |
+| JSON 命名 | 字段 lowerCamelCase；枚举值小写 snake_case（`pending_restart`） |
+| 分页 | 游标分页：请求 `limit`（默认 50，最大 200）和 `cursor`；响应 `{ "items": [...], "nextCursor": "…" }`，没有下一页时 `nextCursor` 省略 |
+| 错误 | RFC 9457 `application/problem+json`，见 `openapi/common.yaml#/components/schemas/Problem`。`code` 是机器可读的错误码，前端按它显示中英文文案 |
+| 错误码 | `<域>.<snake_case>`，例如 `iam.login_tx_expired`、`org.grant_exceeds_own`。通用码：`common.unauthenticated`、`common.forbidden`、`common.not_found`、`common.validation_failed`、`common.conflict`、`common.precondition_failed`、`common.rate_limited`、`common.internal`、`common.unavailable` |
+| 语言 | 请求头 `Accept-Language`（`zh-CN`、`en`）；`Problem.detail` 和带 `LocalizedText` 的字段按它返回 |
+| 乐观锁 | 可修改的管理类资源返回 `ETag`；`PATCH` / `PUT` 带 `If-Match` 时检查，不匹配返回 412 |
+| 幂等 | 创建类 `POST` 支持 `Idempotency-Key` 请求头，24 小时内同一个键返回同一结果 |
+| 追踪 | edge 生成 `X-Request-Id`，并传播 W3C `traceparent`；服务的日志和审计都带上 |
+
+## 鉴权
+
+| 调用方 | 凭据 | 说明 |
+|---|---|---|
+| 浏览器（门户） | cookie `auriga_session` | 不透明随机值；HttpOnly，SameSite=Lax，有 TLS 时 Secure |
+| 浏览器（管理台，独立源） | cookie `auriga_admin_session` | 同上，只在管理台的源上下发 |
+| 浏览器的写请求 | cookie `auriga_csrf` + 请求头 `X-Auriga-CSRF` | `POST` / `PUT` / `PATCH` / `DELETE` 时 edge 检查：请求头等于 cookie，且它的 SHA-256 等于会话记录里的 `csrfHash`（见 `kv/session.schema.json`） |
+| edge → 业务服务 | `Authorization: Bearer <访问令牌>` | edge 校验会话后换成 iam 签发的访问令牌（JWT，5 分钟，见 `auth/access-token.schema.json`）。业务服务只认 Bearer，不认 cookie |
+| 服务账号、外部系统 | OAuth 2.0 client credentials 换到的访问令牌 | `ptyp=service_account` |
+| 服务 → 服务（gRPC） | 元数据 `authorization: Bearer <服务令牌>` | 合并部署时是本地调用，不经过网络；分开部署时另加 mTLS |
+| DSH 实例 → 平台 | `Authorization: Bearer ait_…`（实例令牌） | 不透明，每实例一个，可吊销；edge 原样转给 workspace 校验 |
+| 平台 → DSH 实例 | 请求头 `Auriga-Identity`（edge 签名的身份头） | 见 `plugin/README.md` |
+| 用户电脑上的插件 | 设备凭据：设备授权流程（RFC 8628）换到的刷新令牌 | 访问令牌 `ptyp=device`、带 `did`；见 `plugin/README.md` |
+| 节点代理 | 节点证书（mTLS） | 入网时用一次性令牌换取，见 `proto/auriga/node/v1/enrollment.proto` |
+
+- 访问令牌签名算法 ES256，iam 在 `/.well-known/openid-configuration` 和 `/oauth2/jwks` 发布公钥；服务自行校验，不回调 iam。
+- 身份头用 Ed25519（EdDSA），密钥由 iam 管理、edge 签名、节点代理把公钥写进实例。
+- OIDC 和 OAuth 2.0 的标准端点（`/oauth2/authorize`、`/oauth2/token`、`/oauth2/device_authorization`、`/oauth2/jwks`、`/userinfo`、`/.well-known/openid-configuration`）由 iam 提供，按标准实现，不在 OpenAPI 里重复定义。
+- 租户：令牌里的 `tid` 决定租户。登录前按访问的主机名解析租户（org `TenantService.ResolveTenantByHost`），私有部署只有一个默认租户。
+
+## 路由（edge 对外）
+
+| 路径前缀 | 转到 |
+|---|---|
+| `/api/iam/v1/`、`/oauth2/`、`/.well-known/`、`/userinfo` | iam |
+| `/api/org/v1/` | org |
+| `/api/workspace/v1/` | workspace |
+| `/i/<实例 id>/` | 节点代理 ingress → DSH 实例（加身份头） |
+| `/panel/` | 团队面板静态文件（见 `plugin/README.md`） |
+| 其他 | 门户 / 管理台静态文件 |
+
+管理台用独立的源（例如 `admin.example.com`），`/api/*/v1/admin/**` 只接受管理台源上的会话。
+
+## NATS
+
+| 名称 | 类型 | 写入方 | 读取方 | 内容 |
+|---|---|---|---|---|
+| `AURIGA_EVENTS` | JetStream 流，主题 `auriga.evt.>` | 各服务（经 outbox） | 各服务 | 业务事件，见 `events/README.md` |
+| `AURIGA_AUDIT` | JetStream 流，主题 `auriga.audit.>` | 各服务（经 outbox） | audit | 审计记录 |
+| `auriga-sessions` | KV | iam | edge | 会话缓存，键是 cookie 值的 SHA-256（小写十六进制），见 `kv/session.schema.json` |
+| `auriga-routes` | KV | workspace | edge | 实例路由，键是实例 id，见 `kv/route.schema.json` |
+
+## 代码生成
+
+| 来源 | Java | Go | TypeScript |
+|---|---|---|---|
+| protobuf | protobuf-java + grpc-java，包 `io.github.hansjone.auriga.contracts.<域>.v1` | protoc-gen-go + protoc-gen-go-grpc，模块 `github.com/hansjone/auriga/infra/gen` | 需要时用 `@bufbuild/protobuf` |
+| OpenAPI | openapi-generator（Spring 接口 + 模型） | 需要时用 oapi-codegen | openapi-typescript |
+| JSON Schema | jsonschema2pojo 或等价工具 | 需要时用 go-jsonschema | json-schema-to-typescript |
+
+生成命令和输出目录由仓库骨架（K1）定；生成的 Go 代码提交进仓库，CI 检查是否最新。
+
+## 校验
+
+```
+buf lint && buf breaking --against <上一版本>          # 在 contracts/ 下
+redocly lint --config redocly.yaml openapi/iam.yaml openapi/org.yaml openapi/workspace.yaml identity/remote-connector.yaml
+```
+
+JSON Schema 用 Ajv（2020-12，strict）编译全部 `*.schema.json`。OpenAPI 生成 Java 前先用 `redocly bundle` 把外部引用打包成单文件；跳转回调端点（`/login/callback/*`）手写，不用生成的接口。
+
+## 修改流程
+
+1. 改契约和改实现放在同一个变更里；
+2. 跑 lint 和兼容性检查；
+3. 不兼容的修改先在 ADR 里说明理由，再开新主版本。

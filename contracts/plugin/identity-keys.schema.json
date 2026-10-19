@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "身份头公钥文件 identity-keys.json v1",
+  "description": "节点代理写进实例的 meta/identity-keys.json（路径在 AURIGA_IDENTITY_KEYS_FILE）。JWKS 子集：只有 Ed25519 公钥。通常是当前 + 下一把两把。",
+  "type": "object",
+  "properties": {
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "kty": { "const": "OKP" },
+          "crv": { "const": "Ed25519" },
+          "x": { "description": "公钥，base64url 无填充。", "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+          "kid": { "type": "string", "minLength": 1 },
+          "alg": { "const": "EdDSA" },
+          "use": { "const": "sig" },
+          "nbf": { "description": "可选：生效时间（Unix 秒）。", "type": "integer" },
+          "exp": { "description": "可选：过期时间（Unix 秒）。", "type": "integer" }
+        },
+        "required": ["kty", "crv", "x", "kid", "alg"]
+      }
+    }
+  },
+  "required": ["keys"]
+}
