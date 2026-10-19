@@ -219,7 +219,8 @@ func TestMissingSession(t *testing.T) {
 
 func TestRateLimit(t *testing.T) {
 	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
-	cfg.RateLimit = RateLimitConfig{RequestsPerSecond: 0, Burst: 1}
+	// Tiny refill so burst=1 is exhausted immediately on the second call.
+	cfg.RateLimit = RateLimitConfig{RequestsPerSecond: 0.0001, Burst: 1}
 	cfg.PublicPathPrefixes = []string{"/api/iam/v1/login/"}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
 	t.Cleanup(upstream.Close)
@@ -295,13 +296,24 @@ func TestIdentitySignAndTicketOnce(t *testing.T) {
 		t.Fatalf("location %s", loc)
 	}
 
+	nonce := ""
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "auriga_open_nonce" || c.Name == "__Host-auriga_open_nonce" {
+			nonce = c.Value
+		}
+	}
+	if nonce == "" {
+		t.Fatal("missing open nonce cookie")
+	}
+
 	req = httptest.NewRequest(http.MethodGet, "http://"+host+"/_auriga/ticket?t="+url.QueryEscape(ticket), nil)
 	req.Host = host
 	req.RemoteAddr = "192.0.2.10:1"
+	req.AddCookie(&http.Cookie{Name: "auriga_open_nonce", Value: nonce})
 	rr = httptest.NewRecorder()
 	gw.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusFound {
-		t.Fatalf("redeem %d", rr.Code)
+		t.Fatalf("redeem %d %s", rr.Code, rr.Body.String())
 	}
 	instCookie := ""
 	for _, c := range rr.Result().Cookies() {
@@ -316,6 +328,7 @@ func TestIdentitySignAndTicketOnce(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "http://"+host+"/_auriga/ticket?t="+url.QueryEscape(ticket), nil)
 	req.Host = host
 	req.RemoteAddr = "192.0.2.10:1"
+	req.AddCookie(&http.Cookie{Name: "auriga_open_nonce", Value: nonce})
 	rr = httptest.NewRecorder()
 	gw.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
@@ -364,10 +377,11 @@ func TestResolveClientIPUnit(t *testing.T) {
 		t.Fatal(got)
 	}
 	r.RemoteAddr = "127.0.0.1:9"
-	r.Header.Del("X-Auriga-Client-IP")
-	r.Header.Set("X-Forwarded-For", "198.51.100.1")
-	if got := ResolveClientIP(r, tp); got != "198.51.100.1" {
-		t.Fatal(got)
+	r.Header.Set("X-Auriga-Client-IP", "203.0.113.9")
+	r.Header.Set("X-Real-IP", "203.0.113.8")
+	r.Header.Set("X-Forwarded-For", "203.0.113.1, 192.0.2.50, 127.0.0.1")
+	if got := ResolveClientIP(r, tp); got != "192.0.2.50" {
+		t.Fatalf("expected rightmost untrusted XFF, got %q", got)
 	}
 }
 

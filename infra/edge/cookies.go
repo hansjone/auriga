@@ -73,3 +73,45 @@ func setInstanceCookie(w http.ResponseWriter, secure bool, value string, maxAge 
 	}
 	http.SetCookie(w, c)
 }
+
+func openNonceCookieBase() string { return "auriga_open_nonce" }
+
+// openNonceCookieDomain returns a Domain that covers portal + instance hosts when using
+// subdomain routing (e.g. i.example.com → example.com). Empty means host-only cookie.
+func openNonceCookieDomain(instanceParentDomain string) string {
+	parent := strings.ToLower(strings.TrimSpace(instanceParentDomain))
+	if parent == "" {
+		return ""
+	}
+	if i := strings.IndexByte(parent, '.'); i > 0 && i+1 < len(parent) {
+		return parent[i+1:]
+	}
+	return parent
+}
+
+func openNonceCookieName(secure bool, domain string) string {
+	if domain == "" && secure {
+		return "__Host-" + openNonceCookieBase()
+	}
+	return openNonceCookieBase()
+}
+
+func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, value string, maxAge int) {
+	c := &http.Cookie{
+		Name:     openNonceCookieName(secure, domain),
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+		Secure:   secure,
+	}
+	if domain != "" {
+		c.Domain = domain
+	}
+	http.SetCookie(w, c)
+}
+
+func clearOpenNonceCookie(w http.ResponseWriter, secure bool, domain string) {
+	setOpenNonceCookie(w, secure, domain, "", -1)
+}

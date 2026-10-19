@@ -50,9 +50,10 @@ var ErrSessionNotFound = fmt.Errorf("session not found")
 
 // MemorySessionStore is an in-memory store for tests and local fallback.
 type MemorySessionStore struct {
-	mu     sync.RWMutex
-	byHash map[string]*Session
-	byID   map[string]*Session
+	mu       sync.RWMutex
+	byHash   map[string]*Session
+	byID     map[string]*Session
+	OnRevoke func(sessionID string) // optional; wired to SessionConnHub
 }
 
 func NewMemorySessionStore() *MemorySessionStore {
@@ -74,12 +75,29 @@ func (m *MemorySessionStore) Put(cookieRaw string, s *Session) {
 
 func (m *MemorySessionStore) Delete(cookieRaw string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var sid string
 	h := HashCookie(cookieRaw)
 	if s := m.byHash[h]; s != nil {
+		sid = s.SessionID
 		delete(m.byID, s.SessionID)
 	}
 	delete(m.byHash, h)
+	m.mu.Unlock()
+	if sid != "" && m.OnRevoke != nil {
+		m.OnRevoke(sid)
+	}
+}
+
+// Revoke marks the session revoked (if present) and notifies OnRevoke.
+func (m *MemorySessionStore) Revoke(sessionID string) {
+	m.mu.Lock()
+	if s := m.byID[sessionID]; s != nil {
+		s.Revoked = true
+	}
+	m.mu.Unlock()
+	if m.OnRevoke != nil {
+		m.OnRevoke(sessionID)
+	}
 }
 
 func (m *MemorySessionStore) Get(_ context.Context, cookieHash string) (*Session, error) {

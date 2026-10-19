@@ -71,7 +71,8 @@ JSON 文件 + 环境变量覆盖。公开仓示例一律用 `example.com` / `192
 - Host = `adminHost` → 读管理台会话（`__Host-auriga_admin_session` / `auriga_admin_session`）。
 - `/api/*/v1/admin/**` **只**接受管理台 Host；门户访问返回 **403**（`edge.admin_host_required`）。
 - 不接受客户端用头/查询覆盖 tenant 或 audience。
-- 实例：`<instanceId>.<instanceParentDomain>`，或只有 IP 时的同源 `/i/<instanceId>/…`（弱隔离，见 ADR 0020）。
+- 实例：`<instanceId>.<instanceParentDomain>`；仅当**未**配置 `instanceParentDomain` 且 Host 为门户时，才启用同源 `/i/<instanceId>/…`（弱隔离，见 ADR 0020）。管理台 Host 上 `/i/` 一律 404。
+- 路由前会拒绝含 `..`、`//`、`;`、编码斜杠（`%2f`/`%5c`）等未规范化路径（400 `edge.bad_path`）。
 
 ## 会话与 CSRF
 
@@ -79,17 +80,18 @@ JSON 文件 + 环境变量覆盖。公开仓示例一律用 `example.com` / `192
 
 校验：audience、未过期、未吊销。写请求（POST/PUT/PATCH/DELETE）且非公开路径：要求 `X-Auriga-CSRF` = CSRF cookie，且其 SHA-256 = 会话 `csrfHash`。
 
-转发业务 API：删除名字含 `auriga_` 的 cookie；设置 `Authorization: Bearer <accessToken>`；传播/生成 `X-Request-Id` 与 `traceparent`；覆盖写入 `X-Auriga-Client-IP`。
+转发业务 API：删除名字含 `auriga_` 的 cookie；设置 `Authorization: Bearer <accessToken>`（**公开路径上的写请求不注入**会话 Bearer）；传播/生成 `X-Request-Id` 与 `traceparent`（非法值会丢弃并重生成）；覆盖写入 `X-Auriga-Client-IP`。API 请求体上限 1 MiB。
 
-公开前缀默认：`/oauth2/`、`/.well-known/`、`/userinfo`、`/api/iam/v1/login/`。其余 API 无会话且无客户端 Bearer → **401** `application/problem+json`。
+公开前缀默认：`/oauth2/`、`/.well-known/`、`/userinfo`（精确，不含 `/userinfoXYZ`）、`/api/iam/v1/login/`。其余 API 无会话且无客户端 Bearer → **401** `application/problem+json`。
 
 KV 未命中：预留 `SessionIntrospector`（默认失败，不假造成功）；待 iam gRPC Introspect 接线。
 
 ## 可信代理与客户端 IP
 
-仅当 `RemoteAddr` ∈ `trustedProxies` 时采信 `X-Auriga-Client-IP` / `X-Real-IP` / `X-Forwarded-For`（取第一跳）。
-非可信直连：用真实 RemoteAddr，**忽略**客户端伪造的 `X-Auriga-Client-IP`。
-发往后端时始终覆盖设置该头。
+仅当 `RemoteAddr` ∈ `trustedProxies` 时采信 `X-Forwarded-For`：从右向左取第一个**不在**可信列表中的地址。
+不采信客户端可带的 `X-Auriga-Client-IP` / `X-Real-IP`（前置代理须覆盖或剥离它们）。
+非可信直连：用真实 RemoteAddr。发往后端时始终覆盖设置 `X-Auriga-Client-IP`。
+`trustedProxies` 拒绝 `0.0.0.0/0` / `::/0`；`rateLimit.requestsPerSecond` 必须 `> 0`。
 
 ## 身份头密钥文件
 
@@ -119,11 +121,14 @@ JWKS 子集（含 `d` 私钥种子，选 `state=CURRENT`）：
 
 ## `/open` 与实例骨架
 
-1. 门户 `GET|POST /open/<instanceId>`：校验门户会话 + 所有权（`RouteStore.ownerId`）→ 一次性票据（60s、单次、绑 sid+instance）→ 302 到实例源 `/_auriga/ticket?t=…`。
-2. 兑换票据 → 设置实例 cookie → 302 `/`。
-3. 实例 Host 或 `/i/<id>/…`：验实例 cookie + 门户会话仍有效 → 签身份头 → 反代到路由里的 `ingress`（测试用 `httptest`）。
+1. 门户 `GET|POST /open/<instanceId>`：校验门户会话 + 所有权 → 下发一次性 `auriga_open_nonce` cookie（有父域时 Domain 覆盖 portal+实例）→ 票据存 nonce 哈希 → 302 到实例 `/_auriga/ticket?t=…`。
+2. 兑换票据：校验 nonce cookie 与票据哈希一致（不能只靠 Sec-Fetch-Site）→ binding 有效期对齐会话 `ExpiresAt` → 设置实例 cookie → 302 `/`。
+3. 实例 Host（或无父域时的门户 `/i/<id>/…`）：验实例 cookie + 门户会话仍有效 → 签身份头 → 反代；剥 `auriga_*` / `__Host-*` Set-Cookie。实例路径只拒 `..`，不套用 portal 的严格规范化（允许 `%2f` 等应用路径）。
+4. WebSocket：`Upgrade: websocket` 才做 Origin 检查；portal/admin API 只接受自身 Origin；实例只接受该实例自己的 Origin。会话附着到长连接，吊销/到期会 cancel。
 
-**不做**（留给 E2）：经节点代理 ingress 的生产长连接 / WebSocket / mTLS 会话、冷启动页、NATS `auriga-routes` 实时同步。
+内存票据用完即删；限流 bucket 定期/满额淘汰，IPv6 按 /64 归并。`ReadTimeout` 不设（大上传）；实例反代无短 `ResponseHeaderTimeout`；1MiB body 上限仅 `/api/`。
+
+**不做**（留给 E2）：经节点代理 ingress 的生产 mTLS、冷启动页、NATS `auriga-routes` 实时同步。
 
 ## TLS
 

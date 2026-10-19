@@ -8,7 +8,6 @@ import (
 
 const headerAurigaClientIP = "X-Auriga-Client-IP"
 const headerXForwardedFor = "X-Forwarded-For"
-const headerXRealIP = "X-Real-IP"
 
 // TrustedProxies decides when to honor forwarded client address headers.
 type TrustedProxies struct {
@@ -60,8 +59,9 @@ func remoteIP(r *http.Request) net.IP {
 }
 
 // ResolveClientIP returns the client IP edge should use and propagate.
-// Only peers in trustedProxies may supply X-Forwarded-For / X-Real-IP / X-Auriga-Client-IP.
-// Untrusted peers' forged X-Auriga-Client-IP is ignored; RemoteAddr is used.
+// Only peers in trustedProxies may supply X-Forwarded-For. Client-supplied
+// X-Auriga-Client-IP / X-Real-IP are never trusted (proxies must not forward them).
+// From XFF, walk right-to-left and take the first address not in the trusted set.
 func ResolveClientIP(r *http.Request, trusted *TrustedProxies) string {
 	rip := remoteIP(r)
 	if rip == nil {
@@ -70,16 +70,20 @@ func ResolveClientIP(r *http.Request, trusted *TrustedProxies) string {
 	if trusted == nil || !trusted.contains(rip) {
 		return rip.String()
 	}
-	if v := strings.TrimSpace(r.Header.Get(headerAurigaClientIP)); v != "" && isIPLiteral(v) {
-		return normalizeIP(v)
-	}
-	if v := strings.TrimSpace(r.Header.Get(headerXRealIP)); v != "" && isIPLiteral(v) {
-		return normalizeIP(v)
-	}
 	if v := strings.TrimSpace(r.Header.Get(headerXForwardedFor)); v != "" {
-		first := strings.TrimSpace(strings.Split(v, ",")[0])
-		if isIPLiteral(first) {
-			return normalizeIP(first)
+		parts := strings.Split(v, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			cand := strings.TrimSpace(parts[i])
+			if !isIPLiteral(cand) {
+				continue
+			}
+			ip := net.ParseIP(cand)
+			if ip == nil {
+				continue
+			}
+			if !trusted.contains(ip) {
+				return normalizeIP(cand)
+			}
 		}
 	}
 	return rip.String()
@@ -104,4 +108,17 @@ func SetClientIPHeader(h http.Header, clientIP string) {
 	if clientIP != "" {
 		h.Set(headerAurigaClientIP, clientIP)
 	}
+}
+
+// rateLimitKey folds IPv6 addresses to their /64 network for bucket keys.
+func rateLimitKey(ip string) string {
+	parsed := net.ParseIP(strings.TrimSpace(ip))
+	if parsed == nil {
+		return ip
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		return v4.String()
+	}
+	masked := parsed.Mask(net.CIDRMask(64, 128))
+	return masked.String() + "/64"
 }
