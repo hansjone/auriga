@@ -1,6 +1,6 @@
 # 节点代理（agent）
 
-`infra/agent` 是装在运行 DSH 实例的主机上的 Go 程序（任务 A1 骨架）。进程名 `auriga-agent`。
+`infra/agent` 是装在运行 DSH 实例的主机上的 Go 程序。进程名 `auriga-agent`。
 
 详细设计见 `docs/architecture/node-agent.zh.md`；契约见 `contracts/proto/auriga/node/v1/`。
 
@@ -28,7 +28,7 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 |---|---|---|
 | `server` | `AURIGA_AGENT_SERVER` | 入网用的平台 URL（生产须 https/grpcs） |
 | `dataRoot` | `AURIGA_AGENT_DATA_ROOT` | 数据根；Linux 默认 `/var/lib/auriga`，Windows 默认 `%ProgramData%\auriga` |
-| `drivers` | `AURIGA_AGENT_DRIVERS` | 逗号分隔；A1 运行时用假驱动 `fake` |
+| `drivers` | `AURIGA_AGENT_DRIVERS` | 逗号分隔；`docker`（默认，含 Podman API）或 `fake`（测试） |
 | `maxConcurrentPrepare` | `AURIGA_AGENT_MAX_CONCURRENT_PREPARE` | 同时准备/启动上限，默认 4 |
 | `controlEndpoint` | `AURIGA_AGENT_CONTROL_ENDPOINT` | 覆盖入网返回的 NodeControl 地址 |
 | `agentVersion` | `AURIGA_AGENT_VERSION` | Hello / Join 上报的版本 |
@@ -36,26 +36,37 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 
 配置项前缀约定：`auriga.agent.*` / `AURIGA_AGENT_*`。
 
+未设置 `drivers` / `AURIGA_AGENT_DRIVERS` 且未提供 JSON 配置时，`run` 使用 **Docker** 驱动。本地/单测可设 `AURIGA_AGENT_DRIVERS=fake`。
+
+Docker Engine 地址遵循 `DOCKER_HOST`（`unix:///var/run/docker.sock`、`npipe:////./pipe/docker_engine`、`tcp://127.0.0.1:2375`）。节点代理通过 Engine HTTP API 操作，不调用 `docker` CLI。
+
 ## 目录布局（`<dataRoot>`）
 
 ```
 <dataRoot>/
 ├─ agent/          state.db、node.key、node.crt、ca.crt、sealing.key
 ├─ artifacts/
+│  └─ sha256/<hex> 内容寻址制品（只读）；refs.json 引用计数
 ├─ instances/<id>/
+│  ├─ home/        .dsh .memwiki .auriga workspace（绑进容器 /home/dsh）
+│  ├─ meta/        package.json、cordis.patch.yml、env、identity-keys.json、instance.token、schema-version
+│  └─ trash/
 └─ backups/
 ```
 
 各凭据文件先写临时文件并同步，再原子 rename；顺序为 `node.key`、`sealing.key`、`ca.crt`、`node.crt`，防止私钥写入失败时发布新证书并搭配旧私钥。这不是多文件事务：强制重新入网中断仍可能留下新私钥配旧证书，需要重新入网恢复。Unix `0600`；Windows 从当前进程令牌取得用户 SID，设置受保护的 DACL，仅授予 SYSTEM、Administrators、当前用户完整权限，不保留继承项。
 
+`instance.token` / `ai-gateway.token` 仅写在 `meta/`，权限收紧（0600），内容不进日志。
+
 运行时由单个续期协程立即检查一次，此后默认每小时检查；重连不另行发起续期。失败以连接配置的最小退避（默认 1 秒）起步，指数增长到 30 分钟并加抖动，达到上限后仍持续退避；成功后恢复检查间隔。续期成功写盘，下次建立会话时重新加载新证书。退出前等待续期协程结束，再关闭状态存储。
 
-## A1 范围
+## A2 范围
 
-- 入网（`join`）、运行中按有效期（剩 1/3 或默认 7 天内）定时续期，失败记日志并退避重试
-- mTLS 会话：Hello、Inventory、心跳、断线指数退避（带抖动）重连、Welcome 超时、重连后全量对账
-- 本地状态（bbolt）：期望规格 + 实际状态，重启可恢复；每次加载核对 CA 指纹
-- 对账状态机 + **假驱动**（内存模拟 Ensure/Start/Stop；真 Docker 留给 A2）
+- **Docker / Podman 驱动**：Engine API；非 root（宿主机 uid 自 200000 映射）、只读根、`cap-drop ALL`、`no-new-privileges`、内存/CPU/进程上限；每实例 internal 网络；标签 `auriga.instance` / `auriga.generation`
+- **制品**：按 URL + `sha256:…` 下载校验缓存，失败不保留；引用计数 + 7 天 GC
+- **配置渲染**：确定性写出 profile / cordis / env / identity-keys / 令牌；HPKE 解封规格内密文
+- **目录**：§8.1 布局、`schema-version` 迁移、软配额统计
+- 假驱动保留给测试；真 Docker 集成测试：`go test -tags docker ./internal/runtime/`
 
 ## 测试
 
@@ -64,8 +75,11 @@ Set-Location infra\agent
 go vet ./...
 go test -count=1 -timeout=10m ./...
 go test -race ./...   # 需要 cgo 和可用的 C 编译器
+go test -tags docker -count=1 ./internal/runtime/   # 需本机 Docker，默认 CI 不跑
 ```
 
 集成测试用 `internal/testutil` 假 workspace（随机端口、`grpc://` + `AllowInsecure`）。CA 指纹 pin 用 `net.Pipe` 测（避免本机杀毒软件劫持 localhost TLS）。
+
+Docker 单元测试用 `httptest` 假 Engine，断言创建容器请求含加固参数。制品测试覆盖哈希不符与下载中断。
 
 续期测试将检查间隔缩短至 10 毫秒，覆盖存活会话中的重复换证、重连凭据加载、失败退避重试，以及缺失/畸形证书、公钥不符、节点身份变化、错误 CA、过期证书均不替换原证书。另覆盖 CA 文件篡改、主机名与 IP SAN 不符、重复入网不修改凭据、保存各阶段失败和临时文件清理。Windows 专用测试读回目录与全部凭据文件的 DACL，逐项核对 SID、权限及禁止继承，包含覆盖保存场景。

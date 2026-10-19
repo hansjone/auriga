@@ -1,3 +1,3 @@
 # storage
 
-Reserved for the node-agent implementation. No behavior is implemented in K1.
+Instance directory layout (`home` / `meta` / `trash`), schema-version migrations, soft disk quota accounting.

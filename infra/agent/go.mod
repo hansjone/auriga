@@ -3,6 +3,7 @@ module github.com/hansjone/auriga/infra/agent
 go 1.27.0
 
 require (
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/hansjone/auriga/infra/gen v0.0.0
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/crypto v0.42.0

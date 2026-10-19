@@ -1,4 +1,4 @@
-// Package runtime defines the instance driver interface and fake implementation.
+// Package runtime defines the instance driver interface and implementations.
 package runtime
 
 import (
@@ -13,14 +13,25 @@ type Caps struct {
 	ReadOnlyRoot     bool
 }
 
-// Spec is the subset of InstanceSpec the driver needs (A1: opaque enough for fake).
+// Spec is the subset of InstanceSpec the driver needs.
 type Spec struct {
 	InstanceID string
 	Generation int64
 	Desired    string // running | stopped
+
+	// Docker / process fields (filled by Preparing driver or tests).
+	Image      string // must be repo@sha256:…
+	CPUMillis  int64
+	MemoryMB   int64
+	PIDs       int64
+	HostUID    int
+	HomeBind   string // host path mounted at /home/dsh
+	ListenPort uint32
+	Env        map[string]string
+	Labels     map[string]string
 }
 
-// Rendered is a placeholder for config render output (filled in A2).
+// Rendered is config render output.
 type Rendered struct {
 	Digest string
 }
