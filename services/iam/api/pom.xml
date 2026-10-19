@@ -8,4 +8,8 @@
     <relativePath>../../../pom.xml</relativePath>
   </parent>
   <artifactId>iam-api</artifactId>
+  <dependencies>
+    <dependency><groupId>tools.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+    <dependency><groupId>io.github.hansjone.auriga</groupId><artifactId>contracts</artifactId><version>${project.version}</version></dependency>
+  </dependencies>
 </project>
