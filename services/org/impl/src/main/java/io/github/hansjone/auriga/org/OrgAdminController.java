@@ -127,7 +127,10 @@ public class OrgAdminController {
                 : UUID.fromString(body.path("parentId").asString()))
             : null;
     return org.updateGroup(
-        groupId, text(body, "name"), text(body, "description"), body.has("parentId") ? parent : null);
+        groupId,
+        text(body, "name"),
+        text(body, "description"),
+        body.has("parentId") ? parent : null);
   }
 
   @DeleteMapping("/groups/{groupId}")

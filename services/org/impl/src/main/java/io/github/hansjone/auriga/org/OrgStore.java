@@ -150,7 +150,12 @@ public final class OrgStore {
   }
 
   public record TenantRow(
-      UUID id, String slug, String displayName, String locale, List<String> hosts, Instant createdAt) {}
+      UUID id,
+      String slug,
+      String displayName,
+      String locale,
+      List<String> hosts,
+      Instant createdAt) {}
 
   public record MemberRow(
       UUID id,

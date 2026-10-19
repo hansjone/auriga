@@ -40,8 +40,7 @@ public final class OrgGrpcServices {
     @Override
     @AuthenticatedOnly
     public void resolveTenantByHost(
-        ResolveTenantByHostRequest request,
-        StreamObserver<ResolveTenantByHostResponse> observer) {
+        ResolveTenantByHostRequest request, StreamObserver<ResolveTenantByHostResponse> observer) {
       OrgStore.TenantRow row = org.resolveTenantByHost(request.getHost());
       observer.onNext(ResolveTenantByHostResponse.newBuilder().setTenant(toProto(row)).build());
       observer.onCompleted();
@@ -97,7 +96,8 @@ public final class OrgGrpcServices {
     }
   }
 
-  public static class AuthorizationGrpc extends AuthorizationServiceGrpc.AuthorizationServiceImplBase {
+  public static class AuthorizationGrpc
+      extends AuthorizationServiceGrpc.AuthorizationServiceImplBase {
     private final OrgService org;
 
     public AuthorizationGrpc(OrgService org) {
@@ -124,8 +124,7 @@ public final class OrgGrpcServices {
 
     @Override
     @AuthenticatedOnly
-    public void checkGrant(
-        CheckGrantRequest request, StreamObserver<CheckGrantResponse> observer) {
+    public void checkGrant(CheckGrantRequest request, StreamObserver<CheckGrantResponse> observer) {
       UUID tid = UUID.fromString(request.getTenantId());
       var result =
           TenantContext.call(
@@ -192,9 +191,7 @@ public final class OrgGrpcServices {
               UUID.fromString(request.getAccountId()),
               request.getDisplayName(),
               request.getEmail(),
-              request.getProviderId().isBlank()
-                  ? null
-                  : UUID.fromString(request.getProviderId()));
+              request.getProviderId().isBlank() ? null : UUID.fromString(request.getProviderId()));
       UUID tid =
           TenantContext.current()
               .orElseGet(
@@ -224,8 +221,7 @@ public final class OrgGrpcServices {
       ObjectNode q =
           TenantContext.call(
               tid, () -> org.getEffectiveQuota(UUID.fromString(request.getAccountId())));
-      observer.onNext(
-          GetEffectiveQuotaResponse.newBuilder().setQuota(toQuotaProto(q)).build());
+      observer.onNext(GetEffectiveQuotaResponse.newBuilder().setQuota(toQuotaProto(q)).build());
       observer.onCompleted();
     }
   }
@@ -292,10 +288,8 @@ public final class OrgGrpcServices {
             .setDisplayName(json.path("displayName").asString())
             .setMemberType(memberType(json.path("memberType").asString()))
             .setStatus(memberStatus(json.path("status").asString()))
-            .addAllGroupIds(
-                OrgJson.MAPPER.convertValue(json.path("groupIds"), List.class))
-            .addAllRoleKeys(
-                OrgJson.MAPPER.convertValue(json.path("roleKeys"), List.class))
+            .addAllGroupIds(OrgJson.MAPPER.convertValue(json.path("groupIds"), List.class))
+            .addAllRoleKeys(OrgJson.MAPPER.convertValue(json.path("roleKeys"), List.class))
             .setCreatedAt(ts(Instant.parse(json.path("createdAt").asString())));
     if (json.hasNonNull("email")) b.setEmail(json.path("email").asString());
     return b.build();
@@ -310,8 +304,7 @@ public final class OrgGrpcServices {
             .addAllRoleIds(OrgJson.MAPPER.convertValue(json.path("roleIds"), List.class))
             .addAllGroupIds(OrgJson.MAPPER.convertValue(json.path("groupIds"), List.class))
             .addAllProviderIds(OrgJson.MAPPER.convertValue(json.path("providerIds"), List.class))
-            .setRemainingUses(
-                Math.max(0, json.path("maxUses").asInt() - json.path("uses").asInt()))
+            .setRemainingUses(Math.max(0, json.path("maxUses").asInt() - json.path("uses").asInt()))
             .setExpiresAt(ts(Instant.parse(json.path("expiresAt").asString())));
     if (json.hasNonNull("email")) b.setEmail(json.path("email").asString());
     if (json.hasNonNull("displayName")) b.setDisplayName(json.path("displayName").asString());

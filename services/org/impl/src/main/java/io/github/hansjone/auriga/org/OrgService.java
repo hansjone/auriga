@@ -12,7 +12,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -45,8 +44,7 @@ public final class OrgService {
   public OrgStore.TenantRow resolveTenantByHost(String host) {
     Optional<OrgStore.TenantRow> hit =
         host == null || host.isBlank() ? Optional.empty() : store.resolveByHost(host.trim());
-    return hit.or(store::defaultTenant)
-        .orElseThrow(() -> OrgError.error("not_found", 404));
+    return hit.or(store::defaultTenant).orElseThrow(() -> OrgError.error("not_found", 404));
   }
 
   public OrgStore.TenantRow getTenant() {
@@ -106,7 +104,8 @@ public final class OrgService {
   public GrantResult checkGrant(UUID grantorId, List<UUID> roleIds, UUID groupId) {
     return store.tx(
         () -> {
-          Set<String> grantor = new LinkedHashSet<>(getEffectivePermissions(grantorId).permissions());
+          Set<String> grantor =
+              new LinkedHashSet<>(getEffectivePermissions(grantorId).permissions());
           Set<String> target = new LinkedHashSet<>();
           if (roleIds != null && !roleIds.isEmpty())
             target.addAll(store.permissionsForRoleIds(roleIds));
@@ -231,8 +230,7 @@ public final class OrgService {
             next = encodeCursor(last.createdAt(), last.id());
             rows = rows.subList(0, lim);
           }
-          ObjectNode out =
-              OrgJson.object("items", rows.stream().map(this::toMemberJson).toList());
+          ObjectNode out = OrgJson.object("items", rows.stream().map(this::toMemberJson).toList());
           if (next != null) out.put("nextCursor", next);
           return out;
         });
@@ -279,7 +277,8 @@ public final class OrgService {
           OrgError.require(actor == null || !actor.equals(accountId), "conflict", 409);
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
           OrgError.require("active".equals(m.status()), "conflict", 409);
-          if (store.isOwner(accountId)) OrgError.require(store.countOwners() > 1, "last_owner", 409);
+          if (store.isOwner(accountId))
+            OrgError.require(store.countOwners() > 1, "last_owner", 409);
           Instant now = clock.instant();
           var updated =
               new OrgStore.MemberRow(
@@ -327,7 +326,8 @@ public final class OrgService {
           OrgError.require(actor == null || !actor.equals(accountId), "conflict", 409);
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
           OrgError.require(!"offboarded".equals(m.status()), "conflict", 409);
-          if (store.isOwner(accountId)) OrgError.require(store.countOwners() > 1, "last_owner", 409);
+          if (store.isOwner(accountId))
+            OrgError.require(store.countOwners() > 1, "last_owner", 409);
           Instant now = clock.instant();
           var updated =
               new OrgStore.MemberRow(
@@ -424,12 +424,7 @@ public final class OrgService {
           }
           sql.append(" ORDER BY g.name");
           List<ObjectNode> items =
-              store
-                  .jdbc()
-                  .query(
-                      sql.toString(),
-                      (rs, i) -> groupJson(rs),
-                      args.toArray());
+              store.jdbc().query(sql.toString(), (rs, i) -> groupJson(rs), args.toArray());
           return OrgJson.object("items", items);
         });
   }
@@ -578,7 +573,8 @@ public final class OrgService {
                   groupId);
           store
               .jdbc()
-              .update("DELETE FROM \"group\" WHERE tenant_id=? AND id=?", store.tenantId(), groupId);
+              .update(
+                  "DELETE FROM \"group\" WHERE tenant_id=? AND id=?", store.tenantId(), groupId);
           UUID actor = actorId();
           for (UUID m : members) {
             ObjectNode json = toMemberJson(store.member(m).orElseThrow());
@@ -706,9 +702,7 @@ public final class OrgService {
     String de = rs.getString("description_en");
     String dz = rs.getString("description_zh");
     if (de != null || dz != null)
-      n.set(
-          "description",
-          OrgJson.object("en", de == null ? "" : de, "zh", dz == null ? "" : dz));
+      n.set("description", OrgJson.object("en", de == null ? "" : de, "zh", dz == null ? "" : dz));
     return n;
   }
 
@@ -922,8 +916,7 @@ public final class OrgService {
                         (rs, i) -> (UUID) rs.getObject(1),
                         store.tenantId(),
                         subjectId);
-            for (UUID m : members)
-              userEvents.permissionsChanged(m, roleKeysOf(m), actor);
+            for (UUID m : members) userEvents.permissionsChanged(m, roleKeysOf(m), actor);
           }
           List<ObjectNode> rows =
               store
@@ -1019,11 +1012,11 @@ public final class OrgService {
   public ObjectNode putPolicy(String key, JsonNode value, Long ifMatch) {
     return store.tx(
         () -> {
-          OrgError.require(
-              Set.of("workspace", "egress", "login").contains(key), "conflict", 409);
+          OrgError.require(Set.of("workspace", "egress", "login").contains(key), "conflict", 409);
           ObjectNode existing = getPolicy(key);
           if (ifMatch != null)
-            OrgError.require(existing.path("version").asLong() == ifMatch, "precondition_failed", 412);
+            OrgError.require(
+                existing.path("version").asLong() == ifMatch, "precondition_failed", 412);
           long version = existing.path("version").asLong() + 1;
           store
               .jdbc()
@@ -1241,8 +1234,7 @@ public final class OrgService {
           for (UUID g : groups) ensureGrantAllowed(requireActor(), null, g);
           String code = newCode();
           UUID id = UuidV7.next();
-          Instant exp =
-              expiresAt != null ? expiresAt : clock.instant().plusSeconds(7 * 24 * 3600);
+          Instant exp = expiresAt != null ? expiresAt : clock.instant().plusSeconds(7 * 24 * 3600);
           Instant now = clock.instant();
           UUID actor = requireActor();
           OrgArrays.update(
@@ -1276,9 +1268,7 @@ public final class OrgService {
         () -> {
           refreshInvitationStatuses();
           int lim = Math.min(Math.max(limit <= 0 ? 50 : limit, 1), 200);
-          StringBuilder sql =
-              new StringBuilder(
-                  "SELECT id FROM invitation WHERE tenant_id=?");
+          StringBuilder sql = new StringBuilder("SELECT id FROM invitation WHERE tenant_id=?");
           List<Object> args = new ArrayList<>();
           args.add(store.tenantId());
           if (status != null && !status.isBlank()) {
@@ -1287,17 +1277,14 @@ public final class OrgService {
           }
           Cursor c = decodeCursor(cursor);
           if (c != null) {
-            sql.append(
-                " AND (created_at, id) > (?, ?)");
+            sql.append(" AND (created_at, id) > (?, ?)");
             args.add(java.sql.Timestamp.from(c.at()));
             args.add(c.id());
           }
           sql.append(" ORDER BY created_at, id LIMIT ?");
           args.add(lim + 1);
           List<UUID> ids =
-              store
-                  .jdbc()
-                  .query(sql.toString(), (rs, i) -> (UUID) rs.getObject(1), args.toArray());
+              store.jdbc().query(sql.toString(), (rs, i) -> (UUID) rs.getObject(1), args.toArray());
           String next = null;
           if (ids.size() > lim) {
             UUID last = ids.get(lim - 1);
@@ -1312,8 +1299,7 @@ public final class OrgService {
             next = encodeCursor(at, last);
             ids = ids.subList(0, lim);
           }
-          ObjectNode out =
-              OrgJson.object("items", ids.stream().map(this::invitationJson).toList());
+          ObjectNode out = OrgJson.object("items", ids.stream().map(this::invitationJson).toList());
           if (next != null) out.put("nextCursor", next);
           return out;
         });
@@ -1337,7 +1323,8 @@ public final class OrgService {
   public record ResolvedInvitation(ObjectNode invitation, String reason) {}
 
   public ResolvedInvitation resolveInvitation(String code) {
-    // May be called without tenant (gRPC); try hash lookup via system-less path using default tenant
+    // May be called without tenant (gRPC); try hash lookup via system-less path using default
+    // tenant
     // after resolving — invitations are tenant-scoped, so search default tenant first then require
     // tenant context when available.
     UUID tenant =
@@ -1407,7 +1394,9 @@ public final class OrgService {
                               accountId);
                   if (existing != null && existing > 0) {
                     return toMemberJson(
-                        store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404)));
+                        store
+                            .member(accountId)
+                            .orElseThrow(() -> OrgError.error("not_found", 404)));
                   }
                   OrgError.require("active".equals(inv.get("status")), "conflict", 409);
                   Instant exp = ((java.sql.Timestamp) inv.get("expires_at")).toInstant();
@@ -1428,10 +1417,7 @@ public final class OrgService {
                     OrgError.require(ok, "conflict", 409);
                   }
                   String invEmail = (String) inv.get("email");
-                  if (invEmail != null
-                      && !invEmail.isBlank()
-                      && email != null
-                      && !email.isBlank())
+                  if (invEmail != null && !invEmail.isBlank() && email != null && !email.isBlank())
                     OrgError.require(invEmail.equalsIgnoreCase(email), "conflict", 409);
 
                   boolean created = store.member(accountId).isEmpty();
@@ -1505,21 +1491,25 @@ public final class OrgService {
 
                   ObjectNode member = toMemberJson(store.member(accountId).orElseThrow());
                   if (created)
-                    userEvents.created(member, "invitation", invitationId, (UUID) inv.get("created_by"));
+                    userEvents.created(
+                        member, "invitation", invitationId, (UUID) inv.get("created_by"));
                   return member;
                 }));
   }
 
   public ObjectNode previewInvitation(String code) {
     ResolvedInvitation r = resolveInvitation(code);
-    if (r.invitation() == null)
-      return OrgJson.object("valid", false, "reason", r.reason());
+    if (r.invitation() == null) return OrgJson.object("valid", false, "reason", r.reason());
     ObjectNode inv = r.invitation();
     OrgStore.TenantRow tenant = resolveTenantByHost(""); // default
     UUID tenantId =
         TenantContext.current()
             .orElseGet(
-                () -> store.defaultTenant().map(OrgStore.TenantRow::id).orElse(OrgIds.DEFAULT_TENANT));
+                () ->
+                    store
+                        .defaultTenant()
+                        .map(OrgStore.TenantRow::id)
+                        .orElse(OrgIds.DEFAULT_TENANT));
     return TenantContext.call(
         tenantId,
         () -> {
@@ -1541,9 +1531,7 @@ public final class OrgService {
             out.put("email", maskEmail(email));
           }
           UUID createdBy = UUID.fromString(inv.path("createdBy").asString());
-          store
-              .member(createdBy)
-              .ifPresent(m -> out.put("inviterName", m.displayName()));
+          store.member(createdBy).ifPresent(m -> out.put("inviterName", m.displayName()));
           return out;
         });
   }
@@ -1665,7 +1653,8 @@ public final class OrgService {
   static String hashCode(String code) {
     try {
       return HexFormat.of()
-          .formatHex(MessageDigest.getInstance("SHA-256").digest(code.getBytes(StandardCharsets.UTF_8)));
+          .formatHex(
+              MessageDigest.getInstance("SHA-256").digest(code.getBytes(StandardCharsets.UTF_8)));
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }

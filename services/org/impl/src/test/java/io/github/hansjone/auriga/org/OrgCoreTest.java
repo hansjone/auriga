@@ -245,9 +245,7 @@ class OrgCoreTest {
     var hooks = new OrgIdentityPolicyHooks(svc);
     assertTrue(
         hooks.consumeInvitation(
-            code,
-            null,
-            OrgJson.object("accountId", account.toString(), "displayName", "Dave")));
+            code, null, OrgJson.object("accountId", account.toString(), "displayName", "Dave")));
     assertTrue(
         PendingAccount.call(
             account,
