@@ -1,0 +1,16 @@
+# Standalone IAM assembly in platform-app. Other modules are still empty assembly points.
+auriga:
+  iam:
+    issuer: ${AURIGA_IAM_ISSUER}
+    encryption-key: ${AURIGA_IAM_ENCRYPTION_KEY}
+  service:
+    name: iam
+    schema: iam
+  security:
+    jwt:
+      issuer: ${AURIGA_IAM_ISSUER}
+      jwk-set-uri: ${AURIGA_IAM_ISSUER}/oauth2/jwks
+spring:
+  flyway:
+    schemas: iam
+    locations: classpath:db/iam

@@ -1,0 +1,220 @@
+package io.github.hansjone.auriga.iam;
+
+import com.nimbusds.jose.*;
+import com.nimbusds.jose.crypto.*;
+import com.nimbusds.jose.jwk.*;
+import com.nimbusds.jwt.*;
+import io.github.hansjone.auriga.iam.api.*;
+import java.time.*;
+import java.util.*;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
+
+public final class TokenService implements InternalTokenIssuer {
+  private final SigningKeys keys;
+  private final ContractSchemas schemas;
+  private final PermissionResolver permissions;
+  private final Clock clock;
+  private final String issuer;
+  private final Map<String, String> internalSecrets;
+
+  public TokenService(
+      SigningKeys keys,
+      ContractSchemas schemas,
+      PermissionResolver permissions,
+      Clock clock,
+      String issuer,
+      Map<String, String> internalSecretHashes) {
+    this.keys = keys;
+    this.schemas = schemas;
+    this.permissions = permissions;
+    this.clock = clock;
+    this.issuer = issuer.replaceAll("/$", "");
+    this.internalSecrets = Map.copyOf(internalSecretHashes);
+  }
+
+  public String issuer() {
+    return issuer;
+  }
+
+  public String access(
+      UUID tenant,
+      String subject,
+      String audience,
+      String principalType,
+      String context,
+      UUID session,
+      UUID device,
+      Instant authTime,
+      Instant stepUp,
+      String scope) {
+    return access(
+        tenant,
+        subject,
+        audience,
+        principalType,
+        context,
+        session,
+        device,
+        authTime,
+        stepUp,
+        scope,
+        "member");
+  }
+
+  public String access(
+      UUID tenant,
+      String subject,
+      String audience,
+      String principalType,
+      String context,
+      UUID session,
+      UUID device,
+      Instant authTime,
+      Instant stepUp,
+      String scope,
+      String memberType) {
+    IamError.require(
+        !"internal_service".equals(principalType) && !"auriga.internal".equals(audience),
+        "invalid_audience",
+        400);
+    var perms =
+        permissions.resolve(tenant, subject, context).stream()
+            .filter(p -> allowedPermission(p, context))
+            .sorted()
+            .toList();
+    ObjectNode claims = base(tenant, subject, audience, principalType, context);
+    claims.set("perms", Json.MAPPER.valueToTree(perms));
+    claims.put("scope", scope);
+    if (session != null) claims.put("sid", session.toString());
+    if (device != null) claims.put("did", device.toString());
+    if (authTime != null) claims.put("auth_time", authTime.getEpochSecond());
+    if (stepUp != null) claims.put("stepup_time", stepUp.getEpochSecond());
+    if ("user".equals(principalType) || "device".equals(principalType))
+      claims.put("mtyp", memberType);
+    return signAccess(claims);
+  }
+
+  static boolean allowedPermission(String permission, String context) {
+    if ("device".equals(context))
+      return permission.equals("auriga.connect")
+          || permission.startsWith("auriga.connect.")
+              && !permission.matches(".*\\.(write|admin|grant)(\\..*)?");
+    if ("portal".equals(context))
+      return !(permission.startsWith("iam.")
+          || permission.startsWith("org.")
+          || permission.startsWith("ops.")
+          || permission.matches(".*\\.(admin|grant)(\\..*)?"));
+    return true;
+  }
+
+  private ObjectNode base(UUID tenant, String sub, String aud, String type, String context) {
+    long now = clock.instant().getEpochSecond();
+    return Json.object(
+        "iss",
+        issuer,
+        "sub",
+        sub,
+        "aud",
+        aud,
+        "iat",
+        now,
+        "nbf",
+        now,
+        "exp",
+        now + 300,
+        "jti",
+        Secrets.random(),
+        "tid",
+        tenant.toString(),
+        "ptyp",
+        type,
+        "ctx",
+        context);
+  }
+
+  private String signAccess(ObjectNode claims) {
+    schemas.validate("auth/access-token.schema.json", claims);
+    return sign(claims, "at+jwt");
+  }
+
+  private String sign(ObjectNode claims, String typ) {
+    try {
+      ECKey key = keys.current();
+      SignedJWT jwt =
+          new SignedJWT(
+              new JWSHeader.Builder(JWSAlgorithm.ES256)
+                  .type(new JOSEObjectType(typ))
+                  .keyID(key.getKeyID())
+                  .build(),
+              JWTClaimsSet.parse(claims.toString()));
+      jwt.sign(new ECDSASigner(key));
+      return jwt.serialize();
+    } catch (JOSEException | java.text.ParseException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  public String idToken(JsonNode session, String clientId, String nonce) {
+    ObjectNode c =
+        Json.object(
+            "iss",
+            issuer,
+            "sub",
+            session.path("accountId").asString(),
+            "aud",
+            clientId,
+            "iat",
+            clock.instant().getEpochSecond(),
+            "exp",
+            clock.instant().plusSeconds(300).getEpochSecond(),
+            "auth_time",
+            Instant.parse(session.path("authTime").asString()).getEpochSecond());
+    if (!nonce.isEmpty()) c.put("nonce", nonce);
+    return sign(c, "JWT");
+  }
+
+  public ObjectNode verify(String token) {
+    try {
+      SignedJWT jwt = SignedJWT.parse(token);
+      IamError.require(
+          JWSAlgorithm.ES256.equals(jwt.getHeader().getAlgorithm())
+              && new JOSEObjectType("at+jwt").equals(jwt.getHeader().getType()),
+          "invalid_token",
+          401);
+      ECKey key = null;
+      for (JsonNode k : keys.jwks().path("keys"))
+        if (k.path("kid").asString().equals(jwt.getHeader().getKeyID()))
+          key = ECKey.parse(k.toString());
+      IamError.require(key != null && jwt.verify(new ECDSAVerifier(key)), "invalid_token", 401);
+      ObjectNode c = Json.read(jwt.getJWTClaimsSet().toString());
+      schemas.validate("auth/access-token.schema.json", c);
+      IamError.require(
+          c.path("iss").asString().equals(issuer)
+              && c.path("exp").asLong() > clock.instant().getEpochSecond()
+              && c.path("nbf").asLong() <= clock.instant().getEpochSecond() + 30
+              && !c.path("ptyp").asString().equals("internal_service"),
+          "invalid_token",
+          401);
+      return c;
+    } catch (JOSEException | java.text.ParseException e) {
+      throw IamError.error("invalid_token", 401);
+    }
+  }
+
+  @Override
+  public String issue(String service, String installationSecret) {
+    IamError.require(
+        service.matches("[a-z][a-z0-9-]{1,62}")
+            && Secrets.same(internalSecrets.get(service), Secrets.hash(installationSecret)),
+        "invalid_service_credentials",
+        401);
+    return signAccess(
+        base(
+            SigningKeys.PLATFORM,
+            "svc:" + service,
+            "auriga.internal",
+            "internal_service",
+            "service"));
+  }
+}
