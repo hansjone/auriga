@@ -47,14 +47,7 @@ public final class ProviderManager {
           String now = clock.instant().toString();
           JsonNode policy = input.path("admission");
           if (!policy.isObject()) policy = Json.object("mode", "invite_only", "mfa", "new_device");
-          IamError.require(
-              policy.path("externalSessionCheckSeconds").asLong(0) == 0,
-              "external_session_check_unavailable",
-              409);
-          // Group mapping requires org's permission ceiling checks before it may be configured.
-          for (JsonNode mapping : policy.path("attributeMapping"))
-            IamError.require(
-                !mapping.path("to").asString().equals("group"), "group_mapping_unavailable", 409);
+          validateAdmission(policy);
           ObjectNode row =
               store.insert(
                   "idp_provider",
@@ -84,6 +77,65 @@ public final class ProviderManager {
           audit.record(AuditEntry.builder("iam.provider.create").target("provider", id).build());
           return view(row);
         });
+  }
+
+  public ObjectNode get(String id) {
+    return store.tx(
+        () -> {
+          ObjectNode row = store.get("idp_provider", id, false);
+          IamError.require(row != null, "not_found", 404);
+          return view(row);
+        });
+  }
+
+  /** JSON Merge Patch for display / config / enabled / admission. */
+  public ObjectNode update(String id, JsonNode patch) {
+    return store.tx(
+        () -> {
+          ObjectNode row = store.get("idp_provider", id, true);
+          IamError.require(row != null, "not_found", 404);
+          IamError.require(!row.path("builtin").asBoolean(), "builtin_provider", 409);
+          String type = row.path("connectorType").asString();
+          if (patch.has("display")) row.set("display", patch.path("display"));
+          if (patch.has("enabled")) row.put("enabled", patch.path("enabled").asBoolean());
+          if (patch.has("admission")) {
+            validateAdmission(patch.path("admission"));
+            row.set("admission", patch.path("admission"));
+          }
+          if (patch.has("config")) {
+            ObjectNode merged = decryptedConfig(row);
+            patch
+                .path("config")
+                .properties()
+                .forEach(
+                    e -> {
+                      if (e.getValue().isObject()
+                          && e.getValue().path("x-secret-set").asBoolean(false)
+                          && e.getValue().size() == 1) return;
+                      merged.set(e.getKey(), e.getValue());
+                    });
+            registry.validate(type, merged);
+            row.put(
+                "config",
+                secrets.encrypt(
+                    merged.toString(), "provider:" + TenantContext.require() + ":" + id));
+          }
+          row.put("updatedAt", clock.instant().toString());
+          store.save("idp_provider", row);
+          audit.record(AuditEntry.builder("iam.provider.update").target("provider", id).build());
+          return view(row);
+        });
+  }
+
+  private void validateAdmission(JsonNode policy) {
+    IamError.require(
+        policy.path("externalSessionCheckSeconds").asLong(0) == 0,
+        "external_session_check_unavailable",
+        409);
+    // Group mapping requires org's permission ceiling checks before it may be configured.
+    for (JsonNode mapping : policy.path("attributeMapping"))
+      IamError.require(
+          !mapping.path("to").asString().equals("group"), "group_mapping_unavailable", 409);
   }
 
   ObjectNode view(ObjectNode row) {

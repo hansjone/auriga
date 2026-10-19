@@ -39,7 +39,9 @@ public class IamAdminController {
                         "source",
                         c instanceof RemoteConnector
                             ? "remote"
-                            : c instanceof EmergencyConnector || c instanceof TeamAccountConnector
+                            : c instanceof EmergencyConnector
+                                    || c instanceof TeamAccountConnector
+                                    || c instanceof OidcConnector
                                 ? "builtin"
                                 : "plugin"))
             .toList());
@@ -58,6 +60,19 @@ public class IamAdminController {
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   public ObjectNode create(@RequestBody ProviderInput input) {
     return providers.create(Json.MAPPER.valueToTree(input));
+  }
+
+  @GetMapping("/providers/{id}")
+  @RequiresPermission("iam.providers.read")
+  public ObjectNode get(@PathVariable String id) {
+    return providers.get(id);
+  }
+
+  @PatchMapping(path = "/providers/{id}", consumes = "application/merge-patch+json")
+  @RequiresPermission("iam.providers.write")
+  public ObjectNode update(
+      @PathVariable String id, @RequestBody tools.jackson.databind.JsonNode patch) {
+    return providers.update(id, patch);
   }
 
   @DeleteMapping("/providers/{id}")
