@@ -115,6 +115,9 @@ export interface QrStep {
    * 要编码进二维码的字符串（通常是 URL）。
    */
   content: string;
+  /**
+   * 两位比对码。手机端确认时必须**输入**这两位数字（不是从候选里选）。
+   */
   matchCode: string;
   status?: 'waiting' | 'scanned';
   expiresAt: string;
@@ -306,5 +309,8 @@ export interface FailStep {
  */
 export interface CompleteStep {
   type: 'complete';
+  /**
+   * 只能是本平台的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化。
+   */
   redirectTo: string;
 }

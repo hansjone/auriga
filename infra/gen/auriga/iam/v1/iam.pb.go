@@ -22,6 +22,70 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type RevokeReason int32
+
+const (
+	RevokeReason_REVOKE_REASON_UNSPECIFIED     RevokeReason = 0
+	RevokeReason_REVOKE_REASON_LOGOUT          RevokeReason = 1
+	RevokeReason_REVOKE_REASON_USER            RevokeReason = 2
+	RevokeReason_REVOKE_REASON_ADMIN           RevokeReason = 3
+	RevokeReason_REVOKE_REASON_USER_DISABLED   RevokeReason = 4
+	RevokeReason_REVOKE_REASON_USER_OFFBOARDED RevokeReason = 5
+	RevokeReason_REVOKE_REASON_SECURITY        RevokeReason = 6
+	RevokeReason_REVOKE_REASON_EXPIRED         RevokeReason = 7
+)
+
+// Enum value maps for RevokeReason.
+var (
+	RevokeReason_name = map[int32]string{
+		0: "REVOKE_REASON_UNSPECIFIED",
+		1: "REVOKE_REASON_LOGOUT",
+		2: "REVOKE_REASON_USER",
+		3: "REVOKE_REASON_ADMIN",
+		4: "REVOKE_REASON_USER_DISABLED",
+		5: "REVOKE_REASON_USER_OFFBOARDED",
+		6: "REVOKE_REASON_SECURITY",
+		7: "REVOKE_REASON_EXPIRED",
+	}
+	RevokeReason_value = map[string]int32{
+		"REVOKE_REASON_UNSPECIFIED":     0,
+		"REVOKE_REASON_LOGOUT":          1,
+		"REVOKE_REASON_USER":            2,
+		"REVOKE_REASON_ADMIN":           3,
+		"REVOKE_REASON_USER_DISABLED":   4,
+		"REVOKE_REASON_USER_OFFBOARDED": 5,
+		"REVOKE_REASON_SECURITY":        6,
+		"REVOKE_REASON_EXPIRED":         7,
+	}
+)
+
+func (x RevokeReason) Enum() *RevokeReason {
+	p := new(RevokeReason)
+	*p = x
+	return p
+}
+
+func (x RevokeReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RevokeReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_auriga_iam_v1_iam_proto_enumTypes[0].Descriptor()
+}
+
+func (RevokeReason) Type() protoreflect.EnumType {
+	return &file_auriga_iam_v1_iam_proto_enumTypes[0]
+}
+
+func (x RevokeReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RevokeReason.Descriptor instead.
+func (RevokeReason) EnumDescriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{0}
+}
+
 type SessionAudience int32
 
 const (
@@ -57,11 +121,11 @@ func (x SessionAudience) String() string {
 }
 
 func (SessionAudience) Descriptor() protoreflect.EnumDescriptor {
-	return file_auriga_iam_v1_iam_proto_enumTypes[0].Descriptor()
+	return file_auriga_iam_v1_iam_proto_enumTypes[1].Descriptor()
 }
 
 func (SessionAudience) Type() protoreflect.EnumType {
-	return &file_auriga_iam_v1_iam_proto_enumTypes[0]
+	return &file_auriga_iam_v1_iam_proto_enumTypes[1]
 }
 
 func (x SessionAudience) Number() protoreflect.EnumNumber {
@@ -70,7 +134,7 @@ func (x SessionAudience) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SessionAudience.Descriptor instead.
 func (SessionAudience) EnumDescriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{0}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{1}
 }
 
 type AccountStatus int32
@@ -107,11 +171,11 @@ func (x AccountStatus) String() string {
 }
 
 func (AccountStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_auriga_iam_v1_iam_proto_enumTypes[1].Descriptor()
+	return file_auriga_iam_v1_iam_proto_enumTypes[2].Descriptor()
 }
 
 func (AccountStatus) Type() protoreflect.EnumType {
-	return &file_auriga_iam_v1_iam_proto_enumTypes[1]
+	return &file_auriga_iam_v1_iam_proto_enumTypes[2]
 }
 
 func (x AccountStatus) Number() protoreflect.EnumNumber {
@@ -120,7 +184,7 @@ func (x AccountStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AccountStatus.Descriptor instead.
 func (AccountStatus) EnumDescriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{1}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{2}
 }
 
 type KeyState int32
@@ -133,6 +197,8 @@ const (
 	KeyState_KEY_STATE_NEXT KeyState = 2
 	// 已停止签名，公钥保留到过期，之后移除。
 	KeyState_KEY_STATE_RETIRING KeyState = 3
+	// 已吊销（私钥疑似泄漏）：实例必须立即删除这个 kid。
+	KeyState_KEY_STATE_REVOKED KeyState = 4
 )
 
 // Enum value maps for KeyState.
@@ -142,12 +208,14 @@ var (
 		1: "KEY_STATE_CURRENT",
 		2: "KEY_STATE_NEXT",
 		3: "KEY_STATE_RETIRING",
+		4: "KEY_STATE_REVOKED",
 	}
 	KeyState_value = map[string]int32{
 		"KEY_STATE_UNSPECIFIED": 0,
 		"KEY_STATE_CURRENT":     1,
 		"KEY_STATE_NEXT":        2,
 		"KEY_STATE_RETIRING":    3,
+		"KEY_STATE_REVOKED":     4,
 	}
 )
 
@@ -162,11 +230,11 @@ func (x KeyState) String() string {
 }
 
 func (KeyState) Descriptor() protoreflect.EnumDescriptor {
-	return file_auriga_iam_v1_iam_proto_enumTypes[2].Descriptor()
+	return file_auriga_iam_v1_iam_proto_enumTypes[3].Descriptor()
 }
 
 func (KeyState) Type() protoreflect.EnumType {
-	return &file_auriga_iam_v1_iam_proto_enumTypes[2]
+	return &file_auriga_iam_v1_iam_proto_enumTypes[3]
 }
 
 func (x KeyState) Number() protoreflect.EnumNumber {
@@ -175,7 +243,111 @@ func (x KeyState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use KeyState.Descriptor instead.
 func (KeyState) EnumDescriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{2}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{3}
+}
+
+type TouchSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionToken  string                 `protobuf:"bytes,1,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
+	Audience      SessionAudience        `protobuf:"varint,2,opt,name=audience,proto3,enum=auriga.iam.v1.SessionAudience" json:"audience,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TouchSessionRequest) Reset() {
+	*x = TouchSessionRequest{}
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TouchSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TouchSessionRequest) ProtoMessage() {}
+
+func (x *TouchSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TouchSessionRequest.ProtoReflect.Descriptor instead.
+func (*TouchSessionRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *TouchSessionRequest) GetSessionToken() string {
+	if x != nil {
+		return x.SessionToken
+	}
+	return ""
+}
+
+func (x *TouchSessionRequest) GetAudience() SessionAudience {
+	if x != nil {
+		return x.Audience
+	}
+	return SessionAudience_SESSION_AUDIENCE_UNSPECIFIED
+}
+
+type TouchSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Active        bool                   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
+	IdleExpiresAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=idle_expires_at,json=idleExpiresAt,proto3" json:"idle_expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TouchSessionResponse) Reset() {
+	*x = TouchSessionResponse{}
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TouchSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TouchSessionResponse) ProtoMessage() {}
+
+func (x *TouchSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TouchSessionResponse.ProtoReflect.Descriptor instead.
+func (*TouchSessionResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *TouchSessionResponse) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+func (x *TouchSessionResponse) GetIdleExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.IdleExpiresAt
+	}
+	return nil
 }
 
 type IntrospectSessionRequest struct {
@@ -191,7 +363,7 @@ type IntrospectSessionRequest struct {
 
 func (x *IntrospectSessionRequest) Reset() {
 	*x = IntrospectSessionRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[0]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -203,7 +375,7 @@ func (x *IntrospectSessionRequest) String() string {
 func (*IntrospectSessionRequest) ProtoMessage() {}
 
 func (x *IntrospectSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[0]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -216,7 +388,7 @@ func (x *IntrospectSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntrospectSessionRequest.ProtoReflect.Descriptor instead.
 func (*IntrospectSessionRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{0}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *IntrospectSessionRequest) GetSessionToken() string {
@@ -260,7 +432,7 @@ type IntrospectSessionResponse struct {
 
 func (x *IntrospectSessionResponse) Reset() {
 	*x = IntrospectSessionResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[1]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -272,7 +444,7 @@ func (x *IntrospectSessionResponse) String() string {
 func (*IntrospectSessionResponse) ProtoMessage() {}
 
 func (x *IntrospectSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[1]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -285,7 +457,7 @@ func (x *IntrospectSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntrospectSessionResponse.ProtoReflect.Descriptor instead.
 func (*IntrospectSessionResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{1}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *IntrospectSessionResponse) GetActive() bool {
@@ -327,6 +499,8 @@ type Session struct {
 	// 本次登录做过多因素验证。
 	Mfa       bool                   `protobuf:"varint,6,opt,name=mfa,proto3" json:"mfa,omitempty"`
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// 最近一次二次验证时间，未做过时不设置。
+	StepUpAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=step_up_at,json=stepUpAt,proto3" json:"step_up_at,omitempty"`
 	// 绝对过期时间。
 	ExpiresAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	// 闲置过期时间（有活动时顺延）。
@@ -337,7 +511,7 @@ type Session struct {
 
 func (x *Session) Reset() {
 	*x = Session{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -349,7 +523,7 @@ func (x *Session) String() string {
 func (*Session) ProtoMessage() {}
 
 func (x *Session) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -362,7 +536,7 @@ func (x *Session) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Session.ProtoReflect.Descriptor instead.
 func (*Session) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{2}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Session) GetSessionId() string {
@@ -414,6 +588,13 @@ func (x *Session) GetCreatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Session) GetStepUpAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StepUpAt
+	}
+	return nil
+}
+
 func (x *Session) GetExpiresAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.ExpiresAt
@@ -434,8 +615,8 @@ type RevokeSessionsRequest struct {
 	AccountId string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	// 为空表示该账号的全部会话。
 	SessionIds []string `protobuf:"bytes,3,rep,name=session_ids,json=sessionIds,proto3" json:"session_ids,omitempty"`
-	// `user_disabled`、`user_offboarded`、`admin`、`security`。
-	Reason string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	// 与 events/identity.schema.json 的 reason 对应。
+	Reason RevokeReason `protobuf:"varint,4,opt,name=reason,proto3,enum=auriga.iam.v1.RevokeReason" json:"reason,omitempty"`
 	// 同时吊销该账号的设备凭据。
 	IncludeDevices bool `protobuf:"varint,5,opt,name=include_devices,json=includeDevices,proto3" json:"include_devices,omitempty"`
 	unknownFields  protoimpl.UnknownFields
@@ -444,7 +625,7 @@ type RevokeSessionsRequest struct {
 
 func (x *RevokeSessionsRequest) Reset() {
 	*x = RevokeSessionsRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -456,7 +637,7 @@ func (x *RevokeSessionsRequest) String() string {
 func (*RevokeSessionsRequest) ProtoMessage() {}
 
 func (x *RevokeSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -469,7 +650,7 @@ func (x *RevokeSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionsRequest.ProtoReflect.Descriptor instead.
 func (*RevokeSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{3}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RevokeSessionsRequest) GetTenantId() string {
@@ -493,11 +674,11 @@ func (x *RevokeSessionsRequest) GetSessionIds() []string {
 	return nil
 }
 
-func (x *RevokeSessionsRequest) GetReason() string {
+func (x *RevokeSessionsRequest) GetReason() RevokeReason {
 	if x != nil {
 		return x.Reason
 	}
-	return ""
+	return RevokeReason_REVOKE_REASON_UNSPECIFIED
 }
 
 func (x *RevokeSessionsRequest) GetIncludeDevices() bool {
@@ -516,7 +697,7 @@ type RevokeSessionsResponse struct {
 
 func (x *RevokeSessionsResponse) Reset() {
 	*x = RevokeSessionsResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -528,7 +709,7 @@ func (x *RevokeSessionsResponse) String() string {
 func (*RevokeSessionsResponse) ProtoMessage() {}
 
 func (x *RevokeSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -541,7 +722,7 @@ func (x *RevokeSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionsResponse.ProtoReflect.Descriptor instead.
 func (*RevokeSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{4}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RevokeSessionsResponse) GetRevoked() int64 {
@@ -566,7 +747,7 @@ type Account struct {
 
 func (x *Account) Reset() {
 	*x = Account{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -578,7 +759,7 @@ func (x *Account) String() string {
 func (*Account) ProtoMessage() {}
 
 func (x *Account) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -591,7 +772,7 @@ func (x *Account) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Account.ProtoReflect.Descriptor instead.
 func (*Account) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{5}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Account) GetAccountId() string {
@@ -653,7 +834,7 @@ type GetAccountRequest struct {
 
 func (x *GetAccountRequest) Reset() {
 	*x = GetAccountRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -665,7 +846,7 @@ func (x *GetAccountRequest) String() string {
 func (*GetAccountRequest) ProtoMessage() {}
 
 func (x *GetAccountRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -678,7 +859,7 @@ func (x *GetAccountRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccountRequest.ProtoReflect.Descriptor instead.
 func (*GetAccountRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{6}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetAccountRequest) GetTenantId() string {
@@ -704,7 +885,7 @@ type GetAccountResponse struct {
 
 func (x *GetAccountResponse) Reset() {
 	*x = GetAccountResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -716,7 +897,7 @@ func (x *GetAccountResponse) String() string {
 func (*GetAccountResponse) ProtoMessage() {}
 
 func (x *GetAccountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -729,7 +910,7 @@ func (x *GetAccountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccountResponse.ProtoReflect.Descriptor instead.
 func (*GetAccountResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{7}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetAccountResponse) GetAccount() *Account {
@@ -750,7 +931,7 @@ type BatchGetAccountsRequest struct {
 
 func (x *BatchGetAccountsRequest) Reset() {
 	*x = BatchGetAccountsRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -762,7 +943,7 @@ func (x *BatchGetAccountsRequest) String() string {
 func (*BatchGetAccountsRequest) ProtoMessage() {}
 
 func (x *BatchGetAccountsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -775,7 +956,7 @@ func (x *BatchGetAccountsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchGetAccountsRequest.ProtoReflect.Descriptor instead.
 func (*BatchGetAccountsRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{8}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *BatchGetAccountsRequest) GetTenantId() string {
@@ -801,7 +982,7 @@ type BatchGetAccountsResponse struct {
 
 func (x *BatchGetAccountsResponse) Reset() {
 	*x = BatchGetAccountsResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -813,7 +994,7 @@ func (x *BatchGetAccountsResponse) String() string {
 func (*BatchGetAccountsResponse) ProtoMessage() {}
 
 func (x *BatchGetAccountsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -826,7 +1007,7 @@ func (x *BatchGetAccountsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchGetAccountsResponse.ProtoReflect.Descriptor instead.
 func (*BatchGetAccountsResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{9}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *BatchGetAccountsResponse) GetAccounts() []*Account {
@@ -840,7 +1021,7 @@ type SigningKey struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Kid   string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`
 	State KeyState               `protobuf:"varint,2,opt,name=state,proto3,enum=auriga.iam.v1.KeyState" json:"state,omitempty"`
-	// Ed25519 私钥种子（32 字节）。GetPublicKeys 里为空。
+	// Ed25519 私钥种子（32 字节）。
 	PrivateKey []byte `protobuf:"bytes,3,opt,name=private_key,json=privateKey,proto3" json:"private_key,omitempty"`
 	// Ed25519 公钥（32 字节）。
 	PublicKey     []byte                 `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
@@ -852,7 +1033,7 @@ type SigningKey struct {
 
 func (x *SigningKey) Reset() {
 	*x = SigningKey{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -864,7 +1045,7 @@ func (x *SigningKey) String() string {
 func (*SigningKey) ProtoMessage() {}
 
 func (x *SigningKey) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -877,7 +1058,7 @@ func (x *SigningKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SigningKey.ProtoReflect.Descriptor instead.
 func (*SigningKey) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{10}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SigningKey) GetKid() string {
@@ -930,7 +1111,7 @@ type GetSigningKeysRequest struct {
 
 func (x *GetSigningKeysRequest) Reset() {
 	*x = GetSigningKeysRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -942,7 +1123,7 @@ func (x *GetSigningKeysRequest) String() string {
 func (*GetSigningKeysRequest) ProtoMessage() {}
 
 func (x *GetSigningKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -955,7 +1136,7 @@ func (x *GetSigningKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSigningKeysRequest.ProtoReflect.Descriptor instead.
 func (*GetSigningKeysRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{11}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{13}
 }
 
 type GetSigningKeysResponse struct {
@@ -967,7 +1148,7 @@ type GetSigningKeysResponse struct {
 
 func (x *GetSigningKeysResponse) Reset() {
 	*x = GetSigningKeysResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -979,7 +1160,7 @@ func (x *GetSigningKeysResponse) String() string {
 func (*GetSigningKeysResponse) ProtoMessage() {}
 
 func (x *GetSigningKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -992,7 +1173,7 @@ func (x *GetSigningKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSigningKeysResponse.ProtoReflect.Descriptor instead.
 func (*GetSigningKeysResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{12}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetSigningKeysResponse) GetKeys() []*SigningKey {
@@ -1010,7 +1191,7 @@ type GetPublicKeysRequest struct {
 
 func (x *GetPublicKeysRequest) Reset() {
 	*x = GetPublicKeysRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1022,7 +1203,7 @@ func (x *GetPublicKeysRequest) String() string {
 func (*GetPublicKeysRequest) ProtoMessage() {}
 
 func (x *GetPublicKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1035,19 +1216,97 @@ func (x *GetPublicKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPublicKeysRequest.ProtoReflect.Descriptor instead.
 func (*GetPublicKeysRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{13}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{15}
+}
+
+// 公钥（不含私钥字段，避免误传私钥）。
+type PublicKey struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kid   string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`
+	State KeyState               `protobuf:"varint,2,opt,name=state,proto3,enum=auriga.iam.v1.KeyState" json:"state,omitempty"`
+	// Ed25519 公钥（32 字节）。
+	PublicKey     []byte                 `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	NotBefore     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=not_before,json=notBefore,proto3" json:"not_before,omitempty"`
+	NotAfter      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PublicKey) Reset() {
+	*x = PublicKey{}
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PublicKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PublicKey) ProtoMessage() {}
+
+func (x *PublicKey) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PublicKey.ProtoReflect.Descriptor instead.
+func (*PublicKey) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *PublicKey) GetKid() string {
+	if x != nil {
+		return x.Kid
+	}
+	return ""
+}
+
+func (x *PublicKey) GetState() KeyState {
+	if x != nil {
+		return x.State
+	}
+	return KeyState_KEY_STATE_UNSPECIFIED
+}
+
+func (x *PublicKey) GetPublicKey() []byte {
+	if x != nil {
+		return x.PublicKey
+	}
+	return nil
+}
+
+func (x *PublicKey) GetNotBefore() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NotBefore
+	}
+	return nil
+}
+
+func (x *PublicKey) GetNotAfter() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NotAfter
+	}
+	return nil
 }
 
 type GetPublicKeysResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Keys          []*SigningKey          `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
+	Keys          []*PublicKey           `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetPublicKeysResponse) Reset() {
 	*x = GetPublicKeysResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1059,7 +1318,7 @@ func (x *GetPublicKeysResponse) String() string {
 func (*GetPublicKeysResponse) ProtoMessage() {}
 
 func (x *GetPublicKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1072,10 +1331,10 @@ func (x *GetPublicKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPublicKeysResponse.ProtoReflect.Descriptor instead.
 func (*GetPublicKeysResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{14}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *GetPublicKeysResponse) GetKeys() []*SigningKey {
+func (x *GetPublicKeysResponse) GetKeys() []*PublicKey {
 	if x != nil {
 		return x.Keys
 	}
@@ -1086,7 +1345,13 @@ var File_auriga_iam_v1_iam_proto protoreflect.FileDescriptor
 
 const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\n" +
-	"\x17auriga/iam/v1/iam.proto\x12\rauriga.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb7\x01\n" +
+	"\x17auriga/iam/v1/iam.proto\x12\rauriga.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"v\n" +
+	"\x13TouchSessionRequest\x12#\n" +
+	"\rsession_token\x18\x01 \x01(\tR\fsessionToken\x12:\n" +
+	"\baudience\x18\x02 \x01(\x0e2\x1e.auriga.iam.v1.SessionAudienceR\baudience\"r\n" +
+	"\x14TouchSessionResponse\x12\x16\n" +
+	"\x06active\x18\x01 \x01(\bR\x06active\x12B\n" +
+	"\x0fidle_expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ridleExpiresAt\"\xb7\x01\n" +
 	"\x18IntrospectSessionRequest\x12#\n" +
 	"\rsession_token\x18\x01 \x01(\tR\fsessionToken\x12:\n" +
 	"\baudience\x18\x02 \x01(\x0e2\x1e.auriga.iam.v1.SessionAudienceR\baudience\x12\x1b\n" +
@@ -1097,7 +1362,7 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x120\n" +
 	"\asession\x18\x02 \x01(\v2\x16.auriga.iam.v1.SessionR\asession\x12!\n" +
 	"\faccess_token\x18\x03 \x01(\tR\vaccessToken\x12Q\n" +
-	"\x17access_token_expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x14accessTokenExpiresAt\"\x8d\x03\n" +
+	"\x17access_token_expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x14accessTokenExpiresAt\"\xc7\x03\n" +
 	"\aSession\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1d\n" +
@@ -1109,17 +1374,20 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"providerId\x12\x10\n" +
 	"\x03mfa\x18\x06 \x01(\bR\x03mfa\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x128\n" +
+	"\n" +
+	"step_up_at\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\bstepUpAt\x129\n" +
 	"\n" +
 	"expires_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12B\n" +
-	"\x0fidle_expires_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\ridleExpiresAt\"\xb5\x01\n" +
+	"\x0fidle_expires_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\ridleExpiresAt\"\xd2\x01\n" +
 	"\x15RevokeSessionsRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x02 \x01(\tR\taccountId\x12\x1f\n" +
 	"\vsession_ids\x18\x03 \x03(\tR\n" +
-	"sessionIds\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\x12'\n" +
+	"sessionIds\x123\n" +
+	"\x06reason\x18\x04 \x01(\x0e2\x1b.auriga.iam.v1.RevokeReasonR\x06reason\x12'\n" +
 	"\x0finclude_devices\x18\x05 \x01(\bR\x0eincludeDevices\"2\n" +
 	"\x16RevokeSessionsResponse\x12\x18\n" +
 	"\arevoked\x18\x01 \x01(\x03R\arevoked\"\xaf\x02\n" +
@@ -1159,9 +1427,26 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\x15GetSigningKeysRequest\"G\n" +
 	"\x16GetSigningKeysResponse\x12-\n" +
 	"\x04keys\x18\x01 \x03(\v2\x19.auriga.iam.v1.SigningKeyR\x04keys\"\x16\n" +
-	"\x14GetPublicKeysRequest\"F\n" +
-	"\x15GetPublicKeysResponse\x12-\n" +
-	"\x04keys\x18\x01 \x03(\v2\x19.auriga.iam.v1.SigningKeyR\x04keys*l\n" +
+	"\x14GetPublicKeysRequest\"\xdf\x01\n" +
+	"\tPublicKey\x12\x10\n" +
+	"\x03kid\x18\x01 \x01(\tR\x03kid\x12-\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x17.auriga.iam.v1.KeyStateR\x05state\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x03 \x01(\fR\tpublicKey\x129\n" +
+	"\n" +
+	"not_before\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tnotBefore\x127\n" +
+	"\tnot_after\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\"E\n" +
+	"\x15GetPublicKeysResponse\x12,\n" +
+	"\x04keys\x18\x01 \x03(\v2\x18.auriga.iam.v1.PublicKeyR\x04keys*\xf3\x01\n" +
+	"\fRevokeReason\x12\x1d\n" +
+	"\x19REVOKE_REASON_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14REVOKE_REASON_LOGOUT\x10\x01\x12\x16\n" +
+	"\x12REVOKE_REASON_USER\x10\x02\x12\x17\n" +
+	"\x13REVOKE_REASON_ADMIN\x10\x03\x12\x1f\n" +
+	"\x1bREVOKE_REASON_USER_DISABLED\x10\x04\x12!\n" +
+	"\x1dREVOKE_REASON_USER_OFFBOARDED\x10\x05\x12\x1a\n" +
+	"\x16REVOKE_REASON_SECURITY\x10\x06\x12\x19\n" +
+	"\x15REVOKE_REASON_EXPIRED\x10\a*l\n" +
 	"\x0fSessionAudience\x12 \n" +
 	"\x1cSESSION_AUDIENCE_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17SESSION_AUDIENCE_PORTAL\x10\x01\x12\x1a\n" +
@@ -1169,15 +1454,17 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\rAccountStatus\x12\x1e\n" +
 	"\x1aACCOUNT_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15ACCOUNT_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
-	"\x17ACCOUNT_STATUS_DISABLED\x10\x02*h\n" +
+	"\x17ACCOUNT_STATUS_DISABLED\x10\x02*\x7f\n" +
 	"\bKeyState\x12\x19\n" +
 	"\x15KEY_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11KEY_STATE_CURRENT\x10\x01\x12\x12\n" +
 	"\x0eKEY_STATE_NEXT\x10\x02\x12\x16\n" +
-	"\x12KEY_STATE_RETIRING\x10\x032\xd7\x01\n" +
+	"\x12KEY_STATE_RETIRING\x10\x03\x12\x15\n" +
+	"\x11KEY_STATE_REVOKED\x10\x042\xb0\x02\n" +
 	"\x0eSessionService\x12f\n" +
 	"\x11IntrospectSession\x12'.auriga.iam.v1.IntrospectSessionRequest\x1a(.auriga.iam.v1.IntrospectSessionResponse\x12]\n" +
-	"\x0eRevokeSessions\x12$.auriga.iam.v1.RevokeSessionsRequest\x1a%.auriga.iam.v1.RevokeSessionsResponse2\xc8\x01\n" +
+	"\x0eRevokeSessions\x12$.auriga.iam.v1.RevokeSessionsRequest\x1a%.auriga.iam.v1.RevokeSessionsResponse\x12W\n" +
+	"\fTouchSession\x12\".auriga.iam.v1.TouchSessionRequest\x1a#.auriga.iam.v1.TouchSessionResponse2\xc8\x01\n" +
 	"\x0eAccountService\x12Q\n" +
 	"\n" +
 	"GetAccount\x12 .auriga.iam.v1.GetAccountRequest\x1a!.auriga.iam.v1.GetAccountResponse\x12c\n" +
@@ -1199,64 +1486,77 @@ func file_auriga_iam_v1_iam_proto_rawDescGZIP() []byte {
 	return file_auriga_iam_v1_iam_proto_rawDescData
 }
 
-var file_auriga_iam_v1_iam_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_auriga_iam_v1_iam_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_auriga_iam_v1_iam_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_auriga_iam_v1_iam_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_auriga_iam_v1_iam_proto_goTypes = []any{
-	(SessionAudience)(0),              // 0: auriga.iam.v1.SessionAudience
-	(AccountStatus)(0),                // 1: auriga.iam.v1.AccountStatus
-	(KeyState)(0),                     // 2: auriga.iam.v1.KeyState
-	(*IntrospectSessionRequest)(nil),  // 3: auriga.iam.v1.IntrospectSessionRequest
-	(*IntrospectSessionResponse)(nil), // 4: auriga.iam.v1.IntrospectSessionResponse
-	(*Session)(nil),                   // 5: auriga.iam.v1.Session
-	(*RevokeSessionsRequest)(nil),     // 6: auriga.iam.v1.RevokeSessionsRequest
-	(*RevokeSessionsResponse)(nil),    // 7: auriga.iam.v1.RevokeSessionsResponse
-	(*Account)(nil),                   // 8: auriga.iam.v1.Account
-	(*GetAccountRequest)(nil),         // 9: auriga.iam.v1.GetAccountRequest
-	(*GetAccountResponse)(nil),        // 10: auriga.iam.v1.GetAccountResponse
-	(*BatchGetAccountsRequest)(nil),   // 11: auriga.iam.v1.BatchGetAccountsRequest
-	(*BatchGetAccountsResponse)(nil),  // 12: auriga.iam.v1.BatchGetAccountsResponse
-	(*SigningKey)(nil),                // 13: auriga.iam.v1.SigningKey
-	(*GetSigningKeysRequest)(nil),     // 14: auriga.iam.v1.GetSigningKeysRequest
-	(*GetSigningKeysResponse)(nil),    // 15: auriga.iam.v1.GetSigningKeysResponse
-	(*GetPublicKeysRequest)(nil),      // 16: auriga.iam.v1.GetPublicKeysRequest
-	(*GetPublicKeysResponse)(nil),     // 17: auriga.iam.v1.GetPublicKeysResponse
-	(*timestamppb.Timestamp)(nil),     // 18: google.protobuf.Timestamp
+	(RevokeReason)(0),                 // 0: auriga.iam.v1.RevokeReason
+	(SessionAudience)(0),              // 1: auriga.iam.v1.SessionAudience
+	(AccountStatus)(0),                // 2: auriga.iam.v1.AccountStatus
+	(KeyState)(0),                     // 3: auriga.iam.v1.KeyState
+	(*TouchSessionRequest)(nil),       // 4: auriga.iam.v1.TouchSessionRequest
+	(*TouchSessionResponse)(nil),      // 5: auriga.iam.v1.TouchSessionResponse
+	(*IntrospectSessionRequest)(nil),  // 6: auriga.iam.v1.IntrospectSessionRequest
+	(*IntrospectSessionResponse)(nil), // 7: auriga.iam.v1.IntrospectSessionResponse
+	(*Session)(nil),                   // 8: auriga.iam.v1.Session
+	(*RevokeSessionsRequest)(nil),     // 9: auriga.iam.v1.RevokeSessionsRequest
+	(*RevokeSessionsResponse)(nil),    // 10: auriga.iam.v1.RevokeSessionsResponse
+	(*Account)(nil),                   // 11: auriga.iam.v1.Account
+	(*GetAccountRequest)(nil),         // 12: auriga.iam.v1.GetAccountRequest
+	(*GetAccountResponse)(nil),        // 13: auriga.iam.v1.GetAccountResponse
+	(*BatchGetAccountsRequest)(nil),   // 14: auriga.iam.v1.BatchGetAccountsRequest
+	(*BatchGetAccountsResponse)(nil),  // 15: auriga.iam.v1.BatchGetAccountsResponse
+	(*SigningKey)(nil),                // 16: auriga.iam.v1.SigningKey
+	(*GetSigningKeysRequest)(nil),     // 17: auriga.iam.v1.GetSigningKeysRequest
+	(*GetSigningKeysResponse)(nil),    // 18: auriga.iam.v1.GetSigningKeysResponse
+	(*GetPublicKeysRequest)(nil),      // 19: auriga.iam.v1.GetPublicKeysRequest
+	(*PublicKey)(nil),                 // 20: auriga.iam.v1.PublicKey
+	(*GetPublicKeysResponse)(nil),     // 21: auriga.iam.v1.GetPublicKeysResponse
+	(*timestamppb.Timestamp)(nil),     // 22: google.protobuf.Timestamp
 }
 var file_auriga_iam_v1_iam_proto_depIdxs = []int32{
-	0,  // 0: auriga.iam.v1.IntrospectSessionRequest.audience:type_name -> auriga.iam.v1.SessionAudience
-	5,  // 1: auriga.iam.v1.IntrospectSessionResponse.session:type_name -> auriga.iam.v1.Session
-	18, // 2: auriga.iam.v1.IntrospectSessionResponse.access_token_expires_at:type_name -> google.protobuf.Timestamp
-	0,  // 3: auriga.iam.v1.Session.audience:type_name -> auriga.iam.v1.SessionAudience
-	18, // 4: auriga.iam.v1.Session.created_at:type_name -> google.protobuf.Timestamp
-	18, // 5: auriga.iam.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
-	18, // 6: auriga.iam.v1.Session.idle_expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 7: auriga.iam.v1.Account.status:type_name -> auriga.iam.v1.AccountStatus
-	18, // 8: auriga.iam.v1.Account.created_at:type_name -> google.protobuf.Timestamp
-	18, // 9: auriga.iam.v1.Account.last_login_at:type_name -> google.protobuf.Timestamp
-	8,  // 10: auriga.iam.v1.GetAccountResponse.account:type_name -> auriga.iam.v1.Account
-	8,  // 11: auriga.iam.v1.BatchGetAccountsResponse.accounts:type_name -> auriga.iam.v1.Account
-	2,  // 12: auriga.iam.v1.SigningKey.state:type_name -> auriga.iam.v1.KeyState
-	18, // 13: auriga.iam.v1.SigningKey.not_before:type_name -> google.protobuf.Timestamp
-	18, // 14: auriga.iam.v1.SigningKey.not_after:type_name -> google.protobuf.Timestamp
-	13, // 15: auriga.iam.v1.GetSigningKeysResponse.keys:type_name -> auriga.iam.v1.SigningKey
-	13, // 16: auriga.iam.v1.GetPublicKeysResponse.keys:type_name -> auriga.iam.v1.SigningKey
-	3,  // 17: auriga.iam.v1.SessionService.IntrospectSession:input_type -> auriga.iam.v1.IntrospectSessionRequest
-	6,  // 18: auriga.iam.v1.SessionService.RevokeSessions:input_type -> auriga.iam.v1.RevokeSessionsRequest
-	9,  // 19: auriga.iam.v1.AccountService.GetAccount:input_type -> auriga.iam.v1.GetAccountRequest
-	11, // 20: auriga.iam.v1.AccountService.BatchGetAccounts:input_type -> auriga.iam.v1.BatchGetAccountsRequest
-	14, // 21: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:input_type -> auriga.iam.v1.GetSigningKeysRequest
-	16, // 22: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:input_type -> auriga.iam.v1.GetPublicKeysRequest
-	4,  // 23: auriga.iam.v1.SessionService.IntrospectSession:output_type -> auriga.iam.v1.IntrospectSessionResponse
-	7,  // 24: auriga.iam.v1.SessionService.RevokeSessions:output_type -> auriga.iam.v1.RevokeSessionsResponse
-	10, // 25: auriga.iam.v1.AccountService.GetAccount:output_type -> auriga.iam.v1.GetAccountResponse
-	12, // 26: auriga.iam.v1.AccountService.BatchGetAccounts:output_type -> auriga.iam.v1.BatchGetAccountsResponse
-	15, // 27: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:output_type -> auriga.iam.v1.GetSigningKeysResponse
-	17, // 28: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:output_type -> auriga.iam.v1.GetPublicKeysResponse
-	23, // [23:29] is the sub-list for method output_type
-	17, // [17:23] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	1,  // 0: auriga.iam.v1.TouchSessionRequest.audience:type_name -> auriga.iam.v1.SessionAudience
+	22, // 1: auriga.iam.v1.TouchSessionResponse.idle_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 2: auriga.iam.v1.IntrospectSessionRequest.audience:type_name -> auriga.iam.v1.SessionAudience
+	8,  // 3: auriga.iam.v1.IntrospectSessionResponse.session:type_name -> auriga.iam.v1.Session
+	22, // 4: auriga.iam.v1.IntrospectSessionResponse.access_token_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 5: auriga.iam.v1.Session.audience:type_name -> auriga.iam.v1.SessionAudience
+	22, // 6: auriga.iam.v1.Session.created_at:type_name -> google.protobuf.Timestamp
+	22, // 7: auriga.iam.v1.Session.step_up_at:type_name -> google.protobuf.Timestamp
+	22, // 8: auriga.iam.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	22, // 9: auriga.iam.v1.Session.idle_expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 10: auriga.iam.v1.RevokeSessionsRequest.reason:type_name -> auriga.iam.v1.RevokeReason
+	2,  // 11: auriga.iam.v1.Account.status:type_name -> auriga.iam.v1.AccountStatus
+	22, // 12: auriga.iam.v1.Account.created_at:type_name -> google.protobuf.Timestamp
+	22, // 13: auriga.iam.v1.Account.last_login_at:type_name -> google.protobuf.Timestamp
+	11, // 14: auriga.iam.v1.GetAccountResponse.account:type_name -> auriga.iam.v1.Account
+	11, // 15: auriga.iam.v1.BatchGetAccountsResponse.accounts:type_name -> auriga.iam.v1.Account
+	3,  // 16: auriga.iam.v1.SigningKey.state:type_name -> auriga.iam.v1.KeyState
+	22, // 17: auriga.iam.v1.SigningKey.not_before:type_name -> google.protobuf.Timestamp
+	22, // 18: auriga.iam.v1.SigningKey.not_after:type_name -> google.protobuf.Timestamp
+	16, // 19: auriga.iam.v1.GetSigningKeysResponse.keys:type_name -> auriga.iam.v1.SigningKey
+	3,  // 20: auriga.iam.v1.PublicKey.state:type_name -> auriga.iam.v1.KeyState
+	22, // 21: auriga.iam.v1.PublicKey.not_before:type_name -> google.protobuf.Timestamp
+	22, // 22: auriga.iam.v1.PublicKey.not_after:type_name -> google.protobuf.Timestamp
+	20, // 23: auriga.iam.v1.GetPublicKeysResponse.keys:type_name -> auriga.iam.v1.PublicKey
+	6,  // 24: auriga.iam.v1.SessionService.IntrospectSession:input_type -> auriga.iam.v1.IntrospectSessionRequest
+	9,  // 25: auriga.iam.v1.SessionService.RevokeSessions:input_type -> auriga.iam.v1.RevokeSessionsRequest
+	4,  // 26: auriga.iam.v1.SessionService.TouchSession:input_type -> auriga.iam.v1.TouchSessionRequest
+	12, // 27: auriga.iam.v1.AccountService.GetAccount:input_type -> auriga.iam.v1.GetAccountRequest
+	14, // 28: auriga.iam.v1.AccountService.BatchGetAccounts:input_type -> auriga.iam.v1.BatchGetAccountsRequest
+	17, // 29: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:input_type -> auriga.iam.v1.GetSigningKeysRequest
+	19, // 30: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:input_type -> auriga.iam.v1.GetPublicKeysRequest
+	7,  // 31: auriga.iam.v1.SessionService.IntrospectSession:output_type -> auriga.iam.v1.IntrospectSessionResponse
+	10, // 32: auriga.iam.v1.SessionService.RevokeSessions:output_type -> auriga.iam.v1.RevokeSessionsResponse
+	5,  // 33: auriga.iam.v1.SessionService.TouchSession:output_type -> auriga.iam.v1.TouchSessionResponse
+	13, // 34: auriga.iam.v1.AccountService.GetAccount:output_type -> auriga.iam.v1.GetAccountResponse
+	15, // 35: auriga.iam.v1.AccountService.BatchGetAccounts:output_type -> auriga.iam.v1.BatchGetAccountsResponse
+	18, // 36: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:output_type -> auriga.iam.v1.GetSigningKeysResponse
+	21, // 37: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:output_type -> auriga.iam.v1.GetPublicKeysResponse
+	31, // [31:38] is the sub-list for method output_type
+	24, // [24:31] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_auriga_iam_v1_iam_proto_init() }
@@ -1269,8 +1569,8 @@ func file_auriga_iam_v1_iam_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_iam_v1_iam_proto_rawDesc), len(file_auriga_iam_v1_iam_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   15,
+			NumEnums:      4,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   3,
 		},

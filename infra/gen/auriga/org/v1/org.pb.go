@@ -805,6 +805,129 @@ func (x *GetEffectivePermissionsResponse) GetPermissions() []string {
 	return nil
 }
 
+type CheckGrantRequest struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// 授予者账号 id。
+	GrantorId string   `protobuf:"bytes,2,opt,name=grantor_id,json=grantorId,proto3" json:"grantor_id,omitempty"`
+	RoleIds   []string `protobuf:"bytes,3,rep,name=role_ids,json=roleIds,proto3" json:"role_ids,omitempty"`
+	// 可选：要检查的组（把人加入组、属性映射到组时）。
+	GroupId       string `protobuf:"bytes,4,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckGrantRequest) Reset() {
+	*x = CheckGrantRequest{}
+	mi := &file_auriga_org_v1_org_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckGrantRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckGrantRequest) ProtoMessage() {}
+
+func (x *CheckGrantRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_org_v1_org_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckGrantRequest.ProtoReflect.Descriptor instead.
+func (*CheckGrantRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CheckGrantRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *CheckGrantRequest) GetGrantorId() string {
+	if x != nil {
+		return x.GrantorId
+	}
+	return ""
+}
+
+func (x *CheckGrantRequest) GetRoleIds() []string {
+	if x != nil {
+		return x.RoleIds
+	}
+	return nil
+}
+
+func (x *CheckGrantRequest) GetGroupId() string {
+	if x != nil {
+		return x.GroupId
+	}
+	return ""
+}
+
+type CheckGrantResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Allowed bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
+	// 超出授予者权限的权限 key。
+	ExceedingPermissions []string `protobuf:"bytes,2,rep,name=exceeding_permissions,json=exceedingPermissions,proto3" json:"exceeding_permissions,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *CheckGrantResponse) Reset() {
+	*x = CheckGrantResponse{}
+	mi := &file_auriga_org_v1_org_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckGrantResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckGrantResponse) ProtoMessage() {}
+
+func (x *CheckGrantResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_org_v1_org_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckGrantResponse.ProtoReflect.Descriptor instead.
+func (*CheckGrantResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CheckGrantResponse) GetAllowed() bool {
+	if x != nil {
+		return x.Allowed
+	}
+	return false
+}
+
+func (x *CheckGrantResponse) GetExceedingPermissions() []string {
+	if x != nil {
+		return x.ExceedingPermissions
+	}
+	return nil
+}
+
 type CheckPermissionRequest struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	TenantId   string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
@@ -818,7 +941,7 @@ type CheckPermissionRequest struct {
 
 func (x *CheckPermissionRequest) Reset() {
 	*x = CheckPermissionRequest{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[12]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -830,7 +953,7 @@ func (x *CheckPermissionRequest) String() string {
 func (*CheckPermissionRequest) ProtoMessage() {}
 
 func (x *CheckPermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[12]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -843,7 +966,7 @@ func (x *CheckPermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckPermissionRequest.ProtoReflect.Descriptor instead.
 func (*CheckPermissionRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{12}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CheckPermissionRequest) GetTenantId() string {
@@ -885,7 +1008,7 @@ type CheckPermissionResponse struct {
 
 func (x *CheckPermissionResponse) Reset() {
 	*x = CheckPermissionResponse{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[13]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -897,7 +1020,7 @@ func (x *CheckPermissionResponse) String() string {
 func (*CheckPermissionResponse) ProtoMessage() {}
 
 func (x *CheckPermissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[13]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -910,7 +1033,7 @@ func (x *CheckPermissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckPermissionResponse.ProtoReflect.Descriptor instead.
 func (*CheckPermissionResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{13}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CheckPermissionResponse) GetAllowed() bool {
@@ -932,7 +1055,7 @@ type Invitation struct {
 	InvitationId string                 `protobuf:"bytes,1,opt,name=invitation_id,json=invitationId,proto3" json:"invitation_id,omitempty"`
 	TenantId     string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	MemberType   MemberType             `protobuf:"varint,3,opt,name=member_type,json=memberType,proto3,enum=auriga.org.v1.MemberType" json:"member_type,omitempty"`
-	RoleKeys     []string               `protobuf:"bytes,4,rep,name=role_keys,json=roleKeys,proto3" json:"role_keys,omitempty"`
+	RoleIds      []string               `protobuf:"bytes,4,rep,name=role_ids,json=roleIds,proto3" json:"role_ids,omitempty"`
 	GroupIds     []string               `protobuf:"bytes,5,rep,name=group_ids,json=groupIds,proto3" json:"group_ids,omitempty"`
 	// 限定受邀人的邮箱，可为空。
 	Email       string                 `protobuf:"bytes,6,opt,name=email,proto3" json:"email,omitempty"`
@@ -948,7 +1071,7 @@ type Invitation struct {
 
 func (x *Invitation) Reset() {
 	*x = Invitation{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[14]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -960,7 +1083,7 @@ func (x *Invitation) String() string {
 func (*Invitation) ProtoMessage() {}
 
 func (x *Invitation) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[14]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -973,7 +1096,7 @@ func (x *Invitation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Invitation.ProtoReflect.Descriptor instead.
 func (*Invitation) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{14}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Invitation) GetInvitationId() string {
@@ -997,9 +1120,9 @@ func (x *Invitation) GetMemberType() MemberType {
 	return MemberType_MEMBER_TYPE_UNSPECIFIED
 }
 
-func (x *Invitation) GetRoleKeys() []string {
+func (x *Invitation) GetRoleIds() []string {
 	if x != nil {
-		return x.RoleKeys
+		return x.RoleIds
 	}
 	return nil
 }
@@ -1055,7 +1178,7 @@ type ResolveInvitationRequest struct {
 
 func (x *ResolveInvitationRequest) Reset() {
 	*x = ResolveInvitationRequest{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[15]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +1190,7 @@ func (x *ResolveInvitationRequest) String() string {
 func (*ResolveInvitationRequest) ProtoMessage() {}
 
 func (x *ResolveInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[15]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +1203,7 @@ func (x *ResolveInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveInvitationRequest.ProtoReflect.Descriptor instead.
 func (*ResolveInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{15}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ResolveInvitationRequest) GetCode() string {
@@ -1101,7 +1224,7 @@ type ResolveInvitationResponse struct {
 
 func (x *ResolveInvitationResponse) Reset() {
 	*x = ResolveInvitationResponse{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[16]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1113,7 +1236,7 @@ func (x *ResolveInvitationResponse) String() string {
 func (*ResolveInvitationResponse) ProtoMessage() {}
 
 func (x *ResolveInvitationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[16]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1126,7 +1249,7 @@ func (x *ResolveInvitationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveInvitationResponse.ProtoReflect.Descriptor instead.
 func (*ResolveInvitationResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{16}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ResolveInvitationResponse) GetInvitation() *Invitation {
@@ -1156,7 +1279,7 @@ type RedeemInvitationRequest struct {
 
 func (x *RedeemInvitationRequest) Reset() {
 	*x = RedeemInvitationRequest{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[17]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1168,7 +1291,7 @@ func (x *RedeemInvitationRequest) String() string {
 func (*RedeemInvitationRequest) ProtoMessage() {}
 
 func (x *RedeemInvitationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[17]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1181,7 +1304,7 @@ func (x *RedeemInvitationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedeemInvitationRequest.ProtoReflect.Descriptor instead.
 func (*RedeemInvitationRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{17}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RedeemInvitationRequest) GetCode() string {
@@ -1228,7 +1351,7 @@ type RedeemInvitationResponse struct {
 
 func (x *RedeemInvitationResponse) Reset() {
 	*x = RedeemInvitationResponse{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[18]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1240,7 +1363,7 @@ func (x *RedeemInvitationResponse) String() string {
 func (*RedeemInvitationResponse) ProtoMessage() {}
 
 func (x *RedeemInvitationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[18]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1253,7 +1376,7 @@ func (x *RedeemInvitationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedeemInvitationResponse.ProtoReflect.Descriptor instead.
 func (*RedeemInvitationResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{18}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RedeemInvitationResponse) GetMember() *Member {
@@ -1273,7 +1396,7 @@ type GetEffectiveQuotaRequest struct {
 
 func (x *GetEffectiveQuotaRequest) Reset() {
 	*x = GetEffectiveQuotaRequest{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[19]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1285,7 +1408,7 @@ func (x *GetEffectiveQuotaRequest) String() string {
 func (*GetEffectiveQuotaRequest) ProtoMessage() {}
 
 func (x *GetEffectiveQuotaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[19]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1298,7 +1421,7 @@ func (x *GetEffectiveQuotaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEffectiveQuotaRequest.ProtoReflect.Descriptor instead.
 func (*GetEffectiveQuotaRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{19}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetEffectiveQuotaRequest) GetTenantId() string {
@@ -1324,7 +1447,7 @@ type GetEffectiveQuotaResponse struct {
 
 func (x *GetEffectiveQuotaResponse) Reset() {
 	*x = GetEffectiveQuotaResponse{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[20]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1336,7 +1459,7 @@ func (x *GetEffectiveQuotaResponse) String() string {
 func (*GetEffectiveQuotaResponse) ProtoMessage() {}
 
 func (x *GetEffectiveQuotaResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[20]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1349,7 +1472,7 @@ func (x *GetEffectiveQuotaResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetEffectiveQuotaResponse.ProtoReflect.Descriptor instead.
 func (*GetEffectiveQuotaResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{20}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GetEffectiveQuotaResponse) GetQuota() *Quota {
@@ -1369,7 +1492,7 @@ type Quota struct {
 
 func (x *Quota) Reset() {
 	*x = Quota{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[21]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1504,7 @@ func (x *Quota) String() string {
 func (*Quota) ProtoMessage() {}
 
 func (x *Quota) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[21]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1517,7 @@ func (x *Quota) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Quota.ProtoReflect.Descriptor instead.
 func (*Quota) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{21}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Quota) GetInstance() *InstanceQuota {
@@ -1411,12 +1534,14 @@ func (x *Quota) GetModel() *ModelQuota {
 	return nil
 }
 
+// 合并后的有效配额：字段不设置（has_xxx 为 false）表示"不限"。
 type InstanceQuota struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	CpuMillis    int64                  `protobuf:"varint,1,opt,name=cpu_millis,json=cpuMillis,proto3" json:"cpu_millis,omitempty"`
-	MemoryMb     int64                  `protobuf:"varint,2,opt,name=memory_mb,json=memoryMb,proto3" json:"memory_mb,omitempty"`
-	DiskGb       int64                  `protobuf:"varint,3,opt,name=disk_gb,json=diskGb,proto3" json:"disk_gb,omitempty"`
-	MaxInstances int64                  `protobuf:"varint,4,opt,name=max_instances,json=maxInstances,proto3" json:"max_instances,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CpuMillis *int64                 `protobuf:"varint,1,opt,name=cpu_millis,json=cpuMillis,proto3,oneof" json:"cpu_millis,omitempty"`
+	MemoryMb  *int64                 `protobuf:"varint,2,opt,name=memory_mb,json=memoryMb,proto3,oneof" json:"memory_mb,omitempty"`
+	DiskGb    *int64                 `protobuf:"varint,3,opt,name=disk_gb,json=diskGb,proto3,oneof" json:"disk_gb,omitempty"`
+	// 0 表示不允许有实例。
+	MaxInstances *int64 `protobuf:"varint,4,opt,name=max_instances,json=maxInstances,proto3,oneof" json:"max_instances,omitempty"`
 	// 允许常驻（不做闲置回收）。
 	AlwaysOnAllowed bool `protobuf:"varint,5,opt,name=always_on_allowed,json=alwaysOnAllowed,proto3" json:"always_on_allowed,omitempty"`
 	unknownFields   protoimpl.UnknownFields
@@ -1425,7 +1550,7 @@ type InstanceQuota struct {
 
 func (x *InstanceQuota) Reset() {
 	*x = InstanceQuota{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[22]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1437,7 +1562,7 @@ func (x *InstanceQuota) String() string {
 func (*InstanceQuota) ProtoMessage() {}
 
 func (x *InstanceQuota) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[22]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1450,33 +1575,33 @@ func (x *InstanceQuota) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstanceQuota.ProtoReflect.Descriptor instead.
 func (*InstanceQuota) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{22}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *InstanceQuota) GetCpuMillis() int64 {
-	if x != nil {
-		return x.CpuMillis
+	if x != nil && x.CpuMillis != nil {
+		return *x.CpuMillis
 	}
 	return 0
 }
 
 func (x *InstanceQuota) GetMemoryMb() int64 {
-	if x != nil {
-		return x.MemoryMb
+	if x != nil && x.MemoryMb != nil {
+		return *x.MemoryMb
 	}
 	return 0
 }
 
 func (x *InstanceQuota) GetDiskGb() int64 {
-	if x != nil {
-		return x.DiskGb
+	if x != nil && x.DiskGb != nil {
+		return *x.DiskGb
 	}
 	return 0
 }
 
 func (x *InstanceQuota) GetMaxInstances() int64 {
-	if x != nil {
-		return x.MaxInstances
+	if x != nil && x.MaxInstances != nil {
+		return *x.MaxInstances
 	}
 	return 0
 }
@@ -1490,19 +1615,19 @@ func (x *InstanceQuota) GetAlwaysOnAllowed() bool {
 
 type ModelQuota struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// 每月预算，百万分之一货币单位；0 表示不限。
-	MonthlyBudgetMicros int64 `protobuf:"varint,1,opt,name=monthly_budget_micros,json=monthlyBudgetMicros,proto3" json:"monthly_budget_micros,omitempty"`
+	// 每月预算，百万分之一货币单位。
+	MonthlyBudgetMicros *int64 `protobuf:"varint,1,opt,name=monthly_budget_micros,json=monthlyBudgetMicros,proto3,oneof" json:"monthly_budget_micros,omitempty"`
 	// ISO 4217，例如 `CNY`、`USD`。
 	Currency string `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	// 每日 token 上限；0 表示不限。
-	DailyTokens   int64 `protobuf:"varint,3,opt,name=daily_tokens,json=dailyTokens,proto3" json:"daily_tokens,omitempty"`
+	// 每日 token 上限。
+	DailyTokens   *int64 `protobuf:"varint,3,opt,name=daily_tokens,json=dailyTokens,proto3,oneof" json:"daily_tokens,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ModelQuota) Reset() {
 	*x = ModelQuota{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[23]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1514,7 +1639,7 @@ func (x *ModelQuota) String() string {
 func (*ModelQuota) ProtoMessage() {}
 
 func (x *ModelQuota) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[23]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1527,12 +1652,12 @@ func (x *ModelQuota) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelQuota.ProtoReflect.Descriptor instead.
 func (*ModelQuota) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{23}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ModelQuota) GetMonthlyBudgetMicros() int64 {
-	if x != nil {
-		return x.MonthlyBudgetMicros
+	if x != nil && x.MonthlyBudgetMicros != nil {
+		return *x.MonthlyBudgetMicros
 	}
 	return 0
 }
@@ -1545,8 +1670,8 @@ func (x *ModelQuota) GetCurrency() string {
 }
 
 func (x *ModelQuota) GetDailyTokens() int64 {
-	if x != nil {
-		return x.DailyTokens
+	if x != nil && x.DailyTokens != nil {
+		return *x.DailyTokens
 	}
 	return 0
 }
@@ -1562,7 +1687,7 @@ type GetPolicyRequest struct {
 
 func (x *GetPolicyRequest) Reset() {
 	*x = GetPolicyRequest{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[24]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +1699,7 @@ func (x *GetPolicyRequest) String() string {
 func (*GetPolicyRequest) ProtoMessage() {}
 
 func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[24]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +1712,7 @@ func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyRequest.ProtoReflect.Descriptor instead.
 func (*GetPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{24}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetPolicyRequest) GetTenantId() string {
@@ -1617,7 +1742,7 @@ type GetPolicyResponse struct {
 
 func (x *GetPolicyResponse) Reset() {
 	*x = GetPolicyResponse{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1629,7 +1754,7 @@ func (x *GetPolicyResponse) String() string {
 func (*GetPolicyResponse) ProtoMessage() {}
 
 func (x *GetPolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1642,7 +1767,7 @@ func (x *GetPolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyResponse.ProtoReflect.Descriptor instead.
 func (*GetPolicyResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{25}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetPolicyResponse) GetKey() string {
@@ -1719,7 +1844,16 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"memberType\x123\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x1b.auriga.org.v1.MemberStatusR\x06status\x12\x1b\n" +
 	"\trole_keys\x18\x03 \x03(\tR\broleKeys\x12 \n" +
-	"\vpermissions\x18\x04 \x03(\tR\vpermissions\"\x90\x01\n" +
+	"\vpermissions\x18\x04 \x03(\tR\vpermissions\"\x85\x01\n" +
+	"\x11CheckGrantRequest\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1d\n" +
+	"\n" +
+	"grantor_id\x18\x02 \x01(\tR\tgrantorId\x12\x19\n" +
+	"\brole_ids\x18\x03 \x03(\tR\aroleIds\x12\x19\n" +
+	"\bgroup_id\x18\x04 \x01(\tR\agroupId\"c\n" +
+	"\x12CheckGrantResponse\x12\x18\n" +
+	"\aallowed\x18\x01 \x01(\bR\aallowed\x123\n" +
+	"\x15exceeding_permissions\x18\x02 \x03(\tR\x14exceedingPermissions\"\x90\x01\n" +
 	"\x16CheckPermissionRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1d\n" +
 	"\n" +
@@ -1730,14 +1864,14 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"\bresource\x18\x04 \x01(\tR\bresource\"K\n" +
 	"\x17CheckPermissionResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x82\x03\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x80\x03\n" +
 	"\n" +
 	"Invitation\x12#\n" +
 	"\rinvitation_id\x18\x01 \x01(\tR\finvitationId\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12:\n" +
 	"\vmember_type\x18\x03 \x01(\x0e2\x19.auriga.org.v1.MemberTypeR\n" +
-	"memberType\x12\x1b\n" +
-	"\trole_keys\x18\x04 \x03(\tR\broleKeys\x12\x1b\n" +
+	"memberType\x12\x19\n" +
+	"\brole_ids\x18\x04 \x03(\tR\aroleIds\x12\x1b\n" +
 	"\tgroup_ids\x18\x05 \x03(\tR\bgroupIds\x12\x14\n" +
 	"\x05email\x18\x06 \x01(\tR\x05email\x12!\n" +
 	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\x129\n" +
@@ -1771,19 +1905,27 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"\x05quota\x18\x01 \x01(\v2\x14.auriga.org.v1.QuotaR\x05quota\"r\n" +
 	"\x05Quota\x128\n" +
 	"\binstance\x18\x01 \x01(\v2\x1c.auriga.org.v1.InstanceQuotaR\binstance\x12/\n" +
-	"\x05model\x18\x02 \x01(\v2\x19.auriga.org.v1.ModelQuotaR\x05model\"\xb5\x01\n" +
-	"\rInstanceQuota\x12\x1d\n" +
+	"\x05model\x18\x02 \x01(\v2\x19.auriga.org.v1.ModelQuotaR\x05model\"\x84\x02\n" +
+	"\rInstanceQuota\x12\"\n" +
 	"\n" +
-	"cpu_millis\x18\x01 \x01(\x03R\tcpuMillis\x12\x1b\n" +
-	"\tmemory_mb\x18\x02 \x01(\x03R\bmemoryMb\x12\x17\n" +
-	"\adisk_gb\x18\x03 \x01(\x03R\x06diskGb\x12#\n" +
-	"\rmax_instances\x18\x04 \x01(\x03R\fmaxInstances\x12*\n" +
-	"\x11always_on_allowed\x18\x05 \x01(\bR\x0falwaysOnAllowed\"\x7f\n" +
+	"cpu_millis\x18\x01 \x01(\x03H\x00R\tcpuMillis\x88\x01\x01\x12 \n" +
+	"\tmemory_mb\x18\x02 \x01(\x03H\x01R\bmemoryMb\x88\x01\x01\x12\x1c\n" +
+	"\adisk_gb\x18\x03 \x01(\x03H\x02R\x06diskGb\x88\x01\x01\x12(\n" +
+	"\rmax_instances\x18\x04 \x01(\x03H\x03R\fmaxInstances\x88\x01\x01\x12*\n" +
+	"\x11always_on_allowed\x18\x05 \x01(\bR\x0falwaysOnAllowedB\r\n" +
+	"\v_cpu_millisB\f\n" +
 	"\n" +
-	"ModelQuota\x122\n" +
-	"\x15monthly_budget_micros\x18\x01 \x01(\x03R\x13monthlyBudgetMicros\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\x12!\n" +
-	"\fdaily_tokens\x18\x03 \x01(\x03R\vdailyTokens\"A\n" +
+	"_memory_mbB\n" +
+	"\n" +
+	"\b_disk_gbB\x10\n" +
+	"\x0e_max_instances\"\xb4\x01\n" +
+	"\n" +
+	"ModelQuota\x127\n" +
+	"\x15monthly_budget_micros\x18\x01 \x01(\x03H\x00R\x13monthlyBudgetMicros\x88\x01\x01\x12\x1a\n" +
+	"\bcurrency\x18\x02 \x01(\tR\bcurrency\x12&\n" +
+	"\fdaily_tokens\x18\x03 \x01(\x03H\x01R\vdailyTokens\x88\x01\x01B\x18\n" +
+	"\x16_monthly_budget_microsB\x0f\n" +
+	"\r_daily_tokens\"A\n" +
 	"\x10GetPolicyRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\"n\n" +
@@ -1806,8 +1948,10 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"\x13ResolveTenantByHost\x12).auriga.org.v1.ResolveTenantByHostRequest\x1a*.auriga.org.v1.ResolveTenantByHostResponse2\xc1\x01\n" +
 	"\rMemberService\x12N\n" +
 	"\tGetMember\x12\x1f.auriga.org.v1.GetMemberRequest\x1a .auriga.org.v1.GetMemberResponse\x12`\n" +
-	"\x0fBatchGetMembers\x12%.auriga.org.v1.BatchGetMembersRequest\x1a&.auriga.org.v1.BatchGetMembersResponse2\xf2\x01\n" +
-	"\x14AuthorizationService\x12x\n" +
+	"\x0fBatchGetMembers\x12%.auriga.org.v1.BatchGetMembersRequest\x1a&.auriga.org.v1.BatchGetMembersResponse2\xc5\x02\n" +
+	"\x14AuthorizationService\x12Q\n" +
+	"\n" +
+	"CheckGrant\x12 .auriga.org.v1.CheckGrantRequest\x1a!.auriga.org.v1.CheckGrantResponse\x12x\n" +
 	"\x17GetEffectivePermissions\x12-.auriga.org.v1.GetEffectivePermissionsRequest\x1a..auriga.org.v1.GetEffectivePermissionsResponse\x12`\n" +
 	"\x0fCheckPermission\x12%.auriga.org.v1.CheckPermissionRequest\x1a&.auriga.org.v1.CheckPermissionResponse2\xe0\x01\n" +
 	"\x11InvitationService\x12f\n" +
@@ -1832,7 +1976,7 @@ func file_auriga_org_v1_org_proto_rawDescGZIP() []byte {
 }
 
 var file_auriga_org_v1_org_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_auriga_org_v1_org_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_auriga_org_v1_org_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_auriga_org_v1_org_proto_goTypes = []any{
 	(MemberType)(0),                         // 0: auriga.org.v1.MemberType
 	(MemberStatus)(0),                       // 1: auriga.org.v1.MemberStatus
@@ -1848,63 +1992,67 @@ var file_auriga_org_v1_org_proto_goTypes = []any{
 	(*BatchGetMembersResponse)(nil),         // 11: auriga.org.v1.BatchGetMembersResponse
 	(*GetEffectivePermissionsRequest)(nil),  // 12: auriga.org.v1.GetEffectivePermissionsRequest
 	(*GetEffectivePermissionsResponse)(nil), // 13: auriga.org.v1.GetEffectivePermissionsResponse
-	(*CheckPermissionRequest)(nil),          // 14: auriga.org.v1.CheckPermissionRequest
-	(*CheckPermissionResponse)(nil),         // 15: auriga.org.v1.CheckPermissionResponse
-	(*Invitation)(nil),                      // 16: auriga.org.v1.Invitation
-	(*ResolveInvitationRequest)(nil),        // 17: auriga.org.v1.ResolveInvitationRequest
-	(*ResolveInvitationResponse)(nil),       // 18: auriga.org.v1.ResolveInvitationResponse
-	(*RedeemInvitationRequest)(nil),         // 19: auriga.org.v1.RedeemInvitationRequest
-	(*RedeemInvitationResponse)(nil),        // 20: auriga.org.v1.RedeemInvitationResponse
-	(*GetEffectiveQuotaRequest)(nil),        // 21: auriga.org.v1.GetEffectiveQuotaRequest
-	(*GetEffectiveQuotaResponse)(nil),       // 22: auriga.org.v1.GetEffectiveQuotaResponse
-	(*Quota)(nil),                           // 23: auriga.org.v1.Quota
-	(*InstanceQuota)(nil),                   // 24: auriga.org.v1.InstanceQuota
-	(*ModelQuota)(nil),                      // 25: auriga.org.v1.ModelQuota
-	(*GetPolicyRequest)(nil),                // 26: auriga.org.v1.GetPolicyRequest
-	(*GetPolicyResponse)(nil),               // 27: auriga.org.v1.GetPolicyResponse
-	(*timestamppb.Timestamp)(nil),           // 28: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),                 // 29: google.protobuf.Struct
+	(*CheckGrantRequest)(nil),               // 14: auriga.org.v1.CheckGrantRequest
+	(*CheckGrantResponse)(nil),              // 15: auriga.org.v1.CheckGrantResponse
+	(*CheckPermissionRequest)(nil),          // 16: auriga.org.v1.CheckPermissionRequest
+	(*CheckPermissionResponse)(nil),         // 17: auriga.org.v1.CheckPermissionResponse
+	(*Invitation)(nil),                      // 18: auriga.org.v1.Invitation
+	(*ResolveInvitationRequest)(nil),        // 19: auriga.org.v1.ResolveInvitationRequest
+	(*ResolveInvitationResponse)(nil),       // 20: auriga.org.v1.ResolveInvitationResponse
+	(*RedeemInvitationRequest)(nil),         // 21: auriga.org.v1.RedeemInvitationRequest
+	(*RedeemInvitationResponse)(nil),        // 22: auriga.org.v1.RedeemInvitationResponse
+	(*GetEffectiveQuotaRequest)(nil),        // 23: auriga.org.v1.GetEffectiveQuotaRequest
+	(*GetEffectiveQuotaResponse)(nil),       // 24: auriga.org.v1.GetEffectiveQuotaResponse
+	(*Quota)(nil),                           // 25: auriga.org.v1.Quota
+	(*InstanceQuota)(nil),                   // 26: auriga.org.v1.InstanceQuota
+	(*ModelQuota)(nil),                      // 27: auriga.org.v1.ModelQuota
+	(*GetPolicyRequest)(nil),                // 28: auriga.org.v1.GetPolicyRequest
+	(*GetPolicyResponse)(nil),               // 29: auriga.org.v1.GetPolicyResponse
+	(*timestamppb.Timestamp)(nil),           // 30: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),                 // 31: google.protobuf.Struct
 }
 var file_auriga_org_v1_org_proto_depIdxs = []int32{
 	2,  // 0: auriga.org.v1.GetTenantResponse.tenant:type_name -> auriga.org.v1.Tenant
 	2,  // 1: auriga.org.v1.ResolveTenantByHostResponse.tenant:type_name -> auriga.org.v1.Tenant
 	0,  // 2: auriga.org.v1.Member.member_type:type_name -> auriga.org.v1.MemberType
 	1,  // 3: auriga.org.v1.Member.status:type_name -> auriga.org.v1.MemberStatus
-	28, // 4: auriga.org.v1.Member.created_at:type_name -> google.protobuf.Timestamp
+	30, // 4: auriga.org.v1.Member.created_at:type_name -> google.protobuf.Timestamp
 	7,  // 5: auriga.org.v1.GetMemberResponse.member:type_name -> auriga.org.v1.Member
 	7,  // 6: auriga.org.v1.BatchGetMembersResponse.members:type_name -> auriga.org.v1.Member
 	0,  // 7: auriga.org.v1.GetEffectivePermissionsResponse.member_type:type_name -> auriga.org.v1.MemberType
 	1,  // 8: auriga.org.v1.GetEffectivePermissionsResponse.status:type_name -> auriga.org.v1.MemberStatus
 	0,  // 9: auriga.org.v1.Invitation.member_type:type_name -> auriga.org.v1.MemberType
-	28, // 10: auriga.org.v1.Invitation.expires_at:type_name -> google.protobuf.Timestamp
-	16, // 11: auriga.org.v1.ResolveInvitationResponse.invitation:type_name -> auriga.org.v1.Invitation
+	30, // 10: auriga.org.v1.Invitation.expires_at:type_name -> google.protobuf.Timestamp
+	18, // 11: auriga.org.v1.ResolveInvitationResponse.invitation:type_name -> auriga.org.v1.Invitation
 	7,  // 12: auriga.org.v1.RedeemInvitationResponse.member:type_name -> auriga.org.v1.Member
-	23, // 13: auriga.org.v1.GetEffectiveQuotaResponse.quota:type_name -> auriga.org.v1.Quota
-	24, // 14: auriga.org.v1.Quota.instance:type_name -> auriga.org.v1.InstanceQuota
-	25, // 15: auriga.org.v1.Quota.model:type_name -> auriga.org.v1.ModelQuota
-	29, // 16: auriga.org.v1.GetPolicyResponse.value:type_name -> google.protobuf.Struct
+	25, // 13: auriga.org.v1.GetEffectiveQuotaResponse.quota:type_name -> auriga.org.v1.Quota
+	26, // 14: auriga.org.v1.Quota.instance:type_name -> auriga.org.v1.InstanceQuota
+	27, // 15: auriga.org.v1.Quota.model:type_name -> auriga.org.v1.ModelQuota
+	31, // 16: auriga.org.v1.GetPolicyResponse.value:type_name -> google.protobuf.Struct
 	3,  // 17: auriga.org.v1.TenantService.GetTenant:input_type -> auriga.org.v1.GetTenantRequest
 	5,  // 18: auriga.org.v1.TenantService.ResolveTenantByHost:input_type -> auriga.org.v1.ResolveTenantByHostRequest
 	8,  // 19: auriga.org.v1.MemberService.GetMember:input_type -> auriga.org.v1.GetMemberRequest
 	10, // 20: auriga.org.v1.MemberService.BatchGetMembers:input_type -> auriga.org.v1.BatchGetMembersRequest
-	12, // 21: auriga.org.v1.AuthorizationService.GetEffectivePermissions:input_type -> auriga.org.v1.GetEffectivePermissionsRequest
-	14, // 22: auriga.org.v1.AuthorizationService.CheckPermission:input_type -> auriga.org.v1.CheckPermissionRequest
-	17, // 23: auriga.org.v1.InvitationService.ResolveInvitation:input_type -> auriga.org.v1.ResolveInvitationRequest
-	19, // 24: auriga.org.v1.InvitationService.RedeemInvitation:input_type -> auriga.org.v1.RedeemInvitationRequest
-	21, // 25: auriga.org.v1.QuotaService.GetEffectiveQuota:input_type -> auriga.org.v1.GetEffectiveQuotaRequest
-	26, // 26: auriga.org.v1.PolicyService.GetPolicy:input_type -> auriga.org.v1.GetPolicyRequest
-	4,  // 27: auriga.org.v1.TenantService.GetTenant:output_type -> auriga.org.v1.GetTenantResponse
-	6,  // 28: auriga.org.v1.TenantService.ResolveTenantByHost:output_type -> auriga.org.v1.ResolveTenantByHostResponse
-	9,  // 29: auriga.org.v1.MemberService.GetMember:output_type -> auriga.org.v1.GetMemberResponse
-	11, // 30: auriga.org.v1.MemberService.BatchGetMembers:output_type -> auriga.org.v1.BatchGetMembersResponse
-	13, // 31: auriga.org.v1.AuthorizationService.GetEffectivePermissions:output_type -> auriga.org.v1.GetEffectivePermissionsResponse
-	15, // 32: auriga.org.v1.AuthorizationService.CheckPermission:output_type -> auriga.org.v1.CheckPermissionResponse
-	18, // 33: auriga.org.v1.InvitationService.ResolveInvitation:output_type -> auriga.org.v1.ResolveInvitationResponse
-	20, // 34: auriga.org.v1.InvitationService.RedeemInvitation:output_type -> auriga.org.v1.RedeemInvitationResponse
-	22, // 35: auriga.org.v1.QuotaService.GetEffectiveQuota:output_type -> auriga.org.v1.GetEffectiveQuotaResponse
-	27, // 36: auriga.org.v1.PolicyService.GetPolicy:output_type -> auriga.org.v1.GetPolicyResponse
-	27, // [27:37] is the sub-list for method output_type
-	17, // [17:27] is the sub-list for method input_type
+	14, // 21: auriga.org.v1.AuthorizationService.CheckGrant:input_type -> auriga.org.v1.CheckGrantRequest
+	12, // 22: auriga.org.v1.AuthorizationService.GetEffectivePermissions:input_type -> auriga.org.v1.GetEffectivePermissionsRequest
+	16, // 23: auriga.org.v1.AuthorizationService.CheckPermission:input_type -> auriga.org.v1.CheckPermissionRequest
+	19, // 24: auriga.org.v1.InvitationService.ResolveInvitation:input_type -> auriga.org.v1.ResolveInvitationRequest
+	21, // 25: auriga.org.v1.InvitationService.RedeemInvitation:input_type -> auriga.org.v1.RedeemInvitationRequest
+	23, // 26: auriga.org.v1.QuotaService.GetEffectiveQuota:input_type -> auriga.org.v1.GetEffectiveQuotaRequest
+	28, // 27: auriga.org.v1.PolicyService.GetPolicy:input_type -> auriga.org.v1.GetPolicyRequest
+	4,  // 28: auriga.org.v1.TenantService.GetTenant:output_type -> auriga.org.v1.GetTenantResponse
+	6,  // 29: auriga.org.v1.TenantService.ResolveTenantByHost:output_type -> auriga.org.v1.ResolveTenantByHostResponse
+	9,  // 30: auriga.org.v1.MemberService.GetMember:output_type -> auriga.org.v1.GetMemberResponse
+	11, // 31: auriga.org.v1.MemberService.BatchGetMembers:output_type -> auriga.org.v1.BatchGetMembersResponse
+	15, // 32: auriga.org.v1.AuthorizationService.CheckGrant:output_type -> auriga.org.v1.CheckGrantResponse
+	13, // 33: auriga.org.v1.AuthorizationService.GetEffectivePermissions:output_type -> auriga.org.v1.GetEffectivePermissionsResponse
+	17, // 34: auriga.org.v1.AuthorizationService.CheckPermission:output_type -> auriga.org.v1.CheckPermissionResponse
+	20, // 35: auriga.org.v1.InvitationService.ResolveInvitation:output_type -> auriga.org.v1.ResolveInvitationResponse
+	22, // 36: auriga.org.v1.InvitationService.RedeemInvitation:output_type -> auriga.org.v1.RedeemInvitationResponse
+	24, // 37: auriga.org.v1.QuotaService.GetEffectiveQuota:output_type -> auriga.org.v1.GetEffectiveQuotaResponse
+	29, // 38: auriga.org.v1.PolicyService.GetPolicy:output_type -> auriga.org.v1.GetPolicyResponse
+	28, // [28:39] is the sub-list for method output_type
+	17, // [17:28] is the sub-list for method input_type
 	17, // [17:17] is the sub-list for extension type_name
 	17, // [17:17] is the sub-list for extension extendee
 	0,  // [0:17] is the sub-list for field type_name
@@ -1915,13 +2063,15 @@ func file_auriga_org_v1_org_proto_init() {
 	if File_auriga_org_v1_org_proto != nil {
 		return
 	}
+	file_auriga_org_v1_org_proto_msgTypes[24].OneofWrappers = []any{}
+	file_auriga_org_v1_org_proto_msgTypes[25].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_org_v1_org_proto_rawDesc), len(file_auriga_org_v1_org_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   26,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   6,
 		},

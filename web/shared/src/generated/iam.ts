@@ -115,7 +115,11 @@ export interface paths {
      */
     get: operations['loginCallbackGet'];
     put?: never;
-    /** 回调（POST 绑定，例如 SAML、Apple） */
+    /**
+     * 回调（POST 绑定，例如 SAML、Apple）
+     * @description 跨站 POST 不会带 SameSite=Lax 的事务 cookie：iam 把表单参数暂存（5 分钟、一次性，按随机 resume 键），
+     *     然后 303 跳到同源的 GET /login/callback/{providerId}?resume=<键>，在 GET 里校验事务 cookie 后继续。
+     */
     post: operations['loginCallbackPost'];
     delete?: never;
     options?: never;
@@ -134,7 +138,8 @@ export interface paths {
     };
     /**
      * 手机扫码后查看登录请求（内置扫码）
-     * @description 手机端已登录；返回发起端信息和三个候选比对码，用户选出和电脑上一致的那个。
+     * @description 手机端已登录；返回发起端信息，用户在手机上**输入**电脑上显示的两位比对码。
+     *     purpose 为 link 或 stepup 时，手机端的账号必须等于事务所属的账号，否则 403。
      */
     get: operations['getQrChallenge'];
     put?: never;
@@ -483,6 +488,7 @@ export interface paths {
       query?: never;
       header?: never;
       path: {
+        /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
         userCode: components['parameters']['UserCode'];
       };
       cookie?: never;
@@ -502,12 +508,14 @@ export interface paths {
       query?: never;
       header?: never;
       path: {
+        /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
         userCode: components['parameters']['UserCode'];
       };
       cookie?: never;
     };
     get?: never;
     put?: never;
+    /** @description 要求 10 分钟内做过二次验证（否则 403 iam.step_up_required）；页面必须让用户手动输入或逐字核对 userCode，并显示发起端 IP。 */
     post: operations['approveDeviceRequest'];
     delete?: never;
     options?: never;
@@ -520,6 +528,7 @@ export interface paths {
       query?: never;
       header?: never;
       path: {
+        /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
         userCode: components['parameters']['UserCode'];
       };
       cookie?: never;
@@ -559,6 +568,23 @@ export interface paths {
     get?: never;
     put?: never;
     post: operations['registerRemoteConnector'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/connectors/remote/{type}/rotate-secret': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description 生成新的共享密钥，只返回这一次。过渡期（默认 24 小时）内平台同时用新旧两个密钥签名，之后旧密钥作废。 */
+    post: operations['rotateRemoteConnectorSecret'];
     delete?: never;
     options?: never;
     head?: never;
@@ -875,8 +901,9 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * 立即轮换 edge 身份头签名密钥
-     * @description 生成新的 NEXT 密钥并把现有 NEXT 提升为 CURRENT。实例在下一次规格下发时拿到新公钥，不需要重启。
+     * 轮换 edge 身份头签名密钥
+     * @description mode=scheduled：生成新的 NEXT；只有在所有运行中实例的规格都已包含它（或超过固定传播期，默认 24 小时）之后，edge 才把它切成 CURRENT，旧的转为 RETIRING。
+     *     mode=compromise：立即把当前密钥标为 REVOKED，edge 改用新密钥，下发规格让实例立即删除被吊销的 kid（来不及更新的实例会暂时 401，这是预期）。
      */
     post: operations['rotateIdentityHeaderKey'];
     delete?: never;
@@ -910,17 +937,8 @@ export interface components {
        */
       purpose: 'login' | 'link' | 'stepup';
       invitationCode?: string;
-      /**
-       * Format: uri-reference
-       * @description 完成后回到哪里；只接受本平台的相对路径。
-       */
+      /** @description 完成后回到哪里；只接受本平台的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化。会话发给门户还是管理台由 edge 按 Host 决定。 */
       returnTo?: string;
-      /**
-       * @description 会话发给门户还是管理台。
-       * @default portal
-       * @enum {string}
-       */
-      audience: 'portal' | 'admin';
     };
     LoginTransaction: {
       id: components['schemas']['Uuid'];
@@ -947,7 +965,6 @@ export interface components {
       };
       /** @enum {string} */
       purpose: 'login' | 'link' | 'stepup';
-      matchCandidates: string[];
       /** Format: date-time */
       expiresAt: string;
     };
@@ -1052,11 +1069,13 @@ export interface components {
       clientId: string;
       clientName: components['schemas']['LocalizedText'];
       scopes: string[];
-      device?: {
+      device: {
         name?: string;
         platform?: string;
         clientVersion?: string;
-        ip?: string;
+        ip: string;
+        /** @description 按 IP 粗略推断的位置，可能为空。 */
+        location?: string;
       };
       /** Format: date-time */
       expiresAt: string;
@@ -1077,19 +1096,30 @@ export interface components {
        * @enum {string}
        */
       mode: 'invite_only' | 'auto_provision' | 'linked_only';
-      /** @description mode=auto_provision 时，外部属性满足任一规则即自动开通。 */
+      /**
+       * @description 是否信任连接器上报的 mfaPerformed；false 时平台按 mfa 设置自己补验证。
+       * @default false
+       */
+      trustExternalMfa: boolean;
+      /** @description mode=auto_provision 时，外部属性满足任一规则即自动开通。规则用到 email 时，ExternalProfile.emailVerified 不为 true 一律不匹配。 */
       autoProvisionRules?: {
         /** @description 外部属性路径，例如 `email`、`organization.department`、`attributes.groups`。 */
         attribute: string;
         /** @enum {string} */
         operator: 'equals' | 'suffix' | 'prefix' | 'in' | 'contains';
         value: string | string[];
+        /**
+         * @description attribute 有对应的"已验证"标记时（例如 email ↔ emailVerified），要求已验证。
+         * @default true
+         */
+        requireVerified: boolean;
       }[];
       /**
        * @default member
        * @enum {string}
        */
       defaultMemberType: 'member' | 'external';
+      /** @description 映射到组时，保存配置前检查组的有效权限是否在操作者权限之内（超管上限，org.grant_exceeds_own）。 */
       attributeMapping?: {
         from: string;
         /** @enum {string} */
@@ -1163,11 +1193,10 @@ export interface components {
       /** Format: date-time */
       rotatedAt?: string;
     };
+    /** @description 服务账号的角色在 org 用角色绑定管理（subject.type=service_account），这里不重复保存。 */
     ServiceAccountInput: {
       name: string;
       description?: string;
-      /** @description 角色在 org 管理；授予时同样受"不超过自己的权限"限制。 */
-      roleIds?: components['schemas']['Uuid'][];
       /** @default true */
       enabled: boolean;
     };
@@ -1175,7 +1204,6 @@ export interface components {
       id: components['schemas']['Uuid'];
       name: string;
       description?: string;
-      roleIds: components['schemas']['Uuid'][];
       enabled: boolean;
       clientId: string;
       secrets: {
@@ -1226,6 +1254,7 @@ export interface components {
       type: 'qr';
       /** @description 要编码进二维码的字符串（通常是 URL）。 */
       content: string;
+      /** @description 两位比对码。手机端确认时必须**输入**这两位数字（不是从候选里选）。 */
       matchCode: string;
       /**
        * @default waiting
@@ -1320,7 +1349,7 @@ export interface components {
     CompleteStep: {
       /** @constant */
       type: 'complete';
-      /** Format: uri-reference */
+      /** @description 只能是本平台的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化。 */
       redirectTo: string;
     };
     /** @description 出错。登录页按 code 显示统一的错误文案；retryable=true 时提供重试按钮。 */
@@ -1405,7 +1434,7 @@ export interface components {
           data?: Record<string, never>;
         };
     ConnectorDescriptor: {
-      /** @description 连接器类型，全局唯一，例如 `team-account`、`emergency`、`oidc`、`example-sso`。 */
+      /** @description 连接器类型，全局唯一，例如 `team-account`、`emergency`、`oidc`、`example-sso`。远程连接器的类型必须以 `remote-` 开头，平台拒绝与内置或已有类型重名。 */
       type: string;
       /**
        * @description 实现的 SPI 主版本。平台拒绝加载不兼容的版本。
@@ -1491,8 +1520,8 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
+    /** @description 没有权限（common.forbidden 或更具体的码）。 */
+    Forbidden: {
       headers: {
         [name: string]: unknown;
       };
@@ -1500,8 +1529,8 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 没有权限（common.forbidden 或更具体的码）。 */
-    Forbidden: {
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
       headers: {
         [name: string]: unknown;
       };
@@ -1533,6 +1562,7 @@ export interface components {
     ProviderId: components['schemas']['Uuid'];
     AccountId: components['schemas']['Uuid'];
     ServiceAccountId: components['schemas']['Uuid'];
+    /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
     UserCode: string;
     IdempotencyKey: string;
     /** @description 资源的 ETag；不匹配返回 412。 */
@@ -1742,8 +1772,8 @@ export interface operations {
       };
     };
     responses: {
-      /** @description 回到登录页 */
-      302: {
+      /** @description 跳到同源 GET 回调继续 */
+      303: {
         headers: {
           [name: string]: unknown;
         };
@@ -1798,7 +1828,8 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description 比对码不对（iam.qr_match_mismatch，挑战作废）或已过期 */
+      403: components['responses']['Forbidden'];
+      /** @description 比对码不对（iam.qr_match_mismatch，挑战立即作废，发起端需重新扫码）或已过期 */
       409: {
         headers: {
           [name: string]: unknown;
@@ -2291,6 +2322,7 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
         userCode: components['parameters']['UserCode'];
       };
       cookie?: never;
@@ -2307,6 +2339,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      429: components['responses']['RateLimited'];
     };
   };
   approveDeviceRequest: {
@@ -2314,6 +2347,7 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
         userCode: components['parameters']['UserCode'];
       };
       cookie?: never;
@@ -2333,7 +2367,9 @@ export interface operations {
         };
         content?: never;
       };
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      429: components['responses']['RateLimited'];
     };
   };
   denyDeviceRequest: {
@@ -2341,6 +2377,7 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description 8 位、不含元音的大写字母，可带一个连字符，例如 BCDF-GHJK。 */
         userCode: components['parameters']['UserCode'];
       };
       cookie?: never;
@@ -2407,6 +2444,32 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
+    };
+  };
+  rotateRemoteConnectorSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        type: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 新密钥 */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            sharedSecret: string;
+            /** Format: date-time */
+            oldSecretExpiresAt: string;
+          };
+        };
+      };
     };
   };
   unregisterRemoteConnector: {
@@ -2993,7 +3056,14 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': {
+          /** @enum {string} */
+          mode: 'scheduled' | 'compromise';
+        };
+      };
+    };
     responses: {
       /** @description 已开始轮换 */
       202: {

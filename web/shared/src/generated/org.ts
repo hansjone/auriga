@@ -15,6 +15,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/me/quota': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get: operations['getMyEffectiveQuota'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/tenant': {
     parameters: {
       query?: never;
@@ -28,10 +44,26 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/tenant': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
     patch: operations['updateTenant'];
     trace?: never;
   };
-  '/members': {
+  '/admin/members': {
     parameters: {
       query?: never;
       header?: never;
@@ -47,7 +79,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/members/{accountId}': {
+  '/admin/members/{accountId}': {
     parameters: {
       query?: never;
       header?: never;
@@ -65,7 +97,7 @@ export interface paths {
     patch: operations['updateMember'];
     trace?: never;
   };
-  '/members/{accountId}/disable': {
+  '/admin/members/{accountId}/disable': {
     parameters: {
       query?: never;
       header?: never;
@@ -84,7 +116,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/members/{accountId}/enable': {
+  '/admin/members/{accountId}/enable': {
     parameters: {
       query?: never;
       header?: never;
@@ -102,7 +134,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/members/{accountId}/offboard': {
+  '/admin/members/{accountId}/offboard': {
     parameters: {
       query?: never;
       header?: never;
@@ -121,7 +153,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/members/{accountId}/role-bindings': {
+  '/admin/members/{accountId}/role-bindings': {
     parameters: {
       query?: never;
       header?: never;
@@ -140,7 +172,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/groups': {
+  '/admin/groups': {
     parameters: {
       query?: never;
       header?: never;
@@ -156,7 +188,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/groups/{groupId}': {
+  '/admin/groups/{groupId}': {
     parameters: {
       query?: never;
       header?: never;
@@ -175,7 +207,7 @@ export interface paths {
     patch: operations['updateGroup'];
     trace?: never;
   };
-  '/groups/{groupId}/members': {
+  '/admin/groups/{groupId}/members': {
     parameters: {
       query?: never;
       header?: never;
@@ -193,7 +225,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/groups/{groupId}/members/{accountId}': {
+  '/admin/groups/{groupId}/members/{accountId}': {
     parameters: {
       query?: never;
       header?: never;
@@ -212,7 +244,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/permissions': {
+  '/admin/permissions': {
     parameters: {
       query?: never;
       header?: never;
@@ -228,7 +260,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/roles': {
+  '/admin/roles': {
     parameters: {
       query?: never;
       header?: never;
@@ -244,7 +276,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/roles/{roleId}': {
+  '/admin/roles/{roleId}': {
     parameters: {
       query?: never;
       header?: never;
@@ -263,7 +295,7 @@ export interface paths {
     patch: operations['updateRole'];
     trace?: never;
   };
-  '/role-bindings': {
+  '/admin/role-bindings': {
     parameters: {
       query?: never;
       header?: never;
@@ -279,7 +311,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/role-bindings/{bindingId}': {
+  '/admin/role-bindings/{bindingId}': {
     parameters: {
       query?: never;
       header?: never;
@@ -296,7 +328,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/policies/{key}': {
+  '/admin/policies/{key}': {
     parameters: {
       query?: never;
       header?: never;
@@ -314,7 +346,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/quotas/default': {
+  '/admin/quotas/default': {
     parameters: {
       query?: never;
       header?: never;
@@ -330,7 +362,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/groups/{groupId}/quota': {
+  '/admin/groups/{groupId}/quota': {
     parameters: {
       query?: never;
       header?: never;
@@ -348,7 +380,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/members/{accountId}/quota': {
+  '/admin/members/{accountId}/quota': {
     parameters: {
       query?: never;
       header?: never;
@@ -366,7 +398,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/members/{accountId}/quota/effective': {
+  '/admin/members/{accountId}/quota/effective': {
     parameters: {
       query?: never;
       header?: never;
@@ -375,7 +407,7 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** @description 成员覆盖 → 所在组（多个组时每项取最大值）→ 租户默认，逐项合并。本人也可以查自己的。 */
+    /** @description 成员覆盖 → 所在组 → 租户默认，逐项合并：某层没设置（字段不出现）就看下一层；多个组时取最宽松的值，"不限"最宽松。本人查自己的用 /me/quota。 */
     get: operations['getEffectiveQuota'];
     put?: never;
     post?: never;
@@ -385,7 +417,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/invitations': {
+  '/admin/invitations': {
     parameters: {
       query?: never;
       header?: never;
@@ -401,7 +433,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/invitations/{invitationId}': {
+  '/admin/invitations/{invitationId}': {
     parameters: {
       query?: never;
       header?: never;
@@ -586,20 +618,22 @@ export interface components {
       updatedAt: string;
       updatedBy?: components['schemas']['Uuid'];
     };
-    /** @description 各字段都可省略；合并时省略的字段取下一层的值。 */
+    /** @description 各字段都可省略；省略表示"这一层不设置"。值为 null 表示"不限"。合并时"不限"优先于任何具体数值。 */
     Quota: {
       instance?: {
         cpuMillis?: number;
         memoryMb?: number;
         diskGb?: number;
-        maxInstances?: number;
+        /** @description 0 表示不允许有实例；null 表示不限。 */
+        maxInstances?: number | null;
         alwaysOnAllowed?: boolean;
       };
       model?: {
-        /** @description 每月预算，百万分之一货币单位；0 表示不限。 */
-        monthlyBudgetMicros?: number;
+        /** @description 每月预算，百万分之一货币单位；null 表示不限。 */
+        monthlyBudgetMicros?: number | null;
         currency?: string;
-        dailyTokens?: number;
+        /** @description null 表示不限。 */
+        dailyTokens?: number | null;
       };
     };
     InvitationInput: {
@@ -779,6 +813,26 @@ export interface operations {
             tenant: components['schemas']['Tenant'];
             permissions: string[];
           };
+        };
+      };
+    };
+  };
+  getMyEffectiveQuota: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description 我的有效配额（合并后） */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Quota'];
         };
       };
     };
@@ -1192,6 +1246,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description 组的有效权限超出操作者自己的权限（org.grant_exceeds_own） */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
       };
     };
   };

@@ -401,7 +401,7 @@ export interface components {
       idleStopAt?: string;
       /** Format: date-time */
       nextWakeAt?: string;
-      /** @description 浏览器入口，形如 `/i/<实例 id>/`。 */
+      /** @description 浏览器入口：门户上的 `/open/<实例 id>`（edge 换票后跳到实例子域；只有 IP 的部署直接是 `/i/<实例 id>/`）。 */
       entryUrl: string;
       /** Format: date-time */
       createdAt: string;
@@ -521,14 +521,14 @@ export interface components {
         displayName: string;
         tenantName: string;
       };
-      /** @description 键是写进 DSH 配置的名字。用访问令牌鉴权（Authorization: Bearer）。 */
+      /** @description 键是写进 DSH 配置的名字。地址必须与平台 apiBase 同源，用 aud=auriga.ai-gateway 的访问令牌鉴权（Authorization: Bearer）；插件拒绝其他地址。 */
       mcpServers: {
         [key: string]: {
           /** Format: uri */
           url: string;
         };
       };
-      /** @description 键是写进 DSH 配置的名字。OpenAI 兼容接口，用访问令牌鉴权。 */
+      /** @description 键是写进 DSH 配置的名字。OpenAI 兼容接口，地址必须与平台 apiBase 同源，用 aud=auriga.ai-gateway 的访问令牌鉴权。 */
       modelProviders: {
         [key: string]: {
           /** Format: uri */
@@ -543,8 +543,8 @@ export interface components {
       panel: {
         /** Format: uri */
         manifestUrl: string;
-        /** @description 面板签名公钥（JWKS 子集，同 identity-keys.schema.json 的 keys）。 */
-        keys: Record<string, never>[];
+        /** @description 面板签名公钥（Ed25519 JWK）。 */
+        keys: components['schemas']['items'][];
       };
     };
     /** Format: uuid */
@@ -579,6 +579,23 @@ export interface components {
       /** @description 字段级错误（validation_failed 时）。 */
       errors?: components['schemas']['FieldError'][];
       traceId?: string;
+    };
+    items: {
+      /** @constant */
+      kty: 'OKP';
+      /** @constant */
+      crv: 'Ed25519';
+      /** @description 公钥，base64url 无填充。 */
+      x: string;
+      kid: string;
+      /** @constant */
+      alg: 'EdDSA';
+      /** @constant */
+      use?: 'sig';
+      /** @description 可选：生效时间（Unix 秒）。 */
+      nbf?: number;
+      /** @description 可选：过期时间（Unix 秒）。 */
+      exp?: number;
     };
   };
   responses: {

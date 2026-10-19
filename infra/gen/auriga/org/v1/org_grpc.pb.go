@@ -301,6 +301,7 @@ var MemberService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	AuthorizationService_CheckGrant_FullMethodName              = "/auriga.org.v1.AuthorizationService/CheckGrant"
 	AuthorizationService_GetEffectivePermissions_FullMethodName = "/auriga.org.v1.AuthorizationService/GetEffectivePermissions"
 	AuthorizationService_CheckPermission_FullMethodName         = "/auriga.org.v1.AuthorizationService/CheckPermission"
 )
@@ -309,6 +310,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AuthorizationServiceClient interface {
+	// 超管上限检查：授予者能否把这些角色（或这个组的有效权限）授给别人。iam 改服务账号、身份源属性映射时也调用它。
+	CheckGrant(ctx context.Context, in *CheckGrantRequest, opts ...grpc.CallOption) (*CheckGrantResponse, error)
 	// iam 签发访问令牌时调用，结果写进令牌的 roles / perms。
 	GetEffectivePermissions(ctx context.Context, in *GetEffectivePermissionsRequest, opts ...grpc.CallOption) (*GetEffectivePermissionsResponse, error)
 	// 需要按资源细粒度判断时调用。
@@ -321,6 +324,16 @@ type authorizationServiceClient struct {
 
 func NewAuthorizationServiceClient(cc grpc.ClientConnInterface) AuthorizationServiceClient {
 	return &authorizationServiceClient{cc}
+}
+
+func (c *authorizationServiceClient) CheckGrant(ctx context.Context, in *CheckGrantRequest, opts ...grpc.CallOption) (*CheckGrantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckGrantResponse)
+	err := c.cc.Invoke(ctx, AuthorizationService_CheckGrant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *authorizationServiceClient) GetEffectivePermissions(ctx context.Context, in *GetEffectivePermissionsRequest, opts ...grpc.CallOption) (*GetEffectivePermissionsResponse, error) {
@@ -347,6 +360,8 @@ func (c *authorizationServiceClient) CheckPermission(ctx context.Context, in *Ch
 // All implementations must embed UnimplementedAuthorizationServiceServer
 // for forward compatibility.
 type AuthorizationServiceServer interface {
+	// 超管上限检查：授予者能否把这些角色（或这个组的有效权限）授给别人。iam 改服务账号、身份源属性映射时也调用它。
+	CheckGrant(context.Context, *CheckGrantRequest) (*CheckGrantResponse, error)
 	// iam 签发访问令牌时调用，结果写进令牌的 roles / perms。
 	GetEffectivePermissions(context.Context, *GetEffectivePermissionsRequest) (*GetEffectivePermissionsResponse, error)
 	// 需要按资源细粒度判断时调用。
@@ -361,6 +376,9 @@ type AuthorizationServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAuthorizationServiceServer struct{}
 
+func (UnimplementedAuthorizationServiceServer) CheckGrant(context.Context, *CheckGrantRequest) (*CheckGrantResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckGrant not implemented")
+}
 func (UnimplementedAuthorizationServiceServer) GetEffectivePermissions(context.Context, *GetEffectivePermissionsRequest) (*GetEffectivePermissionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetEffectivePermissions not implemented")
 }
@@ -386,6 +404,24 @@ func RegisterAuthorizationServiceServer(s grpc.ServiceRegistrar, srv Authorizati
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AuthorizationService_ServiceDesc, srv)
+}
+
+func _AuthorizationService_CheckGrant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckGrantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthorizationServiceServer).CheckGrant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthorizationService_CheckGrant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthorizationServiceServer).CheckGrant(ctx, req.(*CheckGrantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AuthorizationService_GetEffectivePermissions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -431,6 +467,10 @@ var AuthorizationService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "auriga.org.v1.AuthorizationService",
 	HandlerType: (*AuthorizationServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CheckGrant",
+			Handler:    _AuthorizationService_CheckGrant_Handler,
+		},
 		{
 			MethodName: "GetEffectivePermissions",
 			Handler:    _AuthorizationService_GetEffectivePermissions_Handler,

@@ -31,7 +31,11 @@ const (
 //
 // 流程：管理员在管理台生成一次性入网令牌（默认 1 小时有效），同时拿到平台 CA 证书的 SHA-256 指纹。
 // 新主机执行 `auriga-agent join --server <地址> --token <令牌> --ca-sha256 <指纹>`：
-// 节点代理用指纹校验服务端证书（类似 kubeadm 的 discovery hash），然后调用 Join。
+// 节点代理用指纹校验服务端证书链里的平台 CA（类似 kubeadm 的 discovery hash），然后调用 Join。
+// 指纹是 CA 证书 SubjectPublicKeyInfo（DER）的 SHA-256，小写十六进制。
+//
+// 内置 CA 签发的证书用 URI SAN 区分身份：`auriga://node/<id>`、`auriga://edge/<id>`、`auriga://workspace`。
+// 节点代理的 ingress 只接受 edge 的 SAN；节点证书不能用来访问其他节点。
 // 单机安装包在安装时自动完成入网，走本机 socket / 命名管道。
 type NodeEnrollmentServiceClient interface {
 	// 用一次性令牌换节点证书。令牌用过即作废。只需服务端 TLS。
@@ -76,7 +80,11 @@ func (c *nodeEnrollmentServiceClient) RenewCertificate(ctx context.Context, in *
 //
 // 流程：管理员在管理台生成一次性入网令牌（默认 1 小时有效），同时拿到平台 CA 证书的 SHA-256 指纹。
 // 新主机执行 `auriga-agent join --server <地址> --token <令牌> --ca-sha256 <指纹>`：
-// 节点代理用指纹校验服务端证书（类似 kubeadm 的 discovery hash），然后调用 Join。
+// 节点代理用指纹校验服务端证书链里的平台 CA（类似 kubeadm 的 discovery hash），然后调用 Join。
+// 指纹是 CA 证书 SubjectPublicKeyInfo（DER）的 SHA-256，小写十六进制。
+//
+// 内置 CA 签发的证书用 URI SAN 区分身份：`auriga://node/<id>`、`auriga://edge/<id>`、`auriga://workspace`。
+// 节点代理的 ingress 只接受 edge 的 SAN；节点证书不能用来访问其他节点。
 // 单机安装包在安装时自动完成入网，走本机 socket / 命名管道。
 type NodeEnrollmentServiceServer interface {
 	// 用一次性令牌换节点证书。令牌用过即作废。只需服务端 TLS。

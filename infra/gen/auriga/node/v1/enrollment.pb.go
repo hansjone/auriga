@@ -129,8 +129,11 @@ type JoinResponse struct {
 	// NodeControl 的地址，例如 `https://platform.example.com:7443`；单机时是 `unix:///…` 或 `npipe:////./pipe/…`。
 	ControlEndpoint      string                 `protobuf:"bytes,4,opt,name=control_endpoint,json=controlEndpoint,proto3" json:"control_endpoint,omitempty"`
 	CertificateExpiresAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=certificate_expires_at,json=certificateExpiresAt,proto3" json:"certificate_expires_at,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// 制品签名公钥（校验 DSH 运行时、插件包、节点代理升级包）。它们不经 NodeControl 下发：
+	// workspace 被攻破时也不能替换。轮换时新公钥必须由旧私钥签名后经 RenewCertificate 下发。
+	ArtifactSigningKeys []*ArtifactSigningKey `protobuf:"bytes,6,rep,name=artifact_signing_keys,json=artifactSigningKeys,proto3" json:"artifact_signing_keys,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *JoinResponse) Reset() {
@@ -198,6 +201,91 @@ func (x *JoinResponse) GetCertificateExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *JoinResponse) GetArtifactSigningKeys() []*ArtifactSigningKey {
+	if x != nil {
+		return x.ArtifactSigningKeys
+	}
+	return nil
+}
+
+type ArtifactSigningKey struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kid   string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`
+	// Ed25519 公钥（32 字节）。
+	PublicKey []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	NotAfter  *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
+	// 轮换时：上一把私钥对 (kid || public_key) 的签名；第一把为空。
+	Endorsement   []byte `protobuf:"bytes,4,opt,name=endorsement,proto3" json:"endorsement,omitempty"`
+	EndorsedByKid string `protobuf:"bytes,5,opt,name=endorsed_by_kid,json=endorsedByKid,proto3" json:"endorsed_by_kid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactSigningKey) Reset() {
+	*x = ArtifactSigningKey{}
+	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactSigningKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactSigningKey) ProtoMessage() {}
+
+func (x *ArtifactSigningKey) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactSigningKey.ProtoReflect.Descriptor instead.
+func (*ArtifactSigningKey) Descriptor() ([]byte, []int) {
+	return file_auriga_node_v1_enrollment_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ArtifactSigningKey) GetKid() string {
+	if x != nil {
+		return x.Kid
+	}
+	return ""
+}
+
+func (x *ArtifactSigningKey) GetPublicKey() []byte {
+	if x != nil {
+		return x.PublicKey
+	}
+	return nil
+}
+
+func (x *ArtifactSigningKey) GetNotAfter() *timestamppb.Timestamp {
+	if x != nil {
+		return x.NotAfter
+	}
+	return nil
+}
+
+func (x *ArtifactSigningKey) GetEndorsement() []byte {
+	if x != nil {
+		return x.Endorsement
+	}
+	return nil
+}
+
+func (x *ArtifactSigningKey) GetEndorsedByKid() string {
+	if x != nil {
+		return x.EndorsedByKid
+	}
+	return ""
+}
+
 type RenewCertificateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Csr   []byte                 `protobuf:"bytes,1,opt,name=csr,proto3" json:"csr,omitempty"`
@@ -209,7 +297,7 @@ type RenewCertificateRequest struct {
 
 func (x *RenewCertificateRequest) Reset() {
 	*x = RenewCertificateRequest{}
-	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[2]
+	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -221,7 +309,7 @@ func (x *RenewCertificateRequest) String() string {
 func (*RenewCertificateRequest) ProtoMessage() {}
 
 func (x *RenewCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[2]
+	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -234,7 +322,7 @@ func (x *RenewCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenewCertificateRequest.ProtoReflect.Descriptor instead.
 func (*RenewCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_enrollment_proto_rawDescGZIP(), []int{2}
+	return file_auriga_node_v1_enrollment_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RenewCertificateRequest) GetCsr() []byte {
@@ -255,13 +343,15 @@ type RenewCertificateResponse struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	CertificateChain     []byte                 `protobuf:"bytes,1,opt,name=certificate_chain,json=certificateChain,proto3" json:"certificate_chain,omitempty"`
 	CertificateExpiresAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=certificate_expires_at,json=certificateExpiresAt,proto3" json:"certificate_expires_at,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// 当前有效的制品签名公钥（含新轮换的）。
+	ArtifactSigningKeys []*ArtifactSigningKey `protobuf:"bytes,3,rep,name=artifact_signing_keys,json=artifactSigningKeys,proto3" json:"artifact_signing_keys,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RenewCertificateResponse) Reset() {
 	*x = RenewCertificateResponse{}
-	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[3]
+	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -273,7 +363,7 @@ func (x *RenewCertificateResponse) String() string {
 func (*RenewCertificateResponse) ProtoMessage() {}
 
 func (x *RenewCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[3]
+	mi := &file_auriga_node_v1_enrollment_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -286,7 +376,7 @@ func (x *RenewCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenewCertificateResponse.ProtoReflect.Descriptor instead.
 func (*RenewCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_enrollment_proto_rawDescGZIP(), []int{3}
+	return file_auriga_node_v1_enrollment_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RenewCertificateResponse) GetCertificateChain() []byte {
@@ -303,6 +393,13 @@ func (x *RenewCertificateResponse) GetCertificateExpiresAt() *timestamppb.Timest
 	return nil
 }
 
+func (x *RenewCertificateResponse) GetArtifactSigningKeys() []*ArtifactSigningKey {
+	if x != nil {
+		return x.ArtifactSigningKeys
+	}
+	return nil
+}
+
 var File_auriga_node_v1_enrollment_proto protoreflect.FileDescriptor
 
 const file_auriga_node_v1_enrollment_proto_rawDesc = "" +
@@ -315,19 +412,28 @@ const file_auriga_node_v1_enrollment_proto_rawDesc = "" +
 	"\bhostname\x18\x04 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x05 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x06 \x01(\tR\x04arch\x12#\n" +
-	"\ragent_version\x18\a \x01(\tR\fagentVersion\"\xee\x01\n" +
+	"\ragent_version\x18\a \x01(\tR\fagentVersion\"\xc6\x02\n" +
 	"\fJoinResponse\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12+\n" +
 	"\x11certificate_chain\x18\x02 \x01(\fR\x10certificateChain\x12\x1b\n" +
 	"\tca_bundle\x18\x03 \x01(\fR\bcaBundle\x12)\n" +
 	"\x10control_endpoint\x18\x04 \x01(\tR\x0fcontrolEndpoint\x12P\n" +
-	"\x16certificate_expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\"Y\n" +
+	"\x16certificate_expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\x12V\n" +
+	"\x15artifact_signing_keys\x18\x06 \x03(\v2\".auriga.node.v1.ArtifactSigningKeyR\x13artifactSigningKeys\"\xc8\x01\n" +
+	"\x12ArtifactSigningKey\x12\x10\n" +
+	"\x03kid\x18\x01 \x01(\tR\x03kid\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x02 \x01(\fR\tpublicKey\x127\n" +
+	"\tnot_after\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\x12 \n" +
+	"\vendorsement\x18\x04 \x01(\fR\vendorsement\x12&\n" +
+	"\x0fendorsed_by_kid\x18\x05 \x01(\tR\rendorsedByKid\"Y\n" +
 	"\x17RenewCertificateRequest\x12\x10\n" +
 	"\x03csr\x18\x01 \x01(\fR\x03csr\x12,\n" +
-	"\x12sealing_public_key\x18\x02 \x01(\fR\x10sealingPublicKey\"\x99\x01\n" +
+	"\x12sealing_public_key\x18\x02 \x01(\fR\x10sealingPublicKey\"\xf1\x01\n" +
 	"\x18RenewCertificateResponse\x12+\n" +
 	"\x11certificate_chain\x18\x01 \x01(\fR\x10certificateChain\x12P\n" +
-	"\x16certificate_expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt2\xc1\x01\n" +
+	"\x16certificate_expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x14certificateExpiresAt\x12V\n" +
+	"\x15artifact_signing_keys\x18\x03 \x03(\v2\".auriga.node.v1.ArtifactSigningKeyR\x13artifactSigningKeys2\xc1\x01\n" +
 	"\x15NodeEnrollmentService\x12A\n" +
 	"\x04Join\x12\x1b.auriga.node.v1.JoinRequest\x1a\x1c.auriga.node.v1.JoinResponse\x12e\n" +
 	"\x10RenewCertificate\x12'.auriga.node.v1.RenewCertificateRequest\x1a(.auriga.node.v1.RenewCertificateResponseBk\n" +
@@ -345,26 +451,30 @@ func file_auriga_node_v1_enrollment_proto_rawDescGZIP() []byte {
 	return file_auriga_node_v1_enrollment_proto_rawDescData
 }
 
-var file_auriga_node_v1_enrollment_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_auriga_node_v1_enrollment_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_auriga_node_v1_enrollment_proto_goTypes = []any{
 	(*JoinRequest)(nil),              // 0: auriga.node.v1.JoinRequest
 	(*JoinResponse)(nil),             // 1: auriga.node.v1.JoinResponse
-	(*RenewCertificateRequest)(nil),  // 2: auriga.node.v1.RenewCertificateRequest
-	(*RenewCertificateResponse)(nil), // 3: auriga.node.v1.RenewCertificateResponse
-	(*timestamppb.Timestamp)(nil),    // 4: google.protobuf.Timestamp
+	(*ArtifactSigningKey)(nil),       // 2: auriga.node.v1.ArtifactSigningKey
+	(*RenewCertificateRequest)(nil),  // 3: auriga.node.v1.RenewCertificateRequest
+	(*RenewCertificateResponse)(nil), // 4: auriga.node.v1.RenewCertificateResponse
+	(*timestamppb.Timestamp)(nil),    // 5: google.protobuf.Timestamp
 }
 var file_auriga_node_v1_enrollment_proto_depIdxs = []int32{
-	4, // 0: auriga.node.v1.JoinResponse.certificate_expires_at:type_name -> google.protobuf.Timestamp
-	4, // 1: auriga.node.v1.RenewCertificateResponse.certificate_expires_at:type_name -> google.protobuf.Timestamp
-	0, // 2: auriga.node.v1.NodeEnrollmentService.Join:input_type -> auriga.node.v1.JoinRequest
-	2, // 3: auriga.node.v1.NodeEnrollmentService.RenewCertificate:input_type -> auriga.node.v1.RenewCertificateRequest
-	1, // 4: auriga.node.v1.NodeEnrollmentService.Join:output_type -> auriga.node.v1.JoinResponse
-	3, // 5: auriga.node.v1.NodeEnrollmentService.RenewCertificate:output_type -> auriga.node.v1.RenewCertificateResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 0: auriga.node.v1.JoinResponse.certificate_expires_at:type_name -> google.protobuf.Timestamp
+	2, // 1: auriga.node.v1.JoinResponse.artifact_signing_keys:type_name -> auriga.node.v1.ArtifactSigningKey
+	5, // 2: auriga.node.v1.ArtifactSigningKey.not_after:type_name -> google.protobuf.Timestamp
+	5, // 3: auriga.node.v1.RenewCertificateResponse.certificate_expires_at:type_name -> google.protobuf.Timestamp
+	2, // 4: auriga.node.v1.RenewCertificateResponse.artifact_signing_keys:type_name -> auriga.node.v1.ArtifactSigningKey
+	0, // 5: auriga.node.v1.NodeEnrollmentService.Join:input_type -> auriga.node.v1.JoinRequest
+	3, // 6: auriga.node.v1.NodeEnrollmentService.RenewCertificate:input_type -> auriga.node.v1.RenewCertificateRequest
+	1, // 7: auriga.node.v1.NodeEnrollmentService.Join:output_type -> auriga.node.v1.JoinResponse
+	4, // 8: auriga.node.v1.NodeEnrollmentService.RenewCertificate:output_type -> auriga.node.v1.RenewCertificateResponse
+	7, // [7:9] is the sub-list for method output_type
+	5, // [5:7] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_auriga_node_v1_enrollment_proto_init() }
@@ -378,7 +488,7 @@ func file_auriga_node_v1_enrollment_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_node_v1_enrollment_proto_rawDesc), len(file_auriga_node_v1_enrollment_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

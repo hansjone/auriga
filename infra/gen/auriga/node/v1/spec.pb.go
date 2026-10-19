@@ -9,6 +9,7 @@ package nodev1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -188,8 +189,11 @@ func (PluginLevel) EnumDescriptor() ([]byte, []int) {
 type TokenRef int32
 
 const (
-	TokenRef_TOKEN_REF_UNSPECIFIED    TokenRef = 0
+	TokenRef_TOKEN_REF_UNSPECIFIED TokenRef = 0
+	// 实例令牌：只能调用 workspace 的 /instance/**。
 	TokenRef_TOKEN_REF_INSTANCE_TOKEN TokenRef = 1
+	// ai-gateway 令牌：只能调用团队 MCP 和团队模型。
+	TokenRef_TOKEN_REF_AI_GATEWAY_TOKEN TokenRef = 2
 )
 
 // Enum value maps for TokenRef.
@@ -197,10 +201,12 @@ var (
 	TokenRef_name = map[int32]string{
 		0: "TOKEN_REF_UNSPECIFIED",
 		1: "TOKEN_REF_INSTANCE_TOKEN",
+		2: "TOKEN_REF_AI_GATEWAY_TOKEN",
 	}
 	TokenRef_value = map[string]int32{
-		"TOKEN_REF_UNSPECIFIED":    0,
-		"TOKEN_REF_INSTANCE_TOKEN": 1,
+		"TOKEN_REF_UNSPECIFIED":      0,
+		"TOKEN_REF_INSTANCE_TOKEN":   1,
+		"TOKEN_REF_AI_GATEWAY_TOKEN": 2,
 	}
 )
 
@@ -398,9 +404,10 @@ type DshRuntime struct {
 	Digest string `protobuf:"bytes,3,opt,name=digest,proto3" json:"digest,omitempty"`
 	// 下载地址（平台内部地址，需要节点证书）。
 	Url string `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`
-	// 平台对 digest 的 Ed25519 签名。
-	Signature  []byte `protobuf:"bytes,5,opt,name=signature,proto3" json:"signature,omitempty"`
-	SigningKid string `protobuf:"bytes,6,opt,name=signing_kid,json=signingKid,proto3" json:"signing_kid,omitempty"`
+	// 已废弃，用 signed：只签 digest 不能防回滚和冒充。保留字段号。
+	Signature  []byte          `protobuf:"bytes,5,opt,name=signature,proto3" json:"signature,omitempty"`
+	SigningKid string          `protobuf:"bytes,6,opt,name=signing_kid,json=signingKid,proto3" json:"signing_kid,omitempty"`
+	Signed     *SignedArtifact `protobuf:"bytes,8,opt,name=signed,proto3" json:"signed,omitempty"`
 	// Docker 驱动用的实例镜像，必须带 digest：`<仓库>@sha256:…`。原生进程驱动为空。
 	Image         string `protobuf:"bytes,7,opt,name=image,proto3" json:"image,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -477,6 +484,13 @@ func (x *DshRuntime) GetSigningKid() string {
 		return x.SigningKid
 	}
 	return ""
+}
+
+func (x *DshRuntime) GetSigned() *SignedArtifact {
+	if x != nil {
+		return x.Signed
+	}
+	return nil
 }
 
 func (x *DshRuntime) GetImage() string {
@@ -565,11 +579,12 @@ type PluginRef struct {
 	// 插件包的 `sha256:<十六进制>`。
 	Digest string `protobuf:"bytes,4,opt,name=digest,proto3" json:"digest,omitempty"`
 	Url    string `protobuf:"bytes,5,opt,name=url,proto3" json:"url,omitempty"`
-	// 平台对 digest 的 Ed25519 签名。
+	// 已废弃，用 signed。
 	Signature  []byte `protobuf:"bytes,6,opt,name=signature,proto3" json:"signature,omitempty"`
 	SigningKid string `protobuf:"bytes,7,opt,name=signing_kid,json=signingKid,proto3" json:"signing_kid,omitempty"`
 	// false 表示安装但关闭。
-	Enabled       bool `protobuf:"varint,8,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Enabled       bool            `protobuf:"varint,8,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Signed        *SignedArtifact `protobuf:"bytes,9,opt,name=signed,proto3" json:"signed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -658,6 +673,13 @@ func (x *PluginRef) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *PluginRef) GetSigned() *SignedArtifact {
+	if x != nil {
+		return x.Signed
+	}
+	return nil
 }
 
 type Profile struct {
@@ -1073,9 +1095,11 @@ type Secrets struct {
 	// 实例令牌，用节点封装公钥加密。
 	InstanceToken *SealedSecret `protobuf:"bytes,1,opt,name=instance_token,json=instanceToken,proto3" json:"instance_token,omitempty"`
 	// 校验 edge 身份头的公钥：当前 + 下一把，按 kid 选用。
-	IdentityKeys  []*IdentityPublicKey `protobuf:"bytes,2,rep,name=identity_keys,json=identityKeys,proto3" json:"identity_keys,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	IdentityKeys []*IdentityPublicKey `protobuf:"bytes,2,rep,name=identity_keys,json=identityKeys,proto3" json:"identity_keys,omitempty"`
+	// ai-gateway 令牌（团队 MCP、团队模型用），用节点封装公钥加密。
+	AiGatewayToken *SealedSecret `protobuf:"bytes,3,opt,name=ai_gateway_token,json=aiGatewayToken,proto3" json:"ai_gateway_token,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Secrets) Reset() {
@@ -1122,9 +1146,17 @@ func (x *Secrets) GetIdentityKeys() []*IdentityPublicKey {
 	return nil
 }
 
+func (x *Secrets) GetAiGatewayToken() *SealedSecret {
+	if x != nil {
+		return x.AiGatewayToken
+	}
+	return nil
+}
+
 // 只有目标节点能解开的机密。
 // 算法 `hpke-x25519-sha256-aes256gcm`：RFC 9180，DHKEM(X25519, HKDF-SHA256) + HKDF-SHA256 + AES-256-GCM，Base 模式；
-// info 为 `auriga/sealed/v1/<instance_id>`。
+// info 为 `auriga/sealed/v1/<instance_id>/<机密名>`（机密名即 Secrets 里的字段名，例如 instance_token），
+// aad 为规格代数的十进制字符串。节点在封装密钥轮换的过渡期内保留旧私钥。
 type SealedSecret struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Alg   string                 `protobuf:"bytes,1,opt,name=alg,proto3" json:"alg,omitempty"`
@@ -1202,9 +1234,9 @@ type IdentityPublicKey struct {
 	Alg string `protobuf:"bytes,2,opt,name=alg,proto3" json:"alg,omitempty"`
 	// 原始 32 字节公钥。
 	PublicKey []byte `protobuf:"bytes,3,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	// 可选：生效和过期时间（Unix 秒，0 表示不限）。
-	NotBefore     int64 `protobuf:"varint,4,opt,name=not_before,json=notBefore,proto3" json:"not_before,omitempty"`
-	NotAfter      int64 `protobuf:"varint,5,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
+	// 可选：生效和过期时间，不设置表示不限。
+	NotBefore     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=not_before,json=notBefore,proto3" json:"not_before,omitempty"`
+	NotAfter      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1260,25 +1292,185 @@ func (x *IdentityPublicKey) GetPublicKey() []byte {
 	return nil
 }
 
-func (x *IdentityPublicKey) GetNotBefore() int64 {
+func (x *IdentityPublicKey) GetNotBefore() *timestamppb.Timestamp {
 	if x != nil {
 		return x.NotBefore
 	}
-	return 0
+	return nil
 }
 
-func (x *IdentityPublicKey) GetNotAfter() int64 {
+func (x *IdentityPublicKey) GetNotAfter() *timestamppb.Timestamp {
 	if x != nil {
 		return x.NotAfter
 	}
-	return 0
+	return nil
+}
+
+// 制品签名声明。平台用制品签名密钥对它的 JCS（RFC 8785）规范化 JSON 签名（Ed25519），
+// 而不是只签 digest：防止已签名的旧版本被回滚使用、或一个已签名制品冒充另一种制品。
+// 节点代理记住每类制品（purpose + name + os + arch）已用过的最高版本，拒绝更低版本（显式降级指令除外）。
+type ArtifactStatement struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// `agent` | `dsh_runtime` | `plugin`
+	Purpose string `protobuf:"bytes,1,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	Name    string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	// `linux` | `windows` | `any`
+	Os string `protobuf:"bytes,4,opt,name=os,proto3" json:"os,omitempty"`
+	// `amd64` | `arm64` | `any`
+	Arch string `protobuf:"bytes,5,opt,name=arch,proto3" json:"arch,omitempty"`
+	// `sha256:<十六进制>`
+	Digest        string                 `protobuf:"bytes,6,opt,name=digest,proto3" json:"digest,omitempty"`
+	IssuedAt      *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=issued_at,json=issuedAt,proto3" json:"issued_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactStatement) Reset() {
+	*x = ArtifactStatement{}
+	mi := &file_auriga_node_v1_spec_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactStatement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactStatement) ProtoMessage() {}
+
+func (x *ArtifactStatement) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_node_v1_spec_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactStatement.ProtoReflect.Descriptor instead.
+func (*ArtifactStatement) Descriptor() ([]byte, []int) {
+	return file_auriga_node_v1_spec_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ArtifactStatement) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+func (x *ArtifactStatement) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ArtifactStatement) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *ArtifactStatement) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *ArtifactStatement) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *ArtifactStatement) GetDigest() string {
+	if x != nil {
+		return x.Digest
+	}
+	return ""
+}
+
+func (x *ArtifactStatement) GetIssuedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.IssuedAt
+	}
+	return nil
+}
+
+type SignedArtifact struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Statement *ArtifactStatement     `protobuf:"bytes,1,opt,name=statement,proto3" json:"statement,omitempty"`
+	// 对 statement 的 JCS JSON 的 Ed25519 签名。
+	Signature     []byte `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
+	SigningKid    string `protobuf:"bytes,3,opt,name=signing_kid,json=signingKid,proto3" json:"signing_kid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SignedArtifact) Reset() {
+	*x = SignedArtifact{}
+	mi := &file_auriga_node_v1_spec_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SignedArtifact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SignedArtifact) ProtoMessage() {}
+
+func (x *SignedArtifact) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_node_v1_spec_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SignedArtifact.ProtoReflect.Descriptor instead.
+func (*SignedArtifact) Descriptor() ([]byte, []int) {
+	return file_auriga_node_v1_spec_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *SignedArtifact) GetStatement() *ArtifactStatement {
+	if x != nil {
+		return x.Statement
+	}
+	return nil
+}
+
+func (x *SignedArtifact) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
+func (x *SignedArtifact) GetSigningKid() string {
+	if x != nil {
+		return x.SigningKid
+	}
+	return ""
 }
 
 var File_auriga_node_v1_spec_proto protoreflect.FileDescriptor
 
 const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\n" +
-	"\x19auriga/node/v1/spec.proto\x12\x0eauriga.node.v1\"\xdb\x05\n" +
+	"\x19auriga/node/v1/spec.proto\x12\x0eauriga.node.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdb\x05\n" +
 	"\fInstanceSpec\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x1b\n" +
@@ -1300,7 +1492,7 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\x06labels\x18\x0e \x03(\v2(.auriga.node.v1.InstanceSpec.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc6\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xfe\x01\n" +
 	"\n" +
 	"DshRuntime\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +
@@ -1310,14 +1502,15 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\x03url\x18\x04 \x01(\tR\x03url\x12\x1c\n" +
 	"\tsignature\x18\x05 \x01(\fR\tsignature\x12\x1f\n" +
 	"\vsigning_kid\x18\x06 \x01(\tR\n" +
-	"signingKid\x12\x14\n" +
+	"signingKid\x126\n" +
+	"\x06signed\x18\b \x01(\v2\x1e.auriga.node.v1.SignedArtifactR\x06signed\x12\x14\n" +
 	"\x05image\x18\a \x01(\tR\x05image\"t\n" +
 	"\tResources\x12\x1d\n" +
 	"\n" +
 	"cpu_millis\x18\x01 \x01(\x03R\tcpuMillis\x12\x1b\n" +
 	"\tmemory_mb\x18\x02 \x01(\x03R\bmemoryMb\x12\x17\n" +
 	"\adisk_gb\x18\x03 \x01(\x03R\x06diskGb\x12\x12\n" +
-	"\x04pids\x18\x04 \x01(\x03R\x04pids\"\xef\x01\n" +
+	"\x04pids\x18\x04 \x01(\x03R\x04pids\"\xa7\x02\n" +
 	"\tPluginRef\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x121\n" +
@@ -1327,7 +1520,8 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\tsignature\x18\x06 \x01(\fR\tsignature\x12\x1f\n" +
 	"\vsigning_kid\x18\a \x01(\tR\n" +
 	"signingKid\x12\x18\n" +
-	"\aenabled\x18\b \x01(\bR\aenabled\"\xa9\x04\n" +
+	"\aenabled\x18\b \x01(\bR\aenabled\x126\n" +
+	"\x06signed\x18\t \x01(\v2\x1e.auriga.node.v1.SignedArtifactR\x06signed\"\xa9\x04\n" +
 	"\aProfile\x12\x1f\n" +
 	"\vlisten_port\x18\x01 \x01(\rR\n" +
 	"listenPort\x125\n" +
@@ -1364,25 +1558,39 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\fegress_proxy\x18\x01 \x01(\tR\vegressProxy\x12\x14\n" +
 	"\x05allow\x18\x02 \x03(\tR\x05allow\"0\n" +
 	"\aStorage\x12%\n" +
-	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\"\x96\x01\n" +
+	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\"\xde\x01\n" +
 	"\aSecrets\x12C\n" +
 	"\x0einstance_token\x18\x01 \x01(\v2\x1c.auriga.node.v1.SealedSecretR\rinstanceToken\x12F\n" +
-	"\ridentity_keys\x18\x02 \x03(\v2!.auriga.node.v1.IdentityPublicKeyR\fidentityKeys\"i\n" +
+	"\ridentity_keys\x18\x02 \x03(\v2!.auriga.node.v1.IdentityPublicKeyR\fidentityKeys\x12F\n" +
+	"\x10ai_gateway_token\x18\x03 \x01(\v2\x1c.auriga.node.v1.SealedSecretR\x0eaiGatewayToken\"i\n" +
 	"\fSealedSecret\x12\x10\n" +
 	"\x03alg\x18\x01 \x01(\tR\x03alg\x12\x15\n" +
 	"\x06key_id\x18\x02 \x01(\tR\x05keyId\x12\x10\n" +
 	"\x03enc\x18\x03 \x01(\fR\x03enc\x12\x1e\n" +
 	"\n" +
 	"ciphertext\x18\x04 \x01(\fR\n" +
-	"ciphertext\"\x92\x01\n" +
+	"ciphertext\"\xca\x01\n" +
 	"\x11IdentityPublicKey\x12\x10\n" +
 	"\x03kid\x18\x01 \x01(\tR\x03kid\x12\x10\n" +
 	"\x03alg\x18\x02 \x01(\tR\x03alg\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x03 \x01(\fR\tpublicKey\x12\x1d\n" +
+	"public_key\x18\x03 \x01(\fR\tpublicKey\x129\n" +
 	"\n" +
-	"not_before\x18\x04 \x01(\x03R\tnotBefore\x12\x1b\n" +
-	"\tnot_after\x18\x05 \x01(\x03R\bnotAfter*\x86\x01\n" +
+	"not_before\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tnotBefore\x127\n" +
+	"\tnot_after\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bnotAfter\"\xd0\x01\n" +
+	"\x11ArtifactStatement\x12\x18\n" +
+	"\apurpose\x18\x01 \x01(\tR\apurpose\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12\x0e\n" +
+	"\x02os\x18\x04 \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\x05 \x01(\tR\x04arch\x12\x16\n" +
+	"\x06digest\x18\x06 \x01(\tR\x06digest\x127\n" +
+	"\tissued_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\bissuedAt\"\x90\x01\n" +
+	"\x0eSignedArtifact\x12?\n" +
+	"\tstatement\x18\x01 \x01(\v2!.auriga.node.v1.ArtifactStatementR\tstatement\x12\x1c\n" +
+	"\tsignature\x18\x02 \x01(\fR\tsignature\x12\x1f\n" +
+	"\vsigning_kid\x18\x03 \x01(\tR\n" +
+	"signingKid*\x86\x01\n" +
 	"\vRuntimeKind\x12\x1c\n" +
 	"\x18RUNTIME_KIND_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13RUNTIME_KIND_DOCKER\x10\x01\x12\x1e\n" +
@@ -1398,10 +1606,11 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\x0fPLUGIN_LEVEL_L1\x10\x02\x12\x13\n" +
 	"\x0fPLUGIN_LEVEL_L2\x10\x03\x12\x13\n" +
 	"\x0fPLUGIN_LEVEL_L3\x10\x04\x12\x13\n" +
-	"\x0fPLUGIN_LEVEL_L4\x10\x05*C\n" +
+	"\x0fPLUGIN_LEVEL_L4\x10\x05*c\n" +
 	"\bTokenRef\x12\x19\n" +
 	"\x15TOKEN_REF_UNSPECIFIED\x10\x00\x12\x1c\n" +
-	"\x18TOKEN_REF_INSTANCE_TOKEN\x10\x01Bk\n" +
+	"\x18TOKEN_REF_INSTANCE_TOKEN\x10\x01\x12\x1e\n" +
+	"\x1aTOKEN_REF_AI_GATEWAY_TOKEN\x10\x02Bk\n" +
 	"+io.github.hansjone.auriga.contracts.node.v1P\x01Z:github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1b\x06proto3"
 
 var (
@@ -1417,30 +1626,33 @@ func file_auriga_node_v1_spec_proto_rawDescGZIP() []byte {
 }
 
 var file_auriga_node_v1_spec_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_auriga_node_v1_spec_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_auriga_node_v1_spec_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_auriga_node_v1_spec_proto_goTypes = []any{
-	(RuntimeKind)(0),          // 0: auriga.node.v1.RuntimeKind
-	(DesiredState)(0),         // 1: auriga.node.v1.DesiredState
-	(PluginLevel)(0),          // 2: auriga.node.v1.PluginLevel
-	(TokenRef)(0),             // 3: auriga.node.v1.TokenRef
-	(*InstanceSpec)(nil),      // 4: auriga.node.v1.InstanceSpec
-	(*DshRuntime)(nil),        // 5: auriga.node.v1.DshRuntime
-	(*Resources)(nil),         // 6: auriga.node.v1.Resources
-	(*PluginRef)(nil),         // 7: auriga.node.v1.PluginRef
-	(*Profile)(nil),           // 8: auriga.node.v1.Profile
-	(*ConfigPatch)(nil),       // 9: auriga.node.v1.ConfigPatch
-	(*McpServer)(nil),         // 10: auriga.node.v1.McpServer
-	(*ModelProvider)(nil),     // 11: auriga.node.v1.ModelProvider
-	(*ModelInfo)(nil),         // 12: auriga.node.v1.ModelInfo
-	(*Network)(nil),           // 13: auriga.node.v1.Network
-	(*Storage)(nil),           // 14: auriga.node.v1.Storage
-	(*Secrets)(nil),           // 15: auriga.node.v1.Secrets
-	(*SealedSecret)(nil),      // 16: auriga.node.v1.SealedSecret
-	(*IdentityPublicKey)(nil), // 17: auriga.node.v1.IdentityPublicKey
-	nil,                       // 18: auriga.node.v1.InstanceSpec.LabelsEntry
-	nil,                       // 19: auriga.node.v1.Profile.McpServersEntry
-	nil,                       // 20: auriga.node.v1.Profile.ModelProvidersEntry
-	nil,                       // 21: auriga.node.v1.Profile.EnvEntry
+	(RuntimeKind)(0),              // 0: auriga.node.v1.RuntimeKind
+	(DesiredState)(0),             // 1: auriga.node.v1.DesiredState
+	(PluginLevel)(0),              // 2: auriga.node.v1.PluginLevel
+	(TokenRef)(0),                 // 3: auriga.node.v1.TokenRef
+	(*InstanceSpec)(nil),          // 4: auriga.node.v1.InstanceSpec
+	(*DshRuntime)(nil),            // 5: auriga.node.v1.DshRuntime
+	(*Resources)(nil),             // 6: auriga.node.v1.Resources
+	(*PluginRef)(nil),             // 7: auriga.node.v1.PluginRef
+	(*Profile)(nil),               // 8: auriga.node.v1.Profile
+	(*ConfigPatch)(nil),           // 9: auriga.node.v1.ConfigPatch
+	(*McpServer)(nil),             // 10: auriga.node.v1.McpServer
+	(*ModelProvider)(nil),         // 11: auriga.node.v1.ModelProvider
+	(*ModelInfo)(nil),             // 12: auriga.node.v1.ModelInfo
+	(*Network)(nil),               // 13: auriga.node.v1.Network
+	(*Storage)(nil),               // 14: auriga.node.v1.Storage
+	(*Secrets)(nil),               // 15: auriga.node.v1.Secrets
+	(*SealedSecret)(nil),          // 16: auriga.node.v1.SealedSecret
+	(*IdentityPublicKey)(nil),     // 17: auriga.node.v1.IdentityPublicKey
+	(*ArtifactStatement)(nil),     // 18: auriga.node.v1.ArtifactStatement
+	(*SignedArtifact)(nil),        // 19: auriga.node.v1.SignedArtifact
+	nil,                           // 20: auriga.node.v1.InstanceSpec.LabelsEntry
+	nil,                           // 21: auriga.node.v1.Profile.McpServersEntry
+	nil,                           // 22: auriga.node.v1.Profile.ModelProvidersEntry
+	nil,                           // 23: auriga.node.v1.Profile.EnvEntry
+	(*timestamppb.Timestamp)(nil), // 24: google.protobuf.Timestamp
 }
 var file_auriga_node_v1_spec_proto_depIdxs = []int32{
 	0,  // 0: auriga.node.v1.InstanceSpec.runtime:type_name -> auriga.node.v1.RuntimeKind
@@ -1452,24 +1664,31 @@ var file_auriga_node_v1_spec_proto_depIdxs = []int32{
 	14, // 6: auriga.node.v1.InstanceSpec.storage:type_name -> auriga.node.v1.Storage
 	15, // 7: auriga.node.v1.InstanceSpec.secrets:type_name -> auriga.node.v1.Secrets
 	1,  // 8: auriga.node.v1.InstanceSpec.desired:type_name -> auriga.node.v1.DesiredState
-	18, // 9: auriga.node.v1.InstanceSpec.labels:type_name -> auriga.node.v1.InstanceSpec.LabelsEntry
-	2,  // 10: auriga.node.v1.PluginRef.level:type_name -> auriga.node.v1.PluginLevel
-	9,  // 11: auriga.node.v1.Profile.patches:type_name -> auriga.node.v1.ConfigPatch
-	19, // 12: auriga.node.v1.Profile.mcp_servers:type_name -> auriga.node.v1.Profile.McpServersEntry
-	20, // 13: auriga.node.v1.Profile.model_providers:type_name -> auriga.node.v1.Profile.ModelProvidersEntry
-	21, // 14: auriga.node.v1.Profile.env:type_name -> auriga.node.v1.Profile.EnvEntry
-	3,  // 15: auriga.node.v1.McpServer.token_ref:type_name -> auriga.node.v1.TokenRef
-	3,  // 16: auriga.node.v1.ModelProvider.token_ref:type_name -> auriga.node.v1.TokenRef
-	12, // 17: auriga.node.v1.ModelProvider.models:type_name -> auriga.node.v1.ModelInfo
-	16, // 18: auriga.node.v1.Secrets.instance_token:type_name -> auriga.node.v1.SealedSecret
-	17, // 19: auriga.node.v1.Secrets.identity_keys:type_name -> auriga.node.v1.IdentityPublicKey
-	10, // 20: auriga.node.v1.Profile.McpServersEntry.value:type_name -> auriga.node.v1.McpServer
-	11, // 21: auriga.node.v1.Profile.ModelProvidersEntry.value:type_name -> auriga.node.v1.ModelProvider
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	20, // 9: auriga.node.v1.InstanceSpec.labels:type_name -> auriga.node.v1.InstanceSpec.LabelsEntry
+	19, // 10: auriga.node.v1.DshRuntime.signed:type_name -> auriga.node.v1.SignedArtifact
+	2,  // 11: auriga.node.v1.PluginRef.level:type_name -> auriga.node.v1.PluginLevel
+	19, // 12: auriga.node.v1.PluginRef.signed:type_name -> auriga.node.v1.SignedArtifact
+	9,  // 13: auriga.node.v1.Profile.patches:type_name -> auriga.node.v1.ConfigPatch
+	21, // 14: auriga.node.v1.Profile.mcp_servers:type_name -> auriga.node.v1.Profile.McpServersEntry
+	22, // 15: auriga.node.v1.Profile.model_providers:type_name -> auriga.node.v1.Profile.ModelProvidersEntry
+	23, // 16: auriga.node.v1.Profile.env:type_name -> auriga.node.v1.Profile.EnvEntry
+	3,  // 17: auriga.node.v1.McpServer.token_ref:type_name -> auriga.node.v1.TokenRef
+	3,  // 18: auriga.node.v1.ModelProvider.token_ref:type_name -> auriga.node.v1.TokenRef
+	12, // 19: auriga.node.v1.ModelProvider.models:type_name -> auriga.node.v1.ModelInfo
+	16, // 20: auriga.node.v1.Secrets.instance_token:type_name -> auriga.node.v1.SealedSecret
+	17, // 21: auriga.node.v1.Secrets.identity_keys:type_name -> auriga.node.v1.IdentityPublicKey
+	16, // 22: auriga.node.v1.Secrets.ai_gateway_token:type_name -> auriga.node.v1.SealedSecret
+	24, // 23: auriga.node.v1.IdentityPublicKey.not_before:type_name -> google.protobuf.Timestamp
+	24, // 24: auriga.node.v1.IdentityPublicKey.not_after:type_name -> google.protobuf.Timestamp
+	24, // 25: auriga.node.v1.ArtifactStatement.issued_at:type_name -> google.protobuf.Timestamp
+	18, // 26: auriga.node.v1.SignedArtifact.statement:type_name -> auriga.node.v1.ArtifactStatement
+	10, // 27: auriga.node.v1.Profile.McpServersEntry.value:type_name -> auriga.node.v1.McpServer
+	11, // 28: auriga.node.v1.Profile.ModelProvidersEntry.value:type_name -> auriga.node.v1.ModelProvider
+	29, // [29:29] is the sub-list for method output_type
+	29, // [29:29] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_auriga_node_v1_spec_proto_init() }
@@ -1483,7 +1702,7 @@ func file_auriga_node_v1_spec_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_node_v1_spec_proto_rawDesc), len(file_auriga_node_v1_spec_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

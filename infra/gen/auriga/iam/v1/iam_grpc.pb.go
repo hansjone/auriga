@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	SessionService_IntrospectSession_FullMethodName = "/auriga.iam.v1.SessionService/IntrospectSession"
 	SessionService_RevokeSessions_FullMethodName    = "/auriga.iam.v1.SessionService/RevokeSessions"
+	SessionService_TouchSession_FullMethodName      = "/auriga.iam.v1.SessionService/TouchSession"
 )
 
 // SessionServiceClient is the client API for SessionService service.
@@ -34,6 +35,8 @@ type SessionServiceClient interface {
 	IntrospectSession(ctx context.Context, in *IntrospectSessionRequest, opts ...grpc.CallOption) (*IntrospectSessionResponse, error)
 	// 吊销会话。调用方：org、ops（停用、离职）。
 	RevokeSessions(ctx context.Context, in *RevokeSessionsRequest, opts ...grpc.CallOption) (*RevokeSessionsResponse, error)
+	// 会话续期（顺延闲置过期时间并改写 NATS KV）。调用方：edge，同一会话最多每 5 分钟一次。
+	TouchSession(ctx context.Context, in *TouchSessionRequest, opts ...grpc.CallOption) (*TouchSessionResponse, error)
 }
 
 type sessionServiceClient struct {
@@ -64,6 +67,16 @@ func (c *sessionServiceClient) RevokeSessions(ctx context.Context, in *RevokeSes
 	return out, nil
 }
 
+func (c *sessionServiceClient) TouchSession(ctx context.Context, in *TouchSessionRequest, opts ...grpc.CallOption) (*TouchSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TouchSessionResponse)
+	err := c.cc.Invoke(ctx, SessionService_TouchSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SessionServiceServer is the server API for SessionService service.
 // All implementations must embed UnimplementedSessionServiceServer
 // for forward compatibility.
@@ -75,6 +88,8 @@ type SessionServiceServer interface {
 	IntrospectSession(context.Context, *IntrospectSessionRequest) (*IntrospectSessionResponse, error)
 	// 吊销会话。调用方：org、ops（停用、离职）。
 	RevokeSessions(context.Context, *RevokeSessionsRequest) (*RevokeSessionsResponse, error)
+	// 会话续期（顺延闲置过期时间并改写 NATS KV）。调用方：edge，同一会话最多每 5 分钟一次。
+	TouchSession(context.Context, *TouchSessionRequest) (*TouchSessionResponse, error)
 	mustEmbedUnimplementedSessionServiceServer()
 }
 
@@ -90,6 +105,9 @@ func (UnimplementedSessionServiceServer) IntrospectSession(context.Context, *Int
 }
 func (UnimplementedSessionServiceServer) RevokeSessions(context.Context, *RevokeSessionsRequest) (*RevokeSessionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RevokeSessions not implemented")
+}
+func (UnimplementedSessionServiceServer) TouchSession(context.Context, *TouchSessionRequest) (*TouchSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TouchSession not implemented")
 }
 func (UnimplementedSessionServiceServer) mustEmbedUnimplementedSessionServiceServer() {}
 func (UnimplementedSessionServiceServer) testEmbeddedByValue()                        {}
@@ -148,6 +166,24 @@ func _SessionService_RevokeSessions_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SessionService_TouchSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TouchSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SessionServiceServer).TouchSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SessionService_TouchSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SessionServiceServer).TouchSession(ctx, req.(*TouchSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SessionService_ServiceDesc is the grpc.ServiceDesc for SessionService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -162,6 +198,10 @@ var SessionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeSessions",
 			Handler:    _SessionService_RevokeSessions_Handler,
+		},
+		{
+			MethodName: "TouchSession",
+			Handler:    _SessionService_TouchSession_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
