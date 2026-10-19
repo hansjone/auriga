@@ -69,6 +69,7 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 			Desired:   nodev1.DesiredState_DESIRED_STATE_RUNNING,
 		},
 	}
+	var chowned int
 	prep := &runtime.Preparing{
 		Inner:          inner,
 		Specs:          specs,
@@ -78,10 +79,19 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 		Policy:         policy.Default(),
 		SealingPrivate: priv,
 		PlatformURL:    "https://edge.example.com",
-		Chown:          storage.Lchown,
+		Chown: func(path string, uid, gid int) error {
+			chowned++
+			if uid < 200000 {
+				t.Fatalf("uid %d", uid)
+			}
+			return nil // CI runners are not root; production uses storage.Lchown
+		},
 	}
 	if err := prep.Ensure(context.Background(), &runtime.Spec{InstanceID: "prep1", Generation: 1}, &runtime.Rendered{}); err != nil {
 		t.Fatal(err)
+	}
+	if chowned == 0 {
+		t.Fatal("expected Chown calls")
 	}
 	tokenPath := filepath.Join(root, "instances", "prep1", "meta", "instance.token")
 	got, err := os.ReadFile(tokenPath)
