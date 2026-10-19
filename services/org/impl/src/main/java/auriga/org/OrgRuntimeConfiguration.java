@@ -34,11 +34,21 @@ public class OrgRuntimeConfiguration {
       @org.springframework.beans.factory.annotation.Qualifier("orgTransactionManager")
           ObjectProvider<TenantTransactionManager> orgTx,
       ObjectProvider<TenantTransactionManager> tx) {
-    DataSource source =
-        beans.containsBean("orgDataSource")
-            ? beans.getBean("orgDataSource", DataSource.class)
-            : beans.getBean(DataSource.class);
-    return new OrgStore(new JdbcTemplate(source), orgTx.getIfAvailable(tx::getObject));
+    DataSource source;
+    TenantTransactionManager manager;
+    if (beans.containsBean("orgDataSource")) {
+      source = beans.getBean("orgDataSource", DataSource.class);
+      manager =
+          orgTx.getIfAvailable(
+              () -> {
+                throw new IllegalStateException(
+                    "orgDataSource present but orgTransactionManager missing");
+              });
+    } else {
+      source = beans.getBean(DataSource.class);
+      manager = orgTx.getIfAvailable(tx::getObject);
+    }
+    return new OrgStore(new JdbcTemplate(source), manager);
   }
 
   @Bean
@@ -50,11 +60,22 @@ public class OrgRuntimeConfiguration {
   @Bean
   OrgService orgService(
       OrgStore store,
+      org.springframework.beans.factory.ListableBeanFactory beans,
       @org.springframework.beans.factory.annotation.Qualifier("orgEventPublisher")
           ObjectProvider<EventPublisher> orgEvents,
       ObjectProvider<EventPublisher> events,
       Clock clock) {
-    return new OrgService(store, orgEvents.getIfAvailable(events::getObject), clock);
+    EventPublisher publisher;
+    if (beans.containsBean("orgEventPublisher")) {
+      publisher =
+          orgEvents.getIfAvailable(
+              () -> {
+                throw new IllegalStateException("orgEventPublisher bean missing");
+              });
+    } else {
+      publisher = orgEvents.getIfAvailable(events::getObject);
+    }
+    return new OrgService(store, publisher, clock);
   }
 
   @Bean

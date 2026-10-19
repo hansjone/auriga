@@ -51,7 +51,7 @@ import org.springframework.test.context.DynamicPropertySource;
           + "auriga.common.autoconfigure.AurigaPersistenceAutoConfiguration,"
           + "auriga.common.autoconfigure.AurigaEventsAutoConfiguration"
     })
-@ActiveProfiles("combined")
+@ActiveProfiles({"combined", "dev"})
 @ExtendWith(PostgresExtension.class)
 @DirtiesContext
 class M1CombinedAssemblyTest {

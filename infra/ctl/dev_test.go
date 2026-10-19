@@ -111,7 +111,7 @@ func TestDevLifecycle(t *testing.T) {
 			if err := db.QueryRow("SELECT rolsuper FROM pg_roles WHERE rolname=current_user").Scan(&super); err != nil || !super {
 				t.Fatal("not a dev superuser", err)
 			}
-			nc, err := nats.Connect(c.NATS)
+			nc, err := nats.Connect(c.NATS, nats.Timeout(5*time.Second), nats.MaxReconnects(0))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,12 +175,12 @@ func TestNATSLifecycle(t *testing.T) {
 	port := freePort(t)
 	for _, phase := range []string{"initial", "restart"} {
 		t.Run(phase, func(t *testing.T) {
-			srv, err := startNATS(port, dir)
+			srv, err := startNATS(port, dir, "auriga", "test-nats-password")
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer func() { srv.Shutdown(); srv.WaitForShutdown() }()
-			nc, err := nats.Connect(srv.ClientURL())
+			nc, err := nats.Connect(authenticatedNATSURL(port, "auriga", "test-nats-password"), nats.Timeout(5*time.Second), nats.MaxReconnects(0))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +212,7 @@ func TestNATSLifecycle(t *testing.T) {
 		t.Fatal("port not released", err)
 	}
 	defer func() { _ = listener.Close() }()
-	if _, err := startNATS(port, dir); err == nil {
+	if _, err := startNATS(port, dir, "auriga", "test-nats-password"); err == nil {
 		t.Fatal("occupied port accepted")
 	}
 }

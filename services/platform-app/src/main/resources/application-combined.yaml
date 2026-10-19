@@ -1,9 +1,11 @@
 # M1 single-process: iam + org with separate schemas/roles.
-# Enable: SPRING_PROFILES_ACTIVE=combined (or --spring.profiles.active=combined)
+# Enable: SPRING_PROFILES_ACTIVE=combined
+# Local/dev looseness (seed, insecure JWKS, cookie secure=false) lives in application-dev.yaml —
+# use combined,dev together with ctl.
 auriga:
   platform:
     combined: true
-    seed: true
+    seed: false
     enrollment-file: ${AURIGA_ENROLLMENT_FILE:.dev/emergency-enrollment.json}
     team:
       rp-id: ${AURIGA_TEAM_RP_ID:portal.example.com}
@@ -34,36 +36,32 @@ auriga:
     ops:
       enabled: false
   iam:
-    issuer: ${AURIGA_IAM_ISSUER:http://portal.example.com}
+    issuer: ${AURIGA_IAM_ISSUER:https://portal.example.com}
     encryption-key: ${AURIGA_IAM_ENCRYPTION_KEY}
     jwks-propagation-seconds: 30
     oidc:
-      allow-local-http: true
+      allow-local-http: false
     hosts:
       "[portal.example.com]":
         tenant: 00000000-0000-0000-0000-000000000001
         audience: portal
-        secure: false
+        secure: true
       "[admin.example.com]":
         tenant: 00000000-0000-0000-0000-000000000001
         audience: admin
-        secure: false
-      "[127.0.0.1]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: portal
-        secure: false
+        secure: true
     trusted-proxies: [127.0.0.1, "::1"]
     session-kv-nats: true
   events:
-    # nats-url: set via AURIGA_NATS_URL / auriga.events.nats-url when ctl brings up NATS.
-    # Leaving the key absent keeps unit tests from opening a NATS connection.
+    # Set AURIGA_NATS_URL (include user:password from ctl) when NATS is up.
     validate-schemas: true
     ensure-streams: true
+    nats-creds-file: ${AURIGA_NATS_CREDS_FILE:}
   security:
     jwt:
-      issuer: ${AURIGA_IAM_ISSUER:http://portal.example.com}
-      jwk-set-uri: ${AURIGA_IAM_ISSUER:http://portal.example.com}/oauth2/jwks
-      allow-insecure-jwks-uri: true
+      issuer: ${AURIGA_IAM_ISSUER:https://portal.example.com}
+      jwk-set-uri: ${AURIGA_IAM_ISSUER:https://portal.example.com}/oauth2/jwks
+      allow-insecure-jwks-uri: false
     public-paths:
       - /actuator/health
       - /actuator/health/**
@@ -75,7 +73,7 @@ auriga:
       - /.well-known/**
       - /userinfo
   persistence:
-    allow-unguarded: true
+    allow-unguarded: false
   grpc:
     server:
       enabled: true
@@ -86,13 +84,12 @@ spring:
     exclude:
       - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
       - org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
-      # Combined mode wires dual DataSources / outboxes itself; single-candidate auto-config would
-      # latch onto @Primary and fight the multi-schema layout.
       - auriga.common.autoconfigure.AurigaPersistenceAutoConfiguration
       - auriga.common.autoconfigure.AurigaEventsAutoConfiguration
   main:
     allow-bean-definition-overriding: true
 server:
+  address: ${AURIGA_PLATFORM_ADDRESS:127.0.0.1}
   port: ${AURIGA_PLATFORM_PORT:8081}
 management:
   endpoints:

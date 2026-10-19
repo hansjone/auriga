@@ -68,9 +68,17 @@ func TestB9_CachingStoreRevokeCancelsAttachedConn(t *testing.T) {
 
 func TestB9_ParseRevokedSessionIDs(t *testing.T) {
 	raw := []byte(`{"type":"identity.session_revoked","data":{"accountId":"a","sessionIds":["s1","s2"],"reason":"logout","actorId":null}}`)
-	ids := parseRevokedSessionIDs(raw)
-	if len(ids) != 2 || ids[0] != "s1" || ids[1] != "s2" {
-		t.Fatalf("%v", ids)
+	ids, ok := parseRevokedSessionIDs(raw)
+	if !ok || len(ids) != 2 || ids[0] != "s1" || ids[1] != "s2" {
+		t.Fatalf("ok=%v ids=%v", ok, ids)
+	}
+	_, ok = parseRevokedSessionIDs([]byte(`{"type":"other.event","data":{"sessionIds":["s1"]}}`))
+	if ok {
+		t.Fatal("wrong type must be rejected")
+	}
+	_, ok = parseRevokedSessionIDs([]byte(`{"data":{"sessionIds":["s1"]}}`))
+	if ok {
+		t.Fatal("empty type must be rejected")
 	}
 }
 

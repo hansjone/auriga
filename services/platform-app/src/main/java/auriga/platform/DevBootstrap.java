@@ -4,15 +4,25 @@ import auriga.iam.EmergencyAccounts;
 import auriga.iam.IamStore;
 import auriga.iam.ProviderManager;
 import auriga.iam.SigningKeys;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,7 +51,6 @@ public class DevBootstrap implements ApplicationRunner {
   private final EmergencyAccounts emergency;
   private final ProviderManager providers;
   private final IamStore store;
-  private final MutableClock clock;
   private final Environment env;
 
   public DevBootstrap(
@@ -49,13 +58,11 @@ public class DevBootstrap implements ApplicationRunner {
       EmergencyAccounts emergency,
       ProviderManager providers,
       IamStore store,
-      MutableClock clock,
       Environment env) {
     this.keys = keys;
     this.emergency = emergency;
     this.providers = providers;
     this.store = store;
-    this.clock = clock;
     this.env = env;
   }
 
@@ -68,11 +75,24 @@ public class DevBootstrap implements ApplicationRunner {
                 store.all("signing_key").stream()
                     .anyMatch(k -> "current".equals(k.path("state").asString())));
     if (!hasSigningKey) {
-      String kid = keys.publishNext();
       Duration prop =
           Duration.ofSeconds(
               env.getProperty("auriga.iam.jwks-propagation-seconds", Long.class, 30L));
-      clock.advance(prop.plusSeconds(1));
+      String kid = keys.publishNext();
+      // Backdate publishedAt so activation succeeds without advancing the shared Clock.
+      store.isolated(
+          SigningKeys.PLATFORM,
+          () -> {
+            ObjectNode row = store.get("signing_key", kid, true);
+            row.put(
+                "publishedAt",
+                Instant.parse(row.path("publishedAt").asString())
+                    .minus(prop)
+                    .minusSeconds(1)
+                    .toString());
+            store.save("signing_key", row);
+            return null;
+          });
       keys.activate(kid);
       log.info("IAM signing key activated");
     } else {
@@ -130,21 +150,68 @@ public class DevBootstrap implements ApplicationRunner {
         });
   }
 
-  private static void writeEnrollment(Path file, EmergencyAccounts.Enrollment enrollment)
-      throws Exception {
-    Files.createDirectories(file.getParent());
+  static void writeEnrollment(Path file, EmergencyAccounts.Enrollment enrollment) throws Exception {
+    Path parent = file.getParent();
+    if (parent != null) {
+      Files.createDirectories(parent);
+    }
     ObjectNode body = JSON.createObjectNode();
     body.put("accountId", enrollment.accountId().toString());
     body.put("providerId", enrollment.providerId().toString());
     body.put("username", enrollment.username());
     body.put("password", enrollment.password());
     body.put("totpSecret", enrollment.totpSecret());
-    Files.writeString(file, body.toPrettyString() + "\n", StandardCharsets.UTF_8);
-    try {
-      Files.setPosixFilePermissions(
-          file, EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
-    } catch (UnsupportedOperationException ignored) {
-      // Windows: best-effort; file still local under .dev/
+    String content = body.toPrettyString() + "\n";
+
+    Set<String> views = FileSystems.getDefault().supportedFileAttributeViews();
+    if (views.contains("posix")) {
+      var attrs =
+          PosixFilePermissions.asFileAttribute(
+              EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+      try (var out = Files.newOutputStream(Files.createFile(file, attrs))) {
+        out.write(content.getBytes(StandardCharsets.UTF_8));
+      }
+      return;
     }
+    if (views.contains("acl")) {
+      Files.createFile(file);
+      restrictWindowsAcl(file);
+      Files.writeString(file, content, StandardCharsets.UTF_8);
+      return;
+    }
+    throw new IOException(
+        "Cannot restrict enrollment file permissions on this filesystem (need posix or acl)");
+  }
+
+  private static void restrictWindowsAcl(Path file) throws IOException {
+    AclFileAttributeView view = Files.getFileAttributeView(file, AclFileAttributeView.class);
+    if (view == null) {
+      throw new IOException("AclFileAttributeView unavailable for " + file);
+    }
+    UserPrincipal owner = view.getOwner();
+    if (owner == null) {
+      owner =
+          FileSystems.getDefault()
+              .getUserPrincipalLookupService()
+              .lookupPrincipalByName(System.getProperty("user.name"));
+    }
+    AclEntry entry =
+        AclEntry.newBuilder()
+            .setType(AclEntryType.ALLOW)
+            .setPrincipal(owner)
+            .setPermissions(
+                EnumSet.of(
+                    AclEntryPermission.READ_DATA,
+                    AclEntryPermission.WRITE_DATA,
+                    AclEntryPermission.APPEND_DATA,
+                    AclEntryPermission.READ_ATTRIBUTES,
+                    AclEntryPermission.WRITE_ATTRIBUTES,
+                    AclEntryPermission.READ_NAMED_ATTRS,
+                    AclEntryPermission.WRITE_NAMED_ATTRS,
+                    AclEntryPermission.READ_ACL,
+                    AclEntryPermission.SYNCHRONIZE,
+                    AclEntryPermission.DELETE))
+            .build();
+    view.setAcl(List.of(entry));
   }
 }
