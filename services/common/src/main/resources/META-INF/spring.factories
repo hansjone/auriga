@@ -1,2 +1,2 @@
 org.springframework.boot.EnvironmentPostProcessor=\
-io.github.hansjone.auriga.common.observability.JsonLoggingEnvironmentPostProcessor
+auriga.common.observability.JsonLoggingEnvironmentPostProcessor

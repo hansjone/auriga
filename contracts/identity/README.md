@@ -8,7 +8,7 @@
 | `connector.schema.json` | 连接器 SPI 的数据结构：描述、上下文、begin / advance、配置校验、可选能力 |
 | `remote-connector.yaml` | 远程连接器的 HTTP 接口（任意语言实现） |
 
-Java SPI（`io.github.hansjone.auriga.iam.spi`，由 B2 实现）和插件离线版的 JS 连接器接口，都用这里的数据结构，语义相同。
+Java SPI（`auriga.iam.spi`，由 B2 实现）和插件离线版的 JS 连接器接口，都用这里的数据结构，语义相同。
 
 ## 一次登录
 

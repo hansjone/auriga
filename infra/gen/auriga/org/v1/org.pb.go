@@ -1960,8 +1960,8 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"\fQuotaService\x12f\n" +
 	"\x11GetEffectiveQuota\x12'.auriga.org.v1.GetEffectiveQuotaRequest\x1a(.auriga.org.v1.GetEffectiveQuotaResponse2_\n" +
 	"\rPolicyService\x12N\n" +
-	"\tGetPolicy\x12\x1f.auriga.org.v1.GetPolicyRequest\x1a .auriga.org.v1.GetPolicyResponseBh\n" +
-	"*io.github.hansjone.auriga.contracts.org.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/org/v1;orgv1b\x06proto3"
+	"\tGetPolicy\x12\x1f.auriga.org.v1.GetPolicyRequest\x1a .auriga.org.v1.GetPolicyResponseBU\n" +
+	"\x17auriga.contracts.org.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/org/v1;orgv1b\x06proto3"
 
 var (
 	file_auriga_org_v1_org_proto_rawDescOnce sync.Once

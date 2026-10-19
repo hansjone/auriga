@@ -8,7 +8,7 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
 option java_multiple_files = true;
-option java_package = "io.github.hansjone.auriga.contracts.node.v1";
+option java_package = "auriga.contracts.node.v1";
 
 // workspace ↔ 节点代理的控制通道（workspace 提供服务端）。
 //

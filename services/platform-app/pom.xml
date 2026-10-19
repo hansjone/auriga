@@ -2,7 +2,7 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <groupId>io.github.hansjone.auriga</groupId>
+    <groupId>auriga</groupId>
     <artifactId>auriga</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <relativePath>../../pom.xml</relativePath>
@@ -10,42 +10,42 @@
   <artifactId>platform-app</artifactId>
   <dependencies>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>iam-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>org-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>workspace-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>resource-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>knowledge-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>collab-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>audit-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>ops-impl</artifactId>
       <version>${project.version}</version>
     </dependency>
@@ -72,7 +72,7 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>io.github.hansjone.auriga</groupId>
+      <groupId>auriga</groupId>
       <artifactId>test-support</artifactId>
       <version>${project.version}</version>
       <scope>test</scope>

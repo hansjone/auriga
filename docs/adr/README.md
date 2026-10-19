@@ -14,7 +14,7 @@
 | [0008](0008-nats.md) | NATS JetStream 做事件总线和缓存 | 已采纳 |
 | [0009](0009-licensing.md) | 许可证：平台 AGPL-3.0 + 商业双授权，插件 MIT | 已采纳 |
 | [0010](0010-windows-native-isolation.md) | Windows 上用原生进程运行实例，隔离弱于容器 | 已采纳 |
-| [0011](0011-java-package.md) | Java 包名和 Maven groupId 用 io.github.hansjone.auriga | 已采纳 |
+| [0011](0011-java-package.md) | Java 包名和 Maven groupId 用 auriga | 已采纳 |
 | [0012](0012-identity-sources.md) | 身份源通用架构：平台核心 + 连接器 + 步骤协议 | 已采纳 |
 | [0013](0013-external-systems.md) | 外部系统不并入平台，经 API 打通 | 已采纳 |
 | [0014](0014-communication-and-tokens.md) | 服务间通信和身份令牌 | 已采纳 |

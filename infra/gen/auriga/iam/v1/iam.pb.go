@@ -1471,8 +1471,8 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\x10BatchGetAccounts\x12&.auriga.iam.v1.BatchGetAccountsRequest\x1a'.auriga.iam.v1.BatchGetAccountsResponse2\xd5\x01\n" +
 	"\x18IdentityHeaderKeyService\x12]\n" +
 	"\x0eGetSigningKeys\x12$.auriga.iam.v1.GetSigningKeysRequest\x1a%.auriga.iam.v1.GetSigningKeysResponse\x12Z\n" +
-	"\rGetPublicKeys\x12#.auriga.iam.v1.GetPublicKeysRequest\x1a$.auriga.iam.v1.GetPublicKeysResponseBh\n" +
-	"*io.github.hansjone.auriga.contracts.iam.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1b\x06proto3"
+	"\rGetPublicKeys\x12#.auriga.iam.v1.GetPublicKeysRequest\x1a$.auriga.iam.v1.GetPublicKeysResponseBU\n" +
+	"\x17auriga.contracts.iam.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_auriga_iam_v1_iam_proto_rawDescOnce sync.Once

@@ -1,6 +1,6 @@
-io.github.hansjone.auriga.common.autoconfigure.AurigaCoreAutoConfiguration
-io.github.hansjone.auriga.common.autoconfigure.AurigaSecurityAutoConfiguration
-io.github.hansjone.auriga.common.autoconfigure.AurigaPersistenceAutoConfiguration
-io.github.hansjone.auriga.common.autoconfigure.AurigaPersistenceGuardAutoConfiguration
-io.github.hansjone.auriga.common.autoconfigure.AurigaEventsAutoConfiguration
-io.github.hansjone.auriga.common.autoconfigure.AurigaGrpcAutoConfiguration
+auriga.common.autoconfigure.AurigaCoreAutoConfiguration
+auriga.common.autoconfigure.AurigaSecurityAutoConfiguration
+auriga.common.autoconfigure.AurigaPersistenceAutoConfiguration
+auriga.common.autoconfigure.AurigaPersistenceGuardAutoConfiguration
+auriga.common.autoconfigure.AurigaEventsAutoConfiguration
+auriga.common.autoconfigure.AurigaGrpcAutoConfiguration
