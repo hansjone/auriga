@@ -1,0 +1,47 @@
+name: S3 Windows native isolation spike
+on:
+  workflow_dispatch:
+  push:
+    branches: [spike/s3-windows-isolation]
+permissions:
+  contents: read
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: spikes/s3-windows-isolation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: spikes/s3-windows-isolation/go.sum
+      - name: Build, vet and nonprivileged unit tests
+        run: |
+          go build -o s3probe.exe .
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          go vet ./...
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          go test -v ./...
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Disposable VM experiments (admin comparison then SYSTEM suite)
+        run: ./Run-All.ps1 -CIDisposableVM
+      - name: Append summary
+        if: always()
+        run: |
+          if (Test-Path out/summary.md) { Get-Content out/summary.md | Add-Content $env:GITHUB_STEP_SUMMARY }
+      - name: Upload all results even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-windows-isolation-${{ matrix.os }}
+          path: spikes/s3-windows-isolation/out/
+          if-no-files-found: warn
+          retention-days: 14
