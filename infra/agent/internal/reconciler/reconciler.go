@@ -17,7 +17,7 @@ import (
 
 const maxFailAttempts = 5
 
-// StatusSink receives status updates after each reconcile step.
+// StatusSink receives an owned snapshot after each reconcile step.
 type StatusSink func(st *nodev1.InstanceStatus)
 
 // Reconciler applies desired specs via a Driver, one goroutine per instance.
@@ -334,7 +334,9 @@ func (r *Reconciler) persist(st *nodev1.InstanceStatus, attempts uint32) {
 
 func (r *Reconciler) emit(st *nodev1.InstanceStatus) {
 	if r.Sink != nil && st != nil {
-		r.Sink(st)
+		// The worker reuses st in later transitions. Copy before handing it to
+		// another goroutine; cloning at stream.Send would already be too late.
+		r.Sink(cloneStatus(st))
 	}
 }
 

@@ -52,3 +52,46 @@ func TestReconcilerRunningAndStopped(t *testing.T) {
 	}
 	_ = context.Background()
 }
+
+func TestStatusSinkKeepsEachTransitionSnapshot(t *testing.T) {
+	store, err := state.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	rec := reconciler.New(store, runtime.NewFake(), nil, 1)
+	defer rec.Close()
+	snapshots := make(chan *nodev1.InstanceStatus, 4)
+	rec.Sink = func(st *nodev1.InstanceStatus) { snapshots <- st }
+	if err := rec.Apply(&nodev1.InstanceSpec{
+		InstanceId: "i_snapshot", Generation: 7,
+		Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING,
+		Storage: &nodev1.Storage{SchemaVersion: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Close drains the queued work and waits until the producer stops mutating status.
+	rec.Close()
+	want := []nodev1.InstancePhase{
+		nodev1.InstancePhase_INSTANCE_PHASE_PREPARING,
+		nodev1.InstancePhase_INSTANCE_PHASE_MIGRATING,
+		nodev1.InstancePhase_INSTANCE_PHASE_STARTING,
+		nodev1.InstancePhase_INSTANCE_PHASE_RUNNING,
+	}
+	for i, phase := range want {
+		select {
+		case st := <-snapshots:
+			if st.Phase != phase {
+				t.Errorf("transition %d changed after publication: got %s, want %s", i, st.Phase, phase)
+			}
+			if st.Ready != (i == len(want)-1) {
+				t.Errorf("transition %d readiness changed after publication", i)
+			}
+			if i < len(want)-1 && st.ObservedGeneration != 0 {
+				t.Errorf("transition %d generation changed after publication", i)
+			}
+		default:
+			t.Fatalf("missing transition %d", i)
+		}
+	}
+}

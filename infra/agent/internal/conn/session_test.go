@@ -72,7 +72,10 @@ func runSession(t *testing.T, s *Session) context.CancelFunc {
 		once.Do(func() {
 			cancel()
 			select {
-			case <-done:
+			case err := <-done:
+				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("session stopped with unexpected error: %v", err)
+				}
 			case <-time.After(6 * time.Second):
 				t.Error("session did not stop")
 			}
