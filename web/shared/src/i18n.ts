@@ -15,7 +15,6 @@ const errorMessagesZh = {
   },
   iam: {
     invalid_credentials: '用户名或口令不正确',
-    invalid_otp: '验证码不正确',
     login_tx_expired: '登录已过期，请重新开始',
     login_tx_finished: '登录事务已结束',
     qr_match_mismatch: '比对码不正确',
@@ -39,7 +38,6 @@ const errorMessagesEn = {
   },
   iam: {
     invalid_credentials: 'Invalid username or password',
-    invalid_otp: 'Invalid authenticator code',
     login_tx_expired: 'Sign-in expired — please start again',
     login_tx_finished: 'Sign-in already finished',
     qr_match_mismatch: 'Match code mismatch',

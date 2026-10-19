@@ -211,10 +211,10 @@ export async function handleMockRequest(
               {
                 ...totpStep(),
                 error: {
-                  code: 'iam.invalid_otp',
+                  code: 'iam.invalid_credentials',
                   message: {
-                    en: 'Invalid authenticator code.',
-                    'zh-CN': '验证码不正确。',
+                    en: 'Invalid username or password.',
+                    'zh-CN': '用户名或口令不正确。',
                   },
                 },
               },
