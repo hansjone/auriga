@@ -1,0 +1,385 @@
+// Package conn manages the NodeControl bidirectional session.
+package conn
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"runtime"
+	"sync"
+	"time"
+
+	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
+	"github.com/hansjone/auriga/infra/agent/internal/state"
+	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
+	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+// Config configures the control session loop.
+type Config struct {
+	AgentDir      string
+	AgentVersion  string
+	CAFingerprint string
+	ControlURL    string // override; else from state meta
+	Drivers       []nodev1.RuntimeKind
+	BootID        string
+	Logger        *slog.Logger
+	Reconciler    *reconciler.Reconciler
+	Store         *state.Store
+
+	// HeartbeatInterval overrides Welcome (tests use short values).
+	HeartbeatInterval time.Duration
+	MinBackoff        time.Duration
+	MaxBackoff        time.Duration
+
+	// OnWelcome is optional test hook after Welcome.
+	OnWelcome func(*nodev1.Welcome)
+}
+
+// Session runs Hello/Inventory/heartbeat and handles ApplySpec/Delete with reconnect.
+type Session struct {
+	cfg Config
+
+	mu          sync.Mutex
+	heartbeat   time.Duration
+	lastWelcome *nodev1.Welcome
+	connected   bool
+	statusCh    chan *nodev1.InstanceStatus
+}
+
+// New creates a session manager.
+func New(cfg Config) *Session {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	if cfg.MinBackoff <= 0 {
+		cfg.MinBackoff = time.Second
+	}
+	if cfg.MaxBackoff <= 0 {
+		cfg.MaxBackoff = 30 * time.Second
+	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 15 * time.Second
+	}
+	if cfg.BootID == "" {
+		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
+	}
+	s := &Session{
+		cfg:       cfg,
+		heartbeat: cfg.HeartbeatInterval,
+		statusCh:  make(chan *nodev1.InstanceStatus, 64),
+	}
+	if cfg.Reconciler != nil {
+		// wire sink lazily via SetStatusSink pattern — caller may set before Run
+	}
+	return s
+}
+
+// StatusSink returns a sink that queues status for uplink.
+func (s *Session) StatusSink() reconciler.StatusSink {
+	return func(st *nodev1.InstanceStatus) {
+		select {
+		case s.statusCh <- st:
+		default:
+			s.cfg.Logger.Warn("status channel full", "instance_id", st.GetInstanceId())
+		}
+	}
+}
+
+// Connected reports whether a Welcome has been received on the current stream.
+func (s *Session) Connected() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.connected
+}
+
+// Run loops connect → session → backoff until ctx is done.
+// After a successful Welcome, the next reconnect starts at MinBackoff.
+func (s *Session) Run(ctx context.Context) error {
+	backoff := s.cfg.MinBackoff
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.lastWelcome = nil
+		s.mu.Unlock()
+
+		err := s.runOnce(ctx)
+
+		s.mu.Lock()
+		hadWelcome := s.lastWelcome != nil
+		s.connected = false
+		s.mu.Unlock()
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.cfg.Logger.Warn("session disconnected", "error", err, "backoff", backoff.String())
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if hadWelcome {
+			backoff = s.cfg.MinBackoff
+		} else {
+			backoff *= 2
+			if backoff > s.cfg.MaxBackoff {
+				backoff = s.cfg.MaxBackoff
+			}
+		}
+	}
+}
+
+func (s *Session) runOnce(ctx context.Context) error {
+	mat, meta, tlsCert, err := s.loadCreds()
+	if err != nil {
+		return err
+	}
+	endpoint := s.cfg.ControlURL
+	if endpoint == "" {
+		endpoint = meta.ControlEndpoint
+	}
+	fp := s.cfg.CAFingerprint
+	if fp == "" {
+		fp = meta.CAFingerprint
+	}
+
+	conn, err := tlsutil.Dial(ctx, tlsutil.DialOptions{
+		Endpoint:          endpoint,
+		CAFingerprint:     fp,
+		CAPEM:             mat.CAPEM,
+		ClientCertificate: &tlsCert,
+	})
+	if err != nil {
+		return fmt.Errorf("dial control: %w", err)
+	}
+	defer conn.Close()
+
+	client := nodev1.NewNodeControlServiceClient(conn)
+	stream, err := client.Session(ctx)
+	if err != nil {
+		return fmt.Errorf("open session: %w", err)
+	}
+
+	if err := s.sendHello(stream, mat); err != nil {
+		return err
+	}
+	if err := s.sendInventory(stream); err != nil {
+		return err
+	}
+
+	// Full reconcile after (re)connect.
+	if s.cfg.Reconciler != nil {
+		if err := s.cfg.Reconciler.ReconcileAll(ctx); err != nil {
+			s.cfg.Logger.Warn("reconcile after connect", "error", err)
+		}
+		_ = s.sendInventory(stream)
+	}
+
+	welcome, err := s.recvWelcome(stream)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.connected = true
+	s.lastWelcome = welcome
+	if iv := welcome.GetHeartbeatInterval(); iv != nil {
+		d := iv.AsDuration()
+		if d > 0 {
+			s.heartbeat = d
+		}
+	} else {
+		s.heartbeat = s.cfg.HeartbeatInterval
+	}
+	hb := s.heartbeat
+	s.mu.Unlock()
+	if s.cfg.OnWelcome != nil {
+		s.cfg.OnWelcome(welcome)
+	}
+	// Reset backoff is handled by caller on success path via runOnce return only on error;
+	// Run() always backs off — fix: Run should reset backoff on successful connect.
+	// Handled below by returning a special path: we stay in session until error.
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.recvLoop(ctx, stream)
+	}()
+
+	ticker := time.NewTicker(hb)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errCh:
+			return err
+		case <-ticker.C:
+			if err := s.sendUsage(stream); err != nil {
+				return err
+			}
+		case st := <-s.statusCh:
+			if err := stream.Send(&nodev1.SessionRequest{
+				Body: &nodev1.SessionRequest_Status{Status: st},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (s *Session) loadCreds() (*identity.Material, state.NodeMeta, tls.Certificate, error) {
+	mat, err := identity.Load(s.cfg.AgentDir)
+	if err != nil {
+		return nil, state.NodeMeta{}, tls.Certificate{}, err
+	}
+	if !mat.CertificateExpiresAt.IsZero() && time.Now().After(mat.CertificateExpiresAt) {
+		return nil, state.NodeMeta{}, tls.Certificate{}, fmt.Errorf("node certificate expired")
+	}
+	meta, err := s.cfg.Store.GetNodeMeta()
+	if err != nil {
+		return nil, state.NodeMeta{}, tls.Certificate{}, err
+	}
+	mat.ControlEndpoint = meta.ControlEndpoint
+	keyPEM, err := marshalKeyPEM(mat.PrivateKey)
+	if err != nil {
+		return nil, state.NodeMeta{}, tls.Certificate{}, err
+	}
+	tlsCert, err := tlsutil.LoadTLSCertificate(mat.CertificatePEM, keyPEM)
+	if err != nil {
+		return nil, state.NodeMeta{}, tls.Certificate{}, err
+	}
+	return mat, meta, tlsCert, nil
+}
+
+func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat *identity.Material) error {
+	hostname, _ := os.Hostname()
+	drivers := s.cfg.Drivers
+	if len(drivers) == 0 {
+		drivers = []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_UNSPECIFIED}
+	}
+	return stream.Send(&nodev1.SessionRequest{
+		Body: &nodev1.SessionRequest_Hello{Hello: &nodev1.Hello{
+			NodeId:          mat.NodeID,
+			AgentVersion:    s.cfg.AgentVersion,
+			ProtocolVersion: 1,
+			Os:              goos(),
+			Arch:            runtime.GOARCH,
+			Hostname:        hostname,
+			Drivers:         drivers,
+			BootId:          s.cfg.BootID,
+			NodeTime:        timestamppb.Now(),
+			SealingKeyId:    identity.SealingKeyID(mat.SealingPublic),
+		}},
+	})
+}
+
+func (s *Session) sendInventory(stream nodev1.NodeControlService_SessionClient) error {
+	var list []*nodev1.InstanceStatus
+	if s.cfg.Reconciler != nil {
+		var err error
+		list, err = s.cfg.Reconciler.Inventory()
+		if err != nil {
+			return err
+		}
+	}
+	return stream.Send(&nodev1.SessionRequest{
+		Body: &nodev1.SessionRequest_Inventory{Inventory: &nodev1.Inventory{
+			Instances: list,
+		}},
+	})
+}
+
+func (s *Session) sendUsage(stream nodev1.NodeControlService_SessionClient) error {
+	return stream.Send(&nodev1.SessionRequest{
+		Body: &nodev1.SessionRequest_Usage{Usage: &nodev1.NodeUsage{
+			SampledAt: timestamppb.Now(),
+			Node: &nodev1.NodeResources{
+				CpuMillisUsed: 1,
+				MemoryMbUsed:  64,
+				DiskGbUsed:    1,
+				DiskGbFree:    10,
+			},
+		}},
+	})
+}
+
+func (s *Session) recvWelcome(stream nodev1.NodeControlService_SessionClient) (*nodev1.Welcome, error) {
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			return nil, err
+		}
+		if w := msg.GetWelcome(); w != nil {
+			return w, nil
+		}
+		// Apply/Delete before Welcome is unusual; still handle.
+		if err := s.handleControl(context.Background(), msg); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func (s *Session) recvLoop(ctx context.Context, stream nodev1.NodeControlService_SessionClient) error {
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return fmt.Errorf("session closed by server")
+			}
+			return err
+		}
+		if err := s.handleControl(ctx, msg); err != nil {
+			s.cfg.Logger.Warn("handle control", "error", err)
+		}
+	}
+}
+
+func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse) error {
+	if msg == nil {
+		return nil
+	}
+	switch body := msg.Body.(type) {
+	case *nodev1.SessionResponse_Apply:
+		if body.Apply == nil || body.Apply.GetSpec() == nil {
+			return nil
+		}
+		return s.cfg.Reconciler.ApplySpec(ctx, body.Apply.GetSpec())
+	case *nodev1.SessionResponse_Delete:
+		d := body.Delete
+		if d == nil {
+			return nil
+		}
+		return s.cfg.Reconciler.Delete(ctx, d.GetInstanceId(), d.GetGeneration(), d.GetPurgeData())
+	case *nodev1.SessionResponse_Welcome:
+		return nil
+	default:
+		return nil
+	}
+}
+
+func goos() string {
+	if runtime.GOOS == "windows" {
+		return "windows"
+	}
+	return "linux"
+}
+
+func marshalKeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+}
