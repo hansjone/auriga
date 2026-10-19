@@ -1,7 +1,7 @@
 {
   "name": "auriga-dsh",
   "version": "0.0.0",
-  "description": "Auriga DSH plugin skeleton",
+  "description": "Auriga DSH plugin (standalone identity: emergency + OIDC connectors)",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -16,11 +16,16 @@
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test",
+    "test": "node --test \"test/**/*.test.js\"",
     "build": "tsc --noEmit -p tsconfig.json",
     "gen:steps": "json2ts -i ../../contracts/identity/steps.schema.json -o src/generated/steps.d.ts --unreachableDefinitions && prettier --write src/generated/steps.d.ts"
   },
   "devDependencies": {
-    "json-schema-to-typescript": "16.0.0"
+    "json-schema-to-typescript": "16.0.0",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "undici": "7.30.1"
   }
 }
