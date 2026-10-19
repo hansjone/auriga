@@ -1,0 +1,55 @@
+name: Go
+on:
+  push:
+    paths: ['infra/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml']
+  pull_request:
+    paths: ['infra/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: infra/**/go.sum
+      - name: Regenerate contracts
+        run: go run generate.go
+      - name: Check committed generated code
+        run: |
+          git diff --exit-code -- gen
+          test -z "$(git status --porcelain -- gen)"
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet, test, and build every workspace module
+        run: |
+          for module in gen edge ai-gateway egress agent ctl; do
+            (cd "$module" && go vet ./... && go test -count=1 -timeout=10m ./... && go build ./...) || exit 1
+          done
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [gen, edge, ai-gateway, egress, agent, ctl]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: infra/**/go.sum
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          working-directory: infra/${{ matrix.module }}
+          args: --config ../.golangci.yml
