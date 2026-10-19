@@ -133,9 +133,9 @@ func runStart(ctx context.Context, options devOptions, out, logs io.Writer) erro
 		state, err := readState(o.DataDir)
 		if err == nil && state.Ready && state.PID == cmd.Process.Pid {
 			_, err := fmt.Fprintf(out,
-				"started pid=%d data-dir=%s\nPostgreSQL: 127.0.0.1:%d database=auriga (credentials in %s)\nNATS: nats://127.0.0.1:%d (loopback, no auth)\nService roles: %s\n",
+				"started pid=%d data-dir=%s\nPostgreSQL: 127.0.0.1:%d database=auriga (credentials in %s)\nNATS: nats://127.0.0.1:%d (loopback + auth; see %s)\nService roles: %s\n",
 				state.PID, o.DataDir, state.PGPort, filepath.Join(o.DataDir, "credentials.env"),
-				state.NATSPort, serviceRolesPath(o.DataDir),
+				state.NATSPort, filepath.Join(o.DataDir, "nats.env"), serviceRolesPath(o.DataDir),
 			)
 			return err
 		}

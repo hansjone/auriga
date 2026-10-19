@@ -24,6 +24,7 @@ type Config struct {
 	IdentityKeysFile     string            `json:"identityKeysFile"`
 	SessionStore         string            `json:"sessionStore"` // memory | nats
 	NATSURL              string            `json:"natsUrl"`
+	NATSCredsFile        string            `json:"natsCredsFile"`
 	PublicPathPrefixes   []string          `json:"publicPathPrefixes"`
 }
 
@@ -99,6 +100,13 @@ func applyEnv(cfg *Config) {
 	set("AURIGA_EDGE_IDENTITY_KEYS_FILE", &cfg.IdentityKeysFile)
 	set("AURIGA_EDGE_SESSION_STORE", &cfg.SessionStore)
 	set("AURIGA_EDGE_NATS_URL", &cfg.NATSURL)
+	if cfg.NATSURL == "" {
+		set("AURIGA_NATS_URL", &cfg.NATSURL)
+	}
+	set("AURIGA_EDGE_NATS_CREDS_FILE", &cfg.NATSCredsFile)
+	if cfg.NATSCredsFile == "" {
+		set("AURIGA_NATS_CREDS_FILE", &cfg.NATSCredsFile)
+	}
 	if v := os.Getenv("AURIGA_EDGE_SECURE_COOKIES"); v != "" {
 		cfg.SecureCookies = v == "1" || strings.EqualFold(v, "true")
 	}
@@ -202,6 +210,13 @@ func (c Config) validate() error {
 		}
 		if ah == parent || strings.HasSuffix(ah, suffix) {
 			return fmt.Errorf("instanceParentDomain %q would capture adminHost %q as an instance host", c.InstanceParentDomain, c.AdminHost)
+		}
+		// Nonce Domain cookie must cover the portal host or browsers drop it.
+		cookieDomain := openNonceCookieDomain(parent)
+		if cookieDomain != "" {
+			if ph != cookieDomain && !strings.HasSuffix(ph, "."+cookieDomain) {
+				return fmt.Errorf("portalHost %q is not under open-nonce cookie Domain %q derived from instanceParentDomain %q", c.PortalHost, cookieDomain, c.InstanceParentDomain)
+			}
 		}
 	}
 	for _, p := range c.TrustedProxies {

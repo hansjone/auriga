@@ -57,11 +57,15 @@ func (l *TokenBucketLimiter) Allow(key, path string) bool {
 	defer l.mu.Unlock()
 	now := l.now()
 	l.ops++
-	if l.ops%rateSweepEvery == 0 || len(l.buckets) >= maxRateBuckets {
+	if l.ops%rateSweepEvery == 0 {
 		l.evictLocked(now)
 	}
 	b, ok := l.buckets[key]
 	if !ok {
+		// Evict only when inserting a new key into a full table (not on every hit).
+		if len(l.buckets) >= maxRateBuckets {
+			l.evictLocked(now)
+		}
 		b = &bucket{tokens: l.burst, last: now}
 		l.buckets[key] = b
 	}

@@ -1,0 +1,29 @@
+# Local development profile (pair with combined: SPRING_PROFILES_ACTIVE=combined,dev).
+# Kept separate so production combined stays secure by default.
+auriga:
+  platform:
+    seed: true
+  iam:
+    issuer: ${AURIGA_IAM_ISSUER:http://portal.example.com}
+    oidc:
+      allow-local-http: true
+    hosts:
+      "[portal.example.com]":
+        tenant: 00000000-0000-0000-0000-000000000001
+        audience: portal
+        secure: false
+      "[admin.example.com]":
+        tenant: 00000000-0000-0000-0000-000000000001
+        audience: admin
+        secure: false
+      "[127.0.0.1]":
+        tenant: 00000000-0000-0000-0000-000000000001
+        audience: portal
+        secure: false
+  security:
+    jwt:
+      issuer: ${AURIGA_IAM_ISSUER:http://portal.example.com}
+      jwk-set-uri: ${AURIGA_IAM_ISSUER:http://portal.example.com}/oauth2/jwks
+      allow-insecure-jwks-uri: true
+  persistence:
+    allow-unguarded: true

@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"strings"
+	"unicode"
 )
 
 func getCookie(r *http.Request, name string) string {
@@ -89,16 +90,40 @@ func openNonceCookieDomain(instanceParentDomain string) string {
 	return parent
 }
 
-func openNonceCookieName(secure bool, domain string) string {
-	if domain == "" && secure {
-		return "__Host-" + openNonceCookieBase()
+// sanitizeCookieNameSuffix keeps cookie name characters safe (RFC 6265 token-ish).
+func sanitizeCookieNameSuffix(id string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(id) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
 	}
-	return openNonceCookieBase()
+	out := b.String()
+	if out == "" {
+		return "x"
+	}
+	if len(out) > 48 {
+		return out[:48]
+	}
+	return out
 }
 
-func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, value string, maxAge int) {
+func openNonceCookieName(secure bool, domain, instanceID string) string {
+	base := openNonceCookieBase()
+	if instanceID != "" {
+		base = base + "_" + sanitizeCookieNameSuffix(instanceID)
+	}
+	if domain == "" && secure {
+		return "__Host-" + base
+	}
+	return base
+}
+
+func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, value string, maxAge int) {
 	c := &http.Cookie{
-		Name:     openNonceCookieName(secure, domain),
+		Name:     openNonceCookieName(secure, domain, instanceID),
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
@@ -112,6 +137,6 @@ func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, value string
 	http.SetCookie(w, c)
 }
 
-func clearOpenNonceCookie(w http.ResponseWriter, secure bool, domain string) {
-	setOpenNonceCookie(w, secure, domain, "", -1)
+func clearOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID string) {
+	setOpenNonceCookie(w, secure, domain, instanceID, "", -1)
 }

@@ -296,20 +296,21 @@ func TestIdentitySignAndTicketOnce(t *testing.T) {
 		t.Fatalf("location %s", loc)
 	}
 
+	nonceName := openNonceCookieName(false, openNonceCookieDomain(cfg.InstanceParentDomain), instID)
 	nonce := ""
 	for _, c := range rr.Result().Cookies() {
-		if c.Name == "auriga_open_nonce" || c.Name == "__Host-auriga_open_nonce" {
+		if c.Name == nonceName {
 			nonce = c.Value
 		}
 	}
 	if nonce == "" {
-		t.Fatal("missing open nonce cookie")
+		t.Fatalf("missing open nonce cookie %q", nonceName)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "http://"+host+"/_auriga/ticket?t="+url.QueryEscape(ticket), nil)
 	req.Host = host
 	req.RemoteAddr = "192.0.2.10:1"
-	req.AddCookie(&http.Cookie{Name: "auriga_open_nonce", Value: nonce})
+	req.AddCookie(&http.Cookie{Name: nonceName, Value: nonce})
 	rr = httptest.NewRecorder()
 	gw.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusFound {
@@ -328,7 +329,7 @@ func TestIdentitySignAndTicketOnce(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "http://"+host+"/_auriga/ticket?t="+url.QueryEscape(ticket), nil)
 	req.Host = host
 	req.RemoteAddr = "192.0.2.10:1"
-	req.AddCookie(&http.Cookie{Name: "auriga_open_nonce", Value: nonce})
+	req.AddCookie(&http.Cookie{Name: nonceName, Value: nonce})
 	rr = httptest.NewRecorder()
 	gw.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {

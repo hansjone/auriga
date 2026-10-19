@@ -131,8 +131,59 @@ func (s *devServices) Close() error {
 	return result
 }
 
-func startNATS(port int, dir string) (*server.Server, error) {
-	nats, err := server.NewServer(&server.Options{Host: "127.0.0.1", Port: port, JetStream: true, StoreDir: dir, NoSigs: true, NoLog: true})
+func natsCredentials(dir string) (user, password string, err error) {
+	path := filepath.Join(dir, "nats.env")
+	body, err := os.ReadFile(path)
+	if err == nil {
+		user, password = "auriga", ""
+		for _, line := range strings.Split(string(body), "\n") {
+			line = strings.TrimSpace(line)
+			switch {
+			case strings.HasPrefix(line, "NATS_USER="):
+				user = strings.TrimPrefix(line, "NATS_USER=")
+			case strings.HasPrefix(line, "NATS_PASSWORD="):
+				password = strings.TrimPrefix(line, "NATS_PASSWORD=")
+			}
+		}
+		if user == "" || password == "" {
+			return "", "", errors.New("invalid nats.env; refusing to reset persisted NATS credentials")
+		}
+		return user, password, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", "", err
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return "", "", err
+	}
+	user, password = "auriga", hex.EncodeToString(secret)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return "", "", err
+	}
+	_, writeErr := fmt.Fprintf(f, "NATS_USER=%s\nNATS_PASSWORD=%s\n", user, password)
+	return user, password, errors.Join(writeErr, f.Close())
+}
+
+func authenticatedNATSURL(port int, user, password string) string {
+	u := url.URL{
+		Scheme: "nats",
+		User:   url.UserPassword(user, password),
+		Host:   fmt.Sprintf("127.0.0.1:%d", port),
+	}
+	return u.String()
+}
+
+func startNATS(port int, dir, user, password string) (*server.Server, error) {
+	if user == "" || password == "" {
+		return nil, errors.New("NATS user and password required")
+	}
+	nats, err := server.NewServer(&server.Options{
+		Host: "127.0.0.1", Port: port, JetStream: true, StoreDir: dir,
+		Username: user, Password: password,
+		NoSigs: true, NoLog: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("configure NATS: %w", err)
 	}
@@ -223,13 +274,17 @@ func startDev(ctx context.Context, options devOptions, logger *slog.Logger) (_ *
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	services.nats, err = startNATS(o.NATSPort, filepath.Join(o.DataDir, "nats"))
+	natsUser, natsPassword, err := natsCredentials(o.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	services.nats, err = startNATS(o.NATSPort, filepath.Join(o.DataDir, "nats"), natsUser, natsPassword)
 	if err != nil {
 		return nil, err
 	}
 	services.Connections = devConnections{
 		Postgres: pgURL,
-		NATS:     services.nats.ClientURL(),
+		NATS:     authenticatedNATSURL(o.NATSPort, natsUser, natsPassword),
 	}
 	return services, nil
 }
@@ -249,8 +304,9 @@ func runDev(ctx context.Context, options devOptions, out io.Writer, logger *slog
 	if abs, err := filepath.Abs(dataDir); err == nil {
 		dataDir = abs
 	}
-	if _, err := fmt.Fprintf(out, "PostgreSQL: %s\nNATS: %s\nCredentials: %s\nService roles: %s\nPress Ctrl+C to stop.\n",
-		c.Postgres, c.NATS, filepath.Join(dataDir, "credentials.env"), serviceRolesPath(dataDir)); err != nil {
+	if _, err := fmt.Fprintf(out, "PostgreSQL: %s\nNATS: nats://127.0.0.1:%d (auth in %s)\nCredentials: %s\nService roles: %s\nPress Ctrl+C to stop.\nExport AURIGA_NATS_URL (edge) and AURIGA_EVENTS_NATS_URL (platform) from nats.env.\n",
+		c.Postgres, options.NATSPort, filepath.Join(dataDir, "nats.env"),
+		filepath.Join(dataDir, "credentials.env"), serviceRolesPath(dataDir)); err != nil {
 		return err
 	}
 	logger.Info("development services ready", "pgPort", options.PGPort, "natsPort", options.NATSPort)

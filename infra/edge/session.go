@@ -156,6 +156,36 @@ func (c CachingSessionStore) Get(ctx context.Context, cookieHash string) (*Sessi
 	return nil, ErrSessionNotFound
 }
 
+func (c CachingSessionStore) GetBySessionID(ctx context.Context, sessionID string) (*Session, error) {
+	return getSessionByID(c.Primary, ctx, sessionID)
+}
+
+// SessionRevokeHook is implemented by stores that can notify when a session is revoked.
+type SessionRevokeHook interface {
+	SetOnRevoke(fn func(sessionID string))
+}
+
+func (m *MemorySessionStore) SetOnRevoke(fn func(sessionID string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.OnRevoke = fn
+}
+
+// wireSessionRevoke attaches CancelSession to memory / nats stores even when wrapped.
+func wireSessionRevoke(store SessionStore, fn func(sessionID string)) {
+	if store == nil || fn == nil {
+		return
+	}
+	switch s := store.(type) {
+	case CachingSessionStore:
+		wireSessionRevoke(s.Primary, fn)
+	case *CachingSessionStore:
+		wireSessionRevoke(s.Primary, fn)
+	case SessionRevokeHook:
+		s.SetOnRevoke(fn)
+	}
+}
+
 func HashCookie(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

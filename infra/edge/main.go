@@ -67,7 +67,7 @@ func openSessionStore(cfg Config, log *slog.Logger) (SessionStore, error) {
 	case "", "memory":
 		return CachingSessionStore{Primary: mem, Introspect: FailIntrospector{}}, nil
 	case "nats":
-		natsStore, err := NewNATSSessionStore(cfg.NATSURL)
+		natsStore, err := NewNATSSessionStore(cfg.NATSURL, cfg.NATSCredsFile, log)
 		if err != nil {
 			log.Warn("nats session store unavailable; falling back to memory", "error", err.Error())
 			return CachingSessionStore{Primary: mem, Introspect: FailIntrospector{}}, nil

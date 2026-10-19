@@ -9,6 +9,14 @@ paths = [
   '''(^|[/\\])\.agent-(?:task|report)\.md$'''
 ]
 
+# checkout fetch-depth:0 pulls other branch objects; gitleaks git walks all of them.
+# Plugin tests intentionally use RFC1918 examples (sources also mark gitleaks:allow).
+[[allowlists]]
+description = "dsh-plugin unit tests may cite RFC1918 example addresses"
+paths = [
+  '''(^|[/\\])clients/dsh-plugin/test/'''
+]
+
 [[rules]]
 id = "private-ipv4"
 description = "RFC 1918 addresses must not appear in the public repository"
