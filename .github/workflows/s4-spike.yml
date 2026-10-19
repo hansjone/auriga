@@ -1,0 +1,137 @@
+name: S4 DSH runtime spike
+on:
+  push:
+    branches: [spike/s4-dsh-runtime]
+  workflow_dispatch:
+    inputs:
+      dsh:
+        description: Exact DSH version
+        default: 0.2.0-rc.2
+        required: true
+      node:
+        description: Exact Node 22 version (avoid 22.x for reproducibility)
+        default: 22.19.0
+        required: true
+permissions:
+  contents: read
+env:
+  # Every job below uses a GitHub-hosted ephemeral VM, never a self-hosted runner.
+  S4_EPHEMERAL_CI: github-hosted
+jobs:
+  linux-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - name: Prototype tests
+        run: node --test spikes/s4-dsh-runtime/prototype.test.mjs
+      - name: Build Linux x64
+        env:
+          DSH_VERSION: ${{ inputs.dsh || '0.2.0-rc.2' }}
+          NODE_VERSION: ${{ inputs.node || '22.19.0' }}
+        run: node spikes/s4-dsh-runtime/build.mjs --dsh "$DSH_VERSION" --node "$NODE_VERSION" --target linux-x64 --lock "spikes/s4-dsh-runtime/locks/dsh-$DSH_VERSION.npm-10.9.3.package-lock.json"
+      - name: Start non-root in a new offline network namespace
+        shell: bash
+        run: |
+          # Start privileged to create only a network namespace, then drop all runtime work
+          # to the runner uid. -r would map only uid 0 and make runuser(non-root) fail.
+          sudo unshare -n -- bash -c '
+            set -euo pipefail
+            ip link set lo up
+            exec runuser -u "$1" -- env GITHUB_ACTIONS=true S4_EPHEMERAL_CI=github-hosted "$2" "$3" --build-result "$4" --network linux-unshare --result "$5"
+          ' _ "$(id -un)" "$(command -v node)" "$PWD/spikes/s4-dsh-runtime/smoke.mjs" "$PWD/spikes/s4-dsh-runtime/out/build-linux-x64.json" "$PWD/spikes/s4-dsh-runtime/out/smoke-linux-native.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: s4-linux-native
+          path: spikes/s4-dsh-runtime/out/
+          if-no-files-found: error
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - name: Prototype tests
+        run: node --test spikes/s4-dsh-runtime/prototype.test.mjs
+      - name: Build Windows x64
+        env:
+          DSH_VERSION: ${{ inputs.dsh || '0.2.0-rc.2' }}
+          NODE_VERSION: ${{ inputs.node || '22.19.0' }}
+        run: node spikes/s4-dsh-runtime/build.mjs --dsh "$env:DSH_VERSION" --node "$env:NODE_VERSION" --target win-x64 --lock "spikes/s4-dsh-runtime/locks/dsh-$env:DSH_VERSION.npm-10.9.3.package-lock.json"
+      - name: Block only the extracted Node executable outbound, start, and remove rule
+        run: node spikes/s4-dsh-runtime/smoke.mjs --build-result spikes/s4-dsh-runtime/out/build-win-x64.json --network windows-firewall --result spikes/s4-dsh-runtime/out/smoke-windows-native.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: s4-windows-native
+          path: spikes/s4-dsh-runtime/out/
+          if-no-files-found: error
+  windows-cross:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - name: Cross-build Linux x64 without executing target binaries or install scripts
+        env:
+          DSH_VERSION: ${{ inputs.dsh || '0.2.0-rc.2' }}
+          NODE_VERSION: ${{ inputs.node || '22.19.0' }}
+        run: node spikes/s4-dsh-runtime/build.mjs --dsh "$env:DSH_VERSION" --node "$env:NODE_VERSION" --target linux-x64 --lock "spikes/s4-dsh-runtime/locks/dsh-$env:DSH_VERSION.npm-10.9.3.package-lock.json"
+      - name: Rebuild from captured lock and compare complete archive SHA-256
+        shell: pwsh
+        env:
+          DSH_VERSION: ${{ inputs.dsh || '0.2.0-rc.2' }}
+          NODE_VERSION: ${{ inputs.node || '22.19.0' }}
+        run: |
+          $first = Get-Content spikes/s4-dsh-runtime/out/build-linux-x64.json -Raw | ConvertFrom-Json
+          $lock = Get-ChildItem spikes/s4-dsh-runtime/out/*.package-lock.json | Select-Object -ExpandProperty FullName
+          node spikes/s4-dsh-runtime/build.mjs --dsh "$env:DSH_VERSION" --node "$env:NODE_VERSION" --target linux-x64 --lock "$lock" --out spikes/s4-dsh-runtime/out/rebuilt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $second = Get-Content spikes/s4-dsh-runtime/out/rebuilt/build-linux-x64.json -Raw | ConvertFrom-Json
+          $matches = $first.digest -eq $second.digest
+          @{ status = $(if ($matches) { 'passed' } else { 'failed' }); first = $first.digest; second = $second.digest; sameArchiveBytes = $matches } | ConvertTo-Json | Set-Content spikes/s4-dsh-runtime/out/reproducibility.json
+          if (-not $matches) { throw 'Rebuild digest changed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: s4-windows-cross-linux-x64
+          path: |
+            spikes/s4-dsh-runtime/out/*.tar.gz
+            spikes/s4-dsh-runtime/out/*.sha256
+            spikes/s4-dsh-runtime/out/*.json
+          if-no-files-found: error
+  linux-consume-cross:
+    needs: windows-cross
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: s4-windows-cross-linux-x64
+          path: spikes/s4-dsh-runtime/out
+      - name: Run the Windows-built Linux artifact offline, with real native flock
+        shell: bash
+        run: |
+          sudo unshare -n -- bash -c '
+            set -euo pipefail
+            ip link set lo up
+            exec runuser -u "$1" -- env GITHUB_ACTIONS=true S4_EPHEMERAL_CI=github-hosted "$2" "$3" --build-result "$4" --network linux-unshare --result "$5"
+          ' _ "$(id -un)" "$(command -v node)" "$PWD/spikes/s4-dsh-runtime/smoke.mjs" "$PWD/spikes/s4-dsh-runtime/out/build-linux-x64.json" "$PWD/spikes/s4-dsh-runtime/out/smoke-linux-cross.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: s4-linux-consume-cross
+          path: spikes/s4-dsh-runtime/out/*.json
+          if-no-files-found: error

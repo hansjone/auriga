@@ -1,0 +1,74 @@
+{
+  "status": "passed",
+  "date": "2026-10-19",
+  "node": "v22.19.0",
+  "syntax": [
+    {
+      "file": "archive.mjs",
+      "exitCode": 0
+    },
+    {
+      "file": "build.mjs",
+      "exitCode": 0
+    },
+    {
+      "file": "lib.mjs",
+      "exitCode": 0
+    },
+    {
+      "file": "native-probe.mjs",
+      "exitCode": 0
+    },
+    {
+      "file": "prototype.test.mjs",
+      "exitCode": 0
+    },
+    {
+      "file": "smoke.mjs",
+      "exitCode": 0
+    },
+    {
+      "file": "verify.mjs",
+      "exitCode": 0
+    }
+  ],
+  "tests": {
+    "tests": 6,
+    "passed": 5,
+    "failed": 0,
+    "skipped": 1,
+    "exitCode": 0
+  },
+  "workflow": {
+    "syntax": "parsed",
+    "jobs": [
+      "linux-native",
+      "windows-native",
+      "windows-cross",
+      "linux-consume-cross"
+    ],
+    "execution": "not-run"
+  },
+  "localFirewallGuardRejected": true,
+  "evidence": [
+    {
+      "file": "windows-build.json",
+      "status": "passed"
+    },
+    {
+      "file": "windows-cross-linux-build.json",
+      "status": "passed"
+    },
+    {
+      "file": "windows-reproducibility.json",
+      "status": "passed"
+    },
+    {
+      "file": "windows-smoke.json",
+      "status": "passed"
+    }
+  ],
+  "lockSha256": "7568ed6aeb263e8605332578aba9b3b099974bf2b80704afd92cc86b7afc168b",
+  "changedPathsWithinTask": true,
+  "whitespace": "passed"
+}

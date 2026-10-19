@@ -1,0 +1,88 @@
+{
+  "status": "passed",
+  "artifactId": "dsh-0.2.0-rc.2+node22.19.0-linux-x64",
+  "target": "linux-x64",
+  "builder": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v22.19.0",
+    "npm": "10.9.3"
+  },
+  "archive": "dsh-0.2.0-rc.2+node22.19.0-linux-x64.tar.gz",
+  "digest": "sha256:ac78e85f600c4e6f821a1b94e7d05130afe5a287bc5beff1f445dbe96b404a2a",
+  "nodeVersion": "22.19.0",
+  "dshVersion": "0.2.0-rc.2",
+  "lockSha256": "7568ed6aeb263e8605332578aba9b3b099974bf2b80704afd92cc86b7afc168b",
+  "unpackedBytes": 605452972,
+  "compressedBytes": 179872403,
+  "fileCount": 26020,
+  "buildMs": 216109,
+  "nativeFiles": [
+    "app/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin",
+    "app/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin/glibc",
+    "app/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin/glibc/system.node",
+    "app/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin/landlock-run",
+    "app/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin/musl",
+    "app/node_modules/@deepseek-ai/node-addon-system-linux-x64/bin/musl/system.node",
+    "app/node_modules/@deepseek-ai/node-addon-system-linux-x64/prebuilds.json",
+    "app/node_modules/@img/sharp-linux-x64/lib/sharp-linux-x64-0.35.5.node",
+    "app/node_modules/@img/sharp-linuxmusl-x64/lib/sharp-linuxmusl-x64-0.35.5.node",
+    "app/node_modules/@koromix/koffi-linux-x64/linux_x64/koffi.node",
+    "app/node_modules/@koromix/koffi-linux-x64/musl_x64/koffi.node",
+    "app/node_modules/node-addon-require-builtin-linux-x64-gnu/prebuilt/linux-x64-gnu-napi-v9.node",
+    "app/node_modules/node-addon-require-builtin-linux-x64-musl/prebuilt/linux-x64-musl-napi-v9.node",
+    "app/node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
+    "app/node_modules/node-pty/prebuilds/darwin-x64/pty.node",
+    "app/node_modules/node-pty/prebuilds/linux-arm64/pty.node",
+    "app/node_modules/node-pty/prebuilds/linux-x64/pty.node",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty/OpenConsole.exe",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty/conpty.dll",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty.node",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty_console_list.node",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty.node",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/OpenConsole.exe",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/conpty.dll",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/OpenConsole.exe",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/conpty.dll",
+    "app/node_modules/sherpa-onnx-linux-x64/sherpa-onnx.node"
+  ],
+  "installScriptPackages": [
+    {
+      "path": "node_modules/@deepseek-ai/dsh-subprocess-local",
+      "version": "0.2.0-rc.2",
+      "optional": false
+    },
+    {
+      "path": "node_modules/@google/genai",
+      "version": "2.21.0",
+      "optional": false
+    },
+    {
+      "path": "node_modules/koffi",
+      "version": "3.1.1",
+      "optional": false
+    },
+    {
+      "path": "node_modules/node-pty",
+      "version": "1.2.0-beta.15",
+      "optional": false
+    },
+    {
+      "path": "node_modules/protobufjs",
+      "version": "7.6.6",
+      "optional": false
+    }
+  ],
+  "signatureProof": {
+    "digest": "ac78e85f600c4e6f821a1b94e7d05130afe5a287bc5beff1f445dbe96b404a2a",
+    "algorithm": "Ed25519",
+    "messageEncoding": "raw-sha256-32-bytes",
+    "valid": true,
+    "tamperRejected": true,
+    "wrongKeyRejected": true,
+    "keysPersisted": false
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "status": "passed",
+  "artifactId": "dsh-0.2.0-rc.2+node22.19.0-win-x64",
+  "target": "win-x64",
+  "builder": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v22.19.0",
+    "npm": "10.9.3"
+  },
+  "archive": "dsh-0.2.0-rc.2+node22.19.0-win-x64.tar.gz",
+  "digest": "sha256:49954f7b896d47633d9322daabaae85f206390e6d404ae1610f3c1a2c0724d1e",
+  "nodeVersion": "22.19.0",
+  "dshVersion": "0.2.0-rc.2",
+  "lockSha256": "7568ed6aeb263e8605332578aba9b3b099974bf2b80704afd92cc86b7afc168b",
+  "unpackedBytes": 577321378,
+  "compressedBytes": 181905029,
+  "fileCount": 26678,
+  "buildMs": 370806,
+  "nativeFiles": [
+    "app/node_modules/@deepseek-ai/libreoffice-kit-win32-x64/bin/libreoffice-kit.exe",
+    "app/node_modules/@img/sharp-win32-x64/lib/libvips-42.dll",
+    "app/node_modules/@img/sharp-win32-x64/lib/libvips-cpp-8.18.7.dll",
+    "app/node_modules/@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.5.node",
+    "app/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node",
+    "app/node_modules/@vscode/ripgrep-win32-x64/bin/rg.exe",
+    "app/node_modules/node-addon-require-builtin-win32-x64-msvc/prebuilt/win32-x64-msvc-napi-v9.node",
+    "app/node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
+    "app/node_modules/node-pty/prebuilds/darwin-x64/pty.node",
+    "app/node_modules/node-pty/prebuilds/linux-arm64/pty.node",
+    "app/node_modules/node-pty/prebuilds/linux-x64/pty.node",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty/OpenConsole.exe",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty/conpty.dll",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty.node",
+    "app/node_modules/node-pty/prebuilds/win32-arm64/conpty_console_list.node",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty.node",
+    "app/node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/OpenConsole.exe",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-arm64/conpty.dll",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/OpenConsole.exe",
+    "app/node_modules/node-pty/third_party/conpty/1.25.260303002/win10-x64/conpty.dll",
+    "app/node_modules/sherpa-onnx-win-x64/onnxruntime.dll",
+    "app/node_modules/sherpa-onnx-win-x64/onnxruntime_providers_shared.dll",
+    "app/node_modules/sherpa-onnx-win-x64/sherpa-onnx-c-api.dll",
+    "app/node_modules/sherpa-onnx-win-x64/sherpa-onnx-cxx-api.dll",
+    "app/node_modules/sherpa-onnx-win-x64/sherpa-onnx.node",
+    "node/node.exe"
+  ],
+  "installScriptPackages": [
+    {
+      "path": "node_modules/@deepseek-ai/dsh-subprocess-local",
+      "version": "0.2.0-rc.2",
+      "optional": false
+    },
+    {
+      "path": "node_modules/@google/genai",
+      "version": "2.21.0",
+      "optional": false
+    },
+    {
+      "path": "node_modules/koffi",
+      "version": "3.1.1",
+      "optional": false
+    },
+    {
+      "path": "node_modules/node-pty",
+      "version": "1.2.0-beta.15",
+      "optional": false
+    },
+    {
+      "path": "node_modules/protobufjs",
+      "version": "7.6.6",
+      "optional": false
+    }
+  ],
+  "signatureProof": {
+    "digest": "49954f7b896d47633d9322daabaae85f206390e6d404ae1610f3c1a2c0724d1e",
+    "algorithm": "Ed25519",
+    "messageEncoding": "raw-sha256-32-bytes",
+    "valid": true,
+    "tamperRejected": true,
+    "wrongKeyRejected": true,
+    "keysPersisted": false
+  }
+}

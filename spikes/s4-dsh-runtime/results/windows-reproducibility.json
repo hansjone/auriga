@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "first": "sha256:49954f7b896d47633d9322daabaae85f206390e6d404ae1610f3c1a2c0724d1e",
+  "second": "sha256:49954f7b896d47633d9322daabaae85f206390e6d404ae1610f3c1a2c0724d1e",
+  "sameArchiveBytes": true,
+  "lockSha256": "7568ed6aeb263e8605332578aba9b3b099974bf2b80704afd92cc86b7afc168b",
+  "firstBuildMs": 370806,
+  "rebuildMs": 129551
+}

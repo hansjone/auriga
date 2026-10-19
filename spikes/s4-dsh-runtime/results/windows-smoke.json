@@ -1,0 +1,51 @@
+{
+  "status": "passed",
+  "network": "online",
+  "isolationScope": "none",
+  "telemetryDisabled": true,
+  "defaultProfile": "web",
+  "frontendBrowserExecuted": false,
+  "artifactId": "dsh-0.2.0-rc.2+node22.19.0-win-x64",
+  "archiveDigestVerified": true,
+  "readOnly": {
+    "mechanism": "file-readonly-attribute",
+    "fileWriteDenied": true,
+    "directoryCreateDenied": false,
+    "fullDirectoryEnforcement": false
+  },
+  "nativeProbe": {
+    "koffi": "loaded",
+    "sharp": "rendered-1px-png",
+    "flock": "unsupported-on-windows",
+    "pty": "spawned-and-exited"
+  },
+  "authenticationExchangeStatus": 303,
+  "startupMs": 6988,
+  "httpStatus": 200,
+  "assets": [
+    {
+      "path": "/assets/index-5SrrfWpU.js",
+      "status": 200,
+      "bytes": 633282
+    },
+    {
+      "path": "/assets/vendor-CCJJTK99.js",
+      "status": 200,
+      "bytes": 740575
+    },
+    {
+      "path": "/assets/vendor-BNsW4eBh.css",
+      "status": 200,
+      "bytes": 29288
+    },
+    {
+      "path": "/assets/index-BPHePDI_.css",
+      "status": 200,
+      "bytes": 76338
+    }
+  ],
+  "childStopped": true,
+  "installTreeUnchanged": true,
+  "attributesRestored": true,
+  "logTail": "dsh web: http://127.0.0.1:51153/?token=<redacted>\n"
+}

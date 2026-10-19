@@ -1,0 +1,8 @@
+{
+  "status": "not-run",
+  "reason": "Workflow must be copied to .github/workflows and pushed by the controller on a spike branch.",
+  "linuxNative": "pending",
+  "windowsOffline": "pending",
+  "windowsCrossLinuxRuntime": "pending",
+  "linuxArm64": "not-tested"
+}
