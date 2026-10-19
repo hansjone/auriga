@@ -304,7 +304,7 @@ func runDev(ctx context.Context, options devOptions, out io.Writer, logger *slog
 	if abs, err := filepath.Abs(dataDir); err == nil {
 		dataDir = abs
 	}
-	if _, err := fmt.Fprintf(out, "PostgreSQL: %s\nNATS: nats://127.0.0.1:%d (auth in %s)\nCredentials: %s\nService roles: %s\nPress Ctrl+C to stop.\nExport AURIGA_NATS_URL from nats.env for platform/edge.\n",
+	if _, err := fmt.Fprintf(out, "PostgreSQL: %s\nNATS: nats://127.0.0.1:%d (auth in %s)\nCredentials: %s\nService roles: %s\nPress Ctrl+C to stop.\nExport AURIGA_NATS_URL (edge) and AURIGA_EVENTS_NATS_URL (platform) from nats.env.\n",
 		c.Postgres, options.NATSPort, filepath.Join(dataDir, "nats.env"),
 		filepath.Join(dataDir, "credentials.env"), serviceRolesPath(dataDir)); err != nil {
 		return err

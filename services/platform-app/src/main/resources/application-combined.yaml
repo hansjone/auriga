@@ -53,7 +53,7 @@ auriga:
     trusted-proxies: [127.0.0.1, "::1"]
     session-kv-nats: true
   events:
-    # Set AURIGA_NATS_URL (include user:password from ctl) when NATS is up.
+    # platform reads auriga.events.nats-url: set AURIGA_EVENTS_NATS_URL (same value as edge's AURIGA_NATS_URL).
     validate-schemas: true
     ensure-streams: true
     nats-creds-file: ${AURIGA_NATS_CREDS_FILE:}
