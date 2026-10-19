@@ -19,9 +19,10 @@
 
 | 编号 | 状态 | 结论 / 备注 |
 |---|---|---|
-| B2 iam 核心 | 完成（#13） | Codex 实现；CI 全绿；Cursor 主控只读安全审查通过（`.agents/runs/auriga-B2-review.md`），无阻断项；接线留给 B1/B6/B7/安装器 |
+| B2 iam 核心 | 完成（#13） | Codex 实现；CI 全绿；Cursor 主控只读安全审查通过（`.agents/runs/auriga-B2-review.md`），无阻断项；接线留给 B6/B7/安装器 |
 | B8 门户/管理台壳 | 完成（#12） | Cursor；shared API+步骤渲染+mock；portal/admin 登录与框架；第二轮去掉本地 alias、错误码对齐契约 |
-| B1 ctl / B7 edge / B6 org | 待派 | 按序给 Cursor；任务说明未写 |
+| B1 ctl 本机内置 | 完成（#14） | Cursor；`dev/start/stop/status`；每服务 schema/角色；文档 `docs/dev/ctl.md`；lint errcheck 返工后 CI 全绿 |
+| B7 edge / B6 org | 待派 | 按序给 Cursor；任务说明未写 |
 | B3 / B4 | 等待 | 依赖 B2，现已可派 |
 | B5 企业连接器 | 等待 | 私有仓，需用户提供公司登录信息 |
 | B9 M1 集成 | 等待 | B1–B8 齐后做 |
