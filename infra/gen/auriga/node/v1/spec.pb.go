@@ -688,7 +688,8 @@ type Profile struct {
 	ListenPort uint32 `protobuf:"varint,1,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"`
 	// 渲染进 `cordis.patch.yml` 的条目，按顺序应用。
 	Patches []*ConfigPatch `protobuf:"bytes,2,rep,name=patches,proto3" json:"patches,omitempty"`
-	// 团队 MCP 服务，键是 DSH 配置里的名字。
+	// 团队 MCP 服务，键是 DSH 配置里的 serverName（[A-Za-z0-9_-]{1,32}）。只放不需要 DSH 会话上下文的工具；
+	// 需要会话上下文的工具由插件注册转发（ADR 0016）。
 	McpServers map[string]*McpServer `protobuf:"bytes,3,rep,name=mcp_servers,json=mcpServers,proto3" json:"mcp_servers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// 团队模型提供商，键是 DSH 配置里的名字。只改带平台标记的条目，不碰用户自己的模型。
 	ModelProviders map[string]*ModelProvider `protobuf:"bytes,4,rep,name=model_providers,json=modelProviders,proto3" json:"model_providers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -817,6 +818,8 @@ func (x *ConfigPatch) GetValueJson() string {
 	return ""
 }
 
+// 渲染规则：transport 固定 streamable-http；请求头 `Authorization: Bearer <令牌>`，令牌值不写进配置文件，
+// 用表达式从 token_ref 对应的令牌文件读取；令牌轮换时节点代理触发插件配置重载（不需要重启实例）。
 type McpServer struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Streamable HTTP 地址。

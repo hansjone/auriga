@@ -21,3 +21,4 @@
 | [0015](0015-contracts-first.md) | 契约优先 | 已采纳 |
 | [0020](0020-instance-origin-isolation.md) | 实例使用独立的源 | 已采纳 |
 | [0016](0016-mcp-session-context.md) | MCP 鉴权与 DSH 会话上下文（S1） | 已采纳 |
+| [0017](0017-team-panel-loading.md) | 团队面板的加载方式（S2） | 已采纳 |

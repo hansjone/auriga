@@ -1,20 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "团队面板清单 /panel/manifest.json v1（草案，S2 验证后定稿）",
+  "title": "团队面板清单 /panel/manifest.json v1",
   "type": "object",
   "properties": {
     "schemaVersion": { "const": 1 },
-    "version": { "description": "面板版本（跟平台发版，semver）。", "type": "string" },
+    "version": { "description": "面板版本（跟平台发版，semver）。", "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" },
     "issuedAt": { "type": "string", "format": "date-time" },
     "expiresAt": { "description": "过期后插件拒绝加载（防回滚）。", "type": "string", "format": "date-time" },
     "protocol": { "description": "面板需要的插件协议主版本。", "const": 1 },
     "minPluginVersion": { "description": "需要的最低插件版本。", "type": "string" },
     "element": { "const": "auriga-team-panel" },
-    "entry": { "description": "入口脚本（ES module），相对 /panel/ 的路径。", "type": "string" },
-    "styles": { "description": "要注入 Shadow DOM 的样式文件。", "type": "array", "items": { "type": "string" } },
+    "entry": { "description": "入口脚本（自包含的 ES module），相对 /panel/ 的路径，必须出现在 integrity 里。", "type": "string", "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$" },
     "integrity": {
-      "description": "每个文件的 SRI 摘要，键是相对路径，值形如 `sha384-…`。entry 和 styles 必须都在这里。",
+      "description": "每个文件的 SRI 摘要，键是相对路径，值形如 `sha384-…`。entry 和所有懒加载分片必须都在这里。",
       "type": "object",
+      "minProperties": 1,
       "propertyNames": { "pattern": "^(?!.*(^|/)\\.\\.(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$" },
       "additionalProperties": { "type": "string", "pattern": "^sha(256|384|512)-[A-Za-z0-9+/=]+$" }
     },

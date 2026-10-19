@@ -38,6 +38,20 @@ deploy/     Windows, Linux, Compose, Helm
 docs/       architecture, ADRs, plans
 ```
 
+## Development
+
+Prerequisites: JDK 25, Go 1.27, Node 22 with pnpm 11. No Docker is needed; tests use embedded PostgreSQL.
+The first build downloads Maven, Go modules and npm packages.
+
+```
+./mvnw -B verify                       # Java: contracts codegen, Spotless, ArchUnit, tests (Windows: mvnw.cmd)
+cd infra && go run ./ctl dev           # local PostgreSQL (127.0.0.1:15433) + NATS (127.0.0.1:14222)
+pnpm install && pnpm -r test           # web packages and the DSH plugin
+gitleaks dir .                         # secret scan (config: .gitleaks.toml)
+```
+
+Details: [Java](docs/dev/java.md) · [Go](docs/dev/go.md) · [Web](docs/dev/web.md) · [CI](docs/dev/ci.md).
+
 ## License
 
 The platform is licensed under the [GNU AGPL-3.0](LICENSE); a commercial license is also available.

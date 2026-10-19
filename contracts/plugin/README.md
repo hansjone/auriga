@@ -52,6 +52,10 @@ WebSocket 只在升级时校验一次身份头；edge 收到 `identity.session_r
 
 - **健康检查**：插件在 DSH 端口上提供 `GET /_auriga/health`（节点代理设计文档里的 `/_health` 即指它）（不要求身份头，只回 `{"status":"ok","ready":true,"protocol":1,"pluginVersion":"…"}`），节点代理据此判断 ready。
 - **心跳**：插件每 30 秒、以及活动计数变化时（2 秒去抖）调用 `POST {AURIGA_PLATFORM_URL}/api/workspace/v1/instance/heartbeat`，`Authorization: Bearer <实例令牌>`，上报执行中的轮次、打开的终端、在线的 IM 机器人数量，见 `contracts/openapi/workspace.yaml`。workspace 合并节点代理的 CPU 观测后判断闲置。
+- **团队工具（ADR 0016）**：
+  - 不需要 DSH 会话上下文的团队工具，由 DSH 自带的 mcp-client 连 ai-gateway 的 MCP（`transport: streamable-http`），节点代理按实例规格的 `mcp_servers` 渲染：键即 DSH 配置里的 `serverName`（`[A-Za-z0-9_-]{1,32}`），请求头固定 `Authorization: Bearer <令牌>`，令牌用 `!!js` 表达式从 `token_ref` 对应的文件读取，不把令牌值写进 YAML。原生客户端的请求头在配置求值时固定：令牌轮换由节点代理触发插件配置重载（新旧令牌有重叠期），不能指望 401 后自动重读。
+  - 需要会话上下文的团队工具（例如团队任务）由 `auriga-dsh` 用 `ctx.tools` 注册，执行时读取 `exec.agent.session.id`，用插件自己的 MCP 客户端转发给同一个 ai-gateway，每个请求重读令牌文件；上下文放在 `params._meta`：`auriga/sessionId`（DSH 会话 id，不透明字符串，不按 UUID 校验）、`auriga/toolCallId`、`auriga/rootCallId`。缺上下文时拒绝执行。
+  - 这些元数据只是关联信息，不是凭据：平台先用令牌确定实例、主人和租户，再校验"会话—任务"绑定。同一个业务工具只从一条路径暴露，不在两边重复注册。
 - **团队 SDK**：插件向其他 DSH 插件提供 `ctx.get('auriga')`，只有它是对插件承诺稳定的接口；SDK 的接口定义随 P1 发布，版本跟协议主版本走。
 
 ## 4. 设备登录（连接模式）
@@ -70,14 +74,15 @@ WebSocket 只在升级时校验一次身份头；edge 收到 `identity.session_r
 
 ## 5. 团队面板加载
 
-团队面板是 Vue 组件编译成的 Web Component，跟平台一起发版，插件只负责挂载（**草案，S2 验证后定稿**）。
+团队面板是 Vue 组件编译成的 Web Component，跟平台一起发版，插件只负责挂载（ADR 0017）。DSH 里的入口用客户端扩展点：侧栏 `sidebar.panellist` 加"团队"，主区域 `main` 挂面板页（这套扩展点在 DSH 0.2 还没有稳定承诺，外壳要尽量薄，并在 CI 里用 DSH 冒烟测试）。
 
+- 面板必须是**自包含**的 ES module（可带懒加载分片，都要列进 `integrity`），运行时不从别的源取代码。
 - 平台在 `/panel/` 下提供面板文件，入口是 `GET /panel/manifest.json`，格式见 `panel-manifest.schema.json`：版本、协议、入口脚本、每个文件的 SRI 摘要、平台签名。
 - 签名：Ed25519，对去掉 `signature` 字段后的清单做 JCS（RFC 8785）规范化再签。面板签名公钥由连接清单 `panel.keys` 下发。
 - 防回滚：清单带 `issuedAt` 和 `expiresAt`；插件拒绝过期的清单，也拒绝版本号低于已加载版本的清单。
 - 文件路径只能是 `integrity` 里列出的相对路径（不含 `..`），`entry` 和 `styles` 必须都在 `integrity` 里。
-- **托管模式**：同源加载，按清单里的 `integrity` 用 SRI 校验脚本。
-- **连接模式**：插件下载清单和文件，先验签、再逐个校验摘要，然后从本机加载（例如经 `dsh-app://`）；校验失败拒绝加载。
+- **托管模式**：edge 在实例自己的源上提供 `/panel/`（同源），插件验清单签名（面板公钥文件和身份头公钥文件一样由节点代理写入），浏览器按 SRI 校验脚本。面板调平台接口用同源会话。
+- **连接模式**：插件（Node 侧）下载清单和文件，先验签、再逐个校验摘要，然后经插件自己的本机路由同源提供给页面；校验失败拒绝加载并显示错误。面板调平台接口也经插件的本机路由代发，设备令牌只在 Node 侧，**页面脚本永远拿不到**，因此平台不需要为 DSH 的来源开 CORS。
 - 自定义元素名 `auriga-team-panel`，用 Shadow DOM 隔离样式。宿主（插件的面板外壳）设置元素属性 `context`：
 
 ```ts
@@ -86,9 +91,11 @@ interface AurigaPanelContext {
   protocol: 1;
   locale: string;               // 'zh-CN' | 'en' …
   theme: 'dark' | 'light';
-  apiBase: string;              // 平台地址
-  fetch(path: string, init?: RequestInit): Promise<Response>; // 宿主负责带凭据
+  apiBase: string;              // 平台地址，只用于显示和拼外链，不是 fetch 的目标
+  fetch(path: string, init?: RequestInit): Promise<Response>; // 只接受以 / 开头的平台 API 路径，凭据由宿主处理；面板不得读取或保存令牌
 }
 ```
 
-  面板向宿主发出的事件（`CustomEvent`，冒泡、可穿过 Shadow DOM）：`auriga-navigate`（`detail.to`）、`auriga-notify`（`detail.level`、`detail.message`）、`auriga-auth-required`。
+  - 宿主在主题或语言变化时**重新赋值整个 `context` 对象**；面板要处理"元素定义前宿主已设置 `context`"的情况。
+  - 面板向宿主发出的事件（`CustomEvent`，冒泡、可穿过 Shadow DOM）：`auriga-navigate`（`detail.to`：`session:new` 或 `http(s)://` 外链，其他忽略）、`auriga-notify`（`detail.level`：`info` | `success` | `warning` | `error`，`detail.message`）、`auriga-auth-required`（宿主负责提示重新登录，面板自己不弹窗）。
+  - Element Plus 的弹层必须留在 Shadow DOM 里（`teleported=false`、对话框 `append-to` 面板内元素），不用挂到 body 的 `ElMessage`。

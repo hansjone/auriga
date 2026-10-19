@@ -107,7 +107,8 @@ message Profile {
   uint32 listen_port = 1;
   // 渲染进 `cordis.patch.yml` 的条目，按顺序应用。
   repeated ConfigPatch patches = 2;
-  // 团队 MCP 服务，键是 DSH 配置里的名字。
+  // 团队 MCP 服务，键是 DSH 配置里的 serverName（[A-Za-z0-9_-]{1,32}）。只放不需要 DSH 会话上下文的工具；
+  // 需要会话上下文的工具由插件注册转发（ADR 0016）。
   map<string, McpServer> mcp_servers = 3;
   // 团队模型提供商，键是 DSH 配置里的名字。只改带平台标记的条目，不碰用户自己的模型。
   map<string, ModelProvider> model_providers = 4;
@@ -131,6 +132,8 @@ enum TokenRef {
   TOKEN_REF_AI_GATEWAY_TOKEN = 2;
 }
 
+// 渲染规则：transport 固定 streamable-http；请求头 `Authorization: Bearer <令牌>`，令牌值不写进配置文件，
+// 用表达式从 token_ref 对应的令牌文件读取；令牌轮换时节点代理触发插件配置重载（不需要重启实例）。
 message McpServer {
   // Streamable HTTP 地址。
   string url = 1;
