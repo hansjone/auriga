@@ -194,7 +194,7 @@ export interface paths {
     get: operations['getNode'];
     put?: never;
     post?: never;
-    /** @description 吊销节点证书。节点上还有实例时 409 workspace.node_not_empty（先 drain 并迁走）。 */
+    /** @description 吊销节点证书。节点上还有实例时 409 workspace.node_not_empty（先 drain 并迁走）；`force=true` 时立即吊销证书、断开会话，节点上的实例全部标记为待迁移，并写审计（用于节点证书泄露的应急处置）。 */
     delete: operations['revokeNode'];
     options?: never;
     head?: never;
@@ -973,7 +973,10 @@ export interface operations {
   };
   revokeNode: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description 节点非空也立即吊销。 */
+        force?: boolean;
+      };
       header?: never;
       path: {
         nodeId: components['parameters']['NodeId'];
