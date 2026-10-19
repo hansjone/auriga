@@ -46,7 +46,7 @@ func deleteProfile(name string) error {
 	}
 	return fmt.Errorf("DeleteAppContainerProfile: 0x%x", v)
 }
-func appLaunch(token windows.Token, exe string, args []string, dir string, sid *windows.SID, capIDs []string, job windows.Handle) (*process, error) {
+func appLaunch(token windows.Token, exe string, args []string, dir string, sid *windows.SID, capIDs []string, job windows.Handle, stdio *appStdio) (*process, error) {
 	caps := make([]windows.SIDAndAttributes, len(capIDs))
 	for i, id := range capIDs {
 		s, e := windows.StringToSid(id)
@@ -59,17 +59,29 @@ func appLaunch(token windows.Token, exe string, args []string, dir string, sid *
 	if len(caps) > 0 {
 		sc.Capabilities = &caps[0]
 	}
-	attrs, e := windows.NewProcThreadAttributeList(1)
+	count := uint32(1)
+	if sid != nil {
+		count++
+	}
+	attrs, e := windows.NewProcThreadAttributeList(count)
 	if e != nil {
 		return nil, e
 	}
 	defer attrs.Delete()
-	if e = attrs.Update(0x20009, unsafe.Pointer(&sc), unsafe.Sizeof(sc)); e != nil {
+	if sid != nil {
+		if e = attrs.Update(0x20009, unsafe.Pointer(&sc), unsafe.Sizeof(sc)); e != nil {
+			return nil, e
+		}
+	}
+	handles := []windows.Handle{stdio.in, stdio.out, stdio.err}
+	if e = attrs.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&handles[0]), uintptr(len(handles))*unsafe.Sizeof(handles[0])); e != nil {
 		return nil, e
 	}
 	si := windows.StartupInfoEx{}
 	si.Cb = uint32(unsafe.Sizeof(si))
 	si.ProcThreadAttributeList = attrs.List()
+	si.Flags = windows.STARTF_USESTDHANDLES
+	si.StdInput, si.StdOutput, si.StdErr = stdio.in, stdio.out, stdio.err
 	p := &process{}
 	if !filepath.IsAbs(exe) {
 		return nil, fmt.Errorf("Node executable path must be absolute")
@@ -81,10 +93,11 @@ func appLaunch(token windows.Token, exe string, args []string, dir string, sid *
 	if e != nil {
 		return nil, e
 	}
-	e = windows.CreateProcessAsUser(token, u16(exe), u16(windows.ComposeCommandLine(append([]string{exe}, args...))), nil, nil, false, windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NO_WINDOW, &env[0], u16(dir), &si.StartupInfo, &p.ProcessInformation)
+	e = windows.CreateProcessAsUser(token, u16(exe), u16(windows.ComposeCommandLine(append([]string{exe}, args...))), nil, nil, true, windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|windows.DETACHED_PROCESS, &env[0], u16(dir), &si.StartupInfo, &p.ProcessInformation)
 	runtime.KeepAlive(sc)
 	runtime.KeepAlive(caps)
 	runtime.KeepAlive(env)
+	runtime.KeepAlive(handles)
 	if e != nil {
 		return nil, fmt.Errorf("CreateProcessAsUser(AppContainer, Unicode environment): %w", e)
 	}
@@ -137,20 +150,25 @@ func appContainerExperiment(o options, r *Result) (err error) {
 	if e = os.Mkdir(appDir, 0700); e != nil {
 		return e
 	}
-	// Grant only this AppContainer, not ALL APPLICATION PACKAGES, access to its scratch files.
-	acl := dataACL(f.sid.String()) + "(A;OICI;FA;;;" + sid.String() + ")"
-	if e = dacl(appDir, acl); e != nil {
+	// Both the account and restricting package SID need access. Keep executable
+	// code immutable and explicitly label the separate writable output Low IL.
+	if e = dacl(appDir, appReadACL(f.SID, sid.String())); e != nil {
 		return e
 	}
-	low, e := windows.SecurityDescriptorFromString("S:(ML;OICI;NW;;;LW)")
-	if e != nil {
+	binDir := filepath.Join(appDir, "bin")
+	outputDir := filepath.Join(appDir, "output")
+	for _, dir := range []string{binDir, outputDir} {
+		if e = os.Mkdir(dir, 0700); e != nil {
+			return e
+		}
+	}
+	if e = dacl(binDir, appReadACL(f.SID, sid.String())); e != nil {
 		return e
 	}
-	sacl, _, e := low.SACL()
-	if e != nil {
+	if e = dacl(outputDir, appWriteACL(f.SID, sid.String())); e != nil {
 		return e
 	}
-	if e = windows.SetNamedSecurityInfo(appDir, windows.SE_FILE_OBJECT, windows.LABEL_SECURITY_INFORMATION, nil, nil, nil, sacl); e != nil {
+	if e = lowLabel(outputDir); e != nil {
 		return e
 	}
 	if e = dacl(f.Dir, instanceACL(f.sid.String())+"(A;;GRGX;;;"+sid.String()+")"); e != nil {
@@ -161,7 +179,7 @@ func appContainerExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	nodeSource := filepath.Join(o.Root, "tools", "node.exe")
-	node := filepath.Join(appDir, "node.exe")
+	node := filepath.Join(binDir, "node.exe")
 	b, e := os.ReadFile(nodeSource)
 	if e != nil {
 		return e
@@ -169,7 +187,10 @@ func appContainerExperiment(o options, r *Result) (err error) {
 	if e = writePlainFile(node, b, 0700); e != nil {
 		return e
 	}
-	script := filepath.Join(appDir, "probe.js")
+	if e = dacl(node, appReadACL(f.SID, sid.String())); e != nil {
+		return e
+	}
+	script := filepath.Join(binDir, "probe.js")
 	source := `'use strict';
 const fs=require('fs'),net=require('net'),cp=require('child_process');
 const [out,hostPort,peerFile,hostFile]=process.argv.slice(2);let report={nodeStarted:true,pid:process.pid,fileAccess:{}};
@@ -182,6 +203,18 @@ setTimeout(()=>process.exit(),15000);save();`
 	if e = writePlainFile(script, []byte(source), 0600); e != nil {
 		return e
 	}
+	if e = dacl(script, appReadACL(f.SID, sid.String())); e != nil {
+		return e
+	}
+	aclEvidence := map[string]any{"accountSID": f.SID, "appContainerSID": sid.String(), "nodeSource": nodeSource, "nodeLaunch": node, "noAllApplicationPackagesGrant": true}
+	for _, path := range []string{o.Root, f.Dir, appDir, binDir, outputDir, node, script} {
+		sd, se := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.LABEL_SECURITY_INFORMATION)
+		if se != nil {
+			return se
+		}
+		aclEvidence[path] = sd.String()
+	}
+	r.observe("AppContainer_explicit_path_permissions", aclEvidence)
 	// Establish that the copied executable and its ACL work for the same account before
 	// adding LowBox attributes, so a missing image/ordinary ACL failure is not misdiagnosed.
 	baselineJob, be := f.job(f.Job+"-node-baseline", 256<<20, 4, 0)
@@ -189,15 +222,25 @@ setTimeout(()=>process.exit(),15000);save();`
 		return be
 	}
 	defer windows.CloseHandle(baselineJob)
-	baseline, bpe := launch(f.token, node, []string{"--version"}, appDir, baselineJob)
+	baselineIO, be := newAppStdio(f.Dir, "node-baseline")
+	if be != nil {
+		return be
+	}
+	defer baselineIO.close()
+	plainOut := filepath.Join(outputDir, "plain-account.json")
+	plainProbe := `const fs=require('fs');fs.readFileSync(process.argv[1]);fs.writeFileSync(process.argv[2],JSON.stringify({nodeStarted:true,nodeVersion:process.version,scriptReadable:true,outputWritable:true}));`
+	baseline, bpe := appLaunch(f.token, node, []string{"-e", plainProbe, script, plainOut}, outputDir, nil, nil, baselineJob, baselineIO)
 	if bpe != nil {
 		return fmt.Errorf("Node plain-account baseline: %w", bpe)
 	}
 	code, bwe := baseline.wait(5 * time.Second)
-	baseline.kill()
+	baselineDiagnostics := baselineIO.diagnostics(baseline, baselineJob)
 	baseline.close()
-	r.check("Node_plain_account_baseline", bwe == nil && code == 0, map[string]any{"exit": code, "error": errorString(bwe)})
-	if bwe != nil || code != 0 {
+	var plainData map[string]any
+	plainRead := readJSON(plainOut, &plainData)
+	plainOK := bwe == nil && code == 0 && plainRead == nil && plainData["scriptReadable"] == true && plainData["outputWritable"] == true
+	r.check("Node_plain_account_baseline", plainOK, map[string]any{"exit": code, "error": errorString(join(bwe, plainRead)), "worker": plainData, "process": baselineDiagnostics})
+	if !plainOK {
 		return fmt.Errorf("Node plain-account baseline failed")
 	}
 	host, e := listening("tcp4", "127.0.0.1:0")
@@ -228,7 +271,7 @@ setTimeout(()=>process.exit(),15000);save();`
 				continue
 			}
 		}
-		e = appCase(f, r, cfg.Name, node, script, appDir, hostPort, sid, cfg.Caps)
+		e = appCase(f, r, cfg.Name, node, script, outputDir, hostPort, sid, cfg.Caps)
 		if e != nil {
 			r.check("AppContainer_"+cfg.Name+"_launch", false, e.Error())
 		}
@@ -249,7 +292,7 @@ setTimeout(()=>process.exit(),15000);save();`
 			if se != nil || state != uint32(windows.WAIT_TIMEOUT) {
 				r.unsupported("inbound_loopback_exemption", "CheckNetIsolation -is did not remain active on this image")
 			} else {
-				ie = appCase(f, r, "network_inbound_exemption", node, script, appDir, hostPort, sid, []string{"S-1-15-3-1", "S-1-15-3-2", "S-1-15-3-3"})
+				ie = appCase(f, r, "network_inbound_exemption", node, script, outputDir, hostPort, sid, []string{"S-1-15-3-1", "S-1-15-3-2", "S-1-15-3-3"})
 				if ie != nil {
 					r.check("AppContainer_inbound_launch", false, ie.Error())
 				}
@@ -274,20 +317,33 @@ func appCase(f *fixture, r *Result, name, node, script, dir, hostPort string, si
 	defer windows.CloseHandle(h)
 	defer windows.TerminateJobObject(h, 94)
 	out := filepath.Join(dir, name+".json")
-	p, e := appLaunch(f.token, node, []string{script, out, hostPort, f.PeerCanary, f.HostCanary}, dir, sid, caps, h)
+	if e = writePlainFile(out, []byte("{}"), 0600); e != nil {
+		return e
+	}
+	if e = dacl(out, appWriteACL(f.SID, sid.String())); e != nil {
+		return e
+	}
+	if e = lowLabel(out); e != nil {
+		return e
+	}
+	sd, e := windows.GetNamedSecurityInfo(out, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.LABEL_SECURITY_INFORMATION)
 	if e != nil {
 		return e
 	}
+	r.observe(name+"_output_permissions", sd.String())
+	stdio, e := newAppStdio(f.Dir, name)
+	if e != nil {
+		return e
+	}
+	defer stdio.close()
+	p, e := appLaunch(f.token, node, []string{"-e", appBootstrap, script, out, hostPort, f.PeerCanary, f.HostCanary}, dir, sid, caps, h, stdio)
+	if e != nil {
+		stdio.close()
+		r.observe(name+"_process_creation_failure", map[string]any{"error": e.Error(), "win32Error": errorCode(e), "stdout": boundedLog(stdio.outPath), "stderr": boundedLog(stdio.errPath)})
+		return e
+	}
 	defer p.close()
-	defer p.kill()
-	if e = awaitFile(out, 8*time.Second); e != nil {
-		return e
-	}
-	time.Sleep(1800 * time.Millisecond)
-	var data map[string]any
-	if e = readJSON(out, &data); e != nil {
-		return e
-	}
+	defer func() { r.observe(name+"_process_diagnostics", stdio.diagnostics(p, h)) }()
 	var token windows.Token
 	if e = windows.OpenProcessToken(p.Process, windows.TOKEN_QUERY, &token); e != nil {
 		return e
@@ -304,6 +360,11 @@ func appCase(f *fixture, r *Result, name, node, script, dir, hostPort string, si
 		return e
 	}
 	r.check(name+"_actual_AppContainer_token", isContainer == 1, isContainer)
+	data, e := awaitAppReport(p, out, 8*time.Second)
+	if e != nil {
+		r.observe(name+"_incomplete_report", data)
+		return e
+	}
 	r.check(name+"_Node_executes", data["nodeStarted"] == true, data)
 	access, _ := data["fileAccess"].(map[string]any)
 	for _, key := range []string{"peer", "host"} {

@@ -173,6 +173,7 @@ type fixture struct {
 	token                  windows.Token
 	journalPath            string
 	CPUBaseline            float64
+	MemoryBaseline         bool
 	PeerCanary, HostCanary string
 }
 
@@ -431,6 +432,9 @@ func (p *process) wait(timeout time.Duration) (uint32, error) {
 	return code, e
 }
 func launch(token windows.Token, exe string, args []string, dir string, job windows.Handle) (*process, error) {
+	return launchConsole(token, exe, args, dir, job, windows.DETACHED_PROCESS)
+}
+func launchConsole(token windows.Token, exe string, args []string, dir string, job windows.Handle, console uint32) (*process, error) {
 	cmd := windows.ComposeCommandLine(append([]string{exe}, args...))
 	if strings.EqualFold(filepath.Base(exe), "cmd.exe") && len(args) == 4 && args[2] == "/c" {
 		cmd = windows.EscapeArg(exe) + " /d /s /c \"" + args[3] + "\""
@@ -444,9 +448,9 @@ func launch(token windows.Token, exe string, args []string, dir string, job wind
 	}
 	var e error
 	if token == 0 {
-		e = windows.CreateProcess(u16(exe), u16(cmd), nil, nil, false, windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NO_WINDOW, &block[0], u16(dir), &si, &p.ProcessInformation)
+		e = windows.CreateProcess(u16(exe), u16(cmd), nil, nil, false, windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|console, &block[0], u16(dir), &si, &p.ProcessInformation)
 	} else {
-		e = windows.CreateProcessAsUser(token, u16(exe), u16(cmd), nil, nil, false, windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NO_WINDOW, &block[0], u16(dir), &si, &p.ProcessInformation)
+		e = windows.CreateProcessAsUser(token, u16(exe), u16(cmd), nil, nil, false, windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|console, &block[0], u16(dir), &si, &p.ProcessInformation)
 	}
 	if e != nil {
 		return nil, e

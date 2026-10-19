@@ -1,6 +1,6 @@
 # S3 Windows 原生隔离安全验证原型
 
-这是独立 spike，不是生产驱动，不合入主分支。已有第一轮 CI 证据，第二、三轮代码仍需主控在一次性 Windows VM 复测。即使兼容性通过，也不能直接宣称“只能访问白名单”或具备容器级隔离。
+这是独立 spike，不是生产驱动，不合入主分支。已有两次 CI 证据，第三轮安全改动和第四轮修复仍需主控在一次性 Windows VM 复测。即使兼容性通过，也不能直接宣称“只能访问白名单”或具备容器级隔离。
 
 ## 本机与 CI
 
@@ -16,7 +16,9 @@
 
 第一轮系统为 Server 2025 build 26100、Server 2022 build 20348，Node v22.23.3。SYSTEM 启动、CPU、进程树、旧 shim 重接管、受控 TCP 白名单/回环拒绝、ACL 等有部分正向证据。Server 2025 内存通过；Server 2022 曾在触碰 44 MiB后超时，不能称双平台全部通过。
 
-第二轮已修复 DWORD 符号扩展、类型 10 登录误用、进程数诊断、临时卷 ACL 和 AppContainer 环境缺项。第三轮根据安全审查改变了权限和策略模型，旧证据不能代替新模型复测。
+第二轮修复的 DWORD 符号扩展、登录权限核对、临时卷 ACL 已在 CI run `39222617442` 的两种镜像通过，WFP 移除与清理、NTFS 配额恢复正常。AppContainer 环境错误消失，但四种配置均等待 JSON 超时；普通账号 Node 基线通过。进程实验中父+三个子进程之外还有四个活 conhost，活动记账为 8，N+1 负载创建返回 1816。Server 2022 内存仍停在 44 MiB并等待超时，Server 2025 通过。第三轮根据安全审查改变了权限和策略模型，旧证据不能代替新模型复测。
+
+第四轮仅处理上述三项残留：比较继承控制台、CREATE_NO_WINDOW 和 DETACHED_PROCESS；分离 AppContainer 程序/输出权限并捕获进程诊断；内存改用逐块原生提交及不限额对照。本机 build/vet 和 24 个顶层测试、47 个子测试通过；这不是管理员实验结果。
 
 ## 身份、口令与环境
 
@@ -40,13 +42,15 @@ S4U 尚未实现。LsaLogonUser/MSV1_0 的认证包、令牌类型、SeTcbPrivil
 
 每个负载均挂起创建、加入特权方创建的 Job、再恢复；Job DACL 不授予实例 SID，显式 SYSTEM owner、OWNER RIGHTS、KILL_ON_JOB_CLOSE、DIE_ON_UNHANDLED_EXCEPTION、UI 限制，不启用 breakaway 标志。
 
-- 内存：96 MiB提交上限，尝试触碰 192 MiB；要求启动/进度/峰值/退出码证据，超时不算通过。
+- 内存：先不限额用 VirtualAlloc 提交并触碰 192 个 1 MiB块作正向对照，再测 96 MiB Job。每次分配前将已提交量/下一次尝试同步到 JSONL（嵌入结果的 blockProgress）；释放原生块后写最终 JSON，避免 Go 堆在限额附近的分配/回收路径影响结果。要求 finished=true、退出码 0、实际拒绝码 8/1455/1816、提交量未达 192 MiB和 Job 峰值证据；退出 0 仅表示负载捕获错误并完成报告，超时不算通过。旧工件没有栈/原生调用跟踪，不能断言 Server 2022 停滞的具体根因已查明。
 - CPU：先不限额跑完作为对照，再测 10% 整机硬上限；两者均要求退出码 0、finished=true，兼看绝对占比和相对下降。未充分占满 CPU 的对照不能作为通过依据。
-- 进程数：保留原控制台行为诊断；正式负载用 CREATE_NO_WINDOW。要求上限和活动计数 4、父+三个子进程存活、再创建返回 1816。记录每个 PID 的镜像与状态；已结束 PID 可从活动数中排除，活 conhost 不豁免。
+- 进程数：保留父 CREATE_NO_WINDOW/子继承，以及每层 CREATE_NO_WINDOW 两种诊断；正式测试父和所有 Go 子进程显式 DETACHED_PROCESS，不混用 CREATE_NO_WINDOW。要求上限和活动计数 4、父+三个子进程存活、再创建返回 1816，活 conhost 不豁免。逐 PID 记录镜像、状态、私有提交和工作集，以及 Job 峰值；查询失败也保留。生产后台负载建议无控制台启动、日志用显式管道/文件；真实负载的派生进程也要遵循此策略，是否严格满足仍以新 CI 为准。
 - 进程树：cmd→Node→Go 都必须属于 Job，终止后原进程句柄结束。
 - escape：CREATE_BREAKAWAY_FROM_JOB 必须返回 5。尝试 WMI Win32_Process.Create 与自身 S4U 计划任务；先验证服务接口可用，再要求明确拒绝 5 或新 PID 仍在原 Job。成功逃出应让该检查失败；随后按 SID 清理。
 
 进程外 COM 没有受控测试服务，任务/WMI 的权限收敛还没有生产实现。不能用某个现成 COM 类不存在作为“没有逃逸”。这些门槛保持未完成；需要受控 COM fixture、服务/namespace ACL 方案或 VM 边界。
+
+第二次 CI 已证明 conhost 进入活动进程记账，却没有使 N+1 负载更早被拒；不能将 ActiveProcessLimit 当作所有系统代建进程的严格总数限制。它自身的内存也须预算：本轮记录每个 conhost 的 privateCommitBytes/workingSetBytes；JobMemoryLimit 是提交内存而非工作集，PeakJobMemoryUsed 按文档包含相关进程。conhost 特殊创建路径的实际内存限额执行仍需额外压力实测，不能由进程数结果推断。DETACHED_PROCESS 只是启动策略，不能阻止程序随后 AllocConsole 或另选控制台标志；ConPTY 未测试。参见 [控制台创建](https://learn.microsoft.com/en-us/windows/console/creation-of-a-console)、[创建标志](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)、[Job 内存字段](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information)。
 
 ## SYSTEM shim 与实际节点服务停止
 
@@ -69,6 +73,10 @@ TCP 各目标先证明可连，拒绝要求 WSAEACCES(10013)，不能把拒绝�
 配额只在本次 128 MiB临时 VHD 上操作，独立验证卷 GUID 不同于系统/宿主卷。通过 GUID 设置卷根和数据目录 ACL，实例创建 32 MiB基线文件，核对文件 owner 是实例 SID，删除后才启用 4 MiB用户配额；再写必须出现磁盘/配额错误，访问拒绝不算。销毁整个测试卷同时销毁该卷配额索引，不改系统卷。先删挂载点、再卸载 VHD并查询确认；不存在文件清理幂等。生产必须评估整卷配额和由 SYSTEM 创建文件的计费归属。参见 [fsutil quota](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-quota)。
 
 AppContainer 继续使用实例 token。原生 CreateEnvironmentBlock(FALSE) 提取必要 profile 字段、过滤任意父环境，保留 SYSTEM profile 创建者的 LOCALAPPDATA 基础路径，排序并检验 Unicode 双零；先证 Node 在普通实例账号下可启动，再测四种 capability/回环配置。每种检查实际 SID/LowBox、Node、shell、127.0.0.1 监听、宿主连接和反连，以及 synthetic 其他实例/宿主敏感文件返回 EACCES；无网络 capability 要求明确 EACCES，宿主接口有正向对照。没有测试真实 DSH；SYSTEM profile 与实例 token 的兼容性仍需复测。开发入站豁免不是生产方案。参见 [AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)。
+
+第四轮把 Node 从已暂存的 tools 副本复制到 `app/bin/node.exe`，脚本也在 bin，账号和本次 package SID 都显式 RX，运行目录各祖先可遍历；不依赖 runner hostedtoolcache 或 Program Files 的 ACL。`app/output` 和预建 JSON 文件同时授予两种 SID 修改权限，显式 Low IL 标签，保留 SYSTEM owner/OWNER RIGHTS，不扩大到 ALL APPLICATION PACKAGES。输出实际路径 SDDL（含标签）供 CI 核对。普通账号基线现在同时验证脚本可读和输出可写。
+
+AppContainer 用 DETACHED_PROCESS 和 STARTF_USESTDHANDLES，HANDLE_LIST 只传 NUL stdin 与 stdout/stderr 文件句柄。日志位于受保护实例目录，结束 Job 后嵌入 JSON，每流最多 32 KiB。Node 内联 bootstrap 向 stderr 输出 `S3_PREFLIGHT`（实际 node/脚本路径权限、输出写入及 errno），即使脚本加载失败也有诊断。等待同时轮询进程和完整协议字段，预建 `{}`/bootstrap JSON 不算成功；提前退出带十六进制退出码，运行中截止与退出分开。每种配置的 `*_process_diagnostics` 记录清理前退出码/状态与 stderr，259 表示取样时仍在运行，不是一次自然退出。新权限布局尚未在 LowBox 下实测，不能把旧超时直接归因于某一个 ACL。
 
 ## 清理与发布判定
 

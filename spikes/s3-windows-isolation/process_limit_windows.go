@@ -5,20 +5,43 @@ package main
 import (
 	"errors"
 	"path/filepath"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 type processEntry struct {
-	PID   uint32 `json:"pid"`
-	Image string `json:"image"`
-	Alive bool   `json:"alive"`
-	Error string `json:"error,omitempty"`
+	PID                uint32  `json:"pid"`
+	Image              string  `json:"image"`
+	Alive              bool    `json:"alive"`
+	Error              string  `json:"error,omitempty"`
+	PrivateCommitBytes uintptr `json:"privateCommitBytes"`
+	WorkingSetBytes    uintptr `json:"workingSetBytes"`
+	MemoryError        string  `json:"memoryError,omitempty"`
 }
 type processLimitSample struct {
-	RawPIDs   []uintptr      `json:"rawPIDs"`
-	Active    uint32         `json:"accountingActive"`
-	Processes []processEntry `json:"processes"`
+	RawPIDs            []uintptr      `json:"rawPIDs"`
+	Active             uint32         `json:"accountingActive"`
+	Processes          []processEntry `json:"processes"`
+	PeakJobCommitBytes uintptr        `json:"peakJobCommitBytes"`
+}
+
+// PROCESS_MEMORY_COUNTERS_EX, Windows amd64 SDK layout (80 bytes).
+type processMemoryCounters struct {
+	Size, PageFaults                                                     uint32
+	PeakWorkingSet, WorkingSet, PeakPagedPool, PagedPool                 uintptr
+	PeakNonpagedPool, NonpagedPool, Pagefile, PeakPagefile, PrivateUsage uintptr
+}
+
+func consoleFlags(mode string) uint32 {
+	switch mode {
+	case "inherit-console":
+		return 0
+	case "no-window":
+		return windows.CREATE_NO_WINDOW
+	default:
+		return windows.DETACHED_PROCESS
+	}
 }
 
 func inspectProcesses(ids []uintptr) []processEntry {
@@ -44,6 +67,14 @@ func inspectProcesses(ids []uintptr) []processEntry {
 			entry.Image = filepath.Base(windows.UTF16ToString(image[:size]))
 		} else if entry.Alive {
 			entry.Error = ie.Error()
+		}
+		var memory processMemoryCounters
+		memory.Size = uint32(unsafe.Sizeof(memory))
+		if me := boolCall(kernel.NewProc("K32GetProcessMemoryInfo"), uintptr(h), uintptr(unsafe.Pointer(&memory)), uintptr(memory.Size)); me == nil {
+			entry.PrivateCommitBytes = memory.PrivateUsage
+			entry.WorkingSetBytes = memory.WorkingSet
+		} else {
+			entry.MemoryError = me.Error()
 		}
 		_ = windows.CloseHandle(h)
 		entries = append(entries, entry)

@@ -107,21 +107,7 @@ func worker(args []string) {
 			}
 		}
 	case "memory":
-		_ = writeJSON(out, map[string]any{"started": true})
-		var blocks [][]byte
-		for i := 0; i < 192; i++ {
-			b := make([]byte, 1<<20)
-			for j := 0; j < len(b); j += 4096 {
-				b[j] = 1
-			}
-			blocks = append(blocks, b)
-			if len(blocks)%4 == 0 {
-				_ = writeJSON(out, map[string]any{"started": true, "allocatedMiB": len(blocks)})
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-		result["allocatedMiB"] = len(blocks)
-		runtime.KeepAlive(blocks)
+		result = memoryWork(out)
 	case "cpu":
 		_ = writeJSON(out, map[string]any{"started": true})
 		runtime.GOMAXPROCS(runtime.NumCPU())
@@ -155,9 +141,11 @@ func worker(args []string) {
 		}()
 		for i := 0; i < 12; i++ {
 			c := exec.Command(os.Args[0], "_work", out+"-"+strconv.Itoa(i), "sleep")
-			if len(a) == 0 || a[0] != "inherit-console" {
-				c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+			mode := "detached"
+			if len(a) > 0 {
+				mode = a[0]
 			}
+			c.SysProcAttr = &syscall.SysProcAttr{CreationFlags: consoleFlags(mode)}
 			if e := c.Start(); e != nil {
 				result["spawnError"] = e.Error()
 				var code syscall.Errno
@@ -277,7 +265,7 @@ func jobExperiment(o options, r *Result) (err error) {
 	}
 	defer func() { err = join(err, f.close()) }()
 	// Each limit has its own job, so one failure cannot masquerade as another limit.
-	for _, kind := range []string{"memory", "cpu-baseline", "cpu", "pids-console", "pids", "tree"} {
+	for _, kind := range []string{"memory-baseline", "memory", "cpu-baseline", "cpu", "pids-console", "pids-no-window", "pids", "tree"} {
 		e = jobCase(f, r, kind)
 		if e != nil {
 			r.check(kind+"_setup", false, e.Error())
@@ -290,7 +278,7 @@ func jobCase(f *fixture, r *Result, kind string) error {
 	if kind == "memory" {
 		memory = 96 << 20
 	}
-	if kind == "pids" || kind == "pids-console" {
+	if kind == "pids" || kind == "pids-console" || kind == "pids-no-window" {
 		pids = 4
 	}
 	if kind == "cpu" {
@@ -305,11 +293,20 @@ func jobCase(f *fixture, r *Result, kind string) error {
 	out := filepath.Join(f.workDir(), kind+".json")
 	exe := probePath(f.o)
 	args := []string{"_work", out, kind}
+	console := uint32(windows.DETACHED_PROCESS)
+	if kind == "memory-baseline" {
+		args = []string{"_work", out, "memory"}
+	}
 	if kind == "cpu-baseline" {
 		args = []string{"_work", out, "cpu"}
 	}
 	if kind == "pids-console" {
 		args = []string{"_work", out, "pids", "inherit-console"}
+		console = windows.CREATE_NO_WINDOW
+	}
+	if kind == "pids-no-window" {
+		args = []string{"_work", out, "pids", "no-window"}
+		console = windows.CREATE_NO_WINDOW
 	}
 	if kind == "tree" {
 		exe = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
@@ -322,22 +319,29 @@ func jobCase(f *fixture, r *Result, kind string) error {
 		args = []string{"/d", "/s", "/c", windows.ComposeCommandLine([]string{node, script, probePath(f.o), out})}
 	}
 	start := time.Now()
-	p, e := launch(f.token, exe, args, f.workDir(), h)
+	p, e := launchConsole(f.token, exe, args, f.workDir(), h, console)
 	if e != nil {
 		return e
 	}
 	defer p.close()
 	defer p.kill()
 	switch kind {
-	case "memory":
-		code, we := p.wait(15 * time.Second)
+	case "memory", "memory-baseline":
+		code, we := p.wait(20 * time.Second)
 		var data map[string]any
 		re := readJSON(out, &data)
 		var limits windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
 		qe := windows.QueryInformationJobObject(h, 9, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits)), nil)
 		allocated, _ := data["allocatedMiB"].(float64)
-		r.check("memory_worker_started", re == nil, data)
-		r.check("memory_96MiB_rejects_192MiB", we == nil && code == 2 && re == nil && qe == nil && allocated >= 16 && allocated < 192 && limits.PeakJobMemoryUsed >= 64<<20 && limits.JobMemoryLimit == 96<<20, map[string]any{"exit": code, "waitError": errorString(join(we, qe)), "worker": data, "peakJobCommitBytes": limits.PeakJobMemoryUsed, "jobLimitBytes": limits.JobMemoryLimit})
+		progress, pre := os.ReadFile(out + ".progress.jsonl")
+		evidence := map[string]any{"exit": code, "waitError": errorString(we), "queryError": errorString(qe), "readError": errorString(re), "worker": data, "peakJobCommitBytes": limits.PeakJobMemoryUsed, "jobLimitBytes": limits.JobMemoryLimit, "blockProgress": string(progress), "progressReadError": errorString(pre)}
+		if kind == "memory-baseline" {
+			f.MemoryBaseline = we == nil && code == 0 && re == nil && qe == nil && pre == nil && data["finished"] == true && data["rejected"] == false && allocated == 192 && limits.PeakJobMemoryUsed >= 192<<20
+			r.check("memory_unlimited_192MiB_positive_control", f.MemoryBaseline, evidence)
+		} else {
+			r.check("memory_worker_started", re == nil && data["started"] == true, data)
+			r.check("memory_96MiB_rejects_192MiB", f.MemoryBaseline && we == nil && code == 0 && re == nil && qe == nil && pre == nil && memoryRejection(data) && limits.PeakJobMemoryUsed >= 64<<20 && limits.JobMemoryLimit == 96<<20, evidence)
+		}
 	case "cpu", "cpu-baseline":
 		code, we := p.wait(20 * time.Second)
 		a, ae := jobAccounting(h)
@@ -355,7 +359,7 @@ func jobCase(f *fixture, r *Result, kind string) error {
 		} else {
 			r.check("cpu_hard_cap_10_percent", complete && ae == nil && fraction > 0.015 && fraction < 0.18 && f.CPUBaseline >= 0.25 && fraction < f.CPUBaseline*0.5, map[string]any{"hostFraction": fraction, "unlimitedFraction": f.CPUBaseline, "worker": worker, "exit": code, "wallSeconds": elapsed, "accounting": a, "error": errorString(join(we, ae))})
 		}
-	case "pids", "pids-console":
+	case "pids", "pids-console", "pids-no-window":
 		if e = awaitFile(out, 10*time.Second); e != nil {
 			return e
 		}
@@ -384,7 +388,11 @@ func jobCase(f *fixture, r *Result, kind string) error {
 			if ae != nil {
 				return ae
 			}
-			sample := processLimitSample{RawPIDs: ids, Active: a.Active, Processes: inspectProcesses(ids)}
+			var usage windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+			if e = windows.QueryInformationJobObject(h, 9, uintptr(unsafe.Pointer(&usage)), uint32(unsafe.Sizeof(usage)), nil); e != nil {
+				return e
+			}
+			sample := processLimitSample{RawPIDs: ids, Active: a.Active, Processes: inspectProcesses(ids), PeakJobCommitBytes: usage.PeakJobMemoryUsed}
 			samples = append(samples, sample)
 			ok = processLimitSatisfied(limits.BasicLimitInformation.ActiveProcessLimit, p.ProcessId, data.ChildPIDs, data.SpawnWin32Error, sample) && data.ChildrenStarted == uint32(len(data.ChildPIDs))
 			if ok || time.Now().After(until) {
@@ -392,10 +400,13 @@ func jobCase(f *fixture, r *Result, kind string) error {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		evidence := map[string]any{"worker": data, "configuredLimit": limits.BasicLimitInformation.ActiveProcessLimit, "samples": samples, "consolePolicy": "CREATE_NO_WINDOW for every workload child; no process name is exempt from the limit"}
+		evidence := map[string]any{"worker": data, "configuredLimit": limits.BasicLimitInformation.ActiveProcessLimit, "samples": samples, "consolePolicy": "DETACHED_PROCESS for root and every workload child; no process name is exempt from the limit"}
 		if kind == "pids-console" {
-			evidence["consolePolicy"] = "original default console behavior, diagnostic comparison only"
+			evidence["consolePolicy"] = "root CREATE_NO_WINDOW, children inherit console; diagnostic comparison only"
 			r.observe("original_console_process_limit_diagnostics", evidence)
+		} else if kind == "pids-no-window" {
+			evidence["consolePolicy"] = "CREATE_NO_WINDOW for root and every child, diagnostic comparison only"
+			r.observe("no_window_process_limit_diagnostics", evidence)
 		} else {
 			r.check("active_process_limit_4", ok && limits.BasicLimitInformation.ActiveProcessLimit == 4, evidence)
 		}

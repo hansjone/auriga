@@ -8,7 +8,7 @@
 
 ADR 0010 面向可信团队选择原生进程驱动，隔离弱于容器。本草稿记录 S3 spike 和安全审查后的验证方案，不直接改变既定架构，不将原型合入主分支。
 
-第一轮 CI 覆盖 Server 2025 build 26100、Server 2022 build 20348，Node v22.23.3。SYSTEM batch 启动、CPU、进程树、旧 shim 重接管、受控 TCP 出站/回环和 ACL 有部分证据。Server 2025 内存通过，Server 2022 曾在触碰 44 MiB后超时。第二轮修复了状态码符号扩展、LogonUser 类型 10 误用、进程数判据、配额 ACL 和环境块缺项。第三轮重设安全边界，尚未复测；旧结果不证明新模型通过。
+第一轮 CI 覆盖 Server 2025 build 26100、Server 2022 build 20348，Node v22.23.3。SYSTEM batch 启动、CPU、进程树、旧 shim 重接管、受控 TCP 出站/回环和 ACL 有部分证据。第二轮修复了状态码符号扩展、LogonUser 类型 10 误用、进程数判据、配额 ACL 和环境块缺项。第二次 CI（run `39222617442`）确认两种镜像的 WFP 移除/清理、登录权限核对和 NTFS 配额通过；Server 2022 内存仍停在 44 MiB并超时，Server 2025 通过；每层 CREATE_NO_WINDOW 仍产生 conhost，四个负载加四个 conhost 被记为 8 个活动进程；AppContainer 四配置均等待 JSON 超时，普通账号 Node 基线通过。第三轮重设安全边界，第四轮处理这三项残留，两轮均尚未复测；旧结果不证明新模型通过。
 
 ## 提议
 
@@ -31,6 +31,15 @@ ADR 0010 面向可信团队选择原生进程驱动，隔离弱于容器。本�
 
 以上仅为原型实现，不是行为已通过。JSON 中的 unsupported/fail 要原样保留。
 
+## 第四轮已实现、待 CI
+
+- **控制台与总量**：原继承控制台、每层 CREATE_NO_WINDOW 两种观察保留；新增父及全部 Go 子进程 DETACHED_PROCESS 的严格断言。只有 Job 限额/活动计数均为 4、父+三个预期子进程存活且 N+1 返回 1816 才通过，任何活 conhost 都不能忽略。生产后台负载采用无控制台和显式日志句柄，真实派生负载同样需约束并复测；ConPTY 未验证。启动标志不能禁止之后的 AllocConsole/其他控制台模式，因此不能据此承诺恶意负载的严格总进程上限。[Windows 控制台创建文档](https://learn.microsoft.com/en-us/windows/console/creation-of-a-console)说明 DETACHED_PROCESS 的无控制台语义。
+- **conhost 资源**：已有 CI 证明它计入活动记账而特殊创建未受同一进程数限制。新工件逐 PID 记录私有提交/工作集及 Job 峰值，不把 conhost 排除在预算外。按 [Job 内存字段定义](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information)，内存上限衡量提交、峰值包含相关进程；conhost 特殊创建路径的内存限额执行尚未单独压力验证，不能从计数旁路推断内存是否同样旁路。
+- **AppContainer 权限与诊断**：暂存 Node/脚本置于不可写的 app/bin，对实例账号及本次 package SID 双重 RX，避免依赖 hostedtoolcache ACL；独立 app/output 和预建 JSON 双重修改权限并显式 Low IL，不向 ALL APPLICATION PACKAGES 放权。输出实际 SDDL。普通账号基线增加脚本读取/输出写入，LowBox 使用显式 HANDLE_LIST 传递标准流，捕获清理前进程状态、退出码和有界 stderr；内联 bootstrap 报实际路径访问/errno，轮询区分提前退出与活进程报告不完整。旧证据不足以认定单一根因，新的 SID/标签布局及 SYSTEM profile 兼容性必须由 CI 判定。
+- **内存负载与等待**：不限额 192 MiB正向对照，随后 96 MiB Job 下按 1 MiB块 VirtualAlloc 提交并触碰，每次尝试前同步 JSONL。释放块后才生成最终 JSON，绕开 Go 堆接近限额时的分配/回收行为。必须完成并退出 0、捕获内存/配额错误 8/1455/1816、实际提交不足 192 MiB、Job 峰值相符才通过；等待 20 秒超时仍失败。旧 44 MiB停滞只能确认负载未退出，没有栈证据可精确归因；新负载报告不能视为旧 Go allocator 行为已查明。
+
+本机第四轮验证为 build/vet 通过、24 个顶层测试和 47 个子测试通过，仅覆盖非特权逻辑。第三轮所有安全门槛继续有效。
+
 ## 尚未完成的发布门槛与替代
 
 - **任意进程外 COM、broker 授权收敛**：没有受控 COM 服务 fixture；未修改共享任务计划程序/WMI namespace ACL。WMI/任务若创建出 Job 外进程就记录失败，不能忽略。补受控服务、按实例组授权方案及完整回归；或改 VM/容器边界。
@@ -43,4 +52,4 @@ ADR 0010 面向可信团队选择原生进程驱动，隔离弱于容器。本�
 
 ## 主控验收
 
-两个矩阵均保存实际版本、每个正向对照和具体拒绝码；重点核对 SYSTEM shim/Job owner、SCM Stop 后存活、breakaway/broker PID、provider 清理、监听/UDP/DNS旁路、quota owner、AppContainer token/拒绝、所有清理及总控计划任务注销。不得把超时、路径不存在、服务不可用或一般网络错误当作拒绝成功。当前仍明确报告缺失门槛，即使代码编译通过也不能采纳强隔离结论。
+两个矩阵均保存实际版本、每个正向对照和具体拒绝码；重点核对 SYSTEM shim/Job owner、SCM Stop 后存活、breakaway/broker PID、provider 清理、监听/UDP/DNS旁路、quota owner、AppContainer token/拒绝、所有清理及总控计划任务注销。第四轮还须核对三种控制台的逐 PID/资源证据、DETACHED_PROCESS 严格 4 进程及 1816、内存不限额对照/逐块记录/拒绝码，以及四种 AppContainer 的路径 SDDL、S3_PREFLIGHT、清理前退出码/stderr。不得把超时、路径不存在、服务不可用或一般网络错误当作拒绝成功。当前仍明确报告缺失门槛，即使代码编译通过也不能采纳强隔离结论。
