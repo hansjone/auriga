@@ -1,4 +1,4 @@
-package agenttest_test
+﻿package agenttest_test
 
 import (
 	"context"
@@ -246,7 +246,9 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	}
 
 	cancel()
-	_ = <-errCh
+	if err := <-errCh; err != nil {
+		t.Logf("session ended: %v", err)
+	}
 
 	fw.SetDropNextSession(true)
 	ctx2, cancel2 := context.WithCancel(context.Background())
