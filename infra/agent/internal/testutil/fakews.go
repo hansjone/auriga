@@ -27,6 +27,7 @@ type FakeWorkspace struct {
 	tokenUsed     bool
 	heartbeat     time.Duration
 	rejectExpired bool
+	renew         func(context.Context, *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error)
 
 	HelloCount     int
 	InventoryCount int
@@ -52,6 +53,7 @@ type FakeWorkspaceOpts struct {
 	Token             string
 	HeartbeatInterval time.Duration
 	RejectExpired     bool
+	Renew             func(context.Context, *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error)
 }
 
 // StartFakeWorkspace listens on 127.0.0.1:0 without TLS.
@@ -74,6 +76,7 @@ func StartFakeWorkspace(opts FakeWorkspaceOpts) (*FakeWorkspace, error) {
 		token:         token,
 		heartbeat:     hb,
 		rejectExpired: opts.RejectExpired,
+		renew:         opts.Renew,
 		applyCh:       make(chan *nodev1.InstanceSpec, 8),
 		deleteCh:      make(chan *nodev1.DeleteInstance, 8),
 	}
@@ -164,6 +167,9 @@ func (f *FakeWorkspace) Join(_ context.Context, req *nodev1.JoinRequest) (*nodev
 }
 
 func (f *FakeWorkspace) RenewCertificate(ctx context.Context, req *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error) {
+	if f.renew != nil {
+		return f.renew(ctx, req)
+	}
 	// Insecure test server cannot require mTLS; issue against default node id when no peer cert.
 	nodeID := "n_test01"
 	if id, err := peerNodeID(ctx); err == nil {

@@ -56,13 +56,12 @@ type Config struct {
 type Session struct {
 	cfg Config
 
-	mu           sync.Mutex
-	heartbeat    time.Duration
-	lastWelcome  *nodev1.Welcome
-	welcomeAt    time.Time
-	connected    bool
-	statusCh     chan *nodev1.InstanceStatus
-	renewBackoff time.Duration
+	mu          sync.Mutex
+	heartbeat   time.Duration
+	lastWelcome *nodev1.Welcome
+	welcomeAt   time.Time
+	connected   bool
+	statusCh    chan *nodev1.InstanceStatus
 }
 
 // New creates a session manager.
@@ -92,10 +91,9 @@ func New(cfg Config) *Session {
 		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
 	}
 	return &Session{
-		cfg:          cfg,
-		heartbeat:    cfg.HeartbeatInterval,
-		statusCh:     make(chan *nodev1.InstanceStatus, 64),
-		renewBackoff: time.Minute,
+		cfg:       cfg,
+		heartbeat: cfg.HeartbeatInterval,
+		statusCh:  make(chan *nodev1.InstanceStatus, 64),
 	}
 }
 
@@ -119,7 +117,16 @@ func (s *Session) Connected() bool {
 
 // Run loops connect → session → backoff until ctx is done.
 func (s *Session) Run(ctx context.Context) error {
-	go s.renewLoop(ctx)
+	renewCtx, cancelRenew := context.WithCancel(ctx)
+	renewDone := make(chan struct{})
+	go func() {
+		defer close(renewDone)
+		s.renewLoop(renewCtx)
+	}()
+	defer func() {
+		cancelRenew()
+		<-renewDone
+	}()
 
 	backoff := s.cfg.MinBackoff
 	for {
@@ -163,30 +170,35 @@ func (s *Session) Run(ctx context.Context) error {
 }
 
 func (s *Session) renewLoop(ctx context.Context) {
-	ticker := time.NewTicker(s.cfg.RenewCheckEvery)
-	defer ticker.Stop()
+	// Only this goroutine renews; reconnects cannot bypass the retry delay.
+	backoff := s.cfg.MinBackoff
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		err := s.tryRenew(ctx)
+		wait := s.cfg.RenewCheckEvery
+		if err != nil {
+			wait = withJitter(backoff)
+			s.cfg.Logger.Error("certificate renew failed", "error", err, "next_backoff", wait.String())
+			backoff *= 2
+			if backoff > 30*time.Minute {
+				backoff = 30 * time.Minute
+			}
+		} else {
+			backoff = s.cfg.MinBackoff
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
-			before := s.renewBackoff
-			s.tryRenew(ctx)
-			if s.renewBackoff > before {
-				// Failed: wait renewBackoff before next ticker-driven attempt.
-				timer := time.NewTimer(withJitter(s.renewBackoff))
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-			}
+		case <-timer.C:
 		}
 	}
 }
 
-func (s *Session) tryRenew(ctx context.Context) {
+func (s *Session) tryRenew(ctx context.Context) error {
 	opts := enroll.Options{
 		AgentDir:      s.cfg.AgentDir,
 		AgentVersion:  s.cfg.AgentVersion,
@@ -196,21 +208,10 @@ func (s *Session) tryRenew(ctx context.Context) {
 		Store:         s.cfg.Store,
 	}
 	_, err := enroll.RenewCertificate(ctx, opts, false)
-	if err != nil {
-		s.cfg.Logger.Error("certificate renew failed", "error", err, "next_backoff", s.renewBackoff.String())
-		s.renewBackoff *= 2
-		if s.renewBackoff > 30*time.Minute {
-			s.renewBackoff = 30 * time.Minute
-		}
-		return
-	}
-	s.renewBackoff = time.Minute
+	return err
 }
 
 func (s *Session) runOnce(ctx context.Context) error {
-	// Best-effort renew before dial so expired-soon certs are refreshed.
-	s.tryRenew(ctx)
-
 	mat, meta, tlsCert, err := s.loadCreds()
 	if err != nil {
 		return err

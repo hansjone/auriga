@@ -1,6 +1,7 @@
 package tlsutil_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -8,8 +9,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +100,8 @@ func mustSelfSigned(t *testing.T, isCA bool) (*x509.Certificate, *ecdsa.PrivateK
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "pipe-ca"},
+		DNSNames:              []string{"platform.example.com"},
+		IPAddresses:           []net.IP{net.ParseIP("192.0.2.10")},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		IsCA:                  isCA,
@@ -124,6 +129,8 @@ func mustIssued(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) (*x
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject:      pkix.Name{CommonName: "leaf"},
+		DNSNames:     []string{"platform.example.com"},
+		IPAddresses:  []net.IP{net.ParseIP("192.0.2.10")},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -138,4 +145,60 @@ func mustIssued(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey) (*x
 		t.Fatal(err)
 	}
 	return cert, key
+}
+
+func TestPinnedPeerRejectsHostnameMismatch(t *testing.T) {
+	ca, key := mustSelfSigned(t, true)
+	leaf, _ := mustIssued(t, ca, key)
+	for name, raw := range map[string][][]byte{"chain": {leaf.Raw, ca.Raw}, "single": {ca.Raw}} {
+		t.Run(name, func(t *testing.T) {
+			fp := identity.SPKISHA256Hex(ca)
+			if err := tlsutil.VerifyPinnedPeerChain(raw, fp, "platform.example.com"); err != nil {
+				t.Fatal(err)
+			}
+			for _, host := range []string{"other.example.com", "192.0.2.11"} {
+				err := tlsutil.VerifyPinnedPeerChain(raw, fp, host)
+				var hostErr x509.HostnameError
+				if !errors.As(err, &hostErr) {
+					t.Fatalf("expected hostname rejection for %s: %v", host, err)
+				}
+			}
+			if err := tlsutil.VerifyPinnedPeerChain(raw, fp, "192.0.2.10"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPinnedSingleCertificateRejectsInvalidValidity(t *testing.T) {
+	ca, key := mustSelfSigned(t, true)
+	for _, future := range []bool{false, true} {
+		cert := *ca
+		cert.NotBefore = time.Now().Add(-2 * time.Hour)
+		cert.NotAfter = time.Now().Add(-time.Hour)
+		if future {
+			cert.NotBefore = time.Now().Add(time.Hour)
+			cert.NotAfter = time.Now().Add(2 * time.Hour)
+		}
+		der, err := x509.CreateCertificate(rand.Reader, &cert, &cert, &key.PublicKey, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tlsutil.VerifyPinnedPeerChain([][]byte{der}, identity.SPKISHA256Hex(ca), "platform.example.com"); err == nil || !strings.Contains(err.Error(), "not valid at current time") {
+			t.Fatalf("invalid validity accepted: %v", err)
+		}
+	}
+}
+
+func TestDialRejectsPlaintext(t *testing.T) {
+	for _, endpoint := range []string{"http://platform.example.com:7443", "grpc://platform.example.com:7443"} {
+		c, err := tlsutil.Dial(context.Background(), tlsutil.DialOptions{Endpoint: endpoint})
+		if c != nil {
+			_ = c.Close()
+			t.Fatal("plaintext connection created")
+		}
+		if err == nil || !strings.Contains(err.Error(), "insecure endpoint") {
+			t.Fatalf("plaintext accepted: %v", err)
+		}
+	}
 }

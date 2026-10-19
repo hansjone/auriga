@@ -82,7 +82,8 @@ func EnsureDir(dir string) error {
 }
 
 // Save writes key material atomically (temp + rename) with tightened permissions.
-// Public material (cert, CA) is switched first; private keys last.
+// Private keys are switched first: a failed key write cannot publish a new
+// certificate with the old key. This is not a multi-file transaction.
 func Save(dir string, m *Material) error {
 	if err := EnsureDir(dir); err != nil {
 		return err
@@ -93,16 +94,16 @@ func Save(dir string, m *Material) error {
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
-	if err := atomicWrite(filepath.Join(dir, CertFileName), m.CertificatePEM, true); err != nil {
+	if err := atomicWrite(filepath.Join(dir, KeyFileName), keyPEM, true); err != nil {
+		return err
+	}
+	if err := atomicWrite(filepath.Join(dir, SealingFileName), m.SealingPrivate[:], true); err != nil {
 		return err
 	}
 	if err := atomicWrite(filepath.Join(dir, CAFileName), m.CAPEM, true); err != nil {
 		return err
 	}
-	if err := atomicWrite(filepath.Join(dir, KeyFileName), keyPEM, true); err != nil {
-		return err
-	}
-	if err := atomicWrite(filepath.Join(dir, SealingFileName), m.SealingPrivate[:], true); err != nil {
+	if err := atomicWrite(filepath.Join(dir, CertFileName), m.CertificatePEM, true); err != nil {
 		return err
 	}
 	m.Dir = dir

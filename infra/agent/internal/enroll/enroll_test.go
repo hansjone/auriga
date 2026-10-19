@@ -1,13 +1,17 @@
 package enroll_test
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/enroll"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/testutil"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 )
 
@@ -29,8 +33,8 @@ func TestValidateJoinRequiresTLS(t *testing.T) {
 func TestNeedsRenewOneThirdLifetime(t *testing.T) {
 	now := time.Now()
 	mat := &identity.Material{
-		CertificateNotBefore: now.Add(-27 * 24 * time.Hour),
-		CertificateExpiresAt: now.Add(3 * 24 * time.Hour), // 30d total, 3d left < 10d (1/3)
+		CertificateNotBefore: now.Add(-21 * 24 * time.Hour),
+		CertificateExpiresAt: now.Add(9 * 24 * time.Hour), // 30d total, 9d left < 10d but > 7d
 	}
 	if !enroll.NeedsRenew(mat, 7*24*time.Hour) {
 		t.Fatal("expected renew near end of life")
@@ -66,33 +70,35 @@ func TestReadTokenFromFileAndEnv(t *testing.T) {
 }
 
 func TestRejectAlreadyEnrolled(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "agent")
-	if err := identity.EnsureDir(dir); err != nil {
-		t.Fatal(err)
-	}
-	key, err := identity.GenerateKeyPair()
+	fw, err := testutil.StartFakeWorkspace(testutil.FakeWorkspaceOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sealPriv, sealPub, err := identity.GenerateSealingKey()
-	if err != nil {
+	defer fw.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	opts := enroll.Options{AgentDir: filepath.Join(t.TempDir(), "agent"), Server: fw.URL(), Token: fw.Token(), CAFingerprint: fw.CA.Fingerprint(), AllowInsecure: true}
+	if _, err := enroll.Join(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	// Minimal fake files so Enrolled is true
-	mat := &identity.Material{
-		NodeID:         "n1",
-		PrivateKey:     key,
-		CertificatePEM: []byte("not-a-real-cert"),
-		CAPEM:          []byte("not-a-real-ca"),
-		SealingPrivate: sealPriv,
-		SealingPublic:  sealPub,
+	before := map[string][]byte{}
+	for _, name := range []string{identity.KeyFileName, identity.CertFileName, identity.CAFileName, identity.SealingFileName} {
+		b, err := os.ReadFile(filepath.Join(opts.AgentDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[name] = b
 	}
-	// Save will fail parse later; just create key file for Enrolled check
-	_ = mat
-	if err := os.WriteFile(filepath.Join(dir, identity.KeyFileName), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
+	if _, err := enroll.Join(ctx, opts); err == nil || !strings.Contains(err.Error(), "already enrolled") {
+		t.Fatalf("duplicate join not rejected locally: %v", err)
 	}
-	if !identity.Enrolled(dir) {
-		t.Fatal("expected enrolled")
+	for name, want := range before {
+		got, err := os.ReadFile(filepath.Join(opts.AgentDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("duplicate join changed %s", name)
+		}
 	}
 }

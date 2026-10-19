@@ -4,7 +4,6 @@ package identity
 
 import (
 	"fmt"
-	"os/user"
 
 	"golang.org/x/sys/windows"
 )
@@ -75,22 +74,14 @@ func explicitAccess(sid *windows.SID) windows.EXPLICIT_ACCESS {
 }
 
 func currentUserSID() (*windows.SID, error) {
-	u, err := user.Current()
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		return nil, err
+	}
+	defer func() { _ = token.Close() }()
+	tu, err := token.GetTokenUser()
 	if err != nil {
 		return nil, err
 	}
-	sid, err := windows.StringToSid(u.Uid)
-	if err != nil {
-		var token windows.Token
-		if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
-			return nil, err
-		}
-		defer func() { _ = token.Close() }()
-		tu, err := token.GetTokenUser()
-		if err != nil {
-			return nil, err
-		}
-		return tu.User.Sid, nil
-	}
-	return sid, nil
+	return tu.User.Sid.Copy()
 }

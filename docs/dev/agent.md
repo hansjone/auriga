@@ -46,7 +46,9 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 └─ backups/
 ```
 
-私钥与 sealing / CA 写入为原子 rename；Unix `0600`，Windows 用 ACL（仅 SYSTEM、Administrators、当前用户）。
+各凭据文件先写临时文件并同步，再原子 rename；顺序为 `node.key`、`sealing.key`、`ca.crt`、`node.crt`，防止私钥写入失败时发布新证书并搭配旧私钥。这不是多文件事务：强制重新入网中断仍可能留下新私钥配旧证书，需要重新入网恢复。Unix `0600`；Windows 从当前进程令牌取得用户 SID，设置受保护的 DACL，仅授予 SYSTEM、Administrators、当前用户完整权限，不保留继承项。
+
+运行时由单个续期协程立即检查一次，此后默认每小时检查；重连不另行发起续期。失败以连接配置的最小退避（默认 1 秒）起步，指数增长到 30 分钟并加抖动，达到上限后仍持续退避；成功后恢复检查间隔。续期成功写盘，下次建立会话时重新加载新证书。退出前等待续期协程结束，再关闭状态存储。
 
 ## A1 范围
 
@@ -59,7 +61,11 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 
 ```powershell
 Set-Location infra\agent
+go vet ./...
 go test -count=1 -timeout=10m ./...
+go test -race ./...   # 需要 cgo 和可用的 C 编译器
 ```
 
 集成测试用 `internal/testutil` 假 workspace（随机端口、`grpc://` + `AllowInsecure`）。CA 指纹 pin 用 `net.Pipe` 测（避免本机杀毒软件劫持 localhost TLS）。
+
+续期测试将检查间隔缩短至 10 毫秒，覆盖存活会话中的重复换证、重连凭据加载、失败退避重试，以及缺失/畸形证书、公钥不符、节点身份变化、错误 CA、过期证书均不替换原证书。另覆盖 CA 文件篡改、主机名与 IP SAN 不符、重复入网不修改凭据、保存各阶段失败和临时文件清理。Windows 专用测试读回目录与全部凭据文件的 DACL，逐项核对 SID、权限及禁止继承，包含覆盖保存场景。
