@@ -61,7 +61,11 @@ export {
 } from './managed/guards.js';
 export { createActivityProbe } from './managed/activity.js';
 export { buildHealthBody, HEALTH_PATH } from './managed/health.js';
-export { createAurigaSdk, provideAurigaSdk, SDK_VERSION } from './managed/sdk.js';
+export {
+  createAurigaSdk,
+  provideAurigaSdk,
+  SDK_VERSION,
+} from './managed/sdk.js';
 export {
   checkProtocol,
   protocolInfo,

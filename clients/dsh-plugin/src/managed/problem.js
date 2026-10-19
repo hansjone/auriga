@@ -10,7 +10,8 @@ export function problem(status, code, detail, params) {
   /** @type {{ type: string, title: string, status: number, code: string, detail?: string, params?: Record<string, unknown> }} */
   const body = {
     type: 'about:blank',
-    title: status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Error',
+    title:
+      status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Error',
     status,
     code,
   };

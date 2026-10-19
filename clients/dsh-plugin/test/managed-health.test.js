@@ -161,7 +161,13 @@ test('createManaged wires door keys health sdk', async () => {
         },
       };
     }
-    return { ok: false, status: 404, async text() { return ''; } };
+    return {
+      ok: false,
+      status: 404,
+      async text() {
+        return '';
+      },
+    };
   };
 
   const runtime = await createManaged({

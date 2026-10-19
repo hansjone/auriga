@@ -60,7 +60,8 @@ export function createActivityProbe(opts = {}) {
     },
     /** @param {Partial<{ runningTurns: number, openTerminals: number, activeImBots: number, connectedClients: number }>} patch */
     update(patch) {
-      if (patch.runningTurns != null) runningTurns = Math.max(0, Math.floor(patch.runningTurns));
+      if (patch.runningTurns != null)
+        runningTurns = Math.max(0, Math.floor(patch.runningTurns));
       if (patch.openTerminals != null)
         openTerminals = Math.max(0, Math.floor(patch.openTerminals));
       if (patch.activeImBots != null)

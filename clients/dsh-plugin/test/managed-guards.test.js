@@ -124,16 +124,10 @@ test('workspace create outside root is forbidden', async () => {
 });
 
 test('assertWorkspaceCreatePath rejects empty and outside paths', () => {
-  assert.equal(
-    assertWorkspaceCreatePath('').ok,
-    false,
-  );
+  assert.equal(assertWorkspaceCreatePath('').ok, false);
   assert.equal(
     assertWorkspaceCreatePath('/etc/passwd').code, // gitleaks:allow
     'common.forbidden',
   );
-  assert.equal(
-    assertWorkspaceCreatePath('/home/dsh/workspace/a').ok,
-    true,
-  );
+  assert.equal(assertWorkspaceCreatePath('/home/dsh/workspace/a').ok, true);
 });

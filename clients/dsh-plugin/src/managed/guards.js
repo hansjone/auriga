@@ -93,8 +93,15 @@ export function guardPluginManager(pluginManager) {
  * @param {object} registry
  * @param {string} [root]
  */
-export function guardWorkspaceRegistry(registry, root = DEFAULT_WORKSPACE_ROOT) {
-  if (!registry || typeof registry.create !== 'function' || registry.__aurigaRootGuard)
+export function guardWorkspaceRegistry(
+  registry,
+  root = DEFAULT_WORKSPACE_ROOT,
+) {
+  if (
+    !registry ||
+    typeof registry.create !== 'function' ||
+    registry.__aurigaRootGuard
+  )
     return registry;
   const orig = registry.create.bind(registry);
   registry.create = async (path, title) => {

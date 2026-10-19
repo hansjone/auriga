@@ -68,7 +68,8 @@ export function createAurigaSdk(opts = {}) {
     },
     kb,
     async notify(message) {
-      if (typeof opts.notify !== 'function') return { ok: false, skipped: true };
+      if (typeof opts.notify !== 'function')
+        return { ok: false, skipped: true };
       await opts.notify(message || {});
       return { ok: true };
     },

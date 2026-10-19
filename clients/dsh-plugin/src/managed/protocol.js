@@ -11,7 +11,9 @@ export const MIN_SUPPORTED_PROTOCOL = Math.max(1, PROTOCOL_VERSION - 1);
  */
 export function checkProtocol(clientMajor) {
   const major =
-    typeof clientMajor === 'string' ? Number.parseInt(clientMajor, 10) : clientMajor;
+    typeof clientMajor === 'string'
+      ? Number.parseInt(clientMajor, 10)
+      : clientMajor;
   if (
     typeof major !== 'number' ||
     !Number.isInteger(major) ||

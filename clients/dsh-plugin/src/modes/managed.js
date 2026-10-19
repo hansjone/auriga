@@ -85,7 +85,10 @@ export async function createManaged(options = {}) {
 
   const pluginVersion = options.pluginVersion ?? readPkgVersion();
   const dshVersion =
-    options.dshVersion ?? env.DSH_CLIENT_VERSION ?? env.DSH_VERSION ?? 'unknown';
+    options.dshVersion ??
+    env.DSH_CLIENT_VERSION ??
+    env.DSH_VERSION ??
+    'unknown';
   const workspaceRoot =
     options.workspaceRoot ??
     env.AURIGA_WORKSPACE_ROOT ??
@@ -179,8 +182,7 @@ export async function createManaged(options = {}) {
     sdk,
     keyCache,
     workspaceRoot,
-    healthBody: () =>
-      buildHealthBody({ pluginVersion, ready: true, activity }),
+    healthBody: () => buildHealthBody({ pluginVersion, ready: true, activity }),
     /**
      * Wire into a Cordis-like DSH host context.
      * @param {object} ctx

@@ -11,14 +11,17 @@ export function canonicalize(value) {
     case 'boolean':
       return value ? 'true' : 'false';
     case 'number':
-      if (!Number.isFinite(value)) throw new TypeError('JCS: non-finite number');
+      if (!Number.isFinite(value))
+        throw new TypeError('JCS: non-finite number');
       return JSON.stringify(value);
     case 'string':
       return JSON.stringify(value);
     case 'object': {
       if (Array.isArray(value))
         return `[${value.map((item) => canonicalize(item)).join(',')}]`;
-      const keys = Object.keys(/** @type {Record<string, unknown>} */ (value)).sort();
+      const keys = Object.keys(
+        /** @type {Record<string, unknown>} */ (value),
+      ).sort();
       const parts = [];
       for (const key of keys) {
         const item = /** @type {Record<string, unknown>} */ (value)[key];

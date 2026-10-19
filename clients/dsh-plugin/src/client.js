@@ -63,7 +63,9 @@ window.__ModuleLoader__.load({
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw Object.assign(
-            new Error(body?.detail ?? body?.error?.message ?? 'bootstrap failed'),
+            new Error(
+              body?.detail ?? body?.error?.message ?? 'bootstrap failed',
+            ),
             { code: body?.code ?? body?.error?.code ?? 'common.unavailable' },
           );
         }
@@ -144,13 +146,10 @@ window.__ModuleLoader__.load({
           state.theme = dark.matches ? 'dark' : 'light';
           emit();
         };
-        ctx.effect?.(
-          () => {
-            dark.addEventListener('change', onScheme);
-            return () => dark.removeEventListener('change', onScheme);
-          },
-          'auriga-shell: theme',
-        );
+        ctx.effect?.(() => {
+          dark.addEventListener('change', onScheme);
+          return () => dark.removeEventListener('change', onScheme);
+        }, 'auriga-shell: theme');
 
         const useHostState = () => {
           const [, bump] = React.useReducer((n) => n + 1, 0);
@@ -241,22 +240,31 @@ window.__ModuleLoader__.load({
             };
           }, [boot, host.locale, host.theme]);
 
-          if (phase.status === 'loading')
-            return h('div', null, t('loading'));
+          if (phase.status === 'loading') return h('div', null, t('loading'));
           if (phase.status === 'error') {
             return h('div', null, [
               h('p', { key: 'm' }, t('failed')),
               h('p', { key: 'c' }, `${t('code')}: ${phase.code}`),
               h(
                 'button',
-                { key: 'r', type: 'button', onClick: () => setAttempt((n) => n + 1) },
+                {
+                  key: 'r',
+                  type: 'button',
+                  onClick: () => setAttempt((n) => n + 1),
+                },
                 t('retry'),
               ),
             ]);
           }
           return h(
             'div',
-            { style: { height: '100%', display: 'flex', flexDirection: 'column' } },
+            {
+              style: {
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+              },
+            },
             [
               authRequired
                 ? h('div', { key: 'a', role: 'status' }, [
@@ -275,7 +283,11 @@ window.__ModuleLoader__.load({
               host.toast
                 ? h(
                     'div',
-                    { key: 'toast', role: 'status', 'data-level': host.toast.level },
+                    {
+                      key: 'toast',
+                      role: 'status',
+                      'data-level': host.toast.level,
+                    },
                     host.toast.message,
                   )
                 : null,

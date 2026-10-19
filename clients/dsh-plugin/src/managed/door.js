@@ -28,7 +28,9 @@ const UNAUTH = 'common.unauthenticated';
  * In-memory jti replay cache (kept until exp + skew).
  * Contract notes jti is for log correlation only; task P1 requires replay rejection.
  */
-export function createReplayCache({ now = () => Math.floor(Date.now() / 1000) } = {}) {
+export function createReplayCache({
+  now = () => Math.floor(Date.now() / 1000),
+} = {}) {
   /** @type {Map<string, number>} */
   const seen = new Map();
 
@@ -104,7 +106,11 @@ export function parseCompactJws(token) {
  */
 export async function verifyIdentityHeader(opts) {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
-  const fail = (reason) => ({ ok: /** @type {const} */ (false), code: UNAUTH, reason });
+  const fail = (reason) => ({
+    ok: /** @type {const} */ (false),
+    code: UNAUTH,
+    reason,
+  });
 
   if (!opts.token) return fail('missing');
 
@@ -177,9 +183,11 @@ export function createDoorLock(cfg) {
   async function check(req) {
     const url = new URL(req.url ?? '/', 'http://192.0.2.10');
     const path = url.pathname;
-    if (path === HEALTH_PATH) return { ok: /** @type {const} */ (true), bypass: true };
+    if (path === HEALTH_PATH)
+      return { ok: /** @type {const} */ (true), bypass: true };
 
-    const raw = req.headers?.['auriga-identity'] ?? req.headers?.['Auriga-Identity'];
+    const raw =
+      req.headers?.['auriga-identity'] ?? req.headers?.['Auriga-Identity'];
     const token = Array.isArray(raw) ? raw[0] : raw;
     return verifyIdentityHeader({
       token,

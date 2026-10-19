@@ -1,5 +1,9 @@
 // @ts-nocheck
-import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
+import {
+  createHash,
+  createPublicKey,
+  verify as cryptoVerify,
+} from 'node:crypto';
 import { canonicalize } from './jcs.js';
 import { PROTOCOL_VERSION } from './protocol.js';
 
@@ -7,8 +11,7 @@ export const PANEL_ELEMENT = 'auriga-team-panel';
 export const ROUTE_PREFIX = '/auriga';
 
 const SRI = /^sha(256|384|512)-[A-Za-z0-9+/=]+$/;
-const SAFE_PATH =
-  /^(?!.*(^|\/)\.\.(\/|$))[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+const SAFE_PATH = /^(?!.*(^|\/)\.\.(\/|$))[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 
 export class PanelError extends Error {
   /** @param {string} code @param {string} [message] */
@@ -61,12 +64,17 @@ export function assertManifestShape(m) {
     typeof sig !== 'object' ||
     sig === null ||
     /** @type {Record<string, unknown>} */ (sig).alg !== 'EdDSA' ||
-    typeof /** @type {Record<string, unknown>} */ (sig).kid !== 'string' ||
-    typeof /** @type {Record<string, unknown>} */ (sig).value !== 'string'
+    typeof (/** @type {Record<string, unknown>} */ (sig).kid) !== 'string' ||
+    typeof (/** @type {Record<string, unknown>} */ (sig).value) !== 'string'
   )
     throw bad('signature missing');
   assertSafePath(/** @type {string} */ (manifest.entry));
-  if (!(/** @type {string} */ (manifest.entry) in /** @type {object} */ (manifest.integrity)))
+  if (
+    !(
+      /** @type {string} */ (manifest.entry) in
+      /** @type {object} */ (manifest.integrity)
+    )
+  )
     throw bad('entry missing integrity');
 }
 
@@ -81,7 +89,11 @@ export function signingInput(manifest) {
  * @param {{ keys: object[] }} keySet
  * @param {number} [nowSec]
  */
-export function verifyManifestSignature(manifest, keySet, nowSec = Math.floor(Date.now() / 1000)) {
+export function verifyManifestSignature(
+  manifest,
+  keySet,
+  nowSec = Math.floor(Date.now() / 1000),
+) {
   const kid = manifest.signature.kid;
   const jwk = (keySet?.keys ?? []).find((k) => k.kid === kid);
   if (!jwk)
@@ -113,8 +125,7 @@ export function verifyManifestSignature(manifest, keySet, nowSec = Math.floor(Da
  */
 export function verifyManifest(manifest, opts) {
   assertManifestShape(manifest);
-  const nowSec =
-    opts.now ?? Math.floor(Date.now() / 1000);
+  const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const expires = Date.parse(String(manifest.expiresAt));
   if (!Number.isFinite(expires) || expires / 1000 < nowSec - 5)
     throw new PanelError('common.unauthenticated', 'panel manifest expired');

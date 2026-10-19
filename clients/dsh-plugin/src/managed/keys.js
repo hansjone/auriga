@@ -18,7 +18,8 @@ import { createPublicKey } from 'node:crypto';
  * @returns {import('node:crypto').KeyObject | null}
  */
 export function jwkToPublicKey(jwk, nowSec = Math.floor(Date.now() / 1000)) {
-  if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || !jwk.kid || !jwk.x) return null;
+  if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || !jwk.kid || !jwk.x)
+    return null;
   if (typeof jwk.nbf === 'number' && nowSec < jwk.nbf - 5) return null;
   if (typeof jwk.exp === 'number' && nowSec > jwk.exp + 5) return null;
   try {

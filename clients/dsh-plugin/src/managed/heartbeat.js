@@ -18,12 +18,11 @@ import { checkProtocol } from './protocol.js';
  */
 export function createHeartbeatClient(opts) {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const intervalMs = opts.intervalMs ?? 30_000;
   const debounceMs = opts.debounceMs ?? 2_000;
   let timer;
   let debounce;
   let stopped = false;
-  let nextHeartbeatSeconds = 30;
+  let nextHeartbeatSeconds = Math.round((opts.intervalMs ?? 30_000) / 1000);
 
   async function send() {
     if (stopped) return;
@@ -84,11 +83,14 @@ export function createHeartbeatClient(opts) {
 
   const schedule = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      void send().finally(() => {
-        if (!stopped) schedule();
-      });
-    }, (nextHeartbeatSeconds || 30) * 1000);
+    timer = setTimeout(
+      () => {
+        void send().finally(() => {
+          if (!stopped) schedule();
+        });
+      },
+      (nextHeartbeatSeconds || 30) * 1000,
+    );
     if (typeof timer.unref === 'function') timer.unref();
   };
 

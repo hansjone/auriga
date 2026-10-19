@@ -30,4 +30,18 @@ export default [
       ],
     },
   },
+  {
+    files: ['src/client.js'],
+    languageOptions: {
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        customElements: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        console: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
 ];
