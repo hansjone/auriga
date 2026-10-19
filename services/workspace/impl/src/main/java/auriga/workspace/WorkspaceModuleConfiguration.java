@@ -10,4 +10,6 @@ import org.springframework.context.annotation.Configuration;
     name = "enabled",
     havingValue = "true",
     matchIfMissing = true)
+@org.springframework.context.annotation.Import(
+    auriga.workspace.config.WorkspaceRuntimeConfiguration.class)
 public class WorkspaceModuleConfiguration {}
