@@ -67,3 +67,7 @@ shared 导出 IAMPaths/OrgPaths/WorkspacePaths 及对应 Components 类型。
 输出 shared 与插件各自的 `src/generated/steps.d.ts` 后统一格式化。
 源 Schema 根没有 properties，必须保留全部 `$defs`，不要手写 ClientStep 等类型。
 生成物提交，CI 重生成并检查 git diff 及新增文件。
+
+## 在 worktree 里开发
+
+worktree 的 `node_modules` 是指向主仓库的联接，`pnpm -r` 会拒绝运行。在 worktree 里改了 `web/shared` 想让 portal / admin 立刻用上时，在 worktree 根目录单独 `pnpm install --store-dir $env:AURIGA_PNPM_STORE`；**不要**为此在 vite.config / tsconfig 里加 alias 或 paths。实在跑不了就交给 CI（PR 会跑全部 web 检查）。
