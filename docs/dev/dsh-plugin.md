@@ -1,4 +1,4 @@
-# DSH 插件（auriga-dsh）离线版
+# DSH 插件（auriga-dsh）
 
 包名 `auriga-dsh`（MIT），目录 `clients/dsh-plugin`。Node 22+，纯 ESM + JSDoc；类型来自 `contracts/identity/steps.schema.json`（`pnpm --filter auriga-dsh gen:steps`）。
 
@@ -7,13 +7,15 @@
 | `AURIGA_MODE` | 含义 |
 |---|---|
 | `standalone`（默认） | 不连平台；应急账号 + 配置的 JS 连接器；单一主人 |
-| `managed` | 平台托管实例（后续任务） |
+| `managed` | 平台托管实例：门锁、守卫、活动探针、团队面板外壳、`ctx.get('auriga')` |
 | `connect` | 本机 DSH 接入团队平台（后续任务） |
 
-`initialize()` 返回模式占位对象。standalone 的完整登录运行时用：
+`initialize()` 返回模式占位对象。standalone / managed 用 `.create(options)` 建运行时。
+
+Cordis 宿主入口：`auriga-dsh/plugin`（`package.json` `main`）。浏览器面板外壳：`auriga-dsh/client`。
 
 ```js
-import initialize, { enrollEmergency } from 'auriga-dsh';
+import initialize, { enrollEmergency, createManaged } from 'auriga-dsh';
 
 const mode = initialize({ AURIGA_MODE: 'standalone' });
 const emergency = enrollEmergency('alice', process.env.EMERGENCY_PASSWORD);
@@ -32,12 +34,47 @@ const runtime = await mode.create({
           clientSecret: '…',
         },
       },
-      // 企业私有包
-      { type: 'example-sso', module: '@example/auriga-sso', config: { /* … */ } },
     ],
   },
 });
 ```
+
+## 托管模式（managed）
+
+环境变量见 `contracts/plugin/README.md` 第 3 节。必需：`AURIGA_INSTANCE_ID`、`AURIGA_OWNER_ID`、`AURIGA_PLATFORM_URL`、`AURIGA_IDENTITY_KEYS_FILE`、`AURIGA_INSTANCE_TOKEN_FILE`。
+
+### 门锁
+
+每个 HTTP / WebSocket 升级请求校验 `Auriga-Identity`（EdDSA / Ed25519，`typ=auriga-id+jwt`）：
+
+1. 按 `kid` 从身份头公钥文件取公钥（找不到则重读文件；可选 `AURIGA_IDENTITY_KEYS_URL` 拉取并缓存）；
+2. `aud` = 本实例 id、`sub` = `AURIGA_OWNER_ID`、`pv` 为支持的协议主版本；
+3. `iat` / `exp`（允许 5 秒时钟偏差；`exp ≤ iat + 60`）；
+4. `htm` / `htu` 与请求方法和路径一致；
+5. `jti` 在有效期内去重（任务要求防重放；契约原文仅用于日志关联）。
+
+失败一律 **401** + `common.unauthenticated`（不向客户端区分原因）。`GET /_auriga/health` 免校验。
+
+### 守卫
+
+- 拦截原生 `pluginManager` 变更：`installBundle` / `removeBundle` / `setBundleEnabled` / `setPluginEnabled` / `setVersionExemption` / `cancelInstall`（服务层 + `POST /api/pluginManager/<方法>`），错误码 `common.forbidden`。
+- 拦截越界新建工作区：`workspaceRegistry.create` 路径必须在 `AURIGA_WORKSPACE_ROOT`（默认 `/home/dsh/workspace`）之下。
+
+### 活动与心跳
+
+- `GET /_auriga/health` → `{ status, ready, protocol, pluginVersion, activity? }`。
+- 每 30 秒及活动计数变化（2 秒去抖）`POST {AURIGA_PLATFORM_URL}/api/workspace/v1/instance/heartbeat`，带 `Auriga-Protocol` 与实例令牌；上报 `runningTurns` / `openTerminals` / `activeImBots` / `connectedClients`。
+- 协议：当前与上一个主版本；更旧返回平台侧 `plugin.protocol_unsupported`（426）。
+
+### 团队面板外壳
+
+- Node：`GET /auriga/bootstrap`（经 DSH `connection.requestRejection`）返回已验签清单与同源 `panelBase=/panel/`。
+- 清单：JCS + Ed25519（`AURIGA_PANEL_KEYS_FILE` 或 `AURIGA_PANEL_KEYS`）；拒过期与版本回滚。
+- 浏览器：`src/client.js` 挂 `sidebar.panellist` + `main`，SRI 加载 `<auriga-team-panel>`（ADR 0017）。
+
+### SDK
+
+`ctx.provide('auriga', …)` / `ctx.get('auriga')`：`version`、`identity()`、`kb`、`notify`、`files`。不提供原型的 `dshTeam`。
 
 ## 连接器 SPI（与契约一致）
 
@@ -68,7 +105,7 @@ const runtime = await mode.create({
 - discovery 的 `authorization_endpoint` 等必须 https（或允许的本地 http），且授权主机与 issuer 相同
 - 外部 HTTP：undici `Agent` 自定义 `lookup`，连接只用已校验地址（防 DNS 重绑定）；响应体流式限长 1 MiB
 
-## 主人与会话
+## 主人与会话（standalone）
 
 - 第一次成功登录的身份成为主人（`claimOwner` 比较并设置，持久化实现必须原子）
 - 可选配置 `owner: { providers?, subject?, email? }`：限定谁可以成为主人。**接公开 OIDC 时务必配置**，否则首个访问者即主人
@@ -81,7 +118,7 @@ const runtime = await mode.create({
 
 只用契约里出现过的码，例如：
 
-`iam.invalid_credentials`、`iam.external_denied`、`iam.connector_unavailable`、`iam.admission_denied`、`iam.login_tx_expired`、`iam.login_tx_finished`、`common.rate_limited`、`common.forbidden`、`common.unauthenticated`、`common.validation_failed`、`common.not_found`
+`iam.invalid_credentials`、`iam.external_denied`、`iam.connector_unavailable`、`iam.admission_denied`、`iam.login_tx_expired`、`iam.login_tx_finished`、`common.rate_limited`、`common.forbidden`、`common.unauthenticated`、`common.validation_failed`、`common.not_found`、`common.unavailable`、`common.precondition_failed`、`plugin.protocol_unsupported`
 
 ## 开发与测试
 

@@ -1,13 +1,19 @@
 {
   "name": "auriga-dsh",
   "version": "0.0.0",
-  "description": "Auriga DSH plugin (standalone identity: emergency + OIDC connectors)",
+  "description": "Auriga DSH plugin (standalone identity, managed host, team panel shell)",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
-  "exports": "./src/index.js",
+  "main": "./src/plugin.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./plugin": "./src/plugin.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
   "files": [
     "src",
     "LICENSE",
@@ -19,6 +25,12 @@
     "test": "node --test \"test/**/*.test.js\"",
     "build": "tsc --noEmit -p tsconfig.json",
     "gen:steps": "json2ts -i ../../contracts/identity/steps.schema.json -o src/generated/steps.d.ts --unreachableDefinitions && prettier --write src/generated/steps.d.ts"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
   },
   "devDependencies": {
     "json-schema-to-typescript": "16.0.0",
