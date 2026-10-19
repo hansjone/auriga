@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "widget.* test events (test-only contract)",
+  "$defs": {
+    "WidgetCreated": {
+      "type": "object",
+      "properties": {
+        "widgetId": { "type": "string", "format": "uuid" },
+        "name": { "type": "string" }
+      },
+      "required": ["widgetId", "name"],
+      "additionalProperties": false
+    }
+  }
+}
