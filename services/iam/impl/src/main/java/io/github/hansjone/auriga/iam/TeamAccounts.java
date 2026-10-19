@@ -82,9 +82,9 @@ public final class TeamAccounts {
                         && i.path("providerId").asString().equals(providerId))
             .findFirst()
             .orElseThrow(() -> IamError.error("forbidden", 403));
-    ObjectNode row =
-        authenticatePassword(providerId, identity.path("subject").asString(), current);
-    IamError.require(next != null && next.length() >= 10 && next.length() <= 256, "invalid_password", 400);
+    ObjectNode row = authenticatePassword(providerId, identity.path("subject").asString(), current);
+    IamError.require(
+        next != null && next.length() >= 10 && next.length() <= 256, "invalid_password", 400);
     row.put("passwordHash", passwords.encode(next));
     store.save("team_account", row);
   }
@@ -110,8 +110,7 @@ public final class TeamAccounts {
     if (row == null) return false;
     String secret =
         secrets.decrypt(
-            row.path("totp").asString(),
-            "totp:" + TenantContext.require() + ":" + accountId);
+            row.path("totp").asString(), "totp:" + TenantContext.require() + ":" + accountId);
     long counter = Totp.verify(secret, code, clock.instant(), row.path("lastCounter").asLong());
     if (counter < 0) return false;
     row.put("lastCounter", counter);
@@ -148,7 +147,14 @@ public final class TeamAccounts {
             + url(issuerLabel)
             + "&digits=6&period=30";
     return Json.object(
-        "enrollmentId", enrollmentId, "secret", secret, "otpauthUri", uri, "expiresAt", expires.toString());
+        "enrollmentId",
+        enrollmentId,
+        "secret",
+        secret,
+        "otpauthUri",
+        uri,
+        "expiresAt",
+        expires.toString());
   }
 
   public void confirmTotpEnrollment(UUID accountId, String enrollmentId, String code) {
@@ -197,8 +203,7 @@ public final class TeamAccounts {
 
   public void deleteTotp(UUID accountId, boolean requireRemainingMfa) {
     IamError.require(hasTotp(accountId), "not_found", 404);
-    if (requireRemainingMfa)
-      IamError.require(passkeyCount(accountId) > 0, "mfa_required", 409);
+    if (requireRemainingMfa) IamError.require(passkeyCount(accountId) > 0, "mfa_required", 409);
     store.delete("team_totp", accountId.toString());
     events.publish(
         "identity.mfa_changed",
@@ -215,7 +220,8 @@ public final class TeamAccounts {
   }
 
   public UUID accountIdFor(String providerId, String username) {
-    ObjectNode identity = store.get("identity", providerId + ":" + username.toLowerCase(Locale.ROOT), false);
+    ObjectNode identity =
+        store.get("identity", providerId + ":" + username.toLowerCase(Locale.ROOT), false);
     return identity == null ? null : UUID.fromString(identity.path("accountId").asString());
   }
 

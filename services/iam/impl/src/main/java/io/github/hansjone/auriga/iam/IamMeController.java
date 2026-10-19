@@ -126,7 +126,9 @@ public class IamMeController {
                   .filter(i -> i.path("id").asString().equals(identityId))
                   .findFirst()
                   .orElseThrow(() -> IamError.error("not_found", 404));
-          store.delete("identity", target.path("providerId").asString() + ":" + target.path("subject").asString());
+          store.delete(
+              "identity",
+              target.path("providerId").asString() + ":" + target.path("subject").asString());
           return null;
         });
   }
@@ -143,7 +145,8 @@ public class IamMeController {
                   .filter(
                       i ->
                           i.path("accountId").asString().equals(principal.subject())
-                              && providerType(i.path("providerId").asString()).equals("team-account"))
+                              && providerType(i.path("providerId").asString())
+                                  .equals("team-account"))
                   .findFirst()
                   .orElseThrow(() -> IamError.error("forbidden", 403));
           accounts.changePassword(
@@ -163,8 +166,7 @@ public class IamMeController {
   @AuthenticatedOnly
   public ObjectNode mfa() {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    return store.tx(
-        () -> accounts.mfaStatus(UUID.fromString(principal.subject()), true));
+    return store.tx(() -> accounts.mfaStatus(UUID.fromString(principal.subject()), true));
   }
 
   @PostMapping("/me/mfa/totp/enrollment")
@@ -173,9 +175,7 @@ public class IamMeController {
   public ObjectNode beginTotp() {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
     return store.tx(
-        () ->
-            accounts.beginTotpEnrollment(
-                UUID.fromString(principal.subject()), issuerHost()));
+        () -> accounts.beginTotpEnrollment(UUID.fromString(principal.subject()), issuerHost()));
   }
 
   @PostMapping("/me/mfa/totp/enrollment/{enrollmentId}/confirm")
@@ -186,9 +186,7 @@ public class IamMeController {
     store.tx(
         () -> {
           accounts.confirmTotpEnrollment(
-              UUID.fromString(principal.subject()),
-              enrollmentId,
-              body.path("code").asString(""));
+              UUID.fromString(principal.subject()), enrollmentId, body.path("code").asString(""));
           return null;
         });
   }
@@ -330,7 +328,10 @@ public class IamMeController {
 
   private ObjectNode teamConfig() {
     return store.all("idp_provider").stream()
-        .filter(p -> p.path("connectorType").asString().equals("team-account") && p.path("enabled").asBoolean())
+        .filter(
+            p ->
+                p.path("connectorType").asString().equals("team-account")
+                    && p.path("enabled").asBoolean())
         .findFirst()
         .map(providers::decryptedConfig)
         .orElseThrow(() -> IamError.error("provider_unavailable", 404));
@@ -357,9 +358,7 @@ public class IamMeController {
                       "connectorType",
                       p == null ? "" : p.path("connectorType").asString(),
                       "displayName",
-                      p == null
-                          ? Json.object("en", "Unknown")
-                          : p.path("display").path("name")),
+                      p == null ? Json.object("en", "Unknown") : p.path("display").path("name")),
                   "subjectHint",
                   hint(i.path("subject").asString()),
                   "displayName",
@@ -413,7 +412,11 @@ public class IamMeController {
     if (session.has("ip")) v.put("ip", session.path("ip").asString());
     if (session.has("userAgent")) v.put("userAgent", session.path("userAgent").asString());
     if (session.has("idleExpiresAt"))
-      v.put("lastSeenAt", Instant.parse(session.path("idleExpiresAt").asString()).minusSeconds(session.path("idleSeconds").asLong(0)).toString());
+      v.put(
+          "lastSeenAt",
+          Instant.parse(session.path("idleExpiresAt").asString())
+              .minusSeconds(session.path("idleSeconds").asLong(0))
+              .toString());
     return v;
   }
 
@@ -437,7 +440,9 @@ public class IamMeController {
 
   private String issuerHost() {
     try {
-      return java.net.URI.create(issuer).getHost() == null ? "Auriga" : java.net.URI.create(issuer).getHost();
+      return java.net.URI.create(issuer).getHost() == null
+          ? "Auriga"
+          : java.net.URI.create(issuer).getHost();
     } catch (Exception e) {
       return "Auriga";
     }

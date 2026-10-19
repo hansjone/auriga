@@ -138,7 +138,12 @@ class TeamAccountFlowTest {
     keys.activate(kid);
     var tokens =
         new TokenService(
-            keys, schemas, (t, s, c) -> Set.of("workspace.read"), clock, "https://portal.example.com", Map.of());
+            keys,
+            schemas,
+            (t, s, c) -> Set.of("workspace.read"),
+            clock,
+            "https://portal.example.com",
+            Map.of());
     var sessions =
         new SessionManager(
             store, new PostgresSessionKv(store, schemas, clock), tokens, clock, events, audit);
@@ -269,12 +274,7 @@ class TeamAccountFlowTest {
                       "register",
                       "values",
                       Json.object(
-                          "username",
-                          "bob",
-                          "password",
-                          "correct-horse",
-                          "displayName",
-                          "Bob")),
+                          "username", "bob", "password", "correct-horse", "displayName", "Bob")),
                   false);
           assertEquals("fail", denied.transaction().path("step").path("type").asString());
           assertEquals(
@@ -360,8 +360,7 @@ class TeamAccountFlowTest {
           assertEquals("totp", afterPassword.transaction().path("step").path("formId").asString());
           ObjectNode totpRow = store.get("team_totp", account.toString(), false);
           String secret =
-              secrets.decrypt(
-                  totpRow.path("totp").asString(), "totp:" + tenant + ":" + account);
+              secrets.decrypt(totpRow.path("totp").asString(), "totp:" + tenant + ":" + account);
           // Advance past the enrollment counter window so the same TOTP slot is not reused.
           clock.now = clock.now.plusSeconds(60);
           var done =
@@ -375,8 +374,7 @@ class TeamAccountFlowTest {
                       "totp",
                       "values",
                       Json.object(
-                          "code",
-                          Totp.code(secret, clock.instant().getEpochSecond() / 30))),
+                          "code", Totp.code(secret, clock.instant().getEpochSecond() / 30))),
                   false);
           assertEquals("complete", done.transaction().path("step").path("type").asString());
           assertTrue(done.session().session().path("mfa").asBoolean());

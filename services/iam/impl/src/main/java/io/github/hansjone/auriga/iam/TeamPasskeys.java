@@ -261,7 +261,8 @@ public final class TeamPasskeys {
 
   public ObjectNode rename(UUID accountId, String passkeyId, String name) {
     ObjectNode row = requireOwned(accountId, passkeyId);
-    IamError.require(name != null && !name.isBlank() && name.length() <= 64, "invalid_password", 400);
+    IamError.require(
+        name != null && !name.isBlank() && name.length() <= 64, "invalid_password", 400);
     row.put("name", name);
     store.save("team_passkey", row);
     return view(row);

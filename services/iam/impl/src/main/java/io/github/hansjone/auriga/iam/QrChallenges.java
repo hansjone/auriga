@@ -17,7 +17,12 @@ public final class QrChallenges {
   }
 
   public ObjectNode create(
-      String txId, String providerId, String purpose, String ip, String userAgent, String portalBase) {
+      String txId,
+      String providerId,
+      String purpose,
+      String ip,
+      String userAgent,
+      String portalBase) {
     String challengeId = UuidV7.next().toString();
     String matchCode = String.format("%02d", random.nextInt(100));
     Instant expires = clock.instant().plusSeconds(300);
@@ -90,7 +95,8 @@ public final class QrChallenges {
     }
   }
 
-  public void confirm(String challengeId, String matchCode, String accountId, String purposeAccountId) {
+  public void confirm(
+      String challengeId, String matchCode, String accountId, String purposeAccountId) {
     ObjectNode row = store.get("qr_challenge", challengeId, true);
     IamError.require(row != null && !expired(row), "not_found", 404);
     String purpose = row.path("purpose").asString("login");

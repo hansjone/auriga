@@ -114,9 +114,7 @@ public final class LoginManager {
           tx.put("txId", tx.path("id").asString());
           if (provider.path("connectorType").asString().equals("team-account")
               && !tx.path("invitationCode").asString("").isBlank()) {
-            tx.put(
-                "state",
-                secrets.encrypt(Json.object("canRegister", true).toString(), aad(tx)));
+            tx.put("state", secrets.encrypt(Json.object("canRegister", true).toString(), aad(tx)));
             store.save("login_tx", tx);
           }
           Result applied;

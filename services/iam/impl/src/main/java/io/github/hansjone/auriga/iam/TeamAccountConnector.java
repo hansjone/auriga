@@ -85,7 +85,8 @@ public final class TeamAccountConnector implements IdentityConnector {
   @Override
   public void validateConfig(JsonNode config) {
     IamError.require(
-        !config.path("rpId").asString("").isBlank() && config.path("origins").isArray()
+        !config.path("rpId").asString("").isBlank()
+            && config.path("origins").isArray()
             && config.path("origins").size() > 0,
         "invalid_config",
         400);
@@ -132,16 +133,15 @@ public final class TeamAccountConnector implements IdentityConnector {
       return done(
           accounts.profile(
               Json.object(
-                  "username",
-                  username.toLowerCase(Locale.ROOT),
-                  "displayName",
-                  displayName),
+                  "username", username.toLowerCase(Locale.ROOT), "displayName", displayName),
               false));
     }
     if (phase.equals("password") && formId.equals("password")) {
       ObjectNode row =
           accounts.authenticatePassword(
-              providerId, values.path("username").asString(""), values.path("password").asString(""));
+              providerId,
+              values.path("username").asString(""),
+              values.path("password").asString(""));
       UUIDOrEmpty account = accountOf(providerId, row.path("username").asString());
       if (account.id != null && accounts.hasTotp(account.id)) {
         state.put("phase", "totp");
@@ -211,8 +211,7 @@ public final class TeamAccountConnector implements IdentityConnector {
   private JsonNode advanceWebAuthn(
       JsonNode context, JsonNode config, JsonNode input, ObjectNode state) {
     String challengeId = state.path("challengeId").asString();
-    ObjectNode profile =
-        passkeys.finishAssertion(challengeId, input.path("credential"), config);
+    ObjectNode profile = passkeys.finishAssertion(challengeId, input.path("credential"), config);
     return done(profile);
   }
 
