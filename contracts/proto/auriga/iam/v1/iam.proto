@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
 option java_multiple_files = true;
-option java_package = "io.github.hansjone.auriga.contracts.iam.v1";
+option java_package = "auriga.contracts.iam.v1";
 
 // iam 的内部接口。调用方必须带服务令牌；每个 RPC 注明允许的调用方。
 

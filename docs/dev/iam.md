@@ -64,7 +64,7 @@ SPI 位于 `iam-api`。`IdentityConnector` 的 descriptor、context、result 和
 因此 advance 入口读取原始 JSON，直接按原始 StepInput schema 校验。
 
 连接器作为 Spring `IdentityConnector` bean 注册，或在 `plugins/identity/` 放置
-带 `META-INF/services/io.github.hansjone.auriga.iam.api.IdentityConnector` 的 jar。
+带 `META-INF/services/auriga.iam.api.IdentityConnector` 的 jar。
 每个 jar 使用独立 URLClassLoader。SPI 主版本不为 1、重复类型或非法 descriptor
 被拒绝；插件加载失败记录于 `ConnectorRegistry.loadErrors()`，保留应急连接器。
 Java 插件是受信代码，不是可执行不可信代码的沙箱。

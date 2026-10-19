@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
 option java_multiple_files = true;
-option java_package = "io.github.hansjone.auriga.contracts.node.v1";
+option java_package = "auriga.contracts.node.v1";
 
 // 实例规格：workspace 决定"实例应该是什么样"，节点代理负责在本机变成那个样子。
 // 同样的规格必须渲染出同样的文件（确定性）。见 docs/architecture/node-agent.zh.md 第四、七节。

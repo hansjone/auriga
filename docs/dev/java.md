@@ -2,7 +2,7 @@
 
 ## 环境与构建
 
-需要 JDK 25；根父 POM 的 groupId 是 `io.github.hansjone.auriga`，版本为
+需要 JDK 25；根父 POM 的 groupId 是 `auriga`，版本为
 `0.1.0-SNAPSHOT`。导入 Spring Boot **4.1.1** BOM（建立骨架时 Maven Central
 实际发布的最新 4.1.x 稳定版），Wrapper 固定 Maven **3.9.16**。
 
@@ -50,7 +50,7 @@ Windows Wrapper 用 JDK 源文件启动下载器，让引导下载与 Maven 使�
 
 protobuf-maven-plugin 下载 protoc，输入根 `contracts/proto`，生成消息和 gRPC
 存根。包名遵循 proto 的 `java_package`：
-`io.github.hansjone.auriga.contracts.{iam,org,node}.v1`。
+`auriga.contracts.{iam,org,node}.v1`。
 
 OpenAPI 生成先由 frontend-maven-plugin 安装独立 Node，按
 `services/contracts/package-lock.json` 运行 `npm ci`，再执行
@@ -61,7 +61,7 @@ OpenAPI / `identity/*.schema.json` 引用，输出
 
 openapi-generator Spring generator 以 `interfaceOnly`、Spring Boot 4、Jakarta、
 Jackson 3 模式生成接口与模型，包名为
-`io.github.hansjone.auriga.<服务>.web.api` / `.web.model`。
+`auriga.<服务>.web.api` / `.web.model`。
 关闭不需要的 supporting files，避免三个文档生成同名全局配置类。
 所有输出位于 `target/generated-sources`，无需提交。
 

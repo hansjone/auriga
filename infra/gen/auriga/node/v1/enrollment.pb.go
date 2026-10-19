@@ -436,8 +436,8 @@ const file_auriga_node_v1_enrollment_proto_rawDesc = "" +
 	"\x15artifact_signing_keys\x18\x03 \x03(\v2\".auriga.node.v1.ArtifactSigningKeyR\x13artifactSigningKeys2\xc1\x01\n" +
 	"\x15NodeEnrollmentService\x12A\n" +
 	"\x04Join\x12\x1b.auriga.node.v1.JoinRequest\x1a\x1c.auriga.node.v1.JoinResponse\x12e\n" +
-	"\x10RenewCertificate\x12'.auriga.node.v1.RenewCertificateRequest\x1a(.auriga.node.v1.RenewCertificateResponseBk\n" +
-	"+io.github.hansjone.auriga.contracts.node.v1P\x01Z:github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1b\x06proto3"
+	"\x10RenewCertificate\x12'.auriga.node.v1.RenewCertificateRequest\x1a(.auriga.node.v1.RenewCertificateResponseBX\n" +
+	"\x18auriga.contracts.node.v1P\x01Z:github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1b\x06proto3"
 
 var (
 	file_auriga_node_v1_enrollment_proto_rawDescOnce sync.Once

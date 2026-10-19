@@ -7,7 +7,7 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/org/v1;orgv1";
 option java_multiple_files = true;
-option java_package = "io.github.hansjone.auriga.contracts.org.v1";
+option java_package = "auriga.contracts.org.v1";
 
 // org 的内部接口。调用方必须带服务令牌。
 

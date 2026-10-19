@@ -7,3 +7,6 @@ lint:
 breaking:
   use:
     - FILE
+  except:
+    # java_package 只影响 Java 生成代码，不影响线上协议（ADR 0011）
+    - FILE_SAME_JAVA_PACKAGE

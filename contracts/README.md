@@ -98,7 +98,7 @@
 
 | 来源 | Java | Go | TypeScript |
 |---|---|---|---|
-| protobuf | protobuf-java + grpc-java，包 `io.github.hansjone.auriga.contracts.<域>.v1` | protoc-gen-go + protoc-gen-go-grpc，模块 `github.com/hansjone/auriga/infra/gen` | 需要时用 `@bufbuild/protobuf` |
+| protobuf | protobuf-java + grpc-java，包 `auriga.contracts.<域>.v1` | protoc-gen-go + protoc-gen-go-grpc，模块 `github.com/hansjone/auriga/infra/gen` | 需要时用 `@bufbuild/protobuf` |
 | OpenAPI | openapi-generator（Spring 接口 + 模型） | 需要时用 oapi-codegen | openapi-typescript |
 | JSON Schema | jsonschema2pojo 或等价工具 | 需要时用 go-jsonschema | json-schema-to-typescript |
 

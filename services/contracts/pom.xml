@@ -2,7 +2,7 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <parent>
-    <groupId>io.github.hansjone.auriga</groupId>
+    <groupId>auriga</groupId>
     <artifactId>auriga</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <relativePath>../../pom.xml</relativePath>
@@ -150,8 +150,8 @@
             <configuration>
               <inputSpec>${project.build.directory}/bundled/iam.json</inputSpec>
               <output>${project.build.directory}/generated-sources/openapi/iam</output>
-              <apiPackage>io.github.hansjone.auriga.iam.web.api</apiPackage>
-              <modelPackage>io.github.hansjone.auriga.iam.web.model</modelPackage>
+              <apiPackage>auriga.iam.web.api</apiPackage>
+              <modelPackage>auriga.iam.web.model</modelPackage>
             </configuration>
           </execution>
           <execution>
@@ -162,8 +162,8 @@
             <configuration>
               <inputSpec>${project.build.directory}/bundled/org.json</inputSpec>
               <output>${project.build.directory}/generated-sources/openapi/org</output>
-              <apiPackage>io.github.hansjone.auriga.org.web.api</apiPackage>
-              <modelPackage>io.github.hansjone.auriga.org.web.model</modelPackage>
+              <apiPackage>auriga.org.web.api</apiPackage>
+              <modelPackage>auriga.org.web.model</modelPackage>
             </configuration>
           </execution>
           <execution>
@@ -174,8 +174,8 @@
             <configuration>
               <inputSpec>${project.build.directory}/bundled/workspace.json</inputSpec>
               <output>${project.build.directory}/generated-sources/openapi/workspace</output>
-              <apiPackage>io.github.hansjone.auriga.workspace.web.api</apiPackage>
-              <modelPackage>io.github.hansjone.auriga.workspace.web.model</modelPackage>
+              <apiPackage>auriga.workspace.web.api</apiPackage>
+              <modelPackage>auriga.workspace.web.model</modelPackage>
             </configuration>
           </execution>
         </executions>

@@ -1613,8 +1613,8 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\bTokenRef\x12\x19\n" +
 	"\x15TOKEN_REF_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18TOKEN_REF_INSTANCE_TOKEN\x10\x01\x12\x1e\n" +
-	"\x1aTOKEN_REF_AI_GATEWAY_TOKEN\x10\x02Bk\n" +
-	"+io.github.hansjone.auriga.contracts.node.v1P\x01Z:github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1b\x06proto3"
+	"\x1aTOKEN_REF_AI_GATEWAY_TOKEN\x10\x02BX\n" +
+	"\x18auriga.contracts.node.v1P\x01Z:github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1b\x06proto3"
 
 var (
 	file_auriga_node_v1_spec_proto_rawDescOnce sync.Once

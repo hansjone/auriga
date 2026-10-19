@@ -2528,8 +2528,8 @@ const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\x11LOG_STREAM_STDOUT\x10\x01\x12\x15\n" +
 	"\x11LOG_STREAM_STDERR\x10\x022d\n" +
 	"\x12NodeControlService\x12N\n" +
-	"\aSession\x12\x1e.auriga.node.v1.SessionRequest\x1a\x1f.auriga.node.v1.SessionResponse(\x010\x01Bk\n" +
-	"+io.github.hansjone.auriga.contracts.node.v1P\x01Z:github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1b\x06proto3"
+	"\aSession\x12\x1e.auriga.node.v1.SessionRequest\x1a\x1f.auriga.node.v1.SessionResponse(\x010\x01BX\n" +
+	"\x18auriga.contracts.node.v1P\x01Z:github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1b\x06proto3"
 
 var (
 	file_auriga_node_v1_node_control_proto_rawDescOnce sync.Once

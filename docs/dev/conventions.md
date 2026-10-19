@@ -19,7 +19,7 @@
 - 文档：架构 `docs/architecture/`，决定 `docs/adr/`，开发说明 `docs/dev/`，计划和进度 `docs/plan/`。
 
 ## 3. 命名
-- Java 包根 `io.github.hansjone.auriga.<服务>`；Go 模块 `github.com/hansjone/auriga/infra/<组件>`；npm 包 `@auriga/<名字>`。
+- Java 包根 `auriga.<服务>`；Go 模块 `github.com/hansjone/auriga/infra/<组件>`；npm 包 `@auriga/<名字>`。
 - 数据库：表和列 `snake_case`，表名单数（`account`、`login_transaction`）；每个服务一个 schema（与服务同名）。
 - 错误码 `<服务>.<原因>`（如 `iam.invalid_credentials`）；权限 key `<服务>.<资源>.<动作>`（如 `org.members.write`）；事件类型按 `contracts/events`。
 - REST 路径小写复数名词、`kebab-case`；管理类操作放 `/admin/**`。

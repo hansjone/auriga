@@ -2,7 +2,7 @@
 
 `services/common`（artifactId `common`）是所有 Java 服务共用的基础设施：租户隔离、outbox 与事件、
 审计、错误、资源服务器安全、gRPC、可观测、许可证检查点。服务只要依赖它并填几个配置，自动配置
-（`META-INF/spring/...AutoConfiguration.imports`）就会装好。包根是 `io.github.hansjone.auriga.common`。
+（`META-INF/spring/...AutoConfiguration.imports`）就会装好。包根是 `auriga.common`。
 
 ## 业务服务接入步骤
 
