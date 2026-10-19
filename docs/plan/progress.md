@@ -23,7 +23,7 @@
 | B8 门户/管理台壳 | 完成（#12） | Cursor；shared API+步骤渲染+mock；portal/admin 登录与框架；第二轮去掉本地 alias、错误码对齐契约 |
 | B1 ctl 本机内置 | 完成（#14） | Cursor；`dev/start/stop/status`；每服务 schema/角色；文档 `docs/dev/ctl.md`；lint errcheck 返工后 CI 全绿 |
 | B7 edge 接入网关 | 完成（#15） | Cursor；会话/CSRF/Host 隔离/身份头/`/open` 骨架；安全审查通过（`auriga-B7-review.md`）；gitleaks+lint 返工后 CI 全绿；E2 接真节点 |
-| B6 org | 待派 | 下一步给 Cursor；任务说明未写 |
-| B3 / B4 | 等待 | 依赖 B2，现已可派 |
+| B6 org | 完成（#16） | Cursor；FORCE RLS、超管上限、邀请幂等、PermissionResolver/hooks、user.*；OrgCoreTest 8/0；CI 全绿；审查 `auriga-B6-review.md`；接线：iam consumeInvitation 传 accountId、合并部署多 DataSource |
+| B3 / B4 | 待派 | B2/B6 已齐；下一步 B3（团队账号连接器），B4 可并行 |
 | B5 企业连接器 | 等待 | 私有仓，需用户提供公司登录信息 |
 | B9 M1 集成 | 等待 | B1–B8 齐后做 |
