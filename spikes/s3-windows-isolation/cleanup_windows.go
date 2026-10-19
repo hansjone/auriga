@@ -16,7 +16,7 @@ import (
 
 func validateJournal(o options, j journal) error {
 	tag := filepath.Base(j.Dir)
-	if !strings.Contains("ijwsabqc", tag) || len(tag) != 1 {
+	if !strings.Contains("ijwsabqce", tag) || len(tag) != 1 {
 		return errors.New("unexpected journal tag")
 	}
 	if j.Dir != filepath.Join(o.Root, tag) || j.Name != "s3"+o.ID+tag || j.Group != j.Name+"g" || j.Job != `Global\auriga-s3-`+o.ID+"-"+tag {
@@ -34,6 +34,9 @@ func validateJournal(o options, j journal) error {
 		}
 	}
 	if j.SID != "" {
+		if !strings.HasPrefix(j.SID, "S-1-5-21-") {
+			return errors.New("refuse non-account SID")
+		}
 		if _, e := windows.StringToSid(j.SID); e != nil {
 			return e
 		}
@@ -41,6 +44,21 @@ func validateJournal(o options, j journal) error {
 	for _, key := range j.Filters {
 		if _, e := windows.GUIDFromString(key); e != nil {
 			return e
+		}
+	}
+	for _, key := range []string{j.Provider, j.SubLayer} {
+		if key != "" {
+			if _, e := windows.GUIDFromString(key); e != nil {
+				return e
+			}
+		}
+	}
+	if (j.Provider == "") != (j.SubLayer == "") {
+		return errors.New("provider and sublayer must be journaled together")
+	}
+	for _, name := range j.Services {
+		if name != "AurigaS3-"+o.ID+"-shim" && name != "AurigaS3-"+o.ID+"-agent" {
+			return errors.New("unexpected service name")
 		}
 	}
 	return nil
@@ -51,7 +69,7 @@ func cleanupExperiment(o options, r *Result) error {
 		return e
 	}
 	if len(paths) == 0 {
-		e = os.RemoveAll(o.Root)
+		e = safeRemoveTree(o.Root)
 		r.check("no_journals_and_run_root_removed", e == nil, errorString(e))
 		return nil
 	}
@@ -98,6 +116,16 @@ func cleanupExperiment(o options, r *Result) error {
 		if j.SID != "" {
 			ae := rightsAbsent(j.SID)
 			r.check("LSA_rights_absent_"+j.Name, ae == nil, errorString(ae))
+			ids, ie := processesForSID(j.SID, false)
+			r.check("SID_processes_absent_"+j.Name, ie == nil && len(ids) == 0, map[string]any{"pids": ids, "error": errorString(ie)})
+			pe := profileAbsent(j.SID)
+			r.check("user_profile_absent_"+j.Name, pe == nil, errorString(pe))
+		}
+		se := servicesAbsent(j.Services)
+		r.check("SCM_services_absent_"+j.Name, se == nil, errorString(se))
+		for _, path := range externalCanaryPaths(j) {
+			_, fe := os.Lstat(path)
+			r.check("external_canary_absent_"+path, os.IsNotExist(fe), errorString(fe))
 		}
 		var buf *byte
 		v, _, _ := netapi.NewProc("NetUserGetInfo").Call(0, uintptr(unsafe.Pointer(u16(j.Name))), 0, uintptr(unsafe.Pointer(&buf)))
@@ -123,7 +151,7 @@ func cleanupExperiment(o options, r *Result) error {
 				}
 				for _, kind := range []string{"SubLayer", "Provider"} {
 					owned, oe := wfpOwnedObjects(h, kind, "Auriga S3 "+j.Name)
-					r.check("WFP_"+kind+"_namespace_empty_"+j.Name, oe == nil && len(owned) == 0, map[string]any{"keys": owned, "error": errorString(oe), "policy": "built-in sublayer reused; no private provider created"})
+					r.check("WFP_"+kind+"_namespace_empty_"+j.Name, oe == nil && len(owned) == 0, map[string]any{"keys": owned, "error": errorString(oe), "policy": "dedicated provider and sublayer removed; shared Windows objects unchanged"})
 				}
 				closeEngine(h)
 			}
@@ -137,7 +165,7 @@ func cleanupExperiment(o options, r *Result) error {
 		}
 		// Remove only validated exact fixture directories. Reparse mount points were detached above.
 		if ce == nil && absent && aggregate(r.Checks[checkStart:], nil) == "pass" {
-			re := os.RemoveAll(j.Dir)
+			re := safeRemoveTree(j.Dir)
 			r.check("directory_ACL_and_VHD_removed_"+j.Name, re == nil, errorString(re))
 			if re == nil {
 				je := os.Remove(path)
@@ -146,7 +174,7 @@ func cleanupExperiment(o options, r *Result) error {
 		}
 	}
 	if len(errs) == 0 && aggregate(r.Checks, nil) == "pass" {
-		e = os.RemoveAll(o.Root)
+		e = safeRemoveTree(o.Root)
 		r.check("run_root_and_all_test_ACLs_removed", e == nil, errorString(e))
 		if e != nil {
 			errs = append(errs, e)

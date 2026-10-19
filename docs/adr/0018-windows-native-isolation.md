@@ -1,63 +1,46 @@
-# 0018 Windows 原生隔离验证与能力门槛
+# 0018 Windows 原生隔离验证与发布门槛
 
 - 状态：提议
 - 日期：2026-10-19
-- 关联：[ADR 0010](0010-windows-native-isolation.md)、[节点代理 §5.4](../architecture/node-agent.zh.md#54-windows-原生进程驱动)
+- 关联：[ADR 0010](0010-windows-native-isolation.md)、[节点代理](../architecture/node-agent.zh.md)
 
-## 背景
+## 背景与现有证据
 
-ADR 0010 选择本地账号 + shim + Job Object + ACL + WFP + NTFS 用户配额，面向互相信任的团队。这里记录验证方案及判定标准。第一轮 CI 已有部分行为证据，第二轮修复尚未复测；本草稿不改变已采纳决定，也不把 Windows 原生模式提升为容器级隔离。
+ADR 0010 面向可信团队选择原生进程驱动，隔离弱于容器。本草稿记录 S3 spike 和安全审查后的验证方案，不直接改变既定架构，不将原型合入主分支。
 
-原型位于 `spikes/s3-windows-isolation/`，独立 Go 1.27 模块，仅在一次性 GitHub-hosted Windows VM 中运行特权实验。工作流包含 `windows-latest` 和 `windows-2022`；实际 OS build 和 Node 版本写入结果。本机只编译、vet、跑非特权单测。原型本身不合入主分支，主控根据工件补全此 ADR 后决定是否采纳。
+第一轮 CI 覆盖 Server 2025 build 26100、Server 2022 build 20348，Node v22.23.3。SYSTEM batch 启动、CPU、进程树、旧 shim 重接管、受控 TCP 出站/回环和 ACL 有部分证据。Server 2025 内存通过，Server 2022 曾在触碰 44 MiB后超时。第二轮修复了状态码符号扩展、LogonUser 类型 10 误用、进程数判据、配额 ACL 和环境块缺项。第三轮重设安全边界，尚未复测；旧结果不证明新模型通过。
 
-## 提议与判定
+## 提议
 
-1. **以 SYSTEM 服务为首选验证身份。** 管理员比较保留为单独工件。账号只直接加入专用本地组，随机口令不落盘，LSA 明确拒绝交互及 RDP，单独允许 batch。通过条件：batch token 能启动正确 SID 的进程，交互类型 2 明确被拒，LSA 权限包含 batch 允许、交互及远程交互拒绝，实例令牌不含管理员组。`CreateProcessAsUser` 的调用者特权与 `CreateProcessWithLogonW` 的交互登录要求不同，不能把“提升为管理员”等同于 SYSTEM。后者还不支持 LocalSystem 调用。依据：[CreateProcessAsUser](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw)、[CreateProcessWithLogonW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createprocesswithlogonw)。预期 SYSTEM + batch 路径可用，CI 待确认。
+1. shim 使用独立 SYSTEM/服务身份，只有负载使用实例 token。Job 由特权方创建，显式 SYSTEM owner、OWNER RIGHTS 和不授予实例的 DACL。实例打开 Job、更改 DACL、操纵 shim 必须明确拒绝；有特权和实例自有对象正向对照。
+2. 实例根和控制元数据不由实例所有，不授予根的 WRITE_DAC/WRITE_OWNER/DELETE。工作区根只有必要创建权限，子项继承修改权限；运行根不用 AU 读执行，工具按 SID 只读。特权读写/删除检查并锁定路径组件，OPEN_REPARSE_POINT 拒绝重解析点，按句柄删除。junction 正负对照及并发替换验证是门槛。
+3. 每种限额独立验证，挂起创建→加入 Job→恢复，不启用 payload breakaway。必须补 CREATE_BREAKAWAY_FROM_JOB、计划任务 S4U、WMI 和进程外 COM 逃逸。创建失败要求具体拒绝码，创建成功必须仍在原 Job；不能因直接派生树正常就宣告没有逃逸。活 conhost 同样计数，短暂退出 PID 与活进程分开。
+4. WFP 使用专属 provider、最高权重子层、拒绝硬裁决、事务、按 provider 回收孤儿规则。只允许白名单的发布门槛包括 TCP/UDP/DNS/UNC/SMB、WebDAV/BITS/WPAD 等系统服务代发，以及按 SID 限制监听地址和端口。单纯 ALE_AUTH_CONNECT 成功不足以发布该能力。
+5. 账号拒绝交互、远程交互、网络和服务登录，核验 LSA 且实际测试支持的类型 2/3/5。保留 batch 仅为本轮原型。评估 S4U 免存口令，不能假定 S4U 自动绕过登录权或阻止其他 broker 创建进程；任务计划程序/WMI/COM 的授权必须另行收敛。
+6. 实例存活用真实节点代理 SCM 服务停止测试：独立 shim 服务不随代理进程/父 Job 生命周期结束。再由新控制器重开 Job 和日志，并验证停止负载整棵树。
+7. NTFS 配额须先证明实例有写权限，核验文件 owner 是实例 SID，再设置硬上限并证明具体配额错误；只在独立临时卷测试。AppContainer 除 Node/监听/shell 兼容性，还必须验证文件与无 capability 网络拒绝；开发豁免不能成为生产依赖。
+8. 清理须覆盖服务、SID 进程、用户 profile、实例自建计划任务、外部写入、配额和 WFP 所有对象。未知残留不能写成“账号已删除所以已清理”。强制取消仍依赖一次性 VM 的销毁。
 
-2. **每种 Job 限额都要求行为证据。** 分别测试提交内存、CPU 硬上限、活跃进程数。以挂起创建→分配 Job→恢复消除初始逃逸窗口；shell、Node、孙进程全部进入同一 Job，不允许 breakaway。通过条件：超限分配失败、整机 CPU 比例符合容差、不能产生第五个活跃进程（含控制台辅助进程）、终止 Job 后三个层级的原进程句柄均已结束。预期支持；共享 VM 的 CPU 调度噪声需复核，API 设置成功本身不算限额有效。
+## 第三轮已实现、待 CI
 
-3. **shim 持有存活句柄。** 实验旧 controller 真正退出，实例账号的 shim 保留命名 Job 和文件日志，新 controller 重开 Job、从旧日志偏移读新增字节、终止负载。通过条件：旧代理退出后实例仍运行，重接管成功；不能由旧代理持有最后一个 kill-on-close 句柄。预期支持；生产接管仍需受保护的持久状态和授权 IPC，实例自报状态不可信。
+- SYSTEM shim 与独立节点代理 SCM 服务、实际 Stop、Job owner/DACL 和句柄访问负向测试；复制令牌句柄而非传口令。
+- 根/工作目录权限分离、OWNER RIGHTS、重解析点防护与实际 junction 对照，公共目录和 tools 的写入负向探测。
+- breakaway、WMI、S4U 任务创建探测和 SID 清理；进程数逐 PID 诊断。
+- 专属 WFP provider/子层、事务和 hard block、按 provider 清理、TCP 监听正负对照、UDP echo、bypass-cache DNS。
+- 网络/服务登录拒绝、CPU 完成标志及不限额对照、AppContainer 文件/无网络 capability 拒绝、配额文件 owner、服务/profile/任务/进程/已知 canary 清理。
 
-4. **按 SID 过滤必须覆盖本机连接。** 使用 `ALE_AUTH_CONNECT_V4/V6` 的 `ALE_USER_ID` security-descriptor 条件，只允许受控的一个 IPv4:port，拒绝其余。所有探测目标先验证无规则时可连，之后必须证明同 IP 其他端口、其他回环 IP 同端口、IPv6 回环受阻，实例重启两次仍受限。独立规则安装进程退出后，持久规则必须仍存在且有效，动态会话规则必须消失。预期持久规则支持代理重启；回环裁决须实测，失败不得发布“仅能访问白名单”的能力。BFE/OS 重启、远端路由、UDP/DNS 等覆盖仍需后续实验，当前不能作全面网络安全结论。依据：[FWPM_FILTER0 的持久标志](https://learn.microsoft.com/en-us/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_filter0)。
+以上仅为原型实现，不是行为已通过。JSON 中的 unsupported/fail 要原样保留。
 
-5. **ACL 隔离实例数据，系统公共目录保持可见。** 实例根目录关闭继承，授予实例 SID、SYSTEM、Administrators；通过条件：自己的 synthetic 文件可读，其他实例明确返回访问拒绝，DACL 有 protected 位。另记录系统公共目录、ProgramData、用户目录的实际可读范围。预期公开的系统文件仍可读，不应在产品文案中表述成“看不到宿主机文件”；ProgramData 的目录名不能替代 ACL。
+## 尚未完成的发布门槛与替代
 
-6. **NTFS 硬配额须实际拒绝写入。** 在临时 VHD 的 NTFS 卷上，先证明 32 MiB可写，设置按账号 4 MiB硬限额后必须得到磁盘/配额相关错误且未写完 32 MiB。不改 CI 系统卷。预期 NTFS 支持，但镜像能否使用 VHD、初始化配额索引待测；不可用输出 unsupported，不能悄悄视为硬配额成功。备选为平台软配额，并明确能力降级；若需要目录级而非全卷用户级语义，须重新选存储方案。
+- **任意进程外 COM、broker 授权收敛**：没有受控 COM 服务 fixture；未修改共享任务计划程序/WMI namespace ACL。WMI/任务若创建出 Job 外进程就记录失败，不能忽略。补受控服务、按实例组授权方案及完整回归；或改 VM/容器边界。
+- **S4U 免口令且去 batch**：仍需实现/验证认证包、可信 LSA 连接、特权、登录类型与 token 使用。现有随机口令不落盘，但 Go 字符串不可承诺完全清除。[LsaLogonUser 文档](https://learn.microsoft.com/en-us/windows/win32/api/ntsecapi/nf-ntsecapi-lsalogonuser)不能替代此项实测。
+- **外部 UNC/WebDAV/BITS/WPAD、UDP 资源绑定、BFE/OS 重启**：没有第二个受控一次性端点或完整重启编排。SID 规则不能约束 SYSTEM 代发；生产要全机 SMB/DNS/代理限制、按需关闭服务并复测，不能靠代理环境变量。参考 [WFP 过滤器语义](https://learn.microsoft.com/en-us/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_filter0)。
+- **公共可写区和任意外部文件残留**：标准 VM 的 Public/Temp 等可能允许普通用户写入；probe 报失败而不改全机 ACL。已知 canary 可清理，任意散落文件没有可靠清单。生产需要受限令牌、AppContainer/VM 或独立文件系统方案，不能盲扫宿主机。
+- **真实 DSH 与版本覆盖**：合成 Node/Go 不能代表插件、shell、MCP 全部兼容，SYSTEM profile 与实例 LowBox 组合也待复测。只覆盖两个 CI 镜像，不扩展到全部 Windows 版本。
 
-7. **AppContainer 单独验证端口方向与兼容性。** 底层使用实例账号，上层加 AppContainer token；先核验身份、低完整性目录权限，再比较无 capability、三个网络 capability、出站回环豁免、临时入站开发豁免。每一配置独立记录 Node、shell、监听、宿主入站和反连。强隔离选项的门槛是同一可支持的配置同时满足实际 DSH 所需的监听、宿主连接与 shell；只有 `listen` 成功或只有开发豁免成功均不足。预期这是主要不确定项。依据：[Windows IPC 的两种回环豁免](https://learn.microsoft.com/en-us/windows/apps/develop/communication/interprocess-communication)。备选为普通账号 + WFP 模式；外部不可信租户继续使用 Linux + 容器，也可评估 Windows VM 边界。未经实测不启用 AppContainer 默认模式。
+因此“只能访问白名单”“不能逃逸 Job”“无宿主机残留”“可用于不可信租户”目前均不具备发布条件。ADR 0010 的可信团队定位保持，外部不可信租户仍用 Linux 容器或 VM。主控应根据完整 CI 工件补最终决定；本 ADR 继续为提议。
 
-8. **清理是验收门槛。** 先登记资源意图再创建；正常路径、总控 finally、外层独立清理分别覆盖。通过条件：账号、组、LSA 权限、命名 Job、WFP GUID、profile、专属回环豁免、VHD、测试目录 ACL 和 SYSTEM 计划任务均无残留。任何失败阻止本轮宣告通过。清理不重置全局防火墙或全局回环豁免列表。
+## 主控验收
 
-## 第一轮证据与第二轮修复（2026-10-19）
-
-主控提供的首轮工件覆盖 Server 2025 build 26100、Server 2022 build 20348，Node v22.23.3。两者均证明 SYSTEM batch token 启动、CPU 硬限额、进程树终止、shim 重接管、受控 TCP 白名单/回环拒绝及持久规则跨安装进程退出、实例 ACL 的主要行为。管理员比较未能替代 SYSTEM 特权。没有将整轮标为通过：
-
-- RDP 的旧判据错误地调用了不受 `LogonUser` 支持的类型 10；第二轮改成核验 LSA 的 batch 允许、交互及远程交互拒绝，另保留类型 2 的实际拒绝。尚未实际建立 RDP 会话验证。
-- 原进程数结果为 3 个子进程成功、再创建返回配额不足，但原始 PID 列表长度 5。没有镜像及退出状态，不能确认第五个是 conhost 还是正在退出的拒绝创建进程。第二轮保留原模式诊断，并增加无控制台负载、逐 PID 镜像/存活状态、活动计数和错误码的严格判据；活 conhost 同样计数，不能为得到通过而忽略。
-- Server 2025 的 WFP `0xffffffff80320003` 被误作错误。第二轮按 DWORD 解析，过滤器不存在为成功；持久过滤器删除后立即查询，并枚举本次命名空间的子层/提供者。使用内置子层且不创建私有提供者，不删除共享对象。
-- 两个系统的配额实验都在写入基线阶段返回访问拒绝，没有证明硬配额是否有效。第二轮通过卷 GUID 设置真实卷根及数据目录 ACL，基线失败停止，缺失文件清理幂等。
-- 四种 AppContainer 创建都返回 203，尚未形成 Node/shell/网络能力结论。第二轮使用非继承的原生环境来源，保留 profile 必需变量并验证 Unicode 双零编码，继续以实例 token 测试；须复测 SYSTEM 所建 profile 与实例 token 组合的兼容性。依据：[CreateEnvironmentBlock](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-createenvironmentblock)、[AppContainer profile 的 LOCALAPPDATA](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)。
-- Server 2025 的内存实验通过；Server 2022 曾在触碰 44 MiB后超时，不能写成双平台已通过。此项负载及判据未改，应随第二轮复核或单独调查。
-
-上述为首轮事实和修复方案，不是第二轮已通过的宣告。原始工件由主控保存；本草稿继续保持“提议”。
-
-## CI 结果待补
-
-主控在此补两个 runner 的 run URL、实际系统版本、各项证据、差异和最终结论，至少确认：
-
-- `identity-admin.json` 与 SYSTEM 结果有无 1314/1385，调用者实际具备哪些特权。
-- Job 限额是行为通过，还是环境过慢/负载未启动造成的假象。
-- shim 由实例账号运行且重接管后日志读偏移连续。
-- WFP 允许与拒绝各有正向基线，持久性确实跨了安装进程退出。
-- ACL 拒绝和路径不存在、文件被占用没有混淆。
-- 配额失败是磁盘/配额错误，临时卷真的 NTFS 且已卸载。
-- AppContainer 每个 capability/豁免组合的监听和宿主连接分别是什么结果。
-- `cleanup-final.json`、`scheduledTaskRemoved` 及全部清理断言通过。
-
-第二轮修复尚无复测结果。工作流失败也要读取工件；`observed` 或 `unsupported` 不能补写成通过。
-
-## 影响与未覆盖边界
-
-在结果采纳前，ADR 0010 的“隔离弱于容器、只面向可信团队”保持有效。即使所有合成实验通过，也只验证了两个 CI 镜像的具体行为，不等于覆盖 Windows Server 2019、所有桌面版本、真实 DSH 插件、内核漏洞、凭据窃取或完整绕过测试。
-
-原型不实现生产 DPAPI 凭据状态、服务安装、自升级、日志轮转、完整 shim RPC、BFE/OS 重启恢复。以上需要后续生产驱动设计和独立验证，不能直接复用 spike 当实现。
+两个矩阵均保存实际版本、每个正向对照和具体拒绝码；重点核对 SYSTEM shim/Job owner、SCM Stop 后存活、breakaway/broker PID、provider 清理、监听/UDP/DNS旁路、quota owner、AppContainer token/拒绝、所有清理及总控计划任务注销。不得把超时、路径不存在、服务不可用或一般网络错误当作拒绝成功。当前仍明确报告缺失门槛，即使代码编译通过也不能采纳强隔离结论。

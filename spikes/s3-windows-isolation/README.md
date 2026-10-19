@@ -1,119 +1,77 @@
-# S3：Windows 原生进程隔离验证
+# S3 Windows 原生隔离安全验证原型
 
-这是独立技术原型，不接入生产驱动，不进主分支。真实实验结果由 GitHub Actions 的一次性 Windows VM 产生；本机的编译通过不代表隔离通过。
+这是独立 spike，不是生产驱动，不合入主分支。已有第一轮 CI 证据，第二、三轮代码仍需主控在一次性 Windows VM 复测。即使兼容性通过，也不能直接宣称“只能访问白名单”或具备容器级隔离。
 
-## 第二轮修复（2026-10-19）
+## 本机与 CI
 
-第一轮已在 Server 2025（build 26100）和 Server 2022（build 20348）运行，Node 均为 v22.23.3。以下改动针对第一轮证据，修复后的特权行为仍需主控重新跑 CI：
+本机只在本目录执行 `go build -o s3probe.exe .`、`go vet ./...`、`go test -count=1 ./...`。Go 1.27 / Windows amd64，依赖仍只有 `golang.org/x/sys v0.49.0`。单测处理 SDK 布局、SDDL、状态码、路径/环境编码和普通临时文件，不启动特权实验。
 
-- WFP 将返回值收窄为 DWORD，兼容 `0xffffffff80320003` 的符号扩展；该码表示过滤器不存在。删除后立即再查过滤器，总清理还枚举本次显示名前缀的子层/提供者。原型使用内置默认子层且不创建私有提供者，不删除共享对象。
-- 进程数保留原控制台行为的诊断对照，再用 `CREATE_NO_WINDOW` 负载作严格判定。证据包含每个 PID 的镜像名、是否存活、查询错误、Job 活动计数及创建失败码。原始列表长度不等于活动进程数，活着的 conhost 没有名称豁免。第一轮只有 PID 数字，无法事后确认额外进程的身份；第二轮的对照证据用于区分 conhost 和已终止的拒绝创建进程。
-- RDP 禁止策略改查账号 LSA 权限。`LogonUser` 只用支持的交互类型 2 作拒绝验证，不再传入类型 10；策略存在不能替代真实 RDP 会话的端到端测试。
-- 配额 ACL 通过卷 GUID 作用于真实卷根及专用数据目录，避免只修改宿主挂载点的重解析项。写入基线必须成功才配置配额；文件已不存在时清理成功。
-- AppContainer 使用 `CreateEnvironmentBlock(..., FALSE)` 提取必要系统/profile 字段，过滤任意父进程环境及凭据，补全 `LOCALAPPDATA`，排序并验证 Unicode 双零环境块。profile 由 SYSTEM 创建，其基础路径来自 SYSTEM 原生环境；底层实例 token 不变。每种配置附带环境键及启动阶段诊断，仍须 CI 确认该组合可正常创建 LowBox。
+主控沿用 spike 分支，将 `ci.yml` 放入 `.github/workflows/` 后手动触发。矩阵为 `windows-latest`、`windows-2022`，先管理员比较，再由临时 SYSTEM 计划任务执行 `Run-All.ps1 -CIDisposableVM`。脚本兼容 Windows PowerShell 5（UTF-8 BOM / CRLF）。禁止自托管 runner 和开发机运行；不能伪造 CI 环境绕过防误操作限制。
 
-第一轮 Server 2022 的内存实验还出现一次超时（已触碰 44 MiB、峰值提交约 96.9 MiB），不能称为两个 OS 的内存测试都通过。第二轮保留原内存负载及判据，须一并复核，不因其他修复掩盖该结果。
+总控依次执行 `identity`、`job`、`escape`、`shim`、`wfp`、`acl`、`quota`、`appcontainer`，finally 清理，再由外层注销总控计划任务、独立审计。普通项 75 秒，job/escape 120 秒，wfp/cleanup 180 秒；SYSTEM 任务上限 21 分钟，工作流上限 30 分钟。失败仍执行其余项并上传工件。
 
-## 本机允许的操作
+工件重点看 `report.json`、`summary.md`、`identity-admin.json`、`cleanup-final.json`、各项 stderr/stdout。每项 JSON 包含 experiment/status/checks/error/durationMs。`pass` 为断言满足，`fail` 为不满足，`observed` 仅记录测量，`unsupported` 表示缺少能力或受控验证，`error` 表示执行错误。未完成的发布门槛明确输出 unsupported，因此目前工作流报红可以是预期结果；不得把它改成 pass。
 
-在本 worktree 中进入本目录，仅运行：
+## 已有证据与本轮范围
 
-```powershell
-go build -o s3probe.exe .
-go vet ./...
-go test -v ./...
-```
+第一轮系统为 Server 2025 build 26100、Server 2022 build 20348，Node v22.23.3。SYSTEM 启动、CPU、进程树、旧 shim 重接管、受控 TCP 白名单/回环拒绝、ACL 等有部分正向证据。Server 2025 内存通过；Server 2022 曾在触碰 44 MiB后超时，不能称双平台全部通过。
 
-需要 Go 1.27、Windows amd64；唯一外部 Go 依赖是 `golang.org/x/sys v0.49.0`。单元测试只检查内存中的 Windows SDK 布局、SID/SDDL 编码、结果聚合和运行限制，不创建账号、Job、监听器或防火墙规则。`Run-All.ps1` 为兼容 Windows PowerShell 5 使用 UTF-8 BOM、CRLF。
+第二轮已修复 DWORD 符号扩展、类型 10 登录误用、进程数诊断、临时卷 ACL 和 AppContainer 环境缺项。第三轮根据安全审查改变了权限和策略模型，旧证据不能代替新模型复测。
 
-## 由主控运行 CI
+## 身份、口令与环境
 
-1. 将这里的 `ci.yml` 复制到 `.github/workflows/s3-windows-isolation.yml`，只推到 spike 分支，手动触发 `workflow_dispatch`。不需要仓库密钥。
-2. 工作流分别使用 `windows-latest` 和 `windows-2022`，记录实际 OS build、Node 版本。不能用自托管 runner。
-3. 工作流构建、vet、跑非特权单测，再执行 `./Run-All.ps1 -CIDisposableVM`。
-4. 总控先用 runner 的管理员令牌运行 `identity` 比较，然后通过临时 SYSTEM 计划任务运行全部实验。结束、失败或超时都会尝试清理计划任务并做第二次清理审计。
-5. 下载 `s3-windows-isolation-<runner>` 工件：重点看 `report.json`、`summary.md`、`identity-admin.json`、`cleanup-final.json`。出错时同时看相应 `*.stderr.txt`、`*.stdout.json`、`bootstrap-error.json`。
+每项使用独立本地账号和专用组；随机口令不落盘、不进命令行或环境。仍用 batch LogonUser 创建负载 token，同时设置并核对：SeBatchLogonRight，以及 SeDenyInteractiveLogonRight、SeDenyRemoteInteractiveLogonRight、SeDenyNetworkLogonRight、SeDenyServiceLogonRight。类型 2/3/5 必须返回 1385，batch 成功是同一口令的正向对照。RDP 改查 LSA 权限，不调用不支持的 LogonUser 类型 10，也不声称做过真实 RDP 会话。
 
-某一实验失败会继续跑下一项。单项通常有 75 秒上限，清理 120 秒；任务及工作流另有外层超时。`report.json.status` 为 `fail/error/unsupported` 时工作流报失败，但仍上传已得到的证据。`unsupported` 不是通过。
+shim 不再使用实例 token。SYSTEM shim 从 SYSTEM 测试控制器复制令牌句柄，只有负载使用实例 token，没有传递或序列化口令。句柄数值本身不能代替 OpenProcess/PROCESS_DUP_HANDLE 授权。随机口令仍短暂存在 Go 字符串中，不能承诺完全擦除。
 
-仅在上述 CI VM 中，单项也可这样运行（通常直接使用总控）：
+S4U 尚未实现。LsaLogonUser/MSV1_0 的认证包、令牌类型、SeTcbPrivilege 和登录权需要独立验证；免口令不等于可以移除 batch 权，也不自动阻止任务计划程序/WMI 代建进程。该项保留发布门槛，不能靠撤销拒绝登录策略获得通过。参见 [LsaLogonUser](https://learn.microsoft.com/en-us/windows/win32/api/ntsecapi/nf-ntsecapi-lsalogonuser)。
 
-```powershell
-.\s3probe.exe identity --ci-disposable-vm --id <总控生成的10位hex> --root "$env:ProgramData\auriga-s3-<同一id>" --node <总控复制的node.exe>
-```
+负载环境只有 SYSTEMROOT、WINDIR、PATH、TEMP、TMP，排序、Unicode 双零编码，不携带 GITHUB_ACTIONS、RUNNER_ENVIRONMENT 或 runner 凭据。内部 Go 负载使用受保护运行目录中的 guard 防误启动；这不是对恶意操作者的安全边界。
 
-子命令为 `identity`、`job`、`shim`、`wfp`、`acl`、`quota`、`appcontainer`、`cleanup`。总控先把公开可执行文件复制到运行目录的 `tools`，不能跳过。每个特权入口同时要求显式开关、GitHub Actions 环境、`github-hosted` 标记、提升后的令牌和固定格式的运行目录。这是防误操作约束，不是对恶意操作者的安全边界；不要伪造环境变量在本机绕过。
+## 目录、所有者与重解析点
 
-## 结果格式
+运行根、实例根和 Job 显式采用 SYSTEM 所有者及 OWNER RIGHTS ACE。全局运行根不授予 AU 读执行，只给已登记实例 SID 遍历，tools 按 SID 授予只读执行。实例根只授予遍历/读取，不给 WRITE_DAC、WRITE_OWNER、DELETE 或根目录写入；work 根只给创建文件/子目录所需的有限权限，子项用 OICIIO 继承修改权限。管理日志、service 元数据与负载可写区分开。
 
-每项 stdout 输出一个 JSON 对象，含 `experiment`、`status`、`checks`、`error`、`durationMs`；每条检查含 `name`、`status`、`evidence`。总控补充退出码，汇总环境及所有项。
+特权文件操作采用 OPEN_REPARSE_POINT 检查每个路径组件，持有不共享写入/删除的句柄，拒绝任何 reparse tag；删除通过对象句柄，不递归跟随 junction。并发写入/替换导致共享冲突或非空目录时失败并保留证据。JSON 使用同目录随机独占临时文件替换，读取也验证路径。此实现仍需 CI 的重解析点和并发场景验证，不能称生产路径处理已审计完备。
 
-- `pass`：对应断言满足；`fail`：测得行为不满足断言。
-- `observed`：原始测量/比较，没有把它解释为能力通过。
-- `unsupported`：相关 API、镜像能力或探测前提不可用。
-- `error`：设置、执行或清理出现错误，不能作出能力结论。
+负向探测实际尝试 FSCTL_SET_REPARSE_POINT；先在实例自建空目录上建立/移除指向 synthetic 目录的 junction 作正向对照，再要求实例根操作返回 5。另查根目录 WRITE_DAC/DELETE 被拒，自己的 work 可写，实例根/tools/ProgramData/Public/Windows Temp 写入应返回 5。标准 VM 的公共目录可能允许普通用户写入：这应报告失败，不能改全局 ACL 后掩盖它。生产需要受限令牌、AppContainer、VM 或专用机器权限方案。
 
-预期的负向检查（禁止登录、拒绝连接、拒绝越额写入）只有在拒绝行为得到证明时才通过。WFP 的每个目标先有连通基线；目录的拒绝要求 `ERROR_ACCESS_DENIED`，不把文件不存在算成隔离。
+## Job 限额与逃逸
 
-## 每项如何判定
+每个负载均挂起创建、加入特权方创建的 Job、再恢复；Job DACL 不授予实例 SID，显式 SYSTEM owner、OWNER RIGHTS、KILL_ON_JOB_CLOSE、DIE_ON_UNHANDLED_EXCEPTION、UI 限制，不启用 breakaway 标志。
 
-### 1. 账号与启动 API
+- 内存：96 MiB提交上限，尝试触碰 192 MiB；要求启动/进度/峰值/退出码证据，超时不算通过。
+- CPU：先不限额跑完作为对照，再测 10% 整机硬上限；两者均要求退出码 0、finished=true，兼看绝对占比和相对下降。未充分占满 CPU 的对照不能作为通过依据。
+- 进程数：保留原控制台行为诊断；正式负载用 CREATE_NO_WINDOW。要求上限和活动计数 4、父+三个子进程存活、再创建返回 1816。记录每个 PID 的镜像与状态；已结束 PID 可从活动数中排除，活 conhost 不豁免。
+- 进程树：cmd→Node→Go 都必须属于 Job，终止后原进程句柄结束。
+- escape：CREATE_BREAKAWAY_FROM_JOB 必须返回 5。尝试 WMI Win32_Process.Create 与自身 S4U 计划任务；先验证服务接口可用，再要求明确拒绝 5 或新 PID 仍在原 Job。成功逃出应让该检查失败；随后按 SID 清理。
 
-每项使用随机运行前缀、本地账号、单独的专用本地组。口令含 32 字节随机熵，仅存在进程内存和匿名 stdin 管道；不写文件、参数、环境或日志。LSA 对账号 SID 授予 `SeBatchLogonRight`，明确拒绝交互和 RDP 登录。
+进程外 COM 没有受控测试服务，任务/WMI 的权限收敛还没有生产实现。不能用某个现成 COM 类不存在作为“没有逃逸”。这些门槛保持未完成；需要受控 COM fixture、服务/namespace ACL 方案或 VM 边界。
 
-必须证明：batch `LogonUser` 成功，交互类型 2 返回 1385，LSA 明确列出 `SeBatchLogonRight`、`SeDenyInteractiveLogonRight`、`SeDenyRemoteInteractiveLogonRight`；`CreateProcessAsUser` 子进程实际 SID 正确，令牌无 Administrators、直接加入的本地组只有专用组。保留 `CreateProcessWithLogonW` 在同样拒绝策略下的比较结果和调用者特权列表。提升后的管理员缺少服务特权属于比较证据，不直接推断 SYSTEM 也不可用。`LogonUser` 不支持远程交互类型 10，详见[支持的登录类型](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-logonuserw)。本轮未增加网络登录权策略。
+## SYSTEM shim 与实际节点服务停止
 
-服务方案优先验证 `LogonUser(LOGON32_LOGON_BATCH)` + `CreateProcessAsUser`。后者通常要求调用者持有 `SeIncreaseQuotaPrivilege`，还可能要求 `SeAssignPrimaryTokenPrivilege`；SYSTEM 服务持有这些权限。`CreateProcessWithLogonW` 不要求这些调用者特权，但账号需要本地交互登录权限，且不能从 LocalSystem 调用，和本实验的禁止交互策略冲突。见 [CreateProcessAsUser](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw)、[CreateProcessWithLogonW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createprocesswithlogonw)。
+实验在 SCM 注册两个临时 LocalSystem 服务：节点代理服务启动独立 shim 服务，shim 持有 Job、日志和复制的负载 token。测试实际发送 SCM Stop 停止节点代理服务，再检查 shim 服务及实例仍活着、新控制器重开 Job、读取旧偏移后的日志、终止负载。shim 服务有 90 秒实验租约，结束时注销两个服务；不是生产服务安装方案。
 
-### 2. Job Object
+SYSTEM 能打开控制对象作正向对照；实例自建普通 Job 作 API 正向对照。实例必须无法打开受管 Job、更改其 DACL、以 terminate/dup-handle/vm-write 权限打开 SYSTEM shim，错误码必须为 5。Job owner 必须实查为 SYSTEM。参见 [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)。
 
-四类行为用独立 Job 分别测量，另加原控制台行为的诊断对照；均先挂起创建、加入 Job、再恢复，禁止 breakaway：
+## WFP、监听与系统服务旁路
 
-- Job 总提交内存限制 96 MiB，Go 负载尝试分配并触碰 192 MiB，要求确实启动后非零退出；结合证据排查其他崩溃原因。
-- CPU 硬上限 1000/10000，所有逻辑 CPU 跑忙循环，读取 Job 用户态+内核态累计 CPU 时间，除以墙钟和逻辑核数。当前容差要求整机占比在 1.5%–18%，原始值全部保留；共享 VM 的调度噪声需要人工复核。
-- 活跃进程限制 4，先记录原控制台模式的 PID 诊断，再明确用无控制台方式启动 3 个存活子进程；第四个创建须返回 1816。Job 读回上限及活动计数须为 4、四个负载 PID 均在 Job 中且存活，不得出现额外活进程。原始列表可短暂带有已终止进程，需结合逐 PID 状态判断；活着的 conhost 同样计入。
-- `cmd → Node → Go` 三层 PID 都必须出现在 Job 中，`TerminateJobObject` 后等待预先打开的三个进程句柄全部进入结束状态，避免 PID 重用误判。
+采用独立持久 provider 和权重 0xFFFF 子层；安装用事务，拒绝过滤器设置 CLEAR_ACTION_RIGHT，白名单允许不硬覆盖其他安全策略。ALE_AUTH_CONNECT_V4/V6 按用户 SD 条件过滤，ALE_AUTH_LISTEN_V4/V6 只允许 127.0.0.1 + 随机分配端口。安装子进程退出后新管理进程验证持久规则；动态会话退出后规则须不存在。DWORD/HRESULT 均按 32 位处理，不把符号扩展的 0x80320003 当错误。
 
-参见 [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)、[CPU rate control](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_cpu_rate_control_information)。
+TCP 各目标先证明可连，拒绝要求 WSAEACCES(10013)，不能把拒绝连接/超时算隔离；每轮拒绝后宿主再次连到监听器证明它活着。监听先证明可绑定，再要求 wildcard、其他端口、IPv6 回环返回 10013，指定地址端口可用。UDP echo 有无规则对照。DnsQuery_W 使用 bypass-cache，先无规则查询 example.com，再查看按 SID 规则是否仍允许系统服务代发；若仍能解析，检查失败，说明旁路风险。
 
-### 3. 垫片与代理退出
+尚无受控的外部 UNC/SMB、WebDAV、BITS、WPAD 端点，也未验证 UDP resource-assignment 绑定限制、BFE/OS 重启。相关能力不能发布。普通 SID ALE 规则不能证明隔绝系统服务代发；生产需全机层面限制 SMB/DNS/代理、按需关闭 WebClient/BITS，并在专用节点上验证。spike 不擅自修改全机服务和出站默认策略。参见 [WFP 过滤器](https://learn.microsoft.com/en-us/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_filter0)。
 
-一次性 controller（模拟旧代理）通过内存口令以实例账号启动 shim，随后真正退出。shim 自己持有有名 Job 的最后一个句柄，并将负载放进 Job；shim 本身在负载 Job 之外。独立的新 controller 用 `OpenJobObject` 找回 Job、确认负载 PID，并从上次偏移重新打开日志文件读取新增字节，再终止整个负载 Job。
+清理按 provider 枚举过滤器，回收意图日志遗漏的孤儿规则，再删除专属子层和 provider，最后按 key 和 namespace 再查；不删除 Windows 内置对象。
 
-必须看到旧 controller 退出后 shim 及负载仍活着，新 controller 能接管 Job 和日志。使用文件日志，未实现命名管道协议。为防 CI 卡住，shim 有 60 秒实验租约；这不是生产实例的生命周期方案。命名 Job DACL 只授予 SYSTEM/Administrators，不能以不可信 shim 自报的 PID、路径或日志作为生产权威状态。
+## NTFS 与 AppContainer
 
-### 4. WFP
+配额只在本次 128 MiB临时 VHD 上操作，独立验证卷 GUID 不同于系统/宿主卷。通过 GUID 设置卷根和数据目录 ACL，实例创建 32 MiB基线文件，核对文件 owner 是实例 SID，删除后才启用 4 MiB用户配额；再写必须出现磁盘/配额错误，访问拒绝不算。销毁整个测试卷同时销毁该卷配额索引，不改系统卷。先删挂载点、再卸载 VHD并查询确认；不存在文件清理幂等。生产必须评估整卷配额和由 SYSTEM 创建文件的计费归属。参见 [fsutil quota](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-quota)。
 
-直接调用 `fwpuclnt.dll`。`ALE_AUTH_CONNECT_V4/V6` 上以 `ALE_USER_ID` 的 security-descriptor blob（`FWP_SECURITY_DESCRIPTOR_TYPE`，匹配权限 1）匹配实例 SID。默认 sublayer 中，低权重拒绝该 SID 的所有连接，高权重允许一个 IPv4:port。规则不匹配其他账号，不改全局默认策略。参见 [条件标识](https://learn.microsoft.com/en-us/windows/win32/fwp/filtering-condition-identifiers-)、[过滤器结构](https://learn.microsoft.com/en-us/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_filter0)。
+AppContainer 继续使用实例 token。原生 CreateEnvironmentBlock(FALSE) 提取必要 profile 字段、过滤任意父环境，保留 SYSTEM profile 创建者的 LOCALAPPDATA 基础路径，排序并检验 Unicode 双零；先证 Node 在普通实例账号下可启动，再测四种 capability/回环配置。每种检查实际 SID/LowBox、Node、shell、127.0.0.1 监听、宿主连接和反连，以及 synthetic 其他实例/宿主敏感文件返回 EACCES；无网络 capability 要求明确 EACCES，宿主接口有正向对照。没有测试真实 DSH；SYSTEM profile 与实例 token 的兼容性仍需复测。开发入站豁免不是生产方案。参见 [AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)。
 
-受控 TCP listener 先证明连通，再分别验证：允许 `127.0.0.1:<白名单端口>`；拒绝同 IP 的另一端口、`127.0.0.2:<同端口>`、IPv6 回环。另起两次实例进程重复连接。持久过滤器由独立安装进程创建，该进程退出且未显式关闭 engine；新管理进程再查规则，实例重新连接仍必须受限。另一个独立进程创建动态会话过滤器，退出后它必须消失。
+## 清理与发布判定
 
-限制：没有重启 BFE/OS，没有覆盖远端路由、DNS、UDP、原始套接字或应用层代理隧道。当前原型只能证明记录中的受控目标，不能据此声称所有网络绕过都已排除。持久规则的 BFE 重启语义来自 [FWPM_FILTER0 文档](https://learn.microsoft.com/en-us/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_filter0)，不是本轮实测结论。
+先登记资源意图再创建；停止并删除专属 SCM 服务、停止注销该 SID 的计划任务，终止可查询的 SID 进程，再删除用户 profile、LSA 权限、账号/组，回收 WFP provider、卸载销毁临时卷、删除受保护运行树。已知公共写入 canary 名称可确定并单独清理，不能递归清扫 Windows/Public。审计进程、profile 注册表项、Job、账号/组、服务、规则/子层/提供者和运行目录，外层另查总控计划任务。
 
-### 5. 目录 ACL
-
-实例目录设置 protected DACL，只给实例 SID、SYSTEM、Administrators；实际读取自己的 sentinel 成功、其他实例 sentinel 必须返回访问拒绝。额外读取 Windows、System32、Program Files、ProgramData、Users、Public、调用者用户目录及公共文件，结果只记录可读与否、字节数/目录项数量，不上传文件内容或目录项名字。
-
-同在 ProgramData 下但显式公开的 sentinel 应可读，用来证明“放进 ProgramData”本身不能保护数据。实际系统路径不存在、被占用和访问拒绝分别保留错误码；不要把观察表里所有失败都解释为 ACL 拒绝。文档中的“能读系统公共目录”需用两个镜像的实际结果补充边界。
-
-### 6. NTFS 按用户配额
-
-用 diskpart 创建 128 MiB 临时可扩展 VHD，挂载到本次运行的子目录，格式化 NTFS。通过卷 GUID 对卷根及 `probe-data` 设置 ACL，并记录数据目录实际 SDDL。先由实例账号成功写入 32 MiB并删除，再在该临时卷执行 `fsutil quota enforce/modify`，为该账号设置 4 MiB 阈值与硬上限；基线失败即停止，不能继续配置配额并作结论。再次以该账号写入，必须在 32 MiB之前得到磁盘满/配额相关 Win32 错误；权限拒绝不算配额有效。保留 quota query 输出。
-
-镜像不能创建/挂载 VHD 或配置配额时报告 `unsupported`。最后从独立存储查询确认 VHD 已卸载，再删除其文件；卷内配额索引随卷销毁。不修改系统卷。参见 [fsutil quota](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-quota)。
-
-### 7. AppContainer
-
-底层仍用实例 batch token，叠加 `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`，实查子进程的用户 SID 和 `TokenIsAppContainer`。只对该 profile SID 授予专用 scratch 目录访问，并设置可继承 low integrity label，复制公开 Node 可执行文件。启动前验证 Node 绝对路径存在；原生环境块先复制再 `DestroyEnvironmentBlock`，仅保留必要字段，包含 profile 解析所需的 `LOCALAPPDATA`/`USERPROFILE`。输出环境键及 Unicode/双零标记，不输出凭据或整个环境。参见 [CreateEnvironmentBlock](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-createenvironmentblock)、[AppContainer 的 profile 环境](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer)。
-
-依次比较：无 capability；`internetClient` + `internetClientServer` + `privateNetworkClientServer`；增加 `CheckNetIsolation -a` 出站回环豁免；如果镜像支持，再在有界 Job 内启动 `CheckNetIsolation -is` 临时入站开发豁免。逐项测 Node 启动、`cmd /c` shell、`listen(0,'127.0.0.1')`、宿主连接和 AppContainer 反连宿主。监听与连接是两个独立观察；出站 `-a` 不等于宿主能连接入站监听。参见 [IPC 回环方向](https://learn.microsoft.com/en-us/windows/apps/develop/communication/interprocess-communication)、[SECURITY_CAPABILITIES](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-security_capabilities)。
-
-各配置的功能断言可能失败，这是待解释的实验结果；需要按配置查看，不能只读总状态。即便开发豁免成功，也不等于已经有可支持的生产托管方案；还必须验证真实 DSH、插件和最小 capability 集。
-
-### 8. 清理
-
-每项先落不含凭据的资源意图日志，再创建资源；日志通过同目录临时文件替换，避免半写入。正常返回会释放进程/Job、移除该账号 WFP 规则和 LSA 权限、删除账号及组，AppContainer 恢复专属回环豁免并删除 profile，卸载 VHD。
-
-总清理只接受精确的本次命名空间和目录，重试上述操作，并独立查询账号/组不存在、LSA 权限不残留、所有登记的 Job 不存在、每条 WFP GUID 不存在、profile 及回环豁免不存在。确认后删除实例目录、VHD、工具副本和整个运行根目录。计划任务由外层 finally 注销并再次核验。任意清理失败都会保留失败证据且最终状态不为 pass。
-
-VM 被平台强制销毁/工作流取消时，finally 不是保证，因此限定 GitHub-hosted 一次性 VM。原型无生产级崩溃恢复、DPAPI 状态存储、日志轮转或 shim RPC。
+仍缺任意散落文件的可靠 per-SID 清单，受保护进程不能仅靠枚举推断，强制取消也不保证 finally。只有一次性 VM 可运行本实验；生产需要文件系统边界或可靠清单。任一缺失发布门槛、负向检查失败、清理错误都阻止宣称隔离能力通过。报告保留 unsupported/fail，不将缺项吞掉。

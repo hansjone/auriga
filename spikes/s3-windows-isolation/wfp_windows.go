@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -196,12 +197,26 @@ func addUserFilter(f *fixture, h windows.Handle, layer windows.GUID, allow bool,
 		action = 0x1002
 		weight = 15
 		conditions = append(conditions, endpointConditions(port)...)
+		if layer == listen4 || layer == listen6 {
+			conditions[1].Key = localAddressCondition
+			conditions[2].Key = localPortCondition
+		}
 	}
 	filter := wfpFilter{Key: key, Display: displayData{Name: u16("Auriga S3 " + f.Name)}, Layer: layer, Weight: fwpValue{Type: 1, Value: weight}, Count: uint32(len(conditions)), Conditions: &conditions[0], Action: filterAction{Type: action}}
 	if persistent {
 		filter.Flags = 1
 	}
-	// Default sublayer keeps allow/deny arbitration in one sublayer. No global block or policy reset.
+	filter.Flags = policyFlags(allow, persistent)
+	provider, pe := windows.GUIDFromString(f.Provider)
+	if pe != nil {
+		return key, pe
+	}
+	sub, se := windows.GUIDFromString(f.SubLayer)
+	if se != nil {
+		return key, se
+	}
+	filter.Provider = &provider
+	filter.SubLayer = sub
 	var id uint64
 	e = statusCall(fw.NewProc("FwpmFilterAdd0"), uintptr(h), uintptr(unsafe.Pointer(&filter)), 0, uintptr(unsafe.Pointer(&id)))
 	runtime.KeepAlive(sd)
@@ -227,8 +242,8 @@ func wfpObserver(args []string) {
 	}
 	emit(result)
 }
-func observer(keys []string) (map[string]any, error) {
-	c := exec.Command(os.Args[0], append([]string{"_wfp-observer"}, keys...)...)
+func observer(exe string, keys []string) (map[string]any, error) {
+	c := exec.Command(exe, append([]string{"_wfp-observer"}, keys...)...)
 	b, e := c.Output()
 	if e != nil {
 		return nil, e
@@ -267,6 +282,12 @@ func wfpInstaller() {
 		h, e = engine(q.Dynamic)
 	}
 	if e == nil {
+		e = statusCall(fw.NewProc("FwpmTransactionBegin0"), uintptr(h), 0)
+	}
+	if e == nil && !q.Dynamic {
+		e = ensurePolicy(f, h)
+	}
+	if e == nil {
 		if q.Dynamic {
 			_, e = addUserFilter(f, h, connect4, false, 0, false)
 		} else {
@@ -278,7 +299,20 @@ func wfpInstaller() {
 			if e == nil {
 				_, e = addUserFilter(f, h, connect4, true, q.Port, true)
 			}
+			for _, layer := range []windows.GUID{listen4, listen6} {
+				if e == nil {
+					_, e = addUserFilter(f, h, layer, false, 0, true)
+				}
+			}
+			if e == nil {
+				_, e = addUserFilter(f, h, listen4, true, f.ListenPort, true)
+			}
 		}
+	}
+	if e == nil {
+		e = statusCall(fw.NewProc("FwpmTransactionCommit0"), uintptr(h))
+	} else {
+		_ = statusCall(fw.NewProc("FwpmTransactionAbort0"), uintptr(h))
 	}
 	emit(map[string]any{"error": errorString(e)})
 	if e != nil {
@@ -290,7 +324,10 @@ func installInProcess(f *fixture, port uint16, dynamic bool) error {
 	if e != nil {
 		return e
 	}
-	c := exec.Command(os.Args[0], "_wfp-install")
+	if e := preparePolicyIDs(f); e != nil {
+		return e
+	}
+	c := exec.Command(probePath(f.o), "_wfp-install")
 	c.Stdin = bytes.NewReader(b)
 	out, e := c.CombinedOutput()
 	// Always reload the write-ahead journal, including partially installed rules on failure.
@@ -331,6 +368,21 @@ func wfpExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	defer denied.Close()
+	udp, ue := udpEcho()
+	if ue != nil {
+		return ue
+	}
+	defer udp.Close()
+	udpBaseline, e := runWork(f, "udp", udp.LocalAddr().String())
+	if e != nil {
+		return e
+	}
+	r.check("UDP_unfiltered_positive_control", win32Code(udpBaseline[udp.LocalAddr().String()]) == 0, udpBaseline)
+	dnsBaseline, e := runWork(f, "dns", "example.com")
+	if e != nil {
+		return e
+	}
+	r.observe("DNS_unfiltered_positive_control", dnsBaseline)
 	// Positive baselines ensure a refusal/listener failure cannot be reported as firewall success.
 	addresses := []string{allowed.Addr().String(), denied.Addr().String()}
 	otherIP, oe := listening("tcp4", fmt.Sprintf("127.0.0.2:%d", allowed.Addr().(*net.TCPAddr).Port))
@@ -354,11 +406,28 @@ func wfpExperiment(o options, r *Result) (err error) {
 	for _, a := range addresses {
 		r.check("baseline_connect_"+a, connected(baseline, a), baseline[a])
 	}
+	reservation, re := net.Listen("tcp4", "127.0.0.1:0")
+	if re != nil {
+		return re
+	}
+	f.ListenPort = uint16(reservation.Addr().(*net.TCPAddr).Port)
+	_ = reservation.Close()
+	if e = f.save(); e != nil {
+		return e
+	}
+	listenTargets := []string{fmt.Sprintf("127.0.0.1:%d", f.ListenPort), fmt.Sprintf("0.0.0.0:%d", f.ListenPort), fmt.Sprintf("127.0.0.1:%d", f.ListenPort+1), fmt.Sprintf("[::1]:%d", f.ListenPort)}
+	listenBaseline, e := runWork(f, append([]string{"listen"}, listenTargets...)...)
+	if e != nil {
+		return e
+	}
+	for _, target := range listenTargets {
+		r.check("listen_baseline_"+target, win32Code(listenBaseline[target]) == 0, listenBaseline[target])
+	}
 	if e = installInProcess(f, uint16(allowed.Addr().(*net.TCPAddr).Port), false); e != nil {
 		return e
 	}
 	keys := append([]string(nil), f.Filters...)
-	seen, e := observer(keys)
+	seen, e := observer(probePath(o), keys)
 	if e != nil {
 		return e
 	}
@@ -373,21 +442,40 @@ func wfpExperiment(o options, r *Result) (err error) {
 		}
 		r.check(fmt.Sprintf("allow_exact_IP_port_restart_%d", pass), connected(data, addresses[0]), data[addresses[0]])
 		for _, a := range addresses[1:] {
-			r.check(fmt.Sprintf("deny_other_loopback_restart_%d_%s", pass, a), !connected(data, a), data[a])
+			r.check(fmt.Sprintf("deny_other_loopback_restart_%d_%s", pass, a), !connected(data, a) && win32Code(data[a]) == 10013, data[a])
+			c, ce := net.DialTimeout("tcp", a, time.Second)
+			if ce == nil {
+				_ = c.Close()
+			}
+			r.check(fmt.Sprintf("host_listener_still_alive_%d_%s", pass, a), ce == nil, errorString(ce))
 		}
 	}
 	// A dynamic filter disappears when its management process exits; an independent observer checks it.
+	listenAfter, e := runWork(f, append([]string{"listen"}, listenTargets...)...)
+	if e != nil {
+		return e
+	}
+	for index, target := range listenTargets {
+		wanted := uint32(10013)
+		if index == 0 {
+			wanted = 0
+		}
+		r.check("listen_policy_"+target, win32Code(listenAfter[target]) == wanted, listenAfter[target])
+	}
+	if e = networkBypassProbes(f, r, udp.LocalAddr().String(), dnsBaseline); e != nil {
+		return e
+	}
 	if e = installInProcess(f, 0, true); e != nil {
 		return e
 	}
 	key := f.Filters[len(f.Filters)-1]
-	seen, e = observer([]string{key})
+	seen, e = observer(probePath(o), []string{key})
 	if e != nil {
 		return e
 	}
 	v, _ := seen[key].(map[string]any)
 	r.check("dynamic_session_filter_removed", v["present"] == false && v["error"] == "", v)
-	r.observe("scope", map[string]any{"layers": []string{"ALE_AUTH_CONNECT_V4", "ALE_AUTH_CONNECT_V6"}, "transport": "TCP loopback controlled listeners", "BFE_reboot": "not performed", "remote_network": "not inferred from loopback"})
+	r.observe("scope", map[string]any{"layers": []string{"ALE_AUTH_CONNECT_V4", "ALE_AUTH_CONNECT_V6"}, "transport": "controlled TCP/UDP loopback and bypass-cache DNS", "BFE_reboot": "not performed", "remote_network": "not inferred from loopback"})
 	return nil
 }
 func connected(data map[string]any, address string) bool {

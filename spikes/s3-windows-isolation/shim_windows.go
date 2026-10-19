@@ -3,143 +3,187 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
-
-	"golang.org/x/sys/windows"
 )
 
-type controlRequest struct {
-	Name, Password, Dir, Root, Job, Action string
-	LogOffset                              int64
-}
-type controlReply struct {
-	ShimPID   uint32    `json:"shimPID"`
-	PIDs      []uintptr `json:"pids"`
-	LogBytes  int64     `json:"logBytes"`
-	TailBytes int       `json:"tailBytes"`
-	Error     string    `json:"error,omitempty"`
+type probeService struct {
+	f           fixture
+	sourcePID   uint32
+	sourceToken windows.Handle
+	shimName    string
 }
 
-func controllerWorker(_ []string) {
-	var q controlRequest
-	reply := controlReply{}
-	e := json.NewDecoder(os.Stdin).Decode(&q)
-	if e == nil {
-		switch q.Action {
-		case "start":
-			var token windows.Token
-			token, e = logon(q.Name, q.Password, 4)
-			q.Password = ""
-			if e == nil {
-				var p *process
-				p, e = launch(token, filepath.Join(q.Root, "tools", "s3probe.exe"), []string{"_shim", q.Dir, q.Job}, q.Dir, 0)
-				_ = token.Close()
-				if e == nil {
-					reply.ShimPID = p.ProcessId
-					p.close()
-				}
-			}
-		case "adopt":
-			var h windows.Handle
-			h, e = openJob(q.Job)
-			if e == nil {
-				reply.PIDs, e = jobPIDs(h)
-				if st, se := os.Stat(filepath.Join(q.Dir, "instance.log")); se == nil {
-					reply.LogBytes = st.Size()
-				} else {
-					e = join(e, se)
-				}
-				log, le := os.Open(filepath.Join(q.Dir, "instance.log"))
-				if le == nil {
-					_, le = log.Seek(q.LogOffset, io.SeekStart)
-					if le == nil {
-						var tail []byte
-						tail, le = io.ReadAll(io.LimitReader(log, 64<<10))
-						reply.TailBytes = len(tail)
-					}
-					_ = log.Close()
-				}
-				e = join(e, le)
-				_ = windows.CloseHandle(h)
-			}
-		case "terminate":
-			var h windows.Handle
-			h, e = openJob(q.Job)
-			if e == nil {
-				e = windows.TerminateJobObject(h, 95)
-				_ = windows.CloseHandle(h)
-			}
-		default:
-			e = fmt.Errorf("invalid controller action")
+func (s *probeService) Execute(_ []string, requests <-chan svc.ChangeRequest, states chan<- svc.Status) (bool, uint32) {
+	states <- svc.Status{State: svc.StartPending}
+	var job windows.Handle
+	var payload *process
+	var log *os.File
+	if s.shimName != "" {
+		m, e := mgr.Connect()
+		if e != nil {
+			return false, 1
+		}
+		defer m.Disconnect()
+		shim, e := m.OpenService(s.shimName)
+		if e != nil {
+			return false, 2
+		}
+		defer shim.Close()
+		if e = shim.Start(); e != nil {
+			return false, 3
+		}
+	} else {
+		source, e := windows.OpenProcess(windows.PROCESS_DUP_HANDLE, false, s.sourcePID)
+		if e != nil {
+			return false, 4
+		}
+		defer windows.CloseHandle(source)
+		var token windows.Handle
+		if e = windows.DuplicateHandle(source, s.sourceToken, windows.CurrentProcess(), &token, 0, false, windows.DUPLICATE_SAME_ACCESS); e != nil {
+			return false, 5
+		}
+		defer windows.CloseHandle(token)
+		job, e = newJob(s.f.Job, 192<<20, 16, 2000)
+		if e != nil {
+			return false, 6
+		}
+		defer windows.CloseHandle(job)
+		defer windows.TerminateJobObject(job, 92)
+		payload, e = launch(windows.Token(token), probePath(s.f.o), []string{"_work", filepath.Join(s.f.workDir(), "payload.json"), "sleep"}, s.f.workDir(), job)
+		if e != nil {
+			return false, 7
+		}
+		defer payload.close()
+		defer payload.kill()
+		log, e = os.OpenFile(filepath.Join(s.f.Dir, "instance.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if e != nil {
+			return false, 8
+		}
+		defer log.Close()
+		current, e := windows.GetCurrentProcessToken().GetTokenUser()
+		if e != nil {
+			return false, 9
+		}
+		if e = writeJSON(filepath.Join(s.f.Dir, "shim-ready.json"), map[string]any{"shimPID": os.Getpid(), "payloadPID": payload.ProcessId, "shimSID": current.User.Sid.String()}); e != nil {
+			return false, 10
 		}
 	}
-	if e != nil {
-		reply.Error = e.Error()
-	}
-	emit(reply)
-	if e != nil {
-		os.Exit(1)
+	states <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
+	tick := time.NewTicker(150 * time.Millisecond)
+	defer tick.Stop()
+	lease := time.NewTimer(90 * time.Second)
+	defer lease.Stop()
+	for {
+		select {
+		case req := <-requests:
+			switch req.Cmd {
+			case svc.Stop, svc.Shutdown:
+				states <- svc.Status{State: svc.StopPending}
+				return false, 0
+			case svc.Interrogate:
+				states <- req.CurrentStatus
+			}
+		case <-tick.C:
+			if log != nil {
+				_, _ = fmt.Fprintf(log, "%s payload=%d\n", time.Now().UTC().Format(time.RFC3339Nano), payload.ProcessId)
+				_ = log.Sync()
+			}
+		case <-lease.C:
+			return false, 0
+		}
 	}
 }
-func shimWorker(args []string) {
-	if len(args) != 2 {
+func serviceWorker(mode string, args []string) {
+	current, e := windows.GetCurrentProcessToken().GetTokenUser()
+	if e != nil || current.User.Sid.String() != "S-1-5-18" {
 		os.Exit(2)
 	}
-	dir, name := args[0], args[1]
-	h, e := newJob(name, 192<<20, 8, 2000)
-	if e != nil {
-		_ = writeJSON(filepath.Join(dir, "shim-error.json"), map[string]any{"error": e.Error()})
+	var handler probeService
+	var name string
+	if mode == "_shim-service" {
+		if len(args) != 7 {
+			os.Exit(2)
+		}
+		name = args[0]
+		o := options{Root: args[1], ID: args[2]}
+		if validateOptions(o) != nil {
+			os.Exit(2)
+		}
+		pid, e := strconv.ParseUint(args[3], 10, 32)
+		if e != nil {
+			os.Exit(2)
+		}
+		token, e := strconv.ParseUint(args[4], 10, 64)
+		if e != nil {
+			os.Exit(2)
+		}
+		handler.f = fixture{o: o, journal: journal{Dir: args[5], Job: args[6]}}
+		handler.sourcePID = uint32(pid)
+		handler.sourceToken = windows.Handle(token)
+	} else {
+		if len(args) != 4 {
+			os.Exit(2)
+		}
+		name = args[0]
+		if validateOptions(options{Root: args[2], ID: args[3]}) != nil {
+			os.Exit(2)
+		}
+		handler.shimName = args[1]
+	}
+	if e = svc.Run(name, &handler); e != nil {
 		os.Exit(3)
 	}
-	defer windows.CloseHandle(h)
-	p, e := launch(0, os.Args[0], []string{"_work", filepath.Join(dir, "payload.json"), "sleep"}, dir, h)
-	if e != nil {
-		os.Exit(4)
-	}
-	defer p.close()
-	defer p.kill()
-	log, e := os.OpenFile(filepath.Join(dir, "instance.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if e != nil {
-		os.Exit(5)
-	}
-	defer log.Close()
-	_ = writeJSON(filepath.Join(dir, "shim-ready.json"), map[string]any{"shimPID": os.Getpid(), "payloadPID": p.ProcessId})
-	until := time.Now().Add(60 * time.Second)
-	for time.Now().Before(until) {
-		if _, e = os.Stat(filepath.Join(dir, "stop")); e == nil {
-			return
-		}
-		_, _ = fmt.Fprintf(log, "%s payload=%d\n", time.Now().UTC().Format(time.RFC3339Nano), p.ProcessId)
-		_ = log.Sync()
-		time.Sleep(150 * time.Millisecond)
-	}
 }
-func callController(q controlRequest) (controlReply, error) {
-	// Anonymous stdin pipe only: the password never appears in command line, environment or files.
-	b, e := json.Marshal(q)
-	if e != nil {
-		return controlReply{}, e
+func waitService(s *mgr.Service, state svc.State, timeout time.Duration) error {
+	until := time.Now().Add(timeout)
+	for time.Now().Before(until) {
+		v, e := s.Query()
+		if e != nil {
+			return e
+		}
+		if v.State == state {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	c := exec.Command(os.Args[0], "_controller")
-	c.Stdin = bytes.NewReader(b)
-	var out bytes.Buffer
-	c.Stdout = &out
-	c.Stderr = &out
-	e = c.Run()
-	clear(b)
-	var reply controlReply
-	de := json.Unmarshal(out.Bytes(), &reply)
+	return fmt.Errorf("service did not reach %d", state)
+}
+func stopDeleteService(name string) error {
+	m, e := mgr.Connect()
 	if e != nil {
-		return reply, fmt.Errorf("controller: %w (%s)", e, reply.Error)
+		return e
 	}
-	return reply, de
+	defer m.Disconnect()
+	s, e := m.OpenService(name)
+	if e == windows.ERROR_SERVICE_DOES_NOT_EXIST {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	defer s.Close()
+	v, e := s.Query()
+	if e != nil {
+		return e
+	}
+	if v.State != svc.Stopped {
+		_, e = s.Control(svc.Stop)
+		if e != nil {
+			return e
+		}
+		if e = waitService(s, svc.Stopped, 10*time.Second); e != nil {
+			return e
+		}
+	}
+	return s.Delete()
 }
 func shimExperiment(o options, r *Result) (err error) {
 	f, e := newFixture(o, "s")
@@ -147,50 +191,123 @@ func shimExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	defer func() { err = join(err, f.close()) }()
-	reply, e := callController(controlRequest{Name: f.Name, Password: f.password, Dir: f.Dir, Root: o.Root, Job: f.Job, Action: "start"})
+	m, e := mgr.Connect()
 	if e != nil {
 		return e
 	}
-	sh, e := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, reply.ShimPID)
+	defer m.Disconnect()
+	f.Services = []string{"AurigaS3-" + o.ID + "-shim", "AurigaS3-" + o.ID + "-agent"}
+	if e = f.save(); e != nil {
+		return e
+	}
+	sh, e := m.CreateService(f.Services[0], probePath(o), mgr.Config{StartType: mgr.StartManual, ServiceStartName: "LocalSystem"}, "_shim-service", f.Services[0], o.Root, o.ID, strconv.Itoa(os.Getpid()), strconv.FormatUint(uint64(f.token), 10), f.Dir, f.Job)
 	if e != nil {
 		return e
 	}
-	defer windows.CloseHandle(sh)
-	defer func() {
-		_ = os.WriteFile(filepath.Join(f.Dir, "stop"), nil, 0600)
-		_, _ = windows.WaitForSingleObject(sh, 8000)
-	}()
+	defer sh.Close()
+	agent, e := m.CreateService(f.Services[1], probePath(o), mgr.Config{StartType: mgr.StartManual, ServiceStartName: "LocalSystem"}, "_agent-service", f.Services[1], f.Services[0], o.Root, o.ID)
+	if e != nil {
+		return e
+	}
+	defer agent.Close()
+	if e = agent.Start(); e != nil {
+		return e
+	}
+	if e = waitService(agent, svc.Running, 15*time.Second); e != nil {
+		return e
+	}
 	if e = awaitFile(filepath.Join(f.Dir, "shim-ready.json"), 15*time.Second); e != nil {
 		return e
 	}
-	var ready struct{ ShimPID, PayloadPID uint32 }
+	var ready struct {
+		ShimPID, PayloadPID uint32
+		ShimSID             string
+	}
 	if e = readJSON(filepath.Join(f.Dir, "shim-ready.json"), &ready); e != nil {
 		return e
 	}
-	// callController waited for the first controller to exit. No node-agent job handle remains.
-	state, e := windows.WaitForSingleObject(sh, 0)
-	r.check("shim_survives_controller_exit", e == nil && state == uint32(windows.WAIT_TIMEOUT), map[string]any{"shimPID": reply.ShimPID})
-	a, e := callController(controlRequest{Dir: f.Dir, Job: f.Job, Action: "adopt"})
+	r.check("shim_runs_as_SYSTEM", ready.ShimSID == "S-1-5-18", ready)
+	if _, e = agent.Control(svc.Stop); e != nil {
+		return e
+	}
+	if e = waitService(agent, svc.Stopped, 10*time.Second); e != nil {
+		return e
+	}
+	v, e := sh.Query()
+	r.check("shim_survives_node_service_stop", e == nil && v.State == svc.Running, v)
+	h, e := openJob(f.Job)
 	if e != nil {
 		return e
 	}
+	defer windows.CloseHandle(h)
+	ids, e := jobPIDs(h)
+	if e != nil {
+		return e
+	}
+	r.check("new_agent_reopens_job", pidIn(ids, ready.PayloadPID), ids)
+	log, e := os.Open(filepath.Join(f.Dir, "instance.log"))
+	if e != nil {
+		return e
+	}
+	offset, e := log.Seek(0, io.SeekEnd)
+	if e != nil {
+		_ = log.Close()
+		return e
+	}
+	_ = log.Close()
 	time.Sleep(500 * time.Millisecond)
-	b, e := callController(controlRequest{Dir: f.Dir, Job: f.Job, Action: "adopt", LogOffset: a.LogBytes})
+	log, e = os.Open(filepath.Join(f.Dir, "instance.log"))
 	if e != nil {
 		return e
 	}
-	r.check("new_controller_opens_named_job", pidIn(b.PIDs, ready.PayloadPID), b)
-	r.check("new_controller_resumes_file_logs", b.LogBytes > a.LogBytes && b.TailBytes > 0, map[string]any{"before": a.LogBytes, "after": b.LogBytes, "tailBytes": b.TailBytes})
-	payload, e := windows.OpenProcess(windows.SYNCHRONIZE, false, ready.PayloadPID)
+	defer log.Close()
+	_, e = log.Seek(offset, io.SeekStart)
 	if e != nil {
 		return e
 	}
-	defer windows.CloseHandle(payload)
-	_, e = callController(controlRequest{Dir: f.Dir, Job: f.Job, Action: "terminate"})
+	tail, e := io.ReadAll(io.LimitReader(log, 64<<10))
 	if e != nil {
 		return e
 	}
-	state, e = windows.WaitForSingleObject(payload, 5000)
-	r.check("adopted_job_terminates_payload", e == nil && state == windows.WAIT_OBJECT_0, ready)
+	r.check("new_agent_resumes_file_logs", len(tail) > 0, map[string]any{"offset": offset, "newBytes": len(tail)})
+	sd, e := windows.GetSecurityInfo(h, windows.SE_KERNEL_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if e != nil {
+		return e
+	}
+	owner, _, e := sd.Owner()
+	if e != nil {
+		return e
+	}
+	r.check("job_owner_SYSTEM", owner.String() == "S-1-5-18", sd.String())
+	negative, e := runWork(f, "job-security", f.Job, strconv.FormatUint(uint64(ready.ShimPID), 10))
+	if e != nil {
+		return e
+	}
+	r.check("instance_own_job_positive_control", win32Code(negative["ownJobControl"]) == 0, negative["ownJobControl"])
+	control, ce := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.PROCESS_DUP_HANDLE|windows.PROCESS_VM_WRITE, false, ready.ShimPID)
+	if ce == nil {
+		_ = windows.CloseHandle(control)
+	}
+	r.check("SYSTEM_can_open_shim_control", ce == nil, errorString(ce))
+	for _, name := range []string{"jobOpen", "jobWriteDACL", "shimOpen"} {
+		r.check("instance_denied_"+name, win32Code(negative[name]) == 5, negative[name])
+	}
+	if e = windows.TerminateJobObject(h, 95); e != nil {
+		return e
+	}
+	until := time.Now().Add(5 * time.Second)
+	ended := false
+	for time.Now().Before(until) {
+		ids, qe := jobPIDs(h)
+		if qe != nil {
+			return qe
+		}
+		if len(ids) == 0 {
+			ended = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	r.check("adopted_job_terminated", ended, nil)
 	return nil
 }

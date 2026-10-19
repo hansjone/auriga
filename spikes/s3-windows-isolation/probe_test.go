@@ -83,7 +83,7 @@ func TestSIDAndSDDL(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if a.AceCount != 3 {
+	if a.AceCount != 4 {
 		t.Fatalf("ACL has %d entries", a.AceCount)
 	}
 	control, _, e := sd.Control()

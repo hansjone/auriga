@@ -65,6 +65,7 @@ func worker(args []string) {
 			start := time.Now()
 			c, e := net.DialTimeout("tcp", address, 1500*time.Millisecond)
 			entry := map[string]any{"connected": e == nil, "durationMs": time.Since(start).Milliseconds()}
+			entry["win32Error"] = errorCode(e)
 			if e != nil {
 				entry["error"] = e.Error()
 			} else {
@@ -174,7 +175,9 @@ func worker(args []string) {
 		time.Sleep(10 * time.Second)
 		return
 	default:
-		os.Exit(2)
+		if !securityWorker(mode, a, result) {
+			os.Exit(2)
+		}
 	}
 	if e := writeJSON(out, result); e != nil {
 		os.Exit(4)
@@ -191,7 +194,7 @@ func identityExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	r.check("batch_logon_primary_token", u.User.Sid.String() == f.sid.String(), u.User.Sid.String())
-	for _, kind := range []uint32{2} {
+	for _, kind := range []uint32{2, 3, 5} {
 		t, le := logon(f.Name, f.password, kind)
 		if t != 0 {
 			_ = t.Close()
@@ -202,9 +205,10 @@ func identityExperiment(o options, r *Result) (err error) {
 	if re != nil {
 		return re
 	}
-	for _, name := range []string{"SeBatchLogonRight", "SeDenyInteractiveLogonRight", "SeDenyRemoteInteractiveLogonRight"} {
+	for _, name := range []string{"SeBatchLogonRight", "SeDenyInteractiveLogonRight", "SeDenyRemoteInteractiveLogonRight", "SeDenyNetworkLogonRight", "SeDenyServiceLogonRight"} {
 		r.check("LSA_"+name, slices.Contains(rights, name), rights)
 	}
+	r.unsupported("S4U_without_batch_release_gate", "No persistent password is stored; the shim receives a duplicated token. LsaLogonUser/MSV1_0 S4U needs a separately verified authentication package, logon-type policy, token and privilege design. Passwordless S4U alone does not prove Task Scheduler/WMI escape prevention.")
 	data, e := runWork(f, "identity")
 	if e != nil {
 		return e
@@ -273,7 +277,7 @@ func jobExperiment(o options, r *Result) (err error) {
 	}
 	defer func() { err = join(err, f.close()) }()
 	// Each limit has its own job, so one failure cannot masquerade as another limit.
-	for _, kind := range []string{"memory", "cpu", "pids-console", "pids", "tree"} {
+	for _, kind := range []string{"memory", "cpu-baseline", "cpu", "pids-console", "pids", "tree"} {
 		e = jobCase(f, r, kind)
 		if e != nil {
 			r.check(kind+"_setup", false, e.Error())
@@ -298,24 +302,27 @@ func jobCase(f *fixture, r *Result, kind string) error {
 	}
 	defer windows.CloseHandle(h)
 	defer windows.TerminateJobObject(h, 97)
-	out := filepath.Join(f.Dir, kind+".json")
+	out := filepath.Join(f.workDir(), kind+".json")
 	exe := probePath(f.o)
 	args := []string{"_work", out, kind}
+	if kind == "cpu-baseline" {
+		args = []string{"_work", out, "cpu"}
+	}
 	if kind == "pids-console" {
 		args = []string{"_work", out, "pids", "inherit-console"}
 	}
 	if kind == "tree" {
 		exe = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
 		node := filepath.Join(f.o.Root, "tools", "node.exe")
-		script := filepath.Join(f.Dir, "tree.js")
+		script := filepath.Join(f.workDir(), "tree.js")
 		body := `const cp=require('child_process');const fs=require('fs');let c=cp.spawn(process.argv[2],['_work',process.argv[3]+'-leaf','sleep']);fs.writeFileSync(process.argv[3],JSON.stringify({node:process.pid,child:c.pid}));setInterval(()=>{},1000);`
-		if e = os.WriteFile(script, []byte(body), 0600); e != nil {
+		if e = writePlainFile(script, []byte(body), 0600); e != nil {
 			return e
 		}
 		args = []string{"/d", "/s", "/c", windows.ComposeCommandLine([]string{node, script, probePath(f.o), out})}
 	}
 	start := time.Now()
-	p, e := launch(f.token, exe, args, f.Dir, h)
+	p, e := launch(f.token, exe, args, f.workDir(), h)
 	if e != nil {
 		return e
 	}
@@ -331,12 +338,23 @@ func jobCase(f *fixture, r *Result, kind string) error {
 		allocated, _ := data["allocatedMiB"].(float64)
 		r.check("memory_worker_started", re == nil, data)
 		r.check("memory_96MiB_rejects_192MiB", we == nil && code == 2 && re == nil && qe == nil && allocated >= 16 && allocated < 192 && limits.PeakJobMemoryUsed >= 64<<20 && limits.JobMemoryLimit == 96<<20, map[string]any{"exit": code, "waitError": errorString(join(we, qe)), "worker": data, "peakJobCommitBytes": limits.PeakJobMemoryUsed, "jobLimitBytes": limits.JobMemoryLimit})
-	case "cpu":
-		_, we := p.wait(20 * time.Second)
+	case "cpu", "cpu-baseline":
+		code, we := p.wait(20 * time.Second)
 		a, ae := jobAccounting(h)
+		var worker map[string]any
+		re := readJSON(out, &worker)
+		complete := we == nil && code == 0 && re == nil && worker["finished"] == true
 		elapsed := time.Since(start).Seconds()
 		fraction := float64(a.User+a.Kernel) / 1e7 / elapsed / float64(runtime.NumCPU())
-		r.check("cpu_hard_cap_10_percent", we == nil && ae == nil && fraction > 0.015 && fraction < 0.18, map[string]any{"hostFraction": fraction, "wallSeconds": elapsed, "logicalCPUs": runtime.NumCPU(), "accounting": a, "error": errorString(join(we, ae))})
+		if kind == "cpu-baseline" {
+			f.CPUBaseline = fraction
+			r.check("CPU_unlimited_completed", complete && ae == nil, map[string]any{"hostFraction": fraction, "worker": worker, "exit": code})
+			if fraction < 0.25 {
+				r.unsupported("CPU_unlimited_saturation", fraction)
+			}
+		} else {
+			r.check("cpu_hard_cap_10_percent", complete && ae == nil && fraction > 0.015 && fraction < 0.18 && f.CPUBaseline >= 0.25 && fraction < f.CPUBaseline*0.5, map[string]any{"hostFraction": fraction, "unlimitedFraction": f.CPUBaseline, "worker": worker, "exit": code, "wallSeconds": elapsed, "accounting": a, "error": errorString(join(we, ae))})
+		}
 	case "pids", "pids-console":
 		if e = awaitFile(out, 10*time.Second); e != nil {
 			return e
@@ -449,15 +467,15 @@ func aclExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	defer func() { err = join(err, b.close()) }()
-	own := filepath.Join(a.Dir, "sentinel")
-	peer := filepath.Join(b.Dir, "sentinel")
+	own := filepath.Join(a.workDir(), "sentinel")
+	peer := filepath.Join(b.workDir(), "sentinel")
 	for _, p := range []string{own, peer} {
-		if e = os.WriteFile(p, []byte("public synthetic sentinel"), 0600); e != nil {
+		if e = writePlainFile(p, []byte("public synthetic sentinel"), 0600); e != nil {
 			return e
 		}
 	}
 	public := filepath.Join(o.Root, "public-sentinel")
-	if e = os.WriteFile(public, []byte("synthetic public data"), 0600); e != nil {
+	if e = writePlainFile(public, []byte("synthetic public data"), 0600); e != nil {
 		return e
 	}
 	if e = dacl(public, adminACL+"(A;;GR;;;AU)"); e != nil {
@@ -484,6 +502,27 @@ func aclExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	r.check("inheritance_disabled", control&windows.SE_DACL_PROTECTED != 0, sd.String())
+	negative, e := runWork(a, "root-security", a.Dir)
+	if e != nil {
+		return e
+	}
+	r.check("junction_positive_control", win32Code(negative["junctionControl"]) == 0, negative["junctionControl"])
+	for _, name := range []string{"junctionWrite", "rootWriteDACL", "rootDelete"} {
+		r.check("root_denies_"+name, win32Code(negative[name]) == 5, negative[name])
+	}
+	writes := []string{a.Name, a.workDir(), a.Dir, os.Getenv("ProgramData"), os.Getenv("PUBLIC"), filepath.Join(os.Getenv("SystemRoot"), "Temp"), filepath.Join(o.Root, "tools")}
+	writeResults, e := runWork(a, append([]string{"write-probes"}, writes...)...)
+	if e != nil {
+		return e
+	}
+	for _, path := range writes[1:] {
+		expected := uint32(5)
+		if path == a.workDir() {
+			expected = 0
+		}
+		r.check("write_policy_"+path, win32Code(writeResults[path]) == expected, writeResults[path])
+	}
+	r.unsupported("machine_shared_directory_write_gate", "A vanilla runner may allow writes to Public/Windows Temp/ProgramData. Production needs a restricted token/AppContainer/VM or dedicated machine ACL policy. The spike does not change global directory ACLs.")
 	return nil
 }
 func accessDenied(v any) bool {

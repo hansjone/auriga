@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -22,6 +23,18 @@ func diskpart(script string) (string, error) {
 func detachVHD(path string) error {
 	if _, e := os.Stat(path); os.IsNotExist(e) {
 		return nil
+	}
+	mount := filepath.Join(filepath.Dir(path), "volume") + `\`
+	var volume [windows.MAX_PATH]uint16
+	if e := windows.GetVolumeNameForVolumeMountPoint(u16(mount), &volume[0], uint32(len(volume))); e == nil {
+		locks, le := lockPlainPath(filepath.Dir(path))
+		if le != nil {
+			return le
+		}
+		defer locks.close()
+		if e = boolCall(kernel.NewProc("DeleteVolumeMountPointW"), uintptr(unsafe.Pointer(u16(mount)))); e != nil {
+			return e
+		}
 	}
 	out, e := diskpart(fmt.Sprintf("select vdisk file=\"%s\"\r\ndetach vdisk", path))
 	if e != nil {
@@ -76,7 +89,7 @@ func quotaExperiment(o options, r *Result) (err error) {
 	if e = os.MkdirAll(dataDir, 0700); e != nil {
 		return e
 	}
-	if e = dacl(dataDir, instanceACL(f.sid.String())); e != nil {
+	if e = dacl(dataDir, dataACL(f.sid.String())); e != nil {
 		return e
 	}
 	sd, se := windows.GetNamedSecurityInfo(dataDir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
@@ -94,6 +107,15 @@ func quotaExperiment(o options, r *Result) (err error) {
 	if !baselineOK {
 		return fmt.Errorf("quota baseline write failed; quota was not enabled: %v", baseline)
 	}
+	fileSD, oe := windows.GetNamedSecurityInfo(tempGUID+"probe-data\\large.bin", windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if oe != nil {
+		return oe
+	}
+	owner, _, oe := fileSD.Owner()
+	if oe != nil {
+		return oe
+	}
+	r.check("quota_file_owner_is_instance", owner.String() == f.SID, owner.String())
 	if e = removeExistingFile(target); e != nil {
 		return e
 	}

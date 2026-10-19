@@ -154,7 +154,7 @@ func TestQuotaDataACLAndAbsentFile(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if acl.AceCount != 3 {
+	if acl.AceCount != 4 {
 		t.Fatal("volume data DACL principals changed")
 	}
 	path := filepath.Join(t.TempDir(), "large.bin")

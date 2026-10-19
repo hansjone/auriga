@@ -58,13 +58,45 @@ func writeJSON(path string, v any) error {
 	if e != nil {
 		return e
 	}
-	tmp := path + ".tmp"
-	if e = os.WriteFile(tmp, b, 0600); e != nil {
+	return writePlainFile(path, b, 0600)
+}
+func writePlainFile(path string, b []byte, mode os.FileMode) error {
+	locks, e := lockPlainPath(filepath.Dir(path))
+	if e != nil {
 		return e
 	}
-	return windows.MoveFileEx(u16(tmp), u16(path), windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	defer locks.close()
+	tmp, e := os.CreateTemp(filepath.Dir(path), ".s3-json-")
+	if e != nil {
+		return e
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, e = tmp.Write(b); e != nil {
+		_ = tmp.Close()
+		return e
+	}
+	if e = tmp.Sync(); e != nil {
+		_ = tmp.Close()
+		return e
+	}
+	if e = tmp.Close(); e != nil {
+		return e
+	}
+	if e = os.Chmod(name, mode); e != nil {
+		return e
+	}
+	if info, se := os.Lstat(path); se == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refuse JSON replacement of reparse point")
+	}
+	return windows.MoveFileEx(u16(name), u16(path), windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
 func readJSON(path string, v any) error {
+	locks, e := lockPlainPath(path)
+	if e != nil {
+		return e
+	}
+	defer locks.close()
 	b, e := os.ReadFile(path)
 	if e != nil {
 		return e
@@ -72,6 +104,11 @@ func readJSON(path string, v any) error {
 	return json.Unmarshal(b, v)
 }
 func dacl(path, sddl string) error {
+	locks, le := lockPlainPath(path)
+	if le != nil {
+		return le
+	}
+	defer locks.close()
 	sd, e := windows.SecurityDescriptorFromString(sddl)
 	if e != nil {
 		return e
@@ -80,12 +117,36 @@ func dacl(path, sddl string) error {
 	if e != nil {
 		return e
 	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, a, nil)
+	var owner *windows.SID
+	flags := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION)
+	if strings.HasPrefix(sddl, "O:SY") {
+		owner, _, e = sd.Owner()
+		if e != nil {
+			return e
+		}
+		current, ce := windows.GetCurrentProcessToken().GetTokenUser()
+		if ce != nil {
+			return ce
+		}
+		if current.User.Sid.String() == "S-1-5-18" {
+			flags |= windows.OWNER_SECURITY_INFORMATION
+		} else {
+			owner = nil
+		}
+	}
+	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, flags, owner, nil, a, nil)
 }
 
 const adminACL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
 
-func instanceACL(sid string) string { return adminACL + "(A;OICI;FA;;;" + sid + ")" }
+const protectedAdminACL = "O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;RC;;;S-1-3-4)"
+const jobACL = "O:SYG:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;RC;;;S-1-3-4)"
+
+func instanceACL(sid string) string { return protectedAdminACL + "(A;;0x1200a9;;;" + sid + ")" }
+func dataACL(sid string) string {
+	return protectedAdminACL + "(A;;0x1200af;;;" + sid + ")(A;OICIIO;0x1301bf;;;" + sid + ")"
+}
+func (f *fixture) workDir() string { return filepath.Join(f.Dir, "work") }
 func command(name string, args ...string) (string, error) {
 	c := exec.Command(name, args...)
 	b, e := c.CombinedOutput()
@@ -100,14 +161,19 @@ type journal struct {
 	SID                            string
 	Loopback                       bool
 	Jobs                           []string
+	Provider, SubLayer             string
+	ListenPort                     uint16
+	Services                       []string
 }
 type fixture struct {
 	journal
-	o           options
-	password    string
-	sid         *windows.SID
-	token       windows.Token
-	journalPath string
+	o                      options
+	password               string
+	sid                    *windows.SID
+	token                  windows.Token
+	journalPath            string
+	CPUBaseline            float64
+	PeerCanary, HostCanary string
 }
 
 func (f *fixture) save() error { return writeJSON(f.journalPath, f.journal) }
@@ -122,10 +188,10 @@ func newFixture(o options, tag string) (*fixture, error) {
 	if e := os.MkdirAll(o.Root, 0700); e != nil {
 		return nil, e
 	}
-	if e := dacl(o.Root, adminACL+"(A;;GRGX;;;AU)"); e != nil {
+	if e := dacl(o.Root, protectedAdminACL); e != nil {
 		return nil, e
 	}
-	if e := dacl(filepath.Join(o.Root, "tools"), adminACL+"(A;OICI;GRGX;;;AU)"); e != nil {
+	if e := dacl(filepath.Join(o.Root, "tools"), protectedAdminACL); e != nil {
 		return nil, e
 	}
 	name := "s3" + o.ID + tag
@@ -159,6 +225,30 @@ func newFixture(o options, tag string) (*fixture, error) {
 	if e = f.save(); e != nil {
 		return fail(e)
 	}
+	rootACL, toolsACL := protectedAdminACL, protectedAdminACL
+	states, _ := filepath.Glob(filepath.Join(o.Root, "*.state.json"))
+	for _, state := range states {
+		var saved journal
+		if e = readJSON(state, &saved); e != nil {
+			return fail(e)
+		}
+		if saved.SID != "" {
+			rootACL += "(A;;GX;;;" + saved.SID + ")"
+			toolsACL += "(A;OICI;GRGX;;;" + saved.SID + ")"
+		}
+	}
+	if e = dacl(o.Root, rootACL); e != nil {
+		return fail(e)
+	}
+	if e = dacl(filepath.Join(o.Root, "tools"), toolsACL); e != nil {
+		return fail(e)
+	}
+	if e = writePlainFile(filepath.Join(o.Root, "ci.guard"), []byte(o.ID), 0600); e != nil {
+		return fail(e)
+	}
+	if e = dacl(filepath.Join(o.Root, "ci.guard"), toolsACL); e != nil {
+		return fail(e)
+	}
 	member := struct{ SID *windows.SID }{sid}
 	if e = statusCall(netapi.NewProc("NetLocalGroupAddMembers"), 0, uintptr(unsafe.Pointer(u16(f.Group))), 0, uintptr(unsafe.Pointer(&member)), 1); e != nil {
 		return fail(e)
@@ -175,13 +265,19 @@ func newFixture(o options, tag string) (*fixture, error) {
 		}
 	}
 	// Only the dedicated local group is joined; rights are scoped to this disposable SID.
-	if e = accountRights(sid, []string{"SeBatchLogonRight", "SeDenyInteractiveLogonRight", "SeDenyRemoteInteractiveLogonRight"}, false); e != nil {
+	if e = accountRights(sid, []string{"SeBatchLogonRight", "SeDenyInteractiveLogonRight", "SeDenyRemoteInteractiveLogonRight", "SeDenyNetworkLogonRight", "SeDenyServiceLogonRight"}, false); e != nil {
 		return fail(e)
 	}
 	if e = os.MkdirAll(f.Dir, 0700); e != nil {
 		return fail(e)
 	}
 	if e = dacl(f.Dir, instanceACL(sid.String())); e != nil {
+		return fail(e)
+	}
+	if e = os.MkdirAll(f.workDir(), 0700); e != nil {
+		return fail(e)
+	}
+	if e = dacl(f.workDir(), dataACL(sid.String())); e != nil {
 		return fail(e)
 	}
 	f.token, e = logon(name, f.password, 4)
@@ -245,14 +341,30 @@ func cleanJournal(j journal) error {
 			errs = append(errs, e)
 		}
 	}
+	if _, e := os.Stat(j.Dir); e == nil {
+		locks, le := lockPlainPath(j.Dir)
+		if le != nil {
+			return le
+		}
+		defer locks.close()
+	}
+	for i := len(j.Services) - 1; i >= 0; i-- {
+		add(stopDeleteService(j.Services[i]))
+	}
+	if j.SID != "" {
+		add(cleanupAccountTasks(j))
+		_, e := processesForSID(j.SID, true)
+		add(e)
+		add(deleteAccountProfile(j.SID))
+		add(removeCanaries(j))
+	}
 	for _, name := range append([]string{j.Job}, j.Jobs...) {
 		if h, e := openJob(name); e == nil {
 			_ = windows.TerminateJobObject(h, 99)
 			_ = windows.CloseHandle(h)
 		}
 	}
-	// The shim is outside its payload job. Its bounded lease and stop marker close its handle.
-	_ = os.WriteFile(filepath.Join(j.Dir, "stop"), nil, 0600)
+	// Dedicated SCM services were stopped above; no tenant-writable stop marker is used.
 	if j.Profile != "" {
 		present, pe := exemptionState(j.Profile)
 		add(pe)
@@ -266,8 +378,8 @@ func cleanJournal(j journal) error {
 		}
 		add(deleteProfile(j.Profile))
 	}
-	if len(j.Filters) > 0 {
-		add(removeFilters(j.Filters))
+	if len(j.Filters) > 0 || j.Provider != "" {
+		add(removePolicy(j))
 	}
 	if j.VHD != "" {
 		add(detachVHD(j.VHD))
@@ -326,12 +438,10 @@ func launch(token windows.Token, exe string, args []string, dir string, job wind
 	si := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{}))}
 	p := &process{}
 	// Minimal environment: no inherited host credentials or user profile paths.
-	env := []string{"SystemRoot=" + os.Getenv("SystemRoot"), "WINDIR=" + os.Getenv("SystemRoot"), "PATH=" + filepath.Join(os.Getenv("SystemRoot"), "System32"), "TEMP=" + dir, "TMP=" + dir, "GITHUB_ACTIONS=true", "RUNNER_ENVIRONMENT=github-hosted"}
-	var block []uint16
-	for _, v := range env {
-		block = append(block, windows.StringToUTF16(v)...)
+	block, ee := encodeEnvironment(workloadEnvironment(dir))
+	if ee != nil {
+		return nil, ee
 	}
-	block = append(block, 0)
 	var e error
 	if token == 0 {
 		e = windows.CreateProcess(u16(exe), u16(cmd), nil, nil, false, windows.CREATE_SUSPENDED|windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NO_WINDOW, &block[0], u16(dir), &si, &p.ProcessInformation)
@@ -357,14 +467,14 @@ func launch(token windows.Token, exe string, args []string, dir string, job wind
 }
 func probePath(o options) string { return filepath.Join(o.Root, "tools", "s3probe.exe") }
 func runWork(f *fixture, args ...string) (map[string]any, error) {
-	path := filepath.Join(f.Dir, "result-"+randomHex(4)+".json")
+	path := filepath.Join(f.workDir(), "result-"+randomHex(4)+".json")
 	all := append([]string{"_work", path}, args...)
 	h, e := f.job(f.Job+"-worker-"+randomHex(3), 0, 0, 0)
 	if e != nil {
 		return nil, e
 	}
 	defer windows.CloseHandle(h)
-	p, e := launch(f.token, probePath(f.o), all, f.Dir, h)
+	p, e := launch(f.token, probePath(f.o), all, f.workDir(), h)
 	if e != nil {
 		return nil, e
 	}
@@ -382,7 +492,7 @@ func runWork(f *fixture, args ...string) (map[string]any, error) {
 	return result, e
 }
 func newJob(name string, memory uintptr, pids uint32, cpu uint32) (windows.Handle, error) {
-	sd, e := windows.SecurityDescriptorFromString(adminACL)
+	sd, e := windows.SecurityDescriptorFromString(jobACL)
 	if e != nil {
 		return 0, e
 	}
@@ -392,16 +502,7 @@ func newJob(name string, memory uintptr, pids uint32, cpu uint32) (windows.Handl
 		return 0, e
 	}
 	// kill-on-close belongs to the shim, not to an ephemeral node agent.
-	limits := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
-	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-	if memory > 0 {
-		limits.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_JOB_MEMORY
-		limits.JobMemoryLimit = memory
-	}
-	if pids > 0 {
-		limits.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-		limits.BasicLimitInformation.ActiveProcessLimit = pids
-	}
+	limits := jobLimits(memory, pids)
 	if _, e = windows.SetInformationJobObject(h, 9, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); e != nil {
 		_ = windows.CloseHandle(h)
 		return 0, e
@@ -413,7 +514,28 @@ func newJob(name string, memory uintptr, pids uint32, cpu uint32) (windows.Handl
 			return 0, e
 		}
 	}
+	ui := windows.JOBOBJECT_BASIC_UI_RESTRICTIONS{UIRestrictionsClass: 0xff}
+	if _, e = windows.SetInformationJobObject(h, 4, uintptr(unsafe.Pointer(&ui)), uint32(unsafe.Sizeof(ui))); e != nil {
+		_ = windows.CloseHandle(h)
+		return 0, e
+	}
 	return h, nil
+}
+func workloadEnvironment(dir string) map[string]string {
+	return map[string]string{"SYSTEMROOT": os.Getenv("SystemRoot"), "WINDIR": os.Getenv("SystemRoot"), "PATH": filepath.Join(os.Getenv("SystemRoot"), "System32"), "TEMP": dir, "TMP": dir}
+}
+func jobLimits(memory uintptr, pids uint32) windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+	var limits windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows.JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION
+	if memory > 0 {
+		limits.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_JOB_MEMORY
+		limits.JobMemoryLimit = memory
+	}
+	if pids > 0 {
+		limits.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+		limits.BasicLimitInformation.ActiveProcessLimit = pids
+	}
+	return limits
 }
 func openJob(name string) (windows.Handle, error) {
 	v, _, e := kernel.NewProc("OpenJobObjectW").Call(0x1f003f, 0, uintptr(unsafe.Pointer(u16(name))))

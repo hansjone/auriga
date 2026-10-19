@@ -26,7 +26,7 @@ function Invoke-Probe([string]$Experiment, [string]$Suffix = '') {
     $probeArgs = @($Experiment, '--ci-disposable-vm', '--root', ('"{0}"' -f $root), '--id', $RunId, '--node', ('"{0}"' -f $NodePath))
     $child = Start-Process -FilePath $probe -ArgumentList $probeArgs -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $timeoutMs = 75000
-    if ($Experiment -eq 'cleanup') { $timeoutMs = 120000 }
+    if ($Experiment -in @('job','escape')) { $timeoutMs = 120000 }; if ($Experiment -in @('cleanup','wfp')) { $timeoutMs = 180000 }
     $timedOut = -not $child.WaitForExit($timeoutMs)
     if ($timedOut) { $child.Kill(); $child.WaitForExit() }
     $child.Refresh()
@@ -66,11 +66,11 @@ if (-not $SystemPhase) {
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
         $action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
         $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 18)
+        $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 21)
         Register-ScheduledTask -TaskName $taskName -Action $action -Principal $taskPrincipal -Settings $settings | Out-Null
         $taskRegistered = $true
         Start-ScheduledTask -TaskName $taskName
-        $deadline = [DateTime]::UtcNow.AddMinutes(17)
+        $deadline = [DateTime]::UtcNow.AddMinutes(20)
         $done = Join-Path $OutputDirectory 'system.done'
         while (-not (Test-Path -LiteralPath $done)) {
             if ([DateTime]::UtcNow -gt $deadline) { throw 'SYSTEM 阶段超时。' }
@@ -115,7 +115,7 @@ $results = [Collections.Generic.List[object]]::new()
 $fatal = $null
 $nodeVersion = & $NodePath --version
 try {
-    foreach ($experiment in @('identity', 'job', 'shim', 'wfp', 'acl', 'quota', 'appcontainer')) {
+    foreach ($experiment in @('identity', 'job', 'escape', 'shim', 'wfp', 'acl', 'quota', 'appcontainer')) {
         try { $results.Add((Invoke-Probe $experiment)) }
         catch { $results.Add([pscustomobject]@{ experiment=$experiment; status='error'; checks=@(); error=$_.Exception.Message }) }
     }

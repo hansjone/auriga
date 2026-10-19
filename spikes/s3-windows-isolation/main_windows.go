@@ -89,23 +89,26 @@ func gate(ack bool, elevated bool) error {
 }
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "s3probe identity|job|shim|wfp|acl|quota|appcontainer|cleanup --ci-disposable-vm --id <10 hex> --root <ProgramData/auriga-s3-id> [--node <node.exe>]")
+		fmt.Fprintln(os.Stderr, "s3probe identity|job|escape|shim|wfp|acl|quota|appcontainer|cleanup --ci-disposable-vm --id <10 hex> --root <ProgramData/auriga-s3-id> [--node <node.exe>]")
 		os.Exit(2)
 	}
 	mode := os.Args[1]
-	// Internal workloads inherit the CI environment, but never need administrator rights.
-	if mode == "_work" || mode == "_shim" || mode == "_controller" || mode == "_wfp-observer" || mode == "_wfp-install" {
-		if err := gate(true, false); err != nil {
+	if mode == "_shim-service" || mode == "_agent-service" {
+		if e := internalWorkerGate(); e != nil {
+			os.Exit(2)
+		}
+		serviceWorker(mode, os.Args[2:])
+		return
+	}
+	// Internal workloads use the protected staged-run guard, not inherited runner variables.
+	if mode == "_work" || mode == "_wfp-observer" || mode == "_wfp-install" {
+		if err := internalWorkerGate(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		switch mode {
 		case "_work":
 			worker(os.Args[2:])
-		case "_shim":
-			shimWorker(os.Args[2:])
-		case "_controller":
-			controllerWorker(os.Args[2:])
 		case "_wfp-observer":
 			wfpObserver(os.Args[2:])
 		case "_wfp-install":
@@ -132,6 +135,8 @@ func main() {
 			err = identityExperiment(o, &r)
 		case "job":
 			err = jobExperiment(o, &r)
+		case "escape":
+			err = escapeExperiment(o, &r)
 		case "shim":
 			err = shimExperiment(o, &r)
 		case "wfp":

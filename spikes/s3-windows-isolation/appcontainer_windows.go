@@ -106,6 +106,22 @@ func appContainerExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	defer func() { err = join(err, f.close()) }()
+	peer, pe := newFixture(o, "b")
+	if pe != nil {
+		return pe
+	}
+	defer func() { err = join(err, peer.close()) }()
+	f.PeerCanary = filepath.Join(peer.workDir(), "app-peer-canary")
+	if e = writePlainFile(f.PeerCanary, []byte("synthetic peer"), 0600); e != nil {
+		return e
+	}
+	f.HostCanary = filepath.Join(f.Dir, "host-sensitive-canary")
+	if e = writePlainFile(f.HostCanary, []byte("synthetic privileged data"), 0600); e != nil {
+		return e
+	}
+	if e = dacl(f.HostCanary, protectedAdminACL); e != nil {
+		return e
+	}
 	f.Profile = "auriga.s3." + o.ID
 	if e = f.save(); e != nil {
 		return e
@@ -122,7 +138,7 @@ func appContainerExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	// Grant only this AppContainer, not ALL APPLICATION PACKAGES, access to its scratch files.
-	acl := instanceACL(f.sid.String()) + "(A;OICI;FA;;;" + sid.String() + ")"
+	acl := dataACL(f.sid.String()) + "(A;OICI;FA;;;" + sid.String() + ")"
 	if e = dacl(appDir, acl); e != nil {
 		return e
 	}
@@ -141,7 +157,7 @@ func appContainerExperiment(o options, r *Result) (err error) {
 		return e
 	}
 	// AppContainer traverses the run root but receives executable access only to the copied tools.
-	if e = dacl(o.Root, adminACL+"(A;;GRGX;;;AU)(A;;GRGX;;;"+sid.String()+")"); e != nil {
+	if e = dacl(o.Root, protectedAdminACL+"(A;;GX;;;"+f.SID+")(A;;GRGX;;;"+sid.String()+")"); e != nil {
 		return e
 	}
 	nodeSource := filepath.Join(o.Root, "tools", "node.exe")
@@ -150,19 +166,20 @@ func appContainerExperiment(o options, r *Result) (err error) {
 	if e != nil {
 		return e
 	}
-	if e = os.WriteFile(node, b, 0700); e != nil {
+	if e = writePlainFile(node, b, 0700); e != nil {
 		return e
 	}
 	script := filepath.Join(appDir, "probe.js")
 	source := `'use strict';
 const fs=require('fs'),net=require('net'),cp=require('child_process');
-const [out,hostPort]=process.argv.slice(2);let report={nodeStarted:true,pid:process.pid};
+const [out,hostPort,peerFile,hostFile]=process.argv.slice(2);let report={nodeStarted:true,pid:process.pid,fileAccess:{}};
+for(const [key,path] of Object.entries({peer:peerFile,host:hostFile})){try{fs.readFileSync(path);report.fileAccess[key]={readable:true}}catch(e){report.fileAccess[key]={readable:false,code:e.code,errno:e.errno}}}
 function save(){fs.writeFileSync(out,JSON.stringify(report));}
 try {let p=cp.spawnSync(process.env.SystemRoot+'\\System32\\cmd.exe',['/d','/c','echo auriga-s3'],{encoding:'utf8',timeout:3000});report.shell={status:p.status,error:p.error?.message,ok:p.status===0&&p.stdout.trim()==='auriga-s3'};}catch(e){report.shell={ok:false,error:e.message};}
 let client=net.connect({host:'127.0.0.1',port:+hostPort});client.setTimeout(1500);client.on('connect',()=>{report.outboundLoopback=true;client.end();save()});client.on('error',e=>{report.outboundLoopback=false;report.clientError=e.code;save()});client.on('timeout',()=>{report.outboundLoopback=false;client.destroy();save()});
 let server=net.createServer(c=>{c.end('auriga-s3');});server.on('error',e=>{report.listen=false;report.listenError=e.code;save()});server.listen(0,'127.0.0.1',()=>{report.listen=true;report.port=server.address().port;save()});
 setTimeout(()=>process.exit(),15000);save();`
-	if e = os.WriteFile(script, []byte(source), 0600); e != nil {
+	if e = writePlainFile(script, []byte(source), 0600); e != nil {
 		return e
 	}
 	// Establish that the copied executable and its ACL work for the same account before
@@ -188,6 +205,11 @@ setTimeout(()=>process.exit(),15000);save();`
 		return e
 	}
 	defer host.Close()
+	positive, he := runWork(f, "network", host.Addr().String())
+	if he != nil {
+		return he
+	}
+	r.check("AppContainer_network_positive_control", connected(positive, host.Addr().String()), positive)
 	_, hostPort, _ := net.SplitHostPort(host.Addr().String())
 	configs := []struct {
 		Name   string
@@ -252,7 +274,7 @@ func appCase(f *fixture, r *Result, name, node, script, dir, hostPort string, si
 	defer windows.CloseHandle(h)
 	defer windows.TerminateJobObject(h, 94)
 	out := filepath.Join(dir, name+".json")
-	p, e := appLaunch(f.token, node, []string{script, out, hostPort}, dir, sid, caps, h)
+	p, e := appLaunch(f.token, node, []string{script, out, hostPort, f.PeerCanary, f.HostCanary}, dir, sid, caps, h)
 	if e != nil {
 		return e
 	}
@@ -283,6 +305,14 @@ func appCase(f *fixture, r *Result, name, node, script, dir, hostPort string, si
 	}
 	r.check(name+"_actual_AppContainer_token", isContainer == 1, isContainer)
 	r.check(name+"_Node_executes", data["nodeStarted"] == true, data)
+	access, _ := data["fileAccess"].(map[string]any)
+	for _, key := range []string{"peer", "host"} {
+		entry, _ := access[key].(map[string]any)
+		r.check(name+"_denies_"+key+"_file", entry["code"] == "EACCES", entry)
+	}
+	if name == "none" {
+		r.check("AppContainer_no_network_capability_denies_connect", data["outboundLoopback"] == false && data["clientError"] == "EACCES", data)
+	}
 	shell, _ := data["shell"].(map[string]any)
 	r.check(name+"_shell_child", shell["ok"] == true, shell)
 	r.check(name+"_listen_127_0_0_1", data["listen"] == true, data)
