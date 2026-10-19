@@ -170,6 +170,7 @@ public class IamMeController {
   }
 
   @PostMapping("/me/mfa/totp/enrollment")
+  @RequiresRecentStepUp
   @AuthenticatedOnly
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   public ObjectNode beginTotp() {
@@ -179,6 +180,7 @@ public class IamMeController {
   }
 
   @PostMapping("/me/mfa/totp/enrollment/{enrollmentId}/confirm")
+  @RequiresRecentStepUp
   @AuthenticatedOnly
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void confirmTotp(@PathVariable String enrollmentId, @RequestBody JsonNode body) {
@@ -187,6 +189,7 @@ public class IamMeController {
         () -> {
           accounts.confirmTotpEnrollment(
               UUID.fromString(principal.subject()), enrollmentId, body.path("code").asString(""));
+          revokeOtherCredentialSessions();
           return null;
         });
   }
@@ -216,6 +219,7 @@ public class IamMeController {
   }
 
   @PostMapping("/me/passkeys/registration")
+  @RequiresRecentStepUp
   @AuthenticatedOnly
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   public ObjectNode beginPasskey() {
@@ -231,19 +235,24 @@ public class IamMeController {
   }
 
   @PostMapping("/me/passkeys/registration/{registrationId}/complete")
+  @RequiresRecentStepUp
   @AuthenticatedOnly
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   public ObjectNode completePasskey(
       @PathVariable String registrationId, @RequestBody JsonNode body) {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
     return store.tx(
-        () ->
-            passkeys.completeRegistration(
-                UUID.fromString(principal.subject()),
-                registrationId,
-                body.path("name").asString(""),
-                body.path("credential"),
-                teamConfig()));
+        () -> {
+          ObjectNode result =
+              passkeys.completeRegistration(
+                  UUID.fromString(principal.subject()),
+                  registrationId,
+                  body.path("name").asString(""),
+                  body.path("credential"),
+                  teamConfig());
+          revokeOtherCredentialSessions();
+          return result;
+        });
   }
 
   @PatchMapping("/me/passkeys/{passkeyId}")
@@ -257,6 +266,7 @@ public class IamMeController {
   }
 
   @DeleteMapping("/me/passkeys/{passkeyId}")
+  @RequiresRecentStepUp
   @AuthenticatedOnly
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void deletePasskey(@PathVariable String passkeyId) {
@@ -294,7 +304,7 @@ public class IamMeController {
         () -> {
           ObjectNode d = requireDevice(principal.subject(), deviceId);
           String name = body.path("name").asString("");
-          IamError.require(!name.isBlank() && name.length() <= 64, "invalid_password", 400);
+          IamError.validate(!name.isBlank() && name.length() <= 64);
           d.put("name", name);
           store.save("device", d);
           return deviceView(d);
@@ -446,5 +456,13 @@ public class IamMeController {
     } catch (Exception e) {
       return "Auriga";
     }
+  }
+
+  private void revokeOtherCredentialSessions() {
+    var principal = AuthorizationRules.currentPrincipal().orElseThrow();
+    for (ObjectNode session : store.all("session"))
+      if (session.path("accountId").asString().equals(principal.subject())
+          && !session.path("sessionId").asString().equals(principal.sessionId())
+          && !session.path("revoked").asBoolean()) sessions.revokeOne(session, "security");
   }
 }

@@ -19,6 +19,7 @@ public final class TeamAccounts {
   private final Clock clock;
   private final EventPublisher events;
   private final Argon2PasswordEncoder passwords = new Argon2PasswordEncoder(16, 32, 1, 65536, 3);
+  private final String dummyHash = passwords.encode(Secrets.random());
 
   public TeamAccounts(IamStore store, Secrets secrets, Clock clock, EventPublisher events) {
     this.store = store;
@@ -28,18 +29,35 @@ public final class TeamAccounts {
   }
 
   static String accountKey(String providerId, String username) {
-    return providerId + ":" + username.toLowerCase(Locale.ROOT);
+    return providerId + ":" + username.strip().toLowerCase(Locale.ROOT);
   }
 
   public void register(String providerId, String username, String password, String displayName) {
+    username = username.strip();
     IamError.require(USERNAME.matcher(username).matches(), "invalid_username", 400);
     IamError.require(
         password != null && password.length() >= 10 && password.length() <= 256,
         "invalid_password",
         400);
+    IamError.validate(
+        displayName == null
+            || displayName.length() <= 64
+                && displayName
+                    .codePoints()
+                    .noneMatch(
+                        c ->
+                            Character.isISOControl(c) || Character.getType(c) == Character.FORMAT));
     String key = accountKey(providerId, username);
     store.lock("team-account:" + key);
-    IamError.require(store.get("team_account", key, true) == null, "username_taken", 409);
+    ObjectNode existing = store.get("team_account", key, true);
+    if (existing != null
+        && existing.has("pendingUntil")
+        && !clock.instant().isBefore(Instant.parse(existing.path("pendingUntil").asString()))
+        && store.get("identity", key, false) == null) {
+      store.delete("team_account", key);
+      existing = null;
+    }
+    IamError.require(existing == null, "username_taken", 409);
     store.insert(
         "team_account",
         key,
@@ -52,9 +70,38 @@ public final class TeamAccounts {
             displayName == null || displayName.isBlank() ? username : displayName,
             "passwordHash",
             passwords.encode(password),
+            "pendingUntil",
+            clock.instant().plusSeconds(300).toString(),
             "createdAt",
             clock.instant().toString()),
         null);
+  }
+
+  void pendingRegistrationUntil(String providerId, String username, String txId, Instant expires) {
+    String key = accountKey(providerId, username);
+    ObjectNode row = store.get("team_account", key, true);
+    IamError.require(row != null, "invalid_credentials", 401);
+    row.put("pendingUntil", expires.toString());
+    row.put("pendingTxId", txId);
+    store.save("team_account", row);
+  }
+
+  void lockPendingRegistration(String providerId, String username, String txId) {
+    String key = accountKey(providerId, username);
+    store.lock("team-account:" + key);
+    ObjectNode row = store.get("team_account", key, true);
+    IamError.require(
+        row != null && txId.equals(row.path("pendingTxId").asString("")),
+        "invalid_credentials",
+        401);
+  }
+
+  void abandonPendingRegistration(String providerId, String username, String txId) {
+    String key = accountKey(providerId, username);
+    store.lock("team-account:" + key);
+    ObjectNode row = store.get("team_account", key, true);
+    if (row != null && txId.equals(row.path("pendingTxId").asString("")))
+      store.delete("team_account", key);
   }
 
   /** Drop credentials if invite redemption failed after the connector already registered them. */
@@ -66,10 +113,9 @@ public final class TeamAccounts {
   public ObjectNode authenticatePassword(String providerId, String username, String password) {
     IamError.require(password != null && password.length() <= 256, "invalid_credentials", 401);
     ObjectNode row = store.get("team_account", accountKey(providerId, username), true);
-    IamError.require(
-        row != null && passwords.matches(password, row.path("passwordHash").asString()),
-        "invalid_credentials",
-        401);
+    boolean matches =
+        passwords.matches(password, row == null ? dummyHash : row.path("passwordHash").asString());
+    IamError.require(row != null && matches, "invalid_credentials", 401);
     return row;
   }
 
@@ -91,6 +137,19 @@ public final class TeamAccounts {
 
   public boolean hasTotp(UUID accountId) {
     return store.get("team_totp", accountId.toString(), false) != null;
+  }
+
+  boolean hasMfa(UUID accountId) {
+    return hasTotp(accountId) || passkeyCount(accountId) > 0;
+  }
+
+  /** Only the password-verified, browser-bound login transaction may bootstrap a first factor. */
+  void enrollFirstTotp(UUID accountId, String secret, String code) {
+    store.lock("team-totp-enroll:" + accountId);
+    IamError.requireAbsentCredential(hasMfa(accountId));
+    long counter = Totp.verify(secret, code, clock.instant(), -1);
+    IamError.require(counter >= 0, "invalid_credentials", 401);
+    saveTotp(accountId, secret, counter);
   }
 
   public int passkeyCount(UUID accountId) {
@@ -119,6 +178,8 @@ public final class TeamAccounts {
   }
 
   public ObjectNode beginTotpEnrollment(UUID accountId, String issuerLabel) {
+    CredentialAuthorization.requireRecent(accountId, clock);
+    IamError.requireAbsentCredential(hasTotp(accountId));
     store.lock("team-totp-enroll:" + accountId);
     String enrollmentId = UuidV7.next().toString();
     String secret = Totp.generate();
@@ -158,6 +219,9 @@ public final class TeamAccounts {
   }
 
   public void confirmTotpEnrollment(UUID accountId, String enrollmentId, String code) {
+    CredentialAuthorization.requireRecent(accountId, clock);
+    store.lock("team-totp-enroll:" + accountId);
+    IamError.requireAbsentCredential(hasTotp(accountId));
     ObjectNode ceremony = store.get("team_ceremony", enrollmentId, true);
     IamError.require(
         ceremony != null
@@ -172,7 +236,11 @@ public final class TeamAccounts {
             "totp-enroll:" + TenantContext.require() + ":" + enrollmentId);
     long counter = Totp.verify(secret, code, clock.instant(), -1);
     IamError.require(counter >= 0, "invalid_credentials", 400);
-    ObjectNode existing = store.get("team_totp", accountId.toString(), true);
+    saveTotp(accountId, secret, counter);
+    store.delete("team_ceremony", enrollmentId);
+  }
+
+  private void saveTotp(UUID accountId, String secret, long counter) {
     ObjectNode row =
         Json.object(
             "accountId",
@@ -181,12 +249,7 @@ public final class TeamAccounts {
             secrets.encrypt(secret, "totp:" + TenantContext.require() + ":" + accountId),
             "lastCounter",
             counter);
-    if (existing == null) store.insert("team_totp", accountId.toString(), row, null);
-    else {
-      row.put("id", existing.path("id").asString());
-      store.save("team_totp", row);
-    }
-    store.delete("team_ceremony", enrollmentId);
+    store.insert("team_totp", accountId.toString(), row, null);
     events.publish(
         "identity.mfa_changed",
         accountId.toString(),
@@ -196,7 +259,7 @@ public final class TeamAccounts {
             "method",
             "totp",
             "change",
-            existing == null ? "added" : "reset",
+            "added",
             "actorId",
             accountId.toString()));
   }
@@ -220,8 +283,7 @@ public final class TeamAccounts {
   }
 
   public UUID accountIdFor(String providerId, String username) {
-    ObjectNode identity =
-        store.get("identity", providerId + ":" + username.toLowerCase(Locale.ROOT), false);
+    ObjectNode identity = store.get("identity", accountKey(providerId, username), false);
     return identity == null ? null : UUID.fromString(identity.path("accountId").asString());
   }
 

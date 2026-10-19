@@ -245,7 +245,6 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
           if (!purpose.equals("login"))
             IamError.require(
                 principal.subject().equals(row.path("accountId").asString("")), "forbidden", 403);
-          qr.markScanned(challengeId, principal.subject());
           return view;
         });
   }
@@ -255,21 +254,37 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void confirmQr(@PathVariable String challengeId, @RequestBody JsonNode body) {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    store.tx(
-        () -> {
-          ObjectNode row = qr.row(challengeId, true);
-          IamError.require(row != null, "not_found", 404);
-          String purposeAccount =
-              row.path("purpose").asString("login").equals("login")
-                  ? null
-                  : row.path("accountId").asString(null);
-          qr.confirm(
-              challengeId,
-              body.path("matchCode").asString(""),
-              principal.subject(),
-              purposeAccount);
-          return null;
-        });
+    String failure =
+        store.tx(
+            () -> {
+              ObjectNode session = sessions.activeById(principal.sessionId());
+              IamError.require(
+                  session != null
+                      && session.path("mfa").asBoolean()
+                      && session.path("accountId").asString().equals(principal.subject()),
+                  "step_up_required",
+                  403);
+              ObjectNode row = qr.row(challengeId, true);
+              IamError.require(row != null, "not_found", 404);
+              String purposeAccount =
+                  row.path("purpose").asString("login").equals("login")
+                      ? null
+                      : row.path("accountId").asString(null);
+              try {
+                qr.confirm(
+                    challengeId,
+                    body.path("matchCode").asString(""),
+                    principal.subject(),
+                    purposeAccount);
+              } catch (auriga.common.error.AurigaException error) {
+                if (error.errorCode().code().equals("iam.qr_match_mismatch"))
+                  return "qr_match_mismatch";
+                throw error;
+              }
+              return null;
+            });
+    // Throw after commit: a wrong match code permanently consumes the challenge.
+    if (failure != null) throw IamError.error(failure, 409);
   }
 
   @PostMapping("/login/qr/{challengeId}/reject")

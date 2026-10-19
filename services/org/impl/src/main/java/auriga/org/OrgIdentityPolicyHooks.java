@@ -19,6 +19,11 @@ public final class OrgIdentityPolicyHooks implements IdentityPolicyHooks {
   }
 
   @Override
+  public boolean validateInvitation(String code, UUID provider) {
+    return org.validateInvitation(code, provider);
+  }
+
+  @Override
   public boolean consumeInvitation(String code, UUID provider, JsonNode profile) {
     UUID accountId = PendingAccount.current().or(() -> accountIdFromProfile(profile)).orElse(null);
     if (accountId == null || code == null || code.isBlank()) return false;

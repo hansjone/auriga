@@ -33,7 +33,7 @@ Java SPI（`auriga.iam.spi`，由 B2 实现）和插件离线版的 JS 连接器
 2. **跳转类**：一律用 `state`、`nonce` 和 PKCE；回调地址用 `ctx.callbackUrl`（按身份源实例固定），不接受参数指定。
 3. **扫码类**：`qr` 步骤必须带两位比对码；平台把二维码和发起端 cookie 绑定，防止二维码被转发。状态变化时连接器返回新的 `qr` 步骤（`status: scanned`），平台经 SSE 推给登录页。
 4. **登录事务** 5 分钟过期、一次性使用；按 IP 和账号限速。过期后再调用返回 `iam.login_tx_expired`。
-5. **错误**：连接器用 `fail` 步骤报错，`code` 用 `iam.` 前缀的通用码（例如 `iam.invalid_credentials`、`iam.external_denied`、`iam.connector_unavailable`），或连接器自己的 `<连接器类型>.<码>`。
+5. **错误**：连接器用 `fail` 步骤报错，`code` 用 `iam.` 前缀的通用码（例如 `iam.invalid_credentials`、`iam.external_denied`、`iam.connector_unavailable`、`iam.admission_denied`），或连接器自己的 `<连接器类型>.<码>`。
 6. **机密**：`configSchema` 里标 `"x-secret": true` 的字段加密保存、管理台不回显；传给连接器时已解密，连接器不得记录到日志。连接器的每次外部调用由平台记录耗时和结果（不记凭据）。
 7. **兼容**：`spiVersion` 不兼容的连接器拒绝加载，并在管理台提示。
 

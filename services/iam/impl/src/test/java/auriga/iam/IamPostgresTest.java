@@ -18,6 +18,77 @@ class IamPostgresTest {
   private static IamStore store;
   private static JdbcTemplate jdbc;
 
+  @Test
+  void wrongQrCodeCommitsFailureAndCannotBeRetried() {
+    UUID tenant = UUID.randomUUID(), account = UUID.randomUUID();
+    var clock = java.time.Clock.systemUTC();
+    var qr = new QrChallenges(store, clock);
+    var sessions = org.mockito.Mockito.mock(SessionManager.class);
+    org.mockito.Mockito.when(sessions.activeById("qr-session"))
+        .thenReturn(Json.object("accountId", account.toString(), "mfa", true));
+    var controller = new IamLoginController(null, null, store, sessions, qr, null);
+    var principal =
+        new auriga.common.security.AurigaPrincipal(
+            account.toString(),
+            tenant,
+            auriga.common.security.PrincipalType.USER,
+            auriga.common.security.TokenContext.PORTAL,
+            "qr-session",
+            null,
+            "member",
+            List.of(),
+            Set.of(),
+            clock.instant(),
+            clock.instant(),
+            "qr-test");
+    try {
+      TenantContext.run(
+          tenant,
+          () ->
+              auriga.common.context.RequestContext.start("qr-test", null)
+                  .withPrincipal(principal)
+                  .run(
+                      () -> {
+                        var challenge =
+                            store.tx(
+                                () ->
+                                    qr.create(
+                                        "tx",
+                                        UUID.randomUUID().toString(),
+                                        "login",
+                                        "192.0.2.10",
+                                        "test",
+                                        "https://portal.example.com"));
+                        String id = challenge.path("challengeId").asString();
+                        store.tx(
+                            () -> {
+                              qr.markScanned(id, account.toString());
+                              return null;
+                            });
+                        String code = challenge.path("matchCode").asString(),
+                            wrong = code.equals("000000") ? "000001" : "000000";
+                        assertEquals(
+                            "iam.qr_match_mismatch",
+                            assertThrows(
+                                    auriga.common.error.AurigaException.class,
+                                    () -> controller.confirmQr(id, Json.object("matchCode", wrong)))
+                                .errorCode()
+                                .code());
+                        assertEquals(
+                            "failed", store.tx(() -> qr.row(id, false)).path("status").asString());
+                        assertEquals(
+                            "iam.external_denied",
+                            assertThrows(
+                                    auriga.common.error.AurigaException.class,
+                                    () -> controller.confirmQr(id, Json.object("matchCode", code)))
+                                .errorCode()
+                                .code());
+                      }));
+    } finally {
+      controller.destroy();
+    }
+  }
+
   @BeforeAll
   static void migrate() {
     var roles =

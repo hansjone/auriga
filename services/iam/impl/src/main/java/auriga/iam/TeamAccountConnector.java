@@ -126,7 +126,7 @@ public final class TeamAccountConnector implements IdentityConnector {
     JsonNode values = input.path("values");
     String providerId = context.path("providerId").asString();
     if (phase.equals("register") && formId.equals("register")) {
-      String username = values.path("username").asString("");
+      String username = values.path("username").asString("").strip().toLowerCase(Locale.ROOT);
       String password = values.path("password").asString("");
       String displayName = values.path("displayName").asString(username);
       accounts.register(providerId, username, password, displayName);
@@ -149,6 +149,8 @@ public final class TeamAccountConnector implements IdentityConnector {
         state.put("displayName", row.path("displayName").asString());
         return result(totpForm(), state);
       }
+      if (account.id != null && accounts.passkeyCount(account.id) > 0)
+        return beginWebAuthn(context, config, row.path("username").asString());
       return done(accounts.profile(row, false));
     }
     if (phase.equals("totp") && formId.equals("totp")) {
@@ -216,37 +218,8 @@ public final class TeamAccountConnector implements IdentityConnector {
   }
 
   private JsonNode beginQr(JsonNode context, JsonNode config) {
-    ObjectNode created =
-        qr.create(
-            context.path("txId").asString(),
-            context.path("providerId").asString(),
-            context.path("purpose").asString("login"),
-            context.path("clientIp").asString(""),
-            context.path("userAgent").asString(""),
-            portalBase);
-    ObjectNode step =
-        Json.object(
-            "type",
-            "qr",
-            "content",
-            created.path("content").asString(),
-            "matchCode",
-            created.path("matchCode").asString(),
-            "status",
-            "waiting",
-            "expiresAt",
-            created.path("expiresAt").asString(),
-            "pollIntervalMs",
-            2000);
-    return result(
-        step,
-        Json.object(
-            "phase",
-            "qr",
-            "challengeId",
-            created.path("challengeId").asString(),
-            "content",
-            created.path("content").asString()));
+    // QR scan POST and six-digit codes require a contract update before enabling this flow.
+    return fail("iam.external_denied");
   }
 
   private JsonNode beginWebAuthn(JsonNode context, JsonNode config, String username) {

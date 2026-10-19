@@ -1322,6 +1322,30 @@ public final class OrgService {
 
   public record ResolvedInvitation(ObjectNode invitation, String reason) {}
 
+  /** Read-only preflight; redemption still locks and rechecks the invitation at completion. */
+  public boolean validateInvitation(String code, UUID providerId) {
+    if (code == null || code.isBlank() || TenantContext.current().isEmpty()) return false;
+    return store.tx(
+        () -> {
+          var rows =
+              store
+                  .jdbc()
+                  .queryForList(
+                      "SELECT provider_ids FROM invitation WHERE tenant_id=? AND code_hash=?"
+                          + " AND status='active' AND expires_at>? AND uses<max_uses",
+                      store.tenantId(),
+                      hashCode(code),
+                      java.sql.Timestamp.from(clock.instant()));
+          if (rows.isEmpty()) return false;
+          try {
+            UUID[] providers = OrgStore.asUuidArray(rows.getFirst().get("provider_ids"));
+            return providers.length == 0 || java.util.Arrays.asList(providers).contains(providerId);
+          } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(e);
+          }
+        });
+  }
+
   public ResolvedInvitation resolveInvitation(String code) {
     // May be called without tenant (gRPC); try hash lookup via system-less path using default
     // tenant

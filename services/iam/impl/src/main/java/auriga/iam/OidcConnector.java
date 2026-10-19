@@ -1,10 +1,12 @@
 package auriga.iam;
 
 import auriga.iam.api.IdentityConnector;
+import com.nimbusds.jose.*;
+import com.nimbusds.jose.crypto.*;
+import com.nimbusds.jose.jwk.*;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import java.net.URLEncoder;
-import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
@@ -19,24 +21,18 @@ import tools.jackson.databind.node.ObjectNode;
  * PKCE; callback URL comes from {@code ctx.callbackUrl}.
  */
 public final class OidcConnector implements IdentityConnector {
-  private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(10);
   private static final List<String> DEFAULT_SCOPES = List.of("openid", "profile", "email");
 
-  private final HttpClient http;
+  private final OidcHttp http;
   private final Clock clock;
   private final OidcMetadata metadata;
 
   public OidcConnector() {
-    this(
-        HttpClient.newBuilder()
-            .connectTimeout(HTTP_TIMEOUT)
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build(),
-        Clock.systemUTC());
+    this(false, Clock.systemUTC());
   }
 
-  OidcConnector(HttpClient http, Clock clock) {
-    this.http = http;
+  OidcConnector(boolean allowLocalHttp, Clock clock) {
+    this.http = new OidcHttp(allowLocalHttp);
     this.clock = clock;
     this.metadata = new OidcMetadata(http, clock);
   }
@@ -225,14 +221,7 @@ public final class OidcConnector implements IdentityConnector {
     long started = System.nanoTime();
     String outcome = "failure";
     try {
-      HttpRequest request =
-          HttpRequest.newBuilder(doc.tokenEndpoint())
-              .timeout(HTTP_TIMEOUT)
-              .header("Content-Type", "application/x-www-form-urlencoded")
-              .header("Accept", "application/json")
-              .POST(HttpRequest.BodyPublishers.ofString(body))
-              .build();
-      HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+      OidcHttp.Response response = http.send(doc.tokenEndpoint(), "POST", body, Map.of());
       if (response.statusCode() >= 400 && response.statusCode() < 500)
         throw new AurigaFail("iam.external_denied");
       IamError.require(response.statusCode() == 200, "connector_unavailable", 502);
@@ -240,9 +229,6 @@ public final class OidcConnector implements IdentityConnector {
       if (tokens.has("error")) throw new AurigaFail("iam.external_denied");
       outcome = "success";
       return tokens;
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw IamError.error("connector_unavailable", 502);
     } catch (java.io.IOException e) {
       throw IamError.error("connector_unavailable", 502);
     } finally {
@@ -261,13 +247,26 @@ public final class OidcConnector implements IdentityConnector {
     String idToken = tokens.path("id_token").asString("");
     if (!idToken.isBlank()) {
       try {
-        JWTClaimsSet set = SignedJWT.parse(idToken).getJWTClaimsSet();
+        SignedJWT jwt = SignedJWT.parse(idToken);
+        verifySignature(doc, jwt);
+        JWTClaimsSet set = jwt.getJWTClaimsSet();
+        if (set.getSubject() == null || set.getSubject().isBlank())
+          throw new AurigaFail("iam.external_denied");
         if (!OidcMetadata.normalizeIssuer(config.path("issuer").asString())
             .equals(OidcMetadata.normalizeIssuer(Objects.toString(set.getIssuer(), ""))))
           throw new AurigaFail("iam.external_denied");
         List<String> audience = set.getAudience();
         if (audience == null
             || audience.stream().noneMatch(a -> config.path("clientId").asString().equals(a)))
+          throw new AurigaFail("iam.external_denied");
+        String client = config.path("clientId").asString();
+        if ((audience.size() > 1 || set.getClaim("azp") != null)
+            && !client.equals(set.getStringClaim("azp")))
+          throw new AurigaFail("iam.external_denied");
+        if (set.getIssueTime() == null
+            || set.getIssueTime().toInstant().isAfter(clock.instant().plusSeconds(30))
+            || set.getNotBeforeTime() != null
+                && set.getNotBeforeTime().toInstant().isAfter(clock.instant().plusSeconds(30)))
           throw new AurigaFail("iam.external_denied");
         String tokenNonce = set.getStringClaim("nonce");
         if (!nonce.isBlank() && !Secrets.same(nonce, tokenNonce == null ? "" : tokenNonce))
@@ -280,35 +279,86 @@ public final class OidcConnector implements IdentityConnector {
         throw new AurigaFail("iam.external_denied");
       }
     }
+    if (idToken.isBlank() && Arrays.asList(scopes(config).split(" ")).contains("openid"))
+      throw new AurigaFail("iam.external_denied");
     String access = tokens.path("access_token").asString("");
     if (doc.userinfoEndpoint() != null && !access.isBlank()) {
       JsonNode info = userinfo(doc, access);
-      info.properties().forEach(e -> claims.set(e.getKey(), e.getValue()));
+      if (!idToken.isBlank() && !claims.path("sub").equals(info.path("sub")))
+        throw new AurigaFail("iam.external_denied");
+      // Signed claims remain authoritative, including custom identity/email mappings.
+      info.properties()
+          .forEach(
+              e -> {
+                if (!claims.has(e.getKey())
+                    && !Set.of(
+                            "iss",
+                            "aud",
+                            "nonce",
+                            "azp",
+                            "exp",
+                            "iat",
+                            "nbf",
+                            "auth_time",
+                            "amr",
+                            "acr")
+                        .contains(e.getKey())) claims.set(e.getKey(), e.getValue());
+              });
     }
     if (claims.isEmpty()) throw new AurigaFail("iam.external_denied");
     return claims;
+  }
+
+  private void verifySignature(OidcMetadata.Document doc, SignedJWT jwt) {
+    if (doc.jwksUri() == null
+        || !Set.of(JWSAlgorithm.RS256, JWSAlgorithm.ES256).contains(jwt.getHeader().getAlgorithm())
+        || jwt.getHeader().getCriticalParams() != null
+            && !jwt.getHeader().getCriticalParams().isEmpty())
+      throw new AurigaFail("iam.external_denied");
+    try {
+      OidcHttp.Response response = http.send(doc.jwksUri(), "GET", null, Map.of());
+      IamError.require(response.statusCode() == 200, "connector_unavailable", 502);
+      for (JWK key : JWKSet.parse(response.body()).getKeys()) {
+        if (key.isPrivate()
+            || key.getKeyUse() != null && !KeyUse.SIGNATURE.equals(key.getKeyUse())
+            || key.getKeyOperations() != null
+                && !key.getKeyOperations().contains(KeyOperation.VERIFY)
+            || key.getAlgorithm() != null
+                && !key.getAlgorithm().equals(jwt.getHeader().getAlgorithm())
+            || jwt.getHeader().getKeyID() != null
+                && !jwt.getHeader().getKeyID().equals(key.getKeyID())) continue;
+        if (key instanceof RSAKey rsa
+            && JWSAlgorithm.RS256.equals(jwt.getHeader().getAlgorithm())
+            && rsa.size() >= 2048
+            && jwt.verify(new RSASSAVerifier(rsa))) return;
+        if (key instanceof ECKey ec
+            && Curve.P_256.equals(ec.getCurve())
+            && JWSAlgorithm.ES256.equals(jwt.getHeader().getAlgorithm())
+            && jwt.verify(new ECDSAVerifier(ec))) return;
+      }
+      throw new AurigaFail("iam.external_denied");
+    } catch (java.text.ParseException | JOSEException e) {
+      throw new AurigaFail("iam.external_denied");
+    } catch (java.io.IOException e) {
+      throw IamError.error("connector_unavailable", 502);
+    }
   }
 
   private JsonNode userinfo(OidcMetadata.Document doc, String accessToken) {
     long started = System.nanoTime();
     String outcome = "failure";
     try {
-      HttpRequest request =
-          HttpRequest.newBuilder(doc.userinfoEndpoint())
-              .timeout(HTTP_TIMEOUT)
-              .header("Authorization", "Bearer " + accessToken)
-              .header("Accept", "application/json")
-              .GET()
-              .build();
-      HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+      OidcHttp.Response response =
+          http.send(
+              doc.userinfoEndpoint(),
+              "GET",
+              null,
+              Map.of("Authorization", "Bearer " + accessToken));
       if (response.statusCode() >= 400 && response.statusCode() < 500)
         throw new AurigaFail("iam.external_denied");
       IamError.require(response.statusCode() == 200, "connector_unavailable", 502);
       outcome = "success";
       return Json.MAPPER.readTree(response.body());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw IamError.error("connector_unavailable", 502);
     } catch (java.io.IOException e) {
       throw IamError.error("connector_unavailable", 502);
     } finally {

@@ -104,6 +104,16 @@ public final class ProviderManager {
           }
           if (patch.has("config")) {
             ObjectNode merged = decryptedConfig(row);
+            JsonNode configPatch = patch.path("config");
+            if (type.equals("oidc")
+                && configPatch.has("issuer")
+                && !merged.path("issuer").equals(configPatch.path("issuer")))
+              IamError.require(
+                  configPatch.path("clientSecret").isString()
+                      && !configPatch.path("clientSecret").asString().isBlank()
+                      && !configPatch.path("clientSecret").equals(merged.path("clientSecret")),
+                  "invalid_config",
+                  400);
             patch
                 .path("config")
                 .properties()
@@ -122,7 +132,20 @@ public final class ProviderManager {
           }
           row.put("updatedAt", clock.instant().toString());
           store.save("idp_provider", row);
-          audit.record(AuditEntry.builder("iam.provider.update").target("provider", id).build());
+          List<String> fields = new ArrayList<>();
+          patch
+              .properties()
+              .forEach(
+                  e -> {
+                    if (e.getKey().equals("config"))
+                      e.getValue().properties().forEach(c -> fields.add("config." + c.getKey()));
+                    else fields.add(e.getKey());
+                  });
+          audit.record(
+              AuditEntry.builder("iam.provider.update")
+                  .target("provider", id)
+                  .detail("fields", fields)
+                  .build());
           return view(row);
         });
   }
