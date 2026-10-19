@@ -27,4 +27,4 @@ jobs:
           path-to-signatures: signatures/cla-v1.json
           path-to-document: https://github.com/hansjone/auriga/blob/main/CLA.md
           branch: cla-signatures
-          allowlist: 'hansjone,*[bot],github-actions'
+          allowlist: 'hansjone,zhoutianjun127,*[bot],github-actions'
