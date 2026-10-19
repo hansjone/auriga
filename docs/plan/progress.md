@@ -14,3 +14,14 @@
 | S2 面板 Web Component | 完成（Sonnet） | 托管和连接两种模式都在真实 DSH 0.2.0-rc.2 里挂载成功，样式隔离自检 6/6；连接模式由插件验签后经本机路由提供，设备令牌不进页面（ADR 0017）。原型在本地分支 spike/s2-panel |
 | S3 Windows 原生隔离 | 暂停（M4 再继续） | 第二轮修好 WFP 清理、登录权限、配额；第三轮（审查意见）shim 改 SYSTEM 并通过存活实验，但负载启动回归、清理时进程未结束；第四轮修进程数 / AppContainer / 内存，第五轮修回归（任务说明已写好） |
 | S4 DSH 运行时制品 | 完成（Codex） | Node + DSH + 锁定依赖打成 tar.gz（约 180 MB 压缩）；Windows / Linux 断网、只读目录启动通过；可在 Windows 交叉打 Linux 包且可复现（ADR 0019）。原型在 spike/s4-dsh-runtime 分支 |
+
+## M1 平台底座
+
+| 编号 | 状态 | 结论 / 备注 |
+|---|---|---|
+| B2 iam 核心 | 完成（#13） | Codex 实现；CI 全绿；Cursor 主控只读安全审查通过（`.agents/runs/auriga-B2-review.md`），无阻断项；接线留给 B1/B6/B7/安装器 |
+| B8 门户/管理台壳 | 完成（#12） | Cursor；shared API+步骤渲染+mock；portal/admin 登录与框架；第二轮去掉本地 alias、错误码对齐契约 |
+| B1 ctl / B7 edge / B6 org | 待派 | 按序给 Cursor；任务说明未写 |
+| B3 / B4 | 等待 | 依赖 B2，现已可派 |
+| B5 企业连接器 | 等待 | 私有仓，需用户提供公司登录信息 |
+| B9 M1 集成 | 等待 | B1–B8 齐后做 |
