@@ -10,7 +10,7 @@
 | C1 契约第一版 | 完成 | OpenAPI（iam、org、workspace、远程连接器）、protobuf（入网、NodeControl、iam / org 内部接口）、事件、身份源步骤协议、插件协议、令牌和 KV；buf lint、redocly lint、Ajv 编译通过；Go / Java / TS 类型生成并编译通过；Opus 安全评审 25 条已全部处理（实例改用独立子域，ADR 0020） |
 | K1 仓库骨架 | 未开始 | |
 | K2 common 公共库 | 未开始 | |
-| S1 DSH mcp-client | 未开始 | |
+| S1 DSH mcp-client | 完成（Codex） | 原生 mcp-client 支持 Streamable HTTP 和自定义请求头，但不透传 DSH 会话；会话相关的团队工具由插件注册后转发（ADR 0016）。原型在本地分支 spike/s1-mcp-client |
 | S2 面板 Web Component | 未开始 | |
 | S3 Windows 原生隔离 | 未开始 | 在 GitHub Actions 的 Windows 虚拟机里跑，不动开发机 |
 | S4 DSH 运行时制品 | 未开始 | |
