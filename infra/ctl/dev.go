@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	_ "github.com/lib/pq"
 	"github.com/nats-io/nats-server/v2/server"
 )
 
@@ -160,12 +162,17 @@ func startDev(ctx context.Context, options devOptions, logger *slog.Logger) (_ *
 			result = errors.Join(result, services.Close())
 		}
 	}()
-	lockPath := filepath.Join(o.DataDir, "dev.lock")
+	lockPath := filepath.Join(o.DataDir, lockFileName)
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		return nil, fmt.Errorf("lock dev directory (another ctl dev may be running): %w", err)
+		return nil, fmt.Errorf("lock data directory (another ctl may be running): %w", err)
 	}
 	services.lockPath = lockPath
+	if _, err := fmt.Fprintf(lock, "%d\n", os.Getpid()); err != nil {
+		_ = lock.Close()
+		_ = os.Remove(lockPath)
+		return nil, err
+	}
 	if err := lock.Close(); err != nil {
 		return nil, err
 	}
@@ -200,12 +207,28 @@ func startDev(ctx context.Context, options devOptions, logger *slog.Logger) (_ *
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	pgURL := (&url.URL{Scheme: "postgresql", User: url.UserPassword("auriga_dev", password), Host: fmt.Sprintf("127.0.0.1:%d", o.PGPort), Path: "/auriga", RawQuery: "sslmode=disable"}).String()
+	db, err := sql.Open("postgres", pgURL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	if err := db.PingContext(ctx); err != nil {
+		return nil, fmt.Errorf("ping PostgreSQL: %w", err)
+	}
+	if err := ensureServiceRoles(db, o.DataDir, o.PGPort); err != nil {
+		return nil, fmt.Errorf("initialize service roles: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	services.nats, err = startNATS(o.NATSPort, filepath.Join(o.DataDir, "nats"))
 	if err != nil {
 		return nil, err
 	}
 	services.Connections = devConnections{
-		Postgres: (&url.URL{Scheme: "postgresql", User: url.UserPassword("auriga_dev", password), Host: fmt.Sprintf("127.0.0.1:%d", o.PGPort), Path: "/auriga", RawQuery: "sslmode=disable"}).String(),
+		Postgres: pgURL,
 		NATS:     services.nats.ClientURL(),
 	}
 	return services, nil
@@ -222,7 +245,12 @@ func runDev(ctx context.Context, options devOptions, out io.Writer, logger *slog
 	}
 	defer func() { result = errors.Join(result, services.Close()) }()
 	c := services.Connections
-	if _, err := fmt.Fprintf(out, "PostgreSQL: %s\nNATS: %s\nCredentials: %s\nPress Ctrl+C to stop.\n", c.Postgres, c.NATS, filepath.Join(options.DataDir, "credentials.env")); err != nil {
+	dataDir := options.DataDir
+	if abs, err := filepath.Abs(dataDir); err == nil {
+		dataDir = abs
+	}
+	if _, err := fmt.Fprintf(out, "PostgreSQL: %s\nNATS: %s\nCredentials: %s\nService roles: %s\nPress Ctrl+C to stop.\n",
+		c.Postgres, c.NATS, filepath.Join(dataDir, "credentials.env"), serviceRolesPath(dataDir)); err != nil {
 		return err
 	}
 	logger.Info("development services ready", "pgPort", options.PGPort, "natsPort", options.NATSPort)

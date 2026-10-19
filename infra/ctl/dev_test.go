@@ -231,7 +231,7 @@ func TestDevCommandCancellation(t *testing.T) {
 		done <- err
 	}()
 	scan := bufio.NewScanner(reader)
-	for range 4 {
+	for range 5 {
 		if !scan.Scan() {
 			t.Fatalf("command failed before ready: %v", scan.Err())
 		}
