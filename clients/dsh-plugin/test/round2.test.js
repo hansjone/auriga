@@ -222,3 +222,51 @@ test('TEST_ARGON2 meets configured floors', () => {
   assert.ok(TEST_ARGON2.t >= ARGON2_LIMITS.tMin);
   assert.ok(TEST_ARGON2.saltLen >= ARGON2_LIMITS.saltMin);
 });
+
+for (const scenario of [
+  { name: 'non-owner subject', providerId: 'emergency', subject: 'bob' },
+  { name: 'non-owner provider', providerId: 'oidc', subject: 'alice' },
+  {
+    name: 'expired MFA',
+    providerId: 'emergency',
+    subject: 'alice',
+    age: 600_001,
+  },
+]) {
+  test(`linkIdentity rejects ${scenario.name} with common.forbidden`, async () => {
+    let nowMs = fixedNow().getTime();
+    const runtime = await createStandalone({
+      now: () => new Date(nowMs),
+      config: { secure: false, connectors: [] },
+    });
+    runtime.store.claimOwner({ providerId: 'emergency', subject: 'alice' });
+    const issued = runtime.sessions.issue({
+      providerId: scenario.providerId,
+      subject: scenario.subject,
+      mfaPerformed: true,
+    });
+    nowMs += scenario.age ?? 0;
+    const cookies = {
+      [runtime.sessions.sessionCookie]: issued.session.sessionId,
+      [runtime.sessions.csrfCookie]: issued.csrf,
+    };
+    const headers = { 'x-auriga-csrf': issued.csrf };
+    assert.ok(
+      runtime.sessions.readSession(cookies),
+      'session itself is still valid',
+    );
+    assert.equal(runtime.sessions.checkCsrf('POST', cookies, headers).ok, true);
+    assert.deepEqual(
+      runtime.linkIdentity('oidc', 'new-identity', { cookies, headers }),
+      {
+        ok: false,
+        code: 'common.forbidden',
+      },
+    );
+    assert.equal(runtime.store.hasIdentity('oidc', 'new-identity'), false);
+    assert.deepEqual(runtime.store.getOwner(), {
+      providerId: 'emergency',
+      subject: 'alice',
+    });
+  });
+}

@@ -55,6 +55,17 @@ function isLoopbackIp(address) {
   return address === '127.0.0.1' || address === '::1' || localHost(address);
 }
 
+function prohibitedAddress() {
+  return Object.assign(new Error('OIDC target address is prohibited'), {
+    code: 'iam.connector_unavailable',
+  });
+}
+
+/** URL.hostname retains brackets around IPv6 literals. @param {string} host */
+function ipHostname(host) {
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+}
+
 /**
  * Validate resolved addresses; throw if any are prohibited.
  * @param {string} host
@@ -62,13 +73,12 @@ function isLoopbackIp(address) {
  * @param {boolean} allowLocalHttp
  */
 export function assertAddressesAllowed(host, addresses, allowLocalHttp) {
-  if (!addresses.length) throw new Error('OIDC target address is prohibited');
+  if (!addresses.length) throw prohibitedAddress();
   for (const address of addresses) {
     if (localHost(host) || isLoopbackIp(host)) {
-      if (!allowLocalHttp || !isLoopbackIp(address))
-        throw new Error('OIDC target address is prohibited');
+      if (!allowLocalHttp || !isLoopbackIp(address)) throw prohibitedAddress();
     } else if (!publicAddress(address)) {
-      throw new Error('OIDC target address is prohibited');
+      throw prohibitedAddress();
     }
   }
 }
@@ -83,6 +93,7 @@ export async function resolvePublic(
   allowLocalHttp,
   lookupAll = dnsLookupAll,
 ) {
+  host = ipHostname(host);
   if (isIP(host)) {
     assertAddressesAllowed(host, [host], allowLocalHttp);
     return [host];
@@ -116,6 +127,10 @@ export function validateUrl(url, allowLocalHttp) {
     throw Object.assign(new Error('invalid OIDC URL'), {
       code: 'common.validation_failed',
     });
+  // WHATWG URL canonicalizes decimal/octal/hex IPv4 and IPv6 spellings first.
+  // Literal hosts bypass net.connect's lookup, so check them before any fetch.
+  const host = ipHostname(url.hostname);
+  if (isIP(host)) assertAddressesAllowed(host, [host], allowLocalHttp);
 }
 
 /**
@@ -169,20 +184,27 @@ export function createOidcHttp(options = {}) {
    * Lookup used by the undici Agent so the TCP connect uses only validated addresses
    * (no second unbound DNS resolve by fetch).
    * @param {string} hostname
-   * @param {import('node:dns').LookupOptions | number | undefined} _opts
-   * @param {(err: NodeJS.ErrnoException|null, address: string, family: number) => void} callback
+   * @param {import('node:dns').LookupOptions | number | undefined} opts
+   * @param {(err: NodeJS.ErrnoException|null, address: string | import('node:dns').LookupAddress[], family?: number) => void} callback
    */
-  function pinnedLookup(hostname, _opts, callback) {
+  function pinnedLookup(hostname, opts, callback) {
     lookupAll(hostname)
       .then((records) => {
         const addresses = records.map((r) => r.address);
         assertAddressesAllowed(hostname, addresses, allowLocalHttp);
-        const first = records[0];
-        callback(
-          null,
-          first.address,
-          first.family || (first.address.includes(':') ? 6 : 4),
-        );
+        const family = typeof opts === 'number' ? opts : opts?.family;
+        const checked = records
+          .map((r) => ({ address: r.address, family: isIP(r.address) }))
+          .filter((r) => !family || r.family === family);
+        if (!checked.length)
+          throw Object.assign(
+            new Error('OIDC target address family not found'),
+            {
+              code: 'ENOTFOUND',
+            },
+          );
+        if (typeof opts === 'object' && opts?.all) callback(null, checked);
+        else callback(null, checked[0].address, checked[0].family);
       })
       .catch((err) => {
         const error = /** @type {NodeJS.ErrnoException} */ (
@@ -249,8 +271,7 @@ export function createOidcHttp(options = {}) {
         let cur = err;
         for (let i = 0; i < 5 && cur; i++) {
           const msg = cur instanceof Error ? cur.message : String(cur);
-          if (/prohibited/i.test(msg))
-            throw new Error('OIDC target address is prohibited');
+          if (/prohibited/i.test(msg)) throw prohibitedAddress();
           cur =
             cur instanceof Error
               ? /** @type {{ cause?: unknown }} */ (cur).cause

@@ -46,13 +46,6 @@ export function createMemoryStore() {
       data.owner = { ...owner };
       return true;
     },
-    /**
-     * @deprecated use claimOwner — kept for diagnostics only
-     * @param {{ providerId: string, subject: string, displayName?: string, email?: string }} owner
-     */
-    setOwner(owner) {
-      data.owner = { ...owner };
-    },
     /** @param {string} providerId @param {string} subject */
     identityKey(providerId, subject) {
       return `${providerId}:${subject}`;
