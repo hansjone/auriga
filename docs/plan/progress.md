@@ -27,4 +27,15 @@
 | B3 团队账号连接器 | 完成（#17） | Cursor；team-account：邀请/口令+TOTP/Passkey/扫码、`/me/**`；测试 34；审查 `auriga-B3-review.md`；接线：建 Provider、Passkey 联调、composite hooks |
 | B4 通用 OIDC 连接器 | 完成（#18） | Cursor；Discovery+码+PKCE、claimMapping、Provider GET/PATCH；43 测；审查 `auriga-B4-review.md`；**生产前补 id_token JWKS 验签** |
 | B5 企业连接器 | 等待 | 私有仓，需用户提供公司登录信息 |
-| B9 M1 集成 | 待派 | B1–B8（除 B5）已齐；任务说明 `tasks/auriga-B9.md`；含 JWKS/装配接线 |
+| B9 M1 集成 | 完成（#22） | Cursor；platform 合并装配（iam+org 双 schema）、种子应急账号、默认安全配置、NATS 会话吊销接线；两轮独立审查；文档 `docs/dev/m1.md` |
+| 补审修复 | 完成（#20、#21） | Cursor 主控期间自审合并的 B3/B4/B7 经独立补审共 19 条问题（含高危），edge 由 Cursor、iam 由 Codex 修复，各两轮复审 |
+| 包名整改 | 完成（#19） | Java 根包和 groupId 改为 `auriga`（ADR 0011 修订） |
+
+**M1 完成（2026-10-20）。**
+
+## M2 工作空间（提前开工）
+
+| 编号 | 状态 | 结论 / 备注 |
+|---|---|---|
+| A1 节点代理骨架 | 完成（#23） | Cursor 实现，Codex 修复续期竞争等；三轮独立审查；线上 Linux Go 测试打开 `-race` 后又抓到一处真实数据竞争并修复 |
+| P0 插件离线版 | 完成（#24） | Cursor 实现，Codex 修复真实网络路径和 IP 字面量绕过；三轮审查，复审用真实网络实测 |
