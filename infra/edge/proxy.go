@@ -1,10 +1,28 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"time"
 )
+
+// Shared reverse-proxy transport (reused across requests).
+var proxyTransport http.RoundTripper = &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: (&net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          100,
+	MaxIdleConnsPerHost:   32,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: 30 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+}
 
 func newReverseProxy(target *url.URL) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
@@ -12,6 +30,7 @@ func newReverseProxy(target *url.URL) *httputil.ReverseProxy {
 			pr.SetURL(target)
 			pr.Out.Host = target.Host
 		},
+		Transport: proxyTransport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			writeProblem(w, problem(http.StatusBadGateway, "edge.upstream_error", "Bad Gateway", "upstream unavailable", requestID(r)))
 		},

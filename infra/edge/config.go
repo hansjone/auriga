@@ -193,15 +193,39 @@ func (c Config) validate() error {
 	if c.IdentityKeysFile == "" {
 		return fmt.Errorf("identityKeysFile is required")
 	}
-	for _, p := range c.TrustedProxies {
-		if ip := net.ParseIP(p); ip == nil {
-			if _, _, err := net.ParseCIDR(p); err != nil {
-				return fmt.Errorf("invalid trusted proxy %q", p)
-			}
+	if parent := strings.ToLower(strings.TrimSpace(c.InstanceParentDomain)); parent != "" {
+		ph := strings.ToLower(c.PortalHost)
+		ah := strings.ToLower(c.AdminHost)
+		suffix := "." + parent
+		if ph == parent || strings.HasSuffix(ph, suffix) {
+			return fmt.Errorf("instanceParentDomain %q would capture portalHost %q as an instance host", c.InstanceParentDomain, c.PortalHost)
+		}
+		if ah == parent || strings.HasSuffix(ah, suffix) {
+			return fmt.Errorf("instanceParentDomain %q would capture adminHost %q as an instance host", c.InstanceParentDomain, c.AdminHost)
 		}
 	}
-	if c.RateLimit.RequestsPerSecond < 0 || c.RateLimit.Burst < 0 {
-		return fmt.Errorf("rateLimit values must be non-negative")
+	for _, p := range c.TrustedProxies {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if ip := net.ParseIP(p); ip != nil {
+			continue
+		}
+		_, n, err := net.ParseCIDR(p)
+		if err != nil {
+			return fmt.Errorf("invalid trusted proxy %q", p)
+		}
+		ones, bits := n.Mask.Size()
+		if ones == 0 && (bits == 32 || bits == 128) {
+			return fmt.Errorf("trustedProxies must not include world-open CIDR %q", p)
+		}
+	}
+	if c.RateLimit.RequestsPerSecond <= 0 {
+		return fmt.Errorf("rateLimit.requestsPerSecond must be > 0 (got %v); use a large value if you intend to effectively disable limiting", c.RateLimit.RequestsPerSecond)
+	}
+	if c.RateLimit.Burst <= 0 {
+		return fmt.Errorf("rateLimit.burst must be > 0")
 	}
 	return nil
 }

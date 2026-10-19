@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	maxRateBuckets   = 10000
+	bucketIdleExpire = 15 * time.Minute
+)
+
 // TokenBucketLimiter is a simple per-key token bucket.
 type TokenBucketLimiter struct {
 	mu      sync.Mutex
@@ -45,9 +50,11 @@ func (l *TokenBucketLimiter) Allow(key, path string) bool {
 	if l.prefix != "" && !strings.HasPrefix(path, l.prefix) {
 		return true
 	}
+	key = rateLimitKey(key)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
+	l.evictLocked(now)
 	b, ok := l.buckets[key]
 	if !ok {
 		b = &bucket{tokens: l.burst, last: now}
@@ -66,6 +73,34 @@ func (l *TokenBucketLimiter) Allow(key, path string) bool {
 	}
 	b.tokens--
 	return true
+}
+
+func (l *TokenBucketLimiter) evictLocked(now time.Time) {
+	for k, b := range l.buckets {
+		if b == nil || now.Sub(b.last) > bucketIdleExpire {
+			delete(l.buckets, k)
+		}
+	}
+	for len(l.buckets) >= maxRateBuckets {
+		var oldestKey string
+		var oldestTime time.Time
+		first := true
+		for k, b := range l.buckets {
+			if b == nil {
+				delete(l.buckets, k)
+				continue
+			}
+			if first || b.last.Before(oldestTime) {
+				oldestKey = k
+				oldestTime = b.last
+				first = false
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(l.buckets, oldestKey)
+	}
 }
 
 func (l *TokenBucketLimiter) Middleware(next http.Handler, clientIP func(*http.Request) string) http.Handler {

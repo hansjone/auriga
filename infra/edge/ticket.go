@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+const (
+	defaultBindingTTL = 12 * time.Hour
+	ticketSweepEvery  = 64 // purge expired entries every N mutations
+)
+
 // Ticket binds a one-time open grant to a portal session and instance.
 type Ticket struct {
 	Token      string
@@ -25,6 +30,7 @@ type InstBinding struct {
 	TenantID   string
 	InstanceID string
 	CookieRaw  string // opaque cookie value
+	ExpiresAt  time.Time
 }
 
 // TicketStore issues one-time tickets and instance cookie bindings.
@@ -40,6 +46,7 @@ type MemoryTicketStore struct {
 	tickets  map[string]*Ticket
 	bindings map[string]*InstBinding
 	now      func() time.Time
+	ops      int
 }
 
 func NewMemoryTicketStore() *MemoryTicketStore {
@@ -65,6 +72,7 @@ func (m *MemoryTicketStore) Issue(sessionID, accountID, tenantID, instanceID str
 	}
 	m.mu.Lock()
 	m.tickets[tok] = t
+	m.maybeSweepLocked()
 	m.mu.Unlock()
 	cp := *t
 	return &cp, nil
@@ -73,6 +81,7 @@ func (m *MemoryTicketStore) Issue(sessionID, accountID, tenantID, instanceID str
 func (m *MemoryTicketStore) Redeem(token string) (*Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.maybeSweepLocked()
 	t, ok := m.tickets[token]
 	if !ok || t == nil {
 		return nil, fmt.Errorf("ticket not found")
@@ -81,9 +90,11 @@ func (m *MemoryTicketStore) Redeem(token string) (*Ticket, error) {
 		return nil, fmt.Errorf("ticket already used")
 	}
 	if !m.now().UTC().Before(t.ExpiresAt) {
+		delete(m.tickets, token)
 		return nil, fmt.Errorf("ticket expired")
 	}
 	t.Used = true
+	delete(m.tickets, token) // one-time: drop after use
 	cp := *t
 	return &cp, nil
 }
@@ -100,9 +111,11 @@ func (m *MemoryTicketStore) BindInstance(sessionID, accountID, tenantID, instanc
 		TenantID:   tenantID,
 		InstanceID: instanceID,
 		CookieRaw:  raw,
+		ExpiresAt:  m.now().UTC().Add(defaultBindingTTL),
 	}
 	m.mu.Lock()
 	m.bindings[raw] = b
+	m.maybeSweepLocked()
 	m.mu.Unlock()
 	cp := *b
 	return &cp, nil
@@ -111,10 +124,33 @@ func (m *MemoryTicketStore) BindInstance(sessionID, accountID, tenantID, instanc
 func (m *MemoryTicketStore) LookupInstance(cookieRaw string) (*InstBinding, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.maybeSweepLocked()
 	b, ok := m.bindings[cookieRaw]
 	if !ok || b == nil {
 		return nil, fmt.Errorf("instance cookie not found")
 	}
+	if !b.ExpiresAt.IsZero() && !m.now().UTC().Before(b.ExpiresAt) {
+		delete(m.bindings, cookieRaw)
+		return nil, fmt.Errorf("instance cookie expired")
+	}
 	cp := *b
 	return &cp, nil
+}
+
+func (m *MemoryTicketStore) maybeSweepLocked() {
+	m.ops++
+	if m.ops%ticketSweepEvery != 0 {
+		return
+	}
+	now := m.now().UTC()
+	for k, t := range m.tickets {
+		if t == nil || t.Used || !now.Before(t.ExpiresAt) {
+			delete(m.tickets, k)
+		}
+	}
+	for k, b := range m.bindings {
+		if b == nil || (!b.ExpiresAt.IsZero() && !now.Before(b.ExpiresAt)) {
+			delete(m.bindings, k)
+		}
+	}
 }
