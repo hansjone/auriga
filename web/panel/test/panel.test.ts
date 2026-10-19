@@ -24,6 +24,6 @@ it('mounts a custom element with shadow styles and reacts to host context', asyn
   );
   panel.context = { locale: 'zh-CN', theme: 'light' };
   await nextTick();
-  expect(panel.shadowRoot?.textContent).toContain('????');
+  expect(panel.shadowRoot?.textContent).toContain('团队面板');
   panel.remove();
 });

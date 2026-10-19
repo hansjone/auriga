@@ -19,10 +19,11 @@ pnpm --filter @auriga/panel test:bundle
 
 ## 包结构
 
-- `web/shared`（`@auriga/shared`）：主题 CSS、i18n 工厂、Placeholder 组件与契约生成类型。
+- `web/shared`（`@auriga/shared`）：主题 CSS、i18n 工厂、API 客户端（problem+json / CSRF / 401）、
+  登录步骤渲染器（按 `ClientStep` 类型）、开发用 fetch mock、Placeholder 与契约生成类型。
   workspace 消费者使用源码，Vite 另生成可验证的 ES library。
-- `web/portal`、`web/admin`：Vue 3 + TypeScript + Vite，注册 Pinia、Vue Router、Element Plus；
-  仅可切换中英文/深浅主题的占位首页，不实现登录或业务。
+- `web/portal`：门户。登录（步骤驱动）、邀请注册、手机扫码确认、登录后顶栏框架；首页内容占位。
+- `web/admin`：管理台。独立登录、侧边栏（成员 / 组 / 角色 / 身份源 / 系统设置）、成员列表（搜索 + 游标分页）。
 - `web/panel`：独立 ES module `dist/auriga-team-panel.js`，导入后注册 `auriga-team-panel`，
   Vue 运行时打入单文件，Shadow DOM 内置主题和组件样式。
 - `clients/dsh-plugin`：独立 MIT npm 包 `auriga-dsh`，纯 ESM JavaScript + JSDoc，Node 原生测试，
@@ -30,6 +31,19 @@ pnpm --filter @auriga/panel test:bundle
 
 各 web 包都有 ESLint flat config + Prettier、vue-tsc、Vitest / Vue Test Utils、vite build。
 插件使用 tsc checkJs，其 build 脚本为无输出类型校验，因为 Node 22 可直接执行源码。
+
+## 本地 Mock
+
+后端未就绪时，给 Vite 设 `VITE_AURIGA_MOCK=1`（portal / admin 的 `main.ts` 会调用 `enableAurigaMock()`）。
+Mock 拦截 `/api/*`：多步登录（选身份源 → 口令 `correct-horse` → TOTP `123456` → 完成）、
+口令错误 / `fail-hard` 失败路径、邀请预览码 `invite-demo`、扫码挑战 `qr-demo-challenge`（比对码 `42`）、
+管理台成员列表。切真实后端时去掉该环境变量即可，业务代码只依赖 `@auriga/shared` 的 API 封装。
+
+```powershell
+# 示例：只给 portal 开 mock 做联调（不要占用任务要求外的端口以外的服务；本地预览自行决定）
+$env:VITE_AURIGA_MOCK = '1'
+pnpm --filter @auriga/portal exec vite --port 5173
+```
 
 ## 主题与语言
 
