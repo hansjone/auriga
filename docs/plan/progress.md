@@ -24,6 +24,7 @@
 | B1 ctl 本机内置 | 完成（#14） | Cursor；`dev/start/stop/status`；每服务 schema/角色；文档 `docs/dev/ctl.md`；lint errcheck 返工后 CI 全绿 |
 | B7 edge 接入网关 | 完成（#15） | Cursor；会话/CSRF/Host 隔离/身份头/`/open` 骨架；安全审查通过（`auriga-B7-review.md`）；gitleaks+lint 返工后 CI 全绿；E2 接真节点 |
 | B6 org | 完成（#16） | Cursor；FORCE RLS、超管上限、邀请幂等、PermissionResolver/hooks、user.*；OrgCoreTest 8/0；CI 全绿；审查 `auriga-B6-review.md`；接线：iam consumeInvitation 传 accountId、合并部署多 DataSource |
-| B3 / B4 | 待派 | B2/B6 已齐；下一步 B3（团队账号连接器），B4 可并行 |
+| B3 团队账号连接器 | 完成（#17） | Cursor；team-account：邀请/口令+TOTP/Passkey/扫码、`/me/**`；测试 34；审查 `auriga-B3-review.md`；接线：建 Provider、Passkey 联调、composite hooks |
+| B4 通用 OIDC 连接器 | 待派 | 任务说明已写 `tasks/auriga-B4.md` |
 | B5 企业连接器 | 等待 | 私有仓，需用户提供公司登录信息 |
 | B9 M1 集成 | 等待 | B1–B8 齐后做 |
