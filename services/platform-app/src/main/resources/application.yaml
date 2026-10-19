@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: auriga-platform
+  threads:
+    virtual:
+      enabled: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
