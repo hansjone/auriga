@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
@@ -30,7 +31,14 @@ type Options struct {
 	AgentVersion  string
 	Logger        *slog.Logger
 	// RenewBefore renews when NotAfter - now < RenewBefore (default 7 days).
+	// Also renews when remaining lifetime < 1/3 of total validity.
 	RenewBefore time.Duration
+	// AllowInsecure permits grpc:// / http:// (tests / AURIGA_AGENT_ALLOW_INSECURE).
+	AllowInsecure bool
+	// Force overwrites an existing enrollment.
+	Force bool
+	// Store, if set, is reused instead of opening state.db (avoids bbolt lock with the running agent).
+	Store *state.Store
 }
 
 func (o Options) log() *slog.Logger {
@@ -54,6 +62,12 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 	if opts.AgentDir == "" {
 		return nil, fmt.Errorf("agent dir is required")
 	}
+	if err := tlsutil.ValidateJoinEndpoint(opts.Server, opts.AllowInsecure); err != nil {
+		return nil, err
+	}
+	if identity.Enrolled(opts.AgentDir) && !opts.Force {
+		return nil, fmt.Errorf("already enrolled in %s (pass --force to replace)", opts.AgentDir)
+	}
 
 	key, err := identity.GenerateKeyPair()
 	if err != nil {
@@ -72,6 +86,7 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 	conn, err := tlsutil.Dial(ctx, tlsutil.DialOptions{
 		Endpoint:      opts.Server,
 		CAFingerprint: opts.CAFingerprint,
+		AllowInsecure: opts.AllowInsecure,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("dial enrollment: %w", err)
@@ -97,9 +112,14 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 	if resp.GetNodeId() == "" || len(resp.GetCertificateChain()) == 0 || len(resp.GetCaBundle()) == 0 {
 		return nil, fmt.Errorf("join response incomplete")
 	}
-	// Always pin the returned CA bundle (covers grpc:// test transports and post-join check).
 	if err := tlsutil.VerifyCAPEMFingerprint(resp.GetCaBundle(), opts.CAFingerprint); err != nil {
 		return nil, err
+	}
+	if err := tlsutil.ValidateControlEndpoint(resp.GetControlEndpoint(), opts.AllowInsecure); err != nil {
+		return nil, fmt.Errorf("control endpoint from server: %w", err)
+	}
+	if err := validateIssuedCert(resp.GetCertificateChain(), resp.GetCaBundle(), key, resp.GetNodeId()); err != nil {
+		return nil, fmt.Errorf("join certificate: %w", err)
 	}
 
 	expires := time.Time{}
@@ -143,7 +163,30 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 	return mat, nil
 }
 
-// RenewCertificate renews the node cert when within RenewBefore of expiry (or force).
+// NeedsRenew reports whether the cert should be renewed (force, < RenewBefore, or < 1/3 lifetime left).
+func NeedsRenew(mat *identity.Material, renewBefore time.Duration) bool {
+	if mat == nil || mat.CertificateExpiresAt.IsZero() {
+		return false
+	}
+	if renewBefore <= 0 {
+		renewBefore = 7 * 24 * time.Hour
+	}
+	left := time.Until(mat.CertificateExpiresAt)
+	if left <= renewBefore {
+		return true
+	}
+	notBefore := mat.CertificateNotBefore
+	if notBefore.IsZero() {
+		return false
+	}
+	lifetime := mat.CertificateExpiresAt.Sub(notBefore)
+	if lifetime > 0 && left <= lifetime/3 {
+		return true
+	}
+	return false
+}
+
+// RenewCertificate renews the node cert when within RenewBefore / 1/3 lifetime (or force).
 func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.Material, error) {
 	if opts.AgentDir == "" {
 		return nil, fmt.Errorf("agent dir is required")
@@ -152,11 +195,19 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 	if err != nil {
 		return nil, err
 	}
-	st, err := state.Open(opts.AgentDir)
-	if err != nil {
-		return nil, err
+	st := opts.Store
+	owned := false
+	if st == nil {
+		var openErr error
+		st, openErr = state.Open(opts.AgentDir)
+		if openErr != nil {
+			return nil, openErr
+		}
+		owned = true
 	}
-	defer st.Close()
+	if owned {
+		defer st.Close()
+	}
 	meta, err := st.GetNodeMeta()
 	if err != nil {
 		return nil, err
@@ -172,12 +223,14 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 	if fp == "" {
 		return nil, fmt.Errorf("ca fingerprint missing; re-join required")
 	}
-
-	before := opts.RenewBefore
-	if before <= 0 {
-		before = 7 * 24 * time.Hour
+	if err := tlsutil.VerifyCAPEMFingerprint(mat.CAPEM, fp); err != nil {
+		return nil, fmt.Errorf("ca.crt pin: %w", err)
 	}
-	if !force && time.Until(mat.CertificateExpiresAt) > before {
+	if err := tlsutil.ValidateControlEndpoint(mat.ControlEndpoint, opts.AllowInsecure); err != nil {
+		return nil, err
+	}
+
+	if !force && !NeedsRenew(mat, opts.RenewBefore) {
 		return mat, nil
 	}
 
@@ -199,6 +252,7 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 		CAFingerprint:     fp,
 		CAPEM:             mat.CAPEM,
 		ClientCertificate: &tlsCert,
+		AllowInsecure:     opts.AllowInsecure,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("dial renew: %w", err)
@@ -212,9 +266,22 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 	if err != nil {
 		return nil, fmt.Errorf("renew: %w", err)
 	}
+	if len(resp.GetCertificateChain()) == 0 {
+		return nil, fmt.Errorf("renew response missing certificate chain")
+	}
+	if err := validateIssuedCert(resp.GetCertificateChain(), mat.CAPEM, mat.PrivateKey, mat.NodeID); err != nil {
+		return nil, fmt.Errorf("renew certificate: %w", err)
+	}
+
 	mat.CertificatePEM = resp.GetCertificateChain()
 	if ts := resp.GetCertificateExpiresAt(); ts != nil {
 		mat.CertificateExpiresAt = ts.AsTime()
+	} else {
+		certs, _ := identity.ParseCertPEM(mat.CertificatePEM)
+		if len(certs) > 0 {
+			mat.CertificateExpiresAt = certs[0].NotAfter
+			mat.CertificateNotBefore = certs[0].NotBefore
+		}
 	}
 	if err := identity.Save(opts.AgentDir, mat); err != nil {
 		return nil, err
@@ -228,6 +295,40 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 		"cert_expires_at", mat.CertificateExpiresAt.UTC().Format(time.RFC3339),
 	)
 	return mat, nil
+}
+
+func validateIssuedCert(certPEM, caPEM []byte, key *ecdsa.PrivateKey, wantNodeID string) error {
+	certs, err := identity.ParseCertPEM(certPEM)
+	if err != nil {
+		return err
+	}
+	leaf := certs[0]
+	if !identity.PublicKeysEqual(leaf, key) {
+		return fmt.Errorf("certificate public key does not match local private key")
+	}
+	nodeID, err := identity.NodeIDFromCert(leaf)
+	if err != nil {
+		return err
+	}
+	if wantNodeID != "" && nodeID != wantNodeID {
+		return fmt.Errorf("node id changed: got %q want %q", nodeID, wantNodeID)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return fmt.Errorf("invalid CA bundle")
+	}
+	intermediates := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		intermediates.AddCert(c)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}); err != nil {
+		return fmt.Errorf("certificate does not chain to CA: %w", err)
+	}
+	return nil
 }
 
 func goos() string {
@@ -245,4 +346,22 @@ func marshalKeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {
 		return nil, err
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+}
+
+// ReadToken resolves token from flag, file, or AURIGA_AGENT_JOIN_TOKEN.
+func ReadToken(flagToken, tokenFile string) (string, error) {
+	if strings.TrimSpace(flagToken) != "" {
+		return strings.TrimSpace(flagToken), nil
+	}
+	if tokenFile != "" {
+		raw, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return "", fmt.Errorf("read token file: %w", err)
+		}
+		return strings.TrimSpace(string(raw)), nil
+	}
+	if v := strings.TrimSpace(os.Getenv("AURIGA_AGENT_JOIN_TOKEN")); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("token required (--token, --token-file, or AURIGA_AGENT_JOIN_TOKEN)")
 }

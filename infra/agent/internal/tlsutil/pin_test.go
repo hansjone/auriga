@@ -23,10 +23,10 @@ func TestVerifyPinnedPeerChainAcceptsMatchingCA(t *testing.T) {
 	_ = leafKey
 	want := identity.SPKISHA256Hex(caCert)
 	raw := [][]byte{leafCert.Raw, caCert.Raw}
-	if err := tlsutil.VerifyPinnedPeerChain(raw, want); err != nil {
+	if err := tlsutil.VerifyPinnedPeerChain(raw, want, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := tlsutil.VerifyPinnedPeerChain(raw, "00"+want[2:]); err == nil {
+	if err := tlsutil.VerifyPinnedPeerChain(raw, "00"+want[2:], ""); err == nil {
 		t.Fatal("expected mismatch")
 	}
 }
@@ -76,7 +76,7 @@ func TestPipeTLSPin(t *testing.T) {
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-			return tlsutil.VerifyPinnedPeerChain(rawCerts, want)
+			return tlsutil.VerifyPinnedPeerChain(rawCerts, want, "")
 		},
 	})
 	if err := cli.Handshake(); err != nil {

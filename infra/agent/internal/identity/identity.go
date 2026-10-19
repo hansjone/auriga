@@ -30,6 +30,7 @@ type Material struct {
 	NodeID               string
 	ControlEndpoint      string
 	CertificateExpiresAt time.Time
+	CertificateNotBefore time.Time
 	PrivateKey           *ecdsa.PrivateKey
 	CertificatePEM       []byte // full chain PEM
 	CAPEM                []byte
@@ -66,6 +67,12 @@ func SPKISHA256Hex(cert *x509.Certificate) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// Enrolled reports whether identity files already exist.
+func Enrolled(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, KeyFileName))
+	return err == nil
+}
+
 // EnsureDir creates the agent credential directory with restrictive permissions.
 func EnsureDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -74,7 +81,8 @@ func EnsureDir(dir string) error {
 	return restrictDir(dir)
 }
 
-// Save writes key material to dir with tightened file permissions.
+// Save writes key material atomically (temp + rename) with tightened permissions.
+// Public material (cert, CA) is switched first; private keys last.
 func Save(dir string, m *Material) error {
 	if err := EnsureDir(dir); err != nil {
 		return err
@@ -84,16 +92,17 @@ func Save(dir string, m *Material) error {
 		return fmt.Errorf("marshal key: %w", err)
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	if err := writePrivate(filepath.Join(dir, KeyFileName), keyPEM); err != nil {
+
+	if err := atomicWrite(filepath.Join(dir, CertFileName), m.CertificatePEM, true); err != nil {
 		return err
 	}
-	if err := writePrivate(filepath.Join(dir, SealingFileName), m.SealingPrivate[:]); err != nil {
+	if err := atomicWrite(filepath.Join(dir, CAFileName), m.CAPEM, true); err != nil {
 		return err
 	}
-	if err := writePublic(filepath.Join(dir, CertFileName), m.CertificatePEM); err != nil {
+	if err := atomicWrite(filepath.Join(dir, KeyFileName), keyPEM, true); err != nil {
 		return err
 	}
-	if err := writePublic(filepath.Join(dir, CAFileName), m.CAPEM); err != nil {
+	if err := atomicWrite(filepath.Join(dir, SealingFileName), m.SealingPrivate[:], true); err != nil {
 		return err
 	}
 	m.Dir = dir
@@ -129,7 +138,7 @@ func Load(dir string) (*Material, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse node key: %w", err)
 	}
-	certs, err := parseCertPEM(certPEM)
+	certs, err := ParseCertPEM(certPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +158,7 @@ func Load(dir string) (*Material, error) {
 		SealingPrivate:       sealingPriv,
 		SealingPublic:        sealingPub,
 		CertificateExpiresAt: certs[0].NotAfter,
+		CertificateNotBefore: certs[0].NotBefore,
 		Dir:                  dir,
 	}, nil
 }
@@ -171,7 +181,8 @@ func SealingKeyID(pub [32]byte) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-func parseCertPEM(pemBytes []byte) ([]*x509.Certificate, error) {
+// ParseCertPEM parses a PEM certificate chain.
+func ParseCertPEM(pemBytes []byte) ([]*x509.Certificate, error) {
 	var certs []*x509.Certificate
 	rest := pemBytes
 	for {
@@ -195,16 +206,66 @@ func parseCertPEM(pemBytes []byte) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
-func writePrivate(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+// PublicKeysEqual reports whether cert's ECDSA public key matches priv.
+func PublicKeysEqual(cert *x509.Certificate, priv *ecdsa.PrivateKey) bool {
+	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
+	if !ok || priv == nil {
+		return false
+	}
+	return pub.X.Cmp(priv.X) == 0 && pub.Y.Cmp(priv.Y) == 0 && pub.Curve == priv.Curve
+}
+
+func atomicWrite(path string, data []byte, private bool) error {
+	dir := filepath.Dir(path)
+	var tmp string
+	var f *os.File
+	var err error
+	for i := 0; i < 5; i++ {
+		suffix := make([]byte, 4)
+		if _, err := rand.Read(suffix); err != nil {
+			return err
+		}
+		tmp = filepath.Join(dir, fmt.Sprintf(".%s.tmp.%x", filepath.Base(path), suffix))
+		f, err = os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			break
+		}
+		if !os.IsExist(err) {
+			return err
+		}
+	}
+	if f == nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if private {
+		if err := restrictFile(tmp); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	} else {
+		_ = os.Chmod(tmp, 0o600)
+		if err := restrictFile(tmp); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	return restrictFile(path)
-}
-
-func writePublic(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return err
-	}
-	return nil
 }

@@ -4,17 +4,21 @@ package conn
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"os"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/enroll"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
@@ -34,13 +38,17 @@ type Config struct {
 	Logger        *slog.Logger
 	Reconciler    *reconciler.Reconciler
 	Store         *state.Store
+	AllowInsecure bool
 
-	// HeartbeatInterval overrides Welcome (tests use short values).
 	HeartbeatInterval time.Duration
 	MinBackoff        time.Duration
 	MaxBackoff        time.Duration
+	WelcomeTimeout    time.Duration
+	// StableFor resets backoff only after a session stayed up this long (default 30s).
+	StableFor time.Duration
+	// RenewCheckEvery polls cert renewal (default 1h; tests use shorter).
+	RenewCheckEvery time.Duration
 
-	// OnWelcome is optional test hook after Welcome.
 	OnWelcome func(*nodev1.Welcome)
 }
 
@@ -48,11 +56,13 @@ type Config struct {
 type Session struct {
 	cfg Config
 
-	mu          sync.Mutex
-	heartbeat   time.Duration
-	lastWelcome *nodev1.Welcome
-	connected   bool
-	statusCh    chan *nodev1.InstanceStatus
+	mu           sync.Mutex
+	heartbeat    time.Duration
+	lastWelcome  *nodev1.Welcome
+	welcomeAt    time.Time
+	connected    bool
+	statusCh     chan *nodev1.InstanceStatus
+	renewBackoff time.Duration
 }
 
 // New creates a session manager.
@@ -69,18 +79,24 @@ func New(cfg Config) *Session {
 	if cfg.HeartbeatInterval <= 0 {
 		cfg.HeartbeatInterval = 15 * time.Second
 	}
+	if cfg.WelcomeTimeout <= 0 {
+		cfg.WelcomeTimeout = 30 * time.Second
+	}
+	if cfg.StableFor <= 0 {
+		cfg.StableFor = 30 * time.Second
+	}
+	if cfg.RenewCheckEvery <= 0 {
+		cfg.RenewCheckEvery = time.Hour
+	}
 	if cfg.BootID == "" {
 		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
 	}
-	s := &Session{
-		cfg:       cfg,
-		heartbeat: cfg.HeartbeatInterval,
-		statusCh:  make(chan *nodev1.InstanceStatus, 64),
+	return &Session{
+		cfg:          cfg,
+		heartbeat:    cfg.HeartbeatInterval,
+		statusCh:     make(chan *nodev1.InstanceStatus, 64),
+		renewBackoff: time.Minute,
 	}
-	if cfg.Reconciler != nil {
-		// wire sink lazily via SetStatusSink pattern — caller may set before Run
-	}
-	return s
 }
 
 // StatusSink returns a sink that queues status for uplink.
@@ -102,8 +118,9 @@ func (s *Session) Connected() bool {
 }
 
 // Run loops connect → session → backoff until ctx is done.
-// After a successful Welcome, the next reconnect starts at MinBackoff.
 func (s *Session) Run(ctx context.Context) error {
+	go s.renewLoop(ctx)
+
 	backoff := s.cfg.MinBackoff
 	for {
 		if err := ctx.Err(); err != nil {
@@ -111,27 +128,30 @@ func (s *Session) Run(ctx context.Context) error {
 		}
 		s.mu.Lock()
 		s.lastWelcome = nil
+		s.welcomeAt = time.Time{}
 		s.mu.Unlock()
 
 		err := s.runOnce(ctx)
 
 		s.mu.Lock()
 		hadWelcome := s.lastWelcome != nil
+		stable := !s.welcomeAt.IsZero() && time.Since(s.welcomeAt) >= s.cfg.StableFor
 		s.connected = false
 		s.mu.Unlock()
 
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		s.cfg.Logger.Warn("session disconnected", "error", err, "backoff", backoff.String())
-		timer := time.NewTimer(backoff)
+		wait := withJitter(backoff)
+		s.cfg.Logger.Warn("session disconnected", "error", err, "backoff", wait.String())
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
 		}
-		if hadWelcome {
+		if hadWelcome && stable {
 			backoff = s.cfg.MinBackoff
 		} else {
 			backoff *= 2
@@ -142,7 +162,55 @@ func (s *Session) Run(ctx context.Context) error {
 	}
 }
 
+func (s *Session) renewLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.cfg.RenewCheckEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			before := s.renewBackoff
+			s.tryRenew(ctx)
+			if s.renewBackoff > before {
+				// Failed: wait renewBackoff before next ticker-driven attempt.
+				timer := time.NewTimer(withJitter(s.renewBackoff))
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+		}
+	}
+}
+
+func (s *Session) tryRenew(ctx context.Context) {
+	opts := enroll.Options{
+		AgentDir:      s.cfg.AgentDir,
+		AgentVersion:  s.cfg.AgentVersion,
+		CAFingerprint: s.cfg.CAFingerprint,
+		AllowInsecure: s.cfg.AllowInsecure,
+		Logger:        s.cfg.Logger,
+		Store:         s.cfg.Store,
+	}
+	_, err := enroll.RenewCertificate(ctx, opts, false)
+	if err != nil {
+		s.cfg.Logger.Error("certificate renew failed", "error", err, "next_backoff", s.renewBackoff.String())
+		s.renewBackoff *= 2
+		if s.renewBackoff > 30*time.Minute {
+			s.renewBackoff = 30 * time.Minute
+		}
+		return
+	}
+	s.renewBackoff = time.Minute
+}
+
 func (s *Session) runOnce(ctx context.Context) error {
+	// Best-effort renew before dial so expired-soon certs are refreshed.
+	s.tryRenew(ctx)
+
 	mat, meta, tlsCert, err := s.loadCreds()
 	if err != nil {
 		return err
@@ -150,6 +218,9 @@ func (s *Session) runOnce(ctx context.Context) error {
 	endpoint := s.cfg.ControlURL
 	if endpoint == "" {
 		endpoint = meta.ControlEndpoint
+	}
+	if err := tlsutil.ValidateControlEndpoint(endpoint, s.cfg.AllowInsecure); err != nil {
+		return err
 	}
 	fp := s.cfg.CAFingerprint
 	if fp == "" {
@@ -161,6 +232,7 @@ func (s *Session) runOnce(ctx context.Context) error {
 		CAFingerprint:     fp,
 		CAPEM:             mat.CAPEM,
 		ClientCertificate: &tlsCert,
+		AllowInsecure:     s.cfg.AllowInsecure,
 	})
 	if err != nil {
 		return fmt.Errorf("dial control: %w", err)
@@ -180,7 +252,6 @@ func (s *Session) runOnce(ctx context.Context) error {
 		return err
 	}
 
-	// Full reconcile after (re)connect.
 	if s.cfg.Reconciler != nil {
 		if err := s.cfg.Reconciler.ReconcileAll(ctx); err != nil {
 			s.cfg.Logger.Warn("reconcile after connect", "error", err)
@@ -188,13 +259,14 @@ func (s *Session) runOnce(ctx context.Context) error {
 		_ = s.sendInventory(stream)
 	}
 
-	welcome, err := s.recvWelcome(stream)
+	welcome, err := s.recvWelcome(ctx, stream)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	s.connected = true
 	s.lastWelcome = welcome
+	s.welcomeAt = time.Now()
 	if iv := welcome.GetHeartbeatInterval(); iv != nil {
 		d := iv.AsDuration()
 		if d > 0 {
@@ -208,9 +280,6 @@ func (s *Session) runOnce(ctx context.Context) error {
 	if s.cfg.OnWelcome != nil {
 		s.cfg.OnWelcome(welcome)
 	}
-	// Reset backoff is handled by caller on success path via runOnce return only on error;
-	// Run() always backs off — fix: Run should reset backoff on successful connect.
-	// Handled below by returning a special path: we stay in session until error.
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -250,6 +319,16 @@ func (s *Session) loadCreds() (*identity.Material, state.NodeMeta, tls.Certifica
 	meta, err := s.cfg.Store.GetNodeMeta()
 	if err != nil {
 		return nil, state.NodeMeta{}, tls.Certificate{}, err
+	}
+	fp := s.cfg.CAFingerprint
+	if fp == "" {
+		fp = meta.CAFingerprint
+	}
+	if fp == "" {
+		return nil, state.NodeMeta{}, tls.Certificate{}, fmt.Errorf("ca fingerprint missing")
+	}
+	if err := tlsutil.VerifyCAPEMFingerprint(mat.CAPEM, fp); err != nil {
+		return nil, state.NodeMeta{}, tls.Certificate{}, fmt.Errorf("ca.crt pin: %w", err)
 	}
 	mat.ControlEndpoint = meta.ControlEndpoint
 	keyPEM, err := marshalKeyPEM(mat.PrivateKey)
@@ -315,19 +394,34 @@ func (s *Session) sendUsage(stream nodev1.NodeControlService_SessionClient) erro
 	})
 }
 
-func (s *Session) recvWelcome(stream nodev1.NodeControlService_SessionClient) (*nodev1.Welcome, error) {
-	for {
-		msg, err := stream.Recv()
-		if err != nil {
-			return nil, err
+func (s *Session) recvWelcome(ctx context.Context, stream nodev1.NodeControlService_SessionClient) (*nodev1.Welcome, error) {
+	wctx, cancel := context.WithTimeout(ctx, s.cfg.WelcomeTimeout)
+	defer cancel()
+	type result struct {
+		w   *nodev1.Welcome
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				ch <- result{err: err}
+				return
+			}
+			if w := msg.GetWelcome(); w != nil {
+				ch <- result{w: w}
+				return
+			}
+			// Ignore Apply/Delete before Welcome.
+			s.cfg.Logger.Warn("ignoring control message before Welcome")
 		}
-		if w := msg.GetWelcome(); w != nil {
-			return w, nil
-		}
-		// Apply/Delete before Welcome is unusual; still handle.
-		if err := s.handleControl(context.Background(), msg); err != nil {
-			return nil, err
-		}
+	}()
+	select {
+	case <-wctx.Done():
+		return nil, fmt.Errorf("welcome timeout: %w", wctx.Err())
+	case r := <-ch:
+		return r.w, r.err
 	}
 }
 
@@ -347,7 +441,7 @@ func (s *Session) recvLoop(ctx context.Context, stream nodev1.NodeControlService
 }
 
 func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse) error {
-	if msg == nil {
+	if msg == nil || s.cfg.Reconciler == nil {
 		return nil
 	}
 	switch body := msg.Body.(type) {
@@ -367,6 +461,19 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 	default:
 		return nil
 	}
+}
+
+func withJitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(d/2)+1))
+	if err != nil {
+		var b [8]byte
+		_, _ = rand.Read(b[:])
+		return d + time.Duration(binary.LittleEndian.Uint64(b[:])%uint64(d/2+1))
+	}
+	return d + time.Duration(n.Int64())
 }
 
 func goos() string {

@@ -27,7 +27,7 @@ func TestJoinAndRejectBadTokenAndBadFingerprint(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer fw.Close()
-		_, err = enroll.Join(context.Background(), enroll.Options{
+		_, err = enroll.Join(context.Background(), enroll.Options{AllowInsecure: true,
 			Server:        fw.URL(),
 			Token:         "wrong.token",
 			CAFingerprint: fw.CA.Fingerprint(),
@@ -46,7 +46,7 @@ func TestJoinAndRejectBadTokenAndBadFingerprint(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer fw.Close()
-		_, err = enroll.Join(context.Background(), enroll.Options{
+		_, err = enroll.Join(context.Background(), enroll.Options{AllowInsecure: true,
 			Server:        fw.URL(),
 			Token:         fw.Token(),
 			CAFingerprint: "0000000000000000000000000000000000000000000000000000000000000000",
@@ -66,7 +66,7 @@ func TestJoinAndRejectBadTokenAndBadFingerprint(t *testing.T) {
 		}
 		defer fw.Close()
 		agentDir := filepath.Join(t.TempDir(), "agent")
-		mat, err := enroll.Join(context.Background(), enroll.Options{
+		mat, err := enroll.Join(context.Background(), enroll.Options{AllowInsecure: true,
 			Server:        fw.URL(),
 			Token:         fw.Token(),
 			CAFingerprint: fw.CA.Fingerprint(),
@@ -97,7 +97,7 @@ func TestExpiredCertificateRejected(t *testing.T) {
 	agentDir := filepath.Join(dir, "agent")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	mat, err := enroll.Join(context.Background(), enroll.Options{
+	mat, err := enroll.Join(context.Background(), enroll.Options{AllowInsecure: true,
 		Server:        fw.URL(),
 		Token:         fw.Token(),
 		CAFingerprint: fw.CA.Fingerprint(),
@@ -128,15 +128,17 @@ func TestExpiredCertificateRejected(t *testing.T) {
 	rec := reconciler.New(store, driver, logger, 2)
 	defer rec.Close()
 
-	sess := conn.New(conn.Config{
-		AgentDir:      agentDir,
-		AgentVersion:  "test",
-		CAFingerprint: fw.CA.Fingerprint(),
-		Logger:        logger,
-		Reconciler:    rec,
-		Store:         store,
-		MinBackoff:    10 * time.Millisecond,
-		MaxBackoff:    50 * time.Millisecond,
+	sess := conn.New(conn.Config{AllowInsecure: true,
+		AgentDir:        agentDir,
+		AgentVersion:    "test",
+		CAFingerprint:   fw.CA.Fingerprint(),
+		Logger:          logger,
+		Reconciler:      rec,
+		Store:           store,
+		MinBackoff:      10 * time.Millisecond,
+		MaxBackoff:      50 * time.Millisecond,
+		RenewCheckEvery: 24 * time.Hour,
+		WelcomeTimeout:  time.Second,
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -159,7 +161,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	agentDir := filepath.Join(dir, "agent")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	_, err = enroll.Join(context.Background(), enroll.Options{
+	_, err = enroll.Join(context.Background(), enroll.Options{AllowInsecure: true,
 		Server:        fw.URL(),
 		Token:         fw.Token(),
 		CAFingerprint: fw.CA.Fingerprint(),
@@ -180,7 +182,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	rec := reconciler.New(store, driver, logger, 2)
 	defer rec.Close()
 
-	sess := conn.New(conn.Config{
+	sess := conn.New(conn.Config{AllowInsecure: true,
 		AgentDir:          agentDir,
 		AgentVersion:      "test",
 		CAFingerprint:     fw.CA.Fingerprint(),
@@ -190,6 +192,9 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 		HeartbeatInterval: 40 * time.Millisecond,
 		MinBackoff:        20 * time.Millisecond,
 		MaxBackoff:        100 * time.Millisecond,
+		WelcomeTimeout:    5 * time.Second,
+		RenewCheckEvery:   24 * time.Hour,
+		StableFor:         time.Millisecond,
 	})
 	rec.Sink = sess.StatusSink()
 
@@ -198,7 +203,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- sess.Run(ctx) }()
 
-	if err := testutil.WaitFor(3*time.Second, func() bool { return sess.Connected() }); err != nil {
+	if err := testutil.WaitFor(5*time.Second, func() bool { return sess.Connected() }); err != nil {
 		t.Fatal("connect:", err)
 	}
 	if err := testutil.WaitFor(3*time.Second, func() bool {
@@ -246,7 +251,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	fw.SetDropNextSession(true)
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	sess2 := conn.New(conn.Config{
+	sess2 := conn.New(conn.Config{AllowInsecure: true,
 		AgentDir:          agentDir,
 		AgentVersion:      "test",
 		CAFingerprint:     fw.CA.Fingerprint(),
@@ -256,6 +261,9 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 		HeartbeatInterval: 40 * time.Millisecond,
 		MinBackoff:        20 * time.Millisecond,
 		MaxBackoff:        80 * time.Millisecond,
+		WelcomeTimeout:    5 * time.Second,
+		RenewCheckEvery:   24 * time.Hour,
+		StableFor:         time.Millisecond,
 	})
 	go func() { _ = sess2.Run(ctx2) }()
 
@@ -357,7 +365,7 @@ func TestWrongServerCertRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	_, err = enroll.Join(context.Background(), enroll.Options{
+	_, err = enroll.Join(context.Background(), enroll.Options{AllowInsecure: true,
 		Server:        fw.URL(),
 		Token:         fw.Token(),
 		CAFingerprint: other.Fingerprint(),

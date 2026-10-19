@@ -50,10 +50,13 @@ func runJoin(args []string, logs io.Writer) error {
 	fs := flag.NewFlagSet("join", flag.ContinueOnError)
 	fs.SetOutput(logs)
 	server := fs.String("server", "", "platform URL (https://host:port)")
-	token := fs.String("token", "", "one-time enrollment token")
+	token := fs.String("token", "", "one-time enrollment token (prefer --token-file or env)")
+	tokenFile := fs.String("token-file", "", "read token from file")
 	caSHA := fs.String("ca-sha256", "", "platform CA SPKI SHA-256 (hex)")
 	configPath := fs.String("config", "", "optional JSON config path")
 	dataRoot := fs.String("data-root", "", "override data root")
+	force := fs.Bool("force", false, "replace existing enrollment")
+	allowInsecure := fs.Bool("allow-insecure", false, "allow grpc:// http:// (local dev only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -68,18 +71,27 @@ func runJoin(args []string, logs io.Writer) error {
 		cfg.Server = *server
 	}
 	cfg.AgentVersion = Version
+	if *allowInsecure {
+		cfg.AllowInsecure = true
+	}
+	tok, err := enroll.ReadToken(*token, *tokenFile)
+	if err != nil {
+		return err
+	}
 	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "agent")
 	if err := ensureLayout(cfg); err != nil {
 		return err
 	}
 	_, err = enroll.Join(context.Background(), enroll.Options{
 		Server:        cfg.Server,
-		Token:         *token,
+		Token:         tok,
 		CAFingerprint: *caSHA,
 		DataRoot:      cfg.DataRoot,
 		AgentDir:      cfg.AgentDir(),
 		AgentVersion:  cfg.AgentVersion,
 		Logger:        logger,
+		AllowInsecure: cfg.AllowInsecure,
+		Force:         *force,
 	})
 	return err
 }
@@ -89,6 +101,7 @@ func runAgent(args []string, logs io.Writer) error {
 	fs.SetOutput(logs)
 	configPath := fs.String("config", "", "optional JSON config path")
 	dataRoot := fs.String("data-root", "", "override data root")
+	allowInsecure := fs.Bool("allow-insecure", false, "allow grpc:// http:// (local dev only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -99,17 +112,14 @@ func runAgent(args []string, logs io.Writer) error {
 	if *dataRoot != "" {
 		cfg.DataRoot = *dataRoot
 	}
+	if *allowInsecure {
+		cfg.AllowInsecure = true
+	}
 	cfg.AgentVersion = Version
 	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "agent")
 	if err := ensureLayout(cfg); err != nil {
 		return err
 	}
-
-	_, _ = enroll.RenewCertificate(context.Background(), enroll.Options{
-		AgentDir:     cfg.AgentDir(),
-		AgentVersion: cfg.AgentVersion,
-		Logger:       logger,
-	}, false)
 
 	store, err := state.Open(cfg.AgentDir())
 	if err != nil {
@@ -122,13 +132,14 @@ func runAgent(args []string, logs io.Writer) error {
 	defer rec.Close()
 
 	sess := conn.New(conn.Config{
-		AgentDir:     cfg.AgentDir(),
-		AgentVersion: cfg.AgentVersion,
-		ControlURL:   cfg.ControlEndpoint,
-		Drivers:      []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_DOCKER},
-		Logger:       logger,
-		Reconciler:   rec,
-		Store:        store,
+		AgentDir:      cfg.AgentDir(),
+		AgentVersion:  cfg.AgentVersion,
+		ControlURL:    cfg.ControlEndpoint,
+		Drivers:       []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_DOCKER},
+		Logger:        logger,
+		Reconciler:    rec,
+		Store:         store,
+		AllowInsecure: cfg.AllowInsecure,
 	})
 	rec.Sink = sess.StatusSink()
 

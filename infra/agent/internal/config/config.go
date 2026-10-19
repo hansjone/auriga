@@ -25,6 +25,8 @@ type Config struct {
 	ControlEndpoint string `json:"controlEndpoint"`
 	// AgentVersion reported in Hello / Join.
 	AgentVersion string `json:"agentVersion"`
+	// AllowInsecure permits grpc:// and http:// endpoints (local dev / tests only).
+	AllowInsecure bool `json:"allowInsecure"`
 }
 
 func defaultDataRoot() string {
@@ -92,6 +94,12 @@ func applyEnv(cfg *Config) {
 		n, err := strconv.Atoi(v)
 		if err == nil && n > 0 {
 			cfg.MaxConcurrentPrepare = n
+		}
+	}
+	if v := os.Getenv("AURIGA_AGENT_ALLOW_INSECURE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err == nil {
+			cfg.AllowInsecure = b
 		}
 	}
 }
