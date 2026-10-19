@@ -12,12 +12,16 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
 	"github.com/hansjone/auriga/infra/agent/internal/config"
 	"github.com/hansjone/auriga/infra/agent/internal/conn"
 	"github.com/hansjone/auriga/infra/agent/internal/enroll"
+	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
+	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 )
 
@@ -129,7 +133,42 @@ func runAgent(args []string, logs io.Writer) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	driver := runtime.NewFake()
+	driverName := runtime.PrimaryDriverName(cfg.Drivers)
+	// config.Default still lists "fake" (A1). For `run` with no drivers override,
+	// A2 defaults to Docker. Explicit AURIGA_AGENT_DRIVERS or JSON drivers win.
+	if os.Getenv("AURIGA_AGENT_DRIVERS") == "" && *configPath == "" && driverName == "fake" {
+		driverName = "docker"
+	}
+	polPath := os.Getenv("AURIGA_AGENT_POLICY_FILE")
+	if polPath == "" {
+		polPath = filepath.Join(cfg.DataRoot, "agent-policy.yaml")
+	}
+	pol, err := policy.Load(polPath)
+	if err != nil {
+		return fmt.Errorf("load policy: %w", err)
+	}
+	inner, err := runtime.SelectDriver(driverName, runtime.DockerConfig{DataRoot: cfg.DataRoot, Policy: pol})
+	if err != nil {
+		return err
+	}
+	driver := runtime.Driver(inner)
+	if driverName != "fake" {
+		art := artifacts.New(cfg.ArtifactsDir(), pol)
+		prep := &runtime.Preparing{
+			Inner:       inner,
+			Specs:       store,
+			Artifacts:   art,
+			Layout:      &storage.Layout{InstancesDir: cfg.InstancesDir()},
+			UIDs:        storage.NewUIDTable(cfg.AgentDir()),
+			Policy:      pol,
+			PlatformURL: cfg.Server,
+			Chown:       storage.Lchown,
+		}
+		if mat, loadErr := identity.Load(cfg.AgentDir()); loadErr == nil {
+			prep.SealingPrivate = mat.SealingPrivate
+		}
+		driver = prep
+	}
 	rec := reconciler.New(store, driver, logger, cfg.MaxConcurrentPrepare)
 	defer rec.Close()
 
@@ -154,7 +193,7 @@ func runAgent(args []string, logs io.Writer) error {
 	}
 	defer stopIO()
 
-	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot)
+	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)
 	return sess.Run(ctx)
 }
 
