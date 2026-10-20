@@ -38,6 +38,7 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 | — | `AURIGA_AGENT_FILE_TICKET_KEYS` | 文件票据公钥 JWKS；默认 `<agentDir>/file-ticket-keys.json` |
 | — | `AURIGA_AGENT_IDENTITY_KEYS` | 身份头验签公钥 JWKS；默认 `<agentDir>/identity-keys.json` |
 | （策略文件） | `AURIGA_AGENT_POLICY_FILE` | 默认 `<dataRoot>/agent-policy.yaml`；镜像/制品白名单与资源上限 |
+| — | `AURIGA_AGENT_ARTIFACT_GC_INTERVAL` | 制品定时 GC 间隔（Go duration），默认 `6h`；`0` 关闭定时（每次准备后仍会尝试一次） |
 
 配置项前缀约定：`auriga.agent.*` / `AURIGA_AGENT_*`。
 
@@ -81,7 +82,10 @@ maxArtifactBytes: 2147483648
 ## A2 范围
 
 - **Docker / Podman 驱动**：Engine API；持久 uid（`instance-uids.json`）、只读根、`cap-drop ALL`、`no-new-privileges`、资源取 min(规格, 策略)；Mounts（home + meta:ro）；拉镜像解析错误流并核对 digest
-- **制品**：https 白名单、大小上限、连接/总超时分开；篡改缓存会重下；按实例 Release；7 天 GC
+- **制品**：https 白名单、大小上限、连接/总超时分开；URL 路径必须已是 `path.Clean` 形式（拒绝 `.`/`..`/空段、编码的点和分隔符、反斜杠，重定向每跳同样检查）；篡改缓存会重下；按实例 Release；无人引用满 7 天才 GC
+- **制品 GC**：每次准备后尝试一次（有准备在下载时跳过），另按 `AURIGA_AGENT_ARTIFACT_GC_INTERVAL` 定时执行，退出时停止。GC 与下载互斥（下载持共享锁、GC 持独占锁）；GC 前收集所有期望规格和运行时现有实例引用的摘要，一律保留，即使 `refs.json` 丢了引用；列实例或读规格失败、或 `refs.json` 本轮刚从损坏中重建时，本轮不删任何文件
+- **本地路径**：由规格/清单拼出的路径一律走 `storage.SafeJoin`：元素不能是绝对路径、不能含 `.`/`..`/冒号/NUL，`filepath.Clean` 后必须仍在根目录下，根目录以下已存在的每一级都不能是符号链接（实例可写的 `home/*` 被换成符号链接时 `Layout.Ensure` 拒绝，不 chown）；失败返回 `storage.ErrUnsafePath`。实例 id 另拒绝 Windows 设备名（CON、NUL、COM1 等）
+- **容器环境变量（白名单）**：只放平台键（`AURIGA_MODE`、`AURIGA_PROTOCOL`、`AURIGA_INSTANCE_ID`、`AURIGA_OWNER_ID`、`AURIGA_TENANT_ID`、`AURIGA_PLATFORM_URL`、`AURIGA_IDENTITY_KEYS_FILE`、`AURIGA_INSTANCE_TOKEN_FILE`、`DSH_HOME`、`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`）和规格 `profile.env` 里声明、且在额外白名单内的键（默认 `TZ`、`LANG`、`LANGUAGE`、`LC_ALL`，`Preparing.ExtraEnvKeys` 可改）。其余键丢弃并记 warn 日志（只记键名，不记值）；键名不合法或值含换行/NUL/控制字符直接拒绝。Docker 驱动创建容器前再校验一次语法并按键排序
 - **配置渲染**：`yaml.v3` 结构化生成；拒绝换行/`!!`；禁止覆盖 `AURIGA_*`/`DSH_HOME`；HPKE 解封
 - **策略**：`internal/policy` 镜像/制品白名单与资源上限（本地最后一道关）
 - **目录**：§8.1、严格实例 id、Lchown、软配额
