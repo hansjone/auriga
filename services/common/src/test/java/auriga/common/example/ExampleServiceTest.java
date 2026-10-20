@@ -187,6 +187,15 @@ class ExampleServiceTest {
                     Long.class,
                     widget)
                 == 1);
+    // the forwarder marks published_at after the broker ack, which can lag the consumer
+    await(
+        "forwarder to mark both events published",
+        () ->
+            admin.queryForObject(
+                    "SELECT count(*) FROM example.outbox_event WHERE tenant_id = ? AND published_at IS NULL",
+                    Long.class,
+                    tenant)
+                == 0);
     assertEquals(
         tenant,
         admin.queryForObject(
@@ -210,21 +219,14 @@ class ExampleServiceTest {
     assertTrue(auditJson.contains("\"apiKey\":{\"redacted\":true}"), auditJson);
 
     // redeliver the same event under a different broker message id: processed only once
-    int before = handler.invocations.get();
+    assertEquals(1, handler.invocationsOf(eventId));
     Headers headers = new Headers();
     headers.put(NatsEvents.MSG_ID_HEADER, UUID.randomUUID().toString());
-    nats.jetStream().publish("auriga.evt.widget.created", headers, onStream.getData());
-    await(
-        "duplicate to be acknowledged",
-        () ->
-            admin.queryForObject(
-                        "SELECT count(*) FROM example.processed_event WHERE event_id = ?::uuid",
-                        Long.class,
-                        eventId)
-                    == 1
-                && consumerIdle());
-    Thread.sleep(300);
-    assertEquals(before, handler.invocations.get());
+    long duplicateSeq =
+        nats.jetStream().publish("auriga.evt.widget.created", headers, onStream.getData()).getSeqno();
+    // wait until the consumer has acknowledged the duplicate's own stream sequence
+    await("duplicate to be acknowledged", () -> ackedThrough(duplicateSeq));
+    assertEquals(1, handler.invocationsOf(eventId));
     assertEquals(
         1L,
         admin.queryForObject(
@@ -235,6 +237,17 @@ class ExampleServiceTest {
             "SELECT count(*) FROM example.dead_letter_event WHERE event_id = ?::uuid",
             Long.class,
             eventId));
+  }
+
+  private boolean ackedThrough(long streamSeq) {
+    try {
+      var info =
+          nats.jetStreamManagement()
+              .getConsumerInfo(NatsEvents.EVENTS_STREAM, "example-widget-seen");
+      return info.getAckFloor().getStreamSequence() >= streamSeq;
+    } catch (Exception e) {
+      return false;
+    }
   }
 
   private boolean consumerIdle() {
