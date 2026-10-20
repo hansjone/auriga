@@ -85,6 +85,8 @@ CA 私钥检查拒绝符号链接。Kubernetes Secret 卷默认的符号链接�
 
 路由发布器启动时立即全量扫描，之后每秒重扫已提交的实例／节点状态，并按 `contracts/kv/route.schema.json` 更新 NATS KV。发布器不运行在业务事务或 afterCommit 调用线程上。实例调度、状态变化、节点入口变化、已落库的迁移分配都由下一轮扫描反映；实例删除、节点吊销或入口无效删除 KV 项。迁移待处理或节点心跳超过 60 秒标为 failed，阻止 edge 继续转发。尚未分配节点的实例不发布；host 为 null，edge 仍按其域名配置识别实例。应用 ready 的 running/pending_restart 映射 running，未 ready 映射 starting，停止／失败据实际阶段映射。
 
-PostgreSQL 是恢复依据：NATS 故障不回滚业务操作，恢复或 workspace 重启后重发最新快照；不会重放排队的旧入口。每租户通过独立的事务级 advisory lock 串行化多个发布副本的“读快照→写 KV”，避免旧快照最后覆盖新快照；该锁不与业务行锁共用。数据库读取保持租户事务与 RLS，没有跨租户绕过。相同字节不重复写 KV revision。代价是每秒全表扫描、一次发布期间占用一个数据库连接，规模扩大时应另行评估增量发布；节点迁移执行本身仍属于 W1 后续任务。
+PostgreSQL 是恢复依据：NATS 故障不回滚业务操作，恢复或 workspace 重启后重发最新快照；不会重放排队的旧入口。数据库事务只负责读取 ID 和最新快照，提交并归还连接后才进行 NATS 操作，不持有数据库事务或 advisory lock 等待 NATS。为防多个副本的旧快照覆盖新值，先在事务外读取各路由当前 KV revision（包括删除标记），再读取新的数据库快照，最后在事务外按先前 revision 做 CAS update/delete；revision 冲突则放弃该次写入，下一轮重新读取最新数据库状态。删除标记也参与 CAS，避免旧快照复活已删除路由。扫描 ID 后新建的实例留到下一轮。所有数据库读取保持租户事务与 RLS；相同字节不重复写 revision。仍有每秒全量扫描与 KV 历史读取的开销，规模扩大时应评估增量发布；节点迁移执行本身仍属于 W1 后续任务。
+
+节点证书由 `NodeCa.issue` 同时签发 clientAuth 与 serverAuth EKU，唯一 URI SAN 仍为 `auriga://node/<id>`，不接受 CSR 覆盖平台身份。入网和续期共用该签发逻辑。edge 保持 serverAuth 验证，旧证书需续期／换证。
 
 测试：`WorkspaceRoutesTest` 检查契约形状与入口／状态；`WorkspaceRoutesNatsTest` 用 test-support NATS 检查幂等写入、更新、删除与恢复；`WorkspaceIntegrationTest.ingressHelloAndRouteRecoveryMigrationDeletion` 检查 Hello 持久化、真实数据库提交／回滚、故障补发、重启、迁移与删除，另有非法 Hello 入口负向测试。集成测试需要能启动嵌入式 PostgreSQL 的环境；沙箱中的启动失败不能算通过。

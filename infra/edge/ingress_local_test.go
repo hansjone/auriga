@@ -34,6 +34,7 @@ func TestIngressLocalSocketMTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	g.Ingress.allowLocal = cfg.AllowLocalIngress
 	t.Cleanup(g.Ingress.Close)
 	route.Ingress = endpoint
 	routes.Put(route)

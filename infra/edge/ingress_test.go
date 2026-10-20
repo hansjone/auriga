@@ -34,6 +34,7 @@ const testInstanceID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
 func testNode(t *testing.T, cfg *Config, h http.Handler, nodeID string) *httptest.Server {
 	t.Helper()
+	cfg.AllowLocalIngress = true // Explicit opt-in for local test listeners.
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +48,7 @@ func testNode(t *testing.T, cfg *Config, h http.Handler, nodeID string) *httptes
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue := func(uri string, serial int64, usage x509.ExtKeyUsage) (tls.Certificate, []byte, []byte) {
+	issue := func(uri string, serial int64, usage ...x509.ExtKeyUsage) (tls.Certificate, []byte, []byte) {
 		key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if e != nil {
 			t.Fatal(e)
@@ -56,7 +57,7 @@ func testNode(t *testing.T, cfg *Config, h http.Handler, nodeID string) *httptes
 		if e != nil {
 			t.Fatal(e)
 		}
-		leaf := &x509.Certificate{SerialNumber: big.NewInt(serial), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), URIs: []*url.URL{u}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
+		leaf := &x509.Certificate{SerialNumber: big.NewInt(serial), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), URIs: []*url.URL{u}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: usage}
 		der, e := x509.CreateCertificate(rand.Reader, leaf, ca, &key.PublicKey, caKey)
 		if e != nil {
 			t.Fatal(e)
@@ -74,7 +75,7 @@ func testNode(t *testing.T, cfg *Config, h http.Handler, nodeID string) *httptes
 		return pair, cp, kp
 	}
 	_, certPEM, keyPEM := issue("auriga://edge/test", 2, x509.ExtKeyUsageClientAuth)
-	server, _, _ := issue("auriga://node/"+nodeID, 3, x509.ExtKeyUsageServerAuth)
+	server, _, _ := issue("auriga://node/"+nodeID, 3, x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth)
 	dir := t.TempDir()
 	cfg.NodeTLS = NodeTLSConfig{CertFile: filepath.Join(dir, "edge.pem"), KeyFile: filepath.Join(dir, "edge.key"), CAFile: filepath.Join(dir, "ca.pem")}
 	for path, data := range map[string][]byte{cfg.NodeTLS.CertFile: certPEM, cfg.NodeTLS.KeyFile: keyPEM, cfg.NodeTLS.CAFile: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})} {

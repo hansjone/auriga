@@ -62,6 +62,9 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	if err != nil {
 		return nil, err
 	}
+	if ingress != nil {
+		ingress.allowLocal = cfg.AllowLocalIngress
+	}
 	wireSessionRevoke(sessions, hub.CancelSession)
 	g := &Gateway{
 		Cfg:          cfg,
@@ -358,11 +361,19 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		return
 	}
 	ok, err := g.Owners.Owns(r.Context(), sess.AccountID, instanceID)
+	if errors.Is(err, ErrRouteUnavailable) {
+		g.routeUnavailable(w, rid)
+		return
+	}
 	if err != nil || !ok {
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
 	}
 	route, err := g.Routes.Get(r.Context(), instanceID)
+	if errors.Is(err, ErrRouteUnavailable) {
+		g.routeUnavailable(w, rid)
+		return
+	}
 	if err != nil || route.InstanceID != instanceID || route.TenantID != sess.TenantID {
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
@@ -433,12 +444,6 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		return
 	}
 
-	route, err := g.Routes.Get(r.Context(), instanceID)
-	if err != nil {
-		writeProblem(w, problem(http.StatusNotFound, "edge.instance_not_found", "Not Found", "unknown instance", rid))
-		return
-	}
-
 	binding, err := g.lookupInstBinding(r)
 	if err != nil || binding.InstanceID != instanceID {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "instance cookie required", rid))
@@ -447,6 +452,15 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 	sess, err := getSessionByID(g.Sessions, r.Context(), binding.SessionID)
 	if err != nil || sess.Valid(g.Now().UTC(), "portal") != nil {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session invalid", rid))
+		return
+	}
+	route, err := g.Routes.Get(r.Context(), instanceID)
+	if errors.Is(err, ErrRouteUnavailable) {
+		g.routeUnavailable(w, rid)
+		return
+	}
+	if err != nil {
+		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
 	}
 	if route.InstanceID != instanceID || sess.AccountID != route.OwnerID || sess.AccountID != binding.AccountID || sess.TenantID != route.TenantID || sess.TenantID != binding.TenantID {
@@ -663,4 +677,11 @@ func stripInstanceSetCookie(resp *http.Response) error {
 		resp.Header.Add("Set-Cookie", c)
 	}
 	return nil
+}
+
+func (g *Gateway) routeUnavailable(w http.ResponseWriter, rid string) {
+	if g.Log != nil {
+		g.Log.Warn("instance route service unavailable", "request_id", rid)
+	}
+	writeProblem(w, problem(http.StatusServiceUnavailable, "common.unavailable", "Service Unavailable", "route service unavailable", rid))
 }

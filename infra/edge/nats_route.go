@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -52,14 +53,17 @@ func (s *NATSRouteStore) Get(ctx context.Context, id string) (*InstanceRoute, er
 	defer cancel()
 	kv, err := s.js.KeyValue(ctx, "auriga-routes")
 	if err != nil {
-		return nil, ErrRouteNotFound
+		return nil, ErrRouteUnavailable
 	}
 	entry, err := kv.Get(ctx, id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
 		delete(s.cache, id)
-		return nil, ErrRouteNotFound
+		if errors.Is(err, jetstream.ErrKeyNotFound) || errors.Is(err, jetstream.ErrKeyDeleted) {
+			return nil, ErrRouteNotFound
+		}
+		return nil, ErrRouteUnavailable
 	}
 	if cached, ok := s.cache[id]; ok && cached.revision == entry.Revision() {
 		cp := cached.route

@@ -27,6 +27,7 @@ type RouteStore interface {
 }
 
 var ErrRouteNotFound = fmt.Errorf("route not found")
+var ErrRouteUnavailable = fmt.Errorf("route service unavailable")
 
 // MemoryRouteStore for tests and local skeleton.
 type MemoryRouteStore struct {

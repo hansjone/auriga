@@ -170,9 +170,27 @@ go build ./...
 
 edge 启动必须配置 `natsUrl`（或 `AURIGA_EDGE_NATS_URL`）以及 `nodeTLS.certFile`、`nodeTLS.keyFile`、`nodeTLS.caFile`。环境变量分别是 `AURIGA_EDGE_NODE_CERT_FILE`、`AURIGA_EDGE_NODE_KEY_FILE`、`AURIGA_EDGE_NODE_CA_FILE`。客户端证书必须由平台 CA 签发，带 clientAuth 和 `auriga://edge/<id>` URI SAN；安装器负责签发与更新材料，换证后重启 edge。读取前拒绝链接和非普通文件；POSIX 收紧为 0600，Windows 设置仅当前服务用户、SYSTEM、Administrators 可访问的受保护 DACL。
 
-edge 只读 workspace 发布的 NATS KV `auriga-routes`，不创建 bucket。NATS 用户须允许 bucket 查询和读取，禁止写入 `$KV.auriga-routes.>`；只有 workspace 可发布路由。`natsCredsFile` 沿用原配置。未找到、已删除、格式错误或 NATS 不可用时拒绝实例访问，不使用陈旧缓存授权。每次访问读取当前 KV revision，相同 revision 复用解码缓存；迁移更新 revision，删除会清除对应缓存。此实现没有只靠本地 watch 的断线陈旧窗口，代价是每个请求需要查询 KV。
+edge 只读 workspace 发布的 NATS KV `auriga-routes`，不创建 bucket。路由使用独立的 NATS 用户，凭据由 `routesNatsCredsFile` / `AURIGA_EDGE_ROUTES_NATS_CREDS_FILE` 指定；未设置时才回落到 `natsCredsFile`，生产部署必须配置独立凭据，不能复用拥有会话写权限的用户。只有 workspace 可发布路由。未找到、已删除或格式错误时拒绝实例访问；NATS 连接／超时／bucket 不可用返回 503 `common.unavailable` 并记录日志，不用陈旧缓存授权。先验证实例绑定与会话才查路由，未登录统一 401；已登录的不存在／非主人统一 403。每次访问读取当前 KV revision，相同 revision 复用解码缓存；迁移更新 revision，删除会清除对应缓存。此实现没有只靠本地 watch 的断线陈旧窗口，代价是每个请求需要查询 KV。
+
+路由用户权限应只放行以下读取 API 和回复 inbox（NATS 用户配置中的 permissions 示例；凭据由部署流程生成，不在公开配置中填写密码）。不要授予 `$KV.auriga-routes.>` 发布权限或 `$JS.API.>` 通配权限：
+
+```conf
+permissions: {
+  publish: { allow: [
+    "$JS.API.STREAM.INFO.KV_auriga-routes",
+    "$JS.API.STREAM.MSG.GET.KV_auriga-routes",
+    "$JS.API.DIRECT.GET.KV_auriga-routes",
+    "$JS.API.DIRECT.GET.KV_auriga-routes.>"
+  ] }
+  subscribe: { allow: ["_INBOX.>"] }
+}
+```
 
 第二轮主控已决定：地址只用于定位，信任以平台 CA 和目标节点证书为准，不另建地址白名单。入口只允许 `https://host:port`、`unix:///absolute/path`、`npipe:////./pipe/name`，拒绝明文 HTTP、userinfo、query、fragment、HTTPS 路径。所有通道都跑 TLS；校验完整证书链、有效期、serverAuth，且叶证书只有一个 URI SAN、精确等于 `auriga://node/<route.nodeId>`。不以 DNS SAN 代替节点身份，也不依赖环境 HTTP 代理。HTTP 请求和身份头只在 TLS 验证完成后发送。URI 身份验证同时支持没有 DNS 名称的本机 socket。
+
+第三轮补充出站限制：`allowLocalIngress` 默认 false（环境变量 `AURIGA_EDGE_ALLOW_LOCAL_INGRESS`），此时不连接 Unix socket／命名管道，也不连接 HTTPS 回环地址。单机部署由 ctl／安装器显式启用该开关后才允许本机入口；ctl 接线不在本任务范围。HTTPS 每次新建连接时解析 DNS，检查全部解析结果，拒绝未指定、链路本地（含云元数据地址）、组播及带 zone 的地址；IPv4-mapped IPv6 先转换为 IPv4 再判断。全部结果通过后只拨号到已验证的数值 IP，不再次解析域名，避免 DNS 重绑定。允许单机模式也不会放开链路本地／未指定地址。完整解析与拨号共用 10 秒期限。私有单播节点地址仍受允许，并须通过节点证书验证。
+
+节点证书现在由 workspace 的 NodeCa 同时签发 clientAuth 和 serverAuth：前者用于控制通道，后者用于实例入口。旧的仅 clientAuth 节点证书必须通过续期／重新入网换证，并重启 agent 入口以重新加载证书；不能放宽 edge 的 serverAuth 校验来兼容。
 
 转发路径统一为 `/i/<instanceId>/<应用路径>`，身份头 `aud` 为实例 ID，`sub/tid/sid` 来自当前门户会话，`htu` 仍是实例最终看到的应用路径，不含查询串。每次检查路由主人、会话账号、实例绑定账号一致，并检查三者租户一致。契约当前只允许主人，没有信息支持的委派访问一律拒绝。WebSocket 与普通 HTTP 使用相同 mTLS Transport；SessionConnHub 在吊销／到期时取消连接，并在登记后再次校验会话以避免登记前的吊销竞态。
 

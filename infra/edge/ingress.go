@@ -21,6 +21,7 @@ type NodeIngress struct {
 	roots      *x509.CertPool
 	mu         sync.Mutex
 	transports map[string]*http.Transport
+	allowLocal bool
 }
 
 type NodeTLSConfig struct {
@@ -98,6 +99,9 @@ func (n *NodeIngress) target(route *InstanceRoute) (*url.URL, http.RoundTripper,
 	if err != nil {
 		return nil, nil, err
 	}
+	if u.Scheme != "https" && !n.allowLocal {
+		return nil, nil, fmt.Errorf("local ingress is disabled")
+	}
 	key := route.NodeID + "|" + route.Ingress
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -136,7 +140,21 @@ func (n *NodeIngress) target(route *InstanceRoute) (*url.URL, http.RoundTripper,
 		}
 		tr = &http.Transport{TLSClientConfig: cfg, TLSHandshakeTimeout: 10 * time.Second, IdleConnTimeout: 90 * time.Second, MaxIdleConns: 32, MaxIdleConnsPerHost: 8, ExpectContinueTimeout: time.Second}
 		dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-		tr.DialContext = dialer.DialContext
+		// Resolve and validate on every new TCP connection, then dial the numeric
+		// address. Never let DialContext resolve the original name a second time.
+		tr.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+			return dialResolvedIngress(ctx, dialer, network, port, addresses, n.allowLocal)
+		}
 		if u.Scheme != "https" {
 			endpoint := *u
 			tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return dialLocalIngress(ctx, &endpoint) }

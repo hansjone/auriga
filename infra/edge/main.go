@@ -48,7 +48,11 @@ func run(args []string, out, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
-	routes, err := NewNATSRouteStore(cfg.NATSURL, cfg.NATSCredsFile)
+	routesCreds := cfg.RoutesNATSCredsFile
+	if routesCreds == "" {
+		routesCreds = cfg.NATSCredsFile
+	}
+	routes, err := NewNATSRouteStore(cfg.NATSURL, routesCreds)
 	if err != nil {
 		return err
 	}

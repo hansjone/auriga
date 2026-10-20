@@ -53,6 +53,7 @@ public final class WorkspaceRoutes implements AutoCloseable {
 
   public synchronized void refresh() {
     try {
+      requireNoTransaction();
       if (connection == null || connection.getStatus() == Connection.Status.CLOSED)
         connection = connect.get();
       if (connection.getStatus() != Connection.Status.CONNECTED) return;
@@ -67,31 +68,31 @@ public final class WorkspaceRoutes implements AutoCloseable {
       }
       KeyValue kv = connection.keyValue(BUCKET);
       for (UUID tenant : store.tenants()) {
-        store.in(
-            tenant,
-            () -> {
-              // Serialize publishers across replicas before reading the snapshot, without locking
-              // business rows or borrowing another connection from an active tenant transaction.
-              boolean acquired =
-                  Boolean.TRUE.equals(
-                      store.jdbc.queryForObject(
-                          "SELECT pg_try_advisory_xact_lock(hashtextextended(?, 82152))",
-                          Boolean.class,
-                          tenant.toString()));
-              if (!acquired) return null;
-              for (var row :
-                  store.jdbc.queryForList(
-                      "SELECT i.*,n.ingress_endpoint,n.revoked AS node_revoked,n.last_seen_at AS node_seen FROM instance i LEFT JOIN node n ON n.tenant_id=i.tenant_id AND n.id=i.node_id WHERE i.tenant_id=? ORDER BY i.id",
-                      tenant)) {
-                String id = row.get("id").toString();
-                try {
-                  write(kv, id, encode(row));
-                } catch (Exception e) {
-                  throw new IllegalStateException("Route publish unavailable", e);
-                }
-              }
-              return null;
-            });
+        var ids =
+            store.in(
+                tenant,
+                () ->
+                    store.jdbc.queryForList(
+                        "SELECT id FROM instance WHERE tenant_id=? ORDER BY id",
+                        UUID.class,
+                        tenant));
+        // Read KV revisions BEFORE the fresh DB snapshot. A stale publisher cannot
+        // overwrite any newer put/delete: CAS includes tombstone revisions as well.
+        Map<String, io.nats.client.api.KeyValueEntry> observed = new HashMap<>();
+        for (UUID id : ids) observed.put(id.toString(), latest(kv, id.toString()));
+        var rows =
+            store.in(
+                tenant,
+                () ->
+                    store.jdbc.queryForList(
+                        "SELECT i.*,n.ingress_endpoint,n.revoked AS node_revoked,n.last_seen_at AS node_seen FROM instance i LEFT JOIN node n ON n.tenant_id=i.tenant_id AND n.id=i.node_id WHERE i.tenant_id=? ORDER BY i.id",
+                        tenant));
+        // store.in has committed and returned its connection before any NATS write.
+        for (var row : rows) {
+          String id = row.get("id").toString();
+          // Instances inserted after the ID scan are picked up by the next pass.
+          if (observed.containsKey(id)) write(kv, id, encode(row), observed.get(id));
+        }
       }
     } catch (Exception e) {
       // All state remains in PostgreSQL. Next pass resends the latest state, never old queued URLs.
@@ -100,12 +101,42 @@ public final class WorkspaceRoutes implements AutoCloseable {
     }
   }
 
+  static io.nats.client.api.KeyValueEntry latest(KeyValue kv, String id) throws Exception {
+    requireNoTransaction();
+    // get() hides deletion markers; history preserves the last subject revision.
+    var history = kv.history(id);
+    return history.isEmpty() ? null : history.getLast();
+  }
+
   static void write(KeyValue kv, String id, byte[] value) throws Exception {
-    var existing = kv.get(id);
-    if (value == null) {
-      if (existing != null && existing.getOperation() == io.nats.client.api.KeyValueOperation.PUT)
-        kv.delete(id);
-    } else if (existing == null || !Arrays.equals(value, existing.getValue())) kv.put(id, value);
+    write(kv, id, value, latest(kv, id));
+  }
+
+  static boolean write(
+      KeyValue kv, String id, byte[] value, io.nats.client.api.KeyValueEntry observed)
+      throws Exception {
+    requireNoTransaction();
+    boolean live =
+        observed != null && observed.getOperation() == io.nats.client.api.KeyValueOperation.PUT;
+    if (value == null && !live
+        || value != null && live && Arrays.equals(value, observed.getValue())) return true;
+    long revision = observed == null ? 0 : observed.getRevision();
+    try {
+      if (value == null) kv.delete(id, revision);
+      else kv.update(id, value, revision);
+      return true;
+    } catch (io.nats.client.JetStreamApiException e) {
+      if (e.getApiErrorCode() == 10071)
+        return false; // wrong last subject sequence: retry latest DB state next pass
+      throw e;
+    }
+  }
+
+  private static void requireNoTransaction() {
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+        .isActualTransactionActive())
+      throw new IllegalStateException(
+          "Route NATS operations must run outside database transactions");
   }
 
   static byte[] encode(Map<String, Object> row) throws Exception {
