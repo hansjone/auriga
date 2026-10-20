@@ -188,6 +188,9 @@ public final class NodeSessions implements AutoCloseable {
                 if (!request.hasHello())
                   throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
                 Hello h = request.getHello();
+                if (!h.getIngressEndpoint().isEmpty()
+                    && !WorkspaceRoutes.validEndpoint(h.getIngressEndpoint()))
+                  throw new AurigaException(CommonErrors.VALIDATION_FAILED);
                 if (!h.getNodeId().equals(node.toString()))
                   throw new AurigaException(CommonErrors.UNAUTHENTICATED);
                 if (h.getProtocolVersion() != 1
@@ -207,10 +210,11 @@ public final class NodeSessions implements AutoCloseable {
                 enrollment.store.tx(
                     () ->
                         enrollment.store.jdbc.update(
-                            "UPDATE node SET hello=?,last_seen_at=?,agent_version=? WHERE tenant_id=? AND id=?",
+                            "UPDATE node SET hello=?,last_seen_at=?,agent_version=?,ingress_endpoint=? WHERE tenant_id=? AND id=?",
                             h.toByteArray(),
                             time(workspace.clock.instant()),
                             h.getAgentVersion(),
+                            h.getIngressEndpoint(),
                             tenant,
                             node));
                 hello = true;

@@ -172,26 +172,27 @@ func runAgent(args []string, logs io.Writer) error {
 	rec := reconciler.New(store, driver, logger, cfg.MaxConcurrentPrepare)
 	defer rec.Close()
 
-	sess := conn.New(conn.Config{
-		AgentDir:      cfg.AgentDir(),
-		AgentVersion:  cfg.AgentVersion,
-		ControlURL:    cfg.ControlEndpoint,
-		Drivers:       []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_DOCKER},
-		Logger:        logger,
-		Reconciler:    rec,
-		Store:         store,
-		AllowInsecure: cfg.AllowInsecure,
-	})
-	rec.Sink = sess.StatusSink()
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	stopIO, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal)
+	stopIO, endpoint, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal)
 	if err != nil {
 		return err
 	}
 	defer stopIO()
+
+	sess := conn.New(conn.Config{
+		AgentDir:        cfg.AgentDir(),
+		AgentVersion:    cfg.AgentVersion,
+		ControlURL:      cfg.ControlEndpoint,
+		IngressEndpoint: endpoint,
+		Drivers:         []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_DOCKER},
+		Logger:          logger,
+		Reconciler:      rec,
+		Store:           store,
+		AllowInsecure:   cfg.AllowInsecure,
+	})
+	rec.Sink = sess.StatusSink()
 
 	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)
 	return sess.Run(ctx)

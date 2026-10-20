@@ -61,7 +61,13 @@ JSON 文件 + 环境变量覆盖。公开仓示例一律用 `example.com` / `192
   "tls": { "mode": "off" },
   "rateLimit": { "requestsPerSecond": 50, "burst": 100 },
   "identityKeysFile": "./var/identity-signing-keys.json",
-  "sessionStore": "memory"
+  "sessionStore": "memory",
+  "natsUrl": "nats://127.0.0.1:4222",
+  "nodeTLS": {
+    "certFile": "./var/edge.crt",
+    "keyFile": "./var/edge.key",
+    "caFile": "./var/platform-ca.crt"
+  }
 }
 ```
 
@@ -128,7 +134,7 @@ JWKS 子集（含 `d` 私钥种子，选 `state=CURRENT`）：
 
 内存票据用完即删；限流 bucket 定期/满额淘汰，IPv6 按 /64 归并。`ReadTimeout` 不设（大上传）；实例反代无短 `ResponseHeaderTimeout`；1MiB body 上限仅 `/api/`。
 
-**不做**（留给 E2）：经节点代理 ingress 的生产 mTLS、冷启动页、NATS `auriga-routes` 实时同步。
+实例生产链路已接入 E2 的节点 mTLS 和 `auriga-routes`；冷启动页仍未实现。
 
 ## TLS
 
@@ -139,6 +145,8 @@ JWKS 子集（含 `d` 私钥种子，选 `state=CURRENT`）：
 | `certmagic` | 配置校验需要 `domains`；本骨架**不**在 CI 外网申请证书。生产有域名时优先外置反代或安装器接入 CertMagic DNS-01；启用占位需 `AURIGA_EDGE_CERTMAGIC_ENABLE=1`（仍会提示未捆绑 ACME） |
 
 ## 与 B2 / E2 边界
+
+以下为 B7 阶段分工；E2 当前实现与配置见文末 E2 节。
 
 | 本任务（B7） | B2（iam） | E2 |
 |---|---|---|
@@ -157,3 +165,17 @@ go build ./...
 ```
 
 覆盖：可信代理 IP、伪造客户端 IP、portal/admin Host 隔离、CSRF、会话缺失、Bearer 注入、限流、身份头验签、票据单次使用、剥 cookie。测试只用随机/`httptest` 端口，不启常驻进程。
+
+## E2：节点实例入口
+
+edge 启动必须配置 `natsUrl`（或 `AURIGA_EDGE_NATS_URL`）以及 `nodeTLS.certFile`、`nodeTLS.keyFile`、`nodeTLS.caFile`。环境变量分别是 `AURIGA_EDGE_NODE_CERT_FILE`、`AURIGA_EDGE_NODE_KEY_FILE`、`AURIGA_EDGE_NODE_CA_FILE`。客户端证书必须由平台 CA 签发，带 clientAuth 和 `auriga://edge/<id>` URI SAN；安装器负责签发与更新材料，换证后重启 edge。读取前拒绝链接和非普通文件；POSIX 收紧为 0600，Windows 设置仅当前服务用户、SYSTEM、Administrators 可访问的受保护 DACL。
+
+edge 只读 workspace 发布的 NATS KV `auriga-routes`，不创建 bucket。NATS 用户须允许 bucket 查询和读取，禁止写入 `$KV.auriga-routes.>`；只有 workspace 可发布路由。`natsCredsFile` 沿用原配置。未找到、已删除、格式错误或 NATS 不可用时拒绝实例访问，不使用陈旧缓存授权。每次访问读取当前 KV revision，相同 revision 复用解码缓存；迁移更新 revision，删除会清除对应缓存。此实现没有只靠本地 watch 的断线陈旧窗口，代价是每个请求需要查询 KV。
+
+第二轮主控已决定：地址只用于定位，信任以平台 CA 和目标节点证书为准，不另建地址白名单。入口只允许 `https://host:port`、`unix:///absolute/path`、`npipe:////./pipe/name`，拒绝明文 HTTP、userinfo、query、fragment、HTTPS 路径。所有通道都跑 TLS；校验完整证书链、有效期、serverAuth，且叶证书只有一个 URI SAN、精确等于 `auriga://node/<route.nodeId>`。不以 DNS SAN 代替节点身份，也不依赖环境 HTTP 代理。HTTP 请求和身份头只在 TLS 验证完成后发送。URI 身份验证同时支持没有 DNS 名称的本机 socket。
+
+转发路径统一为 `/i/<instanceId>/<应用路径>`，身份头 `aud` 为实例 ID，`sub/tid/sid` 来自当前门户会话，`htu` 仍是实例最终看到的应用路径，不含查询串。每次检查路由主人、会话账号、实例绑定账号一致，并检查三者租户一致。契约当前只允许主人，没有信息支持的委派访问一律拒绝。WebSocket 与普通 HTTP 使用相同 mTLS Transport；SessionConnHub 在吊销／到期时取消连接，并在登记后再次校验会话以避免登记前的吊销竞态。
+
+实例请求体总体上限 64 MiB（已知长度和未知长度都限制，超限 413），允许超过 1 MiB 的上传；API 的 1 MiB 上限保持原样。拨号／TLS 握手上限 10 秒，不设置实例短响应头超时和服务器整体 ReadTimeout。Transport 按节点 ID 和入口复用并限制池数量，地址变化和进程退出关闭空闲连接。
+
+E2 测试见 `ingress*_test.go`、`local_*_test.go`：正常身份与路径、越权／跨租户、错误节点／CA、非法 scheme、WebSocket 吊销断连、路由迁移删除、2 MiB 上传及未知长度超限、本机 TLS。Windows 假节点使用随机命名管道上的真实 TLS，避开本机 HTTPS 扫描对 loopback TCP 证书的替换；Linux 使用 httptest 随机 TCP 端口，并另测 Unix socket。

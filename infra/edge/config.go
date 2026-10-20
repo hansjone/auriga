@@ -25,6 +25,7 @@ type Config struct {
 	SessionStore         string            `json:"sessionStore"` // memory | nats
 	NATSURL              string            `json:"natsUrl"`
 	NATSCredsFile        string            `json:"natsCredsFile"`
+	NodeTLS              NodeTLSConfig     `json:"nodeTLS"`
 	PublicPathPrefixes   []string          `json:"publicPathPrefixes"`
 }
 
@@ -94,6 +95,9 @@ func applyEnv(cfg *Config) {
 		}
 	}
 	set("AURIGA_EDGE_LISTEN", &cfg.Listen)
+	set("AURIGA_EDGE_NODE_CERT_FILE", &cfg.NodeTLS.CertFile)
+	set("AURIGA_EDGE_NODE_KEY_FILE", &cfg.NodeTLS.KeyFile)
+	set("AURIGA_EDGE_NODE_CA_FILE", &cfg.NodeTLS.CAFile)
 	set("AURIGA_EDGE_PORTAL_HOST", &cfg.PortalHost)
 	set("AURIGA_EDGE_ADMIN_HOST", &cfg.AdminHost)
 	set("AURIGA_EDGE_INSTANCE_PARENT_DOMAIN", &cfg.InstanceParentDomain)

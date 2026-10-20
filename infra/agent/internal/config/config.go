@@ -27,6 +27,8 @@ type Config struct {
 	AgentVersion string `json:"agentVersion"`
 	// AllowInsecure permits grpc:// and http:// endpoints (local dev / tests only).
 	AllowInsecure bool `json:"allowInsecure"`
+	// IngressAdvertiseHost is the externally reachable DNS name/IP (no port).
+	IngressAdvertiseHost string `json:"ingressAdvertiseHost"`
 }
 
 func defaultDataRoot() string {
@@ -79,6 +81,7 @@ func applyEnv(cfg *Config) {
 	set("AURIGA_AGENT_DATA_ROOT", &cfg.DataRoot)
 	set("AURIGA_AGENT_CONTROL_ENDPOINT", &cfg.ControlEndpoint)
 	set("AURIGA_AGENT_VERSION", &cfg.AgentVersion)
+	set("AURIGA_AGENT_INGRESS_ADVERTISE_HOST", &cfg.IngressAdvertiseHost)
 	if v := os.Getenv("AURIGA_AGENT_DRIVERS"); v != "" {
 		parts := strings.Split(v, ",")
 		out := make([]string, 0, len(parts))

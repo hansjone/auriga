@@ -29,16 +29,17 @@ import (
 
 // Config configures the control session loop.
 type Config struct {
-	AgentDir      string
-	AgentVersion  string
-	CAFingerprint string
-	ControlURL    string // override; else from state meta
-	Drivers       []nodev1.RuntimeKind
-	BootID        string
-	Logger        *slog.Logger
-	Reconciler    *reconciler.Reconciler
-	Store         *state.Store
-	AllowInsecure bool
+	AgentDir        string
+	AgentVersion    string
+	CAFingerprint   string
+	ControlURL      string // override; else from state meta
+	IngressEndpoint string
+	Drivers         []nodev1.RuntimeKind
+	BootID          string
+	Logger          *slog.Logger
+	Reconciler      *reconciler.Reconciler
+	Store           *state.Store
+	AllowInsecure   bool
 
 	HeartbeatInterval time.Duration
 	MinBackoff        time.Duration
@@ -361,6 +362,7 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 			BootId:          s.cfg.BootID,
 			NodeTime:        timestamppb.Now(),
 			SealingKeyId:    identity.SealingKeyID(mat.SealingPublic),
+			IngressEndpoint: s.cfg.IngressEndpoint,
 		}},
 	})
 }

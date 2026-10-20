@@ -52,17 +52,18 @@ func TestAudit1_InstanceSetCookieStripped(t *testing.T) {
 	cfg.SecureCookies = false
 	instID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	host := instID + ".i.example.com"
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := testNode(t, &cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Set-Cookie", "__Host-auriga_admin_session=evil; Path=/; Secure; HttpOnly")
 		w.Header().Add("Set-Cookie", "auriga_session=evil2; Path=/")
 		w.Header().Add("Set-Cookie", "app_theme=dark; Path=/")
 		w.WriteHeader(200)
-	}))
+	}), testNodeID)
 	t.Cleanup(upstream.Close)
 	routes.Put(&InstanceRoute{
 		InstanceID: instID,
 		TenantID:   "33333333-3333-3333-3333-333333333333",
 		OwnerID:    "22222222-2222-2222-2222-222222222222",
+		NodeID:     testNodeID,
 		Host:       &host,
 		Ingress:    upstream.URL,
 		State:      "running",
@@ -422,15 +423,16 @@ func TestAuditN1_InstanceAllowsEncodedSlash(t *testing.T) {
 	instID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	host := instID + ".i.example.com"
 	var sawPath string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := testNode(t, &cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawPath = r.URL.RequestURI()
 		w.WriteHeader(200)
-	}))
+	}), testNodeID)
 	t.Cleanup(upstream.Close)
 	routes.Put(&InstanceRoute{
 		InstanceID: instID,
 		TenantID:   "33333333-3333-3333-3333-333333333333",
 		OwnerID:    "22222222-2222-2222-2222-222222222222",
+		NodeID:     testNodeID,
 		Host:       &host,
 		Ingress:    upstream.URL,
 		State:      "running",

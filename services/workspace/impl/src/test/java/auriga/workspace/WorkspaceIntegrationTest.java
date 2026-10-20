@@ -36,7 +36,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Real PostgreSQL + TLS gRPC fake node using only the generated protobuf protocol. */
-@ExtendWith(PostgresExtension.class)
+@ExtendWith({PostgresExtension.class, auriga.testsupport.NatsExtension.class})
 class WorkspaceIntegrationTest {
   static WorkspaceStore store;
   @TempDir Path directory;
@@ -180,6 +180,149 @@ class WorkspaceIntegrationTest {
         .setHostname("example-node")
         .setAgentVersion("1.0.0")
         .build();
+  }
+
+  @Test
+  void ingressHelloAndRouteRecoveryMigrationDeletion() throws Exception {
+    var request = joinRequest(token().token(), TestPki.key());
+    var joined = enrollment.join(request);
+    UUID node = UUID.fromString(joined.getNodeId());
+    var fake = new FakeNode();
+    var context =
+        Context.current()
+            .withValue(NodeSessions.PEER, NodeCa.parse(joined.getCertificateChain().toByteArray()));
+    var stream = context.call(() -> sessions.session(fake));
+    stream.onNext(
+        SessionRequest.newBuilder()
+            .setHello(
+                Hello.newBuilder()
+                    .setNodeId(node.toString())
+                    .setProtocolVersion(1)
+                    .setOs("linux")
+                    .setArch("amd64")
+                    .setIngressEndpoint("https://node.example.com:7443")
+                    .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+                    .setCapacity(
+                        Capacity.newBuilder().setCpuMillis(10000).setMemoryMb(8192).setDiskGb(100))
+                    .setSealingKeyId(
+                        HexFormat.of()
+                            .formatHex(
+                                WorkspaceCrypto.hash(request.getSealingPublicKey().toByteArray()))
+                            .substring(0, 16)))
+            .build());
+    assertTrue(fake.next().hasWelcome());
+    assertEquals(
+        "https://node.example.com:7443",
+        store.in(tenant, () -> store.node(node).get("ingress_endpoint")));
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    assertEquals(node, store.in(tenant, () -> store.instance(instance).get("node_id")));
+    var generation =
+        store.in(tenant, () -> ((Number) store.instance(instance).get("generation")).longValue());
+    TenantContext.run(
+        tenant,
+        () ->
+            service.status(
+                node,
+                InstanceStatus.newBuilder()
+                    .setInstanceId(instance.toString())
+                    .setObservedGeneration(generation)
+                    .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
+                    .setReady(true)
+                    .build()));
+    // Publishing is separate from business transactions. Simulate initial NATS outage.
+    try (var unavailable =
+        new WorkspaceRoutes(
+            store,
+            () -> {
+              throw new IllegalStateException("offline");
+            })) {
+      assertDoesNotThrow(unavailable::refresh);
+      assertEquals("running", store.in(tenant, () -> store.instance(instance).get("phase")));
+    }
+    String nats = auriga.testsupport.NatsExtension.url();
+    try (var reader = io.nats.client.Nats.connect(nats);
+        var routes = WorkspaceRoutes.configured(store, nats, "", "", false)) {
+      routes.refresh();
+      var kv = reader.keyValue(WorkspaceRoutes.BUCKET);
+      var first = WorkspaceService.JSON.readTree(kv.get(instance.toString()).getValue());
+      assertEquals(node.toString(), first.path("nodeId").asText());
+      assertEquals(owner.toString(), first.path("ownerId").asText());
+      assertEquals("running", first.path("state").asText());
+      // A rolled back change must not leak into routing.
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              store.in(
+                  tenant,
+                  () -> {
+                    store.jdbc.update(
+                        "UPDATE node SET ingress_endpoint=? WHERE tenant_id=? AND id=?",
+                        "https://rolled-back.example.com:7443",
+                        tenant,
+                        node);
+                    throw new IllegalStateException("rollback");
+                  }));
+      routes.refresh();
+      assertEquals(
+          "https://node.example.com:7443",
+          WorkspaceService.JSON
+              .readTree(kv.get(instance.toString()).getValue())
+              .path("ingress")
+              .asText());
+      // Changed node/endpoint is picked up from committed state, including after publisher restart.
+      UUID replacement =
+          UUID.fromString(enrollment.join(joinRequest(token().token(), TestPki.key())).getNodeId());
+      store.in(
+          tenant,
+          () -> {
+            store.jdbc.update(
+                "UPDATE node SET ingress_endpoint=?,last_seen_at=? WHERE tenant_id=? AND id=?",
+                "npipe:////./pipe/replacement",
+                WorkspaceStore.time(clock.instant()),
+                tenant,
+                replacement);
+            return store.jdbc.update(
+                "UPDATE instance SET node_id=?,generation=generation+1 WHERE tenant_id=? AND id=?",
+                replacement,
+                tenant,
+                instance);
+          });
+      try (var restarted = WorkspaceRoutes.configured(store, nats, "", "", false)) {
+        restarted.refresh();
+      }
+      var migrated = WorkspaceService.JSON.readTree(kv.get(instance.toString()).getValue());
+      assertEquals(replacement.toString(), migrated.path("nodeId").asText());
+      assertEquals("npipe:////./pipe/replacement", migrated.path("ingress").asText());
+      TenantContext.run(
+          tenant, () -> new WorkspaceAdmin(service, inputs).delete(instance, false, owner));
+      routes.refresh();
+      assertTrue(
+          kv.get(instance.toString()) == null
+              || kv.get(instance.toString()).getOperation()
+                  != io.nats.client.api.KeyValueOperation.PUT);
+    }
+    stream.onCompleted();
+  }
+
+  @Test
+  void helloRejectsInvalidIngressScheme() throws Exception {
+    var request = joinRequest(token().token(), TestPki.key());
+    var joined = enrollment.join(request);
+    var fake = new FakeNode();
+    var context =
+        Context.current()
+            .withValue(NodeSessions.PEER, NodeCa.parse(joined.getCertificateChain().toByteArray()));
+    var stream = context.call(() -> sessions.session(fake));
+    stream.onNext(
+        SessionRequest.newBuilder()
+            .setHello(
+                Hello.newBuilder()
+                    .setNodeId(joined.getNodeId())
+                    .setProtocolVersion(1)
+                    .setIngressEndpoint("http://node.example.com:7443"))
+            .build());
+    assertEquals(Status.Code.INVALID_ARGUMENT, fake.error.get(5, TimeUnit.SECONDS).getCode());
   }
 
   @Test

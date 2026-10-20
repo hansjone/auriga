@@ -10,9 +10,12 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/hansjone/auriga/infra/agent/internal/config"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
@@ -23,23 +26,22 @@ import (
 
 // startIngressAndObserver wires A3 ingress + observer (append-only).
 // Instance registry/targets stay empty until runtime exposes endpoints (主控接线).
-func startIngressAndObserver(ctx context.Context, cfg config.Config, logger *slog.Logger, listenAddr, localPath string) (func(), error) {
+func startIngressAndObserver(ctx context.Context, cfg config.Config, logger *slog.Logger, listenAddr, localPath string) (func(), string, error) {
 	mat, err := identity.Load(cfg.AgentDir())
 	if err != nil {
-		logger.Warn("ingress skipped: identity not loaded", "err", err)
-		return func() {}, nil
+		return nil, "", fmt.Errorf("ingress identity: %w", err)
 	}
 	keyPEM, err := marshalECDSAKeyPEM(mat.PrivateKey)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tlsCert, err := tlsutil.LoadTLSCertificate(mat.CertificatePEM, keyPEM)
 	if err != nil {
-		return nil, fmt.Errorf("ingress tls cert: %w", err)
+		return nil, "", fmt.Errorf("ingress tls cert: %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(mat.CAPEM) {
-		return nil, fmt.Errorf("ingress: no CA certs")
+		return nil, "", fmt.Errorf("ingress: no CA certs")
 	}
 
 	if localPath == "" {
@@ -75,9 +77,15 @@ func startIngressAndObserver(ctx context.Context, cfg config.Config, logger *slo
 		Logger:       logger,
 	})
 	if err := srv.Start(ctx); err != nil {
-		logger.Warn("ingress start failed", "err", err)
+		_ = srv.Close()
+		return nil, "", err
 	} else {
 		logger.Info("ingress started", "listen", listenAddr, "local", localPath)
+	}
+	endpoint, err := ingressEndpoint(listenAddr, localPath, cfg.IngressAdvertiseHost, srv.Addr().String())
+	if err != nil {
+		_ = srv.Close()
+		return nil, "", err
 	}
 
 	obs := observer.New(observer.Config{
@@ -91,7 +99,34 @@ func startIngressAndObserver(ctx context.Context, cfg config.Config, logger *slo
 	return func() {
 		obs.Stop()
 		_ = srv.Close()
-	}, nil
+	}, endpoint, nil
+}
+
+func ingressEndpoint(listenAddr, localPath, advertiseHost, actualAddr string) (string, error) {
+	if listenAddr != "" {
+		host, port, err := net.SplitHostPort(actualAddr)
+		if err != nil {
+			return "", err
+		}
+		if advertiseHost != "" {
+			host = advertiseHost
+		}
+		if host == "" || host == "0.0.0.0" || host == "::" || strings.ContainsAny(host, "/@?#") {
+			return "", fmt.Errorf("ingress needs a reachable advertise host")
+		}
+		return (&url.URL{Scheme: "https", Host: net.JoinHostPort(host, port)}).String(), nil
+	}
+	if runtime.GOOS == "windows" {
+		pipe := strings.TrimPrefix(localPath, `\\.\pipe\`)
+		if pipe == "" || strings.ContainsAny(pipe, `/\`) {
+			return "", fmt.Errorf("invalid ingress pipe name")
+		}
+		return "npipe:////./pipe/" + pipe, nil
+	}
+	if !filepath.IsAbs(localPath) {
+		return "", fmt.Errorf("ingress socket must be absolute")
+	}
+	return (&url.URL{Scheme: "unix", Path: localPath}).String(), nil
 }
 
 func marshalECDSAKeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {

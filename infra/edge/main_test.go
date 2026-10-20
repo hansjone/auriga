@@ -250,12 +250,12 @@ func TestIdentitySignAndTicketOnce(t *testing.T) {
 	cfg.SecureCookies = false
 
 	var gotIdentity, gotAuth, gotCookie string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := testNode(t, &cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotIdentity = r.Header.Get("Auriga-Identity")
 		gotAuth = r.Header.Get("Authorization")
 		gotCookie = r.Header.Get("Cookie")
 		_, _ = w.Write([]byte("ok"))
-	}))
+	}), testNodeID)
 	t.Cleanup(upstream.Close)
 
 	instID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
