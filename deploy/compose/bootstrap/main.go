@@ -41,7 +41,8 @@ func main() {
 	}
 	pki := filepath.Join(*out, "pki")
 	tpl := filepath.Join(*out, "templates")
-	mustMkdir(pki, 0o700)
+	// 0755 so edge (nonroot) can traverse the bind-mounted pki dir.
+	mustMkdir(pki, 0o755)
 	mustMkdir(tpl, 0o755)
 	mustMkdir(filepath.Join(*out, "join"), 0o755)
 

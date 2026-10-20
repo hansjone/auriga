@@ -41,7 +41,8 @@ EOF
 # Empty join token until e2e writes it (agent waits).
 : > "$VAR/join/token"
 # Platform (root) needs CA/workspace private keys; edge runs as distroless nonroot and must
-# read edge.key + identity-signing-keys.json from the bind mount.
+# traverse pki/ and read edge.key + identity-signing-keys.json from the bind mount.
+chmod 755 "$VAR/pki" "$VAR/templates" || true
 chmod 600 "$VAR/pki/ca.key" "$VAR/pki/workspace.key" || true
 chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/identity-signing-keys.json" "$VAR/identity-keys.json" \
