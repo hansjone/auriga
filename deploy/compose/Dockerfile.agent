@@ -1,0 +1,14 @@
+# Build from repository root: docker build -f deploy/compose/Dockerfile.agent .
+FROM golang:1.27 AS build
+WORKDIR /src/infra
+COPY infra/ ./
+WORKDIR /src/infra/agent
+RUN CGO_ENABLED=0 go build -o /out/auriga-agent .
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/auriga-agent /usr/local/bin/auriga-agent
+COPY deploy/compose/scripts/agent-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

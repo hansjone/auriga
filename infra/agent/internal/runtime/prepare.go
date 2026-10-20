@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,14 @@ type Preparing struct {
 	SealingPrivate [32]byte
 	PlatformURL    string
 	Chown          func(path string, uid, gid int) error
+	Log            *slog.Logger
+}
+
+func (p *Preparing) log() *slog.Logger {
+	if p.Log == nil {
+		return slog.Default()
+	}
+	return p.Log
 }
 
 func (p *Preparing) Name() string {
@@ -102,12 +111,14 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 				if pl == nil || pl.Url == "" || pl.Digest == "" {
 					continue
 				}
+				p.log().Info("fetching plugin artifact", "instance_id", full.InstanceId, "plugin", pl.Name)
 				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, pl.Url, pl.Digest, 0); err != nil {
 					return fmt.Errorf("plugin %s: %w", pl.Name, err)
 				}
 				wantDigests = append(wantDigests, pl.Digest)
 			}
 			if dsh := full.GetDsh(); dsh != nil && dsh.Url != "" && dsh.Digest != "" && dsh.Image == "" {
+				p.log().Info("fetching dsh runtime artifact", "instance_id", full.InstanceId)
 				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, dsh.Url, dsh.Digest, 0); err != nil {
 					return fmt.Errorf("dsh runtime: %w", err)
 				}
@@ -160,6 +171,7 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		}
 		s.Env = env
 	}
+	p.log().Info("pulling image and creating container", "instance_id", s.InstanceID)
 	return p.Inner.Ensure(ctx, s, r)
 }
 

@@ -186,6 +186,7 @@ func TestCSRFFailureAndBearerInjection(t *testing.T) {
 	req.RemoteAddr = "192.0.2.10:1"
 	req.AddCookie(&http.Cookie{Name: "__Host-auriga_session", Value: cookieRaw})
 	req.AddCookie(&http.Cookie{Name: "__Host-auriga_csrf", Value: csrfRaw})
+	req.AddCookie(&http.Cookie{Name: "auriga_login_tx", Value: "login-binding"})
 	req.AddCookie(&http.Cookie{Name: "other", Value: "keep"})
 	req.Header.Set("X-Auriga-CSRF", csrfRaw)
 	rr = httptest.NewRecorder()
@@ -196,11 +197,39 @@ func TestCSRFFailureAndBearerInjection(t *testing.T) {
 	if gotAuth != "Bearer access-token-abc" {
 		t.Fatalf("auth %q", gotAuth)
 	}
-	if strings.Contains(gotCookie, "auriga_") || strings.Contains(gotCookie, "__Host-auriga") {
-		t.Fatalf("cookie not stripped: %q", gotCookie)
+	if strings.Contains(gotCookie, "auriga_session") || strings.Contains(gotCookie, "auriga_csrf") {
+		t.Fatalf("session cookies not stripped: %q", gotCookie)
+	}
+	if !strings.Contains(gotCookie, "auriga_login_tx=login-binding") {
+		t.Fatalf("login_tx must be forwarded: %q", gotCookie)
 	}
 	if !strings.Contains(gotCookie, "other=keep") {
 		t.Fatalf("non-auriga cookie lost: %q", gotCookie)
+	}
+}
+
+func TestAPIProxyPreservesVirtualHost(t *testing.T) {
+	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
+	var gotHost string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(upstream.Close)
+	cfg.Upstreams["iam"] = upstream.URL
+	cfg.PublicPathPrefixes = []string{"/api/iam/v1/login/"}
+	gw := newTestGateway(t, cfg, sessions, routes, tickets, signer)
+
+	req := httptest.NewRequest(http.MethodPost, "http://admin.example.com/api/iam/v1/login/transactions", nil)
+	req.Host = "admin.example.com"
+	req.RemoteAddr = "192.0.2.10:1"
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+	if gotHost != "admin.example.com" {
+		t.Fatalf("upstream Host = %q, want admin.example.com", gotHost)
 	}
 }
 

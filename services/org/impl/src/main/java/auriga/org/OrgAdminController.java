@@ -13,11 +13,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 @RestController
-@ConditionalOnExpression("${auriga.services.org.enabled:true}")
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-    prefix = "auriga.service",
-    name = "schema",
-    havingValue = "org")
+@ConditionalOnExpression(
+    "${auriga.services.org.enabled:true} && ('${auriga.service.schema:}' == 'org' || ${auriga.platform.combined:false})")
 @RequestMapping("/api/org/v1/admin")
 @AdminOnly
 public class OrgAdminController {

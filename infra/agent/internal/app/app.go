@@ -17,6 +17,8 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/conn"
 	"github.com/hansjone/auriga/infra/agent/internal/enroll"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/ingress"
+	"github.com/hansjone/auriga/infra/agent/internal/observer"
 	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
@@ -175,24 +177,32 @@ func runAgent(args []string, logs io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	stopIO, endpoint, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal)
+	reg := ingress.NewMapRegistry()
+	targets := &observer.SliceTargets{}
+	sess := conn.New(conn.Config{
+		AgentDir:      cfg.AgentDir(),
+		AgentVersion:  cfg.AgentVersion,
+		ControlURL:    cfg.ControlEndpoint,
+		Drivers:       []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_DOCKER},
+		Logger:        logger,
+		Reconciler:    rec,
+		Store:         store,
+		AllowInsecure: cfg.AllowInsecure,
+		Capacity:      helloCapacity(cfg.DetectCapacity()),
+	})
+	io, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal, reg, targets, sess)
 	if err != nil {
 		return err
 	}
-	defer stopIO()
+	defer io.Stop()
+	sess.SetIngressEndpoint(io.Endpoint)
 
-	sess := conn.New(conn.Config{
-		AgentDir:        cfg.AgentDir(),
-		AgentVersion:    cfg.AgentVersion,
-		ControlURL:      cfg.ControlEndpoint,
-		IngressEndpoint: endpoint,
-		Drivers:         []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_DOCKER},
-		Logger:          logger,
-		Reconciler:      rec,
-		Store:           store,
-		AllowInsecure:   cfg.AllowInsecure,
-	})
-	rec.Sink = sess.StatusSink()
+	bridge := newInstanceBridge(cfg, driver, reg, targets)
+	statusSink := sess.StatusSink()
+	rec.Sink = func(st *nodev1.InstanceStatus) {
+		bridge.Sync(st)
+		statusSink(st)
+	}
 
 	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)
 	return sess.Run(ctx)
@@ -206,4 +216,13 @@ func ensureLayout(cfg config.Config) error {
 	}
 	_ = os.WriteFile(filepath.Join(cfg.AgentDir(), ".layout"), []byte("auriga-agent\n"), 0o644)
 	return nil
+}
+
+func helloCapacity(c config.Capacity) *nodev1.Capacity {
+	out := &nodev1.Capacity{CpuMillis: c.CPUMillis, MemoryMb: c.MemoryMB, DiskGb: c.DiskGB}
+	if c.MaxInstances > 0 {
+		max := c.MaxInstances
+		out.MaxInstances = &max
+	}
+	return out
 }

@@ -132,6 +132,10 @@ func (c *EngineClient) PullImage(ctx context.Context, image string) error {
 	if !ok || !strings.HasPrefix(digest, "sha256:") {
 		return fmt.Errorf("docker: image must be repo@sha256:…")
 	}
+	// Local registry / preloaded images: skip pull when the pinned digest is already present.
+	if insp, err := c.ImageInspect(ctx, image); err == nil && imageHasRepoDigest(insp, image, digest) {
+		return nil
+	}
 	q.Set("fromImage", repo)
 	q.Set("tag", digest)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/images/create?"+q.Encode(), nil)

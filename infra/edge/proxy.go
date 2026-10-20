@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -27,11 +28,19 @@ var apiProxyTransport http.RoundTripper = &http.Transport{
 func newReverseProxy(target *url.URL, tr http.RoundTripper) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			// Keep the browser Host (portal/admin). IAM maps Host → tenant/audience;
+			// rewriting to the upstream IP breaks admin vs portal and cookie names.
+			virt := pr.In.Host
 			pr.SetURL(target)
-			pr.Out.Host = target.Host
+			if virt != "" {
+				pr.Out.Host = virt
+			} else {
+				pr.Out.Host = target.Host
+			}
 		},
 		Transport: tr,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.Default().Warn("upstream request failed", "target", target.Redacted(), "path", r.URL.Path, "error", err)
 			writeProblem(w, problem(http.StatusBadGateway, "edge.upstream_error", "Bad Gateway", "upstream unavailable", requestID(r)))
 		},
 	}
@@ -40,7 +49,7 @@ func newReverseProxy(target *url.URL, tr http.RoundTripper) *httputil.ReversePro
 func rewriteOutboundAPI(req *http.Request, clientIP, bearer, requestID, traceparent string) {
 	// Strip browser session cookies; keep non-auriga cookies only if any remain.
 	if c := req.Header.Get("Cookie"); c != "" {
-		stripped := stripAurigaCookies(c)
+		stripped := stripAurigaCookies(c, true)
 		if stripped == "" {
 			req.Header.Del("Cookie")
 		} else {
@@ -65,7 +74,7 @@ func rewriteOutboundInstance(req *http.Request, clientIP, identity, requestID, t
 	req.Header.Del("Auriga-Identity")
 	req.Header.Del("Authorization")
 	if c := req.Header.Get("Cookie"); c != "" {
-		stripped := stripAurigaCookies(c)
+		stripped := stripAurigaCookies(c, false)
 		if stripped == "" {
 			req.Header.Del("Cookie")
 		} else {

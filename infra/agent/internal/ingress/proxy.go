@@ -1,6 +1,7 @@
 package ingress
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -35,6 +36,7 @@ func (s *Server) newInstanceProxy(inst *Instance) *httputil.ReverseProxy {
 		},
 		Transport: s.transport,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.Default().Warn("instance upstream failed", "path", r.URL.Path, "error", err)
 			writeProblem(w, http.StatusBadGateway, CodeInternal, "Bad Gateway", "upstream unavailable")
 		},
 	}

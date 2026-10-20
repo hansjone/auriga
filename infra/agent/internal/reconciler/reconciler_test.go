@@ -87,8 +87,10 @@ func TestStatusSinkKeepsEachTransitionSnapshot(t *testing.T) {
 			if st.Ready != (i == len(want)-1) {
 				t.Errorf("transition %d readiness changed after publication", i)
 			}
-			if i < len(want)-1 && st.ObservedGeneration != 0 {
-				t.Errorf("transition %d generation changed after publication", i)
+			// Every report for this attempt names the generation being applied,
+			// otherwise workspace drops it as stale.
+			if st.ObservedGeneration != 7 {
+				t.Errorf("transition %d observed generation = %d, want 7", i, st.ObservedGeneration)
 			}
 		default:
 			t.Fatalf("missing transition %d", i)

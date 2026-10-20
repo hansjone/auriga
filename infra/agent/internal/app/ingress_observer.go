@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/hansjone/auriga/infra/agent/internal/config"
@@ -24,24 +25,41 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 )
 
-// startIngressAndObserver wires A3 ingress + observer (append-only).
-// Instance registry/targets stay empty until runtime exposes endpoints (主控接线).
-func startIngressAndObserver(ctx context.Context, cfg config.Config, logger *slog.Logger, listenAddr, localPath string) (func(), string, error) {
+// ingressIO is the running ingress + observer pair.
+type ingressIO struct {
+	Stop     func()
+	Endpoint string
+	Registry *ingress.MapRegistry
+	Targets  *observer.SliceTargets
+	Observer *observer.Observer
+}
+
+// startIngressAndObserver wires A3 ingress + observer.
+// Registry and targets are shared with the reconciler so running instances are routable and observed.
+func startIngressAndObserver(
+	ctx context.Context,
+	cfg config.Config,
+	logger *slog.Logger,
+	listenAddr, localPath string,
+	reg *ingress.MapRegistry,
+	targets *observer.SliceTargets,
+	reporter observer.Reporter,
+) (*ingressIO, error) {
 	mat, err := identity.Load(cfg.AgentDir())
 	if err != nil {
-		return nil, "", fmt.Errorf("ingress identity: %w", err)
+		return nil, fmt.Errorf("ingress identity: %w", err)
 	}
 	keyPEM, err := marshalECDSAKeyPEM(mat.PrivateKey)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	tlsCert, err := tlsutil.LoadTLSCertificate(mat.CertificatePEM, keyPEM)
 	if err != nil {
-		return nil, "", fmt.Errorf("ingress tls cert: %w", err)
+		return nil, fmt.Errorf("ingress tls cert: %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(mat.CAPEM) {
-		return nil, "", fmt.Errorf("ingress: no CA certs")
+		return nil, fmt.Errorf("ingress: no CA certs")
 	}
 
 	if localPath == "" {
@@ -66,40 +84,57 @@ func startIngressAndObserver(ctx context.Context, cfg config.Config, logger *slo
 		idPath = filepath.Join(cfg.AgentDir(), "identity-keys.json")
 	}
 
+	if reg == nil {
+		reg = ingress.NewMapRegistry()
+	}
+	if targets == nil {
+		targets = &observer.SliceTargets{}
+	}
+	if reporter == nil {
+		reporter = observer.LogReporter{Log: logger}
+	}
+
 	srv := ingress.New(ingress.Config{
 		ListenAddr:   listenAddr,
 		LocalPath:    localPath,
+		LocalGroup:   localGroup(),
 		ServerCert:   tlsCert,
 		PlatformCA:   pool,
-		Registry:     ingress.NewMapRegistry(),
+		Registry:     reg,
 		Tickets:      &ingress.TicketVerifier{Keys: loadEd25519Pubs(ticketPath, logger)},
 		IdentityKeys: ingress.IdentityKeys(loadEd25519Pubs(idPath, logger)),
 		Logger:       logger,
 	})
 	if err := srv.Start(ctx); err != nil {
 		_ = srv.Close()
-		return nil, "", err
-	} else {
-		logger.Info("ingress started", "listen", listenAddr, "local", localPath)
+		return nil, err
 	}
+	logger.Info("ingress started", "listen", listenAddr, "local", localPath)
+
 	endpoint, err := ingressEndpoint(listenAddr, localPath, cfg.IngressAdvertiseHost, srv.Addr().String())
 	if err != nil {
 		_ = srv.Close()
-		return nil, "", err
+		return nil, err
 	}
 
 	obs := observer.New(observer.Config{
-		Source:    &observer.SliceTargets{},
-		Reporter:  observer.LogReporter{Log: logger},
+		Source:    targets,
+		Reporter:  reporter,
 		Collector: observer.DefaultCollector(),
 		Logger:    logger,
 	})
 	obs.Start(ctx)
 
-	return func() {
-		obs.Stop()
-		_ = srv.Close()
-	}, endpoint, nil
+	return &ingressIO{
+		Stop: func() {
+			obs.Stop()
+			_ = srv.Close()
+		},
+		Endpoint: endpoint,
+		Registry: reg,
+		Targets:  targets,
+		Observer: obs,
+	}, nil
 }
 
 func ingressEndpoint(listenAddr, localPath, advertiseHost, actualAddr string) (string, error) {
@@ -174,4 +209,18 @@ func loadEd25519Pubs(path string, logger *slog.Logger) map[string]ed25519.Public
 		out[k.Kid] = ed25519.PublicKey(x)
 	}
 	return out
+}
+
+// localGroup reads AURIGA_AGENT_INGRESS_LOCAL_GID: the group allowed to connect
+// to the single-node ingress socket (the edge's gid when edge is not root).
+func localGroup() *int {
+	v := os.Getenv("AURIGA_AGENT_INGRESS_LOCAL_GID")
+	if v == "" {
+		return nil
+	}
+	gid, err := strconv.Atoi(v)
+	if err != nil || gid < 0 {
+		return nil
+	}
+	return &gid
 }

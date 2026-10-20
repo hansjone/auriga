@@ -359,14 +359,21 @@ public final class NodeSessions implements AutoCloseable {
                   }
                   return frames;
                 });
+        if (!messages.isEmpty())
+          org.slf4j.LoggerFactory.getLogger(getClass())
+              .info("node {}: dispatching {} control message(s)", node, messages.size());
         for (var message : messages) if (!outbound.send(message)) break;
       } catch (RuntimeException e) {
+        org.slf4j.LoggerFactory.getLogger(getClass())
+            .warn("node {}: dispatch failed, closing session", node, e);
         fail(e);
       }
     }
 
     synchronized void fail(Throwable error) {
       if (closed) return;
+      org.slf4j.LoggerFactory.getLogger(getClass())
+          .info("node {}: session closed ({})", node, error.toString());
       closed = true;
       sessions.remove(node, this);
       release();

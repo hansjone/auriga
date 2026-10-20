@@ -25,6 +25,7 @@ Thumbs.db
 !.env.example
 /.dev/
 /data/
+deploy/compose/var/
 *.pem
 *.key
 # Agent work files

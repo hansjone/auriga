@@ -25,6 +25,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Transactional orchestration: changes desired specifications; only the node executes them. */
 public final class WorkspaceService {
+  /** Wake jobs fire this long before the alarm so DSH is ready when it runs. */
+  static final Duration WAKE_LEAD = Duration.ofSeconds(120);
+
   public static final JsonMapper JSON = JsonMapper.builder().build();
   public final WorkspaceStore store;
   private final WorkspaceInputs inputs;
@@ -263,14 +266,24 @@ public final class WorkspaceService {
             "SELECT * FROM node WHERE tenant_id=? AND NOT revoked AND schedulable AND NOT draining AND last_seen_at>? ORDER BY id FOR UPDATE",
             store.tenant(),
             time(clock.instant().minusSeconds(60)));
+    var skipped = new java.util.ArrayList<String>();
     for (var node : nodes) {
       try {
-        if (node.get("hello") == null) continue;
+        if (node.get("hello") == null) {
+          skipped.add(node.get("id") + ": no hello");
+          continue;
+        }
         Hello hello = Hello.parseFrom((byte[]) node.get("hello"));
-        if (!hello.getDriversList().contains(spec.getRuntime())) continue;
+        if (!hello.getDriversList().contains(spec.getRuntime())) {
+          skipped.add(node.get("id") + ": runtime " + spec.getRuntime() + " not offered");
+          continue;
+        }
         var labels = JSON.readTree(node.get("labels").toString());
         if (spec.getLabelsMap().entrySet().stream()
-            .anyMatch(e -> !e.getValue().equals(labels.path(e.getKey()).asText()))) continue;
+            .anyMatch(e -> !e.getValue().equals(labels.path(e.getKey()).asText()))) {
+          skipped.add(node.get("id") + ": labels " + spec.getLabelsMap() + " not matched");
+          continue;
+        }
         var current =
             store.jdbc.queryForList(
                 "SELECT * FROM instance WHERE tenant_id=? AND node_id=? AND (NOT deleted OR phase<>'absent')",
@@ -288,7 +301,10 @@ public final class WorkspaceService {
         if (c.hasMaxInstances() && current.size() >= c.getMaxInstances()
             || cpu > c.getCpuMillis() - r.getCpuMillis()
             || mem > c.getMemoryMb() - r.getMemoryMb()
-            || disk > c.getDiskGb() - r.getDiskGb()) continue;
+            || disk > c.getDiskGb() - r.getDiskGb()) {
+          skipped.add(node.get("id") + ": no capacity");
+          continue;
+        }
         var template =
             templates.get(
                 spec.getDsh().getVersion(), spec.getRuntime(), hello.getOs(), hello.getArch());
@@ -328,8 +344,15 @@ public final class WorkspaceService {
         throw new IllegalStateException(e);
       } catch (AurigaException e) {
         if (e.errorCode() != CommonErrors.UNAVAILABLE) throw e;
+        skipped.add(node.get("id") + ": no runtime template (" + e.getMessage() + ")");
       }
     }
+    org.slf4j.LoggerFactory.getLogger(getClass())
+        .info(
+            "instance {} not scheduled: {} candidate node(s) seen in the last 60s; skipped {}",
+            row.get("id"),
+            nodes.size(),
+            skipped);
   }
 
   public void saveSpec(Map<String, Object> row, InstanceSpec next) {
@@ -667,7 +690,16 @@ public final class WorkspaceService {
               queueRestart((UUID) row.get("id"), "apply_pending");
               continue;
             }
+            // Do not idle-stop an instance whose alarm is about to fire: the wake job
+            // pre-warms WAKE_LEAD early and is consumed while the instance still runs.
+            Instant nextWake = instant(row, "next_wake_at");
+            // Only a future alarm counts; a stale next_wake_at must not pin the instance.
+            boolean alarmSoon =
+                nextWake != null
+                    && nextWake.isAfter(now)
+                    && !nextWake.isAfter(now.plus(WAKE_LEAD).plus(WAKE_LEAD));
             if (s.getDesired() == DesiredState.DESIRED_STATE_RUNNING
+                && !alarmSoon
                 && Lifecycle.idle(
                     now,
                     instant(row, "last_activity_at"),
@@ -685,11 +717,20 @@ public final class WorkspaceService {
                   tenant,
                   time(now))) {
             var row = store.instance((UUID) job.get("instance_id"));
+            var wakeLog = org.slf4j.LoggerFactory.getLogger(getClass());
+            if (!Boolean.TRUE.equals(policy.getWakeOnSchedule()))
+              wakeLog.info("wake job for {} dropped: policy wakeOnSchedule is off", row.get("id"));
             if (Boolean.TRUE.equals(policy.getWakeOnSchedule())) {
               UUID owner = (UUID) row.get("owner_id");
               var quota = inputs.quota(tenant, owner);
-              if (inputs.member(tenant, owner).getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
+              var memberStatus = inputs.member(tenant, owner).getStatus();
+              if (memberStatus != MemberStatus.MEMBER_STATUS_ACTIVE
                   || quota.hasMaxInstances() && quota.getMaxInstances() == 0) {
+                wakeLog.info(
+                    "wake job for {} dropped: member {} quota maxInstances {}",
+                    row.get("id"),
+                    memberStatus,
+                    quota.hasMaxInstances() ? quota.getMaxInstances() : "unset");
                 store.jdbc.update(
                     "UPDATE workspace_job SET done=true WHERE tenant_id=? AND id=?",
                     tenant,
@@ -697,9 +738,14 @@ public final class WorkspaceService {
                 continue;
               }
               try {
+                boolean wasStopped = spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING;
                 desire(row, true, "wake", policy.getMaxConcurrentStarts());
+                if (wasStopped) wakeLog.info("wake job for {} started the instance", row.get("id"));
               } catch (AurigaException e) {
-                if (e.errorCode() == ADMISSION_FULL) continue;
+                if (e.errorCode() == ADMISSION_FULL) {
+                  wakeLog.info("wake job for {} deferred: admission full", row.get("id"));
+                  continue;
+                }
                 throw e;
               }
             }
@@ -744,7 +790,7 @@ public final class WorkspaceService {
                 UuidV7.next(clock),
                 store.tenant(),
                 id,
-                time(next.minusSeconds(120)));
+                time(next.minus(WAKE_LEAD)));
           return null;
         });
   }

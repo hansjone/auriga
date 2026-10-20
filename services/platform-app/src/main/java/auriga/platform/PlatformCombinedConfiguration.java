@@ -44,15 +44,11 @@ import tools.jackson.databind.json.JsonMapper;
 @ConditionalOnProperty(prefix = "auriga.platform", name = "combined", havingValue = "true")
 public class PlatformCombinedConfiguration {
 
+  /** Real UTC time for every module: expiry, idle reclaim and alarms all depend on it. */
   @Bean
   @Primary
-  MutableClock platformClock() {
-    return new MutableClock();
-  }
-
-  @Bean
-  Clock clock(MutableClock platformClock) {
-    return platformClock;
+  Clock clock() {
+    return Clock.systemUTC();
   }
 
   @Bean(name = "iamDataSource", destroyMethod = "close")

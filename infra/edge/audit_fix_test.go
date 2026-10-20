@@ -73,6 +73,7 @@ func TestAudit1_InstanceSetCookieStripped(t *testing.T) {
 	putPortalSession(sessions, cookieRaw, "csrf", "tok")
 	binding, err := tickets.BindInstance(
 		"11111111-1111-1111-1111-111111111111",
+		"",
 		"22222222-2222-2222-2222-222222222222",
 		"33333333-3333-3333-3333-333333333333",
 		instID,
@@ -325,7 +326,7 @@ func TestAudit6_TicketAndBindingSweep(t *testing.T) {
 	store.now = func() time.Time { return fixed }
 	sessExp := fixed.Add(30 * time.Minute)
 
-	tok, err := store.Issue("s", "a", "t", "i", "noncehash", time.Second, sessExp)
+	tok, err := store.Issue("s", "", "a", "t", "i", "noncehash", time.Second, sessExp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +341,7 @@ func TestAudit6_TicketAndBindingSweep(t *testing.T) {
 	store.mu.Unlock()
 
 	store.now = func() time.Time { return fixed }
-	b, err := store.BindInstance("s", "a", "t", "i", sessExp)
+	b, err := store.BindInstance("s", "", "a", "t", "i", sessExp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,6 +442,7 @@ func TestAuditN1_InstanceAllowsEncodedSlash(t *testing.T) {
 	putPortalSession(sessions, "portal-sess", "csrf", "tok")
 	binding, err := tickets.BindInstance(
 		"11111111-1111-1111-1111-111111111111",
+		"",
 		"22222222-2222-2222-2222-222222222222",
 		"33333333-3333-3333-3333-333333333333",
 		instID,

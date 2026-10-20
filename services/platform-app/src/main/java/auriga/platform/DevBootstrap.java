@@ -1,5 +1,8 @@
 package auriga.platform;
 
+import auriga.common.context.TenantContext;
+import auriga.common.persistence.TenantTransactionManager;
+import auriga.common.persistence.UuidV7;
 import auriga.iam.EmergencyAccounts;
 import auriga.iam.IamStore;
 import auriga.iam.ProviderManager;
@@ -16,6 +19,8 @@ import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
+import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -24,14 +29,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -47,23 +57,42 @@ public class DevBootstrap implements ApplicationRunner {
   private static final JsonMapper JSON = JsonMapper.builder().build();
   static final UUID DEFAULT_TENANT = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
+  private static final UUID ROLE_OWNER = UUID.fromString("00000000-0000-7000-8000-000000000001");
+  private static final String[] WORKSPACE_PERMS = {
+    "workspace.instances.read",
+    "workspace.instances.admin",
+    "workspace.nodes.read",
+    "workspace.nodes.admin",
+    "workspace.runtimes.read",
+    "workspace.runtimes.write"
+  };
+
   private final SigningKeys keys;
   private final EmergencyAccounts emergency;
   private final ProviderManager providers;
   private final IamStore store;
   private final Environment env;
+  private final ObjectProvider<DataSource> orgDataSource;
+  private final ObjectProvider<TenantTransactionManager> orgTx;
+  private final Clock clock;
 
   public DevBootstrap(
       SigningKeys keys,
       EmergencyAccounts emergency,
       ProviderManager providers,
       IamStore store,
-      Environment env) {
+      Environment env,
+      @Qualifier("orgDataSource") ObjectProvider<DataSource> orgDataSource,
+      @Qualifier("orgTransactionManager") ObjectProvider<TenantTransactionManager> orgTx,
+      ObjectProvider<Clock> clock) {
     this.keys = keys;
     this.emergency = emergency;
     this.providers = providers;
     this.store = store;
     this.env = env;
+    this.orgDataSource = orgDataSource;
+    this.orgTx = orgTx;
+    this.clock = clock.getIfAvailable(Clock::systemUTC);
   }
 
   @Override
@@ -105,13 +134,23 @@ public class DevBootstrap implements ApplicationRunner {
                     "auriga.platform.enrollment-file", ".dev/emergency-enrollment.json"))
             .toAbsolutePath()
             .normalize();
+    UUID emergencyAccountId = null;
     if (!Files.exists(enrollmentFile)) {
       EmergencyAccounts.Enrollment enrollment = emergency.install(DEFAULT_TENANT);
       writeEnrollment(enrollmentFile, enrollment);
+      emergencyAccountId = enrollment.accountId();
       log.info(
           "Emergency account enrolled; credentials written to {} (not logged)", enrollmentFile);
     } else {
       log.info("Emergency enrollment file already present; skipping emergency install");
+      try {
+        ObjectNode existing = (ObjectNode) JSON.readTree(Files.readString(enrollmentFile));
+        if (existing.hasNonNull("accountId")) {
+          emergencyAccountId = UUID.fromString(existing.path("accountId").asString());
+        }
+      } catch (Exception e) {
+        log.warn("Could not read enrollment accountId for org seed: {}", e.toString());
+      }
     }
 
     store.tenant(
@@ -148,6 +187,78 @@ public class DevBootstrap implements ApplicationRunner {
           }
           return null;
         });
+
+    if (emergencyAccountId != null) {
+      seedOrgOwner(emergencyAccountId);
+    }
+  }
+
+  /** Promote emergency account to org owner and grant workspace admin perms (M2 compose/e2e). */
+  private void seedOrgOwner(UUID accountId) {
+    DataSource ds = orgDataSource.getIfAvailable();
+    TenantTransactionManager tx = orgTx.getIfAvailable();
+    if (ds == null || tx == null) {
+      log.info("Org datasource unavailable; skip emergency org owner seed");
+      return;
+    }
+    JdbcTemplate jdbc = new JdbcTemplate(ds);
+    TransactionTemplate template = new TransactionTemplate(tx);
+    TenantContext.run(
+        DEFAULT_TENANT,
+        () ->
+            template.executeWithoutResult(
+                status -> {
+                  Integer members =
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM member WHERE tenant_id=? AND id=?",
+                          Integer.class,
+                          DEFAULT_TENANT,
+                          accountId);
+                  if (members == null || members == 0) {
+                    jdbc.update(
+                        "INSERT INTO member (id, tenant_id, display_name, email, member_type, status, version, created_at, disabled_at, offboarded_at)"
+                            + " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        accountId,
+                        DEFAULT_TENANT,
+                        "Emergency administrator",
+                        null,
+                        "member",
+                        "active",
+                        1L,
+                        Timestamp.from(clock.instant()),
+                        null,
+                        null);
+                    jdbc.update(
+                        "INSERT INTO role_binding (id, tenant_id, role_id, subject_type, subject_id, granted_by, created_at)"
+                            + " VALUES (?,?,?,?,?,?,?)",
+                        UuidV7.next(clock),
+                        DEFAULT_TENANT,
+                        ROLE_OWNER,
+                        "member",
+                        accountId,
+                        accountId,
+                        Timestamp.from(clock.instant()));
+                    log.info("Emergency account seeded as org owner");
+                  }
+                  for (String perm : WORKSPACE_PERMS) {
+                    jdbc.update(
+                        "UPDATE role SET permissions = CASE"
+                            + " WHEN ? = ANY(permissions) THEN permissions"
+                            + " ELSE array_append(permissions, ?::text) END"
+                            + " WHERE tenant_id=? AND id=?",
+                        perm,
+                        perm,
+                        DEFAULT_TENANT,
+                        ROLE_OWNER);
+                  }
+                  jdbc.update(
+                      "UPDATE policy SET value = jsonb_set(value, '{idleMinutes}', '5'::jsonb, true),"
+                          + " version = version + 1, updated_at = ?"
+                          + " WHERE tenant_id=? AND key='workspace'"
+                          + " AND COALESCE((value->>'idleMinutes')::int, 30) > 5",
+                      Timestamp.from(clock.instant()),
+                      DEFAULT_TENANT);
+                }));
   }
 
   static void writeEnrollment(Path file, EmergencyAccounts.Enrollment enrollment) throws Exception {

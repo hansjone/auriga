@@ -1,0 +1,113 @@
+name: E2E M2
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  m2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: |
+            infra/**/go.sum
+            deploy/compose/bootstrap/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prepare materials (registry + PKI + template)
+        working-directory: deploy/compose
+        run: |
+          chmod +x scripts/prepare.sh scripts/agent-entrypoint.sh
+          ./scripts/prepare.sh
+          set -a
+          # shellcheck disable=SC1091
+          source var/compose.env
+          set +a
+          echo "AURIGA_IAM_ENCRYPTION_KEY=$AURIGA_IAM_ENCRYPTION_KEY" >> "$GITHUB_ENV"
+          echo "AURIGA_WORKSPACE_ENCRYPTION_KEY=$AURIGA_WORKSPACE_ENCRYPTION_KEY" >> "$GITHUB_ENV"
+          echo "AURIGA_AGENT_CA_SHA256=$AURIGA_AGENT_CA_SHA256" >> "$GITHUB_ENV"
+
+      - name: Build and start stack
+        working-directory: deploy/compose
+        run: |
+          docker compose --env-file var/compose.env build
+          sudo mkdir -p /var/lib/auriga
+          docker compose --env-file var/compose.env up -d
+          # Wait for platform health
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8081/actuator/health >/dev/null; then
+              echo "platform healthy"
+              break
+            fi
+            sleep 5
+            if [ "$i" -eq 90 ]; then
+              echo "platform did not become healthy"
+              docker compose ps
+              docker compose logs --tail=200 platform || true
+              exit 1
+            fi
+          done
+          # Enrollment is written by platform as root:0600; make readable for the runner.
+          sudo chmod -R a+rX var/enrollment || chmod -R a+rX var/enrollment
+          # Wait for edge HTTP (any response code means the listener is up)
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:8080/ || true)
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+              echo "edge listening (http $code)"
+              break
+            fi
+            sleep 2
+            if [ "$i" -eq 60 ]; then
+              echo "edge did not listen on :8080"
+              docker compose ps
+              docker compose logs --tail=200 edge || true
+              exit 1
+            fi
+          done
+          # Agent data lives at the same host path the agent uses (see compose).
+          echo "AGENT_VOLUME=/var/lib/auriga" >> "$GITHUB_ENV"
+
+      - name: Run e2e
+        env:
+          EDGE_BASE: http://127.0.0.1:8080
+          PLATFORM_BASE: http://127.0.0.1:8081
+          ENROLLMENT_FILE: deploy/compose/var/enrollment/emergency-enrollment.json
+          JOIN_TOKEN_FILE: deploy/compose/var/join/token
+          IDLE_MINUTES: '5'
+        run: |
+          # Re-assert enrollment readability (platform may recreate the file).
+          sudo chmod -R a+rX deploy/compose/var/enrollment 2>/dev/null || true
+          # AGENT_VOLUME (from previous step) lets e2e read instance.token and
+          # write ops-cron/store.json into the live agent data volume.
+          export AGENT_VOLUME
+          node e2e/m2.mjs
+
+      - name: Dump logs on failure
+        if: failure()
+        working-directory: deploy/compose
+        run: |
+          docker compose ps || true
+          for s in postgres nats platform edge agent registry; do
+            echo "===== logs $s ====="
+            docker compose logs --tail=200 "$s" || true
+          done
+
+      - name: Tear down
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose --env-file var/compose.env down -v || docker compose down -v || true

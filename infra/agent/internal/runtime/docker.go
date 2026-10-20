@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"sync"
@@ -232,11 +233,34 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	hostPort := publishedPort(insp, d.portOf(id))
+	port := d.portOf(id)
+	endpoint, err := instanceEndpoint(insp, networkName(id), port)
+	if err != nil {
+		return fmt.Errorf("docker: %s: %w", name, err)
+	}
 	d.mu.Lock()
-	d.endpoints[id] = fmt.Sprintf("http://127.0.0.1:%s", hostPort)
+	d.endpoints[id] = endpoint
 	d.mu.Unlock()
 	return nil
+}
+
+// instanceEndpoint picks how the agent reaches the instance. Docker does not
+// publish ports for containers attached only to an internal network (the
+// isolation we want), so the usual path is the container address on its own
+// network, which the host can still route to; a published loopback port is
+// used when present.
+func instanceEndpoint(insp map[string]any, network string, port uint32) (string, error) {
+	if hp := publishedPort(insp, port); hp != "0" {
+		return fmt.Sprintf("http://127.0.0.1:%s", hp), nil
+	}
+	settings, _ := insp["NetworkSettings"].(map[string]any)
+	networks, _ := settings["Networks"].(map[string]any)
+	n, _ := networks[network].(map[string]any)
+	ip, _ := n["IPAddress"].(string)
+	if net.ParseIP(ip) == nil {
+		return "", fmt.Errorf("no published port and no address on network %s", network)
+	}
+	return "http://" + net.JoinHostPort(ip, strconv.FormatUint(uint64(port), 10)), nil
 }
 
 func (d *Docker) Stop(ctx context.Context, id string, grace time.Duration) error {

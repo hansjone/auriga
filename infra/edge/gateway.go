@@ -314,6 +314,32 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 	proxy.ServeHTTP(w, r)
 }
 
+// sessionKey is the session-store key for the request's session cookie.
+func (g *Gateway) sessionKey(r *http.Request, audience string) string {
+	raw := getCookie(r, cookieName(g.Cfg.SecureCookies, sessionCookieBase(audience)))
+	if raw == "" {
+		return ""
+	}
+	return HashCookie(raw)
+}
+
+// boundSession re-reads the portal session behind a ticket or instance
+// binding. Stores keyed by cookie hash (NATS) need the key; the session id
+// must still match so a reused key cannot swap in another session.
+func (g *Gateway) boundSession(ctx context.Context, key, sessionID string) (*Session, error) {
+	if key == "" {
+		return getSessionByID(g.Sessions, ctx, sessionID)
+	}
+	s, err := g.Sessions.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if s.SessionID != sessionID {
+		return nil, ErrSessionNotFound
+	}
+	return s, nil
+}
+
 func (g *Gateway) loadSession(r *http.Request, audience string) (*Session, error) {
 	name := cookieName(g.Cfg.SecureCookies, sessionCookieBase(audience))
 	raw := getCookie(r, name)
@@ -355,6 +381,7 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		writeProblem(w, problem(http.StatusNotFound, "edge.not_found", "Not Found", "", rid))
 		return
 	}
+	sessKey := g.sessionKey(r, "portal")
 	sess, err := g.loadSession(r, "portal")
 	if err != nil || sess.Valid(g.Now().UTC(), "portal") != nil {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session required", rid))
@@ -385,7 +412,7 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 	}
 	sum := sha256.Sum256([]byte(nonce))
 	nonceHash := hex.EncodeToString(sum[:])
-	ticket, err := g.Tickets.Issue(sess.SessionID, sess.AccountID, sess.TenantID, instanceID, nonceHash, 60*time.Second, sess.ExpiresAt)
+	ticket, err := g.Tickets.Issue(sess.SessionID, sessKey, sess.AccountID, sess.TenantID, instanceID, nonceHash, 60*time.Second, sess.ExpiresAt)
 	if err != nil {
 		writeProblem(w, problem(http.StatusInternalServerError, "edge.ticket_error", "Internal Server Error", "cannot issue ticket", rid))
 		return
@@ -449,7 +476,7 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "instance cookie required", rid))
 		return
 	}
-	sess, err := getSessionByID(g.Sessions, r.Context(), binding.SessionID)
+	sess, err := g.boundSession(r.Context(), binding.SessionKey, binding.SessionID)
 	if err != nil || sess.Valid(g.Now().UTC(), "portal") != nil {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session invalid", rid))
 		return
@@ -503,7 +530,7 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 	defer stop()
 	r = r.WithContext(ctx)
 	// A revoke between the first lookup and Attach must not leave an untracked upgrade.
-	freshSession, err := getSessionByID(g.Sessions, ctx, binding.SessionID)
+	freshSession, err := g.boundSession(ctx, binding.SessionKey, binding.SessionID)
 	if err != nil || freshSession.Valid(g.Now().UTC(), "portal") != nil {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session invalid", rid))
 		return
@@ -573,11 +600,11 @@ func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceI
 	}
 	expiresAt := ticket.SessionExpiresAt
 	if expiresAt.IsZero() {
-		if sess, err := getSessionByID(g.Sessions, r.Context(), ticket.SessionID); err == nil && sess != nil {
+		if sess, err := g.boundSession(r.Context(), ticket.SessionKey, ticket.SessionID); err == nil && sess != nil {
 			expiresAt = sess.ExpiresAt
 		}
 	}
-	binding, err := g.Tickets.BindInstance(ticket.SessionID, ticket.AccountID, ticket.TenantID, ticket.InstanceID, expiresAt)
+	binding, err := g.Tickets.BindInstance(ticket.SessionID, ticket.SessionKey, ticket.AccountID, ticket.TenantID, ticket.InstanceID, expiresAt)
 	if err != nil {
 		writeProblem(w, problem(http.StatusInternalServerError, "edge.ticket_error", "Internal Server Error", "", rid))
 		return
