@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -39,6 +40,7 @@ func newReverseProxy(target *url.URL, tr http.RoundTripper) *httputil.ReversePro
 		},
 		Transport: tr,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.Default().Warn("upstream request failed", "target", target.Redacted(), "path", r.URL.Path, "error", err)
 			writeProblem(w, problem(http.StatusBadGateway, "edge.upstream_error", "Bad Gateway", "upstream unavailable", requestID(r)))
 		},
 	}

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/hansjone/auriga/infra/agent/internal/config"
@@ -96,6 +97,7 @@ func startIngressAndObserver(
 	srv := ingress.New(ingress.Config{
 		ListenAddr:   listenAddr,
 		LocalPath:    localPath,
+		LocalGroup:   localGroup(),
 		ServerCert:   tlsCert,
 		PlatformCA:   pool,
 		Registry:     reg,
@@ -207,4 +209,18 @@ func loadEd25519Pubs(path string, logger *slog.Logger) map[string]ed25519.Public
 		out[k.Kid] = ed25519.PublicKey(x)
 	}
 	return out
+}
+
+// localGroup reads AURIGA_AGENT_INGRESS_LOCAL_GID: the group allowed to connect
+// to the single-node ingress socket (the edge's gid when edge is not root).
+func localGroup() *int {
+	v := os.Getenv("AURIGA_AGENT_INGRESS_LOCAL_GID")
+	if v == "" {
+		return nil
+	}
+	gid, err := strconv.Atoi(v)
+	if err != nil || gid < 0 {
+		return nil
+	}
+	return &gid
 }

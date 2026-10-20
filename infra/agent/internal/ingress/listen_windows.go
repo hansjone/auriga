@@ -11,7 +11,8 @@ import (
 )
 
 // ListenLocal opens a Windows named pipe. path may be `\\.\pipe\name` or just `name`.
-func ListenLocal(path string) (net.Listener, error) {
+// gid is unused on Windows; the pipe ACL grants Administrators, SYSTEM and the owner.
+func ListenLocal(path string, _ int) (net.Listener, error) {
 	pipe := path
 	if !strings.HasPrefix(strings.ToLower(path), `\\.\pipe\`) {
 		pipe = `\\.\pipe\` + strings.TrimPrefix(path, `\`)

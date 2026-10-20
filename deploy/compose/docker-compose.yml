@@ -134,7 +134,9 @@ services:
       AURIGA_AGENT_CA_SHA256: ${AURIGA_AGENT_CA_SHA256}
       AURIGA_AGENT_ALLOW_INSECURE: "true"
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
-      AURIGA_AGENT_INGRESS_LOCAL: /var/lib/auriga/agent/ingress.sock
+      # Own directory shared with the edge (distroless nonroot gid 65532); the agent dir stays 0700.
+      AURIGA_AGENT_INGRESS_LOCAL: /var/lib/auriga/ingress/ingress.sock
+      AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
       DOCKER_HOST: unix:///var/run/docker.sock

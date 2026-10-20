@@ -19,6 +19,9 @@ type Config struct {
 	ListenAddr string
 	// LocalPath is unix socket path or Windows pipe name for single-node.
 	LocalPath string
+	// LocalGroup shares the unix socket with this gid (e.g. a non-root edge);
+	// nil keeps it private to the agent's user.
+	LocalGroup *int
 	// ServerCert is the node certificate (presented to edge).
 	ServerCert tls.Certificate
 	// PlatformCA verifies edge client certificates.
@@ -161,7 +164,11 @@ func (s *Server) Start(ctx context.Context) error {
 		add(ln)
 	}
 	if s.cfg.LocalPath != "" {
-		ln, err := ListenLocal(s.cfg.LocalPath)
+		gid := -1
+		if s.cfg.LocalGroup != nil {
+			gid = *s.cfg.LocalGroup
+		}
+		ln, err := ListenLocal(s.cfg.LocalPath, gid)
 		if err != nil {
 			if s.cfg.ListenAddr == "" {
 				return err
