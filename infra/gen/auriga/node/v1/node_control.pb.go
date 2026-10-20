@@ -536,9 +536,13 @@ type Hello struct {
 	// 节点本机时间，workspace 用来估算时钟偏差（超过 5 秒告警）。
 	NodeTime *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=node_time,json=nodeTime,proto3" json:"node_time,omitempty"`
 	// 当前封装公钥的 key_id（见 SealedSecret.key_id），workspace 据此知道该用哪把公钥加密。
-	SealingKeyId  string `protobuf:"bytes,12,opt,name=sealing_key_id,json=sealingKeyId,proto3" json:"sealing_key_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	SealingKeyId string `protobuf:"bytes,12,opt,name=sealing_key_id,json=sealingKeyId,proto3" json:"sealing_key_id,omitempty"`
+	// 节点代理 ingress 的地址（见 kv/route.schema.json 的 ingress 格式）：多机 `https://<主机>:<端口>`，
+	// 单机 `unix:///…` 或 `npipe:////./pipe/…`。workspace 记录后写进实例路由；edge 连接时以节点证书身份
+	// （URI SAN `auriga://node/<node_id>`）为准，不以地址本身为信任依据。空表示该节点暂不对外提供 ingress。
+	IngressEndpoint string `protobuf:"bytes,13,opt,name=ingress_endpoint,json=ingressEndpoint,proto3" json:"ingress_endpoint,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Hello) Reset() {
@@ -651,6 +655,13 @@ func (x *Hello) GetNodeTime() *timestamppb.Timestamp {
 func (x *Hello) GetSealingKeyId() string {
 	if x != nil {
 		return x.SealingKeyId
+	}
+	return ""
+}
+
+func (x *Hello) GetIngressEndpoint() string {
+	if x != nil {
+		return x.IngressEndpoint
 	}
 	return ""
 }
@@ -2339,7 +2350,7 @@ const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\acommand\x18\x04 \x01(\v2\x17.auriga.node.v1.CommandH\x00R\acommand\x124\n" +
 	"\x06policy\x18\x05 \x01(\v2\x1a.auriga.node.v1.PolicyHintH\x00R\x06policy\x125\n" +
 	"\x06update\x18\x06 \x01(\v2\x1b.auriga.node.v1.UpdateAgentH\x00R\x06updateB\x06\n" +
-	"\x04body\"\x8b\x04\n" +
+	"\x04body\"\xb6\x04\n" +
 	"\x05Hello\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12#\n" +
 	"\ragent_version\x18\x02 \x01(\tR\fagentVersion\x12)\n" +
@@ -2353,7 +2364,8 @@ const file_auriga_node_v1_node_control_proto_rawDesc = "" +
 	"\aboot_id\x18\n" +
 	" \x01(\tR\x06bootId\x127\n" +
 	"\tnode_time\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\bnodeTime\x12$\n" +
-	"\x0esealing_key_id\x18\f \x01(\tR\fsealingKeyId\x1a9\n" +
+	"\x0esealing_key_id\x18\f \x01(\tR\fsealingKeyId\x12)\n" +
+	"\x10ingress_endpoint\x18\r \x01(\tR\x0fingressEndpoint\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9b\x01\n" +
