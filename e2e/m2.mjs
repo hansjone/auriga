@@ -647,7 +647,9 @@ async function main() {
     );
   }
 
-  const wakeAt = Date.now() + (IDLE_MINUTES * 60 + 90) * 1000;
+  // The alarm must land well after idle reclaim: workspace keeps an instance up
+  // when its alarm is within ~4 minutes (wake jobs pre-warm 2 minutes early).
+  const wakeAt = Date.now() + (IDLE_MINUTES * 60 + 90 + 360) * 1000;
   await writeWakeSchedule(instanceId, wakeAt);
   await waitWakeRegistered(instanceId);
 
@@ -662,7 +664,7 @@ async function main() {
   console.log('idle reclaim ok');
 
   step('wait alarm wake');
-  await waitPhase(instanceId, 'running', 360_000);
+  await waitPhase(instanceId, 'running', 480_000);
   console.log('alarm wake ok');
 
   await revokeSmoke();
