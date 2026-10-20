@@ -54,7 +54,8 @@ func main() {
 		[]string{"localhost", "platform", "platform.example.com"},
 		[]net.IP{net.ParseIP("127.0.0.1")},
 		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
-	writeFile(filepath.Join(pki, "workspace.crt"), wsCert, 0o644)
+	// Leaf+CA chain: agent pins CA SPKI and requires the CA to appear in the peer chain.
+	writeFile(filepath.Join(pki, "workspace.crt"), append(wsCert, caPEM...), 0o644)
 	writeFile(filepath.Join(pki, "workspace.key"), wsKey, 0o400)
 
 	edgeCert, edgeKey := mustIssue(caKey, caCert, "edge-compose", "auriga://edge/compose-e2e",
