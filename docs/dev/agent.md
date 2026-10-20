@@ -33,6 +33,10 @@ JSON 文件 + 环境变量覆盖。公开仓示例用 `example.com` / `192.0.2.x
 | `controlEndpoint` | `AURIGA_AGENT_CONTROL_ENDPOINT` | 覆盖入网返回的 NodeControl 地址 |
 | `agentVersion` | `AURIGA_AGENT_VERSION` | Hello / Join 上报的版本 |
 | `allowInsecure` | `AURIGA_AGENT_ALLOW_INSECURE` | 允许明文端点（仅本地开发） |
+| （run 标志） | `AURIGA_AGENT_INGRESS_LISTEN` | 多机 ingress TCP 地址，如 `192.0.2.20:7443` |
+| （run 标志） | `AURIGA_AGENT_INGRESS_LOCAL` | 单机 socket/管道路径；默认 Unix `<agentDir>/ingress.sock`、Windows `auriga-agent-ingress` |
+| — | `AURIGA_AGENT_FILE_TICKET_KEYS` | 文件票据公钥 JWKS；默认 `<agentDir>/file-ticket-keys.json` |
+| — | `AURIGA_AGENT_IDENTITY_KEYS` | 身份头验签公钥 JWKS；默认 `<agentDir>/identity-keys.json` |
 | （策略文件） | `AURIGA_AGENT_POLICY_FILE` | 默认 `<dataRoot>/agent-policy.yaml`；镜像/制品白名单与资源上限 |
 
 配置项前缀约定：`auriga.agent.*` / `AURIGA_AGENT_*`。
@@ -82,6 +86,32 @@ maxArtifactBytes: 2147483648
 - **策略**：`internal/policy` 镜像/制品白名单与资源上限（本地最后一道关）
 - **目录**：§8.1、严格实例 id、Lchown、软配额
 - 假驱动保留给测试；真 Docker：`go test -tags docker ./internal/runtime/`
+
+## A3 实例入口与观测
+
+`run` 在入网凭据可用时启动 ingress + observer：
+
+| 项 | 说明 |
+|---|---|
+| 入口 | 只接受 URI SAN 为 `auriga://edge` 的客户端证书；多机 `--ingress-listen` / `AURIGA_AGENT_INGRESS_LISTEN`；单机 Unix socket 或 Windows 命名管道（`AURIGA_AGENT_INGRESS_LOCAL`） |
+| `/i/<id>/…` | 反代到实例；验签后转发 `Auriga-Identity`，伪造头剥掉 |
+| `/files/<id>/…` | workspace 签发的 Ed25519 文件票据（`file-ticket-keys.json` / `AURIGA_AGENT_FILE_TICKET_KEYS`）；路径防逃逸；zip UTF-8 标志 |
+| `/logs/<id>` | 实例日志尾部；滚动默认 50 MB |
+| `/metrics` | Prometheus 文本指标 |
+| 观测 | 健康探活、5 分钟 CPU 活动、ops-cron/schedule 下次唤醒（含时区）、Linux cgroup；上报经 `observer.Reporter`（当前记日志，接 Session 待主控接线） |
+
+实例注册表与观测目标列表目前为空，需 runtime/reconciler 提供上游地址与根目录后由主控接线。
+
+
+### A3 安全边界与资源限制
+
+- `/i/` 在身份验签公钥为空时返回 503；有效身份头还必须满足 `aud == 实例 id`。反代共用一个 Transport，关闭入口时清理空闲连接，不读取系统 HTTP 代理环境变量。
+- 文件接口拒绝符号链接、Windows 联接及其他 reparse point。Linux 通过 `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)` 打开；内核不支持时才逐级 `O_NOFOLLOW`。创建父目录使用已打开目录下的 `mkdirat`；不会在安全打开失败后退回普通路径。Windows 使用相对目录句柄的 `NtCreateFile(FILE_OPEN_REPARSE_POINT)`，检查句柄属性后才访问文件。删除使用 Go `os.Root.RemoveAll` 的受限目录操作，禁止删除实例根目录。
+- 文件票据只使用一次，`jti` 必填；清洗请求路径和票据前缀后再比较。有效期最多 15 分钟，已消费的 `jti` 保留至过期并计入时钟偏差。缓存最多 100000 条，满时拒绝新票据。节点重启会清空内存缓存，上游应签发短期且唯一的票据。
+- `ingress.Config.MaxUploadBytes` 默认 64 MiB；超限返回 413，未知长度的请求也受限。流式上传失败可能留下限额内的部分文件，上游需要重新签发票据后重试。
+- zip 默认最多 256 MiB 原始文件内容、10000 个遍历条目，分别由 `MaxZipBytes` / `MaxZipEntries` 设置（目前为装配 API）。打包根据打开后的句柄检查文件类型，跳过链接、FIFO 和设备；先写临时文件，成功关闭 zip 后才发送响应，失败不会返回成功状态的截断 zip。
+- 定时任务文件只读取普通文件，不跟随链接，单文件最多 1 MiB；解析错误不包含文件内容。cron 只接受五字段表达式；不可满足的 cron 表示无下次唤醒，不接受 `@every` 等描述符。
+- 最近 CPU 活动按相邻成功采样的累计 CPU 差值计算；首次采样、采集失败后的首次采样和计数器回退只建立基线。
 
 ## 测试
 

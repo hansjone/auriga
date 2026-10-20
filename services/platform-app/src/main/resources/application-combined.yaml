@@ -18,13 +18,19 @@ auriga:
       jdbc-url: ${AURIGA_ORG_JDBC_URL}
       username: ${AURIGA_ORG_DB_USER:auriga_org}
       password: ${AURIGA_ORG_DB_PASSWORD:}
+    workspace:
+      jdbc-url: ${AURIGA_WORKSPACE_JDBC_URL:}
+      username: ${AURIGA_WORKSPACE_DB_USER:auriga_workspace_app}
+      password: ${AURIGA_WORKSPACE_DB_PASSWORD:}
+      migration-username: ${AURIGA_WORKSPACE_MIGRATION_USER:auriga_workspace_owner}
+      migration-password: ${AURIGA_WORKSPACE_MIGRATION_PASSWORD:}
   services:
     iam:
       enabled: true
     org:
       enabled: true
     workspace:
-      enabled: false
+      enabled: ${AURIGA_WORKSPACE_ENABLED:false}
     resource:
       enabled: false
     knowledge:
