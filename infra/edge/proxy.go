@@ -27,8 +27,15 @@ var apiProxyTransport http.RoundTripper = &http.Transport{
 func newReverseProxy(target *url.URL, tr http.RoundTripper) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			// Keep the browser Host (portal/admin). IAM maps Host → tenant/audience;
+			// rewriting to the upstream IP breaks admin vs portal and cookie names.
+			virt := pr.In.Host
 			pr.SetURL(target)
-			pr.Out.Host = target.Host
+			if virt != "" {
+				pr.Out.Host = virt
+			} else {
+				pr.Out.Host = target.Host
+			}
 		},
 		Transport: tr,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

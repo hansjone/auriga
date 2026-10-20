@@ -53,6 +53,11 @@ func stripAurigaCookies(cookieHeader string) string {
 			name = p[:i]
 		}
 		lname := strings.ToLower(name)
+		// Login binding cookies must reach IAM; edge does not terminate login_tx.
+		if lname == "auriga_login_tx" || lname == "__host-auriga_login_tx" {
+			kept = append(kept, p)
+			continue
+		}
 		if strings.Contains(lname, "auriga_") {
 			continue
 		}
