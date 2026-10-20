@@ -152,10 +152,7 @@ test('bridge + heartbeat: stable activity does not exceed schedule rate', async 
 
 test('guard blocks matrix params and trailing %00', () => {
   assert.equal(
-    isNativePluginManageRequest(
-      'POST',
-      '/api/pluginManager/installBundle;a=1',
-    ),
+    isNativePluginManageRequest('POST', '/api/pluginManager/installBundle;a=1'),
     true,
   );
   assert.equal(
@@ -166,10 +163,7 @@ test('guard blocks matrix params and trailing %00', () => {
     true,
   );
   assert.equal(
-    isNativePluginManageRequest(
-      'POST',
-      '/api/pluginManager/installBundle%00',
-    ),
+    isNativePluginManageRequest('POST', '/api/pluginManager/installBundle%00'),
     true,
   );
   assert.equal(

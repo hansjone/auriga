@@ -189,17 +189,11 @@ test('plugin manage HTTP guard catches path variants and PUT', () => {
     true,
   );
   assert.equal(
-    isNativePluginManageRequest(
-      'POST',
-      '/api/pluginManager/installBundle;a=1',
-    ),
+    isNativePluginManageRequest('POST', '/api/pluginManager/installBundle;a=1'),
     true,
   );
   assert.equal(
-    isNativePluginManageRequest(
-      'POST',
-      '/api/pluginManager/installBundle%00',
-    ),
+    isNativePluginManageRequest('POST', '/api/pluginManager/installBundle%00'),
     true,
   );
   assert.equal(
