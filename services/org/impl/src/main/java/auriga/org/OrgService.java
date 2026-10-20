@@ -1151,12 +1151,32 @@ public final class OrgService {
         });
   }
 
+  /**
+   * Missing group/member quotas are normal. Must not call {@link #getQuota} inside an open
+   * transaction: its not_found still marks the shared TX rollback-only even when caught.
+   */
   private ObjectNode softQuota(String scope, UUID scopeId) {
-    try {
-      return getQuota(scope, scopeId);
-    } catch (RuntimeException e) {
-      return null;
+    List<String> rows =
+        scopeId == null
+            ? store
+                .jdbc()
+                .query(
+                    "SELECT value::text FROM quota WHERE tenant_id=? AND scope=? AND scope_id IS NULL",
+                    (rs, i) -> rs.getString(1),
+                    store.tenantId(),
+                    scope)
+            : store
+                .jdbc()
+                .query(
+                    "SELECT value::text FROM quota WHERE tenant_id=? AND scope=? AND scope_id=?",
+                    (rs, i) -> rs.getString(1),
+                    store.tenantId(),
+                    scope,
+                    scopeId);
+    if (rows.isEmpty()) {
+      return "default".equals(scope) ? OrgJson.object() : null;
     }
+    return OrgJson.read(rows.getFirst());
   }
 
   /** Fill only unset fields from layer. */
