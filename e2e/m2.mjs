@@ -954,6 +954,7 @@ async function revokeDualSession(instanceId) {
     hostHeader: host,
     headers: cookieHdr ? { Cookie: cookieHdr } : {},
     timeoutMs: 20_000,
+    keepAliveMs: FIXTURE === 'real' ? 1000 : 0,
   });
   openSockets.push(ws);
   if (FIXTURE === 'fake') {

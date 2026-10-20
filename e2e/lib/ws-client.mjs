@@ -13,6 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
  *   hostHeader: string,
  *   headers?: Record<string, string>,
  *   timeoutMs?: number,
+ *   keepAliveMs?: number,
  * }} opts
  */
 export async function openWebSocket(opts) {
@@ -31,7 +32,10 @@ export async function openWebSocket(opts) {
   });
 
   await new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('ws connect timeout')), timeoutMs);
+    const t = setTimeout(
+      () => reject(new Error('ws connect timeout')),
+      timeoutMs,
+    );
     socket.once('connect', () => {
       clearTimeout(t);
       resolve();
@@ -66,6 +70,12 @@ export async function openWebSocket(opts) {
     .digest('base64');
   // Accept header already consumed in status parse; frame buffer starts at rest.
   let buf = rest;
+  // Real DSH's transport expects Pong liveness, even when this harness does
+  // not open an application stream. RFC 6455 permits unsolicited Pong frames.
+  const stopKeepalive =
+    opts.keepAliveMs > 0
+      ? startControlKeepalive(socket, opts.keepAliveMs)
+      : () => {};
 
   function sendText(text) {
     const payload = Buffer.from(String(text), 'utf8');
@@ -84,7 +94,10 @@ export async function openWebSocket(opts) {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
       while (buf.length < 2) {
-        buf = Buffer.concat([buf, await readChunk(socket, deadline - Date.now())]);
+        buf = Buffer.concat([
+          buf,
+          await readChunk(socket, deadline - Date.now()),
+        ]);
       }
       const b0 = buf[0];
       const b1 = buf[1];
@@ -94,14 +107,20 @@ export async function openWebSocket(opts) {
       let off = 2;
       if (len === 126) {
         while (buf.length < 4) {
-          buf = Buffer.concat([buf, await readChunk(socket, deadline - Date.now())]);
+          buf = Buffer.concat([
+            buf,
+            await readChunk(socket, deadline - Date.now()),
+          ]);
         }
         len = buf.readUInt16BE(2);
         off = 4;
       }
       const maskLen = masked ? 4 : 0;
       while (buf.length < off + maskLen + len) {
-        buf = Buffer.concat([buf, await readChunk(socket, deadline - Date.now())]);
+        buf = Buffer.concat([
+          buf,
+          await readChunk(socket, deadline - Date.now()),
+        ]);
       }
       let payload = buf.subarray(off + maskLen, off + maskLen + len);
       if (masked) {
@@ -120,14 +139,12 @@ export async function openWebSocket(opts) {
   }
 
   async function waitClosed(ms) {
-    const raced = await Promise.race([
-      closed,
-      sleep(ms).then(() => 'timeout'),
-    ]);
+    const raced = await Promise.race([closed, sleep(ms).then(() => 'timeout')]);
     return raced !== 'timeout';
   }
 
   function close() {
+    stopKeepalive();
     try {
       socket.end();
     } catch {
@@ -141,6 +158,24 @@ export async function openWebSocket(opts) {
   }
 
   return { sendText, readTextFrame, waitClosed, close, expectAccept: expect };
+}
+
+/** Keep a control-only native transport alive; application frames are discarded. */
+export function startControlKeepalive(socket, intervalMs) {
+  const timer = setInterval(() => {
+    if (socket.destroyed) return;
+    // Client control frames are masked, including an empty Pong payload.
+    socket.write(Buffer.concat([Buffer.from([0x8a, 0x80]), randomBytes(4)]));
+  }, intervalMs);
+  timer.unref?.();
+  const stop = () => {
+    clearInterval(timer);
+    socket.off('close', stop);
+  };
+  socket.once('close', stop);
+  // Consume server Ping/Close frames so a FIN cannot wait behind unread data.
+  socket.resume();
+  return stop;
 }
 
 /**
