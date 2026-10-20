@@ -26,6 +26,10 @@ type Reconciler struct {
 	Driver runtime.Driver
 	Log    *slog.Logger
 	Sink   StatusSink
+	// PrepareTimeout bounds Ensure (artifact fetch, image pull, render) and
+	// StartTimeout bounds Start, so a stuck download fails instead of hanging.
+	PrepareTimeout time.Duration
+	StartTimeout   time.Duration
 
 	mu      sync.Mutex
 	workers map[string]chan workItem
@@ -50,12 +54,14 @@ func New(store *state.Store, driver runtime.Driver, log *slog.Logger, maxConcurr
 		log = slog.Default()
 	}
 	return &Reconciler{
-		Store:   store,
-		Driver:  driver,
-		Log:     log,
-		workers: make(map[string]chan workItem),
-		sem:     make(chan struct{}, maxConcurrentPrepare),
-		maxPrep: maxConcurrentPrepare,
+		Store:          store,
+		Driver:         driver,
+		Log:            log,
+		workers:        make(map[string]chan workItem),
+		sem:            make(chan struct{}, maxConcurrentPrepare),
+		maxPrep:        maxConcurrentPrepare,
+		PrepareTimeout: 10 * time.Minute,
+		StartTimeout:   2 * time.Minute,
 	}
 }
 
@@ -244,7 +250,12 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 		Generation: spec.Generation,
 		Desired:    desiredString(spec),
 	}
-	if err := r.Driver.Ensure(ctx, drvSpec, &runtime.Rendered{}); err != nil {
+	r.Log.Info("preparing instance", "instance_id", id, "generation", spec.Generation)
+	prepCtx, cancelPrep := context.WithTimeout(ctx, r.PrepareTimeout)
+	err := r.Driver.Ensure(prepCtx, drvSpec, &runtime.Rendered{})
+	cancelPrep()
+	if err != nil {
+		r.Log.Warn("prepare failed", "instance_id", id, "error", err)
 		r.fail(id, rec.Attempts, "agent.ensure_failed", err.Error(), true)
 		return
 	}
@@ -260,10 +271,15 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_STARTING
 		st.UpdatedAt = timestamppb.Now()
 		r.persist(st, rec.Attempts)
-		if err := r.Driver.Start(ctx, id); err != nil {
+		startCtx, cancelStart := context.WithTimeout(ctx, r.StartTimeout)
+		err := r.Driver.Start(startCtx, id)
+		cancelStart()
+		if err != nil {
+			r.Log.Warn("start failed", "instance_id", id, "error", err)
 			r.fail(id, rec.Attempts, "agent.start_failed", err.Error(), true)
 			return
 		}
+		r.Log.Info("instance started", "instance_id", id, "generation", spec.Generation)
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_RUNNING
 		st.Ready = true
 		st.ObservedGeneration = spec.Generation
