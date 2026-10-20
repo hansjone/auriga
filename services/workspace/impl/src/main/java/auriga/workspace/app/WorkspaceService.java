@@ -705,11 +705,20 @@ public final class WorkspaceService {
                   tenant,
                   time(now))) {
             var row = store.instance((UUID) job.get("instance_id"));
+            var wakeLog = org.slf4j.LoggerFactory.getLogger(getClass());
+            if (!Boolean.TRUE.equals(policy.getWakeOnSchedule()))
+              wakeLog.info("wake job for {} dropped: policy wakeOnSchedule is off", row.get("id"));
             if (Boolean.TRUE.equals(policy.getWakeOnSchedule())) {
               UUID owner = (UUID) row.get("owner_id");
               var quota = inputs.quota(tenant, owner);
-              if (inputs.member(tenant, owner).getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
+              var memberStatus = inputs.member(tenant, owner).getStatus();
+              if (memberStatus != MemberStatus.MEMBER_STATUS_ACTIVE
                   || quota.hasMaxInstances() && quota.getMaxInstances() == 0) {
+                wakeLog.info(
+                    "wake job for {} dropped: member {} quota maxInstances {}",
+                    row.get("id"),
+                    memberStatus,
+                    quota.hasMaxInstances() ? quota.getMaxInstances() : "unset");
                 store.jdbc.update(
                     "UPDATE workspace_job SET done=true WHERE tenant_id=? AND id=?",
                     tenant,
@@ -718,8 +727,12 @@ public final class WorkspaceService {
               }
               try {
                 desire(row, true, "wake", policy.getMaxConcurrentStarts());
+                wakeLog.info("wake job for {} started the instance", row.get("id"));
               } catch (AurigaException e) {
-                if (e.errorCode() == ADMISSION_FULL) continue;
+                if (e.errorCode() == ADMISSION_FULL) {
+                  wakeLog.info("wake job for {} deferred: admission full", row.get("id"));
+                  continue;
+                }
                 throw e;
               }
             }
