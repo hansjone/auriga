@@ -259,7 +259,13 @@ paths:
       operationId: revokeNode
       x-admin-only: true
       x-permission: workspace.nodes.admin
-      description: 吊销节点证书。节点上还有实例时 409 workspace.node_not_empty（先 drain 并迁走）。
+      description: 吊销节点证书。节点上还有实例时 409 workspace.node_not_empty（先 drain 并迁走）；`force=true` 时立即吊销证书、断开会话，节点上的实例全部标记为待迁移，并写审计（用于节点证书泄露的应急处置）。
+      parameters:
+        - name: force
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: 节点非空也立即吊销。
       responses:
         '204': { description: 已吊销 }
         '409': { $ref: 'common.yaml#/components/responses/Conflict' }
