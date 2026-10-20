@@ -17,10 +17,12 @@ export default [
         URL: 'readonly',
         URLSearchParams: 'readonly',
         clearTimeout: 'readonly',
+        clearInterval: 'readonly',
         console: 'readonly',
         fetch: 'readonly',
         process: 'readonly',
         setTimeout: 'readonly',
+        setInterval: 'readonly',
       },
     },
     rules: {

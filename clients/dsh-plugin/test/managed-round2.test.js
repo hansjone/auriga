@@ -30,7 +30,6 @@ test('rawRequestPath does not collapse .. or decode', () => {
 });
 
 test('door health bypass only for exact GET/HEAD raw path', async () => {
-  const keys = makeIdentityKeys();
   const door = createDoorLock({
     instanceId: INSTANCE_ID,
     ownerId: OWNER_ID,
