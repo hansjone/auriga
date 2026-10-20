@@ -22,7 +22,7 @@ func RemoveBeneath(root, rel string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	// RemoveAll itself is traversal-resistant, including concurrent symlink swaps.
 	return r.RemoveAll(clean)
 }

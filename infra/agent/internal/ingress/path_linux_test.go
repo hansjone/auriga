@@ -31,7 +31,7 @@ func TestLinux_ZipSkipsFIFOAndSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(Config{})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	w := httptest.NewRecorder()
 	if err := s.zipTree(w, root, "."); err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestLinux_ConcurrentSymlinkSwapsCannotEscape(t *testing.T) {
 	}()
 	defer func() { close(stop); wg.Wait() }()
 	s := New(Config{})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	for i := 0; i < 100; i++ {
 		f, err := OpenBeneath(root, "file", os.O_RDONLY, 0)
 		if err == nil {

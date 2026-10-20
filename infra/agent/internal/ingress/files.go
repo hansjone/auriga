@@ -150,7 +150,7 @@ func (s *Server) listDir(w http.ResponseWriter, root, rel string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	entries, err := f.ReadDir(-1)
 	if err != nil {
 		return err
@@ -202,7 +202,7 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request, root, rel str
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil {
 		return err
@@ -244,8 +244,8 @@ func (s *Server) zipTree(w http.ResponseWriter, root, rel string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer func() { _ = tmp.Close() }()
 	zw := zip.NewWriter(tmp)
 	var total int64
 	count := 0
@@ -259,7 +259,7 @@ func (s *Server) zipTree(w http.ResponseWriter, root, rel string) error {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		st, err := f.Stat()
 		if err != nil {
 			return err

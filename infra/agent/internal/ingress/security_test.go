@@ -40,7 +40,7 @@ func TestIdentity_FailClosedAndAudience(t *testing.T) {
 	defer up.Close()
 	u, _ := url.Parse(up.URL)
 	s := New(Config{Registry: NewMapRegistry(&Instance{ID: "i1", Upstream: u})})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/i/i1/", nil)
 	req.Header.Set(identityHeader, "forged")
