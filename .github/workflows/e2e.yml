@@ -61,6 +61,23 @@ jobs:
               exit 1
             fi
           done
+          # Enrollment is written by platform as root:0600; make readable for the runner.
+          sudo chmod -R a+rX var/enrollment || chmod -R a+rX var/enrollment
+          # Wait for edge HTTP (any response code means the listener is up)
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:8080/ || true)
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+              echo "edge listening (http $code)"
+              break
+            fi
+            sleep 2
+            if [ "$i" -eq 60 ]; then
+              echo "edge did not listen on :8080"
+              docker compose ps
+              docker compose logs --tail=200 edge || true
+              exit 1
+            fi
+          done
           # Export agent data for e2e heartbeats via docker volume
           VOL="$(docker volume ls -q | grep agentdata | head -1)"
           echo "AGENT_VOLUME=$VOL" >> "$GITHUB_ENV"
@@ -73,6 +90,8 @@ jobs:
           JOIN_TOKEN_FILE: deploy/compose/var/join/token
           IDLE_MINUTES: '5'
         run: |
+          # Re-assert enrollment readability (platform may recreate the file).
+          sudo chmod -R a+rX deploy/compose/var/enrollment 2>/dev/null || true
           # AGENT_VOLUME (from previous step) lets e2e read instance.token and
           # write ops-cron/store.json into the live agent data volume.
           export AGENT_VOLUME
