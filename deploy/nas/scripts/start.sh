@@ -10,7 +10,6 @@ require_cmd docker
 
 [ -f "$(marker_path)" ] || die "not initialized; run init.sh first"
 [ -f "$AURIGA_DATA_ROOT/stack.env" ] || {
-  # Allow stack.env beside data root copy from operator.
   if [ -f "$NAS_ROOT/stack.env" ]; then
     cp "$NAS_ROOT/stack.env" "$AURIGA_DATA_ROOT/stack.env"
     chmod 0600 "$AURIGA_DATA_ROOT/stack.env"
@@ -26,15 +25,20 @@ require_cmd docker
   exit "$_ec"
 }
 
-# Re-render so host/domain changes apply without rotating secrets.
 "$NAS_ROOT/scripts/render.sh"
 
-# Ensure ingress dir permissions for edge gid.
-mkdir -p "$AURIGA_DATA_ROOT/data/agent/ingress"
-chmod 0750 "$AURIGA_DATA_ROOT/data/agent/ingress" || true
+mkdir -p "$AURIGA_DATA_ROOT/ingress"
+chmod 0750 "$AURIGA_DATA_ROOT/ingress" || true
+chown_required 65532:65532 "$AURIGA_DATA_ROOT/ingress"
 
-info "starting project $COMPOSE_PROJECT_NAME (no build)"
-run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build
+if project_is_running; then
+  info "project already running — compose up -d is idempotent"
+fi
+
+info "starting project $AURIGA_NAS_PROJECT (no build, pull_policy never for local ids)"
+# Prefer never pulling when refs are local image ids.
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never \
+  || run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build
 
 info "start requested; use status.sh / smoke.sh to verify"
 info "after first seed start, set AURIGA_PLATFORM_SEED=false in stack.env and re-render"

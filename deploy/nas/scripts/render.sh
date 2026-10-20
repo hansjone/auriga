@@ -7,6 +7,7 @@ set -eu
 
 load_stack_env
 require_cmd sed awk tr
+require_root_or_capable_chown
 
 SECRETS="$AURIGA_DATA_ROOT/secrets"
 CONFIG="$AURIGA_DATA_ROOT/config"
@@ -16,7 +17,9 @@ CONFIG="$AURIGA_DATA_ROOT/config"
 read_secret() {
   _f="$SECRETS/$1"
   [ -f "$_f" ] || die "missing secret: $1"
-  tr -d '\r' <"$_f" | awk '{printf "%s", $0}'
+  _v=$(tr -d '\r' <"$_f" | awk '{printf "%s", $0}')
+  [ -n "$_v" ] || die "empty secret file: $1"
+  printf '%s' "$_v"
 }
 
 escape_sed() {
@@ -48,7 +51,7 @@ SEED=${AURIGA_PLATFORM_SEED:-false}
 HOST_NC=${AURIGA_HOST_PUBLISH_NODECONTROL:-17443}
 HOST_REG=${AURIGA_HOST_PUBLISH_REGISTRY:-15000}
 
-mkdir -p "$CONFIG/postgres" "$CONFIG/nats" "$CONFIG/templates"
+mkdir -p "$CONFIG/postgres" "$CONFIG/nats" "$CONFIG/templates" "$CONFIG/pki-edge"
 
 umask 077
 sed \
@@ -66,6 +69,7 @@ sed \
   -e "s|__NATS_EDGE_PASSWORD__|$(escape_sed "$NATS_EDGE")|g" \
   "$NAS_ROOT/nats/nats.conf.tmpl" >"$CONFIG/nats/nats.conf"
 chmod 0600 "$CONFIG/nats/nats.conf"
+chown_required 65532:65532 "$CONFIG/nats/nats.conf"
 
 cat >"$CONFIG/platform.env" <<EOF
 AURIGA_IAM_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
@@ -100,6 +104,7 @@ AURIGA_WORKSPACE_TEMPLATES_DIRECTORY=/etc/auriga/templates
 AURIGA_PLATFORM_SEED=$SEED
 EOF
 chmod 0600 "$CONFIG/platform.env"
+chown_required 10001:10001 "$CONFIG/platform.env"
 
 TRUSTED_YAML=$(printf '%s' "$TRUSTED" | tr ',' '\n' | sed '/^$/d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/^/      - "/;s/$/"/')
 cat >"$CONFIG/platform-runtime.yaml" <<EOF
@@ -132,10 +137,7 @@ $TRUSTED_YAML
 EOF
 chmod 0644 "$CONFIG/platform-runtime.yaml"
 
-TP_JSON=$(printf '%s' "$TRUSTED" | tr ',' '\n' | sed '/^$/d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/^/"/;s/$/"/' | paste -sd, - 2>/dev/null || true)
-if [ -z "$TP_JSON" ]; then
-  TP_JSON=$(printf '%s' "$TRUSTED" | tr ',' '\n' | sed '/^$/d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/^/"/;s/$/"/' | awk '{s=(s?s",":"")$0} END{print s}')
-fi
+TP_JSON=$(printf '%s' "$TRUSTED" | tr ',' '\n' | sed '/^$/d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/^/"/;s/$/"/' | awk '{s=(s?s",":"")$0} END{print s}')
 [ -n "$TP_JSON" ] || TP_JSON='"127.0.0.1"'
 
 cat >"$CONFIG/edge.config.json" <<EOF
@@ -169,8 +171,16 @@ cat >"$CONFIG/edge.config.json" <<EOF
 }
 EOF
 chmod 0600 "$CONFIG/edge.config.json"
-if command -v chown >/dev/null 2>&1; then
-  chown 65532:65532 "$CONFIG/edge.config.json" 2>/dev/null || true
+chown_required 65532:65532 "$CONFIG/edge.config.json"
+
+# Keep pki-edge in sync if re-render
+if [ -f "$CONFIG/pki/edge.key" ]; then
+  cp -f "$CONFIG/pki/ca.crt" "$CONFIG/pki-edge/ca.crt"
+  cp -f "$CONFIG/pki/edge.crt" "$CONFIG/pki-edge/edge.crt"
+  cp -f "$CONFIG/pki/edge.key" "$CONFIG/pki-edge/edge.key"
+  chown_required 65532:65532 "$CONFIG/pki-edge/edge.key" "$CONFIG/pki-edge/edge.crt" "$CONFIG/pki-edge/ca.crt"
+  chmod 0600 "$CONFIG/pki-edge/edge.key"
+  chmod 0644 "$CONFIG/pki-edge/edge.crt" "$CONFIG/pki-edge/ca.crt"
 fi
 
 REG_PREFIX="127.0.0.1:${HOST_REG}/auriga/"
@@ -192,7 +202,6 @@ AURIGA_AGENT_ALLOW_INSECURE=false
 EOF
 chmod 0600 "$CONFIG/agent.env"
 
-# Compose secret file (same content as secret store entry).
 printf '%s' "$PG_BOOT" >"$SECRETS/pg_bootstrap_password"
 chmod 0600 "$SECRETS/pg_bootstrap_password"
 
@@ -209,3 +218,4 @@ EOF
 fi
 
 info "render complete (configs under $CONFIG; secrets not printed)"
+info "note: platform.env embeds DB/NATS secrets as env vars — visible to anyone with docker inspect (M5)"

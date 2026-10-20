@@ -4,8 +4,11 @@
 
 set -eu
 
+# Fixed project name — never take arbitrary COMPOSE_PROJECT_NAME from stack.env (M1).
+AURIGA_NAS_PROJECT=auriga-nas-test
+export AURIGA_NAS_PROJECT
+
 nas_scripts_dir() {
-  # $0 may be sourced; prefer explicit NAS_ROOT when set.
   if [ -n "${NAS_ROOT:-}" ]; then
     printf '%s\n' "$NAS_ROOT"
     return 0
@@ -32,7 +35,65 @@ require_cmd() {
   done
 }
 
-# Load stack.env from data root or NAS_ROOT without printing values.
+require_root_or_capable_chown() {
+  if [ "${NAS_ALLOW_NONROOT:-}" = "1" ]; then
+    info "NAS_ALLOW_NONROOT=1: skipping root/chown requirement (test only)"
+    return 0
+  fi
+  if [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
+    return 0
+  fi
+  die "init/render must run as root so edge/platform materials can be chown'd (L1)"
+}
+
+# Soft chown: hard-fail as root; no-op under NAS_ALLOW_NONROOT.
+chown_required() {
+  _spec=$1
+  shift
+  if [ "${NAS_ALLOW_NONROOT:-}" = "1" ]; then
+    return 0
+  fi
+  chown "$_spec" "$@" || die "chown $_spec failed"
+}
+
+# Parse KEY=VALUE lines only — no shell execution (L3).
+load_env_file() {
+  _file=$1
+  [ -f "$_file" ] || die "env file missing: $_file"
+  # Prefer owner-restricted files when present on a multi-user NAS.
+  if command -v stat >/dev/null 2>&1; then
+    _mode=$(stat -c '%a' "$_file" 2>/dev/null || stat -f '%OLp' "$_file" 2>/dev/null || echo "")
+    case "$_mode" in
+      600|400|640|440|'') ;;
+      *) info "warning: $_file mode=$_mode (prefer 0600)" ;;
+    esac
+  fi
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    case "$_line" in
+      ''|\#*) continue ;;
+    esac
+    case "$_line" in
+      *=*) ;;
+      *) die "invalid env line (not KEY=VALUE): $_file" ;;
+    esac
+    _key=${_line%%=*}
+    _val=${_line#*=}
+    case "$_key" in
+      *[!A-Za-z0-9_]*|'') die "invalid env key in $_file" ;;
+    esac
+    # Strip optional surrounding single/double quotes.
+    case "$_val" in
+      \"*\") _val=${_val#\"}; _val=${_val%\"} ;;
+      \'*\') _val=${_val#\'}; _val=${_val%\'} ;;
+    esac
+    # Reject command substitution / expansion markers.
+    case "$_val" in
+      *'$('*|*'`'*|*'${'*) die "refusing shell expansion in env value: $_key" ;;
+    esac
+    export "$_key=$_val"
+  done <"$_file"
+}
+
 load_stack_env() {
   _root=${AURIGA_DATA_ROOT:-}
   _file=""
@@ -45,14 +106,50 @@ load_stack_env() {
   else
     die "stack.env not found (set AURIGA_DATA_ROOT or place stack.env under $NAS_ROOT)"
   fi
-  # shellcheck disable=SC1090
-  set -a
-  # shellcheck disable=SC1090
-  . "$_file"
-  set +a
+  load_env_file "$_file"
   [ -n "${AURIGA_DATA_ROOT:-}" ] || die "AURIGA_DATA_ROOT is required"
-  [ -n "${COMPOSE_PROJECT_NAME:-}" ] || COMPOSE_PROJECT_NAME=auriga-nas-test
+  validate_data_root "$AURIGA_DATA_ROOT"
+  # Ignore operator COMPOSE_PROJECT_NAME — always fixed (M1).
+  COMPOSE_PROJECT_NAME=$AURIGA_NAS_PROJECT
   export COMPOSE_PROJECT_NAME
+}
+
+# M3: absolute, no .., no //, no /./, depth >= 3, last component auriga-*, no symlinks on path.
+validate_data_root() {
+  _root=$1
+  [ -n "$_root" ] || die "AURIGA_DATA_ROOT empty"
+  case "$_root" in
+    /*) ;;
+    *) die "AURIGA_DATA_ROOT must be absolute" ;;
+  esac
+  case "$_root" in
+    *..*|*"//"*|*"/./"*|*"/."|*"/. ") die "AURIGA_DATA_ROOT rejects .. // /. segments" ;;
+  esac
+  case "$_root" in
+    /|/share|/var|/tmp|/home|/root|/usr|/etc|/opt) die "AURIGA_DATA_ROOT too shallow or system path: $_root" ;;
+  esac
+  # At least three components: /a/b/auriga-x
+  _depth=0
+  _rest=$_root
+  while [ -n "$_rest" ] && [ "$_rest" != "/" ]; do
+    _depth=$((_depth + 1))
+    _rest=$(dirname -- "$_rest")
+    [ "$_depth" -gt 20 ] && break
+  done
+  [ "$_depth" -ge 3 ] || die "AURIGA_DATA_ROOT needs >= 3 path components (got $_depth): $_root"
+  _base=$(basename -- "$_root")
+  case "$_base" in
+    auriga-*) ;;
+    *) die "AURIGA_DATA_ROOT basename must start with auriga- (got $_base)" ;;
+  esac
+  # Reject symlinks along the path (existing components only).
+  _check=$_root
+  while [ -n "$_check" ] && [ "$_check" != "/" ]; do
+    if [ -L "$_check" ]; then
+      die "AURIGA_DATA_ROOT path component is a symlink: $_check"
+    fi
+    _check=$(dirname -- "$_check")
+  done
 }
 
 compose_cmd() {
@@ -67,30 +164,29 @@ compose_cmd() {
 
 run_compose() {
   _cc=$(compose_cmd)
-  # Intentionally do not pass --env-file that dumps secrets into process listings beyond stack.env.
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
-    COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
-    $_cc -f "$NAS_ROOT/docker-compose.yml" -p "$COMPOSE_PROJECT_NAME" "$@"
+    COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
+    $_cc -f "$NAS_ROOT/docker-compose.yml" -p "$AURIGA_NAS_PROJECT" "$@"
 }
 
-is_absolute_path() {
-  case "$1" in
-    /*) return 0 ;;
-    *) return 1 ;;
-  esac
+# True if this compose project already has running containers (H4).
+project_is_running() {
+  command -v docker >/dev/null 2>&1 || return 1
+  _n=$(docker ps -q --filter "label=com.docker.compose.project=${AURIGA_NAS_PROJECT}" 2>/dev/null | wc -l | tr -d ' ')
+  [ "${_n:-0}" -gt 0 ]
 }
 
-path_under_root() {
-  _path=$1
-  _root=$2
-  case "$_path" in
-    "$_root"|"$_root"/*) return 0 ;;
-    *) return 1 ;;
-  esac
+# Port busy on host, ignoring listeners owned by this compose project (H4).
+host_port_busy_foreign() {
+  _port=$1
+  if project_is_running; then
+    # If our project is up, assume our publish ports are ours.
+    return 1
+  fi
+  host_port_busy "$_port"
 }
 
-# True if TCP port is listening on 127.0.0.1 or * (host). Does not prove a LAN IP is free.
 host_port_busy() {
   _port=$1
   if command -v ss >/dev/null 2>&1; then
@@ -110,14 +206,31 @@ host_port_busy() {
   die "need ss or netstat to check host ports"
 }
 
+# Image ref: local id sha256:… or registry@sha256:… (H5). Returns 0/1 (does not exit).
+validate_image_ref() {
+  _img=$1
+  case "$_img" in
+    sha256:[a-fA-F0-9][a-fA-F0-9]*) return 0 ;;
+    *@sha256:[a-fA-F0-9][a-fA-F0-9]*) return 0 ;;
+    *)
+      printf 'invalid image ref (need sha256:<id> or name@sha256:<digest>): %s\n' "$_img" >&2
+      return 1
+      ;;
+  esac
+}
+
 rand_alnum() {
   _n=${1:-32}
+  _out=""
   if command -v openssl >/dev/null 2>&1; then
-    openssl rand -base64 "$_n" | tr -d '\n/+=' | cut -c1-"$_n"
-    return 0
+    _out=$(openssl rand -base64 "$_n" 2>/dev/null | tr -d '\n/+=' | cut -c1-"$_n") || _out=""
+  else
+    _out=$(dd if=/dev/urandom bs="$_n" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' | cut -c1-"$_n") || _out=""
   fi
-  # BusyBox fallback
-  dd if=/dev/urandom bs="$_n" count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' | cut -c1-"$_n"
+  if [ -z "$_out" ] || [ "${#_out}" -lt "$_n" ]; then
+    die "rand_alnum failed to produce $_n characters (openssl/urandom error)"
+  fi
+  printf '%s' "$_out"
 }
 
 chmod_strict() {
@@ -132,7 +245,7 @@ chmod_strict() {
 refuse_secret_overwrite() {
   _file=$1
   if [ -e "$_file" ]; then
-    die "refusing to overwrite existing secret/config: $_file"
+    die "refusing to overwrite existing secret/config: $_file (remove manually only after backup)"
   fi
 }
 
@@ -141,5 +254,40 @@ marker_path() {
 }
 
 release_marker_path() {
-  printf '%s\n' "${AURIGA_DATA_ROOT}/.auriga-release"
+  # Release marker lives next to the loaded bundle, not inventing a data root (M3b).
+  printf '%s\n' "${AURIGA_RELEASE_DIR:-$NAS_ROOT}/.auriga-release"
+}
+
+dir_is_empty() {
+  _d=$1
+  [ -d "$_d" ] || return 0
+  # shellcheck disable=SC2010
+  _any=$(ls -A "$_d" 2>/dev/null | head -n 1 || true)
+  [ -z "$_any" ]
+}
+
+# IPv4 dotted-quad in CIDR (L4) — simple /8 /16 /24 /32 check.
+ipv4_in_cidr() {
+  _ip=$1
+  _cidr=$2
+  _net=${_cidr%/*}
+  _bits=${_cidr#*/}
+  case "$_bits" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  _ipn=$(ipv4_to_int "$_ip") || return 1
+  _netn=$(ipv4_to_int "$_net") || return 1
+  _mask=$(( 0xFFFFFFFF << (32 - _bits) & 0xFFFFFFFF ))
+  [ $((_ipn & _mask)) -eq $((_netn & _mask)) ]
+}
+
+ipv4_to_int() {
+  _a=$1
+  oldifs=$IFS
+  IFS=.
+  # shellcheck disable=SC2086
+  set -- $_a
+  IFS=$oldifs
+  [ "$#" -eq 4 ] || return 1
+  printf '%s' $(( ($1 << 24) + ($2 << 16) + ($3 << 8) + $4 ))
 }

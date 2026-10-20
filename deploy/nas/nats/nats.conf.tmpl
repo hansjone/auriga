@@ -6,6 +6,9 @@ server_name: auriga-nas-test-nats
 
 jetstream {
   store_dir: /data
+  # Disk/RAM caps so a runaway client cannot fill the NAS share (M11).
+  max_memory_store: 64MB
+  max_file_store: 1GB
 }
 
 accounts {
@@ -16,14 +19,28 @@ accounts {
     jetstream: enabled
     users: [
       {
-        # Platform: events + sessions KV create/write. Not a wildcard on all subjects.
+        # Platform: events + sessions KV. JS API limited to sessions stream/KV.
         user: platform
         password: "__NATS_PLATFORM_PASSWORD__"
         permissions: {
           publish: { allow: [
             "auriga.evt.>",
             "$KV.auriga-sessions.>",
-            "$JS.API.>"
+            "$JS.API.STREAM.CREATE.KV_auriga-sessions",
+            "$JS.API.STREAM.UPDATE.KV_auriga-sessions",
+            "$JS.API.STREAM.INFO.KV_auriga-sessions",
+            "$JS.API.STREAM.LIST",
+            "$JS.API.STREAM.NAMES",
+            "$JS.API.STREAM.MSG.GET.KV_auriga-sessions",
+            "$JS.API.DIRECT.GET.KV_auriga-sessions",
+            "$JS.API.DIRECT.GET.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.CREATE.KV_auriga-sessions",
+            "$JS.API.CONSUMER.CREATE.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.DURABLE.CREATE.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.INFO.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.MSG.NEXT.KV_auriga-sessions.>",
+            "$JS.ACK.KV_auriga-sessions.>",
+            "$JS.API.INFO"
           ] }
           subscribe: { allow: [
             "_INBOX.>",
@@ -33,21 +50,32 @@ accounts {
         }
       }
       {
-        # Workspace routes publisher (write-only to routes KV + needed JS API).
+        # Workspace routes publisher — JS API limited to routes KV/stream.
         user: routes_rw
         password: "__NATS_ROUTES_RW_PASSWORD__"
         permissions: {
           publish: { allow: [
             "$KV.auriga-routes.>",
-            "$JS.API.>"
+            "$JS.API.STREAM.CREATE.KV_auriga-routes",
+            "$JS.API.STREAM.UPDATE.KV_auriga-routes",
+            "$JS.API.STREAM.INFO.KV_auriga-routes",
+            "$JS.API.STREAM.LIST",
+            "$JS.API.STREAM.NAMES",
+            "$JS.API.STREAM.MSG.GET.KV_auriga-routes",
+            "$JS.API.DIRECT.GET.KV_auriga-routes",
+            "$JS.API.DIRECT.GET.KV_auriga-routes.>",
+            "$JS.API.CONSUMER.CREATE.KV_auriga-routes",
+            "$JS.API.CONSUMER.CREATE.KV_auriga-routes.>",
+            "$JS.API.CONSUMER.DURABLE.CREATE.KV_auriga-routes.>",
+            "$JS.API.CONSUMER.INFO.KV_auriga-routes.>",
+            "$JS.API.INFO"
           ] }
           subscribe: { allow: ["_INBOX.>", "$KV.auriga-routes.>"] }
         }
       }
       {
-        # Edge: sessions KV + routes read + revoke events.
-        # Current edge binary shares one natsUrl for session + route stores (password auth),
-        # so this user is the minimal union. Separate JWT .creds can split later.
+        # Edge: sessions + routes read + revoke. Shared natsUrl (password auth).
+        # If KV create/ensure-streams needs broader JS on first boot, widen here and document.
         user: edge
         password: "__NATS_EDGE_PASSWORD__"
         permissions: {
@@ -61,15 +89,20 @@ accounts {
             "$JS.API.STREAM.MSG.GET.KV_auriga-sessions",
             "$JS.API.DIRECT.GET.KV_auriga-sessions",
             "$JS.API.DIRECT.GET.KV_auriga-sessions.>",
-            "$JS.API.CONSUMER.>",
-            "$JS.ACK.>"
+            "$JS.API.STREAM.CREATE.KV_auriga-sessions",
+            "$JS.API.CONSUMER.CREATE.KV_auriga-sessions",
+            "$JS.API.CONSUMER.CREATE.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.DURABLE.CREATE.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.INFO.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.MSG.NEXT.KV_auriga-sessions.>",
+            "$JS.ACK.KV_auriga-sessions.>",
+            "$JS.API.INFO"
           ] }
           subscribe: { allow: [
             "_INBOX.>",
             "$KV.auriga-sessions.>",
             "$KV.auriga-routes.>",
-            "auriga.evt.identity.session_revoked",
-            "_INBOX.>"
+            "auriga.evt.identity.session_revoked"
           ] }
         }
       }

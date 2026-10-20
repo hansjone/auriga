@@ -1,11 +1,12 @@
 #!/bin/sh
-# Local static validations for deploy/nas (no Docker required for most checks).
+# Behavior tests for deploy/nas (no real Docker daemon required for most).
 # shellcheck shell=sh
 set -eu
 
 ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 export NAS_ROOT="$ROOT"
 export NAS_ALLOW_EXAMPLE_ENV=1
+export NAS_ALLOW_NONROOT=1
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 fail=0
@@ -13,20 +14,104 @@ fail=0
 pass() { printf 'PASS %s\n' "$1"; }
 fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 
-# --- path rejection ---
-AURIGA_DATA_ROOT="/tmp/not-used"
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib.sh"
-if is_absolute_path "/srv/auriga-test"; then pass path_absolute; else fail_msg path_absolute "expected absolute"; fi
-if is_absolute_path "relative/path"; then fail_msg path_relative "should reject"; else pass path_relative; fi
-if path_under_root "/srv/auriga-test/data" "/srv/auriga-test"; then pass path_under; else fail_msg path_under "expected under"; fi
-if path_under_root "/other" "/srv/auriga-test"; then fail_msg path_escape "should reject"; else pass path_escape; fi
 
-# --- init idempotency + credential no-overwrite ---
-DATA="$TMP/data"
+try_validate() {
+  # validate_data_root calls die on failure — isolate in subshell
+  sh -c 'NAS_ROOT="$1"; . "$1/scripts/lib.sh"; validate_data_root "$2"' sh "$ROOT" "$1" 2>/dev/null
+}
+
+# --- path validation (M3) ---
+if try_validate "/srv/container/auriga-test"; then pass path_ok; else fail_msg path_ok "should accept"; fi
+if try_validate "/srv/auriga-test"; then fail_msg path_shallow "should reject depth<3"; else pass path_shallow; fi
+if try_validate "/"; then fail_msg path_root "should reject /"; else pass path_root; fi
+if try_validate "/share"; then fail_msg path_share "should reject /share"; else pass path_share; fi
+if try_validate "/tmp/foo/bar"; then fail_msg path_name "should reject non-auriga-* basename"; else pass path_name; fi
+if try_validate "/srv/container/auriga-test/../x"; then fail_msg path_dotdot "should reject .."; else pass path_dotdot; fi
+
+mkdir -p "$TMP/real/container"
+ln -s "$TMP/real/container" "$TMP/linkroot" 2>/dev/null || true
+if [ -L "$TMP/linkroot" ]; then
+  if try_validate "$TMP/linkroot/auriga-test"; then
+    fail_msg path_symlink "should reject symlink component"
+  else
+    pass path_symlink
+  fi
+else
+  printf 'SKIP path_symlink (ln not available)\n'
+fi
+
+# --- rand_alnum / empty secret (M4) ---
+_v=$(rand_alnum 32) || { fail_msg rand_alnum "failed"; _v=""; }
+if [ "${#_v}" -eq 32 ]; then pass rand_alnum; else fail_msg rand_alnum "len=${#_v}"; fi
+
+# --- project name lock (M1) ---
+if [ "$AURIGA_NAS_PROJECT" = "auriga-nas-test" ]; then pass project_fixed; else fail_msg project_fixed "unexpected"; fi
+
+# --- ipv4_in_cidr (L4) ---
+if ipv4_in_cidr "192.0.2.10" "192.0.2.0/24"; then pass cidr_in; else fail_msg cidr_in "expected in"; fi
+if ipv4_in_cidr "198.51.100.10" "192.0.2.0/24"; then fail_msg cidr_out "expected out"; else pass cidr_out; fi
+
+try_img() {
+  sh -c 'NAS_ROOT="$1"; . "$1/scripts/lib.sh"; validate_image_ref "$2"' sh "$ROOT" "$1" 2>/dev/null
+}
+
+# --- stop scope: no volume wipe, no remove-orphans ---
+if grep -v '^[[:space:]]*#' "$ROOT/scripts/stop.sh" | grep -E 'prune|down -v|down --volumes|remove-orphans' >/dev/null; then
+  fail_msg stop_scope "dangerous stop flags present"
+else
+  pass stop_scope
+fi
+
+# --- nats: no anonymous auth; no JS.API.> wildcards; jetstream caps ---
+if grep -v '^[[:space:]]*#' "$ROOT/nats/nats.conf.tmpl" | grep -q 'no_auth_user'; then
+  fail_msg nats_no_auth "anonymous auth must stay disabled"
+else
+  pass nats_no_auth
+fi
+if grep -v '^[[:space:]]*#' "$ROOT/nats/nats.conf.tmpl" | grep -qE '\$JS\.API\.>"'; then
+  fail_msg nats_js_wild "JS.API.> must not appear"
+else
+  pass nats_js_narrow
+fi
+if grep -q 'max_file_store' "$ROOT/nats/nats.conf.tmpl" && grep -q 'max_memory_store' "$ROOT/nats/nats.conf.tmpl"; then
+  pass nats_js_caps
+else
+  fail_msg nats_js_caps "missing jetstream store caps"
+fi
+
+# --- compose topology markers (H1/H2/M6/M8) ---
+grep -q 'auriga-nas-test_publish' "$ROOT/docker-compose.yml" || { fail_msg topo_publish "missing publish network"; }
+grep -q 'internal: true' "$ROOT/docker-compose.yml" || { fail_msg topo_internal "missing internal:true"; }
+grep -q 'pki-edge' "$ROOT/docker-compose.yml" || { fail_msg topo_pki_edge "missing pki-edge mount"; }
+grep -q '/ingress:' "$ROOT/docker-compose.yml" || { fail_msg topo_ingress "missing ingress mount"; }
+# edge service block must not mount data/agent (ignore comments)
+if awk '
+  /^  edge:/ {in_edge=1; next}
+  /^  [a-z]/ && in_edge {in_edge=0}
+  in_edge && $0 !~ /^[[:space:]]*#/ && /data\/agent/ {found=1}
+  END { exit found ? 0 : 1 }
+' "$ROOT/docker-compose.yml"; then
+  fail_msg edge_agent_mount "edge must not mount data/agent"
+else
+  pass edge_no_agent_mount
+fi
+grep -q 'cap_drop: \[ALL\]' "$ROOT/docker-compose.yml" && pass cap_drop || fail_msg cap_drop "missing"
+
+# --- no private site values ---
+if grep -RE 'avelo\.top|10\.0\.0\.|avelo' "$ROOT" \
+  --include='*.md' --include='*.yml' --include='*.example' --include='*.tmpl' --include='*.sh' \
+  --exclude='run-tests.sh' >/dev/null 2>&1; then
+  fail_msg no_private_addrs "private/site values leaked"
+else
+  pass no_private_addrs
+fi
+
+# --- init behavior with fake go/openssl ---
+DATA="$TMP/srv/container/auriga-test"
 mkdir -p "$DATA"
 cat >"$DATA/stack.env" <<EOF
-COMPOSE_PROJECT_NAME=auriga-nas-test
 AURIGA_DATA_ROOT=$DATA
 AURIGA_LAN_NETWORK=lan-example
 AURIGA_LAN_SUBNET=192.0.2.0/24
@@ -39,9 +124,9 @@ AURIGA_TEAM_ORIGIN=https://portal.example.com
 AURIGA_TEAM_RP_ID=portal.example.com
 AURIGA_SECURE_COOKIES=true
 AURIGA_TRUSTED_PROXIES=192.0.2.1/32
-AURIGA_IMAGE_PLATFORM=auriga/platform@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-AURIGA_IMAGE_EDGE=auriga/edge@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-AURIGA_IMAGE_AGENT=auriga/agent@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+AURIGA_IMAGE_PLATFORM=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+AURIGA_IMAGE_EDGE=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+AURIGA_IMAGE_AGENT=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 AURIGA_IMAGE_POSTGRES=postgres:17@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 AURIGA_IMAGE_NATS=nats:2.10-alpine@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 AURIGA_IMAGE_REGISTRY=registry:2@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -62,31 +147,50 @@ if command -v go >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
   KEY1=$(cat "$DATA/secrets/iam_encryption_key")
   if sh "$ROOT/scripts/init.sh"; then
     KEY2=$(cat "$DATA/secrets/iam_encryption_key")
-    if [ "$KEY1" = "$KEY2" ]; then
-      pass init_idempotent
-    else
-      fail_msg init_idempotent "key rotated on re-init"
-    fi
+    if [ "$KEY1" = "$KEY2" ]; then pass init_idempotent; else fail_msg init_idempotent "key rotated"; fi
   else
     fail_msg init_idempotent "re-init failed"
   fi
-  # Credential no-overwrite: remove marker but keep secrets → init must refuse or no-op without rewrite
-  rm -f "$DATA/.auriga-initialized"
-  if sh "$ROOT/scripts/init.sh" 2>"$TMP/init.err"; then
-    # If it succeeded, secrets must be unchanged
-    KEY3=$(cat "$DATA/secrets/iam_encryption_key")
-    if [ "$KEY1" = "$KEY3" ]; then
-      pass creds_no_overwrite
-    else
-      fail_msg creds_no_overwrite "secrets changed"
-    fi
+  # Non-empty foreign root without marker
+  OTHER="$TMP/srv/container/auriga-other"
+  mkdir -p "$OTHER/noise"
+  echo x >"$OTHER/noise/f"
+  cat >"$OTHER/stack.env" <<EOF
+AURIGA_DATA_ROOT=$OTHER
+AURIGA_LAN_NETWORK=lan-example
+AURIGA_LAN_SUBNET=192.0.2.0/24
+AURIGA_EDGE_LAN_IP=192.0.2.10
+AURIGA_PORTAL_HOST=portal.example.com
+AURIGA_ADMIN_HOST=admin.example.com
+AURIGA_INSTANCE_PARENT_DOMAIN=i.example.com
+AURIGA_ISSUER=https://portal.example.com
+AURIGA_TEAM_ORIGIN=https://portal.example.com
+AURIGA_TEAM_RP_ID=portal.example.com
+AURIGA_SECURE_COOKIES=true
+AURIGA_TRUSTED_PROXIES=192.0.2.1/32
+AURIGA_IMAGE_PLATFORM=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+AURIGA_IMAGE_EDGE=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+AURIGA_IMAGE_AGENT=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+AURIGA_IMAGE_POSTGRES=postgres:17@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+AURIGA_IMAGE_NATS=nats:2.10-alpine@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+AURIGA_IMAGE_REGISTRY=registry:2@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+AURIGA_HOST_PUBLISH_NODECONTROL=17443
+AURIGA_HOST_PUBLISH_REGISTRY=15000
+AURIGA_HOST_PUBLISH_PLATFORM_HTTP=18081
+AURIGA_PLATFORM_SEED=false
+AURIGA_AGENT_CAPACITY_MAX_INSTANCES=1
+EOF
+  export AURIGA_DATA_ROOT="$OTHER"
+  if sh "$ROOT/scripts/init.sh" 2>"$TMP/init-foreign.err"; then
+    fail_msg foreign_root "should refuse non-empty unmarked root"
   else
-    # Refusal is also acceptable when data+secrets exist without marker
-    pass creds_no_overwrite_refuse
+    pass foreign_root
   fi
-  # Missing secrets with existing postgres data → refuse
+  # Missing secrets with postgres data
+  export AURIGA_DATA_ROOT="$DATA"
   rm -rf "$DATA/secrets" "$DATA/.auriga-initialized" "$DATA/config"
   mkdir -p "$DATA/data/postgres"
+  echo leftover >"$DATA/data/postgres/x"
   if sh "$ROOT/scripts/init.sh" 2>"$TMP/init2.err"; then
     fail_msg missing_secrets_refuse "should have refused"
   else
@@ -96,50 +200,59 @@ else
   printf 'SKIP init_tests (need go+openssl)\n'
 fi
 
-# --- stop scope: executable lines must not wipe volumes ---
-if grep -v '^[[:space:]]*#' "$ROOT/scripts/stop.sh" | grep -E 'prune|down -v|down --volumes' >/dev/null; then
-  fail_msg stop_scope "dangerous docker wipe found"
-else
-  pass stop_scope
+# --- H4: project_is_running helper with fake docker ---
+BIN="$TMP/bin"
+mkdir -p "$BIN"
+cat >"$BIN/docker" <<'EOF'
+#!/bin/sh
+# Emulate: docker ps -q --filter label=com.docker.compose.project=...
+if [ "$1" = "ps" ]; then
+  if [ "${FAKE_RUNNING:-}" = "1" ]; then
+    printf '%s\n' 'deadbeefcafebabe'
+  fi
+  exit 0
 fi
-if grep -v '^[[:space:]]*#' "$ROOT/scripts/stop.sh" | grep -q 'down --remove-orphans'; then
-  pass stop_keeps_volumes
+exit 0
+EOF
+# Ensure LF executable for Git Bash on Windows
+chmod +x "$BIN/docker"
+PATH="$BIN:$PATH"
+export PATH
+export FAKE_RUNNING=1
+_out=$(docker ps -q --filter "label=com.docker.compose.project=auriga-nas-test" || true)
+if [ -n "$_out" ] && project_is_running; then
+  pass h4_running_detect
 else
-  fail_msg stop_keeps_volumes "expected down --remove-orphans without volume wipe"
+  fail_msg h4_running_detect "fake docker out='$_out' which=$(command -v docker)"
+fi
+export FAKE_RUNNING=0
+if project_is_running; then fail_msg h4_stopped_detect "expected stopped"; else pass h4_stopped_detect; fi
+
+# --- image ref validator (H5) ---
+if validate_image_ref "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" 2>/dev/null; then
+  pass img_local_id
+else
+  fail_msg img_local_id "sha256:id should pass"
+fi
+if validate_image_ref "auriga/platform:nas" 2>/dev/null; then
+  fail_msg img_tag "bare tag should fail"
+else
+  pass img_tag_reject
 fi
 
-# --- nats template: anonymous auth off; edge has no subject wildcard ---
-if grep -v '^[[:space:]]*#' "$ROOT/nats/nats.conf.tmpl" | grep -q 'no_auth_user'; then
-  fail_msg nats_no_auth "anonymous auth must stay disabled"
+# --- smoke partial exit code documented ---
+if grep -q 'AURIGA_SMOKE_ALLOW_PARTIAL' "$ROOT/scripts/smoke.sh" && grep -q 'exit 2' "$ROOT/scripts/smoke.sh"; then
+  pass smoke_partial
 else
-  pass nats_no_auth
-fi
-if grep -A20 'user: edge' "$ROOT/nats/nats.conf.tmpl" | grep -v '^[[:space:]]*#' | grep -q 'allow: \[">"\]'; then
-  fail_msg nats_edge_wildcard "edge must not have publish/subscribe >"
-else
-  pass nats_edge_minperms
-fi
-if grep -q 'http: "127.0.0.1:8222"' "$ROOT/nats/nats.conf.tmpl"; then
-  pass nats_monitor_loopback
-else
-  fail_msg nats_monitor_loopback "monitoring must bind loopback"
+  fail_msg smoke_partial "missing PARTIAL exit 2"
 fi
 
-# --- public placeholders only (exclude this test file's patterns) ---
-if grep -RE 'avelo\.top|10\.0\.0\.|avelo' "$ROOT" \
-  --include='*.md' --include='*.yml' --include='*.example' --include='*.tmpl' --include='*.sh' \
-  --exclude='run-tests.sh' >/dev/null 2>&1; then
-  fail_msg no_private_addrs "private/site values leaked into public pack"
-else
-  pass no_private_addrs
-fi
-
-# --- LF scripts (no CR) ---
+# --- LF ---
 cr=0
 for f in "$ROOT"/scripts/*.sh "$ROOT"/docker/agent-entrypoint.sh "$ROOT"/test/run-tests.sh; do
   [ -f "$f" ] || continue
   if od -An -tx1 "$f" 2>/dev/null | grep -q ' 0d'; then
-    fail_msg "lf_$f" "CR found"
+    fail_msg "lf_$(basename "$f")" "CR found"
     cr=1
   fi
 done

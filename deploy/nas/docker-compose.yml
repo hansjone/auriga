@@ -1,17 +1,22 @@
-# Isolated Auriga NAS test stack. Images are digests only — no build on the NAS.
-# Project name defaults via COMPOSE_PROJECT_NAME / -p auriga-nas-test.
+# Isolated Auriga NAS test stack. Images by local id or digest — no build on the NAS.
+# Topology:
+#   internal  — internal:true; postgres/nats only; edge+platform+registry also join
+#   publish   — non-internal bridge ONLY so 127.0.0.1 host publishes work for agent
+#   lan       — external; edge only (dedicated LAN IP). Backends never join lan.
 name: auriga-nas-test
 
-x-service-security: &service_security
+x-cap-drop-all: &cap_drop_all
+  cap_drop: [ALL]
   security_opt:
     - no-new-privileges:true
-  read_only: false
   privileged: false
 
 services:
   postgres:
     image: ${AURIGA_IMAGE_POSTGRES}
-    <<: *service_security
+    <<: *cap_drop_all
+    # Official image needs these caps for initdb / role setup; entrypoint drops to postgres.
+    cap_add: [CHOWN, SETUID, SETGID, FOWNER, DAC_OVERRIDE]
     restart: unless-stopped
     environment:
       POSTGRES_DB: auriga
@@ -31,26 +36,23 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 512M
-          pids: 256
     mem_limit: 512m
     cpus: 0.50
     pids_limit: 256
 
   nats:
     image: ${AURIGA_IMAGE_NATS}
-    <<: *service_security
+    <<: *cap_drop_all
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    user: "65532:65532"
     command: ["-c", "/etc/nats/nats.conf"]
     volumes:
       - ${AURIGA_DATA_ROOT}/config/nats/nats.conf:/etc/nats/nats.conf:ro
       - ${AURIGA_DATA_ROOT}/data/nats:/data
     networks: [internal]
-    # Client port only on the internal bridge — monitoring (8222) is not published.
     expose:
       - "4222"
     healthcheck:
@@ -59,49 +61,45 @@ services:
       timeout: 5s
       retries: 30
       start_period: 10s
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 256M
-          pids: 128
     mem_limit: 256m
     cpus: 0.25
     pids_limit: 128
 
   registry:
     image: ${AURIGA_IMAGE_REGISTRY}
-    <<: *service_security
+    <<: *cap_drop_all
     restart: unless-stopped
-    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    networks: [internal, publish]
     expose:
       - "5000"
     ports:
-      # NAS loopback only — for host-network agent image pulls. Pick a free host port.
       - "127.0.0.1:${AURIGA_HOST_PUBLISH_REGISTRY}:5000"
     volumes:
       - ${AURIGA_DATA_ROOT}/data/registry:/var/lib/registry
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 256M
-          pids: 128
     mem_limit: 256m
     cpus: 0.25
     pids_limit: 128
 
   platform:
     image: ${AURIGA_IMAGE_PLATFORM}
-    <<: *service_security
+    <<: *cap_drop_all
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/tmp:size=32m,mode=1777
+    user: "10001:10001"
     depends_on:
       postgres:
         condition: service_healthy
       nats:
         condition: service_healthy
     env_file:
-      - ${AURIGA_DATA_ROOT}/config/platform.env
+      - path: ${AURIGA_DATA_ROOT}/config/platform.env
+        required: true
     environment:
       SPRING_PROFILES_ACTIVE: combined
       SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/auriga/platform-runtime.yaml
@@ -113,14 +111,12 @@ services:
       - ${AURIGA_DATA_ROOT}/config/pki:/etc/auriga/pki:ro
       - ${AURIGA_DATA_ROOT}/config/templates:/etc/auriga/templates:ro
       - ${AURIGA_DATA_ROOT}/enrollment:/var/auriga
-    networks: [internal]
+    networks: [internal, publish]
     expose:
       - "8081"
       - "7443"
     ports:
-      # NAS loopback only — agent (host network) dials NodeControl here.
       - "127.0.0.1:${AURIGA_HOST_PUBLISH_NODECONTROL}:7443"
-      # Optional: smoke/diagnostics against platform HTTP; not for public VPS.
       - "127.0.0.1:${AURIGA_HOST_PUBLISH_PLATFORM_HTTP}:8081"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8081/actuator/health || exit 1"]
@@ -128,20 +124,18 @@ services:
       timeout: 5s
       retries: 60
       start_period: 90s
-    deploy:
-      resources:
-        limits:
-          cpus: "1.00"
-          memory: 1536M
-          pids: 512
     mem_limit: 1536m
     cpus: 1.00
     pids_limit: 512
 
   edge:
     image: ${AURIGA_IMAGE_EDGE}
-    <<: *service_security
+    <<: *cap_drop_all
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    user: "65532:65532"
     depends_on:
       platform:
         condition: service_healthy
@@ -153,31 +147,24 @@ services:
     volumes:
       - ${AURIGA_DATA_ROOT}/config/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
-      # edge chmod's cert/key on startup — needs write on key files only.
-      - ${AURIGA_DATA_ROOT}/config/pki:/etc/auriga/pki
-      # Same absolute path as agent ingress socket (route uses unix://… on the host path).
-      - ${AURIGA_DATA_ROOT}/data/agent:${AURIGA_DATA_ROOT}/data/agent:ro
+      # Only edge leaf materials — not ca.key / workspace.key (M8).
+      - ${AURIGA_DATA_ROOT}/config/pki-edge:/etc/auriga/pki:ro
+      # Ingress socket only — not data/agent private keys (H2).
+      - ${AURIGA_DATA_ROOT}/ingress:${AURIGA_DATA_ROOT}/ingress:ro
     networks:
       internal:
       lan:
         ipv4_address: ${AURIGA_EDGE_LAN_IP}
-    # Listen on container :8080; reachability is via the dedicated LAN IP, not NAS host publish.
     expose:
       - "8080"
-    user: "65532:65532"
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 256M
-          pids: 128
     mem_limit: 256m
     cpus: 0.25
     pids_limit: 128
 
   agent:
     image: ${AURIGA_IMAGE_AGENT}
-    <<: *service_security
+    <<: *cap_drop_all
+    # host network + docker.sock ⇒ effective host root; see docs/dev/nas.md (M7).
     restart: unless-stopped
     network_mode: host
     depends_on:
@@ -186,14 +173,14 @@ services:
       registry:
         condition: service_started
     env_file:
-      - ${AURIGA_DATA_ROOT}/config/agent.env
+      - path: ${AURIGA_DATA_ROOT}/config/agent.env
+        required: true
     environment:
-      # Absolute path identical on host and in container (daemon bind-mount resolution).
       AURIGA_AGENT_DATA_ROOT: ${AURIGA_DATA_ROOT}/data/agent
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
-      AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/data/agent/ingress/ingress.sock
+      AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
       AURIGA_AGENT_CAPACITY_MAX_INSTANCES: ${AURIGA_AGENT_CAPACITY_MAX_INSTANCES:-1}
       AURIGA_AGENT_CAPACITY_CPU_MILLIS: ${AURIGA_AGENT_CAPACITY_CPU_MILLIS:-500}
@@ -203,24 +190,25 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${AURIGA_DATA_ROOT}/data/agent:${AURIGA_DATA_ROOT}/data/agent
+      - ${AURIGA_DATA_ROOT}/ingress:${AURIGA_DATA_ROOT}/ingress
       - ${AURIGA_DATA_ROOT}/join:/run/auriga-join
       - ${AURIGA_DATA_ROOT}/config/identity-keys.json:/etc/auriga/identity-keys.json:ro
       - ${AURIGA_DATA_ROOT}/config/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
-    deploy:
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 512M
-          pids: 256
     mem_limit: 512m
     cpus: 0.50
     pids_limit: 256
 
 networks:
   internal:
-    name: ${COMPOSE_PROJECT_NAME:-auriga-nas-test}_internal
+    name: auriga-nas-test_internal
     driver: bridge
     internal: true
+  publish:
+    # Non-internal: required for 127.0.0.1 port publishes to reach host-network agent (H1).
+    # Not attached to LAN; backends are still unreachable from the dedicated edge LAN IP path.
+    name: auriga-nas-test_publish
+    driver: bridge
+    internal: false
   lan:
     external: true
     name: ${AURIGA_LAN_NETWORK}
