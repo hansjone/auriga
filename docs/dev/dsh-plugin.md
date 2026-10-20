@@ -4,11 +4,11 @@
 
 ## 模式
 
-| `AURIGA_MODE` | 含义 |
-|---|---|
-| `standalone`（默认） | 不连平台；应急账号 + 配置的 JS 连接器；单一主人 |
-| `managed` | 平台托管实例：门锁、守卫、活动探针、团队面板外壳、`ctx.get('auriga')` |
-| `connect` | 本机 DSH 接入团队平台（后续任务） |
+| `AURIGA_MODE`        | 含义                                                                  |
+| -------------------- | --------------------------------------------------------------------- |
+| `standalone`（默认） | 不连平台；应急账号 + 配置的 JS 连接器；单一主人                       |
+| `managed`            | 平台托管实例：门锁、守卫、活动探针、团队面板外壳、`ctx.get('auriga')` |
+| `connect`            | 本机 DSH 接入团队平台（后续任务）                                     |
 
 `initialize()` 返回模式占位对象。standalone / managed 用 `.create(options)` 建运行时。
 
@@ -47,24 +47,26 @@ const runtime = await mode.create({
 
 每个 HTTP / WebSocket 升级请求校验 `Auriga-Identity`（EdDSA / Ed25519，`typ=auriga-id+jwt`）：
 
-1. 按 `kid` 从身份头公钥文件取公钥（找不到则重读文件；可选 `AURIGA_IDENTITY_KEYS_URL` 拉取并缓存）；
+1. 按 `kid` 从 `AURIGA_IDENTITY_KEYS_FILE` 取公钥（找不到则限流重读文件；**不**从远程 URL 拉密钥）；
 2. `aud` = 本实例 id、`sub` = `AURIGA_OWNER_ID`、`pv` 为支持的协议主版本；
 3. `iat` / `exp`（允许 5 秒时钟偏差；`exp ≤ iat + 60`）；
-4. `htm` / `htu` 与请求方法和路径一致；
-5. `jti` 在有效期内去重（任务要求防重放；契约原文仅用于日志关联）。
+4. `htm` / `htu` 与请求方法和**原始** path 一致（不经 `URL` 规范化）；
+5. `jti` 在有效期内去重（有数量上限；任务要求防重放；契约原文仅用于日志关联）。
 
-失败一律 **401** + `common.unauthenticated`（不向客户端区分原因）。`GET /_auriga/health` 免校验。
+失败一律 **401** + `common.unauthenticated`。拿不到 `ctx.webServer.server` 时插件 **启动失败**（失败关闭）。仅精确路径 `GET|HEAD /_auriga/health` 免校验。
 
 ### 守卫
 
-- 拦截原生 `pluginManager` 变更：`installBundle` / `removeBundle` / `setBundleEnabled` / `setPluginEnabled` / `setVersionExemption` / `cancelInstall`（服务层 + `POST /api/pluginManager/<方法>`），错误码 `common.forbidden`。
-- 拦截越界新建工作区：`workspaceRegistry.create` 路径必须在 `AURIGA_WORKSPACE_ROOT`（默认 `/home/dsh/workspace`）之下。
+- 拦截原生 `pluginManager` 变更：`installBundle` / `removeBundle` / `setBundleEnabled` / `setPluginEnabled` / `setVersionExemption` / `cancelInstall`（服务层 + HTTP 写方法 `/api/pluginManager/<方法>`，含尾斜杠、重复斜杠、`.` 段等归一化变体），错误码 `common.forbidden`。
+- 拦截越界新建工作区：`workspaceRegistry.create` 路径必须在 `AURIGA_WORKSPACE_ROOT`（默认 `/home/dsh/workspace`）之下（字符串约束，不解析 symlink）。
 
 ### 活动与心跳
 
-- `GET /_auriga/health` → `{ status, ready, protocol, pluginVersion, activity? }`。
-- 每 30 秒及活动计数变化（2 秒去抖）`POST {AURIGA_PLATFORM_URL}/api/workspace/v1/instance/heartbeat`，带 `Auriga-Protocol` 与实例令牌；上报 `runningTurns` / `openTerminals` / `activeImBots` / `connectedClients`。
+- `GET /_auriga/health`（免鉴权，仅 GET/HEAD）→ 契约字段 `{ status, ready, protocol, pluginVersion }`，不含活动计数。
+- 活动计数来自 DSH 服务 `agents` / `terminals` / `dshIm` / `connection`（与原型 hub-heartbeat 同源）；接不上的指标记为未知，心跳里 `health.ok=false` 且 `problems` 含 `activity.<字段>.unknown`，避免平台把「未知」当成全 0 闲置回收。
+- 每 30 秒及活动计数变化（2 秒去抖）`POST …/instance/heartbeat`；发送失败 catch + 指数退避，不抛未处理拒绝。
 - 协议：当前与上一个主版本；更旧返回平台侧 `plugin.protocol_unsupported`（426）。
+- 工作区根守卫只做路径字符串约束，**不**解析符号链接逃逸。
 
 ### 团队面板外壳
 

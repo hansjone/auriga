@@ -14,6 +14,7 @@ import { checkProtocol } from './protocol.js';
  *   debounceMs?: number,
  *   healthOk?: () => boolean,
  *   onProtocol?: (info: { current: number, minSupported: number }) => void,
+ *   refreshActivity?: () => void | Promise<void>,
  * }} opts
  */
 export function createHeartbeatClient(opts) {
@@ -23,74 +24,89 @@ export function createHeartbeatClient(opts) {
   let debounce;
   let stopped = false;
   let nextHeartbeatSeconds = Math.round((opts.intervalMs ?? 30_000) / 1000);
+  let backoffSeconds = 0;
 
   async function send() {
-    if (stopped) return;
-    const token = await opts.getInstanceToken();
-    const activity = opts.activity.snapshot();
-    const body = {
-      pluginVersion: opts.pluginVersion,
-      dshVersion: opts.dshVersion,
-      activity: {
-        runningTurns: activity.runningTurns,
-        openTerminals: activity.openTerminals,
-        activeImBots: activity.activeImBots,
-        connectedClients: activity.connectedClients,
-        ...(activity.lastInteractionAt
-          ? { lastInteractionAt: activity.lastInteractionAt }
-          : {}),
-      },
-      health: {
-        ok: opts.healthOk ? opts.healthOk() : true,
-      },
-    };
-    const url = new URL(
-      '/api/workspace/v1/instance/heartbeat',
-      opts.platformUrl,
-    );
-    const res = await fetchImpl(url, {
-      method: 'POST',
-      redirect: 'error',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        'auriga-protocol': String(PROTOCOL_VERSION),
-        'user-agent': userAgent(opts.pluginVersion, opts.dshVersion),
-      },
-      body: JSON.stringify(body),
-    });
-    if (res.status === 426) {
-      const problem = await res.json().catch(() => ({}));
-      const checked = checkProtocol(0);
-      opts.onProtocol?.(
-        problem?.params ?? {
-          current: checked.params?.current ?? PROTOCOL_VERSION,
-          minSupported: checked.params?.minSupported ?? 1,
-        },
+    if (stopped) return { ok: false, status: 0, skipped: true };
+    try {
+      if (opts.refreshActivity) await opts.refreshActivity();
+      const token = await opts.getInstanceToken();
+      const activity = opts.activity.snapshot();
+      const problems = activity.unknownFields.map(
+        (f) => `activity.${f}.unknown`,
       );
-      return { ok: false, status: 426, problem };
+      const healthOk =
+        (opts.healthOk ? opts.healthOk() : true) && activity.allKnown;
+      const body = {
+        pluginVersion: opts.pluginVersion,
+        dshVersion: opts.dshVersion,
+        activity: {
+          runningTurns: activity.runningTurns,
+          openTerminals: activity.openTerminals,
+          activeImBots: activity.activeImBots,
+          connectedClients: activity.connectedClients,
+          ...(activity.lastInteractionAt
+            ? { lastInteractionAt: activity.lastInteractionAt }
+            : {}),
+        },
+        health: {
+          ok: healthOk,
+          ...(problems.length ? { problems } : {}),
+        },
+      };
+      const url = new URL(
+        '/api/workspace/v1/instance/heartbeat',
+        opts.platformUrl,
+      );
+      const res = await fetchImpl(url, {
+        method: 'POST',
+        redirect: 'error',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          'auriga-protocol': String(PROTOCOL_VERSION),
+          'user-agent': userAgent(opts.pluginVersion, opts.dshVersion),
+        },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 426) {
+        const problem = await res.json().catch(() => ({}));
+        const checked = checkProtocol(0);
+        opts.onProtocol?.(
+          problem?.params ?? {
+            current: PROTOCOL_VERSION,
+            minSupported: checked.ok ? 1 : (checked.params?.minSupported ?? 1),
+          },
+        );
+        backoffSeconds = Math.min(120, Math.max(5, (backoffSeconds || 5) * 2));
+        return { ok: false, status: 426, problem };
+      }
+      if (!res.ok) {
+        await res.body?.cancel?.().catch?.(() => {});
+        backoffSeconds = Math.min(120, Math.max(5, (backoffSeconds || 5) * 2));
+        return { ok: false, status: res.status };
+      }
+      const data = await res.json().catch(() => ({}));
+      if (data?.protocol) opts.onProtocol?.(data.protocol);
+      if (typeof data?.nextHeartbeatSeconds === 'number')
+        nextHeartbeatSeconds = data.nextHeartbeatSeconds;
+      backoffSeconds = 0;
+      return { ok: true, data };
+    } catch {
+      backoffSeconds = Math.min(120, Math.max(5, (backoffSeconds || 5) * 2));
+      return { ok: false, status: 0, error: true };
     }
-    if (!res.ok) {
-      await res.body?.cancel?.().catch?.(() => {});
-      return { ok: false, status: res.status };
-    }
-    const data = await res.json();
-    if (data?.protocol) opts.onProtocol?.(data.protocol);
-    if (typeof data?.nextHeartbeatSeconds === 'number')
-      nextHeartbeatSeconds = data.nextHeartbeatSeconds;
-    return { ok: true, data };
   }
 
   const schedule = () => {
     clearTimeout(timer);
-    timer = setTimeout(
-      () => {
-        void send().finally(() => {
-          if (!stopped) schedule();
-        });
-      },
-      (nextHeartbeatSeconds || 30) * 1000,
-    );
+    const delaySec =
+      backoffSeconds > 0 ? backoffSeconds : nextHeartbeatSeconds || 30;
+    timer = setTimeout(() => {
+      void send().finally(() => {
+        if (!stopped) schedule();
+      });
+    }, delaySec * 1000);
     if (typeof timer.unref === 'function') timer.unref();
   };
 

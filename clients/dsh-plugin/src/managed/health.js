@@ -5,34 +5,23 @@ import { HEALTH_PATH } from './door.js';
 export { HEALTH_PATH };
 
 /**
- * @param {{
- *   pluginVersion: string,
- *   ready?: boolean,
- *   activity?: ReturnType<import('./activity.js').createActivityProbe>,
- * }} opts
+ * Contract fields only for unauthenticated health:
+ * { status, ready, protocol, pluginVersion }
+ * @param {{ pluginVersion: string, ready?: boolean }} opts
  */
 export function buildHealthBody(opts) {
-  const activity = opts.activity?.snapshot();
   return {
     status: 'ok',
     ready: opts.ready !== false,
     protocol: PROTOCOL_VERSION,
     pluginVersion: opts.pluginVersion,
-    activity: activity
-      ? {
-          runningTurns: activity.runningTurns,
-          openTerminals: activity.openTerminals,
-          activeImBots: activity.activeImBots,
-          connectedClients: activity.connectedClients,
-        }
-      : undefined,
   };
 }
 
 /**
- * Register GET /_auriga/health (no identity header required).
+ * Register GET/HEAD /_auriga/health (no identity header required).
  * @param {object} ctx Cordis-like
- * @param {{ pluginVersion: string, activity?: ReturnType<import('./activity.js').createActivityProbe>, ready?: () => boolean }} opts
+ * @param {{ pluginVersion: string, ready?: () => boolean }} opts
  */
 export function registerHealthRoute(ctx, opts) {
   const handler = async (req, res) => {
@@ -44,7 +33,6 @@ export function registerHealthRoute(ctx, opts) {
     const body = buildHealthBody({
       pluginVersion: opts.pluginVersion,
       ready: opts.ready ? opts.ready() : true,
-      activity: opts.activity,
     });
     const raw = JSON.stringify(body);
     res.writeHead(200, {

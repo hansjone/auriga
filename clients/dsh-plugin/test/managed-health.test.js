@@ -23,29 +23,16 @@ test('health path constant matches protocol', () => {
   assert.equal(HEALTH_PATH, '/_auriga/health');
 });
 
-test('health body reports protocol, version, and activity counts', () => {
-  const activity = createActivityProbe();
-  activity.update({
-    runningTurns: 2,
-    openTerminals: 1,
-    activeImBots: 3,
-    connectedClients: 4,
-  });
+test('health body reports only contract fields', () => {
   const body = buildHealthBody({
     pluginVersion: '0.0.0',
     ready: true,
-    activity,
   });
   assert.equal(body.status, 'ok');
   assert.equal(body.ready, true);
   assert.equal(body.protocol, PROTOCOL_VERSION);
   assert.equal(body.pluginVersion, '0.0.0');
-  assert.deepEqual(body.activity, {
-    runningTurns: 2,
-    openTerminals: 1,
-    activeImBots: 3,
-    connectedClients: 4,
-  });
+  assert.equal('activity' in body, false);
 });
 
 test('activity probe notifies on change', () => {
@@ -59,6 +46,7 @@ test('activity probe notifies on change', () => {
   assert.equal(n, 2);
   assert.equal(activity.snapshot().runningTurns, 1);
   assert.equal(activity.snapshot().openTerminals, 2);
+  assert.equal(activity.snapshot().known.runningTurns, true);
 });
 
 test('heartbeat posts activity with Auriga-Protocol header', async () => {

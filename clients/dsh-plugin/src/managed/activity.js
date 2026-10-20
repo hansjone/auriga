@@ -1,6 +1,7 @@
 // @ts-nocheck
 /**
- * In-process activity counters for health and heartbeat.
+ * In-process activity counters for heartbeat.
+ * Each metric can be known (wired to a DSH source) or unknown (must not look like idle 0).
  */
 
 /**
@@ -8,10 +9,13 @@
  */
 export function createActivityProbe(opts = {}) {
   const now = opts.now ?? (() => new Date());
-  let runningTurns = 0;
-  let openTerminals = 0;
-  let activeImBots = 0;
-  let connectedClients = 0;
+  /** @type {Record<string, number | null>} */
+  const values = {
+    runningTurns: null,
+    openTerminals: null,
+    activeImBots: null,
+    connectedClients: null,
+  };
   /** @type {Date | undefined} */
   let lastInteractionAt;
   /** @type {Set<() => void>} */
@@ -32,15 +36,15 @@ export function createActivityProbe(opts = {}) {
   };
 
   /**
-   * @param {'runningTurns'|'openTerminals'|'activeImBots'|'connectedClients'} field
-   * @param {number} value
+   * @param {keyof typeof values} field
+   * @param {number | null | undefined} value null/undefined → unknown
    */
   const set = (field, value) => {
-    const n = Math.max(0, Math.floor(Number(value) || 0));
-    if (field === 'runningTurns') runningTurns = n;
-    else if (field === 'openTerminals') openTerminals = n;
-    else if (field === 'activeImBots') activeImBots = n;
-    else if (field === 'connectedClients') connectedClients = n;
+    if (value == null || Number.isNaN(Number(value))) {
+      values[field] = null;
+    } else {
+      values[field] = Math.max(0, Math.floor(Number(value)));
+    }
     bumpInteraction();
     notify();
   };
@@ -58,18 +62,21 @@ export function createActivityProbe(opts = {}) {
     setConnectedClients(n) {
       set('connectedClients', n);
     },
-    /** @param {Partial<{ runningTurns: number, openTerminals: number, activeImBots: number, connectedClients: number }>} patch */
+    markUnknown(field) {
+      if (field in values)
+        set(/** @type {keyof typeof values} */ (field), null);
+    },
+    markAllUnknown() {
+      for (const k of Object.keys(values))
+        set(/** @type {keyof typeof values} */ (k), null);
+    },
+    /**
+     * @param {Partial<Record<keyof typeof values, number | null | undefined>>} patch
+     */
     update(patch) {
-      if (patch.runningTurns != null)
-        runningTurns = Math.max(0, Math.floor(patch.runningTurns));
-      if (patch.openTerminals != null)
-        openTerminals = Math.max(0, Math.floor(patch.openTerminals));
-      if (patch.activeImBots != null)
-        activeImBots = Math.max(0, Math.floor(patch.activeImBots));
-      if (patch.connectedClients != null)
-        connectedClients = Math.max(0, Math.floor(patch.connectedClients));
-      bumpInteraction();
-      notify();
+      for (const [k, v] of Object.entries(patch)) {
+        if (k in values) set(/** @type {keyof typeof values} */ (k), v);
+      }
     },
     /** @param {() => void} fn */
     onChange(fn) {
@@ -77,15 +84,185 @@ export function createActivityProbe(opts = {}) {
       return () => listeners.delete(fn);
     },
     snapshot() {
+      const known = {
+        runningTurns: values.runningTurns != null,
+        openTerminals: values.openTerminals != null,
+        activeImBots: values.activeImBots != null,
+        connectedClients: values.connectedClients != null,
+      };
+      const allKnown = Object.values(known).every(Boolean);
       return {
-        runningTurns,
-        openTerminals,
-        activeImBots,
-        connectedClients,
+        // Contract requires integers ≥ 0; unknown stays 0 but flagged via known/problems.
+        runningTurns: values.runningTurns ?? 0,
+        openTerminals: values.openTerminals ?? 0,
+        activeImBots: values.activeImBots ?? 0,
+        connectedClients: values.connectedClients ?? 0,
+        known,
+        allKnown,
+        unknownFields: Object.entries(known)
+          .filter(([, k]) => !k)
+          .map(([name]) => name),
         lastInteractionAt: lastInteractionAt
           ? lastInteractionAt.toISOString()
           : undefined,
       };
     },
+  };
+}
+
+function rows(value) {
+  if (Array.isArray(value)) return value;
+  if (value instanceof Map) return [...value.values()];
+  if (value && typeof value === 'object') return Object.values(value);
+  return [];
+}
+
+function service(ctx, name) {
+  try {
+    return ctx.get?.(name);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Collect activity from DSH host services (same sources as oclaw hub-heartbeat).
+ * Missing services leave the corresponding metric unknown.
+ * @param {object} ctx
+ * @param {ReturnType<typeof createActivityProbe>} activity
+ * @param {{ browsers?: number }} [opts]
+ */
+export async function refreshActivityFromHost(ctx, activity, opts = {}) {
+  let agents = [];
+  let agentsOk = false;
+  try {
+    const agentsSvc = service(ctx, 'agents');
+    if (agentsSvc && typeof agentsSvc.list === 'function') {
+      agents = rows(agentsSvc.list());
+      agentsOk = true;
+    }
+  } catch {
+    agents = [];
+    agentsOk = false;
+  }
+
+  if (agentsOk) {
+    const runningTurns = agents.filter((handle) => {
+      const agent = handle.agent || handle;
+      return (
+        agent.isRunning === true ||
+        agent.status === 'running' ||
+        agent.turn?.status === 'running'
+      );
+    }).length;
+    activity.setRunningTurns(runningTurns);
+  } else {
+    activity.markUnknown('runningTurns');
+  }
+
+  let terminalsOk = false;
+  let openTerminals = 0;
+  try {
+    const termSvc = service(ctx, 'terminals');
+    if (termSvc && typeof termSvc.list === 'function') {
+      terminalsOk = true;
+      if (agentsOk && agents.length) {
+        openTerminals = agents.reduce((n, handle) => {
+          const agent = handle.agent || handle;
+          try {
+            return n + rows(termSvc.list(agent)).length;
+          } catch {
+            return n;
+          }
+        }, 0);
+      } else {
+        openTerminals = rows(termSvc.list()).length;
+      }
+    }
+  } catch {
+    terminalsOk = false;
+  }
+  if (terminalsOk) activity.setOpenTerminals(openTerminals);
+  else activity.markUnknown('openTerminals');
+
+  let imOk = false;
+  let activeImBots = 0;
+  try {
+    const dshIm = service(ctx, 'dshIm');
+    if (dshIm?.listDeliveryCatalog) {
+      const catalog = await dshIm.listDeliveryCatalog();
+      activeImBots = new Set(
+        rows(catalog?.bots || catalog)
+          .filter((row) => row.enabled !== false)
+          .map((row) => row.botId || row.id)
+          .filter(Boolean),
+      ).size;
+      imOk = true;
+    }
+  } catch {
+    imOk = false;
+  }
+  if (imOk) activity.setActiveImBots(activeImBots);
+  else activity.markUnknown('activeImBots');
+
+  if (typeof opts.browsers === 'number') {
+    activity.setConnectedClients(opts.browsers);
+  } else {
+    let clientsOk = false;
+    let connectedClients = 0;
+    try {
+      const connection = service(ctx, 'connection');
+      if (typeof connection?.clientCount === 'number') {
+        connectedClients = connection.clientCount;
+        clientsOk = true;
+      } else if (typeof connection?.listClients === 'function') {
+        connectedClients = rows(connection.listClients()).length;
+        clientsOk = true;
+      }
+    } catch {
+      clientsOk = false;
+    }
+    if (clientsOk) activity.setConnectedClients(connectedClients);
+    else activity.markUnknown('connectedClients');
+  }
+}
+
+/**
+ * Wire periodic refresh + optional inject hooks. Returns disposer.
+ * @param {object} ctx
+ * @param {ReturnType<typeof createActivityProbe>} activity
+ * @param {{ intervalMs?: number, getBrowsers?: () => number }} [opts]
+ */
+export function installActivityBridge(ctx, activity, opts = {}) {
+  activity.markAllUnknown();
+  const intervalMs = opts.intervalMs ?? 2_000;
+  let timer;
+
+  const tick = () => {
+    void refreshActivityFromHost(ctx, activity, {
+      browsers: opts.getBrowsers?.(),
+    }).catch(() => {
+      /* keep previous / unknown */
+    });
+  };
+
+  tick();
+  timer = setInterval(tick, intervalMs);
+  if (typeof timer.unref === 'function') timer.unref();
+
+  // Best-effort: refresh when agents service appears.
+  try {
+    ctx.inject?.(['agents'], () => tick());
+  } catch {
+    /* optional */
+  }
+  try {
+    ctx.inject?.(['terminals'], () => tick());
+  } catch {
+    /* optional */
+  }
+
+  return () => {
+    clearInterval(timer);
   };
 }

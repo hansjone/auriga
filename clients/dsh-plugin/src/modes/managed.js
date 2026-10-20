@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { readFileSync } from 'node:fs';
-import { createIdentityKeyCache, loadKeySet } from '../managed/keys.js';
+import { createIdentityKeyCache } from '../managed/keys.js';
 import { createDoorLock, createReplayCache } from '../managed/door.js';
 import {
   DEFAULT_WORKSPACE_ROOT,
@@ -9,7 +9,11 @@ import {
   guardPluginManager,
   guardWorkspaceRegistry,
 } from '../managed/guards.js';
-import { createActivityProbe } from '../managed/activity.js';
+import {
+  createActivityProbe,
+  installActivityBridge,
+  refreshActivityFromHost,
+} from '../managed/activity.js';
 import { registerHealthRoute, buildHealthBody } from '../managed/health.js';
 import { createHeartbeatClient } from '../managed/heartbeat.js';
 import {
@@ -24,9 +28,6 @@ import {
   userAgent,
 } from '../managed/protocol.js';
 
-/**
- * @returns {string}
- */
 function readPkgVersion() {
   try {
     const pkg = JSON.parse(
@@ -39,7 +40,6 @@ function readPkgVersion() {
 }
 
 /**
- * Read instance token from file or inline value.
  * @param {NodeJS.ProcessEnv} env
  * @param {string} [inline]
  */
@@ -52,8 +52,6 @@ async function resolveInstanceToken(env, inline) {
 }
 
 /**
- * Managed mode runtime: door lock, guards, health, heartbeat, panel shell, SDK.
- *
  * @param {{
  *   env?: NodeJS.ProcessEnv,
  *   now?: () => number,
@@ -83,6 +81,12 @@ export async function createManaged(options = {}) {
   }
   if (!platformUrl) throw new Error('AURIGA_PLATFORM_URL is required');
 
+  if (!options.identityKeys && !env.AURIGA_IDENTITY_KEYS_FILE) {
+    throw new Error(
+      'auriga-dsh: AURIGA_IDENTITY_KEYS_FILE is required in managed mode',
+    );
+  }
+
   const pluginVersion = options.pluginVersion ?? readPkgVersion();
   const dshVersion =
     options.dshVersion ??
@@ -98,11 +102,31 @@ export async function createManaged(options = {}) {
   const keyCache = createIdentityKeyCache({
     file: options.identityKeys ? undefined : env.AURIGA_IDENTITY_KEYS_FILE,
     keySet: options.identityKeys,
-    keysUrl: env.AURIGA_IDENTITY_KEYS_URL,
-    fetchImpl: options.fetchImpl,
     watch: options.watchKeys !== false,
     now,
   });
+
+  /** @type {ReturnType<typeof createIdentityKeyCache> | undefined} */
+  let panelKeyCache;
+  if (options.panelKeys) {
+    panelKeyCache = createIdentityKeyCache({
+      keySet: options.panelKeys,
+      watch: false,
+      now,
+    });
+  } else if (env.AURIGA_PANEL_KEYS_FILE) {
+    panelKeyCache = createIdentityKeyCache({
+      file: env.AURIGA_PANEL_KEYS_FILE,
+      watch: options.watchKeys !== false,
+      now,
+    });
+  } else if (env.AURIGA_PANEL_KEYS) {
+    panelKeyCache = createIdentityKeyCache({
+      keySet: JSON.parse(env.AURIGA_PANEL_KEYS),
+      watch: false,
+      now,
+    });
+  }
 
   const replay = createReplayCache({ now });
   const door = createDoorLock({
@@ -116,20 +140,21 @@ export async function createManaged(options = {}) {
   const activity = createActivityProbe({
     now: () => new Date(now() * 1000),
   });
+  activity.markAllUnknown();
 
-  /** @type {{ keys: object[] }} */
-  let panelKeys = options.panelKeys ?? { keys: [] };
-  if (!options.panelKeys && env.AURIGA_PANEL_KEYS_FILE) {
-    panelKeys = loadKeySet(env.AURIGA_PANEL_KEYS_FILE);
-  } else if (!options.panelKeys && env.AURIGA_PANEL_KEYS) {
-    panelKeys = JSON.parse(env.AURIGA_PANEL_KEYS);
-  }
+  /** @type {{ ctx: object | null }} */
+  const host = { ctx: null };
 
   let lastManifestVersion = '';
   const getManifest = async () => {
+    if (!panelKeyCache) {
+      throw new Error(
+        'auriga-dsh: panel keys required (AURIGA_PANEL_KEYS_FILE)',
+      );
+    }
     const manifest = await fetchVerifiedManifest({
       platformUrl,
-      keys: panelKeys,
+      keys: () => panelKeyCache.snapshot(),
       pluginVersion,
       fetchImpl: options.fetchImpl,
       now: now(),
@@ -155,6 +180,9 @@ export async function createManaged(options = {}) {
     dshVersion,
     activity,
     fetchImpl: options.fetchImpl,
+    refreshActivity: async () => {
+      if (host.ctx) await refreshActivityFromHost(host.ctx, activity);
+    },
   });
 
   if (options.startHeartbeat) heartbeat.start();
@@ -166,6 +194,9 @@ export async function createManaged(options = {}) {
       role: 'owner',
     }),
   });
+
+  /** @type {(() => void) | undefined} */
+  let disposeActivity;
 
   return {
     mode: /** @type {const} */ ('managed'),
@@ -181,13 +212,21 @@ export async function createManaged(options = {}) {
     heartbeat,
     sdk,
     keyCache,
+    panelKeyCache,
     workspaceRoot,
-    healthBody: () => buildHealthBody({ pluginVersion, ready: true, activity }),
+    healthBody: () => buildHealthBody({ pluginVersion, ready: true }),
     /**
-     * Wire into a Cordis-like DSH host context.
      * @param {object} ctx
      */
     apply(ctx) {
+      const server = ctx.webServer?.server;
+      if (!server) {
+        throw new Error(
+          'auriga-dsh: managed mode requires ctx.webServer.server to install the identity door; refusing to start without a door lock',
+        );
+      }
+
+      host.ctx = ctx;
       installManagedGuards(ctx, { workspaceRoot });
       provideAurigaSdk(ctx, {
         getIdentity: () => ({
@@ -196,7 +235,8 @@ export async function createManaged(options = {}) {
           role: 'owner',
         }),
       });
-      registerHealthRoute(ctx, { pluginVersion, activity });
+      registerHealthRoute(ctx, { pluginVersion });
+      disposeActivity = installActivityBridge(ctx, activity);
 
       const handler = createAurigaRouteHandler({
         mode: 'managed',
@@ -218,17 +258,17 @@ export async function createManaged(options = {}) {
         'auriga-dsh: /auriga routes',
       );
 
-      const server = ctx.webServer?.server;
-      if (server) {
-        door.install(server);
-        installNativePluginHttpGuard(server);
-      }
+      door.install(server);
+      installNativePluginHttpGuard(server);
 
       if (options.startHeartbeat !== false) heartbeat.start();
 
       return () => {
         heartbeat.stop();
+        disposeActivity?.();
+        host.ctx = null;
         keyCache.close();
+        panelKeyCache?.close();
       };
     },
     guardPluginManager,
@@ -237,7 +277,10 @@ export async function createManaged(options = {}) {
     getManifest,
     close() {
       heartbeat.stop();
+      disposeActivity?.();
+      host.ctx = null;
       keyCache.close();
+      panelKeyCache?.close();
     },
   };
 }
@@ -259,9 +302,6 @@ function compareSemver(a, b) {
   return 0;
 }
 
-/**
- * Mode placeholder used by initialize(); call `.create()` for the runtime.
- */
 export function managed() {
   return {
     mode: 'managed',

@@ -11,7 +11,7 @@ export const PANEL_ELEMENT = 'auriga-team-panel';
 export const ROUTE_PREFIX = '/auriga';
 
 const SRI = /^sha(256|384|512)-[A-Za-z0-9+/=]+$/;
-const SAFE_PATH = /^(?!.*(^|\/)\.\.(\/|$))[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
 export class PanelError extends Error {
   /** @param {string} code @param {string} [message] */
@@ -24,8 +24,14 @@ export class PanelError extends Error {
 
 /** @param {string} path */
 export function assertSafePath(path) {
-  if (typeof path !== 'string' || !SAFE_PATH.test(path)) {
-    throw new PanelError('common.validation_failed', `unsafe path: ${path}`);
+  if (typeof path !== 'string' || !path) {
+    throw new PanelError('common.validation_failed', 'unsafe path');
+  }
+  const parts = path.split('/');
+  for (const seg of parts) {
+    if (!seg || seg === '.' || seg === '..' || !SAFE_SEGMENT.test(seg)) {
+      throw new PanelError('common.validation_failed', `unsafe path: ${path}`);
+    }
   }
 }
 
@@ -69,14 +75,21 @@ export function assertManifestShape(m) {
   )
     throw bad('signature missing');
   assertSafePath(/** @type {string} */ (manifest.entry));
-  if (
-    !(
-      /** @type {string} */ (
-        manifest.entry in /** @type {object} */ (manifest.integrity)
-      )
-    )
-  )
+  const integrity = /** @type {Record<string, string>} */ (manifest.integrity);
+  if (!(/** @type {string} */ (manifest.entry) in integrity))
     throw bad('entry missing integrity');
+  if (manifest.styles !== undefined) {
+    if (
+      !Array.isArray(manifest.styles) ||
+      manifest.styles.some((s) => typeof s !== 'string')
+    )
+      throw bad('styles type error');
+    for (const style of manifest.styles) {
+      assertSafePath(style);
+      if (!(style in integrity))
+        throw bad(`styles missing integrity: ${style}`);
+    }
+  }
 }
 
 /** @param {object} manifest */
@@ -164,7 +177,7 @@ function versionAtLeast(a, b) {
  * Managed mode: fetch and verify panel manifest from platform /panel/.
  * @param {{
  *   platformUrl: string,
- *   keys: { keys: object[] },
+ *   keys: { keys: object[] } | (() => { keys: object[] }),
  *   pluginVersion: string,
  *   fetchImpl?: typeof fetch,
  *   now?: number,
@@ -182,14 +195,11 @@ export async function fetchVerifiedManifest(opts) {
       },
       redirect: 'error',
     });
-  } catch (error) {
-    throw new PanelError(
-      'common.unavailable',
-      error instanceof Error ? error.message : String(error),
-    );
+  } catch {
+    throw new PanelError('common.unavailable', 'panel manifest fetch failed');
   }
   if (!response.ok)
-    throw new PanelError('common.unavailable', `HTTP ${response.status}`);
+    throw new PanelError('common.unavailable', 'panel manifest fetch failed');
   const text = await response.text();
   if (text.length > 256 * 1024)
     throw new PanelError('common.validation_failed', 'manifest too large');
@@ -199,8 +209,9 @@ export async function fetchVerifiedManifest(opts) {
   } catch {
     throw new PanelError('common.validation_failed', 'manifest not JSON');
   }
+  const keys = typeof opts.keys === 'function' ? opts.keys() : opts.keys;
   return verifyManifest(manifest, {
-    keys: opts.keys,
+    keys,
     pluginVersion: opts.pluginVersion,
     now: opts.now,
   });
@@ -259,7 +270,7 @@ export function createAurigaRouteHandler(o) {
             title: 'Bad Gateway',
             status: 502,
             code,
-            detail: error instanceof Error ? error.message : String(error),
+            detail: 'panel bootstrap failed',
           }),
         );
       }

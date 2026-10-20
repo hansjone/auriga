@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { posix } from 'node:path';
 import { sendProblem } from './problem.js';
+import { normalizeHttpPath, rawRequestPath } from './raw-path.js';
 
 /** Native DSH pluginManager mutations blocked in managed mode (DSH 0.2.0-rc.2). */
 export const NATIVE_PLUGIN_MUTATIONS = Object.freeze([
@@ -12,6 +13,8 @@ export const NATIVE_PLUGIN_MUTATIONS = Object.freeze([
   'cancelInstall',
 ]);
 
+export const NATIVE_PLUGIN_HTTP_PREFIX = '/api/pluginmanager/';
+
 export const NATIVE_PLUGIN_BLOCKLIST = Object.freeze(
   NATIVE_PLUGIN_MUTATIONS.flatMap((name) => [
     { kind: 'rpc', method: `pluginManager/${name}` },
@@ -22,14 +25,23 @@ export const NATIVE_PLUGIN_BLOCKLIST = Object.freeze(
 /** Default user-visible workspace root inside the instance. */
 export const DEFAULT_WORKSPACE_ROOT = '/home/dsh/workspace';
 
-/** @param {string|undefined} method @param {string|undefined} urlPath */
+const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * True when the HTTP request targets a native pluginManager mutation.
+ * Path is normalized (decode, collapse `.`/`..`, strip trailing slash, case-insensitive).
+ * Any write method is blocked (not only POST).
+ * @param {string|undefined} method
+ * @param {string|undefined} urlPath
+ */
 export function isNativePluginManageRequest(method, urlPath) {
-  const path = String(urlPath || '').split('?')[0];
   const m = String(method || 'GET').toUpperCase();
-  return NATIVE_PLUGIN_BLOCKLIST.some((rule) => {
-    if (rule.kind !== 'http') return false;
-    return rule.method === m && path === rule.path;
-  });
+  if (!WRITE_METHODS.has(m)) return false;
+  const path = normalizeHttpPath(rawRequestPath(urlPath));
+  if (!path.startsWith(NATIVE_PLUGIN_HTTP_PREFIX)) return false;
+  const rest = path.slice(NATIVE_PLUGIN_HTTP_PREFIX.length);
+  const name = rest.split('/')[0];
+  return NATIVE_PLUGIN_MUTATIONS.some((n) => n.toLowerCase() === name);
 }
 
 /** @param {string|undefined} rpcMethod */
@@ -45,6 +57,7 @@ function asPosix(p) {
 }
 
 /**
+ * String-level confinement only — does not resolve symlinks (document in docs).
  * @param {string} candidate
  * @param {string} [root]
  */
@@ -60,7 +73,6 @@ export function isUnderWorkspaceRoot(candidate, root = DEFAULT_WORKSPACE_ROOT) {
 /**
  * @param {string} path
  * @param {string} [root]
- * @returns {{ ok: true, path: string } | { ok: false, code: string }}
  */
 export function assertWorkspaceCreatePath(path, root = DEFAULT_WORKSPACE_ROOT) {
   if (typeof path !== 'string' || !path.trim()) {
@@ -118,7 +130,6 @@ export function guardWorkspaceRegistry(
 }
 
 /**
- * HTTP layer for native plugin manage endpoints.
  * @param {import('node:http').Server} server
  */
 export function installNativePluginHttpGuard(server) {
@@ -141,7 +152,6 @@ export function installNativePluginHttpGuard(server) {
 }
 
 /**
- * Install Cordis-style guards when services appear.
  * @param {object} ctx
  * @param {{ workspaceRoot?: string }} [opts]
  */

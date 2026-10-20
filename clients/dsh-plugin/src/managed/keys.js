@@ -3,9 +3,12 @@ import { readFileSync, watch as fsWatch } from 'node:fs';
 import { createPublicKey } from 'node:crypto';
 
 /**
- * Load / cache Ed25519 identity-header public keys (JWKS subset).
- * Primary source: AURIGA_IDENTITY_KEYS_FILE; optional URL for rotation fetch.
+ * Load / cache Ed25519 identity-header (or panel) public keys from a local JWKS file.
+ * Contract: AURIGA_IDENTITY_KEYS_FILE only — no remote fetch.
  */
+
+const X_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const RELOAD_MIN_INTERVAL_MS = 1000;
 
 /**
  * @typedef {{ kty: string, crv: string, x: string, kid: string, alg?: string, use?: string, nbf?: number, exp?: number }} IdentityJwk
@@ -13,13 +16,25 @@ import { createPublicKey } from 'node:crypto';
  */
 
 /**
+ * @param {unknown} jwk
+ * @returns {jwk is IdentityJwk}
+ */
+export function isValidIdentityJwk(jwk) {
+  if (!jwk || typeof jwk !== 'object') return false;
+  const k = /** @type {Record<string, unknown>} */ (jwk);
+  if (k.kty !== 'OKP' || k.crv !== 'Ed25519') return false;
+  if (typeof k.kid !== 'string' || !k.kid) return false;
+  if (typeof k.x !== 'string' || !X_PATTERN.test(k.x)) return false;
+  if (k.alg != null && k.alg !== 'EdDSA') return false;
+  return true;
+}
+
+/**
  * @param {IdentityJwk} jwk
  * @param {number} nowSec
- * @returns {import('node:crypto').KeyObject | null}
  */
 export function jwkToPublicKey(jwk, nowSec = Math.floor(Date.now() / 1000)) {
-  if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || !jwk.kid || !jwk.x)
-    return null;
+  if (!isValidIdentityJwk(jwk)) return null;
   if (typeof jwk.nbf === 'number' && nowSec < jwk.nbf - 5) return null;
   if (typeof jwk.exp === 'number' && nowSec > jwk.exp + 5) return null;
   try {
@@ -33,33 +48,55 @@ export function jwkToPublicKey(jwk, nowSec = Math.floor(Date.now() / 1000)) {
 }
 
 /**
- * @param {string | IdentityKeySet} source file path or already-parsed key set
+ * Validate and normalize a key set; throws if empty or malformed.
+ * @param {unknown} parsed
+ * @returns {IdentityKeySet}
+ */
+export function assertKeySet(parsed) {
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.keys)) {
+    throw new Error('identity keys must be { keys: [...] }');
+  }
+  const keys = [];
+  for (const item of parsed.keys) {
+    if (!isValidIdentityJwk(item)) {
+      throw new Error('identity keys entry must be Ed25519 OKP with kid and x');
+    }
+    keys.push(item);
+  }
+  if (keys.length < 1)
+    throw new Error('identity keys must contain at least one key');
+  return { keys };
+}
+
+/**
+ * @param {string | IdentityKeySet} source
  * @returns {IdentityKeySet}
  */
 export function loadKeySet(source) {
-  if (typeof source === 'object' && source && Array.isArray(source.keys))
-    return { keys: source.keys };
+  if (typeof source === 'object' && source) return assertKeySet(source);
   const raw = readFileSync(/** @type {string} */ (source), 'utf8');
-  const parsed = JSON.parse(raw);
-  if (!parsed || !Array.isArray(parsed.keys))
-    throw new Error('identity keys file must contain keys[]');
-  return { keys: parsed.keys };
+  return assertKeySet(JSON.parse(raw));
 }
 
 /**
  * @param {{
  *   file?: string,
  *   keySet?: IdentityKeySet,
- *   keysUrl?: string,
- *   fetchImpl?: typeof fetch,
  *   watch?: boolean,
  *   now?: () => number,
  * }} [opts]
  */
 export function createIdentityKeyCache(opts = {}) {
+  if (!opts.file && !opts.keySet) {
+    throw new Error(
+      'auriga-dsh: identity keys required (AURIGA_IDENTITY_KEYS_FILE or in-memory keySet)',
+    );
+  }
+
   /** @type {IdentityKeySet} */
-  let keySet = opts.keySet ?? { keys: [] };
+  let keySet = opts.keySet ? assertKeySet(opts.keySet) : { keys: [] };
   let loadedFromFile = false;
+  let lastReloadAt = 0;
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000));
   /** @type {import('node:fs').FSWatcher | undefined} */
   let watcher;
@@ -68,6 +105,7 @@ export function createIdentityKeyCache(opts = {}) {
     if (!opts.file) return;
     keySet = loadKeySet(opts.file);
     loadedFromFile = true;
+    lastReloadAt = Date.now();
   };
 
   if (opts.file) {
@@ -82,14 +120,13 @@ export function createIdentityKeyCache(opts = {}) {
           }
         });
       } catch {
-        /* watch optional (tests / missing FS) */
+        /* watch optional */
       }
     }
   }
 
   /**
    * @param {string} kid
-   * @returns {import('node:crypto').KeyObject | null}
    */
   const resolve = (kid) => {
     const tryFind = () => {
@@ -101,44 +138,26 @@ export function createIdentityKeyCache(opts = {}) {
     };
     let key = tryFind();
     if (!key && opts.file && loadedFromFile) {
-      try {
-        reloadFile();
-      } catch {
-        /* ignore */
+      const elapsed = Date.now() - lastReloadAt;
+      if (elapsed >= RELOAD_MIN_INTERVAL_MS) {
+        try {
+          reloadFile();
+        } catch {
+          /* ignore */
+        }
+        key = tryFind();
       }
-      key = tryFind();
     }
     return key;
   };
 
   return {
-    /** @returns {IdentityKeySet} */
     snapshot() {
       return { keys: [...keySet.keys] };
     },
-    /**
-     * Look up kid; on miss, re-read file once (protocol) then optional URL.
-     * @param {string} kid
-     */
+    /** @param {string} kid */
     async getPublicKey(kid) {
-      let key = resolve(kid);
-      if (key) return key;
-      if (opts.keysUrl && opts.fetchImpl) {
-        try {
-          const res = await opts.fetchImpl(opts.keysUrl, {
-            redirect: 'error',
-            headers: { accept: 'application/json' },
-          });
-          if (res.ok) {
-            const body = /** @type {IdentityKeySet} */ (await res.json());
-            if (body?.keys) keySet = { keys: body.keys };
-            key = resolve(kid);
-          }
-        } catch {
-          /* keep cache */
-        }
-      }
-      return key;
+      return resolve(kid);
     },
     close() {
       watcher?.close();
