@@ -127,7 +127,10 @@ async function req(path, opts = {}) {
   };
 }
 
-function totp(secretB32, stepSec = 30) {
+/** Last emergency TOTP time-step consumed (replay rejected via lastCounter). */
+let lastTotpStep = -1;
+
+function totpAt(secretB32, step, stepSec = 30) {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let bits = '';
   for (const c of String(secretB32).replace(/=+$/, '').toUpperCase()) {
@@ -141,7 +144,7 @@ function totp(secretB32, stepSec = 30) {
   }
   const key = Buffer.from(bytes);
   const counter = Buffer.alloc(8);
-  counter.writeUInt32BE(Math.floor(Date.now() / 1000 / stepSec), 4);
+  counter.writeUInt32BE(step >>> 0, 4);
   const hmac = createHmac('sha1', key).update(counter).digest();
   const offset = hmac[hmac.length - 1] & 0xf;
   const code =
@@ -152,8 +155,31 @@ function totp(secretB32, stepSec = 30) {
   return String(code % 1_000_000).padStart(6, '0');
 }
 
+/** Wait for a TOTP step not yet consumed (emergency lastCounter rejects replay). */
+async function nextTotp(secretB32, stepSec = 30) {
+  let step = Math.floor(Date.now() / 1000 / stepSec);
+  if (step <= lastTotpStep) {
+    const waitMs = Math.ceil((stepSec - ((Date.now() / 1000) % stepSec) + 0.25) * 1000);
+    console.log(`waiting ${waitMs}ms for fresh TOTP step`);
+    await sleep(waitMs);
+    step = Math.floor(Date.now() / 1000 / stepSec);
+  }
+  lastTotpStep = step;
+  return totpAt(secretB32, step, stepSec);
+}
+
+function sessionCookieFor(host) {
+  return host === ADMIN_HOST ? 'auriga_admin_session' : 'auriga_session';
+}
+
 async function loginEmergency(host) {
   step(`login emergency (${host})`);
+  const sessionName = sessionCookieFor(host);
+  // Keep the other audience's cookies; emergency TOTP cannot be replayed in the same step.
+  if (jar.has(sessionName)) {
+    console.log('reuse', sessionName);
+    return;
+  }
   if (!existsSync(ENROLLMENT)) fail('login', `missing ${ENROLLMENT}`);
   const enr = JSON.parse(readFileSync(ENROLLMENT, 'utf8'));
   const providerId = enr.providerId;
@@ -164,11 +190,11 @@ async function loginEmergency(host) {
     fail('login', 'enrollment incomplete', Object.keys(enr));
   }
 
-  // Clear previous audience cookies for a clean login.
+  // Clear only this audience's cookies (+ login_tx); leave the other audience alone.
   for (const k of [...jar.keys()]) {
-    if (k.includes('session') || k.includes('csrf') || k.includes('login_tx')) {
-      jar.delete(k);
-    }
+    if (k === sessionName || k.includes('login_tx')) jar.delete(k);
+    if (host === ADMIN_HOST && k.includes('admin') && k.includes('csrf')) jar.delete(k);
+    if (host !== ADMIN_HOST && (k === 'auriga_csrf' || k === '__Host-auriga_csrf')) jar.delete(k);
   }
 
   const start = await req('/api/iam/v1/login/transactions', {
@@ -182,6 +208,7 @@ async function loginEmergency(host) {
   const txId = start.body?.id;
   if (!txId) fail('login', 'no tx id', start.body);
 
+  const otp = await nextTotp(totpSecret);
   const advance = await req(`/api/iam/v1/login/transactions/${txId}/advance`, {
     host,
     method: 'POST',
@@ -191,7 +218,7 @@ async function loginEmergency(host) {
       values: {
         username,
         password,
-        otp: totp(totpSecret),
+        otp,
       },
     },
   });
