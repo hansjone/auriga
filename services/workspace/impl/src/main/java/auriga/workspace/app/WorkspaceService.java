@@ -263,14 +263,24 @@ public final class WorkspaceService {
             "SELECT * FROM node WHERE tenant_id=? AND NOT revoked AND schedulable AND NOT draining AND last_seen_at>? ORDER BY id FOR UPDATE",
             store.tenant(),
             time(clock.instant().minusSeconds(60)));
+    var skipped = new java.util.ArrayList<String>();
     for (var node : nodes) {
       try {
-        if (node.get("hello") == null) continue;
+        if (node.get("hello") == null) {
+          skipped.add(node.get("id") + ": no hello");
+          continue;
+        }
         Hello hello = Hello.parseFrom((byte[]) node.get("hello"));
-        if (!hello.getDriversList().contains(spec.getRuntime())) continue;
+        if (!hello.getDriversList().contains(spec.getRuntime())) {
+          skipped.add(node.get("id") + ": runtime " + spec.getRuntime() + " not offered");
+          continue;
+        }
         var labels = JSON.readTree(node.get("labels").toString());
         if (spec.getLabelsMap().entrySet().stream()
-            .anyMatch(e -> !e.getValue().equals(labels.path(e.getKey()).asText()))) continue;
+            .anyMatch(e -> !e.getValue().equals(labels.path(e.getKey()).asText()))) {
+          skipped.add(node.get("id") + ": labels " + spec.getLabelsMap() + " not matched");
+          continue;
+        }
         var current =
             store.jdbc.queryForList(
                 "SELECT * FROM instance WHERE tenant_id=? AND node_id=? AND (NOT deleted OR phase<>'absent')",
@@ -288,7 +298,10 @@ public final class WorkspaceService {
         if (c.hasMaxInstances() && current.size() >= c.getMaxInstances()
             || cpu > c.getCpuMillis() - r.getCpuMillis()
             || mem > c.getMemoryMb() - r.getMemoryMb()
-            || disk > c.getDiskGb() - r.getDiskGb()) continue;
+            || disk > c.getDiskGb() - r.getDiskGb()) {
+          skipped.add(node.get("id") + ": no capacity");
+          continue;
+        }
         var template =
             templates.get(
                 spec.getDsh().getVersion(), spec.getRuntime(), hello.getOs(), hello.getArch());
@@ -328,8 +341,15 @@ public final class WorkspaceService {
         throw new IllegalStateException(e);
       } catch (AurigaException e) {
         if (e.errorCode() != CommonErrors.UNAVAILABLE) throw e;
+        skipped.add(node.get("id") + ": no runtime template (" + e.getMessage() + ")");
       }
     }
+    org.slf4j.LoggerFactory.getLogger(getClass())
+        .info(
+            "instance {} not scheduled: {} candidate node(s) seen in the last 60s; skipped {}",
+            row.get("id"),
+            nodes.size(),
+            skipped);
   }
 
   public void saveSpec(Map<String, Object> row, InstanceSpec next) {
