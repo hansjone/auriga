@@ -23,7 +23,8 @@ auriga:
   security:
     jwt:
       issuer: ${AURIGA_IAM_ISSUER:http://portal.example.com}
-      jwk-set-uri: ${AURIGA_IAM_ISSUER:http://portal.example.com}/oauth2/jwks
+      # Compose/host-net: issuer Host is virtual; fetch JWKS via loopback to platform itself.
+      jwk-set-uri: ${AURIGA_IAM_JWK_SET_URI:${AURIGA_IAM_ISSUER:http://portal.example.com}/oauth2/jwks}
       allow-insecure-jwks-uri: true
   persistence:
     allow-unguarded: true

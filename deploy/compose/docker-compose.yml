@@ -70,6 +70,8 @@ services:
       AURIGA_IAM_ENCRYPTION_KEY: ${AURIGA_IAM_ENCRYPTION_KEY}
       AURIGA_WORKSPACE_ENCRYPTION_KEY: ${AURIGA_WORKSPACE_ENCRYPTION_KEY}
       AURIGA_IAM_ISSUER: http://portal.example.com
+      # Resource-server JWKS fetch must hit platform (issuer Host is virtual / no :8081).
+      AURIGA_IAM_JWK_SET_URI: http://127.0.0.1:8081/oauth2/jwks
       AURIGA_EVENTS_NATS_URL: nats://platform:e2e_nats_platform@127.0.0.1:4222
       AURIGA_NATS_URL: nats://sessions:e2e_nats_sessions@127.0.0.1:4222
       AURIGA_WORKSPACE_ROUTES_NATS_URL: nats://routes_rw:e2e_nats_routes_rw@127.0.0.1:4222
