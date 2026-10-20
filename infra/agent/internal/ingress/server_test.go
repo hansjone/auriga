@@ -130,14 +130,14 @@ func startTestIngress(t *testing.T, reg *MapRegistry, tickets *TicketVerifier, i
 		Certificates:       []tls.Certificate{edge},
 		RootCAs:            pool,
 		ServerName:         "localhost",
-		InsecureSkipVerify: true, // gitleaks:allow — per-test self-signed CA
+		InsecureSkipVerify: true, // gitleaks:allow - per-test self-signed CA
 		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			return &edge, nil
 		},
 	}
 	// Wait until accept works.
 	ready := false
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		c, err := tls.Dial("tcp", ln.Addr().String(), clientTLS.Clone())
 		if err == nil {
@@ -157,8 +157,9 @@ func startTestIngress(t *testing.T, reg *MapRegistry, tickets *TicketVerifier, i
 			base: base,
 			rt:   &http.Transport{TLSClientConfig: tlsCfg},
 		},
-		Timeout: 5 * time.Second,
+		Timeout: 20 * time.Second,
 	}
+	t.Cleanup(func() { client.Transport.(roundTripBase).rt.(*http.Transport).CloseIdleConnections() })
 	return srv, client, ca
 }
 
@@ -225,9 +226,9 @@ func TestProxy_StripsForgedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var seen string
+	seen := make(chan string, 2)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = r.Header.Get("Auriga-Identity")
+		seen <- r.Header.Get("Auriga-Identity")
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -236,27 +237,35 @@ func TestProxy_StripsForgedIdentity(t *testing.T) {
 
 	root := t.TempDir()
 	reg := NewMapRegistry(&Instance{ID: "inst-1", Upstream: u, RootDir: root, LogPath: filepath.Join(root, "out.log")})
-	_, client, _ := startTestIngress(t, reg, &TicketVerifier{Keys: map[string]ed25519.PublicKey{}}, IdentityKeys{kid: pub})
+	// Exercise identity forwarding over HTTP; the separate mTLS test checks the
+	// certificate gate. This avoids local TLS interception affecting this test.
+	srv := New(Config{Registry: reg, IdentityKeys: IdentityKeys{kid: pub}})
+	t.Cleanup(func() { _ = srv.Close() })
+	proxy := httptest.NewServer(srv.Handler())
+	t.Cleanup(proxy.Close)
+	client := proxy.Client()
+	client.Timeout = 20 * time.Second
+	t.Cleanup(client.CloseIdleConnections)
 
-	req, _ := http.NewRequest(http.MethodGet, "/i/inst-1/hello", nil)
+	req, _ := http.NewRequest(http.MethodGet, proxy.URL+"/i/inst-1/hello", nil)
 	req.Header.Set("Auriga-Identity", "forged-not-a-jws")
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
-	if seen != "" {
+	if seen := <-seen; seen != "" {
 		t.Fatalf("forged identity should be stripped, got %q", seen)
 	}
 
-	req2, _ := http.NewRequest(http.MethodGet, "/i/inst-1/hello", nil)
+	req2, _ := http.NewRequest(http.MethodGet, proxy.URL+"/i/inst-1/hello", nil)
 	req2.Header.Set("Auriga-Identity", good)
 	resp2, err := client.Do(req2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp2.Body.Close()
-	if seen != good {
+	if seen := <-seen; seen != good {
 		t.Fatalf("want edge identity forwarded, got %q", seen)
 	}
 }
@@ -282,11 +291,13 @@ func TestFiles_TicketAndPathEscape(t *testing.T) {
 	reg := NewMapRegistry(&Instance{ID: "inst-1", RootDir: root, LogPath: filepath.Join(root, "out.log")})
 	_, client, _ := startTestIngress(t, reg, v, nil)
 
+	ticketSeq := 0
 	mk := func(mod func(*FileTicketClaims)) string {
+		ticketSeq++
 		c := FileTicketClaims{
 			Iss: "auriga-workspace", Aud: "auriga-agent", IID: "inst-1",
 			PathPrefix: "workspace", Ops: []string{"read", "write", "list", "delete", "zip"},
-			Iat: fixed.Unix(), Exp: fixed.Add(time.Minute).Unix(), Jti: "t1",
+			Iat: fixed.Unix(), Exp: fixed.Add(time.Minute).Unix(), Jti: fmt.Sprint(ticketSeq),
 		}
 		if mod != nil {
 			mod(&c)

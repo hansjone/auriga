@@ -15,7 +15,7 @@ import (
 
 // Config configures the edge-facing ingress server.
 type Config struct {
-	// ListenAddr is host:port for multi-node (empty → local socket/pipe only).
+	// ListenAddr is host:port for multi-node (empty means local socket/pipe only).
 	ListenAddr string
 	// LocalPath is unix socket path or Windows pipe name for single-node.
 	LocalPath string
@@ -31,10 +31,15 @@ type Config struct {
 	Now          func() time.Time
 	// MaxLogBytes per instance rolling log (default 50 MiB).
 	MaxLogBytes int64
+	// File operation limits (defaults: 64 MiB upload, 256 MiB zip, 10000 entries).
+	MaxUploadBytes int64
+	MaxZipBytes    int64
+	MaxZipEntries  int
 }
 
 // Server is the mTLS ingress for edge.
 type Server struct {
+	transport *http.Transport
 	cfg       Config
 	mux       *http.ServeMux
 	httpSrv   *http.Server
@@ -57,7 +62,16 @@ func New(cfg Config) *Server {
 	if cfg.Executor == nil {
 		cfg.Executor = DirectExecutor{}
 	}
-	s := &Server{cfg: cfg, metrics: newMetrics()}
+	if cfg.MaxUploadBytes <= 0 {
+		cfg.MaxUploadBytes = 64 << 20
+	}
+	if cfg.MaxZipBytes <= 0 {
+		cfg.MaxZipBytes = 256 << 20
+	}
+	if cfg.MaxZipEntries <= 0 {
+		cfg.MaxZipEntries = 10000
+	}
+	s := &Server{cfg: cfg, metrics: newMetrics(), transport: newProxyTransport()}
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/", s.route)
 	s.mux.Handle("/metrics", s.metrics.handler())
@@ -191,6 +205,8 @@ func (s *Server) Addr() net.Addr {
 
 // Close shuts down the HTTP server and listeners.
 func (s *Server) Close() error {
+	s.transport.CloseIdleConnections()
+	defer s.transport.CloseIdleConnections()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := s.httpSrv.Shutdown(ctx)

@@ -42,9 +42,8 @@ func ValidateRelPath(rel string) (string, error) {
 	return cleaned, nil
 }
 
-// ResolveUnderRoot joins root + rel and ensures the result stays under root
-// after EvalSymlinks on existing ancestors. For the final missing leaf, only
-// the parent is checked. Callers that open files should prefer OpenBeneath.
+// ResolveUnderRoot checks the existing prefix and rejects links and reparse
+// points. This is a lexical/preflight check; use OpenBeneath for actual I/O.
 func ResolveUnderRoot(root, rel string) (string, error) {
 	clean, err := ValidateRelPath(rel)
 	if err != nil {
@@ -53,10 +52,6 @@ func ResolveUnderRoot(root, rel string) (string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", fmt.Errorf("%s: root abs: %w", CodePathInvalid, err)
-	}
-	absRoot, err = filepath.EvalSymlinks(absRoot)
-	if err != nil {
-		return "", fmt.Errorf("%s: root resolve: %w", CodePathInvalid, err)
 	}
 	// Walk existing prefix and reject out-of-root symlinks/junctions.
 	cur := absRoot
@@ -79,16 +74,8 @@ func ResolveUnderRoot(root, rel string) (string, error) {
 			}
 			return "", fmt.Errorf("%s: lstat: %w", CodePathInvalid, err)
 		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			resolved, err := filepath.EvalSymlinks(next)
-			if err != nil {
-				return "", fmt.Errorf("%s: symlink: %w", CodePathEscape, err)
-			}
-			if !underRoot(absRoot, resolved) {
-				return "", fmt.Errorf("%s: symlink escapes root", CodePathEscape)
-			}
-			cur = resolved
-			continue
+		if isLink(fi) {
+			return "", fmt.Errorf("%s: link in path", CodePathEscape)
 		}
 		cur = next
 	}

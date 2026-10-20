@@ -2,12 +2,14 @@ package observer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/ingress"
 	"github.com/robfig/cron/v3"
 )
 
@@ -23,11 +25,11 @@ func NextWakeFromInstanceDir(instanceDir string, now time.Time) (WakeInfo, error
 	var best *time.Time
 	source := ""
 
-	if t, src, err := nextFromOpsCron(filepath.Join(instanceDir, "ops-cron", "store.json"), now); err == nil && t != nil {
+	if t, src, err := nextFromOpsCron(instanceDir, "ops-cron/store.json", now); err == nil && t != nil {
 		best = t
 		source = src
 	}
-	if t, src, err := nextFromSchedule(filepath.Join(instanceDir, "storages", "schedule.json"), now); err == nil && t != nil {
+	if t, src, err := nextFromSchedule(instanceDir, "storages/schedule.json", now); err == nil && t != nil {
 		if best == nil || t.Before(*best) {
 			best = t
 			source = src
@@ -36,13 +38,13 @@ func NextWakeFromInstanceDir(instanceDir string, now time.Time) (WakeInfo, error
 	return WakeInfo{NextWakeAt: best, Source: source}, nil
 }
 
-func nextFromOpsCron(path string, now time.Time) (*time.Time, string, error) {
-	raw, err := os.ReadFile(path)
+func nextFromOpsCron(root, path string, now time.Time) (*time.Time, string, error) {
+	raw, err := readSchedule(root, path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil
 		}
-		return nil, "", err
+		return nil, "", fmt.Errorf("schedule read or parse failed")
 	}
 	var store struct {
 		Jobs []struct {
@@ -60,7 +62,7 @@ func nextFromOpsCron(path string, now time.Time) (*time.Time, string, error) {
 		} `json:"settings"`
 	}
 	if err := json.Unmarshal(raw, &store); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("schedule read or parse failed")
 	}
 	defaultTZ := store.Settings.Timezone
 	if defaultTZ == "" {
@@ -95,13 +97,13 @@ func nextFromOpsCron(path string, now time.Time) (*time.Time, string, error) {
 	return best, "ops-cron", nil
 }
 
-func nextFromSchedule(path string, now time.Time) (*time.Time, string, error) {
-	raw, err := os.ReadFile(path)
+func nextFromSchedule(root, path string, now time.Time) (*time.Time, string, error) {
+	raw, err := readSchedule(root, path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, "", nil
 		}
-		return nil, "", err
+		return nil, "", fmt.Errorf("schedule read or parse failed")
 	}
 	var doc struct {
 		Tables struct {
@@ -118,7 +120,7 @@ func nextFromSchedule(path string, now time.Time) (*time.Time, string, error) {
 		} `json:"tables"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("schedule read or parse failed")
 	}
 	var best *time.Time
 	for _, task := range doc.Tables.Tasks {
@@ -194,7 +196,7 @@ func nextFromScheduleSpec(kind, expr, at, tz string, now time.Time) (*time.Time,
 // NextCron returns the next fire time for a 5-field cron expression in tz.
 func NextCron(expr, tz string, now time.Time) (time.Time, error) {
 	expr = strings.TrimSpace(expr)
-	if expr == "" {
+	if expr == "" || strings.HasPrefix(expr, "@") {
 		return time.Time{}, fmt.Errorf("empty cron")
 	}
 	loc, err := loadTZ(tz)
@@ -206,7 +208,11 @@ func NextCron(expr, tz string, now time.Time) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	return sched.Next(now.In(loc)), nil
+	next := sched.Next(now.In(loc))
+	if next.IsZero() {
+		return time.Time{}, fmt.Errorf("no next cron trigger")
+	}
+	return next, nil
 }
 
 func nextDaily(clockHHMMSS, tz string, now time.Time) (*time.Time, error) {
@@ -238,4 +244,32 @@ func loadTZ(name string) (*time.Location, error) {
 		return time.UTC, nil
 	}
 	return time.LoadLocation(name)
+}
+
+const maxScheduleBytes = 1 << 20
+
+func openSchedule(root, path string) (*os.File, error) {
+	f, err := ingress.OpenBeneath(root, path, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() || st.Size() > maxScheduleBytes {
+		_ = f.Close()
+		return nil, fmt.Errorf("invalid schedule file")
+	}
+	return f, nil
+}
+
+func readSchedule(root, path string) ([]byte, error) {
+	f, err := openSchedule(root, path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxScheduleBytes+1))
+	if err != nil || len(raw) > maxScheduleBytes {
+		return nil, fmt.Errorf("invalid schedule file")
+	}
+	return raw, nil
 }

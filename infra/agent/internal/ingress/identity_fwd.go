@@ -8,36 +8,29 @@ import (
 	"time"
 )
 
-// IdentityKeys maps kid → Ed25519 public key for Auriga-Identity verification.
+// IdentityKeys maps kid to Ed25519 public key for Auriga-Identity verification.
 type IdentityKeys map[string]ed25519.PublicKey
 
 // SelectForwardIdentity returns the edge-signed compact JWS to forward, or "".
 // Forged / invalid / multi-value headers are dropped (stripped).
-func SelectForwardIdentity(values []string, keys IdentityKeys, now func() time.Time) string {
-	if len(values) == 0 {
+func SelectForwardIdentity(values []string, keys IdentityKeys, now func() time.Time, instanceID string) string {
+	if len(values) != 1 || len(keys) == 0 {
 		return ""
 	}
-	// Prefer a single verified token; ignore extras.
+	// Only one verified token is eligible for forwarding.
 	for _, v := range values {
 		v = strings.TrimSpace(v)
 		if v == "" {
 			continue
 		}
-		if len(keys) == 0 {
-			// No keys configured: still only forward if exactly one value.
-			if len(values) == 1 {
-				return v
-			}
-			return ""
-		}
-		if verifyIdentityJWS(v, keys, now) {
+		if verifyIdentityJWS(v, keys, now, instanceID) {
 			return v
 		}
 	}
 	return ""
 }
 
-func verifyIdentityJWS(token string, keys IdentityKeys, now func() time.Time) bool {
+func verifyIdentityJWS(token string, keys IdentityKeys, now func() time.Time, instanceID string) bool {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return false
@@ -58,7 +51,7 @@ func verifyIdentityJWS(token string, keys IdentityKeys, now func() time.Time) bo
 		return false
 	}
 	pub, ok := keys[hdr.Kid]
-	if !ok {
+	if !ok || len(pub) != ed25519.PublicKeySize {
 		return false
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -74,13 +67,14 @@ func verifyIdentityJWS(token string, keys IdentityKeys, now func() time.Time) bo
 	}
 	var claims struct {
 		Iss string `json:"iss"`
+		Aud string `json:"aud"`
 		Exp int64  `json:"exp"`
 		Iat int64  `json:"iat"`
 	}
 	if json.Unmarshal(payload, &claims) != nil {
 		return false
 	}
-	if claims.Iss != "auriga-edge" {
+	if claims.Iss != "auriga-edge" || instanceID == "" || claims.Aud != instanceID {
 		return false
 	}
 	t := time.Now()

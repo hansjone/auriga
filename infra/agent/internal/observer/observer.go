@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Reporter receives observation updates (wired to NodeControl session by app/主控).
+// Reporter receives observation updates (wired to NodeControl session by app).
 type Reporter interface {
 	ReportWake(w *nodev1.WakeSchedule)
 	ReportUsage(u *nodev1.NodeUsage)
@@ -79,9 +79,10 @@ type Config struct {
 
 // Observer probes health, watches cron files, and samples resources.
 type Observer struct {
-	cfg    Config
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	lastCPU map[string]int64
+	cfg     Config
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 // New creates an Observer (not started).
@@ -113,7 +114,7 @@ func New(cfg Config) *Observer {
 	if cfg.WatchPoll <= 0 {
 		cfg.WatchPoll = time.Second
 	}
-	return &Observer{cfg: cfg}
+	return &Observer{cfg: cfg, lastCPU: make(map[string]int64)}
 }
 
 // Start runs background loops until Stop or ctx cancel.
@@ -183,9 +184,20 @@ func (o *Observer) sampleUsage() {
 		},
 	}
 	if o.cfg.Source != nil {
+		active := make(map[string]bool)
 		for _, target := range o.cfg.Source.Targets() {
-			ir, _ := o.cfg.Collector.CollectInstance(target)
-			o.cfg.Activity.Observe(target.ID, ir.CPUMillis)
+			active[target.ID] = true
+			ir, err := o.cfg.Collector.CollectInstance(target)
+			if err != nil {
+				delete(o.lastCPU, target.ID)
+				continue
+			}
+			delta := int64(0)
+			if prev, ok := o.lastCPU[target.ID]; ok && ir.CPUMillis >= prev {
+				delta = ir.CPUMillis - prev
+			}
+			o.lastCPU[target.ID] = ir.CPUMillis
+			o.cfg.Activity.Observe(target.ID, delta)
 			usage.Instances = append(usage.Instances, &nodev1.InstanceUsage{
 				InstanceId:      target.ID,
 				CpuMillis:       ir.CPUMillis,
@@ -196,6 +208,11 @@ func (o *Observer) sampleUsage() {
 				NetTxBytes:      ir.NetTxBytes,
 				RecentCpuActive: o.cfg.Activity.RecentCPUActive(target.ID, 50),
 			})
+		}
+		for id := range o.lastCPU {
+			if !active[id] {
+				delete(o.lastCPU, id)
+			}
 		}
 	}
 	o.cfg.Reporter.ReportUsage(usage)
@@ -231,7 +248,7 @@ func (o *Observer) refreshWakes(lastMod map[string]time.Time) {
 		}
 		info, err := NextWakeFromInstanceDir(target.RootDir, now)
 		if err != nil {
-			o.cfg.Logger.Warn("wake parse", "instance", target.ID, "err", err)
+			o.cfg.Logger.Warn("wake parse failed", "instance", target.ID)
 			continue
 		}
 		w := &nodev1.WakeSchedule{

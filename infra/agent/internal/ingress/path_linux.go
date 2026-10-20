@@ -3,6 +3,7 @@
 package ingress
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,78 +12,80 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const resolveBeneath = 0x8 // RESOLVE_BENEATH
-
-// OpenBeneath opens path under root, preferring openat2+RESOLVE_BENEATH.
+// OpenBeneath never follows symlinks and never blocks on FIFOs.
 func OpenBeneath(root, rel string, flags int, mode os.FileMode) (*os.File, error) {
+	return openBeneath(root, rel, flags, mode, false)
+}
+
+func createBeneath(root, rel string) (*os.File, error) {
+	return openBeneath(root, rel, os.O_CREATE|os.O_WRONLY, 0o600, true)
+}
+
+func linuxPathError(err error) error {
+	if errors.Is(err, unix.EXDEV) || errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+		return fmt.Errorf("%s: %w", CodePathEscape, err)
+	}
+	return err
+}
+
+func openBeneath(root, rel string, flags int, mode os.FileMode, parents bool) (*os.File, error) {
 	clean, err := ValidateRelPath(rel)
 	if err != nil {
 		return nil, err
 	}
-	absRoot, err := filepath.Abs(root)
+	dirfd, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
-	dirfd, err := unix.Open(absRoot, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, fmt.Errorf("%s: open root: %w", CodePathInvalid, err)
-	}
 	defer func() { _ = unix.Close(dirfd) }()
-
-	how := &unix.OpenHow{
-		Flags:   uint64(flags) | unix.O_CLOEXEC,
-		Mode:    uint64(mode),
-		Resolve: resolveBeneath,
-	}
-	fd, err := unix.Openat2(dirfd, clean, how)
-	if err == nil {
-		return os.NewFile(uintptr(fd), filepath.Join(absRoot, filepath.FromSlash(clean))), nil
-	}
-	// ENOSYS / EINVAL → walk openat fallback.
-	if err != unix.ENOSYS && err != unix.EINVAL {
-		return nil, fmt.Errorf("%s: openat2: %w", CodePathEscape, err)
-	}
-	return openBeneathWalk(dirfd, absRoot, clean, flags, mode)
-}
-
-func openBeneathWalk(rootFD int, absRoot, clean string, flags int, mode os.FileMode) (*os.File, error) {
-	if clean == "." {
-		fd, err := unix.Openat(rootFD, ".", flags|unix.O_CLOEXEC, uint32(mode))
-		if err != nil {
-			return nil, err
+	if !parents {
+		how := &unix.OpenHow{Flags: uint64(flags | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC), Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS}
+		if flags&os.O_CREATE != 0 {
+			how.Mode = uint64(mode.Perm())
 		}
-		return os.NewFile(uintptr(fd), absRoot), nil
+		fd, err := unix.Openat2(dirfd, clean, how)
+		if err == nil {
+			return os.NewFile(uintptr(fd), filepath.Join(root, clean)), nil
+		}
+		if !errors.Is(err, unix.ENOSYS) && !errors.Is(err, unix.EINVAL) {
+			return nil, linuxPathError(err)
+		}
 	}
+	// mkdirat and every open are relative to a pinned directory, never a pathname.
 	parts := strings.Split(clean, "/")
-	cur := rootFD
-	owned := false
-	defer func() {
-		if owned && cur != rootFD {
-			_ = unix.Close(cur)
-		}
-	}()
-	for i, p := range parts {
+	for i, part := range parts {
 		last := i == len(parts)-1
-		fl := unix.O_PATH | unix.O_NOFOLLOW | unix.O_CLOEXEC
+		fl := unix.O_PATH | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
 		if last {
-			fl = flags | unix.O_NOFOLLOW | unix.O_CLOEXEC
-		} else {
-			fl |= unix.O_DIRECTORY
+			fl = flags | unix.O_NOFOLLOW | unix.O_NONBLOCK | unix.O_CLOEXEC
 		}
-		fd, err := unix.Openat(cur, p, fl, uint32(mode))
+		fd, err := openAtBeneath(dirfd, part, fl, mode)
+		if errors.Is(err, unix.ENOENT) && parents && !last {
+			if e := unix.Mkdirat(dirfd, part, 0o700); e != nil && !errors.Is(e, unix.EEXIST) {
+				return nil, e
+			}
+			fd, err = openAtBeneath(dirfd, part, fl, 0)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: openat walk: %w", CodePathEscape, err)
+			return nil, linuxPathError(err)
 		}
-		if owned && cur != rootFD {
-			_ = unix.Close(cur)
+		if last {
+			return os.NewFile(uintptr(fd), filepath.Join(root, clean)), nil
 		}
-		cur = fd
-		owned = true
-		if !last {
-			continue
-		}
-		owned = false
-		return os.NewFile(uintptr(fd), filepath.Join(absRoot, filepath.FromSlash(clean))), nil
+		_ = unix.Close(dirfd)
+		dirfd = fd
 	}
 	return nil, fmt.Errorf("%s: empty path", CodePathInvalid)
+}
+
+func openAtBeneath(dirfd int, name string, flags int, mode os.FileMode) (int, error) {
+	how := &unix.OpenHow{Flags: uint64(flags), Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS}
+	if flags&unix.O_CREAT != 0 {
+		how.Mode = uint64(mode.Perm())
+	}
+	fd, err := unix.Openat2(dirfd, name, how)
+	if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EINVAL) {
+		return unix.Openat(dirfd, name, flags|unix.O_NOFOLLOW, uint32(mode.Perm()))
+	}
+	return fd, err
 }

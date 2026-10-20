@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,8 @@ type TicketVerifier struct {
 	Now  func() time.Time
 	// ClockSkew is allowed skew when checking iat/exp (default 5s).
 	ClockSkew time.Duration
+	mu        sync.Mutex
+	used      map[string]time.Time
 }
 
 // Verify parses and validates a compact JWS ticket for the given instance and op.
@@ -77,7 +80,7 @@ func (v *TicketVerifier) Verify(token, instanceID string, op FileOp, relPath str
 		return nil, fmt.Errorf("%s: unsupported alg/typ", CodeTicketInvalid)
 	}
 	pub, ok := v.Keys[hdr.Kid]
-	if !ok {
+	if !ok || len(pub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("%s: unknown kid", CodeTicketInvalid)
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -112,13 +115,37 @@ func (v *TicketVerifier) Verify(token, instanceID string, op FileOp, relPath str
 	if !opAllowed(c.Ops, op) {
 		return nil, fmt.Errorf("%s: op %s not allowed", CodeTicketOpDenied, op)
 	}
-	prefix := strings.TrimPrefix(c.PathPrefix, "/")
-	rel := strings.TrimPrefix(relPath, "/")
-	if prefix != "" && prefix != "." {
-		if rel != prefix && !strings.HasPrefix(rel, strings.TrimSuffix(prefix, "/")+"/") {
-			return nil, fmt.Errorf("%s: path outside ticket prefix", CodeTicketPathDenied)
+	if c.Iat <= 0 || c.Exp <= c.Iat || c.Exp-c.Iat > 900 || c.Jti == "" {
+		return nil, fmt.Errorf("%s: invalid ticket lifetime/id", CodeTicketInvalid)
+	}
+	prefix, err := ValidateRelPath(c.PathPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("%s: invalid prefix", CodeTicketPathDenied)
+	}
+	rel, err := ValidateRelPath(relPath)
+	if err != nil {
+		return nil, err
+	}
+	if prefix != "." && rel != prefix && !strings.HasPrefix(rel, prefix+"/") {
+		return nil, fmt.Errorf("%s: path outside ticket prefix", CodeTicketPathDenied)
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.used == nil {
+		v.used = make(map[string]time.Time)
+	}
+	for id, expiry := range v.used {
+		if t.After(expiry) {
+			delete(v.used, id)
 		}
 	}
+	if _, exists := v.used[c.Jti]; exists {
+		return nil, fmt.Errorf("%s: replayed ticket", CodeTicketInvalid)
+	}
+	if len(v.used) >= 100000 {
+		return nil, fmt.Errorf("%s: ticket cache full", CodeTicketInvalid)
+	}
+	v.used[c.Jti] = time.Unix(c.Exp, 0).Add(skew)
 	return &c, nil
 }
 

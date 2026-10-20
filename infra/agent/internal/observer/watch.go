@@ -1,28 +1,28 @@
 package observer
 
 import (
-	"os"
-	"path/filepath"
 	"time"
 )
 
 func scheduleFilesChanged(rootDir, instanceID string, lastMod map[string]time.Time) bool {
 	paths := []string{
-		filepath.Join(rootDir, "ops-cron", "store.json"),
-		filepath.Join(rootDir, "storages", "schedule.json"),
+		"ops-cron/store.json",
+		"storages/schedule.json",
 	}
 	changed := false
 	for _, p := range paths {
 		key := instanceID + "|" + p
-		st, err := os.Stat(p)
+		f, err := openSchedule(rootDir, p)
 		if err != nil {
-			if os.IsNotExist(err) {
-				if _, ok := lastMod[key]; ok {
-					delete(lastMod, key)
-					changed = true
-				}
-				continue
+			if _, ok := lastMod[key]; ok {
+				delete(lastMod, key)
+				changed = true
 			}
+			continue
+		}
+		st, err := f.Stat()
+		_ = f.Close()
+		if err != nil {
 			continue
 		}
 		mod := st.ModTime()

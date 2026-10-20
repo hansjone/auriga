@@ -3,6 +3,7 @@ package ingress
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,13 +27,18 @@ func (s *Server) serveFiles(w http.ResponseWriter, r *http.Request, instanceID, 
 
 	rel := strings.TrimPrefix(rest, "/")
 	op := fileOpForRequest(r, rel)
-	claims, err := s.cfg.Tickets.Verify(token, instanceID, op, rel)
+	rel, err := ValidateRelPath(rel)
+	if err != nil {
+		code, status := pathError(err)
+		writeProblem(w, status, code, "Error", err.Error())
+		return
+	}
+	_, err = s.cfg.Tickets.Verify(token, instanceID, op, rel)
 	if err != nil {
 		code, status := ticketError(err)
 		writeProblem(w, status, code, "Forbidden", err.Error())
 		return
 	}
-	_ = claims
 
 	exec := s.cfg.Executor
 	if exec == nil {
@@ -88,12 +94,12 @@ func ticketError(err error) (code string, status int) {
 func pathError(err error) (code string, status int) {
 	msg := err.Error()
 	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return CodePathInvalid, http.StatusNotFound
 	case strings.Contains(msg, CodePathEscape):
 		return CodePathEscape, http.StatusBadRequest
 	case strings.Contains(msg, CodePathInvalid):
 		return CodePathInvalid, http.StatusBadRequest
-	case os.IsNotExist(err):
-		return CodePathInvalid, http.StatusNotFound
 	default:
 		return CodeInternal, http.StatusInternalServerError
 	}
@@ -140,11 +146,12 @@ func (s *Server) handleFileOp(w http.ResponseWriter, r *http.Request, inst *Inst
 }
 
 func (s *Server) listDir(w http.ResponseWriter, root, rel string) error {
-	path, err := ResolveUnderRoot(root, rel)
+	f, err := OpenBeneath(root, rel, os.O_RDONLY, 0)
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(path)
+	defer f.Close()
+	entries, err := f.ReadDir(-1)
 	if err != nil {
 		return err
 	}
@@ -179,32 +186,40 @@ func (s *Server) readFile(w http.ResponseWriter, r *http.Request, root, rel stri
 	if st.IsDir() {
 		return s.listDir(w, root, rel)
 	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("%s: not a regular file", CodePathInvalid)
+	}
 	http.ServeContent(w, r, filepath.Base(rel), st.ModTime(), f)
 	return nil
 }
 
 func (s *Server) writeFile(w http.ResponseWriter, r *http.Request, root, rel string) error {
-	clean, err := ValidateRelPath(rel)
+	if r.ContentLength > s.cfg.MaxUploadBytes {
+		writeProblem(w, http.StatusRequestEntityTooLarge, CodePathInvalid, "Too Large", "upload limit exceeded")
+		return nil
+	}
+	f, err := createBeneath(root, rel)
 	if err != nil {
 		return err
 	}
-	path, err := ResolveUnderRoot(root, clean)
+	defer f.Close()
+	st, err := f.Stat()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("%s: not a regular file", CodePathInvalid)
+	}
+	if err := f.Truncate(0); err != nil {
 		return err
 	}
-	// Create via open-beneath when possible; fall back to resolved path.
-	f, err := OpenBeneath(root, clean, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-		if err != nil {
-			return err
-		}
+	_, err = io.Copy(f, http.MaxBytesReader(w, r.Body, s.cfg.MaxUploadBytes))
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeProblem(w, http.StatusRequestEntityTooLarge, CodePathInvalid, "Too Large", "upload limit exceeded")
+		return nil
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := io.Copy(f, r.Body); err != nil {
+	if err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -212,11 +227,7 @@ func (s *Server) writeFile(w http.ResponseWriter, r *http.Request, root, rel str
 }
 
 func (s *Server) deletePath(w http.ResponseWriter, root, rel string) error {
-	path, err := ResolveUnderRoot(root, rel)
-	if err != nil {
-		return err
-	}
-	if err := os.RemoveAll(path); err != nil {
+	if err := RemoveBeneath(root, rel); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -224,57 +235,107 @@ func (s *Server) deletePath(w http.ResponseWriter, root, rel string) error {
 }
 
 func (s *Server) zipTree(w http.ResponseWriter, root, rel string) error {
-	base, err := ResolveUnderRoot(root, rel)
+	clean, err := ValidateRelPath(rel)
 	if err != nil {
 		return err
 	}
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="export.zip"`)
-	zw := zip.NewWriter(w)
-	defer func() { _ = zw.Close() }()
-	return filepath.Walk(base, func(path string, info os.FileInfo, err error) error {
+	// Build before sending headers so errors never produce a successful partial zip.
+	tmp, err := os.CreateTemp("", "auriga-export-*.zip")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	zw := zip.NewWriter(tmp)
+	var total int64
+	count := 0
+	var walk func(string, string) error
+	walk = func(path, name string) error {
+		count++
+		if count > s.cfg.MaxZipEntries {
+			return fmt.Errorf("%s: zip entry limit", CodePathInvalid)
+		}
+		f, err := OpenBeneath(root, path, os.O_RDONLY, 0)
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if st.IsDir() {
+			// Bounded batches prevent a huge directory from exhausting memory.
+			for {
+				entries, err := f.ReadDir(128)
+				for _, entry := range entries {
+					info, err := entry.Info()
+					if err != nil {
+						return err
+					}
+					if isLink(info) || !info.IsDir() && !info.Mode().IsRegular() {
+						count++
+						if count > s.cfg.MaxZipEntries {
+							return fmt.Errorf("%s: zip entry limit", CodePathInvalid)
+						}
+						continue
+					}
+					if err := walk(filepath.ToSlash(filepath.Join(path, entry.Name())), filepath.ToSlash(filepath.Join(name, entry.Name()))); err != nil {
+						return err
+					}
+				}
+				if err == io.EOF {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if !st.Mode().IsRegular() {
 			return nil
 		}
-		relPath, err := filepath.Rel(base, path)
+		if st.Size() > s.cfg.MaxZipBytes-total {
+			return fmt.Errorf("%s: zip size limit", CodePathInvalid)
+		}
+		hdr, err := zip.FileInfoHeader(st)
 		if err != nil {
 			return err
 		}
-		relPath = filepath.ToSlash(relPath)
-		if _, err := ValidateRelPath(relPath); err != nil && relPath != "." {
-			return fmt.Errorf("%s: zip entry", CodePathEscape)
+		if name == "." {
+			name = filepath.Base(path)
 		}
-		// Reject if file is a symlink escaping (Walk follows; check Lstat).
-		fi, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s: symlink in zip", CodePathEscape)
-		}
-		hdr, err := zip.FileInfoHeader(info)
-		if err != nil {
-			return err
-		}
-		hdr.Name = relPath
-		hdr.Method = zip.Deflate
-		// UTF-8 filename flag (bit 11) so CJK names extract correctly.
-		if utf8.ValidString(relPath) {
+		hdr.Name, hdr.Method = name, zip.Deflate
+		if utf8.ValidString(name) {
 			hdr.Flags |= 0x800
 		}
 		fw, err := zw.CreateHeader(hdr)
 		if err != nil {
 			return err
 		}
-		f, err := os.Open(path)
+		n, err := io.Copy(fw, io.LimitReader(f, s.cfg.MaxZipBytes-total+1))
+		total += n
 		if err != nil {
 			return err
 		}
-		_, copyErr := io.Copy(fw, f)
-		_ = f.Close()
-		return copyErr
-	})
+		if total > s.cfg.MaxZipBytes {
+			return fmt.Errorf("%s: zip size limit", CodePathInvalid)
+		}
+		return nil
+	}
+	err = walk(clean, ".")
+	closeErr := zw.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="export.zip"`)
+	_, err = io.Copy(w, tmp)
+	return err
 }
