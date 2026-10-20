@@ -43,7 +43,11 @@ export function normalizeHttpPath(urlPath) {
       parts.pop();
       continue;
     }
-    parts.push(seg);
+    // Strip matrix params (`;a=1`) and trailing NULs (`%00`) so
+    // installBundle;a=1 / installBundle%00 still match the blocklist.
+    const cleaned = seg.split('\0')[0].split(';')[0];
+    if (!cleaned) continue;
+    parts.push(cleaned);
   }
   let out = '/' + parts.join('/');
   if (out.length > 1 && out.endsWith('/')) out = out.slice(0, -1);

@@ -142,8 +142,10 @@ export async function createManaged(options = {}) {
   });
   activity.markAllUnknown();
 
-  /** @type {{ ctx: object | null }} */
+  /** @type {{ ctx: object | null, getBrowsers?: () => number }} */
   const host = { ctx: null };
+  /** Browser WebSocket upgrades (oclaw hub-member pattern). */
+  const browserSockets = new Set();
 
   let lastManifestVersion = '';
   const getManifest = async () => {
@@ -181,7 +183,10 @@ export async function createManaged(options = {}) {
     activity,
     fetchImpl: options.fetchImpl,
     refreshActivity: async () => {
-      if (host.ctx) await refreshActivityFromHost(host.ctx, activity);
+      if (!host.ctx) return;
+      await refreshActivityFromHost(host.ctx, activity, {
+        browsers: host.getBrowsers?.(),
+      });
     },
   });
 
@@ -227,6 +232,7 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
+      host.getBrowsers = () => browserSockets.size;
       installManagedGuards(ctx, { workspaceRoot });
       provideAurigaSdk(ctx, {
         getIdentity: () => ({
@@ -236,7 +242,19 @@ export async function createManaged(options = {}) {
         }),
       });
       registerHealthRoute(ctx, { pluginVersion });
-      disposeActivity = installActivityBridge(ctx, activity);
+
+      // Count browser transports via upgrade (same idea as oclaw hub-member).
+      // We do not filter by identity here: the door already gates HTTP; raw
+      // TCP keepalives do not emit `upgrade`.
+      const onUpgrade = (_req, socket) => {
+        browserSockets.add(socket);
+        socket.once('close', () => browserSockets.delete(socket));
+      };
+      server.on('upgrade', onUpgrade);
+
+      disposeActivity = installActivityBridge(ctx, activity, {
+        getBrowsers: () => browserSockets.size,
+      });
 
       const handler = createAurigaRouteHandler({
         mode: 'managed',
@@ -266,7 +284,10 @@ export async function createManaged(options = {}) {
       return () => {
         heartbeat.stop();
         disposeActivity?.();
+        server.off('upgrade', onUpgrade);
+        browserSockets.clear();
         host.ctx = null;
+        host.getBrowsers = undefined;
         keyCache.close();
         panelKeyCache?.close();
       };

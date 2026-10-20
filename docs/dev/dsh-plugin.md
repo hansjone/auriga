@@ -57,13 +57,14 @@ const runtime = await mode.create({
 
 ### 守卫
 
-- 拦截原生 `pluginManager` 变更：`installBundle` / `removeBundle` / `setBundleEnabled` / `setPluginEnabled` / `setVersionExemption` / `cancelInstall`（服务层 + HTTP 写方法 `/api/pluginManager/<方法>`，含尾斜杠、重复斜杠、`.` 段等归一化变体），错误码 `common.forbidden`。
+- 拦截原生 `pluginManager` 变更：`installBundle` / `removeBundle` / `setBundleEnabled` / `setPluginEnabled` / `setVersionExemption` / `cancelInstall`（服务层 + HTTP 写方法 `/api/pluginManager/<方法>`，含尾斜杠、重复斜杠、`.` 段、`;` 路径参数、`%00` 等归一化变体），错误码 `common.forbidden`。
 - 拦截越界新建工作区：`workspaceRegistry.create` 路径必须在 `AURIGA_WORKSPACE_ROOT`（默认 `/home/dsh/workspace`）之下（字符串约束，不解析 symlink）。
 
 ### 活动与心跳
 
 - `GET /_auriga/health`（免鉴权，仅 GET/HEAD）→ 契约字段 `{ status, ready, protocol, pluginVersion }`，不含活动计数。
-- 活动计数来自 DSH 服务 `agents` / `terminals` / `dshIm` / `connection`（与原型 hub-heartbeat 同源）；接不上的指标记为未知，心跳里 `health.ok=false` 且 `problems` 含 `activity.<字段>.unknown`，避免平台把「未知」当成全 0 闲置回收。
+- 活动计数与原型 `oclaw` hub-heartbeat / hub-member 同源：`agents`（执行中轮次）、`terminals`（打开终端）、`dshIm.listDeliveryCatalog`（IM 机器人）、浏览器 `upgrade` 套接字数（`connectedClients`，对应原型 `browsers` 回调）。接不上的指标记为未知，心跳里 `health.ok=false` 且 `problems` 含 `activity.<字段>.unknown`，避免平台把「未知」当成全 0 闲置回收。
+- 计数只在数值真正变化时通知心跳；`lastInteractionAt` 仅在正向活动变化时更新，心跳/轮询刷新不得推进该时间戳。
 - 每 30 秒及活动计数变化（2 秒去抖）`POST …/instance/heartbeat`；发送失败 catch + 指数退避，不抛未处理拒绝。
 - 协议：当前与上一个主版本；更旧返回平台侧 `plugin.protocol_unsupported`（426）。
 - 工作区根守卫只做路径字符串约束，**不**解析符号链接逃逸。

@@ -40,13 +40,26 @@ export function createActivityProbe(opts = {}) {
    * @param {number | null | undefined} value null/undefined → unknown
    */
   const set = (field, value) => {
+    /** @type {number | null} */
+    let next;
     if (value == null || Number.isNaN(Number(value))) {
-      values[field] = null;
+      next = null;
     } else {
-      values[field] = Math.max(0, Math.floor(Number(value)));
+      next = Math.max(0, Math.floor(Number(value)));
     }
-    bumpInteraction();
+    const prev = values[field];
+    if (prev === next) return;
+    values[field] = next;
+    // Only real count changes bump idle clock; refreshes with the same
+    // numbers must not. Going idle (→0 / unknown) keeps the prior stamp
+    // so the platform can reclaim; positive activity refreshes it.
+    if (next != null && next > 0) bumpInteraction();
     notify();
+  };
+
+  /** Explicit user-facing interaction (not used by host refresh). */
+  const touchInteraction = () => {
+    bumpInteraction();
   };
 
   return {
@@ -83,6 +96,7 @@ export function createActivityProbe(opts = {}) {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
+    touchInteraction,
     snapshot() {
       const known = {
         runningTurns: values.runningTurns != null,
@@ -205,25 +219,12 @@ export async function refreshActivityFromHost(ctx, activity, opts = {}) {
   if (imOk) activity.setActiveImBots(activeImBots);
   else activity.markUnknown('activeImBots');
 
+  // Match oclaw hub-member: browsers come from an external callback
+  // (WebSocket upgrade count), not from guessing connection.clientCount.
   if (typeof opts.browsers === 'number') {
     activity.setConnectedClients(opts.browsers);
   } else {
-    let clientsOk = false;
-    let connectedClients = 0;
-    try {
-      const connection = service(ctx, 'connection');
-      if (typeof connection?.clientCount === 'number') {
-        connectedClients = connection.clientCount;
-        clientsOk = true;
-      } else if (typeof connection?.listClients === 'function') {
-        connectedClients = rows(connection.listClients()).length;
-        clientsOk = true;
-      }
-    } catch {
-      clientsOk = false;
-    }
-    if (clientsOk) activity.setConnectedClients(connectedClients);
-    else activity.markUnknown('connectedClients');
+    activity.markUnknown('connectedClients');
   }
 }
 

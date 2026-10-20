@@ -43,6 +43,7 @@ test('activity probe notifies on change', () => {
   });
   activity.setRunningTurns(1);
   activity.setOpenTerminals(2);
+  activity.setRunningTurns(1); // same value → no notify
   assert.equal(n, 2);
   assert.equal(activity.snapshot().runningTurns, 1);
   assert.equal(activity.snapshot().openTerminals, 2);

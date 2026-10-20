@@ -159,11 +159,10 @@ test('activity wires agents and terminals', async () => {
             bots: [{ id: 'b1', enabled: true }],
           }),
         };
-      if (name === 'connection') return { clientCount: 3 };
       throw new Error('missing ' + name);
     },
   };
-  await refreshActivityFromHost(ctx, activity);
+  await refreshActivityFromHost(ctx, activity, { browsers: 3 });
   const snap = activity.snapshot();
   assert.equal(snap.runningTurns, 1);
   assert.equal(snap.openTerminals, 2);
@@ -190,6 +189,20 @@ test('plugin manage HTTP guard catches path variants and PUT', () => {
     true,
   );
   assert.equal(
+    isNativePluginManageRequest(
+      'POST',
+      '/api/pluginManager/installBundle;a=1',
+    ),
+    true,
+  );
+  assert.equal(
+    isNativePluginManageRequest(
+      'POST',
+      '/api/pluginManager/installBundle%00',
+    ),
+    true,
+  );
+  assert.equal(
     isNativePluginManageRequest('GET', '/api/pluginManager/installBundle'),
     false,
   );
@@ -199,6 +212,10 @@ test('plugin manage HTTP guard catches path variants and PUT', () => {
   );
   assert.equal(
     normalizeHttpPath('/api/./pluginManager/InstallBundle/'),
+    '/api/pluginmanager/installbundle',
+  );
+  assert.equal(
+    normalizeHttpPath('/api/pluginManager/installBundle;a=1'),
     '/api/pluginmanager/installbundle',
   );
   assert.equal(NATIVE_PLUGIN_MUTATIONS.length, 6);
