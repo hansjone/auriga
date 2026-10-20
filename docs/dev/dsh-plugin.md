@@ -55,6 +55,10 @@ const runtime = await mode.create({
 
 失败一律 **401** + `common.unauthenticated`。拿不到 `ctx.webServer.server` 时插件 **启动失败**（失败关闭）。仅精确路径 `GET|HEAD /_auriga/health` 免校验。
 
+免校验只适用于普通 HTTP 健康请求；向健康路径发起 WebSocket 升级仍须身份头。门锁在原生插件写接口守卫之前执行，未认证的写请求也返回 401。
+
+DSH 0.2.0-rc.2 还会通过 `connection.authorizeIndex` / `requestRejection` 检查原生启动令牌与浏览器 cookie。托管模式用门锁内部的 WeakSet 标记已验签的请求对象，再让这两个入口接受该请求，避免第二次登录。客户端头、手写 `__aurigaIdentity` 属性、健康检查绕过都不能产生这个标记；未标记请求仍执行原生认证。卸载时恢复方法。
+
 ### 守卫
 
 - 拦截原生 `pluginManager` 变更：`installBundle` / `removeBundle` / `setBundleEnabled` / `setPluginEnabled` / `setVersionExemption` / `cancelInstall`（服务层 + HTTP 写方法 `/api/pluginManager/<方法>`，含尾斜杠、重复斜杠、`.` 段、`;` 路径参数、`%00` 等归一化变体），错误码 `common.forbidden`。
@@ -63,8 +67,9 @@ const runtime = await mode.create({
 ### 活动与心跳
 
 - `GET /_auriga/health`（免鉴权，仅 GET/HEAD）→ 契约字段 `{ status, ready, protocol, pluginVersion }`，不含活动计数。
-- 活动计数与原型 `oclaw` hub-heartbeat / hub-member 同源：`agents`（执行中轮次）、`terminals`（打开终端）、`dshIm.listDeliveryCatalog`（IM 机器人）、浏览器 `upgrade` 套接字数（`connectedClients`，对应原型 `browsers` 回调）。接不上的指标记为未知，心跳里 `health.ok=false` 且 `problems` 含 `activity.<字段>.unknown`，避免平台把「未知」当成全 0 闲置回收。
-- 计数只在数值真正变化时通知心跳；`lastInteractionAt` 仅在正向活动变化时更新，心跳/轮询刷新不得推进该时间戳。
+- 活动计数与原型 `oclaw` hub-heartbeat / hub-member 同源：`agents`（执行中轮次）、`terminals`（打开终端）、`dshIm.listDeliveryCatalog`（IM 机器人）、浏览器 `upgrade` 套接字数（`connectedClients`，对应原型 `browsers` 回调）。接不上的指标在快照里保留 `null` / `known=false`，不转成 0。终端必须逐个真实 Agent 调用 `terminals.list(agent)`，只数 `status.kind=running` 的 PTY；任意所有者查询失败、状态不可识别或 agents 不可用都保留未知。
+- **v1 契约接线缺口**：`HeartbeatRequest.activity` 强制四个非负整数，尚不能表达未知；当前 workspace 也没有用 `health.ok` 阻止闲置判断。因此任一计数未知时插件暂缓整个心跳（`send()` 返回 `skipped` 与 `unknownFields`），既不伪造全 0，也不发送违反契约的 null/缺字段。此时活动时间无法上报；之前有效心跳在平台保鲜窗口内的行为仍需主控修复，不能把此措施当作完整的未知状态回收保护。需要主控同步修改契约、生成模型及 workspace 的保守判断。
+- 计数只在数值真正变化时通知心跳；`lastInteractionAt` 由已验签的真实用户 HTTP/WS 请求更新。计数初始化、正数增减、心跳与轮询刷新都不得推进该时间戳；免鉴权健康请求也不推进。
 - 每 30 秒及活动计数变化（2 秒去抖）`POST …/instance/heartbeat`；发送失败 catch + 指数退避，不抛未处理拒绝。
 - 协议：当前与上一个主版本；更旧返回平台侧 `plugin.protocol_unsupported`（426）。
 - 工作区根守卫只做路径字符串约束，**不**解析符号链接逃逸。
@@ -107,6 +112,14 @@ const runtime = await mode.create({
 - `id_token` 用 JWKS 验签（RS256 / ES256）；无 id_token 一律拒绝
 - discovery 的 `authorization_endpoint` 等必须 https（或允许的本地 http），且授权主机与 issuer 相同
 - 外部 HTTP：undici `Agent` 自定义 `lookup`，连接只用已校验地址（防 DNS 重绑定）；响应体流式限长 1 MiB
+
+fake-ip DNS 环境下，OIDC 域名可能被解析成保留的基准测试网段地址（如 `198.18.0.0/15`）；离线 OIDC 的 SSRF 地址校验会拒绝它。应在代理/DNS 侧给该 IdP 配真实 DNS 解析或使用明确支持的本地测试 IdP，不能为了测试关闭地址校验。`standalone` 只代表不连接 Auriga 平台，外部 OIDC 的 discovery、JWKS 和 token 交换仍需可达网络，不代表外部 IdP 可断网登录。
+
+## 真实宿主验证
+
+`deploy/compose/real-dsh` 固定 S4 的 DSH 0.2.0-rc.2 / Node 22.19.0 / npm 10.9.3 与完整依赖锁；使用本仓库 `auriga-dsh` 的正式 Cordis 入口。构建期安装，启动期只建实例状态目录并运行 DSH，不装依赖。运行、镜像摘要交付、严格 e2e 和当前阻塞见 [m2.md](m2.md#真实-dsh-与托管插件w3)。
+
+纯 DSH 基线不包含原型的 `dshIm` 服务，不能把它缺席解释为 0 个在线机器人。Windows 本机无 Docker，W3 的真实镜像构建、真实交互的心跳投影、闲置回收和闹钟唤醒均未取得运行证据；已有假 DSH CI 不能替代这些验收。
 
 ## 主人与会话（standalone）
 

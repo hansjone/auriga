@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { readFileSync } from 'node:fs';
+import { installHostAuthentication } from '../managed/host-auth.js';
 import { createIdentityKeyCache } from '../managed/keys.js';
 import { createDoorLock, createReplayCache } from '../managed/door.js';
 import {
@@ -204,6 +205,9 @@ export async function createManaged(options = {}) {
 
   /** @type {(() => void) | undefined} */
   let disposeActivity;
+  let disposeHostAuth;
+  let disposeDoor;
+  let disposeHttpGuard;
 
   return {
     mode: /** @type {const} */ ('managed'),
@@ -234,6 +238,7 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
+      disposeHostAuth = installHostAuthentication(ctx.connection, door);
       host.getBrowsers = () => browserSockets.size;
       installManagedGuards(ctx, { workspaceRoot });
       provideAurigaSdk(ctx, {
@@ -278,14 +283,18 @@ export async function createManaged(options = {}) {
         'auriga-dsh: /auriga routes',
       );
 
-      door.install(server);
-      installNativePluginHttpGuard(server);
+      // Door is outermost: even forbidden native writes must authenticate first.
+      disposeHttpGuard = installNativePluginHttpGuard(server);
+      disposeDoor = door.install(server);
 
       if (options.startHeartbeat !== false) heartbeat.start();
 
       return () => {
         heartbeat.stop();
         disposeActivity?.();
+        disposeDoor?.();
+        disposeHttpGuard?.();
+        disposeHostAuth?.();
         server.off('upgrade', onUpgrade);
         browserSockets.clear();
         host.ctx = null;
@@ -301,6 +310,7 @@ export async function createManaged(options = {}) {
     close() {
       heartbeat.stop();
       disposeActivity?.();
+      disposeHostAuth?.();
       host.ctx = null;
       keyCache.close();
       panelKeyCache?.close();

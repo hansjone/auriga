@@ -22,6 +22,8 @@ test('set does not notify or bump lastInteractionAt when value unchanged', async
 
   activity.setRunningTurns(2);
   assert.equal(notifies, 1);
+  assert.equal(activity.snapshot().lastInteractionAt, undefined);
+  activity.touchInteraction();
   const first = activity.snapshot().lastInteractionAt;
   assert.ok(first);
 
@@ -48,7 +50,8 @@ test('refreshActivityFromHost with stable counts does not notify', async () => {
   const ctx = {
     get(name) {
       if (name === 'agents') return { list: () => [{ agent }] };
-      if (name === 'terminals') return { list: () => [{ id: 1 }] };
+      if (name === 'terminals')
+        return { list: () => [{ id: 1, status: { kind: 'running' } }] };
       if (name === 'dshIm')
         return {
           listDeliveryCatalog: async () => ({
@@ -72,6 +75,7 @@ test('refreshActivityFromHost with stable counts does not notify', async () => {
 test('bridge + heartbeat: stable activity does not exceed schedule rate', async () => {
   let clock = 1_700_000_000_000;
   const activity = createActivityProbe({ now: () => new Date(clock) });
+  activity.touchInteraction();
   activity.setRunningTurns(1);
   const stamp = activity.snapshot().lastInteractionAt;
   assert.ok(stamp);
@@ -190,5 +194,5 @@ test('connectedClients unknown without browsers callback', async () => {
   await refreshActivityFromHost(ctx, activity);
   const snap = activity.snapshot();
   assert.equal(snap.known.connectedClients, false);
-  assert.equal(snap.connectedClients, 0);
+  assert.equal(snap.connectedClients, null);
 });

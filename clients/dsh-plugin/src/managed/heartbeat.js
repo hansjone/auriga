@@ -30,8 +30,18 @@ export function createHeartbeatClient(opts) {
     if (stopped) return { ok: false, status: 0, skipped: true };
     try {
       if (opts.refreshActivity) await opts.refreshActivity();
-      const token = await opts.getInstanceToken();
       const activity = opts.activity.snapshot();
+      // Protocol v1 requires all four integers and cannot encode unknown.
+      // Do not fabricate idle zeros or send an invalid/null contract payload.
+      if (!activity.allKnown) {
+        return {
+          ok: false,
+          status: 0,
+          skipped: true,
+          unknownFields: activity.unknownFields,
+        };
+      }
+      const token = await opts.getInstanceToken();
       const problems = activity.unknownFields.map(
         (f) => `activity.${f}.unknown`,
       );

@@ -8,9 +8,6 @@ import { createManaged } from './modes/managed.js';
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
 
-/** @type {Awaited<ReturnType<typeof createManaged>> | undefined} */
-let runtime;
-
 /**
  * @param {object} ctx
  */
@@ -22,17 +19,22 @@ export async function apply(ctx) {
     );
     return;
   }
-  runtime = await createManaged({
+  const runtime = await createManaged({
     env: process.env,
     startHeartbeat: false,
   });
-  const dispose = runtime.apply(ctx);
+  let dispose;
+  try {
+    dispose = runtime.apply(ctx);
+  } catch (error) {
+    runtime.close();
+    throw error;
+  }
   runtime.heartbeat.start();
   ctx.effect?.(
     () => () => {
       dispose?.();
-      runtime?.close();
-      runtime = undefined;
+      runtime.close();
     },
     'auriga-dsh: dispose',
   );

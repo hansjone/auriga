@@ -42,7 +42,7 @@ export function createActivityProbe(opts = {}) {
   const set = (field, value) => {
     /** @type {number | null} */
     let next;
-    if (value == null || Number.isNaN(Number(value))) {
+    if (!Number.isSafeInteger(value) || value < 0) {
       next = null;
     } else {
       next = Math.max(0, Math.floor(Number(value)));
@@ -50,10 +50,8 @@ export function createActivityProbe(opts = {}) {
     const prev = values[field];
     if (prev === next) return;
     values[field] = next;
-    // Only real count changes bump idle clock; refreshes with the same
-    // numbers must not. Going idle (→0 / unknown) keeps the prior stamp
-    // so the platform can reclaim; positive activity refreshes it.
-    if (next != null && next > 0) bumpInteraction();
+    // Counts describe liveness, not a user action. Neither initialization,
+    // polling nor positive count changes can invent a user interaction.
     notify();
   };
 
@@ -106,11 +104,10 @@ export function createActivityProbe(opts = {}) {
       };
       const allKnown = Object.values(known).every(Boolean);
       return {
-        // Contract requires integers ≥ 0; unknown stays 0 but flagged via known/problems.
-        runningTurns: values.runningTurns ?? 0,
-        openTerminals: values.openTerminals ?? 0,
-        activeImBots: values.activeImBots ?? 0,
-        connectedClients: values.connectedClients ?? 0,
+        runningTurns: values.runningTurns,
+        openTerminals: values.openTerminals,
+        activeImBots: values.activeImBots,
+        connectedClients: values.connectedClients,
         known,
         allKnown,
         unknownFields: Object.entries(known)
@@ -128,7 +125,7 @@ function rows(value) {
   if (Array.isArray(value)) return value;
   if (value instanceof Map) return [...value.values()];
   if (value && typeof value === 'object') return Object.values(value);
-  return [];
+  throw new TypeError('invalid host activity collection');
 }
 
 function service(ctx, name) {
@@ -152,7 +149,19 @@ export async function refreshActivityFromHost(ctx, activity, opts = {}) {
   try {
     const agentsSvc = service(ctx, 'agents');
     if (agentsSvc && typeof agentsSvc.list === 'function') {
-      agents = rows(agentsSvc.list());
+      agents = rows(await agentsSvc.list());
+      if (
+        agents.some((handle) => {
+          const agent = handle?.agent || handle;
+          return (
+            !agent ||
+            (!['idle', 'running'].includes(agent.status) &&
+              typeof agent.isRunning !== 'boolean' &&
+              !['idle', 'running'].includes(agent.turn?.status))
+          );
+        })
+      )
+        throw new TypeError('unknown agent status');
       agentsOk = true;
     }
   } catch {
@@ -179,18 +188,25 @@ export async function refreshActivityFromHost(ctx, activity, opts = {}) {
   try {
     const termSvc = service(ctx, 'terminals');
     if (termSvc && typeof termSvc.list === 'function') {
-      terminalsOk = true;
-      if (agentsOk && agents.length) {
-        openTerminals = agents.reduce((n, handle) => {
+      // DSH 0.2.0-rc.2 terminals.list requires an exact Agent owner.
+      // Calling list(undefined) silently returns [] even with live terminals.
+      if (agentsOk) {
+        for (const handle of agents) {
           const agent = handle.agent || handle;
-          try {
-            return n + rows(termSvc.list(agent)).length;
-          } catch {
-            return n;
+          const terminals = rows(await termSvc.list(agent));
+          if (
+            terminals.some(
+              (terminal) =>
+                !['running', 'exited'].includes(terminal?.status?.kind),
+            )
+          ) {
+            throw new TypeError('unknown terminal status');
           }
-        }, 0);
-      } else {
-        openTerminals = rows(termSvc.list()).length;
+          openTerminals += terminals.filter(
+            (terminal) => terminal.status.kind === 'running',
+          ).length;
+        }
+        terminalsOk = true;
       }
     }
   } catch {
@@ -221,7 +237,7 @@ export async function refreshActivityFromHost(ctx, activity, opts = {}) {
 
   // Match oclaw hub-member: browsers come from an external callback
   // (WebSocket upgrade count), not from guessing connection.clientCount.
-  if (typeof opts.browsers === 'number') {
+  if (Number.isSafeInteger(opts.browsers) && opts.browsers >= 0) {
     activity.setConnectedClients(opts.browsers);
   } else {
     activity.markUnknown('connectedClients');
