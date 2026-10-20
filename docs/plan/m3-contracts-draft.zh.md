@@ -1,6 +1,6 @@
 # M3 契约与第一批实施拆分草案
 
-> 状态：**仅供主控 Claude 评审，未生效，未开工实现**。日期：2026-10-20。
+> 状态：**评审基线，未生效，未开工实现**。D1–D7 已由用户于 2026-10-20 按推荐决定（见第 7 节标注），正式契约由 C3 落地。日期：2026-10-20。
 > 核对基线：本 worktree `2e19dbf840a95cf5393a1f22ee12176b4c3cc6c9`。正式接口仍以 `contracts/` 为唯一来源。
 > 第二轮：在已提交的首轮草案 `9069ebf` 上按独立审查修订，仍是未生效提议；不重做首轮盘点，不落地任何契约或实现。
 > 本文只建议下一轮契约与任务边界；没有修改契约、ADR、代码、依赖、CI 或部署。下文标为“提议”的路径、字段、权限、错误码、事件、TaskId 均不是现行契约。
@@ -45,7 +45,7 @@
 - **签发入口（候选内部 RPC）**：iam 新增 `IssueInstanceAiToken`，只准 `svc:workspace` 代租户；请求绑定 `tenant_id/owner_id/instance_id/credential_version`，响应 token 与 expires_at。owner 不能由实例调用者指定；iam 必须验证受信 workspace 的委派范围和 org 有效成员身份。gateway 另需 workspace 的内部 `GetInstanceAiBinding`，确认租户、主人、当前凭据代次、实例是否已删除/停用；不得把实例 HTTP 的 `getInstanceSelf` 当作内部代查接口。
 - **轮换建议**：短期 JWT 保持现有 5 分钟上限，workspace 提前续签，经 `Secrets.ai_gateway_token` 封装下发；agent 原子换文件并触发原生 MCP/模型配置重载，插件转发客户端每请求重读文件。初议正常轮换重叠不超过 60 秒、以节点应用确认与到期时间共同约束；紧急吊销无重叠。具体时间和流中 token 到期策略见 D1，不能把短期 JWT 改成长效静态 key。
 - **设备 AI JWT**：`ptyp=device/ctx=device/sub/tid/did` 沿用设备协议；校验 `auriga.connect` 范围的细分权限并执行同一用户模型授权/预算，不能给设备发管理员权限。当前 [TokenService.allowedPermission](../../services/iam/impl/src/main/java/auriga/iam/TokenService.java) 会过滤非 `auriga.connect.*` 设备权限，新增 `ai.*` 权限不会自然进入设备 JWT，须正式定义映射。
-- **bearer 风险与来源约束（D1 提议）**：实例中的不完全可信代码能读 AI token 文件；tid/instanceId/凭据代次是声明绑定，不是发送者约束，窃取者在到期/吊销前仍可能冒用。推荐托管调用只经 edge 内部入口；G1 验证 edge 的 mTLS 身份和受信转发标记，edge 丢弃客户端同名头且公网入口拒收 ctx=instance。仅内部入口不证明具体实例，必须由受认证的节点/实例通道确定并绑定 instanceId，不能信任来源 IP、Host 或任意头。C3/WR1/AR1/E3 要补通道和标记契约；设备调用独立走设备入口。即使通道闭合，已失陷的本实例仍能花本人的额度，不能宣称持有者证明；若不实现该通道而只用 bearer，须由用户显式接受“泄露可在实例外冒用至到期/吊销”的残余风险，不得默认为接受。
+- **bearer 风险与来源约束（D1，用户 2026-10-20 已决定：托管调用只经 edge 内部通道）**：实例中的不完全可信代码能读 AI token 文件；tid/instanceId/凭据代次是声明绑定，不是发送者约束，窃取者在到期/吊销前仍可能冒用。推荐托管调用只经 edge 内部入口；G1 验证 edge 的 mTLS 身份和受信转发标记，edge 丢弃客户端同名头且公网入口拒收 ctx=instance。仅内部入口不证明具体实例，必须由受认证的节点/实例通道确定并绑定 instanceId，不能信任来源 IP、Host 或任意头。C3/WR1/AR1/E3 要补通道和标记契约；设备调用独立走设备入口。即使通道闭合，已失陷的本实例仍能花本人的额度，不能宣称持有者证明；若不实现该通道而只用 bearer，须由用户显式接受“泄露可在实例外冒用至到期/吊销”的残余风险，不得默认为接受。
 - **失效建议**：成员停用、离职、权限变化、设备吊销、实例删除以及新增的实例 AI 凭据撤销，触发失效缓存与取消受影响的流；没有确认过的绑定或撤销信息时拒绝新请求。提议数据面每次准入在线核对有效成员/模型授权/配额，运行中的流在 token 到期或撤销时取消。正常重叠只容纳连接切换，不允许以旧版本无限续流。控制面不可用不妨碍 DSH 自身运行，但团队 AI 失败关闭；完整停机/离线策略由 D1 确认。
 - **内部调用**：gateway/resource/workspace 调 org 等仍用独立内部服务 JWT + mTLS 和代租户白名单；RPC 请求中的租户必须等于已授权的委派租户。resource 下载的节点身份见 §4.4，不能拿模型令牌下载任意包。
 
@@ -290,10 +290,10 @@ L0–L4 枚举已定；下面是待写入正式 API/策略的**细则提议**：
 
 以下只记录待决，不在本次草案请求批准或实施。主控先归并问题，形成可评审正式变更；涉及架构偏离/契约大改再交用户。
 
-- **D1：托管 AI 主体与失效语义**。推荐专用 AI JWT、主人 sub、ptyp=user 与新增 ctx=instance，签名绑定 instanceId/credentialVersion，perms 只取本人有效权限与 `{ai.models.invoke,ai.usage.read}` 的交集；I3a 必修当前 ctx=service 等分支无过滤的风险，G1 数据 ctx 仅 instance/device，portal/admin/service 拒绝。需用户批准新增上下文及各解码器变更、受认证的 edge 内部实例通道、bearer 残余风险、“控制面不可用拒绝团队 AI”、流到期取消、正常轮换重叠的可用性取舍。内部通道不能防止已失陷实例自身滥用；若放弃通道而只用 bearer，必须明确接受外部冒用窗口，不能省略威胁模型。ait_ 不扩权。
+- **D1：托管 AI 主体与失效语义**（用户 2026-10-20 已决定：按本条推荐，ctx=instance，托管调用只经 edge 内部通道）。推荐专用 AI JWT、主人 sub、ptyp=user 与新增 ctx=instance，签名绑定 instanceId/credentialVersion，perms 只取本人有效权限与 `{ai.models.invoke,ai.usage.read}` 的交集；I3a 必修当前 ctx=service 等分支无过滤的风险，G1 数据 ctx 仅 instance/device，portal/admin/service 拒绝。需用户批准新增上下文及各解码器变更、受认证的 edge 内部实例通道、bearer 残余风险、“控制面不可用拒绝团队 AI”、流到期取消、正常轮换重叠的可用性取舍。内部通道不能防止已失陷实例自身滥用；若放弃通道而只用 bearer，必须明确接受外部冒用窗口，不能省略威胁模型。ait_ 不扩权。
 - **D2：模型兼容范围、错误与幂等例外**。推荐首批只覆盖经 DSH 验证的 models/chat-completions，流式重试只返回原执行状态、不存正文重放、无自动上游重试；须批准相对 REST Problem 和创建 POST 幂等约定的局部差异。若要求完整兼容/缓存重放/故障切换，必须扩大契约、保留数据与隐私评审，不能只换接口名。
 - **D3：硬预算与不确定用量**。推荐 UTC 周期、单一币种、准入价格快照、保守预占、unknown 冻结、配额变化影响新准入；模型额度 0=禁止须正式补定义。还需批准每 `(tid,sub)` 并发流数和在途预占比例/绝对上限（§3.5 初议 2 流、25%，不限额度必须有绝对预占上限），由同一数据库原子执行，区分 rate_limited 与 budget_exceeded。需确认是否接受取消/断线暂不退额度和长流到期取消；若要求即时新配额、自动账单对账、多币种或租户/团队共享总预算，先定义版本/预占/冲正接口，不新建外部计费服务。
-- **D4：资源签名与撤销/降级**。推荐 §4.1 的新 envelope 签名覆盖 tenantId/packageId/versionId/notAfter 与完整制品 statement，独立发行签名 key、公钥信任配置及独立授权签名的撤销清单；清单带 tenantId/revision/issuedAt/expiresAt/revokedKids/revokedArtifacts，经 workspace 的新增 ApplySpec 字段下发，agent 验签并持久化 revision 防回滚。过期 envelope/清单拒绝新安装/启用，普通下架与恶意强制停用分开，只允许显式审计降级；skill/template 不复用 plugin purpose。需确认有效期/离线撤销时限、是否允许重启正在运行实例、skill/模板规格扩展和资源包审查强度。它涉及 spec 与信任链大改，不能自行合并。
+- **D4：资源签名与撤销/降级**（用户 2026-10-20 已决定：按本条推荐，离线节点撤销最迟 24 小时生效）。推荐 §4.1 的新 envelope 签名覆盖 tenantId/packageId/versionId/notAfter 与完整制品 statement，独立发行签名 key、公钥信任配置及独立授权签名的撤销清单；清单带 tenantId/revision/issuedAt/expiresAt/revokedKids/revokedArtifacts，经 workspace 的新增 ApplySpec 字段下发，agent 验签并持久化 revision 防回滚。过期 envelope/清单拒绝新安装/启用，普通下架与恶意强制停用分开，只允许显式审计降级；skill/template 不复用 plugin purpose。需确认有效期/离线撤销时限、是否允许重启正在运行实例、skill/模板规格扩展和资源包审查强度。它涉及 spec 与信任链大改，不能自行合并。
 - **D5：内网模型与出网边界**。默认维持 egress 内网拒绝；真实私有模型若必须用内网地址，需明确仅 gateway 的受信上游端点例外、配置权限和 DNS/IP 固定策略，不能扩大实例直连白名单。第一批假 Transport 不需要申请真实例外。
 - **D6：托管团队面板的成员 API 桥接**。推荐先保留门户源上的账户/敏感操作入口，实例里的团队面板只接经过单独批准的最小、只读能力；完整面板可选受隔离 iframe + 校验 origin 的消息协议，或限路径/动作/主体的代理能力。两种都需要新契约与威胁评审；不能用通用“同源会话代理”给实例全部成员 API。若要恢复实例与门户同源，将偏离 ADR 0020，须用户决定。
 - **D7：N1 自动贡献与外部服务费用**。工作知识提炼、自动贡献的启用/退出与内容范围另行确认，个人记忆不自动收集；真实模型、S3、KMS、扫描云服务等全部未授权、未接入。现有 PostgreSQL/NATS/本地盘足够首批假上游验证，不能为便捷引入 Redis、向量库、新消息总线或订阅费用。
