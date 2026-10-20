@@ -196,8 +196,14 @@ async function loginEmergency(host) {
   const sessionName = sessionCookieFor(host);
   // Keep the other audience's cookies; emergency TOTP cannot be replayed in the same step.
   if (jar.has(sessionName)) {
-    console.log('reuse', sessionName);
-    return;
+    // Sessions expire for real (idle timeout), so only reuse one that still works.
+    const me = await req('/api/iam/v1/me', { host });
+    if (me.status === 200) {
+      console.log('reuse', sessionName);
+      return;
+    }
+    console.log('session expired (status', me.status + '); logging in again');
+    jar.delete(sessionName);
   }
   if (!existsSync(ENROLLMENT)) fail('login', `missing ${ENROLLMENT}`);
   const enr = JSON.parse(readFileSync(ENROLLMENT, 'utf8'));
@@ -541,9 +547,26 @@ async function waitPhase(instanceId, want, timeoutMs) {
       host: ADMIN_HOST,
       csrf: true,
     });
+    if (g.status !== 200) {
+      console.log(
+        '  get instance status',
+        g.status,
+        JSON.stringify(g.body)?.slice(0, 200),
+      );
+      if (g.status === 401) await loginEmergency(ADMIN_HOST);
+      await sleep(5000);
+      continue;
+    }
     const phase = String(g.body?.phase || '').toLowerCase();
     const desired = String(g.body?.desired || '').toLowerCase();
-    console.log('  phase=', phase, 'desired=', desired);
+    console.log(
+      '  phase=',
+      phase,
+      'desired=',
+      desired,
+      'idleStopAt=',
+      g.body?.idleStopAt,
+    );
     if (phase === want || desired === want) return g.body;
     // also accept stopped when desired=stopped
     if (want === 'stopped' && desired.includes('stop')) return g.body;
