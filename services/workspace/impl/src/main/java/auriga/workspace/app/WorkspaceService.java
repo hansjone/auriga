@@ -25,6 +25,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Transactional orchestration: changes desired specifications; only the node executes them. */
 public final class WorkspaceService {
+  /** Wake jobs fire this long before the alarm so DSH is ready when it runs. */
+  static final Duration WAKE_LEAD = Duration.ofSeconds(120);
+
   public static final JsonMapper JSON = JsonMapper.builder().build();
   public final WorkspaceStore store;
   private final WorkspaceInputs inputs;
@@ -687,7 +690,13 @@ public final class WorkspaceService {
               queueRestart((UUID) row.get("id"), "apply_pending");
               continue;
             }
+            // Do not idle-stop an instance whose alarm is about to fire: the wake job
+            // pre-warms WAKE_LEAD early and is consumed while the instance still runs.
+            Instant nextWake = instant(row, "next_wake_at");
+            boolean alarmSoon =
+                nextWake != null && !nextWake.isAfter(now.plus(WAKE_LEAD).plus(WAKE_LEAD));
             if (s.getDesired() == DesiredState.DESIRED_STATE_RUNNING
+                && !alarmSoon
                 && Lifecycle.idle(
                     now,
                     instant(row, "last_activity_at"),
@@ -726,8 +735,9 @@ public final class WorkspaceService {
                 continue;
               }
               try {
+                boolean wasStopped = spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING;
                 desire(row, true, "wake", policy.getMaxConcurrentStarts());
-                wakeLog.info("wake job for {} started the instance", row.get("id"));
+                if (wasStopped) wakeLog.info("wake job for {} started the instance", row.get("id"));
               } catch (AurigaException e) {
                 if (e.errorCode() == ADMISSION_FULL) {
                   wakeLog.info("wake job for {} deferred: admission full", row.get("id"));
@@ -777,7 +787,7 @@ public final class WorkspaceService {
                 UuidV7.next(clock),
                 store.tenant(),
                 id,
-                time(next.minusSeconds(120)));
+                time(next.minus(WAKE_LEAD)));
           return null;
         });
   }
