@@ -200,6 +200,22 @@ class WorkspaceHardeningTest {
   }
 
   @Test
+  void nodeCertificateAuthenticatesControlClientAndIngressServer() throws Exception {
+    var clock = new TestClock();
+    var key = TestPki.key();
+    var ca = new NodeCa(TestPki.ca(key, clock.instant()), key.getPrivate(), clock);
+    UUID node = UUID.randomUUID();
+    var leaf = ca.issue(TestPki.csr(TestPki.key()), node);
+    leaf.verify(ca.certificate().getPublicKey());
+    assertEquals(
+        Set.of("1.3.6.1.5.5.7.3.1", "1.3.6.1.5.5.7.3.2"), Set.copyOf(leaf.getExtendedKeyUsage()));
+    assertEquals(
+        List.of(List.of(6, "auriga://node/" + node)),
+        List.copyOf(leaf.getSubjectAlternativeNames()));
+    assertDoesNotThrow(() -> ca.verify(leaf));
+  }
+
+  @Test
   void posixAndWindowsAclPoliciesRejectSharedSecrets() throws Exception {
     assertFalse(
         SecretFilePermissions.exposedPosix(

@@ -35,6 +35,9 @@ func run(args []string, out, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if cfg.NodeTLS.CAFile == "" {
+		return fmt.Errorf("nodeTLS is required for instance ingress")
+	}
 
 	signer, err := LoadIdentitySigner(cfg.IdentityKeysFile)
 	if err != nil {
@@ -45,7 +48,15 @@ func run(args []string, out, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
-	routes := NewMemoryRouteStore()
+	routesCreds := cfg.RoutesNATSCredsFile
+	if routesCreds == "" {
+		routesCreds = cfg.NATSCredsFile
+	}
+	routes, err := NewNATSRouteStore(cfg.NATSURL, routesCreds)
+	if err != nil {
+		return err
+	}
+	defer routes.Close()
 	tickets := NewMemoryTicketStore()
 
 	gw, err := NewGateway(cfg, sessions, routes, tickets, signer, logger)
@@ -53,6 +64,7 @@ func run(args []string, out, logs io.Writer) error {
 		return err
 	}
 
+	defer gw.Ingress.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

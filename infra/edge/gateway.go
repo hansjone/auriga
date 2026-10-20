@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -12,7 +13,8 @@ import (
 	"time"
 )
 
-const maxAPIBodyBytes = 1 << 20 // 1 MiB — only /api/**
+const maxAPIBodyBytes = 1 << 20       // 1 MiB — only /api/**
+const maxInstanceBodyBytes = 64 << 20 // 64 MiB, aligned with agent uploads.
 
 // Gateway is the edge HTTP handler.
 type Gateway struct {
@@ -27,6 +29,7 @@ type Gateway struct {
 	Limiter  *TokenBucketLimiter
 	Conns    *SessionConnHub
 	Now      func() time.Time
+	Ingress  *NodeIngress
 
 	iamURL       *url.URL
 	orgURL       *url.URL
@@ -55,6 +58,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		return nil, err
 	}
 	hub := NewSessionConnHub()
+	ingress, err := loadNodeIngress(cfg.NodeTLS)
+	if err != nil {
+		return nil, err
+	}
+	if ingress != nil {
+		ingress.allowLocal = cfg.AllowLocalIngress
+	}
 	wireSessionRevoke(sessions, hub.CancelSession)
 	g := &Gateway{
 		Cfg:          cfg,
@@ -68,6 +78,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		Limiter:      NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, cfg.RateLimit.PathPrefix),
 		Conns:        hub,
 		Now:          time.Now,
+		Ingress:      ingress,
 		iamURL:       iamURL,
 		orgURL:       orgURL,
 		workspaceURL: wsURL,
@@ -294,7 +305,7 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 		r = r.WithContext(ctx)
 	}
 
-	proxy := newReverseProxy(target, false)
+	proxy := newReverseProxy(target, apiProxyTransport)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
@@ -350,7 +361,20 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		return
 	}
 	ok, err := g.Owners.Owns(r.Context(), sess.AccountID, instanceID)
+	if errors.Is(err, ErrRouteUnavailable) {
+		g.routeUnavailable(w, rid)
+		return
+	}
 	if err != nil || !ok {
+		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
+		return
+	}
+	route, err := g.Routes.Get(r.Context(), instanceID)
+	if errors.Is(err, ErrRouteUnavailable) {
+		g.routeUnavailable(w, rid)
+		return
+	}
+	if err != nil || route.InstanceID != instanceID || route.TenantID != sess.TenantID {
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
 	}
@@ -420,12 +444,6 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		return
 	}
 
-	route, err := g.Routes.Get(r.Context(), instanceID)
-	if err != nil {
-		writeProblem(w, problem(http.StatusNotFound, "edge.instance_not_found", "Not Found", "unknown instance", rid))
-		return
-	}
-
 	binding, err := g.lookupInstBinding(r)
 	if err != nil || binding.InstanceID != instanceID {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "instance cookie required", rid))
@@ -436,7 +454,16 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session invalid", rid))
 		return
 	}
-	if sess.AccountID != route.OwnerID || sess.AccountID != binding.AccountID {
+	route, err := g.Routes.Get(r.Context(), instanceID)
+	if errors.Is(err, ErrRouteUnavailable) {
+		g.routeUnavailable(w, rid)
+		return
+	}
+	if err != nil {
+		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
+		return
+	}
+	if route.InstanceID != instanceID || sess.AccountID != route.OwnerID || sess.AccountID != binding.AccountID || sess.TenantID != route.TenantID || sess.TenantID != binding.TenantID {
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
 	}
@@ -462,8 +489,8 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		return
 	}
 
-	ingress, err := url.Parse(route.Ingress)
-	if err != nil || ingress.Scheme == "" {
+	ingress, transport, err := g.Ingress.target(route)
+	if err != nil {
 		writeProblem(w, problem(http.StatusBadGateway, "edge.bad_ingress", "Bad Gateway", "invalid ingress", rid))
 		return
 	}
@@ -475,15 +502,38 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 	ctx, stop := g.Conns.Attach(r.Context(), sess.SessionID, deadline)
 	defer stop()
 	r = r.WithContext(ctx)
+	// A revoke between the first lookup and Attach must not leave an untracked upgrade.
+	freshSession, err := getSessionByID(g.Sessions, ctx, binding.SessionID)
+	if err != nil || freshSession.Valid(g.Now().UTC(), "portal") != nil {
+		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session invalid", rid))
+		return
+	}
+	if r.ContentLength > maxInstanceBodyBytes {
+		writeProblem(w, problem(http.StatusRequestEntityTooLarge, "common.validation_failed", "Payload Too Large", "instance request body too large", rid))
+		return
+	}
+	if r.Body != nil && r.Body != http.NoBody {
+		r.Body = http.MaxBytesReader(w, r.Body, maxInstanceBodyBytes)
+	}
 
-	proxy := newReverseProxy(ingress, true)
+	proxy := newReverseProxy(ingress, transport)
+	baseError := proxy.ErrorHandler
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeProblem(w, problem(http.StatusRequestEntityTooLarge, "common.validation_failed", "Payload Too Large", "instance request body too large", rid))
+			return
+		}
+		baseError(w, r, err)
+	}
 	tp := ensureTraceparent(r)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
-		if pathSuffix != "" {
-			pr.Out.URL.Path = instPath
-			pr.Out.URL.RawPath = ""
+		pr.Out.URL.Path = "/i/" + instanceID + instPath
+		pr.Out.URL.RawPath = ""
+		if pathSuffix == "" && r.URL.RawPath != "" {
+			pr.Out.URL.RawPath = "/i/" + instanceID + r.URL.RawPath
 		}
 		rewriteOutboundInstance(pr.Out, clientIP, token, rid, tp)
 	}
@@ -627,4 +677,11 @@ func stripInstanceSetCookie(resp *http.Response) error {
 		resp.Header.Add("Set-Cookie", c)
 	}
 	return nil
+}
+
+func (g *Gateway) routeUnavailable(w http.ResponseWriter, rid string) {
+	if g.Log != nil {
+		g.Log.Warn("instance route service unavailable", "request_id", rid)
+	}
+	writeProblem(w, problem(http.StatusServiceUnavailable, "common.unavailable", "Service Unavailable", "route service unavailable", rid))
 }

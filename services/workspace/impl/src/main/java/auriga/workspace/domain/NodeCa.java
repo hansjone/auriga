@@ -138,7 +138,10 @@ public final class NodeCa {
       extensions.addExtension(Extension.basicConstraints, true, new BasicConstraints(false));
       extensions.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
       extensions.addExtension(
-          Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_clientAuth));
+          Extension.extendedKeyUsage,
+          false,
+          new ExtendedKeyUsage(
+              new KeyPurposeId[] {KeyPurposeId.id_kp_clientAuth, KeyPurposeId.id_kp_serverAuth}));
       extensions.addExtension(
           Extension.subjectAlternativeName,
           false,

@@ -129,6 +129,17 @@ public class WorkspaceRuntimeConfiguration {
     return new WorkspaceQueries(service);
   }
 
+  @Bean(initMethod = "start", destroyMethod = "close")
+  @ConditionalOnProperty(name = "auriga.workspace.routes.nats-url")
+  WorkspaceRoutes workspaceRoutes(WorkspaceStore store, Environment env) {
+    return WorkspaceRoutes.configured(
+        store,
+        env.getRequiredProperty("auriga.workspace.routes.nats-url"),
+        env.getProperty("auriga.workspace.routes.nats-creds-file", ""),
+        env.getProperty("auriga.workspace.routes.nats-nkey-seed-file", ""),
+        env.getProperty("auriga.workspace.routes.nats-tls", Boolean.class, false));
+  }
+
   @Bean
   WorkspaceAdmin workspaceAdmin(WorkspaceService service, WorkspaceInputs inputs) {
     return new WorkspaceAdmin(service, inputs);

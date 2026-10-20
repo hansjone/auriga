@@ -128,3 +128,9 @@ go test -tags docker -count=1 ./internal/runtime/   # 需本机 Docker，默认 
 Docker 单元测试用 `httptest` 假 Engine，断言创建容器请求含加固参数。制品测试覆盖哈希不符与下载中断。
 
 续期测试将检查间隔缩短至 10 毫秒，覆盖存活会话中的重复换证、重连凭据加载、失败退避重试，以及缺失/畸形证书、公钥不符、节点身份变化、错误 CA、过期证书均不替换原证书。另覆盖 CA 文件篡改、主机名与 IP SAN 不符、重复入网不修改凭据、保存各阶段失败和临时文件清理。Windows 专用测试读回目录与全部凭据文件的 DACL，逐项核对 SID、权限及禁止继承，包含覆盖保存场景。
+
+## E2：上报实例入口
+
+NodeControl 的 Hello 现在填充 `ingress_endpoint`。`run --ingress-listen host:port`（或 `AURIGA_AGENT_INGRESS_LISTEN`）启用 TCP ingress；Hello 使用实际绑定后的端口，支持 `:0` 测试。绑定 `0.0.0.0` / `::` 时必须另设 JSON `ingressAdvertiseHost` 或环境变量 `AURIGA_AGENT_INGRESS_ADVERTISE_HOST` 为节点对 edge 可达的 DNS 名称／IP（不带端口）；不会把通配地址发布为入口。
+
+单机继续使用 `--ingress-local` / `AURIGA_AGENT_INGRESS_LOCAL`：Unix 发布绝对 socket 路径，Windows 发布 `npipe:////./pipe/<name>`。默认值仍是 agent 数据目录内的 ingress.sock 或 auriga-agent-ingress 管道。两种本机通道都承载 TLS。入口身份加载或启动失败现在阻止控制会话启动，避免发布不存在的入口。实例运行时 Registry、实例身份执行器和 observer targets 的 A3 接线缺口仍由对应任务处理；本变更只上报已启动入口。
