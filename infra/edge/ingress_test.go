@@ -108,7 +108,7 @@ func instanceFixture(t *testing.T, h http.Handler) (*Gateway, *MemorySessionStor
 	cfg.SecureCookies = false
 	node := testNode(t, &cfg, h, testNodeID)
 	sess := putPortalSession(sessions, "session", "csrf", "token")
-	binding, err := tickets.BindInstance(sess.SessionID, sess.AccountID, sess.TenantID, testInstanceID, time.Now().Add(time.Hour))
+	binding, err := tickets.BindInstance(sess.SessionID, "", sess.AccountID, sess.TenantID, testInstanceID, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}

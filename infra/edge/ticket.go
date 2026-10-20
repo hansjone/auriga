@@ -12,6 +12,7 @@ const ticketSweepEvery = 64 // purge expired entries every N mutations
 type Ticket struct {
 	Token            string
 	SessionID        string
+	SessionKey       string
 	AccountID        string
 	TenantID         string
 	InstanceID       string
@@ -23,8 +24,11 @@ type Ticket struct {
 
 // InstBinding is the server-side value behind __Host-auriga_inst.
 type InstBinding struct {
-	Token      string
-	SessionID  string
+	Token     string
+	SessionID string
+	// SessionKey is the session-store key (hash of the portal cookie); the
+	// NATS store can only look sessions up by it, not by SessionID.
+	SessionKey string
 	AccountID  string
 	TenantID   string
 	InstanceID string
@@ -34,9 +38,9 @@ type InstBinding struct {
 
 // TicketStore issues one-time tickets and instance cookie bindings.
 type TicketStore interface {
-	Issue(sessionID, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error)
+	Issue(sessionID, sessionKey, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error)
 	Redeem(token string) (*Ticket, error)
-	BindInstance(sessionID, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error)
+	BindInstance(sessionID, sessionKey, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error)
 	LookupInstance(cookieRaw string) (*InstBinding, error)
 }
 
@@ -56,7 +60,7 @@ func NewMemoryTicketStore() *MemoryTicketStore {
 	}
 }
 
-func (m *MemoryTicketStore) Issue(sessionID, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error) {
+func (m *MemoryTicketStore) Issue(sessionID, sessionKey, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error) {
 	tok, err := randomID(24)
 	if err != nil {
 		return nil, err
@@ -64,6 +68,7 @@ func (m *MemoryTicketStore) Issue(sessionID, accountID, tenantID, instanceID, no
 	t := &Ticket{
 		Token:            tok,
 		SessionID:        sessionID,
+		SessionKey:       sessionKey,
 		AccountID:        accountID,
 		TenantID:         tenantID,
 		InstanceID:       instanceID,
@@ -100,7 +105,7 @@ func (m *MemoryTicketStore) Redeem(token string) (*Ticket, error) {
 	return &cp, nil
 }
 
-func (m *MemoryTicketStore) BindInstance(sessionID, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error) {
+func (m *MemoryTicketStore) BindInstance(sessionID, sessionKey, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error) {
 	raw, err := randomID(24)
 	if err != nil {
 		return nil, err
@@ -111,6 +116,7 @@ func (m *MemoryTicketStore) BindInstance(sessionID, accountID, tenantID, instanc
 	b := &InstBinding{
 		Token:      raw,
 		SessionID:  sessionID,
+		SessionKey: sessionKey,
 		AccountID:  accountID,
 		TenantID:   tenantID,
 		InstanceID: instanceID,
