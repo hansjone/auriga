@@ -115,7 +115,7 @@ services:
       - ./var/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
       # pki rw: edge chmod's cert/key on startup (ro bind → EROFS)
       - ./var/pki:/etc/auriga/pki
-      - agentdata:/var/lib/auriga:ro
+      - /var/lib/auriga:/var/lib/auriga:ro
 
   agent:
     build:
@@ -140,7 +140,9 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agentdata:/var/lib/auriga
+      # Same path on host and in the container: the agent asks the host Docker
+      # daemon to bind-mount instance directories, which resolves host paths.
+      - /var/lib/auriga:/var/lib/auriga
       - ./var/join:/run/auriga-join
       - ./var/identity-keys.json:/etc/auriga/identity-keys.json:ro
       - ./var/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
@@ -148,4 +150,3 @@ services:
 volumes:
   pgdata:
   natsdata:
-  agentdata:

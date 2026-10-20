@@ -46,6 +46,7 @@ jobs:
         working-directory: deploy/compose
         run: |
           docker compose --env-file var/compose.env build
+          sudo mkdir -p /var/lib/auriga
           docker compose --env-file var/compose.env up -d
           # Wait for platform health
           for i in $(seq 1 90); do
@@ -78,9 +79,8 @@ jobs:
               exit 1
             fi
           done
-          # Export agent data for e2e heartbeats via docker volume
-          VOL="$(docker volume ls -q | grep agentdata | head -1)"
-          echo "AGENT_VOLUME=$VOL" >> "$GITHUB_ENV"
+          # Agent data lives at the same host path the agent uses (see compose).
+          echo "AGENT_VOLUME=/var/lib/auriga" >> "$GITHUB_ENV"
 
       - name: Run e2e
         env:

@@ -238,10 +238,13 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 	r.sem <- struct{}{}
 	defer func() { <-r.sem }()
 
+	// Every report for this attempt carries the generation being applied;
+	// workspace drops reports for any other generation as stale.
 	st := &nodev1.InstanceStatus{
-		InstanceId: id,
-		Phase:      nodev1.InstancePhase_INSTANCE_PHASE_PREPARING,
-		UpdatedAt:  timestamppb.Now(),
+		InstanceId:         id,
+		Phase:              nodev1.InstancePhase_INSTANCE_PHASE_PREPARING,
+		ObservedGeneration: spec.Generation,
+		UpdatedAt:          timestamppb.Now(),
 	}
 	r.persist(st, rec.Attempts)
 
@@ -256,7 +259,7 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 	cancelPrep()
 	if err != nil {
 		r.Log.Warn("prepare failed", "instance_id", id, "error", err)
-		r.fail(id, rec.Attempts, "agent.ensure_failed", err.Error(), true)
+		r.fail(id, spec.Generation, rec.Attempts, "agent.ensure_failed", err.Error(), true)
 		return
 	}
 
@@ -276,7 +279,7 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 		cancelStart()
 		if err != nil {
 			r.Log.Warn("start failed", "instance_id", id, "error", err)
-			r.fail(id, rec.Attempts, "agent.start_failed", err.Error(), true)
+			r.fail(id, spec.Generation, rec.Attempts, "agent.start_failed", err.Error(), true)
 			return
 		}
 		r.Log.Info("instance started", "instance_id", id, "generation", spec.Generation)
@@ -327,12 +330,13 @@ func (r *Reconciler) handleDelete(ctx context.Context, id string, del *nodev1.De
 	r.emit(st)
 }
 
-func (r *Reconciler) fail(id string, attempts uint32, code, msg string, retryable bool) {
+func (r *Reconciler) fail(id string, generation int64, attempts uint32, code, msg string, retryable bool) {
 	attempts++
 	st := &nodev1.InstanceStatus{
-		InstanceId: id,
-		Phase:      nodev1.InstancePhase_INSTANCE_PHASE_FAILED,
-		UpdatedAt:  timestamppb.Now(),
+		InstanceId:         id,
+		Phase:              nodev1.InstancePhase_INSTANCE_PHASE_FAILED,
+		ObservedGeneration: generation,
+		UpdatedAt:          timestamppb.Now(),
 		Error: &nodev1.InstanceError{
 			Code:      code,
 			Message:   msg,
