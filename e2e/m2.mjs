@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * M2 e2e: login → join node → open instance → edge access → idle reclaim → alarm wake
- * (+ iam revoke smoke). Failures print which step and what was returned.
+ * M2 e2e (strict): login → join → open → edge → idle reclaim → alarm wake →
+ * dual-session revoke (HTTP + WebSocket). Failures print redacted step summaries.
  */
 import {
   readFileSync,
@@ -10,14 +10,25 @@ import {
   mkdirSync,
   readdirSync,
   mkdtempSync,
+  rmSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { CookieJar, jarForHost } from './lib/cookie-jar.mjs';
+import {
+  assertRevokeSuccess,
+  containerIsRunning,
+  edgeInstanceOk,
+  instanceReadyRunning,
+  phaseReached,
+  safeSummary,
+} from './lib/assert.mjs';
+import { openWebSocket } from './lib/ws-client.mjs';
 
 const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
 const PLATFORM = process.env.PLATFORM_BASE || 'http://127.0.0.1:8081';
@@ -32,50 +43,55 @@ const AGENT_DATA = process.env.AGENT_DATA_ROOT || '';
 const AGENT_VOLUME = process.env.AGENT_VOLUME || '';
 const IDLE_MINUTES = Number(process.env.IDLE_MINUTES || 5);
 
-/** @type {Map<string, string>} */
-const jar = new Map();
+/** @type {{ admin: CookieJar, portal: CookieJar, instance: CookieJar }} */
+const jars = {
+  admin: new CookieJar(),
+  portal: new CookieJar(),
+  instance: new CookieJar(),
+};
+const hosts = { admin: ADMIN_HOST, portal: PORTAL_HOST };
+
+/** Temp dirs created during the run (cleaned in finally). */
+const tempDirs = [];
+/** @type {Array<{ close: () => void }>} */
+const openSockets = [];
 
 function step(name) {
   console.log(`\n==> STEP: ${name}`);
 }
 
 function fail(stepName, detail, extra) {
-  console.error(`FAIL at ${stepName}: ${detail}`);
-  if (extra !== undefined) console.error(extra);
-  process.exit(1);
+  console.error(`FAIL at ${stepName}: ${safeSummary(detail)}`);
+  if (extra !== undefined) console.error(safeSummary(extra));
+  process.exitCode = 1;
+  throw new Error(`FAIL at ${stepName}`);
 }
 
-function parseSetCookie(setCookie) {
-  const raw = Array.isArray(setCookie)
-    ? setCookie
-    : setCookie
-      ? [setCookie]
-      : [];
-  for (const line of raw) {
-    const [pair] = String(line).split(';');
-    const i = pair.indexOf('=');
-    if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
-  }
-}
-
-function cookieHeader() {
-  return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
+function edgeUrl() {
+  return new URL(EDGE);
 }
 
 /**
  * HTTP via node:http so Host can be virtual (admin/portal/instance).
- * fetch() forbids overriding Host, which makes edge return edge.unknown_host.
+ * Each request uses the audience jar for that Host only.
  */
 async function req(path, opts = {}) {
   const host = opts.host || PORTAL_HOST;
   const base = new URL(opts.base || EDGE);
   const u = new URL(path, base);
+  const jar =
+    opts.jar ||
+    jarForHost(host, hosts, jars);
   /** @type {Record<string, string>} */
   const headers = {
     host,
     ...(opts.headers || {}),
   };
-  const cookie = cookieHeader();
+  const cookie = jar.cookieHeader({
+    host,
+    path: u.pathname,
+    secure: u.protocol === 'https:',
+  });
   if (cookie) headers.cookie = cookie;
   const bodyStr =
     opts.json !== undefined
@@ -87,11 +103,18 @@ async function req(path, opts = {}) {
     headers['content-type'] = opts.contentType || 'application/json';
   if (bodyStr !== null)
     headers['content-length'] = String(Buffer.byteLength(bodyStr));
-  const csrf =
-    jar.get('auriga_csrf') ||
-    jar.get('auriga_admin_csrf') ||
-    jar.get('__Host-auriga_csrf');
-  if (opts.csrf && csrf) headers['X-Auriga-CSRF'] = csrf;
+
+  if (opts.csrf) {
+    const csrfHdr = jar.cookieHeader({
+      host,
+      path: u.pathname,
+      secure: u.protocol === 'https:',
+    });
+    const csrf =
+      pickCookie(csrfHdr, 'auriga_csrf') ||
+      pickCookie(csrfHdr, '__Host-auriga_csrf');
+    if (csrf) headers['X-Auriga-CSRF'] = csrf;
+  }
 
   const lib = u.protocol === 'https:' ? https : http;
   const {
@@ -125,7 +148,12 @@ async function req(path, opts = {}) {
     r.end();
   });
 
-  parseSetCookie(rawHeaders['set-cookie']);
+  jar.storeFromResponse(rawHeaders['set-cookie'], {
+    host,
+    path: u.pathname,
+    secure: u.protocol === 'https:',
+  });
+
   let body = text;
   try {
     body = text ? JSON.parse(text) : null;
@@ -142,6 +170,15 @@ async function req(path, opts = {}) {
     text,
     status,
   };
+}
+
+function pickCookie(header, name) {
+  if (!header) return null;
+  for (const part of header.split('; ')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i) === name) return part.slice(i + 1);
+  }
+  return null;
 }
 
 /** Last emergency TOTP time-step consumed (replay rejected via lastCounter). */
@@ -172,7 +209,6 @@ function totpAt(secretB32, step, stepSec = 30) {
   return String(code % 1_000_000).padStart(6, '0');
 }
 
-/** Wait for a TOTP step not yet consumed (emergency lastCounter rejects replay). */
 async function nextTotp(secretB32, stepSec = 30) {
   let step = Math.floor(Date.now() / 1000 / stepSec);
   if (step <= lastTotpStep) {
@@ -187,23 +223,27 @@ async function nextTotp(secretB32, stepSec = 30) {
   return totpAt(secretB32, step, stepSec);
 }
 
-function sessionCookieFor(host) {
+function sessionCookieName(host) {
   return host === ADMIN_HOST ? 'auriga_admin_session' : 'auriga_session';
 }
 
-async function loginEmergency(host) {
+/**
+ * @param {string} host
+ * @param {CookieJar} [jar]
+ */
+async function loginEmergency(host, jar) {
   step(`login emergency (${host})`);
-  const sessionName = sessionCookieFor(host);
-  // Keep the other audience's cookies; emergency TOTP cannot be replayed in the same step.
-  if (jar.has(sessionName)) {
-    // Sessions expire for real (idle timeout), so only reuse one that still works.
-    const me = await req('/api/iam/v1/me', { host });
+  const useJar = jar || jarForHost(host, hosts, jars);
+  const sessionName = sessionCookieName(host);
+  if (useJar.wouldSend(sessionName, { host, path: '/' })) {
+    const me = await req('/api/iam/v1/me', { host, jar: useJar });
     if (me.status === 200) {
-      console.log('reuse', sessionName);
+      console.log('reuse session for', host);
       return;
     }
     console.log('session expired (status', me.status + '); logging in again');
-    jar.delete(sessionName);
+    useJar.deleteByName(sessionName);
+    useJar.deleteByName('__Host-' + sessionName);
   }
   if (!existsSync(ENROLLMENT)) fail('login', `missing ${ENROLLMENT}`);
   const enr = JSON.parse(readFileSync(ENROLLMENT, 'utf8'));
@@ -215,20 +255,16 @@ async function loginEmergency(host) {
     fail('login', 'enrollment incomplete', Object.keys(enr));
   }
 
-  // Clear only this audience's cookies (+ login_tx); leave the other audience alone.
-  for (const k of [...jar.keys()]) {
-    if (k === sessionName || k.includes('login_tx')) jar.delete(k);
-    if (host === ADMIN_HOST && k.includes('admin') && k.includes('csrf'))
-      jar.delete(k);
-    if (
-      host !== ADMIN_HOST &&
-      (k === 'auriga_csrf' || k === '__Host-auriga_csrf')
-    )
-      jar.delete(k);
-  }
+  useJar.deleteByName(sessionName);
+  useJar.deleteByName('__Host-' + sessionName);
+  useJar.deleteByName('auriga_login_tx');
+  useJar.deleteByName('__Host-auriga_login_tx');
+  useJar.deleteByName('auriga_csrf');
+  useJar.deleteByName('__Host-auriga_csrf');
 
   const start = await req('/api/iam/v1/login/transactions', {
     host,
+    jar: useJar,
     method: 'POST',
     json: { providerId, returnTo: '/' },
   });
@@ -241,15 +277,12 @@ async function loginEmergency(host) {
   const otp = await nextTotp(totpSecret);
   const advance = await req(`/api/iam/v1/login/transactions/${txId}/advance`, {
     host,
+    jar: useJar,
     method: 'POST',
     json: {
       type: 'form',
       formId: 'emergency',
-      values: {
-        username,
-        password,
-        otp,
-      },
+      values: { username, password, otp },
     },
   });
   if (advance.status !== 200)
@@ -257,9 +290,9 @@ async function loginEmergency(host) {
   if (advance.body?.status && advance.body.status !== 'completed') {
     fail('login', `tx status ${advance.body.status}`, advance.body);
   }
-  const sessionKeys = [...jar.keys()].filter((k) => k.includes('session'));
-  if (!sessionKeys.length) fail('login', 'no session cookie', [...jar.keys()]);
-  console.log('login ok cookies=', sessionKeys.join(','));
+  const names = useJar.names().filter((k) => k.includes('session'));
+  if (!names.length) fail('login', 'no session cookie', useJar.names());
+  console.log('login ok cookieNames=', names.join(','));
 }
 
 async function setIdlePolicy() {
@@ -315,8 +348,6 @@ async function createJoinTokenAndWaitNode() {
     const items = nodes.body?.items || [];
     if (items.length > 0) {
       console.log('node online count=', items.length);
-      // Node labels are admin-assigned (the agent cannot claim its own);
-      // the e2e template requires template=fake-dsh-e2e.
       step('label node for the e2e template');
       const nodeId = items[0].id;
       const patch = await req(`/api/workspace/v1/admin/nodes/${nodeId}`, {
@@ -362,55 +393,99 @@ async function waitReady(instanceId) {
     });
     const phase = String(g.body?.phase || '').toLowerCase();
     console.log('  phase=', phase, 'ready=', g.body?.ready);
-    if (g.body?.ready && phase === 'running') return g.body;
+    if (instanceReadyRunning(g.body)) return g.body;
     await sleep(4000);
   }
-  // Diagnostics: show why the scheduler could not place the instance.
   const nodes = await req('/api/workspace/v1/admin/nodes', {
     host: ADMIN_HOST,
     csrf: true,
   });
-  console.log('nodes at timeout:', JSON.stringify(nodes.body, null, 2));
+  console.log('nodes at timeout:', safeSummary(nodes.body, 800));
   const inst = await req(`/api/workspace/v1/instances/${instanceId}`, {
     host: ADMIN_HOST,
     csrf: true,
   });
-  console.log('instance at timeout:', JSON.stringify(inst.body, null, 2));
+  console.log('instance at timeout:', safeSummary(inst.body, 800));
   fail('ready', 'timeout');
 }
 
-async function accessViaEdge(instanceId) {
+/**
+ * Redeem ticket into the instance jar and GET /.
+ * @param {string} instanceId
+ * @param {CookieJar} [portalJar]
+ * @param {CookieJar} [instanceJar]
+ */
+async function accessViaEdge(instanceId, portalJar, instanceJar) {
   step('edge access instance');
-  await loginEmergency(PORTAL_HOST);
+  const pJar = portalJar || jars.portal;
+  const iJar = instanceJar || jars.instance;
+  await loginEmergency(PORTAL_HOST, pJar);
   const open = await req(`/open/${instanceId}`, {
     host: PORTAL_HOST,
+    jar: pJar,
     method: 'GET',
   });
   console.log(
     'open status',
     open.status,
     'loc',
-    open.res.headers.get('location'),
+    open.res.headers.get('location') ? '(set)' : '(none)',
   );
 
   const host = `${instanceId}.i.example.com`;
+  // Domain open-nonce → instance jar
+  iJar.absorbMatchingDomainCookies(pJar, host);
   let loc = open.res.headers.get('location');
   if (loc) {
     const u = new URL(loc, EDGE);
+    const redeemHost = u.hostname.includes('.') ? u.hostname : host;
+    iJar.absorbMatchingDomainCookies(pJar, redeemHost);
     const redeem = await req(u.pathname + u.search, {
-      host: u.hostname.includes('.') ? u.hostname : host,
+      host: redeemHost,
+      jar: iJar,
     });
     console.log('redeem', redeem.status);
   }
-  const page = await req('/', { host });
-  if (page.status !== 200 || !String(page.text).includes('fake-dsh')) {
+  const page = await req('/', { host, jar: iJar });
+  if (!edgeInstanceOk(page)) {
     fail(
       'edge-access',
       `status ${page.status}`,
-      String(page.text).slice(0, 400),
+      String(page.text).slice(0, 200),
     );
   }
+  // Admin jar must never be required for instance access.
+  if (
+    jars.admin.wouldSend('auriga_admin_session', { host, path: '/' }) ||
+    jars.admin.wouldSend('__Host-auriga_admin_session', { host, path: '/' })
+  ) {
+    fail('edge-access', 'admin session would be sent to instance host');
+  }
   console.log('edge access ok');
+  return { host, instanceJar: iJar, portalJar: pJar };
+}
+
+function dockerInspectRunning(instanceId) {
+  const name = `auriga-inst-${instanceId}`;
+  const r = spawnSync(
+    'docker',
+    ['inspect', '-f', '{{.State.Running}}', name],
+    { encoding: 'utf8' },
+  );
+  if (r.status !== 0) {
+    const detail = (r.stderr || r.stdout || '').trim();
+    // Removed container is not running (idle reclaim may remove after stop).
+    if (/no such object|no such container/i.test(detail)) {
+      return { ok: true, running: false, field: 'missing', detail };
+    }
+    return {
+      ok: false,
+      running: false,
+      detail: safeSummary(detail.slice(0, 200)),
+    };
+  }
+  const field = (r.stdout || '').trim();
+  return { ok: true, running: containerIsRunning(field), field };
 }
 
 function readTokenFromVolume(instanceId) {
@@ -487,7 +562,6 @@ async function heartbeatIdle(token) {
   }
 }
 
-// Fail fast if the agent never reports the alarm, instead of after the idle wait.
 async function waitWakeRegistered(instanceId) {
   step('wait nextWakeAt registered');
   await loginEmergency(ADMIN_HOST);
@@ -515,7 +589,7 @@ async function waitWakeRegistered(instanceId) {
       '-c',
       `ls -laR /data/instances/${instanceId}/home/ops-cron; cat /data/instances/${instanceId}/home/ops-cron/store.json`,
     ]);
-    console.log(String(ls.stdout), String(ls.stderr));
+    console.log(safeSummary(String(ls.stdout), 400));
   }
   fail('wake-registered', 'nextWakeAt not reported within 60s');
 }
@@ -531,9 +605,9 @@ async function writeWakeSchedule(instanceId, nextWakeMs) {
       },
     ],
   });
-  // Prefer writing into the live agent volume so observer sees the file.
   if (AGENT_VOLUME) {
     const tmp = mkdtempSync(join(tmpdir(), 'auriga-wake-'));
+    tempDirs.push(tmp);
     const local = join(tmp, 'store.json');
     writeFileSync(local, body);
     const dest = `/data/instances/${instanceId}/home/ops-cron`;
@@ -571,8 +645,11 @@ async function writeWakeSchedule(instanceId, nextWakeMs) {
   console.log('wake schedule at', new Date(nextWakeMs).toISOString());
 }
 
+/**
+ * Wait until actual phase matches. desired-only changes do not succeed.
+ */
 async function waitPhase(instanceId, want, timeoutMs) {
-  step(`wait phase=${want}`);
+  step(`wait phase=${want} (actual only)`);
   await loginEmergency(ADMIN_HOST);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -584,7 +661,7 @@ async function waitPhase(instanceId, want, timeoutMs) {
       console.log(
         '  get instance status',
         g.status,
-        JSON.stringify(g.body)?.slice(0, 200),
+        safeSummary(g.body, 160),
       );
       if (g.status === 401) await loginEmergency(ADMIN_HOST);
       await sleep(5000);
@@ -600,78 +677,246 @@ async function waitPhase(instanceId, want, timeoutMs) {
       'idleStopAt=',
       g.body?.idleStopAt,
     );
-    if (phase === want || desired === want) return g.body;
-    // also accept stopped when desired=stopped
-    if (want === 'stopped' && desired.includes('stop')) return g.body;
+    if (phaseReached(g.body, want)) return g.body;
     await sleep(5000);
   }
-  fail('phase', `did not reach ${want}`);
+  fail('phase', `did not reach actual phase ${want}`);
 }
 
-async function revokeSmoke() {
-  step('iam session revoke smoke');
+async function waitStoppedStrict(instanceId) {
+  const body = await waitPhase(instanceId, 'stopped', 240_000);
+  const insp = dockerInspectRunning(instanceId);
+  if (!insp.ok) {
+    fail('idle-stop-container', `docker inspect failed: ${insp.detail}`);
+  }
+  if (insp.running) {
+    fail(
+      'idle-stop-container',
+      'container still Running=true after phase=stopped',
+      insp.field,
+    );
+  }
+  console.log('container stopped (Running=false)');
+
+  const host = `${instanceId}.i.example.com`;
+  const page = await req('/', { host, jar: jars.instance });
+  if (edgeInstanceOk(page)) {
+    fail(
+      'idle-stop-edge',
+      `edge still returned healthy instance response status=${page.status}`,
+    );
+  }
+  console.log(
+    'edge no longer serves healthy instance (status=',
+    page.status,
+    ')',
+  );
+  return body;
+}
+
+async function waitWakeStrict(instanceId) {
+  step('wait alarm wake (phase+container+edge)');
   await loginEmergency(ADMIN_HOST);
-  const revoke = await req('/api/iam/v1/me/sessions/revoke-others', {
-    host: ADMIN_HOST,
-    method: 'POST',
-    csrf: true,
-    json: {},
+  const deadline = Date.now() + 480_000;
+  while (Date.now() < deadline) {
+    const g = await req(`/api/workspace/v1/instances/${instanceId}`, {
+      host: ADMIN_HOST,
+      csrf: true,
+    });
+    if (g.status === 401) await loginEmergency(ADMIN_HOST);
+    const phase = String(g.body?.phase || '').toLowerCase();
+    const desired = String(g.body?.desired || '').toLowerCase();
+    console.log('  phase=', phase, 'desired=', desired, 'ready=', g.body?.ready);
+    if (instanceReadyRunning(g.body)) {
+      const insp = dockerInspectRunning(instanceId);
+      if (!insp.ok || !insp.running) {
+        console.log('  phase ready but container not running yet', insp);
+        await sleep(5000);
+        continue;
+      }
+      // Re-redeem / access via edge after wake.
+      jars.instance.clear();
+      await accessViaEdge(instanceId);
+      console.log('alarm wake ok (phase=running ready, container up, edge ok)');
+      return g.body;
+    }
+    await sleep(5000);
+  }
+  fail('wake', 'did not reach running+ready with container+edge');
+}
+
+/**
+ * Dual portal sessions: A holds instance HTTP+WS; B revokes A via DELETE /me/sessions/{id}.
+ */
+async function revokeDualSession(instanceId) {
+  step('iam dual-session revoke (A HTTP+WS, B deletes A)');
+  const portalA = new CookieJar();
+  const instanceA = new CookieJar();
+  const portalB = new CookieJar();
+
+  await loginEmergency(PORTAL_HOST, portalA);
+  const meA = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalA });
+  if (meA.status !== 200) fail('revoke-A', `me A ${meA.status}`, meA.body);
+  const listA = await req('/api/iam/v1/me/sessions', {
+    host: PORTAL_HOST,
+    jar: portalA,
   });
-  console.log('revoke-others', revoke.status);
-  // Soft pass: endpoint reachable (may be 200/204/404 depending on other sessions)
-  if (revoke.status >= 500)
-    fail('revoke', `status ${revoke.status}`, revoke.body);
+  if (listA.status !== 200)
+    fail('revoke-A-list', `status ${listA.status}`, listA.body);
+  const sessionIdA = (listA.body?.items || []).find((s) => s?.current)?.id;
+  if (!sessionIdA) fail('revoke-A-list', 'no current session id for A');
+
+  await accessViaEdge(instanceId, portalA, instanceA);
+  const host = `${instanceId}.i.example.com`;
+  const pageA = await req('/', { host, jar: instanceA });
+  if (!edgeInstanceOk(pageA)) {
+    fail('revoke-A', `instance HTTP before revoke ${pageA.status}`);
+  }
+
+  const edge = edgeUrl();
+  const cookieHdr = instanceA.cookieHeader({
+    host,
+    path: '/ws',
+    secure: edge.protocol === 'https:',
+  });
+  const ws = await openWebSocket({
+    hostname: edge.hostname,
+    port: Number(edge.port || (edge.protocol === 'https:' ? 443 : 80)),
+    path: '/ws',
+    hostHeader: host,
+    headers: cookieHdr ? { Cookie: cookieHdr } : {},
+    timeoutMs: 20_000,
+  });
+  openSockets.push(ws);
+  const ping = `ping-${randomBytes(4).toString('hex')}`;
+  ws.sendText(ping);
+  const echo = await ws.readTextFrame(10_000);
+  if (echo !== ping) fail('revoke-ws', `echo mismatch got=${safeSummary(echo)}`);
+  console.log('session A HTTP+WS ok');
+
+  // Fresh portal session B (same emergency account) revokes A by id.
+  await loginEmergency(PORTAL_HOST, portalB);
+  const meB = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalB });
+  if (meB.status !== 200) fail('revoke-B', `me B ${meB.status}`, meB.body);
+
+  const del = await req(`/api/iam/v1/me/sessions/${sessionIdA}`, {
+    host: PORTAL_HOST,
+    jar: portalB,
+    method: 'DELETE',
+    csrf: true,
+  });
+  try {
+    assertRevokeSuccess(del.status, del.body);
+  } catch (e) {
+    fail('revoke', e.message, del.body);
+  }
+  console.log('revoke DELETE status', del.status);
+
+  const closed = await ws.waitClosed(30_000);
+  if (!closed) fail('revoke-ws', 'websocket did not close within 30s after revoke');
+  console.log('session A websocket closed after revoke');
+
+  const pageAfter = await req('/', { host, jar: instanceA });
+  if (pageAfter.status < 400 || edgeInstanceOk(pageAfter)) {
+    fail(
+      'revoke-http',
+      `revoked instance cookie still accepted status=${pageAfter.status}`,
+    );
+  }
+  console.log('revoked instance cookie rejected status=', pageAfter.status);
+
+  const meB2 = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalB });
+  if (meB2.status !== 200) {
+    fail('revoke-B-alive', `B session broken status=${meB2.status}`, meB2.body);
+  }
+  console.log('session B still valid');
+
+  // Negative: soft 4xx must not be treated as success (unit-tested; runtime guard).
+  try {
+    assertRevokeSuccess(404, { title: 'nope' });
+    fail('revoke-guard', 'assertRevokeSuccess unexpectedly accepted 404');
+  } catch (e) {
+    if (e && e.code === 'revoke_not_ok') {
+      console.log('revoke 4xx correctly rejected by assert');
+    } else {
+      throw e;
+    }
+  }
+
+  ws.close();
+}
+
+function cleanup() {
+  for (const s of openSockets) {
+    try {
+      s.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  openSockets.length = 0;
+  for (const d of tempDirs) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+  tempDirs.length = 0;
 }
 
 async function main() {
   console.log('M2 e2e', { EDGE, PLATFORM, IDLE_MINUTES });
-  await loginEmergency(ADMIN_HOST);
-  await setIdlePolicy();
-  await createJoinTokenAndWaitNode();
-  const instanceId = await openInstance();
-  await waitReady(instanceId);
-  await accessViaEdge(instanceId);
+  try {
+    await loginEmergency(ADMIN_HOST);
+    await setIdlePolicy();
+    await createJoinTokenAndWaitNode();
+    const instanceId = await openInstance();
+    await waitReady(instanceId);
+    await accessViaEdge(instanceId);
 
-  step('locate instance.token');
-  let token = null;
-  const tokenDeadline = Date.now() + 120_000;
-  while (Date.now() < tokenDeadline) {
-    token = findInstanceToken(instanceId);
-    if (token) break;
-    await sleep(3000);
+    step('locate instance.token');
+    let token = null;
+    const tokenDeadline = Date.now() + 120_000;
+    while (Date.now() < tokenDeadline) {
+      token = findInstanceToken(instanceId);
+      if (token) break;
+      await sleep(3000);
+    }
+    if (!token) {
+      fail(
+        'heartbeat',
+        'missing instance.token; set AGENT_VOLUME or AGENT_DATA_ROOT',
+      );
+    }
+
+    const wakeAt = Date.now() + (IDLE_MINUTES * 60 + 90 + 360) * 1000;
+    await writeWakeSchedule(instanceId, wakeAt);
+    await waitWakeRegistered(instanceId);
+
+    step(`idle heartbeats ~${IDLE_MINUTES + 1.5} min`);
+    const idleUntil = Date.now() + (IDLE_MINUTES * 60 + 90) * 1000;
+    while (Date.now() < idleUntil) {
+      await heartbeatIdle(token);
+      await sleep(15_000);
+    }
+
+    await waitStoppedStrict(instanceId);
+    console.log('idle reclaim ok (phase+container+edge)');
+
+    await waitWakeStrict(instanceId);
+
+    await revokeDualSession(instanceId);
+    console.log('\nM2 e2e PASSED');
+  } finally {
+    cleanup();
   }
-  if (!token) {
-    fail(
-      'heartbeat',
-      'missing instance.token; set AGENT_VOLUME or AGENT_DATA_ROOT',
-    );
-  }
-
-  // The alarm must land well after idle reclaim: workspace keeps an instance up
-  // when its alarm is within ~4 minutes (wake jobs pre-warm 2 minutes early).
-  const wakeAt = Date.now() + (IDLE_MINUTES * 60 + 90 + 360) * 1000;
-  await writeWakeSchedule(instanceId, wakeAt);
-  await waitWakeRegistered(instanceId);
-
-  step(`idle heartbeats ~${IDLE_MINUTES + 1.5} min`);
-  const idleUntil = Date.now() + (IDLE_MINUTES * 60 + 90) * 1000;
-  while (Date.now() < idleUntil) {
-    await heartbeatIdle(token);
-    await sleep(15_000);
-  }
-
-  await waitPhase(instanceId, 'stopped', 240_000);
-  console.log('idle reclaim ok');
-
-  step('wait alarm wake');
-  await waitPhase(instanceId, 'running', 480_000);
-  console.log('alarm wake ok');
-
-  await revokeSmoke();
-  console.log('\nM2 e2e PASSED');
 }
 
 main().catch((e) => {
-  console.error(e);
-  process.exit(1);
+  cleanup();
+  if (process.exitCode !== 1) {
+    console.error(safeSummary(e && e.stack ? e.stack : e));
+    process.exitCode = 1;
+  }
 });

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Minimal fake DSH for M2 e2e: HTTP + /_auriga/health + Auriga-Identity door.
- * Not a real DSH runtime (see docs/dev/m2.md).
+ * Minimal fake DSH for M2 e2e: HTTP + /_auriga/health + Auriga-Identity door
+ * + minimal WebSocket echo (for session-revoke e2e). Not a real DSH runtime.
  */
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { join } from 'node:path';
@@ -126,6 +127,101 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
   res.end('fake-dsh ok\n');
+});
+
+/** Minimal RFC6455 text-frame echo (e2e revoke fixture only). */
+server.on('upgrade', (req, socket, head) => {
+  const path = rawPath(req.url || '/');
+  if (path !== '/ws' && path !== '/') {
+    socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  // Edge already verified identity before upgrade; re-check if header present.
+  if (req.headers['auriga-identity']) {
+    const v = verifyIdentity(req);
+    if (!v.ok) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+  }
+  const key = req.headers['sec-websocket-key'];
+  if (!key || typeof key !== 'string') {
+    socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const accept = createHash('sha1')
+    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+    .digest('base64');
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n` +
+      '\r\n',
+  );
+  if (head && head.length) socket.unshift(head);
+
+  let buf = Buffer.alloc(0);
+  socket.on('data', (chunk) => {
+    buf = Buffer.concat([buf, chunk]);
+    while (buf.length >= 2) {
+      const b0 = buf[0];
+      const b1 = buf[1];
+      const opcode = b0 & 0x0f;
+      const masked = (b1 & 0x80) !== 0;
+      let len = b1 & 0x7f;
+      let off = 2;
+      if (len === 126) {
+        if (buf.length < 4) return;
+        len = buf.readUInt16BE(2);
+        off = 4;
+      } else if (len === 127) {
+        socket.destroy();
+        return;
+      }
+      const maskLen = masked ? 4 : 0;
+      if (buf.length < off + maskLen + len) return;
+      let payload = buf.subarray(off + maskLen, off + maskLen + len);
+      if (masked) {
+        const mask = buf.subarray(off, off + 4);
+        payload = Buffer.from(payload);
+        for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+      }
+      buf = buf.subarray(off + maskLen + len);
+      if (opcode === 0x8) {
+        // close
+        socket.end();
+        return;
+      }
+      if (opcode === 0x9) {
+        // ping → pong
+        const pong = Buffer.alloc(2 + payload.length);
+        pong[0] = 0x8a;
+        pong[1] = payload.length;
+        payload.copy(pong, 2);
+        socket.write(pong);
+        continue;
+      }
+      if (opcode === 0x1 || opcode === 0x2) {
+        // echo unmasked
+        const out = Buffer.alloc(2 + payload.length);
+        out[0] = 0x80 | opcode;
+        out[1] = payload.length;
+        payload.copy(out, 2);
+        socket.write(out);
+      }
+    }
+  });
+  socket.on('error', () => {
+    try {
+      socket.destroy();
+    } catch {
+      /* ignore */
+    }
+  });
 });
 
 server.listen(port, '0.0.0.0', () => {
