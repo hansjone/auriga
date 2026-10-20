@@ -10,11 +10,8 @@ import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.node.ObjectNode;
 
 @RestController
-@ConditionalOnExpression("${auriga.services.org.enabled:true}")
-@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-    prefix = "auriga.service",
-    name = "schema",
-    havingValue = "org")
+@ConditionalOnExpression(
+    "${auriga.services.org.enabled:true} && ('${auriga.service.schema:}' == 'org' || ${auriga.platform.combined:false})")
 @RequestMapping("/api/org/v1")
 public class OrgPortalController {
   private final OrgService org;
