@@ -1,0 +1,177 @@
+name: NAS bundle
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact git commit SHA to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+
+      - name: Verify commit
+        run: |
+          set -euo pipefail
+          got=$(git rev-parse HEAD)
+          want=${{ inputs.commit }}
+          case "$want" in
+            "$got"|${got}*) ;;
+            *)
+              # Allow short SHA if it matches prefix
+              case "$got" in
+                "$want"*) ;;
+                *) echo "checked out $got does not match requested $want"; exit 1 ;;
+              esac
+              ;;
+          esac
+          echo "commit=$got" >> "$GITHUB_ENV"
+          echo "Building commit $got"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: |
+            infra/**/go.sum
+            deploy/nas/bootstrap/go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=$commit"
+            echo "tool_java=$(java -version 2>&1 | head -1)"
+            echo "tool_go=$(go version)"
+            echo "tool_node=$(node -v)"
+            echo "tool_pnpm=$(pnpm -v)"
+            echo "tool_docker=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo n/a)"
+            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee versions.txt
+
+      - name: Build bootstrap binary (linux/amd64)
+        working-directory: deploy/nas/bootstrap
+        run: |
+          set -euo pipefail
+          mkdir -p ../bin
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../bin/auriga-nas-bootstrap .
+          chmod 0755 ../bin/auriga-nas-bootstrap
+
+      - name: Build images (linux/amd64)
+        run: |
+          set -euo pipefail
+          mkdir -p out/images
+          docker build --platform=linux/amd64 -f deploy/nas/docker/Dockerfile.platform -t auriga/platform:nas "$GITHUB_WORKSPACE"
+          docker build --platform=linux/amd64 -f deploy/nas/docker/Dockerfile.edge -t auriga/edge:nas "$GITHUB_WORKSPACE"
+          docker build --platform=linux/amd64 -f deploy/nas/docker/Dockerfile.agent -t auriga/agent:nas "$GITHUB_WORKSPACE"
+          docker save auriga/platform:nas -o out/images/platform.tar
+          docker save auriga/edge:nas -o out/images/edge.tar
+          docker save auriga/agent:nas -o out/images/agent.tar
+
+      - name: Write manifest + checksums
+        run: |
+          set -euo pipefail
+          id_platform=$(docker image inspect --format '{{.Id}}' auriga/platform:nas)
+          id_edge=$(docker image inspect --format '{{.Id}}' auriga/edge:nas)
+          id_agent=$(docker image inspect --format '{{.Id}}' auriga/agent:nas)
+          {
+            echo "commit=$commit"
+            echo "image_platform_id=$id_platform"
+            echo "image_edge_id=$id_edge"
+            echo "image_agent_id=$id_agent"
+            cat versions.txt
+          } > out/images/manifest.json
+          # Also emit digest-oriented lines for operators (RepoDigests may be empty for local tags).
+          {
+            echo "{"
+            echo "  \"commit\": \"$commit\","
+            echo "  \"images\": {"
+            echo "    \"platform\": {\"id\": \"$id_platform\", \"tar\": \"platform.tar\"},"
+            echo "    \"edge\": {\"id\": \"$id_edge\", \"tar\": \"edge.tar\"},"
+            echo "    \"agent\": {\"id\": \"$id_agent\", \"tar\": \"agent.tar\"}"
+            echo "  }"
+            echo "}"
+          } > out/images/manifest.json
+          (cd out/images && sha256sum ./*.tar > SHA256SUMS)
+          cp deploy/nas/bin/auriga-nas-bootstrap out/auriga-nas-bootstrap
+          cp versions.txt out/versions.txt
+          # Bundle deploy templates (no secrets).
+          mkdir -p out/deploy-nas
+          cp -a deploy/nas/. out/deploy-nas/
+          rm -rf out/deploy-nas/bin
+          mkdir -p out/deploy-nas/bin
+          cp deploy/nas/bin/auriga-nas-bootstrap out/deploy-nas/bin/
+
+      - name: Validate compose config (placeholder env, quiet)
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          cp deploy/nas/env.example "$tmp/stack.env"
+          # Replace zero digests with local image ids so compose accepts refs for --quiet structure check.
+          # We do not render secrets; use a dry compose file check with env that points images to local tags.
+          {
+            echo "COMPOSE_PROJECT_NAME=auriga-nas-test"
+            echo "AURIGA_DATA_ROOT=$tmp/data"
+            echo "AURIGA_LAN_NETWORK=bridge"
+            echo "AURIGA_LAN_SUBNET=192.0.2.0/24"
+            echo "AURIGA_EDGE_LAN_IP=192.0.2.10"
+            echo "AURIGA_PORTAL_HOST=portal.example.com"
+            echo "AURIGA_ADMIN_HOST=admin.example.com"
+            echo "AURIGA_INSTANCE_PARENT_DOMAIN=i.example.com"
+            echo "AURIGA_ISSUER=https://portal.example.com"
+            echo "AURIGA_TEAM_ORIGIN=https://portal.example.com"
+            echo "AURIGA_TEAM_RP_ID=portal.example.com"
+            echo "AURIGA_TLS_UPSTREAM=true"
+            echo "AURIGA_SECURE_COOKIES=true"
+            echo "AURIGA_TRUSTED_PROXIES=127.0.0.1"
+            echo "AURIGA_IMAGE_PLATFORM=auriga/platform:nas"
+            echo "AURIGA_IMAGE_EDGE=auriga/edge:nas"
+            echo "AURIGA_IMAGE_AGENT=auriga/agent:nas"
+            echo "AURIGA_IMAGE_POSTGRES=postgres:17"
+            echo "AURIGA_IMAGE_NATS=nats:2.10-alpine"
+            echo "AURIGA_IMAGE_REGISTRY=registry:2"
+            echo "AURIGA_HOST_PUBLISH_NODECONTROL=17443"
+            echo "AURIGA_HOST_PUBLISH_REGISTRY=15000"
+            echo "AURIGA_HOST_PUBLISH_PLATFORM_HTTP=18081"
+            echo "AURIGA_PLATFORM_SEED=false"
+            echo "AURIGA_AGENT_CAPACITY_MAX_INSTANCES=1"
+          } > "$tmp/stack.env"
+          mkdir -p "$tmp/data/secrets"
+          echo placeholder > "$tmp/data/secrets/pg_bootstrap_password"
+          # Structure-only: skip external network requirement by not running up.
+          # compose config still resolves external network name — create a throwaway network.
+          docker network create --driver bridge auriga-ci-lan-check || true
+          sed -i 's/^AURIGA_LAN_NETWORK=.*/AURIGA_LAN_NETWORK=auriga-ci-lan-check/' "$tmp/stack.env"
+          docker compose --env-file "$tmp/stack.env" -f deploy/nas/docker-compose.yml -p auriga-nas-ci-check config --quiet
+          docker network rm auriga-ci-lan-check || true
+          # Ensure rendered secret files are not uploaded.
+          rm -rf "$tmp"
+
+      - name: Upload artifact (no credentials)
+        uses: actions/upload-artifact@v4
+        with:
+          name: auriga-nas-bundle-${{ env.commit }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14

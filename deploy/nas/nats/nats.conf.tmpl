@@ -1,0 +1,81 @@
+# Auriga NAS test NATS (JetStream). Passwords filled by render.sh — never commit rendered files.
+# Monitoring (http) binds loopback only and is not published to the NAS host or LAN.
+port: 4222
+http: "127.0.0.1:8222"
+server_name: auriga-nas-test-nats
+
+jetstream {
+  store_dir: /data
+}
+
+accounts {
+  SYS: {
+    users: [{ user: sys, password: "__NATS_SYS_PASSWORD__" }]
+  }
+  AURIGA: {
+    jetstream: enabled
+    users: [
+      {
+        # Platform: events + sessions KV create/write. Not a wildcard on all subjects.
+        user: platform
+        password: "__NATS_PLATFORM_PASSWORD__"
+        permissions: {
+          publish: { allow: [
+            "auriga.evt.>",
+            "$KV.auriga-sessions.>",
+            "$JS.API.>"
+          ] }
+          subscribe: { allow: [
+            "_INBOX.>",
+            "auriga.evt.>",
+            "$KV.auriga-sessions.>"
+          ] }
+        }
+      }
+      {
+        # Workspace routes publisher (write-only to routes KV + needed JS API).
+        user: routes_rw
+        password: "__NATS_ROUTES_RW_PASSWORD__"
+        permissions: {
+          publish: { allow: [
+            "$KV.auriga-routes.>",
+            "$JS.API.>"
+          ] }
+          subscribe: { allow: ["_INBOX.>", "$KV.auriga-routes.>"] }
+        }
+      }
+      {
+        # Edge: sessions KV + routes read + revoke events.
+        # Current edge binary shares one natsUrl for session + route stores (password auth),
+        # so this user is the minimal union. Separate JWT .creds can split later.
+        user: edge
+        password: "__NATS_EDGE_PASSWORD__"
+        permissions: {
+          publish: { allow: [
+            "$KV.auriga-sessions.>",
+            "$JS.API.STREAM.INFO.KV_auriga-routes",
+            "$JS.API.STREAM.MSG.GET.KV_auriga-routes",
+            "$JS.API.DIRECT.GET.KV_auriga-routes",
+            "$JS.API.DIRECT.GET.KV_auriga-routes.>",
+            "$JS.API.STREAM.INFO.KV_auriga-sessions",
+            "$JS.API.STREAM.MSG.GET.KV_auriga-sessions",
+            "$JS.API.DIRECT.GET.KV_auriga-sessions",
+            "$JS.API.DIRECT.GET.KV_auriga-sessions.>",
+            "$JS.API.CONSUMER.>",
+            "$JS.ACK.>"
+          ] }
+          subscribe: { allow: [
+            "_INBOX.>",
+            "$KV.auriga-sessions.>",
+            "$KV.auriga-routes.>",
+            "auriga.evt.identity.session_revoked",
+            "_INBOX.>"
+          ] }
+        }
+      }
+    ]
+  }
+}
+
+system_account: SYS
+# Every client must authenticate (anonymous login disabled).

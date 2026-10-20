@@ -1,0 +1,29 @@
+# Build from repository root. Embeds portal + admin static assets for NAS.
+#   docker build -f deploy/nas/docker/Dockerfile.edge --platform=linux/amd64 .
+FROM node:22-bookworm AS web
+WORKDIR /src
+COPY package.json pnpm-workspace.yaml .npmrc ./
+COPY web ./web
+COPY clients ./clients
+COPY contracts ./contracts
+COPY tsconfig.base.json ./
+RUN corepack enable \
+  && corepack prepare pnpm@11.28.6 --activate \
+  && pnpm install --frozen-lockfile \
+  && pnpm gen:api \
+  && pnpm gen:steps \
+  && pnpm --filter @auriga/portal build \
+  && pnpm --filter @auriga/admin build
+
+FROM golang:1.27 AS gobuild
+WORKDIR /src/infra
+COPY infra/ ./
+WORKDIR /src/infra/edge
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-edge .
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=gobuild /out/auriga-edge /auriga-edge
+COPY --from=web /src/web/portal/dist /srv/auriga/static/portal
+COPY --from=web /src/web/admin/dist /srv/auriga/static/admin
+USER nonroot:nonroot
+ENTRYPOINT ["/auriga-edge"]
