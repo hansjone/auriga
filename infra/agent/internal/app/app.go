@@ -106,6 +106,8 @@ func runAgent(args []string, logs io.Writer) error {
 	configPath := fs.String("config", "", "optional JSON config path")
 	dataRoot := fs.String("data-root", "", "override data root")
 	allowInsecure := fs.Bool("allow-insecure", false, "allow grpc:// http:// (local dev only)")
+	ingressListen := fs.String("ingress-listen", "", "TCP listen for edge mTLS (multi-node); empty = local only")
+	ingressLocal := fs.String("ingress-local", "", "unix socket or Windows pipe name for single-node ingress")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -184,6 +186,13 @@ func runAgent(args []string, logs io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	stopIO, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal)
+	if err != nil {
+		return err
+	}
+	defer stopIO()
+
 	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)
 	return sess.Run(ctx)
 }
