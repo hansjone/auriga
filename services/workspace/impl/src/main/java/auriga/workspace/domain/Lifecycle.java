@@ -5,6 +5,9 @@ import java.time.Instant;
 
 /** Conservative decisions: missing or stale activity never authorizes reclamation. */
 public final class Lifecycle {
+  public static final Duration WAKE_LEAD = Duration.ofSeconds(120);
+  private static final Duration MAX_ALARM_IDLE_EXTENSION = WAKE_LEAD.multipliedBy(2);
+
   private Lifecycle() {}
 
   public static Instant latestActivity(
@@ -35,6 +38,18 @@ public final class Lifecycle {
   }
 
   public static boolean wake(Instant now, Instant nextWake) {
-    return nextWake != null && !nextWake.isAfter(now.plusSeconds(120));
+    return nextWake != null && !nextWake.isAfter(now.plus(WAKE_LEAD));
+  }
+
+  public static boolean alarmBudgetAvailable(Instant now, Instant activity, Duration timeout) {
+    return now.isBefore(activity.plus(timeout).plus(MAX_ALARM_IDLE_EXTENSION));
+  }
+
+  public static boolean alarmSoon(
+      Instant now, Instant nextWake, Instant activity, Duration timeout) {
+    return alarmBudgetAvailable(now, activity, timeout)
+        && nextWake != null
+        && nextWake.isAfter(now)
+        && !nextWake.isAfter(now.plus(WAKE_LEAD).plus(WAKE_LEAD));
   }
 }

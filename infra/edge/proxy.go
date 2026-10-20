@@ -25,17 +25,14 @@ var apiProxyTransport http.RoundTripper = &http.Transport{
 	ExpectContinueTimeout: 1 * time.Second,
 }
 
-func newReverseProxy(target *url.URL, tr http.RoundTripper) *httputil.ReverseProxy {
+func newReverseProxy(target *url.URL, tr http.RoundTripper, keepHost bool) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			// Keep the browser Host (portal/admin). IAM maps Host → tenant/audience;
-			// rewriting to the upstream IP breaks admin vs portal and cookie names.
-			virt := pr.In.Host
 			pr.SetURL(target)
-			if virt != "" {
-				pr.Out.Host = virt
-			} else {
-				pr.Out.Host = target.Host
+			pr.Out.Host = target.Host
+			// Only platform APIs need the browser Host for IAM tenant/audience routing.
+			if keepHost && pr.In.Host != "" {
+				pr.Out.Host = pr.In.Host
 			}
 		},
 		Transport: tr,

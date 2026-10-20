@@ -19,7 +19,7 @@ func TestListenLocalModes(t *testing.T) {
 		{"shared with group", os.Getgid(), 0o750, 0o660},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "run", "ingress.sock")
+			path := filepath.Join(t.TempDir(), "ingress", "ingress.sock")
 			ln, err := ListenLocal(path, tc.gid)
 			if err != nil {
 				t.Fatal(err)

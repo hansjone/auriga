@@ -305,7 +305,7 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 		r = r.WithContext(ctx)
 	}
 
-	proxy := newReverseProxy(target, apiProxyTransport)
+	proxy := newReverseProxy(target, apiProxyTransport, true)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
@@ -543,7 +543,7 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		r.Body = http.MaxBytesReader(w, r.Body, maxInstanceBodyBytes)
 	}
 
-	proxy := newReverseProxy(ingress, transport)
+	proxy := newReverseProxy(ingress, transport, false)
 	baseError := proxy.ErrorHandler
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		var tooLarge *http.MaxBytesError

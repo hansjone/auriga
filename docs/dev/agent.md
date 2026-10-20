@@ -1,5 +1,26 @@
 # 节点代理（agent）
 
+## Unix ingress 的组共享目录
+
+设置 `AURIGA_AGENT_INGRESS_LOCAL_GID` 后，socket 路径必须为绝对、规范化的
+`<parent>/ingress/ingress.sock`，例如 `/var/lib/auriga/ingress/ingress.sock`。
+`<parent>` 必须预先存在；从它到根的各级目录都必须为真实目录（禁止符号链接），
+由 agent 用户或 root 持有且不可被组或其他用户写入。root 所有的 sticky `/tmp`
+只允许作为更上层祖先，不能直接作为 `<parent>`。
+
+agent 只创建并授权专用的 `ingress` 子目录（0750）和 socket（0660），
+不会对数据根、`/run`、`/tmp` 等共享目录执行 chown/chmod。
+新建目录内留有 agent 所有、0600、单链接的空标记 `.auriga-ingress-v1`，
+重启仅接管带此标记且由当前 agent 用户持有、无组写及其他用户权限的目录。
+目录内仅允许该标记和 agent 所有的 socket；已有空目录也不会自动接管。
+不符合这些条件时启动失败，错误含 `unsafe shared ingress directory`。
+私有模式（未设置 gid）仍使用原来的路径和 0700/0600 权限。
+
+首次部署不要预建 `ingress` 目录；升级已有部署时先停 agent，将旧目录移到备份位置，
+保留其父目录，由 agent 重建专用目录。不要手工伪造标记来接管共享目录。
+edge 必须能逐级穿过父目录；只给 edge 所属的专用组配置该 gid。
+进程在创建标记之前异常退出可能留下不能接管的空目录，需停机检查后重新创建。
+
 `infra/agent` 是装在运行 DSH 实例的主机上的 Go 程序。进程名 `auriga-agent`。
 
 详细设计见 `docs/architecture/node-agent.zh.md`；契约见 `contracts/proto/auriga/node/v1/`。

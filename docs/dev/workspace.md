@@ -1,5 +1,33 @@
 # workspace 服务
 
+## 闹钟与闲置回收的上限
+
+临近闹钟仍在 `(当前时间, 当前时间 + 4 分钟]` 内保护运行中的实例，
+但只持续到 `last_activity_at + idleMinutes + 4 分钟`，到达该时刻立即失效。
+额外 4 分钟等于两倍预热提前量（2 分钟），允许一次预热及执行窗口，
+同时保证不断移动闹钟不能无限延长同一闲置期。只有实际活动或已有生命周期操作
+更新 `last_activity_at` 才改变该截止时间；上报闹钟不更新它。
+预算耗尽并满足双路新鲜空闲观测时，同时取消临近的唤醒作业（`due_at <= now + 2 分钟`），
+避免本轮或紧随其后的预热作业撤销回收；更远的定时唤醒仍保留。
+
+每个实例最多每 30 秒应用一次变更并重建闹钟作业。超频上报只覆盖单个持久化的
+待处理值（包含取消），窗口结束后由每 5 秒的决策循环应用最终值，不断开节点会话。
+这是调度处理的限流和合并：接收不同的超频值仍需更新一行，作业处理及新增数量有界。
+迁移 V3 添加 `wake_reported_at`、`wake_report_pending` 和 `pending_wake_at`，
+在实例行锁内读写，使多副本和服务重启共用限制；节点归属检查仍先执行。
+相同上报不写库，已消费的相同作业不复活。预算耗尽时也清除临近的待处理值，
+防止延后的报告撤销回收。取舍：窗口内的合法修改可能延迟约 30–35 秒生效，
+但最后一次编辑或取消无需 agent 再次修改文件或重报。
+
+## combined 开发种子保护
+
+`DevBootstrap` 同时要求 `auriga.platform.combined=true`、`auriga.platform.seed=true`
+以及显式启用 `dev` 或 `e2e` profile。缺少该 profile 时只记录 WARN 并立即返回，
+不会读取或写入种子数据、创建账号、提升 owner 权限或缩短闲置策略。
+真正执行种子时也记录 WARN。生产误开 seed 不会绕过 profile 条件。
+现有 CI Compose 的 `SPRING_PROFILES_ACTIVE=combined,dev` 和 dev 配置的 `seed: true`
+继续有效，无需增加环境变量；`e2e` profile 本身不隐式打开 seed。
+
 workspace 负责规格、容量预留、准入和生命周期决策。节点执行规格；控制面失联不会被解释成实例已停止。对外路径和数据模型来自 `contracts/openapi/workspace.yaml`，控制通道使用生成的 `auriga.node.v1` 消息。
 
 ## 装配

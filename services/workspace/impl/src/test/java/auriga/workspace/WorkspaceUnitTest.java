@@ -95,6 +95,34 @@ class WorkspaceUnitTest {
   }
 
   @Test
+  void movingAlarmsHaveAFixedFourMinuteIdleBudget() {
+    Instant activity = now.minusSeconds(1800);
+    Duration timeout = Duration.ofMinutes(30);
+    for (int seconds = 0; seconds < 240; seconds += 30) {
+      Instant tick = now.plusSeconds(seconds);
+      assertTrue(Lifecycle.alarmSoon(tick, tick.plusSeconds(240), activity, timeout));
+    }
+    Instant deadline = now.plusSeconds(240);
+    assertFalse(Lifecycle.alarmSoon(deadline, deadline.plusSeconds(1), activity, timeout));
+    assertFalse(
+        Lifecycle.alarmSoon(
+            deadline.plusSeconds(30), deadline.plusSeconds(240), activity, timeout));
+    // Real activity starts a new idle period; changing only the alarm does not.
+    assertTrue(Lifecycle.alarmSoon(deadline, deadline.plusSeconds(120), now, timeout));
+  }
+
+  @Test
+  void alarmProtectionRejectsStaleMissingAndDistantSchedules() {
+    Instant activity = now.minusSeconds(1800);
+    Duration timeout = Duration.ofMinutes(30);
+    assertFalse(Lifecycle.alarmSoon(now, null, activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(now, now.minusSeconds(1), activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(now, now, activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(now, now.plusSeconds(241), activity, timeout));
+    assertTrue(Lifecycle.alarmSoon(now, now.plusSeconds(240), activity, timeout));
+  }
+
+  @Test
   void wakeHasTwoMinuteLead() {
     assertTrue(Lifecycle.wake(now, now.plusSeconds(120)));
     assertFalse(Lifecycle.wake(now, now.plusSeconds(121)));

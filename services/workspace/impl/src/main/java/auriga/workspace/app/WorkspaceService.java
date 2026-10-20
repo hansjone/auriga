@@ -26,7 +26,9 @@ import tools.jackson.databind.json.JsonMapper;
 /** Transactional orchestration: changes desired specifications; only the node executes them. */
 public final class WorkspaceService {
   /** Wake jobs fire this long before the alarm so DSH is ready when it runs. */
-  static final Duration WAKE_LEAD = Duration.ofSeconds(120);
+  static final Duration WAKE_LEAD = Lifecycle.WAKE_LEAD;
+
+  static final Duration WAKE_REPORT_INTERVAL = Duration.ofSeconds(30);
 
   public static final JsonMapper JSON = JsonMapper.builder().build();
   public final WorkspaceStore store;
@@ -637,6 +639,11 @@ public final class WorkspaceService {
               store.jdbc.queryForList(
                   "SELECT * FROM instance WHERE tenant_id=? AND NOT deleted ORDER BY id FOR UPDATE",
                   tenant)) {
+            if (Boolean.TRUE.equals(row.get("wake_report_pending"))
+                && wakeReportAllowed(row, now)) {
+              applyWakeReport(row, instant(row, "pending_wake_at"), now);
+              row = store.instance((UUID) row.get("id"));
+            }
             UUID owner = (UUID) row.get("owner_id");
             var quota = inputs.quota(tenant, owner);
             if (inputs.member(tenant, owner).getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
@@ -693,11 +700,18 @@ public final class WorkspaceService {
             // Do not idle-stop an instance whose alarm is about to fire: the wake job
             // pre-warms WAKE_LEAD early and is consumed while the instance still runs.
             Instant nextWake = instant(row, "next_wake_at");
-            // Only a future alarm counts; a stale next_wake_at must not pin the instance.
+            // A moving alarm cannot extend this fixed deadline within one idle period.
+            boolean alarmBudgetAvailable =
+                Lifecycle.alarmBudgetAvailable(
+                    now,
+                    instant(row, "last_activity_at"),
+                    Duration.ofMinutes(policy.getIdleMinutes()));
             boolean alarmSoon =
-                nextWake != null
-                    && nextWake.isAfter(now)
-                    && !nextWake.isAfter(now.plus(WAKE_LEAD).plus(WAKE_LEAD));
+                Lifecycle.alarmSoon(
+                    now,
+                    nextWake,
+                    instant(row, "last_activity_at"),
+                    Duration.ofMinutes(policy.getIdleMinutes()));
             if (s.getDesired() == DesiredState.DESIRED_STATE_RUNNING
                 && !alarmSoon
                 && Lifecycle.idle(
@@ -708,8 +722,23 @@ public final class WorkspaceService {
                     instant(row, "cpu_seen_at"),
                     (boolean) row.get("cpu_active"),
                     (boolean) row.get("always_on"),
-                    Duration.ofMinutes(policy.getIdleMinutes())))
+                    Duration.ofMinutes(policy.getIdleMinutes()))) {
+              // Cancel imminent pre-warm jobs too, or the job loop could immediately undo
+              // the idle stop and reset last_activity_at in the same transaction.
+              if (!alarmBudgetAvailable) {
+                store.jdbc.update(
+                    "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done AND due_at<=?",
+                    tenant,
+                    row.get("id"),
+                    time(now.plus(WAKE_LEAD)));
+                store.jdbc.update(
+                    "UPDATE instance SET wake_report_pending=false,pending_wake_at=NULL WHERE tenant_id=? AND id=? AND wake_report_pending AND (pending_wake_at IS NULL OR pending_wake_at<=?)",
+                    tenant,
+                    row.get("id"),
+                    time(now.plus(WAKE_LEAD).plus(WAKE_LEAD)));
+              }
               desire(row, false, "idle", policy.getMaxConcurrentStarts());
+            }
           }
           for (var job :
               store.jdbc.queryForList(
@@ -770,29 +799,58 @@ public final class WorkspaceService {
                   id,
                   node);
           if (rows.isEmpty()) return null;
+          var row = rows.getFirst();
+          Instant now = clock.instant();
           Instant next =
               wake.hasNextWakeAt()
                   ? Instant.ofEpochSecond(
                       wake.getNextWakeAt().getSeconds(), wake.getNextWakeAt().getNanos())
                   : null;
-          store.jdbc.update(
-              "UPDATE instance SET next_wake_at=? WHERE tenant_id=? AND id=?",
-              time(next),
-              store.tenant(),
-              id);
-          store.jdbc.update(
-              "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done",
-              store.tenant(),
-              id);
-          if (next != null)
+          boolean pending = Boolean.TRUE.equals(row.get("wake_report_pending"));
+          Instant latest = instant(row, pending ? "pending_wake_at" : "next_wake_at");
+          if (Objects.equals(next, latest)) return null;
+          if (!wakeReportAllowed(row, now)) {
+            // Coalesce to a single durable trailing report. The agent only reports file
+            // changes, so dropping it would permanently lose a quick edit/cancellation.
             store.jdbc.update(
-                "INSERT INTO workspace_job(id,tenant_id,instance_id,kind,due_at) VALUES(?,?,?,'wake',?)",
-                UuidV7.next(clock),
+                "UPDATE instance SET pending_wake_at=?,wake_report_pending=true WHERE tenant_id=? AND id=?",
+                time(next),
                 store.tenant(),
-                id,
-                time(next.minus(WAKE_LEAD)));
+                id);
+            return null;
+          }
+          applyWakeReport(row, next, now);
           return null;
         });
+  }
+
+  private static boolean wakeReportAllowed(Map<String, Object> row, Instant now) {
+    Instant reportedAt = instant(row, "wake_reported_at");
+    return reportedAt == null || !now.isBefore(reportedAt.plus(WAKE_REPORT_INTERVAL));
+  }
+
+  // Called with the instance row locked, both from reports and the tenant decision loop.
+  private void applyWakeReport(Map<String, Object> row, Instant next, Instant now) {
+    UUID id = (UUID) row.get("id");
+    store.jdbc.update(
+        "UPDATE instance SET next_wake_at=?,wake_reported_at=?,wake_report_pending=false,pending_wake_at=NULL WHERE tenant_id=? AND id=?",
+        time(next),
+        time(now),
+        store.tenant(),
+        id);
+    // Repeated inventory reports of the same schedule must not grow the job table.
+    if (Objects.equals(next, instant(row, "next_wake_at"))) return;
+    store.jdbc.update(
+        "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done",
+        store.tenant(),
+        id);
+    if (next != null)
+      store.jdbc.update(
+          "INSERT INTO workspace_job(id,tenant_id,instance_id,kind,due_at) VALUES(?,?,?,'wake',?)",
+          UuidV7.next(clock),
+          store.tenant(),
+          id,
+          time(next.minus(WAKE_LEAD)));
   }
 
   public Map<String, Object> authenticateInstance(String token) {
