@@ -61,6 +61,30 @@ class WorkspaceUnitTest {
   }
 
   @Test
+  void idleTimeoutDoesNotReclaimOneMicrosecondEarly() {
+    Instant activity = now.minusSeconds(1800).plusNanos(123457000);
+    Instant boundary = activity.plusSeconds(1800);
+    assertFalse(
+        Lifecycle.idle(
+            boundary.minusNanos(1000),
+            activity,
+            boundary,
+            false,
+            boundary,
+            false,
+            false,
+            Duration.ofMinutes(30)));
+    assertTrue(
+        Lifecycle.idle(
+            boundary, activity, boundary, false, boundary, false, false, Duration.ofMinutes(30)));
+    // A nanosecond clock can still be before the boundary after the activity was rounded in DB.
+    Instant linuxNow = now.plusNanos(123456789);
+    assertFalse(
+        Lifecycle.idle(
+            linuxNow, activity, linuxNow, false, linuxNow, false, false, Duration.ofMinutes(30)));
+  }
+
+  @Test
   void alwaysOnAndRecentActivityPreventStop() {
     assertFalse(
         Lifecycle.idle(

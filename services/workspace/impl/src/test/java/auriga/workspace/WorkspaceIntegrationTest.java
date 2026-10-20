@@ -31,6 +31,8 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Real PostgreSQL + TLS gRPC fake node using only the generated protobuf protocol. */
@@ -511,8 +513,17 @@ class WorkspaceIntegrationTest {
         });
   }
 
-  @Test
-  void persistedLifecycleUsesClockAndDoesNotExecuteRuntimeCommands() throws Exception {
+  @ParameterizedTest
+  @ValueSource(ints = {0, 123456499, 123456500, 999999999})
+  void persistedLifecycleUsesClockAndDoesNotExecuteRuntimeCommands(int nanos) throws Exception {
+    // PostgreSQL stores microseconds and rounds finer timestamps. An exact timeout fixture
+    // must use representable instants: Linux Instant.now() can have sub-microsecond precision.
+    clock.now =
+        clock
+            .instant()
+            .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+            .plusNanos(nanos)
+            .truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
     UUID node = UUID.fromString(joined.getNodeId());
     TenantContext.run(
@@ -531,6 +542,16 @@ class WorkspaceIntegrationTest {
                       auriga.workspace.persistence.WorkspaceStore.time(clock.instant()),
                       tenant,
                       id));
+          assertEquals(
+              clock.instant().minusSeconds(1800),
+              auriga.workspace.persistence.WorkspaceStore.instant(
+                  store.tx(() -> store.instance(id)), "last_activity_at"));
+          clock.now = clock.now.minusNanos(1000);
+          service.tickTenant();
+          assertEquals(
+              DesiredState.DESIRED_STATE_RUNNING,
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getDesired());
+          clock.now = clock.now.plusNanos(1000);
           service.tickTenant();
           var stopped = store.tx(() -> store.instance(id));
           assertEquals(
