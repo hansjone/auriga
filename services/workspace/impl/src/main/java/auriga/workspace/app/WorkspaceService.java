@@ -693,8 +693,11 @@ public final class WorkspaceService {
             // Do not idle-stop an instance whose alarm is about to fire: the wake job
             // pre-warms WAKE_LEAD early and is consumed while the instance still runs.
             Instant nextWake = instant(row, "next_wake_at");
+            // Only a future alarm counts; a stale next_wake_at must not pin the instance.
             boolean alarmSoon =
-                nextWake != null && !nextWake.isAfter(now.plus(WAKE_LEAD).plus(WAKE_LEAD));
+                nextWake != null
+                    && nextWake.isAfter(now)
+                    && !nextWake.isAfter(now.plus(WAKE_LEAD).plus(WAKE_LEAD));
             if (s.getDesired() == DesiredState.DESIRED_STATE_RUNNING
                 && !alarmSoon
                 && Lifecycle.idle(

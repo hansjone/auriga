@@ -49,7 +49,7 @@ func newReverseProxy(target *url.URL, tr http.RoundTripper) *httputil.ReversePro
 func rewriteOutboundAPI(req *http.Request, clientIP, bearer, requestID, traceparent string) {
 	// Strip browser session cookies; keep non-auriga cookies only if any remain.
 	if c := req.Header.Get("Cookie"); c != "" {
-		stripped := stripAurigaCookies(c)
+		stripped := stripAurigaCookies(c, true)
 		if stripped == "" {
 			req.Header.Del("Cookie")
 		} else {
@@ -74,7 +74,7 @@ func rewriteOutboundInstance(req *http.Request, clientIP, identity, requestID, t
 	req.Header.Del("Auriga-Identity")
 	req.Header.Del("Authorization")
 	if c := req.Header.Get("Cookie"); c != "" {
-		stripped := stripAurigaCookies(c)
+		stripped := stripAurigaCookies(c, false)
 		if stripped == "" {
 			req.Header.Del("Cookie")
 		} else {

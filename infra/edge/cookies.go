@@ -37,7 +37,10 @@ func isWriteMethod(m string) bool {
 	}
 }
 
-func stripAurigaCookies(cookieHeader string) string {
+// stripAurigaCookies drops every auriga_* cookie. keepLoginTx keeps the login
+// transaction cookie, which only the platform API (IAM) may receive; instance
+// workloads must never see it.
+func stripAurigaCookies(cookieHeader string, keepLoginTx bool) string {
 	if cookieHeader == "" {
 		return ""
 	}
@@ -54,7 +57,7 @@ func stripAurigaCookies(cookieHeader string) string {
 		}
 		lname := strings.ToLower(name)
 		// Login binding cookies must reach IAM; edge does not terminate login_tx.
-		if lname == "auriga_login_tx" || lname == "__host-auriga_login_tx" {
+		if keepLoginTx && (lname == "auriga_login_tx" || lname == "__host-auriga_login_tx") {
 			kept = append(kept, p)
 			continue
 		}
