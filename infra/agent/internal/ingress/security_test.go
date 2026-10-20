@@ -52,7 +52,7 @@ func TestIdentity_FailClosedAndAudience(t *testing.T) {
 
 func TestProxy_SharedTransport(t *testing.T) {
 	s := New(Config{})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	a, b := s.newInstanceProxy(&Instance{}), s.newInstanceProxy(&Instance{})
 	if a.Transport != b.Transport {
 		t.Fatal("transport not shared")
@@ -105,7 +105,7 @@ func TestTicket_CleanPrefixReplayAndLifetime(t *testing.T) {
 func TestFiles_WriteLimitsDeleteRootAndMissing(t *testing.T) {
 	root := t.TempDir()
 	s := New(Config{MaxUploadBytes: 3})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	for _, declared := range []int64{4, -1} {
 		req := httptest.NewRequest("PUT", "/", strings.NewReader("1234"))
 		req.ContentLength = declared
@@ -145,7 +145,7 @@ func TestZip_UTF8AndLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(Config{MaxZipBytes: 3, MaxZipEntries: 2})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	w := httptest.NewRecorder()
 	if err := s.zipTree(w, root, "."); err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestFiles_RejectSymlinkWrite(t *testing.T) {
 		t.Skip(err)
 	}
 	s := New(Config{})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	err := s.writeFile(httptest.NewRecorder(), httptest.NewRequest("PUT", "/", strings.NewReader("bad")), root, "link/created/file")
 	if err == nil || !strings.Contains(err.Error(), CodePathEscape) {
 		t.Fatalf("write link: %v", err)

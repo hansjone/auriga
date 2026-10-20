@@ -30,7 +30,7 @@ func openWindowsBeneath(root, rel string, flags int, parents bool) (*os.File, er
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	parent, err := r.Open(".")
 	if err != nil {
 		return nil, err

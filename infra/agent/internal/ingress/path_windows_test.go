@@ -35,7 +35,7 @@ func TestWindows_JunctionRejected(t *testing.T) {
 		}
 	}
 	s := New(Config{})
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	err := s.writeFile(httptest.NewRecorder(), httptest.NewRequest("PUT", "/", strings.NewReader("bad")), root, "junction/new/file")
 	if err == nil || !strings.Contains(err.Error(), CodePathEscape) {
 		t.Fatalf("write: %v", err)

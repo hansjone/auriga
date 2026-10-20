@@ -266,7 +266,7 @@ func readSchedule(root, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, maxScheduleBytes+1))
 	if err != nil || len(raw) > maxScheduleBytes {
 		return nil, fmt.Errorf("invalid schedule file")
