@@ -134,6 +134,15 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	cpu, mem, pids := d.Policy.ClampResources(s.CPUMillis, s.MemoryMB, s.PIDs)
 	s.CPUMillis, s.MemoryMB, s.PIDs = cpu, mem, pids
 
+	env := make([]string, 0, len(s.Env))
+	for _, k := range sortedEnvKeys(s.Env) {
+		v := s.Env[k]
+		if err := validateEnvPair(k, v); err != nil {
+			return fmt.Errorf("docker: %w", err)
+		}
+		env = append(env, k+"="+v)
+	}
+
 	if err := d.Client.PullImage(ctx, s.Image); err != nil {
 		return err
 	}
@@ -154,11 +163,6 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	}
 	for k, v := range s.Labels {
 		labels["auriga.label."+k] = v
-	}
-
-	env := make([]string, 0, len(s.Env))
-	for k, v := range s.Env {
-		env = append(env, k+"="+v)
 	}
 
 	memBytes := mem * 1024 * 1024

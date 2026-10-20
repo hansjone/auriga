@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
 	"github.com/hansjone/auriga/infra/agent/internal/config"
@@ -154,9 +155,10 @@ func runAgent(args []string, logs io.Writer) error {
 		return err
 	}
 	driver := runtime.Driver(inner)
+	var prep *runtime.Preparing
 	if driverName != "fake" {
 		art := artifacts.New(cfg.ArtifactsDir(), pol)
-		prep := &runtime.Preparing{
+		prep = &runtime.Preparing{
 			Inner:       inner,
 			Specs:       store,
 			Artifacts:   art,
@@ -176,6 +178,15 @@ func runAgent(args []string, logs io.Writer) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if prep != nil {
+		gcEvery, err := artifactGCInterval()
+		if err != nil {
+			return err
+		}
+		prep.Log = logger
+		defer prep.StartGC(ctx, gcEvery)()
+	}
 
 	reg := ingress.NewMapRegistry()
 	targets := &observer.SliceTargets{}
@@ -206,6 +217,24 @@ func runAgent(args []string, logs io.Writer) error {
 
 	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)
 	return sess.Run(ctx)
+}
+
+// defaultArtifactGCInterval is how often cached artifacts are collected
+// besides the collection after each prepare.
+const defaultArtifactGCInterval = 6 * time.Hour
+
+// artifactGCInterval reads AURIGA_AGENT_ARTIFACT_GC_INTERVAL (Go duration,
+// "0" disables the periodic run).
+func artifactGCInterval() (time.Duration, error) {
+	raw := os.Getenv("AURIGA_AGENT_ARTIFACT_GC_INTERVAL")
+	if raw == "" {
+		return defaultArtifactGCInterval, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("AURIGA_AGENT_ARTIFACT_GC_INTERVAL: invalid duration %q", raw)
+	}
+	return d, nil
 }
 
 func ensureLayout(cfg config.Config) error {
