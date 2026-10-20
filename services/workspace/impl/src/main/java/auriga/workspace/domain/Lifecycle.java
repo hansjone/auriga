@@ -7,6 +7,8 @@ import java.time.Instant;
 public final class Lifecycle {
   public static final Duration WAKE_LEAD = Duration.ofSeconds(120);
   private static final Duration MAX_ALARM_IDLE_EXTENSION = WAKE_LEAD.multipliedBy(2);
+  public static final Duration MIN_STOPPED = Duration.ofSeconds(30);
+  public static final Duration MAX_WAKE_HORIZON = Duration.ofDays(400);
 
   private Lifecycle() {}
 
@@ -45,11 +47,43 @@ public final class Lifecycle {
     return now.isBefore(activity.plus(timeout).plus(MAX_ALARM_IDLE_EXTENSION));
   }
 
+  /**
+   * Whether an imminent alarm keeps a running instance up. Within one idle period any alarm counts
+   * until {@code activity + timeout + 4 min}; after that only an alarm already reported before that
+   * deadline and due at most 4 minutes past it still counts, so a moving alarm can never extend the
+   * period (absolute cap: {@code activity + timeout + 8 min}).
+   */
   public static boolean alarmSoon(
-      Instant now, Instant nextWake, Instant activity, Duration timeout) {
-    return alarmBudgetAvailable(now, activity, timeout)
-        && nextWake != null
-        && nextWake.isAfter(now)
-        && !nextWake.isAfter(now.plus(WAKE_LEAD).plus(WAKE_LEAD));
+      Instant now, Instant nextWake, Instant reportedAt, Instant activity, Duration timeout) {
+    if (nextWake == null
+        || !nextWake.isAfter(now)
+        || nextWake.isAfter(now.plus(MAX_ALARM_IDLE_EXTENSION))) return false;
+    if (alarmBudgetAvailable(now, activity, timeout)) return true;
+    Instant deadline = activity.plus(timeout).plus(MAX_ALARM_IDLE_EXTENSION);
+    return reportedAt != null
+        && reportedAt.isBefore(deadline)
+        && !nextWake.isAfter(deadline.plus(MAX_ALARM_IDLE_EXTENSION));
+  }
+
+  /**
+   * Due time of the single wake job kept when the idle deadline stops an instance whose alarm is
+   * still in the future: its pre-warm job may already have been consumed while running. Never
+   * earlier than {@link #MIN_STOPPED} from now, so the stop is not undone in the same decision
+   * loop. Returns null when no future alarm remains.
+   */
+  public static Instant rewakeDue(Instant now, Instant nextWake) {
+    if (nextWake == null || !nextWake.isAfter(now)) return null;
+    Instant due = nextWake.minus(WAKE_LEAD), earliest = now.plus(MIN_STOPPED);
+    return due.isBefore(earliest) ? earliest : due;
+  }
+
+  /**
+   * Accepted alarm reports: at most {@link #WAKE_LEAD} in the past (clock skew, report delay) and
+   * at most {@link #MAX_WAKE_HORIZON} ahead (yearly schedules). Null means no alarm.
+   */
+  public static boolean wakeInRange(Instant now, Instant nextWake) {
+    return nextWake == null
+        || !nextWake.isBefore(now.minus(WAKE_LEAD))
+            && !nextWake.isAfter(now.plus(MAX_WAKE_HORIZON));
   }
 }

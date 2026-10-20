@@ -100,26 +100,95 @@ class WorkspaceUnitTest {
     Duration timeout = Duration.ofMinutes(30);
     for (int seconds = 0; seconds < 240; seconds += 30) {
       Instant tick = now.plusSeconds(seconds);
-      assertTrue(Lifecycle.alarmSoon(tick, tick.plusSeconds(240), activity, timeout));
+      // Each tick re-reports the alarm, as a moving schedule would.
+      assertTrue(Lifecycle.alarmSoon(tick, tick.plusSeconds(240), tick, activity, timeout));
     }
     Instant deadline = now.plusSeconds(240);
-    assertFalse(Lifecycle.alarmSoon(deadline, deadline.plusSeconds(1), activity, timeout));
+    assertFalse(
+        Lifecycle.alarmSoon(deadline, deadline.plusSeconds(1), deadline, activity, timeout));
     assertFalse(
         Lifecycle.alarmSoon(
-            deadline.plusSeconds(30), deadline.plusSeconds(240), activity, timeout));
+            deadline.plusSeconds(30),
+            deadline.plusSeconds(240),
+            deadline.plusSeconds(30),
+            activity,
+            timeout));
     // Real activity starts a new idle period; changing only the alarm does not.
-    assertTrue(Lifecycle.alarmSoon(deadline, deadline.plusSeconds(120), now, timeout));
+    assertTrue(Lifecycle.alarmSoon(deadline, deadline.plusSeconds(120), deadline, now, timeout));
+  }
+
+  @Test
+  void alarmReportedBeforeTheDeadlineStillFiresButCannotMove() {
+    Instant activity = now.minusSeconds(1800);
+    Duration timeout = Duration.ofMinutes(30);
+    Instant deadline = now.plusSeconds(240);
+    // Review case: alarm at last_activity + idle + 241 s, reported before the deadline.
+    Instant alarm = activity.plus(timeout).plusSeconds(241);
+    Instant reported = now.plusSeconds(1);
+    assertTrue(Lifecycle.alarmSoon(deadline, alarm, reported, activity, timeout));
+    assertTrue(Lifecycle.alarmSoon(alarm.minusNanos(1000), alarm, reported, activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(alarm, alarm, reported, activity, timeout));
+    // Absolute cap: deadline + 4 minutes, even for an alarm known in time.
+    assertTrue(
+        Lifecycle.alarmSoon(deadline, deadline.plusSeconds(240), reported, activity, timeout));
+    assertFalse(
+        Lifecycle.alarmSoon(
+            deadline.plusSeconds(10), deadline.plusSeconds(241), reported, activity, timeout));
+    // Moving it after the deadline (new report time) drops the protection.
+    assertFalse(
+        Lifecycle.alarmSoon(
+            deadline.plusSeconds(30),
+            alarm.plusSeconds(60),
+            deadline.plusSeconds(30),
+            activity,
+            timeout));
+    assertFalse(Lifecycle.alarmSoon(deadline, alarm, null, activity, timeout));
+  }
+
+  @Test
+  void idleStopKeepsOneWakeJobForAFutureAlarm() {
+    assertNull(Lifecycle.rewakeDue(now, null));
+    assertNull(Lifecycle.rewakeDue(now, now));
+    assertNull(Lifecycle.rewakeDue(now, now.minusSeconds(1)));
+    // Pre-warm already consumed or imminent: never in this loop, at most 30 s later.
+    assertEquals(now.plusSeconds(30), Lifecycle.rewakeDue(now, now.plusSeconds(1)));
+    assertEquals(now.plusSeconds(30), Lifecycle.rewakeDue(now, now.plusSeconds(150)));
+    assertEquals(now.plusSeconds(60), Lifecycle.rewakeDue(now, now.plusSeconds(180)));
+    assertEquals(now.plusSeconds(3480), Lifecycle.rewakeDue(now, now.plusSeconds(3600)));
+  }
+
+  @Test
+  void wakeReportsOutsideTheAcceptedRangeAreRejected() {
+    assertTrue(Lifecycle.wakeInRange(now, null));
+    assertTrue(Lifecycle.wakeInRange(now, now.minusSeconds(120)));
+    assertFalse(Lifecycle.wakeInRange(now, now.minusSeconds(121)));
+    assertTrue(Lifecycle.wakeInRange(now, now.plus(Duration.ofDays(400))));
+    assertFalse(Lifecycle.wakeInRange(now, now.plus(Duration.ofDays(400)).plusSeconds(1)));
   }
 
   @Test
   void alarmProtectionRejectsStaleMissingAndDistantSchedules() {
     Instant activity = now.minusSeconds(1800);
     Duration timeout = Duration.ofMinutes(30);
-    assertFalse(Lifecycle.alarmSoon(now, null, activity, timeout));
-    assertFalse(Lifecycle.alarmSoon(now, now.minusSeconds(1), activity, timeout));
-    assertFalse(Lifecycle.alarmSoon(now, now, activity, timeout));
-    assertFalse(Lifecycle.alarmSoon(now, now.plusSeconds(241), activity, timeout));
-    assertTrue(Lifecycle.alarmSoon(now, now.plusSeconds(240), activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(now, null, now, activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(now, now.minusSeconds(1), now, activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(now, now, now, activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(now, now.plusSeconds(241), now, activity, timeout));
+    assertTrue(Lifecycle.alarmSoon(now, now.plusSeconds(240), now, activity, timeout));
+  }
+
+  @Test
+  void doneWakeJobsArePrunedByUuidV7CreationOrder() {
+    var clock = Clock.fixed(now, ZoneOffset.UTC);
+    UUID floor = auriga.workspace.app.WorkspaceService.uuidV7Floor(now);
+    UUID created = UuidV7.next(clock);
+    UUID earlier = UuidV7.next(Clock.fixed(now.minusMillis(1), ZoneOffset.UTC));
+    assertTrue(
+        Long.compareUnsigned(created.getMostSignificantBits(), floor.getMostSignificantBits())
+            >= 0);
+    assertTrue(
+        Long.compareUnsigned(earlier.getMostSignificantBits(), floor.getMostSignificantBits()) < 0);
+    assertEquals(7, floor.version());
   }
 
   @Test

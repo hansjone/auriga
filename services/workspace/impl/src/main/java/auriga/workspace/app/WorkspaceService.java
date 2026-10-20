@@ -30,6 +30,9 @@ public final class WorkspaceService {
 
   static final Duration WAKE_REPORT_INTERVAL = Duration.ofSeconds(30);
 
+  /** Done wake jobs are kept briefly for diagnosis, then deleted by the decision loop. */
+  static final Duration DONE_WAKE_RETENTION = Duration.ofDays(1);
+
   public static final JsonMapper JSON = JsonMapper.builder().build();
   public final WorkspaceStore store;
   private final WorkspaceInputs inputs;
@@ -710,6 +713,7 @@ public final class WorkspaceService {
                 Lifecycle.alarmSoon(
                     now,
                     nextWake,
+                    instant(row, "wake_reported_at"),
                     instant(row, "last_activity_at"),
                     Duration.ofMinutes(policy.getIdleMinutes()));
             if (s.getDesired() == DesiredState.DESIRED_STATE_RUNNING
@@ -723,19 +727,23 @@ public final class WorkspaceService {
                     (boolean) row.get("cpu_active"),
                     (boolean) row.get("always_on"),
                     Duration.ofMinutes(policy.getIdleMinutes()))) {
-              // Cancel imminent pre-warm jobs too, or the job loop could immediately undo
-              // the idle stop and reset last_activity_at in the same transaction.
+              // The deadline overrode an alarm reported too late to be protected. Keep exactly
+              // one wake job for it: its pre-warm may already have been consumed while the
+              // instance ran, and an imminent one must not undo this stop in the same loop.
+              // A trailing pending report is applied later and replaces this job as usual.
               if (!alarmBudgetAvailable) {
                 store.jdbc.update(
-                    "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done AND due_at<=?",
+                    "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done",
                     tenant,
-                    row.get("id"),
-                    time(now.plus(WAKE_LEAD)));
-                store.jdbc.update(
-                    "UPDATE instance SET wake_report_pending=false,pending_wake_at=NULL WHERE tenant_id=? AND id=? AND wake_report_pending AND (pending_wake_at IS NULL OR pending_wake_at<=?)",
-                    tenant,
-                    row.get("id"),
-                    time(now.plus(WAKE_LEAD).plus(WAKE_LEAD)));
+                    row.get("id"));
+                Instant due = Lifecycle.rewakeDue(now, nextWake);
+                if (due != null)
+                  store.jdbc.update(
+                      "INSERT INTO workspace_job(id,tenant_id,instance_id,kind,due_at) VALUES(?,?,?,'wake',?)",
+                      UuidV7.next(clock),
+                      tenant,
+                      row.get("id"),
+                      time(due));
               }
               desire(row, false, "idle", policy.getMaxConcurrentStarts());
             }
@@ -783,6 +791,12 @@ public final class WorkspaceService {
                 tenant,
                 job.get("id"));
           }
+          // Finished wake jobs are never read again; ids are UUIDv7, so the id order is the
+          // creation order and also covers cancelled jobs whose due_at is far in the future.
+          store.jdbc.update(
+              "DELETE FROM workspace_job WHERE tenant_id=? AND kind='wake' AND done AND id<?",
+              tenant,
+              uuidV7Floor(now.minus(DONE_WAKE_RETENTION)));
           notifyCommitted();
           return null;
         });
@@ -806,6 +820,11 @@ public final class WorkspaceService {
                   ? Instant.ofEpochSecond(
                       wake.getNextWakeAt().getSeconds(), wake.getNextWakeAt().getNanos())
                   : null;
+          if (!Lifecycle.wakeInRange(now, next)) {
+            org.slf4j.LoggerFactory.getLogger(getClass())
+                .debug("wake report for {} ignored: next_wake_at out of range", id);
+            return null;
+          }
           boolean pending = Boolean.TRUE.equals(row.get("wake_report_pending"));
           Instant latest = instant(row, pending ? "pending_wake_at" : "next_wake_at");
           if (Objects.equals(next, latest)) return null;
@@ -822,6 +841,11 @@ public final class WorkspaceService {
           applyWakeReport(row, next, now);
           return null;
         });
+  }
+
+  /** Smallest UUIDv7 created at {@code at}; PostgreSQL compares uuids bytewise. */
+  public static UUID uuidV7Floor(Instant at) {
+    return new UUID((at.toEpochMilli() & 0xFFFFFFFFFFFFL) << 16 | 0x7000L, 0x8000000000000000L);
   }
 
   private static boolean wakeReportAllowed(Map<String, Object> row, Instant now) {
