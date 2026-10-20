@@ -1,11 +1,12 @@
 import { standalone } from './modes/standalone.js';
 import { managed } from './modes/managed.js';
 import { connect } from './modes/connect.js';
+import { PROTOCOL_VERSION } from './managed/protocol.js';
 
 /** @typedef {import('./generated/steps').ClientStep} ClientStep */
 /** @typedef {'standalone' | 'managed' | 'connect'} Mode */
 
-export const PROTOCOL_VERSION = 1;
+export { PROTOCOL_VERSION };
 
 /** @param {NodeJS.ProcessEnv} [env] @returns {Mode} */
 export function selectMode(env = process.env) {
@@ -16,7 +17,7 @@ export function selectMode(env = process.env) {
 }
 
 /**
- * Select a mode placeholder. Standalone hosts should call `.create(options)` for the auth runtime.
+ * Select a mode placeholder. Standalone / managed hosts call `.create(options)`.
  * @param {NodeJS.ProcessEnv} [env]
  */
 export default function initialize(env = process.env) {
@@ -33,6 +34,7 @@ export {
   generateTotpSecret,
   totpCode,
 } from './modes/standalone.js';
+export { createManaged } from './modes/managed.js';
 export { createEmergencyConnector } from './identity/emergency.js';
 export { createOidcConnector } from './identity/oidc.js';
 export {
@@ -44,3 +46,28 @@ export {
   publicAddress,
   localHost,
 } from './identity/oidc-http.js';
+export {
+  verifyIdentityHeader,
+  createDoorLock,
+  createReplayCache,
+} from './managed/door.js';
+export {
+  NATIVE_PLUGIN_MUTATIONS,
+  guardPluginManager,
+  guardWorkspaceRegistry,
+  isNativePluginManageRequest,
+  assertWorkspaceCreatePath,
+  DEFAULT_WORKSPACE_ROOT,
+} from './managed/guards.js';
+export { createActivityProbe } from './managed/activity.js';
+export { buildHealthBody, HEALTH_PATH } from './managed/health.js';
+export {
+  createAurigaSdk,
+  provideAurigaSdk,
+  SDK_VERSION,
+} from './managed/sdk.js';
+export {
+  checkProtocol,
+  protocolInfo,
+  MIN_SUPPORTED_PROTOCOL,
+} from './managed/protocol.js';

@@ -17,10 +17,12 @@ export default [
         URL: 'readonly',
         URLSearchParams: 'readonly',
         clearTimeout: 'readonly',
+        clearInterval: 'readonly',
         console: 'readonly',
         fetch: 'readonly',
         process: 'readonly',
         setTimeout: 'readonly',
+        setInterval: 'readonly',
       },
     },
     rules: {
@@ -28,6 +30,20 @@ export default [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+    },
+  },
+  {
+    files: ['src/client.js'],
+    languageOptions: {
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        customElements: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        console: 'readonly',
+        URL: 'readonly',
+      },
     },
   },
 ];

@@ -4,5 +4,6 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src/**/*.js", "src/**/*.d.ts"]
+  "include": ["src/**/*.js", "src/**/*.d.ts"],
+  "exclude": ["src/client.js"]
 }
