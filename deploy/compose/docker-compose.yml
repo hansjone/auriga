@@ -21,7 +21,8 @@ services:
       retries: 30
 
   nats:
-    image: nats:2.10
+    # alpine variant: official scratch image has no wget for healthchecks
+    image: nats:2.10-alpine
     command: ["-c", "/etc/nats/nats.conf"]
     ports:
       - "4222:4222"
