@@ -15,6 +15,9 @@ import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Node authentication is exclusively mTLS; intentionally separate from internal JWT gRPC. */
 public final class NodeSessions implements AutoCloseable {
@@ -22,11 +25,32 @@ public final class NodeSessions implements AutoCloseable {
   private final NodeEnrollment enrollment;
   private final WorkspaceService workspace;
   private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
+  private final ExecutorService notifications =
+      Executors.newSingleThreadExecutor(
+          Thread.ofVirtual().name("workspace-node-dispatch").factory());
+  private final AtomicBoolean dispatchPending = new AtomicBoolean();
 
   public NodeSessions(NodeEnrollment enrollment, WorkspaceService workspace) {
     this.enrollment = enrollment;
     this.workspace = workspace;
-    workspace.onChanged(this::dispatch);
+    // afterCommit still holds the caller's connection until cleanup. Never wait for another
+    // connection there; one coalesced worker dispatches after the caller can return its connection.
+    workspace.onChanged(
+        () -> {
+          if (!dispatchPending.compareAndSet(false, true)) return;
+          try {
+            notifications.execute(
+                () -> {
+                  try {
+                    dispatch();
+                  } finally {
+                    dispatchPending.set(false);
+                  }
+                });
+          } catch (java.util.concurrent.RejectedExecutionException e) {
+            dispatchPending.set(false);
+          }
+        });
     workspace.onNodeRevoked(this::revoke);
   }
 
@@ -103,6 +127,7 @@ public final class NodeSessions implements AutoCloseable {
 
   @Override
   public void close() {
+    notifications.shutdownNow();
     for (var s : List.copyOf(sessions.values()))
       s.fail(new AurigaException(CommonErrors.UNAVAILABLE));
   }
@@ -292,7 +317,7 @@ public final class NodeSessions implements AutoCloseable {
         fail(e);
         return;
       }
-      fail(new AurigaException(CommonErrors.UNAVAILABLE));
+      for (var delivery : overdue) inFlight.remove(delivery.id());
     }
 
     synchronized void dispatch() {

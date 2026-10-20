@@ -52,6 +52,10 @@ public final class NodeEnrollment {
   }
 
   public Token createToken(String name, int minutes, UUID actor) {
+    return saveToken(prepareToken(name, minutes, actor));
+  }
+
+  Token prepareToken(String name, int minutes, UUID actor) {
     valid(minutes >= 5 && minutes <= 1440 && (name == null || name.length() <= 64));
     UUID id = UuidV7.next(clock), tenant = store.tenant();
     store.register(tenant, "tenant", tenant);
@@ -60,17 +64,6 @@ public final class NodeEnrollment {
         Base64.getUrlEncoder().withoutPadding().encodeToString(WorkspaceCrypto.random(32));
     var now = clock.instant();
     var expires = now.plusSeconds(minutes * 60L);
-    store.tx(
-        () ->
-            store.jdbc.update(
-                "INSERT INTO join_token(id,tenant_id,name,secret_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
-                id,
-                tenant,
-                name,
-                WorkspaceCrypto.hash(secret),
-                time(expires),
-                actor,
-                time(now)));
     String token = id + "." + secret;
     return new Token(
         id,
@@ -86,6 +79,21 @@ public final class NodeEnrollment {
         actor,
         now,
         expires);
+  }
+
+  Token saveToken(Token token) {
+    store.tx(
+        () ->
+            store.jdbc.update(
+                "INSERT INTO join_token(id,tenant_id,name,secret_hash,expires_at,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
+                token.id(),
+                store.tenant(),
+                token.name(),
+                WorkspaceCrypto.hash(token.token().substring(37)),
+                time(token.expiresAt()),
+                token.createdBy(),
+                time(token.createdAt())));
+    return token;
   }
 
   public JoinResponse join(JoinRequest request) {
@@ -106,22 +114,19 @@ public final class NodeEnrollment {
     }
     UUID tenant = store.route(tokenId, "token");
     UUID node = UuidV7.next(clock);
+    // Authenticate before preparing metadata, then recheck under the consumption lock below.
+    store.in(
+        tenant,
+        () -> {
+          checkToken(tokenId, secret, tenant, false);
+          return null;
+        });
+    store.register(node, "node", tenant);
     JoinResponse response =
         store.in(
             tenant,
             () -> {
-              var tokens =
-                  store.jdbc.queryForList(
-                      "SELECT * FROM join_token WHERE tenant_id=? AND id=? FOR UPDATE",
-                      tenant,
-                      tokenId);
-              if (tokens.isEmpty()) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
-              var token = tokens.getFirst();
-              if (token.get("used_at") != null
-                  || !instant(token, "expires_at").isAfter(clock.instant())
-                  || !MessageDigest.isEqual(
-                      (byte[]) token.get("secret_hash"), WorkspaceCrypto.hash(secret)))
-                throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+              checkToken(tokenId, secret, tenant, true);
               valid(
                   request.getSealingPublicKey().size() == 32
                       && !request.getSealingPublicKey().equals(ByteString.copyFrom(new byte[32])));
@@ -139,7 +144,6 @@ public final class NodeEnrollment {
                       && request.getHostname().length() <= 255
                       && request.getAgentVersion().length() <= 128);
               X509Certificate leaf = ca.issue(request.getCsr().toByteArray(), node);
-              store.register(node, "node", tenant);
               store.jdbc.update(
                   "UPDATE join_token SET used_at=? WHERE tenant_id=? AND id=?",
                   time(clock.instant()),
@@ -168,6 +172,20 @@ public final class NodeEnrollment {
                   .build();
             });
     return response;
+  }
+
+  private void checkToken(UUID tokenId, String secret, UUID tenant, boolean lock) {
+    var tokens =
+        store.jdbc.queryForList(
+            "SELECT * FROM join_token WHERE tenant_id=? AND id=?" + (lock ? " FOR UPDATE" : ""),
+            tenant,
+            tokenId);
+    if (tokens.isEmpty()) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    var token = tokens.getFirst();
+    if (token.get("used_at") != null
+        || !instant(token, "expires_at").isAfter(clock.instant())
+        || !MessageDigest.isEqual((byte[]) token.get("secret_hash"), WorkspaceCrypto.hash(secret)))
+      throw new AurigaException(CommonErrors.UNAUTHENTICATED);
   }
 
   public UUID identity(X509Certificate leaf) {

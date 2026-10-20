@@ -254,6 +254,38 @@ class WorkspaceHardeningTest {
   }
 
   @Test
+  void registryRejectsNestedRegistrationBeforeBorrowingConnection() {
+    var connections = new AtomicInteger();
+    var dataSource =
+        new AbstractDataSource() {
+          public Connection getConnection() throws SQLException {
+            connections.incrementAndGet();
+            throw new SQLException("No connection expected");
+          }
+
+          public Connection getConnection(String user, String password) throws SQLException {
+            return getConnection();
+          }
+        };
+    var store =
+        new WorkspaceStore(new JdbcTemplate(dataSource), new TenantTransactionManager(dataSource));
+    boolean previous =
+        org.springframework.transaction.support.TransactionSynchronizationManager
+            .isActualTransactionActive();
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .setActualTransactionActive(true);
+    try {
+      assertThrows(
+          IllegalStateException.class,
+          () -> store.register(UUID.randomUUID(), "instance", UUID.randomUUID()));
+      assertEquals(0, connections.get());
+    } finally {
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .setActualTransactionActive(previous);
+    }
+  }
+
+  @Test
   void sseLimitsArePerUserGlobalAndReleasedOnlyOnce() {
     var slots = new SseLimits();
     List<Runnable> releases = new ArrayList<>();

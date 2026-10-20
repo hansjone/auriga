@@ -183,27 +183,121 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
-  void platformRegistryWorksInsideTenantTransactionAndSeparatesResourceKinds() {
+  void platformRegistryRequiresRegistrationBeforeTenantTransactionAndSeparatesResourceKinds() {
     UUID id = UuidV7.next();
+    store.register(id, "instance", tenant);
+    store.register(id, "instance", tenant);
+    assertEquals(tenant, store.route(id, "instance"));
+    assertEquals(
+        "common.unauthenticated",
+        assertThrows(AurigaException.class, () -> store.route(id, "token")).errorCode().code());
     TenantContext.run(
         tenant,
         () ->
             store.tx(
                 () -> {
-                  store.register(id, "instance", tenant);
-                  store.register(id, "instance", tenant);
+                  assertThrows(
+                      IllegalStateException.class, () -> store.register(id, "instance", tenant));
                   assertEquals(
                       0L,
                       store.jdbc.queryForObject(
                           "SELECT count(*) FROM workspace_registry WHERE id=?", Long.class, id));
-                  assertEquals(tenant, store.route(id, "instance"));
-                  assertEquals(
-                      "common.unauthenticated",
-                      assertThrows(AurigaException.class, () -> store.route(id, "token"))
-                          .errorCode()
-                          .code());
                   return null;
                 }));
+  }
+
+  WorkspaceService serviceFor(WorkspaceStore target) {
+    return new WorkspaceService(
+        target,
+        inputs,
+        service.templates,
+        new WorkspaceCrypto(WorkspaceCrypto.random(32)),
+        new OutboxEventPublisher(
+            target.jdbc,
+            "workspace",
+            "workspace",
+            new EventSchemas(),
+            WorkspaceService.JSON,
+            clock,
+            () -> {}),
+        clock);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {1, 2})
+  void concurrentOpenJoinAndIdempotentTokensOutnumberPoolWithoutDeadlock(int poolSize)
+      throws Exception {
+    policy.setMaxConcurrentStarts(100);
+    List<JoinRequest> requests = new ArrayList<>();
+    for (int i = 0; i < 4; i++) requests.add(joinRequest(token().token(), TestPki.key()));
+    try (var pool = new com.zaxxer.hikari.HikariDataSource()) {
+      pool.setDataSource(store.jdbc.getDataSource());
+      pool.setMaximumPoolSize(poolSize);
+      pool.setMinimumIdle(0);
+      pool.setConnectionTimeout(2000);
+      var small = new WorkspaceStore(new JdbcTemplate(pool), new TenantTransactionManager(pool));
+      var app = serviceFor(small);
+      var nodes = new NodeEnrollment(small, ca, clock, "https://127.0.0.1:7443", List.of());
+      try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+        CountDownLatch ready = new CountDownLatch(12), start = new CountDownLatch(1);
+        List<Future<String>> futures = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+          int index = i;
+          futures.add(
+              workers.submit(
+                  () -> {
+                    ready.countDown();
+                    assertTrue(start.await(10, TimeUnit.SECONDS));
+                    return TenantContext.call(
+                        tenant,
+                        () -> {
+                          if (index % 3 == 0) {
+                            UUID account = UuidV7.next();
+                            var opened = app.open(account);
+                            assertEquals(
+                                opened.instance().get("id"),
+                                app.open(account).instance().get("id"));
+                            return opened.instance().get("id").toString();
+                          }
+                          if (index % 3 == 1)
+                            return nodes.join(requests.get(index / 3)).getNodeId();
+                          return app.joinToken(nodes, "concurrent", 5, owner, "concurrent-key")
+                              .token();
+                        });
+                  }));
+        }
+        assertTrue(ready.await(10, TimeUnit.SECONDS));
+        start.countDown();
+        Set<String> credentials = new HashSet<>();
+        for (int i = 0; i < futures.size(); i++) {
+          String value = futures.get(i).get(20, TimeUnit.SECONDS);
+          if (i % 3 == 2) credentials.add(value);
+        }
+        assertEquals(1, credentials.size());
+      }
+      assertEquals(
+          4L,
+          small.in(
+              tenant,
+              () ->
+                  small.jdbc.queryForObject(
+                      "SELECT count(*) FROM instance WHERE tenant_id=?", Long.class, tenant)));
+      assertEquals(
+          4L,
+          small.in(
+              tenant,
+              () ->
+                  small.jdbc.queryForObject(
+                      "SELECT count(*) FROM node WHERE tenant_id=?", Long.class, tenant)));
+      assertEquals(
+          5L,
+          small.in(
+              tenant,
+              () ->
+                  small.jdbc.queryForObject(
+                      "SELECT count(*) FROM join_token WHERE tenant_id=?", Long.class, tenant)));
+      assertEquals(0, pool.getHikariPoolMXBean().getActiveConnections());
+    }
   }
 
   @Test
@@ -330,6 +424,123 @@ class WorkspaceIntegrationTest {
         });
     assertTrue(lease.guard(() -> delivery.claim(node, holder, Set.of())).isEmpty());
     lease.release();
+  }
+
+  @Test
+  @ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+  void commandTimeoutKeepsSessionAndExhaustedDeleteLogsWithoutReleasingCapacity(
+      org.springframework.boot.test.system.CapturedOutput logs) throws Exception {
+    var request = joinRequest(token().token(), TestPki.key());
+    var joined = enrollment.join(request);
+    UUID node = UUID.fromString(joined.getNodeId());
+    var fake = new FakeNode();
+    var context =
+        Context.current()
+            .withValue(NodeSessions.PEER, NodeCa.parse(joined.getCertificateChain().toByteArray()));
+    var stream = context.call(() -> sessions.session(fake));
+    stream.onNext(
+        SessionRequest.newBuilder()
+            .setHello(
+                Hello.newBuilder()
+                    .setNodeId(node.toString())
+                    .setProtocolVersion(1)
+                    .setSealingKeyId(
+                        HexFormat.of()
+                            .formatHex(
+                                WorkspaceCrypto.hash(request.getSealingPublicKey().toByteArray()))
+                            .substring(0, 16)))
+            .build());
+    assertTrue(fake.next().hasWelcome());
+    stream.onNext(SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    store.in(
+        tenant,
+        () ->
+            store.jdbc.update(
+                "UPDATE instance SET node_id=? WHERE tenant_id=? AND id=?",
+                node,
+                tenant,
+                instance));
+    TenantContext.run(tenant, () -> service.operate(instance, actor(), "restart"));
+    sessions.dispatch();
+    SessionResponse frame;
+    do {
+      frame = fake.next();
+    } while (!frame.hasCommand());
+    String commandId = frame.getCommand().getCommandId();
+    clock.now = clock.now.plusSeconds(121);
+    stream.onNext(SessionRequest.newBuilder().setUsage(NodeUsage.getDefaultInstance()).build());
+    sessions.expire();
+    assertFalse(fake.error.isDone());
+    var timedOut =
+        store.in(
+            tenant,
+            () ->
+                store.one(
+                    "SELECT * FROM workspace_job WHERE tenant_id=? AND id=?",
+                    tenant,
+                    UUID.fromString(commandId)));
+    assertEquals("common.unavailable", timedOut.get("last_error"));
+    assertEquals(false, timedOut.get("done"));
+    clock.now = clock.now.plusSeconds(6);
+    sessions.dispatch();
+    do {
+      frame = fake.next();
+    } while (!frame.hasCommand());
+    assertEquals(commandId, frame.getCommand().getCommandId());
+    stream.onNext(
+        SessionRequest.newBuilder()
+            .setResult(
+                CommandResult.newBuilder()
+                    .setCommandId(commandId)
+                    .setInstanceId(instance.toString())
+                    .setOk(true))
+            .build());
+    assertFalse(fake.error.isDone());
+    TenantContext.run(
+        tenant, () -> new WorkspaceAdmin(service, inputs).delete(instance, false, owner));
+    UUID deletion =
+        store.in(
+            tenant,
+            () ->
+                store.jdbc.queryForObject(
+                    "SELECT id FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='delete'",
+                    UUID.class,
+                    tenant,
+                    instance));
+    for (int i = 0; i < 5; i++) {
+      sessions.dispatch();
+      do {
+        frame = fake.next();
+      } while (!frame.hasDelete());
+      clock.now = clock.now.plusSeconds(121);
+      stream.onNext(SessionRequest.newBuilder().setUsage(NodeUsage.getDefaultInstance()).build());
+      sessions.expire();
+      assertFalse(fake.error.isDone());
+      clock.now = clock.now.plusSeconds(81);
+      // Heartbeat before expiration checks: this test isolates command timeouts from liveness.
+      stream.onNext(SessionRequest.newBuilder().setUsage(NodeUsage.getDefaultInstance()).build());
+    }
+    var failed =
+        store.in(
+            tenant,
+            () ->
+                store.one(
+                    "SELECT * FROM workspace_job WHERE tenant_id=? AND id=?", tenant, deletion));
+    assertEquals(true, failed.get("failed"));
+    assertEquals(5, ((Number) failed.get("attempts")).intValue());
+    assertTrue(logs.getAll().contains("Node deletion exhausted retries:"));
+    assertTrue(logs.getAll().contains(deletion.toString()));
+    assertEquals(
+        "deleting",
+        store.in(
+            tenant,
+            () ->
+                store
+                    .one("SELECT * FROM instance WHERE tenant_id=? AND id=?", tenant, instance)
+                    .get("phase")));
+    stream.onCompleted();
   }
 
   @Test

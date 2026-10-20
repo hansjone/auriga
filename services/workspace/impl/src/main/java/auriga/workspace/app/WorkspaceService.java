@@ -78,31 +78,22 @@ public final class WorkspaceService {
       NodeEnrollment enrollment, String name, int minutes, UUID actor, String key) {
     if (key == null) return enrollment.createToken(name, minutes, actor);
     valid(!key.isBlank() && key.length() <= 256);
+    String aad =
+        store.tenant()
+            + "/"
+            + actor
+            + "/join/"
+            + HexFormat.of().formatHex(WorkspaceCrypto.hash(key));
+    byte[] hash = WorkspaceCrypto.hash(JSON.writeValueAsBytes(Arrays.asList(name, minutes)));
+    var existing = store.tx(() -> savedJoinToken(actor, key, hash, aad));
+    if (existing != null) return existing;
+    var prepared = enrollment.prepareToken(name, minutes, actor);
     return store.tx(
         () -> {
           store.lock();
-          String aad =
-              store.tenant()
-                  + "/"
-                  + actor
-                  + "/join/"
-                  + HexFormat.of().formatHex(WorkspaceCrypto.hash(key));
-          byte[] hash = WorkspaceCrypto.hash(JSON.writeValueAsBytes(Arrays.asList(name, minutes)));
-          var saved =
-              store.jdbc.queryForList(
-                  "SELECT * FROM workspace_request WHERE tenant_id=? AND actor_id=? AND request_key=? AND expires_at>?",
-                  store.tenant(),
-                  actor,
-                  WorkspaceCrypto.hash(key),
-                  time(clock.instant()));
-          if (!saved.isEmpty()) {
-            var row = saved.getFirst();
-            if (!java.security.MessageDigest.isEqual(hash, (byte[]) row.get("request_hash")))
-              throw new AurigaException(CommonErrors.CONFLICT);
-            return JSON.readValue(
-                crypto.decrypt((byte[]) row.get("response"), aad), NodeEnrollment.Token.class);
-          }
-          var token = enrollment.createToken(name, minutes, actor);
+          var saved = savedJoinToken(actor, key, hash, aad);
+          if (saved != null) return saved;
+          var token = enrollment.saveToken(prepared);
           store.jdbc.update(
               "INSERT INTO workspace_request(id,tenant_id,actor_id,request_key,request_hash,response,expires_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(tenant_id,actor_id,request_key) DO UPDATE SET request_hash=excluded.request_hash,response=excluded.response,expires_at=excluded.expires_at",
               UuidV7.next(clock),
@@ -114,6 +105,22 @@ public final class WorkspaceService {
               time(clock.instant().plusSeconds(86400)));
           return token;
         });
+  }
+
+  private NodeEnrollment.Token savedJoinToken(UUID actor, String key, byte[] hash, String aad) {
+    var rows =
+        store.jdbc.queryForList(
+            "SELECT * FROM workspace_request WHERE tenant_id=? AND actor_id=? AND request_key=? AND expires_at>?",
+            store.tenant(),
+            actor,
+            WorkspaceCrypto.hash(key),
+            time(clock.instant()));
+    if (rows.isEmpty()) return null;
+    var row = rows.getFirst();
+    if (!java.security.MessageDigest.isEqual(hash, (byte[]) row.get("request_hash")))
+      throw new AurigaException(CommonErrors.CONFLICT);
+    return JSON.readValue(
+        crypto.decrypt((byte[]) row.get("response"), aad), NodeEnrollment.Token.class);
   }
 
   private void notifyCommitted() {
@@ -146,6 +153,16 @@ public final class WorkspaceService {
     var policy = inputs.policy(tenant);
     if (quota.hasMaxInstances() && quota.getMaxInstances() == 0)
       throw new AurigaException(NOT_ALLOWED);
+    var ids =
+        store.tx(
+            () ->
+                store.jdbc.queryForList(
+                    "SELECT id FROM instance WHERE tenant_id=? AND owner_id=? AND NOT deleted",
+                    UUID.class,
+                    tenant,
+                    owner));
+    UUID id = ids.isEmpty() ? UuidV7.next(clock) : ids.getFirst();
+    store.register(id, "instance", tenant);
     return store.tx(
         () -> {
           store.lock();
@@ -159,9 +176,9 @@ public final class WorkspaceService {
             desire(row, true, "user", policy.getMaxConcurrentStarts());
             return new Open(store.instance((UUID) row.get("id")), false);
           }
+          // A concurrent delete invalidated the preflight ID; retry with a fresh route.
+          if (!ids.isEmpty()) throw new AurigaException(CommonErrors.CONFLICT);
           admission(policy.getMaxConcurrentStarts());
-          UUID id = UuidV7.next(clock);
-          store.register(id, "instance", tenant);
           InstanceSpec base =
               templates.get(defaultVersion(policy.getDefaultDshVersion()), null, null, null);
           Resources resources = resources(base.getResources(), quota);

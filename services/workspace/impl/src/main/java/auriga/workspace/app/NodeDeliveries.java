@@ -30,13 +30,17 @@ public final class NodeDeliveries {
   public List<Delivery> claim(UUID node, UUID session, Set<UUID> inFlight) {
     List<Delivery> deliveries = new ArrayList<>();
     // A disconnect after the final send must still reach a terminal state without an ACK.
-    store.jdbc.update(
-        "UPDATE workspace_job SET done=true,failed=true,last_error=COALESCE(last_error,'common.unavailable') WHERE tenant_id=? AND NOT done AND kind IN ('restart','delete') AND attempts>=? AND due_at<=? AND instance_id IN (SELECT id FROM instance WHERE tenant_id=? AND node_id=?)",
-        store.tenant(),
-        NodeDeliveryPolicy.MAX_ATTEMPTS,
-        time(clock.instant()),
-        store.tenant(),
-        node);
+    var exhausted =
+        store.jdbc.queryForList(
+            "UPDATE workspace_job SET done=true,failed=true,last_error=COALESCE(last_error,'common.unavailable') WHERE tenant_id=? AND NOT done AND kind IN ('restart','delete') AND attempts>=? AND due_at<=? AND instance_id IN (SELECT id FROM instance WHERE tenant_id=? AND node_id=?) RETURNING id,instance_id,kind",
+            store.tenant(),
+            NodeDeliveryPolicy.MAX_ATTEMPTS,
+            time(clock.instant()),
+            store.tenant(),
+            node);
+    for (var job : exhausted)
+      if (job.get("kind").equals("delete"))
+        deletionFailed(node, (UUID) job.get("id"), (UUID) job.get("instance_id"));
     var jobs =
         store.jdbc.queryForList(
             "SELECT j.* FROM workspace_job j JOIN instance i ON i.id=j.instance_id AND i.tenant_id=j.tenant_id WHERE j.tenant_id=? AND i.node_id=? AND (j.kind='delete' OR (j.kind='restart' AND NOT i.deleted)) AND NOT j.done AND j.due_at<=? AND j.attempts<? ORDER BY j.due_at,j.id FOR UPDATE OF j SKIP LOCKED LIMIT 32",
@@ -96,20 +100,41 @@ public final class NodeDeliveries {
   private void finish(
       UUID node, UUID session, Delivery delivery, boolean ok, byte[] result, String error) {
     boolean failed = !ok && NodeDeliveryPolicy.exhausted(delivery.attempt());
-    store.jdbc.update(
-        "UPDATE workspace_job SET done=?,failed=?,result=?,last_error=?,due_at=? WHERE tenant_id=? AND id=? AND instance_id=? AND dispatched_session=? AND attempts=? AND NOT done AND instance_id IN (SELECT id FROM instance WHERE tenant_id=? AND node_id=?)",
-        ok || failed,
-        failed,
-        result,
-        error,
-        time(clock.instant().plus(NodeDeliveryPolicy.backoff(delivery.attempt()))),
-        store.tenant(),
-        delivery.id(),
-        delivery.instance(),
-        session,
-        delivery.attempt(),
-        store.tenant(),
-        node);
+    int updated =
+        store.jdbc.update(
+            "UPDATE workspace_job SET done=?,failed=?,result=?,last_error=?,due_at=? WHERE tenant_id=? AND id=? AND instance_id=? AND dispatched_session=? AND attempts=? AND NOT done AND instance_id IN (SELECT id FROM instance WHERE tenant_id=? AND node_id=?)",
+            ok || failed,
+            failed,
+            result,
+            error,
+            time(clock.instant().plus(NodeDeliveryPolicy.backoff(delivery.attempt()))),
+            store.tenant(),
+            delivery.id(),
+            delivery.instance(),
+            session,
+            delivery.attempt(),
+            store.tenant(),
+            node);
+    if (updated == 1 && failed && delivery.kind().equals("delete"))
+      deletionFailed(node, delivery.id(), delivery.instance());
+  }
+
+  private void deletionFailed(UUID node, UUID job, UUID instance) {
+    UUID tenant = store.tenant();
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .registerSynchronization(
+            new org.springframework.transaction.support.TransactionSynchronization() {
+              @Override
+              public void afterCommit() {
+                org.slf4j.LoggerFactory.getLogger(NodeDeliveries.class)
+                    .error(
+                        "Node deletion exhausted retries: tenant={} node={} instance={} job={}; capacity remains reserved until ABSENT is confirmed",
+                        tenant,
+                        node,
+                        instance,
+                        job);
+              }
+            });
   }
 
   public void deleted(UUID node, UUID session, Delivery delivery, InstanceStatus status) {
