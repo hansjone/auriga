@@ -188,6 +188,7 @@ func runAgent(args []string, logs io.Writer) error {
 		Reconciler:    rec,
 		Store:         store,
 		AllowInsecure: cfg.AllowInsecure,
+		Capacity:      helloCapacity(cfg.DetectCapacity()),
 	})
 	io, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal, reg, targets, sess)
 	if err != nil {
@@ -215,4 +216,13 @@ func ensureLayout(cfg config.Config) error {
 	}
 	_ = os.WriteFile(filepath.Join(cfg.AgentDir(), ".layout"), []byte("auriga-agent\n"), 0o644)
 	return nil
+}
+
+func helloCapacity(c config.Capacity) *nodev1.Capacity {
+	out := &nodev1.Capacity{CpuMillis: c.CPUMillis, MemoryMb: c.MemoryMB, DiskGb: c.DiskGB}
+	if c.MaxInstances > 0 {
+		max := c.MaxInstances
+		out.MaxInstances = &max
+	}
+	return out
 }

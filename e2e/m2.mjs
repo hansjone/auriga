@@ -3,7 +3,14 @@
  * M2 e2e: login → join node → open instance → edge access → idle reclaim → alarm wake
  * (+ iam revoke smoke). Failures print which step and what was returned.
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, mkdtempSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  mkdtempSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHmac } from 'node:crypto';
@@ -39,7 +46,11 @@ function fail(stepName, detail, extra) {
 }
 
 function parseSetCookie(setCookie) {
-  const raw = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+  const raw = Array.isArray(setCookie)
+    ? setCookie
+    : setCookie
+      ? [setCookie]
+      : [];
   for (const line of raw) {
     const [pair] = String(line).split(';');
     const i = pair.indexOf('=');
@@ -72,8 +83,10 @@ async function req(path, opts = {}) {
       : opts.body !== undefined
         ? String(opts.body)
         : null;
-  if (opts.json) headers['content-type'] = 'application/json';
-  if (bodyStr !== null) headers['content-length'] = String(Buffer.byteLength(bodyStr));
+  if (opts.json)
+    headers['content-type'] = opts.contentType || 'application/json';
+  if (bodyStr !== null)
+    headers['content-length'] = String(Buffer.byteLength(bodyStr));
   const csrf =
     jar.get('auriga_csrf') ||
     jar.get('auriga_admin_csrf') ||
@@ -81,7 +94,11 @@ async function req(path, opts = {}) {
   if (opts.csrf && csrf) headers['X-Auriga-CSRF'] = csrf;
 
   const lib = u.protocol === 'https:' ? https : http;
-  const { status, headers: rawHeaders, text } = await new Promise((resolve, reject) => {
+  const {
+    status,
+    headers: rawHeaders,
+    text,
+  } = await new Promise((resolve, reject) => {
     const r = lib.request(
       {
         protocol: u.protocol,
@@ -159,7 +176,9 @@ function totpAt(secretB32, step, stepSec = 30) {
 async function nextTotp(secretB32, stepSec = 30) {
   let step = Math.floor(Date.now() / 1000 / stepSec);
   if (step <= lastTotpStep) {
-    const waitMs = Math.ceil((stepSec - ((Date.now() / 1000) % stepSec) + 0.25) * 1000);
+    const waitMs = Math.ceil(
+      (stepSec - ((Date.now() / 1000) % stepSec) + 0.25) * 1000,
+    );
     console.log(`waiting ${waitMs}ms for fresh TOTP step`);
     await sleep(waitMs);
     step = Math.floor(Date.now() / 1000 / stepSec);
@@ -193,8 +212,13 @@ async function loginEmergency(host) {
   // Clear only this audience's cookies (+ login_tx); leave the other audience alone.
   for (const k of [...jar.keys()]) {
     if (k === sessionName || k.includes('login_tx')) jar.delete(k);
-    if (host === ADMIN_HOST && k.includes('admin') && k.includes('csrf')) jar.delete(k);
-    if (host !== ADMIN_HOST && (k === 'auriga_csrf' || k === '__Host-auriga_csrf')) jar.delete(k);
+    if (host === ADMIN_HOST && k.includes('admin') && k.includes('csrf'))
+      jar.delete(k);
+    if (
+      host !== ADMIN_HOST &&
+      (k === 'auriga_csrf' || k === '__Host-auriga_csrf')
+    )
+      jar.delete(k);
   }
 
   const start = await req('/api/iam/v1/login/transactions', {
@@ -222,7 +246,8 @@ async function loginEmergency(host) {
       },
     },
   });
-  if (advance.status !== 200) fail('login', `advance ${advance.status}`, advance.body);
+  if (advance.status !== 200)
+    fail('login', `advance ${advance.status}`, advance.body);
   if (advance.body?.status && advance.body.status !== 'completed') {
     fail('login', `tx status ${advance.body.status}`, advance.body);
   }
@@ -284,6 +309,19 @@ async function createJoinTokenAndWaitNode() {
     const items = nodes.body?.items || [];
     if (items.length > 0) {
       console.log('node online count=', items.length);
+      // Node labels are admin-assigned (the agent cannot claim its own);
+      // the e2e template requires template=fake-dsh-e2e.
+      step('label node for the e2e template');
+      const nodeId = items[0].id;
+      const patch = await req(`/api/workspace/v1/admin/nodes/${nodeId}`, {
+        host: ADMIN_HOST,
+        method: 'PATCH',
+        csrf: true,
+        contentType: 'application/merge-patch+json',
+        json: { labels: { template: 'fake-dsh-e2e' } },
+      });
+      if (patch.status !== 200)
+        fail('label-node', `status ${patch.status}`, patch.body);
       return;
     }
     await sleep(3000);
@@ -331,7 +369,12 @@ async function accessViaEdge(instanceId) {
     host: PORTAL_HOST,
     method: 'GET',
   });
-  console.log('open status', open.status, 'loc', open.res.headers.get('location'));
+  console.log(
+    'open status',
+    open.status,
+    'loc',
+    open.res.headers.get('location'),
+  );
 
   const host = `${instanceId}.i.example.com`;
   let loc = open.res.headers.get('location');
@@ -344,7 +387,11 @@ async function accessViaEdge(instanceId) {
   }
   const page = await req('/', { host });
   if (page.status !== 200 || !String(page.text).includes('fake-dsh')) {
-    fail('edge-access', `status ${page.status}`, String(page.text).slice(0, 400));
+    fail(
+      'edge-access',
+      `status ${page.status}`,
+      String(page.text).slice(0, 400),
+    );
   }
   console.log('edge access ok');
 }
@@ -356,7 +403,16 @@ function readTokenFromVolume(instanceId) {
     : `find /data/instances -name instance.token -print -quit 2>/dev/null | head -1 | xargs -r cat`;
   const r = spawnSync(
     'docker',
-    ['run', '--rm', '-v', `${AGENT_VOLUME}:/data:ro`, 'alpine', 'sh', '-c', script],
+    [
+      'run',
+      '--rm',
+      '-v',
+      `${AGENT_VOLUME}:/data:ro`,
+      'alpine',
+      'sh',
+      '-c',
+      script,
+    ],
     { encoding: 'utf8' },
   );
   const t = (r.stdout || '').trim();
@@ -450,7 +506,10 @@ async function writeWakeSchedule(instanceId, nextWakeMs) {
     if (r.status !== 0) {
       fail('wake-schedule', `docker write failed: ${r.stderr || r.stdout}`);
     }
-    console.log('wake schedule written to volume at', new Date(nextWakeMs).toISOString());
+    console.log(
+      'wake schedule written to volume at',
+      new Date(nextWakeMs).toISOString(),
+    );
     return;
   }
   if (!AGENT_DATA) {
@@ -493,7 +552,8 @@ async function revokeSmoke() {
   });
   console.log('revoke-others', revoke.status);
   // Soft pass: endpoint reachable (may be 200/204/404 depending on other sessions)
-  if (revoke.status >= 500) fail('revoke', `status ${revoke.status}`, revoke.body);
+  if (revoke.status >= 500)
+    fail('revoke', `status ${revoke.status}`, revoke.body);
 }
 
 async function main() {

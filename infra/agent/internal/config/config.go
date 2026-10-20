@@ -29,6 +29,17 @@ type Config struct {
 	AllowInsecure bool `json:"allowInsecure"`
 	// IngressAdvertiseHost is the externally reachable DNS name/IP (no port).
 	IngressAdvertiseHost string `json:"ingressAdvertiseHost"`
+	// Capacity is what this node offers to the scheduler (reported in Hello).
+	// Zero fields are filled from the host where possible (see DetectCapacity).
+	Capacity Capacity `json:"capacity"`
+}
+
+// Capacity mirrors nodev1.Capacity. MaxInstances 0 means unlimited.
+type Capacity struct {
+	CPUMillis    int64 `json:"cpuMillis"`
+	MemoryMB     int64 `json:"memoryMB"`
+	DiskGB       int64 `json:"diskGB"`
+	MaxInstances int64 `json:"maxInstances"`
 }
 
 func defaultDataRoot() string {
@@ -99,6 +110,17 @@ func applyEnv(cfg *Config) {
 			cfg.MaxConcurrentPrepare = n
 		}
 	}
+	setInt := func(key string, dst *int64) {
+		if v := os.Getenv(key); v != "" {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+				*dst = n
+			}
+		}
+	}
+	setInt("AURIGA_AGENT_CAPACITY_CPU_MILLIS", &cfg.Capacity.CPUMillis)
+	setInt("AURIGA_AGENT_CAPACITY_MEMORY_MB", &cfg.Capacity.MemoryMB)
+	setInt("AURIGA_AGENT_CAPACITY_DISK_GB", &cfg.Capacity.DiskGB)
+	setInt("AURIGA_AGENT_CAPACITY_MAX_INSTANCES", &cfg.Capacity.MaxInstances)
 	if v := os.Getenv("AURIGA_AGENT_ALLOW_INSECURE"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err == nil {

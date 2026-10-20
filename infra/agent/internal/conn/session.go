@@ -34,12 +34,14 @@ type Config struct {
 	CAFingerprint   string
 	ControlURL      string // override; else from state meta
 	IngressEndpoint string
-	Drivers         []nodev1.RuntimeKind
-	BootID          string
-	Logger          *slog.Logger
-	Reconciler      *reconciler.Reconciler
-	Store           *state.Store
-	AllowInsecure   bool
+	// Capacity is reported in Hello so the scheduler can place instances here.
+	Capacity      *nodev1.Capacity
+	Drivers       []nodev1.RuntimeKind
+	BootID        string
+	Logger        *slog.Logger
+	Reconciler    *reconciler.Reconciler
+	Store         *state.Store
+	AllowInsecure bool
 
 	HeartbeatInterval time.Duration
 	MinBackoff        time.Duration
@@ -422,6 +424,7 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 	ingress := s.cfg.IngressEndpoint
 	agentVersion := s.cfg.AgentVersion
 	bootID := s.cfg.BootID
+	capacity := s.cfg.Capacity
 	s.mu.Unlock()
 	if len(drivers) == 0 {
 		drivers = []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_UNSPECIFIED}
@@ -439,6 +442,7 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 			NodeTime:        timestamppb.Now(),
 			SealingKeyId:    identity.SealingKeyID(mat.SealingPublic),
 			IngressEndpoint: ingress,
+			Capacity:        capacity,
 		}},
 	})
 }
