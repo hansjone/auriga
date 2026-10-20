@@ -359,6 +359,17 @@ async function waitReady(instanceId) {
     if (g.body?.ready && phase === 'running') return g.body;
     await sleep(4000);
   }
+  // Diagnostics: show why the scheduler could not place the instance.
+  const nodes = await req('/api/workspace/v1/admin/nodes', {
+    host: ADMIN_HOST,
+    csrf: true,
+  });
+  console.log('nodes at timeout:', JSON.stringify(nodes.body, null, 2));
+  const inst = await req(`/api/workspace/v1/instances/${instanceId}`, {
+    host: ADMIN_HOST,
+    csrf: true,
+  });
+  console.log('instance at timeout:', JSON.stringify(inst.body, null, 2));
   fail('ready', 'timeout');
 }
 

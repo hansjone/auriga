@@ -298,9 +298,11 @@ func (s *Session) runOnce(ctx context.Context) error {
 		return fmt.Errorf("open session: %w", err)
 	}
 
+	s.cfg.Logger.Info("control session opened", "endpoint", endpoint)
 	if err := s.sendHello(stream, mat); err != nil {
 		return err
 	}
+	s.cfg.Logger.Info("hello sent", "node_id", mat.NodeID)
 	if err := s.sendInventory(stream); err != nil {
 		return err
 	}
@@ -316,6 +318,7 @@ func (s *Session) runOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.cfg.Logger.Info("welcome received; session established")
 	s.mu.Lock()
 	s.connected = true
 	s.lastWelcome = welcome
