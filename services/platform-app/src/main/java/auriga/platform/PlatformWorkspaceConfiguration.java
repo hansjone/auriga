@@ -36,7 +36,8 @@ public class PlatformWorkspaceConfiguration {
           env.getRequiredProperty("auriga.platform.workspace.migration-username"));
       migration.setPassword(
           env.getRequiredProperty("auriga.platform.workspace.migration-password"));
-      migration.setMaximumPoolSize(1);
+      // Flyway needs ≥2 connections (migrate + PG advisory lock); size 1 deadlocks for 30s.
+      migration.setMaximumPoolSize(2);
       migration.setSchema("workspace");
       CommonMigrations.migrate(migration, "workspace");
       CommonMigrations.serviceFlyway(
