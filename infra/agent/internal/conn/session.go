@@ -527,7 +527,11 @@ func (s *Session) recvLoop(ctx context.Context, stream nodev1.NodeControlService
 }
 
 func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse) error {
-	if msg == nil || s.cfg.Reconciler == nil {
+	if msg == nil {
+		return nil
+	}
+	s.cfg.Logger.Info("control message received", "type", fmt.Sprintf("%T", msg.Body))
+	if s.cfg.Reconciler == nil {
 		return nil
 	}
 	switch body := msg.Body.(type) {
