@@ -111,7 +111,8 @@ services:
     volumes:
       - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
       - ./var/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
-      - ./var/pki:/etc/auriga/pki:ro
+      # pki rw: edge chmod's cert/key on startup (ro bind → EROFS)
+      - ./var/pki:/etc/auriga/pki
       - agentdata:/var/lib/auriga:ro
 
   agent:
