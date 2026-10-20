@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHmac } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import http from 'node:http';
+import https from 'node:https';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
@@ -36,10 +38,10 @@ function fail(stepName, detail, extra) {
   process.exit(1);
 }
 
-function parseSetCookie(res) {
-  const raw = res.headers.getSetCookie?.() || [];
+function parseSetCookie(setCookie) {
+  const raw = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
   for (const line of raw) {
-    const [pair] = line.split(';');
+    const [pair] = String(line).split(';');
     const i = pair.indexOf('=');
     if (i > 0) jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
   }
@@ -49,36 +51,80 @@ function cookieHeader() {
   return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
+/**
+ * HTTP via node:http so Host can be virtual (admin/portal/instance).
+ * fetch() forbids overriding Host, which makes edge return edge.unknown_host.
+ */
 async function req(path, opts = {}) {
   const host = opts.host || PORTAL_HOST;
+  const base = new URL(opts.base || EDGE);
+  const u = new URL(path, base);
+  /** @type {Record<string, string>} */
   const headers = {
-    Host: host,
+    host,
     ...(opts.headers || {}),
   };
   const cookie = cookieHeader();
   if (cookie) headers.cookie = cookie;
+  const bodyStr =
+    opts.json !== undefined
+      ? JSON.stringify(opts.json)
+      : opts.body !== undefined
+        ? String(opts.body)
+        : null;
   if (opts.json) headers['content-type'] = 'application/json';
+  if (bodyStr !== null) headers['content-length'] = String(Buffer.byteLength(bodyStr));
   const csrf =
     jar.get('auriga_csrf') ||
     jar.get('auriga_admin_csrf') ||
     jar.get('__Host-auriga_csrf');
   if (opts.csrf && csrf) headers['X-Auriga-CSRF'] = csrf;
 
-  const res = await fetch(new URL(path, opts.base || EDGE), {
-    method: opts.method || 'GET',
-    headers,
-    body: opts.json ? JSON.stringify(opts.json) : opts.body,
-    redirect: 'manual',
+  const lib = u.protocol === 'https:' ? https : http;
+  const { status, headers: rawHeaders, text } = await new Promise((resolve, reject) => {
+    const r = lib.request(
+      {
+        protocol: u.protocol,
+        hostname: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + u.search,
+        method: opts.method || 'GET',
+        headers,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode || 0,
+            headers: res.headers,
+            text: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      },
+    );
+    r.on('error', reject);
+    if (bodyStr !== null) r.write(bodyStr);
+    r.end();
   });
-  parseSetCookie(res);
-  const text = await res.text();
+
+  parseSetCookie(rawHeaders['set-cookie']);
   let body = text;
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
     /* keep text */
   }
-  return { res, body, text, status: res.status };
+  const headerGet = (name) => {
+    const v = rawHeaders[String(name).toLowerCase()];
+    return Array.isArray(v) ? v[0] : v || null;
+  };
+  return {
+    res: { status, headers: { get: headerGet } },
+    body,
+    text,
+    status,
+  };
 }
 
 function totp(secretB32, stepSec = 30) {
