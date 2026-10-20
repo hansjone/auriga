@@ -60,7 +60,7 @@ export async function openWebSocket(opts) {
   req += '\r\n';
   socket.write(req);
 
-  const { status, rest } = await readHttpResponse(socket, timeoutMs);
+  const { status, head, rest } = await readHttpResponse(socket, timeoutMs);
   if (status !== 101) {
     socket.destroy();
     throw new Error(`ws upgrade status ${status}`);
@@ -68,13 +68,17 @@ export async function openWebSocket(opts) {
   const expect = createHash('sha1')
     .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
     .digest('base64');
-  // Accept header already consumed in status parse; frame buffer starts at rest.
+  const accepted = /^sec-websocket-accept:\s*(\S+)\s*$/im.exec(head)?.[1];
+  if (accepted !== expect) {
+    socket.destroy();
+    throw new Error('ws invalid Sec-WebSocket-Accept');
+  }
   let buf = rest;
   // Real DSH's transport expects Pong liveness, even when this harness does
   // not open an application stream. RFC 6455 permits unsolicited Pong frames.
   const stopKeepalive =
     opts.keepAliveMs > 0
-      ? startControlKeepalive(socket, opts.keepAliveMs)
+      ? startControlKeepalive(socket, opts.keepAliveMs, rest)
       : () => {};
 
   function sendText(text) {
@@ -161,18 +165,76 @@ export async function openWebSocket(opts) {
 }
 
 /** Keep a control-only native transport alive; application frames are discarded. */
-export function startControlKeepalive(socket, intervalMs) {
+export function startControlKeepalive(
+  socket,
+  intervalMs,
+  initial = Buffer.alloc(0),
+) {
+  function controlFrame(opcode, payload = Buffer.alloc(0)) {
+    const mask = randomBytes(4);
+    const frame = Buffer.alloc(6 + payload.length);
+    frame[0] = 0x80 | opcode;
+    frame[1] = 0x80 | payload.length;
+    mask.copy(frame, 2);
+    for (let i = 0; i < payload.length; i++)
+      frame[i + 6] = payload[i] ^ mask[i % 4];
+    return frame;
+  }
+  let pending = Buffer.alloc(0);
   const timer = setInterval(() => {
     if (socket.destroyed) return;
     // Client control frames are masked, including an empty Pong payload.
-    socket.write(Buffer.concat([Buffer.from([0x8a, 0x80]), randomBytes(4)]));
+    socket.write(controlFrame(0x0a));
   }, intervalMs);
   timer.unref?.();
   const stop = () => {
     clearInterval(timer);
     socket.off('close', stop);
+    socket.off('data', consume);
   };
+  function consume(chunk) {
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= 2) {
+      const opcode = pending[0] & 0x0f;
+      let length = pending[1] & 0x7f;
+      let offset = 2;
+      if (length === 126) {
+        if (pending.length < 4) return;
+        length = pending.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (pending.length < 10) return;
+        const large = pending.readBigUInt64BE(2);
+        if (large > 1024n * 1024n) {
+          socket.destroy();
+          return;
+        }
+        length = Number(large);
+        offset = 10;
+      }
+      if (
+        pending[1] & 0x80 ||
+        length > 1024 * 1024 ||
+        (opcode >= 8 && (!(pending[0] & 0x80) || length > 125))
+      ) {
+        socket.destroy();
+        return;
+      }
+      if (pending.length < offset + length) return;
+      const payload = pending.subarray(offset, offset + length);
+      pending = pending.subarray(offset + length);
+      if (opcode === 0x09) socket.write(controlFrame(0x0a, payload));
+      if (opcode === 0x08) {
+        // A peer Close already means this transport is no longer alive.
+        stop();
+        socket.end(controlFrame(0x08, payload), () => socket.destroy());
+        return;
+      }
+    }
+  }
   socket.once('close', stop);
+  socket.on('data', consume);
+  consume(initial);
   // Consume server Ping/Close frames so a FIN cannot wait behind unread data.
   socket.resume();
   return stop;
