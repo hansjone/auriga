@@ -95,19 +95,33 @@ func main() {
 	fp := spkiSHA256(caCert)
 	writeFile(filepath.Join(*out, "ca-sha256.txt"), []byte(fp+"\n"), 0o644)
 
+	dig := digestOf(*image)
 	spec := &nodev1.InstanceSpec{
 		Runtime: nodev1.RuntimeKind_RUNTIME_KIND_DOCKER,
 		Resources: &nodev1.Resources{
 			CpuMillis: 500,
-			MemoryMb:  256,
+			MemoryMb:  512,
 			DiskGb:    1,
 			Pids:      128,
 		},
 		Dsh: &nodev1.DshRuntime{
 			Version:    "0.0.0-fake",
 			ArtifactId: "fake-dsh",
-			Digest:     digestOf(*image),
+			Digest:     dig,
 			Image:      *image,
+			// WorkspaceTemplates requires hasSigned + non-empty signature (e2e placeholder).
+			Signed: &nodev1.SignedArtifact{
+				Signature:  []byte{0x01},
+				SigningKid: "e2e-artifact",
+				Statement: &nodev1.ArtifactStatement{
+					Purpose: "dsh_runtime",
+					Name:    "fake-dsh",
+					Version: "0.0.0-fake",
+					Os:      "linux",
+					Arch:    "amd64",
+					Digest:  dig,
+				},
+			},
 		},
 		Profile: &nodev1.Profile{ListenPort: 7860},
 		Secrets: &nodev1.Secrets{
