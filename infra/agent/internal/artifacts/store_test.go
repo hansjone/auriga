@@ -324,3 +324,134 @@ func (e *errReader) Read(p []byte) (int, error) {
 	}
 	return n, nil
 }
+
+func TestEnsureRejectsUncleanURLPath(t *testing.T) {
+	p := policy.Default()
+	p.AllowedArtifactURLPrefixes = []string{"https://artifacts.example.com/team/"}
+	st := artifacts.New(t.TempDir(), p)
+	st.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("must not fetch %s", r.URL)
+		return nil, nil
+	})}
+	digest := "sha256:" + strings.Repeat("ab", 32)
+	for _, u := range []string{
+		"https://artifacts.example.com/team/../other/x.tgz",
+		"https://artifacts.example.com/team/./x.tgz",
+		"https://artifacts.example.com/team//x.tgz",
+		"https://artifacts.example.com/team/%2e%2e/other/x.tgz",
+		"https://artifacts.example.com/team/a%2Fb.tgz",
+		"https://artifacts.example.com/team/a%5c..%5cb.tgz",
+	} {
+		if _, err := st.Ensure(context.Background(), "h1", u, digest, 0); err == nil {
+			t.Fatalf("%s should be rejected", u)
+		}
+	}
+}
+
+func TestRedirectToUncleanPathRejected(t *testing.T) {
+	body := []byte("x")
+	sum := sha256.Sum256(body)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			w.Header().Set("Location", "/a//b")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	st := artifacts.New(t.TempDir(), anyPol())
+	st.Client.Transport = srv.Client().Transport
+	if _, err := st.Ensure(context.Background(), "h1", srv.URL+"/start", digest, 0); err == nil {
+		t.Fatal("redirect to unclean path should be rejected")
+	}
+}
+
+func TestEnsureRejectsSymlinkedCacheEntry(t *testing.T) {
+	root := t.TempDir()
+	st := artifacts.New(root, anyPol())
+	digest := "sha256:" + strings.Repeat("cd", 32)
+	if err := os.MkdirAll(filepath.Join(root, "sha256"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "sha256", strings.Repeat("cd", 32))); err != nil {
+		t.Skipf("symlink not permitted here: %v", err)
+	}
+	st.Client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Fatal("must not download")
+		return nil, nil
+	})}
+	if _, err := st.Ensure(context.Background(), "h1", "https://artifacts.example.com/x", digest, 0); err == nil {
+		t.Fatal("symlinked cache entry must be rejected")
+	}
+	if _, err := st.Path(digest); err == nil {
+		t.Fatal("Path must reject symlinked entry")
+	}
+	if raw, _ := os.ReadFile(outside); string(raw) != "secret" {
+		t.Fatal("outside file touched")
+	}
+}
+
+func TestGCKeepProtectsLiveDigests(t *testing.T) {
+	body := []byte("live")
+	sum := sha256.Sum256(body)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	st := artifacts.New(t.TempDir(), anyPol())
+	st.Client = srv.Client()
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	st.Now = func() time.Time { return now }
+	path, err := st.Ensure(context.Background(), "inst_l", srv.URL+"/a", digest, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Refs lose track of the holder (e.g. a bug or a manual edit) ...
+	if err := st.ReleaseAll("inst_l"); err != nil {
+		t.Fatal(err)
+	}
+	st.Now = func() time.Time { return now.Add(30 * 24 * time.Hour) }
+	// ... but the live set still names it, so GC keeps it.
+	n, err := st.GCKeep(true, []string{digest})
+	if err != nil || n != 0 {
+		t.Fatalf("GCKeep removed live digest: n=%d err=%v", n, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("live artifact deleted:", err)
+	}
+	if _, err := st.GCKeep(false, []string{"not-a-digest"}); err == nil {
+		t.Fatal("bad keep digest must fail")
+	}
+}
+
+func TestGCSkipsRoundWhenRefsCorrupt(t *testing.T) {
+	root := t.TempDir()
+	hexDig := strings.Repeat("ef", 32)
+	if err := os.MkdirAll(filepath.Join(root, "sha256"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, "sha256", hexDig)
+	if err := os.WriteFile(p, []byte("held-by-someone"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "refs.json"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := artifacts.New(root, anyPol())
+	if n, err := st.GC(true); err == nil || n != 0 {
+		t.Fatalf("GC must skip after rebuilding corrupt refs: n=%d err=%v", n, err)
+	}
+	if _, err := os.Stat(p); err != nil {
+		t.Fatal("artifact removed despite corrupt refs:", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "refs.json.corrupt")); err != nil {
+		t.Fatal("corrupt refs not preserved:", err)
+	}
+}
