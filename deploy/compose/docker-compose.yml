@@ -1,0 +1,147 @@
+# M2 single-host stack for GitHub Actions / Linux. Agent + edge + platform use host networking
+# so Docker-published instance ports on 127.0.0.1 and unix ingress sockets work.
+name: auriga-m2
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: auriga
+      POSTGRES_USER: auriga_dev
+      POSTGRES_PASSWORD: e2e_pg_super
+    ports:
+      - "15432:5432"
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auriga_dev -d auriga"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  nats:
+    image: nats:2.10
+    command: ["-c", "/etc/nats/nats.conf"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+      - natsdata:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  registry:
+    image: registry:2
+    ports:
+      - "5000:5000"
+
+  platform:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.platform
+    network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: combined,dev
+      AURIGA_PLATFORM_ADDRESS: 0.0.0.0
+      AURIGA_PLATFORM_PORT: "8081"
+      AURIGA_IAM_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
+      AURIGA_IAM_DB_USER: auriga_iam
+      AURIGA_IAM_DB_PASSWORD: e2e_iam_only
+      AURIGA_ORG_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
+      AURIGA_ORG_DB_USER: auriga_org
+      AURIGA_ORG_DB_PASSWORD: e2e_org_only
+      AURIGA_WORKSPACE_ENABLED: "true"
+      AURIGA_WORKSPACE_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
+      AURIGA_WORKSPACE_DB_USER: auriga_workspace_app
+      AURIGA_WORKSPACE_DB_PASSWORD: e2e_ws_app
+      AURIGA_WORKSPACE_MIGRATION_USER: auriga_workspace_owner
+      AURIGA_WORKSPACE_MIGRATION_PASSWORD: e2e_ws_owner
+      AURIGA_IAM_ENCRYPTION_KEY: ${AURIGA_IAM_ENCRYPTION_KEY}
+      AURIGA_WORKSPACE_ENCRYPTION_KEY: ${AURIGA_WORKSPACE_ENCRYPTION_KEY}
+      AURIGA_IAM_ISSUER: http://portal.example.com
+      AURIGA_EVENTS_NATS_URL: nats://platform:e2e_nats_platform@127.0.0.1:4222
+      AURIGA_NATS_URL: nats://sessions:e2e_nats_sessions@127.0.0.1:4222
+      AURIGA_WORKSPACE_ROUTES_NATS_URL: nats://routes_rw:e2e_nats_routes_rw@127.0.0.1:4222
+      AURIGA_ENROLLMENT_FILE: /var/auriga/emergency-enrollment.json
+      AURIGA_TEAM_RP_ID: portal.example.com
+      AURIGA_TEAM_ORIGIN: http://portal.example.com
+      AURIGA_WORKSPACE_CA_CERTIFICATE_FILE: /etc/auriga/pki/ca.crt
+      AURIGA_WORKSPACE_CA_PRIVATE_KEY_FILE: /etc/auriga/pki/ca.key
+      AURIGA_WORKSPACE_TLS_CERTIFICATE_FILE: /etc/auriga/pki/workspace.crt
+      AURIGA_WORKSPACE_TLS_PRIVATE_KEY_FILE: /etc/auriga/pki/workspace.key
+      AURIGA_WORKSPACE_CONTROL_ENDPOINT: https://127.0.0.1:7443
+      AURIGA_WORKSPACE_NODE_SERVER_HOST: 0.0.0.0
+      AURIGA_WORKSPACE_NODE_SERVER_PORT: "7443"
+      AURIGA_WORKSPACE_TEMPLATES_DIRECTORY: /etc/auriga/templates
+    volumes:
+      - ./var/pki:/etc/auriga/pki:ro
+      - ./var/templates:/etc/auriga/templates:ro
+      - ./var/enrollment:/var/auriga
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8081/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  edge:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.edge
+    network_mode: host
+    depends_on:
+      platform:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    command: ["-config", "/etc/auriga/edge.config.json"]
+    environment:
+      AURIGA_EDGE_ALLOW_LOCAL_INGRESS: "true"
+    volumes:
+      - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
+      - ./var/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
+      - ./var/pki:/etc/auriga/pki:ro
+      - agentdata:/var/lib/auriga:ro
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.agent
+    network_mode: host
+    privileged: false
+    depends_on:
+      platform:
+        condition: service_healthy
+      registry:
+        condition: service_started
+    environment:
+      AURIGA_AGENT_DATA_ROOT: /var/lib/auriga
+      AURIGA_AGENT_SERVER: https://127.0.0.1:7443
+      AURIGA_AGENT_CA_SHA256: ${AURIGA_AGENT_CA_SHA256}
+      AURIGA_AGENT_ALLOW_INSECURE: "true"
+      AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
+      AURIGA_AGENT_INGRESS_LOCAL: /var/lib/auriga/agent/ingress.sock
+      AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
+      AURIGA_AGENT_DRIVERS: docker
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agentdata:/var/lib/auriga
+      - ./var/join:/run/auriga-join
+      - ./var/identity-keys.json:/etc/auriga/identity-keys.json:ro
+      - ./var/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
+
+volumes:
+  pgdata:
+  natsdata:
+  agentdata:

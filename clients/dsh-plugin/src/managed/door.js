@@ -185,6 +185,8 @@ export async function verifyIdentityHeader(opts) {
  */
 export function createDoorLock(cfg) {
   const replay = cfg.replay ?? createReplayCache({ now: cfg.now });
+  /** @type {undefined | (() => void)} */
+  let onAuthenticated = cfg.onAuthenticated;
 
   /**
    * @param {{ method?: string, url?: string, headers?: Record<string, string | string[] | undefined> }} req
@@ -238,6 +240,14 @@ export function createDoorLock(cfg) {
             if (result.ok) {
               if ('claims' in result && result.claims)
                 req.__aurigaIdentity = result.claims;
+              // Health bypass is not a user interaction; identity-gated hits are.
+              if (!result.bypass) {
+                try {
+                  onAuthenticated?.();
+                } catch {
+                  /* ignore */
+                }
+              }
               original(event, ...args);
               return;
             }
@@ -260,6 +270,13 @@ export function createDoorLock(cfg) {
             if (result.ok) {
               if ('claims' in result && result.claims)
                 req.__aurigaIdentity = result.claims;
+              if (!result.bypass) {
+                try {
+                  onAuthenticated?.();
+                } catch {
+                  /* ignore */
+                }
+              }
               original(event, ...args);
               return;
             }
@@ -294,5 +311,13 @@ export function createDoorLock(cfg) {
     };
   }
 
-  return { check, install, replay };
+  return {
+    check,
+    install,
+    replay,
+    /** @param {undefined | (() => void)} fn */
+    setOnAuthenticated(fn) {
+      onAuthenticated = fn;
+    },
+  };
 }

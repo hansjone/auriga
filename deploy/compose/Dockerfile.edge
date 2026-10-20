@@ -1,0 +1,10 @@
+# Build from repository root: docker build -f deploy/compose/Dockerfile.edge .
+FROM golang:1.27 AS build
+WORKDIR /src/infra
+COPY infra/ ./
+WORKDIR /src/infra/edge
+RUN CGO_ENABLED=0 go build -o /out/auriga-edge .
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/auriga-edge /auriga-edge
+ENTRYPOINT ["/auriga-edge"]

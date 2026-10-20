@@ -2,6 +2,7 @@ package ingress
 
 import (
 	"net/url"
+	"sync"
 )
 
 // Instance describes a local instance for ingress routing.
@@ -19,7 +20,8 @@ type Registry interface {
 
 // MapRegistry is a simple mutable registry for tests and early wiring.
 type MapRegistry struct {
-	m map[string]*Instance
+	mu sync.RWMutex
+	m  map[string]*Instance
 }
 
 func NewMapRegistry(items ...*Instance) *MapRegistry {
@@ -36,13 +38,30 @@ func (r *MapRegistry) Lookup(id string) (*Instance, bool) {
 	if r == nil {
 		return nil, false
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	it, ok := r.m[id]
 	return it, ok
 }
 
 func (r *MapRegistry) Put(it *Instance) {
+	if it == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.m == nil {
 		r.m = make(map[string]*Instance)
 	}
 	r.m[it.ID] = it
+}
+
+// Delete removes an instance from the registry.
+func (r *MapRegistry) Delete(id string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.m, id)
 }

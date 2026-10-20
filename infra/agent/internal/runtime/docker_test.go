@@ -27,6 +27,7 @@ type fakeEngine struct {
 	pullErr      string
 	inspectWrong bool // RepoDigests omit the requested digest
 	lastInspect  string
+	pulledOK     bool // after a successful pull stream, inspect finds the image
 }
 
 func (f *fakeEngine) handler() http.Handler {
@@ -45,6 +46,9 @@ func (f *fakeEngine) handler() http.Handler {
 			_, _ = w.Write([]byte(`{"error":"` + errMsg + `"}` + "\n"))
 			return
 		}
+		f.mu.Lock()
+		f.pulledOK = true
+		f.mu.Unlock()
 		_, _ = w.Write([]byte(`{"status":"Pull complete"}` + "\n"))
 	})
 	mux.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +64,12 @@ func (f *fakeEngine) handler() http.Handler {
 		f.mu.Lock()
 		f.lastInspect = name
 		wrong := f.inspectWrong
+		have := f.pulledOK || f.inspectWrong // digest-mismatch test inspects after pull
 		f.mu.Unlock()
+		if !have {
+			http.NotFound(w, r)
+			return
+		}
 
 		manifestDig := "sha256:" + strings.Repeat("ab", 32)
 		if _, dig, ok := strings.Cut(name, "@"); ok {

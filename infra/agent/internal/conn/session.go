@@ -63,6 +63,8 @@ type Session struct {
 	welcomeAt   time.Time
 	connected   bool
 	statusCh    chan *nodev1.InstanceStatus
+	usageCh     chan *nodev1.NodeUsage
+	wakeCh      chan *nodev1.WakeSchedule
 }
 
 // New creates a session manager.
@@ -95,6 +97,8 @@ func New(cfg Config) *Session {
 		cfg:       cfg,
 		heartbeat: cfg.HeartbeatInterval,
 		statusCh:  make(chan *nodev1.InstanceStatus, 64),
+		usageCh:   make(chan *nodev1.NodeUsage, 8),
+		wakeCh:    make(chan *nodev1.WakeSchedule, 16),
 	}
 }
 
@@ -107,6 +111,51 @@ func (s *Session) StatusSink() reconciler.StatusSink {
 			s.cfg.Logger.Warn("status channel full", "instance_id", st.GetInstanceId())
 		}
 	}
+}
+
+// ReportUsage queues observer usage for the control stream (observer.Reporter).
+func (s *Session) ReportUsage(u *nodev1.NodeUsage) {
+	if u == nil {
+		return
+	}
+	select {
+	case s.usageCh <- u:
+	default:
+		select {
+		case <-s.usageCh:
+		default:
+		}
+		select {
+		case s.usageCh <- u:
+		default:
+		}
+	}
+}
+
+// ReportWake queues a wake schedule for the control stream (observer.Reporter).
+func (s *Session) ReportWake(w *nodev1.WakeSchedule) {
+	if w == nil {
+		return
+	}
+	select {
+	case s.wakeCh <- w:
+	default:
+		s.cfg.Logger.Warn("wake channel full", "instance_id", w.GetInstanceId())
+	}
+}
+
+// ReportReady is accepted for observer.Reporter; ready flips travel via InstanceStatus.
+func (s *Session) ReportReady(instanceID string, ready bool) {
+	if s.cfg.Logger != nil {
+		s.cfg.Logger.Debug("instance ready probe", "instance", instanceID, "ready", ready)
+	}
+}
+
+// SetIngressEndpoint updates the Hello ingress_endpoint (set after ingress binds).
+func (s *Session) SetIngressEndpoint(endpoint string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cfg.IngressEndpoint = endpoint
 }
 
 // Connected reports whether a Welcome has been received on the current stream.
@@ -297,7 +346,29 @@ func (s *Session) runOnce(ctx context.Context) error {
 		case err := <-errCh:
 			return err
 		case <-ticker.C:
-			if err := s.sendUsage(stream); err != nil {
+			// Keepalive when observer has not produced a sample yet.
+			select {
+			case u := <-s.usageCh:
+				if err := stream.Send(&nodev1.SessionRequest{
+					Body: &nodev1.SessionRequest_Usage{Usage: u},
+				}); err != nil {
+					return err
+				}
+			default:
+				if err := s.sendUsage(stream); err != nil {
+					return err
+				}
+			}
+		case u := <-s.usageCh:
+			if err := stream.Send(&nodev1.SessionRequest{
+				Body: &nodev1.SessionRequest_Usage{Usage: u},
+			}); err != nil {
+				return err
+			}
+		case w := <-s.wakeCh:
+			if err := stream.Send(&nodev1.SessionRequest{
+				Body: &nodev1.SessionRequest_Wake{Wake: w},
+			}); err != nil {
 				return err
 			}
 		case st := <-s.statusCh:
@@ -346,23 +417,28 @@ func (s *Session) loadCreds() (*identity.Material, state.NodeMeta, tls.Certifica
 
 func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat *identity.Material) error {
 	hostname, _ := os.Hostname()
+	s.mu.Lock()
 	drivers := s.cfg.Drivers
+	ingress := s.cfg.IngressEndpoint
+	agentVersion := s.cfg.AgentVersion
+	bootID := s.cfg.BootID
+	s.mu.Unlock()
 	if len(drivers) == 0 {
 		drivers = []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_UNSPECIFIED}
 	}
 	return stream.Send(&nodev1.SessionRequest{
 		Body: &nodev1.SessionRequest_Hello{Hello: &nodev1.Hello{
 			NodeId:          mat.NodeID,
-			AgentVersion:    s.cfg.AgentVersion,
+			AgentVersion:    agentVersion,
 			ProtocolVersion: 1,
 			Os:              goos(),
 			Arch:            runtime.GOARCH,
 			Hostname:        hostname,
 			Drivers:         drivers,
-			BootId:          s.cfg.BootID,
+			BootId:          bootID,
 			NodeTime:        timestamppb.Now(),
 			SealingKeyId:    identity.SealingKeyID(mat.SealingPublic),
-			IngressEndpoint: s.cfg.IngressEndpoint,
+			IngressEndpoint: ingress,
 		}},
 	})
 }

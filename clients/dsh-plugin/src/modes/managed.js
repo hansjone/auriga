@@ -129,18 +129,20 @@ export async function createManaged(options = {}) {
   }
 
   const replay = createReplayCache({ now });
+  const activity = createActivityProbe({
+    now: () => new Date(now() * 1000),
+  });
+  activity.markAllUnknown();
+
   const door = createDoorLock({
     instanceId,
     ownerId,
     getPublicKey: (kid) => keyCache.getPublicKey(kid),
     replay,
     now,
+    // Authenticated HTTP/WS (not /_auriga/health) counts as real user interaction.
+    onAuthenticated: () => activity.touchInteraction(),
   });
-
-  const activity = createActivityProbe({
-    now: () => new Date(now() * 1000),
-  });
-  activity.markAllUnknown();
 
   /** @type {{ ctx: object | null, getBrowsers?: () => number }} */
   const host = { ctx: null };

@@ -1,0 +1,94 @@
+name: E2E M2
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+timeout-minutes: 30
+jobs:
+  m2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: |
+            infra/**/go.sum
+            deploy/compose/bootstrap/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prepare materials (registry + PKI + template)
+        working-directory: deploy/compose
+        run: |
+          chmod +x scripts/prepare.sh scripts/agent-entrypoint.sh
+          ./scripts/prepare.sh
+          set -a
+          # shellcheck disable=SC1091
+          source var/compose.env
+          set +a
+          echo "AURIGA_IAM_ENCRYPTION_KEY=$AURIGA_IAM_ENCRYPTION_KEY" >> "$GITHUB_ENV"
+          echo "AURIGA_WORKSPACE_ENCRYPTION_KEY=$AURIGA_WORKSPACE_ENCRYPTION_KEY" >> "$GITHUB_ENV"
+          echo "AURIGA_AGENT_CA_SHA256=$AURIGA_AGENT_CA_SHA256" >> "$GITHUB_ENV"
+
+      - name: Build and start stack
+        working-directory: deploy/compose
+        run: |
+          docker compose --env-file var/compose.env build
+          docker compose --env-file var/compose.env up -d
+          # Wait for platform health
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:8081/actuator/health >/dev/null; then
+              echo "platform healthy"
+              break
+            fi
+            sleep 5
+            if [ "$i" -eq 90 ]; then
+              echo "platform did not become healthy"
+              docker compose ps
+              docker compose logs --tail=200 platform || true
+              exit 1
+            fi
+          done
+          # Export agent data for e2e heartbeats via docker volume
+          VOL="$(docker volume ls -q | grep agentdata | head -1)"
+          echo "AGENT_VOLUME=$VOL" >> "$GITHUB_ENV"
+
+      - name: Run e2e
+        env:
+          EDGE_BASE: http://127.0.0.1:8080
+          PLATFORM_BASE: http://127.0.0.1:8081
+          ENROLLMENT_FILE: deploy/compose/var/enrollment/emergency-enrollment.json
+          JOIN_TOKEN_FILE: deploy/compose/var/join/token
+          IDLE_MINUTES: '5'
+        run: |
+          # AGENT_VOLUME (from previous step) lets e2e read instance.token and
+          # write ops-cron/store.json into the live agent data volume.
+          export AGENT_VOLUME
+          node e2e/m2.mjs
+
+      - name: Dump logs on failure
+        if: failure()
+        working-directory: deploy/compose
+        run: |
+          docker compose ps || true
+          for s in postgres nats platform edge agent registry; do
+            echo "===== logs $s ====="
+            docker compose logs --tail=200 "$s" || true
+          done
+
+      - name: Tear down
+        if: always()
+        working-directory: deploy/compose
+        run: docker compose --env-file var/compose.env down -v || docker compose down -v || true
