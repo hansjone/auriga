@@ -124,6 +124,7 @@ public final class ExampleService {
   public static class WidgetSeenHandler implements EventHandler {
     private final JdbcTemplate jdbc;
     public final AtomicInteger invocations = new AtomicInteger();
+
     /** Invocations per event id: other tests' events are consumed concurrently. */
     private final java.util.concurrent.ConcurrentHashMap<String, AtomicInteger> byEvent =
         new java.util.concurrent.ConcurrentHashMap<>();
@@ -150,7 +151,9 @@ public final class ExampleService {
     @Override
     public void handle(ReceivedEvent event) {
       invocations.incrementAndGet();
-      byEvent.computeIfAbsent(String.valueOf(event.id()), k -> new AtomicInteger()).incrementAndGet();
+      byEvent
+          .computeIfAbsent(String.valueOf(event.id()), k -> new AtomicInteger())
+          .incrementAndGet();
       WidgetCreated data = event.dataAs(WidgetCreated.class);
       if (data.name().startsWith("poison")) throw new IllegalStateException("cannot handle poison");
       jdbc.update(

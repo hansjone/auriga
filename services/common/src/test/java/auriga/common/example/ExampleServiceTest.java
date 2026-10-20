@@ -223,7 +223,9 @@ class ExampleServiceTest {
     Headers headers = new Headers();
     headers.put(NatsEvents.MSG_ID_HEADER, UUID.randomUUID().toString());
     long duplicateSeq =
-        nats.jetStream().publish("auriga.evt.widget.created", headers, onStream.getData()).getSeqno();
+        nats.jetStream()
+            .publish("auriga.evt.widget.created", headers, onStream.getData())
+            .getSeqno();
     // wait until the consumer has acknowledged the duplicate's own stream sequence
     await("duplicate to be acknowledged", () -> ackedThrough(duplicateSeq));
     assertEquals(1, handler.invocationsOf(eventId));
