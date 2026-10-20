@@ -487,6 +487,39 @@ async function heartbeatIdle(token) {
   }
 }
 
+// Fail fast if the agent never reports the alarm, instead of after the idle wait.
+async function waitWakeRegistered(instanceId) {
+  step('wait nextWakeAt registered');
+  await loginEmergency(ADMIN_HOST);
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const g = await req(`/api/workspace/v1/instances/${instanceId}`, {
+      host: ADMIN_HOST,
+      csrf: true,
+    });
+    if (g.status === 401) await loginEmergency(ADMIN_HOST);
+    if (g.body?.nextWakeAt) {
+      console.log('nextWakeAt', g.body.nextWakeAt);
+      return;
+    }
+    await sleep(3000);
+  }
+  if (AGENT_VOLUME) {
+    const ls = spawnSync('docker', [
+      'run',
+      '--rm',
+      '-v',
+      `${AGENT_VOLUME}:/data:ro`,
+      'alpine',
+      'sh',
+      '-c',
+      `ls -laR /data/instances/${instanceId}/home/ops-cron; cat /data/instances/${instanceId}/home/ops-cron/store.json`,
+    ]);
+    console.log(String(ls.stdout), String(ls.stderr));
+  }
+  fail('wake-registered', 'nextWakeAt not reported within 60s');
+}
+
 async function writeWakeSchedule(instanceId, nextWakeMs) {
   const body = JSON.stringify({
     settings: { timezone: 'UTC' },
@@ -616,6 +649,7 @@ async function main() {
 
   const wakeAt = Date.now() + (IDLE_MINUTES * 60 + 90) * 1000;
   await writeWakeSchedule(instanceId, wakeAt);
+  await waitWakeRegistered(instanceId);
 
   step(`idle heartbeats ~${IDLE_MINUTES + 1.5} min`);
   const idleUntil = Date.now() + (IDLE_MINUTES * 60 + 90) * 1000;

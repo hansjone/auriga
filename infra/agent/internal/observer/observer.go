@@ -258,6 +258,7 @@ func (o *Observer) refreshWakes(lastMod map[string]time.Time) {
 		if info.NextWakeAt != nil {
 			w.NextWakeAt = timestamppb.New(*info.NextWakeAt)
 		}
+		o.cfg.Logger.Info("wake schedule changed", "instance", target.ID, "source", info.Source, "next_wake_at", info.NextWakeAt)
 		o.cfg.Reporter.ReportWake(w)
 	}
 }
