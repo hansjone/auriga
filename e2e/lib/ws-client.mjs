@@ -1,180 +1,232 @@
-/**
- * Minimal WebSocket client over node:net (no extra deps) for e2e revoke checks.
- */
+/** Bounded RFC6455 client for E2E transport liveness and session revocation. */
 import net from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
-import { setTimeout as sleep } from 'node:timers/promises';
 
-/**
- * @param {{
- *   hostname: string,
- *   port: number,
- *   path?: string,
- *   hostHeader: string,
- *   headers?: Record<string, string>,
- *   timeoutMs?: number,
- *   keepAliveMs?: number,
- * }} opts
- */
+const MAX_PAYLOAD = 1024 * 1024;
+
 export async function openWebSocket(opts) {
-  const path = opts.path || '/ws';
   const timeoutMs = opts.timeoutMs || 15_000;
   const key = randomBytes(16).toString('base64');
-  const socket = net.connect({
-    host: opts.hostname,
-    port: opts.port,
-  });
-
-  const closed = new Promise((resolve) => {
-    socket.once('close', () => resolve('close'));
-    socket.once('error', () => resolve('error'));
-    socket.once('end', () => resolve('end'));
-  });
-
-  await new Promise((resolve, reject) => {
-    const t = setTimeout(
-      () => reject(new Error('ws connect timeout')),
-      timeoutMs,
-    );
-    socket.once('connect', () => {
-      clearTimeout(t);
-      resolve();
-    });
-    socket.once('error', (e) => {
-      clearTimeout(t);
-      reject(e);
-    });
-  });
-
-  const hdrs = {
-    Host: opts.hostHeader,
-    Upgrade: 'websocket',
-    Connection: 'Upgrade',
-    'Sec-WebSocket-Key': key,
-    'Sec-WebSocket-Version': '13',
-    Origin: `http://${opts.hostHeader}`,
-    ...(opts.headers || {}),
-  };
-  let req = `GET ${path} HTTP/1.1\r\n`;
-  for (const [k, v] of Object.entries(hdrs)) req += `${k}: ${v}\r\n`;
-  req += '\r\n';
-  socket.write(req);
-
-  const { status, head, rest } = await readHttpResponse(socket, timeoutMs);
-  if (status !== 101) {
-    socket.destroy();
-    throw new Error(`ws upgrade status ${status}`);
-  }
-  const expect = createHash('sha1')
-    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-    .digest('base64');
-  const accepted = /^sec-websocket-accept:\s*(\S+)\s*$/im.exec(head)?.[1];
-  if (accepted !== expect) {
-    socket.destroy();
-    throw new Error('ws invalid Sec-WebSocket-Accept');
-  }
-  let buf = rest;
-  /** Close frame status seen in keepalive mode (null: none / no code). */
+  const socket = net.connect({ host: opts.hostname, port: opts.port });
+  let closedInfo = null;
   let peerClose = null;
-  // Real DSH's transport expects Pong liveness, even when this harness does
-  // not open an application stream. RFC 6455 permits unsolicited Pong frames.
-  // Keepalive mode owns the socket's reads: never mix it with readTextFrame.
-  const stopKeepalive =
-    opts.keepAliveMs > 0
-      ? startControlKeepalive(socket, opts.keepAliveMs, rest, (code) => {
-          peerClose = { code };
-        })
-      : () => {};
-
-  function sendText(text) {
-    const payload = Buffer.from(String(text), 'utf8');
-    const mask = randomBytes(4);
-    const out = Buffer.alloc(2 + 4 + payload.length);
-    out[0] = 0x81;
-    out[1] = 0x80 | payload.length;
-    mask.copy(out, 2);
-    for (let i = 0; i < payload.length; i++) {
-      out[6 + i] = payload[i] ^ mask[i % 4];
-    }
-    socket.write(out);
-  }
-
-  async function readTextFrame(ms = timeoutMs) {
-    const deadline = Date.now() + ms;
-    while (Date.now() < deadline) {
-      while (buf.length < 2) {
-        buf = Buffer.concat([
-          buf,
-          await readChunk(socket, deadline - Date.now()),
-        ]);
-      }
-      const b0 = buf[0];
-      const b1 = buf[1];
-      const opcode = b0 & 0x0f;
-      const masked = (b1 & 0x80) !== 0;
-      let len = b1 & 0x7f;
-      let off = 2;
-      if (len === 126) {
-        while (buf.length < 4) {
-          buf = Buffer.concat([
-            buf,
-            await readChunk(socket, deadline - Date.now()),
-          ]);
-        }
-        len = buf.readUInt16BE(2);
-        off = 4;
-      }
-      const maskLen = masked ? 4 : 0;
-      while (buf.length < off + maskLen + len) {
-        buf = Buffer.concat([
-          buf,
-          await readChunk(socket, deadline - Date.now()),
-        ]);
-      }
-      let payload = buf.subarray(off + maskLen, off + maskLen + len);
-      if (masked) {
-        const mask = buf.subarray(off, off + 4);
-        payload = Buffer.from(payload);
-        for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
-      }
-      buf = buf.subarray(off + maskLen + len);
-      if (opcode === 0x8) {
-        socket.destroy();
-        throw new Error('ws closed by peer');
-      }
-      if (opcode === 0x1) return payload.toString('utf8');
-    }
-    throw new Error('ws read timeout');
-  }
-
-  async function waitClosed(ms) {
-    const raced = await Promise.race([closed, sleep(ms).then(() => 'timeout')]);
-    return raced !== 'timeout';
-  }
-
-  function close() {
-    stopKeepalive();
-    try {
-      socket.end();
-    } catch {
-      /* ignore */
-    }
-    try {
-      socket.destroy();
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return {
-    sendText,
-    readTextFrame,
-    waitClosed,
-    close,
-    expectAccept: expect,
-    /** null when the transport ended without a peer Close frame (e.g. edge cut TCP). */
-    peerClose: () => peerClose,
+  let handshake = true;
+  let pending = Buffer.alloc(0);
+  let fragment = null;
+  const messages = [];
+  const pongs = [];
+  const waiters = new Set();
+  const notify = () => {
+    for (const wake of waiters) wake();
   };
+  socket.on('connect', notify);
+  const markClosed = (event) => {
+    closedInfo ||= { at: Date.now(), event };
+    notify();
+  };
+  // Keep the error listener until final close; subsequent errors cannot become
+  // uncaught exceptions after a first end/error event.
+  socket.on('error', () => markClosed('error'));
+  socket.on('close', () => markClosed('close'));
+  socket.on('end', () => markClosed('end'));
+  function maskedFrame(opcode, payload = Buffer.alloc(0)) {
+    if (payload.length > MAX_PAYLOAD) throw new Error('ws payload too large');
+    const extended = payload.length < 126 ? 0 : payload.length <= 65535 ? 2 : 8;
+    const mask = randomBytes(4);
+    const out = Buffer.alloc(2 + extended + 4 + payload.length);
+    out[0] = 0x80 | opcode;
+    out[1] =
+      0x80 | (extended === 0 ? payload.length : extended === 2 ? 126 : 127);
+    if (extended === 2) out.writeUInt16BE(payload.length, 2);
+    if (extended === 8) out.writeBigUInt64BE(BigInt(payload.length), 2);
+    mask.copy(out, 2 + extended);
+    for (let i = 0; i < payload.length; i++)
+      out[6 + extended + i] = payload[i] ^ mask[i % 4];
+    return out;
+  }
+  function parseFrames() {
+    while (!handshake && pending.length >= 2) {
+      const fin = !!(pending[0] & 0x80);
+      const opcode = pending[0] & 0x0f;
+      let length = pending[1] & 0x7f;
+      let offset = 2;
+      if (length === 126) {
+        if (pending.length < 4) return;
+        length = pending.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (pending.length < 10) return;
+        const large = pending.readBigUInt64BE(2);
+        if (large > BigInt(MAX_PAYLOAD)) {
+          socket.destroy();
+          return;
+        }
+        length = Number(large);
+        offset = 10;
+      }
+      if (
+        pending[0] & 0x70 ||
+        pending[1] & 0x80 ||
+        length > MAX_PAYLOAD ||
+        (opcode >= 8 && (!fin || length > 125))
+      ) {
+        socket.destroy();
+        return;
+      }
+      if (pending.length < offset + length) return;
+      const payload = pending.subarray(offset, offset + length);
+      pending = pending.subarray(offset + length);
+      if (opcode === 8) {
+        peerClose = {
+          code: payload.length >= 2 ? payload.readUInt16BE(0) : null,
+        };
+        markClosed('peer-close');
+        socket.end(maskedFrame(8, payload));
+        return;
+      }
+      if (opcode === 9) socket.write(maskedFrame(10, payload));
+      else if (opcode === 10) {
+        pongs.push(payload.toString('hex'));
+        notify();
+      } else if (opcode === 1 || opcode === 2) {
+        if (fragment) {
+          socket.destroy();
+          return;
+        }
+        if (fin) {
+          if (opcode === 1) messages.push(payload.toString('utf8'));
+        } else fragment = { opcode, payload: Buffer.from(payload) };
+        notify();
+      } else if (opcode === 0) {
+        if (!fragment || fragment.payload.length + length > MAX_PAYLOAD) {
+          socket.destroy();
+          return;
+        }
+        fragment.payload = Buffer.concat([fragment.payload, payload]);
+        if (fin) {
+          if (fragment.opcode === 1)
+            messages.push(fragment.payload.toString('utf8'));
+          fragment = null;
+          notify();
+        }
+      } else {
+        socket.destroy();
+        return;
+      }
+    }
+  }
+  socket.on('data', (chunk) => {
+    pending = Buffer.concat([pending, chunk]);
+    if (!handshake) parseFrames();
+    notify();
+  });
+  async function until(predicate, ms, allowClosed = false) {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const value = predicate();
+      if (value !== undefined) return value;
+      if (closedInfo && !allowClosed) throw new Error('ws closed');
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('ws timeout');
+      await new Promise((resolve) => {
+        const wake = () => {
+          clearTimeout(timer);
+          waiters.delete(wake);
+          resolve();
+        };
+        const timer = setTimeout(wake, remaining);
+        waiters.add(wake);
+      });
+    }
+  }
+  let keepalive;
+  try {
+    await until(() => (!socket.connecting ? true : undefined), timeoutMs);
+    const headers = {
+      Host: opts.hostHeader,
+      Upgrade: 'websocket',
+      Connection: 'Upgrade',
+      'Sec-WebSocket-Key': key,
+      'Sec-WebSocket-Version': '13',
+      Origin: `http://${opts.hostHeader}`,
+      ...(opts.headers || {}),
+    };
+    let request = `GET ${opts.path || '/ws'} HTTP/1.1\r\n`;
+    for (const [name, value] of Object.entries(headers))
+      request += `${name}: ${value}\r\n`;
+    socket.write(request + '\r\n');
+    const index = await until(() => {
+      const i = pending.indexOf('\r\n\r\n');
+      if (pending.length > 16_384) throw new Error('ws handshake too large');
+      return i >= 0 ? i : undefined;
+    }, timeoutMs);
+    const head = pending.subarray(0, index).toString('utf8');
+    pending = pending.subarray(index + 4);
+    const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(head)?.[1]);
+    if (status !== 101) {
+      const error = new Error(`ws upgrade status ${status}`);
+      error.status = status;
+      throw error;
+    }
+    const expect = createHash('sha1')
+      .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64');
+    if (/^sec-websocket-accept:\s*(\S+)\s*$/im.exec(head)?.[1] !== expect)
+      throw new Error('ws invalid Sec-WebSocket-Accept');
+    handshake = false;
+    parseFrames();
+    if (opts.keepAliveMs > 0) {
+      keepalive = setInterval(() => {
+        if (!closedInfo) socket.write(maskedFrame(10));
+      }, opts.keepAliveMs);
+      keepalive.unref?.();
+    }
+    socket.once('close', () => clearInterval(keepalive));
+    return {
+      sendText(text) {
+        if (closedInfo) throw new Error('ws closed');
+        socket.write(maskedFrame(1, Buffer.from(String(text))));
+      },
+      readTextFrame(ms = timeoutMs) {
+        return until(
+          () => (messages.length ? messages.shift() : undefined),
+          ms,
+        );
+      },
+      async probe(ms = timeoutMs) {
+        if (closedInfo) throw new Error('ws closed before probe');
+        const payload = randomBytes(12);
+        const wanted = payload.toString('hex');
+        socket.write(maskedFrame(9, payload));
+        await until(() => {
+          const index = pongs.indexOf(wanted);
+          if (index < 0) return undefined;
+          pongs.splice(index, 1);
+          return true;
+        }, ms);
+        if (closedInfo) throw new Error('ws closed during probe');
+        return { at: Date.now(), kind: 'ping-pong' };
+      },
+      async waitClosed(ms) {
+        try {
+          await until(() => closedInfo || undefined, ms, true);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      closedInfo: () => closedInfo,
+      peerClose: () => peerClose,
+      close() {
+        clearInterval(keepalive);
+        socket.destroy();
+      },
+    };
+  } catch (error) {
+    clearInterval(keepalive);
+    socket.destroy();
+    throw error;
+  }
 }
 
 /** Keep a control-only native transport alive; application frames are discarded. */
@@ -257,62 +309,4 @@ export function startControlKeepalive(
   // Consume server Ping/Close frames so a FIN cannot wait behind unread data.
   socket.resume();
   return stop;
-}
-
-/**
- * @param {import('node:net').Socket} socket
- * @param {number} timeoutMs
- */
-async function readHttpResponse(socket, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let buf = Buffer.alloc(0);
-  while (Date.now() < deadline) {
-    buf = Buffer.concat([buf, await readChunk(socket, deadline - Date.now())]);
-    const idx = buf.indexOf('\r\n\r\n');
-    if (idx < 0) continue;
-    const head = buf.subarray(0, idx).toString('utf8');
-    const rest = buf.subarray(idx + 4);
-    const m = /^HTTP\/1\.[01] (\d{3})/.exec(head);
-    const status = m ? Number(m[1]) : 0;
-    return { status, head, rest };
-  }
-  throw new Error('ws handshake timeout');
-}
-
-/**
- * @param {import('node:net').Socket} socket
- * @param {number} ms
- */
-function readChunk(socket, ms) {
-  return new Promise((resolve, reject) => {
-    if (ms <= 0) {
-      reject(new Error('ws read timeout'));
-      return;
-    }
-    const t = setTimeout(() => {
-      cleanup();
-      reject(new Error('ws read timeout'));
-    }, ms);
-    function onData(c) {
-      cleanup();
-      resolve(c);
-    }
-    function onErr(e) {
-      cleanup();
-      reject(e);
-    }
-    function onClose() {
-      cleanup();
-      reject(new Error('ws closed'));
-    }
-    function cleanup() {
-      clearTimeout(t);
-      socket.off('data', onData);
-      socket.off('error', onErr);
-      socket.off('close', onClose);
-    }
-    socket.once('data', onData);
-    socket.once('error', onErr);
-    socket.once('close', onClose);
-  });
 }

@@ -27,6 +27,10 @@ import {
   instanceReadyRunning,
   phaseReached,
   safeSummary,
+  assertInstanceUnauthorized,
+  assertStoppedEvidence,
+  assertRevocationClose,
+  assertAlarmWake,
 } from './lib/assert.mjs';
 import { openWebSocket } from './lib/ws-client.mjs';
 import { waitInstancePage } from './lib/instance-page.mjs';
@@ -303,11 +307,13 @@ async function loginEmergency(host, jar) {
   });
   if (advance.status !== 200)
     fail('login', `advance ${advance.status}`, advance.body);
-  if (advance.body?.status && advance.body.status !== 'completed') {
+  if (advance.body?.status !== 'completed') {
     fail('login', `tx status ${advance.body.status}`, advance.body);
   }
   const names = useJar.names().filter((k) => k.includes('session'));
   if (!names.length) fail('login', 'no session cookie', useJar.names());
+  const me = await req('/api/iam/v1/me', { host, jar: useJar });
+  if (me.status !== 200) fail('login-me', `status ${me.status}`, me.body);
   console.log('login ok cookieNames=', names.join(','));
 }
 
@@ -475,13 +481,6 @@ async function accessViaEdge(instanceId, portalJar, instanceJar, deadline) {
   } catch (error) {
     fail('edge-access', error.message);
   }
-  // Admin jar must never be required for instance access.
-  if (
-    jars.admin.wouldSend('auriga_admin_session', { host, path: '/' }) ||
-    jars.admin.wouldSend('__Host-auriga_admin_session', { host, path: '/' })
-  ) {
-    fail('edge-access', 'admin session would be sent to instance host');
-  }
   console.log('edge access ok');
   return { host, instanceJar: iJar, portalJar: pJar };
 }
@@ -645,23 +644,30 @@ async function verifyRealHost(instanceId, instance) {
 
 function dockerInspectRunning(instanceId) {
   const name = `auriga-inst-${instanceId}`;
-  const r = spawnSync('docker', ['inspect', '-f', '{{.State.Running}}', name], {
+  const r = spawnSync('docker', ['inspect', '-f', '{{json .State}}', name], {
     encoding: 'utf8',
   });
   if (r.status !== 0) {
     const detail = (r.stderr || r.stdout || '').trim();
-    // Removed container is not running (idle reclaim may remove after stop).
-    if (/no such object|no such container/i.test(detail)) {
-      return { ok: true, running: false, field: 'missing', detail };
-    }
     return {
       ok: false,
       running: false,
       detail: safeSummary(detail.slice(0, 200)),
     };
   }
-  const field = (r.stdout || '').trim();
-  return { ok: true, running: containerIsRunning(field), field };
+  try {
+    const state = JSON.parse(r.stdout);
+    const field = String(state.Running);
+    return {
+      ok: true,
+      running: containerIsRunning(field),
+      field,
+      startedAt: state.StartedAt,
+      finishedAt: state.FinishedAt,
+    };
+  } catch {
+    return { ok: false, running: false, detail: 'invalid Docker State JSON' };
+  }
 }
 
 function readTokenFromVolume(instanceId) {
@@ -710,7 +716,7 @@ function findInstanceToken(instanceId) {
   return null;
 }
 
-async function heartbeatIdle(token) {
+async function heartbeatIdle(token, instanceId) {
   const res = await fetch(
     new URL('/api/workspace/v1/instance/heartbeat', PLATFORM),
     {
@@ -734,11 +740,23 @@ async function heartbeatIdle(token) {
     },
   );
   if (!res.ok) {
+    // A known stopped phase is the only reason to tolerate a rejected trailing
+    // fake heartbeat. Transport errors and failures while running remain fatal.
+    const instance = await req(`/api/workspace/v1/instances/${instanceId}`, {
+      host: ADMIN_HOST,
+    });
+    if (
+      instance.status === 200 &&
+      ['stopping', 'stopped'].includes(instance.body?.phase)
+    ) {
+      return false;
+    }
     fail('heartbeat', `status ${res.status}`, await res.text());
   }
+  return true;
 }
 
-async function waitWakeRegistered(instanceId) {
+async function waitWakeRegistered(instanceId, wakeAt) {
   step('wait nextWakeAt registered');
   await loginEmergency(ADMIN_HOST);
   const deadline = Date.now() + 60_000;
@@ -748,7 +766,7 @@ async function waitWakeRegistered(instanceId) {
       csrf: true,
     });
     if (g.status === 401) await loginEmergency(ADMIN_HOST);
-    if (g.body?.nextWakeAt) {
+    if (g.status === 200 && Date.parse(g.body?.nextWakeAt) === wakeAt) {
       console.log('nextWakeAt', g.body.nextWakeAt);
       return;
     }
@@ -858,41 +876,33 @@ async function waitPhase(instanceId, want, timeoutMs) {
 async function waitStoppedStrict(instanceId) {
   const body = await waitPhase(instanceId, 'stopped', 240_000);
   const insp = dockerInspectRunning(instanceId);
-  if (!insp.ok) {
-    fail('idle-stop-container', `docker inspect failed: ${insp.detail}`);
-  }
-  if (insp.running) {
-    fail(
-      'idle-stop-container',
-      'container still Running=true after phase=stopped',
-      insp.field,
-    );
-  }
-  console.log('container stopped (Running=false)');
+  const stoppedAt = Date.now();
   evidence.stopped = {
     phase: body.phase,
     running: insp.running,
     inspect: insp.field,
+    observedAt: stoppedAt,
+    finishedAt: insp.finishedAt,
   };
 
   const host = `${instanceId}.i.example.com`;
   const page = await req('/', { host, jar: jars.instance });
-  if (instancePageOk(page)) {
-    fail(
-      'idle-stop-edge',
-      `edge still returned healthy instance response status=${page.status}`,
-    );
+  try {
+    assertStoppedEvidence(insp, page);
+  } catch (error) {
+    fail('idle-stop-evidence', error.message);
   }
+  console.log('container stopped (Running=false)');
   console.log(
     'edge no longer serves healthy instance (status=',
     page.status,
     ')',
   );
   evidence.stopped.edgeStatus = page.status;
-  return body;
+  return { body, stoppedAt };
 }
 
-async function waitWakeStrict(instanceId) {
+async function waitWakeStrict(instanceId, wakeAt, stoppedAt) {
   step('wait alarm wake (phase+container+edge)');
   await loginEmergency(ADMIN_HOST);
   const deadline = Date.now() + 480_000;
@@ -919,6 +929,37 @@ async function waitWakeStrict(instanceId) {
         await sleep(5000);
         continue;
       }
+      // Pre-warm is expected 120s before the alarm; the at schedule is only
+      // consumed by the observer after its actual due time. Keep both facts.
+      const startedAt = Date.parse(insp.startedAt);
+      if (
+        !Number.isFinite(startedAt) ||
+        startedAt <= stoppedAt ||
+        startedAt < wakeAt - 120_000 - 5000
+      ) {
+        fail(
+          'wake-cause',
+          'container started outside this alarm pre-warm window',
+        );
+      }
+      evidence.prewarmed = {
+        startedAt: insp.startedAt,
+        alarmAt: new Date(wakeAt).toISOString(),
+        wakeLeadSeconds: 120,
+        stoppedAt,
+      };
+      if (
+        Date.now() < wakeAt ||
+        (g.body?.nextWakeAt && Date.parse(g.body.nextWakeAt) <= wakeAt)
+      ) {
+        await sleep(5000);
+        continue;
+      }
+      try {
+        assertAlarmWake(insp, wakeAt, stoppedAt, g.body);
+      } catch (error) {
+        fail('wake-evidence', error.message);
+      }
       // Re-redeem / access via edge after wake.
       jars.instance.clear();
       await accessViaEdge(instanceId, undefined, undefined, deadline);
@@ -926,9 +967,15 @@ async function waitWakeStrict(instanceId) {
         phase: g.body.phase,
         ready: g.body.ready,
         running: insp.running,
+        startedAt: insp.startedAt,
+        alarmAt: new Date(wakeAt).toISOString(),
+        nextWakeAt: g.body?.nextWakeAt ?? null,
+        scheduleConsumedObservedAt: Date.now(),
         edge: 'page predicate passed',
       };
-      console.log('alarm wake ok (phase=running ready, container up, edge ok)');
+      console.log(
+        'alarm pre-warm and schedule consumption ok (phase+container+edge)',
+      );
       return g.body;
     }
     await sleep(5000);
@@ -936,66 +983,119 @@ async function waitWakeStrict(instanceId) {
   fail('wake', 'did not reach running+ready with container+edge');
 }
 
-/**
- * Dual portal sessions: A holds instance HTTP+WS; B revokes A via DELETE /me/sessions/{id}.
- */
+/** Send each actual audience session to the instance Host, bypassing jar routing. */
+async function rejectAudienceCookies(instanceId, portalJar = jars.portal) {
+  const host = `${instanceId}.i.example.com`;
+  for (const [audience, source, sourceHost] of [
+    ['portal', portalJar, PORTAL_HOST],
+    ['admin', jars.admin, ADMIN_HOST],
+  ]) {
+    const sourceHeader = source.cookieHeader({
+      host: sourceHost,
+      path: '/',
+      secure: edgeUrl().protocol === 'https:',
+    });
+    const name = sessionCookieName(sourceHost);
+    const cookie = sourceHeader
+      .split('; ')
+      .filter(
+        (part) =>
+          part.startsWith(name + '=') ||
+          part.startsWith('__Host-' + name + '='),
+      )
+      .join('; ');
+    if (!cookie) fail('audience-probe', `no actual ${audience} session cookie`);
+    const response = await req('/', {
+      host,
+      jar: new CookieJar(),
+      headers: { Cookie: cookie },
+    });
+    try {
+      assertInstanceUnauthorized(response);
+    } catch (error) {
+      fail('audience-probe', `${audience}: ${error.message}`);
+    }
+  }
+  evidence.checks.push('actual-portal-and-admin-cookies-rejected-at-instance');
+}
+
+/** Dual sessions retain independent instance HTTP and WS access. */
 async function revokeDualSession(instanceId) {
   step('iam dual-session revoke (A HTTP+WS, B deletes A)');
   const portalA = new CookieJar();
   const instanceA = new CookieJar();
   const portalB = new CookieJar();
-
+  const instanceB = new CookieJar();
+  // Finish the second TOTP login before opening either transport: no idle gap
+  // between the final A liveness probe and DELETE is attributed to revocation.
   await loginEmergency(PORTAL_HOST, portalA);
-  const meA = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalA });
-  if (meA.status !== 200) fail('revoke-A', `me A ${meA.status}`, meA.body);
+  await loginEmergency(PORTAL_HOST, portalB);
   const listA = await req('/api/iam/v1/me/sessions', {
     host: PORTAL_HOST,
     jar: portalA,
   });
   if (listA.status !== 200)
     fail('revoke-A-list', `status ${listA.status}`, listA.body);
-  const sessionIdA = (listA.body?.items || []).find((s) => s?.current)?.id;
+  const sessionIdA = (listA.body?.items || []).find(
+    (session) => session?.current,
+  )?.id;
   if (!sessionIdA) fail('revoke-A-list', 'no current session id for A');
-
-  await accessViaEdge(instanceId, portalA, instanceA);
-  const host = `${instanceId}.i.example.com`;
-  const pageA = await req('/', { host, jar: instanceA });
-  if (!instancePageOk(pageA)) {
-    fail('revoke-A', `instance HTTP before revoke ${pageA.status}`);
-  }
-
-  const edge = edgeUrl();
-  const cookieHdr = instanceA.cookieHeader({
-    host,
-    path: WS_PATH,
-    secure: edge.protocol === 'https:',
+  const listB = await req('/api/iam/v1/me/sessions', {
+    host: PORTAL_HOST,
+    jar: portalB,
   });
-  const ws = await openWebSocket({
+  const sessionIdB = (listB.body?.items || []).find(
+    (session) => session?.current,
+  )?.id;
+  if (listB.status !== 200 || !sessionIdB || sessionIdB === sessionIdA)
+    fail('revoke-B-list', 'B must be a distinct active session');
+  await accessViaEdge(instanceId, portalA, instanceA);
+  await accessViaEdge(instanceId, portalB, instanceB);
+  await rejectAudienceCookies(instanceId, portalA);
+  const host = `${instanceId}.i.example.com`;
+  const edge = edgeUrl();
+  const socketOptions = (jar) => ({
     hostname: edge.hostname,
     port: Number(edge.port || (edge.protocol === 'https:' ? 443 : 80)),
     path: WS_PATH,
     hostHeader: host,
-    headers: cookieHdr ? { Cookie: cookieHdr } : {},
+    headers: {
+      Cookie: jar.cookieHeader({
+        host,
+        path: WS_PATH,
+        secure: edge.protocol === 'https:',
+      }),
+    },
     timeoutMs: 20_000,
     keepAliveMs: FIXTURE === 'real' ? 1000 : 0,
   });
-  openSockets.push(ws);
-  if (FIXTURE === 'fake') {
-    const ping = `ping-${randomBytes(4).toString('hex')}`;
-    ws.sendText(ping);
-    const echo = await ws.readTextFrame(10_000);
-    if (echo !== ping)
-      fail('revoke-ws', `echo mismatch got=${safeSummary(echo)}`);
-  } else if (await ws.waitClosed(1000)) {
-    fail('revoke-ws', 'real DSH transport closed before revoke');
+  const oldOptionsA = socketOptions(instanceA);
+  const wsA = await openWebSocket(oldOptionsA);
+  openSockets.push(wsA);
+  const wsB = await openWebSocket(socketOptions(instanceB));
+  openSockets.push(wsB);
+  async function probe(ws, label) {
+    if (ws.closedInfo())
+      fail(label, 'transport already closed before liveness probe');
+    if (FIXTURE === 'fake') {
+      const ping = `ping-${randomBytes(8).toString('hex')}`;
+      ws.sendText(ping);
+      if ((await ws.readTextFrame(10_000)) !== ping)
+        fail(label, 'echo mismatch');
+      return { at: Date.now(), kind: 'text-echo' };
+    }
+    return ws.probe(10_000);
   }
-  console.log('session A HTTP+WS ok');
-
-  // Fresh portal session B (same emergency account) revokes A by id.
-  await loginEmergency(PORTAL_HOST, portalB);
-  const meB = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalB });
-  if (meB.status !== 200) fail('revoke-B', `me B ${meB.status}`, meB.body);
-
+  // B is the positive control, then A is checked immediately before DELETE.
+  const pageB = await req('/', { host, jar: instanceB });
+  if (!instancePageOk(pageB)) fail('revoke-B-before', `HTTP ${pageB.status}`);
+  await probe(wsB, 'revoke-B-before-ws');
+  const pageA = await req('/', { host, jar: instanceA });
+  if (!instancePageOk(pageA)) fail('revoke-A-before', `HTTP ${pageA.status}`);
+  const lastAliveA = await probe(wsA, 'revoke-A-before-ws');
+  if (wsA.closedInfo() || wsB.closedInfo())
+    fail('revoke-before', 'a transport closed before DELETE');
+  const deleteSentAt = Date.now();
   const del = await req(`/api/iam/v1/me/sessions/${sessionIdA}`, {
     host: PORTAL_HOST,
     jar: portalB,
@@ -1004,47 +1104,77 @@ async function revokeDualSession(instanceId) {
   });
   try {
     assertRevokeSuccess(del.status, del.body);
-  } catch (e) {
-    fail('revoke', e.message, del.body);
+  } catch (error) {
+    fail('revoke', error.message, del.body);
   }
-  console.log('revoke DELETE status', del.status);
-
-  const closed = await ws.waitClosed(30_000);
-  if (!closed)
-    fail('revoke-ws', 'websocket did not close within 30s after revoke');
-  // Edge revocation cuts the proxied TCP stream; a DSH Close frame instead
-  // (timeout/error) is recorded so the cause is not silently attributed.
-  evidence.revokeClose = { peerClose: ws.peerClose?.() ?? null };
-  console.log('session A websocket closed after revoke', evidence.revokeClose);
-
-  const pageAfter = await req('/', { host, jar: instanceA });
-  if (pageAfter.status < 400 || instancePageOk(pageAfter)) {
-    fail(
-      'revoke-http',
-      `revoked instance cookie still accepted status=${pageAfter.status}`,
-    );
-  }
-  console.log('revoked instance cookie rejected status=', pageAfter.status);
-
-  const meB2 = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalB });
-  if (meB2.status !== 200) {
-    fail('revoke-B-alive', `B session broken status=${meB2.status}`, meB2.body);
-  }
-  console.log('session B still valid');
-
-  // Negative: soft 4xx must not be treated as success (unit-tested; runtime guard).
+  if (!(await wsA.waitClosed(30_000)))
+    fail('revoke-ws', 'A did not close within 30s');
+  evidence.revokeClose = {
+    lastAliveA,
+    deleteSentAt,
+    closed: wsA.closedInfo(),
+    peerClose: wsA.peerClose(),
+  };
   try {
-    assertRevokeSuccess(404, { title: 'nope' });
-    fail('revoke-guard', 'assertRevokeSuccess unexpectedly accepted 404');
-  } catch (e) {
-    if (e && e.code === 'revoke_not_ok') {
-      console.log('revoke 4xx correctly rejected by assert');
-    } else {
-      throw e;
-    }
+    assertRevocationClose(wsA.closedInfo(), deleteSentAt, wsA.peerClose());
+  } catch (error) {
+    fail('revoke-ws-cause', error.message);
   }
-
-  ws.close();
+  console.log('A transport closed after DELETE', evidence.revokeClose);
+  const pageAfter = await req('/', { host, jar: instanceA });
+  try {
+    assertInstanceUnauthorized(pageAfter);
+  } catch (error) {
+    fail('revoke-http', error.message);
+  }
+  // Reuse the exact pre-revoke instance cookie for a new handshake; a deleted
+  // cookie from the HTTP rejection must not turn this into a missing-cookie test.
+  let rejection;
+  try {
+    const unexpected = await openWebSocket(oldOptionsA);
+    unexpected.close();
+    fail('revoke-new-ws', 'revoked cookie opened a new transport');
+  } catch (error) {
+    rejection = error;
+  }
+  if (rejection?.status !== 401)
+    fail(
+      'revoke-new-ws',
+      `expected 401, got ${rejection?.status ?? 'transport error'}`,
+    );
+  const meA = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalA });
+  if (meA.status !== 401)
+    fail('revoke-A-me', `expected 401, got ${meA.status}`);
+  const meB = await req('/api/iam/v1/me', { host: PORTAL_HOST, jar: portalB });
+  const pageB2 = await req('/', { host, jar: instanceB });
+  if (meB.status !== 200 || !instancePageOk(pageB2))
+    fail('revoke-B-alive', `B portal=${meB.status} instance=${pageB2.status}`);
+  const aliveB = await probe(wsB, 'revoke-B-after-ws');
+  const sessions = await req('/api/iam/v1/me/sessions', {
+    host: PORTAL_HOST,
+    jar: portalB,
+  });
+  if (
+    sessions.status !== 200 ||
+    !Array.isArray(sessions.body?.items) ||
+    sessions.body.items.some((session) => session.id === sessionIdA) ||
+    !sessions.body.items.some(
+      (session) => session.id === sessionIdB && session.current,
+    )
+  )
+    fail('revoke-B-sessions', 'A still listed or current B missing');
+  evidence.revoke = {
+    status: del.status,
+    aHttpStatus: pageAfter.status,
+    aNewWsStatus: rejection.status,
+    aPortalStatus: meA.status,
+    bPortalStatus: meB.status,
+    bHttpStatus: pageB2.status,
+    bWsAlive: aliveB,
+    aAbsentFromSessions: true,
+  };
+  wsA.close();
+  wsB.close();
 }
 
 function cleanup() {
@@ -1097,21 +1227,45 @@ async function main() {
       );
     }
 
+    // Same-jar HTTP and same-daemon container positive controls precede the idle
+    // window. Repeating a user GET at the idle deadline would restart real idle.
+    const beforeIdle = await req('/', {
+      host: `${instanceId}.i.example.com`,
+      jar: jars.instance,
+    });
+    const runningBeforeIdle = dockerInspectRunning(instanceId);
+    if (
+      !instancePageOk(beforeIdle) ||
+      !runningBeforeIdle.ok ||
+      !runningBeforeIdle.running
+    )
+      fail(
+        'idle-positive-control',
+        'running instance HTTP/container positive control failed',
+      );
+    evidence.beforeIdle = {
+      observedAt: Date.now(),
+      edgeStatus: beforeIdle.status,
+      running: true,
+      startedAt: runningBeforeIdle.startedAt,
+    };
+
     const wakeAt = Date.now() + (IDLE_MINUTES * 60 + 90 + 360) * 1000;
     await writeWakeSchedule(instanceId, wakeAt);
-    await waitWakeRegistered(instanceId);
+    await waitWakeRegistered(instanceId, wakeAt);
 
     step(`idle heartbeats ~${IDLE_MINUTES + 1.5} min`);
     const idleUntil = Date.now() + (IDLE_MINUTES * 60 + 90) * 1000;
     while (Date.now() < idleUntil) {
-      if (FIXTURE === 'fake') await heartbeatIdle(token);
+      if (FIXTURE === 'fake' && !(await heartbeatIdle(token, instanceId)))
+        break;
       await sleep(15_000);
     }
 
-    await waitStoppedStrict(instanceId);
+    const { stoppedAt } = await waitStoppedStrict(instanceId);
     console.log('idle reclaim ok (phase+container+edge)');
 
-    await waitWakeStrict(instanceId);
+    await waitWakeStrict(instanceId, wakeAt, stoppedAt);
 
     await revokeDualSession(instanceId);
     evidence.status = 'passed';

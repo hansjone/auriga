@@ -44,7 +44,8 @@ function verifyIdentity(req) {
     return { ok: true, bypass: true };
   }
   const token = req.headers['auriga-identity'];
-  if (!token || typeof token !== 'string') return { ok: false, reason: 'missing' };
+  if (!token || typeof token !== 'string')
+    return { ok: false, reason: 'missing' };
   const parts = token.split('.');
   if (parts.length !== 3) return { ok: false, reason: 'malformed' };
   let header;
@@ -69,9 +70,11 @@ function verifyIdentity(req) {
   );
   if (!ok) return { ok: false, reason: 'sig' };
   if (claims.iss !== 'auriga-edge') return { ok: false, reason: 'iss' };
-  if (instanceId && claims.aud !== instanceId) return { ok: false, reason: 'aud' };
+  if (instanceId && claims.aud !== instanceId)
+    return { ok: false, reason: 'aud' };
   if (ownerId && claims.sub !== ownerId) return { ok: false, reason: 'sub' };
-  if (String(claims.htm || '').toUpperCase() !== method) return { ok: false, reason: 'htm' };
+  if (String(claims.htm || '').toUpperCase() !== method)
+    return { ok: false, reason: 'htm' };
   if (claims.htu !== path) return { ok: false, reason: 'htu' };
   const now = Math.floor(Date.now() / 1000);
   if (typeof claims.exp !== 'number' || now - 5 > claims.exp) {
@@ -96,7 +99,10 @@ try {
 
 const server = http.createServer((req, res) => {
   const path = rawPath(req.url || '/');
-  if (path === '/_auriga/health' && (req.method === 'GET' || req.method === 'HEAD')) {
+  if (
+    path === '/_auriga/health' &&
+    (req.method === 'GET' || req.method === 'HEAD')
+  ) {
     const body = JSON.stringify({
       status: 'ok',
       ready: true,
@@ -131,20 +137,20 @@ const server = http.createServer((req, res) => {
 
 /** Minimal RFC6455 text-frame echo (e2e revoke fixture only). */
 server.on('upgrade', (req, socket, head) => {
+  if (String(req.headers.upgrade || '').toLowerCase() !== 'websocket') {
+    socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    return;
+  }
   const path = rawPath(req.url || '/');
   if (path !== '/ws' && path !== '/') {
     socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
     socket.destroy();
     return;
   }
-  // Edge already verified identity before upgrade; re-check if header present.
-  if (req.headers['auriga-identity']) {
-    const v = verifyIdentity(req);
-    if (!v.ok) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
-    }
+  const v = verifyIdentity(req);
+  if (!v.ok) {
+    socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    return;
   }
   const key = req.headers['sec-websocket-key'];
   if (!key || typeof key !== 'string') {
@@ -162,10 +168,18 @@ server.on('upgrade', (req, socket, head) => {
       `Sec-WebSocket-Accept: ${accept}\r\n` +
       '\r\n',
   );
-  if (head && head.length) socket.unshift(head);
-
   let buf = Buffer.alloc(0);
-  socket.on('data', (chunk) => {
+  function frame(opcode, payload) {
+    const extended = payload.length < 126 ? 0 : payload.length <= 65535 ? 2 : 8;
+    const out = Buffer.alloc(2 + extended + payload.length);
+    out[0] = 0x80 | opcode;
+    out[1] = extended === 0 ? payload.length : extended === 2 ? 126 : 127;
+    if (extended === 2) out.writeUInt16BE(payload.length, 2);
+    if (extended === 8) out.writeBigUInt64BE(BigInt(payload.length), 2);
+    payload.copy(out, 2 + extended);
+    return out;
+  }
+  function consume(chunk) {
     buf = Buffer.concat([buf, chunk]);
     while (buf.length >= 2) {
       const b0 = buf[0];
@@ -179,6 +193,22 @@ server.on('upgrade', (req, socket, head) => {
         len = buf.readUInt16BE(2);
         off = 4;
       } else if (len === 127) {
+        if (buf.length < 10) return;
+        const large = buf.readBigUInt64BE(2);
+        if (large > 1024n * 1024n) {
+          socket.destroy();
+          return;
+        }
+        len = Number(large);
+        off = 10;
+      }
+      if (
+        !masked ||
+        !(b0 & 0x80) ||
+        b0 & 0x70 ||
+        len > 1024 * 1024 ||
+        (opcode >= 8 && len > 125)
+      ) {
         socket.destroy();
         return;
       }
@@ -192,29 +222,22 @@ server.on('upgrade', (req, socket, head) => {
       }
       buf = buf.subarray(off + maskLen + len);
       if (opcode === 0x8) {
-        // close
-        socket.end();
+        socket.end(frame(8, payload));
         return;
       }
       if (opcode === 0x9) {
         // ping → pong
-        const pong = Buffer.alloc(2 + payload.length);
-        pong[0] = 0x8a;
-        pong[1] = payload.length;
-        payload.copy(pong, 2);
-        socket.write(pong);
+        socket.write(frame(10, payload));
         continue;
       }
       if (opcode === 0x1 || opcode === 0x2) {
         // echo unmasked
-        const out = Buffer.alloc(2 + payload.length);
-        out[0] = 0x80 | opcode;
-        out[1] = payload.length;
-        payload.copy(out, 2);
-        socket.write(out);
+        socket.write(frame(opcode, payload));
       }
     }
-  });
+  }
+  socket.on('data', consume);
+  if (head?.length) consume(head);
   socket.on('error', () => {
     try {
       socket.destroy();
@@ -225,5 +248,5 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(port, '0.0.0.0', () => {
-  process.stdout.write(`fake-dsh listening on ${port}\n`);
+  process.stdout.write(`fake-dsh listening on ${server.address().port}\n`);
 });

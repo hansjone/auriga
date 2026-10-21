@@ -154,7 +154,6 @@ export class CookieJar {
         ),
     );
     if (c.expiresAt !== null && c.expiresAt <= now) return;
-    if (c.value === '') return; // deletion
     this.cookies.push(c);
   }
 
@@ -172,7 +171,9 @@ export class CookieJar {
  * @returns {Cookie | null}
  */
 export function parseSetCookieLine(line, req, now) {
-  const parts = String(line).split(';').map((s) => s.trim());
+  const parts = String(line)
+    .split(';')
+    .map((s) => s.trim());
   if (!parts[0]) return null;
   const eq = parts[0].indexOf('=');
   if (eq <= 0) return null;
@@ -188,6 +189,7 @@ export function parseSetCookieLine(line, req, now) {
   /** @type {number | null} */
   let expiresAt = null;
   let maxAgeSeen = false;
+  let rootPathSeen = false;
 
   for (let i = 1; i < parts.length; i++) {
     const p = parts[i];
@@ -199,14 +201,16 @@ export function parseSetCookieLine(line, req, now) {
       hostOnly = false;
     } else if (k === 'path' && v) {
       path = v.startsWith('/') ? v : '/' + v;
+      rootPathSeen = v === '/';
     } else if (k === 'secure') {
       secure = true;
     } else if (k === 'httponly') {
       httpOnly = true;
     } else if (k === 'max-age') {
-      maxAgeSeen = true;
+      if (!/^-?\d+$/.test(v)) continue;
       const n = Number(v);
-      if (!Number.isFinite(n)) continue;
+      if (!Number.isSafeInteger(n)) continue;
+      maxAgeSeen = true;
       expiresAt = n <= 0 ? now : now + n * 1000;
     } else if (k === 'expires' && !maxAgeSeen) {
       const t = parseAttrDate(v);
@@ -215,9 +219,16 @@ export function parseSetCookieLine(line, req, now) {
   }
 
   // Reject Domain that does not cover the request host.
-  if (!hostOnly && !domainMatches(domain, req.host, false)) {
+  if (
+    !hostOnly &&
+    (!domain.includes('.') || !domainMatches(domain, req.host, false))
+  ) {
     return null;
   }
+  if (secure && !req.secure) return null;
+  if (name.startsWith('__Host-') && (!secure || !hostOnly || !rootPathSeen))
+    return null;
+  if (name.startsWith('__Secure-') && !secure) return null;
 
   return {
     name,
