@@ -1,5 +1,21 @@
 # 节点代理（agent）
 
+## 启动就绪与停止期间观测
+
+Docker 的 `ContainerStart` 成功只代表进程启动。驱动在既有 Start 超时上下文内，
+每 100 毫秒重试实例实际端点的 `GET /_auriga/health`，成功后才发布端点并返回成功。
+必须是 HTTP 200 和健康契约四字段：`status=ok`、`ready=true`、`protocol=1`、非空 `pluginVersion`。
+空响应、HTML、错误状态、未就绪、错误协议、额外字段或尾随 JSON 均不视为就绪。
+每次请求最长 3 秒（连接及响应头各至多 2 秒），总等待受原 Start 截止和取消限制；
+不读取 HTTP 代理环境变量、不跟重定向，响应最多 8 KiB。失败重试先清除旧端点，
+失败不能继续通过旧端点报告 ready。周期健康探测复用相同报文校验，不记录响应体。
+
+STOPPED 状态从 ingress 移除，但保留 `ProcessStopped` 和实例 home 路径作为闹钟文件观察目标，
+不保留 HTTP 地址。停止期间文件变化仍可观察，已知截止到期后即使文件 mtime 未改也重算下一次计划，
+一次性 at 会报告已消费；这仅是计划观测，不执行 DSH 业务任务。重新运行时替换为当前端点。
+ABSENT、DELETING、FAILED 彻底移除目标。停止或失败的进程不发送 HTTP 探测、不采集或上报新鲜 CPU；
+同时丢弃旧 CPU 基线和活动窗口，防止它们跨重启造成保活。
+
 ## Unix ingress 的组共享目录
 
 设置 `AURIGA_AGENT_INGRESS_LOCAL_GID` 后，socket 路径必须为绝对、规范化的
