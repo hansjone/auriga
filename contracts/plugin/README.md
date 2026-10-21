@@ -51,7 +51,7 @@ WebSocket 只在升级时校验一次身份头；edge 收到 `identity.session_r
 | `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` | 出网代理 |
 
 - **健康检查**：插件在 DSH 端口上提供 `GET /_auriga/health`（节点代理设计文档里的 `/_health` 即指它）（不要求身份头，只回 `{"status":"ok","ready":true,"protocol":1,"pluginVersion":"…"}`），节点代理据此判断 ready。
-- **心跳**：插件每 30 秒、以及活动计数变化时（2 秒去抖）调用 `POST {AURIGA_PLATFORM_URL}/api/workspace/v1/instance/heartbeat`，`Authorization: Bearer <实例令牌>`，上报执行中的轮次、打开的终端、在线的 IM 机器人数量，见 `contracts/openapi/workspace.yaml`。workspace 合并节点代理的 CPU 观测后判断闲置。
+- **心跳**：插件每 30 秒、以及活动计数变化时（2 秒去抖）调用 `POST {AURIGA_PLATFORM_URL}/api/workspace/v1/instance/heartbeat`，`Authorization: Bearer <实例令牌>`，上报执行中的轮次、打开的终端、在线的 IM 机器人和浏览器连接数量，见 `contracts/openapi/workspace.yaml`。四个计数字段始终必需；非负整数表示已知计数，显式 `null` 表示未知，缺字段和负数无效。未知时继续上报，不伪造 0。workspace 仅在四项明确为 0、`health.ok=true` 且 CPU 观测也新鲜空闲时回收；未知或健康故障保护运行并刷新插件存活时间，但不会推进用户活动时间。恢复已知健康空闲后按原闲置时间恢复回收。原有全整数请求继续有效。
 - **团队工具（ADR 0016）**：
   - 不需要 DSH 会话上下文的团队工具，由 DSH 自带的 mcp-client 连 ai-gateway 的 MCP（`transport: streamable-http`），节点代理按实例规格的 `mcp_servers` 渲染：键即 DSH 配置里的 `serverName`（`[A-Za-z0-9_-]{1,32}`），请求头固定 `Authorization: Bearer <令牌>`，令牌用 `!!js` 表达式从 `token_ref` 对应的文件读取，不把令牌值写进 YAML。原生客户端的请求头在配置求值时固定：令牌轮换由节点代理触发插件配置重载（新旧令牌有重叠期），不能指望 401 后自动重读。
   - 需要会话上下文的团队工具（例如团队任务）由 `auriga-dsh` 用 `ctx.tools` 注册，执行时读取 `exec.agent.session.id`，用插件自己的 MCP 客户端转发给同一个 ai-gateway，每个请求重读令牌文件；上下文放在 `params._meta`：`auriga/sessionId`（DSH 会话 id，不透明字符串，不按 UUID 校验）、`auriga/toolCallId`、`auriga/rootCallId`。缺上下文时拒绝执行。

@@ -78,7 +78,8 @@ DSH 0.2.0-rc.2 还会通过 `connection.authorizeIndex` / `requestRejection` 检
 - `GET /_auriga/health`（免鉴权，仅 GET/HEAD）→ 契约字段 `{ status, ready, protocol, pluginVersion }`，不含活动计数。
 - 活动计数与原型 `oclaw` hub-heartbeat / hub-member 同源：`agents`（执行中轮次）、`terminals`（打开终端）、`dshIm.listDeliveryCatalog`（IM 机器人）、浏览器 `upgrade` 套接字数（`connectedClients`，对应原型 `browsers` 回调）。接不上的指标在快照里保留 `null` / `known=false`，不转成 0。终端必须逐个真实 Agent 调用 `terminals.list(agent)`，只数 `status.kind=running` 的 PTY；任意所有者查询失败、状态不可识别或 agents 不可用都保留未知。
 - **纯 DSH 的 IM 计数**：宿主服务查询成功确认没有 `dshIm`，且行配置声明 `imBots: "none"` 时，`activeImBots` 为已知 0；没有声明、查询接口不可用、查询抛错或服务读取失败时仍为未知。
-- **v1 契约接线缺口**：`HeartbeatRequest.activity` 强制四个非负整数，尚不能表达未知；当前 workspace 也没有用 `health.ok` 阻止闲置判断。因此任一计数未知时插件暂缓整个心跳（`send()` 返回 `skipped` 与 `unknownFields`），未知字段集合变化时用宿主 logger 告警一次（只含字段名），既不伪造全 0，也不发送违反契约的 null/缺字段。心跳体的 `health.ok` 只反映宿主检查。此时活动时间无法上报；之前有效心跳在平台保鲜窗口内的行为仍需主控修复，不能把此措施当作完整的未知状态回收保护。需要主控同步修改契约、生成模型及 workspace 的保守判断。
+- `HeartbeatRequest.activity` 的四个字段必须存在，非负整数为已知，显式 `null` 为未知；未知时照常发送心跳，保持已有 `lastInteractionAt`，不伪造空闲 0。采集过程整体失败会把历史计数改回未知。未知字段集合变化时用宿主 logger 告警一次（只含字段名），恢复全部已知时记录恢复；不输出令牌、计数或请求体。`health.ok` 独立反映已绑定的宿主 HTTP 服务是否实际监听，未绑定、停止监听或检查抛错均为 false；没有健康检查回调时也不能默认健康。
+- workspace 刷新插件存活时间，将任意未知或 `health.ok=false` 作为回收保护，仍仅用真实正计数或 `lastInteractionAt` 推进活动时间。持续未知/故障不会因猜测超时而停机；恢复四个 0 且健康后立即清除保护，按原活动时间及新鲜的 CPU 观测正常回收。此契约接线不代替真实 DSH 隔离网络、原始心跳和完整生命周期的运行验收。
 - 计数只在数值真正变化时通知心跳；`lastInteractionAt` 定义为"最近一次通过门锁的已验签 HTTP 请求或 WS 升级"，包括页面后台轮询和资源加载，**不是**严格意义的用户操作；已建立的 WS 内的帧（打字、发消息）不经门锁，不推进它（此时 `connectedClients>0`，平台按活跃处理）。计数初始化、正数增减、心跳与轮询刷新都不得推进该时间戳；免鉴权健康请求也不推进。
 - 实例令牌与身份公钥文件对容器内同一 uid 的终端、Agent 可读，它们因此能伪造本实例心跳；只影响主人自己的实例，在威胁模型内接受。
 - 每 30 秒及活动计数变化（2 秒去抖）`POST …/instance/heartbeat`；发送失败 catch + 指数退避，不抛未处理拒绝。

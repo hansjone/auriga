@@ -80,6 +80,7 @@ test('heartbeat posts activity with Auriga-Protocol header', async () => {
     pluginVersion: '0.0.0',
     dshVersion: '0.2.0-rc.2',
     activity,
+    healthOk: () => true,
     fetchImpl: /** @type {typeof fetch} */ (fetchImpl),
   });
   const result = await client.send();

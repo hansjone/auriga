@@ -15,34 +15,35 @@ import {
   OWNER_ID,
 } from './managed-helpers.js';
 
-test('unknown host values stay null and never cause a zero heartbeat', async () => {
+test('unknown host values are sent as explicit null, never idle zeros', async () => {
   const activity = createActivityProbe();
   await refreshActivityFromHost({}, activity, { browsers: 0 });
   assert.equal(activity.snapshot().runningTurns, null);
   assert.equal(activity.snapshot().openTerminals, null);
   assert.equal(activity.snapshot().activeImBots, null);
   let calls = 0;
+  let body;
   const client = createHeartbeatClient({
     platformUrl: 'https://example.com',
     pluginVersion: '0.0.0',
     dshVersion: '0.2.0-rc.2',
     activity,
-    getInstanceToken: () => {
-      throw new Error('must not read credentials');
-    },
-    fetchImpl: async () => {
+    getInstanceToken: () => 'test-token',
+    fetchImpl: async (_url, init) => {
       calls++;
-      throw new Error('must not send');
+      body = JSON.parse(init.body);
+      return new Response('{}');
     },
   });
   const result = await client.send();
-  assert.equal(result.skipped, true);
-  assert.deepEqual(result.unknownFields, [
-    'runningTurns',
-    'openTerminals',
-    'activeImBots',
-  ]);
-  assert.equal(calls, 0);
+  assert.equal(result.ok, true);
+  assert.deepEqual(body.activity, {
+    runningTurns: null,
+    openTerminals: null,
+    activeImBots: null,
+    connectedClients: 0,
+  });
+  assert.equal(calls, 1);
 });
 
 test('replay cache pressure fails closed without forgetting unexpired identities', () => {

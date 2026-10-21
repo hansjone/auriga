@@ -37,11 +37,13 @@ class WorkspaceSurfaceTest {
           WorkspaceRuntimeConfiguration.class,
           WorkspaceController.class,
           WorkspacePluginController.class,
+          WorkspaceHeartbeatRequestAdvice.class,
           WorkspaceSseController.class,
           WorkspaceResponseAdvice.class);
       context.refresh();
       assertEquals(0, context.getBeansOfType(WorkspaceController.class).size());
       assertEquals(0, context.getBeansOfType(WorkspacePluginController.class).size());
+      assertEquals(0, context.getBeansOfType(WorkspaceHeartbeatRequestAdvice.class).size());
       assertEquals(0, context.getBeansOfType(WorkspaceSseController.class).size());
     }
   }
