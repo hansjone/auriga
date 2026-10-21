@@ -82,6 +82,9 @@ jobs:
           # Agent data lives at the same host path the agent uses (see compose).
           echo "AGENT_VOLUME=/var/lib/auriga" >> "$GITHUB_ENV"
 
+      - name: E2E library regression tests
+        run: node --test e2e/lib/*.test.mjs
+
       - name: Run e2e
         env:
           EDGE_BASE: http://127.0.0.1:8080

@@ -9,7 +9,10 @@ import {
 
 describe('domainMatches', () => {
   it('host-only requires exact host', () => {
-    assert.equal(domainMatches('admin.example.com', 'admin.example.com', true), true);
+    assert.equal(
+      domainMatches('admin.example.com', 'admin.example.com', true),
+      true,
+    );
     assert.equal(
       domainMatches('admin.example.com', 'uuid.i.example.com', true),
       false,
@@ -17,7 +20,10 @@ describe('domainMatches', () => {
   });
 
   it('Domain covers subdomains', () => {
-    assert.equal(domainMatches('example.com', 'portal.example.com', false), true);
+    assert.equal(
+      domainMatches('example.com', 'portal.example.com', false),
+      true,
+    );
     assert.equal(domainMatches('example.com', 'a.i.example.com', false), true);
     assert.equal(domainMatches('example.com', 'evil.com', false), false);
   });
@@ -151,16 +157,28 @@ describe('CookieJar lifecycle', () => {
   it('expires via Max-Age', () => {
     const jar = new CookieJar();
     const t0 = 1_700_000_000_000;
-    jar.storeFromResponse('temp=1; Path=/; Max-Age=10', {
-      host: 'portal.example.com',
-      path: '/',
-    }, t0);
+    jar.storeFromResponse(
+      'temp=1; Path=/; Max-Age=10',
+      {
+        host: 'portal.example.com',
+        path: '/',
+      },
+      t0,
+    );
     assert.equal(
-      jar.wouldSend('temp', { host: 'portal.example.com', path: '/' }, t0 + 5_000),
+      jar.wouldSend(
+        'temp',
+        { host: 'portal.example.com', path: '/' },
+        t0 + 5_000,
+      ),
       true,
     );
     assert.equal(
-      jar.wouldSend('temp', { host: 'portal.example.com', path: '/' }, t0 + 11_000),
+      jar.wouldSend(
+        'temp',
+        { host: 'portal.example.com', path: '/' },
+        t0 + 11_000,
+      ),
       false,
     );
   });
@@ -174,20 +192,32 @@ describe('CookieJar lifecycle', () => {
       t0,
     );
     assert.equal(
-      jar.wouldSend('temp', { host: 'portal.example.com', path: '/' }, t0 + 1000),
+      jar.wouldSend(
+        'temp',
+        { host: 'portal.example.com', path: '/' },
+        t0 + 1000,
+      ),
       true,
     );
     assert.equal(
-      jar.wouldSend('temp', { host: 'portal.example.com', path: '/' }, t0 + 6000),
+      jar.wouldSend(
+        'temp',
+        { host: 'portal.example.com', path: '/' },
+        t0 + 6000,
+      ),
       false,
     );
   });
 
   it('rejects Domain that does not cover request host', () => {
-    const c = parseSetCookieLine('x=1; Domain=other.com', {
-      host: 'portal.example.com',
-      path: '/',
-    }, Date.now());
+    const c = parseSetCookieLine(
+      'x=1; Domain=other.com',
+      {
+        host: 'portal.example.com',
+        path: '/',
+      },
+      Date.now(),
+    );
     assert.equal(c, null);
   });
 
@@ -205,5 +235,47 @@ describe('CookieJar lifecycle', () => {
       jar.wouldSend('x', { host: 'portal.example.com', path: '/' }),
       false,
     );
+  });
+});
+
+describe('browser credential cookie constraints', () => {
+  it('keeps an empty value without an explicit expiration', () => {
+    const jar = new CookieJar();
+    jar.storeFromResponse('empty=; Path=/', { host: 'portal.example.com' });
+    assert.equal(jar.cookieHeader({ host: 'portal.example.com' }), 'empty=');
+  });
+  it('rejects insecure Secure/__Host cookies and public single-label domains', () => {
+    const req = { host: 'portal.example.com', path: '/', secure: false };
+    for (const cookie of [
+      'x=1; Secure',
+      '__Host-x=1; Secure; Path=/',
+      'x=1; Domain=com',
+    ])
+      assert.equal(parseSetCookieLine(cookie, req, Date.now()), null);
+    for (const cookie of [
+      '__Host-x=1; Secure; Domain=example.com; Path=/',
+      '__Host-x=1; Secure; Path=/api',
+      '__Host-x=1; Secure',
+    ])
+      assert.equal(
+        parseSetCookieLine(cookie, { ...req, secure: true }, Date.now()),
+        null,
+      );
+    assert.ok(
+      parseSetCookieLine(
+        '__Host-x=1; Secure; Path=/',
+        { ...req, secure: true },
+        Date.now(),
+      ),
+    );
+  });
+  it('invalid Max-Age does not disable Expires', () => {
+    const now = Date.parse('2026-01-01T00:00:00Z');
+    const cookie = parseSetCookieLine(
+      'x=1; Max-Age=no; Expires=Thu, 01 Jan 2026 00:00:05 GMT',
+      { host: 'portal.example.com' },
+      now,
+    );
+    assert.equal(cookie.expiresAt, now + 5000);
   });
 });
