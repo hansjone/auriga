@@ -180,6 +180,7 @@ test('only door-admitted requests bypass the native DSH authentication', async (
     method: 'GET',
     url: '/',
     headers: {
+      host: '192.0.2.20:7860',
       'auriga-identity': signIdentity(keys.privateKey, keys.kid, {
         htm: 'GET',
         htu: '/',
@@ -198,14 +199,20 @@ test('only door-admitted requests bypass the native DSH authentication', async (
   assert.equal(connection.authorizeIndex(req), true);
   const first = activity.snapshot().lastInteractionAt;
   clock += 30_000;
-  const health = { method: 'GET', url: '/_auriga/health' };
+  const health = {
+    method: 'GET',
+    url: '/_auriga/health',
+    headers: { host: '192.0.2.20:7860' },
+  };
   await admitted(health);
   assert.equal(activity.snapshot().lastInteractionAt, first);
-  assert.equal(connection.requestRejection(health), 401);
+  // Admitted (a native fence must not 401 readiness) but not an interaction.
+  assert.equal(connection.requestRejection(health), undefined);
   assert.equal((await door.check(health, true)).code, 'common.unauthenticated');
   const second = {
     ...req,
     headers: {
+      host: '192.0.2.20:7860',
       'auriga-identity': signIdentity(keys.privateKey, keys.kid, {
         htm: 'GET',
         htu: '/',

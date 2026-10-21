@@ -302,3 +302,59 @@ func TestNATSRoutesMigrationDeleteAndUnavailable(t *testing.T) {
 		t.Fatal("unavailable store served cache")
 	}
 }
+
+// Real DSH multiplexes its browser transport over /api/remote.mux; the edge
+// must forward that upgrade with an identity bound to the exact path, and must
+// still refuse a cross-site Origin before reaching the node.
+func TestIngressRealDSHRemoteMuxUpgrade(t *testing.T) {
+	seen := make(chan *http.Request, 1)
+	g, _, _, _, cookie := instanceFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+		_ = rw.Flush()
+	}))
+	srv := httptest.NewServer(g.Handler())
+	defer srv.Close()
+
+	bad := instanceRequest(cookie, "/api/remote.mux")
+	bad.Header.Set("Connection", "Upgrade")
+	bad.Header.Set("Upgrade", "websocket")
+	bad.Header.Set("Origin", "http://evil.example.net")
+	w := httptest.NewRecorder()
+	g.Handler().ServeHTTP(w, bad)
+	if w.Code != http.StatusForbidden || len(seen) != 0 {
+		t.Fatalf("cross-site mux upgrade: %d forwarded=%d", w.Code, len(seen))
+	}
+
+	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(srv.URL, "http://"), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	r := instanceRequest(cookie, "/api/remote.mux")
+	r.RequestURI = ""
+	r.Header.Set("Connection", "Upgrade")
+	r.Header.Set("Upgrade", "websocket")
+	r.Header.Set("Origin", "http://"+r.Host)
+	if err := r.Write(conn); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(conn), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("mux upgrade %d", response.StatusCode)
+	}
+	got := <-seen
+	claims, _, err := VerifyIdentityToken(got.Header.Get("Auriga-Identity"), g.Signer.PublicKey())
+	if err != nil || claims.Htu != "/api/remote.mux" || claims.Htm != http.MethodGet || got.URL.Path != "/i/"+testInstanceID+"/api/remote.mux" {
+		t.Fatalf("mux identity/path: %+v %v %s", claims, err, got.URL)
+	}
+}

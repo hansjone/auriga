@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -14,6 +14,8 @@ for (const key of [
 }
 if (process.env.AURIGA_MODE !== 'managed')
   throw new Error('Managed mode required');
+const PATCH = '/run/auriga/cordis.patch.yml';
+if (!existsSync(PATCH)) throw new Error(`Missing ${PATCH}`);
 const workspace = '/home/dsh/workspace';
 const cache = '/home/dsh/.cache';
 const temp = '/home/dsh/.tmp';
@@ -26,13 +28,11 @@ const child = spawn(
   [
     '/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
     'web',
-    '--host',
-    '0.0.0.0',
-    '--port',
-    '7860',
     '--no-open',
+    // Rendered by the node agent: plugin row, listener (DSH refuses
+    // `--host 0.0.0.0`, the webserver row binds instead), trustedHosts, MCP.
     '--patch',
-    '/opt/fixture/managed.patch.yml',
+    PATCH,
   ],
   {
     cwd: workspace,

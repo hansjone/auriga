@@ -141,7 +141,8 @@ function service(ctx, name) {
  * Missing services leave the corresponding metric unknown.
  * @param {object} ctx
  * @param {ReturnType<typeof createActivityProbe>} activity
- * @param {{ browsers?: number }} [opts]
+ * @param {{ browsers?: number, imBots?: 'none' }} [opts]
+ *   imBots 'none' is an explicit declaration that no IM service exists.
  */
 export async function refreshActivityFromHost(ctx, activity, opts = {}) {
   let agents = [];
@@ -219,7 +220,11 @@ export async function refreshActivityFromHost(ctx, activity, opts = {}) {
   let activeImBots = 0;
   try {
     const dshIm = service(ctx, 'dshIm');
-    if (dshIm?.listDeliveryCatalog) {
+    if (!dshIm && opts.imBots === 'none') {
+      // The rendered config declares this build has no IM service: absence is
+      // a known 0. A present-but-failing service below stays unknown.
+      imOk = true;
+    } else if (dshIm?.listDeliveryCatalog) {
       const catalog = await dshIm.listDeliveryCatalog();
       activeImBots = new Set(
         rows(catalog?.bots || catalog)
@@ -248,7 +253,7 @@ export async function refreshActivityFromHost(ctx, activity, opts = {}) {
  * Wire periodic refresh + optional inject hooks. Returns disposer.
  * @param {object} ctx
  * @param {ReturnType<typeof createActivityProbe>} activity
- * @param {{ intervalMs?: number, getBrowsers?: () => number }} [opts]
+ * @param {{ intervalMs?: number, getBrowsers?: () => number, imBots?: 'none' }} [opts]
  */
 export function installActivityBridge(ctx, activity, opts = {}) {
   activity.markAllUnknown();
@@ -258,6 +263,7 @@ export function installActivityBridge(ctx, activity, opts = {}) {
   const tick = () => {
     void refreshActivityFromHost(ctx, activity, {
       browsers: opts.getBrowsers?.(),
+      imBots: opts.imBots,
     }).catch(() => {
       /* keep previous / unknown */
     });

@@ -74,11 +74,16 @@ export async function openWebSocket(opts) {
     throw new Error('ws invalid Sec-WebSocket-Accept');
   }
   let buf = rest;
+  /** Close frame status seen in keepalive mode (null: none / no code). */
+  let peerClose = null;
   // Real DSH's transport expects Pong liveness, even when this harness does
   // not open an application stream. RFC 6455 permits unsolicited Pong frames.
+  // Keepalive mode owns the socket's reads: never mix it with readTextFrame.
   const stopKeepalive =
     opts.keepAliveMs > 0
-      ? startControlKeepalive(socket, opts.keepAliveMs, rest)
+      ? startControlKeepalive(socket, opts.keepAliveMs, rest, (code) => {
+          peerClose = { code };
+        })
       : () => {};
 
   function sendText(text) {
@@ -161,7 +166,15 @@ export async function openWebSocket(opts) {
     }
   }
 
-  return { sendText, readTextFrame, waitClosed, close, expectAccept: expect };
+  return {
+    sendText,
+    readTextFrame,
+    waitClosed,
+    close,
+    expectAccept: expect,
+    /** null when the transport ended without a peer Close frame (e.g. edge cut TCP). */
+    peerClose: () => peerClose,
+  };
 }
 
 /** Keep a control-only native transport alive; application frames are discarded. */
@@ -169,6 +182,7 @@ export function startControlKeepalive(
   socket,
   intervalMs,
   initial = Buffer.alloc(0),
+  onPeerClose = () => {},
 ) {
   function controlFrame(opcode, payload = Buffer.alloc(0)) {
     const mask = randomBytes(4);
@@ -226,6 +240,11 @@ export function startControlKeepalive(
       if (opcode === 0x09) socket.write(controlFrame(0x0a, payload));
       if (opcode === 0x08) {
         // A peer Close already means this transport is no longer alive.
+        try {
+          onPeerClose(payload.length >= 2 ? payload.readUInt16BE(0) : null);
+        } catch {
+          /* ignore */
+        }
         stop();
         socket.end(controlFrame(0x08, payload), () => socket.destroy());
         return;

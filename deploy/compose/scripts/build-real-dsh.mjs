@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -10,6 +10,20 @@ const tag = '127.0.0.1:5000/auriga/real-dsh:w3';
 if (!/^node:22\.19\.0-bookworm-slim@sha256:[a-f0-9]{64}$/.test(nodeImage)) {
   throw new Error(
     'Set NODE_IMAGE=node:22.19.0-bookworm-slim@sha256:<reviewed manifest digest>',
+  );
+}
+// Bind to the digest recorded (reviewed) in versions.json, not just its shape.
+const reviewed = JSON.parse(
+  readFileSync(new URL('../real-dsh/versions.json', import.meta.url), 'utf8'),
+).nodeImage;
+if (!reviewed) {
+  throw new Error(
+    'real-dsh/versions.json nodeImage is empty: record the reviewed base image digest first',
+  );
+}
+if (nodeImage !== reviewed) {
+  throw new Error(
+    'NODE_IMAGE does not match the reviewed real-dsh/versions.json nodeImage',
   );
 }
 function docker(args, capture = false) {

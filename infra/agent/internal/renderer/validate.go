@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	envKeyRe    = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
-	safeIDRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,127}$`)
-	safeURLRe   = regexp.MustCompile(`^https://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$`)
+	envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	safeIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,127}$`)
+	// HTTP is allowed: IP-only / HTTP-only deployments must work (conventions).
+	safeURLRe   = regexp.MustCompile(`^https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$`)
 	patchPathRe = regexp.MustCompile(`^[A-Za-z0-9_./-]{1,128}$`)
 )
 

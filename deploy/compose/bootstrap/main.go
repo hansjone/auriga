@@ -135,7 +135,7 @@ func main() {
 				},
 			},
 		},
-		Profile: &nodev1.Profile{ListenPort: 7860},
+		Profile: profileFor(*fixture),
 		Secrets: &nodev1.Secrets{
 			IdentityKeys: []*nodev1.IdentityPublicKey{{
 				Kid:       kid,
@@ -193,6 +193,17 @@ func main() {
 	writeYAMLish(filepath.Join(*out, "agent-policy.yaml"), policy)
 
 	fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s\n", *out, fp, *image)
+}
+
+// profileFor declares what the fixture build lacks. Pure DSH 0.2.0-rc.2 has no
+// IM service, so the managed plugin may report activeImBots as a known 0;
+// without this declaration it stays unknown and no heartbeat is sent.
+func profileFor(fixture string) *nodev1.Profile {
+	p := &nodev1.Profile{ListenPort: 7860}
+	if fixture == "real" {
+		p.Patches = []*nodev1.ConfigPatch{{Path: "plugins.auriga-dsh.imBots", ValueJson: `"none"`}}
+	}
+	return p
 }
 
 func containsDigest(image string) bool {

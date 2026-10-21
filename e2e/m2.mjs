@@ -559,12 +559,39 @@ async function verifyRealHost(instanceId, instance) {
   );
   evidence.checks.push('direct-real-door-and-health');
 
+  // While activity is "active" (connectedClients/terminals/turns > 0) the
+  // platform projects lastActivityAt = now on every heartbeat, which would
+  // make the interaction step pass without lastInteractionAt. Quiet windows
+  // reject that interference when heartbeats arrive, but cannot establish the
+  // raw counts or even heartbeat delivery. This remains projection evidence.
+  const quietWindow = async (label) => {
+    const start = await req(`/api/workspace/v1/instances/${instanceId}`, {
+      host: ADMIN_HOST,
+    });
+    const stable = start.body?.lastActivityAt;
+    const quietUntil = Date.now() + 40_000;
+    while (Date.now() < quietUntil) {
+      await directRequest('/_auriga/health');
+      const response = await req(`/api/workspace/v1/instances/${instanceId}`, {
+        host: ADMIN_HOST,
+      });
+      if (response.body?.lastActivityAt !== stable) {
+        fail(
+          label,
+          'activity advanced without a user request (active counts, health polling or host refresh)',
+        );
+      }
+      await sleep(3000);
+    }
+    return start;
+  };
+  step('real platform activity projection must stay quiet before interaction');
+  const before = await quietWindow('real-quiet-before');
+  evidence.checks.push('real-quiet-before-interaction');
+
   step(
     'real user page request must advance the platform interaction projection',
   );
-  const before = await req(`/api/workspace/v1/instances/${instanceId}`, {
-    host: ADMIN_HOST,
-  });
   // Plugin timestamps have second precision; make the new action distinguishable.
   const prior = Date.parse(before.body?.lastActivityAt);
   const clockDeadline = Date.now() + 5000;
@@ -583,8 +610,7 @@ async function verifyRealHost(instanceId, instance) {
     });
     if (
       Date.parse(response.body?.lastActivityAt) >= started - 1000 &&
-      Date.parse(response.body?.lastActivityAt) >
-        Date.parse(before.body?.lastActivityAt)
+      (Number.isNaN(prior) || Date.parse(response.body?.lastActivityAt) > prior)
     ) {
       observed = response.body.lastActivityAt;
       break;
@@ -600,23 +626,15 @@ async function verifyRealHost(instanceId, instance) {
     before: before.body.lastActivityAt,
     after: observed,
     source:
-      'real user GET / -> plugin heartbeat -> platform lastActivityAt projection',
+      'quiet window -> real GET / -> platform lastActivityAt projection -> quiet window',
+    rawHeartbeatVerified: false,
+    limitation:
+      'Raw heartbeat counts and lastInteractionAt are not observed; projection alone cannot complete W3 interaction acceptance.',
   };
   // Direct unauthenticated health polling must not advance the activity clock.
-  const quietUntil = Date.now() + 40_000;
-  while (Date.now() < quietUntil) {
-    await directRequest('/_auriga/health');
-    const response = await req(`/api/workspace/v1/instances/${instanceId}`, {
-      host: ADMIN_HOST,
-    });
-    if (response.body?.lastActivityAt !== observed) {
-      fail(
-        'real-static-heartbeat',
-        'health polling or stable host refresh advanced activity',
-      );
-    }
-    await sleep(3000);
-  }
+  const after = await quietWindow('real-static-heartbeat');
+  if (after.body?.lastActivityAt !== observed)
+    fail('real-static-heartbeat', 'activity moved after the interaction');
   evidence.checks.push('real-interaction-projection-and-static-health');
 }
 
@@ -989,7 +1007,10 @@ async function revokeDualSession(instanceId) {
   const closed = await ws.waitClosed(30_000);
   if (!closed)
     fail('revoke-ws', 'websocket did not close within 30s after revoke');
-  console.log('session A websocket closed after revoke');
+  // Edge revocation cuts the proxied TCP stream; a DSH Close frame instead
+  // (timeout/error) is recorded so the cause is not silently attributed.
+  evidence.revokeClose = { peerClose: ws.peerClose?.() ?? null };
+  console.log('session A websocket closed after revoke', evidence.revokeClose);
 
   const pageAfter = await req('/', { host, jar: instanceA });
   if (pageAfter.status < 400 || instancePageOk(pageAfter)) {

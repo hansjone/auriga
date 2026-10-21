@@ -18,7 +18,6 @@ RUN ln -s /opt/auriga-dsh /opt/dsh/node_modules/auriga-dsh && node /opt/fixture/
 
 FROM ${NODE_IMAGE}
 COPY --from=build /opt /opt
-COPY deploy/compose/real-dsh/managed.patch.yml /opt/fixture/managed.patch.yml
 COPY deploy/compose/real-dsh/start.mjs /opt/fixture/start.mjs
 ENV HOME=/home/dsh DSH_VERSION=0.2.0-rc.2 DSH_TELEMETRY_DISABLED=1 DSH_TELEMETRY_MODE=DISABLED
 WORKDIR /home/dsh

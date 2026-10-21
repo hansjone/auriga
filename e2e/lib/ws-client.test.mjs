@@ -58,3 +58,22 @@ test('native control reader echoes a split Ping and immediately honors a peer Cl
   assert.equal(socket.listenerCount('data'), 0);
   stop();
 });
+
+test('native control reader reports the peer Close status code', () => {
+  const socket = new EventEmitter();
+  socket.destroyed = false;
+  socket.write = () => {};
+  socket.resume = () => {};
+  socket.destroy = () => {
+    socket.destroyed = true;
+    socket.emit('close');
+  };
+  socket.end = (_frame, done) => done();
+  const codes = [];
+  const stop = startControlKeepalive(socket, 1000, Buffer.alloc(0), (code) =>
+    codes.push(code),
+  );
+  socket.emit('data', Buffer.from([0x88, 0x02, 0x03, 0xe9]));
+  assert.deepEqual(codes, [1001]);
+  stop();
+});

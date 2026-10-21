@@ -6,5 +6,6 @@
   "libc": "glibc",
   "s4Commit": "3337b698815996fd8f596de5232ebde60bdd900e",
   "lockSha256": "7568ed6aeb263e8605332578aba9b3b099974bf2b80704afd92cc86b7afc168b",
-  "installPolicy": "npm ci --omit=dev --include=optional --ignore-scripts --bin-links=false --os=linux --cpu=x64 --libc=glibc"
+  "installPolicy": "npm ci --omit=dev --include=optional --ignore-scripts --bin-links=false --os=linux --cpu=x64 --libc=glibc",
+  "nodeImage": ""
 }

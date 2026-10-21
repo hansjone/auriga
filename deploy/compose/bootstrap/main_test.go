@@ -56,6 +56,14 @@ func TestFixtureTemplates(t *testing.T) {
 			spec.GetLabels()["template"] != name+"-e2e" || spec.GetProfile().GetListenPort() != 7860 {
 			t.Fatalf("wrong runtime binding in %s template", fixture)
 		}
+		patches := spec.GetProfile().GetPatches()
+		if fixture == "real" {
+			if len(patches) != 1 || patches[0].GetPath() != "plugins.auriga-dsh.imBots" || patches[0].GetValueJson() != `"none"` {
+				t.Fatalf("real template must declare imBots none: %v", patches)
+			}
+		} else if len(patches) != 0 {
+			t.Fatalf("fake template must not declare plugin config: %v", patches)
+		}
 		statement := spec.GetDsh().GetSigned().GetStatement()
 		if statement.GetName() != name || statement.GetVersion() != version || statement.GetDigest() != digest {
 			t.Fatalf("runtime statement differs from selected %s image", fixture)

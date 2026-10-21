@@ -10,8 +10,9 @@ export const inject = ['webServer', 'connection'];
 
 /**
  * @param {object} ctx
+ * @param {{ imBots?: 'none', trustedHosts?: string[] }} [config] Loader row config
  */
-export async function apply(ctx) {
+export async function apply(ctx, config) {
   const mode = process.env.AURIGA_MODE ?? 'standalone';
   if (mode !== 'managed') {
     ctx.logger?.info?.(
@@ -21,6 +22,7 @@ export async function apply(ctx) {
   }
   const runtime = await createManaged({
     env: process.env,
+    config: config ?? {},
     startHeartbeat: false,
   });
   let dispose;

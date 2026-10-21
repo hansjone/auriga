@@ -213,6 +213,23 @@ export function createDoorLock(cfg) {
   }
 
   /**
+   * Mark a request the door let through. The health bypass is admitted too
+   * (so a native fence never turns readiness into 401) but is not counted as
+   * an interaction; it can only reach the plugin's exact health route.
+   */
+  function admit(req, result) {
+    if ('claims' in result && result.claims)
+      req.__aurigaIdentity = result.claims;
+    authenticated.add(req);
+    if (result.bypass) return;
+    try {
+      onAuthenticated?.();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
    * @param {import('node:http').Server} server
    */
   function install(server) {
@@ -229,17 +246,7 @@ export function createDoorLock(cfg) {
         void check(req)
           .then((result) => {
             if (result.ok) {
-              if ('claims' in result && result.claims)
-                req.__aurigaIdentity = result.claims;
-              // Health bypass is not a user interaction; identity-gated hits are.
-              if (!result.bypass) {
-                authenticated.add(req);
-                try {
-                  onAuthenticated?.();
-                } catch {
-                  /* ignore */
-                }
-              }
+              admit(req, result);
               original(event, ...args);
               return;
             }
@@ -260,16 +267,7 @@ export function createDoorLock(cfg) {
         void check(req, true)
           .then((result) => {
             if (result.ok) {
-              if ('claims' in result && result.claims)
-                req.__aurigaIdentity = result.claims;
-              if (!result.bypass) {
-                authenticated.add(req);
-                try {
-                  onAuthenticated?.();
-                } catch {
-                  /* ignore */
-                }
-              }
+              admit(req, result);
               original(event, ...args);
               return;
             }
@@ -295,6 +293,25 @@ export function createDoorLock(cfg) {
               /* ignore */
             }
           });
+        return false;
+      }
+      if (event === 'checkContinue' || event === 'checkExpectation') {
+        // Only reachable when a host listener exists; never let it bypass the door.
+        const res = args[1];
+        try {
+          res.writeHead(417, { connection: 'close' });
+          res.end();
+        } catch {
+          /* ignore */
+        }
+        return false;
+      }
+      if (event === 'connect') {
+        try {
+          args[1]?.destroy?.();
+        } catch {
+          /* ignore */
+        }
         return false;
       }
       return original(event, ...args);
