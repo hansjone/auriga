@@ -36,16 +36,21 @@ func (l *Layout) For(instanceID string) (Paths, error) {
 	if err := ValidateInstanceID(instanceID); err != nil {
 		return Paths{}, err
 	}
-	root := filepath.Join(l.InstancesDir, instanceID)
-	if err := AssertUnderRoot(l.InstancesDir, root); err != nil {
+	var p Paths
+	var err error
+	if p.Root, err = SafeJoin(l.InstancesDir, instanceID); err != nil {
 		return Paths{}, err
 	}
-	return Paths{
-		Root:  root,
-		Home:  filepath.Join(root, "home"),
-		Meta:  filepath.Join(root, "meta"),
-		Trash: filepath.Join(root, "trash"),
-	}, nil
+	if p.Home, err = SafeJoin(l.InstancesDir, instanceID, "home"); err != nil {
+		return Paths{}, err
+	}
+	if p.Meta, err = SafeJoin(l.InstancesDir, instanceID, "meta"); err != nil {
+		return Paths{}, err
+	}
+	if p.Trash, err = SafeJoin(l.InstancesDir, instanceID, "trash"); err != nil {
+		return Paths{}, err
+	}
+	return p, nil
 }
 
 // Ensure creates the §8.1 layout and home subdirs. uid/gid are the instance user (0 = skip chown).
@@ -62,11 +67,22 @@ func (l *Layout) Ensure(instanceID string, uid, gid int) (Paths, error) {
 		filepath.Join(p.Home, "workspace"),
 	}
 	for _, dir := range dirs {
+		// home/* is writable by the instance: refuse to follow a symlink planted
+		// there (before mkdir, and again after to catch a swap in between).
+		if err := CheckNoSymlink(l.InstancesDir, dir); err != nil {
+			return Paths{}, err
+		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return Paths{}, fmt.Errorf("storage: mkdir %s: %w", dir, err)
 		}
+		if err := CheckNoSymlink(l.InstancesDir, dir); err != nil {
+			return Paths{}, err
+		}
 	}
-	schemaPath := filepath.Join(p.Meta, schemaFileName)
+	schemaPath, err := SafeJoin(l.InstancesDir, instanceID, "meta", schemaFileName)
+	if err != nil {
+		return Paths{}, err
+	}
 	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
 		if err := os.WriteFile(schemaPath, []byte("1\n"), 0o644); err != nil {
 			return Paths{}, err
@@ -84,11 +100,14 @@ func (l *Layout) Ensure(instanceID string, uid, gid int) (Paths, error) {
 
 // SchemaVersion reads meta/schema-version (0 if missing).
 func (l *Layout) SchemaVersion(instanceID string) (uint32, error) {
-	p, err := l.For(instanceID)
+	if _, err := l.For(instanceID); err != nil {
+		return 0, err
+	}
+	schemaPath, err := SafeJoin(l.InstancesDir, instanceID, "meta", schemaFileName)
 	if err != nil {
 		return 0, err
 	}
-	raw, err := os.ReadFile(filepath.Join(p.Meta, schemaFileName))
+	raw, err := os.ReadFile(schemaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return 0, nil
@@ -107,8 +126,7 @@ func (l *Layout) Migrate(instanceID string, want uint32) error {
 	if want == 0 {
 		return nil
 	}
-	p, err := l.Ensure(instanceID, 0, 0)
-	if err != nil {
+	if _, err := l.Ensure(instanceID, 0, 0); err != nil {
 		return err
 	}
 	cur, err := l.SchemaVersion(instanceID)
@@ -125,7 +143,11 @@ func (l *Layout) Migrate(instanceID string, want uint32) error {
 				return fmt.Errorf("storage: cannot migrate to schema %d (agent supports %d)", want, CurrentSchema)
 			}
 		}
-		if err := os.WriteFile(filepath.Join(p.Meta, schemaFileName), []byte(fmt.Sprintf("%d\n", next)), 0o644); err != nil {
+		schemaPath, err := SafeJoin(l.InstancesDir, instanceID, "meta", schemaFileName)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(schemaPath, []byte(fmt.Sprintf("%d\n", next)), 0o644); err != nil {
 			return err
 		}
 		cur = next

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
@@ -35,6 +36,16 @@ type Preparing struct {
 	PlatformURL    string
 	Chown          func(path string, uid, gid int) error
 	Log            *slog.Logger
+	// ExtraEnvKeys are the Profile.Env keys a spec may set besides the
+	// platform keys; nil means DefaultExtraEnvKeys.
+	ExtraEnvKeys []string
+	// NewTicker drives the periodic GC; nil uses time.NewTicker. Tests pass a
+	// manual clock.
+	NewTicker func(d time.Duration) (<-chan time.Time, func())
+
+	// gcMu keeps artifact GC out of the fetch-to-acquire window: prepares
+	// hold it shared while fetching, GC holds it exclusively.
+	gcMu sync.RWMutex
 }
 
 func (p *Preparing) log() *slog.Logger {
@@ -106,28 +117,13 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		}
 
 		if p.Artifacts != nil {
-			var wantDigests []string
-			for _, pl := range full.Plugins {
-				if pl == nil || pl.Url == "" || pl.Digest == "" {
-					continue
-				}
-				p.log().Info("fetching plugin artifact", "instance_id", full.InstanceId, "plugin", pl.Name)
-				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, pl.Url, pl.Digest, 0); err != nil {
-					return fmt.Errorf("plugin %s: %w", pl.Name, err)
-				}
-				wantDigests = append(wantDigests, pl.Digest)
+			p.gcMu.RLock()
+			err := p.fetchArtifacts(ctx, full)
+			p.gcMu.RUnlock()
+			if err != nil {
+				return err
 			}
-			if dsh := full.GetDsh(); dsh != nil && dsh.Url != "" && dsh.Digest != "" && dsh.Image == "" {
-				p.log().Info("fetching dsh runtime artifact", "instance_id", full.InstanceId)
-				if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, dsh.Url, dsh.Digest, 0); err != nil {
-					return fmt.Errorf("dsh runtime: %w", err)
-				}
-				wantDigests = append(wantDigests, dsh.Digest)
-			}
-			if err := p.Artifacts.SyncHolders(full.InstanceId, wantDigests); err != nil {
-				return fmt.Errorf("artifacts sync: %w", err)
-			}
-			_, _ = p.Artifacts.GC(false)
+			p.tryCollectGarbage(ctx)
 		}
 
 		rend, err := renderer.Render(full, renderer.Options{
@@ -147,7 +143,11 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		}
 		r.Digest = rend.Digest
 
-		env, err := loadEnvFile(rend.EnvFile)
+		rawEnv, err := loadEnvFile(rend.EnvFile)
+		if err != nil {
+			return err
+		}
+		env, err := ContainerEnv(rawEnv, full.GetProfile().GetEnv(), p.extraEnvKeys(), p.log().With("instance_id", full.InstanceId))
 		if err != nil {
 			return err
 		}
@@ -173,6 +173,180 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	}
 	p.log().Info("pulling image and creating container", "instance_id", s.InstanceID)
 	return p.Inner.Ensure(ctx, s, r)
+}
+
+func (p *Preparing) extraEnvKeys() []string {
+	if p.ExtraEnvKeys == nil {
+		return DefaultExtraEnvKeys
+	}
+	return p.ExtraEnvKeys
+}
+
+// fetchArtifacts downloads and pins every artifact the spec names, then drops
+// this instance's holds on digests it no longer uses. Caller holds gcMu.RLock.
+func (p *Preparing) fetchArtifacts(ctx context.Context, full *nodev1.InstanceSpec) error {
+	var wantDigests []string
+	for _, pl := range full.Plugins {
+		if pl == nil || pl.Url == "" || pl.Digest == "" {
+			continue
+		}
+		p.log().Info("fetching plugin artifact", "instance_id", full.InstanceId, "plugin", pl.Name)
+		if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, pl.Url, pl.Digest, 0); err != nil {
+			return fmt.Errorf("plugin %s: %w", pl.Name, err)
+		}
+		wantDigests = append(wantDigests, pl.Digest)
+	}
+	if dsh := full.GetDsh(); dsh != nil && dsh.Url != "" && dsh.Digest != "" && dsh.Image == "" {
+		p.log().Info("fetching dsh runtime artifact", "instance_id", full.InstanceId)
+		if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, dsh.Url, dsh.Digest, 0); err != nil {
+			return fmt.Errorf("dsh runtime: %w", err)
+		}
+		wantDigests = append(wantDigests, dsh.Digest)
+	}
+	if err := p.Artifacts.SyncHolders(full.InstanceId, wantDigests); err != nil {
+		return fmt.Errorf("artifacts sync: %w", err)
+	}
+	return nil
+}
+
+// specDigests lists the artifact digests a spec references (valid ones only).
+func specDigests(spec *nodev1.InstanceSpec) []string {
+	if spec == nil {
+		return nil
+	}
+	var out []string
+	add := func(d string) {
+		if d == "" {
+			return
+		}
+		if _, err := artifacts.NormalizeDigest(d); err == nil {
+			out = append(out, d)
+		}
+	}
+	for _, pl := range spec.Plugins {
+		if pl != nil {
+			add(pl.Digest)
+		}
+	}
+	if dsh := spec.GetDsh(); dsh != nil {
+		add(dsh.Digest)
+	}
+	return out
+}
+
+// desiredLister is implemented by state.Store.
+type desiredLister interface {
+	ListDesiredIDs() ([]string, error)
+}
+
+// liveDigests collects every digest named by a desired spec or by a spec of an
+// instance the runtime still has. Any listing error aborts GC (fail closed).
+func (p *Preparing) liveDigests(ctx context.Context) ([]string, error) {
+	ids := map[string]struct{}{}
+	if p.Inner != nil {
+		list, err := p.Inner.List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list instances: %w", err)
+		}
+		for _, st := range list {
+			ids[st.InstanceID] = struct{}{}
+		}
+	}
+	if l, ok := p.Specs.(desiredLister); ok {
+		desired, err := l.ListDesiredIDs()
+		if err != nil {
+			return nil, fmt.Errorf("list desired: %w", err)
+		}
+		for _, id := range desired {
+			ids[id] = struct{}{}
+		}
+	}
+	var keep []string
+	for id := range ids {
+		spec, err := p.Specs.GetDesired(id)
+		if err != nil {
+			return nil, fmt.Errorf("desired %s: %w", id, err)
+		}
+		keep = append(keep, specDigests(spec)...)
+	}
+	return keep, nil
+}
+
+// CollectGarbage removes unreferenced cached artifacts, never touching a
+// digest that any desired or present instance names. It waits for in-flight
+// artifact fetches and blocks new ones while it runs.
+func (p *Preparing) CollectGarbage(ctx context.Context) (int, error) {
+	if p.Artifacts == nil {
+		return 0, nil
+	}
+	p.gcMu.Lock()
+	defer p.gcMu.Unlock()
+	return p.collectLocked(ctx)
+}
+
+// tryCollectGarbage runs GC after a prepare unless a fetch or GC is in flight
+// (the periodic loop catches up later).
+func (p *Preparing) tryCollectGarbage(ctx context.Context) {
+	if !p.gcMu.TryLock() {
+		return
+	}
+	defer p.gcMu.Unlock()
+	if n, err := p.collectLocked(ctx); err != nil {
+		p.log().Warn("artifact gc failed", "error", err)
+	} else if n > 0 {
+		p.log().Info("artifact gc", "removed", n)
+	}
+}
+
+func (p *Preparing) collectLocked(ctx context.Context) (int, error) {
+	keep, err := p.liveDigests(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("artifact gc skipped: %w", err)
+	}
+	return p.Artifacts.GCKeep(false, keep)
+}
+
+// StartGC runs CollectGarbage every interval until stop is called or ctx
+// ends. interval <= 0 (or no artifact store) disables it. stop waits for the
+// loop to exit and is safe to call more than once.
+func (p *Preparing) StartGC(ctx context.Context, interval time.Duration) (stop func()) {
+	if interval <= 0 || p.Artifacts == nil {
+		return func() {}
+	}
+	newTicker := p.NewTicker
+	if newTicker == nil {
+		newTicker = func(d time.Duration) (<-chan time.Time, func()) {
+			t := time.NewTicker(d)
+			return t.C, t.Stop
+		}
+	}
+	tick, stopTicker := newTicker(interval)
+	quit := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer stopTicker()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-quit:
+				return
+			case <-tick:
+				n, err := p.CollectGarbage(ctx)
+				if err != nil {
+					p.log().Warn("periodic artifact gc failed", "error", err)
+				} else if n > 0 {
+					p.log().Info("periodic artifact gc", "removed", n)
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(quit) })
+		<-done
+	}
 }
 
 func (p *Preparing) Start(ctx context.Context, id string) error {

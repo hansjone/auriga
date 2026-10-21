@@ -34,7 +34,24 @@ func ValidateInstanceID(id string) error {
 	if !InstanceIDPattern.MatchString(id) {
 		return fmt.Errorf("storage: instance id %q rejected by pattern", id)
 	}
+	if isWindowsDeviceName(id) {
+		return fmt.Errorf("storage: instance id %q is a reserved device name", id)
+	}
 	return nil
+}
+
+// isWindowsDeviceName rejects CON, PRN, AUX, NUL, COM1-9, LPT1-9 (any case):
+// on Windows they open a device instead of a directory.
+func isWindowsDeviceName(id string) bool {
+	u := strings.ToUpper(id)
+	switch u {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	if len(u) == 4 && (strings.HasPrefix(u, "COM") || strings.HasPrefix(u, "LPT")) && u[3] >= '1' && u[3] <= '9' {
+		return true
+	}
+	return false
 }
 
 // AssertUnderRoot ensures absPath is strictly under root (after Clean).

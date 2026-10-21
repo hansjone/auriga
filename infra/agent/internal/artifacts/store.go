@@ -11,13 +11,16 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/policy"
+	"github.com/hansjone/auriga/infra/agent/internal/storage"
 )
 
 const (
@@ -85,6 +88,9 @@ func (s *Store) newHTTPClient() *http.Client {
 			if len(via) >= maxRedirects {
 				return fmt.Errorf("artifacts: too many redirects")
 			}
+			if err := checkURLPath(req.URL); err != nil {
+				return err
+			}
 			if err := s.Policy.AllowArtifactURL(req.URL.String()); err != nil {
 				return err
 			}
@@ -99,7 +105,39 @@ func (s *Store) Path(digest string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(s.Root, "sha256", hexDig), nil
+	return storage.SafeJoin(s.Root, "sha256", hexDig)
+}
+
+// checkURLPath rejects artifact URLs whose path is not already clean
+// (".", ".." or empty segments, encoded dots/slashes, backslashes), so the
+// allowlist prefix comparison cannot be walked out of by path tricks.
+func checkURLPath(u *url.URL) error {
+	if u == nil {
+		return fmt.Errorf("artifacts: empty url")
+	}
+	p := u.Path
+	if p == "" {
+		return nil
+	}
+	if strings.ContainsRune(p, 0) || strings.ContainsRune(p, '\\') {
+		return fmt.Errorf("artifacts: url path contains backslash or NUL")
+	}
+	esc := strings.ToLower(u.EscapedPath())
+	if strings.Contains(esc, "%2e") || strings.Contains(esc, "%2f") || strings.Contains(esc, "%5c") {
+		return fmt.Errorf("artifacts: url path contains encoded dot or separator")
+	}
+	if path.Clean(p) != p {
+		return fmt.Errorf("artifacts: url path is not clean (dot segments or empty segments)")
+	}
+	return nil
+}
+
+func parseArtifactURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("artifacts: bad url: %w", err)
+	}
+	return checkURLPath(u)
 }
 
 // Ensure downloads url if needed, verifies SHA-256, and records holder.
@@ -115,6 +153,9 @@ func (s *Store) Ensure(ctx context.Context, holder, url, digest string, maxBytes
 	if url == "" {
 		return "", fmt.Errorf("artifacts: empty url")
 	}
+	if err := parseArtifactURL(url); err != nil {
+		return "", err
+	}
 	if err := s.Policy.AllowArtifactURL(url); err != nil {
 		return "", err
 	}
@@ -127,8 +168,13 @@ func (s *Store) Ensure(ctx context.Context, holder, url, digest string, maxBytes
 		limit = cap
 	}
 
-	path := filepath.Join(s.Root, "sha256", hexDig)
-	if st, err := os.Stat(path); err == nil && st.Size() > 0 {
+	path, err := storage.SafeJoin(s.Root, "sha256", hexDig)
+	if err != nil {
+		return "", err
+	}
+	if st, err := os.Lstat(path); err == nil && !st.Mode().IsRegular() {
+		return "", fmt.Errorf("artifacts: cache entry %s is not a regular file", hexDig)
+	} else if err == nil && st.Size() > 0 {
 		if err := s.verifyFile(path, hexDig); err != nil {
 			_ = os.Chmod(path, 0o600)
 			_ = os.Remove(path)
@@ -293,14 +339,38 @@ func (s *Store) SyncHolders(holder string, want []string) error {
 
 // GC removes unreferenced artifacts older than retainAge, or all when force.
 func (s *Store) GC(force bool) (removed int, err error) {
+	return s.GCKeep(force, nil)
+}
+
+// GCKeep is GC that never removes digests in keep (e.g. every digest named by
+// a desired or running instance), even when refs.json lost track of them.
+// When refs.json had to be rebuilt this round, nothing is removed.
+func (s *Store) GCKeep(force bool, keep []string) (removed int, err error) {
+	protect := make(map[string]struct{}, len(keep))
+	for _, d := range keep {
+		hexDig, nErr := NormalizeDigest(d)
+		if nErr != nil {
+			return 0, nErr
+		}
+		protect[hexDig] = struct{}{}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	refs, err := s.loadRefsLocked()
+	refs, rebuilt, err := s.loadRefsChecked()
 	if err != nil {
 		return 0, err
 	}
+	if rebuilt {
+		if err := s.saveRefsLocked(refs); err != nil {
+			return 0, err
+		}
+		return 0, fmt.Errorf("artifacts: refs.json was corrupt and has been rebuilt; gc skipped this round")
+	}
 	now := s.Now().UTC()
-	dir := filepath.Join(s.Root, "sha256")
+	dir, err := storage.SafeJoin(s.Root, "sha256")
+	if err != nil {
+		return 0, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -309,10 +379,16 @@ func (s *Store) GC(force bool) (removed int, err error) {
 		return 0, err
 	}
 	for _, ent := range entries {
-		if ent.IsDir() || strings.HasPrefix(ent.Name(), ".") {
+		if !ent.Type().IsRegular() || strings.HasPrefix(ent.Name(), ".") {
 			continue
 		}
 		hexDig := ent.Name()
+		if norm, nErr := NormalizeDigest(hexDig); nErr != nil || norm != hexDig {
+			continue // not ours; leave unknown files alone
+		}
+		if _, ok := protect[hexDig]; ok {
+			continue
+		}
 		e := refs[hexDig]
 		if e.count() > 0 {
 			continue
@@ -326,7 +402,7 @@ func (s *Store) GC(force bool) (removed int, err error) {
 				continue
 			}
 		}
-		if rErr := os.Remove(filepath.Join(dir, hexDig)); rErr == nil {
+		if rErr := os.Remove(filepath.Join(dir, hexDig)); rErr == nil { // hexDig is 64 hex chars
 			removed++
 			delete(refs, hexDig)
 		}
@@ -403,19 +479,28 @@ func (s *Store) acquire(holder, hexDig string) error {
 }
 
 func (s *Store) loadRefsLocked() (map[string]refEntry, error) {
-	path := filepath.Join(s.Root, refsFileName)
+	refs, _, err := s.loadRefsChecked()
+	return refs, err
+}
+
+// loadRefsChecked also reports whether refs.json was corrupt and rebuilt empty.
+func (s *Store) loadRefsChecked() (map[string]refEntry, bool, error) {
+	path, err := storage.SafeJoin(s.Root, refsFileName)
+	if err != nil {
+		return nil, false, err
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return map[string]refEntry{}, nil
+			return map[string]refEntry{}, false, nil
 		}
-		return nil, err
+		return nil, false, err
 	}
 	var refs map[string]refEntry
 	if err := json.Unmarshal(raw, &refs); err != nil {
 		// Corrupt refs: rebuild empty (artifacts remain; next Ensure re-acquires).
 		_ = os.Rename(path, path+".corrupt")
-		return map[string]refEntry{}, nil
+		return map[string]refEntry{}, true, nil
 	}
 	if refs == nil {
 		refs = map[string]refEntry{}
@@ -426,14 +511,17 @@ func (s *Store) loadRefsLocked() (map[string]refEntry, error) {
 			refs[dig] = e
 		}
 	}
-	return refs, nil
+	return refs, false, nil
 }
 
 func (s *Store) saveRefsLocked(refs map[string]refEntry) error {
 	if err := os.MkdirAll(s.Root, 0o700); err != nil {
 		return err
 	}
-	path := filepath.Join(s.Root, refsFileName)
+	path, err := storage.SafeJoin(s.Root, refsFileName)
+	if err != nil {
+		return err
+	}
 	raw, err := json.MarshalIndent(refs, "", "  ")
 	if err != nil {
 		return err
