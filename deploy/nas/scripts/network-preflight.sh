@@ -24,6 +24,10 @@ docker network inspect "$NET" >/dev/null 2>&1 || die "external network not found
 
 driver=$(docker network inspect -f '{{.Driver}}' "$NET")
 info "network=$NET driver=$driver"
+case "$driver" in
+  qnet|macvlan|ipvlan|bridge) ;;
+  *) info "unverified external network driver — exit 4"; exit 4 ;;
+esac
 
 cfg_subnets=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NET")
 info "network_subnets=$cfg_subnets expected=$SUBNET"
@@ -60,29 +64,39 @@ for g in $gw; do
   fi
 done
 
-occupied=$(docker network inspect -f '{{range $id, $e := .Containers}}{{printf "%s %s\n" $e.Name $e.IPv4Address}}{{end}}' "$NET" 2>/dev/null || true)
+reserved=$(docker network inspect -f '{{range .IPAM.Config}}{{range .AuxiliaryAddresses}}{{println .}}{{end}}{{end}}' "$NET")
+for reserved_ip in $reserved; do
+  [ "$reserved_ip" != "$IP" ] || die "AURIGA_EDGE_LAN_IP is an IPAM auxiliary reservation"
+done
+dynamic_ranges=$(docker network inspect -f '{{range .IPAM.Config}}{{if .IPRange}}{{println .IPRange}}{{end}}{{end}}' "$NET")
+for dynamic_range in $dynamic_ranges; do
+  if ipv4_in_cidr "$IP" "$dynamic_range"; then
+    die "AURIGA_EDGE_LAN_IP overlaps the dynamic IPAM allocation range"
+  fi
+done
+
+occupied=$(docker network inspect -f '{{range $id, $e := .Containers}}{{printf "%s %s\n" $id $e.IPv4Address}}{{end}}' "$NET")
 info "network_members:"
 printf '%s\n' "$occupied" | while IFS= read -r _line || [ -n "$_line" ]; do
   [ -n "$_line" ] || continue
   info "  $_line"
 done
 
-# If our project edge already holds this IP, allow (H4 idempotent start).
+# Exempt only the actual member holding the exact target address on this network.
 own_edge=""
-if project_is_running; then
-  own_edge=$(docker ps --filter "label=com.docker.compose.project=${AURIGA_NAS_PROJECT}" \
-    --filter "label=com.docker.compose.service=edge" --format '{{.ID}}' 2>/dev/null | head -n 1 || true)
+while read -r member address; do
+  [ "${address%/*}" = "$IP" ] || continue
+  member_project=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$member") || die "cannot inspect LAN member"
+  member_service=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$member") || die "cannot inspect LAN member"
+  [ "$member_project" = "$AURIGA_NAS_PROJECT" ] && [ "$member_service" = edge ] \
+    || die "LAN IP already assigned on foreign network member: $IP"
+  own_edge=$member
+done <<EOF
+$occupied
+EOF
+if [ -n "$own_edge" ]; then
+  info "LAN IP $IP held by verified project edge on $NET — ok for re-start"
 fi
-
-case "$occupied" in
-  *" $IP/"*|*"$IP/"*)
-    if [ -n "$own_edge" ]; then
-      info "LAN IP $IP already held by this project's edge — ok for re-start"
-    else
-      die "LAN IP already assigned on network: $IP"
-    fi
-    ;;
-esac
 
 if command -v ip >/dev/null 2>&1; then
   if [ -z "$own_edge" ] && ip neigh show "$IP" 2>/dev/null | grep -qi 'REACHABLE\|DELAY\|STALE\|PERMANENT'; then

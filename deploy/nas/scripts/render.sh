@@ -48,6 +48,11 @@ RP_ID=${AURIGA_TEAM_RP_ID:-$PORTAL}
 TRUSTED=${AURIGA_TRUSTED_PROXIES:-127.0.0.1}
 SECURE=${AURIGA_SECURE_COOKIES:-true}
 SEED=${AURIGA_PLATFORM_SEED:-false}
+case "$SEED" in
+  true) PROFILES=combined,e2e ;;
+  false) PROFILES=combined ;;
+  *) die "AURIGA_PLATFORM_SEED must be true or false" ;;
+esac
 HOST_NC=${AURIGA_HOST_PUBLISH_NODECONTROL:-17443}
 HOST_REG=${AURIGA_HOST_PUBLISH_REGISTRY:-15000}
 
@@ -61,6 +66,8 @@ sed \
   -e "s|__PG_WS_APP_PASSWORD__|$(escape_sed "$PG_WS_APP")|g" \
   "$NAS_ROOT/postgres/init.sql.tmpl" >"$CONFIG/postgres/init.sql"
 chmod 0600 "$CONFIG/postgres/init.sql"
+# The selected Debian postgres image runs psql as uid 999 (not root).
+chown_required 999:999 "$CONFIG/postgres/init.sql"
 
 sed \
   -e "s|__NATS_SYS_PASSWORD__|$(escape_sed "$NATS_SYS")|g" \
@@ -72,6 +79,7 @@ chmod 0600 "$CONFIG/nats/nats.conf"
 chown_required 65532:65532 "$CONFIG/nats/nats.conf"
 
 cat >"$CONFIG/platform.env" <<EOF
+SPRING_PROFILES_ACTIVE=$PROFILES
 AURIGA_IAM_JDBC_URL=jdbc:postgresql://postgres:5432/auriga
 AURIGA_IAM_DB_USER=auriga_iam
 AURIGA_IAM_DB_PASSWORD=$PG_IAM

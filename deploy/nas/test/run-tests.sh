@@ -6,7 +6,7 @@ set -eu
 ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 export NAS_ROOT="$ROOT"
 export NAS_ALLOW_EXAMPLE_ENV=1
-export NAS_ALLOW_NONROOT=1
+export NAS_ALLOW_NONROOT=${NAS_ALLOW_NONROOT:-1}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 fail=0
@@ -85,7 +85,7 @@ fi
 grep -q 'auriga-nas-test_publish' "$ROOT/docker-compose.yml" || { fail_msg topo_publish "missing publish network"; }
 grep -q 'internal: true' "$ROOT/docker-compose.yml" || { fail_msg topo_internal "missing internal:true"; }
 grep -q 'pki-edge' "$ROOT/docker-compose.yml" || { fail_msg topo_pki_edge "missing pki-edge mount"; }
-grep -q '/ingress:' "$ROOT/docker-compose.yml" || { fail_msg topo_ingress "missing ingress mount"; }
+grep -q '/socket-share:' "$ROOT/docker-compose.yml" || { fail_msg topo_ingress "missing socket parent mount"; }
 # edge service block must not mount data/agent (ignore comments)
 if awk '
   /^  edge:/ {in_edge=1; next}
@@ -137,12 +137,20 @@ AURIGA_PLATFORM_SEED=true
 AURIGA_AGENT_CAPACITY_MAX_INSTANCES=1
 EOF
 
-if command -v go >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
+if { [ -x "$ROOT/bin/auriga-nas-bootstrap" ] || command -v go >/dev/null 2>&1; } && command -v openssl >/dev/null 2>&1; then
   export AURIGA_DATA_ROOT="$DATA"
   if sh "$ROOT/scripts/init.sh"; then
     pass init_first
   else
     fail_msg init_first "init failed"
+  fi
+  if [ "$NAS_ALLOW_NONROOT" != 1 ]; then
+    if [ "$(stat -c '%u:%a' "$DATA/config/postgres/init.sql")" = 999:600 ] \
+      && [ "$(stat -c '%u:%g:%a' "$DATA/socket-share")" = 0:65532:750 ]; then
+      pass linux_owner_modes
+    else
+      fail_msg linux_owner_modes "postgres SQL or shared parent ownership incorrect"
+    fi
   fi
   KEY1=$(cat "$DATA/secrets/iam_encryption_key")
   if sh "$ROOT/scripts/init.sh"; then
@@ -150,6 +158,11 @@ if command -v go >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1; then
     if [ "$KEY1" = "$KEY2" ]; then pass init_idempotent; else fail_msg init_idempotent "key rotated"; fi
   else
     fail_msg init_idempotent "re-init failed"
+  fi
+  if sh "$ROOT/test/review-regressions.sh" "$DATA"; then
+    pass review_regressions
+  else
+    fail_msg review_regressions "review regression failed"
   fi
   # Non-empty foreign root without marker
   OTHER="$TMP/srv/container/auriga-other"

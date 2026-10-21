@@ -39,19 +39,21 @@ $AURIGA_DATA_ROOT/            # 例：/srv/container/auriga-test（≥3 层，ba
     pki/                      # CA + workspace（platform 10001）
     pki-edge/                 # 仅 ca.crt + edge.crt/key（edge 65532，:ro）
   data/{postgres,nats,registry,agent}/
-  ingress/ingress.sock        # 独立目录；edge 只挂这里，不挂 data/agent
+  socket-share/              # root:65532 0750；agent/edge 只共享这个父目录
+    ingress/ingress.sock      # agent 创建叶子与标记，edge 只读挂载父目录
   enrollment/
   join/token
   results/
 ```
 
-Agent 数据根 `$AURIGA_DATA_ROOT/data/agent` 保持 **0700**；ingress 单独 **0750** 且属主 65532。
+Agent 数据根 `$AURIGA_DATA_ROOT/data/agent` 保持 **0700**；共享父目录和 agent 创建的 ingress 叶子均为 **root:65532 0750**。叶子不是 bind mount，允许 W2H 原子创建/迁移；init/start 不预建叶子、不改成 edge uid。祖先必须归 root 所有且不可组/其他写（高层 root sticky 临时目录例外）；预检只诊断，不修改 NAS 既有共享目录权限。
 
 ## Agent / 宿主权限边界（M7）
 
 agent 使用 host 网络 + root + `docker.sock`，被攻破约等于 NAS root（含其它容器与卷）。这是单机测试栈的已知取舍，不是生产加固模型：
 
 - 实例隔离仍靠 agent policy（镜像前缀、CPU/内存/PID）与现有 Docker 驱动参数（`cap-drop ALL`、只读根、`no-new-privileges`）。
+- agent 自身仅补回 `CHOWN/DAC_OVERRIDE/FOWNER`，用于分配实例 uid/gid、更新实例文件和共享 socket；实例容器仍丢弃全部 capabilities，不启用 privileged。
 - registry **无认证**，且经 loopback 发布：NAS 上其它本机用户也可能向该 registry 推镜像；白名单前缀是主要约束。
 - `platform.env` 内嵌 DB/NATS 口令与加密主密钥：任何能 `docker inspect` 的用户都能看到（服务当前读 env；`_FILE` 待服务侧支持）。
 
@@ -65,18 +67,19 @@ export AURIGA_DATA_ROOT=/srv/container/auriga-test
 sh deploy/nas/scripts/init.sh      # 需 root（chown）；再次只 render
 sh deploy/nas/scripts/preflight.sh
 sh deploy/nas/scripts/network-preflight.sh
-sh deploy/nas/scripts/start.sh     # 已运行时跳过「外方」端口/IP 冲突检查
+sh deploy/nas/scripts/start.sh     # 逐端口/网络成员确认归属，允许本项目精确占用的重入
 sh deploy/nas/scripts/smoke.sh     # 无 E2E hook 时 exit 2（PARTIAL）
 sh deploy/nas/scripts/stop.sh
 ```
 
 规则：
 
-- 数据根 basename 必须以 `auriga-` 开头，路径 ≥3 层，拒绝符号链接与 `..`。
+- 数据根 basename 必须以 `auriga-` 开头，路径 ≥3 层，拒绝符号链接与 `..`；管理配置/密钥/共享 socket 树内也拒绝符号链接，实例用户目录不扫描。
 - 已有非空目录且无 `.auriga-initialized`（除 `stack.env` 外）→ 拒绝。
 - 随机口令失败不写空文件；已有 secrets 不覆盖。
 - 私钥 0600；init/render 以 root 运行，`chown` 失败即退出。
-- `AURIGA_PLATFORM_SEED=true` 仅首装。
+- `AURIGA_PLATFORM_SEED=true` 仅隔离测试首装，render 显式选择 `combined,e2e`，以通过 W2H 种子门禁；设回 false 后恢复 `combined`。不启用 dev profile。
+- PostgreSQL 选用固定摘要的 **Debian postgres:17（uid/gid 999）**，含口令的初始化 SQL 归 `999:999`、权限 0600；不可直接替换为 uid 不同的 Alpine 镜像。
 
 ### 角色分离限制
 
@@ -86,7 +89,7 @@ sh deploy/nas/scripts/stop.sh
 ### NATS 权限
 
 - 无匿名登录；监控只绑容器 loopback。
-- `$JS.API.>` 已收窄到 sessions/routes 相关流；`jetstream` 设 `max_memory_store` / `max_file_store`。
+- `$JS.API.>` 已收窄：platform 可首启创建 AURIGA_EVENTS/AURIGA_AUDIT、发布业务/审计事件及消费这两条流；routes_rw 只写 routes KV；edge 只读 routes、管理 sessions，并仅创建/拉取/确认 `edge-session-revoke` 撤销消费者。无任意流删除权限；`jetstream` 有内存/磁盘上限。
 - edge 因共用一个 `natsUrl`，口令模式下为会话+路由并集；JWT 分用户待主控扩展。
 
 ## 镜像与 CI 工件
@@ -121,7 +124,7 @@ sh deploy/nas/scripts/smoke.sh
 ## 升级 / 回退 / 备份
 
 - 升级：换摘要镜像；迁移不可假设换旧镜像即回退。
-- 停止：只停本项目；`--with-registered-instances` 仅停挂载落在 `data/agent` 下且（优先）带实例 label 的容器。禁止 prune / `down -v` / orphans 清扫。
+- 停止：只停本项目；`--with-registered-instances` 对发现和登记的 ID 均要求 `auriga.managed=true`、实例 label 和规范化后严格位于 `data/agent/` 下的 bind。外方 label、路径前缀碰撞和链接逃逸均拒绝。禁止 prune / `down -v` / orphans 清扫。
 - 备份：`secrets/`、`data/postgres`、`data/agent`、`enrollment/`、`stack.env`。
 
 ## 弱隔离（纯 IP）
@@ -136,4 +139,7 @@ bootstrap 叶子证书约 825 天；到期前需重新 init/签发并滚动 edge
 
 ```sh
 sh deploy/nas/test/run-tests.sh
+# Linux root 可验证真实 chown/mode，使用 CI 预构建的 bootstrap 二进制：
+NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
+(cd infra/edge && go test -count=1 ../../deploy/nas/test/nats_policy_test.go)
 ```

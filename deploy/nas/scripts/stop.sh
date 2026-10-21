@@ -29,45 +29,46 @@ run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" stop || true
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" down || true
 
 if [ "$STOP_INSTANCES" -eq 1 ]; then
-  # Prefer label filter over free-form ID file (M2).
   DATA_AGENT="$AURIGA_DATA_ROOT/data/agent"
+  stop_verified_instance() {
+    cid=$1
+    case "$cid" in ''|*[!0-9a-fA-F]*) info "skip non-hex container id"; return ;; esac
+    [ "${#cid}" -ge 12 ] && [ "${#cid}" -le 64 ] || { info "skip invalid container id length"; return; }
+    managed=$(docker inspect -f '{{index .Config.Labels "auriga.managed"}}' "$cid" 2>/dev/null) || return 0
+    instance=$(docker inspect -f '{{index .Config.Labels "auriga.instance"}}' "$cid" 2>/dev/null) || return 0
+    [ "$managed" = true ] || { info "skip unmanaged container"; return; }
+    printf '%s\n' "$instance" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$' \
+      || { info "skip invalid instance label"; return; }
+    # One mount per line: whitespace or a substring cannot impersonate a path boundary.
+    mounts=$(docker inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{println .Source}}{{end}}{{end}}' "$cid" 2>/dev/null) || return 0
+    matched=0
+    while IFS= read -r mount || [ -n "$mount" ]; do
+      case "$mount" in
+        "$DATA_AGENT/instances/$instance/"*)
+          case "$mount" in *'/../'*|*'/./'*|*'//'*) continue ;; esac
+          resolved=$(readlink -f "$mount" 2>/dev/null) || continue
+          case "$resolved" in "$DATA_AGENT/instances/$instance/"*) matched=1 ;; esac
+          ;;
+      esac
+    done <<EOF
+$mounts
+EOF
+    [ "$matched" -eq 1 ] || { info "skip instance outside data/agent"; return; }
+    info "stopping verified instance id_prefix=$(printf '%s' "$cid" | cut -c1-12)"
+    docker stop "$cid" >/dev/null 2>&1 || true
+    docker rm "$cid" >/dev/null 2>&1 || true
+  }
   info "stopping containers with auriga instance labels under $DATA_AGENT"
-  docker ps -aq --filter "label=auriga.instance=true" 2>/dev/null | while IFS= read -r cid || [ -n "$cid" ]; do
+  docker ps -aq --no-trunc --filter "label=auriga.managed=true" --filter "label=auriga.instance" 2>/dev/null | while IFS= read -r cid || [ -n "$cid" ]; do
     [ -n "$cid" ] || continue
-    mounts=$(docker inspect -f '{{range .Mounts}}{{.Source}} {{end}}' "$cid" 2>/dev/null || true)
-    case " $mounts " in
-      *" $DATA_AGENT "*|*"$DATA_AGENT/"*)
-        info "stopping verified instance id_prefix=$(printf '%s' "$cid" | cut -c1-12)"
-        docker stop "$cid" >/dev/null 2>&1 || true
-        docker rm "$cid" >/dev/null 2>&1 || true
-        ;;
-      *)
-        info "skip container $(printf '%s' "$cid" | cut -c1-12): mounts not under data/agent"
-        ;;
-    esac
+    stop_verified_instance "$cid"
   done
-  # Legacy file: only accept 64-hex or 12+ hex ids, still verify mounts.
+  # The legacy registration file receives exactly the same ownership checks.
   REG="$AURIGA_DATA_ROOT/results/registered-instances.txt"
   if [ -f "$REG" ]; then
     while IFS= read -r cid || [ -n "$cid" ]; do
       case "$cid" in ''|\#*) continue ;; esac
-      case "$cid" in
-        *[!0-9a-fA-F]*)
-          info "skip non-hex id in registered-instances.txt"
-          continue
-          ;;
-      esac
-      [ "${#cid}" -ge 12 ] || { info "skip short id"; continue; }
-      mounts=$(docker inspect -f '{{range .Mounts}}{{.Source}} {{end}}' "$cid" 2>/dev/null || true)
-      case " $mounts " in
-        *" $DATA_AGENT "*|*"$DATA_AGENT/"*)
-          docker stop "$cid" >/dev/null 2>&1 || true
-          docker rm "$cid" >/dev/null 2>&1 || true
-          ;;
-        *)
-          info "skip unverified id_prefix=$(printf '%s' "$cid" | cut -c1-12)"
-          ;;
-      esac
+      stop_verified_instance "$cid"
     done <"$REG"
   fi
 fi

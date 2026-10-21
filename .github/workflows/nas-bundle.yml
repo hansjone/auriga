@@ -94,6 +94,12 @@ jobs:
           docker save auriga/edge:nas -o out/images/edge.tar
           docker save auriga/agent:nas -o out/images/agent.tar
 
+      - name: Verify NAS scripts and authenticated NATS policy
+        run: |
+          set -euo pipefail
+          sudo env PATH="$PATH" NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
+          (cd infra/edge && go test -count=1 ../../deploy/nas/test/nats_policy_test.go)
+
       - name: Write manifest + checksums
         run: |
           set -euo pipefail

@@ -27,9 +27,7 @@ require_cmd docker
 
 "$NAS_ROOT/scripts/render.sh"
 
-mkdir -p "$AURIGA_DATA_ROOT/ingress"
-chmod 0750 "$AURIGA_DATA_ROOT/ingress" || true
-chown_required 65532:65532 "$AURIGA_DATA_ROOT/ingress"
+prepare_socket_parent
 
 if project_is_running; then
   info "project already running — compose up -d is idempotent"

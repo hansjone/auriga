@@ -63,14 +63,15 @@ mkdir -p \
   "$DATA/agent/instances" \
   "$DATA/agent/artifacts" \
   "$DATA/agent/backups" \
-  "$AURIGA_DATA_ROOT/ingress" \
+  "$AURIGA_DATA_ROOT/socket-share" \
   "$AURIGA_DATA_ROOT/enrollment" \
   "$AURIGA_DATA_ROOT/join" \
   "$AURIGA_DATA_ROOT/results" \
   "$AURIGA_DATA_ROOT/bin"
 
 chmod_strict 0700 "$SECRETS" "$DATA/agent"
-chmod_strict 0750 "$AURIGA_DATA_ROOT/ingress" "$AURIGA_DATA_ROOT/enrollment" "$AURIGA_DATA_ROOT/join"
+chmod_strict 0750 "$AURIGA_DATA_ROOT/enrollment" "$AURIGA_DATA_ROOT/join"
+prepare_socket_parent
 chmod_strict 0755 "$CONFIG" "$CONFIG/pki" "$CONFIG/pki-edge" "$CONFIG/templates"
 
 write_secret() {
@@ -131,15 +132,13 @@ chmod 0600 "$CONFIG/pki-edge/edge.key"
 # Ownership: edge 65532, platform 10001 — fail hard as root (L1)
 chown_required 65532:65532 \
   "$CONFIG/pki-edge/edge.key" "$CONFIG/pki-edge/edge.crt" "$CONFIG/pki-edge/ca.crt" \
-  "$CONFIG/identity-signing-keys.json" \
-  "$AURIGA_DATA_ROOT/ingress"
+  "$CONFIG/identity-signing-keys.json"
 chown_required 10001:10001 \
   "$CONFIG/pki/ca.key" "$CONFIG/pki/workspace.key" "$CONFIG/pki/ca.crt" "$CONFIG/pki/workspace.crt" \
   "$AURIGA_DATA_ROOT/enrollment"
 chown_required 65532:65532 "$AURIGA_DATA_ROOT/data/nats"
 
 chmod 0600 "$CONFIG/pki-edge/edge.key" "$CONFIG/identity-signing-keys.json"
-chmod 0750 "$AURIGA_DATA_ROOT/ingress"
 
 : >"$AURIGA_DATA_ROOT/join/token"
 chmod 0600 "$AURIGA_DATA_ROOT/join/token"

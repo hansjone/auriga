@@ -43,10 +43,7 @@ if [ -d "$_parent" ]; then
   [ "$free_kb" -ge "$MIN_DISK_KB" ] || die "insufficient free disk"
 fi
 
-if project_is_running; then
-  info "project=$AURIGA_NAS_PROJECT already running — skipping foreign port conflict checks (H4)"
-else
-  busy=0
+busy=0
   for port in \
     "${AURIGA_HOST_PUBLISH_NODECONTROL:?}" \
     "${AURIGA_HOST_PUBLISH_REGISTRY:?}" \
@@ -61,7 +58,9 @@ else
       info "host_port=$port free_at_check_time"
     fi
   done
-  [ "$busy" -eq 0 ] || die "host publish ports conflict; revise stack.env"
+[ "$busy" -eq 0 ] || die "host publish ports conflict; revise stack.env"
+if [ -d "$AURIGA_DATA_ROOT/socket-share" ]; then
+  validate_ingress_ancestors
 fi
 
 for img in \

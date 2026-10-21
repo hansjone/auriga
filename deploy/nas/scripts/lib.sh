@@ -59,6 +59,7 @@ chown_required() {
 # Parse KEY=VALUE lines only — no shell execution (L3).
 load_env_file() {
   _file=$1
+  [ ! -L "$_file" ] || die "env file must not be a symlink: $_file"
   [ -f "$_file" ] || die "env file missing: $_file"
   # Prefer owner-restricted files when present on a multi-user NAS.
   if command -v stat >/dev/null 2>&1; then
@@ -109,9 +110,53 @@ load_stack_env() {
   load_env_file "$_file"
   [ -n "${AURIGA_DATA_ROOT:-}" ] || die "AURIGA_DATA_ROOT is required"
   validate_data_root "$AURIGA_DATA_ROOT"
+  validate_managed_tree
   # Ignore operator COMPOSE_PROJECT_NAME — always fixed (M1).
   COMPOSE_PROJECT_NAME=$AURIGA_NAS_PROJECT
   export COMPOSE_PROJECT_NAME
+}
+
+validate_managed_tree() {
+  # User workspaces may contain symlinks; only these deployment-owned trees are scanned.
+  for _rel in config secrets join results enrollment bin socket-share data data/agent data/postgres data/nats data/registry; do
+    _managed="$AURIGA_DATA_ROOT/$_rel"
+    [ ! -L "$_managed" ] || die "managed path is a symlink: $_managed"
+  done
+  for _rel in config secrets join results enrollment bin socket-share; do
+    _managed="$AURIGA_DATA_ROOT/$_rel"
+    [ -d "$_managed" ] || continue
+    _links=$(find "$_managed" -type l -print) || die "cannot inspect managed tree: $_managed"
+    [ -z "$_links" ] || die "symlink inside managed tree: $_managed"
+  done
+}
+
+validate_ingress_ancestors() {
+  [ "${NAS_ALLOW_NONROOT:-}" != "1" ] || return 0
+  _ancestor="$AURIGA_DATA_ROOT/socket-share"
+  while :; do
+    [ -d "$_ancestor" ] && [ ! -L "$_ancestor" ] || die "unsafe ingress ancestor: $_ancestor"
+    _owner=$(stat -c '%u' "$_ancestor") || die "cannot inspect ingress owner"
+    _mode=$(stat -c '%a' "$_ancestor") || die "cannot inspect ingress mode"
+    [ "$_owner" = 0 ] || die "ingress ancestor must be root-owned: $_ancestor"
+    case "$_mode" in ''|*[!0-7]*) die "invalid ingress ancestor mode" ;; esac
+    if [ "$((0$_mode & 022))" -ne 0 ]; then
+      # Root-owned sticky /tmp is allowed only above our private parent.
+      [ "$_ancestor" != "$AURIGA_DATA_ROOT/socket-share" ] && [ "$((0$_mode & 01000))" -ne 0 ] \
+        || die "ingress ancestor is writable by group/others: $_ancestor (choose a private root; do not loosen permissions)"
+    fi
+    [ "$_ancestor" != / ] || break
+    _ancestor=$(dirname -- "$_ancestor")
+  done
+}
+
+prepare_socket_parent() {
+  _socket_parent="$AURIGA_DATA_ROOT/socket-share"
+  [ ! -L "$_socket_parent" ] || die "socket-share must not be a symlink"
+  mkdir -p "$_socket_parent"
+  chown_required 0:65532 "$_socket_parent"
+  chmod 0750 "$_socket_parent" || die "chmod socket-share failed"
+  validate_ingress_ancestors
+  # Never precreate/mount the leaf: the agent publishes ingress/ by atomic rename.
 }
 
 # M3: absolute, no .., no //, no /./, depth >= 3, last component auriga-*, no symlinks on path.
@@ -180,11 +225,16 @@ project_is_running() {
 # Port busy on host, ignoring listeners owned by this compose project (H4).
 host_port_busy_foreign() {
   _port=$1
-  if project_is_running; then
-    # If our project is up, assume our publish ports are ours.
-    return 1
-  fi
-  host_port_busy "$_port"
+  host_port_busy "$_port" || return 1
+  _port_owners=$(docker ps -q --no-trunc --filter "publish=$_port" 2>/dev/null) || return 0
+  [ -n "$_port_owners" ] || return 0
+  for _port_owner in $_port_owners; do
+    _project=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$_port_owner" 2>/dev/null) || return 0
+    [ "$_project" = "$AURIGA_NAS_PROJECT" ] || return 0
+    _bindings=$(docker inspect -f '{{range .NetworkSettings.Ports}}{{range .}}{{printf "%s %s\n" .HostIp .HostPort}}{{end}}{{end}}' "$_port_owner" 2>/dev/null) || return 0
+    printf '%s\n' "$_bindings" | awk -v port="$_port" '$1 == "127.0.0.1" && $2 == port {found=1} END {exit !found}' || return 0
+  done
+  return 1
 }
 
 host_port_busy() {

@@ -19,12 +19,27 @@ accounts {
     jetstream: enabled
     users: [
       {
-        # Platform: events + sessions KV. JS API limited to sessions stream/KV.
+        # Combined platform: business/audit streams and sessions KV, no arbitrary stream deletion.
         user: platform
         password: "__NATS_PLATFORM_PASSWORD__"
         permissions: {
           publish: { allow: [
             "auriga.evt.>",
+            "auriga.audit.>",
+            "$JS.API.STREAM.CREATE.AURIGA_EVENTS",
+            "$JS.API.STREAM.INFO.AURIGA_EVENTS",
+            "$JS.API.STREAM.CREATE.AURIGA_AUDIT",
+            "$JS.API.STREAM.INFO.AURIGA_AUDIT",
+            "$JS.API.CONSUMER.CREATE.AURIGA_EVENTS.>",
+            "$JS.API.CONSUMER.DURABLE.CREATE.AURIGA_EVENTS.>",
+            "$JS.API.CONSUMER.INFO.AURIGA_EVENTS.>",
+            "$JS.API.CONSUMER.MSG.NEXT.AURIGA_EVENTS.>",
+            "$JS.ACK.AURIGA_EVENTS.>",
+            "$JS.API.CONSUMER.CREATE.AURIGA_AUDIT.>",
+            "$JS.API.CONSUMER.DURABLE.CREATE.AURIGA_AUDIT.>",
+            "$JS.API.CONSUMER.INFO.AURIGA_AUDIT.>",
+            "$JS.API.CONSUMER.MSG.NEXT.AURIGA_AUDIT.>",
+            "$JS.ACK.AURIGA_AUDIT.>",
             "$KV.auriga-sessions.>",
             "$JS.API.STREAM.CREATE.KV_auriga-sessions",
             "$JS.API.STREAM.UPDATE.KV_auriga-sessions",
@@ -75,11 +90,18 @@ accounts {
       }
       {
         # Edge: sessions + routes read + revoke. Shared natsUrl (password auth).
-        # If KV create/ensure-streams needs broader JS on first boot, widen here and document.
+        # Revoke consumer is fixed to the edge durable; route KV remains read-only.
         user: edge
         password: "__NATS_EDGE_PASSWORD__"
         permissions: {
           publish: { allow: [
+            "$JS.API.STREAM.INFO.AURIGA_EVENTS",
+            "$JS.API.CONSUMER.CREATE.AURIGA_EVENTS.edge-session-revoke",
+            "$JS.API.CONSUMER.CREATE.AURIGA_EVENTS.edge-session-revoke.auriga.evt.identity.session_revoked",
+            "$JS.API.CONSUMER.DURABLE.CREATE.AURIGA_EVENTS.edge-session-revoke",
+            "$JS.API.CONSUMER.INFO.AURIGA_EVENTS.edge-session-revoke",
+            "$JS.API.CONSUMER.MSG.NEXT.AURIGA_EVENTS.edge-session-revoke",
+            "$JS.ACK.AURIGA_EVENTS.edge-session-revoke.>",
             "$KV.auriga-sessions.>",
             "$JS.API.STREAM.INFO.KV_auriga-routes",
             "$JS.API.STREAM.MSG.GET.KV_auriga-routes",

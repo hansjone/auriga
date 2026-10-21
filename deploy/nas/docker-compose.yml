@@ -101,7 +101,6 @@ services:
       - path: ${AURIGA_DATA_ROOT}/config/platform.env
         required: true
     environment:
-      SPRING_PROFILES_ACTIVE: combined
       SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/auriga/platform-runtime.yaml
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
       AURIGA_PLATFORM_PORT: "8081"
@@ -150,7 +149,7 @@ services:
       # Only edge leaf materials — not ca.key / workspace.key (M8).
       - ${AURIGA_DATA_ROOT}/config/pki-edge:/etc/auriga/pki:ro
       # Ingress socket only — not data/agent private keys (H2).
-      - ${AURIGA_DATA_ROOT}/ingress:${AURIGA_DATA_ROOT}/ingress:ro
+      - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share:ro
     networks:
       internal:
       lan:
@@ -164,6 +163,8 @@ services:
   agent:
     image: ${AURIGA_IMAGE_AGENT}
     <<: *cap_drop_all
+    # Allocate instance uid/gid and update files owned by those uids. No privileged mode.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     # host network + docker.sock ⇒ effective host root; see docs/dev/nas.md (M7).
     restart: unless-stopped
     network_mode: host
@@ -180,7 +181,7 @@ services:
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
-      AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/ingress/ingress.sock
+      AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
       AURIGA_AGENT_CAPACITY_MAX_INSTANCES: ${AURIGA_AGENT_CAPACITY_MAX_INSTANCES:-1}
       AURIGA_AGENT_CAPACITY_CPU_MILLIS: ${AURIGA_AGENT_CAPACITY_CPU_MILLIS:-500}
@@ -190,7 +191,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${AURIGA_DATA_ROOT}/data/agent:${AURIGA_DATA_ROOT}/data/agent
-      - ${AURIGA_DATA_ROOT}/ingress:${AURIGA_DATA_ROOT}/ingress
+      - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share
       - ${AURIGA_DATA_ROOT}/join:/run/auriga-join
       - ${AURIGA_DATA_ROOT}/config/identity-keys.json:/etc/auriga/identity-keys.json:ro
       - ${AURIGA_DATA_ROOT}/config/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
