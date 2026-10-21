@@ -1,5 +1,21 @@
 # workspace 服务
 
+## 活动心跳与未知状态
+
+`HeartbeatRequest.activity` 的四个计数必需，显式 `null` 表示未知；缺字段、负数、非整数无效。
+契约生成的 Java `Integer` 不能区分缺字段与显式 null，因此仅心跳请求的 `RequestBodyAdvice`
+在绑定前验证原始 JSON 的字段存在性和整数类型，随后仍走生成模型校验、实例令牌鉴权和通用错误映射。
+其他接口不受此补充检查影响，原有全整数客户端继续有效。
+心跳是小报文，其原始 JSON 限 64 KiB；按实际流最多读取上限加一字节，
+超限返回 `400 common.validation_failed`，无论是否提供 `Content-Length`，也包括 chunked 请求。
+这只限制心跳接口，不修改全局请求限制。
+
+每次合法心跳刷新 `plugin_seen_at`。任一未知、真实正计数或 `health.ok=false` 都将已有
+`plugin_active` 设为回收保护，但只有真实正计数及上报的用户交互时间推进 `last_activity_at`；
+未知或健康故障不冒充用户活动。后续四项已知为 0 且健康的心跳会清除保护，
+不会永久锁存，也不重新开始闲置计时。只有插件和 CPU 观测均新鲜空闲，且原闲置期限已到时才回收。
+持续未知期间不猜测任务已经结束；恢复后按原期限正常回收。不需要新增数据库字段或迁移。
+
 ## 闹钟与闲置回收的上限
 
 记 `截止 = last_activity_at + idleMinutes + 4 分钟`。临近闹钟（落在 `(当前时间, 当前时间 + 4 分钟]`）
@@ -30,6 +46,7 @@
 已完成的唤醒作业（含被取消的）保留 1 天后由决策循环删除；按 UUIDv7 主键（即创建时间）判断，
 远期但已取消的作业也能及时清理。V3 为此加部分索引 `workspace_job_done_wake`。
 重启、删除作业不清理（重启作业按 generation 去重会读历史行）。
+
 ## combined 开发种子保护
 
 `DevBootstrap` 同时要求 `auriga.platform.combined=true`、`auriga.platform.seed=true`

@@ -12,6 +12,7 @@ import {
   installHostAuthentication,
 } from '../src/managed/host-auth.js';
 import { createManaged } from '../src/modes/managed.js';
+import { browserController } from './terminal-fixtures.js';
 import {
   makeIdentityKeys,
   signIdentity,
@@ -25,7 +26,7 @@ function pureDshCtx() {
   return {
     get(name) {
       if (name === 'agents') return { list: () => [] };
-      if (name === 'terminals') return { list: () => [] };
+      if (name === 'terminalController') return browserController();
       return undefined;
     },
   };
@@ -36,13 +37,17 @@ test('pure DSH: declared imBots none is a known 0; undeclared stays unknown', as
   await refreshActivityFromHost(pureDshCtx(), declared, {
     browsers: 0,
     imBots: 'none',
+    terminalSources: 'browser-only',
   });
   const snap = declared.snapshot();
   assert.equal(snap.activeImBots, 0);
   assert.equal(snap.allKnown, true);
 
   const undeclared = createActivityProbe();
-  await refreshActivityFromHost(pureDshCtx(), undeclared, { browsers: 0 });
+  await refreshActivityFromHost(pureDshCtx(), undeclared, {
+    browsers: 0,
+    terminalSources: 'browser-only',
+  });
   assert.equal(undeclared.snapshot().activeImBots, null);
   assert.deepEqual(undeclared.snapshot().unknownFields, ['activeImBots']);
 });
@@ -60,7 +65,11 @@ test('declared imBots none never masks a present but failing IM service', async 
       return pureDshCtx().get(name);
     },
   };
-  await refreshActivityFromHost(ctx, activity, { browsers: 0, imBots: 'none' });
+  await refreshActivityFromHost(ctx, activity, {
+    browsers: 0,
+    imBots: 'none',
+    terminalSources: 'browser-only',
+  });
   assert.equal(activity.snapshot().activeImBots, null);
 });
 
@@ -69,6 +78,7 @@ test('declared imBots none never masks a failed IM service lookup', async () => 
   await refreshActivityFromHost(pureDshCtx(), activity, {
     browsers: 0,
     imBots: 'none',
+    terminalSources: 'browser-only',
   });
   assert.equal(activity.snapshot().activeImBots, 0);
   const ctx = {
@@ -77,7 +87,11 @@ test('declared imBots none never masks a failed IM service lookup', async () => 
       return pureDshCtx().get(name);
     },
   };
-  await refreshActivityFromHost(ctx, activity, { browsers: 0, imBots: 'none' });
+  await refreshActivityFromHost(ctx, activity, {
+    browsers: 0,
+    imBots: 'none',
+    terminalSources: 'browser-only',
+  });
   const snap = activity.snapshot();
   assert.equal(snap.activeImBots, null);
   assert.equal(snap.allKnown, false);
@@ -99,10 +113,12 @@ test('pure DSH with declaration sends a heartbeat with known zeros', async () =>
     pluginVersion: '0.0.0',
     dshVersion: '0.2.0-rc.2',
     activity,
+    healthOk: () => true,
     refreshActivity: () =>
       refreshActivityFromHost(pureDshCtx(), activity, {
         browsers: 0,
         imBots: 'none',
+        terminalSources: 'browser-only',
       }),
     fetchImpl: async (_url, init) => {
       bodies.push(JSON.parse(init.body));
@@ -128,7 +144,7 @@ test('pure DSH with declaration sends a heartbeat with known zeros', async () =>
   assert.equal(bodies[0].activity.lastInteractionAt, undefined);
 });
 
-test('skipped heartbeat reports field names once per unknown set', async () => {
+test('heartbeat reports field names once per unknown set and still sends', async () => {
   const activity = createActivityProbe();
   activity.update({ runningTurns: 0, openTerminals: 0, connectedClients: 0 });
   const skips = [];
@@ -139,7 +155,7 @@ test('skipped heartbeat reports field names once per unknown set', async () => {
     pluginVersion: '0.0.0',
     dshVersion: 'x',
     activity,
-    onSkip: (fields) => skips.push(fields),
+    onUnknownActivity: (fields) => skips.push(fields),
     fetchImpl: async () => {
       fetched += 1;
       return new Response('{}', { status: 200 });
@@ -151,7 +167,7 @@ test('skipped heartbeat reports field names once per unknown set', async () => {
   activity.markUnknown('openTerminals');
   await hb.send();
   assert.deepEqual(skips[1], ['openTerminals', 'activeImBots']);
-  assert.equal(fetched, 0);
+  assert.equal(fetched, 3);
   assert.ok(!JSON.stringify(skips).includes('tok'));
 });
 

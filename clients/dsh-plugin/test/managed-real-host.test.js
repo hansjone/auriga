@@ -9,40 +9,46 @@ import { createHeartbeatClient } from '../src/managed/heartbeat.js';
 import { createDoorLock, createReplayCache } from '../src/managed/door.js';
 import { installHostAuthentication } from '../src/managed/host-auth.js';
 import {
+  terminalAgent,
+  modelTerminals,
+  modelRecord,
+} from './terminal-fixtures.js';
+import {
   makeIdentityKeys,
   signIdentity,
   INSTANCE_ID,
   OWNER_ID,
 } from './managed-helpers.js';
 
-test('unknown host values stay null and never cause a zero heartbeat', async () => {
+test('unknown host values are sent as explicit null, never idle zeros', async () => {
   const activity = createActivityProbe();
   await refreshActivityFromHost({}, activity, { browsers: 0 });
   assert.equal(activity.snapshot().runningTurns, null);
   assert.equal(activity.snapshot().openTerminals, null);
   assert.equal(activity.snapshot().activeImBots, null);
   let calls = 0;
+  let body;
   const client = createHeartbeatClient({
     platformUrl: 'https://example.com',
     pluginVersion: '0.0.0',
     dshVersion: '0.2.0-rc.2',
     activity,
-    getInstanceToken: () => {
-      throw new Error('must not read credentials');
-    },
-    fetchImpl: async () => {
+    getInstanceToken: () => 'test-token',
+    fetchImpl: async (_url, init) => {
       calls++;
-      throw new Error('must not send');
+      body = JSON.parse(init.body);
+      return new Response('{}');
     },
   });
   const result = await client.send();
-  assert.equal(result.skipped, true);
-  assert.deepEqual(result.unknownFields, [
-    'runningTurns',
-    'openTerminals',
-    'activeImBots',
-  ]);
-  assert.equal(calls, 0);
+  assert.equal(result.ok, true);
+  assert.deepEqual(body.activity, {
+    runningTurns: null,
+    openTerminals: null,
+    activeImBots: null,
+    connectedClients: 0,
+  });
+  assert.equal(calls, 1);
 });
 
 test('replay cache pressure fails closed without forgetting unexpired identities', () => {
@@ -57,18 +63,19 @@ test('replay cache pressure fails closed without forgetting unexpired identities
 
 test('owner-scoped terminal lookup failures and missing agents stay unknown', async () => {
   const activity = createActivityProbe();
-  const agent = { status: 'idle' };
+  const agent = terminalAgent();
+  const model = modelTerminals();
+  model.sessions.set('pty-1', modelRecord(agent, 'pty-1'));
+  model.list = (owner) => {
+    assert.equal(owner, agent);
+    throw new Error('backend unavailable');
+  };
   const ctx = {
     get: (name) =>
       name === 'agents'
         ? { list: () => [agent] }
         : name === 'terminals'
-          ? {
-              list: (owner) => {
-                assert.equal(owner, agent);
-                throw new Error('backend unavailable');
-              },
-            }
+          ? model
           : undefined,
   };
   await refreshActivityFromHost(ctx, activity, { browsers: 0 });
@@ -80,23 +87,26 @@ test('owner-scoped terminal lookup failures and missing agents stay unknown', as
   assert.equal(activity.snapshot().openTerminals, null);
 });
 
-test('exited PTYs are not open terminals; malformed state stays unknown', async () => {
+test('retained exited PTYs need cleanup confirmation; malformed state stays unknown', async () => {
   const activity = createActivityProbe();
-  let sessions = [
-    { status: { kind: 'running' } },
-    { status: { kind: 'exited' } },
-  ];
+  const agent = terminalAgent();
+  const model = modelTerminals();
+  model.sessions.set('running', modelRecord(agent, 'running'));
+  model.sessions.set('exited', modelRecord(agent, 'exited', 'exited'));
   const ctx = {
     get: (name) =>
       name === 'agents'
-        ? { list: () => [{ status: 'idle' }] }
+        ? { list: () => [agent] }
         : name === 'terminals'
-          ? { list: async () => sessions }
+          ? model
           : undefined,
   };
   await refreshActivityFromHost(ctx, activity);
+  assert.equal(activity.snapshot().openTerminals, null);
+  model.sessions.delete('exited');
+  await refreshActivityFromHost(ctx, activity);
   assert.equal(activity.snapshot().openTerminals, 1);
-  sessions = [{}];
+  model.sessions.get('running').session.status = () => ({});
   await refreshActivityFromHost(ctx, activity);
   assert.equal(activity.snapshot().openTerminals, null);
 });

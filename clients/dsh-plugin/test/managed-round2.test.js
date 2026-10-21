@@ -15,6 +15,11 @@ import {
 } from '../src/managed/activity.js';
 import { createManaged } from '../src/modes/managed.js';
 import {
+  terminalAgent,
+  modelTerminals,
+  modelRecord,
+} from './terminal-fixtures.js';
+import {
   makeIdentityKeys,
   signPanelManifest,
   panelManifestBase,
@@ -148,17 +153,16 @@ test('activity unknown when host services missing', async () => {
 
 test('activity wires agents and terminals', async () => {
   const activity = createActivityProbe();
-  const agent = { status: 'running' };
+  const agent = terminalAgent();
+  agent.status = 'running';
+  const model = modelTerminals();
+  model.sessions.set('pty-1', modelRecord(agent, 'pty-1'));
+  model.sessions.set('pty-2', modelRecord(agent, 'pty-2'));
   const ctx = {
     get(name) {
       if (name === 'agents') return { list: () => [{ agent }] };
-      if (name === 'terminals')
-        return {
-          list: () => [
-            { id: 1, status: { kind: 'running' } },
-            { id: 2, status: { kind: 'running' } },
-          ],
-        };
+      if (name === 'terminals') return model;
+      if (name === 'terminalController') return undefined;
       if (name === 'dshIm')
         return {
           listDeliveryCatalog: async () => ({

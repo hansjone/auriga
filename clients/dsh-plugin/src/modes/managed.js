@@ -65,7 +65,7 @@ async function resolveInstanceToken(env, inline) {
  *   workspaceRoot?: string,
  *   watchKeys?: boolean,
  *   startHeartbeat?: boolean,
- *   config?: { imBots?: 'none', trustedHosts?: string[] },
+ *   config?: { imBots?: 'none', terminalSources?: 'browser-only', trustedHosts?: string[] },
  * }} [options]
  */
 export async function createManaged(options = {}) {
@@ -76,6 +76,15 @@ export async function createManaged(options = {}) {
     throw new Error("auriga-dsh: config.imBots must be 'none' when set");
   }
   const imBots = rowConfig.imBots;
+  if (
+    rowConfig.terminalSources !== undefined &&
+    rowConfig.terminalSources !== 'browser-only'
+  ) {
+    throw new Error(
+      "auriga-dsh: config.terminalSources must be 'browser-only' when set",
+    );
+  }
+  const terminalSources = rowConfig.terminalSources;
   const trustedHosts = Array.isArray(rowConfig.trustedHosts)
     ? rowConfig.trustedHosts.filter((entry) => typeof entry === 'string')
     : [];
@@ -196,16 +205,20 @@ export async function createManaged(options = {}) {
     dshVersion,
     activity,
     fetchImpl: options.fetchImpl,
+    healthOk: () => host.ctx?.webServer?.server?.listening === true,
     refreshActivity: async () => {
       if (!host.ctx) return;
       await refreshActivityFromHost(host.ctx, activity, {
         browsers: host.getBrowsers?.(),
         imBots,
+        terminalSources,
       });
     },
-    onSkip: (fields) =>
+    onUnknownActivity: (fields) =>
       host.ctx?.logger?.warn?.(
-        `[auriga-dsh] heartbeat paused: activity unknown (${fields.join(', ')})`,
+        fields.length
+          ? `[auriga-dsh] activity unknown (${fields.join(', ')})`
+          : '[auriga-dsh] activity observations recovered',
       ),
   });
 
@@ -280,6 +293,7 @@ export async function createManaged(options = {}) {
       disposeActivity = installActivityBridge(ctx, activity, {
         getBrowsers: () => browserSockets.size,
         imBots,
+        terminalSources,
       });
 
       const handler = createAurigaRouteHandler({

@@ -907,11 +907,17 @@ public final class WorkspaceService {
   public void heartbeat(
       Map<String, Object> row, auriga.workspace.web.model.HeartbeatRequest request) {
     var activity = request.getActivity();
-    boolean active =
-        activity.getRunningTurns() > 0
-            || activity.getOpenTerminals() > 0
-            || activity.getActiveImBots() > 0
-            || activity.getConnectedClients() > 0;
+    var counts =
+        Arrays.asList(
+            activity.getRunningTurns(),
+            activity.getOpenTerminals(),
+            activity.getActiveImBots(),
+            activity.getConnectedClients());
+    boolean active = counts.stream().anyMatch(value -> value != null && value > 0);
+    // plugin_active is the conservative stop guard, not proof of a user action.
+    // Recovery replaces this guard on the very next known, healthy heartbeat.
+    boolean stopProtected =
+        active || counts.contains(null) || !Boolean.TRUE.equals(request.getHealth().getOk());
     store.tx(
         () -> {
           Instant now = clock.instant();
@@ -926,7 +932,7 @@ public final class WorkspaceService {
           store.jdbc.update(
               "UPDATE instance SET plugin_seen_at=?,plugin_active=?,last_activity_at=GREATEST(last_activity_at,?) WHERE tenant_id=? AND id=?",
               time(now),
-              active,
+              stopProtected,
               time(latest),
               store.tenant(),
               row.get("id"));

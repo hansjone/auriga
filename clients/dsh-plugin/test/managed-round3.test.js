@@ -7,6 +7,11 @@ import {
 } from '../src/managed/activity.js';
 import { createHeartbeatClient } from '../src/managed/heartbeat.js';
 import { isNativePluginManageRequest } from '../src/managed/guards.js';
+import {
+  terminalAgent,
+  modelTerminals,
+  modelRecord,
+} from './terminal-fixtures.js';
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -46,12 +51,15 @@ test('refreshActivityFromHost with stable counts does not notify', async () => {
   activity.onChange(() => {
     notifies += 1;
   });
-  const agent = { status: 'running' };
+  const agent = terminalAgent();
+  agent.status = 'running';
+  const model = modelTerminals();
+  model.sessions.set('pty-1', modelRecord(agent, 'pty-1'));
   const ctx = {
     get(name) {
       if (name === 'agents') return { list: () => [{ agent }] };
-      if (name === 'terminals')
-        return { list: () => [{ id: 1, status: { kind: 'running' } }] };
+      if (name === 'terminals') return model;
+      if (name === 'terminalController') return undefined;
       if (name === 'dshIm')
         return {
           listDeliveryCatalog: async () => ({
@@ -99,11 +107,13 @@ test('bridge + heartbeat: stable activity does not exceed schedule rate', async 
     };
   };
 
-  const agent = { status: 'idle' };
+  const agent = terminalAgent();
+  const model = modelTerminals();
   const ctx = {
     get(name) {
       if (name === 'agents') return { list: () => [{ agent }] };
-      if (name === 'terminals') return { list: () => [] };
+      if (name === 'terminals') return model;
+      if (name === 'terminalController') return undefined;
       if (name === 'dshIm')
         return {
           listDeliveryCatalog: async () => ({ bots: [] }),
@@ -184,7 +194,8 @@ test('connectedClients unknown without browsers callback', async () => {
   const ctx = {
     get(name) {
       if (name === 'agents') return { list: () => [] };
-      if (name === 'terminals') return { list: () => [] };
+      if (name === 'terminals') return modelTerminals();
+      if (name === 'terminalController') return undefined;
       if (name === 'dshIm')
         return { listDeliveryCatalog: async () => ({ bots: [] }) };
       if (name === 'connection') return { clientCount: 99 };
