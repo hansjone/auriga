@@ -1,0 +1,17 @@
+# Build from repository root:
+#   docker build -f deploy/nas/docker/Dockerfile.agent --platform=linux/amd64 .
+FROM golang:1.27 AS build
+WORKDIR /src/infra
+COPY infra/ ./
+WORKDIR /src/infra/agent
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-agent .
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --system --uid 10001 --create-home auriga
+COPY --from=build /out/auriga-agent /usr/local/bin/auriga-agent
+COPY deploy/nas/docker/agent-entrypoint.sh /entrypoint.sh
+RUN chmod 0755 /entrypoint.sh
+# Agent needs docker.sock; run as root unless operator remaps — document in nas.md.
+ENTRYPOINT ["/entrypoint.sh"]

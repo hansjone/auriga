@@ -1,0 +1,192 @@
+name: NAS bundle
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact 40-char git commit SHA to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      WANT: ${{ inputs.commit }}
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ env.WANT }}
+          persist-credentials: false
+
+      - name: Verify commit
+        run: |
+          set -euo pipefail
+          got=$(git rev-parse HEAD)
+          want=$WANT
+          case "$want" in
+            [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+              ;;
+            *)
+              echo "commit input must be a full 40-char hex SHA"
+              exit 1
+              ;;
+          esac
+          if [ "$got" != "$want" ]; then
+            echo "checked out $got does not equal requested $want"
+            exit 1
+          fi
+          echo "commit=$got" >> "$GITHUB_ENV"
+          echo "Building commit $got"
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.27.0'
+          cache-dependency-path: |
+            infra/**/go.sum
+            deploy/nas/bootstrap/go.mod
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Tool versions
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=$commit"
+            echo "tool_java=$(java -version 2>&1 | head -1)"
+            echo "tool_go=$(go version)"
+            echo "tool_node=$(node -v)"
+            echo "tool_pnpm=$(pnpm -v)"
+            echo "tool_docker=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo n/a)"
+            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } | tee versions.txt
+
+      - name: Build bootstrap binary (linux/amd64)
+        working-directory: deploy/nas/bootstrap
+        run: |
+          set -euo pipefail
+          mkdir -p ../bin
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../bin/auriga-nas-bootstrap .
+          chmod 0755 ../bin/auriga-nas-bootstrap
+
+      - name: Build images (linux/amd64)
+        run: |
+          set -euo pipefail
+          mkdir -p out/images
+          docker build --platform=linux/amd64 -f deploy/nas/docker/Dockerfile.platform -t auriga/platform:nas "$GITHUB_WORKSPACE"
+          docker build --platform=linux/amd64 -f deploy/nas/docker/Dockerfile.edge -t auriga/edge:nas "$GITHUB_WORKSPACE"
+          docker build --platform=linux/amd64 -f deploy/nas/docker/Dockerfile.agent -t auriga/agent:nas "$GITHUB_WORKSPACE"
+          docker save auriga/platform:nas -o out/images/platform.tar
+          docker save auriga/edge:nas -o out/images/edge.tar
+          docker save auriga/agent:nas -o out/images/agent.tar
+
+      - name: Verify NAS scripts and authenticated NATS policy
+        run: |
+          set -euo pipefail
+          sudo env PATH="$PATH" NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
+          (cd infra/edge && go test -count=1 ../../deploy/nas/test/nats_policy_test.go)
+
+      - name: Write manifest + checksums
+        run: |
+          set -euo pipefail
+          id_platform=$(docker image inspect --format '{{.Id}}' auriga/platform:nas)
+          id_edge=$(docker image inspect --format '{{.Id}}' auriga/edge:nas)
+          id_agent=$(docker image inspect --format '{{.Id}}' auriga/agent:nas)
+          export ID_PLATFORM="$id_platform" ID_EDGE="$id_edge" ID_AGENT="$id_agent"
+          python3 - <<'PY'
+          import json, os
+          tools = {}
+          for line in open("versions.txt", encoding="utf-8"):
+              line = line.strip()
+              if "=" in line:
+                  k, _, v = line.partition("=")
+                  if k.startswith("tool_") or k == "created":
+                      tools[k] = v
+          manifest = {
+              "commit": os.environ["commit"],
+              "images": {
+                  "platform": {"id": os.environ["ID_PLATFORM"], "tar": "platform.tar"},
+                  "edge": {"id": os.environ["ID_EDGE"], "tar": "edge.tar"},
+                  "agent": {"id": os.environ["ID_AGENT"], "tar": "agent.tar"},
+              },
+              "tools": tools,
+              "stack_env_hint": {
+                  "AURIGA_IMAGE_PLATFORM": os.environ["ID_PLATFORM"],
+                  "AURIGA_IMAGE_EDGE": os.environ["ID_EDGE"],
+                  "AURIGA_IMAGE_AGENT": os.environ["ID_AGENT"],
+                  "note": "After docker load, use these sha256:<id> values so compose does not pull",
+              },
+          }
+          open("out/images/manifest.json", "w", encoding="utf-8").write(json.dumps(manifest, indent=2) + "\n")
+          PY
+          (cd out/images && sha256sum ./*.tar > SHA256SUMS)
+          cp deploy/nas/bin/auriga-nas-bootstrap out/auriga-nas-bootstrap
+          cp versions.txt out/versions.txt
+          mkdir -p out/deploy-nas
+          cp -a deploy/nas/. out/deploy-nas/
+          rm -rf out/deploy-nas/bin
+          mkdir -p out/deploy-nas/bin
+          cp deploy/nas/bin/auriga-nas-bootstrap out/deploy-nas/bin/
+
+      - name: Validate compose config (placeholder env, quiet)
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          id_platform=$(docker image inspect --format '{{.Id}}' auriga/platform:nas)
+          id_edge=$(docker image inspect --format '{{.Id}}' auriga/edge:nas)
+          id_agent=$(docker image inspect --format '{{.Id}}' auriga/agent:nas)
+          mkdir -p "$tmp/data/secrets" "$tmp/data/config"
+          : >"$tmp/data/config/platform.env"
+          : >"$tmp/data/config/agent.env"
+          echo placeholder >"$tmp/data/secrets/pg_bootstrap_password"
+          {
+            echo "AURIGA_DATA_ROOT=$tmp/data"
+            echo "AURIGA_LAN_NETWORK=auriga-ci-lan-check"
+            echo "AURIGA_LAN_SUBNET=192.0.2.0/24"
+            echo "AURIGA_EDGE_LAN_IP=192.0.2.10"
+            echo "AURIGA_PORTAL_HOST=portal.example.com"
+            echo "AURIGA_ADMIN_HOST=admin.example.com"
+            echo "AURIGA_INSTANCE_PARENT_DOMAIN=i.example.com"
+            echo "AURIGA_ISSUER=https://portal.example.com"
+            echo "AURIGA_TEAM_ORIGIN=https://portal.example.com"
+            echo "AURIGA_TEAM_RP_ID=portal.example.com"
+            echo "AURIGA_SECURE_COOKIES=true"
+            echo "AURIGA_TRUSTED_PROXIES=127.0.0.1"
+            echo "AURIGA_IMAGE_PLATFORM=$id_platform"
+            echo "AURIGA_IMAGE_EDGE=$id_edge"
+            echo "AURIGA_IMAGE_AGENT=$id_agent"
+            echo "AURIGA_IMAGE_POSTGRES=postgres:17@sha256:0000000000000000000000000000000000000000000000000000000000000001"
+            echo "AURIGA_IMAGE_NATS=nats:2.10-alpine@sha256:0000000000000000000000000000000000000000000000000000000000000002"
+            echo "AURIGA_IMAGE_REGISTRY=registry:2@sha256:0000000000000000000000000000000000000000000000000000000000000003"
+            echo "AURIGA_HOST_PUBLISH_NODECONTROL=17443"
+            echo "AURIGA_HOST_PUBLISH_REGISTRY=15000"
+            echo "AURIGA_HOST_PUBLISH_PLATFORM_HTTP=18081"
+            echo "AURIGA_PLATFORM_SEED=false"
+            echo "AURIGA_AGENT_CAPACITY_MAX_INSTANCES=1"
+          } >"$tmp/stack.env"
+          docker network create --driver bridge --subnet 192.0.2.0/24 auriga-ci-lan-check || true
+          docker compose --env-file "$tmp/stack.env" -f deploy/nas/docker-compose.yml -p auriga-nas-test config --quiet
+          docker network rm auriga-ci-lan-check || true
+          rm -rf "$tmp"
+
+      - name: Upload artifact (no credentials)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: auriga-nas-bundle-${{ env.commit }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14

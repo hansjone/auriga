@@ -29,6 +29,7 @@ import {
   safeSummary,
 } from './lib/assert.mjs';
 import { openWebSocket } from './lib/ws-client.mjs';
+import { waitInstancePage } from './lib/instance-page.mjs';
 
 const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
 const PLATFORM = process.env.PLATFORM_BASE || 'http://127.0.0.1:8081';
@@ -130,6 +131,7 @@ async function req(path, opts = {}) {
         path: u.pathname + u.search,
         method: opts.method || 'GET',
         headers,
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
       },
       (res) => {
         const chunks = [];
@@ -144,6 +146,9 @@ async function req(path, opts = {}) {
       },
     );
     r.on('error', reject);
+    r.setTimeout(opts.timeoutMs ?? 15_000, () =>
+      r.destroy(new Error('e2e HTTP timeout')),
+    );
     if (bodyStr !== null) r.write(bodyStr);
     r.end();
   });
@@ -415,7 +420,7 @@ async function waitReady(instanceId) {
  * @param {CookieJar} [portalJar]
  * @param {CookieJar} [instanceJar]
  */
-async function accessViaEdge(instanceId, portalJar, instanceJar) {
+async function accessViaEdge(instanceId, portalJar, instanceJar, deadline) {
   step('edge access instance');
   const pJar = portalJar || jars.portal;
   const iJar = instanceJar || jars.instance;
@@ -446,13 +451,14 @@ async function accessViaEdge(instanceId, portalJar, instanceJar) {
     });
     console.log('redeem', redeem.status);
   }
-  const page = await req('/', { host, jar: iJar });
-  if (!edgeInstanceOk(page)) {
-    fail(
-      'edge-access',
-      `status ${page.status}`,
-      String(page.text).slice(0, 200),
+  try {
+    await waitInstancePage(
+      (timeoutMs) => req('/', { host, jar: iJar, timeoutMs }),
+      edgeInstanceOk,
+      { deadline: Math.min(deadline ?? Infinity, Date.now() + 15_000) },
     );
+  } catch (error) {
+    fail('edge-access', error.message);
   }
   // Admin jar must never be required for instance access.
   if (
@@ -736,7 +742,7 @@ async function waitWakeStrict(instanceId) {
       }
       // Re-redeem / access via edge after wake.
       jars.instance.clear();
-      await accessViaEdge(instanceId);
+      await accessViaEdge(instanceId, undefined, undefined, deadline);
       console.log('alarm wake ok (phase=running ready, container up, edge ok)');
       return g.body;
     }
