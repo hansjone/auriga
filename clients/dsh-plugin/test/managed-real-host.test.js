@@ -9,6 +9,11 @@ import { createHeartbeatClient } from '../src/managed/heartbeat.js';
 import { createDoorLock, createReplayCache } from '../src/managed/door.js';
 import { installHostAuthentication } from '../src/managed/host-auth.js';
 import {
+  terminalAgent,
+  modelTerminals,
+  modelRecord,
+} from './terminal-fixtures.js';
+import {
   makeIdentityKeys,
   signIdentity,
   INSTANCE_ID,
@@ -58,18 +63,19 @@ test('replay cache pressure fails closed without forgetting unexpired identities
 
 test('owner-scoped terminal lookup failures and missing agents stay unknown', async () => {
   const activity = createActivityProbe();
-  const agent = { status: 'idle' };
+  const agent = terminalAgent();
+  const model = modelTerminals();
+  model.sessions.set('pty-1', modelRecord(agent, 'pty-1'));
+  model.list = (owner) => {
+    assert.equal(owner, agent);
+    throw new Error('backend unavailable');
+  };
   const ctx = {
     get: (name) =>
       name === 'agents'
         ? { list: () => [agent] }
         : name === 'terminals'
-          ? {
-              list: (owner) => {
-                assert.equal(owner, agent);
-                throw new Error('backend unavailable');
-              },
-            }
+          ? model
           : undefined,
   };
   await refreshActivityFromHost(ctx, activity, { browsers: 0 });
@@ -81,23 +87,26 @@ test('owner-scoped terminal lookup failures and missing agents stay unknown', as
   assert.equal(activity.snapshot().openTerminals, null);
 });
 
-test('exited PTYs are not open terminals; malformed state stays unknown', async () => {
+test('retained exited PTYs need cleanup confirmation; malformed state stays unknown', async () => {
   const activity = createActivityProbe();
-  let sessions = [
-    { status: { kind: 'running' } },
-    { status: { kind: 'exited' } },
-  ];
+  const agent = terminalAgent();
+  const model = modelTerminals();
+  model.sessions.set('running', modelRecord(agent, 'running'));
+  model.sessions.set('exited', modelRecord(agent, 'exited', 'exited'));
   const ctx = {
     get: (name) =>
       name === 'agents'
-        ? { list: () => [{ status: 'idle' }] }
+        ? { list: () => [agent] }
         : name === 'terminals'
-          ? { list: async () => sessions }
+          ? model
           : undefined,
   };
   await refreshActivityFromHost(ctx, activity);
+  assert.equal(activity.snapshot().openTerminals, null);
+  model.sessions.delete('exited');
+  await refreshActivityFromHost(ctx, activity);
   assert.equal(activity.snapshot().openTerminals, 1);
-  sessions = [{}];
+  model.sessions.get('running').session.status = () => ({});
   await refreshActivityFromHost(ctx, activity);
   assert.equal(activity.snapshot().openTerminals, null);
 });

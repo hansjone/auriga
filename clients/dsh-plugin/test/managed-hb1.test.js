@@ -6,6 +6,7 @@ import { createActivityProbe } from '../src/managed/activity.js';
 import { createHeartbeatClient } from '../src/managed/heartbeat.js';
 import { createManaged } from '../src/modes/managed.js';
 import { makeIdentityKeys, INSTANCE_ID, OWNER_ID } from './managed-helpers.js';
+import { browserController } from './terminal-fixtures.js';
 
 test('real fetch sends unknown counters, checked health and interaction time; recovery is reported', async (t) => {
   const bodies = [];
@@ -94,7 +95,7 @@ test('managed heartbeat health follows actual host listening, loss and recovery'
     instanceToken: 'hb1-host-test-token',
     watchKeys: false,
     startHeartbeat: false,
-    config: { imBots: 'none' },
+    config: { imBots: 'none', terminalSources: 'browser-only' },
     fetchImpl: async (_url, init) => {
       bodies.push(JSON.parse(init.body));
       return new Response('{}');
@@ -105,8 +106,11 @@ test('managed heartbeat health follows actual host listening, loss and recovery'
   assert.equal(bodies.at(-1).health.ok, false);
   const dispose = runtime.apply({
     webServer: { server: hostServer, register() {} },
-    get: (name) =>
-      ['agents', 'terminals'].includes(name) ? { list: () => [] } : undefined,
+    get(name) {
+      if (name === 'agents') return { list: () => [] };
+      if (name === 'terminalController') return browserController();
+      return undefined;
+    },
   });
   t.after(dispose);
   await runtime.heartbeat.send();

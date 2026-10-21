@@ -12,6 +12,7 @@ import {
   installHostAuthentication,
 } from '../src/managed/host-auth.js';
 import { createManaged } from '../src/modes/managed.js';
+import { browserController } from './terminal-fixtures.js';
 import {
   makeIdentityKeys,
   signIdentity,
@@ -25,7 +26,7 @@ function pureDshCtx() {
   return {
     get(name) {
       if (name === 'agents') return { list: () => [] };
-      if (name === 'terminals') return { list: () => [] };
+      if (name === 'terminalController') return browserController();
       return undefined;
     },
   };
@@ -36,13 +37,17 @@ test('pure DSH: declared imBots none is a known 0; undeclared stays unknown', as
   await refreshActivityFromHost(pureDshCtx(), declared, {
     browsers: 0,
     imBots: 'none',
+    terminalSources: 'browser-only',
   });
   const snap = declared.snapshot();
   assert.equal(snap.activeImBots, 0);
   assert.equal(snap.allKnown, true);
 
   const undeclared = createActivityProbe();
-  await refreshActivityFromHost(pureDshCtx(), undeclared, { browsers: 0 });
+  await refreshActivityFromHost(pureDshCtx(), undeclared, {
+    browsers: 0,
+    terminalSources: 'browser-only',
+  });
   assert.equal(undeclared.snapshot().activeImBots, null);
   assert.deepEqual(undeclared.snapshot().unknownFields, ['activeImBots']);
 });
@@ -60,7 +65,11 @@ test('declared imBots none never masks a present but failing IM service', async 
       return pureDshCtx().get(name);
     },
   };
-  await refreshActivityFromHost(ctx, activity, { browsers: 0, imBots: 'none' });
+  await refreshActivityFromHost(ctx, activity, {
+    browsers: 0,
+    imBots: 'none',
+    terminalSources: 'browser-only',
+  });
   assert.equal(activity.snapshot().activeImBots, null);
 });
 
@@ -69,6 +78,7 @@ test('declared imBots none never masks a failed IM service lookup', async () => 
   await refreshActivityFromHost(pureDshCtx(), activity, {
     browsers: 0,
     imBots: 'none',
+    terminalSources: 'browser-only',
   });
   assert.equal(activity.snapshot().activeImBots, 0);
   const ctx = {
@@ -77,7 +87,11 @@ test('declared imBots none never masks a failed IM service lookup', async () => 
       return pureDshCtx().get(name);
     },
   };
-  await refreshActivityFromHost(ctx, activity, { browsers: 0, imBots: 'none' });
+  await refreshActivityFromHost(ctx, activity, {
+    browsers: 0,
+    imBots: 'none',
+    terminalSources: 'browser-only',
+  });
   const snap = activity.snapshot();
   assert.equal(snap.activeImBots, null);
   assert.equal(snap.allKnown, false);
@@ -104,6 +118,7 @@ test('pure DSH with declaration sends a heartbeat with known zeros', async () =>
       refreshActivityFromHost(pureDshCtx(), activity, {
         browsers: 0,
         imBots: 'none',
+        terminalSources: 'browser-only',
       }),
     fetchImpl: async (_url, init) => {
       bodies.push(JSON.parse(init.body));
