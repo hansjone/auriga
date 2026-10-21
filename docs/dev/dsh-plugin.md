@@ -45,10 +45,11 @@ const runtime = await mode.create({
 
 Loader 行配置（节点代理渲染进 `cordis.patch.yml` 的 `auriga-dsh` 行）：
 
-| 键             | 含义                                                                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `trustedHosts` | edge 实例域名（`host` 或 `host:port`，无端口匹配任意端口），节点代理独占                                                                   |
-| `imBots`       | 只接受 `"none"`：显式声明本构建没有 IM 服务，`activeImBots` 按已知 0 上报；其他值启动失败。由模板规格补丁 `plugins.auriga-dsh.imBots` 给出 |
+| 键                | 含义                                                                                                                                                                                                                               |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trustedHosts`    | edge 实例域名（`host` 或 `host:port`，无端口匹配任意端口），节点代理独占                                                                                                                                                           |
+| `imBots`          | 只接受 `"none"`：显式声明本构建没有 IM 服务，`activeImBots` 按已知 0 上报；其他值启动失败。由模板规格补丁 `plugins.auriga-dsh.imBots` 给出                                                                                         |
+| `terminalSources` | 只接受 `"browser-only"`：固定 web profile 声明仅配置原生浏览器终端，允许已确认缺席的模型 PTY 来源为无；仍读取实际存在的全局与 Agent 级 `terminals`。由固定模板补丁 `plugins.auriga-dsh.terminalSources` 给出，不能用于跳过未知来源 |
 
 ### 门锁
 
@@ -76,7 +77,9 @@ DSH 0.2.0-rc.2 还会通过 `connection.authorizeIndex` / `requestRejection` 检
 ### 活动与心跳
 
 - `GET /_auriga/health`（免鉴权，仅 GET/HEAD）→ 契约字段 `{ status, ready, protocol, pluginVersion }`，不含活动计数。
-- 活动计数与原型 `oclaw` hub-heartbeat / hub-member 同源：`agents`（执行中轮次）、`terminals`（打开终端）、`dshIm.listDeliveryCatalog`（IM 机器人）、浏览器 `upgrade` 套接字数（`connectedClients`，对应原型 `browsers` 回调）。接不上的指标在快照里保留 `null` / `known=false`，不转成 0。终端必须逐个真实 Agent 调用 `terminals.list(agent)`，只数 `status.kind=running` 的 PTY；任意所有者查询失败、状态不可识别或 agents 不可用都保留未知。
+- 活动计数来自 `agents`（执行中轮次）、终端 registry、`dshIm.listDeliveryCatalog`（IM 机器人）和浏览器 `upgrade` 套接字数（`connectedClients`，对应原型 `browsers` 回调）。接不上的指标在快照里保留 `null` / `known=false`，不转成 0。
+- **固定 DSH 0.2.0-rc.2 的两类终端**：浏览器 `terminalController.owners` 与模型 PTY `terminals` 是独立来源。浏览器逐个保留的 Session owner 调用 `list(sessionId)`，覆盖离线 Agent、无浏览器附着的后台终端；仅明确 `running` 且未在清理的终端计数。`pending`、失败 allocation、关闭或清理中、`failed`/`exited` 保留记录均为未知，直到实际清理移出 registry 后恢复已知空闲，不假造正计数。模型 PTY 同时检查全局与每个在线 Agent 的服务，按 `sessions` Map 去重，使用 registry 中的精确 owner（含保留的离线 owner）调用 `list(owner)`，计数 `status.kind=running`；未完成 spawn、关闭中、已释放 owner 的保留记录、`exited` 但仍未从 registry 移除的记录或服务 teardown 均为未知。`kill` 失败可能清除 closing 标志而保留已退出记录，因此退出状态也不能替代完整进程范围的成功清理。任一来源读取失败、形状不符或 owner 枚举失败，整个终端计数为未知。
+- 固定真实 web fixture 没有模型 PTY 插件，模板以 `terminalSources: "browser-only"` 显式声明；只有宿主与 Agent 服务查询成功确认缺席且浏览器 registry 可读时，空 registry 才是已知 0。没有声明的缺席仍为未知。该声明不会忽略实际出现的全局或 Agent 级模型 PTY。此适配绑定当前固定 DSH registry 形状，升级宿主后必须重新验收；形状变化会保守回报未知。
 - **纯 DSH 的 IM 计数**：宿主服务查询成功确认没有 `dshIm`，且行配置声明 `imBots: "none"` 时，`activeImBots` 为已知 0；没有声明、查询接口不可用、查询抛错或服务读取失败时仍为未知。
 - `HeartbeatRequest.activity` 的四个字段必须存在，非负整数为已知，显式 `null` 为未知；未知时照常发送心跳，保持已有 `lastInteractionAt`，不伪造空闲 0。采集过程整体失败会把历史计数改回未知。未知字段集合变化时用宿主 logger 告警一次（只含字段名），恢复全部已知时记录恢复；不输出令牌、计数或请求体。`health.ok` 独立反映已绑定的宿主 HTTP 服务是否实际监听，未绑定、停止监听或检查抛错均为 false；没有健康检查回调时也不能默认健康。
 - workspace 刷新插件存活时间，将任意未知或 `health.ok=false` 作为回收保护，仍仅用真实正计数或 `lastInteractionAt` 推进活动时间。持续未知/故障不会因猜测超时而停机；恢复四个 0 且健康后立即清除保护，按原活动时间及新鲜的 CPU 观测正常回收。此契约接线不代替真实 DSH 隔离网络、原始心跳和完整生命周期的运行验收。
@@ -131,7 +134,7 @@ fake-ip DNS 环境下，OIDC 域名可能被解析成保留的基准测试网段
 
 `deploy/compose/real-dsh` 固定 S4 的 DSH 0.2.0-rc.2 / Node 22.19.0 / npm 10.9.3 与完整依赖锁；使用本仓库 `auriga-dsh` 的正式 Cordis 入口。构建期安装，启动期只建实例状态目录并运行 DSH，不装依赖。运行、镜像摘要交付、严格 e2e 和当前阻塞见 [m2.md](m2.md#真实-dsh-与托管插件w3)。
 
-纯 DSH 基线不包含原型的 `dshIm` 服务，不能把它缺席**默认**解释为 0 个在线机器人；真实模板用规格补丁 `plugins.auriga-dsh.imBots = "none"` 显式声明。Windows 没有 Docker CLI，WSL Ubuntu 已确认有本机 Docker；W3 的真实运行验收状态以脱敏证据为准，真实交互的原始心跳、闲置回收和闹钟唤醒仍待验证；已有假 DSH CI 不能替代这些验收。
+纯 DSH 基线不包含原型的 `dshIm` 服务，不能把它缺席**默认**解释为 0 个在线机器人；真实模板用规格补丁 `plugins.auriga-dsh.imBots = "none"` 显式声明，同时为固定 web 组成声明 `plugins.auriga-dsh.terminalSources = "browser-only"`。终端采集回归按固定宿主 registry 形状构造，并经本机真实 HTTP fetch 检查心跳载荷；这些单元测试没有启动实际 PTY，不能据此宣称真实终端生命周期验收通过。Windows 没有 Docker CLI，WSL Ubuntu 已确认有本机 Docker；W3 的真实运行验收状态以脱敏证据为准，已有假 DSH CI 不能替代真实交互、闲置回收和闹钟唤醒验收。
 
 ## 主人与会话（standalone）
 

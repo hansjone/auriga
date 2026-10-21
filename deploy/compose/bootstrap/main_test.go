@@ -58,8 +58,9 @@ func TestFixtureTemplates(t *testing.T) {
 		}
 		patches := spec.GetProfile().GetPatches()
 		if fixture == "real" {
-			if len(patches) != 1 || patches[0].GetPath() != "plugins.auriga-dsh.imBots" || patches[0].GetValueJson() != `"none"` {
-				t.Fatalf("real template must declare imBots none: %v", patches)
+			if len(patches) != 2 || patches[0].GetPath() != "plugins.auriga-dsh.imBots" || patches[0].GetValueJson() != `"none"` ||
+				patches[1].GetPath() != "plugins.auriga-dsh.terminalSources" || patches[1].GetValueJson() != `"browser-only"` {
+				t.Fatalf("real template must declare no IM and browser-only terminal sources: %v", patches)
 			}
 		} else if len(patches) != 0 {
 			t.Fatalf("fake template must not declare plugin config: %v", patches)

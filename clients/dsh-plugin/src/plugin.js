@@ -10,7 +10,7 @@ export const inject = ['webServer', 'connection'];
 
 /**
  * @param {object} ctx
- * @param {{ imBots?: 'none', trustedHosts?: string[] }} [config] Loader row config
+ * @param {{ imBots?: 'none', terminalSources?: 'browser-only', trustedHosts?: string[] }} [config] Loader row config
  */
 export async function apply(ctx, config) {
   const mode = process.env.AURIGA_MODE ?? 'standalone';
