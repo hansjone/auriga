@@ -28,6 +28,7 @@ type fakeEngine struct {
 	inspectWrong bool // RepoDigests omit the requested digest
 	lastInspect  string
 	pulledOK     bool // after a successful pull stream, inspect finds the image
+	healthPort   string
 }
 
 func (f *fakeEngine) handler() http.Handler {
@@ -121,7 +122,11 @@ func (f *fakeEngine) handler() http.Handler {
 		case strings.HasSuffix(path, "/stop") && r.Method == http.MethodPost:
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(path, "/json") && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"State":{"Running":true},"Config":{"Labels":{"auriga.instance":"inst_i1","auriga.generation":"3"}},"NetworkSettings":{"Ports":{"7860/tcp":[{"HostIp":"127.0.0.1","HostPort":"41999"}]}}}`))
+			port := f.healthPort
+			if port == "" {
+				port = "41999"
+			}
+			_, _ = w.Write([]byte(`{"State":{"Running":true},"Config":{"Labels":{"auriga.instance":"inst_i1","auriga.generation":"3"}},"NetworkSettings":{"Ports":{"7860/tcp":[{"HostIp":"127.0.0.1","HostPort":"` + port + `"}]}}}`))
 		case strings.HasSuffix(path, "/stats"):
 			_, _ = w.Write([]byte(`{"memory_stats":{"usage":67108864},"pids_stats":{"current":4}}`))
 		case r.Method == http.MethodDelete:
@@ -136,7 +141,13 @@ func (f *fakeEngine) handler() http.Handler {
 }
 
 func TestDockerDriverSecurityParams(t *testing.T) {
-	fake := &fakeEngine{}
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, readyBody) }))
+	t.Cleanup(health.Close)
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(health.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeEngine{healthPort: port}
 	srv := httptest.NewServer(fake.handler())
 	t.Cleanup(srv.Close)
 

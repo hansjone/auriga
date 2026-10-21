@@ -148,7 +148,8 @@ func TestProbeHealth_Ready(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		w.WriteHeader(200)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok","ready":true,"protocol":1,"pluginVersion":"0.0.0"}`))
 	}))
 	t.Cleanup(up.Close)
 	u, _ := url.Parse(up.URL)

@@ -47,6 +47,13 @@ func (a *ActivityTracker) Observe(instanceID string, cpuMillis int64) {
 	a.samples[instanceID] = s[:j]
 }
 
+// Forget drops observations from a stopped or removed process lifetime.
+func (a *ActivityTracker) Forget(instanceID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.samples, instanceID)
+}
+
 // RecentCPUActive is true if any sample in the window had meaningful CPU.
 func (a *ActivityTracker) RecentCPUActive(instanceID string, thresholdMillis int64) bool {
 	if thresholdMillis <= 0 {
