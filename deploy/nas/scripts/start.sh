@@ -18,14 +18,14 @@ require_cmd docker
   fi
 }
 
-"$NAS_ROOT/scripts/preflight.sh"
-"$NAS_ROOT/scripts/network-preflight.sh" || {
+sh "$NAS_ROOT/scripts/preflight.sh"
+sh "$NAS_ROOT/scripts/network-preflight.sh" || {
   _ec=$?
   [ "$_ec" -eq 4 ] && die "network preflight inconclusive (exit 4); verify LAN IP before start"
   exit "$_ec"
 }
 
-"$NAS_ROOT/scripts/render.sh"
+sh "$NAS_ROOT/scripts/render.sh"
 
 prepare_socket_parent
 

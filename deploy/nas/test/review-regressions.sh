@@ -37,7 +37,10 @@ cat >"$TMP/bin/docker" <<'EOF'
 #!/bin/sh
 set -eu
 case "$1" in
-  compose) exit 0 ;;
+  info|image) exit 0 ;;
+  compose)
+    case " $* " in *' up '*) printf '%s\n' "$*" >>"$TEST_DOCKER_LOG" ;; esac
+    exit 0 ;;
   ps)
     case " $* " in
       *' publish='*) printf '%s\n' "${TEST_PORT_OWNER:-aaaaaaaaaaaa}" ;;
@@ -107,3 +110,12 @@ if sh "$ROOT/scripts/network-preflight.sh" >"$TMP/network-foreign.log" 2>&1; the
   echo 'foreign target IP accepted while own edge exists' >&2; exit 1
 fi
 printf 'PASS exact_ip_member_owner_checked\n'
+
+# Follow the real start chain as well as init/re-init. Source archives keep
+# scripts at 0644, so child scripts must work without an executable bit.
+TEST_PORT_OWNER=aaaaaaaaaaaa; TEST_IP_OWNER=aaaaaaaaaaaa
+export TEST_PORT_OWNER TEST_IP_OWNER
+AURIGA_TEST_MIN_MEMORY_KB=1 AURIGA_TEST_MIN_DISK_KB=1 \
+  sh "$ROOT/scripts/start.sh" >"$TMP/start.log"
+grep -q ' up -d --no-build --pull never$' "$TEST_DOCKER_LOG"
+printf 'PASS start_shell_chain\n'
