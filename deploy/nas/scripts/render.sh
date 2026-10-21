@@ -207,6 +207,9 @@ cat >"$CONFIG/agent.env" <<EOF
 AURIGA_AGENT_SERVER=https://127.0.0.1:${HOST_NC}
 AURIGA_AGENT_CA_SHA256=$CA_SHA
 AURIGA_AGENT_ALLOW_INSECURE=false
+# DNS alias on the trusted edge inside each isolated instance bridge.
+AURIGA_AGENT_INSTANCE_PLATFORM_URL=http://${PORTAL}:8080
+AURIGA_AGENT_INSTANCE_PARENT_DOMAIN=$INSTANCE_PARENT
 EOF
 chmod 0600 "$CONFIG/agent.env"
 

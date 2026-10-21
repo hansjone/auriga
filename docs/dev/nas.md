@@ -13,8 +13,17 @@
 | `auriga-nas-test_internal` | bridge，`internal: true` | postgres、nats、platform、registry、edge | 组件互访；**无**宿主端口映射 |
 | `auriga-nas-test_publish` | bridge，非 internal | platform、registry | 仅用于把 7443/8081/5000 映射到宿主 `127.0.0.1`，供 **host 网络 agent** 连接；不接 LAN |
 | LAN（external） | 现场已有网络 | **仅 edge**（静态 IPv4） | VPS/局域网入口 |
+| `auriga-net-<实例 id>` | agent 创建的 owned bridge，`internal: true` | 该实例 + 受信 edge | 实例通过 edge 内部门户入口发送真实插件心跳，不接组件控制网 |
 
 Docker 对「只挂 internal 网络」的容器不创建宿主端口映射；因此 NodeControl/registry 的 loopback 发布必须落在 `publish` 网上。后台仍不接 LAN：从 edge 的 LAN IP 无法直接打到 PG/NATS。
+
+### 实例内部心跳入口
+
+edge 的稳定容器名固定为 `auriga-nas-test-edge`，带 `auriga.role=edge` 标签；Compose 用同一标量 anchor 将该名字传给 agent 的 `AURIGA_AGENT_DOCKER_EDGE_CONTAINER`，并让 agent 等 edge 启动。驱动仍验证 edge 身份、网络成员与实例网络 ownership，再仅向对应实例的 internal bridge 挂接 edge 端点，并设置门户 Host 的 DNS alias。实例不加入 `auriga-nas-test_internal` 或 `publish`，后端不增加 LAN 或宿主发布。
+
+`render.sh` 从现有 `AURIGA_PORTAL_HOST` 生成 `agent.env` 的 `AURIGA_AGENT_INSTANCE_PLATFORM_URL=http://<门户 Host>:8080`；同一个 Host 也写入 edge 的 `portalHost`，驱动仅取 URL 的 hostname 作为内部 DNS alias。心跳使用 edge 的容器内 HTTP 8080，不经公网 HTTPS、宿主回环端口或 gRPC 7443。现有 `AURIGA_INSTANCE_PARENT_DOMAIN` 同时传给 agent 的 `AURIGA_AGENT_INSTANCE_PARENT_DOMAIN`，与 edge 的实例父域一致，供 renderer 生成实例 `trustedHosts`。
+
+这里准备的是源码配置与本机测试接线，不代表已在 NAS 部署或能够登录；没有继承开发栈的应急远程登录开关、观测代理或测试凭据。最终整合镜像、签名模板、现场网络和真实生命周期仍须由主控独立验收。
 
 ## 架构要点
 
@@ -155,3 +164,5 @@ sh deploy/nas/test/run-tests.sh
 NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
 (cd infra/edge && go test -count=1 ../../deploy/nas/test/nats_policy_test.go)
 ```
+
+具备 Docker Compose 与 Python 3 时，脚本测试还会只读归一化实际 Compose 配置，检查默认及自定义门户/实例父域的心跳 URL、稳定 edge 名称/标签及既有网络、权限边界；不启动容器或占用端口。测试凭据均在新临时目录随机生成，退出清理，不读取现场材料。
