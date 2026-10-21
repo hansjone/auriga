@@ -26,6 +26,7 @@ async function fake(t) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  child.stderr.resume();
   t.after(async () => {
     if (child.exitCode === null) {
       child.kill();
@@ -85,13 +86,17 @@ async function fake(t) {
 
 test('fake WS requires a valid owner/method/path identity and valid upgrade', async (t) => {
   const { opts, identity } = await fake(t);
-  for (const headers of [
-    {},
-    { 'Auriga-Identity': 'malformed' },
-    { 'Auriga-Identity': identity('/wrong') },
-    { 'Auriga-Identity': identity('/ws', 'other-owner') },
+  for (const [label, headers] of [
+    ['missing', {}],
+    ['malformed', { 'Auriga-Identity': 'malformed' }],
+    ['wrong-path', { 'Auriga-Identity': identity('/wrong') }],
+    ['wrong-owner', { 'Auriga-Identity': identity('/ws', 'other-owner') }],
   ]) {
-    await assert.rejects(openWebSocket({ ...opts, headers }), { status: 401 });
+    await assert.rejects(
+      openWebSocket({ ...opts, headers }),
+      { status: 401 },
+      label,
+    );
   }
   await assert.rejects(
     openWebSocket({

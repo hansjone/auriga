@@ -137,6 +137,9 @@ const server = http.createServer((req, res) => {
 
 /** Minimal RFC6455 text-frame echo (e2e revoke fixture only). */
 server.on('upgrade', (req, socket, head) => {
+  // A rejected upgrade is still a raw socket. Its peer may reset immediately
+  // after reading the HTTP rejection; attach before every early return.
+  socket.on('error', () => socket.destroy());
   if (String(req.headers.upgrade || '').toLowerCase() !== 'websocket') {
     socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
     return;
@@ -238,13 +241,6 @@ server.on('upgrade', (req, socket, head) => {
   }
   socket.on('data', consume);
   if (head?.length) consume(head);
-  socket.on('error', () => {
-    try {
-      socket.destroy();
-    } catch {
-      /* ignore */
-    }
-  });
 });
 
 server.listen(port, '0.0.0.0', () => {
