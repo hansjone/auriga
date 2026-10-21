@@ -1,5 +1,6 @@
-# M2 single-host stack for GitHub Actions / Linux. Agent + edge + platform use host networking
-# so Docker-published instance ports on 127.0.0.1 and unix ingress sockets work.
+# M2 single-host stack for GitHub Actions / Linux. Agent + platform use host
+# networking. The trusted edge joins each instance's internal network; instances
+# never join the control network or gain a default route to external networks.
 name: auriga-m2
 
 services:
@@ -70,6 +71,10 @@ services:
       AURIGA_IAM_ENCRYPTION_KEY: ${AURIGA_IAM_ENCRYPTION_KEY}
       AURIGA_WORKSPACE_ENCRYPTION_KEY: ${AURIGA_WORKSPACE_ENCRYPTION_KEY}
       AURIGA_IAM_ISSUER: http://portal.example.com
+      # Test enrollment requires password + TOTP through the bridged edge.
+      # Docker NAT changes loopback clients to bridge IPs. This dev-only stack
+      # opts in explicitly rather than trusting spoofable loopback headers.
+      AURIGA_IAM_EMERGENCY_REMOTE_ENABLED: 'true'
       # Resource-server JWKS fetch must hit platform (issuer Host is virtual / no :8081).
       AURIGA_IAM_JWK_SET_URI: http://127.0.0.1:8081/oauth2/jwks
       AURIGA_EVENTS_NATS_URL: nats://platform:e2e_nats_platform@127.0.0.1:4222
@@ -105,7 +110,13 @@ services:
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
-    network_mode: host
+    container_name: ${COMPOSE_PROJECT_NAME:-auriga-m2}-edge
+    labels:
+      auriga.role: edge
+    ports:
+      - '127.0.0.1:8080:8080'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
       platform:
         condition: service_healthy
@@ -132,6 +143,8 @@ services:
         condition: service_healthy
       registry:
         condition: service_started
+      edge:
+        condition: service_started
     environment:
       AURIGA_AGENT_DATA_ROOT: /var/lib/auriga
       AURIGA_AGENT_SERVER: https://127.0.0.1:7443
@@ -143,9 +156,9 @@ services:
       AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
-      # Instance-facing platform entry (heartbeat); must be reachable from the
-      # per-instance internal network. Unset in CI fake mode (fake DSH sends none).
-      AURIGA_AGENT_INSTANCE_PLATFORM_URL: ${AURIGA_AGENT_INSTANCE_PLATFORM_URL:-}
+      # DNS alias on the edge endpoint inside each isolated instance network.
+      AURIGA_AGENT_INSTANCE_PLATFORM_URL: http://portal.example.com:8080
+      AURIGA_AGENT_DOCKER_EDGE_CONTAINER: ${COMPOSE_PROJECT_NAME:-auriga-m2}-edge
       # Same value as edge instanceParentDomain: rendered into DSH trustedHosts.
       AURIGA_AGENT_INSTANCE_PARENT_DOMAIN: i.example.com
       DOCKER_HOST: unix:///var/run/docker.sock

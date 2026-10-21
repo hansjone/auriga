@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,11 +26,12 @@ type Docker struct {
 	Client *EngineClient
 	Policy policy.Policy
 	// DataRoot is used only for default bind paths when Spec.HomeBind is empty.
-	DataRoot string
+	DataRoot      string
+	EdgeContainer string
+	PlatformHost  string
 
 	mu        sync.Mutex
 	endpoints map[string]string
-	ports     map[string]uint32
 }
 
 // DockerConfig configures the Docker driver.
@@ -38,11 +40,18 @@ type DockerConfig struct {
 	DataRoot string
 	Timeout  time.Duration
 	Policy   policy.Policy
+	// Trusted node configuration, never supplied by an instance spec. The edge
+	// joins each isolated instance network with this platform DNS alias.
+	EdgeContainer string
+	PlatformHost  string
 }
 
 // NewDocker dials the Engine API.
 // Zero-value Policy uses deny-by-default Default(); AllowAnyImage is never implied.
 func NewDocker(cfg DockerConfig) (*Docker, error) {
+	if err := validateEdgeNetworkConfig(cfg.EdgeContainer, cfg.PlatformHost); err != nil {
+		return nil, err
+	}
 	host := cfg.Host
 	if host == "" {
 		host = os.Getenv("DOCKER_HOST")
@@ -53,6 +62,7 @@ func NewDocker(cfg DockerConfig) (*Docker, error) {
 	}
 	d := NewDockerWithClient(client, cfg.DataRoot)
 	d.Policy = normalizeDockerPolicy(cfg.Policy)
+	d.EdgeContainer, d.PlatformHost = cfg.EdgeContainer, cfg.PlatformHost
 	return d, nil
 }
 
@@ -64,7 +74,6 @@ func NewDockerWithClient(client *EngineClient, dataRoot string) *Docker {
 		DataRoot:  dataRoot,
 		Policy:    policy.Default(),
 		endpoints: make(map[string]string),
-		ports:     make(map[string]uint32),
 	}
 }
 
@@ -152,6 +161,11 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	}); err != nil {
 		return err
 	}
+	if d.EdgeContainer != "" {
+		if err := d.ensureEdgeNetwork(ctx, s.InstanceID); err != nil {
+			return err
+		}
+	}
 
 	_ = d.Client.ContainerStop(ctx, name, 5)
 	_ = d.Client.ContainerRemove(ctx, name, true)
@@ -218,9 +232,6 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	if _, err := d.Client.ContainerCreate(ctx, name, body); err != nil {
 		return err
 	}
-	d.mu.Lock()
-	d.ports[s.InstanceID] = port
-	d.mu.Unlock()
 	_ = r
 	return nil
 }
@@ -229,6 +240,9 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}
+	d.mu.Lock()
+	delete(d.endpoints, id)
+	d.mu.Unlock()
 	name := containerName(id)
 	if err := d.Client.ContainerStart(ctx, name); err != nil {
 		return err
@@ -237,10 +251,16 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	port := d.portOf(id)
+	port, err := instancePort(insp)
+	if err != nil {
+		return fmt.Errorf("docker: %s: %w", name, err)
+	}
 	endpoint, err := instanceEndpoint(insp, networkName(id), port)
 	if err != nil {
 		return fmt.Errorf("docker: %s: %w", name, err)
+	}
+	if err := waitInstanceHealth(ctx, endpoint); err != nil {
+		return fmt.Errorf("docker: %s health not ready: %w", name, err)
 	}
 	d.mu.Lock()
 	d.endpoints[id] = endpoint
@@ -282,14 +302,30 @@ func (d *Docker) Remove(ctx context.Context, id string) error {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}
+	// Validate ownership before touching an existing network or its edge endpoint.
+	// An absent network is harmless (e.g. a retry after successful removal).
+	var owned *engineNetwork
+	if d.EdgeContainer != "" {
+		var err error
+		owned, err = d.ownedNetwork(ctx, id)
+		if err != nil {
+			return err
+		}
+	}
 	_ = d.Client.ContainerStop(ctx, containerName(id), 5)
 	if err := d.Client.ContainerRemove(ctx, containerName(id), true); err != nil {
 		return err
 	}
-	_ = d.Client.NetworkRemove(ctx, networkName(id))
+	if owned != nil {
+		if err := d.detachEdge(ctx, owned); err != nil {
+			return err
+		}
+	}
+	if err := d.Client.NetworkRemove(ctx, networkName(id)); err != nil {
+		return err
+	}
 	d.mu.Lock()
 	delete(d.endpoints, id)
-	delete(d.ports, id)
 	d.mu.Unlock()
 	return nil
 }
@@ -308,7 +344,8 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	st := Status{InstanceID: id}
 	if state, ok := insp["State"].(map[string]any); ok {
 		st.Running, _ = state["Running"].(bool)
-		st.Ready = st.Running
+		_, endpointErr := d.Endpoint(id)
+		st.Ready = st.Running && endpointErr == nil
 		if !st.Running {
 			if errMsg, _ := state["Error"].(string); errMsg != "" {
 				st.Error = errMsg
@@ -377,20 +414,48 @@ func (d *Docker) List(ctx context.Context) ([]Status, error) {
 		}
 		if state, ok := c["State"].(string); ok {
 			st.Running = state == "running"
-			st.Ready = st.Running
+			_, endpointErr := d.Endpoint(id)
+			st.Ready = st.Running && endpointErr == nil
 		}
 		out = append(out, st)
 	}
 	return out, nil
 }
 
-func (d *Docker) portOf(id string) uint32 {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if p := d.ports[id]; p != 0 {
-		return p
+// instancePort reads the single TCP binding set by Ensure. Image EXPOSE values
+// may be merged into Config.ExposedPorts, so they cannot identify our listener.
+// Desired specs may already describe a pending replacement and are not evidence
+// of the still-running container's port either.
+func instancePort(insp map[string]any) (uint32, error) {
+	host, _ := insp["HostConfig"].(map[string]any)
+	bindings, _ := host["PortBindings"].(map[string]any)
+	var port uint32
+	for key, raw := range bindings {
+		number, protocol, ok := strings.Cut(key, "/")
+		parsed, err := strconv.ParseUint(number, 10, 16)
+		if !ok || err != nil || parsed == 0 || strconv.FormatUint(parsed, 10) != number ||
+			(protocol != "tcp" && protocol != "udp" && protocol != "sctp") {
+			return 0, fmt.Errorf("invalid container port binding")
+		}
+		if protocol != "tcp" {
+			continue
+		}
+		values, ok := raw.([]any)
+		if !ok || len(values) != 1 {
+			return 0, fmt.Errorf("invalid container TCP binding")
+		}
+		if _, ok := values[0].(map[string]any); !ok {
+			return 0, fmt.Errorf("invalid container TCP binding")
+		}
+		if port != 0 {
+			return 0, fmt.Errorf("ambiguous container TCP bindings")
+		}
+		port = uint32(parsed)
 	}
-	return 7860
+	if port == 0 {
+		return 0, fmt.Errorf("missing container TCP binding")
+	}
+	return port, nil
 }
 
 // containerName uses the validated instance id verbatim (no truncation/mutation).

@@ -4,11 +4,13 @@ import (
 	"net/url"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/config"
 	"github.com/hansjone/auriga/infra/agent/internal/ingress"
 	"github.com/hansjone/auriga/infra/agent/internal/observer"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
+	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 )
 
@@ -37,13 +39,26 @@ func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) {
 		return
 	}
 	id := st.InstanceId
+	if storage.ValidateInstanceID(id) != nil {
+		return
+	}
 	switch st.Phase {
 	case nodev1.InstancePhase_INSTANCE_PHASE_RUNNING,
 		nodev1.InstancePhase_INSTANCE_PHASE_STARTING,
 		nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART:
-		b.publish(id, st.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING)
-	case nodev1.InstancePhase_INSTANCE_PHASE_STOPPED,
-		nodev1.InstancePhase_INSTANCE_PHASE_ABSENT,
+		running := st.Phase != nodev1.InstancePhase_INSTANCE_PHASE_STARTING || st.StartedAt != nil
+		startedAt := time.Time{}
+		if st.StartedAt != nil && st.StartedAt.IsValid() {
+			startedAt = st.StartedAt.AsTime()
+		}
+		b.publish(id, running, startedAt)
+	case nodev1.InstancePhase_INSTANCE_PHASE_STOPPED:
+		b.registry.Delete(id)
+		b.mu.Lock()
+		b.byID[id] = observer.InstanceTarget{ID: id, RootDir: filepath.Join(b.cfg.InstancesDir(), id, "home"), Process: observer.ProcessStopped}
+		b.flushLocked()
+		b.mu.Unlock()
+	case nodev1.InstancePhase_INSTANCE_PHASE_ABSENT,
 		nodev1.InstancePhase_INSTANCE_PHASE_DELETING,
 		nodev1.InstancePhase_INSTANCE_PHASE_FAILED:
 		b.remove(id)
@@ -52,7 +67,7 @@ func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) {
 	}
 }
 
-func (b *instanceBridge) publish(id string, running bool) {
+func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
 	ep, err := b.driver.Endpoint(id)
 	if err != nil || ep.URL == "" {
 		return
@@ -75,10 +90,11 @@ func (b *instanceBridge) publish(id string, running bool) {
 	}
 	b.mu.Lock()
 	b.byID[id] = observer.InstanceTarget{
-		ID:      id,
-		BaseURL: u,
-		RootDir: home,
-		Process: proc,
+		ID:               id,
+		BaseURL:          u,
+		RootDir:          home,
+		Process:          proc,
+		ProcessStartedAt: startedAt,
 	}
 	b.flushLocked()
 	b.mu.Unlock()
