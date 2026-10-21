@@ -162,6 +162,7 @@ maxArtifactBytes: 2147483648
 
 `deploy/compose` 的本机 Linux 测试栈采用此接线：edge 在 bridge 网络，通过 `host.docker.internal` 访问宿主上的平台和 NATS；
 门户端口仅发布到 `127.0.0.1:8080`。这份测试栈不作为 NAS 现场部署配置。
+Docker NAT 会把本机测试客户端显示为 bridge 地址，因此测试栈显式启用既有的应急账号远程入口配置；仍须随机安装口令和 TOTP，不能伪造回环来源。生产部署不继承此测试配置。
 
 ```powershell
 Set-Location infra\agent
