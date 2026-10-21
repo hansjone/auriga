@@ -71,6 +71,10 @@ services:
       AURIGA_IAM_ENCRYPTION_KEY: ${AURIGA_IAM_ENCRYPTION_KEY}
       AURIGA_WORKSPACE_ENCRYPTION_KEY: ${AURIGA_WORKSPACE_ENCRYPTION_KEY}
       AURIGA_IAM_ISSUER: http://portal.example.com
+      # Test enrollment requires password + TOTP through the bridged edge.
+      # Docker NAT changes loopback clients to bridge IPs. This dev-only stack
+      # opts in explicitly rather than trusting spoofable loopback headers.
+      AURIGA_IAM_EMERGENCY_REMOTE_ENABLED: 'true'
       # Resource-server JWKS fetch must hit platform (issuer Host is virtual / no :8081).
       AURIGA_IAM_JWK_SET_URI: http://127.0.0.1:8081/oauth2/jwks
       AURIGA_EVENTS_NATS_URL: nats://platform:e2e_nats_platform@127.0.0.1:4222
