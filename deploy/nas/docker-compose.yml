@@ -129,6 +129,9 @@ services:
 
   edge:
     image: ${AURIGA_IMAGE_EDGE}
+    container_name: &trusted_edge_container auriga-nas-test-edge
+    labels:
+      auriga.role: edge
     <<: *cap_drop_all
     restart: unless-stopped
     read_only: true
@@ -173,6 +176,8 @@ services:
         condition: service_healthy
       registry:
         condition: service_started
+      edge:
+        condition: service_started
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/agent.env
         required: true
@@ -181,6 +186,8 @@ services:
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
+      # Same stable container validated before joining an owned instance network.
+      AURIGA_AGENT_DOCKER_EDGE_CONTAINER: *trusted_edge_container
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
       AURIGA_AGENT_CAPACITY_MAX_INSTANCES: ${AURIGA_AGENT_CAPACITY_MAX_INSTANCES:-1}

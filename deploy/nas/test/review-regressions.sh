@@ -15,6 +15,29 @@ grep -qx 'SPRING_PROFILES_ACTIVE=combined' "$DATA/config/platform.env"
 [ -d "$DATA/socket-share" ] && [ ! -e "$DATA/socket-share/ingress" ]
 printf 'PASS seed_profiles_and_socket_parent\n'
 
+# Normalize the actual Compose model: aliases must resolve to the same stable
+# trusted edge while all existing network and privilege boundaries stay intact.
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
+  && command -v python3 >/dev/null 2>&1; then
+  umask 077
+  docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" \
+    config --format json >"$TMP/compose.json"
+  python3 "$ROOT/test/internal-heartbeat.py" "$DATA" "$TMP/compose.json"
+  cp "$DATA/stack.env" "$TMP/stack.env.saved"
+  sed -e 's/^AURIGA_PORTAL_HOST=.*/AURIGA_PORTAL_HOST=portal-alt.example.com/' \
+    -e 's/^AURIGA_INSTANCE_PARENT_DOMAIN=.*/AURIGA_INSTANCE_PARENT_DOMAIN=instance-alt.example.com/' \
+    "$TMP/stack.env.saved" >"$DATA/stack.env"
+  sh "$ROOT/scripts/render.sh" >/dev/null
+  docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" \
+    config --format json >"$TMP/compose.json"
+  python3 "$ROOT/test/internal-heartbeat.py" "$DATA" "$TMP/compose.json"
+  cp "$TMP/stack.env.saved" "$DATA/stack.env"
+  sh "$ROOT/scripts/render.sh" >/dev/null
+  printf 'PASS internal_heartbeat_custom_hosts\n'
+else
+  printf 'SKIP internal_heartbeat_normalized_config (need Docker Compose and Python 3)\n'
+fi
+
 mkdir "$TMP/outside"
 if ln -s "$TMP/outside" "$TMP/probe-link" 2>/dev/null && [ -L "$TMP/probe-link" ]; then
   rm "$TMP/probe-link"
