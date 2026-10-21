@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestInstanceSurfaceFromEnv(t *testing.T) {
+	t.Setenv("AURIGA_AGENT_DOCKER_EDGE_CONTAINER", "")
 	t.Setenv("AURIGA_AGENT_SERVER", "https://192.0.2.10:7443")
 	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "")
 	t.Setenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "")
@@ -34,5 +35,19 @@ func TestInstanceSurfaceFromEnv(t *testing.T) {
 	t.Setenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "not a domain")
 	if _, err := instanceSurfaceFromEnv(); err == nil {
 		t.Fatal("bad parent domain should fail")
+	}
+}
+
+func TestEdgeContainerRequiresInstanceHTTPEntry(t *testing.T) {
+	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "")
+	t.Setenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "")
+	t.Setenv("AURIGA_AGENT_DOCKER_EDGE_CONTAINER", "auriga-test-edge")
+	if _, err := instanceSurfaceFromEnv(); err == nil {
+		t.Fatal("edge join without a platform URL accepted")
+	}
+	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "http://portal.example.com:8080")
+	got, err := instanceSurfaceFromEnv()
+	if err != nil || got.EdgeContainer != "auriga-test-edge" {
+		t.Fatalf("edge surface not retained: %+v %v", got, err)
 	}
 }

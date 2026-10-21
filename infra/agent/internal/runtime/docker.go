@@ -25,7 +25,9 @@ type Docker struct {
 	Client *EngineClient
 	Policy policy.Policy
 	// DataRoot is used only for default bind paths when Spec.HomeBind is empty.
-	DataRoot string
+	DataRoot      string
+	EdgeContainer string
+	PlatformHost  string
 
 	mu        sync.Mutex
 	endpoints map[string]string
@@ -38,11 +40,18 @@ type DockerConfig struct {
 	DataRoot string
 	Timeout  time.Duration
 	Policy   policy.Policy
+	// Trusted node configuration, never supplied by an instance spec. The edge
+	// joins each isolated instance network with this platform DNS alias.
+	EdgeContainer string
+	PlatformHost  string
 }
 
 // NewDocker dials the Engine API.
 // Zero-value Policy uses deny-by-default Default(); AllowAnyImage is never implied.
 func NewDocker(cfg DockerConfig) (*Docker, error) {
+	if err := validateEdgeNetworkConfig(cfg.EdgeContainer, cfg.PlatformHost); err != nil {
+		return nil, err
+	}
 	host := cfg.Host
 	if host == "" {
 		host = os.Getenv("DOCKER_HOST")
@@ -53,6 +62,7 @@ func NewDocker(cfg DockerConfig) (*Docker, error) {
 	}
 	d := NewDockerWithClient(client, cfg.DataRoot)
 	d.Policy = normalizeDockerPolicy(cfg.Policy)
+	d.EdgeContainer, d.PlatformHost = cfg.EdgeContainer, cfg.PlatformHost
 	return d, nil
 }
 
@@ -151,6 +161,11 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		labelManaged:  "true",
 	}); err != nil {
 		return err
+	}
+	if d.EdgeContainer != "" {
+		if err := d.ensureEdgeNetwork(ctx, s.InstanceID); err != nil {
+			return err
+		}
 	}
 
 	_ = d.Client.ContainerStop(ctx, name, 5)
@@ -282,11 +297,28 @@ func (d *Docker) Remove(ctx context.Context, id string) error {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}
+	// Validate ownership before touching an existing network or its edge endpoint.
+	// An absent network is harmless (e.g. a retry after successful removal).
+	var owned *engineNetwork
+	if d.EdgeContainer != "" {
+		var err error
+		owned, err = d.ownedNetwork(ctx, id)
+		if err != nil {
+			return err
+		}
+	}
 	_ = d.Client.ContainerStop(ctx, containerName(id), 5)
 	if err := d.Client.ContainerRemove(ctx, containerName(id), true); err != nil {
 		return err
 	}
-	_ = d.Client.NetworkRemove(ctx, networkName(id))
+	if owned != nil {
+		if err := d.detachEdge(ctx, owned); err != nil {
+			return err
+		}
+	}
+	if err := d.Client.NetworkRemove(ctx, networkName(id)); err != nil {
+		return err
+	}
 	d.mu.Lock()
 	delete(d.endpoints, id)
 	delete(d.ports, id)

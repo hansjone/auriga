@@ -147,6 +147,21 @@ maxArtifactBytes: 2147483648
 
 ## 测试
 
+### Docker 实例内部平台入口
+
+`AURIGA_AGENT_INSTANCE_PLATFORM_URL` 是实例访问 edge 的 HTTP(S) 地址，与节点的 gRPC 控制地址分开。
+当 edge 与实例由同一 Docker Engine 管理时，设置 `AURIGA_AGENT_DOCKER_EDGE_CONTAINER` 为受信任的 edge 容器名或 ID。
+此时平台 URL 必须使用 DNS 主机名；驱动把该主机名作为 edge 端点的网络别名，接入每个实例独立的 `internal` bridge。
+实例仍只加入自己的内部网络；edge 的控制网络不会附加给实例。URL 的端口必须是 edge 容器实际监听端口。
+
+指定的 edge 必须带 `auriga.role=edge` 标签，准备实例时必须正在运行，且不能使用 host、none 或另一个容器的网络命名空间。
+驱动在连接前校验网络名称、内部隔离、bridge 驱动、实例归属标签和现有成员，连接后再检查实际 DNS 别名。
+已有同名网络不符合策略时拒绝准备。删除实例会先移除实例容器，再断开该网络上的 edge 端点，最后删除网络；edge 停止时仍可移除端点。
+这些配置来自节点管理员，不接受实例规格覆盖。外部管理的 edge 网络仍须由部署者提供可达的内部入口。
+
+`deploy/compose` 的本机 Linux 测试栈采用此接线：edge 在 bridge 网络，通过 `host.docker.internal` 访问宿主上的平台和 NATS；
+门户端口仅发布到 `127.0.0.1:8080`。这份测试栈不作为 NAS 现场部署配置。
+
 ```powershell
 Set-Location infra\agent
 go vet ./...
