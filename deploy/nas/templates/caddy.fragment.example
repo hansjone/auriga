@@ -1,0 +1,29 @@
+# Example VPS Caddy fragment (public placeholders only).
+# Merge into the existing VPS Caddyfile after certificates cover all three names.
+# Do not use a shallow wildcard that fails to cover the instance parent domain.
+#
+# Required certificate SANs (example):
+#   portal.example.com
+#   admin.example.com
+#   *.i.example.com
+#
+# Upstream is the dedicated NAS LAN IP + edge :8080 (HTTP; TLS terminated here).
+# Preserve Host. Support WebSocket and SSE. Set forwarded proto for secure cookies.
+
+portal.example.com, admin.example.com, *.i.example.com {
+	tls /etc/caddy/auriga-tls/fullchain.pem /etc/caddy/auriga-tls/privkey.pem
+
+	encode gzip
+
+	reverse_proxy 192.0.2.10:8080 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+		# WebSocket / long-lived streams
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}
