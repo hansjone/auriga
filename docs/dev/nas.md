@@ -4,6 +4,8 @@
 
 本包 Compose 项目名**固定**为 `auriga-nas-test`（脚本忽略 `stack.env` 里的其它项目名，防止误删别的栈）。在 W3 交付真实 DSH 摘要与签名模板之前，**不得宣称真实验收完成**。
 
+操作脚本均以 `sh deploy/nas/scripts/<操作>.sh` 调用；首装、重入与启动链也显式使用 `sh` 调用子脚本，支持 Git checkout / 解包后脚本没有执行位的文件系统。Linux 验证须在原生目录使用普通文件权限运行，不能只依赖 Windows 挂载上的可执行权限。
+
 ## 网络拓扑（H1）
 
 | 网络 | 类型 | 成员 | 作用 |
@@ -100,6 +102,16 @@ sh deploy/nas/scripts/stop.sh
 
 - `images/*.tar` + `SHA256SUMS` + **一份** `manifest.json`（commit、镜像 Id、tools、stack_env_hint）
 - `versions.txt`、`auriga-nas-bootstrap`
+
+GitHub Actions 工件下载后，文件执行位可能丢失（[官方说明](https://github.com/actions/upload-artifact#permission-loss)）。
+在解包后的工件根目录核对 manifest 的提交和校验和，并在首次初始化前恢复预构建 bootstrap 的执行位：
+
+```sh
+(cd images && sha256sum -c SHA256SUMS)
+chmod 0755 deploy-nas/bin/auriga-nas-bootstrap
+```
+
+源码 checkout 对应 `deploy/nas/bin/auriga-nas-bootstrap`。其余操作脚本均以 `sh` 调用，无需执行位；NAS 无需 Go。
 
 NAS 上 `load-images.sh` 后，把 `AURIGA_IMAGE_PLATFORM/EDGE/AGENT` 设为 manifest 里的 **`sha256:<id>`**（本地 Id，compose 不 pull）。基础镜像仍用 `name@sha256:…`。
 

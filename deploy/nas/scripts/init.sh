@@ -16,7 +16,7 @@ DATA="$AURIGA_DATA_ROOT/data"
 
 if [ -f "$MARKER" ]; then
   info "already initialized ($MARKER); rendering configs only"
-  "$NAS_ROOT/scripts/render.sh"
+  sh "$NAS_ROOT/scripts/render.sh"
   exit 0
 fi
 
@@ -143,7 +143,7 @@ chmod 0600 "$CONFIG/pki-edge/edge.key" "$CONFIG/identity-signing-keys.json"
 : >"$AURIGA_DATA_ROOT/join/token"
 chmod 0600 "$AURIGA_DATA_ROOT/join/token"
 
-"$NAS_ROOT/scripts/render.sh" || die "render failed after secrets created — fix and re-run render.sh (marker not written)"
+sh "$NAS_ROOT/scripts/render.sh" || die "render failed after secrets created — fix and re-run render.sh (marker not written)"
 
 {
   printf 'initialized_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date)"
