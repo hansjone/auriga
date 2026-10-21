@@ -190,6 +190,11 @@ func (o *Observer) sampleUsage() {
 		active := make(map[string]bool)
 		for _, target := range o.cfg.Source.Targets() {
 			active[target.ID] = true
+			if target.Process == ProcessStopped || target.Process == ProcessFailed {
+				delete(o.lastCPU, target.ID)
+				o.cfg.Activity.Forget(target.ID)
+				continue
+			}
 			ir, err := o.cfg.Collector.CollectInstance(target)
 			if err != nil {
 				delete(o.lastCPU, target.ID)
@@ -215,6 +220,7 @@ func (o *Observer) sampleUsage() {
 		for id := range o.lastCPU {
 			if !active[id] {
 				delete(o.lastCPU, id)
+				o.cfg.Activity.Forget(id)
 			}
 		}
 	}

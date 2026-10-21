@@ -244,6 +244,9 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}
+	d.mu.Lock()
+	delete(d.endpoints, id)
+	d.mu.Unlock()
 	name := containerName(id)
 	if err := d.Client.ContainerStart(ctx, name); err != nil {
 		return err
@@ -256,6 +259,9 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	endpoint, err := instanceEndpoint(insp, networkName(id), port)
 	if err != nil {
 		return fmt.Errorf("docker: %s: %w", name, err)
+	}
+	if err := waitInstanceHealth(ctx, endpoint); err != nil {
+		return fmt.Errorf("docker: %s health not ready: %w", name, err)
 	}
 	d.mu.Lock()
 	d.endpoints[id] = endpoint
@@ -340,7 +346,8 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	st := Status{InstanceID: id}
 	if state, ok := insp["State"].(map[string]any); ok {
 		st.Running, _ = state["Running"].(bool)
-		st.Ready = st.Running
+		_, endpointErr := d.Endpoint(id)
+		st.Ready = st.Running && endpointErr == nil
 		if !st.Running {
 			if errMsg, _ := state["Error"].(string); errMsg != "" {
 				st.Error = errMsg
@@ -409,7 +416,8 @@ func (d *Docker) List(ctx context.Context) ([]Status, error) {
 		}
 		if state, ok := c["State"].(string); ok {
 			st.Running = state == "running"
-			st.Ready = st.Running
+			_, endpointErr := d.Endpoint(id)
+			st.Ready = st.Running && endpointErr == nil
 		}
 		out = append(out, st)
 	}
