@@ -2,6 +2,7 @@ package nastest
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -157,9 +158,12 @@ func TestNASNATSPolicy(t *testing.T) {
 		t.Fatalf("edge session deletion: %v", err)
 	}
 	// Request timeouts alone are insufficient: require the server's explicit ACL rejection.
-	deny := func(subject string) {
+	deny := func(subject string, payload ...byte) {
 		t.Helper()
-		if _, err := edgeConn.Request(subject, []byte("{}"), 300*time.Millisecond); err == nil {
+		if len(payload) == 0 {
+			payload = []byte("{}")
+		}
+		if _, err := edgeConn.Request(subject, payload, 300*time.Millisecond); err == nil {
 			t.Fatalf("unexpected permission for %s", subject)
 		}
 		select {
@@ -175,6 +179,24 @@ func TestNASNATSPolicy(t *testing.T) {
 	deny("$JS.API.STREAM.CREATE.UNRELATED")
 	deny("$JS.API.CONSUMER.CREATE.AURIGA_EVENTS.foreign")
 	deny("$KV.auriga-routes.instance1")
+	// A fixed durable name alone is not a filter boundary: bare/legacy CREATE
+	// let the caller replace the filter and consume unrelated business events.
+	changeFilter := []byte(`{"stream_name":"AURIGA_EVENTS","config":{"durable_name":"edge-session-revoke","name":"edge-session-revoke","filter_subject":"auriga.evt.private.changed","ack_policy":"explicit","deliver_policy":"new"}}`)
+	deny("$JS.API.CONSUMER.CREATE.AURIGA_EVENTS.edge-session-revoke", changeFilter...)
+	deny("$JS.API.CONSUMER.DURABLE.CREATE.AURIGA_EVENTS.edge-session-revoke", changeFilter...)
+	reply, err := edgeConn.Request("$JS.API.CONSUMER.CREATE.AURIGA_EVENTS.edge-session-revoke.auriga.evt.identity.session_revoked", changeFilter, time.Second)
+	if err != nil {
+		t.Fatalf("filtered endpoint must respond with an explicit filter mismatch: %v", err)
+	}
+	var mismatch struct {
+		Error struct {
+			Code    int `json:"code"`
+			ErrCode int `json:"err_code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(reply.Data, &mismatch); err != nil || mismatch.Error.Code != 400 || mismatch.Error.ErrCode != 10131 {
+		t.Fatalf("server must reject an endpoint/body filter mismatch: %s, %v", reply.Data, err)
+	}
 	if err := platformConn.FlushTimeout(time.Second); err != nil {
 		t.Fatal(err)
 	}
