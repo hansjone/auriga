@@ -1,5 +1,33 @@
 # 节点代理（agent）
 
+## Unix ingress 的组共享目录
+
+设置 `AURIGA_AGENT_INGRESS_LOCAL_GID` 后，socket 路径必须为绝对、规范化的
+`<parent>/ingress/ingress.sock`，例如 `/var/lib/auriga/ingress/ingress.sock`。
+`<parent>` 必须预先存在；从它到根的各级目录都必须为真实目录（禁止符号链接），
+由 agent 用户或 root 持有且不可被组或其他用户写入。root 所有的 sticky `/tmp`
+只允许作为更上层祖先，不能直接作为 `<parent>`。
+
+agent 只创建并授权专用的 `ingress` 子目录（0750）和 socket（0660），
+不会对数据根、`/run`、`/tmp` 等共享目录执行 chown/chmod。
+新建目录内留有 agent 所有、0600、单链接的空标记 `.auriga-ingress-v1`，
+重启仅接管带此标记且由当前 agent 用户持有、无组写及其他用户权限的目录。
+目录内仅允许该标记和 agent 所有的 socket；已有空目录也不会自动接管。
+不符合这些条件时启动失败，错误含 `unsafe shared ingress directory`。
+私有模式（未设置 gid）仍使用原来的路径和 0700/0600 权限。
+
+新目录在父目录下以临时名 `.auriga-ingress-tmp-*` 创建，显式设为 0700 并写好 0600 标记
+（不受 umask 影响）后一次 rename 成 `ingress`，所以崩溃不会留下无标记的 `ingress`；
+启动时删除 agent 自己留下的临时目录。首次部署不要预建 `ingress` 目录。
+
+升级（持久卷里已有旧版 agent 建的无标记 `ingress`）：仅当它是真实目录、属于当前 agent 用户、
+且里面什么都没有或只有 agent 自己的 socket `ingress.sock` 时，agent 启动时把它整体
+rename 为同一父目录下的 `.auriga-ingress-legacy-<纳秒时间戳>`（不修改它的属主和权限，
+也不接管），再按上面的方式新建专用目录；备份确认无用后可手工删除。
+其他情况（非 agent 所有、含别的文件、符号链接、挂载点导致 rename 失败等）照旧拒绝启动；
+此时停 agent，人工检查后把旧目录移走，保留父目录再启动。不要手工伪造标记来接管目录。
+edge 必须能逐级穿过父目录；**只给 edge 专属的组**配置该 gid，不要用 0 或宽泛的共享组。
+
 `infra/agent` 是装在运行 DSH 实例的主机上的 Go 程序。进程名 `auriga-agent`。
 
 详细设计见 `docs/architecture/node-agent.zh.md`；契约见 `contracts/proto/auriga/node/v1/`。

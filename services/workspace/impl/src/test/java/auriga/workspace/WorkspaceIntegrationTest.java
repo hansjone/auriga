@@ -942,6 +942,390 @@ class WorkspaceIntegrationTest {
         });
   }
 
+  private void markRunningIdle(UUID node, UUID id, Instant activity) {
+    store.tx(
+        () ->
+            store.jdbc.update(
+                "UPDATE instance SET node_id=?,phase='running',ready=true,last_activity_at=?,plugin_seen_at=?,cpu_seen_at=?,plugin_active=false,cpu_active=false WHERE tenant_id=? AND id=?",
+                node,
+                WorkspaceStore.time(activity),
+                WorkspaceStore.time(clock.instant()),
+                WorkspaceStore.time(clock.instant()),
+                tenant,
+                id));
+  }
+
+  private List<Instant> openWakeJobs(UUID id) {
+    return store.tx(
+        () ->
+            store
+                .jdbc
+                .queryForList(
+                    "SELECT due_at FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done ORDER BY due_at",
+                    tenant,
+                    id)
+                .stream()
+                .map(r -> WorkspaceStore.instant(r, "due_at"))
+                .toList());
+  }
+
+  private DesiredState desired(UUID id) {
+    return WorkspaceService.spec(store.tx(() -> store.instance(id))).getDesired();
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void rollingWakeReportsCannotOutliveTheAbsoluteIdleCapButStillWakeLater(boolean pendingAtDeadline)
+      throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    policy.idleMinutes(5).wakeOnSchedule(true);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          Instant activity = clock.instant().minusSeconds(300);
+          // Idle deadline: activity + 5 min + 4 min = 240 s after the loop starts.
+          int[] reportTimes =
+              pendingAtDeadline
+                  ? new int[] {0, 40, 80, 120, 160, 200, 230, 240}
+                  : new int[] {0, 30, 60, 90, 120, 150, 180, 210, 240};
+          for (int seconds : reportTimes) {
+            clock.now = activity.plusSeconds(300 + seconds);
+            markRunningIdle(node, id, activity);
+            service.wake(
+                node,
+                WakeSchedule.newBuilder()
+                    .setInstanceId(id.toString())
+                    .setNextWakeAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(120)))
+                    .build());
+            service.tickTenant();
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          }
+          // A trailing report is applied at 260 s; a 100 s alarm cannot stop and pre-warm safely.
+          clock.now = activity.plusSeconds(560);
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          long generation =
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration();
+          // Even continually accepted near-term edits cannot move the activity + idle + 8 min cap.
+          for (int seconds : new int[] {290, 320, 350, 380, 410, 440, 480}) {
+            clock.now = activity.plusSeconds(300 + seconds);
+            markRunningIdle(node, id, activity);
+            // Every next report arrives before the previous alarm; only the final edit crosses
+            // the cap. There is no expired-alarm gap that could authorize an earlier stop.
+            Instant next =
+                seconds == 480
+                    ? clock.instant().plusSeconds(10)
+                    : clock.instant().plusSeconds(Math.min(45, 480 - seconds));
+            service.wake(
+                node,
+                WakeSchedule.newBuilder()
+                    .setInstanceId(id.toString())
+                    .setNextWakeAt(NodeEnrollment.timestamp(next))
+                    .build());
+            service.tickTenant();
+            var state = store.tx(() -> store.instance(id));
+            assertEquals(
+                seconds < 480
+                    ? DesiredState.DESIRED_STATE_RUNNING
+                    : DesiredState.DESIRED_STATE_STOPPED,
+                desired(id));
+            assertEquals(
+                seconds < 480 ? activity : clock.instant(),
+                WorkspaceStore.instant(state, "last_activity_at"));
+            assertEquals(
+                generation + (seconds < 480 ? 0 : 1), WorkspaceService.spec(state).getGeneration());
+          }
+          Instant stoppedAt = clock.instant();
+          assertEquals(false, store.tx(() -> store.instance(id)).get("wake_report_pending"));
+          // The stop is not undone in the same loop, but the alarm is not lost either.
+          assertEquals(List.of(stoppedAt.plusSeconds(30)), openWakeJobs(id));
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+          clock.now = stoppedAt.plusSeconds(29);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+          clock.now = stoppedAt.plusSeconds(30);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          assertEquals("wake", store.tx(() -> store.instance(id)).get("start_reason"));
+        });
+  }
+
+  @Test
+  void alarmJustAfterTheIdleDeadlineStillFiresOnTheRunningInstance() throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    policy.idleMinutes(5).wakeOnSchedule(true);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          Instant activity = clock.instant().minusSeconds(301);
+          // Review case: alarm A = last_activity + idle + 241 s, first idle loop at +1 s.
+          Instant alarm = activity.plusSeconds(300 + 241);
+          markRunningIdle(node, id, activity);
+          service.wake(
+              node,
+              WakeSchedule.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setNextWakeAt(NodeEnrollment.timestamp(alarm))
+                  .build());
+          for (int offset : new int[] {1, 121, 200, 240}) {
+            clock.now = activity.plusSeconds(300 + offset);
+            markRunningIdle(node, id, activity);
+            service.tickTenant();
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id), "at +" + offset);
+          }
+          // Its pre-warm (A - 2 min) was consumed while running; the alarm fires before stop.
+          assertEquals(List.of(), openWakeJobs(id));
+          clock.now = alarm;
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+          assertEquals(List.of(), openWakeJobs(id));
+        });
+  }
+
+  @Test
+  void alarmAdvancedAfterTheDeadlineFiresWithoutStoppingOrResettingActivity() throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    policy.idleMinutes(5).wakeOnSchedule(true);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          Instant activity = clock.instant().minusSeconds(500);
+          Instant originalAlarm = activity.plusSeconds(700);
+          markRunningIdle(node, id, activity);
+          service.wake(
+              node,
+              WakeSchedule.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setNextWakeAt(NodeEnrollment.timestamp(originalAlarm))
+                  .build());
+          long generation =
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration();
+          // L+08:20 reports L+11:40; this known alarm keeps running past the L+09:00 deadline.
+          for (int seconds : new int[] {500, 540}) {
+            clock.now = activity.plusSeconds(seconds);
+            markRunningIdle(node, id, activity);
+            service.tickTenant();
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          }
+          clock.now = activity.plusSeconds(541);
+          Instant alarm = clock.instant().plusSeconds(10);
+          service.wake(
+              node,
+              WakeSchedule.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setNextWakeAt(NodeEnrollment.timestamp(alarm))
+                  .build());
+          var edited = store.tx(() -> store.instance(id));
+          assertEquals(alarm, WorkspaceStore.instant(edited, "next_wake_at"));
+          assertEquals(clock.instant(), WorkspaceStore.instant(edited, "wake_reported_at"));
+          assertEquals(false, edited.get("wake_report_pending"));
+          for (int seconds : new int[] {541, 550}) {
+            clock.now = activity.plusSeconds(seconds);
+            markRunningIdle(node, id, activity);
+            service.tickTenant();
+            var state = store.tx(() -> store.instance(id));
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+            assertEquals(generation, WorkspaceService.spec(state).getGeneration());
+            assertEquals(activity, WorkspaceStore.instant(state, "last_activity_at"));
+            assertEquals(List.of(), openWakeJobs(id));
+          }
+          // It remains running through the alarm; afterward idle reclamation resumes normally.
+          clock.now = alarm;
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          var stopped = store.tx(() -> store.instance(id));
+          assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+          assertEquals(generation + 1, WorkspaceService.spec(stopped).getGeneration());
+          // Existing lifecycle changes stamp activity on stop; there was no intervening restart.
+          assertEquals(clock.instant(), WorkspaceStore.instant(stopped, "last_activity_at"));
+          assertEquals(List.of(), openWakeJobs(id));
+        });
+  }
+
+  @Test
+  void outOfRangeWakeReportsAndOldFinishedJobsAreDiscarded() throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          markRunningIdle(node, id, clock.instant());
+          for (Instant next :
+              List.of(
+                  clock.instant().minusSeconds(121),
+                  clock.instant().plus(Duration.ofDays(400)).plusSeconds(1))) {
+            service.wake(
+                node,
+                WakeSchedule.newBuilder()
+                    .setInstanceId(id.toString())
+                    .setNextWakeAt(NodeEnrollment.timestamp(next))
+                    .build());
+            var state = store.tx(() -> store.instance(id));
+            assertNull(WorkspaceStore.instant(state, "next_wake_at"));
+            assertNull(WorkspaceStore.instant(state, "wake_reported_at"));
+            assertEquals(List.of(), openWakeJobs(id));
+          }
+          Instant now = clock.instant();
+          UUID old =
+              UuidV7.next(
+                  Clock.fixed(now.minus(Duration.ofDays(1)).minusMillis(1), ZoneOffset.UTC));
+          UUID recent = UuidV7.next(Clock.fixed(now.minusSeconds(3600), ZoneOffset.UTC));
+          UUID open = UuidV7.next(Clock.fixed(now.minus(Duration.ofDays(2)), ZoneOffset.UTC));
+          for (UUID job : List.of(old, recent, open))
+            store.tx(
+                () ->
+                    store.jdbc.update(
+                        "INSERT INTO workspace_job(id,tenant_id,instance_id,kind,due_at,done) VALUES(?,?,?,'wake',?,?)",
+                        job,
+                        tenant,
+                        id,
+                        WorkspaceStore.time(now.plus(Duration.ofDays(30))),
+                        !job.equals(open)));
+          service.tickTenant();
+          assertEquals(
+              Set.of(open, recent),
+              Set.copyOf(
+                  store.tx(
+                      () ->
+                          store.jdbc.queryForList(
+                              "SELECT id FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='wake'",
+                              UUID.class,
+                              tenant,
+                              id))));
+        });
+  }
+
+  @Test
+  void wakeReportLimitSurvivesAnotherServiceInstanceAndAppliesTrailingCancellation()
+      throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          store.tx(
+              () ->
+                  store.jdbc.update(
+                      "UPDATE instance SET node_id=? WHERE tenant_id=? AND id=?",
+                      node,
+                      tenant,
+                      id));
+          Instant reportedAt = clock.instant();
+          Instant next = reportedAt.plusSeconds(3600);
+          service.wake(
+              node,
+              WakeSchedule.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setNextWakeAt(NodeEnrollment.timestamp(next))
+                  .build());
+          var another =
+              new WorkspaceService(
+                  store,
+                  inputs,
+                  service.templates,
+                  null,
+                  org.mockito.Mockito.mock(EventPublisher.class),
+                  clock);
+          clock.now = reportedAt.plusSeconds(29);
+          another.wake(node, WakeSchedule.newBuilder().setInstanceId(id.toString()).build());
+          var state = store.tx(() -> store.instance(id));
+          assertEquals(
+              next, auriga.workspace.persistence.WorkspaceStore.instant(state, "next_wake_at"));
+          assertEquals(
+              reportedAt,
+              auriga.workspace.persistence.WorkspaceStore.instant(state, "wake_reported_at"));
+          assertEquals(true, state.get("wake_report_pending"));
+          clock.now = reportedAt.plusSeconds(30);
+          service.tickTenant();
+          assertNull(
+              auriga.workspace.persistence.WorkspaceStore.instant(
+                  store.tx(() -> store.instance(id)), "next_wake_at"));
+          assertEquals(
+              0,
+              store.tx(
+                  () ->
+                      store.jdbc.queryForObject(
+                          "SELECT count(*) FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done",
+                          Integer.class,
+                          tenant,
+                          id)));
+        });
+  }
+
+  @Test
+  void duplicateAndForeignWakeReportsCannotCreateOrReplaceJobs() throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          store.tx(
+              () ->
+                  store.jdbc.update(
+                      "UPDATE instance SET node_id=? WHERE tenant_id=? AND id=?",
+                      node,
+                      tenant,
+                      id));
+          Instant next = clock.instant().plusSeconds(120);
+          WakeSchedule report =
+              WakeSchedule.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setNextWakeAt(NodeEnrollment.timestamp(next))
+                  .build();
+          service.wake(node, report);
+          store.tx(
+              () ->
+                  store.jdbc.update(
+                      "UPDATE workspace_job SET done=true WHERE tenant_id=? AND instance_id=? AND kind='wake'",
+                      tenant,
+                      id));
+          clock.now = clock.now.plusSeconds(30);
+          service.wake(node, report);
+          service.wake(
+              UUID.randomUUID(), WakeSchedule.newBuilder().setInstanceId(id.toString()).build());
+          var state = store.tx(() -> store.instance(id));
+          assertEquals(
+              next, auriga.workspace.persistence.WorkspaceStore.instant(state, "next_wake_at"));
+          assertEquals(false, state.get("wake_report_pending"));
+          assertEquals(
+              1,
+              store.tx(
+                  () ->
+                      store.jdbc.queryForObject(
+                          "SELECT count(*) FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='wake'",
+                          Integer.class,
+                          tenant,
+                          id)));
+          assertEquals(
+              0,
+              store.tx(
+                  () ->
+                      store.jdbc.queryForObject(
+                          "SELECT count(*) FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='wake' AND NOT done",
+                          Integer.class,
+                          tenant,
+                          id)));
+        });
+  }
+
   @Test
   void idempotentJoinTokenDoesNotMintAdditionalCredentials() {
     TenantContext.run(

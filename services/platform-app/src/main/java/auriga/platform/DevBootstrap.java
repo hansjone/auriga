@@ -39,6 +39,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -97,6 +98,11 @@ public class DevBootstrap implements ApplicationRunner {
 
   @Override
   public void run(ApplicationArguments args) throws Exception {
+    if (!env.acceptsProfiles(Profiles.of("dev", "e2e"))) {
+      log.warn("Dev seed ignored: an explicit dev or e2e profile is required");
+      return;
+    }
+    log.warn("Dev seed enabled: privileged test data must only be used in dev/e2e environments");
     boolean hasSigningKey =
         store.isolated(
             SigningKeys.PLATFORM,
