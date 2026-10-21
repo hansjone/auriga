@@ -37,15 +37,16 @@ func (r LogReporter) ReportReady(instanceID string, ready bool) {
 	}
 }
 
-// TargetSource lists instances to observe.
+// TargetSource lists instances to observe; ProcessEpoch separates process lifetimes.
 type TargetSource interface {
 	Targets() []InstanceTarget
 }
 
-// SliceTargets is a static/mutable target list for tests.
+// SliceTargets retains process transitions even when no poll sees intermediate states.
 type SliceTargets struct {
-	mu sync.Mutex
-	t  []InstanceTarget
+	mu        sync.Mutex
+	t         []InstanceTarget
+	nextEpoch uint64
 }
 
 func (s *SliceTargets) Targets() []InstanceTarget {
@@ -59,7 +60,25 @@ func (s *SliceTargets) Targets() []InstanceTarget {
 func (s *SliceTargets) Set(t []InstanceTarget) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.t = append([]InstanceTarget(nil), t...)
+	previous := make(map[string]InstanceTarget, len(s.t))
+	for _, target := range s.t {
+		previous[target.ID] = target
+	}
+	next := append([]InstanceTarget(nil), t...)
+	for index := range next {
+		target := &next[index]
+		old, exists := previous[target.ID]
+		if target.ProcessStartedAt.IsZero() && exists {
+			target.ProcessStartedAt = old.ProcessStartedAt
+		}
+		if !exists || old.Process != target.Process || !old.ProcessStartedAt.Equal(target.ProcessStartedAt) {
+			s.nextEpoch++
+			target.ProcessEpoch = s.nextEpoch
+		} else {
+			target.ProcessEpoch = old.ProcessEpoch
+		}
+	}
+	s.t = next
 }
 
 // Config configures the observer loop.
@@ -79,7 +98,8 @@ type Config struct {
 
 // Observer probes health, watches cron files, and samples resources.
 type Observer struct {
-	lastCPU map[string]int64
+	lastCPU   map[string]int64
+	lastEpoch map[string]uint64
 	// Used only by the watch loop. A known deadline must be recomputed when
 	// reached even if a stopped instance cannot update its schedule files.
 	nextWakes map[string]time.Time
@@ -117,7 +137,7 @@ func New(cfg Config) *Observer {
 	if cfg.WatchPoll <= 0 {
 		cfg.WatchPoll = time.Second
 	}
-	return &Observer{cfg: cfg, lastCPU: make(map[string]int64), nextWakes: make(map[string]time.Time)}
+	return &Observer{cfg: cfg, lastCPU: make(map[string]int64), lastEpoch: make(map[string]uint64), nextWakes: make(map[string]time.Time)}
 }
 
 // Start runs background loops until Stop or ctx cancel.
@@ -190,6 +210,11 @@ func (o *Observer) sampleUsage() {
 		active := make(map[string]bool)
 		for _, target := range o.cfg.Source.Targets() {
 			active[target.ID] = true
+			if epoch, known := o.lastEpoch[target.ID]; !known || epoch != target.ProcessEpoch {
+				delete(o.lastCPU, target.ID)
+				o.cfg.Activity.Forget(target.ID)
+				o.lastEpoch[target.ID] = target.ProcessEpoch
+			}
 			if target.Process == ProcessStopped || target.Process == ProcessFailed {
 				delete(o.lastCPU, target.ID)
 				o.cfg.Activity.Forget(target.ID)
@@ -217,8 +242,9 @@ func (o *Observer) sampleUsage() {
 				RecentCpuActive: o.cfg.Activity.RecentCPUActive(target.ID, 50),
 			})
 		}
-		for id := range o.lastCPU {
+		for id := range o.lastEpoch {
 			if !active[id] {
+				delete(o.lastEpoch, id)
 				delete(o.lastCPU, id)
 				o.cfg.Activity.Forget(id)
 			}

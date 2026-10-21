@@ -28,6 +28,10 @@ type InstanceTarget struct {
 	RootDir    string
 	Process    ProcessStatus
 	CgroupPath string // linux; empty on windows / process drivers without cgroup
+	// ProcessStartedAt identifies an actual process lifetime, not spec metadata.
+	ProcessStartedAt time.Time
+	// ProcessEpoch is assigned by SliceTargets across transitions, even between polls.
+	ProcessEpoch uint64
 }
 
 // HealthResult combines HTTP probe and process state.

@@ -21,6 +21,11 @@ const readyBody = `{"status":"ok","ready":true,"protocol":1,"pluginVersion":"0.0
 
 func readyDocker(t *testing.T, endpoint string) *runtime.Docker {
 	t.Helper()
+	return readyDockerWithPortMetadata(t, endpoint, map[string]any{"7860/tcp": []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}, "7860/tcp")
+}
+
+func readyDockerWithPortMetadata(t *testing.T, endpoint string, bindings any, publishedKey string) *runtime.Docker {
+	t.Helper()
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +40,9 @@ func readyDocker(t *testing.T, endpoint string) *runtime.Docker {
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(r.URL.Path, "/json"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"State": map[string]any{"Running": true},
-				"NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": port}}}}})
+				"Config":          map[string]any{"ExposedPorts": map[string]any{"7860/tcp": map[string]any{}, "8888/tcp": map[string]any{}}},
+				"HostConfig":      map[string]any{"PortBindings": bindings},
+				"NetworkSettings": map[string]any{"Ports": map[string]any{publishedKey: []any{map[string]string{"HostPort": port}}}}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -46,6 +53,57 @@ func readyDocker(t *testing.T, endpoint string) *runtime.Docker {
 		t.Fatal(err)
 	}
 	return runtime.NewDockerWithClient(client, "")
+}
+
+func TestDockerStartUsesActualUnambiguousContainerPort(t *testing.T) {
+	for _, key := range []string{"7860/tcp", "8888/tcp"} {
+		t.Run(key, func(t *testing.T) {
+			health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, readyBody) }))
+			t.Cleanup(health.Close)
+			d := readyDockerWithPortMetadata(t, health.URL, map[string]any{key: []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}, key)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := d.Start(ctx, "actual-port-test"); err != nil {
+				t.Fatal(err)
+			}
+			if endpoint, err := d.Endpoint("actual-port-test"); err != nil || endpoint.URL != health.URL {
+				t.Fatalf("actual container port not recovered: %+v %v", endpoint, err)
+			}
+		})
+	}
+}
+
+func TestDockerStartRejectsMissingAmbiguousOrInvalidContainerPort(t *testing.T) {
+	for name, bindings := range map[string]any{
+		"missing":           nil,
+		"empty":             map[string]any{},
+		"multiple":          map[string]any{"7860/tcp": []any{map[string]string{"HostPort": "0"}}, "8888/tcp": []any{map[string]string{"HostPort": "0"}}},
+		"zero":              map[string]any{"0/tcp": []any{map[string]string{"HostPort": "0"}}},
+		"overflow":          map[string]any{"65536/tcp": []any{map[string]string{"HostPort": "0"}}},
+		"negative":          map[string]any{"-1/tcp": []any{map[string]string{"HostPort": "0"}}},
+		"path":              map[string]any{"7860/tcp/../8888": []any{map[string]string{"HostPort": "0"}}},
+		"noncanonical":      map[string]any{"07860/tcp": []any{map[string]string{"HostPort": "0"}}},
+		"empty-binding":     map[string]any{"7860/tcp": []any{}},
+		"multiple-bindings": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": "0"}, map[string]string{"HostPort": "0"}}},
+		"invalid-binding":   map[string]any{"7860/tcp": []any{"invalid"}},
+		"no-tcp":            map[string]any{"7860/udp": []any{map[string]string{"HostPort": "0"}}},
+		"wrong-type":        "7860/tcp",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var probes atomic.Int64
+			health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { probes.Add(1); _, _ = io.WriteString(w, readyBody) }))
+			t.Cleanup(health.Close)
+			d := readyDockerWithPortMetadata(t, health.URL, bindings, "7860/tcp")
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := d.Start(ctx, "invalid-port-test"); err == nil {
+				t.Fatal("invalid container port metadata accepted")
+			}
+			if _, err := d.Endpoint("invalid-port-test"); err == nil || probes.Load() != 0 {
+				t.Fatal("invalid port metadata reached health or published endpoint")
+			}
+		})
+	}
 }
 
 func TestDockerStartWaitsForRealHealth(t *testing.T) {
