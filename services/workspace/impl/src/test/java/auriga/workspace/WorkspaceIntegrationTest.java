@@ -975,7 +975,7 @@ class WorkspaceIntegrationTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
-  void rollingWakeReportsCannotOutliveTheIdleDeadlineButStillWakeLater(boolean pendingAtDeadline)
+  void rollingWakeReportsCannotOutliveTheAbsoluteIdleCapButStillWakeLater(boolean pendingAtDeadline)
       throws Exception {
     clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     policy.idleMinutes(5).wakeOnSchedule(true);
@@ -1001,20 +1001,43 @@ class WorkspaceIntegrationTest {
                     .setNextWakeAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(120)))
                     .build());
             service.tickTenant();
-            // With a trailing report the alarm applied at 230 s (due 350 s) was known before
-            // the deadline, so it still counts once; it cannot be moved any further.
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          }
+          // A trailing report is applied at 260 s; a 100 s alarm cannot stop and pre-warm safely.
+          clock.now = activity.plusSeconds(560);
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          long generation =
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration();
+          // Even continually accepted near-term edits cannot move the activity + idle + 8 min cap.
+          for (int seconds : new int[] {290, 320, 350, 380, 410, 440, 480}) {
+            clock.now = activity.plusSeconds(300 + seconds);
+            markRunningIdle(node, id, activity);
+            // Every next report arrives before the previous alarm; only the final edit crosses
+            // the cap. There is no expired-alarm gap that could authorize an earlier stop.
+            Instant next =
+                seconds == 480
+                    ? clock.instant().plusSeconds(10)
+                    : clock.instant().plusSeconds(Math.min(45, 480 - seconds));
+            service.wake(
+                node,
+                WakeSchedule.newBuilder()
+                    .setInstanceId(id.toString())
+                    .setNextWakeAt(NodeEnrollment.timestamp(next))
+                    .build());
+            service.tickTenant();
+            var state = store.tx(() -> store.instance(id));
             assertEquals(
-                seconds < 240 || pendingAtDeadline
+                seconds < 480
                     ? DesiredState.DESIRED_STATE_RUNNING
                     : DesiredState.DESIRED_STATE_STOPPED,
                 desired(id));
-          }
-          if (pendingAtDeadline) {
-            // The trailing report (360 s) is applied at 260 s and is no longer protected.
-            clock.now = activity.plusSeconds(560);
-            markRunningIdle(node, id, activity);
-            service.tickTenant();
-            assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+            assertEquals(
+                seconds < 480 ? activity : clock.instant(),
+                WorkspaceStore.instant(state, "last_activity_at"));
+            assertEquals(
+                generation + (seconds < 480 ? 0 : 1), WorkspaceService.spec(state).getGeneration());
           }
           Instant stoppedAt = clock.instant();
           assertEquals(false, store.tx(() -> store.instance(id)).get("wake_report_pending"));
@@ -1064,6 +1087,69 @@ class WorkspaceIntegrationTest {
           markRunningIdle(node, id, activity);
           service.tickTenant();
           assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+          assertEquals(List.of(), openWakeJobs(id));
+        });
+  }
+
+  @Test
+  void alarmAdvancedAfterTheDeadlineFiresWithoutStoppingOrResettingActivity() throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    policy.idleMinutes(5).wakeOnSchedule(true);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          Instant activity = clock.instant().minusSeconds(500);
+          Instant originalAlarm = activity.plusSeconds(700);
+          markRunningIdle(node, id, activity);
+          service.wake(
+              node,
+              WakeSchedule.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setNextWakeAt(NodeEnrollment.timestamp(originalAlarm))
+                  .build());
+          long generation =
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration();
+          // L+08:20 reports L+11:40; this known alarm keeps running past the L+09:00 deadline.
+          for (int seconds : new int[] {500, 540}) {
+            clock.now = activity.plusSeconds(seconds);
+            markRunningIdle(node, id, activity);
+            service.tickTenant();
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          }
+          clock.now = activity.plusSeconds(541);
+          Instant alarm = clock.instant().plusSeconds(10);
+          service.wake(
+              node,
+              WakeSchedule.newBuilder()
+                  .setInstanceId(id.toString())
+                  .setNextWakeAt(NodeEnrollment.timestamp(alarm))
+                  .build());
+          var edited = store.tx(() -> store.instance(id));
+          assertEquals(alarm, WorkspaceStore.instant(edited, "next_wake_at"));
+          assertEquals(clock.instant(), WorkspaceStore.instant(edited, "wake_reported_at"));
+          assertEquals(false, edited.get("wake_report_pending"));
+          for (int seconds : new int[] {541, 550}) {
+            clock.now = activity.plusSeconds(seconds);
+            markRunningIdle(node, id, activity);
+            service.tickTenant();
+            var state = store.tx(() -> store.instance(id));
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+            assertEquals(generation, WorkspaceService.spec(state).getGeneration());
+            assertEquals(activity, WorkspaceStore.instant(state, "last_activity_at"));
+            assertEquals(List.of(), openWakeJobs(id));
+          }
+          // It remains running through the alarm; afterward idle reclamation resumes normally.
+          clock.now = alarm;
+          markRunningIdle(node, id, activity);
+          service.tickTenant();
+          var stopped = store.tx(() -> store.instance(id));
+          assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+          assertEquals(generation + 1, WorkspaceService.spec(stopped).getGeneration());
+          // Existing lifecycle changes stamp activity on stop; there was no intervening restart.
+          assertEquals(clock.instant(), WorkspaceStore.instant(stopped, "last_activity_at"));
           assertEquals(List.of(), openWakeJobs(id));
         });
   }

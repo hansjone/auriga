@@ -95,7 +95,7 @@ class WorkspaceUnitTest {
   }
 
   @Test
-  void movingAlarmsHaveAFixedFourMinuteIdleBudget() {
+  void movingAlarmsHaveAFixedAbsoluteIdleBudget() {
     Instant activity = now.minusSeconds(1800);
     Duration timeout = Duration.ofMinutes(30);
     for (int seconds = 0; seconds < 240; seconds += 30) {
@@ -104,8 +104,7 @@ class WorkspaceUnitTest {
       assertTrue(Lifecycle.alarmSoon(tick, tick.plusSeconds(240), tick, activity, timeout));
     }
     Instant deadline = now.plusSeconds(240);
-    assertFalse(
-        Lifecycle.alarmSoon(deadline, deadline.plusSeconds(1), deadline, activity, timeout));
+    assertTrue(Lifecycle.alarmSoon(deadline, deadline.plusSeconds(1), deadline, activity, timeout));
     assertFalse(
         Lifecycle.alarmSoon(
             deadline.plusSeconds(30),
@@ -113,12 +112,14 @@ class WorkspaceUnitTest {
             deadline.plusSeconds(30),
             activity,
             timeout));
+    Instant cap = deadline.plusSeconds(240);
+    assertFalse(Lifecycle.alarmSoon(cap, cap.plusSeconds(1), cap, activity, timeout));
     // Real activity starts a new idle period; changing only the alarm does not.
     assertTrue(Lifecycle.alarmSoon(deadline, deadline.plusSeconds(120), deadline, now, timeout));
   }
 
   @Test
-  void alarmReportedBeforeTheDeadlineStillFiresButCannotMove() {
+  void alarmReportedBeforeTheDeadlineStillFiresButDistantEditsLoseProtection() {
     Instant activity = now.minusSeconds(1800);
     Duration timeout = Duration.ofMinutes(30);
     Instant deadline = now.plusSeconds(240);
@@ -134,15 +135,35 @@ class WorkspaceUnitTest {
     assertFalse(
         Lifecycle.alarmSoon(
             deadline.plusSeconds(10), deadline.plusSeconds(241), reported, activity, timeout));
-    // Moving it after the deadline (new report time) drops the protection.
+    // A late edit that leaves enough time to stop and pre-warm loses protection.
     assertFalse(
         Lifecycle.alarmSoon(
             deadline.plusSeconds(30),
-            alarm.plusSeconds(60),
+            deadline.plusSeconds(181),
             deadline.plusSeconds(30),
             activity,
             timeout));
     assertFalse(Lifecycle.alarmSoon(deadline, alarm, null, activity, timeout));
+  }
+
+  @Test
+  void imminentEditAfterTheDeadlineKeepsRunningWithinTheAbsoluteCap() {
+    Instant activity = now;
+    Duration timeout = Duration.ofMinutes(5);
+    Instant deadline = activity.plusSeconds(540);
+    Instant editedAt = deadline.plusSeconds(1);
+    // Accepted 41 s after the original report: stopping now misses this alarm by at least 20 s.
+    assertTrue(
+        Lifecycle.alarmSoon(editedAt, editedAt.plusSeconds(10), editedAt, activity, timeout));
+    assertTrue(
+        Lifecycle.alarmSoon(editedAt, editedAt.plusSeconds(150), editedAt, activity, timeout));
+    assertFalse(
+        Lifecycle.alarmSoon(editedAt, editedAt.plusSeconds(151), editedAt, activity, timeout));
+    Instant cap = deadline.plusSeconds(240);
+    assertTrue(Lifecycle.alarmSoon(cap.minusSeconds(1), cap, editedAt, activity, timeout));
+    assertFalse(
+        Lifecycle.alarmSoon(cap.minusSeconds(1), cap.plusSeconds(1), editedAt, activity, timeout));
+    assertFalse(Lifecycle.alarmSoon(cap, cap.plusSeconds(10), cap, activity, timeout));
   }
 
   @Test

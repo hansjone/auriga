@@ -50,8 +50,9 @@ public final class Lifecycle {
   /**
    * Whether an imminent alarm keeps a running instance up. Within one idle period any alarm counts
    * until {@code activity + timeout + 4 min}; after that only an alarm already reported before that
-   * deadline and due at most 4 minutes past it still counts, so a moving alarm can never extend the
-   * period (absolute cap: {@code activity + timeout + 8 min}).
+   * deadline, or too soon for a stop and pre-warm, still counts. Both must be due at most 4 minutes
+   * past the deadline, so a moving alarm can never extend the period (absolute cap: {@code activity
+   * + timeout + 8 min}).
    */
   public static boolean alarmSoon(
       Instant now, Instant nextWake, Instant reportedAt, Instant activity, Duration timeout) {
@@ -61,8 +62,9 @@ public final class Lifecycle {
     if (alarmBudgetAvailable(now, activity, timeout)) return true;
     Instant deadline = activity.plus(timeout).plus(MAX_ALARM_IDLE_EXTENSION);
     return reportedAt != null
-        && reportedAt.isBefore(deadline)
-        && !nextWake.isAfter(deadline.plus(MAX_ALARM_IDLE_EXTENSION));
+        && !nextWake.isAfter(deadline.plus(MAX_ALARM_IDLE_EXTENSION))
+        && (reportedAt.isBefore(deadline)
+            || !nextWake.isAfter(now.plus(MIN_STOPPED).plus(WAKE_LEAD)));
   }
 
   /**
