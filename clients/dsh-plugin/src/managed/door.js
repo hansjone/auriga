@@ -28,18 +28,6 @@ export function createReplayCache({
     }
   };
 
-  const evictOldest = () => {
-    let oldestKey;
-    let oldestExp = Infinity;
-    for (const [jti, exp] of seen) {
-      if (exp < oldestExp) {
-        oldestExp = exp;
-        oldestKey = jti;
-      }
-    }
-    if (oldestKey !== undefined) seen.delete(oldestKey);
-  };
-
   return {
     /**
      * @param {string} jti
@@ -50,11 +38,8 @@ export function createReplayCache({
       const t = now();
       purgeExpired(t);
       if (seen.has(jti)) return false;
-      while (seen.size >= maxSize) {
-        purgeExpired(t);
-        if (seen.size >= maxSize) evictOldest();
-        else break;
-      }
+      // Never evict live entries: pressure must not reopen a replay window.
+      if (seen.size >= maxSize) return false;
       seen.set(jti, exp + CLOCK_SKEW_SEC);
       return true;
     },
@@ -185,17 +170,23 @@ export async function verifyIdentityHeader(opts) {
  */
 export function createDoorLock(cfg) {
   const replay = cfg.replay ?? createReplayCache({ now: cfg.now });
+  // Only this door can admit a request; headers or request properties cannot.
+  const authenticated = new WeakSet();
   /** @type {undefined | (() => void)} */
   let onAuthenticated = cfg.onAuthenticated;
 
   /**
    * @param {{ method?: string, url?: string, headers?: Record<string, string | string[] | undefined> }} req
    */
-  async function check(req) {
+  async function check(req, upgrade = false) {
     try {
       const path = rawRequestPath(req.url);
       const method = String(req.method || 'GET').toUpperCase();
-      if (path === HEALTH_PATH && (method === 'GET' || method === 'HEAD')) {
+      if (
+        !upgrade &&
+        path === HEALTH_PATH &&
+        (method === 'GET' || method === 'HEAD')
+      ) {
         return { ok: /** @type {const} */ (true), bypass: true };
       }
 
@@ -222,6 +213,23 @@ export function createDoorLock(cfg) {
   }
 
   /**
+   * Mark a request the door let through. The health bypass is admitted too
+   * (so a native fence never turns readiness into 401) but is not counted as
+   * an interaction; it can only reach the plugin's exact health route.
+   */
+  function admit(req, result) {
+    if ('claims' in result && result.claims)
+      req.__aurigaIdentity = result.claims;
+    authenticated.add(req);
+    if (result.bypass) return;
+    try {
+      onAuthenticated?.();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
    * @param {import('node:http').Server} server
    */
   function install(server) {
@@ -238,16 +246,7 @@ export function createDoorLock(cfg) {
         void check(req)
           .then((result) => {
             if (result.ok) {
-              if ('claims' in result && result.claims)
-                req.__aurigaIdentity = result.claims;
-              // Health bypass is not a user interaction; identity-gated hits are.
-              if (!result.bypass) {
-                try {
-                  onAuthenticated?.();
-                } catch {
-                  /* ignore */
-                }
-              }
+              admit(req, result);
               original(event, ...args);
               return;
             }
@@ -265,18 +264,10 @@ export function createDoorLock(cfg) {
       if (event === 'upgrade') {
         const req = args[0];
         const socket = args[1];
-        void check(req)
+        void check(req, true)
           .then((result) => {
             if (result.ok) {
-              if ('claims' in result && result.claims)
-                req.__aurigaIdentity = result.claims;
-              if (!result.bypass) {
-                try {
-                  onAuthenticated?.();
-                } catch {
-                  /* ignore */
-                }
-              }
+              admit(req, result);
               original(event, ...args);
               return;
             }
@@ -304,6 +295,25 @@ export function createDoorLock(cfg) {
           });
         return false;
       }
+      if (event === 'checkContinue' || event === 'checkExpectation') {
+        // Only reachable when a host listener exists; never let it bypass the door.
+        const res = args[1];
+        try {
+          res.writeHead(417, { connection: 'close' });
+          res.end();
+        } catch {
+          /* ignore */
+        }
+        return false;
+      }
+      if (event === 'connect') {
+        try {
+          args[1]?.destroy?.();
+        } catch {
+          /* ignore */
+        }
+        return false;
+      }
       return original(event, ...args);
     };
     return () => {
@@ -314,6 +324,7 @@ export function createDoorLock(cfg) {
   return {
     check,
     install,
+    isAuthenticated: (req) => authenticated.has(req),
     replay,
     /** @param {undefined | (() => void)} fn */
     setOnAuthenticated(fn) {

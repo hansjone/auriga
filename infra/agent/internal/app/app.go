@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/observer"
 	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
+	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
@@ -158,15 +161,24 @@ func runAgent(args []string, logs io.Writer) error {
 	var prep *runtime.Preparing
 	if driverName != "fake" {
 		art := artifacts.New(cfg.ArtifactsDir(), pol)
+		surface, err := instanceSurfaceFromEnv()
+		if err != nil {
+			return err
+		}
+		if surface.PlatformURL == "" {
+			logger.Warn("AURIGA_AGENT_INSTANCE_PLATFORM_URL unset; managed plugins cannot send heartbeats")
+		}
 		prep = &runtime.Preparing{
-			Inner:       inner,
-			Specs:       store,
-			Artifacts:   art,
-			Layout:      &storage.Layout{InstancesDir: cfg.InstancesDir()},
-			UIDs:        storage.NewUIDTable(cfg.AgentDir()),
-			Policy:      pol,
-			PlatformURL: cfg.Server,
-			Chown:       storage.Lchown,
+			Inner:     inner,
+			Specs:     store,
+			Artifacts: art,
+			Layout:    &storage.Layout{InstancesDir: cfg.InstancesDir()},
+			UIDs:      storage.NewUIDTable(cfg.AgentDir()),
+			Policy:    pol,
+			// The instance-facing HTTP entry, never the gRPC control address.
+			PlatformURL:          surface.PlatformURL,
+			InstanceParentDomain: surface.ParentDomain,
+			Chown:                storage.Lchown,
 		}
 		if mat, loadErr := identity.Load(cfg.AgentDir()); loadErr == nil {
 			prep.SealingPrivate = mat.SealingPrivate
@@ -235,6 +247,37 @@ func artifactGCInterval() (time.Duration, error) {
 		return 0, fmt.Errorf("AURIGA_AGENT_ARTIFACT_GC_INTERVAL: invalid duration %q", raw)
 	}
 	return d, nil
+}
+
+// instanceSurface is what an instance is told about the platform around it.
+type instanceSurface struct {
+	PlatformURL  string
+	ParentDomain string
+}
+
+// instanceSurfaceFromEnv reads the instance-facing platform URL (the edge
+// internal entry reachable from the instance network) and the edge
+// instanceParentDomain. Both are separate from cfg.Server, the gRPC control
+// address, which instances neither reach nor speak.
+func instanceSurfaceFromEnv() (instanceSurface, error) {
+	out := instanceSurface{
+		PlatformURL:  strings.TrimSpace(os.Getenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL")),
+		ParentDomain: strings.TrimSpace(os.Getenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN")),
+	}
+	if out.PlatformURL != "" {
+		u, err := url.Parse(out.PlatformURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+			return instanceSurface{}, fmt.Errorf("AURIGA_AGENT_INSTANCE_PLATFORM_URL: want http(s)://host[:port]")
+		}
+		out.PlatformURL = strings.TrimSuffix(out.PlatformURL, "/")
+	}
+	if out.ParentDomain != "" {
+		if _, err := renderer.TrustedHosts("probe", out.ParentDomain); err != nil {
+			return instanceSurface{}, fmt.Errorf("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN: %w", err)
+		}
+	}
+	return out, nil
 }
 
 func ensureLayout(cfg config.Config) error {

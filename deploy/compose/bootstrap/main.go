@@ -32,7 +32,11 @@ import (
 func main() {
 	out := flag.String("out", "deploy/compose/var", "output directory")
 	image := flag.String("image", "", "docker image ref repo@sha256:… for fake DSH template")
+	fixture := flag.String("fixture", "fake", "DSH fixture: fake or real")
 	flag.Parse()
+	if *fixture != "fake" && *fixture != "real" {
+		fatalf("-fixture must be fake or real")
+	}
 	if *image == "" || !containsDigest(*image) {
 		fatalf("-image must be repo@sha256:…")
 	}
@@ -98,17 +102,23 @@ func main() {
 	writeFile(filepath.Join(*out, "ca-sha256.txt"), []byte(fp+"\n"), 0o644)
 
 	dig := digestOf(*image)
+	name, version := "fake-dsh", "0.0.0-fake"
+	memoryMB := int64(512)
+	if *fixture == "real" {
+		name, version = "real-dsh", "0.2.0-rc.2"
+		memoryMB = 1024
+	}
 	spec := &nodev1.InstanceSpec{
 		Runtime: nodev1.RuntimeKind_RUNTIME_KIND_DOCKER,
 		Resources: &nodev1.Resources{
 			CpuMillis: 500,
-			MemoryMb:  512,
+			MemoryMb:  memoryMB,
 			DiskGb:    1,
 			Pids:      128,
 		},
 		Dsh: &nodev1.DshRuntime{
-			Version:    "0.0.0-fake",
-			ArtifactId: "fake-dsh",
+			Version:    version,
+			ArtifactId: name,
 			Digest:     dig,
 			Image:      *image,
 			// WorkspaceTemplates requires hasSigned + non-empty signature (e2e placeholder).
@@ -117,15 +127,15 @@ func main() {
 				SigningKid: "e2e-artifact",
 				Statement: &nodev1.ArtifactStatement{
 					Purpose: "dsh_runtime",
-					Name:    "fake-dsh",
-					Version: "0.0.0-fake",
+					Name:    name,
+					Version: version,
 					Os:      "linux",
 					Arch:    "amd64",
 					Digest:  dig,
 				},
 			},
 		},
-		Profile: &nodev1.Profile{ListenPort: 7860},
+		Profile: profileFor(*fixture),
 		Secrets: &nodev1.Secrets{
 			IdentityKeys: []*nodev1.IdentityPublicKey{{
 				Kid:       kid,
@@ -133,13 +143,19 @@ func main() {
 				PublicKey: pub,
 			}},
 		},
-		Labels: map[string]string{"template": "fake-dsh-e2e"},
+		Labels: map[string]string{"template": name + "-e2e"},
 	}
 	raw, err := proto.Marshal(spec)
 	if err != nil {
 		fatalf("%v", err)
 	}
-	writeFile(filepath.Join(tpl, "fake-dsh.pb"), raw, 0o644)
+	// Do not leave two eligible templates when switching fixture on a clean stack.
+	for _, old := range []string{"fake-dsh.pb", "real-dsh.pb"} {
+		if err := os.Remove(filepath.Join(tpl, old)); err != nil && !os.IsNotExist(err) {
+			fatalf("remove stale template: %v", err)
+		}
+	}
+	writeFile(filepath.Join(tpl, name+".pb"), raw, 0o644)
 
 	edgeCfg := map[string]any{
 		"listen":               "0.0.0.0:8080",
@@ -154,11 +170,11 @@ func main() {
 			"org":       "http://127.0.0.1:8081",
 			"workspace": "http://127.0.0.1:8081",
 		},
-		"tls":               map[string]string{"mode": "off"},
-		"rateLimit":         map[string]any{"requestsPerSecond": 200, "burst": 400},
-		"identityKeysFile":  "/etc/auriga/identity-signing-keys.json",
-		"sessionStore": "nats",
-		"natsUrl":      "nats://sessions:e2e_nats_sessions@127.0.0.1:4222",
+		"tls":              map[string]string{"mode": "off"},
+		"rateLimit":        map[string]any{"requestsPerSecond": 200, "burst": 400},
+		"identityKeysFile": "/etc/auriga/identity-signing-keys.json",
+		"sessionStore":     "nats",
+		"natsUrl":          "nats://sessions:e2e_nats_sessions@127.0.0.1:4222",
 		"nodeTLS": map[string]string{
 			"certFile": "/etc/auriga/pki/edge.crt",
 			"keyFile":  "/etc/auriga/pki/edge.key",
@@ -169,14 +185,25 @@ func main() {
 
 	policy := map[string]any{
 		"allowedImageRepos": []string{"127.0.0.1:5000/auriga/", "localhost:5000/auriga/"},
-		"maxCPUMillis":         4000,
-		"maxMemoryMB":          4096,
-		"maxPIDs":              512,
-		"maxArtifactBytes":     64 << 20,
+		"maxCPUMillis":      4000,
+		"maxMemoryMB":       4096,
+		"maxPIDs":           512,
+		"maxArtifactBytes":  64 << 20,
 	}
 	writeYAMLish(filepath.Join(*out, "agent-policy.yaml"), policy)
 
 	fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s\n", *out, fp, *image)
+}
+
+// profileFor declares what the fixture build lacks. Pure DSH 0.2.0-rc.2 has no
+// IM service, so the managed plugin may report activeImBots as a known 0;
+// without this declaration it stays unknown and no heartbeat is sent.
+func profileFor(fixture string) *nodev1.Profile {
+	p := &nodev1.Profile{ListenPort: 7860}
+	if fixture == "real" {
+		p.Patches = []*nodev1.ConfigPatch{{Path: "plugins.auriga-dsh.imBots", ValueJson: `"none"`}}
+	}
+	return p
 }
 
 func containsDigest(image string) bool {

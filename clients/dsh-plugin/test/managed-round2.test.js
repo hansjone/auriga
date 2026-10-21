@@ -152,7 +152,13 @@ test('activity wires agents and terminals', async () => {
   const ctx = {
     get(name) {
       if (name === 'agents') return { list: () => [{ agent }] };
-      if (name === 'terminals') return { list: () => [{ id: 1 }, { id: 2 }] };
+      if (name === 'terminals')
+        return {
+          list: () => [
+            { id: 1, status: { kind: 'running' } },
+            { id: 2, status: { kind: 'running' } },
+          ],
+        };
       if (name === 'dshIm')
         return {
           listDeliveryCatalog: async () => ({

@@ -10,12 +10,12 @@ services:
       POSTGRES_USER: auriga_dev
       POSTGRES_PASSWORD: e2e_pg_super
     ports:
-      - "15432:5432"
+      - '15432:5432'
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U auriga_dev -d auriga"]
+      test: ['CMD-SHELL', 'pg_isready -U auriga_dev -d auriga']
       interval: 3s
       timeout: 5s
       retries: 30
@@ -23,15 +23,15 @@ services:
   nats:
     # alpine variant: official scratch image has no wget for healthchecks
     image: nats:2.10-alpine
-    command: ["-c", "/etc/nats/nats.conf"]
+    command: ['-c', '/etc/nats/nats.conf']
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - '4222:4222'
+      - '8222:8222'
     volumes:
       - ./nats/nats.conf:/etc/nats/nats.conf:ro
       - natsdata:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8222/healthz']
       interval: 3s
       timeout: 5s
       retries: 30
@@ -39,7 +39,7 @@ services:
   registry:
     image: registry:2
     ports:
-      - "5000:5000"
+      - '5000:5000'
 
   platform:
     build:
@@ -54,14 +54,14 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: combined,dev
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
-      AURIGA_PLATFORM_PORT: "8081"
+      AURIGA_PLATFORM_PORT: '8081'
       AURIGA_IAM_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_IAM_DB_USER: auriga_iam
       AURIGA_IAM_DB_PASSWORD: e2e_iam_only
       AURIGA_ORG_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_ORG_DB_USER: auriga_org
       AURIGA_ORG_DB_PASSWORD: e2e_org_only
-      AURIGA_WORKSPACE_ENABLED: "true"
+      AURIGA_WORKSPACE_ENABLED: 'true'
       AURIGA_WORKSPACE_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_WORKSPACE_DB_USER: auriga_workspace_app
       AURIGA_WORKSPACE_DB_PASSWORD: e2e_ws_app
@@ -84,14 +84,18 @@ services:
       AURIGA_WORKSPACE_TLS_PRIVATE_KEY_FILE: /etc/auriga/pki/workspace.key
       AURIGA_WORKSPACE_CONTROL_ENDPOINT: https://127.0.0.1:7443
       AURIGA_WORKSPACE_NODE_SERVER_HOST: 0.0.0.0
-      AURIGA_WORKSPACE_NODE_SERVER_PORT: "7443"
+      AURIGA_WORKSPACE_NODE_SERVER_PORT: '7443'
       AURIGA_WORKSPACE_TEMPLATES_DIRECTORY: /etc/auriga/templates
     volumes:
       - ./var/pki:/etc/auriga/pki:ro
       - ./var/templates:/etc/auriga/templates:ro
       - ./var/enrollment:/var/auriga
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8081/actuator/health || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'curl -sf http://127.0.0.1:8081/actuator/health || exit 1',
+        ]
       interval: 5s
       timeout: 5s
       retries: 60
@@ -107,9 +111,9 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
-    command: ["-config", "/etc/auriga/edge.config.json"]
+    command: ['-config', '/etc/auriga/edge.config.json']
     environment:
-      AURIGA_EDGE_ALLOW_LOCAL_INGRESS: "true"
+      AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
     volumes:
       - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
       - ./var/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
@@ -132,13 +136,18 @@ services:
       AURIGA_AGENT_DATA_ROOT: /var/lib/auriga
       AURIGA_AGENT_SERVER: https://127.0.0.1:7443
       AURIGA_AGENT_CA_SHA256: ${AURIGA_AGENT_CA_SHA256}
-      AURIGA_AGENT_ALLOW_INSECURE: "true"
+      AURIGA_AGENT_ALLOW_INSECURE: 'true'
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       # Own directory shared with the edge (distroless nonroot gid 65532); the agent dir stays 0700.
       AURIGA_AGENT_INGRESS_LOCAL: /var/lib/auriga/ingress/ingress.sock
-      AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
+      AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
+      # Instance-facing platform entry (heartbeat); must be reachable from the
+      # per-instance internal network. Unset in CI fake mode (fake DSH sends none).
+      AURIGA_AGENT_INSTANCE_PLATFORM_URL: ${AURIGA_AGENT_INSTANCE_PLATFORM_URL:-}
+      # Same value as edge instanceParentDomain: rendered into DSH trustedHosts.
+      AURIGA_AGENT_INSTANCE_PARENT_DOMAIN: i.example.com
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

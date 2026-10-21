@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
-	"gopkg.in/yaml.v3"
 )
 
 // Container paths for files mounted read-only at /run/auriga.
@@ -41,11 +40,16 @@ type Result struct {
 
 // Options controls where files are written.
 type Options struct {
-	MetaDir        string
-	HomeDir        string
-	PlatformURL    string
-	SealingPrivate [32]byte
-	RestrictFile   func(path string) error
+	MetaDir string
+	HomeDir string
+	// PlatformURL is the instance-facing HTTP(S) base of the platform (edge
+	// internal entry). It is not the agent's gRPC control address.
+	PlatformURL string
+	// InstanceParentDomain is the edge's instanceParentDomain; the instance
+	// host <instanceId>.<domain> is written into DSH and plugin trustedHosts.
+	InstanceParentDomain string
+	SealingPrivate       [32]byte
+	RestrictFile         func(path string) error
 	// OwnerUID/GID set after write for secret files (0 = skip).
 	OwnerUID int
 	OwnerGID int
@@ -94,7 +98,7 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	cordisPath := filepath.Join(opt.MetaDir, "cordis.patch.yml")
-	cordisRaw, err := buildCordisPatch(spec)
+	cordisRaw, err := buildCordisPatch(spec, opt)
 	if err != nil {
 		return Result{}, err
 	}
@@ -180,110 +184,6 @@ func buildPackageJSON(spec *nodev1.InstanceSpec) []byte {
 	}
 	raw, _ := json.MarshalIndent(doc, "", "  ")
 	return append(raw, '\n')
-}
-
-func buildCordisPatch(spec *nodev1.InstanceSpec) ([]byte, error) {
-	doc := map[string]any{}
-	port := uint32(7860)
-	if spec.GetProfile() != nil && spec.Profile.ListenPort != 0 {
-		port = spec.Profile.ListenPort
-	}
-	doc["server"] = map[string]any{"host": "127.0.0.1", "port": int(port)}
-	doc["plugins"] = map[string]any{
-		"auriga-dsh": map[string]any{
-			"mode":                 "managed",
-			"disableNativeInstall": true,
-		},
-	}
-	if prof := spec.GetProfile(); prof != nil {
-		for _, p := range prof.Patches {
-			if p == nil {
-				continue
-			}
-			if err := validatePatch(p.Path, p.ValueJson); err != nil {
-				return nil, err
-			}
-		}
-		if len(prof.Patches) > 0 {
-			patches := make([]map[string]string, 0, len(prof.Patches))
-			for _, p := range prof.Patches {
-				if p == nil {
-					continue
-				}
-				patches = append(patches, map[string]string{"path": p.Path, "valueJson": p.ValueJson})
-			}
-			doc["aurigaPatches"] = patches
-		}
-		if len(prof.McpServers) > 0 {
-			mcp := map[string]any{}
-			for _, name := range sortedKeysMap(prof.McpServers) {
-				if err := rejectUnsafeString("mcp.name", name); err != nil {
-					return nil, err
-				}
-				srv := prof.McpServers[name]
-				if err := rejectUnsafeString("mcp.url", srv.GetUrl()); err != nil {
-					return nil, err
-				}
-				tokenFile := ContainerInstanceToken
-				if srv.GetTokenRef() == nodev1.TokenRef_TOKEN_REF_AI_GATEWAY_TOKEN {
-					tokenFile = ContainerAIGatewayToken
-				}
-				mcp[name] = map[string]any{
-					"url":       srv.GetUrl(),
-					"transport": "streamable-http",
-					"headers": map[string]string{
-						// Token is read from a file path; value is not embedded.
-						"Authorization": "Bearer ${file:" + tokenFile + "}",
-					},
-				}
-			}
-			doc["mcpServers"] = mcp
-		}
-		if len(prof.ModelProviders) > 0 {
-			mps := map[string]any{}
-			for _, name := range sortedKeysMap(prof.ModelProviders) {
-				if err := rejectUnsafeString("model.name", name); err != nil {
-					return nil, err
-				}
-				mp := prof.ModelProviders[name]
-				if err := rejectUnsafeString("model.baseUrl", mp.GetBaseUrl()); err != nil {
-					return nil, err
-				}
-				tokenFile := ContainerInstanceToken
-				if mp.GetTokenRef() == nodev1.TokenRef_TOKEN_REF_AI_GATEWAY_TOKEN {
-					tokenFile = ContainerAIGatewayToken
-				}
-				entry := map[string]any{
-					"baseUrl": mp.GetBaseUrl(),
-					"apiKey":  "${file:" + tokenFile + "}",
-				}
-				if len(mp.Models) > 0 {
-					models := make([]map[string]any, 0, len(mp.Models))
-					for _, m := range mp.Models {
-						if err := rejectUnsafeString("model.id", m.GetId()); err != nil {
-							return nil, err
-						}
-						if err := rejectUnsafeString("model.displayName", m.GetDisplayName()); err != nil {
-							return nil, err
-						}
-						item := map[string]any{"id": m.GetId()}
-						if m.GetDisplayName() != "" {
-							item["displayName"] = m.GetDisplayName()
-						}
-						models = append(models, item)
-					}
-					entry["models"] = models
-				}
-				mps[name] = entry
-			}
-			doc["modelProviders"] = mps
-		}
-	}
-	raw, err := yaml.Marshal(doc)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
 }
 
 func buildIdentityKeys(spec *nodev1.InstanceSpec) []byte {

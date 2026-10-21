@@ -73,14 +73,15 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 	}
 	var chowned int
 	prep := &runtime.Preparing{
-		Inner:          inner,
-		Specs:          specs,
-		Artifacts:      art,
-		Layout:         layout,
-		UIDs:           uids,
-		Policy:         policy.Default(),
-		SealingPrivate: priv,
-		PlatformURL:    "https://edge.example.com",
+		Inner:                inner,
+		Specs:                specs,
+		Artifacts:            art,
+		Layout:               layout,
+		UIDs:                 uids,
+		Policy:               policy.Default(),
+		SealingPrivate:       priv,
+		PlatformURL:          "https://edge.example.com",
+		InstanceParentDomain: "i.example.com",
 		Chown: func(path string, uid, gid int) error {
 			chowned++
 			if uid < 200000 {
@@ -99,6 +100,14 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 	got, err := os.ReadFile(tokenPath)
 	if err != nil || string(got) != "tok" {
 		t.Fatalf("token %q %v", got, err)
+	}
+	patch, err := os.ReadFile(filepath.Join(root, "instances", "prep1", "meta", "cordis.patch.yml"))
+	if err != nil || !strings.Contains(string(patch), "prep1.i.example.com") {
+		t.Fatalf("instance parent domain not passed to renderer: %v", err)
+	}
+	envFile, err := os.ReadFile(filepath.Join(root, "instances", "prep1", "meta", "env"))
+	if err != nil || !strings.Contains(string(envFile), "AURIGA_PLATFORM_URL=https://edge.example.com\n") {
+		t.Fatalf("instance platform URL not passed to renderer: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(art.Root, "sha256", hex.EncodeToString(sum[:]))); err != nil {
 		t.Fatal("artifact missing:", err)

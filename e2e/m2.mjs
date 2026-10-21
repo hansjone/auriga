@@ -12,7 +12,7 @@ import {
   mkdtempSync,
   rmSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -30,6 +30,11 @@ import {
 } from './lib/assert.mjs';
 import { openWebSocket } from './lib/ws-client.mjs';
 import { waitInstancePage } from './lib/instance-page.mjs';
+import {
+  realDshPageOk,
+  identitySigner,
+  probeRealDoor,
+} from './lib/real-dsh.mjs';
 
 const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
 const PLATFORM = process.env.PLATFORM_BASE || 'http://127.0.0.1:8081';
@@ -43,6 +48,12 @@ const JOIN_TOKEN_FILE =
 const AGENT_DATA = process.env.AGENT_DATA_ROOT || '';
 const AGENT_VOLUME = process.env.AGENT_VOLUME || '';
 const IDLE_MINUTES = Number(process.env.IDLE_MINUTES || 5);
+const FIXTURE = process.env.DSH_FIXTURE || 'fake';
+if (!['fake', 'real'].includes(FIXTURE))
+  throw new Error('DSH_FIXTURE must be fake or real');
+const instancePageOk = FIXTURE === 'real' ? realDshPageOk : edgeInstanceOk;
+const WS_PATH = FIXTURE === 'real' ? '/api/remote.mux' : '/ws';
+const evidence = { fixture: FIXTURE, status: 'failed', checks: [] };
 
 /** @type {{ admin: CookieJar, portal: CookieJar, instance: CookieJar }} */
 const jars = {
@@ -58,10 +69,12 @@ const tempDirs = [];
 const openSockets = [];
 
 function step(name) {
+  evidence.currentStep = name;
   console.log(`\n==> STEP: ${name}`);
 }
 
 function fail(stepName, detail, extra) {
+  evidence.failedStep = stepName;
   console.error(`FAIL at ${stepName}: ${safeSummary(detail)}`);
   if (extra !== undefined) console.error(safeSummary(extra));
   process.exitCode = 1;
@@ -80,9 +93,7 @@ async function req(path, opts = {}) {
   const host = opts.host || PORTAL_HOST;
   const base = new URL(opts.base || EDGE);
   const u = new URL(path, base);
-  const jar =
-    opts.jar ||
-    jarForHost(host, hosts, jars);
+  const jar = opts.jar || jarForHost(host, hosts, jars);
   /** @type {Record<string, string>} */
   const headers = {
     host,
@@ -360,7 +371,11 @@ async function createJoinTokenAndWaitNode() {
         method: 'PATCH',
         csrf: true,
         contentType: 'application/merge-patch+json',
-        json: { labels: { template: 'fake-dsh-e2e' } },
+        json: {
+          labels: {
+            template: `${FIXTURE === 'real' ? 'real' : 'fake'}-dsh-e2e`,
+          },
+        },
       });
       if (patch.status !== 200)
         fail('label-node', `status ${patch.status}`, patch.body);
@@ -454,7 +469,7 @@ async function accessViaEdge(instanceId, portalJar, instanceJar, deadline) {
   try {
     await waitInstancePage(
       (timeoutMs) => req('/', { host, jar: iJar, timeoutMs }),
-      edgeInstanceOk,
+      instancePageOk,
       { deadline: Math.min(deadline ?? Infinity, Date.now() + 15_000) },
     );
   } catch (error) {
@@ -471,13 +486,168 @@ async function accessViaEdge(instanceId, portalJar, instanceJar, deadline) {
   return { host, instanceJar: iJar, portalJar: pJar };
 }
 
-function dockerInspectRunning(instanceId) {
-  const name = `auriga-inst-${instanceId}`;
-  const r = spawnSync(
+async function verifyRealHost(instanceId, instance) {
+  step('verify immutable real runtime and direct plugin door');
+  const metadata = JSON.parse(
+    readFileSync('deploy/compose/var/real-dsh.json', 'utf8'),
+  );
+  const container = `auriga-inst-${instanceId}`;
+  const inspected = spawnSync('docker', ['inspect', container], {
+    encoding: 'utf8',
+  });
+  if (inspected.status !== 0)
+    fail('real-runtime', 'cannot inspect real instance');
+  const info = JSON.parse(inspected.stdout)[0];
+  if (
+    info.Config.Image !== metadata.image ||
+    metadata.dshVersion !== '0.2.0-rc.2' ||
+    metadata.nodeVersion !== '22.19.0' ||
+    metadata.target !== 'linux/amd64'
+  ) {
+    fail(
+      'real-runtime',
+      'instance image/version differs from pinned build metadata',
+    );
+  }
+  const runtime = spawnSync(
     'docker',
-    ['inspect', '-f', '{{.State.Running}}', name],
+    [
+      'exec',
+      container,
+      'node',
+      '-e',
+      'const m=require("/opt/fixture/manifest.json");process.stdout.write(JSON.stringify({dshVersion:m.dshVersion,nodeVersion:process.versions.node,pluginVersion:m.pluginVersion,lockSha256:m.lockSha256}))',
+    ],
     { encoding: 'utf8' },
   );
+  if (runtime.status !== 0)
+    fail('real-runtime', 'real image manifest unavailable');
+  const actual = JSON.parse(runtime.stdout);
+  for (const field of [
+    'dshVersion',
+    'nodeVersion',
+    'pluginVersion',
+    'lockSha256',
+  ]) {
+    if (actual[field] !== metadata[field])
+      fail('real-runtime', `manifest mismatch: ${field}`);
+  }
+  evidence.runtime = { image: metadata.image, ...actual };
+  const published = info.NetworkSettings.Ports?.['7860/tcp']?.[0];
+  const ip =
+    info.NetworkSettings.Networks?.[`auriga-net-${instanceId}`]?.IPAddress;
+  const direct = published
+    ? `http://127.0.0.1:${published.HostPort}`
+    : ip
+      ? `http://${ip}:7860`
+      : '';
+  if (!direct) fail('real-runtime', 'no direct container endpoint');
+  const host = `${instanceId}.i.example.com`;
+  const directRequest = (path, options = {}) =>
+    req(path, {
+      base: direct,
+      host,
+      jar: new CookieJar(),
+      method: options.method,
+      headers: options.identity ? { 'Auriga-Identity': options.identity } : {},
+    });
+  const signer = identitySigner({
+    keysFile: 'deploy/compose/var/identity-signing-keys.json',
+    instanceId,
+    ownerId: instance.ownerId,
+    tenantId: instance.tenantId,
+  });
+  evidence.door = await probeRealDoor(
+    directRequest,
+    signer,
+    actual.pluginVersion,
+  );
+  evidence.checks.push('direct-real-door-and-health');
+
+  // While activity is "active" (connectedClients/terminals/turns > 0) the
+  // platform projects lastActivityAt = now on every heartbeat, which would
+  // make the interaction step pass without lastInteractionAt. Quiet windows
+  // reject that interference when heartbeats arrive, but cannot establish the
+  // raw counts or even heartbeat delivery. This remains projection evidence.
+  const quietWindow = async (label) => {
+    const start = await req(`/api/workspace/v1/instances/${instanceId}`, {
+      host: ADMIN_HOST,
+    });
+    const stable = start.body?.lastActivityAt;
+    const quietUntil = Date.now() + 40_000;
+    while (Date.now() < quietUntil) {
+      await directRequest('/_auriga/health');
+      const response = await req(`/api/workspace/v1/instances/${instanceId}`, {
+        host: ADMIN_HOST,
+      });
+      if (response.body?.lastActivityAt !== stable) {
+        fail(
+          label,
+          'activity advanced without a user request (active counts, health polling or host refresh)',
+        );
+      }
+      await sleep(3000);
+    }
+    return start;
+  };
+  step('real platform activity projection must stay quiet before interaction');
+  const before = await quietWindow('real-quiet-before');
+  evidence.checks.push('real-quiet-before-interaction');
+
+  step(
+    'real user page request must advance the platform interaction projection',
+  );
+  // Plugin timestamps have second precision; make the new action distinguishable.
+  const prior = Date.parse(before.body?.lastActivityAt);
+  const clockDeadline = Date.now() + 5000;
+  while (Date.now() <= prior + 1000 && Date.now() < clockDeadline) {
+    await sleep(100);
+  }
+  const started = Date.now();
+  const page = await req('/', { host, jar: jars.instance });
+  if (!realDshPageOk(page))
+    fail('real-interaction', 'user request did not reach DSH');
+  let observed;
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    const response = await req(`/api/workspace/v1/instances/${instanceId}`, {
+      host: ADMIN_HOST,
+    });
+    if (
+      Date.parse(response.body?.lastActivityAt) >= started - 1000 &&
+      (Number.isNaN(prior) || Date.parse(response.body?.lastActivityAt) > prior)
+    ) {
+      observed = response.body.lastActivityAt;
+      break;
+    }
+    await sleep(3000);
+  }
+  if (!observed)
+    fail(
+      'real-interaction',
+      'no real heartbeat interaction observed; check unknown host counters and agent platform URL; synthetic heartbeats are forbidden',
+    );
+  evidence.interaction = {
+    before: before.body.lastActivityAt,
+    after: observed,
+    source:
+      'quiet window -> real GET / -> platform lastActivityAt projection -> quiet window',
+    rawHeartbeatVerified: false,
+    limitation:
+      'Raw heartbeat counts and lastInteractionAt are not observed; projection alone cannot complete W3 interaction acceptance.',
+  };
+  // Direct unauthenticated health polling must not advance the activity clock.
+  const after = await quietWindow('real-static-heartbeat');
+  if (after.body?.lastActivityAt !== observed)
+    fail('real-static-heartbeat', 'activity moved after the interaction');
+  evidence.checks.push('real-interaction-projection-and-static-health');
+}
+
+function dockerInspectRunning(instanceId) {
+  const name = `auriga-inst-${instanceId}`;
+  const r = spawnSync('docker', ['inspect', '-f', '{{.State.Running}}', name], {
+    encoding: 'utf8',
+  });
   if (r.status !== 0) {
     const detail = (r.stderr || r.stdout || '').trim();
     // Removed container is not running (idle reclaim may remove after stop).
@@ -664,11 +834,7 @@ async function waitPhase(instanceId, want, timeoutMs) {
       csrf: true,
     });
     if (g.status !== 200) {
-      console.log(
-        '  get instance status',
-        g.status,
-        safeSummary(g.body, 160),
-      );
+      console.log('  get instance status', g.status, safeSummary(g.body, 160));
       if (g.status === 401) await loginEmergency(ADMIN_HOST);
       await sleep(5000);
       continue;
@@ -703,10 +869,15 @@ async function waitStoppedStrict(instanceId) {
     );
   }
   console.log('container stopped (Running=false)');
+  evidence.stopped = {
+    phase: body.phase,
+    running: insp.running,
+    inspect: insp.field,
+  };
 
   const host = `${instanceId}.i.example.com`;
   const page = await req('/', { host, jar: jars.instance });
-  if (edgeInstanceOk(page)) {
+  if (instancePageOk(page)) {
     fail(
       'idle-stop-edge',
       `edge still returned healthy instance response status=${page.status}`,
@@ -717,6 +888,7 @@ async function waitStoppedStrict(instanceId) {
     page.status,
     ')',
   );
+  evidence.stopped.edgeStatus = page.status;
   return body;
 }
 
@@ -732,7 +904,14 @@ async function waitWakeStrict(instanceId) {
     if (g.status === 401) await loginEmergency(ADMIN_HOST);
     const phase = String(g.body?.phase || '').toLowerCase();
     const desired = String(g.body?.desired || '').toLowerCase();
-    console.log('  phase=', phase, 'desired=', desired, 'ready=', g.body?.ready);
+    console.log(
+      '  phase=',
+      phase,
+      'desired=',
+      desired,
+      'ready=',
+      g.body?.ready,
+    );
     if (instanceReadyRunning(g.body)) {
       const insp = dockerInspectRunning(instanceId);
       if (!insp.ok || !insp.running) {
@@ -743,6 +922,12 @@ async function waitWakeStrict(instanceId) {
       // Re-redeem / access via edge after wake.
       jars.instance.clear();
       await accessViaEdge(instanceId, undefined, undefined, deadline);
+      evidence.woken = {
+        phase: g.body.phase,
+        ready: g.body.ready,
+        running: insp.running,
+        edge: 'page predicate passed',
+      };
       console.log('alarm wake ok (phase=running ready, container up, edge ok)');
       return g.body;
     }
@@ -775,29 +960,35 @@ async function revokeDualSession(instanceId) {
   await accessViaEdge(instanceId, portalA, instanceA);
   const host = `${instanceId}.i.example.com`;
   const pageA = await req('/', { host, jar: instanceA });
-  if (!edgeInstanceOk(pageA)) {
+  if (!instancePageOk(pageA)) {
     fail('revoke-A', `instance HTTP before revoke ${pageA.status}`);
   }
 
   const edge = edgeUrl();
   const cookieHdr = instanceA.cookieHeader({
     host,
-    path: '/ws',
+    path: WS_PATH,
     secure: edge.protocol === 'https:',
   });
   const ws = await openWebSocket({
     hostname: edge.hostname,
     port: Number(edge.port || (edge.protocol === 'https:' ? 443 : 80)),
-    path: '/ws',
+    path: WS_PATH,
     hostHeader: host,
     headers: cookieHdr ? { Cookie: cookieHdr } : {},
     timeoutMs: 20_000,
+    keepAliveMs: FIXTURE === 'real' ? 1000 : 0,
   });
   openSockets.push(ws);
-  const ping = `ping-${randomBytes(4).toString('hex')}`;
-  ws.sendText(ping);
-  const echo = await ws.readTextFrame(10_000);
-  if (echo !== ping) fail('revoke-ws', `echo mismatch got=${safeSummary(echo)}`);
+  if (FIXTURE === 'fake') {
+    const ping = `ping-${randomBytes(4).toString('hex')}`;
+    ws.sendText(ping);
+    const echo = await ws.readTextFrame(10_000);
+    if (echo !== ping)
+      fail('revoke-ws', `echo mismatch got=${safeSummary(echo)}`);
+  } else if (await ws.waitClosed(1000)) {
+    fail('revoke-ws', 'real DSH transport closed before revoke');
+  }
   console.log('session A HTTP+WS ok');
 
   // Fresh portal session B (same emergency account) revokes A by id.
@@ -819,11 +1010,15 @@ async function revokeDualSession(instanceId) {
   console.log('revoke DELETE status', del.status);
 
   const closed = await ws.waitClosed(30_000);
-  if (!closed) fail('revoke-ws', 'websocket did not close within 30s after revoke');
-  console.log('session A websocket closed after revoke');
+  if (!closed)
+    fail('revoke-ws', 'websocket did not close within 30s after revoke');
+  // Edge revocation cuts the proxied TCP stream; a DSH Close frame instead
+  // (timeout/error) is recorded so the cause is not silently attributed.
+  evidence.revokeClose = { peerClose: ws.peerClose?.() ?? null };
+  console.log('session A websocket closed after revoke', evidence.revokeClose);
 
   const pageAfter = await req('/', { host, jar: instanceA });
-  if (pageAfter.status < 400 || edgeInstanceOk(pageAfter)) {
+  if (pageAfter.status < 400 || instancePageOk(pageAfter)) {
     fail(
       'revoke-http',
       `revoked instance cookie still accepted status=${pageAfter.status}`,
@@ -872,24 +1067,30 @@ function cleanup() {
 }
 
 async function main() {
-  console.log('M2 e2e', { EDGE, PLATFORM, IDLE_MINUTES });
+  console.log('M2 e2e', { EDGE, PLATFORM, IDLE_MINUTES, FIXTURE });
   try {
     await loginEmergency(ADMIN_HOST);
     await setIdlePolicy();
     await createJoinTokenAndWaitNode();
     const instanceId = await openInstance();
-    await waitReady(instanceId);
+    const instance = await waitReady(instanceId);
     await accessViaEdge(instanceId);
 
-    step('locate instance.token');
+    if (FIXTURE === 'real') await verifyRealHost(instanceId, instance);
+
+    step(
+      FIXTURE === 'real'
+        ? 'real plugin owns heartbeats (no synthetic idle)'
+        : 'locate instance.token',
+    );
     let token = null;
     const tokenDeadline = Date.now() + 120_000;
-    while (Date.now() < tokenDeadline) {
+    while (FIXTURE === 'fake' && Date.now() < tokenDeadline) {
       token = findInstanceToken(instanceId);
       if (token) break;
       await sleep(3000);
     }
-    if (!token) {
+    if (FIXTURE === 'fake' && !token) {
       fail(
         'heartbeat',
         'missing instance.token; set AGENT_VOLUME or AGENT_DATA_ROOT',
@@ -903,7 +1104,7 @@ async function main() {
     step(`idle heartbeats ~${IDLE_MINUTES + 1.5} min`);
     const idleUntil = Date.now() + (IDLE_MINUTES * 60 + 90) * 1000;
     while (Date.now() < idleUntil) {
-      await heartbeatIdle(token);
+      if (FIXTURE === 'fake') await heartbeatIdle(token);
       await sleep(15_000);
     }
 
@@ -913,9 +1114,26 @@ async function main() {
     await waitWakeStrict(instanceId);
 
     await revokeDualSession(instanceId);
-    console.log('\nM2 e2e PASSED');
+    evidence.status = 'passed';
+    evidence.checks.push(
+      'idle-phase-container-edge',
+      'wake-phase-container-edge',
+      'dual-session-revoke',
+    );
+    console.log(`\nM2 e2e PASSED (${FIXTURE} DSH)`);
   } finally {
     cleanup();
+    if (FIXTURE === 'real') {
+      if (evidence.status !== 'passed' && !evidence.failedStep) {
+        evidence.failedStep = evidence.currentStep;
+      }
+      const file =
+        process.env.W3_EVIDENCE_FILE || 'deploy/compose/var/w3-evidence.json';
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify(evidence, null, 2) + '\n', {
+        mode: 0o600,
+      });
+    }
   }
 }
 

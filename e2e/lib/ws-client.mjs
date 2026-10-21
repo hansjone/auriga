@@ -13,6 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
  *   hostHeader: string,
  *   headers?: Record<string, string>,
  *   timeoutMs?: number,
+ *   keepAliveMs?: number,
  * }} opts
  */
 export async function openWebSocket(opts) {
@@ -31,7 +32,10 @@ export async function openWebSocket(opts) {
   });
 
   await new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('ws connect timeout')), timeoutMs);
+    const t = setTimeout(
+      () => reject(new Error('ws connect timeout')),
+      timeoutMs,
+    );
     socket.once('connect', () => {
       clearTimeout(t);
       resolve();
@@ -56,7 +60,7 @@ export async function openWebSocket(opts) {
   req += '\r\n';
   socket.write(req);
 
-  const { status, rest } = await readHttpResponse(socket, timeoutMs);
+  const { status, head, rest } = await readHttpResponse(socket, timeoutMs);
   if (status !== 101) {
     socket.destroy();
     throw new Error(`ws upgrade status ${status}`);
@@ -64,8 +68,23 @@ export async function openWebSocket(opts) {
   const expect = createHash('sha1')
     .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
     .digest('base64');
-  // Accept header already consumed in status parse; frame buffer starts at rest.
+  const accepted = /^sec-websocket-accept:\s*(\S+)\s*$/im.exec(head)?.[1];
+  if (accepted !== expect) {
+    socket.destroy();
+    throw new Error('ws invalid Sec-WebSocket-Accept');
+  }
   let buf = rest;
+  /** Close frame status seen in keepalive mode (null: none / no code). */
+  let peerClose = null;
+  // Real DSH's transport expects Pong liveness, even when this harness does
+  // not open an application stream. RFC 6455 permits unsolicited Pong frames.
+  // Keepalive mode owns the socket's reads: never mix it with readTextFrame.
+  const stopKeepalive =
+    opts.keepAliveMs > 0
+      ? startControlKeepalive(socket, opts.keepAliveMs, rest, (code) => {
+          peerClose = { code };
+        })
+      : () => {};
 
   function sendText(text) {
     const payload = Buffer.from(String(text), 'utf8');
@@ -84,7 +103,10 @@ export async function openWebSocket(opts) {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
       while (buf.length < 2) {
-        buf = Buffer.concat([buf, await readChunk(socket, deadline - Date.now())]);
+        buf = Buffer.concat([
+          buf,
+          await readChunk(socket, deadline - Date.now()),
+        ]);
       }
       const b0 = buf[0];
       const b1 = buf[1];
@@ -94,14 +116,20 @@ export async function openWebSocket(opts) {
       let off = 2;
       if (len === 126) {
         while (buf.length < 4) {
-          buf = Buffer.concat([buf, await readChunk(socket, deadline - Date.now())]);
+          buf = Buffer.concat([
+            buf,
+            await readChunk(socket, deadline - Date.now()),
+          ]);
         }
         len = buf.readUInt16BE(2);
         off = 4;
       }
       const maskLen = masked ? 4 : 0;
       while (buf.length < off + maskLen + len) {
-        buf = Buffer.concat([buf, await readChunk(socket, deadline - Date.now())]);
+        buf = Buffer.concat([
+          buf,
+          await readChunk(socket, deadline - Date.now()),
+        ]);
       }
       let payload = buf.subarray(off + maskLen, off + maskLen + len);
       if (masked) {
@@ -120,14 +148,12 @@ export async function openWebSocket(opts) {
   }
 
   async function waitClosed(ms) {
-    const raced = await Promise.race([
-      closed,
-      sleep(ms).then(() => 'timeout'),
-    ]);
+    const raced = await Promise.race([closed, sleep(ms).then(() => 'timeout')]);
     return raced !== 'timeout';
   }
 
   function close() {
+    stopKeepalive();
     try {
       socket.end();
     } catch {
@@ -140,7 +166,97 @@ export async function openWebSocket(opts) {
     }
   }
 
-  return { sendText, readTextFrame, waitClosed, close, expectAccept: expect };
+  return {
+    sendText,
+    readTextFrame,
+    waitClosed,
+    close,
+    expectAccept: expect,
+    /** null when the transport ended without a peer Close frame (e.g. edge cut TCP). */
+    peerClose: () => peerClose,
+  };
+}
+
+/** Keep a control-only native transport alive; application frames are discarded. */
+export function startControlKeepalive(
+  socket,
+  intervalMs,
+  initial = Buffer.alloc(0),
+  onPeerClose = () => {},
+) {
+  function controlFrame(opcode, payload = Buffer.alloc(0)) {
+    const mask = randomBytes(4);
+    const frame = Buffer.alloc(6 + payload.length);
+    frame[0] = 0x80 | opcode;
+    frame[1] = 0x80 | payload.length;
+    mask.copy(frame, 2);
+    for (let i = 0; i < payload.length; i++)
+      frame[i + 6] = payload[i] ^ mask[i % 4];
+    return frame;
+  }
+  let pending = Buffer.alloc(0);
+  const timer = setInterval(() => {
+    if (socket.destroyed) return;
+    // Client control frames are masked, including an empty Pong payload.
+    socket.write(controlFrame(0x0a));
+  }, intervalMs);
+  timer.unref?.();
+  const stop = () => {
+    clearInterval(timer);
+    socket.off('close', stop);
+    socket.off('data', consume);
+  };
+  function consume(chunk) {
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= 2) {
+      const opcode = pending[0] & 0x0f;
+      let length = pending[1] & 0x7f;
+      let offset = 2;
+      if (length === 126) {
+        if (pending.length < 4) return;
+        length = pending.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (pending.length < 10) return;
+        const large = pending.readBigUInt64BE(2);
+        if (large > 1024n * 1024n) {
+          socket.destroy();
+          return;
+        }
+        length = Number(large);
+        offset = 10;
+      }
+      if (
+        pending[1] & 0x80 ||
+        length > 1024 * 1024 ||
+        (opcode >= 8 && (!(pending[0] & 0x80) || length > 125))
+      ) {
+        socket.destroy();
+        return;
+      }
+      if (pending.length < offset + length) return;
+      const payload = pending.subarray(offset, offset + length);
+      pending = pending.subarray(offset + length);
+      if (opcode === 0x09) socket.write(controlFrame(0x0a, payload));
+      if (opcode === 0x08) {
+        // A peer Close already means this transport is no longer alive.
+        try {
+          onPeerClose(payload.length >= 2 ? payload.readUInt16BE(0) : null);
+        } catch {
+          /* ignore */
+        }
+        stop();
+        socket.end(controlFrame(0x08, payload), () => socket.destroy());
+        return;
+      }
+    }
+  }
+  socket.once('close', stop);
+  socket.on('data', consume);
+  consume(initial);
+  // Consume server Ping/Close frames so a FIN cannot wait behind unread data.
+  socket.resume();
+  return stop;
 }
 
 /**

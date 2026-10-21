@@ -15,6 +15,7 @@ import { checkProtocol } from './protocol.js';
  *   healthOk?: () => boolean,
  *   onProtocol?: (info: { current: number, minSupported: number }) => void,
  *   refreshActivity?: () => void | Promise<void>,
+ *   onSkip?: (unknownFields: string[]) => void,
  * }} opts
  */
 export function createHeartbeatClient(opts) {
@@ -25,18 +26,38 @@ export function createHeartbeatClient(opts) {
   let stopped = false;
   let nextHeartbeatSeconds = Math.round((opts.intervalMs ?? 30_000) / 1000);
   let backoffSeconds = 0;
+  let lastSkipKey = '';
 
   async function send() {
     if (stopped) return { ok: false, status: 0, skipped: true };
     try {
       if (opts.refreshActivity) await opts.refreshActivity();
-      const token = await opts.getInstanceToken();
       const activity = opts.activity.snapshot();
-      const problems = activity.unknownFields.map(
-        (f) => `activity.${f}.unknown`,
-      );
-      const healthOk =
-        (opts.healthOk ? opts.healthOk() : true) && activity.allKnown;
+      // Protocol v1 requires all four integers and cannot encode unknown.
+      // Do not fabricate idle zeros or send an invalid/null contract payload.
+      if (!activity.allKnown) {
+        const key = activity.unknownFields.join(',');
+        if (key !== lastSkipKey) {
+          lastSkipKey = key;
+          // Field names only: no counts, ids or tokens.
+          try {
+            opts.onSkip?.(activity.unknownFields);
+          } catch {
+            /* ignore */
+          }
+        }
+        return {
+          ok: false,
+          status: 0,
+          skipped: true,
+          unknownFields: activity.unknownFields,
+        };
+      }
+      lastSkipKey = '';
+      const token = await opts.getInstanceToken();
+      // Unknown activity never reaches here (skipped above), so health only
+      // reflects the host check; v1 has no field for unknown counts.
+      const healthOk = opts.healthOk ? opts.healthOk() : true;
       const body = {
         pluginVersion: opts.pluginVersion,
         dshVersion: opts.dshVersion,
@@ -49,10 +70,7 @@ export function createHeartbeatClient(opts) {
             ? { lastInteractionAt: activity.lastInteractionAt }
             : {}),
         },
-        health: {
-          ok: healthOk,
-          ...(problems.length ? { problems } : {}),
-        },
+        health: { ok: healthOk },
       };
       const url = new URL(
         '/api/workspace/v1/instance/heartbeat',

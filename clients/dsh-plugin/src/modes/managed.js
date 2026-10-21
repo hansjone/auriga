@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { readFileSync } from 'node:fs';
+import { installHostAuthentication } from '../managed/host-auth.js';
 import { createIdentityKeyCache } from '../managed/keys.js';
 import { createDoorLock, createReplayCache } from '../managed/door.js';
 import {
@@ -64,10 +65,20 @@ async function resolveInstanceToken(env, inline) {
  *   workspaceRoot?: string,
  *   watchKeys?: boolean,
  *   startHeartbeat?: boolean,
+ *   config?: { imBots?: 'none', trustedHosts?: string[] },
  * }} [options]
  */
 export async function createManaged(options = {}) {
   const env = options.env ?? process.env;
+  // Loader row config rendered by the node agent (cordis.patch.yml).
+  const rowConfig = options.config ?? {};
+  if (rowConfig.imBots !== undefined && rowConfig.imBots !== 'none') {
+    throw new Error("auriga-dsh: config.imBots must be 'none' when set");
+  }
+  const imBots = rowConfig.imBots;
+  const trustedHosts = Array.isArray(rowConfig.trustedHosts)
+    ? rowConfig.trustedHosts.filter((entry) => typeof entry === 'string')
+    : [];
   if ((env.AURIGA_MODE ?? 'managed') !== 'managed') {
     throw new Error('createManaged requires AURIGA_MODE=managed');
   }
@@ -140,7 +151,8 @@ export async function createManaged(options = {}) {
     getPublicKey: (kid) => keyCache.getPublicKey(kid),
     replay,
     now,
-    // Authenticated HTTP/WS (not /_auriga/health) counts as real user interaction.
+    // Any identity-gated HTTP request or WS upgrade (not /_auriga/health)
+    // moves lastInteractionAt; frames inside an open WS do not.
     onAuthenticated: () => activity.touchInteraction(),
   });
 
@@ -188,8 +200,13 @@ export async function createManaged(options = {}) {
       if (!host.ctx) return;
       await refreshActivityFromHost(host.ctx, activity, {
         browsers: host.getBrowsers?.(),
+        imBots,
       });
     },
+    onSkip: (fields) =>
+      host.ctx?.logger?.warn?.(
+        `[auriga-dsh] heartbeat paused: activity unknown (${fields.join(', ')})`,
+      ),
   });
 
   if (options.startHeartbeat) heartbeat.start();
@@ -204,6 +221,9 @@ export async function createManaged(options = {}) {
 
   /** @type {(() => void) | undefined} */
   let disposeActivity;
+  let disposeHostAuth;
+  let disposeDoor;
+  let disposeHttpGuard;
 
   return {
     mode: /** @type {const} */ ('managed'),
@@ -234,6 +254,9 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
+      disposeHostAuth = installHostAuthentication(ctx.connection, door, {
+        trustedHosts,
+      });
       host.getBrowsers = () => browserSockets.size;
       installManagedGuards(ctx, { workspaceRoot });
       provideAurigaSdk(ctx, {
@@ -256,6 +279,7 @@ export async function createManaged(options = {}) {
 
       disposeActivity = installActivityBridge(ctx, activity, {
         getBrowsers: () => browserSockets.size,
+        imBots,
       });
 
       const handler = createAurigaRouteHandler({
@@ -278,14 +302,18 @@ export async function createManaged(options = {}) {
         'auriga-dsh: /auriga routes',
       );
 
-      door.install(server);
-      installNativePluginHttpGuard(server);
+      // Door is outermost: even forbidden native writes must authenticate first.
+      disposeHttpGuard = installNativePluginHttpGuard(server);
+      disposeDoor = door.install(server);
 
       if (options.startHeartbeat !== false) heartbeat.start();
 
       return () => {
         heartbeat.stop();
         disposeActivity?.();
+        disposeDoor?.();
+        disposeHttpGuard?.();
+        disposeHostAuth?.();
         server.off('upgrade', onUpgrade);
         browserSockets.clear();
         host.ctx = null;
@@ -301,6 +329,7 @@ export async function createManaged(options = {}) {
     close() {
       heartbeat.stop();
       disposeActivity?.();
+      disposeHostAuth?.();
       host.ctx = null;
       keyCache.close();
       panelKeyCache?.close();
