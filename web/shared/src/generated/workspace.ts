@@ -485,15 +485,16 @@ export interface components {
     HeartbeatRequest: {
       pluginVersion: string;
       dshVersion: string;
-      /** @description 插件看到的活动；workspace 另外合并节点代理观测到的 CPU 活动。四个条件都为空闲才算闲置。 */
+      /** @description 插件看到的活动；四个计数字段必须存在，显式 null 表示未知。workspace 仅在四项均为 0、health.ok 为 true 且节点 CPU 观测也新鲜空闲时回收；未知或健康故障保护运行，但不冒充用户活动。 */
       activity: {
-        /** @description 正在执行的对话轮次。 */
-        runningTurns: number;
-        openTerminals: number;
-        /** @description 在线的 IM 机器人连接。 */
-        activeImBots: number;
-        /** @description 打开着的浏览器 / 桌面端连接。 */
-        connectedClients: number;
+        /** @description 正在执行的对话轮次；null 表示未知。 */
+        runningTurns: number | null;
+        /** @description 打开的终端；null 表示未知。 */
+        openTerminals: number | null;
+        /** @description 在线的 IM 机器人连接；null 表示未知。 */
+        activeImBots: number | null;
+        /** @description 打开着的浏览器 / 桌面端连接；null 表示未知。 */
+        connectedClients: number | null;
         /**
          * Format: date-time
          * @description 最近一次用户操作。

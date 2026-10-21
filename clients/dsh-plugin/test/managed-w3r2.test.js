@@ -99,6 +99,7 @@ test('pure DSH with declaration sends a heartbeat with known zeros', async () =>
     pluginVersion: '0.0.0',
     dshVersion: '0.2.0-rc.2',
     activity,
+    healthOk: () => true,
     refreshActivity: () =>
       refreshActivityFromHost(pureDshCtx(), activity, {
         browsers: 0,
@@ -128,7 +129,7 @@ test('pure DSH with declaration sends a heartbeat with known zeros', async () =>
   assert.equal(bodies[0].activity.lastInteractionAt, undefined);
 });
 
-test('skipped heartbeat reports field names once per unknown set', async () => {
+test('heartbeat reports field names once per unknown set and still sends', async () => {
   const activity = createActivityProbe();
   activity.update({ runningTurns: 0, openTerminals: 0, connectedClients: 0 });
   const skips = [];
@@ -139,7 +140,7 @@ test('skipped heartbeat reports field names once per unknown set', async () => {
     pluginVersion: '0.0.0',
     dshVersion: 'x',
     activity,
-    onSkip: (fields) => skips.push(fields),
+    onUnknownActivity: (fields) => skips.push(fields),
     fetchImpl: async () => {
       fetched += 1;
       return new Response('{}', { status: 200 });
@@ -151,7 +152,7 @@ test('skipped heartbeat reports field names once per unknown set', async () => {
   activity.markUnknown('openTerminals');
   await hb.send();
   assert.deepEqual(skips[1], ['openTerminals', 'activeImBots']);
-  assert.equal(fetched, 0);
+  assert.equal(fetched, 3);
   assert.ok(!JSON.stringify(skips).includes('tok'));
 });
 

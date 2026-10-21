@@ -196,6 +196,7 @@ export async function createManaged(options = {}) {
     dshVersion,
     activity,
     fetchImpl: options.fetchImpl,
+    healthOk: () => host.ctx?.webServer?.server?.listening === true,
     refreshActivity: async () => {
       if (!host.ctx) return;
       await refreshActivityFromHost(host.ctx, activity, {
@@ -203,9 +204,11 @@ export async function createManaged(options = {}) {
         imBots,
       });
     },
-    onSkip: (fields) =>
+    onUnknownActivity: (fields) =>
       host.ctx?.logger?.warn?.(
-        `[auriga-dsh] heartbeat paused: activity unknown (${fields.join(', ')})`,
+        fields.length
+          ? `[auriga-dsh] activity unknown (${fields.join(', ')})`
+          : '[auriga-dsh] activity observations recovered',
       ),
   });
 

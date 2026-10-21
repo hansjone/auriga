@@ -17,6 +17,9 @@ import auriga.workspace.domain.*;
 import auriga.workspace.grpc.*;
 import auriga.workspace.persistence.NodeSessionLease;
 import auriga.workspace.persistence.WorkspaceStore;
+import auriga.workspace.web.model.HeartbeatRequest;
+import auriga.workspace.web.model.HeartbeatRequestActivity;
+import auriga.workspace.web.model.HeartbeatRequestHealth;
 import com.google.protobuf.ByteString;
 import io.grpc.*;
 import io.grpc.netty.shaded.io.grpc.netty.*;
@@ -967,6 +970,105 @@ class WorkspaceIntegrationTest {
                 .stream()
                 .map(r -> WorkspaceStore.instant(r, "due_at"))
                 .toList());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"runningTurns", "openTerminals", "activeImBots", "connectedClients", "health"})
+  void heartbeatUnknownOrUnhealthyProtectsWithoutInventingActivityAndRecovers(String failure)
+      throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          Instant historical = clock.instant().minusSeconds(1801);
+          markRunningIdle(node, id, historical);
+          for (int step = 0; step < 3; step++) {
+            clock.now = clock.now.plusSeconds(60);
+            store.tx(
+                () ->
+                    store.jdbc.update(
+                        "UPDATE instance SET cpu_seen_at=? WHERE tenant_id=? AND id=?",
+                        WorkspaceStore.time(clock.instant()),
+                        tenant,
+                        id));
+            var values = new LinkedHashMap<String, Object>();
+            for (String name :
+                List.of("runningTurns", "openTerminals", "activeImBots", "connectedClients"))
+              values.put(name, name.equals(failure) ? null : 0);
+            var request =
+                WorkspaceService.JSON.convertValue(
+                    Map.of(
+                        "pluginVersion",
+                        "test",
+                        "dshVersion",
+                        "test",
+                        "activity",
+                        values,
+                        "health",
+                        Map.of("ok", !failure.equals("health"))),
+                    HeartbeatRequest.class);
+            service.heartbeat(store.tx(() -> store.instance(id)), request);
+            var row = store.tx(() -> store.instance(id));
+            assertEquals(clock.instant(), WorkspaceStore.instant(row, "plugin_seen_at"));
+            assertEquals(historical, WorkspaceStore.instant(row, "last_activity_at"));
+            service.tickTenant();
+            assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+          }
+          service.heartbeat(
+              store.tx(() -> store.instance(id)),
+              new HeartbeatRequest(
+                  "test",
+                  "test",
+                  new HeartbeatRequestActivity(0, 0, 0, 0),
+                  new HeartbeatRequestHealth(true)));
+          assertEquals(
+              historical,
+              WorkspaceStore.instant(store.tx(() -> store.instance(id)), "last_activity_at"));
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_STOPPED, desired(id));
+        });
+  }
+
+  @Test
+  void realHeartbeatCountsAndInteractionStillAdvanceActivity() throws Exception {
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          markRunningIdle(node, id, clock.instant().minusSeconds(1801));
+          service.heartbeat(
+              store.tx(() -> store.instance(id)),
+              new HeartbeatRequest(
+                  "test",
+                  "test",
+                  new HeartbeatRequestActivity(1, null, 0, 0),
+                  new HeartbeatRequestHealth(false)));
+          assertEquals(
+              clock.instant(),
+              WorkspaceStore.instant(store.tx(() -> store.instance(id)), "last_activity_at"));
+          clock.now = clock.now.plusSeconds(20);
+          Instant interaction = clock.instant().minusSeconds(3);
+          service.heartbeat(
+              store.tx(() -> store.instance(id)),
+              new HeartbeatRequest(
+                  "test",
+                  "test",
+                  new HeartbeatRequestActivity(0, 0, null, 0)
+                      .lastInteractionAt(interaction.atOffset(ZoneOffset.UTC)),
+                  new HeartbeatRequestHealth(true)));
+          assertEquals(
+              interaction,
+              WorkspaceStore.instant(store.tx(() -> store.instance(id)), "last_activity_at"));
+          service.tickTenant();
+          assertEquals(DesiredState.DESIRED_STATE_RUNNING, desired(id));
+        });
   }
 
   private DesiredState desired(UUID id) {
