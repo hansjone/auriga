@@ -130,7 +130,7 @@ fake-ip DNS 环境下，OIDC 域名可能被解析成保留的基准测试网段
 
 `deploy/compose/real-dsh` 固定 S4 的 DSH 0.2.0-rc.2 / Node 22.19.0 / npm 10.9.3 与完整依赖锁；使用本仓库 `auriga-dsh` 的正式 Cordis 入口。构建期安装，启动期只建实例状态目录并运行 DSH，不装依赖。运行、镜像摘要交付、严格 e2e 和当前阻塞见 [m2.md](m2.md#真实-dsh-与托管插件w3)。
 
-纯 DSH 基线不包含原型的 `dshIm` 服务，不能把它缺席**默认**解释为 0 个在线机器人；真实模板用规格补丁 `plugins.auriga-dsh.imBots = "none"` 显式声明。Windows 本机无 Docker，W3 的真实镜像构建、真实交互的心跳投影、闲置回收和闹钟唤醒均未取得运行证据；已有假 DSH CI 不能替代这些验收。
+纯 DSH 基线不包含原型的 `dshIm` 服务，不能把它缺席**默认**解释为 0 个在线机器人；真实模板用规格补丁 `plugins.auriga-dsh.imBots = "none"` 显式声明。Windows 没有 Docker CLI，WSL Ubuntu 已确认有本机 Docker；W3 的真实运行验收状态以脱敏证据为准，真实交互的原始心跳、闲置回收和闹钟唤醒仍待验证；已有假 DSH CI 不能替代这些验收。
 
 ## 主人与会话（standalone）
 

@@ -7,5 +7,13 @@
   "s4Commit": "3337b698815996fd8f596de5232ebde60bdd900e",
   "lockSha256": "7568ed6aeb263e8605332578aba9b3b099974bf2b80704afd92cc86b7afc168b",
   "installPolicy": "npm ci --omit=dev --include=optional --ignore-scripts --bin-links=false --os=linux --cpu=x64 --libc=glibc",
-  "nodeImage": ""
+  "nodeImage": "node:22.19.0-bookworm-slim@sha256:cff78eb5aa1cf27dc2b6aeea9d31366415a43e9a9ea0ddec00d780b2b66fad0f",
+  "nodeImageProvenance": {
+    "registry": "docker.io/library/node",
+    "tag": "22.19.0-bookworm-slim",
+    "platform": "linux/amd64",
+    "resolvedOn": "2026-10-22",
+    "method": "docker manifest inspect --verbose",
+    "approval": "pending independent review"
+  }
 }
