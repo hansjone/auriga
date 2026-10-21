@@ -7,6 +7,65 @@ import {
 } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
+export function assertRuntimeIsolation(info, network, edge, instanceId) {
+  const [uid, gid] = String(info.Config?.User).split(':').map(Number);
+  assert.ok(
+    Number.isInteger(uid) && uid >= 200000 && uid === gid,
+    'instance uid isolation missing',
+  );
+  const hc = info.HostConfig || {};
+  assert.equal(hc.Privileged, false);
+  assert.equal(hc.ReadonlyRootfs, true);
+  assert.ok(hc.CapDrop?.includes('ALL'), 'cap-drop ALL missing');
+  assert.ok(
+    hc.SecurityOpt?.some((value) =>
+      /^no-new-privileges(?::true)?$/.test(value),
+    ),
+    'no-new-privileges missing',
+  );
+  assert.ok(
+    hc.Memory > 0 && hc.NanoCpus > 0 && hc.PidsLimit > 0,
+    'resource limits missing',
+  );
+  assert.equal(
+    info.Mounts?.find((mount) => mount.Destination === '/run/auriga')?.RW,
+    false,
+    'meta mount is not read-only',
+  );
+  assert.equal(
+    info.Mounts?.find((mount) => mount.Destination === '/home/dsh')?.RW,
+    true,
+    'home is not writable',
+  );
+  assert.deepEqual(
+    Object.keys(info.NetworkSettings?.Networks || {}),
+    [`auriga-net-${instanceId}`],
+    'instance joined another network',
+  );
+  assert.equal(network.Name, `auriga-net-${instanceId}`);
+  assert.equal(network.Internal, true);
+  assert.equal(network.Driver, 'bridge');
+  assert.equal(network.Labels?.['auriga.instance'], instanceId);
+  assert.equal(network.Labels?.['auriga.managed'], 'true');
+  assert.equal(edge.Config?.Labels?.['auriga.role'], 'edge');
+  assert.ok(info.Id && edge.Id && info.Id !== edge.Id);
+  assert.deepEqual(
+    Object.keys(network.Containers || {}).sort(),
+    [info.Id, edge.Id].sort(),
+    'foreign network member or missing trusted edge',
+  );
+  assert.equal(
+    edge.NetworkSettings?.Networks?.[network.Name]?.NetworkID,
+    network.Id,
+  );
+  assert.ok(
+    edge.NetworkSettings.Networks[network.Name].Aliases?.includes(
+      'portal.example.com',
+    ),
+    'platform DNS alias missing',
+  );
+}
+
 export function realDshPageOk(page) {
   return (
     page.status === 200 &&

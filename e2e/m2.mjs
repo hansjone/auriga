@@ -35,9 +35,16 @@ import {
 import { openWebSocket } from './lib/ws-client.mjs';
 import { waitInstancePage } from './lib/instance-page.mjs';
 import {
+  readRawHeartbeats,
+  assertRawHeartbeat,
+  assertRawQuiet,
+} from './lib/raw-heartbeat.mjs';
+import {
   realDshPageOk,
   identitySigner,
   probeRealDoor,
+  assertRuntimeIsolation,
+  assertRealHealth,
 } from './lib/real-dsh.mjs';
 
 const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
@@ -57,7 +64,12 @@ if (!['fake', 'real'].includes(FIXTURE))
   throw new Error('DSH_FIXTURE must be fake or real');
 const instancePageOk = FIXTURE === 'real' ? realDshPageOk : edgeInstanceOk;
 const WS_PATH = FIXTURE === 'real' ? '/api/remote.mux' : '/ws';
-const evidence = { fixture: FIXTURE, status: 'failed', checks: [] };
+const evidence = {
+  fixture: FIXTURE,
+  status: 'failed',
+  lifecycleVerified: false,
+  checks: [],
+};
 
 /** @type {{ admin: CookieJar, portal: CookieJar, instance: CookieJar }} */
 const jars = {
@@ -497,6 +509,38 @@ async function verifyRealHost(instanceId, instance) {
   if (inspected.status !== 0)
     fail('real-runtime', 'cannot inspect real instance');
   const info = JSON.parse(inspected.stdout)[0];
+  const netInspect = spawnSync(
+    'docker',
+    ['network', 'inspect', `auriga-net-${instanceId}`],
+    { encoding: 'utf8' },
+  );
+  const edgeInspect = spawnSync(
+    'docker',
+    ['inspect', `${process.env.COMPOSE_PROJECT_NAME || 'auriga-m2'}-edge`],
+    { encoding: 'utf8' },
+  );
+  if (netInspect.status !== 0 || edgeInspect.status !== 0)
+    fail(
+      'real-isolation',
+      'cannot inspect actual instance network and trusted edge',
+    );
+  const network = JSON.parse(netInspect.stdout)[0];
+  const edgeInfo = JSON.parse(edgeInspect.stdout)[0];
+  assertRuntimeIsolation(info, network, edgeInfo, instanceId);
+  evidence.isolation = {
+    internal: true,
+    network: network.Name,
+    members: Object.keys(network.Containers).length,
+    user: info.Config.User,
+    readOnlyRoot: true,
+    capDropAll: true,
+    noNewPrivileges: true,
+    metaReadOnly: true,
+    memoryBytes: info.HostConfig.Memory,
+    nanoCpus: info.HostConfig.NanoCpus,
+    pidsLimit: info.HostConfig.PidsLimit,
+  };
+  evidence.checks.push('actual-runtime-isolation');
   if (
     info.Config.Image !== metadata.image ||
     metadata.dshVersion !== '0.2.0-rc.2' ||
@@ -556,6 +600,7 @@ async function verifyRealHost(instanceId, instance) {
     ownerId: instance.ownerId,
     tenantId: instance.tenantId,
   });
+  const doorStartedAt = Date.now();
   evidence.door = await probeRealDoor(
     directRequest,
     signer,
@@ -563,19 +608,52 @@ async function verifyRealHost(instanceId, instance) {
   );
   evidence.checks.push('direct-real-door-and-health');
 
-  // While activity is "active" (connectedClients/terminals/turns > 0) the
-  // platform projects lastActivityAt = now on every heartbeat, which would
-  // make the interaction step pass without lastInteractionAt. Quiet windows
-  // reject that interference when heartbeats arrive, but cannot establish the
-  // raw counts or even heartbeat delivery. This remains projection evidence.
-  const quietWindow = async (label) => {
+  const rawFile = process.env.RAW_HEARTBEAT_FILE;
+  const raw = (window) => readRawHeartbeats(rawFile, instanceId, window);
+  // Settle the successful signed door request before opening the quiet window.
+  // Otherwise its delayed real heartbeat would be mistaken for health activity.
+  const settleDeadline = Date.now() + 90_000;
+  let initialRaw;
+  let initialProblem;
+  while (Date.now() < settleDeadline) {
+    const last = raw().at(-1);
+    const projected = await req(`/api/workspace/v1/instances/${instanceId}`, {
+      host: ADMIN_HOST,
+    });
+    if (
+      last &&
+      Date.parse(last.activity?.lastInteractionAt) >= doorStartedAt - 1000 &&
+      Date.parse(projected.body?.lastActivityAt) >=
+        Date.parse(last.activity.lastInteractionAt)
+    ) {
+      try {
+        assertRawHeartbeat(last, actual);
+        initialRaw = last;
+        break;
+      } catch (error) {
+        initialProblem = error.message;
+      }
+    }
+    await sleep(1000);
+  }
+  if (!initialRaw)
+    fail(
+      'real-raw-heartbeat',
+      `signed door interaction never settled as a healthy idle actual heartbeat: ${initialProblem || 'no matching request'}`,
+    );
+
+  const quietWindow = async (label, interactionAt) => {
     const start = await req(`/api/workspace/v1/instances/${instanceId}`, {
       host: ADMIN_HOST,
     });
     const stable = start.body?.lastActivityAt;
-    const quietUntil = Date.now() + 40_000;
+    const from = Date.now();
+    const quietUntil = from + 65_000;
     while (Date.now() < quietUntil) {
-      await directRequest('/_auriga/health');
+      assertRealHealth(
+        await directRequest('/_auriga/health'),
+        actual.pluginVersion,
+      );
       const response = await req(`/api/workspace/v1/instances/${instanceId}`, {
         host: ADMIN_HOST,
       });
@@ -587,10 +665,24 @@ async function verifyRealHost(instanceId, instance) {
       }
       await sleep(3000);
     }
+    const until = Date.now();
+    const entries = raw({ after: from, before: until });
+    assertRawQuiet(entries, actual, interactionAt, { until });
+    evidence.rawQuietWindows ??= [];
+    evidence.rawQuietWindows.push({
+      label,
+      from: new Date(from).toISOString(),
+      until: new Date(until).toISOString(),
+      acceptedHeartbeats: entries.length,
+      lastInteractionAt: interactionAt,
+    });
     return start;
   };
   step('real platform activity projection must stay quiet before interaction');
-  const before = await quietWindow('real-quiet-before');
+  const before = await quietWindow(
+    'real-quiet-before',
+    initialRaw.activity.lastInteractionAt,
+  );
   evidence.checks.push('real-quiet-before-interaction');
 
   step(
@@ -607,6 +699,7 @@ async function verifyRealHost(instanceId, instance) {
   if (!realDshPageOk(page))
     fail('real-interaction', 'user request did not reach DSH');
   let observed;
+  let interactionRaw;
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     const response = await req(`/api/workspace/v1/instances/${instanceId}`, {
@@ -616,8 +709,18 @@ async function verifyRealHost(instanceId, instance) {
       Date.parse(response.body?.lastActivityAt) >= started - 1000 &&
       (Number.isNaN(prior) || Date.parse(response.body?.lastActivityAt) > prior)
     ) {
-      observed = response.body.lastActivityAt;
-      break;
+      const last = raw({ after: started }).at(-1);
+      if (
+        last &&
+        Date.parse(last.activity?.lastInteractionAt) >= started - 1000 &&
+        Date.parse(last.activity.lastInteractionAt) >
+          Date.parse(initialRaw.activity.lastInteractionAt)
+      ) {
+        assertRawHeartbeat(last, actual);
+        observed = response.body.lastActivityAt;
+        interactionRaw = last;
+        break;
+      }
     }
     await sleep(3000);
   }
@@ -630,15 +733,20 @@ async function verifyRealHost(instanceId, instance) {
     before: before.body.lastActivityAt,
     after: observed,
     source:
-      'quiet window -> real GET / -> platform lastActivityAt projection -> quiet window',
+      'accepted actual plugin heartbeat -> quiet health polling -> real GET / -> accepted raw lastInteractionAt -> quiet health polling',
     rawHeartbeatVerified: false,
-    limitation:
-      'Raw heartbeat counts and lastInteractionAt are not observed; projection alone cannot complete W3 interaction acceptance.',
+    requestStartedAt: new Date(started).toISOString(),
+    rawBefore: initialRaw,
+    rawAfter: interactionRaw,
   };
   // Direct unauthenticated health polling must not advance the activity clock.
-  const after = await quietWindow('real-static-heartbeat');
+  const after = await quietWindow(
+    'real-static-heartbeat',
+    interactionRaw.activity.lastInteractionAt,
+  );
   if (after.body?.lastActivityAt !== observed)
     fail('real-static-heartbeat', 'activity moved after the interaction');
+  evidence.interaction.rawHeartbeatVerified = true;
   evidence.checks.push('real-interaction-projection-and-static-health');
 }
 
@@ -1268,6 +1376,7 @@ async function main() {
     await waitWakeStrict(instanceId, wakeAt, stoppedAt);
 
     await revokeDualSession(instanceId);
+    evidence.lifecycleVerified = true;
     evidence.status = 'passed';
     evidence.checks.push(
       'idle-phase-container-edge',
