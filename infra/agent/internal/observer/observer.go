@@ -80,9 +80,12 @@ type Config struct {
 // Observer probes health, watches cron files, and samples resources.
 type Observer struct {
 	lastCPU map[string]int64
-	cfg     Config
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	// Used only by the watch loop. A known deadline must be recomputed when
+	// reached even if a stopped instance cannot update its schedule files.
+	nextWakes map[string]time.Time
+	cfg       Config
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 // New creates an Observer (not started).
@@ -114,7 +117,7 @@ func New(cfg Config) *Observer {
 	if cfg.WatchPoll <= 0 {
 		cfg.WatchPoll = time.Second
 	}
-	return &Observer{cfg: cfg, lastCPU: make(map[string]int64)}
+	return &Observer{cfg: cfg, lastCPU: make(map[string]int64), nextWakes: make(map[string]time.Time)}
 }
 
 // Start runs background loops until Stop or ctx cancel.
@@ -238,12 +241,16 @@ func (o *Observer) refreshWakes(lastMod map[string]time.Time) {
 		return
 	}
 	now := o.cfg.Clock.Now()
+	active := make(map[string]bool)
 	for _, target := range o.cfg.Source.Targets() {
+		active[target.ID] = true
 		if target.RootDir == "" {
 			continue
 		}
 		changed := scheduleFilesChanged(target.RootDir, target.ID, lastMod)
-		if !changed {
+		next, known := o.nextWakes[target.ID]
+		due := known && !now.Before(next)
+		if !changed && !due {
 			continue
 		}
 		info, err := NextWakeFromInstanceDir(target.RootDir, now)
@@ -257,9 +264,17 @@ func (o *Observer) refreshWakes(lastMod map[string]time.Time) {
 		}
 		if info.NextWakeAt != nil {
 			w.NextWakeAt = timestamppb.New(*info.NextWakeAt)
+			o.nextWakes[target.ID] = *info.NextWakeAt
+		} else {
+			delete(o.nextWakes, target.ID)
 		}
 		o.cfg.Logger.Info("wake schedule changed", "instance", target.ID, "source", info.Source, "next_wake_at", info.NextWakeAt)
 		o.cfg.Reporter.ReportWake(w)
+	}
+	for id := range o.nextWakes {
+		if !active[id] {
+			delete(o.nextWakes, id)
+		}
 	}
 }
 

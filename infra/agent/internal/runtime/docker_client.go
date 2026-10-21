@@ -314,13 +314,26 @@ func (c *EngineClient) ContainerList(ctx context.Context, all bool, filters map[
 
 func (c *EngineClient) NetworkCreate(ctx context.Context, name string, internal bool, labels map[string]string) (string, error) {
 	body := map[string]any{
-		"Name":     name,
-		"Internal": internal,
-		"Labels":   labels,
-		"Driver":   "bridge",
+		"Name":           name,
+		"Internal":       internal,
+		"Labels":         labels,
+		"Driver":         "bridge",
+		"CheckDuplicate": true,
 	}
 	raw, status, err := c.doJSON(ctx, http.MethodPost, "/networks/create", body, http.StatusCreated, http.StatusOK, http.StatusConflict)
 	if status == http.StatusConflict {
+		n, inspectErr := c.NetworkInspect(ctx, name)
+		if inspectErr != nil {
+			return "", inspectErr
+		}
+		if n == nil || n.Name != name || n.Internal != internal || n.Driver != "bridge" {
+			return "", fmt.Errorf("docker: existing network does not match isolation policy")
+		}
+		for k, want := range labels {
+			if n.Labels[k] != want {
+				return "", fmt.Errorf("docker: existing network ownership mismatch")
+			}
+		}
 		return name, nil
 	}
 	if err != nil {
@@ -329,7 +342,12 @@ func (c *EngineClient) NetworkCreate(ctx context.Context, name string, internal 
 	var out struct {
 		ID string `json:"Id"`
 	}
-	_ = json.Unmarshal(raw, &out)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	if out.ID == "" {
+		return "", fmt.Errorf("docker: network create returned no ID")
+	}
 	return out.ID, nil
 }
 

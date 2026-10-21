@@ -2,6 +2,7 @@ package observer
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,67 @@ import (
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 )
+
+func TestWatch_RecalculatesDueWakeWithoutFileChange(t *testing.T) {
+	for _, kind := range []string{"at", "cron", "next-job"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(dir, "ops-cron"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+			due := now.Add(time.Minute)
+			jobs := fmt.Sprintf(`{"enabled":true,"schedule":{"kind":"at","at":%q}}`, due.Format(time.RFC3339))
+			if kind == "cron" {
+				jobs = `{"enabled":true,"schedule":{"kind":"cron","expr":"* * * * *","timezone":"UTC"}}`
+			}
+			if kind == "next-job" {
+				jobs += fmt.Sprintf(`,{"enabled":true,"schedule":{"kind":"at","at":%q}}`, due.Add(time.Minute).Format(time.RFC3339))
+			}
+			path := filepath.Join(dir, "ops-cron", "store.json")
+			if err := os.WriteFile(path, []byte(`{"jobs":[`+jobs+`]}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			before, _ := os.Stat(path)
+			clock := &MutableClock{T: now}
+			rep := &captureReporter{}
+			src := &SliceTargets{}
+			src.Set([]InstanceTarget{{ID: "inst-1", RootDir: dir, Process: ProcessStopped}})
+			obs := New(Config{Source: src, Reporter: rep, Clock: clock, Collector: NopResources{}})
+			mod := map[string]time.Time{}
+			obs.refreshWakes(mod)
+			if len(rep.wakes) != 1 || !rep.wakes[0].GetNextWakeAt().AsTime().Equal(due) {
+				t.Fatal("initial wake missing")
+			}
+			clock.Advance(30 * time.Second)
+			obs.refreshWakes(mod)
+			if len(rep.wakes) != 1 {
+				t.Fatal("unchanged future wake needlessly republished")
+			}
+			clock.Advance(30 * time.Second)
+			obs.refreshWakes(mod)
+			if len(rep.wakes) != 2 {
+				t.Fatal("due wake was not recalculated without file change")
+			}
+			got := rep.wakes[1].GetNextWakeAt()
+			if kind == "at" {
+				if got != nil {
+					t.Fatal("consumed one-shot wake was retained")
+				}
+			} else if got == nil || !got.AsTime().Equal(due.Add(time.Minute)) {
+				t.Fatal("next occurrence/job not published")
+			}
+			after, _ := os.Stat(path)
+			if !before.ModTime().Equal(after.ModTime()) {
+				t.Fatal("test changed task file")
+			}
+			obs.refreshWakes(mod)
+			if len(rep.wakes) != 2 {
+				t.Fatal("consumption repeatedly published")
+			}
+		})
+	}
+}
 
 type captureReporter struct {
 	mu    sync.Mutex

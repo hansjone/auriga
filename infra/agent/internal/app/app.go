@@ -153,7 +153,20 @@ func runAgent(args []string, logs io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("load policy: %w", err)
 	}
-	inner, err := runtime.SelectDriver(driverName, runtime.DockerConfig{DataRoot: cfg.DataRoot, Policy: pol})
+	var surface instanceSurface
+	dockerCfg := runtime.DockerConfig{DataRoot: cfg.DataRoot, Policy: pol}
+	if driverName != "fake" {
+		surface, err = instanceSurfaceFromEnv()
+		if err != nil {
+			return err
+		}
+		dockerCfg.EdgeContainer = surface.EdgeContainer
+		if surface.EdgeContainer != "" {
+			u, _ := url.Parse(surface.PlatformURL) // validated by instanceSurfaceFromEnv
+			dockerCfg.PlatformHost = strings.ToLower(u.Hostname())
+		}
+	}
+	inner, err := runtime.SelectDriver(driverName, dockerCfg)
 	if err != nil {
 		return err
 	}
@@ -161,10 +174,6 @@ func runAgent(args []string, logs io.Writer) error {
 	var prep *runtime.Preparing
 	if driverName != "fake" {
 		art := artifacts.New(cfg.ArtifactsDir(), pol)
-		surface, err := instanceSurfaceFromEnv()
-		if err != nil {
-			return err
-		}
 		if surface.PlatformURL == "" {
 			logger.Warn("AURIGA_AGENT_INSTANCE_PLATFORM_URL unset; managed plugins cannot send heartbeats")
 		}
@@ -251,8 +260,9 @@ func artifactGCInterval() (time.Duration, error) {
 
 // instanceSurface is what an instance is told about the platform around it.
 type instanceSurface struct {
-	PlatformURL  string
-	ParentDomain string
+	PlatformURL   string
+	ParentDomain  string
+	EdgeContainer string
 }
 
 // instanceSurfaceFromEnv reads the instance-facing platform URL (the edge
@@ -261,8 +271,12 @@ type instanceSurface struct {
 // address, which instances neither reach nor speak.
 func instanceSurfaceFromEnv() (instanceSurface, error) {
 	out := instanceSurface{
-		PlatformURL:  strings.TrimSpace(os.Getenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL")),
-		ParentDomain: strings.TrimSpace(os.Getenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN")),
+		PlatformURL:   strings.TrimSpace(os.Getenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL")),
+		ParentDomain:  strings.TrimSpace(os.Getenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN")),
+		EdgeContainer: strings.TrimSpace(os.Getenv("AURIGA_AGENT_DOCKER_EDGE_CONTAINER")),
+	}
+	if out.EdgeContainer != "" && out.PlatformURL == "" {
+		return instanceSurface{}, fmt.Errorf("AURIGA_AGENT_DOCKER_EDGE_CONTAINER requires AURIGA_AGENT_INSTANCE_PLATFORM_URL")
 	}
 	if out.PlatformURL != "" {
 		u, err := url.Parse(out.PlatformURL)

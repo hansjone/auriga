@@ -143,9 +143,25 @@ maxArtifactBytes: 2147483648
 - `ingress.Config.MaxUploadBytes` 默认 64 MiB；超限返回 413，未知长度的请求也受限。流式上传失败可能留下限额内的部分文件，上游需要重新签发票据后重试。
 - zip 默认最多 256 MiB 原始文件内容、10000 个遍历条目，分别由 `MaxZipBytes` / `MaxZipEntries` 设置（目前为装配 API）。打包根据打开后的句柄检查文件类型，跳过链接、FIFO 和设备；先写临时文件，成功关闭 zip 后才发送响应，失败不会返回成功状态的截断 zip。
 - 定时任务文件只读取普通文件，不跟随链接，单文件最多 1 MiB；解析错误不包含文件内容。cron 只接受五字段表达式；不可满足的 cron 表示无下次唤醒，不接受 `@every` 等描述符。
+- 已知的下一次唤醒到期后，即使文件未修改、实例仍停止，observer 也重新计算并上报：一次性任务清空，周期任务或后续任务推进到下一次，避免平台保留过期时间。
 - 最近 CPU 活动按相邻成功采样的累计 CPU 差值计算；首次采样、采集失败后的首次采样和计数器回退只建立基线。
 
 ## 测试
+
+### Docker 实例内部平台入口
+
+`AURIGA_AGENT_INSTANCE_PLATFORM_URL` 是实例访问 edge 的 HTTP(S) 地址，与节点的 gRPC 控制地址分开。
+当 edge 与实例由同一 Docker Engine 管理时，设置 `AURIGA_AGENT_DOCKER_EDGE_CONTAINER` 为受信任的 edge 容器名或 ID。
+此时平台 URL 必须使用 DNS 主机名；驱动把该主机名作为 edge 端点的网络别名，接入每个实例独立的 `internal` bridge。
+实例仍只加入自己的内部网络；edge 的控制网络不会附加给实例。URL 的端口必须是 edge 容器实际监听端口。
+
+指定的 edge 必须带 `auriga.role=edge` 标签，准备实例时必须正在运行，且不能使用 host、none 或另一个容器的网络命名空间。
+驱动在连接前校验网络名称、内部隔离、bridge 驱动、实例归属标签和现有成员，连接后再检查实际 DNS 别名。
+已有同名网络不符合策略时拒绝准备。删除实例会先移除实例容器，再断开该网络上的 edge 端点，最后删除网络；edge 停止时仍可移除端点。
+这些配置来自节点管理员，不接受实例规格覆盖。外部管理的 edge 网络仍须由部署者提供可达的内部入口。
+
+`deploy/compose` 的本机 Linux 测试栈采用此接线：edge 在 bridge 网络，通过 `host.docker.internal` 访问宿主上的平台和 NATS；
+门户端口仅发布到 `127.0.0.1:8080`。这份测试栈不作为 NAS 现场部署配置。
 
 ```powershell
 Set-Location infra\agent
