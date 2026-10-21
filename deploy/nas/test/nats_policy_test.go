@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,8 +17,7 @@ import (
 // Run from infra/edge: go test -count=1 ../../deploy/nas/test/nats_policy_test.go.
 // Reuse the repository's existing NATS versions without adding production dependencies.
 func TestNASNATSPolicy(t *testing.T) {
-	_, file, _, _ := runtime.Caller(0)
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "nats", "nats.conf.tmpl"))
+	raw, err := os.ReadFile(filepath.Join("..", "nats", "nats.conf.tmpl"))
 	if err != nil {
 		t.Fatal(err)
 	}
