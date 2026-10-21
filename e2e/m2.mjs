@@ -43,6 +43,7 @@ import {
   realDshPageOk,
   identitySigner,
   probeRealDoor,
+  assertRuntimeIsolation,
 } from './lib/real-dsh.mjs';
 
 const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
@@ -507,6 +508,38 @@ async function verifyRealHost(instanceId, instance) {
   if (inspected.status !== 0)
     fail('real-runtime', 'cannot inspect real instance');
   const info = JSON.parse(inspected.stdout)[0];
+  const netInspect = spawnSync(
+    'docker',
+    ['network', 'inspect', `auriga-net-${instanceId}`],
+    { encoding: 'utf8' },
+  );
+  const edgeInspect = spawnSync(
+    'docker',
+    ['inspect', `${process.env.COMPOSE_PROJECT_NAME || 'auriga-m2'}-edge`],
+    { encoding: 'utf8' },
+  );
+  if (netInspect.status !== 0 || edgeInspect.status !== 0)
+    fail(
+      'real-isolation',
+      'cannot inspect actual instance network and trusted edge',
+    );
+  const network = JSON.parse(netInspect.stdout)[0];
+  const edgeInfo = JSON.parse(edgeInspect.stdout)[0];
+  assertRuntimeIsolation(info, network, edgeInfo, instanceId);
+  evidence.isolation = {
+    internal: true,
+    network: network.Name,
+    members: Object.keys(network.Containers).length,
+    user: info.Config.User,
+    readOnlyRoot: true,
+    capDropAll: true,
+    noNewPrivileges: true,
+    metaReadOnly: true,
+    memoryBytes: info.HostConfig.Memory,
+    nanoCpus: info.HostConfig.NanoCpus,
+    pidsLimit: info.HostConfig.PidsLimit,
+  };
+  evidence.checks.push('actual-runtime-isolation');
   if (
     info.Config.Image !== metadata.image ||
     metadata.dshVersion !== '0.2.0-rc.2' ||
