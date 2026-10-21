@@ -103,6 +103,16 @@ sh deploy/nas/scripts/stop.sh
 - `images/*.tar` + `SHA256SUMS` + **一份** `manifest.json`（commit、镜像 Id、tools、stack_env_hint）
 - `versions.txt`、`auriga-nas-bootstrap`
 
+GitHub Actions 工件下载后，文件执行位可能丢失（[官方说明](https://github.com/actions/upload-artifact#permission-loss)）。
+在解包后的工件根目录核对 manifest 的提交和校验和，并在首次初始化前恢复预构建 bootstrap 的执行位：
+
+```sh
+(cd images && sha256sum -c SHA256SUMS)
+chmod 0755 deploy-nas/bin/auriga-nas-bootstrap
+```
+
+源码 checkout 对应 `deploy/nas/bin/auriga-nas-bootstrap`。其余操作脚本均以 `sh` 调用，无需执行位；NAS 无需 Go。
+
 NAS 上 `load-images.sh` 后，把 `AURIGA_IMAGE_PLATFORM/EDGE/AGENT` 设为 manifest 里的 **`sha256:<id>`**（本地 Id，compose 不 pull）。基础镜像仍用 `name@sha256:…`。
 
 ## 网络与 VPS
