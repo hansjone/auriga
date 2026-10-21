@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,7 +32,6 @@ type Docker struct {
 
 	mu        sync.Mutex
 	endpoints map[string]string
-	ports     map[string]uint32
 }
 
 // DockerConfig configures the Docker driver.
@@ -74,7 +74,6 @@ func NewDockerWithClient(client *EngineClient, dataRoot string) *Docker {
 		DataRoot:  dataRoot,
 		Policy:    policy.Default(),
 		endpoints: make(map[string]string),
-		ports:     make(map[string]uint32),
 	}
 }
 
@@ -233,9 +232,6 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	if _, err := d.Client.ContainerCreate(ctx, name, body); err != nil {
 		return err
 	}
-	d.mu.Lock()
-	d.ports[s.InstanceID] = port
-	d.mu.Unlock()
 	_ = r
 	return nil
 }
@@ -255,7 +251,10 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	port := d.portOf(id)
+	port, err := instancePort(insp)
+	if err != nil {
+		return fmt.Errorf("docker: %s: %w", name, err)
+	}
 	endpoint, err := instanceEndpoint(insp, networkName(id), port)
 	if err != nil {
 		return fmt.Errorf("docker: %s: %w", name, err)
@@ -327,7 +326,6 @@ func (d *Docker) Remove(ctx context.Context, id string) error {
 	}
 	d.mu.Lock()
 	delete(d.endpoints, id)
-	delete(d.ports, id)
 	d.mu.Unlock()
 	return nil
 }
@@ -424,13 +422,40 @@ func (d *Docker) List(ctx context.Context) ([]Status, error) {
 	return out, nil
 }
 
-func (d *Docker) portOf(id string) uint32 {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if p := d.ports[id]; p != 0 {
-		return p
+// instancePort reads the single TCP binding set by Ensure. Image EXPOSE values
+// may be merged into Config.ExposedPorts, so they cannot identify our listener.
+// Desired specs may already describe a pending replacement and are not evidence
+// of the still-running container's port either.
+func instancePort(insp map[string]any) (uint32, error) {
+	host, _ := insp["HostConfig"].(map[string]any)
+	bindings, _ := host["PortBindings"].(map[string]any)
+	var port uint32
+	for key, raw := range bindings {
+		number, protocol, ok := strings.Cut(key, "/")
+		parsed, err := strconv.ParseUint(number, 10, 16)
+		if !ok || err != nil || parsed == 0 || strconv.FormatUint(parsed, 10) != number ||
+			(protocol != "tcp" && protocol != "udp" && protocol != "sctp") {
+			return 0, fmt.Errorf("invalid container port binding")
+		}
+		if protocol != "tcp" {
+			continue
+		}
+		values, ok := raw.([]any)
+		if !ok || len(values) != 1 {
+			return 0, fmt.Errorf("invalid container TCP binding")
+		}
+		if _, ok := values[0].(map[string]any); !ok {
+			return 0, fmt.Errorf("invalid container TCP binding")
+		}
+		if port != 0 {
+			return 0, fmt.Errorf("ambiguous container TCP bindings")
+		}
+		port = uint32(parsed)
 	}
-	return 7860
+	if port == 0 {
+		return 0, fmt.Errorf("missing container TCP binding")
+	}
+	return port, nil
 }
 
 // containerName uses the validated instance id verbatim (no truncation/mutation).

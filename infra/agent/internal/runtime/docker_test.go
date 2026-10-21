@@ -126,7 +126,7 @@ func (f *fakeEngine) handler() http.Handler {
 			if port == "" {
 				port = "41999"
 			}
-			_, _ = w.Write([]byte(`{"State":{"Running":true},"Config":{"Labels":{"auriga.instance":"inst_i1","auriga.generation":"3"}},"NetworkSettings":{"Ports":{"7860/tcp":[{"HostIp":"127.0.0.1","HostPort":"` + port + `"}]}}}`))
+			_, _ = w.Write([]byte(`{"State":{"Running":true},"Config":{"Labels":{"auriga.instance":"inst_i1","auriga.generation":"3"}},"HostConfig":{"PortBindings":{"7860/tcp":[{"HostIp":"127.0.0.1","HostPort":"0"}]}},"NetworkSettings":{"Ports":{"7860/tcp":[{"HostIp":"127.0.0.1","HostPort":"` + port + `"}]}}}`))
 		case strings.HasSuffix(path, "/stats"):
 			_, _ = w.Write([]byte(`{"memory_stats":{"usage":67108864},"pids_stats":{"current":4}}`))
 		case r.Method == http.MethodDelete:

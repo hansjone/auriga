@@ -137,9 +137,16 @@ func (r *Reconciler) Inventory() ([]*nodev1.InstanceStatus, error) {
 		return nil, err
 	}
 	out := make([]*nodev1.InstanceStatus, 0, len(recs))
+	inspectionCtx, cancel := context.WithTimeout(context.Background(), r.StartTimeout)
+	defer cancel()
 	for _, rec := range recs {
 		if rec.Status != nil {
-			out = append(out, rec.Status)
+			status := cloneStatus(rec.Status)
+			if status.Ready {
+				actual, inspectErr := r.Driver.Inspect(inspectionCtx, status.InstanceId)
+				status.Ready = inspectErr == nil && inspectionCtx.Err() == nil && actual.Running && actual.Ready
+			}
+			out = append(out, status)
 		}
 	}
 	ids, err := r.Store.ListDesiredIDs()
@@ -208,13 +215,31 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 	rec, _ := r.Store.GetActual(id)
 	if rec.Status != nil &&
 		rec.Status.ObservedGeneration == spec.Generation &&
-		rec.Status.Phase == desiredPhase(spec) &&
-		(rec.Status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_RUNNING || rec.Status.Ready) {
-		// After process restart the driver may be empty — re-drive if needed.
-		st, _ := r.Driver.Inspect(ctx, id)
-		need := spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING && !st.Running
-		need = need || (spec.Desired == nodev1.DesiredState_DESIRED_STATE_STOPPED && st.Running)
-		if !need {
+		(spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING || rec.Status.Phase == desiredPhase(spec)) {
+		// Persisted ready is not evidence after an agent restart. Rediscover and
+		// health-check a still-running process without Ensure replacing it.
+		recoveryCtx, cancel := context.WithTimeout(ctx, r.StartTimeout)
+		st, err := r.Driver.Inspect(recoveryCtx, id)
+		if err == nil {
+			err = recoveryCtx.Err()
+		}
+		if err != nil {
+			cancel()
+			r.failRecovery(rec, "runtime inspection failed")
+			return
+		}
+		if spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING && st.Running {
+			if st.Ready && rec.Status.Ready &&
+				(rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING || rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART) {
+				r.emit(rec.Status)
+			} else {
+				r.recoverRunning(recoveryCtx, rec)
+			}
+			cancel()
+			return
+		}
+		cancel()
+		if spec.Desired == nodev1.DesiredState_DESIRED_STATE_STOPPED && !st.Running {
 			r.emit(rec.Status)
 			return
 		}
@@ -223,15 +248,36 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 	// desired=stopped falls through and stops the instance.
 	if rec.Status != nil &&
 		spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING &&
-		rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING &&
+		(rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING ||
+			rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART ||
+			(rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED && len(rec.Status.RestartReasons) != 0)) &&
 		rec.Status.ObservedGeneration > 0 &&
 		rec.Status.ObservedGeneration < spec.Generation &&
 		needsRestart(rec.Status, spec) {
 		st := cloneStatus(rec.Status)
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
-		st.RestartReasons = restartReasons(spec)
+		if len(st.RestartReasons) == 0 {
+			st.RestartReasons = restartReasons(spec)
+		}
+		st.Error = nil
 		st.UpdatedAt = timestamppb.Now()
-		r.persist(st, rec.Attempts)
+		pending := rec
+		pending.Status = st
+		recoveryCtx, cancel := context.WithTimeout(ctx, r.StartTimeout)
+		actual, err := r.Driver.Inspect(recoveryCtx, id)
+		if err == nil {
+			err = recoveryCtx.Err()
+		}
+		switch {
+		case err != nil || !actual.Running:
+			r.failRecovery(pending, "pending runtime inspection failed")
+		case !actual.Ready:
+			r.recoverRunning(recoveryCtx, pending)
+		default:
+			st.Ready = true
+			r.persist(st, rec.Attempts)
+		}
+		cancel()
 		return
 	}
 
@@ -302,6 +348,44 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 		st.UpdatedAt = timestamppb.Now()
 		r.persist(st, 0)
 	}
+}
+
+func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord) {
+	previous := rec.Status
+	select {
+	case r.sem <- struct{}{}:
+		defer func() { <-r.sem }()
+	case <-ctx.Done():
+		r.failRecovery(rec, "runtime health recovery timed out")
+		return
+	}
+	st := cloneStatus(previous)
+	st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_STARTING
+	st.Ready = false
+	st.Error = nil
+	st.UpdatedAt = timestamppb.Now()
+	r.persist(st, rec.Attempts)
+	if err := r.Driver.Start(ctx, st.InstanceId); err != nil {
+		r.failRecovery(rec, "runtime health recovery failed")
+		return
+	}
+	st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_RUNNING
+	if previous.Phase == nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART || len(previous.RestartReasons) != 0 {
+		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART
+	}
+	st.Ready = true
+	st.UpdatedAt = timestamppb.Now()
+	// Start may merely rediscover an existing container. Preserve its start time.
+	r.persist(st, 0)
+}
+
+func (r *Reconciler) failRecovery(rec state.ActualRecord, message string) {
+	attempts := rec.Attempts + 1
+	st := cloneStatus(rec.Status)
+	st.Phase, st.Ready = nodev1.InstancePhase_INSTANCE_PHASE_FAILED, false
+	st.UpdatedAt = timestamppb.Now()
+	st.Error = &nodev1.InstanceError{Code: "agent.start_failed", Message: message, Retryable: attempts < maxFailAttempts, Attempts: attempts}
+	r.persist(st, attempts)
 }
 
 func (r *Reconciler) handleDelete(ctx context.Context, id string, del *nodev1.DeleteInstance) {
