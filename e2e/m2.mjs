@@ -44,6 +44,7 @@ import {
   identitySigner,
   probeRealDoor,
   assertRuntimeIsolation,
+  assertRealHealth,
 } from './lib/real-dsh.mjs';
 
 const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
@@ -613,6 +614,7 @@ async function verifyRealHost(instanceId, instance) {
   // Otherwise its delayed real heartbeat would be mistaken for health activity.
   const settleDeadline = Date.now() + 90_000;
   let initialRaw;
+  let initialProblem;
   while (Date.now() < settleDeadline) {
     const last = raw().at(-1);
     const projected = await req(`/api/workspace/v1/instances/${instanceId}`, {
@@ -624,16 +626,20 @@ async function verifyRealHost(instanceId, instance) {
       Date.parse(projected.body?.lastActivityAt) >=
         Date.parse(last.activity.lastInteractionAt)
     ) {
-      assertRawHeartbeat(last, actual);
-      initialRaw = last;
-      break;
+      try {
+        assertRawHeartbeat(last, actual);
+        initialRaw = last;
+        break;
+      } catch (error) {
+        initialProblem = error.message;
+      }
     }
     await sleep(1000);
   }
   if (!initialRaw)
     fail(
       'real-raw-heartbeat',
-      'signed door interaction never reached workspace as an accepted actual heartbeat',
+      `signed door interaction never settled as a healthy idle actual heartbeat: ${initialProblem || 'no matching request'}`,
     );
 
   const quietWindow = async (label, interactionAt) => {
@@ -644,7 +650,10 @@ async function verifyRealHost(instanceId, instance) {
     const from = Date.now();
     const quietUntil = from + 65_000;
     while (Date.now() < quietUntil) {
-      await directRequest('/_auriga/health');
+      assertRealHealth(
+        await directRequest('/_auriga/health'),
+        actual.pluginVersion,
+      );
       const response = await req(`/api/workspace/v1/instances/${instanceId}`, {
         host: ADMIN_HOST,
       });
@@ -658,7 +667,7 @@ async function verifyRealHost(instanceId, instance) {
     }
     const until = Date.now();
     const entries = raw({ after: from, before: until });
-    assertRawQuiet(entries, actual, interactionAt);
+    assertRawQuiet(entries, actual, interactionAt, { until });
     evidence.rawQuietWindows ??= [];
     evidence.rawQuietWindows.push({
       label,

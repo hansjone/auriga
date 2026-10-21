@@ -49,7 +49,7 @@ export function assertRawHeartbeat(entry, runtime) {
   );
 }
 
-export function assertRawQuiet(entries, runtime, interactionAt) {
+export function assertRawQuiet(entries, runtime, interactionAt, window = {}) {
   assert.ok(
     entries.length >= 2,
     'quiet window needs at least two accepted actual heartbeats',
@@ -62,4 +62,17 @@ export function assertRawQuiet(entries, runtime, interactionAt) {
       'health polling/refresh advanced raw interaction time',
     );
   }
+  const times = entries
+    .map((entry) => Date.parse(entry.receivedAt))
+    .sort((a, b) => a - b);
+  assert.ok(times.every(Number.isFinite), 'capture receipt times missing');
+  assert.ok(
+    times.at(-1) - times[0] >= 25_000,
+    'duplicate/burst heartbeats do not cover a periodic observation',
+  );
+  if (window.until !== undefined)
+    assert.ok(
+      window.until - times.at(-1) <= 35_000,
+      'actual heartbeats stopped before the quiet window ended',
+    );
 }
