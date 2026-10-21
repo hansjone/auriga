@@ -77,9 +77,9 @@ func TestSharedLocalRejectsUnsafeDirectories(t *testing.T) {
 					write(path)
 				}
 			}
-			before, err := os.Lstat(filepath.Dir(path))
-			if err != nil {
-				t.Fatal(err)
+			before, beforeErr := os.Lstat(filepath.Dir(path))
+			if beforeErr != nil && !os.IsNotExist(beforeErr) {
+				t.Fatal(beforeErr)
 			}
 			listener, err := ListenLocal(path, os.Getgid())
 			if listener != nil {
@@ -90,6 +90,12 @@ func TestSharedLocalRejectsUnsafeDirectories(t *testing.T) {
 				t.Fatalf("expected explicit rejection, got %v", err)
 			}
 			after, err := os.Lstat(filepath.Dir(path))
+			if os.IsNotExist(beforeErr) {
+				if !os.IsNotExist(err) {
+					t.Fatalf("rejected path must remain absent, got %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
