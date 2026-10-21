@@ -129,11 +129,10 @@ function rows(value) {
 }
 
 function service(ctx, name) {
-  try {
-    return ctx.get?.(name);
-  } catch {
-    return undefined;
-  }
+  // Let each collector's catch distinguish a failed lookup from real absence.
+  if (typeof ctx.get !== 'function')
+    throw new TypeError('host service lookup unavailable');
+  return ctx.get(name);
 }
 
 /**
@@ -220,7 +219,7 @@ export async function refreshActivityFromHost(ctx, activity, opts = {}) {
   let activeImBots = 0;
   try {
     const dshIm = service(ctx, 'dshIm');
-    if (!dshIm && opts.imBots === 'none') {
+    if (dshIm == null && opts.imBots === 'none') {
       // The rendered config declares this build has no IM service: absence is
       // a known 0. A present-but-failing service below stays unknown.
       imOk = true;

@@ -64,6 +64,32 @@ test('declared imBots none never masks a present but failing IM service', async 
   assert.equal(activity.snapshot().activeImBots, null);
 });
 
+test('declared imBots none never masks a failed IM service lookup', async () => {
+  const activity = createActivityProbe();
+  await refreshActivityFromHost(pureDshCtx(), activity, {
+    browsers: 0,
+    imBots: 'none',
+  });
+  assert.equal(activity.snapshot().activeImBots, 0);
+  const ctx = {
+    get(name) {
+      if (name === 'dshIm') throw new Error('service lookup failed');
+      return pureDshCtx().get(name);
+    },
+  };
+  await refreshActivityFromHost(ctx, activity, { browsers: 0, imBots: 'none' });
+  const snap = activity.snapshot();
+  assert.equal(snap.activeImBots, null);
+  assert.equal(snap.allKnown, false);
+  assert.deepEqual(snap.unknownFields, ['activeImBots']);
+});
+
+test('declared imBots none requires a working service lookup', async () => {
+  const activity = createActivityProbe();
+  await refreshActivityFromHost({}, activity, { browsers: 0, imBots: 'none' });
+  assert.equal(activity.snapshot().activeImBots, null);
+});
+
 test('pure DSH with declaration sends a heartbeat with known zeros', async () => {
   const activity = createActivityProbe();
   const bodies = [];

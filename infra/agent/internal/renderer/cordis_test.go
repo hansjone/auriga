@@ -191,3 +191,20 @@ func TestCordisPatchStringValuesStayData(t *testing.T) {
 		t.Fatalf("string value changed: %#v", cfg["note"])
 	}
 }
+
+func TestCordisPatchRejectsExpressionPaths(t *testing.T) {
+	for _, path := range []string{
+		"plugins.auriga-dsh.__jsExpr",
+		"plugins.auriga-dsh.note.__jsExpr",
+		"plugins.session-query-sqlite.note.__jsExpr",
+		"plugins.session-query-sqlite.__jsExpr.note",
+	} {
+		t.Run(path, func(t *testing.T) {
+			spec := baseSpec()
+			spec.Profile.Patches = []*nodev1.ConfigPatch{{Path: path, ValueJson: `"2 + 2"`}}
+			if _, err := renderCordis(t, spec, ""); err == nil || !strings.Contains(err.Error(), "Loader expression") {
+				t.Fatalf("expected Loader expression rejection, got %v", err)
+			}
+		})
+	}
+}

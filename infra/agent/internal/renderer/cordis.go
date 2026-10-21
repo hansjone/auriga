@@ -187,6 +187,12 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 	for _, row := range overrideOrder {
 		rows = append(rows, map[string]any{"id": row, "config": overrides[row]})
 	}
+	// Audit the assembled document as well as each input value: path expansion
+	// must never synthesize the Loader's executable-object marker. Renderer-owned
+	// jsExpr values are a distinct type and remain the only allowed expressions.
+	if containsLoaderExpression(rows) {
+		return nil, fmt.Errorf("renderer: assembled patch contains a Loader expression")
+	}
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -216,6 +222,11 @@ func splitPatchPath(path string) (string, []string, error) {
 	parts := strings.Split(path, ".")
 	if len(parts) < 3 || parts[0] != "plugins" {
 		return "", nil, fmt.Errorf("renderer: patch path %q must be plugins.<row>.<key>", path)
+	}
+	for _, part := range parts[1:] {
+		if part == "__jsExpr" {
+			return "", nil, fmt.Errorf("renderer: patch path %q contains a Loader expression", path)
+		}
 	}
 	row := parts[1]
 	if !rowIDRe.MatchString(row) {
