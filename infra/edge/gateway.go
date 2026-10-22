@@ -31,6 +31,8 @@ type Gateway struct {
 	Now           func() time.Time
 	Ingress       *NodeIngress
 	AdminCSRF     AdminCSRFVerifier
+	SessionRPC    BrowserSessionRPC
+	Activity      *sessionActivity
 	IAMTransport  http.RoundTripper
 	APITransports map[*url.URL]http.RoundTripper
 
@@ -68,7 +70,11 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	if ingress != nil {
 		ingress.allowLocal = cfg.AllowLocalIngress
 	}
-	wireSessionRevoke(sessions, hub.CancelSession)
+	activity := newSessionActivity()
+	wireSessionRevoke(sessions, func(sid string) {
+		activity.epoch.Add(1)
+		hub.CancelSession(sid)
+	})
 	g := &Gateway{
 		Cfg:          cfg,
 		Log:          log,
@@ -80,6 +86,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		Signer:       signer,
 		Limiter:      NewTokenBucketLimiter(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, cfg.RateLimit.PathPrefix),
 		Conns:        hub,
+		Activity:     activity,
 		Now:          time.Now,
 		Ingress:      ingress,
 		iamURL:       iamURL,
@@ -397,7 +404,7 @@ func (g *Gateway) loadSession(r *http.Request, audience string) (*Session, error
 	if raw == "" {
 		return nil, ErrSessionNotFound
 	}
-	return g.Sessions.Get(r.Context(), HashCookie(raw))
+	return g.browserSession(r, raw, audience, r.Method == http.MethodGet)
 }
 
 func (g *Gateway) checkCSRF(r *http.Request, sess *Session) error {
@@ -438,6 +445,10 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 	}
 	sessKey := g.sessionKey(r, "portal")
 	sess, err := g.loadSession(r, "portal")
+	if errors.Is(err, errIAMUnavailable) {
+		writeProblem(w, problem(http.StatusServiceUnavailable, "common.unavailable", "Service Unavailable", "session unavailable", rid))
+		return
+	}
 	if err != nil || sess.Valid(g.Now().UTC(), "portal") != nil {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "portal session required", rid))
 		return
@@ -458,6 +469,16 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 	}
 	if err != nil || route.InstanceID != instanceID || route.TenantID != sess.TenantID {
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
+		return
+	}
+	if sess, err = g.touchBrowserSession(r.Context(), getCookie(r, cookieName(g.requestSecureCookies(r), sessionCookieBase("portal"))), sess); err != nil {
+		status := http.StatusServiceUnavailable
+		code := "common.unavailable"
+		if errors.Is(err, errIAMUnauthenticated) {
+			status = http.StatusUnauthorized
+			code = "common.unauthenticated"
+		}
+		writeProblem(w, problem(status, code, http.StatusText(status), "session unavailable", rid))
 		return
 	}
 	nonce, err := randomID(24)
