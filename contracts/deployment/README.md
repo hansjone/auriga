@@ -45,8 +45,34 @@ Ajv 校结构、IPv4/DNS 格式、枚举、类型、范围、mode 与实例模�
    IP 模式不允许无端口 IP 表示任意端口，不含管理端口、内部 alias 或通配符；实例 profile、心跳和请求不能覆盖。
    domain 模式继续按已验证实例 ID 派生子域。现插件配置尚缺 scheme 绑定接线，IP2 必须先补契约/实现，不能删 fence。
 
-这些跨字段/URL/CIDR规则是启动失败条件。本次只有结构测试与语义负例数据，尚无启动验证器，不能把 schema 验过当作规则都已执行。
+这些跨字段/URL/CIDR规则是启动失败条件。IP1a 已提供下述 Go 生产加载器及实际负例回归；
+edge/IAM/agent 尚未装配消费，不能把配置加载成功当作浏览器或服务入口已实现。
 内部 API 的错误/权限沿用 common/IAM/workspace 单一来源；无效配置在启动前报具体字段并退出，不发明运行时权限键。
+
+### 生成与 Go 加载入口（IP1a）
+
+仓库根执行 `./mvnw -Pgo-openapi-models -pl services/contracts -am generate-sources`（Windows 用 `mvnw.cmd`），
+再执行 `gofmt -w infra/gen/aiapi infra/gen/resourceapi infra/gen/deployment`。
+固定 OpenAPI Generator 7.26.0 生成 `infra/gen/deployment` 的 Go 类型；
+生成投影将 `$defs`/`const` 转成 OpenAPI 模型和带 discriminator 的 union，完整原 schema 另生成副本，
+不以类型、union 解码器或投影取代原 schema 验证。手写代码在独立的 `infra/gen/deploymentconfig`，不会被生成清理。
+
+消费 API 为 `deploymentconfig.Load(data) (Config, error)`：拒绝重复 JSON 键（含转义后同名）、
+尾随内容和无效 UTF-8，输入上限 1 MiB、嵌套上限64；随后以完整 Draft 2020-12 schema 验证未知字段、
+必填/null、精确数值、枚举、union 和 format，再解码生成模型并执行上述配置内跨字段规则。
+schema 仅从生成副本编译，format 断言显式开启，文件/网络外部引用禁止加载；不会从安装输入选择另一份 schema。
+规范 IPv4/DNS A-label/CIDR 必须预先合规，不宽容修复 host；JSON Schema 合法整数的指数或小数表示会在精确校验后规范化，
+tenant UUID 统一小写，Origin 默认端口省略，其余有效端口保留。
+
+`Config` 私有持有生成模型，只有加载成功才 `Valid()==true`；零值无效。
+`TenantID`、`Mode`、`PortalOrigin`/`AdminOrigin`、`PortalURL`/`AdminURL`、`Issuer`、`Listeners`、
+`InstanceControl`、`IngressKind`、`ProxyPeerCIDRs`、`InstanceParentDomain` 按值或副本返回，不能修改已校验身份。
+失败返回 `ValidationError`，`Code()` 为既有 `common.validation_failed`，`Field` 为 JSON Pointer，错误文本不回显配置值。
+
+从 `infra/gen` 执行 `go test ./deploymentconfig`，实际覆盖四份原始正例、32项结构负例、12项启动语义负例及歧义/冲突回归；
+12项启动负例须先通过完整结构验证，再由相应语义字段报错。合法父子域正例仍须加载成功。
+本地加载不证明 IAM 实际租户存在、代理证书身份/TCP 对端匹配、edge 容器身份及网络归属/成员，
+这些安装装配与运行时核验仍须由后续消费者完成；尚未接 HTTP listener、会话或 CSRF，不能据此宣称纯 IP 浏览器可用。
 
 ## authority、Origin 与代理信任
 

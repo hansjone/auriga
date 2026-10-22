@@ -9,6 +9,16 @@
   不生成客户端、嵌套go.mod或新增第三方依赖。每次仅清理这两个专属生成目录，勿在其中放手写代码。
 - 日常Java构建默认不重写跟踪的Go HTTP文件；Java CI的Linux job显式启用上述profile并检查漂移，
   Windows Java/Go CI仍编译已提交类型。
+- 受信部署入口：同一 `go-openapi-models` profile 先运行 `services/contracts/scripts/gen-access.mjs`，
+  从 `contracts/deployment/access.schema.json` 投影生成用 OpenAPI，再用固定 7.26.0 生成 `deployment` 的 Go 模型；
+  执行 `gofmt -w infra/gen/deployment`。该目录包括原 schema 的生成副本，每次仅清理此目录，
+  不生成客户端、Java/TS模型、嵌套模块或模型验证依赖。投影的 discriminator 仅帮助解码，不能替代结构校验。
+  Java Linux CI 同时检查该目录的已跟踪和未跟踪漂移。
+- `deploymentconfig.Load([]byte) (Config, error)` 是手写的生产加载入口：严格 JSON、完整 Draft 2020-12 schema
+  （启用 format 断言，禁止外部资源加载）、生成模型解码和跨字段启动校验依次执行。
+  使用 `jsonschema/v6` 和已有 `x/net/idna`，生成模型留在私有状态；getter 返回值或副本。
+  `go test ./deploymentconfig` 实际读取原始四份正例、32份结构负例与12份启动语义负例，
+  并验证重复键、null、尾随内容、监听冲突、CIDR和命名空间等回归。它尚未由 edge/IAM/agent 装配消费。
 - `contracttest` 是手写测试，检查四份共享JCS/Ed25519向量和生成模型的presence/null语义，
   不实现生产签名消费。Java签名测试会写本次临时公钥/签名到
   `services/contracts/target/java-signature-vectors.json`；将此绝对路径设为

@@ -31,9 +31,9 @@ jobs:
       - name: Check committed OpenAPI Go models (Linux)
         if: runner.os != 'Windows'
         run: |
-          gofmt -w infra/gen/aiapi infra/gen/resourceapi
-          git diff --exit-code -- infra/gen/aiapi infra/gen/resourceapi
-          test -z "$(git status --porcelain -- infra/gen/aiapi infra/gen/resourceapi)"
+          gofmt -w infra/gen/aiapi infra/gen/resourceapi infra/gen/deployment
+          git diff --exit-code -- infra/gen/aiapi infra/gen/resourceapi infra/gen/deployment
+          test -z "$(git status --porcelain -- infra/gen/aiapi infra/gen/resourceapi infra/gen/deployment)"
       - name: Verify Java signing with Go (Linux)
         if: runner.os != 'Windows'
         run: |

@@ -111,6 +111,15 @@
               <arguments>run bundle</arguments>
             </configuration>
           </execution>
+          <execution>
+            <id>project-access-models</id>
+            <phase>generate-sources</phase>
+            <goals><goal>npm</goal></goals>
+            <configuration>
+              <skip>${auriga.skipGoModels}</skip>
+              <arguments>run gen-access</arguments>
+            </configuration>
+          </execution>
         </executions>
       </plugin>
       <plugin>
@@ -252,6 +261,30 @@
               <generateModelDocumentation>false</generateModelDocumentation>
               <configOptions>
                 <packageName>resourceapi</packageName>
+                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                <disallowAdditionalPropertiesIfNotPresent>false</disallowAdditionalPropertiesIfNotPresent>
+              </configOptions>
+            </configuration>
+          </execution>
+          <execution>
+            <id>access-go-models</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <skip>${auriga.skipGoModels}</skip>
+              <!-- gen-access cleans only deployment before writing its schema. -->
+              <cleanupOutput>false</cleanupOutput>
+              <generatorName>go</generatorName>
+              <inputSpec>${project.build.directory}/bundled/access.json</inputSpec>
+              <output>${project.basedir}/../../infra/gen/deployment</output>
+              <generateApis>false</generateApis>
+              <generateSupportingFiles>true</generateSupportingFiles>
+              <supportingFilesToGenerate>utils.go</supportingFilesToGenerate>
+              <generateApiDocumentation>false</generateApiDocumentation>
+              <generateModelDocumentation>false</generateModelDocumentation>
+              <configOptions>
+                <packageName>deployment</packageName>
+                <!-- Structural validation happens against the full schema first. -->
+                <useOneOfDiscriminatorLookup>true</useOneOfDiscriminatorLookup>
                 <hideGenerationTimestamp>true</hideGenerationTimestamp>
                 <disallowAdditionalPropertiesIfNotPresent>false</disallowAdditionalPropertiesIfNotPresent>
               </configOptions>
