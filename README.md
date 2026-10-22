@@ -8,8 +8,16 @@ and manages those workspaces for them: install, configure, start, stop, upgrade 
 On top of that it provides team identity (pluggable identity sources), roles and quotas,
 a model gateway, an MCP gateway for team tools, a resource center and team knowledge.
 
-**Status: early development (milestone M0).** Nothing here is usable yet.
-See [docs/plan/roadmap.zh.md](docs/plan/roadmap.zh.md) and [docs/plan/progress.md](docs/plan/progress.md).
+**Status: early development.** M0 and M1 are complete. The core M2 flow has passed
+local acceptance with a real DSH runtime, including heartbeats, stop/wake, session
+revocation and agent restart recovery; general self-hosted deployment remains in development.
+See the [roadmap](docs/plan/roadmap.zh.md), [progress](docs/plan/progress.md),
+[M2 validation guide](docs/dev/m2.md) and [container deployment guide](docs/dev/nas.md).
+
+Auriga targets general open-source self-hosting; NAS is one real deployment
+environment used to validate that process. Domain access and LAN access by IP
+alone are both first-class requirements. Full login and instance WebSocket access
+without a domain have not yet passed acceptance.
 
 ## Architecture at a glance
 

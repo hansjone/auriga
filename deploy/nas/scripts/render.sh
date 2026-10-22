@@ -193,7 +193,7 @@ fi
 
 REG_PREFIX="127.0.0.1:${HOST_REG}/auriga/"
 cat >"$CONFIG/agent-policy.yaml" <<EOF
-allowedImagePrefixes:
+allowedImageRepos:
   - ${REG_PREFIX}
   - localhost:${HOST_REG}/auriga/
 maxCPUMillis: 500
