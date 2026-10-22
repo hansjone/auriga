@@ -44,6 +44,7 @@ class LoginResponsePostgresTest {
   SigningKeys keys;
   TokenService tokens;
   TeamAccounts team;
+  EventPublisher events;
   ConnectorRegistry registry;
   RequestIdentity identity;
   IamMeController me;
@@ -102,7 +103,7 @@ class LoginResponsePostgresTest {
             clock,
             access.portalUrl(),
             Map.of());
-    var events = mock(EventPublisher.class);
+    events = mock(EventPublisher.class);
     var audit = mock(AuditLogger.class);
     sessions = new SessionManager(store, projection, tokens, clock, events, audit);
     team = new TeamAccounts(store, secrets, clock, events);
@@ -305,6 +306,10 @@ class LoginResponsePostgresTest {
   }
 
   void asUser(ObjectNode projected, Runnable work) {
+    asUser(projected, false, work);
+  }
+
+  void asUser(ObjectNode projected, boolean steppedUp, Runnable work) {
     var claims = tokens.verify(projected.path("accessToken").asString());
     var principal =
         new auriga.common.security.AurigaPrincipal(
@@ -318,7 +323,7 @@ class LoginResponsePostgresTest {
             List.of(),
             Set.of(),
             clock.instant(),
-            null,
+            steppedUp ? clock.instant() : null,
             claims.path("jti").asString());
     TenantContext.run(
         tenant,
@@ -528,6 +533,195 @@ class LoginResponsePostgresTest {
                 }));
     assertEquals(2, rejected.get());
     assertNotNull(consumer.get(live.hash()));
+  }
+
+  @Test
+  void passwordRetryMustConfirmEarlierCommittedSecurityDeletion() throws Exception {
+    var old = live();
+    var current = live();
+    UUID account = UUID.fromString(current.value().path("accountId").asString());
+    var otherAccount = scopedSession(tenant, UUID.randomUUID());
+    UUID otherTenant = UUID.randomUUID();
+    var otherTenantSession = scopedSession(otherTenant, UUID.randomUUID());
+    try (var readerConnection = io.nats.client.Nats.connect(NatsExtension.url())) {
+      var reader = new NatsSessionKv(readerConnection, schemas);
+      assertNotNull(reader.get(old.hash()));
+      connection.close();
+      assertCredentialUnavailable(
+          current.value(),
+          () ->
+              me.changePassword(
+                  Json.object(
+                      "currentPassword", "correct-horse", "newPassword", "retry-password-one")));
+      assertTrue(store.tenant(tenant, () -> store.sessionProjectionPending(old.hash())));
+      assertNotNull(
+          reader.get(old.hash()), "The original consumer has a separate healthy connection");
+      assertCredentialUnavailable(
+          current.value(),
+          () ->
+              me.changePassword(
+                  Json.object(
+                      "currentPassword",
+                      "retry-password-one",
+                      "newPassword",
+                      "retry-password-two")));
+      assertTrue(store.tenant(tenant, () -> store.sessionProjectionPending(old.hash())));
+      assertNotNull(reader.get(old.hash()));
+      reconstructCredentialController();
+      asUser(
+          current.value(),
+          () ->
+              me.changePassword(
+                  Json.object(
+                      "currentPassword",
+                      "retry-password-two",
+                      "newPassword",
+                      "retry-password-three")));
+      assertNull(
+          reader.get(old.hash()),
+          "Successful credential response must immediately reject the old cookie");
+      assertFalse(store.tenant(tenant, () -> store.sessionProjectionPending(old.hash())));
+      assertNotNull(reader.get(current.hash()));
+      assertScopePreserved(reader, otherAccount, tenant);
+      assertScopePreserved(reader, otherTenantSession, otherTenant);
+      verify(events, times(1))
+          .publish(eq("identity.session_revoked"), eq(account.toString()), any());
+      asUser(current.value(), () -> assertEquals(0, me.revokeOthers().path("revoked").asInt()));
+      verify(events, times(1))
+          .publish(eq("identity.session_revoked"), eq(account.toString()), any());
+      assertRequestReleasedAndPoolBecomesIdle();
+      System.out.println(
+          "CREDENTIAL_PASSWORD_RETRY failed=503,503 recovered=success old_cookie=absent current=preserved");
+    }
+  }
+
+  void assertCredentialUnavailable(ObjectNode current, Runnable change) {
+    var error =
+        assertThrows(auriga.common.error.AurigaException.class, () -> asUser(current, change));
+    assertEquals("common.unavailable", error.errorCode().code());
+    assertEquals(503, error.errorCode().httpStatus());
+    store.requireTransactionReleased();
+  }
+
+  void reconstructCredentialController() throws Exception {
+    reconstructProjection();
+    sessions =
+        new SessionManager(store, projection, tokens, clock, events, mock(AuditLogger.class));
+    team = new TeamAccounts(store, secrets, clock, events);
+    me =
+        new IamMeController(
+            store,
+            sessions,
+            team,
+            new TeamPasskeys(store, secrets, clock, events),
+            null,
+            clock,
+            tokens);
+  }
+
+  SessionManager.Issued scopedSession(UUID scope, UUID account) {
+    return TenantContext.call(
+        scope,
+        () ->
+            sessions.withSigningKey(
+                () ->
+                    sessions.response(
+                        () -> {
+                          store.insert(
+                              "account",
+                              account.toString(),
+                              Json.object(
+                                  "accountId", account, "status", "active", "memberType", "member"),
+                              null);
+                          UUID scopedProvider = provider;
+                          if (!scope.equals(tenant)) {
+                            scopedProvider = UUID.randomUUID();
+                            store.insert(
+                                "idp_provider",
+                                scopedProvider.toString(),
+                                Json.object("providerId", scopedProvider, "enabled", true),
+                                null);
+                          }
+                          return sessions.create(
+                              account,
+                              scopedProvider,
+                              "admin",
+                              false,
+                              Duration.ofHours(1),
+                              Duration.ofMinutes(30));
+                        })));
+  }
+
+  void assertScopePreserved(NatsSessionKv reader, SessionManager.Issued issued, UUID scope) {
+    String hash = Secrets.hash(issued.cookie());
+    assertNotNull(reader.get(hash));
+    var row = store.tenant(scope, () -> store.get("session", hash, false));
+    assertNotNull(row);
+    assertFalse(row.path("revoked").asBoolean());
+    assertFalse(store.tenant(scope, () -> store.sessionProjectionPending(hash)));
+    assertNotNull(tokens.verify(reader.get(hash).path("accessToken").asString()));
+  }
+
+  @Test
+  void totpConfirmationMustIncludeEarlierRevokedSessionsWhileProjectionRemainsUnavailable()
+      throws Exception {
+    credentialTotpRetry(false);
+  }
+
+  @Test
+  void recoveredTotpConfirmationImmediatelyDeletesEarlierRevokedSessions() throws Exception {
+    credentialTotpRetry(true);
+  }
+
+  void credentialTotpRetry(boolean recoverBeforeConfirmation) throws Exception {
+    var old = live();
+    var current = live();
+    String account = current.value().path("accountId").asString();
+    try (var readerConnection = io.nats.client.Nats.connect(NatsExtension.url())) {
+      var reader = new NatsSessionKv(readerConnection, schemas);
+      connection.close();
+      assertCredentialUnavailable(
+          current.value(),
+          () ->
+              me.changePassword(
+                  Json.object(
+                      "currentPassword", "correct-horse", "newPassword", "totp-retry-password")));
+      assertNotNull(reader.get(old.hash()));
+      assertTrue(store.tenant(tenant, () -> store.sessionProjectionPending(old.hash())));
+      if (recoverBeforeConfirmation) reconstructCredentialController();
+      var enrollment = new java.util.concurrent.atomic.AtomicReference<ObjectNode>();
+      asUser(current.value(), true, () -> enrollment.set(me.beginTotp()));
+      String enrollmentId = enrollment.get().path("enrollmentId").asString();
+      String code =
+          Totp.code(
+              enrollment.get().path("secret").asString(), clock.instant().getEpochSecond() / 30);
+      Runnable confirmation =
+          () ->
+              asUser(
+                  current.value(),
+                  true,
+                  () -> me.confirmTotp(enrollmentId, Json.object("code", code)));
+      if (recoverBeforeConfirmation) {
+        confirmation.run();
+        assertNull(reader.get(old.hash()));
+        assertFalse(store.tenant(tenant, () -> store.sessionProjectionPending(old.hash())));
+      } else {
+        var error = assertThrows(auriga.common.error.AurigaException.class, confirmation::run);
+        assertEquals("common.unavailable", error.errorCode().code());
+        assertEquals(503, error.errorCode().httpStatus());
+        assertNotNull(reader.get(old.hash()));
+        assertTrue(store.tenant(tenant, () -> store.sessionProjectionPending(old.hash())));
+      }
+      assertTrue(store.tenant(tenant, () -> team.hasTotp(UUID.fromString(account))));
+      assertNull(store.tenant(tenant, () -> store.get("team_ceremony", enrollmentId, false)));
+      verify(events, times(1)).publish(eq("identity.session_revoked"), eq(account), any());
+      verify(events, times(1)).publish(eq("identity.mfa_changed"), eq(account), any());
+      assertNotNull(reader.get(current.hash()));
+      store.requireTransactionReleased();
+      System.out.printf(
+          "CREDENTIAL_TOTP_RETRY restored=%s status=%s events_once=true current=preserved%n",
+          recoverBeforeConfirmation, recoverBeforeConfirmation ? "success" : "503");
+    }
   }
 
   @Test

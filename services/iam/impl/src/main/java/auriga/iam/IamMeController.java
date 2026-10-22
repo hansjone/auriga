@@ -154,10 +154,7 @@ public class IamMeController {
               teamIdentity.path("providerId").asString(),
               body.path("currentPassword").asString(""),
               body.path("newPassword").asString(""));
-          for (ObjectNode s : store.all("session"))
-            if (s.path("accountId").asString().equals(principal.subject())
-                && !s.path("sessionId").asString().equals(principal.sessionId())
-                && !s.path("revoked").asBoolean()) sessions.revokeOne(s, "security");
+          revokeOtherCredentialSessions();
           return null;
         });
   }
@@ -462,7 +459,8 @@ public class IamMeController {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
     for (ObjectNode session : store.all("session"))
       if (session.path("accountId").asString().equals(principal.subject())
-          && !session.path("sessionId").asString().equals(principal.sessionId())
-          && !session.path("revoked").asBoolean()) sessions.revokeOne(session, "security");
+          && !session.path("sessionId").asString().equals(principal.sessionId()))
+        // Earlier credential changes may have committed while their deletion confirmation failed.
+        sessions.revokeOne(session, "security");
   }
 }
