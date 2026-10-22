@@ -18,18 +18,21 @@ const maxInstanceBodyBytes = 64 << 20 // 64 MiB, aligned with agent uploads.
 
 // Gateway is the edge HTTP handler.
 type Gateway struct {
-	Cfg      Config
-	Log      *slog.Logger
-	Trusted  *TrustedProxies
-	Sessions SessionStore
-	Routes   RouteStore
-	Owners   OwnerChecker
-	Tickets  TicketStore
-	Signer   IdentitySigner
-	Limiter  *TokenBucketLimiter
-	Conns    *SessionConnHub
-	Now      func() time.Time
-	Ingress  *NodeIngress
+	Cfg           Config
+	Log           *slog.Logger
+	Trusted       *TrustedProxies
+	Sessions      SessionStore
+	Routes        RouteStore
+	Owners        OwnerChecker
+	Tickets       TicketStore
+	Signer        IdentitySigner
+	Limiter       *TokenBucketLimiter
+	Conns         *SessionConnHub
+	Now           func() time.Time
+	Ingress       *NodeIngress
+	AdminCSRF     AdminCSRFVerifier
+	IAMTransport  http.RoundTripper
+	APITransports map[*url.URL]http.RoundTripper
 
 	iamURL       *url.URL
 	orgURL       *url.URL
@@ -86,6 +89,28 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
 	}
+	if cfg.Access.Valid() && (cfg.IAMHop.CAFile != "" || cfg.IAMHop.AllowLoopbackHTTP) {
+		g.IAMTransport, err = newIAMHopTransport(cfg.IAMHop, iamURL)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if cfg.Access.Valid() {
+		g.APITransports = make(map[*url.URL]http.RoundTripper)
+		for _, target := range []*url.URL{orgURL, wsURL} {
+			if g.IAMTransport != nil && sameInternalHTTPSOrigin(iamURL, target) {
+				g.APITransports[target] = g.IAMTransport
+			} else if cfg.IAMHop.AllowLoopbackHTTP && target.Scheme == "http" {
+				transport, err := newIAMHopTransport(cfg.IAMHop, target)
+				if err != nil {
+					return nil, err
+				}
+				g.APITransports[target] = transport
+			}
+		}
+		g.portalStatic = newAccessSPAFileServer(cfg.Static.PortalRoot, cfg.Access.Mode())
+		g.adminStatic = newAccessSPAFileServer(cfg.Static.AdminRoot, cfg.Access.Mode())
+	}
 	return g, nil
 }
 
@@ -94,6 +119,9 @@ func (g *Gateway) Handler() http.Handler {
 	h = g.Limiter.Middleware(h, func(r *http.Request) string {
 		return ResolveClientIP(r, g.Trusted)
 	})
+	if g.Cfg.Access.Valid() {
+		h = g.accessHandler(h)
+	}
 	return h
 }
 
@@ -126,6 +154,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	audience, knownHost := normalizeAudience(host, g.Cfg.PortalHost, g.Cfg.AdminHost)
+	if entry, ok := r.Context().Value(accessEntryKey{}).(accessEntry); ok {
+		audience, knownHost = entry.role, true
+	}
 
 	// Path-based instance: /i/<id>/... — only on portal host when no parent domain is configured.
 	if strings.HasPrefix(path, "/i/") {
@@ -170,6 +201,10 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Admin API isolation (use sanitized path)
 	if isAdminAPIPath(path) && audience != "admin" {
+		if g.Cfg.Access.Valid() {
+			writeProblem(w, problem(http.StatusForbidden, "common.forbidden", "Forbidden", "admin entry required", rid))
+			return
+		}
 		writeProblem(w, problem(http.StatusForbidden, "edge.admin_host_required", "Forbidden", "admin API only on admin host", rid))
 		return
 	}
@@ -247,6 +282,10 @@ func (g *Gateway) isPublicPath(path string) bool {
 }
 
 func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.URL, audience, clientIP, rid string) {
+	if g.Cfg.Access.Valid() {
+		g.proxyAccessAPI(w, r, target, audience, clientIP, rid)
+		return
+	}
 	if err := g.checkUpgradeOriginAPI(r, audience); err != nil {
 		writeProblem(w, problem(http.StatusForbidden, "edge.bad_origin", "Forbidden", err.Error(), rid))
 		return
@@ -316,7 +355,7 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 
 // sessionKey is the session-store key for the request's session cookie.
 func (g *Gateway) sessionKey(r *http.Request, audience string) string {
-	raw := getCookie(r, cookieName(g.Cfg.SecureCookies, sessionCookieBase(audience)))
+	raw := getCookie(r, cookieName(g.requestSecureCookies(r), sessionCookieBase(audience)))
 	if raw == "" {
 		return ""
 	}
@@ -341,7 +380,7 @@ func (g *Gateway) boundSession(ctx context.Context, key, sessionID string) (*Ses
 }
 
 func (g *Gateway) loadSession(r *http.Request, audience string) (*Session, error) {
-	name := cookieName(g.Cfg.SecureCookies, sessionCookieBase(audience))
+	name := cookieName(g.requestSecureCookies(r), sessionCookieBase(audience))
 	raw := getCookie(r, name)
 	if raw == "" {
 		return nil, ErrSessionNotFound
@@ -350,7 +389,7 @@ func (g *Gateway) loadSession(r *http.Request, audience string) (*Session, error
 }
 
 func (g *Gateway) checkCSRF(r *http.Request, sess *Session) error {
-	csrfName := cookieName(g.Cfg.SecureCookies, csrfCookieBase())
+	csrfName := cookieName(g.requestSecureCookies(r), csrfCookieBase())
 	cookieVal := getCookie(r, csrfName)
 	headerVal := strings.TrimSpace(r.Header.Get("X-Auriga-CSRF"))
 	if cookieVal == "" || headerVal == "" || cookieVal != headerVal {
@@ -614,7 +653,7 @@ func (g *Gateway) redeemTicket(w http.ResponseWriter, r *http.Request, instanceI
 }
 
 func (g *Gateway) lookupInstBinding(r *http.Request) (*InstBinding, error) {
-	name := cookieName(g.Cfg.SecureCookies, instCookieBase())
+	name := cookieName(g.requestSecureCookies(r), instCookieBase())
 	raw := getCookie(r, name)
 	if raw == "" {
 		return nil, ErrSessionNotFound
@@ -684,6 +723,13 @@ func parseOriginHost(r *http.Request) (string, error) {
 func isUpgradeRequest(r *http.Request) bool {
 	// N4: require explicit websocket upgrade, not merely Connection: upgrade (e.g. h2c).
 	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+}
+
+func (g *Gateway) requestSecureCookies(r *http.Request) bool {
+	if entry, ok := r.Context().Value(accessEntryKey{}).(accessEntry); ok {
+		return entry.scheme == "https"
+	}
+	return g.Cfg.SecureCookies
 }
 
 func stripInstanceSetCookie(resp *http.Response) error {

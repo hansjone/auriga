@@ -106,6 +106,10 @@ Sec-Fetch-Site=same-site 或 SameSite cookie 被免检；标准外部服务 Bear
 | 错误/到期CSRF而会话有效 | 403 `common.forbidden`，不能退回旧cookie值 |
 | IAM权威校验不可用 | 503 `common.unavailable`，不使用KV旧正向状态 |
 
+表中 `common.validation_failed` 适用于已进入应用的合法 HTTP 请求所做的 authority 校验。
+HTTP 解析器在进入应用前拒绝的非法报文（如重复 Host 或非法字节）返回协议层 400，
+正文不保证为 Problem；这些报文仍不得转发上游或签发身份。
+
 登录例外是精确白名单，不是“`/login/**`都免检”：
 
 - `POST /api/iam/v1/login/transactions` 的 purpose=login 尚无会话CSRF，但仍要求对应入口的完整同源Origin、
