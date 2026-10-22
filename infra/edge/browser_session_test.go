@@ -353,7 +353,7 @@ func TestBrowserTouchConcurrencyAudienceCapacityAndRevoke(t *testing.T) {
 		t.Fatal("saturation evicted key or called RPC")
 	}
 	store.Revoke(portal.SessionID)
-	if _, err := g.touchBrowserSession(context.Background(), "portal", portal); !errors.Is(err, errIAMUnavailable) {
+	if _, err := g.touchBrowserSession(context.Background(), "portal", portal); !errors.Is(err, errIAMUnauthenticated) {
 		t.Fatalf("revoked throttled request: %v", err)
 	}
 }
@@ -419,7 +419,7 @@ func TestBrowserRevokeDuringTouchCancelsOriginalConnection(t *testing.T) {
 	ctx, cancel := g.Conns.Attach(context.Background(), row.SessionID, row.ExpiresAt)
 	defer cancel()
 	backend.onTouch = func() { store.Revoke(row.SessionID) }
-	if w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie"); w.Code != 503 {
+	if w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie"); w.Code != 401 {
 		t.Fatalf("racing revoke accepted: %d", w.Code)
 	}
 	select {
@@ -512,5 +512,151 @@ func TestBrowserPublicLinkAndStepupKeepRenewedPrincipal(t *testing.T) {
 				t.Fatal("public login purpose touched idle deadline")
 			}
 		})
+	}
+}
+
+func TestBrowserOpenKVMissDoesNotTouchBeforeOwnership(t *testing.T) {
+	for _, domain := range []bool{false, true} {
+		for _, routeCase := range []string{"non-owner", "wrong-tenant", "owner"} {
+			t.Run(fmt.Sprintf("domain=%v/%s", domain, routeCase), func(t *testing.T) {
+				g, _, store := accessFixture(t, domain, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+				backend, _ := browserRPCFixture(t, g, store)
+				row := putBrowserSession(g, backend, "cookie", "portal")
+				backend.clock.Add(120)
+				originalIdle := row.IdleExpiresAt
+				store.Delete("cookie")
+				const instanceID = "019a0000-0000-7000-8000-000000000001"
+				route := &InstanceRoute{InstanceID: instanceID, TenantID: row.TenantID, OwnerID: row.AccountID, State: "running"}
+				if routeCase == "non-owner" {
+					route.OwnerID = "another-account"
+				}
+				if routeCase == "wrong-tenant" {
+					route.TenantID = "another-tenant"
+				}
+				g.Routes.(*MemoryRouteStore).Put(route)
+				w := browserRequest(g, "portal", "GET", "/open/"+instanceID, "cookie")
+				if w.Code != 503 || backend.touches != 0 || !row.IdleExpiresAt.Equal(originalIdle) || len(g.Activity.attempts) != 0 {
+					t.Fatalf("early open side effect: status=%d touch=%d idle_delta=%s", w.Code, backend.touches, row.IdleExpiresAt.Sub(originalIdle))
+				}
+				if w = browserRequest(g, "portal", "GET", "/api/org/v1/me", "cookie"); w.Code != 204 || backend.touches != 1 {
+					t.Fatalf("normal GET recovery: %d touch=%d", w.Code, backend.touches)
+				}
+				want := 403
+				if routeCase == "owner" {
+					want = 302
+				}
+				w = browserRequest(g, "portal", "GET", "/open/"+instanceID, "cookie")
+				if w.Code != want || backend.touches != 1 {
+					t.Fatalf("recovered open: %d want=%d touch=%d", w.Code, want, backend.touches)
+				}
+			})
+		}
+	}
+}
+
+func TestBrowserUnrelatedRevokeDoesNotCacheTouchFailure(t *testing.T) {
+	g, _, store := accessFixture(t, false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	backend, _ := browserRPCFixture(t, g, store)
+	putBrowserSession(g, backend, "cookie", "portal")
+	started := backend.clock.Load()
+	backend.onTouch = func() { store.Revoke("unrelated-session") }
+	if w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie"); w.Code != 204 {
+		t.Fatalf("unrelated race: %d", w.Code)
+	}
+	backend.onTouch = nil
+	for _, offset := range []int64{1, 299, 300} {
+		backend.clock.Store(started + offset)
+		w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie")
+		wantTouches := 1
+		if offset == 300 {
+			wantTouches = 2
+		}
+		if w.Code != 204 || backend.touches != wantTouches {
+			t.Errorf("+%ds: status=%d touch=%d", offset, w.Code, backend.touches)
+		}
+	}
+}
+
+func emitSessionRevoke(store *MemorySessionStore, sid string) {
+	store.mu.RLock()
+	onRevoke := store.OnRevoke
+	store.mu.RUnlock()
+	onRevoke(sid)
+}
+
+func TestBrowserSameSessionRevokeWithStaleKVRemainsRejected(t *testing.T) {
+	g, _, store := accessFixture(t, false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	backend, _ := browserRPCFixture(t, g, store)
+	row := putBrowserSession(g, backend, "cookie", "portal")
+	started := backend.clock.Load()
+	ctx, cancel := g.Conns.Attach(context.Background(), row.SessionID, row.ExpiresAt)
+	defer cancel()
+	backend.onTouch = func() {
+		row.Revoked = true // authoritative revoke; the just-published KV stays stale
+		emitSessionRevoke(store, row.SessionID)
+	}
+	if w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie"); w.Code != 401 {
+		t.Fatalf("same-sid race: %d", w.Code)
+	}
+	backend.onTouch = nil
+	projection, err := store.Get(context.Background(), HashCookie("cookie"))
+	if err != nil || projection.Revoked {
+		t.Fatal("test did not retain stale KV")
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("original connection survived same-sid revoke")
+	}
+	for _, offset := range []int64{1, 299, 300} {
+		backend.clock.Store(started + offset)
+		w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie")
+		if w.Code != 401 || backend.touches != 1 {
+			t.Errorf("revoked +%ds: status=%d touch=%d", offset, w.Code, backend.touches)
+		}
+	}
+}
+
+type afterGetSessionStore struct {
+	SessionStore
+	afterGet func()
+}
+
+func (s afterGetSessionStore) Get(ctx context.Context, key string) (*Session, error) {
+	row, err := s.SessionStore.Get(ctx, key)
+	s.afterGet()
+	return row, err
+}
+
+func TestBrowserSameSessionRevokeAfterTouchResponse(t *testing.T) {
+	g, _, store := accessFixture(t, false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	backend, _ := browserRPCFixture(t, g, store)
+	row := putBrowserSession(g, backend, "cookie", "portal")
+	ctx, cancel := g.Conns.Attach(context.Background(), row.SessionID, row.ExpiresAt)
+	defer cancel()
+	var reads atomic.Int32
+	g.Sessions = afterGetSessionStore{SessionStore: store, afterGet: func() {
+		if reads.Add(1) == 2 {
+			emitSessionRevoke(store, row.SessionID)
+		}
+	}}
+	if w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie"); w.Code != 401 || backend.touches != 1 {
+		t.Fatalf("post-response revoke: %d touch=%d", w.Code, backend.touches)
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("post-response revoke left original connection alive")
+	}
+}
+
+func TestBrowserRevokedCookieBeforeFirstTouchFailsAuthorityCheck(t *testing.T) {
+	g, _, store := accessFixture(t, false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	backend, _ := browserRPCFixture(t, g, store)
+	row := putBrowserSession(g, backend, "cookie", "portal")
+	row.Revoked = true
+	emitSessionRevoke(store, row.SessionID) // no attempt exists to mark yet
+	if w := browserRequest(g, "portal", "GET", "/api/org/v1/members", "cookie"); w.Code != 401 || backend.touches != 1 {
+		t.Fatalf("pre-attempt authority check: %d touch=%d", w.Code, backend.touches)
 	}
 }

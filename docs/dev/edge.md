@@ -25,10 +25,13 @@ portal/domain OAuth authorize 仍由 IAM 原同意流程校当前 session/CSRF�
 audience、绝对到期和认证时间，只有仍有效的响应才能供本请求转发；控制面错误不会退回旧 JWT。
 未装配受信 RPC 或旧单 listener 模式不能续换，访问 JWT 临到期时失败关闭。
 
-Introspect 不包含原 `csrfHash`，edge 必须重新取得绑定匹配的 KV 投影。真实有效 GET 可按同一
+Introspect 不包含原 `csrfHash`，edge 必须重新取得绑定匹配的 KV 投影。真实有效的普通 API GET 可按同一
 节流调用 Touch 重建投影；缺失 CSRF 投影的写请求返回 503，先通过 GET 恢复后再写。
 IAM 的 NATS 投影可能异步可见，未取到投影的本次请求仍返回 503；不轮询等待、不自造 CSRF。
 公共登录不会因旧 cookie 无效或续换 RPC 不可用而阻断重新登录。
+`/open` 在取得会话前尚不能校验实例 ownership/tenant，缺投影时不 Touch，返回 503；
+先通过正常受保护 GET 恢复后，再打开实例。撤销标记只作用于同 sid 的已有限流项，
+另一会话的撤销不会被缓存成当前会话五分钟 RPC 故障。
 
 通过入口、会话及适用 Origin/CSRF/ownership 校验的门户/管理 API 和 `/open` 请求才调用
 `TouchSession`，按 tenant+audience+sid 合并并发、每 5 分钟最多尝试一次（失败也占用间隔）。

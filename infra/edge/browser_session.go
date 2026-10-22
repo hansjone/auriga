@@ -16,9 +16,10 @@ const sessionTouchCapacity = 8192
 
 type sessionActivityKey struct{ tenant, audience, sid string }
 type sessionActivityAttempt struct {
-	until time.Time
-	done  chan struct{}
-	err   error
+	until   time.Time
+	done    chan struct{}
+	err     error
+	revoked bool
 }
 
 // Only attempt timing/results are retained. Cookies, JWTs and CSRF material
@@ -31,6 +32,25 @@ type sessionActivity struct {
 
 func newSessionActivity() *sessionActivity {
 	return &sessionActivity{attempts: make(map[sessionActivityKey]*sessionActivityAttempt)}
+}
+
+func (a *sessionActivity) revoke(sid string) {
+	// Introspection may not know its sid until the response arrives. Its
+	// global fence only rejects that request; it never poisons a Touch result.
+	a.epoch.Add(1)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for key, attempt := range a.attempts {
+		if key.sid == sid {
+			attempt.revoked = true
+		}
+	}
+}
+
+func (a *sessionActivity) wasRevoked(attempt *sessionActivityAttempt) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return attempt.revoked
 }
 
 func sameSessionBinding(a, b *Session) bool {
@@ -149,8 +169,11 @@ func (g *Gateway) touchBrowserSession(ctx context.Context, raw string, expected 
 	previous := a.attempts[key]
 	if previous != nil && (now.Before(previous.until) || previous.done != nil) {
 		done := previous.done
-		epoch := a.epoch.Load()
+		revoked := previous.revoked
 		a.mu.Unlock()
+		if revoked {
+			return nil, errIAMUnauthenticated
+		}
 		if done != nil {
 			select {
 			case <-ctx.Done():
@@ -160,12 +183,19 @@ func (g *Gateway) touchBrowserSession(ctx context.Context, raw string, expected 
 		}
 		a.mu.Lock()
 		err := previous.err
+		revoked = previous.revoked
 		a.mu.Unlock()
+		if revoked {
+			return nil, errIAMUnauthenticated
+		}
 		if err == nil {
 			projection, readErr := g.Sessions.Get(ctx, HashCookie(raw))
-			if readErr != nil || projection.Valid(g.Now().UTC(), expected.Audience) != nil || !sameSessionBinding(expected, projection) || epoch != a.epoch.Load() {
+			if readErr != nil || projection.Valid(g.Now().UTC(), expected.Audience) != nil || !sameSessionBinding(expected, projection) {
 				return nil, errIAMUnavailable
 			}
+		}
+		if a.wasRevoked(previous) {
+			return nil, errIAMUnauthenticated
 		}
 		return expected, err
 	}
@@ -181,11 +211,18 @@ func (g *Gateway) touchBrowserSession(ctx context.Context, raw string, expected 
 	attempt := &sessionActivityAttempt{until: now.Add(sessionTouchInterval), done: make(chan struct{})}
 	a.attempts[key] = attempt
 	a.mu.Unlock()
-	epoch := a.epoch.Load()
-	response, err := g.SessionRPC.TouchSession(ctx, raw, expected.Audience, expected.TenantID)
+	var response *iamv1.TouchSessionResponse
+	var err error
+	if a.wasRevoked(attempt) {
+		err = errIAMUnauthenticated
+	} else {
+		response, err = g.SessionRPC.TouchSession(ctx, raw, expected.Audience, expected.TenantID)
+	}
 	var idle time.Time
 	if err != nil || response == nil {
-		err = errIAMUnavailable
+		if !errors.Is(err, errIAMUnauthenticated) {
+			err = errIAMUnavailable
+		}
 	} else if !response.Active {
 		err = errIAMUnauthenticated
 		g.Conns.CancelSession(expected.SessionID)
@@ -193,18 +230,21 @@ func (g *Gateway) touchBrowserSession(ctx context.Context, raw string, expected 
 		err = errIAMUnavailable
 	} else {
 		idle = response.IdleExpiresAt.AsTime()
-		if !g.Now().UTC().Before(idle) || idle.After(expected.ExpiresAt) || idle.Before(expected.IdleExpiresAt) || epoch != a.epoch.Load() {
+		if !g.Now().UTC().Before(idle) || idle.After(expected.ExpiresAt) || idle.Before(expected.IdleExpiresAt) {
 			err = errIAMUnavailable
 		}
 	}
 	rpcErr := err
 	if err == nil {
 		projection, readErr := g.Sessions.Get(ctx, HashCookie(raw))
-		if readErr != nil || projection.Valid(g.Now().UTC(), expected.Audience) != nil || !sameSessionBinding(expected, projection) || expected.CSRFHash != "" && expected.CSRFHash != projection.CSRFHash || epoch != a.epoch.Load() {
+		if readErr != nil || projection.Valid(g.Now().UTC(), expected.Audience) != nil || !sameSessionBinding(expected, projection) || expected.CSRFHash != "" && expected.CSRFHash != projection.CSRFHash {
 			err = errIAMUnavailable
 		}
 	}
 	a.mu.Lock()
+	if attempt.revoked {
+		err = errIAMUnauthenticated
+	}
 	// Projection visibility is checked per request. A valid Touch whose
 	// asynchronous KV projection is not visible yet still consumes the
 	// interval, but must not block recovery once that projection arrives.
@@ -217,5 +257,8 @@ func (g *Gateway) touchBrowserSession(ctx context.Context, raw string, expected 
 	}
 	result := *expected
 	result.IdleExpiresAt = idle
+	if a.wasRevoked(attempt) {
+		return nil, errIAMUnauthenticated
+	}
 	return &result, nil
 }

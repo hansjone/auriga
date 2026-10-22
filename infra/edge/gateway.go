@@ -72,7 +72,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	}
 	activity := newSessionActivity()
 	wireSessionRevoke(sessions, func(sid string) {
-		activity.epoch.Add(1)
+		activity.revoke(sid)
 		hub.CancelSession(sid)
 	})
 	g := &Gateway{
@@ -317,7 +317,7 @@ func (g *Gateway) proxyAPI(w http.ResponseWriter, r *http.Request, target *url.U
 	public := g.isPublicPath(r.URL.Path)
 
 	needSession := !public && !hasClientBearer
-	sess, err := g.loadSession(r, audience)
+	sess, err := g.loadSession(r, audience, r.Method == http.MethodGet)
 	if err != nil && needSession {
 		writeProblem(w, problem(http.StatusUnauthorized, "edge.unauthorized", "Unauthorized", "session required", rid))
 		return
@@ -398,13 +398,13 @@ func (g *Gateway) boundSession(ctx context.Context, key, sessionID string) (*Ses
 	return s, nil
 }
 
-func (g *Gateway) loadSession(r *http.Request, audience string) (*Session, error) {
+func (g *Gateway) loadSession(r *http.Request, audience string, recoverRead bool) (*Session, error) {
 	name := cookieName(g.requestSecureCookies(r), sessionCookieBase(audience))
 	raw := getCookie(r, name)
 	if raw == "" {
 		return nil, ErrSessionNotFound
 	}
-	return g.browserSession(r, raw, audience, r.Method == http.MethodGet)
+	return g.browserSession(r, raw, audience, recoverRead)
 }
 
 func (g *Gateway) checkCSRF(r *http.Request, sess *Session) error {
@@ -444,7 +444,9 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		return
 	}
 	sessKey := g.sessionKey(r, "portal")
-	sess, err := g.loadSession(r, "portal")
+	// Ownership and route tenant are not known yet. A missing projection must
+	// be recovered by a normal authenticated API GET, without an early Touch.
+	sess, err := g.loadSession(r, "portal", false)
 	if errors.Is(err, errIAMUnavailable) {
 		writeProblem(w, problem(http.StatusServiceUnavailable, "common.unavailable", "Service Unavailable", "session unavailable", rid))
 		return
