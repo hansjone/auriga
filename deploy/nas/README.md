@@ -10,9 +10,10 @@ Public deployment templates for a separate NAS test stack (`auriga-nas-test`).
 ## 下载工件后的准备
 
 GitHub Actions 工件不会保留文件执行位（见 [Permission Loss](https://github.com/actions/upload-artifact#permission-loss)）。
-在解包后的工件根目录，先核对 `images/manifest.json` 的提交与 `images/SHA256SUMS`，再恢复预构建二进制的执行位：
+在解包后的工件根目录，先核对 `images/manifest.json` 的提交与 `images/SHA256SUMS`，再核对工件根 `SHA256SUMS` 中的 bootstrap/manifest 摘要并恢复预构建二进制的执行位：
 
 ```sh
+sha256sum -c SHA256SUMS
 (cd images && sha256sum -c SHA256SUMS)
 chmod 0755 deploy-nas/bin/auriga-nas-bootstrap
 ```

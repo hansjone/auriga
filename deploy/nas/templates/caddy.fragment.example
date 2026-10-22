@@ -1,29 +1,34 @@
-# Example VPS Caddy fragment (public placeholders only).
-# Merge into the existing VPS Caddyfile after certificates cover all three names.
-# Do not use a shallow wildcard that fails to cover the instance parent domain.
-#
-# Required certificate SANs (example):
-#   portal.example.com
-#   admin.example.com
-#   *.i.example.com
-#
-# Upstream is the dedicated NAS LAN IP + edge :8080 (HTTP; TLS terminated here).
-# Preserve Host. Support WebSocket and SSE. Set forwarded proto for secure cookies.
+# HTTPS front proxy for access-proxy.example.json. Public placeholders only.
+# Install this deployment's proxy-ca.crt and proxy-client.crt/key on the trusted
+# proxy. Client key is private; never copy IAM/NodeControl keys or the proxy CA key.
+# Upstream ports MUST match the separate portal/admin TLS listeners in access JSON.
+# Preserve full external authority, including non-default ports. The edge derives
+# scheme/tenant from the installed access map, never X-Forwarded-*.
+# Caddy transport options: https://caddyserver.com/docs/caddyfile/directives/reverse_proxy
 
-portal.example.com, admin.example.com, *.i.example.com {
-	tls /etc/caddy/auriga-tls/fullchain.pem /etc/caddy/auriga-tls/privkey.pem
+(auriga_backend_mtls) {
+ transport http {
+  tls_server_name edge.auriga.internal
+  tls_trust_pool file /etc/caddy/auriga-proxy/proxy-ca.crt
+  tls_client_auth /etc/caddy/auriga-proxy/proxy-client.crt /etc/caddy/auriga-proxy/proxy-client.key
+  read_timeout 0
+  write_timeout 0
+ }
+ header_up Host {http.request.hostport}
+}
 
-	encode gzip
+portal.example.com, *.i.example.com {
+ tls /etc/caddy/auriga-tls/fullchain.pem /etc/caddy/auriga-tls/privkey.pem
+ encode gzip
+ reverse_proxy https://192.0.2.10:18080 {
+  import auriga_backend_mtls
+ }
+}
 
-	reverse_proxy 192.0.2.10:8080 {
-		header_up Host {host}
-		header_up X-Forwarded-Host {host}
-		header_up X-Forwarded-Proto {scheme}
-		header_up X-Forwarded-For {remote_host}
-		# WebSocket / long-lived streams
-		transport http {
-			read_timeout 0
-			write_timeout 0
-		}
-	}
+admin.example.com {
+ tls /etc/caddy/auriga-tls/fullchain.pem /etc/caddy/auriga-tls/privkey.pem
+ encode gzip
+ reverse_proxy https://192.0.2.10:18082 {
+  import auriga_backend_mtls
+ }
 }

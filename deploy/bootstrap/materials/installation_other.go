@@ -1,6 +1,6 @@
 //go:build !linux
 
-package main
+package materials
 
 import (
 	"bytes"
@@ -13,13 +13,13 @@ import (
 
 // Windows retains material generation for development only. It does not provide the
 // Linux metadata trust guarantee, and the existing Java publisher rejects non-POSIX activation.
-type privateInstallation struct {
+type Installation struct {
 	path string
 	stat os.FileInfo
 	seen map[string]os.FileInfo
 }
 
-func openPrivateInstallation(out string) (*privateInstallation, error) {
+func Open(out string) (*Installation, error) {
 	if runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("private IAM installation requires Linux")
 	}
@@ -31,13 +31,16 @@ func openPrivateInstallation(out string) (*privateInstallation, error) {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("invalid private IAM installation directory")
 	}
-	return &privateInstallation{path: path, stat: info, seen: make(map[string]os.FileInfo)}, nil
+	return &Installation{path: path, stat: info, seen: make(map[string]os.FileInfo)}, nil
 }
 
-func (p *privateInstallation) owner() int { return os.Getuid() }
-func (p *privateInstallation) close()     {}
+func (p *Installation) Owner() int { return os.Getuid() }
+func (p *Installation) Close()     {}
 
-func (p *privateInstallation) read(name string) ([]byte, error) {
+func (p *Installation) Read(name string) ([]byte, error) {
+	if err := checkLeaf(name); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(p.path, name)
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -69,7 +72,10 @@ func samePrivateWindowsFile(a, b os.FileInfo) bool {
 	return os.SameFile(a, b) && a.Mode() == b.Mode() && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime())
 }
 
-func (p *privateInstallation) create(name string, data []byte) error {
+func (p *Installation) Create(name string, data []byte) error {
+	if err := checkLeaf(name); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(filepath.Join(p.path, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create private IAM installation file")
@@ -79,7 +85,7 @@ func (p *privateInstallation) create(name string, data []byte) error {
 	if writeErr != nil || closeErr != nil || n != len(data) {
 		return fmt.Errorf("write private IAM installation file")
 	}
-	raw, err := p.read(name)
+	raw, err := p.Read(name)
 	defer clear(raw)
 	if err != nil || !bytes.Equal(raw, data) {
 		return fmt.Errorf("changed new private IAM installation file")
@@ -87,7 +93,7 @@ func (p *privateInstallation) create(name string, data []byte) error {
 	return nil
 }
 
-func (p *privateInstallation) validate() error {
+func (p *Installation) Validate() error {
 	info, err := os.Lstat(p.path)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !os.SameFile(p.stat, info) {
 		return fmt.Errorf("changed private IAM installation directory")

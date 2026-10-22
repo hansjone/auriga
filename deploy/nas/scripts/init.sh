@@ -6,7 +6,8 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
 load_stack_env
-require_cmd openssl mkdir chmod
+require_cmd openssl mkdir chmod cmp stat
+validate_nas_access
 require_root_or_capable_chown
 
 MARKER=$(marker_path)
@@ -51,11 +52,11 @@ fi
 
 mkdir -p \
   "$SECRETS" \
-  "$CONFIG/pki" \
   "$CONFIG/pki-edge" \
   "$CONFIG/postgres" \
   "$CONFIG/nats" \
   "$CONFIG/templates" \
+  "$AURIGA_DATA_ROOT/internal-tokens" \
   "$DATA/postgres" \
   "$DATA/nats" \
   "$DATA/registry" \
@@ -72,7 +73,9 @@ mkdir -p \
 chmod_strict 0700 "$SECRETS" "$DATA/agent"
 chmod_strict 0750 "$AURIGA_DATA_ROOT/enrollment" "$AURIGA_DATA_ROOT/join"
 prepare_socket_parent
-chmod_strict 0755 "$CONFIG" "$CONFIG/pki" "$CONFIG/pki-edge" "$CONFIG/templates"
+chmod_strict 0755 "$CONFIG" "$CONFIG/pki-edge" "$CONFIG/templates"
+chown_required 10001:65532 "$AURIGA_DATA_ROOT/internal-tokens"
+chmod 0750 "$AURIGA_DATA_ROOT/internal-tokens"
 
 write_secret() {
   _name=$1
@@ -105,40 +108,17 @@ _v=$(openssl rand -base64 32 | tr -d '\n') || die "openssl rand failed"
 [ -n "$_v" ] || die "empty workspace encryption key"
 write_secret workspace_encryption_key "$_v"
 
-BOOT=""
-if [ -x "$NAS_ROOT/bin/auriga-nas-bootstrap" ]; then
-  BOOT="$NAS_ROOT/bin/auriga-nas-bootstrap"
-elif [ -x "$AURIGA_DATA_ROOT/bin/auriga-nas-bootstrap" ]; then
-  BOOT="$AURIGA_DATA_ROOT/bin/auriga-nas-bootstrap"
-elif command -v go >/dev/null 2>&1; then
-  info "building bootstrap with local go (dev/test only; NAS uses CI binary)"
-  (CDPATH= cd -P -- "$NAS_ROOT/bootstrap" && go build -o "$AURIGA_DATA_ROOT/bin/auriga-nas-bootstrap" .)
-  BOOT="$AURIGA_DATA_ROOT/bin/auriga-nas-bootstrap"
-else
-  die "auriga-nas-bootstrap binary missing and go unavailable — delete partial $AURIGA_DATA_ROOT/secrets if cleaning up"
-fi
-"$BOOT" -out "$CONFIG" -mode full || die "bootstrap failed — secrets may exist; do not re-run without cleanup (L2)"
-
-chmod 0600 "$CONFIG/pki/ca.key" "$CONFIG/pki/workspace.key" "$CONFIG/identity-signing-keys.json" "$CONFIG/pki/edge.key"
-chmod 0644 "$CONFIG/pki/ca.crt" "$CONFIG/pki/workspace.crt" "$CONFIG/pki/edge.crt" "$CONFIG/identity-keys.json" "$CONFIG/ca-sha256.txt"
-
-# pki-edge: only what edge needs (M8)
-cp -f "$CONFIG/pki/ca.crt" "$CONFIG/pki-edge/ca.crt"
-cp -f "$CONFIG/pki/edge.crt" "$CONFIG/pki-edge/edge.crt"
-cp -f "$CONFIG/pki/edge.key" "$CONFIG/pki-edge/edge.key"
-chmod 0644 "$CONFIG/pki-edge/ca.crt" "$CONFIG/pki-edge/edge.crt"
-chmod 0600 "$CONFIG/pki-edge/edge.key"
-
-# Ownership: edge 65532, platform 10001 — fail hard as root (L1)
-chown_required 65532:65532 \
-  "$CONFIG/pki-edge/edge.key" "$CONFIG/pki-edge/edge.crt" "$CONFIG/pki-edge/ca.crt" \
-  "$CONFIG/identity-signing-keys.json"
-chown_required 10001:10001 \
-  "$CONFIG/pki/ca.key" "$CONFIG/pki/workspace.key" "$CONFIG/pki/ca.crt" "$CONFIG/pki/workspace.crt" \
-  "$AURIGA_DATA_ROOT/enrollment"
+bootstrap_nas_materials
+# Source materials/receipt stay installer-owned. Edge receives only exact leaf copies.
+for _name in ca.crt edge.crt edge-iam.crt proxy-ca.crt proxy-edge.crt; do
+  install_edge_material "$CONFIG/materials/pki/$_name" "$CONFIG/pki-edge/$_name" 644
+done
+for _name in edge.key edge-iam.key proxy-edge.key; do
+  install_edge_material "$CONFIG/materials/pki/$_name" "$CONFIG/pki-edge/$_name" 600
+done
+install_edge_material "$CONFIG/materials/identity-signing-keys.json" "$CONFIG/pki-edge/identity-signing-keys.json" 600
+chown_required 10001:10001 "$AURIGA_DATA_ROOT/enrollment"
 chown_required 65532:65532 "$AURIGA_DATA_ROOT/data/nats"
-
-chmod 0600 "$CONFIG/pki-edge/edge.key" "$CONFIG/identity-signing-keys.json"
 
 : >"$AURIGA_DATA_ROOT/join/token"
 chmod 0600 "$AURIGA_DATA_ROOT/join/token"

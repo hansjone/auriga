@@ -1,4 +1,4 @@
-package main
+package materials
 
 import (
 	"bytes"
@@ -69,7 +69,7 @@ func TestInstallationRejectsExistingFileMetadata(t *testing.T) {
 		for _, kind := range []string{"mode", "directory", "symlink", "hardlink", "oversize", "empty"} {
 			t.Run(name+"/"+kind, func(t *testing.T) {
 				out := t.TempDir()
-				if err := writeInternalTokenInstallation(out); err != nil {
+				if err := EnsureServiceCredentials(out); err != nil {
 					t.Fatal(err)
 				}
 				path := filepath.Join(out, "iam-installation", name)
@@ -110,7 +110,7 @@ func TestInstallationRejectsExistingFileMetadata(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				if err := writeInternalTokenInstallation(out); err == nil {
+				if err := EnsureServiceCredentials(out); err == nil {
 					t.Fatal("invalid existing file metadata accepted")
 				}
 				if kind == "mode" {
@@ -138,7 +138,7 @@ func TestInstallationRejectsDirectoryMetadata(t *testing.T) {
 			if err := os.Mkdir(out, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := writeInternalTokenInstallation(out); err != nil {
+			if err := EnsureServiceCredentials(out); err != nil {
 				t.Fatal(err)
 			}
 			dir := filepath.Join(out, "iam-installation")
@@ -172,7 +172,7 @@ func TestInstallationRejectsDirectoryMetadata(t *testing.T) {
 			case "parent-component":
 				out += "/../output"
 			}
-			if err := writeInternalTokenInstallation(out); err == nil {
+			if err := EnsureServiceCredentials(out); err == nil {
 				t.Fatal("invalid directory metadata accepted")
 			}
 		})
@@ -183,20 +183,20 @@ func TestInstallationFinalMetadataRecheck(t *testing.T) {
 	for _, kind := range []string{"file-mode", "file-replaced", "directory-replaced"} {
 		t.Run(kind, func(t *testing.T) {
 			out := t.TempDir()
-			if err := writeInternalTokenInstallation(out); err != nil {
+			if err := EnsureServiceCredentials(out); err != nil {
 				t.Fatal(err)
 			}
-			p, err := openPrivateInstallation(out)
+			p, err := Open(out)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer p.close()
-			raw, err := p.read("internal.properties")
+			defer p.Close()
+			raw, err := p.Read("internal.properties")
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer clear(raw)
-			if err := p.validate(); err != nil {
+			if err := p.Validate(); err != nil {
 				t.Fatal(err)
 			}
 			path := filepath.Join(out, "iam-installation", "internal.properties")
@@ -221,7 +221,7 @@ func TestInstallationFinalMetadataRecheck(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := p.validate(); err == nil {
+			if err := p.Validate(); err == nil {
 				t.Fatal("changed material passed final validation")
 			}
 		})

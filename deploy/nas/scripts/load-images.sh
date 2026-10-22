@@ -37,7 +37,13 @@ export AURIGA_RELEASE_DIR
 cp "$MANIFEST" "$(release_marker_path)"
 chmod 0644 "$(release_marker_path)"
 if [ -f "$BUNDLE/versions.txt" ]; then
-  cp "$BUNDLE/versions.txt" "$AURIGA_RELEASE_DIR/versions.txt"
+  # The default release directory is the bundle itself. Do not fail a valid
+  # workflow artifact by copying versions.txt onto the same inode.
+  _bundle_dir=$(CDPATH= cd -P -- "$BUNDLE" && pwd)
+  _release_dir=$(CDPATH= cd -P -- "$AURIGA_RELEASE_DIR" && pwd)
+  if [ "$_bundle_dir" != "$_release_dir" ]; then
+    cp "$BUNDLE/versions.txt" "$AURIGA_RELEASE_DIR/versions.txt"
+  fi
 fi
 
 # Emit suggested stack.env image lines (sha256:id) for operator paste (H5).

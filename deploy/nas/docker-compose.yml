@@ -92,6 +92,7 @@ services:
       - /tmp:size=64m,mode=1777
       - /app/tmp:size=32m,mode=1777
     user: "10001:10001"
+    group_add: ["65532"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,13 +102,34 @@ services:
       - path: ${AURIGA_DATA_ROOT}/config/platform.env
         required: true
     environment:
-      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/auriga/platform-runtime.yaml
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/auriga/platform-access.yaml
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_SSL_ENABLED: "true"
+      AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
+      AURIGA_IAM_TLS_CERT_FILE: /etc/auriga/pki/iam.crt
+      AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
+      AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
+      AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
+      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties
+      AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: "true"
+      AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE: /run/auriga-installation/edge.secret
+      AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
+      AURIGA_GRPC_PORT: "9091"
+      AURIGA_GRPC_SERVER_HOST: 0.0.0.0
+      AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
+      AURIGA_GRPC_SERVER_TLS_PRIVATE_KEY: /etc/auriga/pki/iam.key
+      AURIGA_GRPC_SERVER_TLS_TRUST_CERT_COLLECTION: /etc/auriga/pki/ca.crt
+      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
       AURIGA_PLATFORM_PORT: "8081"
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+UseContainerSupport
     volumes:
-      - ${AURIGA_DATA_ROOT}/config/platform-runtime.yaml:/etc/auriga/platform-runtime.yaml:ro
-      - ${AURIGA_DATA_ROOT}/config/pki:/etc/auriga/pki:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/platform-access.yaml:/etc/auriga/platform-access.yaml:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/iam-healthcheck.sh:/etc/auriga/iam-healthcheck.sh:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/iam-installation:/run/auriga-installation:ro
+      - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal
+      - ${AURIGA_DATA_ROOT}/config/materials/pki:/etc/auriga/pki:ro
       - ${AURIGA_DATA_ROOT}/config/templates:/etc/auriga/templates:ro
       - ${AURIGA_DATA_ROOT}/enrollment:/var/auriga
     networks: [internal, publish]
@@ -118,7 +140,7 @@ services:
       - "127.0.0.1:${AURIGA_HOST_PUBLISH_NODECONTROL}:7443"
       - "127.0.0.1:${AURIGA_HOST_PUBLISH_PLATFORM_HTTP}:8081"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8081/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "sh /etc/auriga/iam-healthcheck.sh"]
       interval: 5s
       timeout: 5s
       retries: 60
@@ -144,21 +166,28 @@ services:
       nats:
         condition: service_healthy
     command: ["-config", "/etc/auriga/edge.config.json"]
+    env_file:
+      - path: ${AURIGA_DATA_ROOT}/config/edge.env
+        required: true
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: "true"
     volumes:
-      - ${AURIGA_DATA_ROOT}/config/edge.config.json:/etc/auriga/edge.config.json:ro
-      - ${AURIGA_DATA_ROOT}/config/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/edge.config.json:/etc/auriga/edge.config.json:ro
+      - ${AURIGA_DATA_ROOT}/config/pki-edge/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
+      - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal:ro
       # Only edge leaf materials — not ca.key / workspace.key (M8).
       - ${AURIGA_DATA_ROOT}/config/pki-edge:/etc/auriga/pki:ro
       # Ingress socket only — not data/agent private keys (H2).
       - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share:ro
     networks:
       internal:
+        ipv4_address: ${AURIGA_INTERNAL_EDGE_IP}
       lan:
         ipv4_address: ${AURIGA_EDGE_LAN_IP}
     expose:
-      - "8080"
+      - "${AURIGA_NAS_PORTAL_TARGET_PORT}"
+      - "${AURIGA_NAS_ADMIN_TARGET_PORT}"
     mem_limit: 256m
     cpus: 0.25
     pids_limit: 128
@@ -186,8 +215,7 @@ services:
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
-      # Same stable container validated before joining an owned instance network.
-      AURIGA_AGENT_DOCKER_EDGE_CONTAINER: *trusted_edge_container
+      # Trusted edge identity and internal alias come only from access.json.
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
       AURIGA_AGENT_CAPACITY_MAX_INSTANCES: ${AURIGA_AGENT_CAPACITY_MAX_INSTANCES:-1}
@@ -200,8 +228,9 @@ services:
       - ${AURIGA_DATA_ROOT}/data/agent:${AURIGA_DATA_ROOT}/data/agent
       - ${AURIGA_DATA_ROOT}/socket-share:${AURIGA_DATA_ROOT}/socket-share
       - ${AURIGA_DATA_ROOT}/join:/run/auriga-join
-      - ${AURIGA_DATA_ROOT}/config/identity-keys.json:/etc/auriga/identity-keys.json:ro
-      - ${AURIGA_DATA_ROOT}/config/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/identity-keys.json:/etc/auriga/identity-keys.json:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
     mem_limit: 512m
     cpus: 0.50
     pids_limit: 256
@@ -211,6 +240,9 @@ networks:
     name: auriga-nas-test_internal
     driver: bridge
     internal: true
+    ipam:
+      config:
+        - subnet: ${AURIGA_INTERNAL_SUBNET}
   publish:
     # Non-internal: required for 127.0.0.1 port publishes to reach host-network agent (H1).
     # Not attached to LAN; backends are still unreachable from the dedicated edge LAN IP path.

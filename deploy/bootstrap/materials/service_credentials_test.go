@@ -1,4 +1,4 @@
-package main
+package materials
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 func TestInstallationCredentialIsRandomPrivateAndStable(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 	for _, out := range []string{a, b} {
-		if err := writeInternalTokenInstallation(out); err != nil {
+		if err := EnsureServiceCredentials(out); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -31,7 +31,7 @@ func TestInstallationCredentialIsRandomPrivateAndStable(t *testing.T) {
 	if len(first) != 43 || bytes.Equal(first, other) {
 		t.Fatal("installation secrets must be independently random")
 	}
-	if err := writeInternalTokenInstallation(a); err != nil {
+	if err := EnsureServiceCredentials(a); err != nil {
 		t.Fatal(err)
 	}
 	again, _ := os.ReadFile(path)
@@ -53,7 +53,7 @@ func TestInstallationCredentialIsRandomPrivateAndStable(t *testing.T) {
 		if err := os.Chmod(path, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := writeInternalTokenInstallation(a); err == nil {
+		if err := EnsureServiceCredentials(a); err == nil {
 			t.Fatal("publicly readable secret accepted")
 		}
 	}
@@ -63,13 +63,13 @@ func TestInstallationRejectsMalformedOrMismatchedExistingMaterial(t *testing.T) 
 	for _, name := range []string{"edge.secret", "internal.properties"} {
 		t.Run(name, func(t *testing.T) {
 			out := t.TempDir()
-			if err := writeInternalTokenInstallation(out); err != nil {
+			if err := EnsureServiceCredentials(out); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(out, "iam-installation", name), []byte("invalid"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := writeInternalTokenInstallation(out); err == nil {
+			if err := EnsureServiceCredentials(out); err == nil {
 				t.Fatal("invalid installation silently replaced")
 			}
 		})
@@ -80,7 +80,7 @@ func TestInstallationRejectsNoncanonicalCredentialAndExtraProperties(t *testing.
 	for _, kind := range []string{"noncanonical-secret", "extra-properties", "wrong-installer"} {
 		t.Run(kind, func(t *testing.T) {
 			out := t.TempDir()
-			if err := writeInternalTokenInstallation(out); err != nil {
+			if err := EnsureServiceCredentials(out); err != nil {
 				t.Fatal(err)
 			}
 			name := "internal.properties"
@@ -103,7 +103,7 @@ func TestInstallationRejectsNoncanonicalCredentialAndExtraProperties(t *testing.
 			if err := os.WriteFile(path, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := writeInternalTokenInstallation(out); err == nil {
+			if err := EnsureServiceCredentials(out); err == nil {
 				t.Fatal("noncanonical or unexpected installation content accepted")
 			}
 		})

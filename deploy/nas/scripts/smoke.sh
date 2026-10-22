@@ -10,12 +10,12 @@ set -eu
 load_stack_env
 require_cmd curl
 
-PORTAL=${AURIGA_PORTAL_HOST:-portal.example.com}
-ADMIN=${AURIGA_ADMIN_HOST:-admin.example.com}
-INSTANCE_PARENT=${AURIGA_INSTANCE_PARENT_DOMAIN:-i.example.com}
+load_env_file "$AURIGA_DATA_ROOT/config/materials/access.env"
+PORTAL=$AURIGA_NAS_PORTAL_HOST
+ADMIN=$AURIGA_NAS_ADMIN_HOST
+PORTAL_URL=$AURIGA_NAS_PORTAL_URL
+ADMIN_URL=$AURIGA_NAS_ADMIN_URL
 EDGE_IP=${AURIGA_EDGE_LAN_IP:?}
-EDGE_PORT=${AURIGA_EDGE_PORT:-8080}
-HP=${AURIGA_HOST_PUBLISH_PLATFORM_HTTP:?}
 RESULTS="$AURIGA_DATA_ROOT/results"
 mkdir -p "$RESULTS"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || date +%s)
@@ -32,7 +32,7 @@ check() {
   _name=$1
   _expect=$2
   shift 2
-  _code=$(curl -s -o "$BODY" -w '%{http_code}' --max-time 15 "$@" || printf '000')
+  _code=$(curl --noproxy '*' -s -o "$BODY" -w '%{http_code}' --max-time 15 "$@" || printf '000')
   if [ "$_code" = "$_expect" ]; then
     log "PASS $_name http=$_code"
   else
@@ -44,8 +44,8 @@ check() {
 check_spa() {
   _name=$1
   shift
-  _code=$(curl -s -o "$BODY" -w '%{http_code}' --max-time 15 "$@" || printf '000')
-  _h=$(curl -sI --max-time 15 "$@" 2>/dev/null | tr -d '\r' || true)
+  _code=$(curl --noproxy '*' -s -o "$BODY" -w '%{http_code}' --max-time 15 "$@" || printf '000')
+  _h=$(curl --noproxy '*' -sI --max-time 15 "$@" 2>/dev/null | tr -d '\r' || true)
   case "$_h" in
     *[Cc]ontent-[Tt]ype:*text/html*) ;;
     *) log "FAIL $_name missing content-type text/html"; fail=1; return ;;
@@ -63,24 +63,14 @@ check_spa() {
   fi
 }
 
-log "smoke begin edge=$EDGE_IP:$EDGE_PORT"
-
-check platform_health 200 "http://127.0.0.1:${HP}/actuator/health"
-
-RESOLVE_PORTAL="${PORTAL}:${EDGE_PORT}:${EDGE_IP}"
-RESOLVE_ADMIN="${ADMIN}:${EDGE_PORT}:${EDGE_IP}"
-
-check_spa portal_static \
-  --resolve "$RESOLVE_PORTAL" -H "Host: $PORTAL" \
-  "http://${PORTAL}:${EDGE_PORT}/"
-
-check_spa admin_static \
-  --resolve "$RESOLVE_ADMIN" -H "Host: $ADMIN" \
-  "http://${ADMIN}:${EDGE_PORT}/"
-
-_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
-  --resolve "$RESOLVE_PORTAL" -H "Host: $PORTAL" \
-  "http://${PORTAL}:${EDGE_PORT}/api/iam/v1/me" || printf '000')
+log "smoke begin portal=$PORTAL_URL admin=$ADMIN_URL"
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" exec -T platform sh /etc/auriga/iam-healthcheck.sh >/dev/null \
+  && log 'PASS platform_health mTLS+current_service_jwt' || { log 'FAIL platform_health'; fail=1; }
+# Ordinary requests consume the real declared browser Origins. HTTPS proxy mode
+# needs the configured trusted proxy and its browser-facing certificate.
+check_spa portal_static "$PORTAL_URL/"
+check_spa admin_static "$ADMIN_URL/"
+_code=$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' --max-time 15 "$PORTAL_URL/api/iam/v1/me" || printf '000')
 case "$_code" in
   401|403) log "PASS unauth_me http=$_code" ;;
   *) log "FAIL unauth_me http=$_code expected=401|403"; fail=1 ;;
@@ -88,9 +78,8 @@ esac
 
 if [ -n "${AURIGA_E2E_HOOK:-}" ] && [ -x "${AURIGA_E2E_HOOK}" ]; then
   log "running AURIGA_E2E_HOOK"
-  if EDGE_BASE="http://${EDGE_IP}:${EDGE_PORT}" \
+  if EDGE_BASE="$PORTAL_URL" \
     PORTAL_HOST="$PORTAL" ADMIN_HOST="$ADMIN" \
-    INSTANCE_PARENT_DOMAIN="$INSTANCE_PARENT" \
     ENROLLMENT_FILE="$AURIGA_DATA_ROOT/enrollment/emergency-enrollment.json" \
     JOIN_TOKEN_FILE="$AURIGA_DATA_ROOT/join/token" \
     AGENT_VOLUME="$AURIGA_DATA_ROOT/data/agent" \

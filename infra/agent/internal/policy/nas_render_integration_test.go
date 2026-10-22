@@ -20,6 +20,12 @@ func TestNASRenderedAgentPolicy(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the real deployment init/render scripts require Linux/POSIX tools")
 	}
+	if os.Geteuid() != 0 {
+		if os.Getenv("AURIGA_NAS_REQUIRE_ROOT_TEST") == "1" {
+			t.Fatal("required NAS producer/consumer test must run as Linux root")
+		}
+		t.Skip("NAS fixed uid10001 installation requires the explicit root producer/consumer CI step")
+	}
 	nasRoot, err := filepath.Abs(filepath.Join("..", "..", "..", "..", "deploy", "nas"))
 	if err != nil {
 		t.Fatal(err)
@@ -38,17 +44,34 @@ func TestNASRenderedAgentPolicy(t *testing.T) {
 		{name: "custom_registry_port", port: "25443", env: "AURIGA_HOST_PUBLISH_REGISTRY=25443\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dataRoot := filepath.Join(t.TempDir(), "srv", "container", "auriga-policy-test")
-			if err := os.MkdirAll(dataRoot, 0o700); err != nil {
+			base, err := os.MkdirTemp("", "auriga-policy-")
+			if err != nil {
 				t.Fatal(err)
 			}
-			stackEnv := "AURIGA_DATA_ROOT=" + dataRoot + "\n" + tc.env
+			t.Cleanup(func() { _ = os.RemoveAll(base) })
+			if err := os.Chmod(base, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			dataRoot := filepath.Join(base, "srv", "container", "auriga-policy-test")
+			if err := os.MkdirAll(dataRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			stackEnv := "AURIGA_DATA_ROOT=" + dataRoot + "\nAURIGA_ACCESS_FILE=" + filepath.Join(nasRoot, "access-ip.example.json") + "\nAURIGA_INTERNAL_SUBNET=192.0.2.128/26\nAURIGA_INTERNAL_EDGE_IP=192.0.2.138\n" + tc.env
 			if err := os.WriteFile(filepath.Join(dataRoot, "stack.env"), []byte(stackEnv), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			// Generate fresh credentials using the existing non-root test mode.
-			// Ownership checks belong to the separate root shell regression suite.
-			env := deploymentTestEnv(nasRoot, dataRoot)
+			// Build the public binary before invoking the install scripts; the NAS never compiles.
+			bin := filepath.Join(base, "bin")
+			if err := os.Mkdir(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			build := exec.Command("go", "build", "-o", filepath.Join(bin, "auriga-nas-bootstrap"), ".")
+			build.Dir = filepath.Join(nasRoot, "bootstrap")
+			build.Env = deploymentTestEnv(nasRoot, dataRoot)
+			if output, err := build.CombinedOutput(); err != nil {
+				t.Fatalf("prebuild NAS binary: %v\n%s", err, output)
+			}
+			env := append(deploymentTestEnv(nasRoot, dataRoot), "AURIGA_NAS_BOOTSTRAP_BINARY="+filepath.Join(bin, "auriga-nas-bootstrap"))
 			for _, script := range []string{"init.sh", "render.sh"} {
 				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 				cmd := exec.CommandContext(ctx, "sh", filepath.Join(nasRoot, "scripts", script))
@@ -59,7 +82,7 @@ func TestNASRenderedAgentPolicy(t *testing.T) {
 					t.Fatalf("real %s failed: %v\n%s", script, err, output)
 				}
 			}
-			p, err := policy.Load(filepath.Join(dataRoot, "config", "agent-policy.yaml"))
+			p, err := policy.Load(filepath.Join(dataRoot, "config", "materials", "agent-policy.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,5 +152,5 @@ func deploymentTestEnv(nasRoot, dataRoot string) []string {
 		}
 		env = append(env, value)
 	}
-	return append(env, "NAS_ROOT="+nasRoot, "AURIGA_DATA_ROOT="+dataRoot, "NAS_ALLOW_NONROOT=1", "GOWORK=off")
+	return append(env, "NAS_ROOT="+nasRoot, "AURIGA_DATA_ROOT="+dataRoot, "NAS_ALLOW_NONROOT=0", "GOWORK=off")
 }

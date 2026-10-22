@@ -1,180 +1,77 @@
-# NAS 独立测试栈（deploy/nas）
+# NAS 公开预构建安装配方
 
-Auriga 面向所有人提供开源自托管部署；NAS 是验证通用容器部署流程的一个真实环境。域名访问与内网纯 IP 访问都是正式支持目标，当前纯 IP 的完整登录、实例入口与 WebSocket 链路仍待实现核对和完整验收。
+本包在一个隔离的 Docker 项目 `auriga-nas-test` 中安装 combined、edge、agent、PostgreSQL、NATS 和本机 registry。NAS 不编译源码；用 `.github/workflows/nas-bundle.yml` 对完整40位提交生成包。工人只在本机验证，不访问 NAS、VPS、DNS 或旧 Hub。公开例子一律用 `example.com`、`192.0.2.x`、`/srv/container/auriga-test`，真实值只写私有现场笔记。
 
-本目录目前提供**隔离测试部署包**：与 CI 的 `deploy/compose`（host 网络 + 假 DSH）并行，不替换旧 Hub，不改 DNS/防火墙/路由。工人只准备模板与脚本；**不能访问或修改 NAS**。真实域名、LAN IP、目录只写在私有现场笔记，公开仓一律用 `example.com` / `192.0.2.x` / `/srv/container/auriga-test`。
+## 一份 access 配置
 
-本包 Compose 项目名**固定**为 `auriga-nas-test`（脚本忽略 `stack.env` 里的其它项目名，防止误删别的栈）。在 W3 交付真实 DSH 摘要与签名模板之前，**不得宣称真实验收完成**。
+选择包中的 `access-domain.example.json`、`access-ip.example.json` 或 `access-proxy.example.json`，复制到数据根以外的绝对路径（例如 `/srv/container/auriga-access.json`），编辑后将它写入 `stack.env` 的 `AURIGA_ACCESS_FILE`。bootstrap 对原始字节调用生产 `deploymentconfig.Load`，先按完整原 schema 和启动语义校验，再验证 NAS 装配；不会用 Compose 的开发租户、固定 M2 服务端口、模板或 seed 验证器代替生产加载。
 
-操作脚本均以 `sh deploy/nas/scripts/<操作>.sh` 调用；首装、重入与启动链也显式使用 `sh` 调用子脚本，支持 Git checkout / 解包后脚本没有执行位的文件系统。Linux 验证须在原生目录使用普通文件权限运行，不能只依赖 Windows 挂载上的可执行权限。
+- direct HTTP：支持 DNS 域名和规范纯 IPv4，必须明确确认 HTTP；IP 门户与管理使用不同端口，不需要域名、hosts、伪 Host 或额外 IP。domain 实例继续使用独立子域；IP 实例使用 `/i/<instanceId>/`，只面向互信团队，不宣称具有 domain 的同等隔离。
+- trusted_proxy HTTPS：外部浏览器访问 HTTPS；前置代理到 edge 的 portal/admin 两个 socket 仍必须 TLS+mTLS，保留完整 authority。独立的代理 CA、`proxy-client` 证书与唯一 URI SAN `auriga://proxy/nas-test` 绑定代理身份，access 的规范 `peerCidrs` 再绑定真实 TCP 来源。转发头不能选择 scheme、tenant、audience。旧版「TLS在VPS终止后明文8080+X-Forwarded-*」配方应迁移，不能继续套用。
+- 三个 listener 必须在容器中分别绑定 `0.0.0.0`；内控 listener 单独使用 HTTP，内部 alias 必须与所有 browser Origin 分开。它不发布宿主端口，只接受正式 self/heartbeat。direct 公网 TLS、split 部署及其它 schema 能力需要另行装配，本配方会明确拒绝不支持的组合。
 
-## 网络拓扑（H1）
+同一个最终 `config/materials/access.json` 只读挂载给 edge、IAM、agent。issuer、team Origin、RP host 从它派生，包含非默认端口；agent 不再使用旧 `INSTANCE_PLATFORM_URL`/`INSTANCE_PARENT_DOMAIN`。旧 `AURIGA_PORTAL_HOST`、`ADMIN_HOST`、`INSTANCE_PARENT_DOMAIN`、`ISSUER`、`TEAM_ORIGIN`、`TEAM_RP_ID`、`TLS_UPSTREAM`、`SECURE_COOKIES`、`TRUSTED_PROXIES` 输入会明确报迁移错误，不静默降级。access 的 tenant 必须由安装者与实际 IAM/org 租户对应；加载成功不代表租户已创建。combined 的既有首次 seed 创建演示租户 `00000000-0000-0000-0000-000000000001`，无 dev profile 或远程紧急登录例外。
 
-| 网络 | 类型 | 成员 | 作用 |
-|---|---|---|---|
-| `auriga-nas-test_internal` | bridge，`internal: true` | postgres、nats、platform、registry、edge | 组件互访；**无**宿主端口映射 |
-| `auriga-nas-test_publish` | bridge，非 internal | platform、registry | 仅用于把 7443/8081/5000 映射到宿主 `127.0.0.1`，供 **host 网络 agent** 连接；不接 LAN |
-| LAN（external） | 现场已有网络 | **仅 edge**（静态 IPv4） | VPS/局域网入口 |
-| `auriga-net-<实例 id>` | agent 创建的 owned bridge，`internal: true` | 该实例 + 受信 edge | 实例通过 edge 内部门户入口发送真实插件心跳，不接组件控制网 |
+## 初始化、启动、停止
 
-Docker 对「只挂 internal 网络」的容器不创建宿主端口映射；因此 NodeControl/registry 的 loopback 发布必须落在 `publish` 网上。后台仍不接 LAN：从 edge 的 LAN IP 无法直接打到 PG/NATS。
-
-### 实例内部心跳入口
-
-edge 的稳定容器名固定为 `auriga-nas-test-edge`，带 `auriga.role=edge` 标签；Compose 用同一标量 anchor 将该名字传给 agent 的 `AURIGA_AGENT_DOCKER_EDGE_CONTAINER`，并让 agent 等 edge 启动。驱动仍验证 edge 身份、网络成员与实例网络 ownership，再仅向对应实例的 internal bridge 挂接 edge 端点，并设置门户 Host 的 DNS alias。实例不加入 `auriga-nas-test_internal` 或 `publish`，后端不增加 LAN 或宿主发布。
-
-`render.sh` 从现有 `AURIGA_PORTAL_HOST` 生成 `agent.env` 的 `AURIGA_AGENT_INSTANCE_PLATFORM_URL=http://<门户 Host>:8080`；同一个 Host 也写入 edge 的 `portalHost`，驱动仅取 URL 的 hostname 作为内部 DNS alias。心跳使用 edge 的容器内 HTTP 8080，不经公网 HTTPS、宿主回环端口或 gRPC 7443。现有 `AURIGA_INSTANCE_PARENT_DOMAIN` 同时传给 agent 的 `AURIGA_AGENT_INSTANCE_PARENT_DOMAIN`，与 edge 的实例父域一致，供 renderer 生成实例 `trustedHosts`。
-
-这里准备的是源码配置与本机测试接线，不代表已在 NAS 部署或能够登录；没有继承开发栈的应急远程登录开关、观测代理或测试凭据。最终整合镜像、签名模板、现场网络和真实生命周期仍须由主控独立验收。
-
-## 架构要点
-
-| 组件 | 网络 | 端口（容器内） | 说明 |
-|---|---|---|---|
-| edge | LAN + internal | 8080 | 唯一对 LAN/VPS 入口；TLS 通常在上游终止；uid 65532 |
-| platform | internal + publish | 8081、7443 | uid 10001；loopback 映射给 agent |
-| postgres / nats | 仅 internal | 5432 / 4222 | NATS 监控 `127.0.0.1:8222` 不映射到宿主 |
-| registry | internal + publish | 5000 | 宿主 loopback 供 agent `docker pull` |
-| agent | `network_mode: host` | — | Docker socket + 同路径 data bind；容量 `MAX_INSTANCES=1` |
-
-公网只反代到 edge；浏览器不直连 8081。一个 edge 入口仍对应完整后端（platform/NATS/DB），只是不对公网另开站点。
-
-资源预算（建议）：基础服务合计约 ≤ 3.5–4 GiB RAM、约 2 CPU；实例策略上限 500m CPU / 512 MiB / 128 PIDs。
-
-### 实例镜像策略
-
-`init.sh` / `render.sh` 生成的 `agent-policy.yaml` 使用 agent 实际读取的 `allowedImageRepos`，仅允许 `127.0.0.1:<registry 端口>/auriga/` 与 `localhost:<registry 端口>/auriga/`。端口来自 `AURIGA_HOST_PUBLISH_REGISTRY`（默认 15000），实例镜像仍必须固定为 `repo@sha256:<64 位摘要>`；其它 registry、路径前缀碰撞及未固定摘要的镜像均拒绝。此修复不增加镜像信任来源，也不放宽资源限额。
-
-本机真实 DSH 生命周期验收使用 1024 MiB；本包的默认策略与容量仍为 512 MiB，两者的配额接线、真实模板和签名信任链仍须后续打通。修正镜像策略键名本身不代表通用部署或生产验收完成。
-
-## 目录布局
-
-```
-$AURIGA_DATA_ROOT/            # 例：/srv/container/auriga-test（≥3 层，basename 为 auriga-*）
-  stack.env                   # 可预置；无口令
-  .auriga-initialized
-  secrets/                    # 0700
-  config/
-    pki/                      # CA + workspace（platform 10001）
-    pki-edge/                 # 仅 ca.crt + edge.crt/key（edge 65532，:ro）
-  data/{postgres,nats,registry,agent}/
-  socket-share/              # root:65532 0750；agent/edge 只共享这个父目录
-    ingress/ingress.sock      # agent 创建叶子与标记，edge 只读挂载父目录
-  enrollment/
-  join/token
-  results/
-```
-
-Agent 数据根 `$AURIGA_DATA_ROOT/data/agent` 保持 **0700**；共享父目录和 agent 创建的 ingress 叶子均为 **root:65532 0750**。叶子不是 bind mount，允许 W2H 原子创建/迁移；init/start 不预建叶子、不改成 edge uid。祖先必须归 root 所有且不可组/其他写（高层 root sticky 临时目录例外）；预检只诊断，不修改 NAS 既有共享目录权限。
-
-## Agent / 宿主权限边界（M7）
-
-agent 使用 host 网络 + root + `docker.sock`，被攻破约等于 NAS root（含其它容器与卷）。这是单机测试栈的已知取舍，不是生产加固模型：
-
-- 实例隔离仍靠 agent policy（镜像前缀、CPU/内存/PID）与现有 Docker 驱动参数（`cap-drop ALL`、只读根、`no-new-privileges`）。
-- agent 自身仅补回 `CHOWN/DAC_OVERRIDE/FOWNER`，用于分配实例 uid/gid、更新实例文件和共享 socket；实例容器仍丢弃全部 capabilities，不启用 privileged。
-- registry **无认证**，且经 loopback 发布：NAS 上其它本机用户也可能向该 registry 推镜像；白名单前缀是主要约束。
-- `platform.env` 内嵌 DB/NATS 口令与加密主密钥：任何能 `docker inspect` 的用户都能看到（服务当前读 env；`_FILE` 待服务侧支持）。
-
-## 初始化与幂等
+工件下载会丢执行位。先核对提交、镜像 manifest 和校验和，再恢复二进制执行位（不是在 NAS 构建）：
 
 ```sh
-mkdir -p /srv/container/auriga-test
-cp deploy/nas/env.example /srv/container/auriga-test/stack.env
-# 编辑：LAN、Host、镜像 sha256:<id>、loopback 端口
-export AURIGA_DATA_ROOT=/srv/container/auriga-test
-sh deploy/nas/scripts/init.sh      # 需 root（chown）；再次只 render
-sh deploy/nas/scripts/preflight.sh
-sh deploy/nas/scripts/network-preflight.sh
-sh deploy/nas/scripts/start.sh     # 逐端口/网络成员确认归属，允许本项目精确占用的重入
-sh deploy/nas/scripts/smoke.sh     # 无 E2E hook 时 exit 2（PARTIAL）
-sh deploy/nas/scripts/stop.sh
-```
-
-规则：
-
-- 数据根 basename 必须以 `auriga-` 开头，路径 ≥3 层，拒绝符号链接与 `..`；管理配置/密钥/共享 socket 树内也拒绝符号链接，实例用户目录不扫描。
-- 已有非空目录且无 `.auriga-initialized`（除 `stack.env` 外）→ 拒绝。
-- 随机口令失败不写空文件；已有 secrets 不覆盖。
-- 私钥 0600；init/render 以 root 运行，`chown` 失败即退出。
-- `AURIGA_PLATFORM_SEED=true` 仅隔离测试首装，render 显式选择 `combined,e2e`，以通过 W2H 种子门禁；设回 false 后恢复 `combined`。不启用 dev profile。
-- PostgreSQL 选用固定摘要的 **Debian postgres:17（uid/gid 999）**，含口令的初始化 SQL 归 `999:999`、权限 0600；不可直接替换为 uid 不同的 Alpine 镜像。
-
-### 角色分离限制
-
-- **workspace**：迁移 / 运行角色已分开。
-- **iam / org**：combined 仍单角色兼迁移与运行（服务限制，不私改）。
-
-### NATS 权限
-
-- 无匿名登录；监控只绑容器 loopback。
-- `$JS.API.>` 已收窄：platform 可首启创建 AURIGA_EVENTS/AURIGA_AUDIT、发布业务/审计事件及消费这两条流；routes_rw 只写 routes KV；edge 只读 routes、管理 sessions，并仅创建/拉取/确认 `edge-session-revoke` 撤销消费者。无任意流删除权限；`jetstream` 有内存/磁盘上限。
-- edge 因共用一个 `natsUrl`，口令模式下为会话+路由并集；JWT 分用户待主控扩展。
-
-## 镜像与 CI 工件
-
-`.github/workflows/nas-bundle.yml`：仅 `workflow_dispatch`，输入完整 40 位 SHA；第三方 action 钉到提交；`persist-credentials: false`。
-
-产出：
-
-- `images/*.tar` + `SHA256SUMS` + **一份** `manifest.json`（commit、镜像 Id、tools、stack_env_hint）
-- `versions.txt`、`auriga-nas-bootstrap`
-
-GitHub Actions 工件下载后，文件执行位可能丢失（[官方说明](https://github.com/actions/upload-artifact#permission-loss)）。
-在解包后的工件根目录核对 manifest 的提交和校验和，并在首次初始化前恢复预构建 bootstrap 的执行位：
-
-```sh
+sha256sum -c SHA256SUMS
 (cd images && sha256sum -c SHA256SUMS)
 chmod 0755 deploy-nas/bin/auriga-nas-bootstrap
+mkdir -p /srv/container/auriga-test
+cp deploy-nas/env.example /srv/container/auriga-test/stack.env
+cp deploy-nas/access-ip.example.json /srv/container/auriga-access.json
+# 编辑上述两份文件；数据根预置内容只能有 stack.env。
+export AURIGA_DATA_ROOT=/srv/container/auriga-test
+sh deploy-nas/scripts/init.sh
+sh deploy-nas/scripts/preflight.sh
+sh deploy-nas/scripts/network-preflight.sh
+sh deploy-nas/scripts/start.sh
+sh deploy-nas/scripts/smoke.sh
+sh deploy-nas/scripts/stop.sh
 ```
 
-源码 checkout 对应 `deploy/nas/bin/auriga-nas-bootstrap`。其余操作脚本均以 `sh` 调用，无需执行位；NAS 无需 Go。
+所有操作脚本都显式用 `sh` 调用，不依赖执行位。源码 checkout 对应 `deploy/nas/`。数据根须绝对路径、至少三层且 basename 为 `auriga-*`；拒绝链接、点段及未初始化的外来非空目录。首装/root初始化只为新建且空的材料根通过已打开 FD 设置固定 `10001:10001`，再让清空补充组的同一预构建 binary 子进程生成材料。重入按原身份校验 receipt、输入和完整材料，原 key 不轮换；错 owner/mode、额外链接、错误祖先、缺 receipt、template-only、PKI/模板目录链接都拒绝，不自动 chmod/chown 旧材料。
 
-NAS 上 `load-images.sh` 后，把 `AURIGA_IMAGE_PLATFORM/EDGE/AGENT` 设为 manifest 里的 **`sha256:<id>`**（本地 Id，compose 不 pull）。基础镜像仍用 `name@sha256:…`。
+`AURIGA_NAS_BOOTSTRAP_BINARY` 可显式指向已校验的预构建 Linux binary（用于独立包布局/CI），不会触发 Go 编译。Windows 可做 `-validate-access`，不支持 NAS 私密材料激活。`NAS_ALLOW_NONROOT` 是旧脚本测试标志，不能绕过固定 uid 的真实材料安装。
 
-## 网络与 VPS
+第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不要给 NAS 配方追加 dev、远程 emergency 或 observer 例外。
 
-- `network-preflight.sh`：外部网络名/driver/IPAM、IP 落在子网、非网关/广播、成员占用；本项目 edge 已占用时允许重入。ping 无响应不能证明空闲；不确定 exit 4。
-- VPS 示例：`deploy/nas/templates/caddy.fragment.example`。通配证书须覆盖实例父域。
+## 材料与持续服务票据
 
-```sh
-curl --resolve portal.example.com:8080:192.0.2.10 -H 'Host: portal.example.com' http://portal.example.com:8080/
-```
+源材料在 `config/materials/`，包括 `pki/`、identity 签名 key、生产 access、派生配置与 `iam-installation/`。源根、`pki/`、`templates/` 精确为10001:10001/0755；固定源叶子必须是10001:10001的单链接普通文件，所有PKI私钥及identity签名key为0600，其余固定公开材料为0644。NAS用持有的目录FD和no-follow打开验证这些元数据，并在receipt复用、生成封存前后复核。私密安装目录另为0700、文件0600、单链接；所有祖先只信 root/installer且不可组/其它写（root sticky临时祖先例外）。普通重入不修复源文件权限。`config/pki-edge/` 是单独的精确 runtime 叶副本，归65532，私钥0600，绝不包含 CA key、workspace key、IAM server key或proxy client key；identity签名key也独立复制，源文件不chown。
 
-## 冒烟
+IAM 的 HTTPS HTTP-hop 使用专门 `iam` server 证书（DNS SAN `platform`）和 `edge-iam` client 证书（DNS SAN `edge.auriga.internal`），与节点mTLS和前置代理证书分开。platform 只认可固定 edge 组件网络 IP 和本地健康探针。gRPC 9091 使用同一专用hop mTLS，租户委派固定 `svc:edge`；edge不拿实例Ed25519 key伪造服务JWT。
 
-`smoke.sh`：健康、SPA（`text/html` + root/title）、未登录拒绝。无 `AURIGA_E2E_HOOK` 时输出 `SMOKE PARTIAL` 并 **exit 2**（除非 `AURIGA_SMOKE_ALLOW_PARTIAL=1`）。完整生命周期：
+platform维持uid10001，并加入reader group65532以给新JWT正确设gid。安装凭据目录只读挂载，实际 IAM exporter 每60秒重新认证并原子发布短时JWT；`internal-tokens/` 仅platform可写，edge只读挂载整个目录，逐RPC重读新inode，不挂单文件。输出叶目录0750、文件0640；没有把原文secret写进公开配置或环境。平台健康检查实际使用mTLS并要求当前票据文件非空。
 
-```sh
-export AURIGA_E2E_HOOK=/path/to/w2v-or-w3-runner
-sh deploy/nas/scripts/smoke.sh
-```
+前置HTTPS代理安装时，只把 `config/materials/pki/proxy-ca.crt`、`proxy-client.crt/key` 安装到受信代理的私密目录，不复制任何 CA 私钥或IAM/节点key。`templates/caddy.fragment.example` 分别反代portal/admin TLS listener，使用 `tls_trust_pool`、`tls_client_auth`、固定serverName；示例端口与 `access-proxy.example.json` 配套。配置语法依据 [Caddy官方文档](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)。实际代理IP/CIDR、浏览器证书和解析由部署者配置，本包不会改系统信任/DNS/VPS。
 
-## 升级 / 回退 / 备份
+## 网络、权限与预算
 
-- 升级：换摘要镜像；迁移不可假设换旧镜像即回退。
-- 停止：只停本项目；`--with-registered-instances` 对发现和登记的 ID 均要求 `auriga.managed=true`、实例 label 和规范化后严格位于 `data/agent/` 下的 bind。外方 label、路径前缀碰撞和链接逃逸均拒绝。禁止 prune / `down -v` / orphans 清扫。
-- 备份：`secrets/`、`data/postgres`、`data/agent`、`enrollment/`、`stack.env`。
+`internal` 是 `internal:true` 的组件bridge，成员postgres/nats/platform/registry/edge；`AURIGA_INTERNAL_SUBNET` 和固定 `AURIGA_INTERNAL_EDGE_IP` 必须与LAN和现有路由不冲突。`publish` 只给platform/registry作宿主127.0.0.1端口映射，agent保持host网络。外部LAN网络只连接edge；其portal/admin按access listener实际端口提供服务，后端和内控不对LAN额外发布。网络预检不创建或调整NAS网络，不确定时exit4；端口/目标IP重入只接受本项目精确归属。
 
-## 纯 IP 访问
+每实例owned bridge仍internal，只有该实例和经标签/身份/归属复核的edge两个成员，独立DNS alias指向内控listener；实例不加入组件网或publish网。共享socket父目录 `socket-share/` 为root:65532/0750，agent创建叶子；agent数据根保持0700，不预建叶子、不把私密agent目录给edge。
 
-内网无域名、仅通过 IP（例如 `http://192.0.2.10:8080`）访问是正式支持目标，不能依赖手工修改 Host 或临时私有步骤完成。无独立 Host 时须明确处理门户、管理台与实例的 cookie、Origin 和路由隔离；当前这套部署配置的完整登录、实例访问及 WebSocket 尚未通过纯 IP 验收，不能把域名模式的验收结果视为纯 IP 已完成。
+容器继续cap-drop ALL、no-new-privileges、非privileged。agent自身因Docker socket+host网络相当于宿主root，只补CHOWN/DAC_OVERRIDE/FOWNER以管理实例；它不是生产多租户强隔离模型。registry无认证但只在宿主loopback发布；前缀白名单不替代镜像摘要/签名信任。platform.env暂仍包含DB/NATS口令和加密key，Docker inspect权限意味着可以看到这些环境。
 
-## 证书轮换（L6）
+保留基础预算约3.5–4GiB、约2CPU；实例默认500m CPU、512MiB、128PIDs，容量MAX_INSTANCES=1。policy使用真实 `allowedImageRepos`，只允许当前registry loopback端口下 `auriga/`，镜像须固定repo@sha256摘要。公开real DSH既有模板若要求1024MiB，会被当前512MiB预算拒绝；不能私降模板或手改产物以宣称生命周期通过，需另行明确容量变更。
 
-bootstrap 叶子证书约 825 天；到期前需重新 init/签发并滚动 edge/platform，本包无自动轮换提示。
+数据库仍PostgreSQL17 Debian uid999；workspace迁移/运行角色分开，iam/org combined仍沿既有限制单角色，RLS不变。NATS无匿名、监控只容器loopback；平台事件/审计、routes写、edge routes只读+sessions及撤销consumer ACL不扩权，JetStream保留内存/磁盘限制。
 
-## 本地验证
+停止只操作固定项目及严格核对标签/绑定路径的登记实例，不prune、不down -v、不remove-orphans。升级换精确镜像Id/摘要；DB迁移不能假设换旧镜像即可回退。备份 `secrets/`、`config/materials/`、data/postgres、data/agent、enrollment、stack.env与原access输入；停止前后保持材料，不依赖手工修权限。证书叶约825天，CA约10年，轮换应另行受审并滚动服务，不用普通重入自动换key。
+
+## 验证与证据边界
 
 ```sh
-sh deploy/nas/test/run-tests.sh
-# Linux：真实 init/render 的产物经 agent policy.Load / AllowImage 验证；不启动容器。
-(cd infra/agent && go test -count=1 ./internal/policy)
-# Linux root 可验证真实 chown/mode，使用 CI 预构建的 bootstrap 二进制：
+(cd deploy/bootstrap && go test -count=1 ./...)
+(cd deploy/compose/bootstrap && go test -count=1 ./...)
+(cd deploy/nas/bootstrap && go test -count=1 ./... && go build -o ../bin/auriga-nas-bootstrap .)
 NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
+(cd infra/agent && AURIGA_NAS_REQUIRE_ROOT_TEST=1 go test -count=1 -run '^TestNASRenderedAgentPolicy$' ./internal/policy)
 (cd infra/edge && go test -count=1 ../../deploy/nas/test/nats_policy_test.go)
 ```
 
-具备 Docker Compose 与 Python 3 时，脚本测试还会只读归一化实际 Compose 配置，检查默认及自定义门户/实例父域的心跳 URL、稳定 edge 名称/标签及既有网络、权限边界；不启动容器或占用端口。测试凭据均在新临时目录随机生成，退出清理，不读取现场材料。
-
-agent policy 的跨组件回归由现有 Linux Go CI 执行，覆盖默认及自定义 registry 端口的真实初始化、重新渲染、镜像允许与拒绝、资源限额。测试使用已有的 `NAS_ALLOW_NONROOT=1` 模式，供非 root runner 运行，不代替 root/chown 和共享目录祖先归属检查；这些由上面的 root shell 测试验证。Windows 明确跳过这条 POSIX 脚本链，其余 policy 单测仍运行。
+后3条真实权限/安装交叉测试须在独立Linux root测试环境运行；非root普通Go测试具名跳过固定uid安装，自动CI另有强制root步骤，不能以skip当通过。NAS脚本/Go负例在自动PR E2E中运行，不只在手动bundle workflow。smoke检查真实浏览器URL、mTLS健康与未登录拒绝；没有完整E2E hook时仍exit2/PARTIAL。静态Compose、配置加载或本机测试不等于真实NAS网络、浏览器登录、real DSH心跳或IP3完整验收。

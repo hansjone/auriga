@@ -64,11 +64,11 @@ for g in $gw; do
   fi
 done
 
-reserved=$(docker network inspect -f '{{range .IPAM.Config}}{{range .AuxiliaryAddresses}}{{println .}}{{end}}{{end}}' "$NET")
+reserved=$(docker network inspect -f '{{range .IPAM.Config}}{{range index . "AuxiliaryAddresses"}}{{println .}}{{end}}{{end}}' "$NET")
 for reserved_ip in $reserved; do
   [ "$reserved_ip" != "$IP" ] || die "AURIGA_EDGE_LAN_IP is an IPAM auxiliary reservation"
 done
-dynamic_ranges=$(docker network inspect -f '{{range .IPAM.Config}}{{if .IPRange}}{{println .IPRange}}{{end}}{{end}}' "$NET")
+dynamic_ranges=$(docker network inspect -f '{{range .IPAM.Config}}{{if index . "IPRange"}}{{println (index . "IPRange")}}{{end}}{{end}}' "$NET")
 for dynamic_range in $dynamic_ranges; do
   if ipv4_in_cidr "$IP" "$dynamic_range"; then
     die "AURIGA_EDGE_LAN_IP overlaps the dynamic IPAM allocation range"

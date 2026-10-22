@@ -24,10 +24,25 @@ jobs:
           cache-dependency-path: |
             infra/**/go.sum
             deploy/compose/bootstrap/go.sum
+            deploy/bootstrap/go.sum
+            deploy/nas/bootstrap/go.sum
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Verify shared bootstrap and public NAS install regressions
+        run: |
+          set -euo pipefail
+          for module in deploy/bootstrap deploy/compose/bootstrap deploy/nas/bootstrap; do
+            (cd "$module" && test -z "$(gofmt -l .)" && go vet ./... && go test -count=1 ./...)
+          done
+          (cd deploy/nas/bootstrap && mkdir -p ../bin && go build -o ../bin/auriga-nas-bootstrap .)
+          sudo env PATH="$PATH" GOMODCACHE="$(go env GOMODCACHE)" GOTOOLCHAIN=local \
+            sh -c 'cd deploy/nas/bootstrap && go test -count=1 -run "^TestNASFixedInstallerAndReceipt$" -v ./...'
+          sudo env PATH="$PATH" NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
+          sudo env PATH="$PATH" NAS_ALLOW_NONROOT=0 NAS_TEST_ACCESS_MODE=ip sh deploy/nas/test/run-tests.sh
+          sudo env PATH="$PATH" NAS_ALLOW_NONROOT=0 NAS_TEST_ACCESS_MODE=proxy sh deploy/nas/test/run-tests.sh
 
       - name: Prepare materials (registry + PKI + template)
         working-directory: deploy/compose

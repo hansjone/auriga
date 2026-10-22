@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "mode": "ip",
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "portalOrigin": {
+    "scheme": "http",
+    "host": "192.0.2.10",
+    "port": 8080
+  },
+  "adminOrigin": {
+    "scheme": "http",
+    "host": "192.0.2.10",
+    "port": 8084
+  },
+  "issuerOrigin": {
+    "scheme": "http",
+    "host": "192.0.2.10",
+    "port": 8080
+  },
+  "insecureHttpAcknowledged": true,
+  "listeners": {
+    "portal": {
+      "address": "0.0.0.0",
+      "port": 8080,
+      "tls": false
+    },
+    "admin": {
+      "address": "0.0.0.0",
+      "port": 8084,
+      "tls": false
+    },
+    "instanceControl": {
+      "address": "0.0.0.0",
+      "port": 8083,
+      "tls": false
+    }
+  },
+  "ingress": {
+    "kind": "direct"
+  },
+  "instances": {
+    "mode": "path",
+    "prefix": "/i/",
+    "trustedTeamAcknowledged": true
+  },
+  "instanceControl": {
+    "dnsAlias": "auriga-instance.internal",
+    "origin": {
+      "scheme": "http",
+      "host": "auriga-instance.internal",
+      "port": 8083
+    },
+    "edgeContainer": "auriga-nas-test-edge"
+  }
+}
