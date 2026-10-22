@@ -36,9 +36,14 @@ func main() {
 	lanIP := flag.String("lan-ip", "", "required edge LAN IPv4 excluded from instance control")
 	lanSubnet := flag.String("lan-subnet", "", "required disjoint LAN IPv4 prefix")
 	registryPort := flag.Int("registry-port", 15000, "host loopback registry port")
+	instanceMemory := flag.String("instance-max-memory-mb", "512", "per-instance memory limit in positive canonical decimal MiB")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fatalf("unexpected positional arguments")
+	}
+	maxMemoryMB, err := parseInstanceMaxMemoryMB(*instanceMemory)
+	if err != nil {
+		fatalf("%v", err)
 	}
 	raw, cfg, err := loadNASAccess(*accessFile, *peerIP, *subnet, *registryPort)
 	if err != nil {
@@ -53,7 +58,7 @@ func main() {
 	if *out == "" {
 		fatalf("-out is required")
 	}
-	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet); err != nil {
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB); err != nil {
 		fatalf("%v", err)
 	}
 	guard, err := openNASMaterialGuard(*out)
@@ -62,7 +67,7 @@ func main() {
 	}
 	defer guard.Close()
 	pki := filepath.Join(*out, "pki")
-	input := sha256.Sum256(append(append([]byte{}, raw...), []byte(fmt.Sprintf("\n%s\n%s\n%d\n%s\n%s", *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet))...))
+	input := sha256.Sum256(append(append([]byte{}, raw...), []byte(fmt.Sprintf("\n%s\n%s\n%d\n%s\n%s\n%d", *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB))...))
 	inputDigest := hex.EncodeToString(input[:])
 	reuse, err := materials.CheckReceipt(*out, inputDigest, nasMaterialSet())
 	if err != nil {
@@ -80,7 +85,7 @@ func main() {
 	}
 	mustPKI(pki)
 	mustIdentity(*out)
-	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP)
+	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB)
 	if err := guard.Validate(false); err != nil {
 		fatalf("%v", err)
 	}

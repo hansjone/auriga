@@ -151,6 +151,26 @@ AURIGA_AGENT_CAPACITY_MAX_INSTANCES=1
 EOF
 
 if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1; then
+  # Both public shell entry points must pass explicit empty/invalid values to Go,
+  # before init creates secrets/config or bootstrap creates its material root.
+  _budget_index=0
+  for _budget in '' 0 -1 +512 0512 ' 512' '512 ' 512.0 1e3 abc ５１２ 8796093022208 9223372036854775808; do
+    _budget_index=$((_budget_index + 1))
+    _budget_root="$TMP/srv/container/auriga-budget-$_budget_index"
+    mkdir -p "$_budget_root"
+    sed "s|^AURIGA_DATA_ROOT=.*|AURIGA_DATA_ROOT=$_budget_root|" "$DATA/stack.env" >"$_budget_root/stack.env"
+    printf 'AURIGA_INSTANCE_MAX_MEMORY_MB=%s\n' "$_budget" >>"$_budget_root/stack.env"
+    if AURIGA_DATA_ROOT="$_budget_root" sh "$ROOT/scripts/init.sh" >"$TMP/budget-init.log" 2>&1; then
+      fail_msg "budget_init_$_budget_index" "invalid memory accepted"
+    elif grep -q instance-max-memory-mb "$TMP/budget-init.log" && [ ! -e "$_budget_root/config" ] && [ ! -e "$_budget_root/secrets" ]; then
+      pass "budget_init_$_budget_index"
+    else fail_msg "budget_init_$_budget_index" "wrong error or material write"; fi
+    if AURIGA_DATA_ROOT="$_budget_root" sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; bootstrap_nas_materials' >"$TMP/budget-bootstrap.log" 2>&1; then
+      fail_msg "budget_bootstrap_$_budget_index" "invalid memory accepted"
+    elif grep -q instance-max-memory-mb "$TMP/budget-bootstrap.log" && [ ! -e "$_budget_root/config" ]; then
+      pass "budget_bootstrap_$_budget_index"
+    else fail_msg "budget_bootstrap_$_budget_index" "wrong error or material write"; fi
+  done
   export AURIGA_DATA_ROOT="$DATA"
   if sh "$ROOT/scripts/init.sh"; then
     pass init_first
@@ -172,6 +192,26 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
   else
     fail_msg init_idempotent "re-init failed"
   fi
+  # Default and explicit 512 share one receipt input. Changing the budget must
+  # reject without touching the sealed source or installing runtime copies.
+  find "$DATA/config/materials" -type f -exec sha256sum {} \; | sort >"$TMP/budget-before.sha256"
+  printf 'AURIGA_INSTANCE_MAX_MEMORY_MB=512\n' >>"$DATA/stack.env"
+  if sh "$ROOT/scripts/init.sh" >"$TMP/budget-same.log" 2>&1; then
+    find "$DATA/config/materials" -type f -exec sha256sum {} \; | sort >"$TMP/budget-after.sha256"
+    if cmp -s "$TMP/budget-before.sha256" "$TMP/budget-after.sha256"; then pass budget_explicit_default_reentry
+    else fail_msg budget_explicit_default_reentry "same memory changed sealed source"; fi
+  else fail_msg budget_explicit_default_reentry "explicit 512 rejected"; fi
+  sed 's/^AURIGA_INSTANCE_MAX_MEMORY_MB=512$/AURIGA_INSTANCE_MAX_MEMORY_MB=1024/' "$DATA/stack.env" >"$TMP/changed-stack.env"
+  cp "$TMP/changed-stack.env" "$DATA/stack.env"
+  if sh "$ROOT/scripts/init.sh" >"$TMP/budget-changed.log" 2>&1; then
+    fail_msg budget_change_rejected "changed memory accepted"
+  elif grep -q 'input' "$TMP/budget-changed.log"; then
+    find "$DATA/config/materials" -type f -exec sha256sum {} \; | sort >"$TMP/budget-after.sha256"
+    if cmp -s "$TMP/budget-before.sha256" "$TMP/budget-after.sha256"; then pass budget_change_rejected_without_repair
+    else fail_msg budget_change_rejected "rejection changed sealed source"; fi
+  else fail_msg budget_change_rejected "wrong rejection"; fi
+  sed 's/^AURIGA_INSTANCE_MAX_MEMORY_MB=1024$/AURIGA_INSTANCE_MAX_MEMORY_MB=512/' "$DATA/stack.env" >"$TMP/restored-stack.env"
+  cp "$TMP/restored-stack.env" "$DATA/stack.env"
   if sh "$ROOT/test/review-regressions.sh" "$DATA"; then
     pass review_regressions
   else

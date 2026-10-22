@@ -15,7 +15,7 @@ import (
 
 // Only an empty newly created source root is handed to the fixed NAS installer.
 // Existing owners/permissions are checked, never repaired.
-func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string) error {
+func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, maxMemoryMB int64) error {
 	if !filepath.IsAbs(out) || filepath.Clean(out) != out || strings.Contains(out, "\\") {
 		return fmt.Errorf("NAS material root must be a canonical absolute path")
 	}
@@ -102,7 +102,7 @@ func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, l
 	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o755 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 		return fmt.Errorf("current NAS bootstrap must be a regular executable with mode0755")
 	}
-	cmd := exec.Command("/proc/self/fd/3", "-out", out, "-access-file", "-", "-edge-peer-ip", peer, "-internal-subnet", subnet, "-registry-port", fmt.Sprint(registry), "-lan-ip", lanIP, "-lan-subnet", lanSubnet)
+	cmd := exec.Command("/proc/self/fd/3", "-out", out, "-access-file", "-", "-edge-peer-ip", peer, "-internal-subnet", subnet, "-registry-port", fmt.Sprint(registry), "-lan-ip", lanIP, "-lan-subnet", lanSubnet, "-instance-max-memory-mb", fmt.Sprint(maxMemoryMB))
 	cmd.ExtraFiles = []*os.File{binary}
 	cmd.Stdin = bytes.NewReader(raw)
 	cmd.Stdout = os.Stdout

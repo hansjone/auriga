@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +60,30 @@ func TestNASPublicAccessCLI(t *testing.T) {
 			}
 			if _, err := os.Lstat(out); !os.IsNotExist(err) {
 				t.Fatal("validation wrote installation output")
+			}
+			for _, memory := range []string{"512", "1024", "8796093022207"} {
+				t.Run("memory_"+memory, func(t *testing.T) {
+					memoryArgs := append(append([]string{}, args...), "-instance-max-memory-mb", memory)
+					if b, err := exec.Command(binary, memoryArgs...).CombinedOutput(); err != nil {
+						t.Fatalf("valid memory %s: %v %s", memory, err, b)
+					}
+				})
+			}
+			for i, memory := range invalidInstanceMemoryInputs() {
+				t.Run("invalid_memory_"+strconv.Itoa(i), func(t *testing.T) {
+					for _, validateOnly := range []bool{true, false} {
+						memoryArgs := append(append([]string{}, args...), "-instance-max-memory-mb", memory)
+						if !validateOnly {
+							memoryArgs = memoryArgs[1:]
+						}
+						if b, err := exec.Command(binary, memoryArgs...).CombinedOutput(); err == nil || !strings.Contains(string(b), "instance-max-memory-mb") {
+							t.Fatalf("invalid memory %q: err=%v output=%s", memory, err, b)
+						}
+						if _, err := os.Lstat(out); !os.IsNotExist(err) {
+							t.Fatal("invalid memory created installation output")
+						}
+					}
+				})
 			}
 			if b, err := exec.Command(binary, args[:len(args)-4]...).CombinedOutput(); err == nil {
 				t.Fatalf("missing LAN isolation input accepted: %s", b)

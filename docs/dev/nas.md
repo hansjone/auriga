@@ -63,7 +63,13 @@ platform维持uid10001，并加入reader group65532以给新JWT正确设gid。�
 
 容器继续cap-drop ALL、no-new-privileges、非privileged。agent自身因Docker socket+host网络相当于宿主root，只补CHOWN/DAC_OVERRIDE/FOWNER以管理实例；它不是生产多租户强隔离模型。registry无认证但只在宿主loopback发布；前缀白名单不替代镜像摘要/签名信任。platform.env暂仍包含DB/NATS口令和加密key，Docker inspect权限意味着可以看到这些环境。
 
-保留基础预算约3.5–4GiB、约2CPU；实例默认500m CPU、512MiB、128PIDs，容量MAX_INSTANCES=1。policy使用真实 `allowedImageRepos`，只允许当前registry loopback端口下 `auriga/`，镜像须固定repo@sha256摘要。公开real DSH既有模板请求1024MiB；当前agent按既定策略取min(规格请求,本地上限)，因此在该512MiB cap下实际分配512MiB，不会仅因超限而拒绝。1024MiB是模板请求，不是已验证的最低需求；不能把截断后的启动或未测场景记为完整生命周期通过。真实模板、生成预算与实际运行资源的一致性仍需验收，容量变更须明确配置。
+保留基础预算约3.5–4GiB、约2CPU；实例默认500m CPU、512MiB、128PIDs，容量MAX_INSTANCES=1。policy使用真实 `allowedImageRepos`，只允许当前registry loopback端口下 `auriga/`，镜像须固定repo@sha256摘要。
+
+operator 在 `stack.env` 设置 `AURIGA_INSTANCE_MAX_MEMORY_MB`，生成每实例 `agent-policy.yaml` 的 `maxMemoryMB`；直接调用 bootstrap 对应字符串参数 `-instance-max-memory-mb`。缺省和显式 `512` 都得到512MiB；确认宿主实际可用容量后可明确选择 `1024`。仅接受无前导零的正ASCII十进制整数，范围1–8796093022207MiB（`MaxInt64/(1024*1024)`），防止Docker字节换算溢出；显式空值、0、正负号、空白、小数、指数、非ASCII数字及越界在写材料前拒绝。该输入通过校验、root到固定uid10001子进程及生成使用同一规范值，不放入派生九字段 `access.env`。
+
+每实例上限、节点总容量 `AURIGA_AGENT_CAPACITY_MEMORY_MB` 和 agent 容器自身的 cgroup 内存限制是三个独立配置；本参数不会自动提高后两者，也不调整CPU/PID或实例数。公开real DSH既有模板请求1024MiB；agent继续取min(规格请求,本地上限)，默认/显式512上限时实际分配512MiB，选择1024上限时分配1024MiB，不会仅因请求超限而拒绝。1024MiB是模板请求，不是已验证的最低需求；生成参数成功不代表真实DSH在该预算下可用，不能把截断后的启动或未测场景记为完整生命周期通过。
+
+规范内存值纳入receipt输入摘要；同值重入保留材料与receipt，变值拒绝且不修复原件。旧bootstrap生成的receipt不包含该输入，即使本次使用缺省或显式512也会拒绝。升级前应保留完整材料，另走独立受控迁移；本变更不提供旧receipt迁移、不删除receipt重建信任。现场预算仍须按真实可用容量选择和验收。
 
 数据库仍PostgreSQL17 Debian uid999；workspace迁移/运行角色分开，iam/org combined仍沿既有限制单角色，RLS不变。NATS无匿名、监控只容器loopback；平台事件/审计、routes写、edge routes只读+sessions及撤销consumer ACL不扩权，JetStream保留内存/磁盘限制。
 
