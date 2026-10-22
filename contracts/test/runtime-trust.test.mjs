@@ -275,13 +275,91 @@ test('驱动映射向量：image换而tar不变、平台/tag/index/native混用�
   );
 });
 
+test('参考Timestamp严格校验全范围并精确保留纳秒', () => {
+  for (const [value, expected] of [
+    ['0001-01-01T00:00:00Z', -62135596800000000000n],
+    ['9999-12-31T23:59:59.999999999Z', 253402300799999999999n],
+    ['1970-01-01T00:00:00Z', 0n],
+    ['1969-12-31T23:59:59.999999999Z', -1n],
+    ['1970-01-01T00:00:00.000000001Z', 1n],
+    ['1970-01-01T00:00:00.1Z', 100000000n],
+    ['1970-01-01T00:00:00.123Z', 123000000n],
+    ['1970-01-01T00:00:00.123456Z', 123456000n],
+    ['1970-01-01T00:00:00.123456789Z', 123456789n],
+    ['2000-02-29T00:00:00Z', 951782400000000000n],
+  ])
+    assert.equal(timestampNanos(value), expected, value);
+  for (const value of [
+    null,
+    undefined,
+    0,
+    '',
+    'invalid',
+    '0000-01-01T00:00:00Z',
+    '10000-01-01T00:00:00Z',
+    '1900-02-29T00:00:00Z',
+    '2026-02-30T00:00:00Z',
+    '2026-00-01T00:00:00Z',
+    '2026-13-01T00:00:00Z',
+    '2026-01-00T00:00:00Z',
+    '2026-04-31T00:00:00Z',
+    '2026-01-01T24:00:00Z',
+    '2026-01-01T00:60:00Z',
+    '2026-01-01T00:00:60Z',
+    '2026-01-01T00:00:00.0000000001Z',
+    '2026-01-01T00:00:00.Z',
+    '2026-01-01T00:00:00+00:00',
+    '2026-01-01T00:00:00Z\n',
+  ])
+    assert.throws(() => timestampNanos(value), String(value));
+});
+
 const records = Object.fromEntries(fixtures.keys.map((k) => [k.kid, k]));
 function record(k) {
   const { kid, publicKey, notAfter, endorsement, endorsedByKid } = k;
   return { kid, publicKey, notAfter, endorsement, endorsedByKid };
 }
+// Contract reference only: Gregorian UTC seconds and nanos, never millisecond Date parsing.
+function timestampNanos(value) {
+  assert.equal(typeof value, 'string', 'invalid Timestamp');
+  const parts =
+    /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?Z$/.exec(
+      value,
+    );
+  assert(parts && parts[0] === value, 'invalid Timestamp');
+  const [year, month, day, hour, minute, second] = parts
+    .slice(1, 7)
+    .map(Number);
+  assert(
+    year >= 1 && year <= 9999 && month >= 1 && month <= 12,
+    'invalid Timestamp',
+  );
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const months = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  assert(
+    day >= 1 &&
+      day <= months[month - 1] &&
+      hour < 24 &&
+      minute < 60 &&
+      second < 60,
+    'invalid Timestamp',
+  );
+  const previousYears = BigInt(year - 1);
+  const days =
+    365n * previousYears +
+    previousYears / 4n -
+    previousYears / 100n +
+    previousYears / 400n +
+    BigInt(
+      months.slice(0, month - 1).reduce((sum, days) => sum + days, 0) + day - 1,
+    ) -
+    719162n;
+  const seconds = days * 86400n + BigInt(hour * 3600 + minute * 60 + second);
+  const nanos = BigInt((parts[7] ?? '').padEnd(9, '0'));
+  return seconds * 1000000000n + nanos;
+}
 function evaluate(scenario) {
-  const now = Date.parse(scenario.now);
+  const now = timestampNanos(scenario.now);
   const old = new Map(
     scenario.initial.map((name) => [
       name,
@@ -299,7 +377,7 @@ function evaluate(scenario) {
   for (const key of incoming) {
     assert.match(key.kid, /^[A-Za-z0-9._-]{1,128}$/);
     rawBase64(key.publicKey, 32);
-    assert(Date.parse(key.notAfter) > now);
+    assert(timestampNanos(key.notAfter) > now);
     assert(!candidates.has(key.kid), 'duplicate kid');
     candidates.set(key.kid, key);
     if (old.has(key.kid))
@@ -316,7 +394,10 @@ function evaluate(scenario) {
   function resolve(kid) {
     assert(!active.has(kid), 'cycle');
     if (merged.has(kid)) {
-      assert(Date.parse(merged.get(kid).localNotAfter) > now, 'expired parent');
+      assert(
+        timestampNanos(merged.get(kid).localNotAfter) > now,
+        'expired parent',
+      );
       return merged.get(kid);
     }
     const key = candidates.get(kid);
@@ -340,7 +421,7 @@ function evaluate(scenario) {
         'endorsement',
       );
       localNotAfter =
-        Date.parse(parent.localNotAfter) < Date.parse(key.notAfter)
+        timestampNanos(parent.localNotAfter) < timestampNanos(key.notAfter)
           ? parent.localNotAfter
           : key.notAfter;
     }

@@ -489,6 +489,292 @@
       "initial": [],
       "incoming": ["root"],
       "expected": "reject"
+    },
+    {
+      "name": "nanosecond-min-parent-in-same-millisecond",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "accept",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000002Z"
+        }
+      ],
+      "deadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z",
+        "child": "2026-11-01T00:00:00.000000001Z"
+      }
+    },
+    {
+      "name": "nanosecond-min-child-in-same-millisecond",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "accept",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000002Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000001Z"
+        }
+      ],
+      "deadlines": {
+        "root": "2026-11-01T00:00:00.000000002Z",
+        "child": "2026-11-01T00:00:00.000000001Z"
+      }
+    },
+    {
+      "name": "parent-expiry-before-by-one-nanosecond",
+      "now": "2026-11-01T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "accept",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000002Z"
+        }
+      ],
+      "deadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z",
+        "child": "2026-11-01T00:00:00.000000001Z"
+      }
+    },
+    {
+      "name": "parent-expiry-exact-nanosecond",
+      "now": "2026-11-01T00:00:00.000000001Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000002Z"
+        }
+      ]
+    },
+    {
+      "name": "parent-expiry-after-by-one-nanosecond",
+      "now": "2026-11-01T00:00:00.000000002Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000003Z"
+        }
+      ]
+    },
+    {
+      "name": "child-expiry-before-by-one-nanosecond",
+      "now": "2026-11-01T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "accept",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000002Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000001Z"
+        }
+      ],
+      "deadlines": {
+        "root": "2026-11-01T00:00:00.000000002Z",
+        "child": "2026-11-01T00:00:00.000000001Z"
+      }
+    },
+    {
+      "name": "child-expiry-exact-nanosecond",
+      "now": "2026-11-01T00:00:00.000000001Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000002Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000001Z"
+        }
+      ]
+    },
+    {
+      "name": "child-expiry-after-by-one-nanosecond",
+      "now": "2026-11-01T00:00:00.000000002Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000003Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000001Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-nonleap-date",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2027-02-29T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-timestamp-year-zero",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "0000-11-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-timestamp-overflow-year",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "10000-11-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-timestamp-leap-second",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:60Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-timestamp-nanos-overflow",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.0000000001Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-now-normalized-date",
+      "now": "2026-02-30T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000002Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-now-year-zero",
+      "now": "0000-01-01T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00.000000001Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00.000000002Z"
+        }
+      ]
     }
   ]
 }
