@@ -461,3 +461,74 @@ func TestTLSJoinSymlinkTargetsStayConsistent(t *testing.T) {
 		})
 	}
 }
+func TestWindowsTLSJoinRejectsAllCaseAliasedHistoryBeforeRPC(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows case-aliased leaf history")
+	}
+	for _, name := range []string{identity.KeyFileName, identity.CertFileName, identity.CAFileName, identity.SealingFileName, identity.TrustGuardFileName, "state.db"} {
+		for _, temporary := range []bool{false, true} {
+			for _, casing := range []string{"upper", "mixed"} {
+				for _, force := range []bool{false, true} {
+					canonical := name
+					if temporary {
+						canonical = "." + name + ".tmp.crashed"
+					}
+					leaf := strings.ToUpper(canonical)
+					if casing == "mixed" {
+						mixed := []byte(canonical)
+						for i, ch := range mixed {
+							if i%2 == 0 && ch >= 'a' && ch <= 'z' {
+								mixed[i] = ch - 'a' + 'A'
+							}
+						}
+						leaf = string(mixed)
+					}
+					t.Run(canonical+"/"+casing+map[bool]string{false: "/normal", true: "/force"}[force], func(t *testing.T) {
+						root, _ := runtimeRoot(t)
+						fw, opts := startTLS(t, []*nodev1.ArtifactSigningKey{root})
+						opts.AgentDir = filepath.Join(t.TempDir(), "ParentCASE[1]", "AgentCASE")
+						opts.Force = force
+						if err := os.MkdirAll(opts.AgentDir, 0o700); err != nil {
+							t.Fatal(err)
+						}
+						path := filepath.Join(opts.AgentDir, leaf)
+						want := []byte("historical case-aliased identity bytes")
+						if err := os.WriteFile(path, want, 0o600); err != nil {
+							t.Fatal(err)
+						}
+						before, err := os.Stat(path)
+						if err != nil {
+							t.Fatal(err)
+						}
+						mat, err := enroll.Join(enrollmentContext(t), opts)
+						if err == nil || mat != nil {
+							t.Fatal("CA-pin TLS Join replaced case-aliased initialization history")
+						}
+						entries, err := os.ReadDir(opts.AgentDir)
+						if err != nil || len(entries) != 1 || entries[0].Name() != leaf {
+							t.Fatal("rejected Join changed directory entries or initialized guard/state")
+						}
+						got, err := os.ReadFile(path)
+						if err != nil || !bytes.Equal(got, want) {
+							t.Fatal("rejected Join changed old bytes/readability")
+						}
+						after, err := os.Stat(path)
+						if err != nil || after.Mode() != before.Mode() {
+							t.Fatal("rejected Join changed old mode")
+						}
+						fresh := opts
+						fresh.AgentDir = filepath.Join(t.TempDir(), "fresh")
+						fresh.Token = fw.Token()
+						if _, err := enroll.Join(enrollmentContext(t), fresh); err != nil {
+							t.Fatalf("case alias rejection happened after consuming token: %v", err)
+						}
+						got, err = os.ReadFile(path)
+						if err != nil || !bytes.Equal(got, want) {
+							t.Fatal("fresh enrollment affected historical bytes/readability")
+						}
+					})
+				}
+			}
+		}
+	}
+}

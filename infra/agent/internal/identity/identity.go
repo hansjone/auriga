@@ -111,11 +111,18 @@ func checkFreshEnrollment(dir string, readDir func(string) ([]os.DirEntry, error
 		return fmt.Errorf("read enrollment directory: %w", err)
 	}
 	for _, entry := range entries {
+		leaf := entry.Name()
+		if runtime.GOOS == "windows" {
+			// ReadDir preserves spelling on Windows' normally case-insensitive
+			// filesystems. Fold only the leaf, conservatively also refusing such
+			// aliases in a Windows directory configured as case-sensitive.
+			leaf = strings.ToLower(leaf)
+		}
 		for _, name := range []string{KeyFileName, CertFileName, CAFileName, SealingFileName, TrustGuardFileName, "state.db"} {
-			if entry.Name() == name {
+			if leaf == name {
 				return fmt.Errorf("already enrolled or initialization evidence exists (%s); use certificate renewal; --force cannot replace trust", name)
 			}
-			if strings.HasPrefix(entry.Name(), "."+name+".tmp.") {
+			if strings.HasPrefix(leaf, "."+name+".tmp.") {
 				return fmt.Errorf("incomplete identity initialization; protected local recovery required")
 			}
 		}
