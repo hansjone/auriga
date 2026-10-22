@@ -1,6 +1,11 @@
 ﻿# Go 开发
 
-使用 Go 1.27，命令从仓库根进入 `infra/` 后执行。
+构建和测试固定使用 Go 1.27.3，命令从仓库根进入 `infra/` 后执行。
+该版本包含 [Go 官方发布记录](https://go.dev/doc/devel/release#go1.27.3)所列的
+`crypto/x509` 安全修复，并包含 1.27.2 的安全修复。CI 与容器构建同步固定补丁版本；
+`go.mod` / `go.work` 中的 `go 1.27.0` 仍表示最低语言版本，不能代替实际工具链要求。
+已有 Go 安装可在当前进程设置 `GOTOOLCHAIN=go1.27.3`，由 Go 下载并校验官方工具链，
+再以 `go version` 确认实际版本。此工具链补丁不代表所有第三方依赖均无漏洞。
 `go.work` 包含 `gen`、`edge`、`ai-gateway`、`egress`、`agent`、`ctl`，
 模块前缀为 `github.com/hansjone/auriga/infra/`。
 

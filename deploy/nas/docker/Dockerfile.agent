@@ -1,6 +1,6 @@
 # Build from repository root:
 #   docker build -f deploy/nas/docker/Dockerfile.agent --platform=linux/amd64 .
-FROM golang:1.27 AS build
+FROM golang:1.27.3 AS build
 WORKDIR /src/infra
 COPY infra/ ./
 WORKDIR /src/infra/agent

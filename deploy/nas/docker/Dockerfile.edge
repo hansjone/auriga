@@ -15,7 +15,7 @@ RUN corepack enable \
   && pnpm --filter @auriga/portal build \
   && pnpm --filter @auriga/admin build
 
-FROM golang:1.27 AS gobuild
+FROM golang:1.27.3 AS gobuild
 WORKDIR /src/infra
 COPY infra/ ./
 WORKDIR /src/infra/edge

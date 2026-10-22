@@ -1,5 +1,5 @@
 # Build from repository root: docker build -f deploy/compose/Dockerfile.edge .
-FROM golang:1.27 AS build
+FROM golang:1.27.3 AS build
 WORKDIR /src/infra
 COPY infra/ ./
 WORKDIR /src/infra/edge

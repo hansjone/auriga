@@ -48,7 +48,9 @@ docs/       architecture, ADRs, plans
 
 ## Development
 
-Prerequisites: JDK 25, Go 1.27, Node 22 with pnpm 11. No Docker is needed; tests use embedded PostgreSQL.
+Prerequisites: JDK 25, Go 1.27.3, Node 22 with pnpm 11. No Docker is needed; tests use embedded PostgreSQL.
+Builds and tests pin the Go security patch toolchain; the `go 1.27.0` language minimum remains unchanged.
+See the [official Go release notes](https://go.dev/doc/devel/release#go1.27.3) and [Go setup details](docs/dev/go.md).
 The first build downloads Maven, Go modules and npm packages.
 
 ```
