@@ -33,6 +33,7 @@ public final class IamStore {
           "qr_challenge");
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
+  private final ScopedValue<Set<String>> responseProjections = ScopedValue.newInstance();
 
   public IamStore(JdbcTemplate jdbc, TenantTransactionManager manager) {
     this.jdbc = jdbc;
@@ -43,6 +44,19 @@ public final class IamStore {
     TenantContext.require();
     TenantTransactionManager.verifyTransactionTenant();
     return transactions.execute(s -> work.get());
+  }
+
+  /** An explicit response owner, never a transaction synchronization callback. */
+  <T> T responseTx(SessionKv projection, Supplier<T> work) {
+    if (responseProjections.isBound()) return tx(work);
+    requireTransactionReleased();
+    var hashes = new LinkedHashSet<String>();
+    // Unbind before Spring invokes commit/completion callbacks: those still hold resources,
+    // but must never impersonate nested business work inside an owned response.
+    T result = tx(() -> ScopedValue.where(responseProjections, hashes).call(work::get));
+    requireTransactionReleased();
+    projection.awaitProjected(hashes);
+    return result;
   }
 
   // A response that waits for another transaction must own its transaction boundary. Even an
@@ -76,6 +90,7 @@ public final class IamStore {
         .isActualTransactionActive())
       throw new IllegalStateException("Session projection requires a transaction");
     UUID tenant = TenantContext.require();
+    if (responseProjections.isBound()) responseProjections.get().add(hash);
     jdbc.update(
         "INSERT INTO iam.session_projection_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",
         tenant);

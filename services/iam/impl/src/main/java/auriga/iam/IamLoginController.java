@@ -261,7 +261,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
     requests.call(
         request,
         () ->
-            store.tx(
+            sessions.response(
                 () -> {
                   ObjectNode session = requests.browserSession(request, sessions, true);
                   sessions.revokeOne(session, "logout");
@@ -299,9 +299,9 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void revoke(@PathVariable String id) {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    store.tx(
+    sessions.response(
         () -> {
-          ObjectNode row = sessions.activeById(id);
+          ObjectNode row = store.byId("session", id, true);
           IamError.require(
               row != null && row.path("accountId").asString().equals(principal.subject()),
               "not_found",

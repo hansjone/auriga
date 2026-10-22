@@ -32,7 +32,8 @@ public final class CompositeSessionKv implements SessionKv, SmartLifecycle {
   private volatile boolean running;
   private volatile Thread worker;
 
-  private record Confirmation(UUID tenant, String hash, CompletableFuture<Void> completed) {}
+  private record Confirmation(
+      UUID tenant, String hash, boolean requirePresent, CompletableFuture<Void> completed) {}
 
   private enum Visibility {
     READY,
@@ -42,22 +43,44 @@ public final class CompositeSessionKv implements SessionKv, SmartLifecycle {
 
   @Override
   public void awaitVisible(String hash) {
+    await(java.util.List.of(hash), true);
+  }
+
+  @Override
+  public void awaitProjected(java.util.Collection<String> hashes) {
+    await(hashes, false);
+  }
+
+  private void await(java.util.Collection<String> hashes, boolean requirePresent) {
     store.requireTransactionReleased();
-    var confirmation =
-        new Confirmation(
-            auriga.common.context.TenantContext.require(), hash, new CompletableFuture<>());
-    if (!running || !confirmations.offer(confirmation)) throw unavailable();
-    signal.release();
+    var waiting = new java.util.ArrayList<Confirmation>();
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     try {
-      confirmation.completed().get(5, TimeUnit.SECONDS);
+      for (String hash : hashes) {
+        var confirmation =
+            new Confirmation(
+                auriga.common.context.TenantContext.require(),
+                hash,
+                requirePresent,
+                new CompletableFuture<>());
+        if (!running || !confirmations.offer(confirmation)) throw unavailable();
+        waiting.add(confirmation);
+      }
+      signal.release();
+      for (var confirmation : waiting)
+        confirmation
+            .completed()
+            .get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       throw unavailable();
     } catch (ExecutionException | TimeoutException error) {
       throw unavailable();
     } finally {
-      confirmation.completed().cancel(false);
-      confirmations.remove(confirmation);
+      for (var confirmation : waiting) {
+        confirmation.completed().cancel(false);
+        confirmations.remove(confirmation);
+      }
     }
   }
 
@@ -152,7 +175,7 @@ public final class CompositeSessionKv implements SessionKv, SmartLifecycle {
                   var row = store.claimSessionProjection(confirmation.hash(), clock.instant());
                   if (row != null && !project(row)) return Visibility.FAILED;
                   if (store.sessionProjectionPending(confirmation.hash())) return Visibility.WAIT;
-                  return primary.get(confirmation.hash()) == null
+                  return confirmation.requirePresent() && primary.get(confirmation.hash()) == null
                       ? Visibility.FAILED
                       : Visibility.READY;
                 });

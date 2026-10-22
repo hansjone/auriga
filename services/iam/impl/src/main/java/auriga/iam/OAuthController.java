@@ -53,7 +53,10 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<ObjectNode> token(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
-    return standard(() -> requests.call(request, () -> oauth.token(credentials(input, request))));
+    return standard(
+        () ->
+            requests.call(
+                request, () -> sessions.response(() -> oauth.token(credentials(input, request)))));
   }
 
   @PostMapping(

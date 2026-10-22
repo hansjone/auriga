@@ -74,10 +74,181 @@ class SessionProjectionPostgresTest {
     return new CompositeSessionKv(store, primary, target, time);
   }
 
+  @Test
+  void normalBackgroundWorkerOwnsOneConnectionWhileRequestResourcesAreReleased() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    SessionKv target =
+        new SessionKv() {
+          public tools.jackson.databind.node.ObjectNode get(String key) {
+            return secondary.get(key);
+          }
+
+          public void put(String key, tools.jackson.databind.node.ObjectNode value) {
+            entered.countDown();
+            try {
+              assertTrue(release.await(5, TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              throw new IllegalStateException(e);
+            }
+            secondary.put(key, value);
+          }
+
+          public void delete(String key) {
+            secondary.delete(key);
+          }
+        };
+    var worker = composite(target);
+    try {
+      store.tenant(
+          tenant,
+          () -> {
+            worker.put(hash, IndependentReviewProbeTest.value(tenant, "background"));
+            return null;
+          });
+      worker.start();
+      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      store.requireTransactionReleased();
+      assertEquals(1, source.getHikariPoolMXBean().getActiveConnections());
+      try (var threads = Executors.newVirtualThreadPerTaskExecutor()) {
+        var calls = new ArrayList<Future<?>>();
+        for (int i = 0; i < 5; i++)
+          calls.add(threads.submit(() -> store.tenant(tenant, () -> store.all("session"))));
+        for (var call : calls) call.get(2, TimeUnit.SECONDS);
+      }
+      System.out.println(
+          "BACKGROUND_POOL_PROBE request_resource=false worker_active=1 five_requests=completed pool=5");
+      release.countDown();
+      org.awaitility.Awaitility.await()
+          .atMost(Duration.ofSeconds(3))
+          .untilAsserted(() -> assertNotNull(secondary.get(hash)));
+    } finally {
+      release.countDown();
+      worker.stop();
+    }
+    assertEquals(0, source.getHikariPoolMXBean().getActiveConnections());
+  }
+
   int pending(UUID id) {
     return store.tenant(
         id,
         () -> jdbc.queryForObject("SELECT count(*) FROM iam.session_projection", Integer.class));
+  }
+
+  @Test
+  void responseConfirmsMixedUpdatesAndDeletesAndRejectsCrossTenantBeforeCommit() {
+    var worker = composite(secondary);
+    String removed = Secrets.hash(Secrets.random());
+    worker.start();
+    try {
+      auriga.common.context.TenantContext.run(
+          tenant,
+          () ->
+              store.responseTx(
+                  worker,
+                  () -> {
+                    worker.put(hash, IndependentReviewProbeTest.value(tenant, "first"));
+                    worker.put(removed, IndependentReviewProbeTest.value(tenant, "deleted"));
+                    worker.delete(removed);
+                    worker.put(hash, IndependentReviewProbeTest.value(tenant, "latest"));
+                    return null;
+                  }));
+      assertEquals("latest", secondary.get(hash).path("accessToken").asString());
+      assertNull(secondary.get(removed));
+      assertEquals(0, pending(tenant));
+      String forbidden = Secrets.hash(Secrets.random());
+      assertThrows(
+          auriga.common.persistence.TenantTransactionManager.TenantMismatchException.class,
+          () ->
+              auriga.common.context.TenantContext.run(
+                  tenant,
+                  () ->
+                      store.responseTx(
+                          worker,
+                          () -> {
+                            worker.put(
+                                forbidden, IndependentReviewProbeTest.value(tenant, "rollback"));
+                            store.tenant(
+                                UUID.randomUUID(),
+                                () -> {
+                                  worker.delete(hash);
+                                  return null;
+                                });
+                            return null;
+                          })));
+      assertNull(secondary.get(forbidden));
+      assertEquals("latest", secondary.get(hash).path("accessToken").asString());
+      assertEquals(0, pending(tenant));
+    } finally {
+      worker.stop();
+    }
+  }
+
+  @Test
+  void boundedConfirmationQueueFailsExplicitlyWithoutDroppingDurableRevocations() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var target = spy(secondary);
+    doAnswer(
+            invocation -> {
+              entered.countDown();
+              assertTrue(release.await(5, TimeUnit.SECONDS));
+              return invocation.callRealMethod();
+            })
+        .when(target)
+        .put(eq(hash), any());
+    var worker = composite(target);
+    var hashes = new ArrayList<String>();
+    for (int i = 0; i < 129; i++) hashes.add(Secrets.hash(Secrets.random()));
+    try {
+      store.tenant(
+          tenant,
+          () -> {
+            worker.put(hash, IndependentReviewProbeTest.value(tenant, "blocked"));
+            return null;
+          });
+      worker.start();
+      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      var failure =
+          assertThrows(
+              auriga.common.error.AurigaException.class,
+              () ->
+                  auriga.common.context.TenantContext.run(
+                      tenant,
+                      () ->
+                          store.responseTx(
+                              worker,
+                              () -> {
+                                hashes.forEach(worker::delete);
+                                return null;
+                              })));
+      assertEquals("common.unavailable", failure.errorCode().code());
+      store.requireTransactionReleased();
+      assertTrue(pending(tenant) >= 129);
+      release.countDown();
+      org.awaitility.Awaitility.await()
+          .atMost(Duration.ofSeconds(3))
+          .untilAsserted(() -> assertNotNull(secondary.get(hash)));
+    } finally {
+      release.countDown();
+      worker.stop();
+    }
+    time.now = time.now.plusSeconds(2);
+    worker.start();
+    try {
+      auriga.common.context.TenantContext.run(
+          tenant,
+          () -> {
+            worker.awaitProjected(List.of(hash));
+            for (int i = 0; i < hashes.size(); i += 32)
+              worker.awaitProjected(hashes.subList(i, Math.min(i + 32, hashes.size())));
+          });
+    } finally {
+      worker.stop();
+    }
+    assertEquals(0, pending(tenant));
+    hashes.forEach(key -> assertNull(secondary.get(key)));
   }
 
   void drain(CompositeSessionKv worker) {

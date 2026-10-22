@@ -79,7 +79,7 @@ public final class LoginManager {
             ScopedValue.where(preparedAttempts, Map.copyOf(charged))
                 .call(
                     () -> {
-                      Result result = store.tx(work);
+                      Result result = sessions.response(work);
                       if (result.session() != null) sessions.awaitVisible(result.session());
                       return result;
                     }));
