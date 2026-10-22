@@ -62,7 +62,12 @@
 | JC1 Java 配置加载 | 已合并 #52 | 同一原 Schema 生成 Java 模型并严格加载，精确数字、format、跨字段和外部引用禁用均经实际回归；返回深副本，JAR 保留单份原 Schema。冻结 dea94f3 的 6 项 CI 与全新独审通过；原 93 项、独立 5 项方法及 42 条新增 Go/Java IDNA 对照通过，生成无漂移；合并后主线四工作流全部成功 |
 | IP1b 真实入口与 IAM 通道 | 已合并 #54 | 三实际 listener、完整 authority/Origin、专用 mTLS 与在线管理 CSRF RPC、唯一 SPA mode 已实现；首轮独审的 3 项中风险已修，冻结 50b98c0 的 14 项 CI 与第 2 轮全新独审均通过，独立代理、78 项 CSRF 边界、原样票据及真实 TCP mTLS 探针通过。凭据文件支持热更新，安装侧持续发行仍待 IP1f |
 | IP1d 管理台内存 CSRF | 已合并 #53 | 每 document 安全随机内存 token、单 flight、Retry-After、会话变化隔离及固定同源请求已接入实际管理台；模式类型从原 Schema 生成。首轮独审的满槽退出和响应延迟两项中风险已修；冻结 34748b9 的 7 项 CI 与第 2 轮全新会话独审均通过，独立共享 45 项、原探针 12 项及新增 8 项通过。真实浏览器仍待 IP3 |
-| IP1c / IP1e IAM 与公开装配 | #55 独审返工 | 冻结 54ba28d 的 22 项 CI 全部成功，公开装配 20 文件独审通过；同源原生 Linux 的 54 项库测试、完整 fake 闲置回收、闹钟预热消费及双会话 HTTP/WebSocket 吊销均通过。IAM 独审实证有限 5 连接池在提交后投影时耗尽并丢投影，以及同旧 cookie 的并发替换留下两个有效事务，高 1、中 1，须修复后重新 CI 和全新独审；真实 DSH 等待修复后新冻结，IP2/IP3 和内部凭据持续发行未完成 |
+| IP1c / IP1e IAM 与公开装配 | 已合并 #55 | ce8a830 的 6 项 CI、102 项选择集、Linux 完整 IAM 两轮各 143 项及真实 DSH 完整生命周期通过；23 条原始心跳、实际停机/预热/消费和完整 A/B HTTP/WS 吊销通过，991 blob 前后一致。第 2 轮独审发现凭据变更重试过滤已 revoked 行，窄修 3a9dbbe 的 6 项 CI、Windows 105/Linux 49 项回归已通过，第 3 轮新独审高/中/低均零、独立 42 项通过后合并，53 个合入 blob 全部一致；装配原 20 blob 未变，独立 13 项探针通过，历史失败保留 |
+| IP1f 安装服务令牌刷新 | 已合并 #56 | combined Linux 固定 svc:edge 可信持续发行、原子目录消费及代际停机保护已实现，默认关闭；原真实 IAM/common/PG mTLS 七阶段通过。消费前 owner/祖先/单链接/完整内容和身份校验已补，冻结 7b0b1a3 的 6 项 CI 与第 2 轮限定只读独审高/中/低均零后合并，实际 19 个合入文件与已审源一致。作者 Windows 5 顶层/11 子、Linux 9 顶层/54 子回归通过；本轮独审未重做动态验证，split、Windows 发行及正式部署未完成 |
+| IP2b 纯 IP 实例路径 | 已合并 #57 | 6e98e9b 的 22 项 CI 与非作者独审通过（高 0、中 0、低 2），六个合入 blob 与冻结一致；74 项 edge 测试、真实 HTTP/HTTPS 双实例 cookiejar、双向 WS 撤销及 Linux race 通过。空 path 绝对 URL 的尾斜杠/SW scope 规范偏差，以及未证越界的非法 UTF-8 拒绝策略列为低风险加固，已随 IP2c #58 关闭；未声称跨实例利用。IP2a 完整浏览器 Origin、IP2d 公开自定义部署入口与 IP3 真浏览器未完成 |
+| IP2c 实例路径规范加固 | 已合并 #58 | 空 path 的同源绝对响应映射到带尾斜杠实例根，Location/SW 出口核精确 mount，四入口统一拒绝非法 UTF-8 并保合法 Unicode；仅两生产文件和一回归。冻结 8e5b134 的作者 Windows/Linux 79 顶层、累计 167 pass、race/vet/build 与双目标 lint 通过，精确 22 项 CI 与全新独审高/中/低均零后合并；独立完整 82 顶层/222 累计、vet/build 通过，3 个合入 blob 与已审源一致 |
+| IP2a 完整浏览器 Origin | #59 CI 与真实最小验证中 | 31 文件源码已冻结，单个受保护 browserOrigin 精确消费同一配置的 scheme/host/有效端口，与内部心跳别名分离；1007 份源码哈希核同，原错误 scheme 真实红例保留。Windows/隔离 Linux race、插件 140 项和契约 89 项已通过；真实新 DSH 最小接线与精确 CI、两份非作者分工独审仍待收口 |
+| IP2d / IP2e / IP3 通用安装与浏览器 | 公开输入实现中、后续待验 | IP2d 正补公开 bootstrap 部署者配置输入及完整端口/Origin 消费；旧公开 NAS 配方仍使用旧变量，须由 IP2e 同步 access/mTLS/服务票据。然后 IP3 按域名/纯 IPv4 真实浏览器验证登录、管理多 tab、双实例 HTTP/WS、吊销恢复和 agent 重启；不可手改生成物、伪 Host 或 hosts 代替纯 IP 通过 |
 | A2F 制品与 GC | 已合并 #34 | 独立审查通过后合并；遗留以审查报告和主控手册为准 |
 | CF1 / RL1 | 已合并 #32 / #38 | common 偶发测试与 Windows renderer lint 修复，经独立审查 |
 
