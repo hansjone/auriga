@@ -35,6 +35,8 @@ sh deploy-nas/scripts/stop.sh
 
 所有操作脚本都显式用 `sh` 调用，不依赖执行位。源码 checkout 对应 `deploy/nas/`。数据根须绝对路径、至少三层且 basename 为 `auriga-*`；拒绝链接、点段及未初始化的外来非空目录。首装/root初始化只为新建且空的材料根通过已打开 FD 设置固定 `10001:10001`，再让清空补充组的同一预构建 binary 子进程生成材料。重入按原身份校验 receipt、输入和完整材料，原 key 不轮换；错 owner/mode、额外链接、错误祖先、缺 receipt、template-only、PKI/模板目录链接都拒绝，不自动 chmod/chown 旧材料。
 
+Linux root只从固定 `/proc/self/exe` 打开当前0755普通可执行文件，将该只读FD单独传为子进程fd3并通过 `/proc/self/fd/3` 以10001身份执行，因此bundle可在0700私有目录；材料根的祖先信任与实际可遍历要求仍独立强制，不复制binary或修改bundle目录权限。
+
 `AURIGA_NAS_BOOTSTRAP_BINARY` 可显式指向已校验的预构建 Linux binary（用于独立包布局/CI），不会触发 Go 编译。Windows 可做 `-validate-access`，不支持 NAS 私密材料激活。`NAS_ALLOW_NONROOT` 是旧脚本测试标志，不能绕过固定 uid 的真实材料安装。
 
 第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不要给 NAS 配方追加 dev、远程 emergency 或 observer 例外。

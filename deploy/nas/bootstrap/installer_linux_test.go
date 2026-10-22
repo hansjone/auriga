@@ -16,6 +16,7 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires Linux root for the real fixed uid boundary")
 	}
+	t.Run("executable-boundary", testNASFixedInstallerExecutableBoundary)
 	root, err := os.MkdirTemp("", "auriga-nas-installer-")
 	if err != nil {
 		t.Fatal(err)
@@ -216,4 +217,85 @@ func nasSnapshot(t *testing.T, out string) string {
 		t.Fatal(err)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func testNASFixedInstallerExecutableBoundary(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires Linux root for the real executable and fixed uid boundary")
+	}
+	root, err := os.MkdirTemp("", "auriga-nas-executable-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(root, "private-bundle")
+	if err := os.Mkdir(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(private, "bootstrap")
+	if b, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, b)
+	}
+	beforeBinary := nasSnapshot(t, private)
+	input := filepath.Join(root, "input.json")
+	raw, err := os.ReadFile("../access-ip.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(input, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invoke := func(out string) ([]byte, error) {
+		return exec.Command(binary, "-out", out, "-access-file", input, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26").CombinedOutput()
+	}
+	t.Run("private-bundle-public-data", func(t *testing.T) {
+		out := filepath.Join(root, "public-data")
+		if b, err := invoke(out); err != nil {
+			t.Fatalf("private bundle with legal data root: %v %s", err, b)
+		}
+		before := nasSnapshot(t, out)
+		if b, err := invoke(out); err != nil {
+			t.Fatalf("private bundle reentry: %v %s", err, b)
+		}
+		if before != nasSnapshot(t, out) || beforeBinary != nasSnapshot(t, private) {
+			t.Fatal("private bundle reentry changed source or executable metadata/bytes")
+		}
+	})
+	for _, mode := range []os.FileMode{0o700, 0o775} {
+		t.Run(fmt.Sprintf("unsafe-data-ancestor-%o", mode), func(t *testing.T) {
+			parent := filepath.Join(root, fmt.Sprintf("data-parent-%o", mode))
+			if err := os.Mkdir(parent, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			out := filepath.Join(parent, "materials")
+			if err := os.Mkdir(out, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chown(out, 10001, 10001); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(parent, mode); err != nil {
+				t.Fatal(err)
+			}
+			before := nasSnapshot(t, parent)
+			if b, err := invoke(out); err == nil {
+				t.Fatalf("unsafe data ancestor accepted: %s", b)
+			}
+			if before != nasSnapshot(t, parent) {
+				t.Fatal("unsafe data ancestor rejection repaired or wrote materials")
+			}
+		})
+	}
+	t.Run("non-executable-for-installer", func(t *testing.T) {
+		if err := os.Chmod(binary, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(binary, 0o755)
+		if b, err := invoke(filepath.Join(root, "bad-binary-mode")); err == nil {
+			t.Fatalf("non-executable binary for fixed uid accepted: %s", b)
+		}
+	})
 }

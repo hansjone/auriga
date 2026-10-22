@@ -88,17 +88,28 @@ func runAsInstaller(out string, raw []byte, peer, subnet string, registry int) e
 	if unix.Fstat(child, &after) != nil || unix.Fstatat(fd, leaf, &path, unix.AT_SYMLINK_NOFOLLOW) != nil || after.Dev != path.Dev || after.Ino != path.Ino || after.Uid != 10001 || after.Gid != 10001 || after.Mode != before.Mode {
 		return fmt.Errorf("changed NAS source root")
 	}
-	binary, err := os.Executable()
+	// Pin only this running executable, not a caller-supplied path. The bundle
+	// may be private while the independently validated material root is public.
+	binary, err := os.Open("/proc/self/exe")
 	if err != nil {
-		return err
+		return fmt.Errorf("open current NAS bootstrap executable: %w", err)
 	}
-	cmd := exec.Command(binary, "-out", out, "-access-file", "-", "-edge-peer-ip", peer, "-internal-subnet", subnet, "-registry-port", fmt.Sprint(registry))
+	defer binary.Close()
+	info, err := binary.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect current NAS bootstrap executable: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o755 || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+		return fmt.Errorf("current NAS bootstrap must be a regular executable with mode0755")
+	}
+	cmd := exec.Command("/proc/self/fd/3", "-out", out, "-access-file", "-", "-edge-peer-ip", peer, "-internal-subnet", subnet, "-registry-port", fmt.Sprint(registry))
+	cmd.ExtraFiles = []*os.File{binary}
 	cmd.Stdin = bytes.NewReader(raw)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 10001, Gid: 10001, Groups: []uint32{}}}
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("fixed NAS installer failed")
+		return fmt.Errorf("fixed NAS installer failed: %w", err)
 	}
 	os.Exit(0)
 	return nil
