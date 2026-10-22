@@ -49,17 +49,23 @@ message JoinResponse {
   // NodeControl 的地址，例如 `https://platform.example.com:7443`；单机时是 `unix:///…` 或 `npipe:////./pipe/…`。
   string control_endpoint = 4;
   google.protobuf.Timestamp certificate_expires_at = 5;
-  // 制品签名公钥（校验 DSH 运行时、插件包、节点代理升级包）。它们不经 NodeControl 下发：
-  // workspace 被攻破时也不能替换。轮换时新公钥必须由旧私钥签名后经 RenewCertificate 下发。
+  // 首次 Join 沿 CA pin TLS 可信 bootstrap 固定至少一个根；根的两个背书字段均为空。
+  // 附属 key 必须完整锚定到根；已有身份/force/缺 keyring 不可重新 TOFU。
+  // NodeControl/ApplySpec 不得添根。信任边界及事务验图见 contracts/runtime/README.md。
   repeated ArtifactSigningKey artifact_signing_keys = 6;
 }
 
+// endorsement v1 未签期限；not_after 是本地信任上限，不是发行者授权的有效期。
+// 同 kid 的公钥、原始期限及来源背书固定；遗漏不撤销，历史冲突记录不可删后复用。
 message ArtifactSigningKey {
+  // [A-Za-z0-9._-]{1,128}。
   string kid = 1;
   // Ed25519 公钥（32 字节）。
   bytes public_key = 2;
+  // 必须合法且接收时未过期；子 key 本地截止=min(收到的 not_after, 父本地截止)。
   google.protobuf.Timestamp not_after = 3;
-  // 轮换时：上一把私钥对 (kid || public_key) 的签名；第一把为空。
+  // Ed25519 原始64字节，输入恰为 UTF8(kid)||32字节原始public_key；无前缀/分隔符。
+  // 初始根为空；轮换父 key 必须已受信且接收时有效，完整验图后事务合并。
   bytes endorsement = 4;
   string endorsed_by_kid = 5;
 }
@@ -73,6 +79,7 @@ message RenewCertificateRequest {
 message RenewCertificateResponse {
   bytes certificate_chain = 1;
   google.protobuf.Timestamp certificate_expires_at = 2;
-  // 当前有效的制品签名公钥（含新轮换的）。
+  // 仅以已固定根锚定轮换，重复列表幂等、遗漏不撤销、不得新增根。
+  // 坏列表与有效新节点证书分开验收：保存有效续证、保留旧keyring并报告信任更新失败。
   repeated ArtifactSigningKey artifact_signing_keys = 3;
 }

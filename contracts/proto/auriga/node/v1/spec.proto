@@ -2,8 +2,9 @@ syntax = "proto3";
 
 package auriga.node.v1;
 
-import "google/protobuf/timestamp.proto";
+import "auriga/node/v1/runtime_trust.proto";
 import "auriga/resource/v1/trust.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
 option java_multiple_files = true;
@@ -72,6 +73,10 @@ message DshRuntime {
   SignedArtifact signed = 8;
   // Docker 驱动用的实例镜像，必须带 digest：`<仓库>@sha256:…`。原生进程驱动为空。
   string image = 7;
+  // 正式发行的完整信任声明；同时绑定归档与实际执行的单平台 OCI manifest。
+  // 旧 signed 存在时仍须完整验签并校对归档语义，不可代替 image 验证。
+  // RT0 契约，生产强制消费待 RT2；精确 JSON 映射见 contracts/runtime/README.md。
+  RuntimeReleaseEnvelope release_envelope = 9;
 }
 
 message Resources {
@@ -212,7 +217,11 @@ message IdentityPublicKey {
 
 // 制品签名声明。平台用制品签名密钥对它的 JCS（RFC 8785）规范化 JSON 签名（Ed25519），
 // 而不是只签 digest：防止已签名的旧版本被回滚使用、或一个已签名制品冒充另一种制品。
-// 节点代理记住每类制品（purpose + name + os + arch）已用过的最高版本，拒绝更低版本（显式降级指令除外）。
+// standalone JSON 恰有下列七字段，全显式，字符串不规范化；Timestamp CheckValid 后
+// UTC 整秒 Z 或去尾零的最短 1..9 位小数，见 contracts/runtime/README.md。
+// agent/plugin 仍记住每类制品（purpose + name + os + arch）已用过的最高版本，
+// 拒绝更低版本（显式降级指令除外）；不改变这些非 runtime 类别的既有防回滚约束。
+// 正式 runtime 防回滚使用 release_envelope.release_sequence，不以此 version 代替。
 message ArtifactStatement {
   // `agent` | `dsh_runtime` | `plugin`
   string purpose = 1;

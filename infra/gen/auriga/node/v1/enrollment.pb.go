@@ -129,8 +129,9 @@ type JoinResponse struct {
 	// NodeControl 的地址，例如 `https://platform.example.com:7443`；单机时是 `unix:///…` 或 `npipe:////./pipe/…`。
 	ControlEndpoint      string                 `protobuf:"bytes,4,opt,name=control_endpoint,json=controlEndpoint,proto3" json:"control_endpoint,omitempty"`
 	CertificateExpiresAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=certificate_expires_at,json=certificateExpiresAt,proto3" json:"certificate_expires_at,omitempty"`
-	// 制品签名公钥（校验 DSH 运行时、插件包、节点代理升级包）。它们不经 NodeControl 下发：
-	// workspace 被攻破时也不能替换。轮换时新公钥必须由旧私钥签名后经 RenewCertificate 下发。
+	// 首次 Join 沿 CA pin TLS 可信 bootstrap 固定至少一个根；根的两个背书字段均为空。
+	// 附属 key 必须完整锚定到根；已有身份/force/缺 keyring 不可重新 TOFU。
+	// NodeControl/ApplySpec 不得添根。信任边界及事务验图见 contracts/runtime/README.md。
 	ArtifactSigningKeys []*ArtifactSigningKey `protobuf:"bytes,6,rep,name=artifact_signing_keys,json=artifactSigningKeys,proto3" json:"artifact_signing_keys,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -208,13 +209,18 @@ func (x *JoinResponse) GetArtifactSigningKeys() []*ArtifactSigningKey {
 	return nil
 }
 
+// endorsement v1 未签期限；not_after 是本地信任上限，不是发行者授权的有效期。
+// 同 kid 的公钥、原始期限及来源背书固定；遗漏不撤销，历史冲突记录不可删后复用。
 type ArtifactSigningKey struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Kid   string                 `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`
+	// [A-Za-z0-9._-]{1,128}。
+	Kid string `protobuf:"bytes,1,opt,name=kid,proto3" json:"kid,omitempty"`
 	// Ed25519 公钥（32 字节）。
-	PublicKey []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
-	NotAfter  *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
-	// 轮换时：上一把私钥对 (kid || public_key) 的签名；第一把为空。
+	PublicKey []byte `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	// 必须合法且接收时未过期；子 key 本地截止=min(收到的 not_after, 父本地截止)。
+	NotAfter *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"`
+	// Ed25519 原始64字节，输入恰为 UTF8(kid)||32字节原始public_key；无前缀/分隔符。
+	// 初始根为空；轮换父 key 必须已受信且接收时有效，完整验图后事务合并。
 	Endorsement   []byte `protobuf:"bytes,4,opt,name=endorsement,proto3" json:"endorsement,omitempty"`
 	EndorsedByKid string `protobuf:"bytes,5,opt,name=endorsed_by_kid,json=endorsedByKid,proto3" json:"endorsed_by_kid,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -343,7 +349,8 @@ type RenewCertificateResponse struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	CertificateChain     []byte                 `protobuf:"bytes,1,opt,name=certificate_chain,json=certificateChain,proto3" json:"certificate_chain,omitempty"`
 	CertificateExpiresAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=certificate_expires_at,json=certificateExpiresAt,proto3" json:"certificate_expires_at,omitempty"`
-	// 当前有效的制品签名公钥（含新轮换的）。
+	// 仅以已固定根锚定轮换，重复列表幂等、遗漏不撤销、不得新增根。
+	// 坏列表与有效新节点证书分开验收：保存有效续证、保留旧keyring并报告信任更新失败。
 	ArtifactSigningKeys []*ArtifactSigningKey `protobuf:"bytes,3,rep,name=artifact_signing_keys,json=artifactSigningKeys,proto3" json:"artifact_signing_keys,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache

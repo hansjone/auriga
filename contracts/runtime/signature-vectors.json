@@ -1,0 +1,392 @@
+{
+  "producer": "Java JCA Ed25519",
+  "cases": [
+    {
+      "name": "runtime-0",
+      "schema": "runtime",
+      "canonical": "{\"arch\":\"amd64\",\"archiveDigest\":\"\",\"artifactId\":\"dsh-é-é-😀-0\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"issuedAt\":\"2026-10-23T00:00:00Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":7,\"schemaVersion\":1}",
+      "sha256": "ddf0d889208fcffcfa5dc6438cb63b31c1a6bfd0387b061c9d69fb4a311a8c26",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 0
+      },
+      "document": {
+        "schemaVersion": 1,
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "artifactId": "dsh-é-é-😀-0",
+        "dshVersion": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "archiveDigest": "",
+        "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "releaseSequence": 7,
+        "issuedAt": "2026-10-23T00:00:00Z",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "release-root",
+          "value": "Q_3pilSrRgc4vSeYLQikJs6uyKODwZQMVHDH3hTFVawFpfEo7IyEHUA7GJciDibRiVoM6o4d-iggu3eNnaSuBw"
+        }
+      }
+    },
+    {
+      "name": "standalone-0",
+      "schema": "standalone",
+      "canonical": "{\"arch\":\"amd64\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-23T00:00:00Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"version\":\"0.2.0+node22.19\"}",
+      "sha256": "305e9e8d2cf24af32e6d8e27139c7cc318e5dfa6e3b7429b73a66b5e624445cd",
+      "signature": "b91NkyRAlmMDw-pD940JpoGCW6g61fjy40yR_rX9OCkbwsbiR4kUkiqjx4m3qLHFYj7F-uw2k77VK9V4Uhc6Bw",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 0
+      },
+      "document": {
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "version": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-10-23T00:00:00Z"
+      }
+    },
+    {
+      "name": "runtime-1",
+      "schema": "runtime",
+      "canonical": "{\"arch\":\"amd64\",\"archiveDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"artifactId\":\"dsh-é-é-😀-1\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"issuedAt\":\"2026-10-23T00:00:00.1Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":7,\"schemaVersion\":1}",
+      "sha256": "32d3f30d2fb7d827d367a3d8879a7ea38962e564d8e0f3a6018f510b5cedad6c",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 100000000
+      },
+      "document": {
+        "schemaVersion": 1,
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "artifactId": "dsh-é-é-😀-1",
+        "dshVersion": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "archiveDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "releaseSequence": 7,
+        "issuedAt": "2026-10-23T00:00:00.1Z",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "release-root",
+          "value": "XEvcVISBYdbebf8AtKi29VJ9k4Znh0ha7DeAa-IauGjmusoreLd6bgBG2Unar5XMHGtnKynG-OvJYqPTTYMRBg"
+        }
+      }
+    },
+    {
+      "name": "standalone-1",
+      "schema": "standalone",
+      "canonical": "{\"arch\":\"amd64\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-23T00:00:00.1Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"version\":\"0.2.0+node22.19\"}",
+      "sha256": "a85b6bab0229619b1e8784fd656e05a3b7c389713bddaf64f296848bdeac5b78",
+      "signature": "4Z10XYsR2wBph1fZ8yzNg8tdgUtYz-JuTseTC1Iz3bqmCpDDv_oI-ucbPNHxU7-W_yGWzLgRSmzcA8FTX-e5Dw",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 100000000
+      },
+      "document": {
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "version": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-10-23T00:00:00.1Z"
+      }
+    },
+    {
+      "name": "runtime-2",
+      "schema": "runtime",
+      "canonical": "{\"arch\":\"amd64\",\"archiveDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"artifactId\":\"dsh-é-é-😀-2\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"issuedAt\":\"2026-10-23T00:00:00.12Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":7,\"schemaVersion\":1}",
+      "sha256": "b085ea071c139f5b16f02f593a5ccdd19bb940d104af28884012b6bb9abdd2b6",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 120000000
+      },
+      "document": {
+        "schemaVersion": 1,
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "artifactId": "dsh-é-é-😀-2",
+        "dshVersion": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "archiveDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "releaseSequence": 7,
+        "issuedAt": "2026-10-23T00:00:00.12Z",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "release-root",
+          "value": "hQaYSYKOyI5-hsImjbNxzxLGc0u5tgIx4tC9WUmRPmS-jbXzVgwq3B9lXhGWvQT7T-99tFwwCEw4jQg4KMITAA"
+        }
+      }
+    },
+    {
+      "name": "standalone-2",
+      "schema": "standalone",
+      "canonical": "{\"arch\":\"amd64\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-23T00:00:00.12Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"version\":\"0.2.0+node22.19\"}",
+      "sha256": "c63cc702b2ee08fc63d2c4a967a55261a6d5a9775494e02ea37c0a977c67a55a",
+      "signature": "wHZS7PsO6V-mzQpcRKgLVnb3UIwcmcRjakSAgZ_21T2uILfrNYYNkwrNHRraXYO8oUse54eYUehyjCMytssDDA",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 120000000
+      },
+      "document": {
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "version": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-10-23T00:00:00.12Z"
+      }
+    },
+    {
+      "name": "runtime-3",
+      "schema": "runtime",
+      "canonical": "{\"arch\":\"amd64\",\"archiveDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"artifactId\":\"dsh-é-é-😀-3\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"issuedAt\":\"2026-10-23T00:00:00.123Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":7,\"schemaVersion\":1}",
+      "sha256": "4dc3eac2db7fb37463dda9847fd353ec22e9934ca080fad7b13b1b6b5c539d69",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 123000000
+      },
+      "document": {
+        "schemaVersion": 1,
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "artifactId": "dsh-é-é-😀-3",
+        "dshVersion": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "archiveDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "releaseSequence": 7,
+        "issuedAt": "2026-10-23T00:00:00.123Z",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "release-root",
+          "value": "PVVt0odDmYCR7F4sGqSm-dGwZH1wN2P_jnC4qhQPkG-JAaiRH1Zg7qXVINjG66E0AZdiILPhy5xRod-i2YwODw"
+        }
+      }
+    },
+    {
+      "name": "standalone-3",
+      "schema": "standalone",
+      "canonical": "{\"arch\":\"amd64\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-23T00:00:00.123Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"version\":\"0.2.0+node22.19\"}",
+      "sha256": "e3a16c0c58becf2db7a1a02471dacc1f3c1c0984f67cab88018b5ecfdd2430c4",
+      "signature": "pbEHCesitJOds_xm_2ofEjGlcgIASJ51uoaAUB_EIjMW7NI6Z0znKqf0-J3RdPK5YoDJFCy8ywP6iPK_avzOAA",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 123000000
+      },
+      "document": {
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "version": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-10-23T00:00:00.123Z"
+      }
+    },
+    {
+      "name": "runtime-4",
+      "schema": "runtime",
+      "canonical": "{\"arch\":\"amd64\",\"archiveDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"artifactId\":\"dsh-é-é-😀-4\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"issuedAt\":\"2026-10-23T00:00:00.123456Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":7,\"schemaVersion\":1}",
+      "sha256": "39d142ad0ea2776d5356e1f2aae435fe270e857c20a6c1d3fe85243b00bf838f",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 123456000
+      },
+      "document": {
+        "schemaVersion": 1,
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "artifactId": "dsh-é-é-😀-4",
+        "dshVersion": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "archiveDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "releaseSequence": 7,
+        "issuedAt": "2026-10-23T00:00:00.123456Z",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "release-root",
+          "value": "J4h-uGp0wSnJFPctI7tyQiaD4B3gKyBMiSfWHy9smvtIhRKMivZGJI8VD4NNlGmzFf-M_sONP0B3UxkHApDGBw"
+        }
+      }
+    },
+    {
+      "name": "standalone-4",
+      "schema": "standalone",
+      "canonical": "{\"arch\":\"amd64\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-23T00:00:00.123456Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"version\":\"0.2.0+node22.19\"}",
+      "sha256": "35a3360868486d4331548f2c93bb021423be2a3e1e497a07ffd697da2ffc15be",
+      "signature": "PKgXGtxIFijDXko72FjgVwgP0WMA5e1wmNU2GWunwwb2hiv2ihDUzwjVRiTIKQy-vF2Zd-d3AVpwamlgqeXzDw",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 123456000
+      },
+      "document": {
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "version": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "amd64",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-10-23T00:00:00.123456Z"
+      }
+    },
+    {
+      "name": "runtime-5",
+      "schema": "runtime",
+      "canonical": "{\"arch\":\"arm64\",\"archiveDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"artifactId\":\"dsh-é-é-😀-5\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"issuedAt\":\"2026-10-23T00:00:00.123456789Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":9007199254740991,\"schemaVersion\":1}",
+      "sha256": "332334549c8419b6a5da6c374ce4bc8e27db0c8fbb1aad5b9d883e240121d3ec",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 123456789
+      },
+      "document": {
+        "schemaVersion": 1,
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "artifactId": "dsh-é-é-😀-5",
+        "dshVersion": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "arm64",
+        "archiveDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "imageDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "releaseSequence": 9007199254740991,
+        "issuedAt": "2026-10-23T00:00:00.123456789Z",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "release-root",
+          "value": "ip7JMYaldc8WhyGrLQberqb3zr-h5ls0_uWXYkzHyUopnT87tfMMm-Lj5wDAFf9yBBaQGpYh1ht-cq9ZS5igAg"
+        }
+      }
+    },
+    {
+      "name": "standalone-5",
+      "schema": "standalone",
+      "canonical": "{\"arch\":\"arm64\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-23T00:00:00.123456789Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"version\":\"0.2.0+node22.19\"}",
+      "sha256": "2128df0f6d379a1dccabcf1297ad65e8d74ea1fcf96082242c50778653166393",
+      "signature": "qYl7L28aqt2DYBkFDVkj_dl1VI8XZduqO6_jn9yhcqKkYy_ORuWk1towphGNYONQK2SBS8yZpPM7IOEBAQKUAQ",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 123456789
+      },
+      "document": {
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "version": "0.2.0+node22.19",
+        "os": "linux",
+        "arch": "arm64",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-10-23T00:00:00.123456789Z"
+      }
+    },
+    {
+      "name": "runtime-6",
+      "schema": "runtime",
+      "canonical": "{\"arch\":\"amd64\",\"archiveDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"artifactId\":\"dsh-é-é-😀-6\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"\",\"issuedAt\":\"2026-10-23T00:00:00.000000001Z\",\"name\":\"dsh\",\"os\":\"windows\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":7,\"schemaVersion\":1}",
+      "sha256": "e2b9f254e78a2f190625fe3d04a684059eaed273aa71e7b7c9c1bed440f6729e",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 1
+      },
+      "document": {
+        "schemaVersion": 1,
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "artifactId": "dsh-é-é-😀-6",
+        "dshVersion": "0.2.0+node22.19",
+        "os": "windows",
+        "arch": "amd64",
+        "archiveDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "imageDigest": "",
+        "releaseSequence": 7,
+        "issuedAt": "2026-10-23T00:00:00.000000001Z",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "release-root",
+          "value": "nNf92CyNBnMl9KOHTD7sdkdrihodlvslSKp2u7liHPrVHccGmThBUJlbkX-3Iuw8oiHm1ldHnaZnzQ4Bg-zmDg"
+        }
+      }
+    },
+    {
+      "name": "standalone-6",
+      "schema": "standalone",
+      "canonical": "{\"arch\":\"amd64\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-23T00:00:00.000000001Z\",\"name\":\"dsh\",\"os\":\"windows\",\"purpose\":\"dsh_runtime\",\"version\":\"0.2.0+node22.19\"}",
+      "sha256": "9d8fe49a989fbfe6313d6de73151da5a5df69f0eaf78c9111fc61f65c1d88f01",
+      "signature": "SnRMVFz8kRF5lp9wPVamknezZPjltidiD_pQw7RPVT5ND0vnVAvi-pHt311Pd4OmcDAY2SvHnE_URXHksBqnBA",
+      "publicKeySpki": "MCowBQYDK2VwAyEAL_b7flQxKJcvMbIbldRlCtS2Y-LtsdPchlcyKVtnFG8",
+      "timestamp": {
+        "seconds": 1792713600,
+        "nanos": 1
+      },
+      "document": {
+        "purpose": "dsh_runtime",
+        "name": "dsh",
+        "version": "0.2.0+node22.19",
+        "os": "windows",
+        "arch": "amd64",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "issuedAt": "2026-10-23T00:00:00.000000001Z"
+      }
+    }
+  ],
+  "resigned": {
+    "canonical": "{\"arch\":\"amd64\",\"archiveDigest\":\"\",\"artifactId\":\"dsh-é-é-😀-0\",\"dshVersion\":\"0.2.0+node22.19\",\"imageDigest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"issuedAt\":\"2026-10-23T00:00:00Z\",\"name\":\"dsh\",\"os\":\"linux\",\"purpose\":\"dsh_runtime\",\"releaseSequence\":7,\"schemaVersion\":1}",
+    "publicKeySpki": "MCowBQYDK2VwAyEAnZWgHDQI5Jn8tWcQcJDomXRQ0sac1aJ-JBK1lSafjU8",
+    "signature": "eKEPuB2mwmeYGtySMmQcGEQkEsB7q0g-iTWCyL8JSNdQj8pneclA3YAuq3QsOCAT3-sqlSnUoDP33Vs_pOorCw"
+  },
+  "keys": [
+    {
+      "kid": "root",
+      "publicKey": "ivGeNL1qc-mYo14Hxbo17KSUe2pB5hO1me86MG7pP7A",
+      "publicKeySpki": "MCowBQYDK2VwAyEAivGeNL1qc-mYo14Hxbo17KSUe2pB5hO1me86MG7pP7A",
+      "notAfter": "2027-01-01T00:00:00Z",
+      "endorsedByKid": "",
+      "endorsement": ""
+    },
+    {
+      "kid": "child",
+      "publicKey": "KpxL1a1SesN4UI0xd_LTp6x23AfGFwCTBM4fuYZq74o",
+      "publicKeySpki": "MCowBQYDK2VwAyEAKpxL1a1SesN4UI0xd_LTp6x23AfGFwCTBM4fuYZq74o",
+      "notAfter": "2028-01-01T00:00:00Z",
+      "endorsedByKid": "root",
+      "endorsement": "BA5rj5RWRAkDKIStJRWHwPsjk812cHPEIomLskRdJP1FBFi18u7QiKU98kkEuq8-EjrkqVu1hyoibOE_SEUrCg",
+      "parentPublicKeySpki": "MCowBQYDK2VwAyEAivGeNL1qc-mYo14Hxbo17KSUe2pB5hO1me86MG7pP7A",
+      "inputHex": "6368696c642a9c4bd5ad527ac378508d3177f2d3a7ac76dc07c617009304ce1fb9866aef8a",
+      "inputLength": 37
+    },
+    {
+      "kid": "leaf",
+      "publicKey": "DcG1JS4hHahpCofA2f2Ke-IN6AKYNUnsbzlh5o7ykoQ",
+      "publicKeySpki": "MCowBQYDK2VwAyEADcG1JS4hHahpCofA2f2Ke-IN6AKYNUnsbzlh5o7ykoQ",
+      "notAfter": "2026-12-01T00:00:00Z",
+      "endorsedByKid": "child",
+      "endorsement": "suTxN8XTUxdWKtubKOOX85Y-7E6jtZ29oyMbvGPbve3Ke6ziRw2rV0ZgrDosI9YT2P9epOrxq4RCGfNjlG97BA",
+      "parentPublicKeySpki": "MCowBQYDK2VwAyEAKpxL1a1SesN4UI0xd_LTp6x23AfGFwCTBM4fuYZq74o",
+      "inputHex": "6c6561660dc1b5252e211da8690a87c0d9fd8a7be20de802983549ec6f3961e68ef29284",
+      "inputLength": 36
+    }
+  ]
+}
