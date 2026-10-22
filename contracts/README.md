@@ -10,8 +10,12 @@
 | `openapi/iam.yaml` | iam 对外接口：登录事务、会话、本人的身份 / 多因素 / 设备、身份源管理、服务账号 | OpenAPI 3.1 |
 | `openapi/org.yaml` | org 对外接口：租户、成员、组、角色、策略、配额、邀请 | OpenAPI 3.1 |
 | `openapi/workspace.yaml` | workspace 对外接口：实例、节点、入网令牌；实例和连接模式插件调用的接口 | OpenAPI 3.1 |
+| `openapi/ai.yaml`、`openapi/resource.yaml` | M3首批模型管理/JSON/SSE及资源目录/审签/分发/节点下载 | OpenAPI 3.1 |
+| `ai/README.md`、`resource/` | AI身份通道/预算、资源签名与撤销/降级JSONSchema及共享JCS向量 | Markdown、JSON Schema、JSON |
+| `catalog/m3.json` | M3新增权限/域错误/事件生产方与ACL的单一定义 | JSON |
 | `proto/auriga/node/v1` | workspace ↔ 节点代理：入网、NodeControl 双向流、实例规格 | protobuf（buf） |
 | `proto/auriga/iam/v1`、`proto/auriga/org/v1` | iam、org 的内部 gRPC 接口 | protobuf |
+| `proto/auriga/ai/v1`、`proto/auriga/resource/v1`、`proto/auriga/workspace/v1` | M3模型目录、原子准入消息、资源锁定解析与签名、实例AI绑定/资源应用状态 | protobuf |
 | `events/` | NATS 事件：信封和 `user.*`、`identity.*`、`instance.*`、`audit.*` | JSON Schema 2020-12 |
 | `identity/` | 身份源步骤协议、连接器描述、远程连接器 HTTP 接口 | JSON Schema、OpenAPI |
 | `plugin/` | 插件协议：身份头、身份头公钥文件、实例环境变量、心跳、设备登录、面板加载 | Markdown、JSON Schema |
@@ -24,6 +28,7 @@
 - 一个主版本内**只做兼容修改**：加可选字段、加接口、加枚举值、加事件类型。不能删字段、改字段含义或类型、把可选改成必填、改 URL。
 - 客户端必须忽略不认识的字段和枚举值（枚举值未知时按"未知"处理，不报错）。
 - JSON Schema 里的 `additionalProperties: false` 只给**生产方**自测用（防止写错字段名）；消费方（服务、edge、插件、连接器）校验收到的数据时必须放宽为允许额外字段，否则以后加字段就成了不兼容修改。
+- 受签名的资源envelope/撤销/降级对象是明确例外：其完整JSON映射严格，未知签名字段必须升级schemaVersion，不能丢弃字段后继续验签。见resource/README.md。
 - 不兼容的修改要开新主版本，旧版本至少保留一个发布周期。插件协议例外：平台同时支持当前和上一个主版本（用户电脑上的插件升级慢）。
 - CI 检查：`buf lint`、`buf breaking`（FILE 级）、OpenAPI lint 和 diff、JSON Schema 校验。
 
@@ -59,7 +64,7 @@
 | 节点代理 | 节点证书（mTLS） | 入网时用一次性令牌换取，见 `proto/auriga/node/v1/enrollment.proto` |
 
 - 访问令牌按 RFC 9068：JOSE 头 `typ: at+jwt`，ES256；iam 在 `/.well-known/openid-configuration` 和 `/oauth2/jwks` 发布公钥；服务自行校验 typ、iss、aud、exp，不回调 iam。发给第三方 OIDC 客户端的令牌 `aud` 只有客户端 id，平台服务拒绝。
-- 访问令牌的 `ctx` 区分来源（portal / admin / device / service）。OpenAPI 里所有 `/admin/**` 操作都标了 `x-admin-only: true`，只接受 `ctx=admin`，由 common 库统一检查；"近期做过二次验证"用令牌的 `stepup_time` 判断（默认 10 分钟）。
+- 访问令牌的 `ctx` 区分来源（portal / admin / device / service / instance）。instance仅用于受认证内部AI通道，普通业务服务和公网拒收，不能与ait_混淆；详见ai/README.md及ADR0021。OpenAPI 里所有 `/admin/**` 操作都标了 `x-admin-only: true`，只接受 `ctx=admin`；"近期做过二次验证"用令牌的 `stepup_time` 判断（默认 10 分钟）。
 - 身份头用 Ed25519（EdDSA），密钥由 iam 管理、edge 签名、节点代理把公钥写进实例。
 - OIDC 和 OAuth 2.0 的标准端点（`/oauth2/authorize`、`/oauth2/token`、`/oauth2/device_authorization`、`/oauth2/jwks`、`/userinfo`、`/.well-known/openid-configuration`）由 iam 提供，按标准实现，不在 OpenAPI 里重复定义。
 - 租户：令牌里的 `tid` 决定租户。登录前按访问的主机名解析租户（org `TenantService.ResolveTenantByHost`），私有部署只有一个默认租户。
@@ -71,6 +76,8 @@
 | `/api/iam/v1/`、`/oauth2/`、`/.well-known/`、`/userinfo` | iam |
 | `/api/org/v1/` | org |
 | `/api/workspace/v1/` | workspace |
+| `/api/ai/v1/`、`/ai/v1/` | ai-gateway；管理/数据audience及内部instance入口分别校验 |
+| `/api/resource/v1/` | resource；`/internal/resource/**`只在内部节点mTLS入口，公网不路由 |
 | `/open/<实例 id>` | edge：校验门户会话和主人，签一次性票据，302 到实例地址 |
 | `/panel/` | 团队面板静态文件（见 `plugin/README.md`） |
 | 其他 | 门户 / 管理台静态文件 |
@@ -102,13 +109,15 @@
 | OpenAPI | openapi-generator（Spring 接口 + 模型） | 需要时用 oapi-codegen | openapi-typescript |
 | JSON Schema | jsonschema2pojo 或等价工具 | 需要时用 go-jsonschema | json-schema-to-typescript |
 
-生成命令和输出目录由仓库骨架（K1）定；生成的 Go 代码提交进仓库，CI 检查是否最新。
+Java与TS的HTTP生成包含iam/org/workspace/ai/resource。Go protobuf仍由infra/generate.go生成；
+新增Go HTTP模型复用现有固定版OpenAPI Generator，显式Maven profile与命令见infra/gen/README.md，
+生成Go代码提交，Java Linux CI重生并检查新增HTTP两包是否最新。普通Java构建不改跟踪的Go文件。
 
 ## 校验
 
 ```
 buf lint && buf breaking --against <上一版本>          # 在 contracts/ 下
-redocly lint --config redocly.yaml openapi/iam.yaml openapi/org.yaml openapi/workspace.yaml identity/remote-connector.yaml
+redocly lint --config redocly.yaml openapi/iam.yaml openapi/org.yaml openapi/workspace.yaml openapi/ai.yaml openapi/resource.yaml identity/remote-connector.yaml
 ```
 
 JSON Schema 用 Ajv（2020-12，strict）编译全部 `*.schema.json`。OpenAPI 生成 Java 前先用 `redocly bundle` 把外部引用打包成单文件；跳转回调端点（`/login/callback/*`）手写，不用生成的接口。

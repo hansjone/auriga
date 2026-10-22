@@ -196,3 +196,25 @@ message PublicKey {
 message GetPublicKeysResponse {
   repeated PublicKey keys = 1;
 }
+
+// 独立于 ait_ 实例心跳令牌、浏览器会话与外部服务账号。
+service InstanceAiTokenService {
+  // 只允许 svc:workspace 在授权委派租户内调用；org 有效成员检查失败关闭。
+  // perms 必须为主人有效权限与 {ai.models.invoke,ai.usage.read} 的交集，不携带管理角色。
+  // JWT: ptyp=user,ctx=instance,aud=auriga.ai-gateway,sub=owner_id；最大有效期 300 秒。
+  // common.unauthenticated/forbidden/not_found/unavailable，参数错误 common.validation_failed。
+  rpc IssueInstanceAiToken(IssueInstanceAiTokenRequest) returns (IssueInstanceAiTokenResponse);
+}
+
+message IssueInstanceAiTokenRequest {
+  string tenant_id = 1;
+  string owner_id = 2;
+  string instance_id = 3;
+  // [1,9007199254740991]，只由 workspace 的权威记录决定，实例不能自增/选主人。
+  uint64 credential_version = 4;
+}
+
+message IssueInstanceAiTokenResponse {
+  string access_token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}

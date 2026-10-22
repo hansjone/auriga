@@ -1,0 +1,7 @@
+{
+  "model": "example-model",
+  "messages": [{ "role": "user", "content": "你好" }],
+  "stream": false,
+  "max_tokens": 16,
+  "stop": ["END"]
+}

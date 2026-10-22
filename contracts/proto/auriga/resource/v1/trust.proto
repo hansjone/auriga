@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package auriga.resource.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/resource/v1;resourcev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.resource.v1";
+
+// 所有签名对象的唯一 JSON 映射：contracts/resource/signatures.schema.json 与 README.md。
+// 不得直接签 protojson：uint64 必须映射为安全范围内的 JSON number，所有时间为显式 UTC 字符串。
+message ResourceSignature {
+  // 固定 Ed25519；value 是 64 字节签名的 base64url 无填充文本。
+  string alg = 1;
+  string kid = 2;
+  string value = 3;
+}
+
+message ResourceArtifactStatement {
+  // 首批只允许 plugin；skill/template 不得冒用本 purpose。
+  string purpose = 1;
+  string name = 2;
+  string version = 3;
+  string os = 4;
+  string arch = 5;
+  string digest = 6;
+  string issued_at = 7;
+}
+
+message ResourceEnvelope {
+  uint32 schema_version = 1;
+  string tenant_id = 2;
+  string package_id = 3;
+  string version_id = 4;
+  uint64 release_sequence = 5;
+  string not_after = 6;
+  ResourceArtifactStatement statement = 7;
+  ResourceSignature signature = 8;
+}
+
+message RevokedArtifact {
+  string package_id = 1;
+  string version_id = 2;
+  string digest = 3;
+}
+
+message ResourceRevocationList {
+  uint32 schema_version = 1;
+  string tenant_id = 2;
+  uint64 revision = 3;
+  string issued_at = 4;
+  string expires_at = 5;
+  repeated string revoked_kids = 6;
+  repeated RevokedArtifact revoked_artifacts = 7;
+  ResourceSignature signature = 8;
+}
+
+message ResourceDowngradeAuthorization {
+  uint32 schema_version = 1;
+  string authorization_id = 2;
+  string tenant_id = 3;
+  string instance_id = 4;
+  string package_id = 5;
+  string version_id = 6;
+  string digest = 7;
+  uint64 from_release_sequence = 8;
+  uint64 to_release_sequence = 9;
+  string issued_at = 10;
+  string expires_at = 11;
+  string reason = 12;
+  ResourceSignature signature = 13;
+}
+
+// 独立部署根信任，签名用途不得互换；绝不信任包自带公钥或 ApplySpec 任意替换根。
+message ResourceTrustKey {
+  string kid = 1;
+  bytes public_key = 2;
+  // release / revocation / downgrade；一把 key 只用于一种 purpose。
+  string purpose = 3;
+  string not_before = 4;
+  string not_after = 5;
+}

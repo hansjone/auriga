@@ -13,7 +13,9 @@
     "jti": { "type": "string" },
     "tid": { "description": "租户 id。", "type": "string", "format": "uuid" },
     "ptyp": { "description": "主体类型。`internal_service` 是平台内置服务（sub 为 `svc:<服务名>`，tid 为平台租户），只出现在 aud=`auriga.internal` 的服务间令牌里。", "enum": ["user", "service_account", "device", "internal_service"] },
-    "ctx": { "description": "令牌来自哪里：portal（门户会话）、admin（管理台会话）、device（设备凭据）、service（服务账号）。标了 `x-admin-only` 的操作只接受 ctx=admin，由 common 库统一检查。", "enum": ["portal", "admin", "device", "service"] },
+    "ctx": { "description": "portal/admin/device/service/instance；instance 是主人为 sub 的专用托管 AI 主体，仅经受认证节点实例通道及 edge 内部入口使用。普通业务服务和公网入口拒收 instance。管理操作只接受 admin。", "enum": ["portal", "admin", "device", "service", "instance"] },
+    "instanceId": { "description": "ctx=instance 的权威实例 id；必须与受信通道及 workspace 在线绑定一致，不能由 HTTP 参数覆盖。", "type": "string", "format": "uuid" },
+    "credentialVersion": { "description": "workspace 单调递增的实例 AI 凭据代次；正整数且不大于 JCS/JavaScript 安全整数。紧急吊销无重叠，正常轮换重叠最多 60 秒且不超过旧 token 到期。", "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
     "sid": { "description": "浏览器会话 id（ctx=portal / admin 时）。", "type": "string", "format": "uuid" },
     "did": { "description": "设备 id（ctx=device 时）。", "type": "string", "format": "uuid" },
     "mtyp": { "description": "成员类型（ptyp=user / device 时）。", "enum": ["member", "external"] },
@@ -27,5 +29,25 @@
     "locale": { "type": "string" }
   },
   "required": ["iss", "sub", "aud", "exp", "iat", "jti", "tid", "ptyp", "ctx"],
-  "additionalProperties": true
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": { "properties": { "ctx": { "const": "instance" } }, "required": ["ctx"] },
+      "then": {
+        "properties": {
+          "instanceId": { "$ref": "#/properties/instanceId" },
+          "credentialVersion": { "$ref": "#/properties/credentialVersion" },
+          "ptyp": { "const": "user" },
+          "sub": { "type": "string", "format": "uuid" },
+          "aud": { "oneOf": [{ "const": "auriga.ai-gateway" }, { "type": "array", "items": { "const": "auriga.ai-gateway" }, "minItems": 1, "maxItems": 1 }] },
+          "perms": { "type": "array", "items": { "enum": ["ai.models.invoke", "ai.usage.read"] }, "uniqueItems": true },
+          "roles": { "type": "array", "maxItems": 0 },
+          "sid": false,
+          "did": false
+        },
+        "required": ["instanceId", "credentialVersion", "perms"]
+      },
+      "else": { "properties": { "instanceId": false, "credentialVersion": false } }
+    }
+  ]
 }

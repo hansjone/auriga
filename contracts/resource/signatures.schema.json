@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/resource/signatures.schema.json",
+  "title": "资源签名、撤销与显式降级 v1",
+  "description": "规范映射与执行约束见 README.md。签名覆盖去除 signature 的完整对象，经 RFC 8785 JCS 后 UTF-8 编码。不得使用默认 protobuf JSON 序列化结果代替规范映射。",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "Counter": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "format": "int64"
+    },
+    "Time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+      "$comment": "auriga-preserve-signature-text"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Signature": {
+      "type": "object",
+      "properties": {
+        "alg": {
+          "type": "string",
+          "const": "Ed25519"
+        },
+        "kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$",
+          "description": "64 字节签名的 base64url 无填充编码；解码后须重编码比较，拒绝非规范尾位。"
+        }
+      },
+      "required": [
+        "alg",
+        "kid",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "Statement": {
+      "type": "object",
+      "properties": {
+        "purpose": {
+          "type": "string",
+          "const": "plugin"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 214,
+          "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "os": {
+          "type": "string",
+          "enum": [
+            "linux",
+            "windows",
+            "any"
+          ]
+        },
+        "arch": {
+          "type": "string",
+          "enum": [
+            "amd64",
+            "arm64",
+            "any"
+          ]
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "purpose",
+        "name",
+        "version",
+        "os",
+        "arch",
+        "digest",
+        "issuedAt"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceEnvelope": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "tenantId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "packageId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "versionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "releaseSequence": {
+          "$ref": "#/$defs/Counter",
+          "description": "同一租户/包的单调安全序号，不能用 SemVer 或 build metadata 替代。"
+        },
+        "notAfter": {
+          "$ref": "#/$defs/Time",
+          "description": "必须晚于 statement.issuedAt，最长 24 小时；续签不改变身份/字节/安全序号且必须重新授权审计。"
+        },
+        "statement": {
+          "$ref": "#/$defs/Statement"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "packageId",
+        "versionId",
+        "releaseSequence",
+        "notAfter",
+        "statement",
+        "signature"
+      ],
+      "additionalProperties": false
+    },
+    "RevokedArtifact": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "versionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "packageId",
+        "versionId",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "RevocationList": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "tenantId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/Counter"
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/Time",
+          "description": "issuedAt 之后且最多 24 小时；离线最迟于此失效并停用受管资源。"
+        },
+        "revokedKids": {
+          "type": "array",
+          "maxItems": 2048,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "revokedArtifacts": {
+          "type": "array",
+          "maxItems": 8192,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/RevokedArtifact"
+          }
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "revision",
+        "issuedAt",
+        "expiresAt",
+        "revokedKids",
+        "revokedArtifacts",
+        "signature"
+      ],
+      "additionalProperties": false
+    },
+    "DowngradeAuthorization": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "authorizationId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "tenantId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "instanceId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "packageId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "versionId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "fromReleaseSequence": {
+          "$ref": "#/$defs/Counter"
+        },
+        "toReleaseSequence": {
+          "$ref": "#/$defs/Counter"
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/Time"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "authorizationId",
+        "tenantId",
+        "instanceId",
+        "packageId",
+        "versionId",
+        "digest",
+        "fromReleaseSequence",
+        "toReleaseSequence",
+        "issuedAt",
+        "expiresAt",
+        "reason",
+        "signature"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

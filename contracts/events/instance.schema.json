@@ -6,68 +6,210 @@
     "InstanceRef": {
       "type": "object",
       "properties": {
-        "instanceId": { "type": "string", "format": "uuid" },
-        "ownerId": { "type": "string", "format": "uuid" },
-        "nodeId": { "type": ["string", "null"], "format": "uuid" },
-        "generation": { "type": "integer", "minimum": 0 }
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
-      "required": ["instanceId", "ownerId", "nodeId", "generation"],
+      "required": [
+        "instanceId",
+        "ownerId",
+        "nodeId",
+        "generation"
+      ],
       "additionalProperties": false
     },
     "InstanceCreated": {
       "description": "type `instance.created`。",
       "type": "object",
       "properties": {
-        "instance": { "$ref": "#/$defs/InstanceRef" },
-        "runtime": { "enum": ["docker", "linux_process", "windows_process"] },
-        "dshVersion": { "type": "string" },
-        "actorId": { "type": ["string", "null"], "format": "uuid" }
+        "instance": {
+          "$ref": "#/$defs/InstanceRef"
+        },
+        "runtime": {
+          "enum": [
+            "docker",
+            "linux_process",
+            "windows_process"
+          ]
+        },
+        "dshVersion": {
+          "type": "string"
+        },
+        "actorId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
       },
-      "required": ["instance", "runtime", "dshVersion", "actorId"],
+      "required": [
+        "instance",
+        "runtime",
+        "dshVersion",
+        "actorId"
+      ],
       "additionalProperties": false
     },
     "InstanceStarted": {
       "description": "type `instance.started`：实例进入 running 且 ready。",
       "type": "object",
       "properties": {
-        "instance": { "$ref": "#/$defs/InstanceRef" },
-        "reason": { "enum": ["user", "admin", "wake", "always_on", "recover"] },
-        "coldStartMs": { "description": "从决定启动到 ready 的耗时。", "type": "integer", "minimum": 0 }
+        "instance": {
+          "$ref": "#/$defs/InstanceRef"
+        },
+        "reason": {
+          "enum": [
+            "user",
+            "admin",
+            "wake",
+            "always_on",
+            "recover"
+          ]
+        },
+        "coldStartMs": {
+          "description": "从决定启动到 ready 的耗时。",
+          "type": "integer",
+          "minimum": 0
+        }
       },
-      "required": ["instance", "reason"],
+      "required": [
+        "instance",
+        "reason"
+      ],
       "additionalProperties": false
     },
     "InstanceStopped": {
       "description": "type `instance.stopped`：实例停止。",
       "type": "object",
       "properties": {
-        "instance": { "$ref": "#/$defs/InstanceRef" },
-        "reason": { "enum": ["idle", "user", "admin", "user_disabled", "restart", "node_lost", "crashed"] },
-        "runningSeconds": { "description": "本次运行时长（计量用）。", "type": "integer", "minimum": 0 }
+        "instance": {
+          "$ref": "#/$defs/InstanceRef"
+        },
+        "reason": {
+          "enum": [
+            "idle",
+            "user",
+            "admin",
+            "user_disabled",
+            "restart",
+            "node_lost",
+            "crashed"
+          ]
+        },
+        "runningSeconds": {
+          "description": "本次运行时长（计量用）。",
+          "type": "integer",
+          "minimum": 0
+        }
       },
-      "required": ["instance", "reason", "runningSeconds"],
+      "required": [
+        "instance",
+        "reason",
+        "runningSeconds"
+      ],
       "additionalProperties": false
     },
     "InstanceFailed": {
       "description": "type `instance.failed`：节点代理连续 5 次失败后停止重试。",
       "type": "object",
       "properties": {
-        "instance": { "$ref": "#/$defs/InstanceRef" },
-        "code": { "type": "string" },
-        "message": { "type": "string" }
+        "instance": {
+          "$ref": "#/$defs/InstanceRef"
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
       },
-      "required": ["instance", "code"],
+      "required": [
+        "instance",
+        "code"
+      ],
       "additionalProperties": false
     },
     "InstanceDeleted": {
       "description": "type `instance.deleted`。",
       "type": "object",
       "properties": {
-        "instance": { "$ref": "#/$defs/InstanceRef" },
-        "dataPurged": { "type": "boolean" },
-        "actorId": { "type": ["string", "null"], "format": "uuid" }
+        "instance": {
+          "$ref": "#/$defs/InstanceRef"
+        },
+        "dataPurged": {
+          "type": "boolean"
+        },
+        "actorId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        }
       },
-      "required": ["instance", "dataPurged", "actorId"],
+      "required": [
+        "instance",
+        "dataPurged",
+        "actorId"
+      ],
+      "additionalProperties": false
+    },
+    "InstanceAiCredentialRevoked": {
+      "type": "object",
+      "properties": {
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "credentialVersion": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "rotation",
+            "security",
+            "deleted",
+            "disabled",
+            "permissions_changed"
+          ]
+        },
+        "revokedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "instanceId",
+        "ownerId",
+        "credentialVersion",
+        "reason",
+        "revokedAt"
+      ],
       "additionalProperties": false
     }
   }

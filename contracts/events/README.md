@@ -30,4 +30,11 @@
 | `instance.deleted` | workspace | `instance.schema.json#/$defs/InstanceDeleted` | audit |
 | `audit.recorded` | 所有服务 | `audit.schema.json#/$defs/AuditRecorded` | audit |
 
-以后的里程碑会加 `resource.*`、`knowledge.*`、`usage.*`（计量）等类型，按同样规则登记在这里。
+M3新增`usage.recorded`、`resource.version_published`、`resource.version_withdrawn`、
+`resource.distribution_requested`、`instance.ai_credential_revoked`。
+它们的唯一生产方source、subject、data-schema、消费者和精确发布ACL在
+[`catalog/m3.json`](../catalog/m3.json)的`events`定义，不能仅按新前缀猜生产方。
+事件经相同outbox/inbox去重；版本/选择/凭据revision必须单调，旧事件不得覆盖新状态。
+unknown用量显式null，不伪造0；事件不带prompt、响应正文、secret或bearer下载URL。
+现有common事件生产方白名单实现仍须后续接入此目录，不能因新增schema就声称消费方已支持。
+`knowledge.*`仍留未来里程碑另定。

@@ -225,11 +225,11 @@ message InstanceQuota {
 }
 
 message ModelQuota {
-  // 每月预算，百万分之一货币单位。
+  // 每月预算，百万分之一货币单位；不设置=不限，0=禁止团队模型。UTC月，币种必须等于gateway部署币种。
   optional int64 monthly_budget_micros = 1;
   // ISO 4217，例如 `CNY`、`USD`。
   string currency = 2;
-  // 每日 token 上限。
+  // 每日 token 上限；不设置=不限，0=禁止团队模型。UTC日；实例/设备按同一主体共享。
   optional int64 daily_tokens = 3;
 }
 

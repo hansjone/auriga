@@ -1,0 +1,10 @@
+data: {"id":"example-request","object":"chat.completion.chunk","created":1792569600,"model":"example-model","choices":[{"index":0,"delta":{"role":"assistant","content":"你"},"finish_reason":null}]}
+
+data: {"id":"example-request","object":"chat.completion.chunk","created":1792569600,"model":"example-model","choices":[{"index":0,"delta":{"content":"好"},"finish_reason":null}]}
+
+data: {"id":"example-request","object":"chat.completion.chunk","created":1792569600,"model":"example-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: {"id":"example-request","object":"chat.completion.chunk","created":1792569600,"model":"example-model","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}
+
+data: [DONE]
+

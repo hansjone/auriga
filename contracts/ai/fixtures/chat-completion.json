@@ -1,0 +1,8 @@
+{
+  "id": "example-request",
+  "object": "chat.completion",
+  "created": 1792569600,
+  "model": "example-model",
+  "choices": [{ "index": 0, "message": { "role": "assistant", "content": "你好" }, "finish_reason": "stop" }],
+  "usage": { "prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5 }
+}

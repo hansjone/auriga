@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package auriga.workspace.v1;
+
+import "google/protobuf/timestamp.proto";
+import "auriga/node/v1/node_control.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1;workspacev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.workspace.v1";
+
+// 全部 RPC 要求 auriga.internal 服务 JWT、mTLS 和授权代租户，正文 tenant_id 必须相等。
+service InstanceAiBindingService {
+  // 仅 svc:ai-gateway。每次准入在线检查；失败关闭，不允许旧缓存批准付费动作。
+  // common.unauthenticated/forbidden/not_found/unavailable。
+  rpc GetInstanceAiBinding(GetInstanceAiBindingRequest) returns (GetInstanceAiBindingResponse);
+}
+
+message GetInstanceAiBindingRequest {
+  string tenant_id = 1;
+  string instance_id = 2;
+}
+
+message GetInstanceAiBindingResponse {
+  string tenant_id = 1;
+  string instance_id = 2;
+  string owner_id = 3;
+  // false 包括删除、停用、主人失效或紧急吊销。不能把不存在映射为 active=true。
+  bool active = 4;
+  uint64 credential_version = 5;
+  // 正常轮换可选的前代，仅在 overlap_expires_at 前且 token 未到期时有效；最多 60 秒。
+  optional uint64 previous_credential_version = 6;
+  google.protobuf.Timestamp overlap_expires_at = 7;
+  string node_id = 8;
+}
+
+service ResourceApplyService {
+  // 仅 svc:resource。resource 不得直接读 workspace 表；不可见实例 common.not_found。
+  rpc GetResourceApplyStatus(GetResourceApplyStatusRequest) returns (GetResourceApplyStatusResponse);
+  // 仅 svc:resource。授权下载前在线核验调度节点、主人、规格/选择代次及实例仍有效。
+  rpc CheckResourceDownload(CheckResourceDownloadRequest) returns (CheckResourceDownloadResponse);
+}
+
+message GetResourceApplyStatusRequest {
+  string tenant_id = 1;
+  string instance_id = 2;
+  uint64 selection_revision = 3;
+}
+
+message GetResourceApplyStatusResponse {
+  string instance_id = 1;
+  uint64 selection_revision = 2;
+  int64 generation = 3;
+  int64 observed_generation = 4;
+  // 未知值按未知处理，不能声称 applied。
+  auriga.node.v1.InstancePhase phase = 5;
+  bool ready = 6;
+  string error_code = 7;
+}
+
+message CheckResourceDownloadRequest {
+  string tenant_id = 1;
+  string node_id = 2;
+  string instance_id = 3;
+  string owner_id = 4;
+  uint64 selection_revision = 5;
+  string version_id = 6;
+  string digest = 7;
+}
+
+message CheckResourceDownloadResponse {
+  bool allowed = 1;
+  int64 generation = 2;
+}
