@@ -1,0 +1,9 @@
+# These six historical findings are the documented, disposable M2 test subnet
+# introduced without inline annotations in 5044db5. They are not site addresses.
+# Keep full history/working-tree scanning and all other rule matches enabled.
+5044db587d5cecf8768954f6e7f4649783fce3a8:deploy/compose/docker-compose.yml:private-ipv4:72
+5044db587d5cecf8768954f6e7f4649783fce3a8:deploy/compose/docker-compose.yml:private-ipv4:130
+5044db587d5cecf8768954f6e7f4649783fce3a8:deploy/compose/docker-compose.yml:private-ipv4:198
+5044db587d5cecf8768954f6e7f4649783fce3a8:docs/dev/compose-access.md:private-ipv4:30
+5044db587d5cecf8768954f6e7f4649783fce3a8:docs/dev/compose-access.md:private-ipv4:31
+5044db587d5cecf8768954f6e7f4649783fce3a8:docs/dev/compose-access.md:private-ipv4:51
