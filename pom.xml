@@ -17,6 +17,7 @@
     <mybatis-plus.version>3.5.17</mybatis-plus.version>
     <jnats.version>2.26.4</jnats.version>
     <json-schema-validator.version>3.0.8</json-schema-validator.version>
+    <icu4j.version>78.3</icu4j.version>
     <webauthn.version>2.7.0</webauthn.version>
   </properties>
   <modules>
@@ -44,6 +45,11 @@
   </modules>
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>com.ibm.icu</groupId>
+        <artifactId>icu4j</artifactId>
+        <version>${icu4j.version}</version>
+      </dependency>
       <dependency>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-dependencies</artifactId>
