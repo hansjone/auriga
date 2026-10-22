@@ -15,8 +15,12 @@ public class IamGrpcSessions extends SessionServiceGrpc.SessionServiceImplBase {
   private static void caller(Set<String> allowed) {
     var p =
         AuthorizationRules.currentPrincipal()
-            .orElseThrow(() -> IamError.error("unauthenticated", 401));
-    IamError.require(p.isInternalService() && allowed.contains(p.subject()), "forbidden", 403);
+            .orElseThrow(
+                () ->
+                    new auriga.common.error.AurigaException(
+                        auriga.common.error.CommonErrors.UNAUTHENTICATED));
+    if (!p.isInternalService() || !allowed.contains(p.subject()))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
   }
 
   @Override
@@ -34,6 +38,18 @@ public class IamGrpcSessions extends SessionServiceGrpc.SessionServiceImplBase {
       TouchSessionRequest request, StreamObserver<TouchSessionResponse> observer) {
     caller(Set.of("svc:edge"));
     observer.onNext(sessions.touch(request));
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void verifyAdminSessionCsrf(
+      VerifyAdminSessionCsrfRequest request,
+      StreamObserver<VerifyAdminSessionCsrfResponse> observer) {
+    caller(Set.of("svc:edge"));
+    if (auriga.common.context.TenantContext.current().isEmpty())
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+    observer.onNext(sessions.verifyAdminCsrf(request));
     observer.onCompleted();
   }
 

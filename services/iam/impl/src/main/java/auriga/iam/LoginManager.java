@@ -57,9 +57,24 @@ public final class LoginManager {
     this.issuer = issuer;
   }
 
-  public Result begin(JsonNode request, String audience, String ip, String userAgent) {
+  public Result begin(
+      JsonNode request,
+      String audience,
+      String ip,
+      String userAgent,
+      String origin,
+      String previousBinding) {
     return store.tx(
         () -> {
+          if (previousBinding != null) {
+            store.lock("login-binding:" + audience + ":" + Secrets.hash(previousBinding));
+            for (ObjectNode old : store.all("login_tx"))
+              if (old.path("audience").asString().equals(audience)
+                  && old.path("origin").asString().equals(origin)
+                  && Secrets.same(old.path("bindingHash").asString(), Secrets.hash(previousBinding))
+                  && old.path("status").asString().equals("pending"))
+                cancel(old.path("id").asString(), previousBinding);
+          }
           store.limit("login-ip:" + ip, clock.instant(), 30);
           String pid = request.path("providerId").asString();
           ObjectNode provider = provider(pid);
@@ -80,6 +95,10 @@ public final class LoginManager {
                   Secrets.hash(binding),
                   "audience",
                   audience,
+                  "origin",
+                  origin,
+                  "tenantId",
+                  TenantContext.require().toString(),
                   "ip",
                   ip,
                   "userAgent",
@@ -100,7 +119,12 @@ public final class LoginManager {
                 "unauthenticated",
                 401);
             ObjectNode active = sessions.activeById(principal.sessionId());
-            IamError.require(active != null, "unauthenticated", 401);
+            IamError.require(
+                active != null
+                    && active.path("accountId").asString().equals(principal.subject())
+                    && active.path("audience").asString().equals(audience),
+                "unauthenticated",
+                401);
             if (purpose.equals("link"))
               IamError.require(
                   principal.steppedUpWithin(Duration.ofMinutes(10), clock.instant()),
@@ -153,6 +177,15 @@ public final class LoginManager {
             && Secrets.same(tx.path("bindingHash").asString(), Secrets.hash(binding)),
         "not_found",
         404);
+    return tx;
+  }
+
+  public ObjectNode checkEntry(String id, String binding, String audience, String origin) {
+    ObjectNode tx = transaction(id, binding);
+    if (!tx.path("audience").asString().equals(audience)
+        || !tx.path("origin").asString().equals(origin)
+        || !tx.path("tenantId").asString().equals(TenantContext.require().toString()))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.NOT_FOUND);
     return tx;
   }
 
@@ -364,7 +397,12 @@ public final class LoginManager {
     return new Result(view(tx, provider), null, null);
   }
 
-  public Result callback(String providerId, String binding, Map<String, String> params) {
+  public Result callback(
+      String providerId,
+      String binding,
+      Map<String, String> params,
+      String audience,
+      String origin) {
     return store.tx(
         () -> {
           String state = params.getOrDefault("state", params.getOrDefault("RelayState", ""));
@@ -377,6 +415,7 @@ public final class LoginManager {
                               && Secrets.same(t.path("callbackState").asString(""), state))
                   .findFirst()
                   .orElseThrow(() -> IamError.error("not_found", 404));
+          checkEntry(tx.path("id").asString(), binding, audience, origin);
           return advance(
               tx.path("id").asString(),
               binding,
@@ -708,7 +747,9 @@ public final class LoginManager {
             "userAgent",
             tx.path("userAgent").asString(),
             "callbackUrl",
-            issuer + "/api/iam/v1/login/callback/" + provider.path("providerId").asString(),
+            tx.path("origin").asString()
+                + "/api/iam/v1/login/callback/"
+                + provider.path("providerId").asString(),
             "state",
             state,
             "expiresAt",

@@ -56,6 +56,20 @@ public final class IamStore {
     return TenantContext.call(tenant, () -> isolated.execute(s -> work.get()));
   }
 
+  public void afterCommit(Runnable work) {
+    if (!org.springframework.transaction.support.TransactionSynchronizationManager
+        .isActualTransactionActive())
+      throw new IllegalStateException("Session projection requires a transaction");
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .registerSynchronization(
+            new org.springframework.transaction.support.TransactionSynchronization() {
+              @Override
+              public void afterCommit() {
+                work.run();
+              }
+            });
+  }
+
   private String table(String table) {
     if (!TABLES.contains(table)) throw new IllegalArgumentException("Unknown IAM table");
     return "iam.\"" + table + "\"";

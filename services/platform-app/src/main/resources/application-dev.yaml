@@ -4,27 +4,23 @@ auriga:
   platform:
     seed: true
   iam:
+    # Explicit dev profile permits only a numeric loopback HTTP hop.
+    edge-hop:
+      peer-addresses: [127.0.0.1, "::1", "0:0:0:0:0:0:0:1"]
+      allow-loopback-http: true
     issuer: ${AURIGA_IAM_ISSUER:http://portal.example.com}
     oidc:
       allow-local-http: true
-    hosts:
-      "[portal.example.com]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: portal
-        secure: false
-      "[admin.example.com]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: admin
-        secure: false
-      "[127.0.0.1]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: portal
-        secure: false
   security:
     jwt:
       issuer: ${AURIGA_IAM_ISSUER:http://portal.example.com}
-      # Compose/host-net: issuer Host is virtual; fetch JWKS via loopback to platform itself.
+      # Non-IAM consumers may configure a remote JWKS URI; IAM uses local public keys.
       jwk-set-uri: ${AURIGA_IAM_JWK_SET_URI:${AURIGA_IAM_ISSUER:http://portal.example.com}/oauth2/jwks}
       allow-insecure-jwks-uri: true
   persistence:
     allow-unguarded: true
+server:
+  address: 127.0.0.1
+  forward-headers-strategy: none
+  ssl:
+    enabled: false
