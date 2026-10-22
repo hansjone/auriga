@@ -6,7 +6,6 @@ import auriga.common.security.AurigaWebSecurity;
 import auriga.common.security.EndpointAuthorizationCheck;
 import auriga.common.security.ProblemSecurityHandlers;
 import auriga.iam.api.IdentityPolicyHooks;
-import auriga.iam.api.PermissionResolver;
 import io.grpc.BindableService;
 import java.time.Clock;
 import javax.sql.DataSource;
@@ -80,7 +79,7 @@ public class OrgRuntimeConfiguration {
 
   @Bean
   @Primary
-  PermissionResolver orgPermissionResolver(OrgService org) {
+  OrgPermissionResolver orgPermissionResolver(OrgService org) {
     return new OrgPermissionResolver(org);
   }
 

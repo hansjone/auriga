@@ -133,6 +133,22 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamInstanceAiTokens iamInstanceAiTokens(
+      TokenService tokens,
+      IamAccounts accounts,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    return new IamInstanceAiTokens(
+        tokens,
+        accounts,
+        authorization.getIfAvailable(
+            () ->
+                request -> {
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.UNAVAILABLE);
+                }));
+  }
+
+  @Bean
   @ConditionalOnProperty(prefix = "auriga.iam", name = "local-service-name")
   auriga.common.grpc.ServiceTokenProvider iamLocalServiceTokenProvider(
       TokenService tokens, Environment env) {
