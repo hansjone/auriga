@@ -1,6 +1,7 @@
 # M2 Compose 的正式入口与 IAM mTLS 装配
 
-本页描述一次性公开 M2 测试栈，配置生成器在 `deploy/compose/bootstrap`。
+本页描述 Linux combined 的公开 M2 测试配方，配置生成器在 `deploy/compose/bootstrap`。
+它可接受部署者的一份严格 access JSON；这不代表生产发行、NAS、TLS/代理或 split 安装已完成。
 先前 [m2.md](m2.md) 中的单 edge 监听、明文 8081、回环 HTTP JWKS 和
 明文心跳观察代理步骤不能直接套用到这套配置。这里的 domain M2 仍使用
 Node HTTP 客户端手填虚拟 Host；它不是实际 IP 浏览器验收，也不证明 IP2/IP3 完成。
@@ -9,7 +10,7 @@ Node HTTP 客户端手填虚拟 Host；它不是实际 IP 浏览器验收，也�
 
 从 `deploy/compose` 运行 `./scripts/prepare.sh`，公开 bootstrap 使用契约生成的
 `deployment.Access`，序列化后调用生产 `deploymentconfig.Load`，通过后才写入
-`var/access.json`。edge 与 IAM 挂载同一文件，不再各自手填 Host 列表。
+`var/access.json`。edge、IAM 和 agent 只读挂载同一个最终文件，不再各自手填 Host 列表。
 固定租户为 dev seed 的 `00000000-0000-0000-0000-000000000001`。
 
 - 门户及实例：`http://portal.example.com:8080`、`http://<instanceId>.i.example.com:8080`，
@@ -20,7 +21,8 @@ Node HTTP 客户端手填虚拟 Host；它不是实际 IP 浏览器验收，也�
 
 这些是本套 M2 的端口，不是产品硬编码。浏览器 HTTP 有明确
 `insecureHttpAcknowledged=true`；issuer 固定为完整门户 Origin，包含 `:8080`。
-生成的 `access.env` 将相同 issuer、team Origin 和内部平台 URL 交给 Compose。
+生成的 `access.env` 将相同 issuer、team Origin、RP host、项目名及内外端口映射交给 Compose；
+内部实例 URL、DNS alias 与 edge 身份由 agent 直接从共享 access 文件读取。
 dev profile 用于 seed，Compose 显式覆盖其 Servlet TLS、监听地址和明文 hop 例外，
 非回环 HTTP 不获放行。combined 的 JWT 解码使用 IAM 本地公开 JWKSource，
 不为自取 JWKS 再开未认证 HTTP 监听。
@@ -34,6 +36,106 @@ dev profile 用于 seed，Compose 显式覆盖其 Servlet TLS、监听地址和�
 新一轮应同时设置独立 `COMPOSE_PROJECT_NAME` 与 `AURIGA_M2_DATA_ROOT`（例如
 `/var/lib/auriga-m2-new-run`）。后者将宿主和容器的 agent 数据根保持同一路径，edge
 只读挂载相同位置；e2e 的 `AGENT_VOLUME` 也使用这个值。不要复用封存测试的数据目录。
+
+## 传入部署入口
+
+从 `deploy/compose` 调用公开入口，只传一份文件：
+
+```sh
+export COMPOSE_PROJECT_NAME=auriga-demo
+export AURIGA_M2_DATA_ROOT=/var/lib/auriga-demo
+DSH_FIXTURE=real AURIGA_M2_HEARTBEAT_OBSERVER=1 \
+  bash scripts/prepare.sh --access-file /absolute/path/access.json
+# 后续所有 Compose 命令都使用生成的同一个私密 env 文件。
+docker compose --env-file var/compose.env config --quiet
+docker compose --env-file var/compose.env build
+docker compose --env-file var/compose.env up -d
+# 正常停机保留卷和密钥；不要加 -v。
+docker compose --env-file var/compose.env down
+```
+
+使用 real 观察模式时仍须按下节启动观察器，不能仅按上述命令启动后声称真实心跳验收通过。
+省略 `--access-file` 仍生成原回环绑定的 domain M2 配方。
+直接调用 bootstrap 可用 `-access-file /absolute/path/access.json`；
+`-validate-access` 仅执行原生产 loader 和本配方装配检查，不生成文件，也不要求镜像参数。
+prepare 会在创建输出、启动 registry 或构建镜像前完成这次验证；实际生成前再次验证原输入。
+未知字段、重复字段、非规范 authority、issuer/alias/socket 冲突都由生产 loader 拒绝，不修复或猜测缺失值。
+
+以下是可编辑的 direct HTTP domain 输入；`example.com` 及管理域名和实例通配子域必须由部署者的真实 DNS
+解析到 Linux 宿主，文档示例不是已配置的站点。允许根门户与嵌套实例父域，并允许内外 NAT 端口不同：
+
+```json
+{
+  "schemaVersion": 1,
+  "mode": "domain",
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "portalOrigin": { "scheme": "http", "host": "example.com", "port": 19080 },
+  "adminOrigin": { "scheme": "http", "host": "admin.example.com", "port": 19084 },
+  "issuerOrigin": { "scheme": "http", "host": "example.com", "port": 19080 },
+  "insecureHttpAcknowledged": true,
+  "listeners": {
+    "portal": { "address": "0.0.0.0", "port": 18080, "tls": false },
+    "admin": { "address": "0.0.0.0", "port": 18084, "tls": false },
+    "instanceControl": { "address": "0.0.0.0", "port": 18083, "tls": false }
+  },
+  "ingress": { "kind": "direct" },
+  "instances": { "mode": "subdomain", "parentDomain": "i.example.com", "scheme": "http", "port": 19080 },
+  "instanceControl": {
+    "dnsAlias": "installation.internal",
+    "origin": { "scheme": "http", "host": "installation.internal", "port": 18083 },
+    "edgeContainer": "auriga-demo-edge"
+  }
+}
+```
+
+纯 IPv4 输入如下；将文档保留地址 `192.0.2.10` 换成宿主实际可达的规范 IPv4，不需要域名、hosts 或伪 Host。
+同一 IP 的门户与管理端口必须不同。`/i/<instanceId>/` 与门户同源，仅面向互信团队，不能宣称与 domain 分源等强：
+
+```json
+{
+  "schemaVersion": 1,
+  "mode": "ip",
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "portalOrigin": { "scheme": "http", "host": "192.0.2.10", "port": 19080 },
+  "adminOrigin": { "scheme": "http", "host": "192.0.2.10", "port": 19084 },
+  "issuerOrigin": { "scheme": "http", "host": "192.0.2.10", "port": 19080 },
+  "insecureHttpAcknowledged": true,
+  "listeners": {
+    "portal": { "address": "0.0.0.0", "port": 18080, "tls": false },
+    "admin": { "address": "0.0.0.0", "port": 18084, "tls": false },
+    "instanceControl": { "address": "0.0.0.0", "port": 18083, "tls": false }
+  },
+  "ingress": { "kind": "direct" },
+  "instances": { "mode": "path", "prefix": "/i/", "trustedTeamAcknowledged": true },
+  "instanceControl": {
+    "dnsAlias": "installation.internal",
+    "origin": { "scheme": "http", "host": "installation.internal", "port": 18083 },
+    "edgeContainer": "auriga-demo-edge"
+  }
+}
+```
+
+本配方在原 schema 之后额外检查以下装配边界；这些不是通用 access 契约的限制：
+
+- 仅 Linux combined、direct HTTP 浏览器与 HTTP 内控，所有容器 listener 必须为 `0.0.0.0` 且无 TLS。
+  HTTPS、trusted_proxy、split、指定容器内其它监听地址均明确拒绝，不静默降级。
+- 固定 dev seed 租户如上；edge 身份必须等于 `<COMPOSE_PROJECT_NAME>-edge`，项目名按 Compose 小写规则。
+  `prepare` 与启动时必须使用同一项目名，不用宿主环境覆盖生成的入口变量。
+- 门户/管理的宿主端口必须不同（domain 相同外部端口的配方尚未接线），且不得占用本栈固定 host 服务的
+  `15432/4222/8222/5000/8081/8082/7443/9091`。容器内角色端口按原 loader 独立校验，内外端口可以不同。
+- 显式 domain 输入的浏览器端口发布在 `0.0.0.0`；显式 IP 输入只绑定声明的 IPv4，地址必须实际属于宿主。
+  默认无输入仍只发布回环端口。instanceControl 端口始终不向宿主发布，只经受隔离实例网络的受信 alias。
+- IAM HTTP-hop、观察器和 RPC 的内部端口/证书固定不随浏览器 Origin 改写；完整 issuer、team Origin、实例浏览器
+  Origin 与 alias 各自从同一文件消费。HTTP IP 首批只验口令/TOTP，Passkey 不受支持，不能把 IP 填入 RP host 宣称支持。
+
+重复准备只支持相同原始 access 内容、镜像、fixture、观察模式和身份输入；应先正常停止本轮栈。
+bootstrap 在可信私密 `iam-installation` 中保存 0600 的小型完整性记录和两份 Java 加密 key，
+核对完整生成文件、证书/key、模板、安装凭据及输入后原样复用，不重新签 CA、轮换身份或加密 key。
+首次显式提供的两份 `AURIGA_*_ENCRYPTION_KEY` 必须为规范 base64 的 32 字节；重复运行显式不同值拒绝。
+损坏、部分生成、缺少完整性记录的旧材料或输入变化均失败，不自动修补、迁移或轮换；使用新的安装目录/源码快照做新测试。
+`compose.env` 由已验证的私密 key 与公开派生值写入同目录 0600 临时文件后原子替换，不执行旧 env 内容。
+本 Linux 配方要求现成 `mktemp` 与支持 `-T` 的 `mv`，明确按文件替换目标；不据此声明 NAS shell 或其他平台兼容。
+这只提供 M2 配方的幂等性，不是生产升级、密钥轮换或制品信任机制。
 
 ## 专用 IAM HTTP-hop 证书
 
@@ -74,9 +176,8 @@ cookie 写操作与实例 WS 使用完整 Origin。登录事务分别使用
 作用域，不假设不同端口隔离 cookie。原真实心跳、空闲回收、告警唤醒、双会话撤销、
 WS 关闭时序及实际 Docker 网络隔离断言继续保留。
 
-当前 agent 的内部 URL 可派生 DNS alias，但 renderer 的 `TrustedHosts` 仍只接
-`instanceParentDomain`，尚缺独立完整浏览器 Origin 的正式消费。这属于 IP2；不能把
-内部 alias 当浏览器入口，或往 profile 填未知字段绕过。
+agent、renderer 与插件从已验证配置派生完整浏览器 Origin，并把它与内部 alias 分开。
+这些静态装配和合成请求不替代真实浏览器双实例、WebSocket、吊销与重启验收；完整矩阵由 IP3 独立执行。
 
 ## 真实心跳观察模式
 
