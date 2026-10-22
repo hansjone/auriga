@@ -15,31 +15,74 @@ type ProvidersResponse =
 const IAM = '/api/iam/v1';
 
 export function createIamApi(client: ApiClient) {
+  const anonymousTransactions = new Set<string>();
+  async function remember(
+    transaction: Promise<LoginTransaction>,
+    anonymous: boolean,
+  ) {
+    const tx = await transaction;
+    if (anonymous) anonymousTransactions.add(tx.id);
+    if (tx.step.type === 'complete') {
+      client.resetSession();
+      anonymousTransactions.clear();
+    }
+    return tx;
+  }
   return {
     listLoginProviders(purpose: 'login' | 'link' = 'login') {
       const q = purpose === 'login' ? '' : `?purpose=${purpose}`;
       return client.get<ProvidersResponse>(`${IAM}/login/providers${q}`);
     },
     createLoginTransaction(body: CreateLoginTransaction) {
-      return client.post<LoginTransaction>(`${IAM}/login/transactions`, body);
+      const anonymous = body.purpose === 'login';
+      if (anonymous) {
+        client.resetSession();
+        anonymousTransactions.clear();
+      }
+      return remember(
+        client.post<LoginTransaction>(`${IAM}/login/transactions`, body, {
+          anonymousLogin: anonymous,
+        }),
+        anonymous,
+      );
     },
     getLoginTransaction(txId: string) {
-      return client.get<LoginTransaction>(`${IAM}/login/transactions/${txId}`);
+      return client
+        .get<LoginTransaction>(`${IAM}/login/transactions/${txId}`)
+        .then((tx) => {
+          if (tx.step.type === 'complete') {
+            client.resetSession();
+            anonymousTransactions.clear();
+          }
+          if (tx.purpose === 'login' && tx.status === 'pending')
+            anonymousTransactions.add(tx.id);
+          return tx;
+        });
     },
     advanceLoginTransaction(txId: string, input: StepInput) {
-      return client.post<LoginTransaction>(
-        `${IAM}/login/transactions/${txId}/advance`,
-        input,
+      return remember(
+        client.post<LoginTransaction>(
+          `${IAM}/login/transactions/${txId}/advance`,
+          input,
+          { anonymousLogin: anonymousTransactions.has(txId) },
+        ),
+        anonymousTransactions.has(txId),
       );
     },
     cancelLoginTransaction(txId: string) {
-      return client.delete<void>(`${IAM}/login/transactions/${txId}`);
+      const anonymousLogin = anonymousTransactions.delete(txId);
+      return client.delete<void>(`${IAM}/login/transactions/${txId}`, {
+        anonymousLogin,
+      });
     },
     getMe() {
       return client.get<Me>(`${IAM}/me`);
     },
-    logout() {
-      return client.post<void>(`${IAM}/logout`);
+    async logout() {
+      client.invalidatePendingRequests();
+      anonymousTransactions.clear();
+      await client.post<void>(`${IAM}/logout`);
+      client.resetSession();
     },
     getQrChallenge(challengeId: string) {
       return client.get<QrChallenge>(`${IAM}/login/qr/${challengeId}`);

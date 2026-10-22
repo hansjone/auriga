@@ -85,3 +85,18 @@ shared 导出 IAMPaths/OrgPaths/WorkspacePaths 及对应 Components 类型。
 ## 在 worktree 里开发
 
 worktree 的 `node_modules` 是指向主仓库的联接，`pnpm -r` 会拒绝运行。在 worktree 里改了 `web/shared` 想让 portal / admin 立刻用上时，在 worktree 根目录单独 `pnpm install --store-dir $env:AURIGA_PNPM_STORE`；**不要**为此在 vite.config / tsconfig 里加 alias 或 paths。实在跑不了就交给 CI（PR 会跑全部 web 检查）。
+
+## 管理台入口模式与 CSRF
+
+edge 仅在 SPA index 注入唯一 `meta[name=auriga-access-mode]`，值为原部署 Schema 的 `mode`。
+`gen:api` 使用固定 json-schema-to-typescript 16 从同一 Schema 生成类型；浏览器仅使用 mode 的 Pick 投影。
+管理台缺失、重复或非法 mode 时写请求失败关闭，中英文提示；不从 hostname 或网络错误猜模式。
+开发 mock 装配显式 domain 标签，生产不使用默认 mode。门户两模式和 domain 管理台继续使用原 CSRF cookie。
+
+IP 管理台每个 ApiClient/document 以安全随机 32 字节生成无填充 base64url token，只留闭包内存。
+首次管理写按正式 POST csrf-tokens 登记；匿名 purpose=login 的创建、advance、cancel 由 IAM 操作状态明确豁免，link/stepup 仍登记。
+并发只登记一次，到期按需重新登记；401、登录会话变化及登出使旧在途结果失效。
+管理请求拒绝异源目标和 Authorization，固定 same-origin credentials 与 redirect:error，浏览器自行设置 Origin。
+业务 403/429/503 不自动重放。登记 429/503 保存同一个候选 token，按 Retry-After 等待后由下一次操作重试；
+`ApiError.retryAfter` 暴露原响应头，UI 可据此提示等待。没有 Retry-After 时最少等一秒，不自动循环。
+真实双浏览器实例、cookie 端口及完整纯 IP 登录属于 IP3，组件测试不能替代该验收。
