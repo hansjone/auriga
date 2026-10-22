@@ -9,6 +9,11 @@ export {
 } from './api/client';
 export { readCsrfCookie, isWriteMethod } from './api/csrf';
 export {
+  readAccessMode,
+  type AccessMode,
+  type PublicAccess,
+} from './api/access-mode';
+export {
   ApiError,
   isApiError,
   mapProblemMessage,
