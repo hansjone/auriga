@@ -20,6 +20,7 @@ export type ApiClientOptions = {
 };
 
 export type ApiClient = {
+  invalidatePendingRequests: () => void;
   resetSession: () => void;
   request: <T>(path: string, init?: ApiRequestInit) => Promise<T>;
   get: <T>(path: string, init?: ApiRequestInit) => Promise<T>;
@@ -68,12 +69,16 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   let retryAt = 0;
   let retryError: ApiError | undefined;
 
-  function resetSession() {
+  function invalidatePendingRequests() {
     generation++;
+    flight = undefined;
+  }
+
+  function resetSession() {
+    invalidatePendingRequests();
     registered = undefined;
     registeredUntil = 0;
     candidate = undefined;
-    flight = undefined;
     retryAt = 0;
     retryError = undefined;
   }
@@ -129,6 +134,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const body: components['schemas']['AdminCsrfTokenRegistration'] = {
         token,
       };
+      const requestedAt = Date.now();
       const res = await fetchImpl(
         sameOriginUrl('/api/iam/v1/admin/session/csrf-tokens'),
         {
@@ -166,11 +172,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       const expires = Date.parse(value.expiresAt);
       // HTTP Date uses the server clock and whole seconds. Account for its
       // rounding conservatively instead of rejecting valid tokens when the
-      // browser clock differs from IAM's clock.
+      // browser clock differs from IAM's clock. Anchor a relative deadline to
+      // request start so transport and body-read time cannot extend it.
       const date = res.headers.get('Date');
       const reference = date === null ? Date.now() : Date.parse(date);
       const remaining = expires - reference;
       const lifetime = remaining - (date === null ? 0 : 1000);
+      const until =
+        date === null ? expires : requestedAt + Math.min(lifetime, 900_000);
       if (
         res.redirected ||
         !res.headers.get('content-type')?.includes('application/json') ||
@@ -182,6 +191,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
         !Number.isFinite(expires) ||
         !Number.isFinite(reference) ||
         lifetime <= 0 ||
+        until <= Date.now() ||
         remaining > (date === null ? 900_000 : 901_000)
       ) {
         throw new Error(
@@ -190,7 +200,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       }
       if (epoch !== generation) throw new Error('会话已改变 / Session changed');
       registered = value;
-      registeredUntil = Date.now() + Math.min(lifetime, 900_000);
+      registeredUntil = until;
       candidate = undefined;
       return token;
     })();
@@ -298,6 +308,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   }
 
   return {
+    invalidatePendingRequests,
     resetSession,
     request,
     get: (path, init) => request(path, { ...init, method: 'GET' }),

@@ -104,6 +104,115 @@ describe('IP administrative CSRF', () => {
       ).toHaveLength(2);
     },
   );
+  it.each(['headers', 'body'])(
+    'does not extend server expiry by delayed response %s',
+    async (delayAt) => {
+      vi.useFakeTimers();
+      const h = harness();
+      h.handler.mockImplementationOnce(async (_url, init) => {
+        const issued = Date.now();
+        const value = {
+          ...JSON.parse(String(init.body)),
+          expiresAt: new Date(issued + 10_000).toISOString(),
+        };
+        const response = json(value, 200, {
+          Date: new Date(issued).toUTCString(),
+        });
+        if (delayAt === 'headers') vi.advanceTimersByTime(5_000);
+        else
+          vi.spyOn(response, 'json').mockImplementationOnce(async () => {
+            vi.advanceTimersByTime(5_000);
+            return value;
+          });
+        return response;
+      });
+      await h.client.post('/write');
+      vi.advanceTimersByTime(6_000);
+      await h.client.post('/write');
+      expect(
+        h.calls.filter((c) => c.url.endsWith('/csrf-tokens')),
+      ).toHaveLength(2);
+    },
+  );
+  it('rejects a registration that expires before its body arrives', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.handler.mockImplementationOnce(async (_url, init) => {
+      const issued = Date.now();
+      const response = json(
+        {
+          ...JSON.parse(String(init.body)),
+          expiresAt: new Date(issued + 10_000).toISOString(),
+        },
+        200,
+        { Date: new Date(issued).toUTCString() },
+      );
+      vi.advanceTimersByTime(11_000);
+      return response;
+    });
+    await expect(h.client.post('/write')).rejects.toThrow('Invalid CSRF');
+    expect(h.calls).toHaveLength(1);
+  });
+  it('logs out using the existing token when all 32 slots are occupied', async () => {
+    const h = harness();
+    await h.client.post('/write');
+    const token = JSON.parse(String(h.calls[0].init.body)).token;
+    h.handler.mockImplementation(async (url, init) => {
+      if (url.endsWith('/csrf-tokens'))
+        return json({ code: 'common.rate_limited' }, 429, {
+          'Retry-After': '600',
+        });
+      expect(new Headers(init.headers).get('X-Auriga-CSRF')).toBe(token);
+      return new Response(null, { status: 204 });
+    });
+    await createIamApi(h.client).logout();
+    expect(h.calls.filter((c) => c.url.endsWith('/logout'))).toHaveLength(1);
+    expect(h.calls.filter((c) => c.url.endsWith('/csrf-tokens'))).toHaveLength(
+      1,
+    );
+    await expect(h.client.post('/write')).rejects.toMatchObject({
+      status: 429,
+    });
+  });
+  it('preserves logout candidate and Retry-After after bootstrap 503', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.handler.mockImplementation(async () =>
+      json({ code: 'common.unavailable' }, 503, { 'Retry-After': '1' }),
+    );
+    const api = createIamApi(h.client);
+    await expect(api.logout()).rejects.toMatchObject({ status: 503 });
+    await expect(api.logout()).rejects.toMatchObject({ status: 503 });
+    expect(h.calls).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    await expect(api.logout()).rejects.toMatchObject({ status: 503 });
+    expect(h.calls[1].init.body).toBe(h.calls[0].init.body);
+  });
+  it('logout invalidates an older bootstrap and its waiting business write', async () => {
+    const h = harness();
+    let finish!: () => void;
+    h.handler.mockImplementationOnce(
+      (_url, init) =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve(
+              json({
+                ...JSON.parse(String(init.body)),
+                expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              }),
+            );
+        }),
+    );
+    const pending = h.client.post('/old-write');
+    await createIamApi(h.client).logout();
+    finish();
+    await expect(pending).rejects.toThrow('Session changed');
+    expect(h.calls.some((c) => c.url.endsWith('/old-write'))).toBe(false);
+    await h.client.post('/new-write');
+    expect(h.calls.filter((c) => c.url.endsWith('/csrf-tokens'))).toHaveLength(
+      3,
+    );
+  });
   it.each([429, 503])(
     'respects Retry-After for %i and retries the same candidate',
     async (status) => {

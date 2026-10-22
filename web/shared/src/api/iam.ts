@@ -79,13 +79,10 @@ export function createIamApi(client: ApiClient) {
       return client.get<Me>(`${IAM}/me`);
     },
     async logout() {
-      client.resetSession();
+      client.invalidatePendingRequests();
       anonymousTransactions.clear();
-      try {
-        await client.post<void>(`${IAM}/logout`);
-      } finally {
-        client.resetSession();
-      }
+      await client.post<void>(`${IAM}/logout`);
+      client.resetSession();
     },
     getQrChallenge(challengeId: string) {
       return client.get<QrChallenge>(`${IAM}/login/qr/${challengeId}`);
