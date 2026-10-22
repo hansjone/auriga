@@ -1663,7 +1663,8 @@
           "common.precondition_failed",
           "common.rate_limited",
           "common.unavailable",
-          "common.internal"
+          "common.internal",
+          "iam.step_up_required"
         ],
         "x-events": [],
         "parameters": [
@@ -1813,7 +1814,8 @@
               }
             }
           }
-        }
+        },
+        "x-step-up-max-age-seconds": 600
       }
     },
     "/api/ai/v1/me/usage": {
@@ -1984,7 +1986,8 @@
           "common.precondition_failed",
           "common.rate_limited",
           "common.unavailable",
-          "common.internal"
+          "common.internal",
+          "iam.step_up_required"
         ],
         "x-events": [],
         "parameters": [
@@ -2107,7 +2110,8 @@
             }
           }
         },
-        "x-admin-only": true
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
       }
     },
     "/ai/v1/models": {
@@ -3712,6 +3716,7 @@
       "Auriga-Forwarded-Instance",
       "Auriga-Forwarded-Node"
     ],
-    "binding": "JWT + node certificate + local per-instance socket + online workspace binding"
+    "binding": "JWT + node certificate + local per-instance socket + online workspace binding",
+    "routeTable": "../ai/instance-routes.json"
   }
 }

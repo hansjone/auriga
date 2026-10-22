@@ -1,0 +1,25 @@
+{
+  "$schema": "./instance-routes.schema.json",
+  "schemaVersion": 1,
+  "matching": "exact-method-and-raw-path-deny-unlisted",
+  "routes": [
+    {
+      "method": "GET",
+      "internalPath": "/internal/ai/v1/models",
+      "gatewayPath": "/ai/v1/models",
+      "operationId": "listAiModels"
+    },
+    {
+      "method": "POST",
+      "internalPath": "/internal/ai/v1/chat/completions",
+      "gatewayPath": "/ai/v1/chat/completions",
+      "operationId": "createAiChatCompletion"
+    },
+    {
+      "method": "GET",
+      "internalPath": "/internal/ai/v1/me/usage",
+      "gatewayPath": "/api/ai/v1/me/usage",
+      "operationId": "listOwnAiUsage"
+    }
+  ]
+}
