@@ -2,6 +2,33 @@
 
 ## 装配和安装
 
+同机 Linux/POSIX combined 可显式启用安装侧 `auriga.iam.edge-token-export.enabled=true`。
+必须配置绝对且无链接的 `installation-secret-file`、`token-file`；`reader-group` 默认
+edge 既有 GID 65532。默认关闭、IAM 关闭时不创建发行器，非 combined 或不支持 POSIX
+安全目录流的平台启用会拒绝。安装秘密目录必须为 0700、普通文件至多 128 字节且仅 owner
+可读写；bootstrap 生成的原文是 32 字节随机值的 43 字符 base64url，不允许换行。
+匹配哈希仍由既有 `auriga.iam.internal-secret-hashes.edge` 认证。
+
+`installation-owner` 默认当前进程用户，显式设置时为固定可信安装者的数值 UID。
+bootstrap 把生成者 UID 与哈希一起写入仅 platform 可读的私密 properties，供 root platform
+读取安装者拥有的只读材料。每次核对秘密目录与文件 owner，祖先只允许 root、当前进程或
+该显式安装者；不会从请求或每次看到的路径属性自动信任另一个 owner。
+
+发行器仅调用 `InternalTokenIssuer.issue("edge", ...)`，没有公共取票接口或服务选择参数。
+首次启动立即异步尝试，随后每分钟重认证并在专用 0750 目录里以 0640 普通文件原子替换；
+每次仍是现有 IAM ES256 `svc:edge`、`auriga.internal`、五分钟 JWT，claims 与验证器不变。
+失败不修改旧 JWT、不中途延长到期时间，也不记录秘密或异常原文。停机关闭调度并删除
+导出，重启可恢复；禁用后没有继续发行，异常退出遗留 JWT 到期后按现有验证器拒绝。
+文件字节缓冲区用后清空；既有 String 发行接口产生的短暂字符串不缓存，不能承诺 JVM
+不可变字符串原地抹除。目录及文件类型、权限、组、大小、符号链接/硬链接异常均拒绝，
+不修改系统账号或 Windows ACL。公开 Compose 接线与分层验证见
+[compose-access.md](compose-access.md#combined-安装侧持续发行)。跨主机 split 分发与完整 IP3 尚未支持。
+
+签发调用不占停机锁；停机取消调度并切换代际，迟到签发不会在停机后落盘，也不会覆盖或
+清理重启新代文件。若底层发行器不响应线程中断，Java 不能强杀该外部调用；停机不会等它，
+待调用自行退出后旧 daemon 调度线程才完全终止。文件系统自身停滞不在此本地原子文件装配的
+有界保证内；不把正常停机测试等同于任意底层故障可强制杀线程。
+
 `IamRuntimeConfiguration` 在配置 `auriga.iam.issuer` 后启用，仍受
 `auriga.services.iam.enabled` 开关控制。`platform-app` 的 `iam` profile 配置
 iam 的 common outbox、Flyway 和资源服务器。运行时角色和迁移角色按

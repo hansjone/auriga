@@ -55,6 +55,9 @@ func main() {
 	mustMkdir(pki, 0o755)
 	mustMkdir(tpl, 0o755)
 	mustMkdir(filepath.Join(*out, "join"), 0o755)
+	if err := writeInternalTokenInstallation(*out); err != nil {
+		fatalf("%v", err)
+	}
 
 	caKey, caCert, caPEM := mustCA()
 	writeFile(filepath.Join(pki, "ca.crt"), caPEM, 0o644)
@@ -200,6 +203,11 @@ func main() {
 		"iamHop": map[string]string{
 			"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key",
 			"caFile": "/etc/auriga/pki/ca.crt", "serverName": iamServerName,
+		},
+		"iamRpc": map[string]any{
+			"address":    fmt.Sprintf("host.docker.internal:%d", iamRPCPort),
+			"serverName": iamServerName, "timeoutMillis": 2000,
+			"serviceTokenFile": "/run/auriga-internal/edge/service.jwt",
 		},
 		"tls":              map[string]string{"mode": "off"},
 		"rateLimit":        map[string]any{"requestsPerSecond": 200, "burst": 400},

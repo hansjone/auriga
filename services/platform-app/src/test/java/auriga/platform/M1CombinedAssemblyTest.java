@@ -115,6 +115,7 @@ class M1CombinedAssemblyTest {
 
   @Test
   void localJwksBeansValidateBothAudiencesAndPublishedRotationWithoutHttp() {
+    assertFalse(context.containsBean("iamEdgeTokenFilePublisher"));
     assertTrue(context.containsBean("iamAccessTokenDecoder"));
     assertFalse(context.containsBean("aurigaAccessTokenDecoder"));
     assertTrue(context.containsBean("iamInternalTokenVerifier"));

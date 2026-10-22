@@ -401,6 +401,14 @@ class AdminCsrfPostgresTest {
   }
 
   @Test
+  void installationIssuerFileRefreshFeedsExistingGoEdgeMutualTlsRpc(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+    String csrf = Secrets.random();
+    register(csrf);
+    EdgeTokenEdgeIntegration.run(dir, time, sessions, tenant, account, issued, principal, csrf);
+  }
+
+  @Test
   void rpcUsesRealMutualTlsInternalJwtAndDelegatedTenant(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
     String csrf = Secrets.random();

@@ -66,6 +66,9 @@ func iamHealthcheck() string {
 	return fmt.Sprintf(`#!/bin/sh
 set -eu
 material_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "${AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED:-false}" = true ]; then
+  test -s "$AURIGA_IAM_EDGE_TOKEN_FILE"
+fi
 exec curl --fail --silent --show-error --noproxy '*' \
   --cacert "$material_dir/pki/ca.crt" \
   --cert "$material_dir/pki/edge-iam.crt" \
