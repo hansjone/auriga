@@ -1,12 +1,304 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
+
+var identityMaterialFiles = []string{
+	"pki/ca.crt", "pki/ca.key", "pki/workspace.crt", "pki/workspace.key",
+	"pki/edge.crt", "pki/edge.key", "pki/iam.crt", "pki/iam.key", "pki/edge-iam.crt", "pki/edge-iam.key",
+	"identity-signing-keys.json", "identity-keys.json", "ca-sha256.txt",
+	"access.json", "iam-healthcheck.sh", "iam-client.json", "heartbeat-observer.json",
+	"edge.config.json", "access.env", "agent-policy.yaml",
+}
+
+func writeComposeKeys(out string) error {
+	p, err := openPrivateInstallation(out)
+	if err != nil {
+		return err
+	}
+	defer p.close()
+	raw, err := p.read("compose.keys")
+	if os.IsNotExist(err) {
+		var b strings.Builder
+		for _, key := range []string{"AURIGA_IAM_ENCRYPTION_KEY", "AURIGA_WORKSPACE_ENCRYPTION_KEY"} {
+			value := os.Getenv(key)
+			if value == "" {
+				secret := make([]byte, 32)
+				if _, err := rand.Read(secret); err != nil {
+					return fmt.Errorf("generate compose key")
+				}
+				value = base64.StdEncoding.EncodeToString(secret)
+				clear(secret)
+			}
+			fmt.Fprintf(&b, "%s=%s\n", key, value)
+		}
+		raw = []byte(b.String())
+		if err := validateComposeKeys(raw); err != nil {
+			return err
+		}
+		if err := p.create("compose.keys", raw); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return fmt.Errorf("read compose keys")
+	}
+	defer clear(raw)
+	if err := validateComposeKeys(raw); err != nil {
+		return err
+	}
+	return p.validate()
+}
+
+func validateComposeKeys(raw []byte) error {
+	lines := strings.Split(string(raw), "\n")
+	if len(lines) != 3 || lines[2] != "" {
+		return fmt.Errorf("invalid compose keys")
+	}
+	for i, key := range []string{"AURIGA_IAM_ENCRYPTION_KEY", "AURIGA_WORKSPACE_ENCRYPTION_KEY"} {
+		value, ok := strings.CutPrefix(lines[i], key+"=")
+		decoded, err := base64.StdEncoding.Strict().DecodeString(value)
+		clear(decoded)
+		if !ok || err != nil || len(value) != 44 || len(decoded) != 32 {
+			return fmt.Errorf("invalid compose keys")
+		}
+		if supplied := os.Getenv(key); supplied != "" && supplied != value {
+			return fmt.Errorf("compose key input differs from existing installation")
+		}
+	}
+	return nil
+}
+
+// The receipt is private installation metadata, never a public configuration.
+// It binds the exact inputs and complete fixed material set; it is not a
+// signature or an upgrade/rotation protocol.
+func materialDigest(out string) (string, error) {
+	h := sha256.New()
+	p, err := openPrivateInstallation(out)
+	if err != nil {
+		return "", err
+	}
+	defer p.close()
+	for _, name := range []string{"edge.secret", "internal.properties", "compose.keys"} {
+		raw, err := p.read(name)
+		if err != nil {
+			return "", fmt.Errorf("incomplete private installation")
+		}
+		sum := sha256.Sum256(raw)
+		clear(raw)
+		_, _ = fmt.Fprintf(h, "%s:%x\n", name, sum)
+	}
+	if err := p.validate(); err != nil {
+		return "", err
+	}
+	names := append([]string{}, identityMaterialFiles...)
+	entries, err := os.ReadDir(filepath.Join(out, "templates"))
+	if err != nil || len(entries) != 1 || (entries[0].Name() != "fake-dsh.pb" && entries[0].Name() != "real-dsh.pb") {
+		return "", fmt.Errorf("incomplete fixture template")
+	}
+	names = append(names, "templates/"+entries[0].Name())
+	for _, name := range names {
+		path := filepath.Join(out, name)
+		parent, err := os.Lstat(filepath.Dir(path))
+		if err != nil || !parent.IsDir() || parent.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("invalid identity material directory")
+		}
+		before, err := os.Lstat(path)
+		if err != nil || !before.Mode().IsRegular() || before.Size() > 1<<20 {
+			return "", fmt.Errorf("identity materials incomplete or changed")
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return "", fmt.Errorf("read identity material")
+		}
+		opened, statErr := f.Stat()
+		raw, readErr := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+		after, finalErr := f.Stat()
+		_ = f.Close()
+		final, pathErr := os.Lstat(path)
+		if statErr != nil || readErr != nil || finalErr != nil || pathErr != nil || !os.SameFile(before, opened) || !os.SameFile(opened, after) || !os.SameFile(after, final) || before.Size() != int64(len(raw)) || after.Size() != before.Size() || !before.ModTime().Equal(after.ModTime()) || !after.ModTime().Equal(final.ModTime()) {
+			return "", fmt.Errorf("changed identity material")
+		}
+		sum := sha256.Sum256(raw)
+		_, _ = fmt.Fprintf(h, "%s:%x\n", name, sum)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func writeIdentityManifest(out, inputDigest string) error {
+	digest, err := materialDigest(out)
+	if err != nil {
+		return err
+	}
+	installation, err := openPrivateInstallation(out)
+	if err != nil {
+		return err
+	}
+	defer installation.close()
+	if err := installation.create("bootstrap.receipt", []byte(inputDigest+"\n"+digest+"\n")); err != nil {
+		return err
+	}
+	return installation.validate()
+}
+
+func existingIdentityMaterials(out, inputDigest string) (ed25519.PublicKey, string, bool, error) {
+	installation, err := openPrivateInstallation(out)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer installation.close()
+	raw, err := installation.read("bootstrap.receipt")
+	if os.IsNotExist(err) {
+		// A new installation may only use the empty real directories created by
+		// main. Do not adopt unknown remnants or follow links while generating
+		// templates or private PKI outside this installation.
+		for _, name := range []string{"pki", "templates"} {
+			path := filepath.Join(out, name)
+			info, statErr := os.Lstat(path)
+			if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				return nil, "", false, fmt.Errorf("unreceipted %s must be an empty real directory", name)
+			}
+			entries, readErr := os.ReadDir(path)
+			if readErr != nil || len(entries) != 0 {
+				return nil, "", false, fmt.Errorf("unreceipted %s must be an empty real directory", name)
+			}
+		}
+		for _, name := range identityMaterialFiles {
+			if _, err := os.Lstat(filepath.Join(out, name)); !os.IsNotExist(err) {
+				return nil, "", false, fmt.Errorf("existing identity materials require a complete bootstrap receipt; use a fresh installation directory")
+			}
+		}
+		for _, name := range []string{"edge.secret", "internal.properties", "compose.keys"} {
+			if _, err := installation.read(name); !os.IsNotExist(err) {
+				return nil, "", false, fmt.Errorf("existing installation requires a complete bootstrap receipt")
+			}
+		}
+		return nil, "", false, nil
+	}
+	digest, digestErr := materialDigest(out)
+	if err != nil || digestErr != nil || string(raw) != inputDigest+"\n"+digest+"\n" {
+		return nil, "", false, fmt.Errorf("installation inputs or identity materials changed; refusing automatic rotation")
+	}
+	// Validate the existing private credentials before allowing any public writes.
+	for _, name := range []string{"edge.secret", "internal.properties", "compose.keys"} {
+		if _, err := installation.read(name); err != nil {
+			return nil, "", false, fmt.Errorf("incomplete private installation")
+		}
+	}
+	if err := installation.validate(); err != nil {
+		return nil, "", false, err
+	}
+	return readIdentityPublic(out)
+}
+
+func readIdentityPublic(out string) (ed25519.PublicKey, string, bool, error) {
+	raw, err := os.ReadFile(filepath.Join(out, "identity-keys.json"))
+	var keys struct{ Keys []struct{ X string } }
+	if err != nil || json.Unmarshal(raw, &keys) != nil || len(keys.Keys) != 1 {
+		return nil, "", false, fmt.Errorf("invalid identity public key")
+	}
+	pub, err := base64.RawURLEncoding.Strict().DecodeString(keys.Keys[0].X)
+	if err != nil || len(pub) != ed25519.PublicKeySize {
+		return nil, "", false, fmt.Errorf("invalid identity public key")
+	}
+	fp, err := os.ReadFile(filepath.Join(out, "ca-sha256.txt"))
+	if err != nil {
+		return nil, "", false, fmt.Errorf("invalid CA fingerprint")
+	}
+	return pub, strings.TrimSpace(string(fp)), true, nil
+}
+
+// loadComposeAccess validates the original bytes before decoding or writing any
+// installation material. The production loader remains the only JSON parser.
+func loadComposeAccess(path, edgeContainer string) ([]byte, deploymentconfig.Config, error) {
+	if path == "" {
+		raw, cfg, err := marshalAccess(composeAccess(edgeContainer))
+		if err == nil {
+			err = validateComposeAccess(cfg, edgeContainer)
+		}
+		return raw, cfg, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, deploymentconfig.Config{}, fmt.Errorf("open access file")
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return nil, deploymentconfig.Config{}, fmt.Errorf("read access file")
+	}
+	cfg, err := deploymentconfig.Load(raw)
+	if err != nil {
+		return nil, deploymentconfig.Config{}, fmt.Errorf("compose access: %w", err)
+	}
+	if err := validateComposeAccess(cfg, edgeContainer); err != nil {
+		return nil, deploymentconfig.Config{}, err
+	}
+	return raw, cfg, nil
+}
+
+// Schema validity is necessary but does not claim unsupported Compose wiring.
+func validateComposeAccess(cfg deploymentconfig.Config, edgeContainer string) error {
+	if cfg.TenantID() != composeTenant {
+		return fmt.Errorf("compose access: tenantId must match the combined dev seed")
+	}
+	if cfg.InstanceControl().EdgeContainer != edgeContainer {
+		return fmt.Errorf("compose access: edgeContainer must match -edge-container and Compose project")
+	}
+	project, suffix := strings.CutSuffix(edgeContainer, "-edge")
+	if !suffix || project == "" || strings.Trim(project, "abcdefghijklmnopqrstuvwxyz0123456789_-") != "" || strings.ContainsAny(project[:1], "_-") {
+		return fmt.Errorf("compose access: edgeContainer must be a lowercase Compose project followed by -edge")
+	}
+	if cfg.PortalOrigin().Port == cfg.AdminOrigin().Port {
+		return fmt.Errorf("compose access: this recipe requires distinct external portal and admin ports")
+	}
+	if cfg.IngressKind() != "direct" || cfg.PortalOrigin().Scheme != "http" || cfg.AdminOrigin().Scheme != "http" || cfg.InstanceControl().Origin.Scheme != "http" {
+		return fmt.Errorf("compose access: only direct HTTP browser and instance-control ingress is supported")
+	}
+	ls := cfg.Listeners()
+	for _, listener := range []deployment.Listener{ls.Portal, ls.Admin, ls.InstanceControl} {
+		if listener.Address != "0.0.0.0" || listener.Tls {
+			return fmt.Errorf("compose access: container listeners require 0.0.0.0 without TLS")
+		}
+	}
+	for _, origin := range []deployment.Origin{cfg.PortalOrigin(), cfg.AdminOrigin()} {
+		for _, reserved := range []int32{15432, 4222, 8222, 5000, iamPort, observerPort, 7443, iamRPCPort} {
+			if origin.Port == reserved {
+				return fmt.Errorf("compose access: browser port conflicts with a fixed combined host service")
+			}
+		}
+	}
+	return nil
+}
+
+func composeAccessEnv(cfg deploymentconfig.Config, supplied bool) []byte {
+	// No shell syntax can enter these values: all hosts/ports were validated by
+	// deploymentconfig.Load. Custom domain installs publish on all interfaces;
+	// custom IP installs publish only the declared IPv4. Default M2 stays local.
+	bind := "127.0.0.1"
+	if supplied {
+		bind = "0.0.0.0"
+		if cfg.Mode() == "ip" {
+			bind = cfg.PortalOrigin().Host
+		}
+	}
+	return []byte(fmt.Sprintf("COMPOSE_PROJECT_NAME='%s'\nAURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\nAURIGA_TEAM_RP_ID='%s'\nAURIGA_ACCESS_BIND='%s'\nAURIGA_PORTAL_PORT='%d'\nAURIGA_ADMIN_PORT='%d'\nAURIGA_PORTAL_TARGET_PORT='%d'\nAURIGA_ADMIN_TARGET_PORT='%d'\n",
+		strings.TrimSuffix(cfg.InstanceControl().EdgeContainer, "-edge"), cfg.Issuer(), cfg.PortalURL(), cfg.PortalOrigin().Host, bind,
+		cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, cfg.Listeners().Portal.Port, cfg.Listeners().Admin.Port))
+}
 
 // These ports belong to the disposable public M2 stack, not product defaults.
 const (

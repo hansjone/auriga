@@ -34,17 +34,22 @@ func main() {
 	image := flag.String("image", "", "docker image ref repo@sha256:… for fake DSH template")
 	fixture := flag.String("fixture", "fake", "DSH fixture: fake or real")
 	edgeContainer := flag.String("edge-container", "auriga-m2-edge", "trusted edge container identity (must match Compose project)")
+	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
+	validateOnly := flag.Bool("validate-access", false, "validate access and Compose support without writing materials")
 	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
 	flag.Parse()
+	accessJSON, access, err := loadComposeAccess(*accessFile, *edgeContainer)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	if *validateOnly {
+		return
+	}
 	if *fixture != "fake" && *fixture != "real" {
 		fatalf("-fixture must be fake or real")
 	}
 	if *image == "" || !containsDigest(*image) {
 		fatalf("-image must be repo@sha256:…")
-	}
-	accessJSON, access, err := marshalAccess(composeAccess(*edgeContainer))
-	if err != nil {
-		fatalf("%v", err)
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fatalf("%v", err)
@@ -55,36 +60,31 @@ func main() {
 	mustMkdir(pki, 0o755)
 	mustMkdir(tpl, 0o755)
 	mustMkdir(filepath.Join(*out, "join"), 0o755)
+	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%t\n%t", *image, *fixture, *observer, *accessFile != ""))...))
+	inputDigest := hex.EncodeToString(input[:])
+	pub, fp, reuse, err := existingIdentityMaterials(*out, inputDigest)
+	if err != nil {
+		fatalf("%v", err)
+	}
 	if err := writeInternalTokenInstallation(*out); err != nil {
 		fatalf("%v", err)
 	}
+	if err := writeComposeKeys(*out); err != nil {
+		fatalf("%v", err)
+	}
+	if reuse {
+		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
+		return
+	}
+	if !reuse {
+		generateIdentityMaterials(*out)
+		pub, fp, _, err = readIdentityPublic(*out)
+		if err != nil {
+			fatalf("%v", err)
+		}
+	}
+	kid := "e2e-id-1"
 
-	caKey, caCert, caPEM := mustCA()
-	writeFile(filepath.Join(pki, "ca.crt"), caPEM, 0o644)
-	writeFile(filepath.Join(pki, "ca.key"), pkcs8PEM(caKey), 0o400)
-
-	wsCert, wsKey := mustIssue(caKey, caCert, "workspace", "auriga://workspace",
-		[]string{"localhost", "platform", "platform.example.com"},
-		[]net.IP{net.ParseIP("127.0.0.1")},
-		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
-	// Leaf+CA chain: agent pins CA SPKI and requires the CA to appear in the peer chain.
-	writeFile(filepath.Join(pki, "workspace.crt"), append(wsCert, caPEM...), 0o644)
-	writeFile(filepath.Join(pki, "workspace.key"), wsKey, 0o400)
-
-	edgeCert, edgeKey := mustIssue(caKey, caCert, "edge-compose", "auriga://edge/compose-e2e",
-		nil, nil,
-		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
-	writeFile(filepath.Join(pki, "edge.crt"), edgeCert, 0o644)
-	writeFile(filepath.Join(pki, "edge.key"), edgeKey, 0o400)
-
-	iamCert, iamKey := mustIssue(caKey, caCert, "iam-compose", "auriga://iam/compose-e2e",
-		[]string{iamServerName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
-	writeFile(filepath.Join(pki, "iam.crt"), append(iamCert, caPEM...), 0o644)
-	writeFile(filepath.Join(pki, "iam.key"), iamKey, 0o400)
-	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-compose", "auriga://edge/iam-compose-e2e",
-		[]string{edgeHopDNSName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
-	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
-	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o400)
 	writeFile(filepath.Join(*out, "access.json"), accessJSON, 0o644)
 	writeFile(filepath.Join(*out, "iam-healthcheck.sh"), []byte(iamHealthcheck()), 0o755)
 	writeJSON(filepath.Join(*out, "iam-client.json"), map[string]any{
@@ -98,39 +98,6 @@ func main() {
 		"caFile": "pki/ca.crt", "certFile": "pki/iam.crt", "keyFile": "pki/iam.key",
 		"clientCertFile": "pki/edge-iam.crt", "clientKeyFile": "pki/edge-iam.key",
 	}, 0o644)
-
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		fatalf("%v", err)
-	}
-	kid := "e2e-id-1"
-	signing := map[string]any{
-		"keys": []map[string]any{{
-			"kty":   "OKP",
-			"crv":   "Ed25519",
-			"x":     base64.RawURLEncoding.EncodeToString(pub),
-			"d":     base64.RawURLEncoding.EncodeToString(priv.Seed()),
-			"kid":   kid,
-			"alg":   "EdDSA",
-			"use":   "sig",
-			"state": "CURRENT",
-		}},
-	}
-	pubOnly := map[string]any{
-		"keys": []map[string]any{{
-			"kty": "OKP",
-			"crv": "Ed25519",
-			"x":   base64.RawURLEncoding.EncodeToString(pub),
-			"kid": kid,
-			"alg": "EdDSA",
-			"use": "sig",
-		}},
-	}
-	writeJSON(filepath.Join(*out, "identity-signing-keys.json"), signing, 0o600)
-	writeJSON(filepath.Join(*out, "identity-keys.json"), pubOnly, 0o644)
-
-	fp := spkiSHA256(caCert)
-	writeFile(filepath.Join(*out, "ca-sha256.txt"), []byte(fp+"\n"), 0o644)
 
 	dig := digestOf(*image)
 	name, version := "fake-dsh", "0.0.0-fake"
@@ -222,9 +189,7 @@ func main() {
 	}
 	writeJSON(filepath.Join(*out, "edge.config.json"), edgeCfg, 0o644)
 	// Public values are derived from the validated installation; no credentials.
-	writeFile(filepath.Join(*out, "access.env"), []byte(fmt.Sprintf(
-		"AURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\n",
-		access.Issuer(), access.PortalURL())), 0o644)
+	writeFile(filepath.Join(*out, "access.env"), composeAccessEnv(access, *accessFile != ""), 0o644)
 
 	policy := map[string]any{
 		"allowedImageRepos": []string{"127.0.0.1:5000/auriga/", "localhost:5000/auriga/"},
@@ -235,6 +200,11 @@ func main() {
 	}
 	writeYAMLish(filepath.Join(*out, "agent-policy.yaml"), policy)
 
+	if !reuse {
+		if err := writeIdentityManifest(*out, inputDigest); err != nil {
+			fatalf("%v", err)
+		}
+	}
 	fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s\n", *out, fp, *image)
 }
 
@@ -385,4 +355,67 @@ func mustMkdir(path string, mode os.FileMode) {
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
+}
+
+func generateIdentityMaterials(out string) {
+	pki := filepath.Join(out, "pki")
+	caKey, caCert, caPEM := mustCA()
+	writeFile(filepath.Join(pki, "ca.crt"), caPEM, 0o644)
+	writeFile(filepath.Join(pki, "ca.key"), pkcs8PEM(caKey), 0o400)
+
+	wsCert, wsKey := mustIssue(caKey, caCert, "workspace", "auriga://workspace",
+		[]string{"localhost", "platform", "platform.example.com"},
+		[]net.IP{net.ParseIP("127.0.0.1")},
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	// Leaf+CA chain: agent pins CA SPKI and requires the CA to appear in the peer chain.
+	writeFile(filepath.Join(pki, "workspace.crt"), append(wsCert, caPEM...), 0o644)
+	writeFile(filepath.Join(pki, "workspace.key"), wsKey, 0o400)
+
+	edgeCert, edgeKey := mustIssue(caKey, caCert, "edge-compose", "auriga://edge/compose-e2e",
+		nil, nil,
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "edge.crt"), edgeCert, 0o644)
+	writeFile(filepath.Join(pki, "edge.key"), edgeKey, 0o400)
+
+	iamCert, iamKey := mustIssue(caKey, caCert, "iam-compose", "auriga://iam/compose-e2e",
+		[]string{iamServerName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	writeFile(filepath.Join(pki, "iam.crt"), append(iamCert, caPEM...), 0o644)
+	writeFile(filepath.Join(pki, "iam.key"), iamKey, 0o400)
+	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-compose", "auriga://edge/iam-compose-e2e",
+		[]string{edgeHopDNSName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
+	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o400)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	kid := "e2e-id-1"
+	signing := map[string]any{
+		"keys": []map[string]any{{
+			"kty":   "OKP",
+			"crv":   "Ed25519",
+			"x":     base64.RawURLEncoding.EncodeToString(pub),
+			"d":     base64.RawURLEncoding.EncodeToString(priv.Seed()),
+			"kid":   kid,
+			"alg":   "EdDSA",
+			"use":   "sig",
+			"state": "CURRENT",
+		}},
+	}
+	pubOnly := map[string]any{
+		"keys": []map[string]any{{
+			"kty": "OKP",
+			"crv": "Ed25519",
+			"x":   base64.RawURLEncoding.EncodeToString(pub),
+			"kid": kid,
+			"alg": "EdDSA",
+			"use": "sig",
+		}},
+	}
+	writeJSON(filepath.Join(out, "identity-signing-keys.json"), signing, 0o600)
+	writeJSON(filepath.Join(out, "identity-keys.json"), pubOnly, 0o644)
+
+	fp := spkiSHA256(caCert)
+	writeFile(filepath.Join(out, "ca-sha256.txt"), []byte(fp+"\n"), 0o644)
+
 }

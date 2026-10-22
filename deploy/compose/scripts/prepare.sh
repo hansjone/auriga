@@ -4,13 +4,27 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 COMPOSE="$ROOT/deploy/compose"
 VAR="$COMPOSE/var"
+ACCESS_ARGS=()
+if [ "$#" -gt 0 ]; then
+  if [ "$#" -ne 2 ] || [ "$1" != --access-file ] || [ -z "$2" ]; then
+    echo 'usage: prepare.sh [--access-file /absolute/path/access.json]' >&2; exit 1
+  fi
+  # Resolve once before changing directory; only the public Go loader parses it.
+  ACCESS_FILE="$(cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")"
+  ACCESS_ARGS=(-access-file "$ACCESS_FILE")
+fi
+FIXTURE="${DSH_FIXTURE:-fake}"
+case "$FIXTURE" in fake|real) ;; *) echo 'DSH_FIXTURE must be fake or real' >&2; exit 1 ;; esac
+(
+  cd "$COMPOSE/bootstrap"
+  go run . -validate-access -edge-container "${COMPOSE_PROJECT_NAME:-auriga-m2}-edge" "${ACCESS_ARGS[@]}"
+)
 mkdir -p "$VAR/enrollment" "$VAR/join"
 
 echo "==> start local registry if needed"
 docker compose -f "$COMPOSE/docker-compose.yml" up -d registry
 sleep 2
 
-FIXTURE="${DSH_FIXTURE:-fake}"
 case "$FIXTURE" in
   fake)
     echo "==> build and push fake-dsh"
@@ -35,23 +49,23 @@ fi
 (
   cd "$COMPOSE/bootstrap"
   go run . -out "$VAR" -image "$DIGEST" -fixture "$FIXTURE" \
-    -edge-container "${COMPOSE_PROJECT_NAME:-auriga-m2}-edge" "${OBSERVER_ARGS[@]}"
+    -edge-container "${COMPOSE_PROJECT_NAME:-auriga-m2}-edge" "${OBSERVER_ARGS[@]}" "${ACCESS_ARGS[@]}"
 )
 
-# Keys for Java (32-byte base64)
-if [ -z "${AURIGA_IAM_ENCRYPTION_KEY:-}" ]; then
-  AURIGA_IAM_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-fi
-if [ -z "${AURIGA_WORKSPACE_ENCRYPTION_KEY:-}" ]; then
-  AURIGA_WORKSPACE_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-fi
+# Bootstrap strictly validates and preserves the two private Java keys.
 CA_SHA="$(tr -d '\n' < "$VAR/ca-sha256.txt")"
 
-cat > "$VAR/compose.env" <<EOF
-AURIGA_IAM_ENCRYPTION_KEY=$AURIGA_IAM_ENCRYPTION_KEY
-AURIGA_WORKSPACE_ENCRYPTION_KEY=$AURIGA_WORKSPACE_ENCRYPTION_KEY
+# Write a private new inode and atomically replace the run file; never follow an
+# existing compose.env symlink or truncate another file through it.
+COMPOSE_ENV_TMP="$(umask 077; mktemp "$VAR/.compose.env.XXXXXX")"
+trap 'rm -f -- "$COMPOSE_ENV_TMP"' EXIT
+cat "$VAR/iam-installation/compose.keys" > "$COMPOSE_ENV_TMP"
+cat >> "$COMPOSE_ENV_TMP" <<EOF
 AURIGA_AGENT_CA_SHA256=$CA_SHA
 EOF
+cat "$VAR/access.env" >> "$COMPOSE_ENV_TMP"
+mv -fT -- "$COMPOSE_ENV_TMP" "$VAR/compose.env"
+trap - EXIT
 
 # Empty join token until e2e writes it (agent waits).
 : > "$VAR/join/token"
