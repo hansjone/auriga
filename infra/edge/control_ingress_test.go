@@ -129,21 +129,17 @@ func testControlIngressActualLocalDestination(t *testing.T, mode string) {
 		req.Header.Set("X-Forwarded-For", "127.0.0.2")
 		return client.Do(req)
 	}
-	response, err := request("127.0.0.2")
-	if err != nil {
-		t.Fatalf("private target rejected: %v", err)
+	// Loopback aliases are no longer a private-prefix positive control. Real
+	// private and dynamic-interface positives run in the explicit Linux netns test.
+	for _, target := range []string{"127.0.0.1", "127.0.0.2"} {
+		response, err := request(target)
+		if err == nil {
+			_ = response.Body.Close()
+			t.Errorf("non-private target reached HTTP with status %d", response.StatusCode)
+		}
 	}
-	_ = response.Body.Close()
-	if response.StatusCode != http.StatusNoContent || upstreamCalls.Load() != 1 {
-		t.Fatal("private target did not reach authenticated test upstream")
-	}
-	response, err = request("127.0.0.1")
-	if err == nil {
-		_ = response.Body.Close()
-		t.Errorf("LAN target reached HTTP with status %d", response.StatusCode)
-	}
-	if upstreamCalls.Load() != 1 {
-		t.Error("LAN target reached upstream before isolation")
+	if upstreamCalls.Load() != 0 {
+		t.Fatal("non-private connection reached HTTP/upstream")
 	}
 	// The same LAN target remains available to both original browser roles.
 	for _, role := range []string{"portal", "admin"} {
@@ -229,27 +225,70 @@ func TestControlIngressConfigurationAndStartup(t *testing.T) {
 	}
 }
 
+func controlTestInterfaces() []controlInterface {
+	return []controlInterface{
+		{index: 1, flags: net.FlagUp, addresses: []controlInterfaceAddress{{local: netip.MustParseAddr("192.0.2.10"), prefix: netip.MustParsePrefix("192.0.2.0/26")}}},
+		{index: 2, flags: net.FlagUp, addresses: []controlInterfaceAddress{{local: netip.MustParseAddr("192.0.2.138"), prefix: netip.MustParsePrefix("192.0.2.128/26")}}},
+	}
+}
 func TestControlIngressKernelAddressNormalization(t *testing.T) {
-	policy := &controlIngressPolicy{port: 8083, denied: map[netip.Addr]struct{}{netip.MustParseAddr("127.0.0.1"): {}}}
+	policy := &controlIngressPolicy{port: 8083, denied: map[netip.Addr]struct{}{netip.MustParseAddr("192.0.2.10"): {}}}
+	tcp := func(ip string, port int) net.Addr { return &net.TCPAddr{IP: net.ParseIP(ip), Port: port} }
 	for _, test := range []struct {
-		name    string
-		address net.Addr
-		allow   bool
+		name          string
+		local, remote net.Addr
+		allow         bool
 	}{
-		{"private", &net.TCPAddr{IP: net.ParseIP("127.0.0.2"), Port: 8083}, true},
-		{"LAN", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8083}, false},
-		{"mapped-LAN", &net.TCPAddr{IP: net.ParseIP("::ffff:127.0.0.1"), Port: 8083}, false},
-		{"mapped-private", &net.TCPAddr{IP: net.ParseIP("::ffff:127.0.0.2"), Port: 8083}, true},
-		{"wrong-port", &net.TCPAddr{IP: net.ParseIP("127.0.0.2"), Port: 8084}, false},
-		{"missing", nil, false},
-		{"wrong-type", &net.UnixAddr{Name: "127.0.0.2:8083", Net: "tcp"}, false},
-		{"missing-IP", &net.TCPAddr{Port: 8083}, false},
-		{"IPv6", &net.TCPAddr{IP: net.ParseIP("::1"), Port: 8083}, false},
-		{"zoned", &net.TCPAddr{IP: net.ParseIP("127.0.0.2"), Zone: "untrusted", Port: 8083}, false},
+		{"private", tcp("192.0.2.138", 8083), tcp("192.0.2.148", 40000), true},
+		{"LAN-target", tcp("192.0.2.10", 8083), tcp("192.0.2.20", 40000), false},
+		{"routed-LAN", tcp("192.0.2.138", 8083), tcp("192.0.2.20", 40000), false},
+		{"routed-external", tcp("192.0.2.138", 8083), tcp("198.51.100.20", 40000), false},
+		{"mapped-private", tcp("::ffff:192.0.2.138", 8083), tcp("::ffff:192.0.2.148", 40000), true},
+		{"mapped-LAN-source", tcp("::ffff:192.0.2.138", 8083), tcp("::ffff:192.0.2.20", 40000), false},
+		{"unknown-local", tcp("192.0.2.139", 8083), tcp("192.0.2.148", 40000), false},
+		{"wrong-port", tcp("192.0.2.138", 8084), tcp("192.0.2.148", 40000), false},
+		{"missing-local", nil, tcp("192.0.2.148", 40000), false},
+		{"missing-peer", tcp("192.0.2.138", 8083), nil, false},
+		{"wrong-type", &net.UnixAddr{Name: "private", Net: "tcp"}, tcp("192.0.2.148", 40000), false},
+		{"missing-IP", &net.TCPAddr{Port: 8083}, tcp("192.0.2.148", 40000), false},
+		{"IPv6-local", tcp("2001:db8::1", 8083), tcp("192.0.2.148", 40000), false},
+		{"IPv6-peer", tcp("192.0.2.138", 8083), tcp("2001:db8::2", 40000), false},
+		{"zoned", &net.TCPAddr{IP: net.ParseIP("192.0.2.138"), Zone: "untrusted", Port: 8083}, tcp("192.0.2.148", 40000), false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if policy.allowsLocal(test.address) != test.allow {
-				t.Fatal("incorrect actual local target decision")
+			if policy.allowsConnection(test.local, test.remote, controlTestInterfaces()) != test.allow {
+				t.Fatal("incorrect direct-private decision")
+			}
+		})
+	}
+}
+func TestControlIngressInterfaceTopology(t *testing.T) {
+	policy := &controlIngressPolicy{port: 8083, denied: map[netip.Addr]struct{}{netip.MustParseAddr("192.0.2.10"): {}}}
+	local := &net.TCPAddr{IP: net.ParseIP("192.0.2.138"), Port: 8083}
+	peer := &net.TCPAddr{IP: net.ParseIP("192.0.2.148"), Port: 40000}
+	for _, test := range []struct {
+		name   string
+		change func([]controlInterface) []controlInterface
+	}{
+		{"missing-LAN", func(s []controlInterface) []controlInterface { return s[1:] }},
+		{"missing-private", func(s []controlInterface) []controlInterface { return s[:1] }},
+		{"down-LAN", func(s []controlInterface) []controlInterface { s[0].flags = 0; return s }},
+		{"down-private", func(s []controlInterface) []controlInterface { s[1].flags = 0; return s }},
+		{"loopback-private", func(s []controlInterface) []controlInterface { s[1].flags |= net.FlagLoopback; return s }},
+		{"ambiguous-LAN", func(s []controlInterface) []controlInterface { return append(s, s[0]) }},
+		{"ambiguous-private", func(s []controlInterface) []controlInterface { return append(s, s[1]) }},
+		{"overlap", func(s []controlInterface) []controlInterface {
+			s[0].addresses[0].prefix = netip.MustParsePrefix("192.0.2.0/24")
+			return s
+		}},
+		{"nonmatching-prefix", func(s []controlInterface) []controlInterface {
+			s[1].addresses[0].prefix = netip.MustParsePrefix("198.51.100.0/24")
+			return s
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if policy.allowsConnection(local, peer, test.change(controlTestInterfaces())) {
+				t.Fatal("unsafe topology accepted")
 			}
 		})
 	}

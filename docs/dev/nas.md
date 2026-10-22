@@ -55,9 +55,9 @@ platform维持uid10001，并加入reader group65532以给新JWT正确设gid。�
 
 ## 网络、权限与预算
 
-`internal` 是 `internal:true` 的组件bridge，成员postgres/nats/platform/registry/edge；`AURIGA_INTERNAL_SUBNET` 和固定 `AURIGA_INTERNAL_EDGE_IP` 必须与LAN和现有路由不冲突。`publish` 只给platform/registry作宿主127.0.0.1端口映射，agent保持host网络。外部LAN网络只连接edge；其portal/admin按access listener实际端口提供服务，后端不接入LAN；内控虽为动态实例桥绑定wildcard，但edge在TCP Accept处按内核实际目标地址关闭发往已配置LAN IP的连接，早于HTTP和IAM处理。portal/admin保持原入口协议。网络预检不创建或调整NAS网络，不确定时exit4；端口/目标IP重入只接受本项目精确归属。
+`internal` 是 `internal:true` 的组件bridge，成员postgres/nats/platform/registry/edge；`AURIGA_INTERNAL_SUBNET` 和固定 `AURIGA_INTERNAL_EDGE_IP` 必须与LAN和现有路由不冲突。`publish` 只给platform/registry作宿主127.0.0.1端口映射，agent保持host网络。外部LAN网络只连接edge；其portal/admin按access listener实际端口提供服务，后端不接入LAN；内控虽为动态实例桥绑定wildcard，但edge在TCP Accept处联校内核实际本地／对端地址及当前直连前缀：目标须唯一属于非LAN私有接口，peer须处于该目标的同一前缀。LAN目标和任何外部可路由源到私有目标都早于HTTP／IAM被关闭。portal/admin保持原入口协议。网络预检不创建或调整NAS网络，不确定时exit4；端口/目标IP重入只接受本项目精确归属。
 
-`AURIGA_EDGE_LAN_IP` 与 `AURIGA_LAN_SUBNET` 是必填可信安装输入（直接调用bootstrap时对应 `-lan-ip/-lan-subnet`），须为规范IPv4、地址归属该子网且与组件网不重叠。LAN配置纳入receipt输入摘要，变更或旧材料不匹配会拒绝，不自动修复。edge启动还核该LAN IP确属于自身网络命名空间。
+`AURIGA_EDGE_LAN_IP` 与 `AURIGA_LAN_SUBNET` 是必填可信安装输入（直接调用bootstrap时对应 `-lan-ip/-lan-subnet`），须为规范IPv4、地址归属该子网且与组件网不重叠。LAN配置纳入receipt输入摘要，变更或旧材料不匹配会拒绝，不自动修复。edge启动及每个新内控连接还核所有LAN IP在自身netns唯一归属UP接口，活跃接口前缀不得跨接口重叠。每连接两份一致的实际接口快照支持动态桥增删，缺失／多义／读取失败保守拒绝。该规则依赖既有LAN、组件及owned实例直连桥拓扑，不识别真实入接口，也不宣称与网络管理不存在竞态；不要另给edge接入外部路由网。
 
 每实例owned bridge仍internal，只有该实例和经标签/身份/归属复核的edge两个成员，独立DNS alias指向内控listener；实例不加入组件网或publish网。共享socket父目录 `socket-share/` 为root:65532/0750，agent创建叶子；agent数据根保持0700，不预建叶子、不把私密agent目录给edge。
 
