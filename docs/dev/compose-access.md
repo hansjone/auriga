@@ -27,8 +27,8 @@ dev profile 用于 seed，Compose 显式覆盖其 Servlet TLS、监听地址和�
 
 `COMPOSE_PROJECT_NAME` 必须在 prepare 和 Compose 启动时一致；prepare 将实际
 `<project>-edge` 传给 `-edge-container`，写入受信 edge 身份。直接调用 bootstrap 时
-也应传这个参数。控制网络使用本套临时子网 `172.29.240.0/24`，固定 edge 地址
-`172.29.240.10`。如果测试宿主已有冲突路由，应换干净测试环境或统一修改这套公开
+也应传这个参数。控制网络使用本套临时子网 `172.29.240.0/24`，固定 edge 地址 <!-- gitleaks:allow disposable M2 network -->
+`172.29.240.10`。如果测试宿主已有冲突路由，应换干净测试环境或统一修改这套公开 <!-- gitleaks:allow disposable M2 network -->
 装配后重验，不能只手改 peer 白名单。
 
 新一轮应同时设置独立 `COMPOSE_PROJECT_NAME` 与 `AURIGA_M2_DATA_ROOT`（例如
@@ -48,7 +48,7 @@ edge `iamHop.serverName=platform` 固定验证服务证书 DNS。CA、EKU、有�
 校验保持启用；不使用 `-k`、代理环境或 `InsecureSkipVerify`。
 
 Servlet connector 对 combined 三个 API 统一要求客户端证书，IAM 还同时核对固定
-edge DNS SAN 与 TCP 对端精确白名单。M2 白名单为 edge 的 `172.29.240.10` 与本地
+edge DNS SAN 与 TCP 对端精确白名单。M2 白名单为 edge 的 `172.29.240.10` 与本地 <!-- gitleaks:allow disposable M2 network -->
 健康检查的 `127.0.0.1`，不使用整个 Docker 网段。prepare 仅对本轮生成的
 `edge-iam.key` 设置 group 65532、模式 0640，供固定 distroless edge 组和拥有者读取。
 这要求本机 root 或可非交互执行 `sudo chgrp`；失败就停止，不放宽为可写或改全局 ACL。

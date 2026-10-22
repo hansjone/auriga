@@ -68,8 +68,7 @@ services:
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
       AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
       # Exact TCP source: fixed edge control-network address + local health probe.
-      SPRING_APPLICATION_JSON: >-
-        {"auriga":{"iam":{"edge-hop":{"peer-addresses":["172.29.240.10","127.0.0.1"],"allow-loopback-http":false}}}}
+      SPRING_APPLICATION_JSON: '{"auriga":{"iam":{"edge-hop":{"peer-addresses":["172.29.240.10","127.0.0.1"],"allow-loopback-http":false}}}}' # gitleaks:allow disposable M2 network
       AURIGA_IAM_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_IAM_DB_USER: auriga_iam
       AURIGA_IAM_DB_PASSWORD: e2e_iam_only
@@ -127,7 +126,7 @@ services:
       - '127.0.0.1:8084:8084'
     networks:
       default:
-        ipv4_address: 172.29.240.10
+        ipv4_address: 172.29.240.10 # gitleaks:allow disposable M2 network
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     depends_on:
@@ -195,4 +194,4 @@ networks:
   default:
     ipam:
       config:
-        - subnet: 172.29.240.0/24
+        - subnet: 172.29.240.0/24 # gitleaks:allow disposable M2 network
