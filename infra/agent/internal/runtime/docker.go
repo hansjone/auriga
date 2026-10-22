@@ -243,6 +243,13 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	d.mu.Lock()
 	delete(d.endpoints, id)
 	d.mu.Unlock()
+	// A replacement edge loses its endpoints on existing instance networks.
+	// Restore the trusted bridge before starting or publishing the instance.
+	if d.EdgeContainer != "" {
+		if err := d.ensureEdgeNetwork(ctx, id); err != nil {
+			return err
+		}
+	}
 	name := containerName(id)
 	if err := d.Client.ContainerStart(ctx, name); err != nil {
 		return err

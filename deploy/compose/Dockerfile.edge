@@ -1,4 +1,31 @@
 # Build from repository root: docker build -f deploy/compose/Dockerfile.edge .
+FROM node:22-bookworm AS web
+WORKDIR /src
+COPY package.json pnpm-workspace.yaml .npmrc tsconfig.base.json ./
+# Keep the workspace importers and the configured lockfileDir; never copy host
+# node_modules or a previous dist into the image build.
+COPY web/pnpm-lock.yaml ./web/pnpm-lock.yaml
+COPY web/shared/package.json ./web/shared/package.json
+COPY web/portal/package.json ./web/portal/package.json
+COPY web/admin/package.json ./web/admin/package.json
+COPY web/panel/package.json ./web/panel/package.json
+COPY clients/dsh-plugin/package.json ./clients/dsh-plugin/package.json
+RUN corepack enable \
+  && corepack prepare pnpm@11.28.6 --activate \
+  && pnpm install --frozen-lockfile
+COPY contracts ./contracts
+COPY web/shared/src ./web/shared/src
+COPY web/shared/scripts ./web/shared/scripts
+COPY clients/dsh-plugin/src ./clients/dsh-plugin/src
+COPY web/portal/src ./web/portal/src
+COPY web/portal/index.html web/portal/vite.config.ts ./web/portal/
+COPY web/admin/src ./web/admin/src
+COPY web/admin/index.html web/admin/vite.config.ts ./web/admin/
+RUN pnpm gen:api \
+  && pnpm gen:steps \
+  && pnpm --filter @auriga/portal build \
+  && pnpm --filter @auriga/admin build
+
 FROM golang:1.27.3 AS build
 WORKDIR /src/infra
 COPY infra/ ./
@@ -7,4 +34,8 @@ RUN CGO_ENABLED=0 go build -o /out/auriga-edge .
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/auriga-edge /auriga-edge
+COPY --from=web /src/web/portal/dist /srv/auriga/static/portal
+COPY --from=web /src/web/admin/dist /srv/auriga/static/admin
+ENV AURIGA_EDGE_STATIC_PORTAL=/srv/auriga/static/portal \
+    AURIGA_EDGE_STATIC_ADMIN=/srv/auriga/static/admin
 ENTRYPOINT ["/auriga-edge"]

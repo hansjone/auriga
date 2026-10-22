@@ -170,6 +170,19 @@ sh var/iam-healthcheck.sh
 
 ## 合成客户端与尚未完成的链路
 
+公开 `deploy/compose/Dockerfile.edge` 使用仓库现有 Node 22、pnpm 11.28.6 和
+`web/pnpm-lock.yaml`（workspace `lockfileDir: web`）执行 frozen install、契约生成，
+构建真实 portal/admin；没有启用前端 mock。两份 dist 随 Go edge 一起进入
+distroless nonroot 镜像，镜像默认 `AURIGA_EDGE_STATIC_PORTAL` 与
+`AURIGA_EDGE_STATIC_ADMIN` 分别指向 `/srv/auriga/static/portal` 和
+`/srv/auriga/static/admin`，由现有 edge 静态入口提供，不需要另起静态服务器。
+这不修改 bootstrap 生成配置或共享 access 输入。
+
+M2 在登录与长 idle 窗口之前请求两个入口的 `/login`，检查真实 HTML 文档、
+对应应用标题、挂载点与 module/CSS 引用，再仅请求该入口本地 `/assets/` 下的
+构建 JS/CSS，核对状态、类型和非 HTML/JSON 响应。缺静态目录、HTML fallback、
+JSON API 或缺失资源均不能通过；这些 HTTP 断言仍不能替代真实浏览器执行脚本与 UI 验收。
+
 `e2e/m2.mjs` 从共享 access 文件读取完整入口与端口，将门户请求投到 8080、管理请求投到 8084，Host 保留外部端口，
 cookie 写操作与实例 WS 使用完整 Origin。登录事务分别使用
 `auriga_portal_login_tx` 和 `auriga_admin_login_tx`；cookie jar 按 hostname 处理
