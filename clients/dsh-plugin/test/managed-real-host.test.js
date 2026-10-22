@@ -178,7 +178,13 @@ test('only door-admitted requests bypass the native DSH authentication', async (
     requestRejection: () => 401,
     authorizeIndex: () => false,
   };
-  const disposeAuth = installHostAuthentication(connection, door);
+  const disposeAuth = installHostAuthentication(connection, door, {
+    browserOrigin: {
+      scheme: 'https',
+      host: 'instance.i.example.com',
+      port: 443,
+    },
+  });
   const server = new EventEmitter();
   const disposeDoor = door.install(server);
   const admitted = (req) =>

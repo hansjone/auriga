@@ -7,9 +7,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/hansjone/auriga/infra/gen/deployment"
+	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -42,14 +46,10 @@ type Result struct {
 type Options struct {
 	MetaDir string
 	HomeDir string
-	// PlatformURL is the instance-facing HTTP(S) base of the platform (edge
-	// internal entry). It is not the agent's gRPC control address.
-	PlatformURL string
-	// InstanceParentDomain is the edge's instanceParentDomain; the instance
-	// host <instanceId>.<domain> is written into DSH and plugin trustedHosts.
-	InstanceParentDomain string
-	SealingPrivate       [32]byte
-	RestrictFile         func(path string) error
+	// Access is the single validated installation boundary, loaded by the agent.
+	Access         deploymentconfig.Config
+	SealingPrivate [32]byte
+	RestrictFile   func(path string) error
 	// OwnerUID/GID set after write for secret files (0 = skip).
 	OwnerUID int
 	OwnerGID int
@@ -70,7 +70,10 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	if err := validateIdentity(spec.TenantId, "tenantId"); err != nil {
 		return Result{}, err
 	}
-	if err := validatePlatformURL(opt.PlatformURL); err != nil {
+	if !opt.Access.Valid() {
+		return Result{}, fmt.Errorf("renderer: validated deployment access required")
+	}
+	if _, err := BrowserOrigin(spec.InstanceId, opt.Access); err != nil {
 		return Result{}, err
 	}
 	if opt.MetaDir == "" {
@@ -234,7 +237,7 @@ func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 		"AURIGA_INSTANCE_ID=" + spec.InstanceId,
 		"AURIGA_OWNER_ID=" + spec.OwnerId,
 		"AURIGA_TENANT_ID=" + spec.TenantId,
-		"AURIGA_PLATFORM_URL=" + opt.PlatformURL,
+		"AURIGA_PLATFORM_URL=" + originURL(opt.Access.InstanceControl().Origin),
 		"AURIGA_IDENTITY_KEYS_FILE=" + ContainerIdentityKeys,
 		"AURIGA_INSTANCE_TOKEN_FILE=" + ContainerInstanceToken,
 		"DSH_HOME=" + ContainerDSHHome,
@@ -347,4 +350,26 @@ func sortedKeysMap[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// BrowserOrigin derives only the browser boundary; the internal alias never enters it.
+func BrowserOrigin(instanceID string, access deploymentconfig.Config) (deployment.Origin, error) {
+	if !access.Valid() {
+		return deployment.Origin{}, fmt.Errorf("renderer: validated deployment access required")
+	}
+	if sub, ok := access.InstanceSubdomain(); ok {
+		if !hostLabelRe.MatchString(instanceID) || strings.Contains(instanceID, "_") || strings.HasPrefix(instanceID, "-") || strings.HasSuffix(instanceID, "-") || len(instanceID)+1+len(sub.ParentDomain) > 253 {
+			return deployment.Origin{}, fmt.Errorf("renderer: instance id is not a canonical DNS label")
+		}
+		return deployment.Origin{Scheme: sub.Scheme, Host: instanceID + "." + sub.ParentDomain, Port: sub.Port}, nil
+	}
+	return access.PortalOrigin(), nil
+}
+
+func originURL(o deployment.Origin) string {
+	authority := net.JoinHostPort(o.Host, strconv.Itoa(int(o.Port)))
+	if o.Scheme == "http" && o.Port == 80 || o.Scheme == "https" && o.Port == 443 {
+		authority = o.Host
+	}
+	return o.Scheme + "://" + authority
 }

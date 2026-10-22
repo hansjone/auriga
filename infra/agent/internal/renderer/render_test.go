@@ -63,7 +63,7 @@ func TestRenderDeterministicAndSecretPerms(t *testing.T) {
 	opt := renderer.Options{
 		MetaDir:        meta,
 		HomeDir:        home,
-		PlatformURL:    "https://edge.example.com",
+		Access:         testAccess(t, ""),
 		SealingPrivate: priv,
 	}
 	r1, err := renderer.Render(spec, opt)
@@ -115,7 +115,7 @@ func TestRejectYAMLInjectionAndReservedEnv(t *testing.T) {
 		}
 	}
 	root := t.TempDir()
-	opt := renderer.Options{MetaDir: filepath.Join(root, "meta"), HomeDir: filepath.Join(root, "home"), SealingPrivate: priv, PlatformURL: "https://edge.example.com"}
+	opt := renderer.Options{MetaDir: filepath.Join(root, "meta"), HomeDir: filepath.Join(root, "home"), SealingPrivate: priv, Access: testAccess(t, "")}
 	_ = os.MkdirAll(opt.HomeDir, 0o700)
 
 	spec := base()

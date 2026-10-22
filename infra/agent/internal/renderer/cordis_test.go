@@ -1,6 +1,8 @@
 package renderer_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,11 +31,10 @@ func renderCordis(t *testing.T, spec *nodev1.InstanceSpec, parent string) (strin
 	spec.Secrets.InstanceToken = sealed
 	root := t.TempDir()
 	opt := renderer.Options{
-		MetaDir:              filepath.Join(root, "meta"),
-		HomeDir:              filepath.Join(root, "home"),
-		PlatformURL:          "http://192.0.2.10:8080",
-		InstanceParentDomain: parent,
-		SealingPrivate:       priv,
+		MetaDir:        filepath.Join(root, "meta"),
+		HomeDir:        filepath.Join(root, "home"),
+		Access:         testAccess(t, parent),
+		SealingPrivate: priv,
 	}
 	_ = os.MkdirAll(opt.HomeDir, 0o700)
 	res, err := renderer.Render(spec, opt)
@@ -44,7 +46,7 @@ func renderCordis(t *testing.T, spec *nodev1.InstanceSpec, parent string) (strin
 		t.Fatal(err)
 	}
 	env, _ := os.ReadFile(res.EnvFile)
-	if !strings.Contains(string(env), "AURIGA_PLATFORM_URL=http://192.0.2.10:8080\n") {
+	if !strings.Contains(string(env), "AURIGA_PLATFORM_URL=http://auriga-instance.internal:8081\n") {
 		t.Fatalf("platform url not rendered: %s", env)
 	}
 	return string(raw), nil
@@ -98,8 +100,8 @@ func TestCordisPatchIsLoaderPatchList(t *testing.T) {
 	if pcfg["imBots"] != "none" {
 		t.Fatalf("plugin config: %#v", pcfg)
 	}
-	if hosts := pcfg["trustedHosts"].([]any); len(hosts) != 1 || hosts[0] != "inst-c1.i.example.com" {
-		t.Fatalf("plugin trustedHosts: %#v", pcfg["trustedHosts"])
+	if origin := pcfg["browserOrigin"].(map[string]any); origin["host"] != "inst-c1.i.example.com" || origin["scheme"] != "https" || origin["port"] != 443 {
+		t.Fatalf("plugin origin: %#v", origin)
 	}
 	mcp := inserts[1].(map[string]any)
 	mcfg := mcp["config"].(map[string]any)
@@ -114,7 +116,7 @@ func TestCordisPatchIsLoaderPatchList(t *testing.T) {
 	if rows[2]["id"] != "web-runtime" || rt["printUrl"] != false || rt["openBrowser"] != false {
 		t.Fatalf("web-runtime row: %#v", rows[2])
 	}
-	if hosts := rt["trustedHosts"].([]any); len(hosts) != 1 || hosts[0] != "inst-c1.i.example.com" {
+	if hosts := rt["trustedHosts"].([]any); len(hosts) != 1 || hosts[0] != "inst-c1.i.example.com:443" {
 		t.Fatalf("web-runtime trustedHosts: %#v", rt["trustedHosts"])
 	}
 	other := rows[3]
@@ -131,7 +133,7 @@ func TestCordisPatchNativeRuntimeBindsLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(raw, "host: 127.0.0.1") || !strings.Contains(raw, "trustedHosts: []") {
+	if !strings.Contains(raw, "host: 127.0.0.1") || !strings.Contains(raw, "192.0.2.10:8080") {
 		t.Fatalf("native runtime patch:\n%s", raw)
 	}
 	if strings.Contains(raw, "imBots") {
@@ -144,6 +146,8 @@ func TestCordisPatchRejectsReservedAndMalformed(t *testing.T) {
 		{Path: "plugins.webserver.host", ValueJson: `"0.0.0.0"`},
 		{Path: "plugins.connection.trustedHosts", ValueJson: `["evil.example.com"]`},
 		{Path: "plugins.web-runtime.trustedHosts", ValueJson: `["evil.example.com"]`},
+		{Path: "plugins.auriga-dsh.browserOrigin.host", ValueJson: `"evil.example.com"`},
+		{Path: "plugins.auriga-dsh.browserOrigin", ValueJson: `null`},
 		{Path: "plugins.auriga-dsh.trustedHosts", ValueJson: `["evil.example.com"]`},
 		{Path: "plugins.auriga-mcp-team.url", ValueJson: `"https://evil.example.com"`},
 		{Path: "server.host", ValueJson: `"0.0.0.0"`},
@@ -170,7 +174,7 @@ func TestCordisPatchRejectsReservedAndMalformed(t *testing.T) {
 	if _, err := renderCordis(t, spec, ""); err == nil {
 		t.Fatal("mcp without token_ref must be rejected")
 	}
-	if _, err := renderer.TrustedHosts("inst-c1", "bad_domain"); err == nil {
+	if _, err := renderer.BrowserOrigin("inst-c1", deploymentconfig.Config{}); err == nil {
 		t.Fatal("invalid parent domain accepted")
 	}
 }
@@ -206,5 +210,126 @@ func TestCordisPatchRejectsExpressionPaths(t *testing.T) {
 				t.Fatalf("expected Loader expression rejection, got %v", err)
 			}
 		})
+	}
+}
+
+func testAccess(t *testing.T, parent string) deploymentconfig.Config {
+	t.Helper()
+	name := "ip-http.json"
+	if parent != "" {
+		name = "domain-proxy.json"
+	}
+	raw, err := os.ReadFile(filepath.Join("../../../../contracts/deployment/fixtures", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent != "" {
+		raw = []byte(strings.ReplaceAll(string(raw), "i.example.com", strings.ToLower(parent)))
+	}
+	access, err := deploymentconfig.Load(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return access
+}
+
+func TestBrowserOriginRenderMatrix(t *testing.T) {
+	for _, mode := range []string{"ip", "domain"} {
+		for _, scheme := range []string{"http", "https"} {
+			for _, nonDefault := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/nonDefault=%t", mode, scheme, nonDefault), func(t *testing.T) {
+					file := "ip-http.json"
+					if mode == "domain" {
+						file = "domain-proxy.json"
+					}
+					raw, err := os.ReadFile(filepath.Join("../../../../contracts/deployment/fixtures", file))
+					if err != nil {
+						t.Fatal(err)
+					}
+					var value map[string]any
+					if err := json.Unmarshal(raw, &value); err != nil {
+						t.Fatal(err)
+					}
+					port := 80
+					if scheme == "https" {
+						port = 443
+					}
+					if nonDefault {
+						port = 8443
+					}
+					value["insecureHttpAcknowledged"] = true
+					host := "inst-c1.i.example.com"
+					if mode == "domain" {
+						sub := value["instances"].(map[string]any)
+						sub["scheme"] = scheme
+						sub["port"] = port
+						for _, field := range []string{"portalOrigin", "issuerOrigin"} {
+							o := value[field].(map[string]any)
+							o["scheme"] = scheme
+							o["port"] = port
+						}
+					} else {
+						host = "192.0.2.10"
+						for _, field := range []string{"portalOrigin", "issuerOrigin", "adminOrigin"} {
+							o := value[field].(map[string]any)
+							o["scheme"] = scheme
+							o["port"] = port
+							if field == "adminOrigin" {
+								o["port"] = port + 1
+							}
+						}
+						for _, field := range []string{"portal", "admin"} {
+							value["listeners"].(map[string]any)[field].(map[string]any)["tls"] = scheme == "https"
+						}
+					}
+					raw, _ = json.Marshal(value)
+					access, err := deploymentconfig.Load(raw)
+					if err != nil {
+						t.Fatal(err)
+					}
+					root := t.TempDir()
+					spec := baseSpec()
+					got, err := renderer.Render(spec, renderer.Options{MetaDir: root, Access: access})
+					if err != nil {
+						t.Fatal(err)
+					}
+					patch, err := os.ReadFile(got.CordisPatchFile)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var rows []map[string]any
+					if err := yaml.Unmarshal(patch, &rows); err != nil {
+						t.Fatal(err)
+					}
+					cfg := rows[0]["insert"].([]any)[0].(map[string]any)["config"].(map[string]any)
+					origin := cfg["browserOrigin"].(map[string]any)
+					if origin["scheme"] != scheme || origin["host"] != host || origin["port"] != port {
+						t.Fatalf("browser: %#v", origin)
+					}
+					native := rows[2]["config"].(map[string]any)["trustedHosts"].([]any)
+					if len(native) != 1 || native[0] != fmt.Sprintf("%s:%d", host, port) {
+						t.Fatalf("native: %#v", native)
+					}
+					if strings.Contains(string(patch), access.InstanceControl().DnsAlias) {
+						t.Fatal("internal alias entered browser config")
+					}
+					env, err := os.ReadFile(got.EnvFile)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !strings.Contains(string(env), "AURIGA_PLATFORM_URL=http://auriga-instance.internal:8081\n") {
+						t.Fatalf("heartbeat not internal: %s", env)
+					}
+				})
+			}
+		}
+	}
+	if _, err := renderer.Render(baseSpec(), renderer.Options{MetaDir: t.TempDir()}); err == nil {
+		t.Fatal("unvalidated config accepted")
+	}
+	for _, id := range []string{"UPPER", "bad_label", "-bad", "bad-"} {
+		if _, err := renderer.BrowserOrigin(id, testAccess(t, "i.example.com")); err == nil {
+			t.Fatalf("invalid DNS instance accepted: %s", id)
+		}
 	}
 }

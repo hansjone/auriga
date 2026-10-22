@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -22,11 +24,10 @@ const (
 )
 
 var (
-	rowIDRe      = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	patchKeyRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	mcpNameRe    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
-	parentDomain = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
-	hostLabelRe  = regexp.MustCompile(`^[a-z0-9_-]{1,63}$`)
+	rowIDRe     = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	patchKeyRe  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	mcpNameRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+	hostLabelRe = regexp.MustCompile(`^[a-z0-9_-]{1,63}$`)
 )
 
 // Rows the renderer owns: a spec patch must not widen the Host/Origin fence or
@@ -39,7 +40,8 @@ var reservedRows = map[string]struct{}{
 
 // Plugin config keys the renderer owns.
 var reservedPluginKeys = map[string]struct{}{
-	"trustedHosts": {},
+	"trustedHosts":  {},
+	"browserOrigin": {},
 }
 
 // jsExpr renders as a DSH Loader `!!js` expression node.
@@ -60,29 +62,15 @@ func jsString(s string) string {
 	return string(raw)
 }
 
-// TrustedHosts returns the edge authorities DSH must accept for this instance.
-func TrustedHosts(instanceID, parent string) ([]string, error) {
-	if parent == "" {
-		return []string{}, nil
-	}
-	parent = strings.ToLower(strings.TrimSuffix(parent, "."))
-	if !parentDomain.MatchString(parent) {
-		return nil, fmt.Errorf("renderer: invalid instance parent domain")
-	}
-	label := strings.ToLower(instanceID)
-	if !hostLabelRe.MatchString(label) {
-		return nil, fmt.Errorf("renderer: instance id is not a host label")
-	}
-	return []string{label + "." + parent}, nil
-}
-
 // buildCordisPatch renders a DSH Loader patch list (an `--patch` layer). Rows
 // with an id replace that row's whole config; `insert` appends new rows.
 func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
-	trusted, err := TrustedHosts(spec.InstanceId, opt.InstanceParentDomain)
+	browser, err := BrowserOrigin(spec.InstanceId, opt.Access)
 	if err != nil {
 		return nil, err
 	}
+	// Native DSH accepts authorities, not schemes. Always retain the effective port.
+	trusted := []string{net.JoinHostPort(browser.Host, strconv.Itoa(int(browser.Port)))}
 	prof := spec.GetProfile()
 	port := uint32(7860)
 	if prof.GetListenPort() != 0 {
@@ -95,7 +83,7 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 		host = "0.0.0.0"
 	}
 
-	pluginCfg := map[string]any{"trustedHosts": trusted}
+	pluginCfg := map[string]any{"browserOrigin": browser}
 	overrides := map[string]map[string]any{}
 	var overrideOrder []string
 	for _, p := range prof.GetPatches() {

@@ -280,3 +280,32 @@ func TestNormalizationAndCopies(t *testing.T) {
 		t.Fatal("zero config accepted")
 	}
 }
+
+func TestInstanceSubdomainIsValidatedValueCopy(t *testing.T) {
+	for _, port := range []int{443, 8443} {
+		c, err := Load(changed(t, "domain-proxy.json", patch{Pointer: "instances.port", Value: port}, patch{Pointer: "portalOrigin.port", Value: port}, patch{Pointer: "issuerOrigin.port", Value: port}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, ok := c.InstanceSubdomain()
+		if !ok || got.Port != int32(port) || got.Scheme != "https" || got.ParentDomain != "i.example.com" {
+			t.Fatalf("subdomain: %+v %t", got, ok)
+		}
+		got.Port = 1234
+		got.ParentDomain = "evil.example.com"
+		again, _ := c.InstanceSubdomain()
+		if again.Port != int32(port) || again.ParentDomain != "i.example.com" {
+			t.Fatal("accessor exposed mutable state")
+		}
+	}
+	c, err := Load(fixture(t, "ip-http.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.InstanceSubdomain(); ok {
+		t.Fatal("IP path has no subdomain")
+	}
+	if _, ok := (Config{}).InstanceSubdomain(); ok {
+		t.Fatal("invalid Config has no subdomain")
+	}
+}

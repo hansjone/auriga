@@ -71,19 +71,6 @@ func validateIdentity(id, field string) error {
 	return nil
 }
 
-func validatePlatformURL(u string) error {
-	if u == "" {
-		return nil
-	}
-	if err := rejectUnsafeString("platformURL", u); err != nil {
-		return err
-	}
-	if !safeURLRe.MatchString(u) {
-		return fmt.Errorf("renderer: invalid platformURL")
-	}
-	return nil
-}
-
 func validatePatch(path, valueJSON string) error {
 	if err := rejectUnsafeString("patch.path", path); err != nil {
 		return err

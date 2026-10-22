@@ -223,8 +223,8 @@ func main() {
 	writeJSON(filepath.Join(*out, "edge.config.json"), edgeCfg, 0o644)
 	// Public values are derived from the validated installation; no credentials.
 	writeFile(filepath.Join(*out, "access.env"), []byte(fmt.Sprintf(
-		"AURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\nAURIGA_AGENT_INSTANCE_PLATFORM_URL='http://%s:%d'\n",
-		access.Issuer(), access.PortalURL(), controlAlias, controlPort)), 0o644)
+		"AURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\n",
+		access.Issuer(), access.PortalURL())), 0o644)
 
 	policy := map[string]any{
 		"allowedImageRepos": []string{"127.0.0.1:5000/auriga/", "localhost:5000/auriga/"},
