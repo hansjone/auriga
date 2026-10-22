@@ -7,17 +7,17 @@ require (
 	github.com/hansjone/auriga/infra/gen v0.0.0
 	github.com/robfig/cron/v3 v3.0.1
 	go.etcd.io/bbolt v1.4.3
-	golang.org/x/crypto v0.42.0
-	golang.org/x/sys v0.36.0
-	google.golang.org/grpc v1.76.0
-	google.golang.org/protobuf v1.36.10
+	golang.org/x/crypto v0.57.0
+	golang.org/x/sys v0.48.0
+	google.golang.org/grpc v1.84.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	golang.org/x/net v0.43.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
 )
 
 replace github.com/hansjone/auriga/infra/gen => ../gen

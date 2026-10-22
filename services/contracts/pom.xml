@@ -57,6 +57,18 @@
     </dependency>
   </dependencies>
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${project.basedir}/../../contracts</directory>
+        <targetPath>auriga/contracts</targetPath>
+        <includes>
+          <include>catalog/m3.json</include>
+        </includes>
+      </resource>
+    </resources>
     <testResources>
       <testResource>
         <directory>${project.basedir}/../../contracts/resource</directory>
