@@ -10,10 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var identityMaterialFiles = []string{
@@ -22,6 +26,7 @@ var identityMaterialFiles = []string{
 	"identity-signing-keys.json", "identity-keys.json", "ca-sha256.txt",
 	"access.json", "iam-healthcheck.sh", "iam-client.json", "heartbeat-observer.json",
 	"edge.config.json", "access.env", "agent-policy.yaml",
+	"runtime-keys/root.pb",
 }
 
 func writeComposeKeys(out string) error {
@@ -82,7 +87,7 @@ func validateComposeKeys(raw []byte) error {
 }
 
 func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet, error) {
-	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates"}}
+	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys"}}
 	entries, err := os.ReadDir(filepath.Join(out, "templates"))
 	if err != nil {
 		return set, err
@@ -112,7 +117,71 @@ func existingIdentityMaterials(out, inputDigest string) (ed25519.PublicKey, stri
 	if err != nil || !reuse {
 		return nil, "", false, err
 	}
+	if err := validateRuntimeRoot(out); err != nil {
+		return nil, "", false, err
+	}
 	return readIdentityPublic(out)
+}
+
+var runtimeRootExpiry = time.Date(2031, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+// An old installation never receives a new root directory as an implicit repair.
+func prepareRuntimeRootDirectory(out string) error {
+	path := filepath.Join(out, "runtime-keys")
+	if _, err := os.Lstat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	for _, name := range append(append([]string{}, identityMaterialFiles...), "iam-installation/bootstrap.receipt", "iam-installation/edge.secret", "iam-installation/internal.properties", "iam-installation/compose.keys") {
+		if _, err := os.Lstat(filepath.Join(out, filepath.FromSlash(name))); err == nil {
+			return fmt.Errorf("existing installation lacks runtime root material; use a fresh installation directory")
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return os.Mkdir(path, 0o755)
+}
+
+func generateRuntimeRoot(out string) error {
+	if !time.Now().Before(runtimeRootExpiry) {
+		return fmt.Errorf("M2 runtime root fixture expiry reached; update fixture explicitly")
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	clear(priv)
+	k := &nodev1.ArtifactSigningKey{Kid: "e2e-runtime-root", PublicKey: pub, NotAfter: timestamppb.New(runtimeRootExpiry)}
+	raw, err := proto.Marshal(k)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(out, "runtime-keys", "root.pb"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.Write(raw); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+func validateRuntimeRoot(out string) error {
+	entries, err := os.ReadDir(filepath.Join(out, "runtime-keys"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "root.pb" {
+		return fmt.Errorf("invalid M2 runtime root directory")
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "runtime-keys", "root.pb"))
+	if err != nil {
+		return err
+	}
+	var k nodev1.ArtifactSigningKey
+	if proto.Unmarshal(raw, &k) != nil || len(k.ProtoReflect().GetUnknown()) != 0 || k.Kid != "e2e-runtime-root" || len(k.PublicKey) != ed25519.PublicKeySize || k.NotAfter == nil || len(k.NotAfter.ProtoReflect().GetUnknown()) != 0 || k.NotAfter.CheckValid() != nil || !k.NotAfter.AsTime().Equal(runtimeRootExpiry) || !time.Now().Before(k.NotAfter.AsTime()) || k.EndorsedByKid != "" || len(k.Endorsement) != 0 {
+		return fmt.Errorf("invalid or expired M2 runtime root; use a fresh installation after explicit fixture update")
+	}
+	return nil
 }
 
 func readIdentityPublic(out string) (ed25519.PublicKey, string, bool, error) {

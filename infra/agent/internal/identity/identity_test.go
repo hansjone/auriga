@@ -138,3 +138,25 @@ func TestSaveKeysBeforeCertificateOnFailure(t *testing.T) {
 		})
 	}
 }
+func TestInitializationEvidenceAndUnreadableGuard(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent")
+	if err := identity.CheckFreshEnrollment(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, identity.TrustGuardFileName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identity.ReadTrustGuard(dir); err == nil {
+		t.Fatal("directory accepted as guard")
+	}
+	if err := identity.CheckFreshEnrollment(dir); err == nil {
+		t.Fatal("unreadable guard mistaken for absence")
+	}
+	path := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(path, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.CheckFreshEnrollment(filepath.Join(path, "agent")); err == nil {
+		t.Fatal("filesystem inspection error mistaken for fresh enrollment")
+	}
+}

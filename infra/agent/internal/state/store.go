@@ -22,7 +22,8 @@ var (
 
 // Store is the local agent state database under <data>/agent/state.db.
 type Store struct {
-	db *bbolt.DB
+	db       *bbolt.DB
+	agentDir string
 }
 
 // Open creates or opens state.db under agentDir.
@@ -47,7 +48,7 @@ func Open(agentDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, agentDir: agentDir}, nil
 }
 
 // Close closes the database.

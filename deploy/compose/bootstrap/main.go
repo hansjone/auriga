@@ -63,6 +63,9 @@ func main() {
 	mustMkdir(pki, 0o755)
 	mustMkdir(tpl, 0o755)
 	mustMkdir(filepath.Join(*out, "join"), 0o755)
+	if err := prepareRuntimeRootDirectory(*out); err != nil {
+		fatalf("%v", err)
+	}
 	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%t\n%t", *image, *fixture, *observer, *accessFile != ""))...))
 	inputDigest := hex.EncodeToString(input[:])
 	pub, fp, reuse, err := existingIdentityMaterials(*out, inputDigest)
@@ -81,6 +84,9 @@ func main() {
 	}
 	if !reuse {
 		generateIdentityMaterials(*out)
+		if err := generateRuntimeRoot(*out); err != nil {
+			fatalf("%v", err)
+		}
 		pub, fp, _, err = readIdentityPublic(*out)
 		if err != nil {
 			fatalf("%v", err)

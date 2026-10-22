@@ -2,9 +2,22 @@
 
 正式 DSH 的发行信任规范和 Java→Go 共享向量见
 [`contracts/runtime/README.md`](../../contracts/runtime/README.md)。RT0 仅冻结契约；
-初始根必须来自实际 CA pin 校验的 TLS Join，明文开发 Join 不能建立发行信任。
-生产 keyring/续证分离待 RT1，运行时强制验签、真实单平台 OCI 检查及持久防回滚待 RT2，
-本契约 PR 不代表正式模板或部署已可用。现有资源签名时间精度保持原样。
+初始根必须来自实际 CA pin 校验的 TLS Join，且响应必须包含至少一个合法根；空根或坏图会拒绝入网，
+不写身份与 keyring，但服务端可能已消费一次性 token。`AllowInsecure=true` 不会降级 HTTPS；
+实际明文开发 Join 只生成明确无发行信任的状态，普通 Join/Renew 不能再为它补根。
+RT1 已消费并持久化 v1 keyring，运行时强制验签、真实单平台 OCI 检查及持久防回滚仍待 RT2，
+不能据此认定正式模板或部署已可用。现有资源签名时间精度保持原样。
+
+身份目录永久保留 `release-trust.guard`，绑定初始证书、节点身份、CA 与根摘要。
+初始化先写 guard，再以 bbolt 事务写 pending 的 meta/keyring，最后保存身份文件并激活。
+已有任一身份文件、guard、state.db 或身份写入临时痕迹时，Join（包括 `--force`）都拒绝覆盖；
+缺库、半写与旧版身份缺根不会重新 TOFU。不完整状态需停机后由受保护的本机流程人工诊断，
+本版本不提供身份替换或重新 bootstrap 命令；不要删除 guard 或只删除 state.db 试图重新入网。
+
+续证独立验收证书和发行 key 列表。合法新证书仍保存，坏 key 批次整体拒绝，旧 ring 保留；
+调用方获得新身份及 `TrustUpdateError`，会话明确记录信任更新失败并在重连时读取新证书。
+遗漏 key 不撤销历史信任，kid 的公钥、原始秒/纳秒期限、来源和背书不可变；本地截止逐级取最小，
+接收与使用时到期即拒绝，不能通过重排列表、改变 mtime 或重启延长。
 
 ## 启动就绪与停止期间观测
 

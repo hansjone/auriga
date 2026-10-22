@@ -3,6 +3,8 @@ package conn
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -24,6 +26,7 @@ import (
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func sessionFixture(t *testing.T, renew func(context.Context, *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error)) (*Session, *testutil.FakeWorkspace, *identity.Material) {
@@ -314,4 +317,66 @@ func TestLoadCredsRejectsTamperedCA(t *testing.T) {
 	if _, err := enroll.RenewCertificate(context.Background(), enroll.Options{AgentDir: s.cfg.AgentDir, Store: s.cfg.Store, AllowInsecure: true}, true); err == nil || !strings.Contains(err.Error(), "ca.crt pin") {
 		t.Fatalf("renew accepted tampered CA: %v", err)
 	}
+}
+func TestTLSRenewTrustFailureRetainsCertificateAndReconnect(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := &nodev1.ArtifactSigningKey{Kid: "root", PublicKey: pub, NotAfter: timestamppb.New(time.Now().Add(time.Hour))}
+	fw, err := testutil.StartFakeWorkspace(testutil.FakeWorkspaceOpts{TLS: true, ArtifactSigningKeys: []*nodev1.ArtifactSigningKey{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(fw.Close)
+	dir := filepath.Join(t.TempDir(), "agent")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mat, err := enroll.Join(ctx, enroll.Options{Server: fw.URL(), Token: fw.Token(), CAFingerprint: fw.CA.Fingerprint(), AgentDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := state.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	var logs bytes.Buffer
+	s := New(Config{AgentDir: dir, Store: st, RenewCheckEvery: time.Hour, MinBackoff: time.Millisecond, MaxBackoff: 10 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	old := nearExpiry(t, s, fw, mat)
+	badPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fw.SetArtifactSigningKeys([]*nodev1.ArtifactSigningKey{{Kid: "unapproved-root", PublicKey: badPub, NotAfter: timestamppb.New(time.Now().Add(time.Hour))}})
+	if err := s.tryRenew(ctx); err != nil {
+		t.Fatalf("completed certificate renewal was treated as certificate failure: %v", err)
+	}
+	if !strings.Contains(logs.String(), "certificate renewed; runtime release trust unchanged") {
+		t.Fatal("split trust failure was not reported")
+	}
+	_, meta, cert, err := s.loadCreds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCerts, err := identity.ParseCertPEM(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(cert.Certificate[0], oldCerts[0].Raw) {
+		t.Fatal("reconnect loaded old certificate")
+	}
+	if !meta.ExpiresAt.Equal(cert.Leaf.NotAfter) {
+		t.Fatal("certificate and metadata differ")
+	}
+	ring, err := st.GetReleaseTrust()
+	if err != nil || len(ring.Records) != 1 || ring.Records[0].Kid != "root" {
+		t.Fatalf("bad roots replaced trust: %v", err)
+	}
+	// Stop before reading log bytes again: the session logger runs in another goroutine.
+	stop := runSession(t, s)
+	if err := testutil.WaitFor(3*time.Second, s.Connected); err != nil {
+		t.Fatal(err)
+	}
+	stop()
 }

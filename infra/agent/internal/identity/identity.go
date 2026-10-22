@@ -2,6 +2,7 @@
 package identity
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,21 +10,205 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/curve25519"
 )
 
+// Concurrent renewal RPCs may finish together. Coordinate the multi-file IO
+// locally so readers never observe an in-progress Save and Windows rename is
+// not attempted while another renewal still has an identity file open.
+var identityIOLocks sync.Map
+
+func identityIOLock(dir string) *sync.RWMutex {
+	path := CanonicalDir(dir)
+	lock, _ := identityIOLocks.LoadOrStore(path, &sync.RWMutex{})
+	return lock.(*sync.RWMutex)
+}
+
+// CanonicalDir is shared by enrollment's certificate+metadata commit lock.
+func CanonicalDir(dir string) string {
+	path, err := filepath.Abs(dir)
+	if err != nil {
+		path = filepath.Clean(dir)
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	if runtime.GOOS == "windows" {
+		path = strings.ToLower(path)
+	}
+	return path
+}
+
 const (
-	KeyFileName     = "node.key"
-	CertFileName    = "node.crt"
-	CAFileName      = "ca.crt"
-	SealingFileName = "sealing.key"
+	KeyFileName        = "node.key"
+	CertFileName       = "node.crt"
+	CAFileName         = "ca.crt"
+	SealingFileName    = "sealing.key"
+	TrustGuardFileName = "release-trust.guard"
 )
+
+// TrustGuard is permanent initialization evidence outside state.db. Its presence
+// prevents a missing/replaced database from silently becoming a fresh bootstrap.
+type TrustGuard struct {
+	Version     int    `json:"version"`
+	Binding     string `json:"binding"`
+	Roots       string `json:"roots"`
+	Trusted     bool   `json:"trusted"`
+	Certificate string `json:"initial_certificate_sha256"`
+}
+
+func CertificateDigest(cert []byte) string {
+	sum := sha256.Sum256(cert)
+	return hex.EncodeToString(sum[:])
+}
+
+// CheckFreshEnrollment must run before creating a database or replacing identity.
+// Force deliberately cannot override these historical initialization traces.
+func CheckFreshEnrollment(dir string) error {
+	// Windows can report a child of a regular file as "not found". Inspect
+	// existing ancestors as well, so an IO/path error is never evidence of a
+	// fresh enrollment.
+	path, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	for current := path; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				info, err = os.Stat(current)
+				if err != nil {
+					return err
+				}
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("enrollment ancestor is not a directory")
+			}
+			break
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect enrollment directory: %w", err)
+		}
+		if filepath.Dir(current) == current {
+			break
+		}
+	}
+	for _, name := range []string{KeyFileName, CertFileName, CAFileName, SealingFileName, TrustGuardFileName, "state.db"} {
+		_, err := os.Lstat(filepath.Join(dir, name))
+		if err == nil {
+			return fmt.Errorf("already enrolled or initialization evidence exists (%s); use certificate renewal; --force cannot replace trust", name)
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect enrollment evidence: %w", err)
+		}
+		matches, err := filepath.Glob(filepath.Join(dir, "."+name+".tmp.*"))
+		if err != nil {
+			return err
+		}
+		if len(matches) != 0 {
+			return fmt.Errorf("incomplete identity initialization; protected local recovery required")
+		}
+	}
+	return nil
+}
+
+// TrustBinding excludes the renewable leaf certificate but binds its node ID,
+// stable private-key public part, CA bytes, and sealing public key.
+func TrustBinding(m *Material) (string, error) {
+	if m == nil || m.PrivateKey == nil || m.NodeID == "" {
+		return "", fmt.Errorf("identity binding incomplete")
+	}
+	certs, err := ParseCertPEM(m.CertificatePEM)
+	if err != nil {
+		return "", err
+	}
+	if !PublicKeysEqual(certs[0], m.PrivateKey) {
+		return "", fmt.Errorf("identity key/certificate mismatch")
+	}
+	id, err := NodeIDFromCert(certs[0])
+	if err != nil || id != m.NodeID {
+		return "", fmt.Errorf("identity node binding mismatch")
+	}
+	pub, err := x509.MarshalPKIXPublicKey(&m.PrivateKey.PublicKey)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(struct {
+		Node                string
+		Public, CA, Sealing []byte
+	}{m.NodeID, pub, m.CAPEM, m.SealingPublic[:]})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// CreateTrustGuard exclusively claims initialization. Never remove it on errors:
+// a partial write is intentional fail-closed evidence for subsequent attempts.
+func CreateTrustGuard(dir string, g TrustGuard) error {
+	if err := CheckFreshEnrollment(dir); err != nil {
+		return err
+	}
+	if err := EnsureDir(dir); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(g)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, TrustGuardFileName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	if err := restrictFile(f.Name()); err != nil {
+		return err
+	}
+	if _, err := f.Write(raw); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+func ReadTrustGuard(dir string) (TrustGuard, error) {
+	var g TrustGuard
+	path := filepath.Join(dir, TrustGuardFileName)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return g, err
+	}
+	if !info.Mode().IsRegular() {
+		return g, fmt.Errorf("invalid release trust guard file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return g, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&g); err != nil {
+		return g, fmt.Errorf("invalid release trust guard: %w", err)
+	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return g, fmt.Errorf("trailing release trust guard data")
+	}
+	if g.Version != 1 || len(g.Binding) != 64 || len(g.Certificate) != 64 || (g.Trusted && len(g.Roots) != 64) || (!g.Trusted && g.Roots != "") {
+		return g, fmt.Errorf("invalid release trust guard binding")
+	}
+	return g, nil
+}
 
 // Material is the node identity persisted under <data>/agent/.
 type Material struct {
@@ -85,6 +270,9 @@ func EnsureDir(dir string) error {
 // Private keys are switched first: a failed key write cannot publish a new
 // certificate with the old key. This is not a multi-file transaction.
 func Save(dir string, m *Material) error {
+	lock := identityIOLock(dir)
+	lock.Lock()
+	defer lock.Unlock()
 	if err := EnsureDir(dir); err != nil {
 		return err
 	}
@@ -112,6 +300,9 @@ func Save(dir string, m *Material) error {
 
 // Load reads identity files from dir. Returns os.ErrNotExist if not enrolled.
 func Load(dir string) (*Material, error) {
+	lock := identityIOLock(dir)
+	lock.RLock()
+	defer lock.RUnlock()
 	keyPEM, err := os.ReadFile(filepath.Join(dir, KeyFileName))
 	if err != nil {
 		return nil, err

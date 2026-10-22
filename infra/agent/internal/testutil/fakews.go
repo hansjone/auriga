@@ -2,6 +2,8 @@ package testutil
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"sync"
 	"time"
@@ -13,12 +15,13 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// FakeWorkspace is an insecure gRPC server (grpc://) for tests.
-// TLS pin checks are covered separately via net.Pipe (localhost TLS may be MITMed by AV).
+// FakeWorkspace defaults to plaintext for older development tests. TLS mode
+// exercises production CA-pin bootstrap and authenticated certificate renewal.
 type FakeWorkspace struct {
 	CA *TestCA
 
@@ -40,9 +43,13 @@ type FakeWorkspace struct {
 	applyCh  chan *nodev1.InstanceSpec
 	deleteCh chan *nodev1.DeleteInstance
 
-	lis    net.Listener
-	server *grpc.Server
-	addr   string
+	lis           net.Listener
+	server        *grpc.Server
+	addr          string
+	tls           bool
+	keys          []*nodev1.ArtifactSigningKey
+	joinResponse  func(*nodev1.JoinResponse)
+	renewResponse func(*nodev1.RenewCertificateResponse)
 
 	nodev1.UnimplementedNodeEnrollmentServiceServer
 	nodev1.UnimplementedNodeControlServiceServer
@@ -50,13 +57,17 @@ type FakeWorkspace struct {
 
 // FakeWorkspaceOpts configures the fake platform.
 type FakeWorkspaceOpts struct {
-	Token             string
-	HeartbeatInterval time.Duration
-	RejectExpired     bool
-	Renew             func(context.Context, *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error)
+	TLS                 bool
+	ArtifactSigningKeys []*nodev1.ArtifactSigningKey
+	JoinResponse        func(*nodev1.JoinResponse)
+	RenewResponse       func(*nodev1.RenewCertificateResponse)
+	Token               string
+	HeartbeatInterval   time.Duration
+	RejectExpired       bool
+	Renew               func(context.Context, *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error)
 }
 
-// StartFakeWorkspace listens on 127.0.0.1:0 without TLS.
+// StartFakeWorkspace listens on 127.0.0.1:0, optionally using a real CA/TLS chain.
 func StartFakeWorkspace(opts FakeWorkspaceOpts) (*FakeWorkspace, error) {
 	ca, err := NewTestCA()
 	if err != nil {
@@ -77,11 +88,29 @@ func StartFakeWorkspace(opts FakeWorkspaceOpts) (*FakeWorkspace, error) {
 		heartbeat:     hb,
 		rejectExpired: opts.RejectExpired,
 		renew:         opts.Renew,
+		tls:           opts.TLS,
+		joinResponse:  opts.JoinResponse,
+		renewResponse: opts.RenewResponse,
 		applyCh:       make(chan *nodev1.InstanceSpec, 8),
 		deleteCh:      make(chan *nodev1.DeleteInstance, 8),
 	}
 
-	fw.server = grpc.NewServer()
+	fw.SetArtifactSigningKeys(opts.ArtifactSigningKeys)
+	var serverOpts []grpc.ServerOption
+	if opts.TLS {
+		certPEM, keyPEM, err := ca.IssueWorkspace([]string{"localhost"}, []net.IP{net.ParseIP("127.0.0.1")})
+		if err != nil {
+			return nil, err
+		}
+		cert, err := tls.X509KeyPair(append(certPEM, ca.PEM...), keyPEM)
+		if err != nil {
+			return nil, err
+		}
+		roots := x509.NewCertPool()
+		roots.AppendCertsFromPEM(ca.PEM)
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12, ClientCAs: roots, ClientAuth: tls.VerifyClientCertIfGiven})))
+	}
+	fw.server = grpc.NewServer(serverOpts...)
 	nodev1.RegisterNodeEnrollmentServiceServer(fw.server, fw)
 	nodev1.RegisterNodeControlServiceServer(fw.server, fw)
 
@@ -98,8 +127,28 @@ func StartFakeWorkspace(opts FakeWorkspaceOpts) (*FakeWorkspace, error) {
 // Addr returns host:port.
 func (f *FakeWorkspace) Addr() string { return f.addr }
 
-// URL returns grpc://127.0.0.1:port (insecure; for tests).
-func (f *FakeWorkspace) URL() string { return "grpc://" + f.addr }
+// URL returns the actual plaintext or authenticated TLS test endpoint.
+func (f *FakeWorkspace) URL() string {
+	if f.tls {
+		return "https://" + f.addr
+	}
+	return "grpc://" + f.addr
+}
+
+func (f *FakeWorkspace) SetArtifactSigningKeys(keys []*nodev1.ArtifactSigningKey) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keys = cloneKeys(keys)
+}
+func cloneKeys(keys []*nodev1.ArtifactSigningKey) []*nodev1.ArtifactSigningKey {
+	out := make([]*nodev1.ArtifactSigningKey, len(keys))
+	for i, k := range keys {
+		if k != nil {
+			out[i] = proto.Clone(k).(*nodev1.ArtifactSigningKey)
+		}
+	}
+	return out
+}
 
 // Token returns the valid join token.
 func (f *FakeWorkspace) Token() string { return f.token }
@@ -157,16 +206,26 @@ func (f *FakeWorkspace) Join(_ context.Context, req *nodev1.JoinRequest) (*nodev
 	}
 	f.tokenUsed = true
 	expires := time.Now().Add(30 * 24 * time.Hour)
-	return &nodev1.JoinResponse{
+	resp := &nodev1.JoinResponse{
 		NodeId:               nodeID,
 		CertificateChain:     certPEM,
 		CaBundle:             f.CA.PEM,
 		ControlEndpoint:      f.URL(),
 		CertificateExpiresAt: timestamppb.New(expires),
-	}, nil
+		ArtifactSigningKeys:  cloneKeys(f.keys),
+	}
+	if f.joinResponse != nil {
+		f.joinResponse(resp)
+	}
+	return resp, nil
 }
 
 func (f *FakeWorkspace) RenewCertificate(ctx context.Context, req *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error) {
+	if f.tls {
+		if _, err := peerNodeID(ctx); err != nil {
+			return nil, status.Error(codes.Unauthenticated, "TLS renewal requires node client certificate")
+		}
+	}
 	if f.renew != nil {
 		return f.renew(ctx, req)
 	}
@@ -179,10 +238,18 @@ func (f *FakeWorkspace) RenewCertificate(ctx context.Context, req *nodev1.RenewC
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue cert: %v", err)
 	}
-	return &nodev1.RenewCertificateResponse{
+	f.mu.Lock()
+	keys := cloneKeys(f.keys)
+	f.mu.Unlock()
+	resp := &nodev1.RenewCertificateResponse{
 		CertificateChain:     certPEM,
 		CertificateExpiresAt: timestamppb.New(time.Now().Add(30 * 24 * time.Hour)),
-	}, nil
+		ArtifactSigningKeys:  keys,
+	}
+	if f.renewResponse != nil {
+		f.renewResponse(resp)
+	}
+	return resp, nil
 }
 
 func (f *FakeWorkspace) Session(stream nodev1.NodeControlService_SessionServer) error {
