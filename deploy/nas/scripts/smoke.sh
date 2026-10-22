@@ -10,7 +10,7 @@ set -eu
 load_stack_env
 require_cmd curl
 
-load_env_file "$AURIGA_DATA_ROOT/config/materials/access.env"
+load_nas_access_env "$AURIGA_DATA_ROOT/config/materials/access.env"
 PORTAL=$AURIGA_NAS_PORTAL_HOST
 ADMIN=$AURIGA_NAS_ADMIN_HOST
 PORTAL_URL=$AURIGA_NAS_PORTAL_URL

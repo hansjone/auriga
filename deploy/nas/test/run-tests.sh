@@ -177,6 +177,11 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
   else
     fail_msg review_regressions "review regression failed"
   fi
+  if sh "$ROOT/test/derived-access-env.sh" "$DATA"; then
+    pass derived_access_env_boundary
+  else
+    fail_msg derived_access_env_boundary "derived fields must not gain operator configuration authority"
+  fi
   # Reproduce the old policy caller's missing access input, with no material writes.
   LEGACY="$TMP/srv/container/auriga-legacy"
   mkdir -p "$LEGACY"

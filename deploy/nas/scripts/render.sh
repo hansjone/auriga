@@ -13,7 +13,7 @@ SECRETS="$AURIGA_DATA_ROOT/secrets"
 CONFIG="$AURIGA_DATA_ROOT/config"
 [ -d "$SECRETS" ] || die "secrets directory missing; run init.sh first"
 bootstrap_nas_materials
-load_env_file "$CONFIG/materials/access.env"
+load_nas_access_env "$CONFIG/materials/access.env"
 
 for _name in ca.crt edge.crt edge-iam.crt proxy-ca.crt proxy-edge.crt; do
   install_edge_material "$CONFIG/materials/pki/$_name" "$CONFIG/pki-edge/$_name" 644

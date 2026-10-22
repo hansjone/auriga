@@ -95,6 +95,64 @@ load_env_file() {
   done <"$_file"
 }
 
+# Generated access metadata has no operator configuration authority. Capture and
+# validate the entire fixed record before exporting even its first field.
+load_nas_access_env() {
+  _nas_env_file=$1
+  [ -f "$_nas_env_file" ] && [ ! -L "$_nas_env_file" ] || die "invalid derived access environment"
+  require_cmd awk
+  _nas_env_record=$(LC_ALL=C awk '
+    function port(value) {
+      return value ~ /^[1-9][0-9]*$/ && length(value) <= 5 && value + 0 <= 65535
+    }
+    function host(value, labels, count, i) {
+      if (length(value) < 1 || length(value) > 253) return 0
+      count = split(value, labels, /[.]/)
+      for (i = 1; i <= count; i++) {
+        if (length(labels[i]) < 1 || length(labels[i]) > 63 || labels[i] !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/) return 0
+      }
+      return 1
+    }
+    function origin(value, authority, count, parts) {
+      if (value !~ /^https?:\/\//) return 0
+      authority = value
+      sub(/^https?:\/\//, "", authority)
+      count = split(authority, parts, ":")
+      return (count == 1 || count == 2 && port(parts[2])) && host(parts[1])
+    }
+    BEGIN {
+      count = split("AURIGA_NAS_ISSUER AURIGA_NAS_PORTAL_HOST AURIGA_NAS_ADMIN_HOST AURIGA_NAS_PORTAL_URL AURIGA_NAS_ADMIN_URL AURIGA_NAS_PORTAL_PORT AURIGA_NAS_ADMIN_PORT AURIGA_NAS_PORTAL_TARGET_PORT AURIGA_NAS_ADMIN_TARGET_PORT", keys, " ")
+      for (i = 1; i <= count; i++) allowed[keys[i]] = 1
+    }
+    {
+      equal = index($0, "=")
+      key = substr($0, 1, equal - 1)
+      value = substr($0, equal + 1)
+      if (equal < 2 || !(key in allowed) || seen[key]++ || value == "" || NR > 9) { bad = 1; exit 1 }
+      if (key ~ /_HOST$/) valid = host(value)
+      else if (key ~ /_PORT$/) valid = port(value)
+      else valid = origin(value)
+      if (!valid) { bad = 1; exit 1 }
+      record[NR] = $0
+    }
+    END {
+      if (bad || NR != 9) exit 1
+      for (i = 1; i <= 9; i++) if (!(keys[i] in seen)) exit 1
+      for (i = 1; i <= 9; i++) print record[i]
+    }
+  ' "$_nas_env_file") || die "invalid derived access environment"
+  while IFS= read -r _nas_env_line; do
+    _nas_env_key=${_nas_env_line%%=*}
+    case "$_nas_env_key" in
+      AURIGA_NAS_ISSUER|AURIGA_NAS_PORTAL_HOST|AURIGA_NAS_ADMIN_HOST|AURIGA_NAS_PORTAL_URL|AURIGA_NAS_ADMIN_URL|AURIGA_NAS_PORTAL_PORT|AURIGA_NAS_ADMIN_PORT|AURIGA_NAS_PORTAL_TARGET_PORT|AURIGA_NAS_ADMIN_TARGET_PORT)
+        export "$_nas_env_key=${_nas_env_line#*=}" ;;
+      *) die "invalid derived access environment" ;;
+    esac
+  done <<EOF
+$_nas_env_record
+EOF
+}
+
 load_stack_env() {
   _root=${AURIGA_DATA_ROOT:-}
   _file=""
@@ -116,7 +174,7 @@ load_stack_env() {
   case "$AURIGA_ACCESS_FILE" in /*) ;; *) die "AURIGA_ACCESS_FILE must be absolute" ;; esac
   validate_data_root "$AURIGA_DATA_ROOT"
   validate_managed_tree
-  if [ -f "$AURIGA_DATA_ROOT/config/materials/access.env" ]; then load_env_file "$AURIGA_DATA_ROOT/config/materials/access.env"; fi
+  if [ -f "$AURIGA_DATA_ROOT/config/materials/access.env" ]; then load_nas_access_env "$AURIGA_DATA_ROOT/config/materials/access.env"; fi
   # Ignore operator COMPOSE_PROJECT_NAME — always fixed (M1).
   COMPOSE_PROJECT_NAME=$AURIGA_NAS_PROJECT
   export COMPOSE_PROJECT_NAME
