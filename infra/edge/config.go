@@ -7,28 +7,35 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
 
 // Config drives auriga-edge. Values may come from a JSON file and/or environment.
 type Config struct {
-	Listen               string            `json:"listen"`
-	PortalHost           string            `json:"portalHost"`
-	AdminHost            string            `json:"adminHost"`
-	InstanceParentDomain string            `json:"instanceParentDomain"`
-	SecureCookies        bool              `json:"secureCookies"`
-	TrustedProxies       []string          `json:"trustedProxies"`
-	Upstreams            map[string]string `json:"upstreams"`
-	Static               StaticConfig      `json:"static"`
-	TLS                  TLSConfig         `json:"tls"`
-	RateLimit            RateLimitConfig   `json:"rateLimit"`
-	IdentityKeysFile     string            `json:"identityKeysFile"`
-	SessionStore         string            `json:"sessionStore"` // memory | nats
-	NATSURL              string            `json:"natsUrl"`
-	NATSCredsFile        string            `json:"natsCredsFile"`
-	RoutesNATSCredsFile  string            `json:"routesNatsCredsFile"`
-	AllowLocalIngress    bool              `json:"allowLocalIngress"`
-	NodeTLS              NodeTLSConfig     `json:"nodeTLS"`
-	PublicPathPrefixes   []string          `json:"publicPathPrefixes"`
+	AccessConfigFile     string                  `json:"accessConfigFile"`
+	Access               deploymentconfig.Config `json:"-"`
+	ProxyTLS             ProxyTLSConfig          `json:"proxyTLS"`
+	IAMRPC               IAMRPCConfig            `json:"iamRpc"`
+	IAMHop               IAMHopConfig            `json:"iamHop"`
+	Listen               string                  `json:"listen"`
+	PortalHost           string                  `json:"portalHost"`
+	AdminHost            string                  `json:"adminHost"`
+	InstanceParentDomain string                  `json:"instanceParentDomain"`
+	SecureCookies        bool                    `json:"secureCookies"`
+	TrustedProxies       []string                `json:"trustedProxies"`
+	Upstreams            map[string]string       `json:"upstreams"`
+	Static               StaticConfig            `json:"static"`
+	TLS                  TLSConfig               `json:"tls"`
+	RateLimit            RateLimitConfig         `json:"rateLimit"`
+	IdentityKeysFile     string                  `json:"identityKeysFile"`
+	SessionStore         string                  `json:"sessionStore"` // memory | nats
+	NATSURL              string                  `json:"natsUrl"`
+	NATSCredsFile        string                  `json:"natsCredsFile"`
+	RoutesNATSCredsFile  string                  `json:"routesNatsCredsFile"`
+	AllowLocalIngress    bool                    `json:"allowLocalIngress"`
+	NodeTLS              NodeTLSConfig           `json:"nodeTLS"`
+	PublicPathPrefixes   []string                `json:"publicPathPrefixes"`
 }
 
 type StaticConfig struct {
@@ -72,7 +79,7 @@ func defaultConfig() Config {
 	}
 }
 
-func loadConfig(path string) (Config, error) {
+func loadConfigWithAccess(path, accessPath string) (Config, error) {
 	cfg := defaultConfig()
 	if path != "" {
 		raw, err := os.ReadFile(path)
@@ -84,6 +91,24 @@ func loadConfig(path string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	if accessPath != "" {
+		cfg.AccessConfigFile = accessPath
+	}
+	if cfg.AccessConfigFile != "" {
+		raw, err := os.ReadFile(cfg.AccessConfigFile)
+		if err != nil {
+			return Config{}, fmt.Errorf("read access config: %w", err)
+		}
+		cfg.Access, err = deploymentconfig.Load(raw)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.PortalHost = originAuthority(cfg.Access.PortalOrigin())
+		cfg.AdminHost = originAuthority(cfg.Access.AdminOrigin())
+		cfg.InstanceParentDomain = cfg.Access.InstanceParentDomain()
+		cfg.SecureCookies = cfg.Access.PortalOrigin().Scheme == "https"
+		cfg.TrustedProxies = nil
+	}
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
@@ -97,6 +122,7 @@ func applyEnv(cfg *Config) {
 		}
 	}
 	set("AURIGA_EDGE_LISTEN", &cfg.Listen)
+	set("AURIGA_EDGE_ACCESS_CONFIG", &cfg.AccessConfigFile)
 	set("AURIGA_EDGE_NODE_CERT_FILE", &cfg.NodeTLS.CertFile)
 	set("AURIGA_EDGE_NODE_KEY_FILE", &cfg.NodeTLS.KeyFile)
 	set("AURIGA_EDGE_NODE_CA_FILE", &cfg.NodeTLS.CAFile)
@@ -211,7 +237,7 @@ func (c Config) validate() error {
 	if c.IdentityKeysFile == "" {
 		return fmt.Errorf("identityKeysFile is required")
 	}
-	if parent := strings.ToLower(strings.TrimSpace(c.InstanceParentDomain)); parent != "" {
+	if parent := strings.ToLower(strings.TrimSpace(c.InstanceParentDomain)); parent != "" && !c.Access.Valid() {
 		ph := strings.ToLower(c.PortalHost)
 		ah := strings.ToLower(c.AdminHost)
 		suffix := "." + parent

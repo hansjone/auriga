@@ -24,6 +24,9 @@ type Server struct {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if s.Cfg.Access.Valid() {
+		return s.runAccess(ctx)
+	}
 	if s.Log == nil {
 		s.Log = slog.Default()
 	}

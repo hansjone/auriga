@@ -18,6 +18,7 @@ func run(args []string, out, logs io.Writer) error {
 	flags.SetOutput(logs)
 	showVersion := flags.Bool("version", false, "print version")
 	configPath := flags.String("config", "", "path to JSON config file")
+	accessPath := flags.String("access-config", "", "path to trusted deployment access configuration")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -31,7 +32,7 @@ func run(args []string, out, logs io.Writer) error {
 
 	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "edge")
 
-	cfg, err := loadConfig(*configPath)
+	cfg, err := loadConfigWithAccess(*configPath, *accessPath)
 	if err != nil {
 		return err
 	}
@@ -65,6 +66,22 @@ func run(args []string, out, logs io.Writer) error {
 	}
 
 	defer gw.Ingress.Close()
+	if transport, ok := gw.IAMTransport.(interface{ CloseIdleConnections() }); ok {
+		defer transport.CloseIdleConnections()
+	}
+	for _, component := range gw.APITransports {
+		if transport, ok := component.(interface{ CloseIdleConnections() }); ok {
+			defer transport.CloseIdleConnections()
+		}
+	}
+	if cfg.Access.Valid() && cfg.IAMRPC.Address != "" {
+		rpc, err := newIAMRPC(cfg.IAMRPC, cfg.IAMHop)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rpc.Close() }()
+		gw.AdminCSRF = rpc
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

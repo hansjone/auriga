@@ -2,6 +2,28 @@
 
 `infra/edge` 是对外唯一入口的骨架（任务 B7）。进程名 `auriga-edge`。
 
+IP1 增加受信入口模式：`--access-config <access.json>`（或基础配置 `accessConfigFile`、
+`AURIGA_EDGE_ACCESS_CONFIG`）通过正式 `deploymentconfig.Load` 校验安装配置，再一次性绑定
+portal/admin/instanceControl 三个独立 socket；任何一个失败都关闭此前绑定。开启后旧 listen、
+host、secureCookies、trustedProxies 环境值不能覆盖安装身份。下文旧单 listener 配置仅适用于未启用此模式。
+
+基础配置仍提供 upstream、静态目录、NATS、PKI。direct 根据实际 TLS 选择传输；HTTPS listener
+使用现 `tls.certFile/keyFile`。trusted_proxy 的 portal/admin 强制实际 TLS+mTLS，额外固定
+`proxyTLS.caFile` 与 `proxyTLS.identityUri`，同时校已验证证书的唯一 URI SAN 和实际 TCP peer CIDR；
+Forwarded/X-Forwarded 不能决定角色、scheme 或租户。内控 listener 仅精确 self/heartbeat，
+要求 `Bearer ait_...` 后仍由 workspace 验真实令牌，其余路由 404。
+
+IAM 专用 mTLS hop、精确 cookie 白名单、标准服务 JWT 的 CSRF gRPC 配置，以及 SPA 公开
+`auriga-access-mode` meta 的正式 wire 约束见
+[edge-iam-hop.md](../../contracts/deployment/edge-iam-hop.md)。IAM hop 或管理 RPC 未装配时失败关闭；
+IP admin 写每次在线核验，绝不退回旧 CSRF cookie/hash。管理 WebSocket 尚无正式握手协议，拒绝。
+portal/domain OAuth authorize 仍由 IAM 原同意流程校当前 session/CSRF，IP admin 旧同意表单拒绝。
+仅 provider 已登记表单 callback 的精确 POST 可按协议处理跨源 resume，不能整段跳过登录 Origin/CSRF。
+
+门户/管理 index 注入经校验的 `domain|ip`，使用 no-store；静态资产不注入。
+IP2 的实例 mount/cookiePath、上游 Location/Service Worker 边界与 IP3 真实浏览器双模式验收仍未完成，
+本入口/RPC 单元和真实 socket 回归不能作为“纯 IP 已可用”的结论。
+
 详细契约见 `contracts/README.md`（鉴权、路由、KV）与 `contracts/plugin/README.md` §2（身份头）。
 实例源隔离见 ADR 0020；令牌模型见 ADR 0014。
 

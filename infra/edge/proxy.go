@@ -68,6 +68,9 @@ func rewriteOutboundAPI(req *http.Request, clientIP, bearer, requestID, tracepar
 }
 
 func rewriteOutboundInstance(req *http.Request, clientIP, identity, requestID, traceparent string) {
+	stripUntrustedEntryHeaders(req.Header)
+	req.Header.Del("X-Auriga-CSRF")
+	req.Header.Del("X-Auriga-CSRF-Bootstrap")
 	req.Header.Del("Auriga-Identity")
 	req.Header.Del("Authorization")
 	if c := req.Header.Get("Cookie"); c != "" {
