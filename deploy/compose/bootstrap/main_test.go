@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Exercise the actual CLI and protobuf consumed by workspace, including a fixture switch.
+// Exercise the actual CLI and protobuf for each fixture in a fresh installation.
 func TestFixtureTemplates(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "bootstrap")
@@ -27,9 +27,6 @@ func TestFixtureTemplates(t *testing.T) {
 	for _, fixture := range []string{"fake", "real"} {
 		out := filepath.Join(root, fixture)
 		if err := os.MkdirAll(filepath.Join(out, "templates"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(out, "templates", "fake-dsh.pb"), []byte("stale"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		args := []string{"-fixture", fixture, "-image", image, "-out", out}

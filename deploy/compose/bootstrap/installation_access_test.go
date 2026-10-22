@@ -235,6 +235,119 @@ func installationSnapshot(t *testing.T, out string) string {
 	return b.String()
 }
 
+func TestPartialInstallationCLI(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "bootstrap")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	if output, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v: %s", err, output)
+	}
+	cases := []string{"fake-template", "real-template", "unknown-template", "template-subdirectory", "templates-file", "unknown-pki"}
+	if runtime.GOOS == "linux" {
+		cases = append(cases, "templates-empty-directory-symlink", "pki-empty-directory-symlink")
+	}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			caseRoot := t.TempDir()
+			out := filepath.Join(caseRoot, "installation")
+			if err := os.MkdirAll(out, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			fixture := "fake"
+			dir := filepath.Join(out, "templates")
+			switch name {
+			case "templates-empty-directory-symlink", "pki-empty-directory-symlink":
+				external := filepath.Join(caseRoot, "external")
+				if err := os.Mkdir(external, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if name == "pki-empty-directory-symlink" {
+					dir = filepath.Join(out, "pki")
+				}
+				if err := os.Symlink(external, dir); err != nil {
+					t.Fatal(err)
+				}
+			case "templates-file":
+				if err := os.WriteFile(dir, []byte("retained"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if name == "unknown-pki" {
+					dir = filepath.Join(out, "pki")
+				}
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				file := "fake-dsh.pb"
+				if name == "real-template" {
+					file = "real-dsh.pb"
+					fixture = "real"
+				}
+				if name == "unknown-template" || name == "unknown-pki" {
+					file = "unknown.material"
+				}
+				if name == "template-subdirectory" {
+					if err := os.Mkdir(filepath.Join(dir, "unknown"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.WriteFile(filepath.Join(dir, file), []byte("retained"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := safeInstallationFiles(t, caseRoot)
+			image := "127.0.0.1:5000/auriga/real-dsh@sha256:" + strings.Repeat("a", 64)
+			output, err := exec.Command(binary, "-out", out, "-fixture", fixture, "-image", image).CombinedOutput()
+			if err == nil {
+				t.Errorf("partial installation accepted: %s", output)
+			}
+			if after := safeInstallationFiles(t, caseRoot); after != before {
+				t.Error("failed installation modified existing or external materials")
+			}
+		})
+	}
+}
+
+func safeInstallationFiles(t *testing.T, root string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(&b, "%s %o link=%s\n", rel, info.Mode(), target)
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&b, "%s %o %x\n", rel, info.Mode(), sha256.Sum256(raw))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
 func customAccess(mode string) deployment.Access {
 	a := composeAccess("public-test-edge")
 	a.PortalOrigin.Host = "example.com"

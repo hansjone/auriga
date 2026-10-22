@@ -162,6 +162,20 @@ func existingIdentityMaterials(out, inputDigest string) (ed25519.PublicKey, stri
 	defer installation.close()
 	raw, err := installation.read("bootstrap.receipt")
 	if os.IsNotExist(err) {
+		// A new installation may only use the empty real directories created by
+		// main. Do not adopt unknown remnants or follow links while generating
+		// templates or private PKI outside this installation.
+		for _, name := range []string{"pki", "templates"} {
+			path := filepath.Join(out, name)
+			info, statErr := os.Lstat(path)
+			if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				return nil, "", false, fmt.Errorf("unreceipted %s must be an empty real directory", name)
+			}
+			entries, readErr := os.ReadDir(path)
+			if readErr != nil || len(entries) != 0 {
+				return nil, "", false, fmt.Errorf("unreceipted %s must be an empty real directory", name)
+			}
+		}
 		for _, name := range identityMaterialFiles {
 			if _, err := os.Lstat(filepath.Join(out, name)); !os.IsNotExist(err) {
 				return nil, "", false, fmt.Errorf("existing identity materials require a complete bootstrap receipt; use a fresh installation directory")
