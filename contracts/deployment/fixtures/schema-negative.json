@@ -1,0 +1,219 @@
+[
+  {
+    "name": "port-zero",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.port",
+    "value": 0
+  },
+  {
+    "name": "port-too-large",
+    "base": "ip-http.json",
+    "pointer": "adminOrigin.port",
+    "value": 65536
+  },
+  {
+    "name": "port-fraction",
+    "base": "ip-http.json",
+    "pointer": "adminOrigin.port",
+    "value": 8082.5
+  },
+  {
+    "name": "port-string",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.port",
+    "value": "8080"
+  },
+  {
+    "name": "ip-host-is-domain",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "portal.example.com"
+  },
+  {
+    "name": "ip-host-is-ipv6",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "[2001:db8::1]"
+  },
+  {
+    "name": "ipv4-leading-zero",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "192.0.2.010"
+  },
+  {
+    "name": "host-userinfo",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "alice@192.0.2.10"
+  },
+  {
+    "name": "host-url",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "http://192.0.2.10"
+  },
+  {
+    "name": "host-percent",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "192.0.2.10%2f"
+  },
+  {
+    "name": "host-comma",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "192.0.2.10,192.0.2.11"
+  },
+  {
+    "name": "host-path",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "192.0.2.10/"
+  },
+  {
+    "name": "host-trailing-dot",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.host",
+    "value": "192.0.2.10."
+  },
+  {
+    "name": "scheme-ws",
+    "base": "ip-http.json",
+    "pointer": "portalOrigin.scheme",
+    "value": "ws"
+  },
+  {
+    "name": "unknown-mode",
+    "base": "ip-http.json",
+    "pointer": "mode",
+    "value": "auto"
+  },
+  {
+    "name": "missing-tenant",
+    "base": "ip-http.json",
+    "pointer": "tenantId",
+    "value": null,
+    "remove": true
+  },
+  {
+    "name": "bad-tenant",
+    "base": "ip-http.json",
+    "pointer": "tenantId",
+    "value": "not-a-uuid"
+  },
+  {
+    "name": "unknown-field",
+    "base": "ip-http.json",
+    "pointer": "audience",
+    "value": "admin"
+  },
+  {
+    "name": "ip-subdomain-mix",
+    "base": "ip-http.json",
+    "pointer": "instances",
+    "value": {
+      "mode": "subdomain",
+      "parentDomain": "i.example.com",
+      "scheme": "https",
+      "port": 443
+    }
+  },
+  {
+    "name": "path-wrong-prefix",
+    "base": "ip-http.json",
+    "pointer": "instances.prefix",
+    "value": "/"
+  },
+  {
+    "name": "weak-isolation-not-acknowledged",
+    "base": "ip-http.json",
+    "pointer": "instances.trustedTeamAcknowledged",
+    "value": false
+  },
+  {
+    "name": "internal-ip-alias",
+    "base": "ip-http.json",
+    "pointer": "instanceControl.dnsAlias",
+    "value": "192.0.2.10"
+  },
+  {
+    "name": "internal-ip-origin",
+    "base": "ip-http.json",
+    "pointer": "instanceControl.origin.host",
+    "value": "192.0.2.10"
+  },
+  {
+    "name": "internal-userinfo",
+    "base": "ip-http.json",
+    "pointer": "instanceControl.origin.host",
+    "value": "alice@auriga-instance.internal"
+  },
+  {
+    "name": "missing-edge-container",
+    "base": "ip-http.json",
+    "pointer": "instanceControl.edgeContainer",
+    "value": null,
+    "remove": true
+  },
+  {
+    "name": "wrong-tls-type",
+    "base": "ip-http.json",
+    "pointer": "listeners.admin.tls",
+    "value": "false"
+  },
+  {
+    "name": "proxy-missing-mtls",
+    "base": "ip-http.json",
+    "pointer": "ingress",
+    "value": {
+      "kind": "trusted_proxy",
+      "peerCidrs": ["127.0.0.1/32"],
+      "preserveAuthority": true
+    }
+  },
+  {
+    "name": "proxy-mtls-disabled",
+    "base": "ip-http.json",
+    "pointer": "ingress",
+    "value": {
+      "kind": "trusted_proxy",
+      "peerCidrs": ["127.0.0.1/32"],
+      "preserveAuthority": true,
+      "requireMtls": false
+    }
+  },
+  {
+    "name": "proxy-wildcard-authority",
+    "base": "ip-http.json",
+    "pointer": "ingress",
+    "value": {
+      "kind": "trusted_proxy",
+      "peerCidrs": ["127.0.0.1/32"],
+      "preserveAuthority": false,
+      "requireMtls": true
+    }
+  },
+  {
+    "name": "domain-path-mix",
+    "base": "domain-proxy.json",
+    "pointer": "instances",
+    "value": {
+      "mode": "path",
+      "prefix": "/i/",
+      "trustedTeamAcknowledged": true
+    }
+  },
+  {
+    "name": "domain-ip-host",
+    "base": "domain-proxy.json",
+    "pointer": "adminOrigin.host",
+    "value": "192.0.2.10"
+  },
+  {
+    "name": "domain-wildcard",
+    "base": "domain-proxy.json",
+    "pointer": "instances.parentDomain",
+    "value": "*.i.example.com"
+  }
+]

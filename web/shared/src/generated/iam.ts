@@ -27,7 +27,7 @@ export interface paths {
     put?: never;
     /**
      * 开始一次登录（或绑定、补验证）
-     * @description 返回第一步。会给发起端下发 cookie `auriga_login_tx`（绑定事务和浏览器，扫码类防转发）。
+     * @description 返回第一步。按本入口下发 portal/admin 分名的登录事务cookie（见文首），绑定事务和浏览器，扫码类防转发。
      *     purpose=link / stepup 时需要已登录。
      */
     post: operations['createLoginTransaction'];
@@ -91,7 +91,8 @@ export interface paths {
     put?: never;
     /**
      * 提交输入，推进到下一步
-     * @description 完成时响应里 step.type=complete，并下发会话 cookie（经 edge 原样转给浏览器）。
+     * @description 完成时 step.type=complete，按本事务的规范入口/audience下发对应会话cookie并清除本audience事务cookie。
+     *     另一个入口的会话和事务不变；IP管理台不下发可读CSRF cookie，完成后调用管理CSRF登记接口。
      */
     post: operations['advanceLoginTransaction'];
     delete?: never;
@@ -111,7 +112,9 @@ export interface paths {
     };
     /**
      * 跳转类身份源的固定回调地址
-     * @description 用查询参数和 `auriga_login_tx` cookie 推进事务，然后 302 回登录页（完成时回 redirectTo）。
+     * @description 用查询参数及本入口audience的登录事务cookie推进事务，然后302回本入口登录页（完成时回已验证的returnTo）。
+     *     外部重定向的GET可缺Origin；只此精确回调允许，以固定provider回调、一次性state/nonce/PKCE、事务cookie及
+     *     事务Origin/tenant/audience绑定代替普通写请求CSRF。不得推广到其它路径或其它方法。
      */
     get: operations['loginCallbackGet'];
     put?: never;
@@ -119,6 +122,8 @@ export interface paths {
      * 回调（POST 绑定，例如 SAML、Apple）
      * @description 跨站 POST 不会带 SameSite=Lax 的事务 cookie：iam 把表单参数暂存（5 分钟、一次性，按随机 resume 键），
      *     然后 303 跳到同源的 GET /login/callback/{providerId}?resume=<键>，在 GET 里校验事务 cookie 后继续。
+     *     这是精确协议例外：仅已登记provider固定POST回调，校验协议state/签名等，resume绑定原事务、
+     *     tenant/audience/规范回调Origin，不产生会话或完成登录；最终GET还需对应audience事务cookie。
      */
     post: operations['loginCallbackPost'];
     delete?: never;
@@ -195,7 +200,49 @@ export interface paths {
     };
     get?: never;
     put?: never;
+    /**
+     * @description 校验本入口完整Origin和本会话CSRF，仅吊销实际消费的当前audience会话；清除该audience的session、
+     *     登录事务及CSRF状态。门户登出使它关联的实例cookie/原WS失效，但不注销独立管理会话；管理登出反之。
+     *     IP管理台清空全部已登记adminCsrfTokens；不能一并清除门户CSRF或另一入口的cookie。
+     */
     post: operations['logout'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/admin/session/csrf-tokens': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * 为本人当前管理浏览器会话登记内存CSRF令牌（IP0，待IP1实现）
+     * @description 仅IP模式管理入口启用。精确 POST /api/iam/v1/admin/session/csrf-tokens 是唯一免旧CSRF头的登记操作。
+     *     edge必须验证可信admin listener、完整规范admin Origin、当前admin浏览器session、JSON及下列固定非简单头。
+     *     普通同源POST fetch会自动带Origin；不使用可能没有Origin的GET恢复流程。缺失/null/多个/错scheme或端口Origin拒绝。
+     *     固定头不是秘密，不能使其它路由免CSRF；不开放CORS/JSONP/重定向，不允许service/device或任意admin Bearer替代cookie。
+     *     edge只向受信IAM hop换发绑定当前sid/tid的ctx=admin令牌；IAM按权威会话重查账号/tenant/audience/到期/吊销，
+     *     实现使用AuthenticatedOnly+AdminOnly，不新增权限key，不允许请求指定目标会话。
+     *
+     *     每个tab/document先用crypto.getRandomValues生成32字节、无填充base64url token，仅保存在内存中并提交。
+     *     IAM事务锁定当前会话，清理过期条目，只保存UTF-8 token的SHA-256小写十六进制hash及到期；不能从csrfHash还原原文。
+     *     同一有效hash重试返回同一expiresAt且不延长；不同tab各有独立条目，不全局轮换或覆盖其它tab。
+     *     每会话最多32个有效条目，满额返回429和Retry-After，不挤占有效条目；到期取min(当前时间+900秒,会话绝对/闲置到期)。
+     *     响应回显本次提交的token，不需要持久化可逆明文；只有IAM事务提交成功才返回200，原文不进KV、日志或URL。
+     *     刷新/新tab/丢失内存/到期使用新token；响应丢失只重试相同请求token。续期重发JWT不延长token期限。
+     *     管理写请求的X-Auriga-CSRF由edge通过VerifyAdminSessionCsrf在线验证，失败关闭；IP模式不退回旧csrfHash/cookie比较。
+     *     401回管理登录；403仅在确认会话仍有效且token过期/未知时登记新token，不自动重放已发出的非幂等业务写请求。
+     *     登出、会话到期/吊销清空所有hash；并发登记与吊销锁同一权威会话，不能让KV延迟/旧续期写复活。
+     *     响应仅同源JSON，Cache-Control:no-store、X-Content-Type-Options:nosniff；禁止持久化、URL、可读cookie和跨源postMessage。
+     *     domain模式保留既有按源CSRF cookie流程，本操作不启用；完整规范及后续实测矩阵见deployment/README.md。
+     */
+    post: operations['registerAdminSessionCsrfToken'];
     delete?: never;
     options?: never;
     head?: never;
@@ -916,6 +963,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    AdminCsrfTokenRegistration: {
+      /** @description 每tab由crypto.getRandomValues生成32字节、规范无填充base64url。服务端校格式不能证明熵，客户端必须使用安全随机源。 */
+      token: string;
+    };
+    AdminCsrfToken: {
+      token: components['schemas']['AdminCsrfTokenRegistration']['token'];
+      /** Format: date-time */
+      expiresAt: string;
+    };
     LoginProvider: {
       id: components['schemas']['Uuid'];
       connectorType: string;
@@ -937,7 +993,7 @@ export interface components {
        */
       purpose: 'login' | 'link' | 'stepup';
       invitationCode?: string;
-      /** @description 完成后回到哪里；只接受本平台的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化。会话发给门户还是管理台由 edge 按 Host 决定。 */
+      /** @description 完成后回到哪里；只接受本入口的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化与路由白名单验证。会话audience由edge按受信listener和完整scheme/authority决定。 */
       returnTo?: string;
     };
     LoginTransaction: {
@@ -1869,12 +1925,54 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description 已退出，cookie 已清除 */
+      /** @description 当前入口已退出，其cookie已清除 */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+    };
+  };
+  registerAdminSessionCsrfToken: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description 公开固定非简单头；仅此精确操作允许，不是秘密或其它路由的免检开关。 */
+        'X-Auriga-CSRF-Bootstrap': 'admin-session-v1';
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AdminCsrfTokenRegistration'];
+      };
+    };
+    responses: {
+      /** @description 已登记或同hash重试；body的token严格等于提交值，不设任何CSRF cookie。 */
+      200: {
+        headers: {
+          'Cache-Control'?: 'no-store';
+          'X-Content-Type-Options'?: 'nosniff';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AdminCsrfToken'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      429: components['responses']['RateLimited'];
+      /** @description IAM权威会话或原子登记不可用（common.unavailable），不返回token成功。 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
       };
     };
   };

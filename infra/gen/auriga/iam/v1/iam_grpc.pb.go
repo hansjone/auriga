@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SessionService_IntrospectSession_FullMethodName = "/auriga.iam.v1.SessionService/IntrospectSession"
-	SessionService_RevokeSessions_FullMethodName    = "/auriga.iam.v1.SessionService/RevokeSessions"
-	SessionService_TouchSession_FullMethodName      = "/auriga.iam.v1.SessionService/TouchSession"
+	SessionService_IntrospectSession_FullMethodName      = "/auriga.iam.v1.SessionService/IntrospectSession"
+	SessionService_RevokeSessions_FullMethodName         = "/auriga.iam.v1.SessionService/RevokeSessions"
+	SessionService_TouchSession_FullMethodName           = "/auriga.iam.v1.SessionService/TouchSession"
+	SessionService_VerifyAdminSessionCsrf_FullMethodName = "/auriga.iam.v1.SessionService/VerifyAdminSessionCsrf"
 )
 
 // SessionServiceClient is the client API for SessionService service.
@@ -37,6 +38,16 @@ type SessionServiceClient interface {
 	RevokeSessions(ctx context.Context, in *RevokeSessionsRequest, opts ...grpc.CallOption) (*RevokeSessionsResponse, error)
 	// 会话续期（顺延闲置过期时间并改写 NATS KV）。调用方：edge，同一会话最多每 5 分钟一次。
 	TouchSession(ctx context.Context, in *TouchSessionRequest, opts ...grpc.CallOption) (*TouchSessionResponse, error)
+	// IP0契约，待IP1实现。仅svc:edge，既有内部服务JWT + 非回环mTLS。
+	// 每个IP管理浏览器写请求在线校验；不能用KV缓存、旧csrfHash或任意admin JWT替代。
+	// IAM从session_token定位当前权威会话，检查admin audience、账号/租户状态、到期/吊销和
+	// 当前有效adminCsrfTokens中UTF-8 csrf_token的SHA-256；恒定时间比较，不打印原文。
+	// 登记/过期/吊销与此检查按同一会话串行化；吊销提交后的新校验必须失败。
+	// 无效/过期/吊销或非admin会话返回UNAUTHENTICATED；会话有效但CSRF不匹配时active=false且无session。
+	// 控制面错误返回UNAVAILABLE，不伪造active；edge分别映射401/403/503的既有common错误。
+	// edge先校验实际listener/完整Origin，再比较响应sid/account/tid/admin audience与实际cookie会话，
+	// 不符即拒绝。结果仅用于本次请求，不缓存、不延期，不使其它路径跳过CSRF。
+	VerifyAdminSessionCsrf(ctx context.Context, in *VerifyAdminSessionCsrfRequest, opts ...grpc.CallOption) (*VerifyAdminSessionCsrfResponse, error)
 }
 
 type sessionServiceClient struct {
@@ -77,6 +88,16 @@ func (c *sessionServiceClient) TouchSession(ctx context.Context, in *TouchSessio
 	return out, nil
 }
 
+func (c *sessionServiceClient) VerifyAdminSessionCsrf(ctx context.Context, in *VerifyAdminSessionCsrfRequest, opts ...grpc.CallOption) (*VerifyAdminSessionCsrfResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyAdminSessionCsrfResponse)
+	err := c.cc.Invoke(ctx, SessionService_VerifyAdminSessionCsrf_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SessionServiceServer is the server API for SessionService service.
 // All implementations must embed UnimplementedSessionServiceServer
 // for forward compatibility.
@@ -90,6 +111,16 @@ type SessionServiceServer interface {
 	RevokeSessions(context.Context, *RevokeSessionsRequest) (*RevokeSessionsResponse, error)
 	// 会话续期（顺延闲置过期时间并改写 NATS KV）。调用方：edge，同一会话最多每 5 分钟一次。
 	TouchSession(context.Context, *TouchSessionRequest) (*TouchSessionResponse, error)
+	// IP0契约，待IP1实现。仅svc:edge，既有内部服务JWT + 非回环mTLS。
+	// 每个IP管理浏览器写请求在线校验；不能用KV缓存、旧csrfHash或任意admin JWT替代。
+	// IAM从session_token定位当前权威会话，检查admin audience、账号/租户状态、到期/吊销和
+	// 当前有效adminCsrfTokens中UTF-8 csrf_token的SHA-256；恒定时间比较，不打印原文。
+	// 登记/过期/吊销与此检查按同一会话串行化；吊销提交后的新校验必须失败。
+	// 无效/过期/吊销或非admin会话返回UNAUTHENTICATED；会话有效但CSRF不匹配时active=false且无session。
+	// 控制面错误返回UNAVAILABLE，不伪造active；edge分别映射401/403/503的既有common错误。
+	// edge先校验实际listener/完整Origin，再比较响应sid/account/tid/admin audience与实际cookie会话，
+	// 不符即拒绝。结果仅用于本次请求，不缓存、不延期，不使其它路径跳过CSRF。
+	VerifyAdminSessionCsrf(context.Context, *VerifyAdminSessionCsrfRequest) (*VerifyAdminSessionCsrfResponse, error)
 	mustEmbedUnimplementedSessionServiceServer()
 }
 
@@ -108,6 +139,9 @@ func (UnimplementedSessionServiceServer) RevokeSessions(context.Context, *Revoke
 }
 func (UnimplementedSessionServiceServer) TouchSession(context.Context, *TouchSessionRequest) (*TouchSessionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TouchSession not implemented")
+}
+func (UnimplementedSessionServiceServer) VerifyAdminSessionCsrf(context.Context, *VerifyAdminSessionCsrfRequest) (*VerifyAdminSessionCsrfResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyAdminSessionCsrf not implemented")
 }
 func (UnimplementedSessionServiceServer) mustEmbedUnimplementedSessionServiceServer() {}
 func (UnimplementedSessionServiceServer) testEmbeddedByValue()                        {}
@@ -184,6 +218,24 @@ func _SessionService_TouchSession_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SessionService_VerifyAdminSessionCsrf_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyAdminSessionCsrfRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SessionServiceServer).VerifyAdminSessionCsrf(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SessionService_VerifyAdminSessionCsrf_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SessionServiceServer).VerifyAdminSessionCsrf(ctx, req.(*VerifyAdminSessionCsrfRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SessionService_ServiceDesc is the grpc.ServiceDesc for SessionService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -202,6 +254,10 @@ var SessionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TouchSession",
 			Handler:    _SessionService_TouchSession_Handler,
+		},
+		{
+			MethodName: "VerifyAdminSessionCsrf",
+			Handler:    _SessionService_VerifyAdminSessionCsrf_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

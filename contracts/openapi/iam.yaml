@@ -6,10 +6,15 @@ info:
     身份认证：登录事务（按步骤协议驱动）、会话、本人的身份 / 多因素 / 设备、设备授权确认、身份源管理、服务账号。
     OIDC / OAuth 2.0 标准端点（/oauth2/*、/.well-known/openid-configuration、/userinfo）按标准实现，不在这里定义。
     `/admin/**` 只接受管理台源上的会话（访问令牌 ctx=admin，见 x-admin-only），并要求相应权限（见各操作的 x-permission）。
+    仅本人管理浏览器会话的CSRF登记使用 AuthenticatedOnly + AdminOnly，不新增RBAC权限。
 
-    **登录事务和发起端绑定**：创建事务时下发 cookie `__Host-auriga_login_tx`（纯 HTTP 部署为 `auriga_login_tx`；HttpOnly，SameSite=Lax，
-    Path=/api/iam/v1/login/），值是随机数，事务里只存它的哈希。`/login/transactions/{txId}/**` 和回调都必须带与事务绑定的这个 cookie，
-    否则一律 404（不区分"不存在"和"不属于你"）。txId 本身不是凭据。
+    **登录事务和发起端绑定（IP0，接线待IP1）**：门户下发 `__Host-auriga_portal_login_tx`，管理台下发
+    `__Host-auriga_admin_login_tx`；TLS时均Secure、HttpOnly、SameSite=Lax、Path=/、无Domain。
+    纯HTTP去掉 __Host- 前缀且不设Secure，其余属性相同；不能给 __Host- cookie 设置非根Path。
+    值是随机数，事务只存哈希，另绑定安装配置的规范Origin、tenant和audience。入口按完整scheme/authority及可信listener判定，
+    不接受客户端选择audience。事务API与回调缺少正确audience的cookie或绑定不符均404；txId本身不是凭据。
+    同一audience一次一个发起事务，新建替换该audience旧事务；门户/管理台并行互不覆盖。
+    完整入口、cookie/CSRF/登出及精确协议例外见 ../deployment/README.md 和 ADR0022。
   license:
     name: AGPL-3.0-only
     identifier: AGPL-3.0-only
@@ -25,6 +30,7 @@ tags:
   - name: admin-accounts
   - name: admin-service-accounts
   - name: admin-keys
+  - name: admin-session
 paths:
   # ---------------- 登录 ----------------
   /login/providers:
@@ -53,7 +59,7 @@ paths:
       operationId: createLoginTransaction
       summary: 开始一次登录（或绑定、补验证）
       description: |
-        返回第一步。会给发起端下发 cookie `auriga_login_tx`（绑定事务和浏览器，扫码类防转发）。
+        返回第一步。按本入口下发 portal/admin 分名的登录事务cookie（见文首），绑定事务和浏览器，扫码类防转发。
         purpose=link / stepup 时需要已登录。
       security: [{}, { bearerAuth: [] }]
       requestBody:
@@ -113,7 +119,9 @@ paths:
       tags: [login]
       operationId: advanceLoginTransaction
       summary: 提交输入，推进到下一步
-      description: 完成时响应里 step.type=complete，并下发会话 cookie（经 edge 原样转给浏览器）。
+      description: |
+        完成时 step.type=complete，按本事务的规范入口/audience下发对应会话cookie并清除本audience事务cookie。
+        另一个入口的会话和事务不变；IP管理台不下发可读CSRF cookie，完成后调用管理CSRF登记接口。
       security: [{}, { bearerAuth: [] }]
       requestBody:
         required: true
@@ -144,7 +152,10 @@ paths:
       tags: [login]
       operationId: loginCallbackGet
       summary: 跳转类身份源的固定回调地址
-      description: 用查询参数和 `auriga_login_tx` cookie 推进事务，然后 302 回登录页（完成时回 redirectTo）。
+      description: |
+        用查询参数及本入口audience的登录事务cookie推进事务，然后302回本入口登录页（完成时回已验证的returnTo）。
+        外部重定向的GET可缺Origin；只此精确回调允许，以固定provider回调、一次性state/nonce/PKCE、事务cookie及
+        事务Origin/tenant/audience绑定代替普通写请求CSRF。不得推广到其它路径或其它方法。
       security: []
       responses:
         '302': { description: 回到登录页 }
@@ -155,6 +166,8 @@ paths:
       description: |
         跨站 POST 不会带 SameSite=Lax 的事务 cookie：iam 把表单参数暂存（5 分钟、一次性，按随机 resume 键），
         然后 303 跳到同源的 GET /login/callback/{providerId}?resume=<键>，在 GET 里校验事务 cookie 后继续。
+        这是精确协议例外：仅已登记provider固定POST回调，校验协议state/签名等，resume绑定原事务、
+        tenant/audience/规范回调Origin，不产生会话或完成登录；最终GET还需对应audience事务cookie。
       security: []
       requestBody:
         content:
@@ -223,8 +236,73 @@ paths:
     post:
       tags: [login]
       operationId: logout
+      description: |
+        校验本入口完整Origin和本会话CSRF，仅吊销实际消费的当前audience会话；清除该audience的session、
+        登录事务及CSRF状态。门户登出使它关联的实例cookie/原WS失效，但不注销独立管理会话；管理登出反之。
+        IP管理台清空全部已登记adminCsrfTokens；不能一并清除门户CSRF或另一入口的cookie。
       responses:
-        '204': { description: 已退出，cookie 已清除 }
+        '204': { description: 当前入口已退出，其cookie已清除 }
+
+  /admin/session/csrf-tokens:
+    post:
+      tags: [admin-session]
+      operationId: registerAdminSessionCsrfToken
+      summary: 为本人当前管理浏览器会话登记内存CSRF令牌（IP0，待IP1实现）
+      x-admin-only: true
+      x-authenticated-only: true
+      x-browser-session-only: true
+      x-csrf-bootstrap: true
+      x-error-codes: [common.validation_failed, common.unauthenticated, common.forbidden, common.rate_limited, common.unavailable]
+      security:
+        - adminSessionCookie: []
+      description: |
+        仅IP模式管理入口启用。精确 POST /api/iam/v1/admin/session/csrf-tokens 是唯一免旧CSRF头的登记操作。
+        edge必须验证可信admin listener、完整规范admin Origin、当前admin浏览器session、JSON及下列固定非简单头。
+        普通同源POST fetch会自动带Origin；不使用可能没有Origin的GET恢复流程。缺失/null/多个/错scheme或端口Origin拒绝。
+        固定头不是秘密，不能使其它路由免CSRF；不开放CORS/JSONP/重定向，不允许service/device或任意admin Bearer替代cookie。
+        edge只向受信IAM hop换发绑定当前sid/tid的ctx=admin令牌；IAM按权威会话重查账号/tenant/audience/到期/吊销，
+        实现使用AuthenticatedOnly+AdminOnly，不新增权限key，不允许请求指定目标会话。
+
+        每个tab/document先用crypto.getRandomValues生成32字节、无填充base64url token，仅保存在内存中并提交。
+        IAM事务锁定当前会话，清理过期条目，只保存UTF-8 token的SHA-256小写十六进制hash及到期；不能从csrfHash还原原文。
+        同一有效hash重试返回同一expiresAt且不延长；不同tab各有独立条目，不全局轮换或覆盖其它tab。
+        每会话最多32个有效条目，满额返回429和Retry-After，不挤占有效条目；到期取min(当前时间+900秒,会话绝对/闲置到期)。
+        响应回显本次提交的token，不需要持久化可逆明文；只有IAM事务提交成功才返回200，原文不进KV、日志或URL。
+        刷新/新tab/丢失内存/到期使用新token；响应丢失只重试相同请求token。续期重发JWT不延长token期限。
+        管理写请求的X-Auriga-CSRF由edge通过VerifyAdminSessionCsrf在线验证，失败关闭；IP模式不退回旧csrfHash/cookie比较。
+        401回管理登录；403仅在确认会话仍有效且token过期/未知时登记新token，不自动重放已发出的非幂等业务写请求。
+        登出、会话到期/吊销清空所有hash；并发登记与吊销锁同一权威会话，不能让KV延迟/旧续期写复活。
+        响应仅同源JSON，Cache-Control:no-store、X-Content-Type-Options:nosniff；禁止持久化、URL、可读cookie和跨源postMessage。
+        domain模式保留既有按源CSRF cookie流程，本操作不启用；完整规范及后续实测矩阵见deployment/README.md。
+      parameters:
+        - name: X-Auriga-CSRF-Bootstrap
+          in: header
+          required: true
+          description: 公开固定非简单头；仅此精确操作允许，不是秘密或其它路由的免检开关。
+          schema: { type: string, enum: [admin-session-v1] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminCsrfTokenRegistration' }
+      responses:
+        '200':
+          description: 已登记或同hash重试；body的token严格等于提交值，不设任何CSRF cookie。
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminCsrfToken' }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
+        '503':
+          description: IAM权威会话或原子登记不可用（common.unavailable），不返回token成功。
+          content:
+            application/problem+json:
+              schema: { $ref: 'common.yaml#/components/schemas/Problem' }
 
   # ---------------- 本人 ----------------
   /me:
@@ -1045,7 +1123,28 @@ components:
       schema: { type: string, pattern: '^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$' }
   securitySchemes:
     bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
+    adminSessionCookie:
+      type: apiKey
+      in: cookie
+      name: auriga_admin_session
+      description: 仅受信管理入口消费的当前浏览器会话。TLS时名字为__Host-auriga_admin_session；无Domain、Path=/、HttpOnly。任意Bearer不能替代。
   schemas:
+    AdminCsrfTokenRegistration:
+      type: object
+      properties:
+        token:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$'
+          description: 每tab由crypto.getRandomValues生成32字节、规范无填充base64url。服务端校格式不能证明熵，客户端必须使用安全随机源。
+      required: [token]
+      additionalProperties: false
+    AdminCsrfToken:
+      type: object
+      properties:
+        token: { $ref: '#/components/schemas/AdminCsrfTokenRegistration/properties/token' }
+        expiresAt: { type: string, format: date-time }
+      required: [token, expiresAt]
+      additionalProperties: false
     LoginProvider:
       type: object
       properties:
@@ -1063,7 +1162,7 @@ components:
         providerId: { $ref: 'common.yaml#/components/schemas/Uuid' }
         purpose: { type: string, enum: [login, link, stepup], default: login }
         invitationCode: { type: string }
-        returnTo: { type: string, pattern: '^/(?![/\\])[^\s]*$', description: 完成后回到哪里；只接受本平台的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化。会话发给门户还是管理台由 edge 按 Host 决定。 }
+        returnTo: { type: string, pattern: '^/(?![/\\])[^\s]*$', description: 完成后回到哪里；只接受本入口的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化与路由白名单验证。会话audience由edge按受信listener和完整scheme/authority决定。 }
       required: [providerId]
     LoginTransaction:
       type: object
