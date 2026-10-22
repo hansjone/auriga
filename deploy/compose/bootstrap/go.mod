@@ -3,6 +3,7 @@ module github.com/hansjone/auriga/deploy/compose/bootstrap
 go 1.27.0
 
 require (
+ github.com/hansjone/auriga/deploy/bootstrap v0.0.0
 	github.com/hansjone/auriga/infra/gen v0.0.0
 	google.golang.org/protobuf v1.36.11
 )
@@ -17,3 +18,5 @@ require (
 )
 
 replace github.com/hansjone/auriga/infra/gen => ../../../infra/gen
+
+replace github.com/hansjone/auriga/deploy/bootstrap => ../../bootstrap

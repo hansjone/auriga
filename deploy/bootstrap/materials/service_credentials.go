@@ -1,4 +1,4 @@
-package main
+package materials
 
 import (
 	"bytes"
@@ -10,17 +10,15 @@ import (
 	"os"
 )
 
-const iamRPCPort = 9091
-
 // Only the platform receives this private directory. No raw secret goes into JSON or env.
 // Preserve an existing installation on a repeated bootstrap instead of rotating its credentials.
-func writeInternalTokenInstallation(out string) error {
-	installation, err := openPrivateInstallation(out)
+func EnsureServiceCredentials(out string) error {
+	installation, err := Open(out)
 	if err != nil {
 		return err
 	}
-	defer installation.close()
-	secret, err := installation.read("edge.secret")
+	defer installation.Close()
+	secret, err := installation.Read("edge.secret")
 	defer func() { clear(secret) }()
 	if os.IsNotExist(err) {
 		raw := make([]byte, 32)
@@ -29,7 +27,7 @@ func writeInternalTokenInstallation(out string) error {
 		}
 		secret = []byte(base64.RawURLEncoding.EncodeToString(raw))
 		clear(raw)
-		if err := installation.create("edge.secret", secret); err != nil {
+		if err := installation.Create("edge.secret", secret); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -41,15 +39,15 @@ func writeInternalTokenInstallation(out string) error {
 		return fmt.Errorf("invalid IAM installation credential")
 	}
 	hash := sha256.Sum256(secret)
-	properties := []byte("auriga.iam.internal-secret-hashes.edge=" + hex.EncodeToString(hash[:]) + "\nauriga.iam.edge-token-export.installation-owner=" + fmt.Sprint(installation.owner()) + "\n")
-	existing, err := installation.read("internal.properties")
+	properties := []byte("auriga.iam.internal-secret-hashes.edge=" + hex.EncodeToString(hash[:]) + "\nauriga.iam.edge-token-export.installation-owner=" + fmt.Sprint(installation.Owner()) + "\n")
+	existing, err := installation.Read("internal.properties")
 	defer clear(existing)
 	if os.IsNotExist(err) {
-		if err := installation.create("internal.properties", properties); err != nil {
+		if err := installation.Create("internal.properties", properties); err != nil {
 			return err
 		}
 	} else if err != nil || !bytes.Equal(existing, properties) {
 		return fmt.Errorf("invalid IAM installation hash configuration")
 	}
-	return installation.validate()
+	return installation.Validate()
 }

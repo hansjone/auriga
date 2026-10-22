@@ -13,6 +13,12 @@ host、secureCookies、trustedProxies 环境值不能覆盖安装身份。下文
 Forwarded/X-Forwarded 不能决定角色、scheme 或租户。内控 listener 仅精确 self/heartbeat，
 要求 `Bearer ait_...` 后仍由 workspace 验真实令牌，其余路由 404。
 
+NAS 生成的 JSON 强制 `instanceControlIngress.denyLocalIPv4`，列出本安装的 LAN IPv4；该字段没有环境覆盖。启用时要求经验证的 wildcard 内控 listener、非空且不重复的规范 IPv4，并在任何服务绑定前核每个 LAN IP 在当前网络命名空间中唯一归属一个 UP 接口；不同活跃接口的 IPv4 直连前缀重叠则拒绝。
+
+内控 Accept 使用内核 TCP 的本地／对端地址，统一 IPv4 映射，要求本地端口精确且目标仍是唯一非 LAN、非 loopback 接口的本机 IPv4；peer 必须属于该目标的同一直连私有前缀。LAN 接口上的目标、外部可路由源（包括经 LAN 投递到组件或实例私有目标）、IPv6、未知或多义上下文都在 HTTP／IAM 前关闭。每个新连接读取两次实际接口快照，只有一致且都通过才允许；动态 Docker 桥的新增无需重启，接口／地址删除、LAN 信息丢失、重叠或读取失败保守拒绝，客户端可重试。
+
+拓扑前提是 NAS edge 只连接声明的 LAN、组件 internal bridge 及 owned 实例 internal bridge，私有链路是互不重叠的直连 L2 前缀，Docker／网络管理者受信。LocalAddr／RemoteAddr 与这些前缀的联校不是实际入接口或 L2 身份检测；两份快照也不使网络管理与 Accept 原子化。portal/admin 不受该过滤器影响，原 authority／AIT 校验继续强制；未启用此字段的其他配方保持原支持。
+
 IAM 专用 mTLS hop、精确 cookie 白名单、标准服务 JWT 的 CSRF gRPC 配置，以及 SPA 公开
 `auriga-access-mode` meta 的正式 wire 约束见
 [edge-iam-hop.md](../../contracts/deployment/edge-iam-hop.md)。IAM hop 或管理 RPC 未装配时失败关闭；

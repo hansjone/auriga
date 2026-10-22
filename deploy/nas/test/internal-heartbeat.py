@@ -11,7 +11,7 @@ values = dict(
     for line in (root / 'stack.env').read_text().splitlines()
     if line and not line.startswith('#') and '=' in line
 )
-edge_config = json.loads((root / 'config/edge.config.json').read_text())
+edge_config = json.loads((root / 'config/materials/edge.config.json').read_text())
 services = compose['services']
 edge = services['edge']
 agent = services['agent']
@@ -26,28 +26,24 @@ def check(ok, name):
 
 
 edge_name = 'auriga-nas-test-edge'
-portal = values['AURIGA_PORTAL_HOST']
-parent = values['AURIGA_INSTANCE_PARENT_DOMAIN']
+access = json.loads((root / 'config/materials/access.json').read_text())
 check(edge.get('container_name') == edge_name, 'stable_edge_name')
 check(edge.get('labels', {}).get('auriga.role') == 'edge', 'trusted_edge_label')
-check(
-    env.get('AURIGA_AGENT_DOCKER_EDGE_CONTAINER') == edge_name,
-    'matching_edge_reference',
-)
-check(
-    env.get('AURIGA_AGENT_INSTANCE_PLATFORM_URL') == f'http://{portal}:8080',
-    'internal_http_url',
-)
-check(
-    env.get('AURIGA_AGENT_INSTANCE_PARENT_DOMAIN') == parent,
-    'matching_instance_parent',
-)
-check(
-    edge_config['portalHost'] == portal
-    and edge_config['listen'] == '0.0.0.0:8080',
-    'edge_portal_listener',
-)
-check(edge_config['instanceParentDomain'] == parent, 'edge_parent_domain')
+check(access['instanceControl']['edgeContainer'] == edge_name, 'matching_edge_reference')
+check('AURIGA_AGENT_INSTANCE_PLATFORM_URL' not in env and 'AURIGA_AGENT_INSTANCE_PARENT_DOMAIN' not in env and 'AURIGA_AGENT_DOCKER_EDGE_CONTAINER' not in env, 'no_legacy_origin_override')
+check(env.get('AURIGA_DEPLOYMENT_ACCESS_FILE') == '/etc/auriga/access.json', 'agent_shared_access')
+check(access['instanceControl']['dnsAlias'] != access['portalOrigin']['host'], 'browser_alias_separation')
+check(edge_config['accessConfigFile'] == '/etc/auriga/access.json', 'edge_shared_access')
+check(edge_config.get('instanceControlIngress') == {'denyLocalIPv4': [values['AURIGA_EDGE_LAN_IP']]}, 'kernel_local_lan_target_excluded')
+check(edge_config['iamHop']['serverName'] == 'platform' and edge_config['iamRpc']['address'] == 'platform:9091', 'dedicated_iam_hop_rpc')
+check(edge_config['iamRpc']['serviceTokenFile'] == '/run/auriga-internal/edge/service.jwt', 'continued_service_token')
+for service in ['edge', 'platform', 'agent']:
+    matches = [v for v in services[service]['volumes'] if v['target'] == '/etc/auriga/access.json']
+    check(len(matches) == 1 and matches[0]['source'] == str(root / 'config/materials/access.json') and matches[0].get('read_only'), service + '_same_access_readonly')
+for service, readonly in [('platform', False), ('edge', True)]:
+    matches = [v for v in services[service]['volumes'] if v['target'] == '/run/auriga-internal']
+    check(len(matches) == 1 and matches[0]['source'] == str(root / 'internal-tokens') and bool(matches[0].get('read_only')) == readonly, service + '_token_directory_mount')
+check(edge['networks']['internal']['ipv4_address'] == values['AURIGA_INTERNAL_EDGE_IP'], 'exact_iam_peer_source')
 check(
     set(edge['networks']) == {'internal', 'lan'} and not edge.get('ports'),
     'edge_network_boundary',
@@ -82,6 +78,8 @@ check(
 )
 platform_env = services['platform']['environment']
 check(platform_env.get('SPRING_PROFILES_ACTIVE') == 'combined', 'no_dev_profile')
+check(platform_env.get('SERVER_SSL_ENABLED') == 'true' and platform_env.get('AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED') == 'true', 'mtls_and_publisher_enabled')
+check(services['platform']['user'] == '10001:10001' and '65532' in services['platform']['group_add'], 'publisher_fixed_uid_and_reader_group')
 check(
     not any('EMERGENCY' in key and ('REMOTE' in key or 'PROXY' in key)
             for key in platform_env),

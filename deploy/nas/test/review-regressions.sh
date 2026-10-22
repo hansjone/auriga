@@ -5,7 +5,9 @@ ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 DATA=$1
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
-export NAS_ROOT="$ROOT" AURIGA_DATA_ROOT="$DATA" NAS_ALLOW_NONROOT=1
+export NAS_ROOT="$ROOT" AURIGA_DATA_ROOT="$DATA" NAS_ALLOW_NONROOT=0
+. "$ROOT/scripts/lib.sh"
+load_stack_env
 
 grep -qx 'SPRING_PROFILES_ACTIVE=combined,e2e' "$DATA/config/platform.env"
 sed 's/AURIGA_PLATFORM_SEED=true/AURIGA_PLATFORM_SEED=false/' "$DATA/stack.env" >"$TMP/env"
@@ -23,17 +25,13 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
   docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" \
     config --format json >"$TMP/compose.json"
   python3 "$ROOT/test/internal-heartbeat.py" "$DATA" "$TMP/compose.json"
-  cp "$DATA/stack.env" "$TMP/stack.env.saved"
-  sed -e 's/^AURIGA_PORTAL_HOST=.*/AURIGA_PORTAL_HOST=portal-alt.example.com/' \
-    -e 's/^AURIGA_INSTANCE_PARENT_DOMAIN=.*/AURIGA_INSTANCE_PARENT_DOMAIN=instance-alt.example.com/' \
-    "$TMP/stack.env.saved" >"$DATA/stack.env"
+  cp "$AURIGA_ACCESS_FILE" "$TMP/access.saved"
+  sed 's/00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000002/g' "$TMP/access.saved" >"$AURIGA_ACCESS_FILE"
+  if sh "$ROOT/scripts/render.sh" >"$TMP/changed.log" 2>&1; then echo 'changed installation input accepted' >&2; exit 1; fi
+  cp "$TMP/access.saved" "$AURIGA_ACCESS_FILE"
   sh "$ROOT/scripts/render.sh" >/dev/null
-  docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" \
-    config --format json >"$TMP/compose.json"
-  python3 "$ROOT/test/internal-heartbeat.py" "$DATA" "$TMP/compose.json"
-  cp "$TMP/stack.env.saved" "$DATA/stack.env"
-  sh "$ROOT/scripts/render.sh" >/dev/null
-  printf 'PASS internal_heartbeat_custom_hosts\n'
+  printf 'PASS access_input_change_refused\n'
+
 else
   printf 'SKIP internal_heartbeat_normalized_config (need Docker Compose and Python 3)\n'
 fi
@@ -93,7 +91,7 @@ case "$1" in
     [ "${3:-}" = -f ] || exit 0
     case "$4" in
       *Driver*) echo bridge ;;
-      *Subnet*) echo 192.0.2.0/24 ;;
+      *Subnet*) echo 192.0.2.0/26 ;;
       *Gateway*) echo 192.0.2.1 ;;
       *AuxiliaryAddresses*|*IPRange*) : ;;
       *Containers*) printf '%s 192.0.2.10/24\n' "${TEST_IP_OWNER:-aaaaaaaaaaaa}" ;;

@@ -18,6 +18,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	"math/big"
 	"net"
 	"net/url"
@@ -27,28 +28,69 @@ import (
 )
 
 func main() {
-	out := flag.String("out", "", "config output directory (…/config)")
-	mode := flag.String("mode", "full", "full | keys-only | pki-only")
+	out := flag.String("out", "", "private source material directory")
+	accessFile := flag.String("access-file", "", "required trusted access JSON")
+	validateOnly := flag.Bool("validate-access", false, "validate without writing installation materials")
+	peerIP := flag.String("edge-peer-ip", "", "fixed edge component-network IPv4")
+	subnet := flag.String("internal-subnet", "", "component-network IPv4 prefix")
+	lanIP := flag.String("lan-ip", "", "required edge LAN IPv4 excluded from instance control")
+	lanSubnet := flag.String("lan-subnet", "", "required disjoint LAN IPv4 prefix")
+	registryPort := flag.Int("registry-port", 15000, "host loopback registry port")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		fatalf("unexpected positional arguments")
+	}
+	raw, cfg, err := loadNASAccess(*accessFile, *peerIP, *subnet, *registryPort)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	if err := validateNASLAN(*lanIP, *lanSubnet, *subnet); err != nil {
+		fatalf("%v", err)
+	}
+	if *validateOnly {
+		return
+	}
 	if *out == "" {
 		fatalf("-out is required")
 	}
-	mustMkdir(*out, 0o755)
-	pki := filepath.Join(*out, "pki")
-	mustMkdir(pki, 0o755)
-
-	switch *mode {
-	case "keys-only":
-		mustIdentity(*out)
-	case "pki-only":
-		mustPKI(pki)
-	case "full":
-		mustPKI(pki)
-		mustIdentity(*out)
-	default:
-		fatalf("unknown -mode %q", *mode)
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet); err != nil {
+		fatalf("%v", err)
 	}
-	fmt.Printf("nas-bootstrap ok out=%s mode=%s\n", *out, *mode)
+	guard, err := openNASMaterialGuard(*out)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer guard.Close()
+	pki := filepath.Join(*out, "pki")
+	input := sha256.Sum256(append(append([]byte{}, raw...), []byte(fmt.Sprintf("\n%s\n%s\n%d\n%s\n%s", *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet))...))
+	inputDigest := hex.EncodeToString(input[:])
+	reuse, err := materials.CheckReceipt(*out, inputDigest, nasMaterialSet())
+	if err != nil {
+		fatalf("%v", err)
+	}
+	if err := materials.EnsureServiceCredentials(*out); err != nil {
+		fatalf("%v", err)
+	}
+	if reuse {
+		if err := guard.Validate(false); err != nil {
+			fatalf("%v", err)
+		}
+		fmt.Println("nas-bootstrap ok (existing installation)")
+		return
+	}
+	mustPKI(pki)
+	mustIdentity(*out)
+	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP)
+	if err := guard.Validate(false); err != nil {
+		fatalf("%v", err)
+	}
+	if err := materials.SealReceipt(*out, inputDigest, nasMaterialSet()); err != nil {
+		fatalf("%v", err)
+	}
+	if err := guard.Validate(false); err != nil {
+		fatalf("%v", err)
+	}
+	fmt.Println("nas-bootstrap ok")
 }
 
 func mustPKI(pki string) {
@@ -72,6 +114,24 @@ func mustPKI(pki string) {
 	writeFile(filepath.Join(pki, "edge.crt"), edgeCert, 0o644)
 	// 0600 + chown 65532 by init.sh so distroless edge can read without world-readable keys.
 	writeFile(filepath.Join(pki, "edge.key"), edgeKey, 0o600)
+
+	iamCert, iamKey := mustIssue(caKey, caCert, "iam-nas", "auriga://iam/nas-test", []string{"platform"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	writeFile(filepath.Join(pki, "iam.crt"), append(iamCert, caPEM...), 0o644)
+	writeFile(filepath.Join(pki, "iam.key"), iamKey, 0o600)
+	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-nas", "auriga://edge/iam-nas-test", []string{"edge.auriga.internal"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
+	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o600)
+
+	// Front proxy trust is independent of IAM/NodeControl identities and CA.
+	proxyKey, proxyCA, proxyCAPEM := mustCA()
+	writeFile(filepath.Join(pki, "proxy-ca.crt"), proxyCAPEM, 0o644)
+	writeFile(filepath.Join(pki, "proxy-ca.key"), pkcs8PEM(proxyKey), 0o600)
+	server, serverKey := mustIssue(proxyKey, proxyCA, "edge-proxy-nas", "auriga://edge/proxy-nas", []string{"edge.auriga.internal"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	writeFile(filepath.Join(pki, "proxy-edge.crt"), append(server, proxyCAPEM...), 0o644)
+	writeFile(filepath.Join(pki, "proxy-edge.key"), serverKey, 0o600)
+	client, clientKey := mustIssue(proxyKey, proxyCA, "proxy-client-nas", "auriga://proxy/nas-test", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "proxy-client.crt"), client, 0o644)
+	writeFile(filepath.Join(pki, "proxy-client.key"), clientKey, 0o600)
 
 	fp := spkiSHA256(caCert)
 	writeFile(filepath.Join(filepath.Dir(pki), "ca-sha256.txt"), []byte(fp+"\n"), 0o644)

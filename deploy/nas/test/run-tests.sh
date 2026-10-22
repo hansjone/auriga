@@ -6,8 +6,9 @@ set -eu
 ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 export NAS_ROOT="$ROOT"
 export NAS_ALLOW_EXAMPLE_ENV=1
-export NAS_ALLOW_NONROOT=${NAS_ALLOW_NONROOT:-1}
+export NAS_ALLOW_NONROOT=${NAS_ALLOW_NONROOT:-0}
 TMP=$(mktemp -d)
+chmod 0755 "$TMP"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 fail=0
 
@@ -99,6 +100,22 @@ else
 fi
 grep -q 'cap_drop: \[ALL\]' "$ROOT/docker-compose.yml" && pass cap_drop || fail_msg cap_drop "missing"
 
+# Front proxy must preserve authority ports and use dedicated authenticated TLS.
+if grep -q 'header_up Host {http.request.hostport}' "$ROOT/templates/caddy.fragment.example" \
+ && grep -q 'tls_client_auth.*proxy-client.crt.*proxy-client.key' "$ROOT/templates/caddy.fragment.example" \
+ && grep -q 'tls_trust_pool file.*proxy-ca.crt' "$ROOT/templates/caddy.fragment.example" \
+ && ! grep -q 'tls_insecure_skip_verify' "$ROOT/templates/caddy.fragment.example"; then
+ pass proxy_template_full_authority_and_mtls
+else fail_msg proxy_template_full_authority_and_mtls "missing full authority or independent proxy TLS trust"; fi
+
+# Docker 29 rejects direct access to omitted optional IPAM map keys.
+if command -v docker >/dev/null 2>&1 && docker network inspect bridge >/dev/null 2>&1; then
+  if docker network inspect -f '{{range .IPAM.Config}}{{range index . "AuxiliaryAddresses"}}{{println .}}{{end}}{{end}}' bridge >/dev/null \
+    && docker network inspect -f '{{range .IPAM.Config}}{{if index . "IPRange"}}{{println (index . "IPRange")}}{{end}}{{end}}' bridge >/dev/null; then
+    pass optional_ipam_metadata_absent
+  else fail_msg optional_ipam_metadata_absent "optional IPAM absence must not abort inspection"; fi
+else printf 'SKIP optional_ipam_metadata_absent (Docker daemon unavailable)\n'; fi
+
 # --- no private site values ---
 if grep -RE 'avelo\.top|10\.0\.0\.|avelo' "$ROOT" \
   --include='*.md' --include='*.yml' --include='*.example' --include='*.tmpl' --include='*.sh' \
@@ -109,21 +126,17 @@ else
 fi
 
 # --- init behavior with fake go/openssl ---
+cp "$ROOT/access-${NAS_TEST_ACCESS_MODE:-domain}.example.json" "$TMP/access.json"
 DATA="$TMP/srv/container/auriga-test"
 mkdir -p "$DATA"
 cat >"$DATA/stack.env" <<EOF
 AURIGA_DATA_ROOT=$DATA
+AURIGA_ACCESS_FILE=$TMP/access.json
+AURIGA_INTERNAL_SUBNET=192.0.2.128/26
+AURIGA_INTERNAL_EDGE_IP=192.0.2.138
 AURIGA_LAN_NETWORK=lan-example
-AURIGA_LAN_SUBNET=192.0.2.0/24
+AURIGA_LAN_SUBNET=192.0.2.0/26
 AURIGA_EDGE_LAN_IP=192.0.2.10
-AURIGA_PORTAL_HOST=portal.example.com
-AURIGA_ADMIN_HOST=admin.example.com
-AURIGA_INSTANCE_PARENT_DOMAIN=i.example.com
-AURIGA_ISSUER=https://portal.example.com
-AURIGA_TEAM_ORIGIN=https://portal.example.com
-AURIGA_TEAM_RP_ID=portal.example.com
-AURIGA_SECURE_COOKIES=true
-AURIGA_TRUSTED_PROXIES=192.0.2.1/32
 AURIGA_IMAGE_PLATFORM=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 AURIGA_IMAGE_EDGE=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 AURIGA_IMAGE_AGENT=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -137,7 +150,7 @@ AURIGA_PLATFORM_SEED=true
 AURIGA_AGENT_CAPACITY_MAX_INSTANCES=1
 EOF
 
-if { [ -x "$ROOT/bin/auriga-nas-bootstrap" ] || command -v go >/dev/null 2>&1; } && command -v openssl >/dev/null 2>&1; then
+if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1; then
   export AURIGA_DATA_ROOT="$DATA"
   if sh "$ROOT/scripts/init.sh"; then
     pass init_first
@@ -164,23 +177,37 @@ if { [ -x "$ROOT/bin/auriga-nas-bootstrap" ] || command -v go >/dev/null 2>&1; }
   else
     fail_msg review_regressions "review regression failed"
   fi
+  if sh "$ROOT/test/derived-access-env.sh" "$DATA"; then
+    pass derived_access_env_boundary
+  else
+    fail_msg derived_access_env_boundary "derived fields must not gain operator configuration authority"
+  fi
+  # Reproduce the old policy caller's missing access input, with no material writes.
+  LEGACY="$TMP/srv/container/auriga-legacy"
+  mkdir -p "$LEGACY"
+  printf 'AURIGA_DATA_ROOT=%s\n' "$LEGACY" >"$LEGACY/stack.env"
+  if AURIGA_DATA_ROOT="$LEGACY" sh "$ROOT/scripts/init.sh" >"$TMP/legacy.log" 2>&1; then
+    fail_msg legacy_policy_caller "missing required access input accepted"
+  elif grep -q 'AURIGA_ACCESS_FILE is required' "$TMP/legacy.log" && [ ! -e "$LEGACY/config" ]; then pass legacy_policy_caller_rejected
+  else fail_msg legacy_policy_caller "wrong error or material write"; fi
+  # An existing runtime leaf must never be silently repaired on render.
+  chmod 0644 "$DATA/config/pki-edge/edge.key"
+  if sh "$ROOT/scripts/render.sh" >"$TMP/runtime-leaf.log" 2>&1; then
+    fail_msg runtime_leaf_mode "unsafe leaf repaired/accepted"
+  elif [ "$(stat -c '%a' "$DATA/config/pki-edge/edge.key")" = 644 ]; then pass runtime_leaf_mode_rejected_without_repair
+  else fail_msg runtime_leaf_mode "rejection changed existing leaf"; fi
   # Non-empty foreign root without marker
   OTHER="$TMP/srv/container/auriga-other"
   mkdir -p "$OTHER/noise"
   echo x >"$OTHER/noise/f"
   cat >"$OTHER/stack.env" <<EOF
 AURIGA_DATA_ROOT=$OTHER
+AURIGA_ACCESS_FILE=$TMP/access.json
+AURIGA_INTERNAL_SUBNET=192.0.2.128/26
+AURIGA_INTERNAL_EDGE_IP=192.0.2.138
 AURIGA_LAN_NETWORK=lan-example
-AURIGA_LAN_SUBNET=192.0.2.0/24
+AURIGA_LAN_SUBNET=192.0.2.0/26
 AURIGA_EDGE_LAN_IP=192.0.2.10
-AURIGA_PORTAL_HOST=portal.example.com
-AURIGA_ADMIN_HOST=admin.example.com
-AURIGA_INSTANCE_PARENT_DOMAIN=i.example.com
-AURIGA_ISSUER=https://portal.example.com
-AURIGA_TEAM_ORIGIN=https://portal.example.com
-AURIGA_TEAM_RP_ID=portal.example.com
-AURIGA_SECURE_COOKIES=true
-AURIGA_TRUSTED_PROXIES=192.0.2.1/32
 AURIGA_IMAGE_PLATFORM=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 AURIGA_IMAGE_EDGE=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 AURIGA_IMAGE_AGENT=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -210,7 +237,7 @@ EOF
     pass missing_secrets_refuse
   fi
 else
-  printf 'SKIP init_tests (need go+openssl)\n'
+  fail_msg init_tests 'need prebuilt bootstrap+openssl; refusing partial test success'
 fi
 
 # --- H4: project_is_running helper with fake docker ---
@@ -259,6 +286,9 @@ if grep -q 'AURIGA_SMOKE_ALLOW_PARTIAL' "$ROOT/scripts/smoke.sh" && grep -q 'exi
 else
   fail_msg smoke_partial "missing PARTIAL exit 2"
 fi
+
+if sh "$ROOT/test/load-images.sh"; then pass load_images_regressions
+else fail_msg load_images_regressions "workflow artifact metadata failed"; fi
 
 # --- LF ---
 cr=0

@@ -1,4 +1,4 @@
-package main
+package materials
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type privateInstallation struct {
+type Installation struct {
 	dir  *os.File
 	path string
 	uid  uint32
@@ -19,7 +19,7 @@ type privateInstallation struct {
 	seen map[string]unix.Stat_t
 }
 
-func openPrivateInstallation(out string) (*privateInstallation, error) {
+func Open(out string) (*Installation, error) {
 	// Bind the recorded installer to the effective creator, never to an unverified file owner.
 	uid := uint32(os.Geteuid())
 	parent, path, err := openTrustedInstallationPath(out, uid)
@@ -34,7 +34,7 @@ func openPrivateInstallation(out string) (*privateInstallation, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &privateInstallation{dir: dir, path: filepath.Join(path, "iam-installation"), uid: uid, stat: stat, seen: make(map[string]unix.Stat_t)}, nil
+	return &Installation{dir: dir, path: filepath.Join(path, "iam-installation"), uid: uid, stat: stat, seen: make(map[string]unix.Stat_t)}, nil
 }
 
 // Anchor each component with openat: neither existing nor concurrently changed symlinks are followed.
@@ -107,10 +107,13 @@ func sameInstallationFile(a, b unix.Stat_t) bool {
 	return sameInstallationDirectory(a, b) && a.Nlink == b.Nlink && a.Size == b.Size && a.Mtim == b.Mtim && a.Ctim == b.Ctim
 }
 
-func (p *privateInstallation) owner() int { return int(p.uid) }
-func (p *privateInstallation) close()     { _ = p.dir.Close() }
+func (p *Installation) Owner() int { return int(p.uid) }
+func (p *Installation) Close()     { _ = p.dir.Close() }
 
-func (p *privateInstallation) read(name string) ([]byte, error) {
+func (p *Installation) Read(name string) ([]byte, error) {
+	if err := checkLeaf(name); err != nil {
+		return nil, err
+	}
 	var before, opened, after unix.Stat_t
 	if err := unix.Fstatat(int(p.dir.Fd()), name, &before, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return nil, err
@@ -137,7 +140,10 @@ func (p *privateInstallation) read(name string) ([]byte, error) {
 	return raw, nil
 }
 
-func (p *privateInstallation) create(name string, data []byte) error {
+func (p *Installation) Create(name string, data []byte) error {
+	if err := checkLeaf(name); err != nil {
+		return err
+	}
 	fd, err := unix.Openat(int(p.dir.Fd()), name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create private IAM installation file")
@@ -157,7 +163,7 @@ func (p *privateInstallation) create(name string, data []byte) error {
 	if writeErr != nil || writtenErr != nil || closeErr != nil || n != len(data) || !validInstallationFile(written, p.uid) || !sameInstallationDirectory(created, written) {
 		return fmt.Errorf("write private IAM installation file")
 	}
-	raw, err := p.read(name)
+	raw, err := p.Read(name)
 	defer clear(raw)
 	if err != nil || !bytes.Equal(raw, data) || !sameInstallationFile(written, p.seen[name]) {
 		return fmt.Errorf("changed new private IAM installation file")
@@ -165,7 +171,7 @@ func (p *privateInstallation) create(name string, data []byte) error {
 	return nil
 }
 
-func (p *privateInstallation) validate() error {
+func (p *Installation) Validate() error {
 	parent, _, err := openTrustedInstallationPath(filepath.Dir(p.path), p.uid)
 	if err != nil {
 		return err

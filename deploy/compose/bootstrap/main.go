@@ -25,9 +25,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+const iamRPCPort = 9091
 
 func main() {
 	out := flag.String("out", "deploy/compose/var", "output directory")
@@ -66,7 +69,7 @@ func main() {
 	if err != nil {
 		fatalf("%v", err)
 	}
-	if err := writeInternalTokenInstallation(*out); err != nil {
+	if err := materials.EnsureServiceCredentials(*out); err != nil {
 		fatalf("%v", err)
 	}
 	if err := writeComposeKeys(*out); err != nil {

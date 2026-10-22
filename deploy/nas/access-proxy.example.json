@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "mode": "domain",
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "portalOrigin": {
+    "scheme": "https",
+    "host": "portal.example.com",
+    "port": 443
+  },
+  "adminOrigin": {
+    "scheme": "https",
+    "host": "admin.example.com",
+    "port": 443
+  },
+  "issuerOrigin": {
+    "scheme": "https",
+    "host": "portal.example.com",
+    "port": 443
+  },
+  "insecureHttpAcknowledged": false,
+  "listeners": {
+    "portal": {
+      "address": "0.0.0.0",
+      "port": 18080,
+      "tls": true
+    },
+    "admin": {
+      "address": "0.0.0.0",
+      "port": 18082,
+      "tls": true
+    },
+    "instanceControl": {
+      "address": "0.0.0.0",
+      "port": 8081,
+      "tls": false
+    }
+  },
+  "ingress": {
+    "kind": "trusted_proxy",
+    "peerCidrs": [
+      "192.0.2.1/32"
+    ],
+    "requireMtls": true,
+    "preserveAuthority": true
+  },
+  "instances": {
+    "mode": "subdomain",
+    "parentDomain": "i.example.com",
+    "scheme": "https",
+    "port": 443
+  },
+  "instanceControl": {
+    "dnsAlias": "auriga-instance.internal",
+    "origin": {
+      "scheme": "http",
+      "host": "auriga-instance.internal",
+      "port": 8081
+    },
+    "edgeContainer": "auriga-nas-test-edge"
+  }
+}

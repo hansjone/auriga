@@ -95,6 +95,64 @@ load_env_file() {
   done <"$_file"
 }
 
+# Generated access metadata has no operator configuration authority. Capture and
+# validate the entire fixed record before exporting even its first field.
+load_nas_access_env() {
+  _nas_env_file=$1
+  [ -f "$_nas_env_file" ] && [ ! -L "$_nas_env_file" ] || die "invalid derived access environment"
+  require_cmd awk
+  _nas_env_record=$(LC_ALL=C awk '
+    function port(value) {
+      return value ~ /^[1-9][0-9]*$/ && length(value) <= 5 && value + 0 <= 65535
+    }
+    function host(value, labels, count, i) {
+      if (length(value) < 1 || length(value) > 253) return 0
+      count = split(value, labels, /[.]/)
+      for (i = 1; i <= count; i++) {
+        if (length(labels[i]) < 1 || length(labels[i]) > 63 || labels[i] !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/) return 0
+      }
+      return 1
+    }
+    function origin(value, authority, count, parts) {
+      if (value !~ /^https?:\/\//) return 0
+      authority = value
+      sub(/^https?:\/\//, "", authority)
+      count = split(authority, parts, ":")
+      return (count == 1 || count == 2 && port(parts[2])) && host(parts[1])
+    }
+    BEGIN {
+      count = split("AURIGA_NAS_ISSUER AURIGA_NAS_PORTAL_HOST AURIGA_NAS_ADMIN_HOST AURIGA_NAS_PORTAL_URL AURIGA_NAS_ADMIN_URL AURIGA_NAS_PORTAL_PORT AURIGA_NAS_ADMIN_PORT AURIGA_NAS_PORTAL_TARGET_PORT AURIGA_NAS_ADMIN_TARGET_PORT", keys, " ")
+      for (i = 1; i <= count; i++) allowed[keys[i]] = 1
+    }
+    {
+      equal = index($0, "=")
+      key = substr($0, 1, equal - 1)
+      value = substr($0, equal + 1)
+      if (equal < 2 || !(key in allowed) || seen[key]++ || value == "" || NR > 9) { bad = 1; exit 1 }
+      if (key ~ /_HOST$/) valid = host(value)
+      else if (key ~ /_PORT$/) valid = port(value)
+      else valid = origin(value)
+      if (!valid) { bad = 1; exit 1 }
+      record[NR] = $0
+    }
+    END {
+      if (bad || NR != 9) exit 1
+      for (i = 1; i <= 9; i++) if (!(keys[i] in seen)) exit 1
+      for (i = 1; i <= 9; i++) print record[i]
+    }
+  ' "$_nas_env_file") || die "invalid derived access environment"
+  while IFS= read -r _nas_env_line; do
+    _nas_env_key=${_nas_env_line%%=*}
+    case "$_nas_env_key" in
+      AURIGA_NAS_ISSUER|AURIGA_NAS_PORTAL_HOST|AURIGA_NAS_ADMIN_HOST|AURIGA_NAS_PORTAL_URL|AURIGA_NAS_ADMIN_URL|AURIGA_NAS_PORTAL_PORT|AURIGA_NAS_ADMIN_PORT|AURIGA_NAS_PORTAL_TARGET_PORT|AURIGA_NAS_ADMIN_TARGET_PORT)
+        export "$_nas_env_key=${_nas_env_line#*=}" ;;
+      *) die "invalid derived access environment" ;;
+    esac
+  done <<EOF
+$_nas_env_record
+EOF
+}
+
 load_stack_env() {
   _root=${AURIGA_DATA_ROOT:-}
   _file=""
@@ -109,8 +167,14 @@ load_stack_env() {
   fi
   load_env_file "$_file"
   [ -n "${AURIGA_DATA_ROOT:-}" ] || die "AURIGA_DATA_ROOT is required"
+  for _legacy in AURIGA_PORTAL_HOST AURIGA_ADMIN_HOST AURIGA_INSTANCE_PARENT_DOMAIN AURIGA_ISSUER AURIGA_TEAM_ORIGIN AURIGA_TEAM_RP_ID AURIGA_TLS_UPSTREAM AURIGA_SECURE_COOKIES AURIGA_TRUSTED_PROXIES; do
+    if env | grep -q "^${_legacy}="; then die "legacy $_legacy is unsupported; migrate to AURIGA_ACCESS_FILE"; fi
+  done
+  [ -n "${AURIGA_ACCESS_FILE:-}" ] || die "AURIGA_ACCESS_FILE is required"
+  case "$AURIGA_ACCESS_FILE" in /*) ;; *) die "AURIGA_ACCESS_FILE must be absolute" ;; esac
   validate_data_root "$AURIGA_DATA_ROOT"
   validate_managed_tree
+  if [ -f "$AURIGA_DATA_ROOT/config/materials/access.env" ]; then load_nas_access_env "$AURIGA_DATA_ROOT/config/materials/access.env"; fi
   # Ignore operator COMPOSE_PROJECT_NAME — always fixed (M1).
   COMPOSE_PROJECT_NAME=$AURIGA_NAS_PROJECT
   export COMPOSE_PROJECT_NAME
@@ -118,11 +182,11 @@ load_stack_env() {
 
 validate_managed_tree() {
   # User workspaces may contain symlinks; only these deployment-owned trees are scanned.
-  for _rel in config secrets join results enrollment bin socket-share data data/agent data/postgres data/nats data/registry; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens data data/agent data/postgres data/nats data/registry; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ ! -L "$_managed" ] || die "managed path is a symlink: $_managed"
   done
-  for _rel in config secrets join results enrollment bin socket-share; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ -d "$_managed" ] || continue
     _links=$(find "$_managed" -type l -print) || die "cannot inspect managed tree: $_managed"
@@ -340,4 +404,45 @@ ipv4_to_int() {
   IFS=$oldifs
   [ "$#" -eq 4 ] || return 1
   printf '%s' $(( ($1 << 24) + ($2 << 16) + ($3 << 8) + $4 ))
+}
+
+bootstrap_binary() {
+  if [ -n "${AURIGA_NAS_BOOTSTRAP_BINARY:-}" ]; then
+    [ -f "$AURIGA_NAS_BOOTSTRAP_BINARY" ] && [ -x "$AURIGA_NAS_BOOTSTRAP_BINARY" ] || die "explicit prebuilt bootstrap unavailable"
+    printf '%s\n' "$AURIGA_NAS_BOOTSTRAP_BINARY"; return
+  fi
+  if [ -x "$NAS_ROOT/bin/auriga-nas-bootstrap" ]; then printf '%s\n' "$NAS_ROOT/bin/auriga-nas-bootstrap"
+  elif [ -x "$AURIGA_DATA_ROOT/bin/auriga-nas-bootstrap" ]; then printf '%s\n' "$AURIGA_DATA_ROOT/bin/auriga-nas-bootstrap"
+  else die "prebuilt auriga-nas-bootstrap is required; verify bundle checksums and restore its executable bit (NAS does not compile)"; fi
+}
+
+validate_nas_access() {
+  _boot=$(bootstrap_binary)
+  "$_boot" -validate-access -access-file "$AURIGA_ACCESS_FILE" \
+    -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
+    -lan-ip "${AURIGA_EDGE_LAN_IP:?}" -lan-subnet "${AURIGA_LAN_SUBNET:?}" \
+    -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}"
+}
+
+bootstrap_nas_materials() {
+  _boot=$(bootstrap_binary)
+  (umask 022; "$_boot" -out "$AURIGA_DATA_ROOT/config/materials" -access-file "$AURIGA_ACCESS_FILE" \
+    -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
+    -lan-ip "${AURIGA_EDGE_LAN_IP:?}" -lan-subnet "${AURIGA_LAN_SUBNET:?}" \
+    -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}")
+}
+
+install_edge_material() {
+  _source=$1; _target=$2; _mode=$3
+  if [ -e "$_target" ] || [ -L "$_target" ]; then
+    [ -f "$_target" ] && [ ! -L "$_target" ] || die "invalid existing edge leaf"
+    [ "$(stat -c '%u:%g:%a:%h' "$_target")" = "65532:65532:$_mode:1" ] || die "invalid existing edge leaf metadata; refusing repair"
+    cmp -s "$_source" "$_target" || die "existing edge leaf differs; refusing rotation"
+    return
+  fi
+  _temporary=$(umask 077; mktemp "$AURIGA_DATA_ROOT/config/pki-edge/.install.XXXXXX")
+  cat "$_source" >"$_temporary"
+  chown_required 65532:65532 "$_temporary"
+  chmod "0$_mode" "$_temporary"
+  mv -T "$_temporary" "$_target"
 }

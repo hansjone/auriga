@@ -3,9 +3,7 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
@@ -26,12 +25,12 @@ var identityMaterialFiles = []string{
 }
 
 func writeComposeKeys(out string) error {
-	p, err := openPrivateInstallation(out)
+	p, err := materials.Open(out)
 	if err != nil {
 		return err
 	}
-	defer p.close()
-	raw, err := p.read("compose.keys")
+	defer p.Close()
+	raw, err := p.Read("compose.keys")
 	if os.IsNotExist(err) {
 		var b strings.Builder
 		for _, key := range []string{"AURIGA_IAM_ENCRYPTION_KEY", "AURIGA_WORKSPACE_ENCRYPTION_KEY"} {
@@ -50,7 +49,7 @@ func writeComposeKeys(out string) error {
 		if err := validateComposeKeys(raw); err != nil {
 			return err
 		}
-		if err := p.create("compose.keys", raw); err != nil {
+		if err := p.Create("compose.keys", raw); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -60,7 +59,7 @@ func writeComposeKeys(out string) error {
 	if err := validateComposeKeys(raw); err != nil {
 		return err
 	}
-	return p.validate()
+	return p.Validate()
 }
 
 func validateComposeKeys(raw []byte) error {
@@ -82,123 +81,35 @@ func validateComposeKeys(raw []byte) error {
 	return nil
 }
 
-// The receipt is private installation metadata, never a public configuration.
-// It binds the exact inputs and complete fixed material set; it is not a
-// signature or an upgrade/rotation protocol.
-func materialDigest(out string) (string, error) {
-	h := sha256.New()
-	p, err := openPrivateInstallation(out)
-	if err != nil {
-		return "", err
-	}
-	defer p.close()
-	for _, name := range []string{"edge.secret", "internal.properties", "compose.keys"} {
-		raw, err := p.read(name)
-		if err != nil {
-			return "", fmt.Errorf("incomplete private installation")
-		}
-		sum := sha256.Sum256(raw)
-		clear(raw)
-		_, _ = fmt.Fprintf(h, "%s:%x\n", name, sum)
-	}
-	if err := p.validate(); err != nil {
-		return "", err
-	}
-	names := append([]string{}, identityMaterialFiles...)
+func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet, error) {
+	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates"}}
 	entries, err := os.ReadDir(filepath.Join(out, "templates"))
-	if err != nil || len(entries) != 1 || (entries[0].Name() != "fake-dsh.pb" && entries[0].Name() != "real-dsh.pb") {
-		return "", fmt.Errorf("incomplete fixture template")
+	if err != nil {
+		return set, err
 	}
-	names = append(names, "templates/"+entries[0].Name())
-	for _, name := range names {
-		path := filepath.Join(out, name)
-		parent, err := os.Lstat(filepath.Dir(path))
-		if err != nil || !parent.IsDir() || parent.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("invalid identity material directory")
-		}
-		before, err := os.Lstat(path)
-		if err != nil || !before.Mode().IsRegular() || before.Size() > 1<<20 {
-			return "", fmt.Errorf("identity materials incomplete or changed")
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return "", fmt.Errorf("read identity material")
-		}
-		opened, statErr := f.Stat()
-		raw, readErr := io.ReadAll(io.LimitReader(f, (1<<20)+1))
-		after, finalErr := f.Stat()
-		_ = f.Close()
-		final, pathErr := os.Lstat(path)
-		if statErr != nil || readErr != nil || finalErr != nil || pathErr != nil || !os.SameFile(before, opened) || !os.SameFile(opened, after) || !os.SameFile(after, final) || before.Size() != int64(len(raw)) || after.Size() != before.Size() || !before.ModTime().Equal(after.ModTime()) || !after.ModTime().Equal(final.ModTime()) {
-			return "", fmt.Errorf("changed identity material")
-		}
-		sum := sha256.Sum256(raw)
-		_, _ = fmt.Fprintf(h, "%s:%x\n", name, sum)
+	if len(entries) == 0 && !requireTemplate {
+		return set, nil
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	if len(entries) != 1 || (entries[0].Name() != "fake-dsh.pb" && entries[0].Name() != "real-dsh.pb") {
+		return set, fmt.Errorf("incomplete fixture template")
+	}
+	set.PublicFiles = append(set.PublicFiles, "templates/"+entries[0].Name())
+	return set, nil
 }
-
 func writeIdentityManifest(out, inputDigest string) error {
-	digest, err := materialDigest(out)
+	set, err := composeMaterialSet(out, true)
 	if err != nil {
 		return err
 	}
-	installation, err := openPrivateInstallation(out)
-	if err != nil {
-		return err
-	}
-	defer installation.close()
-	if err := installation.create("bootstrap.receipt", []byte(inputDigest+"\n"+digest+"\n")); err != nil {
-		return err
-	}
-	return installation.validate()
+	return materials.SealReceipt(out, inputDigest, set)
 }
-
 func existingIdentityMaterials(out, inputDigest string) (ed25519.PublicKey, string, bool, error) {
-	installation, err := openPrivateInstallation(out)
+	set, err := composeMaterialSet(out, false)
 	if err != nil {
 		return nil, "", false, err
 	}
-	defer installation.close()
-	raw, err := installation.read("bootstrap.receipt")
-	if os.IsNotExist(err) {
-		// A new installation may only use the empty real directories created by
-		// main. Do not adopt unknown remnants or follow links while generating
-		// templates or private PKI outside this installation.
-		for _, name := range []string{"pki", "templates"} {
-			path := filepath.Join(out, name)
-			info, statErr := os.Lstat(path)
-			if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-				return nil, "", false, fmt.Errorf("unreceipted %s must be an empty real directory", name)
-			}
-			entries, readErr := os.ReadDir(path)
-			if readErr != nil || len(entries) != 0 {
-				return nil, "", false, fmt.Errorf("unreceipted %s must be an empty real directory", name)
-			}
-		}
-		for _, name := range identityMaterialFiles {
-			if _, err := os.Lstat(filepath.Join(out, name)); !os.IsNotExist(err) {
-				return nil, "", false, fmt.Errorf("existing identity materials require a complete bootstrap receipt; use a fresh installation directory")
-			}
-		}
-		for _, name := range []string{"edge.secret", "internal.properties", "compose.keys"} {
-			if _, err := installation.read(name); !os.IsNotExist(err) {
-				return nil, "", false, fmt.Errorf("existing installation requires a complete bootstrap receipt")
-			}
-		}
-		return nil, "", false, nil
-	}
-	digest, digestErr := materialDigest(out)
-	if err != nil || digestErr != nil || string(raw) != inputDigest+"\n"+digest+"\n" {
-		return nil, "", false, fmt.Errorf("installation inputs or identity materials changed; refusing automatic rotation")
-	}
-	// Validate the existing private credentials before allowing any public writes.
-	for _, name := range []string{"edge.secret", "internal.properties", "compose.keys"} {
-		if _, err := installation.read(name); err != nil {
-			return nil, "", false, fmt.Errorf("incomplete private installation")
-		}
-	}
-	if err := installation.validate(); err != nil {
+	reuse, err := materials.CheckReceipt(out, inputDigest, set)
+	if err != nil || !reuse {
 		return nil, "", false, err
 	}
 	return readIdentityPublic(out)
