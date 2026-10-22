@@ -49,29 +49,26 @@ public class LoginCallbackController {
       HttpServletResponse response) {
     return requests.call(
         request,
-        () ->
-            store.tx(
-                () -> {
-                  Map<String, String> params = input;
-                  if (input.containsKey("resume"))
-                    throw new auriga.common.error.AurigaException(
-                        auriga.common.error.CommonErrors.NOT_FOUND);
-                  LoginManager.Result result =
-                      login.callback(
-                          providerId.toString(),
-                          requests.binding(request),
-                          params,
-                          requests.host(request).audience(),
-                          requests.origin(request));
-                  requests.issued(request, response, result);
-                  String target =
-                      result.transaction().path("status").asString().equals("completed")
-                          ? result.transaction().path("step").path("redirectTo").asString()
-                          : "/login?tx=" + result.transaction().path("id").asString();
-                  return ResponseEntity.status(302)
-                      .location(URI.create(target))
-                      .cacheControl(CacheControl.noStore())
-                      .build();
-                }));
+        () -> {
+          if (input.containsKey("resume"))
+            throw new auriga.common.error.AurigaException(
+                auriga.common.error.CommonErrors.NOT_FOUND);
+          LoginManager.Result result =
+              login.callbackResponse(
+                  providerId.toString(),
+                  requests.binding(request),
+                  input,
+                  requests.host(request).audience(),
+                  requests.origin(request));
+          requests.issued(request, response, result);
+          String target =
+              result.transaction().path("status").asString().equals("completed")
+                  ? result.transaction().path("step").path("redirectTo").asString()
+                  : "/login?tx=" + result.transaction().path("id").asString();
+          return ResponseEntity.status(302)
+              .location(URI.create(target))
+              .cacheControl(CacheControl.noStore())
+              .build();
+        });
   }
 }

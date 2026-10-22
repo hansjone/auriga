@@ -11,7 +11,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Write-through cache for edge: bucket {@code auriga-sessions}, key = cookie SHA-256 hex. Failures
- * are swallowed by {@link CompositeSessionKv}; iam's PostgreSQL store remains authoritative.
+ * are retained for retry by {@link CompositeSessionKv}; login responses also require publication
+ * confirmation. IAM's PostgreSQL store remains authoritative.
  */
 public final class NatsSessionKv implements SessionKv {
   static final String BUCKET = "auriga-sessions";

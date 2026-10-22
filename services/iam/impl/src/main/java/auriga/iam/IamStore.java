@@ -45,6 +45,20 @@ public final class IamStore {
     return transactions.execute(s -> work.get());
   }
 
+  // A response that waits for another transaction must own its transaction boundary. Even an
+  // afterCompletion callback can still own the connection until Spring finishes cleanup.
+  void requireTransactionReleased() {
+    var dataSource = jdbc.getDataSource();
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+            .isActualTransactionActive()
+        || org.springframework.transaction.support.TransactionSynchronizationManager
+            .isSynchronizationActive()
+        || (dataSource != null
+            && org.springframework.transaction.support.TransactionSynchronizationManager
+                .hasResource(dataSource)))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+  }
+
   public <T> T tenant(UUID tenant, Supplier<T> work) {
     return TenantContext.call(tenant, () -> tx(work));
   }
@@ -96,6 +110,27 @@ public final class IamStore {
             TenantContext.require(),
             java.sql.Timestamp.from(now));
     return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  SessionProjection claimSessionProjection(String hash, Instant now) {
+    var rows =
+        jdbc.query(
+            "SELECT id,cookie_hash,attempts FROM iam.session_projection WHERE tenant_id=? AND cookie_hash=? AND next_attempt_at<=? FOR UPDATE SKIP LOCKED",
+            (rs, i) ->
+                new SessionProjection(rs.getObject(1, UUID.class), rs.getString(2), rs.getInt(3)),
+            TenantContext.require(),
+            hash,
+            java.sql.Timestamp.from(now));
+    return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  boolean sessionProjectionPending(String hash) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM iam.session_projection WHERE tenant_id=? AND cookie_hash=?)",
+            Boolean.class,
+            TenantContext.require(),
+            hash));
   }
 
   void completeSessionProjection(UUID id) {
