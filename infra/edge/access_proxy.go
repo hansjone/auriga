@@ -142,9 +142,21 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 				}
 				return
 			}
-		} else if g.checkCSRF(r, sess) != nil {
-			fail(403, "common.forbidden")
-			return
+		} else {
+			count := 0
+			for _, cookie := range r.Cookies() {
+				if cookie.Name == cookieName(e.scheme == "https", csrfCookieBase()) {
+					count++
+				}
+			}
+			if count > 1 {
+				fail(400, "common.validation_failed")
+				return
+			}
+			if len(r.Header.Values("X-Auriga-CSRF")) != 1 || g.checkCSRF(r, sess) != nil {
+				fail(403, "common.forbidden")
+				return
+			}
 		}
 	}
 	if iam && g.IAMTransport == nil {

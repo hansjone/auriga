@@ -130,7 +130,7 @@ func openIAMRPC(cfg IAMRPCConfig, hop IAMHopConfig, dialer func(context.Context,
 	if timeout <= 0 || timeout > 5*time.Second {
 		return nil, fmt.Errorf("iamRpc.timeoutMillis must be 1..5000")
 	}
-	options := []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))}
+	options := []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)), grpc.WithNoProxy()}
 	if dialer != nil {
 		options = append(options, grpc.WithContextDialer(dialer))
 	}

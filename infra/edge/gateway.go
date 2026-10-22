@@ -463,6 +463,17 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 }
 
 func (g *Gateway) ticketRedirectURL(r *http.Request, instanceID, token string) string {
+	if g.Cfg.Access.Valid() {
+		// The loader requires the subdomain instance scheme and port to equal
+		// portalOrigin. Preserve that complete installation authority.
+		origin := g.Cfg.Access.PortalOrigin()
+		path := "/i/" + instanceID + "/_auriga/ticket"
+		if parent := g.Cfg.Access.InstanceParentDomain(); parent != "" {
+			origin.Host = instanceID + "." + parent
+			path = "/_auriga/ticket"
+		}
+		return origin.Scheme + "://" + originAuthority(origin) + path + "?t=" + url.QueryEscape(token)
+	}
 	scheme := "http"
 	if g.Cfg.SecureCookies || r.TLS != nil {
 		scheme = "https"
