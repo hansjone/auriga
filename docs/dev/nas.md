@@ -1,6 +1,8 @@
 # NAS 独立测试栈（deploy/nas）
 
-面向家里 NAS 的**隔离测试部署包**：与 CI 的 `deploy/compose`（host 网络 + 假 DSH）并行，不替换旧 Hub，不改 DNS/防火墙/路由。工人只准备模板与脚本；**不能访问或修改 NAS**。真实域名、LAN IP、目录只写在私有现场笔记，公开仓一律用 `example.com` / `192.0.2.x` / `/srv/container/auriga-test`。
+Auriga 面向所有人提供开源自托管部署；NAS 是验证通用容器部署流程的一个真实环境。域名访问与内网纯 IP 访问都是正式支持目标，当前纯 IP 的完整登录、实例入口与 WebSocket 链路仍待实现核对和完整验收。
+
+本目录目前提供**隔离测试部署包**：与 CI 的 `deploy/compose`（host 网络 + 假 DSH）并行，不替换旧 Hub，不改 DNS/防火墙/路由。工人只准备模板与脚本；**不能访问或修改 NAS**。真实域名、LAN IP、目录只写在私有现场笔记，公开仓一律用 `example.com` / `192.0.2.x` / `/srv/container/auriga-test`。
 
 本包 Compose 项目名**固定**为 `auriga-nas-test`（脚本忽略 `stack.env` 里的其它项目名，防止误删别的栈）。在 W3 交付真实 DSH 摘要与签名模板之前，**不得宣称真实验收完成**。
 
@@ -38,6 +40,12 @@ edge 的稳定容器名固定为 `auriga-nas-test-edge`，带 `auriga.role=edge`
 公网只反代到 edge；浏览器不直连 8081。一个 edge 入口仍对应完整后端（platform/NATS/DB），只是不对公网另开站点。
 
 资源预算（建议）：基础服务合计约 ≤ 3.5–4 GiB RAM、约 2 CPU；实例策略上限 500m CPU / 512 MiB / 128 PIDs。
+
+### 实例镜像策略
+
+`init.sh` / `render.sh` 生成的 `agent-policy.yaml` 使用 agent 实际读取的 `allowedImageRepos`，仅允许 `127.0.0.1:<registry 端口>/auriga/` 与 `localhost:<registry 端口>/auriga/`。端口来自 `AURIGA_HOST_PUBLISH_REGISTRY`（默认 15000），实例镜像仍必须固定为 `repo@sha256:<64 位摘要>`；其它 registry、路径前缀碰撞及未固定摘要的镜像均拒绝。此修复不增加镜像信任来源，也不放宽资源限额。
+
+本机真实 DSH 生命周期验收使用 1024 MiB；本包的默认策略与容量仍为 512 MiB，两者的配额接线、真实模板和签名信任链仍须后续打通。修正镜像策略键名本身不代表通用部署或生产验收完成。
 
 ## 目录布局
 
@@ -148,9 +156,9 @@ sh deploy/nas/scripts/smoke.sh
 - 停止：只停本项目；`--with-registered-instances` 对发现和登记的 ID 均要求 `auriga.managed=true`、实例 label 和规范化后严格位于 `data/agent/` 下的 bind。外方 label、路径前缀碰撞和链接逃逸均拒绝。禁止 prune / `down -v` / orphans 清扫。
 - 备份：`secrets/`、`data/postgres`、`data/agent`、`enrollment/`、`stack.env`。
 
-## 弱隔离（纯 IP）
+## 纯 IP 访问
 
-无独立 Host 时 cookie/Origin 隔离变弱；验收应使用门户/管理台/实例父域三个来源。
+内网无域名、仅通过 IP（例如 `http://192.0.2.10:8080`）访问是正式支持目标，不能依赖手工修改 Host 或临时私有步骤完成。无独立 Host 时须明确处理门户、管理台与实例的 cookie、Origin 和路由隔离；当前这套部署配置的完整登录、实例访问及 WebSocket 尚未通过纯 IP 验收，不能把域名模式的验收结果视为纯 IP 已完成。
 
 ## 证书轮换（L6）
 
@@ -160,9 +168,13 @@ bootstrap 叶子证书约 825 天；到期前需重新 init/签发并滚动 edge
 
 ```sh
 sh deploy/nas/test/run-tests.sh
+# Linux：真实 init/render 的产物经 agent policy.Load / AllowImage 验证；不启动容器。
+(cd infra/agent && go test -count=1 ./internal/policy)
 # Linux root 可验证真实 chown/mode，使用 CI 预构建的 bootstrap 二进制：
 NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
 (cd infra/edge && go test -count=1 ../../deploy/nas/test/nats_policy_test.go)
 ```
 
 具备 Docker Compose 与 Python 3 时，脚本测试还会只读归一化实际 Compose 配置，检查默认及自定义门户/实例父域的心跳 URL、稳定 edge 名称/标签及既有网络、权限边界；不启动容器或占用端口。测试凭据均在新临时目录随机生成，退出清理，不读取现场材料。
+
+agent policy 的跨组件回归由现有 Linux Go CI 执行，覆盖默认及自定义 registry 端口的真实初始化、重新渲染、镜像允许与拒绝、资源限额。测试使用已有的 `NAS_ALLOW_NONROOT=1` 模式，供非 root runner 运行，不代替 root/chown 和共享目录祖先归属检查；这些由上面的 root shell 测试验证。Windows 明确跳过这条 POSIX 脚本链，其余 policy 单测仍运行。
