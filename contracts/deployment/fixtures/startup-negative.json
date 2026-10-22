@@ -1,0 +1,79 @@
+[
+  {
+    "name": "issuer-differs",
+    "base": "ip-http.json",
+    "pointer": "issuerOrigin.port",
+    "value": 8082,
+    "rule": 2
+  },
+  {
+    "name": "same-origin-admin",
+    "base": "ip-http.json",
+    "pointer": "adminOrigin.port",
+    "value": 8080,
+    "rule": 2
+  },
+  {
+    "name": "different-ip-admin",
+    "base": "ip-http.json",
+    "pointer": "adminOrigin.host",
+    "value": "192.0.2.11",
+    "rule": 2
+  },
+  {
+    "name": "http-unacknowledged",
+    "base": "ip-http.json",
+    "pointer": "insecureHttpAcknowledged",
+    "value": false,
+    "rule": 4
+  },
+  {
+    "name": "listener-collision",
+    "base": "ip-http.json",
+    "pointer": "listeners.admin.port",
+    "value": 8080,
+    "rule": 3
+  },
+  {
+    "name": "direct-tls-mismatch",
+    "base": "ip-http.json",
+    "pointer": "listeners.portal.tls",
+    "value": true,
+    "rule": 3
+  },
+  {
+    "name": "alias-origin-mismatch",
+    "base": "ip-http.json",
+    "pointer": "instanceControl.origin.host",
+    "value": "other.internal",
+    "rule": 5
+  },
+  {
+    "name": "internal-port-mismatch",
+    "base": "ip-http.json",
+    "pointer": "instanceControl.origin.port",
+    "value": 8080,
+    "rule": 5
+  },
+  {
+    "name": "overlapping-domain",
+    "base": "domain-proxy.json",
+    "pointer": "instances.parentDomain",
+    "value": "example.com",
+    "rule": 2
+  },
+  {
+    "name": "proxy-cidr-invalid",
+    "base": "domain-proxy.json",
+    "pointer": "ingress.peerCidrs",
+    "value": ["not-a-cidr"],
+    "rule": 3
+  },
+  {
+    "name": "proxy-cidr-all",
+    "base": "domain-proxy.json",
+    "pointer": "ingress.peerCidrs",
+    "value": ["0.0.0.0/0"],
+    "rule": 3
+  }
+]

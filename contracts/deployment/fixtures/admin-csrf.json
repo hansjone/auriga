@@ -1,0 +1,10 @@
+{
+  "request": {
+    "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  },
+  "response": {
+    "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "expiresAt": "2026-10-22T01:15:00Z"
+  },
+  "description": "Synthetic all-zero shape fixture, never a usable credential or an example of secure entropy. Runtime clients must use crypto.getRandomValues."
+}

@@ -19,6 +19,30 @@ service SessionService {
   rpc RevokeSessions(RevokeSessionsRequest) returns (RevokeSessionsResponse);
   // 会话续期（顺延闲置过期时间并改写 NATS KV）。调用方：edge，同一会话最多每 5 分钟一次。
   rpc TouchSession(TouchSessionRequest) returns (TouchSessionResponse);
+  // IP0契约，待IP1实现。仅svc:edge，既有内部服务JWT + 非回环mTLS。
+  // 每个IP管理浏览器写请求在线校验；不能用KV缓存、旧csrfHash或任意admin JWT替代。
+  // IAM从session_token定位当前权威会话，检查admin audience、账号/租户状态、到期/吊销和
+  // 当前有效adminCsrfTokens中UTF-8 csrf_token的SHA-256；恒定时间比较，不打印原文。
+  // 登记/过期/吊销与此检查按同一会话串行化；吊销提交后的新校验必须失败。
+  // 无效/过期/吊销或非admin会话返回UNAUTHENTICATED；会话有效但CSRF不匹配时active=false且无session。
+  // 控制面错误返回UNAVAILABLE，不伪造active；edge分别映射401/403/503的既有common错误。
+  // edge先校验实际listener/完整Origin，再比较响应sid/account/tid/admin audience与实际cookie会话，
+  // 不符即拒绝。结果仅用于本次请求，不缓存、不延期，不使其它路径跳过CSRF。
+  rpc VerifyAdminSessionCsrf(VerifyAdminSessionCsrfRequest) returns (VerifyAdminSessionCsrfResponse);
+}
+
+message VerifyAdminSessionCsrfRequest {
+  // 实际admin入口消费的浏览器cookie原值，仅经受信内部通道，不允许由外部Bearer替代。
+  string session_token = 1;
+  // X-Auriga-CSRF原值；32字节规范无填充base64url，内部请求也不得记录明文。
+  string csrf_token = 2;
+}
+
+message VerifyAdminSessionCsrfResponse {
+  bool active = 1;
+  // 仅active=true设置；sid/account/tid非空、audience必须为ADMIN。
+  // IAM检查完的权威状态，edge必须与当前实际消费的会话一致。
+  Session session = 2;
 }
 
 message TouchSessionRequest {
