@@ -34,6 +34,7 @@ import {
 } from './lib/assert.mjs';
 import { openWebSocket } from './lib/ws-client.mjs';
 import { waitInstancePage } from './lib/instance-page.mjs';
+import { verifyStaticWeb } from './lib/static-web.mjs';
 import {
   readRawHeartbeats,
   assertRawHeartbeat,
@@ -1350,6 +1351,17 @@ function cleanup() {
 async function main() {
   console.log('M2 e2e', { EDGE, PLATFORM, IDLE_MINUTES, FIXTURE });
   try {
+    step('portal/admin HTML and built JS/CSS');
+    for (const [audience, host] of Object.entries(hosts)) {
+      const assets = await verifyStaticWeb(
+        (path) => req(path, { host, jar: new CookieJar() }),
+        audience,
+      );
+      console.log(
+        `${audience} entry and ${assets.length} built assets verified`,
+      );
+    }
+    evidence.checks.push('portal-admin-html-js-css');
     await loginEmergency(ADMIN_HOST);
     await setIdlePolicy();
     await createJoinTokenAndWaitNode();
