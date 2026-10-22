@@ -27,6 +27,9 @@ import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith({PostgresExtension.class, NatsExtension.class})
 class LoginResponsePostgresTest {
+  static final java.util.concurrent.atomic.AtomicInteger clientIds =
+      new java.util.concurrent.atomic.AtomicInteger(20);
+  final String clientIp = "192.0.2." + clientIds.incrementAndGet();
   static PostgresExtension.ServiceRoles roles;
   HikariDataSource source;
   IamStore store;
@@ -200,6 +203,8 @@ class LoginResponsePostgresTest {
 
   MockHttpServletRequest request() {
     var request = HttpBoundaryTest.request(access, "admin");
+    request.removeHeader("X-Auriga-Client-IP");
+    request.addHeader("X-Auriga-Client-IP", clientIp);
     request.addHeader("Origin", access.adminUrl());
     return request;
   }
@@ -253,7 +258,7 @@ class LoginResponsePostgresTest {
     assertNotNull(
         store.tenant(tenant, () -> sessions.activeById(projected.path("sessionId").asString())));
     assertImmediateMe(projected);
-    assertEquals(0, source.getHikariPoolMXBean().getActiveConnections());
+    assertRequestReleasedAndPoolBecomesIdle();
   }
 
   void assertImmediateMe(ObjectNode projected) {
@@ -286,6 +291,318 @@ class LoginResponsePostgresTest {
   }
 
   @Test
+  void productionHttpRevokeResponseImmediatelyRemovesOriginalNatsProjection() {
+    var response = new MockHttpServletResponse();
+    complete(begin(), response);
+    String hash = Secrets.hash(response.getCookie("__Host-auriga_admin_session").getValue());
+    ObjectNode projected = assertNotNullValue(consumer.get(hash));
+    asUser(projected, () -> controller.revoke(projected.path("sessionId").asString()));
+    assertNull(
+        consumer.get(hash),
+        "A successful production revoke response must already reject the old cookie");
+    asUser(projected, () -> controller.revoke(projected.path("sessionId").asString()));
+    assertNull(consumer.get(hash));
+  }
+
+  void asUser(ObjectNode projected, Runnable work) {
+    var claims = tokens.verify(projected.path("accessToken").asString());
+    var principal =
+        new auriga.common.security.AurigaPrincipal(
+            claims.path("sub").asString(),
+            tenant,
+            auriga.common.security.PrincipalType.USER,
+            auriga.common.security.TokenContext.ADMIN,
+            claims.path("sid").asString(),
+            null,
+            "member",
+            List.of(),
+            Set.of(),
+            clock.instant(),
+            null,
+            claims.path("jti").asString());
+    TenantContext.run(
+        tenant,
+        () ->
+            auriga.common.context.RequestContext.start("revoke-response", null)
+                .withPrincipal(principal)
+                .run(work));
+  }
+
+  ObjectNode assertNotNullValue(ObjectNode value) {
+    assertNotNull(value);
+    return value;
+  }
+
+  record Live(String hash, ObjectNode value, MockHttpServletRequest request) {}
+
+  Live live() {
+    var pending = begin();
+    var response = new MockHttpServletResponse();
+    complete(pending, response);
+    var cookie = response.getCookie("__Host-auriga_admin_session");
+    String hash = Secrets.hash(cookie.getValue());
+    var value = assertNotNullValue(consumer.get(hash));
+    var csrf = response.getCookie("__Host-auriga_csrf");
+    assertNotNull(csrf);
+    pending.request().setCookies(cookie, csrf);
+    pending.request().addHeader("X-Auriga-CSRF", csrf.getValue());
+    return new Live(hash, value, pending.request());
+  }
+
+  @Test
+  void productionGrpcRevokeConfirmsBeforeObserverAndRetriesIdempotently() {
+    var live = live();
+    var principal =
+        new auriga.common.security.AurigaPrincipal(
+            "svc:org",
+            tenant,
+            auriga.common.security.PrincipalType.INTERNAL_SERVICE,
+            auriga.common.security.TokenContext.SERVICE,
+            null,
+            null,
+            null,
+            List.of(),
+            Set.of(),
+            null,
+            null,
+            "grpc-revoke");
+    var request =
+        auriga.contracts.iam.v1.RevokeSessionsRequest.newBuilder()
+            .setTenantId(tenant.toString())
+            .setAccountId(live.value().path("accountId").asString())
+            .addSessionIds(live.value().path("sessionId").asString())
+            .setReason(auriga.contracts.iam.v1.RevokeReason.REVOKE_REASON_USER_DISABLED)
+            .build();
+    var replies = new ArrayList<Long>();
+    var grpc = new IamGrpcSessions(sessions);
+    var observer =
+        new io.grpc.stub.StreamObserver<auriga.contracts.iam.v1.RevokeSessionsResponse>() {
+          public void onNext(auriga.contracts.iam.v1.RevokeSessionsResponse response) {
+            assertNull(consumer.get(live.hash()));
+            replies.add(response.getRevoked());
+          }
+
+          public void onError(Throwable error) {
+            fail(error);
+          }
+
+          public void onCompleted() {}
+        };
+    TenantContext.run(
+        tenant,
+        () ->
+            auriga.common.context.RequestContext.start("grpc-revoke", null)
+                .withPrincipal(principal)
+                .run(
+                    () -> {
+                      grpc.revokeSessions(request, observer);
+                      grpc.revokeSessions(request, observer);
+                    }));
+    assertEquals(List.of(1L, 0L), replies);
+  }
+
+  @Test
+  void fiveProductionRevokeResponsesReleasePoolAndImmediatelyDeleteAllKeys() throws Exception {
+    var lives = new ArrayList<Live>();
+    for (int i = 0; i < 5; i++) lives.add(live());
+    var gate = new CountDownLatch(1);
+    long began = System.nanoTime();
+    try (var threads = Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls = new ArrayList<Future<?>>();
+      for (var live : lives)
+        calls.add(
+            threads.submit(
+                () -> {
+                  assertTrue(gate.await(5, TimeUnit.SECONDS));
+                  asUser(
+                      live.value(),
+                      () -> controller.revoke(live.value().path("sessionId").asString()));
+                  assertNull(consumer.get(live.hash()));
+                  store.requireTransactionReleased();
+                  return null;
+                }));
+      gate.countDown();
+      for (var call : calls) call.get(10, TimeUnit.SECONDS);
+    }
+    long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began);
+    assertTrue(elapsed < 7000);
+    System.out.printf("PRODUCTION_REVOKE_POOL elapsed_ms=%d removed=5/5 pool=5%n", elapsed);
+  }
+
+  @Test
+  void unavailableRevokeKeepsDurableDeletionAcrossReconstructionAndRetry() throws Exception {
+    var live = live();
+    connection.close();
+    long began = System.nanoTime();
+    var failure =
+        assertThrows(
+            auriga.common.error.AurigaException.class,
+            () ->
+                asUser(
+                    live.value(),
+                    () -> controller.revoke(live.value().path("sessionId").asString())));
+    assertEquals("common.unavailable", failure.errorCode().code());
+    assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began) < 7000);
+    assertTrue(store.tenant(tenant, () -> store.sessionProjectionPending(live.hash())));
+    assertTrue(
+        store
+            .tenant(
+                tenant,
+                () -> store.byId("session", live.value().path("sessionId").asString(), false))
+            .path("revoked")
+            .asBoolean());
+    reconstructProjection();
+    // Retrying through the original controller requires the same fresh store as the new worker.
+    var rebuiltSessions =
+        new SessionManager(
+            store, projection, tokens, clock, mock(EventPublisher.class), mock(AuditLogger.class));
+    var rebuiltController =
+        new IamLoginController(
+            login, identity, store, rebuiltSessions, new QrChallenges(store, clock), secrets);
+    try {
+      asUser(
+          live.value(), () -> rebuiltController.revoke(live.value().path("sessionId").asString()));
+      assertNull(consumer.get(live.hash()));
+      assertFalse(store.tenant(tenant, () -> store.sessionProjectionPending(live.hash())));
+    } finally {
+      rebuiltController.destroy();
+    }
+    System.out.println(
+        "PRODUCTION_REVOKE_RECOVERY unavailable=true durable=true reconstructed=true idempotent=true");
+  }
+
+  @Test
+  void externallyOwnedTransactionRejectsRevokeBeforeChangingAuthoritativeState() {
+    var live = live();
+    store.tenant(
+        tenant,
+        () -> {
+          var failure =
+              assertThrows(
+                  auriga.common.error.AurigaException.class,
+                  () ->
+                      asUser(
+                          live.value(),
+                          () -> controller.revoke(live.value().path("sessionId").asString())));
+          assertEquals("common.unavailable", failure.errorCode().code());
+          assertFalse(
+              store
+                  .byId("session", live.value().path("sessionId").asString(), false)
+                  .path("revoked")
+                  .asBoolean());
+          return null;
+        });
+    assertNotNull(consumer.get(live.hash()));
+    var rejected = new java.util.concurrent.atomic.AtomicInteger();
+    TenantContext.run(
+        tenant,
+        () ->
+            sessions.response(
+                () -> {
+                  org.springframework.transaction.support.TransactionSynchronizationManager
+                      .registerSynchronization(
+                          new org.springframework.transaction.support.TransactionSynchronization() {
+                            void reject() {
+                              var failure =
+                                  assertThrows(
+                                      auriga.common.error.AurigaException.class,
+                                      () ->
+                                          asUser(
+                                              live.value(),
+                                              () ->
+                                                  controller.revoke(
+                                                      live.value().path("sessionId").asString())));
+                              assertEquals("common.unavailable", failure.errorCode().code());
+                              rejected.incrementAndGet();
+                            }
+
+                            public void afterCommit() {
+                              reject();
+                            }
+
+                            public void afterCompletion(int status) {
+                              reject();
+                            }
+                          });
+                  return null;
+                }));
+    assertEquals(2, rejected.get());
+    assertNotNull(consumer.get(live.hash()));
+  }
+
+  @Test
+  void productionRevokeOthersPasswordAndLogoutConfirmBeforeReturning() {
+    var first = live();
+    var current = live();
+    asUser(current.value(), () -> assertEquals(1, me.revokeOthers().path("revoked").asInt()));
+    assertNull(consumer.get(first.hash()));
+    assertNotNull(consumer.get(current.hash()));
+    asUser(current.value(), () -> assertEquals(0, me.revokeOthers().path("revoked").asInt()));
+    var other = live();
+    asUser(
+        current.value(),
+        () ->
+            me.changePassword(
+                Json.object(
+                    "currentPassword", "correct-horse", "newPassword", "new-correct-horse")));
+    assertNull(consumer.get(other.hash()));
+    assertNotNull(consumer.get(current.hash()));
+    var response = new MockHttpServletResponse();
+    asUser(current.value(), () -> controller.logout(current.request(), response));
+    assertNull(consumer.get(current.hash()));
+    assertTrue(
+        response.getHeaders("Set-Cookie").stream()
+            .anyMatch(c -> c.contains("auriga_admin_session=") && c.contains("Max-Age=0")));
+  }
+
+  @Test
+  void accountEventKeepsInboxOwnedCommitAndRollbackWithoutNestedConfirmation() {
+    var live = live();
+    var handler = new IamAccountEvents(store, sessions);
+    var event =
+        new auriga.common.events.ReceivedEvent(
+            UUID.randomUUID(),
+            "user.disabled",
+            "org",
+            live.value().path("accountId").asString(),
+            clock.instant(),
+            tenant,
+            "1",
+            null,
+            Json.object("userId", live.value().path("accountId").asString()));
+    projection.stop();
+    try {
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              store.tenant(
+                  tenant,
+                  () -> {
+                    handler.handle(event);
+                    assertTrue(store.sessionProjectionPending(live.hash()));
+                    assertNotNull(consumer.get(live.hash()));
+                    throw new IllegalStateException("inbox rollback");
+                  }));
+      assertFalse(store.tenant(tenant, () -> store.sessionProjectionPending(live.hash())));
+      assertNotNull(
+          store.tenant(
+              tenant, () -> sessions.activeById(live.value().path("sessionId").asString())));
+      store.tenant(
+          tenant,
+          () -> {
+            handler.handle(event);
+            return null;
+          });
+      assertTrue(store.tenant(tenant, () -> store.sessionProjectionPending(live.hash())));
+      assertNotNull(consumer.get(live.hash()));
+    } finally {
+      projection.start();
+    }
+    TenantContext.run(tenant, () -> projection.awaitProjected(List.of(live.hash())));
+    assertNull(consumer.get(live.hash()));
+  }
+
+  @Test
   void fiveProductionLoginsReleaseFiveConnectionsBeforeWaitingForVisibility() throws Exception {
     var pending = new ArrayList<Pending>();
     for (int i = 0; i < 5; i++) pending.add(begin());
@@ -313,7 +630,7 @@ class LoginResponsePostgresTest {
         "PRODUCTION_LOGIN_POOL elapsed_ms=%d visible=5/5 pool=%d timeout_ms=%d%n",
         elapsed, source.getMaximumPoolSize(), source.getConnectionTimeout());
     assertTrue(elapsed < 10000);
-    assertEquals(0, source.getHikariPoolMXBean().getActiveConnections());
+    assertRequestReleasedAndPoolBecomesIdle();
   }
 
   @Test
@@ -395,7 +712,7 @@ class LoginResponsePostgresTest {
                   > 0);
           return null;
         });
-    assertEquals(0, source.getHikariPoolMXBean().getActiveConnections());
+    assertRequestReleasedAndPoolBecomesIdle();
     System.out.printf(
         "PRODUCTION_LOGIN_UNAVAILABLE elapsed_ms=%d cookie=false durable=true%n", elapsed);
     String hash =
@@ -464,6 +781,25 @@ class LoginResponsePostgresTest {
     context.register(SessionProjectionPostgresTest.LifecycleAssembly.class);
     context.refresh();
     projection = assertInstanceOf(CompositeSessionKv.class, context.getBean(SessionKv.class));
+    keys = new SigningKeys(store, secrets, clock, Duration.ofSeconds(30));
+    tokens =
+        new TokenService(
+            keys,
+            schemas,
+            (t, s, c) -> Set.of("workspace.read"),
+            clock,
+            access.portalUrl(),
+            Map.of());
+  }
+
+  void assertRequestReleasedAndPoolBecomesIdle() {
+    store.requireTransactionReleased();
+    // The one production projection worker may legitimately be in a transaction right now.
+    // The separate latch probe proves active=1 belongs to that worker while requests are free.
+    assertTrue(source.getHikariPoolMXBean().getActiveConnections() <= 1);
+    org.awaitility.Awaitility.await()
+        .atMost(Duration.ofSeconds(2))
+        .untilAsserted(() -> assertEquals(0, source.getHikariPoolMXBean().getActiveConnections()));
   }
 
   @Test

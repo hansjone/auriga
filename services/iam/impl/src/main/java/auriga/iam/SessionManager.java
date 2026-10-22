@@ -85,6 +85,10 @@ public final class SessionManager implements Sessions {
     kv.awaitVisible(Secrets.hash(issued.cookie()));
   }
 
+  <T> T response(java.util.function.Supplier<T> work) {
+    return store.responseTx(kv, work);
+  }
+
   <T> T withSigningKey(java.util.function.Supplier<T> work) {
     return tokens.withSigningKey(work);
   }
@@ -208,7 +212,11 @@ public final class SessionManager implements Sessions {
     ObjectNode locked = store.byId("session", row.path("id").asString(), true);
     IamError.require(locked != null, "not_found", 404);
     row = locked;
-    if (row.path("revoked").asBoolean()) return;
+    if (row.path("revoked").asBoolean()) {
+      // A previous response can fail after commit. Retrying must confirm its durable tombstone.
+      kv.delete(row.path("cookieHash").asString());
+      return;
+    }
     row.put("revoked", true);
     row.remove("adminCsrfTokens");
     store.save("session", row);
@@ -425,8 +433,8 @@ public final class SessionManager implements Sessions {
           for (ObjectNode row : store.all("session"))
             if (row.path("accountId").asString().equals(request.getAccountId())
                 && (request.getSessionIdsList().isEmpty()
-                    || request.getSessionIdsList().contains(row.path("sessionId").asString()))
-                && !row.path("revoked").asBoolean()) {
+                    || request.getSessionIdsList().contains(row.path("sessionId").asString()))) {
+              boolean wasRevoked = row.path("revoked").asBoolean();
               revokeOne(
                   row,
                   request
@@ -434,7 +442,7 @@ public final class SessionManager implements Sessions {
                       .name()
                       .replace("REVOKE_REASON_", "")
                       .toLowerCase(Locale.ROOT));
-              count++;
+              if (!wasRevoked) count++;
             }
           if (request.getIncludeDevices())
             for (ObjectNode device : store.all("device"))

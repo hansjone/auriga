@@ -17,4 +17,7 @@ public interface SessionKv {
    * Confirm external visibility after the response's database transaction has released resources.
    */
   default void awaitVisible(String cookieHash) {}
+
+  /** Confirm every committed update or deletion within one bounded response wait. */
+  default void awaitProjected(java.util.Collection<String> cookieHashes) {}
 }

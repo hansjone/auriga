@@ -58,7 +58,7 @@ public class IamGrpcSessions extends SessionServiceGrpc.SessionServiceImplBase {
   public void revokeSessions(
       RevokeSessionsRequest request, StreamObserver<RevokeSessionsResponse> observer) {
     caller(Set.of("svc:org", "svc:ops"));
-    observer.onNext(sessions.revoke(request));
+    observer.onNext(sessions.response(() -> sessions.revoke(request)));
     observer.onCompleted();
   }
 }

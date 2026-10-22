@@ -1063,6 +1063,7 @@ class TeamAccountFlowTest {
           UUID account = UUID.randomUUID();
           SessionManager sessions = mock(SessionManager.class);
           TokenService tokens = mock(TokenService.class);
+          when(sessions.response(any())).thenAnswer(i -> ((Supplier<?>) i.getArgument(0)).get());
           when(tokens.issuer()).thenReturn("https://portal.example.com");
           var controller =
               new IamMeController(store, sessions, team, passkeys, null, clock, tokens);
