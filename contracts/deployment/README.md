@@ -8,6 +8,8 @@
 
 `fixtures/ip-http.json`：单 IPv4，门户/实例一个端口、管理台另一个端口；
 `fixtures/domain-proxy.json`：门户/管理台/每实例分源，受信前置代理到 edge 的端口可与浏览器外部端口不同。
+`fixtures/domain-root-portal.json`、`fixtures/domain-nested-parent.json`补充合法嵌套域名正例：
+门户`example.com`与实例父域`i.example.com`，以及门户`dsh.example.com`与实例父域`i.dsh.example.com`。
 示例不能直接视为安装步骤。公网 IPv4/IPv6、多个租户共用一个 IP、IPv6 literal 及每实例公网端口不在首批 IP 模式范围。
 `tenantId` 是本部署固定单租户绑定，必须与 IAM/org 实际租户一致；未知 authority 不映射到默认租户。
 
@@ -22,8 +24,13 @@ Ajv 校结构、IPv4/DNS 格式、枚举、类型、范围、mode 与实例模�
    DNS 使用已规范化小写 ASCII A-label，各标签合规；拒绝原始 Unicode、尾点、空标签、wildcard、userinfo、百分号编码和反斜杠。
    配置先拒绝非规范值，不用宽容 URL parser 把歧义输入悄悄修成可信入口。
 2. `issuerOrigin` 必须逐字段等于 `portalOrigin`。IP 模式 portal/admin 的规范 IPv4 与 scheme 相同，port 必须不同；
-   domain 模式两个 host 不同，实例 parentDomain 不能包含/等于门户或管理 host（任一后缀包含关系均拒绝），
+   domain 模式两个固定 host 不同；沿用现edge的实例保留命名空间，固定门户或管理 host 等于parentDomain、
+   或以`.`加parentDomain为后缀时拒绝，防止占用保留根/子域或被`<实例id>.<parentDomain>`实例Host路由捕获。
+   现有单标签匹配规则也会捕获非UUID标签，不能只因固定 host 的前缀不是UUID就将这类路由碰撞放行。
    实例 scheme/port 必须等于门户外部 scheme/port，实例只挂 portal listener。
+   **不能双向检查任意域名后缀就拒绝**：parentDomain位于门户域名之下是正常配置，如上述两组正例；
+   共享站点或父子域不等于同Origin，仍按完整scheme/host/有效port隔离、校验Origin和host-only cookie。
+   上述保留命名空间检查只按固定host→parentDomain方向执行；nonce cookie的覆盖范围仍须单独正确生成/验证，不能以此重新禁止所有合法嵌套。
 3. 三种 listener 角色有独立本地 socket；地址含通配绑定时也不能出现端口冲突或被另一角色匹配。
    direct 时 portal/admin listener 的 TLS 与相应 scheme 一致；允许 NAT 端口映射，所以内外端口不必相同。
    trusted_proxy 时 portal/admin listener 必须 TLS+mTLS，实际 TCP 对端在规范 CIDR 白名单且证书匹配安装的代理身份。

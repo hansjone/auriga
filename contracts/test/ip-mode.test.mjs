@@ -18,15 +18,22 @@ const access = ajv.compile(read('contracts/deployment/access.schema.json'));
 const session = ajv.compile(read('contracts/kv/session.schema.json'));
 function changed(c) {
   const value = fixture(c.base);
-  const names = c.pointer.split('.');
-  const leaf = names.pop();
-  const target = names.reduce((v, name) => v[name], value);
-  if (c.remove) delete target[leaf];
-  else target[leaf] = JSON.parse(JSON.stringify(c.value));
+  for (const patch of [c, ...(c.additionalChanges ?? [])]) {
+    const names = patch.pointer.split('.');
+    const leaf = names.pop();
+    const target = names.reduce((v, name) => v[name], value);
+    if (patch.remove) delete target[leaf];
+    else target[leaf] = JSON.parse(JSON.stringify(patch.value));
+  }
   return value;
 }
 
-for (const file of ['ip-http.json', 'domain-proxy.json']) {
+for (const file of [
+  'ip-http.json',
+  'domain-proxy.json',
+  'domain-root-portal.json',
+  'domain-nested-parent.json',
+]) {
   test('受信入口结构正例：' + file, () => {
     assert.equal(access(fixture(file)), true, JSON.stringify(access.errors));
   });
@@ -43,9 +50,46 @@ for (const c of fixture('schema-negative.json')) {
     assert.equal(access(changed(c)), false, c.name);
   });
 }
-test('明确schema无法比较的11项启动负例，留给IP1验证器执行', () => {
+test('合法嵌套域名样本保持不同Origin，不被派生实例host命名空间捕获', () => {
+  // Fixture topology only: this is not a production startup validator or a
+  // browser cookie/SameSite test. Runtime acceptance remains an IP1/IP3 gate.
+  const id = '019a0000-0000-7000-8000-000000000001';
+  for (const file of ['domain-root-portal.json', 'domain-nested-parent.json']) {
+    const value = fixture(file);
+    const parent = value.instances.parentDomain;
+    assert(parent.endsWith('.' + value.portalOrigin.host));
+    const origin = ({ scheme, host, port }) =>
+      new URL(scheme + '://' + host + ':' + port).origin;
+    const instanceOrigin = origin({
+      ...value.instances,
+      host: id + '.' + parent,
+    });
+    assert.notEqual(origin(value.portalOrigin), instanceOrigin);
+    assert.notEqual(origin(value.adminOrigin), instanceOrigin);
+    assert.notEqual(origin(value.portalOrigin), origin(value.adminOrigin));
+    for (const fixed of [value.portalOrigin.host, value.adminOrigin.host]) {
+      assert.notEqual(fixed, parent);
+      assert.equal(fixed.endsWith('.' + parent), false);
+    }
+  }
+  for (const name of [
+    'portal-captured-by-instance-host',
+    'admin-captured-by-instance-host',
+  ]) {
+    const c = fixture('startup-negative.json').find(
+      (item) => item.name === name,
+    );
+    const value = changed(c);
+    assert.deepEqual(value.issuerOrigin, value.portalOrigin);
+    const fixed = c.pointer.startsWith('portal')
+      ? value.portalOrigin.host
+      : value.adminOrigin.host;
+    assert.equal(fixed, id + '.' + value.instances.parentDomain);
+  }
+});
+test('明确schema无法比较的12项启动负例，留给IP1验证器执行', () => {
   const cases = fixture('startup-negative.json');
-  assert.equal(cases.length, 11);
+  assert.equal(cases.length, 12);
   for (const c of cases) {
     // This is intentionally NOT a runtime rejection test. These values pass
     // structural validation and MUST fail the documented startup checks.

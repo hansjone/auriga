@@ -56,10 +56,23 @@
     "rule": 5
   },
   {
-    "name": "overlapping-domain",
+    "name": "portal-captured-by-instance-host",
     "base": "domain-proxy.json",
-    "pointer": "instances.parentDomain",
-    "value": "example.com",
+    "pointer": "portalOrigin.host",
+    "value": "019a0000-0000-7000-8000-000000000001.i.example.com",
+    "rule": 2,
+    "additionalChanges": [
+      {
+        "pointer": "issuerOrigin.host",
+        "value": "019a0000-0000-7000-8000-000000000001.i.example.com"
+      }
+    ]
+  },
+  {
+    "name": "admin-captured-by-instance-host",
+    "base": "domain-proxy.json",
+    "pointer": "adminOrigin.host",
+    "value": "019a0000-0000-7000-8000-000000000001.i.example.com",
     "rule": 2
   },
   {
