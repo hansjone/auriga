@@ -19,13 +19,24 @@
   socket 以实例独立的运行身份/挂载权限隔离，不能让实例选择任意实例 id 或访问别人的 socket。
   节点从自己持久化的实例/socket 绑定取得 `instanceId`，从节点证书得到 `nodeId`，
   原 JWT 仅转发、不改写。不存在安全本地实例身份机制的驱动不得启用托管 AI。
-- 节点用自己的 mTLS 证书访问 edge **独立内部 listener** 的 `/internal/ai/v1/**`。
+- 节点用自己的 mTLS 证书访问 edge **独立内部 listener**，只允许
+  [`instance-routes.json`](instance-routes.json) 中逐项声明的方法与内部原始路径，
+  再转发到该表同一行的 gateway 方法/路径；这是唯一允许表，不做前缀替换或任意 `/api` 转发。
   edge 校验节点 SAN、吊销和 workspace 当前 `(tid,owner,instance,node)` 调度绑定，
   剥除全部客户端 `Auriga-Forwarded-*`，根据认证结果写入
   `Auriga-Forwarded-Tenant`、`Auriga-Forwarded-Instance`、`Auriga-Forwarded-Node`（均小写 UUID）。
-  请求再转为 gateway 的 `/ai/v1/**`；这些标记仅对 gateway 验证过的 edge mTLS 身份有效。
+  这些标记仅对 gateway 验证过的 edge mTLS 身份有效。
   gateway 必须逐项比较 JWT、受信标记和在线 `GetInstanceAiBinding`；缺少/重复/不匹配均拒绝。
+  本人用量映射到 OpenAPI 的 `listOwnAiUsage`，还必须按 JWT 的 `tid/sub` 限本人并检查 `ai.usage.read`，
+  实例不得通过查询参数或请求内容选择其他账号、租户或实例。
   认证绑定和标记不能来自 IP、Host、普通请求头或实例提供的 owner 参数。
+- 内部路由先按**原始方法与原始路径精确匹配**允许表，未列出的一律拒绝；
+  不补斜杠、不折叠大小写/点段/重复斜杠、不先百分号解码再匹配，也不接受绝对URL/反斜杠/片段。
+  路径中任何百分号编码均拒绝，不能用编码的斜杠、点段或管理前缀绕过；
+  `HEAD/OPTIONS` 或其他未列方法不因存在GET而自动放行。
+  查询参数与路径分开，只能使用目的OpenAPI操作已声明的参数并按其schema验证，不能参与选择转发目的。
+  任何 `/admin/`、通用 `/api/` 或其他未列入口都不可由实例通道转发；
+  专有socket、节点/edge mTLS、标记清理、在线绑定及本人权限检查适用于表中每一行，映射本身不授予身份。
 - edge 公网 listener 永不路由 `/internal/**` 且拒收 `ctx=instance`；
   gateway 托管入口只信显式配置的 edge SAN 白名单。device 走独立公网数据策略，不接受转发标记。
   允许内网 IP:port 作为地址不改变证书身份或来源校验；不能开放实例源 CORS 来补接线。

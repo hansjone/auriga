@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "受信实例AI内部精确路由表 v1",
+  "description": "只声明契约允许表，不表示路由服务已经实现。目的操作还必须存在、方法相同、接受aiDataAuth且权限属于实例本人范围；见README及契约测试。",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string", "const": "./instance-routes.schema.json" },
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "matching": {
+      "type": "string",
+      "const": "exact-method-and-raw-path-deny-unlisted"
+    },
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "properties": {
+          "method": { "type": "string", "enum": ["GET", "POST"] },
+          "internalPath": {
+            "type": "string",
+            "pattern": "^/internal/ai/v1/[a-z][a-z0-9/-]*$"
+          },
+          "gatewayPath": {
+            "type": "string",
+            "pattern": "^/(api/)?ai/v1/[a-z][a-z0-9/-]*$"
+          },
+          "operationId": { "type": "string", "minLength": 1 }
+        },
+        "required": ["method", "internalPath", "gatewayPath", "operationId"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["$schema", "schemaVersion", "matching", "routes"],
+  "additionalProperties": false
+}
