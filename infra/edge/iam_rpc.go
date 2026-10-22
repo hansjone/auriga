@@ -98,6 +98,61 @@ func sameInternalHTTPSOrigin(a, b *url.URL) bool {
 type AdminCSRFVerifier interface {
 	Verify(context.Context, string, string, *Session, time.Time) error
 }
+
+type BrowserSessionRPC interface {
+	IntrospectSession(context.Context, string, string, string) (*iamv1.IntrospectSessionResponse, error)
+	TouchSession(context.Context, string, string, string) (*iamv1.TouchSessionResponse, error)
+}
+
+func sessionAudience(audience string) iamv1.SessionAudience {
+	switch audience {
+	case "portal":
+		return iamv1.SessionAudience_SESSION_AUDIENCE_PORTAL
+	case "admin":
+		return iamv1.SessionAudience_SESSION_AUDIENCE_ADMIN
+	default:
+		return iamv1.SessionAudience_SESSION_AUDIENCE_UNSPECIFIED
+	}
+}
+
+func (c *iamRPC) sessionContext(ctx context.Context, tenant string) (context.Context, context.CancelFunc, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	token, err := readIAMServiceToken(c.tokenFile)
+	if err != nil || tenant == "" {
+		cancel()
+		return nil, nil, errIAMUnavailable
+	}
+	return metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+token, "auriga-tenant-id", tenant)), cancel, nil
+}
+
+func (c *iamRPC) IntrospectSession(ctx context.Context, cookie, audience, tenant string) (*iamv1.IntrospectSessionResponse, error) {
+	ctx, cancel, err := c.sessionContext(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	response, err := c.client.IntrospectSession(ctx, &iamv1.IntrospectSessionRequest{SessionToken: cookie, Audience: sessionAudience(audience)})
+	if err != nil {
+		// Authentication errors here concern the control-plane credential, not
+		// the user's cookie. Never use the old user JWT after an RPC failure.
+		return nil, errIAMUnavailable
+	}
+	return response, nil
+}
+
+func (c *iamRPC) TouchSession(ctx context.Context, cookie, audience, tenant string) (*iamv1.TouchSessionResponse, error) {
+	ctx, cancel, err := c.sessionContext(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	response, err := c.client.TouchSession(ctx, &iamv1.TouchSessionRequest{SessionToken: cookie, Audience: sessionAudience(audience)})
+	if err != nil {
+		return nil, errIAMUnavailable
+	}
+	return response, nil
+}
+
 type iamRPC struct {
 	conn      *grpc.ClientConn
 	client    iamv1.SessionServiceClient

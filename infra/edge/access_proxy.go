@@ -95,8 +95,8 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	}
 	var sess *Session
 	if cookieOK {
-		loaded, err := g.Sessions.Get(r.Context(), HashCookie(raw))
-		if err != nil && !errors.Is(err, ErrSessionNotFound) {
+		loaded, err := g.browserSession(r, raw, audience, !public && r.Method == http.MethodGet)
+		if err != nil && !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, errIAMUnauthenticated) && !public {
 			fail(503, "common.unavailable")
 			return
 		}
@@ -188,6 +188,21 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	if transport == nil {
 		fail(503, "common.unavailable")
 		return
+	}
+	if sess != nil && !public {
+		_, err := g.touchBrowserSession(r.Context(), raw, sess)
+		if err != nil {
+			if errors.Is(err, errIAMUnauthenticated) {
+				fail(401, "common.unauthenticated")
+			} else {
+				fail(503, "common.unavailable")
+			}
+			return
+		}
+		if !g.Now().UTC().Before(sess.AccessTokenExpiresAt) {
+			fail(503, "common.unavailable")
+			return
+		}
 	}
 	proxy := newReverseProxy(target, transport, true)
 	proxy.ErrorHandler = func(w http.ResponseWriter, request *http.Request, err error) {
