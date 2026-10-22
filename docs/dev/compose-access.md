@@ -120,6 +120,18 @@ bootstrap 每次新安装生成独立随机的 32 字节凭据，写入 `var/iam
 读取该安装者的只读秘密；秘密目录/文件 owner 必须匹配，祖先只允许 root、当前进程或
 这个显式可信安装者。未配置时默认为进程用户，不从每次读取的现场路径自推断信任。
 
+Linux bootstrap 在交给 Spring 导入前校验两份私密文件的完整内容、哈希与实际 owner。
+安装 UID 固定为 bootstrap 有效 UID，并要求目录和两个文件的实际 owner 均与它一致；
+不会仅凭文件中的 `installation-owner` 自授信任，也不会自动 chmod/chown 修复旧材料。
+从根目录开始逐级通过目录句柄打开路径，禁止符号链接和 `..` 路径组件；祖先只能由 root
+或该安装 UID 拥有，且禁止组/其他用户写入，唯一例外是 root 拥有的 sticky 公共目录（如 `/tmp`）。
+私密目录严格 0700，两个普通文件严格 0600、单硬链接，打开前后及最终路径身份均须一致；
+普通目录自然具有多个链接，不按文件链接数规则拒绝。重复安装保留原随机凭据。
+通过校验后依赖上述可信宿主用户维护材料、原私密目录权限和 platform 独占只读挂载，
+直到 Spring 消费配置；root 或安装 UID 主动修改其材料不属于该信任保证。
+Windows bootstrap 仅保留开发材料生成/构建，不提供此 POSIX 元数据信任保证；发行器启用仍拒绝。
+该 bootstrap 私密材料入口在 Linux/Windows 以外的平台明确拒绝，不能据此声明支持其他 POSIX 发行平台。
+
 Compose 显式启用 `auriga.iam.edge-token-export`，只允许 combined/POSIX。
 发行器固定调用 `InternalTokenIssuer.issue("edge", installationSecret)`，仍由 IAM 的权威
 ES256 钥和既有五分钟协议签发。首次立即异步尝试、以后每分钟重新读取凭据并认证；签发或写入

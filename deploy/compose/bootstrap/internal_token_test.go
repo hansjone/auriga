@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +71,40 @@ func TestInstallationRejectsMalformedOrMismatchedExistingMaterial(t *testing.T) 
 			}
 			if err := writeInternalTokenInstallation(out); err == nil {
 				t.Fatal("invalid installation silently replaced")
+			}
+		})
+	}
+}
+
+func TestInstallationRejectsNoncanonicalCredentialAndExtraProperties(t *testing.T) {
+	for _, kind := range []string{"noncanonical-secret", "extra-properties", "wrong-installer"} {
+		t.Run(kind, func(t *testing.T) {
+			out := t.TempDir()
+			if err := writeInternalTokenInstallation(out); err != nil {
+				t.Fatal(err)
+			}
+			name := "internal.properties"
+			if kind == "noncanonical-secret" {
+				name = "edge.secret"
+			}
+			path := filepath.Join(out, "iam-installation", name)
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "noncanonical-secret":
+				raw = []byte(strings.Repeat("A", 42) + "B")
+			case "extra-properties":
+				raw = append(raw, []byte("extra=value\n")...)
+			case "wrong-installer":
+				raw = []byte(strings.Replace(string(raw), "installation-owner="+fmt.Sprint(os.Getuid()), "installation-owner="+fmt.Sprint(os.Getuid()+1), 1))
+			}
+			if err := os.WriteFile(path, raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeInternalTokenInstallation(out); err == nil {
+				t.Fatal("noncanonical or unexpected installation content accepted")
 			}
 		})
 	}
