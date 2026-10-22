@@ -8,4 +8,11 @@
     <relativePath>../../../pom.xml</relativePath>
   </parent>
   <artifactId>resource-api</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>auriga</groupId>
+      <artifactId>contracts</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+  </dependencies>
 </project>
