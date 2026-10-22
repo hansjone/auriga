@@ -8,6 +8,12 @@ import (
 
 const ticketSweepEvery = 64 // purge expired entries every N mutations
 
+// InstanceTarget is server-selected, never a browser-provided return URL.
+type InstanceTarget struct {
+	Origin string
+	Mount  string
+}
+
 // Ticket binds a one-time open grant to a portal session and instance.
 type Ticket struct {
 	Token            string
@@ -20,6 +26,7 @@ type Ticket struct {
 	SessionExpiresAt time.Time
 	ExpiresAt        time.Time
 	Used             bool
+	Target           InstanceTarget
 }
 
 // InstBinding is the server-side value behind __Host-auriga_inst.
@@ -34,13 +41,14 @@ type InstBinding struct {
 	InstanceID string
 	CookieRaw  string // opaque cookie value
 	ExpiresAt  time.Time
+	Target     InstanceTarget
 }
 
 // TicketStore issues one-time tickets and instance cookie bindings.
 type TicketStore interface {
-	Issue(sessionID, sessionKey, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error)
+	Issue(sessionID, sessionKey, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time, target ...InstanceTarget) (*Ticket, error)
 	Redeem(token string) (*Ticket, error)
-	BindInstance(sessionID, sessionKey, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error)
+	BindInstance(sessionID, sessionKey, accountID, tenantID, instanceID string, expiresAt time.Time, target ...InstanceTarget) (*InstBinding, error)
 	LookupInstance(cookieRaw string) (*InstBinding, error)
 }
 
@@ -60,7 +68,7 @@ func NewMemoryTicketStore() *MemoryTicketStore {
 	}
 }
 
-func (m *MemoryTicketStore) Issue(sessionID, sessionKey, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time) (*Ticket, error) {
+func (m *MemoryTicketStore) Issue(sessionID, sessionKey, accountID, tenantID, instanceID, nonceHash string, ttl time.Duration, sessionExpiresAt time.Time, target ...InstanceTarget) (*Ticket, error) {
 	tok, err := randomID(24)
 	if err != nil {
 		return nil, err
@@ -75,6 +83,9 @@ func (m *MemoryTicketStore) Issue(sessionID, sessionKey, accountID, tenantID, in
 		NonceHash:        nonceHash,
 		SessionExpiresAt: sessionExpiresAt,
 		ExpiresAt:        m.now().UTC().Add(ttl),
+	}
+	if len(target) == 1 {
+		t.Target = target[0]
 	}
 	m.mu.Lock()
 	m.tickets[tok] = t
@@ -105,7 +116,7 @@ func (m *MemoryTicketStore) Redeem(token string) (*Ticket, error) {
 	return &cp, nil
 }
 
-func (m *MemoryTicketStore) BindInstance(sessionID, sessionKey, accountID, tenantID, instanceID string, expiresAt time.Time) (*InstBinding, error) {
+func (m *MemoryTicketStore) BindInstance(sessionID, sessionKey, accountID, tenantID, instanceID string, expiresAt time.Time, target ...InstanceTarget) (*InstBinding, error) {
 	raw, err := randomID(24)
 	if err != nil {
 		return nil, err
@@ -122,6 +133,9 @@ func (m *MemoryTicketStore) BindInstance(sessionID, sessionKey, accountID, tenan
 		InstanceID: instanceID,
 		CookieRaw:  raw,
 		ExpiresAt:  expiresAt.UTC(),
+	}
+	if len(target) == 1 {
+		b.Target = target[0]
 	}
 	m.mu.Lock()
 	m.bindings[raw] = b
