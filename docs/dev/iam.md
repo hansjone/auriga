@@ -250,6 +250,30 @@ yubico 校验认证器 UV 标志；凭据查询还校验 userHandle。
 无账号步骤按事务分桶，用户名阶段十次/五分钟，IP 额度保留。缺失账号仍执行一次
 真实 Argon2 matches。显示名服务端限制 64 字符并拒绝控制字符和格式控制符。
 
+## 会话 KV 的持久投影与事务替换
+
+PostgreSQL 是会话权威。V4 在会话更新或删除的同一事务内，把 cookie hash 合并登记到
+`session_projection`；该表启用 FORCE RLS，不保存会话值或凭据。回滚（包括嵌套保存点）
+同时撤销登记。请求提交回调不申请连接、不调用 NATS，外层事务由原 Spring 管理者正常释放。
+
+`CompositeSessionKv` 作为 Spring `SmartLifecycle` 管理单个后台 worker。每 100ms 最多巡检
+32 个租户，每个租户最多处理一个已到期键；游标持续推进，空队列和失败租户不阻塞其后租户。
+每个键在独立租户事务中用 `FOR UPDATE SKIP LOCKED` 认领，并保留按 hash 的跨进程
+advisory lock。worker 重读最新已提交 PG 值，缺失或过期则写 NATS tombstone；NATS 仍用
+revision CAS。成功发布后才删除认领行；并发写入会等待该行，再登记自己的工作，不丢新代际。
+失败工作持久保留，1 秒起指数退避、上限 60 秒，无重试次数耗尽丢弃；重启会恢复扫描。
+
+内部 `session_projection_tenant` 仅存可信 TenantContext 的 UUID，用作重启发现租户的基础设施
+目录，类似 common outbox 不启用 RLS；没有对外查询接口，且不存 hash、状态、撤销信息或凭据。
+所有会话工作及 payload 读写仍必须进入明确租户事务，由 FORCE RLS 隔离。目录不能只来自
+deployment-access 的固定 HTTP 租户，因为内部授权代租户 RPC 和账号事件也可能更新会话。
+目录按租户保留，队列按键合并；NATS 故障时待处理键持久积累，需恢复 broker 后排空。
+
+同一 audience/Origin 的旧登录绑定最多产生一次后继：替换在旧绑定锁内持久标记 `replaced`，
+与取消旧流及创建新流一起提交。两个已在途请求携相同旧 cookie 时，一个成功，另一个返回既有
+`iam.login_tx_finished`；完成或取消后的当前绑定仍可正常重新开始一次。无 cookie 的新浏览器
+和另一 audience 保持独立；已替换旧绑定不会再次生成可继续的后继。
+
 ## 通用 OIDC / OAuth 2.0（oidc）
 
 内置连接器类型 `oidc`，经 `ConnectorRegistry` 注册（Spring bean `oidcConnector`）。

@@ -177,7 +177,7 @@ public class IamRuntimeConfiguration {
     if (connection == null) {
       return postgres;
     }
-    return new CompositeSessionKv(store, postgres, new NatsSessionKv(connection, schemas));
+    return new CompositeSessionKv(store, postgres, new NatsSessionKv(connection, schemas), clock);
   }
 
   @Bean

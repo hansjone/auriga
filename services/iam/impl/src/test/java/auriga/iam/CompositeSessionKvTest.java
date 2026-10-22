@@ -30,11 +30,16 @@ class CompositeSessionKvTest {
             throw new IllegalStateException("nats down");
           }
         };
-    CompositeSessionKv kv = new CompositeSessionKv(store(), primary, secondary);
+    IamStore store = store();
+    CompositeSessionKv kv = new CompositeSessionKv(store, primary, secondary);
     primary.put("h", JsonNodeFactory.instance.objectNode().put("id", "1"));
     auriga.common.context.TenantContext.run(
         java.util.UUID.randomUUID(), () -> assertDoesNotThrow(() -> kv.delete("h")));
+    assertEquals(0, attempts.get());
+    for (int i = 0; i < 3; i++) assertEquals(0, kv.forwardOnce());
     assertEquals(3, attempts.get());
+    verify(store, times(3)).retrySessionProjection(any(), any());
+    verify(store, never()).completeSessionProjection(any());
     assertNull(primary.get("h"));
   }
 
@@ -63,20 +68,19 @@ class CompositeSessionKvTest {
     primary.put("h", JsonNodeFactory.instance.objectNode());
     auriga.common.context.TenantContext.run(
         java.util.UUID.randomUUID(), () -> assertDoesNotThrow(() -> kv.delete("h")));
+    assertEquals(0, kv.forwardOnce());
+    assertEquals(1, kv.forwardOnce());
     assertEquals(2, attempts.get());
   }
 
   private static IamStore store() {
     IamStore store = mock(IamStore.class);
-    doAnswer(
-            i -> {
-              ((Runnable) i.getArgument(0)).run();
-              return null;
-            })
-        .when(store)
-        .afterCommit(any());
-    when(store.isolated(any(), any()))
+    when(store.sessionProjectionTenants(any(), anyInt()))
+        .thenReturn(java.util.List.of(java.util.UUID.randomUUID()));
+    when(store.tenant(any(), any()))
         .thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(1)).get());
+    when(store.claimSessionProjection(any()))
+        .thenReturn(new IamStore.SessionProjection(java.util.UUID.randomUUID(), "h", 0));
     return store;
   }
 

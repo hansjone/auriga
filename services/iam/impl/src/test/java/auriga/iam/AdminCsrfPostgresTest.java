@@ -332,24 +332,14 @@ class AdminCsrfPostgresTest {
 
   @Test
   void secondaryRunsAfterCommitAndDelayedProjectionRereadsCommittedRevocation() {
-    var pending = new ArrayList<Runnable>();
     SessionKv secondary = mock(SessionKv.class);
-    IamStore delayed = spy(store);
-    doAnswer(
-            i -> {
-              Runnable projection = i.getArgument(0);
-              store.afterCommit(() -> pending.add(projection));
-              return null;
-            })
-        .when(delayed)
-        .afterCommit(any());
-    var composite = new CompositeSessionKv(delayed, kv, secondary);
+    var composite = new CompositeSessionKv(store, kv, secondary, time);
     sessions =
         new SessionManager(
             store, composite, tokens, time, mock(EventPublisher.class), mock(AuditLogger.class));
     String token = Secrets.random();
     register(token);
-    assertEquals(1, pending.size());
+    assertNotNull(store.tenant(tenant, () -> store.claimSessionProjection(time.instant())));
     verifyNoInteractions(secondary);
     assertThrows(
         IllegalStateException.class,
@@ -360,18 +350,17 @@ class AdminCsrfPostgresTest {
                   register(Secrets.random());
                   throw new IllegalStateException("rollback");
                 }));
-    assertEquals(1, pending.size());
+    verifyNoInteractions(secondary);
     store.tenant(
         tenant,
         () -> {
           sessions.revokeOne(row(), "user");
           return null;
         });
-    assertEquals(2, pending.size());
-    pending.get(1).run();
-    pending.get(0).run();
+    assertEquals(1, composite.forwardOnce());
+    assertEquals(0, composite.forwardOnce());
     org.mockito.Mockito.verify(secondary, never()).put(anyString(), any());
-    org.mockito.Mockito.verify(secondary, times(2)).delete(Secrets.hash(issued.cookie()));
+    org.mockito.Mockito.verify(secondary).delete(Secrets.hash(issued.cookie()));
   }
 
   @Test

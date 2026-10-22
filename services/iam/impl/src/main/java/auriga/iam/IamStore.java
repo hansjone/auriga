@@ -56,18 +56,61 @@ public final class IamStore {
     return TenantContext.call(tenant, () -> isolated.execute(s -> work.get()));
   }
 
-  public void afterCommit(Runnable work) {
+  void enqueueSessionProjection(String hash, Instant now) {
+    TenantTransactionManager.verifyTransactionTenant();
     if (!org.springframework.transaction.support.TransactionSynchronizationManager
         .isActualTransactionActive())
       throw new IllegalStateException("Session projection requires a transaction");
-    org.springframework.transaction.support.TransactionSynchronizationManager
-        .registerSynchronization(
-            new org.springframework.transaction.support.TransactionSynchronization() {
-              @Override
-              public void afterCommit() {
-                work.run();
-              }
-            });
+    UUID tenant = TenantContext.require();
+    jdbc.update(
+        "INSERT INTO iam.session_projection_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",
+        tenant);
+    jdbc.update(
+        "INSERT INTO iam.session_projection(id,tenant_id,cookie_hash,next_attempt_at) VALUES (?,?,?,?)"
+            + " ON CONFLICT (tenant_id,cookie_hash) DO UPDATE SET attempts=0,next_attempt_at=excluded.next_attempt_at",
+        UuidV7.next(),
+        tenant,
+        hash,
+        java.sql.Timestamp.from(now));
+  }
+
+  // This directory contains infrastructure tenant IDs only; never read session data outside RLS.
+  List<UUID> sessionProjectionTenants(UUID after, int limit) {
+    return jdbc.query(
+        "SELECT tenant_id FROM iam.session_projection_tenant WHERE (?::uuid IS NULL OR tenant_id>?) ORDER BY tenant_id LIMIT ?",
+        (rs, i) -> rs.getObject(1, UUID.class),
+        after,
+        after,
+        limit);
+  }
+
+  record SessionProjection(UUID id, String hash, int attempts) {}
+
+  SessionProjection claimSessionProjection(Instant now) {
+    var rows =
+        jdbc.query(
+            "SELECT id,cookie_hash,attempts FROM iam.session_projection WHERE tenant_id=? AND next_attempt_at<=?"
+                + " ORDER BY next_attempt_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",
+            (rs, i) ->
+                new SessionProjection(rs.getObject(1, UUID.class), rs.getString(2), rs.getInt(3)),
+            TenantContext.require(),
+            java.sql.Timestamp.from(now));
+    return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  void completeSessionProjection(UUID id) {
+    jdbc.update(
+        "DELETE FROM iam.session_projection WHERE tenant_id=? AND id=?",
+        TenantContext.require(),
+        id);
+  }
+
+  void retrySessionProjection(SessionProjection row, Instant next) {
+    jdbc.update(
+        "UPDATE iam.session_projection SET attempts=LEAST(attempts+1,30),next_attempt_at=? WHERE tenant_id=? AND id=?",
+        java.sql.Timestamp.from(next),
+        TenantContext.require(),
+        row.id());
   }
 
   private String table(String table) {

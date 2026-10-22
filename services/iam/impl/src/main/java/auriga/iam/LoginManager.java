@@ -71,9 +71,17 @@ public final class LoginManager {
             for (ObjectNode old : store.all("login_tx"))
               if (old.path("audience").asString().equals(audience)
                   && old.path("origin").asString().equals(origin)
-                  && Secrets.same(old.path("bindingHash").asString(), Secrets.hash(previousBinding))
-                  && old.path("status").asString().equals("pending"))
-                cancel(old.path("id").asString(), previousBinding);
+                  && Secrets.same(
+                      old.path("bindingHash").asString(), Secrets.hash(previousBinding))) {
+                ObjectNode current = transaction(old.path("id").asString(), previousBinding);
+                IamError.require(!current.path("replaced").asBoolean(), "login_tx_finished", 409);
+                cancel(current.path("id").asString(), previousBinding);
+                current = transaction(current.path("id").asString(), previousBinding);
+                // A binding may produce exactly one successor, even after completion/cancel.
+                // This marker and its successor commit or roll back together.
+                current.put("replaced", true);
+                store.save("login_tx", current);
+              }
           }
           store.limit("login-ip:" + ip, clock.instant(), 30);
           String pid = request.path("providerId").asString();
