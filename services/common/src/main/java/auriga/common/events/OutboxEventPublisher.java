@@ -29,6 +29,7 @@ public final class OutboxEventPublisher implements EventPublisher {
   private final JdbcTemplate jdbc;
   private final String serviceName;
   private final String insertSql;
+  private final String subjectLockPrefix;
   private final EventSchemas schemas;
   private final JsonMapper json;
   private final Clock clock;
@@ -52,6 +53,7 @@ public final class OutboxEventPublisher implements EventPublisher {
       throw new IllegalArgumentException("Invalid service name: " + serviceName);
     }
     this.serviceName = serviceName;
+    this.subjectLockPrefix = schema + ":";
     this.schemas = schemas;
     this.json = Objects.requireNonNull(json);
     this.clock = Objects.requireNonNull(clock);
@@ -95,13 +97,14 @@ public final class OutboxEventPublisher implements EventPublisher {
             dataNode);
     if (schemas != null) schemas.validate(json.valueToTree(envelope));
     String subjectKey = subject == null ? id.toString() : subject;
-    // Serialize publishers of the same subject until commit, so outbox seq order equals commit
-    // order (the forwarder delivers per subject in seq order).
+    // Serialize the same subject within its physical outbox, matching the forwarder's scope.
+    // Separate service transactions may publish for the same subject on one call stack;
+    // sharing their lock would make the inner transaction wait for its own caller to commit.
     jdbc.query(
         "SELECT pg_advisory_xact_lock(?, hashtext(?))",
         rs -> null,
         SUBJECT_LOCK_NAMESPACE,
-        subjectKey);
+        subjectLockPrefix + subjectKey);
     jdbc.update(
         insertSql,
         id,

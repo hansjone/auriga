@@ -42,6 +42,8 @@ class OutboxTest {
   private static PostgresExtension.ServiceRole role;
   private static JdbcTemplate jdbc;
   private static TransactionTemplate tx;
+  private static JdbcTemplate otherJdbc;
+  private static TransactionTemplate otherTx;
 
   private MutableClock clock;
   private SimpleMeterRegistry registry;
@@ -53,11 +55,16 @@ class OutboxTest {
     CommonMigrations.migrate(role.dataSource(), "obx");
     jdbc = new JdbcTemplate(role.dataSource());
     tx = new TransactionTemplate(new TenantTransactionManager(role.dataSource()));
+    var otherRole = PostgresExtension.serviceRole(OutboxTest.class, "obx_other_app", "obx_other");
+    CommonMigrations.migrate(otherRole.dataSource(), "obx_other");
+    otherJdbc = new JdbcTemplate(otherRole.dataSource());
+    otherTx = new TransactionTemplate(new TenantTransactionManager(otherRole.dataSource()));
   }
 
   @BeforeEach
   void clean() {
     jdbc.update("DELETE FROM obx.outbox_event");
+    otherJdbc.update("DELETE FROM obx_other.outbox_event");
     clock = new MutableClock(Instant.parse("2026-10-19T08:00:00Z"));
     registry = new SimpleMeterRegistry();
     metrics = new EventMetrics(registry, "obx");
@@ -386,8 +393,44 @@ class OutboxTest {
   }
 
   @Test
+  void nestedPublishersInDifferentSchemasDoNotWaitForTheirCaller() {
+    var outer = publisher(false);
+    var inner = new OutboxEventPublisher(otherJdbc, "obx_other", "org", null, JSON, clock, null);
+    assertDoesNotThrow(
+        () ->
+            TenantContext.run(
+                TENANT,
+                () ->
+                    tx.executeWithoutResult(
+                        outerStatus -> {
+                          outer.publish("test.happened", "same-account", Map.of("n", 1));
+                          otherTx.executeWithoutResult(
+                              innerStatus -> {
+                                otherJdbc.execute("SET LOCAL lock_timeout = '1s'");
+                                inner.publish("test.happened", "same-account", Map.of("n", 2));
+                              });
+                          outer.publish("test.happened", "same-account", Map.of("n", 3));
+                        })));
+    assertEquals(
+        List.of(1, 3),
+        jdbc.queryForList(
+            "SELECT (envelope::jsonb -> 'data' ->> 'n')::int FROM obx.outbox_event ORDER BY seq",
+            Integer.class));
+    assertEquals(
+        List.of(2),
+        otherJdbc.queryForList(
+            "SELECT (envelope::jsonb -> 'data' ->> 'n')::int FROM obx_other.outbox_event ORDER BY seq",
+            Integer.class));
+    assertEquals(
+        "same-account",
+        otherJdbc.queryForObject("SELECT subject_key FROM obx_other.outbox_event", String.class));
+  }
+
+  @Test
   void sameSubjectPublishersAreSerializedUntilCommit() throws Exception {
     OutboxEventPublisher publisher = publisher(false);
+    var secondPublisher =
+        new OutboxEventPublisher(jdbc, "obx", "workspace", null, JSON, clock, null);
     CountDownLatch firstPublished = new CountDownLatch(1);
     CountDownLatch releaseFirst = new CountDownLatch(1);
     try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -407,7 +450,7 @@ class OutboxTest {
               () ->
                   publish(
                       publisher,
-                      () -> publisher.publish("test.happened", "order-1", Map.of("n", 2))));
+                      () -> secondPublisher.publish("test.happened", "order-1", Map.of("n", 2))));
       // a different subject is not blocked
       pool.submit(
               () ->
