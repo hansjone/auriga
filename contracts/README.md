@@ -22,6 +22,7 @@
 | `auth/` | 访问令牌（JWT）声明 | JSON Schema |
 | `kv/` | NATS KV 里跨服务共享的数据（会话缓存、实例路由） | JSON Schema |
 | `deployment/` | domain/单IPv4受信入口schema、启动语义、cookie/CSRF/实例路径及双模式验收矩阵（IP0，待IP1–IP3接线） | JSON Schema、JSON、Markdown |
+| `runtime/` | 正式 DSH 发行/standalone/背书/根/高水位契约及 Java→Go 向量（RT0，生产待 RT1/RT2） | JSON Schema、JSON、Markdown |
 
 ## 版本与兼容
 
@@ -30,6 +31,7 @@
 - 客户端必须忽略不认识的字段和枚举值（枚举值未知时按"未知"处理，不报错）。
 - JSON Schema 里的 `additionalProperties: false` 只给**生产方**自测用（防止写错字段名）；消费方（服务、edge、插件、连接器）校验收到的数据时必须放宽为允许额外字段，否则以后加字段就成了不兼容修改。
 - 受签名的资源envelope/撤销/降级对象是明确例外：其完整JSON映射严格，未知签名字段必须升级schemaVersion，不能丢弃字段后继续验签。见resource/README.md。
+- 正式 runtime envelope 与 standalone ArtifactStatement 同属严格受签对象例外：未知字段/重复键拒绝，所有必需空字段显式输出，禁止直接签 protojson。见 runtime/README.md；不改变既有 resource 时间精度。
 - `deployment/access.schema.json`是受信安装配置而非跨版本消息消费者；按schemaVersion严格拒绝未知字段，再执行启动语义规则，防配置拼写错误静默放宽入口。
 - 不兼容的修改要开新主版本，旧版本至少保留一个发布周期。插件协议例外：平台同时支持当前和上一个主版本（用户电脑上的插件升级慢）。
 - CI 检查：`buf lint`、`buf breaking`（FILE 级）、OpenAPI lint 和 diff、JSON Schema 校验。

@@ -1,5 +1,11 @@
 # 节点代理（agent）
 
+正式 DSH 的发行信任规范和 Java→Go 共享向量见
+[`contracts/runtime/README.md`](../../contracts/runtime/README.md)。RT0 仅冻结契约；
+初始根必须来自实际 CA pin 校验的 TLS Join，明文开发 Join 不能建立发行信任。
+生产 keyring/续证分离待 RT1，运行时强制验签、真实单平台 OCI 检查及持久防回滚待 RT2，
+本契约 PR 不代表正式模板或部署已可用。现有资源签名时间精度保持原样。
+
 ## 启动就绪与停止期间观测
 
 Docker 的 `ContainerStart` 成功只代表进程启动。驱动在既有 Start 超时上下文内，

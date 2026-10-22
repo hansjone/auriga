@@ -1,0 +1,494 @@
+{
+  "description": "RT1 normative acceptance inputs; JS reference interpreter is not a production keyring/transaction test. Names refer to signature-vectors.json keys. All patches precede graph validation.",
+  "cases": [
+    {
+      "name": "bootstrap-unordered-chain",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": true,
+      "initial": [],
+      "incoming": ["leaf", "child", "root"],
+      "expected": "accept",
+      "deadlines": {
+        "root": "2027-01-01T00:00:00Z",
+        "child": "2027-01-01T00:00:00Z",
+        "leaf": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "renew-unordered-chain",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["leaf", "child"],
+      "expected": "accept",
+      "deadlines": {
+        "root": "2027-01-01T00:00:00Z",
+        "child": "2027-01-01T00:00:00Z",
+        "leaf": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "bootstrap-needs-root",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": true,
+      "initial": [],
+      "incoming": [],
+      "expected": "reject"
+    },
+    {
+      "name": "bootstrap-floating-child",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": true,
+      "initial": [],
+      "incoming": ["child"],
+      "expected": "reject"
+    },
+    {
+      "name": "renew-forbids-root",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": [],
+      "incoming": ["root"],
+      "expected": "reject"
+    },
+    {
+      "name": "known-duplicate-list-idempotent",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child", "leaf"],
+      "incoming": ["leaf", "child", "root"],
+      "expected": "accept",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "deadlines": {
+        "root": "2027-01-01T00:00:00Z",
+        "child": "2027-01-01T00:00:00Z",
+        "leaf": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "omission-keeps-known-keys",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child", "leaf"],
+      "incoming": ["root"],
+      "expected": "accept",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "deadlines": {
+        "root": "2027-01-01T00:00:00Z",
+        "child": "2027-01-01T00:00:00Z",
+        "leaf": "2026-12-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "empty-renew-is-no-update",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child"],
+      "incoming": [],
+      "expected": "accept",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "deadlines": {
+        "root": "2027-01-01T00:00:00Z",
+        "child": "2027-01-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "unknown-parent",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["leaf"],
+      "expected": "reject"
+    },
+    {
+      "name": "duplicate-kid",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child", "child"],
+      "expected": "reject"
+    },
+    {
+      "name": "wrong-parent",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsedByKid",
+          "value": "leaf"
+        }
+      ]
+    },
+    {
+      "name": "cycle",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child", "leaf"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsedByKid",
+          "value": "leaf"
+        }
+      ]
+    },
+    {
+      "name": "bad-kid",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "kid",
+          "value": "bad/kid"
+        }
+      ]
+    },
+    {
+      "name": "empty-kid",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "kid",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "name": "long-kid",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "kid",
+          "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    {
+      "name": "short-public-key",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "publicKey",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ]
+    },
+    {
+      "name": "long-public-key",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "publicKey",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ]
+    },
+    {
+      "name": "short-signature",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsement",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ]
+    },
+    {
+      "name": "bad-signature",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsement",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ]
+    },
+    {
+      "name": "missing-signature",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsement",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "name": "missing-parent",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsedByKid",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "name": "expired-new-key",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-10-22T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "invalid-expiry",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "invalid"
+        }
+      ]
+    },
+    {
+      "name": "wrong-known-parent",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "leaf"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsedByKid",
+          "value": "leaf"
+        }
+      ]
+    },
+    {
+      "name": "known-key-conflict",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "publicKey",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ]
+    },
+    {
+      "name": "known-expiry-extended",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2029-01-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "known-expiry-shortened",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "known-source-conflict",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsedByKid",
+          "value": "leaf"
+        }
+      ]
+    },
+    {
+      "name": "known-endorsement-conflict",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      },
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsement",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ]
+    },
+    {
+      "name": "parent-local-expiry-bounds-child",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "accept",
+      "initialDeadlines": {
+        "root": "2026-11-01T00:00:00Z"
+      },
+      "deadlines": {
+        "root": "2026-11-01T00:00:00Z",
+        "child": "2026-11-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "new-unsigned-shorter-time-is-local-bound",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "accept",
+      "patches": [
+        {
+          "index": 0,
+          "field": "notAfter",
+          "value": "2026-11-01T00:00:00Z"
+        }
+      ],
+      "deadlines": {
+        "root": "2027-01-01T00:00:00Z",
+        "child": "2026-11-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "expired-parent-rejected",
+      "now": "2027-01-01T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root"],
+      "incoming": ["child"],
+      "expected": "reject"
+    },
+    {
+      "name": "replay-does-not-revive-expired-key",
+      "now": "2027-01-01T00:00:00Z",
+      "bootstrap": false,
+      "initial": ["root", "child"],
+      "incoming": ["child"],
+      "expected": "reject",
+      "initialDeadlines": {
+        "child": "2027-01-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "bootstrap-root-with-half-endorsement",
+      "now": "2026-10-23T00:00:00Z",
+      "bootstrap": true,
+      "initial": [],
+      "incoming": ["root"],
+      "expected": "reject",
+      "patches": [
+        {
+          "index": 0,
+          "field": "endorsedByKid",
+          "value": "child"
+        }
+      ]
+    },
+    {
+      "name": "bootstrap-expired-root",
+      "now": "2027-01-01T00:00:00Z",
+      "bootstrap": true,
+      "initial": [],
+      "incoming": ["root"],
+      "expected": "reject"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package auriga.node.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.node.v1";
+
+// 正式 DSH 发行声明，独立于 plugin ResourceEnvelope 和旧归档 SignedArtifact。
+// 签名 JSON 的精确字段/必需空值/JCS 映射见 contracts/runtime/README.md；禁止直接签 protojson。
+// RT0 仅冻结契约，生产强制消费、OCI inspect 和持久高水位由 RT2 实现。
+message RuntimeReleaseEnvelope {
+  uint32 schema_version = 1;
+  // 固定 dsh_runtime。
+  string purpose = 2;
+  // 固定 dsh。
+  string name = 3;
+  string artifact_id = 4;
+  string dsh_version = 5;
+  // linux | windows，不接受 any。
+  string os = 6;
+  // amd64 | arm64，不接受 any。
+  string arch = 7;
+  // 归档 sha256；Docker-only 可为空，但 JSON 字段不可省略。
+  string archive_digest = 8;
+  // 单平台 OCI manifest sha256；native 为空，但 JSON 字段不可省略。
+  string image_digest = 9;
+  // JSON 正整数 1..9007199254740991；按 purpose/name/os/arch 持久防回滚。
+  uint64 release_sequence = 10;
+  // CheckValid 后映射 UTC Z，最短必要的 1..9 位小数，不用 protojson 的 0/3/6/9 位。
+  google.protobuf.Timestamp issued_at = 11;
+  RuntimeReleaseSignature signature = 12;
+}
+
+message RuntimeReleaseSignature {
+  // 固定 Ed25519。
+  string alg = 1;
+  // [A-Za-z0-9._-]{1,128}。
+  string kid = 2;
+  // 原始 64 字节签名的规范无填充 base64url 字符串。
+  string value = 3;
+}
