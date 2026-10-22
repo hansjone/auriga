@@ -43,10 +43,11 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 	if err := os.WriteFile(input, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	invoke := func(out string) ([]byte, error) {
-		return exec.Command(binary, "-out", out, "-access-file", input, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26").CombinedOutput()
+	invokeWithLAN := func(out, lanIP string) ([]byte, error) {
+		return exec.Command(binary, "-out", out, "-access-file", input, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26", "-lan-ip", lanIP, "-lan-subnet", "192.0.2.0/26").CombinedOutput()
 	}
-	for _, kind := range []string{"valid", "wrong-owner", "source-link", "template-only", "pki-link", "private-hardlink", "private-mode", "missing-receipt", "source-ca-mode", "source-signer-owner", "source-signer-readable-owner", "source-signer-hardlink", "source-pki-mode"} {
+	invoke := func(out string) ([]byte, error) { return invokeWithLAN(out, "192.0.2.10") }
+	for _, kind := range []string{"valid", "wrong-owner", "source-link", "template-only", "pki-link", "private-hardlink", "private-mode", "missing-receipt", "source-ca-mode", "source-signer-owner", "source-signer-readable-owner", "source-signer-hardlink", "source-pki-mode", "lan-input-drift"} {
 		t.Run(kind, func(t *testing.T) {
 			out := filepath.Join(root, kind)
 			if kind == "wrong-owner" {
@@ -96,6 +97,15 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 				}
 			}
 			before := nasSnapshot(t, out)
+			if kind == "lan-input-drift" {
+				if b, err := invokeWithLAN(out, "192.0.2.11"); err == nil {
+					t.Fatalf("changed LAN isolation input accepted: %s", b)
+				}
+				if before != nasSnapshot(t, out) {
+					t.Fatal("LAN input rejection changed source materials or receipt")
+				}
+				return
+			}
 			if kind == "valid" {
 				t.Run("held-directory-path-replacement", func(t *testing.T) {
 					guard, err := openNASMaterialGuard(out)
@@ -249,7 +259,7 @@ func testNASFixedInstallerExecutableBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	invoke := func(out string) ([]byte, error) {
-		return exec.Command(binary, "-out", out, "-access-file", input, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26").CombinedOutput()
+		return exec.Command(binary, "-out", out, "-access-file", input, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26", "-lan-ip", "192.0.2.10", "-lan-subnet", "192.0.2.0/26").CombinedOutput()
 	}
 	t.Run("private-bundle-public-data", func(t *testing.T) {
 		out := filepath.Join(root, "public-data")

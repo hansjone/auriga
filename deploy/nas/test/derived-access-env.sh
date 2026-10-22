@@ -101,7 +101,8 @@ if [ "${NAS_TEST_ACCESS_MODE:-domain}" = domain ]; then
     "$ROOT/access-domain.example.json" >"$TMP/default-http.json"
   bootstrap=$(bootstrap_binary)
   (umask 022; "$bootstrap" -out "$TMP/default-http" -access-file "$TMP/default-http.json" \
-    -edge-peer-ip 192.0.2.138 -internal-subnet 192.0.2.128/26) >/dev/null
+    -edge-peer-ip 192.0.2.138 -internal-subnet 192.0.2.128/26 \
+    -lan-ip 192.0.2.10 -lan-subnet 192.0.2.0/26) >/dev/null
   load_nas_access_env "$TMP/default-http/access.env"
   [ "$AURIGA_NAS_PORTAL_URL" = http://xn--bcher-kva.example ]
   [ "$AURIGA_NAS_PORTAL_PORT" = 80 ]

@@ -34,6 +34,7 @@ check('AURIGA_AGENT_INSTANCE_PLATFORM_URL' not in env and 'AURIGA_AGENT_INSTANCE
 check(env.get('AURIGA_DEPLOYMENT_ACCESS_FILE') == '/etc/auriga/access.json', 'agent_shared_access')
 check(access['instanceControl']['dnsAlias'] != access['portalOrigin']['host'], 'browser_alias_separation')
 check(edge_config['accessConfigFile'] == '/etc/auriga/access.json', 'edge_shared_access')
+check(edge_config.get('instanceControlIngress') == {'denyLocalIPv4': [values['AURIGA_EDGE_LAN_IP']]}, 'kernel_local_lan_target_excluded')
 check(edge_config['iamHop']['serverName'] == 'platform' and edge_config['iamRpc']['address'] == 'platform:9091', 'dedicated_iam_hop_rpc')
 check(edge_config['iamRpc']['serviceTokenFile'] == '/run/auriga-internal/edge/service.jwt', 'continued_service_token')
 for service in ['edge', 'platform', 'agent']:

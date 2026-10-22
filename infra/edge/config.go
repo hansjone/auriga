@@ -13,29 +13,30 @@ import (
 
 // Config drives auriga-edge. Values may come from a JSON file and/or environment.
 type Config struct {
-	AccessConfigFile     string                  `json:"accessConfigFile"`
-	Access               deploymentconfig.Config `json:"-"`
-	ProxyTLS             ProxyTLSConfig          `json:"proxyTLS"`
-	IAMRPC               IAMRPCConfig            `json:"iamRpc"`
-	IAMHop               IAMHopConfig            `json:"iamHop"`
-	Listen               string                  `json:"listen"`
-	PortalHost           string                  `json:"portalHost"`
-	AdminHost            string                  `json:"adminHost"`
-	InstanceParentDomain string                  `json:"instanceParentDomain"`
-	SecureCookies        bool                    `json:"secureCookies"`
-	TrustedProxies       []string                `json:"trustedProxies"`
-	Upstreams            map[string]string       `json:"upstreams"`
-	Static               StaticConfig            `json:"static"`
-	TLS                  TLSConfig               `json:"tls"`
-	RateLimit            RateLimitConfig         `json:"rateLimit"`
-	IdentityKeysFile     string                  `json:"identityKeysFile"`
-	SessionStore         string                  `json:"sessionStore"` // memory | nats
-	NATSURL              string                  `json:"natsUrl"`
-	NATSCredsFile        string                  `json:"natsCredsFile"`
-	RoutesNATSCredsFile  string                  `json:"routesNatsCredsFile"`
-	AllowLocalIngress    bool                    `json:"allowLocalIngress"`
-	NodeTLS              NodeTLSConfig           `json:"nodeTLS"`
-	PublicPathPrefixes   []string                `json:"publicPathPrefixes"`
+	AccessConfigFile       string                        `json:"accessConfigFile"`
+	Access                 deploymentconfig.Config       `json:"-"`
+	ProxyTLS               ProxyTLSConfig                `json:"proxyTLS"`
+	InstanceControlIngress *InstanceControlIngressConfig `json:"instanceControlIngress,omitempty"`
+	IAMRPC                 IAMRPCConfig                  `json:"iamRpc"`
+	IAMHop                 IAMHopConfig                  `json:"iamHop"`
+	Listen                 string                        `json:"listen"`
+	PortalHost             string                        `json:"portalHost"`
+	AdminHost              string                        `json:"adminHost"`
+	InstanceParentDomain   string                        `json:"instanceParentDomain"`
+	SecureCookies          bool                          `json:"secureCookies"`
+	TrustedProxies         []string                      `json:"trustedProxies"`
+	Upstreams              map[string]string             `json:"upstreams"`
+	Static                 StaticConfig                  `json:"static"`
+	TLS                    TLSConfig                     `json:"tls"`
+	RateLimit              RateLimitConfig               `json:"rateLimit"`
+	IdentityKeysFile       string                        `json:"identityKeysFile"`
+	SessionStore           string                        `json:"sessionStore"` // memory | nats
+	NATSURL                string                        `json:"natsUrl"`
+	NATSCredsFile          string                        `json:"natsCredsFile"`
+	RoutesNATSCredsFile    string                        `json:"routesNatsCredsFile"`
+	AllowLocalIngress      bool                          `json:"allowLocalIngress"`
+	NodeTLS                NodeTLSConfig                 `json:"nodeTLS"`
+	PublicPathPrefixes     []string                      `json:"publicPathPrefixes"`
 }
 
 type StaticConfig struct {
@@ -195,6 +196,9 @@ func applyEnv(cfg *Config) {
 }
 
 func (c Config) validate() error {
+	if _, err := c.parseControlIngress(); err != nil {
+		return err
+	}
 	if c.Listen == "" {
 		return fmt.Errorf("listen is required")
 	}

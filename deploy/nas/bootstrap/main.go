@@ -33,6 +33,8 @@ func main() {
 	validateOnly := flag.Bool("validate-access", false, "validate without writing installation materials")
 	peerIP := flag.String("edge-peer-ip", "", "fixed edge component-network IPv4")
 	subnet := flag.String("internal-subnet", "", "component-network IPv4 prefix")
+	lanIP := flag.String("lan-ip", "", "required edge LAN IPv4 excluded from instance control")
+	lanSubnet := flag.String("lan-subnet", "", "required disjoint LAN IPv4 prefix")
 	registryPort := flag.Int("registry-port", 15000, "host loopback registry port")
 	flag.Parse()
 	if flag.NArg() != 0 {
@@ -42,13 +44,16 @@ func main() {
 	if err != nil {
 		fatalf("%v", err)
 	}
+	if err := validateNASLAN(*lanIP, *lanSubnet, *subnet); err != nil {
+		fatalf("%v", err)
+	}
 	if *validateOnly {
 		return
 	}
 	if *out == "" {
 		fatalf("-out is required")
 	}
-	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort); err != nil {
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet); err != nil {
 		fatalf("%v", err)
 	}
 	guard, err := openNASMaterialGuard(*out)
@@ -57,7 +62,7 @@ func main() {
 	}
 	defer guard.Close()
 	pki := filepath.Join(*out, "pki")
-	input := sha256.Sum256(append(append([]byte{}, raw...), []byte(fmt.Sprintf("\n%s\n%s\n%d", *peerIP, *subnet, *registryPort))...))
+	input := sha256.Sum256(append(append([]byte{}, raw...), []byte(fmt.Sprintf("\n%s\n%s\n%d\n%s\n%s", *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet))...))
 	inputDigest := hex.EncodeToString(input[:])
 	reuse, err := materials.CheckReceipt(*out, inputDigest, nasMaterialSet())
 	if err != nil {
@@ -75,7 +80,7 @@ func main() {
 	}
 	mustPKI(pki)
 	mustIdentity(*out)
-	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort)
+	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP)
 	if err := guard.Validate(false); err != nil {
 		fatalf("%v", err)
 	}

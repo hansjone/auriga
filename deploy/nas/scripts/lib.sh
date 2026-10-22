@@ -420,6 +420,7 @@ validate_nas_access() {
   _boot=$(bootstrap_binary)
   "$_boot" -validate-access -access-file "$AURIGA_ACCESS_FILE" \
     -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
+    -lan-ip "${AURIGA_EDGE_LAN_IP:?}" -lan-subnet "${AURIGA_LAN_SUBNET:?}" \
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}"
 }
 
@@ -427,6 +428,7 @@ bootstrap_nas_materials() {
   _boot=$(bootstrap_binary)
   (umask 022; "$_boot" -out "$AURIGA_DATA_ROOT/config/materials" -access-file "$AURIGA_ACCESS_FILE" \
     -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
+    -lan-ip "${AURIGA_EDGE_LAN_IP:?}" -lan-subnet "${AURIGA_LAN_SUBNET:?}" \
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}")
 }
 

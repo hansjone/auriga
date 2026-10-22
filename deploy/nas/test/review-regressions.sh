@@ -91,7 +91,7 @@ case "$1" in
     [ "${3:-}" = -f ] || exit 0
     case "$4" in
       *Driver*) echo bridge ;;
-      *Subnet*) echo 192.0.2.0/24 ;;
+      *Subnet*) echo 192.0.2.0/26 ;;
       *Gateway*) echo 192.0.2.1 ;;
       *AuxiliaryAddresses*|*IPRange*) : ;;
       *Containers*) printf '%s 192.0.2.10/24\n' "${TEST_IP_OWNER:-aaaaaaaaaaaa}" ;;

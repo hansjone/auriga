@@ -79,12 +79,30 @@ func nasMaterialSet() materials.MaterialSet {
 	}}
 }
 
-func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer string, registry int) {
+func validateNASLAN(value, subnet, componentSubnet string) error {
+	address, err := netip.ParseAddr(value)
+	prefix, prefixErr := netip.ParsePrefix(subnet)
+	component, componentErr := netip.ParsePrefix(componentSubnet)
+	if err != nil || !address.Is4() || address.String() != value || !address.IsGlobalUnicast() || address.IsLoopback() || prefixErr != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix || prefix.String() != subnet || prefix.Bits() < 8 || prefix.Bits() > 30 || !prefix.Contains(address) || componentErr != nil || prefix.Overlaps(component) {
+		return fmt.Errorf("required LAN IPv4/prefix must be canonical, matching and disjoint from the component network")
+	}
+	first := prefix.Addr().As4()
+	ip := address.As4()
+	network := uint32(first[0])<<24 | uint32(first[1])<<16 | uint32(first[2])<<8 | uint32(first[3])
+	selected := uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+	if selected <= network+1 || selected == network+(uint32(1)<<(32-prefix.Bits()))-1 {
+		return fmt.Errorf("LAN address must not be network, default gateway or broadcast")
+	}
+	return nil
+}
+
+func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer string, registry int, lanIP string) {
 	writeFile(filepath.Join(out, "access.json"), raw, 0o644)
 	ls := cfg.Listeners()
 	writeFile(filepath.Join(out, "access.env"), []byte(fmt.Sprintf("AURIGA_NAS_ISSUER=%s\nAURIGA_NAS_PORTAL_HOST=%s\nAURIGA_NAS_ADMIN_HOST=%s\nAURIGA_NAS_PORTAL_URL=%s\nAURIGA_NAS_ADMIN_URL=%s\nAURIGA_NAS_PORTAL_PORT=%d\nAURIGA_NAS_ADMIN_PORT=%d\nAURIGA_NAS_PORTAL_TARGET_PORT=%d\nAURIGA_NAS_ADMIN_TARGET_PORT=%d\n", cfg.Issuer(), cfg.PortalOrigin().Host, cfg.AdminOrigin().Host, cfg.PortalURL(), cfg.AdminURL(), cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, ls.Portal.Port, ls.Admin.Port)), 0o644)
 	edgeConfig := map[string]any{
-		"accessConfigFile": "/etc/auriga/access.json", "allowLocalIngress": true,
+		"instanceControlIngress": map[string]any{"denyLocalIPv4": []string{lanIP}},
+		"accessConfigFile":       "/etc/auriga/access.json", "allowLocalIngress": true,
 		"upstreams": map[string]string{"iam": "https://platform:8081", "org": "https://platform:8081", "workspace": "https://platform:8081"},
 		"iamHop":    map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "platform"},
 		"iamRpc":    map[string]any{"address": "platform:9091", "serverName": "platform", "timeoutMillis": 2000, "serviceTokenFile": "/run/auriga-internal/edge/service.jwt"},

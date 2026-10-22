@@ -56,7 +56,7 @@ func TestNASRenderedAgentPolicy(t *testing.T) {
 			if err := os.MkdirAll(dataRoot, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			stackEnv := "AURIGA_DATA_ROOT=" + dataRoot + "\nAURIGA_ACCESS_FILE=" + filepath.Join(nasRoot, "access-ip.example.json") + "\nAURIGA_INTERNAL_SUBNET=192.0.2.128/26\nAURIGA_INTERNAL_EDGE_IP=192.0.2.138\n" + tc.env
+			stackEnv := "AURIGA_DATA_ROOT=" + dataRoot + "\nAURIGA_ACCESS_FILE=" + filepath.Join(nasRoot, "access-ip.example.json") + "\nAURIGA_INTERNAL_SUBNET=192.0.2.128/26\nAURIGA_INTERNAL_EDGE_IP=192.0.2.138\nAURIGA_LAN_SUBNET=192.0.2.0/26\nAURIGA_EDGE_LAN_IP=192.0.2.10\n" + tc.env
 			if err := os.WriteFile(filepath.Join(dataRoot, "stack.env"), []byte(stackEnv), 0o600); err != nil {
 				t.Fatal(err)
 			}

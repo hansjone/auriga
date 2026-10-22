@@ -52,12 +52,15 @@ func TestNASPublicAccessCLI(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := filepath.Join(root, mode+"-out")
-			args := []string{"-validate-access", "-out", out, "-access-file", path, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26"}
+			args := []string{"-validate-access", "-out", out, "-access-file", path, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26", "-lan-ip", "192.0.2.10", "-lan-subnet", "192.0.2.0/26"}
 			if b, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 				t.Fatalf("valid %s: %v %s", mode, err, b)
 			}
 			if _, err := os.Lstat(out); !os.IsNotExist(err) {
 				t.Fatal("validation wrote installation output")
+			}
+			if b, err := exec.Command(binary, args[:len(args)-4]...).CombinedOutput(); err == nil {
+				t.Fatalf("missing LAN isolation input accepted: %s", b)
 			}
 			// Unknown/duplicate JSON fields must fail in the production loader before writes.
 			for _, bad := range [][]byte{append([]byte(`{"unknown":1,`), raw[1:]...), append([]byte(`{"mode":"ip",`), raw[1:]...)} {
@@ -72,6 +75,23 @@ func TestNASPublicAccessCLI(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNASLANIsolationInputs(t *testing.T) {
+	if err := validateNASLAN("192.0.2.10", "192.0.2.0/26", "192.0.2.128/26"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ address, prefix string }{
+		{"", "192.0.2.0/26"}, {"192.0.2.10", ""}, {"::ffff:192.0.2.10", "192.0.2.0/26"},
+		{"192.0.2.010", "192.0.2.0/26"}, {"192.0.2.10", "192.0.2.0/24"},
+		{"192.0.2.138", "192.0.2.128/26"}, {"198.51.100.10", "192.0.2.0/26"},
+		{"192.0.2.0", "192.0.2.0/26"}, {"192.0.2.1", "192.0.2.0/26"}, {"192.0.2.63", "192.0.2.0/26"},
+		{"127.0.0.2", "127.0.0.0/26"},
+	} {
+		if err := validateNASLAN(test.address, test.prefix, "192.0.2.128/26"); err == nil {
+			t.Errorf("invalid LAN isolation input accepted: %+v", test)
+		}
 	}
 }
 

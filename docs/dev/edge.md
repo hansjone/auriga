@@ -13,6 +13,8 @@ host、secureCookies、trustedProxies 环境值不能覆盖安装身份。下文
 Forwarded/X-Forwarded 不能决定角色、scheme 或租户。内控 listener 仅精确 self/heartbeat，
 要求 `Bearer ait_...` 后仍由 workspace 验真实令牌，其余路由 404。
 
+NAS 生成的 JSON 额外强制 `instanceControlIngress.denyLocalIPv4`，列出本安装的 LAN IPv4；该字段没有环境覆盖。启用时要求经验证的 wildcard 内控 listener、非空且不重复的规范 IPv4，并在任何服务绑定前核地址属于当前网络命名空间。内控 Accept 根据内核 TCP 本地目标 IP 和端口判断，IPv4 映射统一处理；LAN 目标、IPv6 或未知上下文直接关闭，尚未进入 HTTP／IAM。portal/admin 不受该过滤器影响。动态实例私有 bridge 上的 edge 地址仍可使用，原 authority 与 AIT 校验继续强制。未启用此字段的其他配方保持原支持。
+
 IAM 专用 mTLS hop、精确 cookie 白名单、标准服务 JWT 的 CSRF gRPC 配置，以及 SPA 公开
 `auriga-access-mode` meta 的正式 wire 约束见
 [edge-iam-hop.md](../../contracts/deployment/edge-iam-hop.md)。IAM hop 或管理 RPC 未装配时失败关闭；

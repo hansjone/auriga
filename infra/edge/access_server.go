@@ -15,6 +15,10 @@ import (
 )
 
 func (s *Server) runAccess(ctx context.Context) error {
+	controlPolicy, err := s.Cfg.prepareControlIngress()
+	if err != nil {
+		return err
+	}
 	listeners := s.Cfg.Access.Listeners()
 	entries := []struct {
 		role   string
@@ -62,6 +66,9 @@ func (s *Server) runAccess(ctx context.Context) error {
 		socket, err := listen("tcp", net.JoinHostPort(entry.config.Address, strconv.Itoa(int(entry.config.Port))))
 		if err != nil {
 			return err
+		}
+		if entry.role == "instanceControl" && controlPolicy != nil {
+			socket = &controlIngressListener{Listener: socket, policy: controlPolicy}
 		}
 		if tlsConfig != nil {
 			socket = tls.NewListener(socket, tlsConfig)
