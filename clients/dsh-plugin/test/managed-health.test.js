@@ -161,6 +161,13 @@ test('createManaged wires door keys health sdk', async () => {
   };
 
   const runtime = await createManaged({
+    config: {
+      browserOrigin: {
+        scheme: 'https',
+        host: 'instance.i.example.com',
+        port: 443,
+      },
+    },
     env: {
       AURIGA_MODE: 'managed',
       AURIGA_INSTANCE_ID: INSTANCE_ID,

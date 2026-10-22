@@ -1,6 +1,9 @@
 // @ts-nocheck
 import { readFileSync } from 'node:fs';
-import { installHostAuthentication } from '../managed/host-auth.js';
+import {
+  installHostAuthentication,
+  validateBrowserOrigin,
+} from '../managed/host-auth.js';
 import { createIdentityKeyCache } from '../managed/keys.js';
 import { createDoorLock, createReplayCache } from '../managed/door.js';
 import {
@@ -65,7 +68,7 @@ async function resolveInstanceToken(env, inline) {
  *   workspaceRoot?: string,
  *   watchKeys?: boolean,
  *   startHeartbeat?: boolean,
- *   config?: { imBots?: 'none', terminalSources?: 'browser-only', trustedHosts?: string[] },
+ *   config?: import('../generated/managed-config.js').ManagedConfig,
  * }} [options]
  */
 export async function createManaged(options = {}) {
@@ -85,9 +88,16 @@ export async function createManaged(options = {}) {
     );
   }
   const terminalSources = rowConfig.terminalSources;
-  const trustedHosts = Array.isArray(rowConfig.trustedHosts)
-    ? rowConfig.trustedHosts.filter((entry) => typeof entry === 'string')
-    : [];
+  if (
+    !rowConfig ||
+    typeof rowConfig !== 'object' ||
+    Array.isArray(rowConfig) ||
+    Object.keys(rowConfig).some(
+      (key) => !['imBots', 'terminalSources', 'browserOrigin'].includes(key),
+    )
+  )
+    throw new Error('auriga-dsh: unknown managed config field');
+  const browserOrigin = validateBrowserOrigin(rowConfig.browserOrigin);
   if ((env.AURIGA_MODE ?? 'managed') !== 'managed') {
     throw new Error('createManaged requires AURIGA_MODE=managed');
   }
@@ -268,7 +278,7 @@ export async function createManaged(options = {}) {
 
       host.ctx = ctx;
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
-        trustedHosts,
+        browserOrigin,
       });
       host.getBrowsers = () => browserSockets.size;
       installManagedGuards(ctx, { workspaceRoot });

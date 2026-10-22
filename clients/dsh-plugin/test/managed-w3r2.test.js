@@ -172,7 +172,7 @@ test('heartbeat reports field names once per unknown set and still sends', async
 });
 
 test('browser fence: edge Origin with rewritten upstream Host passes, others fail', () => {
-  const trusted = [EDGE];
+  const trusted = { scheme: 'https', host: EDGE, port: 443 };
   const req = (headers) => ({
     headers: { host: '172.18.0.2:7860', ...headers },
   });
@@ -183,22 +183,28 @@ test('browser fence: edge Origin with rewritten upstream Host passes, others fai
   );
   assert.equal(
     browserFenceOk(req({ origin: `http://${EDGE}:8080` }), trusted),
-    true,
+    false,
   );
   assert.equal(
     browserFenceOk(req({ origin: 'https://evil.example.net' }), trusted),
     false,
   );
-  assert.equal(browserFenceOk(req({ origin: `https://${EDGE}` }), []), false);
+  assert.equal(
+    browserFenceOk(req({ origin: `https://${EDGE}` }), {
+      ...trusted,
+      host: 'other.i.example.com',
+    }),
+    false,
+  );
   assert.equal(
     browserFenceOk(req({ 'sec-fetch-site': 'cross-site' }), trusted),
     false,
   );
   assert.equal(browserFenceOk(req({ origin: 'null' }), trusted), false);
-  // Same-origin direct access (Origin equals Host) stays allowed.
+  // An upstream IP Host does not grant a browser Origin.
   assert.equal(
     browserFenceOk(req({ origin: 'http://172.18.0.2:7860' }), trusted),
-    true,
+    false,
   );
   // DNS rebinding: an undeclared name as Host is refused.
   assert.equal(
@@ -207,7 +213,7 @@ test('browser fence: edge Origin with rewritten upstream Host passes, others fai
   );
   assert.equal(
     browserFenceOk({ headers: { host: `${EDGE}:8080` } }, trusted),
-    true,
+    false,
   );
   assert.equal(browserFenceOk({ headers: {} }, trusted), false);
 });
@@ -250,7 +256,7 @@ test('door-admitted requests keep the Origin fence on native RPC and index', asy
     authorizeIndex: () => false,
   };
   const dispose = installHostAuthentication(connection, door, {
-    trustedHosts: [EDGE],
+    browserOrigin: { scheme: 'https', host: EDGE, port: 443 },
   });
   const server = new EventEmitter();
   const disposeDoor = door.install(server);

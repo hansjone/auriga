@@ -70,6 +70,15 @@ func (c Config) InstanceParentDomain() string {
 	return ""
 }
 
+// InstanceSubdomain returns a value copy of the validated per-instance browser
+// origin settings. Path mode and the invalid zero Config have no subdomain.
+func (c Config) InstanceSubdomain() (deployment.AccessInstancesSubdomain, bool) {
+	if c.valid && c.access.Instances.AccessInstancesSubdomain != nil {
+		return *c.access.Instances.AccessInstancesSubdomain, true
+	}
+	return deployment.AccessInstancesSubdomain{}, false
+}
+
 func serializeOrigin(o deployment.Origin) string {
 	if o.Scheme == "http" && o.Port == 80 || o.Scheme == "https" && o.Port == 443 {
 		return o.Scheme + "://" + o.Host

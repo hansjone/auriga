@@ -130,6 +130,27 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	}
 }
 
+func TestAgentUsesOnlySharedAccessFile(t *testing.T) {
+	raw, err := os.ReadFile("../docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	start := strings.Index(text, "  agent:")
+	if start < 0 {
+		t.Fatal("agent service absent")
+	}
+	agent := text[start:]
+	if !strings.Contains(agent, "AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json") || !strings.Contains(agent, "./var/access.json:/etc/auriga/access.json:ro") {
+		t.Fatal("agent did not mount the shared read-only file")
+	}
+	for _, key := range []string{"AURIGA_AGENT_INSTANCE_PLATFORM_URL", "AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "AURIGA_AGENT_DOCKER_EDGE_CONTAINER"} {
+		if strings.Contains(agent, key) {
+			t.Fatalf("legacy agent input remains: %s", key)
+		}
+	}
+}
+
 func TestAccessRejectsConflictingInstallation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

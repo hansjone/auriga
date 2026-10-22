@@ -267,7 +267,15 @@ test('managed browser-only profile reaches a real fetch with 0, live, unknown an
     instanceToken: 'terminal-generated-test-token',
     watchKeys: false,
     startHeartbeat: false,
-    config: { imBots: 'none', terminalSources: 'browser-only' },
+    config: {
+      browserOrigin: {
+        scheme: 'https',
+        host: 'instance.i.example.com',
+        port: 443,
+      },
+      imBots: 'none',
+      terminalSources: 'browser-only',
+    },
   });
   t.after(() => runtime.close());
   const hostServer = createServer();

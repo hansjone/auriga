@@ -58,6 +58,13 @@ test('door health bypass only for exact GET/HEAD raw path', async () => {
 test('apply throws when webServer.server is missing', async () => {
   const keys = makeIdentityKeys();
   const runtime = await createManaged({
+    config: {
+      browserOrigin: {
+        scheme: 'https',
+        host: 'instance.i.example.com',
+        port: 443,
+      },
+    },
     env: {
       AURIGA_MODE: 'managed',
       AURIGA_INSTANCE_ID: INSTANCE_ID,
@@ -81,6 +88,13 @@ test('apply throws when webServer.server is missing', async () => {
 test('apply installs door when server present', async () => {
   const keys = makeIdentityKeys();
   const runtime = await createManaged({
+    config: {
+      browserOrigin: {
+        scheme: 'https',
+        host: 'instance.i.example.com',
+        port: 443,
+      },
+    },
     env: {
       AURIGA_MODE: 'managed',
       AURIGA_INSTANCE_ID: INSTANCE_ID,
@@ -229,6 +243,13 @@ test('createManaged rejects missing identity keys file', async () => {
   await assert.rejects(
     () =>
       createManaged({
+        config: {
+          browserOrigin: {
+            scheme: 'https',
+            host: 'instance.i.example.com',
+            port: 443,
+          },
+        },
         env: {
           AURIGA_MODE: 'managed',
           AURIGA_INSTANCE_ID: INSTANCE_ID,

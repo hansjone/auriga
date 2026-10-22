@@ -186,10 +186,8 @@ services:
       AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
-      # DNS alias on the edge endpoint inside each isolated instance network.
-      AURIGA_AGENT_DOCKER_EDGE_CONTAINER: ${COMPOSE_PROJECT_NAME:-auriga-m2}-edge
-      # Same value as edge instanceParentDomain: rendered into DSH trustedHosts.
-      AURIGA_AGENT_INSTANCE_PARENT_DOMAIN: i.example.com
+      # Same validated installation file as edge; internal alias and browser origin stay separate.
+      AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
       DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -198,6 +196,7 @@ services:
       - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}
       - ./var/join:/run/auriga-join
       - ./var/identity-keys.json:/etc/auriga/identity-keys.json:ro
+      - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
 
 volumes:

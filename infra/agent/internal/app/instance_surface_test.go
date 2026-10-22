@@ -1,53 +1,60 @@
 package app
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
-func TestInstanceSurfaceFromEnv(t *testing.T) {
-	t.Setenv("AURIGA_AGENT_DOCKER_EDGE_CONTAINER", "")
-	t.Setenv("AURIGA_AGENT_SERVER", "https://192.0.2.10:7443")
-	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "")
-	t.Setenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "")
-	got, err := instanceSurfaceFromEnv()
-	if err != nil || got.PlatformURL != "" || got.ParentDomain != "" {
-		t.Fatalf("unset must stay empty (never the gRPC server): %+v %v", got, err)
-	}
-
-	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "http://192.0.2.10:8080/")
-	t.Setenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "i.example.com")
-	got, err = instanceSurfaceFromEnv()
-	if err != nil || got.PlatformURL != "http://192.0.2.10:8080" || got.ParentDomain != "i.example.com" {
-		t.Fatalf("valid surface: %+v %v", got, err)
-	}
-
-	for _, bad := range []string{
-		"grpc://192.0.2.10:7443",
-		"https://edge.example.com/api",
-		"https://user@edge.example.com",
-		"https://edge.example.com?x=1",
-		"edge.example.com",
-	} {
-		t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", bad)
-		if _, err := instanceSurfaceFromEnv(); err == nil {
-			t.Fatalf("%q should fail", bad)
-		}
-	}
-	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "")
-	t.Setenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "not a domain")
-	if _, err := instanceSurfaceFromEnv(); err == nil {
-		t.Fatal("bad parent domain should fail")
+func clearSurfaceEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"AURIGA_DEPLOYMENT_ACCESS_FILE", "AURIGA_AGENT_INSTANCE_PLATFORM_URL", "AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "AURIGA_AGENT_DOCKER_EDGE_CONTAINER"} {
+		t.Setenv(key, "")
 	}
 }
-
-func TestEdgeContainerRequiresInstanceHTTPEntry(t *testing.T) {
-	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "")
-	t.Setenv("AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "")
-	t.Setenv("AURIGA_AGENT_DOCKER_EDGE_CONTAINER", "auriga-test-edge")
+func TestInstanceSurfaceFromEnv(t *testing.T) {
+	clearSurfaceEnv(t)
+	t.Setenv("AURIGA_AGENT_SERVER", "https://192.0.2.10:7443")
 	if _, err := instanceSurfaceFromEnv(); err == nil {
-		t.Fatal("edge join without a platform URL accepted")
+		t.Fatal("managed runtime accepted missing access file")
 	}
-	t.Setenv("AURIGA_AGENT_INSTANCE_PLATFORM_URL", "http://portal.example.com:8080")
-	got, err := instanceSurfaceFromEnv()
-	if err != nil || got.EdgeContainer != "auriga-test-edge" {
-		t.Fatalf("edge surface not retained: %+v %v", got, err)
+	for _, name := range []string{"ip-http.json", "domain-proxy.json"} {
+		t.Run(name, func(t *testing.T) {
+			path, err := filepath.Abs(filepath.Join("../../../../contracts/deployment/fixtures", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AURIGA_DEPLOYMENT_ACCESS_FILE", path)
+			got, err := instanceSurfaceFromEnv()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !got.Access.Valid() || got.EdgeContainer != "auriga-edge" || got.Access.InstanceControl().DnsAlias != "auriga-instance.internal" {
+				t.Fatalf("surface: %+v", got)
+			}
+			for _, key := range []string{"AURIGA_AGENT_INSTANCE_PLATFORM_URL", "AURIGA_AGENT_INSTANCE_PARENT_DOMAIN", "AURIGA_AGENT_DOCKER_EDGE_CONTAINER"} {
+				t.Setenv(key, "obsolete")
+				if _, err := instanceSurfaceFromEnv(); err == nil {
+					t.Fatalf("legacy override accepted: %s", key)
+				}
+				t.Setenv(key, "")
+			}
+		})
+	}
+}
+func TestInstanceSurfaceRejectsUnreadableOrInvalidAccess(t *testing.T) {
+	clearSurfaceEnv(t)
+	p := filepath.Join(t.TempDir(), "access.json")
+	t.Setenv("AURIGA_DEPLOYMENT_ACCESS_FILE", p)
+	if _, err := instanceSurfaceFromEnv(); err == nil {
+		t.Fatal("missing file accepted")
+	}
+	for _, raw := range []string{`null`, `{}`, `{"portalOrigin":null}`, `{"mode":"ip","mode":"domain"}`} {
+		if err := os.WriteFile(p, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := instanceSurfaceFromEnv(); err == nil {
+			t.Fatalf("invalid access accepted: %s", raw)
+		}
 	}
 }

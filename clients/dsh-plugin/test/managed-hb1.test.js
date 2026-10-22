@@ -95,7 +95,15 @@ test('managed heartbeat health follows actual host listening, loss and recovery'
     instanceToken: 'hb1-host-test-token',
     watchKeys: false,
     startHeartbeat: false,
-    config: { imBots: 'none', terminalSources: 'browser-only' },
+    config: {
+      browserOrigin: {
+        scheme: 'https',
+        host: 'instance.i.example.com',
+        port: 443,
+      },
+      imBots: 'none',
+      terminalSources: 'browser-only',
+    },
     fetchImpl: async (_url, init) => {
       bodies.push(JSON.parse(init.body));
       return new Response('{}');

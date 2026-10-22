@@ -266,3 +266,64 @@ test('KV附加投影只存hash/到期，最多32条，仅admin；不改变原门
   ])
     assert.equal(session(invalid), false, JSON.stringify(invalid));
 });
+
+const managedSchema = read('contracts/plugin/managed-config.schema.json');
+const configAjv = new Ajv2020({ strict: true, allErrors: true });
+addFormats(configAjv);
+configAjv.addSchema(
+  read('contracts/deployment/access.schema.json'),
+  'https://auriga.example/contracts/deployment/access.schema.json',
+);
+const managed = configAjv.compile({
+  ...managedSchema,
+  $id: 'https://auriga.example/contracts/plugin/managed-config.schema.json',
+});
+for (const browserOrigin of [
+  { scheme: 'https', host: 'instance.i.example.com', port: 443 },
+  { scheme: 'https', host: 'instance.i.example.com', port: 8443 },
+  { scheme: 'http', host: '192.0.2.10', port: 80 },
+  { scheme: 'http', host: '192.0.2.10', port: 8080 },
+])
+  test(
+    'managed配置复用部署Origin正例：' + JSON.stringify(browserOrigin),
+    () => {
+      assert(
+        managed({
+          browserOrigin,
+          imBots: 'none',
+          terminalSources: 'browser-only',
+        }),
+        JSON.stringify(managed.errors),
+      );
+    },
+  );
+for (const config of [
+  null,
+  {},
+  { trustedHosts: ['i.example.com'] },
+  { browserOrigin: null },
+  ...[
+    {},
+    [],
+    { scheme: 'https', host: 'i.example.com' },
+    { scheme: 'https', host: 'i.example.com', port: '443' },
+    { scheme: 'ws', host: 'i.example.com', port: 443 },
+    { scheme: 'https', host: 'i.example.com', port: 0 },
+    { scheme: 'https', host: 'i.example.com', port: 65536 },
+    { scheme: 'https', host: 'I.example.com', port: 443 },
+    { scheme: 'https', host: 'i.example.com/path', port: 443 },
+    { scheme: 'https', host: 'i.example.com', port: 443, extra: true },
+  ].map((browserOrigin) => ({ browserOrigin })),
+  {
+    browserOrigin: { scheme: 'https', host: 'i.example.com', port: 443 },
+    trustedHosts: [],
+  },
+])
+  test('managed配置结构拒绝：' + JSON.stringify(config), () =>
+    assert.equal(managed(config), false),
+  );
+test('managed browserOrigin直接引用原Origin规则，不定义第二份规则', () => {
+  assert.deepEqual(managedSchema.properties.browserOrigin, {
+    $ref: '../deployment/access.schema.json#/$defs/Origin',
+  });
+});

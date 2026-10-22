@@ -19,6 +19,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
 
 type memSpecs map[string]*nodev1.InstanceSpec
@@ -73,15 +74,14 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 	}
 	var chowned int
 	prep := &runtime.Preparing{
-		Inner:                inner,
-		Specs:                specs,
-		Artifacts:            art,
-		Layout:               layout,
-		UIDs:                 uids,
-		Policy:               policy.Default(),
-		SealingPrivate:       priv,
-		PlatformURL:          "https://edge.example.com",
-		InstanceParentDomain: "i.example.com",
+		Inner:          inner,
+		Specs:          specs,
+		Artifacts:      art,
+		Layout:         layout,
+		UIDs:           uids,
+		Policy:         policy.Default(),
+		SealingPrivate: priv,
+		Access:         testAccess(t, "domain-proxy.json"),
 		Chown: func(path string, uid, gid int) error {
 			chowned++
 			if uid < 200000 {
@@ -102,11 +102,11 @@ func TestPreparingFetchesAndRenders(t *testing.T) {
 		t.Fatalf("token %q %v", got, err)
 	}
 	patch, err := os.ReadFile(filepath.Join(root, "instances", "prep1", "meta", "cordis.patch.yml"))
-	if err != nil || !strings.Contains(string(patch), "prep1.i.example.com") {
-		t.Fatalf("instance parent domain not passed to renderer: %v", err)
+	if err != nil || !strings.Contains(string(patch), "prep1.i.example.com:443") {
+		t.Fatalf("browser authority not passed to renderer: %v", err)
 	}
 	envFile, err := os.ReadFile(filepath.Join(root, "instances", "prep1", "meta", "env"))
-	if err != nil || !strings.Contains(string(envFile), "AURIGA_PLATFORM_URL=https://edge.example.com\n") {
+	if err != nil || !strings.Contains(string(envFile), "AURIGA_PLATFORM_URL=http://auriga-instance.internal:8081\n") {
 		t.Fatalf("instance platform URL not passed to renderer: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(art.Root, "sha256", hex.EncodeToString(sum[:]))); err != nil {
@@ -175,7 +175,7 @@ func TestPreparingUpgradeReleasesOldArtifact(t *testing.T) {
 		UIDs:           storage.NewUIDTable(filepath.Join(root, "agent")),
 		Policy:         policy.Default(),
 		SealingPrivate: priv,
-		PlatformURL:    "https://edge.example.com",
+		Access:         testAccess(t),
 		Chown:          func(string, int, int) error { return nil },
 	}
 	if err := prep.Ensure(context.Background(), &runtime.Spec{InstanceID: "prep2"}, &runtime.Rendered{}); err != nil {
@@ -197,4 +197,23 @@ func TestPreparingUpgradeReleasesOldArtifact(t *testing.T) {
 	if err != nil || n != 1 {
 		t.Fatalf("old digest should be GC'd after upgrade sync: n=%d err=%v", n, err)
 	}
+}
+
+func testAccess(t *testing.T, names ...string) deploymentconfig.Config {
+	t.Helper()
+	name := "ip-http.json"
+	if len(names) > 0 {
+		name = names[0]
+	}
+
+	raw, err := os.ReadFile(filepath.Join("../../../../contracts/deployment/fixtures", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	access, err := deploymentconfig.Load(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return access
 }

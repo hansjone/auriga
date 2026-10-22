@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ManagedConfig",
+  "description": "受信节点 renderer 拥有的托管插件 Loader row 配置；browserOrigin 不由实例 profile 或请求头选择。",
+  "type": "object",
+  "properties": {
+    "browserOrigin": {
+      "$ref": "../deployment/access.schema.json#/$defs/Origin"
+    },
+    "imBots": { "const": "none" },
+    "terminalSources": { "const": "browser-only" }
+  },
+  "required": ["browserOrigin"],
+  "additionalProperties": false
+}

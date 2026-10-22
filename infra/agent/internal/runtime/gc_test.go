@@ -121,7 +121,7 @@ func newGCFixture(t *testing.T, handler http.Handler) *gcFixture {
 		UIDs:           storage.NewUIDTable(filepath.Join(root, "agent")),
 		Policy:         policy.Default(),
 		SealingPrivate: priv,
-		PlatformURL:    "https://edge.example.com",
+		Access:         testAccess(t),
 		Chown:          func(string, int, int) error { return nil },
 	}
 	return &gcFixture{prep: prep, art: art, specs: specs, inner: inner, pub: pub, srv: srv, clock: clock}

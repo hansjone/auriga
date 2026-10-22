@@ -58,6 +58,37 @@ WebSocket 只在升级时校验一次身份头；edge 收到 `identity.session_r
   - 这些元数据只是关联信息，不是凭据：平台先用令牌确定实例、主人和租户，再校验"会话—任务"绑定。同一个业务工具只从一条路径暴露，不在两边重复注册。
 - **团队 SDK**：插件向其他 DSH 插件提供 `ctx.get('auriga')`，只有它是对插件承诺稳定的接口；SDK 的接口定义随 P1 发布，版本跟协议主版本走。
 
+### 受信托管 Loader 配置
+
+`managed-config.schema.json` 定义节点渲染的托管插件配置，`browserOrigin` 直接引用
+`deployment/access.schema.json#/$defs/Origin`，必须完整给出 `{scheme, host, port}`。
+这是受信安装配置，严格拒绝未知字段、null、缺失字段以及旧 `trustedHosts` 配置；不是可宽容消费的跨版本业务消息。
+插件启动还校验规范 IPv4 或小写 ASCII DNS/A-label，不接受 URL、userinfo、路径、查询、片段、编码 host、尾点或歧义 IP。
+`imBots: none` 和 `terminalSources: browser-only` 仍是显式活动观测声明。
+
+agent 从 `AURIGA_DEPLOYMENT_ACCESS_FILE` 加载与 edge 相同的只读 `access.json`，使用既有 `deploymentconfig.Load`；
+无受信文件的 managed 实例运行期启动失败。仅 `fake` 控制驱动保持无实例 HTTP 配置的原行为。
+旧 `AURIGA_AGENT_INSTANCE_PLATFORM_URL`、`AURIGA_AGENT_INSTANCE_PARENT_DOMAIN` 和
+`AURIGA_AGENT_DOCKER_EDGE_CONTAINER` 设置时明确报迁移错误，须删除并迁移至同一 access 文件，不能覆盖安装边界。
+域名模式按 `instances` 的 scheme、port 和每实例子域派生 browserOrigin；IP 模式使用 portalOrigin。
+`AURIGA_PLATFORM_URL` 仅序列化 `instanceControl.origin`，供原 self/heartbeat 内部通道使用，内部 alias 不进入浏览器白名单。
+公开 Compose 目前仍使用 bootstrap 的固定 domain 测试配方；公开用户输入和双模式真实浏览器验收由后续 IP2d/IP3 交付。
+
+renderer 拥有 `browserOrigin` 整个子树，profile/spec patch 不能覆盖；`webserver`、`web-runtime`、`connection`
+行继续受保护。DSH 0.2.0-rc.2 的 `web-runtime.trustedHosts` 只接原生支持的精确 `host:有效port`，包括默认端口。
+Auriga 在合法签名门锁通过后仍校验完整 scheme/host/有效port；原生 authority 白名单不能替代 scheme fence。
+上游 loopback/IP Host 仍可由节点重写，无 Origin 的已签名导航或 server-to-server 行为不变；
+带 Origin 时必须与唯一 browserOrigin 完全匹配，不能因本地 Host、内部 alias 或有效签名放行别的浏览器源。
+重复/opaque/null/畸形 Origin、错误 scheme/端口和 cross-site Fetch Metadata 均拒绝；未通过门锁仍走原生认证拒绝。
+
+类型使用固定的 `json-schema-to-typescript 16.0.0` 生成；在仓库根执行 `pnpm --filter auriga-dsh gen:steps`。
+其新增部分的准确命令（插件目录执行）为：
+
+```sh
+json2ts -i ../../contracts/plugin/managed-config.schema.json -o src/generated/managed-config.d.ts
+prettier --write src/generated/managed-config.d.ts
+```
+
 ## 4. 设备登录（连接模式）
 
 用户电脑上的 DSH 接入平台，用 OAuth 2.0 设备授权流程（RFC 8628），客户端是内置的公共客户端 `auriga-dsh`：
