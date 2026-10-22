@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -259,7 +260,13 @@ func (s *Session) tryRenew(ctx context.Context) error {
 		Logger:        s.cfg.Logger,
 		Store:         s.cfg.Store,
 	}
-	_, err := enroll.RenewCertificate(ctx, opts, false)
+	mat, err := enroll.RenewCertificate(ctx, opts, false)
+	var trustErr *enroll.TrustUpdateError
+	if mat != nil && errors.As(err, &trustErr) {
+		s.cfg.Logger.Error("certificate renewed; runtime release trust unchanged", "error", trustErr)
+		// Existing streams remain valid; runOnce reloads the new certificate on reconnect.
+		return nil
+	}
 	return err
 }
 

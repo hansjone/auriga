@@ -63,7 +63,7 @@ func runJoin(args []string, logs io.Writer) error {
 	caSHA := fs.String("ca-sha256", "", "platform CA SPKI SHA-256 (hex)")
 	configPath := fs.String("config", "", "optional JSON config path")
 	dataRoot := fs.String("data-root", "", "override data root")
-	force := fs.Bool("force", false, "replace existing enrollment")
+	force := fs.Bool("force", false, "compatibility flag; existing identity/trust cannot be replaced; use certificate renewal")
 	allowInsecure := fs.Bool("allow-insecure", false, "allow grpc:// http:// (local dev only)")
 	if err := fs.Parse(args); err != nil {
 		return err

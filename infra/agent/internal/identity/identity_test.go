@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,5 +138,151 @@ func TestSaveKeysBeforeCertificateOnFailure(t *testing.T) {
 				t.Fatalf("temporary secrets left behind: %v", tmp)
 			}
 		})
+	}
+}
+func TestInitializationEvidenceAndUnreadableGuard(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent")
+	if err := identity.CheckFreshEnrollment(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, identity.TrustGuardFileName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identity.ReadTrustGuard(dir); err == nil {
+		t.Fatal("directory accepted as guard")
+	}
+	if err := identity.CheckFreshEnrollment(dir); err == nil {
+		t.Fatal("unreadable guard mistaken for absence")
+	}
+	path := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(path, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := identity.CheckFreshEnrollment(filepath.Join(path, "agent")); err == nil {
+		t.Fatal("filesystem inspection error mistaken for fresh enrollment")
+	}
+}
+func TestLiteralParentDirectoryRejectsEveryInitializationLeaf(t *testing.T) {
+	parents := []string{"legacy[1]"}
+	if runtime.GOOS != "windows" {
+		parents = append(parents, "legacy*?[1]")
+	}
+	for _, parent := range parents {
+		for _, name := range []string{identity.KeyFileName, identity.CertFileName, identity.CAFileName, identity.SealingFileName, identity.TrustGuardFileName, "state.db"} {
+			for _, temp := range []bool{false, true} {
+				t.Run(parent+"/"+name+map[bool]string{false: "/formal", true: "/temporary"}[temp], func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), parent, "agent")
+					if err := os.MkdirAll(dir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					leaf := name
+					if temp {
+						leaf = "." + name + ".tmp.crashed"
+					}
+					path := filepath.Join(dir, leaf)
+					want := []byte("historical initialization bytes")
+					if err := os.WriteFile(path, want, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if err := identity.CheckFreshEnrollment(dir); err == nil {
+						t.Fatal("literal parent hid initialization evidence")
+					}
+					got, err := os.ReadFile(path)
+					if err != nil || !bytes.Equal(got, want) {
+						t.Fatal("freshness probe changed evidence")
+					}
+				})
+			}
+		}
+	}
+}
+func TestWindowsCaseAliasesRejectAllInitializationLeaves(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows leaf-name alias matching")
+	}
+	for _, name := range []string{identity.KeyFileName, identity.CertFileName, identity.CAFileName, identity.SealingFileName, identity.TrustGuardFileName, "state.db"} {
+		for _, temporary := range []bool{false, true} {
+			for _, casing := range []string{"upper", "mixed"} {
+				canonical := name
+				if temporary {
+					canonical = "." + name + ".tmp.crashed"
+				}
+				leaf := strings.ToUpper(canonical)
+				if casing == "mixed" {
+					mixed := []byte(canonical)
+					for i, ch := range mixed {
+						if i%2 == 0 && ch >= 'a' && ch <= 'z' {
+							mixed[i] = ch - 'a' + 'A'
+						}
+					}
+					leaf = string(mixed)
+				}
+				t.Run(canonical+"/"+casing, func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), "ParentCASE[1]", "AgentCASE")
+					if err := os.MkdirAll(dir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					path := filepath.Join(dir, leaf)
+					want := []byte("historical case alias bytes")
+					if err := os.WriteFile(path, want, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					before, err := os.Stat(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := identity.CheckFreshEnrollment(dir); err == nil {
+						t.Fatal("Windows case-aliased historical leaf considered fresh")
+					}
+					entries, err := os.ReadDir(dir)
+					if err != nil || len(entries) != 1 || entries[0].Name() != leaf {
+						t.Fatal("gate changed original directory entry")
+					}
+					got, err := os.ReadFile(path)
+					if err != nil || !bytes.Equal(got, want) {
+						t.Fatal("gate changed evidence bytes/readability")
+					}
+					after, err := os.Stat(path)
+					if err != nil || after.Mode() != before.Mode() {
+						t.Fatal("gate changed evidence mode")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestLinuxCaseSensitiveInitializationLeafSemantics(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux case-sensitive leaf semantics")
+	}
+	for _, name := range []string{identity.KeyFileName, identity.CertFileName, identity.CAFileName, identity.SealingFileName, identity.TrustGuardFileName, "state.db"} {
+		for _, temporary := range []bool{false, true} {
+			canonical := name
+			if temporary {
+				canonical = "." + name + ".tmp.crashed"
+			}
+			t.Run(canonical, func(t *testing.T) {
+				dir := filepath.Join(t.TempDir(), "ParentCASE[1]", "agent")
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(dir, strings.ToUpper(canonical))
+				want := []byte("distinct Linux uppercase leaf")
+				if err := os.WriteFile(path, want, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Lstat(filepath.Join(dir, canonical)); !os.IsNotExist(err) {
+					t.Skip("fixture requires a case-sensitive Linux directory")
+				}
+				if err := identity.CheckFreshEnrollment(dir); err != nil {
+					t.Fatalf("Windows leaf folding changed distinct Linux names: %v", err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(got, want) {
+					t.Fatal("gate changed distinct Linux leaf")
+				}
+			})
+		}
 	}
 }

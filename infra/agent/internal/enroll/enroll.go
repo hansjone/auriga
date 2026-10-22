@@ -6,14 +6,18 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/releasetrust"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -35,9 +39,10 @@ type Options struct {
 	RenewBefore time.Duration
 	// AllowInsecure permits grpc:// / http:// (tests / AURIGA_AGENT_ALLOW_INSECURE).
 	AllowInsecure bool
-	// Force overwrites an existing enrollment.
+	// Force is retained for CLI compatibility; it never replaces initialization evidence.
 	Force bool
 	// Store, if set, is reused instead of opening state.db (avoids bbolt lock with the running agent).
+	// This applies to Renew; Join requires a fresh directory and claims its own database.
 	Store *state.Store
 }
 
@@ -65,8 +70,8 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 	if err := tlsutil.ValidateJoinEndpoint(opts.Server, opts.AllowInsecure); err != nil {
 		return nil, err
 	}
-	if identity.Enrolled(opts.AgentDir) && !opts.Force {
-		return nil, fmt.Errorf("already enrolled in %s (pass --force to replace)", opts.AgentDir)
+	if err := identity.CheckFreshEnrollment(opts.AgentDir); err != nil {
+		return nil, err
 	}
 
 	key, err := identity.GenerateKeyPair()
@@ -122,24 +127,46 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 		return nil, fmt.Errorf("join certificate: %w", err)
 	}
 
-	expires := time.Time{}
-	if ts := resp.GetCertificateExpiresAt(); ts != nil {
-		expires = ts.AsTime()
-	}
+	certs, _ := identity.ParseCertPEM(resp.GetCertificateChain())
+	expires := certs[0].NotAfter
 	mat := &identity.Material{
 		NodeID:               resp.GetNodeId(),
 		ControlEndpoint:      resp.GetControlEndpoint(),
 		CertificateExpiresAt: expires,
+		CertificateNotBefore: certs[0].NotBefore,
 		PrivateKey:           key,
 		CertificatePEM:       resp.GetCertificateChain(),
 		CAPEM:                resp.GetCaBundle(),
 		SealingPrivate:       sealPriv,
 		SealingPublic:        sealPub,
 	}
-	if err := identity.Save(opts.AgentDir, mat); err != nil {
-		return nil, fmt.Errorf("save identity: %w", err)
+	// The actual transport selected by production Dial determines bootstrap trust.
+	// AllowInsecure only permits plaintext; it does not downgrade HTTPS.
+	_, _, plaintext, err := tlsutil.ParseEndpoint(opts.Server)
+	if err != nil {
+		return nil, err
 	}
-
+	var ring releasetrust.Ring
+	if !plaintext {
+		ring, err = releasetrust.Merge(releasetrust.Ring{}, resp.GetArtifactSigningKeys(), true, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("release trust bootstrap rejected (join token may already be consumed): %w", err)
+		}
+	}
+	binding, err := identity.TrustBinding(mat)
+	if err != nil {
+		return nil, err
+	}
+	guard := identity.TrustGuard{Version: 1, Binding: binding, Trusted: !plaintext, Certificate: identity.CertificateDigest(mat.CertificatePEM)}
+	if guard.Trusted {
+		guard.Roots, err = ring.RootDigest()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := identity.CreateTrustGuard(opts.AgentDir, guard); err != nil {
+		return nil, fmt.Errorf("claim enrollment initialization: %w", err)
+	}
 	st, err := state.Open(opts.AgentDir)
 	if err != nil {
 		return nil, fmt.Errorf("open state: %w", err)
@@ -151,8 +178,17 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 		ExpiresAt:       expires,
 		CAFingerprint:   opts.CAFingerprint,
 	}
-	if err := st.PutNodeMeta(meta); err != nil {
-		return nil, fmt.Errorf("save node meta: %w", err)
+	if err := st.BeginReleaseInitialization(meta, guard, ring); err != nil {
+		return nil, fmt.Errorf("save pending enrollment: %w", err)
+	}
+	if err := identity.Save(opts.AgentDir, mat); err != nil {
+		return nil, fmt.Errorf("save identity (initialization remains pending): %w", err)
+	}
+	if err := st.CompleteReleaseInitialization(); err != nil {
+		return nil, fmt.Errorf("activate enrollment: %w", err)
+	}
+	if plaintext {
+		opts.log().Warn("plaintext enrollment has no runtime release trust; ordinary join/renew cannot bootstrap roots")
 	}
 
 	opts.log().Info("joined platform",
@@ -161,6 +197,38 @@ func Join(ctx context.Context, opts Options) (*identity.Material, error) {
 		"cert_expires_at", expires.UTC().Format(time.RFC3339),
 	)
 	return mat, nil
+}
+
+// TrustUpdateError means the certificate has been validated and saved, while
+// runtime release trust remains unchanged. Callers must retain the returned material.
+type TrustUpdateError struct{ Err error }
+
+func (e *TrustUpdateError) Error() string {
+	return "certificate renewed; runtime release trust update failed: " + e.Err.Error()
+}
+func (e *TrustUpdateError) Unwrap() error { return e.Err }
+
+var certificateCommitLocks sync.Map
+
+func certificateCommitLock(dir string) *sync.Mutex {
+	lock, _ := certificateCommitLocks.LoadOrStore(identity.CanonicalDir(dir), &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+func persistRenewedCertificate(dir string, st *state.Store, mat *identity.Material, meta state.NodeMeta) error {
+	lock := certificateCommitLock(dir)
+	lock.Lock()
+	defer lock.Unlock()
+	// Save releases its file IO lock before PutNodeMeta acquires bbolt's lock.
+	// This outer enrollment lock is never acquired from inside a DB transaction.
+	if err := identity.Save(dir, mat); err != nil {
+		return err
+	}
+	meta.ExpiresAt = mat.CertificateExpiresAt
+	if err := st.PutNodeMeta(meta); err != nil {
+		return &TrustUpdateError{Err: fmt.Errorf("save renewed certificate metadata: %w", err)}
+	}
+	return nil
 }
 
 // NeedsRenew reports whether the cert should be renewed (force, < RenewBefore, or < 1/3 lifetime left).
@@ -198,6 +266,10 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 	st := opts.Store
 	owned := false
 	if st == nil {
+		// Never implicitly recreate a lost database for an existing identity.
+		if _, err := os.Stat(filepath.Join(opts.AgentDir, "state.db")); err != nil {
+			return nil, fmt.Errorf("existing enrollment state unavailable; protected local recovery required: %w", err)
+		}
 		var openErr error
 		st, openErr = state.Open(opts.AgentDir)
 		if openErr != nil {
@@ -274,26 +346,24 @@ func RenewCertificate(ctx context.Context, opts Options, force bool) (*identity.
 	}
 
 	mat.CertificatePEM = resp.GetCertificateChain()
-	if ts := resp.GetCertificateExpiresAt(); ts != nil {
-		mat.CertificateExpiresAt = ts.AsTime()
-	} else {
-		certs, _ := identity.ParseCertPEM(mat.CertificatePEM)
-		if len(certs) > 0 {
-			mat.CertificateExpiresAt = certs[0].NotAfter
-			mat.CertificateNotBefore = certs[0].NotBefore
+	certs, _ := identity.ParseCertPEM(mat.CertificatePEM)
+	mat.CertificateExpiresAt = certs[0].NotAfter
+	mat.CertificateNotBefore = certs[0].NotBefore
+	if err := persistRenewedCertificate(opts.AgentDir, st, mat, meta); err != nil {
+		var split *TrustUpdateError
+		if errors.As(err, &split) {
+			return mat, err
 		}
-	}
-	if err := identity.Save(opts.AgentDir, mat); err != nil {
 		return nil, err
 	}
-	meta.ExpiresAt = mat.CertificateExpiresAt
-	if err := st.PutNodeMeta(meta); err != nil {
-		return nil, err
-	}
+	trustErr := st.MergeReleaseKeys(resp.GetArtifactSigningKeys(), time.Now())
 	opts.log().Info("renewed certificate",
 		"node_id", mat.NodeID,
 		"cert_expires_at", mat.CertificateExpiresAt.UTC().Format(time.RFC3339),
 	)
+	if trustErr != nil {
+		return mat, &TrustUpdateError{Err: trustErr}
+	}
 	return mat, nil
 }
 
