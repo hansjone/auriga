@@ -42,6 +42,11 @@ auriga:
     ops:
       enabled: false
   iam:
+    edge-token-export:
+      enabled: ${AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED:false}
+      installation-secret-file: ${AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE:}
+      token-file: ${AURIGA_IAM_EDGE_TOKEN_FILE:}
+      reader-group: ${AURIGA_IAM_EDGE_TOKEN_READER_GROUP:65532}
     deployment-access-file: ${AURIGA_DEPLOYMENT_ACCESS_FILE}
     edge-hop:
       peer-addresses: ${AURIGA_IAM_EDGE_PEER_ADDRESSES:}

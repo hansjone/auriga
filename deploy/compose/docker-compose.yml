@@ -67,6 +67,16 @@ services:
       AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
       AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
+      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties
+      AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: 'true'
+      AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE: /run/auriga-installation/edge.secret
+      AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
+      AURIGA_GRPC_PORT: '9091'
+      AURIGA_GRPC_SERVER_HOST: 0.0.0.0
+      AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
+      AURIGA_GRPC_SERVER_TLS_PRIVATE_KEY: /etc/auriga/pki/iam.key
+      AURIGA_GRPC_SERVER_TLS_TRUST_CERT_COLLECTION: /etc/auriga/pki/ca.crt
+      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge
       # Exact TCP source: fixed edge control-network address + local health probe.
       SPRING_APPLICATION_JSON: '{"auriga":{"iam":{"edge-hop":{"peer-addresses":["172.29.240.10","127.0.0.1"],"allow-loopback-http":false}}}}' # gitleaks:allow disposable M2 network
       AURIGA_IAM_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
@@ -107,6 +117,8 @@ services:
       - ./var/pki:/etc/auriga/pki:ro
       - ./var/templates:/etc/auriga/templates:ro
       - ./var/enrollment:/var/auriga
+      - ./var/iam-installation:/run/auriga-installation:ro
+      - internal-tokens:/run/auriga-internal
     healthcheck:
       test: ['CMD-SHELL', 'sh /etc/auriga/iam-healthcheck.sh']
       interval: 5s
@@ -141,6 +153,8 @@ services:
       - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
       - ./var/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
+      # Mount the directory: atomic replacement must expose the new inode per RPC.
+      - internal-tokens:/run/auriga-internal:ro
       # pki rw: edge chmod's cert/key on startup (ro bind → EROFS)
       - ./var/pki:/etc/auriga/pki
       - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:ro
@@ -189,6 +203,7 @@ services:
 volumes:
   pgdata:
   natsdata:
+  internal-tokens:
 
 networks:
   default:

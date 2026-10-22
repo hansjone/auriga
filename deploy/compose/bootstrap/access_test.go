@@ -36,7 +36,11 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		AccessConfigFile string            `json:"accessConfigFile"`
 		Upstreams        map[string]string `json:"upstreams"`
 		IAMHop           map[string]string `json:"iamHop"`
-		NodeTLS          map[string]string `json:"nodeTLS"`
+		IAMRPC           struct {
+			Address, ServerName, ServiceTokenFile string
+			TimeoutMillis                         int
+		} `json:"iamRpc"`
+		NodeTLS map[string]string `json:"nodeTLS"`
 	}
 	if err := json.Unmarshal(read("edge.config.json"), &edge); err != nil {
 		t.Fatal(err)
@@ -67,6 +71,9 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	}
 	if edge.IAMHop["serverName"] != iamServerName || edge.IAMHop["certFile"] == edge.NodeTLS["certFile"] {
 		t.Fatal("IAM HTTP hop must have its own fixed DNS identity")
+	}
+	if edge.IAMRPC.Address != fmt.Sprintf("host.docker.internal:%d", iamRPCPort) || edge.IAMRPC.ServerName != iamServerName || edge.IAMRPC.ServiceTokenFile != "/run/auriga-internal/edge/service.jwt" || edge.IAMRPC.TimeoutMillis != 2000 {
+		t.Fatal("internal RPC must consume the fixed directory-mounted issuer export")
 	}
 	cert := func(name string) *x509.Certificate {
 		t.Helper()

@@ -110,11 +110,43 @@ docker compose --env-file var/compose.env up -d
 缺证书、同 CA 错 DNS 身份、错 CA、错服务 DNS 和出站证书角色均有真实 TLS 负向回归。
 观察器只是本机本轮测试工具，不是生产安装组件。
 
-## 仍需后续装配的边界
+## combined 安装侧持续发行
 
-本配置没有伪造服务 JWT。现有 `iamRpc` 要求正式 mTLS、`svc:edge` 服务 JWT 的签发与
-轮换；短期 JWT 写死到文件不能代替生命周期刷新。Introspect/服务 JWT 未完整装配的
-部分仍按失败关闭处理，不能因为 domain 合成客户端或健康检查通过宣称 IP 管理链完成。
+bootstrap 每次新安装生成独立随机的 32 字节凭据，写入 `var/iam-installation/edge.secret`，
+并把与 `Secrets.hash` 相同 SHA-256 格式的哈希写入 `internal.properties`；目录 0700、文件 0600，
+仅 platform 只读挂载。再次 bootstrap 保留原凭据，已有材料格式、哈希或权限异常就拒绝。
+秘密与 JWT 均不写入公共 JSON、`access.env` 或日志。
+私密 properties 同时固定生成者数值 UID 为 `installation-owner`，明确授权 root platform
+读取该安装者的只读秘密；秘密目录/文件 owner 必须匹配，祖先只允许 root、当前进程或
+这个显式可信安装者。未配置时默认为进程用户，不从每次读取的现场路径自推断信任。
+
+Compose 显式启用 `auriga.iam.edge-token-export`，只允许 combined/POSIX。
+发行器固定调用 `InternalTokenIssuer.issue("edge", installationSecret)`，仍由 IAM 的权威
+ES256 钥和既有五分钟协议签发。首次立即异步尝试、以后每分钟重新读取凭据并认证；签发或写入
+失败只记无秘密的失败信息，旧 JWT 的到期时间保持不变。正常停机停止调度并移除导出文件；
+异常退出留下的旧文件也会自然到期，重启重新发行，不需要重启 edge。
+停机不等待不响应中断的发行器调用，代际保护会丢弃旧任务迟到结果；旧 daemon 线程在底层
+调用退出后终止，不能声称 Java 可强杀任意底层阻塞。另有受控阻塞/stop→start 竞争测试。
+
+输出到独立 named volume 的 `/run/auriga-internal/edge/service.jwt`。发行器仅为自己新建的
+目录与临时文件设置 GID 65532、0750/0640，检查目录、祖先链接、普通文件、硬链接数、
+所属组、权限与大小，再在同目录安全原子替换。已有不合规材料不自动修复，非 root 安装者
+必须预先拥有所需组与写入权限。edge 按整个目录只读挂载，能看到新的 inode；不能换成
+单文件 bind mount，否则热替换对消费者不可见。Windows 启用明确拒绝，不修改系统 ACL。
+
+内部 RPC 固定为 `host.docker.internal:9091`、TLS serverName `platform`，复用专用 edge IAM
+证书和 CA；combined gRPC 开启 mTLS 且仅授权 `svc:edge` 委托租户。首次 JWT 缺失时 edge
+初始化失败关闭，platform 容器健康检查等待首次导出后才允许 edge 启动。每 RPC 仍读文件、
+在线校验真实会话与 CSRF，无静态令牌/节点身份回退，也不缓存授权结果。
+
+`AdminCsrfPostgresTest.installationIssuerFileRefreshFeedsExistingGoEdgeMutualTlsRpc` 在 Linux
+通过 IAM 测试资源提供的 Go overlay 调用未修改的生产 edge 客户端，连接真实 IAM gRPC、
+common 验证器和 PostgreSQL 会话；受控时钟跨初始五分钟、失败到期、恢复和停机/重启，
+同一 edge 客户端持续重读文件。缺 Go/缺依赖会明确失败；Windows 分支只断言不支持的
+启用被拒，不能算作 Linux 成功链证据。首次文件、原子 inode、权限/链接负例另有单元验证。
+
+当前范围只补同机 combined 的发行与消费。split 跨主机分发、Introspect 的其他未接线部分，
+以及完整 IP2/IP3 浏览器与实例链仍需独立完成，domain 合成客户端或健康检查不证明它们。
 最终结果必须由包含冻结 JC1、IP1b、IP1c 前置的精确 CI 或审核后的全新独立栈提供。
 
 ## 针对性回归
