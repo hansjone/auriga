@@ -8,5 +8,7 @@ public interface Sessions {
 
   TouchSessionResponse touch(TouchSessionRequest request);
 
+  VerifyAdminSessionCsrfResponse verifyAdminCsrf(VerifyAdminSessionCsrfRequest request);
+
   RevokeSessionsResponse revoke(RevokeSessionsRequest request);
 }

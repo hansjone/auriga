@@ -251,7 +251,9 @@ class IamFlowTest {
                 Json.object("providerId", enrollment.providerId(), "returnTo", "/"),
                 audience,
                 "127.0.0.1",
-                "test"));
+                "test",
+                "https://portal.example.com",
+                null));
   }
 
   private String external(boolean verified, String mfaPolicy) {
@@ -318,11 +320,25 @@ class IamFlowTest {
     var first =
         TenantContext.call(
             tenant,
-            () -> login.begin(Json.object("providerId", provider), "portal", "192.0.2.10", "test"));
+            () ->
+                login.begin(
+                    Json.object("providerId", provider),
+                    "portal",
+                    "192.0.2.10",
+                    "test",
+                    "https://portal.example.com",
+                    null));
     var second =
         TenantContext.call(
             tenant,
-            () -> login.begin(Json.object("providerId", provider), "portal", "192.0.2.10", "test"));
+            () ->
+                login.begin(
+                    Json.object("providerId", provider),
+                    "portal",
+                    "192.0.2.10",
+                    "test",
+                    "https://portal.example.com",
+                    null));
     assertNotNull(first.session());
     assertEquals(
         first.session().session().path("accountId"), second.session().session().path("accountId"));
@@ -341,7 +357,14 @@ class IamFlowTest {
     var result =
         TenantContext.call(
             tenant,
-            () -> login.begin(Json.object("providerId", provider), "portal", "192.0.2.10", "test"));
+            () ->
+                login.begin(
+                    Json.object("providerId", provider),
+                    "portal",
+                    "192.0.2.10",
+                    "test",
+                    "https://portal.example.com",
+                    null));
     assertEquals("failed", result.transaction().path("status").asString());
     assertNull(result.session());
     assertTrue(eventTypes.contains("identity.login_failed"));
@@ -354,7 +377,14 @@ class IamFlowTest {
     var result =
         TenantContext.call(
             tenant,
-            () -> login.begin(Json.object("providerId", provider), "portal", "192.0.2.10", "test"));
+            () ->
+                login.begin(
+                    Json.object("providerId", provider),
+                    "portal",
+                    "192.0.2.10",
+                    "test",
+                    "https://portal.example.com",
+                    null));
     assertEquals("platform_totp", result.transaction().path("step").path("formId").asString());
     TenantContext.run(
         tenant,
@@ -532,7 +562,9 @@ class IamFlowTest {
                     Json.object("providerId", enrollment.providerId()),
                     "admin",
                     "192.0.2.10",
-                    "test"));
+                    "test",
+                    "https://portal.example.com",
+                    null));
     TenantContext.run(
         tenant,
         () ->
@@ -798,5 +830,78 @@ class IamFlowTest {
         RuntimeException.class,
         () ->
             RemoteConnector.verifyResponse(List.of(key), clock, nonce, 200, time, signature, body));
+  }
+
+  @Test
+  void audienceTransactionsAreIndependentAndReplacementCancelsOnlyItsOwnEntry() {
+    var portal = begin("portal");
+    var admin =
+        TenantContext.call(
+            tenant,
+            () ->
+                login.begin(
+                    Json.object("providerId", enrollment.providerId()),
+                    "admin",
+                    "127.0.0.1",
+                    "test",
+                    "https://admin.example.com",
+                    null));
+    TenantContext.run(
+        tenant,
+        () -> {
+          login.checkEntry(
+              portal.transaction().path("id").asString(),
+              portal.bindingCookie(),
+              "portal",
+              "https://portal.example.com");
+          login.checkEntry(
+              admin.transaction().path("id").asString(),
+              admin.bindingCookie(),
+              "admin",
+              "https://admin.example.com");
+          assertEquals(
+              "common.not_found",
+              assertThrows(
+                      auriga.common.error.AurigaException.class,
+                      () ->
+                          login.checkEntry(
+                              portal.transaction().path("id").asString(),
+                              portal.bindingCookie(),
+                              "admin",
+                              "https://admin.example.com"))
+                  .errorCode()
+                  .code());
+          var replacement =
+              login.begin(
+                  Json.object("providerId", enrollment.providerId()),
+                  "portal",
+                  "127.0.0.1",
+                  "test",
+                  "https://portal.example.com",
+                  portal.bindingCookie());
+          assertEquals(
+              "cancelled",
+              login
+                  .get(portal.transaction().path("id").asString(), portal.bindingCookie())
+                  .transaction()
+                  .path("status")
+                  .asString());
+          assertEquals(
+              "pending",
+              login
+                  .get(admin.transaction().path("id").asString(), admin.bindingCookie())
+                  .transaction()
+                  .path("status")
+                  .asString());
+          login.cancel(
+              replacement.transaction().path("id").asString(), replacement.bindingCookie());
+          assertEquals(
+              "pending",
+              login
+                  .get(admin.transaction().path("id").asString(), admin.bindingCookie())
+                  .transaction()
+                  .path("status")
+                  .asString());
+        });
   }
 }

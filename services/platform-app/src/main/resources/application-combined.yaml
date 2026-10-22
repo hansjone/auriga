@@ -42,21 +42,16 @@ auriga:
     ops:
       enabled: false
   iam:
+    deployment-access-file: ${AURIGA_DEPLOYMENT_ACCESS_FILE}
+    edge-hop:
+      peer-addresses: ${AURIGA_IAM_EDGE_PEER_ADDRESSES:}
+      dns-san: ${AURIGA_IAM_EDGE_DNS_SAN:}
+      allow-loopback-http: false
     issuer: ${AURIGA_IAM_ISSUER:https://portal.example.com}
     encryption-key: ${AURIGA_IAM_ENCRYPTION_KEY}
     jwks-propagation-seconds: 30
     oidc:
       allow-local-http: false
-    hosts:
-      "[portal.example.com]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: portal
-        secure: true
-      "[admin.example.com]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: admin
-        secure: true
-    trusted-proxies: [127.0.0.1, "::1"]
     session-kv-nats: true
   events:
     # platform reads auriga.events.nats-url: set AURIGA_EVENTS_NATS_URL (same value as edge's AURIGA_NATS_URL).
@@ -95,6 +90,13 @@ spring:
   main:
     allow-bean-definition-overriding: true
 server:
+  forward-headers-strategy: none
+  ssl:
+    enabled: true
+    certificate: ${AURIGA_IAM_TLS_CERT_FILE:}
+    certificate-private-key: ${AURIGA_IAM_TLS_KEY_FILE:}
+    trust-certificate: ${AURIGA_IAM_EDGE_CA_FILE:}
+    client-auth: need
   address: ${AURIGA_PLATFORM_ADDRESS:127.0.0.1}
   port: ${AURIGA_PLATFORM_PORT:8081}
 management:

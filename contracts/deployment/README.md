@@ -74,6 +74,32 @@ tenant UUID 统一小写，Origin 默认端口省略，其余有效端口保留�
 本地加载不证明 IAM 实际租户存在、代理证书身份/TCP 对端匹配、edge 容器身份及网络归属/成员，
 这些安装装配与运行时核验仍须由后续消费者完成；尚未接 HTTP listener、会话或 CSRF，不能据此宣称纯 IP 浏览器可用。
 
+### Java 生成与生产加载入口（JC1）
+
+普通 Maven 构建自动从同一 `access.schema.json` 经既有投影、固定 OpenAPI Generator 7.26.0
+生成 `auriga.contracts.deploymentconfig.model` 类型，输出只在 `services/contracts/target/generated-sources`。
+Java 投影步骤不清理或改写 Go 文件；显式 `go-openapi-models` 的重生流程保持原样。
+完整原 schema 按原字节单份打包为 JAR 资源 `auriga/contracts/deployment/access.schema.json`，
+既有 `auriga/contracts/catalog/m3.json` 保留。投影、生成类型及模型解码均不代替原 schema 验证。
+
+生产入口 `auriga.contracts.deploymentconfig.DeploymentAccess.load(byte[])` 返回只有成功加载才能创建的已验配置：
+先拒绝超过 1 MiB、超过 64 层、无效 UTF-8、重复键（含转义同名）和尾随内容，再以
+networknt 3.0.8 完整 Draft 2020-12 原 schema、显式 format 断言及精确十进制数值验证，
+禁止任何外部文件/网络 `$ref`；最后才规范合法整数表示、解码生成模型并执行与 Go 同等的启动语义。
+ICU4J 78.3 的 Unicode 17 UTS46 非转换处理启用 STD3、Bidi 与 ContextJ 检查，
+仅接受已经规范化的 ASCII A-label，不把宽容修复的结果当配置；保留合法嵌套父子域及有向实例命名空间规则。
+
+`tenantId()`、`mode()`、`portalUrl()`、`adminUrl()`、`issuer()`、`ingressKind()`、
+`instanceParentDomain()` 返回字符串；`portalOrigin()`/`adminOrigin()`、`listeners()`、
+`instanceControl()` 返回相应生成类型的深副本；`proxyPeerCidrs()` 返回不可变字符串列表。
+消费者不能通过修改返回模型或列表破坏已验配置。失败抛 `ValidationException`，
+`code()` 固定为 `common.validation_failed`、`field()` 为 JSON Pointer，错误文本不回显配置值。
+加载器不依赖 common，也不接受客户端指定 tenant、audience 或另一份 schema。
+
+`mvnw.cmd -B -pl services/contracts -am verify` 包含原四份正例、32 项结构负例、
+12 项先通过完整结构校验的启动语义负例，以及精确数值、格式、IDNA、外部引用和副本隔离回归。
+与 Go 相同，加载成功不证明租户存在、代理身份或 Docker 网络归属；这些仍由后续装配与运行时核验完成。
+
 ## authority、Origin 与代理信任
 
 处理顺序固定：本地 listener 角色 → 受信传输/TCP 对端 → 单一实际 authority → 安装映射 tenant/audience → 会话/Origin/权限。

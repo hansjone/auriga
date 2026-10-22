@@ -240,7 +240,9 @@ class TeamAccountFlowTest {
                       "providerId", providerId, "returnTo", "/", "invitationCode", "invite-ok"),
                   "portal",
                   "192.0.2.10",
-                  "test");
+                  "test",
+                  "https://portal.example.com",
+                  null);
           assertEquals("register", begin.transaction().path("step").path("formId").asString());
           var advanced =
               login.advance(
@@ -273,7 +275,9 @@ class TeamAccountFlowTest {
                               Json.object("providerId", providerId, "invitationCode", "invite-bad"),
                               "portal",
                               "192.0.2.10",
-                              "test"))
+                              "test",
+                              "https://portal.example.com",
+                              null))
                   .errorCode()
                   .code());
 
@@ -282,7 +286,9 @@ class TeamAccountFlowTest {
                   Json.object("providerId", providerId, "returnTo", "/"),
                   "portal",
                   "192.0.2.10",
-                  "test");
+                  "test",
+                  "https://portal.example.com",
+                  null);
           assertEquals("password", noInvite.transaction().path("step").path("formId").asString());
           var fail =
               login.advance(
@@ -313,7 +319,9 @@ class TeamAccountFlowTest {
                       "providerId", providerId, "returnTo", "/", "invitationCode", "invite-ok"),
                   "portal",
                   "192.0.2.10",
-                  "test");
+                  "test",
+                  "https://portal.example.com",
+                  null);
           // already registered username path: use password login after first invite register
           login.advance(
               begin.transaction().path("id").asString(),
@@ -347,7 +355,9 @@ class TeamAccountFlowTest {
                   Json.object("providerId", providerId, "returnTo", "/"),
                   "portal",
                   "192.0.2.10",
-                  "test");
+                  "test",
+                  "https://portal.example.com",
+                  null);
           assertEquals("password", loginBegin.transaction().path("step").path("formId").asString());
           var afterPassword =
               login.advance(
@@ -454,7 +464,9 @@ class TeamAccountFlowTest {
             Json.object("providerId", providerId, "invitationCode", "invite-ok"),
             "portal",
             "192.0.2.10",
-            "test");
+            "test",
+            "https://portal.example.com",
+            null);
     var done =
         login.advance(
             begin.transaction().path("id").asString(),
@@ -482,7 +494,9 @@ class TeamAccountFlowTest {
                   Json.object("providerId", providerId, "invitationCode", "invite-ok"),
                   "portal",
                   "192.0.2.10",
-                  "test");
+                  "test",
+                  "https://portal.example.com",
+                  null);
           var registered =
               login.advance(
                   begin.transaction().path("id").asString(),
@@ -505,7 +519,13 @@ class TeamAccountFlowTest {
           UUID account = team.accountIdFor(providerId, "alice");
           assertNotNull(account);
           var password =
-              login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+              login.begin(
+                  Json.object("providerId", providerId),
+                  "portal",
+                  "192.0.2.10",
+                  "test",
+                  "https://portal.example.com",
+                  null);
           var done =
               login.advance(
                   password.transaction().path("id").asString(),
@@ -533,7 +553,13 @@ class TeamAccountFlowTest {
           ((ObjectNode) p.path("admission")).put("mfa", "always");
           store.save("idp_provider", p);
           var begin =
-              login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+              login.begin(
+                  Json.object("providerId", providerId),
+                  "portal",
+                  "192.0.2.10",
+                  "test",
+                  "https://portal.example.com",
+                  null);
           var denied =
               login.advance(
                   begin.transaction().path("id").asString(),
@@ -563,7 +589,13 @@ class TeamAccountFlowTest {
               Json.object("accountId", account.toString(), "credentialId", "AQ"),
               null);
           var begin =
-              login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+              login.begin(
+                  Json.object("providerId", providerId),
+                  "portal",
+                  "192.0.2.10",
+                  "test",
+                  "https://portal.example.com",
+                  null);
           var assertion =
               login.advance(
                   begin.transaction().path("id").asString(),
@@ -604,7 +636,13 @@ class TeamAccountFlowTest {
         () -> {
           for (String name : List.of("Alice", " aLiCe ")) {
             var begin =
-                login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+                login.begin(
+                    Json.object("providerId", providerId),
+                    "portal",
+                    "192.0.2.10",
+                    "test",
+                    "https://portal.example.com",
+                    null);
             login.advance(
                 begin.transaction().path("id").asString(),
                 begin.bindingCookie(),
@@ -635,7 +673,13 @@ class TeamAccountFlowTest {
           store.save("idp_provider", p);
           for (int i = 0; i < 2; i++) {
             var begin =
-                login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+                login.begin(
+                    Json.object("providerId", providerId),
+                    "portal",
+                    "192.0.2.10",
+                    "test",
+                    "https://portal.example.com",
+                    null);
             login.advance(
                 begin.transaction().path("id").asString(),
                 begin.bindingCookie(),
@@ -805,7 +849,9 @@ class TeamAccountFlowTest {
                   Json.object("providerId", providerId, "invitationCode", "invite-ok"),
                   "portal",
                   "192.0.2.10",
-                  "test");
+                  "test",
+                  "https://portal.example.com",
+                  null);
           var invalid =
               login.advance(
                   begin.transaction().path("id").asString(),
@@ -863,7 +909,13 @@ class TeamAccountFlowTest {
               .limit(anyString(), any(), anyInt());
           for (int n = 0; n < 10; n++) {
             var begin =
-                login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+                login.begin(
+                    Json.object("providerId", providerId),
+                    "portal",
+                    "192.0.2.10",
+                    "test",
+                    "https://portal.example.com",
+                    null);
             login.advance(
                 begin.transaction().path("id").asString(),
                 begin.bindingCookie(),
@@ -877,7 +929,13 @@ class TeamAccountFlowTest {
                 false);
           }
           var begin =
-              login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+              login.begin(
+                  Json.object("providerId", providerId),
+                  "portal",
+                  "192.0.2.10",
+                  "test",
+                  "https://portal.example.com",
+                  null);
           assertEquals(
               "common.rate_limited",
               assertThrows(
@@ -905,7 +963,13 @@ class TeamAccountFlowTest {
         tenant,
         () -> {
           var begin =
-              login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+              login.begin(
+                  Json.object("providerId", providerId),
+                  "portal",
+                  "192.0.2.10",
+                  "test",
+                  "https://portal.example.com",
+                  null);
           String id = begin.transaction().path("id").asString();
           var challenge =
               qr.create(
@@ -1162,7 +1226,14 @@ class TeamAccountFlowTest {
     var provider = store.get("idp_provider", providerId, true);
     ((ObjectNode) provider.path("admission")).put("mfa", "always");
     store.save("idp_provider", provider);
-    var begin = login.begin(Json.object("providerId", providerId), "portal", "192.0.2.10", "test");
+    var begin =
+        login.begin(
+            Json.object("providerId", providerId),
+            "portal",
+            "192.0.2.10",
+            "test",
+            "https://portal.example.com",
+            null);
     var result =
         login.advance(
             begin.transaction().path("id").asString(),
@@ -1195,7 +1266,9 @@ class TeamAccountFlowTest {
             Json.object("providerId", providerId, "invitationCode", "invite-ok"),
             "portal",
             "192.0.2.10",
-            "test");
+            "test",
+            "https://portal.example.com",
+            null);
     var pending =
         login.advance(
             begin.transaction().path("id").asString(),
@@ -1269,7 +1342,9 @@ class TeamAccountFlowTest {
                   Json.object("providerId", providerId, "invitationCode", "invite-ok"),
                   "portal",
                   "192.0.2.10",
-                  "test");
+                  "test",
+                  "https://portal.example.com",
+                  null);
           var pending =
               login.advance(
                   begin.transaction().path("id").asString(),

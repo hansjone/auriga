@@ -65,9 +65,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const output = path.join(root, 'infra/gen/deployment');
   // Only this dedicated generated directory is cleaned. Handwritten loader code
   // lives in deploymentconfig and cannot be removed by model regeneration.
-  rmSync(output, { recursive: true, force: true });
-  mkdirSync(output, { recursive: true });
-  writeFileSync(path.join(output, 'schema_generated.go'), embeddedSchema(source));
+  if (!process.argv.includes('--java-only')) {
+    rmSync(output, { recursive: true, force: true });
+    mkdirSync(output, { recursive: true });
+    writeFileSync(path.join(output, 'schema_generated.go'), embeddedSchema(source));
+  }
   const bundled = path.join(root, 'services/contracts/target/bundled');
   mkdirSync(bundled, { recursive: true });
   writeFileSync(path.join(bundled, 'access.json'), JSON.stringify(spec, null, 2) + '\n');

@@ -3,7 +3,8 @@ package auriga.iam;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * PostgreSQL adapter now; a future NATS KV adapter must share the surrounding outbox transaction.
+ * The primary projection shares the session transaction; external projection runs only after
+ * commit.
  */
 public interface SessionKv {
   ObjectNode get(String cookieHash);

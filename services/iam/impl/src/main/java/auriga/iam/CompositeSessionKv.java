@@ -5,8 +5,9 @@ import org.slf4j.LoggerFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Primary (PostgreSQL) is authoritative. Secondary (NATS) put is best-effort for edge cache; delete
- * retries then fails the revoke so edge cannot keep a live session after PG revocation.
+ * PostgreSQL is authoritative. NATS is projected only after commit. Each projection takes a
+ * cross-process advisory lock and re-reads the latest committed value, so delayed callbacks cannot
+ * restore a pre-revocation snapshot. IP management authorization never relies on NATS.
  */
 public final class CompositeSessionKv implements SessionKv {
   private static final Logger log = LoggerFactory.getLogger(CompositeSessionKv.class);
@@ -14,8 +15,10 @@ public final class CompositeSessionKv implements SessionKv {
 
   private final SessionKv primary;
   private final SessionKv secondary;
+  private final IamStore store;
 
-  public CompositeSessionKv(SessionKv primary, SessionKv secondary) {
+  public CompositeSessionKv(IamStore store, SessionKv primary, SessionKv secondary) {
+    this.store = store;
     this.primary = primary;
     this.secondary = secondary;
   }
@@ -28,18 +31,37 @@ public final class CompositeSessionKv implements SessionKv {
   @Override
   public void put(String hash, ObjectNode value) {
     primary.put(hash, value);
-    try {
-      secondary.put(hash, value);
-    } catch (RuntimeException e) {
-      log.warn(
-          "session KV secondary put failed (edge may miss cache until introspect): {}",
-          e.toString());
-    }
+    project(hash);
   }
 
   @Override
   public void delete(String hash) {
     primary.delete(hash);
+    project(hash);
+  }
+
+  private void project(String hash) {
+    var tenant = auriga.common.context.TenantContext.require();
+    store.afterCommit(
+        () -> {
+          try {
+            store.isolated(
+                tenant,
+                () -> {
+                  store.lock("session-projection:" + hash);
+                  ObjectNode latest = primary.get(hash);
+                  if (latest == null) deleteSecondary(hash);
+                  else secondary.put(hash, latest);
+                  return null;
+                });
+          } catch (RuntimeException e) {
+            // The session transaction has committed; never misreport it as rolled back.
+            log.warn("session KV secondary projection failed: {}", e.getClass().getSimpleName());
+          }
+        });
+  }
+
+  private void deleteSecondary(String hash) {
     RuntimeException last = null;
     for (int i = 1; i <= DELETE_ATTEMPTS; i++) {
       try {

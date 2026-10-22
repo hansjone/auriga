@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { accessProjection, embeddedSchema } from './gen-access.mjs';
 
 const source = readFileSync(new URL('../../../contracts/deployment/access.schema.json', import.meta.url), 'utf8');
@@ -38,4 +41,18 @@ test('embedded schema is reproducible, complete, and preserves backticks safely'
   assert(embeddedSchema(source).includes(source.replaceAll('\r\n', '\n')));
   assert.equal(embeddedSchema(source), embeddedSchema(source.replaceAll('\r\n', '\n')));
   assert(embeddedSchema('{"description":"`"}').includes('` + "`" + `'));
+});
+
+test('ordinary Java projection is deterministic and leaves generated Go intact', () => {
+  const go = new URL('../../../infra/gen/deployment/', import.meta.url);
+  const snapshot = () => readdirSync(go).sort().map(name => [name,
+    createHash('sha256').update(readFileSync(new URL(name, go))).digest('hex')]);
+  const before = snapshot();
+  const run = () => {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./gen-access.mjs', import.meta.url)), '--java-only']);
+    assert.equal(result.status, 0, result.stderr.toString());
+    return readFileSync(new URL('../target/bundled/access.json', import.meta.url), 'utf8');
+  };
+  assert.equal(run(), run());
+  assert.deepEqual(snapshot(), before);
 });

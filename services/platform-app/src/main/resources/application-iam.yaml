@@ -1,6 +1,11 @@
 # Standalone IAM assembly in platform-app. Other modules are still empty assembly points.
 auriga:
   iam:
+    deployment-access-file: ${AURIGA_DEPLOYMENT_ACCESS_FILE}
+    edge-hop:
+      peer-addresses: ${AURIGA_IAM_EDGE_PEER_ADDRESSES:}
+      dns-san: ${AURIGA_IAM_EDGE_DNS_SAN:}
+      allow-loopback-http: false
     issuer: ${AURIGA_IAM_ISSUER}
     encryption-key: ${AURIGA_IAM_ENCRYPTION_KEY}
   service:
@@ -14,3 +19,11 @@ spring:
   flyway:
     schemas: iam
     locations: classpath:db/iam
+server:
+  forward-headers-strategy: none
+  ssl:
+    enabled: true
+    certificate: ${AURIGA_IAM_TLS_CERT_FILE}
+    certificate-private-key: ${AURIGA_IAM_TLS_KEY_FILE}
+    trust-certificate: ${AURIGA_IAM_EDGE_CA_FILE}
+    client-auth: need
