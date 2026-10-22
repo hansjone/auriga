@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -158,5 +159,39 @@ func TestInitializationEvidenceAndUnreadableGuard(t *testing.T) {
 	}
 	if err := identity.CheckFreshEnrollment(filepath.Join(path, "agent")); err == nil {
 		t.Fatal("filesystem inspection error mistaken for fresh enrollment")
+	}
+}
+func TestLiteralParentDirectoryRejectsEveryInitializationLeaf(t *testing.T) {
+	parents := []string{"legacy[1]"}
+	if runtime.GOOS != "windows" {
+		parents = append(parents, "legacy*?[1]")
+	}
+	for _, parent := range parents {
+		for _, name := range []string{identity.KeyFileName, identity.CertFileName, identity.CAFileName, identity.SealingFileName, identity.TrustGuardFileName, "state.db"} {
+			for _, temp := range []bool{false, true} {
+				t.Run(parent+"/"+name+map[bool]string{false: "/formal", true: "/temporary"}[temp], func(t *testing.T) {
+					dir := filepath.Join(t.TempDir(), parent, "agent")
+					if err := os.MkdirAll(dir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					leaf := name
+					if temp {
+						leaf = "." + name + ".tmp.crashed"
+					}
+					path := filepath.Join(dir, leaf)
+					want := []byte("historical initialization bytes")
+					if err := os.WriteFile(path, want, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					if err := identity.CheckFreshEnrollment(dir); err == nil {
+						t.Fatal("literal parent hid initialization evidence")
+					}
+					got, err := os.ReadFile(path)
+					if err != nil || !bytes.Equal(got, want) {
+						t.Fatal("freshness probe changed evidence")
+					}
+				})
+			}
+		}
 	}
 }

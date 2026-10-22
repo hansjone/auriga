@@ -9,6 +9,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -342,5 +344,120 @@ func TestTwoAuthenticatedRenewConnectionsMerge(t *testing.T) {
 	}
 	if !disk.CertificateExpiresAt.Equal(meta.ExpiresAt) || disk.NodeID != meta.NodeID {
 		t.Fatalf("final certificate/metadata mismatch: %s vs %s", disk.CertificateExpiresAt, meta.ExpiresAt)
+	}
+}
+func TestTLSJoinRejectsTemporaryHistoryInLiteralParentBeforeRPC(t *testing.T) {
+	parents := []string{"legacy[1]"}
+	if runtime.GOOS != "windows" {
+		parents = append(parents, "legacy*?[1]")
+	}
+	for _, parent := range parents {
+		for _, force := range []bool{false, true} {
+			t.Run(parent+map[bool]string{false: "/normal", true: "/force"}[force], func(t *testing.T) {
+				root, _ := runtimeRoot(t)
+				fw, opts := startTLS(t, []*nodev1.ArtifactSigningKey{root})
+				opts.AgentDir = filepath.Join(t.TempDir(), parent, "agent")
+				opts.Force = force
+				if err := os.MkdirAll(opts.AgentDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(opts.AgentDir, ".node.key.tmp.crashed")
+				want := []byte("historical partial identity")
+				if err := os.WriteFile(path, want, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				before, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mat, err := enroll.Join(enrollmentContext(t), opts); err == nil || mat != nil {
+					t.Fatal("real CA-pin TLS Join accepted temporary historical identity")
+				}
+				entries, err := os.ReadDir(opts.AgentDir)
+				if err != nil || len(entries) != 1 || entries[0].Name() != ".node.key.tmp.crashed" {
+					t.Fatal("rejected join wrote identity/guard/state")
+				}
+				after, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(got, want) || after.Mode() != before.Mode() {
+					t.Fatal("rejected join changed old evidence")
+				}
+				// The real service consumes one-time tokens only on Join. Success in a
+				// separate empty directory proves the rejected call never reached its RPC.
+				fresh := opts
+				fresh.AgentDir = filepath.Join(t.TempDir(), "fresh")
+				fresh.Token = fw.Token()
+				if _, err := enroll.Join(enrollmentContext(t), fresh); err != nil {
+					t.Fatalf("local rejection consumed token before RPC: %v", err)
+				}
+			})
+		}
+	}
+}
+func TestTLSJoinSymlinkTargetsStayConsistent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows tests do not request privilege to create symlinks")
+	}
+	for _, ambiguous := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal alias succeeds", true: "symlink parent rejected before RPC"}[ambiguous], func(t *testing.T) {
+			root, _ := runtimeRoot(t)
+			fw, opts := startTLS(t, []*nodev1.ArtifactSigningKey{root})
+			base := t.TempDir()
+			target := filepath.Join(base, "actual", "inside")
+			if err := os.MkdirAll(target, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(base, "alias[1]")
+			if err := os.Symlink(target, alias); err != nil {
+				t.Fatal(err)
+			}
+			opts.AgentDir = alias + "/new?/deep*/agent"
+			if ambiguous {
+				opts.AgentDir = alias + "/../new?/deep*/agent"
+			}
+			mat, err := enroll.Join(enrollmentContext(t), opts)
+			if ambiguous {
+				if err == nil || mat != nil || !strings.Contains(err.Error(), "ambiguous symlink/parent traversal") {
+					t.Fatalf("ambiguous initialization did not fail before writes: %v", err)
+				}
+				for _, path := range []string{filepath.Join(base, "actual", "new?"), filepath.Join(base, "new?")} {
+					if _, err := os.Lstat(path); !os.IsNotExist(err) {
+						t.Fatalf("rejected path created directory %s: %v", path, err)
+					}
+				}
+				fresh := opts
+				fresh.AgentDir = filepath.Join(t.TempDir(), "fresh")
+				fresh.Token = fw.Token()
+				if _, err := enroll.Join(enrollmentContext(t), fresh); err != nil {
+					t.Fatalf("ambiguous path consumed token before RPC: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			physical := filepath.Join(target, "new?", "deep*", "agent")
+			for _, name := range []string{identity.KeyFileName, identity.CertFileName, identity.CAFileName, identity.SealingFileName, identity.TrustGuardFileName, "state.db"} {
+				if _, err := os.Stat(filepath.Join(physical, name)); err != nil {
+					t.Fatalf("alias file escaped physical identity directory: %s: %v", name, err)
+				}
+			}
+			st, err := state.Open(opts.AgentDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = st.Close() }()
+			ring, err := st.GetReleaseTrust()
+			if err != nil || len(ring.Records) != 1 {
+				t.Fatalf("Join guard/DB/identity paths diverged: %v", err)
+			}
+			meta, err := st.GetNodeMeta()
+			if err != nil || meta.NodeID != mat.NodeID {
+				t.Fatal("alias meta identity mismatch")
+			}
+		})
 	}
 }

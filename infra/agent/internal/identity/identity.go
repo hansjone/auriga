@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,51 +77,112 @@ func CertificateDigest(cert []byte) string {
 // CheckFreshEnrollment must run before creating a database or replacing identity.
 // Force deliberately cannot override these historical initialization traces.
 func CheckFreshEnrollment(dir string) error {
-	// Windows can report a child of a regular file as "not found". Inspect
-	// existing ancestors as well, so an IO/path error is never evidence of a
-	// fresh enrollment.
-	path, err := filepath.Abs(dir)
+	return checkFreshEnrollment(dir, os.ReadDir)
+}
+
+// readDir is a private IO boundary: the parent path is always literal, never a
+// glob expression, and read failures must not be confused with empty history.
+func checkFreshEnrollment(dir string, readDir func(string) ([]os.DirEntry, error)) error {
+	literal, err := initializationDirectoryTarget(dir)
 	if err != nil {
 		return err
 	}
-	for current := path; ; current = filepath.Dir(current) {
-		info, err := os.Lstat(current)
-		if err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
-				info, err = os.Stat(current)
-				if err != nil {
-					return err
-				}
-			}
-			if !info.IsDir() {
-				return fmt.Errorf("enrollment ancestor is not a directory")
-			}
-			break
-		}
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect enrollment directory: %w", err)
-		}
-		if filepath.Dir(current) == current {
-			break
-		}
-	}
-	for _, name := range []string{KeyFileName, CertFileName, CAFileName, SealingFileName, TrustGuardFileName, "state.db"} {
-		_, err := os.Lstat(filepath.Join(dir, name))
-		if err == nil {
-			return fmt.Errorf("already enrolled or initialization evidence exists (%s); use certificate renewal; --force cannot replace trust", name)
-		}
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect enrollment evidence: %w", err)
-		}
-		matches, err := filepath.Glob(filepath.Join(dir, "."+name+".tmp.*"))
+	if cleaned := filepath.Clean(dir); cleaned != dir {
+		normalized, err := initializationDirectoryTarget(cleaned)
 		if err != nil {
 			return err
 		}
-		if len(matches) != 0 {
-			return fmt.Errorf("incomplete identity initialization; protected local recovery required")
+		same := literal == normalized
+		if runtime.GOOS == "windows" {
+			same = strings.EqualFold(literal, normalized)
+		}
+		if !same {
+			return fmt.Errorf("enrollment directory has ambiguous symlink/parent traversal; use resolved absolute directory %q", literal)
+		}
+	}
+	// Inspect the same resolved target that Join's filepath.Join-based writers
+	// will use, including a missing component followed by '..'. It is still a
+	// literal ReadDir path: brackets/wildcards are never patterns.
+	entries, err := readDir(literal)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read enrollment directory: %w", err)
+	}
+	for _, entry := range entries {
+		for _, name := range []string{KeyFileName, CertFileName, CAFileName, SealingFileName, TrustGuardFileName, "state.db"} {
+			if entry.Name() == name {
+				return fmt.Errorf("already enrolled or initialization evidence exists (%s); use certificate renewal; --force cannot replace trust", name)
+			}
+			if strings.HasPrefix(entry.Name(), "."+name+".tmp.") {
+				return fmt.Errorf("incomplete identity initialization; protected local recovery required")
+			}
 		}
 	}
 	return nil
+}
+
+// initializationDirectoryTarget resolves the literal existing prefix before
+// cleaning or creation, retaining the missing suffix for target comparison.
+// It also catches Windows' not-found errors below regular files.
+func initializationDirectoryTarget(dir string) (target string, err error) {
+	var missing []string
+	if dir == "" {
+		return "", fmt.Errorf("empty enrollment directory")
+	}
+	separators := string(os.PathSeparator)
+	if runtime.GOOS == "windows" {
+		separators = `/\`
+	}
+	for ancestor := dir; ; {
+		info, err := os.Lstat(ancestor)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				info, err = os.Stat(ancestor)
+				if err != nil {
+					return "", err
+				}
+			}
+			if !info.IsDir() {
+				return "", fmt.Errorf("enrollment ancestor is not a directory")
+			}
+			resolved, err := filepath.EvalSymlinks(ancestor)
+			if err != nil {
+				return "", err
+			}
+			resolved, err = filepath.Abs(resolved)
+			if err != nil {
+				return "", err
+			}
+			target = resolved
+			for i := len(missing) - 1; i >= 0; i-- {
+				target = filepath.Join(target, missing[i])
+			}
+			return target, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("inspect enrollment directory: %w", err)
+		}
+		// Split, unlike Dir/Abs, does not clean a symlink/.. component before the
+		// filesystem resolves it. Resolve first, then make the result absolute.
+		parent, leaf := filepath.Split(strings.TrimRight(ancestor, separators))
+		missing = append(missing, leaf)
+		parent = strings.TrimRight(parent, separators)
+		if parent == "" {
+			if filepath.IsAbs(ancestor) {
+				parent = string(os.PathSeparator)
+			} else {
+				parent = "."
+			}
+		} else if parent == filepath.VolumeName(parent) {
+			parent += string(os.PathSeparator)
+		}
+		if parent == ancestor {
+			return "", fmt.Errorf("enrollment has no existing directory ancestor")
+		}
+		ancestor = parent
+	}
 }
 
 // TrustBinding excludes the renewable leaf certificate but binds its node ID,
@@ -158,17 +220,31 @@ func TrustBinding(m *Material) (string, error) {
 // CreateTrustGuard exclusively claims initialization. Never remove it on errors:
 // a partial write is intentional fail-closed evidence for subsequent attempts.
 func CreateTrustGuard(dir string, g TrustGuard) error {
+	return createTrustGuard(dir, g, syncTrustGuard)
+}
+
+func createTrustGuard(dir string, g TrustGuard, persist func(*os.File, string) error) error {
 	if err := CheckFreshEnrollment(dir); err != nil {
 		return err
 	}
 	if err := EnsureDir(dir); err != nil {
 		return err
 	}
+	absDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	absDir, err = filepath.Abs(absDir)
+	if err != nil {
+		return err
+	}
 	raw, err := json.Marshal(g)
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, TrustGuardFileName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	// Join only the already resolved directory: Join on the original literal
+	// symlink/.. path would clean it before the filesystem could resolve it.
+	f, err := os.OpenFile(filepath.Join(absDir, TrustGuardFileName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
@@ -179,7 +255,12 @@ func CreateTrustGuard(dir string, g TrustGuard) error {
 	if _, err := f.Write(raw); err != nil {
 		return err
 	}
-	return f.Sync()
+	persistErr := persist(f, absDir)
+	closeErr := f.Close()
+	if closeErr != nil {
+		closeErr = fmt.Errorf("close initialization guard: %w", closeErr)
+	}
+	return errors.Join(persistErr, closeErr)
 }
 
 func ReadTrustGuard(dir string) (TrustGuard, error) {
