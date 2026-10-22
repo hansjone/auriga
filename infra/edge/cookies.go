@@ -69,12 +69,16 @@ func stripAurigaCookies(cookieHeader string, keepLoginTx bool) string {
 	return strings.Join(kept, "; ")
 }
 
-func setInstanceCookie(w http.ResponseWriter, secure bool, value string, maxAge int) {
-	name := cookieName(secure, instCookieBase())
+func setInstanceCookie(w http.ResponseWriter, secure bool, value string, maxAge int, mounts ...string) {
+	mount := "/"
+	if len(mounts) == 1 {
+		mount = mounts[0]
+	}
+	name := instanceCookieName(secure, mount)
 	c := &http.Cookie{
 		Name:     name,
 		Value:    value,
-		Path:     "/",
+		Path:     mount,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   maxAge,
@@ -118,22 +122,29 @@ func sanitizeCookieNameSuffix(id string) string {
 	return out
 }
 
-func openNonceCookieName(secure bool, domain, instanceID string) string {
+func openNonceCookieName(secure bool, domain, instanceID string, mounts ...string) string {
 	base := openNonceCookieBase()
 	if instanceID != "" {
 		base = base + "_" + sanitizeCookieNameSuffix(instanceID)
 	}
 	if domain == "" && secure {
+		if len(mounts) == 1 && mounts[0] != "/" {
+			return "__Secure-" + base
+		}
 		return "__Host-" + base
 	}
 	return base
 }
 
-func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, value string, maxAge int) {
+func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, value string, maxAge int, mounts ...string) {
+	mount := "/"
+	if len(mounts) == 1 {
+		mount = mounts[0]
+	}
 	c := &http.Cookie{
-		Name:     openNonceCookieName(secure, domain, instanceID),
+		Name:     openNonceCookieName(secure, domain, instanceID, mount),
 		Value:    value,
-		Path:     "/",
+		Path:     mount,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   maxAge,
@@ -145,6 +156,6 @@ func setOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID, 
 	http.SetCookie(w, c)
 }
 
-func clearOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID string) {
-	setOpenNonceCookie(w, secure, domain, instanceID, "", -1)
+func clearOpenNonceCookie(w http.ResponseWriter, secure bool, domain, instanceID string, mounts ...string) {
+	setOpenNonceCookie(w, secure, domain, instanceID, "", -1, mounts...)
 }
