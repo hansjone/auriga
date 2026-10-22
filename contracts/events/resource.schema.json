@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "resource.*事件：唯一生产方见catalog/m3.json",
+  "$defs": {
+    "ResourceVersionPublished": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "string"
+        },
+        "digest": {
+          "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "packageId",
+        "versionId",
+        "version",
+        "digest",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceVersionWithdrawn": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "version": {
+          "type": "string"
+        },
+        "digest": {
+          "$ref": "../resource/signatures.schema.json#/$defs/Digest"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "withdrawn",
+            "malicious"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "packageId",
+        "versionId",
+        "version",
+        "digest",
+        "revision",
+        "mode",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceDistributionRequested": {
+      "type": "object",
+      "properties": {
+        "distributionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "selectionRevision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "selections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "packageId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "versionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "install",
+                  "enable",
+                  "disable",
+                  "remove"
+                ]
+              }
+            },
+            "required": [
+              "packageId",
+              "versionId",
+              "action"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "distributionId",
+        "instanceId",
+        "ownerId",
+        "selectionRevision",
+        "selections"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

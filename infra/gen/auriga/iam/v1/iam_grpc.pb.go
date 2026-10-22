@@ -502,3 +502,118 @@ var IdentityHeaderKeyService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "auriga/iam/v1/iam.proto",
 }
+
+const (
+	InstanceAiTokenService_IssueInstanceAiToken_FullMethodName = "/auriga.iam.v1.InstanceAiTokenService/IssueInstanceAiToken"
+)
+
+// InstanceAiTokenServiceClient is the client API for InstanceAiTokenService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// 独立于 ait_ 实例心跳令牌、浏览器会话与外部服务账号。
+type InstanceAiTokenServiceClient interface {
+	// 只允许 svc:workspace 在授权委派租户内调用；org 有效成员检查失败关闭。
+	// perms 必须为主人有效权限与 {ai.models.invoke,ai.usage.read} 的交集，不携带管理角色。
+	// JWT: ptyp=user,ctx=instance,aud=auriga.ai-gateway,sub=owner_id；最大有效期 300 秒。
+	// common.unauthenticated/forbidden/not_found/unavailable，参数错误 common.validation_failed。
+	IssueInstanceAiToken(ctx context.Context, in *IssueInstanceAiTokenRequest, opts ...grpc.CallOption) (*IssueInstanceAiTokenResponse, error)
+}
+
+type instanceAiTokenServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewInstanceAiTokenServiceClient(cc grpc.ClientConnInterface) InstanceAiTokenServiceClient {
+	return &instanceAiTokenServiceClient{cc}
+}
+
+func (c *instanceAiTokenServiceClient) IssueInstanceAiToken(ctx context.Context, in *IssueInstanceAiTokenRequest, opts ...grpc.CallOption) (*IssueInstanceAiTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueInstanceAiTokenResponse)
+	err := c.cc.Invoke(ctx, InstanceAiTokenService_IssueInstanceAiToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// InstanceAiTokenServiceServer is the server API for InstanceAiTokenService service.
+// All implementations must embed UnimplementedInstanceAiTokenServiceServer
+// for forward compatibility.
+//
+// 独立于 ait_ 实例心跳令牌、浏览器会话与外部服务账号。
+type InstanceAiTokenServiceServer interface {
+	// 只允许 svc:workspace 在授权委派租户内调用；org 有效成员检查失败关闭。
+	// perms 必须为主人有效权限与 {ai.models.invoke,ai.usage.read} 的交集，不携带管理角色。
+	// JWT: ptyp=user,ctx=instance,aud=auriga.ai-gateway,sub=owner_id；最大有效期 300 秒。
+	// common.unauthenticated/forbidden/not_found/unavailable，参数错误 common.validation_failed。
+	IssueInstanceAiToken(context.Context, *IssueInstanceAiTokenRequest) (*IssueInstanceAiTokenResponse, error)
+	mustEmbedUnimplementedInstanceAiTokenServiceServer()
+}
+
+// UnimplementedInstanceAiTokenServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedInstanceAiTokenServiceServer struct{}
+
+func (UnimplementedInstanceAiTokenServiceServer) IssueInstanceAiToken(context.Context, *IssueInstanceAiTokenRequest) (*IssueInstanceAiTokenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IssueInstanceAiToken not implemented")
+}
+func (UnimplementedInstanceAiTokenServiceServer) mustEmbedUnimplementedInstanceAiTokenServiceServer() {
+}
+func (UnimplementedInstanceAiTokenServiceServer) testEmbeddedByValue() {}
+
+// UnsafeInstanceAiTokenServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to InstanceAiTokenServiceServer will
+// result in compilation errors.
+type UnsafeInstanceAiTokenServiceServer interface {
+	mustEmbedUnimplementedInstanceAiTokenServiceServer()
+}
+
+func RegisterInstanceAiTokenServiceServer(s grpc.ServiceRegistrar, srv InstanceAiTokenServiceServer) {
+	// If the following call pancis, it indicates UnimplementedInstanceAiTokenServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&InstanceAiTokenService_ServiceDesc, srv)
+}
+
+func _InstanceAiTokenService_IssueInstanceAiToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueInstanceAiTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstanceAiTokenServiceServer).IssueInstanceAiToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstanceAiTokenService_IssueInstanceAiToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstanceAiTokenServiceServer).IssueInstanceAiToken(ctx, req.(*IssueInstanceAiTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// InstanceAiTokenService_ServiceDesc is the grpc.ServiceDesc for InstanceAiTokenService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var InstanceAiTokenService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "auriga.iam.v1.InstanceAiTokenService",
+	HandlerType: (*InstanceAiTokenServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "IssueInstanceAiToken",
+			Handler:    _InstanceAiTokenService_IssueInstanceAiToken_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "auriga/iam/v1/iam.proto",
+}

@@ -3,6 +3,7 @@ syntax = "proto3";
 package auriga.node.v1;
 
 import "google/protobuf/timestamp.proto";
+import "auriga/resource/v1/trust.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/node/v1;nodev1";
 option java_multiple_files = true;
@@ -30,6 +31,12 @@ message InstanceSpec {
   DesiredState desired = 13;
   // 附加标签，Docker 驱动写成容器标签 `auriga.label.<键>`。
   map<string, string> labels = 14;
+  // C3：资源选择代次；resource/workspace 锁定同 revision 的精确版本，不重新解析 latest。
+  uint64 resource_selection_revision = 15;
+  // 每个被引用租户必有一份当前清单，最大 2 MiB；空清单不是已验证未撤销。
+  // 不通过此字段替换根公钥。离线清单失效最迟 24h 停用受管资源，见 contracts/resource/README.md。
+  repeated auriga.resource.v1.ResourceRevocationList resource_revocations = 16;
+  repeated auriga.resource.v1.ResourceDowngradeAuthorization resource_downgrades = 17;
 }
 
 enum RuntimeKind {
@@ -100,6 +107,11 @@ message PluginRef {
   // false 表示安装但关闭。
   bool enabled = 8;
   SignedArtifact signed = 9;
+  // 首批资源中心 plugin 必填；同时校验旧 signed.statement 与此完整声明逐项相等。
+  // 不改变 name 的 npm 包名含义；L0 随部署固定的制品仍使用原部署信任链。
+  auriga.resource.v1.ResourceEnvelope resource_envelope = 10;
+  // 内部下载 locator，不是 bearer；节点 mTLS 与 workspace 当前调度/规格在线鉴权。
+  string download_id = 11;
 }
 
 message Profile {

@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package auriga.ai.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/ai/v1;aiv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.ai.v1";
+
+service ModelCatalogService {
+  // 仅 svc:workspace，auriga.internal + mTLS + 委派 tenant；响应仅含当前主体可用别名。
+  // common.unauthenticated/forbidden/unavailable；不存在或不可见模型不泄露 provider/key。
+  rpc ListEffectiveModels(ListEffectiveModelsRequest) returns (ListEffectiveModelsResponse);
+}
+
+message ListEffectiveModelsRequest {
+  string tenant_id = 1;
+  string account_id = 2;
+}
+
+message EffectiveModel {
+  string id = 1;
+  string display_name = 2;
+  int64 context_window = 3;
+  int64 max_output_tokens = 4;
+}
+
+message ListEffectiveModelsResponse {
+  repeated EffectiveModel models = 1;
+  // 平台受信内部地址，可为明示的内网 IP:port HTTP；不能由数据请求提供任意 upstream URL。
+  string managed_base_url = 2;
+}
+
+// G1a/b/c 共用的准入账本消息；不是允许外部直接调用预算的 RPC。
+// PostgreSQL 的同一事务在线核权/配额后，领取主体槽+日 token/月金额预占；不得用内存/NATS计数权威。
+message BudgetAdmission {
+  string request_id = 1;
+  string tenant_id = 2;
+  string account_id = 3;
+  string model_id = 4;
+  string provider_id = 5;
+  string credential_id = 6;
+  string currency = 7;
+  string price_version = 8;
+  // 固定准入 UTC 日/月周期，跨周期结算仍写原周期。
+  string day_period_start = 9;
+  string month_period_start = 10;
+  int64 input_token_upper_bound = 11;
+  int64 max_output_tokens = 12;
+  int64 reserved_tokens = 13;
+  int64 reserved_micros = 14;
+  // effective quota 不设置=不限，0=禁止；不限仍必须配置正数绝对在途上限。
+  optional int64 monthly_budget_micros = 15;
+  optional int64 daily_tokens = 16;
+  uint32 max_active_requests_per_subject = 17;
+  uint32 max_in_flight_percent = 18;
+  optional int64 max_in_flight_micros = 19;
+  optional int64 max_in_flight_tokens = 20;
+  // 经验证的来源二选一，禁止同时设置。实例/设备不能提供 account_id 覆盖 JWT sub。
+  oneof origin {
+    string instance_id = 21;
+    string device_id = 22;
+  }
+  google.protobuf.Timestamp admitted_at = 23;
+  google.protobuf.Timestamp token_expires_at = 24;
+}
+
+message UsageRecord {
+  string request_id = 1;
+  string tenant_id = 2;
+  string account_id = 3;
+  string model_id = 4;
+  // reserved -> dispatching -> completed/failed/cancelled/unknown；终态只结算一次。
+  string outcome = 5;
+  // confirmed/estimated/unknown；unknown 必须不设置下面三数值，不写成0。
+  string usage_quality = 6;
+  optional int64 input_tokens = 7;
+  optional int64 output_tokens = 8;
+  optional int64 cost_micros = 9;
+  int64 frozen_micros = 10;
+  int64 frozen_tokens = 11;
+  uint64 revision = 12;
+}

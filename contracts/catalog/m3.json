@@ -1,0 +1,388 @@
+{
+  "schemaVersion": 1,
+  "description": "M3权限、域错误和新增事件来源的单一定义；OpenAPI x-permission/x-error-codes/x-events 仅为引用。现有common.*与iam.step_up_required复用既有契约和common映射，不在此重定义。",
+  "permissions": {
+    "ai.providers.read": {
+      "description": {
+        "zh-CN": "读取脱敏供应商及模型管理元数据",
+        "en": "Read redacted provider and model administration metadata"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "ai.providers.write": {
+      "description": {
+        "zh-CN": "管理受信供应商端点和模型映射",
+        "en": "Manage trusted provider endpoints and model mappings"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "ai.credentials.rotate": {
+      "description": {
+        "zh-CN": "只写供应商密钥及激活撤销",
+        "en": "Write provider credentials and activate or revoke versions"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "ai.models.grant": {
+      "description": {
+        "zh-CN": "授予当前租户的模型访问权限",
+        "en": "Grant model access within the current tenant"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "ai.models.invoke": {
+      "description": {
+        "zh-CN": "以本人身份调用获授权的团队模型",
+        "en": "Invoke authorized team models as the authenticated account"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "ai.usage.read": {
+      "description": {
+        "zh-CN": "读取本人团队模型用量",
+        "en": "Read own team model usage"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "ai.usage.admin": {
+      "description": {
+        "zh-CN": "读取当前租户模型用量",
+        "en": "Read model usage for the current tenant"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "auriga.connect.models.invoke": {
+      "description": {
+        "zh-CN": "设备调用本人获授权模型",
+        "en": "Invoke own authorized models from a registered device"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "resource.packages.read": {
+      "description": {
+        "zh-CN": "读取可见资源目录和获授权包字节",
+        "en": "Read visible resource metadata and authorized package bytes"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "resource.packages.upload": {
+      "description": {
+        "zh-CN": "创建本人草稿和私有个人插件",
+        "en": "Create own drafts and private personal plugins"
+      },
+      "adminOnly": false,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "resource.versions.submit": {
+      "description": {
+        "zh-CN": "提交本人资源版本审核",
+        "en": "Submit own resource versions for review"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    },
+    "resource.versions.review": {
+      "description": {
+        "zh-CN": "审核本租户精确版本和摘要",
+        "en": "Review exact versions and digests within the tenant"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "resource.versions.publish": {
+      "description": {
+        "zh-CN": "发布已审核版本或撤回发布",
+        "en": "Publish reviewed versions or withdraw publications"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "resource.levels.admin": {
+      "description": {
+        "zh-CN": "管理L1/L2等级与团队默认开关",
+        "en": "Manage L1/L2 levels and team defaults"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner"
+      ]
+    },
+    "resource.distributions.manage": {
+      "description": {
+        "zh-CN": "申请本人实例允许的资源变更",
+        "en": "Request permitted resource changes on own instances"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin",
+        "member"
+      ]
+    }
+  },
+  "errors": {
+    "ai.model_not_allowed": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "此模型未获授权",
+        "en": "This model is not authorized"
+      }
+    },
+    "ai.budget_exceeded": {
+      "http": 429,
+      "grpc": "RESOURCE_EXHAUSTED",
+      "message": {
+        "zh-CN": "模型额度不足或待结算用量占用额度",
+        "en": "Model budget is exhausted or held by unsettled usage"
+      }
+    },
+    "ai.budget_unavailable": {
+      "http": 503,
+      "grpc": "UNAVAILABLE",
+      "message": {
+        "zh-CN": "暂时无法确认预算或授权",
+        "en": "Budget or authorization cannot currently be verified"
+      }
+    },
+    "ai.request_in_progress": {
+      "http": 409,
+      "grpc": "ABORTED",
+      "message": {
+        "zh-CN": "同一请求仍在执行",
+        "en": "The same request is still executing"
+      }
+    },
+    "ai.replay_unavailable": {
+      "http": 409,
+      "grpc": "FAILED_PRECONDITION",
+      "message": {
+        "zh-CN": "原请求已终结，不保存正文供重放",
+        "en": "The original request is terminal and its body is not retained for replay"
+      }
+    },
+    "ai.upstream_unavailable": {
+      "http": 502,
+      "grpc": "UNAVAILABLE",
+      "message": {
+        "zh-CN": "模型供应商暂时不可用",
+        "en": "The model provider is unavailable"
+      }
+    },
+    "ai.upstream_timeout": {
+      "http": 504,
+      "grpc": "DEADLINE_EXCEEDED",
+      "message": {
+        "zh-CN": "模型供应商响应超时",
+        "en": "The model provider timed out"
+      }
+    },
+    "ai.upstream_rejected": {
+      "http": 502,
+      "grpc": "FAILED_PRECONDITION",
+      "message": {
+        "zh-CN": "模型供应商拒绝了请求",
+        "en": "The model provider rejected the request"
+      }
+    },
+    "ai.stream_interrupted": {
+      "http": 502,
+      "grpc": "UNAVAILABLE",
+      "message": {
+        "zh-CN": "模型响应流中断",
+        "en": "The model response stream was interrupted"
+      }
+    },
+    "resource.version_immutable": {
+      "http": 409,
+      "grpc": "ALREADY_EXISTS",
+      "message": {
+        "zh-CN": "已发布版本的内容不可覆盖",
+        "en": "Published version content is immutable"
+      }
+    },
+    "resource.review_required": {
+      "http": 409,
+      "grpc": "FAILED_PRECONDITION",
+      "message": {
+        "zh-CN": "共享发布需要精确摘要和修订的审核",
+        "en": "Shared publication requires review of the exact digest and revision"
+      }
+    },
+    "resource.state_conflict": {
+      "http": 409,
+      "grpc": "ABORTED",
+      "message": {
+        "zh-CN": "资源状态已变化",
+        "en": "The resource state has changed"
+      }
+    },
+    "resource.level_locked": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "资源等级不允许此操作",
+        "en": "The resource level does not permit this action"
+      }
+    },
+    "resource.digest_mismatch": {
+      "http": 422,
+      "grpc": "INVALID_ARGUMENT",
+      "message": {
+        "zh-CN": "资源内容摘要不匹配",
+        "en": "The resource content digest does not match"
+      }
+    },
+    "resource.signature_invalid": {
+      "http": 422,
+      "grpc": "INVALID_ARGUMENT",
+      "message": {
+        "zh-CN": "资源签名或信任声明无效",
+        "en": "The resource signature or trust statement is invalid"
+      }
+    },
+    "resource.download_denied": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "节点或主体没有此资源下载授权",
+        "en": "The node or principal is not authorized to download this resource"
+      }
+    },
+    "resource.storage_unavailable": {
+      "http": 503,
+      "grpc": "UNAVAILABLE",
+      "message": {
+        "zh-CN": "资源对象存储暂时不可用",
+        "en": "The resource object store is unavailable"
+      }
+    }
+  },
+  "events": {
+    "usage.recorded": {
+      "source": "auriga/ai-gateway",
+      "subject": "requestId",
+      "schema": "../events/usage.schema.json#/$defs/UsageRecorded",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.usage.recorded"
+    },
+    "resource.version_published": {
+      "source": "auriga/resource",
+      "subject": "versionId",
+      "schema": "../events/resource.schema.json#/$defs/ResourceVersionPublished",
+      "consumers": [
+        "workspace",
+        "audit"
+      ],
+      "publish": "auriga.evt.resource.version_published"
+    },
+    "resource.version_withdrawn": {
+      "source": "auriga/resource",
+      "subject": "versionId",
+      "schema": "../events/resource.schema.json#/$defs/ResourceVersionWithdrawn",
+      "consumers": [
+        "workspace",
+        "audit"
+      ],
+      "publish": "auriga.evt.resource.version_withdrawn"
+    },
+    "resource.distribution_requested": {
+      "source": "auriga/resource",
+      "subject": "instanceId",
+      "schema": "../events/resource.schema.json#/$defs/ResourceDistributionRequested",
+      "consumers": [
+        "workspace",
+        "audit"
+      ],
+      "publish": "auriga.evt.resource.distribution_requested"
+    },
+    "instance.ai_credential_revoked": {
+      "source": "auriga/workspace",
+      "subject": "instanceId",
+      "schema": "../events/instance.schema.json#/$defs/InstanceAiCredentialRevoked",
+      "consumers": [
+        "ai-gateway",
+        "audit"
+      ],
+      "publish": "auriga.evt.instance.ai_credential_revoked"
+    }
+  },
+  "deviceMappings": {
+    "auriga.connect.models.invoke": [
+      "ai.models.invoke",
+      "ai.usage.read"
+    ]
+  },
+  "roleRules": "这些是新增权限的内置角色映射；不改变既有角色。external默认无新增权限，授权仍受有效权限上限、模型ACL/资源可见范围制约。ctx=instance只取ai.models.invoke/ai.usage.read交集；portal剔除adminOnly；device只含connect范围。"
+}

@@ -1,0 +1,3 @@
+# OpenAPI Generator bookkeeping; the generated Go models and utils are tracked.
+**/.openapi-generator/
+**/.openapi-generator-ignore

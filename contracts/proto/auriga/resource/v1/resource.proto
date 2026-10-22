@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package auriga.resource.v1;
+
+import "auriga/resource/v1/trust.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/resource/v1;resourcev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.resource.v1";
+
+// 仅 svc:workspace，auriga.internal + mTLS 与委派 tenant 必须一致。
+// resource 自己维护目录/审核/ACL/签名，不读写 workspace 表，不向节点直接发命令。
+service ResourceResolutionService {
+  // 同 (tenant,instance,selection_revision) 锁定精确结果，重试不解析新 latest；旧 revision 不覆盖新选择。
+  // common.* 鉴权/参数/冲突；resource.review_required/state_conflict/level_locked/signature_invalid。
+  rpc ResolveInstanceResources(ResolveInstanceResourcesRequest) returns (ResolveInstanceResourcesResponse);
+  // 获取最新版签名撤销清单；不能授权替换部署根信任。不可用/过期失败关闭。
+  rpc GetResourceRevocations(GetResourceRevocationsRequest) returns (GetResourceRevocationsResponse);
+}
+
+message ResourceSelection {
+  string package_id = 1;
+  string version_id = 2;
+  // install / enable / disable / remove；必须通过等级、可见范围与归属检查。
+  string action = 3;
+}
+
+message ResolveInstanceResourcesRequest {
+  string tenant_id = 1;
+  string owner_id = 2;
+  string instance_id = 3;
+  string node_id = 4;
+  uint64 selection_revision = 5;
+  repeated ResourceSelection selections = 6;
+}
+
+message ResourceDownloadAuthorization {
+  string download_id = 1;
+  string tenant_id = 2;
+  string node_id = 3;
+  string instance_id = 4;
+  string owner_id = 5;
+  string package_id = 6;
+  string version_id = 7;
+  string digest = 8;
+  uint64 selection_revision = 9;
+  google.protobuf.Timestamp expires_at = 10;
+  // 内部固定平台入口，非任意 URL；单独泄露 locator 不授予字节读取权。
+  string url = 11;
+}
+
+message ResolvedResource {
+  string package_id = 1;
+  string version_id = 2;
+  // workspace 将该声明逐项映射为 node.PluginRef；不引入 resource->node->resource 包循环。
+  ResourceEnvelope envelope = 3;
+  ResourceDownloadAuthorization download = 4;
+  string level = 5;
+  bool enabled = 6;
+  // 旧 node.SignedArtifact 对完整statement的独立签名，不能把envelope签名冒充旧statement签名。
+  bytes legacy_statement_signature = 7;
+  string legacy_statement_signing_kid = 8;
+}
+
+message ResolveInstanceResourcesResponse {
+  uint64 selection_revision = 1;
+  repeated ResolvedResource resources = 2;
+  ResourceRevocationList revocations = 3;
+}
+
+message GetResourceRevocationsRequest {
+  string tenant_id = 1;
+  uint64 minimum_revision = 2;
+}
+
+message GetResourceRevocationsResponse {
+  ResourceRevocationList revocations = 1;
+}

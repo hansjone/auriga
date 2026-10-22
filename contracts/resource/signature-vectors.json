@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "description": "仅合成公开向量；签名密钥临时生成后丢弃，无私钥入库。Java与Go均独立规范化、验签；不得用于部署信任。",
+  "cases": [
+    {
+      "name": "envelope-nanoseconds",
+      "schema": "ResourceEnvelope",
+      "document": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "packageId": "019a0000-0000-7000-8000-000000000002",
+        "versionId": "019a0000-0000-7000-8000-000000000003",
+        "releaseSequence": 7,
+        "notAfter": "2026-10-22T08:00:00.100000000Z",
+        "statement": {
+          "purpose": "plugin",
+          "name": "@example/plugin",
+          "version": "1.2.3+build.1",
+          "os": "any",
+          "arch": "any",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "issuedAt": "2026-10-21T08:00:00.100000000Z"
+        },
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "vector-only-public-key",
+          "value": "_p0hkTjVGxb4LcZP85IndHK5FZEiFelmT1cg7WEHK7TmxykGJSUYwkntDJLuTis-4k9ryL8EQlSk4Kk1zY9bBg"
+        }
+      },
+      "canonical": "{\"notAfter\":\"2026-10-22T08:00:00.100000000Z\",\"packageId\":\"019a0000-0000-7000-8000-000000000002\",\"releaseSequence\":7,\"schemaVersion\":1,\"statement\":{\"arch\":\"any\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"issuedAt\":\"2026-10-21T08:00:00.100000000Z\",\"name\":\"@example/plugin\",\"os\":\"any\",\"purpose\":\"plugin\",\"version\":\"1.2.3+build.1\"},\"tenantId\":\"019a0000-0000-7000-8000-000000000001\",\"versionId\":\"019a0000-0000-7000-8000-000000000003\"}",
+      "sha256": "a0ca02aa8f60ceae23717776796412954e1e4955db071a5fa8a9dc34f738b362",
+      "publicKeySpki": "MCowBQYDK2VwAyEAiWqbaFWqCWmsPLSxErSigdWf0n098J7F2KUs1j1UJuI"
+    },
+    {
+      "name": "revocations-empty-explicit-arrays",
+      "schema": "RevocationList",
+      "document": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "revision": 9,
+        "issuedAt": "2026-10-21T08:00:00Z",
+        "expiresAt": "2026-10-22T08:00:00Z",
+        "revokedKids": [],
+        "revokedArtifacts": [],
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "vector-only-public-key",
+          "value": "jjFQkpyOm4kJkoYqIptGdX50WFQLZYosHsgGt5IwJOl27nmAzXwdzibhryO7bW73O5Og8xR9cOk8T22d_KK2BQ"
+        }
+      },
+      "canonical": "{\"expiresAt\":\"2026-10-22T08:00:00Z\",\"issuedAt\":\"2026-10-21T08:00:00Z\",\"revision\":9,\"revokedArtifacts\":[],\"revokedKids\":[],\"schemaVersion\":1,\"tenantId\":\"019a0000-0000-7000-8000-000000000001\"}",
+      "sha256": "20c6ed66666dca18d71b1ffbe141e4c88c6487ab6f24edbe853917588fd68f20",
+      "publicKeySpki": "MCowBQYDK2VwAyEAiWqbaFWqCWmsPLSxErSigdWf0n098J7F2KUs1j1UJuI"
+    },
+    {
+      "name": "revocations-populated",
+      "schema": "RevocationList",
+      "document": {
+        "schemaVersion": 1,
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "revision": 10,
+        "issuedAt": "2026-10-21T08:00:00Z",
+        "expiresAt": "2026-10-22T08:00:00Z",
+        "revokedKids": [
+          "release-old"
+        ],
+        "revokedArtifacts": [
+          {
+            "packageId": "019a0000-0000-7000-8000-000000000002",
+            "versionId": "019a0000-0000-7000-8000-000000000003",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "vector-only-public-key",
+          "value": "FoN-pSxc5nq_80jZrJbopWsYovMpPHZz_mfyhsVycrZZl1pKq5CSVqFi8Wj0Wck5JCnb87CmnKlH93Zcf7nyDw"
+        }
+      },
+      "canonical": "{\"expiresAt\":\"2026-10-22T08:00:00Z\",\"issuedAt\":\"2026-10-21T08:00:00Z\",\"revision\":10,\"revokedArtifacts\":[{\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"packageId\":\"019a0000-0000-7000-8000-000000000002\",\"versionId\":\"019a0000-0000-7000-8000-000000000003\"}],\"revokedKids\":[\"release-old\"],\"schemaVersion\":1,\"tenantId\":\"019a0000-0000-7000-8000-000000000001\"}",
+      "sha256": "875e97f3a480dfa0c3b817d10ff04c63b9f116721b220fb439121698455835ae",
+      "publicKeySpki": "MCowBQYDK2VwAyEAiWqbaFWqCWmsPLSxErSigdWf0n098J7F2KUs1j1UJuI"
+    },
+    {
+      "name": "downgrade-safe-integer-unicode",
+      "schema": "DowngradeAuthorization",
+      "document": {
+        "schemaVersion": 1,
+        "authorizationId": "019a0000-0000-7000-8000-000000000005",
+        "tenantId": "019a0000-0000-7000-8000-000000000001",
+        "instanceId": "019a0000-0000-7000-8000-000000000004",
+        "packageId": "019a0000-0000-7000-8000-000000000002",
+        "versionId": "019a0000-0000-7000-8000-000000000003",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fromReleaseSequence": 9007199254740991,
+        "toReleaseSequence": 7,
+        "issuedAt": "2026-10-21T08:00:00.1Z",
+        "expiresAt": "2026-10-21T08:10:00.1Z",
+        "reason": "人工审计回退：中文 😀 / \\ \" \n 失效关闭",
+        "signature": {
+          "alg": "Ed25519",
+          "kid": "vector-only-public-key",
+          "value": "6mdgAEoIRDW9tETYFDPCeLI9_8XMUDUMiZlo_QPFtk2KqWoJJc1CfHgdAREQImBBjmMHvmzq_6hlDpzfNMo6Ag"
+        }
+      },
+      "canonical": "{\"authorizationId\":\"019a0000-0000-7000-8000-000000000005\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"expiresAt\":\"2026-10-21T08:10:00.1Z\",\"fromReleaseSequence\":9007199254740991,\"instanceId\":\"019a0000-0000-7000-8000-000000000004\",\"issuedAt\":\"2026-10-21T08:00:00.1Z\",\"packageId\":\"019a0000-0000-7000-8000-000000000002\",\"reason\":\"人工审计回退：中文 😀 / \\\\ \\\" \\n 失效关闭\",\"schemaVersion\":1,\"tenantId\":\"019a0000-0000-7000-8000-000000000001\",\"toReleaseSequence\":7,\"versionId\":\"019a0000-0000-7000-8000-000000000003\"}",
+      "sha256": "83fef6c5fd7a89eebc2112596d9ece6c0142446283c7ab0163d38c31b4ab8457",
+      "publicKeySpki": "MCowBQYDK2VwAyEAiWqbaFWqCWmsPLSxErSigdWf0n098J7F2KUs1j1UJuI"
+    }
+  ]
+}

@@ -1615,11 +1615,11 @@ func (x *InstanceQuota) GetAlwaysOnAllowed() bool {
 
 type ModelQuota struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// 每月预算，百万分之一货币单位。
+	// 每月预算，百万分之一货币单位；不设置=不限，0=禁止团队模型。UTC月，币种必须等于gateway部署币种。
 	MonthlyBudgetMicros *int64 `protobuf:"varint,1,opt,name=monthly_budget_micros,json=monthlyBudgetMicros,proto3,oneof" json:"monthly_budget_micros,omitempty"`
 	// ISO 4217，例如 `CNY`、`USD`。
 	Currency string `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	// 每日 token 上限。
+	// 每日 token 上限；不设置=不限，0=禁止团队模型。UTC日；实例/设备按同一主体共享。
 	DailyTokens   *int64 `protobuf:"varint,3,opt,name=daily_tokens,json=dailyTokens,proto3,oneof" json:"daily_tokens,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -8,7 +8,16 @@
     <relativePath>../../pom.xml</relativePath>
   </parent>
   <artifactId>contracts</artifactId>
+  <properties>
+    <!-- Go model regeneration is explicit: ordinary Java verification must not mutate tracked Go files. -->
+    <auriga.skipGoModels>true</auriga.skipGoModels>
+  </properties>
   <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
@@ -48,6 +57,14 @@
     </dependency>
   </dependencies>
   <build>
+    <testResources>
+      <testResource>
+        <directory>${project.basedir}/../../contracts/resource</directory>
+        <includes>
+          <include>signature-vectors.json</include>
+        </includes>
+      </testResource>
+    </testResources>
     <extensions>
       <extension>
         <groupId>kr.motd.maven</groupId>
@@ -178,8 +195,78 @@
               <modelPackage>auriga.workspace.web.model</modelPackage>
             </configuration>
           </execution>
+          <execution>
+            <id>ai-http</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <inputSpec>${project.build.directory}/bundled/ai.json</inputSpec>
+              <output>${project.build.directory}/generated-sources/openapi/ai</output>
+              <apiPackage>auriga.ai.web.api</apiPackage>
+              <modelPackage>auriga.ai.web.model</modelPackage>
+            </configuration>
+          </execution>
+          <execution>
+            <id>resource-http</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <inputSpec>${project.build.directory}/bundled/resource.json</inputSpec>
+              <output>${project.build.directory}/generated-sources/openapi/resource</output>
+              <apiPackage>auriga.resource.web.api</apiPackage>
+              <modelPackage>auriga.resource.web.model</modelPackage>
+            </configuration>
+          </execution>
+          <execution>
+            <id>ai-go-models</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <skip>${auriga.skipGoModels}</skip>
+              <cleanupOutput>true</cleanupOutput>
+              <generatorName>go</generatorName>
+              <inputSpec>${project.build.directory}/bundled/ai.json</inputSpec>
+              <output>${project.basedir}/../../infra/gen/aiapi</output>
+              <generateApis>false</generateApis>
+              <generateSupportingFiles>true</generateSupportingFiles>
+              <supportingFilesToGenerate>utils.go</supportingFilesToGenerate>
+              <generateApiDocumentation>false</generateApiDocumentation>
+              <generateModelDocumentation>false</generateModelDocumentation>
+              <configOptions>
+                <packageName>aiapi</packageName>
+                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                <disallowAdditionalPropertiesIfNotPresent>false</disallowAdditionalPropertiesIfNotPresent>
+              </configOptions>
+            </configuration>
+          </execution>
+          <execution>
+            <id>resource-go-models</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <skip>${auriga.skipGoModels}</skip>
+              <cleanupOutput>true</cleanupOutput>
+              <generatorName>go</generatorName>
+              <inputSpec>${project.build.directory}/bundled/resource.json</inputSpec>
+              <output>${project.basedir}/../../infra/gen/resourceapi</output>
+              <generateApis>false</generateApis>
+              <generateSupportingFiles>true</generateSupportingFiles>
+              <supportingFilesToGenerate>utils.go</supportingFilesToGenerate>
+              <generateApiDocumentation>false</generateApiDocumentation>
+              <generateModelDocumentation>false</generateModelDocumentation>
+              <configOptions>
+                <packageName>resourceapi</packageName>
+                <hideGenerationTimestamp>true</hideGenerationTimestamp>
+                <disallowAdditionalPropertiesIfNotPresent>false</disallowAdditionalPropertiesIfNotPresent>
+              </configOptions>
+            </configuration>
+          </execution>
         </executions>
       </plugin>
     </plugins>
   </build>
+  <profiles>
+    <profile>
+      <id>go-openapi-models</id>
+      <properties>
+        <auriga.skipGoModels>false</auriga.skipGoModels>
+      </properties>
+    </profile>
+  </profiles>
 </project>

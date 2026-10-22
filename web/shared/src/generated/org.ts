@@ -629,10 +629,10 @@ export interface components {
         alwaysOnAllowed?: boolean;
       };
       model?: {
-        /** @description 每月预算，百万分之一货币单位；null 表示不限。 */
+        /** @description UTC每月预算，百万分之一货币单位；null 表示不限，0禁止团队模型。币种须等于gateway部署币种；已在途预占不因配额修改清零。 */
         monthlyBudgetMicros?: number | null;
         currency?: string;
-        /** @description null 表示不限。 */
+        /** @description UTC每日token限额；null 表示不限，0禁止团队模型。实例和设备按同一主体共享。 */
         dailyTokens?: number | null;
       };
     };

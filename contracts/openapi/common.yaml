@@ -24,6 +24,14 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: 实例令牌（`ait_` 开头），只能调用 `/api/workspace/v1/instance/**`。
+    aiDataAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        iam 的 ES256 at+jwt，仅 aud=auriga.ai-gateway；ctx=device/ptyp=device 或
+        ctx=instance/ptyp=user。instance 必须经受认证的节点实例通道与 edge 内部 mTLS 转发，
+        公网入口拒收。完整通道见 contracts/ai/README.md；ait_、身份头、portal/admin/service 一律拒收。
   parameters:
     Limit:
       name: limit

@@ -1,0 +1,3722 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Auriga AI",
+    "version": "1.0.0",
+    "description": "G1首批：受限models/chat-completions；管理面aud=auriga、ctx=admin。数据面aud=auriga.ai-gateway，仅device或受信内部instance。逐操作错误/权限引用catalog/m3.json，业务约束见ai/README.md。不是OpenAI全量兼容声明。",
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    }
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/ai/v1/admin/providers": {
+      "get": {
+        "operationId": "listAiProviders",
+        "tags": [
+          "AI"
+        ],
+        "description": "读取当前租户脱敏供应商目录。",
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true
+      },
+      "post": {
+        "operationId": "createAiProvider",
+        "tags": [
+          "AI"
+        ],
+        "description": "登记受信端点；客户端不可自选代理或认证头。",
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Provider"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderInput"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/providers/{providerId}": {
+      "get": {
+        "operationId": "getAiProvider",
+        "tags": [
+          "AI"
+        ],
+        "description": "仅脱敏元数据。",
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Provider"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true
+      },
+      "patch": {
+        "operationId": "patchAiProvider",
+        "tags": [
+          "AI"
+        ],
+        "description": "修改端点与限额，ETag防覆盖。",
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Provider"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderPatch"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/providers/{providerId}/credentials": {
+      "post": {
+        "operationId": "createAiCredential",
+        "tags": [
+          "AI"
+        ],
+        "description": "只写加密凭据，初始staged；无读取secret接口。",
+        "x-permission": "ai.credentials.rotate",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Credential"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/v1/admin/providers/{providerId}/credentials/{credentialId}/activate": {
+      "post": {
+        "operationId": "activateAiCredential",
+        "tags": [
+          "AI"
+        ],
+        "description": "新请求只用新key，原流可按旧key完成。",
+        "x-permission": "ai.credentials.rotate",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Credential"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialAction"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/v1/admin/providers/{providerId}/credentials/{credentialId}/revoke": {
+      "post": {
+        "operationId": "revokeAiCredential",
+        "tags": [
+          "AI"
+        ],
+        "description": "紧急撤销取消旧key上的流，禁止新准入。",
+        "x-permission": "ai.credentials.rotate",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "providerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Credential"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialAction"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/v1/admin/models": {
+      "get": {
+        "operationId": "listAiManagedModels",
+        "tags": [
+          "AI"
+        ],
+        "description": "管理模型目录。",
+        "x-permission": "ai.providers.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true
+      },
+      "post": {
+        "operationId": "createAiModel",
+        "tags": [
+          "AI"
+        ],
+        "description": "登记受限模型别名和单一币种价格快照。",
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Model"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelInput"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/models/{modelId}": {
+      "patch": {
+        "operationId": "patchAiModel",
+        "tags": [
+          "AI"
+        ],
+        "description": "配额/价格改变仅影响新准入，既有账本价格固定。",
+        "x-permission": "ai.providers.write",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Model"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelPatch"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/admin/models/{modelId}/grants": {
+      "put": {
+        "operationId": "replaceAiModelGrants",
+        "tags": [
+          "AI"
+        ],
+        "description": "整体替换租户内ACL，核验成员/组/角色均同租户且不超本人授予上限。",
+        "x-permission": "ai.models.grant",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "当前资源ETag；缺失/不匹配返回common.precondition_failed。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelGrants"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "$ref": "./common.yaml#/components/headers/ETag"
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelGrants"
+              }
+            }
+          }
+        },
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/ai/v1/me/usage": {
+      "get": {
+        "operationId": "listOwnAiUsage",
+        "tags": [
+          "AI"
+        ],
+        "description": "仅本人；不含prompt或正文；门户会话可以读取本人用量。 门户/管理台读取使用auriga audience；受信内部instance或设备本人用量使用专用AI audience与同等在线绑定检查，不允许普通业务服务混收instance。",
+        "x-permission": "ai.usage.read",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "aiDataAuth": []
+          }
+        ],
+        "x-device-permission": "auriga.connect.models.invoke"
+      }
+    },
+    "/api/ai/v1/admin/usage": {
+      "get": {
+        "operationId": "listTenantAiUsage",
+        "tags": [
+          "AI"
+        ],
+        "description": "当前租户用量，不能跨租户。",
+        "x-permission": "ai.usage.admin",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/Limit"
+          },
+          {
+            "$ref": "./common.yaml#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/ai/v1/models": {
+      "get": {
+        "operationId": "listAiModels",
+        "tags": [
+          "AI"
+        ],
+        "description": "仅返回本主体当前可用且已授权的模型；device权限映射见catalog。",
+        "x-permission": "ai.models.invoke",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "ai.model_not_allowed",
+          "ai.budget_unavailable"
+        ],
+        "x-events": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ai.model_not_allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ai.budget_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "aiDataAuth": []
+          }
+        ],
+        "x-local-error-envelope": "AiError",
+        "x-device-permission": "auriga.connect.models.invoke"
+      }
+    },
+    "/ai/v1/chat/completions": {
+      "post": {
+        "operationId": "createAiChatCompletion",
+        "tags": [
+          "AI"
+        ],
+        "description": "JSON或SSE，一次上游提交。幂等例外与断流未知计费见ai/README.md。",
+        "x-permission": "ai.models.invoke",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "ai.model_not_allowed",
+          "ai.budget_exceeded",
+          "ai.budget_unavailable",
+          "ai.request_in_progress",
+          "ai.replay_unavailable",
+          "ai.upstream_unavailable",
+          "ai.upstream_timeout",
+          "ai.upstream_rejected",
+          "ai.stream_interrupted"
+        ],
+        "x-events": [
+          "usage.recorded"
+        ],
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；响应不包含供应商密钥、令牌、prompt或生成正文（模型响应除外）。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletion"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE data为ChatCompletionChunk JSON，末尾成功为data: [DONE]。失败尽力发送AiError后关闭，禁止成功[DONE]。"
+                },
+                "x-chunk-schema": {
+                  "$ref": "#/components/schemas/ChatCompletionChunk"
+                },
+                "x-error-schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ai.model_not_allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ai.request_in_progress, ai.replay_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "ai.budget_exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "ai.upstream_unavailable, ai.upstream_rejected, ai.stream_interrupted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ai.budget_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "ai.upstream_timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "aiDataAuth": []
+          }
+        ],
+        "x-local-error-envelope": "AiError",
+        "x-idempotency": "execution-once-no-body-replay",
+        "x-max-body-bytes": 1048576,
+        "x-device-permission": "auriga.connect.models.invoke"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "$ref": "./common.yaml#/components/securitySchemes/bearerAuth"
+      },
+      "aiDataAuth": {
+        "$ref": "./common.yaml#/components/securitySchemes/aiDataAuth"
+      }
+    },
+    "schemas": {
+      "Provider": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "openai_compatible"
+            ]
+          },
+          "baseUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "由受信管理者配置；默认禁止内网/重定向。显式部署的gateway端点例外另审，不能放宽实例出网。"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "connectTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "firstByteTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "idleTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "totalTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 3600
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "activeCredentialId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "baseUrl",
+          "enabled",
+          "connectTimeoutSeconds",
+          "firstByteTimeoutSeconds",
+          "idleTimeoutSeconds",
+          "totalTimeoutSeconds",
+          "maxConcurrency",
+          "activeCredentialId",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "ProviderInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "openai_compatible"
+            ]
+          },
+          "baseUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "由受信管理者配置；默认禁止内网/重定向。显式部署的gateway端点例外另审，不能放宽实例出网。"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "connectTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "firstByteTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "idleTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "totalTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 3600
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "baseUrl",
+          "enabled",
+          "connectTimeoutSeconds",
+          "firstByteTimeoutSeconds",
+          "idleTimeoutSeconds",
+          "totalTimeoutSeconds",
+          "maxConcurrency"
+        ],
+        "additionalProperties": false
+      },
+      "ProviderPatch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "openai_compatible"
+            ]
+          },
+          "baseUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "由受信管理者配置；默认禁止内网/重定向。显式部署的gateway端点例外另审，不能放宽实例出网。"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "connectTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "firstByteTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "idleTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "totalTimeoutSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 3600
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "minProperties": 1
+      },
+      "ProviderPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Provider"
+            },
+            "maxItems": 200
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "CredentialInput": {
+        "type": "object",
+        "properties": {
+          "secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "仅写；不得进入任何响应、审计正文、实例规格或浏览器。"
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "additionalProperties": false
+      },
+      "Credential": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "staged",
+              "active",
+              "retiring",
+              "revoked"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "createdAt",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "CredentialAction": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "Price": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "inputMicrosPerMillionTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "outputMicrosPerMillionTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "currency",
+          "inputMicrosPerMillionTokens",
+          "outputMicrosPerMillionTokens",
+          "version",
+          "effectiveAt"
+        ],
+        "additionalProperties": false
+      },
+      "Model": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "upstreamModel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "contextWindow": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "providerId",
+          "upstreamModel",
+          "displayName",
+          "enabled",
+          "contextWindow",
+          "maxOutputTokens",
+          "price",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "ModelInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "upstreamModel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "contextWindow": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          }
+        },
+        "required": [
+          "id",
+          "providerId",
+          "upstreamModel",
+          "displayName",
+          "enabled",
+          "contextWindow",
+          "maxOutputTokens",
+          "price"
+        ],
+        "additionalProperties": false
+      },
+      "ModelPatch": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "upstreamModel": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "contextWindow": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "minProperties": 1
+      },
+      "ModelPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            },
+            "maxItems": 200
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "Grant": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "member",
+              "group",
+              "role"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "ModelGrants": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Grant"
+            },
+            "maxItems": 1000,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "reserved",
+              "dispatching",
+              "completed",
+              "failed",
+              "cancelled",
+              "unknown"
+            ]
+          },
+          "usageQuality": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "estimated",
+              "unknown"
+            ]
+          },
+          "inputTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "outputTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "costMicros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frozenMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "frozenTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "currency": {
+            "type": "string"
+          },
+          "dayPeriodStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "monthPeriodStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "priceVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "requestId",
+          "accountId",
+          "modelId",
+          "outcome",
+          "usageQuality",
+          "inputTokens",
+          "outputTokens",
+          "costMicros",
+          "frozenMicros",
+          "frozenTokens",
+          "currency",
+          "dayPeriodStart",
+          "monthPeriodStart",
+          "priceVersion",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "UsagePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Usage"
+            },
+            "maxItems": 200
+          },
+          "nextCursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "ModelList": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "const": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "object": {
+                  "type": "string",
+                  "const": "model"
+                },
+                "created": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "owned_by": {
+                  "type": "string",
+                  "const": "auriga"
+                }
+              },
+              "required": [
+                "id",
+                "object",
+                "created",
+                "owned_by"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "object",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user",
+              "assistant",
+              "tool"
+            ]
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1048576
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "tool_call_id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolCall"
+            },
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "additionalProperties": false
+      },
+      "ToolCall": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "type": {
+            "type": "string",
+            "const": "function"
+          },
+          "function": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
+              },
+              "arguments": {
+                "type": "string",
+                "maxLength": 262144
+              }
+            },
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "function"
+        ],
+        "additionalProperties": false
+      },
+      "Tool": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "function"
+          },
+          "function": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "name",
+              "parameters"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "function"
+        ],
+        "additionalProperties": false
+      },
+      "ChatCompletionRequest": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "maxItems": 256,
+            "minItems": 1
+          },
+          "stream": {
+            "type": "boolean",
+            "default": false
+          },
+          "max_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "top_p": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "stop": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "首批仅接受最多4个字符串的数组，不接受单字符串stop。"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tool"
+            },
+            "maxItems": 128
+          },
+          "tool_choice": {
+            "type": "string",
+            "enum": [
+              "none",
+              "auto",
+              "required"
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "messages",
+          "max_tokens"
+        ],
+        "additionalProperties": false
+      },
+      "TokenUsage": {
+        "type": "object",
+        "properties": {
+          "prompt_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "additionalProperties": false
+      },
+      "ChatCompletion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "chat.completion"
+          },
+          "created": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "model": {
+            "type": "string"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0,
+                  "maximum": 0
+                },
+                "message": {
+                  "$ref": "#/components/schemas/AssistantMessage"
+                },
+                "finish_reason": {
+                  "type": "string",
+                  "enum": [
+                    "stop",
+                    "length",
+                    "tool_calls",
+                    "content_filter"
+                  ]
+                }
+              },
+              "required": [
+                "index",
+                "message",
+                "finish_reason"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 1,
+            "minItems": 1
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "usage"
+        ],
+        "additionalProperties": false
+      },
+      "ToolCallDelta": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "const": "function"
+          },
+          "function": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "arguments": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "index"
+        ],
+        "additionalProperties": false
+      },
+      "ChatCompletionChunk": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "const": "chat.completion.chunk"
+          },
+          "created": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "model": {
+            "type": "string"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0,
+                  "maximum": 0
+                },
+                "delta": {
+                  "type": "object",
+                  "properties": {
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "assistant"
+                      ]
+                    },
+                    "content": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "tool_calls": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ToolCallDelta"
+                      },
+                      "maxItems": 128
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false
+                },
+                "finish_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "stop",
+                    "length",
+                    "tool_calls",
+                    "content_filter",
+                    null
+                  ]
+                }
+              },
+              "required": [
+                "index",
+                "delta",
+                "finish_reason"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 1
+          },
+          "usage": {
+            "$ref": "#/components/schemas/TokenUsage"
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices"
+        ],
+        "additionalProperties": false
+      },
+      "AiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "authentication_error",
+                  "permission_error",
+                  "invalid_request_error",
+                  "rate_limit_error",
+                  "upstream_error",
+                  "conflict_error",
+                  "internal_error"
+                ]
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "originalRequestId": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "cancelled",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "error",
+          "requestId"
+        ],
+        "additionalProperties": false
+      },
+      "AdmissionPolicy": {
+        "type": "object",
+        "properties": {
+          "maxActiveRequestsPerSubject": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 2
+          },
+          "maxInFlightPercent": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          },
+          "maxInFlightMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "maxInFlightTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "maxActiveRequestsPerSubject",
+          "maxInFlightPercent"
+        ],
+        "additionalProperties": false,
+        "description": "部署配置，不接受数据面覆盖。按(tid,sub)跨设备/实例统一原子执行。周期不限时对应正数绝对上限必填；unknown预占继续占用；0配额禁止。"
+      },
+      "AssistantMessage": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "const": "assistant"
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolCall"
+            },
+            "maxItems": 128
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "x-instance-channel": {
+    "definition": "../ai/README.md#身份和受信实例通道d1",
+    "publicEntry": "reject-ctx-instance",
+    "nodeEntry": "/internal/ai/v1",
+    "gatewayPeer": "trusted-edge-mtls",
+    "requiredHeaders": [
+      "Auriga-Forwarded-Tenant",
+      "Auriga-Forwarded-Instance",
+      "Auriga-Forwarded-Node"
+    ],
+    "binding": "JWT + node certificate + local per-instance socket + online workspace binding",
+    "routeTable": "../ai/instance-routes.json"
+  }
+}
