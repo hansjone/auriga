@@ -16,12 +16,14 @@ export type Problem = {
 export class ApiError extends Error {
   readonly problem: Problem;
   readonly status: number;
+  readonly retryAfter?: string;
 
-  constructor(problem: Problem) {
+  constructor(problem: Problem, retryAfter?: string) {
     super(problem.detail || problem.title || problem.code);
     this.name = 'ApiError';
     this.problem = problem;
     this.status = problem.status;
+    this.retryAfter = retryAfter;
   }
 }
 

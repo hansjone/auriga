@@ -1,9 +1,9 @@
 name: Web
 on:
   push:
-    paths: ['web/**', 'clients/**', 'contracts/openapi/**', 'contracts/identity/steps.schema.json', 'package.json', 'pnpm-workspace.yaml', '.npmrc', '.nvmrc', '.prettierrc*', 'eslint.config.*', 'tsconfig.base.json', '.github/workflows/web.yml']
+    paths: ['web/**', 'clients/**', 'contracts/openapi/**', 'contracts/deployment/**', 'contracts/identity/steps.schema.json', 'package.json', 'pnpm-workspace.yaml', '.npmrc', '.nvmrc', '.prettierrc*', 'eslint.config.*', 'tsconfig.base.json', '.github/workflows/web.yml']
   pull_request:
-    paths: ['web/**', 'clients/**', 'contracts/openapi/**', 'contracts/identity/steps.schema.json', 'package.json', 'pnpm-workspace.yaml', '.npmrc', '.nvmrc', '.prettierrc*', 'eslint.config.*', 'tsconfig.base.json', '.github/workflows/web.yml']
+    paths: ['web/**', 'clients/**', 'contracts/openapi/**', 'contracts/deployment/**', 'contracts/identity/steps.schema.json', 'package.json', 'pnpm-workspace.yaml', '.npmrc', '.nvmrc', '.prettierrc*', 'eslint.config.*', 'tsconfig.base.json', '.github/workflows/web.yml']
 permissions:
   contents: read
 jobs:

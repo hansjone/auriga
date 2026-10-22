@@ -1,4 +1,9 @@
-import { createApiClient, createIamApi, createOrgApi } from '@auriga/shared';
+import {
+  createApiClient,
+  createIamApi,
+  createOrgApi,
+  readAccessMode,
+} from '@auriga/shared';
 import type { Router } from 'vue-router';
 
 let loginRedirect: (() => void) | undefined;
@@ -15,6 +20,7 @@ export function bindApiRouter(router: Router) {
 }
 
 export const apiClient = createApiClient({
+  getAdminAccessMode: () => readAccessMode(),
   getLocale: () => document.documentElement.lang || 'zh-CN',
   onUnauthenticated: () => loginRedirect?.(),
 });
