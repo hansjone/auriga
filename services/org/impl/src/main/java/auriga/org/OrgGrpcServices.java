@@ -109,16 +109,7 @@ public final class OrgGrpcServices {
     public void getEffectivePermissions(
         GetEffectivePermissionsRequest request,
         StreamObserver<GetEffectivePermissionsResponse> observer) {
-      UUID tid = UUID.fromString(request.getTenantId());
-      UUID aid = UUID.fromString(request.getAccountId());
-      var eff = TenantContext.call(tid, () -> org.getEffectivePermissions(aid));
-      observer.onNext(
-          GetEffectivePermissionsResponse.newBuilder()
-              .setMemberType(memberType(eff.memberType()))
-              .setStatus(memberStatus(eff.status()))
-              .addAllRoleKeys(eff.roleKeys())
-              .addAllPermissions(eff.permissions())
-              .build());
+      observer.onNext(new OrgPermissionResolver(org).getEffectivePermissions(request));
       observer.onCompleted();
     }
 
@@ -160,6 +151,15 @@ public final class OrgGrpcServices {
       observer.onNext(b.build());
       observer.onCompleted();
     }
+  }
+
+  static GetEffectivePermissionsResponse effectivePermissionsResponse(OrgService.Effective eff) {
+    return GetEffectivePermissionsResponse.newBuilder()
+        .setMemberType(memberType(eff.memberType()))
+        .setStatus(memberStatus(eff.status()))
+        .addAllRoleKeys(eff.roleKeys())
+        .addAllPermissions(eff.permissions())
+        .build();
   }
 
   public static class InvitationGrpc extends InvitationServiceGrpc.InvitationServiceImplBase {

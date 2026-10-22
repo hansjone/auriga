@@ -12,6 +12,8 @@ import auriga.common.security.AurigaAuthentication;
 import auriga.common.security.AurigaPrincipal;
 import auriga.common.security.PrincipalType;
 import auriga.common.security.TokenContext;
+import auriga.contracts.org.v1.*;
+import auriga.iam.api.M3PermissionCatalog;
 import auriga.org.api.PendingAccount;
 import auriga.testsupport.PostgresExtension;
 import java.time.Clock;
@@ -318,6 +320,195 @@ class OrgCoreTest {
     var perms = resolver.resolve(TENANT, owner.toString(), "admin");
     assertFalse(perms.isEmpty());
     assertTrue(perms.contains("org.members.write"));
+  }
+
+  @Test
+  void m3CatalogRegistersExactMetadataAndBuiltinRolesWithoutGrantingExternalUsers() {
+    UUID owner = seedOwner();
+    store.tenant(
+        TENANT,
+        () -> {
+          var items = svc.listPermissions().path("items");
+          for (var permission : M3PermissionCatalog.all()) {
+            var found =
+                java.util.stream.StreamSupport.stream(items.spliterator(), false)
+                    .filter(p -> p.path("key").asString().equals(permission.key()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(permission.english(), found.path("description").path("en").asString());
+            assertEquals(permission.chinese(), found.path("description").path("zh").asString());
+            assertEquals(permission.sensitive(), found.path("sensitive").asBoolean());
+          }
+          for (var role :
+              java.util.Map.of(
+                      "owner",
+                      OrgIds.ROLE_OWNER,
+                      "admin",
+                      OrgIds.ROLE_ADMIN,
+                      "member",
+                      OrgIds.ROLE_MEMBER,
+                      "external",
+                      OrgIds.ROLE_EXTERNAL)
+                  .entrySet()) {
+            UUID user = UuidV7.next();
+            insertMember(user, "member");
+            bindRole(role.getValue(), "member", user, owner);
+            Set<String> permissions = Set.copyOf(svc.getEffectivePermissions(user).permissions());
+            for (var permission : M3PermissionCatalog.all())
+              assertEquals(
+                  permission.builtinRoles().contains(role.getKey()),
+                  permissions.contains(permission.key()),
+                  role.getKey() + "/" + permission.key());
+          }
+          assertTrue(svc.getEffectivePermissions(owner).permissions().contains("org.tenant.write"));
+          long before = items.size();
+          assertEquals(before, svc.listPermissions().path("items").size());
+          return null;
+        });
+    assertEquals(0, store.jdbc().queryForObject("SELECT count(*) FROM permission", Integer.class));
+  }
+
+  @Test
+  void m3RoleCreationAndGrantCannotExceedActualGrantorPermissions() {
+    UUID owner = seedOwner(), admin = UuidV7.next(), member = UuidV7.next();
+    store.tenant(
+        TENANT,
+        () -> {
+          insertMember(admin, "admin");
+          insertMember(member, "member");
+          bindRole(OrgIds.ROLE_ADMIN, "member", admin, owner);
+          bindRole(OrgIds.ROLE_MEMBER, "member", member, owner);
+          return null;
+        });
+    TenantContext.call(
+        TENANT,
+        () -> {
+          withActor(
+              admin,
+              () -> {
+                assertEquals(
+                    "org.grant_exceeds_own",
+                    assertThrows(
+                            AurigaException.class,
+                            () ->
+                                svc.createRole(
+                                    "escalation",
+                                    OrgJson.object("en", "Escalation", "zh", "扩权"),
+                                    null,
+                                    List.of("resource.levels.admin")))
+                        .errorCode()
+                        .code());
+                var result = svc.checkGrant(admin, List.of(OrgIds.ROLE_OWNER), null);
+                assertFalse(result.allowed());
+                assertTrue(result.exceeding().contains("resource.levels.admin"));
+                return null;
+              });
+          withActor(
+              member,
+              () -> {
+                for (var permission : M3PermissionCatalog.all()) {
+                  if (!permission.adminOnly()) continue;
+                  assertEquals(
+                      "org.grant_exceeds_own",
+                      assertThrows(
+                              AurigaException.class,
+                              () ->
+                                  svc.createRole(
+                                      "escalation",
+                                      OrgJson.object("en", "Escalation", "zh", "扩权"),
+                                      null,
+                                      List.of(permission.key())))
+                          .errorCode()
+                          .code());
+                }
+                return null;
+              });
+          return null;
+        });
+  }
+
+  @Test
+  void instanceAiAuthorizationChecksActualMembershipAndTenant() {
+    UUID owner = seedOwner();
+    var resolver = new OrgPermissionResolver(svc);
+    var request =
+        GetEffectivePermissionsRequest.newBuilder()
+            .setTenantId(TENANT.toString())
+            .setAccountId(owner.toString())
+            .build();
+    assertEquals(
+        "common.forbidden",
+        assertThrows(AurigaException.class, () -> resolver.getEffectivePermissions(request))
+            .errorCode()
+            .code());
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var response = resolver.getEffectivePermissions(request);
+          assertEquals(MemberStatus.MEMBER_STATUS_ACTIVE, response.getStatus());
+          assertTrue(response.getPermissionsList().contains("ai.models.invoke"));
+          assertEquals(
+              "common.not_found",
+              assertThrows(
+                      AurigaException.class,
+                      () ->
+                          resolver.getEffectivePermissions(
+                              request.toBuilder().setAccountId(UuidV7.next().toString()).build()))
+                  .errorCode()
+                  .code());
+          assertEquals(
+              "common.forbidden",
+              assertThrows(
+                      AurigaException.class,
+                      () ->
+                          resolver.getEffectivePermissions(
+                              request.toBuilder()
+                                  .setTenantId(UUID.randomUUID().toString())
+                                  .build()))
+                  .errorCode()
+                  .code());
+          store.tx(
+              () ->
+                  store
+                      .jdbc()
+                      .update(
+                          "UPDATE member SET status='disabled' WHERE tenant_id=? AND id=?",
+                          TENANT,
+                          owner));
+          assertEquals(
+              MemberStatus.MEMBER_STATUS_DISABLED,
+              resolver.getEffectivePermissions(request).getStatus());
+          return null;
+        });
+  }
+
+  @Test
+  void roleRequestsCannotSupplyServerOwnedPrivilegeMetadata() {
+    var controller = new OrgAdminController(svc);
+    for (String flag : List.of("adminOnly", "builtin")) {
+      assertEquals(
+          "common.validation_failed",
+          assertThrows(
+                  AurigaException.class, () -> controller.createRole(OrgJson.object(flag, true)))
+              .errorCode()
+              .code());
+      assertEquals(
+          "common.validation_failed",
+          assertThrows(
+                  AurigaException.class,
+                  () -> controller.updateRole(OrgIds.ROLE_MEMBER, OrgJson.object(flag, true)))
+              .errorCode()
+              .code());
+    }
+    assertEquals(
+        "org.role_builtin",
+        assertThrows(
+                AurigaException.class,
+                () ->
+                    svc.createRole(
+                        "owner", OrgJson.object("en", "Fake", "zh", "伪造"), null, List.of()))
+            .errorCode()
+            .code());
   }
 
   @Test

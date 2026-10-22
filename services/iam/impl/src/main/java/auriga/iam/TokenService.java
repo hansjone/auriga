@@ -78,6 +78,27 @@ public final class TokenService implements InternalTokenIssuer {
         !"internal_service".equals(principalType) && !"auriga.internal".equals(audience),
         "invalid_audience",
         400);
+    // Instance tokens can only be issued after the dedicated internal workspace checks.
+    IamError.validate(
+        tenant != null
+            && subject != null
+            && !subject.isBlank()
+            && audience != null
+            && !audience.isBlank()
+            && switch (context == null ? "" : context) {
+              case "portal", "admin" ->
+                  "user".equals(principalType)
+                      && session != null
+                      && device == null
+                      && !"auriga.ai-gateway".equals(audience);
+              case "device" -> "device".equals(principalType) && device != null && session == null;
+              case "service" ->
+                  "service_account".equals(principalType)
+                      && session == null
+                      && device == null
+                      && !"auriga.ai-gateway".equals(audience);
+              default -> false;
+            });
     var perms =
         permissions.resolve(tenant, subject, context).stream()
             .filter(p -> allowedPermission(p, context))
@@ -96,16 +117,40 @@ public final class TokenService implements InternalTokenIssuer {
   }
 
   static boolean allowedPermission(String permission, String context) {
+    if ("instance".equals(context))
+      return Set.of("ai.models.invoke", "ai.usage.read").contains(permission);
     if ("device".equals(context))
       return permission.equals("auriga.connect")
           || permission.startsWith("auriga.connect.")
               && !permission.matches(".*\\.(write|admin|grant)(\\..*)?");
     if ("portal".equals(context))
-      return !(permission.startsWith("iam.")
+      return !(M3PermissionCatalog.adminOnly(permission)
+          || permission.startsWith("iam.")
           || permission.startsWith("org.")
           || permission.startsWith("ops.")
           || permission.matches(".*\\.(admin|grant)(\\..*)?"));
-    return true;
+    return "admin".equals(context) || "service".equals(context);
+  }
+
+  record IssuedToken(String accessToken, Instant expiresAt) {}
+
+  IssuedToken instanceAi(
+      UUID tenant, UUID owner, UUID instance, long version, Set<String> effective) {
+    IamError.validate(
+        tenant != null
+            && owner != null
+            && instance != null
+            && version >= 1
+            && version <= 9007199254740991L);
+    List<String> perms =
+        effective.stream().filter(p -> allowedPermission(p, "instance")).sorted().toList();
+    if (perms.isEmpty())
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+    ObjectNode claims = base(tenant, owner.toString(), "auriga.ai-gateway", "user", "instance");
+    claims.put("instanceId", instance.toString());
+    claims.put("credentialVersion", version);
+    claims.set("perms", Json.MAPPER.valueToTree(perms));
+    return new IssuedToken(signAccess(claims), Instant.ofEpochSecond(claims.path("exp").asLong()));
   }
 
   private ObjectNode base(UUID tenant, String sub, String aud, String type, String context) {

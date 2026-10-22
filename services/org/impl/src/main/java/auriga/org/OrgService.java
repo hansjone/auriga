@@ -25,12 +25,14 @@ import tools.jackson.databind.node.ObjectNode;
 /** Org business facade: tenants, members, groups, roles, policies, quotas, invitations. */
 public final class OrgService {
   private final OrgStore store;
+  private final M3Permissions m3Permissions;
   private final OrgUserEvents userEvents;
   private final Clock clock;
   private final SecureRandom random = new SecureRandom();
 
   public OrgService(OrgStore store, EventPublisher events, Clock clock) {
     this.store = store;
+    this.m3Permissions = new M3Permissions(store);
     this.userEvents = new OrgUserEvents(events);
     this.clock = clock;
   }
@@ -86,6 +88,7 @@ public final class OrgService {
   public Effective getEffectivePermissions(UUID accountId) {
     return store.tx(
         () -> {
+          m3Permissions.register();
           var member = store.member(accountId).orElse(null);
           if (member == null) return new Effective("member", "active", List.of(), List.of());
           List<String> roles = roleKeysOf(accountId);
@@ -643,45 +646,49 @@ public final class OrgService {
 
   public ObjectNode listPermissions() {
     return store.tx(
-        () ->
-            OrgJson.object(
-                "items",
-                store
-                    .jdbc()
-                    .query(
-                        "SELECT key, service, description_en, description_zh, sensitive FROM permission"
-                            + " WHERE tenant_id=? ORDER BY key",
-                        (rs, i) ->
-                            OrgJson.object(
-                                "key",
-                                rs.getString("key"),
-                                "service",
-                                rs.getString("service"),
-                                "description",
-                                OrgJson.object(
-                                    "en",
-                                    rs.getString("description_en"),
-                                    "zh",
-                                    rs.getString("description_zh")),
-                                "sensitive",
-                                rs.getBoolean("sensitive")),
-                        store.tenantId())));
+        () -> {
+          m3Permissions.register();
+          return OrgJson.object(
+              "items",
+              store
+                  .jdbc()
+                  .query(
+                      "SELECT key, service, description_en, description_zh, sensitive FROM permission"
+                          + " WHERE tenant_id=? ORDER BY key",
+                      (rs, i) ->
+                          OrgJson.object(
+                              "key",
+                              rs.getString("key"),
+                              "service",
+                              rs.getString("service"),
+                              "description",
+                              OrgJson.object(
+                                  "en",
+                                  rs.getString("description_en"),
+                                  "zh",
+                                  rs.getString("description_zh")),
+                              "sensitive",
+                              rs.getBoolean("sensitive")),
+                      store.tenantId()));
+        });
   }
 
   public ObjectNode listRoles() {
     return store.tx(
-        () ->
-            OrgJson.object(
-                "items",
-                store
-                    .jdbc()
-                    .query(
-                        "SELECT r.id, r.key, r.name_en, r.name_zh, r.description_en, r.description_zh,"
-                            + " r.builtin, r.permissions,"
-                            + " (SELECT count(*) FROM role_binding b WHERE b.tenant_id=r.tenant_id AND b.role_id=r.id) AS binding_count"
-                            + " FROM role r WHERE r.tenant_id=? ORDER BY r.builtin DESC, r.key",
-                        (rs, i) -> roleJson(rs),
-                        store.tenantId())));
+        () -> {
+          m3Permissions.register();
+          return OrgJson.object(
+              "items",
+              store
+                  .jdbc()
+                  .query(
+                      "SELECT r.id, r.key, r.name_en, r.name_zh, r.description_en, r.description_zh,"
+                          + " r.builtin, r.permissions,"
+                          + " (SELECT count(*) FROM role_binding b WHERE b.tenant_id=r.tenant_id AND b.role_id=r.id) AS binding_count"
+                          + " FROM role r WHERE r.tenant_id=? ORDER BY r.builtin DESC, r.key",
+                      (rs, i) -> roleJson(rs),
+                      store.tenantId()));
+        });
   }
 
   private ObjectNode roleJson(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -709,6 +716,7 @@ public final class OrgService {
   public ObjectNode getRole(UUID roleId) {
     return store.tx(
         () -> {
+          m3Permissions.register();
           List<ObjectNode> rows =
               store
                   .jdbc()
@@ -727,6 +735,8 @@ public final class OrgService {
 
   public ObjectNode createRole(
       String key, JsonNode name, JsonNode description, List<String> permissions) {
+    OrgError.require(
+        !Set.of("owner", "admin", "member", "external").contains(key), "role_builtin", 409);
     return store.tx(
         () -> {
           Set<String> grantor =

@@ -180,6 +180,7 @@ public class OrgAdminController {
   @RequiresPermission("org.roles.write")
   @ResponseStatus(HttpStatus.CREATED)
   public ObjectNode createRole(@RequestBody ObjectNode body) {
+    serverOwnedRoleFlags(body);
     return org.createRole(
         body.path("key").asString(),
         body.path("name"),
@@ -196,6 +197,7 @@ public class OrgAdminController {
   @PatchMapping("/roles/{roleId}")
   @RequiresPermission("org.roles.write")
   public ObjectNode updateRole(@PathVariable UUID roleId, @RequestBody ObjectNode body) {
+    serverOwnedRoleFlags(body);
     List<String> perms =
         body.has("permissions")
             ? OrgJson.MAPPER.convertValue(body.path("permissions"), List.class)
@@ -205,6 +207,12 @@ public class OrgAdminController {
         body.has("name") ? body.path("name") : null,
         body.has("description") ? body.path("description") : null,
         perms);
+  }
+
+  private static void serverOwnedRoleFlags(ObjectNode body) {
+    if (body.has("adminOnly") || body.has("builtin"))
+      throw new auriga.common.error.AurigaException(
+          auriga.common.error.CommonErrors.VALIDATION_FAILED);
   }
 
   @DeleteMapping("/roles/{roleId}")

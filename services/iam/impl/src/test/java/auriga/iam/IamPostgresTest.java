@@ -106,6 +106,57 @@ class IamPostgresTest {
   }
 
   @Test
+  void instanceAiAccountLookupUsesTenantScopedRuntimeRls() {
+    UUID tenant = UUID.randomUUID(), other = UUID.randomUUID(), owner = UUID.randomUUID();
+    store.tenant(
+        tenant,
+        () ->
+            store.insert(
+                "account",
+                owner.toString(),
+                Json.object(
+                    "accountId",
+                    owner.toString(),
+                    "status",
+                    "active",
+                    "createdAt",
+                    Instant.now().toString()),
+                null));
+    var accounts = new IamAccounts(store);
+    var request =
+        auriga.contracts.iam.v1.GetAccountRequest.newBuilder()
+            .setTenantId(tenant.toString())
+            .setAccountId(owner.toString())
+            .build();
+    assertEquals(
+        auriga.contracts.iam.v1.AccountStatus.ACCOUNT_STATUS_ACTIVE,
+        TenantContext.call(tenant, () -> accounts.get(request)).getAccount().getStatus());
+    assertEquals(
+        "common.not_found",
+        assertThrows(
+                auriga.common.error.AurigaException.class,
+                () ->
+                    TenantContext.call(
+                        other,
+                        () ->
+                            accounts.get(
+                                request.toBuilder().setTenantId(other.toString()).build())))
+            .errorCode()
+            .code());
+    store.tenant(
+        tenant,
+        () -> {
+          var row = store.get("account", owner.toString(), true);
+          row.put("status", "disabled");
+          store.save("account", row);
+          return null;
+        });
+    assertEquals(
+        auriga.contracts.iam.v1.AccountStatus.ACCOUNT_STATUS_DISABLED,
+        TenantContext.call(tenant, () -> accounts.get(request)).getAccount().getStatus());
+  }
+
+  @Test
   void allBusinessTablesForceRlsAndRuntimeCannotDisableIt() {
     var tables =
         jdbc.queryForList(
