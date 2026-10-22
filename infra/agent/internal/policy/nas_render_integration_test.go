@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -43,104 +44,120 @@ func TestNASRenderedAgentPolicy(t *testing.T) {
 		{name: "default_registry_port", port: "15000"},
 		{name: "custom_registry_port", port: "25443", env: "AURIGA_HOST_PUBLISH_REGISTRY=25443\n"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			base, err := os.MkdirTemp("", "auriga-policy-")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = os.RemoveAll(base) })
-			if err := os.Chmod(base, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			dataRoot := filepath.Join(base, "srv", "container", "auriga-policy-test")
-			if err := os.MkdirAll(dataRoot, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			stackEnv := "AURIGA_DATA_ROOT=" + dataRoot + "\nAURIGA_ACCESS_FILE=" + filepath.Join(nasRoot, "access-ip.example.json") + "\nAURIGA_INTERNAL_SUBNET=192.0.2.128/26\nAURIGA_INTERNAL_EDGE_IP=192.0.2.138\nAURIGA_LAN_SUBNET=192.0.2.0/26\nAURIGA_EDGE_LAN_IP=192.0.2.10\n" + tc.env
-			if err := os.WriteFile(filepath.Join(dataRoot, "stack.env"), []byte(stackEnv), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			// Build the public binary before invoking the install scripts; the NAS never compiles.
-			bin := filepath.Join(base, "bin")
-			if err := os.Mkdir(bin, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			build := exec.Command("go", "build", "-o", filepath.Join(bin, "auriga-nas-bootstrap"), ".")
-			build.Dir = filepath.Join(nasRoot, "bootstrap")
-			build.Env = deploymentTestEnv(nasRoot, dataRoot)
-			if output, err := build.CombinedOutput(); err != nil {
-				t.Fatalf("prebuild NAS binary: %v\n%s", err, output)
-			}
-			env := append(deploymentTestEnv(nasRoot, dataRoot), "AURIGA_NAS_BOOTSTRAP_BINARY="+filepath.Join(bin, "auriga-nas-bootstrap"))
-			for _, script := range []string{"init.sh", "render.sh"} {
-				ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
-				cmd := exec.CommandContext(ctx, "sh", filepath.Join(nasRoot, "scripts", script))
-				cmd.Env = env
-				output, err := cmd.CombinedOutput()
-				cancel()
-				if err != nil {
-					t.Fatalf("real %s failed: %v\n%s", script, err, output)
-				}
-			}
-			p, err := policy.Load(filepath.Join(dataRoot, "config", "materials", "agent-policy.yaml"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Run("exact_repository_scope", func(t *testing.T) {
-				want := []string{"127.0.0.1:" + tc.port + "/auriga/", "localhost:" + tc.port + "/auriga/"}
-				if !reflect.DeepEqual(p.AllowedImageRepos, want) {
-					t.Fatalf("real policy.Load repositories = %v, want %v", p.AllowedImageRepos, want)
-				}
-			})
-			t.Run("unchanged_resource_limits", func(t *testing.T) {
-				if p.MaxCPUMillis != 500 || p.MaxMemoryMB != 512 || p.MaxPIDs != 128 || p.MaxArtifactBytes != 2147483648 {
-					t.Fatalf("rendered resource limits changed: cpu=%d memory=%d pids=%d artifact=%d",
-						p.MaxCPUMillis, p.MaxMemoryMB, p.MaxPIDs, p.MaxArtifactBytes)
-				}
-				cpu, memory, pids := p.ClampResources(99999, 99999, 99999)
-				if cpu != 500 || memory != 512 || pids != 128 {
-					t.Fatalf("real clamp = %d/%d/%d, want 500/512/128", cpu, memory, pids)
-				}
-			})
-			t.Run("no_allow_any_or_remote_artifacts", func(t *testing.T) {
-				if p.AllowAnyImage || p.AllowAnyArtifact {
-					t.Fatal("deployment must not bypass the production allowlists")
-				}
-				if err := p.AllowArtifactURL("https://artifacts.example.com/dsh.tar.gz"); err == nil || err.Error() != "policy: no allowedArtifactURLPrefixes configured" {
-					t.Fatalf("unconfigured remote artifacts must remain denied: %v", err)
-				}
-			})
-			digest := "@sha256:" + strings.Repeat("a", 64)
-			repo := "127.0.0.1:" + tc.port + "/auriga/dsh"
-			for _, image := range []struct {
-				name string
-				ref  string
-				want string
+		for _, access := range []string{"domain", "ip", "proxy"} {
+			for _, budget := range []struct {
+				name, env string
+				memory    int64
 			}{
-				{name: "allow_loopback_digest", ref: repo + digest},
-				{name: "allow_localhost_digest", ref: "localhost:" + tc.port + "/auriga/dsh" + digest},
-				{name: "reject_other_registry", ref: "registry.example.com/auriga/dsh" + digest, want: "policy: image repository not allowlisted"},
-				{name: "reject_other_port", ref: "127.0.0.1:25444/auriga/dsh" + digest, want: "policy: image repository not allowlisted"},
-				{name: "reject_other_repository", ref: "127.0.0.1:" + tc.port + "/other/dsh" + digest, want: "policy: image repository not allowlisted"},
-				{name: "reject_path_prefix_collision", ref: "127.0.0.1:" + tc.port + "/auriga-evil/dsh" + digest, want: "policy: image repository not allowlisted"},
-				{name: "reject_host_prefix_collision", ref: "localhost.evil.example.com:" + tc.port + "/auriga/dsh" + digest, want: "policy: image repository not allowlisted"},
-				{name: "reject_missing_digest", ref: repo, want: "policy: image must be repo@sha256:<64 hex>"},
-				{name: "reject_mutable_tag", ref: repo + ":latest", want: "policy: image must be repo@sha256:<64 hex>"},
-				{name: "reject_short_digest", ref: repo + "@sha256:aaaa", want: "policy: image must be repo@sha256:<64 hex>"},
-				{name: "reject_other_digest_algorithm", ref: repo + "@sha512:" + strings.Repeat("a", 64), want: "policy: image must be repo@sha256:<64 hex>"},
+				{name: "default_memory", memory: 512},
+				{name: "explicit_512", env: "AURIGA_INSTANCE_MAX_MEMORY_MB=512\n", memory: 512},
+				{name: "explicit_1024", env: "AURIGA_INSTANCE_MAX_MEMORY_MB=1024\n", memory: 1024},
 			} {
-				t.Run(image.name, func(t *testing.T) {
-					err := p.AllowImage(image.ref)
-					if image.want == "" {
+				t.Run(tc.name+"/"+access+"/"+budget.name, func(t *testing.T) {
+					base, err := os.MkdirTemp("", "auriga-policy-")
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = os.RemoveAll(base) })
+					if err := os.Chmod(base, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					dataRoot := filepath.Join(base, "srv", "container", "auriga-policy-test")
+					if err := os.MkdirAll(dataRoot, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					stackEnv := "AURIGA_DATA_ROOT=" + dataRoot + "\nAURIGA_ACCESS_FILE=" + filepath.Join(nasRoot, "access-"+access+".example.json") + "\nAURIGA_INTERNAL_SUBNET=192.0.2.128/26\nAURIGA_INTERNAL_EDGE_IP=192.0.2.138\nAURIGA_LAN_SUBNET=192.0.2.0/26\nAURIGA_EDGE_LAN_IP=192.0.2.10\n" + tc.env + budget.env
+					if err := os.WriteFile(filepath.Join(dataRoot, "stack.env"), []byte(stackEnv), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					// Build the public binary before invoking the install scripts; the NAS never compiles.
+					bin := filepath.Join(base, "bin")
+					if err := os.Mkdir(bin, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					build := exec.Command("go", "build", "-o", filepath.Join(bin, "auriga-nas-bootstrap"), ".")
+					build.Dir = filepath.Join(nasRoot, "bootstrap")
+					build.Env = deploymentTestEnv(nasRoot, dataRoot)
+					if output, err := build.CombinedOutput(); err != nil {
+						t.Fatalf("prebuild NAS binary: %v\n%s", err, output)
+					}
+					env := append(deploymentTestEnv(nasRoot, dataRoot), "AURIGA_NAS_BOOTSTRAP_BINARY="+filepath.Join(bin, "auriga-nas-bootstrap"))
+					for _, script := range []string{"init.sh", "render.sh"} {
+						ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+						cmd := exec.CommandContext(ctx, "sh", filepath.Join(nasRoot, "scripts", script))
+						cmd.Env = env
+						output, err := cmd.CombinedOutput()
+						cancel()
 						if err != nil {
-							t.Fatalf("real policy.AllowImage(%q): %v", image.ref, err)
+							t.Fatalf("real %s failed: %v\n%s", script, err, output)
 						}
-					} else if err == nil || err.Error() != image.want {
-						t.Fatalf("real policy.AllowImage(%q) = %v, want %s", image.ref, err, image.want)
+					}
+					p, err := policy.Load(filepath.Join(dataRoot, "config", "materials", "agent-policy.yaml"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Run("exact_repository_scope", func(t *testing.T) {
+						want := []string{"127.0.0.1:" + tc.port + "/auriga/", "localhost:" + tc.port + "/auriga/"}
+						if !reflect.DeepEqual(p.AllowedImageRepos, want) {
+							t.Fatalf("real policy.Load repositories = %v, want %v", p.AllowedImageRepos, want)
+						}
+					})
+					t.Run("unchanged_resource_limits", func(t *testing.T) {
+						if p.MaxCPUMillis != 500 || p.MaxMemoryMB != budget.memory || p.MaxPIDs != 128 || p.MaxArtifactBytes != 2147483648 {
+							t.Fatalf("rendered resource limits changed: cpu=%d memory=%d pids=%d artifact=%d",
+								p.MaxCPUMillis, p.MaxMemoryMB, p.MaxPIDs, p.MaxArtifactBytes)
+						}
+						for _, request := range []int64{256, 512, 1024, 99999} {
+							t.Run("memory_request_"+strconv.FormatInt(request, 10), func(t *testing.T) {
+								cpu, memory, pids := p.ClampResources(99999, request, 99999)
+								want := min(request, budget.memory)
+								if cpu != 500 || memory != want || pids != 128 {
+									t.Fatalf("real clamp = %d/%d/%d, want 500/%d/128", cpu, memory, pids, want)
+								}
+							})
+						}
+					})
+					t.Run("no_allow_any_or_remote_artifacts", func(t *testing.T) {
+						if p.AllowAnyImage || p.AllowAnyArtifact {
+							t.Fatal("deployment must not bypass the production allowlists")
+						}
+						if err := p.AllowArtifactURL("https://artifacts.example.com/dsh.tar.gz"); err == nil || err.Error() != "policy: no allowedArtifactURLPrefixes configured" {
+							t.Fatalf("unconfigured remote artifacts must remain denied: %v", err)
+						}
+					})
+					digest := "@sha256:" + strings.Repeat("a", 64)
+					repo := "127.0.0.1:" + tc.port + "/auriga/dsh"
+					for _, image := range []struct {
+						name string
+						ref  string
+						want string
+					}{
+						{name: "allow_loopback_digest", ref: repo + digest},
+						{name: "allow_localhost_digest", ref: "localhost:" + tc.port + "/auriga/dsh" + digest},
+						{name: "reject_other_registry", ref: "registry.example.com/auriga/dsh" + digest, want: "policy: image repository not allowlisted"},
+						{name: "reject_other_port", ref: "127.0.0.1:25444/auriga/dsh" + digest, want: "policy: image repository not allowlisted"},
+						{name: "reject_other_repository", ref: "127.0.0.1:" + tc.port + "/other/dsh" + digest, want: "policy: image repository not allowlisted"},
+						{name: "reject_path_prefix_collision", ref: "127.0.0.1:" + tc.port + "/auriga-evil/dsh" + digest, want: "policy: image repository not allowlisted"},
+						{name: "reject_host_prefix_collision", ref: "localhost.evil.example.com:" + tc.port + "/auriga/dsh" + digest, want: "policy: image repository not allowlisted"},
+						{name: "reject_missing_digest", ref: repo, want: "policy: image must be repo@sha256:<64 hex>"},
+						{name: "reject_mutable_tag", ref: repo + ":latest", want: "policy: image must be repo@sha256:<64 hex>"},
+						{name: "reject_short_digest", ref: repo + "@sha256:aaaa", want: "policy: image must be repo@sha256:<64 hex>"},
+						{name: "reject_other_digest_algorithm", ref: repo + "@sha512:" + strings.Repeat("a", 64), want: "policy: image must be repo@sha256:<64 hex>"},
+					} {
+						t.Run(image.name, func(t *testing.T) {
+							err := p.AllowImage(image.ref)
+							if image.want == "" {
+								if err != nil {
+									t.Fatalf("real policy.AllowImage(%q): %v", image.ref, err)
+								}
+							} else if err == nil || err.Error() != image.want {
+								t.Fatalf("real policy.AllowImage(%q) = %v, want %s", image.ref, err, image.want)
+							}
+						})
 					}
 				})
 			}
-		})
+		}
 	}
 }
 

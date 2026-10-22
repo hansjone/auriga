@@ -3,14 +3,33 @@ package main
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
+
+// Keep the Docker MiB-to-byte conversion within signed int64, on every platform.
+func parseInstanceMaxMemoryMB(value string) (int64, error) {
+	if value == "" || value[0] < '1' || value[0] > '9' {
+		return 0, fmt.Errorf("instance-max-memory-mb must be a canonical positive decimal MiB integer")
+	}
+	for i := 1; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return 0, fmt.Errorf("instance-max-memory-mb must be a canonical positive decimal MiB integer")
+		}
+	}
+	memory, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || memory > math.MaxInt64/(1024*1024) {
+		return 0, fmt.Errorf("instance-max-memory-mb exceeds the safe MiB-to-byte limit")
+	}
+	return memory, nil
+}
 
 func loadNASAccess(path, peerIP, subnet string, registryPort int) ([]byte, deploymentconfig.Config, error) {
 	if path == "" {
@@ -96,7 +115,7 @@ func validateNASLAN(value, subnet, componentSubnet string) error {
 	return nil
 }
 
-func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer string, registry int, lanIP string) {
+func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer string, registry int, lanIP string, maxMemoryMB int64) {
 	writeFile(filepath.Join(out, "access.json"), raw, 0o644)
 	ls := cfg.Listeners()
 	writeFile(filepath.Join(out, "access.env"), []byte(fmt.Sprintf("AURIGA_NAS_ISSUER=%s\nAURIGA_NAS_PORTAL_HOST=%s\nAURIGA_NAS_ADMIN_HOST=%s\nAURIGA_NAS_PORTAL_URL=%s\nAURIGA_NAS_ADMIN_URL=%s\nAURIGA_NAS_PORTAL_PORT=%d\nAURIGA_NAS_ADMIN_PORT=%d\nAURIGA_NAS_PORTAL_TARGET_PORT=%d\nAURIGA_NAS_ADMIN_TARGET_PORT=%d\n", cfg.Issuer(), cfg.PortalOrigin().Host, cfg.AdminOrigin().Host, cfg.PortalURL(), cfg.AdminURL(), cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, ls.Portal.Port, ls.Admin.Port)), 0o644)
@@ -134,5 +153,5 @@ set -eu
 test -s /run/auriga-internal/edge/service.jwt
 exec curl --fail --silent --show-error --noproxy '*' --cacert /etc/auriga/pki/ca.crt --cert /etc/auriga/pki/edge-iam.crt --key /etc/auriga/pki/edge-iam.key --resolve platform:8081:127.0.0.1 https://platform:8081/actuator/health
 `), 0o644)
-	writeFile(filepath.Join(out, "agent-policy.yaml"), []byte(fmt.Sprintf("allowedImageRepos:\n  - 127.0.0.1:%d/auriga/\n  - localhost:%d/auriga/\nmaxCPUMillis: 500\nmaxMemoryMB: 512\nmaxPIDs: 128\nmaxArtifactBytes: 2147483648\n", registry, registry)), 0o644)
+	writeFile(filepath.Join(out, "agent-policy.yaml"), []byte(fmt.Sprintf("allowedImageRepos:\n  - 127.0.0.1:%d/auriga/\n  - localhost:%d/auriga/\nmaxCPUMillis: 500\nmaxMemoryMB: %d\nmaxPIDs: 128\nmaxArtifactBytes: 2147483648\n", registry, registry, maxMemoryMB)), 0o644)
 }
