@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "bundle": "node scripts/bundle.mjs",
-    "check-schemas": "node scripts/check-schemas.mjs && node --test ../../contracts/test/m3.test.mjs ../../contracts/test/ip-mode.test.mjs",
+    "gen-access": "node scripts/gen-access.mjs",
+    "check-schemas": "node scripts/check-schemas.mjs && node --test ../../contracts/test/m3.test.mjs ../../contracts/test/ip-mode.test.mjs scripts/gen-access.test.mjs",
     "lint-openapi": "redocly lint --config ../../contracts/redocly.yaml ../../contracts/openapi/iam.yaml ../../contracts/openapi/org.yaml ../../contracts/openapi/workspace.yaml ../../contracts/openapi/ai.yaml ../../contracts/openapi/resource.yaml ../../contracts/identity/remote-connector.yaml"
   },
   "devDependencies": {
