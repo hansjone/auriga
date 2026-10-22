@@ -42,9 +42,12 @@ func mapInstanceResponse(resp *http.Response, target InstanceTarget, requestPath
 		if err != nil {
 			return err
 		}
+		u, err := url.Parse(mapped)
+		if err != nil || !strictInstancePath(u.Path, u.EscapedPath()) || !strings.HasPrefix(u.EscapedPath(), target.Mount) {
+			return fmt.Errorf("instance response path escapes mount")
+		}
 		if header == "Service-Worker-Allowed" {
-			u, err := url.Parse(mapped)
-			if err != nil || u.RawQuery != "" || u.Fragment != "" {
+			if u.RawQuery != "" || u.Fragment != "" {
 				return fmt.Errorf("invalid service worker scope")
 			}
 		}
@@ -119,6 +122,11 @@ func mapInstanceLocation(raw string, target InstanceTarget, requestPath, request
 		wantHost, wantPort, wantErr := parseAuthority(origin.Host, origin.Scheme)
 		if err != nil || wantErr != nil || host != wantHost || port != wantPort {
 			return "", fmt.Errorf("external instance redirect")
+		}
+		// An absolute origin denotes its root even when URL.Path is empty.
+		// Normalize before resolving so the mapped root retains its slash.
+		if u.Path == "" {
+			u.Path = "/"
 		}
 	}
 	if strings.HasPrefix(u.Path, "/i/") {
