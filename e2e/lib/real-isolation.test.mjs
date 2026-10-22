@@ -40,6 +40,35 @@ test('real isolation rejects a privileged, cross-network or writable-metadata ru
     },
   };
   assertRuntimeIsolation(info, network, edge, 'inst-test');
+  const installedAlias = structuredClone(edge);
+  installedAlias.NetworkSettings.Networks[name].Aliases = [
+    'auriga-instance.internal',
+  ];
+  assertRuntimeIsolation(
+    info,
+    network,
+    installedAlias,
+    'inst-test',
+    'auriga-instance.internal',
+  );
+  assert.throws(() =>
+    assertRuntimeIsolation(
+      info,
+      network,
+      edge,
+      'inst-test',
+      'auriga-instance.internal',
+    ),
+  );
+  assert.throws(() =>
+    assertRuntimeIsolation(
+      info,
+      network,
+      installedAlias,
+      'inst-test',
+      'wrong.internal',
+    ),
+  );
   for (const mutate of [
     (i) => {
       i.Config.User = '0:0';

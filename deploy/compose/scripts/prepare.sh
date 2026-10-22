@@ -28,9 +28,14 @@ esac
 echo "image digest: $DIGEST"
 
 echo "==> bootstrap materials"
+OBSERVER_ARGS=()
+if [ "${AURIGA_M2_HEARTBEAT_OBSERVER:-0}" = 1 ]; then
+  OBSERVER_ARGS=(-heartbeat-observer)
+fi
 (
   cd "$COMPOSE/bootstrap"
-  go run . -out "$VAR" -image "$DIGEST" -fixture "$FIXTURE"
+  go run . -out "$VAR" -image "$DIGEST" -fixture "$FIXTURE" \
+    -edge-container "${COMPOSE_PROJECT_NAME:-auriga-m2}-edge" "${OBSERVER_ARGS[@]}"
 )
 
 # Keys for Java (32-byte base64)
@@ -54,6 +59,14 @@ EOF
 # traverse pki/ and read edge.key + identity-signing-keys.json from the bind mount.
 chmod 755 "$VAR/pki" "$VAR/templates" || true
 chmod 600 "$VAR/pki/ca.key" "$VAR/pki/workspace.key" || true
+# Dedicated IAM HTTP-hop key: owner (runner/health probe) + distroless edge group.
+# This changes only this run's generated file, never host trust or global ACLs.
+if [ "$(id -u)" -eq 0 ]; then
+  chgrp 65532 "$VAR/pki/edge-iam.key"
+else
+  sudo -n chgrp 65532 "$VAR/pki/edge-iam.key"
+fi
+chmod 640 "$VAR/pki/edge-iam.key"
 chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/identity-signing-keys.json" "$VAR/identity-keys.json" \
   "$VAR/edge.config.json" || true

@@ -20,9 +20,14 @@ function pathMatches(cookiePath, reqPath) {
   return rp.charAt(cp.length) === '/';
 }
 
+// Cookie scope is a hostname; ports in an HTTP authority never isolate cookies.
+function hostname(authority) {
+  return new URL(`http://${authority}`).hostname.toLowerCase();
+}
+
 /** Domain-attribute match (leading dot optional); host-only needs exact host. */
 export function domainMatches(cookieDomain, host, hostOnly) {
-  const h = String(host || '').toLowerCase();
+  const h = host ? hostname(host) : '';
   if (!h) return false;
   if (hostOnly) return h === String(cookieDomain || '').toLowerCase();
   let d = String(cookieDomain || '')
@@ -106,7 +111,7 @@ export class CookieJar {
    */
   cookieHeader(req, now = Date.now()) {
     this.#expire(now);
-    const host = String(req.host || '').toLowerCase();
+    const host = req.host ? hostname(req.host) : '';
     const path = req.path || '/';
     const secure = !!req.secure;
     const matched = this.cookies.filter((c) => {
@@ -181,7 +186,7 @@ export function parseSetCookieLine(line, req, now) {
   const value = parts[0].slice(eq + 1).trim();
   if (!name) return null;
 
-  let domain = String(req.host || '').toLowerCase();
+  let domain = req.host ? hostname(req.host) : '';
   let hostOnly = true;
   let path = defaultPath(req.path || '/');
   let secure = false;

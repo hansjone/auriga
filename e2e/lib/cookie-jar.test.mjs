@@ -30,6 +30,56 @@ describe('domainMatches', () => {
 });
 
 describe('CookieJar selection', () => {
+  it('scopes cookies by hostname while selecting audience jars by full authority', () => {
+    const jars = {
+      admin: new CookieJar(),
+      portal: new CookieJar(),
+      instance: new CookieJar(),
+    };
+    const hosts = {
+      admin: 'admin.example.com:8082',
+      portal: 'portal.example.com:8080',
+    };
+    assert.equal(jarForHost(hosts.admin, hosts, jars), jars.admin);
+    assert.equal(jarForHost(hosts.portal, hosts, jars), jars.portal);
+    assert.equal(
+      jarForHost('admin.example.com:8080', hosts, jars),
+      jars.instance,
+    );
+    const browser = new CookieJar();
+    browser.storeFromResponse('auriga_admin_session=a; Path=/; HttpOnly', {
+      host: '192.0.2.10:8082',
+    });
+    assert.equal(
+      browser.cookieHeader({ host: '192.0.2.10:8080' }),
+      'auriga_admin_session=a',
+    );
+    browser.storeFromResponse('auriga_admin_session=; Path=/; Max-Age=0', {
+      host: '192.0.2.10:8080',
+    });
+    assert.equal(browser.cookieHeader({ host: '192.0.2.10:8082' }), '');
+  });
+
+  it('keeps audience transaction cookies independent on one hostname', () => {
+    const browser = new CookieJar();
+    browser.storeFromResponse('auriga_portal_login_tx=p; Path=/; HttpOnly', {
+      host: '192.0.2.10:8080',
+    });
+    browser.storeFromResponse('auriga_admin_login_tx=a; Path=/; HttpOnly', {
+      host: '192.0.2.10:8082',
+    });
+    assert.match(
+      browser.cookieHeader({ host: '192.0.2.10:8080' }),
+      /auriga_admin_login_tx=a/,
+    );
+    browser.storeFromResponse('auriga_admin_login_tx=; Path=/; Max-Age=0', {
+      host: '192.0.2.10:8082',
+    });
+    assert.equal(
+      browser.cookieHeader({ host: '192.0.2.10:8082' }),
+      'auriga_portal_login_tx=p',
+    );
+  });
   it('does not send admin host-only session to instance host', () => {
     const admin = new CookieJar();
     admin.storeFromResponse(

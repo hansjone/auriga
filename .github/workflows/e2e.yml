@@ -50,7 +50,7 @@ jobs:
           docker compose --env-file var/compose.env up -d
           # Wait for platform health
           for i in $(seq 1 90); do
-            if curl -sf http://127.0.0.1:8081/actuator/health >/dev/null; then
+            if sh var/iam-healthcheck.sh >/dev/null; then
               echo "platform healthy"
               break
             fi
@@ -88,7 +88,7 @@ jobs:
       - name: Run e2e
         env:
           EDGE_BASE: http://127.0.0.1:8080
-          PLATFORM_BASE: http://127.0.0.1:8081
+          PLATFORM_BASE: https://127.0.0.1:8081
           ENROLLMENT_FILE: deploy/compose/var/enrollment/emergency-enrollment.json
           JOIN_TOKEN_FILE: deploy/compose/var/join/token
           IDLE_MINUTES: '5'

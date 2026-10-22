@@ -47,10 +47,38 @@ import {
   assertRealHealth,
 } from './lib/real-dsh.mjs';
 
-const EDGE = process.env.EDGE_BASE || 'http://127.0.0.1:8080';
-const PLATFORM = process.env.PLATFORM_BASE || 'http://127.0.0.1:8081';
-const PORTAL_HOST = 'portal.example.com';
-const ADMIN_HOST = 'admin.example.com';
+const ACCESS_FILE = process.env.ACCESS_FILE || 'deploy/compose/var/access.json';
+const access = JSON.parse(readFileSync(ACCESS_FILE, 'utf8'));
+if (access.mode !== 'domain' || access.instances.mode !== 'subdomain')
+  throw new Error(
+    'M2 virtual-Host client requires the domain bootstrap fixture',
+  );
+const origin = (value) =>
+  new URL(`${value.scheme}://${value.host}:${value.port}`);
+const PORTAL_HOST = origin(access.portalOrigin).host;
+const ADMIN_HOST = origin(access.adminOrigin).host;
+const instanceAuthority = (id) =>
+  origin({
+    ...access.instances,
+    host: `${id}.${access.instances.parentDomain}`,
+  }).host;
+const EDGE =
+  process.env.EDGE_BASE || `http://127.0.0.1:${access.portalOrigin.port}`;
+const ADMIN_EDGE =
+  process.env.ADMIN_EDGE_BASE || `http://127.0.0.1:${access.adminOrigin.port}`;
+const IAM_CLIENT_FILE =
+  process.env.IAM_CLIENT_FILE || 'deploy/compose/var/iam-client.json';
+const iamClient = JSON.parse(readFileSync(IAM_CLIENT_FILE, 'utf8'));
+const PLATFORM = process.env.PLATFORM_BASE || iamClient.baseURL;
+if (new URL(PLATFORM).protocol !== 'https:')
+  throw new Error('M2 combined backend requires authenticated HTTPS');
+const iamTLS = {
+  ca: readFileSync(join(dirname(IAM_CLIENT_FILE), iamClient.caFile)),
+  cert: readFileSync(join(dirname(IAM_CLIENT_FILE), iamClient.certFile)),
+  key: readFileSync(join(dirname(IAM_CLIENT_FILE), iamClient.keyFile)),
+  servername: iamClient.serverName,
+  rejectUnauthorized: true,
+};
 const ENROLLMENT =
   process.env.ENROLLMENT_FILE ||
   'deploy/compose/var/enrollment/emergency-enrollment.json';
@@ -66,6 +94,7 @@ const instancePageOk = FIXTURE === 'real' ? realDshPageOk : edgeInstanceOk;
 const WS_PATH = FIXTURE === 'real' ? '/api/remote.mux' : '/ws';
 const evidence = {
   fixture: FIXTURE,
+  entryTest: 'domain synthetic HTTP client (virtual Host), not an IP browser',
   status: 'failed',
   lifecycleVerified: false,
   checks: [],
@@ -107,7 +136,7 @@ function edgeUrl() {
  */
 async function req(path, opts = {}) {
   const host = opts.host || PORTAL_HOST;
-  const base = new URL(opts.base || EDGE);
+  const base = new URL(opts.base || (host === ADMIN_HOST ? ADMIN_EDGE : EDGE));
   const u = new URL(path, base);
   const jar = opts.jar || jarForHost(host, hosts, jars);
   /** @type {Record<string, string>} */
@@ -115,6 +144,9 @@ async function req(path, opts = {}) {
     host,
     ...(opts.headers || {}),
   };
+  const method = opts.method || 'GET';
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !opts.platform)
+    headers.origin ??= `${u.protocol}//${host}`;
   const cookie = jar.cookieHeader({
     host,
     path: u.pathname,
@@ -156,8 +188,9 @@ async function req(path, opts = {}) {
         hostname: u.hostname,
         port: u.port || (u.protocol === 'https:' ? 443 : 80),
         path: u.pathname + u.search,
-        method: opts.method || 'GET',
+        method,
         headers,
+        ...(opts.platform ? iamTLS : {}),
         signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
       },
       (res) => {
@@ -289,8 +322,10 @@ async function loginEmergency(host, jar) {
 
   useJar.deleteByName(sessionName);
   useJar.deleteByName('__Host-' + sessionName);
-  useJar.deleteByName('auriga_login_tx');
-  useJar.deleteByName('__Host-auriga_login_tx');
+  const txCookie =
+    host === ADMIN_HOST ? 'auriga_admin_login_tx' : 'auriga_portal_login_tx';
+  useJar.deleteByName(txCookie);
+  useJar.deleteByName('__Host-' + txCookie);
   useJar.deleteByName('auriga_csrf');
   useJar.deleteByName('__Host-auriga_csrf');
 
@@ -470,13 +505,13 @@ async function accessViaEdge(instanceId, portalJar, instanceJar, deadline) {
     open.res.headers.get('location') ? '(set)' : '(none)',
   );
 
-  const host = `${instanceId}.i.example.com`;
+  const host = instanceAuthority(instanceId);
   // Domain open-nonce → instance jar
   iJar.absorbMatchingDomainCookies(pJar, host);
   let loc = open.res.headers.get('location');
   if (loc) {
     const u = new URL(loc, EDGE);
-    const redeemHost = u.hostname.includes('.') ? u.hostname : host;
+    const redeemHost = u.hostname.includes('.') ? u.host : host;
     iJar.absorbMatchingDomainCookies(pJar, redeemHost);
     const redeem = await req(u.pathname + u.search, {
       host: redeemHost,
@@ -526,7 +561,13 @@ async function verifyRealHost(instanceId, instance) {
     );
   const network = JSON.parse(netInspect.stdout)[0];
   const edgeInfo = JSON.parse(edgeInspect.stdout)[0];
-  assertRuntimeIsolation(info, network, edgeInfo, instanceId);
+  assertRuntimeIsolation(
+    info,
+    network,
+    edgeInfo,
+    instanceId,
+    access.instanceControl.dnsAlias,
+  );
   evidence.isolation = {
     internal: true,
     network: network.Name,
@@ -585,7 +626,7 @@ async function verifyRealHost(instanceId, instance) {
       ? `http://${ip}:7860`
       : '';
   if (!direct) fail('real-runtime', 'no direct container endpoint');
-  const host = `${instanceId}.i.example.com`;
+  const host = instanceAuthority(instanceId);
   const directRequest = (path, options = {}) =>
     req(path, {
       base: direct,
@@ -825,29 +866,30 @@ function findInstanceToken(instanceId) {
 }
 
 async function heartbeatIdle(token, instanceId) {
-  const res = await fetch(
-    new URL('/api/workspace/v1/instance/heartbeat', PLATFORM),
-    {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        'auriga-protocol': '1',
-      },
-      body: JSON.stringify({
-        pluginVersion: '0.0.0-fake',
-        dshVersion: '0.0.0-fake',
-        activity: {
-          runningTurns: 0,
-          openTerminals: 0,
-          activeImBots: 0,
-          connectedClients: 0,
-        },
-        health: { ok: true },
-      }),
+  const res = await req('/api/workspace/v1/instance/heartbeat', {
+    base: PLATFORM,
+    platform: true,
+    host: new URL(PLATFORM).host,
+    jar: new CookieJar(),
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'auriga-protocol': '1',
     },
-  );
-  if (!res.ok) {
+    json: {
+      pluginVersion: '0.0.0-fake',
+      dshVersion: '0.0.0-fake',
+      activity: {
+        runningTurns: 0,
+        openTerminals: 0,
+        activeImBots: 0,
+        connectedClients: 0,
+      },
+      health: { ok: true },
+    },
+  });
+  if (res.status < 200 || res.status >= 300) {
     // A known stopped phase is the only reason to tolerate a rejected trailing
     // fake heartbeat. Transport errors and failures while running remain fatal.
     const instance = await req(`/api/workspace/v1/instances/${instanceId}`, {
@@ -859,7 +901,7 @@ async function heartbeatIdle(token, instanceId) {
     ) {
       return false;
     }
-    fail('heartbeat', `status ${res.status}`, await res.text());
+    fail('heartbeat', `status ${res.status}`, res.text);
   }
   return true;
 }
@@ -993,7 +1035,7 @@ async function waitStoppedStrict(instanceId) {
     finishedAt: insp.finishedAt,
   };
 
-  const host = `${instanceId}.i.example.com`;
+  const host = instanceAuthority(instanceId);
   const page = await req('/', { host, jar: jars.instance });
   try {
     assertStoppedEvidence(insp, page);
@@ -1093,7 +1135,7 @@ async function waitWakeStrict(instanceId, wakeAt, stoppedAt) {
 
 /** Send each actual audience session to the instance Host, bypassing jar routing. */
 async function rejectAudienceCookies(instanceId, portalJar = jars.portal) {
-  const host = `${instanceId}.i.example.com`;
+  const host = instanceAuthority(instanceId);
   for (const [audience, source, sourceHost] of [
     ['portal', portalJar, PORTAL_HOST],
     ['admin', jars.admin, ADMIN_HOST],
@@ -1160,7 +1202,7 @@ async function revokeDualSession(instanceId) {
   await accessViaEdge(instanceId, portalA, instanceA);
   await accessViaEdge(instanceId, portalB, instanceB);
   await rejectAudienceCookies(instanceId, portalA);
-  const host = `${instanceId}.i.example.com`;
+  const host = instanceAuthority(instanceId);
   const edge = edgeUrl();
   const socketOptions = (jar) => ({
     hostname: edge.hostname,
@@ -1168,6 +1210,7 @@ async function revokeDualSession(instanceId) {
     path: WS_PATH,
     hostHeader: host,
     headers: {
+      Origin: `${edge.protocol}//${host}`,
       Cookie: jar.cookieHeader({
         host,
         path: WS_PATH,
@@ -1338,7 +1381,7 @@ async function main() {
     // Same-jar HTTP and same-daemon container positive controls precede the idle
     // window. Repeating a user GET at the idle deadline would restart real idle.
     const beforeIdle = await req('/', {
-      host: `${instanceId}.i.example.com`,
+      host: instanceAuthority(instanceId),
       jar: jars.instance,
     });
     const runningBeforeIdle = dockerInspectRunning(instanceId);

@@ -47,6 +47,9 @@ services:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.platform
     network_mode: host
+    env_file:
+      - path: ./var/access.env
+        required: false # prepare starts registry before generating materials
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +59,17 @@ services:
       SPRING_PROFILES_ACTIVE: combined,dev
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
       AURIGA_PLATFORM_PORT: '8081'
+      # dev supplies seed data only; explicitly retain the production TLS hop.
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_SSL_ENABLED: 'true'
+      AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
+      AURIGA_IAM_TLS_CERT_FILE: /etc/auriga/pki/iam.crt
+      AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
+      AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
+      AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
+      # Exact TCP source: fixed edge control-network address + local health probe.
+      SPRING_APPLICATION_JSON: >-
+        {"auriga":{"iam":{"edge-hop":{"peer-addresses":["172.29.240.10","127.0.0.1"],"allow-loopback-http":false}}}}
       AURIGA_IAM_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
       AURIGA_IAM_DB_USER: auriga_iam
       AURIGA_IAM_DB_PASSWORD: e2e_iam_only
@@ -70,19 +84,16 @@ services:
       AURIGA_WORKSPACE_MIGRATION_PASSWORD: e2e_ws_owner
       AURIGA_IAM_ENCRYPTION_KEY: ${AURIGA_IAM_ENCRYPTION_KEY}
       AURIGA_WORKSPACE_ENCRYPTION_KEY: ${AURIGA_WORKSPACE_ENCRYPTION_KEY}
-      AURIGA_IAM_ISSUER: http://portal.example.com
       # Test enrollment requires password + TOTP through the bridged edge.
       # Docker NAT changes loopback clients to bridge IPs. This dev-only stack
       # opts in explicitly rather than trusting spoofable loopback headers.
       AURIGA_IAM_EMERGENCY_REMOTE_ENABLED: 'true'
-      # Resource-server JWKS fetch must hit platform (issuer Host is virtual / no :8081).
-      AURIGA_IAM_JWK_SET_URI: http://127.0.0.1:8081/oauth2/jwks
+      # combined uses IAM's local public JWKSource, with the configured issuer.
       AURIGA_EVENTS_NATS_URL: nats://platform:e2e_nats_platform@127.0.0.1:4222
       AURIGA_NATS_URL: nats://sessions:e2e_nats_sessions@127.0.0.1:4222
       AURIGA_WORKSPACE_ROUTES_NATS_URL: nats://routes_rw:e2e_nats_routes_rw@127.0.0.1:4222
       AURIGA_ENROLLMENT_FILE: /var/auriga/emergency-enrollment.json
       AURIGA_TEAM_RP_ID: portal.example.com
-      AURIGA_TEAM_ORIGIN: http://portal.example.com
       AURIGA_WORKSPACE_CA_CERTIFICATE_FILE: /etc/auriga/pki/ca.crt
       AURIGA_WORKSPACE_CA_PRIVATE_KEY_FILE: /etc/auriga/pki/ca.key
       AURIGA_WORKSPACE_TLS_CERTIFICATE_FILE: /etc/auriga/pki/workspace.crt
@@ -92,15 +103,13 @@ services:
       AURIGA_WORKSPACE_NODE_SERVER_PORT: '7443'
       AURIGA_WORKSPACE_TEMPLATES_DIRECTORY: /etc/auriga/templates
     volumes:
+      - ./var/access.json:/etc/auriga/access.json:ro
+      - ./var/iam-healthcheck.sh:/etc/auriga/iam-healthcheck.sh:ro
       - ./var/pki:/etc/auriga/pki:ro
       - ./var/templates:/etc/auriga/templates:ro
       - ./var/enrollment:/var/auriga
     healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'curl -sf http://127.0.0.1:8081/actuator/health || exit 1',
-        ]
+      test: ['CMD-SHELL', 'sh /etc/auriga/iam-healthcheck.sh']
       interval: 5s
       timeout: 5s
       retries: 60
@@ -115,6 +124,10 @@ services:
       auriga.role: edge
     ports:
       - '127.0.0.1:8080:8080'
+      - '127.0.0.1:8084:8084'
+    networks:
+      default:
+        ipv4_address: 172.29.240.10
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     depends_on:
@@ -126,17 +139,21 @@ services:
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
     volumes:
+      - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
       - ./var/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
       # pki rw: edge chmod's cert/key on startup (ro bind → EROFS)
       - ./var/pki:/etc/auriga/pki
-      - /var/lib/auriga:/var/lib/auriga:ro
+      - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:ro
 
   agent:
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.agent
     network_mode: host
+    env_file:
+      - path: ./var/access.env
+        required: false
     privileged: false
     depends_on:
       platform:
@@ -146,18 +163,17 @@ services:
       edge:
         condition: service_started
     environment:
-      AURIGA_AGENT_DATA_ROOT: /var/lib/auriga
+      AURIGA_AGENT_DATA_ROOT: ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}
       AURIGA_AGENT_SERVER: https://127.0.0.1:7443
       AURIGA_AGENT_CA_SHA256: ${AURIGA_AGENT_CA_SHA256}
       AURIGA_AGENT_ALLOW_INSECURE: 'true'
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       # Own directory shared with the edge (distroless nonroot gid 65532); the agent dir stays 0700.
-      AURIGA_AGENT_INGRESS_LOCAL: /var/lib/auriga/ingress/ingress.sock
+      AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
       # DNS alias on the edge endpoint inside each isolated instance network.
-      AURIGA_AGENT_INSTANCE_PLATFORM_URL: http://portal.example.com:8080
       AURIGA_AGENT_DOCKER_EDGE_CONTAINER: ${COMPOSE_PROJECT_NAME:-auriga-m2}-edge
       # Same value as edge instanceParentDomain: rendered into DSH trustedHosts.
       AURIGA_AGENT_INSTANCE_PARENT_DOMAIN: i.example.com
@@ -166,7 +182,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Same path on host and in the container: the agent asks the host Docker
       # daemon to bind-mount instance directories, which resolves host paths.
-      - /var/lib/auriga:/var/lib/auriga
+      - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}
       - ./var/join:/run/auriga-join
       - ./var/identity-keys.json:/etc/auriga/identity-keys.json:ro
       - ./var/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
@@ -174,3 +190,9 @@ services:
 volumes:
   pgdata:
   natsdata:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.240.0/24
