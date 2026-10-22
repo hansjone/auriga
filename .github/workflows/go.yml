@@ -18,7 +18,7 @@ jobs:
         shell: bash
         working-directory: infra
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.3'
@@ -45,7 +45,7 @@ jobs:
       matrix:
         module: [gen, edge, ai-gateway, egress, agent, ctl]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.3'
