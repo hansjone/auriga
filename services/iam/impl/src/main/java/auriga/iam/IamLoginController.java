@@ -96,23 +96,25 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
       HttpServletResponse response) {
     return requests.call(
         request,
-        () ->
-            store.tx(
-                () -> {
-                  requests.sameOrigin(request);
-                  if (body.getPurpose() != null && !body.getPurpose().toString().equals("login"))
-                    requests.browserSession(request, sessions, true);
-                  LoginManager.Result result =
-                      login.begin(
-                          Json.MAPPER.valueToTree(body),
-                          requests.host(request).audience(),
-                          requests.clientIp(request),
-                          request.getHeader("User-Agent"),
-                          requests.origin(request),
-                          requests.binding(request));
-                  requests.issued(request, response, result);
-                  return result.transaction();
-                }));
+        () -> {
+          var result =
+              login.beginResponse(
+                  requests.clientIp(request),
+                  () -> {
+                    requests.sameOrigin(request);
+                    if (body.getPurpose() != null && !body.getPurpose().toString().equals("login"))
+                      requests.browserSession(request, sessions, true);
+                    return login.begin(
+                        Json.MAPPER.valueToTree(body),
+                        requests.host(request).audience(),
+                        requests.clientIp(request),
+                        request.getHeader("User-Agent"),
+                        requests.origin(request),
+                        requests.binding(request));
+                  });
+          requests.issued(request, response, result);
+          return result.transaction();
+        });
   }
 
   @GetMapping("/login/transactions/{id}")
@@ -159,15 +161,21 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
       HttpServletResponse response) {
     return requests.call(
         request,
-        () ->
-            store.tx(
-                () -> {
-                  flow(id, request, true);
-                  LoginManager.Result result =
-                      login.advance(id, requests.binding(request), input, false);
-                  requests.issued(request, response, result);
-                  return result.transaction();
-                }));
+        () -> {
+          var result =
+              login.advanceResponse(
+                  id,
+                  requests.binding(request),
+                  requests.host(request).audience(),
+                  requests.origin(request),
+                  input,
+                  () -> {
+                    flow(id, request, true);
+                    return login.advance(id, requests.binding(request), input, false);
+                  });
+          requests.issued(request, response, result);
+          return result.transaction();
+        });
   }
 
   private void flow(String id, HttpServletRequest request, boolean write) {

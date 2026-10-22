@@ -29,6 +29,9 @@ public final class LoginManager {
   private final AuditLogger audit;
   private final Clock clock;
   private final String issuer;
+  private final ScopedValue<Map<String, Integer>> preparedAttempts = ScopedValue.newInstance();
+
+  private record Attempt(String key, int maximum) {}
 
   public LoginManager(
       IamStore store,
@@ -57,6 +60,77 @@ public final class LoginManager {
     this.issuer = issuer;
   }
 
+  /**
+   * Only HTTP login responses own this boundary; existing business transaction APIs stay intact.
+   */
+  private Result response(
+      java.util.function.Supplier<List<Attempt>> preflight,
+      java.util.function.Supplier<Result> work) {
+    store.requireTransactionReleased();
+    var attempts = store.tx(preflight);
+    Map<String, Integer> charged = new HashMap<>();
+    // Each counter commits independently before the login transaction borrows its connection.
+    for (var attempt : attempts) {
+      store.limit(attempt.key(), clock.instant(), attempt.maximum());
+      charged.put(attempt.key(), attempt.maximum());
+    }
+    return sessions.withSigningKey(
+        () ->
+            ScopedValue.where(preparedAttempts, Map.copyOf(charged))
+                .call(
+                    () -> {
+                      Result result = store.tx(work);
+                      if (result.session() != null) sessions.awaitVisible(result.session());
+                      return result;
+                    }));
+  }
+
+  public Result beginResponse(String ip, java.util.function.Supplier<Result> work) {
+    return response(() -> List.of(new Attempt("login-ip:" + ip, 30)), work);
+  }
+
+  public Result advanceResponse(
+      String id,
+      String binding,
+      String audience,
+      String origin,
+      JsonNode input,
+      java.util.function.Supplier<Result> work) {
+    return response(
+        () -> {
+          var tx = checkEntry(id, binding, audience, origin);
+          IamError.require(
+              tx.path("status").asString().equals("pending"), "login_tx_finished", 409);
+          return attempts(tx, provider(tx.path("providerId").asString()), input);
+        },
+        work);
+  }
+
+  public Result callbackResponse(
+      String providerId,
+      String binding,
+      Map<String, String> params,
+      String audience,
+      String origin) {
+    JsonNode input = Json.object("type", "callback", "params", params);
+    return response(
+        () -> {
+          var tx = callbackTransaction(providerId, params);
+          checkEntry(tx.path("id").asString(), binding, audience, origin);
+          IamError.require(
+              tx.path("status").asString().equals("pending"), "login_tx_finished", 409);
+          return attempts(tx, provider(tx.path("providerId").asString()), input);
+        },
+        () -> callback(providerId, binding, params, audience, origin));
+  }
+
+  private void charge(String key, int maximum) {
+    if (!preparedAttempts.isBound()) store.limit(key, clock.instant(), maximum);
+    else if (!Objects.equals(preparedAttempts.get().get(key), maximum))
+      // A concurrently changed flow must not cause a new nested connection acquisition.
+      throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+  }
+
   public Result begin(
       JsonNode request,
       String audience,
@@ -83,7 +157,7 @@ public final class LoginManager {
                 store.save("login_tx", current);
               }
           }
-          store.limit("login-ip:" + ip, clock.instant(), 30);
+          charge("login-ip:" + ip, 30);
           String pid = request.path("providerId").asString();
           ObjectNode provider = provider(pid);
           String purpose = request.path("purpose").asString("login");
@@ -239,34 +313,8 @@ public final class LoginManager {
             return new Result(view(tx, provider), null, null);
           }
           String expected = tx.path("step").path("type").asString();
-          if (!input.path("type").asString().equals("poll")) {
-            store.limit("login-ip:" + tx.path("ip").asString(), clock.instant(), 60);
-            String username =
-                input.path("values").path("username").asString("").strip().toLowerCase(Locale.ROOT);
-            String account = tx.path("pendingAccount").asString("");
-            if (account.isEmpty()
-                && tx.has("state")
-                && provider.path("connectorType").asString().equals("team-account")) {
-              JsonNode state =
-                  Json.MAPPER.readTree(secrets.decrypt(tx.path("state").asString(), aad(tx)));
-              String knownUser = state.path("username").asString("");
-              if (!knownUser.isBlank()) {
-                UUID knownAccount =
-                    teamAccounts.accountIdFor(provider.path("providerId").asString(), knownUser);
-                if (knownAccount != null) account = knownAccount.toString();
-              }
-            }
-            String bucket =
-                !account.isBlank()
-                    ? "account:" + account
-                    : expected.equals("form") && !username.isBlank()
-                        ? "user:" + username
-                        : "tx:" + id;
-            store.limit(
-                "login-provider:" + provider.path("providerId").asString() + ":" + bucket,
-                clock.instant(),
-                account.isBlank() ? 10 : 5);
-          }
+          for (var attempt : attempts(tx, provider, input))
+            charge(attempt.key(), attempt.maximum());
           IamError.require(
               expected.equals(input.path("type").asString())
                   || expected.equals("redirect") && trustedCallback
@@ -374,6 +422,35 @@ public final class LoginManager {
         });
   }
 
+  private List<Attempt> attempts(ObjectNode tx, ObjectNode provider, JsonNode input) {
+    if (input.path("type").asString().equals("poll") || expired(tx)) return List.of();
+    String username =
+        input.path("values").path("username").asString("").strip().toLowerCase(Locale.ROOT);
+    String account = tx.path("pendingAccount").asString("");
+    if (account.isEmpty()
+        && tx.has("state")
+        && provider.path("connectorType").asString().equals("team-account")) {
+      JsonNode state = Json.MAPPER.readTree(secrets.decrypt(tx.path("state").asString(), aad(tx)));
+      String knownUser = state.path("username").asString("");
+      if (!knownUser.isBlank()) {
+        UUID knownAccount =
+            teamAccounts.accountIdFor(provider.path("providerId").asString(), knownUser);
+        if (knownAccount != null) account = knownAccount.toString();
+      }
+    }
+    String bucket =
+        !account.isBlank()
+            ? "account:" + account
+            : tx.path("step").path("type").asString().equals("form") && !username.isBlank()
+                ? "user:" + username
+                : "tx:" + tx.path("id").asString();
+    return List.of(
+        new Attempt("login-ip:" + tx.path("ip").asString(), 60),
+        new Attempt(
+            "login-provider:" + provider.path("providerId").asString() + ":" + bucket,
+            account.isBlank() ? 10 : 5));
+  }
+
   private Result apply(ObjectNode tx, ObjectNode provider, JsonNode result, boolean verifiedMfa) {
     JsonNode step = result.path("step");
     if (step.path("type").asString().equals("done"))
@@ -413,16 +490,7 @@ public final class LoginManager {
       String origin) {
     return store.tx(
         () -> {
-          String state = params.getOrDefault("state", params.getOrDefault("RelayState", ""));
-          IamError.require(!state.isEmpty(), "not_found", 404);
-          ObjectNode tx =
-              store.all("login_tx").stream()
-                  .filter(
-                      t ->
-                          t.path("providerId").asString().equals(providerId)
-                              && Secrets.same(t.path("callbackState").asString(""), state))
-                  .findFirst()
-                  .orElseThrow(() -> IamError.error("not_found", 404));
+          ObjectNode tx = callbackTransaction(providerId, params);
           checkEntry(tx.path("id").asString(), binding, audience, origin);
           return advance(
               tx.path("id").asString(),
@@ -430,6 +498,18 @@ public final class LoginManager {
               Json.object("type", "callback", "params", params),
               true);
         });
+  }
+
+  private ObjectNode callbackTransaction(String providerId, Map<String, String> params) {
+    String state = params.getOrDefault("state", params.getOrDefault("RelayState", ""));
+    IamError.require(!state.isEmpty(), "not_found", 404);
+    return store.all("login_tx").stream()
+        .filter(
+            t ->
+                t.path("providerId").asString().equals(providerId)
+                    && Secrets.same(t.path("callbackState").asString(""), state))
+        .findFirst()
+        .orElseThrow(() -> IamError.error("not_found", 404));
   }
 
   private Result finish(ObjectNode tx, ObjectNode provider, JsonNode profile, boolean coreMfa) {

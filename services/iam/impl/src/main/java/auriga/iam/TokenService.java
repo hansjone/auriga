@@ -17,6 +17,13 @@ public final class TokenService implements InternalTokenIssuer {
   private final Clock clock;
   private final String issuer;
   private final Map<String, String> internalSecrets;
+  private final ScopedValue<ECKey> requestSigningKey = ScopedValue.newInstance();
+
+  /** Snapshot the current authoritative key before a login transaction, for this request only. */
+  <T> T withSigningKey(java.util.function.Supplier<T> work) {
+    ECKey key = keys.current();
+    return ScopedValue.where(requestSigningKey, key).call(work::get);
+  }
 
   public TokenService(
       SigningKeys keys,
@@ -185,7 +192,7 @@ public final class TokenService implements InternalTokenIssuer {
 
   private String sign(ObjectNode claims, String typ) {
     try {
-      ECKey key = keys.current();
+      ECKey key = requestSigningKey.isBound() ? requestSigningKey.get() : keys.current();
       SignedJWT jwt =
           new SignedJWT(
               new JWSHeader.Builder(JWSAlgorithm.ES256)

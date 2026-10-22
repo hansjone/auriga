@@ -80,6 +80,15 @@ public final class SessionManager implements Sessions {
     return new Issued(row, cookie, csrf);
   }
 
+  void awaitVisible(Issued issued) {
+    store.requireTransactionReleased();
+    kv.awaitVisible(Secrets.hash(issued.cookie()));
+  }
+
+  <T> T withSigningKey(java.util.function.Supplier<T> work) {
+    return tokens.withSigningKey(work);
+  }
+
   private void refresh(ObjectNode row) {
     Instant now = clock.instant();
     String access =

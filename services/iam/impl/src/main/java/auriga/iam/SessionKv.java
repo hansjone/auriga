@@ -12,4 +12,9 @@ public interface SessionKv {
   void put(String cookieHash, ObjectNode value);
 
   void delete(String cookieHash);
+
+  /**
+   * Confirm external visibility after the response's database transaction has released resources.
+   */
+  default void awaitVisible(String cookieHash) {}
 }
