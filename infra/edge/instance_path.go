@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 )
 
 func canonicalInstanceID(id string) bool {
@@ -25,10 +26,11 @@ func canonicalInstanceID(id string) bool {
 
 func instanceMount(id string) string { return "/i/" + id + "/" }
 
-// strictInstancePath retains ordinary escaping, but forbids a second decoding
-// pass or a different path interpretation by browsers, edge and node ingress.
+// strictInstancePath retains valid UTF-8 and ordinary escaping, but forbids
+// invalid UTF-8, a second decoding pass or a different path interpretation by
+// browsers, edge and node ingress.
 func strictInstancePath(p, raw string) bool {
-	if strings.ContainsAny(p, "\\\x00\r\n") || strings.Contains(strings.ToLower(raw), "%25") {
+	if !utf8.ValidString(p) || strings.ContainsAny(p, "\\\x00\r\n") || strings.Contains(strings.ToLower(raw), "%25") {
 		return false
 	}
 	for _, c := range p {
