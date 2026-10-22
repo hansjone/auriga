@@ -63,7 +63,7 @@ platform维持uid10001，并加入reader group65532以给新JWT正确设gid。�
 
 容器继续cap-drop ALL、no-new-privileges、非privileged。agent自身因Docker socket+host网络相当于宿主root，只补CHOWN/DAC_OVERRIDE/FOWNER以管理实例；它不是生产多租户强隔离模型。registry无认证但只在宿主loopback发布；前缀白名单不替代镜像摘要/签名信任。platform.env暂仍包含DB/NATS口令和加密key，Docker inspect权限意味着可以看到这些环境。
 
-保留基础预算约3.5–4GiB、约2CPU；实例默认500m CPU、512MiB、128PIDs，容量MAX_INSTANCES=1。policy使用真实 `allowedImageRepos`，只允许当前registry loopback端口下 `auriga/`，镜像须固定repo@sha256摘要。公开real DSH既有模板若要求1024MiB，会被当前512MiB预算拒绝；不能私降模板或手改产物以宣称生命周期通过，需另行明确容量变更。
+保留基础预算约3.5–4GiB、约2CPU；实例默认500m CPU、512MiB、128PIDs，容量MAX_INSTANCES=1。policy使用真实 `allowedImageRepos`，只允许当前registry loopback端口下 `auriga/`，镜像须固定repo@sha256摘要。公开real DSH既有模板请求1024MiB；当前agent按既定策略取min(规格请求,本地上限)，因此在该512MiB cap下实际分配512MiB，不会仅因超限而拒绝。1024MiB是模板请求，不是已验证的最低需求；不能把截断后的启动或未测场景记为完整生命周期通过。真实模板、生成预算与实际运行资源的一致性仍需验收，容量变更须明确配置。
 
 数据库仍PostgreSQL17 Debian uid999；workspace迁移/运行角色分开，iam/org combined仍沿既有限制单角色，RLS不变。NATS无匿名、监控只容器loopback；平台事件/审计、routes写、edge routes只读+sessions及撤销consumer ACL不扩权，JetStream保留内存/磁盘限制。
 
