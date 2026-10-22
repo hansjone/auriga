@@ -133,13 +133,13 @@ func testControlIngressActualLocalDestination(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatalf("private target rejected: %v", err)
 	}
-	response.Body.Close()
+	_ = response.Body.Close()
 	if response.StatusCode != http.StatusNoContent || upstreamCalls.Load() != 1 {
 		t.Fatal("private target did not reach authenticated test upstream")
 	}
 	response, err = request("127.0.0.1")
 	if err == nil {
-		response.Body.Close()
+		_ = response.Body.Close()
 		t.Errorf("LAN target reached HTTP with status %d", response.StatusCode)
 	}
 	if upstreamCalls.Load() != 1 {
@@ -163,7 +163,7 @@ func testControlIngressActualLocalDestination(t *testing.T, mode string) {
 		if err != nil {
 			t.Fatalf("%s browser listener regressed: %v", role, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != 200 {
 			t.Fatalf("%s browser listener status %d", role, resp.StatusCode)
 		}
@@ -266,7 +266,7 @@ func TestControlIngressCloseUnblocksAccept(t *testing.T) {
 	go func() {
 		connection, err := wrapped.Accept()
 		if connection != nil {
-			connection.Close()
+			_ = connection.Close()
 		}
 		done <- err
 	}()
@@ -274,8 +274,8 @@ func TestControlIngressCloseUnblocksAccept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection.Close()
-	wrapped.Close()
+	_ = connection.Close()
+	_ = wrapped.Close()
 	select {
 	case err := <-done:
 		if err == nil {
