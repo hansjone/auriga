@@ -53,7 +53,10 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<ObjectNode> token(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
-    return standard(() -> requests.call(request, () -> oauth.token(credentials(input, request))));
+    return standard(
+        () ->
+            requests.call(
+                request, () -> sessions.response(() -> oauth.token(credentials(input, request)))));
   }
 
   @PostMapping(
@@ -70,6 +73,8 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<String> consent(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
+    if (requests.ipAdmin(request))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
     return requests.call(
         request,
         () ->
@@ -129,6 +134,9 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<Void> authorize(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
+    if (requests.ipAdmin(request))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+    requests.sameOrigin(request);
     return requests.call(
         request,
         () -> {

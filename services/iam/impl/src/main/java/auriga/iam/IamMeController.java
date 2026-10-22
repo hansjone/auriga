@@ -84,15 +84,15 @@ public class IamMeController {
   @AuthenticatedOnly
   public ObjectNode revokeOthers() {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    return store.tx(
+    return sessions.response(
         () -> {
           int revoked = 0;
           for (ObjectNode s : store.all("session"))
             if (s.path("accountId").asString().equals(principal.subject())
-                && !s.path("sessionId").asString().equals(principal.sessionId())
-                && !s.path("revoked").asBoolean()) {
+                && !s.path("sessionId").asString().equals(principal.sessionId())) {
+              boolean wasRevoked = s.path("revoked").asBoolean();
               sessions.revokeOne(s, "user");
-              revoked++;
+              if (!wasRevoked) revoked++;
             }
           return Json.object("revoked", revoked);
         });
@@ -138,7 +138,7 @@ public class IamMeController {
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void changePassword(@RequestBody JsonNode body) {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    store.tx(
+    sessions.response(
         () -> {
           ObjectNode teamIdentity =
               store.all("identity").stream()
@@ -154,10 +154,7 @@ public class IamMeController {
               teamIdentity.path("providerId").asString(),
               body.path("currentPassword").asString(""),
               body.path("newPassword").asString(""));
-          for (ObjectNode s : store.all("session"))
-            if (s.path("accountId").asString().equals(principal.subject())
-                && !s.path("sessionId").asString().equals(principal.sessionId())
-                && !s.path("revoked").asBoolean()) sessions.revokeOne(s, "security");
+          revokeOtherCredentialSessions();
           return null;
         });
   }
@@ -185,7 +182,7 @@ public class IamMeController {
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void confirmTotp(@PathVariable String enrollmentId, @RequestBody JsonNode body) {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    store.tx(
+    sessions.response(
         () -> {
           accounts.confirmTotpEnrollment(
               UUID.fromString(principal.subject()), enrollmentId, body.path("code").asString(""));
@@ -241,7 +238,7 @@ public class IamMeController {
   public ObjectNode completePasskey(
       @PathVariable String registrationId, @RequestBody JsonNode body) {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    return store.tx(
+    return sessions.response(
         () -> {
           ObjectNode result =
               passkeys.completeRegistration(
@@ -462,7 +459,8 @@ public class IamMeController {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
     for (ObjectNode session : store.all("session"))
       if (session.path("accountId").asString().equals(principal.subject())
-          && !session.path("sessionId").asString().equals(principal.sessionId())
-          && !session.path("revoked").asBoolean()) sessions.revokeOne(session, "security");
+          && !session.path("sessionId").asString().equals(principal.sessionId()))
+        // Earlier credential changes may have committed while their deletion confirmation failed.
+        sessions.revokeOne(session, "security");
   }
 }

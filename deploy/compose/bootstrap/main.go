@@ -33,12 +33,18 @@ func main() {
 	out := flag.String("out", "deploy/compose/var", "output directory")
 	image := flag.String("image", "", "docker image ref repo@sha256:… for fake DSH template")
 	fixture := flag.String("fixture", "fake", "DSH fixture: fake or real")
+	edgeContainer := flag.String("edge-container", "auriga-m2-edge", "trusted edge container identity (must match Compose project)")
+	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
 	flag.Parse()
 	if *fixture != "fake" && *fixture != "real" {
 		fatalf("-fixture must be fake or real")
 	}
 	if *image == "" || !containsDigest(*image) {
 		fatalf("-image must be repo@sha256:…")
+	}
+	accessJSON, access, err := marshalAccess(composeAccess(*edgeContainer))
+	if err != nil {
+		fatalf("%v", err)
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fatalf("%v", err)
@@ -67,6 +73,28 @@ func main() {
 		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge.crt"), edgeCert, 0o644)
 	writeFile(filepath.Join(pki, "edge.key"), edgeKey, 0o400)
+
+	iamCert, iamKey := mustIssue(caKey, caCert, "iam-compose", "auriga://iam/compose-e2e",
+		[]string{iamServerName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
+	writeFile(filepath.Join(pki, "iam.crt"), append(iamCert, caPEM...), 0o644)
+	writeFile(filepath.Join(pki, "iam.key"), iamKey, 0o400)
+	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-compose", "auriga://edge/iam-compose-e2e",
+		[]string{edgeHopDNSName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
+	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o400)
+	writeFile(filepath.Join(*out, "access.json"), accessJSON, 0o644)
+	writeFile(filepath.Join(*out, "iam-healthcheck.sh"), []byte(iamHealthcheck()), 0o755)
+	writeJSON(filepath.Join(*out, "iam-client.json"), map[string]any{
+		"baseURL": fmt.Sprintf("https://127.0.0.1:%d", iamPort), "serverName": iamServerName,
+		"caFile": "pki/ca.crt", "certFile": "pki/edge-iam.crt", "keyFile": "pki/edge-iam.key",
+	}, 0o644)
+	writeJSON(filepath.Join(*out, "heartbeat-observer.json"), map[string]any{
+		"enabled": *observer, "listenPort": observerPort,
+		"upstream":   fmt.Sprintf("https://127.0.0.1:%d", iamPort),
+		"serverName": iamServerName, "clientDNSName": edgeHopDNSName,
+		"caFile": "pki/ca.crt", "certFile": "pki/iam.crt", "keyFile": "pki/iam.key",
+		"clientCertFile": "pki/edge-iam.crt", "clientKeyFile": "pki/edge-iam.key",
+	}, 0o644)
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -157,18 +185,21 @@ func main() {
 	}
 	writeFile(filepath.Join(tpl, name+".pb"), raw, 0o644)
 
+	upstreamPort := iamPort
+	if *observer {
+		upstreamPort = observerPort
+	}
 	edgeCfg := map[string]any{
-		"listen":               "0.0.0.0:8080",
-		"portalHost":           "portal.example.com",
-		"adminHost":            "admin.example.com",
-		"instanceParentDomain": "i.example.com",
-		"secureCookies":        false,
-		"allowLocalIngress":    true,
-		"trustedProxies":       []string{"127.0.0.1", "::1"},
+		"accessConfigFile":  "/etc/auriga/access.json",
+		"allowLocalIngress": true,
 		"upstreams": map[string]string{
-			"iam":       "http://host.docker.internal:8081",
-			"org":       "http://host.docker.internal:8081",
-			"workspace": "http://host.docker.internal:8081",
+			"iam":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"org":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"workspace": fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+		},
+		"iamHop": map[string]string{
+			"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key",
+			"caFile": "/etc/auriga/pki/ca.crt", "serverName": iamServerName,
 		},
 		"tls":              map[string]string{"mode": "off"},
 		"rateLimit":        map[string]any{"requestsPerSecond": 200, "burst": 400},
@@ -182,6 +213,10 @@ func main() {
 		},
 	}
 	writeJSON(filepath.Join(*out, "edge.config.json"), edgeCfg, 0o644)
+	// Public values are derived from the validated installation; no credentials.
+	writeFile(filepath.Join(*out, "access.env"), []byte(fmt.Sprintf(
+		"AURIGA_IAM_ISSUER='%s'\nAURIGA_TEAM_ORIGIN='%s'\nAURIGA_AGENT_INSTANCE_PLATFORM_URL='http://%s:%d'\n",
+		access.Issuer(), access.PortalURL(), controlAlias, controlPort)), 0o644)
 
 	policy := map[string]any{
 		"allowedImageRepos": []string{"127.0.0.1:5000/auriga/", "localhost:5000/auriga/"},

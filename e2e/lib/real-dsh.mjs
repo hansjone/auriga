@@ -7,7 +7,13 @@ import {
 } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-export function assertRuntimeIsolation(info, network, edge, instanceId) {
+export function assertRuntimeIsolation(
+  info,
+  network,
+  edge,
+  instanceId,
+  expectedAlias = 'portal.example.com',
+) {
   const [uid, gid] = String(info.Config?.User).split(':').map(Number);
   assert.ok(
     Number.isInteger(uid) && uid >= 200000 && uid === gid,
@@ -60,7 +66,7 @@ export function assertRuntimeIsolation(info, network, edge, instanceId) {
   );
   assert.ok(
     edge.NetworkSettings.Networks[network.Name].Aliases?.includes(
-      'portal.example.com',
+      expectedAlias,
     ),
     'platform DNS alias missing',
   );

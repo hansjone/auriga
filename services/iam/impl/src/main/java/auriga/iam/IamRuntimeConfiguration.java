@@ -26,6 +26,75 @@ import org.springframework.security.web.SecurityFilterChain;
     "${auriga.services.iam.enabled:true}")
 public class IamRuntimeConfiguration {
   @Bean
+  auriga.common.security.AccessTokenSettings iamLocalTokenSettings(
+      auriga.contracts.deploymentconfig.DeploymentAccess access,
+      auriga.common.autoconfigure.AurigaProperties properties,
+      Clock clock) {
+    var jwt = properties.getSecurity().getJwt();
+    if (jwt.getIssuer() != null && !access.issuer().equals(jwt.getIssuer()))
+      throw new IllegalStateException("IAM token verification issuer must equal deployment issuer");
+    // The URI is metadata only: both decoders below receive a local, public-key-only source.
+    return new auriga.common.security.AccessTokenSettings(
+        access.issuer(),
+        URI.create(access.issuer() + "/oauth2/jwks"),
+        jwt.getAudience(),
+        jwt.getClockSkew(),
+        jwt.getJwksCacheTtl(),
+        jwt.getJwksMinRefreshInterval(),
+        clock,
+        access.issuer().startsWith("http://"));
+  }
+
+  @Bean
+  com.nimbusds.jose.jwk.source.JWKSource<com.nimbusds.jose.proc.SecurityContext> iamLocalJwkSource(
+      SigningKeys keys, auriga.common.security.AccessTokenSettings settings) {
+    return com.nimbusds.jose.jwk.source.JWKSourceBuilder
+        .<com.nimbusds.jose.proc.SecurityContext>create(
+            new com.nimbusds.jose.jwk.source.JWKSetSource<>() {
+              @Override
+              public com.nimbusds.jose.jwk.JWKSet getJWKSet(
+                  com.nimbusds.jose.jwk.source.JWKSetCacheRefreshEvaluator refresh,
+                  long now,
+                  com.nimbusds.jose.proc.SecurityContext context)
+                  throws com.nimbusds.jose.KeySourceException {
+                try {
+                  return com.nimbusds.jose.jwk.JWKSet.parse(keys.jwks().toString())
+                      .toPublicJWKSet();
+                } catch (java.text.ParseException | RuntimeException e) {
+                  throw new com.nimbusds.jose.KeySourceException(
+                      "Local IAM public keys unavailable", e);
+                }
+              }
+
+              @Override
+              public void close() {}
+            })
+        .cache(
+            settings.jwksCacheTtl().toMillis(),
+            com.nimbusds.jose.jwk.source.JWKSourceBuilder.DEFAULT_CACHE_REFRESH_TIMEOUT)
+        .refreshAheadCache(false)
+        .rateLimited(Math.max(1, settings.jwksMinRefreshInterval().toMillis()))
+        .retrying(true)
+        .build();
+  }
+
+  @Bean
+  org.springframework.security.oauth2.jwt.JwtDecoder iamAccessTokenDecoder(
+      auriga.common.security.AccessTokenSettings settings,
+      com.nimbusds.jose.jwk.source.JWKSource<com.nimbusds.jose.proc.SecurityContext> source) {
+    return auriga.common.security.AccessTokenDecoders.create(settings, source);
+  }
+
+  @Bean
+  auriga.common.security.InternalTokenVerifier iamInternalTokenVerifier(
+      auriga.common.security.AccessTokenSettings settings,
+      com.nimbusds.jose.jwk.source.JWKSource<com.nimbusds.jose.proc.SecurityContext> source) {
+    return new auriga.common.security.InternalTokenVerifier(
+        new auriga.common.security.AccessTokenVerifier(
+            auriga.common.security.AccessTokenDecoders.createInternal(settings, source)));
+  }
+
+  @Bean
   ContractSchemas iamSchemas() {
     return new ContractSchemas();
   }
@@ -76,7 +145,10 @@ public class IamRuntimeConfiguration {
       ContractSchemas schemas,
       PermissionResolver permissions,
       Clock clock,
+      auriga.contracts.deploymentconfig.DeploymentAccess access,
       Environment env) {
+    if (!access.issuer().equals(env.getRequiredProperty("auriga.iam.issuer")))
+      throw new IllegalStateException("IAM issuer must equal deployment portal Origin");
     return new TokenService(
         keys,
         schemas,
@@ -105,7 +177,7 @@ public class IamRuntimeConfiguration {
     if (connection == null) {
       return postgres;
     }
-    return new CompositeSessionKv(postgres, new NatsSessionKv(connection, schemas));
+    return new CompositeSessionKv(store, postgres, new NatsSessionKv(connection, schemas), clock);
   }
 
   @Bean
@@ -123,7 +195,16 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
-  IamGrpcSessions iamGrpcSessions(SessionManager sessions) {
+  IamGrpcSessions iamGrpcSessions(SessionManager sessions, Environment env) {
+    if (env.getProperty("auriga.grpc.server.enabled", Boolean.class, false)) {
+      String host = env.getProperty("auriga.grpc.server.host", "127.0.0.1");
+      boolean loopback = Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(host);
+      if (!loopback
+          && (!env.containsProperty("auriga.grpc.server.tls-cert-chain")
+              || !env.containsProperty("auriga.grpc.server.tls-private-key")
+              || !env.containsProperty("auriga.grpc.server.tls-trust-cert-collection")))
+        throw new IllegalStateException("IAM non-loopback gRPC requires mTLS");
+    }
     return new IamGrpcSessions(sessions);
   }
 
@@ -296,19 +377,47 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
-  RequestIdentity iamRequestIdentity(Environment env) {
-    Map<String, RequestIdentity.Host> hosts =
-        Binder.get(env)
-            .bind("auriga.iam.hosts", Bindable.mapOf(String.class, RequestIdentity.Host.class))
-            .orElse(Map.of());
-    if (hosts.isEmpty())
-      throw new IllegalStateException("IAM host -> tenant/audience map must be configured");
-    return new RequestIdentity(
-        hosts,
+  auriga.contracts.deploymentconfig.DeploymentAccess iamDeploymentAccess(Environment env)
+      throws java.io.IOException {
+    return auriga.contracts.deploymentconfig.DeploymentAccess.load(
+        java.nio.file.Files.readAllBytes(
+            Path.of(env.getRequiredProperty("auriga.iam.deployment-access-file"))));
+  }
+
+  @Bean
+  static org.springframework.beans.factory.config.BeanPostProcessor iamHopServerGuard(
+      Environment env) {
+    return new IamHopServerGuard(
+        env.getProperty("auriga.iam.edge-hop.allow-loopback-http", Boolean.class, false));
+  }
+
+  @Bean
+  RequestIdentity iamRequestIdentity(
+      Environment env, auriga.contracts.deploymentconfig.DeploymentAccess access) {
+    boolean loopbackHttp =
+        env.getProperty("auriga.iam.edge-hop.allow-loopback-http", Boolean.class, false);
+    if (!"none".equalsIgnoreCase(env.getProperty("server.forward-headers-strategy", "none")))
+      throw new IllegalStateException("IAM edge hop requires raw transport peer and TLS state");
+    if (!loopbackHttp
+        && (!env.getProperty("server.ssl.enabled", Boolean.class, false)
+            || !"need".equalsIgnoreCase(env.getProperty("server.ssl.client-auth", ""))
+            || (!env.containsProperty("server.ssl.trust-store")
+                && !env.containsProperty("server.ssl.trust-certificate"))))
+      throw new IllegalStateException(
+          "IAM HTTP edge hop requires TLS and client-auth=need with a client CA");
+    var peers =
         Set.copyOf(
             Binder.get(env)
-                .bind("auriga.iam.trusted-proxies", Bindable.listOf(String.class))
-                .orElse(List.of())));
+                .bind("auriga.iam.edge-hop.peer-addresses", Bindable.listOf(String.class))
+                .orElse(List.of()));
+    if (loopbackHttp
+        && peers.stream().anyMatch(p -> !Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(p)))
+      throw new IllegalStateException(
+          "IAM insecure development hop must have only numeric loopback peers");
+    return new RequestIdentity(
+        access,
+        new RequestIdentity.Hop(
+            peers, env.getProperty("auriga.iam.edge-hop.dns-san"), loopbackHttp));
   }
 
   @Bean

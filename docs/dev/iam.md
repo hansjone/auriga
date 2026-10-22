@@ -9,33 +9,41 @@ iam 的 common outbox、Flyway 和资源服务器。运行时角色和迁移角�
 IAM 所有查询都经过 `IamStore` 的租户事务；JDBC 使用显式租户条件，数据库使用
 FORCE RLS。JSON 数据的身份关系同时由生成列、复合外键和唯一约束保护。
 
-部署配置的形状如下；密钥通过安装器或环境注入，不能把真实值提交到仓库。
+IAM 与 edge 消费同一份 `contracts/deployment/access.schema.json` 安装配置。
+`auriga.iam.deployment-access-file`（`AURIGA_DEPLOYMENT_ACCESS_FILE`）由
+`DeploymentAccess.load(byte[])` 先按完整生成 schema、再按启动语义验证，拒绝非法配置；
+IAM 的 `issuer` 必须与该配置的门户 Origin 完全一致。tenant、门户/管理台 audience、
+完整 scheme/authority 来自这份已验配置，不再使用旧 `hosts` / `trusted-proxies` 映射。
+配置样例见 `contracts/deployment/fixtures/`；样例不是可直接启动的安装步骤。
 
-```yaml
-auriga:
-  iam:
-    issuer: https://portal.example.com
-    encryption-key: ${AURIGA_IAM_ENCRYPTION_KEY} # 32 个随机字节的标准 Base64
-    hosts:
-      "[portal.example.com]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: portal
-        secure: true
-      "[admin.example.com]":
-        tenant: 00000000-0000-0000-0000-000000000001
-        audience: admin
-        secure: true
-    trusted-proxies: [127.0.0.1]
-    jwks-propagation-seconds: 300
-    emergency-remote-enabled: false
-```
+edge→IAM 使用独立的 HTTPS mTLS 连接。IAM Servlet connector 配置
+`server.ssl.enabled=true`、`server.ssl.client-auth=need`，使用安装指定的
+`AURIGA_IAM_TLS_CERT_FILE`、`AURIGA_IAM_TLS_KEY_FILE` 和
+`AURIGA_IAM_EDGE_CA_FILE`（客户端 CA）。启动还检查实际服务器工厂的 SSL/client-auth/CA；
+不允许用空 CA 或只给请求附加证书属性来替代容器链验证。
+`auriga.iam.edge-hop.peer-addresses`（`AURIGA_IAM_EDGE_PEER_ADDRESSES`）是固定的
+实际 TCP peer IP 白名单，`edge-hop.dns-san`（`AURIGA_IAM_EDGE_DNS_SAN`）固定 edge
+客户端证书的 DNS SAN。`server.forward-headers-strategy=none` 保留原始连接事实。
 
-只有 IP / HTTP 的安装可以把 host 配成 IP，issuer 使用 HTTP，`secure: false`。
-对应 cookie 自动去掉 `__Host-` 和 Secure；不启用跨源凭据。
-反向代理必须保留原始 Host；信任列表中的代理必须**覆盖**
-`X-Auriga-Client-IP`，缺失或格式不正确时 IAM 拒绝请求。客户端不能指定租户或会话
-audience。生产必须把所有反向代理列进信任列表，否则代理的 loopback 地址可能被
-误当成本机用户；不要让代理直接转发客户端伪造的地址头。
+只有验证上述连接后，IAM 才消费单值 `X-Auriga-Entry-Origin` 与
+`X-Auriga-Entry-Role=portal|admin`；完整 Host authority 必须与该入口一致，再绑定
+配置 tenant/audience。浏览器写请求继续核完整同源 Origin，未知 host/端口、错 scheme、
+错入口、缺失/多个/非法 Origin 都失败，不从 `Forwarded` 或外部 tenant/audience 头选身份。
+`X-Auriga-Client-IP` 也只从该已认证 hop 消费，edge 必须覆盖外部自报值。
+
+仅显式开发配置 `edge-hop.allow-loopback-http=true` 可使用 HTTP hop；此时服务器
+实际绑定地址、固定 peer 白名单和实际连接对端都必须是数值回环地址。
+`combined,dev` profile 显式配置此例外；生产默认 false，不从请求或 TLS 失败自动降级。
+浏览器入口仍独立按正式 access 配置判断，内部 hop 的 TLS 不改变浏览器 cookie 的 Secure 属性。
+IAM 进程内的 HTTP 与内部 JWT decoder 使用同一 `SigningKeys.jwks()` 本地公开 key source，
+通过 common 既有 `AccessTokenDecoders.create/createInternal` 完成完整 ES256、typ、issuer、
+audience、时间和身份声明验证；不自 HTTP 回取 JWKS，也不另开未认证 listener。
+本地 source 沿用 Nimbus 的 JWKS TTL、最小刷新间隔、重试和未知 kid 刷新语义；
+发布 NEXT / 激活 / 保留旧公钥流程不变，不把私钥交给 verifier。
+
+combined 的 IAM/org/workspace 共用一个 Servlet connector，生产 client-auth=need 作用于全部路径；
+edge 仅在固定 upstream 的规范 HTTPS origin 与 IAM 相同时复用其 mTLS transport，
+不会把 IAM 的入口头和 cookie 特权带给其它服务。不同 origin 必须分别提供认证通道，缺失时失败关闭。
 
 安装器在受保护的本地安装流程中调用：
 
@@ -73,8 +81,9 @@ Java 插件是受信代码，不是可执行不可信代码的沙箱。
 一次性完成、输入类型匹配、并发锁、准入、账号停用、多因素、会话和事件。
 redirect 步骤必须有 state；核心固定 callback URL 并校验回调 state，具体协议的
 nonce、上游 PKCE、签名或 WebAuthn 校验由对应连接器实现。公开 advance 不接受
-callback 和 event 输入。POST 回调先加密暂存，再 303 到同源 GET，GET 验证浏览器
-cookie 后一次性取出，避免放宽 SameSite。
+callback 和 event 输入。当前没有连接器登记正式表单 POST 回调协议，POST callback 返回 `common.forbidden`，
+不创建 resume、不发会话。GET OIDC 回调保留固定 provider、state、nonce、PKCE 和原事务
+cookie 校验，并按事务绑定的 tenant/audience/规范入口复核；不能把 POST 预留入口当作已支持。
 
 SSE 在事务变化时发 step，结束时发 end 并关闭；浏览器取消和应用关闭会停止工作。
 qr/device 连接器可通过 poll input 推进；内置 QR 手机端的 challenge/confirm 端点
@@ -101,15 +110,39 @@ DirectoryCapability、SessionCheckCapability、CredentialCapability 均有 SPI �
 
 ## 会话、令牌和 OAuth
 
-portal/admin 使用不同的 cookie 和服务端 audience。SessionKv 的 PostgreSQL
-实现按会话 schema 写入，并在读取时执行绝对/闲置期限；键是 cookie 的 SHA-256。
-会话包含 csrfHash，原始 cookie 不落库。edge 负责普通写请求的 CSRF 校验；OAuth
-授权确认页面自己校验绑定在会话中的 CSRF，且禁止嵌入 iframe。
+portal/admin 使用不同的 session cookie 和服务端 audience，登录事务 cookie 分别为
+`auriga_portal_login_tx` / `auriga_admin_login_tx`。session 和事务 cookie 都是 HttpOnly、
+SameSite=Lax、Path=/、无 Domain；HTTPS 加 `__Host-` 与 Secure，HTTP 去掉前缀和 Secure。
+事务绑定规范入口 Origin、tenant、audience 与随机发起端 cookie hash，最多 5 分钟；
+替换、完成、取消或登出只处理当前 audience，另一个入口的事务和会话不变。
+link/stepup 的写操作还重查实际 cookie 对应的权威会话及 sid/tid/subject 和 CSRF。
+
+门户和 domain 管理台继续各自 host 的 `auriga_csrf` cookie + header + `csrfHash` 流程。
+IP 管理台不写/清门户 CSRF cookie，不使用旧 csrfHash 作为管理写授权。
+每个 tab 生成 32 字节规范无填充 base64url token，通过唯一 bootstrap
+`POST /api/iam/v1/admin/session/csrf-tokens` 同源 JSON 登记，固定头
+`X-Auriga-CSRF-Bootstrap: admin-session-v1`。控制器要求 AuthenticatedOnly + AdminOnly，
+实际 admin cookie 必须与 JWT sid/tid/subject 一致，再在线复查权威会话/账号/到期/吊销。
+只持久 token 的 SHA-256 和到期：最多 32 条、最多 900 秒且不超过登记时 session
+绝对/闲置期限；同 hash 重试返回原期限，满额 429 与最早到期 Retry-After，不驱逐有效条目。
+成功 JSON 精确回显本次 token，响应 no-store/nosniff，不下发可读 CSRF cookie。
+
+gRPC SessionService 仅允许 svc:edge introspect/touch/VerifyAdminSessionCsrf、org/ops revoke；
+每次 IP 管理写的 RPC 从实际 cookie 定位锁定的 PostgreSQL session，检查账号、tenant、
+ADMIN audience 和期限。会话无效返回 UNAUTHENTICATED；有效会话但 CSRF 不匹配返回
+active=false 且无 Session；控制面不可用返回 UNAVAILABLE。内部 JWT、mTLS 和授权代租户
+规则由正式运行装配/common 拦截器继续执行，不使用缓存 JWT 或 NATS 正向状态代替。
+
+登记、校验、touch、stepup、权限刷新、吊销共用权威 session 行锁和事务。
+写操作重新读取锁定行，不保存调用方传入的过时快照；吊销后清空全部管理 token。
+PostgreSQL SessionKv 投影与 session 同事务。NATS 只在提交后投影，并按同会话 advisory
+lock 串行重读最新已提交投影，延迟回调不能覆盖新状态或复活吊销；回滚不发投影。
+NATS 写入/删除使用 broker revision CAS，包括缺失键的吊销 tombstone，避免网络超时后迟到的
+旧写覆盖新投影；不使用会跨 tombstone 自动重试的 create 操作。
+NATS 失败不伪装数据库事务回滚，IP 管理写仍逐次在线失败关闭。
 
 `Sessions` 和 `AccountDirectory` 本地接口复用生成的 protobuf 类型。
-gRPC SessionService 只允许 edge introspect/touch、org/ops revoke；AccountService
-允许内部服务。调用方必须先绑定租户，不能用请求中的 tenant_id 切换租户。
-common 拦截器负责服务令牌和代租户白名单。
+调用方先绑定租户，不能从请求 body 的 tenant_id 切换租户；AccountService 允许内部服务。
 
 访问令牌统一 ES256、typ=at+jwt、5 分钟有效期；包含 tid/ptyp/ctx/jti/iat/exp，
 浏览器含 sid，设备含 did，二次验证包含 stepup_time。用户和设备带 mtyp。
@@ -149,11 +182,13 @@ userinfo 接受带 openid scope 的用户访问令牌，按 profile/email scope 
 `IamFlowTest` 验证真实 Argon2/TOTP/JWT、会话及 grant 流程；测试库仅替换持久化 I/O。
 `HttpBoundaryTest` 覆盖 Host、代理信任、cookie、CSRF；`ConnectorContractTest` 覆盖
 SPI、配置和步骤 schema。`IamPostgresTest` 用真实 owner/runtime 两角色验证迁移、
-RLS、事务回滚和限速。数据库测试在 Windows 沙箱可能因 pg_ctl restricted token
+RLS、事务回滚和限速。`AdminCsrfPostgresTest` 覆盖真实 PostgreSQL 的并发 32 槽、重复 hash、
+期限、回滚、吊销与旧 stepup、提交后投影顺序和跨租户；`IamHopTlsTest` 使用真实 Servlet
+容器和 mTLS 握手验证客户端 CA、edge SAN 和实际 peer，不伪造 TLS 请求属性。数据库测试在 Windows 沙箱可能因 pg_ctl restricted token
 失败，不能把内存测试当成 RLS 已通过。
 
 安装器、edge 的代理地址头、org 的邀请兑换/属性映射，以及多服务独立 DataSource
-装配需要主控接线。NATS KV 适配、身份头 Ed25519 密钥服务、完整管理面 CRUD 和 OIDC
+装配需要主控接线。身份头 Ed25519 密钥服务、完整管理面 CRUD 和 OIDC
 认证测试尚未提供。现有 KV TTL 在读取时执行，过期数据的物理清理由后续维护任务处理。
 
 ## 团队账号（team-account）
@@ -214,6 +249,61 @@ yubico 校验认证器 UV 标志；凭据查询还校验 userHandle。
 限速用户名使用 strip + 小写；后续 TOTP 优先按服务端解析的账号分桶（五次/五分钟），
 无账号步骤按事务分桶，用户名阶段十次/五分钟，IP 额度保留。缺失账号仍执行一次
 真实 Argon2 matches。显示名服务端限制 64 字符并拒绝控制字符和格式控制符。
+
+## 会话 KV 的持久投影与事务替换
+
+PostgreSQL 是会话权威。V4 在会话更新或删除的同一事务内，把 cookie hash 合并登记到
+`session_projection`；该表启用 FORCE RLS，不保存会话值或凭据。回滚（包括嵌套保存点）
+同时撤销登记。请求提交回调不申请连接、不调用 NATS，外层事务由原 Spring 管理者正常释放。
+
+`CompositeSessionKv` 作为 Spring `SmartLifecycle` 管理单个后台 worker。每 100ms 最多巡检
+32 个租户，每个租户最多处理一个已到期键；游标持续推进，空队列和失败租户不阻塞其后租户。
+每个键在独立租户事务中用 `FOR UPDATE SKIP LOCKED` 认领，并保留按 hash 的跨进程
+advisory lock。worker 重读最新已提交 PG 值，缺失或过期则写 NATS tombstone；NATS 仍用
+revision CAS。成功发布后才删除认领行；并发写入会等待该行，再登记自己的工作，不丢新代际。
+失败工作持久保留，1 秒起指数退避、上限 60 秒，无重试次数耗尽丢弃；重启会恢复扫描。
+
+登录成功响应另有发布确认边界，覆盖立即完成的 begin、advance 和受信 GET callback。
+它先完成限速预检和当前权威签名私钥读取，再开启登录事务；限速计数独立提交，认证失败不能
+回滚计数。签名私钥只在本次请求的 ScopedValue 中固定，结束自动解除，后续请求重新读取当前
+key，保留 NEXT 激活和旧公钥期限。其它内部业务事务 API 的原有语义不变。
+
+生产响应通过 `IamStore.responseTx` 明确拥有最外层事务，在作用域内收集本次事务登记的全部
+投影键；嵌套业务操作共用该事务。登录、HTTP 单会话吊销/登出/吊销其它会话、口令及凭据登记
+触发的安全吊销、OAuth 刷新重放安全吊销，以及 gRPC RevokeSessions 均使用这个边界。
+Spring 完成提交并归还连接后，响应才向同一 worker 请求确认，混合更新和删除一起等待。
+已经撤销的单会话 HTTP/RPC 重试仍重新登记删除并确认，避免上次提交成功、发布失败后重试假成功。
+`IamMeController` 的口令变更、TOTP 确认和 Passkey 登记完成共用其它会话安全吊销：同租户、
+同账号且非当前会话的已撤销行也重新登记删除确认。因此前次凭据变更已提交但投影失败时，
+后续合法凭据变更仍须确认旧会话删除才能成功；幂等撤销不重复发送撤销事件，也不增加新撤销计数。
+
+确认队列最多 128 项，每轮最多处理 32 项，只携 tenant/hash、存在性要求和完成信号，不另建
+发布线程。worker 按原 FORCE RLS、队列行锁、advisory lock、最新 PG 读取及 NATS CAS 发布，
+自己的事务提交并释放资源后才确认；删除后的 PG 投影不存在是成功状态。此前已发布且没有待办
+工作的键也可确认。每批响应确认共享 5 秒期限，期间不占数据库连接；登录另核当前新会话投影仍
+有效，确认成功才设置会话 cookie 或回调重定向。NATS 失败、worker 不运行、确认队列满或超时均抛既有
+`common.unavailable`，登录和上述 me HTTP 路径映射为 503，不发会话 cookie；OAuth token 端点仍按其
+原有 `standard` 规则将异常转换为 OAuth 错误响应，不能将其描述为统一 HTTP 503。
+已经提交的持久工作仍会恢复，不能靠重放完成
+业务或扩大前端重试来掩盖失败。上述响应边界要求自己拥有事务，若被外部事务或尚未释放资源的
+提交回调包裹，则在执行操作前以同一 503 拒绝；不在外层连接仍占用时等待或新借同池。
+普通查询、VerifyAdminSessionCsrf 和后台投影不进入这个响应边界。
+
+账号事件由 common InboxProcessor 的幂等外层事务拥有提交，IAM handler 继续加入该事务，
+会话状态和持久投影工作一起提交或回滚，由单 worker 在提交后恢复；handler 不在 inbox 连接仍被
+占用时等待发布，也不把 handler 返回当作对外 HTTP/RPC 的吊销响应确认。单 worker 正常轮询时
+可能短暂占用一条连接；请求线程必须已解除事务资源，池空闲观测须允许该后台事务结束。
+
+内部 `session_projection_tenant` 仅存可信 TenantContext 的 UUID，用作重启发现租户的基础设施
+目录，类似 common outbox 不启用 RLS；没有对外查询接口，且不存 hash、状态、撤销信息或凭据。
+所有会话工作及 payload 读写仍必须进入明确租户事务，由 FORCE RLS 隔离。目录不能只来自
+deployment-access 的固定 HTTP 租户，因为内部授权代租户 RPC 和账号事件也可能更新会话。
+目录按租户保留，队列按键合并；NATS 故障时待处理键持久积累，需恢复 broker 后排空。
+
+同一 audience/Origin 的旧登录绑定最多产生一次后继：替换在旧绑定锁内持久标记 `replaced`，
+与取消旧流及创建新流一起提交。两个已在途请求携相同旧 cookie 时，一个成功，另一个返回既有
+`iam.login_tx_finished`；完成或取消后的当前绑定仍可正常重新开始一次。无 cookie 的新浏览器
+和另一 audience 保持独立；已替换旧绑定不会再次生成可继续的后继。
 
 ## 通用 OIDC / OAuth 2.0（oidc）
 

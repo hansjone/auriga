@@ -32,9 +32,14 @@ func TestFixtureTemplates(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(out, "templates", "fake-dsh.pb"), []byte("stale"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if output, err := exec.Command(binary, "-fixture", fixture, "-image", image, "-out", out).CombinedOutput(); err != nil {
+		args := []string{"-fixture", fixture, "-image", image, "-out", out}
+		if fixture == "real" {
+			args = append(args, "-heartbeat-observer")
+		}
+		if output, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 			t.Fatalf("bootstrap %s: %v: %s", fixture, err, output)
 		}
+		assertAccessMaterials(t, out, fixture == "real")
 		name, version := fixture+"-dsh", "0.0.0-fake"
 		if fixture == "real" {
 			version = "0.2.0-rc.2"

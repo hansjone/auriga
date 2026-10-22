@@ -2,6 +2,8 @@ package auriga.iam;
 
 import auriga.common.audit.*;
 import auriga.common.context.*;
+import auriga.common.error.AurigaException;
+import auriga.common.error.CommonErrors;
 import auriga.common.events.EventPublisher;
 import auriga.contracts.iam.v1.*;
 import auriga.iam.api.Sessions;
@@ -78,6 +80,19 @@ public final class SessionManager implements Sessions {
     return new Issued(row, cookie, csrf);
   }
 
+  void awaitVisible(Issued issued) {
+    store.requireTransactionReleased();
+    kv.awaitVisible(Secrets.hash(issued.cookie()));
+  }
+
+  <T> T response(java.util.function.Supplier<T> work) {
+    return store.responseTx(kv, work);
+  }
+
+  <T> T withSigningKey(java.util.function.Supplier<T> work) {
+    return tokens.withSigningKey(work);
+  }
+
   private void refresh(ObjectNode row) {
     Instant now = clock.instant();
     String access =
@@ -114,23 +129,42 @@ public final class SessionManager implements Sessions {
             "mfa",
             "authTime",
             "stepUpAt",
-            "csrfHash")) if (row.has(f)) value.set(f, row.get(f));
+            "csrfHash",
+            "adminCsrfTokens")) if (row.has(f)) value.set(f, row.get(f).deepCopy());
     kv.put(row.path("cookieHash").asString(), value);
   }
 
   public ObjectNode activeByCookie(String raw, String audience) {
     if (raw == null || raw.isEmpty()) return null;
     ObjectNode row = store.get("session", Secrets.hash(raw), true);
-    return valid(row) && row.path("audience").asString().equals(audience) ? row : null;
+    if (!valid(row)) {
+      clearInvalid(row);
+      return null;
+    }
+    return row.path("audience").asString().equals(audience) ? row : null;
   }
 
   public ObjectNode activeById(String id) {
     ObjectNode row = store.byId("session", id, true);
-    return valid(row) ? row : null;
+    if (!valid(row)) {
+      clearInvalid(row);
+      return null;
+    }
+    return row;
+  }
+
+  private void clearInvalid(ObjectNode row) {
+    if (row == null) return;
+    if (row.has("adminCsrfTokens")) {
+      row.remove("adminCsrfTokens");
+      store.save("session", row);
+    }
+    kv.delete(row.path("cookieHash").asString());
   }
 
   public boolean valid(ObjectNode row) {
     if (row == null
+        || !TenantContext.require().toString().equals(row.path("tenantId").asString())
         || row.path("revoked").asBoolean()
         || !clock.instant().isBefore(Instant.parse(row.path("expiresAt").asString()))
         || !clock.instant().isBefore(Instant.parse(row.path("idleExpiresAt").asString())))
@@ -140,27 +174,51 @@ public final class SessionManager implements Sessions {
   }
 
   public void stepUp(ObjectNode row) {
-    row.put("mfa", true);
-    row.put("stepUpAt", clock.instant().toString());
-    refresh(row);
+    store.tx(
+        () -> {
+          ObjectNode locked = activeById(row.path("id").asString());
+          if (locked == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+          locked.put("mfa", true);
+          locked.put("stepUpAt", clock.instant().toString());
+          refresh(locked);
+          return null;
+        });
   }
 
   public void permissionsChanged(String accountId) {
-    for (ObjectNode candidate : store.all("session"))
-      if (candidate.path("accountId").asString().equals(accountId)) {
-        ObjectNode row = store.byId("session", candidate.path("id").asString(), true);
-        if (row.path("revoked").asBoolean()) continue;
-        row.put("accessTokenExpiresAt", Instant.EPOCH.toString());
-        store.save("session", row);
-        cache(row);
-      }
+    store.tx(
+        () -> {
+          for (ObjectNode candidate : store.all("session"))
+            if (candidate.path("accountId").asString().equals(accountId)) {
+              ObjectNode row = store.byId("session", candidate.path("id").asString(), true);
+              if (!valid(row)) continue;
+              row.put("accessTokenExpiresAt", Instant.EPOCH.toString());
+              store.save("session", row);
+              cache(row);
+            }
+          return null;
+        });
   }
 
   public void revokeOne(ObjectNode row, String reason) {
+    store.tx(
+        () -> {
+          revokeLocked(row, reason);
+          return null;
+        });
+  }
+
+  private void revokeLocked(ObjectNode row, String reason) {
     ObjectNode locked = store.byId("session", row.path("id").asString(), true);
     IamError.require(locked != null, "not_found", 404);
     row = locked;
+    if (row.path("revoked").asBoolean()) {
+      // A previous response can fail after commit. Retrying must confirm its durable tombstone.
+      kv.delete(row.path("cookieHash").asString());
+      return;
+    }
     row.put("revoked", true);
+    row.remove("adminCsrfTokens");
     store.save("session", row);
     kv.delete(row.path("cookieHash").asString());
     Map<String, Object> data = new LinkedHashMap<>();
@@ -184,6 +242,121 @@ public final class SessionManager implements Sessions {
   static Timestamp timestamp(String time) {
     Instant t = Instant.parse(time);
     return Timestamp.newBuilder().setSeconds(t.getEpochSecond()).setNanos(t.getNano()).build();
+  }
+
+  /** The cookie, JWT subject, sid and delegated tenant must identify the same locked row. */
+  public Instant registerAdminCsrf(
+      String cookie, String token, auriga.common.security.AurigaPrincipal principal) {
+    if (!canonicalCsrf(token)) throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    Instant registered =
+        store.tx(
+            () -> {
+              ObjectNode row = activeByCookie(cookie, "admin");
+              if (row == null) return null;
+              if (principal == null
+                  || !principal.isAdminContext()
+                  || principal.type() != auriga.common.security.PrincipalType.USER
+                  || !TenantContext.require().equals(principal.tenantId())
+                  || !row.path("sessionId").asString().equals(principal.sessionId())
+                  || !row.path("accountId").asString().equals(principal.subject()))
+                throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+              Instant now = clock.instant();
+              var entries = liveCsrf(row, now);
+              String hash = Secrets.hash(token);
+              for (var entry : entries)
+                if (Secrets.same(entry.path("hash").asString(), hash)) {
+                  row.set("adminCsrfTokens", entries);
+                  store.save("session", row);
+                  cache(row);
+                  return Instant.parse(entry.path("expiresAt").asString());
+                }
+              if (entries.size() >= 32) {
+                Instant first =
+                    java.util.stream.StreamSupport.stream(entries.spliterator(), false)
+                        .map(e -> Instant.parse(e.path("expiresAt").asString()))
+                        .min(Comparator.naturalOrder())
+                        .orElseThrow();
+                long retry = Math.max(1, (Duration.between(now, first).toMillis() + 999) / 1000);
+                throw AurigaException.of(CommonErrors.RATE_LIMITED, "retryAfter", retry);
+              }
+              Instant expiry = now.plusSeconds(900);
+              for (String field : List.of("expiresAt", "idleExpiresAt")) {
+                Instant bound = Instant.parse(row.path(field).asString());
+                if (bound.isBefore(expiry)) expiry = bound;
+              }
+              entries.add(Json.object("hash", hash, "expiresAt", expiry.toString()));
+              row.set("adminCsrfTokens", entries);
+              store.save("session", row);
+              cache(row);
+              return expiry;
+            });
+    if (registered == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    return registered;
+  }
+
+  static boolean canonicalCsrf(String token) {
+    if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) return false;
+    try {
+      byte[] bytes = Base64.getUrlDecoder().decode(token);
+      return bytes.length == 32
+          && Base64.getUrlEncoder().withoutPadding().encodeToString(bytes).equals(token);
+    } catch (IllegalArgumentException e) {
+      return false;
+    }
+  }
+
+  private tools.jackson.databind.node.ArrayNode liveCsrf(ObjectNode row, Instant now) {
+    var entries = Json.MAPPER.createArrayNode();
+    for (var entry : row.path("adminCsrfTokens"))
+      if (now.isBefore(Instant.parse(entry.path("expiresAt").asString())))
+        entries.add(entry.deepCopy());
+    return entries;
+  }
+
+  @Override
+  public VerifyAdminSessionCsrfResponse verifyAdminCsrf(VerifyAdminSessionCsrfRequest request) {
+    try {
+      VerifyAdminSessionCsrfResponse result =
+          store.tx(
+              () -> {
+                ObjectNode row = activeByCookie(request.getSessionToken(), "admin");
+                if (row == null) return null;
+                String hash = Secrets.hash(request.getCsrfToken());
+                boolean match = false;
+                // Evaluate every candidate, rather than exposing the matching slot through early
+                // exit.
+                for (var entry : liveCsrf(row, clock.instant()))
+                  match |= Secrets.same(entry.path("hash").asString(), hash);
+                if (!canonicalCsrf(request.getCsrfToken()) || !match)
+                  return VerifyAdminSessionCsrfResponse.getDefaultInstance();
+                return VerifyAdminSessionCsrfResponse.newBuilder()
+                    .setActive(true)
+                    .setSession(session(row, SessionAudience.SESSION_AUDIENCE_ADMIN))
+                    .build();
+              });
+      if (result == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+      return result;
+    } catch (AurigaException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE, Map.of(), List.of(), e);
+    }
+  }
+
+  private Session session(ObjectNode row, SessionAudience audience) {
+    var s =
+        Session.newBuilder()
+            .setSessionId(row.path("sessionId").asString())
+            .setAccountId(row.path("accountId").asString())
+            .setTenantId(row.path("tenantId").asString())
+            .setAudience(audience)
+            .setProviderId(row.path("providerId").asString())
+            .setMfa(row.path("mfa").asBoolean())
+            .setCreatedAt(timestamp(row.path("authTime").asString()))
+            .setExpiresAt(timestamp(row.path("expiresAt").asString()))
+            .setIdleExpiresAt(timestamp(row.path("idleExpiresAt").asString()));
+    if (row.has("stepUpAt")) s.setStepUpAt(timestamp(row.path("stepUpAt").asString()));
+    return s.build();
   }
 
   private static String audience(SessionAudience a) {
@@ -260,8 +433,8 @@ public final class SessionManager implements Sessions {
           for (ObjectNode row : store.all("session"))
             if (row.path("accountId").asString().equals(request.getAccountId())
                 && (request.getSessionIdsList().isEmpty()
-                    || request.getSessionIdsList().contains(row.path("sessionId").asString()))
-                && !row.path("revoked").asBoolean()) {
+                    || request.getSessionIdsList().contains(row.path("sessionId").asString()))) {
+              boolean wasRevoked = row.path("revoked").asBoolean();
               revokeOne(
                   row,
                   request
@@ -269,7 +442,7 @@ public final class SessionManager implements Sessions {
                       .name()
                       .replace("REVOKE_REASON_", "")
                       .toLowerCase(Locale.ROOT));
-              count++;
+              if (!wasRevoked) count++;
             }
           if (request.getIncludeDevices())
             for (ObjectNode device : store.all("device"))

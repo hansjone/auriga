@@ -1,4 +1,6 @@
 import http from 'node:http';
+import https from 'node:https';
+import { X509Certificate } from 'node:crypto';
 
 const counters = [
   'runningTurns',
@@ -60,10 +62,11 @@ export function createHeartbeatObserver({
   upstream,
   onHeartbeat,
   onCaptureError = () => {},
+  tls,
 }) {
   const target = new URL(upstream);
   if (
-    target.protocol !== 'http:' ||
+    target.protocol !== (tls ? 'https:' : 'http:') ||
     target.hostname !== '127.0.0.1' ||
     target.username ||
     target.password ||
@@ -71,8 +74,35 @@ export function createHeartbeatObserver({
     target.search ||
     target.hash
   )
-    throw new Error('observer upstream must be a local HTTP base');
-  const server = http.createServer(async (req, res) => {
+    throw new Error(
+      'observer upstream must be a numeric loopback base with matching transport',
+    );
+  if (
+    tls &&
+    (!tls.ca?.length ||
+      !tls.cert?.length ||
+      !tls.key?.length ||
+      !tls.clientCert?.length ||
+      !tls.clientKey?.length ||
+      !/^(?:[a-z0-9-]+\.)*[a-z][a-z0-9-]*$/.test(tls.serverName || '') ||
+      !/^(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*$/.test(tls.clientDNSName || ''))
+  )
+    throw new Error('observer requires complete fixed mTLS identities');
+  const handle = async (req, res) => {
+    if (tls) {
+      const peer = req.socket.getPeerCertificate();
+      if (
+        !req.socket.authorized ||
+        !peer.raw ||
+        new X509Certificate(peer.raw).checkHost(tls.clientDNSName, {
+          wildcards: false,
+          subject: 'never',
+        }) !== tls.clientDNSName
+      ) {
+        res.writeHead(403).end();
+        return;
+      }
+    }
     const heartbeat =
       req.method === 'POST' &&
       req.url === '/api/workspace/v1/instance/heartbeat';
@@ -95,13 +125,24 @@ export function createHeartbeatObserver({
         return;
       }
     }
-    const proxy = http.request(
+    const transport = tls ? https : http;
+    const proxy = transport.request(
       {
         hostname: target.hostname,
         port: target.port,
         path: req.url,
         method: req.method,
-        headers: { ...req.headers, host: 'portal.example.com' },
+        headers: { ...req.headers },
+        ...(tls
+          ? {
+              ca: tls.ca,
+              cert: tls.clientCert,
+              key: tls.clientKey,
+              servername: tls.serverName,
+              rejectUnauthorized: true,
+              minVersion: 'TLSv1.2',
+            }
+          : {}),
         timeout: 15000,
       },
       (response) => {
@@ -127,7 +168,20 @@ export function createHeartbeatObserver({
     });
     if (heartbeat) proxy.end(raw);
     else req.pipe(proxy);
-  });
+  };
+  const server = tls
+    ? https.createServer(
+        {
+          ca: tls.ca,
+          cert: tls.cert,
+          key: tls.key,
+          requestCert: true,
+          rejectUnauthorized: true,
+          minVersion: 'TLSv1.2',
+        },
+        handle,
+      )
+    : http.createServer(handle);
   server.headersTimeout = 10000;
   server.requestTimeout = 15000;
   return server;

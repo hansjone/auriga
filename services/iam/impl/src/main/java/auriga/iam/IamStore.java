@@ -33,6 +33,7 @@ public final class IamStore {
           "qr_challenge");
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
+  private final ScopedValue<Set<String>> responseProjections = ScopedValue.newInstance();
 
   public IamStore(JdbcTemplate jdbc, TenantTransactionManager manager) {
     this.jdbc = jdbc;
@@ -45,6 +46,33 @@ public final class IamStore {
     return transactions.execute(s -> work.get());
   }
 
+  /** An explicit response owner, never a transaction synchronization callback. */
+  <T> T responseTx(SessionKv projection, Supplier<T> work) {
+    if (responseProjections.isBound()) return tx(work);
+    requireTransactionReleased();
+    var hashes = new LinkedHashSet<String>();
+    // Unbind before Spring invokes commit/completion callbacks: those still hold resources,
+    // but must never impersonate nested business work inside an owned response.
+    T result = tx(() -> ScopedValue.where(responseProjections, hashes).call(work::get));
+    requireTransactionReleased();
+    projection.awaitProjected(hashes);
+    return result;
+  }
+
+  // A response that waits for another transaction must own its transaction boundary. Even an
+  // afterCompletion callback can still own the connection until Spring finishes cleanup.
+  void requireTransactionReleased() {
+    var dataSource = jdbc.getDataSource();
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+            .isActualTransactionActive()
+        || org.springframework.transaction.support.TransactionSynchronizationManager
+            .isSynchronizationActive()
+        || (dataSource != null
+            && org.springframework.transaction.support.TransactionSynchronizationManager
+                .hasResource(dataSource)))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+  }
+
   public <T> T tenant(UUID tenant, Supplier<T> work) {
     return TenantContext.call(tenant, () -> tx(work));
   }
@@ -54,6 +82,85 @@ public final class IamStore {
     isolated.setPropagationBehavior(
         org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     return TenantContext.call(tenant, () -> isolated.execute(s -> work.get()));
+  }
+
+  void enqueueSessionProjection(String hash, Instant now) {
+    TenantTransactionManager.verifyTransactionTenant();
+    if (!org.springframework.transaction.support.TransactionSynchronizationManager
+        .isActualTransactionActive())
+      throw new IllegalStateException("Session projection requires a transaction");
+    UUID tenant = TenantContext.require();
+    if (responseProjections.isBound()) responseProjections.get().add(hash);
+    jdbc.update(
+        "INSERT INTO iam.session_projection_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",
+        tenant);
+    jdbc.update(
+        "INSERT INTO iam.session_projection(id,tenant_id,cookie_hash,next_attempt_at) VALUES (?,?,?,?)"
+            + " ON CONFLICT (tenant_id,cookie_hash) DO UPDATE SET attempts=0,next_attempt_at=excluded.next_attempt_at",
+        UuidV7.next(),
+        tenant,
+        hash,
+        java.sql.Timestamp.from(now));
+  }
+
+  // This directory contains infrastructure tenant IDs only; never read session data outside RLS.
+  List<UUID> sessionProjectionTenants(UUID after, int limit) {
+    return jdbc.query(
+        "SELECT tenant_id FROM iam.session_projection_tenant WHERE (?::uuid IS NULL OR tenant_id>?) ORDER BY tenant_id LIMIT ?",
+        (rs, i) -> rs.getObject(1, UUID.class),
+        after,
+        after,
+        limit);
+  }
+
+  record SessionProjection(UUID id, String hash, int attempts) {}
+
+  SessionProjection claimSessionProjection(Instant now) {
+    var rows =
+        jdbc.query(
+            "SELECT id,cookie_hash,attempts FROM iam.session_projection WHERE tenant_id=? AND next_attempt_at<=?"
+                + " ORDER BY next_attempt_at,id LIMIT 1 FOR UPDATE SKIP LOCKED",
+            (rs, i) ->
+                new SessionProjection(rs.getObject(1, UUID.class), rs.getString(2), rs.getInt(3)),
+            TenantContext.require(),
+            java.sql.Timestamp.from(now));
+    return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  SessionProjection claimSessionProjection(String hash, Instant now) {
+    var rows =
+        jdbc.query(
+            "SELECT id,cookie_hash,attempts FROM iam.session_projection WHERE tenant_id=? AND cookie_hash=? AND next_attempt_at<=? FOR UPDATE SKIP LOCKED",
+            (rs, i) ->
+                new SessionProjection(rs.getObject(1, UUID.class), rs.getString(2), rs.getInt(3)),
+            TenantContext.require(),
+            hash,
+            java.sql.Timestamp.from(now));
+    return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  boolean sessionProjectionPending(String hash) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM iam.session_projection WHERE tenant_id=? AND cookie_hash=?)",
+            Boolean.class,
+            TenantContext.require(),
+            hash));
+  }
+
+  void completeSessionProjection(UUID id) {
+    jdbc.update(
+        "DELETE FROM iam.session_projection WHERE tenant_id=? AND id=?",
+        TenantContext.require(),
+        id);
+  }
+
+  void retrySessionProjection(SessionProjection row, Instant next) {
+    jdbc.update(
+        "UPDATE iam.session_projection SET attempts=LEAST(attempts+1,30),next_attempt_at=? WHERE tenant_id=? AND id=?",
+        java.sql.Timestamp.from(next),
+        TenantContext.require(),
+        row.id());
   }
 
   private String table(String table) {

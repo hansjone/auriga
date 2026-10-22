@@ -87,7 +87,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
     }
   }
 
-  @PostMapping("/login/transactions")
+  @PostMapping(value = "/login/transactions", consumes = "application/json")
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   @PublicEndpoint
   public ObjectNode begin(
@@ -97,12 +97,21 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
     return requests.call(
         request,
         () -> {
-          LoginManager.Result result =
-              login.begin(
-                  Json.MAPPER.valueToTree(body),
-                  requests.host(request).audience(),
+          var result =
+              login.beginResponse(
                   requests.clientIp(request),
-                  request.getHeader("User-Agent"));
+                  () -> {
+                    requests.sameOrigin(request);
+                    if (body.getPurpose() != null && !body.getPurpose().toString().equals("login"))
+                      requests.browserSession(request, sessions, true);
+                    return login.begin(
+                        Json.MAPPER.valueToTree(body),
+                        requests.host(request).audience(),
+                        requests.clientIp(request),
+                        request.getHeader("User-Agent"),
+                        requests.origin(request),
+                        requests.binding(request));
+                  });
           requests.issued(request, response, result);
           return result.transaction();
         });
@@ -111,22 +120,39 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   @GetMapping("/login/transactions/{id}")
   @PublicEndpoint
   public ObjectNode get(@PathVariable String id, HttpServletRequest request) {
-    return requests.call(request, () -> login.get(id, requests.binding(request)).transaction());
+    return requests.call(
+        request,
+        () ->
+            store.tx(
+                () -> {
+                  login.checkEntry(
+                      id,
+                      requests.binding(request),
+                      requests.host(request).audience(),
+                      requests.origin(request));
+                  return login.get(id, requests.binding(request)).transaction();
+                }));
   }
 
   @DeleteMapping("/login/transactions/{id}")
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   @PublicEndpoint
-  public void cancel(@PathVariable String id, HttpServletRequest request) {
+  public void cancel(
+      @PathVariable String id, HttpServletRequest request, HttpServletResponse response) {
     requests.call(
         request,
-        () -> {
-          login.cancel(id, requests.binding(request));
-          return null;
-        });
+        () ->
+            store.tx(
+                () -> {
+                  flow(id, request, true);
+                  login.cancel(id, requests.binding(request));
+                  requests.setCookie(
+                      request, response, requests.transactionCookie(request), "", true, 0);
+                  return null;
+                }));
   }
 
-  @PostMapping("/login/transactions/{id}/advance")
+  @PostMapping(value = "/login/transactions/{id}/advance", consumes = "application/json")
   @PublicEndpoint
   public ObjectNode advance(
       @PathVariable String id,
@@ -136,10 +162,42 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
     return requests.call(
         request,
         () -> {
-          LoginManager.Result result = login.advance(id, requests.binding(request), input, false);
+          var result =
+              login.advanceResponse(
+                  id,
+                  requests.binding(request),
+                  requests.host(request).audience(),
+                  requests.origin(request),
+                  input,
+                  () -> {
+                    flow(id, request, true);
+                    return login.advance(id, requests.binding(request), input, false);
+                  });
           requests.issued(request, response, result);
           return result.transaction();
         });
+  }
+
+  private void flow(String id, HttpServletRequest request, boolean write) {
+    var tx =
+        login.checkEntry(
+            id,
+            requests.binding(request),
+            requests.host(request).audience(),
+            requests.origin(request));
+    if (write) {
+      var state = login.get(id, requests.binding(request)).transaction().path("status").asString();
+      if (!state.equals("pending")) throw IamError.error("login_tx_finished", 409);
+    }
+    if (write) requests.sameOrigin(request);
+    if (!tx.path("purpose").asString().equals("login")) {
+      var row = requests.browserSession(request, sessions, write);
+      IamError.require(
+          row.path("sessionId").asString().equals(tx.path("sessionId").asString())
+              && row.path("accountId").asString().equals(tx.path("accountId").asString()),
+          "not_found",
+          404);
+    }
   }
 
   @GetMapping("/login/transactions/{id}/events")
@@ -147,6 +205,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   public SseEmitter events(@PathVariable String id, HttpServletRequest request) {
     ObjectNode initial = get(id, request);
     var host = requests.host(request);
+    String origin = requests.origin(request);
     String binding = requests.binding(request);
     SseEmitter emitter = new SseEmitter(310000L);
     var stopped = new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -172,7 +231,13 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
               Thread.sleep(1000);
               state =
                   auriga.common.context.TenantContext.call(
-                      host.tenant(), () -> login.get(id, binding).transaction());
+                      host.tenant(),
+                      () ->
+                          store.tx(
+                              () -> {
+                                login.checkEntry(id, binding, host.audience(), origin);
+                                return login.get(id, binding).transaction();
+                              }));
             }
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -193,17 +258,28 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   @AuthenticatedOnly
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void logout(HttpServletRequest request, HttpServletResponse response) {
-    var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    store.tx(
-        () -> {
-          ObjectNode session = sessions.activeById(principal.sessionId());
-          if (session != null) {
-            IamError.require(
-                session.path("accountId").asString().equals(principal.subject()), "forbidden", 403);
-            sessions.revokeOne(session, "logout");
-          }
-          return null;
-        });
+    requests.call(
+        request,
+        () ->
+            sessions.response(
+                () -> {
+                  ObjectNode session = requests.browserSession(request, sessions, true);
+                  sessions.revokeOne(session, "logout");
+                  String binding = requests.binding(request);
+                  if (binding != null)
+                    for (ObjectNode tx : store.all("login_tx"))
+                      if (tx.path("audience").asString().equals(requests.host(request).audience())
+                          && Secrets.same(
+                              tx.path("bindingHash").asString(), Secrets.hash(binding))) {
+                        login.checkEntry(
+                            tx.path("id").asString(),
+                            binding,
+                            requests.host(request).audience(),
+                            requests.origin(request));
+                        login.cancel(tx.path("id").asString(), binding);
+                      }
+                  return null;
+                }));
     requests.setCookie(
         request,
         response,
@@ -213,7 +289,9 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
         "",
         true,
         0);
-    requests.setCookie(request, response, "auriga_csrf", "", false, 0);
+    requests.setCookie(request, response, requests.transactionCookie(request), "", true, 0);
+    if (!requests.ipAdmin(request))
+      requests.setCookie(request, response, "auriga_csrf", "", false, 0);
   }
 
   @DeleteMapping("/me/sessions/{id}")
@@ -221,9 +299,9 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
   public void revoke(@PathVariable String id) {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    store.tx(
+    sessions.response(
         () -> {
-          ObjectNode row = sessions.activeById(id);
+          ObjectNode row = store.byId("session", id, true);
           IamError.require(
               row != null && row.path("accountId").asString().equals(principal.subject()),
               "not_found",
