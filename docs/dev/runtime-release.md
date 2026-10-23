@@ -5,9 +5,9 @@
 `CanonicalReleaseBody`。本工具没有另一套签名格式、JCS 或 OCI 解析器，不生成任何身份、根或部署配置。
 规范见 [RT0](../../contracts/runtime/README.md)，生产启用流程见 [agent](agent.md)。
 
-本批只交付声明、公开根及单平台原始 manifest/config，**不是完整可部署发行包**。
+`sign` 交付声明、公开根及单平台原始 manifest/config；`stage-layout` 可另行验证并复制完整离线 OCI 载体，**仍不是完整可部署发行包**。
 NAS 通过[公开安装配方](nas.md#消费独立审核的正式运行时)复用严格导入，装配受 receipt 保护的正式模板、公开根和原始 proof。
-registry 认证、镜像层离线载体均不在此工具内；签名通过也不代表镜像层已经到位。
+registry 认证与写入不在此工具内；仅签名通过也不代表镜像层已经到位。
 不支持 native、归档混合声明、背书链管理或根自动轮换。
 
 ## 本地 registry 构建与原始 proof
@@ -41,8 +41,8 @@ node deploy/compose/scripts/collect-runtime-proofs.mjs `
 序号、时间及目标平台步骤签发；消费方继续将公开 bundle 中的 root 与**外部独立审核的根**核对，
 以 `verify --root ... --allow-image <精确 image>` 严格导入。新建的本地 fixture 根不因此成为官方授权根。
 
-此流程没有镜像层载体、公网 registry 认证客户端，也不保证跨 registry 重发布后保持同一个 M。
-部署前仍须独立解决镜像层运输与原 repo@M 可用性。
+此流程本身没有镜像层载体或公网 registry 认证客户端，也不保证跨 registry 重发布后保持同一个 M。
+离线层载体可使用下文 `stage-layout`，部署前仍须独立解决运输与原 repo@M 可用性。
 
 ## 发布者输入
 
@@ -125,6 +125,26 @@ verify 必须独立指定外部固定根、目标平台和允许的**精确完�
 路径及祖先不得包含链接；禁止 `..` 穿越。输出父目录必须预先存在，输出通过原子 mkdir 创建，任何已有对象（包括空目录）都拒绝。
 先读完并验证所有输入后才创建输出，文件使用独占创建，不覆盖已有材料。后续磁盘 I/O 失败可能留下新建的残缺目录，
 strict verify 会拒绝它；诊断后使用另一个全新输出路径重试。工具不提供安装替换或掉电事务保证。
+
+## 完整离线 OCI 载体快照
+
+先取得公开 bundle、独立固定的外部根和明确批准的完整 `repo@sha256:<M>`。operator 另行提供含原 M、C 与全部引用层的本地 OCI image-layout 1.0.0 目录，并显式指定唯一 CAS 对象的总字节预算；工具不会推断可用磁盘空间。示例：
+
+```powershell
+./runtime-release.exe stage-layout `
+  --dir ./release-7 --root ./operator-approved/root.pb `
+  --os linux --arch amd64 `
+  --allow-image registry.example.com/auriga/dsh@sha256:<原M的64位小写hex> `
+  --layout ./incoming-oci --out ./staged-oci --max-bytes 300000000
+```
+
+`stage-layout` 先调用与 `verify` 相同的生产 Trust、V、VerifyOCI 路径，再检查 OCI 目录。它只接受**单一已批准 M** 的严格运输 profile：`oci-layout` 声明 1.0.0，`index.json` 为 schemaVersion 2 且恰有一个与生产已验 M 的 digest、size、mediaType 完全一致的 descriptor。正常字符串 `annotations`（包括 ORAS 的 ref-name）可输入，但不能选择另一个 M；索引、artifact、subject、多平台描述符、外部 URL、重复 JSON 键、大小写结构别名和错类型均拒绝。这是严格单镜像运输工具，不能作为通用 OCI layout reader。外层 index 不参与签名，也不代替原 M。
+
+所有被引用 CAS 文件须是无链接的普通单链接文件。工具从已验 digest 推导 `blobs/sha256/` 路径，流式核对实际大小及 SHA-256；M/C 还须逐字节等于公开 bundle 的原始证明。同摘要重复引用仅复制一次，且 size/mediaType 必须相同。预算包括唯一 M、C 和层的实际字节；缺层、坏层、大小不符或超预算均在创建输出前拒绝。输入中未被引用的 blob 不进入结果。
+
+验证全部输入后，工具原子创建全新输出目录，逐个复制并在复制时重新核对字节；最后才写最小 index。输出只含原 M/C/引用层、`oci-layout` 和无标签的单 M 索引。任何已有输出对象或与输入树交叠的输出路径都拒绝。复制阶段失败会保留新建的残缺目录供诊断，不打印成功结果；请选另一全新路径重试。成功行只报告 M、C、唯一 blob 数和总字节数。本次返回值仅是当时的快照事实，不构成持续授权或运行就绪证明。
+
+后续由独立 registry 复制工具从载体按**原 M 摘要**选择源（形如 `./staged-oci@sha256:<M>`），并自行处理目标 registry 的批准、认证与访问；参考 [ORAS cp](https://oras.land/docs/commands/oras_cp/) 的 `--from-oci-layout` 语法。此命令不执行 ORAS、Docker load/push、联网、identity/receipt 安装或运行时启用，也不代表 NAS 部署完成。目录格式依据 [OCI Image Layout v1.1.1](https://github.com/opencontainers/image-spec/blob/v1.1.1/image-layout.md)。
 
 ## 文件与平台权限边界
 

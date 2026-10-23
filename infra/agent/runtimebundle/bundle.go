@@ -62,6 +62,7 @@ type Material struct {
 	dsh                             *nodev1.DshRuntime
 	key                             *nodev1.ArtifactSigningKey
 	bodyDigest, configID            string
+	image                           releaseverify.VerifiedImage
 }
 
 func (m *Material) RuntimeBytes() []byte { return bytes.Clone(m.runtime) }
@@ -242,7 +243,7 @@ func validate(raw, rootRaw []byte, key *nodev1.ArtifactSigningKey, ring releaset
 	if err != nil {
 		return nil, err
 	}
-	return &Material{runtime: bytes.Clone(raw), root: bytes.Clone(rootRaw), manifest: bytes.Clone(manifest), config: bytes.Clone(config), dsh: dsh, key: proto.Clone(key).(*nodev1.ArtifactSigningKey), bodyDigest: v.BodyDigest(), configID: image.ConfigID()}, nil
+	return &Material{runtime: bytes.Clone(raw), root: bytes.Clone(rootRaw), manifest: bytes.Clone(manifest), config: bytes.Clone(config), dsh: dsh, key: proto.Clone(key).(*nodev1.ArtifactSigningKey), bodyDigest: v.BodyDigest(), configID: image.ConfigID(), image: image}, nil
 }
 
 func verifyDeclaration(dsh *nodev1.DshRuntime, ring releasetrust.Ring, p Policy) (releaseverify.VerifiedRelease, error) {
