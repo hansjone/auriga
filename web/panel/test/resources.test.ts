@@ -125,7 +125,7 @@ describe('resource boundary', () => {
     { items: [{ ...plugin, enabled: 'yes' }] },
     { items: [{ ...plugin, kind: 'skill' }] },
     { items: [plugin], nextCursor: 23 },
-    { items: [plugin], nextCursor: '' },
+    { items: [plugin], nextCursor: null },
   ])('rejects malformed success payloads %#', async (body) => {
     const wrapper = render(connect(vi.fn().mockResolvedValue(json(body))));
     await flushPromises();
@@ -166,6 +166,62 @@ describe('resource boundary', () => {
 });
 
 describe('market reading', () => {
+  it.each([false, true])(
+    'accepts a terminal package page with an empty cursor (has items: %s)',
+    async (hasItems) => {
+      const items = hasItems ? [plugin] : [];
+      const reader = createResourceReader(
+        connect(vi.fn().mockResolvedValue(json({ items, nextCursor: '' }))),
+      );
+      await expect(reader.list(new AbortController().signal)).resolves.toEqual({
+        items,
+        nextCursor: undefined,
+      });
+    },
+  );
+  it.each([false, true])(
+    'accepts a terminal version page with an empty cursor (has items: %s)',
+    async (hasItems) => {
+      const items = hasItems ? [version] : [];
+      const reader = createResourceReader(
+        connect(vi.fn().mockResolvedValue(json({ items, nextCursor: '' }))),
+      );
+      await expect(
+        reader.versions(packageId, new AbortController().signal),
+      ).resolves.toEqual({ items, nextCursor: undefined });
+    },
+  );
+  it('preserves loaded packages when the final page is empty and has an empty cursor', async () => {
+    const host = vi
+      .fn()
+      .mockResolvedValueOnce(json({ items: [plugin], nextCursor: 'next' }))
+      .mockResolvedValueOnce(json({ items: [], nextCursor: '' }));
+    const wrapper = render(connect(host));
+    await flushPromises();
+    await click(wrapper, 'Load more');
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.findAll('.card')).toHaveLength(1);
+    expect(wrapper.text()).toContain(plugin.name);
+    expect(wrapper.text()).not.toContain('Load more');
+    expect(host).toHaveBeenCalledTimes(2);
+  });
+  it('preserves loaded versions when the final page is empty and has an empty cursor', async () => {
+    const host = vi
+      .fn()
+      .mockResolvedValueOnce(json({ items: [plugin] }))
+      .mockResolvedValueOnce(json(plugin))
+      .mockResolvedValueOnce(json({ items: [version], nextCursor: 'next' }))
+      .mockResolvedValueOnce(json({ items: [], nextCursor: '' }));
+    const wrapper = render(connect(host));
+    await flushPromises();
+    await click(wrapper, 'View details');
+    await click(wrapper, 'Load more');
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.findAll('.versions li')).toHaveLength(1);
+    expect(wrapper.get('.detail').text()).toContain(version.version);
+    expect(wrapper.text()).not.toContain('Load more');
+    expect(host).toHaveBeenCalledTimes(4);
+  });
   it('reads actual response fields, filters locally, paginates and opens version detail', async () => {
     const host = vi
       .fn()

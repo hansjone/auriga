@@ -90,13 +90,14 @@ function page<T>(
     !Array.isArray(value.items) ||
     value.items.length > 200 ||
     !value.items.every(valid) ||
-    (value.nextCursor !== undefined && !shortText(value.nextCursor, 4096))
+    (value.nextCursor !== undefined && typeof value.nextCursor !== 'string')
   ) {
     throw new ResourceError('invalid');
   }
   return {
     items: value.items,
-    nextCursor: value.nextCursor as string | undefined,
+    // The response contract permits an empty string for the terminal page.
+    nextCursor: value.nextCursor === '' ? undefined : value.nextCursor,
   };
 }
 
