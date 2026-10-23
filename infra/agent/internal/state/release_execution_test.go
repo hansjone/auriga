@@ -16,7 +16,8 @@ import (
 func executionFixture() ExecutionRecord {
 	c := releaseTestCandidate(7)
 	sum := "sha256:" + strings.Repeat("b", 64)
-	return ExecutionRecord{Version: 1, InstanceID: "execution-test", Generation: 1, DSH: &nodev1.DshRuntime{ArtifactId: "original", Digest: "sha256:" + strings.Repeat("a", 64), ReleaseEnvelope: &nodev1.RuntimeReleaseEnvelope{Purpose: c.Partition.Purpose, Name: c.Partition.Name, Os: c.Partition.OS, Arch: c.Partition.Arch, ReleaseSequence: c.Sequence, ImageDigest: sum}}, Candidate: c, ContainerID: strings.Repeat("c", 64), ConfigID: sum, ProofDigest: sum, Phase: "created"}
+	config := "sha256:" + strings.Repeat("d", 64)
+	return ExecutionRecord{Version: 2, InstanceID: "execution-test", Generation: 1, DSH: &nodev1.DshRuntime{ArtifactId: "original", Digest: "sha256:" + strings.Repeat("a", 64), ReleaseEnvelope: &nodev1.RuntimeReleaseEnvelope{Purpose: c.Partition.Purpose, Name: c.Partition.Name, Os: c.Partition.OS, Arch: c.Partition.Arch, ReleaseSequence: c.Sequence, ImageDigest: sum}}, Candidate: c, ContainerID: strings.Repeat("c", 64), ConfigID: config, EngineImageID: config, ProofDigest: sum, Phase: "created"}
 }
 
 func TestExecutionIsIndependentDeepCopiedAndDurable(t *testing.T) {
@@ -66,7 +67,7 @@ func TestExecutionIsIndependentDeepCopiedAndDurable(t *testing.T) {
 }
 
 func TestExecutionCorruptionFailsEveryReadWrite(t *testing.T) {
-	for _, mode := range []string{"truncated", "unknown", "duplicate", "null", "wrong-key", "bad-record", "nested"} {
+	for _, mode := range []string{"truncated", "unknown", "duplicate", "null", "wrong-key", "bad-record", "nested", "old-version", "missing-engine-id", "foreign-engine-id", "invalid-engine-id"} {
 		t.Run(mode, func(t *testing.T) {
 			s := releaseTestStore(t)
 			r := executionFixture()
@@ -93,6 +94,20 @@ func TestExecutionCorruptionFailsEveryReadWrite(t *testing.T) {
 					key = []byte("another-instance")
 				case "bad-record":
 					r.Generation = 0
+					raw, _ = json.Marshal(r)
+				case "old-version":
+					r.Version = 1
+					raw, _ = json.Marshal(r)
+				case "missing-engine-id":
+					var fields map[string]any
+					_ = json.Unmarshal(raw, &fields)
+					delete(fields, "engineImageId")
+					raw, _ = json.Marshal(fields)
+				case "foreign-engine-id":
+					r.EngineImageID = "sha256:" + strings.Repeat("e", 64)
+					raw, _ = json.Marshal(r)
+				case "invalid-engine-id":
+					r.EngineImageID = "sha256:invalid"
 					raw, _ = json.Marshal(r)
 				case "nested":
 					_, err := b.CreateBucket(key)
@@ -124,6 +139,31 @@ func TestExecutionCorruptionFailsEveryReadWrite(t *testing.T) {
 				t.Fatal("corrupt execution reopened", err)
 			}
 		})
+	}
+}
+
+func TestExecutionManifestEngineIdentityIsDurable(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := executionFixture()
+	r.EngineImageID = r.ProofDigest
+	if err := s.PutExecution(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	got, err := s.GetExecution(r.InstanceID)
+	if err != nil || got == nil || got.EngineImageID != r.ProofDigest || got.ConfigID != r.ConfigID {
+		t.Fatal(got, err)
 	}
 }
 

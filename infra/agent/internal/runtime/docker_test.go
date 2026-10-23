@@ -78,7 +78,8 @@ func (f *fakeEngine) handler() http.Handler {
 		if _, dig, ok := strings.Cut(name, "@"); ok {
 			manifestDig = dig
 		}
-		// Real Engine: Id is config digest, distinct from manifest digest in RepoDigests.
+		// Classic-store fixture: Id is the config digest; containerd's manifest
+		// identity is covered by the release Engine HTTP model.
 		configID := fixtureConfigID
 		repoDigests := `["registry.example.com/auriga/dsh@` + manifestDig + `"]`
 		if wrong {

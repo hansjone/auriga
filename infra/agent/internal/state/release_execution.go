@@ -32,8 +32,11 @@ type ExecutionRecord struct {
 	Candidate   ReleaseCandidate   `json:"candidate"`
 	ContainerID string             `json:"containerId"`
 	ConfigID    string             `json:"configId"`
-	ProofDigest string             `json:"proofDigest"`
-	Phase       string             `json:"phase"`
+	// EngineImageID is the immutable execution target observed after exact
+	// repo/platform verification. ConfigID remains the digest of original C.
+	EngineImageID string `json:"engineImageId"`
+	ProofDigest   string `json:"proofDigest"`
+	Phase         string `json:"phase"`
 }
 
 func digestID(s string) bool {
@@ -45,7 +48,9 @@ func digestID(s string) bool {
 }
 
 func (r ExecutionRecord) validate() error {
-	if r.Version != 1 || storage.ValidateInstanceID(r.InstanceID) != nil || r.Generation <= 0 || r.DSH == nil || r.DSH.ReleaseEnvelope == nil || r.Candidate.validate() != nil || !digestID(r.ConfigID) || !digestID(r.ProofDigest) || !validContainerID(r.ContainerID) || (r.Phase != "created" && r.Phase != "started") {
+	// Keep the original bucket: old records must be rejected, never disappear
+	// behind a new bucket or gain an inferred Engine identity during recovery.
+	if r.Version != 2 || storage.ValidateInstanceID(r.InstanceID) != nil || r.Generation <= 0 || r.DSH == nil || r.DSH.ReleaseEnvelope == nil || r.Candidate.validate() != nil || !digestID(r.ConfigID) || !digestID(r.ProofDigest) || !digestID(r.EngineImageID) || (r.EngineImageID != r.ConfigID && r.EngineImageID != r.ProofDigest) || !validContainerID(r.ContainerID) || (r.Phase != "created" && r.Phase != "started") {
 		return ErrExecutionCorrupt
 	}
 	e := r.DSH.ReleaseEnvelope

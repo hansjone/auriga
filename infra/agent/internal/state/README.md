@@ -40,7 +40,10 @@ RT2R 的 `WithReleaseExecution` 在同一资格内添加 `release_intent_v1`：�
 这一选择保安全序，不保证异常退出后自动恢复可用性。
 
 独立 `release_execution_v1` 记录原实际完整 DshRuntime/envelope、实际 generation、candidate、
-真实 container/config ID、公开 proof 摘要定位与 created/started 阶段。desired/actual 的状态写入和删除
+真实 container ID、原 C 的 ConfigID、已固定 EngineImageID、公开 proof 摘要定位与 created/started 阶段。
+记录 Version=2，沿用原 bucket 以保证旧记录不会消失；Version1、缺字段或集合外 EngineImageID 均拒绝读写和重开，
+没有自动推断迁移。EngineImageID 只可为 ConfigID 或 ProofDigest；运行时仍重验原 M→C 和容器的那个确定 ID。
+desired/actual 的状态写入和删除
 不能覆盖它；读取返回独立副本。内部 JSON 形状、绑定、规范编码或任一记录损坏均拒绝读写。
 只有确认对应真实容器删除成功才可比较 container ID 删除 execution；分区高水位永久保留。
 测试使用真实 bbolt，覆盖重开、损坏、关闭、深拷贝、未决结果和 panic；没有真实掉电耐久实验。

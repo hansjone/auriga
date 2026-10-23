@@ -171,7 +171,7 @@ func seedDockerRecord(t *testing.T, d *runtime.Docker, id string, generation int
 	p := v.Partition()
 	c := state.ReleaseCandidate{Partition: state.ReleasePartition{Purpose: p.Purpose, Name: p.Name, OS: p.OS, Arch: p.Arch}, Sequence: v.Sequence(), BodyDigest: v.BodyDigest()}
 	if err := f.store.WithReleaseExecution(context.Background(), c, func(context.Context) error { return nil }, func(context.Context, *state.ReleaseExecution) error {
-		return f.store.PutExecution(state.ExecutionRecord{Version: 1, InstanceID: id, Generation: generation, DSH: f.dsh, Candidate: c, ContainerID: fixtureContainerID, ConfigID: fixtureConfigID, ProofDigest: testDigest(fixtureManifest), Phase: "created"})
+		return f.store.PutExecution(state.ExecutionRecord{Version: 2, InstanceID: id, Generation: generation, DSH: f.dsh, Candidate: c, ContainerID: fixtureContainerID, ConfigID: fixtureConfigID, EngineImageID: fixtureConfigID, ProofDigest: testDigest(fixtureManifest), Phase: "created"})
 	}); err != nil {
 		t.Fatal(err)
 	}

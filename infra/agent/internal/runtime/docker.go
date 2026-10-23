@@ -175,8 +175,12 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		return err
 	}
 	_, digest, _ := strings.Cut(s.Image, "@")
-	if insp["Id"] != scope.image.ConfigID() || insp["Os"] != scope.candidate.Partition.OS || insp["Architecture"] != scope.candidate.Partition.Arch || !imageHasRepoDigest(insp, s.Image, digest) {
+	if insp["Os"] != scope.candidate.Partition.OS || insp["Architecture"] != scope.candidate.Partition.Arch || !imageHasRepoDigest(insp, s.Image, digest) {
 		return fmt.Errorf("docker: actual image does not match signed OCI evidence")
+	}
+	engineImageID, _ := insp["Id"].(string)
+	if err := scope.pinEngineImage(engineImageID); err != nil {
+		return err
 	}
 	if err := scope.recheck(); err != nil {
 		return err
@@ -249,7 +253,7 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	nanoCPUs := cpu * 1_000_000
 
 	body := map[string]any{
-		"Image":  scope.image.ConfigID(),
+		"Image":  engineImageID,
 		"User":   fmt.Sprintf("%d:%d", uid, uid),
 		"Env":    env,
 		"Labels": labels,
@@ -302,7 +306,7 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	if err != nil {
 		return err
 	}
-	record := &state.ExecutionRecord{Version: 1, InstanceID: s.InstanceID, Generation: s.Generation, DSH: proto.Clone(scope.spec.Dsh).(*nodev1.DshRuntime), Candidate: scope.candidate, ContainerID: containerID, ConfigID: scope.image.ConfigID(), ProofDigest: scope.image.ManifestDigest(), Phase: "created"}
+	record := &state.ExecutionRecord{Version: 2, InstanceID: s.InstanceID, Generation: s.Generation, DSH: proto.Clone(scope.spec.Dsh).(*nodev1.DshRuntime), Candidate: scope.candidate, ContainerID: containerID, ConfigID: scope.image.ConfigID(), EngineImageID: engineImageID, ProofDigest: scope.image.ManifestDigest(), Phase: "created"}
 	if _, err := d.verifyContainer(ctx, record); err != nil {
 		return err
 	}
@@ -330,8 +334,11 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if record.Generation != scope.spec.Generation || record.Candidate != scope.candidate {
+	if record.Generation != scope.spec.Generation || !executionMatchesImage(record, scope.image, scope.candidate) {
 		return fmt.Errorf("docker actual execution generation mismatch")
+	}
+	if err := scope.pinEngineImage(record.EngineImageID); err != nil {
+		return err
 	}
 	before, err := d.verifyContainer(ctx, record)
 	if err != nil {

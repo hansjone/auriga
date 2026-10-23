@@ -24,8 +24,10 @@ RT1 已消费并持久化 v1 keyring；RT2 生产 Docker 已强制消费正式�
 目录本身不是信任根；每次启用、启动和恢复都重读原字节，核签名、摘要、格式、当前 ring/策略及节点 GOOS/GOARCH。
 
 Docker-only 的 `archiveDigest`、`dsh.digest`、`dsh.url` 可全空，`SignedArtifact` 可为空；有归档则仍须实际核字节，
-不能用归档签名证明镜像。实际 image inspect 必须精确匹配原 repo@digest、config ID、OS 与 Architecture。
-创建使用已核 config ID 和显式平台，启动绑定创建返回并持久化的真实 container ID；资源、只读挂载、UID、cap 和网络边界继续生效。
+不能用归档签名证明镜像。实际 image inspect 必须精确匹配原 repo@digest、OS 与 Architecture；
+其 Id 只可等于已验原 C 摘要或本次已验单平台 M 摘要（兼容 classic/containerd store），核后一次固定 EngineImageID。
+ConfigID 始终来自原 C，M 必须仍绑定 C；不信 descriptor.annotations，不接受任意 manifest/index ID。
+创建使用固定 EngineImageID 和显式平台，启动绑定创建返回并持久化的真实 container ID；资源、只读挂载、UID、cap 和网络边界继续生效。
 
 同一发行分区保持最终授权 → 高水位提交 → 创建 → 实际记录落盘 → 启动的连续锁。
 执行副作用前先同步持久未决 intent；断线、请求取消、HTTP 错误或进程崩溃不代表 Engine 动作已经退场。
@@ -34,8 +36,10 @@ Docker-only 的 `archiveDigest`、`dsh.digest`、`dsh.url` 可全空，`SignedAr
 不要通过删库、换身份或换根恢复推进。此机制优先保证安全序，异常退出可能使该分区持续不可用。
 仅健康超时且所有 Engine 执行动作已有确定成功回执时，原协调域可清自身 intent 并允许重试；高水位不回退。
 
-独立执行记录保存旧实际发行、完整 envelope、实际 generation、container/config ID 与 proof 定位，
+独立执行记录保存旧实际发行、完整 envelope、实际 generation、container ID、ConfigID、EngineImageID 与 proof 定位，
 不会被新 desired 或普通状态写入覆盖。重连、重启及 PendingRestart 重验旧记录与当前资格，不按标签猜信任。
+container.Image 必须等于记录中那个确定 EngineImageID，恢复不能在 C/M 之间重选。
+执行记录 Version=2 沿用原 bucket，旧 Version1 或缺字段直接拒绝；没有按 desired 或 Engine 当前结果自动推断的迁移。
 核验失败撤 Ready/对外端点，保留已运行进程；停止/删除无需发行 key 仍有效，删除失败保记录，确认真正删除后才释放旧归档引用。
 原始 M/C 首版保守保留。HTTP Engine 模型测试及源码分析不等于真实 daemon 故障注入、现场部署或掉电实验。
 

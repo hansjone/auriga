@@ -217,8 +217,8 @@ func (c *EngineClient) ImageInspect(ctx context.Context, nameOrDigest string) (m
 	return out, nil
 }
 
-// imageHasRepoDigest checks RepoDigests for the pinned manifest digest.
-// Image Id is the config digest and must not be compared to the manifest digest.
+// imageHasRepoDigest binds the exact manifest reference independently of the
+// Engine image ID, which may be the verified config or single-platform manifest.
 func imageHasRepoDigest(insp map[string]any, imageRef, wantDigest string) bool {
 	if insp == nil || wantDigest == "" {
 		return false

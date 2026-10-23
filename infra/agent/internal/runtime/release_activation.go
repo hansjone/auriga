@@ -41,14 +41,15 @@ func (d *Docker) ReleaseCoordinator() *ReleaseActivation { return d.Activation }
 
 type activationKey struct{}
 type activationScope struct {
-	coordinator *ReleaseActivation
-	spec        *nodev1.InstanceSpec
-	candidate   state.ReleaseCandidate
-	image       releaseverify.VerifiedImage
-	execution   *state.ReleaseExecution
-	record      *state.ExecutionRecord
-	mu          sync.Mutex
-	active      bool
+	coordinator   *ReleaseActivation
+	spec          *nodev1.InstanceSpec
+	candidate     state.ReleaseCandidate
+	image         releaseverify.VerifiedImage
+	engineImageID string
+	execution     *state.ReleaseExecution
+	record        *state.ExecutionRecord
+	mu            sync.Mutex
+	active        bool
 }
 
 func (a *ReleaseActivation) verify(dsh *nodev1.DshRuntime) (releaseverify.VerifiedImage, state.ReleaseCandidate, error) {
@@ -110,6 +111,9 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 		return err
 	}
 	scope := &activationScope{coordinator: a, spec: spec, candidate: candidate, record: record, active: true}
+	if record != nil {
+		scope.engineImageID = record.EngineImageID
+	}
 	defer func() { scope.mu.Lock(); scope.active = false; scope.mu.Unlock() }()
 	return a.Store.WithReleaseExecution(ctx, candidate, func(ctx context.Context) error {
 		if err := scope.recheck(); err != nil {
@@ -143,10 +147,30 @@ func (s *activationScope) recheck() error {
 	if candidate != s.candidate {
 		return fmt.Errorf("runtime release changed during activation")
 	}
-	if s.record != nil && (s.record.Candidate != candidate || s.record.ProofDigest != image.ManifestDigest() || s.record.ConfigID != image.ConfigID()) {
+	if s.record != nil && (!executionMatchesImage(s.record, image, candidate) || s.record.EngineImageID != s.engineImageID) {
 		return fmt.Errorf("actual execution does not match signed evidence")
 	}
+	if s.engineImageID != "" && s.engineImageID != image.ConfigID() && s.engineImageID != image.ManifestDigest() {
+		return fmt.Errorf("fixed Engine image does not match signed evidence")
+	}
 	s.image = image
+	return nil
+}
+
+func executionMatchesImage(r *state.ExecutionRecord, image releaseverify.VerifiedImage, c state.ReleaseCandidate) bool {
+	return r.Version == 2 && r.Candidate == c && r.ConfigID == image.ConfigID() && r.ProofDigest == image.ManifestDigest() &&
+		(r.EngineImageID == image.ConfigID() || r.EngineImageID == image.ManifestDigest())
+}
+
+// pinEngineImage fixes the observed Engine target once. Even a switch between
+// the two individually valid digest forms cannot change an existing scope.
+func (s *activationScope) pinEngineImage(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.active || (id != s.image.ConfigID() && id != s.image.ManifestDigest()) || (s.engineImageID != "" && s.engineImageID != id) {
+		return fmt.Errorf("docker: Engine image identity changed or does not match signed OCI evidence")
+	}
+	s.engineImageID = id
 	return nil
 }
 
@@ -200,7 +224,7 @@ func (d *Docker) observationRecord(id string) (*state.ExecutionRecord, error) {
 		return nil, err
 	}
 	image, candidate, err := d.Activation.verify(r.DSH)
-	if err == nil && (candidate != r.Candidate || image.ConfigID() != r.ConfigID || image.ManifestDigest() != r.ProofDigest) {
+	if err == nil && !executionMatchesImage(r, image, candidate) {
 		err = fmt.Errorf("actual execution evidence mismatch")
 	}
 	if err == nil {
@@ -220,7 +244,7 @@ func (d *Docker) verifyContainer(ctx context.Context, r *state.ExecutionRecord) 
 	}
 	cfg, _ := insp["Config"].(map[string]any)
 	labels, _ := cfg["Labels"].(map[string]any)
-	if insp == nil || insp["Id"] != r.ContainerID || insp["Image"] != r.ConfigID || labels[labelManaged] != "true" || labels[labelInstance] != r.InstanceID || labels[labelGeneration] != fmt.Sprint(r.Generation) {
+	if insp == nil || insp["Id"] != r.ContainerID || insp["Image"] != r.EngineImageID || labels[labelManaged] != "true" || labels[labelInstance] != r.InstanceID || labels[labelGeneration] != fmt.Sprint(r.Generation) {
 		return nil, fmt.Errorf("docker actual container identity mismatch")
 	}
 	return insp, nil

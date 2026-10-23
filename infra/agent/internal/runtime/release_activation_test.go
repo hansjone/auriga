@@ -40,9 +40,11 @@ type releaseEngine struct {
 	names       map[string]string
 	starts      []string
 	creates     int
+	networks    int
 	platform    string
 	port        string
 	mode        string
+	imageID     string
 	beforeStart func(string)
 	afterStart  func()
 	afterCreate func()
@@ -80,7 +82,14 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(path, "/images/"):
 		image := strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
+		if e.imageID == testDigest(fixtureManifest) && image == fixtureConfigID {
+			http.NotFound(w, r)
+			return
+		}
 		id, osName, arch, ref := fixtureConfigID, fixtureOS(), fixtureArch(), image
+		if e.imageID != "" {
+			id = e.imageID
+		}
 		switch e.mode {
 		case "image-id":
 			id = "sha256:" + strings.Repeat("0", 64)
@@ -89,8 +98,14 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		case "repo-suffix":
 			ref = "evil.example.com/dsh@" + testDigest(fixtureManifest)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"Id": id, "Os": osName, "Architecture": arch, "RepoDigests": []string{ref}})
+		// Deliberately false annotations are never a source of config identity.
+		annotation := "sha256:" + strings.Repeat("0", 64)
+		if e.mode == "annotation-only" {
+			id, annotation = annotation, fixtureConfigID
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": id, "Os": osName, "Architecture": arch, "RepoDigests": []string{ref}, "Descriptor": map[string]any{"annotations": map[string]string{"config.digest": annotation}}})
 	case path == "/networks/create":
+		e.networks++
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"Id":"network-id"}`)
 	case path == "/containers/create":
@@ -203,6 +218,181 @@ func executeRelease(ctx context.Context, d *runtime.Docker, s *nodev1.InstanceSp
 		}
 		return d.Start(ctx, s.InstanceId)
 	})
+}
+
+func TestReleaseEngineImageIdentity(t *testing.T) {
+	for _, engineID := range []string{fixtureConfigID, testDigest(fixtureManifest)} {
+		name := "config"
+		if engineID != fixtureConfigID {
+			name = "manifest"
+		}
+		t.Run(name, func(t *testing.T) {
+			e, d, f := newReleaseEngine(t)
+			e.imageID = engineID
+			if engineID != fixtureConfigID {
+				if byConfig, err := d.Client.ImageInspect(context.Background(), fixtureConfigID); byConfig != nil || err == nil || !strings.Contains(err.Error(), "image not found") {
+					t.Fatal("containerd fixture unexpectedly resolved config ID", byConfig, err)
+				}
+			}
+			s := releaseSpec(f, "engine-identity", 7)
+			if err := executeRelease(context.Background(), d, s, t.TempDir(), t.TempDir()); err != nil {
+				t.Fatal(err)
+			}
+			r, err := f.store.GetExecution(s.InstanceId)
+			if err != nil || r == nil || r.ConfigID != fixtureConfigID || r.ProofDigest != testDigest(fixtureManifest) {
+				t.Fatal(r, err)
+			}
+			raw, err := json.Marshal(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(raw, &fields); err != nil || fields["engineImageId"] != engineID || fields["version"] != float64(2) {
+				t.Fatalf("execution did not preserve exact Engine identity: %s %v", raw, err)
+			}
+			e.mu.Lock()
+			createdImage, platform := e.containers[r.ContainerID]["Image"], e.platform
+			e.mu.Unlock()
+			if createdImage != engineID || platform != fixtureOS()+"/"+fixtureArch() {
+				t.Fatalf("create image=%v platform=%q", createdImage, platform)
+			}
+			if err := f.store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := state.Open(f.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = reopened.Close() })
+			d.Activation.Store = reopened
+			// A newer, invalid desired and a changed image-store representation
+			// cannot replace the original record or its immutable Engine target.
+			desired := proto.Clone(s).(*nodev1.InstanceSpec)
+			desired.Generation = 99
+			desired.Dsh.ReleaseEnvelope.Signature.Value = "invalid-new-desired"
+			if err := reopened.PutDesired(desired); err != nil {
+				t.Fatal(err)
+			}
+			otherID := testDigest(fixtureManifest)
+			if engineID != fixtureConfigID {
+				otherID = fixtureConfigID
+			}
+			e.mu.Lock()
+			e.imageID = otherID
+			e.mu.Unlock()
+			recoverFull := &nodev1.InstanceSpec{InstanceId: s.InstanceId, Generation: 1, Dsh: s.Dsh}
+			err = d.Activation.Recover(context.Background(), s.InstanceId, 1, func(ctx context.Context) error {
+				return d.Ensure(ctx, &runtime.Spec{Full: recoverFull, InstanceID: s.InstanceId, Generation: 1, Image: s.Dsh.Image, HomeBind: t.TempDir(), MetaBind: t.TempDir(), HostUID: 200001}, nil)
+			})
+			if err == nil || !strings.Contains(err.Error(), "Engine image identity") {
+				t.Fatalf("recovery Ensure reselected current image-store identity: %v", err)
+			}
+			if err := d.Activation.Recover(context.Background(), s.InstanceId, 1, func(ctx context.Context) error { return d.Start(ctx, s.InstanceId) }); err != nil {
+				t.Fatal("recovery reselected from newer desired/image inspect", err)
+			}
+			r, err = reopened.GetExecution(s.InstanceId)
+			if err != nil || r.EngineImageID != engineID || r.Generation != 1 || !proto.Equal(r.DSH, s.Dsh) {
+				t.Fatal("recovery replaced original execution", r, err)
+			}
+			e.mu.Lock()
+			e.containers[r.ContainerID]["Image"] = otherID
+			starts := len(e.starts)
+			e.mu.Unlock()
+			if _, err := d.Endpoint(s.InstanceId); err == nil {
+				t.Fatal("endpoint accepted the other individually allowed digest")
+			}
+			if err := d.Activation.Recover(context.Background(), s.InstanceId, 1, func(ctx context.Context) error { return d.Start(ctx, s.InstanceId) }); err == nil {
+				t.Fatal("recovery reselected the other individually allowed digest")
+			}
+			e.mu.Lock()
+			count, running := len(e.starts), e.containers[r.ContainerID]["running"]
+			e.mu.Unlock()
+			if count != starts || running != true {
+				t.Fatal("failed identity check started or killed the process")
+			}
+		})
+	}
+}
+
+func TestReleaseEngineIdentityCannotSwitchWithinScope(t *testing.T) {
+	for _, first := range []string{fixtureConfigID, testDigest(fixtureManifest)} {
+		t.Run(first, func(t *testing.T) {
+			e, d, f := newReleaseEngine(t)
+			e.imageID = first
+			second := fixtureConfigID
+			if first == second {
+				second = testDigest(fixtureManifest)
+			}
+			s := releaseSpec(f, "fixed-engine-scope", 7)
+			spec := &runtime.Spec{Full: s, InstanceID: s.InstanceId, Generation: 1, Image: s.Dsh.Image, HomeBind: t.TempDir(), MetaBind: t.TempDir(), HostUID: 200001}
+			err := d.Activation.Activate(context.Background(), s, func(ctx context.Context) error {
+				if err := d.Ensure(ctx, spec, nil); err != nil {
+					return err
+				}
+				e.mu.Lock()
+				e.imageID = second
+				e.mu.Unlock()
+				return d.Ensure(ctx, spec, nil)
+			})
+			if err == nil || !strings.Contains(err.Error(), "Engine image identity") {
+				t.Fatalf("scope switched execution identity: %v", err)
+			}
+			e.mu.Lock()
+			creates, networks := e.creates, e.networks
+			e.mu.Unlock()
+			r, readErr := f.store.GetExecution(s.InstanceId)
+			if readErr != nil || r == nil || r.EngineImageID != first || creates != 1 || networks != 1 {
+				t.Fatal("switch reached replacement side effects", r, readErr, creates, networks)
+			}
+		})
+	}
+}
+
+func TestReleaseManifestIdentityRejectsOtherEvidence(t *testing.T) {
+	for _, mode := range []string{"annotation-only", "image-id", "image-platform", "repo-suffix", "container-image", "config-tamper", "record-config-tamper"} {
+		t.Run(mode, func(t *testing.T) {
+			e, d, f := newReleaseEngine(t)
+			e.imageID = testDigest(fixtureManifest)
+			s := releaseSpec(f, "manifest-reject", 7)
+			switch mode {
+			case "config-tamper":
+				entry := filepath.Join(f.proofs, testDigest(fixtureManifest)[7:], "config.json")
+				if err := os.WriteFile(entry, append(bytes.Clone(fixtureConfig), ' '), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "record-config-tamper":
+				if err := executeRelease(context.Background(), d, s, t.TempDir(), t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+				r, err := f.store.GetExecution(s.InstanceId)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r.ConfigID = "sha256:" + strings.Repeat("e", 64)
+				if err := f.store.PutExecution(*r); err != nil {
+					t.Fatal(err)
+				}
+				if err := d.Activation.Recover(context.Background(), s.InstanceId, 1, func(ctx context.Context) error { return d.Start(ctx, s.InstanceId) }); err == nil {
+					t.Fatal("Engine M hid a record ConfigID not bound by original M")
+				}
+				if _, err := d.Endpoint(s.InstanceId); err == nil {
+					t.Fatal("unbound record config published an endpoint")
+				}
+				return
+			default:
+				e.mode = mode
+			}
+			if err := executeRelease(context.Background(), d, s, t.TempDir(), t.TempDir()); err == nil {
+				t.Fatal("invalid evidence executed via manifest identity")
+			}
+			e.mu.Lock()
+			starts, creates, networks := len(e.starts), e.creates, e.networks
+			e.mu.Unlock()
+			if starts != 0 || (mode != "container-image" && (creates != 0 || networks != 0)) {
+				t.Fatal("invalid evidence reached Engine mutation", starts, creates, networks)
+			}
+		})
+	}
 }
 
 func TestReleaseActualDriverSerializesA7B8AndRejectsOldRecovery(t *testing.T) {
