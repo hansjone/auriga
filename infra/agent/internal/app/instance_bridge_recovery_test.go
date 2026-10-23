@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -64,16 +65,16 @@ func newRecoveryFixtureWithPort(t *testing.T, actualPort string) *recoveryFixtur
 	}
 	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/containers/auriga-inst-recovery-test/json":
+		case r.Method == http.MethodGet && r.URL.Path == "/containers/"+fixtureContainerID+"/json":
 			if f.inspectError.Load() {
 				http.Error(w, "inspection unavailable", http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"State": map[string]any{"Running": true},
-				"Config":          map[string]any{"Labels": map[string]string{"auriga.generation": "1"}},
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": fixtureConfigID, "State": map[string]any{"Running": true},
+				"Config":          map[string]any{"Labels": map[string]string{"auriga.generation": "1", "auriga.instance": "recovery-test", "auriga.managed": "true"}},
 				"HostConfig":      map[string]any{"PortBindings": map[string]any{actualPort: []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}},
 				"NetworkSettings": map[string]any{"Ports": map[string]any{actualPort: []any{map[string]string{"HostPort": port}}}}})
-		case r.Method == http.MethodPost && r.URL.Path == "/containers/auriga-inst-recovery-test/start":
+		case r.Method == http.MethodPost && r.URL.Path == "/containers/"+fixtureContainerID+"/start":
 			f.starts.Add(1)
 			w.WriteHeader(http.StatusNotModified) // Existing user process is still running.
 		default:
@@ -86,12 +87,12 @@ func newRecoveryFixtureWithPort(t *testing.T, actualPort string) *recoveryFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.driver = &countedRecoveryDriver{Driver: runtime.NewDockerWithClient(client, "")}
-	store, err := state.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	d := runtime.NewDockerWithClient(client, "")
+	d.Policy.AllowAnyImage = true
+	f.driver = &countedRecoveryDriver{Driver: d}
+	fixture := newDockerReleaseFixture(t, d, time.Now().Add(time.Hour))
+	store := fixture.store
+	seedDockerRecord(t, d, "recovery-test", 1)
 	if err := store.PutDesired(&nodev1.InstanceSpec{InstanceId: "recovery-test", Generation: 1, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,9 @@ func newRecoveryFixtureWithPort(t *testing.T, actualPort string) *recoveryFixtur
 	}
 	f.registry, f.targets = ingress.NewMapRegistry(), &observer.SliceTargets{}
 	f.bridge = newInstanceBridge(config.Config{DataRoot: t.TempDir()}, f.driver, f.registry, f.targets)
+	d.SetEndpointRevoker(f.bridge.remove)
 	f.rec = reconciler.New(store, f.driver, nil, 1)
+	f.rec.Activation = d.Activation
 	t.Cleanup(f.rec.Close)
 	f.rec.StartTimeout = 120 * time.Millisecond
 	f.rec.Sink = func(status *nodev1.InstanceStatus) { f.bridge.Sync(status); f.statuses <- status }
@@ -248,5 +251,175 @@ func TestOldGenerationPendingRecoveryRetainsDecisionAcrossFailure(t *testing.T) 
 	}
 	if status := f.next(t); status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART || !status.Ready || status.ObservedGeneration != 1 || f.starts.Load() != starts {
 		t.Fatalf("healthy old-generation pending recovery was not idempotent: %v", status)
+	}
+}
+
+func TestRuntimeObservationFailureWithdrawsAlreadyPublishedBridge(t *testing.T) {
+	f := newRecoveryFixture(t)
+	f.healthy.Store(true)
+	f.rec.StartTimeout = time.Second
+	if err := f.rec.ReconcileAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		status := f.next(t)
+		if status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+			t.Fatal(status)
+		}
+		if status.Ready {
+			break
+		}
+	}
+	if _, ok := f.registry.Lookup("recovery-test"); !ok {
+		t.Fatal("initial ingress missing")
+	}
+	f.inspectError.Store(true)
+	if _, err := f.driver.Endpoint("recovery-test"); err == nil {
+		t.Fatal("failed actual object still has endpoint")
+	}
+	if _, ok := f.registry.Lookup("recovery-test"); ok || len(f.targets.Targets()) != 0 {
+		t.Fatal("observation failure left previously published ingress/observer")
+	}
+	if f.driver.ensures.Load() != 0 {
+		t.Fatal("observation rebuilt process")
+	}
+	// Endpoint failure synchronously reenters bridge.remove. Publishing must
+	// never hold the bridge mutex across that call.
+	joined := make(chan struct{})
+	go func() {
+		f.bridge.Sync(&nodev1.InstanceStatus{InstanceId: "recovery-test", Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true})
+		close(joined)
+	}()
+	select {
+	case <-joined:
+	case <-time.After(time.Second):
+		t.Fatal("Endpoint revocation reentered a held bridge mutex")
+	}
+}
+
+type capturedEndpointDriver struct {
+	runtime.Driver
+	captured chan struct{}
+	release  chan struct{}
+	once     sync.Once
+}
+
+func (d *capturedEndpointDriver) Endpoint(id string) (runtime.Endpoint, error) {
+	ep, err := d.Driver.Endpoint(id)
+	if err == nil {
+		d.once.Do(func() { close(d.captured); <-d.release })
+	}
+	return ep, err
+}
+
+func TestRevocationFencesAlreadyCapturedEndpointPublication(t *testing.T) {
+	f := newRecoveryFixture(t)
+	f.healthy.Store(true)
+	f.rec.StartTimeout = time.Second
+	if err := f.rec.ReconcileAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		st := f.next(t)
+		if st.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+			t.Fatal(st)
+		}
+		if st.Ready {
+			break
+		}
+	}
+	barrier := &capturedEndpointDriver{Driver: f.driver, captured: make(chan struct{}), release: make(chan struct{})}
+	f.bridge.driver = barrier
+	done := make(chan struct{})
+	go func() {
+		f.bridge.Sync(&nodev1.InstanceStatus{InstanceId: "recovery-test", Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true, StartedAt: f.startedAt})
+		close(done)
+	}()
+	defer func() {
+		select {
+		case <-barrier.release:
+		default:
+			close(barrier.release)
+		}
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	}()
+	select {
+	case <-barrier.captured:
+	case <-time.After(3 * time.Second):
+		t.Fatal("did not capture verified old Endpoint")
+	}
+	f.inspectError.Store(true)
+	if _, err := f.driver.Endpoint("recovery-test"); err == nil {
+		t.Fatal("actual Engine inspection error did not revoke")
+	}
+	if _, ok := f.registry.Lookup("recovery-test"); ok {
+		t.Fatal("revocation did not finish before stale publisher resumed")
+	}
+	close(barrier.release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale publication did not join")
+	}
+	if _, ok := f.registry.Lookup("recovery-test"); ok || len(f.targets.Targets()) != 0 {
+		t.Fatal("captured stale Endpoint resurrected ingress/observer after completed revocation")
+	}
+}
+
+func TestStoppedStatusFencesAlreadyCapturedEndpointPublication(t *testing.T) {
+	f := newRecoveryFixture(t)
+	f.healthy.Store(true)
+	f.rec.StartTimeout = time.Second
+	if err := f.rec.ReconcileAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		st := f.next(t)
+		if st.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+			t.Fatal(st)
+		}
+		if st.Ready {
+			break
+		}
+	}
+	barrier := &capturedEndpointDriver{Driver: f.driver, captured: make(chan struct{}), release: make(chan struct{})}
+	f.bridge.driver = barrier
+	done := make(chan struct{})
+	go func() {
+		f.bridge.Sync(&nodev1.InstanceStatus{InstanceId: "recovery-test", Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true, StartedAt: f.startedAt})
+		close(done)
+	}()
+	defer func() {
+		select {
+		case <-barrier.release:
+		default:
+			close(barrier.release)
+		}
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	}()
+	select {
+	case <-barrier.captured:
+	case <-time.After(3 * time.Second):
+		t.Fatal("did not capture old Endpoint")
+	}
+	f.bridge.Sync(&nodev1.InstanceStatus{InstanceId: "recovery-test", Phase: nodev1.InstancePhase_INSTANCE_PHASE_STOPPED})
+	close(barrier.release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stale publisher did not join")
+	}
+	if _, ok := f.registry.Lookup("recovery-test"); ok {
+		t.Fatal("stopped ingress was recreated")
+	}
+	targets := f.targets.Targets()
+	if len(targets) != 1 || targets[0].Process != observer.ProcessStopped || targets[0].BaseURL != nil {
+		t.Fatal("stopped observer target was replaced by stale running publication")
 	}
 }

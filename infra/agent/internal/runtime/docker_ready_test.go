@@ -26,6 +26,8 @@ func readyDocker(t *testing.T, endpoint string) *runtime.Docker {
 
 func readyDockerWithPortMetadata(t *testing.T, endpoint string, bindings any, publishedKey string) *runtime.Docker {
 	t.Helper()
+	var fixtureInstance atomic.Value
+	fixtureInstance.Store("")
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +42,7 @@ func readyDockerWithPortMetadata(t *testing.T, endpoint string, bindings any, pu
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(r.URL.Path, "/json"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"State": map[string]any{"Running": true},
-				"Config":          map[string]any{"ExposedPorts": map[string]any{"7860/tcp": map[string]any{}, "8888/tcp": map[string]any{}}},
+				"Id": fixtureContainerID, "Image": fixtureConfigID, "Config": map[string]any{"Labels": map[string]string{"auriga.managed": "true", "auriga.instance": fixtureInstance.Load().(string), "auriga.generation": "7"}, "ExposedPorts": map[string]any{"7860/tcp": map[string]any{}, "8888/tcp": map[string]any{}}},
 				"HostConfig":      map[string]any{"PortBindings": bindings},
 				"NetworkSettings": map[string]any{"Ports": map[string]any{publishedKey: []any{map[string]string{"HostPort": port}}}}})
 		default:
@@ -52,7 +54,10 @@ func readyDockerWithPortMetadata(t *testing.T, endpoint string, bindings any, pu
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtime.NewDockerWithClient(client, "")
+	d := runtime.NewDockerWithClient(client, "")
+	d.Policy.AllowAnyImage = true
+	readyInstances.Store(d, &fixtureInstance)
+	return d
 }
 
 func TestDockerStartUsesActualUnambiguousContainerPort(t *testing.T) {
@@ -63,7 +68,7 @@ func TestDockerStartUsesActualUnambiguousContainerPort(t *testing.T) {
 			d := readyDockerWithPortMetadata(t, health.URL, map[string]any{key: []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}, key)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			if err := d.Start(ctx, "actual-port-test"); err != nil {
+			if err := startDocker(t, d, ctx, "actual-port-test"); err != nil {
 				t.Fatal(err)
 			}
 			if endpoint, err := d.Endpoint("actual-port-test"); err != nil || endpoint.URL != health.URL {
@@ -96,7 +101,7 @@ func TestDockerStartRejectsMissingAmbiguousOrInvalidContainerPort(t *testing.T) 
 			d := readyDockerWithPortMetadata(t, health.URL, bindings, "7860/tcp")
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			if err := d.Start(ctx, "invalid-port-test"); err == nil {
+			if err := startDocker(t, d, ctx, "invalid-port-test"); err == nil {
 				t.Fatal("invalid container port metadata accepted")
 			}
 			if _, err := d.Endpoint("invalid-port-test"); err == nil || probes.Load() != 0 {
@@ -130,7 +135,7 @@ func TestDockerStartWaitsForRealHealth(t *testing.T) {
 	d := readyDocker(t, health.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := d.Start(ctx, "ready-test"); err != nil {
+	if err := startDocker(t, d, ctx, "ready-test"); err != nil {
 		t.Fatal(err)
 	}
 	if attempts.Load() < 3 {
@@ -152,7 +157,7 @@ func TestDockerStartWaitsAcrossConnectionRefused(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- d.Start(ctx, "refused-test") }()
+	go func() { done <- startDocker(t, d, ctx, "refused-test") }()
 	select {
 	case err := <-done:
 		t.Fatalf("start returned while health port refused connections: %v", err)
@@ -189,13 +194,13 @@ func TestDockerStartFailedRetryDoesNotKeepPriorReadyEndpoint(t *testing.T) {
 	d := readyDocker(t, health.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := d.Start(ctx, "retry-test"); err != nil {
+	if err := startDocker(t, d, ctx, "retry-test"); err != nil {
 		t.Fatal(err)
 	}
 	ready.Store(false)
 	ctx, cancelRetry := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancelRetry()
-	if err := d.Start(ctx, "retry-test"); !errors.Is(err, context.DeadlineExceeded) {
+	if err := startDocker(t, d, ctx, "retry-test"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("retry: %v", err)
 	}
 	if _, err := d.Endpoint("retry-test"); err == nil {
@@ -235,7 +240,7 @@ func TestDockerStartRejectsFalseHealthUntilContextDeadline(t *testing.T) {
 			d := readyDocker(t, health.URL)
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
-			if err := d.Start(ctx, "unready-test"); !errors.Is(err, context.DeadlineExceeded) {
+			if err := startDocker(t, d, ctx, "unready-test"); !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("false health accepted or deadline lost: %v", err)
 			}
 			if _, err := d.Endpoint("unready-test"); err == nil {
@@ -259,7 +264,7 @@ func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
 	d := readyDocker(t, health.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err := d.Start(ctx, "redirect-test"); !errors.Is(err, context.DeadlineExceeded) {
+	if err := startDocker(t, d, ctx, "redirect-test"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("redirect: %v", err)
 	}
 	if redirected.Load() != 0 {
@@ -279,7 +284,7 @@ func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
 	ctx, cancelProbe := context.WithCancel(context.Background())
 	defer cancelProbe()
 	done := make(chan error, 1)
-	go func() { done <- d.Start(ctx, "cancel-test") }()
+	go func() { done <- startDocker(t, d, ctx, "cancel-test") }()
 	select {
 	case <-entered:
 	case <-time.After(time.Second):

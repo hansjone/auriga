@@ -96,6 +96,72 @@ func digestOf(b []byte) string {
 	return "sha256:" + hex.EncodeToString(s[:])
 }
 
+func TestGCExecutionArchiveSurvivesNewDesiredAndFailedDelete(t *testing.T) {
+	old, newBody := []byte("old-runtime-archive"), []byte("new-desired-plugin")
+	g := newGCFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/old" {
+			_, _ = w.Write(old)
+		} else {
+			_, _ = w.Write(newBody)
+		}
+	}))
+	e, d, f := newReleaseEngine(t)
+	d.Activation.Artifacts = g.art
+	s := releaseSpec(f, "inst_a", 7)
+	s.Dsh.Digest = digestOf(old)
+	s.Dsh.Url = g.srv.URL + "/old"
+	s.Dsh.ReleaseEnvelope.ArchiveDigest = s.Dsh.Digest
+	signRelease(t, s.Dsh, f.key)
+	if err := executeRelease(context.Background(), d, s, t.TempDir(), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	g.prep.Executions = f.store
+	g.put(t, "inst_a", 2, map[string]string{"/new": digestOf(newBody)}, nil)
+	g.ensure(t, "inst_a")
+	// Even with desired/list holders lost, the independent actual record keeps
+	// the old archive. This exercises GC keep separately from SyncHolders.
+	g.specs.remove("inst_a")
+	if err := g.inner.Remove(context.Background(), "inst_a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.art.ReleaseAll("inst_a"); err != nil {
+		t.Fatal(err)
+	}
+	g.clock.Advance(8 * 24 * time.Hour)
+	if _, err := g.prep.CollectGarbage(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !g.cached(t, s.Dsh.Digest) {
+		t.Fatal("old actual archive lost during newer desired")
+	}
+	cleanup := &runtime.Preparing{Inner: d, Artifacts: g.art, Executions: f.store}
+	e.mu.Lock()
+	e.mode = "remove-fail"
+	e.mu.Unlock()
+	if err := cleanup.Remove(context.Background(), "inst_a"); err == nil {
+		t.Fatal("failed removal accepted")
+	}
+	if _, err := g.prep.CollectGarbage(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !g.cached(t, s.Dsh.Digest) {
+		t.Fatal("failed delete released actual archive")
+	}
+	e.mu.Lock()
+	e.mode = ""
+	e.mu.Unlock()
+	if err := cleanup.Remove(context.Background(), "inst_a"); err != nil {
+		t.Fatal(err)
+	}
+	g.clock.Advance(8 * 24 * time.Hour)
+	if _, err := g.prep.CollectGarbage(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if g.cached(t, s.Dsh.Digest) {
+		t.Fatal("confirmed deletion did not release old actual archive")
+	}
+}
+
 func newGCFixture(t *testing.T, handler http.Handler) *gcFixture {
 	t.Helper()
 	srv := httptest.NewServer(handler)

@@ -168,16 +168,27 @@ func runAgent(args []string, logs io.Writer) error {
 		return err
 	}
 	driver := runtime.Driver(inner)
+	if docker, ok := inner.(*runtime.Docker); ok {
+		proofsDir := os.Getenv("AURIGA_AGENT_RUNTIME_PROOFS_DIR")
+		if proofsDir == "" {
+			proofsDir = filepath.Join(cfg.AgentDir(), "runtime-proofs")
+		}
+		docker.Activation = &runtime.ReleaseActivation{Store: store, ProofsDir: proofsDir, Policy: func() policy.Policy { return docker.Policy }}
+	}
 	var prep *runtime.Preparing
 	if driverName != "fake" {
 		art := artifacts.New(cfg.ArtifactsDir(), pol)
+		if docker, ok := inner.(*runtime.Docker); ok {
+			docker.Activation.Artifacts = art
+		}
 		prep = &runtime.Preparing{
-			Inner:     inner,
-			Specs:     store,
-			Artifacts: art,
-			Layout:    &storage.Layout{InstancesDir: cfg.InstancesDir()},
-			UIDs:      storage.NewUIDTable(cfg.AgentDir()),
-			Policy:    pol,
+			Executions: store,
+			Inner:      inner,
+			Specs:      store,
+			Artifacts:  art,
+			Layout:     &storage.Layout{InstancesDir: cfg.InstancesDir()},
+			UIDs:       storage.NewUIDTable(cfg.AgentDir()),
+			Policy:     pol,
 			// The instance-facing HTTP entry, never the gRPC control address.
 			Access: surface.Access,
 			Chown:  storage.Lchown,
@@ -223,6 +234,9 @@ func runAgent(args []string, logs io.Writer) error {
 	sess.SetIngressEndpoint(io.Endpoint)
 
 	bridge := newInstanceBridge(cfg, driver, reg, targets)
+	if docker, ok := inner.(*runtime.Docker); ok {
+		docker.SetEndpointRevoker(bridge.remove)
+	}
 	statusSink := sess.StatusSink()
 	rec.Sink = func(st *nodev1.InstanceStatus) {
 		bridge.Sync(st)

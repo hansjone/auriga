@@ -22,15 +22,19 @@ type instanceBridge struct {
 	registry *ingress.MapRegistry
 	targets  *observer.SliceTargets
 	byID     map[string]observer.InstanceTarget
+	// Retained after removal so an older in-flight publisher cannot recreate
+	// an endpoint after deletion or reuse of the same instance ID.
+	publicationEpoch map[string]uint64
 }
 
 func newInstanceBridge(cfg config.Config, driver runtime.Driver, reg *ingress.MapRegistry, targets *observer.SliceTargets) *instanceBridge {
 	return &instanceBridge{
-		cfg:      cfg,
-		driver:   driver,
-		registry: reg,
-		targets:  targets,
-		byID:     map[string]observer.InstanceTarget{},
+		cfg:              cfg,
+		driver:           driver,
+		registry:         reg,
+		targets:          targets,
+		byID:             map[string]observer.InstanceTarget{},
+		publicationEpoch: map[string]uint64{},
 	}
 }
 
@@ -53,8 +57,9 @@ func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) {
 		}
 		b.publish(id, running, startedAt)
 	case nodev1.InstancePhase_INSTANCE_PHASE_STOPPED:
-		b.registry.Delete(id)
 		b.mu.Lock()
+		b.publicationEpoch[id]++
+		b.registry.Delete(id)
 		b.byID[id] = observer.InstanceTarget{ID: id, RootDir: filepath.Join(b.cfg.InstancesDir(), id, "home"), Process: observer.ProcessStopped}
 		b.flushLocked()
 		b.mu.Unlock()
@@ -68,6 +73,11 @@ func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) {
 }
 
 func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
+	b.mu.Lock()
+	epoch := b.publicationEpoch[id]
+	b.mu.Unlock()
+	// Endpoint may synchronously revoke and reenter remove. Never hold the
+	// bridge mutex across this call; compare its original epoch afterwards.
 	ep, err := b.driver.Endpoint(id)
 	if err != nil || ep.URL == "" {
 		return
@@ -78,6 +88,11 @@ func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
 	}
 	home := filepath.Join(b.cfg.InstancesDir(), id, "home")
 	logPath := filepath.Join(b.cfg.InstancesDir(), id, "meta", "instance.log")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.publicationEpoch[id] != epoch {
+		return
+	}
 	b.registry.Put(&ingress.Instance{
 		ID:       id,
 		Upstream: u,
@@ -88,7 +103,6 @@ func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
 	if running {
 		proc = observer.ProcessRunning
 	}
-	b.mu.Lock()
 	b.byID[id] = observer.InstanceTarget{
 		ID:               id,
 		BaseURL:          u,
@@ -97,12 +111,12 @@ func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
 		ProcessStartedAt: startedAt,
 	}
 	b.flushLocked()
-	b.mu.Unlock()
 }
 
 func (b *instanceBridge) remove(id string) {
-	b.registry.Delete(id)
 	b.mu.Lock()
+	b.publicationEpoch[id]++
+	b.registry.Delete(id)
 	delete(b.byID, id)
 	b.flushLocked()
 	b.mu.Unlock()
