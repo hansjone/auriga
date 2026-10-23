@@ -30,6 +30,8 @@ public final class WorkspaceService {
 
   static final Duration WAKE_REPORT_INTERVAL = Duration.ofSeconds(30);
 
+  private static final Duration STATUS_CLOCK_SKEW = Duration.ofSeconds(60);
+
   /** Done wake jobs are kept briefly for diagnosis, then deleted by the decision loop. */
   static final Duration DONE_WAKE_RETENTION = Duration.ofDays(1);
 
@@ -527,6 +529,15 @@ public final class WorkspaceService {
   }
 
   public void status(UUID node, InstanceStatus status) {
+    status(node, status, false);
+  }
+
+  /** Inventory re-inspects readiness, even when the cached node timestamp did not change. */
+  public void inventory(UUID node, InstanceStatus status) {
+    status(node, status, true);
+  }
+
+  private void status(UUID node, InstanceStatus status, boolean inventory) {
     UUID id;
     try {
       id = UUID.fromString(status.getInstanceId());
@@ -557,6 +568,25 @@ public final class WorkspaceService {
               status.getPhase().name().replace("INSTANCE_PHASE_", "").toLowerCase(Locale.ROOT);
           if (status.getPhase() == InstancePhase.UNRECOGNIZED
               || status.getPhase() == InstancePhase.INSTANCE_PHASE_UNSPECIFIED) return null;
+          Instant now = clock.instant();
+          Instant reportedAt = statusTime(status, now);
+          if (!inventory) {
+            // An unbounded node clock must neither advance the watermark nor revive a route.
+            if (status.hasUpdatedAt() && reportedAt == null) return null;
+            if (row.get("status") != null
+                && status.getObservedGeneration()
+                    == ((Number) row.get("observed_generation")).longValue()) {
+              Instant watermark = instant(row, "status_watermark");
+              if (watermark == null) watermark = instant(row, "updated_at");
+              if (reportedAt == null || !reportedAt.isAfter(watermark)) return null;
+            }
+          }
+          Instant watermark = reportedAt == null ? now : reportedAt;
+          // With no usable Inventory clock, even a clock-ahead queued frame must stay behind it.
+          // This is a bounded barrier; a later Inventory can also re-establish ordering
+          // immediately.
+          if (inventory && reportedAt == null) watermark = now.plus(STATUS_CLOCK_SKEW);
+          watermark = watermark.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
           if (phase.equals("absent")
               && (boolean) row.get("deleted")
               && !(boolean) row.get("deletion_event_sent")) {
@@ -602,17 +632,43 @@ public final class WorkspaceService {
               && !phase.equals(row.get("phase")))
             publish("instance.failed", row, Map.of("code", status.getError().getCode()));
           store.jdbc.update(
-              "UPDATE instance SET phase=?,ready=?,observed_generation=?,status=?,restart_pending=?,updated_at=? WHERE tenant_id=? AND id=?",
+              "UPDATE instance SET phase=?,ready=?,observed_generation=?,status=?,status_watermark=?,restart_pending=?,updated_at=? WHERE tenant_id=? AND id=?",
               phase,
               ready,
               status.getObservedGeneration(),
               status.toByteArray(),
+              time(watermark),
               phase.equals("pending_restart") || !ready && (boolean) row.get("restart_pending"),
               time(clock.instant()),
               store.tenant(),
               id);
+          // NodeSessions fences status/inventory with the authenticated control-session lease.
+          // A fresh current-generation report can undo an outage, never an explicit migration,
+          // drain or revocation. Hello/usage alone must not revive a stale instance observation.
+          if (Boolean.TRUE.equals(row.get("migration_pending"))
+              && (inventory || reportedAt != null)
+              && status.getObservedGeneration() == generation)
+            store.jdbc.update(
+                "UPDATE instance i SET migration_pending=false WHERE i.tenant_id=? AND i.id=? AND i.node_id=? AND NOT i.deleted AND (i.requested_node_id IS NULL OR i.requested_node_id=i.node_id) AND EXISTS (SELECT 1 FROM node n WHERE n.tenant_id=i.tenant_id AND n.id=i.node_id AND NOT n.revoked AND n.schedulable AND NOT n.draining AND n.last_seen_at>=?)",
+                store.tenant(),
+                id,
+                node,
+                time(clock.instant().minusSeconds(60)));
           return null;
         });
+  }
+
+  private static Instant statusTime(InstanceStatus status, Instant now) {
+    if (!status.hasUpdatedAt()) return null;
+    var timestamp = status.getUpdatedAt();
+    if (timestamp.getSeconds() <= 0
+        || timestamp.getSeconds() > 253402300799L
+        || timestamp.getNanos() < 0
+        || timestamp.getNanos() >= 1_000_000_000) return null;
+    Instant at = Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
+    if (at.isAfter(now.plus(STATUS_CLOCK_SKEW))) return null;
+    // PostgreSQL stores microseconds. Compare at that precision so an equal replay cannot round up.
+    return at.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
   }
 
   public void tick() {

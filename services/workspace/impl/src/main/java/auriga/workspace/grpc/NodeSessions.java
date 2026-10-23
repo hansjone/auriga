@@ -233,7 +233,7 @@ public final class NodeSessions implements AutoCloseable {
                 if (request.hasInventory()) {
                   inventory = true;
                   for (var status : request.getInventory().getInstancesList())
-                    workspace.status(node, status);
+                    workspace.inventory(node, status);
                 } else if (request.hasStatus()) {
                   workspace.status(node, request.getStatus());
                   if (request.getStatus().getPhase() == InstancePhase.INSTANCE_PHASE_ABSENT) {
