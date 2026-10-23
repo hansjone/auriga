@@ -1,6 +1,8 @@
 import { useI18n } from 'vue-i18n';
+import { orgZh, orgEn } from './orgMessages';
 
 const zh = {
+  ...orgZh,
   environment: '运行环境',
   membership: '成员与权限',
   nodes: '运行节点',
@@ -110,6 +112,7 @@ const zh = {
   },
 };
 const en = {
+  ...orgEn,
   environment: 'Runtime environment',
   membership: 'Members and permissions',
   nodes: 'Runtime nodes',
