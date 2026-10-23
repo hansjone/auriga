@@ -75,6 +75,8 @@ try {
   docker([
     'build',
     '--platform=linux/amd64',
+    '--provenance=false',
+    '--sbom=false',
     '--build-arg',
     `NODE_IMAGE=${nodeImage}`,
     '-f',

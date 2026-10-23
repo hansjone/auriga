@@ -34,7 +34,7 @@ sleep 2
 case "$FIXTURE" in
   fake)
     echo "==> build and push fake-dsh"
-    docker build --platform=linux/amd64 -t 127.0.0.1:5000/auriga/fake-dsh:e2e "$COMPOSE/fake-dsh"
+    docker build --platform=linux/amd64 --provenance=false --sbom=false -t 127.0.0.1:5000/auriga/fake-dsh:e2e "$COMPOSE/fake-dsh"
     docker push 127.0.0.1:5000/auriga/fake-dsh:e2e
     DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' 127.0.0.1:5000/auriga/fake-dsh:e2e)"
     ;;
