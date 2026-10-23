@@ -5,9 +5,9 @@
 `CanonicalReleaseBody`。本工具没有另一套签名格式、JCS 或 OCI 解析器，不生成任何身份、根或部署配置。
 规范见 [RT0](../../contracts/runtime/README.md)，生产启用流程见 [agent](agent.md)。
 
-`sign` 交付声明、公开根及单平台原始 manifest/config；`stage-layout` 可另行验证并复制完整离线 OCI 载体，**仍不是完整可部署发行包**。
+`sign` 交付声明、公开根及单平台原始 manifest/config；`stage-layout` 可另行验证并复制完整离线 OCI 载体，**仍不是完整可部署发行包**。Linux 上的 `import-layout` 从同一输入新建严格快照，随后复制到批准的本地 registry 并逐对象读回。
 NAS 通过[公开安装配方](nas.md#消费独立审核的正式运行时)复用严格导入，装配受 receipt 保护的正式模板、公开根和原始 proof。
-registry 认证与写入不在此工具内；仅签名通过也不代表镜像层已经到位。
+仅签名通过不代表镜像层已经到位。`import-layout` 仅支持本机匿名 HTTP registry，不管理认证或生产启用。
 不支持 native、归档混合声明、背书链管理或根自动轮换。
 
 ## 本地 registry 构建与原始 proof
@@ -42,7 +42,7 @@ node deploy/compose/scripts/collect-runtime-proofs.mjs `
 以 `verify --root ... --allow-image <精确 image>` 严格导入。新建的本地 fixture 根不因此成为官方授权根。
 
 此流程本身没有镜像层载体或公网 registry 认证客户端，也不保证跨 registry 重发布后保持同一个 M。
-离线层载体可使用下文 `stage-layout`，部署前仍须独立解决运输与原 repo@M 可用性。
+离线层载体可使用下文 `stage-layout`；Linux 本地 registry 的受限运输可使用 `import-layout`。
 
 ## 发布者输入
 
@@ -144,7 +144,29 @@ strict verify 会拒绝它；诊断后使用另一个全新输出路径重试。
 
 验证全部输入后，工具原子创建全新输出目录，逐个复制并在复制时重新核对字节；最后才写最小 index。输出只含原 M/C/引用层、`oci-layout` 和无标签的单 M 索引。任何已有输出对象或与输入树交叠的输出路径都拒绝。复制阶段失败会保留新建的残缺目录供诊断，不打印成功结果；请选另一全新路径重试。成功行只报告 M、C、唯一 blob 数和总字节数。本次返回值仅是当时的快照事实，不构成持续授权或运行就绪证明。
 
-后续由独立 registry 复制工具从载体按**原 M 摘要**选择源（形如 `./staged-oci@sha256:<M>`），并自行处理目标 registry 的批准、认证与访问；参考 [ORAS cp](https://oras.land/docs/commands/oras_cp/) 的 `--from-oci-layout` 语法。此命令不执行 ORAS、Docker load/push、联网、identity/receipt 安装或运行时启用，也不代表 NAS 部署完成。目录格式依据 [OCI Image Layout v1.1.1](https://github.com/opencontainers/image-spec/blob/v1.1.1/image-layout.md)。
+此命令只做快照，不执行 ORAS、Docker load/push、联网、identity/receipt 安装或运行时启用。目录格式依据 [OCI Image Layout v1.1.1](https://github.com/opencontainers/image-spec/blob/v1.1.1/image-layout.md)。
+
+## Linux 本地 registry 导入与真实读回
+
+发布者须在签发材料之前独立批准并固定最终本地 locator，例如 `127.0.0.1:50123/auriga/dsh@sha256:<原M的64位小写hex>`。源构建机与目标 NAS 均可使用同一数字 loopback authority 和仓库；签发后不得改包内 image 或消费方的精确 `--allow-image` 来迁就另一仓库。operator 独立审核 ORAS 1.3.0 可执行文件的来源和 SHA-256，显式指定绝对路径。工具的 `oras version` 检查仅核兼容性，不证明文件可信。
+
+先由 operator 启动现有**只发布到宿主 127.0.0.1** 的 registry，并确保批准仓库可匿名通过 HTTP 访问。Linux 命令示例：
+
+```sh
+./runtime-release import-layout \
+  --dir /srv/container/releases/release-7 \
+  --root /srv/container/operator-approved/root.pb \
+  --os linux --arch amd64 \
+  --allow-image '127.0.0.1:50123/auriga/dsh@sha256:<原M的64位小写hex>' \
+  --layout /srv/container/incoming-oci \
+  --out /srv/container/new-staged-oci \
+  --max-bytes 300000000 \
+  --oras /srv/container/operator-approved/oras-1.3.0
+```
+
+全部 bundle、外部根、平台、精确 image、layout、全新输出目录和预算均必填。工具先完整执行 `stage-layout` 的生产验签、预算与层校验；失败时不会调用 ORAS。ORAS 源固定为新快照的 `path@sha256:<原M>`，辅助 tag 只用于运输，不取自 index 注解。它只把目标仓库从批准 image 派生，拒绝 `localhost`、DNS、远端、URL、userinfo、非规范端口和仓库覆盖。子进程只获得独立空认证文件及受限环境，不读取已有 Docker/registry 登录配置、代理或 HOME；以 [ORAS cp](https://oras.land/docs/commands/oras_cp/) 的 `--from-oci-layout`、`--to-plain-http` 参数复制。
+
+复制期间，ORAS 只接触工具拥有的本机回环运输端口；该端口只把符合批准仓库的请求送往原定数字 loopback registry，拒绝重定向、认证挑战以及跨来源或跨仓库的上传位置。合法同仓库上传位置会改写回本机运输端口；签发的最终 image 与实际 registry 目标不变。复制退出后，工具从**同一个精确数字 loopback HTTP 仓库**按原 M 获取 manifest，并获取原 config 与每个被引用层，流式限制大小并检查 SHA-256；M/C 还逐字节比对原 proof。拒绝压缩响应、缺对象、坏对象或错误摘要。ORAS 版本检查、复制及完整 HTTP 读回共享 5 分钟超时；Linux CLI 收到 Ctrl+C/SIGTERM 时取消并收齐仍在同一进程组的 ORAS 后代，不承诺收容自行脱离进程组的程序。先行 `StageLayout` 由显式字节预算约束，尚不能在文件读取或复制中途按时钟强制中断；其前后均检查取消，取消后不会启动 ORAS。所有对象通过后才输出原 M/C、唯一对象数与字节数。失败返回非零且保留新快照以供诊断；目标 registry 可能已有部分对象，工具不会盲删。这一结果只是当次读回事实，不是持续授权、安装成功或真实 DSH 已启动。此 profile 不支持公网认证、重定向、跨仓库重写或自动下载 ORAS。
 
 ## 文件与平台权限边界
 

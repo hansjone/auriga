@@ -149,7 +149,9 @@ func TestCLIExecutable(t *testing.T) {
 }
 
 func TestCLIArgumentRejections(t *testing.T) {
-	for _, args := range [][]string{nil, {"unknown"}, {"verify", "--unknown"}, {"sign"}, {"verify", "extra"}} {
+	for _, args := range [][]string{nil, {"unknown"}, {"verify", "--unknown"}, {"sign"}, {"verify", "extra"},
+		{"import-layout", "--unknown"}, {"import-layout", "--dir", "x", "--root", "y", "--os", "linux", "--arch", "amd64", "--allow-image", "z", "--layout", "a", "--out", "b", "--max-bytes", "1"},
+		{"import-layout", "--dir", "x", "--root", "y", "--os", "linux", "--arch", "amd64", "--allow-image", "z", "--layout", "a", "--out", "b", "--max-bytes", "1", "--oras", "c", "--oras", "d"}} {
 		if err := run(args, new(bytes.Buffer), new(bytes.Buffer)); err == nil {
 			t.Fatalf("arguments accepted: %v", args)
 		}
