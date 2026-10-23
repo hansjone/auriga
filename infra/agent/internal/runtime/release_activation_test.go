@@ -35,6 +35,8 @@ import (
 // This is the production HTTP client/driver against a controlled Engine model,
 // not a Docker daemon. State is a real bbolt DB and all release evidence is signed.
 type releaseEngine struct {
+	// Publish configuration and snapshot hooks under mu even before the first
+	// test request: newReleaseEngine has already started the HTTP server.
 	mu          sync.Mutex
 	containers  map[string]map[string]any
 	names       map[string]string
@@ -121,9 +123,7 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		e.names[r.URL.Query().Get("name")] = id
 		hook := e.afterCreate
 		if hook != nil {
-			e.mu.Unlock()
-			hook()
-			e.mu.Lock()
+			e.runHookUnlocked(hook)
 		}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]string{"Id": id})
@@ -155,14 +155,13 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		hook := e.beforeStart
 		if hook != nil {
-			e.mu.Unlock()
-			hook(id)
-			e.mu.Lock()
+			e.runHookUnlocked(func() { hook(id) })
 		}
 		body["running"] = true
 		e.starts = append(e.starts, id)
-		if e.afterStart != nil {
-			e.afterStart()
+		afterStart := e.afterStart
+		if afterStart != nil {
+			e.runHookUnlocked(afterStart)
 		}
 		if e.mode == "start-500" {
 			http.Error(w, "start response is uncertain", 500)
@@ -188,6 +187,14 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// The caller holds mu and has snapshotted the hook. Restore the lock even on a
+// hook panic so serve's deferred Unlock remains paired on every exit path.
+func (e *releaseEngine) runHookUnlocked(hook func()) {
+	e.mu.Unlock()
+	defer e.mu.Lock()
+	hook()
 }
 
 func fixtureOS() string {
@@ -228,7 +235,9 @@ func TestReleaseEngineImageIdentity(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			e, d, f := newReleaseEngine(t)
+			e.mu.Lock()
 			e.imageID = engineID
+			e.mu.Unlock()
 			if engineID != fixtureConfigID {
 				if byConfig, err := d.Client.ImageInspect(context.Background(), fixtureConfigID); byConfig != nil || err == nil || !strings.Contains(err.Error(), "image not found") {
 					t.Fatal("containerd fixture unexpectedly resolved config ID", byConfig, err)
@@ -318,7 +327,9 @@ func TestReleaseEngineIdentityCannotSwitchWithinScope(t *testing.T) {
 	for _, first := range []string{fixtureConfigID, testDigest(fixtureManifest)} {
 		t.Run(first, func(t *testing.T) {
 			e, d, f := newReleaseEngine(t)
+			e.mu.Lock()
 			e.imageID = first
+			e.mu.Unlock()
 			second := fixtureConfigID
 			if first == second {
 				second = testDigest(fixtureManifest)
@@ -352,7 +363,9 @@ func TestReleaseManifestIdentityRejectsOtherEvidence(t *testing.T) {
 	for _, mode := range []string{"annotation-only", "image-id", "image-platform", "repo-suffix", "container-image", "config-tamper", "record-config-tamper"} {
 		t.Run(mode, func(t *testing.T) {
 			e, d, f := newReleaseEngine(t)
+			e.mu.Lock()
 			e.imageID = testDigest(fixtureManifest)
+			e.mu.Unlock()
 			s := releaseSpec(f, "manifest-reject", 7)
 			switch mode {
 			case "config-tamper":
@@ -380,7 +393,9 @@ func TestReleaseManifestIdentityRejectsOtherEvidence(t *testing.T) {
 				}
 				return
 			default:
+				e.mu.Lock()
 				e.mode = mode
+				e.mu.Unlock()
 			}
 			if err := executeRelease(context.Background(), d, s, t.TempDir(), t.TempDir()); err == nil {
 				t.Fatal("invalid evidence executed via manifest identity")
@@ -395,11 +410,66 @@ func TestReleaseManifestIdentityRejectsOtherEvidence(t *testing.T) {
 	}
 }
 
+func TestReleaseEngineHooksRunOutsideMutex(t *testing.T) {
+	e, d, f := newReleaseEngine(t)
+	var seen atomic.Uint32
+	var locked atomic.Bool
+	check := func(bit uint32) {
+		// No other Engine request is in flight in this sequential lifecycle.
+		// A failed TryLock means this callback was invoked under the fixture lock.
+		if !e.mu.TryLock() {
+			locked.Store(true)
+			return
+		}
+		seen.Or(bit)
+		e.mu.Unlock()
+	}
+	e.mu.Lock()
+	e.afterCreate = func() { check(1) }
+	e.beforeStart = func(string) { check(2) }
+	e.afterStart = func() { check(4) }
+	e.mu.Unlock()
+	if err := executeRelease(context.Background(), d, releaseSpec(f, "hook-locks", 7), t.TempDir(), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if locked.Load() || seen.Load() != 7 {
+		t.Fatalf("Engine hooks held mutex or were skipped: locked=%v seen=%d", locked.Load(), seen.Load())
+	}
+}
+
+func TestReleaseEngineHookPanicRestoresMutex(t *testing.T) {
+	e := &releaseEngine{}
+	const panicValue = "fixture hook panic"
+	func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		defer func() {
+			if got := recover(); got != panicValue {
+				t.Errorf("hook panic changed or swallowed: %v", got)
+			}
+		}()
+		e.runHookUnlocked(func() {
+			if !e.mu.TryLock() {
+				t.Error("panic hook ran under fixture mutex")
+			} else {
+				e.mu.Unlock()
+			}
+			panic(panicValue)
+		})
+	}()
+	if !e.mu.TryLock() {
+		t.Fatal("hook panic leaked fixture mutex")
+	}
+	e.mu.Unlock()
+}
+
 func TestReleaseActualDriverSerializesA7B8AndRejectsOldRecovery(t *testing.T) {
 	e, d, f := newReleaseEngine(t)
 	accepted, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
+	e.mu.Lock()
 	e.beforeStart = func(string) { once.Do(func() { close(accepted); <-release }) }
+	e.mu.Unlock()
 	defer func() {
 		select {
 		case <-release:
@@ -491,8 +561,10 @@ func TestReleaseSubprocessHelper(t *testing.T) {
 func TestReleaseProcessDeathKeepsIntentAgainstDelayedEngineStart(t *testing.T) {
 	e, d, f := newReleaseEngine(t)
 	accepted, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	e.mu.Lock()
 	e.beforeStart = func(string) { close(accepted); <-release }
 	e.afterStart = func() { close(finished) }
+	e.mu.Unlock()
 	defer func() {
 		select {
 		case <-release:
@@ -614,7 +686,9 @@ func TestReleaseRejectsBadDeclarationsProofsAndActualImages(t *testing.T) {
 					t.Fatal(err)
 				}
 			default:
+				e.mu.Lock()
 				e.mode = mode
+				e.mu.Unlock()
 			}
 			if err := executeRelease(context.Background(), d, s, t.TempDir(), t.TempDir()); err == nil {
 				t.Fatal("untrusted release executed")
@@ -676,7 +750,9 @@ func TestReleaseKeyExpiryAfterCreateRefusesStart(t *testing.T) {
 	s.Dsh.ReleaseEnvelope.Signature.Kid = "old-child"
 	signRelease(t, s.Dsh, oldKey)
 	created, release := make(chan struct{}), make(chan struct{})
+	e.mu.Lock()
 	e.afterCreate = func() { close(created); <-release }
+	e.mu.Unlock()
 	defer func() {
 		select {
 		case <-release:
@@ -771,7 +847,9 @@ func TestReleaseHealthFailureIsCompleteBut500ResponseKeepsIntent(t *testing.T) {
 			if mode == "health" {
 				e.healthy.Store(false)
 			} else {
+				e.mu.Lock()
 				e.mode = mode
+				e.mu.Unlock()
 			}
 			err := d.Activation.Activate(context.Background(), s, func(ctx context.Context) error {
 				if err := d.Ensure(ctx, &runtime.Spec{Full: s, InstanceID: s.InstanceId, Generation: 1, Image: s.Dsh.Image, HostUID: 200001, HomeBind: t.TempDir(), MetaBind: t.TempDir()}, nil); err != nil {
@@ -869,7 +947,9 @@ func TestReleaseReconcilerFreezesDesiredAndRecoversOriginalPendingGeneration(t *
 	rec.Sink = func(s *nodev1.InstanceStatus) { statuses <- s }
 	accepted, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
+	e.mu.Lock()
 	e.beforeStart = func(string) { once.Do(func() { close(accepted); <-release }) }
+	e.mu.Unlock()
 	defer func() {
 		select {
 		case <-release:
