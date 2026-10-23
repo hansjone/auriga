@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +37,140 @@ func runtimeProofFixture(t *testing.T, fixture string) (string, string) {
 		}
 	}
 	return root, image
+}
+
+func TestRuntimeStructuralAliases(t *testing.T) {
+	base := `{"os":"linux","architecture":"amd64","rootfs":{"type":"layers","diff_ids":[]},"config":{}}`
+	cases := []struct{ name, raw string }{
+		{"ASCII", `{"OS":"windows","os":"linux","architecture":"amd64"}`},
+		{"long-s", `{"o\u017f":"windows","os":"linux","architecture":"amd64"}`},
+		{"rootfs", `{"os":"linux","architecture":"amd64","rootfs":{"Type":"layers","type":"layers","diff_ids":[]}}`},
+		{"history", `{"os":"linux","architecture":"amd64","history":[{"Empty_Layer":true,"empty_layer":true}]}`},
+		{"execution", `{"os":"linux","architecture":"amd64","config":{"workingdir":"/","WorkingDir":"/"}}`},
+		{"Kelvin", `{"os":"linux","architecture":"amd64","config":{"healthchec\u212a":{},"Healthcheck":{}}}`},
+		{"healthcheck", `{"os":"linux","architecture":"amd64","config":{"Healthcheck":{"startinterval":1,"StartInterval":1}}}`},
+		{"historical config", `{"os":"linux","architecture":"amd64","container_config":{"attach\u017ftdin":false,"AttachStdin":false,"macaddress":"","MacAddress":""}}`},
+		{"historical healthcheck", `{"os":"linux","architecture":"amd64","container_config":{"Healthcheck":{"RETRIES":1,"Retries":1}}}`},
+	}
+	buildProof := func(c []byte) ([]byte, string) {
+		m := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":%q,"size":%d},"layers":[]}`, proofDigest(c), len(c)))
+		return m, "127.0.0.1:5000/auriga/fake-dsh@" + proofDigest(m)
+	}
+	// Reverse raw object member order at every structural nesting level while
+	// retaining exact key spelling. This is a second independent JSON input.
+	var reverse func(json.RawMessage) []byte
+	reverse = func(raw json.RawMessage) []byte {
+		if len(raw) == 0 {
+			return raw
+		}
+		if raw[0] == '{' {
+			d := json.NewDecoder(bytes.NewReader(raw))
+			_, _ = d.Token()
+			var fields [][]byte
+			for d.More() {
+				key, err := d.Token()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var value json.RawMessage
+				if err := d.Decode(&value); err != nil {
+					t.Fatal(err)
+				}
+				encoded, _ := json.Marshal(key)
+				fields = append(fields, append(append(encoded, ':'), reverse(value)...))
+			}
+			var b bytes.Buffer
+			b.WriteByte('{')
+			for i := len(fields) - 1; i >= 0; i-- {
+				if i != len(fields)-1 {
+					b.WriteByte(',')
+				}
+				b.Write(fields[i])
+			}
+			b.WriteByte('}')
+			return b.Bytes()
+		}
+		if raw[0] == '[' {
+			var values []json.RawMessage
+			if err := json.Unmarshal(raw, &values); err != nil {
+				t.Fatal(err)
+			}
+			var b bytes.Buffer
+			b.WriteByte('[')
+			for i, v := range values {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				b.Write(reverse(v))
+			}
+			b.WriteByte(']')
+			return b.Bytes()
+		}
+		return raw
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "bootstrap")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	if output, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, output)
+	}
+	for _, tc := range cases {
+		for _, order := range []string{"original", "reversed"} {
+			t.Run(tc.name+"/"+order, func(t *testing.T) {
+				c := []byte(tc.raw)
+				if order == "reversed" {
+					c = reverse(c)
+				}
+				m, image := buildProof(c)
+				if err := verifyRuntimeProof(image, m, c); err == nil || !strings.Contains(err.Error(), "noncanonical structural JSON member") {
+					t.Fatalf("alias not specifically rejected: %v", err)
+				}
+				proof := t.TempDir()
+				leaf := filepath.Join(proof, strings.TrimPrefix(digestOf(image), "sha256:"))
+				if err := os.Mkdir(leaf, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				for name, raw := range map[string][]byte{"manifest.json": m, "config.json": c} {
+					if err := os.WriteFile(filepath.Join(leaf, name), raw, 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				out := filepath.Join(t.TempDir(), "not-created")
+				output, err := exec.Command(binary, "-out", out, "-image", image, "-runtime-proofs", proof).CombinedOutput()
+				if err == nil || !strings.Contains(string(output), "noncanonical structural JSON member") {
+					t.Fatalf("CLI accepted wrong structure: %v %s", err, output)
+				}
+				if _, err := os.Lstat(out); !os.IsNotExist(err) {
+					t.Fatal("rejected proof generated installation/signing material")
+				}
+			})
+		}
+	}
+	c := []byte(base)
+	m, _ := buildProof(c)
+	for _, tc := range []struct{ name, from, to string }{
+		{"manifest", `"schemaVersion":2`, `"SchemaVersion":2,"schemaVersion":2`},
+		{"descriptor", `"config":{"mediaType":`, `"config":{"MediaType":"ignored","mediaType":`},
+		{"layer", `"layers":[]`, `"layers":[{"mediaType":"application/vnd.oci.image.layer.v1.tar","digest":"sha256:` + strings.Repeat("a", 64) + `","size":1,"ſize":1}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, raw := range [][]byte{[]byte(strings.Replace(string(m), tc.from, tc.to, 1)), reverse([]byte(strings.Replace(string(m), tc.from, tc.to, 1)))} {
+				image := "127.0.0.1:5000/auriga/fake-dsh@" + proofDigest(raw)
+				if err := verifyRuntimeProof(image, raw, c); err == nil || !strings.Contains(err.Error(), "noncanonical structural JSON member") {
+					t.Fatalf("alias accepted: %v", err)
+				}
+			}
+		})
+	}
+	positive := []byte(`{"os":"linux","architecture":"amd64","rootfs":{"type":"layers","diff_ids":[]},"config":{"Labels":{"OS":"user","oſ":"user","Key":"user"},"ExposedPorts":{"OS":{}},"Volumes":{"/OS":{}}},"container_config":{"Labels":{"OS":"user"},"Volumes":{"OS":{}},"ExposedPorts":{"OS":{}},"future":{"OS":"extension"}},"future":{"OS":"extension"},"İd":"extension"}`)
+	m, _ = buildProof(positive)
+	m = bytes.Replace(m, []byte(`"layers":[]`), []byte(`"layers":[],"annotations":{"OS":"user"},"future":{"OS":"extension"}`), 1)
+	image := "127.0.0.1:5000/auriga/fake-dsh@" + proofDigest(m)
+	if err := verifyRuntimeProof(image, m, positive); err != nil {
+		t.Fatalf("valid user keys/metadata extension rejected: %v", err)
+	}
 }
 
 func TestRuntimeReleaseJavaVectors(t *testing.T) {

@@ -252,7 +252,87 @@ func strictProofJSON(raw []byte, target any) error {
 	if _, err := d.Token(); err != io.EOF {
 		return fmt.Errorf("trailing proof JSON")
 	}
-	return json.Unmarshal(raw, target)
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	return decoder.Decode(target)
+}
+
+// Mirror the structural contexts protected by releaseverify's fixed Moby 27
+// boundary. Never recurse into user-keyed maps or arbitrary metadata extensions.
+func runtimeCanonicalMembers(object map[string]any, names ...string) error {
+	for key := range object {
+		for _, name := range names {
+			if key != name && strings.EqualFold(key, name) {
+				return fmt.Errorf("noncanonical structural JSON member %q (expected %q)", key, name)
+			}
+		}
+	}
+	return nil
+}
+
+func runtimeOnlyMembers(object map[string]any, names ...string) error {
+	if err := runtimeCanonicalMembers(object, names...); err != nil {
+		return err
+	}
+	for key := range object {
+		known := false
+		for _, name := range names {
+			if key == name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("unsupported structural JSON member %q", key)
+		}
+	}
+	return nil
+}
+
+func runtimeStructuralMembers(manifest, config map[string]any) error {
+	object := func(value any) map[string]any { m, _ := value.(map[string]any); return m }
+	check := runtimeCanonicalMembers
+	if err := check(manifest, "schemaVersion", "mediaType", "config", "layers", "annotations", "artifactType", "subject", "manifests"); err != nil {
+		return err
+	}
+	descriptor := []string{"mediaType", "digest", "size", "annotations"}
+	if err := runtimeOnlyMembers(object(manifest["config"]), descriptor...); err != nil {
+		return err
+	}
+	layers, _ := manifest["layers"].([]any)
+	for _, layer := range layers {
+		if err := runtimeOnlyMembers(object(layer), descriptor...); err != nil {
+			return err
+		}
+	}
+	if err := check(config, "created", "author", "architecture", "os", "os.version", "os.features", "variant", "config", "rootfs", "history", "id", "parent", "comment", "container", "container_config", "docker_version", "Size", "artifactType", "subject", "manifests", "mediaType"); err != nil {
+		return err
+	}
+	healthFields := []string{"Test", "Interval", "Timeout", "StartPeriod", "StartInterval", "Retries"}
+	historical := object(config["container_config"])
+	if err := check(historical, "Hostname", "Domainname", "User", "AttachStdin", "AttachStdout", "AttachStderr", "ExposedPorts", "Tty", "OpenStdin", "StdinOnce", "Env", "Cmd", "Healthcheck", "ArgsEscaped", "Image", "Volumes", "WorkingDir", "Entrypoint", "NetworkDisabled", "MacAddress", "OnBuild", "Labels", "StopSignal", "StopTimeout", "Shell"); err != nil {
+		return err
+	}
+	if err := check(object(historical["Healthcheck"]), healthFields...); err != nil {
+		return err
+	}
+	if err := runtimeOnlyMembers(object(config["rootfs"]), "type", "diff_ids"); err != nil {
+		return err
+	}
+	execution := object(config["config"])
+	if err := runtimeOnlyMembers(execution, "User", "WorkingDir", "StopSignal", "Env", "Entrypoint", "Cmd", "OnBuild", "Shell", "ArgsEscaped", "Labels", "ExposedPorts", "Volumes", "Healthcheck"); err != nil {
+		return err
+	}
+	if err := runtimeOnlyMembers(object(execution["Healthcheck"]), healthFields...); err != nil {
+		return err
+	}
+	history, _ := config["history"].([]any)
+	for _, entry := range history {
+		if err := check(object(entry), "created", "created_by", "author", "comment", "empty_layer"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func proofDigest(raw []byte) string {
@@ -292,6 +372,16 @@ func loadRuntimeProofs(root, image string) ([]byte, []byte, error) {
 func verifyRuntimeProof(image string, m, c []byte) error {
 	if !fixtureImagePattern.MatchString(image) || len(m) < 1 || len(c) < 1 || len(m) > maxProofBytes || len(c) > maxProofBytes || proofDigest(m) != digestOf(image) {
 		return fmt.Errorf("runtime manifest digest/size mismatch")
+	}
+	var rawManifest, rawConfig map[string]any
+	if err := strictProofJSON(m, &rawManifest); err != nil {
+		return err
+	}
+	if err := strictProofJSON(c, &rawConfig); err != nil {
+		return err
+	}
+	if err := runtimeStructuralMembers(rawManifest, rawConfig); err != nil {
+		return err
 	}
 	var manifest struct {
 		SchemaVersion int    `json:"schemaVersion"`

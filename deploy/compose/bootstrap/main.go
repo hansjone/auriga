@@ -67,6 +67,15 @@ func main() {
 		if err != nil || !reuse {
 			fatalf("existing installation refused: %v", err)
 		}
+		keys, err := os.ReadFile(filepath.Join(*out, "iam-installation", "compose.keys"))
+		if err != nil {
+			fatalf("read existing compose keys")
+		}
+		err = validateComposeKeys(keys)
+		clear(keys)
+		if err != nil {
+			fatalf("existing installation refused: %v", err)
+		}
 		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
 		return
 	}

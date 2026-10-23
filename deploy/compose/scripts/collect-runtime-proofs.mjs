@@ -68,11 +68,41 @@ export function imageParts(image) {
   return { repository: match[2], digest: match[3] };
 }
 
+// Reserved field names are ASCII. Unicode simple folding into ASCII adds only
+// long-s and Kelvin sign to A-Z; generic Unicode lowercasing is not equivalent.
+const structuralFold = key => key.replace(/[A-Z\u017f\u212a]/g, scalar => scalar === '\u017f' ? 's' : scalar === '\u212a' ? 'k' : scalar.toLowerCase());
+function canonicalMembers(object, names, strict = false) {
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return;
+  for (const key of Object.keys(object)) {
+    for (const name of names) {
+      if (key !== name && structuralFold(key) === structuralFold(name)) throw new Error(`noncanonical structural JSON member ${JSON.stringify(key)} (expected ${JSON.stringify(name)})`);
+    }
+    if (strict && !names.includes(key)) throw new Error(`unsupported structural JSON member ${JSON.stringify(key)}`);
+  }
+}
+
+function structuralMembers(manifest, config) {
+  canonicalMembers(manifest, ['schemaVersion', 'mediaType', 'config', 'layers', 'annotations', 'artifactType', 'subject', 'manifests']);
+  const descriptor = ['mediaType', 'digest', 'size', 'annotations'];
+  canonicalMembers(manifest?.config, descriptor, true);
+  if (Array.isArray(manifest?.layers)) for (const layer of manifest.layers) canonicalMembers(layer, descriptor, true);
+  canonicalMembers(config, ['created', 'author', 'architecture', 'os', 'os.version', 'os.features', 'variant', 'config', 'rootfs', 'history', 'id', 'parent', 'comment', 'container', 'container_config', 'docker_version', 'Size', 'artifactType', 'subject', 'manifests', 'mediaType']);
+  const health = ['Test', 'Interval', 'Timeout', 'StartPeriod', 'StartInterval', 'Retries'];
+  const historical = config?.container_config;
+  canonicalMembers(historical, ['Hostname', 'Domainname', 'User', 'AttachStdin', 'AttachStdout', 'AttachStderr', 'ExposedPorts', 'Tty', 'OpenStdin', 'StdinOnce', 'Env', 'Cmd', 'Healthcheck', 'ArgsEscaped', 'Image', 'Volumes', 'WorkingDir', 'Entrypoint', 'NetworkDisabled', 'MacAddress', 'OnBuild', 'Labels', 'StopSignal', 'StopTimeout', 'Shell']);
+  canonicalMembers(historical?.Healthcheck, health);
+  canonicalMembers(config?.rootfs, ['type', 'diff_ids'], true);
+  canonicalMembers(config?.config, ['User', 'WorkingDir', 'StopSignal', 'Env', 'Entrypoint', 'Cmd', 'OnBuild', 'Shell', 'ArgsEscaped', 'Labels', 'ExposedPorts', 'Volumes', 'Healthcheck'], true);
+  canonicalMembers(config?.config?.Healthcheck, health, true);
+  if (Array.isArray(config?.history)) for (const entry of config.history) canonicalMembers(entry, ['created', 'created_by', 'author', 'comment', 'empty_layer']);
+}
+
 export function verifyProof(image, manifest, config) {
   const { digest } = imageParts(image);
   if (!manifest.length || !config.length || manifest.length > maxProofBytes || config.length > maxProofBytes) throw new Error('proof size limit');
   if (hash(manifest) !== digest) throw new Error('manifest digest mismatch');
   const m = strictJSON(manifest), c = strictJSON(config);
+  structuralMembers(m, c);
   if (m.schemaVersion !== 2 || !manifestTypes.includes(m.mediaType) || !m.config || !configTypes.includes(m.config.mediaType)
       || manifestTypes.indexOf(m.mediaType) !== configTypes.indexOf(m.config.mediaType) || !Array.isArray(m.layers)
       || 'manifests' in m || !digestPattern.test(m.config.digest) || !Number.isSafeInteger(m.config.size) || m.config.size !== config.length
