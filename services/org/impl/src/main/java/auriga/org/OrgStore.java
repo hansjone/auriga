@@ -1,6 +1,8 @@
 package auriga.org;
 
 import auriga.common.context.TenantContext;
+import auriga.common.error.AurigaException;
+import auriga.common.error.CommonErrors;
 import auriga.common.persistence.TenantTransactionManager;
 import java.sql.Array;
 import java.sql.ResultSet;
@@ -9,9 +11,11 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -295,20 +299,48 @@ public final class OrgStore {
   }
 
   public List<UUID> groupAncestorIds(UUID groupId) {
-    return jdbc.query(
-        """
+    // UNION deduplicates the finite (id,parent_id) set, including on pre-existing cyclic data.
+    List<GroupParent> chain =
+        jdbc.query(
+            """
         WITH RECURSIVE chain AS (
           SELECT id, parent_id FROM "group" WHERE tenant_id=? AND id=?
-          UNION ALL
+          UNION
           SELECT g.id, g.parent_id FROM "group" g
           JOIN chain c ON g.id = c.parent_id AND g.tenant_id=?
         )
-        SELECT id FROM chain
+        SELECT id, parent_id FROM chain
         """,
-        (rs, i) -> (UUID) rs.getObject(1),
-        tenantId(),
-        groupId,
-        tenantId());
+            (rs, i) -> new GroupParent((UUID) rs.getObject("id"), (UUID) rs.getObject("parent_id")),
+            tenantId(),
+            groupId,
+            tenantId());
+    if (chain.isEmpty()) return List.of();
+    var ids = chain.stream().map(GroupParent::id).collect(java.util.stream.Collectors.toSet());
+    if (chain.stream().anyMatch(g -> g.parentId() != null && !ids.contains(g.parentId()))) {
+      throw new AurigaException(CommonErrors.NOT_FOUND);
+    }
+    // A complete single-parent chain must end at a root. No root means a cycle.
+    if (chain.stream().noneMatch(g -> g.parentId() == null)) {
+      throw new AurigaException(CommonErrors.CONFLICT);
+    }
+    return chain.stream().map(GroupParent::id).toList();
+  }
+
+  private record GroupParent(UUID id, UUID parentId) {}
+
+  /** Lock before reading any group state; all hierarchy writers hold it until commit. */
+  public void lockGroupHierarchy() {
+    try {
+      // A same-value write also rejects stale concurrent REPEATABLE READ snapshots. The tenant
+      // table has no business triggers; no tenant fields or tenant update events are changed.
+      int rows =
+          jdbc.update("UPDATE tenant SET id=id WHERE tenant_id=? AND id=?", tenantId(), tenantId());
+      if (rows == 0) throw new AurigaException(CommonErrors.NOT_FOUND);
+    } catch (PessimisticLockingFailureException e) {
+      // Let the surrounding transaction roll back. Do not retry against its stale snapshot.
+      throw new AurigaException(CommonErrors.CONFLICT, Map.of(), List.of(), e);
+    }
   }
 
   public long countOwners() {

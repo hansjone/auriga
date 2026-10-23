@@ -1,6 +1,8 @@
 package auriga.org;
 
 import auriga.common.context.TenantContext;
+import auriga.common.error.AurigaException;
+import auriga.common.error.CommonErrors;
 import auriga.common.events.EventPublisher;
 import auriga.common.persistence.UuidV7;
 import auriga.common.security.AuthorizationRules;
@@ -455,17 +457,10 @@ public final class OrgService {
   public ObjectNode createGroup(String name, String description, UUID parentId) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           if (parentId != null) {
+            validateGroupParent(null, parentId);
             ensureGrantAllowed(requireActor(), null, parentId);
-            Integer exists =
-                store
-                    .jdbc()
-                    .queryForObject(
-                        "SELECT count(*) FROM \"group\" WHERE tenant_id=? AND id=?",
-                        Integer.class,
-                        store.tenantId(),
-                        parentId);
-            OrgError.require(exists != null && exists > 0, "not_found", 404);
           }
           UUID id = UuidV7.next();
           Instant now = clock.instant();
@@ -505,9 +500,10 @@ public final class OrgService {
   public ObjectNode updateGroup(UUID groupId, String name, String description, UUID parentId) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           ObjectNode g = getGroup(groupId);
           if (parentId != null) {
-            OrgError.require(!parentId.equals(groupId), "conflict", 409);
+            validateGroupParent(groupId, parentId);
             ensureGrantAllowed(requireActor(), null, parentId);
           }
           ensureGrantAllowed(requireActor(), null, groupId);
@@ -535,9 +531,19 @@ public final class OrgService {
         });
   }
 
+  private void validateGroupParent(UUID groupId, UUID parentId) {
+    if (parentId.equals(groupId)) throw new AurigaException(CommonErrors.CONFLICT);
+    List<UUID> ancestors = store.groupAncestorIds(parentId);
+    if (ancestors.isEmpty()) throw new AurigaException(CommonErrors.NOT_FOUND);
+    if (groupId != null && ancestors.contains(groupId)) {
+      throw new AurigaException(CommonErrors.CONFLICT);
+    }
+  }
+
   public void deleteGroup(UUID groupId) {
     store.tx(
         () -> {
+          store.lockGroupHierarchy();
           getGroup(groupId);
           Integer children =
               store
