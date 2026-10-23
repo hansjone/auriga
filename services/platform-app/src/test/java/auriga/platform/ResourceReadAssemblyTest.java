@@ -27,7 +27,6 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.*;
-import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.*;
@@ -113,7 +112,7 @@ class ResourceReadAssemblyTest {
     registry.add("auriga.resource.cursor-signing-key", ResourceReadAssemblyTest::randomKey);
   }
 
-  @SpringBootConfiguration
+  // Explicit lite configuration: not a scanned component or a discoverable Boot application root.
   @EnableAutoConfiguration
   @Import({ResourceModuleConfiguration.class, PlatformResourceConfiguration.class})
   static class App {
