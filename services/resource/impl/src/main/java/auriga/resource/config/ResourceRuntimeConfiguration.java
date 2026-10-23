@@ -6,6 +6,7 @@ import auriga.resource.api.ResourceAccessInputs;
 import auriga.resource.app.*;
 import auriga.resource.persistence.ResourceStore;
 import auriga.resource.web.ResourceController;
+import auriga.resource.web.ResourceMetadataController;
 import auriga.resource.web.model.PackagePage;
 import auriga.resource.web.model.Version;
 import auriga.resource.web.model.VersionPage;
@@ -28,7 +29,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnExpression(
     "${auriga.services.resource.enabled:true} && ('${auriga.service.schema:}' == 'resource' || ${auriga.platform.combined:false})")
-@Import(ResourceController.class)
+@Import({ResourceController.class, ResourceMetadataController.class})
 public class ResourceRuntimeConfiguration {
   @Bean
   org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer resourceJsonModels() {
@@ -79,6 +80,11 @@ public class ResourceRuntimeConfiguration {
   ResourceQueries resourceQueries(
       ResourceStore store, ResourceAccess access, ResourceCursor cursors) {
     return new ResourceQueries(store, access, cursors);
+  }
+
+  @Bean
+  ResourceCommands resourceCommands(ResourceStore store, ResourceAccess access, Clock clock) {
+    return new ResourceCommands(store, access, clock);
   }
 
   @Bean

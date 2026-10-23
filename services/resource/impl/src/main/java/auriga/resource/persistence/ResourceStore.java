@@ -2,6 +2,7 @@ package auriga.resource.persistence;
 
 import auriga.common.context.TenantContext;
 import auriga.common.persistence.TenantTransactionManager;
+import auriga.common.persistence.UuidV7;
 import auriga.resource.app.ResourceAccess.Reader;
 import auriga.resource.web.model.ModelPackage;
 import auriga.resource.web.model.Version;
@@ -13,11 +14,15 @@ import java.util.function.Supplier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.json.JsonMapper;
 
 /** Parameterized resource-only SQL, always inside a tenant-stamped runtime-role transaction. */
 public final class ResourceStore {
   private final NamedParameterJdbcTemplate jdbc;
   private final TransactionTemplate tx;
+  private final TransactionTemplate writes;
+  private static final JsonMapper JSON = JsonMapper.builder().build();
+  private static final String CREATE = "POST /api/resource/v1/packages";
 
   public ResourceStore(JdbcTemplate jdbc, TenantTransactionManager manager) {
     this.jdbc = new NamedParameterJdbcTemplate(jdbc);
@@ -25,12 +30,125 @@ public final class ResourceStore {
     tx.setReadOnly(true);
     tx.setIsolationLevel(
         org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    writes = new TransactionTemplate(manager);
+    writes.setIsolationLevel(
+        org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+    writes.setTimeout(10);
   }
 
   public <T> T read(Supplier<T> action) {
     TenantContext.require();
     TenantTransactionManager.verifyTransactionTenant();
     return tx.execute(status -> action.get());
+  }
+
+  public <T> T write(Supplier<T> action) {
+    TenantContext.require();
+    TenantTransactionManager.verifyTransactionTenant();
+    return writes.execute(status -> action.get());
+  }
+
+  public void lockCreation(Reader r, String key) {
+    // Hash collisions merely serialize unrelated keys; the unique scope remains exact in SQL.
+    jdbc.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(:scope,0))",
+        Map.of("scope", r.tenant() + ":" + r.account() + ":" + CREATE + ":" + key),
+        (rs, n) -> 0);
+  }
+
+  public record Creation(String fingerprint, ModelPackage response) {}
+
+  public Optional<Creation> creation(Reader r, String key, java.time.Instant now) {
+    return jdbc
+        .query(
+            "SELECT fingerprint,response::text AS response FROM resource.resource_package_creation "
+                + "WHERE tenant_id=:tenant AND actor_id=:account AND operation=:operation AND request_key=:key AND expires_at>:now",
+            creationArgs(r, key, now),
+            (rs, n) ->
+                new Creation(
+                    rs.getString("fingerprint"),
+                    JSON.readValue(rs.getString("response"), ModelPackage.class)))
+        .stream()
+        .findFirst();
+  }
+
+  public void rememberCreation(
+      Reader r, String key, String fingerprint, ModelPackage result, java.time.Instant now) {
+    var args = creationArgs(r, key, now.plusSeconds(86400));
+    args.put("id", UuidV7.next());
+    args.put("fingerprint", fingerprint);
+    args.put("response", JSON.writeValueAsString(result));
+    jdbc.update(
+        "INSERT INTO resource.resource_package_creation(id,tenant_id,actor_id,operation,request_key,fingerprint,response,expires_at) "
+            + "VALUES(:id,:tenant,:account,:operation,:key,:fingerprint,CAST(:response AS jsonb),:now) "
+            + "ON CONFLICT(tenant_id,actor_id,operation,request_key) DO UPDATE SET id=EXCLUDED.id,fingerprint=EXCLUDED.fingerprint,response=EXCLUDED.response,expires_at=EXCLUDED.expires_at",
+        args);
+  }
+
+  private Map<String, Object> creationArgs(Reader r, String key, java.time.Instant now) {
+    var args = params(r);
+    args.put("operation", CREATE);
+    args.put("key", key);
+    args.put("now", OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC));
+    return args;
+  }
+
+  public ModelPackage insert(
+      Reader r, String name, String visibility, Set<UUID> groups, java.time.Instant now) {
+    UUID id = UuidV7.next();
+    var args = params(r);
+    args.put("id", id);
+    args.put("name", name);
+    args.put("visibility", visibility);
+    args.put("level", visibility.equals("private") ? "l4" : "l3");
+    args.put("created", OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC));
+    jdbc.update(
+        "INSERT INTO resource.resource_package(id,tenant_id,owner_id,name,level,visibility,enabled,revision,created_at) "
+            + "VALUES(:id,:tenant,:account,:name,:level,:visibility,false,1,:created)",
+        args);
+    replaceGroups(r, id, groups);
+    return packageById(r, id).orElseThrow();
+  }
+
+  public Optional<UUID> lockPackage(Reader r, UUID id) {
+    var args = params(r);
+    args.put("id", id);
+    return jdbc
+        .query(
+            // ACL subqueries in a statement waiting on a row lock can retain the pre-lock
+            // snapshot. Lock only by tenant/id; authorize using a new statement after the lock.
+            "SELECT p.id FROM resource.resource_package p WHERE p.tenant_id=:tenant AND p.id=:id FOR UPDATE OF p",
+            args,
+            (rs, n) -> rs.getObject("id", UUID.class))
+        .stream()
+        .findFirst();
+  }
+
+  public ModelPackage update(Reader r, UUID id, String name, String visibility, Set<UUID> groups) {
+    var args = params(r);
+    args.put("id", id);
+    args.put("name", name);
+    args.put("visibility", visibility);
+    jdbc.update(
+        "UPDATE resource.resource_package SET name=:name,visibility=:visibility,revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
+        args);
+    replaceGroups(r, id, groups);
+    return packageById(r, id).orElseThrow();
+  }
+
+  private void replaceGroups(Reader r, UUID id, Set<UUID> groups) {
+    var args = params(r);
+    args.put("id", id);
+    jdbc.update(
+        "DELETE FROM resource.resource_package_group WHERE tenant_id=:tenant AND package_id=:id",
+        args);
+    for (UUID group : groups) {
+      args.put("relation", UuidV7.next());
+      args.put("group", group);
+      jdbc.update(
+          "INSERT INTO resource.resource_package_group(id,tenant_id,package_id,group_id) VALUES(:relation,:tenant,:id,:group)",
+          args);
+    }
   }
 
   private Map<String, Object> params(Reader r) {
