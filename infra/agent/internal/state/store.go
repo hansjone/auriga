@@ -50,6 +50,12 @@ func Open(agentDir string) (*Store, error) {
 				return e
 			}
 		}
+		if _, err := readExecutions(tx); err != nil {
+			return err
+		}
+		if _, err := readIntents(tx, ReleasePartition{}); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {

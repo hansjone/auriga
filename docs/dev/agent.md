@@ -5,8 +5,45 @@
 初始根必须来自实际 CA pin 校验的 TLS Join，且响应必须包含至少一个合法根；空根或坏图会拒绝入网，
 不写身份与 keyring，但服务端可能已消费一次性 token。`AllowInsecure=true` 不会降级 HTTPS；
 实际明文开发 Join 只生成明确无发行信任的状态，普通 Join/Renew 不能再为它补根。
-RT1 已消费并持久化 v1 keyring，运行时强制验签、真实单平台 OCI 检查及持久防回滚仍待 RT2，
+RT1 已消费并持久化 v1 keyring；RT2 生产 Docker 已强制消费正式发行签名、单平台原始 OCI 证据、实际 Engine 身份和持久防回滚，
 不能据此认定正式模板或部署已可用。现有资源签名时间精度保持原样。
+
+## 生产 Docker 发行材料与恢复
+
+可信安装阶段把**原始**公开 OCI 单平台 manifest/config 放在：
+
+```text
+<data-root>/agent/runtime-proofs/<manifest sha256 的 64 位小写 hex>/manifest.json
+<data-root>/agent/runtime-proofs/<manifest sha256 的 64 位小写 hex>/config.json
+```
+
+受信任的本机环境变量 `AURIGA_AGENT_RUNTIME_PROOFS_DIR` 可指定上述根目录；容器安装可将公开目录只读挂载到
+`/etc/auriga/runtime-proofs` 并设置该变量。实例规格不能覆盖根目录。发行/安装工具必须保存 registry 返回的
+原始单平台 M 字节及其 config descriptor 指向的原始 C 字节，不得用 JSON 重序列化、docker save、
+镜像内部的同名文件或索引替代。两个文件各不超过 4 MiB，目录/文件不得为链接，文件必须为普通非空文件。
+目录本身不是信任根；每次启用、启动和恢复都重读原字节，核签名、摘要、格式、当前 ring/策略及节点 GOOS/GOARCH。
+
+Docker-only 的 `archiveDigest`、`dsh.digest`、`dsh.url` 可全空，`SignedArtifact` 可为空；有归档则仍须实际核字节，
+不能用归档签名证明镜像。实际 image inspect 必须精确匹配原 repo@digest、OS 与 Architecture；
+其 Id 只可等于已验原 C 摘要或本次已验单平台 M 摘要（兼容 classic/containerd store），核后一次固定 EngineImageID。
+ConfigID 始终来自原 C，M 必须仍绑定 C；不信 descriptor.annotations，不接受任意 manifest/index ID。
+创建使用固定 EngineImageID 和显式平台，启动绑定创建返回并持久化的真实 container ID；资源、只读挂载、UID、cap 和网络边界继续生效。
+
+同一发行分区保持最终授权 → 高水位提交 → 创建 → 实际记录落盘 → 启动的连续锁。
+执行副作用前先同步持久未决 intent；断线、请求取消、HTTP 错误或进程崩溃不代表 Engine 动作已经退场。
+遗留 intent 拒绝该分区的一切同序/高序启用与恢复；单次 Inspect、等待超时、人工确认或重启代理都不能清它。
+本版本没有强制清标记命令；保留 state.db 与全部公开材料，需停机后受保护诊断，并在具备经审查的闭窗证明后另行处理。
+不要通过删库、换身份或换根恢复推进。此机制优先保证安全序，异常退出可能使该分区持续不可用。
+仅健康超时且所有 Engine 执行动作已有确定成功回执时，原协调域可清自身 intent 并允许重试；高水位不回退。
+
+独立执行记录保存旧实际发行、完整 envelope、实际 generation、container ID、ConfigID、EngineImageID 与 proof 定位，
+不会被新 desired 或普通状态写入覆盖。重连、重启及 PendingRestart 重验旧记录与当前资格，不按标签猜信任。
+container.Image 必须等于记录中那个确定 EngineImageID，恢复不能在 C/M 之间重选。
+执行记录 Version=2 沿用原 bucket，旧 Version1 或缺字段直接拒绝；没有按 desired 或 Engine 当前结果自动推断的迁移。
+核验失败撤 Ready/对外端点，保留已运行进程；停止/删除无需发行 key 仍有效，删除失败保记录，确认真正删除后才释放旧归档引用。
+原始 M/C 首版保守保留。HTTP Engine 模型测试及源码分析不等于真实 daemon 故障注入、现场部署或掉电实验。
+
+## 节点身份与发行信任初始化
 
 身份目录永久保留 `release-trust.guard`，绑定初始证书、节点身份、CA 与根摘要。
 初始化先写 guard，再以 bbolt 事务写 pending 的 meta/keyring，最后保存身份文件并激活。

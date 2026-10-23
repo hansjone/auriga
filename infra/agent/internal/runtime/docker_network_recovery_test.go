@@ -51,7 +51,7 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 			if f.failure == "network-owner" {
 				labels["auriga.instance"] = "other"
 			}
-			members := map[string]any{"instance-id": map[string]string{"Name": "auriga-inst-recovery-test"}}
+			members := map[string]any{fixtureContainerID: map[string]string{"Name": "auriga-inst-recovery-test"}}
 			if f.attached {
 				members["replacement-edge-id"] = map[string]string{"Name": "test-edge"}
 			}
@@ -86,12 +86,12 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "replacement-edge-id", "Config": map[string]any{"Labels": map[string]string{"auriga.role": role}},
 				"State": map[string]bool{"Running": f.failure != "stopped-edge"}, "HostConfig": map[string]string{"NetworkMode": mode},
 				"NetworkSettings": map[string]any{"Networks": networks}})
-		case r.Method == http.MethodGet && r.URL.Path == "/containers/auriga-inst-recovery-test/json":
+		case r.Method == http.MethodGet && (r.URL.Path == "/containers/auriga-inst-recovery-test/json" || r.URL.Path == "/containers/"+fixtureContainerID+"/json"):
 			owner := "recovery-test"
 			if f.failure == "instance-owner" {
 				owner = "other"
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"Id": "instance-id", "State": map[string]any{"Running": true, "StartedAt": "2026-01-01T01:02:03Z"},
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": fixtureConfigID, "State": map[string]any{"Running": true, "StartedAt": "2026-01-01T01:02:03Z"},
 				"Config":     map[string]any{"Labels": map[string]string{"auriga.managed": "true", "auriga.instance": owner, "auriga.generation": "7"}},
 				"Mounts":     []any{map[string]any{"Source": "/data/instances/recovery-test/home", "Destination": "/home/dsh", "RW": true}},
 				"HostConfig": map[string]any{"NetworkMode": "auriga-net-recovery-test", "PortBindings": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": "0"}}}},
@@ -113,7 +113,7 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 			}
 			f.attached = f.failure != "connect-noop"
 			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodPost && r.URL.Path == "/containers/auriga-inst-recovery-test/start":
+		case r.Method == http.MethodPost && r.URL.Path == "/containers/"+fixtureContainerID+"/start":
 			f.starts.Add(1)
 			w.WriteHeader(http.StatusNotModified) // Preserve the already running process.
 		default:
@@ -127,7 +127,12 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 		t.Fatal(err)
 	}
 	f.driver = runtime.NewDockerWithClient(f.client, "")
+	f.driver.Policy.AllowAnyImage = true
 	f.driver.EdgeContainer, f.driver.PlatformHost = "test-edge", "portal.example.com"
+	// Install the real trust/Store and original actual record before callers
+	// start their recovery deadline. CA/key generation and durable seeding are
+	// fixture setup, not part of the bounded Engine recovery being asserted.
+	seedDockerRecord(t, f.driver, "recovery-test", 7)
 	return f
 }
 
@@ -140,10 +145,10 @@ func TestDockerStartRestoresReplacementEdgeWithoutRebuildingInstance(t *testing.
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := f.driver.Start(ctx, "recovery-test"); err != nil {
+		if err := startDocker(t, f.driver, ctx, "recovery-test"); err != nil {
 			t.Fatal(err)
 		}
-		if f.connects.Load() != 1 || f.starts.Load() != int64(attempt+1) || f.probes.Load() != int64(attempt+1) {
+		if f.connects.Load() != 1 || f.starts.Load() != 1 || f.probes.Load() != int64(attempt+1) {
 			t.Fatalf("control bridge not restored idempotently: connects=%d starts=%d probes=%d", f.connects.Load(), f.starts.Load(), f.probes.Load())
 		}
 		if _, err := f.driver.Endpoint("recovery-test"); err != nil {
@@ -159,7 +164,7 @@ func TestDockerStartRestoresReplacementEdgeWithoutRebuildingInstance(t *testing.
 func TestDockerStartRejectsUnsafeEdgeRecoveryBeforeStartingOrProbing(t *testing.T) {
 	for failure, expected := range map[string]string{
 		"network-owner": "ownership/isolation mismatch", "external-network": "ownership/isolation mismatch", "network-driver": "ownership/isolation mismatch",
-		"foreign-member": "unexpected instance network member", "instance-owner": "existing instance container ownership mismatch",
+		"foreign-member": "unexpected instance network member", "instance-owner": "actual container identity mismatch",
 		"edge-owner": "running labelled bridge container", "host-edge": "running labelled bridge container", "stopped-edge": "running labelled bridge container",
 		"existing-alias": "existing edge endpoint has wrong platform alias", "connect-error": "403",
 		"connect-noop": "edge platform alias was not applied", "connect-alias": "edge platform alias was not applied", "connect-network": "edge platform alias was not applied",
@@ -168,7 +173,7 @@ func TestDockerStartRejectsUnsafeEdgeRecoveryBeforeStartingOrProbing(t *testing.
 			f := newEdgeRecoveryFixture(t, failure)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			err := f.driver.Start(ctx, "recovery-test")
+			err := startDocker(t, f.driver, ctx, "recovery-test")
 			if err == nil || !strings.Contains(err.Error(), expected) {
 				t.Fatalf("unsafe recovery accepted or wrong error: %v; want %q", err, expected)
 			}
@@ -186,13 +191,13 @@ func TestDockerStartFailedEdgeRecoveryClearsPriorReadyEndpoint(t *testing.T) {
 	f := newEdgeRecoveryFixture(t, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := f.driver.Start(ctx, "recovery-test"); err != nil {
+	if err := startDocker(t, f.driver, ctx, "recovery-test"); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
 	f.failure = "foreign-member"
 	f.mu.Unlock()
-	if err := f.driver.Start(ctx, "recovery-test"); err == nil || !strings.Contains(err.Error(), "unexpected instance network member") {
+	if err := startDocker(t, f.driver, ctx, "recovery-test"); err == nil || !strings.Contains(err.Error(), "unexpected instance network member") {
 		t.Fatalf("contaminated retry accepted: %v", err)
 	}
 	if _, err := f.driver.Endpoint("recovery-test"); err == nil || f.starts.Load() != 1 || f.probes.Load() != 1 || f.connects.Load() != 1 {

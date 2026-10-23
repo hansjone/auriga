@@ -14,9 +14,11 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
 	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
+	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
+	"google.golang.org/protobuf/proto"
 )
 
 // SpecSource loads the full desired InstanceSpec (typically state.Store).
@@ -27,6 +29,7 @@ type SpecSource interface {
 // Preparing wraps an inner Driver and performs artifact fetch, directory
 // setup, and config render before Ensure.
 type Preparing struct {
+	Executions     *state.Store
 	Inner          Driver
 	Specs          SpecSource
 	Artifacts      *artifacts.Store
@@ -78,12 +81,29 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 	if err := storage.ValidateInstanceID(s.InstanceID); err != nil {
 		return err
 	}
-	full, err := p.Specs.GetDesired(s.InstanceID)
+	var full *nodev1.InstanceSpec
+	var err error
+	if s.Full != nil {
+		full = proto.Clone(s.Full).(*nodev1.InstanceSpec)
+	} else if p.ReleaseCoordinator() != nil || p.Inner.Name() == "docker" {
+		return fmt.Errorf("preparing: production requires fixed full spec")
+	} else if p.Specs != nil {
+		full, err = p.Specs.GetDesired(s.InstanceID)
+	}
 	if err != nil {
 		return err
 	}
 	if full == nil {
+		if p.Inner.Name() == "docker" {
+			return fmt.Errorf("preparing: missing production spec")
+		}
 		return p.Inner.Ensure(ctx, s, r)
+	}
+	if full.InstanceId != s.InstanceID || (s.Full != nil && full.Generation != s.Generation) {
+		return fmt.Errorf("preparing: fixed spec generation mismatch")
+	}
+	if p.Inner.Name() == "docker" && (p.Layout == nil || p.Artifacts == nil || p.UIDs == nil || p.Executions == nil) {
+		return fmt.Errorf("preparing: incomplete production dependencies")
 	}
 	if err := storage.ValidateInstanceID(full.InstanceId); err != nil {
 		return err
@@ -174,7 +194,27 @@ func (p *Preparing) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		s.Env = env
 	}
 	p.log().Info("pulling image and creating container", "instance_id", s.InstanceID)
-	return p.Inner.Ensure(ctx, s, r)
+	if err := p.Inner.Ensure(ctx, s, r); err != nil {
+		return err
+	}
+	// The old actual archive remains pinned until its container was removed and
+	// the new actual record durably saved by Ensure.
+	if p.Artifacts != nil && p.Executions != nil {
+		p.gcMu.RLock()
+		defer p.gcMu.RUnlock()
+		want := specDigests(full)
+		record, err := p.Executions.GetExecution(full.InstanceId)
+		if err != nil {
+			return err
+		}
+		if record != nil && record.DSH.Digest != "" {
+			want = append(want, record.DSH.Digest)
+		}
+		if err := p.Artifacts.SyncHolders(full.InstanceId, want); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Preparing) extraEnvKeys() []string {
@@ -198,12 +238,24 @@ func (p *Preparing) fetchArtifacts(ctx context.Context, full *nodev1.InstanceSpe
 		}
 		wantDigests = append(wantDigests, pl.Digest)
 	}
-	if dsh := full.GetDsh(); dsh != nil && dsh.Url != "" && dsh.Digest != "" && dsh.Image == "" {
+	if dsh := full.GetDsh(); dsh != nil && dsh.Digest != "" {
+		if dsh.Url == "" {
+			return fmt.Errorf("dsh runtime: missing archive locator")
+		}
 		p.log().Info("fetching dsh runtime artifact", "instance_id", full.InstanceId)
 		if _, err := p.Artifacts.Ensure(ctx, full.InstanceId, dsh.Url, dsh.Digest, 0); err != nil {
 			return fmt.Errorf("dsh runtime: %w", err)
 		}
 		wantDigests = append(wantDigests, dsh.Digest)
+	}
+	if p.Executions != nil {
+		record, err := p.Executions.GetExecution(full.InstanceId)
+		if err != nil {
+			return err
+		}
+		if record != nil && record.DSH.Digest != "" {
+			wantDigests = append(wantDigests, record.DSH.Digest)
+		}
 	}
 	if err := p.Artifacts.SyncHolders(full.InstanceId, wantDigests); err != nil {
 		return fmt.Errorf("artifacts sync: %w", err)
@@ -264,6 +316,17 @@ func (p *Preparing) liveDigests(ctx context.Context) ([]string, error) {
 		}
 	}
 	var keep []string
+	if p.Executions != nil {
+		records, err := p.Executions.ListExecutions()
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range records {
+			if r.DSH.Digest != "" {
+				keep = append(keep, r.DSH.Digest)
+			}
+		}
+	}
 	for id := range ids {
 		spec, err := p.Specs.GetDesired(id)
 		if err != nil {
@@ -353,6 +416,13 @@ func (p *Preparing) StartGC(ctx context.Context, interval time.Duration) (stop f
 
 func (p *Preparing) Start(ctx context.Context, id string) error {
 	return p.Inner.Start(ctx, id)
+}
+
+func (p *Preparing) ReleaseCoordinator() *ReleaseActivation {
+	if d, ok := p.Inner.(interface{ ReleaseCoordinator() *ReleaseActivation }); ok {
+		return d.ReleaseCoordinator()
+	}
+	return nil
 }
 func (p *Preparing) Stop(ctx context.Context, id string, grace time.Duration) error {
 	return p.Inner.Stop(ctx, id, grace)

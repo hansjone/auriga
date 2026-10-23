@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -76,7 +77,7 @@ func engineTransport(host string) (baseURL string, rt http.RoundTripper, err err
 	}
 }
 
-func (c *EngineClient) doJSON(ctx context.Context, method, path string, in any, wantStatuses ...int) ([]byte, int, error) {
+func (c *EngineClient) doJSON(ctx context.Context, method, path string, in any, wantStatuses ...int) (out []byte, status int, err error) {
 	var body io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)
@@ -92,14 +93,26 @@ func (c *EngineClient) doJSON(ctx context.Context, method, path string, in any, 
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if method != http.MethodGet && method != http.MethodHead {
+		if scope, ok := ctx.Value(activationKey{}).(*activationScope); ok {
+			completed, beginErr := scope.execution.BeginAction()
+			if beginErr != nil {
+				return nil, 0, beginErr
+			}
+			defer func() { completed(err == nil) }()
+		}
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (8<<20)+1))
 	if err != nil {
 		return nil, resp.StatusCode, err
+	}
+	if len(raw) > 8<<20 {
+		return nil, resp.StatusCode, fmt.Errorf("docker: response exceeds limit")
 	}
 	ok := len(wantStatuses) == 0
 	for _, s := range wantStatuses {
@@ -126,7 +139,7 @@ func (c *EngineClient) Ping(ctx context.Context) error {
 	return err
 }
 
-func (c *EngineClient) PullImage(ctx context.Context, image string) error {
+func (c *EngineClient) PullImage(ctx context.Context, image string) (err error) {
 	q := url.Values{}
 	repo, digest, ok := strings.Cut(image, "@")
 	if !ok || !strings.HasPrefix(digest, "sha256:") {
@@ -145,6 +158,13 @@ func (c *EngineClient) PullImage(ctx context.Context, image string) error {
 	// Pulls use a long timeout independent of short Engine ops.
 	client := *c.HTTP
 	client.Timeout = 30 * time.Minute
+	if scope, ok := ctx.Value(activationKey{}).(*activationScope); ok {
+		completed, beginErr := scope.execution.BeginAction()
+		if beginErr != nil {
+			return beginErr
+		}
+		defer func() { completed(err == nil) }()
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -197,8 +217,8 @@ func (c *EngineClient) ImageInspect(ctx context.Context, nameOrDigest string) (m
 	return out, nil
 }
 
-// imageHasRepoDigest checks RepoDigests for the pinned manifest digest.
-// Image Id is the config digest and must not be compared to the manifest digest.
+// imageHasRepoDigest binds the exact manifest reference independently of the
+// Engine image ID, which may be the verified config or single-platform manifest.
 func imageHasRepoDigest(insp map[string]any, imageRef, wantDigest string) bool {
 	if insp == nil || wantDigest == "" {
 		return false
@@ -209,9 +229,6 @@ func imageHasRepoDigest(insp map[string]any, imageRef, wantDigest string) bool {
 		if s == imageRef {
 			return true
 		}
-		if strings.HasSuffix(s, "@"+wantDigest) {
-			return true
-		}
 	}
 	return false
 }
@@ -220,10 +237,18 @@ type containerCreateResponse struct {
 	ID string `json:"Id"`
 }
 
-func (c *EngineClient) ContainerCreate(ctx context.Context, name string, body any) (string, error) {
+var containerIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func (c *EngineClient) ContainerCreate(ctx context.Context, name string, body any, platform ...string) (string, error) {
 	path := "/containers/create"
 	if name != "" {
 		path += "?name=" + url.QueryEscape(name)
+	}
+	if len(platform) > 0 {
+		q := url.Values{}
+		q.Set("name", name)
+		q.Set("platform", platform[0])
+		path = "/containers/create?" + q.Encode()
 	}
 	raw, _, err := c.doJSON(ctx, http.MethodPost, path, body, http.StatusCreated, http.StatusOK)
 	if err != nil {
@@ -232,6 +257,9 @@ func (c *EngineClient) ContainerCreate(ctx context.Context, name string, body an
 	var out containerCreateResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return "", err
+	}
+	if !containerIDPattern.MatchString(out.ID) {
+		return "", fmt.Errorf("docker: create returned invalid container ID")
 	}
 	return out.ID, nil
 }

@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"context"
+	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"time"
 )
 
@@ -15,6 +16,8 @@ type Caps struct {
 
 // Spec is the subset of InstanceSpec the driver needs.
 type Spec struct {
+	// Full is the fixed snapshot supplied by the reconciler for this attempt.
+	Full       *nodev1.InstanceSpec
 	InstanceID string
 	Generation int64
 	Desired    string // running | stopped

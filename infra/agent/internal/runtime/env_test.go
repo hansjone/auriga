@@ -99,7 +99,7 @@ func TestDockerRejectsInvalidEnvBeforeTouchingEngine(t *testing.T) {
 		{"bad key": "x"},
 		{"TZ": "UTC\nX=1"},
 	} {
-		err := d.Ensure(context.Background(), &runtime.Spec{
+		err := ensureDocker(t, d, context.Background(), &runtime.Spec{
 			InstanceID: "inst_e",
 			Image:      "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32),
 			HomeBind:   t.TempDir(),
@@ -126,7 +126,7 @@ func TestDockerEnvIsSorted(t *testing.T) {
 	d := runtime.NewDockerWithClient(client, "")
 	d.Policy = policy.Default()
 	d.Policy.AllowAnyImage = true
-	err := d.Ensure(context.Background(), &runtime.Spec{
+	err := ensureDocker(t, d, context.Background(), &runtime.Spec{
 		InstanceID: "inst_s",
 		Image:      "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32),
 		HomeBind:   t.TempDir(),

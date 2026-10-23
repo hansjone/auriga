@@ -122,7 +122,7 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 						w.WriteHeader(http.StatusNotFound)
 						return
 					}
-					_ = json.NewEncoder(w).Encode(map[string]any{"Id": "inst-id", "Config": map[string]any{"Labels": map[string]string{"auriga.managed": "true", "auriga.instance": "inst_i1"}}})
+					base.ServeHTTP(w, r)
 				case r.URL.Path == "/containers/create":
 					if !connected {
 						t.Error("instance created before trusted edge became reachable")
@@ -140,7 +140,7 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 			}
 			d.Policy.AllowAnyImage = true
 			s := &runtime.Spec{InstanceID: "inst_i1", Image: "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32), HomeBind: t.TempDir(), MetaBind: t.TempDir(), HostUID: 200001}
-			err = d.Ensure(context.Background(), s, nil)
+			err = ensureDocker(t, d, context.Background(), s, nil)
 			if mode != "ok" {
 				if err == nil || created {
 					t.Fatalf("unsafe instance created: err=%v created=%v", err, created)
@@ -152,7 +152,7 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 			}
 			// Re-prepare reuses the same endpoint/alias and removal still works when
 			// the edge is stopped. No forced disconnect of unrelated endpoints.
-			if err := d.Ensure(context.Background(), s, nil); err != nil {
+			if err := ensureDocker(t, d, context.Background(), s, nil); err != nil {
 				t.Fatal(err)
 			}
 			edgeStopped = true

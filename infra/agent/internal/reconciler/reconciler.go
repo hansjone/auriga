@@ -22,10 +22,11 @@ type StatusSink func(st *nodev1.InstanceStatus)
 
 // Reconciler applies desired specs via a Driver, one goroutine per instance.
 type Reconciler struct {
-	Store  *state.Store
-	Driver runtime.Driver
-	Log    *slog.Logger
-	Sink   StatusSink
+	Store      *state.Store
+	Driver     runtime.Driver
+	Activation *runtime.ReleaseActivation
+	Log        *slog.Logger
+	Sink       StatusSink
 	// PrepareTimeout bounds Ensure (artifact fetch, image pull, render) and
 	// StartTimeout bounds Start, so a stuck download fails instead of hanging.
 	PrepareTimeout time.Duration
@@ -53,7 +54,14 @@ func New(store *state.Store, driver runtime.Driver, log *slog.Logger, maxConcurr
 	if log == nil {
 		log = slog.Default()
 	}
+	var activation *runtime.ReleaseActivation
+	if d, ok := driver.(interface {
+		ReleaseCoordinator() *runtime.ReleaseActivation
+	}); ok {
+		activation = d.ReleaseCoordinator()
+	}
 	return &Reconciler{
+		Activation:     activation,
 		Store:          store,
 		Driver:         driver,
 		Log:            log,
@@ -87,6 +95,7 @@ func (r *Reconciler) Apply(spec *nodev1.InstanceSpec) error {
 	if spec == nil || spec.InstanceId == "" {
 		return fmt.Errorf("missing instance_id")
 	}
+	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
 	if err := r.Store.PutDesired(spec); err != nil {
 		return err
 	}
@@ -212,7 +221,37 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 			return
 		}
 	}
-	rec, _ := r.Store.GetActual(id)
+	spec = proto.Clone(spec).(*nodev1.InstanceSpec)
+	rec, actualErr := r.Store.GetActual(id)
+	if actualErr != nil {
+		r.fail(id, spec.Generation, 0, "agent.ensure_failed", actualErr.Error(), false)
+		return
+	}
+	if r.Activation != nil && rec.Status == nil {
+		execution, err := r.Store.GetExecution(id)
+		if err != nil {
+			r.fail(id, spec.Generation, rec.Attempts, "agent.ensure_failed", err.Error(), false)
+			return
+		}
+		if execution != nil {
+			rec.Status = &nodev1.InstanceStatus{InstanceId: id, ObservedGeneration: execution.Generation, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, UpdatedAt: timestamppb.Now()}
+		}
+	}
+	if r.Activation != nil && spec.Desired == nodev1.DesiredState_DESIRED_STATE_STOPPED {
+		execution, err := r.Store.GetExecution(id)
+		if err != nil {
+			r.fail(id, spec.Generation, rec.Attempts, "agent.ensure_failed", err.Error(), false)
+			return
+		}
+		if execution != nil {
+			if err := r.Driver.Stop(ctx, id, 5*time.Second); err != nil {
+				r.fail(id, spec.Generation, rec.Attempts, "agent.start_failed", err.Error(), true)
+				return
+			}
+			_ = r.persist(&nodev1.InstanceStatus{InstanceId: id, ObservedGeneration: spec.Generation, Phase: nodev1.InstancePhase_INSTANCE_PHASE_STOPPED, UpdatedAt: timestamppb.Now()}, 0)
+			return
+		}
+	}
 	if rec.Status != nil &&
 		rec.Status.ObservedGeneration == spec.Generation &&
 		(spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING || rec.Status.Phase == desiredPhase(spec)) {
@@ -228,12 +267,12 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 			r.failRecovery(rec, "runtime inspection failed")
 			return
 		}
-		if spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING && st.Running {
-			if st.Ready && rec.Status.Ready &&
+		if spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING && (st.Running || r.Activation != nil) {
+			if r.Activation == nil && st.Ready && rec.Status.Ready &&
 				(rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING || rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART) {
 				r.emit(rec.Status)
 			} else {
-				r.recoverRunning(recoveryCtx, rec)
+				r.recoverRunning(ctx, rec, st.Ready && rec.Status.Ready)
 			}
 			cancel()
 			return
@@ -271,11 +310,11 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 		switch {
 		case err != nil || !actual.Running:
 			r.failRecovery(pending, "pending runtime inspection failed")
-		case !actual.Ready:
-			r.recoverRunning(recoveryCtx, pending)
+		case !actual.Ready || r.Activation != nil:
+			r.recoverRunning(ctx, pending, actual.Ready && pending.Status.Ready)
 		default:
 			st.Ready = true
-			r.persist(st, rec.Attempts)
+			_ = r.persist(st, rec.Attempts)
 		}
 		cancel()
 		return
@@ -292,65 +331,81 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 		ObservedGeneration: spec.Generation,
 		UpdatedAt:          timestamppb.Now(),
 	}
-	r.persist(st, rec.Attempts)
+	if err := r.persist(st, rec.Attempts); err != nil {
+		return
+	}
 
 	drvSpec := &runtime.Spec{
+		Full:       spec,
 		InstanceID: id,
 		Generation: spec.Generation,
 		Desired:    desiredString(spec),
 	}
-	r.Log.Info("preparing instance", "instance_id", id, "generation", spec.Generation)
-	prepCtx, cancelPrep := context.WithTimeout(ctx, r.PrepareTimeout)
-	err := r.Driver.Ensure(prepCtx, drvSpec, &runtime.Rendered{})
-	cancelPrep()
+	code := "agent.ensure_failed"
+	run := func(activationCtx context.Context) error {
+		r.Log.Info("preparing instance", "instance_id", id, "generation", spec.Generation)
+		prepCtx, cancelPrep := context.WithTimeout(activationCtx, r.PrepareTimeout)
+		err := r.Driver.Ensure(prepCtx, drvSpec, &runtime.Rendered{})
+		cancelPrep()
+		if err != nil {
+			return err
+		}
+		if spec.GetStorage() != nil && spec.Storage.SchemaVersion > 0 {
+			st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_MIGRATING
+			st.UpdatedAt = timestamppb.Now()
+			if err := r.persist(st, rec.Attempts); err != nil {
+				return err
+			}
+		}
+		if spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING {
+			code = "agent.start_failed"
+			st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_STARTING
+			st.UpdatedAt = timestamppb.Now()
+			if err := r.persist(st, rec.Attempts); err != nil {
+				return err
+			}
+			startCtx, cancelStart := context.WithTimeout(activationCtx, r.StartTimeout)
+			err := r.Driver.Start(startCtx, id)
+			cancelStart()
+			return err
+		}
+		return r.Driver.Stop(activationCtx, id, 5*time.Second)
+	}
+	var err error
+	if r.Activation != nil {
+		err = r.Activation.Activate(ctx, spec, run)
+	} else {
+		err = run(ctx)
+	}
 	if err != nil {
-		r.Log.Warn("prepare failed", "instance_id", id, "error", err)
-		r.fail(id, spec.Generation, rec.Attempts, "agent.ensure_failed", err.Error(), true)
+		r.Log.Warn("runtime activation failed", "instance_id", id, "error", err)
+		r.fail(id, spec.Generation, rec.Attempts, code, err.Error(), true)
 		return
 	}
-
-	if spec.GetStorage() != nil && spec.GetStorage().SchemaVersion > 0 {
-		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_MIGRATING
-		st.UpdatedAt = timestamppb.Now()
-		r.persist(st, rec.Attempts)
-	}
-
 	switch spec.Desired {
 	case nodev1.DesiredState_DESIRED_STATE_RUNNING:
-		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_STARTING
-		st.UpdatedAt = timestamppb.Now()
-		r.persist(st, rec.Attempts)
-		startCtx, cancelStart := context.WithTimeout(ctx, r.StartTimeout)
-		err := r.Driver.Start(startCtx, id)
-		cancelStart()
-		if err != nil {
-			r.Log.Warn("start failed", "instance_id", id, "error", err)
-			r.fail(id, spec.Generation, rec.Attempts, "agent.start_failed", err.Error(), true)
-			return
-		}
 		r.Log.Info("instance started", "instance_id", id, "generation", spec.Generation)
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_RUNNING
 		st.Ready = true
 		st.ObservedGeneration = spec.Generation
 		st.StartedAt = timestamppb.Now()
 		st.UpdatedAt = timestamppb.Now()
-		r.persist(st, 0)
+		_ = r.persist(st, 0)
 	case nodev1.DesiredState_DESIRED_STATE_STOPPED:
-		_ = r.Driver.Stop(ctx, id, 5*time.Second)
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_STOPPED
 		st.Ready = false
 		st.ObservedGeneration = spec.Generation
 		st.UpdatedAt = timestamppb.Now()
-		r.persist(st, 0)
+		_ = r.persist(st, 0)
 	default:
 		st.ObservedGeneration = spec.Generation
 		st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_STOPPED
 		st.UpdatedAt = timestamppb.Now()
-		r.persist(st, 0)
+		_ = r.persist(st, 0)
 	}
 }
 
-func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord) {
+func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord, alreadyReady bool) {
 	previous := rec.Status
 	select {
 	case r.sem <- struct{}{}:
@@ -364,8 +419,23 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord)
 	st.Ready = false
 	st.Error = nil
 	st.UpdatedAt = timestamppb.Now()
-	r.persist(st, rec.Attempts)
-	if err := r.Driver.Start(ctx, st.InstanceId); err != nil {
+	if !alreadyReady {
+		if err := r.persist(st, rec.Attempts); err != nil {
+			return
+		}
+	}
+	run := func(ctx context.Context) error {
+		startCtx, cancel := context.WithTimeout(ctx, r.StartTimeout)
+		defer cancel()
+		return r.Driver.Start(startCtx, st.InstanceId)
+	}
+	var err error
+	if r.Activation != nil {
+		err = r.Activation.Recover(ctx, st.InstanceId, st.ObservedGeneration, run)
+	} else {
+		err = run(ctx)
+	}
+	if err != nil {
 		r.failRecovery(rec, "runtime health recovery failed")
 		return
 	}
@@ -376,7 +446,7 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord)
 	st.Ready = true
 	st.UpdatedAt = timestamppb.Now()
 	// Start may merely rediscover an existing container. Preserve its start time.
-	r.persist(st, 0)
+	_ = r.persist(st, 0)
 }
 
 func (r *Reconciler) failRecovery(rec state.ActualRecord, message string) {
@@ -385,7 +455,7 @@ func (r *Reconciler) failRecovery(rec state.ActualRecord, message string) {
 	st.Phase, st.Ready = nodev1.InstancePhase_INSTANCE_PHASE_FAILED, false
 	st.UpdatedAt = timestamppb.Now()
 	st.Error = &nodev1.InstanceError{Code: "agent.start_failed", Message: message, Retryable: attempts < maxFailAttempts, Attempts: attempts}
-	r.persist(st, attempts)
+	_ = r.persist(st, attempts)
 }
 
 func (r *Reconciler) handleDelete(ctx context.Context, id string, del *nodev1.DeleteInstance) {
@@ -398,14 +468,20 @@ func (r *Reconciler) handleDelete(ctx context.Context, id string, del *nodev1.De
 	if rec.Status != nil {
 		st.ObservedGeneration = rec.Status.ObservedGeneration
 	}
-	r.persist(st, rec.Attempts)
-	_ = r.Driver.Stop(ctx, id, 5*time.Second)
-	_ = r.Driver.Remove(ctx, id)
-	if del != nil && del.PurgeData {
-		_ = r.Store.DeleteDesired(id)
-	} else {
-		_ = r.Store.DeleteDesired(id)
+	_ = r.persist(st, rec.Attempts)
+	if err := r.Driver.Stop(ctx, id, 5*time.Second); err != nil {
+		r.fail(id, st.ObservedGeneration, rec.Attempts, "agent.start_failed", err.Error(), true)
+		return
 	}
+	if err := r.Driver.Remove(ctx, id); err != nil {
+		r.fail(id, st.ObservedGeneration, rec.Attempts, "agent.ensure_failed", err.Error(), true)
+		return
+	}
+	if err := r.Store.DeleteDesired(id); err != nil {
+		r.fail(id, st.ObservedGeneration, rec.Attempts, "agent.ensure_failed", err.Error(), true)
+		return
+	}
+	_ = del
 	st = &nodev1.InstanceStatus{
 		InstanceId: id,
 		Phase:      nodev1.InstancePhase_INSTANCE_PHASE_ABSENT,
@@ -428,12 +504,16 @@ func (r *Reconciler) fail(id string, generation int64, attempts uint32, code, ms
 			Attempts:  attempts,
 		},
 	}
-	r.persist(st, attempts)
+	_ = r.persist(st, attempts)
 }
 
-func (r *Reconciler) persist(st *nodev1.InstanceStatus, attempts uint32) {
-	_ = r.Store.PutActual(state.ActualRecord{Status: st, Attempts: attempts})
+func (r *Reconciler) persist(st *nodev1.InstanceStatus, attempts uint32) error {
+	if err := r.Store.PutActual(state.ActualRecord{Status: st, Attempts: attempts}); err != nil {
+		r.Log.Warn("persist runtime status failed", "instance_id", st.InstanceId, "error", err)
+		return err
+	}
 	r.emit(st)
+	return nil
 }
 
 func (r *Reconciler) emit(st *nodev1.InstanceStatus) {

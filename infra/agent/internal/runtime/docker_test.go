@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ type fakeEngine struct {
 	inspectWrong bool // RepoDigests omit the requested digest
 	lastInspect  string
 	pulledOK     bool // after a successful pull stream, inspect finds the image
+	removed      bool
 	healthPort   string
 }
 
@@ -76,14 +78,15 @@ func (f *fakeEngine) handler() http.Handler {
 		if _, dig, ok := strings.Cut(name, "@"); ok {
 			manifestDig = dig
 		}
-		// Real Engine: Id is config digest, distinct from manifest digest in RepoDigests.
-		configID := "sha256:" + strings.Repeat("cd", 32)
+		// Classic-store fixture: Id is the config digest; containerd's manifest
+		// identity is covered by the release Engine HTTP model.
+		configID := fixtureConfigID
 		repoDigests := `["registry.example.com/auriga/dsh@` + manifestDig + `"]`
 		if wrong {
 			other := "sha256:" + strings.Repeat("ef", 32)
 			repoDigests = `["registry.example.com/auriga/dsh@` + other + `"]`
 		}
-		_, _ = w.Write([]byte(`{"Id":"` + configID + `","RepoDigests":` + repoDigests + `}`))
+		_, _ = w.Write([]byte(`{"Id":"` + configID + `","Os":"` + goruntime.GOOS + `","Architecture":"` + goruntime.GOARCH + `","RepoDigests":` + repoDigests + `}`))
 	})
 	mux.HandleFunc("/networks/create", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -107,9 +110,10 @@ func (f *fakeEngine) handler() http.Handler {
 		_ = json.Unmarshal(raw, &body)
 		f.mu.Lock()
 		f.creates = append(f.creates, body)
+		f.removed = false
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"Id":"ctr1"}`))
+		_, _ = w.Write([]byte(`{"Id":"` + fixtureContainerID + `"}`))
 	})
 	mux.HandleFunc("/containers/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -126,10 +130,23 @@ func (f *fakeEngine) handler() http.Handler {
 			if port == "" {
 				port = "41999"
 			}
-			_, _ = w.Write([]byte(`{"State":{"Running":true},"Config":{"Labels":{"auriga.instance":"inst_i1","auriga.generation":"3"}},"HostConfig":{"PortBindings":{"7860/tcp":[{"HostIp":"127.0.0.1","HostPort":"0"}]}},"NetworkSettings":{"Ports":{"7860/tcp":[{"HostIp":"127.0.0.1","HostPort":"` + port + `"}]}}}`))
+			f.mu.Lock()
+			if len(f.creates) == 0 || f.removed {
+				f.mu.Unlock()
+				http.NotFound(w, r)
+				return
+			}
+			last := f.creates[len(f.creates)-1]
+			labels := last["Labels"]
+			image := last["Image"]
+			f.mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"Id": fixtureContainerID, "Image": image, "State": map[string]any{"Running": true}, "Config": map[string]any{"Labels": labels}, "HostConfig": map[string]any{"PortBindings": map[string]any{"7860/tcp": []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}}, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": port}}}}})
 		case strings.HasSuffix(path, "/stats"):
 			_, _ = w.Write([]byte(`{"memory_stats":{"usage":67108864},"pids_stats":{"current":4}}`))
 		case r.Method == http.MethodDelete:
+			f.mu.Lock()
+			f.removed = true
+			f.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && path == "/containers/json":
 			_, _ = w.Write([]byte(`[{"Labels":{"auriga.managed":"true","auriga.instance":"inst_i1","auriga.generation":"3"},"State":"running"}]`))
@@ -179,10 +196,10 @@ func TestDockerDriverSecurityParams(t *testing.T) {
 		Labels:     map[string]string{"tier": "std"},
 	}
 	ctx := context.Background()
-	if err := d.Ensure(ctx, spec, &runtime.Rendered{Digest: "sha256:x"}); err != nil {
+	if err := ensureDocker(t, d, ctx, spec, &runtime.Rendered{Digest: "sha256:x"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Start(ctx, "inst_i1"); err != nil {
+	if err := startDocker(t, d, ctx, "inst_i1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -239,7 +256,7 @@ func TestDockerRejectsBadImageAndID(t *testing.T) {
 	d.Policy.AllowAnyImage = false
 	d.Policy.AllowedImageRepos = []string{"registry.example.com/auriga/"}
 
-	err := d.Ensure(context.Background(), &runtime.Spec{
+	err := ensureDocker(t, d, context.Background(), &runtime.Spec{
 		InstanceID: "inst_x",
 		Image:      "evil.example.com/x@sha256:" + strings.Repeat("ab", 32),
 		HomeBind:   t.TempDir(),
@@ -249,7 +266,7 @@ func TestDockerRejectsBadImageAndID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected image reject")
 	}
-	err = d.Ensure(context.Background(), &runtime.Spec{
+	err = ensureDocker(t, d, context.Background(), &runtime.Spec{
 		InstanceID: ".",
 		Image:      "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32),
 		HomeBind:   t.TempDir(),
@@ -301,7 +318,7 @@ func TestNewDockerZeroPolicyDeniesImages(t *testing.T) {
 	if d.Policy.AllowAnyImage {
 		t.Fatal("zero policy must not AllowAnyImage")
 	}
-	err = d.Ensure(context.Background(), &runtime.Spec{
+	err = ensureDocker(t, d, context.Background(), &runtime.Spec{
 		InstanceID: "inst_z",
 		Image:      "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32),
 		HomeBind:   t.TempDir(),

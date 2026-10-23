@@ -29,4 +29,21 @@ Windows 保留实际可写 guard 文件的 File.Sync（Go 调用 FlushFileBuffer
 
 证书文件与 meta 的续证持久阶段由 enroll 的同目录锁协调，RPC 可以并发；
 证书合法而 key 批次失败时保留新证书，返回明确的信任更新错误。
-此包不实现 RT2 的发行启用、高水位或驱动互斥。
+
+RT2S 的 `WithReleaseActivation` 保持 `(purpose,name,os,arch)` 连续锁，从锁内重新授权、
+持久高水位提交直至同步驱动动作全部返回；`Close` 拒绝新资格并等待原协调域退出。
+RT2R 的 `WithReleaseExecution` 在同一资格内添加 `release_intent_v1`：真实 Engine 副作用前
+事务写入并显式 Sync 未决 intent。仅原调用在所有动作有明确成功回执、上下文未取消且仍持相同资格时，
+比较并删除自身 intent。请求丢响应、HTTP 错误、取消、panic 和进程死亡留下持久阻塞；
+同序重试和更高序都被拒绝。后续一次成功回执不能抹掉早先失联动作；没有强制清标记 API。
+健康失败与执行结果不明分开：确定执行已完成后仅探活超时可由原协调域清 intent。
+这一选择保安全序，不保证异常退出后自动恢复可用性。
+
+独立 `release_execution_v1` 记录原实际完整 DshRuntime/envelope、实际 generation、candidate、
+真实 container ID、原 C 的 ConfigID、已固定 EngineImageID、公开 proof 摘要定位与 created/started 阶段。
+记录 Version=2，沿用原 bucket 以保证旧记录不会消失；Version1、缺字段或集合外 EngineImageID 均拒绝读写和重开，
+没有自动推断迁移。EngineImageID 只可为 ConfigID 或 ProofDigest；运行时仍重验原 M→C 和容器的那个确定 ID。
+desired/actual 的状态写入和删除
+不能覆盖它；读取返回独立副本。内部 JSON 形状、绑定、规范编码或任一记录损坏均拒绝读写。
+只有确认对应真实容器删除成功才可比较 container ID 删除 execution；分区高水位永久保留。
+测试使用真实 bbolt，覆盖重开、损坏、关闭、深拷贝、未决结果和 panic；没有真实掉电耐久实验。

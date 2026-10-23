@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"net"
 	"net/http"
 	"net/url"
@@ -112,12 +113,23 @@ func (d *Docker) ensureEdgeNetwork(ctx context.Context, id string) error {
 	}
 	// Only the matching managed instance and the trusted edge may share this
 	// network. Never attach the edge to a name-collision or contaminated network.
-	instance, err := d.Client.ContainerInspect(ctx, containerName(id))
+	instanceRef := containerName(id)
+	var record *state.ExecutionRecord
+	if scope, ok := ctx.Value(activationKey{}).(*activationScope); ok && scope.record != nil {
+		record = scope.record
+		instanceRef = record.ContainerID
+	}
+	instance, err := d.Client.ContainerInspect(ctx, instanceRef)
 	if err != nil {
 		return err
 	}
 	instanceID, _ := instance["Id"].(string)
 	if instance != nil {
+		if record != nil {
+			if _, err := d.verifyContainer(ctx, record); err != nil {
+				return err
+			}
+		}
 		cfg, _ := instance["Config"].(map[string]any)
 		labels, _ := cfg["Labels"].(map[string]any)
 		if instanceID == "" || labels[labelManaged] != "true" || labels[labelInstance] != id {
