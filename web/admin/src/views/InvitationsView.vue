@@ -57,7 +57,10 @@ function clearCode() {
 }
 onBeforeUnmount(clearCode);
 watch(canRead, (allowed) => {
-  if (!allowed) clearCode();
+  if (!allowed) {
+    clearCode();
+    list.clear(true);
+  }
 });
 onMounted(() => void list.load());
 watch(status, () => {

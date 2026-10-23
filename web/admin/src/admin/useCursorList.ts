@@ -12,13 +12,13 @@ export function useCursorList<T>(
   const nextCursor = ref<string>();
   const history = ref<(string | undefined)[]>([]);
   let version = 0;
-  function clear() {
+  function clear(preserveError = false) {
     ++version;
     items.value = [];
     nextCursor.value = undefined;
     cursor.value = undefined;
     history.value = [];
-    error.value = '';
+    if (!preserveError) error.value = '';
     loading.value = false;
   }
   onBeforeUnmount(clear);

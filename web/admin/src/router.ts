@@ -6,6 +6,7 @@ import NodesView from './views/NodesView.vue';
 import InstancesView from './views/InstancesView.vue';
 import GroupsView from './views/GroupsView.vue';
 import InvitationsView from './views/InvitationsView.vue';
+import QuotasView from './views/QuotasView.vue';
 import PlaceholderView from './views/PlaceholderView.vue';
 
 export const router = createRouter({
@@ -22,6 +23,7 @@ export const router = createRouter({
         { path: 'instances', component: InstancesView },
         { path: 'groups', component: GroupsView },
         { path: 'invitations', component: InvitationsView },
+        { path: 'quotas', component: QuotasView },
         {
           path: 'roles',
           component: PlaceholderView,

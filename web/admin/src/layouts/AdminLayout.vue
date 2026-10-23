@@ -66,6 +66,7 @@ async function logout() {
             adminT('invitationTitle')
           }}</ElMenuItem>
           <ElMenuItem index="/groups">{{ t('adminNav.groups') }}</ElMenuItem>
+          <ElMenuItem index="/quotas">{{ adminT('quotaTitle') }}</ElMenuItem>
           <ElMenuItem index="/roles">{{ t('adminNav.roles') }}</ElMenuItem>
         </ElSubMenu>
         <ElMenuItem v-for="item in items" :key="item.path" :index="item.path">

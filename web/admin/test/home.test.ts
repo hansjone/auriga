@@ -56,6 +56,7 @@ describe('AdminLayout', () => {
     expect(wrapper.text()).toContain('成员与权限');
     expect(wrapper.text()).toContain('节点');
     expect(wrapper.text()).toContain('邀请');
+    expect(wrapper.text()).toContain('配额');
     expect(wrapper.text()).toContain('实例');
     wrapper.unmount();
   });
