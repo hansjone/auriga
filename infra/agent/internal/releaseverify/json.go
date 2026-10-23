@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -144,6 +145,22 @@ func hexEscape(raw []byte, u int) (uint64, error) {
 }
 
 func text(m map[string]any, key string) string { s, _ := m[key].(string); return s }
+
+// encoding/json matches struct members using Unicode simple folding, including
+// long-s and Kelvin sign. A differently spelled member must not be mistaken for
+// an ignored extension here while an Engine decodes it as a structural field.
+// Call only for structural objects; user-controlled map keys remain exact.
+func canonicalMembers(m map[string]any, names ...string) error {
+	for key := range m {
+		for _, name := range names {
+			if key != name && strings.EqualFold(key, name) {
+				return fmt.Errorf("noncanonical structural JSON member %q (expected %q)", key, name)
+			}
+		}
+	}
+	return nil
+}
+
 func hasAny(m map[string]any, keys ...string) bool {
 	for _, key := range keys {
 		if _, exists := m[key]; exists {

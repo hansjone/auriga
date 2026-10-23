@@ -84,6 +84,25 @@ JCS 使用 UTF-16 键排序、精确 JSON 转义，拒绝非法 UTF-8，不做 U
 - M、C 各最多 4 MiB；深度最多 32 层容器（含顶层对象）。全部 JSON 层级拒绝重复键、
   trailing JSON、非法 UTF-8 与未配对 UTF-16 surrogate escape；不对 JSON 做摘要复刻。
 
+结构成员必须使用规范拼写。manifest、image config、history 及旧 container_config/
+Healthcheck 的已知字段，会额外拒绝 ASCII 大小写和 Unicode simple-fold 别名，
+即使只出现别名也拒绝。不能把 `OS`、`oſ` 当作未知元数据忽略：Go 结构体解码会将它们
+匹配到 `os`；`WorKingDir` 同样能匹配 `WorkingDir`。descriptor、rootfs、执行 config
+及其 Healthcheck 继续按现有严格字段集合拒绝别名和其他未知字段。
+此检查按结构对象上下文执行，不递归折叠语义 map：annotations、Labels、ExposedPorts、
+Volumes 中大小写不同的 key 可共存；不碰撞结构字段的普通元数据扩展仍可保留。
+字段集合对齐项目固定的 Moby **27.0.3 / Engine API 1.46**，包括其 Image/V1Image
+旧元数据 tag（未显式命名的 `Size` 保持首字母大写），不借用其他 Docker 版本字段行为。
+
+具体解码依据：[Moby 27.0.3 Image/NewFromJSON](https://github.com/moby/moby/blob/v27.0.3/image/image.go)、
+[RootFS](https://github.com/moby/moby/blob/v27.0.3/image/rootfs.go)、
+[container.Config](https://github.com/moby/moby/blob/v27.0.3/api/types/container/config.go)、
+[随版本固定的 OCI config/History](https://github.com/moby/moby/blob/v27.0.3/vendor/github.com/opencontainers/image-spec/specs-go/v1/config.go)、
+[OCI manifest](https://github.com/moby/moby/blob/v27.0.3/vendor/github.com/opencontainers/image-spec/specs-go/v1/manifest.go)、
+[Docker schema2 manifest](https://github.com/moby/moby/blob/v27.0.3/vendor/github.com/docker/distribution/manifest/schema2/manifest.go)、
+[Docker Healthcheck](https://github.com/moby/moby/blob/v27.0.3/vendor/github.com/moby/docker-image-spec/specs-go/v1/image.go)。
+测试通过对应 tag 的标准 Go 结构体解码，证明别名解释差异及本包的拒绝；没有运行真实 daemon。
+
 本包不下载 layer，也不证明压缩载荷解压后的 diff_ids；只核对原始 M/C 及所需结构。
 真实 layer 摘要/解压内容与本地 configID 的对应关系必须由可信 Engine 内容寻址保证。
 本包不声称抵抗宿主 root、受损 daemon、签名发行者本身、或拥有本机策略配置权的攻击者。

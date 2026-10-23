@@ -65,6 +65,9 @@ func verifyOCI(release VerifiedRelease, ring releasetrust.Ring, manifest, config
 	if err != nil {
 		return VerifiedImage{}, err
 	}
+	if err := canonicalMembers(m, "schemaVersion", "mediaType", "config", "layers", "annotations", "artifactType", "subject", "manifests"); err != nil {
+		return VerifiedImage{}, err
+	}
 	version, ok := integer(m, "schemaVersion")
 	media := text(m, "mediaType")
 	if !ok || version != 2 || (media != ociManifest && media != dockerManifest) || hasAny(m, "artifactType", "subject", "manifests") {
@@ -133,6 +136,24 @@ func descriptor(d map[string]any, media string) (string, uint64, error) {
 }
 
 func imageConfig(c map[string]any, p Partition, layerDigests []string, uncompressed []bool) error {
+	// Includes the legacy image metadata tags in Moby v27.0.3 Image/V1Image.
+	// Size has no explicit tag name there, so its canonical spelling is uppercase.
+	if err := canonicalMembers(c, "created", "author", "architecture", "os", "os.version", "os.features", "variant", "config", "rootfs", "history", "id", "parent", "comment", "container", "container_config", "docker_version", "Size", "artifactType", "subject", "manifests", "mediaType"); err != nil {
+		return err
+	}
+	// container_config is historical build metadata, not RunConfig. Preserve its
+	// existing extension behavior but reject aliases of the actual struct fields;
+	// its Labels/Volumes/ExposedPorts maps must not be folded recursively.
+	if historical, ok := object(c, "container_config"); ok {
+		if err := canonicalMembers(historical, "Hostname", "Domainname", "User", "AttachStdin", "AttachStdout", "AttachStderr", "ExposedPorts", "Tty", "OpenStdin", "StdinOnce", "Env", "Cmd", "Healthcheck", "ArgsEscaped", "Image", "Volumes", "WorkingDir", "Entrypoint", "NetworkDisabled", "MacAddress", "OnBuild", "Labels", "StopSignal", "StopTimeout", "Shell"); err != nil {
+			return err
+		}
+		if health, ok := object(historical, "Healthcheck"); ok {
+			if err := canonicalMembers(health, "Test", "Interval", "Timeout", "StartPeriod", "StartInterval", "Retries"); err != nil {
+				return err
+			}
+		}
+	}
 	// Top-level metadata extensions are covered by raw digests and ignored.
 	// Execution fields below remain explicit; artifact/index disguises are refused.
 	if text(c, "os") != p.OS || text(c, "architecture") != p.Arch || hasAny(c, "artifactType", "subject", "manifests", "mediaType") {
@@ -186,6 +207,9 @@ func imageConfig(c map[string]any, p Partition, layerDigests []string, uncompres
 			e, ok := v.(map[string]any)
 			if !ok {
 				return fmt.Errorf("invalid history entry")
+			}
+			if err := canonicalMembers(e, "created", "created_by", "author", "comment", "empty_layer"); err != nil {
+				return err
 			}
 			for _, k := range []string{"created", "created_by", "author", "comment", "empty_layer"} {
 				v, exists := e[k]

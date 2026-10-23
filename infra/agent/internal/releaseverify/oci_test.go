@@ -3,6 +3,7 @@ package releaseverify
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,182 @@ func jsonBytes(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// The tags below are pinned to Moby v27.0.3 Image/V1Image, RootFS,
+// container.Config and its vendored OCI History (not a live daemon test).
+// https://github.com/moby/moby/blob/v27.0.3/image/image.go
+type moby2703AliasView struct {
+	OS           string   `json:"os"`
+	Architecture string   `json:"architecture"`
+	Variant      string   `json:"variant"`
+	OSFeatures   []string `json:"os.features"`
+	Config       struct {
+		WorkingDir string
+		Hostname   string
+	} `json:"config"`
+	RootFS struct {
+		Type    string   `json:"type"`
+		DiffIDs []string `json:"diff_ids,omitempty"`
+	} `json:"rootfs,omitempty"`
+	History []struct {
+		EmptyLayer bool `json:"empty_layer,omitempty"`
+	} `json:"history,omitempty"`
+}
+
+func TestMoby2703StructuralAliasInterpretations(t *testing.T) {
+	const base = `{"os":"linux","architecture":"amd64","config":{},"rootfs":{"type":"layers","diff_ids":[]}}`
+	for _, tc := range []struct {
+		name, raw string
+		changed   func(moby2703AliasView) bool
+	}{
+		{"ASCII OS", strings.TrimSuffix(base, "}") + `,"OS":"windows"}`, func(v moby2703AliasView) bool { return v.OS == "windows" }},
+		{"Unicode long s", strings.TrimSuffix(base, "}") + `,"o\u017f":"windows"}`, func(v moby2703AliasView) bool { return v.OS == "windows" }},
+		{"architecture", strings.TrimSuffix(base, "}") + `,"Architecture":"arm64"}`, func(v moby2703AliasView) bool { return v.Architecture == "arm64" }},
+		{"variant alone", strings.TrimSuffix(base, "}") + `,"Variant":"v8"}`, func(v moby2703AliasView) bool { return v.Variant == "v8" }},
+		{"features alone", strings.TrimSuffix(base, "}") + `,"OS.Features":["win32k"]}`, func(v moby2703AliasView) bool { return len(v.OSFeatures) == 1 }},
+		{"config", strings.TrimSuffix(base, "}") + `,"Config":{"Hostname":"different"}}`, func(v moby2703AliasView) bool { return v.Config.Hostname == "different" }},
+		{"rootfs", strings.TrimSuffix(base, "}") + `,"RootFS":{"type":"different"}}`, func(v moby2703AliasView) bool { return v.RootFS.Type == "different" }},
+		{"history", strings.TrimSuffix(base, "}") + `,"history":[{"empty_layer":true,"Empty_Layer":false}]}`, func(v moby2703AliasView) bool { return len(v.History) == 1 && !v.History[0].EmptyLayer }},
+		{"Kelvin execution", strings.Replace(base, `"config":{}`, `"config":{"WorkingDir":"/safe","Wor\u212aingDir":"/changed"}`, 1), func(v moby2703AliasView) bool { return v.Config.WorkingDir == "/changed" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var view moby2703AliasView
+			if err := json.Unmarshal([]byte(tc.raw), &view); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.changed(view) {
+				t.Fatalf("pinned Go struct did not interpret alias: %+v", view)
+			}
+			m, _ := imageFixture(t, false)
+			m["layers"] = []any{}
+			rawC := []byte(tc.raw)
+			m["config"].(map[string]any)["digest"] = digest(rawC)
+			m["config"].(map[string]any)["size"] = len(rawC)
+			_, err := verifyRawImage(t, jsonBytes(t, m), rawC)
+			rejected(t, err)
+		})
+	}
+}
+
+func TestStructuralMemberAliasesByContext(t *testing.T) {
+	// Tag spelling matches the pinned Moby/OCI types. Reserved artifact/index
+	// names are included so their aliases cannot become ignored extensions.
+	manifestKeys := []string{"schemaVersion", "mediaType", "config", "layers", "annotations", "artifactType", "subject", "manifests"}
+	imageKeys := []string{"created", "author", "architecture", "os", "os.version", "os.features", "variant", "config", "rootfs", "history", "id", "parent", "comment", "container", "container_config", "docker_version", "Size", "artifactType", "subject", "manifests", "mediaType"}
+	containerKeys := []string{"Hostname", "Domainname", "User", "AttachStdin", "AttachStdout", "AttachStderr", "ExposedPorts", "Tty", "OpenStdin", "StdinOnce", "Env", "Cmd", "Healthcheck", "ArgsEscaped", "Image", "Volumes", "WorkingDir", "Entrypoint", "NetworkDisabled", "MacAddress", "OnBuild", "Labels", "StopSignal", "StopTimeout", "Shell"}
+	healthKeys := []string{"Test", "Interval", "Timeout", "StartPeriod", "StartInterval", "Retries"}
+	for _, context := range []struct {
+		name         string
+		keys         []string
+		selectObject func(map[string]any, map[string]any) map[string]any
+	}{
+		{"manifest", manifestKeys, func(m, c map[string]any) map[string]any { return m }},
+		{"image", imageKeys, func(m, c map[string]any) map[string]any { return c }},
+		{"history", []string{"created", "created_by", "author", "comment", "empty_layer"}, func(m, c map[string]any) map[string]any { return c["history"].([]any)[0].(map[string]any) }},
+		{"rootfs", []string{"type", "diff_ids"}, func(m, c map[string]any) map[string]any { return c["rootfs"].(map[string]any) }},
+		{"config descriptor", []string{"mediaType", "digest", "size", "annotations"}, func(m, c map[string]any) map[string]any { return m["config"].(map[string]any) }},
+		{"layer descriptor", []string{"mediaType", "digest", "size", "annotations"}, func(m, c map[string]any) map[string]any { return m["layers"].([]any)[0].(map[string]any) }},
+		{"execution", containerKeys, func(m, c map[string]any) map[string]any { return c["config"].(map[string]any) }},
+		{"healthcheck", healthKeys, func(m, c map[string]any) map[string]any {
+			h := map[string]any{}
+			c["config"].(map[string]any)["Healthcheck"] = h
+			return h
+		}},
+		{"legacy container", containerKeys, func(m, c map[string]any) map[string]any {
+			old := map[string]any{}
+			c["container_config"] = old
+			return old
+		}},
+		{"legacy healthcheck", healthKeys, func(m, c map[string]any) map[string]any {
+			h := map[string]any{}
+			c["container_config"] = map[string]any{"Healthcheck": h}
+			return h
+		}},
+	} {
+		t.Run(context.name, func(t *testing.T) {
+			for _, key := range context.keys {
+				aliases := map[string]bool{}
+				for _, alias := range []string{strings.ToUpper(key), strings.ToLower(key), strings.Map(func(r rune) rune {
+					switch r {
+					case 's', 'S':
+						return 'ſ'
+					case 'k', 'K':
+						return 'K'
+					}
+					return r
+				}, key)} {
+					if alias != key {
+						aliases[alias] = true
+					}
+				}
+				for alias := range aliases {
+					for _, alone := range []bool{false, true} {
+						mode := "alongside"
+						if alone {
+							mode = "alone"
+						}
+						t.Run(key+"/"+alias+"/"+mode, func(t *testing.T) {
+							// Verify actual standard-library struct-field folding for each tag,
+							// independently of the verifier's EqualFold implementation. RawMessage
+							// preserves the test value; matching depends on the real JSON tag.
+							typ := reflect.StructOf([]reflect.StructField{{Name: "Value", Type: reflect.TypeFor[json.RawMessage](), Tag: reflect.StructTag(`json:"` + key + `"`)}})
+							view := reflect.New(typ)
+							rawAlias := jsonBytes(t, map[string]any{alias: "folded"})
+							if err := json.Unmarshal(rawAlias, view.Interface()); err != nil {
+								t.Fatal(err)
+							}
+							if string(view.Elem().Field(0).Bytes()) != `"folded"` {
+								t.Fatalf("tag %q did not match %q", key, alias)
+							}
+							m, c := imageFixture(t, false)
+							descriptor := m["config"].(map[string]any)
+							members := context.selectObject(m, c)
+							if alone {
+								delete(members, key)
+							} else if _, exists := members[key]; !exists {
+								members[key] = "canonical"
+							}
+							members[alias] = "folded"
+							rawC := jsonBytes(t, c)
+							if context.name != "config descriptor" {
+								descriptor["digest"] = digest(rawC)
+								descriptor["size"] = len(rawC)
+							}
+							_, err := verifyRawImage(t, jsonBytes(t, m), rawC)
+							rejected(t, err)
+						})
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSemanticMapCaseAndMetadataRemainDistinct(t *testing.T) {
+	for _, docker := range []bool{false, true} {
+		m, c := imageFixture(t, docker)
+		distinct := map[string]string{"x": "one", "X": "two", "os": "linux", "OS": "windows", "oſ": "other", "k": "one", "K": "two"}
+		m["annotations"] = distinct
+		m["config"].(map[string]any)["annotations"] = distinct
+		m["layers"].([]any)[0].(map[string]any)["annotations"] = distinct
+		exec := c["config"].(map[string]any)
+		exec["Labels"] = distinct
+		exec["ExposedPorts"] = map[string]any{"x": map[string]any{}, "X": map[string]any{}}
+		exec["Volumes"] = map[string]any{"/x": map[string]any{}, "/X": map[string]any{}}
+		c["container_config"] = map[string]any{"Labels": distinct, "Healthcheck": map[string]any{"Test": []string{"NONE"}}}
+		c["Size"] = 123
+		c["docker_version"] = "example"
+		c["x-extension"] = map[string]any{"config": "metadata", "Config": "different metadata"}
+		c["history"].([]any)[0].(map[string]any)["x-extension"] = distinct
+		m["x-extension"] = map[string]any{"os": "metadata", "OS": "different metadata"}
+		rawC := jsonBytes(t, c)
+		m["config"].(map[string]any)["digest"] = digest(rawC)
+		m["config"].(map[string]any)["size"] = len(rawC)
+		if _, err := verifyRawImage(t, jsonBytes(t, m), rawC); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 func imageFixture(t *testing.T, docker bool) (map[string]any, map[string]any) {
 	t.Helper()
