@@ -39,6 +39,7 @@
 
 | 编号 | 状态 | 结论 / 备注 |
 |---|---|---|
+| NASREADY1 / NASINSTALL1 普通共享目录安装 | 实现完成，待 CI 与独审 | 显式容器模式支持 operator 在普通 NAS 共享目录中新建 bind 数据根，保留原固定 UID、receipt 与材料检查，不改共享上级权限。helper 无网络和 Docker socket；宿主非 root 通过私有临时 env 执行 Compose。六镜像必须预先存在且为 linux/amd64，启动只执行一次 no-build/pull-never。28 项镜像回归、13 项 helper 回归及本机真实 uid1000 首装/重入/拒绝/Compose 解析 10 项通过；尚未启动现场服务 |
 | A1 节点代理骨架 | 完成（#23） | Cursor 实现，Codex 修复续期竞争等；三轮独立审查；线上 Linux Go 测试打开 `-race` 后又抓到一处真实数据竞争并修复 |
 | P0 插件离线版 | 完成（#24） | Cursor 实现，Codex 修复真实网络路径和 IP 字面量绕过；三轮审查，复审用真实网络实测 |
 | W1 workspace 服务 | 完成（#26） | Codex 实现（中途额度用完，恢复后续做）；实例、规格代数、调度、生命周期、入网 CA、NodeControl、强制吊销（契约加 `force`）；线上 11 个数据库集成测试全绿；三轮审查 |
