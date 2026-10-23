@@ -24,6 +24,12 @@ auriga:
       password: ${AURIGA_WORKSPACE_DB_PASSWORD:}
       migration-username: ${AURIGA_WORKSPACE_MIGRATION_USER:auriga_workspace_owner}
       migration-password: ${AURIGA_WORKSPACE_MIGRATION_PASSWORD:}
+    resource:
+      jdbc-url: ${AURIGA_RESOURCE_JDBC_URL:}
+      username: ${AURIGA_RESOURCE_DB_USER:auriga_resource_app}
+      password: ${AURIGA_RESOURCE_DB_PASSWORD:}
+      migration-username: ${AURIGA_RESOURCE_MIGRATION_USER:auriga_resource_owner}
+      migration-password: ${AURIGA_RESOURCE_MIGRATION_PASSWORD:}
   services:
     iam:
       enabled: true
@@ -32,7 +38,7 @@ auriga:
     workspace:
       enabled: ${AURIGA_WORKSPACE_ENABLED:false}
     resource:
-      enabled: false
+      enabled: ${AURIGA_RESOURCE_ENABLED:false}
     knowledge:
       enabled: false
     collab:
@@ -41,6 +47,8 @@ auriga:
       enabled: false
     ops:
       enabled: false
+  resource:
+    cursor-signing-key: ${AURIGA_RESOURCE_CURSOR_SIGNING_KEY:}
   iam:
     edge-token-export:
       enabled: ${AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED:false}
