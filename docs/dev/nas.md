@@ -20,10 +20,15 @@
 sha256sum -c SHA256SUMS
 (cd images && sha256sum -c SHA256SUMS)
 chmod 0755 deploy-nas/bin/auriga-nas-bootstrap
+# 在解包目录先载入 platform/edge/agent 三组件，并核对输出的本地 sha256:image ID。
+sh deploy-nas/scripts/load-images.sh .
 mkdir -p /srv/container/auriga-test
 cp deploy-nas/env.example /srv/container/auriga-test/stack.env
 cp deploy-nas/access-ip.example.json /srv/container/auriga-access.json
-# 编辑上述两份文件；数据根预置内容只能有 stack.env。
+# 编辑上述两份文件；把 load-images.sh 输出的三个 AURIGA_IMAGE_* ID 写入 stack.env。
+# 若正式 runtime image 的已批准 locator 使用 127.0.0.1:50123，
+# 签发/审批前就把 AURIGA_HOST_PUBLISH_REGISTRY 设为 50123（示例默认15000）。
+# 数据根预置内容只能有 stack.env。
 export AURIGA_DATA_ROOT=/srv/container/auriga-test
 sh deploy-nas/scripts/init.sh
 sh deploy-nas/scripts/preflight.sh
@@ -51,7 +56,7 @@ operator的 `stack.env` 与派生 `materials/access.env` 分层处理：派生�
 ```sh
 AURIGA_RUNTIME_BUNDLE=/srv/container/releases/release-7
 AURIGA_RUNTIME_ROOT=/srv/container/operator-approved/root.pb
-AURIGA_RUNTIME_IMAGE=registry.example.com/auriga/dsh@sha256:<原始manifest的64位小写hex>
+AURIGA_RUNTIME_IMAGE=127.0.0.1:50123/auriga/dsh@sha256:<原始manifest的64位小写hex>
 ```
 
 对应 bootstrap 参数为 `-runtime-bundle`、`-runtime-root`、`-runtime-image`。根必须位于 bundle 外，不能把包内根直接当作外部授权，
@@ -77,9 +82,15 @@ agent 只读挂载同一封存 proof 目录。镜像 policy 仅加入批准镜�
 `allowedImageRefs` 精确限制唯一批准的完整 `repo@sha256`；原前缀策略仍是并行必需条件，不自动放行其他仓库。
 没有添根 RPC、force 或明文 Join 旁路；激活仍执行生产当前根、持久高水位、防回滚和 Engine 身份检查。
 
-公开 bundle 只有签名声明与原 M/C，**不含镜像层，也不是完整离线安装包**。部署者还需通过另行审核的运输方式，
-让 Docker 能取得完全相同的 `repo@sha256`，不能重标 repository 或用 `docker save` 内部 JSON 冒充 proof。
-本流程不拉取镜像、不登录 registry、不访问现场。全空模式的基础栈健康/static 检查不能启动真实 DSH 实例，
+公开 bundle 只有签名声明与原 M/C，**不含镜像层，也不是完整离线安装包**。部署者应按下面顺序准备本地 registry；发布者须在材料签发前独立固定最终 `127.0.0.1:<规范端口>/<仓库>@sha256:<原M>`，NAS 与源构建机可使用相同的数字 loopback authority/repo。不能事后改已签包的 image 或放宽 operator 的精确批准策略。
+
+1. 核对 bundle 和三组件 tar 的 SHA-256，执行上面的 `load-images.sh .`，把输出的 platform/edge/agent 本地 image ID 写入 `stack.env`。在正式材料签发/审批前，确认已固定 locator 的数字 loopback 端口等于 `AURIGA_HOST_PUBLISH_REGISTRY`；本例两个值均为 `50123`，不能装好后再改已签 image。
+2. 从同一独立审核的正式材料执行 `init.sh`/bootstrap，生成封存的模板、公开根及原 M/C proof；保留 receipt。再运行 `preflight.sh`、`network-preflight.sh` 和 `render.sh`。材料验签成功本身不使镜像层就位。
+3. 只启动既有 registry，例如 `docker compose -f deploy-nas/docker-compose.yml -p auriga-nas-test --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-deps --no-build --pull never registry`（示例中 `deploy-nas` 是解包后的目录）。宿主须能在批准的 `127.0.0.1:50123` 通过匿名 HTTP 到达它；不开放新的公网 registry 入口。
+4. 将独立审核的含原 M/C/全部层的 OCI layout 与 ORAS 1.3.0 二进制交给 operator；核对二进制来源与 SHA-256。按 [runtime-release import-layout](runtime-release.md#linux-本地-registry-导入与真实读回) 给全套显式参数，在**全新**输出目录完成验签、快照、复制和逐对象实际读回。只有命令成功时，原仓库的 `repo@sha256:<原M>` 才获得当次可读证明。
+5. 再按现有公开流程启动其它服务并做登录、网络、资源、真实 DSH 创建与完整生命周期验收。导入不写 identity/keyring/receipt，也不代替生产 agent 启用检查。
+
+例如把已审核的 `AURIGA_RUNTIME_IMAGE` 设为 `127.0.0.1:50123/auriga/dsh@sha256:<原M的64位小写hex>`，然后将**同一完整值**给 `import-layout --allow-image`。不能重标 repository 或用 `docker save` 内部 JSON 冒充 proof；没有 public 官方根时，本机临时根也不能称为官方发行。本批不生成自动 NAS bundle 工作流，不在现场拉取镜像、登录 registry 或部署。全空模式的基础栈健康/static 检查不能启动真实 DSH 实例，
 不能宣称实例已就绪；即使成功装配了正式材料，也仍需另做真实资源、网络、登录和完整生命周期验收。
 
 ## 材料与持续服务票据

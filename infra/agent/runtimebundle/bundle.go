@@ -71,6 +71,12 @@ func (m *Material) Manifest() []byte     { return bytes.Clone(m.manifest) }
 func (m *Material) Config() []byte       { return bytes.Clone(m.config) }
 func (m *Material) BodyDigest() string   { return m.bodyDigest }
 func (m *Material) ConfigID() string     { return m.configID }
+
+// Descriptors returns copies of the M, C and layer descriptors accepted by
+// production VerifyOCI. Callers must still verify bytes read from a registry.
+func (m *Material) Descriptors() (releaseverify.BlobDescriptor, releaseverify.BlobDescriptor, []releaseverify.BlobDescriptor) {
+	return m.image.Descriptors()
+}
 func (m *Material) Runtime() *nodev1.DshRuntime {
 	return proto.Clone(m.dsh).(*nodev1.DshRuntime)
 }
