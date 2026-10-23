@@ -22,7 +22,12 @@ pnpm --filter @auriga/panel test:bundle
 - `web/shared`（`@auriga/shared`）：主题 CSS、i18n 工厂、API 客户端（problem+json / CSRF / 401）、
   登录步骤渲染器（按 `ClientStep` 类型）、开发用 fetch mock、Placeholder 与契约生成类型。
   workspace 消费者使用源码，Vite 另生成可验证的 ES library。
-- `web/portal`：门户。登录（步骤驱动）、邀请注册、手机扫码确认、登录后顶栏框架；首页内容占位。
+- `web/portal`：门户。登录（步骤驱动）、邀请注册、手机扫码确认、登录后顶栏和本人实例状态；
+  首页只读取身份与实例，不自动创建或启动。用户点击“启动并进入”才调用 workspace 的
+  `POST /me/instance/open`，每两秒查询单实例，最多等待两分钟；只有 `running` 或 `pending_restart` 且 `ready` 才进入。
+  已就绪实例点击“进入”也先显式 open 刷新或唤醒，再检查最新就绪状态；待重启状态仍显示提醒。
+  取消、卸载、失败、401、超时均停止等待，忽略旧响应，支持手动重试，失败写请求不自动重放。
+  入口固定使用 `/open/<编码后的实例 id>` 交由 edge 校验会话、主人并换票，不使用响应中的任意 URL。
 - `web/admin`：管理台。独立登录、侧边栏（成员 / 组 / 角色 / 身份源 / 系统设置）、成员列表（搜索 + 游标分页）。
 - `web/panel`：独立 ES module `dist/auriga-team-panel.js`，导入后注册 `auriga-team-panel`，
   Vue 运行时打入单文件，Shadow DOM 内置主题和组件样式。
@@ -38,6 +43,7 @@ pnpm --filter @auriga/panel test:bundle
 Mock 拦截 `/api/*`：多步登录（选身份源 → 口令 `correct-horse` → TOTP `123456` → 完成）、
 口令错误 / `fail-hard` 失败路径、邀请预览码 `invite-demo`、扫码挑战 `qr-demo-challenge`（比对码 `42`）、
 管理台成员列表。切真实后端时去掉该环境变量即可，业务代码只依赖 `@auriga/shared` 的 API 封装。
+当前开发 mock 不提供 workspace 实例接口；门户实例功能需接真实 workspace，组件测试使用隔离的 fetch 响应，不能作为真实实例已启动的证据。
 
 ```powershell
 # 示例：只给 portal 开 mock 做联调（不要占用任务要求外的端口以外的服务；本地预览自行决定）
