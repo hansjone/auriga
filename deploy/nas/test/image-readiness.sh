@@ -8,9 +8,10 @@ mkdir -p "$TMP/bin" "$TMP/nas/scripts" "$TMP/srv/container/auriga-test"
 cp "$ROOT/scripts/lib.sh" "$TMP/nas/scripts/lib.sh"
 cp "$ROOT/scripts/preflight.sh" "$TMP/nas/scripts/preflight.sh"
 cp "$ROOT/scripts/start.sh" "$TMP/nas/scripts/start.sh"
-for script in network-preflight render; do
+for script in network-preflight render mount-access; do
   printf '#!/bin/sh\nexit 0\n' >"$TMP/nas/scripts/$script.sh"
 done
+printf '#!/bin/sh\nexit "${NAS_READY_MOUNT_EXIT:-0}"\n' >"$TMP/nas/scripts/mount-access.sh"
 export NAS_ROOT="$TMP/nas" NAS_ALLOW_NONROOT=1
 export AURIGA_DATA_ROOT="$TMP/srv/container/auriga-test"
 export AURIGA_TEST_MIN_MEMORY_KB=0 AURIGA_TEST_MIN_DISK_KB=0
@@ -114,6 +115,12 @@ for service in PLATFORM EDGE AGENT POSTGRES NATS REGISTRY; do
   check_preflight "placeholder_$service" fail 'placeholder image'
 done
 write_env
+NAS_READY_MOUNT_EXIT=73; export NAS_READY_MOUNT_EXIT
+: >"$NAS_READY_LOG"
+if sh "$NAS_ROOT/scripts/start.sh" >"$TMP/start.output" 2>&1; then result=0; else result=$?; fi
+if [ "$result" = 73 ] && ! grep -q ' up ' "$NAS_READY_LOG"; then pass start_mount_access_failure_blocks_up
+else bad start_mount_access_failure_blocks_up; fi
+unset NAS_READY_MOUNT_EXIT
 for NAS_READY_UP_EXIT in 73 0; do
   export NAS_READY_UP_EXIT
   : >"$NAS_READY_LOG"
