@@ -12,7 +12,17 @@ const source = await readFile(
 assert.ok(!/^import\s/m.test(source), 'the panel must bundle its runtime');
 dom.window.eval(source.replace(/export\s*\{[^}]*\};?\s*$/, ''));
 const panel = dom.window.document.createElement('auriga-team-panel');
-panel.context = { locale: 'en', theme: 'light' };
+let requests = 0;
+panel.context = {
+  locale: 'en',
+  theme: 'light',
+  mode: 'managed',
+  protocol: 1,
+  fetch: () => {
+    requests++;
+    throw new Error('Managed resource requests are prohibited');
+  },
+};
 dom.window.document.body.append(panel);
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.ok(panel.shadowRoot?.textContent.includes('Team panel'));
@@ -23,6 +33,17 @@ assert.equal(
   panel.shadowRoot?.querySelector('aside')?.getAttribute('data-theme'),
   'light',
 );
+assert.ok(panel.shadowRoot?.textContent.includes('managed environment'));
+const tabs = panel.shadowRoot.querySelectorAll('nav button');
+assert.equal(tabs.length, 2);
+tabs[1].click();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.ok(
+  panel.shadowRoot.textContent.includes(
+    'installation inventory is unavailable',
+  ),
+);
+assert.equal(requests, 0, 'built panel must not call a managed member API');
 panel.remove();
 dom.window.close();
 console.log(
