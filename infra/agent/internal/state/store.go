@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -22,8 +23,15 @@ var (
 
 // Store is the local agent state database under <data>/agent/state.db.
 type Store struct {
-	db       *bbolt.DB
-	agentDir string
+	db                *bbolt.DB
+	agentDir          string
+	activationMu      sync.Mutex
+	activationClosing bool
+	activationStop    chan struct{}
+	activationDone    chan struct{}
+	activationActive  sync.WaitGroup
+	activationLocks   [4]chan struct{}
+	closeErr          error
 }
 
 // Open creates or opens state.db under agentDir.
@@ -48,15 +56,34 @@ func Open(agentDir string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, agentDir: agentDir}, nil
+	s := &Store{db: db, agentDir: agentDir, activationStop: make(chan struct{}), activationDone: make(chan struct{})}
+	for i := range s.activationLocks {
+		s.activationLocks[i] = make(chan struct{}, 1)
+		s.activationLocks[i] <- struct{}{}
+	}
+	return s, nil
 }
 
-// Close closes the database.
+// Close rejects new activation qualifications, wakes queued callers and waits
+// for qualified callbacks to return before closing the database. A callback must
+// not call Close on its own Store: Close necessarily waits for that callback.
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	return s.db.Close()
+	s.activationMu.Lock()
+	if s.activationClosing {
+		s.activationMu.Unlock()
+		<-s.activationDone
+		return s.closeErr
+	}
+	s.activationClosing = true
+	close(s.activationStop)
+	s.activationMu.Unlock()
+	s.activationActive.Wait()
+	s.closeErr = s.db.Close()
+	close(s.activationDone)
+	return s.closeErr
 }
 
 // NodeMeta is node-level metadata kept alongside cert files.
