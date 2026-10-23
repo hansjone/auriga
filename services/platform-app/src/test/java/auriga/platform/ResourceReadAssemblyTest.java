@@ -77,6 +77,7 @@ class ResourceReadAssemblyTest {
 
   @Autowired org.springframework.context.ApplicationContext context;
   JdbcTemplate admin;
+  org.springframework.jdbc.datasource.SingleConnectionDataSource adminConnection;
   HttpClient http;
 
   static UUID id(int number) {
@@ -137,7 +138,12 @@ class ResourceReadAssemblyTest {
                   .locations("classpath:db/org")
                   .load())
           .migrate();
-      return roles.runtime().dataSource();
+      var config = new com.zaxxer.hikari.HikariConfig();
+      config.setDataSource(roles.runtime().dataSource());
+      config.setPoolName("resource-test-org");
+      config.setMaximumPoolSize(2);
+      config.setMinimumIdle(0);
+      return new com.zaxxer.hikari.HikariDataSource(config);
     }
 
     @Bean
@@ -159,11 +165,15 @@ class ResourceReadAssemblyTest {
   }
 
   @BeforeEach
-  void setup() {
+  void setup() throws java.sql.SQLException {
     http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-    admin = new JdbcTemplate(PostgresExtension.database(getClass()).dataSource());
+    // Reuse a real fixture connection instead of starting a Windows PG backend for each statement.
+    adminConnection =
+        new org.springframework.jdbc.datasource.SingleConnectionDataSource(
+            PostgresExtension.database(getClass()).dataSource().getConnection(), true);
+    admin = new JdbcTemplate(adminConnection);
     admin.execute(
-        "TRUNCATE resource.resource_package_group, resource.resource_package, resource.resource_version CASCADE");
+        "TRUNCATE resource.resource_package_creation, resource.resource_package_group, resource.resource_package, resource.resource_version CASCADE");
     admin.execute(
         "DELETE FROM org.role_binding; DELETE FROM org.group_member; DELETE FROM org.member; DELETE FROM org.role WHERE builtin=false; DELETE FROM org.\"group\"");
     admin.update(
@@ -228,6 +238,7 @@ class ResourceReadAssemblyTest {
   @AfterEach
   void close() {
     http.close();
+    if (adminConnection != null) adminConnection.destroy();
   }
 
   UUID resource(int n, String level, String visibility, UUID owner, UUID tenant, boolean enabled) {
@@ -567,17 +578,18 @@ class ResourceReadAssemblyTest {
   }
 
   @Test
-  void resourceHttpIsExplicitlyEnabledAndHasNoWriteOrDownloadHandler() throws Exception {
+  void resourceHttpIsExplicitlyEnabledAndReadPermissionCannotWriteOrDownload() throws Exception {
     assertNotNull(context.getBean(auriga.resource.web.ResourceController.class));
     var response =
         http.send(
             HttpRequest.newBuilder(
                     URI.create("http://127.0.0.1:" + port + "/api/resource/v1/packages"))
                 .header("Authorization", "Bearer " + token(T1, ALICE, true))
-                .POST(HttpRequest.BodyPublishers.noBody())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
                 .build(),
             HttpResponse.BodyHandlers.ofString());
-    assertEquals(405, response.statusCode(), response.body());
+    assertEquals(403, response.statusCode(), response.body());
     denied(
         "/" + id(100) + "/versions/" + id(200) + "/content",
         token(T1, ALICE, true),
@@ -642,7 +654,12 @@ class ResourceReadAssemblyTest {
                 T2,
                 mine,
                 GROUP));
-    for (String table : List.of("resource_package", "resource_version", "resource_package_group"))
+    for (String table :
+        List.of(
+            "resource_package",
+            "resource_version",
+            "resource_package_group",
+            "resource_package_creation"))
       assertTrue(
           admin.queryForObject(
               "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='resource' AND c.relname=?",
@@ -674,6 +691,816 @@ class ResourceReadAssemblyTest {
           () -> new PlatformResourceConfiguration().resourceDataSource(env));
     } finally {
       admin.execute("REVOKE resource_owner FROM resource_app");
+    }
+  }
+
+  void grantWrites() {
+    admin.execute(
+        "UPDATE org.role SET permissions=ARRAY['resource.packages.read','resource.packages.upload'] WHERE key='resource-test'");
+  }
+
+  String writer(UUID tenant, UUID account) throws Exception {
+    return writer(tenant, account, "user", "portal", Instant.now().getEpochSecond());
+  }
+
+  String writer(UUID tenant, UUID account, String type, String ctx, Long stepUp) throws Exception {
+    var claims =
+        new JWTClaimsSet.Builder(SignedJWT.parse(token(tenant, account, true)).getJWTClaimsSet())
+            .claim("perms", List.of("resource.packages.read", "resource.packages.upload"))
+            .claim("ptyp", type)
+            .claim("ctx", ctx)
+            .claim("stepup_time", stepUp);
+    if (ctx.equals("device")) claims.claim("did", id(900).toString());
+    var signed =
+        new SignedJWT(
+            new JWSHeader.Builder(JWSAlgorithm.ES256)
+                .type(new JOSEObjectType("at+jwt"))
+                .keyID(KEY.getKeyID())
+                .build(),
+            claims.build());
+    signed.sign(new ECDSASigner(KEY));
+    return signed.serialize();
+  }
+
+  HttpResponse<String> write(
+      String method, String path, String bearer, String body, String key, String match)
+      throws Exception {
+    var builder =
+        HttpRequest.newBuilder(
+                URI.create("http://127.0.0.1:" + port + "/api/resource/v1/packages" + path))
+            .timeout(Duration.ofSeconds(30))
+            .header("Content-Type", "application/json")
+            .method(method, HttpRequest.BodyPublishers.ofString(body));
+    if (bearer != null) builder.header("Authorization", "Bearer " + bearer);
+    if (key != null) builder.header("Idempotency-Key", key);
+    if (match != null) builder.header("If-Match", match);
+    return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+  }
+
+  String input(String name, String visibility, UUID... groups) {
+    return JSON.writeValueAsString(
+        Map.of(
+            "name", name, "kind", "plugin", "visibility", visibility, "groupIds", List.of(groups)));
+  }
+
+  JsonNode result(HttpResponse<String> response, int status) {
+    assertEquals(status, response.statusCode(), response.body());
+    return JSON.readTree(response.body());
+  }
+
+  void failure(HttpResponse<String> response, int status, String code) {
+    assertEquals(code, result(response, status).path("code").asString());
+  }
+
+  JsonNode create(String name, String visibility, UUID... groups) throws Exception {
+    return result(
+        write(
+            "POST",
+            "",
+            writer(T1, ALICE),
+            input(name, visibility, groups),
+            UUID.randomUUID().toString(),
+            null),
+        201);
+  }
+
+  @Test
+  void realCreateReadPatchReadPreservesServerFieldsAndUpdatesAclAtomically() throws Exception {
+    grantWrites();
+    var created = create("Example plugin", "tenant");
+    String packageId = created.path("id").asString();
+    assertEquals(T1.toString(), created.path("tenantId").asString());
+    assertEquals(ALICE.toString(), created.path("ownerId").asString());
+    assertEquals("l3", created.path("level").asString());
+    assertFalse(created.path("enabled").asBoolean());
+    assertEquals(1, created.path("revision").asLong());
+    assertTrue(created.has("defaultVersionId") && created.get("defaultVersionId").isNull());
+    assertEquals(created, get("/" + packageId, BOB));
+    assertTrue(get("/" + packageId + "/versions", ALICE).path("items").isEmpty());
+    var patched =
+        write(
+            "PATCH",
+            "/" + packageId,
+            writer(T1, ALICE),
+            JSON.writeValueAsString(
+                Map.of(
+                    "name", "Renamed plugin", "visibility", "groups", "groupIds", List.of(GROUP))),
+            null,
+            "\"1\"");
+    var changed = result(patched, 200);
+    assertEquals("\"2\"", patched.headers().firstValue("etag").orElse(""));
+    assertEquals("no-store", patched.headers().firstValue("cache-control").orElse(""));
+    assertEquals(2, changed.path("revision").asLong());
+    assertEquals("Renamed plugin", get("/" + packageId, ALICE).path("name").asString());
+    denied("/" + packageId, token(T1, BOB, true), 404, "common.not_found");
+    result(
+        write(
+            "PATCH",
+            "/" + packageId,
+            writer(T1, ALICE),
+            "{\"visibility\":\"tenant\"}",
+            null,
+            "\"2\""),
+        200);
+    assertTrue(get("/" + packageId, BOB).path("groupIds").isEmpty());
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_group", Integer.class));
+    assertEquals(
+        0, admin.queryForObject("SELECT count(*) FROM resource.resource_version", Integer.class));
+    assertEquals(
+        0, admin.queryForObject("SELECT count(*) FROM resource.outbox_event", Integer.class));
+  }
+
+  @Test
+  void metadataWritesRequireLiveUploadAndRecentStepUpEvenOnReplay() throws Exception {
+    grantWrites();
+    String body = input("Example", "tenant"), bearer = writer(T1, ALICE);
+    failure(write("POST", "", null, body, "auth", null), 401, "common.unauthenticated");
+    failure(write("POST", "", token(T1, ALICE, true), body, "auth", null), 403, "common.forbidden");
+    for (Long time :
+        new Long[] {
+          null,
+          Instant.now().minusSeconds(601).getEpochSecond(),
+          Instant.now().plusSeconds(60).getEpochSecond()
+        })
+      failure(
+          write("POST", "", writer(T1, ALICE, "user", "portal", time), body, "auth", null),
+          403,
+          "iam.step_up_required");
+    var created = result(write("POST", "", bearer, body, "auth", null), 201);
+    admin.update("DELETE FROM org.role_binding WHERE tenant_id=? AND subject_id=?", T1, ALICE);
+    failure(write("POST", "", bearer, body, "auth", null), 403, "common.forbidden");
+    failure(
+        write(
+            "PATCH",
+            "/" + created.path("id").asString(),
+            bearer,
+            "{\"name\":\"Blocked\"}",
+            null,
+            "\"1\""),
+        403,
+        "common.forbidden");
+    String bob = writer(T1, BOB);
+    result(write("POST", "", bob, body, "disabled", null), 201);
+    admin.update("UPDATE org.member SET status='disabled' WHERE id=?", BOB);
+    failure(write("POST", "", bob, body, "disabled", null), 403, "common.forbidden");
+    assertEquals(
+        2, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+  }
+
+  @Test
+  void uploadPermissionDoesNotImplicitlyRequireTheSeparateReadPermission() throws Exception {
+    grantWrites();
+    admin.execute(
+        "UPDATE org.role SET permissions=ARRAY['resource.packages.upload'] WHERE key='resource-test'");
+    var claims =
+        new JWTClaimsSet.Builder(SignedJWT.parse(writer(T1, ALICE)).getJWTClaimsSet())
+            .claim("perms", List.of("resource.packages.upload"))
+            .build();
+    var signed =
+        new SignedJWT(
+            new JWSHeader.Builder(JWSAlgorithm.ES256)
+                .type(new JOSEObjectType("at+jwt"))
+                .keyID(KEY.getKeyID())
+                .build(),
+            claims);
+    signed.sign(new ECDSASigner(KEY));
+    result(
+        write("POST", "", signed.serialize(), input("Upload only", "tenant"), "upload-only", null),
+        201);
+    denied("", signed.serialize(), 403, "common.forbidden");
+  }
+
+  @Test
+  void nonMemberServiceDeviceAndAiCredentialsCannotWrite() throws Exception {
+    grantWrites();
+    String body = input("Example", "tenant");
+    for (String[] claims :
+        List.of(new String[] {"device", "device"}, new String[] {"service_account", "service"})) {
+      var response =
+          write(
+              "POST",
+              "",
+              writer(T1, ALICE, claims[0], claims[1], Instant.now().getEpochSecond()),
+              body,
+              "subject",
+              null);
+      assertTrue(response.statusCode() == 401 || response.statusCode() == 403, response.body());
+    }
+    failure(
+        write("POST", "", "ait_example_redacted", body, "subject", null),
+        401,
+        "common.unauthenticated");
+    failure(write("POST", "", writer(T1, id(999)), body, "subject", null), 403, "common.forbidden");
+    assertEquals(
+        0, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+  }
+
+  @Test
+  void personalCreationPolicyAndL4SharingRemainEnforced() throws Exception {
+    grantWrites();
+    String body = input("Personal plugin", "private"), bearer = writer(T1, ALICE);
+    var personal = result(write("POST", "", bearer, body, "personal", null), 201);
+    String packageId = personal.path("id").asString();
+    assertEquals("l4", personal.path("level").asString());
+    denied("/" + packageId, token(T1, BOB, true), 404, "common.not_found");
+    failure(
+        write(
+            "PATCH",
+            "/" + packageId,
+            writer(T1, ALICE),
+            "{\"visibility\":\"tenant\"}",
+            null,
+            "\"1\""),
+        403,
+        "resource.level_locked");
+    result(
+        write(
+            "PATCH",
+            "/" + packageId,
+            writer(T1, ALICE),
+            "{\"name\":\"Personal renamed\"}",
+            null,
+            "\"1\""),
+        200);
+    admin.update(
+        "UPDATE org.policy SET value=jsonb_set(value,'{allowPersonalPlugins}','false') WHERE tenant_id=? AND key='workspace'",
+        T1);
+    failure(
+        write("POST", "", writer(T1, ALICE), input("Disabled", "private"), "policy", null),
+        403,
+        "common.forbidden");
+    failure(write("POST", "", bearer, body, "personal", null), 403, "common.forbidden");
+    failure(
+        write("PATCH", "/" + packageId, writer(T1, ALICE), "{\"name\":\"Blocked\"}", null, "\"2\""),
+        404,
+        "common.not_found");
+    var shared = create("Shared draft", "tenant");
+    result(
+        write(
+            "PATCH",
+            "/" + shared.path("id").asString(),
+            writer(T1, ALICE),
+            "{\"visibility\":\"private\"}",
+            null,
+            "\"1\""),
+        200);
+    assertEquals("l3", get("/" + shared.path("id").asString(), ALICE).path("level").asString());
+  }
+
+  @Test
+  void groupWritesUseOnlyCurrentTrustedMembershipAndReplayCannotRestoreIt() throws Exception {
+    grantWrites();
+    admin.update(
+        "INSERT INTO org.\"group\"(id,tenant_id,name) VALUES(?,?,'Other tenant group')",
+        id(21),
+        T2);
+    String bearer = writer(T1, ALICE), body = input("Group plugin", "groups", GROUP);
+    for (UUID group : List.of(id(999), id(21)))
+      failure(
+          write("POST", "", bearer, input("Blocked", "groups", group), "group-" + group, null),
+          403,
+          "common.forbidden");
+    failure(write("POST", "", writer(T1, BOB), body, "group", null), 403, "common.forbidden");
+    var created = result(write("POST", "", bearer, body, "group", null), 201);
+    admin.update("DELETE FROM org.group_member WHERE tenant_id=? AND account_id=?", T1, ALICE);
+    failure(write("POST", "", bearer, body, "group", null), 403, "common.forbidden");
+    failure(
+        write(
+            "PATCH",
+            "/" + created.path("id").asString(),
+            bearer,
+            "{\"name\":\"Blocked\"}",
+            null,
+            "\"1\""),
+        404,
+        "common.not_found");
+    assertEquals(
+        1, admin.queryForObject("SELECT revision FROM resource.resource_package", Long.class));
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_group", Integer.class));
+  }
+
+  @Test
+  void patchNeverGrantsOwnerOrTenantOrLevelOverrides() throws Exception {
+    grantWrites();
+    var created = create("Owned", "tenant");
+    String packageId = created.path("id").asString();
+    failure(
+        write("PATCH", "/" + packageId, writer(T1, BOB), "{\"name\":\"Stolen\"}", null, "\"1\""),
+        403,
+        "common.forbidden");
+    failure(
+        write(
+            "PATCH",
+            "/" + packageId,
+            writer(T1, BOB, "user", "admin", Instant.now().getEpochSecond()),
+            "{\"name\":\"Admin override\"}",
+            null,
+            "\"1\""),
+        403,
+        "common.forbidden");
+    failure(
+        write("PATCH", "/" + packageId, writer(T2, id(15)), "{\"name\":\"Stolen\"}", null, "\"1\""),
+        404,
+        "common.not_found");
+    for (String level : List.of("l0", "l1", "l2")) {
+      UUID id =
+          resource(100 + Integer.parseInt(level.substring(1)), level, "tenant", ALICE, T1, false);
+      failure(
+          write("PATCH", "/" + id, writer(T1, ALICE), "{\"name\":\"Locked\"}", null, "\"1\""),
+          403,
+          "resource.level_locked");
+    }
+    var privateOther =
+        result(
+            write("POST", "", writer(T1, BOB), input("Other private", "private"), "other", null),
+            201);
+    failure(
+        write(
+            "PATCH",
+            "/" + privateOther.path("id").asString(),
+            writer(T1, ALICE),
+            "{\"name\":\"Hidden\"}",
+            null,
+            "\"1\""),
+        404,
+        "common.not_found");
+    assertEquals(created, get("/" + packageId, ALICE));
+  }
+
+  @Test
+  void strictPackageBodiesRejectProtectedFieldsDuplicatesNullsAndOversizedInput() throws Exception {
+    grantWrites();
+    String bearer = writer(T1, ALICE), valid = input("Valid", "tenant");
+    var created = create("Existing", "tenant");
+    String path = "/" + created.path("id").asString();
+    for (String field :
+        List.of(
+            "tenantId",
+            "ownerId",
+            "level",
+            "enabled",
+            "defaultVersionId",
+            "revision",
+            "id",
+            "createdAt",
+            "extra")) {
+      failure(
+          write(
+              "POST",
+              "",
+              bearer,
+              valid.substring(0, valid.length() - 1) + ",\"" + field + "\":null}",
+              "inject-" + field,
+              null),
+          400,
+          "common.validation_failed");
+      failure(
+          write("PATCH", path, bearer, "{\"" + field + "\":null}", null, "\"1\""),
+          400,
+          "common.validation_failed");
+    }
+    failure(
+        write("PATCH", path, bearer, "{\"kind\":\"plugin\"}", null, "\"1\""),
+        400,
+        "common.validation_failed");
+    for (String body :
+        List.of(
+            "{}",
+            "   ",
+            "[]",
+            "null",
+            "{",
+            valid + " {}",
+            valid.replace("plugin", "unknown"),
+            valid.replace("\"Valid\"", "null"),
+            valid.replace("\"Valid\"", "\"\""),
+            valid.replace("\"Valid\"", "\"\\u0000\""),
+            valid.replace("\"Valid\"", "\"\\uD800\""),
+            valid.replace("\"Valid\"", "\"\\uDC00\""),
+            input("a".repeat(215), "tenant"),
+            valid.replace("\"name\":", "\"name\":\"duplicate\",\"name\":"),
+            input("Invalid", "groups", GROUP, GROUP),
+            input("Invalid", "groups"),
+            input("Invalid", "tenant", GROUP),
+            valid.replace("[]", "null"),
+            valid.replace("[]", "[\"not-a-uuid\"]"),
+            input("a".repeat(33000), "tenant")))
+      failure(write("POST", "", bearer, body, "invalid", null), 400, "common.validation_failed");
+    for (String body :
+        List.of("{}", "{\"name\":null}", "{\"visibility\":null}", "{\"groupIds\":null}"))
+      failure(write("PATCH", path, bearer, body, null, "\"1\""), 400, "common.validation_failed");
+    assertEquals(
+        1, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_creation", Integer.class));
+  }
+
+  @Test
+  void requestLimitsAlsoApplyToChunkedBodiesAndTooManyGroups() throws Exception {
+    grantWrites();
+    String bearer = writer(T1, ALICE), oversized = input("a".repeat(33000), "tenant");
+    var response =
+        http.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + port + "/api/resource/v1/packages"))
+                .header("Authorization", "Bearer " + bearer)
+                .header("Idempotency-Key", "chunked")
+                .header("Content-Type", "application/json")
+                .POST(
+                    HttpRequest.BodyPublishers.ofInputStream(
+                        () ->
+                            new java.io.ByteArrayInputStream(
+                                oversized.getBytes(StandardCharsets.UTF_8))))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    failure(response, 400, "common.validation_failed");
+    UUID[] groups =
+        java.util.stream.IntStream.range(1000, 1201)
+            .mapToObj(ResourceReadAssemblyTest::id)
+            .toArray(UUID[]::new);
+    failure(
+        write("POST", "", bearer, input("Many groups", "groups", groups), "groups", null),
+        400,
+        "common.validation_failed");
+    failure(
+        write(
+            "POST",
+            "",
+            bearer,
+            input("Bad UUID", "groups", GROUP).replace(GROUP.toString(), "1-1-1-1-1"),
+            "uuid",
+            null),
+        400,
+        "common.validation_failed");
+    assertEquals(
+        0, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+  }
+
+  @Test
+  void nameLengthUsesUnicodeCodePointsWithoutDatabaseReplacement() throws Exception {
+    grantWrites();
+    String name = "\uD83D\uDD0C".repeat(214);
+    var created = create(name, "tenant");
+    assertEquals(name, get("/" + created.path("id").asString(), ALICE).path("name").asString());
+    failure(
+        write("POST", "", writer(T1, ALICE), input(name + "x", "tenant"), "too-long", null),
+        400,
+        "common.validation_failed");
+  }
+
+  @Test
+  void ifMatchIsAnExactStrongSingleRevisionAndCannotOverflow() throws Exception {
+    grantWrites();
+    var created = create("Versioned", "tenant");
+    String path = "/" + created.path("id").asString(), bearer = writer(T1, ALICE);
+    failure(
+        write("PATCH", path, bearer, "{\"name\":\"No match\"}", null, null),
+        412,
+        "common.precondition_failed");
+    for (String match :
+        List.of("1", "W/\"1\"", "*", "\"01\"", "\"1\", \"2\"", "\"0\"", "\"9007199254740992\""))
+      failure(
+          write("PATCH", path, bearer, "{\"name\":\"No match\"}", null, match),
+          412,
+          "common.precondition_failed");
+    var duplicate =
+        http.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + port + "/api/resource/v1/packages" + path))
+                .header("Authorization", "Bearer " + bearer)
+                .header("Content-Type", "application/json")
+                .headers("If-Match", "\"1\"", "If-Match", "\"1\"")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString("{\"name\":\"No match\"}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    failure(duplicate, 412, "common.precondition_failed");
+    result(write("PATCH", path, bearer, "{\"name\":\"Changed\"}", null, "\"1\""), 200);
+    failure(
+        write("PATCH", path, bearer, "{\"name\":\"Lost update\"}", null, "\"1\""),
+        412,
+        "common.precondition_failed");
+    admin.update(
+        "UPDATE resource.resource_package SET revision=9007199254740991 WHERE id=?",
+        UUID.fromString(created.path("id").asString()));
+    failure(
+        write("PATCH", path, bearer, "{\"name\":\"Overflow\"}", null, "\"9007199254740991\""),
+        409,
+        "resource.state_conflict");
+    assertEquals("Changed", get(path, ALICE).path("name").asString());
+    assertEquals(9007199254740991L, get(path, ALICE).path("revision").asLong());
+  }
+
+  @Test
+  void idempotencyReplaysOriginalResultAfterPatchAndRejectsDifferentBodies() throws Exception {
+    grantWrites();
+    String bearer = writer(T1, ALICE), body = input("Initial", "tenant");
+    var first = write("POST", "", bearer, body, "stable", null);
+    var original = result(first, 201);
+    assertEquals("\"1\"", first.headers().firstValue("etag").orElse(""));
+    assertEquals("no-store", first.headers().firstValue("cache-control").orElse(""));
+    String path = "/" + original.path("id").asString();
+    result(write("PATCH", path, bearer, "{\"name\":\"Current\"}", null, "\"1\""), 200);
+    var replay =
+        write(
+            "POST",
+            "",
+            writer(T1, ALICE),
+            "{\"visibility\":\"tenant\",\"kind\":\"plugin\",\"name\":\"Initial\"}",
+            "stable",
+            null);
+    assertEquals(original, result(replay, 201));
+    assertEquals("\"1\"", replay.headers().firstValue("etag").orElse(""));
+    assertEquals("Current", get(path, ALICE).path("name").asString());
+    failure(
+        write("POST", "", bearer, input("Different", "tenant"), "stable", null),
+        409,
+        "common.conflict");
+    for (String key : List.of("", "bad key", "k".repeat(129)))
+      failure(write("POST", "", bearer, body, key, null), 400, "common.validation_failed");
+    assertEquals(
+        1, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_creation", Integer.class));
+  }
+
+  @Test
+  void omittedIdempotencyKeyCreatesIndependentPackagesWithoutReplayRecords() throws Exception {
+    grantWrites();
+    String body = input("Without a key", "tenant"), bearer = writer(T1, ALICE);
+    var first = result(write("POST", "", bearer, body, null, null), 201);
+    var second = result(write("POST", "", bearer, body, null, null), 201);
+    assertNotEquals(first.path("id"), second.path("id"));
+    assertEquals(first, get("/" + first.path("id").asString(), ALICE));
+    assertEquals(second, get("/" + second.path("id").asString(), ALICE));
+    assertEquals(
+        2, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_creation", Integer.class));
+    admin.update("DELETE FROM org.role_binding WHERE tenant_id=? AND subject_id=?", T1, ALICE);
+    failure(write("POST", "", bearer, body, null, null), 403, "common.forbidden");
+  }
+
+  @Test
+  void groupFingerprintNormalizesUuidCaseAndGroupOrderAndRejectsDuplicateHeaders()
+      throws Exception {
+    grantWrites();
+    UUID group = UUID.fromString("01900000-0000-7000-8000-00000000abcd");
+    admin.update(
+        "INSERT INTO org.\"group\"(id,tenant_id,name) VALUES(?,?,'Second example group')",
+        group,
+        T1);
+    admin.update(
+        "INSERT INTO org.group_member(id,tenant_id,group_id,account_id) VALUES(?,?,?,?)",
+        UuidV7.next(),
+        T1,
+        group,
+        ALICE);
+    String bearer = writer(T1, ALICE), body = input("Canonical", "groups", GROUP, group);
+    var original = result(write("POST", "", bearer, body, "canonical", null), 201);
+    String reordered =
+        input("Canonical", "groups", group, GROUP)
+            .replace(group.toString(), group.toString().toUpperCase(Locale.ROOT));
+    assertEquals(original, result(write("POST", "", bearer, reordered, "canonical", null), 201));
+    failure(
+        write(
+            "POST",
+            "",
+            bearer,
+            input("Duplicate", "groups", group, group)
+                .replaceFirst(group.toString(), group.toString().toUpperCase(Locale.ROOT)),
+            "duplicate",
+            null),
+        400,
+        "common.validation_failed");
+    var response =
+        http.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + port + "/api/resource/v1/packages"))
+                .header("Authorization", "Bearer " + bearer)
+                .header("Content-Type", "application/json")
+                .headers("Idempotency-Key", "canonical", "Idempotency-Key", "canonical")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    failure(response, 400, "common.validation_failed");
+  }
+
+  @Test
+  void idempotencyScopeSeparatesActorsTenantsAndExpiredOperations() throws Exception {
+    grantWrites();
+    String body = input("Scoped", "tenant"), alice = writer(T1, ALICE);
+    var first = result(write("POST", "", alice, body, "scope", null), 201);
+    var bob = result(write("POST", "", writer(T1, BOB), body, "scope", null), 201);
+    var other = result(write("POST", "", writer(T2, id(15)), body, "scope", null), 201);
+    assertEquals(
+        3,
+        Set.of(first.path("id").asString(), bob.path("id").asString(), other.path("id").asString())
+            .size());
+    assertEquals(
+        1,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_creation WHERE expires_at BETWEEN now()+interval '23 hours 59 minutes' AND now()+interval '24 hours 1 minute' AND actor_id=?",
+            Integer.class,
+            ALICE));
+    admin.update(
+        "UPDATE resource.resource_package_creation SET expires_at=now()-interval '1 second' WHERE tenant_id=? AND actor_id=?",
+        T1,
+        ALICE);
+    var next =
+        result(write("POST", "", alice, input("After expiry", "tenant"), "scope", null), 201);
+    assertNotEquals(first.path("id"), next.path("id"));
+    assertEquals(
+        next,
+        result(write("POST", "", alice, input("After expiry", "tenant"), "scope", null), 201));
+    assertEquals(
+        4, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+    assertEquals(
+        3,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_creation", Integer.class));
+    var runtime = new JdbcTemplate(resourceDataSource);
+    assertEquals(
+        0,
+        runtime.queryForObject(
+            "SELECT count(*) FROM resource.resource_package_creation", Integer.class));
+    TenantContext.run(
+        T2,
+        () ->
+            new org.springframework.transaction.support.TransactionTemplate(resourceTransactions)
+                .execute(
+                    status -> {
+                      assertEquals(
+                          1,
+                          runtime.queryForObject(
+                              "SELECT count(*) FROM resource.resource_package_creation",
+                              Integer.class));
+                      return null;
+                    }));
+  }
+
+  @Test
+  void concurrentSameKeyCreatesOnePackageAndDifferentBodiesConflict() throws Exception {
+    grantWrites();
+    String bearer = writer(T1, ALICE), body = input("Concurrent", "tenant");
+    var responses =
+        concurrent(
+            () -> write("POST", "", bearer, body, "concurrent", null),
+            () -> write("POST", "", bearer, body, "concurrent", null));
+    assertEquals(result(responses.get(0), 201), result(responses.get(1), 201));
+    assertEquals(
+        1, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+    responses =
+        concurrent(
+            () -> write("POST", "", bearer, input("One", "tenant"), "different", null),
+            () -> write("POST", "", bearer, input("Two", "tenant"), "different", null));
+    assertEquals(
+        List.of(201, 409), responses.stream().map(HttpResponse::statusCode).sorted().toList());
+    assertEquals(
+        2, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+  }
+
+  @Test
+  void concurrentPatchesWithTheSameEtagCannotLoseUpdates() throws Exception {
+    grantWrites();
+    var created = create("Before concurrent patch", "tenant");
+    String bearer = writer(T1, ALICE), path = "/" + created.path("id").asString();
+    var responses =
+        concurrent(
+            () -> write("PATCH", path, bearer, "{\"name\":\"Name winner\"}", null, "\"1\""),
+            () ->
+                write(
+                    "PATCH",
+                    path,
+                    bearer,
+                    JSON.writeValueAsString(
+                        Map.of("visibility", "groups", "groupIds", List.of(GROUP))),
+                    null,
+                    "\"1\""));
+    assertEquals(
+        List.of(200, 412), responses.stream().map(HttpResponse::statusCode).sorted().toList());
+    var winner = responses.stream().filter(r -> r.statusCode() == 200).findFirst().orElseThrow();
+    assertEquals(JSON.readTree(winner.body()), get(path, ALICE));
+    assertEquals(2, get(path, ALICE).path("revision").asLong());
+  }
+
+  @Test
+  void databaseFailureRollsBackPackageAclRevisionAndCreationReplayRecord() throws Exception {
+    grantWrites();
+    var created = create("Before rollback", "groups", GROUP);
+    UUID packageId = UUID.fromString(created.path("id").asString());
+    UUID originalRelation =
+        admin.queryForObject(
+            "SELECT id FROM resource.resource_package_group WHERE package_id=?",
+            UUID.class,
+            packageId);
+    admin.execute(
+        "ALTER TABLE resource.resource_package_group ADD CONSTRAINT resource_test_reject_group CHECK (group_id<>'"
+            + GROUP
+            + "'::uuid) NOT VALID");
+    try {
+      failure(
+          write(
+              "PATCH",
+              "/" + packageId,
+              writer(T1, ALICE),
+              "{\"name\":\"Must roll back\"}",
+              null,
+              "\"1\""),
+          500,
+          "common.internal");
+      failure(
+          write(
+              "POST",
+              "",
+              writer(T1, ALICE),
+              input("Must roll back", "groups", GROUP),
+              "rollback",
+              null),
+          500,
+          "common.internal");
+      assertEquals(created, get("/" + packageId, ALICE));
+      assertEquals(
+          originalRelation,
+          admin.queryForObject(
+              "SELECT id FROM resource.resource_package_group WHERE package_id=?",
+              UUID.class,
+              packageId));
+      assertEquals(
+          1, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+      assertEquals(
+          1,
+          admin.queryForObject(
+              "SELECT count(*) FROM resource.resource_package_creation", Integer.class));
+    } finally {
+      admin.execute(
+          "ALTER TABLE resource.resource_package_group DROP CONSTRAINT resource_test_reject_group");
+    }
+    result(
+        write(
+            "POST",
+            "",
+            writer(T1, ALICE),
+            input("Must roll back", "groups", GROUP),
+            "rollback",
+            null),
+        201);
+  }
+
+  @Test
+  void missingPolicyFailsClosedForNewWritesAndCachedResults() throws Exception {
+    grantWrites();
+    String bearer = writer(T1, ALICE), body = input("Example", "tenant");
+    var created = result(write("POST", "", bearer, body, "dependency", null), 201);
+    admin.update("DELETE FROM org.policy WHERE tenant_id=? AND key='workspace'", T1);
+    failure(write("POST", "", bearer, body, "dependency", null), 503, "common.unavailable");
+    failure(write("POST", "", bearer, body, "new", null), 503, "common.unavailable");
+    failure(
+        write(
+            "PATCH",
+            "/" + created.path("id").asString(),
+            bearer,
+            "{\"name\":\"Blocked\"}",
+            null,
+            "\"1\""),
+        503,
+        "common.unavailable");
+    assertEquals(
+        1, admin.queryForObject("SELECT count(*) FROM resource.resource_package", Integer.class));
+  }
+
+  List<HttpResponse<String>> concurrent(
+      java.util.concurrent.Callable<HttpResponse<String>> first,
+      java.util.concurrent.Callable<HttpResponse<String>> second)
+      throws Exception {
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var ready = new java.util.concurrent.CountDownLatch(2);
+      var start = new java.util.concurrent.CountDownLatch(1);
+      var futures = new ArrayList<java.util.concurrent.Future<HttpResponse<String>>>();
+      for (var action : List.of(first, second))
+        futures.add(
+            executor.submit(
+                () -> {
+                  ready.countDown();
+                  assertTrue(start.await(10, java.util.concurrent.TimeUnit.SECONDS));
+                  return action.call();
+                }));
+      assertTrue(ready.await(10, java.util.concurrent.TimeUnit.SECONDS));
+      start.countDown();
+      return List.of(
+          futures.get(0).get(30, java.util.concurrent.TimeUnit.SECONDS),
+          futures.get(1).get(30, java.util.concurrent.TimeUnit.SECONDS));
     }
   }
 }
