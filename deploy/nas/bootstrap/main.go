@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -28,6 +29,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "image-metadata" || os.Args[1] == "image-check" || os.Args[1] == "image-resolve") {
+		if err := imageCommand(context.Background(), os.Args[1:], os.Stdout); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	out := flag.String("out", "", "private source material directory")
 	accessFile := flag.String("access-file", "", "required trusted access JSON")
 	validateOnly := flag.Bool("validate-access", false, "validate without writing installation materials")

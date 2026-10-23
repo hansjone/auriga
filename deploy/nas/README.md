@@ -19,7 +19,30 @@ GitHub Actions 工件不会保留文件执行位（见 [Permission Loss](https:/
 sha256sum -c SHA256SUMS
 (cd images && sha256sum -c SHA256SUMS)
 chmod 0755 deploy-nas/bin/auriga-nas-bootstrap deploy-nas/bin/runtime-release
+sh deploy-nas/scripts/load-images.sh "$PWD"
 ```
+
+`load-images.sh` 是公开包的应用镜像加载入口。它先用已核对的静态 bootstrap 验证根和镜像校验和、
+固定三份 tar 的 tag、原 config 摘要 `config_id`、唯一 `linux/amd64` 与实际层字节的有序 diffID 链，
+再只加载 `platform.tar`、`edge.tar`、`agent.tar`。加载后从目标 Engine 结构化 inspect 得到精确本地 Id，
+只按该不可变 Id 导出并再次核对原 config 字节及层链；不会再次用可变 tag 选择导出对象。
+三项全部成功后才复制原 `images/manifest.json` 为 release marker，输出三条 `AURIGA_IMAGE_*` 建议。
+将这些建议手工填入 `stack.env`；脚本不会改写 `stack.env`／`STACK_ENV`，不会创建或认领数据根。
+默认 marker 位于包根；`AURIGA_RELEASE_DIR` 可指向已存在的独立目录，同时接收原 `versions.txt`。
+失败会保留已加载镜像和原有 tag，不自动删除、修复或回退。
+
+`images.*.id` 保留构建时 CI Engine 的原身份；不同 Docker store 的实际本地 Id 可能是 config、manifest
+或 index 摘要，不能直接把 CI 值或 `config_id` 当成目标 Engine 值。新增 `config_id`、`os`、`arch` 来自真实
+docker-save 归档；这些是运输关联元数据，不是正式 runtime 签名、官方可信根或独立发布授权。
+缺少新元数据或任一校验和的旧包会明确失败，应重新获取新 workflow 生成的完整包。
+
+bootstrap 的 `image-metadata IMAGES_DIR`、`image-check BUNDLE_DIR`、`image-resolve BUNDLE_DIR` 三个入口均只读，
+在安装参数校验之前分派，不需要 access／PKI／identity／数据根，也不需要 NAS 安装 Python 或 Go。
+元数据入口供 CI 使用；check 无成功输出，resolve 仅在三镜像核验完后输出本地 Id 建议，错误走 stderr。
+解析不解包到文件系统，拒绝重复 JSON／tar 条目、链接、不可信路径、截断和多可运行候选；允许有序重复层，
+OCI attestation 必须绑定唯一的可运行 manifest。每份 tar 原字节上限 8 GiB、展开字节总量上限 16 GiB、
+条目上限 32768，单 JSON 上限 2 MiB、保留元数据总量上限 32 MiB；单次命令总时限 10 分钟，
+inspect 各 30 秒、每次不可变 Id 导出各 3 分钟，失败取消并回收 Docker 子进程。
 
 两个工具均由 workflow 从同一精确 checkout 使用 Go 1.27.3、`CGO_ENABLED=0` 预构建为 Linux/amd64 二进制。
 源代码 checkout 的对应路径为 `deploy/nas/bin/auriga-nas-bootstrap` 和 `deploy/nas/bin/runtime-release`。
