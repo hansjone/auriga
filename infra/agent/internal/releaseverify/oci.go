@@ -21,10 +21,24 @@ const (
 // VerifiedImage binds raw manifest/config evidence to a verified release.
 // Its config ID is NOT a manifest digest or proof of local Engine contents.
 type VerifiedImage struct {
-	valid    bool
-	release  VerifiedRelease
-	configID string
-	layers   int
+	valid            bool
+	release          VerifiedRelease
+	configID         string
+	layers           int
+	manifest         BlobDescriptor
+	config           BlobDescriptor
+	layerDescriptors []BlobDescriptor
+}
+
+// BlobDescriptor is a copy of a descriptor accepted by production VerifyOCI.
+type BlobDescriptor struct {
+	Digest, MediaType string
+	Size              uint64
+}
+
+// Descriptors returns independent values for the original M, C and layers.
+func (v VerifiedImage) Descriptors() (BlobDescriptor, BlobDescriptor, []BlobDescriptor) {
+	return v.manifest, v.config, append([]BlobDescriptor(nil), v.layerDescriptors...)
 }
 
 func (v VerifiedImage) Valid() bool            { return v.valid }
@@ -84,7 +98,7 @@ func verifyOCI(release VerifiedRelease, ring releasetrust.Ring, manifest, config
 	if media == dockerManifest {
 		configMedia = dockerConfig
 	}
-	configDigest, _, err := descriptor(c, configMedia)
+	configDigest, configSize, err := descriptor(c, configMedia)
 	if err != nil {
 		return VerifiedImage{}, err
 	}
@@ -97,6 +111,7 @@ func verifyOCI(release VerifiedRelease, ring releasetrust.Ring, manifest, config
 		return VerifiedImage{}, fmt.Errorf("layer descriptors missing")
 	}
 	layerDigests := make([]string, len(layers))
+	layerDescriptors := make([]BlobDescriptor, len(layers))
 	uncompressed := make([]bool, len(layers))
 	for i, raw := range layers {
 		layer, ok := raw.(map[string]any)
@@ -107,11 +122,12 @@ func verifyOCI(release VerifiedRelease, ring releasetrust.Ring, manifest, config
 		if (media == ociManifest && mt != ociTar && mt != ociTar+"+gzip" && mt != ociTar+"+zstd") || (media == dockerManifest && mt != dockerGzip) {
 			return VerifiedImage{}, fmt.Errorf("unsupported layer media type or compression")
 		}
-		sum, _, err := descriptor(layer, mt)
+		sum, layerSize, err := descriptor(layer, mt)
 		if err != nil {
 			return VerifiedImage{}, err
 		}
 		layerDigests[i], uncompressed[i] = sum, mt == ociTar
+		layerDescriptors[i] = BlobDescriptor{Digest: sum, Size: layerSize, MediaType: mt}
 	}
 	cfg, err := strictJSON(config, MaxConfigBytes)
 	if err != nil {
@@ -120,7 +136,7 @@ func verifyOCI(release VerifiedRelease, ring releasetrust.Ring, manifest, config
 	if err := imageConfig(cfg, release.partition, layerDigests, uncompressed); err != nil {
 		return VerifiedImage{}, err
 	}
-	return VerifiedImage{valid: true, release: release, configID: configDigest, layers: len(layers)}, nil
+	return VerifiedImage{valid: true, release: release, configID: configDigest, layers: len(layers), manifest: BlobDescriptor{Digest: release.imageDigest, Size: uint64(len(manifest)), MediaType: media}, config: BlobDescriptor{Digest: configDigest, Size: configSize, MediaType: configMedia}, layerDescriptors: layerDescriptors}, nil
 }
 
 func descriptor(d map[string]any, media string) (string, uint64, error) {

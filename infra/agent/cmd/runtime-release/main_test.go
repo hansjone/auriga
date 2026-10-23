@@ -81,6 +81,41 @@ func TestCLIExecutable(t *testing.T) {
 	verifyArgs := []string{"verify", "--root", root, "--dir", out, "--os", "linux", "--arch", "amd64", "--allow-image", image}
 	invoke(true, verifyArgs...)
 	invoke(true, verifyArgs...)
+	layout := filepath.Join(dir, "oci-input")
+	if err := os.MkdirAll(filepath.Join(layout, "blobs", "sha256"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	put(filepath.Join("oci-input", "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`))
+	put(filepath.Join("oci-input", "index.json"), []byte(fmt.Sprintf(`{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q,"size":%d}]}`, digest(manifestRaw), len(manifestRaw))))
+	for _, b := range [][]byte{manifestRaw, configRaw} {
+		put(filepath.Join("oci-input", "blobs", "sha256", strings.TrimPrefix(digest(b), "sha256:")), b)
+	}
+	stageArgs := []string{"stage-layout", "--dir", out, "--root", root, "--os", "linux", "--arch", "amd64", "--allow-image", image, "--layout", layout, "--out", filepath.Join(dir, "oci-staged"), "--max-bytes", fmt.Sprint(len(manifestRaw) + len(configRaw))}
+	if !strings.Contains(invoke(true, stageArgs...), "blobs=2") {
+		t.Fatal("missing staged count")
+	}
+	invoke(false, stageArgs...)
+	for _, bad := range [][]string{
+		append(append([]string{}, stageArgs...), "--max-bytes", "9999"),
+		append(append([]string{}, stageArgs...), "unexpected"),
+		append(append([]string{}, stageArgs...), "--unknown", "x"),
+		append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "--max-bytes", "0"),
+		append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "--max-bytes", "-1"),
+		stageArgs[:len(stageArgs)-2],
+	} {
+		invoke(false, bad...)
+	}
+	for _, name := range []string{"dir", "root", "os", "arch", "allow-image", "layout", "out", "max-bytes"} {
+		var args []string
+		for i := 0; i < len(stageArgs); i++ {
+			if stageArgs[i] == "--"+name {
+				i++
+				continue
+			}
+			args = append(args, stageArgs[i])
+		}
+		invoke(false, args...)
+	}
 	invoke(false, signArgs...)                                                                        // existing output
 	invoke(false, "verify", "--dir", out, "--os", "linux", "--arch", "amd64", "--allow-image", image) // no independent root
 	invoke(false, "verify", "--root", root, "--dir", out, "--os", "linux", "--arch", "amd64", "--allow-image", "registry.example.com/unapproved/dsh@"+digest(manifestRaw))
