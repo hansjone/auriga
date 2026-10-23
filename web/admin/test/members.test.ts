@@ -1,5 +1,5 @@
 import { mount, flushPromises } from '@vue/test-utils';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ElementPlus from 'element-plus';
 import {
   createAurigaI18n,
@@ -9,15 +9,20 @@ import {
   setMockSession,
 } from '@auriga/shared';
 import MembersView from '../src/views/MembersView.vue';
+import { adminApi } from '../src/admin/api';
 
 beforeEach(async () => {
   resetMockState();
   await enableAurigaMock();
   setMockSession('admin');
+  vi.spyOn(adminApi, 'membership').mockResolvedValue({
+    permissions: ['org.members.read'],
+  } as Awaited<ReturnType<typeof adminApi.membership>>);
 });
 
 afterEach(() => {
   disableAurigaMock();
+  vi.restoreAllMocks();
 });
 
 describe('MembersView', () => {

@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 import LoginView from './views/LoginView.vue';
 import AdminLayout from './layouts/AdminLayout.vue';
 import MembersView from './views/MembersView.vue';
+import NodesView from './views/NodesView.vue';
+import InstancesView from './views/InstancesView.vue';
 import PlaceholderView from './views/PlaceholderView.vue';
 
 export const router = createRouter({
@@ -14,6 +16,8 @@ export const router = createRouter({
       children: [
         { path: '', redirect: '/members' },
         { path: 'members', component: MembersView },
+        { path: 'nodes', component: NodesView },
+        { path: 'instances', component: InstancesView },
         {
           path: 'groups',
           component: PlaceholderView,
