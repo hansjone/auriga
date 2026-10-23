@@ -58,7 +58,12 @@ cat >"$TMP/bin/docker" <<'EOF'
 #!/bin/sh
 set -eu
 case "$1" in
-  info|image) exit 0 ;;
+  info) exit 0 ;;
+  image)
+    [ "${2:-}" = inspect ] && [ "${3:-}" = --format ] \
+      && [ "${4:-}" = '{{.Os}}/{{.Architecture}}' ] || exit 1
+    printf 'linux/amd64\n'
+    ;;
   compose)
     case " $* " in *' up '*) printf '%s\n' "$*" >>"$TEST_DOCKER_LOG" ;; esac
     exit 0 ;;
