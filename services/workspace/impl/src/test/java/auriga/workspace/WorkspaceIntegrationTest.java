@@ -94,16 +94,28 @@ class WorkspaceIntegrationTest {
                 DshRuntime.newBuilder()
                     .setVersion("1.0.0")
                     .setArtifactId("dsh-test")
-                    .setDigest("sha256:" + "0".repeat(64))
                     .setImage("example.com/dsh@sha256:" + "0".repeat(64))
-                    .setSigned(
-                        SignedArtifact.newBuilder()
-                            .setSignature(ByteString.copyFrom(new byte[] {1}))
-                            .setStatement(
-                                ArtifactStatement.newBuilder()
-                                    .setOs("linux")
-                                    .setArch("amd64")
-                                    .setVersion("1.0.0"))))
+                    .setReleaseEnvelope(
+                        RuntimeReleaseEnvelope.newBuilder()
+                            .setSchemaVersion(1)
+                            .setPurpose("dsh_runtime")
+                            .setName("dsh")
+                            .setArtifactId("dsh-test")
+                            .setDshVersion("1.0.0")
+                            .setOs("linux")
+                            .setArch("amd64")
+                            .setImageDigest("sha256:" + "0".repeat(64))
+                            .setReleaseSequence(1)
+                            .setIssuedAt(
+                                com.google.protobuf.Timestamp.newBuilder().setSeconds(1792713600))
+                            .setSignature(
+                                RuntimeReleaseSignature.newBuilder()
+                                    .setAlg("Ed25519")
+                                    .setKid("test-root")
+                                    .setValue(
+                                        Base64.getUrlEncoder()
+                                            .withoutPadding()
+                                            .encodeToString(new byte[64])))))
             .setProfile(Profile.newBuilder().setListenPort(7860))
             .build();
     inputs =
@@ -350,6 +362,70 @@ class WorkspaceIntegrationTest {
                           "SELECT count(*) FROM workspace_registry WHERE id=?", Long.class, id));
                   return null;
                 }));
+  }
+
+  @Test
+  void formalDockerReleaseSupportsPinsDefaultsAndRuntimeQueriesWithoutLegacyStatement() {
+    var first = service.templates.all().getFirst();
+    var second = first.toBuilder();
+    second.getDshBuilder().setVersion("2.0.0");
+    second
+        .getDshBuilder()
+        .getReleaseEnvelopeBuilder()
+        .setDshVersion("2.0.0")
+        .setReleaseSequence(2)
+        .setIssuedAt(com.google.protobuf.Timestamp.newBuilder().setSeconds(0).setNanos(123456789));
+    var app =
+        new WorkspaceService(
+            store,
+            inputs,
+            new WorkspaceTemplates(List.of(first, second.build())),
+            new WorkspaceCrypto(WorkspaceCrypto.random(32)),
+            new OutboxEventPublisher(
+                store.jdbc,
+                "workspace",
+                "workspace",
+                new EventSchemas(),
+                WorkspaceService.JSON,
+                clock,
+                () -> {}),
+            clock);
+    TenantContext.run(
+        tenant,
+        () -> {
+          var id = (UUID) app.open(owner).instance().get("id");
+          var admin = new WorkspaceAdmin(app, inputs);
+          admin.patch(
+              id, WorkspaceService.JSON.createObjectNode().put("dshVersionPin", "2.0.0"), null);
+          var pinned = WorkspaceService.spec(store.tx(() -> store.instance(id)));
+          assertEquals("2.0.0", pinned.getDsh().getVersion());
+          assertFalse(pinned.getDsh().hasSigned());
+          admin.defaultRuntime("1.0.0");
+          assertEquals(
+              "2.0.0",
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getDsh().getVersion());
+          admin.patch(id, WorkspaceService.JSON.createObjectNode().putNull("dshVersionPin"), null);
+          assertEquals(
+              "1.0.0",
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getDsh().getVersion());
+          admin.defaultRuntime("2.0.0");
+          assertEquals(
+              "2.0.0",
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getDsh().getVersion());
+          app.tickTenant();
+          var runtimes = new WorkspaceQueries(app).runtimes();
+          assertEquals("2.0.0", runtimes.getDefaultVersion());
+          var runtime =
+              runtimes.getItems().stream()
+                  .filter(r -> r.getVersion().equals("2.0.0"))
+                  .findFirst()
+                  .orElseThrow();
+          var artifact = runtime.getArtifacts().getFirst();
+          assertEquals("linux", artifact.getOs().toString());
+          assertEquals("amd64", artifact.getArch().toString());
+          assertEquals("", artifact.getDigest());
+          assertEquals(Instant.ofEpochSecond(0, 123456789), runtime.getCreatedAt().toInstant());
+        });
   }
 
   WorkspaceService serviceFor(WorkspaceStore target) {

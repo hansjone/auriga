@@ -54,8 +54,8 @@ public final class WorkspaceAdmin {
                 service.templates.get(
                     version,
                     previous.getRuntime(),
-                    previous.getDsh().getSigned().getStatement().getOs(),
-                    previous.getDsh().getSigned().getStatement().getArch());
+                    previous.getDsh().getReleaseEnvelope().getOs(),
+                    previous.getDsh().getReleaseEnvelope().getArch());
             next.setDsh(template.getDsh());
             store.jdbc.update(
                 "UPDATE instance SET pinned_version=? WHERE tenant_id=? AND id=?",
@@ -276,8 +276,8 @@ public final class WorkspaceAdmin {
                 service.templates.get(
                     version,
                     spec.getRuntime(),
-                    spec.getDsh().getSigned().getStatement().getOs(),
-                    spec.getDsh().getSigned().getStatement().getArch());
+                    spec.getDsh().getReleaseEnvelope().getOs(),
+                    spec.getDsh().getReleaseEnvelope().getArch());
             if (!spec.getDsh().equals(template.getDsh()))
               service.saveSpec(
                   row,

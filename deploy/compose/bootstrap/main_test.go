@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -22,14 +21,14 @@ func TestFixtureTemplates(t *testing.T) {
 	if output, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build bootstrap: %v: %s", err, output)
 	}
-	digest := "sha256:" + strings.Repeat("a", 64)
-	image := "127.0.0.1:5000/auriga/real-dsh@" + digest
 	for _, fixture := range []string{"fake", "real"} {
+		proofRoot, image := runtimeProofFixture(t, fixture)
+		digest := digestOf(image)
 		out := filepath.Join(root, fixture)
 		if err := os.MkdirAll(filepath.Join(out, "templates"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		args := []string{"-fixture", fixture, "-image", image, "-out", out}
+		args := []string{"-fixture", fixture, "-image", image, "-out", out, "-runtime-proofs", proofRoot}
 		if fixture == "real" {
 			args = append(args, "-heartbeat-observer")
 		}
@@ -53,7 +52,7 @@ func TestFixtureTemplates(t *testing.T) {
 		if err := proto.Unmarshal(raw, &spec); err != nil {
 			t.Fatal(err)
 		}
-		if spec.GetDsh().GetImage() != image || spec.GetDsh().GetDigest() != digest ||
+		if spec.GetDsh().GetImage() != image || spec.GetDsh().GetDigest() != "" ||
 			spec.GetDsh().GetVersion() != version || spec.GetDsh().GetArtifactId() != name ||
 			spec.GetLabels()["template"] != name+"-e2e" || spec.GetProfile().GetListenPort() != 7860 {
 			t.Fatalf("wrong runtime binding in %s template", fixture)
@@ -67,9 +66,12 @@ func TestFixtureTemplates(t *testing.T) {
 		} else if len(patches) != 0 {
 			t.Fatalf("fake template must not declare plugin config: %v", patches)
 		}
-		statement := spec.GetDsh().GetSigned().GetStatement()
-		if statement.GetName() != name || statement.GetVersion() != version || statement.GetDigest() != digest {
-			t.Fatalf("runtime statement differs from selected %s image", fixture)
+		release := spec.GetDsh().GetReleaseEnvelope()
+		if spec.GetDsh().GetSigned() != nil || spec.GetDsh().GetUrl() != "" || release.GetName() != "dsh" || release.GetArtifactId() != name || release.GetDshVersion() != version || release.GetImageDigest() != digest || release.GetArchiveDigest() != "" {
+			t.Fatalf("wrong formal Docker-only release in %s", fixture)
+		}
+		if err := validateRuntimeTemplate(out); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

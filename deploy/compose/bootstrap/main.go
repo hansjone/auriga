@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
@@ -39,6 +40,7 @@ func main() {
 	edgeContainer := flag.String("edge-container", "auriga-m2-edge", "trusted edge container identity (must match Compose project)")
 	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
 	validateOnly := flag.Bool("validate-access", false, "validate access and Compose support without writing materials")
+	proofs := flag.String("runtime-proofs", "", "isolated collected raw OCI proof root (first installation only)")
 	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
 	flag.Parse()
 	accessJSON, access, err := loadComposeAccess(*accessFile, *edgeContainer)
@@ -51,25 +53,36 @@ func main() {
 	if *fixture != "fake" && *fixture != "real" {
 		fatalf("-fixture must be fake or real")
 	}
-	if *image == "" || !containsDigest(*image) {
-		fatalf("-image must be repo@sha256:…")
+	if !fixtureImagePattern.MatchString(*image) || !strings.Contains(*image, "/"+*fixture+"-dsh@") {
+		fatalf("-image must use selected exact local fixture repository@sha256:digest")
+	}
+	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%t\n%t", *image, *fixture, *observer, *accessFile != ""))...))
+	inputDigest := hex.EncodeToString(input[:])
+	existing, err := preflightRuntimeInstallation(*out)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	if existing {
+		_, fp, reuse, err := existingIdentityMaterials(*out, inputDigest)
+		if err != nil || !reuse {
+			fatalf("existing installation refused: %v", err)
+		}
+		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
+		return
+	}
+	manifest, config, err := loadRuntimeProofs(*proofs, *image)
+	if err != nil {
+		fatalf("%v", err)
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fatalf("%v", err)
 	}
 	pki := filepath.Join(*out, "pki")
 	tpl := filepath.Join(*out, "templates")
-	// 0755 so edge (nonroot) can traverse the bind-mounted pki dir.
 	mustMkdir(pki, 0o755)
 	mustMkdir(tpl, 0o755)
 	mustMkdir(filepath.Join(*out, "join"), 0o755)
 	if err := prepareRuntimeRootDirectory(*out); err != nil {
-		fatalf("%v", err)
-	}
-	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%t\n%t", *image, *fixture, *observer, *accessFile != ""))...))
-	inputDigest := hex.EncodeToString(input[:])
-	pub, fp, reuse, err := existingIdentityMaterials(*out, inputDigest)
-	if err != nil {
 		fatalf("%v", err)
 	}
 	if err := materials.EnsureServiceCredentials(*out); err != nil {
@@ -78,19 +91,13 @@ func main() {
 	if err := writeComposeKeys(*out); err != nil {
 		fatalf("%v", err)
 	}
-	if reuse {
-		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
-		return
+	generateIdentityMaterials(*out)
+	pub, fp, _, err := readIdentityPublic(*out)
+	if err != nil {
+		fatalf("%v", err)
 	}
-	if !reuse {
-		generateIdentityMaterials(*out)
-		if err := generateRuntimeRoot(*out); err != nil {
-			fatalf("%v", err)
-		}
-		pub, fp, _, err = readIdentityPublic(*out)
-		if err != nil {
-			fatalf("%v", err)
-		}
+	if err := installRuntimeProofs(*out, *image, manifest, config); err != nil {
+		fatalf("%v", err)
 	}
 	kid := "e2e-id-1"
 
@@ -108,7 +115,6 @@ func main() {
 		"clientCertFile": "pki/edge-iam.crt", "clientKeyFile": "pki/edge-iam.key",
 	}, 0o644)
 
-	dig := digestOf(*image)
 	name, version := "fake-dsh", "0.0.0-fake"
 	memoryMB := int64(512)
 	if *fixture == "real" {
@@ -123,25 +129,7 @@ func main() {
 			DiskGb:    1,
 			Pids:      128,
 		},
-		Dsh: &nodev1.DshRuntime{
-			Version:    version,
-			ArtifactId: name,
-			Digest:     dig,
-			Image:      *image,
-			// WorkspaceTemplates requires hasSigned + non-empty signature (e2e placeholder).
-			Signed: &nodev1.SignedArtifact{
-				Signature:  []byte{0x01},
-				SigningKid: "e2e-artifact",
-				Statement: &nodev1.ArtifactStatement{
-					Purpose: "dsh_runtime",
-					Name:    name,
-					Version: version,
-					Os:      "linux",
-					Arch:    "amd64",
-					Digest:  dig,
-				},
-			},
-		},
+		Dsh:     &nodev1.DshRuntime{Version: version, ArtifactId: name, Image: *image},
 		Profile: profileFor(*fixture),
 		Secrets: &nodev1.Secrets{
 			IdentityKeys: []*nodev1.IdentityPublicKey{{
@@ -152,6 +140,15 @@ func main() {
 		},
 		Labels: map[string]string{"template": name + "-e2e"},
 	}
+	runtimeSigner, err := generateRuntimeRootSigner(*out)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	if err := signRuntimeRelease(spec.Dsh, runtimeSigner, time.Now()); err != nil {
+		clear(runtimeSigner)
+		fatalf("%v", err)
+	}
+	clear(runtimeSigner)
 	raw, err := proto.Marshal(spec)
 	if err != nil {
 		fatalf("%v", err)
@@ -209,10 +206,8 @@ func main() {
 	}
 	writeYAMLish(filepath.Join(*out, "agent-policy.yaml"), policy)
 
-	if !reuse {
-		if err := writeIdentityManifest(*out, inputDigest); err != nil {
-			fatalf("%v", err)
-		}
+	if err := writeIdentityManifest(*out, inputDigest); err != nil {
+		fatalf("%v", err)
 	}
 	fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s\n", *out, fp, *image)
 }
@@ -228,11 +223,6 @@ func profileFor(fixture string) *nodev1.Profile {
 		}
 	}
 	return p
-}
-
-func containsDigest(image string) bool {
-	_, dig, ok := cut(image, "@")
-	return ok && len(dig) > 7 && dig[:7] == "sha256:"
 }
 
 func digestOf(image string) string {

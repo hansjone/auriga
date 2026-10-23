@@ -668,8 +668,8 @@ public final class WorkspaceService {
                       .get(
                           original.getDsh().getVersion(),
                           original.getRuntime(),
-                          original.getDsh().getSigned().getStatement().getOs(),
-                          original.getDsh().getSigned().getStatement().getArch())
+                          original.getDsh().getReleaseEnvelope().getOs(),
+                          original.getDsh().getReleaseEnvelope().getArch())
                       .getResources();
             Resources effective = resources(baseline, quota);
             if (!original.getResources().equals(effective)) {

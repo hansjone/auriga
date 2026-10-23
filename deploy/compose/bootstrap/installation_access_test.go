@@ -25,7 +25,7 @@ func TestPublicAccessCLI(t *testing.T) {
 	if output, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v: %s", err, output)
 	}
-	image := "127.0.0.1:5000/auriga/real-dsh@sha256:" + strings.Repeat("a", 64)
+	proofRoot, image := runtimeProofFixture(t, "real")
 	for _, mode := range []string{"domain", "ip"} {
 		t.Run(mode, func(t *testing.T) {
 			a := customAccess(mode)
@@ -37,7 +37,7 @@ func TestPublicAccessCLI(t *testing.T) {
 			if err := os.WriteFile(input, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-out", out, "-fixture", "real", "-heartbeat-observer"}
+			args := []string{"-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-out", out, "-fixture", "real", "-runtime-proofs", proofRoot, "-heartbeat-observer"}
 			if output, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 				t.Fatalf("bootstrap: %v: %s", err, output)
 			}

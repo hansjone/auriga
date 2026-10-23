@@ -186,6 +186,7 @@ services:
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
+      AURIGA_AGENT_RUNTIME_PROOFS_DIR: /etc/auriga/runtime-proofs
       AURIGA_AGENT_DRIVERS: docker
       # Same validated installation file as edge; internal alias and browser origin stay separate.
       AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
@@ -199,6 +200,7 @@ services:
       - ./var/identity-keys.json:/etc/auriga/identity-keys.json:ro
       - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
+      - ./var/runtime-proofs:/etc/auriga/runtime-proofs:ro
 
 volumes:
   pgdata:

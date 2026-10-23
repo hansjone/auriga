@@ -27,7 +27,8 @@ func TestRuntimeRootCLIReceiptAndReuse(t *testing.T) {
 	for _, mode := range []string{"default", "domain", "ip"} {
 		t.Run(mode, func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "installation")
-			args := []string{"-out", out, "-image", "127.0.0.1:5000/auriga/fake-dsh@sha256:" + strings.Repeat("a", 64)}
+			proofRoot, image := runtimeProofFixture(t, "fake")
+			args := []string{"-out", out, "-image", image, "-runtime-proofs", proofRoot}
 			if mode != "default" {
 				access, _ := json.Marshal(customAccess(mode))
 				input := filepath.Join(t.TempDir(), "access.json")
@@ -73,10 +74,50 @@ func TestRuntimeRootCLIReceiptAndReuse(t *testing.T) {
 			if installationSnapshot(t, out) != before {
 				t.Fatal("reuse changed fixed root/materials")
 			}
-			for _, failure := range []string{"missing root", "damaged root", "old receipt missing leaf", "unknown root file"} {
+			for _, failure := range []string{"missing root", "damaged root", "old receipt missing leaf", "unknown root file", "damaged proof", "missing proof", "unknown proof file", "missing proof root"} {
 				t.Run(failure, func(t *testing.T) {
 					var restore func()
 					switch failure {
+					case "damaged proof", "missing proof":
+						proof := filepath.Join(out, "runtime-proofs", strings.TrimPrefix(digestOf(image), "sha256:"), "manifest.json")
+						original, err := os.ReadFile(proof)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if failure == "missing proof" {
+							err = os.Remove(proof)
+						} else {
+							err = os.WriteFile(proof, []byte("damaged"), 0o644)
+						}
+						if err != nil {
+							t.Fatal(err)
+						}
+						restore = func() {
+							if err := os.WriteFile(proof, original, 0o644); err != nil {
+								t.Fatal(err)
+							}
+						}
+					case "unknown proof file":
+						proof := filepath.Join(out, "runtime-proofs", strings.TrimPrefix(digestOf(image), "sha256:"), "extra.json")
+						if err := os.WriteFile(proof, []byte("extra"), 0o644); err != nil {
+							t.Fatal(err)
+						}
+						restore = func() {
+							if err := os.Remove(proof); err != nil {
+								t.Fatal(err)
+							}
+						}
+					case "missing proof root":
+						proof := filepath.Join(out, "runtime-proofs")
+						hidden := filepath.Join(t.TempDir(), "proofs")
+						if err := os.Rename(proof, hidden); err != nil {
+							t.Fatal(err)
+						}
+						restore = func() {
+							if err := os.Rename(hidden, proof); err != nil {
+								t.Fatal(err)
+							}
+						}
 					case "missing root":
 						if err := os.Remove(path); err != nil {
 							t.Fatal(err)

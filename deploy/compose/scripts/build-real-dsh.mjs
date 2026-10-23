@@ -12,6 +12,11 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
+// prepare keeps metadata isolated until bootstrap has accepted the installation.
+const args = process.argv.slice(2);
+if (args.length !== 0 && (args.length !== 2 || args[0] !== '--metadata-out' || !args[1])) {
+  throw new Error('usage: build-real-dsh.mjs [--metadata-out <file>]');
+}
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const nodeImage = process.env.NODE_IMAGE || '';
 const tag = '127.0.0.1:5000/auriga/real-dsh:w3';
@@ -102,12 +107,12 @@ const manifest = JSON.parse(
     true,
   ),
 );
-const out = resolve(root, 'deploy/compose/var');
-mkdirSync(out, { recursive: true });
+const metadata = args.length ? resolve(args[1]) : resolve(root, 'deploy/compose/var/real-dsh.json');
+mkdirSync(dirname(metadata), { recursive: true });
 writeFileSync(
-  resolve(out, 'real-dsh.json'),
+  metadata,
   JSON.stringify({ image, nodeImage, ...manifest }, null, 2) + '\n',
 );
 console.log(
-  `Real DSH built: ${image}\nMetadata: deploy/compose/var/real-dsh.json`,
+  `Real DSH built: ${image}\nMetadata: ${metadata}`,
 );

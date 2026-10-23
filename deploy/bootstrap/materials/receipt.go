@@ -13,7 +13,10 @@ import (
 // MaterialSet is a recipe's fixed ordered material list, never installation input.
 // ManagedDirectories must be empty real directories before the first generation.
 type MaterialSet struct {
-	PublicFiles        []string
+	PublicFiles []string
+	// PublicFileLimits is recipe-owned, never read from installation input.
+	// Omitted files retain the original 1 MiB limit.
+	PublicFileLimits   map[string]int64
 	PrivateFiles       []string
 	ManagedDirectories []string
 }
@@ -36,6 +39,18 @@ func (s MaterialSet) validate() error {
 			return fmt.Errorf("invalid private material manifest")
 		}
 		seen["iam-installation/"+name] = true
+	}
+	for name, limit := range s.PublicFileLimits {
+		found := false
+		for _, public := range s.PublicFiles {
+			if public == name {
+				found = true
+				break
+			}
+		}
+		if !found || limit < 1 || limit > 4<<20 {
+			return fmt.Errorf("invalid public material size limit")
+		}
 	}
 	return nil
 }
@@ -60,6 +75,10 @@ func materialDigest(out string, set MaterialSet) (string, error) {
 		return "", err
 	}
 	for _, name := range set.PublicFiles {
+		limit := int64(1 << 20)
+		if configured, ok := set.PublicFileLimits[name]; ok {
+			limit = configured
+		}
 		path := filepath.Join(out, filepath.FromSlash(name))
 		// Inspect every material parent, including nested template directories.
 		for parent := filepath.Dir(path); ; parent = filepath.Dir(parent) {
@@ -75,7 +94,7 @@ func materialDigest(out string, set MaterialSet) (string, error) {
 			}
 		}
 		before, err := os.Lstat(path)
-		if err != nil || !before.Mode().IsRegular() || before.Size() > 1<<20 {
+		if err != nil || !before.Mode().IsRegular() || before.Size() > limit {
 			return "", fmt.Errorf("identity materials incomplete or changed")
 		}
 		f, err := os.Open(path)
@@ -83,11 +102,11 @@ func materialDigest(out string, set MaterialSet) (string, error) {
 			return "", fmt.Errorf("read identity material")
 		}
 		opened, statErr := f.Stat()
-		raw, readErr := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+		raw, readErr := io.ReadAll(io.LimitReader(f, limit+1))
 		after, finalErr := f.Stat()
 		_ = f.Close()
 		final, pathErr := os.Lstat(path)
-		if statErr != nil || readErr != nil || finalErr != nil || pathErr != nil || !os.SameFile(before, opened) || !os.SameFile(opened, after) || !os.SameFile(after, final) || before.Size() != int64(len(raw)) || after.Size() != before.Size() || !before.ModTime().Equal(after.ModTime()) || !after.ModTime().Equal(final.ModTime()) {
+		if statErr != nil || readErr != nil || int64(len(raw)) > limit || finalErr != nil || pathErr != nil || !os.SameFile(before, opened) || !os.SameFile(opened, after) || !os.SameFile(after, final) || before.Size() != int64(len(raw)) || after.Size() != before.Size() || !before.ModTime().Equal(after.ModTime()) || !after.ModTime().Equal(final.ModTime()) {
 			clear(raw)
 			return "", fmt.Errorf("changed identity material")
 		}

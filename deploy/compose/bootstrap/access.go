@@ -99,6 +99,31 @@ func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet
 		return set, fmt.Errorf("incomplete fixture template")
 	}
 	set.PublicFiles = append(set.PublicFiles, "templates/"+entries[0].Name())
+	raw, err := readProofFile(filepath.Join(out, "templates", entries[0].Name()))
+	if err != nil {
+		return set, err
+	}
+	var spec nodev1.InstanceSpec
+	if proto.Unmarshal(raw, &spec) != nil || !fixtureImagePattern.MatchString(spec.GetDsh().GetImage()) {
+		return set, fmt.Errorf("invalid runtime proof locator")
+	}
+	leaf := strings.TrimPrefix(digestOf(spec.GetDsh().GetImage()), "sha256:")
+	proofRoot := filepath.Join(out, "runtime-proofs")
+	proofEntries, err := os.ReadDir(proofRoot)
+	if err != nil || len(proofEntries) != 1 || proofEntries[0].Name() != leaf {
+		return set, fmt.Errorf("invalid runtime proof root")
+	}
+	files, err := os.ReadDir(filepath.Join(proofRoot, leaf))
+	if err != nil || len(files) != 2 || files[0].Name() != "config.json" || files[1].Name() != "manifest.json" {
+		return set, fmt.Errorf("incomplete runtime proof files")
+	}
+	set.ManagedDirectories = append(set.ManagedDirectories, "runtime-proofs")
+	set.PublicFileLimits = map[string]int64{}
+	for _, name := range []string{"manifest.json", "config.json"} {
+		path := "runtime-proofs/" + leaf + "/" + name
+		set.PublicFiles = append(set.PublicFiles, path)
+		set.PublicFileLimits[path] = maxProofBytes
+	}
 	return set, nil
 }
 func writeIdentityManifest(out, inputDigest string) error {
@@ -115,6 +140,9 @@ func existingIdentityMaterials(out, inputDigest string) (ed25519.PublicKey, stri
 	}
 	reuse, err := materials.CheckReceipt(out, inputDigest, set)
 	if err != nil || !reuse {
+		return nil, "", false, err
+	}
+	if err := validateRuntimeTemplate(out); err != nil {
 		return nil, "", false, err
 	}
 	if err := validateRuntimeRoot(out); err != nil {
@@ -143,29 +171,36 @@ func prepareRuntimeRootDirectory(out string) error {
 	return os.Mkdir(path, 0o755)
 }
 
-func generateRuntimeRoot(out string) error {
+func generateRuntimeRootSigner(out string) (ed25519.PrivateKey, error) {
 	if !time.Now().Before(runtimeRootExpiry) {
-		return fmt.Errorf("M2 runtime root fixture expiry reached; update fixture explicitly")
+		return nil, fmt.Errorf("M2 runtime root fixture expiry reached; update fixture explicitly")
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return err
+		clear(priv)
+		return nil, err
 	}
-	clear(priv)
 	k := &nodev1.ArtifactSigningKey{Kid: "e2e-runtime-root", PublicKey: pub, NotAfter: timestamppb.New(runtimeRootExpiry)}
 	raw, err := proto.Marshal(k)
 	if err != nil {
-		return err
+		clear(priv)
+		return nil, err
 	}
 	f, err := os.OpenFile(filepath.Join(out, "runtime-keys", "root.pb"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return err
+		clear(priv)
+		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 	if _, err := f.Write(raw); err != nil {
-		return err
+		clear(priv)
+		return nil, err
 	}
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		clear(priv)
+		return nil, err
+	}
+	return priv, nil
 }
 
 func validateRuntimeRoot(out string) error {
