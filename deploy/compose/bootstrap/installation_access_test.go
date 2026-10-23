@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,7 +26,7 @@ func TestPublicAccessCLI(t *testing.T) {
 	if output, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v: %s", err, output)
 	}
-	image := "127.0.0.1:5000/auriga/real-dsh@sha256:" + strings.Repeat("a", 64)
+	proofRoot, image := runtimeProofFixture(t, "real")
 	for _, mode := range []string{"domain", "ip"} {
 		t.Run(mode, func(t *testing.T) {
 			a := customAccess(mode)
@@ -37,7 +38,7 @@ func TestPublicAccessCLI(t *testing.T) {
 			if err := os.WriteFile(input, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-out", out, "-fixture", "real", "-heartbeat-observer"}
+			args := []string{"-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-out", out, "-fixture", "real", "-runtime-proofs", proofRoot, "-heartbeat-observer"}
 			if output, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 				t.Fatalf("bootstrap: %v: %s", err, output)
 			}
@@ -79,6 +80,40 @@ func TestPublicAccessCLI(t *testing.T) {
 			}
 			if wholeAfter := installationSnapshot(t, out); wholeAfter != wholeBefore {
 				t.Fatal("repeated CLI changed installation bytes or modes")
+			}
+			keys, err := os.ReadFile(filepath.Join(out, "iam-installation", "compose.keys"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(string(keys)), "\n") {
+				key, value, _ := strings.Cut(line, "=")
+				decoded, err := base64.StdEncoding.DecodeString(value)
+				if err != nil || len(decoded) != 32 {
+					t.Fatal("invalid generated compose key fixture")
+				}
+				decoded[0] ^= 1
+				different := base64.StdEncoding.EncodeToString(decoded)
+				for _, tc := range []struct {
+					name, value string
+					accepted    bool
+				}{
+					{"same", value, true}, {"different", different, false}, {"malformed", "invalid", false},
+				} {
+					t.Run("environment/"+key+"/"+tc.name, func(t *testing.T) {
+						t.Setenv(key, tc.value)
+						before := installationSnapshot(t, out)
+						output, err := exec.Command(binary, args...).CombinedOutput()
+						if (err == nil) != tc.accepted {
+							t.Fatalf("reuse accepted=%t: %v %s", tc.accepted, err, output)
+						}
+						if !tc.accepted && !strings.Contains(string(output), "compose key input differs") {
+							t.Fatalf("wrong rejection: %s", output)
+						}
+						if installationSnapshot(t, out) != before {
+							t.Fatal("environment compatibility check changed material")
+						}
+					})
+				}
 			}
 			for _, failure := range []string{"image", "fixture", "observer", "access", "damaged public", "missing public", "missing private", "missing receipt", "damaged private"} {
 				t.Run("repeat rejects/"+failure, func(t *testing.T) {

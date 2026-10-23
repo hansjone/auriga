@@ -116,7 +116,7 @@ public final class WorkspaceQueries {
             List<Object> artifacts = new ArrayList<>();
             for (var template : entry.getValue()) {
               var d = template.getDsh();
-              var statement = d.getSigned().getStatement();
+              var statement = d.getReleaseEnvelope();
               artifacts.add(
                   Map.of(
                       "artifactId",
@@ -150,26 +150,22 @@ public final class WorkspaceQueries {
                     "instances",
                     count,
                     "createdAt",
-                    entry
+                    java.time.Instant.ofEpochSecond(
+                            entry
                                 .getValue()
                                 .getFirst()
                                 .getDsh()
-                                .getSigned()
-                                .getStatement()
+                                .getReleaseEnvelope()
                                 .getIssuedAt()
-                                .getSeconds()
-                            == 0
-                        ? java.time.Instant.EPOCH.toString()
-                        : java.time.Instant.ofEpochSecond(
-                                entry
-                                    .getValue()
-                                    .getFirst()
-                                    .getDsh()
-                                    .getSigned()
-                                    .getStatement()
-                                    .getIssuedAt()
-                                    .getSeconds())
-                            .toString()));
+                                .getSeconds(),
+                            entry
+                                .getValue()
+                                .getFirst()
+                                .getDsh()
+                                .getReleaseEnvelope()
+                                .getIssuedAt()
+                                .getNanos())
+                        .toString()));
           }
           String version =
               service.defaultVersion(versions.isEmpty() ? "" : versions.keySet().iterator().next());

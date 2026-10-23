@@ -21,6 +21,12 @@ case "$FIXTURE" in fake|real) ;; *) echo 'DSH_FIXTURE must be fake or real' >&2;
 )
 mkdir -p "$VAR/enrollment" "$VAR/join"
 
+# Keep build metadata and public raw proofs outside the installation until the
+# bootstrap receipt has accepted its original materials and exact inputs.
+PREPARE_TMP="$(mktemp -d)"
+PROOF_TMP="$PREPARE_TMP/proofs"
+trap 'rm -rf -- "$PREPARE_TMP"' EXIT
+
 echo "==> start local registry if needed"
 docker compose -f "$COMPOSE/docker-compose.yml" up -d registry
 sleep 2
@@ -28,19 +34,22 @@ sleep 2
 case "$FIXTURE" in
   fake)
     echo "==> build and push fake-dsh"
-    docker build -t 127.0.0.1:5000/auriga/fake-dsh:e2e "$COMPOSE/fake-dsh"
+    docker build --platform=linux/amd64 --provenance=false --sbom=false -t 127.0.0.1:5000/auriga/fake-dsh:e2e "$COMPOSE/fake-dsh"
     docker push 127.0.0.1:5000/auriga/fake-dsh:e2e
     DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' 127.0.0.1:5000/auriga/fake-dsh:e2e)"
     ;;
   real)
     echo "==> build and push pinned real DSH (S4 inputs)"
-    node "$COMPOSE/scripts/build-real-dsh.mjs"
-    DIGEST="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).image' "$VAR/real-dsh.json")"
+    node "$COMPOSE/scripts/build-real-dsh.mjs" --metadata-out "$PREPARE_TMP/real-dsh.json"
+    DIGEST="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).image' "$PREPARE_TMP/real-dsh.json")"
     ;;
   *) echo "DSH_FIXTURE must be fake or real" >&2; exit 1 ;;
 esac
 echo "image digest: $DIGEST"
 
+# Public raw registry bytes are collected outside the installation. Existing
+# installations are validated by bootstrap before any material can be changed.
+node "$COMPOSE/scripts/collect-runtime-proofs.mjs" "$DIGEST" "$PROOF_TMP"
 echo "==> bootstrap materials"
 OBSERVER_ARGS=()
 if [ "${AURIGA_M2_HEARTBEAT_OBSERVER:-0}" = 1 ]; then
@@ -48,9 +57,15 @@ if [ "${AURIGA_M2_HEARTBEAT_OBSERVER:-0}" = 1 ]; then
 fi
 (
   cd "$COMPOSE/bootstrap"
-  go run . -out "$VAR" -image "$DIGEST" -fixture "$FIXTURE" \
+  go run . -out "$VAR" -image "$DIGEST" -fixture "$FIXTURE" -runtime-proofs "$PROOF_TMP" \
     -edge-container "${COMPOSE_PROJECT_NAME:-auriga-m2}-edge" "${OBSERVER_ARGS[@]}" "${ACCESS_ARGS[@]}"
 )
+
+if [ "$FIXTURE" = real ]; then
+  mv -fT -- "$PREPARE_TMP/real-dsh.json" "$VAR/real-dsh.json"
+fi
+rm -rf -- "$PREPARE_TMP"
+trap - EXIT
 
 # Bootstrap strictly validates and preserves the two private Java keys.
 CA_SHA="$(tr -d '\n' < "$VAR/ca-sha256.txt")"

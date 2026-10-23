@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -112,6 +113,19 @@ test('observer cannot target an external or credential-bearing upstream', () => 
 test('observer authenticates both TLS hops and preserves entry metadata without credential capture', async (t) => {
   const out = mkdtempSync(join(tmpdir(), 'auriga-observer-mtls-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
+  const proofs = mkdtempSync(join(tmpdir(), 'auriga-observer-proofs-'));
+  t.after(() => rmSync(proofs, { recursive: true, force: true }));
+  const sha256 = raw => createHash('sha256').update(raw).digest('hex');
+  const config = Buffer.from('{"os":"linux","architecture":"amd64"}');
+  const manifest = Buffer.from(JSON.stringify({
+    schemaVersion: 2, mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    config: { mediaType: 'application/vnd.oci.image.config.v1+json', digest: `sha256:${sha256(config)}`, size: config.length },
+    layers: [],
+  }));
+  const digest = sha256(manifest);
+  mkdirSync(join(proofs, digest));
+  writeFileSync(join(proofs, digest, 'manifest.json'), manifest);
+  writeFileSync(join(proofs, digest, 'config.json'), config);
   const generated = spawnSync(
     'go',
     [
@@ -120,7 +134,9 @@ test('observer authenticates both TLS hops and preserves entry metadata without 
       '-out',
       out,
       '-image',
-      '127.0.0.1:5000/auriga/fake-dsh@sha256:' + 'a'.repeat(64),
+      '127.0.0.1:5000/auriga/fake-dsh@sha256:' + digest,
+      '-runtime-proofs',
+      proofs,
       '-heartbeat-observer',
     ],
     {
