@@ -46,6 +46,8 @@ import {
   probeRealDoor,
   assertRuntimeIsolation,
   assertRealHealth,
+  realImageDigest,
+  assertRealRuntimeImage,
 } from './lib/real-dsh.mjs';
 
 const ACCESS_FILE = process.env.ACCESS_FILE || 'deploy/compose/var/access.json';
@@ -583,17 +585,28 @@ async function verifyRealHost(instanceId, instance) {
     pidsLimit: info.HostConfig.PidsLimit,
   };
   evidence.checks.push('actual-runtime-isolation');
-  if (
-    info.Config.Image !== metadata.image ||
-    metadata.dshVersion !== '0.2.0-rc.2' ||
-    metadata.nodeVersion !== '22.19.0' ||
-    metadata.target !== 'linux/amd64'
-  ) {
-    fail(
-      'real-runtime',
-      'instance image/version differs from pinned build metadata',
-    );
-  }
+  const manifestDigest = realImageDigest(metadata);
+  const imageInspect = spawnSync(
+    'docker',
+    ['image', 'inspect', metadata.image],
+    { encoding: 'utf8' },
+  );
+  if (imageInspect.error || imageInspect.status !== 0)
+    fail('real-runtime', 'cannot inspect exact immutable real image');
+  const images = JSON.parse(imageInspect.stdout);
+  if (!Array.isArray(images) || images.length !== 1)
+    fail('real-runtime', 'exact real image inspect must return one image');
+  const proofDir = join(
+    'deploy/compose/var/runtime-proofs',
+    manifestDigest.slice('sha256:'.length),
+  );
+  const engineImageId = assertRealRuntimeImage(
+    metadata,
+    images[0],
+    info,
+    readFileSync(join(proofDir, 'manifest.json')),
+    readFileSync(join(proofDir, 'config.json')),
+  );
   const runtime = spawnSync(
     'docker',
     [
@@ -617,7 +630,7 @@ async function verifyRealHost(instanceId, instance) {
     if (actual[field] !== metadata[field])
       fail('real-runtime', `manifest mismatch: ${field}`);
   }
-  evidence.runtime = { image: metadata.image, ...actual };
+  evidence.runtime = { image: metadata.image, engineImageId, ...actual };
   const published = info.NetworkSettings.Ports?.['7860/tcp']?.[0];
   const ip =
     info.NetworkSettings.Networks?.[`auriga-net-${instanceId}`]?.IPAddress;
