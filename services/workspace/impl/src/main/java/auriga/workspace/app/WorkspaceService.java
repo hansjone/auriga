@@ -611,6 +611,17 @@ public final class WorkspaceService {
               time(clock.instant()),
               store.tenant(),
               id);
+          // NodeSessions fences status/inventory with the authenticated control-session lease.
+          // A fresh current-generation report can undo an outage, never an explicit migration,
+          // drain or revocation. Hello/usage alone must not revive a stale instance observation.
+          if (Boolean.TRUE.equals(row.get("migration_pending"))
+              && status.getObservedGeneration() == generation)
+            store.jdbc.update(
+                "UPDATE instance i SET migration_pending=false WHERE i.tenant_id=? AND i.id=? AND i.node_id=? AND NOT i.deleted AND (i.requested_node_id IS NULL OR i.requested_node_id=i.node_id) AND EXISTS (SELECT 1 FROM node n WHERE n.tenant_id=i.tenant_id AND n.id=i.node_id AND NOT n.revoked AND n.schedulable AND NOT n.draining AND n.last_seen_at>=?)",
+                store.tenant(),
+                id,
+                node,
+                time(clock.instant().minusSeconds(60)));
           return null;
         });
   }

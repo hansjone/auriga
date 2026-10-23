@@ -340,6 +340,274 @@ class WorkspaceIntegrationTest {
     assertEquals(Status.Code.INVALID_ARGUMENT, fake.error.get(5, TimeUnit.SECONDS).getCode());
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"running", "starting", "stopped", "requested_same"})
+  void sameNodeInventoryRecoversOfflineMigrationAndFormalRoute(String state) throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    if (state.equals("stopped"))
+      TenantContext.run(tenant, () -> service.operate(instance, actor(), "stop"));
+    if (state.equals("requested_same"))
+      TenantContext.run(
+          tenant,
+          () ->
+              new WorkspaceAdmin(service, inputs)
+                  .patch(
+                      instance,
+                      WorkspaceService.JSON
+                          .createObjectNode()
+                          .put("nodeId", control.node.toString()),
+                      null));
+    var before = store.in(tenant, () -> store.instance(instance));
+    long generation = ((Number) before.get("generation")).longValue();
+    var status =
+        InstanceStatus.newBuilder()
+            .setInstanceId(instance.toString())
+            .setObservedGeneration(generation)
+            .setPhase(
+                state.equals("stopped")
+                    ? InstancePhase.INSTANCE_PHASE_STOPPED
+                    : InstancePhase.INSTANCE_PHASE_RUNNING)
+            .setReady(!state.equals("starting") && !state.equals("stopped"))
+            .build();
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(status))
+            .build());
+    markNodeOffline(control.node);
+    assertEquals(true, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+
+    String nats = auriga.testsupport.NatsExtension.url();
+    try (var reader = io.nats.client.Nats.connect(nats);
+        var routes = WorkspaceRoutes.configured(store, nats, "", "", false)) {
+      routes.refresh();
+      var kv = reader.keyValue(WorkspaceRoutes.BUCKET);
+      var failed = WorkspaceService.JSON.readTree(kv.get(instance.toString()).getValue());
+      assertEquals("failed", failed.path("state").asText());
+      long failedRevision = kv.get(instance.toString()).getRevision();
+      control.reconnect();
+      // Hello proves the control connection is live, not that this instance is reconciled.
+      TenantContext.run(tenant, service::tickTenant);
+      assertEquals(true, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+      TenantContext.run(
+          tenant,
+          () ->
+              service.heartbeat(
+                  store.tx(() -> store.instance(instance)),
+                  new HeartbeatRequest(
+                      "test",
+                      "test",
+                      new HeartbeatRequestActivity(0, 0, 0, 0),
+                      new HeartbeatRequestHealth(true))));
+      assertEquals(true, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+      routes.refresh();
+      assertEquals(
+          "failed",
+          WorkspaceService.JSON
+              .readTree(kv.get(instance.toString()).getValue())
+              .path("state")
+              .asText());
+
+      // Reconnect inventory is sent even when the actual instance status did not change.
+      control.stream.onNext(
+          SessionRequest.newBuilder()
+              .setInventory(Inventory.newBuilder().addInstances(status))
+              .build());
+      assertFalse(control.fake.error.isDone());
+      var recovered = store.in(tenant, () -> store.instance(instance));
+      assertEquals(false, recovered.get("migration_pending"));
+      assertEquals(control.node, recovered.get("node_id"));
+      assertEquals(before.get("requested_node_id"), recovered.get("requested_node_id"));
+      assertEquals(generation, ((Number) recovered.get("generation")).longValue());
+      assertArrayEquals((byte[]) before.get("spec"), (byte[]) recovered.get("spec"));
+      routes.refresh();
+      var route = WorkspaceService.JSON.readTree(kv.get(instance.toString()).getValue());
+      assertEquals(
+          state.equals("requested_same") ? "running" : state, route.path("state").asText());
+      assertEquals(tenant.toString(), route.path("tenantId").asText());
+      assertEquals(owner.toString(), route.path("ownerId").asText());
+      assertEquals(control.node.toString(), route.path("nodeId").asText());
+      assertEquals(generation, route.path("generation").asLong());
+      assertTrue(kv.get(instance.toString()).getRevision() > failedRevision);
+      long recoveredRevision = kv.get(instance.toString()).getRevision();
+      TenantContext.run(tenant, service::tickTenant);
+      routes.refresh();
+      assertEquals(recoveredRevision, kv.get(instance.toString()).getRevision());
+    }
+    control.stream.onCompleted();
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "draining",
+        "unschedulable",
+        "requested_other",
+        "revoked",
+        "deleted",
+        "stale_node",
+        "wrong_node",
+        "old_generation",
+        "pending_previous",
+        "cross_tenant",
+        "expired_session"
+      })
+  void offlineMigrationRecoveryRetainsExplicitAndUntrustedBlockers(String blocker)
+      throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    long generation =
+        store.in(tenant, () -> ((Number) store.instance(instance).get("generation")).longValue());
+    var status =
+        InstanceStatus.newBuilder()
+            .setInstanceId(instance.toString())
+            .setObservedGeneration(generation)
+            .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
+            .setReady(true)
+            .build();
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(status))
+            .build());
+    markNodeOffline(control.node);
+    if (!blocker.equals("stale_node")) {
+      control.reconnect();
+      control.stream.onNext(
+          SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+    }
+    var admin = new WorkspaceAdmin(service, inputs);
+    RecoveryControl reporter = control;
+    switch (blocker) {
+      case "draining" -> TenantContext.run(tenant, () -> admin.node(control.node, null, true));
+      case "unschedulable" ->
+          TenantContext.run(
+              tenant,
+              () ->
+                  admin.node(
+                      control.node,
+                      new auriga.workspace.web.model.UpdateNodeRequest().schedulable(false),
+                      false));
+      case "requested_other" -> {
+        var other = new RecoveryControl(tenant);
+        TenantContext.run(
+            tenant,
+            () ->
+                admin.patch(
+                    instance,
+                    WorkspaceService.JSON.createObjectNode().put("nodeId", other.node.toString()),
+                    null));
+        other.stream.onCompleted();
+      }
+      case "revoked" -> TenantContext.run(tenant, () -> admin.revoke(control.node, true));
+      case "deleted" -> TenantContext.run(tenant, () -> admin.delete(instance, false, owner));
+      case "wrong_node", "cross_tenant" -> {
+        reporter = new RecoveryControl(blocker.equals("cross_tenant") ? UuidV7.next() : tenant);
+        reporter.stream.onNext(
+            SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+      }
+      case "old_generation" ->
+          status = status.toBuilder().setObservedGeneration(generation - 1).build();
+      case "pending_previous" -> {
+        store.in(
+            tenant,
+            () -> {
+              var row = store.instance(instance);
+              service.saveSpec(
+                  row,
+                  WorkspaceService.spec(row).toBuilder().setGeneration(generation + 1).build());
+              return null;
+            });
+        status = status.toBuilder().setPhase(InstancePhase.INSTANCE_PHASE_PENDING_RESTART).build();
+      }
+      case "expired_session" ->
+          store.in(
+              tenant,
+              () ->
+                  store.jdbc.update(
+                      "UPDATE node_session SET expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE tenant_id=? AND node_id=?",
+                      tenant,
+                      control.node));
+      default -> {}
+    }
+    reporter.stream.onNext(SessionRequest.newBuilder().setStatus(status).build());
+    if (blocker.equals("revoked"))
+      assertEquals(
+          Status.Code.UNAUTHENTICATED, control.fake.error.get(5, TimeUnit.SECONDS).getCode());
+    else if (blocker.equals("expired_session"))
+      assertEquals(Status.Code.ABORTED, control.fake.error.get(5, TimeUnit.SECONDS).getCode());
+    else assertFalse(reporter.fake.error.isDone());
+    assertEquals(
+        true,
+        store.in(
+            tenant,
+            () ->
+                store
+                    .one("SELECT * FROM instance WHERE tenant_id=? AND id=?", tenant, instance)
+                    .get("migration_pending")),
+        blocker);
+    reporter.stream.onCompleted();
+    control.stream.onCompleted();
+  }
+
+  void markNodeOffline(UUID node) {
+    store.in(
+        tenant,
+        () ->
+            store.jdbc.update(
+                "UPDATE node SET last_seen_at=? WHERE tenant_id=? AND id=?",
+                WorkspaceStore.time(clock.instant().minusSeconds(61)),
+                tenant,
+                node));
+    TenantContext.run(tenant, service::tickTenant);
+  }
+
+  final class RecoveryControl {
+    final UUID node;
+    final Context context;
+    final Hello hello;
+    FakeNode fake;
+    StreamObserver<SessionRequest> stream;
+
+    RecoveryControl(UUID nodeTenant) throws Exception {
+      String token =
+          TenantContext.call(
+              nodeTenant, () -> enrollment.createToken("recovery", 5, owner).token());
+      var request = joinRequest(token, TestPki.key());
+      var joined = enrollment.join(request);
+      node = UUID.fromString(joined.getNodeId());
+      context =
+          Context.current()
+              .withValue(
+                  NodeSessions.PEER, NodeCa.parse(joined.getCertificateChain().toByteArray()));
+      hello =
+          Hello.newBuilder()
+              .setNodeId(node.toString())
+              .setProtocolVersion(1)
+              .setOs("linux")
+              .setArch("amd64")
+              .setIngressEndpoint("https://node.example.com:7443")
+              .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+              .setCapacity(
+                  Capacity.newBuilder().setCpuMillis(10000).setMemoryMb(8192).setDiskGb(100))
+              .setSealingKeyId(
+                  HexFormat.of()
+                      .formatHex(WorkspaceCrypto.hash(request.getSealingPublicKey().toByteArray()))
+                      .substring(0, 16))
+              .build();
+      reconnect();
+    }
+
+    void reconnect() throws Exception {
+      if (stream != null) stream.onCompleted();
+      fake = new FakeNode();
+      stream = context.call(() -> sessions.session(fake));
+      stream.onNext(SessionRequest.newBuilder().setHello(hello).build());
+      assertTrue(fake.next().hasWelcome());
+    }
+  }
+
   @Test
   void platformRegistryRequiresRegistrationBeforeTenantTransactionAndSeparatesResourceKinds() {
     UUID id = UuidV7.next();
