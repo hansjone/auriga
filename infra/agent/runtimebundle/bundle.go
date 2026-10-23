@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,7 +88,7 @@ func Sign(o SignOptions) (*Material, error) {
 }
 
 func sign(o SignOptions) (*Material, error) {
-	keyRaw, key, ring, err := readRoot(o.RootPath)
+	keyRaw, key, ring, _, err := readRoot(o.RootPath)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +160,7 @@ func verify(o VerifyOptions) (*Material, error) {
 	if rel, err := filepath.Rel(dir, rootPath); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, fmt.Errorf("trusted root must be fixed outside the supplied bundle directory")
 	}
-	_, key, ring, err := readRoot(o.TrustedRootPath)
+	_, key, ring, externalRoot, err := readRoot(o.TrustedRootPath)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,21 @@ func verify(o VerifyOptions) (*Material, error) {
 	if err != nil {
 		return nil, err
 	}
-	rootRaw, err := readMember(r, "runtime-keys/root.pb", MaxRootBytes)
+	rootFile, err := openMember(r, "runtime-keys/root.pb", false)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rootFile.Close() }()
+	bundledRoot, err := rootFile.Stat()
+	if err != nil {
+		return nil, err
+	}
+	// Compare identities from the handles supplying the actual root bytes;
+	// 8.3/long-name aliases cannot turn the bundled root into an external root.
+	if os.SameFile(externalRoot, bundledRoot) {
+		return nil, fmt.Errorf("trusted root must be fixed outside the supplied bundle directory")
+	}
+	rootRaw, err := readBounded(rootFile, MaxRootBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -242,20 +257,33 @@ func verifyDeclaration(dsh *nodev1.DshRuntime, ring releasetrust.Ring, p Policy)
 	}})
 }
 
-func readRoot(path string) ([]byte, *nodev1.ArtifactSigningKey, releasetrust.Ring, error) {
-	raw, err := readInput(path, MaxRootBytes, false)
+func readRoot(path string) ([]byte, *nodev1.ArtifactSigningKey, releasetrust.Ring, os.FileInfo, error) {
+	absolute, err := absolutePath(path)
 	if err != nil {
-		return nil, nil, releasetrust.Ring{}, err
+		return nil, nil, releasetrust.Ring{}, nil, err
+	}
+	f, err := openOrdinary(absolute, false)
+	if err != nil {
+		return nil, nil, releasetrust.Ring{}, nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := readBounded(f, MaxRootBytes)
+	if err != nil {
+		return nil, nil, releasetrust.Ring{}, nil, err
+	}
+	identity, err := f.Stat()
+	if err != nil {
+		return nil, nil, releasetrust.Ring{}, nil, err
 	}
 	key := new(nodev1.ArtifactSigningKey)
 	if err := strictProto(raw, key); err != nil {
-		return nil, nil, releasetrust.Ring{}, err
+		return nil, nil, releasetrust.Ring{}, nil, err
 	}
 	if key.EndorsedByKid != "" || len(key.Endorsement) != 0 {
-		return nil, nil, releasetrust.Ring{}, fmt.Errorf("explicit publisher key must be a fixed bootstrap root")
+		return nil, nil, releasetrust.Ring{}, nil, fmt.Errorf("explicit publisher key must be a fixed bootstrap root")
 	}
 	ring, err := releasetrust.Merge(releasetrust.Ring{}, []*nodev1.ArtifactSigningKey{key}, true, time.Now())
-	return raw, key, ring, err
+	return raw, key, ring, identity, err
 }
 
 func strictProto(raw []byte, m proto.Message) error {

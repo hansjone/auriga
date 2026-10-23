@@ -47,8 +47,23 @@ func openedWindowsFile(f *os.File, path string, directory bool) error {
 		return fmt.Errorf("cannot verify resolved file path")
 	}
 	resolved := strings.TrimPrefix(windows.UTF16ToString(buf[:n]), `\\?\`)
-	if !strings.EqualFold(filepath.Clean(resolved), filepath.Clean(path)) {
+	// The handle API expands 8.3 aliases (for example RUNNER~1 in TEMP).
+	// Expand only short names in the caller path too; never resolve reparse
+	// points or accept a prefix match as a substitute for the full name.
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	n, err = windows.GetLongPathName(p, &buf[0], uint32(len(buf)))
+	if err != nil || n >= uint32(len(buf)) {
+		return fmt.Errorf("cannot verify long file path")
+	}
+	expected := windows.UTF16ToString(buf[:n])
+	if !strings.EqualFold(filepath.Clean(resolved), filepath.Clean(expected)) {
 		return fmt.Errorf("file path changed or traversed a reparse point")
+	}
+	if err := checkWindowsPath(expected); err != nil {
+		return err
 	}
 	return checkWindowsPath(path)
 }
