@@ -119,8 +119,11 @@ jobs:
           id_agent=$(docker image inspect --format '{{.Id}}' auriga/agent:nas)
           export ID_PLATFORM="$id_platform" ID_EDGE="$id_edge" ID_AGENT="$id_agent"
           export SOURCE_TREE=$(git rev-parse HEAD^{tree})
+          # The same bounded, read-only parser is used before and after public load.
+          deploy/nas/bin/auriga-nas-bootstrap image-metadata out/images > out/image-metadata.json
           python3 - <<'PY'
           import hashlib, json, os
+          image_metadata = json.load(open("out/image-metadata.json", encoding="utf-8"))
           tools = {}
           for line in open("versions.txt", encoding="utf-8"):
               line = line.strip()
@@ -139,20 +142,18 @@ jobs:
                   "arch": "amd64",
               },
               "images": {
-                  "platform": {"id": os.environ["ID_PLATFORM"], "tar": "platform.tar"},
-                  "edge": {"id": os.environ["ID_EDGE"], "tar": "edge.tar"},
-                  "agent": {"id": os.environ["ID_AGENT"], "tar": "agent.tar"},
+                  "platform": {"id": os.environ["ID_PLATFORM"], "tar": "platform.tar", **image_metadata["platform"]},
+                  "edge": {"id": os.environ["ID_EDGE"], "tar": "edge.tar", **image_metadata["edge"]},
+                  "agent": {"id": os.environ["ID_AGENT"], "tar": "agent.tar", **image_metadata["agent"]},
               },
               "tools": tools,
               "stack_env_hint": {
-                  "AURIGA_IMAGE_PLATFORM": os.environ["ID_PLATFORM"],
-                  "AURIGA_IMAGE_EDGE": os.environ["ID_EDGE"],
-                  "AURIGA_IMAGE_AGENT": os.environ["ID_AGENT"],
-                  "note": "After docker load, use these sha256:<id> values so compose does not pull",
+                  "note": "Run load-images.sh and use its verified target-Engine local IDs; images.*.id records the source CI Engine identity only",
               },
           }
           open("out/images/manifest.json", "w", encoding="utf-8").write(json.dumps(manifest, indent=2) + "\n")
           PY
+          rm out/image-metadata.json
           (cd out/images && sha256sum ./*.tar > SHA256SUMS)
           cp deploy/nas/bin/auriga-nas-bootstrap out/auriga-nas-bootstrap
           cp versions.txt out/versions.txt
@@ -163,6 +164,7 @@ jobs:
           cp deploy/nas/bin/auriga-nas-bootstrap out/deploy-nas/bin/
           cp deploy/nas/bin/runtime-release out/deploy-nas/bin/
           (cd out && sha256sum deploy-nas/bin/auriga-nas-bootstrap deploy-nas/bin/runtime-release images/manifest.json versions.txt > SHA256SUMS)
+          deploy/nas/bin/auriga-nas-bootstrap image-check out
 
       - name: Validate compose config (placeholder env, quiet)
         run: |

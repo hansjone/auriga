@@ -19,13 +19,13 @@
 ```sh
 sha256sum -c SHA256SUMS
 (cd images && sha256sum -c SHA256SUMS)
-chmod 0755 deploy-nas/bin/auriga-nas-bootstrap
-# 在解包目录先载入 platform/edge/agent 三组件，并核对输出的本地 sha256:image ID。
-sh deploy-nas/scripts/load-images.sh .
+chmod 0755 deploy-nas/bin/auriga-nas-bootstrap deploy-nas/bin/runtime-release
+# 在解包目录载入三组件；只采用 loader 核验完成后输出的目标 Engine 本地 ID。
+sh deploy-nas/scripts/load-images.sh "$PWD"
 mkdir -p /srv/container/auriga-test
 cp deploy-nas/env.example /srv/container/auriga-test/stack.env
 cp deploy-nas/access-ip.example.json /srv/container/auriga-access.json
-# 编辑上述两份文件；把 load-images.sh 输出的三个 AURIGA_IMAGE_* ID 写入 stack.env。
+# 将 loader 完成后输出的三条 AURIGA_IMAGE_* 填入 stack.env，再编辑上述两份文件。
 # 若正式 runtime image 的已批准 locator 使用 127.0.0.1:50123，
 # 签发/审批前就把 AURIGA_HOST_PUBLISH_REGISTRY 设为 50123（示例默认15000）。
 # 数据根预置内容只能有 stack.env。
@@ -39,6 +39,14 @@ sh deploy-nas/scripts/stop.sh
 ```
 
 所有操作脚本都显式用 `sh` 调用，不依赖执行位。源码 checkout 对应 `deploy/nas/`。数据根须绝对路径、至少三层且 basename 为 `auriga-*`；拒绝链接、点段及未初始化的外来非空目录。首装/root初始化只为新建且空的材料根通过已打开 FD 设置固定 `10001:10001`，再让清空补充组的同一预构建 binary 子进程生成材料。重入按原身份校验 receipt、输入和完整材料，原 key 不轮换；错 owner/mode、额外链接、错误祖先、缺 receipt、template-only、PKI/模板目录链接都拒绝，不自动 chmod/chown 旧材料。
+
+应用镜像须走包内 `load-images.sh`：加载前只读验证完整校验和、新 `config_id` 元数据和固定三份真实 tar，
+加载后对固定 tag 的实际本地不可变 Id 执行导出，逐项比原 config 字节摘要、唯一 `linux/amd64` 与有序层 diffID。
+仅三镜像全部成功后才写原制品 manifest 的 release marker 并输出目标 Engine 的三条镜像建议。
+CI 的 `images.*.id` 保持原制品身份，不能直接用于另一种 store；`config_id` 也不是通用 Engine Id。
+loader 不改 env、不创建数据根或安装身份、不依赖现场 Python／Go，失败不删除已加载镜像和旧 tag。
+缺新元数据／校验和应重新获取完整新包，不能退回只信 tag 的加载方式。运输身份核验不替代正式 runtime
+签名授权；归档和子进程的具体预算、只读入口见 [NAS README](../../deploy/nas/README.md)。
 
 Linux root只从固定 `/proc/self/exe` 打开当前0755普通可执行文件，将该只读FD单独传为子进程fd3并通过 `/proc/self/fd/3` 以10001身份执行，因此bundle可在0700私有目录；材料根的祖先信任与实际可遍历要求仍独立强制，不复制binary或修改bundle目录权限。
 
