@@ -2,13 +2,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/runtimeimport"
 	"github.com/hansjone/auriga/infra/agent/runtimebundle"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -21,10 +25,10 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
-	if len(args) == 0 || (args[0] != "sign" && args[0] != "verify" && args[0] != "stage-layout") {
-		return fmt.Errorf("usage: runtime-release sign|verify|stage-layout --help")
+	if len(args) == 0 || (args[0] != "sign" && args[0] != "verify" && args[0] != "stage-layout" && args[0] != "import-layout") {
+		return fmt.Errorf("usage: runtime-release sign|verify|stage-layout|import-layout --help")
 	}
-	if args[0] == "stage-layout" {
+	if args[0] == "stage-layout" || args[0] == "import-layout" {
 		seen := map[string]bool{}
 		for _, arg := range args[1:] {
 			if !strings.HasPrefix(arg, "-") {
@@ -42,7 +46,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	root := fs.String("root", "", "independently fixed ArtifactSigningKey protobuf file")
 	osName := fs.String("os", "", "explicit target OS: linux or windows")
 	arch := fs.String("arch", "", "explicit target architecture: amd64 or arm64")
-	var image, artifactID, version, issued, private, manifest, config, out, dir, allowed, layout *string
+	var image, artifactID, version, issued, private, manifest, config, out, dir, allowed, layout, oras *string
 	var sequence *uint64
 	var maxBytes *int64
 	required := []string{"root", "os", "arch"}
@@ -62,13 +66,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 		dir = fs.String("dir", "", "public bundle directory")
 		allowed = fs.String("allow-image", "", "independently approved exact repo@sha256 locator")
 		required = append(required, "dir", "allow-image")
-	case "stage-layout":
+	case "stage-layout", "import-layout":
 		dir = fs.String("dir", "", "signed public bundle directory")
 		allowed = fs.String("allow-image", "", "independently approved exact repo@sha256 locator")
 		layout = fs.String("layout", "", "untrusted single-image OCI layout directory")
 		out = fs.String("out", "", "new minimal OCI layout directory")
 		maxBytes = fs.Int64("max-bytes", 0, "explicit positive total byte budget")
 		required = append(required, "dir", "allow-image", "layout", "out", "max-bytes")
+		if args[0] == "import-layout" {
+			oras = fs.String("oras", "", "independently approved absolute ORAS 1.3.0 executable path")
+			required = append(required, "oras")
+		}
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -83,15 +91,28 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("explicit --%s is required", name)
 		}
 	}
-	if args[0] == "stage-layout" {
+	if args[0] == "stage-layout" || args[0] == "import-layout" {
 		if *maxBytes <= 0 {
 			return fmt.Errorf("--max-bytes must be positive")
 		}
-		snapshot, err := runtimebundle.StageLayout(runtimebundle.StageLayoutOptions{Verify: runtimebundle.VerifyOptions{Dir: *dir, TrustedRootPath: *root, Policy: runtimebundle.Policy{OS: *osName, Arch: *arch, AllowedImage: *allowed}}, LayoutDir: *layout, OutputDir: *out, MaxBytes: *maxBytes})
+		options := runtimebundle.StageLayoutOptions{Verify: runtimebundle.VerifyOptions{Dir: *dir, TrustedRootPath: *root, Policy: runtimebundle.Policy{OS: *osName, Arch: *arch, AllowedImage: *allowed}}, LayoutDir: *layout, OutputDir: *out, MaxBytes: *maxBytes}
+		var snapshot runtimebundle.LayoutSnapshot
+		var err error
+		if args[0] == "import-layout" {
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			snapshot, err = runtimeimport.Import(ctx, runtimeimport.Options{Stage: options, ORAS: *oras})
+		} else {
+			snapshot, err = runtimebundle.StageLayout(options)
+		}
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(stdout, "staged manifest=%s config=%s blobs=%d bytes=%d\n", snapshot.ManifestDigest, snapshot.ConfigDigest, snapshot.BlobCount, snapshot.TotalBytes)
+		verb := "staged"
+		if args[0] == "import-layout" {
+			verb = "imported and read back"
+		}
+		_, err = fmt.Fprintf(stdout, "%s manifest=%s config=%s blobs=%d bytes=%d\n", verb, snapshot.ManifestDigest, snapshot.ConfigDigest, snapshot.BlobCount, snapshot.TotalBytes)
 		return err
 	}
 	var material *runtimebundle.Material
