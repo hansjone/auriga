@@ -177,6 +177,12 @@ func verify(dsh *nodev1.DshRuntime, ring releasetrust.Ring, target Target) (Veri
 	return v, nil
 }
 
+// CanonicalReleaseBody returns the exact v1 signing body used by Verify.
+// It validates envelope shape only; callers must still use Verify and VerifyOCI.
+func CanonicalReleaseBody(e *nodev1.RuntimeReleaseEnvelope) ([]byte, error) {
+	return releaseBody(e)
+}
+
 func releaseBody(e *nodev1.RuntimeReleaseEnvelope) ([]byte, error) {
 	if e == nil || !known(e.ProtoReflect()) || e.SchemaVersion != 1 || e.Purpose != "dsh_runtime" || e.Name != "dsh" || e.ArtifactId == "" || e.DshVersion == "" || (e.Os != "linux" && e.Os != "windows") || (e.Arch != "amd64" && e.Arch != "arm64") || e.ReleaseSequence < 1 || e.ReleaseSequence > maxSafeInteger || e.Signature == nil || e.Signature.Alg != "Ed25519" {
 		return nil, fmt.Errorf("invalid release v1 shape")
