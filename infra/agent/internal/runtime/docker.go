@@ -396,6 +396,12 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 		return err
 	}
 	d.mu.Lock()
+	// Saving the execution is synchronous and may outlive the Start deadline.
+	// Keep that durable process fact, but do not publish an expired readiness proof.
+	if err := ctx.Err(); err != nil {
+		d.mu.Unlock()
+		return err
+	}
 	d.endpoints[id] = endpoint
 	d.mu.Unlock()
 	return nil
@@ -501,6 +507,10 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return Status{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		d.revoke(id)
+		return Status{InstanceID: id}, err
+	}
 	record, err := d.observationRecord(id)
 	if err != nil {
 		return Status{InstanceID: id}, err
@@ -516,7 +526,11 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	st := Status{InstanceID: id}
 	if state, ok := insp["State"].(map[string]any); ok {
 		st.Running, _ = state["Running"].(bool)
-		_, endpointErr := d.Endpoint(id)
+		_, endpointErr := d.endpoint(ctx, id)
+		if err := ctx.Err(); err != nil {
+			d.revoke(id)
+			return Status{InstanceID: id}, err
+		}
 		st.Ready = st.Running && endpointErr == nil
 		if !st.Running {
 			if errMsg, _ := state["Error"].(string); errMsg != "" {
@@ -530,6 +544,10 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 				st.Generation, _ = strconv.ParseInt(g, 10, 64)
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		d.revoke(id)
+		return Status{InstanceID: id}, err
 	}
 	return st, nil
 }
@@ -561,6 +579,16 @@ func (d *Docker) Stats(ctx context.Context, id string) (Usage, error) {
 }
 
 func (d *Docker) Endpoint(id string) (Endpoint, error) {
+	return d.endpoint(context.Background(), id)
+}
+
+func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		d.revoke(id)
+		return Endpoint{}, err
+	}
 	if _, err := d.observationRecord(id); err != nil {
 		return Endpoint{}, err
 	}
@@ -568,8 +596,6 @@ func (d *Docker) Endpoint(id string) (Endpoint, error) {
 	if err != nil {
 		return Endpoint{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	insp, err := d.verifyContainer(ctx, record)
 	if err != nil {
 		d.revoke(id)
@@ -583,9 +609,17 @@ func (d *Docker) Endpoint(id string) (Endpoint, error) {
 	if _, err := d.observationRecord(id); err != nil {
 		return Endpoint{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		d.revoke(id)
+		return Endpoint{}, err
+	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	u := d.endpoints[id]
+	d.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		d.revoke(id)
+		return Endpoint{}, err
+	}
 	if u == "" {
 		return Endpoint{}, fmt.Errorf("docker: no endpoint for %s", id)
 	}
@@ -601,6 +635,9 @@ func (d *Docker) List(ctx context.Context) ([]Status, error) {
 	}
 	out := make([]Status, 0, len(list))
 	for _, c := range list {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		labels, _ := c["Labels"].(map[string]any)
 		id, _ := labels[labelInstance].(string)
 		if id == "" {
@@ -612,10 +649,16 @@ func (d *Docker) List(ctx context.Context) ([]Status, error) {
 		}
 		if state, ok := c["State"].(string); ok {
 			st.Running = state == "running"
-			_, endpointErr := d.Endpoint(id)
+			_, endpointErr := d.endpoint(ctx, id)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			st.Ready = st.Running && endpointErr == nil
 		}
 		out = append(out, st)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
