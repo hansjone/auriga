@@ -6,6 +6,9 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 
 load_stack_env
+if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+  exec sh "$NAS_ROOT/scripts/installer.sh" render
+fi
 require_cmd sed awk tr cmp stat
 require_root_or_capable_chown
 

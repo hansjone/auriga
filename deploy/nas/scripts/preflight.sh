@@ -59,7 +59,9 @@ busy=0
     fi
   done
 [ "$busy" -eq 0 ] || die "host publish ports conflict; revise stack.env"
-if [ -d "$AURIGA_DATA_ROOT/socket-share" ]; then
+if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+  sh "$NAS_ROOT/scripts/installer.sh" check
+elif [ -d "$AURIGA_DATA_ROOT/socket-share" ]; then
   validate_ingress_ancestors
 fi
 
@@ -72,20 +74,15 @@ for img in \
   "${AURIGA_IMAGE_REGISTRY:?}"
 do
   validate_image_ref "$img" || die "bad image ref"
-done
-
-# Local sha256: ids must already be present (no pull).
-for img in \
-  "$AURIGA_IMAGE_PLATFORM" \
-  "$AURIGA_IMAGE_EDGE" \
-  "$AURIGA_IMAGE_AGENT"
-do
-  case "$img" in
-    sha256:*)
-      docker image inspect "$img" >/dev/null 2>&1 \
-        || die "local image id not loaded: $img (run load-images.sh)"
-      ;;
+  case "${img##*sha256:}" in
+    *[!0]*) ;;
+    *) die "placeholder image must be replaced: $img" ;;
   esac
+  # Inspect the exact configured reference, including RepoDigests. Never pull.
+  image_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$img" 2>/dev/null) \
+    || die "image not available locally: $img (explicitly prepare images before start)"
+  [ "$image_platform" = linux/amd64 ] \
+    || die "expected linux/amd64 image and valid inspect output: $img"
 done
 
 if [ -e "$AURIGA_DATA_ROOT" ] || [ -L "$AURIGA_DATA_ROOT" ]; then

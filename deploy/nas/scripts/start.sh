@@ -27,16 +27,19 @@ sh "$NAS_ROOT/scripts/network-preflight.sh" || {
 
 sh "$NAS_ROOT/scripts/render.sh"
 
-prepare_socket_parent
+if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+  sh "$NAS_ROOT/scripts/installer.sh" prepare-socket
+else
+  prepare_socket_parent
+fi
 
 if project_is_running; then
   info "project already running — compose up -d is idempotent"
 fi
 
-info "starting project $AURIGA_NAS_PROJECT (no build, pull_policy never for local ids)"
-# Prefer never pulling when refs are local image ids.
-run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never \
-  || run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build
+info "starting project $AURIGA_NAS_PROJECT (no build, no pull)"
+# Fail closed, including when Compose does not support --pull never.
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never
 
 info "start requested; use status.sh / smoke.sh to verify"
 info "after first seed start, set AURIGA_PLATFORM_SEED=false in stack.env and re-render"

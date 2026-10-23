@@ -18,6 +18,11 @@ fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib.sh"
 
+if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
+else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi
+if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions
+else fail_msg container_installer_regressions "container installer boundary failed"; fi
+
 try_validate() {
   # validate_data_root calls die on failure — isolate in subshell
   sh -c 'NAS_ROOT="$1"; . "$1/scripts/lib.sh"; validate_data_root "$2"' sh "$ROOT" "$1" 2>/dev/null

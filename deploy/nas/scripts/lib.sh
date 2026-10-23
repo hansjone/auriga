@@ -173,7 +173,13 @@ load_stack_env() {
   [ -n "${AURIGA_ACCESS_FILE:-}" ] || die "AURIGA_ACCESS_FILE is required"
   case "$AURIGA_ACCESS_FILE" in /*) ;; *) die "AURIGA_ACCESS_FILE must be absolute" ;; esac
   validate_data_root "$AURIGA_DATA_ROOT"
-  validate_managed_tree
+  case "${AURIGA_INSTALL_MODE:-host}" in
+    host) validate_managed_tree ;;
+    container)
+      [ "${NAS_ALLOW_NONROOT:-}" != 1 ] || die "container installer forbids NAS_ALLOW_NONROOT"
+      if [ "${NAS_INSTALLER_ACTIVE:-}" = 1 ]; then validate_managed_tree; fi ;;
+    *) die "AURIGA_INSTALL_MODE must be host or container" ;;
+  esac
   if [ -f "$AURIGA_DATA_ROOT/config/materials/access.env" ]; then load_nas_access_env "$AURIGA_DATA_ROOT/config/materials/access.env"; fi
   # Ignore operator COMPOSE_PROJECT_NAME — always fixed (M1).
   COMPOSE_PROJECT_NAME=$AURIGA_NAS_PROJECT
@@ -272,12 +278,66 @@ compose_cmd() {
 }
 
 run_compose() {
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+    container_compose "$@"
+    return
+  fi
   _cc=$(compose_cmd)
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
     COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
     $_cc -f "$NAS_ROOT/docker-compose.yml" -p "$AURIGA_NAS_PROJECT" "$@"
 }
+
+# A subshell owns the private copies and trap, including on Compose failure.
+container_compose() (
+  umask 077
+  _private=$(installer_private_dir compose)
+  trap 'rm -rf -- "$_private"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  sh "$NAS_ROOT/scripts/installer.sh" export-env >"$_private/env.tar"
+  tar -xf "$_private/env.tar" -C "$_private" --no-same-owner
+  rm -f "$_private/env.tar"
+  chmod 0600 "$_private/"*.env
+  _yaml_private=$(printf '%s' "$_private" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat >"$_private/override.yml" <<EOF
+services:
+  platform:
+    env_file: !override
+      - path: '$_yaml_private/platform.env'
+        required: true
+  edge:
+    env_file: !override
+      - path: '$_yaml_private/edge.env'
+        required: true
+  agent:
+    env_file: !override
+      - path: '$_yaml_private/agent.env'
+        required: true
+EOF
+  _cc=$(compose_cmd)
+  # Only the fixed main file and generated env_file override have authority.
+  # shellcheck disable=SC2086
+  env COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" $_cc \
+    -f "$NAS_ROOT/docker-compose.yml" -f "$_private/override.yml" \
+    -p "$AURIGA_NAS_PROJECT" "$@"
+)
+
+# The shared host /tmp may lack sticky bit. Only the operator-managed immediate
+# install parent is used for private host files; never chmod a shared ancestor.
+installer_private_dir() (
+  _parent=$(dirname -- "$AURIGA_DATA_ROOT")
+  [ -d "$_parent" ] && [ ! -L "$_parent" ] && [ "$(readlink -f -- "$_parent")" = "$_parent" ] \
+    || die 'installer temporary parent must be a canonical real directory'
+  _owner=$(stat -c '%u' "$_parent")
+  _mode=$(stat -c '%a' "$_parent")
+  [ "$_owner" = 0 ] || [ "$_owner" = "$(id -u)" ] || die 'installer temporary parent must belong to operator or root'
+  case "$_mode" in ''|*[!0-7]*) die 'invalid installer temporary parent mode' ;; esac
+  [ "$((0$_mode & 022))" = 0 ] || die 'installer temporary parent must not be group/other writable'
+  umask 077
+  mktemp -d "$_parent/.auriga-$1.XXXXXX"
+)
 
 # True if this compose project already has running containers (H4).
 project_is_running() {

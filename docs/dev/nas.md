@@ -14,6 +14,80 @@
 
 ## 初始化、启动、停止
 
+### 普通共享路径的容器初始化
+
+宿主默认使用 `AURIGA_INSTALL_MODE=host`，原 root 和祖先权限要求继续适用。
+共享目录部署可以明确选择 `container` 模式：operator 必须管理宿主 bind 源路径，
+先用 `readlink -f` 解析共享路径别名，将规范绝对路径写入配置。脚本拒绝任何叶软链、
+非规范输入，以及 package/access/bootstrap/runtime 输入与 RW 数据根互相包含。
+此模式不宣称防御拥有宿主存储写权限的人；容器中的 root755 祖先不代表宿主共享目录可信。
+
+布局例子：共享父目录下并列放 `package/`、`release/`、`operator-approved/root.pb`、
+`access.json`、`auriga-data/`，把数据根作为唯一 RW bind。包内 bootstrap 必须已核对摘要且
+恢复 0755；access、公开 runtime 和包外独立根保留稳定 locator，并供固定 uid10001 读取。
+不得挂载整个共享目录、宿主 `/` 或 Docker socket 给 helper。
+
+```sh
+# SHARED_PARENT 由 operator 先创建；可包含宿主软链别名。
+PARENT=$(readlink -f "$SHARED_PARENT") || exit 1
+mkdir "$PARENT/auriga-data" # 新空目录；也允许只有一份普通 stack.env
+cp "$PARENT/package/env.example" "$PARENT/auriga-data/stack.env"
+chmod 0600 "$PARENT/auriga-data/stack.env"
+# 编辑 stack.env，所有路径填规范绝对路径：
+# AURIGA_DATA_ROOT=<PARENT>/auriga-data
+# AURIGA_ACCESS_FILE=<PARENT>/access.json
+# AURIGA_INSTALL_MODE=container
+# AURIGA_INSTALLER_IMAGE=postgres:17@sha256:<operator已批准并预先加载的摘要>
+# 可复用已准备的 PostgreSQL 17 Debian 镜像，须含 /bin/sh、openssl、tar 和 GNU/POSIX 工具。
+export AURIGA_DATA_ROOT="$PARENT/auriga-data"
+sh "$PARENT/package/scripts/init.sh"
+sh "$PARENT/package/scripts/preflight.sh"
+sh "$PARENT/package/scripts/network-preflight.sh"
+sh "$PARENT/package/scripts/start.sh"
+```
+
+installer 镜像必须已在本机且为 linux/amd64，不能用可变 tag；不会自动 pull 或自动降级到
+测试用 `NAS_ALLOW_NONROOT`。helper 使用 user0、network none、cap-drop ALL，仅添加
+CHOWN/DAC_OVERRIDE/FOWNER/SETUID/SETGID，启用 no-new-privileges 和只读根文件系统。
+一次性容器和其匿名卷结束后回收，不删除数据或镜像。只在首装空根/仅 stack.env 的根设置
+root0755；已有材料、owner、权限、receipt、硬链接错误明确拒绝，不修复未知旧目录。
+
+`init.sh`、`render.sh` 自动按显式模式委派；`installer.sh check` 和 `prepare-socket` 可独立运行。
+预检仍在宿主检查 Engine、端口、资源和镜像，严格祖先/材料检查交给 helper。
+Compose 固定项目与主文件，仅从 helper 经私有临时流导出 platform/edge/agent 三份 env，
+写入宿主 mktemp0700 目录和0600叶，再用固定生成的短期 `env_file: !override` 覆盖引用。
+两处宿主临时目录均放在数据根的直接父目录，该父目录必须为规范真实目录、属于当前
+operator 或 root 且无 group/other 写位；不依赖可能为非 sticky0777 的宿主 `/tmp`，不改变共享祖先权限。
+原服务私有文件权限不变；临时副本在成功/失败/信号退出时清理，退出码保留。需要 Compose
+2.29+；postgres secret 继续使用主文件里的原 bind 源，不额外导出。拥有 Docker socket 的
+operator 本身具有宿主 root 等价能力。不要运行会输出完整秘密配置的 `docker compose config`；
+公开入口使用 `config --quiet`，日志和报告不包含秘密。
+
+先显式准备第三方基础镜像。operator 从可信发布者取得并独立批准 PostgreSQL、NATS、registry
+各自的精确 digest（确认支持 `linux/amd64`），将三个完整引用固定到 `stack.env` 的
+`AURIGA_IMAGE_POSTGRES`、`AURIGA_IMAGE_NATS`、`AURIGA_IMAGE_REGISTRY`。包内全零值只是占位，
+预检会拒绝；不能根据可变 tag 自动选择或批准新 digest。在线准备示例（先替换三个占位摘要）：
+
+```sh
+POSTGRES_REF='postgres:17@sha256:<已批准的64位hex摘要>'
+NATS_REF='nats:2.10-alpine@sha256:<已批准的64位hex摘要>'
+REGISTRY_REF='registry:2@sha256:<已批准的64位hex摘要>'
+for image in "$POSTGRES_REF" "$NATS_REF" "$REGISTRY_REF"; do
+  docker pull --platform linux/amd64 "$image" || exit 1
+  docker image inspect --format '{{json .RepoDigests}} {{.Os}}/{{.Architecture}} {{.Id}}' "$image" || exit 1
+done
+```
+
+逐项核对 inspect 的 RepoDigests 对应批准引用、平台为 `linux/amd64`，并记录目标 Engine 的本地
+不可变 Id。确认后将上述完整引用写入配置；若必须离线运输，`docker save` / `docker load` **不保证
+保留 RepoDigests**，不能只因归档加载成功就沿用原 digest 引用。应在加载后独立核对镜像运输关联、
+平台及实际本地不可变身份，再将已核对的目标 Engine `sha256:...` Id 写入对应配置项。
+`config_id` 是 config 字节摘要，不能当成 containerd store 的通用 `Id`。
+
+`preflight.sh` 只读检查六项明确配置的本地镜像，包括 digest 引用；任何缺失、全零占位、错平台或
+非法 inspect 输出都会失败，不执行 pull。`start.sh` 只调用一次 `up -d --no-build --pull never`，
+Compose 失败时保留非零退出码；应修正准备步骤或 Compose 版本后重试。
+
 工件下载会丢执行位。先核对提交、镜像 manifest 和校验和，再恢复二进制执行位（不是在 NAS 构建）：
 
 ```sh
@@ -25,7 +99,8 @@ sh deploy-nas/scripts/load-images.sh "$PWD"
 mkdir -p /srv/container/auriga-test
 cp deploy-nas/env.example /srv/container/auriga-test/stack.env
 cp deploy-nas/access-ip.example.json /srv/container/auriga-access.json
-# 将 loader 完成后输出的三条 AURIGA_IMAGE_* 填入 stack.env，再编辑上述两份文件。
+# 将 loader 输出的三条 AURIGA_IMAGE_* 和上面已准备的三个基础镜像引用填入 stack.env。
+# 再编辑上述两份文件，六项镜像都必须已经在本机且为 linux/amd64。
 # 若正式 runtime image 的已批准 locator 使用 127.0.0.1:50123，
 # 签发/审批前就把 AURIGA_HOST_PUBLISH_REGISTRY 设为 50123（示例默认15000）。
 # 数据根预置内容只能有 stack.env。

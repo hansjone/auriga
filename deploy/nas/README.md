@@ -2,6 +2,13 @@
 
 Public deployment templates for a separate NAS test stack (`auriga-nas-test`).
 
+普通 NAS 共享路径可显式设置 `AURIGA_INSTALL_MODE=container`，以预先审核并加载的不可变
+`AURIGA_INSTALLER_IMAGE` 初始化新数据目录，无须宿主 sudo 或更改共享上级权限。
+数据根、包、access 和独立 runtime 输入必须先解析为规范路径，数据根与输入互不包含。
+helper 只挂一个数据根为 RW，其它输入 RO，无网络或 Docker socket；原 bootstrap 的
+UID、祖先、receipt 和硬链接检查在容器内照常执行。宿主源目录由 operator 管理，
+此模式不防御拥有宿主存储写权限的人。完整步骤见[操作指南](../../docs/dev/nas.md#普通共享路径的容器初始化)。
+
 - Operator guide: [`docs/dev/nas.md`](../../docs/dev/nas.md)
 - Runtime release guide: [`docs/dev/runtime-release.md`](../../docs/dev/runtime-release.md)
 - Do not put real domains, LAN IPs, or credentials in this tree
@@ -30,6 +37,18 @@ sh deploy-nas/scripts/load-images.sh "$PWD"
 将这些建议手工填入 `stack.env`；脚本不会改写 `stack.env`／`STACK_ENV`，不会创建或认领数据根。
 默认 marker 位于包根；`AURIGA_RELEASE_DIR` 可指向已存在的独立目录，同时接收原 `versions.txt`。
 失败会保留已加载镜像和原有 tag，不自动删除、修复或回退。
+
+另外，operator 须从可信发布者独立批准并固定 PostgreSQL、NATS、registry 三个基础镜像的精确
+digest，逐个执行 `docker pull --platform linux/amd64 'name@sha256:<已批准摘要>'`，再用
+`docker image inspect --format '{{json .RepoDigests}} {{.Os}}/{{.Architecture}} {{.Id}}' 'name@sha256:<已批准摘要>'`
+核对摘要与 `linux/amd64` 平台，并把完整引用写入 `stack.env`。
+完整三镜像在线示例见 [操作指南](../../docs/dev/nas.md#初始化启动停止)。
+全零占位不允许启动；预检只读核验六项镜像（包括 digest 引用）都在本机，启动只执行一次
+`up -d --no-build --pull never`，失败保留非零退出码，不隐式拉取或重试放宽策略。
+
+离线运输的 `docker save` / `docker load` 不保证 RepoDigests 保留。加载后应独立核对运输关联、
+平台和目标 Engine 本地不可变身份，将已核对的本地 `sha256:...` Id 写入配置。
+不能只沿用源机 Id，也不能将 config ID 当成 containerd store 的通用 Id。
 
 `images.*.id` 保留构建时 CI Engine 的原身份；不同 Docker store 的实际本地 Id 可能是 config、manifest
 或 index 摘要，不能直接把 CI 值或 `config_id` 当成目标 Engine 值。新增 `config_id`、`os`、`arch` 来自真实
