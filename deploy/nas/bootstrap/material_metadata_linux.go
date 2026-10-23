@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	"golang.org/x/sys/unix"
 )
 
@@ -14,6 +15,7 @@ import (
 type nasMaterialGuard struct {
 	path string
 	dirs map[string]*os.File
+	set  materials.MaterialSet
 }
 
 func sameNASMetadata(a, b unix.Stat_t) bool {
@@ -66,19 +68,23 @@ func openNASSourceRoot(path string) (*os.File, error) {
 	return current, nil
 }
 
-func openNASMaterialGuard(path string) (*nasMaterialGuard, error) {
+func openNASMaterialGuard(path string, sets ...materials.MaterialSet) (*nasMaterialGuard, error) {
+	set := nasMaterialSet()
+	if len(sets) > 0 {
+		set = sets[0]
+	}
 	root, err := openNASSourceRoot(path)
 	if err != nil {
 		return nil, err
 	}
-	g := &nasMaterialGuard{path: path, dirs: map[string]*os.File{"": root}}
+	g := &nasMaterialGuard{path: path, dirs: map[string]*os.File{"": root}, set: set}
 	entries, err := root.ReadDir(-1)
 	if err != nil {
 		g.Close()
 		return nil, err
 	}
 	fresh := len(entries) == 0
-	for _, name := range []string{"pki", "templates"} {
+	for _, name := range set.ManagedDirectories {
 		if fresh {
 			if err := unix.Mkdirat(int(root.Fd()), name, 0o755); err != nil {
 				g.Close()
@@ -92,11 +98,31 @@ func openNASMaterialGuard(path string) (*nasMaterialGuard, error) {
 		}
 		g.dirs[name] = dir
 	}
+	if !fresh {
+		for _, name := range set.PublicFiles {
+			parent := filepath.ToSlash(filepath.Dir(name))
+			if strings.HasPrefix(parent, "runtime-proofs/") && g.dirs[parent] == nil {
+				if err := g.pinRuntimeProof(parent); err != nil {
+					g.Close()
+					return nil, err
+				}
+			}
+		}
+	}
 	if err := g.Validate(fresh); err != nil {
 		g.Close()
 		return nil, err
 	}
 	return g, nil
+}
+
+func (g *nasMaterialGuard) pinRuntimeProof(name string) error {
+	dir, err := openNASDirectory(int(g.dirs["runtime-proofs"].Fd()), filepath.Base(name), true)
+	if err != nil {
+		return err
+	}
+	g.dirs[name] = dir
+	return nil
 }
 
 func (g *nasMaterialGuard) Close() {
@@ -115,21 +141,59 @@ func (g *nasMaterialGuard) Validate(allowMissing bool) error {
 	if unix.Fstat(int(g.dirs[""].Fd()), &held) != nil || unix.Fstat(int(root.Fd()), &current) != nil || !sameNASMetadata(held, current) {
 		return fmt.Errorf("changed NAS source root")
 	}
-	for _, name := range []string{"pki", "templates"} {
-		dir, err := openNASDirectory(int(root.Fd()), name, true)
+	for name, heldDir := range g.dirs {
+		if name == "" {
+			continue
+		}
+		parent, leaf := filepath.Split(name)
+		dir, err := openNASDirectory(int(g.dirs[strings.TrimSuffix(parent, "/")].Fd()), leaf, true)
 		if err != nil {
 			return err
 		}
 		statErr := unix.Fstat(int(dir.Fd()), &current)
 		dir.Close()
-		if statErr != nil || unix.Fstat(int(g.dirs[name].Fd()), &held) != nil || !sameNASMetadata(held, current) {
+		if statErr != nil || unix.Fstat(int(heldDir.Fd()), &held) != nil || !sameNASMetadata(held, current) {
 			return fmt.Errorf("changed NAS source child directory")
 		}
 	}
-	for _, name := range nasMaterialSet().PublicFiles {
+	// Reject every unknown leaf, including an extra template/proof or directory.
+	allowed := map[string]map[string]bool{}
+	for _, name := range append(append(append([]string{}, g.set.PublicFiles...), g.set.ManagedDirectories...), "iam-installation") {
+		for name != "." && name != "" {
+			parent, leaf := filepath.Split(name)
+			parent = strings.TrimSuffix(parent, "/")
+			if allowed[parent] == nil {
+				allowed[parent] = map[string]bool{}
+			}
+			allowed[parent][leaf] = true
+			name = parent
+		}
+	}
+	for name, dir := range g.dirs {
+		// Open a separate directory description so ReadDir never changes the held FD offset.
+		fd, err := unix.Openat(int(dir.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return err
+		}
+		f := os.NewFile(uintptr(fd), name)
+		entries, err := f.ReadDir(-1)
+		_ = f.Close()
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if !allowed[name][entry.Name()] {
+				return fmt.Errorf("unknown NAS source leaf: %s", filepath.Join(name, entry.Name()))
+			}
+		}
+	}
+	for _, name := range g.set.PublicFiles {
 		parent, leaf := filepath.Split(name)
 		dir := g.dirs[strings.TrimSuffix(parent, "/")]
 		if dir == nil {
+			if allowMissing && strings.HasPrefix(name, "runtime-proofs/") {
+				continue
+			}
 			return fmt.Errorf("invalid fixed NAS source manifest")
 		}
 		var before, opened, after unix.Stat_t

@@ -113,6 +113,7 @@ AURIGA_WORKSPACE_CONTROL_ENDPOINT=https://127.0.0.1:${HOST_NC}
 AURIGA_WORKSPACE_NODE_SERVER_HOST=0.0.0.0
 AURIGA_WORKSPACE_NODE_SERVER_PORT=7443
 AURIGA_WORKSPACE_TEMPLATES_DIRECTORY=/etc/auriga/templates
+AURIGA_WORKSPACE_ARTIFACT_KEYS_DIRECTORY=/etc/auriga/runtime-keys
 AURIGA_PLATFORM_SEED=$SEED
 EOF
 chmod 0600 "$CONFIG/platform.env"
@@ -128,23 +129,12 @@ AURIGA_AGENT_SERVER=https://127.0.0.1:${HOST_NC}
 AURIGA_AGENT_CA_SHA256=$CA_SHA
 AURIGA_AGENT_ALLOW_INSECURE=false
 AURIGA_DEPLOYMENT_ACCESS_FILE=/etc/auriga/access.json
+AURIGA_AGENT_RUNTIME_PROOFS_DIR=/etc/auriga/runtime-proofs
 EOF
 chmod 0600 "$CONFIG/agent.env"
 
 printf '%s' "$PG_BOOT" >"$SECRETS/pg_bootstrap_password"
 chmod 0600 "$SECRETS/pg_bootstrap_password"
-
-if [ ! -f "$CONFIG/templates/README.md" ]; then
-  cat >"$CONFIG/templates/README.md" <<'EOF'
-# Instance templates
-
-Place signed InstanceSpec protobuf files from the W3 real-DSH pipeline here.
-This NAS pack refuses to ship CI fake-dsh templates or placeholder signatures.
-Without a real template the stack can start for health/static checks but must not
-be marked as real acceptance complete.
-EOF
-  chmod 0644 "$CONFIG/templates/README.md"
-fi
 
 info "render complete (configs under $CONFIG; secrets not printed)"
 info "note: platform.env embeds DB/NATS secrets as env vars — visible to anyone with docker inspect (M5)"

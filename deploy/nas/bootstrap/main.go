@@ -1,5 +1,5 @@
 // Bootstrap generates PKI and identity keys for the Auriga NAS test stack.
-// It does NOT emit fake DSH templates or CI-style unsigned placeholders.
+// Optional formal templates consume independently approved signed runtime bundles.
 //
 //	go run . -out /path/to/config
 package main
@@ -37,12 +37,19 @@ func main() {
 	lanSubnet := flag.String("lan-subnet", "", "required disjoint LAN IPv4 prefix")
 	registryPort := flag.Int("registry-port", 15000, "host loopback registry port")
 	instanceMemory := flag.String("instance-max-memory-mb", "512", "per-instance memory limit in positive canonical decimal MiB")
+	runtimeBundle := flag.String("runtime-bundle", "", "public signed runtime bundle directory")
+	runtimeRoot := flag.String("runtime-root", "", "independently approved external runtime root protobuf")
+	runtimeImage := flag.String("runtime-image", "", "independently approved complete repo@sha256 locator")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fatalf("unexpected positional arguments")
 	}
 	maxMemoryMB, err := parseInstanceMaxMemoryMB(*instanceMemory)
 	if err != nil {
+		fatalf("%v", err)
+	}
+	runtime := runtimeInputs{*runtimeBundle, *runtimeRoot, *runtimeImage}
+	if err := runtime.validate(maxMemoryMB); err != nil {
 		fatalf("%v", err)
 	}
 	raw, cfg, err := loadNASAccess(*accessFile, *peerIP, *subnet, *registryPort)
@@ -52,24 +59,28 @@ func main() {
 	if err := validateNASLAN(*lanIP, *lanSubnet, *subnet); err != nil {
 		fatalf("%v", err)
 	}
+	if !*validateOnly && *out == "" {
+		fatalf("-out is required")
+	}
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly); err != nil {
+		fatalf("%v", err)
+	}
+	verified, err := runtime.verify()
+	if err != nil {
+		fatalf("%v", err)
+	}
 	if *validateOnly {
 		return
 	}
-	if *out == "" {
-		fatalf("-out is required")
-	}
-	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB); err != nil {
-		fatalf("%v", err)
-	}
-	guard, err := openNASMaterialGuard(*out)
+	set := runtimeMaterialSet(verified)
+	guard, err := openNASMaterialGuard(*out, set)
 	if err != nil {
 		fatalf("%v", err)
 	}
 	defer guard.Close()
 	pki := filepath.Join(*out, "pki")
-	input := sha256.Sum256(append(append([]byte{}, raw...), []byte(fmt.Sprintf("\n%s\n%s\n%d\n%s\n%s\n%d", *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB))...))
-	inputDigest := hex.EncodeToString(input[:])
-	reuse, err := materials.CheckReceipt(*out, inputDigest, nasMaterialSet())
+	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified)
+	reuse, err := materials.CheckReceipt(*out, inputDigest, set)
 	if err != nil {
 		fatalf("%v", err)
 	}
@@ -86,10 +97,19 @@ func main() {
 	mustPKI(pki)
 	mustIdentity(*out)
 	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB)
+	if err := writeRuntimeMaterials(*out, verified, maxMemoryMB); err != nil {
+		fatalf("%v", err)
+	}
+	if verified != nil {
+		if err := guard.pinRuntimeProof(runtimeProofDirectory(verified)); err != nil {
+			fatalf("%v", err)
+		}
+		writeRuntimePolicy(*out, runtime.image, maxMemoryMB)
+	}
 	if err := guard.Validate(false); err != nil {
 		fatalf("%v", err)
 	}
-	if err := materials.SealReceipt(*out, inputDigest, nasMaterialSet()); err != nil {
+	if err := materials.SealReceipt(*out, inputDigest, set); err != nil {
 		fatalf("%v", err)
 	}
 	if err := guard.Validate(false); err != nil {
