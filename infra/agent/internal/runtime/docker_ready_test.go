@@ -63,13 +63,29 @@ func readyDockerWithPortMetadata(t *testing.T, endpoint string, bindings any, pu
 func TestDockerStartUsesActualUnambiguousContainerPort(t *testing.T) {
 	for _, key := range []string{"7860/tcp", "8888/tcp"} {
 		t.Run(key, func(t *testing.T) {
-			health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, readyBody) }))
+			var probes atomic.Int64
+			health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/_auriga/health" {
+					t.Errorf("unexpected health path %s", r.URL.Path)
+				}
+				probes.Add(1)
+				_, _ = io.WriteString(w, readyBody)
+			}))
 			t.Cleanup(health.Close)
 			d := readyDockerWithPortMetadata(t, health.URL, map[string]any{key: []any{map[string]string{"HostIp": "127.0.0.1", "HostPort": "0"}}}, key)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
+			// This checks actual port selection, not a one-second installation
+			// SLA: startDocker also creates trust material and durably seeds state.
+			ctx := t.Context()
+			if deadline, ok := t.Deadline(); ok {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, deadline.Add(-time.Second))
+				defer cancel()
+			}
 			if err := startDocker(t, d, ctx, "actual-port-test"); err != nil {
 				t.Fatal(err)
+			}
+			if probes.Load() == 0 {
+				t.Fatal("actual container port never reached real health")
 			}
 			if endpoint, err := d.Endpoint("actual-port-test"); err != nil || endpoint.URL != health.URL {
 				t.Fatalf("actual container port not recovered: %+v %v", endpoint, err)
@@ -192,8 +208,14 @@ func TestDockerStartFailedRetryDoesNotKeepPriorReadyEndpoint(t *testing.T) {
 	}))
 	t.Cleanup(health.Close)
 	d := readyDocker(t, health.URL)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	// Establish the healthy baseline independently of the failed retry's
+	// production deadline below; lazy trust/state setup is part of startDocker.
+	ctx := t.Context()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline.Add(-time.Second))
+		defer cancel()
+	}
 	if err := startDocker(t, d, ctx, "retry-test"); err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -166,12 +167,27 @@ func TestBridgeRevocationReaddConsumesUnchangedDueWake(t *testing.T) {
 
 type countedRecoveryDriver struct {
 	runtime.Driver
-	ensures atomic.Int64
+	ensures    atomic.Int64
+	cancelNext atomic.Pointer[recoveryStartCancellation]
+}
+
+type recoveryStartCancellation struct {
+	started chan context.CancelFunc
 }
 
 func (d *countedRecoveryDriver) Ensure(ctx context.Context, spec *runtime.Spec, rendered *runtime.Rendered) error {
 	d.ensures.Add(1)
 	return d.Driver.Ensure(ctx, spec, rendered)
+}
+
+func (d *countedRecoveryDriver) Start(ctx context.Context, id string) error {
+	if control := d.cancelNext.Swap(nil); control != nil {
+		child, cancel := context.WithCancel(ctx)
+		defer cancel()
+		control.started <- cancel
+		return d.Driver.Start(child, id)
+	}
+	return d.Driver.Start(ctx, id)
 }
 
 type recoveryFixture struct {
@@ -181,6 +197,9 @@ type recoveryFixture struct {
 	targets               *observer.SliceTargets
 	driver                *countedRecoveryDriver
 	statuses              chan *nodev1.InstanceStatus
+	terminal              chan *nodev1.InstanceStatus
+	probed                chan bool
+	stage                 atomic.Value
 	healthy, inspectError atomic.Bool
 	starts, probes        atomic.Int64
 	startedAt             *timestamppb.Timestamp
@@ -193,11 +212,19 @@ func newRecoveryFixture(t *testing.T) *recoveryFixture {
 
 func newRecoveryFixtureWithPort(t *testing.T, actualPort string) *recoveryFixture {
 	t.Helper()
-	f := &recoveryFixture{statuses: make(chan *nodev1.InstanceStatus, 32), startedAt: timestamppb.New(time.Now().Add(-time.Hour))}
+	f := &recoveryFixture{statuses: make(chan *nodev1.InstanceStatus, 32), terminal: make(chan *nodev1.InstanceStatus, 32),
+		probed: make(chan bool, 32), startedAt: timestamppb.New(time.Now().Add(-time.Hour))}
+	f.stage.Store("fixture setup")
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		f.stage.Store("health probe")
 		f.probes.Add(1)
+		ready := f.healthy.Load()
+		select {
+		case f.probed <- ready:
+		default:
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "ready": f.healthy.Load(), "protocol": 1, "pluginVersion": "test"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "ready": ready, "protocol": 1, "pluginVersion": "test"})
 	}))
 	t.Cleanup(health.Close)
 	_, port, err := net.SplitHostPort(strings.TrimPrefix(health.URL, "http://"))
@@ -205,6 +232,7 @@ func newRecoveryFixtureWithPort(t *testing.T, actualPort string) *recoveryFixtur
 		t.Fatal(err)
 	}
 	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.stage.Store("Engine " + r.Method + " " + r.URL.Path)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/containers/"+fixtureContainerID+"/json":
 			if f.inspectError.Load() {
@@ -247,25 +275,84 @@ func newRecoveryFixtureWithPort(t *testing.T, actualPort string) *recoveryFixtur
 	f.rec = reconciler.New(store, f.driver, nil, 1)
 	f.rec.Activation = d.Activation
 	t.Cleanup(f.rec.Close)
-	f.rec.StartTimeout = 120 * time.Millisecond
-	f.rec.Sink = func(status *nodev1.InstanceStatus) { f.bridge.Sync(status); f.statuses <- status }
+	// Failure tests cancel only after observing a real unhealthy probe. Keep the
+	// production Start budget independent of scheduler/fixture setup latency.
+	f.rec.Sink = func(status *nodev1.InstanceStatus) {
+		f.stage.Store("bridge sync " + status.Phase.String())
+		f.bridge.Sync(status)
+		f.statuses <- status
+		f.stage.Store("status queued " + status.Phase.String())
+		if status.Ready || status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+			f.terminal <- status
+		}
+	}
+	f.stage.Store("fixture ready")
 	return f
 }
 
 func (f *recoveryFixture) next(t *testing.T) *nodev1.InstanceStatus {
 	t.Helper()
-	select {
-	case status := <-f.statuses:
-		return status
-	case <-time.After(2 * time.Second):
-		t.Fatal("recovery status missing")
-		return nil
+	return awaitRecovery(t, f, f.statuses, "recovery status")
+}
+
+func awaitRecovery[T any](t *testing.T, f *recoveryFixture, events <-chan T, what string) T {
+	t.Helper()
+	// This is a test-wide deadlock watchdog, not a claimed per-step runtime SLA.
+	remaining := time.Minute
+	if deadline, ok := t.Deadline(); ok {
+		remaining = time.Until(deadline.Add(-2 * time.Second))
 	}
+	watchdog := time.NewTimer(remaining)
+	defer watchdog.Stop()
+	select {
+	case event := <-events:
+		return event
+	case <-watchdog.C:
+		stack := make([]byte, 1<<20)
+		stack = stack[:goruntime.Stack(stack, true)]
+		t.Logf("stage=%v queued=%d starts=%d probes=%d ensures=%d\n%s", f.stage.Load(), len(f.statuses), f.starts.Load(), f.probes.Load(), f.driver.ensures.Load(), stack)
+		actual := make(chan string, 1)
+		go func() {
+			rec, err := f.rec.Store.GetActual("recovery-test")
+			actual <- fmt.Sprintf("%v error=%v", rec.Status, err)
+		}()
+		select {
+		case snapshot := <-actual:
+			t.Log("persisted actual:", snapshot)
+		case <-time.After(100 * time.Millisecond):
+			t.Log("persisted actual read also blocked")
+		}
+		t.Fatalf("%s missing before global test watchdog", what)
+		var zero T
+		return zero
+	}
+}
+
+func (f *recoveryFixture) waitTerminal(t *testing.T) {
+	t.Helper()
+	_ = awaitRecovery(t, f, f.terminal, "terminal sink notification")
+}
+
+func (f *recoveryFixture) armHealthCancellation(t *testing.T) *recoveryStartCancellation {
+	t.Helper()
+	control := &recoveryStartCancellation{started: make(chan context.CancelFunc, 1)}
+	if !f.driver.cancelNext.CompareAndSwap(nil, control) {
+		t.Fatal("a recovery cancellation is already armed")
+	}
+	return control
+}
+
+func (f *recoveryFixture) cancelAfterUnhealthyProbe(t *testing.T, control *recoveryStartCancellation) {
+	t.Helper()
+	cancel := awaitRecovery(t, f, control.started, "Start context")
+	if ready := awaitRecovery(t, f, f.probed, "real unhealthy probe"); ready {
+		t.Fatal("failure fixture was already healthy")
+	}
+	cancel()
 }
 
 func TestAgentRestartRestoresHealthAndBridgeWithoutRebuildingContainer(t *testing.T) {
 	f := newRecoveryFixture(t)
-	f.rec.StartTimeout = 2 * time.Second
 	initial, err := f.rec.Inventory()
 	if err != nil || len(initial) != 1 || initial[0].Ready {
 		t.Fatalf("first inventory reused persisted ready: %v %v", initial, err)
@@ -305,9 +392,17 @@ func TestRecoveryInspectionOrHealthFailureDoesNotPublishReadyOrRebuildOnRetry(t 
 		t.Run(failure, func(t *testing.T) {
 			f := newRecoveryFixture(t)
 			f.inspectError.Store(failure == "inspect")
+			var control *recoveryStartCancellation
+			if failure == "health" {
+				control = f.armHealthCancellation(t)
+			}
 			if err := f.rec.ReconcileAll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
+			if control != nil {
+				f.cancelAfterUnhealthyProbe(t, control)
+			}
+			f.waitTerminal(t)
 			for {
 				status := f.next(t)
 				if status.Ready {
@@ -322,7 +417,6 @@ func TestRecoveryInspectionOrHealthFailureDoesNotPublishReadyOrRebuildOnRetry(t 
 			}
 			f.inspectError.Store(false)
 			f.healthy.Store(true)
-			f.rec.StartTimeout = time.Second
 			if err := f.rec.ReconcileAll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -361,23 +455,24 @@ func TestOldGenerationPendingRecoveryRetainsDecisionAcrossFailure(t *testing.T) 
 	if err := f.rec.Store.PutActual(previous); err != nil {
 		t.Fatal(err)
 	}
+	control := f.armHealthCancellation(t)
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	for {
-		status := f.next(t)
-		if status.Ready {
-			t.Fatal("unhealthy pending recovery reused ready")
-		}
-		if status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
-			break
-		}
+	if status := f.next(t); status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_STARTING || status.Ready {
+		t.Fatal("unhealthy pending recovery did not start", status)
+	}
+	f.cancelAfterUnhealthyProbe(t, control)
+	f.waitTerminal(t)
+	if status := f.next(t); status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_FAILED || status.Ready ||
+		status.ObservedGeneration != 1 || !slices.Equal(status.RestartReasons, reasons) {
+		t.Fatal("unhealthy recovery lost the pending decision", status)
 	}
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	f.waitTerminal(t)
 	if status := f.next(t); status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_STARTING || status.Ready {
 		t.Fatal("missing pending recovery start")
 	}
@@ -390,6 +485,7 @@ func TestOldGenerationPendingRecoveryRetainsDecisionAcrossFailure(t *testing.T) 
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	f.waitTerminal(t)
 	if status := f.next(t); status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART || !status.Ready || status.ObservedGeneration != 1 || f.starts.Load() != starts {
 		t.Fatalf("healthy old-generation pending recovery was not idempotent: %v", status)
 	}
@@ -398,7 +494,6 @@ func TestOldGenerationPendingRecoveryRetainsDecisionAcrossFailure(t *testing.T) 
 func TestRuntimeObservationFailureWithdrawsAlreadyPublishedBridge(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +551,6 @@ func (d *capturedEndpointDriver) Endpoint(id string) (runtime.Endpoint, error) {
 func TestRevocationFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +607,6 @@ func TestRevocationFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 func TestStoppedStatusFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
