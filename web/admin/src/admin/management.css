@@ -1,0 +1,59 @@
+.management .head,
+.management .actions,
+.management .pager,
+.management .label-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.management .head {
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.management h1,
+.management h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.management .details {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--auriga-border);
+  border-radius: 12px;
+  background: var(--auriga-surface);
+}
+.management .details dl {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 3fr;
+  gap: 0.75rem;
+}
+.management dt,
+.management .muted {
+  color: var(--auriga-muted);
+}
+.management dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.management .error {
+  color: var(--el-color-danger);
+}
+.management .notice {
+  color: var(--auriga-accent);
+}
+.management .pager,
+.management .actions {
+  margin-top: 1rem;
+}
+.management .label-row {
+  margin: 0.5rem 0;
+}
+.management .label-row .el-input {
+  max-width: 240px;
+}
+.management .edit-form {
+  max-width: 720px;
+  margin-top: 1.25rem;
+}

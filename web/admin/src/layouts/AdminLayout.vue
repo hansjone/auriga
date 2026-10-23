@@ -2,19 +2,18 @@
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { ElButton, ElMenu, ElMenuItem } from 'element-plus';
+import { ElButton, ElMenu, ElMenuItem, ElSubMenu } from 'element-plus';
 import type { Me } from '@auriga/shared';
 import { iamApi } from '../api';
+import { useAdminI18n } from '../admin/messages';
 
 const { t, locale } = useI18n();
+const { t: adminT } = useAdminI18n();
 const router = useRouter();
 const me = ref<Me | null>(null);
 const light = ref(document.documentElement.dataset.theme === 'light');
 
 const items = [
-  { path: '/members', key: 'adminNav.members' },
-  { path: '/groups', key: 'adminNav.groups' },
-  { path: '/roles', key: 'adminNav.roles' },
   { path: '/providers', key: 'adminNav.providers' },
   { path: '/settings', key: 'adminNav.settings' },
 ] as const;
@@ -53,7 +52,19 @@ async function logout() {
         background-color="transparent"
         text-color="var(--auriga-text)"
         active-text-color="var(--auriga-accent)"
+        :default-openeds="['environment', 'membership']"
       >
+        <ElSubMenu index="environment">
+          <template #title>{{ adminT('environment') }}</template>
+          <ElMenuItem index="/instances">{{ adminT('instances') }}</ElMenuItem>
+          <ElMenuItem index="/nodes">{{ adminT('nodes') }}</ElMenuItem>
+        </ElSubMenu>
+        <ElSubMenu index="membership">
+          <template #title>{{ adminT('membership') }}</template>
+          <ElMenuItem index="/members">{{ t('adminNav.members') }}</ElMenuItem>
+          <ElMenuItem index="/groups">{{ t('adminNav.groups') }}</ElMenuItem>
+          <ElMenuItem index="/roles">{{ t('adminNav.roles') }}</ElMenuItem>
+        </ElSubMenu>
         <ElMenuItem v-for="item in items" :key="item.path" :index="item.path">
           {{ t(item.key) }}
         </ElMenuItem>

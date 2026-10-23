@@ -52,6 +52,10 @@ describe('AdminLayout', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('成员');
     expect(wrapper.text()).toContain('身份源');
+    expect(wrapper.text()).toContain('运行环境');
+    expect(wrapper.text()).toContain('成员与权限');
+    expect(wrapper.text()).toContain('节点');
+    expect(wrapper.text()).toContain('实例');
     wrapper.unmount();
   });
 });

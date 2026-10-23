@@ -1,123 +1,168 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
-import { useI18n } from 'vue-i18n';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElButton, ElInput, ElTable, ElTableColumn } from 'element-plus';
 import type { Member } from '@auriga/shared';
-import { isApiError, mapProblemMessage } from '@auriga/shared';
 import { orgApi } from '../api';
+import { adminApi } from '../admin/api';
+import { useManagement } from '../admin/useManagement';
+import { useAdminI18n } from '../admin/messages';
+import ActionConfirm from '../admin/ActionConfirm.vue';
+import '../admin/management.css';
 
-const { t } = useI18n();
+const { t, state } = useAdminI18n();
 const q = ref('');
-const items = ref<Member[]>([]);
-const nextCursor = ref<string | undefined>();
-const cursors = ref<string[]>([]);
-const error = ref('');
-const loading = ref(false);
-
-async function load(cursor?: string) {
-  loading.value = true;
-  error.value = '';
-  try {
-    const res = await orgApi.listMembers({
-      q: q.value || undefined,
-      limit: 2,
-      cursor,
-    });
-    items.value = res.items;
-    nextCursor.value = res.nextCursor;
-  } catch (e) {
-    error.value = isApiError(e)
-      ? mapProblemMessage(e.problem, t)
-      : t('errors.unknown');
-  } finally {
-    loading.value = false;
-  }
-}
-
+const {
+  items,
+  selected,
+  loading,
+  detailLoading,
+  busy,
+  locked,
+  error,
+  detailError,
+  notice,
+  pending,
+  canWrite,
+  history,
+  nextCursor,
+  load,
+  select,
+  close,
+  reset,
+  ask,
+  confirm,
+  next,
+  previous,
+} = useManagement<Member>({
+  read: 'org.members.read',
+  write: 'org.members.write',
+  list: (cursor) =>
+    orgApi.listMembers({ q: q.value || undefined, limit: 50, cursor }),
+  detail: (member) => adminApi.member(member.id),
+  t,
+});
 onMounted(() => void load());
-
 let timer: ReturnType<typeof setTimeout> | undefined;
 watch(q, () => {
   if (timer) globalThis.clearTimeout(timer);
-  timer = globalThis.setTimeout(() => {
-    cursors.value = [];
-    void load();
-  }, 250);
+  reset();
+  timer = setTimeout(() => void load(true), 250);
 });
-
-function next() {
-  if (!nextCursor.value) return;
-  const last = items.value[items.value.length - 1]?.id;
-  if (last) cursors.value.push(last);
-  void load(nextCursor.value);
-}
-
-function prev() {
-  cursors.value.pop();
-  const cursor = cursors.value[cursors.value.length - 1];
-  void load(cursor);
+onBeforeUnmount(() => {
+  if (timer) globalThis.clearTimeout(timer);
+});
+function setStatus(action: 'enable' | 'disable') {
+  const member = selected.value;
+  if (member)
+    ask({
+      message: t('memberConfirm', {
+        name: member.displayName,
+        action: t(action),
+      }),
+      run: () => adminApi.setMemberStatus(member.id, action),
+      success: t('memberSaved'),
+    });
 }
 </script>
-
 <template>
-  <div class="members">
+  <div class="management">
     <header class="head">
-      <h1>{{ t('members.title') }}</h1>
+      <h1>{{ t('members') }}</h1>
       <ElInput
         v-model="q"
+        :disabled="busy || !!pending"
         clearable
-        :placeholder="t('members.search')"
+        :placeholder="t('search')"
+        :aria-label="t('search')"
         style="max-width: 280px"
-      />
-    </header>
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <ElTable v-loading="loading" :data="items" empty-text="">
-      <ElTableColumn prop="displayName" :label="t('members.displayName')" />
-      <ElTableColumn prop="email" :label="t('members.email')" />
-      <ElTableColumn prop="memberType" :label="t('members.type')" width="120" />
-      <ElTableColumn prop="status" :label="t('members.status')" width="120" />
-      <ElTableColumn :label="t('members.roles')">
-        <template #default="{ row }">
-          {{ (row.roleKeys || []).join(', ') }}
-        </template>
-      </ElTableColumn>
-    </ElTable>
-    <p v-if="!loading && items.length === 0" class="muted">
-      {{ t('members.empty') }}
-    </p>
-    <div class="pager">
-      <ElButton :disabled="cursors.length === 0" @click="prev">{{
-        t('members.prev')
+      /><ElButton :disabled="locked" @click="load()">{{
+        t('refresh')
       }}</ElButton>
-      <ElButton :disabled="!nextCursor" @click="next">{{
-        t('members.next')
+    </header>
+    <p v-if="loading" role="status">{{ t('loading') }}</p>
+    <p v-if="error" class="error" role="alert">
+      {{ error }}
+      <ElButton :disabled="locked" @click="load()">{{ t('retry') }}</ElButton>
+    </p>
+    <ElTable :data="items" :empty-text="loading || error ? ' ' : t('empty')">
+      <ElTableColumn prop="displayName" :label="t('displayName')" />
+      <ElTableColumn prop="email" :label="t('email')" />
+      <ElTableColumn :label="t('type')"
+        ><template #default="{ row }">{{
+          state(row.memberType)
+        }}</template></ElTableColumn
+      >
+      <ElTableColumn :label="t('status')"
+        ><template #default="{ row }">{{
+          state(row.status)
+        }}</template></ElTableColumn
+      >
+      <ElTableColumn :label="t('roles')"
+        ><template #default="{ row }">{{
+          row.roleKeys.join(', ')
+        }}</template></ElTableColumn
+      >
+      <ElTableColumn :label="t('details')"
+        ><template #default="{ row }"
+          ><ElButton :disabled="locked" @click="select(row as Member)">{{
+            t('details')
+          }}</ElButton></template
+        ></ElTableColumn
+      >
+    </ElTable>
+    <div class="pager">
+      <ElButton :disabled="locked || !history.length" @click="previous">{{
+        t('previous')
+      }}</ElButton
+      ><ElButton :disabled="locked || !nextCursor" @click="next">{{
+        t('next')
       }}</ElButton>
     </div>
+    <p v-if="detailLoading" role="status">{{ t('loading') }}</p>
+    <p v-if="detailError" class="error" role="alert">{{ detailError }}</p>
+    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
+    <section v-if="selected" class="details" :aria-label="t('details')">
+      <header class="head">
+        <h2>{{ selected.displayName }}</h2>
+        <ElButton :disabled="locked" @click="close">{{ t('close') }}</ElButton>
+      </header>
+      <dl>
+        <dt>{{ t('id') }}</dt>
+        <dd>{{ selected.id }}</dd>
+        <dt>{{ t('email') }}</dt>
+        <dd>{{ selected.email || '—' }}</dd>
+        <dt>{{ t('type') }}</dt>
+        <dd>{{ state(selected.memberType) }}</dd>
+        <dt>{{ t('status') }}</dt>
+        <dd>{{ state(selected.status) }}</dd>
+        <dt>{{ t('roles') }}</dt>
+        <dd>{{ selected.roleKeys.join(', ') || '—' }}</dd>
+        <dt>{{ t('groups') }}</dt>
+        <dd>{{ selected.groupIds.join(', ') || '—' }}</dd>
+        <dt>{{ t('created') }}</dt>
+        <dd>{{ selected.createdAt }}</dd>
+      </dl>
+      <p v-if="!canWrite" class="muted">{{ t('readonly') }}</p>
+      <div v-if="canWrite" class="actions">
+        <ElButton
+          v-if="selected.status === 'active'"
+          type="warning"
+          :disabled="locked"
+          @click="setStatus('disable')"
+          >{{ t('disable') }}</ElButton
+        ><ElButton
+          v-if="selected.status === 'disabled'"
+          :disabled="locked"
+          @click="setStatus('enable')"
+          >{{ t('enable') }}</ElButton
+        >
+      </div>
+    </section>
+    <ActionConfirm
+      :message="pending?.message"
+      :busy="busy"
+      @confirm="confirm"
+      @cancel="!busy && (pending = undefined)"
+    />
   </div>
 </template>
-
-<style scoped>
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  gap: 1rem;
-}
-h1 {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-}
-.pager {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-.muted {
-  color: var(--auriga-muted);
-}
-.error {
-  color: #d27a7a;
-}
-</style>
