@@ -67,7 +67,107 @@ printf 'PASS load_images_separate_release_with_versions\n'
 mkdir "$TMP/hardlink-release"
 ln "$TMP/bundle/versions.txt" "$TMP/hardlink-release/versions.txt"
 AURIGA_RELEASE_DIR="$TMP/hardlink-release" sh "$ROOT/scripts/load-images.sh" "$TMP/bundle" >"$TMP/load-hardlink.log"
+[ "$TMP/bundle/versions.txt" -ef "$TMP/hardlink-release/versions.txt" ]
 printf 'PASS load_images_same_versions_inode\n'
+
+# Fail only the metadata publication command; all image validation remains real.
+for command in cp chmod mv; do
+  real_command=$(command -v "$command")
+  cat >"$TMP/bin/$command" <<EOF
+#!/bin/sh
+real_command='$real_command'
+command='$command'
+EOF
+  cat >>"$TMP/bin/$command" <<'EOF'
+set -eu
+case "$command" in
+  mv) for target do case "$target" in -*) continue ;; *) break ;; esac; done ;;
+  *) for target do :; done ;;
+esac
+case "$target" in
+  */.auriga-marker.*|*/.auriga-release) kind=marker ;;
+  */.auriga-versions.*|*/versions.txt) kind=versions ;;
+  *) kind=other ;;
+esac
+if [ "${NAS_PUBLISH_FAIL:-}" = "$command-$kind" ]; then
+  # Simulate a partial write as well as an unsuccessful copy.
+  if [ "$command" = cp ]; then printf 'partial copy\n' >"$target"; fi
+  exit 71
+fi
+exec "$real_command" "$@"
+EOF
+  chmod 0755 "$TMP/bin/$command"
+done
+for operation in cp chmod mv; do
+  for kind in versions marker; do
+    for previous in new old; do
+      release="$TMP/publish-$operation-$kind-$previous"
+      mkdir "$release"
+      printf 'previous versions\n' >"$release/versions.txt"
+      cp "$release/versions.txt" "$TMP/versions.before"
+      if [ "$previous" = old ]; then
+        printf 'previous release\n' >"$release/.auriga-release"
+        cp "$release/.auriga-release" "$TMP/marker.before"
+      fi
+      if NAS_PUBLISH_FAIL="$operation-$kind" AURIGA_RELEASE_DIR="$release" sh "$ROOT/scripts/load-images.sh" "$TMP/bundle" >"$release.log" 2>&1; then
+        echo "FAIL publication $operation-$kind-$previous accepted" >&2; exit 1
+      fi
+      if [ "$previous" = old ]; then
+        cmp "$TMP/marker.before" "$release/.auriga-release"
+      else
+        [ ! -e "$release/.auriga-release" ]
+      fi
+      if [ "$operation-$kind" != mv-marker ]; then
+        cmp "$TMP/versions.before" "$release/versions.txt"
+      fi
+      ! grep -q '^AURIGA_IMAGE_' "$release.log"
+      for temporary in "$release"/.auriga-marker.* "$release"/.auriga-versions.*; do
+        [ ! -e "$temporary" ]
+      done
+      cmp "$STACK_ENV" "$TMP/stack.before"
+      [ ! -e "$AURIGA_DATA_ROOT" ]
+      printf 'PASS load_images_publish_%s_%s_%s_preserves_marker_and_env\n' "$operation" "$kind" "$previous"
+    done
+  done
+done
+for kind in marker versions; do
+  release="$TMP/env-hardlink-$kind"
+  mkdir "$release"
+  case "$kind" in marker) target="$release/.auriga-release" ;; versions) target="$release/versions.txt" ;; esac
+  ln "$STACK_ENV" "$target"
+  AURIGA_RELEASE_DIR="$release" sh "$ROOT/scripts/load-images.sh" "$TMP/bundle" >"$release.log"
+  cmp "$STACK_ENV" "$TMP/stack.before"
+  [ ! "$STACK_ENV" -ef "$target" ]
+  cmp "$TMP/bundle/images/manifest.json" "$release/.auriga-release"
+  cmp "$TMP/bundle/versions.txt" "$release/versions.txt"
+  [ "$(grep -c '^AURIGA_IMAGE_' "$release.log")" = 3 ]
+  [ ! -e "$AURIGA_DATA_ROOT" ]
+  printf 'PASS load_images_%s_hardlink_replaced_without_env_write\n' "$kind"
+done
+for kind in marker versions; do
+  for type in directory symlink fifo; do
+    release="$TMP/special-$kind-$type"
+    mkdir "$release"
+    case "$kind" in marker) target="$release/.auriga-release" ;; versions) target="$release/versions.txt" ;; esac
+    case "$type" in
+      directory) mkdir "$target" ;;
+      symlink) ln -s "$STACK_ENV" "$target" ;;
+      fifo) mkfifo "$target" ;;
+    esac
+    if AURIGA_RELEASE_DIR="$release" sh "$ROOT/scripts/load-images.sh" "$TMP/bundle" >"$release.log" 2>&1; then
+      echo "FAIL special $kind-$type accepted" >&2; exit 1
+    fi
+    ! grep -q '^AURIGA_IMAGE_' "$release.log"
+    case "$type" in
+      directory) [ -d "$target" ]; [ -z "$(ls -A "$target")" ] ;;
+      symlink) [ -L "$target" ] ;;
+      fifo) [ -p "$target" ] ;;
+    esac
+    cmp "$STACK_ENV" "$TMP/stack.before"
+    [ ! -e "$AURIGA_DATA_ROOT" ]
+    printf 'PASS load_images_reject_%s_%s\n' "$kind" "$type"
+  done
+done
 
 reject_load() {
   scenario=$1

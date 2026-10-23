@@ -41,15 +41,41 @@ AURIGA_RELEASE_DIR=${AURIGA_RELEASE_DIR:-$BUNDLE}
 export AURIGA_RELEASE_DIR
 [ -d "$AURIGA_RELEASE_DIR" ] && [ ! -L "$AURIGA_RELEASE_DIR" ] || die "release directory must already exist and not be a symlink"
 _marker=$(release_marker_path)
-[ ! -L "$_marker" ] || die "release marker must not be a symlink"
-[ ! -L "$AURIGA_RELEASE_DIR/versions.txt" ] || die "release versions must not be a symlink"
-# Keep both the default directory and an independent directory whose versions
-# happens to be the same inode. Source checks already required versions.txt.
-if [ ! "$BUNDLE/versions.txt" -ef "$AURIGA_RELEASE_DIR/versions.txt" ]; then
-  cp "$BUNDLE/versions.txt" "$AURIGA_RELEASE_DIR/versions.txt"
+_versions="$AURIGA_RELEASE_DIR/versions.txt"
+regular_or_absent() {
+  [ ! -L "$1" ] && { [ ! -e "$1" ] || [ -f "$1" ]; } \
+    || die "release metadata must be a regular file or absent: $1"
+}
+regular_or_absent "$_marker"
+regular_or_absent "$_versions"
+
+# Prepare both files before publishing either. Never open a final inode for
+# writing: a metadata path may be a hard link to an operator's env file.
+_marker_tmp=
+_versions_tmp=
+cleanup_metadata() {
+  [ -z "$_marker_tmp" ] || rm -f "$_marker_tmp"
+  [ -z "$_versions_tmp" ] || rm -f "$_versions_tmp"
+}
+trap cleanup_metadata 0
+trap 'exit 1' HUP INT TERM
+_marker_tmp=$(mktemp "$AURIGA_RELEASE_DIR/.auriga-marker.XXXXXXXX")
+_versions_tmp=$(mktemp "$AURIGA_RELEASE_DIR/.auriga-versions.XXXXXXXX")
+cp "$BUNDLE/images/manifest.json" "$_marker_tmp"
+cp "$BUNDLE/versions.txt" "$_versions_tmp"
+chmod 0644 "$_marker_tmp"
+chmod 0644 "$_versions_tmp"
+# Recheck before rename; mv must never interpret a directory as a container.
+regular_or_absent "$_versions"
+regular_or_absent "$_marker"
+# Keep default release and independent paths sharing the source versions inode.
+if [ ! "$BUNDLE/versions.txt" -ef "$_versions" ]; then
+  mv -f "$_versions_tmp" "$_versions"
+  _versions_tmp=
 fi
-cp "$BUNDLE/images/manifest.json" "$_marker"
-chmod 0644 "$_marker"
+# The marker is the last commit point, after every other preparation succeeds.
+mv -f "$_marker_tmp" "$_marker"
+_marker_tmp=
 
 printf '%s\n' "$_resolved"
 info "images verified; paste these target-Engine local IDs into stack.env before start" >&2
