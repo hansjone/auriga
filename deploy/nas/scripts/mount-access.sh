@@ -48,10 +48,18 @@ probe edge 65532:65532 none \
   identity-signing:secret:config/pki-edge/identity-signing-keys.json pki:edge-pki:config/pki-edge \
   tokens:tokens:internal-tokens ingress:dir:socket-share
 probe nats 65532:65532 none nats-config:secret:config/nats/nats.conf data:dir:data/nats
-# PostgreSQL entrypoint reads the bootstrap password as root; init SQL and data
-# are consumed after its normal drop to uid999. Do not ask uid999 to read secrets/.
-probe postgres-entrypoint 0:0 none password:secret:secrets/pg_bootstrap_password
-probe postgres 999:999 none init-sql:secret:config/postgres/init.sql data:dir:data/postgres
+# The official root entrypoint prepares empty PGDATA before dropping to uid999.
+# Classify only an actually listable/traversable empty directory (hidden entries
+# included). Existing or unclassifiable data must still pass the runtime uid.
+# Init SQL is always checked as uid999; only root opens the bootstrap password.
+postgres_entrypoint=$(probe postgres-entrypoint 0:0 none \
+  password:secret:secrets/pg_bootstrap_password data:postgres-data-phase:data/postgres)
+printf '%s\n' "$postgres_entrypoint"
+case "$postgres_entrypoint" in
+  *'mount-access PGDATA phase=entrypoint-empty'*)
+    probe postgres 999:999 none init-sql:secret:config/postgres/init.sql ;;
+  *) probe postgres 999:999 none init-sql:secret:config/postgres/init.sql data:dir:data/postgres ;;
+esac
 probe agent 0:0 none \
   access:public:config/materials/access.json identity-public:public:config/materials/identity-keys.json \
   policy:public:config/materials/agent-policy.yaml proofs:tree:config/materials/runtime-proofs \

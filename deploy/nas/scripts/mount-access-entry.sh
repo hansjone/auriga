@@ -25,11 +25,26 @@ tree() (
     if [ -d "$leaf" ] && [ ! -L "$leaf" ]; then tree "$leaf"; else public "$leaf"; fi
   done
 )
+postgres_data_phase() (
+  # Root may only classify an empty first-start directory, never certify uid999
+  # access. If it cannot list/traverse, the runtime identity must still check it.
+  phase=runtime
+  if [ -d "$1" ] && [ ! -L "$1" ] && [ -r "$1" ] && [ -x "$1" ]; then
+    phase=entrypoint-empty
+    for leaf in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+      [ -e "$leaf" ] || [ -L "$leaf" ] || continue
+      phase=runtime
+      break
+    done
+  fi
+  printf 'mount-access PGDATA phase=%s\n' "$phase"
+)
 command -v cat >/dev/null 2>&1 || { category=probe-runtime; failure missing-cat; }
 for spec; do
   category=${spec%%:*}; rest=${spec#*:}; kind=${rest%%:*}; path=/probe/$category
   case "$kind" in
     dir) directory "$path" ;;
+    postgres-data-phase) postgres_data_phase "$path" ;;
     public) public "$path" ;;
     secret) secret "$path" ;;
     tree) tree "$path" ;;

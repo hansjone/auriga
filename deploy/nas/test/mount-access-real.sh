@@ -69,7 +69,8 @@ for base, dirs, files in os.walk(sys.argv[1]):
     for path in [base] + [os.path.join(base, f) for f in files]:
         s = os.lstat(path)
         content = hashlib.sha256(open(path, 'rb').read()).hexdigest() if stat.S_ISREG(s.st_mode) else ''
-        attrs = {a: os.getxattr(path, a).hex() for a in os.listxattr(path)}
+        attrs = {a: os.getxattr(path, a, follow_symlinks=False).hex()
+                 for a in os.listxattr(path, follow_symlinks=False)}
         rows.append((path, s.st_mode, s.st_uid, s.st_gid, s.st_mtime_ns, content, attrs))
 print(json.dumps(sorted(rows)))
 PY
@@ -83,6 +84,7 @@ check() {
   ! grep -q SECRET_MUST_NOT_APPEAR "$TMP/output" || { echo 'FAIL secret disclosure'; exit 1; }
   if [ "$expected" = pass ]; then
     [ "$result" = 0 ] && [ "$(grep -c '^mount-access OK ' "$TMP/output")" = 7 ] || { cat "$TMP/output"; exit 1; }
+    [ -z "$diagnostic" ] || grep -qx "$diagnostic" "$TMP/output" || { cat "$TMP/output"; exit 1; }
   else
     [ "$result" != 0 ] && grep -q "$diagnostic" "$TMP/output" || { cat "$TMP/output"; exit 1; }
   fi
@@ -120,3 +122,55 @@ chmod 0600 "$AURIGA_DATA_ROOT/data/nats"
 check nats_directory_traverse_denied fail 'service=nats.*path-category=data operation=traverse'
 chmod 0755 "$AURIGA_DATA_ROOT/data/nats"
 check repaired_fixture_passes pass ''
+
+# Only demonstrably empty PGDATA may await the official root entrypoint's
+# preparation. Existing/inaccessible entries must still pass the uid999 probe.
+PGDATA="$AURIGA_DATA_ROOT/data/postgres"
+chown 0:0 "$PGDATA"
+chmod 0700 "$PGDATA"
+check postgres_empty_root_0700 pass 'mount-access PGDATA phase=entrypoint-empty'
+for mode in 0000 0100 0400; do
+  chmod "$mode" "$PGDATA"
+  check "postgres_empty_unclassifiable_${mode}_denied" fail 'service=postgres uid:gid=999:999.*path-category=data operation=traverse'
+done
+chmod 0700 "$PGDATA"
+printf '17\n' >"$PGDATA/PG_VERSION"
+check postgres_existing_root_0700_denied fail 'service=postgres uid:gid=999:999.*path-category=data operation=traverse'
+chown 999:999 "$PGDATA"
+check postgres_existing_uid999_0700 pass 'mount-access PGDATA phase=runtime'
+rm "$PGDATA/PG_VERSION"
+chown 0:0 "$PGDATA"
+for leaf in .hidden ..hidden; do
+  printf 'SECRET_MUST_NOT_APPEAR\n' >"$PGDATA/$leaf"
+  check "postgres_${leaf}_is_not_empty" fail 'service=postgres uid:gid=999:999.*path-category=data operation=traverse'
+  rm "$PGDATA/$leaf"
+done
+ln -s missing-target "$PGDATA/.dangling"
+check postgres_dangling_symlink_is_not_empty fail 'service=postgres uid:gid=999:999.*path-category=data operation=traverse'
+rm "$PGDATA/.dangling"
+chmod 0000 "$AURIGA_DATA_ROOT/config/postgres/init.sql"
+check postgres_empty_still_checks_sql_uid999 fail 'service=postgres uid:gid=999:999.*path-category=init-sql operation=secret-open'
+chmod 0600 "$AURIGA_DATA_ROOT/config/postgres/init.sql"
+
+# Exercise the actual public init path, including its inherited strict umask.
+# A prebuilt bootstrap is required; no mock, service startup or image pull.
+[ -x "$ROOT/bin/auriga-nas-bootstrap" ] || { echo 'real init fixture requires prebuilt bootstrap'; exit 1; }
+export AURIGA_DATA_ROOT="$TMP/initialized/container/auriga-test"
+mkdir -p "$AURIGA_DATA_ROOT"
+cp "$ROOT/access-domain.example.json" "$TMP/access.json"
+cat "$ROOT/env.example" >"$AURIGA_DATA_ROOT/stack.env"
+cat >>"$AURIGA_DATA_ROOT/stack.env" <<EOF
+
+AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT
+AURIGA_ACCESS_FILE=$TMP/access.json
+AURIGA_IMAGE_PLATFORM=$AURIGA_MOUNT_TEST_IMAGE
+AURIGA_IMAGE_REGISTRY=$AURIGA_MOUNT_TEST_REGISTRY_IMAGE
+EOF
+chmod 0600 "$AURIGA_DATA_ROOT/stack.env"
+if ! (umask 077; sh "$ROOT/scripts/init.sh") >"$TMP/init-output" 2>&1; then
+  echo 'FAIL real init with umask077'; exit 1
+fi
+[ -f "$AURIGA_DATA_ROOT/.auriga-initialized" ] \
+  && [ "$(stat -c '%u:%g:%a' "$AURIGA_DATA_ROOT/data/postgres")" = 0:0:700 ] \
+  || { echo 'FAIL real init did not leave root:root/0700 PGDATA'; exit 1; }
+check initialized_umask077_empty_pgdata pass 'mount-access PGDATA phase=entrypoint-empty'

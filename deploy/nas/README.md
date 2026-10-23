@@ -14,6 +14,8 @@ UID、祖先、receipt 和硬链接检查在容器内照常执行。宿主源目
 
 `preflight.sh`在初始化完成后还会执行只读的`mount-access.sh`：以各服务实际UID/GID和必要补充组，检查实际挂载目录遍历、公开材料读取及必要秘密文件打开权限。它复用已pin且本地存在的platform镜像提供`sh/cat`，所有源路径只读、无网络、无额外capability、无Docker socket，不拉镜像、不修改材料或ACL。可单独运行`AURIGA_DATA_ROOT=/srv/container/auriga-test sh deploy-nas/scripts/mount-access.sh`。0755不代表继承ACL下有效可读；出现`service`/`uid:gid`/`path-category`错误时，按[公开排障指南](../../docs/dev/nas.md#挂载访问与继承-acl-排障)核查自己专用目录的有效权限。节点在线但模板无法调度时，另按[节点label指南](../../docs/dev/nas.md#节点-label-与模板匹配)经正式管理台/API核对`template=real-dsh`，禁止直接改库绕过。
 
+PostgreSQL仅对只读探针可确认完全为空的PGDATA放行官方entrypoint准备阶段，支持`umask 077`初始化产生的`root:root/0700`空目录。非空（含隐藏项、悬空链接）或无法确认空时，仍按999:999检查数据目录；SQL始终按999:999检查。探针不执行chown/chmod。
+
 - Do not put real domains, LAN IPs, or credentials in this tree
 - Build images via `.github/workflows/nas-bundle.yml` (`workflow_dispatch` + exact commit)
 - Never deploy from a worker session; main controller runs site instantiation from private notes
