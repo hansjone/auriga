@@ -1,0 +1,141 @@
+export const orgZh = {
+  invitationTitle: '邀请',
+  groupTitle: '分组',
+  allStatuses: '全部状态',
+  invitationStates: {
+    active: '可使用',
+    used: '已用完',
+    expired: '已过期',
+    revoked: '已撤销',
+  },
+  newInvitation: '创建普通成员邀请',
+  invitationDefaults:
+    '创建普通成员邀请，不附加角色或分组；限使用一次，有效期由服务端默认设置（当前七天），不限制身份源。不会自动发送邮件。',
+  invitationConfirm:
+    '确认创建普通成员邀请？限定邮箱：{email}。不附加角色或分组，不会自动发送邮件。',
+  optional: '可选',
+  anyEmail: '不限邮箱',
+  invalidEmail: '请输入有效邮箱。',
+  revokeInvitation: '撤销邀请',
+  revokeConfirm: '确认撤销邀请「{id}」？撤销后不能再用此邀请加入。',
+  invitationCreated: '邀请已创建。请安全交付一次性凭据；没有发送邮件。',
+  invitationRevoked: '邀请已撤销。',
+  oneTimeCode: '一次性邀请凭据',
+  codeWarning:
+    '此凭据仅本次显示。关闭后无法再次查看，请安全转交给受邀人；本页不提供邀请链接。',
+  copyCode: '复制邀请凭据',
+  copied: '已复制；请自行清理剪贴板中的敏感内容。',
+  copyFailed: '无法访问剪贴板，请手动复制当前凭据。',
+  clearCode: '关闭并清除凭据',
+  uses: '使用次数 / 上限',
+  expires: '过期时间',
+  createdBy: '创建人 ID',
+  newGroup: '创建分组',
+  editGroup: '修改分组',
+  description: '描述',
+  parentGroup: '父组',
+  noParent: '无父组',
+  source: '来源',
+  memberCount: '成员数',
+  manual: '手动维护',
+  mapped: '身份源映射',
+  mappedWarning: '此分组由身份源映射维护，本页仅查看。',
+  parentLimit:
+    '当前接口不支持清除已有父组；请保留或选择另一个有效父组。父组变化会影响继承权限。',
+  groupConfirm:
+    '确认保存分组「{name}」？父组设置可能改变继承权限，仍由服务端验证授权。',
+  groupSaved: '分组已保存。',
+  deleteGroup: '删除分组',
+  deleteGroupConfirm:
+    '确认删除分组「{name}」？成员将移出，分组角色绑定和配额将一并删除；有子组时服务端会拒绝。',
+  groupDeleted: '分组已删除。',
+  invalidParent: '不能选择自身或下级分组作为父组，请刷新后选择。',
+  groupMembers: '分组成员',
+  addMember: '加入成员',
+  removeMember: '移出成员',
+  memberSelection: '选择真实成员',
+  searchMembers: '搜索成员',
+  selectMember: '选择要加入的成员',
+  memberReadRequired: '选择新成员需要成员查看权限。现有分组成员仍可查看。',
+  addMemberConfirm:
+    '确认将「{name}」加入「{group}」？成员会获得该组的有效权限；超出操作者权限时服务端拒绝。',
+  removeMemberConfirm:
+    '确认将「{name}」移出「{group}」？该成员将失去通过此组获得的权限。',
+  membershipSaved: '分组成员关系已保存，正在重新读取实际数据。',
+  optionsFailed: '选项加载失败，请重试后再提交。',
+  reloadOptions: '重新加载选项',
+  refreshFailedAfterWrite: '操作已提交，但刷新失败。请重试读取，勿重复提交。',
+};
+export const orgEn = {
+  invitationTitle: 'Invitations',
+  groupTitle: 'Groups',
+  allStatuses: 'All statuses',
+  invitationStates: {
+    active: 'Active',
+    used: 'Used up',
+    expired: 'Expired',
+    revoked: 'Revoked',
+  },
+  newInvitation: 'Create member invitation',
+  invitationDefaults:
+    'Invite an ordinary member without extra roles or groups. One use; server-default expiry (currently seven days). Any identity provider is allowed. No email is sent automatically.',
+  invitationConfirm:
+    'Create an ordinary member invitation? Email restriction: {email}. No extra roles or groups; no email will be sent.',
+  optional: 'Optional',
+  anyEmail: 'Any email',
+  invalidEmail: 'Enter a valid email address.',
+  revokeInvitation: 'Revoke invitation',
+  revokeConfirm: 'Revoke invitation “{id}”? It can no longer be used to join.',
+  invitationCreated:
+    'Invitation created. Deliver the credential securely; no email was sent.',
+  invitationRevoked: 'Invitation revoked.',
+  oneTimeCode: 'One-time invitation credential',
+  codeWarning:
+    'This credential is shown once. Closing clears it permanently from this page. Deliver it securely; no invitation link is provided here.',
+  copyCode: 'Copy credential',
+  copied: 'Copied. Clear sensitive clipboard contents yourself.',
+  copyFailed: 'Clipboard unavailable. Copy the displayed credential manually.',
+  clearCode: 'Close and clear credential',
+  uses: 'Uses / limit',
+  expires: 'Expires at',
+  createdBy: 'Creator ID',
+  newGroup: 'Create group',
+  editGroup: 'Edit group',
+  description: 'Description',
+  parentGroup: 'Parent group',
+  noParent: 'No parent',
+  source: 'Source',
+  memberCount: 'Member count',
+  manual: 'Manual',
+  mapped: 'Identity mapping',
+  mappedWarning:
+    'This group is maintained by an identity provider. This page is read-only.',
+  parentLimit:
+    'The current API cannot clear an existing parent. Keep it or select another valid parent. Reparenting affects inherited permissions.',
+  groupConfirm:
+    'Save group “{name}”? Parent changes may affect inherited permissions. The server still validates authorization.',
+  groupSaved: 'Group saved.',
+  deleteGroup: 'Delete group',
+  deleteGroupConfirm:
+    'Delete group “{name}”? Members will be removed, along with group role bindings and quotas. The server rejects groups with children.',
+  groupDeleted: 'Group deleted.',
+  invalidParent:
+    'A group cannot be its own parent or use a descendant as parent. Refresh and choose again.',
+  groupMembers: 'Group members',
+  addMember: 'Add member',
+  removeMember: 'Remove member',
+  memberSelection: 'Select a real member',
+  searchMembers: 'Search members',
+  selectMember: 'Select a member to add',
+  memberReadRequired:
+    'Selecting new members requires member read permission. Existing group members remain viewable.',
+  addMemberConfirm:
+    'Add “{name}” to “{group}”? The member gains the group’s effective permissions; the server rejects grants exceeding your own.',
+  removeMemberConfirm:
+    'Remove “{name}” from “{group}”? The member loses permissions inherited through this group.',
+  membershipSaved: 'Membership saved. Reloading actual data.',
+  optionsFailed: 'Options failed to load. Retry before submitting.',
+  reloadOptions: 'Reload options',
+  refreshFailedAfterWrite:
+    'Operation submitted, but refresh failed. Retry reading instead of submitting again.',
+};

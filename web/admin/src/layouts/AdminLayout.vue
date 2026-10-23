@@ -62,6 +62,9 @@ async function logout() {
         <ElSubMenu index="membership">
           <template #title>{{ adminT('membership') }}</template>
           <ElMenuItem index="/members">{{ t('adminNav.members') }}</ElMenuItem>
+          <ElMenuItem index="/invitations">{{
+            adminT('invitationTitle')
+          }}</ElMenuItem>
           <ElMenuItem index="/groups">{{ t('adminNav.groups') }}</ElMenuItem>
           <ElMenuItem index="/roles">{{ t('adminNav.roles') }}</ElMenuItem>
         </ElSubMenu>

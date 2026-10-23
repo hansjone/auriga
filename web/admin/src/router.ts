@@ -4,6 +4,8 @@ import AdminLayout from './layouts/AdminLayout.vue';
 import MembersView from './views/MembersView.vue';
 import NodesView from './views/NodesView.vue';
 import InstancesView from './views/InstancesView.vue';
+import GroupsView from './views/GroupsView.vue';
+import InvitationsView from './views/InvitationsView.vue';
 import PlaceholderView from './views/PlaceholderView.vue';
 
 export const router = createRouter({
@@ -18,11 +20,8 @@ export const router = createRouter({
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },
         { path: 'instances', component: InstancesView },
-        {
-          path: 'groups',
-          component: PlaceholderView,
-          props: { titleKey: 'adminNav.groups' },
-        },
+        { path: 'groups', component: GroupsView },
+        { path: 'invitations', component: InvitationsView },
         {
           path: 'roles',
           component: PlaceholderView,
