@@ -55,7 +55,6 @@ mkdir -p \
   "$CONFIG/pki-edge" \
   "$CONFIG/postgres" \
   "$CONFIG/nats" \
-  "$CONFIG/templates" \
   "$AURIGA_DATA_ROOT/internal-tokens" \
   "$DATA/postgres" \
   "$DATA/nats" \
@@ -73,7 +72,7 @@ mkdir -p \
 chmod_strict 0700 "$SECRETS" "$DATA/agent"
 chmod_strict 0750 "$AURIGA_DATA_ROOT/enrollment" "$AURIGA_DATA_ROOT/join"
 prepare_socket_parent
-chmod_strict 0755 "$CONFIG" "$CONFIG/pki-edge" "$CONFIG/templates"
+chmod_strict 0755 "$CONFIG" "$CONFIG/pki-edge"
 chown_required 10001:65532 "$AURIGA_DATA_ROOT/internal-tokens"
 chmod 0750 "$AURIGA_DATA_ROOT/internal-tokens"
 

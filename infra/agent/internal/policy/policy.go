@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,10 +26,13 @@ type Policy struct {
 	AllowedArtifactURLPrefixes []string `yaml:"allowedArtifactURLPrefixes"`
 	// AllowedImageRepos: registry/path prefixes (e.g. "registry.example.com/auriga/").
 	AllowedImageRepos []string `yaml:"allowedImageRepos"`
-	MaxCPUMillis      int64    `yaml:"maxCPUMillis"`
-	MaxMemoryMB       int64    `yaml:"maxMemoryMB"`
-	MaxPIDs           int64    `yaml:"maxPIDs"`
-	MaxArtifactBytes  int64    `yaml:"maxArtifactBytes"`
+	// AllowedImageRefs optionally further restricts images to byte-for-byte references.
+	// Nil adds no restriction; a non-nil empty list denies all images.
+	AllowedImageRefs []string `yaml:"allowedImageRefs"`
+	MaxCPUMillis     int64    `yaml:"maxCPUMillis"`
+	MaxMemoryMB      int64    `yaml:"maxMemoryMB"`
+	MaxPIDs          int64    `yaml:"maxPIDs"`
+	MaxArtifactBytes int64    `yaml:"maxArtifactBytes"`
 	// AllowAnyArtifact disables URL checks (unit tests only).
 	AllowAnyArtifact bool `yaml:"allowAnyArtifact"`
 	// AllowAnyImage disables image registry checks (unit tests only).
@@ -164,8 +168,12 @@ func (p Policy) AllowArtifactURL(raw string) error {
 	return fmt.Errorf("policy: artifact url not allowlisted")
 }
 
-// AllowImage requires repo@sha256:… and an allowlisted registry/path prefix.
+// AllowImage requires repo@sha256:… and an allowlisted registry/path prefix,
+// plus an exact reference match when AllowedImageRefs is non-nil.
 func (p Policy) AllowImage(image string) error {
+	if p.AllowedImageRefs != nil && !slices.Contains(p.AllowedImageRefs, image) {
+		return fmt.Errorf("policy: image reference not allowlisted")
+	}
 	if p.AllowAnyImage {
 		if !strings.Contains(image, "@sha256:") {
 			return fmt.Errorf("policy: image must be pinned by digest")

@@ -43,9 +43,48 @@ operator的 `stack.env` 与派生 `materials/access.env` 分层处理：派生�
 
 第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不要给 NAS 配方追加 dev、远程 emergency 或 observer 例外。
 
+## 消费独立审核的正式运行时
+
+安装可选接收 [runtime-release](runtime-release.md) 的公开签发目录。operator 先通过可信发布渠道独立审核并固定公开根，
+再在 `stack.env` 同时设置下列三项；全空只准备基础栈，缺任何一项均在生成安装材料前拒绝：
+
+```sh
+AURIGA_RUNTIME_BUNDLE=/srv/container/releases/release-7
+AURIGA_RUNTIME_ROOT=/srv/container/operator-approved/root.pb
+AURIGA_RUNTIME_IMAGE=registry.example.com/auriga/dsh@sha256:<原始manifest的64位小写hex>
+```
+
+对应 bootstrap 参数为 `-runtime-bundle`、`-runtime-root`、`-runtime-image`。根必须位于 bundle 外，不能把包内根直接当作外部授权，
+不能每次安装新建一个发布根。目录和根须已由 operator 准备为固定 uid10001 可读取、祖先可遍历的公开只读材料；
+bootstrap 不修改输入的 owner/mode，不复制发布私钥。即使以 root 调用，预检与装配也通过清空补充组的固定 uid10001 子进程，
+直接调用生产 `runtimebundle.Verify`，固定目标 `linux/amd64`，要求与独立批准的完整 image 一致。
+验签、根独立性、原始 M/C、目录额外叶和链接检查均由生产导入器执行，失败不生成 PKI/安装身份。
+
+装配只使用成功 `Material` 的复制型快照，生成 `materials/templates/real-dsh.pb`、`runtime-keys/root.pb` 及
+`runtime-proofs/<signedMhex>/{manifest.json,config.json}`。模板保留 Docker-only 正式声明、real profile 的端口7860及
+`imBots=none`、`terminalSources=browser-only`，secrets 只含**本次安装**的 identity 公钥；没有发布私钥或安装凭据。
+资源请求为 CPU500m、PIDs128、disk1GiB，内存直接使用本次 `AURIGA_INSTANCE_MAX_MEMORY_MB`，不隐式提高默认512。
+启用时该值至少256MiB，以满足生产 `WorkspaceTemplates` 的形状检查；这不是 DSH 已验证的最低资源要求。
+基础栈准备模式仍接受原来的内存输入范围。
+
+上述模板、公开根、原字节 proof、三项原输入与内容摘要和预算一起封入安装 receipt。
+同本版本同输入重入逐字节无损复用，不旋转、补叶或修权限；变 image、bundle/root 路径或内容、预算、启用模式，以及坏/缺 receipt、
+未知模板或 proof、链接/硬链接和异常 owner/mode 均拒绝。首装中途 I/O 失败保留痕迹，不能删除 receipt 来补全旧信任，
+应保留材料诊断并使用全新安装目录。旧目录缺新增固定叶/目录时拒绝，不自动补写或迁移；保留无 runtime 的原 receipt 摘要字节语义不代表完成旧安装兼容迁移。
+
+platform 从 receipt 保护的模板和 artifact-keys 目录只读消费，并在既有 CA SPKI pin + TLS 首次 Join 中交付审核根；
+agent 只读挂载同一封存 proof 目录。镜像 policy 仅加入批准镜像的完整 repository 前缀值，并通过额外的
+`allowedImageRefs` 精确限制唯一批准的完整 `repo@sha256`；原前缀策略仍是并行必需条件，不自动放行其他仓库。
+没有添根 RPC、force 或明文 Join 旁路；激活仍执行生产当前根、持久高水位、防回滚和 Engine 身份检查。
+
+公开 bundle 只有签名声明与原 M/C，**不含镜像层，也不是完整离线安装包**。部署者还需通过另行审核的运输方式，
+让 Docker 能取得完全相同的 `repo@sha256`，不能重标 repository 或用 `docker save` 内部 JSON 冒充 proof。
+本流程不拉取镜像、不登录 registry、不访问现场。全空模式的基础栈健康/static 检查不能启动真实 DSH 实例，
+不能宣称实例已就绪；即使成功装配了正式材料，也仍需另做真实资源、网络、登录和完整生命周期验收。
+
 ## 材料与持续服务票据
 
-源材料在 `config/materials/`，包括 `pki/`、identity 签名 key、生产 access、派生配置与 `iam-installation/`。源根、`pki/`、`templates/` 精确为10001:10001/0755；固定源叶子必须是10001:10001的单链接普通文件，所有PKI私钥及identity签名key为0600，其余固定公开材料为0644。NAS用持有的目录FD和no-follow打开验证这些元数据，并在receipt复用、生成封存前后复核。私密安装目录另为0700、文件0600、单链接；所有祖先只信 root/installer且不可组/其它写（root sticky临时祖先例外）。普通重入不修复源文件权限。`config/pki-edge/` 是单独的精确 runtime 叶副本，归65532，私钥0600，绝不包含 CA key、workspace key、IAM server key或proxy client key；identity签名key也独立复制，源文件不chown。
+源材料在 `config/materials/`，包括 `pki/`、identity 签名 key、生产 access、派生配置与 `iam-installation/`。源根、`pki/`、`templates/`、`runtime-keys/`、`runtime-proofs/` 及启用时的精确 proof 子目录均为10001:10001/0755；固定源叶子必须是10001:10001的单链接普通文件，所有PKI私钥及identity签名key为0600，其余固定公开材料为0644。NAS用持有的目录FD和no-follow打开验证这些元数据，拒绝未知叶/目录，并在receipt复用、生成封存前后复核。私密安装目录另为0700、文件0600、单链接；所有祖先只信 root/installer且不可组/其它写（root sticky临时祖先例外）。普通重入不修复源文件权限。`config/pki-edge/` 是单独的精确 runtime 叶副本，归65532，私钥0600，绝不包含 CA key、workspace key、IAM server key或proxy client key；identity签名key也独立复制，源文件不chown。
 
 IAM 的 HTTPS HTTP-hop 使用专门 `iam` server 证书（DNS SAN `platform`）和 `edge-iam` client 证书（DNS SAN `edge.auriga.internal`），与节点mTLS和前置代理证书分开。platform 只认可固定 edge 组件网络 IP 和本地健康探针。gRPC 9091 使用同一专用hop mTLS，租户委派固定 `svc:edge`；edge不拿实例Ed25519 key伪造服务JWT。
 
@@ -63,11 +102,11 @@ platform维持uid10001，并加入reader group65532以给新JWT正确设gid。�
 
 容器继续cap-drop ALL、no-new-privileges、非privileged。agent自身因Docker socket+host网络相当于宿主root，只补CHOWN/DAC_OVERRIDE/FOWNER以管理实例；它不是生产多租户强隔离模型。registry无认证但只在宿主loopback发布；前缀白名单不替代镜像摘要/签名信任。platform.env暂仍包含DB/NATS口令和加密key，Docker inspect权限意味着可以看到这些环境。
 
-保留基础预算约3.5–4GiB、约2CPU；实例默认500m CPU、512MiB、128PIDs，容量MAX_INSTANCES=1。policy使用真实 `allowedImageRepos`，只允许当前registry loopback端口下 `auriga/`，镜像须固定repo@sha256摘要。
+保留基础预算约3.5–4GiB、约2CPU；实例默认500m CPU、512MiB、128PIDs，容量MAX_INSTANCES=1。未启用runtime时保留原本地registry前缀policy，但没有可创建实例的模板；启用时改为上述独立批准的完整repository与唯一精确image限制。
 
 operator 在 `stack.env` 设置 `AURIGA_INSTANCE_MAX_MEMORY_MB`，生成每实例 `agent-policy.yaml` 的 `maxMemoryMB`；直接调用 bootstrap 对应字符串参数 `-instance-max-memory-mb`。缺省和显式 `512` 都得到512MiB；确认宿主实际可用容量后可明确选择 `1024`。仅接受无前导零的正ASCII十进制整数，范围1–8796093022207MiB（`MaxInt64/(1024*1024)`），防止Docker字节换算溢出；显式空值、0、正负号、空白、小数、指数、非ASCII数字及越界在写材料前拒绝。该输入通过校验、root到固定uid10001子进程及生成使用同一规范值，不放入派生九字段 `access.env`。
 
-每实例上限、节点总容量 `AURIGA_AGENT_CAPACITY_MEMORY_MB` 和 agent 容器自身的 cgroup 内存限制是三个独立配置；本参数不会自动提高后两者，也不调整CPU/PID或实例数。公开real DSH既有模板请求1024MiB；agent继续取min(规格请求,本地上限)，默认/显式512上限时实际分配512MiB，选择1024上限时分配1024MiB，不会仅因请求超限而拒绝。1024MiB是模板请求，不是已验证的最低需求；生成参数成功不代表真实DSH在该预算下可用，不能把截断后的启动或未测场景记为完整生命周期通过。
+每实例上限、节点总容量 `AURIGA_AGENT_CAPACITY_MEMORY_MB` 和 agent 容器自身的 cgroup 内存限制是三个独立配置；本参数不会自动提高后两者，也不调整CPU/PID或实例数。NAS正式模板请求使用同一预算值，默认/显式512请求512MiB，选择1024请求1024MiB；agent继续取min(规格请求,本地上限)，生产容量检查仍独立执行。512/1024都不是已验证的最低需求；生成参数成功不代表真实DSH在该预算下可用，不能把截断后的启动或未测场景记为完整生命周期通过。
 
 规范内存值纳入receipt输入摘要；同值重入保留材料与receipt，变值拒绝且不修复原件。旧bootstrap生成的receipt不包含该输入，即使本次使用缺省或显式512也会拒绝。升级前应保留完整材料，另走独立受控迁移；本变更不提供旧receipt迁移、不删除receipt重建信任。现场预算仍须按真实可用容量选择和验收。
 

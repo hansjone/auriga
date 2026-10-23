@@ -91,7 +91,7 @@ func loadNASAccess(path, peerIP, subnet string, registryPort int) ([]byte, deplo
 }
 
 func nasMaterialSet() materials.MaterialSet {
-	return materials.MaterialSet{PrivateFiles: []string{"edge.secret", "internal.properties"}, ManagedDirectories: []string{"pki", "templates"}, PublicFiles: []string{
+	return materials.MaterialSet{PrivateFiles: []string{"edge.secret", "internal.properties"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "runtime-proofs"}, PublicFiles: []string{
 		"pki/proxy-ca.crt", "pki/proxy-ca.key", "pki/proxy-edge.crt", "pki/proxy-edge.key", "pki/proxy-client.crt", "pki/proxy-client.key",
 		"pki/ca.crt", "pki/ca.key", "pki/workspace.crt", "pki/workspace.key", "pki/edge.crt", "pki/edge.key", "pki/iam.crt", "pki/iam.key", "pki/edge-iam.crt", "pki/edge-iam.key",
 		"identity-signing-keys.json", "identity-keys.json", "ca-sha256.txt", "access.json", "access.env", "edge.config.json", "platform-access.yaml", "iam-healthcheck.sh", "agent-policy.yaml",

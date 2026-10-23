@@ -151,6 +151,20 @@ AURIGA_AGENT_CAPACITY_MAX_INSTANCES=1
 EOF
 
 if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1; then
+  # Partial runtime opt-in must fail in the actual preflight before secrets/PKI.
+  _runtime_index=0
+  for _runtime_key in AURIGA_RUNTIME_BUNDLE AURIGA_RUNTIME_ROOT AURIGA_RUNTIME_IMAGE; do
+    _runtime_index=$((_runtime_index + 1))
+    _runtime_root="$TMP/srv/container/auriga-runtime-$_runtime_index"
+    mkdir -p "$_runtime_root"
+    sed "s|^AURIGA_DATA_ROOT=.*|AURIGA_DATA_ROOT=$_runtime_root|" "$DATA/stack.env" >"$_runtime_root/stack.env"
+    printf '%s=%s\n' "$_runtime_key" /public/example >>"$_runtime_root/stack.env"
+    if AURIGA_DATA_ROOT="$_runtime_root" sh "$ROOT/scripts/init.sh" >"$TMP/runtime-init.log" 2>&1; then
+      fail_msg "runtime_partial_$_runtime_index" "partial runtime inputs accepted"
+    elif grep -q 'must be supplied together' "$TMP/runtime-init.log" && [ ! -e "$_runtime_root/config" ] && [ ! -e "$_runtime_root/secrets" ]; then
+      pass "runtime_partial_$_runtime_index"
+    else fail_msg "runtime_partial_$_runtime_index" "wrong rejection or material write"; fi
+  done
   # Both public shell entry points must pass explicit empty/invalid values to Go,
   # before init creates secrets/config or bootstrap creates its material root.
   _budget_index=0
@@ -177,6 +191,12 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
   else
     fail_msg init_first "init failed"
   fi
+  if [ -d "$DATA/config/materials/templates" ] && [ -d "$DATA/config/materials/runtime-keys" ] \
+    && [ -d "$DATA/config/materials/runtime-proofs" ] && [ ! -e "$DATA/config/templates" ] \
+    && grep -qx 'AURIGA_WORKSPACE_ARTIFACT_KEYS_DIRECTORY=/etc/auriga/runtime-keys' "$DATA/config/platform.env" \
+    && grep -qx 'AURIGA_AGENT_RUNTIME_PROOFS_DIR=/etc/auriga/runtime-proofs' "$DATA/config/agent.env"; then
+    pass runtime_consumer_wiring
+  else fail_msg runtime_consumer_wiring "unreceipted templates or missing consumer configuration"; fi
   if [ "$NAS_ALLOW_NONROOT" != 1 ]; then
     if [ "$(stat -c '%u:%a' "$DATA/config/postgres/init.sql")" = 999:600 ] \
       && [ "$(stat -c '%u:%g:%a' "$DATA/socket-share")" = 0:65532:750 ]; then

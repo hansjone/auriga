@@ -175,11 +175,23 @@ allowedArtifactURLPrefixes:
   - https://artifacts.example.com/
 allowedImageRepos:
   - registry.example.com/auriga/
+allowedImageRefs:
+  - registry.example.com/auriga/dsh@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 maxCPUMillis: 8000
 maxMemoryMB: 16384
 maxPIDs: 2048
 maxArtifactBytes: 2147483648
 ```
+
+`allowedImageRepos` 继续按仓库字符串前缀匹配，完整仓库名也不表示精确匹配。
+可选的 `allowedImageRefs` 是额外的 AND 约束：镜像完整引用必须逐字节等于列表中一项，
+同时仍须满足 `allowedImageRepos` 和既有 `repo@sha256:<64 hex>` 形状检查。
+示例中的摘要是占位值，部署时替换为批准的完整引用；同仓库其他摘要、子仓库、tag、
+别名和不同大小写都不会自动匹配。省略该字段（nil）保留原前缀语义，显式 `allowedImageRefs: []`
+拒绝全部镜像；空字符串不代表通配，列表项不裁剪空白或规范化。
+正式发行校验在调用策略前另行严格检查 OCI locator，本列表只缩小本机授权集合。
+YAML 中的 `allowAnyImage` / `allowAnyArtifact` 始终被清除；仅供内存测试的
+`AllowAnyImage` 也不能绕过非 nil 的精确引用约束。
 
 ## 目录布局（`<dataRoot>`）
 

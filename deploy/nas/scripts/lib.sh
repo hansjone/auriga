@@ -422,7 +422,9 @@ validate_nas_access() {
     -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
     -lan-ip "${AURIGA_EDGE_LAN_IP:?}" -lan-subnet "${AURIGA_LAN_SUBNET:?}" \
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}" \
-    -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}"
+    -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
+    -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
+    -runtime-image "${AURIGA_RUNTIME_IMAGE-}"
 }
 
 bootstrap_nas_materials() {
@@ -431,7 +433,9 @@ bootstrap_nas_materials() {
     -edge-peer-ip "${AURIGA_INTERNAL_EDGE_IP:?}" -internal-subnet "${AURIGA_INTERNAL_SUBNET:?}" \
     -lan-ip "${AURIGA_EDGE_LAN_IP:?}" -lan-subnet "${AURIGA_LAN_SUBNET:?}" \
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}" \
-    -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}")
+    -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
+    -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
+    -runtime-image "${AURIGA_RUNTIME_IMAGE-}")
 }
 
 install_edge_material() {

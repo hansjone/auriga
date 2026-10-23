@@ -130,7 +130,8 @@ services:
       - ${AURIGA_DATA_ROOT}/config/materials/iam-installation:/run/auriga-installation:ro
       - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal
       - ${AURIGA_DATA_ROOT}/config/materials/pki:/etc/auriga/pki:ro
-      - ${AURIGA_DATA_ROOT}/config/templates:/etc/auriga/templates:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/templates:/etc/auriga/templates:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/runtime-keys:/etc/auriga/runtime-keys:ro
       - ${AURIGA_DATA_ROOT}/enrollment:/var/auriga
     networks: [internal, publish]
     expose:
@@ -231,6 +232,7 @@ services:
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/identity-keys.json:/etc/auriga/identity-keys.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/runtime-proofs:/etc/auriga/runtime-proofs:ro
     mem_limit: 512m
     cpus: 0.50
     pids_limit: 256

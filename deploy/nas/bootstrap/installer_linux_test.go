@@ -46,6 +46,9 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 	t.Run("memory-budget-and-receipt", func(t *testing.T) {
 		testNASMemoryBudgetAndReceipt(t, root, binary, input, raw)
 	})
+	t.Run("signed-runtime", func(t *testing.T) {
+		testNASSignedRuntime(t, root, binary, input)
+	})
 	invokeWithLAN := func(out, lanIP string) ([]byte, error) {
 		return exec.Command(binary, "-out", out, "-access-file", input, "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26", "-lan-ip", lanIP, "-lan-subnet", "192.0.2.0/26").CombinedOutput()
 	}
