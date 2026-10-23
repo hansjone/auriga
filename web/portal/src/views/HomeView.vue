@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import {
@@ -8,24 +8,41 @@ import {
   ElDropdownItem,
   ElDropdownMenu,
 } from 'element-plus';
-import type { Me } from '@auriga/shared';
+import { isApiError, type Me } from '@auriga/shared';
 import { iamApi } from '../api';
+import InstanceCard from '../components/InstanceCard.vue';
 
 const { t, locale } = useI18n();
 const router = useRouter();
 const me = ref<Me | null>(null);
 const light = ref(document.documentElement.dataset.theme === 'light');
-
-onMounted(async () => {
-  try {
-    me.value = await iamApi.getMe();
-  } catch {
-    void router.replace({
-      path: '/login',
-      query: { returnTo: '/' },
-    });
-  }
+const loadError = ref(false);
+const loading = ref(false);
+let active = true;
+onBeforeUnmount(() => {
+  active = false;
 });
+
+async function loadMe() {
+  if (loading.value) return;
+  loading.value = true;
+  loadError.value = false;
+  try {
+    const value = await iamApi.getMe();
+    if (active) me.value = value;
+  } catch (error) {
+    if (!active) return;
+    if (isApiError(error) && error.status === 401)
+      void router.replace({
+        path: '/login',
+        query: { returnTo: '/' },
+      });
+    else loadError.value = true;
+  } finally {
+    if (active) loading.value = false;
+  }
+}
+onMounted(loadMe);
 
 function language() {
   locale.value = locale.value === 'en' ? 'zh-CN' : 'en';
@@ -39,6 +56,7 @@ function theme() {
 
 async function logout() {
   await iamApi.logout();
+  me.value = null;
   void router.replace('/login');
 }
 </script>
@@ -64,7 +82,11 @@ async function logout() {
     </header>
     <main class="content auriga-glass">
       <h1>{{ t('home.title') }}</h1>
-      <p class="muted">{{ t('home.empty') }}</p>
+      <InstanceCard v-if="me" />
+      <p v-if="loadError" role="alert">{{ t('errors.unknown') }}</p>
+      <ElButton v-if="loadError" @click="loadMe">{{
+        t('login.retry')
+      }}</ElButton>
     </main>
   </div>
 </template>
