@@ -129,6 +129,10 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 	f.driver = runtime.NewDockerWithClient(f.client, "")
 	f.driver.Policy.AllowAnyImage = true
 	f.driver.EdgeContainer, f.driver.PlatformHost = "test-edge", "portal.example.com"
+	// Install the real trust/Store and original actual record before callers
+	// start their recovery deadline. CA/key generation and durable seeding are
+	// fixture setup, not part of the bounded Engine recovery being asserted.
+	seedDockerRecord(t, f.driver, "recovery-test", 7)
 	return f
 }
 

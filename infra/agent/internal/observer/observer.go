@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -306,6 +307,15 @@ func (o *Observer) refreshWakes(lastMod map[string]time.Time) {
 	for id := range o.nextWakes {
 		if !active[id] {
 			delete(o.nextWakes, id)
+		}
+	}
+	// Both caches belong to the target's observed lifetime. Keeping an mtime
+	// after forgetting its deadline would suppress the first read when the
+	// same target returns with an unchanged file, including an already due wake.
+	for key := range lastMod {
+		id, _, _ := strings.Cut(key, "|")
+		if !active[id] {
+			delete(lastMod, key)
 		}
 	}
 }

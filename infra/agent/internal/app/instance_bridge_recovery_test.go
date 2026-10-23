@@ -3,9 +3,12 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -22,6 +25,144 @@ import (
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+type stepWakeTargets struct {
+	targets *observer.SliceTargets
+	step    atomic.Bool
+	entered chan struct{}
+	advance chan struct{}
+	done    chan struct{}
+}
+
+func (s *stepWakeTargets) Targets() []observer.InstanceTarget {
+	if s.step.Load() {
+		select {
+		case s.entered <- struct{}{}:
+		case <-s.done:
+			return nil
+		}
+		select {
+		case <-s.advance:
+		case <-s.done:
+			return nil
+		}
+	}
+	return s.targets.Targets()
+}
+
+type wakeLifecycleReporter struct {
+	wakes  chan *nodev1.WakeSchedule
+	health chan struct{}
+	usage  chan struct{}
+}
+
+func (r wakeLifecycleReporter) ReportWake(w *nodev1.WakeSchedule) { r.wakes <- w }
+func (r wakeLifecycleReporter) ReportReady(string, bool) {
+	select {
+	case r.health <- struct{}{}:
+	default:
+	}
+}
+func (r wakeLifecycleReporter) ReportUsage(*nodev1.NodeUsage) {
+	select {
+	case r.usage <- struct{}{}:
+	default:
+	}
+}
+
+func TestBridgeRevocationReaddConsumesUnchangedDueWake(t *testing.T) {
+	f := newRecoveryFixture(t)
+	f.healthy.Store(true)
+	d := f.driver.Driver.(*runtime.Docker)
+	const id = "recovery-test"
+	recoverRunning := func() {
+		t.Helper()
+		if err := d.Activation.Recover(context.Background(), id, 1, func(ctx context.Context) error { return d.Start(ctx, id) }); err != nil {
+			t.Fatal(err)
+		}
+		f.bridge.Sync(&nodev1.InstanceStatus{InstanceId: id, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, Ready: true})
+	}
+	root := filepath.Join(f.bridge.cfg.InstancesDir(), id, "home")
+	if err := os.MkdirAll(filepath.Join(root, "ops-cron"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
+	due := now.Add(time.Minute)
+	path := filepath.Join(root, "ops-cron", "store.json")
+	body := fmt.Sprintf(`{"jobs":[{"enabled":true,"nextRunAt":%d,"schedule":{"kind":"at","at":%q}}]}`, due.UnixMilli(), due.Format(time.RFC3339Nano))
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &wakeClock{}
+	clock.nanos.Store(now.UnixNano())
+	source := &stepWakeTargets{targets: f.targets, entered: make(chan struct{}), advance: make(chan struct{}), done: make(chan struct{})}
+	reporter := wakeLifecycleReporter{wakes: make(chan *nodev1.WakeSchedule, 8), health: make(chan struct{}, 1), usage: make(chan struct{}, 1)}
+	obs := observer.New(observer.Config{Source: source, Reporter: reporter, Collector: observer.NopResources{}, Clock: clock, WatchPoll: time.Millisecond, HealthEvery: time.Hour, UsageEvery: time.Hour})
+	recoverRunning()
+	obs.Start(context.Background())
+	t.Cleanup(func() { close(source.done); obs.Stop() })
+	wait := func(ch <-chan struct{}, what string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatal(what)
+		}
+	}
+	wait(reporter.health, "initial health loop")
+	wait(reporter.usage, "initial usage loop")
+	select {
+	case first := <-reporter.wakes:
+		if first.NextWakeAt == nil || !first.NextWakeAt.AsTime().Equal(due) {
+			t.Fatal(first)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial wake missing")
+	}
+	if _, ok := f.registry.Lookup(id); !ok {
+		t.Fatal("initial ingress absent")
+	}
+	// Initial health/usage scans are finished; only the watch loop calls this
+	// source until their hour-long intervals elapse. Each barrier starts the
+	// next refresh only after the previous refresh has fully completed.
+	source.step.Store(true)
+	wait(source.entered, "watch did not reach first barrier")
+	f.inspectError.Store(true)
+	if _, err := d.Endpoint(id); err == nil {
+		t.Fatal("unproven actual object kept its endpoint")
+	}
+	if _, ok := f.registry.Lookup(id); ok || len(f.targets.Targets()) != 0 {
+		t.Fatal("failed actual proof retained ingress or observer target")
+	}
+	f.inspectError.Store(false)
+	// refreshWakes samples the clock before reading Targets. Advance it before
+	// releasing the empty pass so the next pass samples the due timestamp.
+	clock.nanos.Store(due.UnixNano())
+	source.advance <- struct{}{}
+	wait(source.entered, "empty-target refresh did not finish")
+	recoverRunning()
+	if _, ok := f.registry.Lookup(id); !ok {
+		t.Fatal("qualified recovery did not restore ingress")
+	}
+	source.advance <- struct{}{}
+	wait(source.entered, "readded-target refresh did not finish")
+	after, err := os.Stat(path)
+	if err != nil || !before.ModTime().Equal(after.ModTime()) {
+		t.Fatal("test changed schedule mtime", err)
+	}
+	select {
+	case wake := <-reporter.wakes:
+		if wake.NextWakeAt != nil {
+			t.Fatal("due wake not consumed", wake)
+		}
+	default:
+		t.Fatal("qualified recovery restored ingress but lost unchanged due wake")
+	}
+}
 
 type countedRecoveryDriver struct {
 	runtime.Driver

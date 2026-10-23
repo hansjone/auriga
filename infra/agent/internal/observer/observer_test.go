@@ -76,6 +76,98 @@ func TestWatch_RecalculatesDueWakeWithoutFileChange(t *testing.T) {
 	}
 }
 
+func TestWatch_TargetRemovalForgetsScheduleCaches(t *testing.T) {
+	for _, kind := range []string{"at", "cron", "next-job", "empty"} {
+		for _, readd := range []string{"unchanged", "new-root", "recreated-file"} {
+			t.Run(kind+"/"+readd, func(t *testing.T) {
+				now := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+				due := now.Add(time.Minute)
+				at := func(when time.Time) string {
+					return fmt.Sprintf(`{"enabled":true,"schedule":{"kind":"at","at":%q}}`, when.Format(time.RFC3339))
+				}
+				jobs := at(due)
+				switch kind {
+				case "cron":
+					jobs = `{"enabled":true,"schedule":{"kind":"cron","expr":"* * * * *","timezone":"UTC"}}`
+				case "next-job":
+					jobs += "," + at(due.Add(time.Minute))
+				case "empty":
+					jobs = ""
+				}
+				write := func(root, content string) string {
+					t.Helper()
+					if err := os.MkdirAll(filepath.Join(root, "ops-cron"), 0700); err != nil {
+						t.Fatal(err)
+					}
+					path := filepath.Join(root, "ops-cron", "store.json")
+					if err := os.WriteFile(path, []byte(`{"jobs":[`+content+`]}`), 0600); err != nil {
+						t.Fatal(err)
+					}
+					return path
+				}
+				root, otherRoot := t.TempDir(), t.TempDir()
+				path := write(root, jobs)
+				original, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				write(otherRoot, at(due.Add(10*time.Minute)))
+				clock, reporter, source := &MutableClock{T: now}, &captureReporter{}, &SliceTargets{}
+				target := InstanceTarget{ID: "returning", RootDir: root, Process: ProcessStopped}
+				other := InstanceTarget{ID: "unrelated", RootDir: otherRoot, Process: ProcessStopped}
+				source.Set([]InstanceTarget{target, other})
+				obs := New(Config{Source: source, Reporter: reporter, Clock: clock, Collector: NopResources{}})
+				mod := map[string]time.Time{}
+				obs.refreshWakes(mod)
+				if len(reporter.wakes) != 2 || len(mod) != 2 {
+					t.Fatal("initial schedules missing", reporter.wakes, mod)
+				}
+				otherMod := mod["unrelated|ops-cron/store.json"]
+				otherNext := obs.nextWakes["unrelated"]
+				source.Set([]InstanceTarget{other})
+				obs.refreshWakes(mod)
+				if len(mod) != 1 || !mod["unrelated|ops-cron/store.json"].Equal(otherMod) || !obs.nextWakes["unrelated"].Equal(otherNext) {
+					t.Fatal("target removal retained stale mtime or changed another target", mod, obs.nextWakes)
+				}
+				if _, known := obs.nextWakes[target.ID]; known {
+					t.Fatal("absent target retained wake deadline")
+				}
+				switch readd {
+				case "new-root":
+					target.RootDir = t.TempDir()
+					path = write(target.RootDir, jobs)
+				case "recreated-file":
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
+					write(root, jobs)
+				}
+				if err := os.Chtimes(path, original.ModTime(), original.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+				clock.Advance(time.Minute)
+				source.Set([]InstanceTarget{target, other})
+				obs.refreshWakes(mod)
+				if len(reporter.wakes) != 3 || reporter.wakes[2].InstanceId != target.ID {
+					t.Fatal("same-mtime readded schedule was not reread", reporter.wakes)
+				}
+				next := reporter.wakes[2].NextWakeAt
+				if kind == "cron" || kind == "next-job" {
+					if next == nil || !next.AsTime().Equal(due.Add(time.Minute)) {
+						t.Fatal("next occurrence/job missing", next)
+					}
+				} else if next != nil {
+					t.Fatal("consumed/empty schedule retained deadline", next)
+				}
+				obs.refreshWakes(mod)
+				if len(reporter.wakes) != 3 {
+					t.Fatal("unchanged schedule repeatedly reported")
+				}
+			})
+		}
+	}
+}
+
 type captureReporter struct {
 	mu    sync.Mutex
 	wakes []*nodev1.WakeSchedule
