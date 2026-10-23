@@ -2,12 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { mkdtemp, readFile, writeFile, mkdir, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { collectRuntimeProofs, maxProofBytes, strictJSON, verifyProof } from '../../deploy/compose/scripts/collect-runtime-proofs.mjs';
+import { collectRuntimeProofs, imageParts, maxProofBytes, strictJSON, verifyProof } from '../../deploy/compose/scripts/collect-runtime-proofs.mjs';
 
 const hash = raw => `sha256:${createHash('sha256').update(raw).digest('hex')}`;
+const runFile = promisify(execFile);
 function fixture(mode = 'oci', config = Buffer.from('{\n "os": "linux", "architecture":"amd64"\n}')) {
   const media = mode === 'docker' ? 'application/vnd.docker.distribution.manifest.v2+json' : 'application/vnd.oci.image.manifest.v1+json';
   const type = mode === 'docker' ? 'application/vnd.docker.container.image.v1+json' : 'application/vnd.oci.image.config.v1+json';
@@ -142,4 +146,50 @@ test('structural checks preserve exact user map keys and unrelated metadata exte
   const directory = await collectRuntimeProofs(f.image, root, origin);
   assert.deepEqual(await readFile(join(directory, 'manifest.json')), f.m);
   assert.deepEqual(await readFile(join(directory, 'config.json')), f.c);
+});
+
+test('explicit approved repository fetches exact raw M/C from its random loopback port', async t => {
+  const f = fixture();
+  const origin = await registry(t, f, (_response, _manifest, request) => {
+    assert.match(request.url, /^\/v2\/team\/runtime\/(?:manifests|blobs)\/sha256:[a-f0-9]{64}$/);
+  });
+  const repository = `${origin.slice('http://'.length)}/team/runtime`;
+  const image = `${repository}@${hash(f.m)}`;
+  const root = await output(t);
+  const destination = await collectRuntimeProofs(image, root, undefined, repository);
+  assert.deepEqual(await readFile(join(destination, 'manifest.json')), f.m);
+  assert.deepEqual(await readFile(join(destination, 'config.json')), f.c);
+  assert.equal(await collectRuntimeProofs(image, root, undefined, repository), destination);
+  assert.equal(imageParts(image, repository).repository, 'team/runtime');
+  assert.doesNotThrow(() => verifyProof(image, f.m, f.c, repository));
+  assert.throws(() => imageParts(image));
+});
+
+test('explicit repository rejects wrong approval, wrong M and origin before any output', async t => {
+  const f = fixture(), origin = await registry(t, f);
+  const repository = `${origin.slice('http://'.length)}/team/runtime`;
+  const root = await output(t);
+  for (const [image, approved, override] of [
+    [`${repository}@${hash(f.m)}`, `${origin.slice('http://'.length)}/team/other`, undefined],
+    [`${repository}@sha256:${'a'.repeat(64)}`, repository, undefined],
+    [`${repository}@sha256:${'A'.repeat(64)}`, repository, undefined],
+    [`${repository}@${hash(f.m)}`, repository, 'http://127.0.0.1:1'],
+  ]) {
+    await assert.rejects(collectRuntimeProofs(image, root, override, approved));
+    assert.deepEqual(await readdir(root), []);
+  }
+  assert.throws(() => verifyProof(`${repository}@${hash(f.m)}`, f.m, f.c));
+});
+
+test('collector CLI derives the only network origin from approved repository', async t => {
+  const f = fixture(), origin = await registry(t, f);
+  const repository = `${origin.slice('http://'.length)}/team/runtime`;
+  const image = `${repository}@${hash(f.m)}`;
+  const root = await output(t);
+  const script = fileURLToPath(new URL('../../deploy/compose/scripts/collect-runtime-proofs.mjs', import.meta.url));
+  await runFile(process.execPath, [script, image, root, '--repository', repository]);
+  assert.deepEqual(await readFile(join(root, hash(f.m).slice(7), 'manifest.json')), f.m);
+  const rejectedRoot = await output(t);
+  await assert.rejects(runFile(process.execPath, [script, image, rejectedRoot, '--repository', `${origin.slice('http://'.length)}/team/other`]));
+  assert.deepEqual(await readdir(rejectedRoot), []);
 });

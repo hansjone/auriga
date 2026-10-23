@@ -7,8 +7,42 @@
 
 本批只交付声明、公开根及单平台原始 manifest/config，**不是完整可部署发行包**。
 NAS 通过[公开安装配方](nas.md#消费独立审核的正式运行时)复用严格导入，装配受 receipt 保护的正式模板、公开根和原始 proof。
-registry 下载与认证、镜像层离线载体、build 入口参数化均不在此工具内；签名通过也不代表镜像层已经到位。
+registry 认证、镜像层离线载体均不在此工具内；签名通过也不代表镜像层已经到位。
 不支持 native、归档混合声明、背书链管理或根自动轮换。
+
+## 本地 registry 构建与原始 proof
+
+在受控本机环境准备已独立审核并固定于 `deploy/compose/real-dsh/versions.json` 的 `NODE_IMAGE`。
+从仓库根目录运行下列命令；本地 registry 须先由 operator 准备，命令会真实 build/push，
+然后从本次**精确仓库**的唯一合法 RepoDigest 写元数据。无 `--image-tag` 时仍使用
+`127.0.0.1:5000/auriga/real-dsh:w3`；`--metadata-out` 可与新选项组合。
+
+```powershell
+$env:NODE_IMAGE = '<versions.json 中已审核的完整 nodeImage pin>'
+node deploy/compose/scripts/build-real-dsh.mjs `
+  --image-tag localhost:50123/team/real-dsh:release_1 `
+  --metadata-out ./release-work/real-dsh.json
+```
+
+`--image-tag` 只接受规范 ASCII 的 `127.0.0.1:<端口>` 或 `localhost:<端口>`、小写仓库路径和合法 tag。
+端口为 1..65535 且无前导零。builder 仍固定 linux/amd64、禁用构建证明索引，并只复制白名单构建输入。
+记录元数据中的精确 `image` 值（`repo@sha256:<M>`），再从同一本地仓库取得原始 M/C：
+
+```powershell
+node deploy/compose/scripts/collect-runtime-proofs.mjs `
+  '<元数据中的完整 image>' ./release-work/runtime-proofs `
+  --repository localhost:50123/team/real-dsh
+```
+
+`--repository` 是独立批准的完整本地仓库，须与 image 的 repo 逐字相等；网络地址仅从该仓库推导。
+无此选项时 collector 仍仅接收原 `127.0.0.1:5000/auriga/{fake,real}-dsh` fixture。
+它按 M 下载单平台原始 manifest 和 descriptor 指向的 config，严格校验后保留原字节。
+将得到的 `manifest.json`、`config.json` 作为下文 `sign` 的输入，并按已有显式 root、私钥、
+序号、时间及目标平台步骤签发；消费方继续将公开 bundle 中的 root 与**外部独立审核的根**核对，
+以 `verify --root ... --allow-image <精确 image>` 严格导入。新建的本地 fixture 根不因此成为官方授权根。
+
+此流程没有镜像层载体、公网 registry 认证客户端，也不保证跨 registry 重发布后保持同一个 M。
+部署前仍须独立解决镜像层运输与原 repo@M 可用性。
 
 ## 发布者输入
 

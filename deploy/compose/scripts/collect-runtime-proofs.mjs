@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectorArgs, localRepository, repositoryDigest } from './runtime-image-input.mjs';
 
 export const maxProofBytes = 4 * 1024 * 1024;
 const manifestTypes = ['application/vnd.oci.image.manifest.v1+json', 'application/vnd.docker.distribution.manifest.v2+json'];
@@ -62,7 +63,11 @@ export function strictJSON(raw) {
   return JSON.parse(text);
 }
 
-export function imageParts(image) {
+export function imageParts(image, approvedRepository) {
+  if (approvedRepository !== undefined) {
+    const { repository } = localRepository(approvedRepository);
+    return { repository, digest: repositoryDigest(image, approvedRepository) };
+  }
   const match = /^(127\.0\.0\.1:5000)\/(auriga\/(?:fake|real)-dsh)@(sha256:[a-f0-9]{64})$/.exec(image);
   if (!match) throw new Error('image must name this M2 registry and exact fixture repository by digest');
   return { repository: match[2], digest: match[3] };
@@ -97,8 +102,8 @@ function structuralMembers(manifest, config) {
   if (Array.isArray(config?.history)) for (const entry of config.history) canonicalMembers(entry, ['created', 'created_by', 'author', 'comment', 'empty_layer']);
 }
 
-export function verifyProof(image, manifest, config) {
-  const { digest } = imageParts(image);
+export function verifyProof(image, manifest, config, approvedRepository) {
+  const { digest } = imageParts(image, approvedRepository);
   if (!manifest.length || !config.length || manifest.length > maxProofBytes || config.length > maxProofBytes) throw new Error('proof size limit');
   if (hash(manifest) !== digest) throw new Error('manifest digest mismatch');
   const m = strictJSON(manifest), c = strictJSON(config);
@@ -129,9 +134,14 @@ async function fetchRaw(url, accept) {
 
 // The optional origin is only a loopback, random-port fixture seam for tests;
 // the CLI never accepts an origin override or arbitrary repository/URL.
-export async function collectRuntimeProofs(image, output, origin = 'http://127.0.0.1:5000') {
-  const { repository, digest } = imageParts(image);
-  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) throw new Error('local registry required');
+export async function collectRuntimeProofs(image, output, origin, approvedRepository) {
+  const { repository, digest } = imageParts(image, approvedRepository);
+  const expectedOrigin = approvedRepository === undefined
+    ? 'http://127.0.0.1:5000'
+    : `http://${localRepository(approvedRepository).authority}`;
+  if (approvedRepository !== undefined && origin !== undefined && origin !== expectedOrigin) throw new Error('approved repository origin required');
+  origin ??= expectedOrigin;
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin) && origin !== expectedOrigin) throw new Error('local registry required');
   const m = await fetchRaw(`${origin}/v2/${repository}/manifests/${digest}`, manifestTypes.join(', '));
   if (!manifestTypes.includes(m.type)) throw new Error('manifest response media type rejected');
   const document = strictJSON(m.raw), descriptor = document.config;
@@ -139,7 +149,7 @@ export async function collectRuntimeProofs(image, output, origin = 'http://127.0
   if (hash(m.raw) !== digest || !descriptor || !digestPattern.test(descriptor.digest) || !configTypes.includes(descriptor.mediaType)
       || !Number.isSafeInteger(descriptor.size) || descriptor.size < 1 || descriptor.size > maxProofBytes || 'urls' in descriptor || 'data' in descriptor) throw new Error('manifest descriptor rejected');
   const c = await fetchRaw(`${origin}/v2/${repository}/blobs/${descriptor.digest}`, descriptor.mediaType);
-  verifyProof(image, m.raw, c.raw);
+  verifyProof(image, m.raw, c.raw, approvedRepository);
   const root = resolve(output), destination = join(root, digest.slice(7));
   // Never repair or overwrite an existing proof directory, even if one file is
   // absent. prepare invokes this against a new isolated temporary directory.
@@ -165,6 +175,6 @@ export async function collectRuntimeProofs(image, output, origin = 'http://127.0
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.length !== 4) throw new Error('usage: collect-runtime-proofs.mjs <fixture repo@digest> <temporary proof root>');
-  await collectRuntimeProofs(process.argv[2], process.argv[3]);
+  const args = collectorArgs(process.argv.slice(2));
+  await collectRuntimeProofs(args.image, args.output, undefined, args.repository);
 }

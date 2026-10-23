@@ -11,15 +11,13 @@ import {
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { buildArgs, selectRepoDigest } from './runtime-image-input.mjs';
 
 // prepare keeps metadata isolated until bootstrap has accepted the installation.
-const args = process.argv.slice(2);
-if (args.length !== 0 && (args.length !== 2 || args[0] !== '--metadata-out' || !args[1])) {
-  throw new Error('usage: build-real-dsh.mjs [--metadata-out <file>]');
-}
+const args = buildArgs(process.argv.slice(2));
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const nodeImage = process.env.NODE_IMAGE || '';
-const tag = '127.0.0.1:5000/auriga/real-dsh:w3';
+const tag = `${args.image.fullRepository}:${args.image.tag}`;
 if (!/^node:22\.19\.0-bookworm-slim@sha256:[a-f0-9]{64}$/.test(nodeImage)) {
   throw new Error(
     'Set NODE_IMAGE=node:22.19.0-bookworm-slim@sha256:<reviewed manifest digest>',
@@ -89,12 +87,8 @@ try {
   rmSync(context, { recursive: true, force: true });
 }
 docker(['push', tag]);
-const image = JSON.parse(
-  docker(['image', 'inspect', tag], true),
-)[0].RepoDigests.find((ref) =>
-  ref.startsWith('127.0.0.1:5000/auriga/real-dsh@sha256:'),
-);
-if (!image) throw new Error('Missing immutable pushed image digest');
+const inspected = JSON.parse(docker(['image', 'inspect', tag], true));
+const image = selectRepoDigest(inspected?.[0]?.RepoDigests, args.image.fullRepository);
 const manifest = JSON.parse(
   docker(
     [
@@ -109,7 +103,7 @@ const manifest = JSON.parse(
     true,
   ),
 );
-const metadata = args.length ? resolve(args[1]) : resolve(root, 'deploy/compose/var/real-dsh.json');
+const metadata = args.metadataOut ? resolve(args.metadataOut) : resolve(root, 'deploy/compose/var/real-dsh.json');
 mkdirSync(dirname(metadata), { recursive: true });
 writeFileSync(
   metadata,
