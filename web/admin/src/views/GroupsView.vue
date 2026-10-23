@@ -100,7 +100,10 @@ function clearDetail() {
 }
 onBeforeUnmount(clearDetail);
 watch(canRead, (allowed) => {
-  if (!allowed) clearDetail();
+  if (!allowed) {
+    clearDetail();
+    list.clear(true);
+  }
 });
 watch(canPickMembers, (allowed) => {
   if (!allowed) {

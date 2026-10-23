@@ -668,6 +668,26 @@ describe('group management', () => {
 });
 
 describe('permissions and API boundaries', () => {
+  it('clears the invitation main list on read revocation while retaining the denial error', async () => {
+    await render(InvitationsView);
+    expect(wrapper!.text()).toContain(invitationId);
+    await click('撤销邀请');
+    permissions = [];
+    await confirm();
+    expect(writes()).toHaveLength(0);
+    expect(wrapper!.text()).not.toContain(invitationId);
+    expect(wrapper!.text()).toContain('common.forbidden');
+  });
+  it('clears group rows and details on read revocation while retaining the denial error', async () => {
+    await render(GroupsView);
+    await click('详情');
+    await click('删除分组');
+    permissions = [];
+    await confirm();
+    expect(writes()).toHaveLength(0);
+    expect(wrapper!.text()).not.toContain('Engineering');
+    expect(wrapper!.text()).toContain('common.forbidden');
+  });
   it('does not add a selected member after member-read permission is revoked', async () => {
     await render(GroupsView);
     await click('详情');

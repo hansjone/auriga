@@ -42,17 +42,23 @@ export function useOrgActions(read: string, write: string, t: Translate) {
     try {
       membership = await adminApi.membership();
     } catch (e) {
-      if (alive && version === authVersion) permissions.value = [];
+      if (alive && version === authVersion) {
+        error.value = orgError(e, t);
+        permissions.value = [];
+      }
       throw e;
     }
     if (!alive || version !== authVersion) return false;
     permissions.value = membership.permissions;
-    if (!canRead.value)
-      throw new ApiError({
+    if (!canRead.value) {
+      const denied = new ApiError({
         status: 403,
         code: 'common.forbidden',
         title: t('forbidden'),
       });
+      error.value = orgError(denied, t);
+      throw denied;
+    }
     return true;
   }
   function ask(message: string, run: () => Promise<void>) {
