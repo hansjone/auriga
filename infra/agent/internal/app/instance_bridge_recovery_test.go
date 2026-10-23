@@ -353,7 +353,6 @@ func (f *recoveryFixture) cancelAfterUnhealthyProbe(t *testing.T, control *recov
 
 func TestAgentRestartRestoresHealthAndBridgeWithoutRebuildingContainer(t *testing.T) {
 	f := newRecoveryFixture(t)
-	f.rec.StartTimeout = 2 * time.Second
 	initial, err := f.rec.Inventory()
 	if err != nil || len(initial) != 1 || initial[0].Ready {
 		t.Fatalf("first inventory reused persisted ready: %v %v", initial, err)
@@ -418,7 +417,6 @@ func TestRecoveryInspectionOrHealthFailureDoesNotPublishReadyOrRebuildOnRetry(t 
 			}
 			f.inspectError.Store(false)
 			f.healthy.Store(true)
-			f.rec.StartTimeout = time.Second
 			if err := f.rec.ReconcileAll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -471,7 +469,6 @@ func TestOldGenerationPendingRecoveryRetainsDecisionAcrossFailure(t *testing.T) 
 		t.Fatal("unhealthy recovery lost the pending decision", status)
 	}
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +494,6 @@ func TestOldGenerationPendingRecoveryRetainsDecisionAcrossFailure(t *testing.T) 
 func TestRuntimeObservationFailureWithdrawsAlreadyPublishedBridge(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +551,6 @@ func (d *capturedEndpointDriver) Endpoint(id string) (runtime.Endpoint, error) {
 func TestRevocationFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +607,6 @@ func TestRevocationFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 func TestStoppedStatusFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.healthy.Store(true)
-	f.rec.StartTimeout = time.Second
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
