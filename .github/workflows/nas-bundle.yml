@@ -84,6 +84,14 @@ jobs:
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../bin/auriga-nas-bootstrap .
           chmod 0755 ../bin/auriga-nas-bootstrap
 
+      - name: Build runtime-release binary (linux/amd64)
+        working-directory: infra
+        run: |
+          set -euo pipefail
+          mkdir -p ../deploy/nas/bin
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../deploy/nas/bin/runtime-release ./agent/cmd/runtime-release
+          chmod 0755 ../deploy/nas/bin/runtime-release
+
       - name: Build images (linux/amd64)
         run: |
           set -euo pipefail
@@ -124,6 +132,12 @@ jobs:
               "commit": os.environ["commit"],
               "source_tree": os.environ["SOURCE_TREE"],
               "bootstrap": {"file": "deploy-nas/bin/auriga-nas-bootstrap", "sha256": hashlib.sha256(open("deploy/nas/bin/auriga-nas-bootstrap", "rb").read()).hexdigest()},
+              "runtime_release": {
+                  "file": "deploy-nas/bin/runtime-release",
+                  "sha256": hashlib.sha256(open("deploy/nas/bin/runtime-release", "rb").read()).hexdigest(),
+                  "os": "linux",
+                  "arch": "amd64",
+              },
               "images": {
                   "platform": {"id": os.environ["ID_PLATFORM"], "tar": "platform.tar"},
                   "edge": {"id": os.environ["ID_EDGE"], "tar": "edge.tar"},
@@ -147,7 +161,8 @@ jobs:
           rm -rf out/deploy-nas/bin
           mkdir -p out/deploy-nas/bin
           cp deploy/nas/bin/auriga-nas-bootstrap out/deploy-nas/bin/
-          (cd out && sha256sum deploy-nas/bin/auriga-nas-bootstrap images/manifest.json versions.txt > SHA256SUMS)
+          cp deploy/nas/bin/runtime-release out/deploy-nas/bin/
+          (cd out && sha256sum deploy-nas/bin/auriga-nas-bootstrap deploy-nas/bin/runtime-release images/manifest.json versions.txt > SHA256SUMS)
 
       - name: Validate compose config (placeholder env, quiet)
         run: |
