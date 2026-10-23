@@ -206,6 +206,34 @@ operator 在 `stack.env` 设置 `AURIGA_INSTANCE_MAX_MEMORY_MB`，生成每实�
 
 数据库仍PostgreSQL17 Debian uid999；workspace迁移/运行角色分开，iam/org combined仍沿既有限制单角色，RLS不变。NATS无匿名、监控只容器loopback；平台事件/审计、routes写、edge routes只读+sessions及撤销consumer ACL不扩权，JetStream保留内存/磁盘限制。
 
+## 挂载访问与继承 ACL 排障
+
+`ls -l` 显示的 POSIX mode（包括0755）不等于服务身份的有效访问权限。共享文件夹的继承 ACL、命名用户条目及 ACL mask 都可能使固定 UID 无法遍历目录或读取文件；宿主 root 能读取也不能证明 uid10001、uid65532 或 uid999 能读取。
+
+已有 bootstrap 在清空补充组后以10001:10001真实读取并验证安装源材料、公开 runtime bundle 和独立根；`installer.sh check` 继续执行这条校验。新增的 `mount-access.sh` 补查 Compose 服务的运行挂载边界，`preflight.sh` 在安装完成且 Compose 配置校验成功后自动调用，`start.sh` 因而在启动服务前失败关闭。也可由具有本机 Docker 使用权限的部署者单独运行：
+
+```sh
+AURIGA_DATA_ROOT=/srv/container/auriga-test sh deploy-nas/scripts/mount-access.sh
+```
+
+探针只使用 `stack.env` 中已固定且本地存在的 platform 镜像提供的 `/bin/sh`、`cat`（edge 镜像本身无 shell）；不替换服务镜像。检查身份与包内 Compose 一致：platform为10001:10001并附加65532组，edge/NATS为65532:65532，PostgreSQL启动阶段读口令为0:0、降权后的SQL和数据目录为999:999，agent及包内registry为0:0。每次仅只读挂载该服务需要的源路径，禁用网络、丢弃全部capability、只读根文件系统并启用no-new-privileges，不挂Docker socket，不拉镜像。公开文件实际读取到`/dev/null`，私钥、口令、内部凭据和已有JWT仅验证打开权限，不读取或输出内容。首次启动前JWT尚未发布时只检查已有父目录，后续重跑会检查已存在的JWT。检查数据目录仅验证遍历，不递归读取用户数据，也不验证写入、磁盘配额或真实网络。
+
+PostgreSQL 的 PGDATA 分阶段检查：仅当丢弃全部 capability 的 root 只读探针能遍历、列举并确认目录完全为空（包括隐藏项、悬空符号链接）时，输出`mount-access PGDATA phase=entrypoint-empty`，允许官方 entrypoint 在首启时按其既有流程准备所有者和权限。因此，真实`init.sh`在`umask 077`下创建的`root:root/0700`空目录可进入启动准备阶段。目录非空或无法确认空时输出`phase=runtime`，仍按999:999检查实际遍历；SQL始终按999:999检查。空目录放行只表示等待 entrypoint 准备，不证明运行身份已能访问，也不读取数据库内容或修改权限。
+
+失败信息包含`service`、`uid:gid`、`supplementary`、`path-category`和操作类别，例如`service=edge uid:gid=65532:65532 supplementary=none path-category=pki operation=traverse`。这指向`config/pki-edge/`的运行挂载访问问题；`secret-open`表示必要秘密叶无法打开，日志不含秘密值。若探针镜像不具备`sh/cat`、本地镜像缺失或源路径缺失，也直接失败，不会回退root、联网拉取或放宽权限重试。
+
+部署者应在自己新建的专用挂载目录上，先核对`stat`/`namei -l`显示的目录链和所有者，再用可用的`getfacl -p`或NAS厂商的共享文件夹ACL界面检查有效/继承规则、命名UID和mask。分别检查材料目录、edge副本目录及其实际挂载叶；宿主父目录的继承规则也影响新建子目录。保留只读诊断结果，确认是哪个服务身份、哪个目录或叶文件被拒绝，再在该专用目录按厂商支持的流程授予该身份必要访问，或另选权限已正确配置的新专用位置按正式流程安装。不要删除共享上级ACL、递归放宽整个共享目录、使用`chmod 777`，也不要把秘密文件改为公开可读。探针和安装重入不会自动修ACL；元数据或receipt不符仍按原规则拒绝，修复后重跑预检。
+
+## 节点 label 与模板匹配
+
+正式NAS模板的调度标签为`template=real-dsh`。节点已经入网、在线或有足够容量仍可能因label不匹配而无法调度；还需核对驱动、OS/架构、可调度状态及剩余容量。管理台的节点详情支持编辑名称、标签及是否调度；标签变更需确认并刷新服务端状态。没有该页面的旧版本也可使用正式管理API调整。在正式管理入口以具备`workspace.nodes.read`/`workspace.nodes.admin`权限的管理员调用`GET /api/workspace/v1/admin/nodes`及`PATCH /api/workspace/v1/admin/nodes/{nodeId}`，PATCH使用`application/merge-patch+json`，示例请求体：
+
+```json
+{"labels":{"template":"real-dsh"},"schedulable":true}
+```
+
+`labels`更新替换整份标签映射：先读取当前值，将其他需要保留的标签一并带回；仅在节点确实可承载该正式模板且准备接收实例时设置上述值。浏览器管理写入仍走正式会话、完整管理Origin和CSRF流程（包括IP模式的内存CSRF token）；不要通过直接改数据库、修改封存模板/receipt或绕过管理权限排障。更新后重新读取节点确认，再通过正常门户重试实例申请，并检查正式调度诊断。
+
 停止只操作固定项目及严格核对标签/绑定路径的登记实例，不prune、不down -v、不remove-orphans。升级换精确镜像Id/摘要；DB迁移不能假设换旧镜像即可回退。备份 `secrets/`、`config/materials/`、data/postgres、data/agent、enrollment、stack.env与原access输入；停止前后保持材料，不依赖手工修权限。证书叶约825天，CA约10年，轮换应另行受审并滚动服务，不用普通重入自动换key。
 
 ## 验证与证据边界
@@ -215,6 +243,10 @@ operator 在 `stack.env` 设置 `AURIGA_INSTANCE_MAX_MEMORY_MB`，生成每实�
 (cd deploy/compose/bootstrap && go test -count=1 ./...)
 (cd deploy/nas/bootstrap && go test -count=1 ./... && go build -o ../bin/auriga-nas-bootstrap .)
 NAS_ALLOW_NONROOT=0 sh deploy/nas/test/run-tests.sh
+# 独立Linux root + 已核实的本机Docker；两个参数都填本地已加载的精确Id/摘要。
+AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
+  AURIGA_MOUNT_TEST_REGISTRY_IMAGE=sha256:<registry-image-id> \
+  sh deploy/nas/test/mount-access-real.sh
 (cd infra/agent && AURIGA_NAS_REQUIRE_ROOT_TEST=1 go test -count=1 -run '^TestNASRenderedAgentPolicy$' ./internal/policy)
 (cd infra/edge && go test -count=1 ../../deploy/nas/test/nats_policy_test.go)
 ```

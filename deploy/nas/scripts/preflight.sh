@@ -98,6 +98,7 @@ if [ -f "$(marker_path)" ]; then
   run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" config --quiet \
     || die "docker compose config failed"
   info "compose_config=ok"
+  sh "$NAS_ROOT/scripts/mount-access.sh"
 fi
 
 info "HOST-PREREQUISITES-PASSED"

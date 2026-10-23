@@ -60,9 +60,19 @@ set -eu
 case "$1" in
   info) exit 0 ;;
   image)
-    [ "${2:-}" = inspect ] && [ "${3:-}" = --format ] \
-      && [ "${4:-}" = '{{.Os}}/{{.Architecture}}' ] || exit 1
-    printf 'linux/amd64\n'
+    [ "${2:-}" = inspect ] && [ "${3:-}" = --format ] || exit 1
+    case "${4:-}" in
+      '{{.Os}}/{{.Architecture}}') printf 'linux/amd64\n' ;;
+      '{{.Config.User}}') printf '\n' ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  run)
+    # Start-chain coverage only; real DAC/ACL checks live in mount-access-real.sh.
+    case " $* " in *' --pull never --network none --user '*) ;; *) exit 1 ;; esac
+    case " $* " in *' --cap-drop ALL --security-opt no-new-privileges:true --read-only '*) ;; *) exit 1 ;; esac
+    case " $* " in *docker.sock*|*' --privileged '*|*' --cap-add '*) exit 1 ;; esac
+    printf 'probe\n' >>"$TEST_DOCKER_LOG"
     ;;
   compose)
     case " $* " in *' up '*) printf '%s\n' "$*" >>"$TEST_DOCKER_LOG" ;; esac
