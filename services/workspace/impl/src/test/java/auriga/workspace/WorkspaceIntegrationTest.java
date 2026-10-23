@@ -466,6 +466,7 @@ class WorkspaceIntegrationTest {
             .setObservedGeneration(generation)
             .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
             .setReady(true)
+            .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().minusSeconds(1)))
             .build();
     control.stream.onNext(
         SessionRequest.newBuilder()
@@ -531,6 +532,8 @@ class WorkspaceIntegrationTest {
                       control.node));
       default -> {}
     }
+    // Reach the explicit blockers, rather than being rejected first as an undated/equal replay.
+    status = status.toBuilder().setUpdatedAt(NodeEnrollment.timestamp(clock.instant())).build();
     reporter.stream.onNext(SessionRequest.newBuilder().setStatus(status).build());
     if (blocker.equals("revoked"))
       assertEquals(
@@ -548,6 +551,384 @@ class WorkspaceIntegrationTest {
                     .get("migration_pending")),
         blocker);
     reporter.stream.onCompleted();
+    control.stream.onCompleted();
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "older",
+        "equal",
+        "nanoseconds",
+        "missing_status",
+        "zero_status",
+        "invalid_status",
+        "future_status",
+        "missing_inventory",
+        "future_inventory",
+        "zero_inventory",
+        "invalid_inventory",
+        "negative_clock",
+        "skew_limit",
+        "over_skew_limit"
+      })
+  void reconnectInventoryFencesQueuedReadyAndAllowsFreshRecovery(String timing) throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    long generation =
+        store.in(tenant, () -> ((Number) store.instance(instance).get("generation")).longValue());
+    Instant old = clock.instant().minusSeconds(120);
+    if (timing.equals("nanoseconds"))
+      old = old.truncatedTo(java.time.temporal.ChronoUnit.MICROS).plusNanos(123);
+    var queued =
+        InstanceStatus.newBuilder()
+            .setInstanceId(instance.toString())
+            .setObservedGeneration(generation)
+            .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
+            .setReady(true)
+            .setUpdatedAt(NodeEnrollment.timestamp(old))
+            .build();
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(queued))
+            .build());
+    markNodeOffline(control.node);
+    try (var reader = io.nats.client.Nats.connect(auriga.testsupport.NatsExtension.url());
+        var routes =
+            WorkspaceRoutes.configured(
+                store, auriga.testsupport.NatsExtension.url(), "", "", false)) {
+      routes.refresh();
+      var kv = reader.keyValue(WorkspaceRoutes.BUCKET);
+      assertEquals(
+          "failed",
+          WorkspaceService.JSON
+              .readTree(kv.get(instance.toString()).getValue())
+              .path("state")
+              .asText());
+      control.reconnect();
+      var inventory = queued.toBuilder().setReady(false);
+      if (timing.equals("older")) inventory.setUpdatedAt(NodeEnrollment.timestamp(clock.instant()));
+      if (timing.equals("missing_inventory")) inventory.clearUpdatedAt();
+      if (timing.equals("future_inventory"))
+        inventory.setUpdatedAt(
+            NodeEnrollment.timestamp(clock.instant().plus(Duration.ofDays(365))));
+      if (timing.equals("zero_inventory"))
+        inventory.setUpdatedAt(com.google.protobuf.Timestamp.getDefaultInstance());
+      if (timing.equals("invalid_inventory"))
+        inventory.setUpdatedAt(
+            com.google.protobuf.Timestamp.newBuilder()
+                .setSeconds(Long.MAX_VALUE)
+                .setNanos(1_000_000_000));
+      control.stream.onNext(
+          SessionRequest.newBuilder()
+              .setInventory(Inventory.newBuilder().addInstances(inventory))
+              .build());
+      routes.refresh();
+      assertEquals(
+          false, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+      assertEquals(
+          "starting",
+          WorkspaceService.JSON
+              .readTree(kv.get(instance.toString()).getValue())
+              .path("state")
+              .asText());
+      long revision = kv.get(instance.toString()).getRevision();
+      var stale = queued.toBuilder();
+      if (timing.equals("missing_status")) stale.clearUpdatedAt();
+      if (timing.equals("zero_status"))
+        stale.setUpdatedAt(com.google.protobuf.Timestamp.getDefaultInstance());
+      if (timing.equals("invalid_status"))
+        stale.setUpdatedAt(
+            com.google.protobuf.Timestamp.newBuilder()
+                .setSeconds(old.getEpochSecond())
+                .setNanos(-1));
+      if (timing.equals("future_status"))
+        stale.setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plus(Duration.ofDays(365))));
+      if (timing.equals("over_skew_limit"))
+        stale.setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(60).plusNanos(1)));
+      control.stream.onNext(SessionRequest.newBuilder().setStatus(stale).build());
+      assertFalse(control.fake.error.isDone());
+      assertEquals(false, store.in(tenant, () -> store.instance(instance).get("ready")), timing);
+      routes.refresh();
+      assertEquals(revision, kv.get(instance.toString()).getRevision(), timing);
+      // A small positive node clock offset is valid; a rejected far-future frame must not poison
+      // it.
+      var fresh =
+          queued.toBuilder()
+              .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(30)))
+              .build();
+      if (timing.equals("negative_clock"))
+        fresh =
+            fresh.toBuilder()
+                .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().minusSeconds(30)))
+                .build();
+      if (timing.equals("skew_limit"))
+        fresh =
+            fresh.toBuilder()
+                .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(60)))
+                .build();
+      control.stream.onNext(SessionRequest.newBuilder().setStatus(fresh).build());
+      if (Set.of("missing_inventory", "future_inventory", "zero_inventory", "invalid_inventory")
+          .contains(timing)) {
+        assertEquals(false, store.in(tenant, () -> store.instance(instance).get("ready")));
+        // An unknown Inventory clock needs a conservative barrier; re-inspection restores now.
+        control.stream.onNext(
+            SessionRequest.newBuilder()
+                .setInventory(Inventory.newBuilder().addInstances(fresh))
+                .build());
+      }
+      assertEquals(true, store.in(tenant, () -> store.instance(instance).get("ready")), timing);
+      routes.refresh();
+      assertEquals(
+          "running",
+          WorkspaceService.JSON
+              .readTree(kv.get(instance.toString()).getValue())
+              .path("state")
+              .asText());
+      assertTrue(kv.get(instance.toString()).getRevision() > revision);
+      // Replay and old-generation reports cannot undo the newer observation.
+      control.stream.onNext(SessionRequest.newBuilder().setStatus(inventory).build());
+      control.stream.onNext(
+          SessionRequest.newBuilder()
+              .setStatus(fresh.toBuilder().setObservedGeneration(generation - 1).setReady(false))
+              .build());
+      assertEquals(true, store.in(tenant, () -> store.instance(instance).get("ready")));
+      if (timing.equals("equal")) {
+        markNodeOffline(control.node);
+        control.reconnect();
+        control.stream.onNext(
+            SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+        control.stream.onNext(SessionRequest.newBuilder().setStatus(fresh).build());
+        assertEquals(
+            true, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+        routes.refresh();
+        assertEquals(
+            "failed",
+            WorkspaceService.JSON
+                .readTree(kv.get(instance.toString()).getValue())
+                .path("state")
+                .asText());
+        control.stream.onNext(
+            SessionRequest.newBuilder()
+                .setStatus(
+                    fresh.toBuilder()
+                        .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(31))))
+                .build());
+        assertEquals(
+            false, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+        routes.refresh();
+        assertEquals(
+            "running",
+            WorkspaceService.JSON
+                .readTree(kv.get(instance.toString()).getValue())
+                .path("state")
+                .asText());
+      }
+    } finally {
+      control.stream.onCompleted();
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"missing", "future"})
+  void invalidInventoryTimeFencesClockAheadQueueWithoutPermanentLock(String timing)
+      throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    long generation =
+        store.in(tenant, () -> ((Number) store.instance(instance).get("generation")).longValue());
+    var queued =
+        InstanceStatus.newBuilder()
+            .setInstanceId(instance.toString())
+            .setObservedGeneration(generation)
+            .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
+            .setReady(true)
+            .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(29)))
+            .build();
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(queued))
+            .build());
+    markNodeOffline(control.node);
+    control.reconnect();
+    var inspected = queued.toBuilder().setReady(false).clearUpdatedAt();
+    if (timing.equals("future"))
+      inspected.setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plus(Duration.ofDays(365))));
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(inspected))
+            .build());
+    try (var reader = io.nats.client.Nats.connect(auriga.testsupport.NatsExtension.url());
+        var routes =
+            WorkspaceRoutes.configured(
+                store, auriga.testsupport.NatsExtension.url(), "", "", false)) {
+      routes.refresh();
+      var kv = reader.keyValue(WorkspaceRoutes.BUCKET);
+      long revision = kv.get(instance.toString()).getRevision();
+      control.stream.onNext(SessionRequest.newBuilder().setStatus(queued).build());
+      assertEquals(false, store.in(tenant, () -> store.instance(instance).get("ready")));
+      routes.refresh();
+      assertEquals(revision, kv.get(instance.toString()).getRevision());
+      // The fallback barrier is bounded, even when the original input was a year in the future.
+      clock.now = clock.instant().plusSeconds(61);
+      control.stream.onNext(
+          SessionRequest.newBuilder().setUsage(NodeUsage.getDefaultInstance()).build());
+      control.stream.onNext(
+          SessionRequest.newBuilder()
+              .setStatus(queued.toBuilder().setUpdatedAt(NodeEnrollment.timestamp(clock.instant())))
+              .build());
+      assertEquals(true, store.in(tenant, () -> store.instance(instance).get("ready")));
+      routes.refresh();
+      assertEquals(
+          "running",
+          WorkspaceService.JSON
+              .readTree(kv.get(instance.toString()).getValue())
+              .path("state")
+              .asText());
+    } finally {
+      control.stream.onCompleted();
+    }
+  }
+
+  @Test
+  void inventoryAndStatusOrderingIsAtomicUnderConcurrentTransactions() throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    long generation =
+        store.in(tenant, () -> ((Number) store.instance(instance).get("generation")).longValue());
+    var status =
+        InstanceStatus.newBuilder()
+            .setInstanceId(instance.toString())
+            .setObservedGeneration(generation)
+            .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING);
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor();
+        var reader = io.nats.client.Nats.connect(auriga.testsupport.NatsExtension.url());
+        var routes =
+            WorkspaceRoutes.configured(
+                store, auriga.testsupport.NatsExtension.url(), "", "", false)) {
+      for (int round = 0; round < 8; round++) {
+        clock.now = clock.instant().plusSeconds(2);
+        var initial =
+            status
+                .setReady(false)
+                .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().minusSeconds(1)))
+                .build();
+        control.stream.onNext(
+            SessionRequest.newBuilder()
+                .setInventory(Inventory.newBuilder().addInstances(initial))
+                .build());
+        var ready =
+            status.setReady(true).setUpdatedAt(NodeEnrollment.timestamp(clock.instant())).build();
+        var inspected = ready.toBuilder().setReady(false).build();
+        var start = new CountDownLatch(1);
+        // Exercise separate transactions rather than the stream's local synchronized monitor.
+        var queued =
+            executor.submit(
+                () -> {
+                  start.await();
+                  TenantContext.run(tenant, () -> service.status(control.node, ready));
+                  return null;
+                });
+        var inventory =
+            executor.submit(
+                () -> {
+                  start.await();
+                  TenantContext.run(tenant, () -> service.inventory(control.node, inspected));
+                  return null;
+                });
+        start.countDown();
+        queued.get(10, TimeUnit.SECONDS);
+        inventory.get(10, TimeUnit.SECONDS);
+        var row = store.in(tenant, () -> store.instance(instance));
+        assertEquals(false, row.get("ready"));
+        assertEquals(inspected, InstanceStatus.parseFrom((byte[]) row.get("status")));
+        assertEquals(
+            clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS),
+            WorkspaceStore.instant(row, "status_watermark"));
+      }
+      routes.refresh();
+      assertEquals(
+          "starting",
+          WorkspaceService.JSON
+              .readTree(reader.keyValue(WorkspaceRoutes.BUCKET).get(instance.toString()).getValue())
+              .path("state")
+              .asText());
+    } finally {
+      control.stream.onCompleted();
+    }
+  }
+
+  @Test
+  void recoveryOrderingKeepsPreviousGenerationPendingRestartAndInventoryAuthority()
+      throws Exception {
+    var control = new RecoveryControl(tenant);
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    var original = store.in(tenant, () -> store.instance(instance));
+    long generation = ((Number) original.get("generation")).longValue();
+    var status =
+        InstanceStatus.newBuilder()
+            .setInstanceId(instance.toString())
+            .setObservedGeneration(generation)
+            .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
+            .setReady(true)
+            .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().minusSeconds(10)))
+            .build();
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(status))
+            .build());
+    markNodeOffline(control.node);
+    store.in(
+        tenant,
+        () -> {
+          service.saveSpec(
+              store.instance(instance),
+              WorkspaceService.spec(original).toBuilder().setGeneration(generation + 1).build());
+          return null;
+        });
+    control.reconnect();
+    var previous =
+        status.toBuilder()
+            .setPhase(InstancePhase.INSTANCE_PHASE_PENDING_RESTART)
+            .setUpdatedAt(NodeEnrollment.timestamp(clock.instant()))
+            .build();
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(previous))
+            .build());
+    var row = store.in(tenant, () -> store.instance(instance));
+    assertEquals("pending_restart", row.get("phase"));
+    assertEquals(generation, ((Number) row.get("observed_generation")).longValue());
+    assertEquals(false, row.get("ready"));
+    assertEquals(true, row.get("migration_pending"));
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setStatus(
+                status.toBuilder()
+                    .setUpdatedAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(1))))
+            .build());
+    assertEquals(true, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+    // Missing timestamps may initialize a new generation but cannot prove freshness to clear
+    // pending.
+    var current =
+        status.toBuilder()
+            .setObservedGeneration(generation + 1)
+            .setReady(false)
+            .clearUpdatedAt()
+            .build();
+    control.stream.onNext(SessionRequest.newBuilder().setStatus(current).build());
+    assertEquals(true, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+    // An authoritative Inventory can legitimately restore even a cached, absent timestamp.
+    control.stream.onNext(
+        SessionRequest.newBuilder()
+            .setInventory(Inventory.newBuilder().addInstances(current.toBuilder().setReady(true)))
+            .build());
+    assertEquals(false, store.in(tenant, () -> store.instance(instance).get("migration_pending")));
+    assertEquals(true, store.in(tenant, () -> store.instance(instance).get("ready")));
     control.stream.onCompleted();
   }
 
