@@ -166,7 +166,7 @@ strict verify 会拒绝它；诊断后使用另一个全新输出路径重试。
 
 全部 bundle、外部根、平台、精确 image、layout、全新输出目录和预算均必填。工具先完整执行 `stage-layout` 的生产验签、预算与层校验；失败时不会调用 ORAS。ORAS 源固定为新快照的 `path@sha256:<原M>`，辅助 tag 只用于运输，不取自 index 注解。它只把目标仓库从批准 image 派生，拒绝 `localhost`、DNS、远端、URL、userinfo、非规范端口和仓库覆盖。子进程只获得独立空认证文件及受限环境，不读取已有 Docker/registry 登录配置、代理或 HOME；以 [ORAS cp](https://oras.land/docs/commands/oras_cp/) 的 `--from-oci-layout`、`--to-plain-http` 参数复制。
 
-复制退出后，工具从**同一个精确数字 loopback HTTP 仓库**按原 M 获取 manifest，并获取原 config 与每个被引用层，流式限制大小并检查 SHA-256；M/C 还逐字节比对原 proof。拒绝重定向、压缩响应、缺对象、坏对象或错误摘要。ORAS 版本检查、复制及完整 HTTP 读回共享 5 分钟超时；Linux CLI 收到 Ctrl+C/SIGTERM 时取消并收齐 ORAS 子进程。先行 `StageLayout` 由显式字节预算约束，尚不能在文件读取或复制中途按时钟强制中断；其前后均检查取消，取消后不会启动 ORAS。所有对象通过后才输出原 M/C、唯一对象数与字节数。失败返回非零且保留新快照以供诊断；目标 registry 可能已有部分对象，工具不会盲删。这一结果只是当次读回事实，不是持续授权、安装成功或真实 DSH 已启动。此 profile 不支持公网认证、重定向、跨仓库重写或自动下载 ORAS。
+复制期间，ORAS 只接触工具拥有的本机回环运输端口；该端口只把符合批准仓库的请求送往原定数字 loopback registry，拒绝重定向、认证挑战以及跨来源或跨仓库的上传位置。合法同仓库上传位置会改写回本机运输端口；签发的最终 image 与实际 registry 目标不变。复制退出后，工具从**同一个精确数字 loopback HTTP 仓库**按原 M 获取 manifest，并获取原 config 与每个被引用层，流式限制大小并检查 SHA-256；M/C 还逐字节比对原 proof。拒绝压缩响应、缺对象、坏对象或错误摘要。ORAS 版本检查、复制及完整 HTTP 读回共享 5 分钟超时；Linux CLI 收到 Ctrl+C/SIGTERM 时取消并收齐仍在同一进程组的 ORAS 后代，不承诺收容自行脱离进程组的程序。先行 `StageLayout` 由显式字节预算约束，尚不能在文件读取或复制中途按时钟强制中断；其前后均检查取消，取消后不会启动 ORAS。所有对象通过后才输出原 M/C、唯一对象数与字节数。失败返回非零且保留新快照以供诊断；目标 registry 可能已有部分对象，工具不会盲删。这一结果只是当次读回事实，不是持续授权、安装成功或真实 DSH 已启动。此 profile 不支持公网认证、重定向、跨仓库重写或自动下载 ORAS。
 
 ## 文件与平台权限边界
 

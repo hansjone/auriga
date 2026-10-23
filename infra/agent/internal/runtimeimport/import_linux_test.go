@@ -37,6 +37,7 @@ type fixture struct {
 	objects map[string][]byte
 	mu      sync.Mutex
 	mode    string
+	custom  func(http.ResponseWriter, *http.Request) bool
 	log     string
 	server  *http.Server
 }
@@ -52,8 +53,12 @@ func newFixture(t *testing.T) *fixture {
 	f.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		mode := f.mode
+		custom := f.custom
 		raw, ok := f.objects[r.URL.Path]
 		f.mu.Unlock()
+		if custom != nil && custom(w, r) {
+			return
+		}
 		if mode == "redirect" {
 			http.Redirect(w, r, "http://example.com/escape", http.StatusFound)
 			return

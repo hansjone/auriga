@@ -112,10 +112,19 @@ func Import(ctx context.Context, o Options) (runtimebundle.LayoutSnapshot, error
 		return runtimebundle.LayoutSnapshot{}, errors.New("cannot resolve staged layout path")
 	}
 	source := stagedPath + "@" + digest
-	target := address + "/" + repo + ":" + tag
-	_, err = runORAS(operationCtx, o.ORAS, env, "cp", "--from-oci-layout", "--to-plain-http", "--from-registry-config", authFile, "--to-registry-config", authFile, "--no-tty", source, target)
+	barrier, err := newTransportBarrier(operationCtx, address, repo, tag, snapshot, manifest, config, layers)
 	if err != nil {
 		return runtimebundle.LayoutSnapshot{}, err
+	}
+	defer barrier.Close()
+	target := barrier.Address() + "/" + repo + ":" + tag
+	_, err = runORAS(operationCtx, o.ORAS, env, "cp", "--from-oci-layout", "--to-plain-http", "--from-registry-config", authFile, "--to-registry-config", authFile, "--no-tty", source, target)
+	barrier.Close()
+	if err != nil {
+		return runtimebundle.LayoutSnapshot{}, err
+	}
+	if barrier.Blocked() {
+		return runtimebundle.LayoutSnapshot{}, errors.New("registry transport response crossed the approved boundary")
 	}
 	if err := readBack(operationCtx, address, repo, material, manifest, config, layers); err != nil {
 		return runtimebundle.LayoutSnapshot{}, err
@@ -199,6 +208,7 @@ func runORAS(ctx context.Context, path string, env []string, args ...string) ([]
 	out := &boundedOutput{limit: 4096}
 	cmd.Stdout, cmd.Stderr = out, out
 	err := cmd.Run()
+	finishProcessGroup(cmd)
 	if err != nil || ctx.Err() != nil {
 		return nil, errors.New("ORAS failed or timed out")
 	}
