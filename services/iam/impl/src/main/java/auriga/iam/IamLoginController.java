@@ -120,7 +120,15 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   // original JSON tree so unknown native security fields cannot be erased by DTO binding.
   public ObjectNode begin(
       CreateLoginTransaction body, HttpServletRequest request, HttpServletResponse response) {
-    return begin(Json.MAPPER.valueToTree(body), request, response);
+    ObjectNode input = Json.MAPPER.valueToTree(body);
+    // Unset DTO optionals serialize as null. Only this typed compatibility entry
+    // normalizes them to absent; original HTTP JSON retains strict null validation.
+    for (String field : List.of("purpose", "returnTo", "invitationCode", "nativeConnect"))
+      if (input.path(field).isNull()) input.remove(field);
+    if (input.path("nativeConnect").isObject()
+        && input.path("nativeConnect").path("deviceName").isNull())
+      ((ObjectNode) input.path("nativeConnect")).remove("deviceName");
+    return begin(input, request, response);
   }
 
   @GetMapping("/login/transactions/{id}")
