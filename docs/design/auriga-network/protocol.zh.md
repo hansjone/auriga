@@ -30,7 +30,7 @@
 
 ### 1.1 系统目录、对话关系与目标解析
 
-对应[总览 §6.1](README.zh.md#61-dsh-内多-agent-的寻址与发现)。本轮替换此前 binding 通讯录设计，以下均为待契约化语义。
+对应[总览 §6.1](README.zh.md#61-dsh-内多-agent-的寻址与发现)。第 7 轮已替换 binding 通讯录；本轮增加 §1.2 首联用户授权，以下均为待契约化语义。
 
 **发现与信任**：目录只返回有权发现的 DSH 系统地址、display_name、owner_user_id、online_state/status_observed_at；不提供会话搜索、精确 local 存在性查询、会话数量或冷热能力索引。来源插件以本次可信宿主上下文选本地 local，并在私有认证请求中声明 from；总部强制 from.node/realm 等于认证主体，不信模型 JSON 中的身份。插件自己保证 local→宿主和 send grant；总部不能独立识别已被攻陷的 node 对自身 local 的伪造。这是职责下沉后的明确信任边界，不改变跨 node/tenant 鉴权。
 
@@ -38,7 +38,7 @@
 
 | 发送意图 | 地址与关系规则 | 不得发生 |
 |---|---|---|
-| first_contact | to 为目标 node 的 system/local=0，from 为源插件已授权会话；总部核节点首联策略，原子保存线程、消息、系统 delivery、幂等和邮箱序号 | 使用缺省前台、通过首联绕到任意非零 local、自动启动模型 |
+| first_contact | to 为目标 node 的 system/local=0，from 为源插件已授权会话；总部核组织首联策略，有效目标原子保存线程、消息、系统 delivery、幂等和邮箱序号；contact_pending 留总部待用户授权，对外回执按 §1.2 裁剪 | 使用缺省前台、通过首联绕到任意非零 local、自动启动模型 |
 | 已有对话 message | to 为完整地址或显式线程收件模式；核逐地址关系后固化收件快照 | 仅凭猜到地址创建参与者、将同 node 两 local 合并 |
 | reply | thread_id、in_reply_to 引用已存消息；to 必须等于原消息已核验的 reply_to（v1 等于 from）；发件人须是原接收者或系统首联唯一分配的新地址 | 第三方 reply_to 重定向、跨线程引用、将默认回复广播到全线程 |
 | control | 同样核关系，另需节点策略与目标插件控制 grant；动作写入受支持 body schema | 靠 kind/flags 提权或绕过限额 |
@@ -47,17 +47,56 @@
 
 **参与者与回执**：thread_participant UNIQUE(tenant, thread, node, local)，delivery UNIQUE(tenant, message, target_node, target_local)；含 tenant 的 node 外键、规范地址和 type 一致性约束，不能建立到总部 host_session 表的外键。v1 realm=tenant，后续跨 realm 必须迁移唯一键并重新设计权限，不能直接放开。一个 message 发同 node 两 local 时两个 delivery_id/mail_seq，各自授权、计费、重试、确认。每个 delivery 固化完整 to 和关系版本，HEAD 合并不合并收件人。插件在本地核 local 映射和 ledger 后才交给唯一 session，不从前台推断。系统 delivery 始终保留 to=sys，首联执行目标另在下面的分配记录中固定，不能篡改原信封。初始参与者是来源地址与目标 sys；sys 只有本次首联管理/回执及唯一新地址介绍权限。首回复事务加入 assigned_address 与来源的对话关系，后续默认精确回复不再把 sys 当群聊收件者，也不授它其他线程会话权。
 
-**系统首联与幂等建会话**：contact_id=首联 message_id。系统入口是真实持久收件地址，首联在正常 message/delivery/mailbox/outbox/dedup 同事务提交后即可返回 platform_stored；不沿用第 6 轮“无目标 contact_stored 待分配后才存消息”的分支。B 系统尚未创建会话时显示 awaiting_session；默认只进受控收件箱，不把它显示成 agent 已接受。system 的持久入箱 receipt 可标 host_accepted 且必须带 accepted_by=system，表示插件系统收件而非会话/模型接受；session_accepted 与 execution_completed 另报，四级 ACK 本义不变。
+**系统首联与幂等建会话**：有效目标的 contact_id=首联 message_id，正常 message/delivery/mailbox/outbox/dedup 同事务保存后形成内部 platform_stored；面向发起方的可见状态遵守 §1.2，不将受限响应当成对目标存在性的证明。授权前状态为 contact_pending，消息正文与权威请求留在总部目标系统收件箱，未进入本地 agent inbox。插件只向已认证目标用户展示批准提示/限长预览；提示已读、预览读取及默认策略评估都不是 Host receipt，不能推进邮箱确认前缀，不能启动模型。离线时同样留存，期限不延长。
 
-批准后（或显式自动创建策略允许），插件以 (tenant,node,contact_id) 单写者锁持久预留唯一非零 local、host_session_id、cwd/preset 与创建状态，核本地创建/执行 grant。先向总部提交私有 CONTACT_ASSIGN CAS，固定该 contact 的 assigned_address 与 creation_attempt_id，只允许当前目标 node/epoch、有效首联、未撤销关系和原期限；总部只存不透明分配结果，不解释宿主结构，也不向目录或发起方提前公开。重复同内容返回既有状态，改 local 冲突。创建许可沿 §5 的一次准入原则，记录获准 epoch/boot_id；仅第一次成功响应且本地 creation_started 标记已持久化的原进程可调用一次 create。回包丢失/崩溃/克隆接管后只查原映射、原生 ID 和原持久存储，不能凭查询结果重新获得创建许可。确认原会话存在才继续后续阶段，无法证明则 outcome_unknown 并停止自动创建，允许零次创建，不换随机 ID；不能用单台宿主的幂等能力推断两个独立克隆共享幂等。READY 接管与分配 CAS 串行，防两克隆给同 contact 各建一次；分配永不因连接续期清零。
+CONTACT_DECIDE 允许建立对话提交后，才进入 awaiting_session 并开放正常正文 FETCH/本地系统收件；本地耐久后可回 host_accepted 且必须带 accepted_by=system，仍非会话/模型接受。session_accepted 与 execution_completed 另报，四级 ACK 本义不变。授权前拒绝/到期生成无正文终态供游标跨过，不造 host_accepted；分页仍可越过未决位置服务其他 local，沿 §8 的空洞与节点配额约束。
 
-native create 并持久确认后，在本地关联原首联 delivery→assigned_address；原消息只交此新会话，绝不自动投给已有会话。真正 queue/prompt 前仍按 §5 在线 EXECUTION_ADMIT，并核尚有效的本地 grant。首联即使已有 system 收件回执，仍可凭单独的有效 contact 执行状态申请唯一准入；system receipt 只释放传输项，不删除 contact 正文、分配/执行状态或创建预算。待处理 contact 的到期和取消继续生效。首条回复用原新会话 from/reply_to、to=原首联 from、in_reply_to=contact_id；collab 只允许该 assigned_address 经原目标 node 认证，在一次回复事务中建立该对话关系并提交回复，不能由任意发送者自报地址建立关系。后续添加参与者须受邀地址经其 node 的有权对话确认，不接受仅列 ID 的 add-member。
+本地用户允许建立对话（或本地该层默认档位允许）且总部 CONTACT_DECIDE 已提交后，插件以 (tenant,node,contact_id) 单写者锁持久预留唯一非零 local、host_session_id、cwd/preset 与创建状态，核本地建立对话/创建 grant；此阶段不要求或隐含自动执行授权。先向总部提交私有 CONTACT_ASSIGN CAS，固定该 contact 的 assigned_address 与 creation_attempt_id，只允许当前目标 node/epoch、contact_allowed 及有效决定版本、当前组织策略、未撤销关系和原期限；总部只存不透明分配结果，不解释宿主结构，也不向目录或发起方提前公开。重复同内容返回既有状态，改 local 冲突。创建许可沿 §5 的一次准入原则，记录获准 epoch/boot_id；仅第一次成功响应且本地 creation_started 标记已持久化的原进程可调用一次 create。回包丢失/崩溃/克隆接管后只查原映射、原生 ID 和原持久存储，不能凭查询结果重新获得创建许可。确认原会话存在才继续后续阶段，无法证明则 outcome_unknown 并停止自动创建，允许零次创建，不换随机 ID；不能用单台宿主的幂等能力推断两个独立克隆共享幂等。READY 接管与分配 CAS 串行，防两克隆给同 contact 各建一次；分配永不因连接续期清零。
+
+native create 并持久确认后，在本地关联原首联 delivery→assigned_address；原消息仅能面向此新会话，绝不自动投给已有会话。允许创建只得到可通信的空会话和地址；没有第二层自动执行授权时不得将正文送入会自动调度模型的 queue/prompt，也不能以原生 create 自带 prompt 绕过。若宿主不支持无模型创建，则停在已允许待适配/host_incompatible，不擅自启动模型。真正 queue/prompt 前须另获本地模型/工具对应授权，再按 §5 在线 EXECUTION_ADMIT，并核尚有效的本地 grant。首联即使已有 system 收件回执，仍可凭单独的有效 contact 执行状态申请唯一准入；system receipt 只释放传输项，不删除 contact 正文、分配/执行状态或创建预算。待处理 contact 的到期和取消继续生效。首条回复用原新会话 from/reply_to、to=原首联 from、in_reply_to=contact_id；collab 只允许该 assigned_address 经原目标 node 认证，在一次回复事务中建立该对话关系并提交回复，不能由任意发送者自报地址建立关系。只有第一层允许时，插件可在新会话已持久创建后发送 body 为 conversation_opened / execution_waiting、provenance=host 的确定性 reply，用该已绑定会话 from/reply_to 交换地址；不是模型生成内容、不计模型完成，不能夹带工具动作。模型实际答复仍需第二层授权。后续添加参与者须受邀地址经其 node 的有权对话确认，不接受仅列 ID 的 add-member。
 
 首条回复进入插件持久 outbox，按稳定 reply 幂等键发送；PG 提交回包丢失查同键，A 接收回执丢失则同 delivery 补投。A 重发首联同键只查原 contact/回复，不再创建。使用新键是新联系，仍受首联速率/积压/创建预算约束，不承诺识别正文相同的不同业务意图。未决 contact/分配/结果至少保留到终态及重试窗口结束；system receipt 后不能提前按普通已接受正文 24 小时清除，待执行期限默认 24 小时且不超过原 expires_at，幂等元数据至少 30 天。过期只禁止新创建/准入，不能撤回已执行动作。
 
-**首联防洪泛**：总部按源 node→目标 node、目标 node、tenant 合并限流，插件单独限制创建并发与本地待批准容量；新 local/同用户多节点不能绕 tenant 总额。建议值见总览 §10。超限在提交前返回 quota_exceeded/overloaded 与 retry_after，离线系统也不无限积压；已入箱项有到期终态，不因人工未处理锁住其他 local 的邮箱游标。不向 LLM 暴露批准/自动创建权限为普通消息可更改的配置。system receipt 前为 PG 传输积压，之后为插件待处理 contact 积压；交接原子记账且预留本地空间，待批准预算不因 receipt 释放，只在批准转入有界执行队列或拒绝/到期后释放，不能用持续 ACK 绕过积压限额。
+**首联防洪泛与容量**：总部按源 node→目标 node、源 IAM 用户→目标 node、目标 node 及 tenant 共同限制频率、待决条数/字节，插件限制提示频率与创建/执行并发。拒绝后根据请求状态计算同来源冷却；本地屏蔽名单不上传。规则和建议值见 §1.2 与总览 §10。等待期间全由总部计入待授权积压，不能因提示已读释放；获准后转入有界待创建/交接预算并预留本地空间，拒绝/过期写终态才释放待决额度。system receipt 只确认获准后的本地耐久收件，不清未决创建/执行证据。不因人工未处理停止整个 node，也不使用本地 ACK 把待批准正文从总部提前删除。
 
 **冷会话与子会话**：普通 local 始终恢复原 native session；允许 receive 不自动允许 wake/执行，没有 wake 时 queued_cold。归档/撤销由插件拒绝新执行并可靠报终态，已准入副作用边界仍按 §5。子 local 内部映射保存可信 lineage 和 durable parent address，N2 验专用子 agent adapter 前返回 host_incompatible，不回退到父普通 prompt。冷会话、子树授权及映射恢复在插件完成，平台只分页返回该 node 的不透明对话关系/未决项，不保存全量会话树。
+
+### 1.2 首次联系授权、状态可见性与撤销
+
+**决策权与作用域**：first_contact 表达“请求与该 DSH 建立对话”。目标 DSH 归属用户在其本机插件操作 allow_once（允许本次）、allow_source（总是允许该发起方）、deny（拒绝）、block（屏蔽）；总部系统 DSH 由有权管理员设置的本地策略决定。允许本次绑定 contact_id 和源身份，建立的对话后续仍需当前个人策略和逐会话 grant；不等于只允许一条回复，也不永久豁免后续策略。总是允许明确选择 source_node 或 source_user，用户身份由 IAM 核当前归属，不能用 payload 自报的 owner_user_id/显示名匹配。按用户的规则涵盖其多个源 node；源 node 归属变化须重新评估，目标用户其他 DSH 不自动同步授权。
+
+**两层默认档位**：conversation_policy 管建立对话/创建普通会话/交换地址；execution_policy 管自动唤醒/启动模型，具体工具还受工具 grant。两层各自可选 ask_each（每次询问，推荐默认）、same_org（同组织自动允许）、allowlist（仅白名单自动允许，未命中保持待问）、deny_all（全部拒绝）。第一层每个 contact 决策，第二层每个稳定执行请求决策，同请求重投不重复提示/授权。工具权限不得从“允许自动模型”推出，白名单记录必须带层级、范围和策略版本。没有跨层默认继承；只允许第一层时可创建并介绍地址，模型调用数与工具执行数必须为 0。
+
+优先级是总部组织禁止/身份失效 → 本地屏蔽或该层全部拒绝 → 当前显式允许/匹配白名单/同组织档位 → 等待人工决定。任何个人允许都不能扩大总部组织上限；same_org 以最新 IAM/org 判定，不凭本地用户填写组织名。同组织但被部门互联策略禁止时直接停止，不弹一个能覆盖组织禁令的允许按钮。IAM/org 不可用时停止新决策提交、创建和执行，不能降级接受缓存允许。
+
+**权威存放与修改入口**：个人决定、默认档位、白名单、屏蔽名单、策略版本及其完整审计在目标插件本地事务库，由真实本地用户界面校验身份后修改；不向模型暴露批准/改设置工具，不接受远程 first_contact/control 或总部普通 UI 更改这些规则。总部只保组织政策、请求/对话处理状态及节点提交的最小决定凭据（decision_id、request_version、opaque policy_revision、结果、时间），不持有个人规则列表/未来默认授权。它不能离线推演“这个用户之前总是允许”，也不能把请求状态当新请求授权。平台已有 node 身份、关系、回执与配额仍按前节保留。
+
+**提交与审计**：插件先在本地持久记录决定及状态 outbox，再经当前认证 node/epoch 发私有 CONTACT_DECIDE。包括 contact_id、decision_id、expected_request_version、opaque policy_revision、conversation_allowed / execution_allowed（独立结果）与层级；详细规则和屏蔽原因留本地。总部核决定来自原目标 node、当前组织策略、身份/期限与请求版本后 CAS 请求状态；首联决定及后续消息的执行授权分别绑定自己的稳定请求/消息 ID，任何执行允许不能复用到另一条消息，同 ID 同体重试返回原结果，异体拒绝。崩溃后补交 outbox，不把未提交的本地允许当平台准入。对 block/deny 总部只记录该请求 denied；屏蔽后新请求仍按通用配额暂存，插件上线时按本地名单静默拒绝，不提示用户、不向总部复制屏蔽名单。审计按 contact/decision ID 可对账，本地库丢失时不从总部结果自动重建“总是允许”，默认回到每次询问。
+
+| 权威请求状态 | 有请求状态查看权的发起方 | 后续约束 |
+|---|---|---|
+| contact_pending | 等待对方授权；不是发送失败或送达 | 正文留总部，提示不 ACK，不 create/prompt |
+| contact_allowed | 对话已允许；可能仍等待创建或执行授权 | 不隐含 execution_allowed；创建仍需 CONTACT_ASSIGN |
+| contact_denied | 已拒绝；不透露屏蔽/拒绝细节 | 终结本次未交接投递、进入冷却，不自动重试 |
+| contact_expired | 已过期 | 不可迟到批准复活；如需新联系用新请求且仍受限额 |
+
+上表 contact 状态针对第一层；第二层另存 execution_permission=pending/allowed/denied，拒绝自动执行不撤销已允许建立的对话，也不把 conversation 状态改成 denied。对已建对话需要重新询问时，沿同一机制登记该消息的有界授权请求，scope 标明 conversation 或 execution；对外返回状态码时带 scope 与关联原消息，不复用已终结的旧 contact 来重建会话。
+
+错误/状态码提案为 contact_pending、contact_denied、contact_expired；错误对象的 code 对应 network.contact_pending / network.contact_denied / network.contact_expired。pending 是可查询的业务等待态，不当传输失败或 SDK 自动重发依据；denied/expired 为此请求的终态，非成功 ACK。请求允许后，创建/执行生命周期按 §1.1/§4 独立记录。撤销已允许关系可记录 revoked；已创建会话身份不删除/复用，既有执行不假报撤回。
+
+**两类回执避免探测**：状态查看权独立于“能提交请求”，由总部的目标发现/状态可见策略或已建立对话授权决定，后续查询重新核权。有权者显示上表状态，但 pending 不附目标在线/已读时点。未获该权者对存在/不存在、组织禁止、个人拒绝/屏蔽、在线/离线目标均只见 request_submitted“已提交请求”；不返回真实 target/message/mail_seq、是否排队、拒绝原因或可变的目标相关 retry_after，也不暴露 contact_denied/contact_expired 的时间差。通过收件同意后才能获得对话地址；发起人自己设定的截止可显示为本次等待窗口结束，不能据此推断远端处理。
+
+为使“已提交请求”真实且不因不存在目标分叉，入口先在源身份配额内耐久保存不透明 submission_id/幂等摘要/截止；对目标校验和真实系统收件箱 materialize 异步处理并关联同一 submission，重试不能重复产生 contact。只有合法可路由目标才有正式系统 message/delivery/mail_seq；无效目标的占位提交不生成虚假投递。外部响应在目标查找前形成，格式、长度和查询外观一致；目标相关限流/冷却/屏蔽不泄漏到该受限回执。源自身鉴权、语法、全局入口配额或数据库失败仍明确报错，不能假回已保存。占位记录同样有界、到期且防批量枚举；它的提交不是四级 ACK 的 platform_stored，也不保证对方会看到。组织允许的真实请求最终留在总部系统收件箱，隐私外观不绕过组织拦截。
+
+**离线、期限和提示**：目标离线时任何个人自动档位均不在总部执行，尚无明确决定的请求只保 contact_pending；上线以 READY/HEAD 和分页取提示，插件本地读取策略后决定。审批 UI 的限长预览仅给目标已认证用户，不进入模型上下文/会话 inbox；预览缓存可丢、非权威。待授权期限=min(原 expires_at,提交+24 小时)，到期任务无需目标在线就写 contact_expired 与未交接 delivery 的 Expired tombstone；迟到 CONTACT_DECIDE/CONTACT_ASSIGN 拒绝，上线不再提示过期项。相同 state_version 提示在本地去重，重连不重复骚扰，不新增周期性短轮询。需要重新询问的已有会话消息同样由总部有界保留待授权；若在撤销同步前已取到本地，只可隔离等待，不产生新的接受回执/执行，也不能删除总部未确认副本或靠旧缓存先执行。已经持久交接的历史项保留事实但新动作按新策略核验。
+
+**撤销与竞态**：本地策略修改先持久增加 revision，重算受影响已建对话、会话收件/执行和待决请求。个人规则不因对话建成而固定：收紧为每次询问时，受影响后续请求待重新批准；deny_all/屏蔽或撤销许可时拒绝新动作。原 allow_once 只在其未被撤销且当前上限仍允许的线程内有效。插件通过同一私有状态通道把受影响请求/关系标为暂停或撤销，只传处理状态，不上传名单；HEAD 通知源查询有权状态。重连先对账本地未提交的撤销，再处理新投递，旧本地允许或平台已知 allowed 都不能跳过本地核验。
+
+CONTACT_DECIDE 的 expected_request_version 拒绝乱序更新；撤销/收紧先保留更高版本，旧允许回包不得继续使用，恢复须按本地最新 revision 与平台版本重新对账，不无条件把冲突旧允许改成新版本重试。
+
+CONTACT_DECIDE、组织撤销、到期、CONTACT_ASSIGN、EXECUTION_ADMIT 在总部按请求/执行版本与既定锁序串行；较旧决定不能覆盖新拒绝/撤销，拒绝/过期终态不改回 allowed。插件本地在 create/prompt/工具调用前核当前 revision/该层许可，撤销与开始动作在本地锁内排序；平台已准入但本地撤销先发生则不调用且保留原准入待对账，不重发许可。组织政策检查与 IAM 不构成跨服务原子事务，已有在途动作不可物理收回；离线撤销尚未同步时总部可能有界存后续消息，但目标不会使用旧允许执行。
+
+**防骚扰默认**：源 node→目标最多 1 个待决，源用户→目标最多 3 个；两者各每分钟 5 次/突发 5，目标每分钟 30 次/突发 10、待决 100 条或 1MiB，另受 tenant/全局入口额度。相同幂等键只占一项，换 local/换源 node 仍受用户聚合；源 node 与源用户任一对目标的拒绝冷却为 24 小时，按总部已存拒绝状态计算，不延长原请求 TTL。屏蔽在本地持续到用户解除，优先于总是允许；被屏蔽请求不产生新提示。目标相关超限对有状态查看权者给清楚的 quota_exceeded/冷却提示，对无权者保持统一提交外观，但内部不越配额，不能靠无限隐藏排队实现隐私。
 
 ## 2. 原生 NATS 接入，不另造传输协议
 
@@ -141,13 +180,13 @@ JSON便于沿现有Go/Java/Node契约生成，不能声称性能更高。只有�
 }
 ```
 
-from/to/reply_to 是结构化完整地址，thread_id/in_reply_to 是平台 ID；v1 reply_to 必须等于 from。kind 取 first_contact/message/reply/control；进度、状态、唤醒、产物引用由相应 body 子类型及 durability 表达，不新增隐式绕权限的路由入口。first_contact 只允许 to.type=system 且 local=0，非系统 type 不得用 0；group 保留但首发返回 unsupported_address_type。其他 local 的 type 由其所属节点在对话介绍时固定，不能改 type 获得新身份。
+from/to/reply_to 是结构化完整地址，thread_id/in_reply_to 是平台 ID；v1 reply_to 必须等于 from。kind 取 first_contact/message/reply/control；first_contact 仅请求目标用户授权，不携带可生效的个人 allow/默认设置，模型在 flags/ext/body 声称“已同意”也无效；进度、状态、唤醒、产物引用由相应 body 子类型及 durability 表达，不新增隐式绕权限的路由入口。first_contact 只允许 to.type=system 且 local=0，非系统 type 不得用 0；group 保留但首发返回 unsupported_address_type。其他 local 的 type 由其所属节点在对话介绍时固定，不能改 type 获得新身份。
 
 ttl 为正整数秒，受消息类型默认值与平台最大留存夹紧；总部初次提交计算不可延长的 expires_at，重投沿用同值，不能按接收时间重置。flags 首发为空，未来可选标记不得改变授权/执行语义；关键能力通过 READY 协商及明确 required_features，未知必需能力、地址主版本、kind 或执行控制子类型明确拒绝，不“忽略后执行”。
 
 **向前兼容**：未知可选字段（含 ext 的命名空间键、未知非关键 flag）由存储/转发方在限长和 JSON 语法检查后保留，不解释、不投影丢弃；接收方忽略其行为，转发或重试仍保留原数据。不是无条件忽略版本/安全错误：已知字段类型错误、重复 JSON key、地址冲突均拒绝；未知字段不能覆盖 from/to、授权、期限或改变默认动作。总 64KiB、正文 16KiB 上限包含扩展，解析深度/字段数须在契约定有限上限。幂等摘要采用契约固定的 JSON 规范化，覆盖包括未知字段的完整业务信封，排除传输 epoch/mail_seq 等封装；不能由旧客户端丢字段后使用同键改写已存消息。N/N-1 往返必须验证扩展保留、地址精度和未知关键语义拒绝。
 
-最小应用消息为 READY/READY_RESULT、HEAD、FETCH/FETCH_RESULT、RECEIPT/RECEIPT_COMMITTED、ATTEMPT_BEGIN/ATTEMPT_RESULT、CONTACT_ASSIGN/ASSIGN_RESULT、EXECUTION_ADMIT/ADMIT_RESULT、STATUS/ERROR。后三组是宿主处理尝试、首联唯一分配和执行准入的私有应用操作，经同一 WSS 上行调用 collab；不开放为模型工具，也不是 Broker 控制帧。DELIVERY 只是 FETCH_RESULT 中的条目，不是另一套重传帧。不透明参与关系恢复单独分页，binding/grant/lineage 在插件本地恢复；NATS 订阅与心跳仍交官方实现。
+最小应用消息为 READY/READY_RESULT、HEAD、FETCH/FETCH_RESULT、RECEIPT/RECEIPT_COMMITTED、ATTEMPT_BEGIN/ATTEMPT_RESULT、CONTACT_DECIDE/DECIDE_RESULT、CONTACT_ASSIGN/ASSIGN_RESULT、EXECUTION_ADMIT/ADMIT_RESULT、STATUS/ERROR。上述处理尝试、用户授权决定、首联唯一分配和执行准入均为私有应用操作，经同一 WSS 上行调用 collab；不开放为模型工具，也不是 Broker 控制帧。DELIVERY 只是 FETCH_RESULT 中的条目，不是另一套重传帧。不透明参与关系恢复单独分页，binding/grant/lineage 在插件本地恢复；NATS 订阅与心跳仍交官方实现。
 
 FETCH 携带 request_id、resume_cursor、受保护的 continuation（含 scan_after/snapshot_head）及本次 max_items/max_bytes。返回条目、受权终态或不暴露正文的空洞说明、当前 head、平台确认前缀和下一页位置。整页含编码头不超过 64KiB，最多 128 项只是数量上限；剩余窗口不足则缩页。Node 默认 single-flight，重复请求/响应不改变额度。FETCH 不锁定 delivery、不修改其状态、不建立租约；Core 请求超时可同位置重试。额度耗尽暂停，收到回执确认/本地空间释放才继续。无待取页时不按秒发空 FETCH。
 
@@ -157,7 +196,7 @@ kind/body 按上述枚举承载普通消息、请求/响应、执行控制、进
 
 ACK_RECEIVED若需要只作为可选应用诊断，不清PG状态；NATS `flush()`/PONG、Core publish成功、JS PubAck、JS consumer ACK均不能映射为host_accepted。Host receipt 逐项包含 delivery_id/完整目标地址/host_request_id/digest 与持久接受证据、accepted_by（system/session）；系统首联额外携带已固定的 assigned_address（如已有）及执行状态。host_session_id 留本地，仅按授权诊断导出；只有 collab 事务结果能形成 RECEIPT_COMMITTED。RECEIPT 必须带 status：host_accepted 才是持久接受；quarantined/retryable/outcome_unknown 仅报告处理状态，不冒成功 ACK。每种状态更新带幂等操作 ID 和状态版本，旧版本不得把终态恢复成可执行项。
 
-错误族建议`network.unauthorized|revoked|stale_epoch|conflict|quota_exceeded|overloaded|expired|resume_unavailable|host_incompatible|outcome_unknown|protocol_error`，待契约统一。返回scope、关联request、retryable/retry_after，不泄漏堆栈/凭据。发送超时为outcome_unknown，查同幂等键；限流/认证错误不转换成功。传输重连期间禁止SDK盲目缓存并重发任意业务写；持久发送必须依赖应用幂等键和权威结果。
+首联状态和隐私裁剪按 §1.2，不能把 contact_pending 转为自动发送重试。未获状态查看权时以下目标相关错误不得穿透统一回执。错误族建议`network.contact_pending|contact_denied|contact_expired|unauthorized|revoked|stale_epoch|conflict|quota_exceeded|overloaded|expired|resume_unavailable|host_incompatible|outcome_unknown|protocol_error`，待契约统一。返回scope、关联request、retryable/retry_after，不泄漏堆栈/凭据。发送超时为outcome_unknown，查同幂等键；源端认证/全局入口限流错误不转换成功；目标相关拒绝对无状态查看权者仅保留 §1.2 的提交回执，不能显示为消息送达。传输重连期间禁止SDK盲目缓存并重发任意业务写；持久发送必须依赖应用幂等键和权威结果。
 ## 4. 两个状态机，不混淆投递和执行
 
 ```mermaid
@@ -182,13 +221,15 @@ Expired/Canceled/Revoked/Skipped 是可审计的传输终态，不是执行成�
 
 outcome_unknown 是执行结果未知，**单凭本地报告不能越过游标**。平台核实原准入/尝试与身份后，持久提交 Unresolved 传输 tombstone（终态记录）及 execution_status.outcome_unknown，禁止该 delivery 自动再准入；这时才允许确认前缀越过。未知事项仍在独立待对账清单内，可查询原请求/结果，绝不显示 execution_completed。迟到结果可补充原执行记录，不撤回 tombstone、不自动重做。Quarantined 本身不能越过前缀；HostAccepted 或上述已提交终态才可以。
 
+授权状态与传输/执行状态分别记录：contact_pending 时系统 delivery 仍 Pending，提示不产生 HostAccepted；第一层拒绝/过期写 Revoked/Expired 传输终态（业务显示 contact_denied/contact_expired），已交接后的撤销只更新关系/执行状态。
+
 上述 `HostAccepted` 结束传输交接，不结束执行生命周期。首联系统已接受后，contact 另保 awaiting_session / creating / session_ready / closed 及创建未知状态；到期、取消、撤销、隔离和未知只更新 contact/执行状态，不将已确认的传输倒退为 Pending 或再推进一次游标。平台到期扫描必须同时覆盖未决 contact（包括已有 system receipt 的项）。本地系统收件和会话收件分别记录，不能因为存在 system receipt 就跳过尚未准入的会话处理，也不能将 session 阶段再次调用误认为系统重投。另记录 `not_started → admitted → running → completed|failed|canceled|outcome_unknown`，每次变化都是有版本的事件/结果，不修改原 message 内容。`admitted/running` 需关联同 delivery 和原生 turn/request 身份，不能由 LLM 文本“收到/完成”触发。
 
 平台 ACK 四级：
 
 1. `platform_stored`：PG 提交。数据库 durability 档和失效假设必须随部署披露。
 2. `transport_received`：对端已读帧，不耐久。
-3. `host_accepted`：宿主持久接收可恢复；平台 ACK 事务已提交才能展示。非系统投递必须有正确会话证据；首联系统入箱标 accepted_by=system、awaiting_session，之后新会话持久接受另标 accepted_by=session/assigned_address，绝不把系统入箱显示成 agent 接收。平台只存证据摘要和不透明地址，原生 session 映射留插件。
+3. `host_accepted`：宿主持久接收可恢复；平台 ACK 事务已提交才能展示。非系统投递必须有正确会话证据；首联获准后本地系统耐久入箱标 accepted_by=system、awaiting_session；授权前总部保存/本地提示不算此 ACK，之后新会话持久接受另标 accepted_by=session/assigned_address，绝不把系统入箱显示成 agent 接收。平台只存证据摘要和不透明地址，原生 session 映射留插件。
 4. `execution_completed`：宿主可信完成事件和结果记录，且语义满足本请求的完成契约。turn/end 可能代表失败/取消，不能无条件视为成功。
 
 至少一次只保证有效期、保留期和故障模型内的已接受消息可恢复投递。网络不保证模型一定会响应，不保证工具副作用天然幂等。执行第三方写入应使用其业务幂等键或事务收件表；外部动作成功而结果落盘前崩溃时，无法查询结果则标 outcome_unknown，禁止自动重复不可幂等操作。连接 epoch 只能 fence 后续网络准入，不能杀死已开始的外部 HTTP 请求。
@@ -198,21 +239,22 @@ outcome_unknown 是执行结果未知，**单凭本地报告不能越过游标**
 沿现有 collab 表新增迁移，不修改已合 migration；tenant_id、RLS、含 tenant 的 FK 保留。拟增加：
 
 - connection_route：当前 epoch/ingress、网络授权引用、server_id/CID/服务器运行世代与有效期。新 FETCH/写操作核当前路由。
+- contact_request / contact_decision：总部系统收件箱的请求状态、两层决定结果/不透明版本、截止和审计关联；个人规则/名单及默认档位只在插件。隐私入口的 submission 记录与正式 contact 关联，不生成虚假投递。
 - node_policy / conversation_relation / contact_assignment：总部保节点策略、完整不透明地址的线程关系、关系来源消息/撤销版本与首联唯一分配/创建准入；binding_grant/session_lineage、宿主 session 映射和 root/祖先预算下沉插件本地耐久库，不再作为总部会话结构表。
 - node_mailbox：head_seq、committed_cursor、保留窗口下界；以邮箱行锁分配序号，事务回滚同时回退。未确认数/字节与 delivery 在同事务更新，用索引找在线积压，不引入 dirty_version、dispatch_ready 或 owner generation。
 - delivery：target_participant/完整目标地址、mail_seq、expires_at、quarantine_deadline、隔离原因，以及平台权威 attempt_count/active_attempt_id；每 node 序号唯一。保留 pending/终态索引及每逻辑收件人的唯一约束，不增加 lease_epoch/delivery_token。
 - host_receipt：稳定 delivery、digest、宿主 request、目标地址、持久证据摘要及接受状态；以 (tenant, delivery, accepted_by) 区分 system/session 阶段，同阶段异体拒绝。非系统项只允许 session；首联 session 阶段还核唯一 assigned_address。首次持久接受才推进稀疏回执/连续前缀和释放传输额度，后续阶段只追加证据、不重复释放。
 - execution_status / operation_dedup：以 (tenant, delivery_id) 唯一记录执行准入；含 admission_id、获准 epoch/进程 boot ID、host_request_id、状态版本和结果。epoch 变化不删除这条唯一记录；另保留源操作幂等 tombstone。不是业务任务调度表。
 
-send 事务按稳定次序锁目标邮箱、thread 和配额；fanout 在原子上限内全成或全退。FETCH 逐项核权、只读有界页面，不持 DB 锁等宿主/网络。RECEIPT 事务核节点身份、固化目标地址/关系、digest 与原 request，写幂等回执、更新稀疏已确认集合并推进无空洞前缀。已 host_accepted 的同 receipt 返回原结果，不再次扣/释放配额。PG 错误不返回成功。
+send 事务按稳定次序锁目标邮箱、thread 和配额；fanout 在原子上限内全成或全退。FETCH 逐项核权，contact_pending 仅给目标审批 UI 提示/受限预览，不进入正文交付接口；获准后才正文交接。只读有界页面，不持 DB 锁等宿主/网络。RECEIPT 事务核节点身份、固化目标地址/关系、digest 与原 request，写幂等回执、更新稀疏已确认集合并推进无空洞前缀。已 host_accepted 的同 receipt 返回原结果，不再次扣/释放配额。PG 错误不返回成功。
 
 允许旧连接迟到 RECEIPT 的范围很窄：连接所属网络授权仍有效、同 tenant/node/incarnation 与原完整目标地址、digest/request 身份一致，且只能补录接受事实或返回已有结果。它不能改路由、准入执行、取消或重映射会话。因吊销而失权的旧连接拒绝；新有效连接或授权对账流程可提交本地持久证据。若过期/取消先发生，记录 receipt 事实与冲突结果，不覆盖已存在的准入终态，不自动重新 prompt。旧 epoch FETCH 和迟到页面仍拒绝。
 
 **处理尝试的持久计数**：进入可能崩溃的宿主 deliver 前，网络插件先生成 attempt_id 并写本地 ledger，再在线调用 ATTEMPT_BEGIN。collab 在短事务中核当前 epoch/授权/期限，按 delivery 原子增加 attempt_count 并登记本次 attempt_id；同 ID 重发不重复计数，FETCH 本身不计数。平台计数是权威，本地仅镜像尝试次数和 entered 标记。只有本次有效成功响应且本地 entered 已持久化，才可调用一次 deliver；重复响应、重启或复制 ledger 不允许重新进入同一尝试。响应丢失可查状态，但查询结果不产生新的调用许可。
 
-崩溃后未完成尝试不退款：无执行准入记录时，当前连接可用新 attempt_id 申请下一次，旧尝试同时失效；已有执行准入则先按下述规则对账，不再自动调用 prompt。最多自动 5 次；第 5 次失败/重启发现未完成，或第 6 次申请时，由平台持久转 Quarantined。首联从系统处理到会话处理共用该 delivery 的累计次数；已 system-accepted 时转 contact 的隔离/关闭状态，不倒退传输，人工待批准本身不消耗尝试。CONTACT_ASSIGN 额外记录一次不可重领的创建许可，attempt 增加不能越过已发出的创建/执行许可。明确毒消息可提前隔离，经 RECEIPT(status=quarantined) 上报；即使插件崩溃到无法上报，平台仍能依据计数和下一次请求隔离。无人重连时由原 expires_at 收尾。管理员修复后若批准额外尝试，必须显式审计额度，重启/换 epoch/反复取页均不得清零。
+崩溃后未完成尝试不退款：无执行准入记录时，当前连接可用新 attempt_id 申请下一次，旧尝试同时失效；已有执行准入则先按下述规则对账，不再自动调用 prompt。最多自动 5 次；第 5 次失败/重启发现未完成，或第 6 次申请时，由平台持久转 Quarantined。首联从系统处理到会话处理共用该 delivery 的累计次数；已 system-accepted 时转 contact 的隔离/关闭状态，不倒退传输，总部等待授权、本地审批提示与策略评估均不消耗宿主尝试。CONTACT_ASSIGN 额外记录一次不可重领的创建许可，attempt 增加不能越过已发出的创建/执行许可。明确毒消息可提前隔离，经 RECEIPT(status=quarantined) 上报；即使插件崩溃到无法上报，平台仍能依据计数和下一次请求隔离。无人重连时由原 expires_at 收尾。管理员修复后若批准额外尝试，必须显式审计额度，重启/换 epoch/反复取页均不得清零。
 
-**执行前的在线准入**：宿主在本地 session 锁内完成历史去重、即将 queue/prompt 前，必须调用 EXECUTION_ADMIT，即 admit(delivery_id, target_address, connection_epoch, host_request_id, attempt_id, boot_id)。插件在同一会话锁内先核本地 grant/lineage/映射与策略版本，收到准入响应后、调用宿主前再次检查；collab 核 delivery 固化的完整 to 与请求地址一致、当前 route epoch、IAM/node 策略及对话关系、有效尝试、期限及取消版本（首联还核 CONTACT_ASSIGN 固化的执行地址；target 仍为 sys，assigned_address 单列，不能任意替换），事务 CAS 把该 delivery 从未准入变为 admitted，并持久记录 admission_id。READY 接管、取消与 admit 按同一 node/执行记录锁序串行化；只有当前世代第一次成功准入的调用可继续。断线、超时、IAM 故障或旧世代均停在 RECEIVED，不能仅凭旧页面或本地 ledger 执行。
+**执行前的在线准入**：宿主在本地 session 锁内完成历史去重、即将 queue/prompt 前，必须调用 EXECUTION_ADMIT，即 admit(delivery_id, target_address, connection_epoch, host_request_id, attempt_id, boot_id)。插件在同一会话锁内先核当前个人两层授权（包括已有对话的新策略）、工具范围、grant/lineage/映射与策略版本，收到准入响应后、调用宿主前再次检查；collab 核 delivery 固化的完整 to 与请求地址一致、当前 route epoch、IAM/组织互联/node 策略及对话关系、contact 决定版本/本次执行允许状态、有效尝试、期限及取消版本（首联还核 CONTACT_ASSIGN 固化的执行地址；target 仍为 sys，assigned_address 单列，不能任意替换），事务 CAS 把该 delivery 从未准入变为 admitted，并持久记录 admission_id。READY 接管、取消与 admit 按同一 node/执行记录锁序串行化；只有当前世代第一次成功准入的调用可继续。断线、超时、IAM 故障或旧世代均停在 RECEIVED，不能仅凭旧页面或本地 ledger 执行。
 
 执行准入不是可到期重领的租约：同 delivery 的重复请求只返回已有状态，不另发执行许可。epoch 续接、克隆 B 接管、超时或未收到 Host receipt 都不能清除 admitted 记录。准入成功响应丢失，或响应成功后 prompt 前崩溃，可能牺牲自动完成：恢复只查原宿主 request/日志；无法证明结果时提交 Unresolved，不把同请求再次交给另一个进程执行。获准进程把 admission_id 与 invocation_started 持久化后只调用一次；重复响应不重复调用。
 
@@ -226,10 +268,10 @@ send 事务按稳定次序锁目标邮箱、thread 和配额；fanout 在原子�
 
 宿主 adapter 通过 `deliver(page) → receipts` 与网络层解耦；fixture 传输可独立调用。输入含平台核验的完整地址/epoch/attempt，以及插件本地核验的 binding/grant 上下文，输出逐项接受证据或 retry/quarantined/outcome_unknown。网络层提供私有 admit 回调供宿主 adapter 在 prompt 前调用；fixture 可以替换该依赖验证时序，但不能用本地恒真检查替代生产在线准入。插件维护专用持久 inbox/receipt ledger（收件与回执账本），至少存 `(tenant,node_incarnation,delivery_id,message_digest,target_address,assigned_address,binding_id,host_session_id,host_request_id,state)`；单写者锁、原子事务、真实 fsync/可恢复日志、容量和回收策略必须验证。可以选择兼容当前 Node 平台的嵌入式事务存储，不能仅以普通配置 JSON 的“已保存”作为断电耐久证明。不要把网络凭据与消息正文混写到公开日志。
 
-以下步骤描述非系统会话交付；system 首联按 §1.1 先做无模型的耐久入箱与分配，再对 assigned_address 执行相同的会话准入/持久接受步骤。ledger 区分 system_received、session_received、session_accepted，检查“已接受”时必须匹配阶段。顺序为：
+以下步骤描述非系统会话交付；system 首联按 §1.2 留总部待授权，获准后按 §1.1 做无模型的本地耐久入箱与分配，再对 assigned_address 执行相同的会话准入/持久接受步骤。ledger 区分 system_received、session_received、session_accepted，检查“已接受”时必须匹配阶段。顺序为：
 
 1. 网络层限长，核完整 to 与插件本地 local→binding→host_session_id 映射、幂等体及 ledger 一致；错配拒绝，不查询当前前台。持久记录 RECEIVED，尚不能报 host_accepted。调用 §5 ATTEMPT_BEGIN 并持久记录 entered 后才进入宿主 deliver；所有重启共用平台按 delivery 保存的次数上限。
-2. 非系统 delivery 必须已有本地 local 映射，用原 native session 恢复，不重复 create 来“接收”。系统 first_contact 按 §1.1 持久入箱/批准/预留/CONTACT_ASSIGN/原生创建，始终沿用原系统 delivery 及其唯一 assigned_address，不再生成改投前台的 delivery。创建或分配响应丢失查询同身份，不另建随机会话。system receipt 与 session 执行各自持久记录，系统已接受不等于模型已执行。
+2. 非系统 delivery 必须已有本地 local 映射，用原 native session 恢复，不重复 create 来“接收”。系统 first_contact 按 §1.2 总部待授权/CONTACT_DECIDE，再按 §1.1 本地耐久入箱/预留/CONTACT_ASSIGN/原生创建，始终沿用原系统 delivery 及其唯一 assigned_address，不再生成改投前台的 delivery。创建或分配响应丢失查询同身份，不另建随机会话。system receipt 与 session 执行各自持久记录，系统已接受不等于模型已执行。
 3. 在同 session 锁内查 ledger 和宿主历史/inbox 的 requestId=delivery_id。已 session-accepted 项只重建回执；未执行项先完成 §5 在线 EXECUTION_ADMIT CAS，成功并持久写 invocation_started 后，普通会话才可 queue/prompt，子 agent 才可进入专用调用。准入不成功只保留 RECEIVED，不执行。
 4. prompt accepted 后核对正确 session 及持久 provider，执行 awaited flush；成功后写 ledger HOST_ACCEPTED 并 fsync，随后发 RECEIPT。缺 provider、flush=false、异常、磁盘满均不发成功 ACK。
 5. 平台按 §5 核节点/完整地址关系/digest 后提交 host_receipt/delivery 状态，回 RECEIPT_COMMITTED。插件只在此后把平台游标推进至无空洞前缀；结果事件走同样可重放 outbox。
