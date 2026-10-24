@@ -3,8 +3,10 @@ import { orgZh, orgEn } from './orgMessages';
 import { quotaZh, quotaEn } from './quotaMessages';
 import { rolesZh, rolesEn } from './rolesMessages';
 import { resourceZh, resourceEn } from './resourceMessages';
+import { providersZh, providersEn } from './providersMessages';
 
 const zh = {
+  ...providersZh,
   ...resourceZh,
   ...orgZh,
   ...quotaZh,
@@ -118,6 +120,7 @@ const zh = {
   },
 };
 const en = {
+  ...providersEn,
   ...resourceEn,
   ...orgEn,
   ...quotaEn,
