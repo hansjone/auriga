@@ -427,6 +427,90 @@ class LocalObjectStoreTest {
   }
 
   @Test
+  void localCleanupPreservesTheOsLeaseBeforeAndAfterOtherJvmCleanup() throws Exception {
+    var clock = new MutableClock(START);
+    try (var owner = new LocalObjectStore(root, clock, Duration.ofHours(24));
+        var other = new LocalObjectStore(root, clock, Duration.ofHours(24))) {
+      for (var cleaner : List.of(owner, other)) {
+        var stage = stage(owner, TENANT);
+        clock.now = clock.now.plus(Duration.ofDays(2));
+        assertEquals(0, cleanupInChild(clock.now), "BEFORE_LOCAL");
+        assertEquals(0, cleaner.cleanupExpiredStaging(TENANT), "LOCAL_CLEANED");
+        assertEquals(0, cleanupInChild(clock.now), "AFTER_LOCAL");
+        try (var raw = owner.openStaged(TENANT, stage.id())) {
+          assertArrayEquals(BYTES, raw.readAllBytes());
+        }
+        assertEquals(stage.object(), owner.commitIfAbsent(TENANT, stage.id(), stage.object()));
+        assertEquals(stage.object(), owner.stat(TENANT, stage.object().digest()));
+      }
+      assertEquals(0, stages(TENANT));
+    }
+  }
+
+  @Test
+  void activeLeaseIdentityAlsoProtectsAnAliasWithoutOpeningAnotherChannel() throws Exception {
+    var clock = new MutableClock(START);
+    try (var owner = new LocalObjectStore(root, clock, Duration.ofHours(24));
+        var cleaner = new LocalObjectStore(root, clock, Duration.ofHours(24))) {
+      var stage = stage(owner, TENANT);
+      Path aliasDirectory =
+          tenant(TENANT)
+              .resolve("staging")
+              .resolve("stage-" + UUID.randomUUID().toString().replace("-", ""));
+      Files.createDirectory(aliasDirectory);
+      Path alias =
+          Files.createLink(
+              aliasDirectory.resolve("lease"), staged(TENANT, stage.id()).resolve("lease"));
+      assertTrue(Files.isSameFile(alias, staged(TENANT, stage.id()).resolve("lease")));
+      clock.now = clock.now.plus(Duration.ofDays(2));
+      assertEquals(0, cleanupInChild(clock.now), "ALIAS_BEFORE_LOCAL");
+      assertEquals(0, cleaner.cleanupExpiredStaging(TENANT), "ALIAS_LOCAL_CLEANED");
+      assertEquals(0, cleanupInChild(clock.now), "ALIAS_AFTER_LOCAL");
+      try (var raw = owner.openStaged(TENANT, stage.id())) {
+        assertArrayEquals(BYTES, raw.readAllBytes());
+      }
+      owner.commitIfAbsent(TENANT, stage.id(), stage.object());
+      assertEquals(stage.object(), owner.stat(TENANT, stage.object().digest()));
+      Files.delete(alias);
+      Files.delete(aliasDirectory);
+      assertEquals(0, stages(TENANT));
+    }
+  }
+
+  @Test
+  void stageStillBeingCopiedKeepsOsLeaseAfterLocalCleanup() throws Exception {
+    var clock = new MutableClock(START);
+    try (var owner = new LocalObjectStore(root, clock, Duration.ofHours(24));
+        var cleaner = new LocalObjectStore(root, clock, Duration.ofHours(24))) {
+      var checked = new java.util.concurrent.atomic.AtomicBoolean();
+      var input =
+          new FilterInputStream(new ByteArrayInputStream(BYTES)) {
+            @Override
+            public int read(byte[] bytes, int offset, int length) throws IOException {
+              if (checked.compareAndSet(false, true)) {
+                clock.now = clock.now.plus(Duration.ofDays(2));
+                try {
+                  assertEquals(0, cleanupInChild(clock.now), "COPY_BEFORE_LOCAL");
+                  assertEquals(0, cleaner.cleanupExpiredStaging(TENANT), "COPY_LOCAL_CLEANED");
+                  assertEquals(0, cleanupInChild(clock.now), "COPY_AFTER_LOCAL");
+                } catch (Exception | AssertionError failure) {
+                  throw new IOException("In-progress lease regression", failure);
+                }
+              }
+              return super.read(bytes, offset, length);
+            }
+          };
+      var stage = owner.putStaged(TENANT, input, ObjectStore.MAX_BYTES);
+      assertTrue(checked.get());
+      try (var raw = owner.openStaged(TENANT, stage.id())) {
+        assertArrayEquals(BYTES, raw.readAllBytes());
+      }
+      owner.commitIfAbsent(TENANT, stage.id(), stage.object());
+      assertEquals(stage.object(), owner.stat(TENANT, stage.object().digest()));
+    }
+  }
+
+  @Test
   void crossProcessLeaseProtectsExpiredStageThenOrphanExpiresAtTheExactBoundary() throws Exception {
     var clock = new MutableClock(START);
     try (var store = new LocalObjectStore(root, clock, Duration.ofHours(24))) {
@@ -613,6 +697,42 @@ class LocalObjectStoreTest {
         .start();
   }
 
+  int cleanupInChild(Instant now) throws Exception {
+    String executable =
+        Path.of(
+                System.getProperty("java.home"),
+                "bin",
+                System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java")
+            .toString();
+    Process child =
+        new ProcessBuilder(
+                executable,
+                "-cp",
+                System.getProperty(
+                    "surefire.test.class.path", System.getProperty("java.class.path")),
+                CleanerProcess.class.getName(),
+                root.toString(),
+                TENANT.toString(),
+                now.toString())
+            .start();
+    try {
+      assertTrue(child.waitFor(15, TimeUnit.SECONDS), "Cleaner process timeout");
+      assertEquals(
+          0,
+          child.exitValue(),
+          new String(child.getErrorStream().readAllBytes(), StandardCharsets.UTF_8));
+      String result =
+          new String(child.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+      assertTrue(result.matches("CLEANED=[0-9]+"), result);
+      return Integer.parseInt(result.substring("CLEANED=".length()));
+    } finally {
+      if (child.isAlive()) {
+        child.destroyForcibly();
+        assertTrue(child.waitFor(15, TimeUnit.SECONDS));
+      }
+    }
+  }
+
   static void junction(Path link, Path target) throws Exception {
     Process process =
         new ProcessBuilder("cmd.exe", "/c", "mklink", "/J", link.toString(), target.toString())
@@ -648,6 +768,18 @@ class LocalObjectStoreTest {
       System.in.read();
       // Simulate an exited uploader: no application close; OS releases the lease, disk stage
       // remains.
+    }
+  }
+
+  public static class CleanerProcess {
+    public static void main(String[] args) {
+      try (var store =
+          new LocalObjectStore(
+              Path.of(args[0]),
+              Clock.fixed(Instant.parse(args[2]), ZoneOffset.UTC),
+              Duration.ofHours(24))) {
+        System.out.println("CLEANED=" + store.cleanupExpiredStaging(UUID.fromString(args[1])));
+      }
     }
   }
 

@@ -31,6 +31,10 @@ public final class LocalObjectStore implements ObjectStore {
   private static final String NAMESPACE = ".auriga-resource-objects-v1";
   private static final String DATA = "payload";
   private static final String LEASE = "lease";
+  // POSIX locks are process-associated: closing any channel for an active lease can drop its
+  // OS lock. All instances coordinate BEFORE opening a lease and through channel close.
+  private static final Object JVM_LEASE_MONITOR = new Object();
+  private static final Set<Path> JVM_ACTIVE_LEASES = new HashSet<>();
   private final Path root;
   private final Clock clock;
   private final Duration stageTtl;
@@ -260,33 +264,37 @@ public final class LocalObjectStore implements ObjectStore {
                 checkedDirectory(entry);
                 Path lease = entry.resolve(LEASE);
                 if (!Files.exists(lease, NOFOLLOW_LINKS)) continue;
-                regular(lease);
-                boolean eligible = false;
-                try (FileChannel channel = FileChannel.open(lease, READ, WRITE, NOFOLLOW_LINKS)) {
-                  FileLock lock;
-                  try {
-                    lock = channel.tryLock();
-                  } catch (OverlappingFileLockException active) {
+                synchronized (JVM_LEASE_MONITOR) {
+                  if (locallyActiveLease(lease)) continue;
+                  regular(lease);
+                  boolean eligible = false;
+                  try (FileChannel channel = FileChannel.open(lease, READ, WRITE, NOFOLLOW_LINKS)) {
+                    FileLock lock;
+                    try {
+                      lock = channel.tryLock();
+                    } catch (OverlappingFileLockException active) {
+                      // Cooperating holders were excluded without opening a second channel.
+                      throw new IOException("Uncoordinated in-process lease lock", active);
+                    }
+                    if (lock == null) continue;
+                    try (lock) {
+                      if (!expiredMarker(channel, tenant, name, cutoff)) continue;
+                      if (!recognizedContents(entry)) continue;
+                      Path data = entry.resolve(DATA);
+                      if (Files.exists(data, NOFOLLOW_LINKS)) {
+                        regular(data);
+                        Files.delete(data);
+                      }
+                      eligible = true;
+                    }
+                  } catch (NoSuchFileException raced) {
                     continue;
                   }
-                  if (lock == null) continue;
-                  try (lock) {
-                    if (!expiredMarker(channel, tenant, name, cutoff)) continue;
-                    if (!recognizedContents(entry)) continue;
-                    Path data = entry.resolve(DATA);
-                    if (Files.exists(data, NOFOLLOW_LINKS)) {
-                      regular(data);
-                      Files.delete(data);
-                    }
-                    eligible = true;
+                  if (eligible) {
+                    // No recursive deletion, no following links, and no committed-object GC.
+                    Files.deleteIfExists(lease);
+                    if (Files.deleteIfExists(entry)) removed++;
                   }
-                } catch (NoSuchFileException raced) {
-                  continue;
-                }
-                if (eligible) {
-                  // No recursive deletion, no following links, and no committed-object GC.
-                  Files.deleteIfExists(lease);
-                  if (Files.deleteIfExists(entry)) removed++;
                 }
               }
             }
@@ -325,46 +333,50 @@ public final class LocalObjectStore implements ObjectStore {
   private Stage newStage(UUID tenant) throws IOException {
     Path parent = tenantPath(tenant, true).resolve("staging");
     ensureDirectory(parent);
-    UUID id = UUID.randomUUID();
-    Path directory = parent.resolve("stage-" + id.toString().replace("-", ""));
-    Files.createDirectory(directory, privateDirectory());
-    FileChannel lease = null;
-    FileLock lock = null;
-    try {
-      lease =
-          FileChannel.open(
-              directory.resolve(LEASE),
-              Set.of(CREATE_NEW, READ, WRITE, NOFOLLOW_LINKS),
-              privateFile());
-      lock = lease.tryLock();
-      if (lock == null) throw new IOException("Exclusive stage lease unavailable");
-      byte[] marker =
-          (MAGIC + "\n" + tenant + "\n" + id + "\n" + clock.instant() + "\n")
-              .getBytes(StandardCharsets.US_ASCII);
-      ByteBuffer bytes = ByteBuffer.wrap(marker);
-      while (bytes.hasRemaining()) lease.write(bytes);
-      lease.force(true);
-      return new Stage(tenant, id, directory, lease, lock);
-    } catch (IOException | RuntimeException e) {
-      if (lock != null)
-        try {
-          lock.close();
-        } catch (IOException close) {
-          e.addSuppressed(close);
-        }
-      if (lease != null)
-        try {
-          lease.close();
-        } catch (IOException close) {
-          e.addSuppressed(close);
-        }
+    synchronized (JVM_LEASE_MONITOR) {
+      UUID id = UUID.randomUUID();
+      Path directory = parent.resolve("stage-" + id.toString().replace("-", ""));
+      Files.createDirectory(directory, privateDirectory());
+      FileChannel lease = null;
+      FileLock lock = null;
+      Path leasePath = directory.resolve(LEASE);
+      JVM_ACTIVE_LEASES.add(leasePath);
       try {
-        Files.deleteIfExists(directory.resolve(LEASE));
-        Files.delete(directory);
-      } catch (IOException cleanup) {
-        e.addSuppressed(cleanup);
+        lease =
+            FileChannel.open(
+                leasePath, Set.of(CREATE_NEW, READ, WRITE, NOFOLLOW_LINKS), privateFile());
+        lock = lease.tryLock();
+        if (lock == null) throw new IOException("Exclusive stage lease unavailable");
+        byte[] marker =
+            (MAGIC + "\n" + tenant + "\n" + id + "\n" + clock.instant() + "\n")
+                .getBytes(StandardCharsets.US_ASCII);
+        ByteBuffer bytes = ByteBuffer.wrap(marker);
+        while (bytes.hasRemaining()) lease.write(bytes);
+        lease.force(true);
+        return new Stage(tenant, id, directory, lease, lock);
+      } catch (IOException | RuntimeException e) {
+        if (lock != null)
+          try {
+            lock.close();
+          } catch (IOException close) {
+            e.addSuppressed(close);
+          }
+        if (lease == null) JVM_ACTIVE_LEASES.remove(leasePath);
+        else
+          try {
+            lease.close();
+            JVM_ACTIVE_LEASES.remove(leasePath);
+          } catch (IOException close) {
+            e.addSuppressed(close);
+          }
+        try {
+          Files.deleteIfExists(directory.resolve(LEASE));
+          Files.delete(directory);
+        } catch (IOException cleanup) {
+          e.addSuppressed(cleanup);
+        }
+        throw e;
       }
-      throw e;
     }
   }
 
@@ -501,33 +513,47 @@ public final class LocalObjectStore implements ObjectStore {
   }
 
   private void dispose(Stage stage) throws IOException {
-    IOException failure = null;
-    try {
-      checkedDirectory(stage.directory);
-      regular(stage.directory.resolve(LEASE));
-      Path data = stage.directory.resolve(DATA);
-      if (Files.exists(data, NOFOLLOW_LINKS)) {
-        regular(data);
-        Files.delete(data);
+    synchronized (JVM_LEASE_MONITOR) {
+      IOException failure = null;
+      try {
+        checkedDirectory(stage.directory);
+        regular(stage.directory.resolve(LEASE));
+        Path data = stage.directory.resolve(DATA);
+        if (Files.exists(data, NOFOLLOW_LINKS)) {
+          regular(data);
+          Files.delete(data);
+        }
+      } catch (IOException e) {
+        failure = e;
       }
-    } catch (IOException e) {
-      failure = e;
+      try {
+        stage.lock.close();
+      } catch (IOException e) {
+        if (failure == null) failure = e;
+        else failure.addSuppressed(e);
+      }
+      try {
+        stage.lease.close();
+        JVM_ACTIVE_LEASES.remove(stage.directory.resolve(LEASE));
+      } catch (IOException e) {
+        if (failure == null) failure = e;
+        else failure.addSuppressed(e);
+      }
+      if (failure != null) throw failure;
+      Files.deleteIfExists(stage.directory.resolve(LEASE));
+      Files.delete(stage.directory);
     }
-    try {
-      stage.lock.close();
-    } catch (IOException e) {
-      if (failure == null) failure = e;
-      else failure.addSuppressed(e);
+  }
+
+  /** Called only under JVM_LEASE_MONITOR; no FileChannel is opened for an active inode. */
+  private static boolean locallyActiveLease(Path lease) throws IOException {
+    if (JVM_ACTIVE_LEASES.contains(lease)) return true;
+    // Also cover physical aliases. On the supported default Unix provider this uses stat,
+    // not a lease FileChannel; Windows does not have POSIX close-any-descriptor semantics.
+    for (Path active : JVM_ACTIVE_LEASES) {
+      if (Files.isSameFile(active, lease)) return true;
     }
-    try {
-      stage.lease.close();
-    } catch (IOException e) {
-      if (failure == null) failure = e;
-      else failure.addSuppressed(e);
-    }
-    if (failure != null) throw failure;
-    Files.deleteIfExists(stage.directory.resolve(LEASE));
-    Files.delete(stage.directory);
+    return false;
   }
 
   private void cleanupFailedStage(Stage stage, Throwable failure) {

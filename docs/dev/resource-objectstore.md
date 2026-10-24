@@ -40,7 +40,11 @@ payload执行force，但不宣称跨所有文件系统的断电持久性或与�
 
 默认stage保留期24小时，可通过内部构造参数`Clock`和正`Duration`由受信装配方指定，无新环境变量或配置协议。`cleanupExpiredStaging(tenant)`仅枚举该租户staging的直接子目录，识别随机stage名字与版本化lease marker中的租户、stage UUID和创建Instant；不递归删除调用方目录，不触碰objects。
 
-stage创建时先取得lease文件排他锁，再写marker和payload。锁一直持有到commit/abort/close，包括仍在复制、校验及等待归档验证的阶段。清理器使用tryLock；同JVM不同实例的OverlappingFileLock或另一JVM的锁均表示活跃，不能因超过TTL强删。进程退出由OS释放锁，留下的完整或部分stage才可成为孤儿。过期条件为`createdAt <= clock.instant()-ttl`，时钟倒退不会提前清理；未来时间不清理。
+stage创建时先取得lease文件排他锁，再写marker和payload。锁一直持有到commit/abort/close，包括仍在复制、校验及等待归档验证的阶段。所有LocalObjectStore实例共享lease登记和互斥区：创建在打开lease前登记，通道成功关闭后才注销；清理在打开任何lease通道前排除本JVM活跃文件，路径别名通过Files.isSameFile识别同inode。创建/关闭与清理的通道打开、加锁、关闭及目录清理都在同一互斥区内协调，payload复制和摘要核验不占用该互斥区。关闭lease失败会保留本JVM保护并返回存储错误，不能把不确定状态当孤儿。
+
+Linux的进程锁可能因关闭同inode的另一条通道而释放，因此**不能打开第二条通道、捕获OverlappingFileLockException再关闭它来保护活跃stage**。同JVM登记在打开前避开该路径；其他JVM仍通过OS tryLock判断活跃。意外的同JVM重叠锁属于不协调的内部锁协议错误，报告既有存储错误，不以重试或返回0声称保护成功。组件要求这些实例使用同一应用加载的LocalObjectStore，且其他代码不直接打开/关闭其私有lease文件。
+
+超过TTL也不能强删活跃stage；进程退出由OS释放锁，留下的完整或部分stage才可成为孤儿。过期条件为`createdAt <= clock.instant()-ttl`，时钟倒退不会提前清理；未来时间不清理。
 
 清理只处理标记完整、已过期、可获得锁、且仅含lease/payload这两个认识名字的stage。非法标记或额外材料保留，链接/类型异常或IO错误封闭失败；不存在的租户/staging为空。发生删除失败时报告错误并保留可诊断材料，不递归强删。它不负责回收仍活跃但业务方遗忘abort的句柄，调用方须落实finally和关闭生命周期。
 
@@ -59,4 +63,4 @@ Windows先点源既有Auriga环境，再执行：
 .\mvnw.cmd -B -q -pl services/resource/impl spotless:check
 ```
 
-测试使用真实临时文件系统、64 MiB流式边界、实际硬链接/锁、两个独立ObjectStore、独立JVM进程退出、损坏与缺失、跨租户、输入/实际部分输出/close故障注入。故障注入仅组合真实NIO输出流，不增加生产测试模式。Linux同一字节码通过已有JDK镜像在无网络、无端口、只读根、非root的临时容器与独立tmpfs中执行，精确命令、平台具名跳过及结果见工位报告；无现场部署验证。
+测试使用真实临时文件系统、64 MiB流式边界、实际硬链接/锁、两个独立ObjectStore、独立JVM进程退出、损坏与缺失、跨租户、输入/实际部分输出/close故障注入。串联回归验证“子JVM清理0→本JVM清理0→子JVM再清理仍0→owner完整读回并提交”，同时覆盖本实例、另一实例、同inode别名，以及尚在复制未交付句柄的stage；原进程退出后的过期孤儿清理仍保留。故障注入仅组合真实NIO输出流，不增加生产测试模式。Linux在已有JDK镜像中实际重新编译候选源码并执行，容器无网络、无端口、只读根、非root，仅独立tmpfs可写；精确命令、平台具名跳过及结果见工位报告，无现场部署验证。
