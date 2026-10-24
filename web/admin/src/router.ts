@@ -7,6 +7,7 @@ import InstancesView from './views/InstancesView.vue';
 import GroupsView from './views/GroupsView.vue';
 import InvitationsView from './views/InvitationsView.vue';
 import QuotasView from './views/QuotasView.vue';
+import RolesView from './views/RolesView.vue';
 import PlaceholderView from './views/PlaceholderView.vue';
 
 export const router = createRouter({
@@ -24,11 +25,7 @@ export const router = createRouter({
         { path: 'groups', component: GroupsView },
         { path: 'invitations', component: InvitationsView },
         { path: 'quotas', component: QuotasView },
-        {
-          path: 'roles',
-          component: PlaceholderView,
-          props: { titleKey: 'adminNav.roles' },
-        },
+        { path: 'roles', component: RolesView },
         {
           path: 'providers',
           component: PlaceholderView,

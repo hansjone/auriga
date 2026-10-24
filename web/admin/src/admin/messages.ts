@@ -1,10 +1,12 @@
 import { useI18n } from 'vue-i18n';
 import { orgZh, orgEn } from './orgMessages';
 import { quotaZh, quotaEn } from './quotaMessages';
+import { rolesZh, rolesEn } from './rolesMessages';
 
 const zh = {
   ...orgZh,
   ...quotaZh,
+  ...rolesZh,
   environment: '运行环境',
   membership: '成员与权限',
   nodes: '运行节点',
@@ -116,6 +118,7 @@ const zh = {
 const en = {
   ...orgEn,
   ...quotaEn,
+  ...rolesEn,
   environment: 'Runtime environment',
   membership: 'Members and permissions',
   nodes: 'Runtime nodes',
