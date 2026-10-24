@@ -6,6 +6,10 @@
 import { createManaged } from './modes/managed.js';
 import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
+import { createConnectRuntime } from './local/runtime.js';
+import { installLocalAdmission } from './local/host.js';
+import { createConnectRoutes } from './local/routes.js';
+import { join } from 'node:path';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -21,12 +25,52 @@ export async function apply(ctx, config) {
       throw new Error(
         'auriga-dsh: local UI requires native host authentication',
       );
+    let connectRuntime;
+    if (config?.connect) {
+      const profile = ctx.get?.('profileContext');
+      if (!profile?.dir)
+        throw new Error('auriga-dsh: isolated host profile directory required');
+      const runtime = await createConnectRuntime({
+        config: config.connect,
+        directory: join(profile.dir, 'auriga-connect'),
+        ctx,
+      });
+      connectRuntime = runtime;
+      let admission, unregister;
+      try {
+        admission = installLocalAdmission(ctx.connection, runtime, {
+          protocol: ctx.webServer.protocol,
+        });
+        unregister = ctx.webServer.register({
+          kind: 'prefix',
+          path: '/auriga/local-login',
+          handler: createConnectRoutes({ runtime, admission }),
+        });
+        ctx.effect(
+          () => () => {
+            unregister();
+            admission.dispose();
+            runtime.close();
+          },
+          'auriga-dsh: local connection',
+        );
+      } catch (error) {
+        unregister?.();
+        admission?.dispose();
+        runtime.close();
+        throw error;
+      }
+    }
     ctx.effect?.(
       () =>
         ctx.webServer.register({
           kind: 'prefix',
           path: '/auriga',
-          handler: createLocalSurfaceHandler({ mode, auth: ctx.connection }),
+          handler: createLocalSurfaceHandler({
+            mode: connectRuntime ? 'connect' : mode,
+            auth: ctx.connection,
+            runtime: connectRuntime,
+          }),
         }),
       'auriga-dsh: local surfaces',
     );

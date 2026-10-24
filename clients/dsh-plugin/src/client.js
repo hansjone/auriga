@@ -29,6 +29,14 @@ window.__ModuleLoader__.load({
       standalone: '独立模式',
       connect: '连接模式',
       unconfigured: '尚未配置总部连接',
+      connected: '平台已连接，Team 工具可用',
+      disconnected: '平台连接暂不可用',
+      endpoint: '本机通信端点',
+      received: '已接受的消息',
+      conversation: '在会话中使用 Team 工具',
+      logout: '退出本机登录',
+      connectHint:
+        '在 DSH 会话中使用 auriga_list_endpoints、auriga_open_thread、auriga_reply_thread 和 auriga_read_thread。接收消息会创建真实 DSH 会话；退出登录不会停止已有任务。',
       packageHint: '当前界面随插件安装包提供。尚未接通总部认证与资源服务。',
       uiSource: '界面来源',
       package: '插件安装包',
@@ -70,6 +78,14 @@ window.__ModuleLoader__.load({
       standalone: 'Standalone',
       connect: 'Connect',
       unconfigured: 'Headquarters connection is not configured',
+      connected: 'Platform connected; Team tools available',
+      disconnected: 'Platform connection unavailable',
+      endpoint: 'Local communication endpoint',
+      received: 'Accepted messages',
+      conversation: 'Use Team tools in a conversation',
+      logout: 'Sign out locally',
+      connectHint:
+        'Use auriga_list_endpoints, auriga_open_thread, auriga_reply_thread and auriga_read_thread in a DSH conversation. Incoming messages create real DSH sessions. Signing out does not stop existing tasks.',
       packageHint:
         'This UI ships with the plugin package. Headquarters authentication and resource services are not connected yet.',
       uiSource: 'UI source',
@@ -171,7 +187,11 @@ window.__ModuleLoader__.load({
       if (body.mode !== 'managed') {
         const panel = body.localPanel;
         if (
-          body.status !== 'unconfigured' ||
+          !['unconfigured', 'connected', 'disconnected'].includes(
+            body.status,
+          ) ||
+          (body.status !== 'unconfigured' &&
+            typeof body.connection?.connected !== 'boolean') ||
           panel?.source !== 'package' ||
           panel.entry !== 'auriga/local-panel.js' ||
           !version(body.pluginVersion) ||
@@ -187,6 +207,7 @@ window.__ModuleLoader__.load({
           source: 'package',
           entry: localURL(panel.entry).href,
           integrity: panel.integrity,
+          connection: body.connection,
         };
       }
       if (
@@ -480,7 +501,11 @@ window.__ModuleLoader__.load({
                   ? 'loading'
                   : phase.status === 'ready'
                     ? phase.boot.source === 'package'
-                      ? 'unconfigured'
+                      ? phase.boot.connection
+                        ? phase.boot.connection.connected
+                          ? 'connected'
+                          : 'disconnected'
+                        : 'unconfigured'
                       : 'ready'
                     : phase.reason,
               ),
@@ -514,13 +539,57 @@ window.__ModuleLoader__.load({
             notice(phase, retry, true),
             boot && row('mode', t(boot.mode)),
             boot && row('protocol', String(boot.protocol)),
+            boot?.connection && row('endpoint', boot.connection.endpointId),
+            boot?.connection &&
+              row('received', String(boot.connection.received ?? 0)),
+            boot?.connection &&
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: async () => {
+                    try {
+                      const response = await fetch(
+                        localURL('auriga/local-login/status'),
+                        {
+                          credentials: 'same-origin',
+                          cache: 'no-store',
+                          redirect: 'error',
+                        },
+                      );
+                      if (!response.ok) throw failure();
+                      const state = await response.json();
+                      const out = await fetch(
+                        localURL('auriga/local-login/logout'),
+                        {
+                          method: 'POST',
+                          credentials: 'same-origin',
+                          redirect: 'error',
+                          headers: {
+                            'content-type': 'application/json',
+                            'X-Auriga-CSRF': state.csrf,
+                          },
+                          body: '{}',
+                        },
+                      );
+                      if (!out.ok) throw failure();
+                      window.location.assign(localURL('auriga/local-login'));
+                    } catch {
+                      retry();
+                    }
+                  },
+                },
+                t('logout'),
+              ),
             h(
               'p',
               null,
               t(
                 boot
                   ? boot.source === 'package'
-                    ? 'packageHint'
+                    ? boot.connection
+                      ? 'connectHint'
+                      : 'packageHint'
                     : 'managedHint'
                   : 'unavailableHint',
               ),
@@ -631,6 +700,25 @@ window.__ModuleLoader__.load({
                 'div',
                 { role: 'status', 'data-level': host.toast.level },
                 host.toast.message,
+              ),
+            boot.connection &&
+              h(
+                'section',
+                { className: 'auriga-shell-status' },
+                h(
+                  'span',
+                  null,
+                  t(boot.connection.connected ? 'connected' : 'disconnected'),
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    disabled: !boot.connection.connected,
+                    onClick: () => navigate('session:new'),
+                  },
+                  t('conversation'),
+                ),
               ),
             h(ELEMENT, { ref, style: { flex: 1 } }),
           );
