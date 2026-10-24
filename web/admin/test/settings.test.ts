@@ -2,6 +2,8 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAurigaI18n } from '@auriga/shared';
 import ElementPlus from 'element-plus';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import SettingsView from '../src/views/SettingsView.vue';
 import ActionConfirm from '../src/admin/ActionConfirm.vue';
 import { apiClient } from '../src/api';
@@ -16,6 +18,9 @@ import {
 const teamPath = '/api/org/v1/tenant';
 const policyPath = '/api/org/v1/admin/policies/workspace';
 const timestamp = '2026-10-24T00:00:00Z';
+// Keep the platform fetch before the per-test fake is installed. Regression
+// requests below use a real random-port HTTP server to count actual delivery.
+const platformFetch = globalThis.fetch;
 let permissions: string[];
 let tenant: Tenant;
 let policy: Policy;
@@ -528,6 +533,134 @@ describe('settings profile and policy', () => {
       2,
     );
   });
+});
+describe('page-owned writes across IP CSRF setup', () => {
+  it.each([
+    ['team', false],
+    ['workspace', false],
+    ['team', true],
+    ['workspace', true],
+  ] as const)(
+    '%s write: actual HTTP delivery with unmount=%s',
+    async (section, unmount) => {
+      const businessPath =
+        section === 'team' ? '/api/org/v1/admin/tenant' : policyPath;
+      const method = section === 'team' ? 'PATCH' : 'PUT';
+      const delivered: {
+        method?: string;
+        path?: string;
+        csrf?: string;
+        etag?: string;
+      }[] = [];
+      const server = createServer(async (request, response) => {
+        delivered.push({
+          method: request.method,
+          path: request.url,
+          csrf: request.headers['x-auriga-csrf'] as string,
+          etag: request.headers['if-match'],
+        });
+        let body = '';
+        for await (const chunk of request) body += String(chunk);
+        const input = JSON.parse(body);
+        if (section === 'team') tenant = { ...tenant, ...input };
+        else policy = { ...policy, value: input.value, version: 2 };
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(section === 'team' ? tenant : policy));
+      });
+      await new Promise<void>((resolve) =>
+        server.listen(0, '127.0.0.1', resolve),
+      );
+      try {
+        const port = (server.address() as AddressInfo).port;
+        const fixtureFetch = globalThis.fetch;
+        const attempts: (AbortSignal | null | undefined)[] = [];
+        let nativeResult: Promise<Response> | undefined;
+        vi.stubGlobal(
+          'fetch',
+          vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => {
+            const path = new URL(String(input), location.href).pathname;
+            if (path === businessPath && init.method === method) {
+              attempts.push(init.signal);
+              nativeResult = platformFetch(
+                `http://127.0.0.1:${port}${path}`,
+                init,
+              );
+              return nativeResult;
+            }
+            return fixtureFetch(input, init);
+          }),
+        );
+        await render();
+        document.head.innerHTML =
+          '<meta name="auriga-access-mode" content="ip">';
+        await input(
+          section === 'team' ? 'team-name' : 'field-idleMinutes',
+          section === 'team' ? 'Changed team' : '45',
+        );
+        await click(`save-${section}`);
+        let release!: (response: Response) => void;
+        let bootstrapToken = '';
+        intercept = (path, init) => {
+          if (path !== '/api/iam/v1/admin/session/csrf-tokens')
+            return undefined;
+          bootstrapToken = JSON.parse(String(init.body)).token;
+          return new Promise<Response>((resolve) => {
+            release = resolve;
+          });
+        };
+        await confirm();
+        await confirm();
+        expect(bootstrapToken).not.toBe('');
+        expect(attempts).toHaveLength(0);
+        expect(delivered).toHaveLength(0);
+        if (unmount) {
+          wrapper!.unmount();
+          wrapper = undefined;
+        }
+        release(
+          json({
+            token: bootstrapToken,
+            expiresAt: new Date(Date.now() + 60000).toISOString(),
+          }),
+        );
+        await flushPromises();
+        expect(attempts).toHaveLength(1);
+        expect(attempts[0]).toBeDefined();
+        expect(attempts[0]!.aborted).toBe(unmount);
+        if (unmount) {
+          await expect(nativeResult).rejects.toMatchObject({
+            name: 'AbortError',
+          });
+          expect(delivered).toHaveLength(0);
+        } else {
+          await nativeResult;
+          await flushPromises();
+          expect(delivered).toEqual([
+            {
+              method,
+              path: businessPath,
+              csrf: bootstrapToken,
+              etag: section === 'workspace' ? '"1"' : undefined,
+            },
+          ]);
+          expect(wrapper!.text()).toContain('已保存服务端配置');
+          wrapper!.unmount();
+          wrapper = undefined;
+          // Aborting after delivery does not undo an already committed write.
+          expect(delivered).toHaveLength(1);
+        }
+        expect(
+          calls.filter(
+            (call) => call.path === '/api/iam/v1/admin/session/csrf-tokens',
+          ),
+        ).toHaveLength(1);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
 });
 describe('workspace form boundary', () => {
   it('preserves unknown nested data and distinguishes omitted from empty string', () => {

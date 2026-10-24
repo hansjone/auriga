@@ -93,6 +93,9 @@ const policyLocked = computed(
     conflict.value,
 );
 let alive = true;
+// The page owns its business writes, not shared CSRF registration. Fetch rejects
+// this signal even if CSRF setup finishes after the component has unmounted.
+const writeController = new globalThis.AbortController();
 let authEpoch = 0;
 const versions = { team: 0, workspace: 0 };
 let authRequest: Promise<boolean> | undefined;
@@ -237,7 +240,7 @@ function askTeam() {
   pending.value = {
     section: 'team',
     message: t('settingsChanges', { changes, scope: t('settingsTeamScope') }),
-    run: () => settingsApi.patchTenant(body),
+    run: () => settingsApi.patchTenant(body, writeController.signal),
   };
 }
 function askWorkspace() {
@@ -264,7 +267,8 @@ function askWorkspace() {
       changes,
       scope: t('settingsWorkspaceScope'),
     }),
-    run: () => settingsApi.putWorkspace(value, originalEtag),
+    run: () =>
+      settingsApi.putWorkspace(value, originalEtag, writeController.signal),
   };
 }
 async function confirm() {
@@ -310,6 +314,7 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  writeController.abort();
   alive = false;
   clear('team');
   clear('workspace');

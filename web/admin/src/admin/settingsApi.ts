@@ -16,17 +16,19 @@ type PolicyPut =
 const base = '/api/org/v1';
 export const settingsApi = {
   tenant: () => apiClient.get<Tenant>(`${base}/tenant`, { cache: 'no-store' }),
-  patchTenant: (body: TenantPatch) =>
+  patchTenant: (body: TenantPatch, signal?: AbortSignal) =>
     apiClient.patch<Tenant>(`${base}/admin/tenant`, body, {
       headers: { 'Content-Type': 'application/merge-patch+json' },
+      signal,
     }),
   workspace: () => readResource<Policy>(`${base}/admin/policies/workspace`),
-  putWorkspace: (value: WorkspaceValue, etag: string) =>
+  putWorkspace: (value: WorkspaceValue, etag: string, signal?: AbortSignal) =>
     apiClient.put<Policy>(
       `${base}/admin/policies/workspace`,
       { value } as PolicyPut,
       {
         headers: { 'If-Match': etag },
+        signal,
       },
     ),
 };
