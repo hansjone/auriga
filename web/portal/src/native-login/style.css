@@ -1,0 +1,38 @@
+.instance-login {
+  box-sizing: border-box;
+  max-width: 42rem;
+  margin: 3rem auto;
+  padding: 1rem;
+  font: inherit;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.instance-login header,
+.instance-login .actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.instance-login header {
+  justify-content: space-between;
+}
+.instance-login button,
+.instance-login select,
+.instance-login a {
+  font: inherit;
+}
+.instance-login .providers {
+  display: grid;
+  gap: 0.75rem;
+  margin-block: 1rem;
+}
+.instance-login .providers button {
+  padding: 0.75rem;
+}
+.instance-login [role='alert'] {
+  color: var(--dsw-alias-state-error-primary, inherit);
+}
+.instance-login .portal-link {
+  display: inline-block;
+  margin-block: 1.5rem;
+}
