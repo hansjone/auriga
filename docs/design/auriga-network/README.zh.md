@@ -143,7 +143,7 @@ MCP是工具协议；数据网络复用NATS协议，WSS只是其下层传输，A
 | 请求类别 | 首发通道与完成语义 |
 |---|---|
 | 登录/TOTP/PKCE、刷新、配对、资源授权 | HTTPS 控制面；沿既有可信 Node 流程，普通登录后后台完成连接，不新增可见“登录总部”步骤。 |
-| agent 列端点、开线程、回复、读有权历史 | 插件采集本次 exec 上下文，经共享远程 MCP 客户端/HTTP 池；发送事务提交才返回 platform_stored，回复未到不是发送失败。 |
+| agent 发现 binding、开线程、定向/线程回复、读有权历史 | 插件采集本次 exec 上下文，经共享远程 MCP 客户端/HTTP 池；目录和目标规则见 §6.1。发送事务提交才返回 platform_stored，回复未到不是发送失败。现有列端点工具须先升级契约，不能以 DSH 列表冒充 agent 通讯录。 |
 | 平台到 DSH 的消息、请求、执行控制、状态事件、唤醒 | 经NATS WSS的本连接专属下行subject承载应用信封；耐久正文先入 PG；提交触发 HEAD 提示，Node 通过同一 WSS 发 FETCH 取页，再回持久回执。无固定间隔客户端拉取。 |
 | 绑定/订阅、投递 receipt、恢复、节点就绪/暂停 | 私有应用消息，非新传输控制帧；仅Node/服务能发送，模型不见此工具。NATS CONNECT/PING/SUB/UNSUB/断线由官方实现，绑定/撤销等持久变更仍经collab授权事务。 |
 | 临时进度/在线提示 | 可合并丢弃的非耐久帧，标明 ephemeral；最终结果和决定必须落为耐久消息。 |
@@ -165,6 +165,61 @@ MCP是工具协议；数据网络复用NATS协议，WSS只是其下层传输，A
 现有 `thread_participant UNIQUE(tenant,thread,endpoint)` 与 `delivery UNIQUE(tenant,message,target_endpoint)` 限制同 DSH 同线程只能有一个参与会话，必须在契约阶段显式升级为逻辑参与者/target binding 级去重；不能只加 WS 后假称同 DSH 多会话已经支持。未绑定的首次接触落到 node 的授权 provisioning inbox，由策略明确允许新建普通会话或转交某个已授权 binding；不能随机选当前前台会话。绑定持久后不能静默重映射。
 
 冷会话只保留持久 binding/grant 与未处理 delivery，不保 socket、心跳、goroutine 或永久订阅。活跃订阅在通道打开时建立，idle 5 分钟或会话结束释放；需要被离线唤醒的“收件权”单独持久化，不靠在线订阅续命。关闭/归档默认暂停新执行并撤销临时委派；保留历史读权需单独策略。重连按 node 分页恢复有权通道，默认每批 128、最多 4 批在途；不逐个会话握手。
+
+### 6.1 DSH 内多 agent 的寻址与发现
+
+**发送方选的是具体会话的 binding，不是整台 DSH。** binding 是平台给一个获授权宿主会话登记的稳定通信地址；会话内当前运行哪个模型或执行实体可以变化，但不能因此把消息换投到别的会话。同一 DSH 的主会话、子会话分别登记地址，共用一条物理连接。下面是契约设计提案，不表示现有“列端点”工具已经具备这些能力。
+
+**如何找到目标**：通讯录以 binding 为一条记录，至少返回 binding_id、所属 node/DSH、显示名、角色、可用能力、主/子会话类型、热/冷/忙状态和状态观测时间。显示名可重名，只作展示和筛选；最终选择必须携带返回的 binding_id，不能凭显示名、角色或“当前前台”猜目标。发送 agent 用发现工具按任务筛选角色/能力，再选择一个明确条目；匹配多个时返回候选，工具不自动选择第一个。
+
+发现请求的来源 binding 由插件读取本次可信执行上下文；平台按 discover 权限、目标可见范围及 tenant 策略裁剪每条记录和字段。能发现不等于能发消息、读历史或唤醒；通讯录只展示当前调用者可用且宿主已支持的能力。没有授权的会话不出现，也不能通过数量、模糊搜索或错误泄漏其存在。冷热状态只是带时间的提示，不保证执行能力；发送时必须重新核权和检查状态。
+
+**三种明确的投递入口**：
+
+- 直接联系：指定目标 binding，平台解析其所属 DSH 和真实宿主会话，发送方不能覆盖宿主 session ID。一次发送不得同时指定互相矛盾的 binding 与线程目标。
+- 已有线程：指定 thread_id 和明确的发送/回复模式，平台从持久参与者集合确定收件 binding。同 DSH 两个会话可以同时参加同一线程，各有自己的 delivery 和回执；同一 node 不合并收件人。群发沿现有 fanout 上限和逐目标授权，不因为同机就扩大接收范围。
+- 只知道 DSH：走显式“首次联系节点”入口，唯一目的地是该 node 的受控 provisioning inbox（待分配收件箱）。普通精确发送入口缺 binding/thread 就报缺少目标，不能隐式选会话。首次联系持久保存后返回 awaiting_binding，说明“平台已存、尚无目标会话”；不是 host_accepted，更不会自动投给前台会话。只有获权分配者才能选择一个已有 binding，或经明确的新建权限创建并绑定新会话；分配动作持久、幂等并重新核双方权限，不能暗中改投已明确指定的目标。
+
+**回复如何返回**：开线程时持久记录 originating_binding_id 与每个参与者的 binding。对请求的默认回复引用原请求 message_id，由平台查其来源 binding 并确认仍是有权参与者；因此返回原发起会话，而不是原 DSH 的任意会话。对某条后续消息的定向回复同样以该消息的持久发送者为目标。要向整个线程回复必须显式选择全线程模式；参与者快照和实际目标在提交时固化，不能把“同线程”默认为本 DSH 所有会话都可读。请求者已归档/撤销时返回可解释失败，不改投其同事、父会话或当前前台。
+
+**冷会话与失效地址**：在线 DSH 收到冷 binding 的消息，先进入这个 binding 的持久收件路径。只有具备 wake/执行权限且目标策略允许时，才恢复原 host_session_id，并经过 §7 与协议 §5 的在线执行准入；不重新 create 已绑定会话。只有 receive 权限时可返回 queued_cold，等待该会话在授权后恢复，不能把“冷”当作自动授权。DSH 离线则在期限和配额内返回 queued_offline；托管实例唤醒仍须 workspace 权限，关机电脑不能被承诺唤醒。binding 归档或撤销后拒绝新发送；提交后、执行前发生变更时停止新准入并记录可查询终态，既有副作用边界不变。
+
+**子会话地址与 N2**：远端也只选子会话自己的 binding。目标插件内部保存经宿主核验的 child session 与 durable parent address（原生父路由地址），由专用子 agent adapter 投递；发送方不能自报 parentSession 来借用父权限，也不需要获得该内部地址。父子默认不共享通讯录可见性和收件权。N1 不宣称支持子会话执行；N2 核实具体原生方法、父不在线/归档、冷子会话恢复后，才可把相应能力发布为可用。未通过兼容验收时明确返回 host_incompatible，不回退到父会话的普通 prompt。
+
+**端到端例子**：同一 tenant 内，DSH A 有三个主会话 A1（协调）、A2（核查）、A3（资料）和 A2 的子会话 A2c；DSH B 有 B1（分析，冷）与 B2（审阅，热）。这些是示意别名，不是生产 ID。A1 获权发现 B1/B2，选择 B1 开线程 T；B2 即使正好在前台也不接收这条私信。六个会话共用两条数据连接；子会话的可用能力取决于 N2。
+
+```mermaid
+sequenceDiagram
+  participant A1 as A1 协调会话
+  participant PA as DSH A 插件 / 一条 WSS
+  participant C as 平台目录与 collab
+  participant PB as DSH B 插件 / 一条 WSS
+  participant B1 as B1 分析会话 / 冷
+  participant B2 as B2 审阅会话 / 热
+  Note over A1,PA: A 还有 A2、A3、A2c；各有独立 binding
+  A1->>PA: 发现可联系的会话
+  PA->>C: 共享 MCP / 可信来源 A1
+  C-->>PA: B1、B2 的有权目录条目与 binding
+  PA-->>A1: 返回候选条目
+  A1->>PA: 选择 B1，创建线程 T 并发送 M1
+  PA->>C: 共享 MCP / 来源 A1、目标 B1
+  C->>C: 保存参与者 A1、B1 与目标 B1 的 delivery
+  C-->>PB: NATS HEAD；插件按窗口 FETCH
+  PB->>PB: 核 target_binding=B1 与 wake 权限，恢复 B1 原 session
+  PB->>C: B1 当前世代执行准入
+  C-->>PB: 唯一准入成功
+  PB->>B1: 有 wake 权限后调用原会话
+  PB-->>C: B1 持久接受回执
+  Note over PB,B2: B2 不接收 M1，即使它是前台
+  B1->>PB: 回复 M1
+  PB->>C: 共享 MCP / 可信来源 B1
+  C->>C: 从 M1 查原发起 binding=A1
+  C-->>PA: HEAD / FETCH，目标固定为 A1
+  PA->>A1: 核 binding 与在线准入后交付回复
+  Note over A1,PA: 不转给 A2、A3 或 A2c
+```
+
+若 T 后续显式加入 A2，则给 A1 与 A2 的消息各产生独立 delivery，即使它们同在 DSH A；A2c 仍不自动成为成员。另一个仅写 DSH B 的首次联系请求停在 provisioning inbox，待授权分配为止。完整错误与事务边界见[协议 §1.1](protocol.zh.md#11-binding-目录与目标解析)。
 
 ## 7. 邮箱序号与客户端游标同步
 
@@ -225,8 +280,8 @@ READY 接管与在线 admit 按同一 node/执行记录锁序串行化。旧 epo
 | 阶段 | 必须实现与过关条件 | 不能据此宣布 |
 |---|---|---|
 | N0：设计与独立接缝门禁 | 先定 schema、IAM 网络授权上限、FETCH/回执/游标语义；分别核 auth callout 的 server_id/CID 与 KICK、私有 inboxPrefix、SDK 硬缓冲。宿主 adapter 可用 fixture 传输独立验收 create/cwd/bind 与持久恢复，不被 Broker spike 阻塞。 | 本阶段已获实施授权，或只有接口同名就兼容。 |
-| N1：最小可靠闭环 | 单 nats-server + auth callout + PG 邮箱/游标 + Core HEAD/FETCH/RECEIPT + 独立宿主 ledger；两真实 DSH 普通会话往返、非默认 cwd、冷恢复、建线程映射竞争、丢回执和崩溃恢复。保留基本限额、平台持久尝试计数、prompt 前在线准入和失败关闭。 | JetStream 通知/dispatcher 已必需、子 agent 已兼容、HA 或大容量已通过。 |
-| N2：授权会话树 | 可信 lineage/parent address、最小委派、递归预算、同 DSH 多逻辑参与者与批量恢复；子 agent 专用适配单独过关。 | 全部 Codex 原生协作能力已复现。 |
+| N1：最小可靠闭环 | 单 nats-server + auth callout + PG 邮箱/游标 + Core HEAD/FETCH/RECEIPT + 独立宿主 ledger；两真实 DSH 普通会话往返、非默认 cwd、冷恢复、建线程映射竞争、丢回执和崩溃恢复。保留基本限额、binding 级目录/定向与回复、同 DSH 多普通会话参与者、平台持久尝试计数、prompt 前在线准入和失败关闭。 | JetStream 通知/dispatcher 已必需、子 agent 已兼容、HA 或大容量已通过。 |
+| N2：授权会话树 | 可信 lineage/parent address、最小委派、递归预算、子 binding 的目录可见性与批量恢复；子 agent 专用适配单独过关，普通会话多 binding 路由在 N1 即须正确。 | 全部 Codex 原生协作能力已复现。 |
 | N3：HA 与容量 | 多副本 Core/adapter、PG 故障切换、滚更与容量压测；按瓶颈增加扫描分区/请求公平调度，分别验既有 JS 故障隔离。 | 自动恢复逐条租约方案、未测跨地域多活或无限扩容。 |
 | 后续增强 | 视测量选择正文外置、存储分片、双 lane 或其他承载；fork/历史/等待/中断/产物分别按原生能力验收。 | 用网络替代业务调度引擎。 |
 

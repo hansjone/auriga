@@ -22,6 +22,33 @@
 
 所有 uint64 在 JSON 中用十进制字符串，禁止 JS number 精度截断。UUID 用契约规范格式；host_session_id 不强制 UUID。`correlation_id` 指向原 request message，`causation_id` 指向触发消息；trace ID 只用于观测。session tree 的 root/parent 身份来自宿主核验和平台授权记录，不由模型复制字符串建立。
 
+### 1.1 binding 目录与目标解析
+
+对应[总览 §6.1](README.zh.md#61-dsh-内多-agent-的寻址与发现)。以下是待契约化的字段和语义，不新增现有工具实现。
+
+**发现记录**：目录按 (tenant_id, node_id, binding_id) 返回地址；条目带 display_name、role、可用 capabilities、session_kind、activity_state（热/冷/忙等）、lifecycle_state（可接收/归档等）、status_observed_at。node_id 表示所属 DSH，不表示接收会话。只有已登记且获权公开的 binding 才可发现；每次分页、按 ID 查询和搜索均按调用者的真实 source binding 核 discover，不泄漏未授权条目或原始 parent address。角色、显示名不是安全主体，状态观测不是新鲜度保证，目录也不是 send/wake 授权凭证。
+
+**源与目的分别确定**：源 binding 由插件本次可信 host_session_id 与平台映射取得，不能由模型参数声明。目标可由 agent 从授权目录选择，但平台必须解析目标归属、检查当前 send/receive 和线程资格；若请求附带 node_id，须与该 binding 的已登记归属一致，不允许客户端把同一 binding 搬到另一 DSH。最终 message 固化 source_binding_id、originating_binding_id（线程创建时的发起者）、明确的目标参与者及可选 reply_to_message_id；这些身份由服务端从可信上下文和已存消息生成或核实。
+
+| 发送意图 | 必填目标 / 平台解析 | 明确禁止 |
+|---|---|---|
+| 直接发给一个会话 | target_binding_id，归属 node 由平台解析；新线程参与者为来源 binding 与所选目标 | 用显示名、前台会话、最近活跃会话或父会话替代目标 |
+| 给线程发送 | thread_id + 显式收件模式；在发送事务中固化有权参与者快照，按 binding 逐一建 delivery | 仅按 node 去重，或把所有同机 binding 自动纳入 |
+| 回复一条请求/消息 | thread_id + reply_to_message_id；平台核被引用消息属于该线程、调用者是允许回复的接收参与者，目标取该消息的持久 source binding | 仅靠 correlation_id 或任意 reply_to 字符串注入目标、默认向全线程/原 DSH 广播 |
+| 仅知道 DSH 的首次联系 | 显式节点联系模式 + node_id，存入受控 provisioning inbox，返回 contact_id 和 awaiting_binding | 在普通精确发送中默默补目标，或把待分配成功显示成已交给 agent |
+
+普通精确发送缺 binding/thread 返回 network.target_required；互斥目标同时出现、node 与 binding 不符或回复引用不属该线程，返回 network.target_mismatch。这些是错误族提案。绑定存在但归档时，对仍有权获知状态的调用者返回 network.binding_archived；撤销可返回 network.revoked。对无 discover/状态查看权限的调用者统一返回 network.target_unavailable，拒绝明确且不泄漏隐藏对象存在性。发送事务须重新查生命周期；目录刚查询成功也不能让随后归档/撤销的目标继续被投递。成功响应返回实际 source/target binding 与 thread/message 标识，便于发送者核对。若调用者本身选中了另一个同样有权的有效 binding，平台不能推断其真实意图或自动换人；只保证准确投给指定地址，不能把选错联系人冒充路由故障或宣称能自动纠正。
+
+**参与者和回包固定到会话**：拟采用 thread_participant UNIQUE(tenant, thread, node, binding)，delivery UNIQUE(tenant, message, target_node, target_binding)，并用含 tenant 的外键验证 binding 归属。一个 message 给同 DSH 的两个 binding 时，分配两个 delivery_id 和两个邮箱 mail_seq，分别核权、确认、重试、计费；node 级 HEAD 可以合并，目标参与者不能合并。每条 delivery 固化 target_binding_id 与目标会话映射；binding 永不静默换绑或复用 ID。接收插件核 envelope 与 ledger 中 binding/host_session_id 一致后才准入指定 session；遇到错配返回错误并隔离，不能就近找个会话执行。
+
+回复的来源同样来自回复会话本次可信上下文。对初始请求回复会回到原 originating binding；对后续消息的定向回复以该消息 source binding 为准。显式全线程模式才按有权参与者 fanout。消息、参与者快照和 delivery 在同一提交中确定；之后有人加入不自动收到旧消息。退出/撤销后的收件重新核权，失败有可查询状态；不得回退到同 node 的其他参与者。正文能否读、历史能否读仍单独按 grant 判定，持有 thread_id 不提供全部历史权限。
+
+**未绑定首次联系**：contact 是持久待分配记录，不构造 target_binding_id 为空的普通执行 delivery。重复联系请求按源操作幂等键返回同一 contact_id。授权分配者在单个分配事务中核目标 binding 与原发送方权限，固化唯一分配结果并创建正常参与者/delivery；重复分配返回既有结果，竞争改选报冲突。若需新建会话，先持久预留映射、明确 cwd/preset 和创建权限，再按 §6 原生创建/绑定流程完成；创建成功但分配回包丢失只查原映射。分配失败保留待分配/拒绝状态，不偷偷换目标。待分配记录继承原消息期限并计入 node/tenant 积压配额；过期后不得再分配。待分配记录提交返回 contact_stored + awaiting_binding，尚无宿主接受或执行完成；只有分配后正常 message/delivery/邮箱事务提交，才产生该消息的 platform_stored。这样不放宽原有消息 ACK 的事务定义。
+
+**冷热与子会话映射**：冷普通会话保留相同 binding→host_session_id 映射；在线且允许唤醒时恢复该原会话，在真正 queue/prompt 前完成 §5 admit。没有 wake 权限时只在已获 receive 权的前提下耐久等待，返回 queued_cold；离线返回 queued_offline，均只是交付等待原因，不新增成功 ACK。目标归档/撤销或恢复发现 session 不匹配时停止新执行，不能用 create 新会话替代已绑定目标。
+
+子会话的公开地址也仍是 binding；内部映射另带经宿主核验的 parent_binding、child host_session_id 和 durable parent address 引用。该引用是目标宿主专用路由信息，不是远端可以伪造的授权材料。N2 验证原生子 agent 路径后才公开相应可调用能力；此前精确子目标返回 host_incompatible，不改投父会话。父会话可发现/可收件不意味着子会话可发现/可收件；父失效按子 grant 的委派链及宿主恢复要求处理，不能借保留地址继续执行。
+
 ## 2. 原生 NATS 接入，不另造传输协议
 
 一 DSH 默认一条官方 nats.js `wsconnect` 连接，Broker 使用 nats-server 原生 WSS。`@nats-io/nats-core` 的 WebSocket transport 与 `transport-node` 的原生 TCP connect 不能混用；须按真实宿主 Node 版本验证。NATS CONNECT/INFO/PING/PONG/PUB/SUB/UNSUB、WebSocket 二进制分帧、服务器发现与慢消费检测全部复用官方实现，不另定义 HELLO/REAUTH/CREDIT/GOAWAY 来替换它们。官方来源：[nats.js core](https://github.com/nats-io/nats.js/tree/main/core)、[WSS](https://docs.nats.io/learn/websocket/)。
@@ -163,7 +190,7 @@ send 事务按稳定次序锁目标邮箱、thread 和配额；fanout 在原子�
 
 崩溃后未完成尝试不退款：无执行准入记录时，当前连接可用新 attempt_id 申请下一次，旧尝试同时失效；已有执行准入则先按下述规则对账，不再自动调用 prompt。最多自动 5 次；第 5 次失败/重启发现未完成，或第 6 次申请时，由平台持久转 Quarantined。明确毒消息可提前隔离，经 RECEIPT(status=quarantined) 上报；即使插件崩溃到无法上报，平台仍能依据计数和下一次请求隔离。无人重连时由原 expires_at 收尾。管理员修复后若批准额外尝试，必须显式审计额度，重启/换 epoch/反复取页均不得清零。
 
-**执行前的在线准入**：宿主在本地 session 锁内完成历史去重、即将 queue/prompt 前，必须调用 EXECUTION_ADMIT，即 admit(delivery_id, binding, connection_epoch, host_request_id, attempt_id, boot_id)。collab 核当前 route epoch、IAM/grant、有效尝试、期限及取消版本，事务 CAS 把该 delivery 从未准入变为 admitted，并持久记录 admission_id。READY 接管、取消与 admit 按同一 node/执行记录锁序串行化；只有当前世代第一次成功准入的调用可继续。断线、超时、IAM 故障或旧世代均停在 RECEIVED，不能仅凭旧页面或本地 ledger 执行。
+**执行前的在线准入**：宿主在本地 session 锁内完成历史去重、即将 queue/prompt 前，必须调用 EXECUTION_ADMIT，即 admit(delivery_id, binding, connection_epoch, host_request_id, attempt_id, boot_id)。collab 核 delivery 固化的 target_binding 与请求 binding 一致、当前 route epoch、IAM/grant、有效尝试、期限及取消版本，事务 CAS 把该 delivery 从未准入变为 admitted，并持久记录 admission_id。READY 接管、取消与 admit 按同一 node/执行记录锁序串行化；只有当前世代第一次成功准入的调用可继续。断线、超时、IAM 故障或旧世代均停在 RECEIVED，不能仅凭旧页面或本地 ledger 执行。
 
 执行准入不是可到期重领的租约：同 delivery 的重复请求只返回已有状态，不另发执行许可。epoch 续接、克隆 B 接管、超时或未收到 Host receipt 都不能清除 admitted 记录。准入成功响应丢失，或响应成功后 prompt 前崩溃，可能牺牲自动完成：恢复只查原宿主 request/日志；无法证明结果时提交 Unresolved，不把同请求再次交给另一个进程执行。获准进程把 admission_id 与 invocation_started 持久化后只调用一次；重复响应不重复调用。
 
@@ -179,8 +206,8 @@ send 事务按稳定次序锁目标邮箱、thread 和配额；fanout 在原子�
 
 顺序为：
 
-1. 网络层限长、验证 target 与幂等体，持久记录 RECEIVED，尚不能报 host_accepted。调用 §5 ATTEMPT_BEGIN 并持久记录 entered 后才进入宿主 deliver；所有重启共用平台按 delivery 保存的次数上限。
-2. 有既存 binding 时用原 native session 身份恢复，不重复 create 来“接收”；未绑定首次会话先持久预留 ID/明确 cwd/preset，再 native create、落盘、平台 bind。create/bind 响应丢失时查询同身份，不另建随机会话。
+1. 网络层限长，核 target_binding 与平台 binding→host_session_id 映射、幂等体及 ledger 一致；错配拒绝，不查询当前前台。持久记录 RECEIVED，尚不能报 host_accepted。调用 §5 ATTEMPT_BEGIN 并持久记录 entered 后才进入宿主 deliver；所有重启共用平台按 delivery 保存的次数上限。
+2. 普通 delivery 必须已有目标 binding，用原 native session 身份恢复，不重复 create 来“接收”。未绑定首次联系走 §1.1 独立分配流程：持久预留 ID/明确 cwd/preset，native create、落盘、平台 bind，完成分配后才生成普通 delivery。create/bind 响应丢失时查询同身份，不另建随机会话，也不把未绑定 contact 交给前台执行。
 3. 在同 session 锁内查 ledger 和宿主历史/inbox 的 requestId=delivery_id。已接受项只重建回执；未执行项先完成 §5 在线 EXECUTION_ADMIT CAS，成功并持久写 invocation_started 后，普通会话才可 queue/prompt，子 agent 才可进入专用调用。准入不成功只保留 RECEIVED，不执行。
 4. prompt accepted 后核对正确 session 及持久 provider，执行 awaited flush；成功后写 ledger HOST_ACCEPTED 并 fsync，随后发 RECEIPT。缺 provider、flush=false、异常、磁盘满均不发成功 ACK。
 5. 平台按 §5 核身份/绑定/digest 后提交 host_receipt/delivery 状态，回 RECEIPT_COMMITTED。插件只在此后把平台游标推进至无空洞前缀；结果事件走同样可重放 outbox。

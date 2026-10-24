@@ -113,6 +113,15 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 
 | 故障/操作 | 必须观察的结果与过关条件 |
 |---|---|
+| 发现目录的跨 tenant/无 discover/重名候选/状态过时 | 仅返回当前来源 binding 有权看到的条目，隐藏项数量和 parent address 不泄漏。重名不自动选第一个；发送再次核状态，不以缓存目录绕过撤销。 |
+| 发错 binding：篡改 delivery 目标、node 与 binding 不符、伪造来源会话 | 平台校验/插件映射检查或 admit 拒绝，错误会话 prompt 次数为 0；不能向前台、父会话或同机其他 binding 回退。成功回执只能绑定原 delivery 的目标。 |
+| 两个目标均有权，但发送方选择了错误联系人 | 响应如实列出实际目标 binding，只投所选目标；不声称平台能从角色/正文推断意图并自动纠正。 |
+| 同 DSH 两会话同线程、发给两个 binding 的同一 message | 两个参与者、两个 delivery_id/mail_seq 和各自回执；一个接受不确认另一个，一个撤销不把另一项改投。不同 session 各自准入，node 级提示合并不合并目标。 |
+| 回复路由到错误会话 / 请求者前台切换 / 伪造 reply_to | 回复初始请求固定回原 originating binding；A2/A3/A2c 不得收到给 A1 的回复。引用跨线程或调用者并非有权回复者时拒绝；全线程 fanout 必须显式选择。 |
+| 未绑定首次联系：只有 node_id、重复分配、新建回包丢失 | 普通精确发送缺目标报错；显式节点联系仅存 provisioning inbox，返回 awaiting_binding，所有现存会话执行次数为 0。授权分配幂等，竞争改选冲突；新建查询原预留映射，不随机重建。 |
+| 冷 binding 有/无 wake 权限、DSH 离线 | 有权时恢复原 host_session_id，经在线 admit 后执行；仅收件权返回 queued_cold，离线为 queued_offline，均不伪报执行成功、不重建已有会话。 |
+| 目录返回后 binding 归档/撤销；发送提交后再撤销 | 前者重新核权拒绝发送并给可见范围内的明确错误；后者终止未准入投递并可查询，不换投同机其他会话，已准入在途边界准确报告。 |
+| 子 binding / parent address 错配、父不在线或 N2 未通过 | 未支持返回 host_incompatible；已支持路径仍核原生 lineage/父路由及独立 grant。不得把消息塞进父会话普通 prompt，父权限不自动授予子目标。 |
 | send提交前崩溃/回滚 | 不存在platform_stored；同键重试只形成一条消息。 |
 | PG提交后、响应丢失 | 同键返回原message；异体同键冲突，message/delivery/dedup数量不增。 |
 | commit 后初始 HEAD 全丢，且无后续新消息 | PG head/未确认项仍在；下一轮修复 HEAD 成功时，仅靠 60 秒扫描恢复。扫描 ≤30 秒、合并/取页预算 10 秒，健康且无积压时预算 100 秒、deadline 120 秒；无客户端周期空 FETCH。 |
@@ -167,9 +176,9 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 
 1. **宿主 adapter 独立门禁 + 接入 spike**：先用 fixture 传输调用 `deliver(page) → receipts`，核映射竞争、冷恢复与持久证据；独立接入侧核 NATS官方Go/JS客户端、真实Broker、隔离IAM/org fixture；负向 subject 矩阵、私有 inboxPrefix、server_id/CID/KICK/LDM 与原生 expiry；另用Tinode+PG做相同身份模型对照，记录新增代码/依赖与不能薄适配之处。不是只跑ping。
 2. **持久协议套件**：真实PostgreSQL/NATS、随机端口、两个fixture Host adapter，有状态机随机操作模型；枚举提交/ACK/kill点，以消息ID集合和副作用计数作oracle。不用 mock 数据库/邮箱和回执事务；不用 dispatcher 租约作为 oracle。
-3. **宿主兼容套件（N1 普通会话，N2 子 agent）**：固定发行DSH build，两个隔离profile；普通现存、冷恢复、首次建会话、同DSH多session、recursive子agent、同delivery重复、缺provider、磁盘错误分别测试。fake模型只用于可复现故障；不得将其冒成真实模型闭环。
+3. **宿主兼容套件（N1 普通会话，N2 子 agent）**：固定发行DSH build，两个隔离profile；普通现存、冷恢复、首次建会话、同DSH多session、recursive子agent、同delivery重复、缺provider、磁盘错误分别测试。fake模型只用于可复现故障；不得将其冒成真实模型闭环。新增 A1/A2/A3/A2c 与 B1/B2 的寻址 fixture：用每个 host_session_id 的收件/准入记录核对实际目标，N1 验普通多会话与对子目标的明确拒绝，N2 再验证 A2c 专用路径，不把子会话占位地址当已兼容。
 4. **负载/chaos**：逐档跑30分钟预热+2小时稳态；大档至少一次24小时浸泡。50%流量一个热点tenant、20%慢节点、1%重复/ACK丢失、5倍突发60秒；再做单节点滚更、Broker/PG故障和全连接重启。通过后不无理由重跑全部，只对相关变更重验。
-5. **真实两DSH与真实模型闭环**：另行使用已授权预算，不在设计任务计费。A与B真实独立登录、不同工作目录；A原生工具开线程→B宿主持久接受并真实工具reply→A原绑定会话收到→权威PG与两边Host证据相符。额外消息如模型重发必须如实计数。再验证断网/ACK丢失/进程恢复不重复已接受request。必须分别记录platform_stored、Host receipt和实际工具回复，不能只看模型自然语言。
+5. **真实两DSH与真实模型闭环**：另行使用已授权预算，不在设计任务计费。A与B真实独立登录、不同工作目录；A原生工具开线程→B宿主持久接受并真实工具reply→A原绑定会话收到→权威PG与两边Host证据相符。额外消息如模型重发必须如实计数。再验证断网/ACK丢失/进程恢复不重复已接受request。必须分别记录platform_stored、Host receipt和实际工具回复，不能只看模型自然语言。N1 追加目标 B1 与非目标 B2 并存、A1/A2 同 DSH 的小样本，切换前台后回复仍回 A1；核其他 session 无该消息/准入记录。同线程多 binding 与未绑定首次联系也按矩阵验证，N2 子会话另行验收。
 6. **发布门禁**：schema生成/兼容、单元/真实依赖集成、安全负向、HA档演练、容量证据、安装与回滚文档齐备；CI后fresh非作者独审，保护路径标【待审查】，本工人不提交/推送/合并。
 
 后续脚本宜分`broker-admission`、`mailbox-model`、`host-compat`、`load-chaos`四类，各自输出版本/hash、随机种子、设置、原始首失、指标与exit code。避免测试专用开关放进生产安全路径；故障点用依赖/网络代理/进程边界注入。模拟driver不调LLM，真实模型只在最后小样本验收。
