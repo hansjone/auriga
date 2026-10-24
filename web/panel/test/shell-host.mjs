@@ -183,10 +183,26 @@ export function surfaceHost(
           });
     };
   }
+  // Routing doubles for the two exports verified in the shipped rc.3 static module table.
+  const primitives = {
+    IconUsersOutlineRegular: ({ size }) =>
+      React.createElement('svg', {
+        width: size,
+        height: size,
+        'aria-hidden': true,
+      }),
+    IconUsersOutlineMedium: ({ size }) =>
+      React.createElement('svg', {
+        width: size,
+        height: size,
+        'aria-hidden': true,
+      }),
+  };
   window.__ModuleLoader__ = {
     load(spec) {
       plugin = spec.factory((name) => {
         if (name === 'react') return React;
+        if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitives;
         throw new Error(name);
       });
     },
@@ -291,6 +307,7 @@ export function surfaceHost(
     document,
     window,
     registrations,
+    primitives,
     counts,
     subscriptions,
     scheme,

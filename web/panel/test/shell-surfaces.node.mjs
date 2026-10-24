@@ -5,6 +5,48 @@ import { surfaceHost, flush, boot, response } from './shell-host.mjs';
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
 
+test('sidebar label uses the native SlotLabel getter contract across host locale changes', () => {
+  const host = surfaceHost(async () => response());
+  try {
+    const {
+      meta: { label },
+      Component,
+    } = host.registrations.get('sidebar.panellist');
+    assert.equal(typeof label, 'function');
+    // Native resolveSlotLabel reads a string verbatim or invokes its getter;
+    // the registration's locale namespace never translates a string label.
+    const read = () => (typeof label === 'function' ? label() : label);
+    assert.equal(read(), 'Auriga');
+    host.locale('en');
+    assert.equal(read(), 'Auriga');
+    host.locale('zh-CN');
+    assert.equal(read(), 'Auriga');
+    for (const [size, active] of [
+      [16, false],
+      [18, true],
+    ]) {
+      const icon = Component({ size, active });
+      assert.ok(icon, 'sidebar renderer supplies a decorative icon');
+      assert.equal(
+        icon.type,
+        active
+          ? host.primitives.IconUsersOutlineMedium
+          : host.primitives.IconUsersOutlineRegular,
+      );
+      assert.equal(icon.props.size, size);
+      assert.equal(icon.props['aria-hidden'], true);
+      const glyph = icon.type(icon.props);
+      assert.equal(glyph.type, 'svg');
+      assert.equal(glyph.props.width, size);
+      assert.equal(glyph.props.height, size);
+      assert.equal(glyph.props['aria-hidden'], true);
+    }
+  } finally {
+    host.dispose();
+    host.close();
+  }
+});
+
 test('review H1: registrations name the declared native slot rather than the locale namespace', () => {
   const host = surfaceHost(async () => response());
   try {
