@@ -27,6 +27,7 @@ import {
  *     owner?: { providers?: string[], subject?: string, email?: string },
  *   },
  *   store?: ReturnType<typeof createMemoryStore>,
+ *   commitAdmission?: (input: import('../identity/owner-admission.js').AdmissionInput) => Promise<boolean>,
  *   now?: () => Date,
  *   allowLocalHttp?: boolean,
  *   fetchImpl?: typeof fetch,
@@ -38,6 +39,7 @@ export async function createStandalone(options = {}) {
   const core = await createStandaloneCore({
     config: options.config ?? { connectors: [] },
     store: options.store,
+    commitAdmission: options.commitAdmission,
     now: options.now,
     allowLocalHttp: options.allowLocalHttp,
     fetchImpl: options.fetchImpl,

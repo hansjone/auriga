@@ -88,6 +88,19 @@ export function createMemoryStore() {
     setEmergencyLastCounter(counter) {
       data.emergencyLastCounter = counter;
     },
+    /** Atomic check-and-set at completion, across all login transactions.
+     * @param {number} counter
+     */
+    consumeEmergencyCounter(counter) {
+      if (
+        !Number.isSafeInteger(counter) ||
+        counter < 0 ||
+        counter <= data.emergencyLastCounter
+      )
+        return false;
+      data.emergencyLastCounter = counter;
+      return true;
+    },
     /**
      * @param {string} key
      * @param {number} nowMs
