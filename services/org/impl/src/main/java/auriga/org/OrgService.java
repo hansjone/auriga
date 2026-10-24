@@ -1048,10 +1048,19 @@ public final class OrgService {
     return store.tx(
         () -> {
           OrgError.require(Set.of("workspace", "egress", "login").contains(key), "conflict", 409);
+          // Serialize the version check with its write, including outer RR transactions.
+          try {
+            store.lockGroupHierarchy();
+          } catch (AurigaException error) {
+            if (error.errorCode().code().equals("common.not_found"))
+              throw OrgError.error("not_found", 404);
+            throw error;
+          }
           ObjectNode existing = getPolicy(key);
           if (ifMatch != null)
             OrgError.require(
                 existing.path("version").asLong() == ifMatch, "precondition_failed", 412);
+          if (key.equals("workspace")) validateWorkspacePolicy(value);
           long version = existing.path("version").asLong() + 1;
           store
               .jdbc()
@@ -1066,6 +1075,29 @@ public final class OrgService {
                   key);
           return getPolicy(key);
         });
+  }
+
+  private static void validateWorkspacePolicy(JsonNode value) {
+    if (value == null || !value.isObject())
+      throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    for (String field : List.of("idleMinutes", "maxConcurrentStarts")) {
+      JsonNode number = value.get(field);
+      if (number != null
+          && (!number.isIntegralNumber()
+              || number
+                      .bigIntegerValue()
+                      .compareTo(java.math.BigInteger.valueOf(field.equals("idleMinutes") ? 5 : 1))
+                  < 0)) throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    }
+    for (String field :
+        List.of("wakeOnSchedule", "alwaysOnRequiresApproval", "allowPersonalPlugins")) {
+      JsonNode flag = value.get(field);
+      if (flag != null && !flag.isBoolean())
+        throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    }
+    JsonNode version = value.get("defaultDshVersion");
+    if (version != null && !version.isString())
+      throw new AurigaException(CommonErrors.VALIDATION_FAILED);
   }
 
   // ---- quotas ----
