@@ -8,7 +8,7 @@ export const settingsZh = {
   settingsTeamScope:
     '仅修改本团队显示名和语言。空字符串会原样保存；无版本校验，多个管理员可能覆盖彼此修改。',
   settingsWorkspaceScope:
-    '替换本团队整层 workspace 策略；省略字段不写入默认值，未知字段保留。策略配置不代表资源安装或已有实例变更已执行。当前版本检查尚无后端原子防覆盖保证。',
+    '替换本团队整层 workspace 策略；省略字段不写入默认值，未知字段保留。策略配置不代表资源安装或已有实例变更已执行。版本冲突时保留草稿，请重新读取后再确认。',
   settingsMissing: '尚无 workspace 策略；本页不创建缺失策略。',
   settingsEtag: '缺失或非法强 ETag，禁止保存；请重新读取。',
   settingsUnsafe: '服务端值包含非法字段类型或无法安全往返的数值，禁止保存。',
@@ -40,7 +40,7 @@ export const settingsEn = {
   settingsTeamScope:
     'Changes only this team’s display name and locale. Empty strings are stored as supplied. There is no version check; administrators may overwrite each other’s changes.',
   settingsWorkspaceScope:
-    'Replaces this team’s entire workspace policy. Omitted fields receive no client defaults; unknown fields are preserved. Saving does not confirm resource installation or changes to existing instances. The backend version check does not yet guarantee atomic protection against overwrites.',
+    'Replaces this team’s entire workspace policy. Omitted fields receive no client defaults; unknown fields are preserved. Saving does not confirm resource installation or changes to existing instances. A version conflict preserves your draft; reload and confirm again.',
   settingsMissing:
     'No workspace policy exists. This page cannot create a missing policy.',
   settingsEtag:
