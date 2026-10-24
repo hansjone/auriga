@@ -30,11 +30,12 @@ pnpm --filter @auriga/panel test:bundle
   入口固定使用 `/open/<编码后的实例 id>` 交由 edge 校验会话、主人并换票，不使用响应中的任意 URL。
 - `web/admin`：管理台。独立登录、侧边栏（成员 / 组 / 角色 / 身份源 / 系统设置）、成员列表（搜索 + 游标分页）。
 - `web/panel`：独立 ES module `dist/auriga-team-panel.js`，导入后注册 `auriga-team-panel`，
-  Vue 运行时打入单文件，Shadow DOM 内置主题和组件样式。
+  原生 Custom Element/DOM，无运行时框架依赖，Shadow DOM 内置 DSH 主题样式。
 - `clients/dsh-plugin`：独立 MIT npm 包 `auriga-dsh`，纯 ESM JavaScript + JSDoc，Node 原生测试，
-  三种模式仅选择空实现，运行期无需前端依赖。
+  托管运行时与默认本地原生页面均走宿主接线，运行期无需前端框架依赖。
 
-各 web 包都有 ESLint flat config + Prettier、vue-tsc、Vitest / Vue Test Utils、vite build。
+管理台与门户使用 ESLint flat config + Prettier、vue-tsc、Vitest / Vue Test Utils、vite build。
+原生面板使用 tsc、Vitest + JSDOM 直接挂载 Custom Element 与 vite build；不引入 Vue。
 插件使用 tsc checkJs，其 build 脚本为无输出类型校验，因为 Node 22 可直接执行源码。
 
 ## 本地 Mock
@@ -58,7 +59,7 @@ pnpm --filter @auriga/portal exec vite --port 5173
 设置文档根 `data-theme="light"` 切浅色。Element Plus 基础颜色映射到同一组变量。
 每个 app 调用 `createAurigaI18n()` 创建自己的实例，支持 `zh-CN`、`en`，fallback 为 en。
 
-面板不依赖宿主 Vue/i18n 或全局 CSS，通过元素 `context` 属性读取 locale/theme：
+面板沿 `--dsw-alias-*` 宿主主题，通过元素 `context` 属性读取 locale/theme；原生模块本身不含 Vue/i18n 运行时：
 
 ```html
 <script type="module">
@@ -74,8 +75,9 @@ pnpm --filter @auriga/portal exec vite --port 5173
 </script>
 ```
 
-目前只读 locale/theme，其余协议字段留待业务接入。context 是 JS 属性，不是 HTML 字符串属性。
-`test:bundle` 在空白 JSDOM 文档执行产物，检查元素、Shadow DOM 和内置样式，不监听端口。
+context 是 JS 属性，不是 HTML 字符串属性。资源读取只在已提供真实 `context.fetch` 的 connect 宿主中启用；managed 和未配置安装均保持封闭，不能回退全局 fetch。
+`test:bundle` 在空白 JSDOM 文档执行产物，检查元素、Shadow DOM、DSH 样式、无 Vue 运行时及体积预算，不监听端口。
+插件的独立安装、设置与登录接线边界见 [plugin-surfaces.md](plugin-surfaces.md)。
 
 ## 类型生成
 

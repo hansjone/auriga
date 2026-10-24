@@ -2,7 +2,7 @@ import js from '@eslint/js';
 
 /** Node-oriented flat config for the standalone plugin package. */
 export default [
-  { ignores: ['node_modules/**', 'src/generated/**'] },
+  { ignores: ['node_modules/**', 'src/generated/**', 'ui/**', 'dist/**'] },
   js.configs.recommended,
   {
     languageOptions: {
