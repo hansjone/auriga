@@ -130,3 +130,17 @@ interface AurigaPanelContext {
   - 宿主在主题或语言变化时**重新赋值整个 `context` 对象**；面板要处理"元素定义前宿主已设置 `context`"的情况。
   - 面板向宿主发出的事件（`CustomEvent`，冒泡、可穿过 Shadow DOM）：`auriga-navigate`（`detail.to`：`session:new` 或 `http(s)://` 外链，其他忽略）、`auriga-notify`（`detail.level`：`info` | `success` | `warning` | `error`，`detail.message`）、`auriga-auth-required`（宿主负责提示重新登录，面板自己不弹窗）。
   - Element Plus 的弹层必须留在 Shadow DOM 里（`teleported=false`、对话框 `append-to` 面板内元素），不用挂到 body 的 `ElMessage`。
+
+## 6. 本机插件库存与有限管理
+
+`local-resources.schema.json` 定义当前 DSH 的本机插件条目，不是平台包元数据或安装记录。面板由宿主额外提供 `context.localResources(path, init)`；它只接受空路径、`/detail`、`/enabled`、`/config`，映射到同源 `/auriga/local-resources`。不借用平台 `context.fetch`，不增加托管成员 API 或 CORS。
+
+- `GET /auriga/local-resources` 返回 `LocalList`；`POST .../detail` 接收 `LocalTarget`，返回 `LocalDetail`。
+- `POST .../enabled` 接收 `LocalEnableInput`；`POST .../config` 接收 `LocalConfigInput`；均返回 `LocalChange`。完整字段、限制以 schema 为准。所有 POST 仅接受 JSON，body 上限 16 KiB。
+- 所有请求保留 DSH `requestRejection`，并要求 `X-Auriga-Local-Resources: 1`；写操作额外要求精确本源 Origin，不接收浏览器传来的路径、URL、命令或插件来源。没有 CORS，不能用 native host 身份冒充平台登录。
+- `id` 是宿主条目 ID 的 SHA-256 投影；不暴露宿主磁盘路径。`revision` 是本接口快照前置条件；配置还传宿主 `configRevision` 给 `settings.mutate`。启停 API 不具备跨入口原子 revision 参数，不能把本接口串行队列和前置校验解释成宿主全局 CAS。
+- 库存来自真实 `pluginManager.listPlugins`，版本/入口只读解析自宿主 profile/installation 根下已登记的合法包名；`installation=present` 表示已解析到普通入口文件，`unknown` 不冒充已安装且禁止修改。`enabled/phase` 是宿主当前观测，修改后的 `application` 独立反映 `applied/restart-required/overridden/failed/cancelled`；保存需重启时不把运行状态伪改成目标值。
+- managed 一律只读；宿主只读条目、Auriga 自身、DSH 内置包和认证/网络/加载器/配置等边界模块禁止修改。配置仅呈现宿主 redacted schema 明确声明的非秘密、非安全敏感的顶层 string/number/boolean 字段，按字段 mutate 保留其余值。复杂/未知 schema、秘密字段和受限制字段不在本编辑器内，页面须明确说明该范围，不能认为已迁移所有配置能力。
+- 错误使用已有 `common.unauthenticated/forbidden/not_found/validation_failed/conflict/unavailable`，不转发宿主原异常、安装器日志或秘密。发出写请求后取消等待不能证明写入撤销；只读回实际结果，不自动重试写操作。
+
+此接口没有下载安装、脚本授权、卸载或市场更新能力。它们仍是后续整体功能继承目标，须分别完成来源、签名、权限和发布/分发闭环。

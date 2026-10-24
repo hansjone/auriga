@@ -6,6 +6,7 @@
 import { createManaged } from './modes/managed.js';
 import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
+import { installLocalResources } from './local-resources/index.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -16,6 +17,7 @@ export const inject = ['webServer', 'connection'];
  */
 export async function apply(ctx, config) {
   const mode = selectMode();
+  installLocalResources(ctx, mode);
   if (mode !== 'managed') {
     if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
       throw new Error(

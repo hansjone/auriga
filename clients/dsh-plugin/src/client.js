@@ -181,6 +181,7 @@ window.__ModuleLoader__.load({
           pluginVersion: body.pluginVersion,
           panelVersion: panel.version,
           source: 'package',
+          localResources: makeLocalResources(),
           entry: localURL(panel.entry).href,
           integrity: panel.integrity,
         };
@@ -211,9 +212,29 @@ window.__ModuleLoader__.load({
         integrity,
         fetchBase: localURL(body.fetchBase).href,
         source: 'signed',
+        localResources: makeLocalResources(),
       };
       view.fetch = makeFetch(view);
       return view;
+    }
+    function makeLocalResources() {
+      const base = localURL('auriga/local-resources');
+      return (path, init = {}) => {
+        if (!['', '/detail', '/enabled', '/config'].includes(path))
+          return Promise.reject(
+            new TypeError('Invalid local resource operation'),
+          );
+        return fetch(new URL(base.href + path), {
+          ...init,
+          headers: {
+            'content-type': 'application/json',
+            'x-auriga-local-resources': '1',
+          },
+          credentials: 'same-origin',
+          cache: 'no-store',
+          redirect: 'error',
+        });
+      };
     }
     function makeFetch(boot) {
       const base = new URL(boot.fetchBase);
@@ -571,6 +592,7 @@ window.__ModuleLoader__.load({
               theme: host.theme,
               apiBase: '',
               fetch: boot.fetch,
+              localResources: boot.localResources,
             };
           }, [boot, host.locale, host.theme]);
           React.useEffect(() => {
