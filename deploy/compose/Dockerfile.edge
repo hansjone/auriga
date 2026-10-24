@@ -18,7 +18,7 @@ COPY web/shared/src ./web/shared/src
 COPY web/shared/scripts ./web/shared/scripts
 COPY clients/dsh-plugin/src ./clients/dsh-plugin/src
 COPY web/portal/src ./web/portal/src
-COPY web/portal/index.html web/portal/vite.config.ts ./web/portal/
+COPY web/portal/index.html web/portal/instance-login.html web/portal/vite.config.ts ./web/portal/
 COPY web/admin/src ./web/admin/src
 COPY web/admin/index.html web/admin/vite.config.ts ./web/admin/
 RUN pnpm gen:api \
