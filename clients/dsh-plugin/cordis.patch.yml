@@ -1,0 +1,6 @@
+# The package root is the Cordis host plugin; library consumers use ./library.
+# DSH discovers the browser entry through dsh.client and exports["./client"].
+- insert:
+    - id: auriga-dsh
+      name: auriga-dsh
+      config: {}

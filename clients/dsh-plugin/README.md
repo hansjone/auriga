@@ -13,7 +13,7 @@ Set `AURIGA_MODE` when explicitly selecting a runtime:
 ## Library
 
 ```js
-import initialize, { enrollEmergency, createManaged } from 'auriga-dsh';
+import initialize, { enrollEmergency, createManaged } from 'auriga-dsh/library';
 
 const { create } = initialize({ AURIGA_MODE: 'standalone' });
 const runtime = await create({
@@ -40,7 +40,21 @@ const managed = await createManaged({
 managed.apply(ctx); // Cordis-like host
 ```
 
-Cordis entry: `auriga-dsh/plugin`. Browser panel shell: `auriga-dsh/client`.
+Cordis bundle row: `auriga-dsh` (the root export is `src/plugin.js`). The explicit Node-only `auriga-dsh/plugin` export remains available; library callers use `auriga-dsh/library`. Browser panel shell: `auriga-dsh/client`. DSH's browser collector discovers package-root rows, so a bundle row naming only the `/plugin` subpath does not register the browser entry.
+
+## Install in DSH
+
+Add the published package or prepared `.tgz` through DSH's native plugin manager. The package declares `dsh.bundle.patch` and ships `cordis.patch.yml`, its Node/browser entries and built native UI. Installation uses DSH's normal package/script approval policy; no installation hook builds code or contacts headquarters.
+
+For a development directory link, first install the repository's documented workspace dependencies (including this plugin's runtime dependencies), then run from the repository root:
+
+```sh
+node clients/dsh-plugin/scripts/package-ui.mjs
+```
+
+Add **`clients/dsh-plugin`** in DSH. A fresh checkout does not contain the ignored `ui/` build output; adding an unprepared directory can install the bundle but cannot serve its UI. Rebuild after changing panel sources. To prepare the distributable tarball, run `npm pack` in this plugin directory; its existing `prepack` performs the UI build. A consumer of the resulting tarball needs neither the monorepo nor Vite.
+
+The default installed surface is the unconfigured shell, protected by native DSH authentication. Bundle installation does not complete Auriga login or the pending connect runtime.
 
 The release preparer runs `npm pack` from this monorepo. `prepack` builds the native `web/panel` module and includes `ui/auriga-team-panel.js` and its package-version/SRI metadata. Published installs have no install hook, Vue dependency, frontend build step or requirement to download a homepage from headquarters. Managed mode continues to use the verified platform manifest; it never falls back to packaged UI after verification or loading failure.
 
