@@ -23,7 +23,11 @@ export function useOrgActions(read: string, write: string, t: Translate) {
   const busy = ref(false);
   const error = ref('');
   const notice = ref('');
-  const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
+  const pending = shallowRef<{
+    message: string;
+    run: () => Promise<void>;
+    permission: string;
+  }>();
   const canRead = computed(() => permissions.value.includes(read));
   const canWrite = computed(
     () => canRead.value && permissions.value.includes(write),
@@ -61,11 +65,16 @@ export function useOrgActions(read: string, write: string, t: Translate) {
     }
     return true;
   }
-  function ask(message: string, run: () => Promise<void>) {
-    if (locked.value || !canWrite.value) return;
+  function ask(message: string, run: () => Promise<void>, permission = write) {
+    if (
+      locked.value ||
+      !canRead.value ||
+      !permissions.value.includes(permission)
+    )
+      return;
     error.value = '';
     notice.value = '';
-    pending.value = { message, run };
+    pending.value = { message, run, permission };
   }
   async function confirm() {
     const action = pending.value;
@@ -73,7 +82,7 @@ export function useOrgActions(read: string, write: string, t: Translate) {
     busy.value = true;
     try {
       if (!(await authorize())) return;
-      if (!canWrite.value)
+      if (!permissions.value.includes(action.permission))
         throw new ApiError({
           status: 403,
           code: 'common.forbidden',
