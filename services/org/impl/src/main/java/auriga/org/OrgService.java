@@ -1320,6 +1320,7 @@ public final class OrgService {
       int maxUses) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           List<UUID> roles = roleIds == null ? List.of() : roleIds;
           List<UUID> groups = groupIds == null ? List.of() : groupIds;
           ensureGrantAllowed(requireActor(), roles, null);
@@ -1328,6 +1329,7 @@ public final class OrgService {
               || !store.tenantId().toString().equals(deploymentAccess.tenantId())) {
             throw new AurigaException(CommonErrors.UNAVAILABLE);
           }
+          requireInvitationTargets(roles, groups);
           String code = newCode();
           UUID id = UuidV7.next();
           Instant exp = expiresAt != null ? expiresAt : clock.instant().plusSeconds(7 * 24 * 3600);
@@ -1492,6 +1494,8 @@ public final class OrgService {
         () ->
             store.tx(
                 () -> {
+                  // Match target deletion's lock order, before touching invitation rows.
+                  store.lockGroupHierarchy();
                   refreshInvitationStatuses();
                   List<Map<String, Object>> rows =
                       store
@@ -1540,6 +1544,8 @@ public final class OrgService {
                   if (invEmail != null && !invEmail.isBlank() && email != null && !email.isBlank())
                     OrgError.require(invEmail.equalsIgnoreCase(email), "conflict", 409);
 
+                  // Completed redemptions above stay idempotent even after target deletion.
+                  requireInvitationTargets(List.of(roleIds), List.of(groupIds));
                   boolean created = store.member(accountId).isEmpty();
                   if (created) {
                     String dn =
@@ -1615,6 +1621,35 @@ public final class OrgService {
                         member, "invitation", invitationId, (UUID) inv.get("created_by"));
                   return member;
                 }));
+  }
+
+  private void requireInvitationTargets(List<UUID> roleIds, List<UUID> groupIds) {
+    for (UUID roleId : roleIds) {
+      OrgError.require(
+          Boolean.TRUE.equals(
+              store
+                  .jdbc()
+                  .queryForObject(
+                      "SELECT EXISTS (SELECT 1 FROM role WHERE tenant_id=? AND id=?)",
+                      Boolean.class,
+                      store.tenantId(),
+                      roleId)),
+          "not_found",
+          404);
+    }
+    for (UUID groupId : groupIds) {
+      OrgError.require(
+          Boolean.TRUE.equals(
+              store
+                  .jdbc()
+                  .queryForObject(
+                      "SELECT EXISTS (SELECT 1 FROM \"group\" WHERE tenant_id=? AND id=?)",
+                      Boolean.class,
+                      store.tenantId(),
+                      groupId)),
+          "not_found",
+          404);
+    }
   }
 
   public ObjectNode previewInvitation(String code) {
