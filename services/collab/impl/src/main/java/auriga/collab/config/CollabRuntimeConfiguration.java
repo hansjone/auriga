@@ -8,7 +8,6 @@ import auriga.common.error.CommonErrors;
 import auriga.common.persistence.TenantTransactionManager;
 import javax.sql.DataSource;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,7 +18,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
     "${auriga.services.collab.enabled:true} && '${auriga.service.schema:}' == 'collab'")
 public class CollabRuntimeConfiguration {
   @Bean
-  @ConditionalOnMissingBean(CollabAdmission.class)
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      prefix = "auriga.collab.control-plane",
+      name = "enabled",
+      havingValue = "false",
+      matchIfMissing = true)
   CollabAdmission collabAdmission() {
     return (actor, operation) -> {
       throw new AurigaException(CommonErrors.UNAVAILABLE);
