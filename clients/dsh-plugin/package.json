@@ -9,16 +9,19 @@
   },
   "main": "./src/plugin.js",
   "exports": {
-    ".": "./src/index.js",
+    ".": "./src/plugin.js",
+    "./library": "./src/index.js",
     "./plugin": "./src/plugin.js",
     "./client": "./src/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "LICENSE",
     "README.md",
-    "ui"
+    "ui",
+    "cordis.patch.yml"
   ],
   "scripts": {
     "lint": "eslint . && prettier --check .",
@@ -29,6 +32,9 @@
     "prepack": "node scripts/package-ui.mjs"
   },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true

@@ -12,10 +12,18 @@
 
 `initialize()` 返回模式占位对象。standalone / managed 用 `.create(options)` 建运行时。
 
-Cordis 宿主入口：`auriga-dsh/plugin`（`package.json` `main`）。浏览器面板外壳：`auriga-dsh/client`。
+Cordis bundle 行使用包根 `auriga-dsh`（根 export 与 `main` 均指向 `src/plugin.js`）；`auriga-dsh/plugin` 显式 Node 入口仍保留。库入口为 `auriga-dsh/library`，浏览器面板外壳为 `auriga-dsh/client`。宿主浏览器模块收集器不收集子路径行，所以只加载 `/plugin` 不能证明浏览器插件已挂载。
+
+## 本地目录与发行包安装
+
+包通过 `dsh.bundle.patch: ./cordis.patch.yml` 声明 bundle；补丁只插入公开的 `auriga-dsh` 包根行，不携带旧 Team 地址、凭据或认证默认值。使用真实 DSH 插件管理器添加准备好的目录或 `.tgz`，沿宿主包管理与脚本审批策略。
+
+开发目录 link 前，先按仓库开发说明准备 workspace 及插件运行依赖，再在仓库根执行 `node clients/dsh-plugin/scripts/package-ui.mjs`，然后添加 `clients/dsh-plugin`。干净检出的 ignored `ui/` 目录不存在，不能省略此步骤后宣称目录开箱可用。脚本使用当前仓库原生 panel 源码生成资产和实际摘要，不复用旧工位产物。
+
+发行准备在插件目录执行 `npm pack`，既有 prepack 构建并打入 UI、Node/browser 源码与补丁。成品 tar 消费者无须仓库源码或 Vite，不执行新的安装构建钩子。安装、enabled/active、Node 路由可达、实际 browser graph/模块可达分别核验；默认只加载尚未配置的界面，不能当登录/真实账号接通。
 
 ```js
-import initialize, { enrollEmergency, createManaged } from 'auriga-dsh';
+import initialize, { enrollEmergency, createManaged } from 'auriga-dsh/library';
 
 const mode = initialize({ AURIGA_MODE: 'standalone' });
 const emergency = enrollEmergency('alice', process.env.EMERGENCY_PASSWORD);
