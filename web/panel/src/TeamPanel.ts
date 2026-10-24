@@ -244,7 +244,8 @@ export class AurigaTeamPanel extends HTMLElement {
     const active = this.shadowRoot?.activeElement as HTMLInputElement | null;
     const focusSearch = active?.type === 'search';
     const caret = active?.selectionStart;
-    this.root.dataset.theme = this.context?.theme ?? 'dark';
+    if (this.context?.theme) this.root.dataset.theme = this.context.theme;
+    else delete this.root.dataset.theme;
     this.root.setAttribute('aria-label', text.panel);
     this.root.replaceChildren(this.element('span', text.panel, 'sr-only'));
     const tabs = this.element('nav');

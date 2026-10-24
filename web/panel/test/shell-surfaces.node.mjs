@@ -231,7 +231,7 @@ test('host language and dark/light changes update native settings and panel cont
     assert.equal(panel.context.theme, 'light');
     assert.match(
       host.document.querySelector('style').textContent,
-      /var\(--dsw-alias-bg-layer-1\)/,
+      /var\(--dsw-alias-bg-layer-1,transparent\)/,
     );
     main.close();
     settings.close();
@@ -657,6 +657,43 @@ test('review M1: a same-identity waiter arriving after definition still waits fo
     a.close();
     b.close();
     host.dispose();
+  } finally {
+    host.close();
+  }
+});
+
+test('host theme overrides opposite OS preference and never installs an independent theme listener or switcher', async () => {
+  const host = surfaceHost(async () => response(), {
+    hostTheme: 'light',
+    osTheme: 'dark',
+  });
+  try {
+    const main = host.mount('main'),
+      settings = host.mount('settings.section');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    assert.equal(panel.context.theme, 'light');
+    assert.equal(host.scheme.size, 0);
+    host.osTheme('light');
+    await flush();
+    assert.equal(panel.context.theme, 'light');
+    host.theme('dark');
+    await flush();
+    assert.equal(panel.context.theme, 'dark');
+    host.osTheme('light');
+    await flush();
+    assert.equal(panel.context.theme, 'dark');
+    assert.equal(
+      settings.root.querySelector(
+        'select,input[type=radio],[data-theme-toggle]',
+      ),
+      null,
+    );
+    assert.equal(main.root.querySelector('auriga-team-panel'), panel);
+    main.close();
+    settings.close();
+    host.dispose();
+    assert.equal(host.subscriptions.size, 0);
   } finally {
     host.close();
   }

@@ -9,6 +9,12 @@ Auriga 插件有登录、功能、设置三部分；管理台是独立应用。�
 - 两页分别对照设计目录的 `index.html`、`resources-2026-10-23.html` 及 README。设置采用“总部连接／工具／关于”的分组与细分隔设置行，复用 DSH 原生按钮和 `--dsw-alias-*` 变量，不导入管理台主题、Vue、Element Plus 或私带 React。
 - 设置打开、刷新和关闭不更新功能组件的 bootstrap/context，不重建资源元素。功能元素在同一连接只改变语言／主题时保留当前页签、搜索与已读数据；真实连接变化则取消请求并清空旧数据。
 
+## 只跟随 DSH 系统主题
+
+功能页、设置页以及后续原生登录均不提供插件主题、配色或字体切换。已核固定 `@deepseek-ai/dsh-client-ui-theme@0.2.0-rc.2` 的真实接口：服务由宿主提供 `theme`，初值取 `theme.getTheme().active.colorScheme`，变化由 `theme/change` 的同形快照同步。插件不读取 OS `prefers-color-scheme`、不复制宿主的 system 模式判断，也不以启动 body marker 充当实时主题接口。
+
+颜色、背景、分隔线、选中／hover、错误和焦点直接消费宿主已有 `--dsw-alias-*`、`--dsw-focus-ring-color/width`；字体继承。Shadow DOM 内不再包含自有亮暗调色板、固定色值、系统字体栈或混色规则。宿主 token 改变即由 CSS 继承生效，无需重建资源元素。`context.theme` 保留为宿主解析结果和事件契约，不能触发插件自己的配色；缺失时不默认 dark。无宿主 token 的独立测试只使用 transparent／inherit／currentColor 中性降级，紧凑布局保持。
+
 ## 真实状态与版本
 
 managed 沿原有受保护 `/auriga/bootstrap` 读取状态；服务端仍先经原生 `requestRejection`，再取得已验签、未过期、未回滚的 manifest。新增 `pluginVersion` 来自插件实际 package/runtime 版本，界面版本来自已验证 `manifest.version`。二者独立取值，不复用示例常量。
@@ -51,7 +57,7 @@ Auriga 当前真实组件分布如下：
 
 ## 验证与限制
 
-插件 Node 测试含原有 140 项与新增 bootstrap／本机路由 6 项。壳的 30 条 Node 行为测试放在 `web/panel/test/shell-surfaces.node.mjs`，由 panel test 脚本在原生 Vitest 38 项后显式执行，文件名避开 Vitest glob。这样 Plugin workflow 的 `--filter auriga-dsh...` 不会依赖根开发用 jsdom；Web workflow 原有完整 workspace 安装提供锁定 jsdom，无新依赖。
+插件 Node 测试含原有 140 项与新增 bootstrap／本机路由 6 项。壳的 31 条 Node 行为测试放在 `web/panel/test/shell-surfaces.node.mjs`，由 panel test 脚本在原生 Vitest 39 项后显式执行，文件名避开 Vitest glob。这样 Plugin workflow 的 `--filter auriga-dsh...` 不会依赖根开发用 jsdom；Web workflow 原有完整 workspace 安装提供锁定 jsdom，无新依赖。
 
 `test:bundle` 在空白 JSDOM 执行实际产物，核 Shadow DOM、主题、资源封闭、无 Vue 标记、无 runtime package dependencies 与 40 kB 预算。隔离 npm tar 安装验证包内资产、SRI、无安装钩子、默认未配置 bootstrap、鉴权拒绝及卸载注销。可选 `test/real-slot-core.mjs <已安装的0.2.0-rc.2入口>` 直接把实际壳元数据交给真实 SlotCore，检查三个目标及卸载，未纳入 CI，也不新增 DSH 依赖。壳 Node VM 导入夹具由测试命令的 `--experimental-vm-modules` 支持，安装和运行无需该参数。组件／路由夹具不代表真实 DSH 登录、前端视觉、平台身份或部署验收；宿主设置的真实关闭／Esc／焦点仍需主控在真实 DSH 验收。
 

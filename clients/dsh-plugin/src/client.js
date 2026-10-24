@@ -95,18 +95,18 @@ window.__ModuleLoader__.load({
       unavailable: 'Temporarily unavailable. Try again later.',
     };
     const css = `
-.auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary);font:inherit;min-width:0}
-.auriga-shell button{font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);cursor:pointer}
-.auriga-shell button:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.auriga-shell button:focus-visible,.auriga-shell summary:focus-visible{outline:2px solid var(--dsw-alias-label-secondary);outline-offset:2px}
+.auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
+.auriga-shell button{font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
+.auriga-shell button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-shell button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
 .auriga-shell button:disabled{opacity:.5;cursor:default}
 .auriga-shell-status{padding:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .auriga-settings{padding:4px 4px 24px;font-size:13px;line-height:1.5}
 .auriga-settings h2{font-size:20px;font-weight:600;margin:0 0 24px}
 .auriga-settings h3{font-size:14px;font-weight:600;margin:24px 0 0}
-.auriga-settings p{color:var(--dsw-alias-label-secondary);font-size:12px;margin:8px 0 16px;overflow-wrap:anywhere}
-.auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.auriga-settings p{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;margin:8px 0 16px;overflow-wrap:anywhere}
+.auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
 .auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
 `;
     function failure(reason = 'unavailable') {
@@ -242,7 +242,7 @@ window.__ModuleLoader__.load({
       };
     }
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'theme'],
       apply(ctx) {
         let disposed = false;
         const cleanups = [];
@@ -272,11 +272,14 @@ window.__ModuleLoader__.load({
         style.textContent = css;
         document.head.append(style);
         own(() => style.remove());
-        const dark = window.matchMedia('(prefers-color-scheme: dark)');
+        const hostScheme = (snapshot) =>
+          ['dark', 'light'].includes(snapshot?.active?.colorScheme)
+            ? snapshot.active.colorScheme
+            : undefined;
         const listeners = new Set();
         const state = {
           locale: ctx.locale.getLocale().active,
-          theme: dark.matches ? 'dark' : 'light',
+          theme: hostScheme(ctx.theme?.getTheme()),
           toast: undefined,
         };
         const emit = () => {
@@ -290,14 +293,14 @@ window.__ModuleLoader__.load({
             }),
           'auriga-shell: locale',
         );
-        const onScheme = () => {
-          state.theme = dark.matches ? 'dark' : 'light';
-          emit();
-        };
-        effect(() => {
-          dark.addEventListener('change', onScheme);
-          return () => dark.removeEventListener('change', onScheme);
-        }, 'auriga-shell: theme');
+        effect(
+          () =>
+            ctx.on('theme/change', (snapshot) => {
+              state.theme = hostScheme(snapshot);
+              emit();
+            }),
+          'auriga-shell: theme',
+        );
         const controllers = new Set();
         const timers = new Set();
         const scripts = new Set();

@@ -67,3 +67,17 @@ it('native tabs support keyboard navigation', () => {
     wrapper.findAll('[role="tab"]')[1].element?.getAttribute('aria-selected'),
   ).toBe('true');
 });
+
+it('has no product palette, font stack or standalone theme controls', () => {
+  const wrapper = mountPanel();
+  wrappers.push(wrapper);
+  const css = wrapper.element.shadowRoot!.querySelector('style')!.textContent!;
+  expect(css).not.toMatch(
+    /#[0-9a-f]{3,8}\b|color-mix|prefers-color-scheme|data-theme\s*=|font-family\s*:/i,
+  );
+  expect(css).toContain('font: inherit');
+  expect(css).toContain('--dsw-alias-state-error-primary');
+  expect(css).toContain('--dsw-focus-ring-color');
+  expect(wrapper.attributes('data-theme')).toBe(null);
+  expect(wrapper.findAll('select,[data-theme-toggle]')).toHaveLength(0);
+});

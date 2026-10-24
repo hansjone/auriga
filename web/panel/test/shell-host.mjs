@@ -7,7 +7,13 @@ import { JSDOM } from 'jsdom';
 // This exercises the real ModuleLoader factory, effect lifecycle and native slots.
 export function surfaceHost(
   fetchImpl,
-  { defined = true, locale = 'zh-CN', slotCore } = {},
+  {
+    defined = true,
+    locale = 'zh-CN',
+    slotCore,
+    hostTheme = 'light',
+    osTheme = 'light',
+  } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
     url: 'https://instance.example.com/i/example/',
@@ -152,9 +158,10 @@ export function surfaceHost(
   const counts = { registered: 0, unregistered: 0, timers: new Map() };
   let dictionary,
     plugin,
-    activeLocale = locale;
+    activeLocale = locale,
+    activeTheme = hostTheme;
   const dark = {
-    matches: false,
+    matches: osTheme === 'dark',
     addEventListener(_event, fn) {
       void _event;
       scheme.add(fn);
@@ -221,6 +228,13 @@ export function surfaceHost(
     },
   );
   const ctx = {
+    theme: {
+      getTheme() {
+        return {
+          active: { id: 'host-custom-theme', colorScheme: activeTheme },
+        };
+      },
+    },
     locale: {
       register(_ns, entries) {
         dictionary = entries;
@@ -294,6 +308,10 @@ export function surfaceHost(
       subscriptions.get('locale/change')?.({ active: value });
     },
     theme(value) {
+      activeTheme = value;
+      subscriptions.get('theme/change')?.(ctx.theme.getTheme());
+    },
+    osTheme(value) {
       dark.matches = value === 'dark';
       scheme.forEach((fn) => fn());
     },
