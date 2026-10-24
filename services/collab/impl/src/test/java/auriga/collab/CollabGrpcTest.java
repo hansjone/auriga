@@ -350,7 +350,7 @@ class CollabGrpcTest {
                             .setActor(b)
                             .setDeliveryId(d.getId())
                             .setLeaseToken(d.getLeaseToken())
-                            .setHostRequestId("stable-host-request")
+                            .setHostRequestId(d.getId())
                             .build())
                     .getDelivery()
                     .getStatus());

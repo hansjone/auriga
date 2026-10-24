@@ -123,6 +123,10 @@ message AckDeliveryRequest {
   Actor actor = 1;
   string delivery_id = 2;
   string lease_token = 3;
+  // MUST equal delivery_id's canonical lowercase UUID string. The Node host
+  // uses this server-issued identity as the DSH prompt requestId on every
+  // retry, across lease renewals. A mismatch is common.conflict and must not
+  // advance this delivery. Same delivery/token/requestId ACK remains idempotent.
   string host_request_id = 4;
 }
 message RevokeEndpointRequest {

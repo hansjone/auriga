@@ -157,7 +157,7 @@ class CollabPostgresTest {
                     .setActor(a)
                     .setDeliveryId(d.getId())
                     .setLeaseToken(d.getLeaseToken())
-                    .setHostRequestId("host-" + d.getId())
+                    .setHostRequestId(d.getId())
                     .build()));
   }
 
@@ -494,5 +494,234 @@ class CollabPostgresTest {
         sql(
             p.a(),
             () -> jdbc.queryForObject("SELECT count(*) FROM collab.message", Integer.class)));
+  }
+
+  @Test
+  void nonParticipantReplyCannotLockPeersOrDeadlockLegitimateReply() throws Exception {
+    UUID tenant = UUID.randomUUID();
+    var endpoints = new ArrayList<Actor>();
+    for (int i = 0; i < 3; i++) endpoints.add(endpoint(actor(tenant)));
+    endpoints.sort(Comparator.comparing(e -> UUID.fromString(e.getEndpointId())));
+    Actor a = bind(endpoints.get(0), "a", "");
+    Actor c = bind(endpoints.get(1), "c", "");
+    Actor d = endpoints.get(2);
+    Message cd = open(c, d, "cd", "cd");
+    Message ac = open(a, c, "ac", "ac");
+    final Actor legitimate = bind(c, "c", ac.getThreadId());
+    CountDownLatch legalHasA = new CountDownLatch(1), illegalAdvanced = new CountDownLatch(1);
+    var illegalPeerLocks = new java.util.concurrent.atomic.AtomicInteger();
+    ThreadLocal<String> source = new ThreadLocal<>();
+    CollabService controlled =
+        new CollabService(
+            jdbc,
+            manager,
+            (actor, operation) -> {
+              if (operation == CollabAdmission.Operation.REPLY) source.set(actor.getEndpointId());
+              if (operation != CollabAdmission.Operation.RECEIVE) return;
+              if (legitimate.getEndpointId().equals(source.get())
+                  && actor.getEndpointId().equals(a.getEndpointId())) {
+                legalHasA.countDown();
+                await(illegalAdvanced);
+              } else if (a.getEndpointId().equals(source.get())) {
+                if (illegalPeerLocks.incrementAndGet() == 2) illegalAdvanced.countDown();
+              }
+            });
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var legal = pool.submit(() -> replyAttempt(controlled, legitimate, ac.getThreadId()));
+      assertTrue(legalHasA.await(10, TimeUnit.SECONDS));
+      var illegal =
+          pool.submit(
+              () -> {
+                try {
+                  return replyAttempt(controlled, a, cd.getThreadId());
+                } finally {
+                  illegalAdvanced.countDown();
+                }
+              });
+      Attempt good = legal.get(15, TimeUnit.SECONDS), denied = illegal.get(15, TimeUnit.SECONDS);
+      assertAll(
+          () -> assertNull(good.failure(), "legitimate reply: " + good.failure()),
+          () ->
+              assertEquals(
+                  "common.not_found",
+                  denied.failure(),
+                  "nonparticipant must be rejected before peer locks"),
+          () ->
+              assertEquals(
+                  0,
+                  illegalPeerLocks.get(),
+                  "nonparticipant reached RECEIVE while holding peer rows"));
+      assertEquals(2, good.message().getSequence());
+    } finally {
+      illegalAdvanced.countDown();
+    }
+  }
+
+  @Test
+  void reusedHostRequestIdCannotFalselyAcceptAnotherDelivery() {
+    Pair p = pair();
+    reply(p.a(), p.first().getThreadId(), "second", "second");
+    reply(p.a(), p.first().getThreadId(), "third", "third");
+    Delivery first = pull(p.b()).getItems(0);
+    // rc.2 hasPromptRequest returns accepted for an already seen session rpcId;
+    // this models that documented dedup boundary, not a real DSH runtime test.
+    Map<String, String> admitted = new HashMap<>();
+    admitted.putIfAbsent(first.getId(), first.getMessage().getText());
+    assertEquals("host_accepted", ackWithRequest(p.b(), first, first.getId()).getStatus());
+    assertEquals("host_accepted", ackWithRequest(p.b(), first, first.getId()).getStatus());
+    Delivery second = pull(p.b()).getItems(0);
+    admitted.putIfAbsent(first.getId(), second.getMessage().getText());
+    assertEquals(1, admitted.size());
+    error("common.conflict", () -> ackWithRequest(p.b(), second, first.getId()));
+    assertEquals(
+        "leased",
+        sql(
+            p.b(),
+            () ->
+                jdbc.queryForObject(
+                    "SELECT status FROM collab.delivery WHERE tenant_id=? AND id=?",
+                    String.class,
+                    UUID.fromString(p.b().getTenantId()),
+                    UUID.fromString(second.getId()))));
+    assertEquals(
+        0,
+        pull(p.b()).getItemsCount(),
+        "third must remain blocked behind the unaccepted second message");
+    admitted.putIfAbsent(second.getId(), second.getMessage().getText());
+    assertEquals("host_accepted", ackWithRequest(p.b(), second, second.getId()).getStatus());
+    assertEquals(2, admitted.size());
+    assertEquals(3, pull(p.b()).getItems(0).getMessage().getSequence());
+  }
+
+  static Delivery ackWithRequest(Actor actor, Delivery delivery, String requestId) {
+    return call(
+        actor,
+        () ->
+            service.ackDelivery(
+                AckDeliveryRequest.newBuilder()
+                    .setActor(actor)
+                    .setDeliveryId(delivery.getId())
+                    .setLeaseToken(delivery.getLeaseToken())
+                    .setHostRequestId(requestId)
+                    .build()));
+  }
+
+  @Test
+  void invalidOpenSourceAndReplyBindingNeverLockRecipientRows() {
+    Pair p = pair();
+    var receives = new java.util.concurrent.atomic.AtomicInteger();
+    CollabService controlled =
+        new CollabService(
+            jdbc,
+            manager,
+            (actor, operation) -> {
+              if (operation == CollabAdmission.Operation.RECEIVE) receives.incrementAndGet();
+            });
+    for (Actor invalid :
+        List.of(
+            p.a().toBuilder().setCredentialSubject(UUID.randomUUID().toString()).build(),
+            p.a().toBuilder().setHostSessionId("forged-session").build())) {
+      error(
+          "common.forbidden",
+          () ->
+              call(
+                  invalid,
+                  () ->
+                      controlled.openThread(
+                          OpenThreadRequest.newBuilder()
+                              .setActor(invalid)
+                              .setTargetEndpointId(p.b().getEndpointId())
+                              .setText("rejected")
+                              .setIdempotencyKey("rejected")
+                              .build())));
+      error(
+          "common.forbidden",
+          () ->
+              call(
+                  invalid,
+                  () ->
+                      controlled.replyThread(
+                          ReplyThreadRequest.newBuilder()
+                              .setActor(invalid)
+                              .setThreadId(p.first().getThreadId())
+                              .setText("rejected")
+                              .setIdempotencyKey("rejected")
+                              .build())));
+    }
+    assertEquals(
+        0,
+        receives.get(),
+        "credential/binding rejection must precede peer row locks and RECEIVE authority");
+    assertEquals(
+        1,
+        sql(
+            p.a(),
+            () -> jdbc.queryForObject("SELECT count(*) FROM collab.message", Integer.class)));
+  }
+
+  @Test
+  void canonicalDeliveryRequestIdentityAlsoFencesSameSessionAcrossThreads() {
+    Pair p = pair();
+    Delivery first = pull(p.b()).getItems(0);
+    assertEquals("host_accepted", ackWithRequest(p.b(), first, first.getId()).getStatus());
+    Message another = open(p.a(), p.b(), "another thread", "another thread");
+    Actor sameSession = bind(p.b(), p.b().getHostSessionId(), another.getThreadId());
+    assertEquals(p.b().getBindingId(), sameSession.getBindingId());
+    Delivery second = pull(sameSession).getItems(0);
+    error("common.conflict", () -> ackWithRequest(sameSession, second, first.getId()));
+    error("common.conflict", () -> ackWithRequest(sameSession, second, "random-host-request"));
+    sql(
+        sameSession,
+        () ->
+            jdbc.update(
+                "UPDATE collab.delivery SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE tenant_id=? AND id=?",
+                UUID.fromString(sameSession.getTenantId()),
+                UUID.fromString(second.getId())));
+    error("common.precondition_failed", () -> ackWithRequest(sameSession, second, second.getId()));
+    Delivery renewed = pull(sameSession).getItems(0);
+    assertEquals(second.getId(), renewed.getId());
+    error("common.precondition_failed", () -> ackWithRequest(sameSession, second, second.getId()));
+    assertEquals(
+        "host_accepted", ackWithRequest(sameSession, renewed, renewed.getId()).getStatus());
+    assertEquals(
+        "host_accepted", ackWithRequest(sameSession, renewed, renewed.getId()).getStatus());
+    error("common.conflict", () -> ackWithRequest(sameSession, renewed, first.getId()));
+    assertEquals(0, pull(sameSession).getItemsCount());
+  }
+
+  record Attempt(Message message, String failure) {}
+
+  static Attempt replyAttempt(CollabService core, Actor actor, String thread) {
+    try {
+      return new Attempt(
+          call(
+              actor,
+              () ->
+                  core.replyThread(
+                      ReplyThreadRequest.newBuilder()
+                          .setActor(actor)
+                          .setThreadId(thread)
+                          .setText("reply")
+                          .setIdempotencyKey("race")
+                          .build())),
+          null);
+    } catch (RuntimeException error) {
+      for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+        if (cause instanceof AurigaException business)
+          return new Attempt(null, business.errorCode().code());
+        if (cause instanceof java.sql.SQLException sql)
+          return new Attempt(null, "SQLSTATE=" + sql.getSQLState());
+      }
+      throw error;
+    }
+  }
+
+  static void await(CountDownLatch latch) {
+    try {
+      assertTrue(latch.await(10, TimeUnit.SECONDS));
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(error);
+    }
   }
 }

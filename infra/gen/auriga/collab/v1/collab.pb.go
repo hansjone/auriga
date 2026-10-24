@@ -994,11 +994,15 @@ func (x *DeliveryPage) GetItems() []*Delivery {
 }
 
 type AckDeliveryRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Actor         *Actor                 `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
-	DeliveryId    string                 `protobuf:"bytes,2,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
-	LeaseToken    string                 `protobuf:"bytes,3,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
-	HostRequestId string                 `protobuf:"bytes,4,opt,name=host_request_id,json=hostRequestId,proto3" json:"host_request_id,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Actor      *Actor                 `protobuf:"bytes,1,opt,name=actor,proto3" json:"actor,omitempty"`
+	DeliveryId string                 `protobuf:"bytes,2,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
+	LeaseToken string                 `protobuf:"bytes,3,opt,name=lease_token,json=leaseToken,proto3" json:"lease_token,omitempty"`
+	// MUST equal delivery_id's canonical lowercase UUID string. The Node host
+	// uses this server-issued identity as the DSH prompt requestId on every
+	// retry, across lease renewals. A mismatch is common.conflict and must not
+	// advance this delivery. Same delivery/token/requestId ACK remains idempotent.
+	HostRequestId string `protobuf:"bytes,4,opt,name=host_request_id,json=hostRequestId,proto3" json:"host_request_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

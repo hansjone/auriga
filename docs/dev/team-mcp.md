@@ -38,7 +38,10 @@ message、delivery、request_dedup；均带 tenant_id、RLS 与包含 tenant 的
 源端点创建线程时固定源会话参与者；目标端点在真实创建/恢复 DSH 会话后绑定该线程，
 一旦绑定不能静默换会话。同一账号的其他端点或同一端点的其他会话不自动取得线程权限。
 
-端点行按 UUID 排序加锁，串行化发送、领取、ACK 与撤销。线程行锁分配单调 sequence；
+Open/Reply 先以不加写锁的查询核来源端点主人/凭据、会话绑定及必要参与关系，
+拒绝请求不得先锁其他参与者端点；预检也不能改成源端点优先加锁。
+随后把来源与参与端点全部按 UUID 排序加锁，再核端点状态/参与绑定与在线准入，
+串行化发送、领取、ACK 与撤销。线程行锁分配单调 sequence；
 消息和对方的 delivery 同事务写入。按 sequence 读取，不按本机时间推断顺序。
 幂等作用域 `(tenant,source endpoint,source binding,operation,key)`；同键同体返回原消息，
 异体 `common.conflict`，未成功事务不留下幂等占位。
@@ -46,8 +49,12 @@ message、delivery、request_dedup；均带 tenant_id、RLS 与包含 tenant 的
 
 每次 pull 1—100 项，只领取每线程最早尚未确认的消息，活跃租约阻止越过该消息。
 租约固定 30 秒；过期重领更换 token，旧 token 不能确认新租约。
-ACK 只允许精确接收端点及已绑定会话，要求当前 token、未过期租约及宿主 requestId；
-重复相同成功 ACK 幂等，异 requestId 返回冲突。
+ACK 只允许精确接收端点及已绑定会话，要求当前 token、未过期租约。
+宿主 prompt 的 `requestId` 必须使用服务端 `delivery.id` 的规范小写 UUID 字符串，
+ACK 的 `host_request_id` 必须逐字相等；不匹配时服务端返回 `common.conflict`，不推进投递。
+不同 delivery 因而不能复用同一个宿主请求身份，包括同会话跨线程的投递。
+同一 delivery 的所有宿主重试、重领租约仍用同一 requestId；相同合法 token/requestId
+的成功 ACK 可幂等重试，旧租约仍被拒绝。不得每次随机生成或沿用上一条消息的 requestId。
 状态 pending/leased/host_accepted 只表示平台待投、租约或宿主接受，不表示模型已读或完成。
 端点离线不伪造 delivered；本批没有心跳在线状态声明，也不启动后台定时器。
 
@@ -74,8 +81,8 @@ CollabAdmission 在线源，当前缺省拒绝，不承诺仅靠本地标志实�
 `packages/api/session-controller/src/index.ts` 的 create(request)、prompt(request,signal)；
 types.ts 的请求为 `{requestId,sessionId,mode:'queue',content:[{type:'text',text}]}`，
 返回 `{accepted:true}`。commands.ts 用 source.rpcId 在 inbox 与历史事件去重，queue 走 followup。
-插件应持久保存 deliveryId→sessionId/requestId，串行化同一 delivery 的宿主准入；
-固定 requestId 重试，accepted 后再 ACK。不能把自然语言输出自动当线程 reply。
+插件应持久保存 deliveryId→sessionId，并始终令 requestId=deliveryId，串行化同一 delivery
+的宿主准入；固定该身份重试，accepted 后再 ACK。不能把自然语言输出自动当线程 reply。
 
 后续真实闭环必须有独立总部与成员的真实 DSH：源工具开聊、指定端点真实入队、成员工具
 回复、总部原线程收到，覆盖断网、重连、ACK 丢失和进程恢复；本批内部核心测试不冒充该验收。

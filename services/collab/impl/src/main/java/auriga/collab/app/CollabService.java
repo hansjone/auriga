@@ -175,9 +175,13 @@ public class CollabService {
         () -> {
           UUID source = uuid(a.getEndpointId()), target = uuid(request.getTargetEndpointId());
           require(!source.equals(target), CommonErrors.VALIDATION_FAILED);
+          // Reject an impersonated source before acquiring any recipient row lock.
+          actorEndpoint(a, false, false);
+          binding(a);
           lockEndpoints(a, List.of(source, target));
           actorEndpoint(a);
           binding(a);
+          admission.verify(a, Operation.OPEN);
           require(
               Boolean.TRUE.equals(
                   one(
@@ -218,14 +222,22 @@ public class CollabService {
         Operation.REPLY,
         () -> {
           UUID thread = uuid(request.getThreadId());
+          // Preflight must not lock the source first: that would invert the
+          // globally sorted endpoint order for legitimate callers as well.
+          actorEndpoint(a, false, false);
+          participant(a, thread);
           var participants =
               rows(
                   "SELECT endpoint_id FROM collab.thread_participant WHERE tenant_id=? AND thread_id=?",
                   tenant(a),
                   thread);
-          lockEndpoints(a, participants.stream().map(r -> (UUID) r.get("endpoint_id")).toList());
+          var endpointIds = new ArrayList<UUID>();
+          endpointIds.add(uuid(a.getEndpointId()));
+          participants.forEach(row -> endpointIds.add((UUID) row.get("endpoint_id")));
+          lockEndpoints(a, endpointIds);
           actorEndpoint(a);
           participant(a, thread);
+          admission.verify(a, Operation.REPLY);
           String fingerprint = fingerprint(request.getThreadId(), request.getText());
           Message previous = replay(a, "reply", request.getIdempotencyKey(), fingerprint);
           if (previous != null) return previous;
@@ -309,6 +321,9 @@ public class CollabService {
           require(
               uuid(request.getLeaseToken()).equals(row.get("lease_token")),
               CommonErrors.PRECONDITION_FAILED);
+          // DSH deduplicates by requestId within the session. A delivery's
+          // server-generated identity is its one stable prompt requestId.
+          require(request.getHostRequestId().equals(id.toString()), CommonErrors.CONFLICT);
           if ("host_accepted".equals(row.get("status"))) {
             require(
                 request.getHostRequestId().equals(row.get("host_request_id")),
@@ -375,9 +390,14 @@ public class CollabService {
   }
 
   private Map<String, Object> actorEndpoint(Actor a, boolean allowRevoked) {
+    return actorEndpoint(a, allowRevoked, true);
+  }
+
+  private Map<String, Object> actorEndpoint(Actor a, boolean allowRevoked, boolean lock) {
     var row =
         one(
-            "SELECT * FROM collab.endpoint WHERE tenant_id=? AND id=? FOR UPDATE",
+            "SELECT * FROM collab.endpoint WHERE tenant_id=? AND id=?"
+                + (lock ? " FOR UPDATE" : ""),
             tenant(a),
             uuid(a.getEndpointId()));
     require(
