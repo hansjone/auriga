@@ -33,7 +33,7 @@ export default [
     },
   },
   {
-    files: ['src/client.js'],
+    files: ['src/client.js', 'src/login/**/*.js'],
     languageOptions: {
       globals: {
         window: 'readonly',
