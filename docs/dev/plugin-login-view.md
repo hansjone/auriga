@@ -14,11 +14,11 @@ ClientStep / StepInput / 字段定义均来自插件 `src/generated/steps.d.ts`�
 
 ## 当前支持与安全边界
 
-支持 form、fail、complete。表单处理 text、password、email、tel、otp、select、checkbox、hidden、info，以及 label、placeholder、help、必填、长度、pattern、autocomplete、字段错误与整表错误。info 不提交，checkbox 提交布尔值，hidden 提交字符串。浏览器原生约束校验通过后才提交。password/otp 不使用上游默认值，提交后立即清空；取消、切步骤、切语言、卸载也清空现存控件。模块不写 storage、URL、日志。
+支持 form、fail、complete。表单处理 text、password、email、tel、otp、select、checkbox、hidden、info，以及 label、placeholder、help、必填、长度、pattern、autocomplete、字段错误与整表错误。info 不提交，checkbox 提交布尔值，hidden 按契约保留原始 string 或 boolean 值（未提供值时提交空字符串），不通过 DOM 字符串转换。浏览器原生约束校验通过后才提交。password/otp 不使用上游默认值，提交后立即清空；取消、切步骤、切语言、卸载也清空现存控件。模块不写 storage、URL、日志。
 
 fail 与表单错误仅按已知契约 code 显示本地受控文案，未知错误回退通用失败；不回显服务端 message 或异常 reason/stack。只有 retryable 的 fail 显示重启按钮。qr、redirect、webauthn、device、done 及未知步骤均显示暂不可用，不产生完成通知或导航。
 
-提交中禁用现有控件，显示处理状态与取消按钮。取消、替换步骤、语言变化、卸载会 abort 请求并使旧响应失效；宿主即使不响应 abort，晚到结果也不会替换当前步骤。dispose 幂等并移除本模块 DOM 和事件监听。完成通知在微任务中检查有效性，切语言不重复通知。
+提交中禁用现有控件，显示处理状态与取消按钮。取消、替换步骤、语言变化、卸载会 abort 请求并使旧响应失效；宿主即使不响应 abort，晚到结果也不会替换当前步骤。dispose 幂等并移除本模块 DOM 和事件监听。完成通知在微任务中检查有效性；切语言保留当前有效 complete 的待通知状态，已通知后不重复通知。替换步骤、取消或卸载仍使旧完成通知失效。
 
 ## 验证与未接范围
 

@@ -44,6 +44,68 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
+it.each([true, false, 'opaque', ''])(
+  'preserves hidden value %s and its original type through form submission',
+  async (value) => {
+    const { root, view, onSubmit } = mount();
+    view.setStep({
+      type: 'form',
+      formId: 'hidden-binding',
+      fields: [{ kind: 'hidden', name: 'binding', value }],
+    });
+    submit(root);
+    const received = onSubmit.mock.calls[0][0];
+    expect(received.type).toBe('form');
+    if (received.type !== 'form') throw new Error('Expected form submission');
+    expect(received.values.binding).toBe(value);
+    await flush();
+  },
+);
+
+it.each([
+  'synchronous-locale',
+  'transport-queued-locale',
+  'locale-after-delivery',
+])('delivers the current completion exactly once across %s', async (mode) => {
+  const { root, view, onSubmit, onComplete } = mount();
+  const complete: ClientStep = { type: 'complete', redirectTo: '/safe' };
+  if (mode === 'transport-queued-locale') {
+    onSubmit.mockResolvedValueOnce(complete);
+    view.setStep(passwordStep);
+    input(root, 'username', 'alice');
+    input(root, 'password', 'test-only');
+    submit(root);
+    queueMicrotask(() => view.setLocale('en'));
+  } else {
+    view.setStep(complete);
+    if (mode === 'locale-after-delivery') await flush();
+    view.setLocale('en');
+  }
+  await flush();
+  expect(root.textContent).toContain('Sign-in step completed');
+  expect(onComplete).toHaveBeenCalledTimes(1);
+  view.setLocale('zh-CN');
+  view.setLocale('en');
+  await flush();
+  expect(onComplete).toHaveBeenCalledTimes(1);
+});
+
+it.each(['new-step', 'dispose'])(
+  'invalidates an undelivered completion after locale then %s',
+  async (action) => {
+    const { root, view, onComplete } = mount();
+    view.setStep({ type: 'complete', redirectTo: '/safe' });
+    view.setLocale('en');
+    if (action === 'new-step') view.setStep(otpStep);
+    else view.dispose();
+    await flush();
+    expect(onComplete).not.toHaveBeenCalled();
+    if (action === 'new-step')
+      expect(root.querySelector('[name=otp]')).not.toBeNull();
+    else expect(root.childNodes).toHaveLength(0);
+  },
+);
 function mount(overrides: Partial<LoginOptions> = {}) {
   const root = document.createElement('div');
   document.body.append(root);

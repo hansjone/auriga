@@ -58,6 +58,7 @@ export function createLoginView(root, options) {
   let step;
   let disposed = false;
   let version = 0;
+  let completionVersion = 0;
   /** @type {AbortController | undefined} */
   let request;
   /** @type {(() => void)[]} */
@@ -82,8 +83,10 @@ export function createLoginView(root, options) {
   function clearSensitive() {
     for (const input of sensitive) input.value = '';
   }
-  function invalidate() {
+  /** @param {boolean} [preserveCompletion] Locale changes preserve the current step's pending notification. */
+  function invalidate(preserveCompletion = false) {
     version++;
+    if (!preserveCompletion) completionVersion++;
     request?.abort();
     request = undefined;
     clearSensitive();
@@ -110,11 +113,11 @@ export function createLoginView(root, options) {
     step = next;
     render();
     if (next.type === 'complete') {
-      const current = version;
+      const current = completionVersion;
       // A synchronous host replacement/disposal must invalidate completion too.
       void Promise.resolve()
         .then(() => {
-          if (!disposed && version === current) options.onComplete();
+          if (!disposed && completionVersion === current) options.onComplete();
         })
         .catch(() => {
           /* Host callback errors must never expose sensitive details. */
@@ -183,7 +186,7 @@ export function createLoginView(root, options) {
       if (formStep.description)
         card.append(element('p', localize(formStep.description), 'muted'));
       const form = element('form');
-      /** @type {{name: string, control: HTMLInputElement | HTMLSelectElement, checkbox: boolean}[]} */
+      /** @type {{name: string, control: HTMLInputElement | HTMLSelectElement, checkbox: boolean, hiddenValue?: string | boolean}[]} */
       const fields = [];
       for (const [index, field] of formStep.fields.entries()) {
         if (field.kind === 'info') {
@@ -232,6 +235,8 @@ export function createLoginView(root, options) {
           name: field.name,
           control,
           checkbox: field.kind === 'checkbox',
+          hiddenValue:
+            field.kind === 'hidden' ? (field.value ?? '') : undefined,
         });
         if (field.kind === 'hidden') {
           form.append(control);
@@ -276,11 +281,13 @@ export function createLoginView(root, options) {
         if (request || disposed || !form.reportValidity()) return;
         /** @type {Record<string, string | boolean>} */
         const values = Object.create(null);
-        for (const { name, control, checkbox } of fields) {
+        for (const { name, control, checkbox, hiddenValue } of fields) {
           values[name] =
-            checkbox && control instanceof InputElement
-              ? control.checked
-              : control.value;
+            hiddenValue !== undefined
+              ? hiddenValue
+              : checkbox && control instanceof InputElement
+                ? control.checked
+                : control.value;
         }
         clearSensitive();
         void run(
@@ -321,7 +328,7 @@ export function createLoginView(root, options) {
     /** @param {string} next */
     setLocale(next) {
       if (disposed) return;
-      invalidate();
+      invalidate(true);
       locale = next || 'zh-CN';
       render();
     },
