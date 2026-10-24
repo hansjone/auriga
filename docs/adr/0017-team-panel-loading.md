@@ -4,9 +4,13 @@
 - 日期：2026-10-19
 - 依据：`spikes/s2-panel/`（可运行原型 + 32 个 Node 测试，DSH `0.2.0-rc.2`）
 
+## 后续决定（2026-10-24）
+
+用户决定插件独立安装、保持轻量并复用 DSH 原生能力，同时保留自包含 ES module 与既有稳定加载协议。管理台仍是独立 Vue 应用；DSH 插件分登录、功能、设置三部分，原生功能页与独立设置页载体已落地，原生登录、真实 connect 及安装执行等仍待接线。插件样式、字体与颜色完整沿用 DSH 宿主主题 tokens 与服务，不另设调色板或监听 OS 主题。此决定同步实现描述，不改变本 ADR 中的元素名、context/events、签名与 SRI、版本和回滚协议、身份及 CORS 边界；也不扩写 URL+Key 认证协议，或替换既有 RFC 8628 设备授权设计。Desktop 转发会丢弃 `Set-Cookie` 的限制仍适用。
+
 ## 背景
 
-团队面板由平台用 Vue 写成 Web Component（`auriga-team-panel`，Shadow DOM），跟平台一起发版；DSH 插件只负责在 DSH 界面里挂载它。托管模式浏览器经 edge 访问 `/i/<实例 id>/`；连接模式用户电脑上的 DSH（浏览器或 DSH Desktop，来源 `dsh-app://app`）要从平台取面板包、验签后本机加载。S2 要回答：DSH 给插件的扩展点是什么、两种模式怎么加载、样式隔不隔得住、令牌怎么处理、协议要改什么。
+原型阶段的团队面板由平台用 Vue 写成 Web Component（`auriga-team-panel`，Shadow DOM），跟平台一起发版；DSH 插件只负责在 DSH 界面里挂载它。托管模式浏览器经 edge 访问 `/i/<实例 id>/`；连接模式用户电脑上的 DSH（浏览器或 DSH Desktop，来源 `dsh-app://app`）要从平台取面板包、验签后本机加载。S2 要回答：DSH 给插件的扩展点是什么、两种模式怎么加载、样式隔不隔得住、令牌怎么处理、协议要改什么。
 
 ## 调查结论
 
@@ -35,7 +39,7 @@
     1. **继承穿透**：`*{font-family:…!important}` 会命中 host 元素，继承进 Shadow；且宿主的 `!important` 压得过 `:host{}` 里的普通声明。复位（`all: initial`）必须放在 Shadow 内部的根节点上（`.auriga-root`），不能放 `:host`。
     2. **Element Plus 的变量写在 `:root` / `html.dark`**，Shadow 里不生效。构建时改写成 `:host` / `.auriga-root.dark`（`panel/src/main.ts`）。
 - Element Plus 弹层：默认挂到 `document.body`，Shadow 里没有样式。设 `:teleported="false"`（`ElSelect` 等）和 `ElDialog :append-to="<shadow 内容器元素>"` 后，下拉、对话框、遮罩都在 Shadow 内，样式、键盘、定位正常（`.el-popper` 在 body 下为 0，在 shadow 内为 1）。注意：`position:fixed` 的遮罩以 DSH 主区域为包含块，对话框遮罩只盖主区域，不盖侧栏（可接受）。**`ElMessage` / `ElMessageBox` / `ElNotification` 会直接挂 body，面板内禁用**，通知一律走 `auriga-notify` 事件。
-- 自包含产物：Vue + Element Plus + 全部 CSS 打成一个 ES module（1.9 MB，gzip 465 KB），清单里只有一个文件要 SRI，没有"样式另外注入"的问题。构建时 CSS 用 `adoptedStyleSheets`（不受将来可能出现的 `style-src` CSP 影响），无此 API 时退回 `<style>`。体积可后续按需引入组件样式优化。
+- 原型自包含产物：Vue + Element Plus + 全部 CSS 曾打成一个 ES module（1.9 MB，gzip 465 KB），清单里只有一个文件要 SRI，没有"样式另外注入"的问题。构建时 CSS 用 `adoptedStyleSheets`（不受将来可能出现的 `style-src` CSP 影响），无此 API 时退回 `<style>`。这是原型记录，不是当前插件实现；当前插件 UI 为原生 Custom Element/DOM，管理台仍为独立 Vue 应用。
 
 ### 3. 连接模式：浏览器里怎么加载
 
