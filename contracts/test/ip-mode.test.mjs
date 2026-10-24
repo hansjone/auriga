@@ -327,3 +327,57 @@ test('managed browserOrigin直接引用原Origin规则，不定义第二份规�
     $ref: '../deployment/access.schema.json#/$defs/Origin',
   });
 });
+
+test('managed portalOrigin复用原Origin规则，缺失兼容但坏值与额外字段拒绝', () => {
+  assert.deepEqual(managedSchema.properties.portalOrigin, {
+    $ref: '../deployment/access.schema.json#/$defs/Origin',
+  });
+  const browserOrigin = {
+    scheme: 'https',
+    host: 'instance.i.example.com',
+    port: 443,
+  };
+  assert(managed({ browserOrigin }));
+  for (const host of ['portal.example.com', '192.0.2.10'])
+    for (const scheme of ['http', 'https'])
+      for (const port of [80, 443, 8080, 8443, 65535])
+        assert(
+          managed({ browserOrigin, portalOrigin: { scheme, host, port } }),
+        );
+  for (const portalOrigin of [
+    null,
+    {},
+    [],
+    'https://portal.example.com',
+    { host: 'portal.example.com', port: 443 },
+    { scheme: 'https', host: 'portal.example.com' },
+    ...[
+      { scheme: 'ws' },
+      { host: 'Portal.example.com' },
+      { host: 'user@portal.example.com' },
+      { host: 'portal.example.com/path' },
+      { host: 'portal.example.com?query' },
+      { host: 'portal.example.com#fragment' },
+      { host: '*.example.com' },
+      { port: '443' },
+      { port: 0 },
+      { port: 65536 },
+      { port: 1.5 },
+      { extra: true },
+    ].map((patch) => ({
+      scheme: 'https',
+      host: 'portal.example.com',
+      port: 443,
+      ...patch,
+    })),
+  ])
+    assert.equal(
+      managed({ browserOrigin, portalOrigin }),
+      false,
+      JSON.stringify(portalOrigin),
+    );
+  assert.equal(
+    managed({ browserOrigin, 'portalOrigin.host': 'evil.example.com' }),
+    false,
+  );
+});

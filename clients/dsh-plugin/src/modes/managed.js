@@ -93,11 +93,28 @@ export async function createManaged(options = {}) {
     typeof rowConfig !== 'object' ||
     Array.isArray(rowConfig) ||
     Object.keys(rowConfig).some(
-      (key) => !['imBots', 'terminalSources', 'browserOrigin'].includes(key),
+      (key) =>
+        ![
+          'imBots',
+          'terminalSources',
+          'browserOrigin',
+          'portalOrigin',
+        ].includes(key),
     )
   )
     throw new Error('auriga-dsh: unknown managed config field');
   const browserOrigin = validateBrowserOrigin(rowConfig.browserOrigin);
+  let portalOrigin;
+  if (rowConfig.portalOrigin !== undefined) {
+    try {
+      // Same deployment Origin semantics, independently of the browser fence.
+      portalOrigin = validateBrowserOrigin(rowConfig.portalOrigin);
+    } catch {
+      throw new Error(
+        'auriga-dsh: config.portalOrigin requires canonical scheme, host and effective port',
+      );
+    }
+  }
   if ((env.AURIGA_MODE ?? 'managed') !== 'managed') {
     throw new Error('createManaged requires AURIGA_MODE=managed');
   }
@@ -316,6 +333,7 @@ export async function createManaged(options = {}) {
         getManifest,
         pluginVersion,
         panelBase: env.AURIGA_PANEL_BASE,
+        portalOrigin,
       });
       ctx.effect?.(
         () =>

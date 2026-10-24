@@ -6,10 +6,11 @@
  */
 
 /**
- * 受信节点 renderer 拥有的托管插件 Loader row 配置；browserOrigin 不由实例 profile 或请求头选择。
+ * 受信节点 renderer 拥有的托管插件 Loader row 配置；browserOrigin 与可选的门户导航目标 portalOrigin 不由实例 profile 或请求头选择。缺少 portalOrigin 时禁用门户入口。
  */
 export interface ManagedConfig {
   browserOrigin: Origin;
+  portalOrigin?: Origin;
   imBots?: 'none';
   terminalSources?: 'browser-only';
 }

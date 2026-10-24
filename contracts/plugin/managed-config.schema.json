@@ -1,10 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ManagedConfig",
-  "description": "受信节点 renderer 拥有的托管插件 Loader row 配置；browserOrigin 不由实例 profile 或请求头选择。",
+  "description": "受信节点 renderer 拥有的托管插件 Loader row 配置；browserOrigin 与可选的门户导航目标 portalOrigin 不由实例 profile 或请求头选择。缺少 portalOrigin 时禁用门户入口。",
   "type": "object",
   "properties": {
     "browserOrigin": {
+      "$ref": "../deployment/access.schema.json#/$defs/Origin"
+    },
+    "portalOrigin": {
       "$ref": "../deployment/access.schema.json#/$defs/Origin"
     },
     "imBots": { "const": "none" },

@@ -42,6 +42,7 @@ var reservedRows = map[string]struct{}{
 var reservedPluginKeys = map[string]struct{}{
 	"trustedHosts":  {},
 	"browserOrigin": {},
+	"portalOrigin":  {},
 }
 
 // jsExpr renders as a DSH Loader `!!js` expression node.
@@ -83,7 +84,7 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 		host = "0.0.0.0"
 	}
 
-	pluginCfg := map[string]any{"browserOrigin": browser}
+	pluginCfg := map[string]any{"browserOrigin": browser, "portalOrigin": opt.Access.PortalOrigin()}
 	overrides := map[string]map[string]any{}
 	var overrideOrder []string
 	for _, p := range prof.GetPatches() {
