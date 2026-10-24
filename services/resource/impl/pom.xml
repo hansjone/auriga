@@ -10,6 +10,10 @@
   <artifactId>resource-impl</artifactId>
   <dependencies>
     <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-compress</artifactId>
+    </dependency>
+    <dependency>
       <groupId>auriga</groupId>
       <artifactId>resource-api</artifactId>
       <version>${project.version}</version>
