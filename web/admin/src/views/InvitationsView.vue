@@ -10,6 +10,7 @@ import {
   ElFormItem,
   ElDialog,
 } from 'element-plus';
+import { isApiError } from '@auriga/shared';
 import { useAdminI18n } from '../admin/messages';
 import {
   orgAdminApi,
@@ -43,16 +44,27 @@ const list = useCursorList<Invitation>(
     if (!(await access.authorize())) return { items: [] };
     return orgAdminApi.invitations(status.value || undefined, cursor);
   },
-  (e) => orgError(e, t),
+  (e) => {
+    const message = orgError(e, t);
+    if (isApiError(e) && (e.status === 401 || e.status === 403)) {
+      error.value = message;
+      access.permissions.value = [];
+    }
+    return message;
+  },
 );
 const { items, loading, error: listError, nextCursor, history } = list;
 const creating = ref(false);
 const email = ref('');
 const displayName = ref('');
 const code = ref('');
+const invitationUrl = ref('');
 const copyNotice = ref('');
+let resultVersion = 0;
 function clearCode() {
+  ++resultVersion;
   code.value = '';
+  invitationUrl.value = '';
   copyNotice.value = '';
 }
 onBeforeUnmount(clearCode);
@@ -73,6 +85,11 @@ async function refresh() {
   if (locked.value) return;
   clearCode();
   creating.value = false;
+  await list.refresh();
+}
+async function retryList() {
+  if (locked.value || loading.value) return;
+  error.value = '';
   await list.refresh();
 }
 function newInvitation() {
@@ -104,15 +121,42 @@ function create() {
   access.ask(
     t('invitationConfirm', { email: normalizedEmail || t('anyEmail') }),
     async () => {
-      const result = await orgAdminApi.createInvitation(body);
-      if (!access.isAlive()) return;
-      // Keep only the credential in ephemeral component memory; never retain the example URL.
-      code.value = result.code;
+      clearCode();
+      const request = resultVersion;
+      let result: Awaited<ReturnType<typeof orgAdminApi.createInvitation>>;
+      try {
+        result = await orgAdminApi.createInvitation(body);
+      } catch (e) {
+        if (!access.isAlive() || request !== resultVersion) return;
+        if (isApiError(e) && e.status === 503) {
+          error.value = `${t('invitationSourceUnavailable')} ${orgError(e, t)}`;
+          return;
+        }
+        throw e;
+      }
+      if (!access.isAlive() || request !== resultVersion) return;
+      // Keep the exact API URL in component memory; do not derive it from the admin origin.
+      let valid =
+        typeof result?.code === 'string' &&
+        result.code.length > 0 &&
+        typeof result?.url === 'string';
+      try {
+        const parsed = new URL(result.url);
+        valid =
+          valid &&
+          (parsed.protocol === 'http:' || parsed.protocol === 'https:');
+      } catch {
+        valid = false;
+      }
+      if (valid) {
+        code.value = result.code;
+        invitationUrl.value = result.url;
+        notice.value = t('invitationCreated');
+      } else error.value = t('invitationResultInvalid');
       copyNotice.value = '';
       creating.value = false;
       email.value = '';
       displayName.value = '';
-      notice.value = t('invitationCreated');
       list.clear();
       if (!(await list.load()) && access.isAlive())
         error.value = t('refreshFailedAfterWrite');
@@ -129,15 +173,16 @@ function revoke(invitation: Invitation) {
       error.value = t('refreshFailedAfterWrite');
   });
 }
-async function copyCode() {
-  const value = code.value;
+async function copyResult(kind: 'code' | 'url') {
+  const value = kind === 'code' ? code.value : invitationUrl.value;
   if (!value) return;
+  const request = resultVersion;
   try {
     await globalThis.navigator.clipboard.writeText(value);
-    if (access.isAlive() && code.value === value)
+    if (access.isAlive() && request === resultVersion)
       copyNotice.value = t('copied');
   } catch {
-    if (access.isAlive() && code.value === value)
+    if (access.isAlive() && request === resultVersion)
       copyNotice.value = t('copyFailed');
   }
 }
@@ -167,7 +212,7 @@ async function copyCode() {
     <p v-if="loading" role="status">{{ t('loading') }}</p>
     <p v-if="listError" role="alert" class="error">
       {{ listError }}
-      <ElButton :disabled="locked || loading" @click="refresh">{{
+      <ElButton :disabled="locked || loading" @click="retryList">{{
         t('retry')
       }}</ElButton>
     </p>
@@ -256,12 +301,29 @@ async function copyCode() {
       @close="clearCode"
     >
       <p>{{ t('codeWarning') }}</p>
+      <p v-if="loading" role="status">{{ t('loading') }}</p>
+      <p v-if="listError" class="error" role="alert">
+        {{ t('refreshFailedAfterWrite') }} {{ listError }}
+      </p>
+      <p>{{ t('invitationLink') }}</p>
+      <pre class="invitation-code" data-testid="invitation-url">{{
+        invitationUrl
+      }}</pre>
+      <p>{{ t('oneTimeCode') }}</p>
       <pre class="invitation-code" data-testid="invitation-code">{{
         code
       }}</pre>
       <p v-if="copyNotice" role="status">{{ copyNotice }}</p>
       <template #footer
-        ><ElButton @click="copyCode">{{ t('copyCode') }}</ElButton
+        ><ElButton
+          v-if="listError"
+          :disabled="locked || loading"
+          @click="retryList"
+          >{{ t('retry') }}</ElButton
+        ><ElButton @click="copyResult('url')">{{
+          t('copyInvitationLink')
+        }}</ElButton
+        ><ElButton @click="copyResult('code')">{{ t('copyCode') }}</ElButton
         ><ElButton @click="clearCode">{{ t('clearCode') }}</ElButton></template
       >
     </ElDialog>
