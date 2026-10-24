@@ -28,15 +28,17 @@
 
 路由先核 realm→是否外域，再 node→DSH，最后插件 local→会话。首发只准本 realm 或省略形式，其他 realm 返回 network.realm_not_supported，不查外部目录、不建外连；未来联邦须独立授权/协议，完整三段并不代表已支持。realm 由受信域注册机构从 1 顺序持久分配、永不复用，恢复/耗尽规则与 node 相同；无域注册依据不能由客户端自定。`type=group,node=0,local=group_id≥1` 为总部保留组空间，组也在本 realm；普通组如 `aur1:2.0.17`，隐式组织广播固定 `aur1:2.0.1`，普通 group_id 从 2 顺序分配且不复用。node=0/local=0 无效，group 不能作 from/reply_to，不能用修改 type 将系统或会话变成组。
 
-**顺序分配与崩溃**：总部 node 计数器、插件 local 计数器均从 1 单调递增，先提交可恢复的事务日志/分配高水位，再把 ID 暴露给消息、宿主创建或外部调用。并发分配由唯一约束和原子计数保证；已预留但创建失败的 ID 也烧掉，不因回滚业务操作而回收。进程断电可留跳号但不能回退、重发旧号；到 uint64 最大值后拒绝新分配，不回绕。总部恢复备份须有独立耐久高水位证明，不能从旧备份继续发可能已用过的 node。插件恢复计数日志不完整或看似完整却低于总部见证，均停止旧身份发件/分配；不能扫描“当前还活着的会话”推算下一个 local，也不能仅把计数器调大后继续旧身份。恢复/克隆检查见下节。真实 DSH 的 local=0 始终是系统入口，不进入普通会话分配池；node=0 的组空间由总部独立管理。
+**顺序分配与崩溃**：总部 node 计数器、插件 local 计数器均从 1 单调递增，先提交可恢复的事务日志/分配高水位，再把 ID 暴露给消息、宿主创建或外部调用。并发分配由唯一约束和原子计数保证；已预留但创建失败的 ID 也烧掉，不因回滚业务操作而回收。进程断电可留跳号但不能回退、重发旧号；到 uint64 最大值后拒绝新分配，不回绕。总部恢复备份须有独立耐久高水位证明，不能从旧备份继续发可能已用过的 node。插件恢复计数日志不完整，或排除原登记回包丢失后仍低于总部见证，均停止旧身份发件/分配；不能扫描“当前还活着的会话”推算下一个 local，也不能仅把计数器调大后继续旧身份。恢复/克隆检查见下节。真实 DSH 的 local=0 始终是系统入口，不进入普通会话分配池；node=0 的组空间由总部独立管理。
 
 **local 的总部外部见证（R12）**：只依靠插件完整日志不能识别自洽的旧快照。本轮采用逐新 local 的 LOCAL_REGISTER，而非允许离线反复消费的预留区间。总部持久保存 (tenant,realm,node) 的 local_high_water、registration_revision，以及 (node,local) 唯一且不可变的 registration_id、allocation_op_id、allocation_fingerprint、获准 epoch/boot_id、状态。fingerprint 由插件在受保护事务中绑定随机分配 nonce 与原 native session 映射摘要；只传不透明摘要，不上传会话树或内容。旧登记/tombstone 随 node 身份保留，不能按普通 30 天消息去重窗口删除后重新登记旧号。
 
-插件先在本地单写者锁内持久预留新 local、allocation_op_id/nonce/映射，再在线 LOCAL_REGISTER；新登记必须 candidate_local > 总部 local_high_water，且 expected_registration_revision、当前 epoch/授权及节点健康状态匹配。总部短事务 CAS 推进高水位并保存唯一登记，成功后插件持久登记凭据，才可建立 source_binding、CONTACT_ASSIGN、公布地址或使用该地址作为组成员/来源。首次见到未登记 from/assigned_address 直接拒绝，不能让 send 隐式补登记。正常并发由插件按 local 顺序串行登记，不能让后号先登记后再把较小号当新号补入；已烧掉的间隙不回填，失败创建也不回收。网络不可用可以预备本地未联网会话，但不能给它公开可用网络地址。
+插件在 node 级持久单队列内完成“预留即登记”：只有队首可持久预留 local、allocation_op_id/nonce/映射并在线 LOCAL_REGISTER；前号的总部结果与本地登记凭据尚未确定、耐久落盘前，后续 contact 只排队，不能预留/发送更大的 local。队列属于 node，不是各 contact 分别持锁；重启/epoch 切换先恢复队首。新登记必须 candidate_local > 总部 local_high_water，且 expected_registration_revision、当前 epoch/授权及节点健康状态匹配。总部短事务 CAS 推进高水位并保存唯一登记，插件持久登记凭据后才出队、允许下一个号；之后才可建立 source_binding、CONTACT_ASSIGN、公布地址或使用该地址作为组成员/来源。首次见到未登记 from/assigned_address 直接拒绝，不能让 send 隐式补登记。网络不可用可以预备本地未联网会话，但不提前为排队 contact 分配网络 local。
 
-同 allocation_op_id、local、fingerprint 的登记重试只查/返回既有记录，不是再次分配/创建许可；不同 op/fingerprint 使用已登记 local，或新登记 local≤高水位，返回 local_allocation_conflict 并持久设置 node_identity_conflict，暂停该 node 新分配/发件/交接/执行，只开放受权诊断与既有证据对账。sys local=0 不走普通登记；所有非零网络 local 都须见证。已有安装迁移若无法证明完整历史高水位与映射，不从“当前还活着的最大 local”补历史，应新注册 node。source_binding 永远绑定原 registration_id/fingerprint，不能用新宿主映射重新绑定旧网络身份。CONTACT_ASSIGN 须引用已登记 local，并另满足原唯一创建许可；跨 contact 也不能共用一个新会话 local。可把首次登记与 CONTACT_ASSIGN 放同事务，但不跳过高水位/指纹核验。
+例如 contact A 预留 7 后响应丢失，B 等待且不能先登记 8；插件用 A 原操作/指纹查询，已提交则补存原登记，未提交则在当前 epoch 重试同一候选，核对成功后 B 才可预留 8。超时/epoch 变化不是身份冲突，也不能跳过未知队首。A 已取消/过期仍须先完成原登记对账并持久标记该号弃用，再放行 B；不得为 A 换号绕过未知结果。已登记但创建失败/未创建的 ID 烧掉，不回填。该顺序只串行登记，不串行所有会话创建或消息处理。
 
-**回滚/克隆检测**：READY 核本地 local 高水位/登记 revision、持久 receipt checkpoint 与总部见证。客户端游标低于平台前缀、低于总部已见客户端 checkpoint，或平台有已接受项而本地缺证据，都先进入 recovery_conflict（回滚疑点），不能只返回最新 cursor 就恢复发送。先封住新业务，再按 §8 区分有完整原始耐久证据的 ACK 回包丢失和实际旧快照。自洽旧快照若缺已见登记/receipt、指纹错配，确认 identity_rollback：旧 node 隔离，不准通过下载平台状态/抬高计数器洗掉证据，按重装注册新 node，旧关系/准入不自动继承。clone A/B 从相同高水位同时登记同 local 时，一个 CAS 可胜出；另一个不同 op/fingerprint 冲突，即使随后换 epoch 也不能覆盖，停用冲突身份待诊断。完整克隆重放同 op 只得到同记录，不能得到第二次 CONTACT_ASSIGN/执行许可；不能据此证明两个进程共享本地磁盘。
+同 allocation_op_id、local、fingerprint 的登记重试首先查/返回既有记录，再考虑新登记高水位约束；即使 expected_revision 已旧也不能把已提交重试误判冲突。它不是再次分配/创建许可；不同 op/fingerprint 使用已登记 local，或新登记 local≤高水位，返回 local_allocation_conflict 并持久设置 node_identity_conflict，暂停该 node 新分配/发件/交接/执行，只开放受权诊断与既有证据对账。sys local=0 不走普通登记；所有非零网络 local 都须见证。已有安装迁移若无法证明完整历史高水位与映射，不从“当前还活着的最大 local”补历史，应新注册 node。source_binding 永远绑定原 registration_id/fingerprint，不能用新宿主映射重新绑定旧网络身份。CONTACT_ASSIGN 须引用已登记 local，并另满足原唯一创建许可；跨 contact 也不能共用一个新会话 local。可把首次登记与 CONTACT_ASSIGN 放同事务，但不跳过高水位/指纹核验。
+
+**回滚/克隆检测**：READY 核本地 local 高水位/登记 revision、持久 receipt checkpoint 与总部见证。resume_cursor 是客户端已知的平台确认前缀，单独低于平台前缀并非回滚证据；总部已见客户端耐久 checkpoint 则证明插件曾持久保存相应账本，二者不得混用。证据一致的回执回包丢失、平台离线到期/撤销及原登记响应丢失在 READY 内自动对账，不设 recovery_conflict、不要求人工。较低登记 revision 若由队首原 allocation_op_id/指纹的未决登记完整解释，可自动补存同一登记结果，不能补造原分配证据。只有低于总部已见耐久 checkpoint、缺平台 HostAccepted 对应原本地证据/合法清理摘要、或排除原操作未决后仍登记回退/指纹错配，才进入 recovery_conflict 暂停新业务并诊断，详见 §8。自洽旧快照若缺已见登记/receipt，确认 identity_rollback：旧 node 隔离，不准通过下载平台状态/抬高计数器洗掉证据，按重装注册新 node，旧关系/准入不自动继承。clone A/B 从相同高水位同时登记同 local 时，一个 CAS 可胜出；另一个不同 op/fingerprint 冲突，即使随后换 epoch 也不能覆盖，停用冲突身份待诊断。完整克隆重放同 op 只得到同记录，不能得到第二次 CONTACT_ASSIGN/执行许可；不能据此证明两个进程共享本地磁盘。
 
 总部高水位与登记本身也依赖权威 PG 的耐久/单写者恢复。若恢复备份可能丢见证、或客户端持有更高的有效总部登记凭据，必须停用受影响身份并核外部耐久证据，不从较低备份继续分配。此机制防意外回滚/克隆撞号，不声称能从已被攻陷插件的伪证据中恢复真实会话身份；同机工具隔离另见 §7。
 
@@ -83,7 +85,7 @@ human_dialogue 的默认授权按 scope 显式设置，不把原“允许创建 
 
 scope=conversation 的 CONTACT_DECIDE 允许建立对话提交后，才进入 awaiting_session 并开放正常正文 FETCH/本地系统收件；本地耐久后可回 host_accepted 且必须带 accepted_by=system，仍非会话/模型接受。session_accepted 与 execution_completed 另报，四级 ACK 本义不变。授权前拒绝/到期生成无正文终态供游标跨过，不造 host_accepted；分页仍可越过未决位置服务其他 local，沿 §8 的空洞与节点配额约束。
 
-本地用户允许建立对话（或本地该层默认档位允许）且总部 CONTACT_DECIDE 已提交后，插件以 (tenant,node,contact_id) 单写者锁持久预留唯一非零 local、host_session_id、cwd/preset 与创建状态，核本地建立对话/创建 grant；此阶段不要求或隐含自动执行授权。先向总部提交私有 CONTACT_ASSIGN CAS，固定该 contact 的 assigned_address 与 creation_attempt_id，只允许当前目标 node/epoch、contact_allowed 及有效决定版本、当前组织策略、未撤销关系和原期限；总部只存不透明分配结果，不解释宿主结构，也不向目录或发起方提前公开。重复同内容返回既有状态，改 local 冲突。该非零 local 必须先获 §1 总部见证，未登记/冲突/回滚状态不得 CONTACT_ASSIGN。创建许可沿 §5 的一次准入原则，记录获准 epoch/boot_id；仅第一次成功响应且本地 creation_started 标记已持久化的原进程可调用一次 create。回包丢失/崩溃/意外凭据克隆接管的故障后只查原映射、原生 ID 和原持久存储，不能凭查询结果重新获得创建许可。确认原会话存在才继续后续阶段，无法证明则 outcome_unknown 并停止自动创建，允许零次创建，不换随机 ID；不能用单台宿主的幂等能力推断两个独立克隆共享幂等。READY 接管与分配 CAS 串行，防两克隆给同 contact 各建一次；分配永不因连接续期清零。
+本地用户允许建立对话（或本地该层默认档位允许）且总部 CONTACT_DECIDE 已提交后，插件以 (tenant,node,contact_id) 单写者锁固定分配意图、host_session_id、cwd/preset 与创建状态，再交 §1 的 node 级队列预留并登记唯一非零 local，核本地建立对话/创建 grant；此阶段不要求或隐含自动执行授权。先向总部提交私有 CONTACT_ASSIGN CAS，固定该 contact 的 assigned_address 与 creation_attempt_id，只允许当前目标 node/epoch、contact_allowed 及有效决定版本、当前组织策略、未撤销关系和原期限；总部只存不透明分配结果，不解释宿主结构，也不向目录或发起方提前公开。重复同内容返回既有状态，改 local 冲突。该非零 local 必须先获 §1 总部见证，未登记/冲突/回滚状态不得 CONTACT_ASSIGN。创建许可沿 §5 的一次准入原则，记录获准 epoch/boot_id；仅第一次成功响应且本地 creation_started 标记已持久化的原进程可调用一次 create。回包丢失/崩溃/意外凭据克隆接管的故障后只查原映射、原生 ID 和原持久存储，不能凭查询结果重新获得创建许可。确认原会话存在才继续后续阶段，无法证明则 outcome_unknown 并停止自动创建，允许零次创建，不换随机 ID；不能用单台宿主的幂等能力推断两个独立克隆共享幂等。READY 接管与分配 CAS 串行，防两克隆给同 contact 各建一次；分配永不因连接续期清零。
 
 native create 并持久确认后，在本地关联原首联 delivery→assigned_address；原消息仅能面向此新会话，绝不自动投给已有会话。允许创建只得到可通信的空会话和地址；没有第二层自动执行授权时不得将正文送入会自动调度模型的 queue/prompt，也不能以原生 create 自带 prompt 绕过。若宿主不支持无模型创建，则停在已允许待适配/host_incompatible，不擅自启动模型。真正 queue/prompt 前须另获本地模型/工具对应授权，再按 §5 在线 EXECUTION_ADMIT，并核尚有效的本地 grant。首联即使已有 system 收件回执，仍可凭单独的有效 contact 执行状态申请唯一准入；system receipt 只释放传输项，不删除 contact 正文、分配/执行状态或创建预算。待处理 contact 的到期和取消继续生效。首条回复用原新会话 from/reply_to、to=原首联 from、in_reply_to=contact_id；collab 只允许该 assigned_address 经原目标 node 认证，在一次回复事务中建立该对话关系并提交回复，不能由任意发送者自报地址建立关系。只有第一层允许且本地已预留对应地址给出关系时，插件可在新会话已持久创建后发送 body 为 conversation_opened / execution_waiting、provenance=host 的确定性 reply，用该已绑定会话 from/reply_to 交换地址；不是模型生成内容、不计模型完成，不能夹带工具动作。模型实际答复仍需第二层授权。后续添加参与者须受邀地址经其 node 的有权对话确认，不接受仅列 ID 的 add-member。
 
@@ -132,15 +134,19 @@ CONTACT_DECIDE、组织撤销、到期、CONTACT_ASSIGN、EXECUTION_ADMIT 在总
 
 **源侧跨目标总量与喷洒检测**：agent 首联须单独 first_contact 能力，默认无此能力，普通 send/组成员身份不含它；human 也须通过本人首联政策和用户意图校验。conversation、human_dialogue、group_join 共用以下源侧总预算，所有目标合计而非每目标重置，任一维度超限就拒绝新提交：
 
-| 源维度 | 每分钟新请求 / 突发 | 未决总数 | 滚动一小时不同目标 node |
-|---|---|---|---|
-| 精确 agent 地址（human 按源 sys） | 5 / 3 | 10 | 20 |
-| 源 node（所有 local 合计） | 10 / 5 | 30 | 50 |
-| 源 IAM 用户（所有 node/local 合计） | 20 / 10 | 60 | 100 |
+| 源维度 | 每分钟新请求 / 突发 | 未决总数 | 滚动一小时不同目标 node | 滚动 24 小时不同目标 node |
+|---|---|---|---|---|
+| 精确 agent 地址（human 按源 sys） | 5 / 3 | 10 | 20 | 40 |
+| 源 node（所有 local 合计） | 10 / 5 | 30 | 50 | 100 |
+| 源 IAM 用户（所有 node/local 合计） | 20 / 10 | 60 | 100 | 200 |
 
-该表与既有源→目标/目标总量、正文/tenant 配额取最严；不同 local、组 ID、kind 或跨本地/云端 DSH 都不能重置用户预算。目标先补本 realm、取真实 target_node；多个该 node 的 local 算同一个不同 node，但每次新请求仍计速率和未决。所有新幂等键（含无效目标的隐私 submission）在查目标前原子预占源预算，同键重试不重复计；submission 转正式 contact 时只迁移引用，不计两份。未获状态查看权时占位预算按统一请求截止释放，不因不存在/屏蔽提前归还而从配额变化泄露目标状态；获得状态查看权后才按可见终态释放，取消等查询也不能泄露隐藏状态。不能靠不断建组邀请绕过未决总量。
+一小时/24 小时均为滚动窗口，不在整点/零点重置；不同目标集合在请求终结或取消后仍保留到窗口结束，不随未决额度释放。该表与既有源→目标/目标总量、正文/tenant 配额取最严；不同 local、组 ID、kind 或跨本地/云端 DSH 都不能重置用户预算。目标先补本 realm、取真实 target_node；多个该 node 的 local 算同一个不同 node，但每次新请求仍计速率和未决。所有新幂等键（含无效目标的隐私 submission）在查目标前原子预占源预算，同键重试不重复计；submission 转正式 contact 时只迁移引用，不计两份。未获状态查看权时占位预算按统一请求截止释放，不因不存在/屏蔽提前归还而从配额变化泄露目标状态；获得状态查看权后才按可见终态释放，取消等查询也不能泄露隐藏状态。不能靠不断建组邀请绕过未决总量。
 
-任一源维度超限返回源侧 network.quota_exceeded/retry_after，触发该来源首联能力至少 10 分钟冷却并合并告警；源侧限制可以明确显示，不泄露目标结果。窗口未恢复或未决仍满则继续拒绝，不排无界队列。总部另按真实 IAM 用户/node 聚合有效 sys 与无效目标：建议 10 分钟内触达 ≥20 个不同 sys 且同窗口获准建立/入组 ≤1 次，触发喷洒告警并按组织策略冻结该来源首联能力 1 小时；24 小时重复触发 ≥3 次可冻结该发送方全部新发件，须管理员审查解除。冻结包括尚未交接的相关联系/邀请，给目标合并提示，不对每条再弹窗。已建立对话的接收/历史事实不倒退。阈值可调且须误报评估，不能靠单个恶意目标报告直接全组织封禁；本信号与无效 local 扫描并列，合法 sys 也计入，不要求先命中不存在地址。
+任一源维度超限返回源侧 network.quota_exceeded/retry_after，触发该来源首联能力至少 10 分钟冷却并合并告警；窗口未恢复或未决仍满则继续拒绝，不排无界队列。源侧限制可以明确显示，但不暴露目标结局或获准率。总部对合法 sys 与无效目标同计，按真实 IAM 用户/node 聚合，采用以下长窗口规则替换“10 分钟内获准≤1”：
+
+- **总量保护**：滚动 24 小时源 node 触达 ≥80、源用户触达 ≥160 个不同目标 node 即告警并冻结该来源 first_contact 能力 1 小时，独立于是否获准。阈值分别低于每日硬上限 100/200，更低于 24×小时上限；均匀发送也能达到，不等无效 local 扫描或真人反馈。处理达到阈值的提交时原子设置冻结；期满后若当前滚动量仍在阈值上，继续阻止新首联，待量降到阈值以下才恢复，不能每小时补发一批。合法集中邀请也受此保护，需要更大规模应另经组织审查调额，不能用自动批准绕过。
+- **成熟请求结局**：另评估提交年龄在 24–48 小时的请求队列，等完整审批 TTL（最长 24 小时）和平台终结任务结束后，按源 node/用户统计最终建立对话或入组的获准率、拒绝率。至少覆盖 20 个不同目标，且获准率≤10% 或拒绝率≥50% 时告警并冻结首联 1 小时。未决或到期任务延迟项不算拒绝/失败，等待终结后再评估；过期是已终结但未获准，不能因数小时未审批就判骚扰。同目标取该队列内首个请求的最终第一层结局，每目标一票，同键重试不重复；第二层执行许可不影响获准率。这个窗口允许数小时后真人批准，结局和分母仅供总部风控，不向无状态查看权的源公开。
+- **升级与误报控制**：同一滚动窗口/同一批请求的定时重算只算一次事件，不反复累计惩罚；解除后有新的提交导致新的触发，才算新事件。滚动 24 小时独立触发 ≥3 次可按组织策略冻结该发送方全部新发件，须管理员审查解除。冻结包含尚未交接的相关联系/邀请，给目标合并提示，不逐条再弹窗；已建立对话的接收/历史事实不倒退。阈值为待测默认值，须评估集中邀请误报，不因单个恶意目标报告封禁全组织。此信号与无效 local 扫描并列，硬限额与总量保护在成熟结局尚不可用时仍生效。
 
 **组邀请是受控首联**：不另开免授权通知通道。插件组管理入口生成 kind=first_contact、contact_scope=group_join、message_class=unicast、intent=request，body 仅含有权 group_address、invitation_id、有限说明与有效期；来源仍按 human/agent 盖章且须 first_contact 与该组当前邀请管理权，服务器签名。普通 send 的任意 flags/ext 不能造邀请。目标只能是 DSH sys，或目标曾通过有效直接对话给过邀请者的精确 local；总部与插件都先核该关系。仅同组或猜到 local 不构成直接关系，也不因为发送邀请而提前登记成员。
 
@@ -727,11 +733,15 @@ outcome_unknown 是执行结果未知，**单凭本地报告不能越过游标**
 
 **解析前的崩溃护栏**：任何原始下行页进入完整 JSON/JCS/验签/正文解析前，由隔离的接收监督器将本地 request_id、有界原始页字节及其摘要、处理中标记耐久写入 receive_guard，并在无凭据、受内存/CPU 限额的解析 worker 中处理；每帧 ≤64KiB、护栏总量 ≤1MiB/256 项。此时不信帧自报 delivery/recipient/source，不据此改业务状态。监督器不能与解析 worker 同时被一个正文异常杀死，N1 须注入验证；护栏写失败先停新解析。worker 异常退出/主进程重启发现未完成标记时，暂停该原始响应与原 FETCH 恢复位置的自动重处理，不再无限重新取页或重启绕过。原字节必须可从护栏恢复供诊断，不能只存崩溃后无法还原的摘要；解析成功且处理责任已耐久移交 attempt/preview ledger，或平台确认故障处理后，才可清理对应护栏，不能删除未解决标记腾空间。
 
-监督器用当前已认证 node 的受限 PROCESSING_FAILURE 诊断操作提交原始响应证据（私有 HTTPS 流式原字节，硬限 64KiB，不把整页再 base64 嵌套进 64KiB WSS 消息；同摘要幂等、限流）。平台独立验自己的服务器签名、目标/请求绑定和权威内容：核原签发时的有效性及历史密钥证据（不是用过期封装授新交付），确认合法的崩溃页后，给该目标 node 的相关 pending recipients 持久记一次 parse_failure 并转 Quarantined；可按已确认的具体项缩小范围，不能定位时整页受影响项都转 Quarantined 并等待有权修复，其他页/线程继续。无法证明合法来源、伪造或坏签只记受限传输异常，绝不给声称的 recipient 造终态/计次，也不处罚被冒充源。平台不可用时原响应保持本地暂停且不重处理，诊断恢复后再继续，不靠丢护栏自愈。隔离页仍受原过期/隔离截止、可恢复正文与有权修复约束，不冒已接受。
+监督器用当前已认证 node 的受限 PROCESSING_FAILURE 诊断操作提交原始响应证据（私有 HTTPS 流式原字节，硬限 64KiB，不把整页再 base64 嵌套进 64KiB WSS 消息；同摘要幂等、限流）。平台独立核原签发时的服务器签名、历史密钥、目标/请求绑定和权威内容，不用过期封装授新交付。确认合法崩溃页但不能定位时，仅暂停原页重放，**不把整页 recipients 转 Quarantined**。平台按原页摘要持久登记有界拆分诊断进度，将原页拆为逐邮箱项的单项 FETCH_RESULT，经原 WSS 通道重新签发；每项仍受 receive_guard 保护，核当前 epoch、授权、期限、状态，保持原 message/delivery/recipient ID 与正文摘要。最多原页 128 项、node 内 single-flight，每项至多一次自动拆分尝试，重启/换 epoch 不重置进度；已经接受/终态的项仅对账，不重新交付。旧原页不再作为重试单元，其他页/线程可继续。
+
+只有某单项在拆分后可复现崩溃，才给该邮箱项尚待处理的 recipients 记 parse_failure 并转 Quarantined；原多项页故障不向所有 recipient 分摊失败次数。成功的单项按正常 ATTEMPT_BEGIN/接受流程处理，不带整页隔离标记；若只是页封装/组合触发、单项都正常，则结束本次诊断并保持该 node 单项取页直至修复验证。若原来就是单项崩溃，已有精确定位，可直接隔离而不再重放；若已能定位到更小 recipient 范围，只隔离该范围。拆分不能清零既有 attempt_count/执行准入，不能获得第二次宿主调用许可。监督器若发现连无正文控制响应或多个已知正常单项也失败，按 adapter 故障停止后续诊断并告警修复，不批量把剩余消息认作毒消息；确实不能定位的残余项保持待诊断且受原 TTL，不用“整页隔离”掩盖未定位故障。
+
+无法证明合法来源、伪造或坏签只记受限传输异常，绝不给声称的 recipient 造终态/计次，也不处罚被冒充源。平台不可用时原响应保持本地暂停且不重处理，诊断恢复后再继续，不靠丢护栏自愈。已确认的诊断进度接管原页后可清原 receive_guard，未完成单项仍须各自耐久护栏；空间不足按原预算背压。隔离单项受原过期/隔离截止、可恢复正文与有权修复约束，不冒已接受。
 
 **处理尝试的持久计数**：受信外层验签完成后、语义正文解析/插件入箱/宿主 deliver 之前，所有需处理的 recipient（含 inbox_only、sys 信息和审批预览解析）先写本地 attempt_id，再在线 ATTEMPT_BEGIN。contact_pending 只允许 purpose=preview 的尝试，平台仅给审批 UI 已获权的限长预览，不借 ATTEMPT_BEGIN 取得完整正文/执行权。等待用户批准本身不处理正文、不扣次数；每次重新进入可能崩溃的处理步骤才计，成功展示过的同版本提示不重复解析/计数。collab 在短事务中核当前 epoch/授权/期限，按 recipient 原子增加 attempt_count 并登记本次 attempt_id；同 ID 重发不重复计数，FETCH 本身不计数。平台计数是权威，本地仅镜像尝试次数和 entered 标记。只有本次有效成功响应且本地 entered 已持久化，才可进入一次解析/入箱/deliver 处理；重复响应、重启或复制 ledger 不允许重新进入同一尝试。响应丢失可查状态，但查询结果不产生新的调用许可。
 
-崩溃后未完成尝试不退款：无执行准入记录时，当前连接可用新 attempt_id 申请下一次，旧尝试同时失效；已有执行准入则先按下述规则对账，不再自动调用 prompt。最多自动 5 次，包含普通执行、inbox_only 与插件语义解析的累计处理；第 5 次失败/重启发现未完成，或第 6 次申请时，由平台持久转 Quarantined。已验证页在完整 JCS/验签 worker 阶段崩溃可由前述护栏更早隔离，不等待 5 次。首联从系统处理到会话处理共用该 recipient 的累计次数；已 system-accepted 时转 contact 的隔离/关闭状态，不倒退传输，总部等待授权、已解析提示的纯展示和默认策略等待均不消耗处理尝试；首次/重试的正文语义解析仍受统一计数，不能以“审批”名义跳过。CONTACT_ASSIGN 额外记录一次不可重领的创建许可，attempt 增加不能越过已发出的创建/执行许可。明确毒消息可提前隔离，经 RECEIPT(status=quarantined) 上报；即使插件崩溃到无法上报，平台仍能依据计数和下一次请求隔离。无人重连时由原 expires_at 收尾。管理员修复后若批准额外尝试，必须显式审计额度，重启/换 epoch/反复取页均不得清零。
+崩溃后未完成尝试不退款：无执行准入记录时，当前连接可用新 attempt_id 申请下一次，旧尝试同时失效；已有执行准入则先按下述规则对账，不再自动调用 prompt。最多自动 5 次，包含普通执行、inbox_only 与插件语义解析的累计处理；第 5 次失败/重启发现未完成，或第 6 次申请时，由平台持久转 Quarantined。已验证页在完整 JCS/验签 worker 阶段崩溃，可由前述拆分护栏定位后更早隔离单项，不等待 5 次，也不把未定位整页隔离。首联从系统处理到会话处理共用该 recipient 的累计次数；已 system-accepted 时转 contact 的隔离/关闭状态，不倒退传输，总部等待授权、已解析提示的纯展示和默认策略等待均不消耗处理尝试；首次/重试的正文语义解析仍受统一计数，不能以“审批”名义跳过。CONTACT_ASSIGN 额外记录一次不可重领的创建许可，attempt 增加不能越过已发出的创建/执行许可。明确毒消息可提前隔离，经 RECEIPT(status=quarantined) 上报；即使插件崩溃到无法上报，平台仍能依据计数和下一次请求隔离。无人重连时由原 expires_at 收尾。管理员修复后若批准额外尝试，必须显式审计额度，重启/换 epoch/反复取页均不得清零。
 
 **执行前的在线准入**：组播/广播、所有 sys inbox、group_join/human_dialogue 及 inbox_only 请求回应在平台与插件都禁止本接口；只有默认 conversation 首联可对已固化的新 agent 地址走后续执行准入。普通控制必须是有专权单播。其他允许执行的单播，宿主在本地 session 锁内完成历史去重、即将 queue/prompt 前，必须调用 EXECUTION_ADMIT，即 admit(recipient_id, target_address, connection_epoch, host_request_id, attempt_id, boot_id)。插件在同一会话锁内先核 §1.3 可信来源、本地单播给出关系、会话仍开放及接收模式，再核当前个人两层授权（包括已有对话的新策略）、工具范围、grant/lineage/映射与策略版本，收到准入响应后、调用宿主前再次检查；collab 核 recipient 固化的完整 to 与请求地址一致、当前 route epoch、IAM/组织互联/node 策略及单播对话关系、仅首联所需的 contact 决定版本及本次执行允许状态、有效尝试、期限及取消版本（首联还核 CONTACT_ASSIGN 固化的执行地址；target 仍为 sys，assigned_address 单列，不能任意替换），事务 CAS 把该 recipient 从未准入变为 admitted，并持久记录 admission_id。READY 接管、取消与 admit 按同一 node/执行记录锁序串行化；只有当前世代第一次成功准入的调用可继续。断线、超时、IAM 故障或旧世代均停在 RECEIVED，不能仅凭旧页面或本地 ledger 执行。
 
@@ -794,7 +804,13 @@ N2 再核专用子 agent delivery、parent address、父不在线和归档。先
 
 已确认连续后缀在 PG 合并成精确区间；单个 101 空洞后，其他线程连续接受的 102…N 只占一个覆盖区间，不要求把每个历史 receipt 永远当稀疏项保存。区间只能覆盖平台已有接受/终态证明的位置，不能跨未决项；原始回执和执行审计仍按留存期保存，区间本身必须留到前缀推进。无法合并的多空洞按上述配额限入，预留回执/终态空间，不能通过丢证据释放配额。
 
-客户端游标回退先按 §1 的 recovery_conflict 暂停新分配/发件/交接/执行，不当成普通对账。只有本地仍保原已接受记录/待提交 receipt、宿主持久证据与 local 登记完全一致，能够证明只是 RECEIPT_COMMITTED 回包丢失时，才通过受权恢复事务解除疑点并推进 cursor；不得从总部补造缺失的本地证据。若前缀仅因平台到期/撤销了未曾本地接受的项而前移，可凭签名终态与一致的原本地 checkpoint 证明是服务端正常收尾，解除本次疑点；不能把平台 HostAccepted 当这类终态下载替代本地 receipt。若缺平台已知 receipt、local 登记或出现更低已持久 checkpoint，则确认 identity_rollback，隔离旧 node、按重装新注册。客户端超前也先核是否只是未提交的本地 receipt；无法解释即冲突，不能仅纠正数字后恢复新业务，PG 保留全部未确认项。不能因客户端上报更大游标而删除数据。越出保留窗口返回 resume_unavailable 与可见 gap 范围，重新核对持久证据，绝不当作全收。分页重叠、响应丢失与乱序只产生重复页面；delivery_id/message_digest 去重正文、recipient_id/digest 去重交付且不按响应到达顺序推进确认。旧 epoch 页丢弃，其持久 receipt 可由新连接幂等补交。
+**受权恢复事务默认由插件自动执行**：当前已认证 node/epoch 在 READY 内按 §1 对比本地登记、总部已见耐久 checkpoint、receipt/合法清理摘要和平台前缀；“受权”指核当前 IAM/node 权限，不指必须人工批准。有界证据可随 READY 提交，较多差异沿同一恢复上下文分页（每批≤128 项、编码≤64KiB），正常握手未完成只保持连接未 ready，不持久标记 node 冲突。证据/数据库暂不可用可幂等重试，不以超时判回滚。处理规则如下：
+
+- 本地 cursor 落后但原 receipt/宿主证据或合法清理摘要、登记及 checkpoint 一致，证明 RECEIPT_COMMITTED 回包丢失：幂等核对已提交结果并自动推进本地确认前缀，READY 成功，无人工、无 recovery_conflict，不再 prompt。
+- 离线期间平台对未接受项到期/撤销而前缀前移：核签名终态与一致的本地 checkpoint，自动合并终态；该类终态不能替代平台 HostAccepted 所需的本地证据。原 LOCAL_REGISTER 响应丢失按 §1 原队首操作对账；只补原登记结果，不改指纹或发第二许可。
+- 只有低于总部已见客户端耐久 checkpoint、平台 HostAccepted 而本地缺原证据/合法清理摘要、登记回退不能由完整未决操作解释或指纹错配，才设置 recovery_conflict，暂停新分配/发件/交接/执行并请求有权操作者诊断。仅在取得原安装原始耐久证据、核验其与平台一致后才能审计解除；人工不能豁免缺证据、直接调大 cursor/计数或下载总部状态“修复”身份。确认旧快照/证据不可恢复时记 identity_rollback，隔离旧 node 并按重装注册新 node，旧关系/准入不继承。
+
+客户端游标超前也先自动核待补交的本地 receipt，不因数字更大删 pending；无法解释的矛盾才进入冲突诊断。越出保留窗口返回 resume_unavailable 与可见 gap 范围，重新核对持久证据，绝不当作全收。分页重叠、响应丢失与乱序只产生重复页面；delivery_id/message_digest 去重正文、recipient_id/digest 去重交付且不按响应到达顺序推进确认。旧 epoch 页丢弃，其持久 receipt 可由新连接幂等补交。
 
 node 邮箱顺序只用于同步，业务入队顺序按 thread/逻辑收件人检查。取消走单独受限控制类别，可按 FETCH 的受权类别优先取，不受正文 thread 队头阻塞；它仍占 node 总预算，控制类别的分页位置也不能推进全局确认前缀。单 session 的 prompt 准入继续串行。
 
