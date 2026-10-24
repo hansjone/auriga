@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import TeamPanel from '../src/TeamPanel.ce.vue';
+import { flushPromises, mountPanel, type NativeWrapper } from './native-host';
 import {
   createResourceReader,
   type PanelContext,
@@ -45,13 +44,13 @@ function json(body: unknown, status = 200) {
 function connect(fetch: NonNullable<PanelContext['fetch']>): PanelContext {
   return { mode: 'connect', protocol: 1, locale: 'en', theme: 'light', fetch };
 }
-let wrappers: VueWrapper[] = [];
+let wrappers: NativeWrapper[] = [];
 function render(context?: PanelContext) {
-  const wrapper = mount(TeamPanel, { props: { context } });
+  const wrapper = mountPanel(context);
   wrappers.push(wrapper);
   return wrapper;
 }
-async function click(wrapper: VueWrapper, label: string) {
+async function click(wrapper: NativeWrapper, label: string) {
   const button = wrapper
     .findAll('button')
     .find((item) => item.text().includes(label));

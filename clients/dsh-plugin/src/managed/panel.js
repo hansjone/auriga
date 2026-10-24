@@ -222,6 +222,7 @@ export async function fetchVerifiedManifest(opts) {
  *   mode: 'managed',
  *   auth: { requestRejection(req: object): number | undefined },
  *   getManifest: () => Promise<object>,
+ *   pluginVersion: string,
  *   panelBase?: string,
  * }} o
  */
@@ -248,6 +249,7 @@ export function createAurigaRouteHandler(o) {
         const body = {
           mode: o.mode,
           protocol: PROTOCOL_VERSION,
+          pluginVersion: o.pluginVersion,
           manifest,
           panelBase: o.panelBase ?? '/panel/',
           fetchBase: '/',

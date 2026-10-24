@@ -314,6 +314,7 @@ export async function createManaged(options = {}) {
           },
         },
         getManifest,
+        pluginVersion,
         panelBase: env.AURIGA_PANEL_BASE,
       });
       ctx.effect?.(

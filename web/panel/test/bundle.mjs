@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { Buffer } from 'node:buffer';
 import { JSDOM } from 'jsdom';
 import assert from 'node:assert/strict';
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -27,7 +28,9 @@ dom.window.document.body.append(panel);
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.ok(panel.shadowRoot?.textContent.includes('Team panel'));
 assert.ok(
-  panel.shadowRoot?.querySelector('style')?.textContent.includes('--auriga-bg'),
+  panel.shadowRoot
+    ?.querySelector('style')
+    ?.textContent.includes('--dsw-alias-bg-layer-1'),
 );
 assert.equal(
   panel.shadowRoot?.querySelector('aside')?.getAttribute('data-theme'),
@@ -48,4 +51,30 @@ panel.remove();
 dom.window.close();
 console.log(
   'Built ES module mounts in a blank document with Shadow DOM and theme styles.',
+);
+
+const panelPackage = JSON.parse(
+  await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+);
+assert.equal(
+  Object.keys(panelPackage.dependencies ?? {}).length,
+  0,
+  'native panel has no runtime package dependencies',
+);
+assert.doesNotMatch(
+  source,
+  /\bvue\b|@vue|defineCustomElement|__v_isRef|createApp/,
+  'native bundle must not contain a Vue runtime',
+);
+assert.ok(
+  Buffer.byteLength(source) < 40_000,
+  'native panel must stay below its 40 kB uncompressed budget',
+);
+console.log(
+  JSON.stringify({
+    native: true,
+    bytes: Buffer.byteLength(source),
+    runtimeDependencies: [],
+    noVue: true,
+  }),
 );

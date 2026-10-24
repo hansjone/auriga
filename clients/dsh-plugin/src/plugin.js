@@ -1,9 +1,11 @@
 // @ts-nocheck
 /**
- * Cordis / DSH host entry for managed mode.
- * Standalone and connect hosts should use the library API from index.js instead.
+ * Cordis / DSH host entry: managed runtime or authenticated local UI.
+ * Local pages are unconfigured; identity library sessions are not mounted here.
  */
 import { createManaged } from './modes/managed.js';
+import { selectMode } from './index.js';
+import { createLocalSurfaceHandler } from './local-ui.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -13,10 +15,20 @@ export const inject = ['webServer', 'connection'];
  * @param {import('./generated/managed-config.js').ManagedConfig} [config] Loader row config
  */
 export async function apply(ctx, config) {
-  const mode = process.env.AURIGA_MODE ?? 'standalone';
+  const mode = selectMode();
   if (mode !== 'managed') {
-    ctx.logger?.info?.(
-      `[auriga-dsh] AURIGA_MODE=${mode}; Cordis apply is a no-op (use library API for standalone)`,
+    if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
+      throw new Error(
+        'auriga-dsh: local UI requires native host authentication',
+      );
+    ctx.effect?.(
+      () =>
+        ctx.webServer.register({
+          kind: 'prefix',
+          path: '/auriga',
+          handler: createLocalSurfaceHandler({ mode, auth: ctx.connection }),
+        }),
+      'auriga-dsh: local surfaces',
     );
     return;
   }
