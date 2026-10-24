@@ -96,16 +96,16 @@ collab 拥有通信真相和 RLS，不让 Go 层跨 schema 直读业务表。Bro
 
 | 实现 | 已核事实 | 复用路径、成本与判断 |
 |---|---|---|
-| **NATS Server / JetStream** | Go；当前仓库锁 `nats-server/v2 v2.12.6`、`nats.go v1.49.0`；该Server tag为Apache-2.0。官方JS客户端现统一nats.js v3模块，支持Node/WebSocket。 | **首选**：启用受隔离WSS listener/account，复用服务端与SDK，只写IAM auth callout及应用适配。不fork Broker。已有 PG 保存业务，Core 只通知邮箱变化；既有 JetStream 事件不构成收件依赖，不为每会话建立消费者。 |
-| **Tinode** | Go后端，WS JSON或gRPC protobuf；单网络session可多topic；PG可选；server GPL-3.0，客户端Apache-2.0；上游自称beta质量。 | **第二候选，真正IM套件**：做Auriga auth backend和DSH adapter，复用topic、消息归档与收发状态。难点是现有collab与Tinode消息库选唯一权威、账号模型与logical binding隔离；不能每 agent 一账号/WS；GPLv3 §13 允许与 AGPLv3 结合发行，限制的是未经另获授权的商业双授权，不是开源集成。 |
-| **OpenIMServer** | Go、Apache-2.0、SDK/网关/RPC/群组/会话及回调；官方compose含MongoDB、Redis、etcd、Kafka及对象存储。 | **第三候选，完整IM需求优先时**：SDK映射DSH节点，业务回调接IAM/org、增Host receipt。不是换几个URL就复用当前PG；当前轻量Windows/单机与既有持久核心下新增组件和双数据模型成本较高。上游规模宣传不当本项目压测。 |
-| Mochi MQTT v2 | Go/MIT、MQTT5、TCP/WS、认证/ACL及多种存储hook；README把cluster列入roadmap。 | 标准MQTT备选可嵌/独立跑，单机试验小；不能由支持MQTT推导已有跨节点持久会话HA。会话树与Host ACK仍自建，选它需承担集群路线。 |
-| ejabberd / Prosody | ejabberd Erlang，官方COPYING为GPLv2文本及OpenSSL例外；有stream management/MAM及集群文档。Prosody Lua/MIT。 | 若开放XMPP互通成为核心需求，成熟度有价值；本任务Go优先和现有IAM/PG模型下需额外runtime与账户/归档改造。各实现恢复持久性及集群功能必须按配置核验。 |
-| Matrix Synapse | 当前官方有AGPL-3.0许可证文件；主要非Go homeserver。 | 作为完整房间/联邦协作产品备选，不作为轻量Agent内部总线首发；Go SDK≠Go服务端，也不能拿未核Go实现替代成熟度证明。 |
-| Centrifugo / centrifuge | Go实时多路通道；Centrifugo核心Apache-2.0，部分能力另分产品；官方history/recovery要求epoch/窗口吻合。 | 适合前端实时推送，短期history并非长期可靠邮箱；仍需PG与应用Host ACK。相对已有NATS又多一种协议/组件，当前不优于首选。 |
-| EMQX当前master | LICENSE标明5.9.0及以后为BSL1.1，有生产/托管/嵌入限制及未来Change License。 | 不按旧Apache印象列成无条件可改造开源发行依赖；本任务不采购许可，也不为避限制锁旧版。 |
+| **NATS Server / JetStream** | Go；当前仓库锁 `nats-server/v2 v2.12.6`、`nats.go v1.49.0`；该 Server tag 为 Apache-2.0。官方 JS 客户端现统一 nats.js v3 模块，支持 Node/WebSocket。 | **首选**：启用受隔离 WSS listener/account，复用服务端与 SDK，只写 IAM auth callout 及应用适配。不 fork Broker。已有 PG 保存业务，Core 只通知邮箱变化；既有 JetStream 事件不构成收件依赖，不为每会话建立消费者。 |
+| **Tinode** | Go 后端，WS JSON 或 gRPC protobuf；单网络 session 可多 topic；PG 可选；server GPL-3.0，客户端 Apache-2.0；上游自称 beta 质量。 | **第二候选，真正 IM 套件**：做 Auriga auth backend 和 DSH adapter，复用 topic、消息归档与收发状态。难点是现有 collab 与 Tinode 消息库选唯一权威、账号模型与 logical binding 隔离；不能每 agent 一账号/WS；GPLv3 §13 允许与 AGPLv3 结合发行，限制的是未经另获授权的商业双授权，不是开源集成。 |
+| **OpenIMServer** | Go、Apache-2.0、SDK/网关/RPC/群组/会话及回调；官方 compose 含 MongoDB、Redis、etcd、Kafka 及对象存储。 | **第三候选，完整 IM 需求优先时**：SDK 映射 DSH 节点，业务回调接 IAM/org、增 Host receipt。不是换几个 URL 就复用当前 PG；当前轻量 Windows/单机与既有持久核心下新增组件和双数据模型成本较高。上游规模宣传不当本项目压测。 |
+| Mochi MQTT v2 | Go/MIT、MQTT5、TCP/WS、认证/ACL 及多种存储 hook；README 把 cluster 列入 roadmap。 | 标准 MQTT 备选可嵌/独立跑，单机试验小；不能由支持 MQTT 推导已有跨节点持久会话 HA。会话树与 Host ACK 仍自建，选它需承担集群路线。 |
+| ejabberd / Prosody | ejabberd Erlang，官方 COPYING 为 GPLv2 文本及 OpenSSL 例外；有 stream management/MAM 及集群文档。Prosody Lua/MIT。 | 若开放 XMPP 互通成为核心需求，成熟度有价值；本任务 Go 优先和现有 IAM/PG 模型下需额外 runtime 与账户/归档改造。各实现恢复持久性及集群功能必须按配置核验。 |
+| Matrix Synapse | 当前官方有 AGPL-3.0 许可证文件；主要非 Go homeserver。 | 作为完整房间/联邦协作产品备选，不作为轻量 Agent 内部总线首发；Go SDK≠Go 服务端，也不能拿未核 Go 实现替代成熟度证明。 |
+| Centrifugo / centrifuge | Go 实时多路通道；Centrifugo 核心 Apache-2.0，部分能力另分产品；官方 history/recovery 要求 epoch/窗口吻合。 | 适合前端实时推送，短期 history 并非长期可靠邮箱；仍需 PG 与应用 Host ACK。相对已有 NATS 又多一种协议/组件，当前不优于首选。 |
+| EMQX 当前 master | LICENSE 标明 5.9.0 及以后为 BSL1.1，有生产/托管/嵌入限制及未来 Change License。 | 不按旧 Apache 印象列成无条件可改造开源发行依赖；本任务不采购许可，也不为避限制锁旧版。 |
 
-原始证据：[NATS v2.12.6 LICENSE](https://raw.githubusercontent.com/nats-io/nats-server/v2.12.6/LICENSE)、[NATS WSS](https://docs.nats.io/learn/websocket/)、[nats.js](https://github.com/nats-io/nats.js)、[Tinode README](https://github.com/tinode/chat)、[Tinode API](https://github.com/tinode/chat/blob/master/docs/API.md)、[Tinode PG安装](https://github.com/tinode/chat/blob/master/INSTALL.md)、[Tinode LICENSE](https://github.com/tinode/chat/blob/master/LICENSE)、[OpenIM README](https://github.com/openimsdk/open-im-server)、[OpenIM部署清单](https://github.com/openimsdk/open-im-server/blob/main/docker-compose.yml)、[OpenIM LICENSE](https://github.com/openimsdk/open-im-server/blob/main/LICENSE)、[Mochi README](https://github.com/mochi-mqtt/server)、[Mochi LICENSE](https://github.com/mochi-mqtt/server/blob/main/LICENSE.md)、[ejabberd模块](https://docs.ejabberd.im/admin/configuration/modules/)、[ejabberd COPYING](https://github.com/processone/ejabberd/blob/master/COPYING)、[ejabberd集群](https://docs.ejabberd.im/admin/guide/clustering/)、[Prosody许可](https://prosody.im/source/start)、[Synapse许可](https://github.com/element-hq/synapse/blob/develop/LICENSE-AGPL-3.0)、[Centrifugo恢复边界](https://centrifugal.dev/docs/server/history_and_recovery)、[Centrifugo许可](https://github.com/centrifugal/centrifugo/blob/master/LICENSE)、[EMQX当前许可](https://github.com/emqx/emqx/blob/master/LICENSE)。mutable分支在实施spike时必须记录精确commit，不将网页当前状态当永久承诺。
+原始证据：[NATS v2.12.6 LICENSE](https://raw.githubusercontent.com/nats-io/nats-server/v2.12.6/LICENSE)、[NATS WSS](https://docs.nats.io/learn/websocket/)、[nats.js](https://github.com/nats-io/nats.js)、[Tinode README](https://github.com/tinode/chat)、[Tinode API](https://github.com/tinode/chat/blob/master/docs/API.md)、[Tinode PG 安装](https://github.com/tinode/chat/blob/master/INSTALL.md)、[Tinode LICENSE](https://github.com/tinode/chat/blob/master/LICENSE)、[OpenIM README](https://github.com/openimsdk/open-im-server)、[OpenIM 部署清单](https://github.com/openimsdk/open-im-server/blob/main/docker-compose.yml)、[OpenIM LICENSE](https://github.com/openimsdk/open-im-server/blob/main/LICENSE)、[Mochi README](https://github.com/mochi-mqtt/server)、[Mochi LICENSE](https://github.com/mochi-mqtt/server/blob/main/LICENSE.md)、[ejabberd 模块](https://docs.ejabberd.im/admin/configuration/modules/)、[ejabberd COPYING](https://github.com/processone/ejabberd/blob/master/COPYING)、[ejabberd 集群](https://docs.ejabberd.im/admin/guide/clustering/)、[Prosody 许可](https://prosody.im/source/start)、[Synapse 许可](https://github.com/element-hq/synapse/blob/develop/LICENSE-AGPL-3.0)、[Centrifugo 恢复边界](https://centrifugal.dev/docs/server/history_and_recovery)、[Centrifugo 许可](https://github.com/centrifugal/centrifugo/blob/master/LICENSE)、[EMQX 当前许可](https://github.com/emqx/emqx/blob/master/LICENSE)。mutable 分支在实施 spike 时必须记录精确 commit，不将网页当前状态当永久承诺。
 
 ### 4.3 三个候选的硬验证门禁
 
@@ -173,10 +173,11 @@ MCP是工具协议；数据网络复用NATS协议，WSS只是其下层传输，A
 邮箱按 node 分配单调序号 `mail_seq`；cursor（游标）表示已确认的连续前缀，不表示执行进度。每个逻辑收件人仍有独立 delivery 和授权；共享邮箱不合并会话权限。
 
 1. **提交**：collab 同事务写 message、每逻辑收件人的 delivery、幂等记录并更新目标 node 邮箱 head。序号在锁定邮箱行的事务中分配，回滚不留下未说明空洞。原有业务事件 outbox（与业务同事务的待发事件表）照常保留，但投递不等待它。提交后才返回 platform_stored。
-2. **提示**：提交回调尽力向内部 Core subject 发 `{node, head_seq}`，不带正文。Go adapter 用 queue group（多副本竞争处理同一请求的订阅组）消费提示，经 collab 查询当前连接并定向发到其 down subject。提示允许重复、合并、丢失；无逐消息可靠通知状态。
+2. **提示**：提交回调尽力向内部 Core subject 发 {node, head_seq}，不带正文。Go adapter 用 queue group（多副本竞争处理同一请求的订阅组）消费。每副本按 node 只保最新 head，以 100ms 合并窗口限速下发；不为每条业务消息保存一条待发 HEAD。发送/合并窗口进行时的新 head 替换待发值，结束后仅在有更新时补一次。集合有全局和租户硬上限，满时可丢提示并记指标，修复扫描兜底，不能挤占正文/回执预算。多副本可能重复提示，每副本仍只保一项，不引入分片所有权。
+   adapter 经 collab 查询当前 route，可缓存最多 2 秒；收到接管/撤销事件即失效。缓存仅用于无正文 HEAD，不用于 FETCH、执行准入或回执写入。旧缓存最多产生过时提示，不授新权限；实际取页仍由 collab 权威核 epoch/授权。无可靠事件失效保证时也按 TTL 强制刷新，不能无限续缓存。
 3. **取页**：插件在收到 HEAD、READY 成功、重连或已有待取页且容量恢复时，通过同一 NATS WSS 发 FETCH。collab 逐项核权并返回限条数、限编码字节的页面。每 node 默认一个取页请求在途；超时按同游标有界重试，不产生领取租约，也不改变投递状态。head 不变时仍可能有未确认空洞，不能据此停止对账。
-4. **持久接受**：传输层把页面交给独立宿主 adapter 的 `deliver(page) → receipts` 接口。宿主按 delivery_id 去重、核原会话并持久化后，插件批量送 RECEIPT（含 delivery_id、digest、binding 和宿主 request 身份）。collab 幂等提交回执并推进连续确认前缀，返回 RECEIPT_COMMITTED。
-5. **继续与隔离**：未确认项不从 PG 删除。分页位置与确认游标分开；卡住的线程记录重试/隔离状态，允许继续扫描其他线程，绝不取“最大已见序号”当确认。客户端磁盘和服务端稀疏回执都有上限，耗尽时明确背压；详细空洞规则见协议 §8。
+4. **处理与持久接受**：网络层先在线登记本次处理尝试，平台按 delivery 持久计数，再把条目交给独立宿主 adapter 的 `deliver(page) → receipts` 接口。宿主按 delivery_id 去重，真正 queue/prompt 前须取得当前 epoch 的在线执行准入 CAS；持久接受后才批量回 RECEIPT。隔离/未知报告不是接受成功。collab 幂等提交接受或明确终态后推进连续确认前缀，返回 RECEIPT_COMMITTED。
+5. **继续与隔离**：未确认项不从 PG 删除。分页位置与确认游标分开；卡住的线程记录重试/隔离状态，允许继续扫描其他线程，绝不取“最大已见序号”当确认。隔离不延长原期限，最长 24 小时后按策略终结传输；本线程空洞限额只限制该 thread/binding，新消息不挤占其他线程。连续已确认后缀合并成精确区间，单个旧空洞不要求无限保存稀疏条目；只有 node 总量实际耗尽才 node 级背压。详见协议 §4/§5/§8。
 
 这是一条服务端通知驱动的长连接同步链路。正常路径多一次“提示→取页”的往返，用实现复杂度换取有界背压。首发不做提示内联正文；未来优化不得改变回执和游标语义。Core 的最多一次语义与 JetStream 的持久消费者不同，见 [Core](https://docs.nats.io/learn/core-nats/) 与 [JetStream](https://docs.nats.io/concepts/jetstream)；本方案的恢复依据始终是 PG 邮箱。
 
@@ -184,7 +185,7 @@ MCP是工具协议；数据网络复用NATS协议，WSS只是其下层传输，A
 
 adapter 先建立内部订阅，再在启动时批量检查在线积压；READY 直接返回 head 与平台确认前缀，不依赖之前是否收到过提示。随后服务端默认每 60 秒扫描“route 有效且存在未确认积压”的索引，分页取最多 256 个 node，定向重发 HEAD。一个有界扫描任务足够首发；重复扫描无害，不需要 owner generation 或 dirty CAS。多副本部署时可用单服务级扫描锁减少重复，丢锁只影响效率，恢复正确性不依赖持有者身份。
 
-扫描用稳定键遍历，一轮开始固定边界并避免热点反复抢占队首；新连接由 READY 覆盖。每轮扫描完成目标 ≤30 秒，故健康但丢失尾部提示时的设计修复预算为 60+30+10=100 秒（等待下一轮、扫到目标、取页），故障注入 deadline 为 120 秒。持续分区或超负载时不承诺该上限，必须告警并限入。没有未确认积压的在线节点不发周期 HEAD，离线节点只存储，绝不全网广播。
+扫描用稳定键遍历，一轮开始固定边界并避免热点反复抢占队首；新连接由 READY 覆盖。扫描每 60 秒按起始时刻调度，每轮完成目标 ≤30 秒；一次提示成功到达后的合并/取页预算为 10 秒。在下一轮修复 HEAD 未再次丢失、依赖健康且无积压的条件下，尾提示丢失恢复预算才是 60+30+10=100 秒，测试 deadline 为 120 秒。每轮独立重试：若前 k 轮修复 HEAD 也丢失、第 k+1 轮成功，预算为 100+60k 秒（等价于第 n 轮成功时 60n+40 秒）；再丢一轮是 160 秒，测试 deadline 180 秒。持续丢包/分区或超载没有有限上限，必须告警并限入。没有未确认积压的在线节点不发周期 HEAD，离线节点只存储，绝不全网广播。
 
 既有 outbox/JetStream 保留内部业务事件用途，故障不阻塞本网络提示与 FETCH；事件积压若触及共享磁盘上限仍须拒绝新写。整个 NATS 不可用时只能在配额内保存消息，不能声称仍有在线 push。正常测试关闭修复扫描仍应即时到达；只丢通知测试才依赖低频修复。不得恢复旧每节点短 poll。
 
@@ -205,7 +206,9 @@ adapter 先建立内部订阅，再在启动时批量检查在线积压；READY 
 
 `connection_route` 保存 tenant/node/incarnation、connection_epoch、ingress_id、down subject、服务端/CID 映射和有效期。epoch（连接世代）是 PG 原子递增的路由版本；它限制新 FETCH、发件与执行准入，不充当每条消息的领取凭证。Broker 负责定位 socket，内存连接表不是数据库真相。
 
-READY 原子接管后新正文只向新 ingress 发；插件也拒绝旧 epoch 的迟到页面进入新执行。已持久的 receipt 可在当前有效身份下从新连接重送；旧 ingress 迟到 receipt 仅允许受限幂等对账，不能启动执行或改绑定。撤销身份不享有这项例外，见协议 §5。
+READY 接管与在线 admit 按同一 node/执行记录锁序串行化。旧 epoch 已 RECEIVED 但尚未准入的项，必须在当前有效连接下重新在线核权和准入；离线、旧连接或本地缓存不能授权 prompt。迟到旧页不执行，持久 receipt 可在新连接幂等重送。
+
+若 A 在 epoch 5 收件但未准入，B 接管 epoch 6 后，A 的 admit 被拒；B 可依法取得唯一准入。若 A 已先取得准入，即使没有回执，B 也不能重新获得许可。准入不会随每小时续接、超时或进程重启清空；不确定窗口进入 outcome_unknown 并持久终结自动重试，不能换身份重做。已获准的在途动作仍不能靠 epoch 物理收回。旧 ingress 的有效迟到 receipt 只作受限对账，撤销身份无此例外，见协议 §5。
 
 插件须有 profile 单写者锁与持久 ledger。同凭据双进程、克隆或不同 incarnation 冲突不采用无限“最后连接赢”，进入 conflict 并停止新执行；合法接管需要可信注册记录。旧进程已开始的副作用无法由 epoch 回收。丢失设备先吊销，再注册新 node，对未决执行单独对账。
 
@@ -222,12 +225,12 @@ READY 原子接管后新正文只向新 ingress 发；插件也拒绝旧 epoch �
 | 阶段 | 必须实现与过关条件 | 不能据此宣布 |
 |---|---|---|
 | N0：设计与独立接缝门禁 | 先定 schema、IAM 网络授权上限、FETCH/回执/游标语义；分别核 auth callout 的 server_id/CID 与 KICK、私有 inboxPrefix、SDK 硬缓冲。宿主 adapter 可用 fixture 传输独立验收 create/cwd/bind 与持久恢复，不被 Broker spike 阻塞。 | 本阶段已获实施授权，或只有接口同名就兼容。 |
-| N1：最小可靠闭环 | 单 nats-server + auth callout + PG 邮箱/游标 + Core HEAD/FETCH/RECEIPT + 独立宿主 ledger；两真实 DSH 普通会话往返、非默认 cwd、冷恢复、建线程映射竞争、丢回执和崩溃恢复。保留基本限额、逐操作授权和失败关闭。 | JetStream 通知/dispatcher 已必需、子 agent 已兼容、HA 或大容量已通过。 |
+| N1：最小可靠闭环 | 单 nats-server + auth callout + PG 邮箱/游标 + Core HEAD/FETCH/RECEIPT + 独立宿主 ledger；两真实 DSH 普通会话往返、非默认 cwd、冷恢复、建线程映射竞争、丢回执和崩溃恢复。保留基本限额、平台持久尝试计数、prompt 前在线准入和失败关闭。 | JetStream 通知/dispatcher 已必需、子 agent 已兼容、HA 或大容量已通过。 |
 | N2：授权会话树 | 可信 lineage/parent address、最小委派、递归预算、同 DSH 多逻辑参与者与批量恢复；子 agent 专用适配单独过关。 | 全部 Codex 原生协作能力已复现。 |
 | N3：HA 与容量 | 多副本 Core/adapter、PG 故障切换、滚更与容量压测；按瓶颈增加扫描分区/请求公平调度，分别验既有 JS 故障隔离。 | 自动恢复逐条租约方案、未测跨地域多活或无限扩容。 |
 | 后续增强 | 视测量选择正文外置、存储分片、双 lane 或其他承载；fork/历史/等待/中断/产物分别按原生能力验收。 | 用网络替代业务调度引擎。 |
 
-宿主接缝必须独立于传输：`deliver(page) → receipts` 只接受经核验的投递上下文，内部负责会话映射、串行准入与持久证据；连接、分页、重试和发送回执由网络插件负责。fixture 能证明状态机边界，真实宿主和模型验收仍不可省。
+宿主接缝必须独立于传输：`deliver(page) → receipts` 只接受经核验的投递上下文，内部负责会话映射、串行调用在线 admit 回调与持久证据；连接、分页、登记处理尝试和发送回执由网络插件负责。fixture 能证明状态机边界，真实宿主和模型验收仍不可省。
 
 实施边界：`contracts/` 先行；`infra/ai-gateway` 承担 Go 网络/远程 MCP；`infra/edge` 增加精确升级路由和 WS 生命周期安全；`services/collab` 负责持久状态/配额/授权；`services/iam`、org 增补主体与委派判定；`services/common` 对 outbox 的任何改进须兼容现有使用者；`clients/dsh-plugin` 承担连接管理与宿主 adapter。`infra/agent|node|egress` 仅在实例生命周期/出口规则确需改变时另派受保护任务。
 
@@ -246,16 +249,21 @@ READY 原子接管后新正文只向新 ingress 发；插件也拒绝旧 epoch �
 | 吊销断连目标 | 系统控制面正常时 ≤5 秒 | 权威逐操作拒绝先行；KICK 失败有界重试，不复活授权 |
 | 心跳 / route 健康 | 空闲 30 秒；连续两次无响应判异常；route 有效期目标 90 秒 | node 级批量更新，每批最多 256；不放宽鉴权 expiry |
 | 重连 / 全站准入 | full jitter，0.5 秒指数至 60 秒；示例限入 100 次/秒 | 服从 Retry-After；429 不立即重试 |
-| 提示修复 / 服务级 | 60 秒一轮；256 node/页；整轮目标 ≤30 秒 | 只扫在线且未确认积压，恢复预算 ≤100 秒，验收 deadline 120 秒 |
+| HEAD 合并 / route 提示缓存 | 每副本每 node 仅最新值，100ms 合并；缓存 TTL ≤2 秒；集合最多 10k node/副本、1k/tenant | 集合满可丢提示，丢失有指标；缓存不用于正文、执行或回执授权 |
+| 提示修复 / 服务级 | 60 秒一轮；256 node/页；整轮目标 ≤30 秒 | 下一轮修复提示成功时预算 100 秒、deadline 120 秒；再丢 k 轮加 60k 秒 |
 | 单个 NATS payload / 正文 | 64KiB / 16KiB；禁应用分片及压缩 | FETCH_RESULT 整页也受 payload 上限，不是每项各获 64KiB |
 | FETCH / node | 最多 128 项、含头 ≤64KiB；默认 1 请求在途；超时 10 秒 | 实际页按剩余窗口缩小；满正文通常一页只能数项 |
 | binding 元数据恢复 | 每批 128、最多 4 批在途 | 与正文 FETCH 分开计费 |
 | 未确认接收 / node；channel | 256 条 / 1MiB；16 条 / 64KiB | 含已接收未提交回执项，另受本地持久队列限制 |
+| 接入 Broker 每连接缓冲 / 写超时 | max_pending=2MiB；write_deadline=10s | Broker 进程级配置；不等于 SDK cap，须计全站总量及内部共用连接影响 |
 | adapter 输出 / node | 硬上限 2MiB；回执/恢复控制保留 64KiB、100 条/秒 | SDK/WebSocket 自身还须证明硬上界 |
 | 活跃通道 / 订阅 / node | 1,000 / 5,000；临时通道空闲 5 分钟释放 | Broker 仅固定少量订阅；持久收件授权不随空闲删除 |
 | 执行准入 / node；session | 4；1 | 接受消息不保证立即执行 |
 | 子树 / fanout | 委派深度 8、root 活跃后代 256；原子 fanout ≤32 | 同受 node/tenant 额度，越界拒绝或显式分批 |
-| 毒消息 / 慢连接 | 自动尝试最多 5 次后隔离；目标写超时 10 秒 | 不因隔离伪造成功或擅自跨有序 thread |
+| 毒消息 / 隔离截止 | 平台按 delivery 最多自动 5 次；隔离截止为原 expires_at 与首次隔离+24 小时中较早者；到期扫描目标 60 秒 | 调用 deliver 前持久计数；重启不退款；隔离/未知报告不冒 host_accepted |
+| 空洞 / (thread, target_binding) | 首个未决项后最多 1,024 个本线程位置或 256 个稀疏确认区间 | 只拒该逻辑收件人新增消息；不把其他线程序号算作本线程跨度 |
+| 稀疏确认 / node | 4,096 个精确区间，另保留 256 个在途回执增量 | 连续后缀压缩；未决位置不能被区间覆盖；仅总量耗尽才限制 node |
+| FETCH 排除提示 | held_ids 最多 256 项，暂停 thread/binding 最多 128 项 | 本次请求有效，整包仍 ≤64KiB；不确认、不删数据 |
 | 积压 / node；tenant | 10k 条或 64MiB；100k 条或 1GiB | PG 未交接及宿主已交接未处理队列均设限，先到先拒 |
 | 留存 / 中档 | 待投 ≤7 天；执行请求默认 24 小时；已接受正文 24 小时 | 需 7 天正文历史时显式提高预算或外置；未接受正文不提前删除 |
 | 幂等与终态元数据 | 至少 30 天；producer_epoch 最长 7 天 | 覆盖未决空洞与重试窗口后才回收；旧世代永远不能新写 |

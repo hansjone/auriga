@@ -14,6 +14,8 @@
 
 ### 1.1 需求与锁定代码的来源
 
+R5 补充（2026-10-25，仅文档）：依据第二轮独审补充隔离终态、平台处理次数和执行前在线准入；未重跑任何服务/宿主试验。只读官方 nats-server v2.12.6 及现有模块缓存确认：`const.go:102` 的默认 MAX_PENDING_SIZE 是每客户端 64MiB，`:132` 的 DEFAULT_FLUSH_DEADLINE 为 10 秒。本文推荐显式改为 max_pending=2MiB、write_deadline=10s，是待压测的配置建议，不是已应用配置或已证明的进程总内存上界。[锁定源码](https://github.com/nats-io/nats-server/blob/v2.12.6/server/const.go#L102)。
+
 R4 只读核验（2026-10-25）：本轮不重跑历史原型或宿主测试。以下新增事实以锁定源码为依据，其余沿用注明出处的历史证据。
 
 - nats-server v2.12.6 官方源码及本机 Go 模块缓存一致：`server/events.go:62–63` 定义 KICK/LDM；`:1484–1494` 注册系统订阅；`:3195–3236` 以 CID 调用 DisconnectClientByID/LDMClientByID。`auth_callout.go:376,456–464` 将客户端 CID 填入请求；`:322` 设置 JWT expiry。源码能证明控制接口存在；CID/server_id/运行世代持久关联、重启误踢防护和权限隔离仍须 N0 实测。[events.go](https://github.com/nats-io/nats-server/blob/v2.12.6/server/events.go#L3203)、[auth_callout.go](https://github.com/nats-io/nats-server/blob/v2.12.6/server/auth_callout.go#L456)。
@@ -79,12 +81,14 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 
 这些单位成本是选型假设，后续用heap/pprof、RSS、GC、FD、WAL与延迟替换，不是引用上游营销吞吐。
 
-- **内存**：每物理连接空闲128KiB（TLS/库/缓冲/goroutine等合计占位），每活跃logical channel 512B、每应用subscription 256B。大档连接约625MiB，channel约48.8MiB、subscription约48.8MiB。若每DSH平均在途buffer64KiB，再加312.5MiB，合计约1.01GiB；尚不含进程基线、GC余量、NATS路由/JS缓存、PostgreSQL和宿主LLM。按每连接硬窗口1MiB全部占满则另需4.88GiB，不能按典型值配置硬上限或一次性预分配。多进程总量与单副本都要测。
-- **单接入Broker规划起点**：2k连接时空闲预算约250MiB、平均buffer125MiB；先配置4vCPU/2GiB测试机、FD上限至少16k，测50%与75%负载点。此为测试起点，不是额定规格。大档建议至少3接入副本、任一故障后余下节点仍≤已测安全上限70%；是否能共用内部JS节点由隔离压测决定。
+- **内存**：每物理连接空闲128KiB（TLS/库/缓冲/goroutine等合计占位），每活跃logical channel 512B、每应用subscription 256B。大档连接约625MiB，channel约48.8MiB、subscription约48.8MiB。若每DSH平均在途buffer64KiB，再加312.5MiB，合计约1.01GiB；尚不含进程基线、GC余量、NATS路由/JS缓存、PostgreSQL和宿主LLM。按每连接硬窗口1MiB全部占满则另需4.88GiB，不能按典型值配置硬上限或一次性预分配。多进程总量与单副本都要测。Broker max_pending 显式建议 2MiB，大档 5,000 连接全部触顶仅这一项约 9.77GiB；adapter 2MiB/node 又是约 9.77GiB，不包含在前述典型 buffer 估算中。SDK、TLS、内核 socket 还有独立开销，不能以单连接 cap 当整机上限。
+- **单接入Broker规划起点**：2k连接时空闲预算约250MiB、平均buffer125MiB；先配置4vCPU/2GiB测试机、FD上限至少16k，测50%与75%负载点。此为测试起点，不是额定规格；2k 连接的 Broker pending 若都达到 2MiB 已约 3.91GiB，不能在这台 2GiB 测试机上承诺该极端档。须按总内存预算降低准入连接数/缓冲上限或增配，并测试慢消费者断连。大档建议至少3接入副本、任一故障后余下节点仍≤已测安全上限70%；是否能共用内部JS节点由隔离压测决定。
 - **FD**：Broker约`C_local + cluster routes + internal clients + stores/logs + margin`；edge反代通常每数据连接占客户端/上游两端FD，约`2C_local`。5k连接edge是约10k基础FD，另算HTTPS池与滚更双连接。不能只调Broker ulimit。
 - **CPU**：若待测纯adapter处理每delivery为0.2ms，大档3000/s仅此项约0.6核；TLS/JSON/校验/GC、IAM/org与DB另算，不能据此宣称1核够。握手成本、正文 16KiB 上限和大fanout分别测，不用平均2KiB掩盖极限。
-- **身份依赖**：最低按源发送2次权威调用、每 delivery 取页核权及回执各 2 次估算，`2λ+4λF`，大档约16k次/s；若执行准入另2次，再加6k/s。当前多层重复验证可能更高。必须压测IAM/org，优先新增受控批量核验接口且逐项拒绝，不用全tenant缓存绕过撤销。网络Broker吞吐充足并不意味着授权服务充足。
-- **PG事务**：批量 FETCH/RECEIPT 各平均 16 条（页面编码仍须 ≤64KiB），理想近似`λ + 2λF/16`，大档约 2375 次数据库操作/秒，其中约 2188 次为写事务、188 次为只读 FETCH；不含 grant/route/配额维护与既有 outbox。线程/根树热点锁可能比总TPS先限速。接口授权与外部发布不能长占业务事务。
+- **身份依赖**：源发送按 2 次权威调用，每 delivery 取页核权与回执各 2 次，基础为 `2λ+4λF`，大档约 16k 次/秒。处理尝试和执行准入是新增必经检查；若每项都触发宿主执行且两步各需 2 次 IAM/org 调用，另加 `4λF=12k`，合计约 28k 次/秒。重试可进一步放大，最多 5 次是每项累计上限，不是可无限维持的稳态吞吐。批量核验或安全复用校验结果的收益必须实测，不用全租户缓存绕过吊销。
+- **PG 操作**：FETCH/RECEIPT 各平均每批 16 条（编码 ≤64KiB），基础 `λ+2λF/16` 为约 2,375 次/秒，其中写 2,187.5、读 187.5。每项第一次处理尝试登记和执行准入各增加一个短写事务；全部 delivery 均执行时再加 6,000，达到约 8,375 次/秒。仍未计提示查 route、配额维护、到期任务与既有 outbox，不能把基础数当完整容量。
+- **提示路径查询**：令 H 为各 adapter 合并后的 HEAD 下发总率，R 为 adapter 副本数、D_active 为活跃 node 数、缓存 TTL T=2 秒。稳定路由且无失效时，route 查询率近似受 min(H, R×D_active/T) 限制；接管/失效和冷缓存会升高，保守不计缓存时预算按 λF=3,000 次/秒。100ms 合并只减少同 node 的密集提示，平均低频流量可能几乎无收益；不能假定所有提示被合并。三类操作合计大档保守约 11,375 次/秒（写 8,187.5、读 3,187.5），不含重试。
+- **修复与到期查询**：大档全部 5,000 node 在线积压时，256 node/页，一轮至少 ceil(5000/256)=20 个批查询；每 60 秒约 0.33 次/秒，单扫描器才是此数，多副本重复扫描乘实际数量。修复页批量带 route/head，避免另按 node 查 route；每轮仍可能发出 5,000 个 HEAD。到期任务对 Pending/Quarantined 的索引批处理、稀疏区间合并及局部限额更新另测。提示查询无需逐条调用用户 IAM，但只能返回内部受限路由与无正文提示；FETCH/admit 权威校验不缓存。线程/邮箱热点锁可能比总 TPS 更先限速。
 - **心跳**：NATS keepalive目标空闲30s一次、两次未应答判异常，约`C/30` PING/s；大档约167/s，加PONG约334条/s。由官方客户端/Broker统一配置，不另给每会话心跳。另有node 级应用健康更新可合并进有业务的状态消息，最多同30s级预算；PG route续期每批256，避免每node一事务。
 - **刷新重连**：按连接凭据一小时、平均提前 90 秒续接的 `C/3510`，大档约 1.42 握手/s，须计票据/IAM/TLS。全站重启重连full jitter 0.5s指数至60s；限入100次/s为示例，大档至少50s才能全部重建，目标120s内99%恢复需留故障与授权余量。429/Retry-After控制节奏，不能同时回零等待。访问 token 刷新独立计算，不应触发每四分钟 WSS 重连；若实际 IAM 网络授权更短，必须按真实剩余期限重算。
 - **积压**：离线1小时、全部接收端离线时`Q=λF×3600`；大档10.8M deliveries，单正文即约22.1GB（十进制），加行/索引/去重/事务WAL更多。默认node队列10k条或64MiB取先到，tenant100k条或1GiB取先到，只是保守初始配额；大档持续离线会明确拒收，不能同时声称无限留7天。
@@ -99,7 +103,7 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 
 **首发性能目标**：在同区域RTT≤50ms、payload≤2KiB、fanout≤2、资源低于70%、身份与存储正常且未积压时，提交响应P95≤250ms/P99≤750ms；commit→在线 Node 收到 FETCH_RESULT 正文 P95≤500ms/P99≤2s（不能只量 HEAD 提示）；收到→host持久接受P95≤1s/P99≤5s，不含LLM排队/运行。应按多个tenant同时测，不只平均。
 
-**恢复目标**：单连接网络恢复后，在无大积压条件下P99≤10s恢复READY/业务游标；丢通知修复默认 60 秒周期、一轮扫描 ≤30 秒、取页恢复预算 10 秒；健康资源条件下 P99≤100 秒恢复，隔离故障用例 deadline 120 秒；网关/Broker滚更或全站重启后，目标120s内99%节点恢复，剩余有明确错误。积压清空时间下界`Q/(可用消费率-新到达率)`，分母≤0时永远清不完，必须限入/扩容，不能给固定恢复承诺。
+**恢复目标**：单连接网络恢复后，在无大积压条件下P99≤10s恢复READY/业务游标；丢通知修复默认 60 秒周期、一轮扫描 ≤30 秒、取页恢复预算 10 秒；仅在下一轮修复 HEAD 未再次丢失、依赖健康且无大积压时，恢复预算 100 秒、用例 deadline 120 秒。若前 k 轮修复提示继续丢失，第 k+1 轮成功，则预算 100+60k 秒；再丢一轮预算 160 秒、deadline 180 秒。持续丢失无有限上限；网关/Broker滚更或全站重启后，目标120s内99%节点恢复，剩余有明确错误。积压清空时间下界`Q/(可用消费率-新到达率)`，分母≤0时永远清不完，必须限入/扩容，不能给固定恢复承诺。
 
 **HA目标**：生产HA档月度平台消息准入可用性99.9%，分别计自身故障、IAM/org、PG、Broker依赖；用户终端长期离线另计，不能通过全排除依赖使数字变好看。单机档不继承HA可用性承诺。同步PG档已提交数据目标RPO=0（限定一故障域失效且同步副本幸存）；异步备份灾难恢复必须披露可丢窗口。PG failover目标RTO≤60s、整服务≤120s均待演练，未知故障不承诺这些数值。
 
@@ -111,15 +115,26 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 |---|---|
 | send提交前崩溃/回滚 | 不存在platform_stored；同键重试只形成一条消息。 |
 | PG提交后、响应丢失 | 同键返回原message；异体同键冲突，message/delivery/dedup数量不增。 |
-| commit 后提交回调/Core HEAD 全丢，且无后续新消息 | PG head/未确认项仍在；仅靠 60 秒服务端扫描恢复。扫全轮 ≤30 秒，取页预算 10 秒，健康条件总预算 ≤100 秒、测试 deadline 120 秒；无客户端周期空 FETCH。 |
+| commit 后初始 HEAD 全丢，且无后续新消息 | PG head/未确认项仍在；下一轮修复 HEAD 成功时，仅靠 60 秒扫描恢复。扫描 ≤30 秒、合并/取页预算 10 秒，健康且无积压时预算 100 秒、deadline 120 秒；无客户端周期空 FETCH。 |
+| 初始提示丢失，第一轮修复 HEAD 也丢失 | 第二轮独立重新提示；在其成功且依赖正常时预算 160 秒、deadline 180 秒。连续 k 轮失败按 100+60k 预算，持续丢失只告警，不伪称 100 秒必达。 |
+| 热 node 连续提交、客户端停读、adapter 合并集合满 | 每副本每 node 最多保留一个最新 head；100ms 合并生效，多副本重复有界。集合满丢提示有指标，PG 不丢业务；Broker pending 按 2MiB 配置触发慢消费保护，内核/SDK 额外缓冲也有观测。 |
+| 提示 route 缓存命中、失效事件丢失/换 epoch | TTL 最多 2 秒；只可能错发无正文提示。旧 ingress FETCH/admit 拒绝；测出冷缓存与稳态查询率，不把缓存当授权真相。 |
 | 提示重复/乱序，FETCH_RESULT 丢失或超时 | 取页不改变 delivery 状态；同位置重试、同 delivery 去重；head 取单调最大提示但确认前缀不跟随它推进。 |
 | adapter 收 HEAD 后崩溃/启动与提交并发 | 重启先订阅再扫描在线积压，READY 直取 PG head；即使尾部提示永久丢失仍由修复覆盖。 |
 | Core 页面丢弃/客户端缓冲溢出 | 无 receipt 不清 PG pending；同位置重取，超窗拒绝或断连，本地持久去重无空洞。 |
 | WSS单向黑洞/半开/代理空闲断连 | native heartbeat/timeout发现；bounded jitter重连，原request身份不变。 |
 | 两Broker中接入节点崩溃 | 官方客户端重新接入，重新认证/READY、补投；不粘死原节点。 |
 | adapter 滚更/queue group 副本退出 | socket 可继续；未答 FETCH/RECEIPT 有界重试到其他副本，不需要转移 delivery 租约；重复回执只提交一次。 |
-| 两连接同 node/旧 socket 页面或 receipt 迟到 | 新 FETCH/执行只接受当前 epoch；旧页不执行。有效未撤销身份的同 receipt 仅幂等补录，不触发 prompt；克隆/抢占风暴进入 conflict。 |
-| 101 毒消息、102 属另一 thread / 窗口耗尽 | 102 可持久回执，前缀仍停 100；分页与确认分离，101 后续同 thread 暂停。重启不重执行 102；隔离不自动 skip；稀疏证据到配额后明确背压。 |
+| 克隆 A(epoch 5) 已 RECEIVED，B(epoch 6) 接管先于 A admit | A 的在线 admit 返回 stale_epoch，不调用 prompt；B 取得唯一准入。A 离线/仅持本地 ledger 同样不得执行，副作用计数最多一次。 |
+| A admit 先提交，B 随后接管；A 响应丢失或 prompt 前崩溃 | B 不获第二许可；A 重启查询不再次发起 prompt。无法确认原执行则持久 Unresolved；允许零次执行，不以“至少执行一次”掩盖重复风险。 |
+| 每小时续接 / 旧 epoch 页面或 RECEIVED 项 | 无准入项用新连接重新在线 admit；已有 admission 只对账，不因换 epoch 清除。旧 ingress 回执仅受限补录，conflict 检测不是唯一防重手段。 |
+| admit 与 cancel/expiry 并发、IAM/连接不可用 | 同一执行记录版本 CAS 决定胜者；未获准只保留 RECEIVED。取消先提交则不执行；admit 已提交的在途动作不能宣称被网络撤回。 |
+| 101 毒消息、102…N 属其他正常线程 | 101 隔离期间其他项继续接受，连续后缀合并精确区间，不能覆盖 101；隔离到期/撤销/有权 skip 提交后前缀跨过。其他线程不因 A 的局部限额停止。 |
+| 隔离项无人处理、node 离线、原期限早于隔离期限 | 平台按 min(expires_at, quarantine_at+24h) 禁止新准入，60 秒目标批处理持久终态；原 TTL 不延长，不依赖客户端回连。 |
+| deliver 连续使插件崩溃 / ATTEMPT_BEGIN 响应丢失 | 平台次数在进入 deliver 前提交；本地 entered 持久化后才调用，重复响应不二次进入。重启不退款；无执行准入的崩溃最多自动 5 次，下一请求隔离，不靠 FETCH 次数或本地重置绕过。 |
+| 本线程跨度 1,024 / 稀疏区间 256 与 node 总区间 4,096 | 局部阈值只拒该 thread/binding 新消息；node 全局未满时其他线程仍服务。区间精确合并，保留 256 个在途回执增量预算，任何阈值不得拒绝必要终态回收或伪造已接受。 |
+| 本地 outcome_unknown、平台 Unresolved 提交前后 | 本地报告不推进游标；平台原子写执行未知、停止再准入与传输 tombstone 后才跨过空洞。查询仍显示未知，迟到结果可补录，不触发自动重做。 |
+| held_ids / 暂停标记重复、越权、过大或重启丢失 | 有权有界集合只抑制本次重复正文，不清 pending；越权/超限拒绝。遗失排除集可重发，已持久项去重，其他线程可继续扫描。 |
 | 撤销后 KICK 成功/失败、CID 复用、旧 KICK 延迟 | 后续准入立即按权威校验拒绝；系统面可用时断连目标 ≤5 秒。错误/旧 server 运行世代映射不得踢错连接；失败有界重试、到期兜底，不恢复授权。 |
 | 私有 inboxPrefix 的 request()/mux/noMux/任意 reply | 仅当前 ingress 私有响应订阅可用；跨 ingress、全局 inbox、系统 subject 均拒绝，超时/重连释放订阅，身份不能由 reply 推断。 |
 | 网络 JWT 与 HTTP 访问 token 分别到期 | 访问 token 正常刷新不切断健康 WSS；网络 JWT 到期前随机续接且原生过期关闭；IAM 会话撤销即拒新操作，不以一小时剩余期放行。 |
@@ -161,7 +176,7 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 
 ## 7. 观测和运维闭环
 
-必须有connections/认证失败/续期、NATS slow-consumer与pending、app active channels、订阅/冷会话数量、既有 outbox lag（独立依赖指标）、mailbox head 与 confirmed 差距、最老空洞年龄、head 提示/修复周期、FETCH 页大小/超时、pending bytes、delivery retry/quarantine、stale epoch、Host flush latency、unknown outcomes、授权RPC延迟与失败、FETCH 限流/公平份额、稀疏回执占用、KICK 成功/失败/延迟、PG事务/锁/WAL/磁盘指标。分开记录网络收到、Host接受、执行开始、执行终态时间。
+必须有 attempt_count/隔离截止滞后、admit 冲突/未知响应、终态空洞闭合时间、HEAD 合并/丢弃/route 缓存命中率、connections/认证失败/续期、NATS slow-consumer与pending、app active channels、订阅/冷会话数量、既有 outbox lag（独立依赖指标）、mailbox head 与 confirmed 差距、最老空洞年龄、head 提示/修复周期、FETCH 页大小/超时、pending bytes、delivery retry/quarantine、stale epoch、Host flush latency、unknown outcomes、授权RPC延迟与失败、FETCH 限流/公平份额、稀疏回执占用、KICK 成功/失败/延迟、PG事务/锁/WAL/磁盘指标。分开记录网络收到、Host接受、执行开始、执行终态时间。
 
 指标标签限service/region/shard/outcome等有界集合；node/session/thread/message ID放受控日志/trace，不做Prometheus高基数label。不记录payload、token、完整票据或敏感路径。管理员只能按权限查询自己tenant的诊断；系统总部不天然能看所有人历史。
 
