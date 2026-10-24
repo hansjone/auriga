@@ -1,134 +1,124 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRouter } from 'vue-router';
-import { ElButton, ElMenu, ElMenuItem, ElSubMenu } from 'element-plus';
+import { useRoute, useRouter } from 'vue-router';
+import { ElButton } from 'element-plus';
 import type { Me } from '@auriga/shared';
 import { iamApi } from '../api';
 import { useAdminI18n } from '../admin/messages';
-
+import { navigation, iconPaths } from '../admin/navigation';
+import '../admin/resources.css';
 const { t, locale } = useI18n();
 const { t: adminT } = useAdminI18n();
 const router = useRouter();
+const route = useRoute();
 const me = ref<Me | null>(null);
-const light = ref(document.documentElement.dataset.theme === 'light');
-
-const items = [
-  { path: '/providers', key: 'adminNav.providers' },
-  { path: '/settings', key: 'adminNav.settings' },
-] as const;
-
+const dark = ref(document.documentElement.dataset.adminTheme === 'dark');
+const logoutError = ref('');
+let alive = true;
+onBeforeUnmount(() => {
+  alive = false;
+});
+const active = computed(() =>
+  navigation.find(
+    (item) =>
+      item.path === route.path ||
+      item.children.some(([path]) => path === route.path),
+  ),
+);
 onMounted(async () => {
   try {
-    me.value = await iamApi.getMe();
+    const result = await iamApi.getMe();
+    if (alive) me.value = result;
   } catch {
-    void router.replace({ path: '/login', query: { returnTo: '/members' } });
+    if (alive)
+      void router.replace({
+        path: '/login',
+        query: { returnTo: route.fullPath },
+      });
   }
 });
-
 function language() {
   locale.value = locale.value === 'en' ? 'zh-CN' : 'en';
   document.documentElement.lang = locale.value;
 }
-
 function theme() {
-  light.value = !light.value;
-  document.documentElement.dataset.theme = light.value ? 'light' : 'dark';
+  dark.value = !dark.value;
+  document.documentElement.dataset.adminTheme = dark.value ? 'dark' : 'light';
 }
-
 async function logout() {
-  await iamApi.logout();
-  void router.replace('/login');
+  logoutError.value = '';
+  try {
+    await iamApi.logout();
+    if (alive) void router.replace('/login');
+  } catch {
+    if (alive) logoutError.value = adminT('failed');
+  }
 }
 </script>
-
 <template>
-  <div class="admin-shell">
-    <aside class="side">
-      <p class="brand">{{ t('brand') }}</p>
-      <ElMenu
-        :default-active="$route.path"
-        router
-        background-color="transparent"
-        text-color="var(--auriga-text)"
-        active-text-color="var(--auriga-accent)"
-        :default-openeds="['environment', 'membership']"
+  <div class="admin-shell" :data-admin-theme="dark ? 'dark' : 'light'">
+    <aside class="admin-side">
+      <RouterLink class="admin-brand" to="/overview"
+        ><span>A</span>
+        <div>
+          Auriga<small>{{ adminT('navConsole') }}</small>
+        </div></RouterLink
       >
-        <ElSubMenu index="environment">
-          <template #title>{{ adminT('environment') }}</template>
-          <ElMenuItem index="/instances">{{ adminT('instances') }}</ElMenuItem>
-          <ElMenuItem index="/nodes">{{ adminT('nodes') }}</ElMenuItem>
-        </ElSubMenu>
-        <ElSubMenu index="membership">
-          <template #title>{{ adminT('membership') }}</template>
-          <ElMenuItem index="/members">{{ t('adminNav.members') }}</ElMenuItem>
-          <ElMenuItem index="/invitations">{{
-            adminT('invitationTitle')
-          }}</ElMenuItem>
-          <ElMenuItem index="/groups">{{ t('adminNav.groups') }}</ElMenuItem>
-          <ElMenuItem index="/quotas">{{ adminT('quotaTitle') }}</ElMenuItem>
-          <ElMenuItem index="/roles">{{ t('adminNav.roles') }}</ElMenuItem>
-        </ElSubMenu>
-        <ElMenuItem v-for="item in items" :key="item.path" :index="item.path">
-          {{ t(item.key) }}
-        </ElMenuItem>
-      </ElMenu>
+      <nav :aria-label="adminT('navConsole')">
+        <RouterLink
+          v-for="item in navigation"
+          :key="item.path"
+          :to="item.path"
+          class="admin-navlink"
+          :aria-current="active?.key === item.key ? 'page' : undefined"
+          ><svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path :d="iconPaths[item.icon]" /></svg
+          ><span>{{ adminT(item.key) }}</span></RouterLink
+        >
+      </nav>
+      <div class="admin-side-bottom">{{ adminT('navControl') }}</div>
     </aside>
-    <div class="main">
-      <header class="top">
-        <span class="muted">{{ me?.account.displayName || '' }}</span>
-        <div class="actions">
-          <ElButton text @click="language">{{ t('language') }}</ElButton>
-          <ElButton text @click="theme">{{ t('theme') }}</ElButton>
-          <ElButton text @click="logout">{{ t('login.logout') }}</ElButton>
+    <div class="admin-workspace">
+      <header class="admin-top">
+        <div class="admin-crumb">
+          {{ adminT('navConsole') }} <span>/</span>
+          {{ active ? adminT(active.key) : '' }}
+        </div>
+        <div class="admin-top-actions">
+          <span>{{ me?.account.displayName || '' }}</span
+          ><ElButton text @click="language">{{ t('language') }}</ElButton
+          ><ElButton text @click="theme">{{ t('theme') }}</ElButton
+          ><ElButton text @click="logout">{{ t('login.logout') }}</ElButton>
         </div>
       </header>
-      <section class="page">
+      <main class="admin-main">
+        <p v-if="logoutError" role="alert" class="resource-error">
+          {{ logoutError }}
+        </p>
+        <nav
+          v-if="active?.children.length"
+          class="admin-subnav"
+          :aria-label="adminT(active.key)"
+        >
+          <RouterLink
+            v-for="[path, key] in active.children"
+            :key="path"
+            :to="path"
+            :aria-current="route.path === path ? 'page' : undefined"
+            >{{ adminT(key) }}</RouterLink
+          >
+        </nav>
         <router-view />
-      </section>
+      </main>
     </div>
   </div>
 </template>
-
-<style scoped>
-.admin-shell {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 220px 1fr;
-}
-.side {
-  border-right: 1px solid var(--auriga-border);
-  padding: 1.25rem 0.75rem;
-  background: rgba(7, 22, 36, 0.55);
-  backdrop-filter: blur(16px);
-}
-.brand {
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  padding: 0 0.75rem 1rem;
-  margin: 0;
-}
-.main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--auriga-border);
-}
-.page {
-  padding: 1.25rem;
-}
-.muted {
-  color: var(--auriga-muted);
-}
-.actions {
-  display: flex;
-  gap: 0.25rem;
-}
-</style>

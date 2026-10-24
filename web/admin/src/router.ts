@@ -8,7 +8,28 @@ import GroupsView from './views/GroupsView.vue';
 import InvitationsView from './views/InvitationsView.vue';
 import QuotasView from './views/QuotasView.vue';
 import RolesView from './views/RolesView.vue';
-import PlaceholderView from './views/PlaceholderView.vue';
+import ResourcesView from './views/ResourcesView.vue';
+import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
+import { navigation } from './admin/navigation';
+
+const existing = new Set([
+  '/resources',
+  '/members',
+  '/nodes',
+  '/instances',
+  '/groups',
+  '/invitations',
+  '/quotas',
+  '/roles',
+]);
+const unavailable = [
+  ...new Set(
+    navigation.flatMap((item) => [
+      item.path,
+      ...item.children.map((child) => child[0]),
+    ]),
+  ),
+].filter((path) => !existing.has(path));
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -18,7 +39,8 @@ export const router = createRouter({
       path: '/',
       component: AdminLayout,
       children: [
-        { path: '', redirect: '/members' },
+        { path: '', redirect: '/resources' },
+        { path: 'resources', component: ResourcesView },
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },
         { path: 'instances', component: InstancesView },
@@ -26,16 +48,10 @@ export const router = createRouter({
         { path: 'invitations', component: InvitationsView },
         { path: 'quotas', component: QuotasView },
         { path: 'roles', component: RolesView },
-        {
-          path: 'providers',
-          component: PlaceholderView,
-          props: { titleKey: 'adminNav.providers' },
-        },
-        {
-          path: 'settings',
-          component: PlaceholderView,
-          props: { titleKey: 'adminNav.settings' },
-        },
+        ...unavailable.map((path) => ({
+          path: path.slice(1),
+          component: WorkflowUnavailableView,
+        })),
       ],
     },
   ],
