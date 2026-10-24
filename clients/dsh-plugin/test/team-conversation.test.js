@@ -242,7 +242,8 @@ async function conversation() {
     const vault = await createVault(path),
       sessions = new Map(),
       admitted = [],
-      promptCalls = [];
+      promptCalls = [],
+      createCalls = [];
     const ctx = {
       tools: {
         register() {
@@ -251,6 +252,7 @@ async function conversation() {
       },
       sessionController: {
         async create({ sessionId }) {
+          createCalls.push(sessionId);
           if (!sessions.has(sessionId))
             sessions.set(sessionId, { id: sessionId, queue: [] });
           return { sessionId };
@@ -323,6 +325,7 @@ async function conversation() {
       sessions,
       admitted,
       promptCalls,
+      createCalls,
       exec,
       alter: (fn) => {
         alter = fn;
@@ -387,12 +390,53 @@ test('A open → B receive/reply → A receive reuses the original source sessio
     await a.team.poll();
     assert.equal(a.admitted.length, 1);
     assert.equal(a.promptCalls.length, 1);
+    assert.deepEqual(a.createCalls, [a.original]);
     assert.equal(run.metrics.acks, 2);
     const queue = JSON.parse(
       await readFile(join(a.path, a.original + '.queue.json'), 'utf8'),
     );
     assert.equal(queue.length, 1);
     assert.equal(queue[0].requestId, a.admitted[0].requestId);
+    await a.team.toolCall(
+      'auriga_reply_thread',
+      { threadId, text: 'Second input for B', idempotencyKey: 'reply-2' },
+      a.exec(a.original),
+    );
+    await b.team.poll();
+    assert.equal(b.admitted.length, 2);
+    assert.equal(b.admitted[1].sessionId, receiver);
+    assert.deepEqual(b.createCalls, [b.original, receiver]);
+    assert.equal(run.metrics.acks, 3);
+  } finally {
+    await run.close();
+  }
+});
+
+test('new receiver without durable native session cannot publish a binding or ACK', async () => {
+  const run = await conversation();
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B');
+    const opened = await a.team.toolCall(
+      'auriga_open_thread',
+      {
+        targetEndpointId: b.id,
+        text: 'Not durable',
+        idempotencyKey: 'no-native-flush',
+      },
+      a.exec(a.original),
+    );
+    b.ctx.sessions.flush = async () => false;
+    await assert.rejects(
+      b.team.poll(),
+      /created DSH session persistence unavailable/,
+    );
+    const thread =
+      b.vault.snapshot().threads[opened.structuredContent.message.threadId];
+    assert.equal(thread.bindingId, null);
+    assert.deepEqual(b.vault.snapshot().deliveries, {});
+    assert.equal(b.promptCalls.length, 0);
+    assert.equal(run.metrics.acks, 0);
   } finally {
     await run.close();
   }

@@ -280,13 +280,24 @@ export function createTeam({
         s.threads[message.threadId] = thread;
       });
     }
-    const created = await ctx.sessionController.create({
-      sessionId: thread.sessionId,
-    });
-    active();
-    if (created.sessionId !== thread.sessionId)
-      throw new Error('DSH session identity mismatch');
     if (!thread.bindingId) {
+      // rc.3 create is a blank-session placement operation, not a resume API:
+      // it may reject another cwd or mint a new ID after a turn has started.
+      // A durable binding already owns the identity; prompt resumes it natively.
+      const created = await ctx.sessionController.create({
+        sessionId: thread.sessionId,
+      });
+      active();
+      if (created.sessionId !== thread.sessionId)
+        throw new Error('DSH session identity mismatch');
+      const session = ctx.sessions.get(thread.sessionId);
+      if (!session || session.id !== thread.sessionId)
+        throw new Error('created DSH session is not live');
+      // Once bindingId is durable, every retry uses prompt's cold resolver.
+      // Persist the native identity before publishing that resume-only state.
+      if ((await ctx.sessions.flush(session)) !== true)
+        throw new Error('created DSH session persistence unavailable');
+      active();
       const bound = await binding(thread.sessionId, message.threadId);
       await vault.update((s) => {
         s.threads[message.threadId].bindingId = bound.id;
