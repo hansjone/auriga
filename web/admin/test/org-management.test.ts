@@ -32,6 +32,7 @@ let members: Member[];
 let calls: { path: string; method: string; init: RequestInit }[];
 let wrapper: VueWrapper | undefined;
 let clipboardWrite: ReturnType<typeof vi.fn>;
+let returnedUrl: string;
 let fail:
   { path: string; method: string; status: number; code: string } | undefined;
 let intercept:
@@ -50,6 +51,7 @@ beforeEach(() => {
   calls = [];
   fail = undefined;
   intercept = undefined;
+  returnedUrl = `https://portal.example.com/invite/${credential}`;
   invitations = [
     {
       id: invitationId,
@@ -149,7 +151,7 @@ beforeEach(() => {
             ...invitations[0],
             ...JSON.parse(String(init.body)),
             code: credential,
-            url: `https://portal.example.com/invite/${credential}`,
+            url: returnedUrl,
           },
           201,
         );
@@ -264,7 +266,239 @@ async function createInvitation() {
 }
 
 describe('invitation management', () => {
-  it('creates only an ordinary member invitation, confirms and shows the code without a URL', async () => {
+  it.each([
+    'https://portal.example.com:9443/team/invite/example%2Bcode?source=invitation',
+    'http://192.0.2.10:8080/invite/example-code',
+    'http://192.0.2.10:8080/portal/path/invite/example-code',
+  ])(
+    'copies the exact official invitation URL %s without deriving it from the admin origin',
+    async (value) => {
+      returnedUrl = value;
+      await render(InvitationsView);
+      await createInvitation();
+      expect(wrapper!.get('[data-testid="invitation-url"]').text()).toBe(value);
+      await click('复制邀请链接');
+      expect(clipboardWrite).toHaveBeenLastCalledWith(value);
+      expect(wrapper!.find('a').exists()).toBe(false);
+      expect(location.href).not.toContain(credential);
+      await click('复制邀请凭据');
+      expect(clipboardWrite).toHaveBeenLastCalledWith(credential);
+      await click('关闭并清除凭据');
+      expect(wrapper!.text()).not.toContain(value);
+      expect(wrapper!.text()).not.toContain(credential);
+    },
+  );
+  it('clears the invitation URL on explicit refresh and on starting another invitation', async () => {
+    await render(InvitationsView);
+    await createInvitation();
+    await click('刷新');
+    expect(wrapper!.text()).not.toContain(returnedUrl);
+    await createInvitation();
+    await click('创建普通成员邀请');
+    expect(wrapper!.text()).not.toContain(returnedUrl);
+    expect(wrapper!.text()).not.toContain(credential);
+  });
+  it('clears the result when a filter changes or an invitation is revoked', async () => {
+    await render(InvitationsView);
+    await createInvitation();
+    await choose('状态', 'active');
+    expect(wrapper!.text()).not.toContain(returnedUrl);
+    await createInvitation();
+    await click('撤销邀请');
+    expect(wrapper!.text()).not.toContain(returnedUrl);
+    expect(wrapper!.text()).not.toContain(credential);
+  });
+  it('preserves a one-time result after list failure and retries only GET without discarding it', async () => {
+    let created = false;
+    intercept = (path, init) => {
+      if (path === '/api/org/v1/admin/invitations' && init.method === 'POST') {
+        created = true;
+        return Promise.resolve(
+          json({ ...invitations[0], code: credential, url: returnedUrl }, 201),
+        );
+      }
+      if (created && path.includes('/admin/invitations?'))
+        return Promise.resolve(
+          json(
+            { status: 503, code: 'common.unavailable', title: 'Unavailable' },
+            503,
+          ),
+        );
+    };
+    await render(InvitationsView);
+    await createInvitation();
+    expect(wrapper!.text()).toContain('勿重复提交');
+    expect(wrapper!.text()).toContain(returnedUrl);
+    intercept = undefined;
+    const retry = wrapper!
+      .findAllComponents({ name: 'ElDialog' })
+      .at(-1)!
+      .findAll('button')
+      .find((button) => button.text() === '重试');
+    expect(retry).toBeDefined();
+    await retry!.trigger('click');
+    await flushPromises();
+    expect(writes()).toHaveLength(1);
+    expect(wrapper!.text()).toContain(returnedUrl);
+    await click('复制邀请链接');
+    expect(clipboardWrite).toHaveBeenLastCalledWith(returnedUrl);
+  });
+  it.each([401, 403])(
+    'clears code and URL when a result readback returns %s',
+    async (status) => {
+      let created = false;
+      intercept = (path, init) => {
+        if (
+          path === '/api/org/v1/admin/invitations' &&
+          init.method === 'POST'
+        ) {
+          created = true;
+          return Promise.resolve(
+            json(
+              { ...invitations[0], code: credential, url: returnedUrl },
+              201,
+            ),
+          );
+        }
+        if (created && path.includes('/admin/invitations?'))
+          return Promise.resolve(
+            json(
+              {
+                status,
+                code:
+                  status === 401
+                    ? 'common.unauthenticated'
+                    : 'common.forbidden',
+                title: 'Denied',
+              },
+              status,
+            ),
+          );
+      };
+      await render(InvitationsView);
+      await createInvitation();
+      expect(wrapper!.text()).not.toContain(returnedUrl);
+      expect(wrapper!.text()).not.toContain(credential);
+      expect(
+        wrapper!
+          .findAll('.invitation-code')
+          .every((node) => node.text() === ''),
+      ).toBe(true);
+    },
+  );
+  it('reports unavailable trusted portal configuration without a fake result or automatic POST replay', async () => {
+    fail = {
+      path: '/api/org/v1/admin/invitations',
+      method: 'POST',
+      status: 503,
+      code: 'common.unavailable',
+    };
+    await render(InvitationsView);
+    await createInvitation();
+    expect(wrapper!.text()).toContain('受信门户配置');
+    expect(wrapper!.text()).not.toContain('邀请已创建');
+    expect(wrapper!.text()).not.toContain(returnedUrl);
+    expect(wrapper!.text()).not.toContain(credential);
+    expect(writes()).toHaveLength(1);
+  });
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,<b>example</b>',
+    '/invite/relative',
+  ])(
+    'does not present an unsupported returned URL as a usable invitation: %s',
+    async (value) => {
+      returnedUrl = value;
+      await render(InvitationsView);
+      await createInvitation();
+      expect(wrapper!.text()).toContain('未提供有效的邀请链接');
+      expect(wrapper!.text()).not.toContain(value);
+      expect(wrapper!.text()).not.toContain('邀请已创建');
+      expect(wrapper!.find('a').exists()).toBe(false);
+    },
+  );
+  it('keeps the link selectable when clipboard access fails and hides exception text', async () => {
+    clipboardWrite.mockRejectedValue(
+      new Error('example-private-clipboard-error'),
+    );
+    await render(InvitationsView);
+    await createInvitation();
+    await click('复制邀请链接');
+    expect(wrapper!.text()).toContain('手动选择并复制');
+    expect(wrapper!.get('[data-testid="invitation-url"]').text()).toBe(
+      returnedUrl,
+    );
+    expect(wrapper!.text()).not.toContain('example-private-clipboard-error');
+  });
+  it('does not restore a cleared result or copy notice from a late clipboard response', async () => {
+    let resolve!: () => void;
+    clipboardWrite.mockImplementation(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    await render(InvitationsView);
+    await createInvitation();
+    await click('复制邀请链接');
+    await click('关闭并清除凭据');
+    resolve();
+    await flushPromises();
+    expect(wrapper!.text()).not.toContain(returnedUrl);
+    expect(wrapper!.text()).not.toContain(credential);
+    expect(wrapper!.text()).not.toContain('已复制');
+  });
+  it('ignores an old copy failure even if a new creation returns the same credential', async () => {
+    let reject!: (e: Error) => void;
+    clipboardWrite.mockImplementationOnce(
+      () =>
+        new Promise((_done, fail) => {
+          reject = fail;
+        }),
+    );
+    await render(InvitationsView);
+    await createInvitation();
+    await click('复制邀请链接');
+    await click('关闭并清除凭据');
+    await createInvitation();
+    reject(new Error('old-copy'));
+    await flushPromises();
+    expect(wrapper!.text()).not.toContain('无法访问剪贴板');
+    expect(wrapper!.text()).toContain(returnedUrl);
+  });
+  it('does not save a creation response that arrives after results were cleared', async () => {
+    let resolve!: (response: Response) => void;
+    intercept = (path, init) =>
+      path === '/api/org/v1/admin/invitations' && init.method === 'POST'
+        ? new Promise((done) => {
+            resolve = done;
+          })
+        : undefined;
+    await render(InvitationsView);
+    await click('创建普通成员邀请');
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    await confirm();
+    wrapper!.findAllComponents({ name: 'ElDialog' }).at(-1)!.vm.$emit('close');
+    await flushPromises();
+    resolve(
+      json({ ...invitations[0], code: credential, url: returnedUrl }, 201),
+    );
+    await flushPromises();
+    expect(wrapper!.text()).not.toContain(returnedUrl);
+    expect(wrapper!.text()).not.toContain(credential);
+  });
+  it('uses English link and copy labels', async () => {
+    await render(InvitationsView, 'en');
+    await click('Create member invitation');
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    await confirm();
+    expect(wrapper!.text()).toContain('One-time invitation link');
+    await click('Copy invitation link');
+    expect(clipboardWrite).toHaveBeenLastCalledWith(returnedUrl);
+  });
+  it('creates only an ordinary member invitation and shows the returned code and URL once', async () => {
     await render(InvitationsView);
     await click('创建普通成员邀请');
     await wrapper!
@@ -288,7 +522,9 @@ describe('invitation management', () => {
     expect(wrapper!.get('[data-testid="invitation-code"]').text()).toBe(
       credential,
     );
-    expect(wrapper!.text()).not.toContain('portal.example.com');
+    expect(wrapper!.get('[data-testid="invitation-url"]').text()).toBe(
+      `https://portal.example.com/invite/${credential}`,
+    );
     expect(wrapper!.find('a').exists()).toBe(false);
     expect(wrapper!.text()).toContain('没有发送邮件');
     expect(location.href).not.toContain(credential);

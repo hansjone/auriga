@@ -21,11 +21,17 @@ export const orgZh = {
   invitationCreated: '邀请已创建。请安全交付一次性凭据；没有发送邮件。',
   invitationRevoked: '邀请已撤销。',
   oneTimeCode: '一次性邀请凭据',
+  invitationLink: '一次性邀请链接',
+  copyInvitationLink: '复制邀请链接',
+  invitationSourceUnavailable:
+    '邀请创建暂不可用，请管理员检查受信门户配置和服务状态。',
+  invitationResultInvalid:
+    '创建响应未提供有效的邀请链接或凭据。请先检查列表，勿重复创建。',
   codeWarning:
-    '此凭据仅本次显示。关闭后无法再次查看，请安全转交给受邀人；本页不提供邀请链接。',
+    '邀请链接和凭据仅本次显示，关闭后无法再次查看。请安全转交给受邀人；链接按服务器返回原样提供。',
   copyCode: '复制邀请凭据',
   copied: '已复制；请自行清理剪贴板中的敏感内容。',
-  copyFailed: '无法访问剪贴板，请手动复制当前凭据。',
+  copyFailed: '无法访问剪贴板，请手动选择并复制当前链接或凭据。',
   clearCode: '关闭并清除凭据',
   uses: '使用次数 / 上限',
   expires: '过期时间',
@@ -90,11 +96,18 @@ export const orgEn = {
     'Invitation created. Deliver the credential securely; no email was sent.',
   invitationRevoked: 'Invitation revoked.',
   oneTimeCode: 'One-time invitation credential',
+  invitationLink: 'One-time invitation link',
+  copyInvitationLink: 'Copy invitation link',
+  invitationSourceUnavailable:
+    'Invitation creation is unavailable. Ask an administrator to check trusted portal configuration and service status.',
+  invitationResultInvalid:
+    'The create response did not provide a valid invitation link or credential. Check the list before creating again.',
   codeWarning:
-    'This credential is shown once. Closing clears it permanently from this page. Deliver it securely; no invitation link is provided here.',
+    'The invitation link and credential are shown once and cleared on close. Deliver them securely. The link is provided exactly as returned by the server.',
   copyCode: 'Copy credential',
   copied: 'Copied. Clear sensitive clipboard contents yourself.',
-  copyFailed: 'Clipboard unavailable. Copy the displayed credential manually.',
+  copyFailed:
+    'Clipboard unavailable. Select and copy the displayed link or credential manually.',
   clearCode: 'Close and clear credential',
   uses: 'Uses / limit',
   expires: 'Expires at',
