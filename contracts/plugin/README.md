@@ -105,7 +105,7 @@ prettier --write src/generated/managed-config.d.ts
 
 ## 5. 团队面板加载
 
-团队面板是 Vue 组件编译成的 Web Component，跟平台一起发版，插件只负责挂载（ADR 0017）。DSH 里的入口用客户端扩展点：侧栏 `sidebar.panellist` 加"团队"，主区域 `main` 挂面板页（这套扩展点在 DSH 0.2 还没有稳定承诺，外壳要尽量薄，并在 CI 里用 DSH 冒烟测试）。
+团队面板以原生 DOM 与 Custom Element 实现，作为自包含 ES module 随平台发版，由插件负责挂载；管理台是独立 Vue 应用。插件面向 DSH 提供登录、功能、设置三部分：原生功能页与独立设置页载体已落地，原生登录、真实 connect 及安装执行等仍待接线。插件页面沿用 DSH 宿主提供的主题 tokens 与服务，字体、颜色和样式随宿主主题，不另设调色板或监听 OS 主题（ADR 0017）。DSH 里的入口用客户端扩展点：侧栏 `sidebar.panellist` 加"团队"，主区域 `main` 挂面板页（这套扩展点在 DSH 0.2 还没有稳定承诺，外壳要尽量薄，并在 CI 里用 DSH 冒烟测试）。
 
 - 面板必须是**自包含**的 ES module（可带懒加载分片，都要列进 `integrity`），运行时不从别的源取代码。
 - 平台在 `/panel/` 下提供面板文件，入口是 `GET /panel/manifest.json`，格式见 `panel-manifest.schema.json`：版本、协议、入口脚本、每个文件的 SRI 摘要、平台签名。
