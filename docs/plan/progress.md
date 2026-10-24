@@ -14,12 +14,14 @@
 
 成员协作参照 Codex 原生 agent、子 agent 与持久会话机制，区分创建与派生、仅发消息与触发执行、运行中引导、等待通知、中断恢复及上下文范围。当前通信工具是先行基础，不代替完整能力目标；先以真实本地登录、平台连接和两个完整 DSH 的收发闭环验收。
 
+通信网络以插件／DSH 实例为连接主体，多个获权主会话和子会话共用稳定连接；总部负责可靠交换，总部系统 DSH 是执行节点。NETWORK1 正在比较适合即时通讯场景的成熟协议与可自部署改造的开源实现，优先核验 Go NATS Server 原生 WSS，再对照 Tinode、OpenIM、MQTT 和 XMPP 等方案。远程 Team MCP 是工具入口，消息数据面另行设计；现有定时 pull 不代表最终网络。隔离 Broker 原型已验证连接复用、离线恢复和漏 ACK 重投，尚未验证新网络的 IAM、原生 Node SDK、完整 DSH、高可用或容量。
+
 2026-10-24 本地接线批次：
 
 - EDGECONNECT2 [#120](https://github.com/hansjone/auriga/pull/120)：正式远程 MCP、Node 私有操作和本人撤销入口已实现；精确提交全部 22 项 CI 成功后，新非作者独审通过（高 0、中 0、低 1）。超限请求的错误状态映射列为低项，字节限制没有绕过。受保护待外部审定，未合并。
-- NATIVELOGIN2 [#121](https://github.com/hansjone/auriga/pull/121)：同次账号/TOTP 与 S256 兑换受限设备身份、本人撤销及在线设备核验已实现。真实应用发现并修复 Spring 安全代理启动失败；旧登录 DTO 兼容回归修后 47 项通过，原始 HTTP 的严格校验保留。最新提交尚待完整 CI 和独审，未合并。
-- TEAMREMOTE2 [#122](https://github.com/hansjone/auriga/pull/122)：远程 Streamable HTTP、四通信工具、Node 投递、逐次 IAM/org/collab 准入及显式服务装配已实现。包含尚未合入的 IAM 和持久核心依赖；正式 POSIX 服务令牌导出不冒 Windows 支持。最新提交尚待完整 CI 和独审，未合并。
-- LOCALCONNECT2 [#123](https://github.com/hansjone/auriga/pull/123)：两个真实当前 DSH 已安装并启用候选；真实密码/TOTP 已签发并加密保存设备凭据，本地六项准入负向通过。实际远程握手发现客户端通知 Accept 不完整，另核到回复的源会话映射与失败恢复问题，正在同作者修复并重验。真实双向收发、退出和重启恢复尚未通过，不以安装、页面壳或模块测试代替。所有候选均保持待审查，未部署。
+- NATIVELOGIN2 [#121](https://github.com/hansjone/auriga/pull/121)：同次账号/TOTP 与 S256 兑换受限设备身份、本人撤销及在线设备核验已实现。真实应用发现并修复 Spring 安全代理启动失败；保留原始 HTTP 严格校验并修复旧登录 DTO 兼容。精确提交 15 项 CI 成功后，全新非作者独审通过（高 0、中 0、低 0），独立验证 57 项无跳过；受保护，未合并。
+- TEAMREMOTE2 [#122](https://github.com/hansjone/auriga/pull/122)：远程 Streamable HTTP、四通信工具、Node 投递、逐次 IAM/org/collab 准入及显式服务装配已实现。精确提交 14 项 CI 成功后，全新非作者独审通过（高 0、中 0、低 1）；合法拆分多条 Accept 被误拒列为兼容性遗留，不能放宽缺 SSE 的拒绝。包含尚未合入的 IAM 和持久核心依赖；正式 POSIX 服务令牌导出不冒 Windows 支持。受保护，未合并。
+- LOCALCONNECT2 [#123](https://github.com/hansjone/auriga/pull/123)：两个完整真实 DSH 已分别完成登录和平台连接。真实模型第一轮有 A 到 B 投递及 B 回复入库，回原会话受重复 create 的 cwd 冲突阻断，完整往返尚未通过。R5 已修普通绑定会话由原生 prompt 恢复、保留 ID/cwd，新建持久化后才绑定；真实 rc.3 模块专项 7 项通过，插件 204 项通过、6 项环境跳过，尚待最新 CI、独审及完整客户端重验。现场已停止并保留证据，不以页面或模块测试代替。所有候选均保持待审查，未部署。
 
 ## M0 立项
 
