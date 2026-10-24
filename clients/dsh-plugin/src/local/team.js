@@ -1,4 +1,4 @@
-/* global AbortController, AbortSignal */
+/* global AbortSignal */
 import { randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { setInterval, clearInterval } from 'node:timers';

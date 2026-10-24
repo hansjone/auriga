@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+/* global Headers */
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, mkdir, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -1,4 +1,4 @@
-/* global Headers, fetch, URLSearchParams, AbortSignal */
+/* global Headers, AbortSignal */
 import { createPublicKey, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 

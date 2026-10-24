@@ -1,4 +1,4 @@
-/* global AbortController, AbortSignal, setInterval, clearInterval */
+/* global AbortSignal */
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { setTimeout as delay } from 'node:timers/promises';

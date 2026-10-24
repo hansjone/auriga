@@ -1,5 +1,5 @@
 import { createLoginView } from './index.js';
-/* global fetch, HTMLElement, AbortController, location, addEventListener */
+/* global HTMLElement, location, addEventListener */
 const BASE = '/auriga/local-login';
 let csrf = '';
 /** @param {string} path @param {object} [body] @param {AbortSignal} [signal] */
