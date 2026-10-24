@@ -1,6 +1,12 @@
 import { createApiClient } from '../../../shared/src/api/client';
 import { createIamApi } from '../../../shared/src/api/iam';
-import { isApiError } from '../../../shared/src/api/problem';
+
+/** Only this page's transport may attach a trusted HTTP status to an error. */
+class SessionHttpError extends Error {
+  constructor(readonly status: number) {
+    super('Session HTTP request failed');
+  }
+}
 
 const messages = {
   'zh-CN': {
@@ -145,8 +151,16 @@ export function mountPortalLogout(
       if (
         response.redirected ||
         (logout && response.ok && response.status !== 204)
-      )
+      ) {
+        void response.body?.cancel().catch(() => {});
         throw new Error('Unexpected session response');
+      }
+      // Do not classify errors through Problem.status: the shared client may
+      // prefer that untrusted body field over the actual transport status.
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => {});
+        throw new SessionHttpError(response.status);
+      }
       return response;
     },
   });
@@ -214,7 +228,9 @@ export function mountPortalLogout(
     } catch (error) {
       if (!current(version)) return;
       status =
-        isApiError(error) && error.status === 401 ? 'expired' : 'checkFailed';
+        error instanceof SessionHttpError && error.status === 401
+          ? 'expired'
+          : 'checkFailed';
     } finally {
       inFlight = undefined;
       render();
@@ -234,12 +250,12 @@ export function mountPortalLogout(
       status = 'success';
     } catch (error) {
       if (!current(version)) return;
-      if (isApiError(error) && error.status === 401) {
+      if (error instanceof SessionHttpError && error.status === 401) {
         authenticated = false;
         status = 'expired';
       } else
         status =
-          isApiError(error) && error.status === 403
+          error instanceof SessionHttpError && error.status === 403
             ? 'forbidden'
             : 'logoutFailed';
     } finally {

@@ -1,5 +1,8 @@
 import { mountPortalLogout } from './page';
+import { mountDocumentPage } from './lifecycle';
 import './style.css';
 
 const root = document.getElementById('portal-logout');
-if (root) mountPortalLogout(root);
+export const disposeEntry = root
+  ? mountDocumentPage(root, mountPortalLogout)
+  : () => {};

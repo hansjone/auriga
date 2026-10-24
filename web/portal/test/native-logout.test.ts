@@ -2,6 +2,7 @@ import { setImmediate } from 'node:timers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountPortalLogout } from '../src/native-logout/page';
 import logoutStyles from '../src/native-logout/style.css?raw';
+import { ApiError } from '../../shared/src/api/problem';
 
 const me = {
   account: { id: 'account-1', status: 'active' },
@@ -98,6 +99,110 @@ afterEach(() => {
 });
 
 describe('native portal logout', () => {
+  it.each([
+    ['GET', 403, 401],
+    ['GET', 500, 401],
+    ['POST', 403, 401],
+    ['POST', 500, 401],
+    ['GET', 401, 403],
+    ['GET', 401, 500],
+    ['POST', 401, 403],
+    ['POST', 401, 500],
+  ] as const)(
+    'uses trusted HTTP transport status for %s %i instead of body status %i',
+    async (method, httpStatus, bodyStatus) => {
+      if (method === 'POST') fetcher.mockResolvedValueOnce(json(me));
+      fetcher.mockResolvedValueOnce(
+        json(
+          {
+            status: bodyStatus,
+            code: 'common.unauthenticated',
+            title: 'Private mismatch',
+            detail: 'Private response',
+          },
+          httpStatus,
+        ),
+      );
+      render();
+      await flush();
+      if (method === 'POST') {
+        button('确认退出').click();
+        await flush();
+      }
+      if (httpStatus === 401) {
+        expect(root.querySelector('[role="status"]')?.textContent).toBe(
+          '尚未登录或登录已失效。',
+        );
+        expect(button('确认退出').hidden).toBe(true);
+        loginLink(true);
+      } else {
+        expect(root.textContent).not.toContain('尚未登录或登录已失效');
+        expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+          method === 'GET'
+            ? '无法确认登录状态'
+            : httpStatus === 403
+              ? '当前入口无法处理'
+              : '退出结果尚未确认',
+        );
+        expect(button(method === 'GET' ? '确认退出' : '重试退出').hidden).toBe(
+          method === 'GET',
+        );
+        loginLink();
+      }
+      expect(root.textContent).not.toContain('Private');
+      expect(fetcher).toHaveBeenCalledTimes(method === 'POST' ? 2 : 1);
+    },
+  );
+
+  it.each(['GET', 'POST'])(
+    'keeps %s network errors closed even when an untrusted error carries status 401',
+    async (method) => {
+      if (method === 'POST') fetcher.mockResolvedValueOnce(json(me));
+      fetcher.mockRejectedValueOnce(
+        new ApiError({
+          status: 401,
+          title: 'Private network error',
+          code: 'common.unauthenticated',
+        }),
+      );
+      render();
+      await flush();
+      if (method === 'POST') {
+        button('确认退出').click();
+        await flush();
+      }
+      expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+        method === 'GET' ? '无法确认登录状态' : '退出结果尚未确认',
+      );
+      expect(root.textContent).not.toContain('尚未登录或登录已失效');
+      expect(root.textContent).not.toContain('Private');
+      loginLink();
+      expect(fetcher).toHaveBeenCalledTimes(method === 'POST' ? 2 : 1);
+    },
+  );
+
+  it.each(['GET', 'POST'])(
+    'does not trust %s redirected HTTP 401 responses as proof of expiry',
+    async (method) => {
+      if (method === 'POST') fetcher.mockResolvedValueOnce(json(me));
+      const response = problem(401);
+      Object.defineProperty(response, 'redirected', { value: true });
+      fetcher.mockResolvedValueOnce(response);
+      render();
+      await flush();
+      if (method === 'POST') {
+        button('确认退出').click();
+        await flush();
+      }
+      expect(root.querySelector('[role="alert"]')?.textContent).toContain(
+        method === 'GET' ? '无法确认登录状态' : '退出结果尚未确认',
+      );
+      expect(root.textContent).not.toContain('尚未登录或登录已失效');
+      loginLink();
+      expect(fetcher).toHaveBeenCalledTimes(method === 'POST' ? 2 : 1);
+    },
+  );
+
   it.each([
     '',
     '?confirm=1&logout=1',
