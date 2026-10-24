@@ -2,8 +2,10 @@ import { useI18n } from 'vue-i18n';
 import { orgZh, orgEn } from './orgMessages';
 import { quotaZh, quotaEn } from './quotaMessages';
 import { rolesZh, rolesEn } from './rolesMessages';
+import { resourceZh, resourceEn } from './resourceMessages';
 
 const zh = {
+  ...resourceZh,
   ...orgZh,
   ...quotaZh,
   ...rolesZh,
@@ -116,6 +118,7 @@ const zh = {
   },
 };
 const en = {
+  ...resourceEn,
   ...orgEn,
   ...quotaEn,
   ...rolesEn,
