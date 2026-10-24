@@ -485,6 +485,11 @@ class InstanceAiTokenTest {
     Set<String> effective =
         new HashSet<>(Set.of("iam.providers.write", "org.roles.read", "ops.nodes.write"));
     M3PermissionCatalog.all().forEach(p -> effective.add(p.key()));
+    effective.addAll(
+        Set.of(
+            "auriga.connect.collab.write",
+            "auriga.connect.collab.admin",
+            "auriga.connect.collab.grant"));
     when(permissions.resolve(any(), anyString(), anyString())).thenReturn(effective);
     var portal =
         tokens.verify(
@@ -522,7 +527,7 @@ class InstanceAiTokenTest {
                 null,
                 ""));
     assertEquals(
-        List.of("auriga.connect.models.invoke"),
+        List.of("auriga.connect.collab.use", "auriga.connect.models.invoke"),
         Json.MAPPER.convertValue(device.path("perms"), List.class));
     assertEquals(
         Set.of("ai.models.invoke", "ai.usage.read"),
