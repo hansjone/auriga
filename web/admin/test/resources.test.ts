@@ -222,6 +222,9 @@ describe('real resource reads and fixed versions', () => {
     expect(wrapper!.get('[data-testid=version-detail]').text()).toContain(
       fixed.digest,
     );
+    expect(wrapper!.get('[data-testid=version-detail] dt').text()).toBe(
+      '资源版本',
+    );
     expect(wrapper!.text()).toContain('待审核');
     expect(wrapper!.text()).toContain('未指定默认版本');
     expect(
@@ -684,6 +687,13 @@ describe('resource async boundaries and navigation', () => {
   it('renders English resource labels and operation scopes', async () => {
     await page('en');
     expect(wrapper!.text()).toContain('Resource governance');
+    await openDetail();
+    await wrapper!.get('.resource-version-list button').trigger('click');
+    await flushPromises();
+    expect(wrapper!.get('[data-testid=version-detail] dt').text()).toBe(
+      'Resource version',
+    );
+    await click('Close details', wrapper!.getComponent(ElDrawer));
     await create();
     expect(wrapper!.getComponent(ActionConfirm).props('message')).toContain(
       'does not upload, review, publish',

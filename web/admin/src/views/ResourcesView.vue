@@ -740,7 +740,7 @@ function cancelConfirm() {
           {{ t('resourceNoVersion') }}
         </p>
         <dl v-if="version" class="resource-facts" data-testid="version-detail">
-          <dt>{{ t('version') }}</dt>
+          <dt>{{ t('resourceVersionLabel') }}</dt>
           <dd>{{ version.version }}</dd>
           <dt>{{ t('status') }}</dt>
           <dd>{{ stateLabel(version.state) }}</dd>

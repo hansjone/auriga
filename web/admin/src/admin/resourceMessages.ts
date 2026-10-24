@@ -28,6 +28,7 @@ export const resourceZh = {
   resourceMetadata: '包元数据',
   resourceVersions: '版本历史',
   resourceVersion: '固定版本详情',
+  resourceVersionLabel: '资源版本',
   resourceNoVersions: '暂无可读取的版本；上传与发布尚未开放。',
   resourceVersionBoundary:
     '版本状态来自服务端。变更说明、文件清单、权限声明和审核记录尚无可用查询接口；未提供不等于已通过核验。',
@@ -156,6 +157,7 @@ export const resourceEn = {
   resourceMetadata: 'Package metadata',
   resourceVersions: 'Version history',
   resourceVersion: 'Fixed version detail',
+  resourceVersionLabel: 'Resource version',
   resourceNoVersions:
     'No readable versions. Upload and publication are not open.',
   resourceVersionBoundary:
