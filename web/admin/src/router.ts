@@ -9,6 +9,7 @@ import InvitationsView from './views/InvitationsView.vue';
 import QuotasView from './views/QuotasView.vue';
 import RolesView from './views/RolesView.vue';
 import ResourcesView from './views/ResourcesView.vue';
+import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
 import { navigation } from './admin/navigation';
@@ -23,6 +24,7 @@ const existing = new Set([
   '/invitations',
   '/quotas',
   '/roles',
+  '/providers',
 ]);
 const unavailable = [
   ...new Set(
@@ -50,6 +52,7 @@ export const router = createRouter({
         { path: 'invitations', component: InvitationsView },
         { path: 'quotas', component: QuotasView },
         { path: 'roles', component: RolesView },
+        { path: 'providers', component: IdentityProvidersView },
         { path: 'settings', component: SettingsView },
         ...unavailable.map((path) => ({
           path: path.slice(1),
