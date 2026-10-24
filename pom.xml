@@ -19,6 +19,7 @@
     <json-schema-validator.version>3.0.8</json-schema-validator.version>
     <icu4j.version>78.3</icu4j.version>
     <webauthn.version>2.7.0</webauthn.version>
+    <commons-compress.version>1.28.0</commons-compress.version>
   </properties>
   <modules>
     <module>services/contracts</module>
@@ -45,6 +46,11 @@
   </modules>
   <dependencyManagement>
     <dependencies>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-compress</artifactId>
+        <version>${commons-compress.version}</version>
+      </dependency>
       <dependency>
         <groupId>com.ibm.icu</groupId>
         <artifactId>icu4j</artifactId>
