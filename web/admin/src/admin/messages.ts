@@ -4,9 +4,11 @@ import { quotaZh, quotaEn } from './quotaMessages';
 import { rolesZh, rolesEn } from './rolesMessages';
 import { resourceZh, resourceEn } from './resourceMessages';
 import { providersZh, providersEn } from './providersMessages';
+import { settingsZh, settingsEn } from './settingsMessages';
 
 const zh = {
   ...providersZh,
+  ...settingsZh,
   ...resourceZh,
   ...orgZh,
   ...quotaZh,
@@ -121,6 +123,7 @@ const zh = {
 };
 const en = {
   ...providersEn,
+  ...settingsEn,
   ...resourceEn,
   ...orgEn,
   ...quotaEn,
