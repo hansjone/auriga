@@ -5,6 +5,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { platformConfig, createPlatform, LoginJar } from './platform.js';
 import { createVault } from './vault.js';
 import { createTeam } from './team.js';
+import {
+  createHttpResponseTracker,
+  installHttpResponseTracking,
+} from './host.js';
 
 export const SESSION_COOKIE = 'auriga_local_session';
 export const ATTEMPT_COOKIE = 'auriga_local_attempt';
@@ -144,9 +148,13 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   };
   const killSession = (/** @type {any} */ row) => {
     sessions.delete(row.key);
+    httpResponses.close(row.key);
     for (const socket of sockets.get(row.key) ?? []) socket.destroy();
     sockets.delete(row.key);
   };
+  const httpResponses = createHttpResponseTracker(resolve);
+  /** @type {(()=>void)|undefined} */
+  let stopHttpTracking;
   async function getAccess() {
     active();
     if (refreshing) return refreshing;
@@ -316,6 +324,25 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     resolve,
     getAccess,
     vault,
+    /** @param {import('node:http').IncomingMessage} request @param {import('node:http').ServerResponse} response */
+    bindHttpResponse(request, response) {
+      return httpResponses.bind(request, response);
+    },
+    installHttpTracking() {
+      if (stopHttpTracking)
+        throw new Error('native HTTP tracking already installed');
+      const remove = installHttpResponseTracking(ctx, (req, res) =>
+        httpResponses.bind(req, res),
+      );
+      let removed = false;
+      stopHttpTracking = () => {
+        if (removed) return;
+        removed = true;
+        remove();
+        stopHttpTracking = undefined;
+      };
+      return stopHttpTracking;
+    },
     isReady() {
       return !!team && online && !closed;
     },
@@ -636,6 +663,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (disposed) return;
       disposed = true;
       closed = true;
+      stopHttpTracking?.();
       clearInterval(expiryTimer);
       clearInterval(revokeTimer);
       generation++;

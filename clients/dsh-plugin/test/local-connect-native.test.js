@@ -5,6 +5,7 @@ import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import * as Plugin from '../src/plugin.js';
 import { registerTeamTools } from '../src/local/team.js';
 
@@ -26,6 +27,7 @@ test(
       Tools,
       Projections,
       Sessions,
+      { Service },
     ] = await Promise.all([
       load('dsh-app-boot'),
       load('dsh-host-webserver'),
@@ -35,6 +37,7 @@ test(
       load('dsh-tools'),
       load('dsh-session-projection'),
       load('dsh-session'),
+      load('cordis'),
     ]);
     assert.equal(
       JSON.parse(
@@ -174,8 +177,39 @@ test(
       const login = await fetch(base + '/auriga/local-login', {
         headers: { cookie: nativeCookie },
       });
-      assert.equal(login.status, 200);
-      assert.match(await login.text(), /assets\/adapter.js/);
+      assert.equal(login.status, 503);
+      await login.arrayBuffer();
+      // Dependency capability only: no successful controller business is
+      // simulated by this native admission/Desk probe.
+      class ControllerCapabilities extends Service {
+        constructor(owner) {
+          super(owner, 'sessionController');
+        }
+        create() {
+          throw new Error('controller calls outside admission probe');
+        }
+        prompt() {
+          throw new Error('controller calls outside admission probe');
+        }
+      }
+      await ctx.plugin(ControllerCapabilities);
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const ready = await fetch(base + '/auriga/local-login', {
+          headers: { cookie: nativeCookie },
+        });
+        const text = await ready.text();
+        if (ready.status === 200) {
+          assert.match(text, /assets\/adapter.js/);
+          break;
+        }
+        assert.equal(ready.status, 503);
+        assert.ok(
+          Date.now() < deadline,
+          'injected login route did not become ready',
+        );
+        await delay(10);
+      }
       for (const file of ['adapter.js', 'index.js', 'styles.js'])
         assert.equal(
           (

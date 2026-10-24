@@ -18,6 +18,10 @@
 
 配置从当前插件 loader row 读取；私有设备状态在 `ctx.profileContext.dir/auriga-connect/`。原生启动授权仍必需，普通登录只回当前 DSH，不调用云端 instance/open。账号与 TOTP 在原步骤视图完成，不增加可见核码或 consent 按钮。详见 `contracts/plugin/local-login.md`。
 
+连接模式的父插件先持有本机准入门锁，再由真实 Cordis 条件注入的子上下文等待 profileContext、tools、sessions 与 sessionController。运行时与工具属于该子上下文；依赖未齐或被卸载时，父门锁继续拒绝原生 API，登录路由返回 503。依赖恢复后须重新登录或 resume，旧浏览器会话不复活。不配置 connect 的壳与 managed 模式不增加这些依赖。
+
+共享原生 `/api` 的 `connection/request(req,res,next)` 在 admission 后、HTTP bridge 前按本机会话关联 ServerResponse。退出、到期或在线认证拒绝会关闭该会话已开的 HTTP/SSE 响应及 WS；finish/close 释放索引。不会关闭共享 Peer、原生 server、其他会话的响应或退出路由自己的响应，也不调用 Agent 任务取消。此覆盖范围不包含绕过该原生 hook 自建的 HTTP 端点。
+
 Team 为平台远程 Streamable HTTP MCP，客户端不启动本地 MCP server。initialize 协商 2025-06-18，发送 initialized 通知；包括通知在内的 MCP POST 均声明 Accept application/json, text/event-stream，通知接受空202响应。四个工具从真实远程 tools/list 获取 schema，再注册到当前 DSH `ctx.tools`。执行只读取真实 `exec.agent.session.id/callId/rootCallId`，构造 ADR0016 `_meta`，Node 私有端点/绑定引用走受信请求头。Node register/bind/pull/ack/revoke 不暴露给模型。访问令牌每请求从 Node 取，refresh 不回放模型写入。
 
 开线程成功返回前，校验服务器响应message/thread UUID与authorEndpointId、已核验的source binding，并原子写入thread→当前可信DSH会话/绑定；禁止覆盖不同会话/绑定。远端提交而本地落盘失败时仍返回失败，调用者可用相同idempotencyKey安全重试，不凭模型输入补源会话。接收prompt分为两个text part：第一个仅有服务器验证过的threadId/messageId JSON上下文，第二个完整保留发送正文。接收模型据入队上下文使用reply/read，不依赖测试额外告知线程，不包含lease/token/私有身份，也不强制业务回复。

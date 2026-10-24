@@ -7,7 +7,10 @@ import { createManaged } from './modes/managed.js';
 import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
 import { createConnectRuntime } from './local/runtime.js';
-import { installLocalAdmission } from './local/host.js';
+import {
+  installLocalAdmission,
+  installHttpResponseTracking,
+} from './local/host.js';
 import { createConnectRoutes } from './local/routes.js';
 import { join } from 'node:path';
 
@@ -25,41 +28,107 @@ export async function apply(ctx, config) {
       throw new Error(
         'auriga-dsh: local UI requires native host authentication',
       );
-    let connectRuntime;
     if (config?.connect) {
-      const profile = ctx.get?.('profileContext');
-      if (!profile?.dir)
-        throw new Error('auriga-dsh: isolated host profile directory required');
-      const runtime = await createConnectRuntime({
-        config: config.connect,
-        directory: join(profile.dir, 'auriga-connect'),
-        ctx,
-      });
-      connectRuntime = runtime;
-      let admission, unregister;
-      try {
-        admission = installLocalAdmission(ctx.connection, runtime, {
-          protocol: ctx.webServer.protocol,
-        });
-        unregister = ctx.webServer.register({
-          kind: 'prefix',
-          path: '/auriga/local-login',
-          handler: createConnectRoutes({ runtime, admission }),
-        });
-        ctx.effect(
-          () => () => {
-            unregister();
-            admission.dispose();
-            runtime.close();
+      // The parent owns the closed door while native providers are pending or
+      // being unloaded. Only the injected child owns the runtime and tools.
+      let binding;
+      const current = () => {
+        if (!binding) return undefined;
+        try {
+          if (
+            !binding.ctx.tools?.register ||
+            !binding.ctx.sessions?.get ||
+            !binding.ctx.sessionController?.prompt
+          )
+            return undefined;
+          return binding;
+        } catch {
+          return undefined;
+        }
+      };
+      const gate = {
+        resolve: (req) => current()?.runtime.resolve(req) ?? null,
+        bindSocket: (req) => current()?.runtime.bindSocket(req) ?? false,
+        status: (req) =>
+          current()?.runtime.status(req) ?? {
+            connected: false,
+            connection: null,
           },
-          'auriga-dsh: local connection',
-        );
-      } catch (error) {
-        unregister?.();
-        admission?.dispose();
-        runtime.close();
-        throw error;
-      }
+        installHttpTracking: () =>
+          installHttpResponseTracking(
+            ctx,
+            (req, res) =>
+              current()?.runtime.bindHttpResponse(req, res) ?? false,
+          ),
+      };
+      const admission = installLocalAdmission(ctx.connection, gate, {
+        protocol: ctx.webServer.protocol,
+      });
+      ctx.effect(
+        () => () => admission.dispose(),
+        'auriga-dsh: persistent local door',
+      );
+      ctx.effect(
+        () =>
+          ctx.webServer.register({
+            kind: 'prefix',
+            path: '/auriga/local-login',
+            handler(req, res) {
+              const active = current();
+              if (active) return active.handler(req, res);
+              const rejected = admission.nativeAuth.requestRejection(req);
+              res.writeHead(rejected ?? 503, { 'cache-control': 'no-store' });
+              res.end();
+            },
+          }),
+        'auriga-dsh: persistent login route',
+      );
+      ctx.effect(
+        () =>
+          ctx.webServer.register({
+            kind: 'prefix',
+            path: '/auriga',
+            handler: createLocalSurfaceHandler({
+              mode: 'connect',
+              auth: ctx.connection,
+              runtime: gate,
+            }),
+          }),
+        'auriga-dsh: connect surfaces',
+      );
+      ctx.inject(
+        ['profileContext', 'tools', 'sessions', 'sessionController'],
+        async (connectCtx) => {
+          const profile = connectCtx.profileContext;
+          if (!profile?.dir)
+            throw new Error(
+              'auriga-dsh: isolated host profile directory required',
+            );
+          const runtime = await createConnectRuntime({
+            config: config.connect,
+            directory: join(profile.dir, 'auriga-connect'),
+            ctx: connectCtx,
+          });
+          const owned = {
+            ctx: connectCtx,
+            runtime,
+            handler: createConnectRoutes({ runtime, admission }),
+          };
+          try {
+            connectCtx.effect(() => {
+              binding = owned;
+              return () => {
+                if (binding === owned) binding = undefined;
+                runtime.close();
+              };
+            }, 'auriga-dsh: injected local runtime');
+          } catch (error) {
+            runtime.close();
+            throw error;
+          }
+        },
+      );
+      return;
     }
     ctx.effect?.(
       () =>
@@ -67,9 +136,8 @@ export async function apply(ctx, config) {
           kind: 'prefix',
           path: '/auriga',
           handler: createLocalSurfaceHandler({
-            mode: connectRuntime ? 'connect' : mode,
+            mode,
             auth: ctx.connection,
-            runtime: connectRuntime,
           }),
         }),
       'auriga-dsh: local surfaces',
