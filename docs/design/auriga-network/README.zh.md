@@ -6,7 +6,9 @@
 
 **要解决的问题**：一个 DSH 内会有许多主会话和子会话。它们需要共享可靠通信，但各自授权；不能每个 agent 维护连接，也不能让总部模型会话承担交换守护进程。
 
-**推荐**：NATS Server（Go 消息交换服务）与官方客户端维护每 DSH 一条 WSS 长连接；PostgreSQL 保存唯一业务真相。平台提交后推送“邮箱有更新”，插件按容量获取消息页，宿主持久接受后回执。会话和子树的授权由 Auriga 负责。总部 DSH 与其他 DSH 一样是执行端。
+**寻址已确认**：每个 DSH 有独立 node 身份，用户只是归属；目录仅列系统地址。初次联系由系统按策略新建会话，双方经 from/reply_to 交换完整地址；总部按 node 路由，插件按 local 分派，详见 §6。
+
+**推荐**：NATS Server（Go 消息交换服务）与官方客户端维护每 DSH 一条 WSS 长连接；PostgreSQL 保存唯一业务真相。平台提交后推送“邮箱有更新”，插件按容量获取消息页，宿主持久接受后回执。总部核节点和对话关系，DSH 插件核会话和子树授权。总部 DSH 与其他 DSH 一样是执行端。
 
 ```mermaid
 flowchart LR
@@ -113,7 +115,7 @@ NATS 优先做小型隔离验证：固定 v2.12.6、两个 Broker/官方客户�
 
 独立运行时兼容已有证据；完整插件、安全权限、硬缓冲与 HA 门禁尚未通过，详见[验收证据](failure-validation.zh.md#1-已有证据与明确未验证项)。
 
-Tinode 对照验证：固定release、PG隔离库、两个网络session、多topic、断线重连补历史、auth backend即时撤销、同一DSH两logical binding不能相互读topic；检查source中的用户级权限路径能否通过一层可信DSH代理满足委派，而无需每binding新账号。至少选定“collab为真相、Tinode仅路由”或“Tinode为消息真相、collab只保授权/receipt”之一再估改造，不能两边各确认成功。
+以下 logical binding 均指插件本地会话映射；R7 后总部只存不透明地址关系，不恢复会话目录。Tinode 对照验证：固定release、PG隔离库、两个网络session、多topic、断线重连补历史、auth backend即时撤销、同一DSH两logical binding不能相互读topic；检查source中的用户级权限路径能否通过一层可信DSH代理满足委派，而无需每binding新账号。至少选定“collab为真相、Tinode仅路由”或“Tinode为消息真相、collab只保授权/receipt”之一再估改造，不能两边各确认成功。
 
 OpenIM 对照验证：固定release和官方依赖最小集，核消息接收/同步时点、用户多端互踢策略、SDK Node宿主可打包性、业务回调失败是否拒绝以及PG持久核心如何迁移。只有真正需要其完整IM产品能力、且接受新增依赖时才优先它；不能裁掉其核心存储后还借其成熟度作保证。
 
@@ -143,9 +145,9 @@ MCP是工具协议；数据网络复用NATS协议，WSS只是其下层传输，A
 | 请求类别 | 首发通道与完成语义 |
 |---|---|
 | 登录/TOTP/PKCE、刷新、配对、资源授权 | HTTPS 控制面；沿既有可信 Node 流程，普通登录后后台完成连接，不新增可见“登录总部”步骤。 |
-| agent 发现 binding、开线程、定向/线程回复、读有权历史 | 插件采集本次 exec 上下文，经共享远程 MCP 客户端/HTTP 池；目录和目标规则见 §6.1。发送事务提交才返回 platform_stored，回复未到不是发送失败。现有列端点工具须先升级契约，不能以 DSH 列表冒充 agent 通讯录。 |
+| 发现 DSH 系统地址、首联、对话内精确发送/回复、读有权历史 | 插件采集本次 exec 上下文，经共享远程 MCP 客户端/HTTP 池；目录不列会话，地址由对话交换，见 §6.1。发送事务提交才返回 platform_stored，回复未到不是发送失败；现有工具须按新地址与关系规则升级契约。 |
 | 平台到 DSH 的消息、请求、执行控制、状态事件、唤醒 | 经NATS WSS的本连接专属下行subject承载应用信封；耐久正文先入 PG；提交触发 HEAD 提示，Node 通过同一 WSS 发 FETCH 取页，再回持久回执。无固定间隔客户端拉取。 |
-| 绑定/订阅、投递 receipt、恢复、节点就绪/暂停 | 私有应用消息，非新传输控制帧；仅Node/服务能发送，模型不见此工具。NATS CONNECT/PING/SUB/UNSUB/断线由官方实现，绑定/撤销等持久变更仍经collab授权事务。 |
+| 绑定/订阅、投递 receipt、恢复、节点就绪/暂停 | 私有应用消息，非新传输控制帧；仅Node/服务能发送，模型不见此工具。NATS CONNECT/PING/SUB/UNSUB/断线由官方实现，节点/对话关系撤销经 collab 授权事务，会话 binding/grant 由插件持久核验。 |
 | 临时进度/在线提示 | 可合并丢弃的非耐久帧，标明 ephemeral；最终结果和决定必须落为耐久消息。 |
 | 大文件/产物 | 经 resource 对象上传/下载；网络只传有权限的产物引用、摘要和大小，读取时重新授权。 |
 | 内部服务调用、路由/邮箱/存储 | 有界 gRPC 池及 NATS；不会为每个 DSH 建一条到 PostgreSQL 的连接。 |
@@ -154,72 +156,69 @@ MCP是工具协议；数据网络复用NATS协议，WSS只是其下层传输，A
 
 ## 6. 身份、会话树与寻址
 
-`用户 ≠ DSH ≠ session ≠ 活跃 agent ≠ thread ≠ connection`。同用户多个 DSH 分别有 node 身份和收件箱；同 DSH 多个主会话共享连接但互相不自动授权。session 是持久会话，agent 是其当前执行实体，冷会话没有必须常驻的 agent。
+`用户 ≠ DSH ≠ session ≠ 活跃 agent ≠ thread ≠ connection`。用户只表示归属：同一用户的本地、云端托管和总部系统 DSH 是独立 node，各自注册、在线、吊销和保存邮箱，不能用 user_id 合并连接或互踢。node_id 由总部注册分配，用户 ID 不进入地址；重新归属不能自动授予旧对话历史，跨 tenant 首发不迁移旧地址。
 
-最小寻址为 `(tenant_id, node_id, binding_id)`，thread 是显式参与者集合；host_session_id 由 Node 可信宿主读取且为不透明字符串。socket 地址、MCP Session ID、模型自填 sessionId 不是身份。连接世代是临时路由版本，不替代稳定 node/binding/delivery ID。
+**两段地址为 `<node>/<local>`**：总部仅依据 node 选择目标 DSH 的邮箱和连接；local 是总部不解析会话结构的不透明收件标识，由目标 DSH 插件分配并分派。总部可以对完整地址作相等比较、存线程关系、回执和计数，但不查询它对应哪个 host_session_id、父会话或当前模型。地址类型只是声明的分类，不改变路由。保留 local=0 为系统收件箱，展示可写 sys；它是插件的受控处理入口，不是一个常驻 LLM 或前台会话。
 
-拟新增授权记录包含 subject binding、可信 parent binding、root binding、授予方、权限交集、目标范围、expiry、最大委派深度与 policy revision。父子关系来自宿主原生 lineage/owner 接口；模型参数不能自报血缘。每个新子会话默认无网络能力，按需要由有权主体请求裁剪授权。子能力是父可委派能力、目标准入、租户策略和子请求的交集；不继承父的设备凭据、全部线程历史或所有工具。fork 复制了文本上下文也不复制 grant。
+node 与 local 均为无符号 64 位 ID，node 在所属 realm 内由总部保证永不复用，local 在该 node 内由插件保证永不复用。线上文本为 `aur1:<16位小写十六进制node>.<16位小写十六进制local>`，例如 `aur1:00000000000000a1.0000000000000001`；系统地址后段为 16 个 0。JSON 使用十进制字符串和独立 version/realm/type 字段，见协议 §1。界面可取各段前 4 位作短别名，冲突时加长；短别名仅展示，不存作身份、不接受为发送目标，也不声称跨目录唯一。不用 4+4 位十六进制作为真实 ID（各仅 65,536 个值）。
 
-授权动作至少区分 discover、send、receive、read_history、wake、queue、steer、cancel、fork、delegate、artifact_read；同进程信任不等于跨成员授权。首发跨 tenant 拒绝，不借总部/admin 主体绕过。跨 DSH 的子任务是新远程授权参与者，不可把本地 parentSession 字符串当远程委派凭据。
+**授权分工**：总部保 IAM/org 的 node 身份与 node→node 策略、完整不透明地址的线程参与关系、逐 delivery 回执及 tenant/node/local 计数。插件保 `local → binding → host_session_id` 映射、会话 grant、可信 lineage/parent/root、策略版本和子树预算；模型不能指定来源或自报血缘。新子会话默认无网络能力，按父可委派能力、接收策略、组织上限及子请求取交集，fork 不复制 grant。discover、send、receive、read_history、wake、queue、steer、cancel、fork、delegate、artifact_read 仍分别核验：总部核节点/对话边界，源插件核真实发起会话，目标插件核接收和执行能力。父权限、同用户或同进程均不自动跨会话授权。
 
-现有 `thread_participant UNIQUE(tenant,thread,endpoint)` 与 `delivery UNIQUE(tenant,message,target_endpoint)` 限制同 DSH 同线程只能有一个参与会话，必须在契约阶段显式升级为逻辑参与者/target binding 级去重；不能只加 WS 后假称同 DSH 多会话已经支持。未绑定的首次接触落到 node 的授权 provisioning inbox，由策略明确允许新建普通会话或转交某个已授权 binding；不能随机选当前前台会话。绑定持久后不能静默重映射。
+这个取舍意味着总部能审计“哪个已认证 node 声明哪个完整地址发给谁”，不能独立证明 local 的宿主血缘、模型身份和子树用量；细粒度审计依赖可信插件的持久记录及按权导出的证据。插件受损可冒充其自身 node 下的 local，不能据此宣称总部能防住同 node 内恶意伪造；总部仍阻止伪造其他 node、越 tenant 和未建立的精确收件关系。平台按不透明 local 限额只能隔离流量，防止多开 local 绕配额靠 node/tenant 硬上限；根树配额在插件执行。总部不知会话结构也不等于端到端加密或不知道会话地址：它仍存业务消息及不透明地址。
 
-冷会话只保留持久 binding/grant 与未处理 delivery，不保 socket、心跳、goroutine 或永久订阅。活跃订阅在通道打开时建立，idle 5 分钟或会话结束释放；需要被离线唤醒的“收件权”单独持久化，不靠在线订阅续命。关闭/归档默认暂停新执行并撤销临时委派；保留历史读权需单独策略。重连按 node 分页恢复有权通道，默认每批 128、最多 4 批在途；不逐个会话握手。
+现有 endpoint 级 UNIQUE 必须在契约阶段升级为完整地址级：thread_participant 按 (tenant, thread, node, local)，delivery 按 (tenant, message, target_node, target_local) 唯一；类型/版本不是可变别名，不能通过换类型重复入会。一个 node 的两个 local 在同一线程仍是两个参与者、两个 delivery/mail_seq 和独立回执。冷会话映射和 grant 持久保存在插件，PG 只保对话及投递；不为冷会话保持连接、心跳或 worker。活跃通道 idle 5 分钟释放，收件权不随订阅销毁；重连分页恢复不透明参与关系（每批 128、最多 4 批在途），并与本地映射核对，不上传整棵会话树。
 
 ### 6.1 DSH 内多 agent 的寻址与发现
 
-**发送方选的是具体会话的 binding，不是整台 DSH。** binding 是平台给一个获授权宿主会话登记的稳定通信地址；会话内当前运行哪个模型或执行实体可以变化，但不能因此把消息换投到别的会话。同一 DSH 的主会话、子会话分别登记地址，共用一条物理连接。下面是契约设计提案，不表示现有“列端点”工具已经具备这些能力。
+**先找到 DSH 系统，再通过对话认识会话。** 网络目录最多列出有权发现的 DSH 系统地址、显示名、归属用户和带观测时间的在线状态；不列会话地址、角色/能力列表、冷热状态、父子结构或会话数量。搜索、分页、按 ID 查询均遵守此边界。同用户的本地和云端 DSH 分列两条系统地址；显示名重名不自动选第一个。目录可见不等于可发送或自动建会话。
 
-**如何找到目标**：通讯录以 binding 为一条记录，至少返回 binding_id、所属 node/DSH、显示名、角色、可用能力、主/子会话类型、热/冷/忙状态和状态观测时间。显示名可重名，只作展示和筛选；最终选择必须携带返回的 binding_id，不能凭显示名、角色或“当前前台”猜目标。发送 agent 用发现工具按任务筛选角色/能力，再选择一个明确条目；匹配多个时返回候选，工具不自动选择第一个。
+**初次联系**：A1 的插件从本次可信执行上下文取得自己的完整地址作为 from；A1 选目录中的 B/sys，以 kind=first_contact 发起线程。总部核 node→node 首联策略、期限和配额，将消息及发往 B/sys 的 delivery 持久提交后返回 platform_stored，再通知 B。B 插件把消息交给系统收件箱，按决策 3 默认等待受控批准；显式允许自动创建/唤醒时，系统才幂等地预留新 local 和宿主 session ID、按明确 cwd/preset 新建会话。不能自动丢给 B 当前前台、已有主会话或父会话。
 
-发现请求的来源 binding 由插件读取本次可信执行上下文；平台按 discover 权限、目标可见范围及 tenant 策略裁剪每条记录和字段。能发现不等于能发消息、读历史或唤醒；通讯录只展示当前调用者可用且宿主已支持的能力。没有授权的会话不出现，也不能通过数量、模糊搜索或错误泄漏其存在。冷热状态只是带时间的提示，不保证执行能力；发送时必须重新核权和检查状态。
+新会话 B1 的首条回复携带自己的完整 from/reply_to，引用原 first_contact。总部只接受原目标 B 的认证插件对该 contact 作一次新地址介绍，并把 B1 与 A1 在这个线程内的关系随回复原子提交；A1 收到回复才获知 B1 地址。发起方 A1 地址已在首联 from 内，B1 因此可以准确回信。地址交换来自对话，不增加会话通讯录；受控收件箱状态不提前暴露待建会话 ID。创建、首回复丢失与重试使用同一 contact、预留 local 和幂等键，详见协议 §1.1。
 
-**三种明确的投递入口**：
+**后续联系与回复**：只有已由目标在对话中给出的地址及其有效关系/线程，才可作为非系统 to。复制、猜测或从别的线程听来的地址都不授予权利；平台校验线程关系，目标插件再次校验本地 grant。默认回复以 in_reply_to 引用持久原消息，to 必须等于该消息经核验的 reply_to（首发限定等于 from），不接受模型任意指定第三方回信地址。消息的 reply_to 是地址，in_reply_to 是消息 ID，不能混淆。全线程发送须显式选择，按已同意的参与者快照逐地址核权；新参与者不自动得到历史，父子和同机其他会话不自动加入。
 
-- 直接联系：指定目标 binding，平台解析其所属 DSH 和真实宿主会话，发送方不能覆盖宿主 session ID。一次发送不得同时指定互相矛盾的 binding 与线程目标。
-- 已有线程：指定 thread_id 和明确的发送/回复模式，平台从持久参与者集合确定收件 binding。同 DSH 两个会话可以同时参加同一线程，各有自己的 delivery 和回执；同一 node 不合并收件人。群发沿现有 fanout 上限和逐目标授权，不因为同机就扩大接收范围。
-- 只知道 DSH：走显式“首次联系节点”入口，唯一目的地是该 node 的受控 provisioning inbox（待分配收件箱）。普通精确发送入口缺 binding/thread 就报缺少目标，不能隐式选会话。首次联系持久保存后返回 awaiting_binding，说明“平台已存、尚无目标会话”；不是 host_accepted，更不会自动投给前台会话。只有获权分配者才能选择一个已有 binding，或经明确的新建权限创建并绑定新会话；分配动作持久、幂等并重新核双方权限，不能暗中改投已明确指定的目标。
+**冷会话和失效地址**：插件按 local 恢复原 host_session_id，核 receive/wake/执行权限，再取得协议 §5 当前世代的在线准入；不 create 替代旧会话。仅有收件权时 queued_cold，节点离线时 queued_offline；都不是执行成功。local 已归档/撤销时由插件报告明确状态并停止新准入；总部获知后拒绝后续发送，尚未知时可先 platform_stored 后得到目标拒绝，不能谎称总部能实时读取离线会话状态。对没有关系的询问统一 target_unavailable，不泄露存在性，不改投其他 local。云实例唤醒仍受 workspace 授权约束。
 
-**回复如何返回**：开线程时持久记录 originating_binding_id 与每个参与者的 binding。对请求的默认回复引用原请求 message_id，由平台查其来源 binding 并确认仍是有权参与者；因此返回原发起会话，而不是原 DSH 的任意会话。对某条后续消息的定向回复同样以该消息的持久发送者为目标。要向整个线程回复必须显式选择全线程模式；参与者快照和实际目标在提交时固化，不能把“同线程”默认为本 DSH 所有会话都可读。请求者已归档/撤销时返回可解释失败，不改投其同事、父会话或当前前台。
+**子会话与 N2**：子会话同样使用自己的 local，地址只经有权对话介绍。插件内部可把 local 映射到 session/child 层级，保存原生 durable parent address；线上 v1 仍是一个 64 位 local，不把斜杠路径塞给总部解析。N2 才核子 agent 专用路径、父离线/归档与独立委派；此前返回 host_incompatible，不回退父会话普通 prompt。可选 type=subagent 不提供父地址或父权限。
 
-**冷会话与失效地址**：在线 DSH 收到冷 binding 的消息，先进入这个 binding 的持久收件路径。只有具备 wake/执行权限且目标策略允许时，才恢复原 host_session_id，并经过 §7 与协议 §5 的在线执行准入；不重新 create 已绑定会话。只有 receive 权限时可返回 queued_cold，等待该会话在授权后恢复，不能把“冷”当作自动授权。DSH 离线则在期限和配额内返回 queued_offline；托管实例唤醒仍须 workspace 权限，关机电脑不能被承诺唤醒。binding 归档或撤销后拒绝新发送；提交后、执行前发生变更时停止新准入并记录可查询终态，既有副作用边界不变。
-
-**子会话地址与 N2**：远端也只选子会话自己的 binding。目标插件内部保存经宿主核验的 child session 与 durable parent address（原生父路由地址），由专用子 agent adapter 投递；发送方不能自报 parentSession 来借用父权限，也不需要获得该内部地址。父子默认不共享通讯录可见性和收件权。N1 不宣称支持子会话执行；N2 核实具体原生方法、父不在线/归档、冷子会话恢复后，才可把相应能力发布为可用。未通过兼容验收时明确返回 host_incompatible，不回退到父会话的普通 prompt。
-
-**端到端例子**：同一 tenant 内，DSH A 有三个主会话 A1（协调）、A2（核查）、A3（资料）和 A2 的子会话 A2c；DSH B 有 B1（分析，冷）与 B2（审阅，热）。这些是示意别名，不是生产 ID。A1 获权发现 B1/B2，选择 B1 开线程 T；B2 即使正好在前台也不接收这条私信。六个会话共用两条数据连接；子会话的可用能力取决于 N2。
+**端到端例子**：同一用户拥有本地 DSH A 与云端 DSH B，A 有三个主会话 A1/A2/A3 和 A2 的子会话 A2c；B 最初只有 B2，首联后新建 B1，形成两个会话。A1 初始只知道 B/sys，不知道 B1/B2。下图用 A/1、B/1 等示意完整地址；实际发送使用上述完整 64 位地址。最终六个会话共享两条 WSS，两个系统收件箱不增加 LLM 或连接。
 
 ```mermaid
 sequenceDiagram
-  participant A1 as A1 协调会话
+  participant A1 as A1 / A/1
   participant PA as DSH A 插件 / 一条 WSS
-  participant C as 平台目录与 collab
-  participant PB as DSH B 插件 / 一条 WSS
-  participant B1 as B1 分析会话 / 冷
-  participant B2 as B2 审阅会话 / 热
-  Note over A1,PA: A 还有 A2、A3、A2c；各有独立 binding
-  A1->>PA: 发现可联系的会话
-  PA->>C: 共享 MCP / 可信来源 A1
-  C-->>PA: B1、B2 的有权目录条目与 binding
-  PA-->>A1: 返回候选条目
-  A1->>PA: 选择 B1，创建线程 T 并发送 M1
-  PA->>C: 共享 MCP / 来源 A1、目标 B1
-  C->>C: 保存参与者 A1、B1 与目标 B1 的 delivery
-  C-->>PB: NATS HEAD；插件按窗口 FETCH
-  PB->>PB: 核 target_binding=B1 与 wake 权限，恢复 B1 原 session
-  PB->>C: B1 当前世代执行准入
-  C-->>PB: 唯一准入成功
-  PB->>B1: 有 wake 权限后调用原会话
-  PB-->>C: B1 持久接受回执
-  Note over PB,B2: B2 不接收 M1，即使它是前台
-  B1->>PB: 回复 M1
-  PB->>C: 共享 MCP / 可信来源 B1
-  C->>C: 从 M1 查原发起 binding=A1
-  C-->>PA: HEAD / FETCH，目标固定为 A1
-  PA->>A1: 核 binding 与在线准入后交付回复
-  Note over A1,PA: 不转给 A2、A3 或 A2c
+  participant C as 总部目录与 collab
+  participant PB as DSH B 系统收件箱 / 一条 WSS
+  participant B1 as B1 / 首联后新建 B/1
+  participant B2 as B2 / 已有会话
+  Note over A1,PA: A 还有 A2、A3、A2c；目录不列会话
+  A1->>PA: 查可联系的 DSH
+  PA->>C: 共享 MCP / 节点身份
+  C-->>PA: B/sys、显示名、归属用户、在线状态
+  PA-->>A1: 只返回系统地址
+  A1->>PA: first_contact 发往 B/sys
+  PA->>C: from=A/1，to=B/sys，线程 T，幂等键 K
+  C->>C: 核 node 策略；提交 M1、系统 delivery 和 mail_seq
+  C-->>PB: HEAD / FETCH，按 node B 路由
+  PB->>PB: 系统持久收件；受控批准或显式自动创建策略
+  PB->>PB: 按 contact 预留 B/1 与原生 ID，幂等 create
+  PB->>C: 固化首联分配；当前 epoch 唯一执行准入
+  C-->>PB: 准入结果
+  PB->>B1: 本地核 grant 后交 M1，持久接受
+  Note over PB,B2: 不转给前台 B2
+  B1->>PB: reply，from/reply_to=B/1，to=A/1
+  PB->>C: in_reply_to=M1；幂等介绍 B/1 并提交回复
+  C->>C: 只存完整地址关系；不解析 B1 宿主结构
+  C-->>PA: HEAD / FETCH，按 node A 路由
+  PA->>A1: 按 local=1 核权、准入并交回复
+  Note over A1,PA: A1 此时才认识 B/1；A2/A3/A2c 不收
+  A1->>PA: 后续 message 至 B/1，引用 T
+  PA->>C: 共享 MCP / 可信 from 与有效对话关系
+  C-->>PB: 按 node B 交换，PB 按 local=1 分派
 ```
 
-若 T 后续显式加入 A2，则给 A1 与 A2 的消息各产生独立 delivery，即使它们同在 DSH A；A2c 仍不自动成为成员。另一个仅写 DSH B 的首次联系请求停在 provisioning inbox，待授权分配为止。完整错误与事务边界见[协议 §1.1](protocol.zh.md#11-binding-目录与目标解析)。
+若 T 后续经对话显式邀请并获得 A2 同意，A1/A2 可同时参加，各自 delivery 和回执独立，A2c 不随父加入。只有 DSH 而没有 local 的普通发送报缺少目标；显式首联工具才规范化为 sys。地址规范、关系建立与错误见[协议 §1.1](protocol.zh.md#11-系统目录对话关系与目标解析)。
 
 ## 7. 邮箱序号与客户端游标同步
 
@@ -231,8 +230,8 @@ sequenceDiagram
 2. **提示**：提交回调尽力向内部 Core subject 发 {node, head_seq}，不带正文。Go adapter 用 queue group（多副本竞争处理同一请求的订阅组）消费。每副本按 node 只保最新 head，以 100ms 合并窗口限速下发；不为每条业务消息保存一条待发 HEAD。发送/合并窗口进行时的新 head 替换待发值，结束后仅在有更新时补一次。集合有全局和租户硬上限，满时可丢提示并记指标，修复扫描兜底，不能挤占正文/回执预算。多副本可能重复提示，每副本仍只保一项，不引入分片所有权。
    adapter 经 collab 查询当前 route，可缓存最多 2 秒；收到接管/撤销事件即失效。缓存仅用于无正文 HEAD，不用于 FETCH、执行准入或回执写入。旧缓存最多产生过时提示，不授新权限；实际取页仍由 collab 权威核 epoch/授权。无可靠事件失效保证时也按 TTL 强制刷新，不能无限续缓存。
 3. **取页**：插件在收到 HEAD、READY 成功、重连或已有待取页且容量恢复时，通过同一 NATS WSS 发 FETCH。collab 逐项核权并返回限条数、限编码字节的页面。每 node 默认一个取页请求在途；超时按同游标有界重试，不产生领取租约，也不改变投递状态。head 不变时仍可能有未确认空洞，不能据此停止对账。
-4. **处理与持久接受**：网络层先在线登记本次处理尝试，平台按 delivery 持久计数，再把条目交给独立宿主 adapter 的 `deliver(page) → receipts` 接口。宿主按 delivery_id 去重，真正 queue/prompt 前须取得当前 epoch 的在线执行准入 CAS；持久接受后才批量回 RECEIPT。隔离/未知报告不是接受成功。collab 幂等提交接受或明确终态后推进连续确认前缀，返回 RECEIPT_COMMITTED。
-5. **继续与隔离**：未确认项不从 PG 删除。分页位置与确认游标分开；卡住的线程记录重试/隔离状态，允许继续扫描其他线程，绝不取“最大已见序号”当确认。隔离不延长原期限，最长 24 小时后按策略终结传输；本线程空洞限额只限制该 thread/binding，新消息不挤占其他线程。连续已确认后缀合并成精确区间，单个旧空洞不要求无限保存稀疏条目；只有 node 总量实际耗尽才 node 级背压。详见协议 §4/§5/§8。
+4. **处理与持久接受**：网络层先在线登记本次处理尝试，平台按 delivery 持久计数，再把条目交给独立宿主 adapter 的 `deliver(page) → receipts` 接口。宿主按 delivery_id 去重，真正 queue/prompt 前须取得当前 epoch 的在线执行准入 CAS；持久接受后才批量回 RECEIPT。首联先可回 accepted_by=system 的系统入箱回执，不代表新会话已接受；contact 创建/执行仍单独持久管理，待批准容量不因传输确认释放。隔离/未知报告不是接受成功。collab 幂等提交接受或明确终态后推进连续确认前缀，返回 RECEIPT_COMMITTED。
+5. **继续与隔离**：未确认项不从 PG 删除。分页位置与确认游标分开；卡住的线程记录重试/隔离状态，允许继续扫描其他线程，绝不取“最大已见序号”当确认。隔离不延长原期限，最长 24 小时后按策略终结传输；本线程空洞限额只限制该 thread/完整目标地址，新消息不挤占其他线程。连续已确认后缀合并成精确区间，单个旧空洞不要求无限保存稀疏条目；只有 node 总量实际耗尽才 node 级背压。详见协议 §4/§5/§8。
 
 这是一条服务端通知驱动的长连接同步链路。正常路径多一次“提示→取页”的往返，用实现复杂度换取有界背压。首发不做提示内联正文；未来优化不得改变回执和游标语义。Core 的最多一次语义与 JetStream 的持久消费者不同，见 [Core](https://docs.nats.io/learn/core-nats/) 与 [JetStream](https://docs.nats.io/concepts/jetstream)；本方案的恢复依据始终是 PG 邮箱。
 
@@ -280,14 +279,14 @@ READY 接管与在线 admit 按同一 node/执行记录锁序串行化。旧 epo
 | 阶段 | 必须实现与过关条件 | 不能据此宣布 |
 |---|---|---|
 | N0：设计与独立接缝门禁 | 先定 schema、IAM 网络授权上限、FETCH/回执/游标语义；分别核 auth callout 的 server_id/CID 与 KICK、私有 inboxPrefix、SDK 硬缓冲。宿主 adapter 可用 fixture 传输独立验收 create/cwd/bind 与持久恢复，不被 Broker spike 阻塞。 | 本阶段已获实施授权，或只有接口同名就兼容。 |
-| N1：最小可靠闭环 | 单 nats-server + auth callout + PG 邮箱/游标 + Core HEAD/FETCH/RECEIPT + 独立宿主 ledger；两真实 DSH 普通会话往返、非默认 cwd、冷恢复、建线程映射竞争、丢回执和崩溃恢复。保留基本限额、binding 级目录/定向与回复、同 DSH 多普通会话参与者、平台持久尝试计数、prompt 前在线准入和失败关闭。 | JetStream 通知/dispatcher 已必需、子 agent 已兼容、HA 或大容量已通过。 |
-| N2：授权会话树 | 可信 lineage/parent address、最小委派、递归预算、子 binding 的目录可见性与批量恢复；子 agent 专用适配单独过关，普通会话多 binding 路由在 N1 即须正确。 | 全部 Codex 原生协作能力已复现。 |
+| N1：最小可靠闭环 | 单 nats-server + auth callout + PG 邮箱/游标 + Core HEAD/FETCH/RECEIPT + 独立宿主 ledger；两真实 DSH 普通会话往返、非默认 cwd、冷恢复、建线程映射竞争、丢回执和崩溃恢复。保留基本限额、系统地址目录、首联幂等建会话、对话内完整地址定向与回复、同 DSH 多普通会话参与者、平台持久尝试计数、prompt 前在线准入和失败关闭。 | JetStream 通知/dispatcher 已必需、子 agent 已兼容、HA 或大容量已通过。 |
+| N2：授权会话树 | 可信 lineage/parent address、最小委派、递归预算、子 local 的对话授权及本地批量恢复；子 agent 专用适配单独过关，普通会话多 local 路由在 N1 即须正确。 | 全部 Codex 原生协作能力已复现。 |
 | N3：HA 与容量 | 多副本 Core/adapter、PG 故障切换、滚更与容量压测；按瓶颈增加扫描分区/请求公平调度，分别验既有 JS 故障隔离。 | 自动恢复逐条租约方案、未测跨地域多活或无限扩容。 |
 | 后续增强 | 视测量选择正文外置、存储分片、双 lane 或其他承载；fork/历史/等待/中断/产物分别按原生能力验收。 | 用网络替代业务调度引擎。 |
 
 宿主接缝必须独立于传输：`deliver(page) → receipts` 只接受经核验的投递上下文，内部负责会话映射、串行调用在线 admit 回调与持久证据；连接、分页、登记处理尝试和发送回执由网络插件负责。fixture 能证明状态机边界，真实宿主和模型验收仍不可省。
 
-实施边界：`contracts/` 先行；`infra/ai-gateway` 承担 Go 网络/远程 MCP；`infra/edge` 增加精确升级路由和 WS 生命周期安全；`services/collab` 负责持久状态/配额/授权；`services/iam`、org 增补主体与委派判定；`services/common` 对 outbox 的任何改进须兼容现有使用者；`clients/dsh-plugin` 承担连接管理与宿主 adapter。`infra/agent|node|egress` 仅在实例生命周期/出口规则确需改变时另派受保护任务。
+实施边界：`contracts/` 先行；`infra/ai-gateway` 承担 Go 网络/远程 MCP；`infra/edge` 增加精确升级路由和 WS 生命周期安全；`services/collab` 负责持久状态/配额/授权；`services/iam`、org 增补节点主体和组织授权上限；`services/common` 对 outbox 的任何改进须兼容现有使用者；`clients/dsh-plugin` 承担 local 分配、系统收件箱、binding/grant/lineage、本地子树配额、连接管理与宿主 adapter。`infra/agent|node|egress` 仅在实例生命周期/出口规则确需改变时另派受保护任务。
 
 不得为本网络删掉真实 IAM/TOTP/PKCE、RLS、幂等和持久线程；把现有 pull 标为迁移期路径，N1 端到端通过后移除周期主链路。所有 PR 都需 CI 与 fresh 非作者独审；命中保护路径标【待审查】，作者/主控不自行合并。本设计本身也尚待独立挑战。
 
@@ -308,7 +307,7 @@ READY 接管与在线 admit 按同一 node/执行记录锁序串行化。旧 epo
 | 提示修复 / 服务级 | 60 秒一轮；256 node/页；整轮目标 ≤30 秒 | 下一轮修复提示成功时预算 100 秒、deadline 120 秒；再丢 k 轮加 60k 秒 |
 | 单个 NATS payload / 正文 | 64KiB / 16KiB；禁应用分片及压缩 | FETCH_RESULT 整页也受 payload 上限，不是每项各获 64KiB |
 | FETCH / node | 最多 128 项、含头 ≤64KiB；默认 1 请求在途；超时 10 秒 | 实际页按剩余窗口缩小；满正文通常一页只能数项 |
-| binding 元数据恢复 | 每批 128、最多 4 批在途 | 与正文 FETCH 分开计费 |
+| 不透明参与关系恢复 / node | 每批 128、最多 4 批在途 | 与正文 FETCH 分开计费 |
 | 未确认接收 / node；channel | 256 条 / 1MiB；16 条 / 64KiB | 含已接收未提交回执项，另受本地持久队列限制 |
 | 接入 Broker 每连接缓冲 / 写超时 | max_pending=2MiB；write_deadline=10s | Broker 进程级配置；不等于 SDK cap，须计全站总量及内部共用连接影响 |
 | adapter 输出 / node | 硬上限 2MiB；回执/恢复控制保留 64KiB、100 条/秒 | SDK/WebSocket 自身还须证明硬上界 |
@@ -316,9 +315,10 @@ READY 接管与在线 admit 按同一 node/执行记录锁序串行化。旧 epo
 | 执行准入 / node；session | 4；1 | 接受消息不保证立即执行 |
 | 子树 / fanout | 委派深度 8、root 活跃后代 256；原子 fanout ≤32 | 同受 node/tenant 额度，越界拒绝或显式分批 |
 | 毒消息 / 隔离截止 | 平台按 delivery 最多自动 5 次；隔离截止为原 expires_at 与首次隔离+24 小时中较早者；到期扫描目标 60 秒 | 调用 deliver 前持久计数；重启不退款；隔离/未知报告不冒 host_accepted |
-| 空洞 / (thread, target_binding) | 首个未决项后最多 1,024 个本线程位置或 256 个稀疏确认区间 | 只拒该逻辑收件人新增消息；不把其他线程序号算作本线程跨度 |
+| 空洞 / (thread, target_node, target_local) | 首个未决项后最多 1,024 个本线程位置或 256 个稀疏确认区间 | 只拒该逻辑收件人新增消息；不把其他线程序号算作本线程跨度 |
 | 稀疏确认 / node | 4,096 个精确区间，另保留 256 个在途回执增量 | 连续后缀压缩；未决位置不能被区间覆盖；仅总量耗尽才限制 node |
-| FETCH 排除提示 | held_ids 最多 256 项，暂停 thread/binding 最多 128 项 | 本次请求有效，整包仍 ≤64KiB；不确认、不删数据 |
+| FETCH 排除提示 | held_ids 最多 256 项，暂停 thread/完整目标地址 最多 128 项 | 本次请求有效，整包仍 ≤64KiB；不确认、不删数据 |
+| 系统首联 / 源→目标 node；目标 node | 每分钟 5 次（突发 5）；每分钟 30 次（突发 10）；待批准 100 条或 1MiB | 同时受 tenant/node 总额约束；新 local 不重置限流，超限明确拒绝；自动建会话默认关闭 |
 | 积压 / node；tenant | 10k 条或 64MiB；100k 条或 1GiB | PG 未交接及宿主已交接未处理队列均设限，先到先拒 |
 | 留存 / 中档 | 待投 ≤7 天；执行请求默认 24 小时；已接受正文 24 小时 | 需 7 天正文历史时显式提高预算或外置；未接受正文不提前删除 |
 | 幂等与终态元数据 | 至少 30 天；producer_epoch 最长 7 天 | 覆盖未决空洞与重试窗口后才回收；旧世代永远不能新写 |

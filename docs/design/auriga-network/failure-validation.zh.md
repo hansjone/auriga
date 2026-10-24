@@ -14,6 +14,8 @@
 
 ### 1.1 需求与锁定代码的来源
 
+R7（2026-10-25，仅设计）：按用户确认替换 R6 binding 通讯录为 DSH 系统目录、64+64 位两段地址、对话内交换会话地址和插件本地会话授权。分工、首联创建幂等、兼容与限流均为本轮设计推导，未实现、未运行新探针或宿主/模型验证；下列历史证据不作为 R7 已通过的证明。
+
 R5 补充（2026-10-25，仅文档）：依据第二轮独审补充隔离终态、平台处理次数和执行前在线准入；未重跑任何服务/宿主试验。只读官方 nats-server v2.12.6 及现有模块缓存确认：`const.go:102` 的默认 MAX_PENDING_SIZE 是每客户端 64MiB，`:132` 的 DEFAULT_FLUSH_DEADLINE 为 10 秒。本文推荐显式改为 max_pending=2MiB、write_deadline=10s，是待压测的配置建议，不是已应用配置或已证明的进程总内存上界。[锁定源码](https://github.com/nats-io/nats-server/blob/v2.12.6/server/const.go#L102)。
 
 R4 只读核验（2026-10-25）：本轮不重跑历史原型或宿主测试。以下新增事实以锁定源码为依据，其余沿用注明出处的历史证据。
@@ -58,7 +60,7 @@ R4 只读核验（2026-10-25）：本轮不重跑历史原型或宿主测试。�
 
 ## 2. 容量模型：先数对对象
 
-用变量区分用户U、物理DSH节点D、历史会话H、活跃授权逻辑通道A、应用订阅S、当前实际运行的agent R、消息发布率λ、平均fanout F、正文B、未确认积压Q。物理网络连接C默认=D，和H/A/R不成一一对应。用户可有多个DSH；冷会话只在PG保记录，不保连接/心跳/执行worker。
+用变量区分用户U、物理DSH节点D、历史会话H、活跃授权逻辑通道A、应用订阅S、当前实际运行的agent R、消息发布率λ、平均fanout F、正文B、未确认积压Q。物理网络连接C默认=D，和H/A/R不成一一对应。用户可有多个DSH；冷会话映射/grant 在插件持久保存，PG 只保不透明对话/投递记录；不保连接/心跳/执行 worker。
 
 以下是可调的三档**示例估算**：每用户2个DSH、每DSH20个活跃逻辑通道、H=10A、S=2A，活跃通道平均每50秒发1条（λ=0.02A），F=1.5，B=2KiB。并非承诺每个agent都能同时跑LLM；R和模型容量独立。
 
@@ -95,11 +97,13 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 - **磁盘**：按每源消息正文2KiB +消息/dedup/既有事件元数据约1.5KiB + F×1KiB delivery，合计约5KiB；索引/膨胀初估×2为10KiB/源消息。持续全天小/中/大档分别约17.7GB/177GB/1.77TB每日逻辑占用；7天约124GB/1.24TB/12.4TB。再加PG副本、WAL/PITR、备份，既有 JS 事件另计，不把它当本方案正文备份。该 7 天情景不是运营默认值。
 - **中档留存与缓解**：首选缩短已接受正文留存至 24 小时；有长期历史需求则将正文外置到授权对象存储，PG 保留摘要和引用。上述中档 1.24TB/7 天中，正文按 ×2 分摊约 495GB，其余约 743GB；正文改 1 天、其余暂按 7 天，仅该口径约 814GB，说明外置正文也不能解决全部成本。真实默认去重/终态元数据至少 30 天，须按实际行宽另算，不能把 814GB 当磁盘采购总量。大档正文分摊约 4.95TB/7 天；缩短或外置优先于无界扩大 PG。外置要先完成对象耐久写，再事务提交引用；校验 digest、读取重授权、孤儿回收和备份一致性，不能让 PG 确认指向未保存对象。待投未接受正文仍保留至截止或明确终态，不能随 24 小时策略提前删。
 
+R7 额外预算：每次获准首联至少增加一次 CONTACT_ASSIGN 写事务，首回复提交还更新一次关系；初始 system delivery 和首回复 delivery 均计入 λ/F，不能算作零成本控制帧。待批准 contact、local 高水位/tombstone、本地 grant/lineage 存储另测；上表旧参数未含这部分新业务分布，不承诺原吞吐。
+
 扩容触发看最先到达的资源：adapter/授权CPU持续>60%、P99越标、线程锁/IO延迟、pending年龄、存储>70%、连接断开率、单租户公平份额被侵占。扩Broker不能修PG写瓶颈；加CPU不能修无界重试。
 
 ## 4. 可靠性与性能目标分别验收
 
-**正确性门禁（无可容忍计数）**：在声明故障模型内，已platform_stored且未过期/显式终态的消息丢失数=0；跨tenant/无权binding交付=0；旧 epoch 成功的新 FETCH/发件/执行准入=0（受限回执对账不是新操作）；重复宿主request准入=0（限定受支持adapter与持久日志可核场景）；未知外部副作用被自动重做数=0。任一失败不以P99或“99.9%成功”掩盖。
+**正确性门禁（无可容忍计数）**：在声明故障模型内，已platform_stored且未过期/显式终态的消息丢失数=0；跨 tenant/无关系完整地址或本地无权会话交付=0；旧 epoch 成功的新 FETCH/发件/执行准入=0（受限回执对账不是新操作）；重复宿主request准入=0（限定受支持adapter与持久日志可核场景）；未知外部副作用被自动重做数=0。任一失败不以P99或“99.9%成功”掩盖。
 
 **首发性能目标**：在同区域RTT≤50ms、payload≤2KiB、fanout≤2、资源低于70%、身份与存储正常且未积压时，提交响应P95≤250ms/P99≤750ms；commit→在线 Node 收到 FETCH_RESULT 正文 P95≤500ms/P99≤2s（不能只量 HEAD 提示）；收到→host持久接受P95≤1s/P99≤5s，不含LLM排队/运行。应按多个tenant同时测，不只平均。
 
@@ -113,15 +117,25 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 
 | 故障/操作 | 必须观察的结果与过关条件 |
 |---|---|
-| 发现目录的跨 tenant/无 discover/重名候选/状态过时 | 仅返回当前来源 binding 有权看到的条目，隐藏项数量和 parent address 不泄漏。重名不自动选第一个；发送再次核状态，不以缓存目录绕过撤销。 |
-| 发错 binding：篡改 delivery 目标、node 与 binding 不符、伪造来源会话 | 平台校验/插件映射检查或 admit 拒绝，错误会话 prompt 次数为 0；不能向前台、父会话或同机其他 binding 回退。成功回执只能绑定原 delivery 的目标。 |
-| 两个目标均有权，但发送方选择了错误联系人 | 响应如实列出实际目标 binding，只投所选目标；不声称平台能从角色/正文推断意图并自动纠正。 |
-| 同 DSH 两会话同线程、发给两个 binding 的同一 message | 两个参与者、两个 delivery_id/mail_seq 和各自回执；一个接受不确认另一个，一个撤销不把另一项改投。不同 session 各自准入，node 级提示合并不合并目标。 |
-| 回复路由到错误会话 / 请求者前台切换 / 伪造 reply_to | 回复初始请求固定回原 originating binding；A2/A3/A2c 不得收到给 A1 的回复。引用跨线程或调用者并非有权回复者时拒绝；全线程 fanout 必须显式选择。 |
-| 未绑定首次联系：只有 node_id、重复分配、新建回包丢失 | 普通精确发送缺目标报错；显式节点联系仅存 provisioning inbox，返回 awaiting_binding，所有现存会话执行次数为 0。授权分配幂等，竞争改选冲突；新建查询原预留映射，不随机重建。 |
-| 冷 binding 有/无 wake 权限、DSH 离线 | 有权时恢复原 host_session_id，经在线 admit 后执行；仅收件权返回 queued_cold，离线为 queued_offline，均不伪报执行成功、不重建已有会话。 |
-| 目录返回后 binding 归档/撤销；发送提交后再撤销 | 前者重新核权拒绝发送并给可见范围内的明确错误；后者终止未准入投递并可查询，不换投同机其他会话，已准入在途边界准确报告。 |
-| 子 binding / parent address 错配、父不在线或 N2 未通过 | 未支持返回 host_incompatible；已支持路径仍核原生 lineage/父路由及独立 grant。不得把消息塞进父会话普通 prompt，父权限不自动授予子目标。 |
+| 系统目录跨 tenant/无 discover/重名/状态过时 | 只列有权 DSH 系统地址、显示名、归属用户与在线观测；不列会话地址/数量/角色/冷热/父子结构。重名不自动选择，状态缓存不授发送权。 |
+| 猜到/枚举非系统 local、复制别人的地址或 thread_id | 总部无该来源→目标的有效对话关系则统一 target_unavailable，不泄露存在性；目标插件再次核 grant。不能通过已知用户 ID、first_contact 或改 type 绕过，错误会话执行数 0。 |
+| 发错 local / 篡改 node、realm、from 或 delivery 目标 | 总部核认证 node/tenant 和固化地址关系，插件核本地映射、ledger 和 grant；不向前台/父/同机其他会话回退。受损插件冒充自身 local 是已披露信任限制，不宣称总部能验证宿主血缘。 |
+| 两个目标均有关系，但发送方选择错误联系人 | 响应列出实际完整地址，仅投所选 local；不从正文或角色猜真实意图。 |
+| local 复用、删除后再分配、备份高水位回退或克隆 | 分配事务拒绝复用/溢出；映射未知不投新会话。无法证明旧高水位则停用旧 node 并重新注册，不能换 incarnation 清零；旧地址不可接收新会话消息。 |
+| 同用户云端与本地两 DSH 同时在线 | 两个不同 node/系统地址、邮箱、epoch 和一条各自 WSS；登录一个不互踢另一个，吊销仅影响授权范围，同 local 数字不串会话。 |
+| 同 DSH 两会话同线程、同 message 发往两个 local | 两个显式同意的参与者、两 delivery/mail_seq 与独立回执；一个撤销/接受不影响另一项，HEAD 合并不合并目标，新成员不自动读历史。 |
+| 回复到错误会话 / 切换前台 / 伪造 reply_to、in_reply_to | 默认 to 等于原消息经核 reply_to（v1=from）；B1 回复 M1 只到 A1，A2/A3/A2c 不收。第三方重定向、跨线程引用和无权回应拒绝；全线程广播须显式。 |
+| 未绑定首次联系 / 默认受控策略 / 授权自动创建 | 缺 local 的普通发送报错；显式 first_contact 规范化到 sys，提交才 platform_stored。默认 awaiting_session、零模型调用；授权后新建唯一会话，不交已有前台。system 的 host_accepted 标明 accepted_by=system，不能当会话已接受/执行。 |
+| 系统收件箱首联洪泛、批量新 local、目标离线 | 源 node→目标 node、目标 node 和 tenant 限流同时生效；待批准条数/字节与 TTL 有界，创建需本地预算。超限明确拒绝，换 local 不重置额度；到期终态不拖住其他 local。 |
+| CONTACT_ASSIGN 响应丢失 / create 成功后崩溃 / 克隆接管 | 同 contact 固定唯一 assigned_address/创建许可，查询原预留 native ID；查询无原会话证据则 outcome_unknown，只对账不重新获取创建许可；不把本机幂等当跨克隆幂等，不换 ID 重建。旧 epoch 不获新许可，同 contact 创建数最多 1，可能 0。 |
+| 新会话回复丢失后重试、A 首联同键重发 | B 持久 outbox 重发同 reply key，平台回原 message/delivery；A 只得同 B1 地址，contact/local/native session 数不增加。不用“没收到回复”判创建失败；新键按新联系另限流。 |
+| 首联 system receipt 后重启/取消/到期/清理 | 已接收系统项不重入箱，待批准预算不因 ACK 释放，未决 contact/分配/正文仍可恢复；只给同 assigned_address 一次执行准入。到期禁止新创建/准入，传输 cursor 推进不清执行状态，不按普通接受后 24 小时提前删未决证据。 |
+| 首联回复伪造新地址 / 另一 node 介绍 / 任意添加参与者 | 仅原目标 node 对有效 contact 的唯一 assigned_address 可随首回复原子建立关系；其他介绍拒绝。邀请第三方须该地址所属 node 的有权对话确认，系统联系不授全节点/全历史权限。 |
+| 冷 local 有/无 wake、DSH 离线 | 允许时恢复原 session 经在线 admit 执行；否则 queued_cold/queued_offline，无成功假象，不重建旧目标。 |
+| local 本地归档/撤销后平台尚未知、或准入响应前发生变化 | 插件立即停止新执行并持久上报；总部可先存后异步拒绝，但不能报告已执行。通知后后续发送失败；无关系者统一错误，已发生副作用不伪称收回。 |
+| 子 local / parent address 错配、父不在线或 N2 未通过 | 仅插件核原生 lineage/独立 grant；未支持返回 host_incompatible，不走父普通 prompt，目录不因 type=subagent 暴露树。 |
+| 地址 uint64 极值、4 位别名冲突、类型改写、跨 realm | 文本 hex16 与 JSON 十进制字符串可逆且不经 JS number；短别名加长只展示，API 拒绝别名；realm≠tenant、group 和不支持主版本拒绝，不按新身份重复入会。 |
+| N/N-1 未知可选字段/flag、扩展超限、未知必需能力 | 存储转发保留未知可选字段且不执行其含义，摘要含扩展；未知必需能力/kind/控制语义拒绝。超限、重复 key、已知字段错型拒绝；不借“忽略”绕授权或重置 TTL。 |
 | send提交前崩溃/回滚 | 不存在platform_stored；同键重试只形成一条消息。 |
 | PG提交后、响应丢失 | 同键返回原message；异体同键冲突，message/delivery/dedup数量不增。 |
 | commit 后初始 HEAD 全丢，且无后续新消息 | PG head/未确认项仍在；下一轮修复 HEAD 成功时，仅靠 60 秒扫描恢复。扫描 ≤30 秒、合并/取页预算 10 秒，健康且无积压时预算 100 秒、deadline 120 秒；无客户端周期空 FETCH。 |
@@ -141,15 +155,15 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 | 101 毒消息、102…N 属其他正常线程 | 101 隔离期间其他项继续接受，连续后缀合并精确区间，不能覆盖 101；隔离到期/撤销/有权 skip 提交后前缀跨过。其他线程不因 A 的局部限额停止。 |
 | 隔离项无人处理、node 离线、原期限早于隔离期限 | 平台按 min(expires_at, quarantine_at+24h) 禁止新准入，60 秒目标批处理持久终态；原 TTL 不延长，不依赖客户端回连。 |
 | deliver 连续使插件崩溃 / ATTEMPT_BEGIN 响应丢失 | 平台次数在进入 deliver 前提交；本地 entered 持久化后才调用，重复响应不二次进入。重启不退款；无执行准入的崩溃最多自动 5 次，下一请求隔离，不靠 FETCH 次数或本地重置绕过。 |
-| 本线程跨度 1,024 / 稀疏区间 256 与 node 总区间 4,096 | 局部阈值只拒该 thread/binding 新消息；node 全局未满时其他线程仍服务。区间精确合并，保留 256 个在途回执增量预算，任何阈值不得拒绝必要终态回收或伪造已接受。 |
+| 本线程跨度 1,024 / 稀疏区间 256 与 node 总区间 4,096 | 局部阈值只拒该 thread/完整目标地址 新消息；node 全局未满时其他线程仍服务。区间精确合并，保留 256 个在途回执增量预算，任何阈值不得拒绝必要终态回收或伪造已接受。 |
 | 本地 outcome_unknown、平台 Unresolved 提交前后 | 本地报告不推进游标；平台原子写执行未知、停止再准入与传输 tombstone 后才跨过空洞。查询仍显示未知，迟到结果可补录，不触发自动重做。 |
 | held_ids / 暂停标记重复、越权、过大或重启丢失 | 有权有界集合只抑制本次重复正文，不清 pending；越权/超限拒绝。遗失排除集可重发，已持久项去重，其他线程可继续扫描。 |
 | 撤销后 KICK 成功/失败、CID 复用、旧 KICK 延迟 | 后续准入立即按权威校验拒绝；系统面可用时断连目标 ≤5 秒。错误/旧 server 运行世代映射不得踢错连接；失败有界重试、到期兜底，不恢复授权。 |
 | 私有 inboxPrefix 的 request()/mux/noMux/任意 reply | 仅当前 ingress 私有响应订阅可用；跨 ingress、全局 inbox、系统 subject 均拒绝，超时/重连释放订阅，身份不能由 reply 推断。 |
 | 网络 JWT 与 HTTP 访问 token 分别到期 | 访问 token 正常刷新不切断健康 WSS；网络 JWT 到期前随机续接且原生过期关闭；IAM 会话撤销即拒新操作，不以一小时剩余期放行。 |
-| 重用已兑换ticket/伪造up subject/任意reply | Broker或adapter明确拒绝；无法伪造source binding，模型无法获得票据。 |
+| 重用已兑换ticket/伪造up subject/任意reply | Broker或adapter明确拒绝；不能伪造其他 node 的 from；可信插件阻止模型覆盖本地来源，模型无法获得票据。 |
 | 订阅其他tenant、`>`、`$SYS`、`$JS.API` | 全部拒绝，日志无凭据；不能从错误中泄漏他人正文/存在性。 |
-| IAM/org故障、到期、退出、设备/成员/父grant吊销 | 新业务失败关闭；旧队列不新启动，子grant不自动恢复；在途边界准确报告。 |
+| IAM/org故障、到期、退出、设备/成员/父grant吊销 | 总部对 IAM/node 故障失败关闭；插件对本地 grant/父链撤销立即拒绝执行并持久上报，子 grant 不自动恢复；在途边界准确报告。 |
 | PG主故障/同步副本不足/读到旧route | 无新成功耐久ACK；单写者failover与epoch正确；不同DB主不能并发接受同node。 |
 | 既有 JetStream 不可用但 Core 正常 | HEAD/FETCH/RECEIPT 正常；新投递不依赖 JS。既有事件有界积压，若共享存储阈值触发则明确限入，不能掩盖资源耦合。 |
 | 整个 NATS 集群不可用 | 只有 PG 有界存储，不能声称在线 push；恢复后 READY/游标取页，按窗口恢复。 |
@@ -158,7 +172,7 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 | Host flush后ledger前kill | 从宿主持久历史/inbox重建同receipt；不能随机换requestId。 |
 | Host ledger 提交后回执或提交响应丢失 | 当前有效连接重送同 receipt，不需新 token、不二次 prompt；PG 幂等回原状态。 |
 | 同session多thread并发/重复消息 | session准入串行；每thread入队顺序正确，其他session不被锁死。 |
-| 非默认 cwd/冷 session/开线程回包前首条消息 | 同 binding 恢复，不 create 冲突、不另造会话；预留映射与响应原子合并，同一逻辑请求只有一个宿主 session。 |
+| 非默认 cwd/冷 session/开线程回包前首条消息 | 同 local→binding 恢复，不 create 冲突、不另造会话；预留映射与响应原子合并，同一逻辑请求只有一个宿主 session。 |
 | recursive subagent/父不在线/归档 | 真实parent-address adapter；不绕普通API拒绝，不默认继承权限。未支持明确host_incompatible。 |
 | poison/不支持schema/超大包 | 隔离对应delivery/channel、有错误详情；不无限重投拖全tenant。 |
 | 慢DSH占满窗口/一个热root | 内存稳定有界，其他tenant P99不越正常目标2倍；同用户其他DSH仍服务。 |
@@ -176,17 +190,17 @@ NATS Broker实际每DSH仅少量上下行subject订阅，不是表中每个应�
 
 1. **宿主 adapter 独立门禁 + 接入 spike**：先用 fixture 传输调用 `deliver(page) → receipts`，核映射竞争、冷恢复与持久证据；独立接入侧核 NATS官方Go/JS客户端、真实Broker、隔离IAM/org fixture；负向 subject 矩阵、私有 inboxPrefix、server_id/CID/KICK/LDM 与原生 expiry；另用Tinode+PG做相同身份模型对照，记录新增代码/依赖与不能薄适配之处。不是只跑ping。
 2. **持久协议套件**：真实PostgreSQL/NATS、随机端口、两个fixture Host adapter，有状态机随机操作模型；枚举提交/ACK/kill点，以消息ID集合和副作用计数作oracle。不用 mock 数据库/邮箱和回执事务；不用 dispatcher 租约作为 oracle。
-3. **宿主兼容套件（N1 普通会话，N2 子 agent）**：固定发行DSH build，两个隔离profile；普通现存、冷恢复、首次建会话、同DSH多session、recursive子agent、同delivery重复、缺provider、磁盘错误分别测试。fake模型只用于可复现故障；不得将其冒成真实模型闭环。新增 A1/A2/A3/A2c 与 B1/B2 的寻址 fixture：用每个 host_session_id 的收件/准入记录核对实际目标，N1 验普通多会话与对子目标的明确拒绝，N2 再验证 A2c 专用路径，不把子会话占位地址当已兼容。
+3. **宿主兼容套件（N1 普通会话，N2 子 agent）**：固定发行DSH build，两个隔离profile；普通现存、冷恢复、首次建会话、同DSH多session、recursive子agent、同delivery重复、缺provider、磁盘错误分别测试。fake模型只用于可复现故障；不得将其冒成真实模型闭环。新增同用户本地 A 与云端 B 的寻址 fixture：A1/A2/A3/A2c，B2 已有、B1 经系统首联新建；用每个 host_session_id 的收件/准入记录核对实际目标，N1 验普通多会话与对子目标的明确拒绝，N2 再验证 A2c 专用路径，不把子会话占位地址当已兼容。
 4. **负载/chaos**：逐档跑30分钟预热+2小时稳态；大档至少一次24小时浸泡。50%流量一个热点tenant、20%慢节点、1%重复/ACK丢失、5倍突发60秒；再做单节点滚更、Broker/PG故障和全连接重启。通过后不无理由重跑全部，只对相关变更重验。
-5. **真实两DSH与真实模型闭环**：另行使用已授权预算，不在设计任务计费。A与B真实独立登录、不同工作目录；A原生工具开线程→B宿主持久接受并真实工具reply→A原绑定会话收到→权威PG与两边Host证据相符。额外消息如模型重发必须如实计数。再验证断网/ACK丢失/进程恢复不重复已接受request。必须分别记录platform_stored、Host receipt和实际工具回复，不能只看模型自然语言。N1 追加目标 B1 与非目标 B2 并存、A1/A2 同 DSH 的小样本，切换前台后回复仍回 A1；核其他 session 无该消息/准入记录。同线程多 binding 与未绑定首次联系也按矩阵验证，N2 子会话另行验收。
+5. **真实两DSH与真实模型闭环**：另行使用已授权预算，不在设计任务计费。A与B真实独立登录、不同工作目录；A1 查到 B/sys 并首联→B 系统按批准策略新建 B1→B1 持久接受并真实工具 reply 携完整地址→A1 原 local 会话收到→权威PG与两边Host证据相符。额外消息如模型重发必须如实计数。再验证断网/ACK丢失/进程恢复不重复已接受request。必须分别记录platform_stored、Host receipt和实际工具回复，不能只看模型自然语言。N1 追加首联前目录不泄露 B1/B2、建会话后 B1 与非目标 B2 并存、A1/A2 同 DSH 的小样本，切换前台后回复仍回 A1；核其他 session 无该消息/准入记录。同线程多 local、首联限流、回复丢失和 local 高水位恢复也按矩阵验证，N2 子会话另行验收。
 6. **发布门禁**：schema生成/兼容、单元/真实依赖集成、安全负向、HA档演练、容量证据、安装与回滚文档齐备；CI后fresh非作者独审，保护路径标【待审查】，本工人不提交/推送/合并。
 
 后续脚本宜分`broker-admission`、`mailbox-model`、`host-compat`、`load-chaos`四类，各自输出版本/hash、随机种子、设置、原始首失、指标与exit code。避免测试专用开关放进生产安全路径；故障点用依赖/网络代理/进程边界注入。模拟driver不调LLM，真实模型只在最后小样本验收。
 
 ## 7. 观测和运维闭环
 
-必须有 attempt_count/隔离截止滞后、admit 冲突/未知响应、终态空洞闭合时间、HEAD 合并/丢弃/route 缓存命中率、connections/认证失败/续期、NATS slow-consumer与pending、app active channels、订阅/冷会话数量、既有 outbox lag（独立依赖指标）、mailbox head 与 confirmed 差距、最老空洞年龄、head 提示/修复周期、FETCH 页大小/超时、pending bytes、delivery retry/quarantine、stale epoch、Host flush latency、unknown outcomes、授权RPC延迟与失败、FETCH 限流/公平份额、稀疏回执占用、KICK 成功/失败/延迟、PG事务/锁/WAL/磁盘指标。分开记录网络收到、Host接受、执行开始、执行终态时间。
+必须有系统首联拒绝/待批准/创建未知、地址关系拒绝/local 不复用违规、本地策略上报延迟（不上传会话树）、attempt_count/隔离截止滞后、admit 冲突/未知响应、终态空洞闭合时间、HEAD 合并/丢弃/route 缓存命中率、connections/认证失败/续期、NATS slow-consumer与pending、app active channels、订阅/冷会话数量、既有 outbox lag（独立依赖指标）、mailbox head 与 confirmed 差距、最老空洞年龄、head 提示/修复周期、FETCH 页大小/超时、pending bytes、delivery retry/quarantine、stale epoch、Host flush latency、unknown outcomes、授权RPC延迟与失败、FETCH 限流/公平份额、稀疏回执占用、KICK 成功/失败/延迟、PG事务/锁/WAL/磁盘指标。分开记录网络收到、Host接受、执行开始、执行终态时间。
 
-指标标签限service/region/shard/outcome等有界集合；node/session/thread/message ID放受控日志/trace，不做Prometheus高基数label。不记录payload、token、完整票据或敏感路径。管理员只能按权限查询自己tenant的诊断；系统总部不天然能看所有人历史。
+总部仅有不透明地址级审计；插件负责本地 session/grant/lineage 关联，不能以总部汇总指标冒细粒度血缘已核。指标标签限service/region/shard/outcome等有界集合；node/session/thread/message ID放受控日志/trace，不做Prometheus高基数label。不记录payload、token、完整票据或敏感路径。管理员只能按权限查询自己tenant的诊断；系统总部不天然能看所有人历史。
 
 runbook需能回答：哪个故障域阻断、哪些message已提交、哪些只是transport收到、哪个receipt不确定、是否仍能安全重投、谁能解除quarantine、剩余磁盘与积压预计耗时。恢复先修权威存储和身份，再让节点按 FETCH 窗口限速排空；不能通过删队列/重置cursor消除告警。
