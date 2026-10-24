@@ -5,6 +5,123 @@ import { surfaceHost, flush, boot, response } from './shell-host.mjs';
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
 
+test('review H1: registrations name the declared native slot rather than the locale namespace', () => {
+  const host = surfaceHost(async () => response());
+  try {
+    for (const [slot, registration] of host.registrations)
+      assert.equal(registration.meta.name, slot);
+  } finally {
+    host.dispose();
+    host.close();
+  }
+});
+
+test('review M1: a foreign constructor claimed during loading never receives managed context', async () => {
+  const host = surfaceHost(async () => response(), { defined: false });
+  try {
+    const main = host.mount('main');
+    await flush();
+    const script = host.document.querySelector('script');
+    class Foreign extends host.window.HTMLElement {}
+    host.window.customElements.define('auriga-team-panel', Foreign);
+    host.completeScript(
+      script,
+      class Trusted extends host.window.HTMLElement {},
+      { register: false },
+    );
+    await flush();
+    assert.equal(main.root.querySelector('auriga-team-panel'), null);
+    assert.ok(main.root.querySelector('[role="alert"]'));
+    main.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});
+
+for (const stop of ['timeout', 'unmount'])
+  test(`review M1: A ${stop} then late A definition cannot be accepted as new B digest`, async () => {
+    let current = boot();
+    const host = surfaceHost(async () => response(200, current), {
+      defined: false,
+    });
+    try {
+      const first = host.mount('main');
+      await flush();
+      const a = host.document.querySelector('script');
+      if (stop === 'timeout') {
+        host.expire(10_000);
+        await flush();
+      } else first.close();
+      current = boot();
+      current.manifest.integrity['panel.js'] = 'sha384-Yg==';
+      let second;
+      if (stop === 'timeout') {
+        button(first.root, '重试').click();
+        second = first;
+      } else second = host.mount('main');
+      await flush();
+      const b = host.document.querySelector('script');
+      assert.notEqual(a, b);
+      class Old extends host.window.HTMLElement {}
+      host.completeScript(a, Old);
+      host.completeScript(b, class New extends host.window.HTMLElement {}, {
+        register: false,
+      });
+      await flush();
+      assert.equal(second.root.querySelector('auriga-team-panel'), null);
+      assert.ok(second.root.querySelector('[role="alert"]'));
+      second.close();
+      host.dispose();
+      assert.equal(host.counts.timers.size, 0);
+    } finally {
+      host.close();
+    }
+  });
+
+for (const variant of ['digest', 'source'])
+  test(`review M1: simultaneous different ${variant} identities do not share a successful pending script`, async () => {
+    let current = boot();
+    const host = surfaceHost(async () => response(200, current), {
+      defined: false,
+    });
+    try {
+      const a = host.mount('main');
+      await flush();
+      const script = host.document.querySelector('script');
+      current =
+        variant === 'digest'
+          ? boot()
+          : {
+              mode: 'standalone',
+              protocol: 1,
+              pluginVersion: '0.2.3',
+              status: 'unconfigured',
+              localPanel: {
+                source: 'package',
+                version: '2.4.6',
+                entry: 'auriga/local-panel.js',
+                integrity: 'sha384-YQ==',
+              },
+              fetchBase: null,
+            };
+      if (variant === 'digest')
+        current.manifest.integrity['panel.js'] = 'sha384-Yg==';
+      const b = host.mount('main');
+      await flush();
+      host.completeScript(script);
+      await flush();
+      assert.ok(a.root.querySelector('auriga-team-panel'));
+      assert.equal(b.root.querySelector('auriga-team-panel'), null);
+      assert.ok(b.root.querySelector('[role="alert"]'));
+      a.close();
+      b.close();
+      host.dispose();
+    } finally {
+      host.close();
+    }
+  });
+
 test('independent native slots: settings uses trusted bootstrap, distinct versions and no editing or scripts', async () => {
   const calls = [];
   const host = surfaceHost(async (url, init) => {
@@ -237,9 +354,11 @@ test('SRI module failure can retry; late element definition and unload clean scr
     first.onerror();
     await flush();
     assert.equal(first.isConnected, false);
+    assert.equal(host.moduleImports.length, 0);
     button(main.root, '重试').click();
     await flush();
     const second = host.document.querySelector('script');
+    host.provideModule(second, new Promise(() => {}));
     second.onload();
     host.expire(10_000);
     await flush();
@@ -247,11 +366,7 @@ test('SRI module failure can retry; late element definition and unload clean scr
     button(main.root, '重试').click();
     await flush();
     const third = host.document.querySelector('script');
-    third.onload();
-    host.window.customElements.define(
-      'auriga-team-panel',
-      class extends host.window.HTMLElement {},
-    );
+    host.completeScript(third);
     await flush();
     assert.ok(main.root.querySelector('auriga-team-panel'));
     assert.equal(third.isConnected, false);
@@ -421,6 +536,126 @@ test('a different manifest or source cannot reuse an already defined panel const
     assert.match(managed.root.textContent, /界面清单验证未通过/);
     assert.equal(managed.root.querySelector('auriga-team-panel'), null);
     managed.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});
+
+test('review M1: the same trusted module can share pending work and reuse its exact constructor', async () => {
+  const host = surfaceHost(async () => response(), { defined: false });
+  try {
+    const a = host.mount('main'),
+      b = host.mount('main');
+    await flush();
+    const scripts = host.document.querySelectorAll('script');
+    assert.equal(scripts.length, 1);
+    const Constructor = host.completeScript(scripts[0]);
+    await flush();
+    assert.equal(
+      a.root.querySelector('auriga-team-panel').constructor,
+      Constructor,
+    );
+    assert.equal(
+      b.root.querySelector('auriga-team-panel').constructor,
+      Constructor,
+    );
+    assert.equal(host.moduleImports.length, 1);
+    assert.equal(host.moduleImports[0], scripts[0].src);
+    a.close();
+    b.close();
+    const reused = host.mount('main');
+    await flush();
+    assert.equal(
+      reused.root.querySelector('auriga-team-panel').constructor,
+      Constructor,
+    );
+    assert.equal(host.moduleImports.length, 1);
+    assert.equal(host.document.querySelector('script'), null);
+    reused.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});
+
+test('review M1: an import that finishes after timeout cannot claim its constructor during B retry', async () => {
+  let current = boot(),
+    resolveA;
+  const host = surfaceHost(async () => response(200, current), {
+    defined: false,
+  });
+  try {
+    const main = host.mount('main');
+    await flush();
+    const a = host.document.querySelector('script');
+    host.provideModule(
+      a,
+      new Promise((resolve) => {
+        resolveA = resolve;
+      }),
+    );
+    a.onload();
+    await flush();
+    host.expire(10_000);
+    await flush();
+    current = boot();
+    current.manifest.integrity['panel.js'] = 'sha384-Yg==';
+    button(main.root, '重试').click();
+    await flush();
+    const b = host.document.querySelector('script');
+    assert.notEqual(a.src, b.src);
+    class Old extends host.window.HTMLElement {}
+    host.window.customElements.define('auriga-team-panel', Old);
+    resolveA(Old);
+    await flush();
+    host.completeScript(b, class New extends host.window.HTMLElement {}, {
+      register: false,
+    });
+    await flush();
+    assert.equal(main.root.querySelector('auriga-team-panel'), null);
+    assert.ok(main.root.querySelector('[role="alert"]'));
+    assert.equal(host.moduleImports.length, 2);
+    assert.equal(host.counts.timers.size, 0);
+    main.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});
+
+test('review M1: a same-identity waiter arriving after definition still waits for positive module validation', async () => {
+  let resolveModule;
+  const host = surfaceHost(async () => response(), { defined: false });
+  try {
+    const a = host.mount('main');
+    await flush();
+    const script = host.document.querySelector('script');
+    class Trusted extends host.window.HTMLElement {}
+    host.provideModule(
+      script,
+      new Promise((resolve) => {
+        resolveModule = resolve;
+      }),
+    );
+    host.window.customElements.define('auriga-team-panel', Trusted);
+    script.onload();
+    await flush();
+    const b = host.mount('main');
+    await flush();
+    resolveModule(Trusted);
+    await flush();
+    assert.equal(
+      a.root.querySelector('auriga-team-panel').constructor,
+      Trusted,
+    );
+    assert.equal(
+      b.root.querySelector('auriga-team-panel').constructor,
+      Trusted,
+    );
+    assert.equal(host.moduleImports.length, 1);
+    a.close();
+    b.close();
     host.dispose();
   } finally {
     host.close();

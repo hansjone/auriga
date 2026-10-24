@@ -353,15 +353,29 @@ window.__ModuleLoader__.load({
         let panelPending;
         const ensurePanel = (boot, signal) => {
           const identity = `${boot.source}:${boot.entry}:${boot.integrity}`;
+          if (panelPending)
+            return panelPending.identity === identity
+              ? panelPending.promise
+              : Promise.reject(failure('verification'));
           const existing = customElements.get(ELEMENT);
           if (existing)
             return loadedPanels.get(existing) === identity
               ? Promise.resolve()
               : Promise.reject(failure('verification'));
-          panelPending ??= new Promise((resolve, reject) => {
+          // A fresh URL fragment isolates this attempt in the browser module map.
+          // The network resource and its manifest SRI remain unchanged.
+          const moduleURL = new URL(boot.entry);
+          moduleURL.hash =
+            'auriga-' +
+            Array.from(window.crypto.getRandomValues(new Uint32Array(4)), (n) =>
+              n.toString(16),
+            ).join('-');
+          const pending = { identity, promise: undefined };
+          panelPending = pending;
+          pending.promise = new Promise((resolve, reject) => {
             const el = document.createElement('script');
             el.type = 'module';
-            el.src = boot.entry;
+            el.src = moduleURL.href;
             el.integrity = boot.integrity;
             el.crossOrigin = 'anonymous';
             el.dataset.aurigaPanel = '';
@@ -378,22 +392,35 @@ window.__ModuleLoader__.load({
             };
             const timer = later(() => finish(failure()), 10_000);
             scripts.add(el);
-            el.onload = () =>
-              customElements.whenDefined(ELEMENT).then(() => {
-                if (!scripts.has(el)) return;
-                loadedPanels.set(customElements.get(ELEMENT), identity);
+            el.onload = async () => {
+              try {
+                // onload proves this exact URL passed browser SRI. Import the same
+                // cached module namespace, never a second unverified module URL.
+                const module = await import(moduleURL.href);
+                if (!scripts.has(el) || disposed || signal.aborted) return;
+                const Constructor = module.AurigaTeamPanel;
+                if (
+                  typeof Constructor !== 'function' ||
+                  !(Constructor.prototype instanceof window.HTMLElement) ||
+                  customElements.get(ELEMENT) !== Constructor
+                )
+                  throw failure('verification');
+                loadedPanels.set(Constructor, identity);
                 finish();
-              });
+              } catch {
+                finish(failure('verification'));
+              }
+            };
             el.onerror = () => finish(failure());
             el.cancel = () => finish(failure());
             signal.addEventListener('abort', el.cancel, { once: true });
             document.head.append(el);
-          }).catch((error) => {
-            panelPending = undefined;
-            throw error;
+          }).finally(() => {
+            if (panelPending === pending) panelPending = undefined;
           });
-          return panelPending;
+          return pending.promise;
         };
+
         const useHostState = () => {
           const [, bump] = React.useReducer((n) => n + 1, 0);
           React.useEffect(() => {
@@ -605,7 +632,12 @@ window.__ModuleLoader__.load({
           () =>
             ctx.slots.inject('sidebar.panellist', () =>
               ctx.slots.register(
-                { name: NS, id: PANEL_ID, locale: NS, label: 'panel' },
+                {
+                  name: 'sidebar.panellist',
+                  id: PANEL_ID,
+                  locale: NS,
+                  label: 'panel',
+                },
                 () => null,
               ),
             ),
@@ -614,7 +646,10 @@ window.__ModuleLoader__.load({
         effect(
           () =>
             ctx.slots.inject('main', () =>
-              ctx.slots.register({ name: NS, key: PANEL_ID }, Main),
+              ctx.slots.register(
+                { name: 'main', key: PANEL_ID, locale: NS },
+                Main,
+              ),
             ),
           'auriga-shell: main',
         );

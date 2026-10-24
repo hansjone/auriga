@@ -1,7 +1,18 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+import { registerPanel } from '../src/index';
 import { mountPanel, type NativeWrapper } from './native-host';
 const wrappers: NativeWrapper[] = [];
 afterEach(() => wrappers.splice(0).forEach((wrapper) => wrapper.unmount()));
+it('rejects a foreign constructor instead of silently treating it as this module', () => {
+  const occupied = vi
+    .spyOn(customElements, 'get')
+    .mockReturnValue(class Foreign extends HTMLElement {});
+  try {
+    expect(() => registerPanel()).toThrow('different module');
+  } finally {
+    occupied.mockRestore();
+  }
+});
 it('renders localized native content', () => {
   const wrapper = mountPanel({ locale: 'en', theme: 'light' });
   wrappers.push(wrapper);

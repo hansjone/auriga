@@ -17,7 +17,7 @@ managed 沿原有受保护 `/auriga/bootstrap` 读取状态；服务端仍先经
 
 错误区分登录失效、无权访问、宿主入口未接、协议不支持、清单验证失败与不可达。重试仅重新读取，不保存、不自动重放写请求。两页各自有请求代次、超时和 AbortController，晚到结果不能更新已卸载页面。脚本 SRI、元素定义等待、通知计时器及 slot/locale/theme/面板事件注册均有清理。
 
-每个已加载 Custom Element 构造器绑定该次来源、入口与 SRI；不同包或签名清单不能复用先前构造器。浏览器无法注销 Custom Element，跨版本／来源更新需刷新 DSH 页面；managed 失败不会回退到本地包。
+每次加载仍由浏览器对同源 module script 执行原 manifest SRI，URL 的唯一 fragment 只隔离该次浏览器 module map，不改变 HTTP 资源或签名清单。onload 后 import 同一精确 URL，取得原本就导出的 `AurigaTeamPanel`，只有该导出构造器与实际注册构造器严格相同才绑定来源、入口与 SRI 并交付 context；不能仅凭元素名认领。不同 identity 的并发 pending 直接拒绝，同 identity 等待者共享正向校验结果。入口遇到同名外来构造器也明确拒绝。依据为 [HTML module map](https://html.spec.whatwg.org/multipage/webappapis.html#module-map)，本轮另用真实 Chrome 对产品加载器做了单次取件、坏 SRI 和名称抢占验证。浏览器无法注销 Custom Element，跨版本／来源更新需刷新 DSH 页面；managed 失败不会回退到本地包。
 
 ## 默认独立安装
 
@@ -51,8 +51,8 @@ Auriga 当前真实组件分布如下：
 
 ## 验证与限制
 
-插件 Node 测试含原有 140 项与新增 bootstrap／本机路由 6 项。壳的 21 条 Node 行为测试放在 `web/panel/test/shell-surfaces.node.mjs`，由 panel test 脚本在原生 Vitest 37 项后显式执行，文件名避开 Vitest glob。这样 Plugin workflow 的 `--filter auriga-dsh...` 不会依赖根开发用 jsdom；Web workflow 原有完整 workspace 安装提供锁定 jsdom，无新依赖。
+插件 Node 测试含原有 140 项与新增 bootstrap／本机路由 6 项。壳的 30 条 Node 行为测试放在 `web/panel/test/shell-surfaces.node.mjs`，由 panel test 脚本在原生 Vitest 38 项后显式执行，文件名避开 Vitest glob。这样 Plugin workflow 的 `--filter auriga-dsh...` 不会依赖根开发用 jsdom；Web workflow 原有完整 workspace 安装提供锁定 jsdom，无新依赖。
 
-`test:bundle` 在空白 JSDOM 执行实际产物，核 Shadow DOM、主题、资源封闭、无 Vue 标记、无 runtime package dependencies 与 40 kB 预算。隔离 npm tar 安装验证包内资产、SRI、无安装钩子、默认未配置 bootstrap、鉴权拒绝及卸载注销。组件／路由夹具不代表真实 DSH 登录、前端视觉、平台身份或部署验收；宿主设置的真实关闭／Esc／焦点仍需主控在真实 DSH 验收。
+`test:bundle` 在空白 JSDOM 执行实际产物，核 Shadow DOM、主题、资源封闭、无 Vue 标记、无 runtime package dependencies 与 40 kB 预算。隔离 npm tar 安装验证包内资产、SRI、无安装钩子、默认未配置 bootstrap、鉴权拒绝及卸载注销。可选 `test/real-slot-core.mjs <已安装的0.2.0-rc.2入口>` 直接把实际壳元数据交给真实 SlotCore，检查三个目标及卸载，未纳入 CI，也不新增 DSH 依赖。壳 Node VM 导入夹具由测试命令的 `--experimental-vm-modules` 支持，安装和运行无需该参数。组件／路由夹具不代表真实 DSH 登录、前端视觉、平台身份或部署验收；宿主设置的真实关闭／Esc／焦点仍需主控在真实 DSH 验收。
 
 旧规范需主控另项同步：`contracts/plugin/README.md:108`、`docs/adr/0017-team-panel-loading.md:9` 与 `:38` 的 Vue 表述。本批按用户明确原生化要求实现，不擅自修改这些受保护规范。

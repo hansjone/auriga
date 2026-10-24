@@ -1,18 +1,32 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { setImmediate } from 'node:timers';
 import { JSDOM } from 'jsdom';
 
 // Small host React hook/DOM adapter: no bundled React dependency in the plugin.
 // This exercises the real ModuleLoader factory, effect lifecycle and native slots.
 export function surfaceHost(
   fetchImpl,
-  { defined = true, locale = 'zh-CN' } = {},
+  { defined = true, locale = 'zh-CN', slotCore } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
     url: 'https://instance.example.com/i/example/',
   });
   const { window } = dom;
   const { document } = window;
+  const modules = new Map(),
+    moduleImports = [];
+  const completeScript = (
+    script,
+    Constructor = class extends window.HTMLElement {},
+    { register = true } = {},
+  ) => {
+    modules.set(script.src, Constructor);
+    if (register && !window.customElements.get('auriga-team-panel'))
+      window.customElements.define('auriga-team-panel', Constructor);
+    script.onload?.();
+    return Constructor;
+  };
   let current;
   const React = {
     createElement(type, props, ...children) {
@@ -130,6 +144,11 @@ export function surfaceHost(
     disposals = [],
     subscriptions = new Map(),
     scheme = new Set();
+  const declarations = new Map([
+    ['main', 'keyed'],
+    ['sidebar.panellist', 'list'],
+    ['settings.section', 'list'],
+  ]);
   const counts = { registered: 0, unregistered: 0, timers: new Map() };
   let dictionary,
     plugin,
@@ -153,12 +172,7 @@ export function surfaceHost(
       for (const node of nodes)
         if (node.localName === 'script')
           Promise.resolve().then(() => {
-            if (!window.customElements.get('auriga-team-panel'))
-              window.customElements.define(
-                'auriga-team-panel',
-                class extends window.HTMLElement {},
-              );
-            node.onload?.();
+            completeScript(node);
           });
     };
   }
@@ -192,6 +206,19 @@ export function surfaceHost(
         counts.timers.delete(id);
       },
     },
+    {
+      importModuleDynamically: async (specifier) => {
+        moduleImports.push(specifier);
+        const Constructor = await modules.get(specifier);
+        if (!Constructor) throw new Error('Module was not evaluated');
+        const module = new vm.SyntheticModule(['AurigaTeamPanel'], function () {
+          this.setExport('AurigaTeamPanel', Constructor);
+        });
+        await module.link(() => {});
+        await module.evaluate();
+        return module;
+      },
+    },
   );
   const ctx = {
     locale: {
@@ -219,6 +246,8 @@ export function surfaceHost(
     },
     slots: {
       inject(slot, register) {
+        if (!declarations.has(slot))
+          throw new Error(`slot "${slot}" is not declared`);
         const cleanup = register();
         return () => {
           cleanup?.();
@@ -226,15 +255,18 @@ export function surfaceHost(
         };
       },
       register(meta, Component) {
-        const slot =
-          meta.name === 'settings.section'
-            ? 'settings.section'
-            : meta.key
-              ? 'main'
-              : 'sidebar.panellist';
+        const slot = meta.name;
+        const kind = declarations.get(slot);
+        if (!kind) throw new Error(`slot "${slot}" is not declared`);
+        if (kind === 'keyed' && typeof meta.key !== 'string')
+          throw new Error(`keyed slot "${slot}" requires options.key`);
+        if (kind === 'list' && typeof meta.id !== 'string')
+          throw new Error(`list slot "${slot}" requires options.id`);
+        const release = slotCore?.register(meta, Component);
         registrations.set(slot, { meta, Component });
         counts.registered++;
         return () => {
+          release?.();
           counts.unregistered++;
         };
       },
@@ -249,6 +281,11 @@ export function surfaceHost(
     subscriptions,
     scheme,
     dark,
+    completeScript,
+    moduleImports,
+    provideModule(script, Constructor) {
+      modules.set(script.src, Constructor);
+    },
     mount(slot) {
       return mount(registrations.get(slot).Component);
     },
@@ -277,6 +314,7 @@ export function surfaceHost(
   };
 }
 export const flush = async () => {
+  await new Promise((resolve) => setImmediate(resolve));
   for (let i = 0; i < 16; i++) await Promise.resolve();
 };
 export const boot = () => ({
