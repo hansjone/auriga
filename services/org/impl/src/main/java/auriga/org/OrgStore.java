@@ -329,7 +329,10 @@ public final class OrgStore {
 
   private record GroupParent(UUID id, UUID parentId) {}
 
-  /** Lock before reading any group state; all hierarchy writers hold it until commit. */
+  /**
+   * Shared tenant structural lock: acquire before group target or last direct owner checks and
+   * member updates. These paths share the hierarchy/quota lock and hold it until commit.
+   */
   public void lockGroupHierarchy() {
     try {
       // A same-value write also rejects stale concurrent REPEATABLE READ snapshots. The tenant

@@ -254,6 +254,7 @@ public final class OrgService {
       UUID accountId, String displayName, String email, String memberType, Long ifMatch) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
           if (ifMatch != null) OrgError.require(m.version() == ifMatch, "precondition_failed", 412);
           List<String> changed = new ArrayList<>();
@@ -287,6 +288,7 @@ public final class OrgService {
   public ObjectNode disableMember(UUID accountId, String reason) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           UUID actor = actorId();
           OrgError.require(actor == null || !actor.equals(accountId), "conflict", 409);
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
@@ -314,6 +316,7 @@ public final class OrgService {
   public ObjectNode enableMember(UUID accountId) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
           OrgError.require("disabled".equals(m.status()), "conflict", 409);
           var updated =
@@ -336,6 +339,7 @@ public final class OrgService {
   public ObjectNode offboardMember(UUID accountId, UUID handoverTo, String reason) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           UUID actor = actorId();
           OrgError.require(actor == null || !actor.equals(accountId), "conflict", 409);
           var m = store.member(accountId).orElseThrow(() -> OrgError.error("not_found", 404));
@@ -829,6 +833,7 @@ public final class OrgService {
   public void deleteRole(UUID roleId) {
     store.tx(
         () -> {
+          store.lockGroupHierarchy();
           ObjectNode role = getRole(roleId);
           OrgError.require(!role.path("builtin").asBoolean(), "role_builtin", 409);
           List<UUID> affected =
@@ -912,7 +917,11 @@ public final class OrgService {
   public ObjectNode createRoleBinding(UUID roleId, String subjectType, UUID subjectId) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
           getRole(roleId);
+          if ("member".equals(subjectType))
+            store.member(subjectId).orElseThrow(() -> OrgError.error("not_found", 404));
+          else if ("group".equals(subjectType)) getGroup(subjectId);
           ensureGrantAllowed(requireActor(), List.of(roleId), null);
           if ("group".equals(subjectType)) ensureGrantAllowed(requireActor(), null, subjectId);
           UUID id = UuidV7.next();
@@ -960,6 +969,7 @@ public final class OrgService {
   public void deleteRoleBinding(UUID bindingId) {
     store.tx(
         () -> {
+          store.lockGroupHierarchy();
           List<Map<String, Object>> rows =
               store
                   .jdbc()
