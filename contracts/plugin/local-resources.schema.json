@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LocalResourceProtocol",
+  "description": "Native DSH local inventory only; separate from platform member APIs. See README local resource routes.",
+  "$defs": {
+    "LocalField": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$" },
+        "type": { "enum": ["string", "number", "boolean"] },
+        "value": { "type": ["string", "number", "boolean"], "maxLength": 4096 }
+      },
+      "required": ["key", "type", "value"]
+    },
+    "LocalPlugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "installation": { "enum": ["present", "unknown"] },
+        "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 214 },
+        "version": { "type": "string", "maxLength": 128 },
+        "enabled": { "type": "boolean" },
+        "phase": {
+          "enum": [
+            "pending",
+            "loading",
+            "active",
+            "failed",
+            "unloading",
+            "inactive"
+          ]
+        },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "readonly": {
+          "enum": ["managed", "protected", "host", "unverified", null]
+        },
+        "canToggle": { "type": "boolean" },
+        "canConfigure": { "type": "boolean" }
+      },
+      "required": [
+        "id",
+        "installation",
+        "name",
+        "enabled",
+        "phase",
+        "revision",
+        "readonly",
+        "canToggle",
+        "canConfigure"
+      ]
+    },
+    "LocalDetail": {
+      "type": "object",
+      "properties": {
+        "plugin": { "$ref": "#/$defs/LocalPlugin" },
+        "fields": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/LocalField" }
+        },
+        "configRevision": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "required": ["plugin", "fields", "configRevision"],
+      "additionalProperties": false
+    },
+    "LocalList": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "const": 1 },
+        "items": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/LocalPlugin" }
+        }
+      },
+      "required": ["protocol", "items"]
+    },
+    "LocalChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "enum": [
+            "applied",
+            "restart-required",
+            "overridden",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "changed": { "type": "boolean" },
+        "item": { "$ref": "#/$defs/LocalDetail" }
+      },
+      "required": ["application", "changed", "item"]
+    },
+    "LocalTarget": {
+      "type": "object",
+      "properties": { "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" } },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    "LocalEnableInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["id", "revision", "enabled"]
+    },
+    "LocalConfigInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "revision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "configRevision": { "type": "integer", "minimum": 0 },
+        "changes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+              },
+              "value": {
+                "type": ["string", "number", "boolean"],
+                "maxLength": 4096
+              }
+            },
+            "required": ["key", "value"]
+          }
+        }
+      },
+      "required": ["id", "revision", "configRevision", "changes"]
+    }
+  }
+}

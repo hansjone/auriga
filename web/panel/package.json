@@ -6,7 +6,7 @@
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --experimental-vm-modules --test test/shell-surfaces.node.mjs",
+    "test": "vitest run && node --experimental-vm-modules --test test/shell-surfaces.node.mjs test/local-resources-shell.node.mjs",
     "build": "vite build",
     "test:bundle": "node test/bundle.mjs"
   }

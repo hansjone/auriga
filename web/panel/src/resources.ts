@@ -13,10 +13,17 @@ export interface PanelContext {
   theme?: 'dark' | 'light';
   apiBase?: string;
   fetch?: (path: string, init?: RequestInit) => Promise<Response>;
+  localResources?: (path: string, init?: RequestInit) => Promise<Response>;
 }
 
 export type Failure =
-  'unavailable' | 'auth' | 'forbidden' | 'missing' | 'limited' | 'invalid';
+  | 'unavailable'
+  | 'auth'
+  | 'forbidden'
+  | 'missing'
+  | 'limited'
+  | 'invalid'
+  | 'conflict';
 export class ResourceError extends Error {
   constructor(public readonly reason: Failure) {
     super(reason);

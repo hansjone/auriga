@@ -1,5 +1,6 @@
 import { messages } from './messages';
 import style from './panel.css?inline';
+import { LocalResourcesView } from './local-resources/view';
 import {
   canReadResources,
   createResourceReader,
@@ -27,6 +28,7 @@ export class AurigaTeamPanel extends HTMLElement {
   private controller?: AbortController;
   private retryAction?: () => void;
   private root: HTMLElement;
+  private local = new LocalResourcesView();
   constructor() {
     super();
     const shadow = this.attachShadow({ mode: 'open' });
@@ -47,8 +49,10 @@ export class AurigaTeamPanel extends HTMLElement {
       previous.mode !== value?.mode ||
       previous.protocol !== value?.protocol ||
       previous.fetch !== value?.fetch ||
+      previous.localResources !== value?.localResources ||
       previous.apiBase !== value?.apiBase;
     if (changed) {
+      this.local.stop();
       this.cancel();
       this.clearData();
       this.selectedId = undefined;
@@ -71,6 +75,7 @@ export class AurigaTeamPanel extends HTMLElement {
     if (this.tab === 'market' && !this.loaded) this.loadPackages();
   }
   disconnectedCallback() {
+    this.local.stop();
     this.cancel();
   }
   cancel() {
@@ -211,6 +216,7 @@ export class AurigaTeamPanel extends HTMLElement {
   }
 
   showTab(value: 'market' | 'mine') {
+    this.local.stop();
     this.cancel();
     this.tab = value;
     this.selectedId = undefined;
@@ -279,21 +285,19 @@ export class AurigaTeamPanel extends HTMLElement {
     this.root.append(tabs);
     const section = this.element('section');
     this.root.append(section);
-    if (this.tab === 'mine' || !this.readable) {
+    if (this.tab === 'mine') {
+      this.local.mount(section, this.context);
+      return;
+    }
+    if (!this.readable) {
       section.className = 'notice';
       section.setAttribute('role', 'status');
-      if (this.tab === 'mine')
-        section.append(
-          this.element('p', text.mineHint),
-          this.element('p', text.installHint),
-        );
-      else
-        section.textContent =
-          this.context?.protocol !== undefined && this.context.protocol !== 1
-            ? text.protocol
-            : this.context?.mode === 'managed'
-              ? text.managed
-              : text.disconnected;
+      section.textContent =
+        this.context?.protocol !== undefined && this.context.protocol !== 1
+          ? text.protocol
+          : this.context?.mode === 'managed'
+            ? text.managed
+            : text.disconnected;
       return;
     }
     section.setAttribute('aria-busy', String(this.busy));
