@@ -44,6 +44,7 @@ const messages = {
     retry: '重试',
     cancel: '取消',
     change: '更换登录方式',
+    logout: '退出登录',
   },
   en: {
     title: 'Sign in and enter my DSH',
@@ -73,6 +74,7 @@ const messages = {
     retry: 'Retry',
     cancel: 'Cancel',
     change: 'Choose another sign-in method',
+    logout: 'Sign out',
   },
 };
 type Locale = keyof typeof messages;
@@ -149,7 +151,18 @@ export function mountInstanceLogin(
   // The legacy Vue router cannot HTTP-load this independent HTML entry from
   // router.replace(returnTo). Its fallback therefore keeps its normal flow.
   portal.href = '/login';
-  shell.append(header, scope, notice, choices, loginRoot, actions, portal);
+  const logout = doc.createElement('a');
+  logout.href = '/logout.html';
+  shell.append(
+    header,
+    scope,
+    notice,
+    choices,
+    loginRoot,
+    actions,
+    portal,
+    logout,
+  );
   root.append(shell);
 
   const client = createApiClient({
@@ -187,6 +200,8 @@ export function mountInstanceLogin(
     cancel.textContent = words().cancel;
     change.textContent = words().change;
     portal.textContent = words().portal;
+    logout.textContent = words().logout;
+    logout.hidden = !authenticated;
     retry.hidden = !retryable;
     retry.disabled = authBusy || workBusy || Date.now() < retryAt;
     cancel.hidden = !(authBusy || workBusy || tx);
