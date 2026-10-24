@@ -317,12 +317,13 @@ public final class OrgGrpcServices {
       ObjectNode i = (ObjectNode) q.path("instance");
       InstanceQuota.Builder ib = InstanceQuota.newBuilder();
       if (i.has("cpuMillis") && !i.path("cpuMillis").isNull())
-        ib.setCpuMillis(i.path("cpuMillis").asLong());
+        ib.setCpuMillis(QuotaValues.int64(i.path("cpuMillis")));
       if (i.has("memoryMb") && !i.path("memoryMb").isNull())
-        ib.setMemoryMb(i.path("memoryMb").asLong());
-      if (i.has("diskGb") && !i.path("diskGb").isNull()) ib.setDiskGb(i.path("diskGb").asLong());
+        ib.setMemoryMb(QuotaValues.int64(i.path("memoryMb")));
+      if (i.has("diskGb") && !i.path("diskGb").isNull())
+        ib.setDiskGb(QuotaValues.int64(i.path("diskGb")));
       if (i.has("maxInstances") && !i.path("maxInstances").isNull())
-        ib.setMaxInstances(i.path("maxInstances").asLong());
+        ib.setMaxInstances(QuotaValues.int64(i.path("maxInstances")));
       if (i.has("alwaysOnAllowed")) ib.setAlwaysOnAllowed(i.path("alwaysOnAllowed").asBoolean());
       b.setInstance(ib);
     }
@@ -330,10 +331,10 @@ public final class OrgGrpcServices {
       ObjectNode m = (ObjectNode) q.path("model");
       ModelQuota.Builder mb = ModelQuota.newBuilder();
       if (m.has("monthlyBudgetMicros") && !m.path("monthlyBudgetMicros").isNull())
-        mb.setMonthlyBudgetMicros(m.path("monthlyBudgetMicros").asLong());
+        mb.setMonthlyBudgetMicros(QuotaValues.int64(m.path("monthlyBudgetMicros")));
       if (m.hasNonNull("currency")) mb.setCurrency(m.path("currency").asString());
       if (m.has("dailyTokens") && !m.path("dailyTokens").isNull())
-        mb.setDailyTokens(m.path("dailyTokens").asLong());
+        mb.setDailyTokens(QuotaValues.int64(m.path("dailyTokens")));
       b.setModel(mb);
     }
     return b.build();

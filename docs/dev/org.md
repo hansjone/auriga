@@ -75,6 +75,44 @@ FORCE RLS 约束，不探测其他租户。祖先查询使用递归 `UNION` 去�
 竞争测试用闩锁控制事务提交并检查数据库锁等待；坏链用例设置事务级
 `statement_timeout`，防止回归使测试无限等待。
 
+## 配额读写完整性
+
+组和成员配额的 GET/PUT/DELETE 都在事务内核对当前租户目标。不存在、其他租户
+以及只有历史孤儿覆盖而没有目标的情况，统一返回 `404 common.not_found`，不会
+通过管理员连接或跨 schema 查询探测其他租户。目标已验证存在但未设置覆盖时，
+GET/DELETE 保持既有 `404 org.not_found`，与缺失目标的错误码区分；默认覆盖缺省
+返回 `{}`，默认 DELETE 保持既有 `409 org.conflict`。
+
+PUT 和 DELETE 先取得上述租户结构锁，再校验目标及读写覆盖，与正式组删除采用
+相同锁顺序。首次并发写同一覆盖会依序完成，避免 UPDATE→INSERT 唯一键竞争；
+组删除与配额写入也不能交错留下孤儿覆盖。PUT 仍是没有 ETag 的整层替换，后提交
+的合法写入可以覆盖前一层内容，不提供多管理员编辑冲突检测。
+
+已知字段按正式 Quota schema 校验：根、`instance` 和 `model` 是 object；
+`cpuMillis`、`memoryMb`、`diskGb` 是不小于 100、256、1 的整数，不能为 null；
+`maxInstances`、`monthlyBudgetMicros`、`dailyTokens` 是非负整数或 null；
+`alwaysOnAllowed` 是 boolean；`currency` 匹配三位大写字母。拒绝数值字符串与浮点
+节点，不做截断或取整。省略、null、0、false 各自保留。schema 没有禁止额外属性，
+根和 section 的未知字段原样往返，不使用全字段白名单。
+多组间未知字段没有契约定义的放宽排序；混合类型值保留原节点，不尝试强转成
+boolean 或整数，也不以转换失败产生 0/false。
+
+HTTP 使用 JSON 树和 PostgreSQL jsonb 存取整数，不套用生成 DTO 的 Integer 范围，
+也不套用 JavaScript 的 `2^53-1` 上限；大于 int64 的可存储整数仍能精确读写及比较。
+多组有效配额按原数值节点作精确大小比较，保留成员→多组最宽松→默认的逐字段优先级，
+null 表示不限并优先于组内具体数值。gRPC 的已知数值字段是 optional int64，超出
+int64 的有效值明确返回 `common.validation_failed`，不会截断或当作不限，HTTP 数据
+保持原值。历史非法根、section 或已知字段在读取时同样安全返回该校验错误，不改写
+或清理原数据。
+
+本服务没有可信的 gateway 部署币种输入，因此只核对 `currency` 形状；部署币种
+一致性仍需后续接线，不新增跨服务调用或配置，也不在本批增加模型预算执行。
+
+`OrgQuotaIntegrityTest` 使用真实 PostgreSQL、非表所有者运行角色及 tenant RLS，
+覆盖目标隔离、合法整层替换、类型/最小值/null/0/false/未知字段、大整数与 gRPC
+边界、有效合并、首次并发写入、组删除竞争及事务回滚。并发测试以闩锁与数据库锁
+等待观察控制交错，不使用 sleep。
+
 ## 事件
 
 经 common `EventPublisher`（outbox）：`user.created` / `user.updated` /

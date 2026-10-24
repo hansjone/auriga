@@ -1054,6 +1054,7 @@ public final class OrgService {
   public ObjectNode getQuota(String scope, UUID scopeId) {
     return store.tx(
         () -> {
+          requireQuotaTarget(scope, scopeId);
           List<String> rows =
               scopeId == null
                   ? store
@@ -1075,13 +1076,16 @@ public final class OrgService {
             if ("default".equals(scope)) return OrgJson.object();
             throw OrgError.error("not_found", 404);
           }
-          return OrgJson.read(rows.getFirst());
+          return QuotaValues.read(rows.getFirst());
         });
   }
 
   public ObjectNode putQuota(String scope, UUID scopeId, JsonNode value) {
     return store.tx(
         () -> {
+          store.lockGroupHierarchy();
+          requireQuotaTarget(scope, scopeId);
+          QuotaValues.validate(value);
           int updated =
               scopeId == null
                   ? store
@@ -1120,7 +1124,9 @@ public final class OrgService {
   public void deleteQuota(String scope, UUID scopeId) {
     store.tx(
         () -> {
+          store.lockGroupHierarchy();
           OrgError.require(!"default".equals(scope), "conflict", 409);
+          requireQuotaTarget(scope, scopeId);
           int n =
               store
                   .jdbc()
@@ -1132,6 +1138,31 @@ public final class OrgService {
           OrgError.require(n > 0, "not_found", 404);
           return null;
         });
+  }
+
+  private void requireQuotaTarget(String scope, UUID scopeId) {
+    switch (scope) {
+      case "default" -> {
+        if (scopeId != null) throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+      }
+      case "group" -> {
+        Boolean exists =
+            store
+                .jdbc()
+                .queryForObject(
+                    "SELECT EXISTS (SELECT 1 FROM \"group\" WHERE tenant_id=? AND id=?)",
+                    Boolean.class,
+                    store.tenantId(),
+                    scopeId);
+        if (!Boolean.TRUE.equals(exists)) throw new AurigaException(CommonErrors.NOT_FOUND);
+      }
+      case "member" -> {
+        if (scopeId == null || store.member(scopeId).isEmpty()) {
+          throw new AurigaException(CommonErrors.NOT_FOUND);
+        }
+      }
+      default -> throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    }
   }
 
   public ObjectNode getEffectiveQuota(UUID accountId) {
@@ -1192,7 +1223,7 @@ public final class OrgService {
     if (rows.isEmpty()) {
       return "default".equals(scope) ? OrgJson.object() : null;
     }
-    return OrgJson.read(rows.getFirst());
+    return QuotaValues.read(rows.getFirst());
   }
 
   /** Fill only unset fields from layer. */
@@ -1244,9 +1275,15 @@ public final class OrgService {
                   dst.putNull(k);
                   return;
                 }
-                if (v.isBoolean()) dst.put(k, cur.asBoolean() || v.asBoolean());
-                else if (v.isNumber()) dst.put(k, Math.max(cur.asLong(), v.asLong()));
-                else dst.set(k, v);
+                if (v.isBoolean() && cur.isBoolean()) {
+                  dst.put(k, cur.booleanValue() || v.booleanValue());
+                } else if (v.isIntegralNumber() && cur.isIntegralNumber()) {
+                  // Keep the original node: HTTP integers may exceed int64 or double precision.
+                  if (v.bigIntegerValue().compareTo(cur.bigIntegerValue()) > 0) dst.set(k, v);
+                } else {
+                  // Unknown fields have no defined loosening order; retain a value, never coerce.
+                  dst.set(k, v);
+                }
               });
     }
   }
