@@ -1,5 +1,8 @@
 import { mountInstanceLogin } from './page';
+import { mountDocumentPage } from '../native-logout/lifecycle';
 import './style.css';
 
 const root = document.getElementById('instance-login');
-if (root) mountInstanceLogin(root);
+export const disposeEntry = root
+  ? mountDocumentPage(root, mountInstanceLogin)
+  : () => {};

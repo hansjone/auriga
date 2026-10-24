@@ -1,0 +1,36 @@
+.portal-logout {
+  box-sizing: border-box;
+  max-width: 36rem;
+  margin: 3rem auto;
+  padding: 1rem;
+  font: inherit;
+  color: var(--dsw-alias-label-primary, inherit);
+}
+.portal-logout header,
+.portal-logout .actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.portal-logout header {
+  justify-content: space-between;
+}
+.portal-logout button,
+.portal-logout select,
+.portal-logout a {
+  font: inherit;
+}
+.portal-logout button {
+  padding: 0.5rem 0.75rem;
+}
+.portal-logout [role='alert'] {
+  color: var(--dsw-alias-state-error-primary, inherit);
+}
+.portal-logout .login-link {
+  display: inline-block;
+  margin-block: 1.5rem;
+}
+.portal-logout [hidden] {
+  display: none;
+}

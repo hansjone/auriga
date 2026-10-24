@@ -7,6 +7,7 @@ export default defineConfig({
       input: {
         index: 'index.html',
         instanceLogin: 'instance-login.html',
+        logout: 'logout.html',
       },
     },
   },

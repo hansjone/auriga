@@ -160,6 +160,67 @@ afterEach(() => {
 });
 
 describe('native cloud sign-in', () => {
+  it('offers a real logout anchor only after portal identity confirmation, including preparation failure', async () => {
+    const late = deferred<Response>();
+    fetcher
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValueOnce(
+        json(
+          { status: 503, title: 'Unavailable', code: 'common.unavailable' },
+          503,
+        ),
+      );
+    render();
+    const logout = root.querySelector<HTMLAnchorElement>(
+      'a[href="/logout.html"]',
+    )!;
+    expect(logout.hidden).toBe(true);
+    late.resolve(json(me));
+    await flush();
+    expect(logout.hidden).toBe(false);
+    expect(logout.textContent).toBe('退出登录');
+    expect(logout.getAttribute('href')).toBe('/logout.html');
+    page!.setLocale('en');
+    expect(logout.textContent).toBe('Sign out');
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/iam/v1/me',
+      '/api/workspace/v1/me/instance/open',
+    ]);
+  });
+
+  it('does not offer logout for anonymous users or an unrelated admin session', async () => {
+    await anonymous();
+    expect(
+      root.querySelector<HTMLAnchorElement>('a[href="/logout.html"]')!.hidden,
+    ).toBe(true);
+    page!.dispose();
+    fetcher.mockResolvedValueOnce(
+      json({ ...me, session: { audience: 'admin', current: true } }),
+    );
+    render();
+    await flush();
+    expect(
+      root.querySelector<HTMLAnchorElement>('a[href="/logout.html"]')!.hidden,
+    ).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('hides logout after a confirmed session expires while waiting for an instance', async () => {
+    fetcher
+      .mockResolvedValueOnce(json(me))
+      .mockResolvedValueOnce(json({ instance: starting }))
+      .mockResolvedValueOnce(expired());
+    render();
+    await flush();
+    const logout = root.querySelector<HTMLAnchorElement>(
+      'a[href="/logout.html"]',
+    )!;
+    expect(logout.hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(logout.hidden).toBe(true);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('uses real IAM form/TOTP shapes, verifies the session, opens and waits for ready before entering', async () => {
     await showPassword();
     expect(JSON.parse(String(fetcher.mock.calls[2]![1]?.body))).toEqual({
