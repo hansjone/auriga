@@ -194,6 +194,7 @@ export function createTeam({
       !opaque(exec.rootCallId)
     )
       throw new Error('trusted DSH execution required');
+    const sessionId = exec.agent.session.id;
     if (
       !args ||
       typeof args !== 'object' ||
@@ -211,14 +212,14 @@ export function createTeam({
       )
     )
       throw new Error('untrusted Team arguments');
-    const row = await binding(exec.agent.session.id, undefined, exec.signal);
+    const row = await binding(sessionId, undefined, exec.signal);
     const result = await rpc(
       'tools/call',
       {
         name,
         arguments: args,
         _meta: {
-          'auriga/sessionId': exec.agent.session.id,
+          'auriga/sessionId': sessionId,
           'auriga/toolCallId': exec.callId,
           'auriga/rootCallId': exec.rootCallId,
         },
@@ -227,6 +228,31 @@ export function createTeam({
       { 'Auriga-Endpoint-Id': row.endpointId, 'Auriga-Binding-Id': row.id },
     );
     if (result.isError) throw new Error('remote Team tool rejected');
+    if (name === 'auriga_open_thread') {
+      const message = result.structuredContent?.message;
+      if (
+        !UUID.test(message?.id) ||
+        !UUID.test(message?.threadId) ||
+        message.authorEndpointId !== row.endpointId ||
+        !UUID.test(row.id) ||
+        row.hostSessionId !== sessionId
+      )
+        throw new Error('invalid Team source thread response');
+      await vault.update((state) => {
+        active();
+        if (state.endpoint !== row.endpointId)
+          throw new Error('Team endpoint changed');
+        const existing = state.threads[message.threadId];
+        if (
+          existing &&
+          (existing.sessionId !== sessionId ||
+            (existing.bindingId !== null && existing.bindingId !== row.id))
+        )
+          throw new Error('Team source thread binding conflict');
+        state.threads[message.threadId] = { sessionId, bindingId: row.id };
+      });
+      active();
+    }
     return result;
   }
   async function receive(/** @type {any} */ delivery) {
@@ -288,7 +314,18 @@ export function createTeam({
         {
           sessionId: thread.sessionId,
           requestId: delivery.id,
-          content: [{ type: 'text', text: message.text }],
+          content: [
+            {
+              type: 'text',
+              text:
+                'Team communication context (server-issued JSON):\n' +
+                JSON.stringify({
+                  threadId: message.threadId,
+                  messageId: message.id,
+                }),
+            },
+            { type: 'text', text: message.text },
+          ],
           mode: 'queue',
         },
         controller.signal,
@@ -355,7 +392,10 @@ export function createTeam({
       await transport('/ai/mcp', {
         method: 'POST',
         token: await getAccess(),
-        headers: { 'MCP-Protocol-Version': protocol },
+        headers: {
+          'MCP-Protocol-Version': protocol,
+          accept: 'application/json, text/event-stream',
+        },
         body: { jsonrpc: '2.0', method: 'notifications/initialized' },
       });
       const list = await rpc('tools/list', {});

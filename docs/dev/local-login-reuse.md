@@ -18,7 +18,11 @@
 
 配置从当前插件 loader row 读取；私有设备状态在 `ctx.profileContext.dir/auriga-connect/`。原生启动授权仍必需，普通登录只回当前 DSH，不调用云端 instance/open。账号与 TOTP 在原步骤视图完成，不增加可见核码或 consent 按钮。详见 `contracts/plugin/local-login.md`。
 
-Team 为平台远程 Streamable HTTP MCP，客户端不启动本地 MCP server。initialize 协商 2025-06-18，发送 initialized 通知；四个工具从真实远程 tools/list 获取 schema，再注册到当前 DSH `ctx.tools`。执行只读取真实 `exec.agent.session.id/callId/rootCallId`，构造 ADR0016 `_meta`，Node 私有端点/绑定引用走受信请求头。Node register/bind/pull/ack/revoke 不暴露给模型。访问令牌每请求从 Node 取，refresh 不回放模型写入。
+Team 为平台远程 Streamable HTTP MCP，客户端不启动本地 MCP server。initialize 协商 2025-06-18，发送 initialized 通知；包括通知在内的 MCP POST 均声明 Accept application/json, text/event-stream，通知接受空202响应。四个工具从真实远程 tools/list 获取 schema，再注册到当前 DSH `ctx.tools`。执行只读取真实 `exec.agent.session.id/callId/rootCallId`，构造 ADR0016 `_meta`，Node 私有端点/绑定引用走受信请求头。Node register/bind/pull/ack/revoke 不暴露给模型。访问令牌每请求从 Node 取，refresh 不回放模型写入。
+
+开线程成功返回前，校验服务器响应message/thread UUID与authorEndpointId、已核验的source binding，并原子写入thread→当前可信DSH会话/绑定；禁止覆盖不同会话/绑定。远端提交而本地落盘失败时仍返回失败，调用者可用相同idempotencyKey安全重试，不凭模型输入补源会话。接收prompt分为两个text part：第一个仅有服务器验证过的threadId/messageId JSON上下文，第二个完整保留发送正文。接收模型据入队上下文使用reply/read，不依赖测试额外告知线程，不包含lease/token/私有身份，也不强制业务回复。
+
+真实设备验证且原子持久完成后，临时Team失败或浏览器取消只清本次jar/临时证明，保留device与backing供后续受门锁的resume重新在线验证；此时不走平台logout补偿。未持久完成的尝试仍补偿自己的登录。取消清理等待本次commit Promise的最终结果，不能在异步写尚未结束时先注销backing；显式本地logout仍立即封闭代际，并在同一vault串行队列中写tombstone/设备撤销补偿，防止迟到写恢复认证。Team未就绪或已取消时不签浏览器session；原有owner/did冲突检查保留。
 
 接收端先持久 thread→真实 DSH session ID，再调用 rc.3 `sessionController.create` 与绑定；以服务器 canonical delivery.id 为 `prompt.requestId`。明确 `accepted=true` 后，取实际 `ctx.sessions.get(sessionId)` 并等待 `ctx.sessions.flush(session)===true`，才持久 accepted 并 ACK；无持久化监听时 rc.3 返回 false，必须拒绝确认。ACK 响应丢失重新取 lease 时跳过已持久 accepted 的 prompt。原生 inbox/spliced 为会话事件，源码已核；仍须用当前实际版本的完整重启测试验明整条链，不仅靠内存测试宣称恰好一次。
 

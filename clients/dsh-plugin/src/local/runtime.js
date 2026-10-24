@@ -26,6 +26,38 @@ export function cookie(request, name) {
   return rows.length === 1 ? rows[0].slice(name.length + 1) : undefined;
 }
 
+/** Publish the commit outcome before starting any asynchronous write, so
+ * cancellation cannot compensate a backing session while its device is landing.
+ * @param {any} attempt @param {()=>Promise<void>} write */
+export function persistNativeAttempt(attempt, write) {
+  if (attempt.commit) throw new Error('native device commit already started');
+  const result = Promise.resolve().then(write);
+  attempt.commit = result.then(
+    () => true,
+    () => false,
+  );
+  return result;
+}
+
+/** A committed device owns its backing beyond a temporary Team failure or
+ * browser cancellation. Explicit logout independently tombstones/revokes it.
+ * @param {any} attempt @param {()=>Promise<void>} compensate */
+export function abandonNativeAttempt(attempt, compensate) {
+  if (attempt.abandoning) return attempt.abandoning;
+  attempt.version++;
+  attempt.controller.abort();
+  attempt.abandoning = (async () => {
+    try {
+      if (!(await (attempt.commit ?? false))) await compensate();
+    } finally {
+      attempt.jar.clear();
+      attempt.verifier = undefined;
+      attempt.device = undefined;
+    }
+  })();
+  return attempt.abandoning;
+}
+
 /** Browser sessions are process-local. Restart can never revive a revoked old bearer from disk.
  * @param {{config:any,directory:string,ctx:any}} options */
 export async function createConnectRuntime({ config: input, directory, ctx }) {
@@ -186,10 +218,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   ) =>
     `${name}=${value}; Path=/; HttpOnly; SameSite=Strict${ctx.webServer.protocol === 'https:' ? '; Secure' : ''}${maxAge === undefined ? '' : '; Max-Age=' + maxAge}`;
   async function abandon(/** @type {any} */ row) {
-    row.version++;
-    row.controller.abort();
-    if (row.transactionId) {
-      // Failure compensation uses this attempt's own cookie/CSRF only.
+    return abandonNativeAttempt(row, async () => {
+      if (!row.transactionId) return;
+      // Only an uncommitted attempt compensates its own cookie/CSRF session.
       await platform
         .request(
           row.completed
@@ -204,14 +235,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           },
         )
         .catch(() => {});
-    }
-    row.jar.clear();
-    row.verifier = undefined;
-    row.device = undefined;
+    });
   }
-  async function startTeam() {
+  async function startTeam(assertAttempt = () => {}) {
     if (team) {
       await team.verifyOnline();
+      assertAttempt();
       return;
     }
     if (
@@ -223,11 +252,15 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     )
       throw new Error('rc.3 tools and sessionController required');
     const g = generation;
+    let starting = true;
     const candidate = createTeam({
       platform,
       vault,
       getAccess,
-      assertActive: () => active(g),
+      assertActive: () => {
+        active(g);
+        if (starting) assertAttempt();
+      },
       ctx,
       label: config.deviceName ?? 'Auriga DSH',
       onState(state) {
@@ -243,6 +276,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     try {
       await candidate.start();
       active(g);
+      assertAttempt();
+      starting = false;
       team = candidate;
     } catch (error) {
       candidate.close();
@@ -367,7 +402,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           check();
           await platform.verifyDevice(token, saved.claims);
           check();
-          await startTeam();
+          await startTeam(check);
           check();
           return issueBrowserSession(row, request, vault.snapshot().credential);
         }
@@ -486,23 +521,25 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         check();
         const finish = finalizing.then(async () => {
           check();
-          await vault.update((state) => {
-            check();
-            const old = state.credential;
-            if (
-              old &&
-              (old.claims.tid !== credential.claims.tid ||
-                old.claims.sub !== credential.claims.sub)
-            )
-              throw new Error('local owner conflict');
-            if (old && old.claims.did !== credential.claims.did)
-              throw new Error(
-                'sign out existing device before replacing connection',
-              );
-            state.credential = credential;
-          });
+          await persistNativeAttempt(row, () =>
+            vault.update((state) => {
+              check();
+              const old = state.credential;
+              if (
+                old &&
+                (old.claims.tid !== credential.claims.tid ||
+                  old.claims.sub !== credential.claims.sub)
+              )
+                throw new Error('local owner conflict');
+              if (old && old.claims.did !== credential.claims.did)
+                throw new Error(
+                  'sign out existing device before replacing connection',
+                );
+              state.credential = credential;
+            }),
+          );
           check();
-          await startTeam();
+          await startTeam(check);
           check();
         });
         finalizing = finish.catch(() => {});

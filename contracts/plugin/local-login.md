@@ -11,7 +11,7 @@
 - POST `/logout`：严格同 Origin、JSON、会话或本次尝试 CSRF。先失效本人本机浏览器会话和其 WS，再原子持久退出状态与加密撤销补偿；不停止 DSH Agent、会话任务或进程。本地持久失败不报告成功。Node 随后 POST `/oauth2/revoke`，form-urlencoded `{client_id,token}`，只用本设备 refresh，不传 did/浏览器 cookie；远端不可达返回 `remoteRevocation=pending` 并重试，不能冒称撤销完成。成功/未知/重复幂等200后才持久移除补偿。重启只对相同平台 origin/clientId 重试，避免配置更换泄露旧凭据。
 - GET `/` 与固定 `/assets/{adapter,index,styles}.js`：原生步骤视图与适配器，不接受任意文件路径、redirect、平台 URL、主体或令牌。
 
-Host 独立内存 jar 保存平台事务 cookie/门户 backing session cookie，仅当前认证尝试可用。nativeDevice、verifier、access/refresh、平台 cookie 不进 UI、URL、日志。UI complete 只提示步骤；Host 还须兑换设备 token、校验 ES256/JWKS/iss/aud/ptyp/ctx/did/tid/sub/scope/到期、原子持久设备凭据、在线 Team 初始化与原生工具注册，然后才发本机 cookie。成功清 jar 不调用平台 logout；失败可用本次 jar 尽力补偿，不声称跨 IAM/FS 两阶段提交。
+Host 独立内存 jar 保存平台事务 cookie/门户 backing session cookie，仅当前认证尝试可用。nativeDevice、verifier、access/refresh、平台 cookie 不进 UI、URL、日志。UI complete 只提示步骤；Host 还须兑换设备 token、校验 ES256/JWKS/iss/aud/ptyp/ctx/did/tid/sub/scope/到期、原子持久设备凭据、在线 Team 初始化与原生工具注册，然后才发本机 cookie。成功清 jar 不调用平台 logout；仅未持久的失败尝试可用本次 jar 尽力补偿。已持久设备遇临时 Team 失败/浏览器取消时保留 backing，经重新在线验证后可 resume，不发未就绪的浏览器会话。取消须等待 commit 结果再决定补偿；显式退出仍串行持久 tombstone/设备撤销，不声称跨 IAM/FS 两阶段提交。
 
 浏览器 bearer 仅在进程内；重启不从磁盘恢复旧 bearer。设备凭据与通信投递映射放在 profile 私有目录 AES-GCM 文件，copy-on-write + 同目录原子 rename 后才发布内存快照。设备 refresh 单飞、检查同一 did/tid/sub 并先持久后发布；401/403 或到期关闭会话 WS，网络不可用显式显示断开。写操作不自动重放。
 
