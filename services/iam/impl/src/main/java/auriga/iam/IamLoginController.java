@@ -91,9 +91,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   @PublicEndpoint
   public ObjectNode begin(
-      @RequestBody CreateLoginTransaction body,
-      HttpServletRequest request,
-      HttpServletResponse response) {
+      @RequestBody JsonNode body, HttpServletRequest request, HttpServletResponse response) {
     return requests.call(
         request,
         () -> {
@@ -102,10 +100,11 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
                   requests.clientIp(request),
                   () -> {
                     requests.sameOrigin(request);
-                    if (body.getPurpose() != null && !body.getPurpose().toString().equals("login"))
+                    if (body.hasNonNull("purpose")
+                        && !body.path("purpose").asString().equals("login"))
                       requests.browserSession(request, sessions, true);
                     return login.begin(
-                        Json.MAPPER.valueToTree(body),
+                        body,
                         requests.host(request).audience(),
                         requests.clientIp(request),
                         request.getHeader("User-Agent"),
@@ -115,6 +114,13 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
           requests.issued(request, response, result);
           return result.transaction();
         });
+  }
+
+  // Retain the typed in-process entry used by existing callers; HTTP uses the
+  // original JSON tree so unknown native security fields cannot be erased by DTO binding.
+  public ObjectNode begin(
+      CreateLoginTransaction body, HttpServletRequest request, HttpServletResponse response) {
+    return begin(Json.MAPPER.valueToTree(body), request, response);
   }
 
   @GetMapping("/login/transactions/{id}")

@@ -29,6 +29,60 @@ public final class LoginManager {
   private final AuditLogger audit;
   private final Clock clock;
   private final String issuer;
+  private OAuthProvider nativeDevices;
+
+  public void nativeDevices(OAuthProvider devices) {
+    this.nativeDevices = devices;
+  }
+
+  private static void validateNative(JsonNode request, String audience) {
+    if (!request.has("nativeConnect")) return;
+    IamError.validate(
+        request.isObject()
+            && "portal".equals(audience)
+            && (!request.has("purpose")
+                || request.path("purpose").isString()
+                    && request.path("purpose").asString().equals("login"))
+            && (!request.has("returnTo")
+                || request.path("returnTo").isString()
+                    && request.path("returnTo").asString().equals("/"))
+            && !request.has("invitationCode"));
+    request
+        .properties()
+        .forEach(
+            e ->
+                IamError.validate(
+                    Set.of("providerId", "purpose", "returnTo", "nativeConnect")
+                        .contains(e.getKey())));
+    JsonNode nativeRequest = request.path("nativeConnect");
+    IamError.validate(nativeRequest.isObject());
+    nativeRequest
+        .properties()
+        .forEach(
+            e ->
+                IamError.validate(
+                    Set.of("clientId", "codeChallenge", "codeChallengeMethod", "deviceName")
+                        .contains(e.getKey())));
+    IamError.validate(
+        nativeRequest.path("clientId").isString()
+            && !nativeRequest.path("clientId").asString().isBlank()
+            && nativeRequest.path("codeChallenge").isString()
+            && SessionManager.canonicalCsrf(nativeRequest.path("codeChallenge").asString())
+            && nativeRequest.path("codeChallengeMethod").asString().equals("S256")
+            && (!nativeRequest.has("deviceName")
+                || nativeRequest.path("deviceName").isString()
+                    && nativeRequest
+                            .path("deviceName")
+                            .asString()
+                            .codePointCount(0, nativeRequest.path("deviceName").asString().length())
+                        <= 64
+                    && nativeRequest
+                        .path("deviceName")
+                        .asString()
+                        .codePoints()
+                        .noneMatch(Character::isISOControl)));
+  }
+
   private final ScopedValue<Map<String, Integer>> preparedAttempts = ScopedValue.newInstance();
 
   private record Attempt(String key, int maximum) {}
@@ -138,6 +192,7 @@ public final class LoginManager {
       String userAgent,
       String origin,
       String previousBinding) {
+    validateNative(request, audience);
     return store.tx(
         () -> {
           if (previousBinding != null) {
@@ -154,12 +209,20 @@ public final class LoginManager {
                 // A binding may produce exactly one successor, even after completion/cancel.
                 // This marker and its successor commit or roll back together.
                 current.put("replaced", true);
+                if (nativeDevices != null) nativeDevices.cancelNative(current);
                 store.save("login_tx", current);
               }
           }
           charge("login-ip:" + ip, 30);
           String pid = request.path("providerId").asString();
           ObjectNode provider = provider(pid);
+          if (request.has("nativeConnect"))
+            IamError.require(
+                nativeDevices != null
+                    && provider.path("connectorType").asString().equals("team-account")
+                    && config(provider).path("primaryStep").asString("form").equals("form"),
+                "invalid_config",
+                400);
           String purpose = request.path("purpose").asString("login");
           IamError.require(
               Set.of("login", "link", "stepup").contains(purpose), "invalid_purpose", 400);
@@ -218,6 +281,10 @@ public final class LoginManager {
           store.insert("login_tx", UuidV7.next().toString(), tx, clock.instant().plusSeconds(300));
           // Retrieval uses the generated transaction id, with no caller-controlled key.
           tx.put("txId", tx.path("id").asString());
+          ObjectNode nativeDevice =
+              request.has("nativeConnect")
+                  ? nativeDevices.beginNative(tx, request.path("nativeConnect"))
+                  : null;
           if (provider.path("connectorType").asString().equals("team-account")
               && !tx.path("invitationCode").asString("").isBlank()) {
             boolean valid =
@@ -247,6 +314,9 @@ public final class LoginManager {
             fail(tx, provider, "iam.connector_unavailable", "failed");
             applied = new Result(view(tx, provider), null, null);
           }
+          if (nativeDevice != null
+              && applied.transaction().path("status").asString().equals("pending"))
+            applied.transaction().set("nativeDevice", nativeDevice);
           return new Result(applied.transaction(), binding, applied.session());
         });
   }
@@ -285,6 +355,7 @@ public final class LoginManager {
     store.tx(
         () -> {
           ObjectNode tx = transaction(id, binding);
+          if (nativeDevices != null) nativeDevices.cancelNative(tx);
           if (tx.path("status").asString().equals("pending")) {
             abandonFirstRegistration(tx, provider(tx.path("providerId").asString()));
             tx.put("status", "cancelled");
@@ -378,7 +449,7 @@ public final class LoginManager {
                     UUID pending = UUID.fromString(tx.path("pendingAccount").asString());
                     IamError.require(
                         teamAccounts.verifyMfaInput(pending, input)
-                            || hooks.verifyMfa(pending, input),
+                            || !tx.has("nativeGrantHash") && hooks.verifyMfa(pending, input),
                         "invalid_credentials",
                         401);
                     return finish(
@@ -453,6 +524,13 @@ public final class LoginManager {
 
   private Result apply(ObjectNode tx, ObjectNode provider, JsonNode result, boolean verifiedMfa) {
     JsonNode step = result.path("step");
+    if (tx.has("nativeGrantHash"))
+      IamError.require(
+          Set.of("done", "fail").contains(step.path("type").asString())
+              || step.path("type").asString().equals("form")
+                  && Set.of("password", "totp").contains(step.path("formId").asString()),
+          "invalid_step_input",
+          400);
     if (step.path("type").asString().equals("done"))
       return finish(tx, provider, step.path("profile"), verifiedMfa);
     if (step.path("type").asString().equals("fail")) {
@@ -568,7 +646,8 @@ public final class LoginManager {
     boolean teamNeedsPlatformTotp = team && teamAccounts.hasTotp(UUID.fromString(accountId));
     if (!mfa
         && (!policy.path("mfa").asString("new_device").equals("never")
-            || purpose.equals("stepup"))) {
+            || purpose.equals("stepup")
+            || tx.has("nativeGrantHash"))) {
       tx.put("pendingAccount", accountId);
       tx.put("pendingProfile", secrets.encrypt(profile.toString(), aad(tx)));
       if (team && !teamAccounts.hasMfa(UUID.fromString(accountId))) {
@@ -678,6 +757,15 @@ public final class LoginManager {
         issued == null
             ? tx.path("sessionId").asString()
             : issued.session().path("sessionId").asString();
+    if (tx.has("nativeGrantHash")) {
+      IamError.require(
+          mfa
+              && issued != null
+              && (coreMfa || tx.path("step").path("formId").asString().equals("totp")),
+          "mfa_required",
+          403);
+      nativeDevices.approveNative(tx, issued.session());
+    }
     events.publish(
         "identity.login",
         accountId,
@@ -740,6 +828,7 @@ public final class LoginManager {
   }
 
   private void fail(ObjectNode tx, ObjectNode provider, String code, String status) {
+    if (nativeDevices != null) nativeDevices.cancelNative(tx);
     abandonFirstRegistration(tx, provider);
     tx.put("status", status);
     tx.set("step", Json.object("type", "fail", "code", code));

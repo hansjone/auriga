@@ -4,6 +4,10 @@ window.__ModuleLoader__.load({
   id: 'auriga-dsh/client',
   factory(require) {
     const React = require('react');
+    const {
+      IconUsersOutlineRegular,
+      IconUsersOutlineMedium,
+    } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
     const NS = 'auriga.shell';
     const PANEL_ID = 'auriga-team';
@@ -639,9 +643,13 @@ window.__ModuleLoader__.load({
                   name: 'sidebar.panellist',
                   id: PANEL_ID,
                   locale: NS,
-                  label: 'panel',
+                  label: () => t('panel'),
                 },
-                () => null,
+                ({ size, active }) =>
+                  h(active ? IconUsersOutlineMedium : IconUsersOutlineRegular, {
+                    size,
+                    'aria-hidden': true,
+                  }),
               ),
             ),
           'auriga-shell: sidebar',

@@ -11,6 +11,43 @@ option java_package = "auriga.contracts.iam.v1";
 // iam 的内部接口。调用方必须带服务令牌；每个 RPC 注明允许的调用方。
 
 // 会话。
+// Dedicated online device authority. Internal service JWT + delegated tenant and
+// authenticated internal transport are mandatory; never accepts browser cookies.
+service DeviceAccessService {
+  // Only svc:ai-gateway. Validates the external device JWT, including the Team
+  // device permission ceiling, and current device/account/backing-session state.
+  rpc VerifyDeviceAccess(VerifyDeviceAccessRequest) returns (VerifyDeviceAccessResponse);
+  // Only svc:collab. Receiver/lock-time authority check; identity inputs are
+  // compared with stored device ownership, never trusted as proof of ownership.
+  rpc VerifyDeviceCredential(VerifyDeviceCredentialRequest) returns (VerifyDeviceCredentialResponse);
+}
+
+message VerifyDeviceAccessRequest {
+  // Raw external access JWT. Secret: never log, persist or include in errors.
+  string access_token = 1;
+}
+message VerifyDeviceAccessResponse {
+  // Determinately invalid => false and all other fields absent/empty.
+  // Dependency failures are UNAVAILABLE, never inactive or a cached approval.
+  bool active = 1;
+  string tenant_id = 2;
+  string account_id = 3;
+  string device_id = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+message VerifyDeviceCredentialRequest {
+  string tenant_id = 1;
+  string account_id = 2;
+  string device_id = 3;
+}
+message VerifyDeviceCredentialResponse {
+  bool active = 1;
+  string tenant_id = 2;
+  string account_id = 3;
+  string device_id = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
 service SessionService {
   // 校验浏览器会话，返回给业务服务用的访问令牌。调用方：edge（NATS KV 缓存没命中时）。
   // 会话无效时返回 active=false，不返回错误。

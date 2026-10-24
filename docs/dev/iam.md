@@ -1,5 +1,70 @@
 # IAM 核心与连接器接入
 
+## 本地 Host 的一次登录连接
+
+安装者可在 `auriga.iam.clients` 显式登记专用客户端，例如下面的脱敏配置；
+`native-connect` 缺省为 false，普通 OAuth 客户端保持原流程。原有七参数 Java
+构造器也缺省关闭该能力。专用客户端只能是 platform public client，固定
+`auriga.connect`，只允许 device-code/refresh 两种 grant，没有 secret 或 redirect URI。
+没有隐式默认客户端、动态登记或浏览器可改的安装配置。
+
+```yaml
+auriga:
+  iam:
+    clients:
+      - id: example-native-host
+        tenant: 019a0000-0000-7000-8000-000000000001
+        platform: true
+        native-connect: true
+        redirect-uris: []
+        scopes: [auriga.connect]
+        grants: ["urn:ietf:params:oauth:grant-type:device_code", refresh_token]
+```
+
+Host 为本次尝试在内存生成 PKCE verifier，向既有
+`POST /api/iam/v1/login/transactions` 传 `nativeConnect`：`clientId`、
+`codeChallenge`、`codeChallengeMethod: S256` 和可选的至多 64 字符 `deviceName`。
+仅门户 team-account 的账号口令加真实 TOTP 登录可用；首次登记 TOTP 也要实际核码。
+purpose 只能 login，returnTo 只能省略或 `/`。拒绝邀请注册、link、stepup、管理台、
+QR、Passkey、外来 deviceCode/userCode/account/sid/权限和未知字段，不调用人工核码或 consent。
+显式 null 不作为缺省值。事务仍受原入口、同源 Origin、绑定 cookie、限速和五分钟期限约束。
+
+创建事务在同一数据库事务内自产唯一 256-bit grant，只存哈希；201 的
+`nativeDevice: {deviceCode, expiresAt, interval: 5}` 仅返回一次。GET、SSE、advance
+均不重放。Host 丢失创建响应应新建事务，不能从查询找回明文。账号和本次 TOTP 完成后，
+只批准本事务绑定的 grant，并建立该设备独立的门户 backing session。
+取消或替换会否决尚未消费的 grant，包括已完成 MFA 但尚未兑换的情形。
+
+`POST /oauth2/token` 的表单须携固定 client_id、device_code、device grant_type 和
+code_verifier。错误 proof 不消费 grant 或推进轮询时间。成功原子落盘唯一 did 和首代
+refresh；access JWT 为 `aud=auriga, ptyp=device, ctx=device, scope=auriga.connect`，
+只含 did，无门户 sid/ID token。重复兑换或已提交但丢响应均不补发第二个设备。
+native 专用客户端不能发起人工 device_authorization；其他客户端的原流程保留。
+
+native refresh 每代保留 native 标记，只在设备、账号、backing session 和 client
+归属均有效且 scope 不变时轮换并 touch idle，idle 上限始终为原 absolute expiry。
+不复活到期或撤销的会话。普通 device/门户 refresh 不增加 idle touch。
+`POST /oauth2/revoke` 接该注册 client_id 与本 client 的 native access/refresh token
+作为 possession proof，只撤本设备及其所有 refresh 代际，不撤 backing session 或其他设备。
+未知、无效、重复 token 返回空对象和 200；任意 did 参数或 cookie 不能选择撤销对象。
+无效客户端及非法参数仍返回标准 OAuth 错误。此路径需 edge 独立精确开放 POST；
+本 IAM 实现不自动修改 edge 规则或安装配置。
+
+内部 `DeviceAccessService.VerifyDeviceAccess` 仅 `svc:ai-gateway` 可调用；
+`VerifyDeviceCredential` 仅 `svc:collab` 可调用。两者使用各自真实 internal_service JWT、
+受信内部传输与授权的 tenant 委托，不扩大 edge 的旧 SessionService ACL。
+Access 输入原始设备 JWT，验证签名/issuer/typ/时间、单一 aud、设备上下文、固定 scope
+及 JWT 实际含 `auriga.connect.collab.use`；Credential 的 account/did 仅作为待查对象。
+IAM 在线比较权威 device/account/backing session 的归属、状态、绝对/闲置期限。
+历史设备行缺少 backing binding 时失败关闭，须重新完成设备登录。
+
+确定无效返回 `active=false` 且其他字段为空；数据库/JWKS 故障为 UNAVAILABLE；
+错误调用方/委托为 PERMISSION_DENIED，缺内部身份为 UNAUTHENTICATED。
+成功返回权威 tenant/account/did；Access 的 expiry 为 JWT/backing absolute/idle 最早值，
+Credential 为 backing absolute/idle 最早值。核验不 touch，也不批准长期缓存。
+gateway/collab 仍须分别在线核组织 ACTIVE 成员与 `collab.messages.use`；设备映射不授予
+管理别人或跨租户的权限。token、verifier 和 grant 明文不写日志、审计或错误 detail。
+
 ## 装配和安装
 
 同机 Linux/POSIX combined 可显式启用安装侧 `auriga.iam.edge-token-export.enabled=true`。
@@ -94,8 +159,9 @@ TOTP counter 在锁定的数据库记录中递增，不能重复使用。
 
 SPI 位于 `iam-api`。`IdentityConnector` 的 descriptor、context、result 和 input
 直接使用 JSON Schema 验证的 JsonNode；结构来自 `contracts/identity`，没有另外
-手写一套步骤 DTO。普通 HTTP 请求使用已生成的 `CreateLoginTransaction`、
-`ProviderInput`；生成器将 StepInput 的 oneOf 展平成相互矛盾的 required 字段，
+手写一套步骤 DTO。ProviderInput 使用已生成的 DTO。创建登录事务读取原始 JSON，
+避免 DTO 绑定丢弃 nativeConnect 的未知安全字段；已有进程内 typed 调用保留。
+生成器将 StepInput 的 oneOf 展平成相互矛盾的 required 字段，
 因此 advance 入口读取原始 JSON，直接按原始 StepInput schema 校验。
 
 连接器作为 Spring `IdentityConnector` bean 注册，或在 `plugins/identity/` 放置
