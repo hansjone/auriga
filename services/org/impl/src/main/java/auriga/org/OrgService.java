@@ -6,6 +6,7 @@ import auriga.common.error.CommonErrors;
 import auriga.common.events.EventPublisher;
 import auriga.common.persistence.UuidV7;
 import auriga.common.security.AuthorizationRules;
+import auriga.contracts.deploymentconfig.DeploymentAccess;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -30,13 +31,21 @@ public final class OrgService {
   private final M3Permissions m3Permissions;
   private final OrgUserEvents userEvents;
   private final Clock clock;
+  private final DeploymentAccess deploymentAccess;
   private final SecureRandom random = new SecureRandom();
 
   public OrgService(OrgStore store, EventPublisher events, Clock clock) {
+    this(store, events, clock, null);
+  }
+
+  /** Invitation creation requires a validated installation identity matching the current tenant. */
+  public OrgService(
+      OrgStore store, EventPublisher events, Clock clock, DeploymentAccess deploymentAccess) {
     this.store = store;
     this.m3Permissions = new M3Permissions(store);
     this.userEvents = new OrgUserEvents(events);
     this.clock = clock;
+    this.deploymentAccess = deploymentAccess;
   }
 
   public OrgStore store() {
@@ -1305,6 +1314,10 @@ public final class OrgService {
           List<UUID> groups = groupIds == null ? List.of() : groupIds;
           ensureGrantAllowed(requireActor(), roles, null);
           for (UUID g : groups) ensureGrantAllowed(requireActor(), null, g);
+          if (deploymentAccess == null
+              || !store.tenantId().toString().equals(deploymentAccess.tenantId())) {
+            throw new AurigaException(CommonErrors.UNAVAILABLE);
+          }
           String code = newCode();
           UUID id = UuidV7.next();
           Instant exp = expiresAt != null ? expiresAt : clock.instant().plusSeconds(7 * 24 * 3600);
@@ -1331,7 +1344,7 @@ public final class OrgService {
               java.sql.Timestamp.from(now));
           ObjectNode inv = invitationJson(id);
           inv.put("code", code);
-          inv.put("url", "https://portal.example.com/invite/" + code);
+          inv.put("url", deploymentAccess.portalUrl() + "/invite/" + code);
           return inv;
         });
   }

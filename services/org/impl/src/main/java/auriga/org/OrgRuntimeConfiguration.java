@@ -5,6 +5,7 @@ import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.security.AurigaWebSecurity;
 import auriga.common.security.EndpointAuthorizationCheck;
 import auriga.common.security.ProblemSecurityHandlers;
+import auriga.contracts.deploymentconfig.DeploymentAccess;
 import auriga.iam.api.IdentityPolicyHooks;
 import io.grpc.BindableService;
 import java.time.Clock;
@@ -63,7 +64,8 @@ public class OrgRuntimeConfiguration {
       @org.springframework.beans.factory.annotation.Qualifier("orgEventPublisher")
           ObjectProvider<EventPublisher> orgEvents,
       ObjectProvider<EventPublisher> events,
-      Clock clock) {
+      Clock clock,
+      ObjectProvider<DeploymentAccess> deploymentAccess) {
     EventPublisher publisher;
     if (beans.containsBean("orgEventPublisher")) {
       publisher =
@@ -74,7 +76,9 @@ public class OrgRuntimeConfiguration {
     } else {
       publisher = orgEvents.getIfAvailable(events::getObject);
     }
-    return new OrgService(store, publisher, clock);
+    // Even a primary bean cannot disambiguate multiple installation identities safely.
+    var sources = deploymentAccess.stream().limit(2).toList();
+    return new OrgService(store, publisher, clock, sources.size() == 1 ? sources.getFirst() : null);
   }
 
   @Bean

@@ -1,9 +1,13 @@
 package auriga.org;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
+import auriga.common.error.ErrorMessages;
+import auriga.common.error.ProblemExceptionHandler;
+import auriga.common.error.Problems;
 import auriga.common.events.EventPublisher;
 import auriga.common.persistence.CommonMigrations;
 import auriga.common.persistence.TenantTransactionManager;
@@ -12,14 +16,22 @@ import auriga.common.security.AurigaAuthentication;
 import auriga.common.security.AurigaPrincipal;
 import auriga.common.security.PrincipalType;
 import auriga.common.security.TokenContext;
+import auriga.contracts.deploymentconfig.DeploymentAccess;
 import auriga.contracts.org.v1.*;
 import auriga.iam.api.M3PermissionCatalog;
 import auriga.org.api.PendingAccount;
 import auriga.testsupport.PostgresExtension;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -28,9 +40,11 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(PostgresExtension.class)
@@ -56,7 +70,7 @@ class OrgCoreTest {
     store = new OrgStore(jdbc, new TenantTransactionManager(roles.runtime().dataSource()));
     events = new RecordingEvents();
     clock = Clock.fixed(Instant.parse("2026-06-01T00:00:00Z"), ZoneOffset.UTC);
-    svc = new OrgService(store, events, clock);
+    svc = new OrgService(store, events, clock, invitationAccess("domain-proxy.json", TENANT, 443));
   }
 
   @BeforeEach
@@ -163,13 +177,17 @@ class OrgCoreTest {
   }
 
   private ObjectNode preflightInvitation(UUID owner, UUID provider) {
+    return preflightInvitation(svc, owner, provider);
+  }
+
+  private ObjectNode preflightInvitation(OrgService service, UUID owner, UUID provider) {
     return store.tenant(
         TENANT,
         () ->
             withActor(
                 owner,
                 () ->
-                    svc.createInvitation(
+                    service.createInvitation(
                         "alice@example.com",
                         "Alice",
                         "member",
@@ -178,6 +196,249 @@ class OrgCoreTest {
                         provider == null ? List.of() : List.of(provider),
                         clock.instant().plusSeconds(3600),
                         1)));
+  }
+
+  @Test
+  void invitationWithoutTrustedPortalIsUnavailableWithoutWriting() {
+    var unconfigured = new OrgService(store, events, clock);
+    UUID owner = seedOwner();
+    preflightInvitation(owner, null);
+    assertInvitationUnavailable(unconfigured, owner);
+    assertEquals(TENANT, store.tenant(TENANT, () -> unconfigured.getTenant().id()));
+  }
+
+  @Test
+  void invitationWithOtherTenantPortalIsUnavailableWithoutWriting() {
+    var otherTenant = invitationAccess("ip-http.json", UUID.randomUUID(), 8080);
+    assertInvitationUnavailable(new OrgService(store, events, clock, otherTenant), seedOwner());
+  }
+
+  @Test
+  void invitationLinksPreserveTrustedPortalOriginsAndSafeCode() {
+    UUID owner = seedOwner();
+    Set<String> codes = new HashSet<>();
+    for (var access :
+        List.of(
+            invitationAccess("domain-proxy.json", TENANT, 443),
+            invitationAccess("domain-proxy.json", TENANT, 8443),
+            invitationAccess("ip-http.json", TENANT, 8080))) {
+      var service = new OrgService(store, events, clock, access);
+      var invitation = preflightInvitation(service, owner, null);
+      String code = invitation.path("code").asString();
+      assertTrue(code.matches("[A-Za-z0-9_-]{32}"));
+      assertTrue(codes.add(code));
+      assertEquals(access.portalUrl() + "/invite/" + code, invitation.path("url").asString());
+      URI link = URI.create(invitation.path("url").asString());
+      assertEquals("/invite/" + code, link.getRawPath());
+      assertNull(link.getRawQuery());
+      assertNull(link.getRawFragment());
+      assertNull(link.getRawUserInfo());
+      assertNotEquals(access.adminUrl(), access.portalUrl());
+    }
+    assertTrue(events.all.isEmpty());
+  }
+
+  @Test
+  void invitationHttpIgnoresRequestOriginsAndUrlFields() throws Exception {
+    UUID owner = seedOwner();
+    var access = invitationAccess("domain-proxy.json", TENANT, 8443);
+    var service = new OrgService(store, events, clock, access);
+    var mvc = MockMvcBuilders.standaloneSetup(new OrgAdminController(service)).build();
+    var response =
+        TenantContext.call(
+            TENANT,
+            () ->
+                withActor(
+                    owner,
+                    () ->
+                        mvc.perform(
+                                post("/api/org/v1/admin/invitations")
+                                    .header("Host", "attacker.example.com:9000")
+                                    .header("Forwarded", "host=attacker.example.com;proto=http")
+                                    .header("X-Forwarded-Host", "attacker.example.com")
+                                    .header("X-Forwarded-Proto", "http")
+                                    .header("X-Forwarded-Port", "9000")
+                                    .header("Origin", access.adminUrl())
+                                    .contentType("application/json")
+                                    .content(
+                                        "{\"memberType\":\"member\","
+                                            + "\"url\":\"http://attacker.example.com\","
+                                            + "\"portalUrl\":\"http://attacker.example.com\"}"))
+                            .andReturn()
+                            .getResponse()));
+    assertEquals(201, response.getStatus());
+    var invitation = OrgJson.MAPPER.readTree(response.getContentAsString());
+    assertEquals(
+        access.portalUrl() + "/invite/" + invitation.path("code").asString(),
+        invitation.path("url").asString());
+  }
+
+  @Test
+  void invitationCodeIsOnlyReturnedOnceAndOriginalRedemptionIsPreserved() {
+    UUID owner = seedOwner();
+    var created = preflightInvitation(owner, null);
+    String code = created.path("code").asString();
+    var unconfigured = new OrgService(store, events, clock);
+    store.tenant(
+        TENANT,
+        () -> {
+          assertEquals(
+              OrgService.hashCode(code),
+              store
+                  .jdbc()
+                  .queryForObject(
+                      "SELECT code_hash FROM invitation WHERE tenant_id=? AND id=?",
+                      String.class,
+                      TENANT,
+                      UUID.fromString(created.path("id").asString())));
+          var listed = unconfigured.listInvitations(null, 10, null).path("items").get(0);
+          assertFalse(listed.has("code"));
+          assertFalse(listed.has("url"));
+          var resolved = unconfigured.resolveInvitation(code).invitation();
+          assertFalse(resolved.has("code"));
+          assertFalse(resolved.has("url"));
+          return null;
+        });
+    UUID account = UuidV7.next();
+    var member = unconfigured.redeemInvitation(code, account, "Alice", "alice@example.com", null);
+    assertEquals(account.toString(), member.path("id").asString());
+    assertEquals(1, events.ofType("user.created").size());
+    assertFalse(OrgJson.MAPPER.writeValueAsString(events.all).contains(code));
+    assertEquals(
+        "org.conflict",
+        assertThrows(
+                AurigaException.class,
+                () ->
+                    unconfigured.redeemInvitation(
+                        code, UuidV7.next(), "Bob", "bob@example.com", null))
+            .errorCode()
+            .code());
+    assertEquals(
+        account.toString(),
+        unconfigured
+            .redeemInvitation(code, account, "Alice", "alice@example.com", null)
+            .path("id")
+            .asString());
+    assertEquals(1, events.ofType("user.created").size());
+  }
+
+  @Test
+  void invitationHttpWithoutTrustedPortalRejectsSpoofedFallbackWithoutWriting() throws Exception {
+    UUID owner = seedOwner();
+    var unconfigured = new OrgService(store, events, clock);
+    var mvc =
+        MockMvcBuilders.standaloneSetup(new OrgAdminController(unconfigured))
+            .setControllerAdvice(
+                new ProblemExceptionHandler(
+                    new Problems(new ErrorMessages(List.of(), Locale.ENGLISH))))
+            .build();
+    long before = invitationCount();
+    var response =
+        TenantContext.call(
+            TENANT,
+            () ->
+                withActor(
+                    owner,
+                    () ->
+                        mvc.perform(
+                                post("/api/org/v1/admin/invitations")
+                                    .header("Host", "attacker.example.com")
+                                    .header("Forwarded", "host=attacker.example.com;proto=https")
+                                    .header("Origin", "https://admin.example.com")
+                                    .contentType("application/json")
+                                    .content(
+                                        "{\"memberType\":\"member\",\"url\":\"https://attacker.example.com\"}"))
+                            .andReturn()
+                            .getResponse()));
+    assertEquals(503, response.getStatus());
+    var problem = OrgJson.MAPPER.readTree(response.getContentAsString());
+    assertEquals("common.unavailable", problem.path("code").asString());
+    assertFalse(problem.has("url"));
+    assertFalse(problem.has("id"));
+    assertFalse(problem.has("params"));
+    assertEquals(before, invitationCount());
+    assertTrue(events.all.isEmpty());
+  }
+
+  @Test
+  void orgRuntimeAcceptsOptionalTrustedSourceAndRejectsAmbiguity() {
+    UUID owner = seedOwner();
+    var runner =
+        new ApplicationContextRunner()
+            .withUserConfiguration(OrgRuntimeConfiguration.class)
+            .withPropertyValues("auriga.service.schema=org")
+            .withBean(OrgStore.class, () -> store)
+            .withBean(EventPublisher.class, () -> events)
+            .withBean(Clock.class, () -> clock);
+    runner.run(
+        context -> {
+          assertNull(context.getStartupFailure());
+          var service = context.getBean(OrgService.class);
+          assertEquals(TENANT, store.tenant(TENANT, () -> service.getTenant().id()));
+          assertInvitationUnavailable(service, owner);
+        });
+    var configured =
+        runner.withBean(
+            "trustedAccess",
+            DeploymentAccess.class,
+            () -> invitationAccess("ip-http.json", TENANT, 8080),
+            bean -> bean.setPrimary(true));
+    configured.run(
+        context -> {
+          assertNull(context.getStartupFailure());
+          var created = preflightInvitation(context.getBean(OrgService.class), owner, null);
+          assertTrue(created.path("url").asString().startsWith("http://192.0.2.10:8080/invite/"));
+        });
+    configured
+        .withBean(
+            "otherAccess",
+            DeploymentAccess.class,
+            () -> invitationAccess("domain-proxy.json", TENANT, 443))
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertInvitationUnavailable(context.getBean(OrgService.class), owner);
+            });
+  }
+
+  private void assertInvitationUnavailable(OrgService service, UUID owner) {
+    long before = invitationCount();
+    var error =
+        assertThrows(AurigaException.class, () -> preflightInvitation(service, owner, null));
+    assertEquals("common.unavailable", error.errorCode().code());
+    assertEquals(503, error.errorCode().httpStatus());
+    assertTrue(error.params().isEmpty());
+    assertEquals(before, invitationCount());
+    assertTrue(events.all.isEmpty());
+  }
+
+  private long invitationCount() {
+    return store.tenant(
+        TENANT,
+        () ->
+            store
+                .jdbc()
+                .queryForObject(
+                    "SELECT count(*) FROM invitation WHERE tenant_id=?", Long.class, TENANT));
+  }
+
+  private static DeploymentAccess invitationAccess(String fixture, UUID tenant, int port) {
+    try {
+      var data =
+          (ObjectNode)
+              OrgJson.MAPPER.readTree(
+                  Files.readString(Path.of("../../../contracts/deployment/fixtures", fixture))
+                      .replace("portal.example.com", "members.example.com"));
+      data.put("tenantId", tenant.toString());
+      ((ObjectNode) data.path("portalOrigin")).put("port", port);
+      ((ObjectNode) data.path("issuerOrigin")).put("port", port);
+      if (data.path("instances").path("mode").asString().equals("subdomain")) {
+        ((ObjectNode) data.path("instances")).put("port", port);
+      }
+      return DeploymentAccess.load(OrgJson.MAPPER.writeValueAsBytes(data));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   @Test
