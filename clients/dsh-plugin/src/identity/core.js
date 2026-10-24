@@ -30,6 +30,7 @@ const MFA_RECENT_MS = 10 * 60_000;
  *     owner?: OwnerPolicy,
  *   },
  *   store?: ReturnType<typeof createMemoryStore>,
+ *   commitAdmission?: (input: import('./owner-admission.js').AdmissionInput) => Promise<boolean>,
  *   now?: () => Date,
  *   allowLocalHttp?: boolean,
  *   fetchImpl?: typeof fetch,
@@ -147,6 +148,21 @@ export async function createStandaloneCore(options) {
       return { ok: true };
     }
     return { ok: false, code: 'iam.admission_denied' };
+  }
+
+  /** Read-only admission before awaiting an external commit. Claim only after success.
+   * @param {string} providerId
+   * @param {{ subject: string, email?: string }} profile
+   * @param {{ type: string }} provider
+   */
+  function canAdmit(providerId, profile, provider) {
+    if (!matchesOwnerPolicy(providerId, profile, provider)) return false;
+    const owner = store.getOwner();
+    return (
+      !owner ||
+      store.hasIdentity(providerId, profile.subject) ||
+      (owner.providerId === providerId && owner.subject === profile.subject)
+    );
   }
 
   /**
@@ -298,20 +314,61 @@ export async function createStandaloneCore(options) {
     if (step.type === 'done') {
       tx.finished = true;
       tx.busy = false;
-      tx.state = result.state
-        ? /** @type {Record<string, unknown>} */ (result.state)
-        : tx.state;
-      const profile =
+      const verified =
         /** @type {{ subject: string, displayName?: string, email?: string, mfaPerformed?: boolean, authTime?: string }} */ (
           step.profile
         );
+      // Snapshot only the verified public identity fields; never forward connector
+      // state, configuration or the mutable profile object to the commit hook.
+      const profile = {
+        subject: verified.subject,
+        ...(typeof verified.displayName === 'string'
+          ? { displayName: verified.displayName }
+          : {}),
+        ...(typeof verified.email === 'string'
+          ? { email: verified.email }
+          : {}),
+        ...(typeof verified.mfaPerformed === 'boolean'
+          ? { mfaPerformed: verified.mfaPerformed }
+          : {}),
+        ...(typeof verified.authTime === 'string'
+          ? { authTime: verified.authTime }
+          : {}),
+      };
+      const verifiedState = /** @type {Record<string, unknown>|undefined} */ (
+        result.state
+      );
+      const emergencyCounter =
+        provider.type === 'emergency' ? verifiedState?.lastCounter : undefined;
+      tx.state = null;
+
+      if (!canAdmit(tx.providerId, profile, provider))
+        return { txId, step: fail('iam.admission_denied') };
+
       if (
         provider.type === 'emergency' &&
-        tx.state &&
-        typeof tx.state.lastCounter === 'number'
+        (typeof emergencyCounter !== 'number' ||
+          !store.consumeEmergencyCounter(emergencyCounter))
       )
-        store.setEmergencyLastCounter(tx.state.lastCounter);
+        return { txId, step: fail('iam.invalid_credentials') };
 
+      if (options.commitAdmission) {
+        try {
+          const committed = await options.commitAdmission({
+            providerId: tx.providerId,
+            profile: { ...profile },
+            ...(typeof emergencyCounter === 'number'
+              ? { emergencyCounter }
+              : {}),
+          });
+          if (committed !== true)
+            return { txId, step: fail('iam.admission_denied') };
+        } catch {
+          return { txId, step: fail('iam.connector_unavailable') };
+        }
+      }
+
+      // Recheck after the await: another transaction may have claimed the owner.
       const admission = admit(tx.providerId, profile, provider);
       if (!admission.ok) {
         tx.state = null;
