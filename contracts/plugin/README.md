@@ -89,6 +89,13 @@ json2ts -i ../../contracts/plugin/managed-config.schema.json -o src/generated/ma
 prettier --write src/generated/managed-config.d.ts
 ```
 
+`portalOrigin` 可选，直接引用同一部署 `Origin`，由 renderer 从已验证的 `access.portalOrigin`
+完整写入 Loader row；profile 不能覆盖该字段或任意子字段。插件启动严格校验并保存独立快照，
+仅在已通过实例签名门锁与原有 browserOrigin 检查的 `GET /auriga/bootstrap` 返回结构化地址。
+它只用于后续账户操作导航，不是浏览器身份白名单或平台 API 代理授权；不含凭据与内部平台地址。
+兼容旧 row 时缺失该字段意味着禁用门户入口，不从 hostname、issuer、请求头、query 或
+`AURIGA_PLATFORM_URL` 推导。当前只交付配置链路，尚未接入退出 UI 或真实 IAM/WS 联调。
+
 ## 4. 设备登录（连接模式）
 
 用户电脑上的 DSH 接入平台，用 OAuth 2.0 设备授权流程（RFC 8628），客户端是内置的公共客户端 `auriga-dsh`：

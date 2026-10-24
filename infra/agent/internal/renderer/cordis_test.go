@@ -103,6 +103,9 @@ func TestCordisPatchIsLoaderPatchList(t *testing.T) {
 	if origin := pcfg["browserOrigin"].(map[string]any); origin["host"] != "inst-c1.i.example.com" || origin["scheme"] != "https" || origin["port"] != 443 {
 		t.Fatalf("plugin origin: %#v", origin)
 	}
+	if portal := pcfg["portalOrigin"].(map[string]any); portal["host"] != "portal.example.com" || portal["scheme"] != "https" || portal["port"] != 443 {
+		t.Fatalf("plugin portal: %#v", portal)
+	}
 	mcp := inserts[1].(map[string]any)
 	mcfg := mcp["config"].(map[string]any)
 	if mcp["name"] != "@deepseek-ai/dsh-mcp-client" || mcfg["serverName"] != "team" || mcfg["transport"] != "streamable-http" {
@@ -306,6 +309,11 @@ func TestBrowserOriginRenderMatrix(t *testing.T) {
 					if origin["scheme"] != scheme || origin["host"] != host || origin["port"] != port {
 						t.Fatalf("browser: %#v", origin)
 					}
+					portal := cfg["portalOrigin"].(map[string]any)
+					wantPortal := access.PortalOrigin()
+					if portal["scheme"] != wantPortal.Scheme || portal["host"] != wantPortal.Host || portal["port"] != int(wantPortal.Port) {
+						t.Fatalf("portal: %#v, want %#v", portal, wantPortal)
+					}
 					native := rows[2]["config"].(map[string]any)["trustedHosts"].([]any)
 					if len(native) != 1 || native[0] != fmt.Sprintf("%s:%d", host, port) {
 						t.Fatalf("native: %#v", native)
@@ -330,6 +338,30 @@ func TestBrowserOriginRenderMatrix(t *testing.T) {
 	for _, id := range []string{"UPPER", "bad_label", "-bad", "bad-"} {
 		if _, err := renderer.BrowserOrigin(id, testAccess(t, "i.example.com")); err == nil {
 			t.Fatalf("invalid DNS instance accepted: %s", id)
+		}
+	}
+}
+
+func TestCordisPatchRejectsPortalOriginOverrides(t *testing.T) {
+	for _, path := range []string{
+		"plugins.auriga-dsh.portalOrigin",
+		"plugins.auriga-dsh.portalOrigin.scheme",
+		"plugins.auriga-dsh.portalOrigin.host",
+		"plugins.auriga-dsh.portalOrigin.port",
+		"plugins.auriga-dsh.portalOrigin.extra",
+		"plugins.auriga-dsh.portalOrigin.host.nested",
+		"plugins.auriga-dsh",
+		"plugins.auriga-dsh.portalOrigin/host",
+		"plugins.auriga-dsh.portalOrigin[host]",
+	} {
+		for _, value := range []string{`null`, `"https://evil.example.com"`, `{"scheme":"https","host":"evil.example.com","port":443}`, `{"portalOrigin":{"scheme":"https","host":"evil.example.com","port":443}}`} {
+			t.Run(path+"="+value, func(t *testing.T) {
+				spec := baseSpec()
+				spec.Profile.Patches = []*nodev1.ConfigPatch{{Path: path, ValueJson: value}}
+				if _, err := renderCordis(t, spec, "i.example.com"); err == nil {
+					t.Fatal("profile portal override accepted")
+				}
+			})
 		}
 	}
 }

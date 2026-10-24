@@ -224,6 +224,7 @@ export async function fetchVerifiedManifest(opts) {
  *   getManifest: () => Promise<object>,
  *   pluginVersion: string,
  *   panelBase?: string,
+ *   portalOrigin?: import('../generated/managed-config.js').ManagedConfig['portalOrigin'],
  * }} o
  */
 export function createAurigaRouteHandler(o) {
@@ -254,6 +255,7 @@ export function createAurigaRouteHandler(o) {
           panelBase: o.panelBase ?? '/panel/',
           fetchBase: '/',
           platformUrl: null,
+          portalOrigin: o.portalOrigin,
         };
         res.writeHead(200, {
           'content-type': 'application/json; charset=utf-8',
