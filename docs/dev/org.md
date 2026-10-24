@@ -137,6 +137,30 @@ gRPC：`TenantService`、`MemberService`、`AuthorizationService`、`InvitationS
 HTTP：`/api/org/v1/**`，`/admin/**` 使用 `@AdminOnly` + `@RequiresPermission`；
 `GET /invitations/preview/{code}` 为 `@PublicEndpoint`。
 
+## 邀请链接与部署前提
+
+创建邀请的正式 201 响应要求同时包含 `code` 和 `url`。链接只取受信装配提供、经过
+`DeploymentAccess.load` 校验的部署身份：必须恰好有一个 `DeploymentAccess` Bean，
+且其 `tenantId()` 与当前租户一致，才返回 `portalUrl() + "/invite/" + code`。
+保留该门户来源的 HTTP/HTTPS 和非默认端口，支持域名及纯 IP 部署。
+combined 部署复用 iam 已发布的部署访问 Bean（其文件配置见 [iam.md](iam.md)）；
+org 不增加请求可控的 URL 字段或另一套配置协议。
+
+缺少配置、存在多个部署身份（即使其中一个标为 `@Primary`），或租户不匹配时，
+创建邀请返回既有 `503 common.unavailable`，不会创建记录、生成并回显 code，
+也不会返回占位链接。配置应在启用邀请创建前完成；不从管理端 `Origin`、`Host`、
+`Forwarded`、`X-Forwarded-*` 或请求体推导门户地址。原三参数 `OrgService` 构造器
+和无配置的 org 装配仍可用，非邀请 API 及已有邀请的预检、预览和兑换不依赖此配置。
+
+code 保持原有的 24 字节安全随机数，以无 padding 的 Base64URL 编码为固定 32 字符，
+可直接作为 `/invite/` 后的单个路径片段。仅创建成功响应包含原始 code 和链接；
+数据库仍只保存 SHA-256 哈希，列表、预览与兑换事件不增加原始 code 或 URL。
+邀请用途限制、撤销、有效期、使用次数及同一账号兑换幂等保持原逻辑。
+
+`OrgCoreTest` 使用真实 PostgreSQL、非表所有者运行角色及 tenant RLS 验证可信来源、
+HTTP 纯 IP 与 HTTPS 非默认端口、跨租户配置拒绝、缺配置和歧义来源失败无新行、
+恶意请求来源不影响链接、仅哈希持久化和原兑换流程，并覆盖可选 Bean 的运行时装配。
+
 ## 权限 key 清单（均在 OpenAPI）
 
 `org.tenant.write`、`org.members.read|write|offboard`、`org.groups.read|write`、
