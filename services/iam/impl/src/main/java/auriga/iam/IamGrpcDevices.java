@@ -8,7 +8,7 @@ import com.google.protobuf.Timestamp;
 import io.grpc.stub.StreamObserver;
 
 /** Separate exact-caller ACLs; deliberately does not widen edge's SessionService. */
-public final class IamGrpcDevices extends DeviceAccessServiceGrpc.DeviceAccessServiceImplBase {
+public class IamGrpcDevices extends DeviceAccessServiceGrpc.DeviceAccessServiceImplBase {
   private final DeviceAccessAuthority authority;
 
   public IamGrpcDevices(DeviceAccessAuthority authority) {
