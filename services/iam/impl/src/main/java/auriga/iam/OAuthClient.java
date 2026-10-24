@@ -11,7 +11,20 @@ public record OAuthClient(
     Set<String> redirectUris,
     Set<String> scopes,
     Set<String> grants,
-    boolean platform) {
+    boolean platform,
+    boolean nativeConnect) {
+  public OAuthClient(
+      String id,
+      UUID tenant,
+      String secretHash,
+      Set<String> redirectUris,
+      Set<String> scopes,
+      Set<String> grants,
+      boolean platform) {
+    this(id, tenant, secretHash, redirectUris, scopes, grants, platform, false);
+  }
+
+  @org.springframework.boot.context.properties.bind.ConstructorBinding
   public OAuthClient {
     if (id == null
         || id.isBlank()
@@ -20,6 +33,13 @@ public record OAuthClient(
     redirectUris = Set.copyOf(redirectUris);
     scopes = Set.copyOf(scopes);
     grants = Set.copyOf(grants);
+    if (nativeConnect
+        && (!platform
+            || (secretHash != null && !secretHash.isEmpty())
+            || !scopes.equals(Set.of("auriga.connect"))
+            || !grants.equals(Set.of(OAuthProvider.DEVICE, "refresh_token"))
+            || !redirectUris.isEmpty()))
+      throw new IllegalArgumentException("Invalid native public client registration");
     for (String uri : redirectUris) {
       java.net.URI parsed = java.net.URI.create(uri);
       if (parsed.getFragment() != null
