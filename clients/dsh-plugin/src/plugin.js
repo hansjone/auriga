@@ -11,8 +11,13 @@ import {
   installLocalAdmission,
   installHttpResponseTracking,
 } from './local/host.js';
-import { createConnectRoutes } from './local/routes.js';
+import {
+  createConnectRoutes,
+  createUnconfiguredLoginRoutes,
+} from './local/routes.js';
 import { join } from 'node:path';
+import { installSettings } from './settings/host.js';
+import { MANAGED_MODEL_STATUS } from './ai/installation.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -23,6 +28,7 @@ export const inject = ['webServer', 'connection'];
  */
 export async function apply(ctx, config) {
   const mode = selectMode();
+  installSettings(ctx, config);
   if (mode !== 'managed') {
     if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
       throw new Error(
@@ -102,7 +108,7 @@ export async function apply(ctx, config) {
           const profile = connectCtx.profileContext;
           if (!profile?.dir)
             throw new Error(
-              'auriga-dsh: isolated host profile directory required',
+              'auriga-dsh: host profile directory required for persistent state',
             );
           const runtime = await createConnectRuntime({
             config: config.connect,
@@ -114,6 +120,16 @@ export async function apply(ctx, config) {
             runtime,
             handler: createConnectRoutes({ runtime, admission }),
           };
+          // aurigaNetwork is a plugin-owned trusted control provider, not a
+          // native DSH API. Missing IAM HTTPS routes keep N1 unavailable.
+          connectCtx.inject(['aurigaNetwork'], (networkCtx) => {
+            const detach = runtime.attachNetwork(networkCtx.aurigaNetwork);
+            networkCtx.effect(() => detach, 'auriga-dsh: network provider');
+          });
+          connectCtx.inject(['llm'], async (llmCtx) => {
+            const detach = await runtime.attachModels(llmCtx.llm);
+            llmCtx.effect(() => detach, 'auriga-dsh: public model adapter');
+          });
           try {
             connectCtx.effect(() => {
               binding = owned;
@@ -142,6 +158,15 @@ export async function apply(ctx, config) {
         }),
       'auriga-dsh: local surfaces',
     );
+    ctx.effect?.(
+      () =>
+        ctx.webServer.register({
+          kind: 'prefix',
+          path: '/auriga/local-login',
+          handler: createUnconfiguredLoginRoutes(ctx.connection),
+        }),
+      'auriga-dsh: unconfigured login',
+    );
     return;
   }
   const runtime = await createManaged({
@@ -149,6 +174,7 @@ export async function apply(ctx, config) {
     config: config ?? {},
     startHeartbeat: false,
   });
+  ctx.logger?.info?.(`[auriga-dsh] AI: ${MANAGED_MODEL_STATUS.state}`);
   let dispose;
   try {
     dispose = runtime.apply(ctx);

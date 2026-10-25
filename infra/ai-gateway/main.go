@@ -20,6 +20,7 @@ func run(args []string, out, logs io.Writer) error {
 	flags.SetOutput(logs)
 	teamConfigFile := flags.String("team-config", "", "serve remote Team MCP using a configuration file")
 	networkConfigFile := flags.String("network-config", "", "serve network callout and revocation reconciliation using a configuration file")
+	adminConfigFile := flags.String("admin-config", "", "serve AI management API using a configuration file")
 	showVersion := flags.Bool("version", false, "print version")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -30,6 +31,12 @@ func run(args []string, out, logs io.Writer) error {
 	if *showVersion {
 		_, err := fmt.Fprintln(out, "auriga-ai-gateway", version)
 		return err
+	}
+	if *adminConfigFile != "" {
+		if *teamConfigFile != "" || *networkConfigFile != "" {
+			return fmt.Errorf("choose one runtime per process: --admin-config, --team-config or --network-config")
+		}
+		return serveAdmin(*adminConfigFile)
 	}
 	if *teamConfigFile != "" {
 		if *networkConfigFile != "" {
@@ -46,7 +53,7 @@ func run(args []string, out, logs io.Writer) error {
 		defer stop()
 		return network.RunRuntime(ctx, cfg)
 	}
-	return fmt.Errorf("runtime configuration required: --team-config or --network-config")
+	return fmt.Errorf("runtime configuration required: --admin-config, --team-config or --network-config")
 }
 
 func main() {

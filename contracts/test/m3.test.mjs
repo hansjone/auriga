@@ -204,7 +204,7 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 34);
+  assert.equal(count, 37);
   assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 16);
   for (const [key, p] of Object.entries(catalog.permissions)) {
     assert(p.description.en && p.description['zh-CN'], key);

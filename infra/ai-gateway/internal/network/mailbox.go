@@ -52,8 +52,8 @@ type ReceiptCommit struct {
 	CommittedCursor uint64
 }
 
-// Mailbox is the collab persistence port. Production will call collab RPC/HTTP;
-// N1 tests inject an in-memory implementation.
+// Mailbox is the in-memory skeleton persistence port. Production uses
+// MailboxClient to preserve complete collab-signed frames and receipt evidence.
 type Mailbox interface {
 	// Route returns current head/cursor/epoch without mutating.
 	Route(ctx context.Context, id NodeIdentity) (Route, error)

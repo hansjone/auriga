@@ -17,6 +17,7 @@ import org.springframework.core.env.Environment;
 public class EdgeTokenFileConfiguration {
   @Bean(destroyMethod = "close")
   EdgeTokenFilePublisher iamEdgeTokenFilePublisher(InternalTokenIssuer issuer, Environment env) {
+    ServiceTokenExportIsolation.verify(env);
     if (!env.getProperty("auriga.platform.combined", Boolean.class, false))
       throw new IllegalStateException(
           "Edge token export requires a same-host combined installation");

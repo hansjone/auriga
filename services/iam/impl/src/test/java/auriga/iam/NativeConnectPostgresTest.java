@@ -270,6 +270,63 @@ class NativeConnectPostgresTest {
   }
 
   @Test
+  void nativeLoginRefreshCanAlternateAiAndPlatformWithoutAnotherLogin() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          effective.add(DeviceAiResource.INVOKE);
+          ObjectNode original = connected();
+          var aiOauth =
+              new OAuthProvider(
+                  store,
+                  sessions,
+                  tokens,
+                  clock,
+                  List.of(
+                      new OAuthClient(
+                          "native-example",
+                          tenant,
+                          null,
+                          Set.of(),
+                          Set.of("auriga.connect"),
+                          Set.of(OAuthProvider.DEVICE, "refresh_token"),
+                          true,
+                          true)),
+                  request ->
+                      auriga.contracts.org.v1.GetEffectivePermissionsResponse.newBuilder()
+                          .setStatus(auriga.contracts.org.v1.MemberStatus.MEMBER_STATUS_ACTIVE)
+                          .setMemberType(auriga.contracts.org.v1.MemberType.MEMBER_TYPE_MEMBER)
+                          .addAllPermissions(effective)
+                          .build());
+          var input =
+              new HashMap<>(
+                  Map.of(
+                      "grant_type",
+                      "refresh_token",
+                      "client_id",
+                      "native-example",
+                      "refresh_token",
+                      original.path("refresh_token").asString(),
+                      "resource",
+                      DeviceAiResource.RESOURCE));
+          ObjectNode ai = aiOauth.token(input);
+          assertTrue(ai.has("access_token"), ai.toString());
+          var initialClaims = tokens.verify(original.path("access_token").asString());
+          var aiClaims = tokens.verify(ai.path("access_token").asString());
+          assertEquals("auriga.ai-gateway", aiClaims.path("aud").asString());
+          assertEquals(initialClaims.path("did"), aiClaims.path("did"));
+          ObjectNode platform = rotate(ai);
+          assertTrue(platform.has("access_token"), platform.toString());
+          assertEquals(
+              "auriga",
+              tokens.verify(platform.path("access_token").asString()).path("aud").asString());
+          input.put("refresh_token", platform.path("refresh_token").asString());
+          assertTrue(aiOauth.token(input).has("access_token"));
+          assertEquals(1, store.tx(() -> store.all("device").size()));
+        });
+  }
+
+  @Test
   void samePasswordAndTotpCreatesExactlyOneDeviceCredential() {
     TenantContext.run(
         tenant,
@@ -761,7 +818,9 @@ class NativeConnectPostgresTest {
             false,
             Set.of());
     var channels = new ArrayList<io.grpc.ManagedChannel>();
-    String secret = Secrets.random();
+    String secret = Secrets.random(),
+        collabSecret = Secrets.random(),
+        edgeSecret = Secrets.random();
     var internal =
         new TokenService(
             keys,
@@ -773,9 +832,9 @@ class NativeConnectPostgresTest {
                 "ai-gateway",
                 Secrets.hash(secret),
                 "collab",
-                Secrets.hash(secret),
+                Secrets.hash(collabSecret),
                 "edge",
-                Secrets.hash(secret)));
+                Secrets.hash(edgeSecret)));
     server.start();
     try {
       java.util.function.Function<
@@ -795,8 +854,8 @@ class NativeConnectPostgresTest {
                     .withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS);
               };
       var gateway = stub.apply(internal.issue("ai-gateway", secret));
-      var collab = stub.apply(internal.issue("collab", secret));
-      var edge = stub.apply(internal.issue("edge", secret));
+      var collab = stub.apply(internal.issue("collab", collabSecret));
+      var edge = stub.apply(internal.issue("edge", edgeSecret));
       var request =
           auriga.contracts.iam.v1.VerifyDeviceAccessRequest.newBuilder()
               .setAccessToken(access)

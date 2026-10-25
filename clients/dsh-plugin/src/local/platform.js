@@ -201,8 +201,8 @@ export function createPlatform(config) {
       );
     return data;
   }
-  /** @param {string} token @param {any} [expected] */
-  async function verifyDevice(token, expected) {
+  /** @param {string} token @param {any} [expected] @param {boolean} [ai] */
+  async function verifyDevice(token, expected, ai = false) {
     if (typeof token !== 'string' || token.length > 16384)
       throw new Error('invalid device credential');
     const parts = token.split('.');
@@ -223,7 +223,7 @@ export function createPlatform(config) {
       header.jwk ||
       header.x5u ||
       claims.iss !== config.issuer ||
-      claims.aud !== 'auriga' ||
+      claims.aud !== (ai ? 'auriga.ai-gateway' : 'auriga') ||
       claims.ptyp !== 'device' ||
       claims.ctx !== 'device' ||
       claims.scope !== 'auriga.connect' ||
@@ -238,6 +238,19 @@ export function createPlatform(config) {
       )
     )
       throw new Error('invalid device credential');
+    if (
+      ai &&
+      (header.typ !== 'at+jwt' ||
+        claims.exp - claims.iat > 300 ||
+        claims.exp <= claims.iat ||
+        claims.exp > now + 300 ||
+        claims.sid !== undefined ||
+        claims.instanceId !== undefined ||
+        !Array.isArray(claims.perms) ||
+        claims.perms.length !== 1 ||
+        claims.perms[0] !== 'auriga.connect.models.invoke')
+    )
+      throw new Error('invalid device AI credential');
     if (
       expected &&
       ['tid', 'sub', 'did'].some((k) => expected[k] !== claims[k])
@@ -270,5 +283,10 @@ export function createPlatform(config) {
       throw new Error('invalid device signature');
     return claims;
   }
-  return { request, verifyDevice };
+  return {
+    request,
+    verifyDevice,
+    verifyAi: (/** @type {string} */ token, /** @type {any} */ expected) =>
+      verifyDevice(token, expected, true),
+  };
 }

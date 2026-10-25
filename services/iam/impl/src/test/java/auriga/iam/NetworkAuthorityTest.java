@@ -283,6 +283,26 @@ class NetworkAuthorityTest {
   }
 
   @Test
+  void preparedConnectionDeadlineIsDistinctAndCannotSlideAtRedemption() {
+    business(
+        () -> {
+          register();
+          admin();
+          network.configure(
+              new Configuration(true, true, true, Map.of(Limit.CONNECTION_SECONDS, 120L)));
+          var ticket = network.prepare("access", "1", "server-a");
+          assertEquals(clock.instant().plusSeconds(30), ticket.expiresAt());
+          assertEquals(clock.instant().plusSeconds(120), ticket.connectionExpiresAt());
+          clock.advance(20);
+          service("svc:ai-gateway");
+          var connection =
+              network.redeem(
+                  ticket.ticket(), "1", device.toString(), "server-a", binding(ticket.ticket()));
+          assertEquals(ticket.connectionExpiresAt(), connection.expiresAt());
+        });
+  }
+
+  @Test
   void supportsFullUnsignedDisplay() {
     assertTrue(IamNetworkAuthority.validNumber("18446744073709551615", false));
     assertFalse(IamNetworkAuthority.validNumber("18446744073709551616", false));

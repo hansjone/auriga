@@ -278,7 +278,7 @@ test('explicit runtime logout queues behind an in-flight real vault write and to
     assert.equal(runtime.resolve(request), null);
     assert.equal(runtime.vault.snapshot().credential, null);
     assert.equal(runtime.vault.snapshot().revocations.length, 1);
-    await assert.rejects(runtime.getAccess(), /platform sign-in required/);
+    await assert.rejects(runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
     const next = { headers: {} };
     const prepared = runtime.prepare(next);
     next.headers.cookie = prepared.setCookie.split(';')[0];

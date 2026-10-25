@@ -223,6 +223,19 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  NetworkDirectory iamNetworkDirectory(
+      IamStore store, SessionManager sessions, TokenService tokens, Clock clock) {
+    return new IamNetworkDirectory(
+        store, sessions, new DeviceAccessAuthority(store, sessions, tokens), clock);
+  }
+
+  @Bean
+  IamGrpcNetworkDirectory iamGrpcNetworkDirectory(
+      NetworkDirectory directory, IamGrpcSessions transportGuard) {
+    return new IamGrpcNetworkDirectory(directory);
+  }
+
+  @Bean
   NetworkIngressCleanup networkIngressCleanup(IamStore store, Clock clock) {
     return new NetworkIngressCleanup(store, clock);
   }
@@ -240,6 +253,20 @@ public class IamRuntimeConfiguration {
         new DeviceAccessAuthority(store, sessions, tokens),
         audit,
         clock,
+        Set.copyOf(
+            Binder.get(env)
+                .bind("auriga.iam.network.server-audiences", Bindable.listOf(String.class))
+                .orElse(List.of())));
+  }
+
+  @Bean
+  IamNetworkClient iamNetworkClient(
+      NetworkAuthority authority, IamStore store, Clock clock, Environment env) {
+    return new IamNetworkClient(
+        authority,
+        store,
+        clock,
+        env.getProperty("auriga.iam.network.client-server-audience", ""),
         Set.copyOf(
             Binder.get(env)
                 .bind("auriga.iam.network.server-audiences", Bindable.listOf(String.class))
@@ -407,7 +434,12 @@ public class IamRuntimeConfiguration {
 
   @Bean
   OAuthProvider iamOAuth(
-      IamStore store, SessionManager sessions, TokenService tokens, Clock clock, Environment env) {
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
     return new OAuthProvider(
         store,
         sessions,
@@ -415,7 +447,13 @@ public class IamRuntimeConfiguration {
         clock,
         Binder.get(env)
             .bind("auriga.iam.clients", Bindable.listOf(OAuthClient.class))
-            .orElse(List.of()));
+            .orElse(List.of()),
+        authorization.getIfAvailable(
+            () ->
+                request -> {
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.UNAVAILABLE);
+                }));
   }
 
   @Bean
