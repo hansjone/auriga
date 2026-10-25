@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
 import {
   openConsent as openRawConsent,
   createFileConsentStore,
@@ -32,6 +33,24 @@ async function openConsent(options) {
       if (!row) throw new Error('request not retained');
       return row;
     },
+  };
+}
+
+function controlledRequestAfterCommit(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // Also update the production module's named node:timers/promises import.
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
+  });
+  return async (service, input, responseDelayMs) => {
+    const response = service.request(input);
+    // This authenticated query queues behind intake and its real disk commit.
+    // Advance only the response timer afterwards; disk latency is not the claim.
+    await service.getRequest(local, input);
+    t.mock.timers.tick(responseDelayMs);
+    return response;
   };
 }
 
@@ -659,6 +678,7 @@ test('revocation serializes with action authorization; stale approvals cannot ru
 });
 
 test('file persistence, atomic decision/outbox and uncertain write poison the service', async (t) => {
+  const requestAfterCommit = controlledRequestAfterCommit(t);
   const dir = await mkdtemp(join(tmpdir(), 'auriga-consent-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   let failure = false;
@@ -669,7 +689,11 @@ test('file persistence, atomic decision/outbox and uncertain write poison the se
     },
   });
   const f = await fixture(t, { store });
-  const r = await f.service.request(f.request());
+  const r = await requestAfterCommit(
+    f.service,
+    f.request(),
+    f.ports.responseDelayMs,
+  );
   await f.service.decide(local, {
     layer: r.request.layer,
     requestId: r.request.requestId,
@@ -681,7 +705,13 @@ test('file persistence, atomic decision/outbox and uncertain write poison the se
   const reopened = await openConsent(f.ports);
   t.after(() => reopened.close());
   assert.equal(
-    (await reopened.request(f.request('conversation', 'persisted'))).status,
+    (
+      await requestAfterCommit(
+        reopened,
+        f.request('conversation', 'persisted'),
+        f.ports.responseDelayMs,
+      )
+    ).status,
     'allowed',
   );
   assert.ok((await reopened.listOutbox(local)).length >= 2);
@@ -694,10 +724,14 @@ test('file persistence, atomic decision/outbox and uncertain write poison the se
     }),
     /disk failure/,
   );
-  await assert.rejects(
+  const unavailable = assert.rejects(
     reopened.request(f.request('conversation', 'after-failure')),
     /unavailable/,
   );
+  // Observe the queued request's poison rejection before releasing its response.
+  await assert.rejects(reopened.getSettings(local), /unavailable/);
+  t.mock.timers.tick(f.ports.responseDelayMs);
+  await unavailable;
 });
 
 test('stored rule IDs allow revocation after ownership transfer without IAM availability', async (t) => {
@@ -787,9 +821,14 @@ test('request capacity keeps revocation usable and pending byte limits stay enfo
 });
 
 test('clock rollback and commit failure before rename cannot expose an approval', async (t) => {
+  const requestAfterCommit = controlledRequestAfterCommit(t);
   const f = await fixture(t);
   const request = f.request();
-  const r = await f.service.request(request);
+  const r = await requestAfterCommit(
+    f.service,
+    request,
+    f.ports.responseDelayMs,
+  );
   f.advance(-1);
   await assert.rejects(
     f.service.decide(local, {
@@ -811,7 +850,12 @@ test('clock rollback and commit failure before rename cannot expose an approval'
       },
     }),
   });
-  const pending = await file.service.request(file.request());
+  const pending = await requestAfterCommit(
+    file.service,
+    file.request(),
+    file.ports.responseDelayMs,
+  );
+  assert.equal(pending.status, 'pending');
   fail = true;
   await assert.rejects(
     file.service.decide(local, {
@@ -823,18 +867,31 @@ test('clock rollback and commit failure before rename cannot expose an approval'
     }),
     /ENOSPC/,
   );
-  await assert.rejects(
+  const unauthorized = assert.rejects(
     file.service.withAuthorization(file.request(), async () =>
       assert.fail('must not run'),
     ),
     /unavailable/,
   );
+  // Drain the failed authorization through the same public transaction queue.
+  await assert.rejects(file.service.getSettings(local), /unavailable/);
+  t.mock.timers.tick(file.ports.responseDelayMs);
+  await unauthorized;
   await file.service.close();
   fail = false;
   const reopened = await openConsent(file.ports);
   t.after(() => reopened.close());
   assert.deepEqual((await reopened.getSettings(local)).rules, []);
-  assert.equal((await reopened.request(file.request())).status, 'pending');
+  assert.equal(
+    (
+      await requestAfterCommit(
+        reopened,
+        file.request(),
+        file.ports.responseDelayMs,
+      )
+    ).status,
+    'pending',
+  );
   assert.ok(
     !(await reopened.listOutbox(local)).some((e) => e.status === 'allowed'),
   );
