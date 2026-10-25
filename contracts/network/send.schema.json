@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://auriga.example.com/contracts/network/send.schema.json",
   "title": "Auriga 网络发送入口 v1",
-  "description": "模型工具参数、插件→总部私有发送请求与发送结果。工具与私有请求都不接受 from/sender_kind/message_class/reply_to/server_auth/source_context/授权引用：额外字段直接拒绝，不先接收再丢弃。见 README.md §7。",
+  "description": "模型工具参数、插件→总部私有发送请求与发送结果。工具与私有请求都不接受 origin/correlation_id/causation_id/from/sender_kind/message_class/reply_to/server_auth/source_context/授权引用：额外字段直接拒绝，不先接收再丢弃。见 README.md §7。",
   "$defs": {
     "ToolBody": {
       "description": "普通发送只接受信息/请求类 body；control 走独立有专权的单播入口。",
@@ -77,7 +77,7 @@
       "additionalProperties": false
     },
     "SubmitRequest": {
-      "description": "插件经 HTTPS 私有接口提交；来源只以 source_binding 或 human_intent_id 引用，总部据此生成 from/sender_kind，并按 to 生成 message_class。",
+      "description": "插件经 HTTPS 私有接口提交；来源只以 source_binding 或 human_intent_id 引用，总部据此生成 from/sender_kind，并按 to 生成 message_class；origin/correlation_id/causation_id 由平台固化，客户端提交直接拒绝。",
       "type": "object",
       "properties": {
         "kind": {
@@ -91,9 +91,6 @@
         },
         "in_reply_to": {
           "$ref": "envelope.schema.json#/$defs/OpaqueId"
-        },
-        "origin": {
-          "$ref": "envelope.schema.json#/$defs/Origin"
         },
         "contact_scope": {
           "$ref": "envelope.schema.json#/$defs/ContactScope"
@@ -143,12 +140,6 @@
         },
         "ext": {
           "$ref": "envelope.schema.json#/$defs/Ext"
-        },
-        "correlation_id": {
-          "$ref": "envelope.schema.json#/$defs/OpaqueId"
-        },
-        "causation_id": {
-          "$ref": "envelope.schema.json#/$defs/OpaqueId"
         },
         "source": {
           "type": "object",

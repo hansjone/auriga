@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/network"
 )
 
 var version = "0.0.0-dev"
@@ -14,6 +19,7 @@ func run(args []string, out, logs io.Writer) error {
 	flags := flag.NewFlagSet("auriga-ai-gateway", flag.ContinueOnError)
 	flags.SetOutput(logs)
 	teamConfigFile := flags.String("team-config", "", "serve remote Team MCP using a configuration file")
+	networkConfigFile := flags.String("network-config", "", "serve network callout and revocation reconciliation using a configuration file")
 	showVersion := flags.Bool("version", false, "print version")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -26,11 +32,21 @@ func run(args []string, out, logs io.Writer) error {
 		return err
 	}
 	if *teamConfigFile != "" {
+		if *networkConfigFile != "" {
+			return fmt.Errorf("choose one runtime per process: --team-config or --network-config")
+		}
 		return serveTeam(*teamConfigFile)
 	}
-	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "ai-gateway")
-	logger.Info("skeleton initialized", "version", version)
-	return nil
+	if *networkConfigFile != "" {
+		cfg, err := network.LoadRuntimeConfig(*networkConfigFile)
+		if err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return network.RunRuntime(ctx, cfg)
+	}
+	return fmt.Errorf("runtime configuration required: --team-config or --network-config")
 }
 
 func main() {

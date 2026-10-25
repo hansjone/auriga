@@ -63,6 +63,7 @@ const addressCases = read('fixtures/address-cases.json');
 const frameCases = read('fixtures/frame-cases.json').cases;
 const rawCases = read('fixtures/raw-cases.json');
 const presentation = read('fixtures/error-presentation.json').cases;
+const replyRequest = read('fixtures/reply-request.json');
 const flatLimits = { ...limits.encoding, ...limits.serverAuth };
 
 const keysByKid = Object.fromEntries(
@@ -317,6 +318,32 @@ for (const c of addressCases.json)
   });
 
 // ---- legal frames ----
+
+test('合法回复私有请求携带 in_reply_to，不携带平台固化字段', () => {
+  const validate = validator('send#SubmitRequest');
+  assert.equal(validate(replyRequest), true, JSON.stringify(validate.errors));
+  assert.equal(replyRequest.kind, 'reply');
+  assert.equal(
+    replyRequest.in_reply_to,
+    fixtures.frames.delivery_multicast.value.message.message_id,
+  );
+  assert.deepEqual(
+    replyRequest.to,
+    fixtures.frames.delivery_multicast.value.message.to,
+  );
+});
+
+for (const field of ['origin', 'correlation_id', 'causation_id'])
+  test('私有请求拒绝客户端平台字段：' + field, () => {
+    const value =
+      field === 'origin'
+        ? { message_id: 'original-message', recipient_id: 'original-recipient' }
+        : 'client-forged-id';
+    assert.equal(
+      validator('send#SubmitRequest')({ ...replyRequest, [field]: value }),
+      false,
+    );
+  });
 
 for (const [name, f] of Object.entries(fixtures.frames))
   test('合法帧通过生产方 schema：' + name, () => {

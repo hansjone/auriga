@@ -159,20 +159,21 @@ func defaultBrokerOpts() brokerOpts {
 }
 
 type harness struct {
-	t         *testing.T
-	o         brokerOpts
-	srv       *server.Server
-	issuer    nkeys.KeyPair
-	xkey      nkeys.KeyPair
-	authUser  string
-	authPass  string
-	adptUser  string
-	adptPass  string
-	opsUser   string
-	opsPass   string
-	tickets   *memTickets
-	decisions chan decision
-	calloutNC *nats.Conn
+	configFile string
+	t          *testing.T
+	o          brokerOpts
+	srv        *server.Server
+	issuer     nkeys.KeyPair
+	xkey       nkeys.KeyPair
+	authUser   string
+	authPass   string
+	adptUser   string
+	adptPass   string
+	opsUser    string
+	opsPass    string
+	tickets    *memTickets
+	decisions  chan decision
+	calloutNC  *nats.Conn
 }
 
 func newHarness(t *testing.T, o brokerOpts) *harness {
@@ -271,6 +272,7 @@ authorization {
 func (h *harness) startServer() {
 	t := h.t
 	path := filepath.Join(t.TempDir(), "nats.conf")
+	h.configFile = path
 	if err := os.WriteFile(path, []byte(h.config()), 0o600); err != nil {
 		t.Fatal(err)
 	}

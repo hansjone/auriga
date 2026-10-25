@@ -183,6 +183,39 @@ export const publicKeyFromSpki = (spki) =>
     type: 'spki',
   });
 
+// JSON Schema validates shape; these constraints compare multiple fields.
+export function checkKeyset(keyset, validate) {
+  if (!validate(keyset)) fail('network.protocol_error', 'keyset schema');
+  if (Date.parse(keyset.valid_until) > Date.parse(keyset.issued_at) + 86400000)
+    fail('network.protocol_error', 'keyset exceeds 24 hours');
+  const kids = new Set();
+  for (const key of keyset.keys) {
+    if (Date.parse(key.not_before) >= Date.parse(key.not_after))
+      fail('network.protocol_error', 'empty or reversed key validity');
+    if (kids.has(key.kid)) fail('network.protocol_error', 'duplicate kid');
+    kids.add(key.kid);
+  }
+}
+
+// roots contains only independently provisioned root keys, never keyset.keys.
+export function checkSignedKeyset(signed, { validate, roots }) {
+  if (!validate(signed)) fail('network.protocol_error', 'signed keyset schema');
+  const { keyset, root_auth: auth } = signed;
+  const root = roots.get(auth.kid);
+  const signature = Buffer.from(auth.signature, 'base64url');
+  if (
+    !root ||
+    signature.length !== 64 ||
+    signature.toString('base64url') !== auth.signature
+  )
+    fail('network.signature_invalid', 'root key or signature encoding');
+  const input = Buffer.from('Auriga.NetworkKeyset.v1\0' + jcs(keyset), 'utf8');
+  if (!verify(null, input, root, signature))
+    fail('network.signature_invalid', 'root signature');
+  // SignedKeyset's schema has already validated the nested payload shape.
+  checkKeyset(keyset, () => true);
+}
+
 export function signedBody(obj) {
   const body = structuredClone(obj);
   delete body.server_auth.signature;

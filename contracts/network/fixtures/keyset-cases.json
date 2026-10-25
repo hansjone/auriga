@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "name": "publication exceeds 24 hours",
+      "payload": {
+        "issued_at": "2026-10-25T00:00:00Z",
+        "valid_until": "2026-10-26T00:00:01Z"
+      }
+    },
+    {
+      "name": "empty key validity window",
+      "key": {
+        "not_before": "2026-10-25T00:00:00Z",
+        "not_after": "2026-10-25T00:00:00Z"
+      }
+    },
+    {
+      "name": "reversed key validity window",
+      "key": {
+        "not_before": "2026-10-26T00:00:00Z",
+        "not_after": "2026-10-25T00:00:00Z"
+      }
+    },
+    { "name": "duplicate kid with different state", "duplicateKid": true }
+  ]
+}

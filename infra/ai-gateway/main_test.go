@@ -2,12 +2,13 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestVersionAndJSONLog(t *testing.T) {
+func TestVersionAndMissingRuntimeConfiguration(t *testing.T) {
 	var out, logs bytes.Buffer
 	if err := run([]string{"--version"}, &out, &logs); err != nil {
 		t.Fatal(err)
@@ -18,14 +19,21 @@ func TestVersionAndJSONLog(t *testing.T) {
 	if logs.Len() != 0 {
 		t.Fatal("version must not initialize services")
 	}
-	if err := run(nil, &out, &logs); err != nil {
-		t.Fatal(err)
+	if err := run(nil, &out, &logs); err == nil {
+		t.Fatal("missing runtime configuration must fail startup")
 	}
-	var record map[string]any
-	if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
-		t.Fatal(err)
-	}
-	if record["service"] != "ai-gateway" {
-		t.Fatal(record)
+}
+
+func TestNetworkRuntimeRequiresCompleteConfiguration(t *testing.T) {
+	for _, content := range []string{`{}`, `{"serverAudience":"server-a"}`, `{"unknown":true}`} {
+		path := filepath.Join(t.TempDir(), "network.json")
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var out, logs bytes.Buffer
+		err := run([]string{"--network-config", path}, &out, &logs)
+		if err == nil || strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("expected runtime config validation, got %v", err)
+		}
 	}
 }
