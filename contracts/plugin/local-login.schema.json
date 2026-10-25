@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auriga local host connection and sign-in v1",
+  "description": "Trusted installation configuration and loopback browser adapter only. Device tokens, PKCE proofs and platform cookies never cross this adapter.",
+  "$defs": {
+    "ConnectConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platformOrigin": {
+          "type": "string",
+          "format": "uri",
+          "description": "Pure HTTPS origin; explicit loopback HTTP tests only."
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri",
+          "description": "Installation-owned issuer on the same origin; JWKS at issuer + /oauth2/jwks."
+        },
+        "clientId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "providerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "allowLocalHttp": { "type": "boolean", "default": false }
+      },
+      "required": ["platformOrigin", "issuer", "clientId", "providerId"]
+    },
+    "Begin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "action": { "const": "begin" } },
+      "required": ["action"]
+    },
+    "Resume": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "action": { "const": "resume" } },
+      "required": ["action"]
+    },
+    "Advance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": { "const": "advance" },
+        "input": {
+          "allOf": [
+            { "$ref": "../identity/steps.schema.json#/$defs/StepInput" },
+            { "type": "object", "properties": { "type": { "const": "form" } } }
+          ]
+        }
+      },
+      "required": ["action", "input"]
+    },
+    "LoginInput": {
+      "oneOf": [
+        { "$ref": "#/$defs/Begin" },
+        { "$ref": "#/$defs/Resume" },
+        { "$ref": "#/$defs/Advance" }
+      ]
+    },
+    "Status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "available": { "const": true },
+        "loggedIn": { "type": "boolean" },
+        "connected": { "type": "boolean" },
+        "csrf": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "resumeAvailable": { "type": "boolean" },
+        "remoteRevocation": { "enum": ["pending", "complete"] },
+        "account": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "subject": { "type": "string" } },
+              "required": ["subject"]
+            }
+          ]
+        },
+        "connection": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "endpointId": { "type": ["string", "null"] },
+                "received": { "type": "integer", "minimum": 0 },
+                "unsupported": { "type": "integer", "minimum": 0 },
+                "pendingSourceOpens": { "type": "integer", "minimum": 0 },
+                "unknownSourceOpens": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["endpointId", "received"]
+            }
+          ]
+        }
+      },
+      "required": ["available", "loggedIn", "connected", "account"]
+    }
+  }
+}

@@ -1,4 +1,5 @@
 /* global structuredClone */
+import { Buffer } from 'node:buffer';
 import { CODES, HostSeamError } from './errors.js';
 import {
   addressKey,
@@ -8,13 +9,9 @@ import {
   parseAddress,
 } from './address.js';
 import { createKeyedMutex } from './keyed-mutex.js';
-import {
-  digestOf,
-  newId,
-  pushAudit,
-  registerReservedLocal,
-  reserveLocal,
-} from './ledger.js';
+import { digestOf, newId, pushAudit } from './ledger.js';
+import { createLocalAllocator } from './local-allocator.js';
+import { createInboundPolicy } from '../policy/inbound-policy.js';
 
 /**
  * Transport-independent host seam: `deliver(page) → receipts` (design README
@@ -93,6 +90,14 @@ const FINAL = new Set([
   'OUTCOME_UNKNOWN',
 ]);
 const DANGEROUS_KINDS = new Set(['control']);
+const SCAN_REASONS = new Set([
+  'unknown_local',
+  'unregistered_local',
+  'no_relation',
+  'lifecycle_archived',
+  'lifecycle_closed',
+  'lifecycle_deleted',
+]);
 
 /**
  * @param {{
@@ -113,6 +118,11 @@ export function createHostAdapter({
   const identity = ledger.identity;
   const self = { realm: identity.realm, node: identity.node };
   const locks = createKeyedMutex();
+  const allocator = createLocalAllocator({
+    ledger,
+    registerLocal: network.registerLocal,
+  });
+  const inboundPolicy = createInboundPolicy({ ledger });
 
   /** @param {FaultPoint} point @param {{ recipientId?: string, contactId?: string }} ctx */
   const fault = async (point, ctx) => {
@@ -250,12 +260,9 @@ export function createHostAdapter({
    *   | { path: 'inbox', acceptedBy: 'system'|'session', contact: boolean, relationId: string|null, bindPeer: boolean }
    *   | { path: 'session', binding: Binding, relationId: string|null, bindPeer: boolean }}
    */
-  function classify(item, rec) {
+  function classifyTarget(item, rec) {
     const s = ledger.peek();
     const m = item.message;
-    const text = /** @type {{ text?: unknown }} */ (m.body)?.text;
-    if (typeof text !== 'string' || Buffer.byteLength(text) > MAX_BODY_TEXT)
-      return { path: 'quarantine', code: CODES.invalidBody, reason: 'body' };
     const group =
       m.messageClass === 'multicast' || m.messageClass === 'broadcast';
     if (group) {
@@ -271,8 +278,13 @@ export function createHostAdapter({
           bindPeer: false,
         };
       const b = s.bindings[rec.local];
-      if (!open(b) || !b.groups.includes(addressKey(m.to)))
-        return { path: 'reject', reason: open(b) ? 'not_member' : 'lifecycle' };
+      if (!b) return { path: 'reject', reason: 'unknown_local' };
+      if (s.locals[rec.local]?.state !== 'registered')
+        return { path: 'reject', reason: 'unregistered_local' };
+      if (!open(b))
+        return { path: 'reject', reason: `lifecycle_${b.lifecycle}` };
+      if (!b.groups.includes(addressKey(m.to)))
+        return { path: 'reject', reason: 'not_member' };
       return {
         path: 'inbox',
         acceptedBy: 'session',
@@ -307,6 +319,8 @@ export function createHostAdapter({
     }
     const b = s.bindings[rec.local];
     if (!b) return { path: 'reject', reason: 'unknown_local' };
+    if (s.locals[rec.local]?.state !== 'registered')
+      return { path: 'reject', reason: 'unregistered_local' };
     if (!open(b)) return { path: 'reject', reason: `lifecycle_${b.lifecycle}` };
     if (m.kind === 'first_contact')
       return { path: 'reject', reason: 'first_contact_to_local' };
@@ -332,6 +346,28 @@ export function createHostAdapter({
       relationId: gate.relationId,
       bindPeer: gate.bindPeer,
     };
+  }
+
+  /** Reject metadata before examining untrusted content, so malformed bodies
+   * cannot reveal whether a guessed address exists.
+   * @param {PageItem} item @param {PageRecipient} rec */
+  function classify(item, rec) {
+    if (inboundPolicy.isBlocked(item.message.from))
+      return /** @type {const} */ ({
+        path: 'reject',
+        reason: 'source_blocked',
+      });
+    const decision = classifyTarget(item, rec);
+    if (decision.path === 'reject' || decision.path === 'retry')
+      return decision;
+    const text = /** @type {{ text?: unknown }} */ (item.message.body)?.text;
+    if (typeof text !== 'string' || Buffer.byteLength(text) > MAX_BODY_TEXT)
+      return /** @type {const} */ ({
+        path: 'quarantine',
+        code: CODES.invalidBody,
+        reason: 'body',
+      });
+    return decision;
   }
 
   /** @param {PageItem} item */
@@ -412,10 +448,10 @@ export function createHostAdapter({
    * Execute one recipient under the per-session lock: ledger/host dedup,
    * online admit, persisted invocation_started, single prompt, awaited flush.
    * @param {Page} page @param {string} recipientId
-   * @param {string} text
+   * @param {PageItem} item
    * @returns {Promise<Receipt>}
    */
-  async function executeInSession(page, recipientId, text) {
+  async function executeInSession(page, recipientId, item) {
     const r0 = recipient(recipientId);
     const sessionId = /** @type {string} */ (r0.hostSessionId);
     return locks.run(`session:${sessionId}`, async () => {
@@ -461,7 +497,10 @@ export function createHostAdapter({
       }
       // Re-check local state between admit response and host call.
       const b = ledger.peek().bindings[r.local];
-      if (r.local !== '0' && !open(b)) {
+      if (
+        inboundPolicy.isBlocked(item.message.from) ||
+        (r.local !== '0' && !open(b))
+      ) {
         return setRecipient(recipientId, (rec, draft) => {
           rec.state = 'REJECTED';
           rec.admissionId = admission.admissionId;
@@ -478,7 +517,7 @@ export function createHostAdapter({
       try {
         await host.prompt(sessionId, {
           requestId: r.hostRequestId,
-          text,
+          text: renderExternal(item),
           mode: 'queue',
         });
       } catch {
@@ -666,6 +705,12 @@ export function createHostAdapter({
               ? again2.reason
               : 'policy';
           pushAudit(draft, r.recipientId, r.localReason, ledger.nowIso());
+          if (again2.path === 'reject' && SCAN_REASONS.has(again2.reason))
+            inboundPolicy.recordInvalidIn(draft, {
+              from: item.message.from,
+              recipientId: r.recipientId,
+              local: rec.local,
+            });
         });
       await setRecipient(rec.recipientId, (r) => {
         r.attempts = [...r.attempts, rec.attemptId].slice(-MAX_ATTEMPTS_KEPT);
@@ -697,6 +742,12 @@ export function createHostAdapter({
         if (decision.path === 'quarantine') r.code = decision.code;
         draft.recipients[r.recipientId] = r;
         pushAudit(draft, r.recipientId, decision.reason, ledger.nowIso());
+        if (decision.path === 'reject' && SCAN_REASONS.has(decision.reason))
+          inboundPolicy.recordInvalidIn(draft, {
+            from: item.message.from,
+            recipientId: r.recipientId,
+            local: rec.local,
+          });
         return receiptOf(r, draft.revision + 1);
       });
       await fault('after_received', { recipientId: rec.recipientId });
@@ -790,7 +841,7 @@ export function createHostAdapter({
         };
       });
     }
-    return executeInSession(page, recipientId, renderExternal(item));
+    return executeInSession(page, recipientId, item);
   }
 
   /** @param {unknown} page */
@@ -817,8 +868,6 @@ export function createHostAdapter({
         !Array.isArray(item.recipients)
       )
         throw new HostSeamError(CODES.protocolError, 'bad item');
-      parseAddress(m.from);
-      parseAddress(m.to);
       for (const rec of item.recipients) {
         if (
           typeof rec?.recipientId !== 'string' ||
@@ -832,6 +881,49 @@ export function createHostAdapter({
     return p;
   }
 
+  /** Trusted page framing is checked once; bad address metadata belongs to
+   * one item and must neither poison peers' strikes nor abort the page.
+   * @param {PageItem} item */
+  function invalidItemAddress(item) {
+    try {
+      parseAddress(item.message.from, {
+        realm: identity.realm,
+        role: 'source',
+      });
+      parseAddress(item.message.to, { realm: identity.realm });
+      return null;
+    } catch (error) {
+      if (error instanceof HostSeamError) return error.code;
+      throw error;
+    }
+  }
+
+  /** @param {Page} page @param {PageItem} item @param {PageRecipient} rec @param {string} reason */
+  async function rejectAddressItem(page, item, rec, reason) {
+    const existing = recipient(rec.recipientId);
+    if (existing) {
+      if (existing.messageDigest !== item.messageDigest)
+        return {
+          ...receiptOf(existing, ledger.peek().revision),
+          status: /** @type {const} */ ('quarantined'),
+          code: CODES.protocolError,
+        };
+      return receiptOf(existing, ledger.peek().revision);
+    }
+    if (ledger.peek().identityConflict)
+      return transientReceipt(item, rec, CODES.recoveryConflict);
+    if (pendingCount() >= maxPendingRecipients)
+      return transientReceipt(item, rec, CODES.overloaded);
+    return ledger.update((draft) => {
+      const r = freshRecord(page, item, rec, null);
+      r.state = 'REJECTED';
+      r.localReason = reason;
+      draft.recipients[r.recipientId] = r;
+      pushAudit(draft, r.recipientId, reason, ledger.nowIso());
+      return receiptOf(r, draft.revision + 1);
+    });
+  }
+
   /**
    * Per-session order: recipients for the same (local, thread) enter in page
    * order through a FIFO lock; different threads run concurrently and only
@@ -840,16 +932,21 @@ export function createHostAdapter({
    * @returns {Promise<Receipt[]>}
    */
   async function deliver(input) {
+    ledger.assertAvailable();
     const page = checkPage(input);
     /** @type {Promise<Receipt>[]} */
     const work = [];
-    for (const item of page.items)
+    for (const item of page.items) {
+      const addressError = invalidItemAddress(item);
       for (const rec of item.recipients)
         work.push(
           locks.run(`thread:${rec.local}:${item.message.threadId}`, () =>
-            deliverOne(page, item, rec),
+            addressError
+              ? rejectAddressItem(page, item, rec, addressError)
+              : deliverOne(page, item, rec),
           ),
         );
+    }
     return Promise.all(work);
   }
 
@@ -867,7 +964,7 @@ export function createHostAdapter({
     cwd,
     receiveMode = 'replies_only',
     kind = 'session',
-    executeMode = 'prompt',
+    executeMode = 'inbox_only',
   }) {
     if (!opId || !hostSessionId || !cwd)
       throw new HostSeamError(
@@ -879,15 +976,18 @@ export function createHostAdapter({
     const session = await host.getSession(hostSessionId);
     if (!session || session.cwd !== cwd)
       throw new HostSeamError(CODES.sessionNotReady, 'host session missing');
-    const entry = await reserveLocal(ledger, {
+    const entry = await allocator.allocate({
       opId,
       purpose: 'bind_existing',
-      mappingDigest: digestOf({ hostSessionId, cwd }),
+      mappingDigest: digestOf({
+        hostSessionId,
+        cwd,
+        kind: session.origin === 'subagent' ? 'subagent' : kind,
+      }),
     });
     return locks.run(`binding:${entry.local}`, async () => {
       if (ledger.peek().bindings[entry.local]?.state === 'bound')
         return entry.local;
-      await registerReservedLocal(ledger, opId, network.registerLocal);
       await ledger.update((draft) => {
         draft.bindings[entry.local] = {
           local: entry.local,
@@ -951,7 +1051,7 @@ export function createHostAdapter({
           c.preset ??= preset;
         });
         const c = contact();
-        const entry = await reserveLocal(ledger, {
+        const entry = await allocator.allocate({
           opId: `contact:${contactId}`,
           purpose: 'contact',
           mappingDigest: digestOf({
@@ -959,11 +1059,6 @@ export function createHostAdapter({
             cwd: c.cwd,
           }),
         });
-        await registerReservedLocal(
-          ledger,
-          `contact:${contactId}`,
-          network.registerLocal,
-        );
         await ledger.update((draft) => {
           const dc = draft.contacts[contactId];
           dc.local = entry.local;
@@ -1302,6 +1397,9 @@ export function createHostAdapter({
 
   return {
     deliver,
+    localAddress: allocator.addressFor,
+    recoverLocalRegistrations: allocator.recover,
+    inboundPolicy,
     bindExistingSession,
     openContactSession,
     deliverContactToSession,

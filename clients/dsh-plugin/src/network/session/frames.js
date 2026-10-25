@@ -156,7 +156,10 @@ export function assertFrameEpoch(frame, epoch) {
     frame
   );
   const found = e.epoch ?? e.page?.epoch;
-  if (found !== undefined && found !== epoch) {
+  if (found === undefined) {
+    throw new SessionError('missing_epoch', 'frame missing epoch');
+  }
+  if (String(found) !== String(epoch)) {
     throw new SessionError('stale_epoch', `frame epoch ${found} != ${epoch}`);
   }
 }

@@ -4,9 +4,9 @@ import { PROTOCOL_VERSION } from './managed/protocol.js';
 
 /**
  * Local packaged UI only. It grants no Auriga identity, resource transport or session.
- * @param {{ mode: 'standalone' | 'connect', auth: { requestRejection(req: object): number | undefined } }} options
+ * @param {{ mode: 'standalone' | 'connect', auth: { requestRejection(req: object): number | undefined }, runtime?: {status(req: object): {connected: boolean, connection?:object}} }} options
  */
-export function createLocalSurfaceHandler({ mode, auth }) {
+export function createLocalSurfaceHandler({ mode, auth, runtime }) {
   /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res */
   return function handle(req, res) {
     const rejection = auth.requestRejection(req);
@@ -58,7 +58,19 @@ export function createLocalSurfaceHandler({ mode, auth }) {
           mode,
           protocol: PROTOCOL_VERSION,
           pluginVersion: pkg.version,
-          status: 'unconfigured',
+          status: runtime
+            ? runtime.status(req).connected
+              ? 'connected'
+              : 'disconnected'
+            : 'unconfigured',
+          ...(runtime
+            ? {
+                connection: {
+                  connected: runtime.status(req).connected,
+                  ...runtime.status(req).connection,
+                },
+              }
+            : {}),
           localPanel: {
             source: 'package',
             version: metadata.version,

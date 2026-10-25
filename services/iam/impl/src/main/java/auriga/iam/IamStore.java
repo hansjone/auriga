@@ -30,7 +30,11 @@ public final class IamStore {
           "team_totp",
           "team_passkey",
           "team_ceremony",
-          "qr_challenge");
+          "qr_challenge",
+          "network_ticket",
+          "network_policy",
+          "network_grant",
+          "network_config");
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
   private final ScopedValue<Set<String>> responseProjections = ScopedValue.newInstance();
@@ -38,6 +42,10 @@ public final class IamStore {
   public IamStore(JdbcTemplate jdbc, TenantTransactionManager manager) {
     this.jdbc = jdbc;
     transactions = new TransactionTemplate(manager);
+  }
+
+  JdbcTemplate networkJdbc() {
+    return jdbc;
   }
 
   public <T> T tx(Supplier<T> work) {
