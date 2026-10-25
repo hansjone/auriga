@@ -18,7 +18,18 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.core.env.MapPropertySource;
 
 class NetworkAuthorityConfigurationTest {
-  @TempDir Path temporary;
+  @TempDir(factory = WorkspaceTempDirectory.class)
+  Path temporary;
+
+  public static class WorkspaceTempDirectory implements org.junit.jupiter.api.io.TempDirFactory {
+    @Override
+    public Path createTempDirectory(
+        org.junit.jupiter.api.extension.AnnotatedElementContext element,
+        org.junit.jupiter.api.extension.ExtensionContext context)
+        throws Exception {
+      return Files.createTempDirectory(Path.of("target"), "network-authority-").toAbsolutePath();
+    }
+  }
 
   @Test
   void runtimeRequiresSigningMaterialAndLoadsMountedKeys() throws Exception {
