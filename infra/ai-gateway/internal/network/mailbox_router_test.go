@@ -252,7 +252,7 @@ func TestProductionMailboxGlobalInflightIsBounded(t *testing.T) {
 	t.Cleanup(runtime.Close)
 	for i := 0; i < mailboxWorkers+1; i++ {
 		ingress := ingressForTicket(fmt.Sprint(i))
-		b := liveBinding{Binding: Binding{ServerID: runtime.redeemer.cfg.ServerID, ClientID: uint64(i + 1), Account: clientAccount, Ingress: ingress}, Tenant: testTenant, Realm: "1", Node: "1", Incarnation: "inc-1", Epoch: 42, ChannelNonce: "nonce-1", NotAfter: time.Now().Add(time.Hour), CheckAfter: time.Now().Add(time.Hour)}
+		b := liveBinding{Binding: Binding{ServerID: runtime.redeemer.cfg.ServerID, ClientID: uint64(i + 1), Account: clientAccount, Ingress: ingress}, Tenant: fmt.Sprintf("01900000-0000-7000-8000-%012d", i+1), Realm: "1", Node: "1", Incarnation: "inc-1", Epoch: 42, ChannelNonce: "nonce-1", NotAfter: time.Now().Add(time.Hour), CheckAfter: time.Now().Add(time.Hour)}
 		runtime.redeemer.mu.Lock()
 		runtime.redeemer.bindings[ingress] = b
 		runtime.redeemer.mu.Unlock()

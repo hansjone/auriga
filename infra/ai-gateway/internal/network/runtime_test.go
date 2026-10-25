@@ -62,9 +62,9 @@ func TestBatchDelegationUsesEachNodesOwnTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	bindings := []liveBinding{{Tenant: testTenant, Realm: "1", Node: "1"}, {Tenant: testDevice, Realm: "1", Node: "1"}, {Tenant: testTenant, Realm: "1", Node: "1"}}
-	result, err := r.activeBatch(context.Background(), bindings)
-	if err != nil {
-		t.Fatal(err)
+	result, failures := r.activeBatch(context.Background(), bindings, 250*time.Millisecond)
+	if failures != nil {
+		t.Fatal(failures)
 	}
 	if len(result) != 2 || !result[nodeIdentity{testTenant, "1", "1"}] || !result[nodeIdentity{testDevice, "1", "1"}] || f.calls != 2 {
 		t.Fatalf("results=%v calls=%d", result, f.calls)
