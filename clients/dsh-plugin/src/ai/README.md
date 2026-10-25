@@ -80,3 +80,10 @@ node --test "test/ai/*.test.js"
 
 本机源码树构建入口的通过结果不证明系统安装包、完整 GUI 或生产装配兼容；
 已接入原生 refresh broker；不调用付费模型，不依赖上游内部运行文件。
+
+`content_filter` 是正式合法终态。公开 npm rc.2 没有内建过滤 finish，
+因此本适配层在完整响应和工具参数通过校验后，先交付已有可信 usage，
+再发标准 `error` finish：本地 failure code 为 `CONTENT_FILTER`，
+message 固定为“内容过滤/拒绝 (content filtered/refused)”，不带上游正文或 reason。
+这不是 wire catalog 错误，也不扩展宿主终态类型；原有 maxRetries=0 仍禁止自动重试。
+SSE 缺 usage 时仍省略计量；非法 usage、截断、缺 DONE 和损坏工具参数仍失败关闭。
