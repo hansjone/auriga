@@ -13,22 +13,28 @@ option java_package = "auriga.contracts.iam.v1";
 // Does not widen NetworkGatewayService or authorize a message, thread, recipient
 // or execution. Normative lifecycle, locking and signing mapping:
 // contracts/network/iam-directory.md, "Agent source authority".
-// Before Register/Get, collab MUST actually invoke the trusted native resolver,
+// Before NEW Register issuance/Get, collab MUST invoke the trusted native resolver,
 // check current node health/epoch and lookup/lock the current typed local witness.
 // Call IAM OUTSIDE collab transactions; activate only by a final local CAS.
 // These are trusted service duties, not independent IAM proof of a native host.
 // Missing implementation/wiring MUST fail closed (UNIMPLEMENTED/unavailable).
 service NetworkSourceAuthorityService {
-  // expected_revision=0 creates once. Same tenant/method/operation_id and exact
-  // normalized body returns the original result; changed body conflicts.
-  // Replay never renews/activates; use Get for current state, never this receipt.
+  // Empty predecessor + expected_revision=0 creates the first generation only.
+  // An EXPIRED current head + positive predecessor revision CAS creates a NEW
+  // binding after full fresh checks, even on the same healthy connection.
+  // Same tenant/method/operation_id + identical original body reads the saved
+  // response after service/tenant/IAM-retained ownership-anchor checks, even if
+  // the original transport expired. Unknown/uncommitted operations require full
+  // live issuance checks. Changed body conflicts. Receipt reads never authorize,
+  // create, extend or revive; then Get with the current connection and local CAS.
   rpc RegisterAgentSource(RegisterAgentSourceRequest) returns (RegisterAgentSourceResponse);
   // Revalidates the exact CURRENT redeem connection, original owner/device/live
   // backing identity, registration, source state/expiry and current permissions.
   // Same-device reconnect may change transport, never the saved source tuple.
   rpc GetAgentSource(GetAgentSourceRequest) returns (GetAgentSourceResponse);
   // Positive expected_revision CAS. Commit serializes with Get/signing on the
-  // IAM source version lock; retry returns the original result without renewal.
+  // IAM lineage/source locks; explicit revocation also stops successor issuance
+  // and revokes the active lineage head. Retry never renews or removes this stop.
   rpc RevokeAgentSource(RevokeAgentSourceRequest) returns (RevokeAgentSourceResponse);
 }
 
@@ -62,7 +68,7 @@ message NetworkAgentSourceRegistration {
 }
 
 // Minimal INTERNAL saved fact. Binding IDs are IAM-generated OpaqueIds, never
-// reassigned; original connection/registration/owner/scope/times are immutable.
+// reassigned; connection/registration/owner/scope/times/predecessor are immutable.
 // IAM also stores the derived device/backing-session anchors, never supplied
 // by callers or returned here. No host ID/tree, message body, token or key.
 // State is current only in Get; mutation responses are immutable receipts.
@@ -78,6 +84,9 @@ message NetworkAgentSource {
   // UTC whole-second RFC3339. Saved maximum validity, NOT a cached allow lease.
   string not_before = 8;
   string expires_at = 9;
+  // Empty for first issuance; otherwise the EXPIRED predecessor. This is an
+  // opaque permission-generation link, never a host session/parent relationship.
+  string predecessor_binding = 10;
 }
 
 message RegisterAgentSourceRequest {
@@ -87,8 +96,13 @@ message RegisterAgentSourceRequest {
   // Stable OpaqueId, persisted before RPC; never an authorization credential.
   string operation_id = 3;
   NetworkAgentSourceScope scope = 4;
-  // Must be zero: no update, rebind, renewal or resurrection API.
+  // Zero iff predecessor_binding is empty. Otherwise the current EXPIRED
+  // predecessor's positive revision; CAS serializes exactly one successor.
+  // Always creates a new binding, never updates/revives the predecessor.
   uint64 expected_revision = 5;
+  // OpaqueId of the current lineage head, same immutable registration/scope and
+  // IAM identity anchors. Explicit stop/revocation forbids any successor.
+  string predecessor_binding = 6;
 }
 
 message RegisterAgentSourceResponse {
@@ -126,6 +140,8 @@ message RevokeAgentSourceRequest {
 }
 
 message RevokeAgentSourceResponse {
-  // Committed terminal receipt. Never creates, extends or returns active state.
+  // Committed terminal receipt AND durable lineage stop confirmation. Expired
+  // named generations remain expired; any active head is revoked atomically.
+  // Never creates, extends or returns active state.
   NetworkAgentSource source = 1;
 }

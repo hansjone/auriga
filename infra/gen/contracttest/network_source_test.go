@@ -74,3 +74,40 @@ func TestNetworkSourceAuthorityWireRoundTrip(t *testing.T) {
 		t.Fatal("opaque source witness, terminal state or uint64 revision changed on wire")
 	}
 }
+
+// A successor has a named predecessor and its revision; operation_id is only
+// idempotency. This verifies wire structure, not issuance, replay auth or CAS.
+func TestNetworkSourceAuthoritySuccessorCASWire(t *testing.T) {
+	request := &iamv1.RegisterAgentSourceRequest{
+		Connection:  &iamv1.NetworkAuthorityConnection{TenantId: "tenant-a", Realm: "2", Node: "63", Ingress: "ingress-a"},
+		OperationId: "source:second", PredecessorBinding: "source:first", ExpectedRevision: 2,
+		Scope: iamv1.NetworkAgentSourceScope_NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND,
+	}
+	fields := request.ProtoReflect().Descriptor().Fields()
+	predecessor := fields.ByNumber(6)
+	if predecessor == nil || predecessor.Name() != "predecessor_binding" || predecessor.Kind() != protoreflect.StringKind || fields.ByNumber(5).Kind() != protoreflect.Uint64Kind {
+		t.Fatal("successor must bind predecessor ID and uint64 revision without replacing existing fields")
+	}
+	source := &iamv1.NetworkAgentSource{SourceBinding: "source:second", PredecessorBinding: request.GetPredecessorBinding()}
+	link := source.ProtoReflect().Descriptor().Fields().ByNumber(10)
+	if link == nil || link.Name() != "predecessor_binding" || link.Kind() != protoreflect.StringKind {
+		t.Fatal("saved successor must expose its immutable predecessor link")
+	}
+	for _, input := range []proto.Message{request, source} {
+		encoded, err := proto.MarshalOptions{Deterministic: true}.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := input.ProtoReflect().Type().New().Interface()
+		if err := proto.Unmarshal(encoded, output); err != nil {
+			t.Fatal(err)
+		}
+		if !proto.Equal(input, output) {
+			t.Fatal("successor/replay request lost predecessor, revision or original connection")
+		}
+	}
+	initial := &iamv1.RegisterAgentSourceRequest{}
+	if initial.GetExpectedRevision() != 0 || initial.GetPredecessorBinding() != "" {
+		t.Fatal("initial issuance must retain empty predecessor/zero CAS wire shape")
+	}
+}

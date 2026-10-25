@@ -218,6 +218,8 @@ collab 独占 typed-local 见证、不可变 type 与业务关系，注册/使�
 首期只定义普通 agent/session durable 单播 send，subagent 发送及 human/广播/组播/控制/首联等继续拒绝；
 不增加逐来源人工批准、挑战或登录，不改变本节产品流程。契约不等于来源链已实施；同机隔离已整体推迟，
 不以远程签名声称证明真人/宿主，仍须实现跨 node/tenant、当前身份及每次签前授权检查。
+同健康连接/同登记自然到期后可经全量新鲜核验/CAS 取得新有界来源代际，旧 binding/原操作不续期、不复活；
+显式撤销/持久停发禁止自动替代。丢失的已提交原登记回执可在原 transport 失效后受限读取，仍不产生当前发送许可。
 
 **工具面**：普通 agent 发送工具参数仅 target、body 和可选 thread；from、sender_kind、message_class、reply_to、server_auth、source_context、授权引用、flags 等不是模型字段，额外顶层字段直接 schema 拒绝，不先接收再丢弃。插件用真实执行上下文组装私有请求；回复动作由可信当前消息上下文绑定 in_reply_to/原 recipient，普通发件工具不能以自造引用攫取回复许可。body 只接收受支持信息/请求 schema；正文内出现“from=总部”只是数据，不递归当信封解析。执行控制使用独立有专权的单播入口，不能藏进普通 send 的 flags/ext。总部再次检查来源和目的权限：插件预拒只是体验优化，无广播权会话即使直接调私有接口也返回 broadcast_forbidden。
 

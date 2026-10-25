@@ -33,22 +33,28 @@ const (
 // Does not widen NetworkGatewayService or authorize a message, thread, recipient
 // or execution. Normative lifecycle, locking and signing mapping:
 // contracts/network/iam-directory.md, "Agent source authority".
-// Before Register/Get, collab MUST actually invoke the trusted native resolver,
+// Before NEW Register issuance/Get, collab MUST invoke the trusted native resolver,
 // check current node health/epoch and lookup/lock the current typed local witness.
 // Call IAM OUTSIDE collab transactions; activate only by a final local CAS.
 // These are trusted service duties, not independent IAM proof of a native host.
 // Missing implementation/wiring MUST fail closed (UNIMPLEMENTED/unavailable).
 type NetworkSourceAuthorityServiceClient interface {
-	// expected_revision=0 creates once. Same tenant/method/operation_id and exact
-	// normalized body returns the original result; changed body conflicts.
-	// Replay never renews/activates; use Get for current state, never this receipt.
+	// Empty predecessor + expected_revision=0 creates the first generation only.
+	// An EXPIRED current head + positive predecessor revision CAS creates a NEW
+	// binding after full fresh checks, even on the same healthy connection.
+	// Same tenant/method/operation_id + identical original body reads the saved
+	// response after service/tenant/IAM-retained ownership-anchor checks, even if
+	// the original transport expired. Unknown/uncommitted operations require full
+	// live issuance checks. Changed body conflicts. Receipt reads never authorize,
+	// create, extend or revive; then Get with the current connection and local CAS.
 	RegisterAgentSource(ctx context.Context, in *RegisterAgentSourceRequest, opts ...grpc.CallOption) (*RegisterAgentSourceResponse, error)
 	// Revalidates the exact CURRENT redeem connection, original owner/device/live
 	// backing identity, registration, source state/expiry and current permissions.
 	// Same-device reconnect may change transport, never the saved source tuple.
 	GetAgentSource(ctx context.Context, in *GetAgentSourceRequest, opts ...grpc.CallOption) (*GetAgentSourceResponse, error)
 	// Positive expected_revision CAS. Commit serializes with Get/signing on the
-	// IAM source version lock; retry returns the original result without renewal.
+	// IAM lineage/source locks; explicit revocation also stops successor issuance
+	// and revokes the active lineage head. Retry never renews or removes this stop.
 	RevokeAgentSource(ctx context.Context, in *RevokeAgentSourceRequest, opts ...grpc.CallOption) (*RevokeAgentSourceResponse, error)
 }
 
@@ -99,22 +105,28 @@ func (c *networkSourceAuthorityServiceClient) RevokeAgentSource(ctx context.Cont
 // Does not widen NetworkGatewayService or authorize a message, thread, recipient
 // or execution. Normative lifecycle, locking and signing mapping:
 // contracts/network/iam-directory.md, "Agent source authority".
-// Before Register/Get, collab MUST actually invoke the trusted native resolver,
+// Before NEW Register issuance/Get, collab MUST invoke the trusted native resolver,
 // check current node health/epoch and lookup/lock the current typed local witness.
 // Call IAM OUTSIDE collab transactions; activate only by a final local CAS.
 // These are trusted service duties, not independent IAM proof of a native host.
 // Missing implementation/wiring MUST fail closed (UNIMPLEMENTED/unavailable).
 type NetworkSourceAuthorityServiceServer interface {
-	// expected_revision=0 creates once. Same tenant/method/operation_id and exact
-	// normalized body returns the original result; changed body conflicts.
-	// Replay never renews/activates; use Get for current state, never this receipt.
+	// Empty predecessor + expected_revision=0 creates the first generation only.
+	// An EXPIRED current head + positive predecessor revision CAS creates a NEW
+	// binding after full fresh checks, even on the same healthy connection.
+	// Same tenant/method/operation_id + identical original body reads the saved
+	// response after service/tenant/IAM-retained ownership-anchor checks, even if
+	// the original transport expired. Unknown/uncommitted operations require full
+	// live issuance checks. Changed body conflicts. Receipt reads never authorize,
+	// create, extend or revive; then Get with the current connection and local CAS.
 	RegisterAgentSource(context.Context, *RegisterAgentSourceRequest) (*RegisterAgentSourceResponse, error)
 	// Revalidates the exact CURRENT redeem connection, original owner/device/live
 	// backing identity, registration, source state/expiry and current permissions.
 	// Same-device reconnect may change transport, never the saved source tuple.
 	GetAgentSource(context.Context, *GetAgentSourceRequest) (*GetAgentSourceResponse, error)
 	// Positive expected_revision CAS. Commit serializes with Get/signing on the
-	// IAM source version lock; retry returns the original result without renewal.
+	// IAM lineage/source locks; explicit revocation also stops successor issuance
+	// and revokes the active lineage head. Retry never renews or removes this stop.
 	RevokeAgentSource(context.Context, *RevokeAgentSourceRequest) (*RevokeAgentSourceResponse, error)
 	mustEmbedUnimplementedNetworkSourceAuthorityServiceServer()
 }

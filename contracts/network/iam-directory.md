@@ -37,12 +37,14 @@
   `ctx=service`、`sub=svc:collab`）、受信 `auriga-tenant-id` 非平台业务租户和既有可信内部传输。
   `connection.tenant_id`、IAM 兑换行、来源行和委托 tenant 必须完全相同。外部用户、设备 token、
   模型、普通 SEND JSON 不能调用，也不能因知道 binding/op ID 获权；未列入的主体默认拒绝。
-- `RegisterAgentSource`/`GetAgentSource` 前，collab 必须实际调用可信插件 native resolver，
+- `RegisterAgentSource` 新建许可代际/`GetAgentSource` 前，collab 必须实际调用可信插件 native resolver，
   取得当前真实执行上下文，核当前节点健康、连接 epoch/boot 与正式 typed-local lookup；
   同库短事务 lock 确认 registration/type/revision，持久记录见证/操作后退出事务再调用 IAM。
   Get 供发送路径重建当前来源时同样要求此实时见证；不能只对两份 JSON 做相等比较。
   IAM 不回调 collab、不跨库读表；这是受信服务职责声明，不能声称 IAM 凭 JSON 独立证明宿主。
-- IAM 精确核 `NetworkAuthorityConnection` 七字段对应的真实兑换记录，重查当前节点、设备、
+  已提交 Register 的原响应受限读取只恢复操作结果，不是新建/当前来源使用；下文规定独立的 IAM 留存锚点核验，
+  读取后仍须当前 native/健康/epoch/typed-local 见证、Get 与最终本地 CAS，不降低使用路径要求。
+- 新建许可或当前 Get 时，IAM 精确核 `NetworkAuthorityConnection` 七字段对应的真实兑换记录，重查当前节点、设备、
   归属账号、底层 session、现行 collab 使用权限及组织网络状态，从本库推导 owner/device/backing-session。
   请求没有这些自报身份字段；`client_account` 只是既有兑换元组的一部分，不能单独当 owner。
   远程 credential/身份核验全部在事务外；随后本库短事务重核相关版本，不能用过期快照落库。
@@ -59,13 +61,17 @@
   proto revision 用正 uint64，投影现有 JSON 时转十进制字符串，不经浮点。type 只接受字面量 `session`。
   ID 遵循网络 `OpaqueId`（1–128 ASCII），摘要为 `sha256:` 加 64 位小写 hex；平台编号用 UUIDv7。
 - `NetworkAgentSource` 回内部最小保存事实：`source_binding`、`original_connection`、`registration`、
-  `scope`、`revision`、`state`、IAM 推导的 `owner_user_id`、`not_before`、`expires_at`。
+  `scope`、`revision`、`state`、IAM 推导的 `owner_user_id`、`not_before`、`expires_at`、`predecessor_binding`。
   时间均 UTC 整秒 RFC3339，`not_before < expires_at`；device/backing-session 锚点只保存在 IAM，不回传。
   绑定 ID 由 IAM 生成；不可变元组为 tenant + 原精确兑换连接 + 原登记八字段 + owner/device/backing-session
-  + 固定 principal_kind=agent + scope + 原时间窗。只有状态/revision 可单调变更，不能 UPDATE 重绑。
-  同一 tenant/原精确连接/登记八字段/scope 的创建事实唯一；不同 op 不能重复建行或刷新该事实。
-  后续合法认证连接若需新授权，必须重新满足全部真实登记前置、生成新 binding，不能改旧来源行或重绑 local；
-  collab 已停发/撤销的 local 不得因换连接、换 op 自动申请替代来源绕过停发，旧授权到期/撤销始终有效。
+  + 固定 principal_kind=agent + scope + 原时间窗 + 前代引用。只有状态/revision 可单调变更，不能 UPDATE 重绑。
+  许可链键为 (tenant, 原 registration_id, scope)，登记八字段和 IAM owner/device/backing-session 锚点固定；
+  链独立于 transport，IAM 持久保存当前 head、显式停权标记及每代不可变前代引用（首代为空）。它不是宿主父子树。
+  首代唯一、每个前代最多一个后继；唯一性/CAS 覆盖同代并发，**不永久禁止同健康连接/同登记的下一有界许可**。
+  只有当前 head 自然 EXPIRED、链未停权，且全部当前真实权限/身份/登记检查重新通过，才可创建新 binding；
+  不能修改旧 binding/时间窗/原 op 回执，也不要求断开仍健康连接、变更登记 revision 或重新分配 local。
+  collab 已持久停发/撤销的 local 不得因换连接、换 op、自然到期或迟到回包自动申请/激活后继；
+  IAM 显式 Revoke 的链停权同样禁止后继，旧授权到期/撤销始终有效。
   原 binding/local 登记及操作摘要保留永久防重绑语义，不按消息去重期清除后复用。
 - 唯一非零 scope `NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND` 只覆盖普通 agent/session、
   已有关系中的 durable 单播：`kind=message` 或 `reply`（reply 仅 private）、`intent=information/request`。
@@ -75,16 +81,31 @@
 
 ### 三 RPC 与当前状态
 
-- `RegisterAgentSourceRequest(connection, registration, operation_id, scope, expected_revision)`：
-  `expected_revision` 必须为 0，仅首次创建；成功 `RegisterAgentSourceResponse.source` 为 revision=1 的原回执。
+- `RegisterAgentSourceRequest(connection, registration, operation_id, scope, expected_revision, predecessor_binding)`：
+  首代 predecessor 为空且 expected_revision=0，仅在该链从未建立时创建；
+  后继 predecessor 必须是同链当前 EXPIRED head，expected_revision 等于该前代当前正 revision。
+  IAM 锁同链 head/停权状态及前代版本，以 CAS 原子创建新 binding（新行 revision=1）、固定新时间窗并推进 head。
+  同连接 C/同登记 R 完全可以创建下一代，换 op 仅表达新操作，不代替任何真实新鲜权限/许可检查。
+  ACTIVE/REVOKED 前代、非 head、错版本、跨链/换元组/身份锚点或已停权均拒绝，不能从旧前代分叉。
+  成功 `RegisterAgentSourceResponse.source` 始终是该代 revision=1 的原创建回执。
   幂等键为 (tenant, RPC 方法, operation_id)，每个操作先持久保存规范请求摘要与完整原响应。
-  同键同体返回原结果，异体 `common.conflict`；同体包含全部字段，不能忽略连接、type、revision 或 scope。
-  并发相同 op 由唯一约束/版本锁收敛为同记录；不同 op 争同一创建事实仅一方创建，另一方冲突。
-  重试须先识别已提交操作，再核新建 CAS，不能把丢回包后的原重试误当新建；仍须核调用者/tenant/原归属，
-  身份已失效可拒绝，绝不把回执当当前 allow。原连接失效而无法重放时，用同设备当前连接 Get 原 binding 对账，
-  不换 op 创建替代授权。
+  同键同体返回原结果，异体 `common.conflict`；同体包含全部字段，不能忽略连接、type、revision、scope 或前代。
+  并发相同 op 由唯一约束/版本锁收敛为同记录；不同 op 争同一前代/CAS 仅一方创建，另一方冲突，不得自动改前代重试。
+  所有分支先完成内部 JWT/委托 tenant 鉴权；随后**先识别已提交操作**，不能先要求原 transport 在线、
+  先按当前状态/过期/CAS 判新建或猜测原 binding。
+  已提交且原请求完全相同：核标准 svc:collab、受信业务 tenant，再按 IAM 留存的“操作→原来源行→原真实兑换证据
+  →原 node/device/backing-session/account 归属锚点”核原归属，才能读取保存的完整原响应。
+  这些锚点是 IAM 创建时从真实权威推导并耐久保存的内部 ID/关联与兑换出处，不是请求自报 owner、op 字符串或 JSON 相等。
+  创建事务须固化已核验的原兑换元组/身份锚点快照并与操作/来源关联保存，留存覆盖回执对账生命周期；
+  不依赖已过期 ingress/ticket 行仍在短期表中，更不能因 transport 清理而丢失对账依据。
+  留存的原归属链必须可核且未换 owner/device/node/backing-session 关联；仅 transport/身份已过期、退出或吊销不阻止
+  这个无授权效力的受限回执读取。跨 tenant/归属不符拒绝；缺锚点失败关闭，不能按请求补造。
+  原请求 C 必须原封重放，不改成 C2；读出的 B/原期限/原 ACTIVE 回执也不代表现在有效，随后用 C2 Get(B) 并最终本地 CAS。
+  未找到已提交操作（含未知 op、仍未提交的并发事务）不得进入回执例外：等待有界提交或按完整当前身份/transport/
+  native/typed-local/新建 CAS 路径处理；原失效 C 在此路径拒绝，绝不能凭 JSON 相等创造回执/授权或改 op 逃避对账。
 - `GetAgentSourceRequest(source_binding, connection, registration)`：核当前真实兑换源连接、同 tenant/realm/node、
   原 owner/device/仍有效的原 backing-session 及当前完整登记见证；跨 owner/device/node 或换 tuple/type/指纹不能借 ID 读。
+  还须核该代所属链与停权状态，不得因后继存在而把 EXPIRED 的旧代当成有效许可；链停权不能返回有效期限。
   正常同设备、同底层 session 的 transport 重连可使用新的 ingress/server/client/account 兑换元组；
   `source.original_connection` 仍返回原值，响应 `connection` 精确回显本次核验元组。新登录替换 backing-session
   不自动继承原授权。IAM 返回的是 collab 已见证登记的原值，不能据此声称 IAM 已查询 collab 当前库。
@@ -99,12 +120,26 @@
   这是单向停权操作：可用 IAM 留存的原精确兑换连接或核过同归属的当前连接；原连接/身份失效不授新权，
   也不阻碍 svc:collab 对本 tenant 原绑定停权。不能因过期删除身份锚点而允许换主人撤销/读取。
   ACTIVE→REVOKED 的提交递增 revision；过期来源仍终态，不能改回 ACTIVE。
+  显式 Revoke 同时持久设置该链停权，并原子撤销当前 ACTIVE head（若有）；即使命名的是早已 EXPIRED 的前代，
+  前代仍保持 EXPIRED，但其已存在后继不能继续有效、未来后继也被禁止。这些修改和原响应在同事务提交，
+  不靠换 transport 或对已过期前代发新 op 洗掉显式撤销；没有隐式清停权/恢复接口。
   同键同体重放先返回原结果，不因 expected_revision 已旧而新建或续期；异体 conflict，其他 stale CAS 拒绝。
   新 op 对已终态来源且 revision 匹配可记录同一终态确认，不改变原时间/绑定、不再增加授权。
 - IAM 在线时钟判到期，不依赖清理任务。首次观察到期在来源版本锁下终态化为 EXPIRED 并递增 revision；
   已 REVOKED 保持 REVOKED。终态吸收，不因旧回包、身份恢复、时间回拨或再次登记恢复为 ACTIVE。
   不可判定时钟/身份/状态时拒绝。mutation response 是原回执，可能早于后续撤销/到期；必须 Get 当前状态再本地 CAS，
   每次签前还须第五 RPC，绝不能从 Register 的 ACTIVE 原回执直接恢复停用来源。
+
+### 许可代际与回执状态/操作矩阵（规范，不是运行时实证）
+
+- 无历史链 + 空前代/0 + 全量当前检查通过：首代 B；再以空前代另 op 创建，冲突。
+- head=B/ACTIVE：Get 返回其当前有界观察；以 B 请求后继拒绝，原 op 仅受限读取原回执。
+- head=B/EXPIRED/未停权：Get 返回原 B、终态 revision 和空期限；新 op + B/该 revision + 全量新鲜检查可建 B2。
+  B2.predecessor_binding=B、revision=1，固定新期限；旧 B、旧期限与 op1 原结果不变。同代并发只有一个 B2。
+- 非 head、REVOKED 或链显式停权：新 op/新连接均不能建后继；collab 本地停发也不得申请/激活。旧回包被本地版本 CAS 拒绝。
+- 已提交 op1、首次回包丢失、原 C 已失效：仅凭已耐久 op1+原请求 C/R 重试 Register，经上述受限归属核验取同一原 B；
+  C2 Get(B) 再核当前权威。若 B 已到期，先对账再按 EXPIRED head CAS 取得新代，不能跳过未知原操作结果。
+- 同 op 异体（包括把 C 改 C2、改前代/CAS）、跨 tenant/原归属不符拒绝且不泄露原响应；未提交/未知 op 无回执读取例外。
 
 结构/范围非法沿既有 `common.validation_failed`，异体/占用/CAS 冲突沿 `common.conflict`；
 未知或不具读取资格统一 `common.forbidden`，依赖未接线/无法在线核权威用 `common.unavailable`，
@@ -118,16 +153,21 @@ local/宿主许可不得进入登记/使用路径；有额外本地期限时 col
 源记录最大时间窗固定不变。Get 及每次第五 RPC 的决定期限再取“现在的 IAM 短授权策略期限、当前身份/连接期限、
 原来源 expires_at”的最小值；签名另受 message.expires_at 与既有 300 秒封装上限夹紧。新观察可产生新的短决定，
 但不得越过原 expires_at；原操作重放原封不动，不延长任何期限，不把保存的来源事实变成永久授权。
+自然到期后经全量当前核验取得的新代，有独立的新 binding/not_before/expires_at；旧代始终 EXPIRED。
+新代也取同样最小期限，前代只是并发协调引用，绝不是新的许可、无限续期或放松当前检查的凭据。
 
-IAM 本库先按既有 session→device 锁序核身份，再锁 tenant 政策版本与来源行/版本（同类多行稳定排序）；
+IAM 本库先按既有 session→device 锁序核身份，再锁 tenant 政策版本、许可链与来源行/版本（同类多行稳定排序）；
 政策修改须与该政策版本锁串行化，不能只在另一快照读取一个 revision 后当提交屏障；
-Revoke/Get/第五 RPC 共用来源版本锁/CAS 序列。远程核验前退出事务，回来后重读身份、政策与来源版本，
+新代 Register/Revoke/Get/第五 RPC 共用许可链/来源版本锁/CAS 序列；显式撤销与创建后继按该序列串行，
+撤销先提交则不能建后继；后继先提交则撤销必须一并停该 ACTIVE head。远程核验前退出事务，回来后重读身份、政策与来源版本，
 任何变动重试或拒绝。Revoke 先提交则后续 Get 不得回有效期限、第五 RPC 不得允许签发；授权已先提交并返回
 后的网络窗口不构成跨服务零窗口保证，collab 仍须最终短事务重核和有界期限。不要持 DB 事务等待远程 IAM/credential。
 
 collab 先在短事务持久 pending 见证/稳定 op/outbox→无锁 Register/Get→短事务 CAS 激活引用；
-CAS 同时核原 pending 版本、当前健康/epoch、typed local 和宿主许可未变。撤销先本地持久停发及撤销 outbox→
+首次未知结果先用原 op/原体取回执；自然到期新代须另存新 op/前代绑定/预期 revision，不改尚未对账的旧操作。
+CAS 同时核原 pending/停发版本、当前健康/epoch、typed local 和宿主许可未变。撤销先本地持久停发及撤销 outbox→
 无锁 Revoke→短事务确认终态；回包丢失重放原 op。撤销标记压过所有迟到激活回包；旧任务/重连不能重置停用版本。
+新代激活还核回包 predecessor_binding 等于耐久 pending 的前代、binding 是本操作原响应里的新 ID，不能把其他代的回包移用。
 本地停发可立即生效，**仅收到 IAM 已提交终态确认才可称全局撤销**；失联只报待确认并继续停发。
 
 ### 与原第五 RPC 的精确映射
@@ -149,6 +189,7 @@ CAS 同时核原 pending 版本、当前健康/epoch、typed local 和宿主许�
   总值8192/单串16KiB；另受当前有效组织上限夹紧），拒绝重复键、非法 Unicode/数值/尾随字节，
   核现有 schema/语义及 JCS digest。不能仅比对两份 JSON；必须用 authorization_ref 查真实 IAM 来源行并锁版本，
   重核原元组、source_revision、状态、期限、owner/device/backing-session、sender policy/scope、policy_revision。
+  必须核所属许可链未停权；来源仍按本消息引用的那一代核，绝不能借后继的有效状态延长旧引用。
   源连接从 IAM 已存原兑换锚点及同 node 当前真实兑换关联读取；同设备重连只可延续原有效 owner/device/backing-session，
   不能将目标 connection 或 Message 自报值当源连接，也不能覆盖原来源元组。
   source_context 的 user/realm/node/sender_kind 必须与权威事实一致；任何未知/缺失/过期都拒绝。
@@ -160,17 +201,22 @@ CAS 同时核原 pending 版本、当前健康/epoch、typed local 和宿主许�
 
 ### 后续实现必需的真实 PG/鉴权验收（本次未执行）
 
-后续最小 IAM 实现包括 tenant RLS 来源行/永久墓碑、操作唯一约束与原响应、来源版本锁/CAS、现行兑换/设备身份
+后续最小 IAM 实现包括 tenant RLS 来源行/永久墓碑、许可链 head/停权与每前代唯一后继、操作唯一约束与原响应、来源版本锁/CAS、现行兑换/设备身份
 及权限重核、可靠政策版本、短期限计算和三 RPC 受限装配；再接完整第五 RPC 与 collab durable outbox/最终重核。
 现 common 委托配置是主体/租户白名单，新增 service 不能绕过；若安装/装配需调整由主控另派，本任务不改 common。
 必须经真实服务入口和真实 PostgreSQL 提交/回读验证以下负向，不能抄一份算法或 mock 当实证：
 
 - 同 binding/local ID 换 tuple/type/registration/fingerprint/owner/device/node/backing-session，跨 tenant/平台 tenant，
   用户/模型/非 collab JWT，空/未知枚举、非 session/非 durable 单播均拒绝且不泄露原字段。
-- 同 op 并发同体只一行/一回执，异体 conflict；不同 op 争同一创建事实；原回包丢失重试不续期。
+- 同 op 并发同体只一行/一回执，异体 conflict；不同 op 争同一前代/CAS 仅一后继。健康 C/原 R 不变，B 提前自然到期，
+  全量当前权限仍有效时可建 B2；旧 B/原 op/原期限不变，不强制断线、不改登记。不新鲜/停发/显式撤销则禁止新代。
+- 首次已提交 Register 回包丢失且原 C 失效，仅以原 op/原请求恢复同一 B/原期限，再 C2 Get/本地 CAS；
+  跨 tenant/原归属不符/异体拒绝；未提交/未知 op 不能绕过完整当前身份检查，回执无当前授权效力。
 - Revoke 与 Get/第五 RPC 在真实来源版本锁争用：撤销先提交必拒绝；session/device/账号/权限失效或换绑
   与授权竞态，远程核验后旧快照不得过关；无锁远程调用和 session→device→source 锁序不死锁。
-- 正常同设备同 backing-session 重连保持原映射；新 owner/device/node/新登录不得继承；到期不靠清理、恢复身份不复活。
+- 正常同设备同 backing-session 重连保持原映射；新 owner/device/node/新登录不得继承；到期不靠清理、恢复身份不复活旧代。
+- 新代 Register 与命名过期前代的 Revoke 竞态：先撤销则不建后继；先建后继则撤销同事务停该 head，链永久停权；
+  同连接/新连接/新 op 不能绕过；collab 已持久停发与迟到原代/新代回包竞态不能激活。
 - collab pending/outbox 崩溃恢复、迟到 Register/Get 回包与本地撤销 CAS、旧 epoch/typed-local/关系版本不复活；
   IAM 未确认不能宣称全局撤销；JSON 一致但真实行缺失/版本旧、目标精确连接或读取权失效必须拒签。
 

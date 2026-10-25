@@ -159,6 +159,11 @@ collab 无锁 RPC/outbox/最终 CAS、既有第五 RPC 字段映射及后续真�
 登记回执不是当前授权状态；每次使用须 Get，签前第五 RPC 仍须查真实来源行/版本、完整来源政策和目标当前读取身份，
 collab 再短事务重核 typed-local/业务关系。未实现服务保持拒绝，本节不表示来源链已启用。
 
+自然到期不复活旧来源：同健康连接/同登记经全量当前核验，可用 Register 的 `predecessor_binding` 与
+`expected_revision` CAS 取得新 binding/独立有界期限，同代并发仅一个后继；持久停发或显式撤销不能靠新 op/连接绕过。
+已提交 Register 的原回包丢失时，svc:collab 可持原 op/原体经 IAM 留存归属锚点核验读取原响应，即使原 transport
+已失效；这不授当前权，取得原 binding 后仍须当前连接 Get 与本地 CAS。未知/未提交操作不享该回执读取例外。
+
 ## 8. Fixtures 与校验
 
 ```

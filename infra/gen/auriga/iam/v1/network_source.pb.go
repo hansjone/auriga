@@ -226,7 +226,7 @@ func (x *NetworkAgentSourceRegistration) GetAddressType() string {
 }
 
 // Minimal INTERNAL saved fact. Binding IDs are IAM-generated OpaqueIds, never
-// reassigned; original connection/registration/owner/scope/times are immutable.
+// reassigned; connection/registration/owner/scope/times/predecessor are immutable.
 // IAM also stores the derived device/backing-session anchors, never supplied
 // by callers or returned here. No host ID/tree, message body, token or key.
 // State is current only in Get; mutation responses are immutable receipts.
@@ -241,10 +241,13 @@ type NetworkAgentSource struct {
 	// IAM-derived owner; only for constructing server-owned SourceContext.user.
 	OwnerUserId string `protobuf:"bytes,7,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
 	// UTC whole-second RFC3339. Saved maximum validity, NOT a cached allow lease.
-	NotBefore     string `protobuf:"bytes,8,opt,name=not_before,json=notBefore,proto3" json:"not_before,omitempty"`
-	ExpiresAt     string `protobuf:"bytes,9,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	NotBefore string `protobuf:"bytes,8,opt,name=not_before,json=notBefore,proto3" json:"not_before,omitempty"`
+	ExpiresAt string `protobuf:"bytes,9,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// Empty for first issuance; otherwise the EXPIRED predecessor. This is an
+	// opaque permission-generation link, never a host session/parent relationship.
+	PredecessorBinding string `protobuf:"bytes,10,opt,name=predecessor_binding,json=predecessorBinding,proto3" json:"predecessor_binding,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *NetworkAgentSource) Reset() {
@@ -340,6 +343,13 @@ func (x *NetworkAgentSource) GetExpiresAt() string {
 	return ""
 }
 
+func (x *NetworkAgentSource) GetPredecessorBinding() string {
+	if x != nil {
+		return x.PredecessorBinding
+	}
+	return ""
+}
+
 type RegisterAgentSourceRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Exact authenticated source redeem tuple, not the signing target tuple.
@@ -348,10 +358,15 @@ type RegisterAgentSourceRequest struct {
 	// Stable OpaqueId, persisted before RPC; never an authorization credential.
 	OperationId string                  `protobuf:"bytes,3,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	Scope       NetworkAgentSourceScope `protobuf:"varint,4,opt,name=scope,proto3,enum=auriga.iam.v1.NetworkAgentSourceScope" json:"scope,omitempty"`
-	// Must be zero: no update, rebind, renewal or resurrection API.
+	// Zero iff predecessor_binding is empty. Otherwise the current EXPIRED
+	// predecessor's positive revision; CAS serializes exactly one successor.
+	// Always creates a new binding, never updates/revives the predecessor.
 	ExpectedRevision uint64 `protobuf:"varint,5,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// OpaqueId of the current lineage head, same immutable registration/scope and
+	// IAM identity anchors. Explicit stop/revocation forbids any successor.
+	PredecessorBinding string `protobuf:"bytes,6,opt,name=predecessor_binding,json=predecessorBinding,proto3" json:"predecessor_binding,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RegisterAgentSourceRequest) Reset() {
@@ -417,6 +432,13 @@ func (x *RegisterAgentSourceRequest) GetExpectedRevision() uint64 {
 		return x.ExpectedRevision
 	}
 	return 0
+}
+
+func (x *RegisterAgentSourceRequest) GetPredecessorBinding() string {
+	if x != nil {
+		return x.PredecessorBinding
+	}
+	return ""
 }
 
 type RegisterAgentSourceResponse struct {
@@ -678,7 +700,9 @@ func (x *RevokeAgentSourceRequest) GetOperationId() string {
 
 type RevokeAgentSourceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Committed terminal receipt. Never creates, extends or returns active state.
+	// Committed terminal receipt AND durable lineage stop confirmation. Expired
+	// named generations remain expired; any active head is revoked atomically.
+	// Never creates, extends or returns active state.
 	Source        *NetworkAgentSource `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -734,7 +758,7 @@ const file_auriga_iam_v1_network_source_proto_rawDesc = "" +
 	"\x05realm\x18\x05 \x01(\tR\x05realm\x12\x12\n" +
 	"\x04node\x18\x06 \x01(\tR\x04node\x12\x14\n" +
 	"\x05local\x18\a \x01(\tR\x05local\x12!\n" +
-	"\faddress_type\x18\b \x01(\tR\vaddressType\"\xe4\x03\n" +
+	"\faddress_type\x18\b \x01(\tR\vaddressType\"\x95\x04\n" +
 	"\x12NetworkAgentSource\x12%\n" +
 	"\x0esource_binding\x18\x01 \x01(\tR\rsourceBinding\x12Z\n" +
 	"\x13original_connection\x18\x02 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\x12originalConnection\x12Q\n" +
@@ -746,7 +770,9 @@ const file_auriga_iam_v1_network_source_proto_rawDesc = "" +
 	"\n" +
 	"not_before\x18\b \x01(\tR\tnotBefore\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\t \x01(\tR\texpiresAt\"\xc8\x02\n" +
+	"expires_at\x18\t \x01(\tR\texpiresAt\x12/\n" +
+	"\x13predecessor_binding\x18\n" +
+	" \x01(\tR\x12predecessorBinding\"\xf9\x02\n" +
 	"\x1aRegisterAgentSourceRequest\x12I\n" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\n" +
@@ -754,7 +780,8 @@ const file_auriga_iam_v1_network_source_proto_rawDesc = "" +
 	"\fregistration\x18\x02 \x01(\v2-.auriga.iam.v1.NetworkAgentSourceRegistrationR\fregistration\x12!\n" +
 	"\foperation_id\x18\x03 \x01(\tR\voperationId\x12<\n" +
 	"\x05scope\x18\x04 \x01(\x0e2&.auriga.iam.v1.NetworkAgentSourceScopeR\x05scope\x12+\n" +
-	"\x11expected_revision\x18\x05 \x01(\x04R\x10expectedRevision\"X\n" +
+	"\x11expected_revision\x18\x05 \x01(\x04R\x10expectedRevision\x12/\n" +
+	"\x13predecessor_binding\x18\x06 \x01(\tR\x12predecessorBinding\"X\n" +
 	"\x1bRegisterAgentSourceResponse\x129\n" +
 	"\x06source\x18\x01 \x01(\v2!.auriga.iam.v1.NetworkAgentSourceR\x06source\"\xdc\x01\n" +
 	"\x15GetAgentSourceRequest\x12%\n" +
