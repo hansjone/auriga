@@ -1,8 +1,24 @@
 # Auriga 公开 LLM 适配层
 
 入口为 `index.js` 的 `createAurigaAdapter(options)` 与
-`registerAurigaAdapter(llm, options)`。这是独立模块；尚未接到 `plugin.js`、
-`client.js`、真实设备 token broker 或生产模型链路。
+`registerAurigaAdapter(llm, options)`。Node `plugin.js` 通过独立的可选
+`ctx.inject(['llm'])` 生命周期装配公开 Adapter；原生登录、Team 工具不依赖 LLM 服务。
+浏览器不接收 AI token。当前生产模型链路仍不可用：没有可信模型容量/能力及精确
+tokenizer，注册后报告 `model_metadata_unavailable`，生成在换票/POST 前拒绝。
+假上游测试的明确计量规则不能用于生产。
+
+`refresh-broker.js` 统一平台与 AI 的分资源缓存/单飞及跨资源串行队列；每个交换任务
+执行时读取 vault 最新 refresh，先原子写 `refreshPending`，成功验票后原子保存新
+refresh，最后才发布 access。AI access 只留内存，不覆盖有效平台 access/claims。
+进程中断、未知 HTTP 结果、验票或最终保存失败保留防重放标记并要求重新认证；
+即使重启也不能用旧 refresh 恢复。交换前标记保存失败则零交换。
+已明确的 AI OAuth 权限拒绝恢复未消费 refresh，取消 AI 流，不改变 Team 登录。
+新的完整原生认证可恢复同一主人，旧设备仍入既有撤销补偿队列，不放宽所有权。
+
+`installation.js` 管注册/注销及缺能力诊断，退出/吊销/身份切换/卸载清缓存并取消流；
+每条流保留固定到期时刻，新票不延长旧流。仅使用当前安装可信 origin 和同源
+`/ai/v1`，新保存的平台设置不迁移旧凭据。managed 缺专有实例 socket 时诊断
+`managed_socket_unavailable`，不以公网 device 或实例令牌替代。
 
 组合层从 **`@deepseek-ai/dsh-llm` 公开包根**加载模块，将其作为 `hostApi`
 注入，再将公开服务 `ctx.llm` 传给注册入口。工厂继承实际 `LlmAdapter`，
@@ -48,7 +64,8 @@ JSON 响应上限 1 MiB；SSE 每事件上限 256 KiB、整条流累计输入上
 
 `contract.d.ts` 由 `node test/ai/generate-contract.js` 从实际 OpenAPI 数据面 schema
 依赖闭包生成，标准测试校验它未漂移。`types.d.ts` 的宿主类型来自公开包根，
-宿主为可选运行时 peer；当前任务禁止更改依赖/锁文件，普通 workspace 无宿主包。
+宿主为不限定版本的可选运行时 peer；开发依赖使用 npm 发布的精确 SDK 版本，
+只安装公开 SDK 及必要依赖，不安装整套 DSH，运行时仍按能力探测。
 `public-api.test.js` 会对可读的真实公开包执行类型检查与实际 Cordis/LlmRuntime
 注册、调用和注销。默认不可解析时明确 skip，不把传输 mock 算作宿主兼容证据。
 工具历史回归使用公开 createDeveloperMessage 与真实 Runtime，验证增删工具、
@@ -62,4 +79,4 @@ node --test "test/ai/*.test.js"
 ```
 
 本机源码树构建入口的通过结果不证明系统安装包、完整 GUI 或生产装配兼容；
-未实现 refresh 交换，不调用付费模型，不依赖上游内部运行文件。
+已接入原生 refresh broker；不调用付费模型，不依赖上游内部运行文件。
