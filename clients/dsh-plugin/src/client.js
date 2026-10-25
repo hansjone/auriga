@@ -983,37 +983,10 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
-                  onClick: async () => {
-                    try {
-                      const response = await fetch(
-                        localURL('auriga/local-login/status'),
-                        {
-                          credentials: 'same-origin',
-                          cache: 'no-store',
-                          redirect: 'error',
-                        },
-                      );
-                      if (!response.ok) throw failure();
-                      const state = await response.json();
-                      const out = await fetch(
-                        localURL('auriga/local-login/logout'),
-                        {
-                          method: 'POST',
-                          credentials: 'same-origin',
-                          redirect: 'error',
-                          headers: {
-                            'content-type': 'application/json',
-                            'X-Auriga-CSRF': state.csrf,
-                          },
-                          body: '{}',
-                        },
-                      );
-                      if (!out.ok) throw failure();
-                      window.location.assign(localURL('auriga/local-login'));
-                    } catch {
-                      retry();
-                    }
-                  },
+                  onClick: () =>
+                    window.location.assign(
+                      localURL('auriga/local-login') + '?logout=1',
+                    ),
                 },
                 t('logout'),
               ),

@@ -21,7 +21,13 @@ public interface NetworkAuthority {
     }
   }
 
-  record Ticket(String ticket, Node identity, String serverAudience, Instant expiresAt) {}
+  /** Redemption window and absolute connection deadline are separate, server-enforced bounds. */
+  record Ticket(
+      String ticket,
+      Node identity,
+      String serverAudience,
+      Instant expiresAt,
+      Instant connectionExpiresAt) {}
 
   /** The gateway signs the NATS User JWT, using precisely this identity and expiry. */
   record Connection(Node identity, String serverAudience, Instant expiresAt) {}
