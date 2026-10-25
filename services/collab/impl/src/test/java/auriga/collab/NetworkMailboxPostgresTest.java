@@ -933,10 +933,16 @@ class NetworkMailboxPostgresTest {
               try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
                 pool.submit(
                         () ->
-                            sql(
+                            call(
                                 tenant,
                                 () -> {
-                                  jdbc.execute("SET LOCAL lock_timeout='2s'");
+                                  // Match the real entry boundary: online checks precede the
+                                  // receipt's own short transaction, while FETCH is still in
+                                  // precheck.
+                                  assertFalse(
+                                      org.springframework.transaction.support
+                                          .TransactionSynchronizationManager
+                                          .isActualTransactionActive());
                                   return mailbox.receipt(
                                       new ReceiptRequest(
                                           tenant,

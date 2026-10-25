@@ -384,9 +384,11 @@ class NetworkMailboxWirePostgresTest {
                   status -> {
                     String persisted =
                         jdbc.queryForObject(
-                            "SELECT request_json FROM collab.network_wire_receipt WHERE tenant_id=? AND operation_id='op-r'",
+                            "SELECT request_json FROM collab.network_wire_receipt WHERE tenant_id=? AND realm=? AND node_id=? AND operation_id='op-r'",
                             String.class,
-                            TENANT);
+                            TENANT,
+                            c.getRealm(),
+                            c.getNode());
                     assertEquals(NetworkJson.canonical(NetworkJson.parse(frame)), persisted);
                     assertTrue(persisted.contains(proof));
                     assertEquals(
