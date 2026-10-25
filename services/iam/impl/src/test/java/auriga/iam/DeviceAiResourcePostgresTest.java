@@ -26,7 +26,10 @@ import tools.jackson.databind.node.ObjectNode;
 @ExtendWith(PostgresExtension.class)
 class DeviceAiResourcePostgresTest {
   static IamStore store;
-  final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
+  final UUID tenant = UUID.randomUUID(),
+      account = UUID.randomUUID(),
+      device = UUID.randomUUID(),
+      provider = UUID.randomUUID();
   final AdminCsrfPostgresTest.Time clock = new AdminCsrfPostgresTest.Time();
   final InstanceAiAuthorization authorization = mock(InstanceAiAuthorization.class);
   final Set<String> effective =
@@ -87,8 +90,7 @@ class DeviceAiResourcePostgresTest {
             clock,
             mock(EventPublisher.class),
             mock(AuditLogger.class));
-    when(authorization.getEffectivePermissions(any()))
-        .thenAnswer(
+    doAnswer(
             i -> {
               GetEffectivePermissionsRequest r = i.getArgument(0);
               assertEquals(tenant.toString(), r.getTenantId());
@@ -98,7 +100,9 @@ class DeviceAiResourcePostgresTest {
                   .setMemberType(MemberType.MEMBER_TYPE_MEMBER)
                   .addAllPermissions(effective)
                   .build();
-            });
+            })
+        .when(authorization)
+        .getEffectivePermissions(any());
     oauth =
         new OAuthProvider(
             store, sessions, tokens, clock, List.of(client("native-example", true)), authorization);
@@ -112,7 +116,6 @@ class DeviceAiResourcePostgresTest {
                       account.toString(),
                       Json.object("accountId", account, "status", "active"),
                       null);
-                  UUID provider = UUID.randomUUID();
                   store.insert(
                       "idp_provider",
                       provider.toString(),
@@ -294,20 +297,29 @@ class DeviceAiResourcePostgresTest {
             MemberStatus.MEMBER_STATUS_DISABLED,
             MemberStatus.MEMBER_STATUS_OFFBOARDED,
             MemberStatus.MEMBER_STATUS_UNSPECIFIED)) {
-      when(authorization.getEffectivePermissions(any()))
-          .thenReturn(
+      doReturn(
               GetEffectivePermissionsResponse.newBuilder()
                   .setStatus(status)
                   .setMemberType(MemberType.MEMBER_TYPE_MEMBER)
                   .addAllPermissions(effective)
-                  .build());
+                  .build())
+          .when(authorization)
+          .getEffectivePermissions(any());
       assertEquals("invalid_grant", exchange(refresh, true).path("error").asString());
       assertFalse(grant().path("used").asBoolean());
     }
-    when(authorization.getEffectivePermissions(any()))
-        .thenThrow(new IllegalStateException("offline"));
+    doThrow(new IllegalStateException("offline"))
+        .when(authorization)
+        .getEffectivePermissions(any());
     assertThrows(auriga.common.error.AurigaException.class, () -> exchange(refresh, true));
     assertFalse(grant().path("used").asBoolean());
+    verify(authorization, times(4))
+        .getEffectivePermissions(
+            GetEffectivePermissionsRequest.newBuilder()
+                .setTenantId(tenant.toString())
+                .setAccountId(account.toString())
+                .build());
+    verifyNoMoreInteractions(authorization);
   }
 
   @Test
@@ -315,18 +327,61 @@ class DeviceAiResourcePostgresTest {
     TenantContext.run(
         tenant,
         () -> {
+          UUID otherAccount = UUID.randomUUID();
+          ObjectNode otherSession =
+              store.tx(
+                  () -> {
+                    store.insert(
+                        "account",
+                        otherAccount.toString(),
+                        Json.object("accountId", otherAccount, "status", "active"),
+                        null);
+                    return sessions
+                        .create(
+                            otherAccount,
+                            provider,
+                            "portal",
+                            true,
+                            Duration.ofSeconds(600),
+                            Duration.ofSeconds(120))
+                        .session();
+                  });
+          oauth =
+              new OAuthProvider(
+                  store,
+                  sessions,
+                  tokens,
+                  clock,
+                  List.of(client("native-example", true), client("other-native", true)),
+                  authorization);
           ObjectNode original = store.tx(() -> store.get("device", device.toString(), false));
-          for (String field :
-              List.of(
-                  "clientId", "sessionId", "accountId", "scope", "authorizationMode", "revoked")) {
+          Map<String, Object> changes =
+              Map.of(
+                  "clientId",
+                  "other-native",
+                  "sessionId",
+                  otherSession.path("sessionId").asString(),
+                  "accountId",
+                  otherAccount.toString(),
+                  "scope",
+                  "openid",
+                  "authorizationMode",
+                  "manual",
+                  "revoked",
+                  true);
+          for (var change : changes.entrySet()) {
+            String field = change.getKey();
             store.tx(
                 () -> {
                   ObjectNode row = original.deepCopy();
-                  if (field.equals("revoked")) row.put(field, true);
-                  else row.put(field, "wrong");
+                  row.set(field, Json.MAPPER.valueToTree(change.getValue()));
                   store.save("device", row);
                   return null;
                 });
+            assertEquals(
+                Json.MAPPER.valueToTree(change.getValue()),
+                store.tx(() -> store.get("device", device.toString(), false)).path(field),
+                field);
             assertEquals("invalid_grant", exchange(refresh, true).path("error").asString(), field);
             assertFalse(grant().path("used").asBoolean());
           }
