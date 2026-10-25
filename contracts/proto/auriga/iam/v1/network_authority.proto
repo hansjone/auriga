@@ -18,6 +18,8 @@ service NetworkAuthorityService {
   rpc ResolveNetworkTarget(ResolveNetworkTargetRequest) returns (ResolveNetworkTargetResponse);
   // Recheck stored source binding/revision, sender policy/grant and target read
   // permission before signing. Stored JSON is evidence, never an allow grant.
+  // Agent source lifecycle: NetworkSourceAuthorityService in network_source.proto;
+  // field mapping and lock/CAS semantics: contracts/network/iam-directory.md.
   rpc AuthorizeNetworkDelivery(AuthorizeNetworkDeliveryRequest) returns (AuthorizeNetworkDeliveryResponse);
 }
 

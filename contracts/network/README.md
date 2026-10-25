@@ -143,6 +143,27 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 - `SubmitRequest`（插件经 HTTPS 私有接口）：`source` 二选一 source_binding / human_intent_id，`idempotency` = producer_epoch + key；同样不接受任何总部盖章字段。
 - `SendResult`：platform_stored / contact_pending 带实际完整 from/to、message_id 等；`request_submitted` 只带 submission_id 与 wait_until，不返回真实 message/delivery/mail_seq。
 
+### 7.1 agent 来源内部权威（契约已定义，实现待接线）
+
+独立 [`NetworkSourceAuthorityService`](../proto/auriga/iam/v1/network_source.proto) 定义
+`RegisterAgentSource`、`GetAgentSource`、`RevokeAgentSource`，各用独立 Request/Response；
+只供 `svc:collab` + 非平台业务 tenant + 既有可信内部传输，不给用户/模型或旧网关增加入口。
+IAM 从现行兑换/设备权威推导 owner/device/backing-session，保存最小 opaque 来源事实；collab 在真实 native
+resolver、健康/epoch、typed-local lookup/lock 后见证登记，并保留 local type 与线程/recipient/关系最终权威。
+只覆盖普通 agent/session 的已有关系 durable 单播 send；human、subagent 发送、组播/广播、控制、首联等继续拒绝。
+源许可不等于任何消息、收件或执行许可，也不新增人工批准/挑战/登录。
+
+不可变元组、永久不重绑、同 op 同体原回执/异体冲突、revision CAS、期限最小值、撤销锁序、
+collab 无锁 RPC/outbox/最终 CAS、既有第五 RPC 字段映射及后续真实 PG 负向要求，统一见
+[`iam-directory.md` 的来源权威规范](iam-directory.md#agent-source-authorityagent-来源权威)。
+登记回执不是当前授权状态；每次使用须 Get，签前第五 RPC 仍须查真实来源行/版本、完整来源政策和目标当前读取身份，
+collab 再短事务重核 typed-local/业务关系。未实现服务保持拒绝，本节不表示来源链已启用。
+
+自然到期不复活旧来源：同健康连接/同登记经全量当前核验，可用 Register 的 `predecessor_binding` 与
+`expected_revision` CAS 取得新 binding/独立有界期限，同代并发仅一个后继；持久停发或显式撤销不能靠新 op/连接绕过。
+已提交 Register 的原回包丢失时，svc:collab 可持原 op/原体经 IAM 留存归属锚点核验读取原响应，即使原 transport
+已失效；这不授当前权，取得原 binding 后仍须当前连接 Get 与本地 CAS。未知/未提交操作不享该回执读取例外。
+
 ## 8. Fixtures 与校验
 
 ```

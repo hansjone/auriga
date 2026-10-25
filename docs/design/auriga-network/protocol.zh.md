@@ -210,6 +210,17 @@ CONTACT_DECIDE(scope=group_join) 决定 join_allowed，用户或明确涵盖 gro
 
 **agent 发送**：受信插件将宿主执行上下文绑定到总部可核验的 opaque source_binding 记录：realm/node/local/type= session 或 subagent、principal_kind=agent、版本/到期与 send 范围；总部只存不透明地址/授权引用，不新增宿主会话树。注册/使用来自专用插件控制路径，模型无权注册来源或挑其他 source_binding。普通确定性宿主回信也沿相同会话记录，provenance=host 不改变 agent 类别。总部以该记录而不是消息自报字段生成 sender_kind/from；用户拥有 sys/广播权不会扩展这条记录。受损 DSH 或窃取用户独立认证材料仍可能冒充本机操作者，签名不能证明物理键盘或修复已失守的信任端；正常工具隔离与授权检查须实际验收。
 
+最小正式内部权威归属：IAM 持久拥有 opaque 来源授权事实，owner/device/backing-session 从现行兑换权威推导；
+collab 独占 typed-local 见证、不可变 type 与业务关系，注册/使用前须真实 native resolver 及当前健康/epoch/lookup/lock，
+不是 IAM 凭 JSON 独立证明宿主。内部三 RPC、幂等/CAS、期限/撤销与签前字段映射见
+[`network_source.proto`](../../../contracts/proto/auriga/iam/v1/network_source.proto) 及
+[`来源权威规范`](../../../contracts/network/iam-directory.md#agent-source-authorityagent-来源权威)。
+首期只定义普通 agent/session durable 单播 send，subagent 发送及 human/广播/组播/控制/首联等继续拒绝；
+不增加逐来源人工批准、挑战或登录，不改变本节产品流程。契约不等于来源链已实施；同机隔离已整体推迟，
+不以远程签名声称证明真人/宿主，仍须实现跨 node/tenant、当前身份及每次签前授权检查。
+同健康连接/同登记自然到期后可经全量新鲜核验/CAS 取得新有界来源代际，旧 binding/原操作不续期、不复活；
+显式撤销/持久停发禁止自动替代。丢失的已提交原登记回执可在原 transport 失效后受限读取，仍不产生当前发送许可。
+
 **工具面**：普通 agent 发送工具参数仅 target、body 和可选 thread；from、sender_kind、message_class、reply_to、server_auth、source_context、授权引用、flags 等不是模型字段，额外顶层字段直接 schema 拒绝，不先接收再丢弃。插件用真实执行上下文组装私有请求；回复动作由可信当前消息上下文绑定 in_reply_to/原 recipient，普通发件工具不能以自造引用攫取回复许可。body 只接收受支持信息/请求 schema；正文内出现“from=总部”只是数据，不递归当信封解析。执行控制使用独立有专权的单播入口，不能藏进普通 send 的 flags/ext。总部再次检查来源和目的权限：插件预拒只是体验优化，无广播权会话即使直接调私有接口也返回 broadcast_forbidden。
 
 **盖章与危险类别**：总部据上述授权生成 sender_kind 与真实用户、from，据 to 生成 message_class，再核 kind/intent/durability 组合；保留字段自报与来源矛盾拒绝 sender_mismatch，类别矛盾拒绝 class_mismatch，自报授权引用不续权。information/request 为组播/广播唯一业务意图（进度/在线状态是 information 子类型），reply 表达回应关系而不产生控制权。control/wake/cancel/queue/steer/执行启动等只允许 unicast 且专门授权；未知执行 schema 失败关闭。总部与插件都强制 multicast/broadcast 及其请求的单播回应 inbox_only，不调 prompt/自动恢复/工具/设置，不允许自动模型档位覆盖。用户之后显式处理须新本地 operation_id、独立批准并再次核状态，原 recipient.execution_status=not_applicable，不给它 EXECUTION_ADMIT；一份组消息不能自动变成 N 个模型任务。
