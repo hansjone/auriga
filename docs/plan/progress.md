@@ -14,14 +14,12 @@
 
 成员协作参照 Codex 原生 agent、子 agent 与持久会话机制，区分创建与派生、仅发消息与触发执行、运行中引导、等待通知、中断恢复及上下文范围。当前通信工具是先行基础，不代替完整能力目标；先以真实本地登录、平台连接和两个完整 DSH 的收发闭环验收。
 
-通信网络以插件／DSH 实例为连接主体，多个获权主会话和子会话共用稳定连接；总部负责可靠交换，总部系统 DSH 是执行节点。NETWORK1 设计 [#124](https://github.com/hansjone/auriga/pull/124) 已于 2026-10-25 作为**待实施的设计方案**合入（[总览](../design/auriga-network/README.zh.md)），经五轮非作者独审通过，遗留低项 3 条。方案：NATS Server 原生 WSS 与官方 SDK 交换，PostgreSQL 为唯一消息真相，邮箱序号加客户端游标同步；DSH 节点身份独立于用户，三段地址 `aur1:[realm.]node.local`，目录只列系统地址，首次联系需对方授权；插件本地防入侵；单播、组播、广播三类，广播权由总部授予，来源盖章并签名。入库不等于批准开工；网络 IAM、硬背压、高可用、容量与两真实 DSH 往返均未实施或验证，现有定时 pull 不代表最终网络。
+通信网络以插件／DSH 实例为连接主体，多个获权主会话和子会话共用稳定连接；总部负责可靠交换，总部系统 DSH 是执行节点。NETWORK1 设计 [#124](https://github.com/hansjone/auriga/pull/124) 已作为待实施方案合入。N0 接缝门禁已于 2026-10-25 合入 main：契约 [#125](https://github.com/hansjone/auriga/pull/125)、ai-gateway NATS callout/ACL [#126](https://github.com/hansjone/auriga/pull/126)、插件宿主 adapter/ledger [#127](https://github.com/hansjone/auriga/pull/127)、插件 NATS 硬缓冲传输 [#128](https://github.com/hansjone/auriga/pull/128)；均精确 HEAD CI 全绿且非作者独审通过。N1（collab 邮箱/游标、gateway HEAD/FETCH/RECEIPT、edge WSS、插件接线、IAM 网络上限、两真实 DSH）进行中，首任务 NETN1-COLLAB。完整网络 IAM、生产硬背压、HA、容量与双 DSH 往返尚未验收；旧定时 pull 仍为迁移期路径。
 
-2026-10-24 本地接线批次：
+2026-10-24 本地接线批次（已合入，除 #123）：
 
-- EDGECONNECT2 [#120](https://github.com/hansjone/auriga/pull/120)：正式远程 MCP、Node 私有操作和本人撤销入口已实现；精确提交全部 22 项 CI 成功后，新非作者独审通过（高 0、中 0、低 1）。超限请求的错误状态映射列为低项，字节限制没有绕过。受保护待外部审定，未合并。
-- NATIVELOGIN2 [#121](https://github.com/hansjone/auriga/pull/121)：同次账号/TOTP 与 S256 兑换受限设备身份、本人撤销及在线设备核验已实现。真实应用发现并修复 Spring 安全代理启动失败；保留原始 HTTP 严格校验并修复旧登录 DTO 兼容。精确提交 15 项 CI 成功后，全新非作者独审通过（高 0、中 0、低 0），独立验证 57 项无跳过；受保护，未合并。
-- TEAMREMOTE2 [#122](https://github.com/hansjone/auriga/pull/122)：远程 Streamable HTTP、四通信工具、Node 投递、逐次 IAM/org/collab 准入及显式服务装配已实现。精确提交 14 项 CI 成功后，全新非作者独审通过（高 0、中 0、低 1）；合法拆分多条 Accept 被误拒列为兼容性遗留，不能放宽缺 SSE 的拒绝。包含尚未合入的 IAM 和持久核心依赖；正式 POSIX 服务令牌导出不冒 Windows 支持。受保护，未合并。
-- LOCALCONNECT2 [#123](https://github.com/hansjone/auriga/pull/123)：两个完整真实 DSH 已分别完成登录和平台连接。真实模型第一轮有 A 到 B 投递及 B 回复入库，回原会话受重复 create 的 cwd 冲突阻断，完整往返尚未通过。R5 已修普通绑定会话由原生 prompt 恢复、保留 ID/cwd，新建持久化后才绑定；真实 rc.3 模块专项 7 项通过，插件 204 项通过、6 项环境跳过，精确提交全部 12 项 CI 成功；非作者独审阶段结论暂不通过（中 3），因投递将随新网络重做，暂停返工，完整客户端重验仍待完成。现场已停止并保留证据，不以页面或模块测试代替。所有候选均保持待审查，未部署。
+- EDGECONNECT2 [#120](https://github.com/hansjone/auriga/pull/120)、NATIVELOGIN2 [#121](https://github.com/hansjone/auriga/pull/121)、TEAMREMOTE2 [#122](https://github.com/hansjone/auriga/pull/122) 已合入 main（各有非作者独审通过）。TEAMREMOTE2 遗留低项：合法拆分 Accept 列表误拒 406。
+- LOCALCONNECT2 [#123](https://github.com/hansjone/auriga/pull/123)：独审阶段暂不通过（中 3）；投递随新网络重做，登录相关中项待单独修；PR 仍开着。
 
 ## M0 立项
 
