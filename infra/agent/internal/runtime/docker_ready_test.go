@@ -273,52 +273,134 @@ func TestDockerStartRejectsFalseHealthUntilContextDeadline(t *testing.T) {
 }
 
 func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
-	var redirected atomic.Int64
-	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		redirected.Add(1)
-		_, _ = io.WriteString(w, readyBody)
-	}))
-	t.Cleanup(other.Close)
-	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, other.URL, http.StatusFound)
-	}))
-	t.Cleanup(health.Close)
-	d := readyDocker(t, health.URL)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	if err := startDocker(t, d, ctx, "redirect-test"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("redirect: %v", err)
-	}
-	if redirected.Load() != 0 {
-		t.Fatal("health followed redirect")
-	}
+	t.Run("redirect", func(t *testing.T) {
+		var probes atomic.Int64
+		var redirected atomic.Int64
+		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			redirected.Add(1)
+			_, _ = io.WriteString(w, readyBody)
+		}))
+		t.Cleanup(other.Close)
+		health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/_auriga/health" {
+				t.Errorf("unexpected health path %s", r.URL.Path)
+			}
+			probes.Add(1)
+			http.Redirect(w, r, other.URL, http.StatusFound)
+		}))
+		t.Cleanup(health.Close)
+		d := readyDocker(t, health.URL)
+		// Prepare real trust and durable execution before the business deadline.
+		// startDocker still performs production Recover, Start and HTTP probing.
+		seedDockerRecord(t, d, "redirect-test", 7)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		if err := startDocker(t, d, ctx, "redirect-test"); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("redirect: %v", err)
+		}
+		if redirected.Load() != 0 {
+			t.Fatal("health followed redirect")
+		}
+		if probes.Load() == 0 {
+			t.Fatal("original health not reached before deadline; redirect was not tested")
+		}
+		if _, err := d.Endpoint("redirect-test"); err == nil {
+			t.Fatal("redirect published endpoint")
+		}
+		status, err := d.Inspect(t.Context(), "redirect-test")
+		if err != nil || !status.Running || status.Ready {
+			t.Fatalf("redirect must remain running without Ready: %+v %v", status, err)
+		}
+	})
 
-	entered := make(chan struct{}, 1)
-	blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Run("cancel", func(t *testing.T) {
+		entered := make(chan struct{}, 1)
+		stopped := make(chan error, 1)
+		blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/_auriga/health" {
+				t.Errorf("unexpected health path %s", r.URL.Path)
+			}
+			// Flush incomplete JSON so cancellation must interrupt a body read.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"status":"ok",`)
+			w.(http.Flusher).Flush()
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			<-r.Context().Done()
+			select {
+			case stopped <- r.Context().Err():
+			default:
+			}
+		}))
+		t.Cleanup(blocked.Close)
+		d := readyDocker(t, blocked.URL)
+		seedDockerRecord(t, d, "cancel-test", 7)
+		t.Cleanup(blocked.CloseClientConnections)
+		ctx, cancelProbe := context.WithCancel(t.Context())
+		// This guard only bounds test scheduling. The cancellation under test is
+		// explicit and occurs after the handler flushes the blocked response body.
+		const schedulingGuard = 5 * time.Second
+		guard, stopGuard := context.WithTimeout(t.Context(), schedulingGuard)
+		defer stopGuard()
+		done := make(chan error, 1)
+		finished := make(chan struct{})
+		go func() {
+			defer close(finished)
+			done <- startDocker(t, d, ctx, "cancel-test")
+		}()
+		t.Cleanup(func() {
+			cancelProbe()
+			select {
+			case <-finished:
+			case <-time.After(schedulingGuard):
+				t.Error("Start did not stop during cleanup")
+			}
+		})
 		select {
-		case entered <- struct{}{}:
+		case <-entered:
+		case err := <-done:
+			t.Fatalf("Start returned before blocked health body: %v", err)
+		case <-guard.Done():
+			t.Fatal("health body not entered within scheduling guard")
+		}
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("probe canceled before explicit cancellation: %v", err)
+		}
+		select {
+		case err := <-stopped:
+			t.Fatalf("HTTP body request stopped before explicit cancellation: %v", err)
 		default:
 		}
-		<-r.Context().Done()
-	}))
-	t.Cleanup(blocked.Close)
-	d = readyDocker(t, blocked.URL)
-	ctx, cancelProbe := context.WithCancel(context.Background())
-	defer cancelProbe()
-	done := make(chan error, 1)
-	go func() { done <- startDocker(t, d, ctx, "cancel-test") }()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("health request not made")
-	}
-	cancelProbe()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("cancellation lost: %v", err)
+		select {
+		case err := <-done:
+			t.Fatalf("Start returned before explicit cancellation: %v", err)
+		default:
 		}
-	case <-time.After(time.Second):
-		t.Fatal("start ignored cancellation")
-	}
+		cancelProbe()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation lost: %v", err)
+			}
+		case <-guard.Done():
+			t.Fatal("start ignored cancellation")
+		}
+		select {
+		case err := <-stopped:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("HTTP request context did not cancel: %v", err)
+			}
+		case <-guard.Done():
+			t.Fatal("HTTP body request remained active after cancellation")
+		}
+		if _, err := d.Endpoint("cancel-test"); err == nil {
+			t.Fatal("canceled start published endpoint")
+		}
+		status, err := d.Inspect(t.Context(), "cancel-test")
+		if err != nil || !status.Running || status.Ready {
+			t.Fatalf("canceled start must remain running without Ready: %+v %v", status, err)
+		}
+	})
 }
