@@ -38,6 +38,10 @@ public final class TokenService implements InternalTokenIssuer {
     this.clock = clock;
     this.issuer = issuer.replaceAll("/$", "");
     this.internalSecrets = Map.copyOf(internalSecretHashes);
+    var unique = new HashSet<String>();
+    for (String digest : internalSecrets.values())
+      if (!unique.add(digest.toLowerCase(Locale.ROOT)))
+        throw new IllegalStateException("Internal services must use distinct installation secrets");
   }
 
   public String issuer() {
