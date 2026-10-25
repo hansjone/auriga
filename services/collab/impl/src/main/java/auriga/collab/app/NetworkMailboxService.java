@@ -21,22 +21,28 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Internal (non-proto) network mailbox API for ai-gateway HEAD/FETCH/RECEIPT wiring.
- * Durable truth lives in PostgreSQL with tenant RLS; transport and signing stay elsewhere.
+ * Internal (non-proto) network mailbox API for ai-gateway HEAD/FETCH/RECEIPT wiring. Durable truth
+ * lives in PostgreSQL with tenant RLS; transport and signing stay elsewhere.
  */
 public class NetworkMailboxService {
   /** contracts/network/limits.json dispatch.atomicMaxNodes */
   static final int ATOMIC_MAX_NODES = 32;
+
   /** contracts/network/limits.json dispatch.atomicMaxLocals */
   static final int ATOMIC_MAX_LOCALS = 256;
+
   /** contracts/network/limits.json fetch.maxItems */
   static final int FETCH_MAX_ITEMS = 128;
+
   /** contracts/network/limits.json message.firstContactPendingMaxSeconds */
   static final long FIRST_CONTACT_MAX_SECONDS = 86400L;
+
   /** contracts/network/limits.json encoding.maxBodyBytes */
   static final int MAX_BODY_BYTES = 16384;
+
   /** contracts/network/limits.json receipt.maxResultsPerReceipt */
   static final int RECEIPT_MAX_RESULTS = 256;
+
   /** contracts/network/limits.json processing.maxAutomaticAttempts */
   static final int MAX_ATTEMPTS = 5;
 
@@ -153,7 +159,8 @@ public class NetworkMailboxService {
               recipientIds.add(recipientId);
             }
             deliveries.add(
-                new DeliveryStored(deliveryId, target.nodeId(), mailSeq, List.copyOf(recipientIds)));
+                new DeliveryStored(
+                    deliveryId, target.nodeId(), mailSeq, List.copyOf(recipientIds)));
           }
 
           UUID contactId = null;
@@ -196,7 +203,12 @@ public class NetworkMailboxService {
             }
           }
           return new StoreResult(
-              messageId, "platform_stored", visible, restricted, List.copyOf(deliveries), contactId);
+              messageId,
+              "platform_stored",
+              visible,
+              restricted,
+              List.copyOf(deliveries),
+              contactId);
         });
   }
 
@@ -302,7 +314,9 @@ public class NetworkMailboxService {
           List<ReceiptResultView> committed = new ArrayList<>();
           for (ReceiptItem result : request.results()) {
             String status = normalizeTransport(result.transportStatus());
-            require(TERMINAL.contains(status) || "quarantined".equals(status), NetworkErrors.PROTOCOL_ERROR);
+            require(
+                TERMINAL.contains(status) || "quarantined".equals(status),
+                NetworkErrors.PROTOCOL_ERROR);
             var row =
                 one(
                     """
@@ -334,19 +348,16 @@ public class NetworkMailboxService {
           }
 
           boolean closed = mailItemClosed(request.tenantId(), request.deliveryId());
-          long cursor = advanceCommittedCursor(request.tenantId(), request.realm(), request.nodeId());
+          long cursor =
+              advanceCommittedCursor(request.tenantId(), request.realm(), request.nodeId());
           return new ReceiptCommitResult(
-              request.deliveryId(),
-              request.mailSeq(),
-              List.copyOf(committed),
-              closed,
-              cursor);
+              request.deliveryId(), request.mailSeq(), List.copyOf(committed), closed, cursor);
         });
   }
 
   /**
-   * Conversation-scope CONTACT_DECIDE. pending→allowed/denied; past expires_at→expired.
-   * Callers without status_viewer see restricted request_submitted appearance.
+   * Conversation-scope CONTACT_DECIDE. pending→allowed/denied; past expires_at→expired. Callers
+   * without status_viewer see restricted request_submitted appearance.
    */
   public ContactDecideResult contactDecide(ContactDecideRequest request) {
     return run(
@@ -407,7 +418,8 @@ public class NetworkMailboxService {
   }
 
   /** Materialize pending→expired when past deadline (scanner / READY hook shape). */
-  public ContactDecideResult expireContactIfDue(UUID tenantId, UUID contactId, boolean statusViewer) {
+  public ContactDecideResult expireContactIfDue(
+      UUID tenantId, UUID contactId, boolean statusViewer) {
     return run(
         tenantId,
         () -> {
@@ -649,9 +661,7 @@ public class NetworkMailboxService {
             realm,
             nodeId);
     long epoch =
-        epochOverride != null
-            ? epochOverride
-            : ((Number) row.get("connection_epoch")).longValue();
+        epochOverride != null ? epochOverride : ((Number) row.get("connection_epoch")).longValue();
     return new NodeRoute(
         realm,
         nodeId,
@@ -661,7 +671,8 @@ public class NetworkMailboxService {
   }
 
   private void validateStore(StoreRequest request) {
-    require(request.targets() != null && !request.targets().isEmpty(), CommonErrors.VALIDATION_FAILED);
+    require(
+        request.targets() != null && !request.targets().isEmpty(), CommonErrors.VALIDATION_FAILED);
     require(request.targets().size() <= ATOMIC_MAX_NODES, NetworkErrors.QUOTA_EXCEEDED);
     require(
         Set.of("message", "first_contact", "reply").contains(request.kind()),

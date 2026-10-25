@@ -37,8 +37,7 @@ public class CollabRuntimeConfiguration {
   }
 
   @Bean
-  NetworkMailboxService networkMailboxService(
-      DataSource source, TenantTransactionManager manager) {
+  NetworkMailboxService networkMailboxService(DataSource source, TenantTransactionManager manager) {
     return new NetworkMailboxService(new JdbcTemplate(source), manager);
   }
 

@@ -4,10 +4,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import auriga.collab.app.NetworkErrors;
 import auriga.collab.app.NetworkMailboxService;
+import auriga.collab.app.NetworkMailboxService.AttemptBeginRequest;
 import auriga.collab.app.NetworkMailboxService.ContactDecideRequest;
 import auriga.collab.app.NetworkMailboxService.DeliveryStored;
 import auriga.collab.app.NetworkMailboxService.ExecutionAdmitRequest;
-import auriga.collab.app.NetworkMailboxService.AttemptBeginRequest;
 import auriga.collab.app.NetworkMailboxService.NodeTarget;
 import auriga.collab.app.NetworkMailboxService.ReceiptItem;
 import auriga.collab.app.NetworkMailboxService.ReceiptRequest;
@@ -92,9 +92,7 @@ class NetworkMailboxPostgresTest {
     var stored =
         call(
             tenant,
-            () ->
-                mailbox.store(
-                    StoreRequest.unicast(tenant, "2", "10", "1", "hello", "20", "3")));
+            () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "hello", "20", "3")));
     assertEquals("platform_stored", stored.durabilityStatus());
     assertEquals("platform_stored", stored.visibleStatus());
     DeliveryStored d = stored.deliveries().getFirst();
@@ -145,15 +143,11 @@ class NetworkMailboxPostgresTest {
     StoreResult first =
         call(
             tenant,
-            () ->
-                mailbox.store(
-                    StoreRequest.unicast(tenant, "2", "10", "1", "one", "20", "1")));
+            () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "one", "20", "1")));
     StoreResult second =
         call(
             tenant,
-            () ->
-                mailbox.store(
-                    StoreRequest.unicast(tenant, "2", "10", "1", "two", "20", "1")));
+            () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "two", "20", "1")));
     var route = call(tenant, () -> mailbox.ready(tenant, "2", "20"));
     DeliveryStored d1 = first.deliveries().getFirst();
     DeliveryStored d2 = second.deliveries().getFirst();
@@ -170,9 +164,7 @@ class NetworkMailboxPostgresTest {
                         route.connectionEpoch(),
                         d1.deliveryId(),
                         d1.mailSeq(),
-                        List.of(
-                            new ReceiptItem(
-                                d1.recipientIds().getFirst(), "host_accepted")))));
+                        List.of(new ReceiptItem(d1.recipientIds().getFirst(), "host_accepted")))));
     assertTrue(ack1.mailItemClosed());
     assertEquals(1L, ack1.committedCursor());
     var again =
@@ -187,16 +179,13 @@ class NetworkMailboxPostgresTest {
                         route.connectionEpoch(),
                         d1.deliveryId(),
                         d1.mailSeq(),
-                        List.of(
-                            new ReceiptItem(
-                                d1.recipientIds().getFirst(), "host_accepted")))));
+                        List.of(new ReceiptItem(d1.recipientIds().getFirst(), "host_accepted")))));
     assertEquals(1L, again.committedCursor());
     assertEquals("host_accepted", again.results().getFirst().transportStatus());
 
     // Hole at seq=2 keeps cursor at 1 until closed.
     assertEquals(
-        1L,
-        call(tenant, () -> mailbox.fetch(tenant, "2", "20", 0, 10)).route().committedCursor());
+        1L, call(tenant, () -> mailbox.fetch(tenant, "2", "20", 0, 10)).route().committedCursor());
 
     var ack2 =
         call(
@@ -210,9 +199,7 @@ class NetworkMailboxPostgresTest {
                         route.connectionEpoch(),
                         d2.deliveryId(),
                         d2.mailSeq(),
-                        List.of(
-                            new ReceiptItem(
-                                d2.recipientIds().getFirst(), "host_accepted")))));
+                        List.of(new ReceiptItem(d2.recipientIds().getFirst(), "host_accepted")))));
     assertEquals(2L, ack2.committedCursor());
   }
 
@@ -222,9 +209,7 @@ class NetworkMailboxPostgresTest {
     StoreResult stored =
         call(
             tenant,
-            () ->
-                mailbox.store(
-                    StoreRequest.unicast(tenant, "2", "10", "1", "body", "20", "1")));
+            () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "body", "20", "1")));
     var route = call(tenant, () -> mailbox.ready(tenant, "2", "20"));
     long oldEpoch = route.connectionEpoch();
     var newer = call(tenant, () -> mailbox.ready(tenant, "2", "20"));
@@ -255,13 +240,7 @@ class NetworkMailboxPostgresTest {
                 () ->
                     mailbox.attemptBegin(
                         new AttemptBeginRequest(
-                            tenant,
-                            "2",
-                            "20",
-                            oldEpoch,
-                            d.deliveryId(),
-                            recipient,
-                            "process"))));
+                            tenant, "2", "20", oldEpoch, d.deliveryId(), recipient, "process"))));
     error(
         NetworkErrors.STALE_EPOCH.code(),
         () ->
@@ -270,13 +249,7 @@ class NetworkMailboxPostgresTest {
                 () ->
                     mailbox.executionAdmit(
                         new ExecutionAdmitRequest(
-                            tenant,
-                            "2",
-                            "20",
-                            oldEpoch,
-                            recipient,
-                            "boot-1",
-                            "host-req-1"))));
+                            tenant, "2", "20", oldEpoch, recipient, "boot-1", "host-req-1"))));
 
     var admit =
         call(
@@ -318,26 +291,19 @@ class NetworkMailboxPostgresTest {
             tenant,
             () ->
                 mailbox.store(
-                    StoreRequest.firstContact(
-                        tenant, "2", "10", "1", "hi", "20", past, false)));
+                    StoreRequest.firstContact(tenant, "2", "10", "1", "hi", "20", past, false)));
     assertEquals("platform_stored", stored.durabilityStatus());
     assertEquals("request_submitted", stored.visibleStatus());
     assertTrue(stored.restrictedAppearance());
 
-    var expired =
-        call(
-            tenant,
-            () ->
-                mailbox.expireContactIfDue(tenant, stored.contactId(), false));
+    var expired = call(tenant, () -> mailbox.expireContactIfDue(tenant, stored.contactId(), false));
     assertEquals("expired", expired.status());
     assertEquals("request_submitted", expired.visibleStatus());
     assertTrue(expired.restrictedAppearance());
     assertEquals("request_submitted", expired.presentationCode());
 
     var viewerExpired =
-        call(
-            tenant,
-            () -> mailbox.expireContactIfDue(tenant, stored.contactId(), true));
+        call(tenant, () -> mailbox.expireContactIfDue(tenant, stored.contactId(), true));
     assertEquals("contact_expired", viewerExpired.visibleStatus());
     assertEquals("network.contact_expired", viewerExpired.presentationCode());
 
@@ -348,8 +314,7 @@ class NetworkMailboxPostgresTest {
                 tenant,
                 () ->
                     mailbox.contactDecide(
-                        new ContactDecideRequest(
-                            tenant, stored.contactId(), "allowed", true))));
+                        new ContactDecideRequest(tenant, stored.contactId(), "allowed", true))));
   }
 
   @Test
@@ -392,17 +357,13 @@ class NetworkMailboxPostgresTest {
   void crossTenantRlsSeesZeroRows() {
     UUID a = UUID.randomUUID();
     UUID b = UUID.randomUUID();
-    call(
-        a,
-        () ->
-            mailbox.store(StoreRequest.unicast(a, "2", "10", "1", "secret", "20", "1")));
+    call(a, () -> mailbox.store(StoreRequest.unicast(a, "2", "10", "1", "secret", "20", "1")));
     assertEquals(
         0,
         sql(
             b,
             () ->
-                jdbc.queryForObject(
-                    "SELECT count(*) FROM collab.network_message", Integer.class)));
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
     assertEquals(
         0,
         sql(
@@ -421,19 +382,14 @@ class NetworkMailboxPostgresTest {
         0,
         sql(
             b,
-            () ->
-                jdbc.queryForObject(
-                    "SELECT count(*) FROM collab.network_node", Integer.class)));
+            () -> jdbc.queryForObject("SELECT count(*) FROM collab.network_node", Integer.class)));
     assertEquals(
         0,
         sql(
             b,
             () ->
-                jdbc.queryForObject(
-                    "SELECT count(*) FROM collab.network_contact", Integer.class)));
-    assertEquals(
-        0,
-        call(b, () -> mailbox.fetch(b, "2", "20", 0, 10)).items().size());
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_contact", Integer.class)));
+    assertEquals(0, call(b, () -> mailbox.fetch(b, "2", "20", 0, 10)).items().size());
   }
 
   @Test
