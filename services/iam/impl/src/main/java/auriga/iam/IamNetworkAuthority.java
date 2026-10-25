@@ -351,6 +351,94 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         });
   }
 
+  /** Existing effective organization ceilings; no policy mutation or rate reservation. */
+  Map<Limit, Long> effectiveLimits() {
+    caller("svc:collab");
+    return transaction(this::limits);
+  }
+
+  record TargetBinding(
+      String realm,
+      String node,
+      String ingress,
+      String serverId,
+      String clientId,
+      String account) {}
+
+  private record TargetSnapshot(
+      Node node, ObjectNode ingress, ObjectNode device, ObjectNode session, ObjectNode account) {}
+
+  /**
+   * Resolve only an existing redeem generation. Native device IDs are never rebound by OAuth;
+   * serverId/ingress identify the broker/redeem generation. No source/local registry is inferred.
+   * Check backing authority outside the network transaction, then compare its complete persisted
+   * snapshots under locks. Even an expiry extension during the call requires a fresh query.
+   */
+  Instant resolveTarget(TargetBinding binding) {
+    caller("svc:collab");
+    store.requireTransactionReleased();
+    if (binding == null
+        || !validNumber(binding.realm(), false)
+        || !validNumber(binding.node(), false)
+        || binding.ingress() == null
+        || !binding.ingress().matches("[a-z2-7]{26}")) return null;
+    TargetSnapshot before = store.tx(() -> targetSnapshot(binding, false));
+    if (before == null) return null;
+    // credential() reuses the canonical owner/device/backing-session checks, without idle touch.
+    var credential =
+        devices.credential(
+            TenantContext.require().toString(), before.node().account(), before.node().device());
+    if (credential == null
+        || !TenantContext.require().toString().equals(credential.tenant())
+        || !before.node().account().equals(credential.account())
+        || !before.node().device().equals(credential.device())) return null;
+    Instant result =
+        transaction(
+            () -> {
+              TargetSnapshot after = targetSnapshot(binding, true);
+              if (!before.equals(after) || !config().path("enabled").asBoolean(true)) return null;
+              Instant expiry =
+                  min(
+                      credential.expiresAt(),
+                      Instant.parse(after.ingress().path("expiresAt").asString()));
+              return clock.instant().isBefore(expiry) ? expiry : null;
+            });
+    // Commit and lock release consume time too; never return an already expired grant.
+    return result != null && clock.instant().isBefore(result) ? result : null;
+  }
+
+  private TargetSnapshot targetSnapshot(TargetBinding b, boolean lock) {
+    Node n = node(b.node());
+    if (n == null || n.revoked() || !n.realm().equals(b.realm())) return null;
+    ObjectNode ingress = store.get("network_ingress", b.ingress(), lock);
+    if (ingress == null
+        || !b.realm().equals(ingress.path("realm").asString())
+        || !b.node().equals(ingress.path("node").asString())
+        || !n.device().equals(ingress.path("device").asString())
+        || !Objects.equals(b.serverId(), ingress.path("serverId").asString())
+        || !Objects.equals(b.clientId(), ingress.path("clientId").asString())
+        || !Objects.equals(b.account(), ingress.path("account").asString())
+        || !ingress.path("serverId").asString().matches("N[A-Z2-7]{55}")
+        || !validNumber(ingress.path("clientId").asString(), false)
+        || !ingress.path("userNkey").asString().matches("U[A-Z2-7]{55}")
+        || !servers.contains(ingress.path("audience").asString())
+        || !clock.instant().isBefore(Instant.parse(ingress.path("expiresAt").asString())))
+      return null;
+    // Session -> device follows the existing refresh lock order. Initial reads hold no row locks.
+    ObjectNode device = store.get("device", n.device(), false);
+    if (device == null) return null;
+    ObjectNode session = store.byId("session", device.path("sessionId").asString(), lock);
+    if (lock) device = store.get("device", n.device(), true);
+    ObjectNode account = store.get("account", n.account(), lock);
+    if (device == null
+        || session == null
+        || account == null
+        || !n.account().equals(device.path("accountId").asString())
+        || !device.path("sessionId").asString().equals(session.path("sessionId").asString())
+        || !n.account().equals(session.path("accountId").asString())) return null;
+    return new TargetSnapshot(n, ingress, device, session, account);
+  }
+
   private boolean permitted(Check r, Map<Limit, Long> limits) {
     if (r == null
         || r.operation() == null
@@ -506,8 +594,14 @@ public final class IamNetworkAuthority implements NetworkAuthority {
 
   private Map<Limit, Long> limits() {
     ObjectNode config = config();
+    if (config.has("limits") && !config.path("limits").isObject())
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
     var result = new EnumMap<Limit, Long>(Limit.class);
     for (Limit limit : Limit.values()) {
+      var configured = config.path("limits").path(limit.name());
+      if (config.path("limits").has(limit.name())
+          && (!configured.isIntegralNumber() || !configured.canConvertToLong()))
+        throw new AurigaException(CommonErrors.UNAVAILABLE);
       long value = config.path("limits").path(limit.name()).asLong(limit.defaultValue());
       if (value <= 0 || value > 9007199254740991L)
         throw new AurigaException(CommonErrors.UNAVAILABLE);
