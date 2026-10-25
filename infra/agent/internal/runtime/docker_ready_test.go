@@ -314,8 +314,12 @@ func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
 	})
 
 	t.Run("cancel", func(t *testing.T) {
+		type completion struct {
+			err error
+			at  time.Time
+		}
 		entered := make(chan struct{}, 1)
-		stopped := make(chan error, 1)
+		stopped := make(chan completion, 1)
 		blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/_auriga/health" {
 				t.Errorf("unexpected health path %s", r.URL.Path)
@@ -330,7 +334,7 @@ func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
 			}
 			<-r.Context().Done()
 			select {
-			case stopped <- r.Context().Err():
+			case stopped <- completion{err: r.Context().Err(), at: time.Now()}:
 			default:
 			}
 		}))
@@ -344,11 +348,17 @@ func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
 		const schedulingGuard = 5 * time.Second
 		guard, stopGuard := context.WithTimeout(t.Context(), schedulingGuard)
 		defer stopGuard()
-		done := make(chan error, 1)
+		done := make(chan completion, 1)
 		finished := make(chan struct{})
+		// The HTTP client's 3s fallback cannot start before Start is invoked.
+		// Completion before this conservative cutoff excludes fallback even if
+		// the entered notification was delayed by test scheduling.
+		started := make(chan time.Time, 1)
 		go func() {
 			defer close(finished)
-			done <- startDocker(t, d, ctx, "cancel-test")
+			started <- time.Now()
+			err := startDocker(t, d, ctx, "cancel-test")
+			done <- completion{err: err, at: time.Now()}
 		}()
 		t.Cleanup(func() {
 			cancelProbe()
@@ -360,8 +370,8 @@ func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
 		})
 		select {
 		case <-entered:
-		case err := <-done:
-			t.Fatalf("Start returned before blocked health body: %v", err)
+		case result := <-done:
+			t.Fatalf("Start returned before blocked health body: %v", result.err)
 		case <-guard.Done():
 			t.Fatal("health body not entered within scheduling guard")
 		}
@@ -369,31 +379,44 @@ func TestDockerStartHealthRedirectAndCancellation(t *testing.T) {
 			t.Fatalf("probe canceled before explicit cancellation: %v", err)
 		}
 		select {
-		case err := <-stopped:
-			t.Fatalf("HTTP body request stopped before explicit cancellation: %v", err)
+		case result := <-stopped:
+			t.Fatalf("HTTP body request stopped before explicit cancellation: %v", result.err)
 		default:
 		}
 		select {
-		case err := <-done:
-			t.Fatalf("Start returned before explicit cancellation: %v", err)
+		case result := <-done:
+			t.Fatalf("Start returned before explicit cancellation: %v", result.err)
 		default:
 		}
+		fallbackNotBefore := (<-started).Add(3 * time.Second)
+		// Unlike the startup/cleanup guard, this is the cancellation response
+		// requirement. Both completion events must occur within the same 1s
+		// window and before the client's own timeout could have closed HTTP.
+		const cancellationResponseLimit = time.Second
+		canceledAt := time.Now()
+		responseDeadline := canceledAt.Add(cancellationResponseLimit)
+		response := time.NewTimer(cancellationResponseLimit)
+		defer response.Stop()
 		cancelProbe()
-		select {
-		case err := <-done:
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("cancellation lost: %v", err)
+		assertCancellation := func(stage string, result completion) {
+			if !errors.Is(result.err, context.Canceled) {
+				t.Fatalf("%s cancellation lost: %v", stage, result.err)
 			}
-		case <-guard.Done():
-			t.Fatal("start ignored cancellation")
+			if result.at.Before(canceledAt) || !result.at.Before(responseDeadline) || !result.at.Before(fallbackNotBefore) {
+				t.Fatalf("%s completion does not prove business cancellation before HTTP fallback: response=%s", stage, result.at.Sub(canceledAt))
+			}
 		}
 		select {
-		case err := <-stopped:
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("HTTP request context did not cancel: %v", err)
-			}
-		case <-guard.Done():
-			t.Fatal("HTTP body request remained active after cancellation")
+		case result := <-done:
+			assertCancellation("Start", result)
+		case <-response.C:
+			t.Fatal("Start did not react to business cancellation within 1s; HTTP fallback is not cancellation evidence")
+		}
+		select {
+		case result := <-stopped:
+			assertCancellation("HTTP body", result)
+		case <-response.C:
+			t.Fatal("HTTP body request did not react to business cancellation within 1s")
 		}
 		if _, err := d.Endpoint("cancel-test"); err == nil {
 			t.Fatal("canceled start published endpoint")
