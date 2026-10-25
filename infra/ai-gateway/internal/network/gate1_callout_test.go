@@ -117,9 +117,15 @@ func TestGate1_CalloutTimeoutAndFailureRejectNoFallback(t *testing.T) {
 		t.Logf("rejected after %v: %v", time.Since(start).Round(time.Millisecond), err)
 	})
 	t.Run("redeem-slower-than-auth-timeout", func(t *testing.T) {
+		// Evidence: nats-server authorization.timeout is short while the
+		// callout's RedeemTimeout is long — ticket can burn after the server
+		// already rejected CONNECT. CalloutConfig.AuthTimeout is set large
+		// only so NewCallout construction succeeds; it deliberately does NOT
+		// match the server's auth timeout (production must keep them aligned).
 		o := defaultBrokerOpts()
 		o.authTimeout = 1
 		o.redeemTimeout = 5 * time.Second
+		o.calloutAuthTimeout = 10 * time.Second
 		h := newHarness(t, o)
 		h.tickets.delay = 2500 * time.Millisecond
 		tk, ing := h.tickets.issue(t, time.Now().Add(time.Hour))
