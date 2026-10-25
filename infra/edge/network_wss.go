@@ -29,7 +29,6 @@ type NetworkWSSConfig struct {
 type NetworkWSS struct {
 	Path           string
 	AllowedOrigins []string
-	upstream       *url.URL
 	proxy          *httputil.ReverseProxy
 	maxConcurrent  int
 	active         atomic.Int64
@@ -96,7 +95,6 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 	return &NetworkWSS{
 		Path:           path,
 		AllowedOrigins: origins,
-		upstream:       u,
 		proxy:          proxy,
 		maxConcurrent:  max,
 	}, nil
