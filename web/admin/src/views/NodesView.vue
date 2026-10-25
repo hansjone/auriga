@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import {
   ElButton,
   ElTable,
@@ -13,9 +13,16 @@ import { adminApi, type Node } from '../admin/api';
 import { useManagement } from '../admin/useManagement';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import JoinMaterials from './nodes/JoinMaterials.vue';
+import NodeDiagnostics from './nodes/NodeDiagnostics.vue';
+import { nodesApi } from '../admin/nodesApi';
+import { retirementBlock, nodeProgress } from './nodes/state';
+import { useNodesI18n } from './nodes/messages';
 import '../admin/management.css';
 
 const { t, state } = useAdminI18n();
+const { t: nt, failure } = useNodesI18n();
+const retirementError = ref('');
 const {
   items,
   selected,
@@ -38,21 +45,105 @@ const {
   write: 'workspace.nodes.admin',
   list: adminApi.nodes,
   detail: (node) => adminApi.node(node.id),
-  t,
+  t: (key, params) =>
+    key === 'failed' && retirementError.value
+      ? retirementError.value
+      : t(key, params ?? {}),
 });
 const name = ref('');
 const schedulable = ref(false);
 const labels = ref<{ key: string; value: string }[]>([]);
-watch(selected, (node) => {
-  name.value = node?.name || '';
-  schedulable.value = node?.schedulable ?? false;
-  labels.value = Object.entries(node?.labels || {}).map(([key, value]) => ({
-    key,
-    value,
-  }));
+watch(
+  () => selected.value?.id,
+  () => {
+    const node = selected.value;
+    name.value = node?.name || '';
+    schedulable.value = node?.schedulable ?? false;
+    labels.value = Object.entries(node?.labels || {}).map(([key, value]) => ({
+      key,
+      value,
+    }));
+  },
+);
+const refreshKey = ref(0);
+const joinOpen = ref(false);
+const pollError = ref('');
+let alive = true;
+let pollGeneration = 0;
+let timer: ReturnType<typeof setTimeout> | undefined;
+function schedule() {
+  if (alive) timer = setTimeout(() => void poll(), 10_000);
+}
+async function poll() {
+  if (locked.value || document.visibilityState === 'hidden') {
+    schedule();
+    return;
+  }
+  const generation = pollGeneration;
+  const current = selected.value;
+  try {
+    const membership = await adminApi.membership();
+    if (!alive || generation !== pollGeneration) return;
+    if (
+      !membership.permissions.includes('workspace.nodes.read') ||
+      (canWrite.value &&
+        !membership.permissions.includes('workspace.nodes.admin'))
+    ) {
+      await refresh();
+      return;
+    }
+    const result = await adminApi.nodes();
+    const detail = current ? await adminApi.node(current.id) : undefined;
+    if (!alive || generation !== pollGeneration) return;
+    if (!locked.value && selected.value === current) {
+      items.value = result.items;
+      if (detail) selected.value = detail;
+      ++refreshKey.value;
+    }
+    schedule();
+  } catch (e) {
+    if (alive && generation === pollGeneration)
+      pollError.value = `${nt('pollFailed')} ${failure(e)}`;
+  }
+}
+async function refresh() {
+  ++pollGeneration;
+  globalThis.clearTimeout(timer);
+  pollError.value = '';
+  if (await load()) {
+    ++refreshKey.value;
+    schedule();
+  }
+}
+onMounted(() => void refresh());
+onBeforeUnmount(() => {
+  alive = false;
+  ++pollGeneration;
+  globalThis.clearTimeout(timer);
 });
-onMounted(() => void load());
+function retire() {
+  const node = selected.value;
+  if (!node || retirementBlock(node)) return;
+  retirementError.value = '';
+  ask({
+    message: nt('retireConfirm', { name: node.name }),
+    run: async () => {
+      const fresh = await adminApi.node(node.id);
+      if (!alive || selected.value?.id !== node.id || !canWrite.value)
+        throw new Error('cancelled');
+      const reason = retirementBlock(fresh);
+      if (reason) {
+        retirementError.value = nt(reason);
+        throw new Error('node-state-changed');
+      }
+      await nodesApi.retire(node.id);
+      return { ...fresh, status: 'revoked', schedulable: false } as Node;
+    },
+    success: nt('retired'),
+  });
+}
 function save() {
+  retirementError.value = '';
   const node = selected.value;
   if (!node) return;
   const keys = labels.value.map((label) => label.key.trim());
@@ -63,7 +154,7 @@ function save() {
   if (!name.value.trim() || name.value.length > 64) return;
   const body = {
     name: name.value.trim(),
-    schedulable: schedulable.value,
+    schedulable: node.status === 'draining' ? false : schedulable.value,
     labels: Object.fromEntries(
       labels.value.map((label, index) => [keys[index], label.value]),
     ),
@@ -75,6 +166,7 @@ function save() {
   });
 }
 function drain() {
+  retirementError.value = '';
   const node = selected.value;
   if (node)
     ask({
@@ -88,18 +180,32 @@ function drain() {
   <div class="management">
     <header class="head">
       <h1>{{ t('nodes') }}</h1>
-      <ElButton :disabled="locked" @click="load()">{{ t('refresh') }}</ElButton>
+      <ElButton
+        v-if="canWrite"
+        :disabled="locked"
+        :aria-expanded="joinOpen"
+        aria-controls="node-join-materials"
+        @click="joinOpen = !joinOpen"
+        >{{ nt('materials') }}</ElButton
+      >
+      <ElButton :disabled="locked" @click="refresh()">{{
+        t('refresh')
+      }}</ElButton>
     </header>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
     <p v-if="error" class="error" role="alert">
       {{ error }}
-      <ElButton :disabled="locked" @click="load()">{{ t('retry') }}</ElButton>
+      <ElButton :disabled="locked" @click="refresh()">{{
+        t('retry')
+      }}</ElButton>
     </p>
+    <p>{{ nt('polling') }}</p>
+    <p v-if="pollError" role="alert">{{ pollError }}</p>
     <ElTable :data="items" :empty-text="loading || error ? ' ' : t('empty')">
       <ElTableColumn prop="name" :label="t('name')" />
       <ElTableColumn :label="t('status')"
         ><template #default="{ row }">{{
-          state(row.status)
+          nt(nodeProgress(row as Node))
         }}</template></ElTableColumn
       >
       <ElTableColumn :label="t('schedulable')"
@@ -150,6 +256,12 @@ function drain() {
         <dt>{{ t('lastSeen') }}</dt>
         <dd>{{ selected.lastSeenAt || '—' }}</dd>
       </dl>
+      <NodeDiagnostics
+        :node="selected"
+        :can-write="canWrite"
+        :locked="locked || !!pollError"
+        @retire="retire"
+      />
       <p v-if="!canWrite" class="muted">{{ t('readonly') }}</p>
       <ElForm
         label-position="top"
@@ -213,6 +325,13 @@ function drain() {
         >
       </div>
     </section>
+    <JoinMaterials
+      v-if="joinOpen && canWrite"
+      id="node-join-materials"
+      :can-write="canWrite"
+      :refresh-key="refreshKey"
+      :locked="locked"
+    />
     <ActionConfirm
       :message="pending?.message"
       :busy="busy"
