@@ -216,8 +216,11 @@ class NetworkAuthorityPostgresTest {
         () -> {
           Node node = network.register("access");
           String sid = UUID.randomUUID().toString();
+          UUID provider = UUID.randomUUID();
           store.tx(
               () -> {
+                store.insert(
+                    "idp_provider", provider.toString(), Json.object("providerId", provider), null);
                 store.insert(
                     "session",
                     sid,
@@ -226,6 +229,8 @@ class NetworkAuthorityPostgresTest {
                         tenant.toString(),
                         "accountId",
                         account.toString(),
+                        "providerId",
+                        provider,
                         "audience",
                         "portal",
                         "expiresAt",
