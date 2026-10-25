@@ -52,7 +52,7 @@ test(
       readers = new Set(),
       aborted = new Set(),
       sessions = new Map(),
-      attempts = new Set();
+      attempts = new Map();
     let hookCalls = 0;
     console.log('ISOLATED_HTTP_PROFILE', home);
     try {
@@ -134,7 +134,9 @@ test(
         },
         checkCsrf: (request) => {
           const session = resolve(request);
-          return !!session && session.csrf === request.headers['x-auriga-csrf'];
+          const csrf =
+            session?.csrf ?? attempts.get(cookie(request, 'stream-attempt'));
+          return !!csrf && csrf === request.headers['x-auriga-csrf'];
         },
         installHttpTracking() {
           return ownerCtx.on(
@@ -154,7 +156,8 @@ test(
         },
         async logout(request) {
           const id = cookie(request, 'stream-session');
-          revoke(id);
+          if (id) revoke(id);
+          else attempts.delete(cookie(request, 'stream-attempt'));
           return {
             body: { loggedIn: false },
             setCookie: 'stream-session=; Path=/; Max-Age=0',
@@ -240,7 +243,7 @@ test(
             b = reason + '-B';
           sessions.set(a, { key: a, csrf: 'csrf-A' });
           sessions.set(b, { key: b, csrf: 'csrf-B' });
-          attempts.add(reason + '-anonymous');
+          attempts.set(reason + '-anonymous', 'csrf-anonymous');
           const streamA = await open(a, a),
             streamB = await open(b, b);
           try {
@@ -271,12 +274,17 @@ test(
                     nativeCookie + '; stream-attempt=' + reason + '-anonymous',
                   origin: base,
                   'content-type': 'application/json',
-                  'X-Auriga-CSRF': 'csrf-A',
+                  'X-Auriga-CSRF': 'csrf-anonymous',
                 },
                 body: '{}',
               },
             );
-            assert.equal(anonymousLogout.status, 403);
+            assert.equal(anonymousLogout.status, 200);
+            assert.equal(emit(a, 'live-after-anonymous-cancel'), true);
+            assert.match(
+              new TextDecoder().decode((await streamA.read()).value),
+              /live-after-anonymous-cancel/,
+            );
             if (reason === 'logout') {
               const logout = await fetch(base + '/auriga/local-login/logout', {
                 method: 'POST',
@@ -318,7 +326,7 @@ test(
               /other-session-live/,
             );
             assert.ok(hookCalls > 0);
-            assert.equal(attempts.has(reason + '-anonymous'), true);
+            assert.equal(attempts.has(reason + '-anonymous'), false);
             assert.equal(sessions.has(b), true);
             const fresh = await fetch(base + '/api/test-once', {
               headers: {

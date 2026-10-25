@@ -302,6 +302,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       session = {
         key,
         subject: credential.claims.sub,
+        tenantId: credential.claims.tid,
+        deviceId: credential.claims.did,
         csrf: random(),
         expiresAt: Date.now() + 1800000,
         accessExpiresAt: credential.claims.exp * 1000,
@@ -368,6 +370,13 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
               endpointId: vault.snapshot().endpoint,
               received: Object.keys(vault.snapshot().deliveries).filter(
                 (id) => vault.snapshot().deliveries[id].accepted,
+              ).length,
+              unsupported: Object.values(vault.snapshot().deliveries).filter(
+                (/** @type {any} */ delivery) =>
+                  delivery.status === 'unsupported',
+              ).length,
+              pendingSourceOpens: Object.keys(
+                vault.snapshot().pendingOpens ?? {},
               ).length,
             }
           : null,
@@ -604,20 +613,39 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     async logout(/** @type {any} */ request) {
       const row = resolve(request),
         attempt = attempts.get(cookie(request, ATTEMPT_COOKIE));
+      if (!row) {
+        await this.cancelAttempt(request);
+        return {
+          setCookie: setCookie(ATTEMPT_COOKIE, '', 0),
+          body: this.status(request),
+        };
+      }
+      const owns = (/** @type {any} */ credential) =>
+        credential?.claims.sub === row.subject &&
+        credential?.claims.tid === row.tenantId &&
+        credential?.claims.did === row.deviceId;
+      if (!owns(vault.snapshot().credential))
+        throw new Error('local device ownership changed');
       generation++;
       if (attempt) {
         attempts.delete(cookie(request, ATTEMPT_COOKIE));
         attempt.controller.abort();
       }
-      if (row)
-        for (const session of sessions.values())
-          if (session.subject === row.subject) killSession(session);
+      for (const session of sessions.values())
+        if (
+          session.subject === row.subject &&
+          session.tenantId === row.tenantId &&
+          session.deviceId === row.deviceId
+        )
+          killSession(session);
       // Close access immediately; persist the tombstone before reporting logout success.
       team?.close();
       team = undefined;
       online = false;
       try {
         await vault.update((s) => {
+          if (!owns(s.credential))
+            throw new Error('local device ownership changed');
           if (s.credential) {
             s.revocations ??= [];
             if (s.revocations.length >= 256)
@@ -633,6 +661,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           s.endpoint = null;
           s.threads = {};
           s.deliveries = {};
+          s.pendingOpens = {};
         });
       } catch {
         closed = true;

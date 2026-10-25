@@ -1,5 +1,5 @@
 /* global AbortSignal */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { setInterval, clearInterval } from 'node:timers';
 
@@ -12,6 +12,14 @@ const TOOL_NAMES = new Set([
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const opaque = (/** @type {unknown} */ value) =>
   typeof value === 'string' && value.length > 0 && value.length <= 512;
+const unsupportedOrigin = (/** @type {any} */ session) =>
+  session?.header?.origin === 'subagent';
+class UnsupportedSessionOrigin extends Error {
+  code = 'session/agent-busy';
+  constructor() {
+    super('unsupported Team session origin: subagent');
+  }
+}
 
 /** Native rc.3 output.render receives (arguments, value), independently of MCP content.
  * @param {any} registry @param {any[]} tools @param {(name:string,args:any,exec:any)=>Promise<any>} call */
@@ -195,6 +203,8 @@ export function createTeam({
     )
       throw new Error('trusted DSH execution required');
     const sessionId = exec.agent.session.id;
+    if (unsupportedOrigin(exec.agent.session))
+      throw new UnsupportedSessionOrigin();
     if (
       !args ||
       typeof args !== 'object' ||
@@ -213,6 +223,39 @@ export function createTeam({
     )
       throw new Error('untrusted Team arguments');
     const row = await binding(sessionId, undefined, exec.signal);
+    // The remote thread ID is unknown until open returns. Persist a barrier
+    // before sending: an unknown delivery must not guess a receiver meanwhile.
+    // Keep uncertain intents across restart; only an explicit same-key tool
+    // retry resolves them. Never automatically replay a model write.
+    let intentKey = '';
+    if (name === 'auriga_open_thread') {
+      if (!opaque(args.idempotencyKey))
+        throw new Error('Team open idempotency key required');
+      intentKey = createHash('sha256')
+        .update(JSON.stringify([row.endpointId, row.id, args.idempotencyKey]))
+        .digest('hex');
+      const intent = {
+        endpointId: row.endpointId,
+        sessionId,
+        bindingId: row.id,
+        fingerprint: createHash('sha256')
+          .update(JSON.stringify([args.targetEndpointId, args.text]))
+          .digest('hex'),
+      };
+      await vault.update((state) => {
+        active();
+        if (state.endpoint !== row.endpointId)
+          throw new Error('Team endpoint changed');
+        state.pendingOpens ??= {};
+        const previous = state.pendingOpens[intentKey];
+        if (previous && JSON.stringify(previous) !== JSON.stringify(intent))
+          throw new Error('Team open intent conflict');
+        if (!previous && Object.keys(state.pendingOpens).length >= 256)
+          throw new Error('too many unresolved Team opens');
+        state.pendingOpens[intentKey] = intent;
+      });
+      active();
+    }
     const result = await rpc(
       'tools/call',
       {
@@ -227,7 +270,14 @@ export function createTeam({
       exec.signal,
       { 'Auriga-Endpoint-Id': row.endpointId, 'Auriga-Binding-Id': row.id },
     );
-    if (result.isError) throw new Error('remote Team tool rejected');
+    if (result.isError) {
+      if (intentKey)
+        await vault.update((state) => {
+          active();
+          delete state.pendingOpens[intentKey];
+        });
+      throw new Error('remote Team tool rejected');
+    }
     if (name === 'auriga_open_thread') {
       const message = result.structuredContent?.message;
       if (
@@ -250,6 +300,7 @@ export function createTeam({
         )
           throw new Error('Team source thread binding conflict');
         state.threads[message.threadId] = { sessionId, bindingId: row.id };
+        delete state.pendingOpens[intentKey];
       });
       active();
     }
@@ -275,8 +326,18 @@ export function createTeam({
     let state = vault.snapshot(),
       thread = state.threads[message.threadId];
     if (!thread) {
-      thread = { sessionId: randomUUID(), bindingId: null };
       await vault.update((s) => {
+        active();
+        if (s.endpoint !== endpointId) throw new Error('Team endpoint changed');
+        if (s.threads[message.threadId]) {
+          thread = s.threads[message.threadId];
+          return;
+        }
+        if (Object.keys(s.pendingOpens ?? {}).length)
+          throw new Error(
+            'Team source open pending; retry with its idempotency key',
+          );
+        thread = { sessionId: randomUUID(), bindingId: null };
         s.threads[message.threadId] = thread;
       });
     }
@@ -312,7 +373,24 @@ export function createTeam({
         previous.messageId !== message.id)
     )
       throw new Error('delivery identity conflict');
+    if (previous?.status === 'unsupported')
+      throw new UnsupportedSessionOrigin();
+    const markUnsupported = async () => {
+      await vault.update((s) => {
+        active();
+        s.deliveries[delivery.id] = {
+          sessionId: thread.sessionId,
+          messageId: message.id,
+          accepted: false,
+          status: 'unsupported',
+          reason: 'subagent_origin',
+        };
+      });
+      throw new UnsupportedSessionOrigin();
+    };
     if (previous?.accepted !== true) {
+      if (unsupportedOrigin(ctx.sessions.get(thread.sessionId)))
+        await markUnsupported();
       await vault.update((s) => {
         s.deliveries[delivery.id] = {
           sessionId: thread.sessionId,
@@ -321,26 +399,36 @@ export function createTeam({
         };
       });
       active();
-      const accepted = await ctx.sessionController.prompt(
-        {
-          sessionId: thread.sessionId,
-          requestId: delivery.id,
-          content: [
-            {
-              type: 'text',
-              text:
-                'Team communication context (server-issued JSON):\n' +
-                JSON.stringify({
-                  threadId: message.threadId,
-                  messageId: message.id,
-                }),
-            },
-            { type: 'text', text: message.text },
-          ],
-          mode: 'queue',
-        },
-        controller.signal,
-      );
+      let accepted;
+      try {
+        accepted = await ctx.sessionController.prompt(
+          {
+            sessionId: thread.sessionId,
+            requestId: delivery.id,
+            content: [
+              {
+                type: 'text',
+                text:
+                  'Team communication context (server-issued JSON):\n' +
+                  JSON.stringify({
+                    threadId: message.threadId,
+                    messageId: message.id,
+                  }),
+              },
+              { type: 'text', text: message.text },
+            ],
+            mode: 'queue',
+          },
+          controller.signal,
+        );
+      } catch (error) {
+        active();
+        // The native cold resolver may only expose ownership after restoration.
+        // A busy ordinary agent is retryable; only known subagent ownership is terminal.
+        if (unsupportedOrigin(ctx.sessions.get(thread.sessionId)))
+          await markUnsupported();
+        throw error;
+      }
       active();
       if (accepted?.accepted !== true)
         throw new Error('DSH did not accept delivery');
@@ -378,10 +466,25 @@ export function createTeam({
     try {
       const endpointId = await endpoint();
       const response = await privateCall('pull', { endpointId, limit: 20 });
+      let firstError;
+      // Transitional pull transport: isolate each lease without bypassing native
+      // ownership or acknowledging a failed/unsupported delivery.
       for (const delivery of response.page?.items ?? []) {
         active();
-        await receive(delivery);
+        try {
+          await receive(delivery);
+        } catch (error) {
+          active();
+          if (
+            /** @type {any} */ (error).status === 401 ||
+            /** @type {any} */ (error).status === 403
+          )
+            throw error;
+          if (!(error instanceof UnsupportedSessionOrigin))
+            firstError ??= error;
+        }
       }
+      if (firstError) throw firstError;
     } finally {
       polling = false;
     }

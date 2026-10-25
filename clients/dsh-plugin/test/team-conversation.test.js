@@ -327,6 +327,15 @@ async function conversation() {
       promptCalls,
       createCalls,
       exec,
+      reconnect: (nextVault) =>
+        createTeam({
+          platform: transport,
+          vault: nextVault,
+          getAccess: async () => token,
+          assertActive() {},
+          ctx,
+          label,
+        }),
       alter: (fn) => {
         alter = fn;
       },
@@ -442,6 +451,192 @@ test('new receiver without durable native session cannot publish a binding or AC
   }
 });
 
+test('fast reply before open response defers unknown mapping, then reaches the original source on retry', async () => {
+  const run = await conversation(),
+    entered = Promise.withResolvers(),
+    release = Promise.withResolvers();
+  let opening;
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B');
+    a.alter(async (value, route, options) => {
+      if (
+        route === '/ai/mcp' &&
+        options.body?.params?.name === 'auriga_open_thread'
+      ) {
+        entered.resolve(value.result.structuredContent.message.threadId);
+        await release.promise;
+      }
+      return value;
+    });
+    opening = a.team.toolCall(
+      'auriga_open_thread',
+      {
+        targetEndpointId: b.id,
+        text: 'Fast reply',
+        idempotencyKey: 'fast-open',
+      },
+      a.exec(a.original),
+    );
+    const settledOpen = opening.catch(() => {});
+    const threadId = await entered.promise;
+    await b.team.poll();
+    await b.team.toolCall(
+      'auriga_reply_thread',
+      {
+        threadId,
+        text: 'Before open returns',
+        idempotencyKey: 'fast-reply',
+      },
+      b.exec(b.admitted[0].sessionId),
+    );
+    const incoming = [...run.deliveries.values()].find(
+      (d) => d.targetEndpointId === a.id,
+    );
+    incoming.leaseToken = proof();
+    incoming.leaseExpiresAt = new Date(Date.now() + 60000).toISOString();
+    await assert.rejects(a.team.receive(incoming));
+    assert.equal(a.vault.snapshot().threads[threadId], undefined);
+    assert.deepEqual(a.createCalls, [a.original]);
+    release.resolve();
+    await opening;
+    await settledOpen;
+    await a.team.poll();
+    assert.equal(a.admitted[0].sessionId, a.original);
+    assert.deepEqual(a.createCalls, [a.original]);
+    assert.equal(run.metrics.opens, 1);
+  } finally {
+    release.resolve();
+    await opening?.catch(() => {});
+    await run.close();
+  }
+});
+
+test('lost open response persists source intent across restart and same-key retry recovers without random binding', async () => {
+  const run = await conversation();
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B');
+    const args = {
+      targetEndpointId: b.id,
+      text: 'Lost response',
+      idempotencyKey: 'lost-open',
+    };
+    a.alter((value, route, options) => {
+      if (
+        route === '/ai/mcp' &&
+        options.body?.params?.name === 'auriga_open_thread'
+      )
+        throw new Error('response lost');
+      return value;
+    });
+    await assert.rejects(
+      a.team.toolCall('auriga_open_thread', args, a.exec(a.original)),
+      /response lost/,
+    );
+    a.team.close();
+    a.vault.close();
+    a.vault = await createVault(a.path);
+    // Keep the same authenticated transport/controller; restart product Team/vault only.
+    a.alter((value) => value);
+    a.team = a.reconnect(a.vault);
+    await a.team.start();
+    await b.team.poll();
+    const threadId = JSON.parse(
+      b.admitted[0].content[0].text.split('\n')[1],
+    ).threadId;
+    await b.team.toolCall(
+      'auriga_reply_thread',
+      {
+        threadId,
+        text: 'Reply after restart',
+        idempotencyKey: 'restart-reply',
+      },
+      b.exec(b.admitted[0].sessionId),
+    );
+    await a.team.poll().catch(() => {});
+    assert.equal(a.vault.snapshot().threads[threadId], undefined);
+    assert.deepEqual(a.createCalls, [a.original]);
+    await a.team.toolCall('auriga_open_thread', args, a.exec(a.original));
+    await a.team.poll();
+    assert.equal(a.admitted[0].sessionId, a.original);
+    assert.equal(run.metrics.opens, 1);
+    assert.deepEqual(a.vault.snapshot().pendingOpens, {});
+  } finally {
+    await run.close();
+  }
+});
+
+test('unsupported first delivery is terminal without ACK while ordinary same-page delivery proceeds and re-leases stay isolated', async () => {
+  const run = await conversation();
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B');
+    const threads = [];
+    for (const idempotencyKey of ['unsupported', 'ordinary']) {
+      const opened = await a.team.toolCall(
+        'auriga_open_thread',
+        { targetEndpointId: b.id, text: idempotencyKey, idempotencyKey },
+        a.exec(a.original),
+      );
+      threads.push(opened.structuredContent.message.threadId);
+    }
+    await b.team.poll();
+    const unsupported = b.admitted[0].sessionId;
+    b.sessions.get(unsupported).header = { origin: 'subagent' };
+    // A late/cold native resolver can discover unsupported ownership at prompt time.
+    const prompt = b.ctx.sessionController.prompt;
+    let attempts = 0;
+    b.ctx.sessionController.prompt = async (request) => {
+      if (request.sessionId === unsupported) {
+        attempts++;
+        throw Object.assign(new Error('ordinary routing rejects subagent'), {
+          code: 'session/agent-busy',
+        });
+      }
+      return prompt(request);
+    };
+    for (const threadId of threads)
+      await a.team.toolCall(
+        'auriga_reply_thread',
+        { threadId, text: 'Again', idempotencyKey: threadId },
+        a.exec(a.original),
+      );
+    await b.team.poll();
+    const failed = [...run.deliveries.values()].find(
+      (d) => d.message.threadId === threads[0] && d.message.text === 'Again',
+    );
+    const ordinary = [...run.deliveries.values()].find(
+      (d) => d.message.threadId === threads[1] && d.message.text === 'Again',
+    );
+    assert.equal(
+      b.vault.snapshot().deliveries[failed.id].status,
+      'unsupported',
+    );
+    assert.equal(b.vault.snapshot().deliveries[failed.id].accepted, false);
+    assert.notEqual(failed.status, 'host_accepted');
+    assert.equal(ordinary.status, 'host_accepted');
+    assert.equal(b.admitted.length, 3);
+    await b.team.poll();
+    assert.equal(attempts, 0);
+    assert.equal(b.admitted.length, 3);
+    await assert.rejects(
+      b.team.toolCall(
+        'auriga_open_thread',
+        {
+          targetEndpointId: a.id,
+          text: 'Child send',
+          idempotencyKey: 'child-send',
+        },
+        b.exec(unsupported),
+      ),
+      /unsupported.*origin/,
+    );
+  } finally {
+    await run.close();
+  }
+});
+
 test('remote open committed but actual vault write failed: same idempotency key safely recovers its original source mapping', async () => {
   const run = await conversation();
   try {
@@ -454,8 +649,16 @@ test('remote open committed but actual vault write failed: same idempotency key 
       };
     const file = join(a.path, 'connect.json'),
       saved = join(a.path, 'preserved.json');
-    await rename(file, saved);
-    await mkdir(file);
+    a.alter(async (value, route, options) => {
+      if (
+        route === '/ai/mcp' &&
+        options.body?.params?.name === 'auriga_open_thread'
+      ) {
+        await rename(file, saved);
+        await mkdir(file);
+      }
+      return value;
+    });
     await assert.rejects(
       a.team.toolCall('auriga_open_thread', args, a.exec(a.original)),
     );
@@ -463,6 +666,7 @@ test('remote open committed but actual vault write failed: same idempotency key 
     assert.equal(run.metrics.opens, 1);
     await rm(file, { recursive: true });
     await rename(saved, file);
+    a.alter((value) => value);
     const retry = await a.team.toolCall(
       'auriga_open_thread',
       args,
@@ -476,6 +680,100 @@ test('remote open committed but actual vault write failed: same idempotency key 
     );
   } finally {
     await run.close();
+  }
+});
+
+test('cold subagent rejection stays terminal after restart while a transient ordinary failure remains retryable', async () => {
+  const run = await conversation();
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B');
+    const ids = [];
+    for (const idempotencyKey of ['cold-child', 'temporary', 'healthy']) {
+      const opened = await a.team.toolCall(
+        'auriga_open_thread',
+        { targetEndpointId: b.id, text: idempotencyKey, idempotencyKey },
+        a.exec(a.original),
+      );
+      ids.push(opened.structuredContent.message.threadId);
+    }
+    await b.team.poll();
+    const [child, temporary] = b.admitted.map((r) => r.sessionId);
+    const prompt = b.ctx.sessionController.prompt;
+    let childCalls = 0,
+      temporaryCalls = 0;
+    b.ctx.sessionController.prompt = async (request) => {
+      if (request.sessionId === child) {
+        childCalls++;
+        b.sessions.get(child).header = { origin: 'subagent' };
+        throw Object.assign(new Error('cold subagent ownership'), {
+          code: 'session/agent-busy',
+        });
+      }
+      if (request.sessionId === temporary && temporaryCalls++ === 0)
+        throw Object.assign(new Error('ordinary agent temporarily busy'), {
+          code: 'session/agent-busy',
+        });
+      return prompt(request);
+    };
+    for (const threadId of ids)
+      await a.team.toolCall(
+        'auriga_reply_thread',
+        { threadId, text: 'After cold restore', idempotencyKey: threadId },
+        a.exec(a.original),
+      );
+    await assert.rejects(b.team.poll(), /temporarily busy/);
+    assert.equal(b.admitted.length, 4);
+    const failed = [...run.deliveries.values()].find(
+      (d) =>
+        d.message.threadId === ids[0] &&
+        d.message.text === 'After cold restore',
+    );
+    assert.equal(
+      b.vault.snapshot().deliveries[failed.id].status,
+      'unsupported',
+    );
+    b.team.close();
+    b.vault.close();
+    b.vault = await createVault(b.path);
+    b.team = b.reconnect(b.vault);
+    await b.team.start();
+    await b.team.poll();
+    assert.equal(childCalls, 1);
+    assert.equal(temporaryCalls, 2);
+    assert.equal(b.admitted.length, 5);
+    assert.notEqual(failed.status, 'host_accepted');
+  } finally {
+    await run.close();
+  }
+});
+
+test('global 401 or 403 aborts a pull page before unrelated deliveries are submitted', async () => {
+  for (const status of [401, 403]) {
+    const run = await conversation();
+    try {
+      const a = await run.node('A'),
+        b = await run.node('B');
+      for (const idempotencyKey of ['first', 'second'])
+        await a.team.toolCall(
+          'auriga_open_thread',
+          { targetEndpointId: b.id, text: idempotencyKey, idempotencyKey },
+          a.exec(a.original),
+        );
+      b.alter((value, route) => {
+        if (route === '/ai/team/node/bind')
+          throw Object.assign(new Error('global authorization invalid'), {
+            status,
+          });
+        return value;
+      });
+      await assert.rejects(b.team.poll(), (error) => error.status === status);
+      assert.equal(b.createCalls.length, 2);
+      assert.equal(b.promptCalls.length, 0);
+      assert.equal(run.metrics.acks, 0);
+    } finally {
+      await run.close();
+    }
   }
 });
 

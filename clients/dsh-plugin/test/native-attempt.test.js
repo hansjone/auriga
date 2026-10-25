@@ -8,12 +8,12 @@ import { tmpdir } from 'node:os';
 import {
   persistNativeAttempt,
   abandonNativeAttempt,
-  createConnectRuntime,
 } from '../src/local/runtime.js';
 import { LoginJar } from '../src/local/platform.js';
 import { createVault } from '../src/local/vault.js';
 import { createTeam } from '../src/local/team.js';
 import { peer } from './team-http-peer.js';
+import { runtimePeer } from './local-runtime-peer.js';
 
 // These tests enter at the already-verified device commit boundary. Random
 // opaque records are not JWTs; no password/TOTP/JWKS/IAM success is simulated.
@@ -231,12 +231,10 @@ test('an in-flight commit that eventually fails is compensated after settlement,
   }
 });
 
-test('explicit runtime logout queues behind an in-flight real vault write and tombstones it before remote retry', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'auriga-logout-commit-')),
-    entered = Promise.withResolvers(),
+test('explicit runtime logout queues behind an in-flight real vault write and tombstones it before remote retry', async (t) => {
+  const entered = Promise.withResolvers(),
     release = Promise.withResolvers(),
-    row = attempt(),
-    saved = credential();
+    row = attempt();
   let runtime,
     compensations = 0;
   const server = createServer((req, res) => {
@@ -247,8 +245,7 @@ test('explicit runtime logout queues behind an in-flight real vault write and to
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;
   try {
-    runtime = await createConnectRuntime({
-      directory,
+    const fixture = await runtimePeer(t, {
       config: {
         platformOrigin: origin,
         issuer: origin,
@@ -256,10 +253,10 @@ test('explicit runtime logout queues behind an in-flight real vault write and to
         providerId: 'team',
         allowLocalHttp: true,
       },
-      ctx: { webServer: { protocol: 'http:' } },
+      revokeHttp: true,
     });
-    const request = { headers: {} };
-    request.headers.cookie = runtime.prepare(request).setCookie.split(';')[0];
+    runtime = fixture.runtime;
+    const { request, credential: saved } = fixture;
     const write = persistNativeAttempt(row, () =>
       runtime.vault.update(async (s) => {
         s.credential = saved;
@@ -294,6 +291,5 @@ test('explicit runtime logout queues behind an in-flight real vault write and to
     release.resolve();
     runtime?.close();
     await new Promise((resolve) => server.close(resolve));
-    await rm(directory, { recursive: true, force: true });
   }
 });

@@ -61,3 +61,38 @@ test('installation configuration cannot carry credentials or arbitrary ignored s
   ])
     assert.equal(config({ ...value, ...extra }), false);
 });
+
+test('local connection status exposes bounded counters without source or delivery identities', () => {
+  const status = validate('Status');
+  const value = {
+    available: true,
+    loggedIn: true,
+    connected: true,
+    account: { subject: 'alice' },
+    connection: {
+      endpointId: null,
+      received: 0,
+      unsupported: 1,
+      pendingSourceOpens: 1,
+    },
+  };
+  assert.equal(status(value), true, JSON.stringify(status.errors));
+  assert.equal(
+    status({ ...value, connection: { ...value.connection, unsupported: -1 } }),
+    false,
+  );
+  assert.equal(
+    status({
+      ...value,
+      connection: { ...value.connection, pendingSourceOpens: -1 },
+    }),
+    false,
+  );
+  assert.equal(
+    status({
+      ...value,
+      connection: { ...value.connection, sessionId: 'private-source' },
+    }),
+    false,
+  );
+});

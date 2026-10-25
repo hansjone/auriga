@@ -13,6 +13,7 @@ import {
 } from '../src/local/platform.js';
 import { createConnectRuntime, cookie } from '../src/local/runtime.js';
 import { createTeam } from '../src/local/team.js';
+import { runtimePeer } from './local-runtime-peer.js';
 
 const config = {
   platformOrigin: 'https://portal.example.com',
@@ -45,8 +46,7 @@ test('cancelled browser attempt loses its CSRF and cannot be advanced or restart
     await rm(directory, { recursive: true, force: true });
   }
 });
-test('logout tombstone precedes real failed revocation HTTP; encrypted compensation survives restart without a browser session', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'auriga-revoke-negative-'));
+test('logout tombstone precedes real failed revocation HTTP; encrypted compensation survives restart without a browser session', async (t) => {
   let runtime;
   const seen = [];
   const server = createServer(async (req, res) => {
@@ -70,20 +70,16 @@ test('logout tombstone precedes real failed revocation HTTP; encrypted compensat
       issuer: origin,
       allowLocalHttp: true,
     },
-    directory,
     ctx: { webServer: { protocol: 'http:' } },
   };
   try {
-    runtime = await createConnectRuntime(options);
-    // Internal vault fixture only; no token validation, browser session or IAM success is simulated.
-    await runtime.vault.update((s) => {
-      s.credential = {
-        refreshToken: 'invalid-revocation-test-proof',
-        claims: {},
-      };
+    const fixture = await runtimePeer(t, {
+      config: options.config,
+      revokeHttp: true,
     });
-    const request = { headers: {} };
-    request.headers.cookie = runtime.prepare(request).setCookie.split(';')[0];
+    runtime = fixture.runtime;
+    const { request, directory } = fixture;
+    options.directory = directory;
     const result = await runtime.logout(request);
     assert.equal(result.body.loggedIn, false);
     assert.equal(result.body.remoteRevocation, 'pending');
@@ -111,7 +107,6 @@ test('logout tombstone precedes real failed revocation HTTP; encrypted compensat
   } finally {
     runtime?.close();
     await new Promise((resolve) => server.close(resolve));
-    await rm(directory, { recursive: true, force: true });
   }
 });
 test('real HTTP negatives preserve 401 and Node requests omit browser Origin; redirects are refused', async () => {
