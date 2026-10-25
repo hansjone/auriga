@@ -1988,9 +1988,10 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\x11KEY_STATE_CURRENT\x10\x01\x12\x12\n" +
 	"\x0eKEY_STATE_NEXT\x10\x02\x12\x16\n" +
 	"\x12KEY_STATE_RETIRING\x10\x03\x12\x15\n" +
-	"\x11KEY_STATE_REVOKED\x10\x042\xf7\x01\n" +
+	"\x11KEY_STATE_REVOKED\x10\x042\xe4\x02\n" +
 	"\x13DeviceAccessService\x12i\n" +
-	"\x12VerifyDeviceAccess\x12(.auriga.iam.v1.VerifyDeviceAccessRequest\x1a).auriga.iam.v1.VerifyDeviceAccessResponse\x12u\n" +
+	"\x12VerifyDeviceAccess\x12(.auriga.iam.v1.VerifyDeviceAccessRequest\x1a).auriga.iam.v1.VerifyDeviceAccessResponse\x12k\n" +
+	"\x14VerifyDeviceAiAccess\x12(.auriga.iam.v1.VerifyDeviceAccessRequest\x1a).auriga.iam.v1.VerifyDeviceAccessResponse\x12u\n" +
 	"\x16VerifyDeviceCredential\x12,.auriga.iam.v1.VerifyDeviceCredentialRequest\x1a-.auriga.iam.v1.VerifyDeviceCredentialResponse2\xa7\x03\n" +
 	"\x0eSessionService\x12f\n" +
 	"\x11IntrospectSession\x12'.auriga.iam.v1.IntrospectSessionRequest\x1a(.auriga.iam.v1.IntrospectSessionResponse\x12]\n" +
@@ -2085,29 +2086,31 @@ var file_auriga_iam_v1_iam_proto_depIdxs = []int32{
 	26, // 26: auriga.iam.v1.GetPublicKeysResponse.keys:type_name -> auriga.iam.v1.PublicKey
 	30, // 27: auriga.iam.v1.IssueInstanceAiTokenResponse.expires_at:type_name -> google.protobuf.Timestamp
 	4,  // 28: auriga.iam.v1.DeviceAccessService.VerifyDeviceAccess:input_type -> auriga.iam.v1.VerifyDeviceAccessRequest
-	6,  // 29: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:input_type -> auriga.iam.v1.VerifyDeviceCredentialRequest
-	12, // 30: auriga.iam.v1.SessionService.IntrospectSession:input_type -> auriga.iam.v1.IntrospectSessionRequest
-	15, // 31: auriga.iam.v1.SessionService.RevokeSessions:input_type -> auriga.iam.v1.RevokeSessionsRequest
-	10, // 32: auriga.iam.v1.SessionService.TouchSession:input_type -> auriga.iam.v1.TouchSessionRequest
-	8,  // 33: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:input_type -> auriga.iam.v1.VerifyAdminSessionCsrfRequest
-	18, // 34: auriga.iam.v1.AccountService.GetAccount:input_type -> auriga.iam.v1.GetAccountRequest
-	20, // 35: auriga.iam.v1.AccountService.BatchGetAccounts:input_type -> auriga.iam.v1.BatchGetAccountsRequest
-	23, // 36: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:input_type -> auriga.iam.v1.GetSigningKeysRequest
-	25, // 37: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:input_type -> auriga.iam.v1.GetPublicKeysRequest
-	28, // 38: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:input_type -> auriga.iam.v1.IssueInstanceAiTokenRequest
-	5,  // 39: auriga.iam.v1.DeviceAccessService.VerifyDeviceAccess:output_type -> auriga.iam.v1.VerifyDeviceAccessResponse
-	7,  // 40: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:output_type -> auriga.iam.v1.VerifyDeviceCredentialResponse
-	13, // 41: auriga.iam.v1.SessionService.IntrospectSession:output_type -> auriga.iam.v1.IntrospectSessionResponse
-	16, // 42: auriga.iam.v1.SessionService.RevokeSessions:output_type -> auriga.iam.v1.RevokeSessionsResponse
-	11, // 43: auriga.iam.v1.SessionService.TouchSession:output_type -> auriga.iam.v1.TouchSessionResponse
-	9,  // 44: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:output_type -> auriga.iam.v1.VerifyAdminSessionCsrfResponse
-	19, // 45: auriga.iam.v1.AccountService.GetAccount:output_type -> auriga.iam.v1.GetAccountResponse
-	21, // 46: auriga.iam.v1.AccountService.BatchGetAccounts:output_type -> auriga.iam.v1.BatchGetAccountsResponse
-	24, // 47: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:output_type -> auriga.iam.v1.GetSigningKeysResponse
-	27, // 48: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:output_type -> auriga.iam.v1.GetPublicKeysResponse
-	29, // 49: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:output_type -> auriga.iam.v1.IssueInstanceAiTokenResponse
-	39, // [39:50] is the sub-list for method output_type
-	28, // [28:39] is the sub-list for method input_type
+	4,  // 29: auriga.iam.v1.DeviceAccessService.VerifyDeviceAiAccess:input_type -> auriga.iam.v1.VerifyDeviceAccessRequest
+	6,  // 30: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:input_type -> auriga.iam.v1.VerifyDeviceCredentialRequest
+	12, // 31: auriga.iam.v1.SessionService.IntrospectSession:input_type -> auriga.iam.v1.IntrospectSessionRequest
+	15, // 32: auriga.iam.v1.SessionService.RevokeSessions:input_type -> auriga.iam.v1.RevokeSessionsRequest
+	10, // 33: auriga.iam.v1.SessionService.TouchSession:input_type -> auriga.iam.v1.TouchSessionRequest
+	8,  // 34: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:input_type -> auriga.iam.v1.VerifyAdminSessionCsrfRequest
+	18, // 35: auriga.iam.v1.AccountService.GetAccount:input_type -> auriga.iam.v1.GetAccountRequest
+	20, // 36: auriga.iam.v1.AccountService.BatchGetAccounts:input_type -> auriga.iam.v1.BatchGetAccountsRequest
+	23, // 37: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:input_type -> auriga.iam.v1.GetSigningKeysRequest
+	25, // 38: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:input_type -> auriga.iam.v1.GetPublicKeysRequest
+	28, // 39: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:input_type -> auriga.iam.v1.IssueInstanceAiTokenRequest
+	5,  // 40: auriga.iam.v1.DeviceAccessService.VerifyDeviceAccess:output_type -> auriga.iam.v1.VerifyDeviceAccessResponse
+	5,  // 41: auriga.iam.v1.DeviceAccessService.VerifyDeviceAiAccess:output_type -> auriga.iam.v1.VerifyDeviceAccessResponse
+	7,  // 42: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:output_type -> auriga.iam.v1.VerifyDeviceCredentialResponse
+	13, // 43: auriga.iam.v1.SessionService.IntrospectSession:output_type -> auriga.iam.v1.IntrospectSessionResponse
+	16, // 44: auriga.iam.v1.SessionService.RevokeSessions:output_type -> auriga.iam.v1.RevokeSessionsResponse
+	11, // 45: auriga.iam.v1.SessionService.TouchSession:output_type -> auriga.iam.v1.TouchSessionResponse
+	9,  // 46: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:output_type -> auriga.iam.v1.VerifyAdminSessionCsrfResponse
+	19, // 47: auriga.iam.v1.AccountService.GetAccount:output_type -> auriga.iam.v1.GetAccountResponse
+	21, // 48: auriga.iam.v1.AccountService.BatchGetAccounts:output_type -> auriga.iam.v1.BatchGetAccountsResponse
+	24, // 49: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:output_type -> auriga.iam.v1.GetSigningKeysResponse
+	27, // 50: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:output_type -> auriga.iam.v1.GetPublicKeysResponse
+	29, // 51: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:output_type -> auriga.iam.v1.IssueInstanceAiTokenResponse
+	40, // [40:52] is the sub-list for method output_type
+	28, // [28:40] is the sub-list for method input_type
 	28, // [28:28] is the sub-list for extension type_name
 	28, // [28:28] is the sub-list for extension extendee
 	0,  // [0:28] is the sub-list for field type_name

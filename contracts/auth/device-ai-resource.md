@@ -44,6 +44,32 @@ claims：`iss` 为当前 issuer，`sub/tid` 为真实账号/租户，`aud` 为�
 `exp` 不超过签发时间加 300 秒、当前门户会话绝对期限和 idle 期限的最小值。
 AI 换票不更新绝对或 idle 期限。数据面每次准入仍须按 D1 在线核成员、设备、模型 ACL 和预算。
 
+## 每次准入的专用在线核验
+
+网关每次设备 AI 准入调用 IAM `DeviceAccessService.VerifyDeviceAiAccess`，复用
+`VerifyDeviceAccessRequest/Response`。仅允许 `svc:ai-gateway` 的内部服务 JWT，
+必须携带非平台委托 tenant，并使用既有受认证内部传输；公网设备 JWT 仅放在请求体中，
+不能替代调用方内部凭据。JWT 的 `tid` 必须与委托 tenant 相同，跨 tenant 拒绝。
+
+此方法复用 IAM 验签、schema、issuer、`typ=at+jwt`、ES256 和 kid 校验，
+仅接受唯一 AI audience（字符串或单元素数组）、`ptyp/ctx=device`、规范 UUID 的
+`tid/sub/did`，权限恰为 `auriga.connect.models.invoke`；不接受非空 roles、sid 或实例身份。
+不依赖平台 `scope` 字段作为 AI 准入条件。显式检查 `exp>iat`、寿命不超过 300 秒，
+`iat/nbf` 最多允许既有 30 秒未来时钟偏差；到期没有宽限。
+平台/Team、instance、服务票、`ait_`、坏签、宽 audience 或宽权限均不能混作设备 AI 票。
+
+每次读取当前账户、设备和 backing 门户会话，并在线读取成员状态、成员类型及有效 invoke 权限；
+成员必须 active 且为 member/external。远程成员查询期间不持 IAM 行锁，完成前再次核设备/会话。
+未知成员、无 invoke、停用/离职、设备撤销、账户/会话失效均返回 `active=false`，
+其余身份字段为空且无 `expires_at`。控制面缺失、null 或异常返回脱敏 `UNAVAILABLE`，
+不能用缓存批准或安装静态权限兜底。跨委托 tenant 返回 `PERMISSION_DENIED`。
+
+`active=true` 返回真实 `tid/sub/did`；`expires_at` 为本 JWT 与当前 backing 绝对/idle
+期限的最小值，完成核验时仍须未到期。不更新 idle，不读取、消费或签发 refresh。
+该核验仅证明设备与成员的当前 AI 资格，模型 ACL 和预算仍由 D1 其他准入检查承担。
+原 `VerifyDeviceAccess` 保持平台 audience / Team 语义；`VerifyDeviceCredential` 仍仅供
+`svc:collab`，不扩展 SessionService 或 NetworkGatewayService 白名单。
+
 错误沿 OAuth JSON 风格，HTTP 400（客户端认证错误为 401）：
 
 - 非法/重复目标或 `audience`：`{"error":"invalid_target"}`。
