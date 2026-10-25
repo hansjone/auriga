@@ -295,12 +295,20 @@ class NetworkMailboxPostgresTest {
     assertEquals("platform_stored", stored.durabilityStatus());
     assertEquals("request_submitted", stored.visibleStatus());
     assertTrue(stored.restrictedAppearance());
+    DeliveryStored delivery = stored.deliveries().getFirst();
+    assertEquals(
+        0L, call(tenant, () -> mailbox.fetch(tenant, "2", "20", 0, 10)).route().committedCursor());
 
     var expired = call(tenant, () -> mailbox.expireContactIfDue(tenant, stored.contactId(), false));
     assertEquals("expired", expired.status());
     assertEquals("request_submitted", expired.visibleStatus());
     assertTrue(expired.restrictedAppearance());
     assertEquals("request_submitted", expired.presentationCode());
+
+    var afterExpire = call(tenant, () -> mailbox.fetch(tenant, "2", "20", 0, 10));
+    assertEquals(
+        "expired", afterExpire.items().getFirst().recipients().getFirst().transportStatus());
+    assertEquals(delivery.mailSeq(), afterExpire.route().committedCursor());
 
     var viewerExpired =
         call(tenant, () -> mailbox.expireContactIfDue(tenant, stored.contactId(), true));
@@ -315,6 +323,37 @@ class NetworkMailboxPostgresTest {
                 () ->
                     mailbox.contactDecide(
                         new ContactDecideRequest(tenant, stored.contactId(), "allowed", true))));
+  }
+
+  @Test
+  void firstContactDenyWritesRevokedTombstoneAndAdvancesCursor() {
+    UUID tenant = UUID.randomUUID();
+    StoreResult stored =
+        call(
+            tenant,
+            () ->
+                mailbox.store(
+                    StoreRequest.firstContact(
+                        tenant,
+                        "2",
+                        "10",
+                        "1",
+                        "nope",
+                        "20",
+                        Instant.now().plusSeconds(3600),
+                        true)));
+    DeliveryStored delivery = stored.deliveries().getFirst();
+    var denied =
+        call(
+            tenant,
+            () ->
+                mailbox.contactDecide(
+                    new ContactDecideRequest(tenant, stored.contactId(), "denied", true)));
+    assertEquals("denied", denied.status());
+    assertEquals("contact_denied", denied.visibleStatus());
+    var afterDeny = call(tenant, () -> mailbox.fetch(tenant, "2", "20", 0, 10));
+    assertEquals("revoked", afterDeny.items().getFirst().recipients().getFirst().transportStatus());
+    assertEquals(delivery.mailSeq(), afterDeny.route().committedCursor());
   }
 
   @Test

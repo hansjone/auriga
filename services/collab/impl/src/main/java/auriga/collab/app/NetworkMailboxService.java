@@ -392,16 +392,24 @@ public class NetworkMailboxService {
                 """,
                 request.tenantId(),
                 request.contactId());
+            // Design §1.2: contact_expired + Expired tombstone on undelivered recipients.
+            closeUndeliveredContactRecipients(request.tenantId(), row, "expired");
             return contactView(request.contactId(), "expired", viewer);
           }
           if ("expired".equals(status)) {
+            // Repair any missing tombstones from earlier writes, then reject late decide.
+            closeUndeliveredContactRecipients(request.tenantId(), row, "expired");
             throw new AurigaException(NetworkErrors.CONTACT_EXPIRED);
           }
           if ("denied".equals(status) && "allowed".equals(request.decision())) {
+            closeUndeliveredContactRecipients(request.tenantId(), row, "revoked");
             throw new AurigaException(NetworkErrors.CONTACT_DENIED);
           }
           if (!"pending".equals(status)) {
             require(status.equals(request.decision()), NetworkErrors.CONFLICT);
+            if ("denied".equals(status)) {
+              closeUndeliveredContactRecipients(request.tenantId(), row, "revoked");
+            }
             return contactView(request.contactId(), status, viewer);
           }
           jdbc.update(
@@ -413,6 +421,10 @@ public class NetworkMailboxService {
               request.decision(),
               request.tenantId(),
               request.contactId());
+          // First-layer deny → Revoked transport tombstone; allow keeps recipients pending.
+          if ("denied".equals(request.decision())) {
+            closeUndeliveredContactRecipients(request.tenantId(), row, "revoked");
+          }
           return contactView(request.contactId(), request.decision(), viewer);
         });
   }
@@ -444,6 +456,11 @@ public class NetworkMailboxService {
                 tenantId,
                 contactId);
             status = "expired";
+          }
+          if ("expired".equals(status)) {
+            closeUndeliveredContactRecipients(tenantId, row, "expired");
+          } else if ("denied".equals(status)) {
+            closeUndeliveredContactRecipients(tenantId, row, "revoked");
           }
           return contactView(contactId, status, statusViewer);
         });
@@ -558,6 +575,49 @@ public class NetworkMailboxService {
       case "expired" -> "network.contact_expired";
       default -> null;
     };
+  }
+
+  /**
+   * Write Expired/Revoked transport tombstones for still-open recipients of a contact's message,
+   * then advance committed_cursor on each affected node mailbox (design §1.2 / §4).
+   */
+  private void closeUndeliveredContactRecipients(
+      UUID tenantId, Map<String, Object> contactRow, String terminalStatus) {
+    require(TERMINAL.contains(terminalStatus), NetworkErrors.PROTOCOL_ERROR);
+    UUID messageId = (UUID) contactRow.get("message_id");
+    String targetRealm = contactRow.get("target_realm").toString();
+    String targetNode = contactRow.get("target_node").toString();
+    ensureNodeLocked(tenantId, targetRealm, targetNode);
+    jdbc.update(
+        """
+        UPDATE collab.network_recipient r
+           SET transport_status=?, state_version=state_version+1
+          FROM collab.network_mail_item i
+         WHERE r.tenant_id=? AND r.delivery_id=i.id
+           AND i.tenant_id=? AND i.message_id=?
+           AND r.transport_status IN ('pending', 'quarantined')
+        """,
+        terminalStatus,
+        tenantId,
+        tenantId,
+        messageId);
+    var nodes =
+        jdbc.queryForList(
+            """
+            SELECT DISTINCT target_realm, target_node
+              FROM collab.network_mail_item
+             WHERE tenant_id=? AND message_id=?
+            """,
+            tenantId,
+            messageId);
+    for (var node : nodes) {
+      String realm = node.get("target_realm").toString();
+      String nodeId = node.get("target_node").toString();
+      if (!(realm.equals(targetRealm) && nodeId.equals(targetNode))) {
+        ensureNodeLocked(tenantId, realm, nodeId);
+      }
+      advanceCommittedCursor(tenantId, realm, nodeId);
+    }
   }
 
   private boolean mailItemClosed(UUID tenantId, UUID deliveryId) {
