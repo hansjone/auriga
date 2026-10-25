@@ -16,7 +16,10 @@
           "enum": ["active", "next", "retired", "revoked"],
           "description": "active 仅在有效期内签发/验证；next 提前公布，激活前不得用于签发或接受新封装；retired 停止签发，在有效窗口内仍可验旧封装；revoked 立即停签且不得用于接受任何封装。kid/公钥不可复用，retired/revoked 不得重新激活。"
         },
-        "not_before": { "$ref": "envelope.schema.json#/$defs/Time" },
+        "not_before": {
+          "$ref": "envelope.schema.json#/$defs/Time",
+          "description": "必须严格早于 not_after；由消费端语义检查强制。"
+        },
         "not_after": { "$ref": "envelope.schema.json#/$defs/Time" },
         "public_key_spki": {
           "type": "string",
@@ -51,6 +54,7 @@
         },
         "keys": {
           "type": "array",
+          "description": "同一清单内 kid 唯一，由消费端语义检查强制；跨版本不可复用另需持久历史。",
           "items": { "$ref": "#/$defs/PublicKey" },
           "maxItems": 128
         }
