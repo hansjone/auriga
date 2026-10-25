@@ -49,7 +49,11 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA ai GRANT SELECT, INSERT, UPDATE, DELETE ON TA
 创建 POST 与 activate/revoke 的幂等作用域为租户、账号、方法、规范路径、key，有效 24 小时；
 HMAC 指纹与资源写入、脱敏响应在同一事务保存。过期记录在相同 key 下次使用时覆盖；
 无 key 每次独立执行。PATCH/PUT 不支持幂等 key，使用 If-Match 防覆盖。
-常规轮换激活 staged 凭据，原 active 转 retiring；显式 revoke 将 active/retiring 紧急转 revoked。
+提供商/模型单项 GET 与列表项均返回强 `etag`，列表中的值可原样用作该资源的 If-Match。
+凭据单项 GET 仅返回 id/state/createdAt/revision，并在 ETag 响应头提供当前版本；
+模型 ACL 单项 GET 返回授权列表，ETag 与模型共享同一 revision。
+常规轮换激活 staged 凭据，原 active 转 retiring；读取旧凭据的单项 GET 获取新 ETag 后即可撤销。
+显式 revoke 将 active/retiring 紧急转 revoked。
 staged 直接 revoke、再次激活/撤销等非法迁移返回 common.conflict。secret 没有读取接口。
 后续转发必须固定 credentialId、检查 revoked 并取消该凭据在途流；本任务没有任何上游请求或转发流。
 

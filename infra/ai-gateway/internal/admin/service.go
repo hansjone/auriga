@@ -108,31 +108,56 @@ func newID() (string, error) {
 
 func loadProvider(ctx context.Context, tx pgx.Tx, tenant, id string, lock bool) (api.Provider, error) {
 	var raw []byte
-	sql := "SELECT document FROM ai.provider WHERE tenant_id=$1 AND id=$2"
+	var revision int64
+	sql := "SELECT document,revision FROM ai.provider WHERE tenant_id=$1 AND id=$2"
 	if lock {
 		sql += " FOR UPDATE"
 	}
-	err := tx.QueryRow(ctx, sql, tenant, id).Scan(&raw)
+	err := tx.QueryRow(ctx, sql, tenant, id).Scan(&raw, &revision)
 	var p api.Provider
 	if err == nil {
-		err = json.Unmarshal(raw, &p)
+		err = readDocument(raw, revision, &p)
 	}
 	return p, err
 }
 func saveProvider(ctx context.Context, tx pgx.Tx, tenant string, p api.Provider) error {
-	b, e := json.Marshal(p)
+	b, e := document(p, p.Revision)
 	if e != nil {
 		return e
 	}
 	_, e = tx.Exec(ctx, "UPDATE ai.provider SET document=$3,revision=$4 WHERE tenant_id=$1 AND id=$2", tenant, p.Id, b, p.Revision)
 	return e
 }
-func loadModel(ctx context.Context, tx pgx.Tx, tenant, id string) (api.Model, error) {
+
+// Stored documents from 0001 predate the required response etag field. Derive it
+// from the row revision without rewriting existing migration SQL or tenant rows.
+func readDocument(raw []byte, revision int64, out any) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	if fields == nil {
+		return fmt.Errorf("invalid stored AI document")
+	}
+	fields["etag"], _ = json.Marshal(etag(revision))
+	fields["revision"], _ = json.Marshal(revision)
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
+}
+func loadModel(ctx context.Context, tx pgx.Tx, tenant, id string, lock bool) (api.Model, error) {
 	var b []byte
-	e := tx.QueryRow(ctx, "SELECT document FROM ai.model WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tenant, id).Scan(&b)
+	var revision int64
+	sql := "SELECT document,revision FROM ai.model WHERE tenant_id=$1 AND id=$2"
+	if lock {
+		sql += " FOR UPDATE"
+	}
+	e := tx.QueryRow(ctx, sql, tenant, id).Scan(&b, &revision)
 	var m api.Model
 	if e == nil {
-		e = json.Unmarshal(b, &m)
+		e = readDocument(b, revision, &m)
 	}
 	return m, e
 }
@@ -171,6 +196,31 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 			return result{}, e
 		}
 		return response(200, v, v.Revision)
+	case "getModel":
+		v, e := loadModel(ctx, tx, p.Tenant, o.model, false)
+		if e != nil {
+			return result{}, e
+		}
+		return response(200, v, v.Revision)
+	case "getCredential":
+		v := api.Credential{Id: o.credential}
+		e := tx.QueryRow(ctx, "SELECT state,created_at,revision FROM ai.credential WHERE tenant_id=$1 AND provider_id=$2 AND id=$3", p.Tenant, o.provider, o.credential).Scan(&v.State, &v.CreatedAt, &v.Revision)
+		if e != nil {
+			return result{}, e
+		}
+		return response(200, v, v.Revision)
+	case "getGrants":
+		var raw []byte
+		var revision int64
+		e := tx.QueryRow(ctx, "SELECT grants,revision FROM ai.model WHERE tenant_id=$1 AND id=$2", p.Tenant, o.model).Scan(&raw, &revision)
+		if e != nil {
+			return result{}, e
+		}
+		var g api.ModelGrants
+		if e = json.Unmarshal(raw, &g); e != nil {
+			return result{}, e
+		}
+		return response(200, g, revision)
 	case "createProvider":
 		var in api.ProviderInput
 		if e := decode(raw, &in); e != nil {
@@ -187,7 +237,7 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 		if e = s.validateEndpoint(ctx, v.BaseUrl); e != nil {
 			return result{}, e
 		}
-		b, e := json.Marshal(v)
+		b, e := document(v, v.Revision)
 		if e != nil {
 			return result{}, e
 		}
@@ -238,7 +288,7 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 		if _, e := loadProvider(ctx, tx, p.Tenant, m.ProviderId, false); e != nil {
 			return result{}, e
 		}
-		b, e := json.Marshal(m)
+		b, e := document(m, m.Revision)
 		if e != nil {
 			return result{}, e
 		}
@@ -248,7 +298,7 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 		}
 		return response(201, m, 1)
 	case "patchModel", "grants":
-		m, e := loadModel(ctx, tx, p.Tenant, o.model)
+		m, e := loadModel(ctx, tx, p.Tenant, o.model, true)
 		if e != nil {
 			return result{}, e
 		}
@@ -267,7 +317,7 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 				return result{}, e
 			}
 			m.Revision++
-			b, marshalErr := json.Marshal(m)
+			b, marshalErr := document(m, m.Revision)
 			if marshalErr != nil {
 				return result{}, marshalErr
 			}
@@ -291,7 +341,7 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 			return result{}, e
 		}
 		m.Revision++
-		b, e := json.Marshal(m)
+		b, e := document(m, m.Revision)
 		if e != nil {
 			return result{}, e
 		}
@@ -330,7 +380,7 @@ func list(ctx context.Context, tx pgx.Tx, tenant string, o operation, r *http.Re
 	if o.name == "listProviders" {
 		table = "ai.provider"
 	}
-	rows, e := tx.Query(ctx, "SELECT document FROM "+table+" WHERE tenant_id=$1 AND id::text>$2 ORDER BY id::text LIMIT $3", tenant, after, limit+1)
+	rows, e := tx.Query(ctx, "SELECT document,revision FROM "+table+" WHERE tenant_id=$1 AND id::text>$2 ORDER BY id::text LIMIT $3", tenant, after, limit+1)
 	if e != nil {
 		return result{}, e
 	}
@@ -342,7 +392,8 @@ func list(ctx context.Context, tx pgx.Tx, tenant string, o operation, r *http.Re
 	count := 0
 	for rows.Next() {
 		var b []byte
-		if e = rows.Scan(&b); e != nil {
+		var revision int64
+		if e = rows.Scan(&b, &revision); e != nil {
 			return result{}, e
 		}
 		if count == limit {
@@ -352,14 +403,14 @@ func list(ctx context.Context, tx pgx.Tx, tenant string, o operation, r *http.Re
 		}
 		if o.name == "listProviders" {
 			var v api.Provider
-			if e = json.Unmarshal(b, &v); e != nil {
+			if e = readDocument(b, revision, &v); e != nil {
 				return result{}, e
 			}
 			providers = append(providers, v)
 			last = v.Id
 		} else {
 			var v api.Model
-			if e = json.Unmarshal(b, &v); e != nil {
+			if e = readDocument(b, revision, &v); e != nil {
 				return result{}, e
 			}
 			models = append(models, v)

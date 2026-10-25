@@ -9,7 +9,6 @@ import (
 	"errors"
 	"os"
 	"regexp"
-	"slices"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -53,7 +52,7 @@ func JWTAuthenticator(issuer, jwksFile string) (Authenticate, error) {
 			}
 			return keys[kid], nil
 		}, jwt.WithValidMethods([]string{"ES256"}), jwt.WithIssuer(issuer), jwt.WithAudience("auriga"), jwt.WithExpirationRequired(), jwt.WithIssuedAt(), jwt.WithLeeway(30*time.Second))
-		if err != nil || !token.Valid || p.IssuedAt == nil || p.ExpiresAt == nil || p.ID == "" || !uuidPattern.MatchString(p.Tenant) || !uuidPattern.MatchString(p.Subject) || p.Type != "user" || slices.Contains(p.Audience, "auriga.internal") || p.ExpiresAt.Sub(p.IssuedAt.Time) > 300*time.Second || !p.ExpiresAt.After(p.IssuedAt.Time) {
+		if err != nil || !token.Valid || p.IssuedAt == nil || p.ExpiresAt == nil || p.ID == "" || !uuidPattern.MatchString(p.Tenant) || !uuidPattern.MatchString(p.Subject) || p.Type != "user" || len(p.Audience) != 1 || p.Audience[0] != "auriga" || p.ExpiresAt.Sub(p.IssuedAt.Time) > 300*time.Second || !p.ExpiresAt.After(p.IssuedAt.Time) {
 			return nil, failure("common.unauthenticated")
 		}
 		if p.Context != "admin" {

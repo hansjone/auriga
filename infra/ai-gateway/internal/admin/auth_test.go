@@ -99,4 +99,9 @@ func TestJWTAuthenticator(t *testing.T) {
 	if _, err = auth(context.Background(), sign(t, key, claims, "at+jwt")); err == nil {
 		t.Fatal("internal audience accepted")
 	}
+	claims = validClaims()
+	claims["aud"] = []string{"auriga", "auriga.ai-gateway"}
+	if _, err = auth(context.Background(), sign(t, key, claims, "at+jwt")); err == nil {
+		t.Fatal("mixed data-plane audience accepted")
+	}
 }

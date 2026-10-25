@@ -70,6 +70,10 @@ func route(method, path string) (operation, bool) {
 	case len(parts) == 3 && parts[0] == "providers" && uuidPattern.MatchString(parts[1]) && parts[2] == "credentials" && method == "POST":
 		o.name = "createCredential"
 		o.provider = parts[1]
+	case len(parts) == 4 && parts[0] == "providers" && uuidPattern.MatchString(parts[1]) && parts[2] == "credentials" && uuidPattern.MatchString(parts[3]) && method == "GET":
+		o.name = "getCredential"
+		o.provider = parts[1]
+		o.credential = parts[3]
 	case len(parts) == 5 && parts[0] == "providers" && uuidPattern.MatchString(parts[1]) && parts[2] == "credentials" && uuidPattern.MatchString(parts[3]) && (parts[4] == "activate" || parts[4] == "revoke") && method == "POST":
 		o.name = parts[4]
 		o.provider = parts[1]
@@ -78,11 +82,17 @@ func route(method, path string) (operation, bool) {
 		o.name = "listModels"
 	case len(parts) == 1 && parts[0] == "models" && method == "POST":
 		o.name = "createModel"
-	case len(parts) == 2 && parts[0] == "models" && modelPattern.MatchString(parts[1]) && method == "PATCH":
-		o.name = "patchModel"
+	case len(parts) == 2 && parts[0] == "models" && modelPattern.MatchString(parts[1]) && (method == "PATCH" || method == "GET"):
+		o.name = "getModel"
+		if method == "PATCH" {
+			o.name = "patchModel"
+		}
 		o.model = parts[1]
-	case len(parts) == 3 && parts[0] == "models" && modelPattern.MatchString(parts[1]) && parts[2] == "grants" && method == "PUT":
-		o.name = "grants"
+	case len(parts) == 3 && parts[0] == "models" && modelPattern.MatchString(parts[1]) && parts[2] == "grants" && (method == "PUT" || method == "GET"):
+		o.name = "getGrants"
+		if method == "PUT" {
+			o.name = "grants"
+		}
 		o.model = parts[1]
 	default:
 		return o, false
@@ -108,8 +118,20 @@ type result struct {
 	etag   string
 }
 
+// document keeps list item ETags identical to the strong single-resource header.
+func document(value any, revision int64) ([]byte, error) {
+	switch v := value.(type) {
+	case api.Provider:
+		v.Etag = etag(revision)
+		value = v
+	case api.Model:
+		v.Etag = etag(revision)
+		value = v
+	}
+	return json.Marshal(value)
+}
 func response(status int, value any, revision int64) (result, error) {
-	b, err := json.Marshal(value)
+	b, err := document(value, revision)
 	r := result{status: status, body: b}
 	if revision > 0 {
 		r.etag = etag(revision)
@@ -142,7 +164,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.problem(w, r, failure("common.forbidden"))
 		return
 	}
-	if o.write && (p.StepUp <= 0 || p.StepUp > time.Now().Unix() || time.Now().Unix()-p.StepUp > 600) {
+	if o.write && !recentStepUp(p.StepUp, time.Now().Unix()) {
 		s.problem(w, r, failure("iam.step_up_required"))
 		return
 	}
@@ -216,6 +238,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(res.status)
 	_, _ = w.Write(res.body)
 }
+
+func recentStepUp(stepup, now int64) bool { return stepup > 0 && stepup <= now+30 && stepup >= now-600 }
 
 func validateQuery(r *http.Request, o operation) error {
 	q, err := baseQuery(r)
