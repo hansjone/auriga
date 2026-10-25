@@ -1,4 +1,4 @@
-/* global TextDecoder */
+import { parseStrictJson } from '../trust/jcs.js';
 import {
   APP_VERSION,
   FETCH_MAX_BYTES,
@@ -9,7 +9,6 @@ import {
 import { SessionError } from './errors.js';
 
 const enc = new TextEncoder();
-const dec = new TextDecoder();
 
 /** @param {unknown} value */
 export function encodeJson(value) {
@@ -30,7 +29,7 @@ export function decodeJson(bytes) {
     throw new SessionError('payload_size', 'invalid payload size');
   }
   try {
-    return JSON.parse(dec.decode(bytes));
+    return parseStrictJson(bytes);
   } catch (cause) {
     throw new SessionError('not_json', 'payload is not JSON', { cause });
   }

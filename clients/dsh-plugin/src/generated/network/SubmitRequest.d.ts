@@ -1,7 +1,7 @@
 // Generated from contracts/network by scripts/gen-network-tools.mjs. Do not edit.
 
 /**
- * 插件经 HTTPS 私有接口提交；来源只以 source_binding 或 human_intent_id 引用，总部据此生成 from/sender_kind，并按 to 生成 message_class。
+ * 插件经 HTTPS 私有接口提交；来源只以 source_binding 或 human_intent_id 引用，总部据此生成 from/sender_kind，并按 to 生成 message_class；origin/correlation_id/causation_id 由平台固化，客户端提交直接拒绝。
  */
 export type SubmitRequest = {
   kind: 'first_contact' | 'message' | 'reply' | 'control';
@@ -32,19 +32,6 @@ export type SubmitRequest = {
    * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
    */
   in_reply_to?: string;
-  /**
-   * 回应组播/广播请求时平台固化的原消息与原 recipient。
-   */
-  origin?: {
-    /**
-     * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
-     */
-    message_id: string;
-    /**
-     * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
-     */
-    recipient_id: string;
-  };
   contact_scope?: 'conversation' | 'human_dialogue' | 'group_join';
   reply_mode?: 'private' | 'group';
   /**
@@ -272,14 +259,6 @@ export type SubmitRequest = {
      */
     [k: string]: unknown;
   };
-  /**
-   * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
-   */
-  correlation_id?: string;
-  /**
-   * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
-   */
-  causation_id?: string;
   source: (
     | {
         source_binding: unknown;

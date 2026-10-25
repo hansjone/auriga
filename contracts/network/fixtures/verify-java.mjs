@@ -7,6 +7,7 @@ import {
   parseStrict,
   checkDownstream,
   publicKeyFromSpki,
+  checkKeyset,
 } from '../../test/network-lib.mjs';
 
 const read = (file) =>
@@ -64,6 +65,7 @@ const keysetSchema = ajv.getSchema(
   'https://auriga.example.com/contracts/network/keyset.schema.json',
 );
 assert.ok(keysetSchema(samples.keyset), JSON.stringify(keysetSchema.errors));
+checkKeyset(samples.keyset, keysetSchema);
 const keys = Object.fromEntries(
   samples.keyset.keys.map((k) => [
     k.kid,
