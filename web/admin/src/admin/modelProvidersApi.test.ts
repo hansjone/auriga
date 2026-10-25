@@ -127,3 +127,49 @@ it('uses contract JSON PATCH and PUT bodies, and gives each create an idempotenc
     firstKey,
   );
 });
+
+it('reads resource versions from the frozen model, grants and credential GET paths', async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(
+    async () =>
+      new Response('{"items":[]}', {
+        headers: { 'Content-Type': 'application/json', ETag: '"read-version"' },
+      }),
+  );
+  const api = createModelProvidersApi({ fetch });
+  expect((await api.model('m/a')).etag).toBe('"read-version"');
+  expect((await api.readGrants('m/a')).etag).toBe('"read-version"');
+  expect((await api.credential('p/a', 'c/b')).etag).toBe('"read-version"');
+  expect(fetch.mock.calls.map((c) => c[0])).toEqual([
+    '/api/ai/v1/admin/models/m%2Fa',
+    '/api/ai/v1/admin/models/m%2Fa/grants',
+    '/api/ai/v1/admin/providers/p%2Fa/credentials/c%2Fb',
+  ]);
+});
+
+it('reuses a supplied submission key across attempts and never retries writes automatically', async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(
+      new Response(
+        '{"status":503,"code":"common.unavailable","title":"Unavailable"}',
+        {
+          status: 503,
+          headers: { 'Content-Type': 'application/problem+json' },
+        },
+      ),
+    )
+    .mockResolvedValue(
+      new Response('{}', { headers: { 'Content-Type': 'application/json' } }),
+    );
+  const api = createModelProvidersApi({ fetch });
+  await expect(
+    api.createCredential('p', { secret: 'fixture' }, 'same-submission'),
+  ).rejects.toMatchObject({ status: 503 });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await api.createCredential('p', { secret: 'fixture' }, 'same-submission');
+  expect(
+    fetch.mock.calls.map((c) =>
+      new Headers(c[1]?.headers).get('Idempotency-Key'),
+    ),
+  ).toEqual(['same-submission', 'same-submission']);
+});

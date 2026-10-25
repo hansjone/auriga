@@ -15,6 +15,7 @@ import {
   providerDraft,
   providerInput,
   modelInput,
+  modelPatch,
   modelDraft,
   validProvider,
   validModel,
@@ -46,8 +47,7 @@ const credential = shallowRef<Credential>();
 const grantText = ref('');
 const pending = shallowRef<{ message: string; run: () => Promise<void> }>();
 const lifetime = new globalThis.AbortController();
-const modelEtags = new Map<string, string>();
-const grantEtags = new Map<string, string>();
+const baselineModel = shallowRef<ModelInput>();
 let alive = true;
 onBeforeUnmount(() => {
   alive = false;
@@ -61,11 +61,17 @@ function failure(e: unknown) {
   const key =
     code === 'iam.step_up_required'
       ? 'stepup'
-      : e.status === 412 || e.status === 409
+      : e.status === 412
         ? 'conflict'
-        : e.status === 403
-          ? 'forbidden'
-          : 'failed';
+        : e.status === 409
+          ? 'stateConflict'
+          : e.status === 400
+            ? 'invalid'
+            : e.status === 429
+              ? 'limited'
+              : e.status === 403
+                ? 'forbidden'
+                : 'failed';
   // Never render Problem detail/title, which could contain submitted credentials.
   return t(key);
 }
@@ -118,6 +124,9 @@ async function load() {
 async function refresh() {
   try {
     await load();
+    if (editor.value === 'credential' && credentialId.value)
+      await readCredential();
+    else if (original.value) await reloadConflict();
   } catch {
     /* Error is shown by load. */
   }
@@ -150,10 +159,13 @@ async function editProvider(p: Provider) {
     if (!alive) return;
     reset('provider');
     original.value = p.id;
-    etag.value = result.etag ?? '';
+    etag.value = result.etag ?? result.data.etag;
     provider.value = providerInput(result.data);
   } catch (e) {
-    if (alive) error.value = failure(e);
+    if (alive) {
+      error.value = failure(e);
+      readbackFailed.value = true;
+    }
   } finally {
     if (alive) busy.value = false;
   }
@@ -162,25 +174,88 @@ function newModel(p: Provider) {
   reset('model');
   model.value = modelDraft(p.id);
 }
-function editModel(m: Model) {
-  reset('model');
-  original.value = m.id;
-  model.value = modelInput(m);
-  etag.value = modelEtags.get(m.id) ?? '';
+async function editModel(m: Pick<Model, 'id'>) {
+  busy.value = true;
+  try {
+    const result = await api.model(m.id, lifetime.signal);
+    if (!alive) return;
+    reset('model');
+    original.value = m.id;
+    model.value = modelInput(result.data);
+    baselineModel.value = modelInput(result.data);
+    etag.value = result.etag ?? result.data.etag;
+  } catch (e) {
+    if (alive) {
+      error.value = failure(e);
+      readbackFailed.value = true;
+    }
+  } finally {
+    if (alive) busy.value = false;
+  }
 }
-function credentials(p: Provider) {
+async function credentials(p: Provider) {
   reset('credential');
   selected.value = p.id;
   credential.value = undefined;
   credentialId.value = p.activeCredentialId ?? '';
   credentialEtag.value = '';
   reason.value = '';
+  if (credentialId.value) await readCredential();
 }
-function grants(m: Model) {
-  reset('grants');
-  original.value = m.id;
-  grantText.value = '';
-  etag.value = grantEtags.get(m.id) ?? '';
+async function readCredential() {
+  credential.value = undefined;
+  credentialEtag.value = '';
+  secret.value = '';
+  if (!uuid.test(credentialId.value)) {
+    error.value = t('invalid');
+    return;
+  }
+  busy.value = true;
+  try {
+    const result = await api.credential(
+      selected.value,
+      credentialId.value,
+      lifetime.signal,
+    );
+    if (!alive) return;
+    credential.value = result.data;
+    credentialEtag.value = result.etag ?? '';
+  } catch (e) {
+    if (alive) error.value = failure(e);
+  } finally {
+    if (alive) busy.value = false;
+  }
+}
+async function grants(m: Pick<Model, 'id'>) {
+  busy.value = true;
+  try {
+    const result = await api.readGrants(m.id, lifetime.signal);
+    if (!alive) return;
+    reset('grants');
+    original.value = m.id;
+    etag.value = result.etag ?? '';
+    grantText.value = result.data.items
+      .map((g) => g.kind + ' ' + g.id)
+      .join('\n');
+  } catch (e) {
+    if (alive) {
+      error.value = failure(e);
+      readbackFailed.value = true;
+    }
+  } finally {
+    if (alive) busy.value = false;
+  }
+}
+async function reloadConflict() {
+  const mode = editor.value,
+    resourceId = original.value;
+  if (mode === 'model') await editModel({ id: resourceId });
+  else if (mode === 'grants') await grants({ id: resourceId });
+  else if (mode === 'credential') await readCredential();
+  else if (mode === 'provider') {
+    const p = providers.value.find((p) => p.id === resourceId);
+    if (p) await editProvider(p);
+  }
 }
 async function write(action: () => Promise<void>) {
   if (busy.value || loading.value || readbackFailed.value || !alive) return;
@@ -191,7 +266,11 @@ async function write(action: () => Promise<void>) {
     await action();
     if (alive) notice.value = t('saved');
   } catch (e) {
-    if (alive) error.value = failure(e);
+    if (alive) {
+      if (isApiError(e) && (e.status === 409 || e.status === 412))
+        await reloadConflict();
+      if (alive) error.value = failure(e);
+    }
   } finally {
     if (alive) {
       busy.value = false;
@@ -220,15 +299,11 @@ function saveProvider() {
   const body = { ...provider.value };
   const currentId = original.value;
   const version = etag.value;
+  const key = globalThis.crypto.randomUUID();
   const action = async () => {
     if (currentId)
       await api.patchProvider(currentId, body, version, lifetime.signal);
-    else
-      await api.createProvider(
-        body,
-        globalThis.crypto.randomUUID(),
-        lifetime.signal,
-      );
+    else await api.createProvider(body, key, lifetime.signal);
     if (!alive) return;
     editor.value = '';
     await readAfterWrite();
@@ -245,26 +320,20 @@ function saveModel() {
   const body = { ...model.value, price: { ...model.value.price } };
   const currentId = original.value;
   const version = etag.value;
+  const patch = baselineModel.value
+    ? modelPatch(baselineModel.value, body)
+    : {};
+  if (currentId && !Object.keys(patch).length) {
+    notice.value = t('noChanges');
+    return;
+  }
+  const key = globalThis.crypto.randomUUID();
   const action = async () => {
-    const patch = {
-      providerId: body.providerId,
-      upstreamModel: body.upstreamModel,
-      displayName: body.displayName,
-      enabled: body.enabled,
-      contextWindow: body.contextWindow,
-      maxOutputTokens: body.maxOutputTokens,
-      price: body.price,
-    };
     const result = currentId
       ? await api.patchModel(currentId, patch, version, lifetime.signal)
-      : await api.createModel(
-          body,
-          globalThis.crypto.randomUUID(),
-          lifetime.signal,
-        );
+      : await api.createModel(body, key, lifetime.signal);
     if (!alive) return;
-    if (result.etag) modelEtags.set(result.data.id, result.etag);
-    else modelEtags.delete(result.data.id);
+    if (!result.data) return;
     editor.value = '';
     await readAfterWrite();
   };
@@ -280,11 +349,12 @@ function createCredential() {
   const value = secret.value;
   secret.value = '';
   const providerId = selected.value;
+  const key = globalThis.crypto.randomUUID();
   void write(async () => {
     const result = await api.createCredential(
       providerId,
       { secret: value },
-      globalThis.crypto.randomUUID(),
+      key,
       lifetime.signal,
     );
     if (!alive) return;
@@ -294,6 +364,14 @@ function createCredential() {
   });
 }
 function askCredential(action: 'activate' | 'revoke') {
+  if (
+    !credential.value ||
+    credential.value.id !== credentialId.value ||
+    (action === 'activate'
+      ? credential.value.state !== 'staged'
+      : credential.value.state === 'revoked')
+  )
+    return;
   if (
     !uuid.test(credentialId.value) ||
     !credentialEtag.value.trim() ||
@@ -308,6 +386,7 @@ function askCredential(action: 'activate' | 'revoke') {
     cid = credentialId.value,
     version = credentialEtag.value,
     body = { reason: reason.value.trim() };
+  const key = globalThis.crypto.randomUUID();
   pending.value = {
     message: t(action === 'revoke' ? 'danger' : 'activateConfirm'),
     run: async () => {
@@ -317,7 +396,7 @@ function askCredential(action: 'activate' | 'revoke') {
         action,
         body,
         version,
-        globalThis.crypto.randomUUID(),
+        key,
         lifetime.signal,
       );
       if (!alive) return;
@@ -341,8 +420,7 @@ function saveGrants() {
     run: async () => {
       const result = await api.grants(mid, body, version, lifetime.signal);
       if (!alive) return;
-      if (result.etag) grantEtags.set(mid, result.etag);
-      else grantEtags.delete(mid);
+      if (!result.data) return;
       editor.value = '';
       await readAfterWrite();
     },
@@ -483,9 +561,6 @@ function saveGrants() {
               t('enabled')
             }}</label
           >
-          <label v-if="original"
-            >{{ t('etag') }}<input v-model="etag" name="etag"
-          /></label>
           <ElButton native-type="submit">{{ t('save') }}</ElButton>
         </form>
         <form
@@ -562,10 +637,6 @@ function saveGrants() {
               t('enabled')
             }}</label
           >
-          <template v-if="original"
-            ><p>{{ t('etagHint') }}</p>
-            <label>{{ t('etag') }}<input v-model="etag" name="etag" /></label
-          ></template>
           <ElButton native-type="submit">{{ t('save') }}</ElButton>
         </form>
         <div v-else-if="editor === 'credential'">
@@ -588,22 +659,41 @@ function saveGrants() {
           </p>
           <label
             >{{ t('credentialId')
-            }}<input v-model="credentialId" name="credentialId"
+            }}<input
+              v-model="credentialId"
+              name="credentialId"
+              @input="
+                credential = undefined;
+                credentialEtag = '';
+              "
           /></label>
-          <label
-            >{{ t('etag')
-            }}<input v-model="credentialEtag" name="credentialEtag"
-          /></label>
+          <ElButton data-testid="read-credential" @click="readCredential">{{
+            t('refresh')
+          }}</ElButton>
           <label
             >{{ t('reason')
             }}<input v-model="reason" name="reason" maxlength="1024"
           /></label>
-          <ElButton @click="askCredential('activate')">{{
-            t('activate')
-          }}</ElButton
-          ><ElButton type="danger" @click="askCredential('revoke')">{{
-            t('revoke')
-          }}</ElButton>
+          <ElButton
+            :disabled="
+              !credential ||
+              credential.id !== credentialId ||
+              credential.state !== 'staged' ||
+              !credentialEtag
+            "
+            @click="askCredential('activate')"
+            >{{ t('activate') }}</ElButton
+          ><ElButton
+            type="danger"
+            :disabled="
+              !credential ||
+              credential.id !== credentialId ||
+              credential.state === 'revoked' ||
+              !credentialEtag
+            "
+            @click="askCredential('revoke')"
+            >{{ t('revoke') }}</ElButton
+          >
         </div>
         <form v-else novalidate @submit.prevent="saveGrants">
           <h2>{{ t('grants') }} · {{ original }}</h2>
@@ -612,9 +702,7 @@ function saveGrants() {
             >{{ t('grantsText')
             }}<textarea v-model="grantText" name="grants" rows="5"></textarea>
           </label>
-          <p>{{ t('etagHint') }}</p>
-          <label>{{ t('etag') }}<input v-model="etag" name="etag" /></label
-          ><ElButton native-type="submit">{{ t('save') }}</ElButton>
+          <ElButton native-type="submit">{{ t('save') }}</ElButton>
         </form>
       </fieldset>
       <ElButton :disabled="busy" @click="close">{{ t('close') }}</ElButton>

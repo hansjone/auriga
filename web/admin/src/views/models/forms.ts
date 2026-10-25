@@ -142,3 +142,20 @@ export function modelInput(
     },
   };
 }
+
+export function modelPatch(before: ModelInput, after: ModelInput) {
+  const patch: import('../../admin/modelProvidersApi').ModelPatch = {};
+  for (const key of [
+    'providerId',
+    'upstreamModel',
+    'displayName',
+    'enabled',
+    'contextWindow',
+    'maxOutputTokens',
+    'price',
+  ] as const) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key]))
+      Object.assign(patch, { [key]: after[key] });
+  }
+  return patch;
+}

@@ -37,11 +37,7 @@ const zh = {
   secret: '密钥（仅写入）',
   secretHint: '提交后立即清空，不显示已存密钥。',
   credentialId: '凭据 ID',
-  etag: '当前 ETag',
-  etagHint:
-    '接口未提供此资源的读取入口。请填写可信管理响应中的当前 ETag，不能用 revision 替代。',
-  credentialHint:
-    '接口暂不提供凭据列表；可操作本次创建的凭据，或填写已有凭据 ID 与 ETag。',
+  credentialHint: '可操作本次创建的凭据，或填写已有凭据 ID 后刷新。',
   reason: '原因',
   activate: '激活',
   revoke: '撤销',
@@ -50,7 +46,7 @@ const zh = {
   activateConfirm: '确认激活此凭据，供新请求使用？',
   grants: '授权',
   grantHint:
-    '替换全部授权，每行填写 member、group 或 role 加空格和 UUID。空内容表示撤销全部授权。当前接口不提供授权读取。',
+    '替换全部授权，每行填写 member、group 或 role 加空格和 UUID。空内容表示撤销全部授权。',
   replaceConfirm: '确认用当前内容替换全部授权？遗漏的授权将被收回。',
   grantsText: '授权列表',
   orphan: '其他提供商的模型',
@@ -62,7 +58,10 @@ const zh = {
   more: '加载更多',
   disabled: '停用',
   stepup: '请先完成二次验证再重试',
-  conflict: '版本已变化，请刷新并取得当前 ETag',
+  conflict: '已被他人修改，请检查最新内容后再保存',
+  stateConflict: '状态冲突，请检查最新内容后重试',
+  limited: '请求过于频繁，请稍后重试',
+  noChanges: '没有更改',
   forbidden: '无操作权限',
   readback: '写入已成功，但刷新失败；请刷新后再操作',
 };
@@ -105,11 +104,8 @@ const en: Record<keyof typeof zh, string> = {
   secretHint:
     'Cleared immediately on submission. Stored secrets are never displayed.',
   credentialId: 'Credential ID',
-  etag: 'Current ETag',
-  etagHint:
-    'No read endpoint is available. Enter the current ETag from a trusted management response. Do not substitute revision.',
   credentialHint:
-    'No credential list endpoint is available. Use a credential created here or enter an existing credential ID and ETag.',
+    'No credential list endpoint is available. Use a credential created here or enter an existing credential ID and refresh.',
   reason: 'Reason',
   activate: 'Activate',
   revoke: 'Revoke',
@@ -118,7 +114,7 @@ const en: Record<keyof typeof zh, string> = {
   activateConfirm: 'Activate this credential for new requests?',
   grants: 'Grants',
   grantHint:
-    'Replace all grants. Enter member, group or role followed by a space and UUID on each line. Empty content removes all grants. No grants read endpoint is available.',
+    'Replace all grants. Enter member, group or role followed by a space and UUID on each line. Empty content removes all grants.',
   replaceConfirm:
     'Replace all grants with this list? Omitted grants will be removed.',
   grantsText: 'Grant list',
@@ -131,7 +127,10 @@ const en: Record<keyof typeof zh, string> = {
   more: 'Load more',
   disabled: 'Disabled',
   stepup: 'Complete step-up verification before retrying',
-  conflict: 'Version changed. Refresh and obtain the current ETag.',
+  conflict: 'Modified by another user. Review the latest data before saving.',
+  stateConflict: 'State conflict. Review the latest data before retrying.',
+  limited: 'Too many requests. Please retry later.',
+  noChanges: 'No changes',
   forbidden: 'Permission denied',
   readback:
     'Write succeeded, but refresh failed. Refresh before editing again.',

@@ -11,6 +11,7 @@ export type Provider = Schemas['Provider'];
 export type ProviderInput = Schemas['ProviderInput'];
 export type Model = Schemas['Model'];
 export type ModelInput = Schemas['ModelInput'];
+export type ModelPatch = Schemas['ModelPatch'];
 export type Credential = Schemas['Credential'];
 export type ModelGrants = Schemas['ModelGrants'];
 export type Versioned<T> = { data: T; etag: string | null };
@@ -112,6 +113,19 @@ export function createModelProvidersApi(options: ApiClientOptions = {}) {
       ),
     models: (cursor?: string, signal?: AbortSignal) =>
       get<Schemas['ModelPage']>(page('models', cursor), signal),
+    model: (modelId: string, signal?: AbortSignal) =>
+      get<Model>(`/models/${id(modelId)}`, signal),
+    readGrants: (modelId: string, signal?: AbortSignal) =>
+      get<ModelGrants>(`/models/${id(modelId)}/grants`, signal),
+    credential: (
+      providerId: string,
+      credentialId: string,
+      signal?: AbortSignal,
+    ) =>
+      get<Credential>(
+        `/providers/${id(providerId)}/credentials/${id(credentialId)}`,
+        signal,
+      ),
     createModel: (body: ModelInput, key?: string, signal?: AbortSignal) =>
       post<Model>('/models', body, key, undefined, signal),
     patchModel: async (
