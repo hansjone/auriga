@@ -171,11 +171,7 @@ class NetworkMailboxWirePostgresTest {
                     return null;
                   });
           String proof = "sha256:" + "a".repeat(64);
-          String frame =
-              """
-          {"app_version":"1.0","type":"receipt","request_id":"receipt-r","operation_id":"op-r","epoch":"1","delivery_id":"%s","mail_seq":"1","results":[{"recipient_id":"%s","target":{"realm":"2","node":"30","local":"0","type":"system"},"message_digest":"%s","host_request_id":"host-r","status":"host_accepted","expected_state_version":"1","accepted_by":"system","acceptance_mode":"normal","evidence_digest":"%s"}]}
-          """
-                  .formatted(delivery, recipient, NetworkJson.digest(data), proof);
+          String frame = NetworkMailboxWireFrames.receipt("30", delivery, recipient, data);
           NetworkAuthorityGrpcTest.denied(
               () ->
                   wire.receipt(
@@ -197,12 +193,13 @@ class NetworkMailboxWirePostgresTest {
           new TransactionTemplate(manager)
               .execute(
                   status -> {
-                    assertTrue(
+                    String persisted =
                         jdbc.queryForObject(
-                                "SELECT request_json FROM collab.network_wire_receipt WHERE tenant_id=? AND operation_id='op-r'",
-                                String.class,
-                                TENANT)
-                            .contains(proof));
+                            "SELECT request_json FROM collab.network_wire_receipt WHERE tenant_id=? AND operation_id='op-r'",
+                            String.class,
+                            TENANT);
+                    assertEquals(NetworkJson.canonical(NetworkJson.parse(frame)), persisted);
+                    assertTrue(persisted.contains(proof));
                     return null;
                   });
           return null;

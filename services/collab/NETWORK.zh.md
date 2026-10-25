@@ -86,5 +86,10 @@ FETCH 的非空 continuation、held_ids、paused、state_barrier，以及 RECEIP
 outcome_unknown 尚不被核心支持，入口明确拒绝而不忽略。旧 epoch 回执暂按 stale_epoch 拒绝，
 跨 epoch 证据对账需要后续实现。这些边界不能宣称为完整 NATS/插件恢复链路已交付。
 
-V6 添加 node 的 wire 字段和两张 RLS 表，不改旧迁移。已见 ingress 与回执证明当前长期保留，
+每个携帧 RPC 都在严格 JSON 解析后校验对应 type 与完整 schema；顶层或嵌套重复键直接拒绝。
+RECEIPT 的 target 必须包含地址契约的 version=1，合法同 operation_id 异体才进入 conflict 判定。
+
+V7__network_wire_association.sql 添加 node 的 wire 字段和两张 RLS 表，不改旧迁移。
+V6 保留给 #147 的 network_audit_decisions；wire 迁移尚未发行，仅本分支改名。
+已见 ingress 与回执证明当前长期保留，
 后续清理必须保留 fencing/去重所需见证，不能简单按连接过期删除。

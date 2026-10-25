@@ -377,6 +377,9 @@ public class NetworkMailboxWireService {
 
   private static JsonNode frame(byte[] bytes, String definition) {
     var frame = NetworkJson.parse(bytes);
+    require(
+        definition.toLowerCase(Locale.ROOT).equals(frame.path("type").asString()),
+        NetworkErrors.PROTOCOL_ERROR);
     NetworkSchemas.validate("protocol", definition, frame);
     return frame;
   }
