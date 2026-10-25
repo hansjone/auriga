@@ -850,6 +850,10 @@ class NetworkMailboxPostgresTest {
   }
 
   static NetworkSourceAuthority authority(NetworkSourceAuthority.Dispatch dispatch) {
+    return authority(dispatch, Clock.systemUTC());
+  }
+
+  static NetworkSourceAuthority authority(NetworkSourceAuthority.Dispatch dispatch, Clock clock) {
     return new NetworkSourceAuthority() {
       public Source currentSource(UUID tenant) {
         return new Source(
@@ -861,15 +865,15 @@ class NetworkMailboxPostgresTest {
             "user-alice",
             "协作会话",
             "1",
-            Instant.now(),
+            clock.instant(),
             "binding-test",
             "1",
             "1",
-            Instant.now().plusSeconds(600));
+            clock.instant().plusSeconds(600));
       }
 
       public Instant authorizeDelivery(UUID tenant, String message, String source, String node) {
-        return Instant.now().plusSeconds(600);
+        return clock.instant().plusSeconds(600);
       }
 
       public String resolveTargetType(UUID tenant, String realm, String node, String local) {
@@ -889,7 +893,7 @@ class NetworkMailboxPostgresTest {
             epoch,
             "nonce-test",
             "request-test",
-            Instant.now().plusSeconds(600));
+            clock.instant().plusSeconds(600));
       }
 
       public Dispatch currentDispatch(UUID tenant) {
@@ -913,33 +917,48 @@ class NetworkMailboxPostgresTest {
   }
 
   @Test
-  void expiredItemBecomesTerminalAndDoesNotBlockLaterDelivery() {
+  void expiredItemBecomesTerminalAndDoesNotBlockLaterDelivery() throws Exception {
     UUID tenant = UUID.randomUUID();
-    call(
-        tenant,
-        () ->
-            mailbox.store(
-                StoreRequest.unicast(tenant, "2", "10", "1", "short", "20", "3"), "{\"ttl\":1}"));
-    call(
-        tenant,
-        () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "later", "20", "3")));
-    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
-    var later =
-        new NetworkMailboxService(
-            jdbc,
-            manager,
-            authority(null),
-            keys,
-            Clock.offset(Clock.systemUTC(), java.time.Duration.ofSeconds(2)),
-            liveIam());
-    var frame =
-        NetworkJson.parse(call(tenant, () -> later.fetchPage(tenant, "2", "20", 0, 10, 65536)));
-    assertEquals("terminal", frame.path("items").get(0).path("type").asString());
-    assertEquals(
-        "expired",
-        frame.path("items").get(0).path("recipients").get(0).path("transport_status").asString());
-    assertEquals("delivery", frame.path("items").get(1).path("type").asString());
-    assertEquals("2", frame.path("page").path("scan_after").asString());
+    Instant start = Instant.parse("2026-10-25T12:00:00Z");
+    Clock clock = mock(Clock.class);
+    when(clock.instant()).thenReturn(start);
+    try (var testKeys = new NetworkSigningKeys(clock, 1)) {
+      for (String purpose : List.of("business_delivery", "protocol_response", "management_state")) {
+        var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        testKeys.add(
+            "2",
+            purpose,
+            purpose,
+            pair.getPublic(),
+            pair.getPrivate(),
+            start.minusSeconds(3600),
+            start.plusSeconds(86400),
+            NetworkSigningKeys.State.ACTIVE);
+      }
+      var controlled =
+          new NetworkMailboxService(
+              jdbc, manager, authority(null, clock), testKeys, clock, liveIam());
+      call(
+          tenant,
+          () ->
+              controlled.store(
+                  StoreRequest.unicast(tenant, "2", "10", "1", "short", "20", "3"), "{\"ttl\":1}"));
+      call(
+          tenant,
+          () -> controlled.store(StoreRequest.unicast(tenant, "2", "10", "1", "later", "20", "3")));
+      call(tenant, () -> controlled.ready(tenant, "2", "20"));
+      // Advance beyond the one-second TTL only after both messages have been stored and signed.
+      when(clock.instant()).thenReturn(start.plusSeconds(2));
+      var frame =
+          NetworkJson.parse(
+              call(tenant, () -> controlled.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+      assertEquals("terminal", frame.path("items").get(0).path("type").asString());
+      assertEquals(
+          "expired",
+          frame.path("items").get(0).path("recipients").get(0).path("transport_status").asString());
+      assertEquals("delivery", frame.path("items").get(1).path("type").asString());
+      assertEquals("2", frame.path("page").path("scan_after").asString());
+    }
   }
 
   @Test
