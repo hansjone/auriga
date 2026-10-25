@@ -237,6 +237,12 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamGrpcNetworkAuthority iamGrpcNetworkAuthority(
+      IamNetworkAuthority authority, IamGrpcSessions transportGuard, Clock clock) {
+    return new IamGrpcNetworkAuthority(authority, clock);
+  }
+
+  @Bean
   NetworkDirectory iamNetworkDirectory(
       IamStore store, SessionManager sessions, TokenService tokens, Clock clock) {
     return new IamNetworkDirectory(
@@ -255,7 +261,7 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
-  NetworkAuthority iamNetworkAuthority(
+  IamNetworkAuthority iamNetworkAuthority(
       IamStore store,
       SessionManager sessions,
       TokenService tokens,
