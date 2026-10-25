@@ -55,6 +55,10 @@ type liveBinding struct {
 	Failures    int
 	FailedSince time.Time
 	RetryAfter  time.Time
+	// Set only from collab's authenticated READY response, never client claims.
+	Incarnation  string
+	ChannelNonce string
+	Epoch        uint64
 }
 
 // IAMRedeemer retains only bounded live connections. Routing hints in CONNECT
@@ -65,13 +69,17 @@ type IAMRedeemer struct {
 	mu       sync.Mutex
 	pending  int
 	bindings map[string]liveBinding
+	inFlight map[string]bool
+	guards   map[string]*sync.Mutex
+	onBind   func(string) error
+	onForget func(string)
 }
 
 func NewIAMRedeemer(rpc grpc.ClientConnInterface, cfg IAMConfig) (*IAMRedeemer, error) {
 	if rpc == nil || cfg.ServerID == "" || cfg.ServerAudience == "" || cfg.Account == "" || cfg.RedeemTimeout <= 0 || cfg.RedeemTimeout >= cfg.AuthTimeout || cfg.MaxConnections <= 0 {
 		return nil, errors.New("network: incomplete IAM configuration or invalid timeout")
 	}
-	return &IAMRedeemer{rpc: iam.NewNetworkGatewayServiceClient(rpc), cfg: cfg, bindings: make(map[string]liveBinding)}, nil
+	return &IAMRedeemer{rpc: iam.NewNetworkGatewayServiceClient(rpc), cfg: cfg, bindings: make(map[string]liveBinding), inFlight: make(map[string]bool), guards: make(map[string]*sync.Mutex)}, nil
 }
 
 func (r *IAMRedeemer) Redeem(ctx context.Context, a Attempt) (Grant, error) {
@@ -121,7 +129,14 @@ func (r *IAMRedeemer) Redeem(ctx context.Context, a Attempt) (Grant, error) {
 	// sending the auth response, so successful CONNECT cannot escape tracking.
 	r.mu.Lock()
 	r.bindings[ingress] = liveBinding{Binding: Binding{ServerID: a.ServerID, ClientID: a.ClientID, Account: r.cfg.Account, Ingress: ingress}, Tenant: token.Tenant, Realm: resp.GetRealm(), Node: token.Node, NotAfter: expiry, CheckAfter: time.Now().Add(r.cfg.AuthTimeout)}
+	onBind := r.onBind
 	r.mu.Unlock()
+	if onBind != nil {
+		if err := onBind(ingress); err != nil {
+			r.forget(ingress)
+			return Grant{}, err
+		}
+	}
 	return Grant{Ingress: ingress, NotAfter: expiry}, nil
 }
 
@@ -137,23 +152,97 @@ func (r *IAMRedeemer) snapshot() []liveBinding {
 
 func (r *IAMRedeemer) onDecision(a Attempt, claims *jwt.UserClaims, decisionErr error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	var forgotten []string
 	for ingress, b := range r.bindings {
 		if b.ServerID != a.ServerID || b.ClientID != a.ClientID {
 			continue
 		}
 		if decisionErr != nil || claims == nil {
 			delete(r.bindings, ingress)
+			delete(r.guards, ingress)
+			forgotten = append(forgotten, ingress)
 		} else {
 			b.NotAfter = time.Unix(claims.Expires, 0)
 			r.bindings[ingress] = b
+		}
+	}
+	onForget := r.onForget
+	r.mu.Unlock()
+	if onForget != nil {
+		for _, ingress := range forgotten {
+			onForget(ingress)
 		}
 	}
 }
 
 type nodeIdentity struct{ Tenant, Realm, Node string }
 
-func (r *IAMRedeemer) activeBatch(ctx context.Context, bindings []liveBinding) (map[nodeIdentity]bool, error) {
+func (r *IAMRedeemer) connectionGuard(ingress string) *sync.Mutex {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.bindings[ingress]; !ok {
+		return nil
+	}
+	guard := r.guards[ingress]
+	if guard == nil {
+		guard = new(sync.Mutex)
+		r.guards[ingress] = guard
+	}
+	return guard
+}
+
+func (r *IAMRedeemer) activeBatch(ctx context.Context, bindings []liveBinding, timeout time.Duration) (map[nodeIdentity]bool, map[string]error) {
+	groups := make(map[string][]liveBinding)
+	for _, b := range bindings {
+		groups[b.Tenant] = append(groups[b.Tenant], b)
+	}
+	type batchResult struct {
+		tenant string
+		status map[nodeIdentity]bool
+		err    error
+	}
+	jobs := make(chan []liveBinding, len(groups))
+	results := make(chan batchResult, len(groups))
+	for _, group := range groups {
+		jobs <- group
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	// Queueing does not consume another tenant's RPC deadline. At most 64
+	// delegated calls execute concurrently; cancellation still stops the batch.
+	for i := 0; i < min(64, len(groups)); i++ {
+		workers.Go(func() {
+			for group := range jobs {
+				check, cancel := context.WithTimeout(ctx, timeout)
+				status, err := r.activeTenantBatch(check, group)
+				cancel()
+				results <- batchResult{group[0].Tenant, status, err}
+			}
+		})
+	}
+	workers.Wait()
+	close(results)
+	var merged map[nodeIdentity]bool
+	var failures map[string]error
+	for result := range results {
+		if result.err != nil {
+			if failures == nil {
+				failures = make(map[string]error)
+			}
+			failures[result.tenant] = result.err
+			continue
+		}
+		if merged == nil {
+			merged = make(map[nodeIdentity]bool)
+		}
+		for key, active := range result.status {
+			merged[key] = active
+		}
+	}
+	return merged, failures
+}
+
+func (r *IAMRedeemer) activeTenantBatch(ctx context.Context, bindings []liveBinding) (map[nodeIdentity]bool, error) {
 	requested := make(map[nodeIdentity]bool, len(bindings))
 	req := &iam.BatchNetworkNodesActiveRequest{}
 	for _, b := range bindings {

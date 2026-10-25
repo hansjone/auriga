@@ -241,7 +241,7 @@ accounts {
   SVC {
     users: [ { user: %q, password: %q, permissions: {
       publish: { allow: ["auriga.net.down.*", "auriga.net.reply.>", "auriga.internal.>"] }
-      subscribe: { allow: ["auriga.net.up.*", "auriga.internal.>", "_INBOX.>"] }
+      subscribe: { allow: ["auriga.net.up.*.*", "auriga.internal.>", "_INBOX.>"] }
     } } ]
     exports: [
       { stream: "auriga.net.down.>", accounts: [CLIENTS] }
