@@ -170,60 +170,150 @@ class NetworkKeyOperationsPostgresTest {
   @Test
   void signaturesAndRevocationSerializeOnTheDurablePublication() throws Exception {
     var p = m.payload(1, KeyTestMaterial.NOW);
-    service().publish(m.release(p));
+    var first = m.release(p);
+    service().publish(first);
     var entered = new java.util.concurrent.CountDownLatch(1);
     var finish = new java.util.concurrent.CountDownLatch(1);
+    var signerPid = new java.util.concurrent.atomic.AtomicInteger();
+    var publisherPid = new java.util.concurrent.atomic.AtomicInteger();
+    var publisherReady = new java.util.concurrent.CountDownLatch(1);
     var next = m.payload(2, KeyTestMaterial.NOW);
     ((ObjectNode) next.path("keys").get(0)).put("state", "revoked");
+    var revocation = m.release(next);
     try (var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-      var signed =
-          workers.submit(
-              () ->
-                  service()
-                      .signApproved(
-                          NetworkJson.canonical(p),
-                          () -> {
-                            entered.countDown();
-                            try {
-                              assertTrue(finish.await(10, java.util.concurrent.TimeUnit.SECONDS));
-                              return "signed-before-revocation";
-                            } catch (InterruptedException e) {
-                              Thread.currentThread().interrupt();
-                              throw new IllegalStateException(e);
-                            }
-                          }));
-      assertTrue(entered.await(10, java.util.concurrent.TimeUnit.SECONDS));
-      var revoked =
-          workers.submit(
-              () ->
-                  TenantContext.call(
-                      tenant,
-                      () ->
-                          new TransactionTemplate(manager)
-                              .execute(
-                                  status -> {
-                                    jdbc.execute("SET LOCAL lock_timeout = '250ms'");
-                                    service().publish(m.release(next));
-                                    return null;
-                                  })));
-      var blocked =
-          assertThrows(
-              java.util.concurrent.ExecutionException.class,
-              () -> revoked.get(10, java.util.concurrent.TimeUnit.SECONDS));
-      assertInstanceOf(
-          org.springframework.dao.CannotAcquireLockException.class, blocked.getCause());
-      finish.countDown();
-      assertEquals(
-          "signed-before-revocation", signed.get(10, java.util.concurrent.TimeUnit.SECONDS));
-      service().publish(m.release(next));
-      assertThrows(
-          RuntimeException.class,
-          () ->
-              service()
-                  .signApproved(
-                      NetworkJson.canonical(p), () -> fail("revoked state must not sign")));
-    } finally {
-      finish.countDown();
+      // This finally must run before ExecutorService.close(), including assertion failures.
+      try {
+        var signed =
+            workers.submit(
+                () ->
+                    service()
+                        .signApproved(
+                            NetworkJson.canonical(p),
+                            () -> {
+                              signerPid.set(
+                                  jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                              entered.countDown();
+                              try {
+                                assertTrue(finish.await(10, java.util.concurrent.TimeUnit.SECONDS));
+                                return "signed-before-revocation";
+                              } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IllegalStateException(e);
+                              }
+                            }));
+        assertTrue(entered.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        var failedPublication =
+            workers.submit(
+                () ->
+                    TenantContext.call(
+                        tenant,
+                        () ->
+                            new TransactionTemplate(manager)
+                                .execute(
+                                    status -> {
+                                      jdbc.execute("SET LOCAL lock_timeout = '250ms'");
+                                      var conflict =
+                                          assertThrows(
+                                              org.springframework.dao.DataAccessException.class,
+                                              () -> service().publish(revocation));
+                                      var sql =
+                                          assertInstanceOf(
+                                              java.sql.SQLException.class,
+                                              conflict.getMostSpecificCause());
+                                      assertEquals("55P03", sql.getSQLState(), conflict::toString);
+                                      if (conflict
+                                          instanceof
+                                          org.springframework.jdbc.UncategorizedSQLException
+                                              uncategorized) {
+                                        assertTrue(
+                                            uncategorized
+                                                .getSql()
+                                                .contains(
+                                                    "INSERT INTO collab.network_key_publication"));
+                                      }
+                                      var aborted =
+                                          assertThrows(
+                                              org.springframework.dao.DataAccessException.class,
+                                              () -> jdbc.queryForObject("SELECT 1", Integer.class));
+                                      assertEquals(
+                                          "25P02",
+                                          assertInstanceOf(
+                                                  java.sql.SQLException.class,
+                                                  aborted.getMostSpecificCause())
+                                              .getSQLState(),
+                                          aborted::toString);
+                                      // The nested publish marked this transaction rollback-only.
+                                      assertTrue(status.isRollbackOnly());
+                                      status.setRollbackOnly();
+                                      return null;
+                                    })));
+        failedPublication.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(
+            first, service().current(), "Failed revocation must not publish any new state");
+
+        // A fresh transaction retries the real publication. Observe its actual blocker rather
+        // than guessing from elapsed time or racing the short error-path lock timeout.
+        var recoveredPublication =
+            workers.submit(
+                () ->
+                    TenantContext.call(
+                        tenant,
+                        () ->
+                            new TransactionTemplate(manager)
+                                .execute(
+                                    status -> {
+                                      publisherPid.set(
+                                          jdbc.queryForObject(
+                                              "SELECT pg_backend_pid()", Integer.class));
+                                      publisherReady.countDown();
+                                      service().publish(revocation);
+                                      return null;
+                                    })));
+        assertTrue(publisherReady.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        boolean blockedBySigner = false;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!blockedBySigner && !recoveredPublication.isDone() && System.nanoTime() < deadline) {
+          blockedBySigner =
+              Boolean.TRUE.equals(
+                  jdbc.queryForObject(
+                      "SELECT ? = ANY(pg_blocking_pids(?))",
+                      Boolean.class,
+                      signerPid.get(),
+                      publisherPid.get()));
+        }
+        assertTrue(blockedBySigner, "Publication must wait for the exact signing backend");
+        assertFalse(
+            recoveredPublication.isDone(), "Revocation cannot commit while signing is held");
+        assertEquals(first, service().current());
+        finish.countDown();
+        assertEquals(
+            "signed-before-revocation", signed.get(10, java.util.concurrent.TimeUnit.SECONDS));
+        recoveredPublication.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(revocation, service().current());
+        assertEquals(
+            "revoked",
+            NetworkJson.parse(service().current().signedKeyset())
+                .path("keyset")
+                .path("keys")
+                .get(0)
+                .path("state")
+                .asString());
+        var denied =
+            assertThrows(
+                auriga.common.error.AurigaException.class,
+                () ->
+                    service()
+                        .signApproved(
+                            NetworkJson.canonical(p), () -> fail("revoked state must not sign")));
+        assertEquals("common.unavailable", denied.errorCode().code());
+        assertEquals(
+            "signed-with-current-protocol-key",
+            service()
+                .signApproved(
+                    NetworkJson.canonical(next), () -> "signed-with-current-protocol-key"));
+      } finally {
+        finish.countDown();
+      }
     }
   }
 
