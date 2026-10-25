@@ -41,6 +41,10 @@ final class SigningKeyLoader {
                     Instant.parse(payload.path("valid_until").asString()))
                 .getSeconds());
     try {
+      // Hold the publisher lock while checking the entire installed snapshot. Once it
+      // matches, every add below only rebinds an existing key in memory, never persists.
+      if (!NetworkJson.canonical(snapshot(payload)).equals(ProtectedKeyFiles.readText(state)))
+        throw ProtectedKeyFiles.invalid();
       var required = new HashSet<String>();
       var purposes = new HashSet<String>();
       for (var entry : payload.path("keys")) {
@@ -105,24 +109,7 @@ final class SigningKeyLoader {
         if (version.compareTo(new java.math.BigInteger(payload.path("keyset_version").asString()))
             >= 0) throw RootKeyPublication.invalid();
       }
-      var snapshot =
-          JsonMapper.builder()
-              .build()
-              .createObjectNode()
-              .put("version", payload.path("keyset_version").asString())
-              .put("issued_at", payload.path("issued_at").asString());
-      var array = snapshot.putArray("keys");
-      for (var key : payload.path("keys")) {
-        array
-            .addObject()
-            .put("kid", key.path("kid").asString())
-            .put("realm", payload.path("realm").asString())
-            .put("purpose", key.path("purpose").asString())
-            .put("state", key.path("state").asString().toUpperCase(java.util.Locale.ROOT))
-            .put("not_before", key.path("not_before").asString())
-            .put("not_after", key.path("not_after").asString())
-            .put("public_key_spki", key.path("public_key_spki").asString());
-      }
+      var snapshot = snapshot(payload);
       Path temporary = Files.createTempFile(file.getParent(), "key-state-", ".tmp");
       try {
         try (var output = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
@@ -137,5 +124,27 @@ final class SigningKeyLoader {
         Files.deleteIfExists(temporary);
       }
     }
+  }
+
+  private static tools.jackson.databind.node.ObjectNode snapshot(JsonNode payload) {
+    var snapshot =
+        JsonMapper.builder()
+            .build()
+            .createObjectNode()
+            .put("version", payload.path("keyset_version").asString())
+            .put("issued_at", payload.path("issued_at").asString());
+    var array = snapshot.putArray("keys");
+    for (var key : payload.path("keys")) {
+      array
+          .addObject()
+          .put("kid", key.path("kid").asString())
+          .put("realm", payload.path("realm").asString())
+          .put("purpose", key.path("purpose").asString())
+          .put("state", key.path("state").asString().toUpperCase(java.util.Locale.ROOT))
+          .put("not_before", key.path("not_before").asString())
+          .put("not_after", key.path("not_after").asString())
+          .put("public_key_spki", key.path("public_key_spki").asString());
+    }
+    return snapshot;
   }
 }

@@ -130,6 +130,130 @@ class NetworkKeyConfigurationTest {
   }
 
   @Test
+  void uninstalledApprovedReleaseCannotPartiallyAdvanceStateAndCanBeInstalledAfterRejection()
+      throws Exception {
+    var old = m.payload(5, KeyTestMaterial.NOW);
+    Path state = directory.resolve("state.json");
+    SigningKeyLoader.installState(old, state);
+    var configured = new java.util.HashMap<>(secrets());
+    var businessNext = KeyTestMaterial.pair();
+    var protocolNext = KeyTestMaterial.pair();
+    var next = m.payload(6, KeyTestMaterial.NOW);
+    var entries = (tools.jackson.databind.node.ArrayNode) next.path("keys");
+    entries.add(m.key("business-next", "business_delivery", businessNext).put("state", "next"));
+    entries.add(m.key("protocol-next", "protocol_response", protocolNext).put("state", "next"));
+    var release = m.release(next);
+    var approved =
+        m.verifier(clock).verify(release.signedKeyset(), release.announcement()).payload();
+    configured.put(
+        "business-next",
+        protectedFile(
+                directory.resolve("business-next.der"), businessNext.getPrivate().getEncoded())
+            .toString());
+
+    assertRejectedLoadKeepsState(approved, state, configured);
+    assertEquals("5", NetworkJson.parse(Files.readString(state)).path("version").asString());
+    // The same already-root-approved v6 remains installable, without relaxing anti-rollback.
+    SigningKeyLoader.installState(approved, state);
+    assertEquals("6", NetworkJson.parse(Files.readString(state)).path("version").asString());
+    // Even after installation, loading a valid earlier key then missing a later NEXT must be inert.
+    assertRejectedLoadKeepsState(approved, state, configured);
+    configured.put(
+        "protocol-next",
+        protectedFile(
+                directory.resolve("protocol-next.der"), protocolNext.getPrivate().getEncoded())
+            .toString());
+    assertHealthyLoadKeepsState(approved, state, configured);
+    byte[] installed = Files.readAllBytes(state);
+    assertThrows(
+        IllegalArgumentException.class, () -> SigningKeyLoader.installState(approved, state));
+    assertArrayEquals(installed, Files.readAllBytes(state));
+  }
+
+  @Test
+  void wrongExtraAndDuplicatePrivateMappingsLeaveInstalledStateAndLockRecoverable()
+      throws Exception {
+    var approved = m.payload(5, KeyTestMaterial.NOW);
+    Path state = directory.resolve("state.json");
+    SigningKeyLoader.installState(approved, state);
+    var valid = secrets();
+    var wrongPair = new java.util.HashMap<>(valid);
+    wrongPair.put(
+        "management",
+        protectedFile(
+                directory.resolve("wrong.der"), KeyTestMaterial.pair().getPrivate().getEncoded())
+            .toString());
+    assertRejectedLoadKeepsState(approved, state, wrongPair);
+    var extra = new java.util.HashMap<>(valid);
+    extra.put("unpublished", valid.get("business"));
+    assertRejectedLoadKeepsState(approved, state, extra);
+    var duplicate = new java.util.HashMap<>(valid);
+    duplicate.put("management", valid.get("protocol"));
+    assertRejectedLoadKeepsState(approved, state, duplicate);
+    var malformed = new java.util.HashMap<>(valid);
+    malformed.put(
+        "management", protectedFile(directory.resolve("malformed.der"), new byte[] {0}).toString());
+    assertRejectedLoadKeepsState(approved, state, malformed);
+    assertHealthyLoadKeepsState(approved, state, valid);
+  }
+
+  @Test
+  void sameVersionDifferentApprovedContentCannotMutateStateOrBypassInstallProtection()
+      throws Exception {
+    var installed = m.payload(5, KeyTestMaterial.NOW);
+    Path state = directory.resolve("state.json");
+    SigningKeyLoader.installState(installed, state);
+    var valid = secrets();
+    var changed = installed.deepCopy();
+    ((tools.jackson.databind.node.ObjectNode) changed.path("keys").get(0)).put("state", "revoked");
+    var release = m.release(changed);
+    var approved =
+        m.verifier(clock).verify(release.signedKeyset(), release.announcement()).payload();
+    assertRejectedLoadKeepsState(approved, state, valid);
+    byte[] before = Files.readAllBytes(state);
+    assertThrows(
+        IllegalArgumentException.class, () -> SigningKeyLoader.installState(approved, state));
+    assertArrayEquals(before, Files.readAllBytes(state));
+    assertHealthyLoadKeepsState(installed, state, valid);
+  }
+
+  void assertRejectedLoadKeepsState(
+      tools.jackson.databind.JsonNode approved, Path state, Map<String, String> configured)
+      throws Exception {
+    byte[] before = Files.readAllBytes(state);
+    var version = NetworkJson.parse(before).path("version");
+    var rejected =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                SigningKeyLoader.load(
+                    approved, state, configured, clock, (registry, work) -> work.get()));
+    assertEquals("Cannot initialize approved network signing keys", rejected.getMessage());
+    assertArrayEquals(
+        before, Files.readAllBytes(state), "Failed load must preserve exact installed bytes");
+    assertEquals(version, NetworkJson.parse(Files.readAllBytes(state)).path("version"));
+    try (var channel =
+            java.nio.channels.FileChannel.open(
+                state.resolveSibling(state.getFileName() + ".lock"),
+                java.nio.file.StandardOpenOption.WRITE);
+        var lock = channel.tryLock()) {
+      assertNotNull(lock, "Rejected load must release the publisher lock");
+    }
+  }
+
+  void assertHealthyLoadKeepsState(
+      tools.jackson.databind.JsonNode approved, Path state, Map<String, String> configured)
+      throws Exception {
+    byte[] before = Files.readAllBytes(state);
+    try (var keys =
+        SigningKeyLoader.load(approved, state, configured, clock, (registry, work) -> work.get())) {
+      assertEquals(NetworkJson.canonical(approved), keys.publicKeysJson("2"));
+      assertArrayEquals(before, Files.readAllBytes(state));
+    }
+    assertArrayEquals(before, Files.readAllBytes(state));
+  }
+
+  @Test
   void offlineCommandProducesPinnedRootReleaseAndPublicState() throws Exception {
     var issued = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     Path payload =
