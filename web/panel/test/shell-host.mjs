@@ -14,6 +14,7 @@ export function surfaceHost(
     hostTheme = 'light',
     osTheme = 'light',
     consentFetch,
+    remote,
   } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
@@ -308,6 +309,9 @@ export function surfaceHost(
     },
   );
   const ctx = {
+    get(name) {
+      return name === 'remote' ? remote : undefined;
+    },
     theme: {
       getTheme() {
         return {

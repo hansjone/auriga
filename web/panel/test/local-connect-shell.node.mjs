@@ -146,3 +146,29 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
     host.close();
   }
 });
+
+test('connect resource context mounts the authenticated Node catalogue proxy', async () => {
+  const calls = [];
+  const host = surfaceHost(async (url, init) => {
+    calls.push({ url: String(url), init });
+    return response(200, localBoot(true));
+  });
+  try {
+    const main = host.mount('main');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    await panel.context.fetch('/api/resource/v1/packages?limit=50', {
+      method: 'GET',
+    });
+    assert.equal(
+      calls.at(-1).url,
+      'https://instance.example.com/i/example/auriga/resources/api/resource/v1/packages?limit=50',
+    );
+    assert.equal(calls.at(-1).init.credentials, 'same-origin');
+    assert.equal(calls.at(-1).init.headers, undefined);
+    main.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});

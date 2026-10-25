@@ -13,6 +13,7 @@ import {
 } from './local/host.js';
 import { createConnectRoutes } from './local/routes.js';
 import { join } from 'node:path';
+import { installResourceChannel } from './resources/channel.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -63,6 +64,10 @@ export async function apply(ctx, config) {
       };
       const admission = installLocalAdmission(ctx.connection, gate, {
         protocol: ctx.webServer.protocol,
+      });
+      installResourceChannel(ctx, {
+        auth: ctx.connection,
+        current: () => current()?.runtime,
       });
       ctx.effect(
         () => () => admission.dispose(),

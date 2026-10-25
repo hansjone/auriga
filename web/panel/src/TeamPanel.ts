@@ -4,6 +4,8 @@ import {
   canReadResources,
   createResourceReader,
   ResourceError,
+  readInstalledResources,
+  type InstalledResource,
   type Failure,
   type PanelContext,
   type ResourcePackage,
@@ -17,6 +19,7 @@ export class AurigaTeamPanel extends HTMLElement {
   private packages: ResourcePackage[] = [];
   private nextCursor?: string;
   private loaded = false;
+  private installed?: InstalledResource[];
   private selectedId?: string;
   private detail?: ResourcePackage;
   private versions: ResourceVersion[] = [];
@@ -47,16 +50,19 @@ export class AurigaTeamPanel extends HTMLElement {
       previous.mode !== value?.mode ||
       previous.protocol !== value?.protocol ||
       previous.fetch !== value?.fetch ||
+      previous.listInstalled !== value?.listInstalled ||
       previous.apiBase !== value?.apiBase;
     if (changed) {
       this.cancel();
       this.clearData();
+      this.installed = undefined;
       this.selectedId = undefined;
       this.failure = undefined;
       this.retryAction = undefined;
     }
     if (this.isConnected) {
       if (changed && this.tab === 'market') this.loadPackages();
+      if (changed && this.tab === 'mine') this.loadInstalled();
       this.render();
     }
   }
@@ -69,6 +75,7 @@ export class AurigaTeamPanel extends HTMLElement {
   connectedCallback() {
     this.render();
     if (this.tab === 'market' && !this.loaded) this.loadPackages();
+    if (this.tab === 'mine') this.loadInstalled();
   }
   disconnectedCallback() {
     this.cancel();
@@ -92,9 +99,10 @@ export class AurigaTeamPanel extends HTMLElement {
     operation: (signal: AbortSignal) => Promise<T>,
     apply: (result: T) => void,
     retry: () => void,
+    local = false,
   ) {
     this.cancel();
-    if (!this.readable) return;
+    if (!local && !this.readable) return;
     const request = this.epoch;
     const active = new AbortController();
     this.controller = active;
@@ -219,7 +227,20 @@ export class AurigaTeamPanel extends HTMLElement {
     this.failure = undefined;
     this.retryAction = undefined;
     if (value === 'market' && !this.loaded) this.loadPackages();
+    if (value === 'mine') this.loadInstalled();
     this.render();
+  }
+
+  private loadInstalled() {
+    this.installed = undefined;
+    void this.run(
+      () => readInstalledResources(this.context),
+      (items) => {
+        this.installed = items;
+      },
+      () => this.loadInstalled(),
+      true,
+    );
   }
 
   private element<K extends keyof HTMLElementTagNameMap>(
@@ -279,21 +300,86 @@ export class AurigaTeamPanel extends HTMLElement {
     this.root.append(tabs);
     const section = this.element('section');
     this.root.append(section);
-    if (this.tab === 'mine' || !this.readable) {
+    if (this.tab === 'mine') {
+      section.setAttribute('aria-busy', String(this.busy));
+      section.append(
+        this.button(text.refresh, () => this.loadInstalled(), this.busy),
+      );
+      if (this.busy) section.append(this.element('p', text.loading));
+      if (this.failure || (!this.busy && !this.installed)) {
+        const notice = this.element('p', text.mineHint, 'notice');
+        notice.setAttribute('role', 'alert');
+        section.append(notice);
+      }
+      if (this.installed) {
+        section.append(this.element('p', text.inventoryHint, 'muted'));
+        if (!this.installed.length)
+          section.append(this.element('p', text.localEmpty));
+        const cards = this.element('div', undefined, 'cards');
+        for (const item of this.installed) {
+          if (item.unavailable) {
+            const notice = this.element('article', undefined, 'notice error');
+            notice.setAttribute('role', 'status');
+            notice.append(
+              this.element('h3', text.preset + ' · ' + item.name),
+              this.element('p', text.presetUnavailable),
+            );
+            cards.append(notice);
+            continue;
+          }
+          const card = this.element('article', undefined, 'card');
+          card.append(
+            this.element('h3', item.name),
+            this.element(
+              'p',
+              text.localEnabled +
+                ' · ' +
+                (item.enabled === 'conditional'
+                  ? text.unknown
+                  : item.enabled
+                    ? text.enabled
+                    : text.disabled),
+            ),
+            this.element(
+              'p',
+              text.runtimeState +
+                ' · ' +
+                (item.phase
+                  ? text[
+                      item.phase as
+                        | 'active'
+                        | 'pending'
+                        | 'loading'
+                        | 'failed'
+                        | 'unloading'
+                    ]
+                  : text.unknown),
+            ),
+            this.element('p', text.versions + ' · ' + text.unknown),
+          );
+          if (item.preset)
+            card.append(this.element('p', text.preset + ' · ' + item.preset));
+          for (const action of ['install', 'update', 'uninstall'] as const) {
+            const button = this.button(text[action], () => {}, true);
+            button.title = text.installHint;
+            card.append(button);
+          }
+          cards.append(card);
+        }
+        section.append(cards);
+      }
+      section.append(this.element('p', text.installHint, 'notice'));
+      return;
+    }
+    if (!this.readable) {
       section.className = 'notice';
       section.setAttribute('role', 'status');
-      if (this.tab === 'mine')
-        section.append(
-          this.element('p', text.mineHint),
-          this.element('p', text.installHint),
-        );
-      else
-        section.textContent =
-          this.context?.protocol !== undefined && this.context.protocol !== 1
-            ? text.protocol
-            : this.context?.mode === 'managed'
-              ? text.managed
-              : text.disconnected;
+      section.textContent =
+        this.context?.protocol !== undefined && this.context.protocol !== 1
+          ? text.protocol
+          : this.context?.mode === 'managed'
+            ? text.managed
+            : text.disconnected;
       return;
     }
     section.setAttribute('aria-busy', String(this.busy));

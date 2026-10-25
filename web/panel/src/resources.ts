@@ -13,6 +13,7 @@ export interface PanelContext {
   theme?: 'dark' | 'light';
   apiBase?: string;
   fetch?: (path: string, init?: RequestInit) => Promise<Response>;
+  listInstalled?: () => Promise<unknown>;
 }
 
 export type Failure =
@@ -103,10 +104,102 @@ function page<T>(
 
 export function canReadResources(context?: PanelContext): boolean {
   return (
-    context?.mode === 'connect' &&
+    (context?.mode === 'connect' || context?.mode === 'managed') &&
     context.protocol === 1 &&
     typeof context.fetch === 'function'
   );
+}
+
+export type InstalledResource =
+  | {
+      id: string;
+      name: string;
+      enabled: boolean | 'conditional';
+      phase: string | null;
+      preset?: string;
+      unavailable?: false;
+    }
+  | {
+      id: string;
+      name: string;
+      unavailable: true;
+    };
+
+// DSH public pluginInventory.list projection; never infer package IDs from module names.
+export async function readInstalledResources(
+  context?: PanelContext,
+): Promise<InstalledResource[]> {
+  if (context?.protocol !== 1 || !context.listInstalled)
+    throw new ResourceError('unavailable');
+  const value = await context.listInstalled();
+  if (
+    !record(value) ||
+    !Array.isArray(value.entries) ||
+    value.entries.length > 10000
+  )
+    throw new ResourceError('invalid');
+  const result: InstalledResource[] = [];
+  function append(row: unknown, preset?: string) {
+    if (
+      !record(row) ||
+      !shortText(row.moduleName, 1024) ||
+      !(shortText(row.entryId, 1024) || (preset && row.entryId === null)) ||
+      !(
+        typeof row.enabled === 'boolean' ||
+        (preset && row.enabled === 'conditional')
+      ) ||
+      !(
+        row.fiberPhase === null ||
+        oneOf(row.fiberPhase, [
+          'pending',
+          'loading',
+          'active',
+          'failed',
+          'unloading',
+        ])
+      )
+    )
+      throw new ResourceError('invalid');
+    result.push({
+      id: String(row.entryId ?? result.length),
+      name: row.moduleName,
+      enabled: row.enabled as boolean | 'conditional',
+      phase: row.fiberPhase as string | null,
+      preset,
+    });
+  }
+  value.entries.forEach((row) => append(row));
+  if (value.agentPresets !== undefined) {
+    if (!Array.isArray(value.agentPresets) || value.agentPresets.length > 1000)
+      throw new ResourceError('invalid');
+    for (const preset of value.agentPresets) {
+      if (
+        !record(preset) ||
+        !shortText(preset.id, 1024) ||
+        !Array.isArray(preset.rows)
+      )
+        throw new ResourceError('unavailable');
+      if (preset.rows.length + result.length > 10000)
+        throw new ResourceError('invalid');
+      if (preset.broken !== undefined) {
+        if (typeof preset.broken !== 'string' || preset.rows.length !== 0)
+          throw new ResourceError('invalid');
+        result.push({
+          id: preset.id,
+          name: shortText(preset.name, 1024) ? preset.name : preset.id,
+          unavailable: true,
+        });
+        continue;
+      }
+      preset.rows.forEach((row) =>
+        append(
+          row,
+          typeof preset.name === 'string' ? preset.name : (preset.id as string),
+        ),
+      );
+    }
+  }
+  return result;
 }
 
 export function createResourceReader(context: PanelContext) {
