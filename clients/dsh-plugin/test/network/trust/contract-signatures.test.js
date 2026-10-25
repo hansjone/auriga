@@ -6,7 +6,7 @@ import {
   privateKeyFromSeed,
   seal,
 } from '../../../../../contracts/test/network-lib.mjs';
-import { openTrustStore } from '../../../src/network/trust/store.js';
+import { openTestTrust as openTrustStore } from './keyset-fixtures.js';
 import { verifyEnvelope } from '../../../src/network/trust/verifier.js';
 import { buildVerifiedPage } from '../../../src/network/session/page.js';
 
@@ -28,16 +28,19 @@ const trust = await openTrustStore({
   now,
   cache: { async load() {}, async commit() {} },
   config: {
+    schema_version: 1,
     realm: '2',
-    version: '5',
-    issuedAt: '2026-10-24T01:00:00Z',
-    validUntil: '2026-10-25T01:00:00Z',
+    keyset_version: '5',
+    issued_at: '2026-10-24T01:00:00Z',
+    valid_until: '2026-10-25T01:00:00Z',
     keys: vectors.keys.map((k) => ({
-      ...k,
+      kid: k.kid,
+      purpose: k.purpose,
+      public_key_spki: k.publicKeySpki,
       alg: 'Ed25519',
-      status: 'active',
-      notBefore: '2026-10-24T00:00:00Z',
-      notAfter: '2026-10-27T00:00:00Z',
+      state: 'active',
+      not_before: '2026-10-24T00:00:00Z',
+      not_after: '2026-10-27T00:00:00Z',
     })),
   },
 });

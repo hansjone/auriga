@@ -65,7 +65,7 @@ async function attachFakeBroker(
           app_version: '1.0',
           type: 'ready_result',
           request_id: frame.request_id,
-          status: 'ready',
+          state: 'ready',
           epoch,
           head_seq: String(headSeq),
           committed_cursor: String(committedCursor),
@@ -163,8 +163,8 @@ async function attachFakeBroker(
           mail_seq: frame.mail_seq,
           results: frame.results.map((r) => ({
             recipient_id: r.recipient_id,
-            transport_status:
-              r.status === 'host_accepted' ? 'host_accepted' : r.status,
+            transport_state:
+              r.state === 'host_accepted' ? 'host_accepted' : r.status,
             state_version: r.expected_state_version,
           })),
           mail_item_closed: true,
@@ -435,7 +435,7 @@ test('trusted page advances scan_after when all deliveries fail or only a termin
           recipients: [
             {
               recipient_id: 'rcp-terminal',
-              transport_status: 'expired',
+              transport_state: 'expired',
               state_version: '1',
             },
           ],
@@ -484,7 +484,7 @@ test('a page waiting for key refresh cannot apply after the connection stops', a
   const world = await openWorld([], undefined, async () => {
     entered();
     await gate;
-    return { ...world.broker.signer.config, version: '6' };
+    return { ...world.broker.signer.config, keyset_version: '6' };
   });
   try {
     await world.session.start();
@@ -526,6 +526,73 @@ test('a page waiting for key refresh cannot apply after the connection stops', a
   }
 });
 
+test('requested FETCH budget counts original wire whitespace as well as canonical content', async () => {
+  const pipe = createMemoryPipe();
+  const f = await signingFixture();
+  let channelNonce;
+  pipe.b.onMessage(async (payload) => {
+    const request = decodeJson(payload);
+    if (request.type === 'ready') channelNonce = request.channel_nonce;
+    const ctx = { ...f.context, channelNonce, requestId: request.request_id };
+    if (request.type === 'ready')
+      await pipe.b.send(
+        encodeJson(
+          f.seal(
+            {
+              app_version: '1.0',
+              type: 'ready_result',
+              request_id: request.request_id,
+              epoch: '7',
+              status: 'ready',
+            },
+            ctx,
+          ),
+        ),
+      );
+    else if (request.type === 'fetch') {
+      const page = f.seal(
+        {
+          app_version: '1.0',
+          type: 'fetch_page',
+          request_id: request.request_id,
+          epoch: '7',
+          scan_after: '100',
+          committed_cursor: '0',
+          manifest: [],
+        },
+        ctx,
+      );
+      const bytes = encodeJson({
+        app_version: '1.0',
+        type: 'fetch_result',
+        page,
+        items: [],
+      });
+      const padded = new Uint8Array(bytes.length + 4096);
+      padded.fill(32);
+      padded.set(bytes);
+      await pipe.b.send(padded);
+    }
+  });
+  const session = createNetworkSession({
+    transport: pipe.a,
+    adapter: {},
+    identity: IDENTITY,
+    trust: f.trust,
+    now: f.now,
+  });
+  try {
+    await session.start();
+    await assert.rejects(
+      session.pull({ maxBytes: 4096 }),
+      (e) => e.code === 'network.protocol_error',
+    );
+    assert.equal(session.scanAfter, '0');
+  } finally {
+    await session.stop();
+  }
+});
+
 test('unsigned READY cannot establish a session', async () => {
   const pipe = createMemoryPipe();
   const f = await signingFixture();
@@ -537,7 +604,7 @@ test('unsigned READY cannot establish a session', async () => {
         type: 'ready_result',
         request_id: frame.request_id,
         epoch: '7',
-        status: 'ready',
+        state: 'ready',
       }),
     );
   });

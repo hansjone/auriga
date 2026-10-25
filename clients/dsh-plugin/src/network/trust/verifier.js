@@ -97,6 +97,11 @@ export function verifyEnvelope(value, { trust, context: c, now = Date.now }) {
   if (value.type === 'delivery') {
     const m = value.message,
       source = value.source_context;
+    if (Buffer.byteLength(canonicalize(m?.body)) > 16384)
+      throw new SessionError(
+        'network.protocol_error',
+        'message body exceeds 16KiB',
+      );
     if (
       value.target_node?.realm !== c.realm ||
       value.target_node?.node !== c.node ||

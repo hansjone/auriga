@@ -1,6 +1,6 @@
 /* global structuredClone */
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { openTrustStore } from '../../../src/network/trust/store.js';
+import { openTestTrust as openTrustStore } from './keyset-fixtures.js';
 import { digest, signingInput } from '../../../src/network/trust/verifier.js';
 import { IDENTITY, peer, self } from '../host/fixtures.js';
 
@@ -25,20 +25,21 @@ export async function signingFixture({ refresh } = {}) {
       },
     },
     config: {
+      schema_version: 1,
       realm: '2',
-      version: '5',
-      issuedAt: '2026-10-25T00:00:00Z',
-      validUntil: '2026-10-26T00:00:00Z',
+      keyset_version: '5',
+      issued_at: '2026-10-25T00:00:00Z',
+      valid_until: '2026-10-26T00:00:00Z',
       keys: Object.entries(pairs).map(([purpose, pair]) => ({
         kid: purpose,
         purpose,
         alg: 'Ed25519',
-        publicKeySpki: pair.publicKey
+        public_key_spki: pair.publicKey
           .export({ format: 'der', type: 'spki' })
           .toString('base64url'),
-        status: 'active',
-        notBefore: '2026-10-24T00:00:00Z',
-        notAfter: '2026-10-27T00:00:00Z',
+        state: 'active',
+        not_before: '2026-10-24T00:00:00Z',
+        not_after: '2026-10-27T00:00:00Z',
       })),
     },
   });
@@ -156,6 +157,6 @@ export async function signingFixture({ refresh } = {}) {
     seal,
     delivery,
     pageInput,
-    config: structuredClone(persisted),
+    config: structuredClone(persisted.publication.keyset),
   };
 }

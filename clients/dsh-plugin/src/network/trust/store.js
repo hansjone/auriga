@@ -1,60 +1,35 @@
-/* global structuredClone */
-import { createPublicKey } from 'node:crypto';
-import { Buffer } from 'node:buffer';
 import { SessionError } from '../session/errors.js';
 import { canonicalize } from './jcs.js';
 
-/** Trusted local configuration, supplied only after provisioning/root validation.
- * @typedef {{kid: string, publicKeySpki: string, alg: string, purpose: string,
- * status: string, notBefore: string, notAfter: string}} TrustKey
- * @typedef {{realm: string, version: string, issuedAt: string, validUntil: string, keys: TrustKey[]}} TrustConfig
- * @typedef {{load(): Promise<any>, commit(value: TrustConfig): Promise<void>}} TrustCache
- */
-const purposes = new Set([
-  'business_delivery',
-  'protocol_response',
-  'management_state',
-]);
-/** @param {string} detail @returns {never} */
-function unavailable(detail) {
-  throw new SessionError('network.key_unavailable', detail);
-}
-/** @param {any} value */
-export function positiveVersion(value) {
-  return (
-    typeof value === 'string' &&
-    /^[1-9][0-9]{0,19}$/.test(value) &&
-    BigInt(value) <= 18446744073709551615n
-  );
-}
-/** @param {any} value */
-export function timeValue(value) {
-  if (
-    typeof value !== 'string' ||
-    !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(value)
-  )
-    return NaN;
-  const time = Date.parse(value);
-  return Number.isFinite(time) &&
-    new Date(time).toISOString() === value.replace('Z', '.000Z')
-    ? time
-    : NaN;
-}
+import {
+  positiveVersion,
+  timeValue,
+  unavailable,
+  publicKey,
+  validatePublicKey,
+  validatePublication,
+} from './keyset.js';
+export { positiveVersion, timeValue } from './keyset.js';
+/** @typedef {import('./keyset-types.d.ts').SignedKeyset} TrustConfig
+ * @typedef {import('./keyset-types.d.ts').KeysetPayload} Payload
+ * @typedef {import('./keyset-types.d.ts').PublicKey} TrustKey
+ * @typedef {{load(): Promise<any>, commit(value: any): Promise<void>}} TrustCache */
 
 /** Cache must be private, durable and single-writer, like the host ledger.
  * The configuration is a trust anchor; never pass a keyset taken from a frame.
- * refresh must fetch from fixed trusted configuration and validate the root;
+ * refresh fetches a SignedKeyset from fixed trusted configuration; roots verify it;
  * frame-provided version/kid are hints, never authority or a URL.
- * @param {{cache: TrustCache, config?: TrustConfig, now?: () => number,
+ * @param {{cache: TrustCache, config?: TrustConfig|string|Uint8Array, roots: Pick<TrustKey, 'kid'|'public_key_spki'>[], now?: () => number,
  * refresh?: (request: {realm: string, minimumVersion: string, kid: string}) => Promise<TrustConfig>}} options
  */
 export async function openTrustStore({
   cache,
   config,
+  roots,
   now = Date.now,
   refresh,
 }) {
-  /** @type {TrustConfig | undefined} */
+  /** @type {Payload | undefined} */
   let current;
   /** @type {Map<string, import('node:crypto').KeyObject>} */
   let publicKeys = new Map();
@@ -63,77 +38,85 @@ export async function openTrustStore({
   /** @type {Promise<void>|undefined} */
   let refreshing;
   let nextRefreshAt = -Infinity;
-  /** @param {TrustConfig} input */
-  function validate(input) {
-    const c = structuredClone(input);
+  const rootKeys = new Map();
+  for (const root of roots) {
     if (
-      !c ||
-      !positiveVersion(c.realm) ||
-      !positiveVersion(c.version) ||
-      !Array.isArray(c.keys) ||
-      c.keys.length > 128 ||
-      !Number.isFinite(timeValue(c.issuedAt)) ||
-      !(timeValue(c.validUntil) > timeValue(c.issuedAt))
+      !root ||
+      !/^[A-Za-z0-9._-]{1,128}$/.test(root.kid) ||
+      rootKeys.has(root.kid)
     )
-      unavailable('invalid keyset');
-    const keys = new Map();
-    for (const k of c.keys) {
+      unavailable('invalid trust root');
+    rootKeys.set(root.kid, publicKey(root.public_key_spki));
+  }
+  /** @type {Map<string, TrustKey>} */
+  let history = new Map();
+  /** @param {Payload} payload */
+  function nextHistory(payload) {
+    const next = new Map(history);
+    for (const k of payload.keys) {
+      const old = history.get(k.kid);
       if (
-        !k ||
-        !/^[A-Za-z0-9._-]{1,128}$/.test(k.kid) ||
-        keys.has(k.kid) ||
-        k.alg !== 'Ed25519' ||
-        !purposes.has(k.purpose) ||
-        !['active', 'revoked'].includes(k.status) ||
-        !Number.isFinite(timeValue(k.notBefore)) ||
-        !(timeValue(k.notAfter) > timeValue(k.notBefore)) ||
-        typeof k.publicKeySpki !== 'string' ||
-        !/^[A-Za-z0-9_-]+$/.test(k.publicKeySpki)
+        old &&
+        (old.public_key_spki !== k.public_key_spki ||
+          old.purpose !== k.purpose ||
+          (old.state === 'revoked' && k.state !== 'revoked') ||
+          (old.state === 'retired' &&
+            !['retired', 'revoked'].includes(k.state)) ||
+          (old.state === 'active' && k.state === 'next'))
       )
-        unavailable('invalid key');
-      try {
-        const der = Buffer.from(k.publicKeySpki, 'base64url');
-        const key = createPublicKey({ key: der, format: 'der', type: 'spki' });
-        if (
-          key.asymmetricKeyType !== 'ed25519' ||
-          key.export({ format: 'der', type: 'spki' }).toString('base64url') !==
-            k.publicKeySpki
+        unavailable('key identity or state rollback');
+      if (
+        [...history.values()].some(
+          (prior) =>
+            prior.kid !== k.kid && prior.public_key_spki === k.public_key_spki,
         )
-          unavailable('invalid public key');
-        keys.set(k.kid, key);
-      } catch {
-        unavailable('invalid public key');
-      }
+      )
+        unavailable('public key reused');
+      next.set(k.kid, k);
     }
-    return { c, keys };
+    return next;
   }
   const persisted = await cache.load();
   if (persisted !== undefined) {
-    const checked = validate(persisted);
-    current = checked.c;
+    const checked = validatePublication(persisted.publication, rootKeys);
+    if (!Array.isArray(persisted.history)) unavailable('invalid key history');
+    for (const k of persisted.history) {
+      validatePublicKey(k);
+      if (history.has(k.kid)) unavailable('duplicate key history');
+      history.set(k.kid, k);
+    }
+    if (checked.publication.keyset.keys.some((k) => !history.has(k.kid)))
+      unavailable('incomplete key history');
+    history = nextHistory(checked.publication.keyset);
+    current = checked.publication.keyset;
     publicKeys = checked.keys;
   }
-  /** @param {TrustConfig} input */
-  function update(input) {
+  /** @param {TrustConfig|string|Uint8Array} input */
+  async function update(input) {
     // Snapshot before awaiting; callers cannot mutate an in-flight update.
-    const checked = validate(input);
+    const checked = validatePublication(input, rootKeys);
     const op = queue.then(async () => {
-      const c = checked.c;
+      const c = checked.publication.keyset;
       if (current) {
         if (
           c.realm !== current.realm ||
-          BigInt(c.version) < BigInt(current.version)
+          BigInt(c.keyset_version) < BigInt(current.keyset_version)
         )
           unavailable('keyset rollback');
-        if (c.version === current.version) {
+        if (c.keyset_version === current.keyset_version) {
           if (canonicalize(c) !== canonicalize(current))
             unavailable('keyset version reused');
           return; // Re-reading a keyset must never refresh its expiry.
         }
       }
+      const next = nextHistory(c);
       blocked = true;
-      await cache.commit(c); // No new key is live before durable commit.
+      await cache.commit({
+        publication: checked.publication,
+        history: [...next.values()],
+      }); // No new key is live before durable commit.
       current = c;
+      history = next;
       publicKeys = checked.keys;
       blocked = false;
     });
@@ -154,7 +137,7 @@ export async function openTrustStore({
       )
         return;
       if (
-        BigInt(version) <= BigInt(current.version) &&
+        BigInt(version) <= BigInt(current.keyset_version) &&
         current.keys.some((k) => k.kid === kid)
       )
         return;
@@ -170,7 +153,7 @@ export async function openTrustStore({
             // Successful rotations must not delay a subsequent real rotation.
             if (
               current &&
-              BigInt(current.version) >= BigInt(version) &&
+              BigInt(current.keyset_version) >= BigInt(version) &&
               current.keys.some((k) => k.kid === kid)
             )
               nextRefreshAt = -Infinity;
@@ -190,22 +173,22 @@ export async function openTrustStore({
         blocked ||
         !current ||
         !Number.isFinite(clock) ||
-        clock < timeValue(current.issuedAt) ||
+        clock < timeValue(current.issued_at) ||
         clock >=
           Math.min(
-            timeValue(current.validUntil),
-            timeValue(current.issuedAt) + 86400000,
+            timeValue(current.valid_until),
+            timeValue(current.issued_at) + 86400000,
           ) ||
         !positiveVersion(version) ||
-        BigInt(version) > BigInt(current.version)
+        BigInt(version) > BigInt(current.keyset_version)
       )
         return unavailable('keyset unavailable');
       const k = current.keys.find((k) => k.kid === kid);
       if (
         !k ||
-        k.status !== 'active' ||
-        clock < timeValue(k.notBefore) ||
-        clock >= timeValue(k.notAfter)
+        !['active', 'retired'].includes(k.state) ||
+        clock < timeValue(k.not_before) ||
+        clock >= timeValue(k.not_after)
       )
         return unavailable('key unavailable');
       if (k.purpose !== purpose)
@@ -216,8 +199,8 @@ export async function openTrustStore({
       return {
         publicKey: publicKeys.get(kid),
         realm: current.realm,
-        notBefore: timeValue(k.notBefore),
-        notAfter: timeValue(k.notAfter),
+        notBefore: timeValue(k.not_before),
+        notAfter: timeValue(k.not_after),
       };
     },
   };

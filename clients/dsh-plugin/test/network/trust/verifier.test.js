@@ -10,7 +10,7 @@ import {
   canonicalize,
   parseStrictJson,
 } from '../../../src/network/trust/jcs.js';
-import { openTrustStore } from '../../../src/network/trust/store.js';
+import { openTestTrust as openTrustStore } from './keyset-fixtures.js';
 import {
   verifyEnvelope,
   verifyEnvelopeWithRefresh,
@@ -41,16 +41,19 @@ const context = {
 };
 function config() {
   return {
+    schema_version: 1,
     realm: '2',
-    version: '5',
-    issuedAt: '2026-10-25T00:00:00Z',
-    validUntil: '2026-10-26T00:00:00Z',
+    keyset_version: '5',
+    issued_at: '2026-10-25T00:00:00Z',
+    valid_until: '2026-10-26T00:00:00Z',
     keys: vectors.keys.map((k) => ({
-      ...k,
+      kid: k.kid,
+      purpose: k.purpose,
+      public_key_spki: k.publicKeySpki,
       alg: 'Ed25519',
-      status: 'active',
-      notBefore: '2026-10-24T00:00:00Z',
-      notAfter: '2026-10-27T00:00:00Z',
+      state: 'active',
+      not_before: '2026-10-24T00:00:00Z',
+      not_after: '2026-10-27T00:00:00Z',
     })),
   };
 }
@@ -103,9 +106,9 @@ test('trust rejects unknown, revoked, expired, inactive and wrong-algorithm keys
   const value = envelope(vectors.vectors[0]);
   for (const change of [
     (c) => (c.keys = []),
-    (c) => (c.keys[0].status = 'revoked'),
-    (c) => (c.keys[0].notAfter = '2026-10-25T00:00:59Z'),
-    (c) => (c.keys[0].notBefore = '2026-10-25T00:02:00Z'),
+    (c) => (c.keys[0].state = 'revoked'),
+    (c) => (c.keys[0].not_after = '2026-10-25T00:00:59Z'),
+    (c) => (c.keys[0].not_before = '2026-10-25T00:02:00Z'),
   ]) {
     const c = config();
     change(c);
@@ -126,13 +129,13 @@ test('trust rejects unknown, revoked, expired, inactive and wrong-algorithm keys
   const replacement = {
     ...config().keys[0],
     kid: 'rotated-business',
-    publicKeySpki: pair.publicKey
+    public_key_spki: pair.publicKey
       .export({ format: 'der', type: 'spki' })
       .toString('base64url'),
   };
   await trust.update({
     ...config(),
-    version: '6',
+    keyset_version: '6',
     keys: [...config().keys, replacement],
   });
   assert.ok(trust.key('test-r2-business-1', 'business_delivery', '5'));
@@ -161,8 +164,8 @@ test('file cache persists revoked keys/version across close and process-style re
       });
       await trust.update({
         ...config(),
-        version: '6',
-        keys: config().keys.map((k) => ({ ...k, status: 'revoked' })),
+        keyset_version: '6',
+        keys: config().keys.map((k) => ({ ...k, state: 'revoked' })),
       });
       await assert.rejects(openFileTrustCache({ dir }));
     } finally {
@@ -192,8 +195,8 @@ test('persistent cache survives reopen and refuses rollback, same-version change
   const trust = await openTrustStore({ cache: disk, config: config(), now });
   const newer = {
     ...config(),
-    version: '6',
-    keys: config().keys.map((k) => ({ ...k, status: 'revoked' })),
+    keyset_version: '6',
+    keys: config().keys.map((k) => ({ ...k, state: 'revoked' })),
   };
   await trust.update(newer);
   const restored = await openTrustStore({ cache: disk, now });
@@ -206,7 +209,7 @@ test('persistent cache survives reopen and refuses rollback, same-version change
     code('network.key_unavailable'),
   );
   await assert.rejects(
-    restored.update({ ...config(), version: '6' }),
+    restored.update({ ...config(), keyset_version: '6' }),
     code('network.key_unavailable'),
   );
   const expired = await openTrustStore({
@@ -226,7 +229,7 @@ test('persistent cache survives reopen and refuses rollback, same-version change
     },
     now,
   });
-  await assert.rejects(failing.update({ ...config(), version: '7' }));
+  await assert.rejects(failing.update({ ...config(), keyset_version: '7' }));
   assert.throws(
     () => failing.key(vectors.keys[0].kid, 'business_delivery', '5'),
     code('network.key_unavailable'),
@@ -294,7 +297,7 @@ test('bounded strict JSON rejects duplicate escaped keys, invalid Unicode, unsaf
 
 test('cache hard limit is 24h and same-version reload cannot extend it; missing cache fails closed', async () => {
   let clock = now();
-  const c = { ...config(), validUntil: '2026-10-28T00:00:00Z' };
+  const c = config();
   const trust = await openTrustStore({
     cache: cache(),
     config: c,
@@ -337,7 +340,7 @@ test('higher keyset version refreshes once for concurrent verification and persi
       calls++;
       request = input;
       await gate;
-      return { ...config(), version: '6' };
+      return { ...config(), keyset_version: '6' };
     },
   });
   const value = refreshedEnvelope();
@@ -360,6 +363,14 @@ test('higher keyset version refreshes once for concurrent verification and persi
 test('unknown kid refreshes trusted configuration and retries the original signature', async () => {
   let calls = 0;
   const c = config();
+  const pair = generateKeyPairSync('ed25519');
+  const introduced = {
+    ...c.keys[0],
+    kid: 'introduced',
+    public_key_spki: pair.publicKey
+      .export({ format: 'der', type: 'spki' })
+      .toString('base64url'),
+  };
   const trust = await openTrustStore({
     cache: cache(),
     config: c,
@@ -368,13 +379,19 @@ test('unknown kid refreshes trusted configuration and retries the original signa
       calls++;
       return {
         ...c,
-        version: '6',
-        keys: [...c.keys, { ...c.keys[0], kid: 'introduced' }],
+        keyset_version: '6',
+        keys: [...c.keys, introduced],
       };
     },
   });
+  const value = refreshedEnvelope('5', 'introduced');
+  value.server_auth.signature = sign(
+    null,
+    signingInput(value),
+    pair.privateKey,
+  ).toString('base64url');
   assert.equal(
-    await verifyEnvelopeWithRefresh(refreshedEnvelope('5', 'introduced'), {
+    await verifyEnvelopeWithRefresh(value, {
       trust,
       context,
       now,
@@ -391,7 +408,7 @@ test('failed, stale or missing refresh stays key_unavailable; repeated failures 
       throw Error('unavailable');
     },
     async () => config(),
-    async () => ({ ...config(), version: '4' }),
+    async () => ({ ...config(), keyset_version: '4' }),
   ]) {
     let calls = 0;
     const trust = await openTrustStore({
@@ -427,7 +444,7 @@ test('bad signatures do not trigger trust refresh', async () => {
     now,
     refresh: async () => {
       calls++;
-      return { ...config(), version: '6' };
+      return { ...config(), keyset_version: '6' };
     },
   });
   const value = envelope(vectors.vectors[0]);
@@ -445,7 +462,7 @@ test('successive genuine rotations can refresh immediately without a cooldown fa
     cache: cache(),
     config: config(),
     now,
-    refresh: async () => ({ ...config(), version: String(++version) }),
+    refresh: async () => ({ ...config(), keyset_version: String(++version) }),
   });
   for (const v of ['6', '7'])
     assert.equal(

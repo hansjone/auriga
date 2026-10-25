@@ -12,6 +12,7 @@ import { SessionError } from './errors.js';
 import { buildVerifiedPage } from './page.js';
 import { createSystemInbox, systemPromptFrom } from './system-inbox.js';
 import { verifyEnvelopeWithRefresh } from '../trust/verifier.js';
+import { FETCH_MAX_BYTES } from './constants.js';
 
 const FINAL = new Set([
   'host_accepted',
@@ -88,6 +89,8 @@ export function createNetworkSession(options) {
   let unsub = null;
   /** @type {Map<string, { resolve: (v: any) => void, reject: (e: Error) => void }>} */
   const pending = new Map();
+  /** @type {WeakMap<object,number>} */
+  const receivedSizes = new WeakMap();
 
   function requireReady() {
     if (!ready) throw new SessionError('not_ready', 'session not ready');
@@ -181,6 +184,7 @@ export function createNetworkSession(options) {
       return;
     }
     if (type === 'fetch_result') {
+      receivedSizes.set(frame, payload.byteLength);
       settle(frame.page?.request_id, frame);
       return;
     }
@@ -315,19 +319,28 @@ export function createNetworkSession(options) {
         }),
       );
       const result = await wait;
-      return await applyFetchResult(result, requestId);
+      return await applyFetchResult(result, requestId, opts.maxBytes);
     } finally {
       fetchInflight = false;
     }
   }
 
-  /** @param {any} result @param {string} requestId */
-  async function applyFetchResult(result, requestId) {
+  /** @param {any} result @param {string} requestId @param {number} [maxBytes] */
+  async function applyFetchResult(result, requestId, maxBytes) {
     requireReady();
     if (frameType(result) !== 'fetch_result') {
       throw new SessionError('bad_fetch_result', 'expected fetch_result');
     }
     assertFrameEpoch(result, epoch);
+    const wireBytes = receivedSizes.get(result);
+    if (wireBytes !== undefined && wireBytes > (maxBytes ?? FETCH_MAX_BYTES)) {
+      const error = new SessionError(
+        'network.protocol_error',
+        'FETCH_RESULT exceeds requested wire budget',
+      );
+      rejectFrame(null, error);
+      throw error;
+    }
     const pageEpoch = String(result.page?.epoch ?? result.epoch);
     const expectedContext = context(requestId);
     let page;
@@ -342,6 +355,7 @@ export function createNetworkSession(options) {
         trust: options.trust,
         context: expectedContext,
         now,
+        maxBytes,
       });
     } catch (error) {
       rejectFrame(null, error);
