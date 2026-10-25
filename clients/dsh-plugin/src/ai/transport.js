@@ -160,6 +160,8 @@ export async function* readSse(response, op) {
       if (byte === 10 || byte === 13) {
         previousCR = byte === 13;
         if (length === 0) {
+          // Reserve a possible LF before dispatching a CR-terminated event.
+          check(eventSize + (previousCR ? 1 : 0) <= EVENT_LIMIT, 'SERVER');
           const event = data.join('\n');
           data = [];
           eventSize = 0;

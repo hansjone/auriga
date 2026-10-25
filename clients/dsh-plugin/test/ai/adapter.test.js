@@ -548,6 +548,7 @@ test('SSE: invalid UTF-8, unterminated DONE, disconnect and response content-typ
 test('SSE: event and total byte budgets are bounded; unknown usage is omitted', async () => {
   for (const raw of [
     `:${'x'.repeat(EVENT_LIMIT)}\n\n`,
+    `:${'x'.repeat(EVENT_LIMIT - 4)}\r\n\r\n`,
     Array.from(
       { length: Math.ceil(TOTAL_LIMIT / 131072) + 1 },
       () => `:${'x'.repeat(131068)}\n\n`,
@@ -555,13 +556,18 @@ test('SSE: event and total byte budgets are bounded; unknown usage is omitted', 
   ]) {
     const { adapter } = setup(
       async () =>
-        new Response(Buffer.from(raw), {
-          headers: { 'content-type': 'text/event-stream' },
-        }),
+        new Response(
+          Buffer.from(
+            `${raw}data: ${JSON.stringify(packet({}, 'stop'))}\n\ndata: [DONE]\n\n`,
+          ),
+          {
+            headers: { 'content-type': 'text/event-stream' },
+          },
+        ),
     );
     assert.equal((await collect(adapter)).at(-1).reason.kind, 'error');
   }
-  const raw = `:${'x'.repeat(EVENT_LIMIT - 4)}\r\n\r\ndata: ${JSON.stringify(packet({ content: 'ok' }, 'stop'))}\r\n\r\ndata: [DONE]\r\n\r\n`;
+  const raw = `:${'x'.repeat(EVENT_LIMIT - 5)}\r\n\r\ndata: ${JSON.stringify(packet({ content: 'ok' }, 'stop'))}\r\n\r\ndata: [DONE]\r\n\r\n`;
   const { adapter } = setup(
     async () =>
       new Response(raw, { headers: { 'content-type': 'text/event-stream' } }),
