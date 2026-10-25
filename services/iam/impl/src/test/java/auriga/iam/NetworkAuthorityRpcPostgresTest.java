@@ -6,14 +6,19 @@ import static org.mockito.Mockito.*;
 import auriga.common.audit.AuditLogger;
 import auriga.common.context.TenantContext;
 import auriga.common.events.EventPublisher;
+import auriga.common.grpc.*;
 import auriga.common.persistence.*;
+import auriga.common.security.*;
 import auriga.contracts.iam.v1.*;
 import auriga.iam.api.NetworkAuthority.*;
 import auriga.testsupport.PostgresExtension;
 import com.nimbusds.jose.jwk.Curve;
+import com.nimbusds.jose.jwk.ECKey;
+import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import java.time.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +42,7 @@ class NetworkAuthorityRpcPostgresTest {
   Ticket ticket;
   IngressBinding binding;
   NetworkAuthorityConnection connection;
+  ECKey key;
 
   @BeforeAll
   static void migrate() {
@@ -59,7 +65,7 @@ class NetworkAuthorityRpcPostgresTest {
 
   @BeforeEach
   void issuedDeviceAndRealRedemption() throws Exception {
-    var key = new ECKeyGenerator(Curve.P_256).keyID(UUID.randomUUID().toString()).generate();
+    key = new ECKeyGenerator(Curve.P_256).keyID(UUID.randomUUID().toString()).generate();
     var keys = mock(SigningKeys.class);
     when(keys.current()).thenReturn(key);
     when(keys.jwks()).thenReturn(Json.object("keys", List.of(key.toPublicJWK().toJSONObject())));
@@ -182,10 +188,81 @@ class NetworkAuthorityRpcPostgresTest {
             store.tx(
                 () -> {
                   var row = store.byId(table, id, true);
+                  assertNotNull(row);
                   row.set(field, Json.MAPPER.valueToTree(value));
                   store.save(table, row);
                   return null;
                 }));
+    // Read in a new transaction only after the mutation has committed, including FK checks.
+    assertEquals(
+        Json.MAPPER.valueToTree(value),
+        TenantContext.call(tenant, () -> store.tx(() -> store.byId(table, id, false))).path(field));
+  }
+
+  void withRpc(
+      java.util.function.Consumer<NetworkAuthorityServiceGrpc.NetworkAuthorityServiceBlockingStub>
+          work) {
+    var settings =
+        new AccessTokenSettings(
+            tokens.issuer(),
+            java.net.URI.create(tokens.issuer() + "/oauth2/jwks"),
+            null,
+            null,
+            null,
+            null,
+            clock,
+            false);
+    var jwks =
+        new com.nimbusds.jose.jwk.source.ImmutableJWKSet<com.nimbusds.jose.proc.SecurityContext>(
+            new JWKSet(key.toPublicJWK()));
+    var verifier = new AccessTokenVerifier(AccessTokenDecoders.createInternal(settings, jwks));
+    var signing = mock(SigningKeys.class);
+    when(signing.current()).thenReturn(key);
+    String secret = Secrets.random();
+    var internal =
+        new TokenService(
+            signing,
+            new ContractSchemas(),
+            (t, s, c) -> Set.of(),
+            clock,
+            tokens.issuer(),
+            Map.of("collab", Secrets.hash(secret)));
+    String serviceToken = internal.issue("collab", secret);
+    var server =
+        new GrpcServer(
+            "127.0.0.1",
+            0,
+            List.of(rpc),
+            new AurigaServerInterceptor(verifier, Set.of(), Set.of("svc:collab")),
+            null,
+            false,
+            Set.of());
+    io.grpc.ManagedChannel channel = null;
+    try {
+      server.start();
+      channel =
+          GrpcChannels.open(
+              "127.0.0.1:" + server.port(),
+              new AurigaClientInterceptor(() -> serviceToken, Duration.ofSeconds(5)));
+      // Keep this shared stub without an absolute deadline; resolveRpc bounds each new call.
+      work.accept(NetworkAuthorityServiceGrpc.newBlockingStub(channel));
+    } finally {
+      if (channel != null) channel.shutdownNow();
+      server.stop();
+    }
+  }
+
+  ResolveNetworkTargetResponse resolveRpc(
+      NetworkAuthorityServiceGrpc.NetworkAuthorityServiceBlockingStub stub) {
+    return TenantContext.call(
+        tenant,
+        () ->
+            stub.withDeadlineAfter(5, TimeUnit.SECONDS)
+                .resolveNetworkTarget(
+                    ResolveNetworkTargetRequest.newBuilder()
+                        .setConnection(connection)
+                        .setLocal("0")
+                        .build()));
   }
 
   @Test
@@ -279,21 +356,41 @@ class NetworkAuthorityRpcPostgresTest {
 
   @Test
   void currentBackingExpiryRevocationAndOwnerChangesAreObservedOnEveryCall() {
-    var expiry = clock.instant().plusSeconds(10);
-    mutate("session", sessionId, "idleExpiresAt", expiry.toString());
-    assertEquals(expiry.toString(), resolve(connection).getValidUntil());
-    mutate("device", device, "revoked", true);
-    assertFalse(resolve(connection).getAllowed());
-    mutate("device", device, "revoked", false);
-    mutate("session", sessionId, "accountId", UUID.randomUUID().toString());
-    assertFalse(resolve(connection).getAllowed());
-    mutate("session", sessionId, "accountId", account.toString());
-    mutate("account", account.toString(), "status", "disabled");
-    assertFalse(resolve(connection).getAllowed());
-    mutate("account", account.toString(), "status", "active");
-    assertTrue(resolve(connection).getAllowed());
-    oauthRevoke();
-    assertFalse(resolve(connection).getAllowed());
+    UUID otherAccount = UUID.randomUUID();
+    // Both session and device accountId have tenant-scoped FKs. Commit a real target first.
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () ->
+                    store.insert(
+                        "account",
+                        otherAccount.toString(),
+                        Json.object("accountId", otherAccount, "status", "active"),
+                        null)));
+    assertNotNull(
+        TenantContext.call(
+            tenant, () -> store.tx(() -> store.byId("account", otherAccount.toString(), false))));
+    withRpc(
+        stub -> {
+          var expiry = clock.instant().plusSeconds(10);
+          mutate("session", sessionId, "idleExpiresAt", expiry.toString());
+          assertEquals(expiry.toString(), resolveRpc(stub).getValidUntil());
+          mutate("device", device, "revoked", true);
+          assertEquals(ResolveNetworkTargetResponse.getDefaultInstance(), resolveRpc(stub));
+          mutate("device", device, "revoked", false);
+          assertTrue(resolveRpc(stub).getAllowed());
+          mutate("session", sessionId, "accountId", otherAccount.toString());
+          assertEquals(ResolveNetworkTargetResponse.getDefaultInstance(), resolveRpc(stub));
+          mutate("session", sessionId, "accountId", account.toString());
+          assertTrue(resolveRpc(stub).getAllowed());
+          mutate("account", account.toString(), "status", "disabled");
+          assertEquals(ResolveNetworkTargetResponse.getDefaultInstance(), resolveRpc(stub));
+          mutate("account", account.toString(), "status", "active");
+          assertTrue(resolveRpc(stub).getAllowed());
+          oauthRevoke();
+          assertEquals(ResolveNetworkTargetResponse.getDefaultInstance(), resolveRpc(stub));
+        });
   }
 
   void oauthRevoke() {
