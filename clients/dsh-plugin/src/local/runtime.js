@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { platformConfig, createPlatform, LoginJar } from './platform.js';
 import { createVault } from './vault.js';
 import { createTeam } from './team.js';
+import { createRefreshBroker } from '../ai/refresh-broker.js';
+import { createModelLifecycle } from '../ai/installation.js';
 import { createNetworkLifecycle } from '../network/lifecycle.js';
 import {
   createHttpResponseTracker,
@@ -87,8 +89,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     online = false;
   /** @type {ReturnType<typeof createTeam>|undefined} */
   let team;
-  /** @type {Promise<string>|undefined} */
-  let refreshing;
   /** @type {Promise<void>|undefined} */
   let revoking;
   async function drainRevocations() {
@@ -161,55 +161,40 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     getAccess,
     authorizeLocal: async (request) => !!resolve(request),
     onRevoked: () => {
+      broker.invalidate('revoked');
+      models.logout();
       for (const row of sessions.values()) killSession(row);
       team?.close();
       team = undefined;
       online = false;
     },
   });
+  const broker = createRefreshBroker({
+    vault,
+    platform,
+    config,
+    onPlatformAccess(claims) {
+      for (const row of sessions.values())
+        row.accessExpiresAt = claims.exp * 1000;
+    },
+    onUncertain() {
+      models.logout();
+      network.logout();
+      team?.close();
+      team = undefined;
+      online = false;
+      for (const row of sessions.values()) killSession(row);
+    },
+  });
+  const models = createModelLifecycle({
+    broker,
+    origin: config.platformOrigin,
+  });
   /** @type {(()=>void)|undefined} */
   let stopHttpTracking;
   async function getAccess() {
     active();
-    if (refreshing) return refreshing;
-    const credential = vault.snapshot().credential;
-    if (!credential) throw new Error('platform sign-in required');
-    if (credential.claims.exp * 1000 > Date.now() + 30000)
-      return credential.accessToken;
-    const g = generation;
-    refreshing = (async () => {
-      const tokens = await platform.request('/oauth2/token', {
-        method: 'POST',
-        form: true,
-        body: {
-          grant_type: 'refresh_token',
-          client_id: config.clientId,
-          refresh_token: credential.refreshToken,
-        },
-      });
-      active(g);
-      const next = await validateTokens(tokens, credential.claims);
-      active(g);
-      await vault.update((s) => {
-        active(g);
-        if (s.credential?.claims.did !== credential.claims.did)
-          throw new Error('device changed during refresh');
-        s.credential = next;
-      });
-      active(g);
-      for (const row of sessions.values())
-        row.accessExpiresAt = next.claims.exp * 1000;
-      return next.accessToken;
-    })();
-    try {
-      return await refreshing;
-    } catch (error) {
-      network.logout();
-      for (const row of sessions.values()) killSession(row);
-      throw error;
-    } finally {
-      refreshing = undefined;
-    }
+    return broker.getPlatformAccess();
   }
   /** @param {any} tokens @param {any} [expected] */
   async function validateTokens(tokens, expected) {
@@ -225,6 +210,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       claims,
+      platformOrigin: config.platformOrigin,
+      issuer: config.issuer,
+      clientId: config.clientId,
     };
   }
   function attemptFor(/** @type {any} */ request) {
@@ -291,6 +279,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         if (closed || generation !== g) return;
         online = state.connected;
         if (state.unauthorized) {
+          broker.invalidate('revoked');
+          models.logout();
           network.logout();
           for (const row of sessions.values()) killSession(row);
           team?.close();
@@ -327,6 +317,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         accessExpiresAt: credential.claims.exp * 1000,
       };
     sessions.set(key, session);
+    models.login();
     row.jar.clear();
     row.verifier = undefined;
     row.device = undefined;
@@ -344,6 +335,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     resolve,
     getAccess,
     vault,
+    attachModels: models.attach,
+    get modelStatus() {
+      return models.status;
+    },
     attachNetwork: network.attach,
     consentUI: network.consentUI,
     get networkStatus() {
@@ -383,6 +378,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         available: true,
         loggedIn: !!row,
         connected: !!row && !!team && online,
+        models: models.status,
         network: row
           ? network.status
           : { available: false, connected: false, state: 'idle' },
@@ -440,7 +436,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         body: {
           ...this.status(request),
           csrf: row.csrf,
-          resumeAvailable: !!vault.snapshot().credential,
+          resumeAvailable:
+            !!vault.snapshot().credential &&
+            !broker.status.reauthenticationRequired,
         },
       };
     },
@@ -586,22 +584,56 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         check();
         const finish = finalizing.then(async () => {
           check();
-          await persistNativeAttempt(row, () =>
-            vault.update((state) => {
-              check();
-              const old = state.credential;
-              if (
-                old &&
-                (old.claims.tid !== credential.claims.tid ||
-                  old.claims.sub !== credential.claims.sub)
-              )
-                throw new Error('local owner conflict');
-              if (old && old.claims.did !== credential.claims.did)
-                throw new Error(
-                  'sign out existing device before replacing connection',
-                );
-              state.credential = credential;
-            }),
+          await broker.commitLogin(() =>
+            persistNativeAttempt(row, () =>
+              vault.update((state) => {
+                check();
+                const old = state.credential;
+                if (
+                  old &&
+                  ((old.platformOrigin !== undefined &&
+                    old.platformOrigin !== config.platformOrigin) ||
+                    old.claims.iss !== config.issuer ||
+                    (old.clientId !== undefined &&
+                      old.clientId !== config.clientId))
+                )
+                  throw new Error(
+                    'platform binding changed; platform switching is unavailable',
+                  );
+                if (
+                  old &&
+                  (old.claims.tid !== credential.claims.tid ||
+                    old.claims.sub !== credential.claims.sub)
+                )
+                  throw new Error('local owner conflict');
+                if (old && old.claims.did !== credential.claims.did) {
+                  if (
+                    !old.refreshPending &&
+                    !broker.status.reauthenticationRequired
+                  )
+                    throw new Error(
+                      'sign out existing device before replacing connection',
+                    );
+                  // A complete fresh native login may recover an uncertain
+                  // exchange for the SAME owner, retaining remote compensation.
+                  state.revocations ??= [];
+                  if (state.revocations.length >= 256)
+                    throw new Error('revocation queue full');
+                  state.revocations.push({
+                    id: random(),
+                    platformOrigin: config.platformOrigin,
+                    clientId: config.clientId,
+                    token: old.refreshToken,
+                  });
+                  state.endpoint = null;
+                  state.threads = {};
+                  state.deliveries = {};
+                  state.pendingOpens = {};
+                  state.openOutcomes = {};
+                }
+                state.credential = credential;
+              }),
+            ),
           );
           check();
           await startTeam(check);
@@ -656,6 +688,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (!owns(vault.snapshot().credential))
         throw new Error('local device ownership changed');
       generation++;
+      broker.invalidate('signed_out');
+      models.logout();
       network.logout();
       if (attempt) {
         attempts.delete(cookie(request, ATTEMPT_COOKIE));
@@ -723,6 +757,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (disposed) return;
       disposed = true;
       closed = true;
+      broker.invalidate('closed');
+      models.close();
       stopHttpTracking?.();
       clearInterval(expiryTimer);
       clearInterval(revokeTimer);

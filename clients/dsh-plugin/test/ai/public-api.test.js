@@ -14,8 +14,10 @@ import Ajv from 'ajv';
 const manifest = process.env.AURIGA_DSH_LLM_PACKAGE;
 const require = createRequire(manifest ? resolve(manifest) : import.meta.url);
 let root;
+let peerRequire;
 try {
   root = require.resolve('@deepseek-ai/dsh-llm');
+  peerRequire = createRequire(root);
 } catch (error) {
   if (!['MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND'].includes(error.code))
     throw error;
@@ -140,7 +142,7 @@ test(
   async () => {
     const hostApi = await import(pathToFileURL(root));
     const { Context } = await import(
-      pathToFileURL(require.resolve('@deepseek-ai/cordis'))
+      pathToFileURL(peerRequire.resolve('@deepseek-ai/cordis'))
     );
     const ctx = new Context();
     const fiber = await ctx.plugin(hostApi.LlmRuntime);
@@ -223,7 +225,7 @@ test(
       return;
     }
     const { Context } = await import(
-      pathToFileURL(require.resolve('@deepseek-ai/cordis'))
+      pathToFileURL(peerRequire.resolve('@deepseek-ai/cordis'))
     );
     const ctx = new Context();
     const fiber = await ctx.plugin(hostApi.LlmRuntime);
