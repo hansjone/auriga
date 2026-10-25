@@ -2,7 +2,8 @@
 
 唯一宿主依据是 deploy/compose/real-dsh/package-lock.json 锁定的
 @deepseek-ai/dsh*@0.2.0-rc.2 npm 包。本轮 npm ci --ignore-scripts 后只读核包内源码，
-不以桌面发行版或其他仓库推断 API。安装隔离另有任务，本目录保持失败封闭，不定隔离方案。
+不以桌面发行版或其他仓库推断 API。用户在 2026-10-25 将同机隔离整体推迟；无隔离服务
+不再阻止原生端口启用。诊断固定显示“未隔离（开发阶段）”，不宣称已经隔离。
 
 ## 源码基线与可复核证据
 
@@ -31,10 +32,28 @@
 
 ## 适配行为
 
-index.js 的两个公开原生工厂先过来源/隔离门禁；普通对象、复制、Proxy 和 no-op 均不能放行。
-本任务不提供隔离服务发行者，私有来源注册表仍为空，J4 保持 unconfigured，不建连、不注册工具。
-readRuntimeFingerprint 只读 CLI manifest.version 与四份包源码摘要；npm manifest 没有 desktop
-build/dirty 字段。诊断指纹匹配不证明当前加载实例，也不替代隔离或已加载文件来源证明。
+index.js 的公开工厂不要求 security/issuer/品牌，也不调用 assertIsolated。主装配必须传入
+当前 Node 宿主的 ctx，以及由宿主 loader 取得的 runtime 文件路径：manifestPath、controllerPath、
+persistencePath、sessionPath、agentLoopPath。路径不得来自模型或浏览器参数。
+
+```
+const host = await createNativeHostPort({ ctx, runtime });
+const sourceForExecution = await createNativeSourceResolver({ ctx, runtime, lookupBinding });
+host.getDiagnostics().isolation.message; // 未隔离（开发阶段）
+```
+
+工厂每次操作仍读实际 CLI manifest.version 和四份源码 SHA-256，严格对照 PINNED_HOST；
+缺文件、版本/摘要不符或 API 缺失继续 host_incompatible。复制 pin 或 no-op security 对象
+不能替代实际文件。npm manifest 没有 desktop build/dirty 字段，源码校验不等于 OS 隔离证明。
+
+隔离只在 runtime.js 的 getNativeIsolationDecision() 判定。恢复条件：用户重新要求强制隔离，
+且真实宿主隔离适配及验证到位，再在此点恢复强制要求；没有环境变量/配置开关或第二处判定。
+J4 读取 getDiagnostics() 展示该诊断，本任务不改现有 UI/provider 文件。
+
+功能性耐久检查独立保留：从已校验的 persistencePath 加载实际 JSONL 类，核当前 provider 实例，
+同 session 的 write handle、storage、tracker.openHandles、closing 状态和 drain/flush 能力；
+未匹配 writer 时不能只因 session/flush 返回 true 就报接受。冷会话先原生恢复再核活动 writer，
+不会因为冷态尚无 writer 被永久卡住。该检查无需隔离服务，也不证明同机工具隔离。
 
 host-port.js 的 createHostPortOperations 和 source-context.js 的 createSourceResolver 是底层
 组合算法，不从 index.js 导出，不授予联网权。单元测试验证算法，不能冒充生产隔离验收。
@@ -65,4 +84,7 @@ node --test test/network/host/native/upstream-check.mjs
 
 它核四份真实源码摘要，直接加载上游 SessionController/SessionStore；inbox 的非导出实现按
 已固定摘要的原始源码片段执行并与适配器比对，不替换宿主模块或放宽原生参数。
-这些是包接口/内存行为核验，真实创建/恢复模型、JSONL 断电耐久、双 DSH 与隔离仍待后续验收。
+另测公开工厂在完全不传隔离服务时启用、创建、冷恢复和 flush：使用实际上游 Context、
+SessionStore、JSONL 文件存储及 controller 包装方法，commands/Agent 装配仍为无模型夹具。
+包含实际版本/文件摘要错误、错误 provider、关闭 writer 的负向检查。
+这些不等于真实模型对话、JSONL 断电耐久或双 DSH 生产验收；同机隔离按用户决定整体推迟。

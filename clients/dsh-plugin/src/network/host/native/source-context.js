@@ -5,11 +5,15 @@ import { isNativeSubagentOwned } from './upstream.js';
 /** In-process tool callback only. Never expose this as a JSON/HTTP/IPC resolver.
  * The broker must bind its IPC peer to the capability before any serialization.
  * Human intent, rebinding and credentials are deliberately not capabilities here.
- * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').NativeSecurity, lookupBinding: (sessionId: string) => Promise<import('./types.js').SourceBinding|null>}} options */
-export function createNativeSourceResolver({ ctx, security, lookupBinding }) {
+ * @param {{ctx: import('./types.js').NativeContext, runtime: import('./types.js').RuntimeArtifacts, lookupBinding: (sessionId: string) => Promise<import('./types.js').SourceBinding|null>}} options */
+export async function createNativeSourceResolver({
+  ctx,
+  runtime,
+  lookupBinding,
+}) {
   return createSourceResolver({
     ctx,
-    security: createNativeAuthority(security),
+    security: await createNativeAuthority({ ctx, runtime }),
     lookupBinding,
   });
 }

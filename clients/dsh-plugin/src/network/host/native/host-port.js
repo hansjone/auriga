@@ -1,6 +1,10 @@
 import { CODES, HostSeamError } from '../errors.js';
 import { createKeyedMutex } from '../keyed-mutex.js';
-import { createNativeAuthority, incompatible } from './runtime.js';
+import {
+  createNativeAuthority,
+  getNativeIsolationDecision,
+  incompatible,
+} from './runtime.js';
 import { hasNativePromptRequest, isNativeSubagentOwned } from './upstream.js';
 
 /** @param {unknown} value @returns {value is string} */
@@ -44,15 +48,19 @@ function liveAgent(agent, id, ctx) {
 }
 
 /** Implements HostPort against the lockfile-pinned upstream rc.2 services.
- * No model calls, module imports, service startup or network registration here.
- * security is a trusted OS broker prerequisite, not an isolation implementation.
- * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').NativeSecurity}} options
- * @returns {Promise<import('../adapter.js').HostPort>} */
-export async function createNativeHostPort({ ctx, security }) {
-  return createHostPortOperations({
+ * No model calls, service startup or network registration here.
+ * OS isolation is deferred; runtime artifacts and native durability remain required.
+ * @param {{ctx: import('./types.js').NativeContext, runtime: import('./types.js').RuntimeArtifacts}} options
+ * @returns {Promise<import('../adapter.js').HostPort & {getDiagnostics(): {isolation:ReturnType<typeof getNativeIsolationDecision>}}> } */
+export async function createNativeHostPort({ ctx, runtime }) {
+  const operations = await createHostPortOperations({
     ctx,
-    security: createNativeAuthority(security),
+    security: await createNativeAuthority({ ctx, runtime }),
   });
+  return {
+    ...operations,
+    getDiagnostics: () => ({ isolation: getNativeIsolationDecision() }),
+  };
 }
 
 /** Pure HostPort operations over an authority port; NOT an installation gate.
@@ -257,7 +265,6 @@ export async function createHostPortOperations({
         if (isNativeSubagentOwned(ctx, record.meta, ctx.agents.get(id)))
           throw incompatible();
         try {
-          await durable(id);
           const requestKey = `${id}\0${input.requestId}`;
           if (await hasRequest(id, input.requestId)) {
             uncertain.delete(requestKey);
@@ -267,6 +274,7 @@ export async function createHostPortOperations({
           const resolved = await ctx.sessionController.resolveAgent(id);
           if (resolved.error || !resolved.agent) throw incompatible();
           liveAgent(resolved.agent, id, ctx);
+          await durable(id);
           if (
             isNativeSubagentOwned(
               ctx,
@@ -352,7 +360,6 @@ export async function createHostPortOperations({
       if (isNativeSubagentOwned(ctx, before.meta, ctx.agents.get(id)))
         return false;
       const provider = ctx.sessionPersistence;
-      await durable(id);
       let session = ctx.sessions.get(id);
       if (!session) {
         const record = await required(id);
@@ -370,6 +377,7 @@ export async function createHostPortOperations({
         session.header.cwd !== before.meta.cwd
       )
         return false;
+      await durable(id);
       if ((await ctx.sessions.flush(session)) !== true) return false;
       await durable(id);
       return (

@@ -4,7 +4,7 @@ import { createNativeHostPort } from '../../../../src/network/host/native/index.
 import { createHostPortOperations } from '../../../../src/network/host/native/host-port.js';
 import { fixture } from './fixtures.js';
 
-test('an ordinary object cannot self-attest the public pinned fingerprint or isolation', async () => {
+test('self-attested security metadata cannot replace runtime artifact locations', async () => {
   const f = fixture();
   let invoked = false;
   const fake = {

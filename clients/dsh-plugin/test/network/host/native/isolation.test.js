@@ -29,11 +29,11 @@ test('diagnostic fingerprint requires the lockfile version and all four package 
   }
 });
 
-test('no security service/config boolean can enable a native port', async () => {
+test('missing functional artifacts cannot be replaced by security/config booleans', async () => {
   const f = fixture();
   await assert.rejects(createInstalledPort({ ctx: f.ctx }), incompatible);
-  assert.throws(
-    () => createInstalledResolver({ ...f, lookupBinding: async () => null }),
+  await assert.rejects(
+    createInstalledResolver({ ...f, lookupBinding: async () => null }),
     incompatible,
   );
   await assert.rejects(
@@ -43,30 +43,34 @@ test('no security service/config boolean can enable a native port', async () => 
     }),
     incompatible,
   );
-  f.state.isolated = false;
   await assert.rejects(createInstalledPort(f), incompatible);
 });
 
-test('boolean isolation/provider attestations are rejected rather than treated as proof', async () => {
+test('durability boolean attestations are rejected rather than treated as provider evidence', async () => {
   const f = fixture();
-  f.security.assertIsolated = async () => true;
-  await assert.rejects(createPort(f), incompatible);
-  f.security.assertIsolated = async () => {};
   const host = await createPort(f);
+  f.security.assertDurableProvider = async () => true;
+  assert.equal(await host.hasDurableProvider('session-a'), false);
   f.security.assertDurableProvider = async () => false;
   assert.equal(await host.hasDurableProvider('session-a'), false);
 });
 
-test('runtime and isolation are rechecked before operations and after async native calls', async () => {
+test('functional runtime is rechecked before operations and after async native calls', async () => {
   const f = fixture();
   const host = await createPort(f);
-  f.security.inspectRuntime = async () => ({ ...PINNED_HOST, build: 'other' });
+  f.security.inspectRuntime = async () => ({
+    ...PINNED_HOST,
+    version: 'other',
+  });
   await assert.rejects(host.getSession('session-a'), incompatible);
   f.security.inspectRuntime = async () => ({ ...PINNED_HOST });
   const prompt = f.ctx.sessionController.prompt;
   f.ctx.sessionController.prompt = async (...args) => {
     const out = await prompt(...args);
-    f.state.isolated = false;
+    f.security.inspectRuntime = async () => ({
+      ...PINNED_HOST,
+      version: 'changed',
+    });
     return out;
   };
   await assert.rejects(

@@ -68,20 +68,21 @@ export interface RuntimeFingerprint {
   sessionSha256: string;
   agentLoopSha256: string;
 }
-/** Trusted host/broker code ONLY; never settings, tool parameters or browser IPC. */
-export interface NativeSecurity {
-  inspectRuntime(): Promise<RuntimeFingerprint>;
-  /** Must throw unless the protocol §7 OS boundary is currently enforced. */
-  assertIsolated(): Promise<void>;
-  /** Must prove the active provider instance and this session's durable writer. */
+/** Locations supplied by the running host loader. */
+export interface RuntimeArtifacts {
+  manifestPath: string;
+  controllerPath: string;
+  persistencePath: string;
+  sessionPath: string;
+  agentLoopPath: string;
+}
+/** Functional readiness and durability; does not grant or assert OS isolation. */
+export interface HostOperationAuthority {
+  assertReady(): Promise<void>;
   assertDurableProvider(
     provider: NativeContext['sessionPersistence'],
     id: string,
   ): Promise<void>;
-}
-/** Internal operation authority for port composition, not host provenance. */
-export interface HostOperationAuthority extends NativeSecurity {
-  assertReady(): Promise<void>;
 }
 export interface SourceBinding {
   local: string;

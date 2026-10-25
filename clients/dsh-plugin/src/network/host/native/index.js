@@ -4,4 +4,5 @@ export {
   PINNED_HOST,
   readRuntimeFingerprint,
   verifyRuntimeFingerprint,
+  getNativeIsolationDecision,
 } from './runtime.js';

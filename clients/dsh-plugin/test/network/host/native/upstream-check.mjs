@@ -2,7 +2,9 @@
 // Not part of the standalone plugin's dependency-free default test glob.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import {
@@ -10,6 +12,11 @@ import {
   verifyRuntimeFingerprint,
 } from '../../../../src/network/host/native/runtime.js';
 import { hasNativePromptRequest } from '../../../../src/network/host/native/upstream.js';
+import {
+  createNativeHostPort,
+  createNativeSourceResolver,
+} from '../../../../src/network/host/native/index.js';
+import { fixture } from './fixtures.js';
 
 const root = new URL(
   '../../../../../../deploy/compose/real-dsh/node_modules/',
@@ -21,6 +28,183 @@ const { SessionController } = await import(
 );
 const { SessionStore } = await import(artifact('dsh-session').href);
 const { Context } = await import(artifact('cordis').href);
+
+test('public native factory enables without an isolation service after functional artifact checks', async () => {
+  const f = fixture();
+  const host = await createNativeHostPort({
+    ctx: f.ctx,
+    runtime: {
+      manifestPath: fileURLToPath(
+        new URL('@deepseek-ai/dsh/package.json', root),
+      ),
+      controllerPath: fileURLToPath(artifact('dsh-api-session-controller')),
+      persistencePath: fileURLToPath(artifact('dsh-session-persistence-jsonl')),
+      sessionPath: fileURLToPath(artifact('dsh-session')),
+      agentLoopPath: fileURLToPath(artifact('dsh-agent-loop')),
+    },
+  });
+  assert.equal(host.getDiagnostics().isolation.message, '未隔离（开发阶段）');
+  assert.equal(await host.hasDurableProvider('session-a'), false);
+  await assert.rejects(
+    host.createSession({ id: 'session-a', cwd: '/work/project', preset: null }),
+    { code: 'network.host_incompatible' },
+  );
+});
+
+test('public gate still rejects wrong versions, changed source bytes and missing artifacts without isolation', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-native-gate-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { writeFile } = await import('node:fs/promises');
+  const manifestPath = join(dir, 'package.json');
+  const controllerPath = join(dir, 'controller.js');
+  await writeFile(manifestPath, JSON.stringify({ version: '0.0.0' }));
+  await writeFile(controllerPath, 'changed source');
+  const runtime = {
+    manifestPath: fileURLToPath(new URL('@deepseek-ai/dsh/package.json', root)),
+    controllerPath: fileURLToPath(artifact('dsh-api-session-controller')),
+    persistencePath: fileURLToPath(artifact('dsh-session-persistence-jsonl')),
+    sessionPath: fileURLToPath(artifact('dsh-session')),
+    agentLoopPath: fileURLToPath(artifact('dsh-agent-loop')),
+  };
+  for (const invalid of [
+    { ...runtime, manifestPath },
+    { ...runtime, controllerPath },
+    { ...runtime, sessionPath: join(dir, 'missing') },
+  ]) {
+    await assert.rejects(
+      createNativeHostPort({ ctx: fixture().ctx, runtime: invalid }),
+      { code: 'network.host_incompatible' },
+    );
+  }
+});
+
+test('public factory creates, cold-restores and flushes through real JSONL without isolation services', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-native-enabled-'));
+  const jsonlRoot = join(dir, 'sessions');
+  const cwd = join(dir, 'workspace');
+  await mkdir(jsonlRoot);
+  await mkdir(cwd);
+  const { default: JsonlPersistence } = await import(
+    artifact('dsh-session-persistence-jsonl').href
+  );
+  const owner = new Context();
+  const provider = new JsonlPersistence(owner, {
+    root: jsonlRoot,
+    compression: 'none',
+  });
+  const store = new SessionStore(owner);
+  const agents = new Map(),
+    detachers = new Map();
+  let created = 0,
+    resumed = 0;
+  t.after(async () => {
+    for (const handle of [...provider.tracker.openHandles])
+      await handle.close();
+    for (const detach of detachers.values()) await detach();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const snapshot = async (id) => {
+    const reader = await provider.open(id, 'read');
+    try {
+      return { meta: reader.header, events: (await reader.read()).events };
+    } finally {
+      await reader.close();
+    }
+  };
+  const attach = (id, meta, events = []) => {
+    const session = store.prepare(id, { meta, seed: events });
+    detachers.set(id, store.enter(session));
+    const agent = { id, session, inbox: { nextTurn: [], nextStep: [] } };
+    agents.set(id, agent);
+    return agent;
+  };
+  const ctx = {
+    sessionPersistence: owner.get('sessionPersistence'),
+    sessions: store,
+    agents: { get: (id) => agents.get(id), isOwnedBy: () => false },
+    workspaceRegistry: { archivedSessionIds: [] },
+    agentPresets: { resolve: async (id) => ({ id: id ?? 'standard' }) },
+    sessionProjections: { stateOf: (session) => session.header.agentPreset },
+    sessionQuery: {
+      observeSession: async (id) => {
+        const data = await snapshot(id);
+        return {
+          header: data.meta,
+          events: data.events,
+          inheritedEventCount: 0,
+          [Symbol.dispose]() {},
+        };
+      },
+    },
+  };
+  const controller = Object.create(SessionController.prototype);
+  controller.ctx = ctx;
+  controller.commands = {
+    create: async (input) => {
+      created++;
+      const agent = attach(input.sessionId, {
+        cwd: input.cwd,
+        agentPreset: input.agentPreset,
+      });
+      await provider.create(agent.session.header);
+      return { sessionId: input.sessionId, agentPreset: input.agentPreset };
+    },
+  };
+  controller.agents = {
+    resolveAgent: async (id) => {
+      if (agents.has(id)) return { agent: agents.get(id) };
+      resumed++;
+      const data = await snapshot(id);
+      const agent = attach(id, data.meta, data.events);
+      await provider.open(id, 'write');
+      return { agent };
+    },
+  };
+  ctx.sessionController = controller;
+  const runtime = {
+    manifestPath: fileURLToPath(new URL('@deepseek-ai/dsh/package.json', root)),
+    controllerPath: fileURLToPath(artifact('dsh-api-session-controller')),
+    persistencePath: fileURLToPath(artifact('dsh-session-persistence-jsonl')),
+    sessionPath: fileURLToPath(artifact('dsh-session')),
+    agentLoopPath: fileURLToPath(artifact('dsh-agent-loop')),
+  };
+  const host = await createNativeHostPort({ ctx, runtime });
+  assert.deepEqual(
+    await host.createSession({ id: 'native-created', cwd, preset: null }),
+    { id: 'native-created', cwd },
+  );
+  assert.equal(await host.hasDurableProvider('native-created'), true);
+  assert.equal(await host.flush('native-created'), true);
+  const writer = provider.tracker.writers.get('native-created');
+  await writer.close();
+  assert.equal(await host.hasDurableProvider('native-created'), false);
+  assert.equal(await host.flush('native-created'), false);
+  await detachers.get('native-created')();
+  detachers.delete('native-created');
+  agents.delete('native-created');
+  assert.equal((await host.getSession('native-created')).cwd, cwd);
+  assert.equal(await host.flush('native-created'), true);
+  assert.equal(created, 1);
+  assert.equal(resumed, 1);
+  assert.equal(host.getDiagnostics().isolation.message, '未隔离（开发阶段）');
+  const resolveSource = await createNativeSourceResolver({
+    ctx,
+    runtime,
+    lookupBinding: async () => ({
+      local: '1',
+      bindingId: 'binding-a',
+      hostSessionId: 'native-created',
+      cwd,
+      state: 'bound',
+      lifecycle: 'open',
+      kind: 'session',
+    }),
+  });
+  assert.equal(
+    (await resolveSource({ agent: agents.get('native-created') })).local,
+    '1',
+  );
+});
 
 test('actual locked npm artifacts match every recorded source digest', async () => {
   const fingerprint = await readRuntimeFingerprint({

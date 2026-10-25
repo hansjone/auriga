@@ -10,7 +10,6 @@ export function fixture() {
   const calls = [];
   const archivedSessionIds = [];
   const state = {
-    isolated: true,
     durable: true,
     flush: true,
     flushError: false,
@@ -95,20 +94,16 @@ export function fixture() {
     },
   };
   const security = {
-    // Port-algorithm fixture authority ONLY. Not a branded native installation.
+    // Port-algorithm functional authority, not a real loaded-host verification.
     async assertReady() {
       if (
         JSON.stringify(await security.inspectRuntime()) !==
-          JSON.stringify(PINNED_HOST) ||
-        (await security.assertIsolated()) !== undefined
+        JSON.stringify(PINNED_HOST)
       )
         throw new Error('fixture authority unavailable');
     },
     async inspectRuntime() {
       return structuredClone(PINNED_HOST);
-    },
-    async assertIsolated() {
-      if (!state.isolated) throw new Error('private isolation diagnostics');
     },
     async assertDurableProvider(provider, id) {
       if (

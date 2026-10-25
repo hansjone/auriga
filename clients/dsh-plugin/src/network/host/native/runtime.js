@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { CODES, HostSeamError } from '../errors.js';
 
 /** npm ci from deploy/compose/real-dsh/package-lock.json; byte SHA-256.
- * Diagnostic baseline only, not loaded-module or isolation attestation. */
+ * Functional artifact baseline, not loaded-module or isolation attestation. */
 export const PINNED_HOST = Object.freeze({
   version: '0.2.0-rc.2',
   controllerSha256:
@@ -16,9 +17,17 @@ export const PINNED_HOST = Object.freeze({
     '00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2',
 });
 
-// Deny-by-default provenance registry. No public enrolment or caller-supplied
-// issuer. Isolation integration is outside this task and remains disabled.
-const nativeSecurityHandles = new WeakSet();
+/** Single isolation decision point. User deferred all same-machine isolation
+ * on 2026-10-25. Restore enforcement here only after a new user decision and
+ * a verified host isolation implementation; never use a config/env bypass. */
+export function getNativeIsolationDecision() {
+  return Object.freeze({
+    required: false,
+    isolated: false,
+    mode: 'development_unisolated',
+    message: '未隔离（开发阶段）',
+  });
+}
 
 export function incompatible() {
   return new HostSeamError(CODES.hostIncompatible);
@@ -38,8 +47,8 @@ export function verifyRuntimeFingerprint(value) {
 /** Paths and manifest identity must come from the same running host loader.
  * Node fs cannot read inside ASAR; Electron's host fs must collect those bytes.
  * This helper is for unpacked distributions, without loading their modules.
- * Diagnostic only: this does not issue a security handle or prove loaded code.
- * @param {{manifestPath: string, controllerPath: string, persistencePath: string, sessionPath: string, agentLoopPath: string}} input
+ * This verifies functional artifacts, not an OS isolation boundary or module origin.
+ * @param {import('./types.js').RuntimeArtifacts} input
  * @returns {Promise<import('./types.js').RuntimeFingerprint>} */
 export async function readRuntimeFingerprint({
   manifestPath,
@@ -79,40 +88,77 @@ export async function readRuntimeFingerprint({
   }
 }
 
-/** No built-in permissive provider. Missing isolation remains unconfigured.
- * @param {import('./types.js').NativeSecurity} security */
-export function createNativeGate(security) {
-  // Matching methods/constants, a copied object, a Proxy or a prototype are
-  // never proof of provenance. Current host evidence cannot mint this brand.
-  if (!nativeSecurityHandles.has(security)) throw incompatible();
+/** Functional readiness remains mandatory despite deferred OS isolation.
+ * Paths must come from the running Node host loader, not model/browser input.
+ * @param {import('./types.js').RuntimeArtifacts} runtime */
+export function createNativeGate(runtime) {
+  const keys = [
+    'manifestPath',
+    'controllerPath',
+    'persistencePath',
+    'sessionPath',
+    'agentLoopPath',
+  ];
   if (
-    !security ||
-    !['inspectRuntime', 'assertIsolated', 'assertDurableProvider'].every(
-      (key) => typeof (/** @type {any} */ (security)[key]) === 'function',
+    !runtime ||
+    !keys.every(
+      (key) =>
+        typeof (/** @type {any} */ (runtime)[key]) === 'string' &&
+        /** @type {any} */ (runtime)[key].length > 0,
     )
   )
     throw incompatible();
+  const files = Object.freeze({ ...runtime });
   return async () => {
     try {
-      verifyRuntimeFingerprint(await security.inspectRuntime());
-      if ((await security.assertIsolated()) !== undefined) throw incompatible();
+      verifyRuntimeFingerprint(await readRuntimeFingerprint(files));
+      const isolation = getNativeIsolationDecision();
+      if (isolation.required && !isolation.isolated) throw incompatible();
     } catch {
       throw incompatible();
     }
   };
 }
 
-/** Preserve genuine service receivers/private fields instead of spreading a
- * class instance into a structural clone. Only branded handles reach here.
- * @param {import('./types.js').NativeSecurity} security
- * @returns {import('./types.js').HostOperationAuthority} */
-export function createNativeAuthority(security) {
-  const assertReady = createNativeGate(security);
+/** JSONL writer checks are functional durability checks, not isolation proof.
+ * Exact pinned implementation fields: JSONL lib/index.js:26-46, :359-363,
+ * :413-420 and :2372-2409. Preserve Cordis service receiver identities.
+ * @param {{ctx:import('./types.js').NativeContext,runtime:import('./types.js').RuntimeArtifacts}} options
+ * @returns {Promise<import('./types.js').HostOperationAuthority>} */
+export async function createNativeAuthority({ ctx, runtime }) {
+  const files = Object.freeze({ ...runtime });
+  const assertReady = createNativeGate(files);
+  await assertReady();
+  let JsonlPersistence;
+  try {
+    ({ default: JsonlPersistence } = await import(
+      pathToFileURL(files.persistencePath).href
+    ));
+  } catch {
+    throw incompatible();
+  }
+  /** @param {any} value */
+  const original = (value) => value?.[Symbol.for('cordis.original')] ?? value;
   return {
     assertReady,
-    inspectRuntime: () => security.inspectRuntime(),
-    assertIsolated: () => security.assertIsolated(),
-    assertDurableProvider: (provider, id) =>
-      security.assertDurableProvider(provider, id),
+    async assertDurableProvider(provider, id) {
+      await assertReady();
+      if (provider !== ctx.sessionPersistence) throw incompatible();
+      const backend = original(provider);
+      if (!(backend instanceof JsonlPersistence)) throw incompatible();
+      const writer = backend.tracker?.writers?.get(id);
+      if (
+        !writer ||
+        writer.id !== id ||
+        writer.header?.id !== id ||
+        writer.access !== 'write' ||
+        writer.closing !== undefined ||
+        original(writer.storage) !== backend ||
+        !backend.tracker.openHandles.has(writer) ||
+        typeof writer.drainLive !== 'function' ||
+        typeof writer.flush !== 'function'
+      )
+        throw incompatible();
+    },
   };
 }
