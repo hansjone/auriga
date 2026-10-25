@@ -9,6 +9,7 @@ import auriga.collab.grpc.CollabGrpcService;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.persistence.TenantTransactionManager;
+import auriga.iam.api.NetworkAuthority;
 import java.time.Clock;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
@@ -60,14 +61,16 @@ public class CollabRuntimeConfiguration {
       DataSource source,
       TenantTransactionManager manager,
       ObjectProvider<NetworkSourceAuthority> authority,
-      ObjectProvider<NetworkSigningKeys> keys) {
+      ObjectProvider<NetworkSigningKeys> keys,
+      ObjectProvider<NetworkAuthority> iam) {
     Clock clock = Clock.systemUTC();
     return new NetworkMailboxService(
         new JdbcTemplate(source),
         manager,
         authority.getIfAvailable(),
         keys.getIfAvailable(() -> new NetworkSigningKeys(clock, 1)),
-        clock);
+        clock,
+        iam.getIfAvailable());
   }
 
   @Bean
