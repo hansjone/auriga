@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/register.schema.json",
+  "title": "Network register request",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}
