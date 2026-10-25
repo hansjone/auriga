@@ -71,5 +71,10 @@ staged 直接 revoke、再次激活/撤销等非法迁移返回 common.conflict�
 
 使用独立测试数据库，将管理员 PostgreSQL URL 放入 `AURIGA_AI_TEST_PG_DSN` 后运行 `go test -count=1 ./...`。
 fixture 创建随机低权限运行角色，验证 RLS、事务回滚、迁移幂等及 API；结束清理测试租户/角色。
+fixture 的角色创建/授权和撤权/删除分别在同一事务内取得数据库级咨询锁（718245010），
+避免跨测试包进程同时改写同一 ai schema/table ACL 目录行；cleanup 失败使测试失败。
+此锁只覆盖 fixture 目录写入，运行角色、业务事务与生产迁移锁（718245009）保持原约束。
+`go test -count=5 ./...` 会保留默认跨包并行；TestPostgresConcurrentFixtures 另启三个独立测试进程，
+各进程内三个并行 fixture 同时初始化/使用/回收，并持续核验存活 fixture 的读写与 RLS。
 无变量时具名跳过 PG 集成测试；`CI=true` 缺变量直接失败。CI Linux 提供 postgres:17 service，
 Windows 使用 runner 自带 PGBIN，在随机端口启动临时库，结束时停止。不得指向真实部署。
