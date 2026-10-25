@@ -1,13 +1,38 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { TLSSocket } from 'node:tls';
 import { createSettingsStore, normalizeOrigin, probe } from './store.js';
+import { validateBrowserOrigin } from '../managed/host-auth.js';
+
+/** Only installation/renderer configuration may supply this value, never a request
+ * header or saved platform preference. Reject normalization and non-origin URLs.
+ * @param {string|undefined} value */
+function trustedOrigin(value) {
+  if (value === undefined) return undefined;
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol) || url.origin !== value)
+    throw new Error(
+      'auriga-dsh: trusted UI origin must be a canonical HTTP(S) origin',
+    );
+  return url.origin;
+}
 
 /** Public host service adapter. Business preferences do not modify loader config
  * or reuse credentials when an origin changes.
- * @param {any} ctx @param {any} config */
-export function installSettings(ctx, config) {
+ * @param {any} ctx @param {any} config
+ * @param {{uiOrigin?:string}} [installation] Trusted process configuration. */
+export function installSettings(
+  ctx,
+  config,
+  { uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN } = {},
+) {
   if (typeof ctx.inject !== 'function') return;
+  // Managed browserOrigin is renderer-owned (the existing managed contract).
+  // A local reverse proxy can instead pin its external origin at process start.
+  const browser =
+    config?.browserOrigin && validateBrowserOrigin(config.browserOrigin);
+  const expectedOrigin = browser
+    ? new URL(`${browser.scheme}://${browser.host}:${browser.port}`).origin
+    : trustedOrigin(uiOrigin);
   ctx.inject(['profileContext'], async (/** @type {any} */ scoped) => {
     if (!scoped.profileContext?.dir) return;
     const store = await createSettingsStore(
@@ -22,6 +47,7 @@ export function installSettings(ctx, config) {
           handler: createSettingsHandler({
             store,
             auth: scoped.connection,
+            uiOrigin: expectedOrigin,
             activeOrigin: config?.connect?.platformOrigin
               ? normalizeOrigin(config.connect.platformOrigin)
               : '',
@@ -35,13 +61,15 @@ export function installSettings(ctx, config) {
   });
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string,deviceName?:string|null}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string,deviceName?:string|null,uiOrigin?:string}} options */
 export function createSettingsHandler({
   store,
   auth,
   activeOrigin,
   deviceName = null,
+  uiOrigin,
 }) {
+  const expectedOrigin = trustedOrigin(uiOrigin);
   return async (
     /** @type {import('node:http').IncomingMessage} */ req,
     /** @type {import('node:http').ServerResponse} */ res,
@@ -64,13 +92,19 @@ export function createSettingsHandler({
         (_, i) => i % 2 === 0 && req.rawHeaders[i].toLowerCase() === key,
       ).length;
     let sameOrigin = false;
-    const protocol = req.socket instanceof TLSSocket ? 'https:' : 'http:';
     try {
+      // DSH's public webServer is node:http. Native auth still owns Host trust;
+      // only a trusted external origin can override direct HTTP semantics.
+      const direct = new URL('http://' + req.headers.host);
       sameOrigin =
         count('host') === 1 &&
         count('origin') === 1 &&
-        req.headers.origin ===
-          new URL(protocol + '//' + req.headers.host).origin;
+        !direct.username &&
+        !direct.password &&
+        !direct.search &&
+        !direct.hash &&
+        direct.pathname === '/' &&
+        req.headers.origin === (expectedOrigin ?? direct.origin);
     } catch {
       /* invalid host rejected */
     }

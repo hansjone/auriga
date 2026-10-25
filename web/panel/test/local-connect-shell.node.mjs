@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { Buffer } from 'node:buffer';
-import { TLSSocket } from 'node:tls';
+import { Socket } from 'node:net';
 import { createSettingsStore } from '../../../clients/dsh-plugin/src/settings/store.js';
 import { createSettingsHandler } from '../../../clients/dsh-plugin/src/settings/host.js';
 const localBoot = (connected) => ({
@@ -30,11 +30,12 @@ const localBoot = (connected) => ({
 
 test('registered settings loads its real authenticated asset and saves through the real API without replacing main', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-shell-settings-'));
-  const socket = new TLSSocket();
+  const socket = new Socket();
   let host;
   try {
     const store = await createSettingsStore(directory, 'https://example.com');
     const handler = createSettingsHandler({
+      uiOrigin: 'https://instance.example.com',
       store,
       auth: { requestRejection: () => undefined },
       activeOrigin: 'https://example.com',

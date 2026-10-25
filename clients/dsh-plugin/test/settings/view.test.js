@@ -74,6 +74,49 @@ function text(tree) {
 const button = (tree, label) =>
   nodes(tree).find((n) => n.type === 'button' && text(n) === label);
 
+for (const failure of ['500', 'timeout', 'invalid-json', 'invalid-state'])
+  test(`account ${failure} is unknown and retryable, distinct from a signed-out response`, async () => {
+    let recover = false;
+    const fixture = harness(async (url) => {
+      if (!url.endsWith('/status'))
+        return Response.json({
+          platformOrigin: 'https://example.com',
+          activeOrigin: 'https://example.com',
+          deployment: 'cloud',
+        });
+      if (recover) return Response.json({ loggedIn: false, connected: false });
+      if (failure === '500') return Response.json({}, { status: 500 });
+      if (failure === 'timeout')
+        throw Object.assign(new Error('private'), { name: 'TimeoutError' });
+      if (failure === 'invalid-json') return new Response('private');
+      return Response.json({ loggedIn: 'false', connected: true });
+    });
+    fixture.render();
+    await setImmediate();
+    let tree = fixture.render();
+    assert.match(text(tree), /登录状态暂时无法读取/);
+    assert.doesNotMatch(text(tree), /未登录|Team 未连接|Team 已连接|private/);
+    assert.ok(
+      nodes(tree).some(
+        (n) =>
+          n.type === 'button' && n.props['aria-label'] === '刷新设置与登录状态',
+      ),
+    );
+    recover = true;
+    nodes(tree)
+      .find(
+        (n) =>
+          n.type === 'button' && n.props['aria-label'] === '刷新设置与登录状态',
+      )
+      .props.onClick();
+    fixture.render();
+    await setImmediate();
+    tree = fixture.render();
+    assert.match(text(tree), /未登录/);
+    assert.doesNotMatch(text(tree), /登录状态暂时无法读取/);
+    fixture.dispose();
+  });
+
 test('settings show unconfigured state and persist edited address and deployment through save', async () => {
   let stored = { platformOrigin: '', activeOrigin: '', deployment: 'cloud' };
   const fixture = harness(async (url, init) => {
@@ -145,6 +188,7 @@ test('failed connection and failed logout remain visible without navigating or r
     if (url.endsWith('/status'))
       return Response.json({
         loggedIn: true,
+        connected: false,
         account: { subject: 'alice' },
         csrf: 'test-csrf',
       });

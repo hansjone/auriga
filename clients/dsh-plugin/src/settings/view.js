@@ -19,6 +19,8 @@ const messages = {
     loginTime: '登录时间',
     missing: '当前登录接口未提供',
     signedOut: '未登录',
+    statusUnavailable: '登录状态暂时无法读取，请重试。',
+    refresh: '刷新设置与登录状态',
     logout: '退出本机登录',
     portal: '在门户管理账号安全',
     tools: '工具',
@@ -57,6 +59,8 @@ const messages = {
     loginTime: 'Sign-in time',
     missing: 'Not provided by the current sign-in API',
     signedOut: 'Signed out',
+    statusUnavailable: 'Sign-in status is unavailable. Please retry.',
+    refresh: 'Refresh settings and sign-in status',
     logout: 'Sign out locally',
     portal: 'Manage account security in portal',
     tools: 'Tools',
@@ -130,7 +134,20 @@ export function createSettingsView(
       setBusy(true);
       void Promise.all([
         call('auriga/settings/state'),
-        call('auriga/local-login/status').catch(() => null),
+        call('auriga/local-login/status')
+          .then((identity) => {
+            if (
+              !identity ||
+              typeof identity.loggedIn !== 'boolean' ||
+              (identity.loggedIn &&
+                (typeof identity.connected !== 'boolean' ||
+                  typeof identity.account?.subject !== 'string' ||
+                  !identity.account.subject))
+            )
+              throw new Error('unavailable');
+            return identity;
+          })
+          .catch(() => null),
       ])
         .then(([next, identity]) => {
           if (!live) return;
@@ -181,9 +198,11 @@ export function createSettingsView(
         { role: 'status' },
         !state?.activeOrigin
           ? t.unconfigured
-          : account?.loggedIn === true && account?.connected === true
-            ? t.connected
-            : t.disconnected,
+          : account === null
+            ? t.statusUnavailable
+            : account?.loggedIn === true && account?.connected === true
+              ? t.connected
+              : t.disconnected,
       ),
       row(
         t.address,
@@ -224,9 +243,11 @@ export function createSettingsView(
       h('h3', null, t.security),
       row(
         t.identity,
-        account?.loggedIn === true
-          ? (account.account?.subject ?? t.missing)
-          : t.signedOut,
+        account === null
+          ? t.statusUnavailable
+          : account?.loggedIn === true
+            ? (account.account?.subject ?? t.missing)
+            : t.signedOut,
       ),
       row(
         t.device,
@@ -313,7 +334,16 @@ export function createSettingsView(
         },
         t.save,
       ),
-      h('button', { type: 'button', disabled: busy, onClick: reload }, '↻'),
+      h(
+        'button',
+        {
+          type: 'button',
+          disabled: busy,
+          onClick: reload,
+          'aria-label': t.refresh,
+        },
+        '↻',
+      ),
       h('p', { role: 'status', 'aria-live': 'polite' }, busy ? t.busy : notice),
     );
   };
