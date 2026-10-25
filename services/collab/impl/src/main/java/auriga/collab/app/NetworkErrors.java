@@ -8,6 +8,10 @@ import io.grpc.Status;
  * contracts/network/errors.json (read-only reference).
  */
 public final class NetworkErrors {
+  public static final ErrorCode SENDER_MISMATCH =
+      ErrorCode.of("network.sender_mismatch", 403, Status.Code.PERMISSION_DENIED);
+  public static final ErrorCode CLASS_MISMATCH =
+      ErrorCode.of("network.class_mismatch", 400, Status.Code.INVALID_ARGUMENT);
   public static final ErrorCode STALE_EPOCH =
       ErrorCode.of("network.stale_epoch", 412, Status.Code.FAILED_PRECONDITION);
   public static final ErrorCode CONFLICT =

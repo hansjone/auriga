@@ -1,0 +1,89 @@
+{
+  "description": "共享严格解析边界。root 的深度为 1；nestedScalar 表示 containers 层数组后接 0，nestedEmpty 表示 containers 层数组且最内为空。string/key 的 repeat 为 decoded 字符串重复次数，suffix 为同一字符串追加内容。",
+  "cases": [
+    {
+      "name": "CJK字符串恰16384字节",
+      "kind": "string",
+      "unit": "汉",
+      "repeat": 5461,
+      "suffix": "a",
+      "accept": true
+    },
+    {
+      "name": "CJK字符串超16384字节",
+      "kind": "string",
+      "unit": "汉",
+      "repeat": 5462,
+      "accept": false
+    },
+    {
+      "name": "astral字符串恰16384字节",
+      "kind": "string",
+      "unit": "😀",
+      "repeat": 4096,
+      "accept": true
+    },
+    {
+      "name": "astral字符串超16384字节",
+      "kind": "string",
+      "unit": "😀",
+      "repeat": 4097,
+      "accept": false
+    },
+    {
+      "name": "CJK键恰16384字节",
+      "kind": "key",
+      "unit": "汉",
+      "repeat": 5461,
+      "suffix": "a",
+      "accept": true
+    },
+    {
+      "name": "CJK键超16384字节",
+      "kind": "key",
+      "unit": "汉",
+      "repeat": 5462,
+      "accept": false
+    },
+    {
+      "name": "标量深度16",
+      "kind": "nestedScalar",
+      "containers": 15,
+      "accept": true
+    },
+    {
+      "name": "标量深度17",
+      "kind": "nestedScalar",
+      "containers": 16,
+      "accept": false
+    },
+    {
+      "name": "空数组深度16",
+      "kind": "nestedEmpty",
+      "containers": 16,
+      "accept": true
+    },
+    {
+      "name": "空数组深度17",
+      "kind": "nestedEmpty",
+      "containers": 17,
+      "accept": false
+    },
+    {
+      "name": "总值恰8192且不计属性名和结束标记",
+      "kind": "valueTree",
+      "branches": 128,
+      "members": 63,
+      "lastMembers": 62,
+      "accept": true
+    },
+    {
+      "name": "总值超8192",
+      "kind": "valueTree",
+      "branches": 128,
+      "members": 63,
+      "lastMembers": 63,
+      "accept": false
+    }
+  ]
+}
