@@ -43,7 +43,7 @@ type DeviceAccessServiceClient interface {
 	// Determinately invalid => inactive with empty identity; dependency faults =>
 	// UNAVAILABLE. Active expires_at is min(token, current backing deadlines),
 	// still future at completion. Does not authorize model ACLs or budgets.
-	VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAccessResponse, error)
+	VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAiAccessResponse, error)
 	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
 	// compared with stored device ownership, never trusted as proof of ownership.
 	VerifyDeviceCredential(ctx context.Context, in *VerifyDeviceCredentialRequest, opts ...grpc.CallOption) (*VerifyDeviceCredentialResponse, error)
@@ -67,9 +67,9 @@ func (c *deviceAccessServiceClient) VerifyDeviceAccess(ctx context.Context, in *
 	return out, nil
 }
 
-func (c *deviceAccessServiceClient) VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAccessResponse, error) {
+func (c *deviceAccessServiceClient) VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAiAccessResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(VerifyDeviceAccessResponse)
+	out := new(VerifyDeviceAiAccessResponse)
 	err := c.cc.Invoke(ctx, DeviceAccessService_VerifyDeviceAiAccess_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -106,7 +106,7 @@ type DeviceAccessServiceServer interface {
 	// Determinately invalid => inactive with empty identity; dependency faults =>
 	// UNAVAILABLE. Active expires_at is min(token, current backing deadlines),
 	// still future at completion. Does not authorize model ACLs or budgets.
-	VerifyDeviceAiAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error)
+	VerifyDeviceAiAccess(context.Context, *VerifyDeviceAiAccessRequest) (*VerifyDeviceAiAccessResponse, error)
 	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
 	// compared with stored device ownership, never trusted as proof of ownership.
 	VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error)
@@ -123,7 +123,7 @@ type UnimplementedDeviceAccessServiceServer struct{}
 func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceAccess not implemented")
 }
-func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAiAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error) {
+func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAiAccess(context.Context, *VerifyDeviceAiAccessRequest) (*VerifyDeviceAiAccessResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceAiAccess not implemented")
 }
 func (UnimplementedDeviceAccessServiceServer) VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error) {
@@ -169,7 +169,7 @@ func _DeviceAccessService_VerifyDeviceAccess_Handler(srv interface{}, ctx contex
 }
 
 func _DeviceAccessService_VerifyDeviceAiAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VerifyDeviceAccessRequest)
+	in := new(VerifyDeviceAiAccessRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func _DeviceAccessService_VerifyDeviceAiAccess_Handler(srv interface{}, ctx cont
 		FullMethod: DeviceAccessService_VerifyDeviceAiAccess_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DeviceAccessServiceServer).VerifyDeviceAiAccess(ctx, req.(*VerifyDeviceAccessRequest))
+		return srv.(DeviceAccessServiceServer).VerifyDeviceAiAccess(ctx, req.(*VerifyDeviceAiAccessRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

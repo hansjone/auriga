@@ -369,6 +369,130 @@ func (x *VerifyDeviceAccessResponse) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type VerifyDeviceAiAccessRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Raw external AI device access JWT. Secret: never log, persist or include in errors.
+	AccessToken   string `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyDeviceAiAccessRequest) Reset() {
+	*x = VerifyDeviceAiAccessRequest{}
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyDeviceAiAccessRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyDeviceAiAccessRequest) ProtoMessage() {}
+
+func (x *VerifyDeviceAiAccessRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyDeviceAiAccessRequest.ProtoReflect.Descriptor instead.
+func (*VerifyDeviceAiAccessRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *VerifyDeviceAiAccessRequest) GetAccessToken() string {
+	if x != nil {
+		return x.AccessToken
+	}
+	return ""
+}
+
+type VerifyDeviceAiAccessResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Determinately invalid => false and all other fields absent/empty.
+	// Dependency failures are UNAVAILABLE, never inactive or a cached approval.
+	Active    bool   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
+	TenantId  string `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	AccountId string `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	DeviceId  string `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	// Minimum of the AI JWT and current backing deadlines; future at completion.
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VerifyDeviceAiAccessResponse) Reset() {
+	*x = VerifyDeviceAiAccessResponse{}
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VerifyDeviceAiAccessResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VerifyDeviceAiAccessResponse) ProtoMessage() {}
+
+func (x *VerifyDeviceAiAccessResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VerifyDeviceAiAccessResponse.ProtoReflect.Descriptor instead.
+func (*VerifyDeviceAiAccessResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *VerifyDeviceAiAccessResponse) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+func (x *VerifyDeviceAiAccessResponse) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *VerifyDeviceAiAccessResponse) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *VerifyDeviceAiAccessResponse) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *VerifyDeviceAiAccessResponse) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
 type VerifyDeviceCredentialRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
@@ -380,7 +504,7 @@ type VerifyDeviceCredentialRequest struct {
 
 func (x *VerifyDeviceCredentialRequest) Reset() {
 	*x = VerifyDeviceCredentialRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -392,7 +516,7 @@ func (x *VerifyDeviceCredentialRequest) String() string {
 func (*VerifyDeviceCredentialRequest) ProtoMessage() {}
 
 func (x *VerifyDeviceCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[2]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -405,7 +529,7 @@ func (x *VerifyDeviceCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyDeviceCredentialRequest.ProtoReflect.Descriptor instead.
 func (*VerifyDeviceCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{2}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *VerifyDeviceCredentialRequest) GetTenantId() string {
@@ -442,7 +566,7 @@ type VerifyDeviceCredentialResponse struct {
 
 func (x *VerifyDeviceCredentialResponse) Reset() {
 	*x = VerifyDeviceCredentialResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -454,7 +578,7 @@ func (x *VerifyDeviceCredentialResponse) String() string {
 func (*VerifyDeviceCredentialResponse) ProtoMessage() {}
 
 func (x *VerifyDeviceCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[3]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -467,7 +591,7 @@ func (x *VerifyDeviceCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyDeviceCredentialResponse.ProtoReflect.Descriptor instead.
 func (*VerifyDeviceCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{3}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *VerifyDeviceCredentialResponse) GetActive() bool {
@@ -517,7 +641,7 @@ type VerifyAdminSessionCsrfRequest struct {
 
 func (x *VerifyAdminSessionCsrfRequest) Reset() {
 	*x = VerifyAdminSessionCsrfRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -529,7 +653,7 @@ func (x *VerifyAdminSessionCsrfRequest) String() string {
 func (*VerifyAdminSessionCsrfRequest) ProtoMessage() {}
 
 func (x *VerifyAdminSessionCsrfRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[4]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -542,7 +666,7 @@ func (x *VerifyAdminSessionCsrfRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyAdminSessionCsrfRequest.ProtoReflect.Descriptor instead.
 func (*VerifyAdminSessionCsrfRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{4}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *VerifyAdminSessionCsrfRequest) GetSessionToken() string {
@@ -571,7 +695,7 @@ type VerifyAdminSessionCsrfResponse struct {
 
 func (x *VerifyAdminSessionCsrfResponse) Reset() {
 	*x = VerifyAdminSessionCsrfResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -583,7 +707,7 @@ func (x *VerifyAdminSessionCsrfResponse) String() string {
 func (*VerifyAdminSessionCsrfResponse) ProtoMessage() {}
 
 func (x *VerifyAdminSessionCsrfResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[5]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -596,7 +720,7 @@ func (x *VerifyAdminSessionCsrfResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyAdminSessionCsrfResponse.ProtoReflect.Descriptor instead.
 func (*VerifyAdminSessionCsrfResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{5}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *VerifyAdminSessionCsrfResponse) GetActive() bool {
@@ -623,7 +747,7 @@ type TouchSessionRequest struct {
 
 func (x *TouchSessionRequest) Reset() {
 	*x = TouchSessionRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -635,7 +759,7 @@ func (x *TouchSessionRequest) String() string {
 func (*TouchSessionRequest) ProtoMessage() {}
 
 func (x *TouchSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[6]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -648,7 +772,7 @@ func (x *TouchSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TouchSessionRequest.ProtoReflect.Descriptor instead.
 func (*TouchSessionRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{6}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TouchSessionRequest) GetSessionToken() string {
@@ -675,7 +799,7 @@ type TouchSessionResponse struct {
 
 func (x *TouchSessionResponse) Reset() {
 	*x = TouchSessionResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -687,7 +811,7 @@ func (x *TouchSessionResponse) String() string {
 func (*TouchSessionResponse) ProtoMessage() {}
 
 func (x *TouchSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[7]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -700,7 +824,7 @@ func (x *TouchSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TouchSessionResponse.ProtoReflect.Descriptor instead.
 func (*TouchSessionResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{7}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *TouchSessionResponse) GetActive() bool {
@@ -730,7 +854,7 @@ type IntrospectSessionRequest struct {
 
 func (x *IntrospectSessionRequest) Reset() {
 	*x = IntrospectSessionRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -742,7 +866,7 @@ func (x *IntrospectSessionRequest) String() string {
 func (*IntrospectSessionRequest) ProtoMessage() {}
 
 func (x *IntrospectSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -755,7 +879,7 @@ func (x *IntrospectSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntrospectSessionRequest.ProtoReflect.Descriptor instead.
 func (*IntrospectSessionRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{8}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *IntrospectSessionRequest) GetSessionToken() string {
@@ -799,7 +923,7 @@ type IntrospectSessionResponse struct {
 
 func (x *IntrospectSessionResponse) Reset() {
 	*x = IntrospectSessionResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -811,7 +935,7 @@ func (x *IntrospectSessionResponse) String() string {
 func (*IntrospectSessionResponse) ProtoMessage() {}
 
 func (x *IntrospectSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[9]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -824,7 +948,7 @@ func (x *IntrospectSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IntrospectSessionResponse.ProtoReflect.Descriptor instead.
 func (*IntrospectSessionResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{9}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *IntrospectSessionResponse) GetActive() bool {
@@ -878,7 +1002,7 @@ type Session struct {
 
 func (x *Session) Reset() {
 	*x = Session{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -890,7 +1014,7 @@ func (x *Session) String() string {
 func (*Session) ProtoMessage() {}
 
 func (x *Session) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[10]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -903,7 +1027,7 @@ func (x *Session) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Session.ProtoReflect.Descriptor instead.
 func (*Session) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{10}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Session) GetSessionId() string {
@@ -992,7 +1116,7 @@ type RevokeSessionsRequest struct {
 
 func (x *RevokeSessionsRequest) Reset() {
 	*x = RevokeSessionsRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1004,7 +1128,7 @@ func (x *RevokeSessionsRequest) String() string {
 func (*RevokeSessionsRequest) ProtoMessage() {}
 
 func (x *RevokeSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[11]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1017,7 +1141,7 @@ func (x *RevokeSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionsRequest.ProtoReflect.Descriptor instead.
 func (*RevokeSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{11}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RevokeSessionsRequest) GetTenantId() string {
@@ -1064,7 +1188,7 @@ type RevokeSessionsResponse struct {
 
 func (x *RevokeSessionsResponse) Reset() {
 	*x = RevokeSessionsResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1076,7 +1200,7 @@ func (x *RevokeSessionsResponse) String() string {
 func (*RevokeSessionsResponse) ProtoMessage() {}
 
 func (x *RevokeSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[12]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1089,7 +1213,7 @@ func (x *RevokeSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeSessionsResponse.ProtoReflect.Descriptor instead.
 func (*RevokeSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{12}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RevokeSessionsResponse) GetRevoked() int64 {
@@ -1114,7 +1238,7 @@ type Account struct {
 
 func (x *Account) Reset() {
 	*x = Account{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1126,7 +1250,7 @@ func (x *Account) String() string {
 func (*Account) ProtoMessage() {}
 
 func (x *Account) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[13]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1139,7 +1263,7 @@ func (x *Account) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Account.ProtoReflect.Descriptor instead.
 func (*Account) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{13}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Account) GetAccountId() string {
@@ -1201,7 +1325,7 @@ type GetAccountRequest struct {
 
 func (x *GetAccountRequest) Reset() {
 	*x = GetAccountRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1213,7 +1337,7 @@ func (x *GetAccountRequest) String() string {
 func (*GetAccountRequest) ProtoMessage() {}
 
 func (x *GetAccountRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[14]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1226,7 +1350,7 @@ func (x *GetAccountRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccountRequest.ProtoReflect.Descriptor instead.
 func (*GetAccountRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{14}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetAccountRequest) GetTenantId() string {
@@ -1252,7 +1376,7 @@ type GetAccountResponse struct {
 
 func (x *GetAccountResponse) Reset() {
 	*x = GetAccountResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[15]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1264,7 +1388,7 @@ func (x *GetAccountResponse) String() string {
 func (*GetAccountResponse) ProtoMessage() {}
 
 func (x *GetAccountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[15]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1277,7 +1401,7 @@ func (x *GetAccountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAccountResponse.ProtoReflect.Descriptor instead.
 func (*GetAccountResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{15}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetAccountResponse) GetAccount() *Account {
@@ -1298,7 +1422,7 @@ type BatchGetAccountsRequest struct {
 
 func (x *BatchGetAccountsRequest) Reset() {
 	*x = BatchGetAccountsRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[16]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1310,7 +1434,7 @@ func (x *BatchGetAccountsRequest) String() string {
 func (*BatchGetAccountsRequest) ProtoMessage() {}
 
 func (x *BatchGetAccountsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[16]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1323,7 +1447,7 @@ func (x *BatchGetAccountsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchGetAccountsRequest.ProtoReflect.Descriptor instead.
 func (*BatchGetAccountsRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{16}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *BatchGetAccountsRequest) GetTenantId() string {
@@ -1349,7 +1473,7 @@ type BatchGetAccountsResponse struct {
 
 func (x *BatchGetAccountsResponse) Reset() {
 	*x = BatchGetAccountsResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[17]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1361,7 +1485,7 @@ func (x *BatchGetAccountsResponse) String() string {
 func (*BatchGetAccountsResponse) ProtoMessage() {}
 
 func (x *BatchGetAccountsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[17]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1374,7 +1498,7 @@ func (x *BatchGetAccountsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchGetAccountsResponse.ProtoReflect.Descriptor instead.
 func (*BatchGetAccountsResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{17}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *BatchGetAccountsResponse) GetAccounts() []*Account {
@@ -1400,7 +1524,7 @@ type SigningKey struct {
 
 func (x *SigningKey) Reset() {
 	*x = SigningKey{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[18]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1412,7 +1536,7 @@ func (x *SigningKey) String() string {
 func (*SigningKey) ProtoMessage() {}
 
 func (x *SigningKey) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[18]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1425,7 +1549,7 @@ func (x *SigningKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SigningKey.ProtoReflect.Descriptor instead.
 func (*SigningKey) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{18}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SigningKey) GetKid() string {
@@ -1478,7 +1602,7 @@ type GetSigningKeysRequest struct {
 
 func (x *GetSigningKeysRequest) Reset() {
 	*x = GetSigningKeysRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[19]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1490,7 +1614,7 @@ func (x *GetSigningKeysRequest) String() string {
 func (*GetSigningKeysRequest) ProtoMessage() {}
 
 func (x *GetSigningKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[19]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1503,7 +1627,7 @@ func (x *GetSigningKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSigningKeysRequest.ProtoReflect.Descriptor instead.
 func (*GetSigningKeysRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{19}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{21}
 }
 
 type GetSigningKeysResponse struct {
@@ -1515,7 +1639,7 @@ type GetSigningKeysResponse struct {
 
 func (x *GetSigningKeysResponse) Reset() {
 	*x = GetSigningKeysResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[20]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1527,7 +1651,7 @@ func (x *GetSigningKeysResponse) String() string {
 func (*GetSigningKeysResponse) ProtoMessage() {}
 
 func (x *GetSigningKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[20]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1540,7 +1664,7 @@ func (x *GetSigningKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSigningKeysResponse.ProtoReflect.Descriptor instead.
 func (*GetSigningKeysResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{20}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GetSigningKeysResponse) GetKeys() []*SigningKey {
@@ -1558,7 +1682,7 @@ type GetPublicKeysRequest struct {
 
 func (x *GetPublicKeysRequest) Reset() {
 	*x = GetPublicKeysRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[21]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1570,7 +1694,7 @@ func (x *GetPublicKeysRequest) String() string {
 func (*GetPublicKeysRequest) ProtoMessage() {}
 
 func (x *GetPublicKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[21]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1583,7 +1707,7 @@ func (x *GetPublicKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPublicKeysRequest.ProtoReflect.Descriptor instead.
 func (*GetPublicKeysRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{21}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{23}
 }
 
 // 公钥（不含私钥字段，避免误传私钥）。
@@ -1601,7 +1725,7 @@ type PublicKey struct {
 
 func (x *PublicKey) Reset() {
 	*x = PublicKey{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[22]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1613,7 +1737,7 @@ func (x *PublicKey) String() string {
 func (*PublicKey) ProtoMessage() {}
 
 func (x *PublicKey) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[22]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1626,7 +1750,7 @@ func (x *PublicKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublicKey.ProtoReflect.Descriptor instead.
 func (*PublicKey) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{22}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PublicKey) GetKid() string {
@@ -1673,7 +1797,7 @@ type GetPublicKeysResponse struct {
 
 func (x *GetPublicKeysResponse) Reset() {
 	*x = GetPublicKeysResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[23]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1685,7 +1809,7 @@ func (x *GetPublicKeysResponse) String() string {
 func (*GetPublicKeysResponse) ProtoMessage() {}
 
 func (x *GetPublicKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[23]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1698,7 +1822,7 @@ func (x *GetPublicKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPublicKeysResponse.ProtoReflect.Descriptor instead.
 func (*GetPublicKeysResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{23}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetPublicKeysResponse) GetKeys() []*PublicKey {
@@ -1721,7 +1845,7 @@ type IssueInstanceAiTokenRequest struct {
 
 func (x *IssueInstanceAiTokenRequest) Reset() {
 	*x = IssueInstanceAiTokenRequest{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[24]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1733,7 +1857,7 @@ func (x *IssueInstanceAiTokenRequest) String() string {
 func (*IssueInstanceAiTokenRequest) ProtoMessage() {}
 
 func (x *IssueInstanceAiTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[24]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1746,7 +1870,7 @@ func (x *IssueInstanceAiTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueInstanceAiTokenRequest.ProtoReflect.Descriptor instead.
 func (*IssueInstanceAiTokenRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{24}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *IssueInstanceAiTokenRequest) GetTenantId() string {
@@ -1787,7 +1911,7 @@ type IssueInstanceAiTokenResponse struct {
 
 func (x *IssueInstanceAiTokenResponse) Reset() {
 	*x = IssueInstanceAiTokenResponse{}
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[25]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1799,7 +1923,7 @@ func (x *IssueInstanceAiTokenResponse) String() string {
 func (*IssueInstanceAiTokenResponse) ProtoMessage() {}
 
 func (x *IssueInstanceAiTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_iam_proto_msgTypes[25]
+	mi := &file_auriga_iam_v1_iam_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1812,7 +1936,7 @@ func (x *IssueInstanceAiTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueInstanceAiTokenResponse.ProtoReflect.Descriptor instead.
 func (*IssueInstanceAiTokenResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{25}
+	return file_auriga_iam_v1_iam_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *IssueInstanceAiTokenResponse) GetAccessToken() string {
@@ -1837,6 +1961,16 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\x19VerifyDeviceAccessRequest\x12!\n" +
 	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\"\xc8\x01\n" +
 	"\x1aVerifyDeviceAccessResponse\x12\x16\n" +
+	"\x06active\x18\x01 \x01(\bR\x06active\x12\x1b\n" +
+	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x03 \x01(\tR\taccountId\x12\x1b\n" +
+	"\tdevice_id\x18\x04 \x01(\tR\bdeviceId\x129\n" +
+	"\n" +
+	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"@\n" +
+	"\x1bVerifyDeviceAiAccessRequest\x12!\n" +
+	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\"\xca\x01\n" +
+	"\x1cVerifyDeviceAiAccessResponse\x12\x16\n" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x1d\n" +
 	"\n" +
@@ -1988,10 +2122,10 @@ const file_auriga_iam_v1_iam_proto_rawDesc = "" +
 	"\x11KEY_STATE_CURRENT\x10\x01\x12\x12\n" +
 	"\x0eKEY_STATE_NEXT\x10\x02\x12\x16\n" +
 	"\x12KEY_STATE_RETIRING\x10\x03\x12\x15\n" +
-	"\x11KEY_STATE_REVOKED\x10\x042\xe4\x02\n" +
+	"\x11KEY_STATE_REVOKED\x10\x042\xe8\x02\n" +
 	"\x13DeviceAccessService\x12i\n" +
-	"\x12VerifyDeviceAccess\x12(.auriga.iam.v1.VerifyDeviceAccessRequest\x1a).auriga.iam.v1.VerifyDeviceAccessResponse\x12k\n" +
-	"\x14VerifyDeviceAiAccess\x12(.auriga.iam.v1.VerifyDeviceAccessRequest\x1a).auriga.iam.v1.VerifyDeviceAccessResponse\x12u\n" +
+	"\x12VerifyDeviceAccess\x12(.auriga.iam.v1.VerifyDeviceAccessRequest\x1a).auriga.iam.v1.VerifyDeviceAccessResponse\x12o\n" +
+	"\x14VerifyDeviceAiAccess\x12*.auriga.iam.v1.VerifyDeviceAiAccessRequest\x1a+.auriga.iam.v1.VerifyDeviceAiAccessResponse\x12u\n" +
 	"\x16VerifyDeviceCredential\x12,.auriga.iam.v1.VerifyDeviceCredentialRequest\x1a-.auriga.iam.v1.VerifyDeviceCredentialResponse2\xa7\x03\n" +
 	"\x0eSessionService\x12f\n" +
 	"\x11IntrospectSession\x12'.auriga.iam.v1.IntrospectSessionRequest\x1a(.auriga.iam.v1.IntrospectSessionResponse\x12]\n" +
@@ -2022,7 +2156,7 @@ func file_auriga_iam_v1_iam_proto_rawDescGZIP() []byte {
 }
 
 var file_auriga_iam_v1_iam_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_auriga_iam_v1_iam_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_auriga_iam_v1_iam_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_auriga_iam_v1_iam_proto_goTypes = []any{
 	(RevokeReason)(0),                      // 0: auriga.iam.v1.RevokeReason
 	(SessionAudience)(0),                   // 1: auriga.iam.v1.SessionAudience
@@ -2030,90 +2164,93 @@ var file_auriga_iam_v1_iam_proto_goTypes = []any{
 	(KeyState)(0),                          // 3: auriga.iam.v1.KeyState
 	(*VerifyDeviceAccessRequest)(nil),      // 4: auriga.iam.v1.VerifyDeviceAccessRequest
 	(*VerifyDeviceAccessResponse)(nil),     // 5: auriga.iam.v1.VerifyDeviceAccessResponse
-	(*VerifyDeviceCredentialRequest)(nil),  // 6: auriga.iam.v1.VerifyDeviceCredentialRequest
-	(*VerifyDeviceCredentialResponse)(nil), // 7: auriga.iam.v1.VerifyDeviceCredentialResponse
-	(*VerifyAdminSessionCsrfRequest)(nil),  // 8: auriga.iam.v1.VerifyAdminSessionCsrfRequest
-	(*VerifyAdminSessionCsrfResponse)(nil), // 9: auriga.iam.v1.VerifyAdminSessionCsrfResponse
-	(*TouchSessionRequest)(nil),            // 10: auriga.iam.v1.TouchSessionRequest
-	(*TouchSessionResponse)(nil),           // 11: auriga.iam.v1.TouchSessionResponse
-	(*IntrospectSessionRequest)(nil),       // 12: auriga.iam.v1.IntrospectSessionRequest
-	(*IntrospectSessionResponse)(nil),      // 13: auriga.iam.v1.IntrospectSessionResponse
-	(*Session)(nil),                        // 14: auriga.iam.v1.Session
-	(*RevokeSessionsRequest)(nil),          // 15: auriga.iam.v1.RevokeSessionsRequest
-	(*RevokeSessionsResponse)(nil),         // 16: auriga.iam.v1.RevokeSessionsResponse
-	(*Account)(nil),                        // 17: auriga.iam.v1.Account
-	(*GetAccountRequest)(nil),              // 18: auriga.iam.v1.GetAccountRequest
-	(*GetAccountResponse)(nil),             // 19: auriga.iam.v1.GetAccountResponse
-	(*BatchGetAccountsRequest)(nil),        // 20: auriga.iam.v1.BatchGetAccountsRequest
-	(*BatchGetAccountsResponse)(nil),       // 21: auriga.iam.v1.BatchGetAccountsResponse
-	(*SigningKey)(nil),                     // 22: auriga.iam.v1.SigningKey
-	(*GetSigningKeysRequest)(nil),          // 23: auriga.iam.v1.GetSigningKeysRequest
-	(*GetSigningKeysResponse)(nil),         // 24: auriga.iam.v1.GetSigningKeysResponse
-	(*GetPublicKeysRequest)(nil),           // 25: auriga.iam.v1.GetPublicKeysRequest
-	(*PublicKey)(nil),                      // 26: auriga.iam.v1.PublicKey
-	(*GetPublicKeysResponse)(nil),          // 27: auriga.iam.v1.GetPublicKeysResponse
-	(*IssueInstanceAiTokenRequest)(nil),    // 28: auriga.iam.v1.IssueInstanceAiTokenRequest
-	(*IssueInstanceAiTokenResponse)(nil),   // 29: auriga.iam.v1.IssueInstanceAiTokenResponse
-	(*timestamppb.Timestamp)(nil),          // 30: google.protobuf.Timestamp
+	(*VerifyDeviceAiAccessRequest)(nil),    // 6: auriga.iam.v1.VerifyDeviceAiAccessRequest
+	(*VerifyDeviceAiAccessResponse)(nil),   // 7: auriga.iam.v1.VerifyDeviceAiAccessResponse
+	(*VerifyDeviceCredentialRequest)(nil),  // 8: auriga.iam.v1.VerifyDeviceCredentialRequest
+	(*VerifyDeviceCredentialResponse)(nil), // 9: auriga.iam.v1.VerifyDeviceCredentialResponse
+	(*VerifyAdminSessionCsrfRequest)(nil),  // 10: auriga.iam.v1.VerifyAdminSessionCsrfRequest
+	(*VerifyAdminSessionCsrfResponse)(nil), // 11: auriga.iam.v1.VerifyAdminSessionCsrfResponse
+	(*TouchSessionRequest)(nil),            // 12: auriga.iam.v1.TouchSessionRequest
+	(*TouchSessionResponse)(nil),           // 13: auriga.iam.v1.TouchSessionResponse
+	(*IntrospectSessionRequest)(nil),       // 14: auriga.iam.v1.IntrospectSessionRequest
+	(*IntrospectSessionResponse)(nil),      // 15: auriga.iam.v1.IntrospectSessionResponse
+	(*Session)(nil),                        // 16: auriga.iam.v1.Session
+	(*RevokeSessionsRequest)(nil),          // 17: auriga.iam.v1.RevokeSessionsRequest
+	(*RevokeSessionsResponse)(nil),         // 18: auriga.iam.v1.RevokeSessionsResponse
+	(*Account)(nil),                        // 19: auriga.iam.v1.Account
+	(*GetAccountRequest)(nil),              // 20: auriga.iam.v1.GetAccountRequest
+	(*GetAccountResponse)(nil),             // 21: auriga.iam.v1.GetAccountResponse
+	(*BatchGetAccountsRequest)(nil),        // 22: auriga.iam.v1.BatchGetAccountsRequest
+	(*BatchGetAccountsResponse)(nil),       // 23: auriga.iam.v1.BatchGetAccountsResponse
+	(*SigningKey)(nil),                     // 24: auriga.iam.v1.SigningKey
+	(*GetSigningKeysRequest)(nil),          // 25: auriga.iam.v1.GetSigningKeysRequest
+	(*GetSigningKeysResponse)(nil),         // 26: auriga.iam.v1.GetSigningKeysResponse
+	(*GetPublicKeysRequest)(nil),           // 27: auriga.iam.v1.GetPublicKeysRequest
+	(*PublicKey)(nil),                      // 28: auriga.iam.v1.PublicKey
+	(*GetPublicKeysResponse)(nil),          // 29: auriga.iam.v1.GetPublicKeysResponse
+	(*IssueInstanceAiTokenRequest)(nil),    // 30: auriga.iam.v1.IssueInstanceAiTokenRequest
+	(*IssueInstanceAiTokenResponse)(nil),   // 31: auriga.iam.v1.IssueInstanceAiTokenResponse
+	(*timestamppb.Timestamp)(nil),          // 32: google.protobuf.Timestamp
 }
 var file_auriga_iam_v1_iam_proto_depIdxs = []int32{
-	30, // 0: auriga.iam.v1.VerifyDeviceAccessResponse.expires_at:type_name -> google.protobuf.Timestamp
-	30, // 1: auriga.iam.v1.VerifyDeviceCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
-	14, // 2: auriga.iam.v1.VerifyAdminSessionCsrfResponse.session:type_name -> auriga.iam.v1.Session
-	1,  // 3: auriga.iam.v1.TouchSessionRequest.audience:type_name -> auriga.iam.v1.SessionAudience
-	30, // 4: auriga.iam.v1.TouchSessionResponse.idle_expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 5: auriga.iam.v1.IntrospectSessionRequest.audience:type_name -> auriga.iam.v1.SessionAudience
-	14, // 6: auriga.iam.v1.IntrospectSessionResponse.session:type_name -> auriga.iam.v1.Session
-	30, // 7: auriga.iam.v1.IntrospectSessionResponse.access_token_expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 8: auriga.iam.v1.Session.audience:type_name -> auriga.iam.v1.SessionAudience
-	30, // 9: auriga.iam.v1.Session.created_at:type_name -> google.protobuf.Timestamp
-	30, // 10: auriga.iam.v1.Session.step_up_at:type_name -> google.protobuf.Timestamp
-	30, // 11: auriga.iam.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
-	30, // 12: auriga.iam.v1.Session.idle_expires_at:type_name -> google.protobuf.Timestamp
-	0,  // 13: auriga.iam.v1.RevokeSessionsRequest.reason:type_name -> auriga.iam.v1.RevokeReason
-	2,  // 14: auriga.iam.v1.Account.status:type_name -> auriga.iam.v1.AccountStatus
-	30, // 15: auriga.iam.v1.Account.created_at:type_name -> google.protobuf.Timestamp
-	30, // 16: auriga.iam.v1.Account.last_login_at:type_name -> google.protobuf.Timestamp
-	17, // 17: auriga.iam.v1.GetAccountResponse.account:type_name -> auriga.iam.v1.Account
-	17, // 18: auriga.iam.v1.BatchGetAccountsResponse.accounts:type_name -> auriga.iam.v1.Account
-	3,  // 19: auriga.iam.v1.SigningKey.state:type_name -> auriga.iam.v1.KeyState
-	30, // 20: auriga.iam.v1.SigningKey.not_before:type_name -> google.protobuf.Timestamp
-	30, // 21: auriga.iam.v1.SigningKey.not_after:type_name -> google.protobuf.Timestamp
-	22, // 22: auriga.iam.v1.GetSigningKeysResponse.keys:type_name -> auriga.iam.v1.SigningKey
-	3,  // 23: auriga.iam.v1.PublicKey.state:type_name -> auriga.iam.v1.KeyState
-	30, // 24: auriga.iam.v1.PublicKey.not_before:type_name -> google.protobuf.Timestamp
-	30, // 25: auriga.iam.v1.PublicKey.not_after:type_name -> google.protobuf.Timestamp
-	26, // 26: auriga.iam.v1.GetPublicKeysResponse.keys:type_name -> auriga.iam.v1.PublicKey
-	30, // 27: auriga.iam.v1.IssueInstanceAiTokenResponse.expires_at:type_name -> google.protobuf.Timestamp
-	4,  // 28: auriga.iam.v1.DeviceAccessService.VerifyDeviceAccess:input_type -> auriga.iam.v1.VerifyDeviceAccessRequest
-	4,  // 29: auriga.iam.v1.DeviceAccessService.VerifyDeviceAiAccess:input_type -> auriga.iam.v1.VerifyDeviceAccessRequest
-	6,  // 30: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:input_type -> auriga.iam.v1.VerifyDeviceCredentialRequest
-	12, // 31: auriga.iam.v1.SessionService.IntrospectSession:input_type -> auriga.iam.v1.IntrospectSessionRequest
-	15, // 32: auriga.iam.v1.SessionService.RevokeSessions:input_type -> auriga.iam.v1.RevokeSessionsRequest
-	10, // 33: auriga.iam.v1.SessionService.TouchSession:input_type -> auriga.iam.v1.TouchSessionRequest
-	8,  // 34: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:input_type -> auriga.iam.v1.VerifyAdminSessionCsrfRequest
-	18, // 35: auriga.iam.v1.AccountService.GetAccount:input_type -> auriga.iam.v1.GetAccountRequest
-	20, // 36: auriga.iam.v1.AccountService.BatchGetAccounts:input_type -> auriga.iam.v1.BatchGetAccountsRequest
-	23, // 37: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:input_type -> auriga.iam.v1.GetSigningKeysRequest
-	25, // 38: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:input_type -> auriga.iam.v1.GetPublicKeysRequest
-	28, // 39: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:input_type -> auriga.iam.v1.IssueInstanceAiTokenRequest
-	5,  // 40: auriga.iam.v1.DeviceAccessService.VerifyDeviceAccess:output_type -> auriga.iam.v1.VerifyDeviceAccessResponse
-	5,  // 41: auriga.iam.v1.DeviceAccessService.VerifyDeviceAiAccess:output_type -> auriga.iam.v1.VerifyDeviceAccessResponse
-	7,  // 42: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:output_type -> auriga.iam.v1.VerifyDeviceCredentialResponse
-	13, // 43: auriga.iam.v1.SessionService.IntrospectSession:output_type -> auriga.iam.v1.IntrospectSessionResponse
-	16, // 44: auriga.iam.v1.SessionService.RevokeSessions:output_type -> auriga.iam.v1.RevokeSessionsResponse
-	11, // 45: auriga.iam.v1.SessionService.TouchSession:output_type -> auriga.iam.v1.TouchSessionResponse
-	9,  // 46: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:output_type -> auriga.iam.v1.VerifyAdminSessionCsrfResponse
-	19, // 47: auriga.iam.v1.AccountService.GetAccount:output_type -> auriga.iam.v1.GetAccountResponse
-	21, // 48: auriga.iam.v1.AccountService.BatchGetAccounts:output_type -> auriga.iam.v1.BatchGetAccountsResponse
-	24, // 49: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:output_type -> auriga.iam.v1.GetSigningKeysResponse
-	27, // 50: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:output_type -> auriga.iam.v1.GetPublicKeysResponse
-	29, // 51: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:output_type -> auriga.iam.v1.IssueInstanceAiTokenResponse
-	40, // [40:52] is the sub-list for method output_type
-	28, // [28:40] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	32, // 0: auriga.iam.v1.VerifyDeviceAccessResponse.expires_at:type_name -> google.protobuf.Timestamp
+	32, // 1: auriga.iam.v1.VerifyDeviceAiAccessResponse.expires_at:type_name -> google.protobuf.Timestamp
+	32, // 2: auriga.iam.v1.VerifyDeviceCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
+	16, // 3: auriga.iam.v1.VerifyAdminSessionCsrfResponse.session:type_name -> auriga.iam.v1.Session
+	1,  // 4: auriga.iam.v1.TouchSessionRequest.audience:type_name -> auriga.iam.v1.SessionAudience
+	32, // 5: auriga.iam.v1.TouchSessionResponse.idle_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 6: auriga.iam.v1.IntrospectSessionRequest.audience:type_name -> auriga.iam.v1.SessionAudience
+	16, // 7: auriga.iam.v1.IntrospectSessionResponse.session:type_name -> auriga.iam.v1.Session
+	32, // 8: auriga.iam.v1.IntrospectSessionResponse.access_token_expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 9: auriga.iam.v1.Session.audience:type_name -> auriga.iam.v1.SessionAudience
+	32, // 10: auriga.iam.v1.Session.created_at:type_name -> google.protobuf.Timestamp
+	32, // 11: auriga.iam.v1.Session.step_up_at:type_name -> google.protobuf.Timestamp
+	32, // 12: auriga.iam.v1.Session.expires_at:type_name -> google.protobuf.Timestamp
+	32, // 13: auriga.iam.v1.Session.idle_expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 14: auriga.iam.v1.RevokeSessionsRequest.reason:type_name -> auriga.iam.v1.RevokeReason
+	2,  // 15: auriga.iam.v1.Account.status:type_name -> auriga.iam.v1.AccountStatus
+	32, // 16: auriga.iam.v1.Account.created_at:type_name -> google.protobuf.Timestamp
+	32, // 17: auriga.iam.v1.Account.last_login_at:type_name -> google.protobuf.Timestamp
+	19, // 18: auriga.iam.v1.GetAccountResponse.account:type_name -> auriga.iam.v1.Account
+	19, // 19: auriga.iam.v1.BatchGetAccountsResponse.accounts:type_name -> auriga.iam.v1.Account
+	3,  // 20: auriga.iam.v1.SigningKey.state:type_name -> auriga.iam.v1.KeyState
+	32, // 21: auriga.iam.v1.SigningKey.not_before:type_name -> google.protobuf.Timestamp
+	32, // 22: auriga.iam.v1.SigningKey.not_after:type_name -> google.protobuf.Timestamp
+	24, // 23: auriga.iam.v1.GetSigningKeysResponse.keys:type_name -> auriga.iam.v1.SigningKey
+	3,  // 24: auriga.iam.v1.PublicKey.state:type_name -> auriga.iam.v1.KeyState
+	32, // 25: auriga.iam.v1.PublicKey.not_before:type_name -> google.protobuf.Timestamp
+	32, // 26: auriga.iam.v1.PublicKey.not_after:type_name -> google.protobuf.Timestamp
+	28, // 27: auriga.iam.v1.GetPublicKeysResponse.keys:type_name -> auriga.iam.v1.PublicKey
+	32, // 28: auriga.iam.v1.IssueInstanceAiTokenResponse.expires_at:type_name -> google.protobuf.Timestamp
+	4,  // 29: auriga.iam.v1.DeviceAccessService.VerifyDeviceAccess:input_type -> auriga.iam.v1.VerifyDeviceAccessRequest
+	6,  // 30: auriga.iam.v1.DeviceAccessService.VerifyDeviceAiAccess:input_type -> auriga.iam.v1.VerifyDeviceAiAccessRequest
+	8,  // 31: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:input_type -> auriga.iam.v1.VerifyDeviceCredentialRequest
+	14, // 32: auriga.iam.v1.SessionService.IntrospectSession:input_type -> auriga.iam.v1.IntrospectSessionRequest
+	17, // 33: auriga.iam.v1.SessionService.RevokeSessions:input_type -> auriga.iam.v1.RevokeSessionsRequest
+	12, // 34: auriga.iam.v1.SessionService.TouchSession:input_type -> auriga.iam.v1.TouchSessionRequest
+	10, // 35: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:input_type -> auriga.iam.v1.VerifyAdminSessionCsrfRequest
+	20, // 36: auriga.iam.v1.AccountService.GetAccount:input_type -> auriga.iam.v1.GetAccountRequest
+	22, // 37: auriga.iam.v1.AccountService.BatchGetAccounts:input_type -> auriga.iam.v1.BatchGetAccountsRequest
+	25, // 38: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:input_type -> auriga.iam.v1.GetSigningKeysRequest
+	27, // 39: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:input_type -> auriga.iam.v1.GetPublicKeysRequest
+	30, // 40: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:input_type -> auriga.iam.v1.IssueInstanceAiTokenRequest
+	5,  // 41: auriga.iam.v1.DeviceAccessService.VerifyDeviceAccess:output_type -> auriga.iam.v1.VerifyDeviceAccessResponse
+	7,  // 42: auriga.iam.v1.DeviceAccessService.VerifyDeviceAiAccess:output_type -> auriga.iam.v1.VerifyDeviceAiAccessResponse
+	9,  // 43: auriga.iam.v1.DeviceAccessService.VerifyDeviceCredential:output_type -> auriga.iam.v1.VerifyDeviceCredentialResponse
+	15, // 44: auriga.iam.v1.SessionService.IntrospectSession:output_type -> auriga.iam.v1.IntrospectSessionResponse
+	18, // 45: auriga.iam.v1.SessionService.RevokeSessions:output_type -> auriga.iam.v1.RevokeSessionsResponse
+	13, // 46: auriga.iam.v1.SessionService.TouchSession:output_type -> auriga.iam.v1.TouchSessionResponse
+	11, // 47: auriga.iam.v1.SessionService.VerifyAdminSessionCsrf:output_type -> auriga.iam.v1.VerifyAdminSessionCsrfResponse
+	21, // 48: auriga.iam.v1.AccountService.GetAccount:output_type -> auriga.iam.v1.GetAccountResponse
+	23, // 49: auriga.iam.v1.AccountService.BatchGetAccounts:output_type -> auriga.iam.v1.BatchGetAccountsResponse
+	26, // 50: auriga.iam.v1.IdentityHeaderKeyService.GetSigningKeys:output_type -> auriga.iam.v1.GetSigningKeysResponse
+	29, // 51: auriga.iam.v1.IdentityHeaderKeyService.GetPublicKeys:output_type -> auriga.iam.v1.GetPublicKeysResponse
+	31, // 52: auriga.iam.v1.InstanceAiTokenService.IssueInstanceAiToken:output_type -> auriga.iam.v1.IssueInstanceAiTokenResponse
+	41, // [41:53] is the sub-list for method output_type
+	29, // [29:41] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_auriga_iam_v1_iam_proto_init() }
@@ -2127,7 +2264,7 @@ func file_auriga_iam_v1_iam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_iam_v1_iam_proto_rawDesc), len(file_auriga_iam_v1_iam_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   26,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   5,
 		},

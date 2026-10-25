@@ -283,34 +283,36 @@ class DeviceAiResourcePostgresTest {
           assertGrpc(
               io.grpc.Status.Code.PERMISSION_DENIED,
               () ->
-                  TenantContext.call(tenant, () -> rpc.collab().verifyDeviceAiAccess(request(ai))));
+                  TenantContext.call(
+                      tenant, () -> rpc.collab().verifyDeviceAiAccess(aiRequest(ai))));
           assertGrpc(
               io.grpc.Status.Code.PERMISSION_DENIED,
-              () -> TenantContext.call(tenant, () -> rpc.edge().verifyDeviceAiAccess(request(ai))));
+              () ->
+                  TenantContext.call(tenant, () -> rpc.edge().verifyDeviceAiAccess(aiRequest(ai))));
           assertGrpc(
               io.grpc.Status.Code.PERMISSION_DENIED,
-              () -> rpc.gateway().verifyDeviceAiAccess(request(ai)));
+              () -> rpc.gateway().verifyDeviceAiAccess(aiRequest(ai)));
           assertGrpc(
               io.grpc.Status.Code.INVALID_ARGUMENT,
               () ->
                   TenantContext.call(
                       TenantContext.PLATFORM_TENANT,
-                      () -> rpc.gateway().verifyDeviceAiAccess(request(ai))));
+                      () -> rpc.gateway().verifyDeviceAiAccess(aiRequest(ai))));
           assertGrpc(
               io.grpc.Status.Code.PERMISSION_DENIED,
               () ->
                   TenantContext.call(
-                      UUID.randomUUID(), () -> rpc.gateway().verifyDeviceAiAccess(request(ai))));
+                      UUID.randomUUID(), () -> rpc.gateway().verifyDeviceAiAccess(aiRequest(ai))));
           assertGrpc(
               io.grpc.Status.Code.UNAUTHENTICATED,
               () ->
                   TenantContext.call(
-                      tenant, () -> rpc.anonymous().verifyDeviceAiAccess(request(ai))));
+                      tenant, () -> rpc.anonymous().verifyDeviceAiAccess(aiRequest(ai))));
           assertGrpc(
               io.grpc.Status.Code.UNAUTHENTICATED,
               () ->
                   TenantContext.call(
-                      tenant, () -> rpc.external().verifyDeviceAiAccess(request(ai))));
+                      tenant, () -> rpc.external().verifyDeviceAiAccess(aiRequest(ai))));
           assertGrpc(
               io.grpc.Status.Code.PERMISSION_DENIED,
               () ->
@@ -650,8 +652,16 @@ class DeviceAiResourcePostgresTest {
     return VerifyDeviceAccessRequest.newBuilder().setAccessToken(raw).build();
   }
 
+  static VerifyDeviceAiAccessRequest aiRequest(String raw) {
+    return VerifyDeviceAiAccessRequest.newBuilder().setAccessToken(raw).build();
+  }
+
   static void assertInactive(VerifyDeviceAccessResponse response) {
     assertEquals(VerifyDeviceAccessResponse.getDefaultInstance(), response);
+  }
+
+  static void assertInactive(VerifyDeviceAiAccessResponse response) {
+    assertEquals(VerifyDeviceAiAccessResponse.getDefaultInstance(), response);
   }
 
   static io.grpc.StatusRuntimeException assertGrpc(io.grpc.Status.Code code, Runnable work) {
@@ -676,8 +686,8 @@ class DeviceAiResourcePostgresTest {
       DeviceAccessServiceGrpc.DeviceAccessServiceBlockingStub anonymous,
       DeviceAccessServiceGrpc.DeviceAccessServiceBlockingStub external,
       UUID tenant) {
-    VerifyDeviceAccessResponse ai(String raw) {
-      return TenantContext.call(tenant, () -> gateway.verifyDeviceAiAccess(request(raw)));
+    VerifyDeviceAiAccessResponse ai(String raw) {
+      return TenantContext.call(tenant, () -> gateway.verifyDeviceAiAccess(aiRequest(raw)));
     }
   }
 

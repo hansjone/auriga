@@ -94,13 +94,13 @@ class IamGrpcDevicesSpringTest {
               assertNull(context.getStartupFailure());
               var service = context.getBean(IamGrpcDevices.class);
               assertTrue(AopUtils.isCglibProxy(service));
-              var response = new Capture<VerifyDeviceAccessResponse>();
+              var response = new Capture<VerifyDeviceAiAccessResponse>();
               as(
                   "svc:ai-gateway",
                   fixture.tenant,
                   () -> {
                     service.verifyDeviceAiAccess(
-                        DeviceAiResourcePostgresTest.request(raw), response);
+                        DeviceAiResourcePostgresTest.aiRequest(raw), response);
                     return null;
                   });
               var identity = response.values.getFirst();
@@ -121,7 +121,7 @@ class IamGrpcDevicesSpringTest {
                           fixture.tenant,
                           () -> {
                             service.verifyDeviceAiAccess(
-                                DeviceAiResourcePostgresTest.request(raw), new Capture<>());
+                                DeviceAiResourcePostgresTest.aiRequest(raw), new Capture<>());
                             return null;
                           }));
             });
@@ -146,6 +146,7 @@ class IamGrpcDevicesSpringTest {
                       .anyMatch(AuthorizationAdvisor.class::isInstance));
               auriga.common.grpc.GrpcAuthorizationCheck.verify(List.of(service), Set.of());
               var access = VerifyDeviceAccessRequest.getDefaultInstance();
+              var aiAccess = VerifyDeviceAiAccessRequest.getDefaultInstance();
               var credential =
                   VerifyDeviceCredentialRequest.newBuilder()
                       .setTenantId(tenant.toString())
@@ -157,7 +158,7 @@ class IamGrpcDevicesSpringTest {
                   () -> service.verifyDeviceAccess(access, new Capture<>()));
               error(
                   "common.unauthenticated",
-                  () -> service.verifyDeviceAiAccess(access, new Capture<>()));
+                  () -> service.verifyDeviceAiAccess(aiAccess, new Capture<>()));
               error(
                   "common.unauthenticated",
                   () -> service.verifyDeviceCredential(credential, new Capture<>()));
@@ -210,7 +211,7 @@ class IamGrpcDevicesSpringTest {
                             denied,
                             tenant,
                             () -> {
-                              service.verifyDeviceAiAccess(access, new Capture<>());
+                              service.verifyDeviceAiAccess(aiAccess, new Capture<>());
                               return null;
                             }));
               error(
@@ -220,19 +221,19 @@ class IamGrpcDevicesSpringTest {
                           "svc:ai-gateway",
                           null,
                           () -> {
-                            service.verifyDeviceAiAccess(access, new Capture<>());
+                            service.verifyDeviceAiAccess(aiAccess, new Capture<>());
                             return null;
                           }));
-              var aiResult = new Capture<VerifyDeviceAccessResponse>();
+              var aiResult = new Capture<VerifyDeviceAiAccessResponse>();
               as(
                   "svc:ai-gateway",
                   tenant,
                   () -> {
-                    service.verifyDeviceAiAccess(access, aiResult);
+                    service.verifyDeviceAiAccess(aiAccess, aiResult);
                     return null;
                   });
               assertEquals(
-                  List.of(VerifyDeviceAccessResponse.getDefaultInstance()), aiResult.values);
+                  List.of(VerifyDeviceAiAccessResponse.getDefaultInstance()), aiResult.values);
               assertTrue(aiResult.completed);
               as(
                   "svc:ai-gateway",

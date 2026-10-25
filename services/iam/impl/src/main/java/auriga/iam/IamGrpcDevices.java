@@ -59,12 +59,12 @@ public class IamGrpcDevices extends DeviceAccessServiceGrpc.DeviceAccessServiceI
   @Override
   @AuthenticatedOnly
   public void verifyDeviceAiAccess(
-      VerifyDeviceAccessRequest request, StreamObserver<VerifyDeviceAccessResponse> observer) {
+      VerifyDeviceAiAccessRequest request, StreamObserver<VerifyDeviceAiAccessResponse> observer) {
     caller("svc:ai-gateway");
     try {
       if (aiAuthority == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
       var identity = aiAuthority.access(request.getAccessToken());
-      var response = VerifyDeviceAccessResponse.newBuilder();
+      var response = VerifyDeviceAiAccessResponse.newBuilder();
       if (identity != null)
         response
             .setActive(true)

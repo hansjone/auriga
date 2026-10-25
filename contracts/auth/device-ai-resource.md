@@ -46,8 +46,8 @@ AI 换票不更新绝对或 idle 期限。数据面每次准入仍须按 D1 在�
 
 ## 每次准入的专用在线核验
 
-网关每次设备 AI 准入调用 IAM `DeviceAccessService.VerifyDeviceAiAccess`，复用
-`VerifyDeviceAccessRequest/Response`。仅允许 `svc:ai-gateway` 的内部服务 JWT，
+网关每次设备 AI 准入调用 IAM `DeviceAccessService.VerifyDeviceAiAccess`，使用独立的
+`VerifyDeviceAiAccessRequest/VerifyDeviceAiAccessResponse`。仅允许 `svc:ai-gateway` 的内部服务 JWT，
 必须携带非平台委托 tenant，并使用既有受认证内部传输；公网设备 JWT 仅放在请求体中，
 不能替代调用方内部凭据。JWT 的 `tid` 必须与委托 tenant 相同，跨 tenant 拒绝。
 

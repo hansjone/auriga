@@ -374,7 +374,7 @@ class DeviceAiAccessAuthorityTest {
       var stub =
           auriga.contracts.iam.v1.DeviceAccessServiceGrpc.newBlockingStub(channel)
               .withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS);
-      var request = DeviceAiResourcePostgresTest.request(raw);
+      var request = DeviceAiResourcePostgresTest.aiRequest(raw);
       var result = TenantContext.call(tenant, () -> stub.verifyDeviceAiAccess(request));
       assertTrue(result.getActive());
       assertEquals(account.toString(), result.getAccountId());
@@ -385,7 +385,8 @@ class DeviceAiAccessAuthorityTest {
       DeviceAiResourcePostgresTest.assertInactive(
           TenantContext.call(
               tenant,
-              () -> stub.verifyDeviceAiAccess(DeviceAiResourcePostgresTest.request(serviceToken))));
+              () ->
+                  stub.verifyDeviceAiAccess(DeviceAiResourcePostgresTest.aiRequest(serviceToken))));
       DeviceAiResourcePostgresTest.assertGrpc(
           io.grpc.Status.Code.PERMISSION_DENIED, () -> stub.verifyDeviceAiAccess(request));
       DeviceAiResourcePostgresTest.assertGrpc(
