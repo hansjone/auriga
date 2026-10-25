@@ -42,8 +42,7 @@ test('existing create cannot succeed when the original header has not crossed a 
 
 test('unverified native inbox evidence cannot authorize a new prompt', async () => {
   const f = fixture();
-  f.attach('session-a');
-  delete f.security.hasPromptRequest;
+  delete f.attach('session-a').inbox;
   const host = await createHostPortOperations(f);
   await assert.rejects(
     host.prompt('session-a', { requestId: 'r', text: 'body', mode: 'queue' }),
@@ -79,19 +78,17 @@ test('existing create rechecks provider and flush before returning, including co
   );
 });
 
-test('unverified parentSession-only lineage cannot create-adopt, prompt or flush', async () => {
+test('a parentSession-only fork can adopt, prompt and flush without child ownership', async () => {
   const f = fixture();
   f.seed('lineage', { parentSession: 'parent' });
   const host = await createHostPortOperations(f);
-  await assert.rejects(
-    host.createSession({ id: 'lineage', cwd: '/work/project', preset: null }),
-    { code: 'host.session_not_ready' },
-  );
-  await assert.rejects(
-    host.prompt('lineage', { requestId: 'r', text: 'body', mode: 'queue' }),
-    { code: 'network.host_incompatible' },
-  );
-  assert.equal(await host.flush('lineage'), false);
+  await host.createSession({
+    id: 'lineage',
+    cwd: '/work/project',
+    preset: null,
+  });
+  await host.prompt('lineage', { requestId: 'r', text: 'body', mode: 'queue' });
+  assert.equal(await host.flush('lineage'), true);
 });
 
 test(
@@ -122,8 +119,7 @@ test(
 
 test('unknown pending evidence is not a definite request absence', async () => {
   const f = fixture();
-  f.attach('session-a');
-  f.security.hasPromptRequest = async () => 'unverified';
+  f.attach('session-a').inbox.nextStep = undefined;
   const host = await createHostPortOperations(f);
   await assert.rejects(host.hasPromptRequest('session-a', 'r'), {
     code: 'network.host_incompatible',

@@ -127,7 +127,7 @@ test('lost create response is queryable by the same id; never creates a replacem
   assert.equal(f.calls.filter(([kind]) => kind === 'create').length, 1);
 });
 
-for (const location of ['pending-evidence', 'history'])
+for (const location of ['nextTurn', 'nextStep', 'history'])
   test(`requestId de-duplicates ${location} without invoking prompt`, async () => {
     const f = fixture();
     const source = { kind: 'user', rpcId: input.requestId };
@@ -137,7 +137,7 @@ for (const location of ['pending-evidence', 'history'])
         .events.push({ type: 'user/message', data: { source } });
     else {
       f.attach('session-a');
-      f.pending.set(`session-a:${input.requestId}`, true);
+      f.agents.get('session-a').inbox[location].push({ source });
     }
     const host = await createPort(f);
     assert.equal(

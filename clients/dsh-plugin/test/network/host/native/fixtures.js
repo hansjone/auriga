@@ -3,10 +3,10 @@ import { PINNED_HOST } from '../../../../src/network/host/native/index.js';
 
 // Contract fixture, not an OS isolation or installed-host compatibility proof.
 export function fixture() {
-  const pending = new Map();
   const stored = new Map();
   const agents = new Map();
   const sessions = new Map();
+  const presets = new Map();
   const calls = [];
   const archivedSessionIds = [];
   const state = {
@@ -22,8 +22,9 @@ export function fixture() {
       header: record.meta,
       snapshotEvents: () => record.events,
     };
-    const agent = { id, session };
+    const agent = { id, session, inbox: { nextTurn: [], nextStep: [] } };
     sessions.set(id, session);
+    if (!presets.has(id)) presets.set(id, record.meta.agentPreset);
     agents.set(id, agent);
     return agent;
   }
@@ -34,7 +35,8 @@ export function fixture() {
     });
   }
   const ctx = {
-    agents: { get: (id) => agents.get(id) },
+    agents: { get: (id) => agents.get(id), isOwnedBy: () => false },
+    sessionProjections: { stateOf: (session) => presets.get(session.id) },
     sessions: {
       get: (id) => sessions.get(id),
       async flush(session) {
@@ -48,7 +50,10 @@ export function fixture() {
       async resolve(id) {
         calls.push(['preset', id]);
         if (id === 'missing') throw new Error('missing');
-        return { id, broken: id === 'broken' ? 'bad preset' : undefined };
+        return {
+          id: id ?? 'standard',
+          broken: id === 'broken' ? 'bad preset' : undefined,
+        };
       },
     },
     sessionPersistence: {
@@ -82,7 +87,9 @@ export function fixture() {
       async prompt(input, signal) {
         calls.push(['prompt', input, signal]);
         if (!agents.has(input.sessionId)) attach(input.sessionId);
-        pending.set(`${input.sessionId}:${input.requestId}`, true);
+        agents.get(input.sessionId).inbox.nextTurn.push({
+          source: { kind: 'user', rpcId: input.requestId },
+        });
         return { accepted: true };
       },
     },
@@ -96,9 +103,6 @@ export function fixture() {
         (await security.assertIsolated()) !== undefined
       )
         throw new Error('fixture authority unavailable');
-    },
-    async hasPromptRequest(id, requestId) {
-      return pending.has(`${id}:${requestId}`);
     },
     async inspectRuntime() {
       return structuredClone(PINNED_HOST);
@@ -124,9 +128,9 @@ export function fixture() {
     stored,
     agents,
     sessions,
+    presets,
     attach,
     seed,
     archivedSessionIds,
-    pending,
   };
 }

@@ -1,4 +1,4 @@
-/** Structural native APIs, not Auriga wire contracts. rc.3 only. */
+/** Structural APIs from lockfile-pinned upstream @deepseek-ai/dsh*@0.2.0-rc.2. */
 export interface Header {
   id: string;
   cwd?: string;
@@ -18,6 +18,10 @@ export interface NativeSession {
 export interface Agent {
   id: string;
   session: NativeSession;
+  inbox: {
+    nextTurn: readonly { source: { kind: string; rpcId?: string } }[];
+    nextStep: readonly { source: { kind: string; rpcId?: string } }[];
+  };
 }
 export interface NativeContext {
   sessionController: {
@@ -27,7 +31,7 @@ export interface NativeContext {
       sessionId: string;
       cwd: string;
       agentPreset?: string;
-    }): Promise<{ sessionId: string }>;
+    }): Promise<{ sessionId: string; agentPreset?: string }>;
     prompt(
       input: {
         sessionId: string;
@@ -42,20 +46,27 @@ export interface NativeContext {
     get(id: string): NativeSession | undefined;
     flush(session: NativeSession): Promise<boolean>;
   };
-  agents: { get(id: string): Agent | undefined };
+  agents: {
+    get(id: string): Agent | undefined;
+    isOwnedBy(id: string, owner: Agent): boolean;
+  };
   workspaceRegistry: { archivedSessionIds: readonly string[] };
-  agentPresets: { resolve(id: string): Promise<{ broken?: unknown }> };
+  agentPresets: {
+    resolve(id?: string): Promise<{ id: string; broken?: unknown }>;
+  };
+  sessionProjections: {
+    stateOf(session: NativeSession, key: 'agentPreset'): string | undefined;
+  };
   sessionPersistence: {
     stat(id: string): Promise<{ header: Header } | undefined>;
   };
 }
 export interface RuntimeFingerprint {
   version: string;
-  build: string;
-  dirty: boolean;
   controllerSha256: string;
   persistenceSha256: string;
   sessionSha256: string;
+  agentLoopSha256: string;
 }
 /** Trusted host/broker code ONLY; never settings, tool parameters or browser IPC. */
 export interface NativeSecurity {
@@ -67,10 +78,6 @@ export interface NativeSecurity {
     provider: NativeContext['sessionPersistence'],
     id: string,
   ): Promise<void>;
-  hasPromptRequest?(
-    id: string,
-    requestId: string,
-  ): Promise<boolean | 'unverified'>;
 }
 /** Internal operation authority for port composition, not host provenance. */
 export interface HostOperationAuthority extends NativeSecurity {

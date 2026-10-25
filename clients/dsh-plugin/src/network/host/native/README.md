@@ -1,59 +1,68 @@
-﻿# 原生 HostPort（N1，安装能力未验证）
+﻿# 上游 DSH HostPort（N1）
 
-当前不能作为已兼容的 rc.3 生产入口：可信隔离句柄发行者、rc.3 pending-request API 和
-dsh-session 源码摘要均未验证。index.js 的两个原生工厂保持失败封闭，J4 必须维持
-unconfigured，不建连、不注册发送工具，不能改用底层操作构造器绕过门禁。
+唯一宿主依据是 deploy/compose/real-dsh/package-lock.json 锁定的
+@deepseek-ai/dsh*@0.2.0-rc.2 npm 包。本轮 npm ci --ignore-scripts 后只读核包内源码，
+不以桌面发行版或其他仓库推断 API。安装隔离另有任务，本目录保持失败封闭，不定隔离方案。
 
-## 返工1：来源与发行物
+## 源码基线与可复核证据
 
-安装门禁使用模块私有 WeakSet 核 security 句柄来源，不导出登记/品牌铸造函数。
-只读宿主没有可验证的隔离服务构造器，登记表当前为空；普通对象、原型复制、Proxy、公开
-pin 和 no-op 断言均不能启用入口。真实发行者须由另一个受审宿主工程提供，不冒充已实现。
+以下包版本均为 0.2.0-rc.2，路径相对各 npm 包；源码 SHA-256 固定在 runtime.js：
 
-readRuntimeFingerprint 只供诊断：版本/build/dirty 从实际 manifest 文件读取，不接受自报值；
-读取 controller、persistence、dsh-session 三份字节并计算 SHA-256。文件路径由调用方指定，
-所以结果不证明当前加载的就是这些字节，也不获得来源品牌。ASAR 须由 Electron 宿主采集。
-controller/persistence pin 来自 failure-validation §1.2；dsh-session 无可核 pin，显式为 null，
-完整指纹验证拒绝。不能用另一份安装包、任意计算出的摘要或文件重读补出加载证明/绕过 TOCTOU。
+- @deepseek-ai/dsh-api-session-controller/lib/index.js:125–131：subagent ownership 是
+  origin=subagent，或 parentSession 对应的 live parent 实际拥有 child；仅有 fork lineage 不拒绝。
+- 同文件 :208–244、:377–410：resolveAgent 原身份冷恢复，调用 sessionQuery 后 agents.resume；
+  :412–456：显式身份创建/采用及 cwd/preset 冲突；:686–714：create 的 sessionId/cwd/agentPreset。
+- 同文件 :339–340：当前 preset 读 sessionProjections.stateOf(session,'agentPreset')；
+  :358–369：省略 preset 使用注册表默认值。本适配创建时明确解析默认 preset，已有会话省略时不改 preset。
+- 同文件 :850–902：prompt 校验内容，写 user source.rpcId，queue 走 followup；
+  :1063–1076：去重查 inbox.nextTurn/nextStep 与 session.snapshotEvents 的 user/message。
+- @deepseek-ai/dsh-agent-loop/lib/index.js:70–85：真实 ReactLoopInbox 两个 getter；
+  :177–179：来自 inbox 投影；:806–814：followup 写 next-turn，steer/inject 写 next-step。
+- controller :2930–2951：resolveAgent 返回 {agent}|{error}，inspect 附着/冷态都返回 meta/events；
+  :3096–3099：signal 仅在 prompt 入口 throwIfAborted，然后交 commands.prompt。
+- @deepseek-ai/dsh-session/lib/index.js:1376–1381：snapshotEvents；:1832–1852：
+  sessions.flush(session) 等所有监听者，任一失败抛错，无参与者 false，有参与者 true；:1861–1862：get。
+- @deepseek-ai/dsh-session-persistence-jsonl/lib/index.js:413–420：匹配 writer 后 drainLive+flush；
+  :2536–2562：stat 可见 pending header，不能当耐久完成；:3178、:3204：实际文件 sync 路径。
+  有 session/flush listener 但无匹配 writer 仍可能得到 true，因此仍必须核真实 durable provider。
+- @deepseek-ai/dsh-agent/lib/index.js:605–607：isOwnedBy 比较真实 owner 对象；
+  @deepseek-ai/dsh-workspace/lib/index.js:504–505：archivedSessionIds；
+  @deepseek-ai/dsh-agent-preset-registry/lib/index.js:603–615：resolve(id?) 返回解析后的 id/broken。
 
-## 底层操作契约
+## 适配行为
 
-host-port.js 的 createHostPortOperations 和 source-context.js 的 createSourceResolver 是供可信
-组件组合的底层算法，未从 index.js 导出；它们不核安装身份、不授予联网权。算法测试显式
-导入底层端口，用抽象 authority 夹具，与生产入口拒绝测试分开，不能当真实宿主或隔离证明。
+index.js 的两个公开原生工厂先过来源/隔离门禁；普通对象、复制、Proxy 和 no-op 均不能放行。
+本任务不提供隔离服务发行者，私有来源注册表仍为空，J4 保持 unconfigured，不建连、不注册工具。
+readRuntimeFingerprint 只读 CLI manifest.version 与四份包源码摘要；npm manifest 没有 desktop
+build/dirty 字段。诊断指纹匹配不证明当前加载实例，也不替代隔离或已加载文件来源证明。
 
-- getSession 沿原身份读归档/stat/inspect，不查前台、不重建、不把读故障当不存在。
-- 新建和已有会话统一经过 durable + 严格 awaited flush 屏障，包括 cold adoption；
-  核 ID/cwd/preset，provider/session 变化、归档、false/异常均不报成功。丢创建响应只查原 ID。
-- prompt 只允许 queue，原 requestId/AbortSignal，同 session 串行，跨 session 并行。
-  30 秒上限到时 abort 并释放锁；调用不明保持本进程不重做，最多留 1,024 项，满后拒绝新增。
-  重启后的不重做由核心耐久 ledger 保证，不能以 timeout 当作“未执行”。
-- 历史只认 user/message.source.rpcId；live pending 必须由经过验证的 hasPromptRequest
-  authority 提供完整证据。缺方法或返回 unverified 时拒绝判断不存在；冷恢复后再次核证据。
-  不再访问未经验证的 native inbox 属性。
-- requestId 与正文摘要一一对应由核心 recipient/messageDigest 耐久记录保证；不得同 ID 换正文。
-  底层 requestId 查询不是独立正文冲突校验器。
-- origin=subagent 拒普通入口；仅有 parentSession 的 lineage 暂不支持，需补 ownership/fork 证据。
-  parentSession 也可能来自 fork，不能直接认作子 agent。N2 专用 delivery 未实施。
-- 来源投影核真实 Agent/Session 对象身份、ownership、唯一 bound/open local，仅释放四个引用。
-  它不证明“当前正在执行本次工具回调”，不是可序列化 IPC 能力；J4 须在真实回调中另核授权。
+host-port.js 的 createHostPortOperations 和 source-context.js 的 createSourceResolver 是底层
+组合算法，不从 index.js 导出，不授予联网权。单元测试验证算法，不能冒充生产隔离验收。
 
-native 失败仍归 host_incompatible；J4 不得把全部瞬时错误永久缓存为不兼容，应沿原身份对账。
-历史扫描暂为 O(n)；缺可信 revision/完整 pending API，故未加入可能漏判的缓存。
-普通 prompt 可先调度后 flush，不承诺副作用恰好一次，结果不明不得自动重做。
+- getSession 原身份读归档/stat/inspect，不查前台、不重建、不把读错误当不存在。
+- 新建和已有 adoption 均过同一 durable + 严格 awaited flush；冷态沿原生 resume，核 cwd 与
+  实际 preset 投影，false/异常/provider 或 session 更换/归档均不成功。丢响应只查原持久 ID。
+- hasPromptRequest 按已核源码直接检查两个真实 pending 队列和 user/message.source.rpcId；
+  字段缺失或无效拒绝，不把缺证据当不存在；恢复为 live 后再查一次。
+- prompt 只允许 queue，按 session 串行。30 秒上限发 abort 并释放锁，但上游仅保证入场前检查
+  signal，不能宣称中途 admission 被取消。不确定请求最多 1,024 项且不重做，重启依靠核心 ledger。
+- requestId 与正文摘要一一对应由核心 recipient/messageDigest 保证；不得同 ID 换正文。
+- 子 agent 按真实 origin/runtime ownership 拒普通入口；普通 fork 不再因 parentSession 被误拒。
+  N2 专用 delivery 未实施。来源投影核真实对象与唯一 bound/open local，不证明本次工具执行权，
+  不可直接当 IPC 能力；J4 必须只在真实工具回调中使用并另核当前授权。
+- 错误保持 host_incompatible 和原身份对账；J4 不得永久缓存瞬时失败。历史扫描暂为 O(n)。
+  prompt 可先调度后 flush，不承诺副作用恰好一次，结果不明不自动重做。
 
-## 只读源码证据（以任务指定 oclaw 为根）
+## 验证边界
 
-- dsh-team/lib/dsh-adapter/team-session.js:130：controller.prompt 的 request/signal；
-  同目录 README.md:29：queue 与 rc.2 版本声明；README.md:36：user/message/source.rpcId。
-- team-session.js:229,233：sessionPersistence、sessionController 等服务注入。
-- dsh-team/lib/dsh-adapter/team-workspace.js:24：persistence.open(id,'read')；
-  dsh-team/test-compat/team-probe-plugin.mjs:38：persistence.flush()。
-- 在 dsh-team/lib/dsh-adapter 与 test-compat 检索 nextTurn、nextStep、hasPromptRequest、
-  snapshotEvents、session/flush，找不到 rc.3 原生字段/实现。旧核验日志不替代指定宿主源码。
+默认插件测试不依赖 DSH 安装目录。另提供显式上游核验（不启动 DSH、不调用模型、不监听端口）：
 
-因此没有保留声称 rc.3 inbox 字段存在的类型或夹具；夹具仅用抽象 pending-evidence Map。
-宿主工程还须核真实服务对象、session writer、flush 参与者；stat/方法名/flush=true 不充分。
-还须证明工具不能经文件/备份、环境/句柄、内存/调试、日志/转储/导出/IPC 读写凭据与各账本。
-IPC 认证对端并绑定当前 local/精确操作，不信工具自报身份。J10 再核真实 rc.3 创建/恢复、
-首消息竞争、强杀/满盘、双 DSH 与同机隔离；本目录不启动服务或修改宿主系统权限。
+```
+# 先在 deploy/compose/real-dsh 按 lockfile npm ci --ignore-scripts
+# 在 clients/dsh-plugin 执行
+node --test test/network/host/native/upstream-check.mjs
+```
+
+它核四份真实源码摘要，直接加载上游 SessionController/SessionStore；inbox 的非导出实现按
+已固定摘要的原始源码片段执行并与适配器比对，不替换宿主模块或放宽原生参数。
+这些是包接口/内存行为核验，真实创建/恢复模型、JSONL 断电耐久、双 DSH 与隔离仍待后续验收。

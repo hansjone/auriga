@@ -1,5 +1,6 @@
 import { isUint64String } from '../address.js';
 import { createNativeAuthority, incompatible } from './runtime.js';
+import { isNativeSubagentOwned } from './upstream.js';
 
 /** In-process tool callback only. Never expose this as a JSON/HTTP/IPC resolver.
  * The broker must bind its IPC peer to the capability before any serialization.
@@ -33,8 +34,7 @@ export function createSourceResolver({ ctx, security, lookupBinding }) {
         ctx.sessions.get(id) === agent.session &&
         agent.id === id &&
         agent.session.header.id === id &&
-        agent.session.header.origin !== 'subagent' &&
-        agent.session.header.parentSession === undefined &&
+        !isNativeSubagentOwned(ctx, agent.session.header, agent) &&
         !ctx.workspaceRegistry.archivedSessionIds.includes(id);
       if (!live() || !id) throw incompatible();
       const native = await ctx.sessionController.resolveAgent(id);

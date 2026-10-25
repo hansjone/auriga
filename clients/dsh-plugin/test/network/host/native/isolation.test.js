@@ -12,18 +12,14 @@ import { fixture } from './fixtures.js';
 
 const incompatible = { code: 'network.host_incompatible' };
 
-test('runtime fingerprint requires exact version/build/clean state and both source hashes', () => {
-  // The dsh-session hash has not been verified: even exact copied metadata fails.
-  assert.throws(
-    () => verifyRuntimeFingerprint({ ...PINNED_HOST }),
-    incompatible,
-  );
+test('diagnostic fingerprint requires the lockfile version and all four package source hashes', () => {
+  assert.equal(verifyRuntimeFingerprint({ ...PINNED_HOST }), true);
   for (const key of Object.keys(PINNED_HOST)) {
     assert.throws(
       () =>
         verifyRuntimeFingerprint({
           ...PINNED_HOST,
-          [key]: key === 'dirty' ? true : 'other',
+          [key]: 'other',
         }),
       incompatible,
     );

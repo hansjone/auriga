@@ -2,22 +2,22 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { CODES, HostSeamError } from '../errors.js';
 
-/** failure-validation §1.2; source evidence, not a claim of runtime validation. */
+/** npm ci from deploy/compose/real-dsh/package-lock.json; byte SHA-256.
+ * Diagnostic baseline only, not loaded-module or isolation attestation. */
 export const PINNED_HOST = Object.freeze({
-  version: '0.2.1-rc.3',
-  build: 'be72761ee1a6736ebcdf4f3739363b083ae53c98',
-  dirty: false,
+  version: '0.2.0-rc.2',
   controllerSha256:
-    'a9801acb577b03053c5d5a3191ff555c5f1d791d0acddec113bea4511e33b386',
+    'fb0f7b96130f595db20809eeb77a195b05f4a039f931d1e67692f1f74a4dd269',
   persistenceSha256:
-    '973dd78679b2661d6f492343bc22b124ae958aa597d3b36c698a2c650f909984',
-  // dsh-session implements flush. No independently verified digest is available.
-  sessionSha256: null,
+    '0845707017acc2b4a8a75eab2244fa3fd88587b8094ab32014321dce7ca1e31b',
+  sessionSha256:
+    '87ea85e2fb5318bf1f826db9a1c88c1b26d3ea328027a7f32b211880c4d62b9d',
+  agentLoopSha256:
+    '00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2',
 });
 
 // Deny-by-default provenance registry. No public enrolment or caller-supplied
-// issuer: the read-only host has no authenticated isolation-handle constructor.
-// A host integration must supply that constructor in a separately reviewed change.
+// issuer. Isolation integration is outside this task and remains disabled.
 const nativeSecurityHandles = new WeakSet();
 
 export function incompatible() {
@@ -29,7 +29,6 @@ export function incompatible() {
 export function verifyRuntimeFingerprint(value) {
   if (!value || typeof value !== 'object') throw incompatible();
   for (const [key, expected] of Object.entries(PINNED_HOST)) {
-    if (expected === null) throw incompatible();
     if (/** @type {Record<string, unknown>} */ (value)[key] !== expected)
       throw incompatible();
   }
@@ -40,13 +39,14 @@ export function verifyRuntimeFingerprint(value) {
  * Node fs cannot read inside ASAR; Electron's host fs must collect those bytes.
  * This helper is for unpacked distributions, without loading their modules.
  * Diagnostic only: this does not issue a security handle or prove loaded code.
- * @param {{manifestPath: string, controllerPath: string, persistencePath: string, sessionPath: string}} input
+ * @param {{manifestPath: string, controllerPath: string, persistencePath: string, sessionPath: string, agentLoopPath: string}} input
  * @returns {Promise<import('./types.js').RuntimeFingerprint>} */
 export async function readRuntimeFingerprint({
   manifestPath,
   controllerPath,
   persistencePath,
   sessionPath,
+  agentLoopPath,
 }) {
   try {
     const [manifest, ...sources] = await Promise.all([
@@ -54,24 +54,25 @@ export async function readRuntimeFingerprint({
       readFile(controllerPath),
       readFile(persistencePath),
       readFile(sessionPath),
+      readFile(agentLoopPath),
     ]);
-    const { version, build, dirty } = JSON.parse(manifest.toString('utf8'));
-    if (
-      typeof version !== 'string' ||
-      typeof build !== 'string' ||
-      typeof dirty !== 'boolean'
-    )
-      throw incompatible();
-    const [controllerSha256, persistenceSha256, sessionSha256] = sources.map(
-      (source) => createHash('sha256').update(source).digest('hex'),
-    );
-    return {
-      version,
-      build,
-      dirty,
+    const { version } = JSON.parse(manifest.toString('utf8'));
+    // The published CLI manifest has version, not desktop build/dirty fields.
+    if (typeof version !== 'string') throw incompatible();
+    const [
       controllerSha256,
       persistenceSha256,
       sessionSha256,
+      agentLoopSha256,
+    ] = sources.map((source) =>
+      createHash('sha256').update(source).digest('hex'),
+    );
+    return {
+      version,
+      controllerSha256,
+      persistenceSha256,
+      sessionSha256,
+      agentLoopSha256,
     };
   } catch {
     throw incompatible();
@@ -113,9 +114,5 @@ export function createNativeAuthority(security) {
     assertIsolated: () => security.assertIsolated(),
     assertDurableProvider: (provider, id) =>
       security.assertDurableProvider(provider, id),
-    hasPromptRequest: (id, requestId) =>
-      security.hasPromptRequest
-        ? security.hasPromptRequest(id, requestId)
-        : Promise.resolve('unverified'),
   };
 }

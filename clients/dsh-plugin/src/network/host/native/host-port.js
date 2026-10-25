@@ -1,6 +1,7 @@
 import { CODES, HostSeamError } from '../errors.js';
 import { createKeyedMutex } from '../keyed-mutex.js';
 import { createNativeAuthority, incompatible } from './runtime.js';
+import { hasNativePromptRequest, isNativeSubagentOwned } from './upstream.js';
 
 /** @param {unknown} value @returns {value is string} */
 const opaque = (value) =>
@@ -8,11 +9,6 @@ const opaque = (value) =>
   value.length > 0 &&
   value.length <= 512 &&
   !value.includes('\0');
-/** Parent lineage alone does not prove subagent ownership (forks also have it).
- * It remains unsupported until the host supplies verified ownership evidence.
- * @param {import('./types.js').Header} header */
-const unsupportedLineage = (header) =>
-  header.origin === 'subagent' || header.parentSession !== undefined;
 /** @param {string} id */
 function validId(id) {
   if (!opaque(id)) throw new HostSeamError(CODES.protocolError);
@@ -47,7 +43,7 @@ function liveAgent(agent, id, ctx) {
   validHeader(agent.session.header, id);
 }
 
-/** Implements host/adapter.js HostPort against the native rc.3 services.
+/** Implements HostPort against the lockfile-pinned upstream rc.2 services.
  * No model calls, module imports, service startup or network registration here.
  * security is a trusted OS broker prerequisite, not an isolation implementation.
  * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').NativeSecurity}} options
@@ -61,7 +57,7 @@ export async function createNativeHostPort({ ctx, security }) {
 
 /** Pure HostPort operations over an authority port; NOT an installation gate.
  * Production callers must use createNativeHostPort from index.js.
- * The separate evidence port avoids inventing native inbox field names.
+ * Native field shapes are pinned to the upstream package source evidence.
  * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').HostOperationAuthority, promptTimeoutMs?: number}} options
  * @returns {Promise<import('../adapter.js').HostPort>} */
 export async function createHostPortOperations({
@@ -142,11 +138,38 @@ export async function createHostPortOperations({
     await ready();
   }
 
+  /** Native preset identity is a projection, not necessarily the initial header.
+   * dsh-api-session-controller lib/index.js:339-340.
+   * @param {string} id @param {string|null} expected */
+  async function assertPreset(id, expected) {
+    if (expected === null) return;
+    let agent = ctx.agents.get(id);
+    if (!agent) {
+      const resolved = await ctx.sessionController.resolveAgent(id);
+      if (resolved.error || !resolved.agent) throw incompatible();
+      agent = resolved.agent;
+    }
+    liveAgent(agent, id, ctx);
+    if (
+      isNativeSubagentOwned(ctx, agent.session.header, agent) ||
+      typeof ctx.sessionProjections?.stateOf !== 'function'
+    )
+      throw incompatible();
+    if (
+      ctx.sessionProjections.stateOf(agent.session, 'agentPreset') !== expected
+    )
+      throw new HostSeamError(CODES.sessionNotReady);
+  }
+
   /** @param {string} id @param {string} requestId */
   async function hasRequest(id, requestId) {
     validId(requestId);
     const record = await required(id);
     const agent = ctx.agents.get(id);
+    if (agent) {
+      liveAgent(agent, id, ctx);
+      return hasNativePromptRequest(agent, requestId);
+    }
     const recorded = record.events.some(
       (event) =>
         event.type === 'user/message' &&
@@ -154,16 +177,6 @@ export async function createHostPortOperations({
         event.data.source.rpcId === requestId,
     );
     if (recorded) return true;
-    if (agent) {
-      liveAgent(agent, id, ctx);
-      // A definite absence requires verified complete native pending evidence.
-      // oclaw does not establish an inbox layout; never infer one from a fixture.
-      if (typeof security.hasPromptRequest !== 'function') throw incompatible();
-      const found = await security.hasPromptRequest(id, requestId);
-      await ready();
-      if (typeof found !== 'boolean') throw incompatible();
-      return found;
-    }
     return false;
   }
 
@@ -186,36 +199,47 @@ export async function createHostPortOperations({
         if (existing) {
           if (
             existing.meta.cwd !== cwd ||
-            (existing.meta.agentPreset ?? null) !== preset ||
-            unsupportedLineage(existing.meta)
+            isNativeSubagentOwned(ctx, existing.meta, ctx.agents.get(id))
           )
             throw new HostSeamError(CODES.sessionNotReady);
+          await assertPreset(id, preset);
           if (!(await flushSession(id))) throw incompatible();
+          await assertPreset(id, preset);
           return { id, cwd };
         }
         // A tombstone cannot be turned into a new conversation by create.
         if (ctx.workspaceRegistry.archivedSessionIds.includes(id))
           throw new HostSeamError(CODES.sessionNotReady);
         try {
-          if (preset !== null) {
-            const resolved = await ctx.agentPresets.resolve(preset);
-            if (!resolved || resolved.broken) throw incompatible();
-          }
+          const resolvedPreset = await ctx.agentPresets.resolve(
+            preset ?? undefined,
+          );
+          if (
+            !resolvedPreset ||
+            resolvedPreset.broken ||
+            !opaque(resolvedPreset.id)
+          )
+            throw incompatible();
           await ready();
           const result = await ctx.sessionController.create({
             sessionId: id,
             cwd,
-            ...(preset === null ? {} : { agentPreset: preset }),
+            agentPreset: resolvedPreset.id,
           });
-          if (result?.sessionId !== id) throw incompatible();
+          if (
+            result?.sessionId !== id ||
+            result.agentPreset !== resolvedPreset.id
+          )
+            throw incompatible();
           const created = await required(id);
           if (
             created.meta.cwd !== cwd ||
-            (created.meta.agentPreset ?? null) !== preset ||
-            unsupportedLineage(created.meta)
+            isNativeSubagentOwned(ctx, created.meta, ctx.agents.get(id))
           )
             throw incompatible();
+          await assertPreset(id, resolvedPreset.id);
           if (!(await flushSession(id))) throw incompatible();
+          await assertPreset(id, resolvedPreset.id);
           return { id, cwd };
         } catch {
           // Unknown create is queried by the core with this same durable id.
@@ -230,7 +254,8 @@ export async function createHostPortOperations({
         throw new HostSeamError(CODES.protocolError);
       return locks.run(id, async () => {
         const record = await required(id);
-        if (unsupportedLineage(record.meta)) throw incompatible();
+        if (isNativeSubagentOwned(ctx, record.meta, ctx.agents.get(id)))
+          throw incompatible();
         try {
           await durable(id);
           const requestKey = `${id}\0${input.requestId}`;
@@ -243,7 +268,11 @@ export async function createHostPortOperations({
           if (resolved.error || !resolved.agent) throw incompatible();
           liveAgent(resolved.agent, id, ctx);
           if (
-            unsupportedLineage(resolved.agent.session.header) ||
+            isNativeSubagentOwned(
+              ctx,
+              resolved.agent.session.header,
+              resolved.agent,
+            ) ||
             resolved.agent.session.header.cwd !== record.meta.cwd
           )
             throw incompatible();
@@ -320,13 +349,15 @@ export async function createHostPortOperations({
   async function flushSession(id) {
     try {
       const before = await required(id);
-      if (unsupportedLineage(before.meta)) return false;
+      if (isNativeSubagentOwned(ctx, before.meta, ctx.agents.get(id)))
+        return false;
       const provider = ctx.sessionPersistence;
       await durable(id);
       let session = ctx.sessions.get(id);
       if (!session) {
         const record = await required(id);
-        if (unsupportedLineage(record.meta)) return false;
+        if (isNativeSubagentOwned(ctx, record.meta, ctx.agents.get(id)))
+          return false;
         const resolved = await ctx.sessionController.resolveAgent(id);
         if (resolved.error || !resolved.agent) return false;
         liveAgent(resolved.agent, id, ctx);
@@ -335,7 +366,7 @@ export async function createHostPortOperations({
       if (
         !session ||
         session.id !== id ||
-        unsupportedLineage(session.header) ||
+        isNativeSubagentOwned(ctx, session.header, ctx.agents.get(id)) ||
         session.header.cwd !== before.meta.cwd
       )
         return false;

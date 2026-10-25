@@ -16,16 +16,16 @@ test('unpacked runtime fingerprints hash actual bytes and refuse missing files w
   const controllerPath = join(dir, 'controller.js');
   const persistencePath = join(dir, 'persistence.js');
   const sessionPath = join(dir, 'session.js');
+  const agentLoopPath = join(dir, 'agent-loop.js');
   const manifestPath = join(dir, 'package.json');
   await writeFile(controllerPath, 'controller');
   await writeFile(persistencePath, 'persistence');
   await writeFile(sessionPath, 'session');
+  await writeFile(agentLoopPath, 'agent-loop');
   await writeFile(
     manifestPath,
     JSON.stringify({
       version: PINNED_HOST.version,
-      build: PINNED_HOST.build,
-      dirty: false,
     }),
   );
   const request = {
@@ -33,6 +33,7 @@ test('unpacked runtime fingerprints hash actual bytes and refuse missing files w
     controllerPath,
     persistencePath,
     sessionPath,
+    agentLoopPath,
   };
   const fingerprint = await readRuntimeFingerprint({
     ...request,
@@ -41,8 +42,8 @@ test('unpacked runtime fingerprints hash actual bytes and refuse missing files w
     dirty: true,
   });
   assert.equal(fingerprint.version, PINNED_HOST.version);
-  assert.equal(fingerprint.build, PINNED_HOST.build);
-  assert.equal(fingerprint.dirty, false);
+  assert.equal('build' in fingerprint, false);
+  assert.equal('dirty' in fingerprint, false);
   assert.equal(
     fingerprint.controllerSha256,
     createHash('sha256').update('controller').digest('hex'),
@@ -67,10 +68,7 @@ test('unpacked runtime fingerprints hash actual bytes and refuse missing files w
       error.code === 'network.host_incompatible' &&
       !error.message.includes(dir),
   );
-  await writeFile(
-    manifestPath,
-    JSON.stringify({ version: '0.2.1-rc.3', build: null, dirty: false }),
-  );
+  await writeFile(manifestPath, JSON.stringify({ version: null }));
   await assert.rejects(readRuntimeFingerprint(request), {
     code: 'network.host_incompatible',
   });
