@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  openConsent,
+  openConsent as openRawConsent,
   createFileConsentStore,
   publicReceipt,
 } from '../../../src/network/consent/index.js';
@@ -19,6 +19,21 @@ const identity = {
 const local = { session: 'authenticated-local-ui' };
 const source = { tenant: identity.tenant, realm: '2', node: '20' };
 const layers = ['conversation', 'execution'];
+
+// Existing policy assertions explicitly inspect the authenticated local view.
+// Source-facing privacy/timing is tested against the raw service in rework.test.js.
+async function openConsent(options) {
+  const service = await openRawConsent(options);
+  return {
+    ...service,
+    request: async (input) => {
+      await service.request(input);
+      const row = await service.getRequest(local, input);
+      if (!row) throw new Error('request not retained');
+      return row;
+    },
+  };
+}
 
 async function fixture(t, options = {}) {
   let time = 1_000_000;
@@ -35,6 +50,9 @@ async function fixture(t, options = {}) {
   const ports = {
     store,
     identity,
+    callbackTimeoutMs: 20,
+    actionTimeoutMs: 50,
+    responseDelayMs: 100,
     now: () => time,
     resolveSource: async (s) => ({ ...s, userId: owner, ownershipRevision }),
     organization: async () => org,
@@ -297,13 +315,13 @@ test('node rules and existing once grants are invalidated by current IAM ownersh
         tenant: 'another-tenant',
       }),
     ),
-    /tenant/,
+    /intake unavailable/,
   );
   await assert.rejects(
     f.service.request(
       f.request('execution', 'cross-realm', { ...source, realm: '3' }),
     ),
-    /realm/,
+    /intake unavailable/,
   );
 });
 
@@ -337,7 +355,7 @@ test('user pending quota spans source nodes and the deadline cannot be extended 
   assert.equal((await f.service.request(original)).status, 'expired');
   await assert.rejects(
     f.service.request({ ...original, expiresAt: original.expiresAt + 100 }),
-    /conflict/,
+    /intake unavailable/,
   );
 });
 
@@ -379,7 +397,7 @@ test('revocation and an in-flight authorized action have a single local order', 
   await Promise.resolve();
   assert.equal(revoked, false);
   release();
-  assert.equal(await action, 'started-before-revocation');
+  assert.deepEqual(await action, { status: 'request_submitted' });
   await revoke;
   await assert.rejects(
     f.service.withAuthorization(request, async () =>
@@ -510,7 +528,7 @@ test('pending limits, original deadlines, stable IDs and metadata-only intake', 
   assert.equal((await f.service.listPending(local)).length, 1);
   await assert.rejects(
     f.service.request({ ...request, digest: 'b'.repeat(64) }),
-    /conflict/,
+    /intake unavailable/,
   );
   await assert.rejects(
     f.service.request({ ...request, body: 'untrusted prompt' }),
@@ -592,7 +610,7 @@ test('local mutations require authenticated UI; identity spoofing and missing IA
   });
   await assert.rejects(
     unavailable.service.request(unavailable.request()),
-    /IAM offline/,
+    /intake unavailable/,
   );
   const spoof = await fixture(t, {
     resolveSource: async (s) => ({
@@ -602,7 +620,10 @@ test('local mutations require authenticated UI; identity spoofing and missing IA
       ownershipRevision: '1',
     }),
   });
-  await assert.rejects(spoof.service.request(spoof.request()), /source/);
+  await assert.rejects(
+    spoof.service.request(spoof.request()),
+    /intake unavailable/,
+  );
 });
 
 test('revocation serializes with action authorization; stale approvals cannot run', async (t) => {
@@ -749,7 +770,7 @@ test('request capacity keeps revocation usable and pending byte limits stay enfo
   });
   await assert.rejects(
     f.service.request(f.request('conversation', 'over')),
-    /capacity/,
+    /not retained/,
   );
   await f.service.revoke(local, {
     layer: 'conversation',

@@ -71,7 +71,9 @@ export const cooldownKeys = (layer, s) =>
 export function matches(rule, s) {
   return rule.scope === 'source_user'
     ? userKey(rule.source) === userKey(s)
-    : proofKey(rule.source) === proofKey(s);
+    : rule.choice === 'block'
+      ? nodeKey(rule.source) === nodeKey(s)
+      : proofKey(rule.source) === proofKey(s);
 }
 
 /** Deterministic intersection: organization cannot turn a local wait/deny into allow.

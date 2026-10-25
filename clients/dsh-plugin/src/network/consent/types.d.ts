@@ -51,6 +51,9 @@ export interface RecordEntry {
   localReason: string;
   manual: boolean;
   organizationRevision: string;
+  receivedAt: number;
+  terminalAt?: number;
+  usedAt?: number;
 }
 export interface Event {
   id: string;
@@ -68,7 +71,7 @@ export interface Audit {
   detail: unknown;
 }
 export interface State {
-  version: 1;
+  version: 1 | 2;
   identity: Identity;
   policyRevision: number;
   lastNow: number;
@@ -78,11 +81,20 @@ export interface State {
   cooldowns: Record<string, number>;
   audit: Audit[];
   outbox: Event[];
+  traffic: Record<string, { since: number; count: number }>;
+  auditSummary: { dropped: number; digest: string };
 }
 export interface Limits {
   maxPending: number;
   maxPendingBytes: number;
   maxRecords: number;
+  maxSourceRecords: number;
+  maxUserRecords: number;
+  maxSourceTerminal: number;
+  maxUserTerminal: number;
+  maxRequestsPerMinute: number;
+  terminalRetentionMs: number;
+  maxAudit: number;
 }
 export interface Options {
   /** Separate store/directory from the host ledger, scoped to this installation. */
@@ -92,5 +104,8 @@ export interface Options {
   organization(source: VerifiedSource): Promise<Organization>;
   authorizeLocal(context: unknown): Promise<boolean>;
   now?: () => number;
+  callbackTimeoutMs?: number;
+  actionTimeoutMs?: number;
+  responseDelayMs?: number;
   limits?: Partial<Limits>;
 }
