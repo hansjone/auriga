@@ -1,4 +1,5 @@
 import { loginStyles } from './styles.js';
+import { failureReason } from './errors.js';
 
 /** @typedef {import('../generated/steps.js').ClientStep} ClientStep */
 /** @typedef {import('../generated/steps.js').StepInput} StepInput */
@@ -9,6 +10,7 @@ import { loginStyles } from './styles.js';
  * @property {(input: StepInput, context: {signal: AbortSignal}) => Promise<ClientStep>} onSubmit
  * @property {(context: {signal: AbortSignal}) => Promise<ClientStep>} onRestart
  * @property {() => void} onComplete The host owns session verification and navigation.
+ * @property {() => Promise<void>} [onCancel] Cancel only this anonymous attempt.
  */
 
 let nextId = 0;
@@ -25,6 +27,14 @@ const messages = {
     invalid: '用户名或口令不正确。',
     expired: '登录已过期，请重新开始。',
     limited: '请求过于频繁，请稍后重试。',
+    network: '网络不可达，请检查连接后重试。',
+    unconfigured: '平台地址尚未配置，请联系安装者配置后重试。',
+    credentialExpired: '本机凭据已过期或失效，请重新登录。',
+    cancelled: '已取消登录，可以重新开始。',
+    qr: '扫码登录',
+    redirect: '跳转登录',
+    webauthn: 'Passkey 登录',
+    device: '设备确认',
   },
   en: {
     title: 'Sign in',
@@ -39,6 +49,16 @@ const messages = {
     invalid: 'Invalid username or password.',
     expired: 'Sign-in expired. Please start again.',
     limited: 'Too many requests. Try again later.',
+    network: 'Network unreachable. Check your connection and retry.',
+    unconfigured:
+      'Platform address is not configured. Ask the installer to configure it, then retry.',
+    credentialExpired:
+      'Local credentials expired or became invalid. Sign in again.',
+    cancelled: 'Sign-in cancelled. You can start again.',
+    qr: 'Scan to sign in',
+    redirect: 'External sign-in',
+    webauthn: 'Passkey sign-in',
+    device: 'Device confirmation',
   },
 };
 
@@ -56,6 +76,9 @@ export function createLoginView(root, options) {
   let locale = options.locale || 'zh-CN';
   /** @type {ClientStep | undefined} */
   let step;
+  /** @type {import('./errors.js').LoginFailureReason | undefined} */
+  let notice;
+  let cancelling = false;
   let disposed = false;
   let version = 0;
   let completionVersion = 0;
@@ -77,6 +100,8 @@ export function createLoginView(root, options) {
   function errorText(code) {
     if (code === 'iam.invalid_credentials') return words().invalid;
     if (code === 'iam.login_tx_expired') return words().expired;
+    if (code === 'common.unauthenticated') return words().credentialExpired;
+    if (code === 'common.unavailable') return words().network;
     if (code === 'common.rate_limited') return words().limited;
     return words().failed;
   }
@@ -110,6 +135,7 @@ export function createLoginView(root, options) {
   function setStep(next) {
     if (disposed) return;
     invalidate();
+    notice = undefined;
     step = next;
     render();
     if (next.type === 'complete') {
@@ -126,7 +152,8 @@ export function createLoginView(root, options) {
   }
   /** @param {(signal: AbortSignal) => Promise<ClientStep>} action @param {HTMLElement} card */
   async function run(action, card) {
-    if (request || disposed) return;
+    if (request || cancelling || disposed) return;
+    card.querySelector('[data-action=cancel]')?.remove();
     const current = version;
     const controller = new AbortController();
     request = controller;
@@ -137,26 +164,67 @@ export function createLoginView(root, options) {
     status.setAttribute('role', 'status');
     const cancel = element('button', words().cancel);
     cancel.type = 'button';
+    cancel.dataset.action = 'cancel';
     listen(cancel, 'click', () => {
-      invalidate();
-      render();
+      void cancelAttempt();
     });
     card.append(status, cancel);
     try {
       const next = await action(controller.signal);
       if (!disposed && current === version && !controller.signal.aborted)
         setStep(next);
-    } catch {
+    } catch (error) {
       if (!disposed && current === version && !controller.signal.aborted) {
         invalidate();
+        notice = failureReason(error);
         render();
-        const error = element('p', words().failed, 'error');
-        error.setAttribute('role', 'alert');
-        shell.querySelector('.card')?.append(error);
       }
     }
   }
+  async function cancelAttempt() {
+    if (disposed || cancelling) return;
+    invalidate();
+    const current = version;
+    cancelling = true;
+    notice = 'cancelled';
+    render();
+    try {
+      await options.onCancel?.();
+    } catch (error) {
+      if (!disposed && current === version) notice = failureReason(error);
+    } finally {
+      cancelling = false;
+      if (!disposed) {
+        if (current === version) invalidate();
+        render();
+      }
+    }
+  }
+  /** @param {HTMLElement} card */
+  function restartButton(card) {
+    const retry = element('button', words().retry);
+    retry.type = 'button';
+    retry.dataset.action = 'restart';
+    retry.disabled = cancelling;
+    listen(retry, 'click', () => {
+      void run((signal) => options.onRestart({ signal }), card);
+    });
+    card.append(retry);
+  }
+  /** @param {HTMLElement} card */
+  function cancelButton(card) {
+    const cancel = element('button', words().cancel);
+    cancel.type = 'button';
+    cancel.dataset.action = 'cancel';
+    cancel.disabled = cancelling;
+    listen(cancel, 'click', () => {
+      void cancelAttempt();
+    });
+    card.append(cancel);
+  }
   function render() {
+    for (const remove of cleanup) remove();
+    cleanup = [];
     shell.replaceChildren();
     shell.lang = locale;
     const style = element('style', loginStyles);
@@ -174,11 +242,24 @@ export function createLoginView(root, options) {
     mark.append(path);
     brand.append(mark, doc.createTextNode('Auriga'));
     const card = element('section', '', 'card');
+    card.dataset.step = step?.type ?? '';
     const title = element('h2', words().title);
     title.id = `${id}-title`;
     card.setAttribute('aria-labelledby', title.id);
     card.append(title);
     shell.append(style, brand, card);
+    if (notice) {
+      const text =
+        notice === 'expired' ? words().credentialExpired : words()[notice];
+      const status = element(
+        'p',
+        text,
+        notice === 'cancelled' ? 'muted' : 'error',
+      );
+      status.setAttribute('role', notice === 'cancelled' ? 'status' : 'alert');
+      card.append(status);
+      restartButton(card);
+    }
     if (!step) return;
     if (step.type === 'form') {
       const formStep = step;
@@ -278,7 +359,14 @@ export function createLoginView(root, options) {
       form.append(submit);
       listen(form, 'submit', (event) => {
         event.preventDefault();
-        if (request || disposed || !form.reportValidity()) return;
+        if (
+          request ||
+          cancelling ||
+          notice === 'cancelled' ||
+          disposed ||
+          !form.reportValidity()
+        )
+          return;
         /** @type {Record<string, string | boolean>} */
         const values = Object.create(null);
         for (const { name, control, checkbox, hiddenValue } of fields) {
@@ -300,34 +388,80 @@ export function createLoginView(root, options) {
         );
       });
       card.append(form);
+      if (notice === 'cancelled' || cancelling)
+        for (const control of form.querySelectorAll('input, select, button'))
+          control.setAttribute('disabled', '');
+      if (options.onCancel && !notice) cancelButton(card);
     } else if (step.type === 'complete') {
       const status = element('p', words().complete);
       status.setAttribute('role', 'status');
       card.append(status);
     } else {
+      const method = ['qr', 'redirect', 'webauthn', 'device'].includes(
+        step.type,
+      );
+      if (method) {
+        const type = /** @type {'qr'|'redirect'|'webauthn'|'device'} */ (
+          step.type
+        );
+        title.textContent = words()[type];
+      }
+      let expired = false;
+      if (step.type === 'qr' || step.type === 'device') {
+        const remaining = Date.parse(step.expiresAt) - Date.now();
+        expired = Number.isFinite(remaining) && remaining <= 0;
+        if (remaining > 0) {
+          const timer = setTimeout(
+            () => {
+              if (!disposed) {
+                invalidate();
+                render();
+              }
+            },
+            Math.min(remaining, 2147483647),
+          );
+          cleanup.push(() => clearTimeout(timer));
+        }
+      }
       const error = element(
         'p',
-        step.type === 'fail' ? errorText(step.code) : words().unavailable,
+        step.type === 'fail'
+          ? errorText(step.code)
+          : expired
+            ? words().expired
+            : words().unavailable,
         'error',
       );
       error.setAttribute('role', 'alert');
       card.append(error);
-      if (step.type === 'fail' && step.retryable) {
-        const retry = element('button', words().retry);
-        retry.type = 'button';
-        listen(retry, 'click', () => {
-          void run((signal) => options.onRestart({ signal }), card);
-        });
-        card.append(retry);
+      if (!notice && ((step.type === 'fail' && step.retryable) || method)) {
+        restartButton(card);
+        if (method) cancelButton(card);
       }
     }
   }
   render();
   return {
     setStep,
+    /** @param {import('./errors.js').LoginFailureReason} reason */
+    setFailure(reason) {
+      if (disposed) return;
+      invalidate();
+      step = undefined;
+      notice = reason;
+      render();
+    },
+    /** @param {(context:{signal:AbortSignal})=>Promise<ClientStep>} action */
+    load(action) {
+      if (disposed) return;
+      const card = shell.querySelector('.card');
+      if (card instanceof doc.defaultView.HTMLElement)
+        void run((signal) => action({ signal }), card);
+    },
     /** @param {string} next */
     setLocale(next) {
       if (disposed) return;
+      if (request && !step && !notice) notice = 'cancelled';
       invalidate(true);
       locale = next || 'zh-CN';
       render();

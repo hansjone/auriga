@@ -53,6 +53,9 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<ObjectNode> token(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
+    String[] resources = request.getParameterValues("resource");
+    if (resources != null && resources.length != 1)
+      return response(OAuthProvider.error("invalid_target"));
     return standard(
         () ->
             requests.call(

@@ -5,6 +5,8 @@ import auriga.common.error.CommonErrors;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.iam.api.NetworkAuthority;
 import auriga.iam.api.NetworkAuthority.*;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
@@ -27,6 +29,13 @@ final class NetworkIamChecks {
 
   void active(String realm, String node) {
     if (!call(() -> iam.active(realm, node))) throw new AurigaException(NetworkErrors.UNAUTHORIZED);
+  }
+
+  Map<NodeReference, Boolean> activeBatch(List<NodeReference> nodes) {
+    var result = call(() -> iam.activeBatch(nodes));
+    if (result == null || nodes.stream().anyMatch(n -> result.get(n) == null))
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    return result;
   }
 
   Decision check(Check request) {
