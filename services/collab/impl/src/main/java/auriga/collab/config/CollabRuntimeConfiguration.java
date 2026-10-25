@@ -25,8 +25,16 @@ public class CollabRuntimeConfiguration {
   @Bean
   @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(
       NetworkSigningKeys.class)
-  NetworkSigningKeys networkSigningKeys() {
-    return new NetworkSigningKeys(Clock.systemUTC(), 1);
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      prefix = "auriga.collab.network",
+      name = "key-state-file")
+  NetworkSigningKeys networkSigningKeys(
+      @org.springframework.beans.factory.annotation.Value(
+              "${auriga.collab.network.key-state-file:}")
+          String stateFile) {
+    if (stateFile.isBlank())
+      throw new IllegalArgumentException("Network key state storage is required");
+    return new NetworkSigningKeys(Clock.systemUTC(), 1, java.nio.file.Path.of(stateFile));
   }
 
   @Bean

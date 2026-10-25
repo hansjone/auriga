@@ -24,24 +24,36 @@ final class NetworkSchemas {
   private NetworkSchemas() {}
 
   static void validate(String definition, JsonNode value) {
+    validate("envelope", definition, value);
+  }
+
+  static void validate(String file, String definition, JsonNode value) {
     var schema =
         REGISTRY.getSchema(
             SchemaLocation.of(
-                "https://auriga.example.com/contracts/network/envelope.schema.json#/$defs/"
+                "https://auriga.example.com/contracts/network/"
+                    + file
+                    + ".schema.json#/$defs/"
                     + definition));
     if (!schema.validate(value).isEmpty()) throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
   }
 
   private static Map<String, String> localSchemas() {
     Map<String, String> schemas = new HashMap<>();
-    for (String file : new String[] {"envelope.schema.json", "address.schema.json"}) {
+    for (String file :
+        new String[] {
+          "envelope.schema.json",
+          "address.schema.json",
+          "protocol.schema.json",
+          "keyset.schema.json"
+        }) {
       String path = "auriga/contracts/network/" + file;
       try (var input = NetworkSchemas.class.getClassLoader().getResourceAsStream(path)) {
         if (input == null) throw new IllegalStateException("Missing network schema resource");
         JsonNode schema = NetworkJson.JSON.readTree(input);
         // README §1: a consuming/forwarding server retains unknown optional fields. Known
         // forbidden fields (properties: false), enums, sizes and required fields stay enforced.
-        allowOptionalFields(schema);
+        if (!file.equals("keyset.schema.json")) allowOptionalFields(schema);
         String json = schema.toString();
         schemas.put("classpath:" + path, json);
         schemas.put(schema.path("$id").asString(), json);

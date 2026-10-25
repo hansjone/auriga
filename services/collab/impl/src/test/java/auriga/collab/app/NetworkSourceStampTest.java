@@ -39,9 +39,7 @@ class NetworkSourceStampTest {
 
   @Test
   void stampHasTrustedIdentityCanonicalDigestAndStableMessage() {
-    var message =
-        NetworkSourceStamp.message(
-            request("2", "10", "1"), source("协作会话"), MESSAGE, NOW, null, null);
+    var message = stamp(request("2", "10", "1"), source("协作会话"), MESSAGE, NOW, null, null);
     var stamp = NetworkSourceStamp.context(source("协作会话"), message);
     assertEquals("agent", message.path("sender_kind").asString());
     assertEquals("10", message.path("from").path("node").asString());
@@ -63,7 +61,7 @@ class NetworkSourceStampTest {
         }) {
       error(
           "network.sender_mismatch",
-          () -> NetworkSourceStamp.message(request, source("协作会话"), MESSAGE, NOW, null, null));
+          () -> stamp(request, source("协作会话"), MESSAGE, NOW, null, null));
     }
     for (String field :
         new String[] {
@@ -79,7 +77,7 @@ class NetworkSourceStampTest {
       error(
           "network.sender_mismatch",
           () ->
-              NetworkSourceStamp.message(
+              stamp(
                   request("2", "10", "1"),
                   source("协作会话"),
                   MESSAGE,
@@ -92,7 +90,7 @@ class NetworkSourceStampTest {
   @Test
   void unknownOptionalValuesArePreservedAndCoveredByDigest() {
     var message =
-        NetworkSourceStamp.message(
+        stamp(
             request("2", "10", "1"),
             source("协作会话"),
             MESSAGE,
@@ -110,9 +108,7 @@ class NetworkSourceStampTest {
   @Test
   void reservedLabelsAreNeutralizedWithoutNormalizingSignedStrings() {
     for (String label : new String[] {"总部", "管\u200b理员", "ＳＹＳＴＥＭ", "Admin\u202eistrator"}) {
-      var message =
-          NetworkSourceStamp.message(
-              request("2", "10", "1"), source(label), MESSAGE, NOW, null, null);
+      var message = stamp(request("2", "10", "1"), source(label), MESSAGE, NOW, null, null);
       assertEquals(
           "协作来源",
           NetworkSourceStamp.context(source(label), message).path("display_label").asString());
@@ -138,11 +134,11 @@ class NetworkSourceStampTest {
             NOW.plusSeconds(1));
     error(
         "network.sender_mismatch",
-        () -> NetworkSourceStamp.message(request("2", "10", "1"), group, MESSAGE, NOW, null, null));
+        () -> stamp(request("2", "10", "1"), group, MESSAGE, NOW, null, null));
     error(
         "network.sender_mismatch",
         () ->
-            NetworkSourceStamp.message(
+            stamp(
                 request("2", "10", "1"),
                 source("label"),
                 MESSAGE,
@@ -151,12 +147,10 @@ class NetworkSourceStampTest {
                 null));
     error(
         "network.sender_mismatch",
-        () -> NetworkSourceStamp.message(request("2", "10", "1"), null, MESSAGE, NOW, null, null));
+        () -> stamp(request("2", "10", "1"), null, MESSAGE, NOW, null, null));
     error(
         "network.protocol_error",
-        () ->
-            NetworkSourceStamp.message(
-                request("2", "10", "1"), source("label"), MESSAGE, NOW, "[]", null));
+        () -> stamp(request("2", "10", "1"), source("label"), MESSAGE, NOW, "[]", null));
   }
 
   @Test
@@ -171,10 +165,21 @@ class NetworkSourceStampTest {
             "4",
             "agent");
     var request = StoreRequest.unicast(TENANT, "2", "10", "1", "hello", "20", "0");
-    var message =
-        NetworkSourceStamp.message(request, source("label"), MESSAGE, NOW, null, dispatch);
+    var message = stamp(request, source("label"), MESSAGE, NOW, null, dispatch);
     assertEquals("broadcast", message.path("message_class").asString());
     assertEquals("grant", message.path("authorization_ref").path("broadcast_grant_id").asString());
+  }
+
+  static tools.jackson.databind.node.ObjectNode stamp(
+      StoreRequest request, Source source, UUID id, Instant now, String fields, Dispatch dispatch) {
+    return NetworkSourceStamp.message(
+        request,
+        source,
+        id,
+        now,
+        fields,
+        dispatch,
+        "0".equals(request.targets().getFirst().locals().getFirst()) ? "system" : "session");
   }
 
   static void error(String code, Runnable action) {

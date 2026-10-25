@@ -1,0 +1,557 @@
+{
+  "test_only": true,
+  "context": {
+    "realm": "2",
+    "node": "64",
+    "incarnation": "inc-64-1",
+    "epoch": "42",
+    "channelNonce": "nonce-ready-0001",
+    "now": "2026-10-25T00:01:00Z"
+  },
+  "frames": {
+    "delivery_first_contact": {
+      "app_version": "1.0",
+      "contact": {
+        "assigned_address": null,
+        "contact_id": "msg-fc-0001",
+        "request_version": "2",
+        "state": "contact_allowed"
+      },
+      "delivery_id": "dlv-msg-fc-0001",
+      "epoch": "42",
+      "mail_seq": "1205",
+      "message": {
+        "authorization_ref": {
+          "broadcast_grant_id": null,
+          "policy_revision": "8",
+          "source_binding": "binding-a1",
+          "source_revision": "3"
+        },
+        "body": {
+          "subtype": "text",
+          "text": "首次联系示例"
+        },
+        "contact_scope": "conversation",
+        "created_at": "2026-10-25T00:00:00Z",
+        "durability": "durable",
+        "expires_at": "2026-10-26T00:00:00Z",
+        "ext": {
+          "e2e_signature": null
+        },
+        "flags": [],
+        "from": {
+          "local": "418",
+          "node": "63",
+          "realm": "2",
+          "type": "session",
+          "version": 1
+        },
+        "in_reply_to": null,
+        "intent": "request",
+        "kind": "first_contact",
+        "message_class": "unicast",
+        "message_id": "msg-fc-0001",
+        "reply_to": {
+          "local": "418",
+          "node": "63",
+          "realm": "2",
+          "type": "session",
+          "version": 1
+        },
+        "sender_kind": "agent",
+        "thread_id": "thread-0001",
+        "thread_sequence": "1",
+        "to": {
+          "local": "0",
+          "node": "64",
+          "realm": "2",
+          "type": "system",
+          "version": 1
+        },
+        "ttl": 86400
+      },
+      "message_state_version": "1",
+      "recipients": [
+        {
+          "local": "0",
+          "recipient_id": "rcp-fc-sys",
+          "type": "system"
+        }
+      ],
+      "server_auth": {
+        "version": 1,
+        "purpose": "business_delivery",
+        "alg": "Ed25519",
+        "kid": "test-r2-business-1",
+        "issuer_realm": "2",
+        "issued_at": "2026-10-25T00:00:00Z",
+        "not_after": "2026-10-25T00:05:00Z",
+        "audience": {
+          "realm": "2",
+          "node": "64",
+          "incarnation": "inc-64-1",
+          "epoch": "42"
+        },
+        "request_id": "req-fetch-0001",
+        "channel_nonce": "nonce-ready-0001",
+        "keyset_version": "5",
+        "signature": "Lz_zbC-Y5mtlg0AmdnoSpI6OMT2XcEvBzcZgCDCuEBI3r_exuYv9ReDnZ6wch7TEMoX8wUmPSW8w0Pl9S5kuDQ"
+      },
+      "source_context": {
+        "display_label": "协作会话",
+        "message_digest": "sha256:8882b6569c1ad7931b59b36867f9d42ada5c4e0195f2b386172494ad11930432",
+        "node": "63",
+        "realm": "2",
+        "sender_kind": "agent",
+        "user": "user-0193a1"
+      },
+      "target_node": {
+        "node": "64",
+        "realm": "2"
+      },
+      "type": "delivery"
+    },
+    "delivery_broadcast": {
+      "app_version": "1.0",
+      "delivery_id": "dlv-msg-bcast-0001",
+      "epoch": "42",
+      "mail_seq": "1207",
+      "message": {
+        "authorization_ref": {
+          "broadcast_grant_id": "grant-0001",
+          "grant_revision": "4",
+          "human_intent_id": "intent-0001",
+          "policy_revision": "8",
+          "subject_type": "user"
+        },
+        "body": {
+          "subtype": "text",
+          "text": "请在方便时确认信息，回复仅回发送者"
+        },
+        "created_at": "2026-10-25T00:00:00Z",
+        "dispatch_mode": "paged",
+        "durability": "durable",
+        "expires_at": "2026-10-26T00:00:00Z",
+        "ext": {
+          "e2e_signature": null
+        },
+        "flags": [],
+        "from": {
+          "local": "0",
+          "node": "63",
+          "realm": "2",
+          "type": "system",
+          "version": 1
+        },
+        "in_reply_to": null,
+        "intent": "request",
+        "kind": "message",
+        "message_class": "broadcast",
+        "message_id": "msg-bcast-0001",
+        "reply_to": {
+          "local": "0",
+          "node": "63",
+          "realm": "2",
+          "type": "system",
+          "version": 1
+        },
+        "response_deadline": "2026-10-26T00:00:00Z",
+        "sender_kind": "human",
+        "thread_id": "thread-bcast-0001",
+        "thread_sequence": "1",
+        "to": {
+          "local": "1",
+          "node": "0",
+          "realm": "2",
+          "type": "group",
+          "version": 1
+        },
+        "ttl": 86400
+      },
+      "message_state_version": "1",
+      "recipients": [
+        {
+          "local": "0",
+          "membership_id": "bcast-member-64",
+          "recipient_id": "rcp-bcast-sys",
+          "type": "system"
+        }
+      ],
+      "server_auth": {
+        "version": 1,
+        "purpose": "business_delivery",
+        "alg": "Ed25519",
+        "kid": "test-r2-business-1",
+        "issuer_realm": "2",
+        "issued_at": "2026-10-25T00:00:00Z",
+        "not_after": "2026-10-25T00:05:00Z",
+        "audience": {
+          "realm": "2",
+          "node": "64",
+          "incarnation": "inc-64-1",
+          "epoch": "42"
+        },
+        "request_id": "req-fetch-0001",
+        "channel_nonce": "nonce-ready-0001",
+        "keyset_version": "5",
+        "signature": "oBPJTo4TrCeg7vXcWXYg_GLUckD0sIIgwWkiM7dc34lmNiBOU1lJxWzbAaPHCwVqqi0mWBMas5WWJ6XrD7pYBQ"
+      },
+      "snapshot_id": "snapshot-bcast-0001",
+      "source_context": {
+        "display_label": "通知发送者",
+        "message_digest": "sha256:5b3bf435ca59f83ba916e533b4d7ad5f9caedac751520ea472d548f17be0615e",
+        "node": "63",
+        "realm": "2",
+        "sender_kind": "human",
+        "user": "user-0193a1"
+      },
+      "target_node": {
+        "node": "64",
+        "realm": "2"
+      },
+      "type": "delivery"
+    },
+    "head": {
+      "app_version": "1.0",
+      "epoch": "42",
+      "head_seq": "1207",
+      "server_auth": {
+        "version": 1,
+        "purpose": "protocol_response",
+        "alg": "Ed25519",
+        "kid": "test-r2-protocol-1",
+        "issuer_realm": "2",
+        "issued_at": "2026-10-25T00:00:00Z",
+        "not_after": "2026-10-25T00:05:00Z",
+        "audience": {
+          "realm": "2",
+          "node": "64",
+          "incarnation": "inc-64-1",
+          "epoch": "42"
+        },
+        "request_id": null,
+        "channel_nonce": "nonce-ready-0001",
+        "keyset_version": "5",
+        "signature": "xBHV0ZUJqtBcsbllwr9-YrmBMZATn-91BpKf4ESVNKJNu25GZ52aKzKWN56sofXXXP2mGDea91_OQMANXjIFCA"
+      },
+      "type": "head"
+    },
+    "error": {
+      "app_version": "1.0",
+      "code": "network.stale_epoch",
+      "related": {
+        "recipient_id": "rcp-0001"
+      },
+      "request_id": "req-op-0001",
+      "retry_after": null,
+      "retryable": false,
+      "scope": "connection",
+      "server_auth": {
+        "version": 1,
+        "purpose": "protocol_response",
+        "alg": "Ed25519",
+        "kid": "test-r2-protocol-1",
+        "issuer_realm": "2",
+        "issued_at": "2026-10-25T00:00:00Z",
+        "not_after": "2026-10-25T00:05:00Z",
+        "audience": {
+          "realm": "2",
+          "node": "64",
+          "incarnation": "inc-64-1",
+          "epoch": "42"
+        },
+        "request_id": "req-op-0001",
+        "channel_nonce": "nonce-ready-0001",
+        "keyset_version": "5",
+        "signature": "gH0rzLK2bufrIDq8Gz0IAHi6wcGnjANSm36hvPCqiUDX0LKWg0QJtQzAzolaxE45IuPPnaVFnJuhS0jyKM_TDA"
+      },
+      "type": "error"
+    },
+    "fetch_result": {
+      "app_version": "1.0",
+      "type": "fetch_result",
+      "page": {
+        "app_version": "1.0",
+        "type": "fetch_page",
+        "request_id": "req-fetch-0001",
+        "epoch": "42",
+        "head_seq": "1207",
+        "committed_cursor": "1204",
+        "scan_after": "1207",
+        "snapshot_head": "1207",
+        "next_continuation": null,
+        "manifest": [
+          {
+            "item_type": "delivery",
+            "digest": "sha256:e16d7d459efadcbdd0adce28ded88670e7b4c7dcca9f3032679f6ee7a4e80fc0",
+            "mail_seq": "1205"
+          },
+          {
+            "item_type": "delivery",
+            "digest": "sha256:085ee3a99a49e3af68f322387de8d28b6f2417cef24ce03d0abcc9dd1a472f63",
+            "mail_seq": "1207"
+          }
+        ],
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "Mh6XlsRdbE7txJPlipvXt2l2O7voBE9utIZxq3YRw51YIfo4w2VGM_dhDG0GOPJTU6SWNHP-C6ypXku98n_zCg"
+        }
+      },
+      "items": [
+        {
+          "app_version": "1.0",
+          "contact": {
+            "assigned_address": null,
+            "contact_id": "msg-fc-0001",
+            "request_version": "2",
+            "state": "contact_allowed"
+          },
+          "delivery_id": "dlv-msg-fc-0001",
+          "epoch": "42",
+          "mail_seq": "1205",
+          "message": {
+            "authorization_ref": {
+              "broadcast_grant_id": null,
+              "policy_revision": "8",
+              "source_binding": "binding-a1",
+              "source_revision": "3"
+            },
+            "body": {
+              "subtype": "text",
+              "text": "首次联系示例"
+            },
+            "contact_scope": "conversation",
+            "created_at": "2026-10-25T00:00:00Z",
+            "durability": "durable",
+            "expires_at": "2026-10-26T00:00:00Z",
+            "ext": {
+              "e2e_signature": null
+            },
+            "flags": [],
+            "from": {
+              "local": "418",
+              "node": "63",
+              "realm": "2",
+              "type": "session",
+              "version": 1
+            },
+            "in_reply_to": null,
+            "intent": "request",
+            "kind": "first_contact",
+            "message_class": "unicast",
+            "message_id": "msg-fc-0001",
+            "reply_to": {
+              "local": "418",
+              "node": "63",
+              "realm": "2",
+              "type": "session",
+              "version": 1
+            },
+            "sender_kind": "agent",
+            "thread_id": "thread-0001",
+            "thread_sequence": "1",
+            "to": {
+              "local": "0",
+              "node": "64",
+              "realm": "2",
+              "type": "system",
+              "version": 1
+            },
+            "ttl": 86400
+          },
+          "message_state_version": "1",
+          "recipients": [
+            {
+              "local": "0",
+              "recipient_id": "rcp-fc-sys",
+              "type": "system"
+            }
+          ],
+          "server_auth": {
+            "version": 1,
+            "purpose": "business_delivery",
+            "alg": "Ed25519",
+            "kid": "test-r2-business-1",
+            "issuer_realm": "2",
+            "issued_at": "2026-10-25T00:00:00Z",
+            "not_after": "2026-10-25T00:05:00Z",
+            "audience": {
+              "realm": "2",
+              "node": "64",
+              "incarnation": "inc-64-1",
+              "epoch": "42"
+            },
+            "request_id": "req-fetch-0001",
+            "channel_nonce": "nonce-ready-0001",
+            "keyset_version": "5",
+            "signature": "Lz_zbC-Y5mtlg0AmdnoSpI6OMT2XcEvBzcZgCDCuEBI3r_exuYv9ReDnZ6wch7TEMoX8wUmPSW8w0Pl9S5kuDQ"
+          },
+          "source_context": {
+            "display_label": "协作会话",
+            "message_digest": "sha256:8882b6569c1ad7931b59b36867f9d42ada5c4e0195f2b386172494ad11930432",
+            "node": "63",
+            "realm": "2",
+            "sender_kind": "agent",
+            "user": "user-0193a1"
+          },
+          "target_node": {
+            "node": "64",
+            "realm": "2"
+          },
+          "type": "delivery"
+        },
+        {
+          "app_version": "1.0",
+          "delivery_id": "dlv-msg-bcast-0001",
+          "epoch": "42",
+          "mail_seq": "1207",
+          "message": {
+            "authorization_ref": {
+              "broadcast_grant_id": "grant-0001",
+              "grant_revision": "4",
+              "human_intent_id": "intent-0001",
+              "policy_revision": "8",
+              "subject_type": "user"
+            },
+            "body": {
+              "subtype": "text",
+              "text": "请在方便时确认信息，回复仅回发送者"
+            },
+            "created_at": "2026-10-25T00:00:00Z",
+            "dispatch_mode": "paged",
+            "durability": "durable",
+            "expires_at": "2026-10-26T00:00:00Z",
+            "ext": {
+              "e2e_signature": null
+            },
+            "flags": [],
+            "from": {
+              "local": "0",
+              "node": "63",
+              "realm": "2",
+              "type": "system",
+              "version": 1
+            },
+            "in_reply_to": null,
+            "intent": "request",
+            "kind": "message",
+            "message_class": "broadcast",
+            "message_id": "msg-bcast-0001",
+            "reply_to": {
+              "local": "0",
+              "node": "63",
+              "realm": "2",
+              "type": "system",
+              "version": 1
+            },
+            "response_deadline": "2026-10-26T00:00:00Z",
+            "sender_kind": "human",
+            "thread_id": "thread-bcast-0001",
+            "thread_sequence": "1",
+            "to": {
+              "local": "1",
+              "node": "0",
+              "realm": "2",
+              "type": "group",
+              "version": 1
+            },
+            "ttl": 86400
+          },
+          "message_state_version": "1",
+          "recipients": [
+            {
+              "local": "0",
+              "membership_id": "bcast-member-64",
+              "recipient_id": "rcp-bcast-sys",
+              "type": "system"
+            }
+          ],
+          "server_auth": {
+            "version": 1,
+            "purpose": "business_delivery",
+            "alg": "Ed25519",
+            "kid": "test-r2-business-1",
+            "issuer_realm": "2",
+            "issued_at": "2026-10-25T00:00:00Z",
+            "not_after": "2026-10-25T00:05:00Z",
+            "audience": {
+              "realm": "2",
+              "node": "64",
+              "incarnation": "inc-64-1",
+              "epoch": "42"
+            },
+            "request_id": "req-fetch-0001",
+            "channel_nonce": "nonce-ready-0001",
+            "keyset_version": "5",
+            "signature": "oBPJTo4TrCeg7vXcWXYg_GLUckD0sIIgwWkiM7dc34lmNiBOU1lJxWzbAaPHCwVqqi0mWBMas5WWJ6XrD7pYBQ"
+          },
+          "snapshot_id": "snapshot-bcast-0001",
+          "source_context": {
+            "display_label": "通知发送者",
+            "message_digest": "sha256:5b3bf435ca59f83ba916e533b4d7ad5f9caedac751520ea472d548f17be0615e",
+            "node": "63",
+            "realm": "2",
+            "sender_kind": "human",
+            "user": "user-0193a1"
+          },
+          "target_node": {
+            "node": "64",
+            "realm": "2"
+          },
+          "type": "delivery"
+        }
+      ]
+    }
+  },
+  "keyset": {
+    "issued_at": "2026-10-25T00:00:00Z",
+    "keys": [
+      {
+        "alg": "Ed25519",
+        "kid": "test-r2-business-1",
+        "not_after": "2026-10-26T00:00:00Z",
+        "not_before": "2026-10-24T00:00:00Z",
+        "public_key_spki": "MCowBQYDK2VwAyEAc3PQSXkP3XHFUWxY5LuTz-rcLl9B3Z-saQbHCIHTDBk",
+        "purpose": "business_delivery",
+        "state": "active"
+      },
+      {
+        "alg": "Ed25519",
+        "kid": "test-r2-protocol-1",
+        "not_after": "2026-10-26T00:00:00Z",
+        "not_before": "2026-10-24T00:00:00Z",
+        "public_key_spki": "MCowBQYDK2VwAyEAeC0lzyN8uqZFMQnQDBoFmX1nFosZTDBrg60wMYZ5tL4",
+        "purpose": "protocol_response",
+        "state": "active"
+      },
+      {
+        "alg": "Ed25519",
+        "kid": "test-r2-management-1",
+        "not_after": "2026-10-26T00:00:00Z",
+        "not_before": "2026-10-24T00:00:00Z",
+        "public_key_spki": "MCowBQYDK2VwAyEAd9Rime3UT1wL2Na_tkrjt-A48iYfOnSg2_bwtFXguc0",
+        "purpose": "management_state",
+        "state": "active"
+      }
+    ],
+    "keyset_version": "5",
+    "realm": "2",
+    "schema_version": 1,
+    "valid_until": "2026-10-26T00:00:00Z"
+  }
+}

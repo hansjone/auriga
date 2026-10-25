@@ -40,11 +40,17 @@ class NetworkEnvelopeSigningTest {
         };
     var keys = new NetworkSigningKeys(clock, 9);
     String original = keys.publicKeysJson("2");
-    time.set(NOW.plusSeconds(86401));
+    time.set(NOW.plusSeconds(3600));
     assertEquals(original, keys.publicKeysJson("2"));
-    keys.refreshPublication();
+    time.set(NOW.plusSeconds(86401));
     assertEquals(
         "10", NetworkJson.parse(keys.publicKeysJson("2")).path("keyset_version").asString());
+    assertEquals(
+        NOW.plusSeconds(86400).toString(),
+        NetworkJson.parse(original).path("valid_until").asString());
+    keys.refreshPublication();
+    assertEquals(
+        "11", NetworkJson.parse(keys.publicKeysJson("2")).path("keyset_version").asString());
     assertNotEquals(original, keys.publicKeysJson("2"));
   }
 
@@ -173,7 +179,7 @@ class NetworkEnvelopeSigningTest {
 
   static String rawCase(tools.jackson.databind.JsonNode c, tools.jackson.databind.JsonNode frames) {
     if (c.has("nest"))
-      return "[".repeat(c.path("nest").asInt()) + "0" + "]".repeat(c.path("nest").asInt());
+      return "[".repeat(c.path("nest").asInt()) + "]".repeat(c.path("nest").asInt());
     if (c.has("members")) {
       var object = NetworkJson.object();
       for (int i = 0; i < c.path("members").asInt(); i++) object.put("k" + i, i);

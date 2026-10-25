@@ -20,7 +20,8 @@ final class NetworkSourceStamp {
       UUID messageId,
       Instant now,
       String fieldsJson,
-      Dispatch dispatch) {
+      Dispatch dispatch,
+      String targetType) {
     if (source == null
         || source.validUntil() == null
         || !source.validUntil().isAfter(now)
@@ -37,6 +38,11 @@ final class NetworkSourceStamp {
     var parsed = fieldsJson == null ? NetworkJson.object() : NetworkJson.parse(fieldsJson);
     if (!(parsed instanceof ObjectNode)) throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
     ObjectNode fields = (ObjectNode) parsed;
+    for (String field : Set.of("origin", "correlation_id", "causation_id")) {
+      if (fields.has(field)) throw new AurigaException(NetworkErrors.UNAUTHORIZED);
+    }
+    if (fields.has("dispatch_mode") && !"atomic".equals(fields.path("dispatch_mode").asString()))
+      throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
     if (fields.has("message_class")) throw new AurigaException(NetworkErrors.CLASS_MISMATCH);
     for (String name :
         Set.of(
@@ -59,13 +65,7 @@ final class NetworkSourceStamp {
     ObjectNode from = address(source.realm(), source.node(), source.local(), source.addressType());
     ObjectNode to =
         dispatch == null
-            ? address(
-                source.realm(),
-                target.nodeId(),
-                targetLocal,
-                fields.has("to")
-                    ? fields.path("to").path("type").asString()
-                    : "0".equals(targetLocal) ? "system" : "session")
+            ? address(source.realm(), target.nodeId(), targetLocal, targetType)
             : (ObjectNode) NetworkJson.parse(dispatch.addressJson());
     if (dispatch != null
         && (!"group".equals(to.path("type").asString())
@@ -126,6 +126,14 @@ final class NetworkSourceStamp {
       auth.put("source_binding", source.sourceBinding())
           .put("source_revision", source.sourceRevision());
     NetworkSchemas.validate("Message", message);
+    if (message.has("response_deadline")) {
+      Instant response = Instant.parse(message.path("response_deadline").asString());
+      if (!"request".equals(message.path("intent").asString())
+          || !response.isAfter(created)
+          || response.isAfter(created.plusSeconds(86400))
+          || response.isAfter(created.plusSeconds(ttl)))
+        throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
+    }
     return message;
   }
 

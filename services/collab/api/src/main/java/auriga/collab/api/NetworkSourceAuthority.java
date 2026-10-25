@@ -21,6 +21,11 @@ public interface NetworkSourceAuthority {
   /** Returns the current authenticated READY/FETCH association, including the client's nonce. */
   Target currentTarget(UUID tenantId);
 
+  /** Current registered target type. Non-system locals require the authoritative directory. */
+  default String resolveTargetType(UUID tenantId, String realm, String node, String local) {
+    return "0".equals(local) ? "system" : null;
+  }
+
   /** Verified group/broadcast snapshot for a batch; null means no group authorization. */
   default Dispatch currentDispatch(UUID tenantId) {
     return null;

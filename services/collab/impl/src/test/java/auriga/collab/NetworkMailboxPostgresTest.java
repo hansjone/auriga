@@ -115,6 +115,10 @@ class NetworkMailboxPostgresTest {
         return Instant.now().plusSeconds(600);
       }
 
+      public String resolveTargetType(UUID tenant, String realm, String node, String local) {
+        return "0".equals(local) ? "system" : "session";
+      }
+
       public Target currentTarget(UUID tenant) {
         long epoch =
             jdbc.queryForObject(
@@ -149,6 +153,181 @@ class NetworkMailboxPostgresTest {
 
   static <T> T sql(UUID tenant, Supplier<T> work) {
     return call(tenant, () -> new TransactionTemplate(manager).execute(s -> work.get()));
+  }
+
+  @Test
+  void expiredItemBecomesTerminalAndDoesNotBlockLaterDelivery() {
+    UUID tenant = UUID.randomUUID();
+    call(
+        tenant,
+        () ->
+            mailbox.store(
+                StoreRequest.unicast(tenant, "2", "10", "1", "short", "20", "3"), "{\"ttl\":1}"));
+    call(
+        tenant,
+        () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "later", "20", "3")));
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var later =
+        new NetworkMailboxService(
+            jdbc,
+            manager,
+            authority(null),
+            keys,
+            Clock.offset(Clock.systemUTC(), java.time.Duration.ofSeconds(2)));
+    var frame =
+        NetworkJson.parse(call(tenant, () -> later.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+    assertEquals("terminal", frame.path("items").get(0).path("type").asString());
+    assertEquals(
+        "expired",
+        frame.path("items").get(0).path("recipients").get(0).path("transport_status").asString());
+    assertEquals("delivery", frame.path("items").get(1).path("type").asString());
+    assertEquals("2", frame.path("page").path("scan_after").asString());
+  }
+
+  @Test
+  void pendingFirstContactIsApprovalPreviewAndDoesNotBlockLaterDelivery() {
+    UUID tenant = UUID.randomUUID();
+    call(
+        tenant,
+        () ->
+            mailbox.store(
+                StoreRequest.firstContact(
+                    tenant,
+                    "2",
+                    "10",
+                    "1",
+                    "preview",
+                    "20",
+                    Instant.now().plusSeconds(3600),
+                    true)));
+    call(
+        tenant,
+        () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "later", "20", "3")));
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var frame =
+        NetworkJson.parse(call(tenant, () -> mailbox.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+    var prompt = frame.path("items").get(0);
+    assertEquals("contact_prompt", prompt.path("type").asString());
+    assertEquals("preview", prompt.path("preview").asString());
+    assertFalse(prompt.has("message"));
+    assertEquals("delivery", frame.path("items").get(1).path("type").asString());
+  }
+
+  @Test
+  void oneAuthorizationFailureBecomesGapWithoutAbortingPage() {
+    UUID tenant = UUID.randomUUID();
+    call(
+        tenant,
+        () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "denied", "20", "3")));
+    call(
+        tenant,
+        () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "later", "20", "3")));
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var delegate = authority(null);
+    var rejecting =
+        new NetworkSourceAuthority() {
+          public Source currentSource(UUID id) {
+            return delegate.currentSource(id);
+          }
+
+          public Target currentTarget(UUID id) {
+            return delegate.currentTarget(id);
+          }
+
+          public Instant authorizeDelivery(UUID id, String message, String source, String node) {
+            if (NetworkJson.parse(message).path("body").path("text").asString().equals("denied"))
+              throw new AurigaException(NetworkErrors.UNAUTHORIZED);
+            return delegate.authorizeDelivery(id, message, source, node);
+          }
+        };
+    var restricted = new NetworkMailboxService(jdbc, manager, rejecting, keys, Clock.systemUTC());
+    var frame =
+        NetworkJson.parse(
+            call(tenant, () -> restricted.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+    assertEquals("gap", frame.path("items").get(0).path("type").asString());
+    assertEquals("awaiting_authorization", frame.path("items").get(0).path("reason").asString());
+    assertFalse(frame.path("items").get(0).has("message"));
+    assertEquals("delivery", frame.path("items").get(1).path("type").asString());
+  }
+
+  @Test
+  void oversizedSignedItemBecomesGapAndEntireFrameFitsRequestedBudget() {
+    UUID tenant = UUID.randomUUID();
+    call(
+        tenant,
+        () ->
+            mailbox.store(
+                StoreRequest.unicast(tenant, "2", "10", "1", "large", "20", "3"),
+                "{\"ext\":{\"com.example.padding\":\"" + "x".repeat(3000) + "\"}}"));
+    call(
+        tenant,
+        () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "later", "20", "3")));
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    String encoded = call(tenant, () -> mailbox.fetchPage(tenant, "2", "20", 0, 10, 4096));
+    assertTrue(encoded.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 4096);
+    var frame = NetworkJson.parse(encoded);
+    assertEquals("gap", frame.path("items").get(0).path("type").asString());
+    assertEquals("delivery", frame.path("items").get(1).path("type").asString());
+    assertEquals(2, frame.path("page").path("manifest").size());
+  }
+
+  @Test
+  void forgedOriginAndInvisibleReplyReferenceCannotBeStamped() {
+    UUID tenant = UUID.randomUUID();
+    var original =
+        call(
+            tenant,
+            () ->
+                mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "request", "20", "3")));
+    var request = StoreRequest.unicast(tenant, "2", "10", "1", "forged", "20", "3");
+    error(
+        "network.unauthorized",
+        () ->
+            call(
+                tenant,
+                () ->
+                    mailbox.store(
+                        request,
+                        "{\"origin\":{\"message_id\":\"other-message\",\"recipient_id\":\"other-recipient\"}}")));
+    var reply =
+        new StoreRequest(
+            tenant,
+            "2",
+            "10",
+            "1",
+            "reply",
+            "reply",
+            null,
+            List.of(new NodeTarget("20", List.of("3"))),
+            "conversation",
+            null,
+            true);
+    error(
+        "network.unauthorized",
+        () ->
+            call(
+                tenant,
+                () ->
+                    mailbox.store(
+                        reply,
+                        "{\"in_reply_to\":\""
+                            + original.messageId()
+                            + "\",\"reply_mode\":\"private\"}")));
+    error(
+        "network.protocol_error",
+        () ->
+            call(
+                tenant,
+                () -> mailbox.store(request, "{\"response_deadline\":\"2099-01-01T00:00:00Z\"}")));
+    error(
+        "network.protocol_error",
+        () ->
+            call(
+                tenant,
+                () ->
+                    mailbox.store(
+                        request,
+                        "{\"to\":{\"version\":1,\"realm\":\"2\",\"node\":\"20\",\"local\":\"3\",\"type\":\"subagent\"}}")));
   }
 
   @Test

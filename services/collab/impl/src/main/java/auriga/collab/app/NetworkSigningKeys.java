@@ -25,7 +25,7 @@ import tools.jackson.databind.node.ObjectNode;
 /**
  * Server memory only. Supply keys from a protected secret mount; never persist private material.
  */
-public final class NetworkSigningKeys implements NetworkPublicKeys {
+public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseable {
   public enum State {
     ACTIVE,
     NEXT,
@@ -40,12 +40,31 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
   private long version;
   private boolean published;
   private Instant publicationTime;
+  private final NetworkKeyPublication persistence;
+  private boolean closed;
 
+  /**
+   * In-memory registry for explicit test/configuration use; production uses the state-file
+   * overload.
+   */
   public NetworkSigningKeys(Clock clock, long initialVersion) {
+    this(clock, initialVersion, null);
+  }
+
+  public NetworkSigningKeys(Clock clock, long initialVersion, Path metadataFile) {
     if (initialVersion < 1) throw new IllegalArgumentException("Invalid keyset version");
     this.clock = java.util.Objects.requireNonNull(clock);
     this.version = initialVersion;
     this.publicationTime = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    persistence = metadataFile == null ? null : new NetworkKeyPublication(metadataFile);
+    if (persistence != null) {
+      try {
+        restore(persistence.read());
+      } catch (RuntimeException e) {
+        persistence.close();
+        throw new IllegalStateException("Invalid network key metadata");
+      }
+    }
   }
 
   /**
@@ -88,13 +107,15 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
       Instant notBefore,
       Instant notAfter,
       State state) {
+    ensureOpen();
+    Key restored = keys.get(kid);
     if (!uint64(realm)
         || "0".equals(realm)
         || !PURPOSES.contains(purpose)
         || kid == null
         || !kid.matches("[A-Za-z0-9._-]{1,128}")
-        || keys.containsKey(kid)
-        || keys.size() >= 128
+        || (restored != null && persistence == null)
+        || (restored == null && keys.size() >= 128)
         || publicKey == null
         || notBefore == null
         || notAfter == null
@@ -103,7 +124,8 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
         || ((state == State.ACTIVE || state == State.NEXT) && privateKey == null)) {
       throw new IllegalArgumentException("Invalid network signing key configuration");
     }
-    if (state == State.ACTIVE
+    if (restored == null
+        && state == State.ACTIVE
         && keys.values().stream()
             .anyMatch(
                 k ->
@@ -112,8 +134,9 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
                         && k.state == State.ACTIVE)) {
       throw new IllegalArgumentException("Ambiguous active signing key");
     }
-    if (keys.values().stream()
-        .anyMatch(k -> Arrays.equals(k.publicKey.getEncoded(), publicKey.getEncoded()))) {
+    if (restored == null
+        && keys.values().stream()
+            .anyMatch(k -> Arrays.equals(k.publicKey.getEncoded(), publicKey.getEncoded()))) {
       throw new IllegalArgumentException(
           "Signing key material must be isolated by realm and purpose");
     }
@@ -132,6 +155,18 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
     } catch (GeneralSecurityException e) {
       throw new IllegalArgumentException("Invalid Ed25519 key pair");
     }
+    if (restored != null) {
+      if (!restored.realm.equals(realm)
+          || !restored.purpose.equals(purpose)
+          || !Arrays.equals(restored.publicKey.getEncoded(), publicKey.getEncoded())
+          || !restored.notBefore.equals(notBefore)
+          || !restored.notAfter.equals(notAfter))
+        throw new IllegalArgumentException(
+            "Signing key identifier cannot change material or scope");
+      restored.privateKey =
+          restored.state == State.ACTIVE || restored.state == State.NEXT ? privateKey : null;
+      return;
+    }
     if (published) bumpVersion();
     keys.put(
         kid,
@@ -144,10 +179,12 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
             notBefore,
             notAfter,
             state));
+    persist();
   }
 
   /** Atomic rotation; retired/revoked identifiers can never be reactivated or reused. */
   public synchronized void activate(String kid) {
+    ensureOpen();
     Key next = requireKey(kid);
     Instant now = clock.instant();
     if (next.state != State.NEXT || now.isBefore(next.notBefore) || !now.isBefore(next.notAfter))
@@ -165,14 +202,17 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
               k.privateKey = null;
             });
     next.state = State.ACTIVE;
+    persist();
   }
 
   public synchronized void revoke(String kid) {
+    ensureOpen();
     Key key = requireKey(kid);
     if (key.state == State.REVOKED) return;
     bumpVersion();
     key.state = State.REVOKED;
     key.privateKey = null;
+    persist();
   }
 
   public synchronized PublicKey publicKey(String kid) {
@@ -181,9 +221,10 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
 
   @Override
   public synchronized String publicKeysJson(String realm) {
-    published = true;
+    ensureOpen();
+    markPublished();
     var out = NetworkJson.object();
-    out.put("realm", realm).put("keyset_version", Long.toString(version));
+    out.put("schema_version", 1).put("realm", realm).put("keyset_version", Long.toString(version));
     Instant issued = publicationTime;
     out.put("issued_at", issued.toString())
         .put("valid_until", issued.plusSeconds(86400).toString());
@@ -196,12 +237,17 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
           .put("alg", "Ed25519")
           .put("purpose", key.purpose)
           .put("state", key.state.name().toLowerCase(java.util.Locale.ROOT))
-          .put("not_before", key.notBefore.toString())
-          .put("not_after", key.notAfter.toString())
+          .put(
+              "not_before",
+              key.notBefore.truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString())
+          .put(
+              "not_after",
+              key.notAfter.truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString())
           .put(
               "public_key_spki",
               Base64.getUrlEncoder().withoutPadding().encodeToString(key.publicKey.getEncoded()));
     }
+    NetworkSchemas.validate("keyset", "KeysetPayload", out);
     return NetworkJson.canonical(out);
   }
 
@@ -211,7 +257,8 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
       String purpose,
       Instant now,
       java.util.function.BiFunction<Key, Long, ObjectNode> work) {
-    published = true;
+    ensureOpen();
+    markPublished();
     Key key =
         keys.values().stream()
             .filter(
@@ -219,6 +266,7 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
                     k.realm.equals(realm)
                         && k.purpose.equals(purpose)
                         && k.state == State.ACTIVE
+                        && k.privateKey != null
                         && !now.isBefore(k.notBefore)
                         && now.isBefore(k.notAfter))
             .findFirst()
@@ -234,7 +282,91 @@ public final class NetworkSigningKeys implements NetworkPublicKeys {
 
   /** Explicit new publication; downloading the same version must never extend cache validity. */
   public synchronized void refreshPublication() {
+    ensureOpen();
     bumpVersion();
+    persist();
+  }
+
+  private void markPublished() {
+    if (!clock.instant().isBefore(publicationTime.plusSeconds(86400))) {
+      bumpVersion();
+      persist();
+    }
+    if (!published) {
+      published = true;
+      persist();
+    }
+  }
+
+  private void persist() {
+    if (persistence == null) return;
+    var snapshot =
+        NetworkJson.object()
+            .put("version", Long.toString(version))
+            .put("issued_at", publicationTime.toString());
+    var entries = snapshot.putArray("keys");
+    for (var key : keys.values())
+      entries
+          .addObject()
+          .put("kid", key.kid)
+          .put("realm", key.realm)
+          .put("purpose", key.purpose)
+          .put("state", key.state.name())
+          .put("not_before", key.notBefore.toString())
+          .put("not_after", key.notAfter.toString())
+          .put(
+              "public_key_spki",
+              Base64.getUrlEncoder().withoutPadding().encodeToString(key.publicKey.getEncoded()));
+    try {
+      persistence.save(snapshot);
+    } catch (RuntimeException e) {
+      close();
+      throw new IllegalStateException("Network key publication failed closed");
+    }
+  }
+
+  private void restore(ObjectNode snapshot) {
+    if (snapshot == null) return;
+    version = Long.parseLong(snapshot.path("version").asString());
+    if (version < 1) throw new IllegalArgumentException("Invalid stored keyset version");
+    publicationTime = Instant.parse(snapshot.path("issued_at").asString());
+    if (snapshot.path("keys").size() > 128)
+      throw new IllegalArgumentException("Too many stored keys");
+    try {
+      var factory = KeyFactory.getInstance("Ed25519");
+      for (var entry : snapshot.path("keys")) {
+        String kid = entry.path("kid").asString();
+        var key =
+            new Key(
+                entry.path("realm").asString(),
+                entry.path("purpose").asString(),
+                kid,
+                factory.generatePublic(
+                    new X509EncodedKeySpec(
+                        Base64.getUrlDecoder().decode(entry.path("public_key_spki").asString()))),
+                null,
+                Instant.parse(entry.path("not_before").asString()),
+                Instant.parse(entry.path("not_after").asString()),
+                State.valueOf(entry.path("state").asString()));
+        if (keys.putIfAbsent(kid, key) != null)
+          throw new IllegalArgumentException("Duplicate stored key identifier");
+      }
+      published = true; // A restart cannot prove an older version was never observed.
+    } catch (GeneralSecurityException e) {
+      throw new IllegalArgumentException("Invalid stored public key");
+    }
+  }
+
+  private void ensureOpen() {
+    if (closed) throw new IllegalStateException("Network signing key registry is closed");
+  }
+
+  @Override
+  public synchronized void close() {
+    if (closed) return;
+    closed = true;
+    keys.values().forEach(k -> k.privateKey = null);
+    if (persistence != null) persistence.close();
   }
 
   private Key requireKey(String kid) {
