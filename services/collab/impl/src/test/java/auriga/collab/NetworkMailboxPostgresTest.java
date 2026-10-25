@@ -1,6 +1,7 @@
 package auriga.collab;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 import auriga.collab.api.NetworkSourceAuthority;
 import auriga.collab.app.NetworkErrors;
@@ -22,6 +23,7 @@ import auriga.common.error.AurigaException;
 import auriga.common.persistence.CommonMigrations;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.security.*;
+import auriga.iam.api.NetworkAuthority;
 import auriga.testsupport.PostgresExtension;
 import java.security.KeyPairGenerator;
 import java.time.Clock;
@@ -36,6 +38,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @ExtendWith(PostgresExtension.class)
@@ -89,7 +92,420 @@ class NetworkMailboxPostgresTest {
           Instant.now().plusSeconds(86400),
           NetworkSigningKeys.State.ACTIVE);
     }
-    mailbox = new NetworkMailboxService(jdbc, manager, authority(null), keys, Clock.systemUTC());
+    mailbox =
+        new NetworkMailboxService(
+            jdbc, manager, authority(null), keys, Clock.systemUTC(), liveIam());
+  }
+
+  static NetworkAuthority liveIam() {
+    var iam = mock(NetworkAuthority.class);
+    when(iam.active(anyString(), anyString()))
+        .thenAnswer(
+            invocation -> {
+              assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+              assertFalse(TransactionSynchronizationManager.isSynchronizationActive());
+              assertFalse(TransactionSynchronizationManager.hasResource(jdbc.getDataSource()));
+              return "2".equals(invocation.getArgument(0));
+            });
+    when(iam.check(any()))
+        .thenAnswer(
+            invocation -> {
+              assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+              assertFalse(TransactionSynchronizationManager.isSynchronizationActive());
+              return new NetworkAuthority.Decision(true, "allowed", Map.of());
+            });
+    return iam;
+  }
+
+  @Test
+  void everyIngressRejectsUnknownRevokedAndUnreachableIamWithoutCreatingRoutes() {
+    UUID tenant = UUID.randomUUID();
+    var iam = liveIam();
+    var guarded =
+        new NetworkMailboxService(jdbc, manager, authority(null), keys, Clock.systemUTC(), iam);
+    when(iam.active("2", "20")).thenReturn(false);
+    error("network.unauthorized", () -> call(tenant, () -> guarded.ready(tenant, "2", "20")));
+    assertEquals(
+        0,
+        sql(
+            tenant,
+            () -> jdbc.queryForObject("SELECT count(*) FROM collab.network_node", Integer.class)));
+    when(iam.active("2", "20")).thenReturn(true);
+    var stored =
+        call(
+            tenant,
+            () -> guarded.store(StoreRequest.unicast(tenant, "2", "10", "1", "hello", "20", "1")));
+    var route = call(tenant, () -> guarded.ready(tenant, "2", "20"));
+    var delivery = stored.deliveries().getFirst();
+    for (boolean offline : List.of(false, true)) {
+      if (offline) when(iam.active("2", "20")).thenThrow(new IllegalStateException("offline"));
+      else when(iam.active("2", "20")).thenReturn(false);
+      String code = offline ? "common.unavailable" : "network.unauthorized";
+      error(code, () -> call(tenant, () -> guarded.ready(tenant, "2", "20")));
+      error(code, () -> call(tenant, () -> guarded.fetch(tenant, "2", "20", 0, 10)));
+      error(code, () -> call(tenant, () -> guarded.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+      error(
+          code,
+          () ->
+              call(
+                  tenant,
+                  () ->
+                      guarded.receipt(
+                          new ReceiptRequest(
+                              tenant,
+                              "2",
+                              "20",
+                              route.connectionEpoch(),
+                              delivery.deliveryId(),
+                              delivery.mailSeq(),
+                              List.of(
+                                  new ReceiptItem(
+                                      delivery.recipientIds().getFirst(), "host_accepted"))))));
+      error(
+          code,
+          () ->
+              call(
+                  tenant,
+                  () ->
+                      guarded.store(
+                          StoreRequest.unicast(tenant, "2", "10", "1", "again", "20", "1"))));
+    }
+    when(iam.active("2", "10")).thenReturn(false);
+    error(
+        "network.unauthorized",
+        () ->
+            call(
+                tenant,
+                () ->
+                    guarded.store(
+                        StoreRequest.unicast(tenant, "2", "10", "1", "again", "20", "1"))));
+    assertEquals(
+        1,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
+  }
+
+  @Test
+  void privateUnknownAndKnownTargetsConsumeIdenticalBudgetsAndRetryDoesNotMaterializeTwice() {
+    UUID knownTenant = UUID.randomUUID(), missingTenant = UUID.randomUUID();
+    var iam = liveIam();
+    var reserved = new java.util.concurrent.atomic.AtomicBoolean();
+    var observedJdbc =
+        new JdbcTemplate(jdbc.getDataSource()) {
+          @Override
+          public int update(String sql, Object... args) {
+            int count = super.update(sql, args);
+            if (sql.contains("INSERT INTO collab.network_contact_submission")) reserved.set(true);
+            return count;
+          }
+        };
+    var guarded =
+        new NetworkMailboxService(
+            observedJdbc, manager, authority(null), keys, Clock.systemUTC(), iam);
+    var expiry = Instant.now().plusSeconds(600);
+    var known =
+        StoreRequest.firstContact(knownTenant, "2", "10", "1", "hello", "20", expiry, false);
+    var missing =
+        StoreRequest.firstContact(missingTenant, "2", "10", "1", "hello", "999", expiry, false);
+    when(iam.active("2", "999"))
+        .thenAnswer(
+            i -> {
+              assertTrue(reserved.get());
+              return false;
+            });
+    var a = call(knownTenant, () -> guarded.store(known, null, "1", "same"));
+    reserved.set(false);
+    var b = call(missingTenant, () -> guarded.store(missing, null, "1", "same"));
+    assertEquals("request_submitted", a.durabilityStatus());
+    assertEquals(a.visibleStatus(), b.visibleStatus());
+    assertEquals(a.deliveries(), b.deliveries());
+    assertNull(a.contactId());
+    assertNull(b.contactId());
+    assertNull(a.messageId());
+    assertNull(b.messageId());
+    assertNotNull(a.submissionId());
+    assertNotNull(b.submissionId());
+    assertEquals(a.waitUntil(), b.waitUntil());
+    assertEquals(a, call(knownTenant, () -> guarded.store(known, null, "1", "same")));
+    assertEquals(b, call(missingTenant, () -> guarded.store(missing, null, "1", "same")));
+    for (UUID tenant : List.of(knownTenant, missingTenant)) {
+      assertEquals(
+          1,
+          sql(
+              tenant,
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab.network_contact_submission", Integer.class)));
+      assertEquals(
+          List.of(2.0, 4.0, 9.0),
+          sql(
+              tenant,
+              () ->
+                  jdbc.queryForList(
+                      "SELECT tokens FROM collab.network_contact_budget ORDER BY tokens",
+                      Double.class)));
+    }
+    assertEquals(
+        1,
+        sql(
+            knownTenant,
+            () ->
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
+    assertEquals(
+        0,
+        sql(
+            missingTenant,
+            () ->
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
+    assertEquals(
+        1,
+        sql(
+            knownTenant,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_contact_submission WHERE message_id IS NOT NULL",
+                    Integer.class)));
+    assertEquals(
+        0,
+        sql(
+            missingTenant,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_contact_submission WHERE message_id IS NOT NULL",
+                    Integer.class)));
+    error(
+        "network.conflict",
+        () ->
+            call(
+                knownTenant,
+                () ->
+                    guarded.store(
+                        StoreRequest.firstContact(
+                            knownTenant, "2", "10", "1", "changed", "20", expiry, false),
+                        null,
+                        "1",
+                        "same")));
+    assertTrue(
+        sql(
+                missingTenant,
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM collab.outbox_event WHERE event_type='audit.recorded'",
+                        Integer.class))
+            > 0);
+  }
+
+  @Test
+  void damagedDateAndNullRowsBecomeAuditedGapsWithoutBlockingNextItem() {
+    UUID tenant = UUID.randomUUID();
+    var one =
+        call(
+            tenant,
+            () ->
+                mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "bad-date", "20", "1")));
+    var two =
+        call(
+            tenant,
+            () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "null", "20", "1")));
+    call(
+        tenant,
+        () -> mailbox.store(StoreRequest.unicast(tenant, "2", "10", "1", "healthy", "20", "1")));
+    sql(
+        tenant,
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_message SET message_json=jsonb_set(message_json::jsonb,'{expires_at}','\"damaged\"')::text WHERE id=?",
+                one.messageId()));
+    sql(
+        tenant,
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_message SET message_json='null' WHERE id=?",
+                two.messageId()));
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var frame =
+        NetworkJson.parse(call(tenant, () -> mailbox.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+    assertEquals("gap", frame.path("items").get(0).path("type").asString());
+    assertEquals("gap", frame.path("items").get(1).path("type").asString());
+    assertEquals("delivery", frame.path("items").get(2).path("type").asString());
+    assertEquals(
+        2,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.outbox_event WHERE event_type='audit.recorded'",
+                    Integer.class)));
+  }
+
+  @Test
+  void targetTypeRequiresBothLiveIamNodeAndAuthoritativeLocalDirectory() {
+    UUID tenant = UUID.randomUUID();
+    var delegate = authority(null);
+    var noDirectory =
+        new NetworkSourceAuthority() {
+          public Source currentSource(UUID t) {
+            return delegate.currentSource(t);
+          }
+
+          public Target currentTarget(UUID t) {
+            return delegate.currentTarget(t);
+          }
+
+          public Instant authorizeDelivery(UUID t, String m, String s, String n) {
+            return delegate.authorizeDelivery(t, m, s, n);
+          }
+        };
+    var iam = liveIam();
+    var guarded =
+        new NetworkMailboxService(jdbc, manager, noDirectory, keys, Clock.systemUTC(), iam);
+    error(
+        "common.unavailable",
+        () ->
+            call(
+                tenant,
+                () ->
+                    guarded.store(
+                        StoreRequest.unicast(tenant, "2", "10", "1", "hello", "20", "3"))));
+    when(iam.active("2", "20")).thenReturn(false);
+    error(
+        "network.unauthorized",
+        () ->
+            call(
+                tenant,
+                () ->
+                    guarded.store(
+                        StoreRequest.unicast(tenant, "2", "10", "1", "hello", "20", "0"))));
+    assertEquals(
+        0,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
+  }
+
+  @Test
+  void missingSourceFirstContactGrantIsRejectedBeforeReservationOrTargetLookup() {
+    UUID tenant = UUID.randomUUID();
+    var iam = liveIam();
+    when(iam.check(
+            argThat(
+                r ->
+                    r != null
+                        && r.operation() == NetworkAuthority.Operation.FIRST_CONTACT
+                        && "10".equals(r.targetNode()))))
+        .thenReturn(new NetworkAuthority.Decision(false, "network_denied", Map.of()));
+    var guarded =
+        new NetworkMailboxService(jdbc, manager, authority(null), keys, Clock.systemUTC(), iam);
+    error(
+        "network.unauthorized",
+        () ->
+            call(
+                tenant,
+                () ->
+                    guarded.store(
+                        StoreRequest.firstContact(
+                            tenant, "2", "10", "1", "hello", "999", null, false),
+                        null,
+                        "1",
+                        "key")));
+    verify(iam, never()).active("2", "999");
+    assertEquals(
+        0,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_contact_submission", Integer.class)));
+  }
+
+  @Test
+  void storeRejectsOversizeSignedItemBeforeAllocatingMailboxSequence() {
+    UUID tenant = UUID.randomUUID();
+    var locals = new java.util.ArrayList<String>();
+    var members = new java.util.HashMap<String, String>();
+    var types = new java.util.HashMap<String, String>();
+    for (int i = 0; i < 256; i++) {
+      String local = Long.toString(Long.MAX_VALUE - i);
+      locals.add(local);
+      members.put("20." + local, "m".repeat(80));
+      types.put("20." + local, "session");
+    }
+    var dispatch =
+        new NetworkSourceAuthority.Dispatch(
+            "{\"version\":1,\"realm\":\"2\",\"node\":\"0\",\"local\":\"2\",\"type\":\"group\"}",
+            "snapshot",
+            members,
+            types,
+            null,
+            null,
+            null);
+    var grouped =
+        new NetworkMailboxService(
+            jdbc, manager, authority(dispatch), keys, Clock.systemUTC(), liveIam());
+    var request =
+        new StoreRequest(
+            tenant,
+            "2",
+            "10",
+            "1",
+            "message",
+            "b".repeat(16000),
+            null,
+            List.of(new NodeTarget("20", locals)),
+            "conversation",
+            null,
+            true);
+    error("network.protocol_error", () -> call(tenant, () -> grouped.store(request)));
+    assertEquals(
+        0,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
+    assertEquals(
+        0,
+        sql(
+            tenant,
+            () -> jdbc.queryForObject("SELECT count(*) FROM collab.network_node", Integer.class)));
+  }
+
+  @Test
+  void broadcastUsageAndCurrentGrantRejectionAreAudited() {
+    UUID tenant = UUID.randomUUID();
+    var dispatch =
+        new NetworkSourceAuthority.Dispatch(
+            "{\"version\":1,\"realm\":\"2\",\"node\":\"0\",\"local\":\"1\",\"type\":\"group\"}",
+            "snapshot",
+            Map.of("20.0", "membership"),
+            Map.of("20.0", "system"),
+            "grant",
+            "1",
+            "agent");
+    var iam = liveIam();
+    var broadcast =
+        new NetworkMailboxService(jdbc, manager, authority(dispatch), keys, Clock.systemUTC(), iam);
+    var request = StoreRequest.unicast(tenant, "2", "10", "1", "broadcast", "20", "0");
+    call(tenant, () -> broadcast.store(request));
+    when(iam.check(
+            argThat(r -> r != null && r.operation() == NetworkAuthority.Operation.BROADCAST)))
+        .thenReturn(new NetworkAuthority.Decision(false, "network_denied", Map.of()));
+    error("network.unauthorized", () -> call(tenant, () -> broadcast.store(request)));
+    assertEquals(
+        2,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.outbox_event WHERE envelope->'data'->>'action'='collab.network.broadcast.submit'",
+                    Integer.class)));
+    call(tenant, () -> broadcast.ready(tenant, "2", "20"));
+    var frame =
+        NetworkJson.parse(call(tenant, () -> broadcast.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+    assertEquals("gap", frame.path("items").get(0).path("type").asString());
+    assertEquals("awaiting_authorization", frame.path("items").get(0).path("reason").asString());
   }
 
   static NetworkSourceAuthority authority(NetworkSourceAuthority.Dispatch dispatch) {
@@ -122,7 +538,7 @@ class NetworkMailboxPostgresTest {
       public Target currentTarget(UUID tenant) {
         long epoch =
             jdbc.queryForObject(
-                "SELECT connection_epoch FROM collab.network_node WHERE tenant_id=? AND realm='2' AND node_id='20'",
+                "SELECT coalesce(max(connection_epoch),0) FROM collab.network_node WHERE tenant_id=? AND realm='2' AND node_id='20'",
                 Long.class,
                 tenant);
         return new Target(
@@ -173,7 +589,8 @@ class NetworkMailboxPostgresTest {
             manager,
             authority(null),
             keys,
-            Clock.offset(Clock.systemUTC(), java.time.Duration.ofSeconds(2)));
+            Clock.offset(Clock.systemUTC(), java.time.Duration.ofSeconds(2)),
+            liveIam());
     var frame =
         NetworkJson.parse(call(tenant, () -> later.fetchPage(tenant, "2", "20", 0, 10, 65536)));
     assertEquals("terminal", frame.path("items").get(0).path("type").asString());
@@ -240,7 +657,8 @@ class NetworkMailboxPostgresTest {
             return delegate.authorizeDelivery(id, message, source, node);
           }
         };
-    var restricted = new NetworkMailboxService(jdbc, manager, rejecting, keys, Clock.systemUTC());
+    var restricted =
+        new NetworkMailboxService(jdbc, manager, rejecting, keys, Clock.systemUTC(), liveIam());
     var frame =
         NetworkJson.parse(
             call(tenant, () -> restricted.fetchPage(tenant, "2", "20", 0, 10, 65536)));
@@ -557,14 +975,21 @@ class NetworkMailboxPostgresTest {
             () ->
                 mailbox.store(
                     StoreRequest.firstContact(tenant, "2", "10", "1", "hi", "20", past, false)));
-    assertEquals("platform_stored", stored.durabilityStatus());
+    assertEquals("request_submitted", stored.durabilityStatus());
     assertEquals("request_submitted", stored.visibleStatus());
     assertTrue(stored.restrictedAppearance());
-    DeliveryStored delivery = stored.deliveries().getFirst();
+    assertTrue(stored.deliveries().isEmpty());
+    assertNull(stored.contactId());
+    UUID contactId =
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT id FROM collab.network_contact WHERE tenant_id=?", UUID.class, tenant));
     assertEquals(
         0L, call(tenant, () -> mailbox.fetch(tenant, "2", "20", 0, 10)).route().committedCursor());
 
-    var expired = call(tenant, () -> mailbox.expireContactIfDue(tenant, stored.contactId(), false));
+    var expired = call(tenant, () -> mailbox.expireContactIfDue(tenant, contactId, false));
     assertEquals("expired", expired.status());
     assertEquals("request_submitted", expired.visibleStatus());
     assertTrue(expired.restrictedAppearance());
@@ -573,10 +998,9 @@ class NetworkMailboxPostgresTest {
     var afterExpire = call(tenant, () -> mailbox.fetch(tenant, "2", "20", 0, 10));
     assertEquals(
         "expired", afterExpire.items().getFirst().recipients().getFirst().transportStatus());
-    assertEquals(delivery.mailSeq(), afterExpire.route().committedCursor());
+    assertEquals(1L, afterExpire.route().committedCursor());
 
-    var viewerExpired =
-        call(tenant, () -> mailbox.expireContactIfDue(tenant, stored.contactId(), true));
+    var viewerExpired = call(tenant, () -> mailbox.expireContactIfDue(tenant, contactId, true));
     assertEquals("contact_expired", viewerExpired.visibleStatus());
     assertEquals("network.contact_expired", viewerExpired.presentationCode());
 
@@ -587,7 +1011,7 @@ class NetworkMailboxPostgresTest {
                 tenant,
                 () ->
                     mailbox.contactDecide(
-                        new ContactDecideRequest(tenant, stored.contactId(), "allowed", true))));
+                        new ContactDecideRequest(tenant, contactId, "allowed", true))));
   }
 
   @Test
@@ -709,7 +1133,8 @@ class NetworkMailboxPostgresTest {
             null,
             null);
     var grouped =
-        new NetworkMailboxService(jdbc, manager, authority(dispatch), keys, Clock.systemUTC());
+        new NetworkMailboxService(
+            jdbc, manager, authority(dispatch), keys, Clock.systemUTC(), liveIam());
     StoreResult stored =
         call(
             tenant,

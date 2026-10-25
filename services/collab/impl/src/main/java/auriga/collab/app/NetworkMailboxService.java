@@ -1,13 +1,20 @@
 package auriga.collab.app;
 
 import auriga.collab.api.NetworkSourceAuthority;
+import auriga.common.audit.AuditEntry;
+import auriga.common.audit.AuditLogger;
+import auriga.common.audit.OutboxAuditLogger;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.error.ErrorCode;
+import auriga.common.events.EventSchemas;
+import auriga.common.events.OutboxEventPublisher;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.persistence.UuidV7;
 import auriga.common.security.AuthorizationRules;
+import auriga.iam.api.NetworkAuthority;
+import auriga.iam.api.NetworkAuthority.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -19,7 +26,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -68,6 +77,9 @@ public class NetworkMailboxService {
   private final NetworkSourceAuthority authority;
   private final NetworkEnvelopeSigner signer;
   private final Clock clock;
+  private final NetworkIamChecks iam;
+  private final NetworkContactBudget budget;
+  private final AuditLogger audit;
 
   public NetworkMailboxService(JdbcTemplate jdbc, TenantTransactionManager manager) {
     this(jdbc, manager, null, new NetworkSigningKeys(Clock.systemUTC(), 1), Clock.systemUTC());
@@ -79,11 +91,27 @@ public class NetworkMailboxService {
       NetworkSourceAuthority authority,
       NetworkSigningKeys keys,
       Clock clock) {
+    this(jdbc, manager, authority, keys, clock, null);
+  }
+
+  public NetworkMailboxService(
+      JdbcTemplate jdbc,
+      TenantTransactionManager manager,
+      NetworkSourceAuthority authority,
+      NetworkSigningKeys keys,
+      Clock clock,
+      NetworkAuthority networkAuthority) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.tx = new TransactionTemplate(manager);
     this.authority = authority;
     this.signer = new NetworkEnvelopeSigner(Objects.requireNonNull(keys), clock);
     this.clock = Objects.requireNonNull(clock);
+    this.iam = new NetworkIamChecks(networkAuthority, manager);
+    this.budget = new NetworkContactBudget(jdbc);
+    this.audit =
+        new OutboxAuditLogger(
+            new OutboxEventPublisher(
+                jdbc, "collab", "collab", new EventSchemas(), NetworkJson.JSON, clock, null));
   }
 
   /** READY-shaped takeover: bumps connection_epoch and returns current mailbox cursors. */
@@ -91,6 +119,7 @@ public class NetworkMailboxService {
     return run(
         tenantId,
         () -> {
+          checkTarget(tenantId, realm, nodeId, Operation.CONNECT);
           ensureNodeLocked(tenantId, realm, nodeId);
           long epoch =
               jdbc.queryForObject(
@@ -119,14 +148,185 @@ public class NetworkMailboxService {
 
   /** Optional structured message fields retain ext values; server-owned identity is rejected. */
   public StoreResult store(StoreRequest request, String messageFieldsJson) {
+    return store(request, messageFieldsJson, "1", UuidV7.next().toString());
+  }
+
+  /** Gateway passes the authenticated producer epoch and the SEND idempotency key. */
+  public StoreResult store(
+      StoreRequest request, String messageFieldsJson, String producerEpoch, String key) {
+    require(
+        !TransactionSynchronizationManager.isActualTransactionActive()
+            && !TransactionSynchronizationManager.isSynchronizationActive()
+            && !TransactionSynchronizationManager.hasResource(jdbc.getDataSource()),
+        CommonErrors.UNAVAILABLE);
+    StoreOutcome outcome;
+    try {
+      outcome = storeTransaction(request, messageFieldsJson, producerEpoch, key);
+    } catch (AurigaException e) {
+      run(
+          request.tenantId(),
+          () -> {
+            recordUse(
+                "first_contact".equals(request.kind()) ? "first_contact" : "send",
+                "submit",
+                request.sourceNode(),
+                e.errorCode());
+            return null;
+          });
+      throw e;
+    }
+    if (outcome.error() != null) throw new AurigaException(outcome.error());
+    return outcome.result();
+  }
+
+  private record StoreOutcome(StoreResult result, ErrorCode error) {}
+
+  private StoreOutcome storeTransaction(
+      StoreRequest request, String messageFieldsJson, String producerEpoch, String key) {
     return run(
         request.tenantId(),
         () -> {
           validateStore(request);
           require(authority != null, CommonErrors.UNAVAILABLE);
           var source = authority.currentSource(request.tenantId());
+          require(
+              source != null
+                  && request.realm().equals(source.realm())
+                  && request.sourceNode().equals(source.node())
+                  && request.sourceLocal().equals(source.local()),
+              NetworkErrors.SENDER_MISMATCH);
+          require(
+              source.validUntil() != null
+                  && source.validUntil().isAfter(clock.instant())
+                  && source.user() != null
+                  && !source.user().isBlank(),
+              NetworkErrors.UNAUTHORIZED);
+          var body =
+              messageFieldsJson == null ? null : NetworkJson.parse(messageFieldsJson).get("body");
+          if (body == null)
+            body = NetworkJson.object().put("subtype", "text").put("text", request.body());
+          long bodyBytes = NetworkJson.canonical(body).getBytes(StandardCharsets.UTF_8).length;
+          iam.active(source.realm(), source.node());
+          var ceilings =
+              iam.check(
+                  new Check(
+                      source.realm(),
+                      source.node(),
+                      source.node(),
+                      source.local(),
+                      sender(source.senderKind()),
+                      Operation.CONNECT,
+                      bodyBytes,
+                      0,
+                      0));
+          require(
+              request.targets().size()
+                      <= NetworkIamChecks.limit(ceilings, Limit.ATOMIC_TARGET_NODES)
+                  && request.targets().stream().mapToLong(t -> t.locals().size()).sum()
+                      <= NetworkIamChecks.limit(ceilings, Limit.ATOMIC_TARGET_LOCALS),
+              NetworkErrors.QUOTA_EXCEEDED);
           var dispatch = authority.currentDispatch(request.tenantId());
           var firstTarget = request.targets().getFirst();
+          boolean firstContact = "first_contact".equals(request.kind());
+          boolean broadcast =
+              dispatch != null
+                  && "1".equals(NetworkJson.parse(dispatch.addressJson()).path("local").asString());
+          String auditedKind = firstContact ? "first_contact" : broadcast ? "broadcast" : null;
+          Instant contactExpiry =
+              request.contactExpiresAt() == null
+                  ? clock.instant().plusSeconds(FIRST_CONTACT_MAX_SECONDS)
+                  : request.contactExpiresAt();
+          NetworkContactBudget.Reservation reservation = null;
+          if (firstContact) {
+            // Check the source capability against its own registered node before inspecting the
+            // requested target. A missing agent grant is a source error, never a private success.
+            ceilings =
+                iam.check(
+                    new Check(
+                        source.realm(),
+                        source.node(),
+                        source.node(),
+                        source.local(),
+                        sender(source.senderKind()),
+                        Operation.FIRST_CONTACT,
+                        bodyBytes,
+                        1,
+                        1));
+            require(
+                dispatch == null && firstTarget.locals().equals(List.of("0")),
+                NetworkErrors.PROTOCOL_ERROR);
+            // Validate all source-controlled fields/size before any target-dependent branch.
+            var probe =
+                NetworkSourceStamp.message(
+                    request,
+                    source,
+                    UuidV7.next(),
+                    clock.instant(),
+                    messageFieldsJson,
+                    null,
+                    "system");
+            probe.put("thread_sequence", Long.toString(Long.MAX_VALUE));
+            preflight(request, probe, NetworkSourceStamp.context(source, probe), null);
+            Instant messageExpiry = Instant.parse(probe.path("expires_at").asString());
+            if (messageExpiry.isBefore(contactExpiry)) contactExpiry = messageExpiry;
+            require(
+                producerEpoch != null
+                    && producerEpoch.matches("[1-9][0-9]{0,19}")
+                    && new java.math.BigInteger(producerEpoch).bitLength() <= 64
+                    && key != null
+                    && key.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"),
+                NetworkErrors.PROTOCOL_ERROR);
+            require(
+                !contactExpiry.isAfter(clock.instant().plusSeconds(FIRST_CONTACT_MAX_SECONDS)),
+                CommonErrors.VALIDATION_FAILED);
+            var fingerprint = NetworkJson.object();
+            fingerprint.put("request", NetworkJson.digest(NetworkJson.JSON.valueToTree(request)));
+            fingerprint.put(
+                "fields",
+                messageFieldsJson == null
+                    ? ""
+                    : NetworkJson.digest(NetworkJson.parse(messageFieldsJson)));
+            reservation =
+                budget.reserve(
+                    request.tenantId(),
+                    source,
+                    firstTarget.nodeId(),
+                    producerEpoch,
+                    key,
+                    NetworkJson.digest(fingerprint),
+                    clock.instant(),
+                    contactExpiry,
+                    ceilings);
+            if (reservation.error() != null) {
+              recordUse(auditedKind, "submit", source.node(), reservation.error());
+              return new StoreOutcome(null, reservation.error());
+            }
+            if (reservation.retry())
+              return new StoreOutcome(
+                  NetworkJson.JSON.readValue(reservation.resultJson(), StoreResult.class), null);
+          }
+          try {
+            for (var target : request.targets()) {
+              iam.active(request.realm(), target.nodeId());
+              iam.check(
+                  new Check(
+                      source.realm(),
+                      source.node(),
+                      target.nodeId(),
+                      source.local(),
+                      sender(source.senderKind()),
+                      firstContact
+                          ? Operation.FIRST_CONTACT
+                          : broadcast ? Operation.BROADCAST : Operation.SEND,
+                      bodyBytes,
+                      broadcast ? request.targets().size() : 1,
+                      broadcast
+                          ? request.targets().stream().mapToLong(t -> t.locals().size()).sum()
+                          : 1));
+            }
+          } catch (AurigaException e) {
+            return targetFailure(request, reservation, auditedKind, e.errorCode());
+          }
           String targetType =
               dispatch == null
                   ? authority.resolveTargetType(
@@ -172,12 +372,18 @@ public class NetworkMailboxService {
                     NetworkSourceStamp.dispatchContext(dispatch, request.targets()));
           }
           for (var target : request.targets()) {
-            Instant deadline =
-                authority.authorizeDelivery(
-                    request.tenantId(), messageJson, contextJson, target.nodeId());
-            require(
-                deadline != null && deadline.isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+            try {
+              Instant deadline =
+                  authority.authorizeDelivery(
+                      request.tenantId(), messageJson, contextJson, target.nodeId());
+              require(
+                  deadline != null && deadline.isAfter(clock.instant()),
+                  NetworkErrors.UNAUTHORIZED);
+            } catch (AurigaException e) {
+              return targetFailure(request, reservation, auditedKind, e.errorCode());
+            }
           }
+          preflight(request, message, sourceContext, dispatchJson);
           jdbc.update(
               """
               INSERT INTO collab.network_message(
@@ -250,12 +456,9 @@ public class NetworkMailboxService {
           boolean restricted = false;
           if ("first_contact".equals(request.kind())) {
             contactId = messageId;
-            Instant expires =
-                request.contactExpiresAt() != null
-                    ? request.contactExpiresAt()
-                    : Instant.now().plusSeconds(FIRST_CONTACT_MAX_SECONDS);
+            Instant expires = contactExpiry;
             require(
-                !expires.isAfter(Instant.now().plusSeconds(FIRST_CONTACT_MAX_SECONDS)),
+                !expires.isAfter(clock.instant().plusSeconds(FIRST_CONTACT_MAX_SECONDS)),
                 CommonErrors.VALIDATION_FAILED);
             NodeTarget only = request.targets().getFirst();
             jdbc.update(
@@ -284,13 +487,23 @@ public class NetworkMailboxService {
               restricted = true;
             }
           }
-          return new StoreResult(
-              messageId,
-              "platform_stored",
-              visible,
-              restricted,
-              List.copyOf(deliveries),
-              contactId);
+          var result =
+              new StoreResult(
+                  messageId,
+                  "platform_stored",
+                  visible,
+                  restricted,
+                  List.copyOf(deliveries),
+                  contactId,
+                  null,
+                  null);
+          if (reservation != null) {
+            budget.materialized(request.tenantId(), reservation.id(), messageId);
+            if (!request.statusViewer()) result = submission(request.tenantId(), reservation.id());
+            budget.complete(request.tenantId(), reservation.id(), result, null);
+          }
+          recordUse(auditedKind, "submit", source.node(), null);
+          return new StoreOutcome(result, null);
         });
   }
 
@@ -302,6 +515,7 @@ public class NetworkMailboxService {
         () -> {
           require(afterCursor >= 0, CommonErrors.VALIDATION_FAILED);
           require(limit >= 1 && limit <= FETCH_MAX_ITEMS, CommonErrors.VALIDATION_FAILED);
+          checkTarget(tenantId, realm, nodeId, Operation.RECEIVE);
           ensureNodeLocked(tenantId, realm, nodeId);
           NodeRoute route = loadRoute(tenantId, realm, nodeId, null);
           var rows =
@@ -402,6 +616,7 @@ public class NetworkMailboxService {
                   target.channelNonce(),
                   target.requestId());
           var envelopes = new NetworkMailboxEnvelopeFactory(signer);
+          var route = raw.route();
           List<ObjectNode> items = new ArrayList<>();
           ObjectNode frame =
               envelopes.page(items, raw.route(), afterCursor, context, target.validUntil());
@@ -412,6 +627,7 @@ public class NetworkMailboxService {
               candidate =
                   signedMailboxItem(tenantId, item, context, target.validUntil(), envelopes);
             } catch (AurigaException e) {
+              auditItem(item, e.errorCode());
               String code = e.errorCode().code();
               String reason =
                   Set.of("network.unauthorized", "common.forbidden", "common.unavailable")
@@ -419,11 +635,17 @@ public class NetworkMailboxService {
                       ? "awaiting_authorization"
                       : "quarantined";
               candidate = envelopes.gap(item.mailSeq(), reason, context, target.validUntil());
-            } catch (IllegalArgumentException | ClassCastException e) {
+            } catch (DataAccessException e) {
+              throw e;
+            } catch (RuntimeException e) {
+              auditItem(item, NetworkErrors.PROTOCOL_ERROR);
               candidate =
                   envelopes.gap(item.mailSeq(), "quarantined", context, target.validUntil());
             }
-            var route = loadRoute(tenantId, realm, nodeId, null);
+            if ("terminal".equals(candidate.path("type").asString())
+                && item.recipients().stream()
+                    .anyMatch(r -> !TERMINAL.contains(r.transportStatus())))
+              route = loadRoute(tenantId, realm, nodeId, null);
             if (!frameFits(
                 envelopes.page(
                     List.of(candidate), route, item.mailSeq(), context, target.validUntil()),
@@ -462,6 +684,10 @@ public class NetworkMailboxService {
     ObjectNode message = (ObjectNode) NetworkJson.parse(stored.get("message_json").toString());
     ObjectNode source =
         (ObjectNode) NetworkJson.parse(stored.get("source_context_json").toString());
+    String auditedKind =
+        "first_contact".equals(item.kind())
+            ? "first_contact"
+            : "broadcast".equals(message.path("message_class").asString()) ? "broadcast" : null;
     ObjectNode contact = null;
     Instant expires = Instant.parse(message.path("expires_at").asString());
     if ("first_contact".equals(item.kind())) {
@@ -509,13 +735,42 @@ public class NetworkMailboxService {
             NetworkJson.canonical(source),
             context.node());
     require(permission != null && permission.isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+    iam.active(
+        message.path("from").path("realm").asString(),
+        message.path("from").path("node").asString());
+    var storedDispatch =
+        stored.get("dispatch_context_json") == null
+            ? null
+            : NetworkJson.parse(stored.get("dispatch_context_json").toString());
+    long nodeCount = 1, localCount = 1;
+    if ("broadcast".equals(auditedKind)) {
+      var nodes = new LinkedHashSet<String>();
+      localCount = storedDispatch.path("members").size();
+      for (var member : storedDispatch.path("members")) nodes.add(member.path("node").asString());
+      nodeCount = nodes.size();
+    }
+    iam.check(
+        new Check(
+            context.realm(),
+            message.path("from").path("node").asString(),
+            context.node(),
+            message.path("from").path("local").asString(),
+            sender(message.path("sender_kind").asString()),
+            "first_contact".equals(auditedKind)
+                ? Operation.FIRST_CONTACT
+                : "broadcast".equals(auditedKind) ? Operation.BROADCAST : Operation.SEND,
+            message.path("body").toString().getBytes(StandardCharsets.UTF_8).length,
+            nodeCount,
+            localCount));
     if (permission.isBefore(deadline)) deadline = permission;
     if (expires.isBefore(deadline)) deadline = expires;
     var dispatch =
         stored.get("dispatch_context_json") == null
             ? null
             : NetworkJson.parse(stored.get("dispatch_context_json").toString());
-    return envelopes.delivery(item, message, source, dispatch, contact, context, deadline);
+    var result = envelopes.delivery(item, message, source, dispatch, contact, context, deadline);
+    recordUse(auditedKind, "dispatch", item.messageId().toString(), null);
+    return result;
   }
 
   private static boolean frameFits(ObjectNode frame, int budget) {
@@ -524,6 +779,128 @@ public class NetworkMailboxService {
     } catch (AurigaException e) {
       if (!e.errorCode().code().equals(NetworkErrors.PROTOCOL_ERROR.code())) throw e;
       return false;
+    }
+  }
+
+  private static Sender sender(String kind) {
+    require(Set.of("human", "agent").contains(kind), NetworkErrors.SENDER_MISMATCH);
+    return "human".equals(kind) ? Sender.HUMAN : Sender.AGENT;
+  }
+
+  private void checkTarget(UUID tenant, String realm, String node, Operation operation) {
+    text(realm, 32);
+    text(node, 32);
+    require(authority != null, CommonErrors.UNAVAILABLE);
+    var target = authority.currentTarget(tenant);
+    require(
+        target != null
+            && realm.equals(target.realm())
+            && node.equals(target.node())
+            && target.validUntil() != null
+            && target.validUntil().isAfter(clock.instant()),
+        NetworkErrors.UNAUTHORIZED);
+    iam.active(realm, node);
+    iam.check(new Check(realm, node, node, "0", Sender.HUMAN, operation, 0, 1, 1));
+  }
+
+  private StoreResult submission(UUID tenant, UUID id) {
+    // Restricted replies expose no target-derived message, contact, delivery IDs or platform ACK.
+    return new StoreResult(
+        null,
+        "request_submitted",
+        "request_submitted",
+        true,
+        List.of(),
+        null,
+        id,
+        budget.visibleUntil(tenant, id));
+  }
+
+  private StoreOutcome targetFailure(
+      StoreRequest request,
+      NetworkContactBudget.Reservation reservation,
+      String kind,
+      ErrorCode error) {
+    recordUse(kind, "submit", request.sourceNode(), error);
+    if (reservation == null) return new StoreOutcome(null, error);
+    if (!request.statusViewer()
+        && (error.equals(NetworkErrors.UNAUTHORIZED) || error.equals(CommonErrors.FORBIDDEN))) {
+      var submitted = submission(request.tenantId(), reservation.id());
+      budget.complete(request.tenantId(), reservation.id(), submitted, null);
+      return new StoreOutcome(submitted, null);
+    }
+    budget.complete(request.tenantId(), reservation.id(), null, error);
+    return new StoreOutcome(null, error);
+  }
+
+  private void recordUse(String kind, String operation, String subject, ErrorCode error) {
+    if (kind == null) return;
+    var entry =
+        AuditEntry.builder("collab.network." + kind + "." + operation)
+            .actor(new AuditEntry.Actor("system", "svc:collab"))
+            .target("network_operation", subject);
+    if (error != null) entry.denied(error.code());
+    audit.record(entry.build());
+  }
+
+  private void auditItem(FetchItem item, ErrorCode error) {
+    // Never log body, display labels, raw exceptions or damaged JSON.
+    audit.record(
+        AuditEntry.builder("collab.network.dispatch")
+            .actor(new AuditEntry.Actor("system", "svc:collab"))
+            .target("message", item.messageId().toString())
+            .denied(error.code())
+            .build());
+  }
+
+  private void preflight(
+      StoreRequest request, ObjectNode message, ObjectNode source, String dispatchJson) {
+    var factory = new NetworkMailboxEnvelopeFactory(signer);
+    var dispatch = dispatchJson == null ? null : NetworkJson.parse(dispatchJson);
+    var maximumOpaque = "x".repeat(128);
+    for (var target : request.targets()) {
+      var context =
+          new NetworkEnvelopeSigner.Context(
+              request.realm(),
+              target.nodeId(),
+              maximumOpaque,
+              Long.MAX_VALUE,
+              maximumOpaque,
+              maximumOpaque);
+      var recipients =
+          target.locals().stream()
+              .map(local -> new RecipientView(UuidV7.next(), local, "pending", Long.MAX_VALUE))
+              .toList();
+      var item =
+          new FetchItem(
+              UuidV7.next(),
+              Long.MAX_VALUE,
+              UUID.fromString(message.path("message_id").asString()),
+              request.body(),
+              request.kind(),
+              request.sourceNode(),
+              request.sourceLocal(),
+              request.threadId(),
+              clock.instant(),
+              recipients);
+      ObjectNode contact = null;
+      if ("first_contact".equals(request.kind()))
+        contact =
+            NetworkJson.object()
+                .put("status", "allowed")
+                .put("decision_version", Long.toString(Long.MAX_VALUE))
+                .put("expires_at", message.path("expires_at").asString());
+      var deadline = Instant.parse(message.path("expires_at").asString());
+      var envelope = factory.delivery(item, message, source, dispatch, contact, context, deadline);
+      var frame =
+          factory.page(
+              List.of(envelope),
+              new NodeRoute(
+                  request.realm(), target.nodeId(), Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE),
+              Long.MAX_VALUE,
+              context,
+              deadline);
+      require(frameFits(frame, 65536), NetworkErrors.PROTOCOL_ERROR);
     }
   }
 
@@ -579,6 +956,7 @@ public class NetworkMailboxService {
                   && !request.results().isEmpty()
                   && request.results().size() <= RECEIPT_MAX_RESULTS,
               CommonErrors.VALIDATION_FAILED);
+          checkTarget(request.tenantId(), request.realm(), request.nodeId(), Operation.RECEIVE);
           ensureNodeLocked(request.tenantId(), request.realm(), request.nodeId());
           NodeRoute route = loadRoute(request.tenantId(), request.realm(), request.nodeId(), null);
           requireEpoch(route.connectionEpoch(), request.epoch());
@@ -662,6 +1040,12 @@ public class NetworkMailboxService {
                   """,
                   request.tenantId(),
                   request.contactId());
+          checkTarget(
+              request.tenantId(),
+              row.get("target_realm").toString(),
+              row.get("target_node").toString(),
+              Operation.RECEIVE);
+          iam.active(row.get("source_realm").toString(), row.get("source_node").toString());
           require("conversation".equals(row.get("scope").toString()), NetworkErrors.PROTOCOL_ERROR);
           Instant expires = ((java.sql.Timestamp) row.get("expires_at")).toInstant();
           String status = row.get("status").toString();
@@ -670,7 +1054,7 @@ public class NetworkMailboxService {
                   ? request.statusViewer()
                   : Boolean.TRUE.equals(row.get("status_viewer"));
 
-          if ("pending".equals(status) && !expires.isAfter(Instant.now())) {
+          if ("pending".equals(status) && !expires.isAfter(clock.instant())) {
             jdbc.update(
                 """
                 UPDATE collab.network_contact
@@ -733,7 +1117,7 @@ public class NetworkMailboxService {
                   contactId);
           String status = row.get("status").toString();
           Instant expires = ((java.sql.Timestamp) row.get("expires_at")).toInstant();
-          if ("pending".equals(status) && !expires.isAfter(Instant.now())) {
+          if ("pending".equals(status) && !expires.isAfter(clock.instant())) {
             jdbc.update(
                 """
                 UPDATE collab.network_contact
@@ -758,6 +1142,7 @@ public class NetworkMailboxService {
     return run(
         request.tenantId(),
         () -> {
+          checkTarget(request.tenantId(), request.realm(), request.nodeId(), Operation.RECEIVE);
           ensureNodeLocked(request.tenantId(), request.realm(), request.nodeId());
           NodeRoute route = loadRoute(request.tenantId(), request.realm(), request.nodeId(), null);
           requireEpoch(route.connectionEpoch(), request.epoch());
@@ -796,6 +1181,7 @@ public class NetworkMailboxService {
     return run(
         request.tenantId(),
         () -> {
+          checkTarget(request.tenantId(), request.realm(), request.nodeId(), Operation.RECEIVE);
           ensureNodeLocked(request.tenantId(), request.realm(), request.nodeId());
           NodeRoute route = loadRoute(request.tenantId(), request.realm(), request.nodeId(), null);
           requireEpoch(route.connectionEpoch(), request.connectionEpoch());
@@ -1177,7 +1563,9 @@ public class NetworkMailboxService {
       String visibleStatus,
       boolean restrictedAppearance,
       List<DeliveryStored> deliveries,
-      UUID contactId) {}
+      UUID contactId,
+      UUID submissionId,
+      Instant waitUntil) {}
 
   public record NodeRoute(
       String realm, String nodeId, long connectionEpoch, long headSeq, long committedCursor) {}
