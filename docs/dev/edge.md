@@ -245,3 +245,20 @@ permissions: {
 实例请求体总体上限 64 MiB（已知长度和未知长度都限制，超限 413），允许超过 1 MiB 的上传；API 的 1 MiB 上限保持原样。拨号／TLS 握手上限 10 秒，不设置实例短响应头超时和服务器整体 ReadTimeout。Transport 按节点 ID 和入口复用并限制池数量，地址变化和进程退出关闭空闲连接。
 
 E2 测试见 `ingress*_test.go`、`local_*_test.go`：正常身份与路径、越权／跨租户、错误节点／CA、非法 scheme、WebSocket 吊销断连、路由迁移删除、2 MiB 上传及未知长度超限、本机 TLS。Windows 假节点使用随机命名管道上的真实 TLS，避开本机 HTTPS 扫描对 loopback TCP 证书的替换；Linux 使用 httptest 随机 TCP 端口，并另测 Unix socket。
+## 远程 Team MCP 入口
+
+安装配置可选 `upstreams["ai-gateway"]`：一个固定受信 HTTPS Origin，或同机数字回环 HTTP。
+不能带用户信息、查询、片段或路径前缀。未配置时 Team 不可用，不回落到浏览器应用。
+
+只有经正式安装配置校验的 portal 入口转发 `GET/POST /ai/mcp` 和
+`POST /ai/team/node/{register,bind,pull,ack,revoke}`。后者仅供受信 Node，不是模型工具。
+其他 `/ai` 路径和方法拒绝。每次转发只接收一个设备 Bearer，删除全部浏览器 cookie，
+不会把门户或管理会话兑换成 Team 凭据。有 Origin 时须匹配完整门户源；远程网关仍须
+逐次核凭据、当前成员权限和端点/会话参与关系，代理成功本身不代表已获授权。
+
+`POST /oauth2/revoke` 只在 portal 入口经既有受认证 IAM hop 转发，保留协议认证，
+不转发浏览器会话 cookie。IAM 负责 token/client 验证及设备撤销，不能凭任意 did 撤设备；
+其他方法、子路径和 admin 入口没有新公共例外。退出不能停止 DSH 或任务。
+
+本代码改动不等于网关已部署或双 DSH 已通；须用匹配制品验证真实登录、在线准入、
+远程 MCP 和宿主投递的整条链。

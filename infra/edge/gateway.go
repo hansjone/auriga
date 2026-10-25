@@ -39,6 +39,7 @@ type Gateway struct {
 	iamURL       *url.URL
 	orgURL       *url.URL
 	workspaceURL *url.URL
+	teamURL      *url.URL
 
 	portalStatic http.Handler
 	adminStatic  http.Handler
@@ -61,6 +62,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	wsURL, err := parseUpstream(cfg.Upstreams["workspace"])
 	if err != nil {
 		return nil, err
+	}
+	var teamURL *url.URL
+	if raw := cfg.Upstreams["ai-gateway"]; raw != "" {
+		teamURL, err = parseTeamUpstream(raw)
+		if err != nil {
+			return nil, err
+		}
 	}
 	hub := NewSessionConnHub()
 	ingress, err := loadNodeIngress(cfg.NodeTLS)
@@ -92,6 +100,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		iamURL:       iamURL,
 		orgURL:       orgURL,
 		workspaceURL: wsURL,
+		teamURL:      teamURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
@@ -225,6 +234,12 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeProblem(w, problem(http.StatusForbidden, "edge.admin_host_required", "Forbidden", "admin API only on admin host", rid))
+		return
+	}
+
+	// Team uses only device Bearer credentials, never browser-session exchange.
+	if path == "/ai" || strings.HasPrefix(path, "/ai/") {
+		g.proxyTeam(w, r, audience, clientIP, rid)
 		return
 	}
 
