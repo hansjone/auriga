@@ -3,13 +3,18 @@ import { nodeKey, parseAddress } from '../host/address.js';
 import { newId } from '../host/ledger.js';
 import { CODES, HostSeamError } from '../host/errors.js';
 
+export const LONG_SCAN_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const LONG_SCAN_LOCAL_THRESHOLD = 100;
+
 /**
  * Private local state. No bodies, native session IDs, threads or target
  * locals are included in security reports. Send only via a trusted port.
  * @typedef {{ id: string, local: string, at: number }} InvalidHit
- * @typedef {{ hits: InvalidHit[], blockedUntil: number, manual: boolean }} SourceState
- * @typedef {{ id: string, sourceNode: string, invalidHits: number, distinctLocals: number, at: number }} SecurityReport
- * @typedef {{ sources: Record<string, SourceState>, reports: SecurityReport[] }} InboundPolicyState
+ * @typedef {{ hits: InvalidHit[], blockedUntil: number, manual: boolean, lastSeen?: number, longTargets?: Array<{ local: string, at: number }> }} SourceState
+ * @typedef {{ id: string, kind: 'scan', sourceNode: string, invalidHits: number, distinctLocals: number, longDistinctLocals: number, at: number }} ScanReport
+ * @typedef {{ id: string, kind: 'source_capacity', evictedSources: number, untrackedSources: number, at: number }} CapacityReport
+ * @typedef {ScanReport|CapacityReport} SecurityReport
+ * @typedef {{ sources: Record<string, SourceState>, reports: SecurityReport[], lastCapacityAlertAt?: number }} InboundPolicyState
  */
 
 /**
@@ -20,6 +25,7 @@ import { CODES, HostSeamError } from '../host/errors.js';
  *   now?: () => number,
  *   hitThreshold?: number, localThreshold?: number,
  *   windowMs?: number, cooldownMs?: number,
+ *   longWindowMs?: number, longLocalThreshold?: number,
  *   maxSources?: number, maxReports?: number,
  * }} options
  */
@@ -30,6 +36,8 @@ export function createInboundPolicy({
   localThreshold = 10,
   windowMs = 60_000,
   cooldownMs = 600_000,
+  longWindowMs = LONG_SCAN_WINDOW_MS,
+  longLocalThreshold = LONG_SCAN_LOCAL_THRESHOLD,
   maxSources = 1024,
   maxReports = 128,
 }) {
@@ -38,6 +46,8 @@ export function createInboundPolicy({
     localThreshold,
     windowMs,
     cooldownMs,
+    longWindowMs,
+    longLocalThreshold,
     maxSources,
     maxReports,
   ])
@@ -54,20 +64,74 @@ export function createInboundPolicy({
   /** @param {SourceState} source @param {number} at */
   const blocked = (source, at) => source.manual || source.blockedUntil > at;
 
+  /** Keep a single bounded, coalesced pressure warning. Cooling entries
+   * are never evicted, and capacity exhaustion never blocks unknown peers.
+   * @param {InboundPolicyState} state @param {number} at @param {boolean} evicted */
+  function reportCapacity(state, at, evicted) {
+    const previous = state.reports.find((r) => r.kind === 'source_capacity');
+    if (previous?.kind === 'source_capacity') {
+      // A stale acknowledgement must not discard an updated summary.
+      previous.id = newId('capacity');
+      previous.at = at;
+      if (evicted) previous.evictedSources++;
+      else previous.untrackedSources++;
+      return;
+    }
+    if (
+      state.lastCapacityAlertAt !== undefined &&
+      at - state.lastCapacityAlertAt < windowMs
+    )
+      return;
+    state.lastCapacityAlertAt = at;
+    if (state.reports.length >= maxReports) state.reports.shift();
+    state.reports.push({
+      id: newId('capacity'),
+      kind: 'source_capacity',
+      at,
+      evictedSources: evicted ? 1 : 0,
+      untrackedSources: evicted ? 0 : 1,
+    });
+  }
+
   /** @param {InboundPolicyState} state @param {string} key @param {number} at */
   function ensureSource(state, key, at) {
     // Never evict an active block to make room for a rotating scanner.
     for (const [id, source] of Object.entries(state.sources)) {
+      source.lastSeen ??= Math.max(0, ...source.hits.map((h) => h.at));
+      // Existing ledgers retain the short-window evidence they already had.
+      source.longTargets ??= [
+        ...new Map(
+          source.hits.map((h) => [h.local, { local: h.local, at: h.at }]),
+        ).values(),
+      ];
       source.hits = source.hits.filter((h) => h.at > at - windowMs);
-      if (!blocked(source, at) && source.hits.length === 0)
+      source.longTargets = source.longTargets.filter(
+        (h) => h.at > at - longWindowMs,
+      );
+      if (
+        !blocked(source, at) &&
+        source.hits.length === 0 &&
+        source.longTargets.length === 0
+      )
         delete state.sources[id];
     }
-    if (!state.sources[key] && Object.keys(state.sources).length >= maxSources)
-      return null;
+    if (
+      !state.sources[key] &&
+      Object.keys(state.sources).length >= maxSources
+    ) {
+      const candidate = Object.entries(state.sources)
+        .filter(([, source]) => !blocked(source, at))
+        .sort((a, b) => (a[1].lastSeen ?? 0) - (b[1].lastSeen ?? 0))[0];
+      reportCapacity(state, at, !!candidate);
+      if (!candidate) return null;
+      delete state.sources[candidate[0]];
+    }
     return (state.sources[key] ??= {
       hits: [],
       blockedUntil: 0,
       manual: false,
+      lastSeen: at,
+      longTargets: [],
     });
   }
 
@@ -75,13 +139,17 @@ export function createInboundPolicy({
   function report(state, key, source, at) {
     const summary = {
       id: newId('scan'),
+      kind: /** @type {const} */ ('scan'),
       sourceNode: key,
       invalidHits: source.hits.length,
       distinctLocals: new Set(source.hits.map((h) => h.local)).size,
+      longDistinctLocals: source.longTargets?.length ?? 0,
       at,
     };
     // One pending summary per source; bounded queue full never unblocks it.
-    const existing = state.reports.findIndex((r) => r.sourceNode === key);
+    const existing = state.reports.findIndex(
+      (r) => r.kind === 'scan' && r.sourceNode === key,
+    );
     if (existing >= 0) state.reports[existing] = summary;
     else if (state.reports.length < maxReports) state.reports.push(summary);
   }
@@ -102,9 +170,15 @@ export function createInboundPolicy({
     )
       return;
     source.hits.push({ id: recipientId, local, at });
+    source.lastSeen = at;
+    const targets = (source.longTargets ??= []);
+    const previous = targets.find((h) => h.local === local);
+    if (previous) previous.at = at;
+    else targets.push({ local, at });
     if (
       source.hits.length >= hitThreshold ||
-      new Set(source.hits.map((h) => h.local)).size >= localThreshold
+      new Set(source.hits.map((h) => h.local)).size >= localThreshold ||
+      targets.length >= longLocalThreshold
     ) {
       source.blockedUntil = at + cooldownMs;
       report(state, key, source, at);
@@ -118,15 +192,7 @@ export function createInboundPolicy({
       const key = sourceKey(from);
       const sources = ledger.peek().inboundPolicy?.sources ?? {};
       const source = sources[key];
-      if (source) return blocked(source, now());
-      // A full table fails closed for unknown sources rather than silently
-      // forgetting blocks. Expired entries are reclaimed on the next write.
-      return (
-        Object.values(sources).filter(
-          (s) =>
-            blocked(s, now()) || s.hits.some((h) => h.at > now() - windowMs),
-        ).length >= maxSources
-      );
+      return source ? blocked(source, now()) : false;
     },
     /** @param {{ from: import('../host/address.js').Address, recipientId: string, local: string }} input */
     recordInvalid({ from, recipientId, local }) {
@@ -137,14 +203,17 @@ export function createInboundPolicy({
     recordInvalidIn,
     /** Local authenticated UI only; not a remotely callable tool.
      * @param {import('../host/address.js').Address} from */
-    blockSource(from) {
+    async blockSource(from) {
       const key = sourceKey(from);
-      return ledger.update((draft) => {
+      const retained = await ledger.update((draft) => {
         const state = (draft.inboundPolicy ??= { sources: {}, reports: [] });
         const source = ensureSource(state, key, now());
-        if (!source) throw new HostSeamError(CODES.overloaded);
+        if (!source) return false;
         source.manual = true;
+        source.lastSeen = now();
+        return true;
       });
+      if (!retained) throw new HostSeamError(CODES.overloaded);
     },
     /** Retained until an authenticated report acknowledgement. */
     pendingReports() {

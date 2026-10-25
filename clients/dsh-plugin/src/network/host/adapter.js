@@ -90,6 +90,14 @@ const FINAL = new Set([
   'OUTCOME_UNKNOWN',
 ]);
 const DANGEROUS_KINDS = new Set(['control']);
+const SCAN_REASONS = new Set([
+  'unknown_local',
+  'unregistered_local',
+  'no_relation',
+  'lifecycle_archived',
+  'lifecycle_closed',
+  'lifecycle_deleted',
+]);
 
 /**
  * @param {{
@@ -270,12 +278,13 @@ export function createHostAdapter({
           bindPeer: false,
         };
       const b = s.bindings[rec.local];
-      if (
-        !open(b) ||
-        s.locals[rec.local]?.state !== 'registered' ||
-        !b.groups.includes(addressKey(m.to))
-      )
-        return { path: 'reject', reason: open(b) ? 'not_member' : 'lifecycle' };
+      if (!b) return { path: 'reject', reason: 'unknown_local' };
+      if (s.locals[rec.local]?.state !== 'registered')
+        return { path: 'reject', reason: 'unregistered_local' };
+      if (!open(b))
+        return { path: 'reject', reason: `lifecycle_${b.lifecycle}` };
+      if (!b.groups.includes(addressKey(m.to)))
+        return { path: 'reject', reason: 'not_member' };
       return {
         path: 'inbox',
         acceptedBy: 'session',
@@ -696,7 +705,7 @@ export function createHostAdapter({
               ? again2.reason
               : 'policy';
           pushAudit(draft, r.recipientId, r.localReason, ledger.nowIso());
-          if (again2.path === 'reject' && again2.reason !== 'source_blocked')
+          if (again2.path === 'reject' && SCAN_REASONS.has(again2.reason))
             inboundPolicy.recordInvalidIn(draft, {
               from: item.message.from,
               recipientId: r.recipientId,
@@ -733,7 +742,7 @@ export function createHostAdapter({
         if (decision.path === 'quarantine') r.code = decision.code;
         draft.recipients[r.recipientId] = r;
         pushAudit(draft, r.recipientId, decision.reason, ledger.nowIso());
-        if (decision.path === 'reject' && decision.reason !== 'source_blocked')
+        if (decision.path === 'reject' && SCAN_REASONS.has(decision.reason))
           inboundPolicy.recordInvalidIn(draft, {
             from: item.message.from,
             recipientId: r.recipientId,
@@ -859,8 +868,6 @@ export function createHostAdapter({
         !Array.isArray(item.recipients)
       )
         throw new HostSeamError(CODES.protocolError, 'bad item');
-      parseAddress(m.from, { realm: identity.realm, role: 'source' });
-      parseAddress(m.to, { realm: identity.realm });
       for (const rec of item.recipients) {
         if (
           typeof rec?.recipientId !== 'string' ||
@@ -872,6 +879,49 @@ export function createHostAdapter({
       }
     }
     return p;
+  }
+
+  /** Trusted page framing is checked once; bad address metadata belongs to
+   * one item and must neither poison peers' strikes nor abort the page.
+   * @param {PageItem} item */
+  function invalidItemAddress(item) {
+    try {
+      parseAddress(item.message.from, {
+        realm: identity.realm,
+        role: 'source',
+      });
+      parseAddress(item.message.to, { realm: identity.realm });
+      return null;
+    } catch (error) {
+      if (error instanceof HostSeamError) return error.code;
+      throw error;
+    }
+  }
+
+  /** @param {Page} page @param {PageItem} item @param {PageRecipient} rec @param {string} reason */
+  async function rejectAddressItem(page, item, rec, reason) {
+    const existing = recipient(rec.recipientId);
+    if (existing) {
+      if (existing.messageDigest !== item.messageDigest)
+        return {
+          ...receiptOf(existing, ledger.peek().revision),
+          status: /** @type {const} */ ('quarantined'),
+          code: CODES.protocolError,
+        };
+      return receiptOf(existing, ledger.peek().revision);
+    }
+    if (ledger.peek().identityConflict)
+      return transientReceipt(item, rec, CODES.recoveryConflict);
+    if (pendingCount() >= maxPendingRecipients)
+      return transientReceipt(item, rec, CODES.overloaded);
+    return ledger.update((draft) => {
+      const r = freshRecord(page, item, rec, null);
+      r.state = 'REJECTED';
+      r.localReason = reason;
+      draft.recipients[r.recipientId] = r;
+      pushAudit(draft, r.recipientId, reason, ledger.nowIso());
+      return receiptOf(r, draft.revision + 1);
+    });
   }
 
   /**
@@ -886,13 +936,17 @@ export function createHostAdapter({
     const page = checkPage(input);
     /** @type {Promise<Receipt>[]} */
     const work = [];
-    for (const item of page.items)
+    for (const item of page.items) {
+      const addressError = invalidItemAddress(item);
       for (const rec of item.recipients)
         work.push(
           locks.run(`thread:${rec.local}:${item.message.threadId}`, () =>
-            deliverOne(page, item, rec),
+            addressError
+              ? rejectAddressItem(page, item, rec, addressError)
+              : deliverOne(page, item, rec),
           ),
         );
+    }
     return Promise.all(work);
   }
 
