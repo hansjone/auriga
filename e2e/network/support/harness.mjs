@@ -95,7 +95,7 @@ export async function openHarness(t) {
   const binary = findNatsServer();
   assert.ok(
     binary,
-    '需要仓库锁定的 nats-server；设置 AURIGA_NATS_SERVER 或 AURIGA_TEST_CACHE（不自动下载、不静默跳过）',
+    'nats-server disappeared after test discovery; set AURIGA_NATS_SERVER or populate ~/.cache/auriga',
   );
   const pinSource = await readFile(
     new URL(

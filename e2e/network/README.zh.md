@@ -9,7 +9,7 @@
 从仓库根目录执行（Node ≥22，插件依赖已按仓库锁文件准备）：
 
 ```powershell
-# 指向现有、可信的仓库锁定版本 nats-server 可执行文件；不会自动下载。
+# 可选：覆盖默认缓存查找，指向可信的仓库锁定版本；不会自动下载。
 $env:AURIGA_NATS_SERVER = '<absolute-path-to-nats-server>'
 node --test "e2e/network/*.test.mjs"
 ```
@@ -17,12 +17,20 @@ node --test "e2e/network/*.test.mjs"
 也支持现有插件辅助的 `AURIGA_TEST_CACHE` 查找规则；详见
 `clients/dsh-plugin/test/network/transport/support/nats-server.js`。
 Broker 版本取自 `services/test-support/.../NatsServer.java` 的 `VERSION`，当前为 2.15.1。
-运行前检查实际 `nats-server -v`；不存在、版本不匹配、启动或连接失败均令测试失败，不自动跳过。
+查找复用插件 `findNatsServer()`：先检查 `AURIGA_NATS_SERVER`，再查
+`AURIGA_TEST_CACHE` 或默认 `~/.cache/auriga/nats-server/<版本>/<平台>` 缓存。
+未找到时复用插件 `skipNoServer`，三个接缝用例均具名跳过并输出原因；
+找到后检查实际 `nats-server -v`，版本不匹配、启动或连接失败仍令测试失败。
 现有 Go 接入 spike 的内嵌版本为 2.12.6，本骨架采用 JS/Java 测试辅助锁定的可执行版本。
 
 Linux CI 使用同一条 Node 命令，先准备对应平台的可信 Broker 制品和插件依赖即可。
-建议主控把该命令加入现有 CI；本任务没有修改工作流。报告中的通过数与 skip 数必须分开统计。
-当前预计 **3 pass / 4 skip**，后续接线完成应替换对应 skip 的测试体并删除跳过原因。
+建议主控在 `.github/workflows/plugin.yml` 的 `jobs.test` 中，Install 之后准备匹配
+版本且经校验的 Broker（设置 `AURIGA_NATS_SERVER` 或填充默认缓存），然后新增
+`Network host seam integration` 步骤，从仓库根运行 `node --test "e2e/network/*.test.mjs"`。
+同时在 push/pull_request 的 paths 加 `e2e/network/**`，避免仅改骨架时不触发。
+本任务没有修改工作流。报告中的通过数与 skip 数必须分开统计：
+有 Broker 时预计 **3 pass / 4 skip**，缺失时 **0 pass / 7 skip**；CI 须确认三个接缝
+用例实际运行。后续接线完成应替换对应 skip 的测试体并删除跳过原因。
 
 ## 装配与信任边界
 

@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openHarness, delivery } from './support/harness.mjs';
+import { skipNoServer } from '../../clients/dsh-plugin/test/network/transport/support/env.js';
 
 test(
   'unicast fixtures travel both ways through two plugin WSS links and emit RECEIPT',
-  { timeout: 30_000 },
+  { timeout: 30_000, skip: skipNoServer },
   async (t) => {
     const h = await openHarness(t);
     const toB = delivery(h.a, h.b, 'b-reply');
@@ -32,7 +33,7 @@ test(
 
 test(
   'lost RECEIPT: replay the same delivery over NATS without a second host prompt',
-  { timeout: 30_000 },
+  { timeout: 30_000, skip: skipNoServer },
   async (t) => {
     const h = await openHarness(t);
     const page = delivery(h.a, h.b, 'lost-receipt');
@@ -56,7 +57,7 @@ test(
 
 test(
   'crash after durable host acceptance: reopen file ledger and WSS client, then replay once',
-  { timeout: 30_000 },
+  { timeout: 30_000, skip: skipNoServer },
   async (t) => {
     const h = await openHarness(t);
     const page = delivery(h.a, h.b, 'restart-recipient');
