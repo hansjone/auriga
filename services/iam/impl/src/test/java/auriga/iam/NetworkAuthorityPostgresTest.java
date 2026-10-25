@@ -105,7 +105,7 @@ class NetworkAuthorityPostgresTest {
         tenant,
         () -> {
           when(devices.credential(tenant.toString(), account.toString(), device.toString()))
-              .thenReturn(null);
+              .thenReturn(identity, (DeviceAccessAuthority.Identity) null);
           assertThrows(AurigaException.class, () -> network.register("access"));
           when(devices.credential(tenant.toString(), account.toString(), device.toString()))
               .thenReturn(identity);
@@ -125,6 +125,84 @@ class NetworkAuthorityPostgresTest {
                             jdbc.queryForObject(
                                 "SELECT count(*) FROM iam.network_node", Integer.class)));
               });
+        });
+  }
+
+  @Test
+  void disabledOrganizationOrInvalidCredentialDoesNotAllocateRealmOrNode() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          store.tx(
+              () -> {
+                store.insert("network_config", "organization", Json.object("enabled", false), null);
+                return null;
+              });
+          assertThrows(AurigaException.class, () -> network.register("access"));
+          assertEquals(
+              0,
+              store.tx(
+                  () ->
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM iam.network_realm WHERE tenant_id=?",
+                          Integer.class,
+                          tenant)));
+          store.tx(
+              () -> {
+                store.delete("network_config", "organization");
+                return null;
+              });
+          when(devices.credential(tenant.toString(), account.toString(), device.toString()))
+              .thenReturn(null);
+          assertThrows(AurigaException.class, () -> network.register("access"));
+          assertEquals(
+              0,
+              store.tx(
+                  () ->
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM iam.network_realm WHERE tenant_id=?",
+                          Integer.class,
+                          tenant)));
+          when(devices.credential(tenant.toString(), account.toString(), device.toString()))
+              .thenReturn(identity);
+          assertEquals("1", network.register("access").node());
+        });
+  }
+
+  @Test
+  void wrongBindingDurablyInvalidatesTicketBeforeReturningForbidden() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          gateway();
+          for (String[] wrong :
+              List.of(
+                  new String[] {"2", device.toString(), "server-a"},
+                  new String[] {"0", device.toString(), "server-a"},
+                  new String[] {node.node(), UUID.randomUUID().toString(), "server-a"},
+                  new String[] {node.node(), device.toString(), "server-other"},
+                  new String[] {node.node(), device.toString(), null})) {
+            var ticket = network.prepare("access", node.node(), "server-a");
+            assertEquals(
+                "common.forbidden",
+                assertThrows(
+                        AurigaException.class,
+                        () -> network.redeem(ticket.ticket(), wrong[0], wrong[1], wrong[2]))
+                    .errorCode()
+                    .code());
+            assertNull(
+                store.tx(() -> store.get("network_ticket", Secrets.hash(ticket.ticket()), false)));
+            assertEquals(
+                "common.forbidden",
+                assertThrows(
+                        AurigaException.class,
+                        () ->
+                            network.redeem(
+                                ticket.ticket(), node.node(), device.toString(), "server-a"))
+                    .errorCode()
+                    .code());
+          }
         });
   }
 

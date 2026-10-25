@@ -61,7 +61,7 @@ public interface NetworkAuthority {
     }
   }
 
-  /** Shared defaults from network design section 10; rates/counters belong to collab. */
+  /** Platform ceilings from network design section 10; rates/counters belong to collab. */
   enum Limit {
     PAYLOAD_BYTES(65536),
     BODY_BYTES(16384),
@@ -129,7 +129,10 @@ public interface NetworkAuthority {
 
   Ticket prepare(String deviceAccessToken, String node, String serverAudience);
 
-  /** Exact svc:ai-gateway only. The audience MUST come from the verified Broker callout. */
+  /**
+   * Exact svc:ai-gateway only. The audience MUST come from the verified Broker callout. A known
+   * ticket is consumed even when the supplied node/device/audience binding is rejected.
+   */
   Connection redeem(String ticket, String node, String device, String serverAudience);
 
   /** Exact svc:ai-gateway / svc:collab only; revoked or unknown has the same denied response. */

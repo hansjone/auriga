@@ -12,7 +12,6 @@ import auriga.iam.api.NetworkAuthority.*;
 import java.math.BigInteger;
 import java.time.*;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.*;
@@ -21,7 +20,10 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.security.core.context.SecurityContextHolder;
 import tools.jackson.databind.node.ObjectNode;
 
-/** Same in-memory I/O replacement style as IamFlowTest; no service/port is started. */
+/**
+ * In-memory policy tests only. This replacement does not model rollback or database concurrency;
+ * NetworkAuthorityPostgresTest is the only evidence for reservations and atomic redemption.
+ */
 class NetworkAuthorityTest {
   final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
 
@@ -272,14 +274,7 @@ class NetworkAuthorityTest {
   }
 
   @Test
-  void failedBindingBurnsReservationAndSupportsFullUnsignedDisplay() {
-    business(
-        () -> {
-          when(devices.credential(anyString(), anyString(), anyString())).thenReturn(null);
-          forbidden(this::register);
-          when(devices.credential(anyString(), anyString(), anyString())).thenReturn(identity);
-          assertEquals("2", register().node());
-        });
+  void supportsFullUnsignedDisplay() {
     assertTrue(IamNetworkAuthority.validNumber("18446744073709551615", false));
     assertFalse(IamNetworkAuthority.validNumber("18446744073709551616", false));
     for (String bad : List.of("0", "01", "-1", "1.0", "ff"))
@@ -298,10 +293,6 @@ class NetworkAuthorityTest {
           assertEquals(clock.instant().plusSeconds(30), ticket.expiresAt());
           assertFalse(rows.toString().contains(ticket.ticket()));
           service("svc:ai-gateway");
-          forbidden(() -> network.redeem(ticket.ticket(), "1", device.toString(), "server-b"));
-          forbidden(() -> network.redeem(ticket.ticket(), "2", device.toString(), "server-a"));
-          forbidden(
-              () -> network.redeem(ticket.ticket(), "1", UUID.randomUUID().toString(), "server-a"));
           Connection connection =
               network.redeem(ticket.ticket(), "1", device.toString(), "server-a");
           assertEquals(clock.instant().plusSeconds(3600), connection.expiresAt());
@@ -489,6 +480,83 @@ class NetworkAuthorityTest {
   }
 
   @Test
+  void rejectedRegistrationDoesNotReachAllocation() {
+    business(
+        () -> {
+          admin();
+          network.configure(new Configuration(false, true, true, Map.of()));
+          forbidden(this::register);
+          assertEquals(BigInteger.ONE, next);
+          network.configure(new Configuration(true, true, true, Map.of()));
+          when(devices.credential(anyString(), anyString(), anyString())).thenReturn(null);
+          forbidden(this::register);
+          assertEquals(BigInteger.ONE, next);
+        });
+  }
+
+  @Test
+  void mismatchedBindingInvalidatesTicketForCorrectCaller() {
+    business(
+        () -> {
+          register();
+          service("svc:ai-gateway");
+          for (String[] wrong :
+              List.of(
+                  new String[] {"2", device.toString(), "server-a"},
+                  new String[] {"0", device.toString(), "server-a"},
+                  new String[] {"1", UUID.randomUUID().toString(), "server-a"},
+                  new String[] {"1", device.toString(), "server-b"},
+                  new String[] {"1", device.toString(), "server-other"},
+                  new String[] {"1", device.toString(), null})) {
+            var ticket = network.prepare("access", "1", "server-a");
+            forbidden(() -> network.redeem(ticket.ticket(), wrong[0], wrong[1], wrong[2]));
+            forbidden(() -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a"));
+          }
+        });
+  }
+
+  @Test
+  void organizationCanOnlyTightenPlatformLimits() {
+    business(
+        () -> {
+          admin();
+          for (Limit limit : Limit.values()) {
+            network.configure(
+                new Configuration(true, true, true, Map.of(limit, limit.defaultValue())));
+            network.configure(new Configuration(true, true, true, Map.of(limit, 1L)));
+            for (long invalid : new long[] {0, -1, limit.defaultValue() + 1, 9007199254740991L}) {
+              assertEquals(
+                  "common.validation_failed",
+                  assertThrows(
+                          AurigaException.class,
+                          () ->
+                              network.configure(
+                                  new Configuration(true, true, true, Map.of(limit, invalid))))
+                      .errorCode()
+                      .code());
+            }
+          }
+        });
+  }
+
+  @Test
+  void storedOverlargeLimitsCannotRelaxPlatformCeiling() {
+    business(
+        () -> {
+          var configured = Json.object();
+          for (Limit limit : Limit.values()) configured.put(limit.name(), 9007199254740991L);
+          rows.put(key("network_config", "organization"), Json.object("limits", configured));
+          service("svc:collab");
+          var decision = network.check(null);
+          for (Limit limit : Limit.values())
+            assertEquals(limit.defaultValue(), decision.limits().get(limit));
+          configured.put(Limit.BODY_BYTES.name(), 1);
+          rows.put(key("network_config", "organization"), Json.object("limits", configured));
+          assertEquals(1L, network.check(null).limits().get(Limit.BODY_BYTES));
+        });
+  }
+
+  @Test
   void realCredentialAuthorityRechecksDeviceAndBackingSessionWithoutCache() {
     business(
         () -> {
@@ -528,38 +596,5 @@ class NetworkAuthorityTest {
           when(sessions.activeById(sessionId)).thenReturn(null);
           assertNull(real.credential(tenant.toString(), account.toString(), device.toString()));
         });
-  }
-
-  @Test
-  void concurrentRedemptionHasExactlyOneWinner() throws Exception {
-    Ticket ticket =
-        TenantContext.call(
-            tenant,
-            () -> {
-              register();
-              return network.prepare("access", "1", "server-a");
-            });
-    try (var executor = Executors.newFixedThreadPool(2)) {
-      Callable<Boolean> attempt =
-          () -> {
-            try {
-              service("svc:ai-gateway");
-              return TenantContext.call(
-                  tenant,
-                  () -> {
-                    try {
-                      network.redeem(ticket.ticket(), "1", device.toString(), "server-a");
-                      return true;
-                    } catch (AurigaException denied) {
-                      return false;
-                    }
-                  });
-            } finally {
-              SecurityContextHolder.clearContext();
-            }
-          };
-      var results = executor.invokeAll(List.of(attempt, attempt));
-      assertNotEquals(results.get(0).get(), results.get(1).get());
-    }
   }
 }

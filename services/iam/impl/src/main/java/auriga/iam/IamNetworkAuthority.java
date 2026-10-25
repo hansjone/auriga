@@ -51,6 +51,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
             TenantContext.require(),
             () -> {
               store.lock("network-authority");
+              enabled();
+              require(devices.credential(identity.tenant(), identity.account(), identity.device()));
               Node existing = nodeByDevice(identity.device());
               if (existing != null) return existing.node();
               jdbc.update(
@@ -155,42 +157,46 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   @Override
   public Connection redeem(String raw, String nodeId, String device, String audience) {
     caller("svc:ai-gateway");
-    if (raw == null
-        || !raw.matches("[A-Za-z0-9_-]{43}")
-        || !validNumber(nodeId, false)
-        || audience == null
-        || !servers.contains(audience)) return denied();
-    return transaction(
-        () -> {
-          enabled();
-          String hash = Secrets.hash(raw);
-          ObjectNode ticket = store.get("network_ticket", hash, true);
-          if (ticket == null
-              || !ticket.path("node").asString().equals(nodeId)
-              || !ticket.path("device").asString().equals(device)
-              || !ticket.path("audience").asString().equals(audience)
-              || !clock.instant().isBefore(Instant.parse(ticket.path("expiresAt").asString())))
-            return denied();
-          Node node = node(nodeId);
-          if (node == null
-              || node.revoked()
-              || !node.device().equals(device)
-              || !node.account().equals(ticket.path("account").asString())
-              || !node.realm().equals(ticket.path("realm").asString())) return denied();
-          var credential =
-              require(
-                  devices.credential(TenantContext.require().toString(), node.account(), device));
-          Instant expiry =
-              min(
-                  credential.expiresAt(),
-                  clock
-                      .instant()
-                      .plusSeconds(Math.min(3600, limits().get(Limit.CONNECTION_SECONDS))));
-          if (!clock.instant().isBefore(expiry)) return denied();
-          // Deletion and online credential locks commit together. Replay cannot observe a live row.
-          store.delete("network_ticket", hash);
-          return new Connection(node, audience, expiry);
-        });
+    if (raw == null || !raw.matches("[A-Za-z0-9_-]{43}")) return denied();
+    Connection result =
+        transaction(
+            () -> {
+              enabled();
+              String hash = Secrets.hash(raw);
+              ObjectNode ticket = store.get("network_ticket", hash, true);
+              if (ticket == null) return null;
+              // Commit consumption even for a rejected binding. Throwing inside this transaction
+              // would roll back the deletion and let a captured ticket be probed repeatedly.
+              store.delete("network_ticket", hash);
+              if (!validNumber(nodeId, false)
+                  || audience == null
+                  || !servers.contains(audience)
+                  || !ticket.path("node").asString().equals(nodeId)
+                  || !ticket.path("device").asString().equals(device)
+                  || !ticket.path("audience").asString().equals(audience)
+                  || !clock.instant().isBefore(Instant.parse(ticket.path("expiresAt").asString())))
+                return null;
+              Node node = node(nodeId);
+              if (node == null
+                  || node.revoked()
+                  || !node.device().equals(device)
+                  || !node.account().equals(ticket.path("account").asString())
+                  || !node.realm().equals(ticket.path("realm").asString())) return null;
+              var credential =
+                  devices.credential(TenantContext.require().toString(), node.account(), device);
+              if (credential == null
+                  || !TenantContext.require().toString().equals(credential.tenant())
+                  || !clock.instant().isBefore(credential.expiresAt())) return null;
+              Instant expiry =
+                  min(
+                      credential.expiresAt(),
+                      clock
+                          .instant()
+                          .plusSeconds(Math.min(3600, limits().get(Limit.CONNECTION_SECONDS))));
+              if (!clock.instant().isBefore(expiry)) return null;
+              return new Connection(node, audience, expiry);
+            });
+    return result == null ? denied() : result;
   }
 
   @Override
@@ -250,7 +256,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     admin();
     Objects.requireNonNull(configuration);
     for (var entry : configuration.limits().entrySet())
-      if (entry.getValue() <= 0 || entry.getValue() > 9007199254740991L)
+      if (entry.getValue() <= 0 || entry.getValue() > entry.getKey().defaultValue())
         throw new AurigaException(CommonErrors.VALIDATION_FAILED);
     transaction(
         () -> {
@@ -371,7 +377,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
       long value = config.path("limits").path(limit.name()).asLong(limit.defaultValue());
       if (value <= 0 || value > 9007199254740991L)
         throw new AurigaException(CommonErrors.UNAVAILABLE);
-      result.put(limit, value);
+      // Previously persisted settings must not relax the platform ceiling either.
+      result.put(limit, Math.min(value, limit.defaultValue()));
     }
     return result;
   }
