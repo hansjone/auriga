@@ -219,6 +219,30 @@ class DeviceAiResourcePostgresTest {
     return TenantContext.call(tenant, () -> store.tx(() -> store.byId("session", sid, false)));
   }
 
+  ObjectNode otherAccountSession() {
+    return TenantContext.call(
+        tenant,
+        () ->
+            store.tx(
+                () -> {
+                  UUID otherAccount = UUID.randomUUID();
+                  store.insert(
+                      "account",
+                      otherAccount.toString(),
+                      Json.object("accountId", otherAccount, "status", "active"),
+                      null);
+                  return sessions
+                      .create(
+                          otherAccount,
+                          provider,
+                          "portal",
+                          true,
+                          Duration.ofSeconds(600),
+                          Duration.ofSeconds(120))
+                      .session();
+                }));
+  }
+
   @Test
   void realRpcAiAdmissionKeepsPlatformTeamSeparateAndDoesNotTouchIdleOrRefresh() {
     ObjectNode issued = exchange(refresh, true);
@@ -375,6 +399,12 @@ class DeviceAiResourcePostgresTest {
   @Test
   void realRpcRevocationAccountSessionAndOwnershipChangesReturnEmptyInactive() {
     String ai = exchange(refresh, true).path("access_token").asString();
+    var otherSession = otherAccountSession();
+    String otherAccount = otherSession.path("accountId").asString();
+    var originalSession = session();
+    var originalDevice =
+        TenantContext.call(
+            tenant, () -> store.tx(() -> store.get("device", device.toString(), false)));
     withRpc(
         ai,
         authorization,
@@ -400,9 +430,9 @@ class DeviceAiResourcePostgresTest {
                           "revoked",
                           true,
                           "accountId",
-                          UUID.randomUUID().toString(),
+                          otherAccount,
                           "sessionId",
-                          UUID.randomUUID().toString(),
+                          otherSession.path("sessionId").asString(),
                           "scope",
                           "openid");
                   case "account" -> Map.of("status", "disabled");
@@ -413,7 +443,7 @@ class DeviceAiResourcePostgresTest {
                           "audience",
                           "admin",
                           "accountId",
-                          UUID.randomUUID().toString(),
+                          otherAccount,
                           "expiresAt",
                           clock.instant().toString(),
                           "idleExpiresAt",
@@ -430,13 +460,44 @@ class DeviceAiResourcePostgresTest {
                             store.save(table, row);
                             return null;
                           }));
+              var persisted =
+                  TenantContext.call(
+                      tenant,
+                      () ->
+                          store.tx(
+                              () ->
+                                  table.equals("session")
+                                      ? store.byId(table, lookup, false)
+                                      : store.get(table, lookup, false)));
+              assertEquals(
+                  Json.MAPPER.valueToTree(change.getValue()),
+                  persisted.path(change.getKey()),
+                  table + "." + change.getKey());
               assertInactive(rpc.ai(ai));
+              TenantContext.run(
+                  tenant,
+                  () ->
+                      store.tx(
+                          () -> {
+                            store.save(table, original);
+                            return null;
+                          }));
+              assertTrue(rpc.ai(ai).getActive());
             }
             TenantContext.run(
                 tenant,
                 () ->
                     store.tx(
                         () -> {
+                          if (table.equals("account")) {
+                            // Move both FK dependants to the real other account before deletion.
+                            var ownedDevice = originalDevice.deepCopy();
+                            ownedDevice.put("accountId", otherAccount);
+                            store.save("device", ownedDevice);
+                            var ownedSession = originalSession.deepCopy();
+                            ownedSession.put("accountId", otherAccount);
+                            store.save("session", ownedSession);
+                          }
                           store.delete(
                               table,
                               table.equals("session")
@@ -444,6 +505,15 @@ class DeviceAiResourcePostgresTest {
                                   : lookup);
                           return null;
                         }));
+            assertNull(
+                TenantContext.call(
+                    tenant,
+                    () ->
+                        store.tx(
+                            () ->
+                                table.equals("session")
+                                    ? store.byId(table, lookup, false)
+                                    : store.get(table, lookup, false))));
             assertInactive(rpc.ai(ai));
             if (table.equals("session")) continue;
             // Restore the deleted row through the production insert path.
@@ -453,6 +523,10 @@ class DeviceAiResourcePostgresTest {
                     store.tx(
                         () -> {
                           store.insert(table, lookup, original, null);
+                          if (table.equals("account")) {
+                            store.save("session", originalSession);
+                            store.save("device", originalDevice);
+                          }
                           return null;
                         }));
             assertTrue(rpc.ai(ai).getActive());
@@ -799,25 +873,7 @@ class DeviceAiResourcePostgresTest {
     TenantContext.run(
         tenant,
         () -> {
-          UUID otherAccount = UUID.randomUUID();
-          ObjectNode otherSession =
-              store.tx(
-                  () -> {
-                    store.insert(
-                        "account",
-                        otherAccount.toString(),
-                        Json.object("accountId", otherAccount, "status", "active"),
-                        null);
-                    return sessions
-                        .create(
-                            otherAccount,
-                            provider,
-                            "portal",
-                            true,
-                            Duration.ofSeconds(600),
-                            Duration.ofSeconds(120))
-                        .session();
-                  });
+          ObjectNode otherSession = otherAccountSession();
           oauth =
               new OAuthProvider(
                   store,
@@ -834,7 +890,7 @@ class DeviceAiResourcePostgresTest {
                   "sessionId",
                   otherSession.path("sessionId").asString(),
                   "accountId",
-                  otherAccount.toString(),
+                  otherSession.path("accountId").asString(),
                   "scope",
                   "openid",
                   "authorizationMode",
