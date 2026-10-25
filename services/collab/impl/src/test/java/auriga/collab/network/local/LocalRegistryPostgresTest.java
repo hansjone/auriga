@@ -1045,17 +1045,14 @@ class LocalRegistryPostgresTest {
                                 () -> {
                                   var failure =
                                       assertThrows(
-                                          org.springframework.dao.CannotAcquireLockException.class,
+                                          org.springframework.dao.DataAccessException.class,
                                           () ->
                                               jdbc.queryForList(
                                                   "SELECT tenant_id FROM collab."
                                                       + table
                                                       + " WHERE tenant_id=? FOR UPDATE NOWAIT",
                                                   tenant));
-                                  assertEquals(
-                                      "55P03",
-                                      ((java.sql.SQLException) failure.getMostSpecificCause())
-                                          .getSQLState());
+                                  assertEquals("55P03", currentSqlException(failure).getSQLState());
                                   return null;
                                 }))
                     .get(20, TimeUnit.SECONDS);
@@ -1068,6 +1065,15 @@ class LocalRegistryPostgresTest {
       assertNotNull(
           pool.submit(() -> sql(() -> targets.lock(tenant, expected))).get(20, TimeUnit.SECONDS));
     }
+  }
+
+  private static java.sql.SQLException currentSqlException(
+      org.springframework.dao.DataAccessException failure) {
+    // The first JDBC cause describes this probe; deeper causes may be older statements.
+    for (Throwable cause = failure.getCause(); cause != null; cause = cause.getCause()) {
+      if (cause instanceof java.sql.SQLException sql) return sql;
+    }
+    return fail("NOWAIT probe must contain a SQLException", failure);
   }
 
   void awaitRegistrationLock() {
