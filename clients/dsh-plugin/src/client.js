@@ -637,7 +637,31 @@ window.__ModuleLoader__.load({
         };
         function ConsentSection({ settings = false }) {
           useHostState();
-          const api = ctx.get('aurigaConsentUI') ?? consentBridge;
+          const api = ctx.get?.('aurigaConsentUI') ?? consentBridge;
+          const readSnapshot = async () => {
+            const snapshot = await api.snapshot();
+            if (
+              !snapshot ||
+              !Array.isArray(snapshot.pending) ||
+              !Array.isArray(snapshot.rules) ||
+              !Number.isSafeInteger(snapshot.policyRevision) ||
+              !snapshot.defaults ||
+              !['conversation', 'execution'].every((layer) =>
+                ['ask_each', 'same_org', 'allowlist', 'deny_all'].includes(
+                  snapshot.defaults[layer],
+                ),
+              ) ||
+              snapshot.organization?.available !== true ||
+              typeof snapshot.organization.revision !== 'string' ||
+              !['conversation', 'execution'].every((layer) =>
+                ['allow', 'ask_each', 'deny_all'].includes(
+                  snapshot.organization[layer],
+                ),
+              )
+            )
+              throw failure();
+            return snapshot;
+          };
           const [view, setView] = React.useState(null);
           const [status, setStatus] = React.useState('loading');
           const [revision, reload] = React.useReducer((n) => n + 1, 0);
@@ -653,7 +677,7 @@ window.__ModuleLoader__.load({
             setStatus('loading');
             if (api) {
               Promise.resolve()
-                .then(() => api.snapshot())
+                .then(() => readSnapshot())
                 .then(
                   (snapshot) => {
                     if (current) {
@@ -682,7 +706,7 @@ window.__ModuleLoader__.load({
             try {
               await operation();
               if (!current()) return;
-              const snapshot = await api.snapshot();
+              const snapshot = await readSnapshot();
               if (current()) {
                 setView(snapshot);
                 setStatus('ready');

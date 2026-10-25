@@ -148,6 +148,17 @@ function data() {
   };
 }
 
+test('malformed consent snapshots leave settings unavailable without crashing the shell', async () => {
+  const f = await fixture({ snapshot: async () => ({ mode: 'connect' }) });
+  try {
+    const tree = await f.render(true);
+    assert.match(text(tree), /暂时无法加载/);
+    assert.equal(all(tree).filter((node) => node.type === 'select').length, 0);
+  } finally {
+    f.close();
+  }
+});
+
 test('native inbox HTTP bridge fetches a fresh CSRF and sends only the user choice', async () => {
   const state = data();
   const requests = [];
