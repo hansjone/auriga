@@ -955,7 +955,7 @@ window.__ModuleLoader__.load({
         }
         function Settings() {
           const host = useHostState();
-          const [phase] = useBootstrap();
+          const [phase, retry] = useBootstrap();
           const boot = phase.status === 'ready' ? phase.boot : undefined;
           const [View, setView] = React.useState(null);
           const [loadFailed, setLoadFailed] = React.useState(false);
@@ -963,16 +963,17 @@ window.__ModuleLoader__.load({
             let live = true;
             import(localURL('auriga/settings/view.js'))
               .then((module) => {
-                if (live)
+                if (live && !disposed)
                   setView(() =>
                     module.createSettingsView(React, {
                       localURL,
+                      fetcher: fetch,
                       navigate: (url) => window.location.assign(url),
                     }),
                   );
               })
               .catch(() => {
-                if (live) setLoadFailed(true);
+                if (live && !disposed) setLoadFailed(true);
               });
             return () => {
               live = false;
@@ -992,13 +993,33 @@ window.__ModuleLoader__.load({
               'aria-label': 'Auriga',
             },
             h('h2', null, 'Auriga'),
-            View
-              ? h(View, { locale: host.locale })
-              : h(
-                  'p',
-                  { role: 'status' },
-                  t(loadFailed ? 'unavailable' : 'loading'),
+            h('h3', null, t('connection')),
+            notice(phase, retry, true),
+            boot && row('mode', t(boot.mode)),
+            boot && row('protocol', String(boot.protocol)),
+            boot?.connection && row('endpoint', boot.connection.endpointId),
+            boot?.connection &&
+              row('received', String(boot.connection.received ?? 0)),
+            boot &&
+              h(
+                'p',
+                null,
+                t(
+                  boot.source === 'package'
+                    ? boot.connection
+                      ? 'connectHint'
+                      : 'packageHint'
+                    : 'managedHint',
                 ),
+              ),
+            phase.status === 'ready' &&
+              (View
+                ? h(View, { locale: host.locale })
+                : h(
+                    'p',
+                    { role: 'status' },
+                    t(loadFailed ? 'unavailable' : 'loading'),
+                  )),
             h(ConsentSection, { settings: true }),
             h('h3', null, t('about')),
             row('pluginVersion', boot?.pluginVersion),

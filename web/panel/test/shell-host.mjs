@@ -14,6 +14,7 @@ export function surfaceHost(
     hostTheme = 'light',
     osTheme = 'light',
     consentFetch,
+    settingsFetch,
   } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
@@ -165,6 +166,7 @@ export function surfaceHost(
       releaseNode(node.lastChild, owner);
       node.lastChild.remove();
     }
+    if ('value' in value.props) node.value = value.props.value;
     return node;
   }
   const mount = (Component) => {
@@ -266,6 +268,31 @@ export function surfaceHost(
     },
   };
   let nextTimer = 0;
+  const settingsImports = [];
+  let preferences = {
+    platformOrigin: '',
+    activeOrigin: '',
+    deployment: 'cloud',
+  };
+  const routeFetch = (url, init = {}) => {
+    const path = new URL(url).pathname;
+    if (path.includes('/auriga/settings/')) {
+      if (settingsFetch) return settingsFetch(url, init);
+      if (path.endsWith('/save'))
+        preferences = { ...preferences, ...JSON.parse(init.body) };
+      return Promise.resolve(
+        response(
+          200,
+          path.endsWith('/test') ? { reachable: true } : preferences,
+        ),
+      );
+    }
+    if (path.includes('/auriga/local-login/consent/'))
+      return consentFetch
+        ? consentFetch(url, init)
+        : Promise.resolve(response(503, { code: 'common.unavailable' }));
+    return fetchImpl(url, init);
+  };
   vm.runInNewContext(
     readFileSync(
       new URL('../../../clients/dsh-plugin/src/client.js', import.meta.url),
@@ -277,13 +304,7 @@ export function surfaceHost(
       customElements: window.customElements,
       URL,
       AbortController: globalThis.AbortController,
-      fetch: (url, init) => {
-        if (new URL(url).pathname.includes('/auriga/local-login/consent/'))
-          return consentFetch
-            ? consentFetch(url, init)
-            : Promise.resolve(response(503, { code: 'common.unavailable' }));
-        return fetchImpl(url, init);
-      },
+      fetch: routeFetch,
       setTimeout(fn, delay) {
         const id = ++nextTimer;
         counts.timers.set(id, { fn, delay });
@@ -295,6 +316,33 @@ export function surfaceHost(
     },
     {
       importModuleDynamically: async (specifier) => {
+        if (new URL(specifier).pathname.endsWith('/auriga/settings/view.js')) {
+          settingsImports.push(specifier);
+          // Evaluate the actual browser module, not a fake exported component.
+          const source = settingsFetch
+            ? await (
+                await settingsFetch(specifier, {
+                  credentials: 'same-origin',
+                  redirect: 'error',
+                  cache: 'no-store',
+                })
+              ).text()
+            : readFileSync(
+                new URL(
+                  '../../../clients/dsh-plugin/src/settings/view.js',
+                  import.meta.url,
+                ),
+                'utf8',
+              );
+          const module = new vm.SourceTextModule(source, {
+            context: vm.createContext({ AbortSignal: globalThis.AbortSignal }),
+          });
+          await module.link(() => {
+            throw new Error('Unexpected settings dependency');
+          });
+          await module.evaluate();
+          return module;
+        }
         moduleImports.push(specifier);
         const Constructor = await modules.get(specifier);
         if (!Constructor) throw new Error('Module was not evaluated');
@@ -378,6 +426,7 @@ export function surfaceHost(
     dark,
     completeScript,
     moduleImports,
+    settingsImports,
     provideModule(script, Constructor) {
       modules.set(script.src, Constructor);
     },

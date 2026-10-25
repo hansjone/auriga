@@ -164,7 +164,7 @@ for (const variant of ['digest', 'source'])
     }
   });
 
-test('independent native slots: settings uses trusted bootstrap, distinct versions and no editing or scripts', async () => {
+test('independent native slots: settings retains trusted bootstrap and versions beside editable preferences without leaking bootstrap credentials', async () => {
   const calls = [];
   const host = surfaceHost(async (url, init) => {
     calls.push({ url, init });
@@ -188,13 +188,14 @@ test('independent native slots: settings uses trusted bootstrap, distinct versio
     await flush();
     assert.match(settings.root.textContent, /系统托管.*协议版本1/);
     assert.match(settings.root.textContent, /插件版本0\.2\.3.*界面版本2\.4\.6/);
-    assert.match(settings.root.textContent, /账号、认证与安全/);
+    assert.match(settings.root.textContent, /账号与安全/);
     assert.equal(
-      settings.root.querySelector(
-        'input,select,form,nav,[role="tab"],[role="dialog"]',
-      ),
+      settings.root.querySelector('form,nav,[role="tab"],[role="dialog"]'),
       null,
     );
+    assert.ok(settings.root.querySelector('input[aria-label="平台地址"]'));
+    assert.ok(settings.root.querySelector('select[aria-label="默认部署位置"]'));
+    assert.equal(host.settingsImports.length, 1);
     assert.equal(host.document.querySelector('script'), null);
     assert.doesNotMatch(
       settings.root.textContent,
@@ -727,7 +728,7 @@ test('host theme overrides opposite OS preference and never installs an independ
     assert.equal(panel.context.theme, 'dark');
     assert.equal(
       settings.root.querySelector(
-        'select,input[type=radio],[data-theme-toggle]',
+        'select:not([aria-label="默认部署位置"]),input[type=radio],[data-theme-toggle]',
       ),
       null,
     );
