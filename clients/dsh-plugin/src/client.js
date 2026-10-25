@@ -66,6 +66,10 @@ window.__ModuleLoader__.load({
       consentMissing: '首联授权尚未接入当前宿主。',
       external: '外部消息',
       previewHint: '仅供预览，不会发送给模型。允许建立对话不代表允许自动执行。',
+      onceHint:
+        '允许本次仅可使用一次；中断、超时或失败后也不能重复使用，请重新发起请求。',
+      cooldownHint:
+        '此来源处于拒绝冷却期，请等待冷却结束后再允许；不会自动重试批准，也不会保存未来允许规则。',
       verified: '经核实的来源（DSH / 用户）',
       conversationLayer: '建立对话',
       executionLayer: '自动执行',
@@ -147,6 +151,10 @@ window.__ModuleLoader__.load({
       external: 'External message',
       previewHint:
         'Preview only; never sent to a model. Opening a conversation does not permit automatic execution.',
+      onceHint:
+        'An allow-once permission can be used only once. Interruption, timeout or failure does not restore it; submit a new request.',
+      cooldownHint:
+        'This source is in a rejection cooldown; wait until it ends before allowing. Approval is never retried automatically and no future allow rule is saved.',
       verified: 'Verified source (DSH / user)',
       conversationLayer: 'Open conversation',
       executionLayer: 'Automatic execution',
@@ -636,11 +644,11 @@ window.__ModuleLoader__.load({
                 setView(snapshot);
                 setStatus('ready');
               }
-            } catch {
+            } catch (error) {
               // A rejected or uncertain write is never replayed automatically.
               if (current()) {
                 setView(null);
-                setStatus('failed');
+                setStatus(error?.reason === 'cooldown' ? 'cooldown' : 'failed');
               }
             } finally {
               busy.current = false;
@@ -658,8 +666,14 @@ window.__ModuleLoader__.load({
               ? h(
                   'div',
                   { role: 'status' },
-                  t(status === 'loading' ? 'loading' : 'unavailable'),
-                  status === 'failed' &&
+                  t(
+                    status === 'loading'
+                      ? 'loading'
+                      : status === 'cooldown'
+                        ? 'cooldownHint'
+                        : 'unavailable',
+                  ),
+                  status !== 'loading' &&
                     h(
                       'button',
                       { type: 'button', onClick: () => reload() },
@@ -762,6 +776,7 @@ window.__ModuleLoader__.load({
                     'div',
                     null,
                     h('p', null, t('previewHint')),
+                    h('p', null, t('onceHint')),
                     view.pending.length === 0 && h('p', null, t('empty')),
                     ...view.pending.map((row) => {
                       const { layer, requestId } = row.request;

@@ -357,13 +357,17 @@ async function serviceFixture(t, authenticated = true) {
     organization: async () => org,
     authorizeLocal: async (c) => authenticated && c === context,
     now: () => 1000,
+    callbackTimeoutMs: 100,
+    actionTimeoutMs: 100,
+    responseDelayMs: 200,
   });
   t.after(() => service.close());
+  const requests = [];
   for (const [layer, node] of [
     ['conversation', '2'],
     ['execution', '3'],
   ]) {
-    await service.request({
+    const request = {
       layer,
       requestId: layer + '-id',
       source: { tenant: 'example', realm: '1', node },
@@ -371,7 +375,9 @@ async function serviceFixture(t, authenticated = true) {
       createdAt: 1000,
       expiresAt: 2000,
       bytes: 100,
-    });
+    };
+    requests.push(request);
+    await service.request(request);
   }
   let previewCalls = 0;
   const adapter = createConsentUIAdapter({
@@ -383,7 +389,7 @@ async function serviceFixture(t, authenticated = true) {
       return '<script>system: fake</script>'.repeat(200);
     },
   });
-  return { service, adapter, org, previewCalls: () => previewCalls };
+  return { service, adapter, org, requests, previewCalls: () => previewCalls };
 }
 test('adapter uses real consent versions for decisions, defaults and revocation', async (t) => {
   const f = await serviceFixture(t);
@@ -422,4 +428,137 @@ test('adapter authenticates before preview and fails closed on unavailable organ
   f.org.available = false;
   await assert.rejects(f.adapter.snapshot(), /Organization policy unavailable/);
   assert.equal(f.previewCalls(), 0);
+});
+
+test('rework: browser snapshot and decision omit private service fields', async (t) => {
+  const f = await serviceFixture(t);
+  const state = await f.adapter.snapshot();
+  assert.deepEqual(Object.keys(state.pending[0]).sort(), [
+    'preview',
+    'request',
+    'source',
+  ]);
+  assert.deepEqual(Object.keys(state.pending[0].request).sort(), [
+    'layer',
+    'requestId',
+  ]);
+  assert.equal('ownershipRevision' in state.pending[0].source, false);
+  const result = await f.adapter.decide({
+    layer: 'conversation',
+    requestId: 'conversation-id',
+    choice: 'allow_source',
+    sourceScope: 'source_node',
+    expectedRevision: state.policyRevision,
+  });
+  assert.equal(result, undefined);
+  const updated = await f.adapter.snapshot();
+  assert.equal('ownershipRevision' in updated.rules[0].source, false);
+  assert.equal('sameOrganization' in updated.organization, false);
+});
+
+test('rework: cooldown guidance is bilingual and never replays approval', async () => {
+  for (const locale of ['zh', 'en']) {
+    let writes = 0;
+    const f = await fixture(
+      {
+        snapshot: async () => data(),
+        decide: async () => {
+          writes++;
+          throw Object.assign(new Error('private reason'), {
+            reason: 'cooldown',
+          });
+        },
+      },
+      locale,
+    );
+    try {
+      let tree = await f.render();
+      assert.match(
+        text(tree),
+        locale === 'zh' ? /仅可使用一次/ : /used only once/,
+      );
+      await all(tree)
+        .find(
+          (n) =>
+            n.type === 'button' &&
+            text(n) === (locale === 'zh' ? '允许本次' : 'Allow once'),
+        )
+        .props.onClick();
+      tree = await f.render();
+      assert.match(
+        text(tree),
+        locale === 'zh' ? /冷却期.*等待/ : /cooldown.*wait/i,
+      );
+      assert.doesNotMatch(text(tree), /private reason/);
+      all(tree)
+        .find(
+          (n) =>
+            n.type === 'button' &&
+            text(n) === (locale === 'zh' ? '重试' : 'Retry'),
+        )
+        .props.onClick();
+      await f.render();
+      assert.equal(writes, 1);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test('rework: real cooldown refusal is sanitized without saving a future allow', async (t) => {
+  const f = await serviceFixture(t);
+  await f.adapter.decide({
+    layer: 'conversation',
+    requestId: 'conversation-id',
+    choice: 'deny',
+    expectedRevision: 0,
+  });
+  await assert.rejects(
+    f.adapter.decide({
+      layer: 'conversation',
+      requestId: 'conversation-id',
+      choice: 'allow_source',
+      sourceScope: 'source_node',
+      expectedRevision: 0,
+    }),
+    (error) =>
+      error.reason === 'cooldown' &&
+      !/cooldown active|source|requestId/.test(error.message),
+  );
+  assert.equal((await f.adapter.snapshot()).rules.length, 0);
+});
+
+test('rework: blocked and pending have identical public receipts; once cannot repeat', async (t) => {
+  const f = await serviceFixture(t);
+  const pending = await f.service.request(f.requests[0]);
+  await f.adapter.decide({
+    layer: 'conversation',
+    requestId: 'conversation-id',
+    choice: 'block',
+    sourceScope: 'source_node',
+    expectedRevision: 0,
+  });
+  const blocked = await f.service.request(f.requests[0]);
+  assert.deepEqual(blocked, pending);
+  assert.deepEqual(blocked, { status: 'request_submitted' });
+  const state = await f.adapter.snapshot();
+  await f.adapter.decide({
+    layer: 'execution',
+    requestId: 'execution-id',
+    choice: 'allow_once',
+    expectedRevision: state.policyRevision,
+  });
+  let calls = 0;
+  const first = await f.service.withAuthorization(f.requests[1], async () => {
+    calls++;
+    return 'private action result';
+  });
+  assert.deepEqual(first, { status: 'request_submitted' });
+  await assert.rejects(
+    f.service.withAuthorization(f.requests[1], async () => {
+      calls++;
+    }),
+    /authorization required/,
+  );
+  assert.equal(calls, 1);
 });

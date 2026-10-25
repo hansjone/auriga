@@ -14,6 +14,26 @@
 - `snapshot()`：使用 `createConsentUIAdapter(...).snapshot()` 的投影。
 - `decide(input)`、`setDefault(layer, mode)`、`revoke(input)`：映射同名适配方法。
 
+### 返工 1：更新后的 consent 接口边界
+
+`request(metadata)` 和 `withAuthorization` 只返回匿名 `{status:'request_submitted'}`，
+不再把返回值当成内部请求行或执行结果。此公开状态在待决和被屏蔽时完全相同，
+界面不能由它推断目标存在、拒绝原因或授权结果。只有真实收件方经本地认证后，
+才可用 `listPending`（或需要单项状态时的 `getRequest`）读取私人状态；
+收件方自己的设置仍可管理屏蔽名单，不能向远端来源暴露这些设置。
+
+浏览器 `snapshot()` 使用显式字段投影：待决项仅有 `request.layer/requestId`、
+经核实的 `source.tenant/realm/node/userId` 与纯文本 `preview`；
+不含 `localReason/status/decisionId/manual/usedAt/ownershipRevision` 等内部数据。
+名单仅保留显示与撤销所需的 `id/layer/scope/source/choice`，组织仅保留上限和版本。
+`decide()` 成功不返回内部行；冷却错误仅映射固定 `reason='cooldown'`，其他决定错误
+映射 `reason='unavailable'`，桥接须保留这个固定分类，不传服务异常原文。
+
+“允许本次”绑定稳定请求且只能消费一次，动作超时/中断不恢复许可；UI 不复用许可，
+由 consent 在动作前持久消费。处于拒绝冷却期时提示等待，不自动重试批准，
+也不保存未来允许规则。重新读取按钮只刷新快照，不重复上一次写操作。
+运行时桥接由插件总装任务完成，本返工不扩展到运行时装配。
+
 这要求建立认证的本地宿主桥，不能将 Node 对象直接当作浏览器服务，
 不能绕过宿主 Connection/Origin、真实本地用户校验与写请求 CSRF 防护。
 服务缺失时不要回退总部 `fetch`、全局对象、localStorage 或 MCP。
