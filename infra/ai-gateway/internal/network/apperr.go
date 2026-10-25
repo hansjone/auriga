@@ -6,7 +6,6 @@ import "fmt"
 const (
 	CodeProtocolError = "network.protocol_error"
 	CodeStaleEpoch    = "network.stale_epoch"
-	CodeQuotaExceeded = "network.quota_exceeded"
 	CodeConflict      = "network.conflict"
 )
 
@@ -32,8 +31,4 @@ func protocolError(requestID, detail string) *AppError {
 
 func staleEpoch(requestID string) *AppError {
 	return &AppError{Code: CodeStaleEpoch, Scope: "connection", RequestID: requestID}
-}
-
-func quotaExceeded(requestID string) *AppError {
-	return &AppError{Code: CodeQuotaExceeded, Scope: "request", RequestID: requestID}
 }
