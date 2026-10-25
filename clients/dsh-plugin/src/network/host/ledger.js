@@ -2,6 +2,19 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { CODES, HostSeamError } from './errors.js';
 import { isUint64String } from './address.js';
+import { createKeyedMutex } from './keyed-mutex.js';
+
+/** @type {WeakMap<Ledger, ReturnType<typeof createKeyedMutex>>} */
+const registerMutexes = new WeakMap();
+/** @param {Ledger} ledger */
+function registrationLocks(ledger) {
+  let locks = registerMutexes.get(ledger);
+  if (!locks) {
+    locks = createKeyedMutex();
+    registerMutexes.set(ledger, locks);
+  }
+  return locks;
+}
 
 const LEDGER_VERSION = 1;
 const UINT64_MAX = (1n << 64n) - 1n;
@@ -47,7 +60,7 @@ const MAX_AUDIT = 256;
  *
  * @typedef {{
  *   opId: string, local: string, nonce: string, fingerprint: string,
- *   purpose: string, state: 'reserved'|'registered'|'abandoned'|'conflict',
+ *   purpose: string, mappingDigest: string, state: 'reserved'|'registered'|'abandoned'|'conflict',
  *   registrationId: string|null,
  * }} LocalRegistration
  *
@@ -73,6 +86,7 @@ const MAX_AUDIT = 256;
  *   recipients: Record<string, RecipientRecord>,
  *   results: Record<string, { resultId: string, recipientId: string, status: string, sent: boolean }>,
  *   audit: Array<{ at: string, recipientId: string, reason: string }>,
+ *   inboundPolicy?: import('../policy/inbound-policy.js').InboundPolicyState,
  * }} LedgerState
  */
 
@@ -117,7 +131,76 @@ function checkState(value, identity) {
       CODES.ledgerUnavailable,
       'ledger identity mismatch',
     );
+  checkAllocationState(s);
   return s;
+}
+
+/** Missing counter/queue/mapping evidence cannot be repaired by inspecting
+ * live sessions or by lifting the counter to the platform high-water mark.
+ * @param {LedgerState} s */
+function checkAllocationState(s) {
+  const invalid = () => {
+    throw new HostSeamError(
+      CODES.ledgerUnavailable,
+      'allocation log incomplete',
+    );
+  };
+  if (
+    !s.locals ||
+    typeof s.locals !== 'object' ||
+    Array.isArray(s.locals) ||
+    !s.registrations ||
+    typeof s.registrations !== 'object' ||
+    Array.isArray(s.registrations) ||
+    !Array.isArray(s.localQueue) ||
+    s.localQueue.length > 1
+  )
+    invalid();
+  let maximum = 0n;
+  for (const [local, entry] of Object.entries(s.locals)) {
+    if (
+      !isUint64String(local) ||
+      local === '0' ||
+      !entry ||
+      entry.local !== local ||
+      typeof entry.opId !== 'string' ||
+      !entry.opId ||
+      typeof entry.purpose !== 'string' ||
+      !entry.purpose ||
+      typeof entry.mappingDigest !== 'string' ||
+      !entry.mappingDigest ||
+      typeof entry.nonce !== 'string' ||
+      !entry.nonce ||
+      !['reserved', 'registered', 'abandoned', 'conflict'].includes(
+        entry.state,
+      ) ||
+      s.registrations[entry.opId] !== local
+    )
+      invalid();
+    if (
+      entry.fingerprint !==
+      createHash('sha256')
+        .update(
+          `${entry.opId}\0${local}\0${entry.nonce}\0${entry.mappingDigest}`,
+        )
+        .digest('hex')
+    )
+      invalid();
+    const unsettled = entry.state === 'reserved' || entry.state === 'conflict';
+    if (unsettled !== (s.localQueue[0] === entry.opId)) invalid();
+    if (
+      !unsettled &&
+      (typeof entry.registrationId !== 'string' || !entry.registrationId)
+    )
+      invalid();
+    if (BigInt(local) > maximum) maximum = BigInt(local);
+  }
+  if (
+    maximum.toString() !== s.localHighWater ||
+    Object.keys(s.registrations).length !== Object.keys(s.locals).length ||
+    s.localQueue.some((id) => !s.locals[s.registrations[id]])
+  )
+    invalid();
 }
 
 /**
@@ -164,6 +247,7 @@ export async function openLedger({
   }
   let tail = Promise.resolve();
   let closed = false;
+  let commitFailed = false;
 
   /**
    * @template T
@@ -172,11 +256,19 @@ export async function openLedger({
    */
   function update(mutate) {
     const run = tail.then(async () => {
-      if (closed) throw new HostSeamError(CODES.ledgerUnavailable);
+      if (closed || commitFailed)
+        throw new HostSeamError(CODES.ledgerUnavailable);
       const draft = structuredClone(state);
       const result = mutate(draft);
       draft.revision = state.revision + 1;
-      await handle.commit(draft);
+      try {
+        await handle.commit(draft);
+      } catch (error) {
+        // Rename/fsync may have committed even when the call failed. Never
+        // overwrite an uncertain durable snapshot with our old memory view.
+        commitFailed = true;
+        throw error;
+      }
       state = draft;
       return result;
     });
@@ -198,6 +290,10 @@ export async function openLedger({
       return state;
     },
     update,
+    assertAvailable() {
+      if (closed || commitFailed)
+        throw new HostSeamError(CODES.ledgerUnavailable);
+    },
     nowIso() {
       return now().toISOString();
     },
@@ -246,11 +342,23 @@ export function digestOf(value) {
  * @returns {Promise<LocalRegistration>}
  */
 export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
+  if (!opId || !purpose || !mappingDigest)
+    throw new HostSeamError(CODES.protocolError, 'allocation intent required');
   return ledger.update((draft) => {
     if (draft.identityConflict)
       throw new HostSeamError(CODES.recoveryConflict, 'identity conflict');
     const existing = draft.locals[draft.registrations[opId] ?? ''];
-    if (existing) return existing;
+    if (existing) {
+      if (
+        existing.purpose !== purpose ||
+        existing.mappingDigest !== mappingDigest
+      )
+        throw new HostSeamError(
+          CODES.localAllocationConflict,
+          'mapping mismatch',
+        );
+      return structuredClone(existing);
+    }
     const head = draft.localQueue[0];
     if (head !== undefined)
       throw new HostSeamError(CODES.localQueueBusy, 'local queue busy');
@@ -268,6 +376,7 @@ export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
         .update(`${opId}\0${local}\0${nonce}\0${mappingDigest}`)
         .digest('hex'),
       purpose,
+      mappingDigest,
       state: 'reserved',
       registrationId: null,
     };
@@ -275,7 +384,7 @@ export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
     draft.locals[local] = entry;
     draft.registrations[opId] = local;
     draft.localQueue.push(opId);
-    return entry;
+    return structuredClone(entry);
   });
 }
 
@@ -288,28 +397,45 @@ export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
  * @returns {Promise<LocalRegistration>}
  */
 export async function registerReservedLocal(ledger, opId, registerLocal) {
-  const local = ledger.peek().registrations[opId];
-  const entry = local === undefined ? undefined : ledger.peek().locals[local];
-  if (!entry) throw new HostSeamError(CODES.protocolError, 'unknown op');
-  if (entry.state === 'registered') return structuredClone(entry);
-  if (entry.state !== 'reserved')
-    throw new HostSeamError(CODES.localAllocationConflict, entry.state);
-  const result = await registerLocal(structuredClone(entry));
-  const outcome = await ledger.update((draft) => {
-    const current = draft.locals[entry.local];
-    if (result?.status === 'registered' && result.registrationId) {
-      current.state = 'registered';
-      current.registrationId = result.registrationId;
-      draft.localQueue = draft.localQueue.filter((id) => id !== opId);
-      return structuredClone(current);
-    }
-    // A different op/fingerprint already owns this number, or it is not above
-    // the platform high-water mark: stop new allocation for this identity.
-    current.state = 'conflict';
-    draft.identityConflict = CODES.localAllocationConflict;
-    return null;
+  return registrationLocks(ledger).run('register', async () => {
+    ledger.assertAvailable();
+    if (ledger.peek().identityConflict)
+      throw new HostSeamError(CODES.recoveryConflict);
+    const local = ledger.peek().registrations[opId];
+    const entry = local === undefined ? undefined : ledger.peek().locals[local];
+    if (!entry) throw new HostSeamError(CODES.protocolError, 'unknown op');
+    if (entry.state === 'registered') return structuredClone(entry);
+    if (entry.state !== 'reserved')
+      throw new HostSeamError(CODES.localAllocationConflict, entry.state);
+    if (ledger.peek().localQueue[0] !== opId)
+      throw new HostSeamError(CODES.localQueueBusy);
+    const result = await registerLocal(structuredClone(entry));
+    if (!(
+      result?.status === 'conflict' ||
+      (result?.status === 'registered' &&
+        typeof result.registrationId === 'string' &&
+        result.registrationId)
+    ))
+      throw new HostSeamError(
+        CODES.protocolError,
+        'unknown registration response',
+      );
+    const outcome = await ledger.update((draft) => {
+      const current = draft.locals[entry.local];
+      if (result?.status === 'registered' && result.registrationId) {
+        current.state = 'registered';
+        current.registrationId = result.registrationId;
+        draft.localQueue = draft.localQueue.filter((id) => id !== opId);
+        return structuredClone(current);
+      }
+      // A different op/fingerprint already owns this number, or it is not above
+      // the platform high-water mark: stop new allocation for this identity.
+      current.state = 'conflict';
+      draft.identityConflict = CODES.localAllocationConflict;
+      return null;
+    });
+    if (!outcome)
+      throw new HostSeamError(CODES.localAllocationConflict, 'conflict');
+    return outcome;
   });
-  if (!outcome)
-    throw new HostSeamError(CODES.localAllocationConflict, 'conflict');
-  return outcome;
 }

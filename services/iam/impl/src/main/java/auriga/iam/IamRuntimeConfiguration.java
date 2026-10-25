@@ -218,6 +218,25 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  NetworkAuthority iamNetworkAuthority(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      AuditLogger audit,
+      Clock clock,
+      Environment env) {
+    return new IamNetworkAuthority(
+        store,
+        new DeviceAccessAuthority(store, sessions, tokens),
+        audit,
+        clock,
+        Set.copyOf(
+            Binder.get(env)
+                .bind("auriga.iam.network.server-audiences", Bindable.listOf(String.class))
+                .orElse(List.of())));
+  }
+
+  @Bean
   IamAccounts iamAccounts(IamStore store) {
     return new IamAccounts(store);
   }
