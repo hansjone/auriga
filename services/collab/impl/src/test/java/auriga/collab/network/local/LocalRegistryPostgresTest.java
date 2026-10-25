@@ -77,6 +77,18 @@ class LocalRegistryPostgresTest {
                         jdbc.update(
                             "INSERT INTO collab.network_node(tenant_id,realm,node_id) VALUES (?,'2','20')",
                             LEGACY_TENANT)));
+    CommonMigrations.serviceFlyway(configuration.target("12").load()).migrate();
+    TenantContext.run(
+        LEGACY_TENANT,
+        () ->
+            new TransactionTemplate(manager)
+                .executeWithoutResult(
+                    t ->
+                        jdbc.update(
+                            "INSERT INTO collab.network_local_registration(id,tenant_id,realm,node_id,local_id,allocation_op_id,allocation_fingerprint,registration_revision,previous_high_water,granted_epoch,granted_boot_id) VALUES (?,?,'2','20',7,'legacy',?,1,0,1,'old-boot')",
+                            UuidV7.next(),
+                            LEGACY_TENANT,
+                            FP)));
     CommonMigrations.serviceFlyway(configuration.target("latest").load()).migrate();
   }
 
@@ -128,10 +140,14 @@ class LocalRegistryPostgresTest {
                           "network.recovery_conflict", legacy.get("local_identity_reason"));
                       assertNotNull(legacy.get("local_identity_observed_at"));
                       assertEquals(
-                          0,
+                          1,
                           jdbc.queryForObject(
                               "SELECT count(*) FROM collab.network_local_registration",
                               Integer.class));
+                      assertNull(
+                          jdbc.queryForObject(
+                              "SELECT address_type FROM collab.network_local_registration",
+                              String.class));
                     }));
     assertEquals("healthy", state("local_identity_status"));
   }
@@ -147,6 +163,115 @@ class LocalRegistryPostgresTest {
     assertEquals("1", retry.registrationRevision());
     assertEquals("7", retry.localHighWater());
     assertEquals("2", state("registration_revision"));
+  }
+
+  @Test
+  void typedSubagentRetriesAndRecoversOnlyItsOriginalWitness() {
+    var request = frame("7", "op", FP, "0").put("address_type", "subagent");
+    var first = call(() -> registry.register(tenant, request.toString()));
+    var retry = call(() -> registry.register(tenant, request.toString()));
+    assertEquals("subagent", first.addressType());
+    assertEquals(first.registrationId(), retry.registrationId());
+    var recovery = recover("7", "0", pending("7", "op", FP).put("address_type", "subagent"));
+    assertEquals("subagent", recovery.pendingRegistration().addressType());
+    assertEquals(first.registrationId(), recovery.pendingRegistration().registrationId());
+    assertEquals("1", state("registration_revision"));
+    UUID contact = contact("allowed", "conversation", NOW.plusSeconds(600));
+    error(
+        "network.local_registration_required",
+        () -> assign(contact, "7", first.registrationId(), "create"));
+  }
+
+  @Test
+  void categoryChangeConflictsEvenForIdenticalOriginalOperation() {
+    register("7", "op", FP, "0");
+    error(
+        "network.local_allocation_conflict",
+        () ->
+            call(
+                () ->
+                    registry.register(
+                        tenant,
+                        frame("7", "op", FP, "0").put("address_type", "subagent").toString())));
+    assertEquals("node_identity_conflict", state("local_identity_status"));
+    assertEquals("1", state("registration_revision"));
+    assertEquals(
+        "session",
+        sql(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT address_type FROM collab.network_local_registration WHERE tenant_id=?",
+                    String.class,
+                    tenant)));
+  }
+
+  @Test
+  void legacyNullCannotBeUpgradedRetriedRecoveredOrGrantedCreation() {
+    var first = register("7", "op", FP, "0");
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET address_type=null WHERE tenant_id=?",
+                tenant));
+    error(
+        "network.local_registration_required",
+        () ->
+            call(
+                () ->
+                    registry.requireRegistered(
+                        tenant, "2", "20", "7", first.registrationId(), FP)));
+    error(
+        "network.local_registration_required",
+        () ->
+            assign(
+                contact("allowed", "conversation", NOW.plusSeconds(600)),
+                "7",
+                first.registrationId(),
+                "create"));
+    error("network.local_allocation_conflict", () -> register("7", "op", FP, "0"));
+    assertNull(
+        sql(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT address_type FROM collab.network_local_registration WHERE tenant_id=?",
+                    String.class,
+                    tenant)));
+    assertEquals("7", state("local_high_water"));
+    assertEquals("1", state("registration_revision"));
+  }
+
+  @Test
+  void pendingLegacyOrChangedCategoryFailsRecoveryWithoutInventingType() {
+    register("7", "op", FP, "0");
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET address_type=null WHERE tenant_id=?",
+                tenant));
+    var result = recover("7", "0", pending("7", "op", FP));
+    assertEquals("recovery_conflict", result.status());
+    assertNull(result.pendingRegistration());
+    assertEquals("1", state("registration_revision"));
+  }
+
+  @Test
+  void retiredWitnessNeverRetriesOrRegrantsButKeepsNumberBurned() {
+    var first = register("7", "op", FP, "0");
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET status='retired' WHERE tenant_id=?",
+                tenant));
+    error(
+        "network.local_registration_required",
+        () ->
+            assign(
+                contact("allowed", "conversation", NOW.plusSeconds(600)),
+                "7",
+                first.registrationId(),
+                "create"));
+    error("network.local_allocation_conflict", () -> register("7", "op", FP, "0"));
+    assertEquals("7", state("local_high_water"));
   }
 
   @Test
@@ -751,6 +876,214 @@ class LocalRegistryPostgresTest {
     assertEquals(NOW.plusSeconds(5), targetBound.validUntil());
   }
 
+  @Test
+  void productionLookupPreservesFullWitnessAndRequiresTenantAndSameDatasource() {
+    var first = register("7", "op", FP, "0");
+    var targets = new LocalTargets(jdbc, manager);
+    var expected = TenantContext.call(tenant, () -> targets.lookup(tenant, "2", "20", "7"));
+    assertEquals(
+        new auriga.collab.api.NetworkLocalTargets.Registration("2", "20", "7", "session", "1"),
+        expected);
+    var witness = sql(() -> targets.witness(tenant, "2", "20", "7", false));
+    assertEquals(first.registrationId(), witness.registrationId());
+    assertEquals("op", witness.allocationOpId());
+    assertEquals(FP, witness.fingerprint());
+    assertEquals("1", witness.revision());
+    assertEquals("session", witness.addressType());
+    assertEquals(expected, sql(() -> targets.lock(tenant, expected)));
+    error(
+        "common.unavailable",
+        () -> TenantContext.run(tenant, () -> targets.lock(tenant, expected)));
+    error("network.unauthorized", () -> targets.lookup(tenant, "2", "20", "7"));
+    error(
+        "network.unauthorized", () -> sql(() -> targets.lookup(UUID.randomUUID(), "2", "20", "7")));
+    var other = new TenantTransactionManager(mock(javax.sql.DataSource.class));
+    assertThrows(IllegalArgumentException.class, () -> new LocalTargets(jdbc, other));
+    // An active transaction for a different datasource must not authorize or start a second read.
+    var foreignTargets = new LocalTargets(new JdbcTemplate(other.getDataSource()), other);
+    error("common.unavailable", () -> sql(() -> foreignTargets.lookup(tenant, "2", "20", "7")));
+    error("common.unavailable", () -> sql(() -> foreignTargets.lock(tenant, expected)));
+  }
+
+  @Test
+  void lookupHidesUnknownCrossRealmNodeTenantNullRetiredAndUnhealthyLocals() {
+    register("7", "op", FP, "0");
+    var targets = new LocalTargets(jdbc, manager);
+    TenantContext.run(
+        tenant,
+        () -> {
+          for (String local : new String[] {"0", "8", "01", "bad", "18446744073709551616"})
+            assertNull(targets.lookup(tenant, "2", "20", local));
+          assertNull(targets.lookup(tenant, "3", "20", "7"));
+          assertNull(targets.lookup(tenant, "2", "21", "7"));
+        });
+    UUID other = UUID.randomUUID();
+    TenantContext.run(other, () -> assertNull(targets.lookup(other, "2", "20", "7")));
+    var expected = sql(() -> targets.lookup(tenant, "2", "20", "7"));
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET address_type=null WHERE tenant_id=?",
+                tenant));
+    assertNull(sql(() -> targets.lookup(tenant, "2", "20", "7")));
+    assertNull(sql(() -> targets.lock(tenant, expected)));
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET address_type='session',status='retired' WHERE tenant_id=?",
+                tenant));
+    assertNull(sql(() -> targets.lookup(tenant, "2", "20", "7")));
+    assertNull(sql(() -> targets.lock(tenant, expected)));
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET status='registered' WHERE tenant_id=?",
+                tenant));
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_node SET local_identity_status='recovery_conflict' WHERE tenant_id=?",
+                tenant));
+    assertNull(sql(() -> targets.lookup(tenant, "2", "20", "7")));
+    assertNull(sql(() -> targets.lock(tenant, expected)));
+  }
+
+  @Test
+  void lockRejectsChangedTypeRevisionOrMissingEvidenceSinceLookup() {
+    register("7", "op", FP, "0");
+    var targets = new LocalTargets(jdbc, manager);
+    var expected = sql(() -> targets.lookup(tenant, "2", "20", "7"));
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET address_type='subagent' WHERE tenant_id=?",
+                tenant));
+    assertNull(sql(() -> targets.lock(tenant, expected)));
+    sql(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET address_type='session',registration_revision=2 WHERE tenant_id=?",
+                tenant));
+    assertNull(sql(() -> targets.lock(tenant, expected)));
+    sql(
+        () ->
+            jdbc.update("DELETE FROM collab.network_local_registration WHERE tenant_id=?", tenant));
+    assertNull(sql(() -> targets.lock(tenant, expected)));
+  }
+
+  @Test
+  void v13DatabaseCheckRejectsUnknownCategoryAndRlsCannotChangeOtherTenant() {
+    register("7", "op", FP, "0");
+    assertThrows(
+        org.springframework.dao.DataIntegrityViolationException.class,
+        () ->
+            sql(
+                () ->
+                    jdbc.update(
+                        "UPDATE collab.network_local_registration SET address_type='system' WHERE tenant_id=?",
+                        tenant)));
+    TenantContext.run(
+        UUID.randomUUID(),
+        () ->
+            new TransactionTemplate(manager)
+                .executeWithoutResult(
+                    t ->
+                        assertEquals(
+                            0,
+                            jdbc.update(
+                                "UPDATE collab.network_local_registration SET address_type='subagent' WHERE tenant_id=?",
+                                tenant))));
+    assertEquals(
+        "session",
+        sql(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT address_type FROM collab.network_local_registration WHERE tenant_id=?",
+                    String.class,
+                    tenant)));
+  }
+
+  @Test
+  void lockWaitsForConcurrentRetirementAndRereadsCommittedWitness() throws Exception {
+    register("7", "op", FP, "0");
+    var targets = new LocalTargets(jdbc, manager);
+    var expected = sql(() -> targets.lookup(tenant, "2", "20", "7"));
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var future =
+          new java.util.concurrent.atomic.AtomicReference<
+              Future<auriga.collab.api.NetworkLocalTargets.Registration>>();
+      sql(
+          () -> {
+            jdbc.queryForMap(
+                "SELECT id FROM collab.network_local_registration WHERE tenant_id=? FOR UPDATE",
+                tenant);
+            future.set(pool.submit(() -> sql(() -> targets.lock(tenant, expected))));
+            awaitRegistrationLock();
+            jdbc.update(
+                "UPDATE collab.network_local_registration SET status='retired' WHERE tenant_id=?",
+                tenant);
+            return null;
+          });
+      assertNull(future.get().get(20, TimeUnit.SECONDS));
+    }
+  }
+
+  @Test
+  void lockedWitnessAndNodeHealthAreHeldUntilCallerTransactionCompletes() throws Exception {
+    register("7", "op", FP, "0");
+    var targets = new LocalTargets(jdbc, manager);
+    var expected = sql(() -> targets.lookup(tenant, "2", "20", "7"));
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      sql(
+          () -> {
+            assertEquals(expected, targets.lock(tenant, expected));
+            for (String table : List.of("network_node", "network_local_registration")) {
+              try {
+                pool.submit(
+                        () ->
+                            sql(
+                                () -> {
+                                  var failure =
+                                      assertThrows(
+                                          org.springframework.dao.CannotAcquireLockException.class,
+                                          () ->
+                                              jdbc.queryForList(
+                                                  "SELECT tenant_id FROM collab."
+                                                      + table
+                                                      + " WHERE tenant_id=? FOR UPDATE NOWAIT",
+                                                  tenant));
+                                  assertEquals(
+                                      "55P03",
+                                      ((java.sql.SQLException) failure.getMostSpecificCause())
+                                          .getSQLState());
+                                  return null;
+                                }))
+                    .get(20, TimeUnit.SECONDS);
+              } catch (Exception e) {
+                throw new AssertionError(e);
+              }
+            }
+            return null;
+          });
+      assertNotNull(
+          pool.submit(() -> sql(() -> targets.lock(tenant, expected))).get(20, TimeUnit.SECONDS));
+    }
+  }
+
+  void awaitRegistrationLock() {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    boolean blocked;
+    do {
+      jdbc.execute("SELECT pg_stat_clear_snapshot()");
+      blocked =
+          jdbc.queryForObject(
+              "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE usename=current_user AND pid<>pg_backend_pid() AND query LIKE '%network_local_registration%' AND wait_event_type='Lock')",
+              Boolean.class);
+      if (!blocked) Thread.yield();
+    } while (!blocked && System.nanoTime() < deadline);
+    assertTrue(blocked, "local witness must wait on the held registration");
+  }
+
   LocalRegistry.Registration register(String local, String op, String fp, String revision) {
     return call(() -> registry.register(tenant, frame(local, op, fp, revision).toString()));
   }
@@ -799,7 +1132,7 @@ class LocalRegistryPostgresTest {
     return (ObjectNode)
         NetworkJson.parse(
             """
-        {"candidate_local":"%s","allocation_op_id":"%s","allocation_fingerprint":"%s"}
+        {"address_type":"session","candidate_local":"%s","allocation_op_id":"%s","allocation_fingerprint":"%s"}
         """
                 .formatted(local, op, fp));
   }

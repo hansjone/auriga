@@ -64,7 +64,7 @@ auriga:
   collab 会再按平台最大值取较小者，事务预留仍归 collab。
 - `ResolveNetworkTarget`：仅核 live connection 和 local=0/sys。非零 local 必须拒绝；
   collab 通过自身 NetworkLocalTargets 端口查询 opaque 登记的精确 realm/node/local/type/revision。
-  未装配登记查询时非零 local 显式失败关闭，不合未审 #155、不跨库读 IAM、不推断 session。
+  独立 collab 已装配 local 包的 LocalTargets；缺失/旧 NULL/retired 登记统一拒绝，不跨库读 IAM、不推断 session。
   核整个 `connection` 对应同一份成功兑换记录，且当前仍活跃；
   realm/node/tenant 不可跨记录拼接，ingress 不可只核“存在”。local=0 类型为 system，
   允许时必须完整回显绑定和 local，target_type 恒为 system；
@@ -80,9 +80,13 @@ READY/HEAD/FETCH/RECEIPT 提交时重锁 node，比较原 binding/epoch/nonce/RE
 核心 preparePage/finishPage 把逐项核权与签名/游标审计提交拆开，保留 #147 的正文/dispatch 指纹复读。
 决定仅在当前 Java 调用作用域有效，最长 30 秒，按服务实例/tenant/node/operation 及 epoch/incarnation/nonce/request_id 绑定，提交前再查期限。
 收到外层数据库事务时失败关闭；需要原子回滚审计的内部调用应先 preparePage，再在自己的短事务 finishPage。
-非零 local 的后续 #155 适配须实现 NetworkLocalTargets.lookup 及同 collab datasource/事务的 lock：
-lookup 返回完整 opaque 地址、type/revision，lock 锁住当前登记见证并返回复读值；默认缺实现拒绝提交。
-本任务没有接入未审 #155、没有创建第二套登记器、没有读取 IAM 库里的 local 类型。
+V13 仅为 network_local_registration 新增 nullable address_type CHECK（session/subagent），无默认值、不回填历史。
+LocalRegistry 新登记强制类别并同原操作/指纹绑定；重试保留原查重顺序，换型冲突；READY 只恢复完整 typed 原操作。
+ContactAssign 要求既有登记类别与普通 session 地址一致，旧 NULL/retired 不得取得创建许可。
+LocalTargets.lookup 使用当前业务 tenant 的短事务，仅返回健康 node 下 active 且类型完整的登记。
+lock 必须在同 collab datasource 的调用者事务内，先锁 node 再锁登记行，复读完整原见证并比对 type/revision；缺失、关闭、变更均拒绝。
+内部只读 Witness 一次读取 registration_id/allocation_op_id/fingerprint/revision/realm/node/local/address_type，端口仍投影既有五字段。
+这些操作不查宿主映射、不做锁内 RPC，也不导出登记或执行许可。旧 NULL 不补型，沿既有诊断/新 local 流程处理。
 
 ## 当前 wire 边界
 
@@ -97,7 +101,7 @@ transport request_id/epoch/operation 与 expected_state_version 不属于稳定�
 按已存完整目标与类别核接受阶段；sys/广播仅 system，非零 local 仅 session；不允许任意 assigned_address。
 CONTACT_ASSIGN/首联 session 阶段尚未接入，显式拒绝；首联 system 还必须有已允许的 contact 记录。
 
-当前核心尚无 local 登记/高水位恢复和 checkpoint 证据对账能力。非零登记/证据恢复 READY
+当前 wire 尚未接入 LocalRegistry 的登记/高水位恢复和 checkpoint 证据对账能力。非零登记/证据恢复 READY
 返回签名 `recovery_conflict` 并封锁业务，不把客户端数值冒充平台见证。
 FETCH 的非空 continuation、held_ids、paused、state_barrier，以及 RECEIPT 的 retryable /
 outcome_unknown 尚不被核心支持，入口明确拒绝而不忽略。旧 epoch 回执暂按 stale_epoch 拒绝，

@@ -27,7 +27,8 @@ final class LocalRecovery {
                 original,
                 local,
                 pending.path("allocation_op_id").asString(),
-                pending.path("allocation_fingerprint").asString());
+                pending.path("allocation_fingerprint").asString(),
+                pending.path("address_type").asString());
         boolean last = same && integer(original, "registration_revision").equals(revision);
         boolean missingResponse = clientRevision.add(BigInteger.ONE).equals(revision);
         boolean alreadySaved = clientRevision.equals(revision);
@@ -49,8 +50,12 @@ final class LocalRecovery {
         : Resolution.RECOVERY_CONFLICT;
   }
 
-  static boolean matches(Map<String, Object> row, String local, String op, String fingerprint) {
-    return row.containsKey("local_id")
+  static boolean matches(
+      Map<String, Object> row, String local, String op, String fingerprint, String addressType) {
+    return ("session".equals(addressType) || "subagent".equals(addressType))
+        && addressType.equals(row.get("address_type"))
+        && "registered".equals(row.get("status"))
+        && row.containsKey("local_id")
         && integer(row, "local_id").equals(new BigInteger(local))
         && op.equals(row.get("allocation_op_id"))
         && fingerprint.equals(row.get("allocation_fingerprint"));

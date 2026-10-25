@@ -4,6 +4,8 @@
 
 ## 1. 稳定身份与临时标识
 
+非零 local 的 `address_type`（仅 session/subagent）由所属已认证 node 首次 LOCAL_REGISTER 固定，与帧 type 分开，绑定原 registration_id/allocation_op_id/指纹；同元组换类别冲突。READY 未决队首必须保存并提交原类别，REGISTER_RESULT 回显原类别并沿原服务器签名覆盖；确认前须核类别一致，恢复只返回完整原操作，不二次分配或发创建许可。缺失/未知类别沿严格 schema 和既有操作失败关闭，不扩大 READY 三能力要求或增加用户步骤。旧 NULL 保留原证据，不从重试、活会话或 ContactAssign 补型；类型依赖新操作拒绝，按已有诊断/新 local 流程处理。总部只存粗类别，不存宿主 ID/树，类别不是权限。
+
 | 标识 | 分配者、范围与含义 |
 |---|---|
 | tenant_id / realm / owner_user_id | IAM/org 决定 tenant 与节点归属用户；realm 是独立顺序 uint64 组织/部署域 ID，由总部验证其与认证 tenant 的绑定，不能把 tenant UUID 当 realm。首发仅本 realm。owner_user_id 仅归属属性，不进入地址，不能合并同用户的多个 node。 |
