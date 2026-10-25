@@ -110,13 +110,20 @@ export function canReadResources(context?: PanelContext): boolean {
   );
 }
 
-export interface InstalledResource {
-  id: string;
-  name: string;
-  enabled: boolean | 'conditional';
-  phase: string | null;
-  preset?: string;
-}
+export type InstalledResource =
+  | {
+      id: string;
+      name: string;
+      enabled: boolean | 'conditional';
+      phase: string | null;
+      preset?: string;
+      unavailable?: false;
+    }
+  | {
+      id: string;
+      name: string;
+      unavailable: true;
+    };
 
 // DSH public pluginInventory.list projection; never infer package IDs from module names.
 export async function readInstalledResources(
@@ -169,12 +176,21 @@ export async function readInstalledResources(
       if (
         !record(preset) ||
         !shortText(preset.id, 1024) ||
-        !Array.isArray(preset.rows) ||
-        preset.broken !== undefined
+        !Array.isArray(preset.rows)
       )
         throw new ResourceError('unavailable');
       if (preset.rows.length + result.length > 10000)
         throw new ResourceError('invalid');
+      if (preset.broken !== undefined) {
+        if (typeof preset.broken !== 'string' || preset.rows.length !== 0)
+          throw new ResourceError('invalid');
+        result.push({
+          id: preset.id,
+          name: shortText(preset.name, 1024) ? preset.name : preset.id,
+          unavailable: true,
+        });
+        continue;
+      }
       preset.rows.forEach((row) =>
         append(
           row,

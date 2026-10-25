@@ -317,6 +317,16 @@ export class AurigaTeamPanel extends HTMLElement {
           section.append(this.element('p', text.localEmpty));
         const cards = this.element('div', undefined, 'cards');
         for (const item of this.installed) {
+          if (item.unavailable) {
+            const notice = this.element('article', undefined, 'notice error');
+            notice.setAttribute('role', 'status');
+            notice.append(
+              this.element('h3', text.preset + ' · ' + item.name),
+              this.element('p', text.presetUnavailable),
+            );
+            cards.append(notice);
+            continue;
+          }
           const card = this.element('article', undefined, 'card');
           card.append(
             this.element('h3', item.name),

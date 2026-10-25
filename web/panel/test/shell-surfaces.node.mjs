@@ -764,7 +764,7 @@ test('managed resource context uses the existing channel without browser cookies
         pluginInventory: {
           async list() {
             reads++;
-            return inventory;
+            return { ok: true, value: inventory };
           },
         },
       },
@@ -788,5 +788,40 @@ test('managed resource context uses the existing channel without browser cookies
     host.dispose();
   } finally {
     host.close();
+  }
+});
+
+test('public inventory Remote failures are rejected without exposing host errors', async () => {
+  for (const result of [
+    { ok: false, error: { code: 'private-code', message: 'private-message' } },
+    { entries: [] },
+    undefined,
+    new Error('private-transport-error'),
+  ]) {
+    const host = surfaceHost(async () => response(), {
+      remote: {
+        pluginInventory: {
+          async list() {
+            if (result instanceof Error) throw result;
+            return result;
+          },
+        },
+      },
+    });
+    try {
+      const main = host.mount('main');
+      await flush();
+      const panel = main.root.querySelector('auriga-team-panel');
+      await assert.rejects(
+        () => panel.context.listInstalled(),
+        (error) =>
+          error.message === 'Auriga surface unavailable' &&
+          error.reason === 'unavailable',
+      );
+      main.close();
+      host.dispose();
+    } finally {
+      host.close();
+    }
   }
 });

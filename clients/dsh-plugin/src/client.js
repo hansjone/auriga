@@ -345,8 +345,15 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'theme'],
       apply(ctx) {
-        const listInstalled = async () =>
-          ctx.get?.('remote')?.pluginInventory?.list();
+        const listInstalled = async () => {
+          try {
+            const result = await ctx.get?.('remote')?.pluginInventory?.list();
+            if (result?.ok === true) return result.value;
+          } catch {
+            /* Host errors must not cross the panel boundary. */
+          }
+          throw failure();
+        };
         let disposed = false;
         const cleanups = [];
         const own = (cleanup) => {

@@ -30,6 +30,7 @@ export const messages = {
     localEnabled: '本机启用状态',
     runtimeState: '运行状态',
     preset: '所属预设',
+    presetUnavailable: '无法读取该预设的插件清单，安装状态未知。',
     active: '运行中',
     pending: '等待中',
     failed: '失败',
@@ -90,6 +91,8 @@ export const messages = {
     localEnabled: 'Local enablement',
     runtimeState: 'Runtime state',
     preset: 'Preset',
+    presetUnavailable:
+      'Preset inventory is unavailable; installation state is unknown.',
     active: 'Active',
     pending: 'Pending',
     failed: 'Failed',

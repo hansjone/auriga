@@ -474,3 +474,69 @@ it('does not present malformed native inventory as an empty installation', async
   );
   expect(wrapper.text()).not.toContain('No local plugins');
 });
+
+it('keeps healthy global and preset plugins when another public preset is broken', async () => {
+  const row = {
+    entryId: 'healthy',
+    moduleName: 'healthy-plugin',
+    enabled: true,
+    fiberPhase: 'active',
+  };
+  const wrapper = render({
+    mode: 'standalone',
+    protocol: 1,
+    locale: 'en',
+    listInstalled: async () => ({
+      entries: [row],
+      agentPresets: [
+        {
+          id: 'healthy-preset',
+          isDefault: true,
+          rows: [{ ...row, entryId: null, moduleName: 'preset-plugin' }],
+        },
+        {
+          id: 'broken-preset',
+          name: 'Broken preset',
+          isDefault: false,
+          broken: 'private-secret-error',
+          rows: [],
+        },
+      ],
+    }),
+  });
+  await click(wrapper, 'My resources');
+  expect(wrapper.findAll('.card')).toHaveLength(2);
+  expect(wrapper.text()).toContain('healthy-plugin');
+  expect(wrapper.text()).toContain('preset-plugin');
+  expect(wrapper.text()).toContain('Broken preset');
+  expect(wrapper.text()).toContain(
+    'Preset inventory is unavailable; installation state is unknown.',
+  );
+  expect(wrapper.text()).not.toContain('private-secret-error');
+  expect(wrapper.text()).not.toContain('No local plugins');
+});
+it('does not turn a broken-only preset into an empty installation', async () => {
+  const wrapper = render({
+    mode: 'standalone',
+    protocol: 1,
+    locale: 'en',
+    listInstalled: async () => ({
+      entries: [],
+      agentPresets: [
+        {
+          id: 'broken-only',
+          isDefault: false,
+          broken: 'private-error',
+          rows: [],
+        },
+      ],
+    }),
+  });
+  await click(wrapper, 'My resources');
+  expect(wrapper.text()).toContain('broken-only');
+  expect(wrapper.text()).toContain(
+    'Preset inventory is unavailable; installation state is unknown.',
+  );
+  expect(wrapper.text()).not.toContain('No local plugins');
+  expect(wrapper.text()).not.toContain('private-error');
+});
