@@ -37,6 +37,7 @@ type Config struct {
 	AllowLocalIngress      bool                          `json:"allowLocalIngress"`
 	NodeTLS                NodeTLSConfig                 `json:"nodeTLS"`
 	PublicPathPrefixes     []string                      `json:"publicPathPrefixes"`
+	NetworkWSS             NetworkWSSConfig              `json:"networkWss"`
 }
 
 type StaticConfig struct {
@@ -193,11 +194,26 @@ func applyEnv(cfg *Config) {
 			cfg.RateLimit.Burst = n
 		}
 	}
+	if v := os.Getenv("AURIGA_EDGE_NETWORK_WSS_ENABLED"); v != "" {
+		cfg.NetworkWSS.Enabled = v == "1" || strings.EqualFold(v, "true")
+	}
+	set("AURIGA_EDGE_NETWORK_WSS_UPSTREAM", &cfg.NetworkWSS.UpstreamURL)
+	set("AURIGA_EDGE_NETWORK_WSS_PATH", &cfg.NetworkWSS.Path)
+	if v := os.Getenv("AURIGA_EDGE_NETWORK_WSS_MAX_CONCURRENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.NetworkWSS.MaxConcurrent = n
+		}
+	}
 }
 
 func (c Config) validate() error {
 	if _, err := c.parseControlIngress(); err != nil {
 		return err
+	}
+	if c.NetworkWSS.Enabled {
+		if c.NetworkWSS.UpstreamURL == "" {
+			return fmt.Errorf("networkWss.upstreamUrl is required when enabled")
+		}
 	}
 	if c.Listen == "" {
 		return fmt.Errorf("listen is required")
