@@ -1,0 +1,162 @@
+import { openNetworkRuntime, isRevocationError } from './runtime.js';
+
+/** Provider lifetime and login lifetime are independent. Late register/prepare
+ * responses cannot resurrect an old login or a disposed native provider.
+ * @param {{directory:string,ctx:any,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void}} options */
+export function createNetworkLifecycle(options) {
+  let authenticated = false;
+  let disposed = false;
+  let generation = 0;
+  /** @type {any} */
+  let provider;
+  /** @type {Awaited<ReturnType<typeof openNetworkRuntime>>|undefined} */
+  let runtime;
+  /** @type {AbortController|undefined} */
+  let controller;
+  let tail = Promise.resolve();
+  let cleanup = Promise.resolve();
+  let phase = 'unconfigured';
+  function retire() {
+    generation++;
+    controller?.abort();
+    controller = undefined;
+    const previous = runtime;
+    runtime = undefined;
+    const stopping = previous?.close();
+    // An uncooperative pending prepare owns no connection. Do not let its late
+    // response block logout or a new login; valid() will retire its candidate.
+    cleanup = Promise.allSettled([cleanup, stopping]).then(() => {});
+    tail = cleanup;
+  }
+  function begin() {
+    retire();
+    if (disposed || !authenticated || !provider) {
+      phase = disposed ? 'stopped' : provider ? 'idle' : 'unconfigured';
+      return;
+    }
+    const expected = generation;
+    const currentProvider = provider;
+    const abort = new AbortController();
+    controller = abort;
+    phase = 'connecting';
+    const valid = () =>
+      !disposed &&
+      authenticated &&
+      expected === generation &&
+      !abort.signal.aborted;
+    tail = tail.then(async () => {
+      let attempt = 0;
+      while (valid()) {
+        let candidate;
+        try {
+          const accessToken = await options.getAccess();
+          if (!valid()) return;
+          const prepared = await currentProvider.prepare({
+            accessToken,
+            signal: abort.signal,
+          });
+          if (!valid()) return;
+          candidate = await (options.open ?? openNetworkRuntime)({
+            prepared,
+            ports: currentProvider.ports,
+            directory: options.directory,
+            ctx: options.ctx,
+            getAccess: options.getAccess,
+            authorizeLocal: options.authorizeLocal,
+            onRevoked: () => {
+              if (valid()) {
+                options.onRevoked?.();
+                authenticated = false;
+                begin();
+              }
+            },
+          });
+          if (!valid()) {
+            await candidate.close();
+            return;
+          }
+          runtime = candidate;
+          await candidate.start();
+          if (!valid()) {
+            await candidate.close();
+            return;
+          }
+          phase = 'running';
+          return;
+        } catch (error) {
+          await candidate?.close();
+          if (!valid()) return;
+          if (isRevocationError(error)) {
+            options.onRevoked?.();
+            authenticated = false;
+            begin();
+            return;
+          }
+          runtime = undefined;
+          phase = 'unavailable';
+          // Initial register/prepare uses the same bounded exponential retry
+          // principle as transport ticket refresh. No synchronous retry loop.
+          await new Promise((resolve) => {
+            const wake = () => {
+              clearTimeout(timer);
+              abort.signal.removeEventListener('abort', wake);
+              resolve(undefined);
+            };
+            const timer = setTimeout(
+              wake,
+              Math.min(30000, 500 * 2 ** Math.min(attempt++, 6)),
+            );
+            timer.unref?.();
+            abort.signal.addEventListener('abort', wake, { once: true });
+            if (abort.signal.aborted) wake();
+          });
+        }
+      }
+    });
+  }
+  return {
+    /** Cordis-owned trusted provider; not a serialized plugin configuration.
+     * @param {any} value */
+    attach(value) {
+      if (disposed) throw new Error('network lifecycle closed');
+      provider = value;
+      begin();
+      return () => {
+        if (provider === value) {
+          provider = undefined;
+          begin();
+        }
+      };
+    },
+    login() {
+      if (!authenticated && !disposed) {
+        authenticated = true;
+        begin();
+      }
+    },
+    logout() {
+      authenticated = false;
+      begin();
+    },
+    get status() {
+      return (
+        runtime?.status ?? {
+          available: !!provider,
+          connected: false,
+          state: phase,
+        }
+      );
+    },
+    consentUI(/** @type {unknown} */ context) {
+      if (!runtime || !authenticated || disposed)
+        throw new Error('network consent unavailable');
+      return runtime.consentUI(context);
+    },
+    async close() {
+      disposed = true;
+      authenticated = false;
+      begin();
+      await tail;
+    },
+  };
+}

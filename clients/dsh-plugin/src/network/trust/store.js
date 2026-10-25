@@ -34,6 +34,15 @@ export async function openTrustStore({
   /** @type {Map<string, import('node:crypto').KeyObject>} */
   let publicKeys = new Map();
   let blocked = false;
+  /** @type {Payload | undefined} */
+  let uncertain;
+  const listeners = new Set();
+  let refreshRevision = 0;
+  const diagnostics = {
+    refreshAttempts: 0,
+    refreshFailures: 0,
+    refreshSuccesses: 0,
+  };
   let queue = Promise.resolve();
   /** @type {Promise<void>|undefined} */
   let refreshing;
@@ -97,6 +106,13 @@ export async function openTrustStore({
     const checked = validatePublication(input, rootKeys);
     const op = queue.then(async () => {
       const c = checked.publication.keyset;
+      if (
+        uncertain &&
+        (BigInt(c.keyset_version) < BigInt(uncertain.keyset_version) ||
+          (c.keyset_version === uncertain.keyset_version &&
+            canonicalize(c) !== canonicalize(uncertain)))
+      )
+        unavailable('uncertain keyset rollback');
       if (current) {
         if (
           c.realm !== current.realm ||
@@ -106,11 +122,14 @@ export async function openTrustStore({
         if (c.keyset_version === current.keyset_version) {
           if (canonicalize(c) !== canonicalize(current))
             unavailable('keyset version reused');
-          return; // Re-reading a keyset must never refresh its expiry.
+          if (!blocked) return; // Re-reading a keyset must never refresh its expiry.
         }
       }
       const next = nextHistory(c);
       blocked = true;
+      uncertain = c;
+      // Retain monotonic key history even when fsync/rename has an uncertain outcome.
+      history = next;
       await cache.commit({
         publication: checked.publication,
         history: [...next.values()],
@@ -119,12 +138,27 @@ export async function openTrustStore({
       history = next;
       publicKeys = checked.keys;
       blocked = false;
+      uncertain = undefined;
     });
     queue = op.catch(() => {});
     return op;
   }
   const store = {
     update,
+    get version() {
+      return current?.keyset_version ?? '1';
+    },
+    get diagnostics() {
+      return { ...diagnostics };
+    },
+    get refreshRevision() {
+      return refreshRevision;
+    },
+    /** @param {() => void} listener */
+    onRefresh(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     /** Merge refreshes across all envelopes; bound unsatisfied hints to one
      * attempt per second, including failed/stale responses. No automatic loop.
      * @param {string} kid @param {string} version */
@@ -137,6 +171,9 @@ export async function openTrustStore({
       )
         return;
       if (
+        !blocked &&
+        now() < timeValue(current.valid_until) &&
+        now() >= timeValue(current.issued_at) &&
         BigInt(version) <= BigInt(current.keyset_version) &&
         current.keys.some((k) => k.kid === kid)
       )
@@ -145,6 +182,9 @@ export async function openTrustStore({
       const clock = now();
       if (!refresh || !Number.isFinite(clock) || clock < nextRefreshAt) return;
       nextRefreshAt = clock + 1000;
+      diagnostics.refreshAttempts++;
+      const previousVersion = current.keyset_version;
+      const wasBlocked = blocked;
       const request = { realm: current.realm, minimumVersion: version, kid };
       refreshing = Promise.resolve()
         .then(async () => {
@@ -153,11 +193,27 @@ export async function openTrustStore({
             // Successful rotations must not delay a subsequent real rotation.
             if (
               current &&
+              !blocked &&
+              now() >= timeValue(current.issued_at) &&
+              now() < timeValue(current.valid_until) &&
               BigInt(current.keyset_version) >= BigInt(version) &&
               current.keys.some((k) => k.kid === kid)
-            )
+            ) {
               nextRefreshAt = -Infinity;
+              diagnostics.refreshSuccesses++;
+              if (wasBlocked || current.keyset_version !== previousVersion) {
+                refreshRevision++;
+                for (const listener of listeners) {
+                  try {
+                    listener();
+                  } catch {
+                    /* Diagnostics/subscribers cannot affect trust. */
+                  }
+                }
+              }
+            } else unavailable('refresh did not satisfy hint');
           } catch {
+            diagnostics.refreshFailures++;
             unavailable('key refresh failed');
           }
         })

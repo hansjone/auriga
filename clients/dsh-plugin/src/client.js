@@ -589,12 +589,55 @@ window.__ModuleLoader__.load({
                 t(refresh && phase.status === 'ready' ? 'refresh' : 'retry'),
               ),
           );
-        // Plugin-local port, not a native DSH service. Runtime integration must
-        // supply an authenticated bridge to createConsentUIAdapter; no fallback
-        // to platform/model tools or browser-provided identity is permitted.
+        const consentRequest = async (action, input) => {
+          const write = input !== undefined;
+          let csrf;
+          if (write) {
+            const status = await fetch(localURL('auriga/local-login/status'), {
+              credentials: 'same-origin',
+              cache: 'no-store',
+              redirect: 'error',
+            });
+            if (!status.ok) throw failure();
+            const state = await status.json();
+            if (!state.loggedIn || !state.csrf) throw failure('auth');
+            csrf = state.csrf;
+          }
+          const response = await fetch(
+            localURL('auriga/local-login/consent/' + action),
+            {
+              credentials: 'same-origin',
+              cache: 'no-store',
+              redirect: 'error',
+              ...(write
+                ? {
+                    method: 'POST',
+                    headers: {
+                      'content-type': 'application/json',
+                      'X-Auriga-CSRF': csrf,
+                    },
+                    body: JSON.stringify(input),
+                  }
+                : {}),
+            },
+          );
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok)
+            throw Object.assign(failure(), {
+              reason: body.reason === 'cooldown' ? 'cooldown' : 'unavailable',
+            });
+          return body;
+        };
+        const consentBridge = {
+          snapshot: () => consentRequest('snapshot'),
+          decide: (input) => consentRequest('decide', input),
+          setDefault: (layer, mode) =>
+            consentRequest('default', { layer, mode }),
+          revoke: (input) => consentRequest('revoke', input),
+        };
         function ConsentSection({ settings = false }) {
           useHostState();
-          const api = ctx.get('aurigaConsentUI');
+          const api = ctx.get('aurigaConsentUI') ?? consentBridge;
           const [view, setView] = React.useState(null);
           const [status, setStatus] = React.useState('loading');
           const [revision, reload] = React.useReducer((n) => n + 1, 0);

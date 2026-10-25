@@ -114,6 +114,12 @@ export async function apply(ctx, config) {
             runtime,
             handler: createConnectRoutes({ runtime, admission }),
           };
+          // aurigaNetwork is a plugin-owned trusted control provider, not a
+          // native DSH API. Missing IAM HTTPS routes keep N1 unavailable.
+          connectCtx.inject(['aurigaNetwork'], (networkCtx) => {
+            const detach = runtime.attachNetwork(networkCtx.aurigaNetwork);
+            networkCtx.effect(() => detach, 'auriga-dsh: network provider');
+          });
           try {
             connectCtx.effect(() => {
               binding = owned;

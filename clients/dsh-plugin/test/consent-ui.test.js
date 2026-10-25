@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom';
 
 // A React hook/element harness: tests actual registered component handlers.
 // It does not pretend to implement native ModuleLoader resolution or rendering.
-async function fixture(api, locale = 'zh') {
+async function fixture(api, locale = 'zh', http) {
   const dom = new JSDOM('<!doctype html>', { url: 'https://example.com/' });
   let module;
   let values = [],
@@ -64,7 +64,9 @@ async function fixture(api, locale = 'zh') {
       customElements: dom.window.customElements,
       setTimeout,
       clearTimeout,
-      fetch: async () => ({ ok: false, status: 503, json: async () => ({}) }),
+      fetch:
+        http ??
+        (async () => ({ ok: false, status: 503, json: async () => ({}) })),
     },
   );
   const plugin = module.factory((name) => {
@@ -145,6 +147,42 @@ function data() {
     })),
   };
 }
+
+test('native inbox HTTP bridge fetches a fresh CSRF and sends only the user choice', async () => {
+  const state = data();
+  const requests = [];
+  const f = await fixture(undefined, 'zh', async (url, init) => {
+    requests.push({ url: String(url), init });
+    let body = state;
+    if (String(url).endsWith('/status'))
+      body = { loggedIn: true, csrf: 'fresh-native-csrf' };
+    if (String(url).endsWith('/decide')) {
+      body = { ok: true };
+      state.pending = [];
+    }
+    return { ok: true, json: async () => body };
+  });
+  try {
+    const tree = await f.render();
+    const allow = all(tree).find(
+      (n) => n.type === 'button' && text(n) === '允许本次',
+    );
+    await allow.props.onClick();
+    const request = requests.find((r) => r.url.endsWith('/decide'));
+    assert.equal(request.init.method, 'POST');
+    assert.equal(request.init.credentials, 'same-origin');
+    assert.equal(request.init.headers['X-Auriga-CSRF'], 'fresh-native-csrf');
+    assert.deepEqual(Object.keys(JSON.parse(request.init.body)).sort(), [
+      'choice',
+      'expectedRevision',
+      'layer',
+      'requestId',
+    ]);
+    assert.ok(requests.some((r) => r.url.endsWith('/status')));
+  } finally {
+    f.close();
+  }
+});
 test('native inbox keeps layer choices separate and treats malicious body as text', async () => {
   const state = data(),
     calls = [];
@@ -233,12 +271,17 @@ test('settings show organization locks and revoke refreshes the list', async () 
     f.close();
   }
 });
-test('missing trusted integration is explicit and has no decision controls in English', async () => {
+test('unavailable authenticated HTTP integration has no decision controls in English', async () => {
   const f = await fixture(undefined, 'en');
   try {
     const tree = await f.render();
-    assert.match(text(tree), /not connected/i);
-    assert.equal(all(tree).filter((n) => n.type === 'button').length, 0);
+    assert.match(text(tree), /unavailable/i);
+    assert.deepEqual(
+      all(tree)
+        .filter((n) => n.type === 'button')
+        .map(text),
+      ['Retry'],
+    );
   } finally {
     f.close();
   }

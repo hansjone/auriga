@@ -73,6 +73,7 @@ import { createInboundPolicy } from '../policy/inbound-policy.js';
  *   hostRequestId: string, messageDigest: string, status: ReceiptStatus,
  *   acceptedBy?: 'system'|'session', acceptanceMode?: 'prompt'|'inbox_only',
  *   assignedAddress?: Address, code?: string, ledgerRevision: number,
+ *   evidenceDigest?: string,
  * }} Receipt
  *
  * Fault hook points used by the fixture transport to crash at each window of
@@ -161,6 +162,7 @@ export function createHostAdapter({
       ledgerRevision: revision,
     };
     if (status === 'host_accepted') {
+      receipt.evidenceDigest = 'sha256:' + digestOf(r);
       receipt.acceptedBy = r.acceptedBy ?? 'session';
       receipt.acceptanceMode = r.acceptanceMode ?? 'prompt';
     }
