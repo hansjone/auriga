@@ -55,6 +55,10 @@ type liveBinding struct {
 	Failures    int
 	FailedSince time.Time
 	RetryAfter  time.Time
+	// Set only from collab's authenticated READY response, never client claims.
+	Incarnation  string
+	ChannelNonce string
+	Epoch        uint64
 }
 
 // IAMRedeemer retains only bounded live connections. Routing hints in CONNECT
@@ -65,13 +69,14 @@ type IAMRedeemer struct {
 	mu       sync.Mutex
 	pending  int
 	bindings map[string]liveBinding
+	inFlight map[string]bool
 }
 
 func NewIAMRedeemer(rpc grpc.ClientConnInterface, cfg IAMConfig) (*IAMRedeemer, error) {
 	if rpc == nil || cfg.ServerID == "" || cfg.ServerAudience == "" || cfg.Account == "" || cfg.RedeemTimeout <= 0 || cfg.RedeemTimeout >= cfg.AuthTimeout || cfg.MaxConnections <= 0 {
 		return nil, errors.New("network: incomplete IAM configuration or invalid timeout")
 	}
-	return &IAMRedeemer{rpc: iam.NewNetworkGatewayServiceClient(rpc), cfg: cfg, bindings: make(map[string]liveBinding)}, nil
+	return &IAMRedeemer{rpc: iam.NewNetworkGatewayServiceClient(rpc), cfg: cfg, bindings: make(map[string]liveBinding), inFlight: make(map[string]bool)}, nil
 }
 
 func (r *IAMRedeemer) Redeem(ctx context.Context, a Attempt) (Grant, error) {
@@ -154,6 +159,46 @@ func (r *IAMRedeemer) onDecision(a Attempt, claims *jwt.UserClaims, decisionErr 
 type nodeIdentity struct{ Tenant, Realm, Node string }
 
 func (r *IAMRedeemer) activeBatch(ctx context.Context, bindings []liveBinding) (map[nodeIdentity]bool, error) {
+	groups := make(map[string][]liveBinding)
+	for _, b := range bindings {
+		groups[b.Tenant] = append(groups[b.Tenant], b)
+	}
+	type batchResult struct {
+		status map[nodeIdentity]bool
+		err    error
+	}
+	jobs := make(chan []liveBinding, len(groups))
+	results := make(chan batchResult, len(groups))
+	for _, group := range groups {
+		jobs <- group
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	// Bounded even with one tenant per connection. The caller's round deadline
+	// includes queueing; many slow tenants cannot extend the revocation budget.
+	for i := 0; i < min(64, len(groups)); i++ {
+		workers.Go(func() {
+			for group := range jobs {
+				status, err := r.activeTenantBatch(ctx, group)
+				results <- batchResult{status, err}
+			}
+		})
+	}
+	workers.Wait()
+	close(results)
+	merged := make(map[nodeIdentity]bool)
+	for result := range results {
+		if result.err != nil {
+			return nil, result.err
+		}
+		for key, active := range result.status {
+			merged[key] = active
+		}
+	}
+	return merged, ctx.Err()
+}
+
+func (r *IAMRedeemer) activeTenantBatch(ctx context.Context, bindings []liveBinding) (map[nodeIdentity]bool, error) {
 	requested := make(map[nodeIdentity]bool, len(bindings))
 	req := &iam.BatchNetworkNodesActiveRequest{}
 	for _, b := range bindings {
