@@ -44,6 +44,8 @@ type Gateway struct {
 	portalStatic http.Handler
 	adminStatic  http.Handler
 	panelStatic  http.Handler
+
+	networkWSS *NetworkWSS
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
@@ -83,6 +85,10 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		activity.revoke(sid)
 		hub.CancelSession(sid)
 	})
+	networkWSS, err := newNetworkWSS(cfg.NetworkWSS, cfg.PortalHost)
+	if err != nil {
+		return nil, err
+	}
 	g := &Gateway{
 		Cfg:          cfg,
 		Log:          log,
@@ -104,6 +110,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
+		networkWSS:   networkWSS,
 	}
 	if cfg.Access.Valid() && (cfg.IAMHop.CAFile != "" || cfg.IAMHop.AllowLoopbackHTTP) {
 		g.IAMTransport, err = newIAMHopTransport(cfg.IAMHop, iamURL)
@@ -224,6 +231,16 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !knownHost {
 		writeProblem(w, problem(http.StatusNotFound, "edge.unknown_host", "Not Found", "unknown host", rid))
+		return
+	}
+
+	// Network data plane: NATS-over-WSS upgrade (auth is NATS CONNECT / callout, not browser session).
+	if g.networkWSS != nil && g.networkWSS.Match(path) {
+		if audience != "portal" {
+			writeProblem(w, problem(http.StatusForbidden, "edge.forbidden", "Forbidden", "network wss only on portal host", rid))
+			return
+		}
+		g.networkWSS.ServeHTTP(w, r)
 		return
 	}
 
