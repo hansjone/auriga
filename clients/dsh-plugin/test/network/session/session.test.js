@@ -127,6 +127,7 @@ function attachFakeBroker(transport, { epoch = '7', deliveries = [] } = {}) {
           type: 'receipt_committed',
           request_id: frame.request_id,
           operation_id: frame.operation_id,
+          epoch,
           delivery_id: frame.delivery_id,
           mail_seq: frame.mail_seq,
           results: frame.results.map((r) => ({
@@ -289,6 +290,26 @@ test('scan_after advances without raising resume_cursor past committed prefix', 
   });
   assert.equal(session.scanAfter, '102');
   assert.equal(session.resumeCursor, '100');
+  await session.stop();
+});
+
+test('FETCH_RESULT missing epoch is rejected by assertFrameEpoch', async () => {
+  const { session } = await openWorld([]);
+  await session.start();
+  await assert.rejects(
+    () =>
+      session.applyFetchResult({
+        app_version: '1.0',
+        type: 'fetch_result',
+        page: {
+          request_id: 'x',
+          scan_after: '10',
+          committed_cursor: '0',
+        },
+        items: [],
+      }),
+    (e) => e instanceof SessionError && e.code === 'missing_epoch',
+  );
   await session.stop();
 });
 

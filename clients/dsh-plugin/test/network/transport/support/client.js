@@ -1,30 +1,12 @@
-import { Agent, WebSocket, buildConnector } from 'undici';
+import { createWsSocketFactory } from '../../../../src/network/transport/ws-socket.js';
 
 /**
- * WebSocket factory that trusts only the test root CA (TLS verification stays on).
- * The upgraded TCP socket is detached from undici's pool, so terminate() destroys
- * it through a reference captured in the connector: that is the only way to drop
- * a connection whose close frame is stuck behind unsent data.
+ * Production-shaped factory that trusts only the test root CA.
+ * Uses `ws` so terminate() is native (same path as product assembly).
  * @param {string} rootPem
  */
 export function createCaSocketFactory(rootPem) {
-  const connector = buildConnector({ ca: rootPem });
-  return (url) => {
-    let tcp;
-    const agent = new Agent({
-      connect: (opts, callback) =>
-        connector(opts, (error, socket) => {
-          tcp = socket;
-          callback(error, socket);
-        }),
-    });
-    const socket = new WebSocket(url, { dispatcher: agent });
-    socket.terminate = () => {
-      tcp?.destroy();
-      agent.destroy().catch(() => {});
-    };
-    return socket;
-  };
+  return createWsSocketFactory({ ca: rootPem, rejectUnauthorized: true });
 }
 
 /** Wait until `check()` is truthy, polling; rejects with `what` after `timeoutMs`. */

@@ -108,8 +108,11 @@ export function createNetworkSession(options) {
         assertFrameEpoch(frame, epoch);
       }
     } catch (e) {
-      if (e instanceof SessionError && e.code === 'stale_epoch') {
-        // Drop stale frames; do not deliver into the ledger.
+      if (
+        e instanceof SessionError &&
+        (e.code === 'stale_epoch' || e.code === 'missing_epoch')
+      ) {
+        // Drop bad-epoch frames; do not deliver into the ledger.
         return;
       }
       throw e;
@@ -234,11 +237,8 @@ export function createNetworkSession(options) {
     if (frameType(result) !== 'fetch_result') {
       throw new SessionError('bad_fetch_result', 'expected fetch_result');
     }
-    if (result.page?.epoch === undefined) {
-      throw new SessionError('bad_fetch_result', 'fetch_page missing epoch');
-    }
     assertFrameEpoch(result, epoch);
-    const pageEpoch = String(result.page.epoch);
+    const pageEpoch = String(result.page?.epoch ?? result.epoch);
     const page = buildVerifiedPage({
       tenant: identity.tenant,
       nodeIncarnation: identity.nodeIncarnation,

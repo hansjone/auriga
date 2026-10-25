@@ -1,7 +1,6 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers';
-import { Agent, WebSocket } from 'undici';
 import { NatsLink } from '../../../src/network/transport/nats-link.js';
 import { TransportError } from '../../../src/network/transport/errors.js';
 import {
@@ -12,6 +11,7 @@ import {
 import { natsBinary, skipNoServer, str, text } from './support/env.js';
 import { startNatsServer } from './support/nats-server.js';
 import { startTcpProxy } from './support/tcp-proxy.js';
+import { createWsSocketFactory } from '../../../src/network/transport/ws-socket.js';
 
 const TOKEN = 'link-test-token';
 const UP = 'auriga.net.up.node1';
@@ -64,6 +64,37 @@ describe('NatsLink without a broker', () => {
       link.send(text('x')),
       (e) => e.code === 'not_connected',
     );
+  });
+
+  test('createSocket without terminate() fails closed at open (socket_incapable)', async () => {
+    const fakeNats = {
+      tokenAuthenticator: () => () => ({ auth_token: 'x' }),
+      wsconnect: async (opts) => {
+        // Exercise the real wsFactory path without dialing a broker.
+        await opts.wsFactory('wss://example.invalid/');
+        throw new Error('wsFactory should have rejected');
+      },
+    };
+    const link = new NatsLink({
+      url: 'wss://example.invalid',
+      auth: { token: 'x' },
+      upSubject: UP,
+      downSubject: DOWN,
+      inboxPrefix: 'p',
+      createSocket: () => ({
+        close() {},
+        send() {},
+        addEventListener() {},
+        bufferedAmount: 0,
+        readyState: 0,
+      }),
+      nats: /** @type {any} */ (fakeNats),
+    });
+    await assert.rejects(
+      link.open(),
+      (e) => e instanceof TransportError && e.code === 'socket_incapable',
+    );
+    assert.equal(link.state, 'closed');
   });
 });
 
@@ -147,6 +178,17 @@ describe(
       await link.close();
     });
 
+    test('production ws factory connects with native terminate()', async () => {
+      const createSocket = createWsSocketFactory({ ca: server.rootPem });
+      assert.equal(
+        typeof (await import('ws')).default.prototype.terminate,
+        'function',
+      );
+      const { link } = await openLink({ createSocket });
+      assert.equal(link.state, 'ready');
+      await link.close();
+    });
+
     test('TLS verification stays on: a client without the test CA cannot connect', async () => {
       const link = new NatsLink({
         url: proxied(),
@@ -154,7 +196,8 @@ describe(
         upSubject: UP,
         downSubject: DOWN,
         inboxPrefix: 'p',
-        createSocket: (url) => new WebSocket(url, { dispatcher: new Agent() }),
+        // Still has terminate() so the check is TLS, not capability.
+        createSocket: createWsSocketFactory({ rejectUnauthorized: true }),
         connectTimeoutMs: 3000,
       });
       await assert.rejects(link.open());

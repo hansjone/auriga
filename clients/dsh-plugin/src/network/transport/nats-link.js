@@ -8,6 +8,7 @@ import {
   worstCaseBufferBound,
 } from './limits.js';
 import { SendQueue } from './send-queue.js';
+import { createWsSocketFactory } from './ws-socket.js';
 
 /**
  * @typedef {{ jwt: string, nkeySeed?: string } | { token: string }} TicketAuth
@@ -185,8 +186,9 @@ export class NatsLink {
     const o = this.#opts;
     try {
       const authenticator = buildAuthenticator(o.auth, this.#nats);
-      const createSocket =
-        o.createSocket ?? ((url) => new globalThis.WebSocket(url));
+      // Default is production `ws` (has terminate). Injected factories that omit
+      // terminate() fail closed below — never degrade to undici/browser close().
+      const createSocket = o.createSocket ?? createWsSocketFactory();
       const nc = await this.#nats.wsconnect({
         servers: o.url,
         name: o.name ?? 'auriga-dsh',
@@ -202,6 +204,17 @@ export class NatsLink {
             throw new TransportError('closed', 'link closed');
           }
           const inner = await createSocket(url);
+          if (typeof inner?.terminate !== 'function') {
+            try {
+              inner?.close?.();
+            } catch {
+              // ignore teardown of an incapable socket
+            }
+            throw new TransportError(
+              'socket_incapable',
+              'createSocket must return a socket with terminate()',
+            );
+          }
           this.#socket = new GuardedSocket(inner, {
             hardCapBytes: this.#limits.socketHardCapBytes,
             onOverflow: (info) =>
