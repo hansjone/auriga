@@ -11,10 +11,12 @@ import RolesView from './views/RolesView.vue';
 import ResourcesView from './views/ResourcesView.vue';
 import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
+import ModelProvidersView from './views/models/ProvidersView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
 import { navigation } from './admin/navigation';
 
 const existing = new Set([
+  '/models/providers',
   '/settings',
   '/resources',
   '/members',
@@ -25,6 +27,8 @@ const existing = new Set([
   '/quotas',
   '/roles',
   '/providers',
+  '/models/relay',
+  '/models/usage',
 ]);
 const unavailable = [
   ...new Set(
@@ -53,7 +57,16 @@ export const router = createRouter({
         { path: 'quotas', component: QuotasView },
         { path: 'roles', component: RolesView },
         { path: 'providers', component: IdentityProvidersView },
+        { path: 'models/providers', component: ModelProvidersView },
         { path: 'settings', component: SettingsView },
+        {
+          path: 'models/relay',
+          component: () => import('./views/models/RelayView.vue'),
+        },
+        {
+          path: 'models/usage',
+          component: () => import('./views/models/UsageView.vue'),
+        },
         ...unavailable.map((path) => ({
           path: path.slice(1),
           component: WorkflowUnavailableView,

@@ -9,6 +9,7 @@ import { Buffer } from 'node:buffer';
 import { Socket } from 'node:net';
 import { createSettingsStore } from '../../../clients/dsh-plugin/src/settings/store.js';
 import { createSettingsHandler } from '../../../clients/dsh-plugin/src/settings/host.js';
+import { mountLocalLoginPage } from '../../../clients/dsh-plugin/src/login/page.js';
 const localBoot = (connected) => ({
   mode: 'connect',
   protocol: 1,
@@ -126,6 +127,40 @@ test('registered settings loads its real authenticated asset and saves through t
       'same-origin',
     );
     assert.ok(calls.some((c) => c.url.endsWith('/view.js')));
+    // Both merged entry points coexist: the shell keeps LOGIN's explicit
+    // confirmation page while SETTINGS retains its reviewed view and handlers.
+    const logout = [...settings.root.querySelectorAll('button')].find(
+      (b) => b.textContent === '退出本机登录',
+    );
+    assert.ok(logout);
+    logout.click();
+    assert.deepEqual(host.navigations, [
+      'https://instance.example.com/i/example/auriga/local-login?logout=1',
+    ]);
+    const logoutRoot = host.document.createElement('main');
+    host.document.body.append(logoutRoot);
+    let logoutRequests = 0;
+    const returned = [];
+    const logoutPage = mountLocalLoginPage(logoutRoot, {
+      logout: new URL(host.navigations[0]).searchParams.get('logout') === '1',
+      fetch: async () => {
+        logoutRequests++;
+        throw new Error('unexpected logout request');
+      },
+      navigate: (path) => returned.push(path),
+    });
+    try {
+      assert.match(logoutRoot.textContent, /确认退出本机登录/);
+      assert.equal(logoutRequests, 0, 'navigation and mount never sign out');
+      logoutRoot.querySelector('[data-action=return]').click();
+      assert.deepEqual(returned, ['/']);
+      assert.equal(logoutRequests, 0);
+    } finally {
+      logoutPage.dispose();
+      logoutRoot.remove();
+    }
+    assert.equal(main.root.querySelector('auriga-team-panel'), panel);
+    assert.equal(panel.context, context);
     settings.close();
     assert.equal(main.root.querySelector('auriga-team-panel'), panel);
     assert.equal(panel.context, context);

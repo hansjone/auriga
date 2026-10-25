@@ -16,6 +16,13 @@
 
 通信网络以插件／DSH 实例为连接主体，多个获权主会话和子会话共用稳定连接；总部负责可靠交换，总部系统 DSH 是执行节点。NETWORK1 设计 [#124](https://github.com/hansjone/auriga/pull/124) 已作为待实施方案合入。N0 接缝门禁已于 2026-10-25 合入 main：契约 [#125](https://github.com/hansjone/auriga/pull/125)、ai-gateway NATS callout/ACL [#126](https://github.com/hansjone/auriga/pull/126)、插件宿主 adapter/ledger [#127](https://github.com/hansjone/auriga/pull/127)、插件 NATS 硬缓冲传输 [#128](https://github.com/hansjone/auriga/pull/128)；均精确 HEAD CI 全绿且非作者独审通过。N1：collab 邮箱/游标/首联 [#129](https://github.com/hansjone/auriga/pull/129)、ai-gateway HEAD/FETCH/RECEIPT 骨架 [#130](https://github.com/hansjone/auriga/pull/130)、edge NATS-over-WSS 升级路由 [#131](https://github.com/hansjone/auriga/pull/131) 已合（均独审通过、精确 HEAD CI 全绿）；下一步插件接线（宿主 adapter↔传输/系统收件箱），再 IAM 网络上限、两真实 DSH。完整网络 IAM、生产硬背压、HA、容量与双 DSH 往返尚未验收；旧定时 pull 仍为迁移期路径。
 
+2026-10-25 Beta 推进（当前检查点）：
+
+- Beta 先完成两个真实 DSH 对话、插件登录和前端、模型中转站；Auto、调用方模型 Key、总部系统 DSH 及完整资源治理留到后续。以上范围不表示现场闭环已验收。
+- N1 插件总装 [#151](https://github.com/hansjone/auriga/pull/151) 和公开 API 能力探测 HostPort [#153](https://github.com/hansjone/auriga/pull/153) 已合入；#153 精确受审 HEAD 全 12 项 CI 成功，非作者复审通过。客户端入口 [#152](https://github.com/hansjone/auriga/pull/152) 已经 20 项精确 HEAD CI 与非作者 A 级独审通过后合入；COLLABIAM [#147](https://github.com/hansjone/auriga/pull/147)、剩余生产接线与 [#142](https://github.com/hansjone/auriga/pull/142) 部署仍未完成，两个真实 DSH 往返尚未验收。
+- 中转站契约读取与版本缺口 [#159](https://github.com/hansjone/auriga/pull/159) 已合入：新增模型、凭据元数据、授权集合读取及 ETag，列表提供只读版本；精确 HEAD 的 24 项 CI 全成功，独立 A 级审查高/中/低均为零。提供商页面 [#157](https://github.com/hansjone/auriga/pull/157) 的自动版本读取、最小 PATCH 及冲突恢复已修复，经精确 HEAD 的 18 项 CI 与新非作者复审通过后合入；存储/管理 API [#158](https://github.com/hansjone/auriga/pull/158) 仍待最终 Windows CI 和复审，实际管理入口装配尚未闭环。
+- 节点管理补齐 [#160](https://github.com/hansjone/auriga/pull/160)、中转站总览与用量 [#161](https://github.com/hansjone/auriga/pull/161) 已分别修复独审功能中项，经新 HEAD 各 8 项 CI 与新的非作者复审通过后合入。三页合入后的产品快照 c845280 在独立工位锁定安装后，lint、类型检查及完整管理台 366 项测试全部通过；未冒充真实部署或模型调用验收。
+- 插件登录 [#163](https://github.com/hansjone/auriga/pull/163)、设置 [#164](https://github.com/hansjone/auriga/pull/164)、资源通道 [#162](https://github.com/hansjone/auriga/pull/162) 仍为草稿并按独审返工；设备 AI 短令牌 [#165](https://github.com/hansjone/auriga/pull/165) 与独立模型 Adapter [#166](https://github.com/hansjone/auriga/pull/166) 等待 CI/独审。主控对真实安装的 DSH 0.2.0-rc.2 公开 API 做了类型、BlockAssembler、注册/调用/注销三项探测且全通过，但不代表 GUI 或真实模型链路已验收。资源 edge 路由与托管身份承接仍须补齐，模块单测不能代替生产闭环。同机隔离按用户决定整体推迟，客户端适配只使用 DSH 公开 API，以 0.2.0-rc.2 为核验基线。
 2026-10-24 本地接线批次（已合入，除 #123）：
 
 - EDGECONNECT2 [#120](https://github.com/hansjone/auriga/pull/120)、NATIVELOGIN2 [#121](https://github.com/hansjone/auriga/pull/121)、TEAMREMOTE2 [#122](https://github.com/hansjone/auriga/pull/122) 已合入 main（各有非作者独审通过）。TEAMREMOTE2 遗留低项：合法拆分 Accept 列表误拒 406。

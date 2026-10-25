@@ -1000,6 +1000,18 @@ window.__ModuleLoader__.load({
             boot?.connection && row('endpoint', boot.connection.endpointId),
             boot?.connection &&
               row('received', String(boot.connection.received ?? 0)),
+            boot?.connection &&
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () =>
+                    window.location.assign(
+                      localURL('auriga/local-login') + '?logout=1',
+                    ),
+                },
+                t('logout'),
+              ),
             boot &&
               h(
                 'p',

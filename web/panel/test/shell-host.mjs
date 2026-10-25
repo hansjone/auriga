@@ -24,6 +24,7 @@ export function surfaceHost(
   const { document } = window;
   const modules = new Map(),
     moduleImports = [];
+  const navigations = [];
   const completeScript = (
     script,
     Constructor = class extends window.HTMLElement {},
@@ -299,7 +300,13 @@ export function surfaceHost(
       'utf8',
     ),
     {
-      window,
+      window: new Proxy(window, {
+        get(target, key) {
+          if (key === 'location')
+            return { assign: (url) => navigations.push(String(url)) };
+          return Reflect.get(target, key);
+        },
+      }),
       document,
       customElements: window.customElements,
       URL,
@@ -418,6 +425,7 @@ export function surfaceHost(
   return {
     document,
     window,
+    navigations,
     registrations,
     primitives,
     counts,

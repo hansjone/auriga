@@ -11,7 +11,10 @@ import {
   installLocalAdmission,
   installHttpResponseTracking,
 } from './local/host.js';
-import { createConnectRoutes } from './local/routes.js';
+import {
+  createConnectRoutes,
+  createUnconfiguredLoginRoutes,
+} from './local/routes.js';
 import { join } from 'node:path';
 import { installSettings } from './settings/host.js';
 
@@ -149,6 +152,15 @@ export async function apply(ctx, config) {
           }),
         }),
       'auriga-dsh: local surfaces',
+    );
+    ctx.effect?.(
+      () =>
+        ctx.webServer.register({
+          kind: 'prefix',
+          path: '/auriga/local-login',
+          handler: createUnconfiguredLoginRoutes(ctx.connection),
+        }),
+      'auriga-dsh: unconfigured login',
     );
     return;
   }
