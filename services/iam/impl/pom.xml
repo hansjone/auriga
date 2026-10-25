@@ -54,7 +54,7 @@
   <build>
     <resources>
       <resource><directory>src/main/resources</directory></resource>
-      <resource><directory>${project.basedir}/../../../contracts</directory><targetPath>auriga/iam/contracts</targetPath><includes><include>identity/*.schema.json</include><include>auth/*.schema.json</include><include>kv/session.schema.json</include></includes></resource>
+      <resource><directory>${project.basedir}/../../../contracts</directory><targetPath>auriga/iam/contracts</targetPath><includes><include>identity/*.schema.json</include><include>auth/*.schema.json</include><include>kv/session.schema.json</include><include>network/system-directory.schema.json</include><include>network/register.schema.json</include><include>network/ticket-request.schema.json</include></includes></resource>
     </resources>
     <plugins>
       <plugin>

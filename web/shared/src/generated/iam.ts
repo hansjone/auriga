@@ -1,4 +1,54 @@
 export interface paths {
+  '/network/register': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 只接受 aud=auriga、ptyp=device、ctx=device、scope=auriga.connect，且有 auriga.connect.collab.use 的 Bearer 访问令牌。
+     *     不接受 cookie、刷新令牌、portal/admin、服务账号或 instance。租户/账号/设备只取已验证凭据。
+     *     同一设备重复注册返回同一 node；已吊销设备/节点、失效会话、停用账号、组织关闭网络均 common.forbidden。
+     *     重新安装/克隆必须取得新设备凭据；客户端不能指定 node、系统地址或 audience。请求体省略时等同空对象。
+     *     register/tickets 共用数据库固定五分钟窗口，单设备 30、单账号 120、单组织 3000 次；超限 common.rate_limited。
+     *     所有响应禁止缓存；公网经 HTTPS，内部 edge→IAM 传输沿现有可信 hop 规则。
+     */
+    post: operations['registerNetworkClient'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/network/tickets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * @description 与 register 相同的设备准入、限流和无缓存要求。node 必须属于当前设备；拒绝任何未知字段（含 serverAudience）。
+     *     serverAudience 仅取服务端 auriga.iam.network.client-server-audience，且必须在 server-audiences 白名单中；
+     *     仅一个白名单值时可自动选取，其他未配置情形 common.unavailable，绝不从请求/Host/查询参数取 audience。
+     *     expiresAt 是最多 30 秒的一次性兑换窗口，connectionExpiresAt 是允许连接的绝对最晚截止，最长一小时且不超过当前设备背后的会话期限和组织限制。
+     *     兑换时重核设备/会话/组织并可进一步缩短连接期限，不能因延迟兑换延长返回的截止。访问 JWT 到期需要刷新控制面凭据，但不自动把有效数据连接限制为五分钟。
+     *     客户端将 identity.tenant/node/device 与 ticket 按 connect-token.schema.json 组装 NATS CONNECT auth_token。
+     *     ingress 和精确 subject 从随机票据派生，不提供模型会话或额外授权；CONNECT 后仍须通过应用 READY。
+     *     每设备最多 8 张未过期票据，达到上限返回 common.forbidden；票据只存摘要，响应丢失须重新申请。
+     */
+    post: operations['prepareNetworkClientTicket'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/login/providers': {
     parameters: {
       query?: never;
@@ -1296,6 +1346,75 @@ export interface components {
       /** Format: date-time */
       createdAt: string;
     };
+    /** Network register request */
+    'register.schema': Record<string, never>;
+    NetworkRegistration: {
+      /** Format: uuid */
+      tenant: string;
+      realm: string;
+      node: string;
+      /** Format: uuid */
+      device: string;
+      systemAddress: string;
+    };
+    FieldError: {
+      /** @description JSON Pointer，例如 `/email`。 */
+      field: string;
+      code: string;
+      message?: string;
+    };
+    /** @description RFC 9457 问题详情。 */
+    Problem: {
+      /**
+       * Format: uri-reference
+       * @default about:blank
+       */
+      type: string;
+      /** @description 英文短标题。 */
+      title: string;
+      status: number;
+      /** @description 按 Accept-Language 返回的说明。 */
+      detail?: string;
+      /** Format: uri-reference */
+      instance?: string;
+      /**
+       * @description 机器可读的错误码，形如 `<域>.<snake_case>`。
+       * @example iam.login_tx_expired
+       */
+      code: string;
+      /** @description 错误文案里的参数。 */
+      params?: Record<string, never>;
+      /** @description 字段级错误（validation_failed 时）。 */
+      errors?: components['schemas']['FieldError'][];
+      traceId?: string;
+    };
+    /** Network ticket request */
+    'ticket-request.schema': {
+      /** @description 当前设备已注册的 node，规范 uint64 十进制字符串，最大 18446744073709551615。 */
+      node: string;
+    };
+    NetworkClientTicket: {
+      identity: components['schemas']['NetworkRegistration'];
+      ticket: string;
+      serverAudience: string;
+      /**
+       * Format: date-time
+       * @description 一次性兑换窗口截止。
+       */
+      expiresAt: string;
+      /**
+       * Format: date-time
+       * @description 允许连接的绝对最晚截止，兑换时可进一步缩短。
+       */
+      connectionExpiresAt: string;
+      ingress: string;
+      upSubject: string;
+      downSubject: string;
+      /** @description 允许订阅的私有 reply 前缀，不含通配符。 */
+      replyPrefix: string;
+      /** @constant */
+      protocolVersion: 1;
+    };
     /** Format: uuid */
     Uuid: string;
     /**
@@ -1448,37 +1567,6 @@ export interface components {
       | components['schemas']['DeviceStep']
       | components['schemas']['CompleteStep']
       | components['schemas']['FailStep'];
-    FieldError: {
-      /** @description JSON Pointer，例如 `/email`。 */
-      field: string;
-      code: string;
-      message?: string;
-    };
-    /** @description RFC 9457 问题详情。 */
-    Problem: {
-      /**
-       * Format: uri-reference
-       * @default about:blank
-       */
-      type: string;
-      /** @description 英文短标题。 */
-      title: string;
-      status: number;
-      /** @description 按 Accept-Language 返回的说明。 */
-      detail?: string;
-      /** Format: uri-reference */
-      instance?: string;
-      /**
-       * @description 机器可读的错误码，形如 `<域>.<snake_case>`。
-       * @example iam.login_tx_expired
-       */
-      code: string;
-      /** @description 错误文案里的参数。 */
-      params?: Record<string, never>;
-      /** @description 字段级错误（validation_failed 时）。 */
-      errors?: components['schemas']['FieldError'][];
-      traceId?: string;
-    };
     /** @description 推进登录事务的输入。 */
     StepInput:
       | {
@@ -1579,18 +1667,8 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 太频繁（common.rate_limited）。 */
-    RateLimited: {
-      headers: {
-        'Retry-After': components['headers']['RetryAfter'];
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 资源不存在（common.not_found）。 */
-    NotFound: {
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
       headers: {
         [name: string]: unknown;
       };
@@ -1607,8 +1685,18 @@ export interface components {
         'application/problem+json': components['schemas']['Problem'];
       };
     };
-    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
-    Unauthenticated: {
+    /** @description 太频繁（common.rate_limited）。 */
+    RateLimited: {
+      headers: {
+        'Retry-After': components['headers']['RetryAfter'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 资源不存在（common.not_found）。 */
+    NotFound: {
       headers: {
         [name: string]: unknown;
       };
@@ -1660,6 +1748,75 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  registerNetworkClient: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['register.schema'];
+      };
+    };
+    responses: {
+      /** @description 已注册或已存在的稳定 DSH 身份。 */
+      200: {
+        headers: {
+          /** @description 禁止缓存。 */
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NetworkRegistration'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      429: components['responses']['RateLimited'];
+    };
+  };
+  prepareNetworkClientTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ticket-request.schema'];
+      };
+    };
+    responses: {
+      /** @description 一次性连接票据；不可重放，不得记录到日志。 */
+      200: {
+        headers: {
+          /** @description 禁止缓存秘密。 */
+          'Cache-Control'?: 'no-store';
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['NetworkClientTicket'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      429: components['responses']['RateLimited'];
+      /** @description 未配置可用的服务端 Broker audience。 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
   listLoginProviders: {
     parameters: {
       query?: {

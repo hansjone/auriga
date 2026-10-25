@@ -761,7 +761,9 @@ class NativeConnectPostgresTest {
             false,
             Set.of());
     var channels = new ArrayList<io.grpc.ManagedChannel>();
-    String secret = Secrets.random();
+    String secret = Secrets.random(),
+        collabSecret = Secrets.random(),
+        edgeSecret = Secrets.random();
     var internal =
         new TokenService(
             keys,
@@ -773,9 +775,9 @@ class NativeConnectPostgresTest {
                 "ai-gateway",
                 Secrets.hash(secret),
                 "collab",
-                Secrets.hash(secret),
+                Secrets.hash(collabSecret),
                 "edge",
-                Secrets.hash(secret)));
+                Secrets.hash(edgeSecret)));
     server.start();
     try {
       java.util.function.Function<
@@ -795,8 +797,8 @@ class NativeConnectPostgresTest {
                     .withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS);
               };
       var gateway = stub.apply(internal.issue("ai-gateway", secret));
-      var collab = stub.apply(internal.issue("collab", secret));
-      var edge = stub.apply(internal.issue("edge", secret));
+      var collab = stub.apply(internal.issue("collab", collabSecret));
+      var edge = stub.apply(internal.issue("edge", edgeSecret));
       var request =
           auriga.contracts.iam.v1.VerifyDeviceAccessRequest.newBuilder()
               .setAccessToken(access)

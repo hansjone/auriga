@@ -301,6 +301,8 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	if r.mailbox, err = newMailboxRouter(ctx, r.redeemer, client, r.signer, r.data); err != nil {
 		return nil, err
 	}
+	r.redeemer.onBind = r.mailbox.registerIngress
+	r.redeemer.onForget = r.mailbox.forgetIngress
 	if err = r.data.FlushTimeout(authTimeout); err != nil {
 		return nil, err
 	}

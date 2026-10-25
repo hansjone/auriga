@@ -16,22 +16,61 @@ import (
 const mailboxWorkers = 128
 const headHintRoot = "auriga.internal.network.head."
 
+type mailboxPublisher interface{ Publish(string, []byte) error }
+
 type mailboxRouter struct {
-	redeemer      *IAMRedeemer
-	client        *MailboxClient
-	signer        *errorSigner
-	nc            *nats.Conn
-	slots         chan struct{}
-	ctx           context.Context
-	workers       sync.WaitGroup
-	subscriptions []*nats.Subscription
-	mu            sync.Mutex
-	closing       bool
+	redeemer        *IAMRedeemer
+	client          *MailboxClient
+	signer          *errorSigner
+	nc              *nats.Conn
+	slots           chan struct{}
+	ctx             context.Context
+	workers         sync.WaitGroup
+	subscriptions   []*nats.Subscription
+	mu              sync.Mutex
+	closing         bool
+	publisher       mailboxPublisher
+	headPending     map[nodeIdentity]string
+	headRunning     map[nodeIdentity]bool
+	headSlots       chan struct{}
+	upSubscriptions map[string]*nats.Subscription
+	ingressNodes    map[string]nodeIdentity
+	nodeRefs        map[nodeIdentity]int
+	tenantRefs      map[string]int
+	nodeBusy        map[nodeIdentity]bool
+	nodeBudgets     map[nodeIdentity]*nodeBudget
+	tenantBudgets   map[string]*requestBucket
+	tenantActive    map[string]int
+	errorSlots      chan struct{}
+	tenantErrors    map[string]int
+	tenantHeads     map[string]int
 }
 
 func newMailboxRouter(ctx context.Context, r *IAMRedeemer, c *MailboxClient, s *errorSigner, nc *nats.Conn) (*mailboxRouter, error) {
-	router := &mailboxRouter{redeemer: r, client: c, signer: s, nc: nc, ctx: ctx, slots: make(chan struct{}, mailboxWorkers)}
-	for _, subject := range []string{UpWildcard, headHintRoot + "*"} {
+	router := &mailboxRouter{
+		redeemer:        r,
+		client:          c,
+		signer:          s,
+		nc:              nc,
+		ctx:             ctx,
+		slots:           make(chan struct{}, mailboxWorkers),
+		publisher:       nc,
+		headPending:     make(map[nodeIdentity]string),
+		headRunning:     make(map[nodeIdentity]bool),
+		headSlots:       make(chan struct{}, 16),
+		upSubscriptions: make(map[string]*nats.Subscription),
+		ingressNodes:    make(map[string]nodeIdentity),
+		nodeRefs:        make(map[nodeIdentity]int),
+		tenantRefs:      make(map[string]int),
+		nodeBusy:        make(map[nodeIdentity]bool),
+		nodeBudgets:     make(map[nodeIdentity]*nodeBudget),
+		tenantBudgets:   make(map[string]*requestBucket),
+		tenantActive:    make(map[string]int),
+		errorSlots:      make(chan struct{}, 16),
+		tenantErrors:    make(map[string]int),
+		tenantHeads:     make(map[string]int),
+	}
+	for _, subject := range []string{headHintRoot + "*"} {
 		sub, err := nc.Subscribe(subject, router.receive)
 		if err != nil {
 			router.close()
@@ -51,10 +90,13 @@ func newMailboxRouter(ctx context.Context, r *IAMRedeemer, c *MailboxClient, s *
 func (r *mailboxRouter) close() {
 	r.mu.Lock()
 	r.closing = true
-	r.mu.Unlock()
 	for _, sub := range r.subscriptions {
 		_ = sub.Unsubscribe()
 	}
+	for _, sub := range r.upSubscriptions {
+		_ = sub.Unsubscribe()
+	}
+	r.mu.Unlock()
 	r.nc.Close()
 	r.workers.Wait()
 }
@@ -77,9 +119,21 @@ func (r *mailboxRouter) receive(msg *nats.Msg) {
 	}
 	r.redeemer.mu.Lock()
 	b, known := r.redeemer.bindings[ingress]
-	busy := r.redeemer.inFlight[ingress]
 	if !known {
 		r.redeemer.mu.Unlock()
+		return
+	}
+	if head {
+		r.redeemer.mu.Unlock()
+		if b.Epoch != 0 && !b.Revoked && time.Now().Before(b.NotAfter) {
+			r.headPending[nodeIdentity{b.Tenant, b.Realm, b.Node}] = ingress
+			r.dispatchHeadsLocked()
+		}
+		return
+	}
+	r.redeemer.mu.Unlock()
+	node := nodeIdentity{b.Tenant, b.Realm, b.Node}
+	if !r.allowRequestLocked(node, time.Now()) {
 		return
 	}
 	var ae *AppError
@@ -88,63 +142,150 @@ func (r *mailboxRouter) receive(msg *nats.Msg) {
 		ae = &AppError{Code: "network.revoked", Scope: "node"}
 	case !time.Now().Before(b.NotAfter):
 		ae = &AppError{Code: "network.expired", Scope: "connection"}
-	case busy:
+	case r.nodeBusy[node] || r.tenantActive[b.Tenant] >= 16:
 		ae = &AppError{Code: "network.overloaded", Scope: "request", Retryable: true}
 	default:
 		select {
 		case r.slots <- struct{}{}:
+			r.nodeBusy[node] = true
+			r.tenantActive[b.Tenant]++
+			r.redeemer.mu.Lock()
 			r.redeemer.inFlight[ingress] = true
+			r.redeemer.mu.Unlock()
 		default:
 			ae = &AppError{Code: "network.overloaded", Scope: "request", Retryable: true}
 		}
 	}
-	r.redeemer.mu.Unlock()
 	if ae != nil {
-		r.sendError(b, msg.Data, ae)
+		r.scheduleErrorLocked(b, msg.Data, ae)
 		return
 	}
 	r.workers.Go(func() {
-		defer func() { r.redeemer.mu.Lock(); delete(r.redeemer.inFlight, ingress); r.redeemer.mu.Unlock(); <-r.slots }()
+		defer func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.redeemer.mu.Lock()
+			delete(r.redeemer.inFlight, ingress)
+			r.redeemer.mu.Unlock()
+			<-r.slots
+			delete(r.nodeBusy, node)
+			r.tenantActive[b.Tenant]--
+			if r.tenantActive[b.Tenant] == 0 {
+				delete(r.tenantActive, b.Tenant)
+			}
+			r.dispatchHeadsLocked()
+		}()
 		r.handle(b, msg.Data, head)
 	})
+}
+
+func (r *mailboxRouter) dispatchHeadsLocked() {
+	if r.closing || r.ctx.Err() != nil {
+		return
+	}
+	for node, ingress := range r.headPending {
+		if r.headRunning[node] || r.tenantHeads[node.Tenant] >= 2 {
+			continue
+		}
+		r.redeemer.mu.Lock()
+		b, ok := r.redeemer.bindings[ingress]
+		busy := r.nodeBusy[node]
+		r.redeemer.mu.Unlock()
+		if !ok || b.Revoked || b.Epoch == 0 || !time.Now().Before(b.NotAfter) {
+			delete(r.headPending, node)
+			continue
+		}
+		if busy {
+			continue
+		}
+		select {
+		case r.headSlots <- struct{}{}:
+		default:
+			return
+		}
+		delete(r.headPending, node)
+		r.headRunning[node] = true
+		r.tenantHeads[node.Tenant]++
+		r.workers.Go(func() {
+			defer func() {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				delete(r.headRunning, node)
+				r.tenantHeads[node.Tenant]--
+				if r.tenantHeads[node.Tenant] == 0 {
+					delete(r.tenantHeads, node.Tenant)
+				}
+				<-r.headSlots
+				r.dispatchHeadsLocked()
+			}()
+			r.handle(b, nil, true)
+		})
+	}
 }
 
 func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
 	operation, requestID, ae := mailboxOperation(raw, head)
 	if ae != nil {
-		r.sendError(b, raw, ae)
+		if !head {
+			r.sendError(b, raw, ae)
+		}
 		return
 	}
 	if operation != "ready" && b.Epoch == 0 {
-		r.sendError(b, raw, staleEpoch(requestID))
+		if !head {
+			r.sendError(b, raw, staleEpoch(requestID))
+		}
 		return
 	}
 	response, ae := r.client.Call(r.ctx, b, operation, raw)
 	if ae != nil {
-		r.sendError(b, raw, ae)
+		if !head {
+			r.sendError(b, raw, ae)
+		}
 		return
+	}
+	if head {
+		var tip struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(response, &tip) != nil || tip.Type != "head" {
+			return
+		}
 	}
 	updated, err := validateMailboxResponse(b, operation, requestID, raw, response)
 	if err != nil {
-		r.sendError(b, raw, protocolError(requestID, "invalid collab response"))
+		if !head {
+			r.sendError(b, raw, protocolError(requestID, "invalid collab response"))
+		}
 		return
 	}
 	// Re-read after the RPC: a revocation observed while fetching must suppress
 	// the completed body, not just the next request. Collab also authorizes each RPC.
+	guard := r.redeemer.connectionGuard(b.Ingress)
+	if guard == nil {
+		return
+	}
+	guard.Lock()
 	r.redeemer.mu.Lock()
 	current, ok := r.redeemer.bindings[b.Ingress]
-	if ok && !current.Revoked && time.Now().Before(current.NotAfter) {
+	allowed := ok && !current.Revoked && time.Now().Before(current.NotAfter) && (operation == "ready" || current.Epoch == b.Epoch && current.ChannelNonce == b.ChannelNonce)
+	if allowed {
 		current.Incarnation, current.ChannelNonce, current.Epoch = updated.Incarnation, updated.ChannelNonce, updated.Epoch
 		r.redeemer.bindings[b.Ingress] = current
-		// Publish while holding the latch lock: reconciliation cannot revoke between
-		// this final check and queueing the response on the authenticated data link.
-		err = r.nc.Publish(DownSubject(b.Ingress), response)
 	} else {
 		err = errUnauthorized
 	}
 	r.redeemer.mu.Unlock()
+	// Only this connection's revocation/publication guard spans the socket write;
+	// other connections, callout admission and snapshots never wait on network I/O.
+	if allowed {
+		err = r.publisher.Publish(DownSubject(b.Ingress), response)
+	}
+	guard.Unlock()
 	if errors.Is(err, errUnauthorized) {
-		r.sendError(current, raw, &AppError{Code: "network.revoked", Scope: "node"})
+		if !head {
+			r.sendError(current, raw, &AppError{Code: "network.revoked", Scope: "node"})
+		}
 	} else if err != nil {
 		slog.Error("network mailbox response publish failed", "server", b.ServerID, "cid", b.ClientID)
 	}
@@ -254,6 +395,12 @@ func validateMailboxResponse(b liveBinding, operation, requestID string, request
 }
 
 func (r *mailboxRouter) sendError(b liveBinding, raw []byte, ae *AppError) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.scheduleErrorLocked(b, raw, ae)
+}
+
+func (r *mailboxRouter) writeError(b liveBinding, raw []byte, ae *AppError) {
 	if b.Ingress == "" || r.ctx.Err() != nil {
 		return
 	}
@@ -270,7 +417,7 @@ func (r *mailboxRouter) sendError(b liveBinding, raw []byte, ae *AppError) {
 	}
 	frame, err := r.signer.encode(b, request.RequestID, ae)
 	if err == nil {
-		err = r.nc.Publish(DownSubject(b.Ingress), frame)
+		err = r.publisher.Publish(DownSubject(b.Ingress), frame)
 	}
 	if err != nil {
 		slog.Error("network mailbox error response unavailable", "server", b.ServerID, "cid", b.ClientID)

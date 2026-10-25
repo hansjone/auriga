@@ -88,10 +88,13 @@ func startMailboxRPC(t *testing.T, f *fakeMailboxRPC) team.RPCConfig {
 	}
 	srv := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		md, _ := metadata.FromIncomingContext(ctx)
+		connection := req.(interface {
+			GetConnection() *collab.NetworkMailboxConnection
+		}).GetConnection()
 		if got := md.Get("authorization"); len(got) != 1 || got[0] != "Bearer "+token {
 			t.Error("missing service JWT")
 		}
-		if got := md.Get("auriga-tenant-id"); len(got) != 1 || got[0] != testTenant {
+		if got := md.Get("auriga-tenant-id"); len(got) != 1 || got[0] != connection.GetTenantId() {
 			t.Error("wrong delegated tenant")
 		}
 		return handler(ctx, req)

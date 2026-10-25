@@ -233,6 +233,48 @@ describe(
       await transport.stop();
     });
 
+    test('each refreshed ticket changes its private up/down subjects before opening the replacement link', async () => {
+      const { peer } = await peerWithUpSink();
+      const sent = [];
+      const all = peer.subscribe('auriga.net.up.>', {
+        callback: (_error, message) => sent.push(message.subject),
+      });
+      await peer.flush();
+      let ticket = 0;
+      const { transport } = makeTransport(
+        { ttlMs: 60000 },
+        {
+          refreshLeadMs: [100, 100],
+          async getTicket() {
+            const id = 'ticket' + ++ticket;
+            return {
+              auth: jwtAuth.mintUser({ ttlMs: 60000 }),
+              expiresAtMs: Date.now() + 800,
+              subjects: {
+                upSubject: `auriga.net.up.${id}`,
+                downSubject: `auriga.net.down.${id}`,
+                inboxPrefix: `auriga.net.reply.${id}`,
+              },
+            };
+          },
+        },
+      );
+      await transport.start();
+      await transport.send(text('first'));
+      await waitFor(
+        () => sent.includes('auriga.net.up.ticket1'),
+        'first private subject',
+      );
+      await waitFor(() => transport.epoch >= 2, 'ticket refresh');
+      await transport.send(text('second'));
+      await waitFor(
+        () => sent.some((subject) => subject !== 'auriga.net.up.ticket1'),
+        'rotated private subject',
+      );
+      all.unsubscribe();
+      await transport.stop();
+    });
+
     test('stop() closes every link and ends all timers', async () => {
       const { transport } = makeTransport({ ttlMs: 60_000 });
       await transport.start();

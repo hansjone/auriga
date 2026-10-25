@@ -85,8 +85,10 @@ IAM 成功授权前提交 `network_ingress`，保存 server generation/CID/user 
 原始票据及访问 token 不落该表。票据先独立提交作废，设备核验异常、连接绑定冲突也不能复活。
 
 每轮对账只取一次完整、按客户端账户过滤的 CONNZ，网关先按租户分组、再按 realm/node 去重，
-每租户调用一次 IAM active，最多 64 个租户 RPC 并发，共享本轮 250ms 内的请求截止时间。
-响应缺项、重复或包含额外身份均视为查询失败。每个批量 RPC 携带原服务 JWT 和该组自己的
+每租户调用一次 IAM active，最多 64 个租户 RPC 并发；每组在取得 worker 后才开始独立的
+requestTimeoutMillis（≤250ms）预算，不把排队时间算成该租户的 IAM 故障。
+每组的成功、失败与退避隔离；一组错误只给本组连接累计失败，其他组继续采用真实结果。
+响应缺项、重复或包含额外身份均视为该组查询失败。每个批量 RPC 携带原服务 JWT 和该组自己的
 委托租户元数据，不再借第一个节点的租户代查其他租户；身份列表只能来自此前兑换成功的记录。
 IAM 的每组查询进入独立 FORCE RLS 作用域，用集合 SQL
 核 node/设备/账户/portal 会话及期限，不逐节点调用 credential，也不扩大外部用户权限。
@@ -104,7 +106,8 @@ KICK 阶段最多 128 并发、每轮总预算 1.5 秒，未开始的条目保�
 同 Broker 世代 CID 不复用，因此无需为每次 KICK 再发 CONNZ。截断/错误快照不据此删记录；
 持续失败达到 1.5 秒即告警，之后对已锁存吊销者按受信 callout 的 server generation/CID 降级 KICK。
 最长轮询抖动 600ms、一次 CONNZ 和 IAM 各 250ms、前轮 KICK 1.5s 时，从首次快照失败到启动
-降级的保守上界为 1.5+0.6+0.25+0.25+1.5=4.1 秒（调度余量另计）。
+降级的保守上界为 1.5+0.6+0.25+ceil(租户组数/64)×0.25+1.5 秒（调度余量另计；≤64 组时 4.1 秒）。
+因此 5000 连接/50 租户的单测不能代表上万独立慢租户的撤销 SLO；生产容量须实测并按租户数扩容。
 吊销锁存后的所有新操作立即被拒绝，FETCH 在 RPC 完成发布前再次核锁存，因此不依赖快照恢复。
 新连接仍有一个 auth timeout 的建立宽限期；正常断连由快照回收。
 5,000 连接（50 租户）的规模单测模拟每租户 IAM 100ms、每个 KICK 10ms，核对一次 CONNZ、
@@ -135,6 +138,7 @@ realm/node/ingress 及当前授权。上行 JSON 和 NATS header 内自报的身
 仅需 SUB `auriga.net.up.*.*`、`auriga.internal.network.head.*`，PUB `auriga.net.down.*`；
 跨账户按对应 subject 单向导入/导出，不授 DSH 内部提示发布权。data 与 auth/ops 必须连接同 Broker 世代，
 所有控制/数据连接关闭即通知运行监督器退出，不自动重连。
+SVC 账户/data 连接的订阅配额应容纳 maxConnections+1（每个认证 ingress 一条 up，另加内部 HEAD）。
 
 任务要求的精确上行为 `auriga.net.up.<shard>.<ingress>`。32 桶 shard 为
 `abcdefghijklmnopqrstuvwxyz234567[SHA256(ASCII(ingress))[0] & 31]` 的单个字符；仅为路由提示。
@@ -147,9 +151,18 @@ READY/FETCH/RECEIPT 经生成的 NetworkMailboxService 转发完整原始 JSON�
 内部提示 `auriga.internal.network.head.<ingress>` 的 payload 不参与寻址；网关调用 Head 得到权威签名提示。
 没有私造客户端 HEAD 请求，也没有用逐连接短 poll 取邮箱；collab 的批量修复扫描/提示合并由后续任务接线。
 
-每 ingress 最多 1 个 RPC 在途（READY/HEAD/FETCH/RECEIPT 共用），全局 128；RPC 时限复用
-requestTimeoutMillis（≤250ms），每个 NATS 订阅 pending ≤256 帧且 ≤256KiB。达到在途上限返回
-可重试 network.overloaded；Core pending 溢出可丢请求，调用方沿原幂等键有界重试。
+客户端 READY/FETCH/RECEIPT 按 tenant/realm/node 最多 1 个 RPC 在途（续接 ingress 共享），
+每租户最多 16 个、全局 128 个；RPC 时限复用 requestTimeoutMillis（≤250ms）。每节点请求
+64/s、burst=8，每租户 256/s、burst=32，限额先在轻量回调检查，不在回调解析 JSON 或签名。
+每个已认证 ingress 独立精确订阅，pending ≤8 帧且 ≤128KiB，随连接授权失败/断开回收；
+订阅总数受 maxConnections 限制，不随 DSH 内的逻辑会话增长。
+拒绝响应另限每节点 1/s、burst=4，每租户最多 2 个、全局 16 个异步签名/发布 worker。
+达到在途上限尽力返回可重试 network.overloaded；超请求/错误预算或 Core pending 溢出可丢请求，
+调用方沿原幂等键有界重试，单节点灌包不占用其他节点的接收队列或全部租户在途预算。
+HEAD 提示不占客户端位，按 node 只保留一个最新待处理标记；FETCH/RECEIPT 完成后补跑一次权威 Head。
+HEAD 自有全局 16/每租户 2 的 RPC 预算，未 READY 或被吊销时静默丢弃，本地失败不向客户端发 ERROR。
+大响应发布只持该 ingress 的发布/吊销互斥锁，不在 socket 写入期间持全局身份锁；同 ingress 已在途
+写入可能先完成，全局身份状态访问不再等这次 socket 写入；共用数据连接的底层 socket 背压仍存在。
 无法连接/超时/未知服务错误映射 network.overloaded；鉴权错误映射 network.unauthorized，
 已知公开 mailbox 错误只允许精确白名单，后台消息/堆栈/凭据不转发。
 
