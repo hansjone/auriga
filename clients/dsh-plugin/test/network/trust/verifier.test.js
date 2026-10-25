@@ -13,8 +13,13 @@ import {
 import { openTrustStore } from '../../../src/network/trust/store.js';
 import {
   verifyEnvelope,
+  verifyEnvelopeWithRefresh,
   signingInput,
 } from '../../../src/network/trust/verifier.js';
+import {
+  privateKeyFromSeed,
+  seal,
+} from '../../../../../contracts/test/network-lib.mjs';
 
 const vectors = JSON.parse(
   await readFile(
@@ -307,4 +312,149 @@ test('cache hard limit is 24h and same-version reload cannot extend it; missing 
     () => empty.key(vectors.keys[0].kid, 'business_delivery', '5'),
     code('network.key_unavailable'),
   );
+});
+
+function refreshedEnvelope(version = '6', kid = vectors.keys[0].kid) {
+  const value = envelope(vectors.vectors[0]);
+  value.server_auth.keyset_version = version;
+  value.server_auth.kid = kid;
+  return seal(value, () => privateKeyFromSeed(vectors.keys[0].testOnlySeedHex));
+}
+
+test('higher keyset version refreshes once for concurrent verification and persists before accepting', async () => {
+  let calls = 0;
+  let request;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const disk = cache();
+  const trust = await openTrustStore({
+    cache: disk,
+    config: config(),
+    now,
+    refresh: async (input) => {
+      calls++;
+      request = input;
+      await gate;
+      return { ...config(), version: '6' };
+    },
+  });
+  const value = refreshedEnvelope();
+  const checks = Array.from({ length: 12 }, () =>
+    verifyEnvelopeWithRefresh(value, { trust, context, now }),
+  );
+  await Promise.resolve();
+  release();
+  assert.deepEqual(await Promise.all(checks), Array(12).fill(true));
+  assert.equal(calls, 1);
+  assert.deepEqual(request, {
+    realm: '2',
+    minimumVersion: '6',
+    kid: vectors.keys[0].kid,
+  });
+  const restored = await openTrustStore({ cache: disk, now });
+  assert.equal(verifyEnvelope(value, { trust: restored, context, now }), true);
+});
+
+test('unknown kid refreshes trusted configuration and retries the original signature', async () => {
+  let calls = 0;
+  const c = config();
+  const trust = await openTrustStore({
+    cache: cache(),
+    config: c,
+    now,
+    refresh: async () => {
+      calls++;
+      return {
+        ...c,
+        version: '6',
+        keys: [...c.keys, { ...c.keys[0], kid: 'introduced' }],
+      };
+    },
+  });
+  assert.equal(
+    await verifyEnvelopeWithRefresh(refreshedEnvelope('5', 'introduced'), {
+      trust,
+      context,
+      now,
+    }),
+    true,
+  );
+  assert.equal(calls, 1);
+});
+
+test('failed, stale or missing refresh stays key_unavailable; repeated failures are bounded and known keys remain usable', async () => {
+  for (const refresh of [
+    undefined,
+    async () => {
+      throw Error('unavailable');
+    },
+    async () => config(),
+    async () => ({ ...config(), version: '4' }),
+  ]) {
+    let calls = 0;
+    const trust = await openTrustStore({
+      cache: cache(),
+      config: config(),
+      now,
+      refresh:
+        refresh &&
+        (async (input) => {
+          calls++;
+          return refresh(input);
+        }),
+    });
+    for (let n = 0; n < 2; n++) {
+      await assert.rejects(
+        verifyEnvelopeWithRefresh(refreshedEnvelope(), { trust, context, now }),
+        code('network.key_unavailable'),
+      );
+    }
+    assert.equal(calls, refresh ? 1 : 0);
+    assert.equal(
+      verifyEnvelope(envelope(vectors.vectors[0]), { trust, context, now }),
+      true,
+    );
+  }
+});
+
+test('bad signatures do not trigger trust refresh', async () => {
+  let calls = 0;
+  const trust = await openTrustStore({
+    cache: cache(),
+    config: config(),
+    now,
+    refresh: async () => {
+      calls++;
+      return { ...config(), version: '6' };
+    },
+  });
+  const value = envelope(vectors.vectors[0]);
+  value.message.body.text = 'tampered';
+  await assert.rejects(
+    verifyEnvelopeWithRefresh(value, { trust, context, now }),
+    code('network.signature_invalid'),
+  );
+  assert.equal(calls, 0);
+});
+
+test('successive genuine rotations can refresh immediately without a cooldown failure', async () => {
+  let version = 5;
+  const trust = await openTrustStore({
+    cache: cache(),
+    config: config(),
+    now,
+    refresh: async () => ({ ...config(), version: String(++version) }),
+  });
+  for (const v of ['6', '7'])
+    assert.equal(
+      await verifyEnvelopeWithRefresh(refreshedEnvelope(v), {
+        trust,
+        context,
+        now,
+      }),
+      true,
+    );
+  assert.equal(version, 7);
 });

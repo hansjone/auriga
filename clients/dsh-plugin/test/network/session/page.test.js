@@ -10,14 +10,14 @@ test('mixed signed page rejects only the bad delivery and retains auditable inde
   const bad = f.delivery('bad');
   bad.message.body.text = 'tampered';
   const input = f.pageInput([bad, good]);
-  const page = buildVerifiedPage(input);
+  const page = await buildVerifiedPage(input);
   assert.equal(page.verified, true);
   assert.equal(page.items.length, 1);
   assert.equal(page.items[0].deliveryId, 'dlv-good');
   assert.deepEqual(page.rejections, [
     { index: 0, code: 'network.signature_invalid', reason: 'bad signature' },
   ]);
-  assert.equal(buildVerifiedPage(f.pageInput([bad])).verified, false);
+  assert.equal((await buildVerifiedPage(f.pageInput([bad]))).verified, true);
 });
 
 test('signed manifest rejects truncation, reorder, replacement and header tampering', async () => {
@@ -35,9 +35,25 @@ test('signed manifest rejects truncation, reorder, replacement and header tamper
       items: structuredClone(input.items),
     };
     change(altered);
-    assert.throws(
+    await assert.rejects(
       () => buildVerifiedPage(altered),
       (e) => e.code === 'network.signature_invalid',
     );
   }
+});
+
+test('newer page header awaits injected keyset refresh before accepting signed delivery', async () => {
+  let calls = 0;
+  const f = await signingFixture({
+    refresh: async () => {
+      calls++;
+      return { ...f.config, version: '6' };
+    },
+  });
+  const input = f.pageInput([f.delivery('rotated')]);
+  f.seal(input.header, f.context, '6');
+  const page = await buildVerifiedPage(input);
+  assert.equal(page.verified, true);
+  assert.equal(page.items.length, 1);
+  assert.equal(calls, 1);
 });

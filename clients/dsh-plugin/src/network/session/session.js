@@ -11,7 +11,7 @@ import {
 import { SessionError } from './errors.js';
 import { buildVerifiedPage } from './page.js';
 import { createSystemInbox, systemPromptFrom } from './system-inbox.js';
-import { verifyEnvelope } from '../trust/verifier.js';
+import { verifyEnvelopeWithRefresh } from '../trust/verifier.js';
 
 const FINAL = new Set([
   'host_accepted',
@@ -153,7 +153,7 @@ export function createNetworkSession(options) {
     if (type === 'ready_result') {
       if (!pending.has(frame.request_id)) return;
       try {
-        verifyEnvelope(frame, {
+        await verifyEnvelopeWithRefresh(frame, {
           trust: options.trust,
           context: context(frame.request_id, String(frame.epoch)),
           now,
@@ -167,7 +167,7 @@ export function createNetworkSession(options) {
     }
     if (type === 'head') {
       try {
-        verifyEnvelope(frame, {
+        await verifyEnvelopeWithRefresh(frame, {
           trust: options.trust,
           context: context(null),
           now,
@@ -187,7 +187,7 @@ export function createNetworkSession(options) {
     if (type === 'receipt_committed') {
       if (!pending.has(frame.request_id)) return;
       try {
-        verifyEnvelope(frame, {
+        await verifyEnvelopeWithRefresh(frame, {
           trust: options.trust,
           context: context(frame.request_id),
           now,
@@ -203,7 +203,7 @@ export function createNetworkSession(options) {
       const id = frame.request_id;
       if (id && pending.has(id)) {
         try {
-          verifyEnvelope(frame, {
+          await verifyEnvelopeWithRefresh(frame, {
             trust: options.trust,
             context: context(id),
             now,
@@ -329,9 +329,10 @@ export function createNetworkSession(options) {
     }
     assertFrameEpoch(result, epoch);
     const pageEpoch = String(result.page?.epoch ?? result.epoch);
+    const expectedContext = context(requestId);
     let page;
     try {
-      page = buildVerifiedPage({
+      page = await buildVerifiedPage({
         tenant: identity.tenant,
         nodeIncarnation: identity.nodeIncarnation,
         epoch: pageEpoch,
@@ -339,15 +340,24 @@ export function createNetworkSession(options) {
         items: result.items ?? [],
         header: result.page,
         trust: options.trust,
-        context: context(requestId),
+        context: expectedContext,
         now,
       });
     } catch (error) {
       rejectFrame(null, error);
       throw error;
     }
+    // A key refresh may outlive stop/reconnect; do not apply an old connection's page.
+    requireReady();
+    if (
+      channelNonce !== expectedContext.channelNonce ||
+      epoch !== expectedContext.epoch
+    )
+      throw new SessionError(
+        'stale_epoch',
+        'connection changed during verification',
+      );
     for (const failure of page.rejections) audit(failure);
-    if (!page.verified) return { receipts: [], committed: [] };
     // scan_after advances pagination; resume_cursor only tracks confirmed prefix.
     if (result.page?.scan_after !== undefined) {
       scanAfter = String(result.page.scan_after);

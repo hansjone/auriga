@@ -83,7 +83,7 @@ for (const c of cases.filter(
     c.mode === 'downstream' &&
     /network\.(signature_|key_unavailable)/.test(c.expect ?? ''),
 )) {
-  test(`contract signature rejection: ${c.name}`, () => {
+  test(`contract signature rejection: ${c.name}`, async () => {
     const fixture = fixtures.frames[c.base];
     const frame = apply(structuredClone(fixture.value), c.ops);
     const ctx = { ...fixtures.receiver, ...fixture.context, ...c.context };
@@ -92,7 +92,7 @@ for (const c of cases.filter(
     if (frame.type === 'fetch_result') {
       let page;
       try {
-        page = buildVerifiedPage({
+        page = await buildVerifiedPage({
           tenant: 'tenant-fixture',
           nodeIncarnation: ctx.incarnation,
           epoch: ctx.epoch,

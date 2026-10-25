@@ -1,5 +1,5 @@
 import { SessionError } from './errors.js';
-import { digest, verifyEnvelope } from '../trust/verifier.js';
+import { digest, verifyEnvelopeWithRefresh } from '../trust/verifier.js';
 
 /**
  * Map a wire FETCH_RESULT delivery item into the host adapter PageItem shape.
@@ -74,11 +74,15 @@ export function wireDeliveryToPageItem(item) {
  *   context: import('../trust/verifier.js').VerifyContext,
  *   now?: () => number,
  * }} input
- * @returns {Omit<import('../host/adapter.js').Page, 'verified'> & {verified: boolean, rejections: {index: number, code: string, reason: string}[]}}
+ * @returns {Promise<import('../host/adapter.js').Page & {rejections: {index: number, code: string, reason: string}[]}>}
  */
-export function buildVerifiedPage(input) {
+export async function buildVerifiedPage(input) {
   const { trust, context, now } = input;
-  verifyEnvelope(input.header, { trust, context, now });
+  const verified = await verifyEnvelopeWithRefresh(input.header, {
+    trust,
+    context,
+    now,
+  });
   const manifest = input.header.manifest;
   if (
     input.header.type !== 'fetch_page' ||
@@ -101,7 +105,7 @@ export function buildVerifiedPage(input) {
   const rejections = [];
   for (const [index, raw] of input.items.entries()) {
     try {
-      verifyEnvelope(raw, { trust, context, now });
+      await verifyEnvelopeWithRefresh(raw, { trust, context, now });
       if (raw.type === 'delivery') items.push(wireDeliveryToPageItem(raw));
       // Verified terminal / hole items have no host delivery in this seam.
     } catch (error) {
@@ -111,7 +115,9 @@ export function buildVerifiedPage(input) {
     }
   }
   return {
-    verified: items.length > 0 || rejections.length === 0,
+    // Only verified members are retained; the page flag attests the header and
+    // full manifest, including when no member can enter the host path.
+    verified,
     tenant: input.tenant,
     nodeIncarnation: input.nodeIncarnation,
     epoch: input.epoch,

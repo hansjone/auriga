@@ -29,9 +29,9 @@ import {
  */
 async function attachFakeBroker(
   transport,
-  { epoch = '7', deliveries = [], corrupt = () => {} } = {},
+  { epoch = '7', deliveries = [], corrupt = () => {}, refresh } = {},
 ) {
-  const signer = await signingFixture();
+  const signer = await signingFixture({ refresh });
   let channelNonce;
   function signed(value, requestId) {
     const ctx = { ...signer.context, epoch, channelNonce, requestId };
@@ -235,12 +235,13 @@ function firstContactDelivery({
   };
 }
 
-async function openWorld(deliveries, corrupt) {
+async function openWorld(deliveries, corrupt, refresh) {
   const pipe = createMemoryPipe();
   const broker = await attachFakeBroker(pipe.b, {
     epoch: '7',
     deliveries,
     corrupt,
+    refresh,
   });
   const store = createMemoryLedgerStore();
   const ledger = await openLedger({
@@ -409,6 +410,119 @@ test('bad signed page header cannot advance cursors or reach ledger', async () =
     assert.deepEqual(Object.keys(ledger.read().recipients), []);
   } finally {
     await session.stop();
+  }
+});
+
+test('trusted page advances scan_after when all deliveries fail or only a terminal verifies', async () => {
+  for (const includeTerminal of [false, true]) {
+    const { session, broker, ledger, host, platform } = await openWorld(
+      [],
+      (item) => {
+        if (item.type === 'delivery') item.message.body.text = 'tampered';
+      },
+    );
+    try {
+      await session.start();
+      const items = [firstContactDelivery({ recipientId: 'rejected' })];
+      if (includeTerminal)
+        items.unshift({
+          app_version: '1.0',
+          type: 'terminal',
+          epoch: '7',
+          mail_seq: '9',
+          delivery_id: 'dlv-terminal',
+          target_node: { realm: '2', node: '64' },
+          recipients: [
+            {
+              recipient_id: 'rcp-terminal',
+              transport_status: 'expired',
+              state_version: '1',
+            },
+          ],
+        });
+      const result = broker.signed(
+        {
+          app_version: '1.0',
+          type: 'fetch_result',
+          page: {
+            app_version: '1.0',
+            type: 'fetch_page',
+            request_id: 'all-rejected',
+            epoch: '7',
+            scan_after: '10',
+            committed_cursor: '0',
+          },
+          items,
+        },
+        'all-rejected',
+      );
+      const before = ledger.read();
+      const outcome = await session.applyFetchResult(result, 'all-rejected');
+      assert.equal(session.scanAfter, '10');
+      assert.equal(session.resumeCursor, '0');
+      assert.deepEqual(outcome.receipts, []);
+      assert.deepEqual(outcome.committed, []);
+      assert.deepEqual(ledger.read(), before);
+      assert.equal(host.counts.prompt, 0);
+      assert.equal(platform.state.calls.admit, 0);
+      assert.equal(session.diagnostics.length, 1);
+    } finally {
+      await session.stop();
+    }
+  }
+});
+
+test('a page waiting for key refresh cannot apply after the connection stops', async () => {
+  let entered;
+  let release;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const world = await openWorld([], undefined, async () => {
+    entered();
+    await gate;
+    return { ...world.broker.signer.config, version: '6' };
+  });
+  try {
+    await world.session.start();
+    const result = world.broker.signed(
+      {
+        app_version: '1.0',
+        type: 'fetch_result',
+        page: {
+          app_version: '1.0',
+          type: 'fetch_page',
+          epoch: '7',
+          request_id: 'refresh',
+          scan_after: '10',
+          committed_cursor: '0',
+        },
+        items: [],
+      },
+      'refresh',
+    );
+    world.broker.signer.seal(
+      result.page,
+      {
+        ...world.broker.signer.context,
+        requestId: 'refresh',
+        channelNonce: result.page.server_auth.channel_nonce,
+      },
+      '6',
+    );
+    const applying = world.session.applyFetchResult(result, 'refresh');
+    await started;
+    await world.session.stop();
+    release();
+    await assert.rejects(applying, (e) => e.code === 'not_ready');
+    assert.equal(world.session.scanAfter, '0');
+    assert.deepEqual(Object.keys(world.ledger.read().recipients), []);
+  } finally {
+    release();
+    await world.session.stop();
   }
 });
 

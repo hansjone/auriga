@@ -4,7 +4,7 @@ import { openTrustStore } from '../../../src/network/trust/store.js';
 import { digest, signingInput } from '../../../src/network/trust/verifier.js';
 import { IDENTITY, peer, self } from '../host/fixtures.js';
 
-export async function signingFixture() {
+export async function signingFixture({ refresh } = {}) {
   const pairs = Object.fromEntries(
     ['business_delivery', 'protocol_response', 'management_state'].map((p) => [
       p,
@@ -15,6 +15,7 @@ export async function signingFixture() {
   let persisted;
   const trust = await openTrustStore({
     now,
+    refresh,
     cache: {
       async load() {
         return persisted;
@@ -49,7 +50,7 @@ export async function signingFixture() {
     requestId: 'req-fetch-test',
     channelNonce: 'nonce-test',
   };
-  function seal(value, ctx = context) {
+  function seal(value, ctx = context, keysetVersion = '5') {
     const purpose = ['delivery', 'contact_prompt'].includes(value.type)
       ? 'business_delivery'
       : value.type === 'state_update'
@@ -71,7 +72,7 @@ export async function signingFixture() {
       },
       request_id: ctx.requestId,
       channel_nonce: ctx.channelNonce,
-      keyset_version: '5',
+      keyset_version: keysetVersion,
     };
     value.server_auth.signature = sign(
       null,
@@ -148,5 +149,13 @@ export async function signingFixture() {
       }),
     };
   }
-  return { trust, now, context, seal, delivery, pageInput };
+  return {
+    trust,
+    now,
+    context,
+    seal,
+    delivery,
+    pageInput,
+    config: structuredClone(persisted),
+  };
 }

@@ -117,3 +117,25 @@ export function verifyEnvelope(value, { trust, context: c, now = Date.now }) {
   }
   return true;
 }
+
+/** Refresh a missing/newer keyset once, then repeat full signature/context checks.
+ * @param {any} value
+ * @param {Parameters<typeof verifyEnvelope>[1]} options
+ * @returns {Promise<true>}
+ */
+export async function verifyEnvelopeWithRefresh(value, options) {
+  try {
+    return verifyEnvelope(value, options);
+  } catch (error) {
+    if (
+      !(error instanceof SessionError) ||
+      error.code !== 'network.key_unavailable'
+    )
+      throw error;
+    await options.trust.refreshFor(
+      value.server_auth.kid,
+      value.server_auth.keyset_version,
+    );
+    return verifyEnvelope(value, options);
+  }
+}

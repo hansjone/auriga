@@ -43,15 +43,26 @@ export function timeValue(value) {
 
 /** Cache must be private, durable and single-writer, like the host ledger.
  * The configuration is a trust anchor; never pass a keyset taken from a frame.
- * @param {{cache: TrustCache, config?: TrustConfig, now?: () => number}} options
+ * refresh must fetch from fixed trusted configuration and validate the root;
+ * frame-provided version/kid are hints, never authority or a URL.
+ * @param {{cache: TrustCache, config?: TrustConfig, now?: () => number,
+ * refresh?: (request: {realm: string, minimumVersion: string, kid: string}) => Promise<TrustConfig>}} options
  */
-export async function openTrustStore({ cache, config, now = Date.now }) {
+export async function openTrustStore({
+  cache,
+  config,
+  now = Date.now,
+  refresh,
+}) {
   /** @type {TrustConfig | undefined} */
   let current;
   /** @type {Map<string, import('node:crypto').KeyObject>} */
   let publicKeys = new Map();
   let blocked = false;
   let queue = Promise.resolve();
+  /** @type {Promise<void>|undefined} */
+  let refreshing;
+  let nextRefreshAt = -Infinity;
   /** @param {TrustConfig} input */
   function validate(input) {
     const c = structuredClone(input);
@@ -131,6 +142,47 @@ export async function openTrustStore({ cache, config, now = Date.now }) {
   }
   const store = {
     update,
+    /** Merge refreshes across all envelopes; bound unsatisfied hints to one
+     * attempt per second, including failed/stale responses. No automatic loop.
+     * @param {string} kid @param {string} version */
+    async refreshFor(kid, version) {
+      if (
+        !current ||
+        !positiveVersion(version) ||
+        typeof kid !== 'string' ||
+        !/^[A-Za-z0-9._-]{1,128}$/.test(kid)
+      )
+        return;
+      if (
+        BigInt(version) <= BigInt(current.version) &&
+        current.keys.some((k) => k.kid === kid)
+      )
+        return;
+      if (refreshing) return refreshing;
+      const clock = now();
+      if (!refresh || !Number.isFinite(clock) || clock < nextRefreshAt) return;
+      nextRefreshAt = clock + 1000;
+      const request = { realm: current.realm, minimumVersion: version, kid };
+      refreshing = Promise.resolve()
+        .then(async () => {
+          try {
+            await update(await refresh(request));
+            // Successful rotations must not delay a subsequent real rotation.
+            if (
+              current &&
+              BigInt(current.version) >= BigInt(version) &&
+              current.keys.some((k) => k.kid === kid)
+            )
+              nextRefreshAt = -Infinity;
+          } catch {
+            unavailable('key refresh failed');
+          }
+        })
+        .finally(() => {
+          refreshing = undefined;
+        });
+      return refreshing;
+    },
     /** @param {string} kid @param {string} purpose @param {string} version */
     key(kid, purpose, version) {
       const clock = now();
