@@ -1,6 +1,6 @@
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createAurigaI18n } from '@auriga/shared';
+import { ApiError, createAurigaI18n } from '@auriga/shared';
 import ElementPlus from 'element-plus';
 import JoinMaterials from './JoinMaterials.vue';
 import NodeDiagnostics from './NodeDiagnostics.vue';
@@ -90,6 +90,170 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+const denied = (status: number) =>
+  new ApiError({
+    status,
+    code: status === 401 ? 'common.unauthenticated' : 'common.forbidden',
+    title: 'Access denied',
+  });
+async function showMaterial() {
+  wrapper = mount(NodesView, { global: global() });
+  await flushPromises();
+  await click('详情');
+  await click('加入材料');
+  await wrapper.getComponent(JoinMaterials).get('form').trigger('submit');
+  await flushPromises();
+  expect(wrapper.text()).toContain('secret-example');
+}
+it.each(['membership', 'nodes', 'node'] as const)(
+  'clears secrets and write controls after polling %s rejects with 403',
+  async (endpoint) => {
+    vi.useFakeTimers();
+    await showMaterial();
+    vi.mocked(adminApi[endpoint]).mockRejectedValueOnce(denied(403));
+    await vi.advanceTimersByTimeAsync(10000);
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('secret-example');
+    expect(wrapper.text()).not.toContain('复制命令');
+    expect(wrapper.findComponent(JoinMaterials).exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll('button')
+        .some((b) => ['加入材料', '保存配置', '退役节点'].includes(b.text())),
+    ).toBe(false);
+    expect(wrapper.text()).toContain('common.forbidden');
+    const reads = vi.mocked(adminApi.membership).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(adminApi.membership).toHaveBeenCalledTimes(reads);
+  },
+);
+it.each([401, 403])(
+  'does not restore a late join issuance after polling rejection %s',
+  async (status) => {
+    vi.useFakeTimers();
+    await showMaterial();
+    await wrapper
+      .getComponent(JoinMaterials)
+      .findAll('button')
+      .find((b) => b.text() === '关闭并清除')!
+      .trigger('click');
+    let resolve!: (value: Awaited<ReturnType<typeof nodesApi.create>>) => void;
+    vi.mocked(nodesApi.create).mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+    );
+    await wrapper.getComponent(JoinMaterials).get('form').trigger('submit');
+    await flushPromises();
+    vi.mocked(adminApi.nodes).mockRejectedValueOnce(denied(status));
+    await vi.advanceTimersByTimeAsync(10000);
+    await flushPromises();
+    expect(wrapper.findComponent(JoinMaterials).exists()).toBe(false);
+    resolve({
+      ...token,
+      token: 'late-secret',
+      command: 'late-command',
+      caSha256: 'example',
+    });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('late-secret');
+    expect(wrapper.text()).not.toContain('late-command');
+    expect(wrapper.findComponent(JoinMaterials).exists()).toBe(false);
+  },
+);
+it.each([
+  new Error('offline'),
+  new ApiError({
+    status: 503,
+    code: 'common.unavailable',
+    title: 'Unavailable',
+  }),
+])(
+  'keeps secrets and configuration drafts on a transient read failure, and permits manual retry: %s',
+  async (readError) => {
+    vi.useFakeTimers();
+    await showMaterial();
+    await wrapper.get('input[aria-label="名称"]').setValue('Draft node');
+    vi.mocked(adminApi.nodes).mockRejectedValueOnce(readError);
+    await vi.advanceTimersByTimeAsync(10000);
+    await flushPromises();
+    expect(wrapper.text()).toContain('secret-example');
+    expect(wrapper.findComponent(JoinMaterials).exists()).toBe(true);
+    expect(
+      (wrapper.get('input[aria-label="名称"]').element as HTMLInputElement)
+        .value,
+    ).toBe('Draft node');
+    expect(wrapper.text()).toContain('自动刷新已暂停');
+    await click('刷新');
+    expect(wrapper.text()).not.toContain('自动刷新已暂停');
+    expect(wrapper.findComponent(JoinMaterials).exists()).toBe(true);
+  },
+);
+
+it.each([['workspace.nodes.read'], []])(
+  'invalidates join material when polling membership loses required permissions: %j',
+  async (...permissions) => {
+    vi.useFakeTimers();
+    await showMaterial();
+    const membership = await adminApi.membership();
+    vi.mocked(adminApi.membership).mockResolvedValueOnce({
+      ...membership,
+      permissions,
+    });
+    await vi.advanceTimersByTimeAsync(10000);
+    await flushPromises();
+    expect(wrapper.findComponent(JoinMaterials).exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('secret-example');
+    expect(wrapper.findAll('button').some((b) => b.text() === '加入材料')).toBe(
+      false,
+    );
+  },
+);
+
+it('blocks a confirmed write waiting for membership after an in-flight poll denies access, and only recovers on manual refresh', async () => {
+  vi.useFakeTimers();
+  await showMaterial();
+  let rejectPoll!: (error: ApiError) => void;
+  vi.mocked(adminApi.nodes).mockImplementationOnce(
+    () =>
+      new Promise((_, reject) => {
+        rejectPoll = reject;
+      }),
+  );
+  await vi.advanceTimersByTimeAsync(10000);
+  await flushPromises();
+  await wrapper.get('.details').get('form').trigger('submit');
+  await flushPromises();
+  let resolveMembership!: (
+    value: Awaited<ReturnType<typeof adminApi.membership>>,
+  ) => void;
+  vi.mocked(adminApi.membership).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveMembership = resolve;
+      }),
+  );
+  await click('确认操作');
+  rejectPoll(denied(403));
+  await flushPromises();
+  expect(wrapper.findComponent(JoinMaterials).exists()).toBe(false);
+  resolveMembership({
+    permissions: ['workspace.nodes.read', 'workspace.nodes.admin'],
+  } as Awaited<ReturnType<typeof adminApi.membership>>);
+  await flushPromises();
+  expect(adminApi.updateNode).not.toHaveBeenCalled();
+  expect(wrapper.findAll('button').some((b) => b.text() === '加入材料')).toBe(
+    false,
+  );
+  await click('刷新');
+  expect(wrapper.findAll('button').some((b) => b.text() === '加入材料')).toBe(
+    true,
+  );
+  expect(wrapper.findComponent(JoinMaterials).exists()).toBe(false);
+  expect(wrapper.text()).not.toContain('secret-example');
 });
 
 it('confirms retirement before deletion and rechecks fresh node state', async () => {

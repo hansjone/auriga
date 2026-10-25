@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { ApiError, isApiError } from '@auriga/shared';
 import {
   ElButton,
   ElTable,
@@ -23,6 +24,7 @@ import '../admin/management.css';
 const { t, state } = useAdminI18n();
 const { t: nt, failure } = useNodesI18n();
 const retirementError = ref('');
+const accessDenied = ref(false);
 const {
   items,
   selected,
@@ -34,12 +36,12 @@ const {
   detailError,
   notice,
   pending,
-  canWrite,
+  canWrite: managementCanWrite,
   load,
   select,
   close,
   ask,
-  confirm,
+  confirm: confirmAction,
 } = useManagement<Node>({
   read: 'workspace.nodes.read',
   write: 'workspace.nodes.admin',
@@ -50,6 +52,9 @@ const {
       ? retirementError.value
       : t(key, params ?? {}),
 });
+const canWrite = computed(
+  () => managementCanWrite.value && !accessDenied.value,
+);
 const name = ref('');
 const schedulable = ref(false);
 const labels = ref<{ key: string; value: string }[]>([]);
@@ -71,6 +76,31 @@ const pollError = ref('');
 let alive = true;
 let pollGeneration = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
+function forbidden() {
+  return new ApiError({
+    status: 403,
+    code: 'common.forbidden',
+    title: t('forbidden'),
+  });
+}
+function revokeAccess() {
+  accessDenied.value = true;
+  joinOpen.value = false;
+  pending.value = undefined;
+  selected.value = undefined;
+  items.value = [];
+  ++pollGeneration;
+  globalThis.clearTimeout(timer);
+}
+async function writeNode(run: () => Promise<Node>) {
+  if (!alive || !canWrite.value) throw forbidden();
+  const result = await run();
+  if (!alive || !canWrite.value) throw forbidden();
+  return result;
+}
+function confirm() {
+  if (canWrite.value) return confirmAction();
+}
 function schedule() {
   if (alive) timer = setTimeout(() => void poll(), 10_000);
 }
@@ -89,8 +119,7 @@ async function poll() {
       (canWrite.value &&
         !membership.permissions.includes('workspace.nodes.admin'))
     ) {
-      await refresh();
-      return;
+      throw forbidden();
     }
     const result = await adminApi.nodes();
     const detail = current ? await adminApi.node(current.id) : undefined;
@@ -102,15 +131,19 @@ async function poll() {
     }
     schedule();
   } catch (e) {
-    if (alive && generation === pollGeneration)
+    if (alive && generation === pollGeneration) {
+      if (isApiError(e) && (e.status === 401 || e.status === 403))
+        revokeAccess();
       pollError.value = `${nt('pollFailed')} ${failure(e)}`;
+    }
   }
 }
 async function refresh() {
-  ++pollGeneration;
+  const generation = ++pollGeneration;
   globalThis.clearTimeout(timer);
   pollError.value = '';
-  if (await load()) {
+  if ((await load()) && alive && generation === pollGeneration) {
+    accessDenied.value = false;
     ++refreshKey.value;
     schedule();
   }
@@ -123,29 +156,30 @@ onBeforeUnmount(() => {
 });
 function retire() {
   const node = selected.value;
-  if (!node || retirementBlock(node)) return;
+  if (!canWrite.value || !node || retirementBlock(node)) return;
   retirementError.value = '';
   ask({
     message: nt('retireConfirm', { name: node.name }),
-    run: async () => {
-      const fresh = await adminApi.node(node.id);
-      if (!alive || selected.value?.id !== node.id || !canWrite.value)
-        throw new Error('cancelled');
-      const reason = retirementBlock(fresh);
-      if (reason) {
-        retirementError.value = nt(reason);
-        throw new Error('node-state-changed');
-      }
-      await nodesApi.retire(node.id);
-      return { ...fresh, status: 'revoked', schedulable: false } as Node;
-    },
+    run: () =>
+      writeNode(async () => {
+        const fresh = await adminApi.node(node.id);
+        if (!alive || selected.value?.id !== node.id || !canWrite.value)
+          throw new Error('cancelled');
+        const reason = retirementBlock(fresh);
+        if (reason) {
+          retirementError.value = nt(reason);
+          throw new Error('node-state-changed');
+        }
+        await nodesApi.retire(node.id);
+        return { ...fresh, status: 'revoked', schedulable: false } as Node;
+      }),
     success: nt('retired'),
   });
 }
 function save() {
   retirementError.value = '';
   const node = selected.value;
-  if (!node) return;
+  if (!canWrite.value || !node) return;
   const keys = labels.value.map((label) => label.key.trim());
   if (keys.some((key) => !key) || new Set(keys).size !== keys.length) {
     detailError.value = t('invalidLabels');
@@ -161,17 +195,17 @@ function save() {
   };
   ask({
     message: t('nodeConfirm', { name: node.name }),
-    run: () => adminApi.updateNode(node.id, body),
+    run: () => writeNode(() => adminApi.updateNode(node.id, body)),
     success: t('saved'),
   });
 }
 function drain() {
   retirementError.value = '';
   const node = selected.value;
-  if (node)
+  if (canWrite.value && node)
     ask({
       message: t('drainConfirm', { name: node.name }),
-      run: () => adminApi.drainNode(node.id),
+      run: () => writeNode(() => adminApi.drainNode(node.id)),
       success: t('accepted'),
     });
 }
