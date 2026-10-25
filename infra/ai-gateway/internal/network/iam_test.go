@@ -7,12 +7,11 @@ import (
 	"testing"
 	"time"
 
+	iam "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 const testTenant = "01900000-0000-7000-8000-000000000001"
@@ -20,16 +19,36 @@ const testDevice = "01900000-0000-7000-8000-000000000002"
 const connectTicket = `{"tenant":"` + testTenant + `","node":"1","device":"` + testDevice + `","ticket":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`
 
 type fakeIAM struct {
+	iam.UnimplementedNetworkGatewayServiceServer
 	mu      sync.Mutex
 	used    bool
 	delay   time.Duration
 	failure error
 	active  bool
 	calls   int
-	mutate  func(*dynamicpb.Message)
+	mutate  func(*iam.RedeemNetworkTicketResponse)
 }
 
 func (f *fakeIAM) Invoke(ctx context.Context, method string, args, reply any, _ ...grpc.CallOption) error {
+	switch method {
+	case iam.NetworkGatewayService_RedeemNetworkTicket_FullMethodName:
+		resp, err := f.RedeemNetworkTicket(ctx, args.(*iam.RedeemNetworkTicketRequest))
+		if err == nil {
+			proto.Merge(reply.(*iam.RedeemNetworkTicketResponse), resp)
+		}
+		return err
+	case iam.NetworkGatewayService_NetworkNodeActive_FullMethodName:
+		resp, err := f.NetworkNodeActive(ctx, args.(*iam.NetworkNodeActiveRequest))
+		if err == nil {
+			proto.Merge(reply.(*iam.NetworkNodeActiveResponse), resp)
+		}
+		return err
+	default:
+		return status.Error(codes.Unimplemented, "unknown RPC")
+	}
+}
+
+func (f *fakeIAM) beforeCall(ctx context.Context) error {
 	f.mu.Lock()
 	f.calls++
 	delay, failure := f.delay, f.failure
@@ -44,28 +63,37 @@ func (f *fakeIAM) Invoke(ctx context.Context, method string, args, reply any, _ 
 	if failure != nil {
 		return failure
 	}
-	req := args.(*dynamicpb.Message)
-	resp := reply.(*dynamicpb.Message)
+	return nil
+}
+
+func (f *fakeIAM) NetworkNodeActive(ctx context.Context, _ *iam.NetworkNodeActiveRequest) (*iam.NetworkNodeActiveResponse, error) {
+	if err := f.beforeCall(ctx); err != nil {
+		return nil, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if method == activeMethod {
-		resp.Set(resp.Descriptor().Fields().ByName("active"), protoreflect.ValueOfBool(f.active))
-		return nil
+	return &iam.NetworkNodeActiveResponse{Active: f.active}, nil
+}
+
+func (f *fakeIAM) RedeemNetworkTicket(ctx context.Context, req *iam.RedeemNetworkTicketRequest) (*iam.RedeemNetworkTicketResponse, error) {
+	if err := f.beforeCall(ctx); err != nil {
+		return nil, err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.used {
-		return status.Error(codes.PermissionDenied, "common.forbidden")
+		return nil, status.Error(codes.PermissionDenied, "common.forbidden")
 	}
 	f.used = true
-	setString(resp, "realm", "9223372036854775809")
-	setString(resp, "node", getString(req, "node"))
-	setString(resp, "device", getString(req, "device"))
-	setString(resp, "server_audience", getString(req, "server_audience"))
-	setString(resp, "ingress", getString(req, "ingress"))
-	setString(resp, "expires_at", time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano))
+	resp := &iam.RedeemNetworkTicketResponse{
+		Realm: "9223372036854775809", Node: req.GetNode(), Device: req.GetDevice(),
+		ServerAudience: req.GetServerAudience(), Ingress: req.GetIngress(),
+		ExpiresAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano),
+	}
 	if f.mutate != nil {
 		f.mutate(resp)
 	}
-	return nil
+	return resp, nil
 }
 
 func (*fakeIAM) NewStream(context.Context, *grpc.StreamDesc, string, ...grpc.CallOption) (grpc.ClientStream, error) {
@@ -126,24 +154,29 @@ func TestIAMRedeemerRejectsUntrustedServerAndMalformedTicket(t *testing.T) {
 	}
 }
 
-func TestIAMDescriptorMatchesContract(t *testing.T) {
-	// Round-trip proves this transport uses protobuf descriptors, not a JSON codec.
-	msg := dynamicpb.NewMessage(iamFile.Messages().ByName("NetworkNodeActiveRequest"))
-	setString(msg, "realm", "18446744073709551615")
+func TestIAMGeneratedMessagesRoundTrip(t *testing.T) {
+	msg := &iam.NetworkNodeActiveRequest{Realm: "18446744073709551615"}
 	raw, err := proto.Marshal(msg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := dynamicpb.NewMessage(msg.Descriptor())
-	if err = proto.Unmarshal(raw, result); err != nil || getString(result, "realm") != "18446744073709551615" {
+	result := new(iam.NetworkNodeActiveRequest)
+	if err = proto.Unmarshal(raw, result); err != nil || result.GetRealm() != "18446744073709551615" {
 		t.Fatalf("roundtrip: %v", err)
 	}
 }
 
 func TestIAMRedeemerRejectsMismatchedOrExpiredAuthorityResponse(t *testing.T) {
-	for field, value := range map[protoreflect.Name]string{"realm": "0", "node": "2", "device": "other", "server_audience": "other", "ingress": "foreign", "expires_at": "2000-01-01T00:00:00Z"} {
-		t.Run(string(field), func(t *testing.T) {
-			r := testRedeemer(t, &fakeIAM{mutate: func(resp *dynamicpb.Message) { setString(resp, field, value) }})
+	for field, mutate := range map[string]func(*iam.RedeemNetworkTicketResponse){
+		"realm":           func(resp *iam.RedeemNetworkTicketResponse) { resp.Realm = "0" },
+		"node":            func(resp *iam.RedeemNetworkTicketResponse) { resp.Node = "2" },
+		"device":          func(resp *iam.RedeemNetworkTicketResponse) { resp.Device = "other" },
+		"server_audience": func(resp *iam.RedeemNetworkTicketResponse) { resp.ServerAudience = "other" },
+		"ingress":         func(resp *iam.RedeemNetworkTicketResponse) { resp.Ingress = "foreign" },
+		"expires_at":      func(resp *iam.RedeemNetworkTicketResponse) { resp.ExpiresAt = "2000-01-01T00:00:00Z" },
+	} {
+		t.Run(field, func(t *testing.T) {
+			r := testRedeemer(t, &fakeIAM{mutate: mutate})
 			if g, err := r.Redeem(context.Background(), testAttempt()); err == nil || g.Ingress != "" || len(r.snapshot()) != 0 {
 				t.Fatalf("invalid response authorized: %+v %v", g, err)
 			}

@@ -78,6 +78,6 @@ IAM 故障也失败关闭；KICK 控制面失效时 JWT（最长一小时且不�
 旧连接依赖原 JWT 到期及应用层逐操作授权。控制连接不自动重连，断开即退出并要求重新启动，
 防止把新 Broker 世代当作旧 server ID；多 Broker/跨进程恢复仍需后续接线。
 
-Go 使用从新增 proto 生成并嵌入的 FileDescriptorSet + dynamic protobuf，避免修改本任务
-范围外的 `infra/gen`。在本目录 `internal/network` 执行 `go generate` 可用 protoc 重生成
-`iam-network.pb`；Java 类型继续由原 Maven contracts 模块生成。
+Go 通过 `infra/gen/auriga/iam/v1` 的生成客户端与消息类型调用 IAM，测试服务也使用生成的
+服务注册函数。在 `infra` 目录执行 `go run generate.go` 同步生成物；Java 类型继续由
+原 Maven contracts 模块生成。

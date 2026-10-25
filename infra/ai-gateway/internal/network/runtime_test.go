@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/team"
+	iam "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
 	"github.com/nats-io/nats.go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 func startIAMRPC(t *testing.T, f *fakeIAM) team.RPCConfig {
@@ -34,25 +34,7 @@ func startIAMRPC(t *testing.T, f *fakeIAM) team.RPCConfig {
 		}
 		return handler(ctx, req)
 	}))
-	svc := iamFile.Services().ByName("NetworkGatewayService")
-	methods := []grpc.MethodDesc{}
-	for i := 0; i < svc.Methods().Len(); i++ {
-		method := svc.Methods().Get(i)
-		full := "/" + string(svc.FullName()) + "/" + string(method.Name())
-		methods = append(methods, grpc.MethodDesc{MethodName: string(method.Name()), Handler: func(_ any, ctx context.Context, decode func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-			req := dynamicpb.NewMessage(method.Input())
-			resp := dynamicpb.NewMessage(method.Output())
-			if err := decode(req); err != nil {
-				return nil, err
-			}
-			handler := func(ctx context.Context, _ any) (any, error) { err := f.Invoke(ctx, full, req, resp); return resp, err }
-			if interceptor != nil {
-				return interceptor(ctx, req, &grpc.UnaryServerInfo{FullMethod: full}, handler)
-			}
-			return handler(ctx, req)
-		}})
-	}
-	srv.RegisterService(&grpc.ServiceDesc{ServiceName: string(svc.FullName()), HandlerType: (*interface{})(nil), Methods: methods}, f)
+	iam.RegisterNetworkGatewayServiceServer(srv, f)
 	done := make(chan struct{})
 	go func() { defer close(done); _ = srv.Serve(listener) }()
 	t.Cleanup(func() { srv.Stop(); _ = listener.Close(); <-done })
