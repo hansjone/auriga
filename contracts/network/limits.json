@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "description": "协议硬上限（契约值，超限即拒绝）。运营默认值（速率、配额、留存等）仍以设计总览 §10 为准且待压测，不在此冻结；本表只收录各端必须一致执行、影响编码/互通的上限。",
+  "encoding": {
+    "maxPayloadBytes": 65536,
+    "maxBodyBytes": 16384,
+    "maxJsonDepth": 16,
+    "maxObjectMembers": 128,
+    "maxArrayItems": 256,
+    "maxStringBytes": 16384,
+    "maxTotalValues": 8192,
+    "maxExtMembers": 32,
+    "maxFlags": 16,
+    "maxDisplayLabelChars": 64,
+    "maxContactPreviewChars": 280,
+    "maxInvitationNoteChars": 512
+  },
+  "address": {
+    "maxHexDigitsPerSegment": 16,
+    "textSegments": [2, 3],
+    "broadcastGroupLocal": "1",
+    "firstOrdinaryGroupLocal": "2",
+    "systemLocal": "0",
+    "groupNode": "0"
+  },
+  "message": {
+    "maxTtlSeconds": 604800,
+    "firstContactPendingMaxSeconds": 86400,
+    "responseDeadlineMaxSeconds": 86400
+  },
+  "serverAuth": {
+    "maxEnvelopeLifetimeSeconds": 300,
+    "maxClockSkewSeconds": 60,
+    "signatureBytes": 64,
+    "domainSeparator": "Auriga.ServerEnvelope.v1"
+  },
+  "fetch": {
+    "maxItems": 128,
+    "maxBytes": 65536,
+    "maxHeldIds": 256,
+    "maxPaused": 128,
+    "maxStateBarrier": 128,
+    "maxInFlightPerNode": 1
+  },
+  "receipt": {
+    "maxResultsPerReceipt": 256
+  },
+  "dispatch": {
+    "atomicMaxNodes": 32,
+    "atomicMaxLocals": 256,
+    "maxLocalsPerNodeItem": 256,
+    "maxNodeItemBytes": 65536,
+    "pagedMaxNodesPerPage": 32,
+    "groupMaxMembers": 1024,
+    "groupMaxNodes": 256,
+    "broadcastMaxNodes": 10000
+  },
+  "processing": {
+    "maxAutomaticAttempts": 5,
+    "quarantineMaxSeconds": 86400
+  },
+  "recovery": {
+    "maxEvidencePerBatch": 128
+  }
+}
