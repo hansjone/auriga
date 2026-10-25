@@ -1,3 +1,4 @@
+/* global TextDecoder */
 import {
   APP_VERSION,
   FETCH_MAX_BYTES,
@@ -21,7 +22,11 @@ export function encodeJson(value) {
 
 /** @param {Uint8Array} bytes */
 export function decodeJson(bytes) {
-  if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_PAYLOAD_BYTES) {
+  if (
+    !bytes ||
+    bytes.byteLength === 0 ||
+    bytes.byteLength > MAX_PAYLOAD_BYTES
+  ) {
     throw new SessionError('payload_size', 'invalid payload size');
   }
   try {
@@ -147,7 +152,9 @@ export function frameType(frame) {
 
 /** @param {unknown} frame @param {string} epoch */
 export function assertFrameEpoch(frame, epoch) {
-  const e = /** @type {{ epoch?: string, page?: { epoch?: string } }} */ (frame);
+  const e = /** @type {{ epoch?: string, page?: { epoch?: string } }} */ (
+    frame
+  );
   const found = e.epoch ?? e.page?.epoch;
   if (found !== undefined && found !== epoch) {
     throw new SessionError('stale_epoch', `frame epoch ${found} != ${epoch}`);

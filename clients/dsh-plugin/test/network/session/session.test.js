@@ -25,10 +25,7 @@ import {
  * Speaks the same JSON shapes as ai-gateway network frames (unsigned stubs).
  */
 function attachFakeBroker(transport, { epoch = '7', deliveries = [] } = {}) {
-  let headSeq = deliveries.reduce(
-    (m, d) => Math.max(m, Number(d.mail_seq)),
-    0,
-  );
+  let headSeq = deliveries.reduce((m, d) => Math.max(m, Number(d.mail_seq)), 0);
   let committedCursor = 0;
   const inbox = [...deliveries];
 
@@ -70,7 +67,10 @@ function attachFakeBroker(transport, { epoch = '7', deliveries = [] } = {}) {
       const taken = [];
       const rest = [];
       for (const d of inbox) {
-        if (Number(d.mail_seq) > resume && taken.length < (frame.max_items ?? 16))
+        if (
+          Number(d.mail_seq) > resume &&
+          taken.length < (frame.max_items ?? 16)
+        )
           taken.push(d);
         else rest.push(d);
       }
@@ -264,7 +264,31 @@ test('FETCH page → ledger inbox + RECEIPT commit for system first_contact', as
   assert.equal(prompts[0].contactId, 'msg-fc-0001');
   assert.match(prompts[0].previewText, /请求建立对话/);
   assert.ok(broker.committedCursor >= 10);
+  // resume follows receipt commit prefix; scan_after is the page tip.
+  assert.equal(session.resumeCursor, '10');
+  assert.equal(session.scanAfter, '10');
 
+  await session.stop();
+});
+
+test('scan_after advances without raising resume_cursor past committed prefix', async () => {
+  const { session } = await openWorld([]);
+  await session.start();
+  assert.equal(session.resumeCursor, '0');
+
+  await session.applyFetchResult({
+    app_version: '1.0',
+    type: 'fetch_result',
+    page: {
+      request_id: 'x',
+      epoch: '7',
+      scan_after: '102',
+      committed_cursor: '100',
+    },
+    items: [],
+  });
+  assert.equal(session.scanAfter, '102');
+  assert.equal(session.resumeCursor, '100');
   await session.stop();
 });
 

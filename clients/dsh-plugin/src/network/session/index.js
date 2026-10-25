@@ -11,8 +11,5 @@ export {
 } from './frames.js';
 export { wireDeliveryToPageItem, buildVerifiedPage } from './page.js';
 export { createMemoryPipe } from './memory-pipe.js';
-export {
-  createSystemInbox,
-  systemPromptFrom,
-} from './system-inbox.js';
+export { createSystemInbox, systemPromptFrom } from './system-inbox.js';
 export { createNetworkSession } from './session.js';

@@ -9,10 +9,7 @@ import {
 } from './frames.js';
 import { SessionError } from './errors.js';
 import { buildVerifiedPage } from './page.js';
-import {
-  createSystemInbox,
-  systemPromptFrom,
-} from './system-inbox.js';
+import { createSystemInbox, systemPromptFrom } from './system-inbox.js';
 
 const FINAL = new Set([
   'host_accepted',
@@ -50,7 +47,10 @@ export function createNetworkSession(options) {
 
   /** @type {string} */
   let epoch = '0';
+  /** Platform-confirmed prefix only (receipt / terminal commits). */
   let resumeCursor = '0';
+  /** Pagination scan tip; never written into resume_cursor. */
+  let scanAfter = '0';
   let ready = false;
   let fetchInflight = false;
   /** @type {(() => void) | null} */
@@ -181,6 +181,9 @@ export function createNetworkSession(options) {
     if (result.committed_cursor !== undefined) {
       resumeCursor = String(result.committed_cursor);
     }
+    if (result.scan_after !== undefined) {
+      scanAfter = String(result.scan_after);
+    }
     ready = true;
     return result;
   }
@@ -214,6 +217,7 @@ export function createNetworkSession(options) {
           requestId,
           epoch,
           resumeCursor,
+          continuation: { scan_after: scanAfter },
           maxItems: opts.maxItems,
           maxBytes: opts.maxBytes,
         }),
@@ -230,8 +234,11 @@ export function createNetworkSession(options) {
     if (frameType(result) !== 'fetch_result') {
       throw new SessionError('bad_fetch_result', 'expected fetch_result');
     }
+    if (result.page?.epoch === undefined) {
+      throw new SessionError('bad_fetch_result', 'fetch_page missing epoch');
+    }
     assertFrameEpoch(result, epoch);
-    const pageEpoch = String(result.page?.epoch ?? epoch);
+    const pageEpoch = String(result.page.epoch);
     const page = buildVerifiedPage({
       tenant: identity.tenant,
       nodeIncarnation: identity.nodeIncarnation,
@@ -239,22 +246,20 @@ export function createNetworkSession(options) {
       bootId,
       items: result.items ?? [],
     });
+    // scan_after advances pagination; resume_cursor only tracks confirmed prefix.
+    if (result.page?.scan_after !== undefined) {
+      scanAfter = String(result.page.scan_after);
+    }
+    if (result.page?.committed_cursor !== undefined) {
+      resumeCursor = String(result.page.committed_cursor);
+    }
     if (page.items.length === 0) {
-      if (result.page?.scan_after !== undefined) {
-        resumeCursor = String(result.page.scan_after);
-      }
       return { receipts: [], committed: [] };
     }
 
     const receipts = await adapter.deliver(page);
     await publishSystemPrompts(page, receipts);
     const committed = await submitReceipts(page, receipts);
-    if (result.page?.committed_cursor !== undefined) {
-      // Platform prefix is authoritative for resume; scan_after is page tip.
-      resumeCursor = String(
-        result.page.scan_after ?? result.page.committed_cursor,
-      );
-    }
     return { receipts, committed, page };
   }
 
@@ -337,6 +342,9 @@ export function createNetworkSession(options) {
       if (frameType(committedFrame) !== 'receipt_committed') {
         throw new SessionError('bad_receipt', 'expected receipt_committed');
       }
+      if (committedFrame.committed_cursor !== undefined) {
+        resumeCursor = String(committedFrame.committed_cursor);
+      }
       const ids = (committedFrame.results ?? []).map((r) => r.recipient_id);
       await adapter.markCommitted(ids);
       committed.push(...ids);
@@ -350,6 +358,9 @@ export function createNetworkSession(options) {
     },
     get resumeCursor() {
       return resumeCursor;
+    },
+    get scanAfter() {
+      return scanAfter;
     },
     get ready() {
       return ready;

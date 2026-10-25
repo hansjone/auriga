@@ -1,10 +1,12 @@
+/* global queueMicrotask */
 import { TransportError } from '../transport/errors.js';
 import { SendQueue } from '../transport/send-queue.js';
 import { pubWireBytes } from '../transport/limits.js';
 
 /**
- * In-process duplex that preserves #128 hard buffer ceilings on each end.
- * Used as a stand-in for NatsTransport in closed-loop tests (no real WSS).
+ * In-process duplex that reuses #128 {@link SendQueue} refusal semantics.
+ * Defaults here are at or below production ceilings (not a widen). Used as a
+ * stand-in for NatsTransport in closed-loop tests (no real WSS).
  *
  * @typedef {{
  *   send(payload: Uint8Array): Promise<void>,
