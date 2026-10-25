@@ -20,14 +20,14 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var identityMaterialFiles = []string{
+var identityMaterialFiles = append([]string{
 	"pki/ca.crt", "pki/ca.key", "pki/workspace.crt", "pki/workspace.key",
 	"pki/edge.crt", "pki/edge.key", "pki/iam.crt", "pki/iam.key", "pki/edge-iam.crt", "pki/edge-iam.key",
 	"identity-signing-keys.json", "identity-keys.json", "ca-sha256.txt",
 	"access.json", "iam-healthcheck.sh", "iam-client.json", "heartbeat-observer.json",
 	"edge.config.json", "access.env", "agent-policy.yaml",
 	"runtime-keys/root.pb",
-}
+}, networkMaterialFiles...)
 
 func writeComposeKeys(out string) error {
 	p, err := materials.Open(out)
@@ -87,7 +87,7 @@ func validateComposeKeys(raw []byte) error {
 }
 
 func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet, error) {
-	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys"}}
+	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "network"}}
 	entries, err := os.ReadDir(filepath.Join(out, "templates"))
 	if err != nil {
 		return set, err

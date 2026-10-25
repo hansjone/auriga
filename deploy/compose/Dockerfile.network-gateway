@@ -1,0 +1,11 @@
+FROM golang:1.27.3 AS build
+WORKDIR /src/infra
+COPY infra/ ./
+WORKDIR /src/infra/ai-gateway
+RUN CGO_ENABLED=0 go build -o /out/auriga-ai-gateway .
+
+# Generated 0600 installation materials are read by root in this isolated
+# container. No host privilege, Docker socket, port publication or writable mount.
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /out/auriga-ai-gateway /auriga-ai-gateway
+ENTRYPOINT ["/auriga-ai-gateway"]

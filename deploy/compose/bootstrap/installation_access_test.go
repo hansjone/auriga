@@ -63,8 +63,25 @@ func TestPublicAccessCLI(t *testing.T) {
 			}
 			// Access changes may never redirect the fixed authenticated internal hops.
 			edge, err := os.ReadFile(filepath.Join(out, "edge.config.json"))
-			if err != nil || !strings.Contains(string(edge), "https://host.docker.internal:8082") || !strings.Contains(string(edge), "host.docker.internal:9091") || strings.Contains(string(edge), cfg.PortalOrigin().Host) {
+			if err != nil || !strings.Contains(string(edge), "https://host.docker.internal:8082") || !strings.Contains(string(edge), "host.docker.internal:9091") {
 				t.Fatalf("internal hop changed: %v", err)
+			}
+			var edgeConfig struct {
+				Upstreams map[string]string `json:"upstreams"`
+				Network   struct {
+					AllowedOrigins []string `json:"allowedOrigins"`
+				} `json:"networkWss"`
+			}
+			if err := json.Unmarshal(edge, &edgeConfig); err != nil {
+				t.Fatal(err)
+			}
+			for _, upstream := range edgeConfig.Upstreams {
+				if strings.Contains(upstream, cfg.PortalOrigin().Host) {
+					t.Fatal("public authority used for an internal hop")
+				}
+			}
+			if len(edgeConfig.Network.AllowedOrigins) != 1 || edgeConfig.Network.AllowedOrigins[0] != cfg.PortalURL() {
+				t.Fatal("network Origin must match the exact domain/IP portal origin")
 			}
 			before, err := os.ReadFile(filepath.Join(out, "iam-installation", "edge.secret"))
 			if err != nil {
@@ -115,7 +132,7 @@ func TestPublicAccessCLI(t *testing.T) {
 					})
 				}
 			}
-			for _, failure := range []string{"image", "fixture", "observer", "access", "damaged public", "missing public", "missing private", "missing receipt", "damaged private"} {
+			for _, failure := range []string{"image", "fixture", "observer", "access", "damaged public", "missing public", "missing private", "missing receipt", "damaged private", "damaged network key", "missing network config"} {
 				t.Run("repeat rejects/"+failure, func(t *testing.T) {
 					badArgs := append([]string{}, args...)
 					changed := ""
@@ -139,6 +156,12 @@ func TestPublicAccessCLI(t *testing.T) {
 						badArgs[1] = badInput
 					default:
 						name := "pki/iam.crt"
+						if failure == "damaged network key" {
+							name = "network/callout-account.seed"
+						}
+						if failure == "missing network config" {
+							name = "network/nats.conf"
+						}
 						if failure == "missing private" {
 							name = "iam-installation/edge.secret"
 						}

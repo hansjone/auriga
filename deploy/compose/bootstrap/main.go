@@ -177,6 +177,10 @@ func main() {
 	edgeCfg := map[string]any{
 		"accessConfigFile":  "/etc/auriga/access.json",
 		"allowLocalIngress": true,
+		"networkWss": map[string]any{
+			"enabled": true, "path": "/net/v1/ws", "upstreamUrl": "https://network-nats:8443/",
+			"allowedOrigins": []string{access.PortalURL()}, "maxConcurrent": 256,
+		},
 		"upstreams": map[string]string{
 			"iam":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
 			"org":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
@@ -425,5 +429,6 @@ func generateIdentityMaterials(out string) {
 
 	fp := spkiSHA256(caCert)
 	writeFile(filepath.Join(out, "ca-sha256.txt"), []byte(fp+"\n"), 0o644)
+	generateNetworkMaterials(out, caKey, caCert, caPEM)
 
 }
