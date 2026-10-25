@@ -325,19 +325,34 @@ class NetworkMailboxPostgresTest {
                 "UPDATE collab.network_message SET message_json='null' WHERE id=?",
                 two.messageId()));
     call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            sql(
+                tenant,
+                () -> {
+                  mailbox.fetchPage(tenant, "2", "20", 0, 10, 65536);
+                  throw new IllegalStateException("rollback fetch");
+                }));
+    assertEquals(0, auditCount(tenant, "collab.network.dispatch"));
     var frame =
         NetworkJson.parse(call(tenant, () -> mailbox.fetchPage(tenant, "2", "20", 0, 10, 65536)));
     assertEquals("gap", frame.path("items").get(0).path("type").asString());
     assertEquals("gap", frame.path("items").get(1).path("type").asString());
     assertEquals("delivery", frame.path("items").get(2).path("type").asString());
-    assertEquals(
-        2,
-        sql(
-            tenant,
-            () ->
-                jdbc.queryForObject(
-                    "SELECT count(*) FROM collab.outbox_event WHERE event_type='audit.recorded'",
-                    Integer.class)));
+    assertEquals(2, auditCount(tenant, "collab.network.dispatch"));
+    for (var reader :
+        List.of(
+            mailbox,
+            new NetworkMailboxService(
+                jdbc, manager, authority(null), keys, Clock.systemUTC(), liveIam()))) {
+      var replay =
+          NetworkJson.parse(call(tenant, () -> reader.fetchPage(tenant, "2", "20", 0, 10, 65536)));
+      assertEquals("gap", replay.path("items").get(0).path("type").asString());
+      assertEquals("gap", replay.path("items").get(1).path("type").asString());
+      assertEquals("delivery", replay.path("items").get(2).path("type").asString());
+      assertEquals(2, auditCount(tenant, "collab.network.dispatch"));
+    }
   }
 
   @Test
@@ -493,19 +508,28 @@ class NetworkMailboxPostgresTest {
             argThat(r -> r != null && r.operation() == NetworkAuthority.Operation.BROADCAST)))
         .thenReturn(new NetworkAuthority.Decision(false, "network_denied", Map.of()));
     error("network.unauthorized", () -> call(tenant, () -> broadcast.store(request)));
-    assertEquals(
-        2,
-        sql(
-            tenant,
-            () ->
-                jdbc.queryForObject(
-                    "SELECT count(*) FROM collab.outbox_event WHERE envelope->'data'->>'action'='collab.network.broadcast.submit'",
-                    Integer.class)));
+    assertEquals(2, auditCount(tenant, "collab.network.broadcast.submit"));
     call(tenant, () -> broadcast.ready(tenant, "2", "20"));
     var frame =
         NetworkJson.parse(call(tenant, () -> broadcast.fetchPage(tenant, "2", "20", 0, 10, 65536)));
     assertEquals("gap", frame.path("items").get(0).path("type").asString());
     assertEquals("awaiting_authorization", frame.path("items").get(0).path("reason").asString());
+  }
+
+  static int auditCount(UUID tenant, String action) {
+    // The shared infrastructure outbox stores its CloudEvents envelope as text.
+    return sql(
+        tenant,
+        () ->
+            jdbc.queryForObject(
+                """
+        SELECT count(*) FROM collab.outbox_event
+        WHERE tenant_id=? AND event_type='audit.recorded'
+          AND envelope::jsonb->'data'->>'action'=?
+        """,
+                Integer.class,
+                tenant,
+                action));
   }
 
   static NetworkSourceAuthority authority(NetworkSourceAuthority.Dispatch dispatch) {

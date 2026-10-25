@@ -627,18 +627,18 @@ public class NetworkMailboxService {
               candidate =
                   signedMailboxItem(tenantId, item, context, target.validUntil(), envelopes);
             } catch (AurigaException e) {
-              auditItem(item, e.errorCode());
               String code = e.errorCode().code();
               String reason =
                   Set.of("network.unauthorized", "common.forbidden", "common.unavailable")
                           .contains(code)
                       ? "awaiting_authorization"
                       : "quarantined";
+              auditItem(tenantId, item, e.errorCode(), "quarantined".equals(reason));
               candidate = envelopes.gap(item.mailSeq(), reason, context, target.validUntil());
             } catch (DataAccessException e) {
               throw e;
             } catch (RuntimeException e) {
-              auditItem(item, NetworkErrors.PROTOCOL_ERROR);
+              auditItem(tenantId, item, NetworkErrors.PROTOCOL_ERROR, true);
               candidate =
                   envelopes.gap(item.mailSeq(), "quarantined", context, target.validUntil());
             }
@@ -843,7 +843,16 @@ public class NetworkMailboxService {
     audit.record(entry.build());
   }
 
-  private void auditItem(FetchItem item, ErrorCode error) {
+  private void auditItem(UUID tenantId, FetchItem item, ErrorCode error, boolean corrupted) {
+    if (corrupted
+        && jdbc.update(
+                """
+            UPDATE collab.network_mail_item SET corruption_audited=true
+            WHERE tenant_id=? AND id=? AND NOT corruption_audited
+            """,
+                tenantId,
+                item.deliveryId())
+            == 0) return;
     // Never log body, display labels, raw exceptions or damaged JSON.
     audit.record(
         AuditEntry.builder("collab.network.dispatch")
