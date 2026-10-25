@@ -27,6 +27,8 @@ const existing = new Set([
   '/quotas',
   '/roles',
   '/providers',
+  '/models/relay',
+  '/models/usage',
 ]);
 const unavailable = [
   ...new Set(
@@ -57,6 +59,14 @@ export const router = createRouter({
         { path: 'providers', component: IdentityProvidersView },
         { path: 'models/providers', component: ModelProvidersView },
         { path: 'settings', component: SettingsView },
+        {
+          path: 'models/relay',
+          component: () => import('./views/models/RelayView.vue'),
+        },
+        {
+          path: 'models/usage',
+          component: () => import('./views/models/UsageView.vue'),
+        },
         ...unavailable.map((path) => ({
           path: path.slice(1),
           component: WorkflowUnavailableView,
