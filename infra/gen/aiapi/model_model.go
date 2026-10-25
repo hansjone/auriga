@@ -30,6 +30,8 @@ type Model struct {
 	MaxOutputTokens int64  `json:"maxOutputTokens"`
 	Price           Price  `json:"price"`
 	Revision        int64  `json:"revision"`
+	// 当前资源的强 ETag（含双引号），与同一版本单项 GET 的 ETag 响应头完全一致，可原样用于该资源的 If-Match。
+	Etag string `json:"etag"`
 }
 
 type _Model Model
@@ -38,7 +40,7 @@ type _Model Model
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewModel(id string, providerId string, upstreamModel string, displayName string, enabled bool, contextWindow int64, maxOutputTokens int64, price Price, revision int64) *Model {
+func NewModel(id string, providerId string, upstreamModel string, displayName string, enabled bool, contextWindow int64, maxOutputTokens int64, price Price, revision int64, etag string) *Model {
 	this := Model{}
 	this.Id = id
 	this.ProviderId = providerId
@@ -49,6 +51,7 @@ func NewModel(id string, providerId string, upstreamModel string, displayName st
 	this.MaxOutputTokens = maxOutputTokens
 	this.Price = price
 	this.Revision = revision
+	this.Etag = etag
 	return &this
 }
 
@@ -276,6 +279,30 @@ func (o *Model) SetRevision(v int64) {
 	o.Revision = v
 }
 
+// GetEtag returns the Etag field value
+func (o *Model) GetEtag() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.Etag
+}
+
+// GetEtagOk returns a tuple with the Etag field value
+// and a boolean to check if the value has been set.
+func (o *Model) GetEtagOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Etag, true
+}
+
+// SetEtag sets field value
+func (o *Model) SetEtag(v string) {
+	o.Etag = v
+}
+
 func (o Model) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -295,6 +322,7 @@ func (o Model) ToMap() (map[string]interface{}, error) {
 	toSerialize["maxOutputTokens"] = o.MaxOutputTokens
 	toSerialize["price"] = o.Price
 	toSerialize["revision"] = o.Revision
+	toSerialize["etag"] = o.Etag
 	return toSerialize, nil
 }
 
@@ -312,6 +340,7 @@ func (o *Model) UnmarshalJSON(data []byte) (err error) {
 		"maxOutputTokens",
 		"price",
 		"revision",
+		"etag",
 	}
 
 	allProperties := make(map[string]interface{})

@@ -12,6 +12,7 @@ import { createKeyedMutex } from './keyed-mutex.js';
 import { digestOf, newId, pushAudit } from './ledger.js';
 import { createLocalAllocator } from './local-allocator.js';
 import { createInboundPolicy } from '../policy/inbound-policy.js';
+import { assertNetworkIsolation } from '../isolation.js';
 
 /**
  * Transport-independent host seam: `deliver(page) → receipts` (design README
@@ -29,6 +30,8 @@ import { createInboundPolicy } from '../policy/inbound-policy.js';
  *
  * Host port, modelled on DSH 0.2.1-rc.3 session-controller (see
  * failure-validation §1.2). Real wiring is the main-controller's job.
+ * Same-machine isolation is deferred by network/isolation.js for both modes;
+ * this does not relax history deduplication or durable flush requirements.
  * @typedef {{
  *   getSession(id: string): Promise<null|{ id: string, cwd: string, origin?: string }>,
  *   createSession(input: { id: string, cwd: string, preset: string|null }): Promise<{ id: string, cwd: string }>,
@@ -73,6 +76,7 @@ import { createInboundPolicy } from '../policy/inbound-policy.js';
  *   hostRequestId: string, messageDigest: string, status: ReceiptStatus,
  *   acceptedBy?: 'system'|'session', acceptanceMode?: 'prompt'|'inbox_only',
  *   assignedAddress?: Address, code?: string, ledgerRevision: number,
+ *   evidenceDigest?: string,
  * }} Receipt
  *
  * Fault hook points used by the fixture transport to crash at each window of
@@ -115,6 +119,7 @@ export function createHostAdapter({
   faults = { at() {} },
   maxPendingRecipients = 1024,
 }) {
+  const isolation = assertNetworkIsolation();
   const identity = ledger.identity;
   const self = { realm: identity.realm, node: identity.node };
   const locks = createKeyedMutex();
@@ -161,6 +166,7 @@ export function createHostAdapter({
       ledgerRevision: revision,
     };
     if (status === 'host_accepted') {
+      receipt.evidenceDigest = 'sha256:' + digestOf(r);
       receipt.acceptedBy = r.acceptedBy ?? 'session';
       receipt.acceptanceMode = r.acceptanceMode ?? 'prompt';
     }
@@ -1396,7 +1402,21 @@ export function createHostAdapter({
   }
 
   return {
+    isolation,
     deliver,
+    /** Private runtime policy rejection after wire verification, with durable uniform evidence.
+     * @param {Page} page @param {PageItem} item @param {string} reason */
+    reject(page, item, reason) {
+      ledger.assertAvailable();
+      checkPage({ ...page, items: [item] });
+      return Promise.all(
+        item.recipients.map((rec) =>
+          locks.run(`thread:${rec.local}:${item.message.threadId}`, () =>
+            rejectAddressItem(page, item, rec, reason),
+          ),
+        ),
+      );
+    },
     localAddress: allocator.addressFor,
     recoverLocalRegistrations: allocator.recover,
     inboundPolicy,

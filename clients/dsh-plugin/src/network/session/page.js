@@ -77,6 +77,7 @@ export function wireDeliveryToPageItem(item) {
  *   context: import('../trust/verifier.js').VerifyContext,
  *   now?: () => number,
  *   maxBytes?: number,
+ *   prepareDelivery?: (raw:any) => Promise<any>,
  * }} input
  * @returns {Promise<{verified:true,items:any[],rejections:{index:number,code:string,reason:string}[]}>}
  */
@@ -134,7 +135,7 @@ export async function verifyFetchPage(input) {
 
 /** Keep signature acceptance separate from the online attempt required by the host.
  * @param {Parameters<typeof verifyFetchPage>[0]} input
- * @returns {Promise<import('../host/adapter.js').Page & {rejections:{index:number,code:string,reason:string}[]}>}
+ * @returns {Promise<import('../host/adapter.js').Page & {verifiedItems:any[],rejections:{index:number,code:string,reason:string}[]}>}
  */
 export async function buildVerifiedPage(input) {
   const checked = await verifyFetchPage(input);
@@ -142,7 +143,11 @@ export async function buildVerifiedPage(input) {
   for (const raw of checked.items) {
     if (raw.type !== 'delivery') continue;
     try {
-      items.push(wireDeliveryToPageItem(raw));
+      items.push(
+        wireDeliveryToPageItem(
+          input.prepareDelivery ? await input.prepareDelivery(raw) : raw,
+        ),
+      );
     } catch (error) {
       if (!(error instanceof SessionError)) throw error;
       checked.rejections.push({
@@ -162,5 +167,6 @@ export async function buildVerifiedPage(input) {
     bootId: input.bootId,
     items,
     rejections: checked.rejections,
+    verifiedItems: checked.items,
   };
 }

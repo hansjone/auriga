@@ -3,7 +3,7 @@ import { NatsLink } from './nats-link.js';
 import { resolveLimits, worstCaseBufferBound } from './limits.js';
 
 /**
- * @typedef {{ auth: import('./nats-link.js').TicketAuth, expiresAtMs: number }} Ticket
+ * @typedef {{ auth: import('./nats-link.js').TicketAuth, expiresAtMs: number, subjects?: {upSubject:string, downSubject:string, inboxPrefix:string} }} Ticket
  * @typedef {{
  *   state: 'idle' | 'connecting' | 'ready' | 'reconnecting' | 'stopped',
  *   epoch: number,
@@ -184,7 +184,10 @@ export class NatsTransport {
       try {
         const ticket = await this.#o.getTicket({ reason, attempt });
         if (this.#stopped) return;
-        if (!Number.isFinite(ticket?.expiresAtMs)) {
+        if (
+          !Number.isFinite(ticket?.expiresAtMs) ||
+          ticket.expiresAtMs <= Date.now()
+        ) {
           throw new TransportError('ticket_invalid', 'ticket has no expiry');
         }
         const issuedAt = Date.now();
@@ -192,9 +195,9 @@ export class NatsTransport {
         link = new NatsLink({
           url: o.url,
           auth: ticket.auth,
-          upSubject: o.upSubject,
-          downSubject: o.downSubject,
-          inboxPrefix: o.inboxPrefix,
+          upSubject: ticket.subjects?.upSubject ?? o.upSubject,
+          downSubject: ticket.subjects?.downSubject ?? o.downSubject,
+          inboxPrefix: ticket.subjects?.inboxPrefix ?? o.inboxPrefix,
           epoch: this.#epoch + 1,
           name: o.name,
           limits: o.limits,

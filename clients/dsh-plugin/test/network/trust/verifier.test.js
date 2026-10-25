@@ -11,6 +11,7 @@ import {
   parseStrictJson,
 } from '../../../src/network/trust/jcs.js';
 import { openTestTrust as openTrustStore } from './keyset-fixtures.js';
+import { definitions } from '../../../src/generated/network/keyset-schema.js';
 import {
   verifyEnvelope,
   verifyEnvelopeWithRefresh,
@@ -74,6 +75,77 @@ function envelope(v) {
   return value;
 }
 const code = (expected) => (e) => e.code === expected;
+
+test('an unknown schema keyword rejects an otherwise valid root-signed keyset publication', async () => {
+  const schema = definitions.PublicKey.properties.kid;
+  schema.futureConstraint = true;
+  try {
+    await assert.rejects(
+      openTrustStore({ cache: cache(), config: config(), now }),
+      code('network.key_unavailable'),
+    );
+  } finally {
+    delete schema.futureConstraint;
+  }
+  await assert.doesNotReject(
+    openTrustStore({ cache: cache(), config: config(), now }),
+  );
+});
+
+test('failed durable key update can recover on a known-version refresh', async () => {
+  const disk = cache();
+  let fail = false;
+  const trust = await openTrustStore({
+    cache: {
+      load: disk.load,
+      commit: async (v) => {
+        if (fail) throw new Error('disk failure');
+        await disk.commit(v);
+      },
+    },
+    config: config(),
+    now,
+    refresh: async () => ({ ...config(), keyset_version: '6' }),
+  });
+  fail = true;
+  await assert.rejects(trust.update({ ...config(), keyset_version: '6' }));
+  fail = false;
+  await trust.refreshFor(vectors.keys[0].kid, '5');
+  assert.doesNotThrow(() =>
+    trust.key(vectors.keys[0].kid, vectors.keys[0].purpose, '5'),
+  );
+  assert.deepEqual(trust.diagnostics, {
+    refreshAttempts: 1,
+    refreshFailures: 0,
+    refreshSuccesses: 1,
+  });
+});
+
+test('expired known keyset refreshes under cooldown and records unsuccessful refreshes', async () => {
+  let clock = now();
+  let calls = 0;
+  const trust = await openTrustStore({
+    cache: cache(),
+    config: config(),
+    now: () => clock,
+    refresh: async () => {
+      calls++;
+      return config();
+    },
+  });
+  clock = Date.parse(config().valid_until);
+  await assert.rejects(
+    trust.refreshFor(vectors.keys[0].kid, '5'),
+    code('network.key_unavailable'),
+  );
+  await trust.refreshFor(vectors.keys[0].kid, '5');
+  assert.equal(calls, 1);
+  assert.equal(trust.diagnostics.refreshFailures, 1);
+  assert.throws(
+    () => trust.key(vectors.keys[0].kid, vectors.keys[0].purpose, '5'),
+    code('network.key_unavailable'),
+  );
+});
 
 for (const v of vectors.vectors) {
   test(`authoritative JCS + Ed25519 vector: ${v.name}`, async () => {

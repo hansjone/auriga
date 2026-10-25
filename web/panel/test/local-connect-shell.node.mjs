@@ -64,3 +64,85 @@ test('connection bootstrap without an explicit validated status cannot claim con
     host.close();
   }
 });
+
+test('consent children use independent hooks and the authenticated HTTP bridge without replacing the main panel', async () => {
+  let snapshot = {
+    policyRevision: 1,
+    defaults: { conversation: 'ask_each', execution: 'ask_each' },
+    organization: {
+      available: true,
+      revision: 'org-1',
+      conversation: 'allow',
+      execution: 'allow',
+    },
+    rules: [],
+    pending: [
+      {
+        request: { layer: 'conversation', requestId: 'contact-1' },
+        source: { realm: '2', node: '63', userId: 'alice' },
+        preview: '<script>untrusted</script>',
+      },
+    ],
+  };
+  const writes = [];
+  const host = surfaceHost(
+    async (url) =>
+      response(
+        200,
+        new URL(url).pathname.endsWith('/status')
+          ? { loggedIn: true, csrf: 'native-csrf' }
+          : localBoot(true),
+      ),
+    {
+      async consentFetch(_url, init) {
+        if (init.method === 'POST') {
+          writes.push(init);
+          snapshot = { ...snapshot, pending: [] };
+          return response(200, { ok: true });
+        }
+        return response(200, snapshot);
+      },
+    },
+  );
+  try {
+    const main = host.mount('main'),
+      settings = host.mount('settings.section');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    const context = panel.context;
+    const inbox = main.root.querySelector('.auriga-consent');
+    assert.match(inbox.textContent, /<script>untrusted<\/script>/);
+    assert.equal(inbox.querySelector('script'), null);
+    assert.equal(
+      settings.root.querySelectorAll('.auriga-consent select').length,
+      2,
+    );
+    const allow = [...inbox.querySelectorAll('button')].find(
+      (element) => element.textContent === '允许本次',
+    );
+    await allow.onclick();
+    await flush();
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].headers['X-Auriga-CSRF'], 'native-csrf');
+    assert.equal(writes[0].credentials, 'same-origin');
+    assert.deepEqual(JSON.parse(writes[0].body), {
+      layer: 'conversation',
+      requestId: 'contact-1',
+      choice: 'allow_once',
+      expectedRevision: 1,
+    });
+    assert.match(
+      main.root.querySelector('.auriga-consent').textContent,
+      /暂无待处理请求/,
+    );
+    settings.close();
+    assert.equal(main.root.querySelector('auriga-team-panel'), panel);
+    assert.equal(panel.context, context);
+    main.close();
+    host.dispose();
+    assert.equal(host.subscriptions.size, 0);
+    assert.equal(host.counts.timers.size, 0);
+  } finally {
+    host.close();
+  }
+});
