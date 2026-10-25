@@ -23,6 +23,7 @@
    工具数 128、工具名 64 ASCII 字符、工具 id 128 字符、每工具参数 262144 字符。
    已知字段的枚举/范围以正式 schema 为准；这些资源界限可进一步拒绝过大响应。
 4. SSE 的事件交付槽固定为 1，没有等待队列，同步读取并交付一个事件；读缓冲最多预读 4096 字节。
+   CR 立即结束行/事件，不等待可选 LF；后续 LF 仍计入所属行/上一事件及输入总字节界限。
    只保留有界文本长度计数、工具拼接状态和单事件；调用者不得另接无界队列。
    `Sink(ctx, bytes)` 返回真实写入字节数，短写/错误即停止，不重试写入。
    sink 必须遵守 ctx，阻塞写必须设 deadline；body 的 Close 必须及时中断并发 Read。
@@ -39,6 +40,7 @@
 - SSE 完成内容和工具、收到完整 DONE 且成功写出后，`Completed=true`；无可信 usage 仍可完成内容，
   但计费保持 unknown。JSON 正式 schema **要求 usage**，缺失/不可信则返回错误和空结果，
   不伪造 0、不输出契约外的 nullable/缺省 usage。
+- `content_filter` 是正式完成原因，原样保留并正常校验最终 usage；不能仅因过滤就把可信计量丢成 unknown。
 - 只有最终 usage 通过来源判断和全部校验才设 `UsageKnown=true`。
   SSE 若在此后写失败/断流，可以同时 `Completed=false, UsageKnown=true`；handler 仍须按可信最终证据和账本规则结算。
   已报告可信 usage 后不再接受替换；未证实最终 usage 的中断始终为 unknown。

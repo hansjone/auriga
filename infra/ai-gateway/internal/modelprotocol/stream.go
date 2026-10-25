@@ -16,19 +16,42 @@ type eventReader struct {
 	limits       Limits
 	total        int64
 	events, size int
+	skipLF       bool
+	endedSize    int // Size of a CR-terminated frame awaiting its optional LF.
 }
 
 func (e *eventReader) byte() (byte, error) {
-	b, err := e.reader.ReadByte()
-	if err != nil {
-		return 0, err
+	for {
+		b, err := e.reader.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		e.total++
+		if e.total > e.limits.MaxBytes {
+			return 0, io.ErrUnexpectedEOF
+		}
+		if e.skipLF && b == '\n' {
+			e.skipLF = false
+			size := e.size
+			if e.endedSize > 0 {
+				size = e.endedSize
+				e.endedSize = 0
+			} else {
+				e.size++
+			}
+			if size >= e.limits.MaxEventBytes {
+				return 0, io.ErrUnexpectedEOF
+			}
+			continue
+		}
+		e.skipLF = false
+		e.endedSize = 0
+		e.size++
+		if e.size > e.limits.MaxEventBytes {
+			return 0, io.ErrUnexpectedEOF
+		}
+		return b, nil
 	}
-	e.total++
-	e.size++
-	if e.total > e.limits.MaxBytes || e.size > e.limits.MaxEventBytes {
-		return 0, io.ErrUnexpectedEOF
-	}
-	return b, nil
 }
 func (e *eventReader) line() (string, error) {
 	var b []byte
@@ -38,13 +61,7 @@ func (e *eventReader) line() (string, error) {
 			return "", err
 		}
 		if c == '\r' || c == '\n' {
-			if c == '\r' {
-				if next, _ := e.reader.Peek(1); len(next) > 0 && next[0] == '\n' {
-					if _, err := e.byte(); err != nil {
-						return "", err
-					}
-				}
-			}
+			e.skipLF = c == '\r'
 			if !utf8.Valid(b) {
 				return "", io.ErrUnexpectedEOF
 			}
@@ -62,6 +79,9 @@ func (e *eventReader) next() (string, error) {
 		}
 		if line == "" {
 			e.events++
+			if e.skipLF {
+				e.endedSize = e.size
+			}
 			e.size = 0
 			if e.events > e.limits.MaxEvents {
 				return "", io.ErrUnexpectedEOF

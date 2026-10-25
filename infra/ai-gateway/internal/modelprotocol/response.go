@@ -196,7 +196,7 @@ func (s *state) accept(ctx context.Context, c *api.ChatCompletionChunk) bool {
 	return true
 }
 func (s *state) complete() bool {
-	if s.finish == "" || s.finish == "content_filter" || ((s.finish == "tool_calls") != (len(s.tools) > 0)) {
+	if s.finish == "" || ((s.finish == "tool_calls") != (len(s.tools) > 0)) {
 		return false
 	}
 	if s.value.ToolChoice != nil && *s.value.ToolChoice == "required" && len(s.tools) == 0 {

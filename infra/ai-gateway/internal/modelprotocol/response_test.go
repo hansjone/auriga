@@ -93,19 +93,19 @@ func TestCompletion(t *testing.T) {
 		}
 	}
 	for name, raw := range map[string]string{
-		"missingUsage": strings.Replace(completion, `,"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}`, ``, 1),
-		"nullUsage":    strings.Replace(completion, `{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}`, `null`, 1),
-		"sum":          strings.Replace(completion, `"total_tokens":12`, `"total_tokens":11`, 1),
-		"missingCount": strings.Replace(completion, `"prompt_tokens":10,`, ``, 1),
-		"negative":     strings.Replace(completion, `"completion_tokens":2`, `"completion_tokens":-2`, 1),
-		"overOutput":   strings.Replace(completion, `"completion_tokens":2,"total_tokens":12`, `"completion_tokens":9,"total_tokens":19`, 1),
-		"overflow":     strings.Replace(completion, `"total_tokens":12`, `"total_tokens":9223372036854775808`, 1),
-		"multiple":     strings.Replace(completion, `"index":0`, `"index":1`, 1),
-		"unknown":      strings.Replace(completion, `"created":1`, `"created":1,"provider_secret":"SECRET"`, 1),
-		"duplicate":    strings.Replace(completion, `"created":1`, `"created":1,"created":1`, 1),
-		"nullContent":  strings.Replace(completion, `"你好"`, `null`, 1),
-		"model":        strings.Replace(completion, `"synthetic"`, `"other"`, 1),
-		"filter":       strings.Replace(completion, `"stop"`, `"content_filter"`, 1),
+		"missingUsage":  strings.Replace(completion, `,"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}`, ``, 1),
+		"nullUsage":     strings.Replace(completion, `{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}`, `null`, 1),
+		"sum":           strings.Replace(completion, `"total_tokens":12`, `"total_tokens":11`, 1),
+		"missingCount":  strings.Replace(completion, `"prompt_tokens":10,`, ``, 1),
+		"negative":      strings.Replace(completion, `"completion_tokens":2`, `"completion_tokens":-2`, 1),
+		"overOutput":    strings.Replace(completion, `"completion_tokens":2,"total_tokens":12`, `"completion_tokens":9,"total_tokens":19`, 1),
+		"overflow":      strings.Replace(completion, `"total_tokens":12`, `"total_tokens":9223372036854775808`, 1),
+		"multiple":      strings.Replace(completion, `"index":0`, `"index":1`, 1),
+		"unknown":       strings.Replace(completion, `"created":1`, `"created":1,"provider_secret":"SECRET"`, 1),
+		"duplicate":     strings.Replace(completion, `"created":1`, `"created":1,"created":1`, 1),
+		"nullContent":   strings.Replace(completion, `"你好"`, `null`, 1),
+		"model":         strings.Replace(completion, `"synthetic"`, `"other"`, 1),
+		"unknownFinish": strings.Replace(completion, `"stop"`, `"unknown_finish"`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			body := &trackedBody{Reader: strings.NewReader(raw)}
@@ -119,7 +119,7 @@ func TestCompletion(t *testing.T) {
 }
 
 func TestExactEventBounds(t *testing.T) {
-	for _, newline := range []string{"\n", "\r\n"} {
+	for _, newline := range []string{"\n", "\r\n", "\r"} {
 		// Entire comment frame, including both separators, is exactly 256 KiB.
 		frame := ":" + strings.Repeat("x", EventLimit-1-2*len(newline)) + newline + newline
 		for _, extra := range []string{"", "x"} {
@@ -222,7 +222,7 @@ func TestStreamFailures(t *testing.T) {
 		"duplicateUsage":    {first, last, `{"id":"c","object":"chat.completion.chunk","created":1,"model":"synthetic","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`, "[DONE]"},
 		"badUsage":          {first, strings.Replace(last, `"total_tokens":12`, `"total_tokens":0`, 1), "[DONE]"},
 		"nullUsage":         {first, strings.Replace(last, `{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}`, `null`, 1), "[DONE]"},
-		"filter":            {first, strings.Replace(last, `"stop"`, `"content_filter"`, 1), "[DONE]"},
+		"unknownFinish":     {first, strings.Replace(last, `"stop"`, `"unknown_finish"`, 1), "[DONE]"},
 		"upstreamError":     {first, `{"error":{"code":"ai.upstream_rejected","message":"SECRET","type":"upstream_error"},"requestId":"SECRET"}`, "[DONE]"},
 		"badUTF8":           {strings.Replace(first, "你好", string([]byte{0xff}), 1), last, "[DONE]"},
 	} {
