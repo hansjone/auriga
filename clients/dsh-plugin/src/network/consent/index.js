@@ -1,6 +1,8 @@
 /* global structuredClone */
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { bounded, opaqueResponse } from './deadline.js';
 import { createFileLedgerStore } from '../host/store.js';
 import {
   DAY_MS,
@@ -33,7 +35,7 @@ export function createFileConsentStore(options) {
 /** @param {import('./types.js').Identity} identity @returns {import('./types.js').State} */
 function empty(identity) {
   return {
-    version: 1,
+    version: 2,
     identity: { ...identity },
     policyRevision: 0,
     lastNow: 0,
@@ -43,6 +45,8 @@ function empty(identity) {
     cooldowns: {},
     audit: [],
     outbox: [],
+    traffic: {},
+    auditSummary: { dropped: 0, digest: '' },
   };
 }
 
@@ -53,7 +57,7 @@ function restore(value, identity) {
   const s = /** @type {import('./types.js').State} */ (value);
   if (
     !s ||
-    s.version !== 1 ||
+    ![1, 2].includes(s.version) ||
     !s.identity ||
     !['tenant', 'realm', 'node', 'nodeIncarnation'].every(
       (k) =>
@@ -89,6 +93,9 @@ function restore(value, identity) {
     checkVerified(rule.source, rule.source);
   }
   for (const [key, row] of Object.entries(s.requests)) {
+    row.receivedAt ??= row.request.createdAt;
+    if (['denied', 'expired', 'revoked'].includes(row.status))
+      row.terminalAt ??= s.lastNow;
     checkRequest(row.request);
     checkVerified(row.source, row.request.source);
     if (
@@ -101,13 +108,73 @@ function restore(value, identity) {
       row.policyRevision > s.policyRevision ||
       typeof row.manual !== 'boolean' ||
       row.deadline !==
-        Math.min(row.request.expiresAt, row.request.createdAt + DAY_MS)
+        Math.min(row.request.expiresAt, row.receivedAt + DAY_MS) ||
+      !Number.isSafeInteger(row.receivedAt) ||
+      row.receivedAt < 0 ||
+      row.receivedAt > s.lastNow ||
+      (row.terminalAt !== undefined &&
+        (!Number.isSafeInteger(row.terminalAt) ||
+          row.terminalAt < row.receivedAt ||
+          row.terminalAt > s.lastNow)) ||
+      (row.usedAt !== undefined &&
+        (!Number.isSafeInteger(row.usedAt) || row.usedAt < row.receivedAt))
     )
       throw new Error('consent unavailable: invalid request');
     textId(row.decisionId);
   }
   if (Object.values(s.cooldowns).some((n) => !Number.isSafeInteger(n) || n < 0))
     throw new Error('consent unavailable: invalid cooldown');
+  s.version = 2;
+  s.traffic ??= {};
+  s.auditSummary ??= { dropped: 0, digest: '' };
+  if (
+    Array.isArray(s.traffic) ||
+    typeof s.traffic !== 'object' ||
+    Object.values(s.traffic).some(
+      (bucket) =>
+        !bucket ||
+        !Number.isSafeInteger(bucket.since) ||
+        bucket.since < 0 ||
+        bucket.since > s.lastNow ||
+        !Number.isSafeInteger(bucket.count) ||
+        bucket.count < 0,
+    ) ||
+    !Number.isSafeInteger(s.auditSummary.dropped) ||
+    s.auditSummary.dropped < 0 ||
+    !/^(?:[a-f0-9]{64})?$/.test(s.auditSummary.digest)
+  )
+    throw new Error('consent unavailable: invalid retention state');
+  for (const event of s.outbox) {
+    textId(event.id);
+    if (
+      !['decision', 'policy_changed'].includes(event.kind) ||
+      !Number.isSafeInteger(event.at) ||
+      event.at < 0 ||
+      event.at > s.lastNow ||
+      !Number.isSafeInteger(event.policyRevision) ||
+      event.policyRevision < 0 ||
+      event.policyRevision > s.policyRevision
+    )
+      throw new Error('consent unavailable: invalid outbox');
+    checkLayer(event.layer);
+    if (event.kind === 'decision') {
+      textId(event.requestId);
+      if (!['pending', 'allowed', 'denied'].includes(event.status ?? ''))
+        throw new Error('consent unavailable: invalid outbox status');
+    }
+  }
+  for (const entry of s.audit) {
+    textId(entry.action);
+    if (
+      !Number.isSafeInteger(entry.at) ||
+      entry.at < 0 ||
+      entry.at > s.lastNow ||
+      !Number.isSafeInteger(entry.policyRevision) ||
+      entry.policyRevision < 0 ||
+      entry.policyRevision > s.policyRevision
+    )
+      throw new Error('consent unavailable: invalid audit');
+  }
   return s;
 }
 
@@ -130,6 +197,9 @@ export async function openConsent({
   organization,
   authorizeLocal,
   now = Date.now,
+  callbackTimeoutMs = 5000,
+  actionTimeoutMs = 10_000,
+  responseDelayMs = 10_500,
   limits: overrides = {},
 }) {
   identity = { ...identity };
@@ -146,9 +216,21 @@ export async function openConsent({
     maxPending: 100,
     maxPendingBytes: 1_048_576,
     maxRecords: 10_000,
+    maxSourceRecords: 32,
+    maxUserRecords: 64,
+    maxSourceTerminal: 16,
+    maxUserTerminal: 32,
+    maxRequestsPerMinute: 5,
+    terminalRetentionMs: DAY_MS,
+    maxAudit: 256,
     ...overrides,
   };
-  for (const limit of Object.values(limits))
+  for (const limit of [
+    ...Object.values(limits),
+    callbackTimeoutMs,
+    actionTimeoutMs,
+    responseDelayMs,
+  ])
     if (!Number.isSafeInteger(limit) || limit < 1)
       throw new RangeError('invalid consent limit');
   const handle = await store.open();
@@ -175,8 +257,8 @@ export async function openConsent({
     return at;
   }
 
-  /** @template T @param {(draft: import('./types.js').State, at: number) => Promise<T>|T} operation @returns {Promise<T>} */
-  function transaction(operation) {
+  /** @template T @param {(draft: import('./types.js').State, at: number) => Promise<T>|T} operation @param {(result: T) => Promise<unknown>} [afterCommit] @returns {Promise<T>} */
+  function transaction(operation, afterCommit) {
     const run = tail.then(async () => {
       if (closed || poisoned) throw new Error('consent unavailable');
       const at = now();
@@ -187,8 +269,10 @@ export async function openConsent({
       for (const [key, until] of Object.entries(draft.cooldowns))
         if (until <= at) delete draft.cooldowns[key];
       expire(draft, at);
+      maintain(draft, at);
       const result = await operation(draft, at);
       expire(draft, currentTime(draft));
+      maintain(draft, draft.lastNow);
       try {
         await handle.commit(draft);
       } catch (error) {
@@ -196,6 +280,7 @@ export async function openConsent({
         throw error;
       }
       state = draft;
+      if (afterCommit) await afterCommit(result);
       return structuredClone(result);
     });
     tail = run.then(
@@ -207,7 +292,9 @@ export async function openConsent({
 
   /** @param {unknown} context */
   async function local(context) {
-    if ((await authorizeLocal(context)) !== true)
+    if (
+      (await bounded(() => authorizeLocal(context), callbackTimeoutMs)) !== true
+    )
       throw new Error('authenticated local UI required');
   }
 
@@ -215,7 +302,10 @@ export async function openConsent({
   async function trusted(source) {
     if (source.tenant !== identity.tenant || source.realm !== identity.realm)
       throw new TypeError('invalid source realm/tenant');
-    const verified = await resolveSource({ ...source });
+    const verified = await bounded(
+      () => resolveSource({ ...source }),
+      callbackTimeoutMs,
+    );
     checkVerified(verified, source);
     // Copy only authority fields; never persist callback extras or display names.
     return {
@@ -227,7 +317,10 @@ export async function openConsent({
 
   /** @param {import('./types.js').VerifiedSource} source */
   async function currentOrganization(source) {
-    const org = await organization({ ...source });
+    const org = await bounded(
+      () => organization({ ...source }),
+      callbackTimeoutMs,
+    );
     if (!org || org.available !== true)
       return {
         available: false,
@@ -248,6 +341,84 @@ export async function openConsent({
   /** @param {import('./types.js').State} s @param {number} at @param {string} action @param {unknown} detail */
   function audit(s, at, action, detail) {
     s.audit.push({ at, action, policyRevision: s.policyRevision, detail });
+    trimAudit(s);
+  }
+
+  /** @param {import('./types.js').State} s */
+  function trimAudit(s) {
+    while (s.audit.length > limits.maxAudit) {
+      const entry = s.audit.shift();
+      s.auditSummary.digest = createHash('sha256')
+        .update(s.auditSummary.digest)
+        .update(JSON.stringify(entry))
+        .digest('hex');
+      s.auditSummary.dropped++;
+    }
+  }
+
+  /** @param {import('./types.js').RecordEntry} row */
+  const terminal = (row) =>
+    ['denied', 'expired', 'revoked'].includes(row.status) ||
+    row.usedAt !== undefined;
+
+  /** @param {import('./types.js').State} s @param {number} at */
+  function maintain(s, at) {
+    for (const [key, row] of Object.entries(s.requests)) {
+      if (
+        terminal(row) &&
+        at >=
+          Math.max(
+            row.deadline,
+            (row.terminalAt ?? row.usedAt ?? row.deadline) +
+              limits.terminalRetentionMs,
+          )
+      ) {
+        delete s.requests[key];
+        s.outbox = s.outbox.filter(
+          (e) =>
+            !(
+              e.kind === 'decision' &&
+              e.layer === row.request.layer &&
+              e.requestId === row.request.requestId
+            ),
+        );
+      }
+    }
+    for (const [key, traffic] of Object.entries(s.traffic))
+      if (at - traffic.since >= 60_000) delete s.traffic[key];
+    trimAudit(s);
+  }
+
+  /** @param {import('./types.js').State} s @param {import('./types.js').VerifiedSource} source @param {number} at */
+  function sourceLimited(s, source, at) {
+    const rows = Object.values(s.requests);
+    const nodes = rows.filter((r) => nodeKey(r.source) === nodeKey(source));
+    const users = rows.filter((r) => userKey(r.source) === userKey(source));
+    if (
+      nodes.length >= limits.maxSourceRecords ||
+      users.length >= limits.maxUserRecords ||
+      nodes.filter(terminal).length >= limits.maxSourceTerminal ||
+      users.filter(terminal).length >= limits.maxUserTerminal
+    )
+      return true;
+    const keys = [nodeKey(source), userKey(source)];
+    if (
+      keys.some(
+        (key) => (s.traffic[key]?.count ?? 0) >= limits.maxRequestsPerMinute,
+      )
+    )
+      return true;
+    // Source/user aggregation prevents rotating node IDs from growing this map.
+    if (
+      Object.keys(s.traffic).length + keys.filter((k) => !s.traffic[k]).length >
+      limits.maxRecords * 2
+    )
+      return true;
+    for (const key of keys) {
+      const bucket = (s.traffic[key] ??= { since: at, count: 0 });
+      bucket.count++;
+    }
+    return false;
   }
 
   /** @param {import('./types.js').State} s @param {number} at @param {import('./types.js').RecordEntry} row @param {import('./types.js').Status} status @param {string} reason */
@@ -260,6 +431,8 @@ export async function openConsent({
     )
       return;
     row.status = status;
+    if (status === 'denied' || status === 'expired' || status === 'revoked')
+      row.terminalAt ??= status === 'expired' ? row.deadline : at;
     row.localReason = reason;
     row.policyRevision = s.policyRevision;
     row.decisionId = randomUUID();
@@ -343,7 +516,6 @@ export async function openConsent({
   /** @param {import('./types.js').State} s @param {number} at @param {import('./types.js').Request} input */
   async function receive(s, at, input) {
     checkRequest(input);
-    if (input.createdAt > at) throw new TypeError('future request');
     const key = requestKey(input);
     let row = s.requests[key];
     if (
@@ -359,13 +531,14 @@ export async function openConsent({
     const org = await currentOrganization(source);
     at = currentTime(s);
     expire(s, at);
+    maintain(s, at);
+    row = s.requests[key];
     if (!row) {
-      if (Object.keys(s.requests).length >= limits.maxRecords)
-        throw new Error('consent capacity exhausted');
       row = {
         request: structuredClone(input),
         source,
-        deadline: Math.min(input.expiresAt, input.createdAt + DAY_MS),
+        receivedAt: at,
+        deadline: Math.min(input.expiresAt, at + DAY_MS),
         status: 'pending',
         policyRevision: s.policyRevision,
         decisionId: '',
@@ -373,9 +546,27 @@ export async function openConsent({
         manual: false,
         organizationRevision: org.revision,
       };
+      if (input.expiresAt <= at || input.expiresAt > at + DAY_MS) {
+        row.status = 'expired';
+        row.localReason = 'invalid_deadline';
+        return row;
+      }
+      if (
+        sourceLimited(s, source, at) ||
+        Object.keys(s.requests).length >= limits.maxRecords
+      ) {
+        row.status = 'denied';
+        row.localReason = 'source_capacity';
+        return row;
+      }
       s.requests[key] = row;
     }
-    if (row.status === 'denied' || row.status === 'expired') return row;
+    if (
+      row.status === 'denied' ||
+      row.status === 'expired' ||
+      row.usedAt !== undefined
+    )
+      return row;
     if (proofKey(row.source) !== proofKey(source)) row.manual = false;
     row.source = source;
     row.organizationRevision = org.revision;
@@ -388,9 +579,24 @@ export async function openConsent({
 
   return {
     /** @param {import('./types.js').Request} input */
-    request(input) {
+    async request(input) {
       const copy = structuredClone(input);
-      return transaction((s, at) => receive(s, at, copy));
+      checkRequest(copy);
+      return opaqueResponse(
+        transaction((s, at) => receive(s, at, copy)),
+        responseDelayMs,
+      );
+    },
+    /** Private UI lookup, never return this row to the remote source.
+     * @param {unknown} context @param {{layer: import('./types.js').Layer, requestId: string}} input */
+    getRequest(context, input) {
+      const copy = { ...input };
+      return transaction(async (s) => {
+        await local(context);
+        checkLayer(copy.layer);
+        textId(copy.requestId);
+        return s.requests[JSON.stringify([copy.layer, copy.requestId])] ?? null;
+      });
     },
     /** @param {unknown} context */
     listPending(context) {
@@ -425,7 +631,19 @@ export async function openConsent({
         const row =
           s.requests[JSON.stringify([choice.layer, choice.requestId])];
         if (!row) throw new Error('unknown request');
-        if (row.status === 'denied' || row.status === 'expired')
+        if (
+          (choice.choice === 'allow_once' ||
+            choice.choice === 'allow_source') &&
+          cooldownKeys(choice.layer, row.source).some(
+            (key) => (s.cooldowns[key] ?? 0) > at,
+          )
+        )
+          throw new Error('cooldown active: wait before allowing');
+        if (
+          row.status === 'denied' ||
+          row.status === 'expired' ||
+          row.usedAt !== undefined
+        )
           throw new Error('terminal request');
         const source = await trusted(row.request.source);
         if (proofKey(source) !== proofKey(row.source))
@@ -433,6 +651,16 @@ export async function openConsent({
         const org = await currentOrganization(source);
         at = currentTime(s);
         if (row.deadline <= at) throw new Error('terminal request');
+        if (
+          (choice.choice === 'allow_once' ||
+            choice.choice === 'allow_source') &&
+          cooldownKeys(choice.layer, source).some(
+            (key) => (s.cooldowns[key] ?? 0) > at,
+          )
+        )
+          throw new Error(
+            'cooldown active: wait or explicitly clear cooldown before allowing',
+          );
         if (choice.choice === 'allow_source' || choice.choice === 'block') {
           if (
             choice.sourceScope !== 'source_node' &&
@@ -552,38 +780,53 @@ export async function openConsent({
         return s.audit;
       });
     },
+    /** @param {unknown} context */
+    getAuditSummary(context) {
+      return transaction(async (s) => {
+        await local(context);
+        return s.auditSummary;
+      });
+    },
     /** Recheck under the same lock as revocation immediately before an action.
      * The callback must separately check host grants and online platform admission.
      * It must not reenter this service. Consent is not execution admission.
-     * @template T @param {import('./types.js').Request} input @param {() => Promise<T>} action */
+     * @template T @param {import('./types.js').Request} input @param {(signal: AbortSignal) => Promise<T>} action */
     async withAuthorization(input, action) {
       const copy = structuredClone(input);
-      // Hold the serial queue across both durable recheck and action start.
-      const run = tail.then(async () => {
-        if (closed || poisoned) throw new Error('consent unavailable');
-        const at = now();
-        if (!Number.isSafeInteger(at) || at < state.lastNow)
-          throw new Error('consent unavailable: clock rollback');
-        const draft = structuredClone(state);
-        draft.lastNow = at;
-        expire(draft, at);
-        const row = await receive(draft, at, copy);
-        try {
-          await handle.commit(draft);
-        } catch (error) {
-          poisoned = true;
-          throw error;
-        }
-        state = draft;
-        if (row.status !== 'allowed' || currentTime(draft) >= row.deadline)
-          throw new Error('authorization required');
-        return action();
-      });
-      tail = run.then(
-        () => {},
-        () => {},
+      checkRequest(copy);
+      const until = performance.now() + responseDelayMs;
+      const work = transaction(
+        async (s, at) => {
+          const row = await receive(s, at, copy);
+          const execute =
+            row.status === 'allowed' &&
+            row.usedAt === undefined &&
+            currentTime(s) < row.deadline &&
+            performance.now() < until;
+          if (execute) {
+            row.usedAt = currentTime(s);
+            audit(s, row.usedAt, 'authorization_consumed', {
+              layer: copy.layer,
+              requestId: copy.requestId,
+            });
+          }
+          return { row, execute };
+        },
+        async ({ row, execute }) => {
+          if (
+            !execute ||
+            row.status !== 'allowed' ||
+            now() >= row.deadline ||
+            performance.now() >= until
+          )
+            throw new Error('authorization required');
+          await bounded(
+            action,
+            Math.min(actionTimeoutMs, Math.max(1, until - performance.now())),
+          );
+        },
       );
-      return run;
+      return opaqueResponse(work, responseDelayMs, true);
     },
     async close() {
       closed = true;
