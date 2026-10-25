@@ -142,7 +142,7 @@ func TestAdmissionRace(t *testing.T) {
 		t.Fatal("missing generated ID/default policy")
 	}
 	_, err = l2.Admit(t.Context(), snap, request(""))
-	wantCode(t, err, "ai.budget_exceeded")
+	wantCode(t, err, "common.rate_limited")
 }
 
 func TestLimitsAndPeriods(t *testing.T) {
@@ -173,18 +173,29 @@ func TestLimitsAndPeriods(t *testing.T) {
 		bounded := ledger(t, s, &api.AdmissionPolicy{MaxActiveRequestsPerSubject: 2, MaxInFlightPercent: 25, MaxInFlightTokens: &cap, MaxInFlightMicros: &cap})
 		admit(t, bounded, snap, "")
 		_, err = bounded.Admit(t.Context(), snap, request(""))
-		wantCode(t, err, "ai.budget_exceeded")
+		wantCode(t, err, "common.rate_limited")
 	})
 	t.Run("total quota", func(t *testing.T) {
-		snap := snapshot(t)
-		quota := int64(40)
-		snap.Admission.DailyTokens = &quota
-		snap.Admission.MonthlyBudgetMicros = &quota
-		for i := 0; i < 4; i++ {
-			finish(t, l, dispatch(t, l, admit(t, l, snap, "")), snap, 8, 2)
+		for _, kind := range []string{"day", "month"} {
+			t.Run(kind, func(t *testing.T) {
+				snap := snapshot(t)
+				quota := int64(40)
+				if kind == "day" {
+					snap.Admission.DailyTokens = &quota
+				} else {
+					snap.Admission.MonthlyBudgetMicros = &quota
+				}
+				for i := 0; i < 4; i++ {
+					finish(t, l, dispatch(t, l, admit(t, l, snap, "")), snap, 8, 2)
+				}
+				_, err := l.Admit(t.Context(), snap, request(""))
+				wantCode(t, err, "ai.budget_exceeded")
+				o, u, b := counts(t, s, snap.Admission)
+				if o != (subject{}) || u != 4 || b != 4 {
+					t.Fatalf("period rejection changed accounting: %+v %d %d", o, u, b)
+				}
+			})
 		}
-		_, err := l.Admit(t.Context(), snap, request(""))
-		wantCode(t, err, "ai.budget_exceeded")
 	})
 	t.Run("fixed UTC periods", func(t *testing.T) {
 		snap := snapshot(t)
@@ -329,7 +340,7 @@ func TestUnknownRecovery(t *testing.T) {
 			t.Fatalf("slot only %+v %d %d", o, n, b)
 		}
 		_, err = l.Admit(t.Context(), snap, request(""))
-		wantCode(t, err, "ai.budget_exceeded")
+		wantCode(t, err, "common.rate_limited")
 		page, err := l.ListUsage(t.Context(), snap.Admission.TenantId, snap.Admission.AccountId, 10, "")
 		if err != nil || len(page.Items) != 1 {
 			t.Fatal(err)

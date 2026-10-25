@@ -131,8 +131,11 @@ func (l *Ledger) reserve(ctx context.Context, tx pgx.Tx, s subject, a *ai.Budget
 	if err != nil {
 		return err
 	}
-	if (a.DailyTokens != nil && *a.DailyTokens == 0) || (a.MonthlyBudgetMicros != nil && *a.MonthlyBudgetMicros == 0) || s.active >= l.policy.MaxActiveRequestsPerSubject || tokens > tcap || micros > mcap {
+	if (a.DailyTokens != nil && *a.DailyTokens == 0) || (a.MonthlyBudgetMicros != nil && *a.MonthlyBudgetMicros == 0) {
 		return failure("ai.budget_exceeded")
+	}
+	if s.active >= l.policy.MaxActiveRequestsPerSubject || tokens > tcap || micros > mcap {
+		return failure("common.rate_limited")
 	}
 	if err = reservePeriod(ctx, tx, a, "day", a.DayPeriodStart, a.ReservedTokens, a.DailyTokens); err != nil {
 		return err

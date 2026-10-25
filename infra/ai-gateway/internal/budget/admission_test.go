@@ -15,7 +15,7 @@ import (
 
 func TestIndependentRequestCompetition(t *testing.T) {
 	s1, s2 := testpg.Open(t), testpg.Open(t)
-	for _, kind := range []string{"slots", "tokens", "micros", "absolute minimum"} {
+	for _, kind := range []string{"slots", "tokens", "micros", "absolute minimum", "unlimited tokens", "unlimited micros"} {
 		t.Run(kind, func(t *testing.T) {
 			snap := snapshot(t)
 			p := &api.AdmissionPolicy{MaxActiveRequestsPerSubject: 100, MaxInFlightPercent: 25}
@@ -33,6 +33,14 @@ func TestIndependentRequestCompetition(t *testing.T) {
 				cap := int64(10)
 				p.MaxInFlightTokens = &cap
 				p.MaxInFlightMicros = &cap
+			case "unlimited tokens":
+				cap := int64(10)
+				snap.Admission.DailyTokens = nil
+				p.MaxInFlightTokens = &cap
+			case "unlimited micros":
+				cap := int64(10)
+				snap.Admission.MonthlyBudgetMicros = nil
+				p.MaxInFlightMicros = &cap
 			}
 			l1, l2 := ledger(t, s1, p), ledger(t, s2, p)
 			var granted atomic.Int64
@@ -49,7 +57,7 @@ func TestIndependentRequestCompetition(t *testing.T) {
 					if err == nil {
 						granted.Add(1)
 					} else {
-						wantCode(t, err, "ai.budget_exceeded")
+						wantCode(t, err, "common.rate_limited")
 					}
 				}(i)
 			}
@@ -60,6 +68,22 @@ func TestIndependentRequestCompetition(t *testing.T) {
 			o, _, _ := counts(t, s1, snap.Admission)
 			if o != (subject{expected, expected * 10, expected * 10}) {
 				t.Fatalf("overspend %+v", o)
+			}
+			err := s1.Transaction(t.Context(), snap.Admission.TenantId, func(tx pgx.Tx) error {
+				var requests, periods int64
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM ai.budget_request WHERE tenant_id=$1 AND subject=$2`, snap.Admission.TenantId, snap.Admission.AccountId).Scan(&requests); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM ai.budget_period WHERE tenant_id=$1 AND subject=$2 AND held=$3 AND spent=0`, snap.Admission.TenantId, snap.Admission.AccountId, expected*10).Scan(&periods); err != nil {
+					return err
+				}
+				if requests != expected || periods != 2 {
+					t.Fatalf("rejected admission persisted writes: requests=%d periods=%d", requests, periods)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -120,7 +144,7 @@ func TestTrustedSnapshotValidation(t *testing.T) {
 	r := admit(t, limited, snap, "redacted-key")
 	*r.Admission.MaxInFlightTokens = 1000
 	_, err = limited.Admit(t.Context(), snap, request(""))
-	wantCode(t, err, "ai.budget_exceeded")
+	wantCode(t, err, "common.rate_limited")
 	err = s.Transaction(t.Context(), snap.Admission.TenantId, func(tx pgx.Tx) error {
 		var text string
 		if err := tx.QueryRow(t.Context(), `SELECT row_to_json(r)::text FROM ai.budget_request r WHERE tenant_id=$1 AND subject=$2`, snap.Admission.TenantId, snap.Admission.AccountId).Scan(&text); err != nil {
