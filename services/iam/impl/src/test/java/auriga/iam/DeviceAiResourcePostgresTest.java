@@ -112,10 +112,17 @@ class DeviceAiResourcePostgresTest {
                       account.toString(),
                       Json.object("accountId", account, "status", "active"),
                       null);
+                  UUID provider = UUID.randomUUID();
+                  store.insert(
+                      "idp_provider",
+                      provider.toString(),
+                      Json.object(
+                          "providerId", provider, "connectorType", "team-account", "enabled", true),
+                      null);
                   var issued =
                       sessions.create(
                           account,
-                          UUID.randomUUID(),
+                          provider,
                           "portal",
                           true,
                           Duration.ofSeconds(600),
