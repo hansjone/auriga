@@ -1,0 +1,21 @@
+{
+  "description": "原始字节层用例：在完整 JSON/JCS/验签前按 README §3.1 严格解析，全部返回 network.protocol_error。base 取 frames.json 对应帧的紧凑 JSON 文本；replace 只替换首个匹配，append 追加到末尾，nest 生成指定深度的嵌套。",
+  "cases": [
+    { "name": "重复键覆盖 kind", "base": "delivery_session_message", "replace": ["\"kind\":\"message\"", "\"kind\":\"message\",\"kind\":\"control\""] },
+    { "name": "重复键覆盖 from", "base": "delivery_session_message", "replace": ["\"from\":{", "\"from\":{\"version\":1,\"realm\":\"2\",\"type\":\"session\",\"node\":\"65\",\"local\":\"1\"},\"from\":{"] },
+    { "name": "孤立代理项", "base": "delivery_session_message", "replace": ["对话内消息示例", "\\ud800"] },
+    { "name": "原始控制字符", "base": "delivery_session_message", "replace": ["对话内消息示例", "a\u0001b"] },
+    { "name": "小数形式整数", "base": "delivery_session_message", "replace": ["\"ttl\":86400", "\"ttl\":86400.0"] },
+    { "name": "指数形式整数", "base": "delivery_session_message", "replace": ["\"ttl\":86400", "\"ttl\":8.64e4"] },
+    { "name": "超出安全整数", "base": "delivery_session_message", "replace": ["\"ttl\":86400", "\"ttl\":9007199254740993"] },
+    { "name": "NaN", "base": "delivery_session_message", "replace": ["\"ttl\":86400", "\"ttl\":NaN"] },
+    { "name": "尾随数据", "base": "head", "append": "{}" },
+    { "name": "超过 64KiB 载荷", "base": "head", "append": "                                                                                                                                ", "repeatAppend": 520 },
+    { "name": "嵌套超过 16 层", "nest": 17 },
+    { "name": "对象成员超过上限", "members": 129 }
+  ],
+  "accept": [
+    { "name": "嵌套恰 16 层", "nest": 16 },
+    { "name": "对象成员恰为上限", "members": 128 }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "description": "错误对调用方的呈现（README §6）。viewer 取 statusViewer/diagnostic/ownNode/targetRelated；expect 为调用方实际看到的码（request_submitted 是统一提交回执状态），null 表示不下发。",
+  "cases": [
+    { "code": "network.contact_denied", "viewer": {}, "expect": "request_submitted" },
+    { "code": "network.contact_denied", "viewer": { "statusViewer": true }, "expect": "network.contact_denied" },
+    { "code": "network.contact_pending", "viewer": {}, "expect": "request_submitted" },
+    { "code": "network.contact_expired", "viewer": { "statusViewer": true }, "expect": "network.contact_expired" },
+    { "code": "network.quota_exceeded", "viewer": { "targetRelated": true }, "expect": "request_submitted" },
+    { "code": "network.quota_exceeded", "viewer": { "targetRelated": true, "statusViewer": true }, "expect": "network.quota_exceeded" },
+    { "code": "network.quota_exceeded", "viewer": {}, "expect": "network.quota_exceeded" },
+    { "code": "network.host_incompatible", "viewer": {}, "expect": "network.target_unavailable" },
+    { "code": "network.host_incompatible", "viewer": { "diagnostic": true }, "expect": "network.host_incompatible" },
+    { "code": "network.group_publish_forbidden", "viewer": {}, "expect": "network.group_not_available" },
+    { "code": "network.recovery_conflict", "viewer": {}, "expect": null },
+    { "code": "network.recovery_conflict", "viewer": { "ownNode": true }, "expect": "network.recovery_conflict" },
+    { "code": "network.local_allocation_conflict", "viewer": { "statusViewer": true }, "expect": null },
+    { "code": "network.signature_invalid", "viewer": { "ownNode": true, "diagnostic": true }, "expect": null },
+    { "code": "network.target_unavailable", "viewer": {}, "expect": "network.target_unavailable" },
+    { "code": "network.broadcast_forbidden", "viewer": {}, "expect": "network.broadcast_forbidden" }
+  ]
+}

@@ -1,0 +1,162 @@
+syntax = "proto3";
+
+package auriga.collab.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/collab/v1;collabv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.collab.v1";
+
+// Internal only: svc:ai-gateway, internal JWT, authenticated transport and delegated
+// tenant matching actor.tenant_id. Actor is supplied by the trusted gateway, never
+// directly by a browser/model. Every operation requires online CollabAdmission;
+// without that control-plane integration production returns common.unavailable.
+// Errors reuse common.unauthenticated/forbidden/not_found/validation_failed/
+// conflict/precondition_failed/unavailable. No business Task lifecycle is implied.
+service CollabCommunicationService {
+  rpc RegisterEndpoint(RegisterEndpointRequest) returns (RegisterEndpointResponse);
+  rpc BindSession(BindSessionRequest) returns (BindSessionResponse);
+  rpc ListEndpoints(ListEndpointsRequest) returns (ListEndpointsResponse);
+  rpc OpenThread(OpenThreadRequest) returns (OpenThreadResponse);
+  rpc ReplyThread(ReplyThreadRequest) returns (ReplyThreadResponse);
+  rpc ReadThread(ReadThreadRequest) returns (ReadThreadResponse);
+  rpc PullDeliveries(PullDeliveriesRequest) returns (PullDeliveriesResponse);
+  rpc AckDelivery(AckDeliveryRequest) returns (AckDeliveryResponse);
+  rpc RevokeEndpoint(RevokeEndpointRequest) returns (RevokeEndpointResponse);
+}
+
+message Actor {
+  string tenant_id = 1;
+  string account_id = 2;
+  // DEVICE or INSTANCE; online authority must validate subject ownership.
+  string credential_kind = 3;
+  string credential_subject = 4;
+  string endpoint_id = 5;
+  string binding_id = 6;
+  // Opaque DSH identifier; not a UUID or MCP transport session.
+  string host_session_id = 7;
+}
+message Endpoint {
+  string id = 1;
+  string account_id = 2;
+  string label = 3;
+  bool receive_enabled = 4;
+  bool revoked = 5;
+  // No presence claim: this core does not implement endpoint heartbeats.
+}
+message SessionBinding {
+  string id = 1;
+  string endpoint_id = 2;
+  string host_session_id = 3;
+}
+message Message {
+  string id = 1;
+  string thread_id = 2;
+  uint64 sequence = 3;
+  string author_endpoint_id = 4;
+  string text = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+message Delivery {
+  string id = 1;
+  Message message = 2;
+  string target_endpoint_id = 3;
+  // pending, leased, host_accepted; never implies model completion/read.
+  string status = 4;
+  string lease_token = 5;
+  google.protobuf.Timestamp lease_expires_at = 6;
+}
+message RegisterEndpointRequest {
+  Actor actor = 1;
+  string label = 2;
+  bool receive_enabled = 3;
+}
+
+// Source binding: thread_id absent. Receiver: bind its real DSH session to the
+// existing participant; once set this cannot silently rebind another session.
+message BindSessionRequest {
+  Actor actor = 1;
+  string thread_id = 2;
+}
+message ListEndpointsRequest {
+  Actor actor = 1;
+  uint32 limit = 2;
+  string after_endpoint_id = 3;
+}
+message EndpointPage {
+  repeated Endpoint items = 1;
+  string next_endpoint_id = 2;
+}
+message OpenThreadRequest {
+  Actor actor = 1;
+  string target_endpoint_id = 2;
+  string text = 3;
+  string idempotency_key = 4;
+}
+message ReplyThreadRequest {
+  Actor actor = 1;
+  string thread_id = 2;
+  string text = 3;
+  string idempotency_key = 4;
+}
+message ReadThreadRequest {
+  Actor actor = 1;
+  string thread_id = 2;
+  uint64 after_sequence = 3;
+  uint32 limit = 4;
+}
+message MessagePage {
+  repeated Message items = 1;
+}
+
+// Only each thread's earliest unacknowledged message is leased. A live lease
+// blocks later messages; expiration allows re-lease with a fresh token.
+message PullDeliveriesRequest {
+  Actor actor = 1;
+  uint32 limit = 2;
+}
+message DeliveryPage {
+  repeated Delivery items = 1;
+}
+message AckDeliveryRequest {
+  Actor actor = 1;
+  string delivery_id = 2;
+  string lease_token = 3;
+  // MUST equal delivery_id's canonical lowercase UUID string. The Node host
+  // uses this server-issued identity as the DSH prompt requestId on every
+  // retry, across lease renewals. A mismatch is common.conflict and must not
+  // advance this delivery. Same delivery/token/requestId ACK remains idempotent.
+  string host_request_id = 4;
+}
+message RevokeEndpointRequest {
+  Actor actor = 1;
+}
+
+message RegisterEndpointResponse {
+  Endpoint endpoint = 1;
+}
+message BindSessionResponse {
+  SessionBinding binding = 1;
+}
+message ListEndpointsResponse {
+  EndpointPage page = 1;
+}
+message OpenThreadResponse {
+  Message message = 1;
+}
+message ReplyThreadResponse {
+  Message message = 1;
+}
+message ReadThreadResponse {
+  MessagePage page = 1;
+}
+message PullDeliveriesResponse {
+  DeliveryPage page = 1;
+}
+message AckDeliveryResponse {
+  Delivery delivery = 1;
+}
+message RevokeEndpointResponse {
+  Endpoint endpoint = 1;
+}

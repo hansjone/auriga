@@ -1,0 +1,18 @@
+# Explicitly combine with the combined profile. Default application-combined keeps collab disabled.
+auriga:
+  services:
+    collab:
+      enabled: true
+  collab:
+    control-plane:
+      enabled: true
+      iam-target: ${AURIGA_COLLAB_IAM_TARGET}
+      org-target: ${AURIGA_COLLAB_ORG_TARGET}
+      service-token-file: ${AURIGA_COLLAB_SERVICE_TOKEN_FILE}
+  platform:
+    collab:
+      jdbc-url: ${AURIGA_COLLAB_JDBC_URL}
+      migration-username: ${AURIGA_COLLAB_MIGRATION_USERNAME}
+      migration-password: ${AURIGA_COLLAB_MIGRATION_PASSWORD}
+      username: ${AURIGA_COLLAB_USERNAME}
+      password: ${AURIGA_COLLAB_PASSWORD}

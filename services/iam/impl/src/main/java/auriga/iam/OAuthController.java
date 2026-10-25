@@ -69,6 +69,13 @@ public class OAuthController {
         () -> requests.call(request, () -> oauth.deviceAuthorization(credentials(input, request))));
   }
 
+  @PostMapping(value = "/oauth2/revoke", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+  @PublicEndpoint
+  public ResponseEntity<ObjectNode> revoke(
+      @RequestParam Map<String, String> input, HttpServletRequest request) {
+    return standard(() -> requests.call(request, () -> oauth.revoke(credentials(input, request))));
+  }
+
   @GetMapping("/oauth2/authorize")
   @PublicEndpoint
   public ResponseEntity<String> consent(

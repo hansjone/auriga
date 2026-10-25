@@ -91,9 +91,7 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
   @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
   @PublicEndpoint
   public ObjectNode begin(
-      @RequestBody CreateLoginTransaction body,
-      HttpServletRequest request,
-      HttpServletResponse response) {
+      @RequestBody JsonNode body, HttpServletRequest request, HttpServletResponse response) {
     return requests.call(
         request,
         () -> {
@@ -102,10 +100,11 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
                   requests.clientIp(request),
                   () -> {
                     requests.sameOrigin(request);
-                    if (body.getPurpose() != null && !body.getPurpose().toString().equals("login"))
+                    if (body.hasNonNull("purpose")
+                        && !body.path("purpose").asString().equals("login"))
                       requests.browserSession(request, sessions, true);
                     return login.begin(
-                        Json.MAPPER.valueToTree(body),
+                        body,
                         requests.host(request).audience(),
                         requests.clientIp(request),
                         request.getHeader("User-Agent"),
@@ -115,6 +114,21 @@ public class IamLoginController implements org.springframework.beans.factory.Dis
           requests.issued(request, response, result);
           return result.transaction();
         });
+  }
+
+  // Retain the typed in-process entry used by existing callers; HTTP uses the
+  // original JSON tree so unknown native security fields cannot be erased by DTO binding.
+  public ObjectNode begin(
+      CreateLoginTransaction body, HttpServletRequest request, HttpServletResponse response) {
+    ObjectNode input = Json.MAPPER.valueToTree(body);
+    // Unset DTO optionals serialize as null. Only this typed compatibility entry
+    // normalizes them to absent; original HTTP JSON retains strict null validation.
+    for (String field : List.of("purpose", "returnTo", "invitationCode", "nativeConnect"))
+      if (input.path(field).isNull()) input.remove(field);
+    if (input.path("nativeConnect").isObject()
+        && input.path("nativeConnect").path("deviceName").isNull())
+      ((ObjectNode) input.path("nativeConnect")).remove("deviceName");
+    return begin(input, request, response);
   }
 
   @GetMapping("/login/transactions/{id}")

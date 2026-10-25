@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Team remote Node transport v1",
+  "description": "Authenticated trusted-Node HTTP requests. Bearer is a current device access JWT; IAM derives tenant/account/device online. Never accepts actor/tid. Node-only paths are absent from MCP tools/list. HTTP responses are the exact protojson CollabCommunicationService response envelopes in collab.proto.",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "Session": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "Register": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "receiveEnabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "receiveEnabled"
+      ]
+    },
+    "Bind": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpointId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "hostSessionId": {
+          "$ref": "#/$defs/Session"
+        },
+        "threadId": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "endpointId",
+        "hostSessionId"
+      ]
+    },
+    "Pull": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpointId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "endpointId",
+        "limit"
+      ]
+    },
+    "Ack": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpointId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "bindingId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "hostSessionId": {
+          "$ref": "#/$defs/Session"
+        },
+        "deliveryId": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "leaseToken": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "hostRequestId": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "endpointId",
+        "bindingId",
+        "hostSessionId",
+        "deliveryId",
+        "leaseToken",
+        "hostRequestId"
+      ]
+    },
+    "Revoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpointId": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": [
+        "endpointId"
+      ]
+    },
+    "Transport": {
+      "description": "Frozen HTTP/MCP routing metadata; not a model or private request body.",
+      "const": {
+        "mcpPath": "/ai/mcp",
+        "protocolVersion": "2025-06-18",
+        "stateless": true,
+        "sourceHeaders": [
+          "Auriga-Endpoint-Id",
+          "Auriga-Binding-Id"
+        ],
+        "sessionMeta": "team-mcp.schema.json#/$defs/SessionMeta",
+        "tools": {
+          "auriga_list_endpoints": "ListEndpoints",
+          "auriga_open_thread": "OpenThread",
+          "auriga_reply_thread": "ReplyThread",
+          "auriga_read_thread": "ReadThread"
+        },
+        "nodeRoutes": {
+          "/ai/team/node/register": {
+            "request": "Register",
+            "rpc": "RegisterEndpoint"
+          },
+          "/ai/team/node/bind": {
+            "request": "Bind",
+            "rpc": "BindSession"
+          },
+          "/ai/team/node/pull": {
+            "request": "Pull",
+            "rpc": "PullDeliveries"
+          },
+          "/ai/team/node/ack": {
+            "request": "Ack",
+            "rpc": "AckDelivery"
+          },
+          "/ai/team/node/revoke": {
+            "request": "Revoke",
+            "rpc": "RevokeEndpoint"
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Register"
+    },
+    {
+      "$ref": "#/$defs/Bind"
+    },
+    {
+      "$ref": "#/$defs/Pull"
+    },
+    {
+      "$ref": "#/$defs/Ack"
+    },
+    {
+      "$ref": "#/$defs/Revoke"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "description": "地址解析/规范化/拒绝用例。text 用例在已认证 realm=2 上下文解析（realm=null 表示无本域上下文）；type=null 表示非零 local，session/subagent 由该 node 的登记决定。",
+  "text": [
+    { "input": "aur1:3f.1a2", "realm": "2", "expect": { "realm": "2", "node": "63", "local": "418", "type": null } },
+    { "input": "aur1:2.3f.1a2", "realm": "2", "expect": { "realm": "2", "node": "63", "local": "418", "type": null } },
+    { "input": "aur1:2.3f.0", "realm": "2", "expect": { "realm": "2", "node": "63", "local": "0", "type": "system" } },
+    { "input": "aur1:3f.0", "realm": "2", "expect": { "realm": "2", "node": "63", "local": "0", "type": "system" } },
+    { "input": "aur1:0.17", "realm": "2", "expect": { "realm": "2", "node": "0", "local": "23", "type": "group" } },
+    { "input": "aur1:2.0.1", "realm": "2", "expect": { "realm": "2", "node": "0", "local": "1", "type": "group" } },
+    { "input": "aur1:1.1", "realm": "2", "expect": { "realm": "2", "node": "1", "local": "1", "type": null } },
+    {
+      "input": "aur1:2.ffffffffffffffff.ffffffffffffffff",
+      "realm": "2",
+      "expect": { "realm": "2", "node": "18446744073709551615", "local": "18446744073709551615", "type": null }
+    },
+    { "input": "aur1:3f.1a2", "realm": null, "error": "network.invalid_address" },
+    { "input": "aur1:3F.1a2", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:03f.1a2", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:2.3f.01a2", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:+3f.1a2", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:-1.2", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:0x3f.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:3f..1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:3f.", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:.3f.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:3f", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:2.3f.1a2.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:3f.1a2/7", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:1ffffffffffffffff.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:0.0", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:2.0.0", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:0.3f.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": " aur1:3f.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur1:3f.1 ", "realm": "2", "error": "network.invalid_address" },
+    { "input": "AUR1:3f.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur:3f.1", "realm": "2", "error": "network.invalid_address" },
+    { "input": "", "realm": "2", "error": "network.invalid_address" },
+    { "input": "aur2:3f.1a2", "realm": "2", "error": "network.unsupported_address_version" },
+    { "input": "aur0:3f.1a2", "realm": "2", "error": "network.unsupported_address_version" },
+    { "input": "aur1:3.3f.1a2", "realm": "2", "error": "network.realm_not_supported" },
+    { "input": "aur1:ffffffffffffffff.1.1", "realm": "2", "error": "network.realm_not_supported" }
+  ],
+  "equivalent": [
+    ["aur1:3f.1a2", "aur1:2.3f.1a2"],
+    ["aur1:3f.0", "aur1:2.3f.0"],
+    ["aur1:0.17", "aur1:2.0.17"]
+  ],
+  "format": [
+    { "address": { "realm": "2", "node": "63", "local": "418" }, "full": "aur1:2.3f.1a2", "short": "aur1:3f.1a2" },
+    { "address": { "realm": "2", "node": "0", "local": "1" }, "full": "aur1:2.0.1", "short": "aur1:0.1" }
+  ],
+  "json": [
+    { "name": "会话", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "63", "local": "418" }, "error": null },
+    { "name": "子会话作源", "role": "source", "input": { "version": 1, "realm": "2", "type": "subagent", "node": "63", "local": "419" }, "error": null },
+    { "name": "系统", "role": "source", "input": { "version": 1, "realm": "2", "type": "system", "node": "63", "local": "0" }, "error": null },
+    { "name": "普通组作目的", "role": "dest", "input": { "version": 1, "realm": "2", "type": "group", "node": "0", "local": "23" }, "error": null },
+    { "name": "广播作目的", "role": "dest", "input": { "version": 1, "realm": "2", "type": "group", "node": "0", "local": "1" }, "error": null },
+    {
+      "name": "uint64 最大值",
+      "role": "dest",
+      "input": { "version": 1, "realm": "18446744073709551615", "type": "session", "node": "18446744073709551615", "local": "18446744073709551615" },
+      "realm": "18446744073709551615",
+      "error": null
+    },
+    {
+      "name": "uint64 溢出",
+      "role": "dest",
+      "input": { "version": 1, "realm": "2", "type": "session", "node": "18446744073709551616", "local": "1" },
+      "error": "network.invalid_address"
+    },
+    { "name": "未来地址版本", "role": "dest", "input": { "version": 2, "realm": "2", "type": "session", "node": "63", "local": "1" }, "error": "network.unsupported_address_version" },
+    { "name": "版本为字符串", "role": "dest", "input": { "version": "1", "realm": "2", "type": "session", "node": "63", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "版本 0", "role": "dest", "input": { "version": 0, "realm": "2", "type": "session", "node": "63", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "realm 0", "role": "dest", "input": { "version": 1, "realm": "0", "type": "session", "node": "63", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "外域", "role": "dest", "input": { "version": 1, "realm": "3", "type": "session", "node": "63", "local": "1" }, "error": "network.realm_not_supported" },
+    { "name": "补零", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "063", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "JSON number", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": 63, "local": "1" }, "error": "network.invalid_address" },
+    { "name": "负数", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "63", "local": "-1" }, "error": "network.invalid_address" },
+    { "name": "小数", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "63", "local": "1.0" }, "error": "network.invalid_address" },
+    { "name": "空串", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "63", "local": "" }, "error": "network.invalid_address" },
+    { "name": "十六进制混入 JSON", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "3f", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "未知类型", "role": "dest", "input": { "version": 1, "realm": "2", "type": "Session", "node": "63", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "缺 type", "role": "dest", "input": { "version": 1, "realm": "2", "node": "63", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "系统 local 非 0", "role": "dest", "input": { "version": 1, "realm": "2", "type": "system", "node": "63", "local": "1" }, "error": "network.invalid_address" },
+    { "name": "会话 local 0", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "63", "local": "0" }, "error": "network.invalid_address" },
+    { "name": "改 type 把系统变组", "role": "dest", "input": { "version": 1, "realm": "2", "type": "group", "node": "63", "local": "0" }, "error": "network.invalid_address" },
+    { "name": "组 local 0", "role": "dest", "input": { "version": 1, "realm": "2", "type": "group", "node": "0", "local": "0" }, "error": "network.invalid_address" },
+    { "name": "node 0 冒充会话", "role": "dest", "input": { "version": 1, "realm": "2", "type": "session", "node": "0", "local": "5" }, "error": "network.invalid_address" },
+    { "name": "组地址作源", "role": "source", "input": { "version": 1, "realm": "2", "type": "group", "node": "0", "local": "23" }, "error": "network.sender_mismatch" },
+    { "name": "广播地址作源", "role": "source", "input": { "version": 1, "realm": "2", "type": "group", "node": "0", "local": "1" }, "error": "network.sender_mismatch" },
+    { "name": "组地址作 recipient", "role": "node", "input": { "version": 1, "realm": "2", "type": "group", "node": "0", "local": "23" }, "error": "network.target_mismatch" }
+  ]
+}

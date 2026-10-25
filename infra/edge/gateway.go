@@ -39,10 +39,13 @@ type Gateway struct {
 	iamURL       *url.URL
 	orgURL       *url.URL
 	workspaceURL *url.URL
+	teamURL      *url.URL
 
 	portalStatic http.Handler
 	adminStatic  http.Handler
 	panelStatic  http.Handler
+
+	networkWSS *NetworkWSS
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
@@ -62,6 +65,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	if err != nil {
 		return nil, err
 	}
+	var teamURL *url.URL
+	if raw := cfg.Upstreams["ai-gateway"]; raw != "" {
+		teamURL, err = parseTeamUpstream(raw)
+		if err != nil {
+			return nil, err
+		}
+	}
 	hub := NewSessionConnHub()
 	ingress, err := loadNodeIngress(cfg.NodeTLS)
 	if err != nil {
@@ -75,6 +85,10 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		activity.revoke(sid)
 		hub.CancelSession(sid)
 	})
+	networkWSS, err := newNetworkWSS(cfg.NetworkWSS, cfg.PortalHost)
+	if err != nil {
+		return nil, err
+	}
 	g := &Gateway{
 		Cfg:          cfg,
 		Log:          log,
@@ -92,9 +106,11 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		iamURL:       iamURL,
 		orgURL:       orgURL,
 		workspaceURL: wsURL,
+		teamURL:      teamURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
+		networkWSS:   networkWSS,
 	}
 	if cfg.Access.Valid() && (cfg.IAMHop.CAFile != "" || cfg.IAMHop.AllowLoopbackHTTP) {
 		g.IAMTransport, err = newIAMHopTransport(cfg.IAMHop, iamURL)
@@ -218,6 +234,16 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Network data plane: NATS-over-WSS upgrade (auth is NATS CONNECT / callout, not browser session).
+	if g.networkWSS != nil && g.networkWSS.Match(path) {
+		if audience != "portal" {
+			writeProblem(w, problem(http.StatusForbidden, "edge.forbidden", "Forbidden", "network wss only on portal host", rid))
+			return
+		}
+		g.networkWSS.ServeHTTP(w, r)
+		return
+	}
+
 	// Admin API isolation (use sanitized path)
 	if isAdminAPIPath(path) && audience != "admin" {
 		if g.Cfg.Access.Valid() {
@@ -225,6 +251,12 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeProblem(w, problem(http.StatusForbidden, "edge.admin_host_required", "Forbidden", "admin API only on admin host", rid))
+		return
+	}
+
+	// Team uses only device Bearer credentials, never browser-session exchange.
+	if path == "/ai" || strings.HasPrefix(path, "/ai/") {
+		g.proxyTeam(w, r, audience, clientIP, rid)
 		return
 	}
 

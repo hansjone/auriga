@@ -7,8 +7,10 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hansjone/auriga/infra/gen v0.0.0
 	github.com/lib/pq v1.10.9
+	github.com/nats-io/jwt/v2 v2.8.1
 	github.com/nats-io/nats-server/v2 v2.12.6
 	github.com/nats-io/nats.go v1.49.0
+	github.com/nats-io/nkeys v0.4.15
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.11
 )
