@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -186,6 +187,19 @@ func precondition(r *http.Request, revision int64) error {
 	return nil
 }
 
+// Grants share the model row revision but have a separate resource validator.
+// UUID/model identifiers contain no NUL, making this domain tuple unambiguous.
+func grantsETag(tenant, model string, revision int64) string {
+	sum := sha256.Sum256([]byte("auriga/ai/model-grants/v1\x00" + tenant + "\x00" + model + "\x00" + strconv.FormatInt(revision, 10)))
+	return `"grants-` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
+}
+
+func grantsResponse(g api.ModelGrants, tenant, model string, revision int64) (result, error) {
+	res, err := response(200, g, 0)
+	res.etag = grantsETag(tenant, model, revision)
+	return res, err
+}
+
 func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operation, raw []byte, r *http.Request) (result, error) {
 	switch o.name {
 	case "listProviders", "listModels":
@@ -220,7 +234,7 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 		if e = json.Unmarshal(raw, &g); e != nil {
 			return result{}, e
 		}
-		return response(200, g, revision)
+		return grantsResponse(g, p.Tenant, o.model, revision)
 	case "createProvider":
 		var in api.ProviderInput
 		if e := decode(raw, &in); e != nil {
@@ -302,10 +316,10 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 		if e != nil {
 			return result{}, e
 		}
-		if e = precondition(r, m.Revision); e != nil {
-			return result{}, e
-		}
 		if o.name == "grants" {
+			if r.Header.Get("If-Match") != grantsETag(p.Tenant, m.Id, m.Revision) {
+				return result{}, failure("common.precondition_failed")
+			}
 			var g api.ModelGrants
 			if e = decode(raw, &g); e != nil {
 				return result{}, e
@@ -325,7 +339,10 @@ func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operati
 			if e != nil {
 				return result{}, e
 			}
-			return response(200, g, m.Revision)
+			return grantsResponse(g, p.Tenant, m.Id, m.Revision)
+		}
+		if e = precondition(r, m.Revision); e != nil {
+			return result{}, e
 		}
 		var patch api.ModelPatch
 		if e = decode(raw, &patch); e != nil {

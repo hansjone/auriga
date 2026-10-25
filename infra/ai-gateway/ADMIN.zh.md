@@ -51,7 +51,10 @@ HMAC 指纹与资源写入、脱敏响应在同一事务保存。过期记录在
 无 key 每次独立执行。PATCH/PUT 不支持幂等 key，使用 If-Match 防覆盖。
 提供商/模型单项 GET 与列表项均返回强 `etag`，列表中的值可原样用作该资源的 If-Match。
 凭据单项 GET 仅返回 id/state/createdAt/revision，并在 ETag 响应头提供当前版本；
-模型 ACL 单项 GET 返回授权列表，ETag 与模型共享同一 revision。
+模型 ACL 单项 GET 返回授权列表及授权集合专属的强 opaque ETag（`"grants-..."`），
+绑定租户、模型 id 与版本，不能用模型 GET/列表或其他授权集合的 ETag 代替。
+PUT 授权集合只接受该集合当前 GET 返回的 ETag；成功后使用返回的新 ETag。
+底层仍共用模型行 revision，因此模型 PATCH 也会使先前取得的授权集合 ETag 失效，需重新 GET。
 常规轮换激活 staged 凭据，原 active 转 retiring；读取旧凭据的单项 GET 获取新 ETag 后即可撤销。
 显式 revoke 将 active/retiring 紧急转 revoked。
 staged 直接 revoke、再次激活/撤销等非法迁移返回 common.conflict。secret 没有读取接口。

@@ -458,8 +458,8 @@ func TestPostgresReadableETagsAndTenantIsolation(t *testing.T) {
 		t.Fatalf("model list ETag: %s", w.Body)
 	}
 	grants := f.read(t, prefix+"models/example/grants")
-	if grants.Header().Get("ETag") != models.Items[0].Etag {
-		t.Fatal("grants ETag not shared with model")
+	if grants.Header().Get("ETag") == models.Items[0].Etag {
+		t.Fatal("grants ETag must not be a model ETag")
 	}
 	other := setup(t)
 	for _, path := range []string{provider, credential, prefix + "models/example", prefix + "models/example/grants"} {
@@ -482,4 +482,136 @@ func TestPostgresValidation(t *testing.T) {
 	for _, query := range []string{"?limit=201", "?cursor=invalid", "?tenant=other", "?limit=1&limit=2", "?bad=%zz"} {
 		expect(t, f.call("GET", prefix+"providers"+query, "", "", ""), 400, "common.validation_failed")
 	}
+}
+
+func TestGrantsETagResourceScope(t *testing.T) {
+	g := api.ModelGrants{Items: []api.Grant{}}
+	current, err := grantsResponse(g, testUUID, "example", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(current.etag, `"`) || !strings.HasSuffix(current.etag, `"`) || strings.HasPrefix(current.etag, "W/") {
+		t.Fatalf("not a strong ETag: %s", current.etag)
+	}
+	model, err := response(200, api.Model{Id: "example", Revision: 7}, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.etag == model.etag {
+		t.Fatal("model tag accepted as grants tag")
+	}
+	for _, tc := range []struct {
+		tenant, model string
+		revision      int64
+	}{
+		{testUUID, "example", 8}, {testUUID, "second", 7}, {"00000000-0000-7000-8000-000000000099", "example", 7},
+	} {
+		other, err := grantsResponse(g, tc.tenant, tc.model, tc.revision)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if other.etag == current.etag {
+			t.Fatalf("ETag scope collision: %+v", tc)
+		}
+	}
+	repeat, err := grantsResponse(g, testUUID, "example", 7)
+	if err != nil || repeat.etag != current.etag || repeat.body == nil {
+		t.Fatalf("unstable grants response: %+v %v", repeat, err)
+	}
+	var decoded api.ModelGrants
+	if err = json.Unmarshal(current.body, &decoded); err != nil || len(decoded.Items) != 0 {
+		t.Fatalf("grants representation changed: %s %v", current.body, err)
+	}
+}
+
+func TestPostgresGrantsETagResourceScope(t *testing.T) {
+	f := setup(t)
+	provider, _ := f.provider(t)
+	input := modelInput(strings.TrimPrefix(provider, prefix+"providers/"))
+	expect(t, f.call("POST", prefix+"models", input, "", ""), 201, "")
+	expect(t, f.call("POST", prefix+"models", strings.Replace(input, `"id":"example"`, `"id":"second"`, 1), "", ""), 201, "")
+	modelPath := prefix + "models/example"
+	grantsPath := modelPath + "/grants"
+	model := f.read(t, modelPath)
+	grants := f.read(t, grantsPath)
+	otherModel := f.read(t, prefix+"models/second")
+	otherGrants := f.read(t, prefix+"models/second/grants")
+	var first, second api.Model
+	if err := json.Unmarshal(model.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(otherModel.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.Revision != second.Revision {
+		t.Fatal("regression requires equal model revisions")
+	}
+	listed := f.call("GET", prefix+"models", "", "", "")
+	expect(t, listed, 200, "")
+	var page api.ModelPage
+	if err := json.Unmarshal(listed.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	var listTag string
+	for _, item := range page.Items {
+		if item.Id == "example" {
+			listTag = item.Etag
+		}
+	}
+	if listTag == "" || listTag != model.Header().Get("ETag") {
+		t.Fatal("model list/GET ETag changed")
+	}
+	foreign := setup(t)
+	foreignProvider, _ := foreign.provider(t)
+	expect(t, foreign.call("POST", prefix+"models", modelInput(strings.TrimPrefix(foreignProvider, prefix+"providers/")), "", ""), 201, "")
+	foreignGrants := foreign.read(t, grantsPath)
+	assertUnchanged := func(t *testing.T, beforeGrants, beforeModel *httptest.ResponseRecorder) {
+		t.Helper()
+		for path, before := range map[string]*httptest.ResponseRecorder{grantsPath: beforeGrants, modelPath: beforeModel} {
+			after := f.read(t, path)
+			if after.Body.String() != before.Body.String() || after.Header().Get("ETag") != before.Header().Get("ETag") {
+				t.Fatalf("rejected write changed %s: %s", path, after.Body)
+			}
+		}
+	}
+	grantBody := `{"items":[{"kind":"member","id":"` + testUUID + `"}]}`
+	for _, tc := range []struct{ name, tag string }{
+		{"model_get", model.Header().Get("ETag")}, {"model_list", listTag}, {"other_model", otherModel.Header().Get("ETag")},
+		{"other_grants_same_revision", otherGrants.Header().Get("ETag")}, {"other_tenant_same_model_revision", foreignGrants.Header().Get("ETag")},
+		{"missing", ""}, {"weak", "W/" + grants.Header().Get("ETag")}, {"wildcard", "*"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expect(t, f.call("PUT", grantsPath, grantBody, tc.tag, ""), 412, "common.precondition_failed")
+			assertUnchanged(t, grants, model)
+		})
+	}
+	// A grants tag cannot be used in the opposite direction for model PATCH.
+	expect(t, f.call("PATCH", modelPath, `{"enabled":false}`, grants.Header().Get("ETag"), ""), 412, "common.precondition_failed")
+	assertUnchanged(t, grants, model)
+	updated := f.call("PUT", grantsPath, grantBody, grants.Header().Get("ETag"), "")
+	expect(t, updated, 200, "")
+	if updated.Header().Get("ETag") == "" || updated.Header().Get("ETag") == grants.Header().Get("ETag") {
+		t.Fatal("successful replacement did not issue a new grants tag")
+	}
+	current := f.read(t, grantsPath)
+	if current.Header().Get("ETag") != updated.Header().Get("ETag") || current.Body.String() != updated.Body.String() {
+		t.Fatal("PUT and GET grants response diverged")
+	}
+	currentModel := f.read(t, modelPath)
+	if current.Header().Get("ETag") == currentModel.Header().Get("ETag") {
+		t.Fatal("updated grants reused model tag")
+	}
+	expect(t, f.call("PUT", grantsPath, `{"items":[]}`, grants.Header().Get("ETag"), ""), 412, "common.precondition_failed")
+	assertUnchanged(t, current, currentModel)
+	// Shared storage revision remains an allowed conservative invalidation rule.
+	expect(t, f.call("PATCH", modelPath, `{"enabled":false}`, currentModel.Header().Get("ETag"), ""), 200, "")
+	afterPatch := f.read(t, grantsPath)
+	if afterPatch.Header().Get("ETag") == current.Header().Get("ETag") {
+		t.Fatal("shared revision did not invalidate grants tag")
+	}
+	if afterPatch.Body.String() != current.Body.String() {
+		t.Fatal("model PATCH changed grants")
+	}
+	expect(t, f.call("PUT", grantsPath, `{"items":[]}`, current.Header().Get("ETag"), ""), 412, "common.precondition_failed")
+	expect(t, f.call("PUT", grantsPath, `{"items":[]}`, afterPatch.Header().Get("ETag"), ""), 200, "")
 }
