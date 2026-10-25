@@ -914,6 +914,12 @@ public class NetworkMailboxService {
       NetworkContactBudget.Reservation reservation,
       SubmissionAudit auditContext,
       ErrorCode error) {
+    if (reservation != null) {
+      // Compete with successful materialization only after the external authority has returned.
+      reservation = budget.current(request.tenantId(), reservation.id());
+      if (reservation.error() != null || reservation.resultJson() != null)
+        return reservationOutcome(reservation);
+    }
     recordSubmission(auditContext, error);
     if (reservation == null) return new StoreOutcome(null, error);
     if (!request.statusViewer() && !CommonErrors.UNAVAILABLE.code().equals(error.code())) {

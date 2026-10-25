@@ -748,6 +748,176 @@ class NetworkMailboxPostgresTest {
   }
 
   @Test
+  void sameKeySuccessWinsOverLateTargetFailures() throws Exception {
+    for (boolean statusViewer : List.of(true, false))
+      for (var failure :
+          List.of(
+              auriga.common.error.CommonErrors.FORBIDDEN,
+              auriga.common.error.CommonErrors.UNAVAILABLE))
+        assertSameKeyCompletionRace(statusViewer, null, failure);
+  }
+
+  @Test
+  void sameKeyCompletedRejectionWinsOverLateSuccess() throws Exception {
+    for (boolean statusViewer : List.of(true, false))
+      assertSameKeyCompletionRace(statusViewer, auriga.common.error.CommonErrors.FORBIDDEN, null);
+  }
+
+  private void assertSameKeyCompletionRace(
+      boolean statusViewer,
+      auriga.common.error.ErrorCode firstFailure,
+      auriga.common.error.ErrorCode lateFailure)
+      throws Exception {
+    UUID tenant = UUID.randomUUID();
+    Clock clock = Clock.fixed(Instant.now(), java.time.ZoneOffset.UTC);
+    var callbacksEntered = new java.util.concurrent.CountDownLatch(2);
+    var firstRelease = new java.util.concurrent.CountDownLatch(1);
+    var lateRelease = new java.util.concurrent.CountDownLatch(1);
+    var services = new java.util.ArrayList<NetworkMailboxService>();
+    for (int i = 0; i < 2; i++) {
+      var release = i == 0 ? firstRelease : lateRelease;
+      var failure = i == 0 ? firstFailure : lateFailure;
+      var adapter = spy(authority(null, clock));
+      doAnswer(
+              invocation -> {
+                // Reaching this external callback means the independent reservation committed.
+                callbacksEntered.countDown();
+                assertTrue(release.await(30, java.util.concurrent.TimeUnit.SECONDS));
+                if (failure != null) throw new AurigaException(failure);
+                return clock.instant().plusSeconds(600);
+              })
+          .when(adapter)
+          .authorizeDelivery(eq(tenant), anyString(), anyString(), eq("20"));
+      services.add(new NetworkMailboxService(jdbc, manager, adapter, keys, clock, liveIam()));
+    }
+    var request =
+        StoreRequest.firstContact(tenant, "2", "10", "1", "race", "20", null, statusViewer);
+    StoreResult winner = null;
+    auriga.common.error.ErrorCode winnerError = statusViewer ? firstFailure : null;
+    Map<String, Object> committed;
+    try (var pool = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var first =
+          pool.submit(() -> call(tenant, () -> services.get(0).store(request, null, "1", "same")));
+      var late =
+          pool.submit(() -> call(tenant, () -> services.get(1).store(request, null, "1", "same")));
+      try {
+        assertTrue(callbacksEntered.await(30, java.util.concurrent.TimeUnit.SECONDS));
+        sql(
+            tenant,
+            () -> {
+              var pending =
+                  jdbc.queryForMap(
+                      "SELECT result_json,error_code FROM collab.network_contact_submission WHERE tenant_id=? FOR UPDATE NOWAIT",
+                      tenant);
+              assertNull(pending.get("result_json"));
+              assertNull(pending.get("error_code"));
+              jdbc.queryForList(
+                  "SELECT id FROM collab.network_contact_budget WHERE tenant_id=? FOR UPDATE NOWAIT",
+                  tenant);
+              return null;
+            });
+        firstRelease.countDown();
+        if (winnerError == null) winner = first.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        else assertStoreFutureError(first, winnerError);
+        // Future completion observes the first request's commit before releasing the late callback.
+        committed =
+            sql(
+                tenant,
+                () ->
+                    jdbc.queryForMap(
+                        "SELECT result_json,error_code,error_http_status,error_grpc_status,message_id FROM collab.network_contact_submission WHERE tenant_id=?",
+                        tenant));
+        lateRelease.countDown();
+        if (winnerError == null)
+          assertEquals(winner, late.get(30, java.util.concurrent.TimeUnit.SECONDS));
+        else assertStoreFutureError(late, winnerError);
+      } finally {
+        firstRelease.countDown();
+        lateRelease.countDown();
+      }
+    }
+    if (winnerError == null)
+      assertEquals(winner, call(tenant, () -> services.get(1).store(request, null, "1", "same")));
+    else
+      error(
+          winnerError.code(),
+          () -> call(tenant, () -> services.get(1).store(request, null, "1", "same")));
+    assertEquals(
+        committed,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForMap(
+                    "SELECT result_json,error_code,error_http_status,error_grpc_status,message_id FROM collab.network_contact_submission WHERE tenant_id=?",
+                    tenant)));
+    if (winnerError == null) {
+      assertNull(committed.get("error_code"));
+      assertEquals(
+          winner,
+          new tools.jackson.databind.json.JsonMapper()
+              .readValue((String) committed.get("result_json"), StoreResult.class));
+      if (statusViewer) {
+        assertEquals(winner.messageId(), committed.get("message_id"));
+        assertEquals(winner.messageId(), winner.contactId());
+        assertEquals("contact_pending", winner.visibleStatus());
+      } else {
+        assertTrue(winner.restrictedAppearance());
+        assertEquals("request_submitted", winner.visibleStatus());
+        assertNull(winner.messageId());
+        assertNull(winner.contactId());
+        assertTrue(winner.deliveries().isEmpty());
+        assertNotNull(winner.submissionId());
+      }
+    } else {
+      assertNull(committed.get("result_json"));
+      assertEquals(winnerError.code(), committed.get("error_code"));
+      assertEquals(winnerError.httpStatus(), committed.get("error_http_status"));
+      assertEquals(winnerError.grpcStatus().name(), committed.get("error_grpc_status"));
+    }
+    int materialized = firstFailure == null ? 1 : 0;
+    assertEquals(materialized == 1, committed.get("message_id") != null);
+    for (String table :
+        List.of("network_message", "network_mail_item", "network_contact", "network_recipient"))
+      assertEquals(
+          materialized,
+          sql(
+              tenant,
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab." + table + " WHERE tenant_id=?",
+                      Integer.class,
+                      tenant)));
+    assertEquals(
+        1,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_contact_submission WHERE tenant_id=?",
+                    Integer.class,
+                    tenant)));
+    assertEquals(1, auditCount(tenant, "collab.network.first_contact.submit"));
+    assertEquals(
+        List.of(2.0, 4.0, 9.0),
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForList(
+                    "SELECT tokens FROM collab.network_contact_budget WHERE tenant_id=? ORDER BY tokens",
+                    Double.class,
+                    tenant)));
+  }
+
+  private static void assertStoreFutureError(
+      java.util.concurrent.Future<StoreResult> future, auriga.common.error.ErrorCode expected) {
+    var failure =
+        assertThrows(
+            java.util.concurrent.ExecutionException.class,
+            () -> future.get(30, java.util.concurrent.TimeUnit.SECONDS));
+    assertEquals(expected, assertInstanceOf(AurigaException.class, failure.getCause()).errorCode());
+  }
+
+  @Test
   void receiptDuringPrecheckIsReflectedWhenMailboxIsLockedForSigning() {
     UUID tenant = UUID.randomUUID();
     var stored =
