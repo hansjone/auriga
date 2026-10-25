@@ -14,4 +14,10 @@ public final class EdgeTokenFilePublisher extends ServiceTokenFilePublisher {
       InternalTokenIssuer issuer, Path secret, Path token, int readerGroup, int installationOwner) {
     super("edge", issuer, secret, token, readerGroup, installationOwner);
   }
+
+  /** Retain the declared edge entry point; all refresh safety checks remain shared. */
+  @Override
+  boolean refresh() {
+    return super.refresh();
+  }
 }
