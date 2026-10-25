@@ -80,9 +80,6 @@ func Complete(ctx context.Context, body io.ReadCloser, r *Request, l Limits) (Re
 		return result, failure("ai.upstream_rejected")
 	}
 	m := c.Choices[0].Message
-	if m.Content.Get() == nil && len(m.ToolCalls) == 0 {
-		return result, failure("ai.upstream_rejected")
-	}
 	d := api.ChatCompletionChunkChoicesInnerDelta{Role: &m.Role, Content: m.Content}
 	for i, t := range m.ToolCalls {
 		name, args := t.Function.Name, t.Function.Arguments

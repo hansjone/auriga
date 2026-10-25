@@ -39,7 +39,7 @@ func matrixRequest(t *testing.T, format, choice string, p Policy) *Request {
 func matrixResponse(t *testing.T, format, finish string, shape terminalFixture, usage string) string {
 	t.Helper()
 	message := map[string]any{"role": "assistant", "content": shape.content}
-	if len(shape.tools) > 0 {
+	if shape.tools != nil {
 		message["tool_calls"] = shape.tools
 	}
 	body := map[string]any{"id": "c", "object": "chat.completion", "created": 1, "model": "synthetic"}
@@ -54,12 +54,12 @@ func matrixResponse(t *testing.T, format, finish string, shape terminalFixture, 
 		}
 		return string(b)
 	}
-	var calls []api.ToolCallDelta
+	calls := make([]api.ToolCallDelta, 0, len(shape.tools))
 	for i, tool := range shape.tools {
 		name, args := tool.Function.Name, tool.Function.Arguments
 		calls = append(calls, api.ToolCallDelta{Index: int64(i), Id: &tool.Id, Type: &tool.Type, Function: &api.ToolCallDeltaFunction{Name: &name, Arguments: &args}})
 	}
-	if len(calls) > 0 {
+	if shape.tools != nil {
 		message["tool_calls"] = calls
 	}
 	delta := map[string]any{"id": "c", "object": "chat.completion.chunk", "created": 1, "model": "synthetic", "choices": []any{map[string]any{"index": 0, "delta": message, "finish_reason": nil}}}
@@ -97,9 +97,9 @@ func TestFilteredTerminalMatrix(t *testing.T) {
 		{"text", "filtered text", nil}, {"empty", "", nil},
 		{"toolNull", nil, []api.ToolCall{tool}}, {"toolText", "filtered text", []api.ToolCall{tool}},
 		{"toolEmpty", "", []api.ToolCall{tool}}, {"multipleTools", nil, []api.ToolCall{tool, matrixTool("b", "lookup", `{"n":1}`)}},
-		// A nullable streaming delta is allowed; a complete JSON message without tools
-		// must still have string content under the D2 cross-field rule.
+		// AssistantMessage and streaming deltas independently allow explicit null.
 		{"nullWithoutTools", nil, nil},
+		{"nullEmptyTools", nil, []api.ToolCall{}},
 	}
 	type evidence struct {
 		name, raw string
@@ -134,7 +134,7 @@ func TestFilteredTerminalMatrix(t *testing.T) {
 						r := matrixRequest(t, format, choice, p)
 						raw := matrixResponse(t, format, "content_filter", shape, e.raw)
 						result, out, err := runMatrixResponse(t, format, raw, r)
-						validShape := (choice != "none" || len(shape.tools) == 0) && (format != "JSON" || shape.content != nil || len(shape.tools) > 0)
+						validShape := choice != "none" || len(shape.tools) == 0
 						known := validShape && e.valid && e.source
 						wantSuccess := validShape && e.valid && (format == "SSE" || known)
 						if !wantSuccess {
@@ -189,6 +189,8 @@ func TestTerminalIntegrityMatrix(t *testing.T) {
 	}{
 		{terminalFixture{"text", "text", nil}, []string{"stop", "length", "content_filter"}},
 		{terminalFixture{"empty", "", nil}, []string{"stop", "length", "content_filter"}},
+		{terminalFixture{"nullWithoutTools", nil, nil}, []string{"stop", "length", "content_filter"}},
+		{terminalFixture{"nullEmptyTools", nil, []api.ToolCall{}}, []string{"stop", "length", "content_filter"}},
 		{terminalFixture{"completeTool", nil, []api.ToolCall{tool}}, []string{"tool_calls", "content_filter"}},
 		{terminalFixture{"undeclared", nil, []api.ToolCall{matrixTool("a", "other", "{}")}}, nil},
 		{terminalFixture{"badJSON", nil, []api.ToolCall{matrixTool("a", "lookup", "{")}}, nil},
@@ -232,5 +234,79 @@ func TestTerminalIntegrityMatrix(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestResponseContentPresence(t *testing.T) {
+	for _, format := range []string{"JSON", "SSE"} {
+		for _, emptyTools := range []bool{false, true} {
+			shape := terminalFixture{"omittedTools", nil, nil}
+			if emptyTools {
+				shape = terminalFixture{"emptyTools", nil, []api.ToolCall{}}
+			}
+			for _, missing := range []bool{false, true} {
+				presence := "null"
+				if missing {
+					presence = "missing"
+				}
+				for _, finish := range []string{"content_filter", "stop", "length"} {
+					for _, choice := range []string{"default", "none", "auto", "required"} {
+						t.Run(format+"/"+shape.name+"/"+presence+"/"+finish+"/"+choice, func(t *testing.T) {
+							p := syntheticPolicy()
+							verified := 0
+							p.VerifyUsage = func(context.Context, api.TokenUsage) bool { verified++; return true }
+							r := matrixRequest(t, format, choice, p)
+							raw := matrixResponse(t, format, finish, shape, `{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}`)
+							if missing {
+								without := strings.Replace(raw, `"content":null,`, "", 1)
+								if raw == without {
+									t.Fatal("content removal fixture failed")
+								}
+								raw = without
+								if strings.Contains(raw, `"content"`) {
+									t.Fatal("content was not removed")
+								}
+							}
+							result, out, err := runMatrixResponse(t, format, raw, r)
+							valid := (format != "JSON" || !missing) && (choice != "required" || finish == "content_filter")
+							if !valid {
+								code := "ai.upstream_rejected"
+								if format == "SSE" {
+									code = "ai.stream_interrupted"
+								}
+								requireCode(t, err, code)
+								if verified != 0 || result.Completed || result.UsageKnown || result.Usage != nil || strings.Contains(out, "[DONE]") {
+									t.Fatal("missing field or terminal policy bypassed")
+								}
+								return
+							}
+							if err != nil || !result.Completed || !result.UsageKnown || result.Usage == nil || result.Usage.TotalTokens != 12 || verified != 1 {
+								t.Fatalf("nullable response lost metering: %+v %v verified=%d", result, err, verified)
+							}
+							if format == "JSON" && (!result.Completion.Choices[0].Message.Content.IsSet() || result.Completion.Choices[0].Message.Content.Get() != nil) {
+								t.Fatal("explicit null was not preserved")
+							}
+							if strings.Contains(out, `"tool_calls":[]`) != emptyTools {
+								t.Fatalf("empty versus omitted tools changed: %s", out)
+							}
+							if !strings.Contains(out, `"finish_reason":"`+finish+`"`) {
+								t.Fatal("finish reason changed")
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestRequestHistoryNullRemainsInvalid(t *testing.T) {
+	for _, role := range []string{"system", "user", "assistant"} {
+		t.Run(role, func(t *testing.T) {
+			raw := strings.Replace(textRequest, `"role":"user"`, `"role":"`+role+`"`, 1)
+			raw = strings.Replace(raw, `"你好"`, `null`, 1)
+			_, err := DecodeRequest(t.Context(), strings.NewReader(raw), syntheticPolicy())
+			requireCode(t, err, "common.validation_failed")
+		})
 	}
 }

@@ -103,7 +103,7 @@ func TestCompletion(t *testing.T) {
 		"multiple":      strings.Replace(completion, `"index":0`, `"index":1`, 1),
 		"unknown":       strings.Replace(completion, `"created":1`, `"created":1,"provider_secret":"SECRET"`, 1),
 		"duplicate":     strings.Replace(completion, `"created":1`, `"created":1,"created":1`, 1),
-		"nullContent":   strings.Replace(completion, `"你好"`, `null`, 1),
+		"contentAbsent": strings.Replace(completion, `,"content":"你好"`, ``, 1),
 		"model":         strings.Replace(completion, `"synthetic"`, `"other"`, 1),
 		"unknownFinish": strings.Replace(completion, `"stop"`, `"unknown_finish"`, 1),
 	} {
