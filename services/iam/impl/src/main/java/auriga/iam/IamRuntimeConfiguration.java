@@ -434,7 +434,12 @@ public class IamRuntimeConfiguration {
 
   @Bean
   OAuthProvider iamOAuth(
-      IamStore store, SessionManager sessions, TokenService tokens, Clock clock, Environment env) {
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
     return new OAuthProvider(
         store,
         sessions,
@@ -442,7 +447,13 @@ public class IamRuntimeConfiguration {
         clock,
         Binder.get(env)
             .bind("auriga.iam.clients", Bindable.listOf(OAuthClient.class))
-            .orElse(List.of()));
+            .orElse(List.of()),
+        authorization.getIfAvailable(
+            () ->
+                request -> {
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.UNAVAILABLE);
+                }));
   }
 
   @Bean

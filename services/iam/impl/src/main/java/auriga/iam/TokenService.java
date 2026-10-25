@@ -145,6 +145,33 @@ public final class TokenService implements InternalTokenIssuer {
 
   record IssuedToken(String accessToken, Instant expiresAt) {}
 
+  IssuedToken deviceAi(
+      DeviceAccessAuthority.Identity identity,
+      Instant authTime,
+      String memberType,
+      Set<String> effective) {
+    if (!effective.contains(DeviceAiResource.INVOKE)) return null;
+    long expiry =
+        Math.min(
+            clock.instant().plusSeconds(300).getEpochSecond(),
+            identity.expiresAt().getEpochSecond());
+    if (expiry <= clock.instant().getEpochSecond()) return null;
+    ObjectNode claims =
+        base(
+            UUID.fromString(identity.tenant()),
+            identity.account(),
+            "auriga.ai-gateway",
+            "device",
+            "device");
+    claims.put("exp", expiry);
+    claims.put("did", identity.device());
+    claims.put("scope", "auriga.connect");
+    claims.put("mtyp", memberType);
+    claims.put("auth_time", authTime.getEpochSecond());
+    claims.set("perms", Json.MAPPER.valueToTree(List.of(DeviceAiResource.INVOKE)));
+    return new IssuedToken(signAccess(claims), Instant.ofEpochSecond(expiry));
+  }
+
   IssuedToken instanceAi(
       UUID tenant, UUID owner, UUID instance, long version, Set<String> effective) {
     IamError.validate(
