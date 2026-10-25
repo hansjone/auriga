@@ -295,7 +295,7 @@ test(
           },
         },
         countInputTokens(body) {
-          measured.push(structuredClone(body));
+          measured.push(JSON.parse(JSON.stringify(body)));
           return inputTokens;
         },
         getAccessToken: async () => ({
