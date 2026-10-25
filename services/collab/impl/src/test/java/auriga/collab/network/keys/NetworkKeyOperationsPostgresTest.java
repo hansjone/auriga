@@ -48,6 +48,13 @@ class NetworkKeyOperationsPostgresTest {
     return new NetworkKeyOperations(jdbc, manager, tenant, "2", m.verifier(clock), "1", clock);
   }
 
+  static java.sql.SQLException currentSqlException(
+      org.springframework.dao.DataAccessException failure) {
+    // Spring wraps the current JDBC operation directly. A deeper cause can describe an
+    // earlier statement (e.g. 55P03 beneath the current transaction-aborted 25P02).
+    return assertInstanceOf(java.sql.SQLException.class, failure.getCause(), failure::toString);
+  }
+
   @Test
   void restartRejectsRollbackSameVersionMutationAndStaleLocalSigner() {
     var first = m.release(m.payload(4, KeyTestMaterial.NOW));
@@ -216,10 +223,7 @@ class NetworkKeyOperationsPostgresTest {
                                           assertThrows(
                                               org.springframework.dao.DataAccessException.class,
                                               () -> service().publish(revocation));
-                                      var sql =
-                                          assertInstanceOf(
-                                              java.sql.SQLException.class,
-                                              conflict.getMostSpecificCause());
+                                      var sql = currentSqlException(conflict);
                                       assertEquals("55P03", sql.getSQLState(), conflict::toString);
                                       if (conflict
                                           instanceof
@@ -237,10 +241,7 @@ class NetworkKeyOperationsPostgresTest {
                                               () -> jdbc.queryForObject("SELECT 1", Integer.class));
                                       assertEquals(
                                           "25P02",
-                                          assertInstanceOf(
-                                                  java.sql.SQLException.class,
-                                                  aborted.getMostSpecificCause())
-                                              .getSQLState(),
+                                          currentSqlException(aborted).getSQLState(),
                                           aborted::toString);
                                       // The nested publish marked this transaction rollback-only.
                                       assertTrue(status.isRollbackOnly());
