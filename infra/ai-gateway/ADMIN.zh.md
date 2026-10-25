@@ -4,11 +4,15 @@
 未配置时不启动管理 API，不影响 network/team。管理 listener 只供 edge 转发；本任务不修改 edge 路由。
 不配置 CORS，不接受浏览器 cookie；edge 负责管理源隔离、会话与 CSRF，转发 IAM 的访问令牌。
 
-配置示例（路径由部署填写）：
+正式部署配置示例（路径由部署填写）：
 
 ```json
 {
-  "listen": "127.0.0.1:8081",
+  "listen": "0.0.0.0:8081",
+  "tlsCertFile": "/protected/ai-admin-server.pem",
+  "tlsKeyFile": "/protected/ai-admin-server.key",
+  "tlsClientCAFile": "/protected/edge-client-ca.pem",
+  "tlsEdgeDNSNames": ["edge.example.com"],
   "issuer": "https://iam.example.com",
   "jwksFile": "/protected/iam-public-jwks.json",
   "masterKeyFile": "/protected/ai-master.key",
@@ -22,8 +26,30 @@
 
 `AURIGA_AI_PG_DSN`、`AURIGA_AI_MIGRATION_PG_DSN` 分别提供应用和迁移连接串，也可填
 `store.dsn` / `store.migrationDsn`（该配置文件同样必须保护）。`AURIGA_AI_MASTER_KEY_FILE`
-可覆盖主密钥路径。非回环监听必须同时配置 `tlsCertFile` / `tlsKeyFile`；org RPC 非回环必须 mTLS，
-字段沿 `team.RPCConfig`（CertFile / KeyFile / CAFile / ServerName）。
+可覆盖主密钥路径。org RPC 非回环必须 mTLS，字段沿 `team.RPCConfig`
+（CertFile / KeyFile / CAFile / ServerName）；它与下述管理 HTTP listener 的材料分别配置。
+
+管理 listener 的 TLS 四项必须一起提供：
+
+- `tlsCertFile` / `tlsKeyFile`：服务端 PEM 证书链和匹配私钥；edge 必须校验该服务端的链、用途、期限和身份。
+- `tlsClientCAFile`：专用于信任 edge 客户端证书签发者的 PEM CA 集合；仅接受带 CA 约束和签证书用途的证书，
+  不使用操作系统根库，不接受空集合、非 CA 证书或夹杂损坏内容的集合。
+- `tlsEdgeDNSNames`：非空的显式 edge 客户端 **DNS SAN** 名单，例如 `edge.example.com`。
+  配置项使用小写 ASCII DNS 名，不带通配符、端口、协议、尾点或 IP；与客户端叶证书 DNS SAN 逐字精确匹配。
+  证书须通过受信链、clientAuth EKU 和有效期校验，CA 相同但 SAN 不在名单的客户端仍会被拒绝。
+  CN、URI SAN、IP SAN、请求 Host 及任何身份请求头都不能代替该 DNS SAN；节点入口使用的 URI 身份不自动获准。
+
+任何非数值回环监听（包括 `localhost`、私网 IP、空主机和通配监听地址）都要求完整 mTLS。
+仅在四项 TLS 配置均未设置时，允许数值回环（如 `127.0.0.1:8081`、`[::1]:8081`）使用原有明文开发模式；
+默认仍为 `127.0.0.1:0`。回环一旦配置任意 TLS 项，也必须提供完整四项；不会降级到明文或单向 TLS。
+材料不可读、非普通文件、链接、证书/私钥不匹配、CA 解析失败或名单非法均在连接数据库/监听端口前拒绝启动。
+每个材料文件最大 1 MiB；由部署方保护文件权限，runtime 不修改 OS ACL，换证/更新名单后重启服务。
+
+DNS SAN 是证书身份，管理服务不会解析名单中的 DNS；内部可连接数值 IP，由 edge 独立核验服务端证书身份。
+前台域名 TLS、外置反代终止 TLS 或纯 IP HTTP 部署都不免除这条内部 mTLS 边界。
+TLS 仅证明受信 edge 通道；原有管理 JWT 的签名、issuer、audience、admin ctx、权限和 stepup 校验仍独立执行。
+正确 edge 证书不能替代用户 JWT，正确 JWT 也不能替代 edge 证书。
+这里仅实现管理服务受信入口；edge 转发路由、会话/CSRF 与 UI 的完整接线由其他任务验证，不据此声称全链完成。
 
 主密钥是部署生成的 **32 个原始随机字节**，不接受口令或文本编码。POSIX 文件仅服务账号可读，
 不能是符号链接或硬链接；Windows 同样验证 ACL 仅授权服务身份、SYSTEM 和管理员，不能只依赖 chmod。
@@ -71,6 +97,11 @@ staged 直接 revoke、再次激活/撤销等非法迁移返回 common.conflict�
 不能用“空权限集合”推断归属，也不直接读 org schema。实现边界在报告中同样列出。
 
 ## 测试
+
+`go test -count=1 -run 'TestAdmin(TLS|Plain|Runtime)' .` 不依赖 PostgreSQL：生成独立临时 CA，
+通过生产实际使用的 server 构造和随机回环 TLS listener 验证 TLS 1.2/1.3 的允许/拒绝握手、禁止明文降级，
+并在真实管理 handler/JWT 验签路径验证无 JWT、伪造 JWT、错误 audience/ctx、缺权限/stepup 被拒绝。
+这些测试不依赖真实 DNS、hosts、外部服务或 DSH，不证明数据库 CRUD 已通过。
 
 使用独立测试数据库，将管理员 PostgreSQL URL 放入 `AURIGA_AI_TEST_PG_DSN` 后运行 `go test -count=1 ./...`。
 fixture 创建随机低权限运行角色，验证 RLS、事务回滚、迁移幂等及 API；结束清理测试租户/角色。
