@@ -691,6 +691,19 @@ class DeviceAiResourcePostgresTest {
     }
   }
 
+  static io.grpc.ClientInterceptor perCallDeadline() {
+    return new io.grpc.ClientInterceptor() {
+      @Override
+      public <Q, R> io.grpc.ClientCall<Q, R> interceptCall(
+          io.grpc.MethodDescriptor<Q, R> method,
+          io.grpc.CallOptions options,
+          io.grpc.Channel next) {
+        // Allocate the bounded deadline for this call, never for the shared stub.
+        return next.newCall(method, options.withDeadlineAfter(5, TimeUnit.SECONDS));
+      }
+    };
+  }
+
   void withRpc(
       String externalToken, InstanceAiAuthorization auth, java.util.function.Consumer<Rpc> work) {
     var provider = new org.springframework.beans.factory.support.StaticListableBeanFactory();
@@ -748,14 +761,15 @@ class DeviceAiResourcePostgresTest {
               raw -> {
                 var channel =
                     raw == null
-                        ? auriga.common.grpc.GrpcChannels.open("127.0.0.1:" + server.port())
+                        ? auriga.common.grpc.GrpcChannels.open(
+                            "127.0.0.1:" + server.port(), perCallDeadline())
                         : auriga.common.grpc.GrpcChannels.open(
                             "127.0.0.1:" + server.port(),
                             new auriga.common.grpc.AurigaClientInterceptor(
-                                () -> raw, Duration.ofSeconds(5)));
+                                () -> raw, Duration.ofSeconds(5)),
+                            perCallDeadline());
                 channels.add(channel);
-                return DeviceAccessServiceGrpc.newBlockingStub(channel)
-                    .withDeadlineAfter(5, TimeUnit.SECONDS);
+                return DeviceAccessServiceGrpc.newBlockingStub(channel);
               };
       work.accept(
           new Rpc(
