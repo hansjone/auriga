@@ -22,6 +22,7 @@ test('AI device JWT: actual ES256 signature, fixed target, owner, tenant, device
     });
   });
   const now = Math.floor(Date.now() / 1000);
+  t.mock.method(Date, 'now', () => now * 1000);
   const claims = {
     iss: config.issuer,
     sub: 'owner',
@@ -52,6 +53,12 @@ test('AI device JWT: actual ES256 signature, fixed target, owner, tenant, device
     );
   };
   assert.deepEqual(await platform.verifyAi(token(), claims), claims);
+  for (const patch of [{ iat: now + 5 }, { exp: now + 300 }])
+    assert.deepEqual(
+      await platform.verifyAi(token(patch), claims),
+      { ...claims, ...patch },
+      JSON.stringify(patch),
+    );
   for (const patch of [
     { aud: 'auriga' },
     { aud: ['auriga.ai-gateway'] },
@@ -72,6 +79,7 @@ test('AI device JWT: actual ES256 signature, fixed target, owner, tenant, device
     await assert.rejects(
       platform.verifyAi(token(patch), claims),
       /invalid device|identity changed/,
+      JSON.stringify(patch),
     );
   await assert.rejects(
     platform.verifyAi(token({}, { typ: 'JWT' }), claims),

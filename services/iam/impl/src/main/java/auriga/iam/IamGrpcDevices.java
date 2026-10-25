@@ -10,9 +10,15 @@ import io.grpc.stub.StreamObserver;
 /** Separate exact-caller ACLs; deliberately does not widen edge's SessionService. */
 public class IamGrpcDevices extends DeviceAccessServiceGrpc.DeviceAccessServiceImplBase {
   private final DeviceAccessAuthority authority;
+  private final DeviceAiAccessAuthority aiAuthority;
 
   public IamGrpcDevices(DeviceAccessAuthority authority) {
+    this(authority, null);
+  }
+
+  public IamGrpcDevices(DeviceAccessAuthority authority, DeviceAiAccessAuthority aiAuthority) {
     this.authority = authority;
+    this.aiAuthority = aiAuthority;
   }
 
   private static void caller(String subject) {
@@ -34,6 +40,31 @@ public class IamGrpcDevices extends DeviceAccessServiceGrpc.DeviceAccessServiceI
     try {
       var identity = authority.access(request.getAccessToken());
       var response = VerifyDeviceAccessResponse.newBuilder();
+      if (identity != null)
+        response
+            .setActive(true)
+            .setTenantId(identity.tenant())
+            .setAccountId(identity.account())
+            .setDeviceId(identity.device())
+            .setExpiresAt(timestamp(identity));
+      observer.onNext(response.build());
+      observer.onCompleted();
+    } catch (AurigaException e) {
+      throw e;
+    } catch (RuntimeException unavailable) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void verifyDeviceAiAccess(
+      VerifyDeviceAiAccessRequest request, StreamObserver<VerifyDeviceAiAccessResponse> observer) {
+    caller("svc:ai-gateway");
+    try {
+      if (aiAuthority == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+      var identity = aiAuthority.access(request.getAccessToken());
+      var response = VerifyDeviceAiAccessResponse.newBuilder();
       if (identity != null)
         response
             .setActive(true)

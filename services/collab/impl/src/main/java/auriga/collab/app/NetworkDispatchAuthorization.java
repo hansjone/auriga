@@ -32,7 +32,10 @@ final class NetworkDispatchAuthorization {
 
   private record Prepared(Check check, ObjectNode message, ObjectNode source, JsonNode dispatch) {}
 
-  Map<UUID, Outcome> check(UUID tenant, List<FetchItem> items, String realm, String target) {
+  record Batch(
+      Map<UUID, Outcome> failures, Map<UUID, Prepared> prepared, Set<NodeReference> sources) {}
+
+  Batch prepare(UUID tenant, List<FetchItem> items, String realm, String target) {
     Map<UUID, Outcome> result = new HashMap<>();
     Map<UUID, Prepared> prepared = new LinkedHashMap<>();
     Set<NodeReference> sources = new LinkedHashSet<>();
@@ -89,6 +92,13 @@ final class NetworkDispatchAuthorization {
         result.put(item.deliveryId(), new Outcome(null, null, e));
       }
     }
+    return new Batch(Map.copyOf(result), Map.copyOf(prepared), Set.copyOf(sources));
+  }
+
+  Map<UUID, Outcome> check(UUID tenant, Batch batch, String realm, String target) {
+    Map<UUID, Outcome> result = new HashMap<>(batch.failures());
+    var prepared = batch.prepared();
+    var sources = batch.sources();
     if (prepared.isEmpty()) return result;
     Map<NodeReference, Boolean> active;
     try {

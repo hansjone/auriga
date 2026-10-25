@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Internal service JWT: ONLY svc:collab, business auriga-tenant-id metadata,
+// and the existing authenticated internal transport. No cached allow decisions.
+// This contract intentionally does not widen NetworkGatewayService's allowlist.
+service NetworkAuthorityService {
+  rpc CheckNetwork(CheckNetworkRequest) returns (CheckNetworkResponse);
+  rpc NetworkAuthorityActive(NetworkAuthorityActiveRequest) returns (NetworkAuthorityActiveResponse);
+  rpc NetworkLimits(NetworkLimitsRequest) returns (NetworkLimitsResponse);
+  // Verify the EXACT persisted redeem binding and current backing identity on
+  // every call, including realm/node/tenant, ingress, server/client/account.
+  rpc ResolveNetworkTarget(ResolveNetworkTargetRequest) returns (ResolveNetworkTargetResponse);
+  // Recheck stored source binding/revision, sender policy/grant and target read
+  // permission before signing. Stored JSON is evidence, never an allow grant.
+  rpc AuthorizeNetworkDelivery(AuthorizeNetworkDeliveryRequest) returns (AuthorizeNetworkDeliveryResponse);
+}
+
+enum NetworkAuthoritySender {
+  NETWORK_AUTHORITY_SENDER_UNSPECIFIED = 0;
+  NETWORK_AUTHORITY_SENDER_HUMAN = 1;
+  NETWORK_AUTHORITY_SENDER_AGENT = 2;
+}
+
+enum NetworkAuthorityOperation {
+  NETWORK_AUTHORITY_OPERATION_UNSPECIFIED = 0;
+  NETWORK_AUTHORITY_OPERATION_CONNECT = 1;
+  NETWORK_AUTHORITY_OPERATION_SEND = 2;
+  NETWORK_AUTHORITY_OPERATION_RECEIVE = 3;
+  NETWORK_AUTHORITY_OPERATION_FIRST_CONTACT = 4;
+  NETWORK_AUTHORITY_OPERATION_BROADCAST = 5;
+}
+
+message CheckNetworkRequest {
+  string realm = 1;
+  string source_node = 2;
+  string target_node = 3;
+  string local = 4;
+  NetworkAuthoritySender sender = 5;
+  NetworkAuthorityOperation operation = 6;
+  uint64 body_bytes = 7;
+  uint64 target_nodes = 8;
+  uint64 target_locals = 9;
+}
+
+message CheckNetworkResponse {
+  bool allowed = 1;
+  string reason = 2;
+}
+
+message NetworkAuthorityActiveRequest {
+  string realm = 1;
+  string node = 2;
+}
+
+message NetworkAuthorityActiveResponse {
+  bool active = 1;
+}
+
+message NetworkLimitsRequest {}
+
+message NetworkLimitsResponse {
+  // Complete effective organization ceilings. Names are the exact enum names
+  // of iam-api NetworkAuthority.Limit (e.g. BODY_BYTES); missing/unknown keys or
+  // values outside signed int64 are protocol failures, never default allows.
+  // Collab additionally clamps every ceiling to its platform maximum.
+  map<string, uint64> limits = 1;
+}
+
+message NetworkAuthorityConnection {
+  string tenant_id = 1;
+  // Canonical positive unsigned decimal IDs, not hexadecimal display values.
+  string realm = 2;
+  string node = 3;
+  string ingress = 4;
+  string server_id = 5;
+  string client_id = 6;
+  string client_account = 7;
+}
+
+message ResolveNetworkTargetRequest {
+  NetworkAuthorityConnection connection = 1;
+  // Only local=0 (the node system mailbox). Nonzero locals MUST be rejected:
+  // their opaque registration/type authority belongs to collab, never IAM.
+  string local = 2;
+}
+
+message ResolveNetworkTargetResponse {
+  bool allowed = 1;
+  // Exact verified binding echo. Missing/mismatched fields fail closed.
+  NetworkAuthorityConnection connection = 2;
+  // Always system. Session/subagent types belong to collab opaque registration.
+  string target_type = 3;
+  // RFC3339 UTC, bounded by current backing session/device/connection expiry.
+  string valid_until = 4;
+  string local = 5;
+}
+
+message AuthorizeNetworkDeliveryRequest {
+  NetworkAuthorityConnection connection = 1;
+  bytes message_json = 2;
+  bytes source_context_json = 3;
+}
+
+message AuthorizeNetworkDeliveryResponse {
+  bool allowed = 1;
+  // Exact verified target binding; all source/policy/read checks succeeded.
+  NetworkAuthorityConnection connection = 2;
+  string valid_until = 3;
+}

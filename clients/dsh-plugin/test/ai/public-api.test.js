@@ -479,3 +479,119 @@ test(
     }
   },
 );
+
+for (const mode of ['json', 'sse'])
+  for (const content of ['filtered text', '', null])
+    test(`public DSH API: ${mode} content_filter (${JSON.stringify(content)}) preserves usage without retry`, async () => {
+      // Always resolve the worktree's installed npm peer, independent of host overrides.
+      const localRoot = createRequire(import.meta.url).resolve(
+        '@deepseek-ai/dsh-llm',
+      );
+      const hostApi = await import(pathToFileURL(localRoot));
+      const { Context } = await import(
+        pathToFileURL(createRequire(localRoot).resolve('@deepseek-ai/cordis'))
+      );
+      const ctx = new Context(),
+        fiber = await ctx.plugin(hostApi.LlmRuntime);
+      let posts = 0,
+        tokens = 0;
+      const usage = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 };
+      const registration = registerAurigaAdapter(ctx.llm, {
+        hostApi,
+        apiBase: 'https://gateway.example.com',
+        responseMode: mode,
+        modelLimits: { 'team-model': { maxOutputTokens: 32 } },
+        getAccessToken: async () => {
+          tokens++;
+          return {
+            token: 'test-token',
+            expiresAt: Date.now() + 60000,
+            signal: new AbortController().signal,
+          };
+        },
+        fetch: async () => {
+          posts++;
+          const envelope = { id: 'filtered', created: 1, model: 'team-model' };
+          if (mode === 'json')
+            return Response.json({
+              ...envelope,
+              object: 'chat.completion',
+              usage,
+              choices: [
+                {
+                  index: 0,
+                  message: { role: 'assistant', content },
+                  finish_reason: 'content_filter',
+                },
+              ],
+            });
+          const packet = (choices, extra = {}) => ({
+            ...envelope,
+            object: 'chat.completion.chunk',
+            choices,
+            ...extra,
+          });
+          return new Response(
+            [
+              packet([{ index: 0, delta: { content }, finish_reason: null }]),
+              packet([
+                { index: 0, delta: {}, finish_reason: 'content_filter' },
+              ]),
+              packet([], { usage }),
+              '[DONE]',
+            ]
+              .map(
+                (v) =>
+                  `data: ${typeof v === 'string' ? v : JSON.stringify(v)}\n\n`,
+              )
+              .join(''),
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        },
+      });
+      try {
+        const assembler = new hostApi.BlockAssembler(),
+          chunks = [];
+        for await (const chunk of ctx.llm.stream({
+          provider: 'auriga',
+          model: 'team-model',
+          maxTokens: 8,
+          messages: [
+            hostApi.createUserMessage({
+              source: { kind: 'user' },
+              content: [{ type: 'text', text: 'test prompt' }],
+            }),
+          ],
+        })) {
+          chunks.push(chunk);
+          assembler.push(chunk);
+        }
+        assert.deepEqual(assembler.finish, {
+          kind: 'error',
+          failure: {
+            code: 'CONTENT_FILTER',
+            message: 'Auriga AI: 内容过滤/拒绝 (content filtered/refused)',
+          },
+        });
+        assert.deepEqual(assembler.usage, {
+          inputTokens: 3,
+          outputTokens: 2,
+          totalTokens: 5,
+        });
+        assert.deepEqual(
+          assembler.blocks(),
+          content ? [{ type: 'text', text: content }] : [],
+        );
+        assert.equal(chunks.at(-2).type, 'usage');
+        assert.equal(chunks.filter((c) => c.type === 'finish').length, 1);
+        assert.equal(posts, 1);
+        assert.equal(tokens, 1);
+        assert.equal(
+          registration.adapter.providerRetryPolicy('auriga').maxRetries,
+          0,
+        );
+      } finally {
+        registration.dispose();
+        await fiber.dispose();
+      }
+    });

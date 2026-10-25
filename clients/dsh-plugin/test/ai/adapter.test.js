@@ -493,7 +493,7 @@ test('SSE: malformed, extra choices, incomplete tools, inconsistent usage and pr
       '[DONE]',
     ],
     [packet({ content: 'x', reasoning_content: 'hidden' }, 'stop'), '[DONE]'],
-    [packet({}, 'content_filter'), '[DONE]'],
+    [packet({}, 'unknown-finish'), '[DONE]'],
     [{ ...packet({}, 'stop'), model: 'wrong' }, '[DONE]'],
   ];
   for (const events of invalid) {
@@ -920,3 +920,98 @@ test('timeouts: broker, fetch, idle and total deadlines interrupt without replay
     await stream.return();
   }
 });
+
+for (const mode of ['json', 'sse'])
+  test(`content_filter: ${mode} keeps validation and never fabricates unknown usage`, async () => {
+    const usage = { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 };
+    for (const scenario of [
+      'unknown',
+      'bad-usage',
+      'unknown-finish',
+      'bad-tool',
+      'valid-tool',
+      ...(mode === 'sse' ? ['no-done', 'truncated-done'] : []),
+    ]) {
+      let posts = 0,
+        tokens = 0;
+      const tool = {
+        id: 'call',
+        type: 'function',
+        function: {
+          name: 'lookup',
+          arguments: scenario === 'bad-tool' ? '{' : '{}',
+        },
+      };
+      const message = {
+        role: 'assistant',
+        content: null,
+        ...(['bad-tool', 'valid-tool'].includes(scenario)
+          ? { tool_calls: [tool] }
+          : {}),
+      };
+      const reason =
+        scenario === 'unknown-finish' ? 'unknown' : 'content_filter';
+      const value =
+        scenario === 'unknown'
+          ? undefined
+          : scenario === 'bad-usage'
+            ? { ...usage, total_tokens: 6 }
+            : usage;
+      const { adapter } = setup(
+        async () => {
+          posts++;
+          if (mode === 'json')
+            return Response.json({
+              id: 'filtered',
+              object: 'chat.completion',
+              created: 1,
+              model: 'team-model',
+              choices: [{ index: 0, message, finish_reason: reason }],
+              ...(value ? { usage: value } : {}),
+            });
+          const delta = {
+            ...message,
+            ...(message.tool_calls
+              ? { tool_calls: [{ index: 0, ...tool }] }
+              : {}),
+          };
+          const events = [packet(delta, reason, value)];
+          if (scenario !== 'no-done') events.push('[DONE]');
+          if (scenario === 'truncated-done')
+            return new Response(
+              `data: ${JSON.stringify(events[0])}\n\ndata: [DONE]`,
+              { headers: { 'content-type': 'text/event-stream' } },
+            );
+          return sse(events);
+        },
+        {
+          responseMode: mode,
+          getAccessToken: async () => {
+            tokens++;
+            return {
+              token: 'test-token',
+              expiresAt: Date.now() + 60000,
+              signal: new AbortController().signal,
+            };
+          },
+        },
+      );
+      const chunks = await collect(adapter);
+      const filtered =
+        scenario === 'valid-tool' || (scenario === 'unknown' && mode === 'sse');
+      assert.equal(
+        chunks.at(-1).reason.failure.code,
+        filtered ? 'CONTENT_FILTER' : 'SERVER',
+        scenario,
+      );
+      assert.equal(
+        chunks.filter((c) => c.type === 'usage').length,
+        scenario === 'valid-tool' ? 1 : 0,
+        scenario,
+      );
+      assert.equal(chunks.filter((c) => c.type === 'finish').length, 1);
+      assert.equal(posts, 1);
+      assert.equal(tokens, 1);
+      adapter.dispose();
+    }
+  });
