@@ -1,9 +1,9 @@
 import { SessionError } from './errors.js';
+import { digest, verifyEnvelope } from '../trust/verifier.js';
 
 /**
  * Map a wire FETCH_RESULT delivery item into the host adapter PageItem shape.
- * N1 does not verify server_auth signatures; callers mark `verified: true` only
- * after their own trust decision (test stub / future verifier).
+ * Call only after verifying the original delivery object.
  *
  * @param {any} item wire delivery
  * @returns {import('../host/adapter.js').PageItem}
@@ -69,21 +69,54 @@ export function wireDeliveryToPageItem(item) {
  *   epoch: string,
  *   bootId: string,
  *   items: any[],
+ *   header: any,
+ *   trust: Awaited<ReturnType<import('../trust/store.js').openTrustStore>>,
+ *   context: import('../trust/verifier.js').VerifyContext,
+ *   now?: () => number,
  * }} input
- * @returns {import('../host/adapter.js').Page}
+ * @returns {Omit<import('../host/adapter.js').Page, 'verified'> & {verified: boolean, rejections: {index: number, code: string, reason: string}[]}}
  */
 export function buildVerifiedPage(input) {
+  const { trust, context, now } = input;
+  verifyEnvelope(input.header, { trust, context, now });
+  const manifest = input.header.manifest;
+  if (
+    input.header.type !== 'fetch_page' ||
+    !Array.isArray(input.items) ||
+    !Array.isArray(manifest) ||
+    manifest.length !== input.items.length ||
+    manifest.some(
+      (m, i) =>
+        m.item_type !== input.items[i]?.type ||
+        m.mail_seq !== (input.items[i]?.mail_seq ?? null) ||
+        m.digest !== digest(input.items[i]),
+    )
+  ) {
+    throw new SessionError(
+      'network.signature_invalid',
+      'page manifest mismatch',
+    );
+  }
   const items = [];
-  for (const raw of input.items ?? []) {
-    if (raw?.type === 'delivery') items.push(wireDeliveryToPageItem(raw));
-    // terminal / hole items are skipped at the host seam for N1.
+  const rejections = [];
+  for (const [index, raw] of input.items.entries()) {
+    try {
+      verifyEnvelope(raw, { trust, context, now });
+      if (raw.type === 'delivery') items.push(wireDeliveryToPageItem(raw));
+      // Verified terminal / hole items have no host delivery in this seam.
+    } catch (error) {
+      if (!(error instanceof SessionError)) throw error;
+      // Never record untrusted sender/recipient IDs as authoritative audit data.
+      rejections.push({ index, code: error.code, reason: error.message });
+    }
   }
   return {
-    verified: true,
+    verified: items.length > 0 || rejections.length === 0,
     tenant: input.tenant,
     nodeIncarnation: input.nodeIncarnation,
     epoch: input.epoch,
     bootId: input.bootId,
     items,
+    rejections,
   };
 }
