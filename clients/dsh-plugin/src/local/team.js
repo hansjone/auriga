@@ -10,6 +10,28 @@ const TOOL_NAMES = new Set([
   'auriga_read_thread',
 ]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const OPEN_INTENT_TTL_MS = 60000;
+const OPEN_INTENT_LIMIT = 256;
+/** Expiry releases capacity, never establishes a guessed source identity.
+ * Old records without deadlines are unknown outcomes immediately.
+ * @param {any} state */
+function expireOpenIntents(state) {
+  const now = Date.now();
+  for (const [key, intent] of Object.entries(state.pendingOpens ?? {})) {
+    const row = /** @type {any} */ (intent);
+    if (Number.isFinite(row.expiresAt) && row.expiresAt > now) continue;
+    state.openOutcomes ??= {};
+    state.openOutcomes[key] = {
+      ...row,
+      status: 'result_unknown',
+      endedAt: now,
+    };
+    delete state.pendingOpens[key];
+  }
+  const outcomes = Object.keys(state.openOutcomes ?? {});
+  for (const key of outcomes.slice(0, -OPEN_INTENT_LIMIT))
+    delete state.openOutcomes[key];
+}
 const opaque = (/** @type {unknown} */ value) =>
   typeof value === 'string' && value.length > 0 && value.length <= 512;
 const unsupportedOrigin = (/** @type {any} */ session) =>
@@ -106,6 +128,18 @@ export function createTeam({
     if (closed) throw new Error('Team connection closed');
     assertActive();
   };
+  async function expireSourceIntents() {
+    if (
+      Object.values(vault.snapshot().pendingOpens ?? {}).some(
+        (/** @type {any} */ row) =>
+          !Number.isFinite(row.expiresAt) || row.expiresAt <= Date.now(),
+      )
+    )
+      await vault.update((state) => {
+        active();
+        expireOpenIntents(state);
+      });
+  }
   /** @param {string} method @param {any} body @param {AbortSignal} [signal] */
   async function privateCall(method, body, signal) {
     active();
@@ -223,10 +257,9 @@ export function createTeam({
     )
       throw new Error('untrusted Team arguments');
     const row = await binding(sessionId, undefined, exec.signal);
-    // The remote thread ID is unknown until open returns. Persist a barrier
-    // before sending: an unknown delivery must not guess a receiver meanwhile.
-    // Keep uncertain intents across restart; only an explicit same-key tool
-    // retry resolves them. Never automatically replay a model write.
+    // Persist bounded recovery evidence before sending. Independent first
+    // messages remain admissible; subsequent messages require a source mapping.
+    // Never automatically replay a model write or renew a retry's deadline.
     let intentKey = '';
     if (name === 'auriga_open_thread') {
       if (!opaque(args.idempotencyKey))
@@ -238,21 +271,33 @@ export function createTeam({
         endpointId: row.endpointId,
         sessionId,
         bindingId: row.id,
+        targetEndpointId: args.targetEndpointId,
         fingerprint: createHash('sha256')
           .update(JSON.stringify([args.targetEndpointId, args.text]))
           .digest('hex'),
+        expiresAt: Date.now() + OPEN_INTENT_TTL_MS,
       };
       await vault.update((state) => {
         active();
         if (state.endpoint !== row.endpointId)
           throw new Error('Team endpoint changed');
         state.pendingOpens ??= {};
+        expireOpenIntents(state);
         const previous = state.pendingOpens[intentKey];
-        if (previous && JSON.stringify(previous) !== JSON.stringify(intent))
+        if (
+          previous &&
+          (previous.endpointId !== intent.endpointId ||
+            previous.sessionId !== intent.sessionId ||
+            previous.bindingId !== intent.bindingId ||
+            previous.fingerprint !== intent.fingerprint)
+        )
           throw new Error('Team open intent conflict');
-        if (!previous && Object.keys(state.pendingOpens).length >= 256)
+        if (
+          !previous &&
+          Object.keys(state.pendingOpens).length >= OPEN_INTENT_LIMIT
+        )
           throw new Error('too many unresolved Team opens');
-        state.pendingOpens[intentKey] = intent;
+        state.pendingOpens[intentKey] = previous ?? intent;
       });
       active();
     }
@@ -270,14 +315,9 @@ export function createTeam({
       exec.signal,
       { 'Auriga-Endpoint-Id': row.endpointId, 'Auriga-Binding-Id': row.id },
     );
-    if (result.isError) {
-      if (intentKey)
-        await vault.update((state) => {
-          active();
-          delete state.pendingOpens[intentKey];
-        });
-      throw new Error('remote Team tool rejected');
-    }
+    // A rejection on a retry cannot prove an earlier request did not commit.
+    // Keep its fixed deadline instead of reopening the random-mapping window.
+    if (result.isError) throw new Error('remote Team tool rejected');
     if (name === 'auriga_open_thread') {
       const message = result.structuredContent?.message;
       if (
@@ -301,6 +341,7 @@ export function createTeam({
           throw new Error('Team source thread binding conflict');
         state.threads[message.threadId] = { sessionId, bindingId: row.id };
         delete state.pendingOpens[intentKey];
+        if (state.openOutcomes) delete state.openOutcomes[intentKey];
       });
       active();
     }
@@ -323,6 +364,7 @@ export function createTeam({
       Date.parse(delivery.leaseExpiresAt) <= Date.now()
     )
       throw new Error('invalid delivery');
+    await expireSourceIntents();
     let state = vault.snapshot(),
       thread = state.threads[message.threadId];
     if (!thread) {
@@ -333,10 +375,23 @@ export function createTeam({
           thread = s.threads[message.threadId];
           return;
         }
-        if (Object.keys(s.pendingOpens ?? {}).length)
-          throw new Error(
-            'Team source open pending; retry with its idempotency key',
+        // The core leases only the earliest unacknowledged message. A new
+        // receiver therefore starts at sequence 1. A later message without a
+        // mapping may be a source reply, even after its open intent expired.
+        if (
+          String(message.sequence) !== '1' ||
+          message.authorEndpointId === endpointId
+        ) {
+          const pending = Object.values(s.pendingOpens ?? {}).some(
+            (/** @type {any} */ intent) =>
+              intent.targetEndpointId === message.authorEndpointId,
           );
+          throw new Error(
+            pending
+              ? 'Team source open pending; retry with its idempotency key'
+              : 'Team source result unknown; mapping unavailable',
+          );
+        }
         thread = { sessionId: randomUUID(), bindingId: null };
         s.threads[message.threadId] = thread;
       });
@@ -464,6 +519,7 @@ export function createTeam({
     if (closed || polling) return;
     polling = true;
     try {
+      await expireSourceIntents();
       const endpointId = await endpoint();
       const response = await privateCall('pull', { endpointId, limit: 20 });
       let firstError;
@@ -495,6 +551,7 @@ export function createTeam({
     poll,
     verifyOnline: () => rpc('ping', {}),
     async start() {
+      await expireSourceIntents();
       const initialized = await rpc('initialize', {
         protocolVersion: '2025-06-18',
         capabilities: {},

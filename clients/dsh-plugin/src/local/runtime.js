@@ -378,6 +378,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
               pendingSourceOpens: Object.keys(
                 vault.snapshot().pendingOpens ?? {},
               ).length,
+              unknownSourceOpens: Object.keys(
+                vault.snapshot().openOutcomes ?? {},
+              ).length,
             }
           : null,
       };
@@ -662,6 +665,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           s.threads = {};
           s.deliveries = {};
           s.pendingOpens = {};
+          s.openOutcomes = {};
         });
       } catch {
         closed = true;

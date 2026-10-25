@@ -74,9 +74,17 @@ test('local connection status exposes bounded counters without source or deliver
       received: 0,
       unsupported: 1,
       pendingSourceOpens: 1,
+      unknownSourceOpens: 1,
     },
   };
   assert.equal(status(value), true, JSON.stringify(status.errors));
+  assert.equal(
+    status({
+      ...value,
+      connection: { ...value.connection, unknownSourceOpens: -1 },
+    }),
+    false,
+  );
   assert.equal(
     status({ ...value, connection: { ...value.connection, unsupported: -1 } }),
     false,

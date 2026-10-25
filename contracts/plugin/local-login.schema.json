@@ -88,7 +88,8 @@
                 "endpointId": { "type": ["string", "null"] },
                 "received": { "type": "integer", "minimum": 0 },
                 "unsupported": { "type": "integer", "minimum": 0 },
-                "pendingSourceOpens": { "type": "integer", "minimum": 0 }
+                "pendingSourceOpens": { "type": "integer", "minimum": 0 },
+                "unknownSourceOpens": { "type": "integer", "minimum": 0 }
               },
               "required": ["endpointId", "received"]
             }

@@ -177,7 +177,12 @@ test(
         targetEndpointId: endpoint,
         leaseToken: randomBytes(24).toString('base64url'),
         leaseExpiresAt: new Date(Date.now() + 60000).toISOString(),
-        message: { id: randomUUID(), threadId: targetThread, text },
+        message: {
+          id: randomUUID(),
+          threadId: targetThread,
+          sequence: '1',
+          text,
+        },
       };
     }
     function connect() {

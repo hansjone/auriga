@@ -104,10 +104,12 @@ test('only authenticated status exposes unsupported delivery and unresolved sour
       reason: 'subagent_origin',
     };
     s.pendingOpens = { source: { sessionId: 'trusted-source' } };
+    s.openOutcomes = { expired: { status: 'result_unknown' } };
   });
   const connection = runtime.status(request).connection;
   assert.equal(connection.unsupported, 1);
   assert.equal(connection.pendingSourceOpens, 1);
+  assert.equal(connection.unknownSourceOpens, 1);
   assert.equal(connection.received, 0);
   assert.equal(runtime.status({ headers: {} }).connection, null);
 });

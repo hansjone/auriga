@@ -567,6 +567,184 @@ test('lost open response persists source intent across restart and same-key retr
   }
 });
 
+test('aborted or abandoned open and a new-key retry do not block first messages from the same peer or a third peer', async () => {
+  const run = await conversation();
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B'),
+      c = await run.node('C');
+    a.alter((value, route, options) => {
+      if (
+        route === '/ai/mcp' &&
+        options.body?.params?.arguments?.idempotencyKey === 'abandoned'
+      )
+        throw new Error('aborted after uncertain remote commit');
+      return value;
+    });
+    await assert.rejects(
+      a.team.toolCall(
+        'auriga_open_thread',
+        {
+          targetEndpointId: b.id,
+          text: 'Uncertain',
+          idempotencyKey: 'abandoned',
+        },
+        a.exec(a.original),
+      ),
+      /aborted/,
+    );
+    await a.team.toolCall(
+      'auriga_open_thread',
+      {
+        targetEndpointId: b.id,
+        text: 'Retry with new key',
+        idempotencyKey: 'new-key',
+      },
+      a.exec(a.original),
+    );
+    for (const peer of [b, c])
+      await peer.team.toolCall(
+        'auriga_open_thread',
+        {
+          targetEndpointId: a.id,
+          text: 'Independent incoming',
+          idempotencyKey: 'incoming',
+        },
+        peer.exec(peer.original),
+      );
+    await a.team.poll();
+    assert.equal(a.admitted.length, 2);
+    assert.equal(Object.keys(a.vault.snapshot().pendingOpens).length, 1);
+    assert.equal(run.metrics.acks, 2);
+  } finally {
+    await run.close();
+  }
+});
+
+test('source intent deadline is fixed across retries and expires to bounded unknown outcomes after restart', async (t) => {
+  const run = await conversation();
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B');
+    a.alter((value, route, options) => {
+      if (
+        route === '/ai/mcp' &&
+        options.body?.params?.name === 'auriga_open_thread'
+      )
+        throw new Error('uncertain response');
+      return value;
+    });
+    const args = {
+      targetEndpointId: b.id,
+      text: 'Unknown outcome',
+      idempotencyKey: 'expiring',
+    };
+    await assert.rejects(
+      a.team.toolCall('auriga_open_thread', args, a.exec(a.original)),
+      /uncertain/,
+    );
+    const [key, first] = Object.entries(a.vault.snapshot().pendingOpens)[0];
+    assert.ok(first.expiresAt > now && first.expiresAt <= now + 60000);
+    now += 1000;
+    await assert.rejects(
+      a.team.toolCall('auriga_open_thread', args, a.exec(a.original)),
+      /uncertain/,
+    );
+    assert.equal(
+      a.vault.snapshot().pendingOpens[key].expiresAt,
+      first.expiresAt,
+    );
+    a.team.close();
+    a.vault.close();
+    a.vault = await createVault(a.path);
+    a.team = a.reconnect(a.vault);
+    now = first.expiresAt + 1;
+    await a.team.start();
+    await a.team.poll();
+    assert.deepEqual(a.vault.snapshot().pendingOpens, {});
+    assert.equal(a.vault.snapshot().openOutcomes[key].status, 'result_unknown');
+    await b.team.toolCall(
+      'auriga_open_thread',
+      {
+        targetEndpointId: a.id,
+        text: 'After expiry',
+        idempotencyKey: 'incoming',
+      },
+      b.exec(b.original),
+    );
+    await a.team.poll();
+    assert.equal(a.admitted.length, 1);
+    await a.vault.update((s) => {
+      for (let i = 0; i < 300; i++)
+        s.pendingOpens['expired-' + i] = { ...first, expiresAt: now - 1 };
+    });
+    await a.team.poll();
+    assert.equal(Object.keys(a.vault.snapshot().openOutcomes).length, 256);
+    assert.deepEqual(a.vault.snapshot().pendingOpens, {});
+  } finally {
+    await run.close();
+  }
+});
+
+test('same-key isError keeps uncertain source protection and expiry never guesses a random source session', async (t) => {
+  const run = await conversation();
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  try {
+    const a = await run.node('A'),
+      b = await run.node('B');
+    const args = {
+      targetEndpointId: b.id,
+      text: 'Original open',
+      idempotencyKey: 'same-key-error',
+    };
+    a.alter((value, route, options) => {
+      if (
+        route === '/ai/mcp' &&
+        options.body?.params?.name === 'auriga_open_thread'
+      )
+        throw new Error('response lost');
+      return value;
+    });
+    await assert.rejects(
+      a.team.toolCall('auriga_open_thread', args, a.exec(a.original)),
+      /response lost/,
+    );
+    a.alter((value, route, options) =>
+      route === '/ai/mcp' && options.body?.params?.name === 'auriga_open_thread'
+        ? { ...value, result: { isError: true } }
+        : value,
+    );
+    await assert.rejects(
+      a.team.toolCall('auriga_open_thread', args, a.exec(a.original)),
+      /tool rejected/,
+    );
+    assert.equal(Object.keys(a.vault.snapshot().pendingOpens).length, 1);
+    await b.team.poll();
+    const threadId = JSON.parse(
+      b.admitted[0].content[0].text.split('\n')[1],
+    ).threadId;
+    await b.team.toolCall(
+      'auriga_reply_thread',
+      { threadId, text: 'Late reply', idempotencyKey: 'late' },
+      b.exec(b.admitted[0].sessionId),
+    );
+    now += 60001;
+    await assert.rejects(a.team.poll(), /source.*(unknown|unavailable)/);
+    assert.equal(a.vault.snapshot().threads[threadId], undefined);
+    assert.deepEqual(a.createCalls, [a.original]);
+    a.alter((value) => value);
+    await a.team.toolCall('auriga_open_thread', args, a.exec(a.original));
+    await a.team.poll();
+    assert.equal(a.admitted[0].sessionId, a.original);
+    assert.equal(run.metrics.opens, 1);
+  } finally {
+    await run.close();
+  }
+});
+
 test('unsupported first delivery is terminal without ACK while ordinary same-page delivery proceeds and re-leases stay isolated', async () => {
   const run = await conversation();
   try {
