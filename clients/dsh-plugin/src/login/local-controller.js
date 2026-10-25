@@ -82,6 +82,18 @@ export function createLocalLoginController(options = {}) {
       throw new LoginFailure('network');
     return /** @type {const} */ ({ type: 'complete', redirectTo: '/' });
   }
+  /** An anonymous browser alone says nothing about the device backing.
+   * @param {any} state */
+  function signedOut(state) {
+    if (
+      state.loggedIn !== false ||
+      state.connected !== false ||
+      state.resumeAvailable !== false ||
+      !['pending', 'complete'].includes(state.remoteRevocation)
+    )
+      throw new LoginFailure('failed');
+    return { loggedIn: false, remoteRevocation: state.remoteRevocation };
+  }
   /** @param {any} result @param {AbortSignal} signal @returns {Promise<import('../generated/steps.js').ClientStep>} */
   async function step(result, signal) {
     if (
@@ -143,9 +155,19 @@ export function createLocalLoginController(options = {}) {
     /** Called only after the user explicitly confirms global device sign-out.
      * @param {AbortSignal} signal */
     async logout(signal) {
-      const state = await status(signal);
-      if (!state.loggedIn)
-        return { loggedIn: false, remoteRevocation: state.remoteRevocation };
+      let state = await status(signal);
+      if (!state.loggedIn) {
+        if (state.resumeAvailable === false) return signedOut(state);
+        if (state.resumeAvailable !== true || !csrf)
+          throw new LoginFailure('expired');
+        // Confirmation authorizes this recovery only. The host must verify the
+        // saved device and establish an owned browser session before logout.
+        const resumed = await call('login', { action: 'resume' }, signal);
+        if (resumed.step?.type !== 'complete')
+          throw new LoginFailure('expired');
+        state = await status(signal);
+        ready(state);
+      }
       if (!csrf) throw new LoginFailure('expired');
       const result = await call('logout', {}, signal);
       if (
@@ -154,7 +176,9 @@ export function createLocalLoginController(options = {}) {
       )
         throw new LoginFailure('failed');
       csrf = '';
-      return result;
+      // Verify both browser access and recoverable backing were actually lost;
+      // an empty remote revocation queue is not evidence of device logout.
+      return signedOut(await status(signal));
     },
   };
 }

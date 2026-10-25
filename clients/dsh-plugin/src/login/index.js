@@ -461,6 +461,7 @@ export function createLoginView(root, options) {
     /** @param {string} next */
     setLocale(next) {
       if (disposed) return;
+      if (request && !step && !notice) notice = 'cancelled';
       invalidate(true);
       locale = next || 'zh-CN';
       render();

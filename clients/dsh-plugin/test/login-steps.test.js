@@ -149,6 +149,35 @@ test('initial loading is visible; cancelled loading ignores late response and cl
   assert.equal(signal.aborted, true);
   assert.match(root.textContent, /已取消/);
 });
+test('initial load then locale change keeps explicit recovery and ignores late old-language secrets', async (t) => {
+  let finish,
+    signal,
+    restarted = 0;
+  const { root, view, completed } = mount(t, {
+    onRestart: async () => {
+      restarted++;
+      return recovery;
+    },
+  });
+  view.load((context) => {
+    signal = context.signal;
+    return new Promise((done) => {
+      finish = done;
+    });
+  });
+  view.setLocale('en');
+  assert.equal(signal.aborted, true);
+  assert.ok(root.querySelector('[data-action=restart]'));
+  finish({ ...recovery, title: { en: 'OLD SECRET', 'zh-CN': '旧语言秘密' } });
+  await tick();
+  assert.doesNotMatch(root.textContent, /OLD SECRET|旧语言秘密/);
+  assert.equal(root.querySelector('.auriga-login').lang, 'en');
+  assert.equal(completed(), 0);
+  root.querySelector('[data-action=restart]').click();
+  await tick();
+  assert.equal(restarted, 1);
+  assert.equal(root.querySelector('input').value, '');
+});
 test('locale change while cancellation is pending does not leave restart disabled', async (t) => {
   let finish;
   const { root, view } = mount(t, {
