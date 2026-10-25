@@ -40,6 +40,7 @@ type Gateway struct {
 	orgURL       *url.URL
 	workspaceURL *url.URL
 	teamURL      *url.URL
+	aiAdminURL   *url.URL
 
 	portalStatic http.Handler
 	adminStatic  http.Handler
@@ -49,6 +50,10 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	aiAdminURL, err := cfg.parseAIAdminUpstream()
+	if err != nil {
+		return nil, err
+	}
 	trusted, err := NewTrustedProxies(cfg.TrustedProxies)
 	if err != nil {
 		return nil, err
@@ -107,6 +112,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		orgURL:       orgURL,
 		workspaceURL: wsURL,
 		teamURL:      teamURL,
+		aiAdminURL:   aiAdminURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
@@ -120,6 +126,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	}
 	if cfg.Access.Valid() {
 		g.APITransports = make(map[*url.URL]http.RoundTripper)
+		if aiAdminURL != nil {
+			transport, err := newIAMHopTransport(cfg.AIAdminHop, aiAdminURL)
+			if err != nil {
+				return nil, err
+			}
+			g.APITransports[aiAdminURL] = transport
+		}
 		for _, target := range []*url.URL{orgURL, wsURL} {
 			if g.IAMTransport != nil && sameInternalHTTPSOrigin(iamURL, target) {
 				g.APITransports[target] = g.IAMTransport
@@ -262,7 +275,16 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Platform API / oauth routes
 	if upstream := g.matchUpstream(path); upstream != nil {
+		if upstream == g.aiAdminURL {
+			g.proxyAIAdmin(w, r, upstream, audience, clientIP, rid)
+			return
+		}
 		g.proxyAPI(w, r, upstream, audience, clientIP, rid)
+		return
+	}
+	// Unconfigured and non-management AI APIs must never fall through to a SPA.
+	if path == "/api/ai" || strings.HasPrefix(path, "/api/ai/") {
+		writeProblem(w, problem(http.StatusNotFound, "common.not_found", "Not Found", "AI API not configured or allowed", rid))
 		return
 	}
 
@@ -291,6 +313,8 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) matchUpstream(path string) *url.URL {
 	switch {
+	case g.Cfg.Access.Valid() && (path == "/api/ai/v1/admin" || strings.HasPrefix(path, "/api/ai/v1/admin/")):
+		return g.aiAdminURL
 	case strings.HasPrefix(path, "/api/iam/v1/"),
 		strings.HasPrefix(path, "/oauth2/"),
 		strings.HasPrefix(path, "/.well-known/"),
