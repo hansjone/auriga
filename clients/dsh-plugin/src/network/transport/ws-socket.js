@@ -9,7 +9,7 @@ import WebSocket from 'ws';
  *   ca?: string | Buffer | Array<string | Buffer>,
  *   rejectUnauthorized?: boolean,
  * }} [tls]
- * @returns {(url: string) => import('ws')}
+ * @returns {(url: string) => import('ws').WebSocket}
  */
 export function createWsSocketFactory(tls = {}) {
   const rejectUnauthorized = tls.rejectUnauthorized ?? true;
