@@ -244,7 +244,7 @@ callout只负责CONNECT身份及subject边界；**每条应用操作**依然由a
 
 ### 2.2 精确 subject 隔离
 
-示意命名 `auriga.net.up.<ingress>` 与 `auriga.net.down.<ingress>`，其中 ingress 为服务端随机不透明值。默认 Node 只可 PUB 自己 up、SUB 自己 down；经下述验证后才允许私有 reply 前缀订阅，不允许 DSH 直发其他 DSH。Broker 只有固定少量订阅/方向约定，不按逻辑会话造 Broker consumer。完整不透明地址/thread 在信封中，collab 核节点与对话关系，DSH 才解析 local 映射。
+网关精确命名 `auriga.net.up.<shard>.<ingress>` 与 `auriga.net.down.<ingress>`，其中 ingress 为服务端随机不透明值。shard 是 `abcdefghijklmnopqrstuvwxyz234567[SHA256(ASCII(ingress))[0] & 31]` 的单个字符，仅作 32 桶路由提示，不授身份；网关同时校验 shard 与 ingress 的对应关系。IAM tickets 响应的 `upSubject`/`downSubject` 必须返回相同的完整 subject，客户端直接采用服务端返回值，不自行删改 shard；旧无 shard 的 up 不接受。默认 Node 只可 PUB 自己 up、SUB 自己 down；经下述验证后才允许私有 reply 前缀订阅，不允许 DSH 直发其他 DSH。Broker 不按逻辑会话造 consumer；网关按已认证连接建立精确 up 订阅，并分别限制 pending，单节点灌包不占用其他 ingress 的待收队列。完整不透明地址/thread 在信封中，collab 核节点与对话关系，DSH 才解析 local 映射。
 
 不授予客户端 `$JS.API.>`、`$SYS.>`、内部服务 subject、全局 `_INBOX.>` 或跨 ingress 通配订阅。默认应用响应经精确 down subject 以 request_id 关联。官方 nats.js v3.4.0 的 [ConnectionOptions.inboxPrefix](https://github.com/nats-io/nats.js/blob/v3.4.0/core/src/core.ts) 支持私有响应前缀，因此 request() 不是一律禁用；可配置服务端分配的 `auriga.net.reply.<ingress>`，仅授权该前缀下 SDK 所需的窄订阅。
 

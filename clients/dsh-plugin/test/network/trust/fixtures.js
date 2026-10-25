@@ -4,14 +4,14 @@ import { openTestTrust as openTrustStore } from './keyset-fixtures.js';
 import { digest, signingInput } from '../../../src/network/trust/verifier.js';
 import { IDENTITY, peer, self } from '../host/fixtures.js';
 
-export async function signingFixture({ refresh } = {}) {
+export async function signingFixture({ refresh, now: suppliedNow } = {}) {
   const pairs = Object.fromEntries(
     ['business_delivery', 'protocol_response', 'management_state'].map((p) => [
       p,
       generateKeyPairSync('ed25519'),
     ]),
   );
-  const now = () => Date.parse('2026-10-25T00:01:00Z');
+  const now = suppliedNow ?? (() => Date.parse('2026-10-25T00:01:00Z'));
   let persisted;
   const trust = await openTrustStore({
     now,

@@ -11,7 +11,10 @@ import {
   installLocalAdmission,
   installHttpResponseTracking,
 } from './local/host.js';
-import { createConnectRoutes } from './local/routes.js';
+import {
+  createConnectRoutes,
+  createUnconfiguredLoginRoutes,
+} from './local/routes.js';
 import { join } from 'node:path';
 
 export const name = 'auriga-dsh';
@@ -102,7 +105,7 @@ export async function apply(ctx, config) {
           const profile = connectCtx.profileContext;
           if (!profile?.dir)
             throw new Error(
-              'auriga-dsh: isolated host profile directory required',
+              'auriga-dsh: host profile directory required for persistent state',
             );
           const runtime = await createConnectRuntime({
             config: config.connect,
@@ -114,6 +117,12 @@ export async function apply(ctx, config) {
             runtime,
             handler: createConnectRoutes({ runtime, admission }),
           };
+          // aurigaNetwork is a plugin-owned trusted control provider, not a
+          // native DSH API. Missing IAM HTTPS routes keep N1 unavailable.
+          connectCtx.inject(['aurigaNetwork'], (networkCtx) => {
+            const detach = runtime.attachNetwork(networkCtx.aurigaNetwork);
+            networkCtx.effect(() => detach, 'auriga-dsh: network provider');
+          });
           try {
             connectCtx.effect(() => {
               binding = owned;
@@ -141,6 +150,15 @@ export async function apply(ctx, config) {
           }),
         }),
       'auriga-dsh: local surfaces',
+    );
+    ctx.effect?.(
+      () =>
+        ctx.webServer.register({
+          kind: 'prefix',
+          path: '/auriga/local-login',
+          handler: createUnconfiguredLoginRoutes(ctx.connection),
+        }),
+      'auriga-dsh: unconfigured login',
     );
     return;
   }

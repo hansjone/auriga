@@ -24,8 +24,14 @@ type ReconcileConfig struct {
 }
 
 type reconcileState struct {
-	nextQuery     time.Time
-	queryFailures int
+	queries             map[string]tenantQuery
+	snapshotFailedSince time.Time
+	snapshotDegraded    bool
+}
+
+type tenantQuery struct {
+	next     time.Time
+	failures int
 }
 
 // Reconcile has one owner per redeemer. IAM and CONNZ are each batched once per
@@ -89,6 +95,20 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 	if ctx.Err() != nil {
 		return
 	}
+	if snapshotErr == nil {
+		state.snapshotFailedSince = time.Time{}
+		state.snapshotDegraded = false
+	} else {
+		if state.snapshotFailedSince.IsZero() {
+			state.snapshotFailedSince = start
+		}
+		if !state.snapshotDegraded && time.Since(state.snapshotFailedSince) >= grace {
+			state.snapshotDegraded = true
+			if cfg.OnError != nil {
+				cfg.OnError(Binding{ServerID: r.cfg.ServerID}, errors.New("network: CONNZ outage grace exhausted; kicking known revoked CIDs"))
+			}
+		}
+	}
 	eligible := make([]liveBinding, 0, len(bindings))
 	for _, b := range bindings {
 		if start.Before(b.CheckAfter) {
@@ -115,34 +135,50 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 		eligible = append(eligible, b)
 	}
 	var status map[nodeIdentity]bool
-	var queryErr error
-	queried := len(eligible) > 0 && !time.Now().Before(state.nextQuery)
-	if queried {
-		check, stop := context.WithTimeout(ctx, cfg.RequestTimeout)
-		status, queryErr = r.activeBatch(check, eligible)
-		stop()
+	var failures map[string]error
+	if state.queries == nil {
+		state.queries = make(map[string]tenantQuery)
+	}
+	previous := state.queries
+	queries := make([]liveBinding, 0, len(eligible))
+	retained := make(map[string]tenantQuery)
+	for _, b := range eligible {
+		q := state.queries[b.Tenant]
+		retained[b.Tenant] = q
+		if !b.Revoked && !time.Now().Before(q.next) {
+			queries = append(queries, b)
+		}
+	}
+	state.queries = retained
+	if len(queries) > 0 {
+		status, failures = r.activeBatch(ctx, queries, cfg.RequestTimeout)
 		if ctx.Err() != nil {
 			return
 		}
-		if queryErr != nil {
-			state.queryFailures++
-			state.nextQuery = time.Now().Add(queryBackoff(cfg.Interval, state.queryFailures))
-		} else {
-			state.queryFailures = 0
-			state.nextQuery = time.Time{}
+		for _, b := range queries {
+			delete(state.queries, b.Tenant)
+		}
+		for tenant := range failures {
+			q := previous[tenant]
+			q.failures++
+			q.next = time.Now().Add(queryBackoff(cfg.Interval, q.failures))
+			state.queries[tenant] = q
 		}
 	}
 	pending := make([]liveBinding, 0)
 	for _, b := range eligible {
+		active, queried := status[nodeIdentity{b.Tenant, b.Realm, b.Node}]
+		queryErr := failures[b.Tenant]
+		queried = queried || queryErr != nil
 		if !b.Revoked && queried {
 			if queryErr == nil {
 				b.Failures = 0
 				b.FailedSince = time.Time{}
-				b.Revoked = !status[nodeIdentity{b.Tenant, b.Realm, b.Node}]
+				b.Revoked = !active
 			} else {
 				b.Failures++
 				if b.FailedSince.IsZero() {
-					b.FailedSince = start
+					b.FailedSince = time.Now()
 				}
 			}
 		}
@@ -155,7 +191,11 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 		r.remember(b)
 		// A complete snapshot proves account/ingress ownership for the entire round.
 		// CIDs cannot be reused within a server generation, so per-KICK CONNZ is redundant.
-		if b.Revoked && snapshotErr == nil && b.Attempts < cfg.MaxKickAttempts && !time.Now().Before(b.RetryAfter) {
+		// During a prolonged CONNZ outage, authenticated callout bindings still
+		// identify the server generation/CID. NoReconnect prevents generation
+		// changes and CIDs are not reused within a generation. Never clear the
+		// revocation latch because control-plane inspection is unavailable.
+		if b.Revoked && (snapshotErr == nil || state.snapshotDegraded) && b.Attempts < cfg.MaxKickAttempts && !time.Now().Before(b.RetryAfter) {
 			pending = append(pending, b)
 		}
 	}
@@ -205,15 +245,33 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 }
 
 func (r *IAMRedeemer) forget(ingress string) {
+	guard := r.connectionGuard(ingress)
+	if guard == nil {
+		return
+	}
+	guard.Lock()
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	delete(r.bindings, ingress)
+	delete(r.guards, ingress)
+	onForget := r.onForget
+	r.mu.Unlock()
+	guard.Unlock()
+	if onForget != nil {
+		onForget(ingress)
+	}
 }
 
 func (r *IAMRedeemer) remember(b liveBinding) {
+	guard := r.connectionGuard(b.Ingress)
+	if guard == nil {
+		return
+	}
+	guard.Lock()
+	defer guard.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.bindings[b.Ingress]; ok {
+	if current, ok := r.bindings[b.Ingress]; ok {
+		b.Incarnation, b.ChannelNonce, b.Epoch = current.Incarnation, current.ChannelNonce, current.Epoch
 		r.bindings[b.Ingress] = b
 	}
 }

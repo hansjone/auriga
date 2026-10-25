@@ -2,9 +2,13 @@ package agenttest_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +20,10 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/testutil"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestJoinAndRejectBadTokenAndBadFingerprint(t *testing.T) {
@@ -148,9 +156,50 @@ func TestExpiredCertificateRejected(t *testing.T) {
 	}
 }
 
+type sessionEvent struct {
+	epoch   int64
+	request *nodev1.SessionRequest
+	closed  bool
+	err     error
+}
+
+type observedSessionStream struct {
+	grpc.ServerStream
+	epoch  int64
+	events chan<- sessionEvent
+}
+
+func (s *observedSessionStream) RecvMsg(msg any) error {
+	if err := s.ServerStream.RecvMsg(msg); err != nil {
+		return err
+	}
+	req := proto.Clone(msg.(*nodev1.SessionRequest)).(*nodev1.SessionRequest)
+	select {
+	case s.events <- sessionEvent{epoch: s.epoch, request: req}:
+		return nil
+	case <-s.Context().Done():
+		return s.Context().Err()
+	}
+}
+
 func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
+	// This bounds the integration test, including startup and disk persistence.
+	// It is not a reconnect or reconcile latency SLA; teardown is bounded below.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	events := make(chan sessionEvent, 128)
+	var epoch atomic.Int64
 	fw, err := testutil.StartFakeWorkspace(testutil.FakeWorkspaceOpts{
 		HeartbeatInterval: 40 * time.Millisecond,
+		SessionInterceptor: func(srv any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+			e := epoch.Add(1)
+			err := handler(srv, &observedSessionStream{ServerStream: stream, epoch: e, events: events})
+			select {
+			case events <- sessionEvent{epoch: e, closed: true, err: err}:
+			case <-ctx.Done():
+			}
+			return err
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +210,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 	agentDir := filepath.Join(dir, "agent")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	_, err = enroll.Join(context.Background(), enroll.Options{AllowInsecure: true,
+	_, err = enroll.Join(ctx, enroll.Options{AllowInsecure: true,
 		Server:        fw.URL(),
 		Token:         fw.Token(),
 		CAFingerprint: fw.CA.Fingerprint(),
@@ -196,22 +245,86 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 		RenewCheckEvery:   24 * time.Hour,
 		StableFor:         time.Millisecond,
 	})
-	rec.Sink = sess.StatusSink()
+	var activeSession atomic.Pointer[conn.Session]
+	activeSession.Store(sess)
+	rec.Sink = func(st *nodev1.InstanceStatus) { activeSession.Load().StatusSink()(st) }
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() { errCh <- sess.Run(ctx) }()
+	start := func(s *conn.Session) func() {
+		runCtx, stop := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() { done <- s.Run(runCtx) }()
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				stop()
+				select {
+				case err := <-done:
+					if !errors.Is(err, context.Canceled) {
+						t.Errorf("session ended unexpectedly: %v", err)
+					}
+				case <-time.After(5 * time.Second):
+					t.Error("session did not stop")
+				}
+			})
+		}
+	}
+	stop := start(sess)
+	defer stop()
 
-	if err := testutil.WaitFor(5*time.Second, func() bool { return sess.Connected() }); err != nil {
-		t.Fatal("connect:", err)
+	var trace []string
+	wait := func(label string, match func(sessionEvent) bool) sessionEvent {
+		t.Helper()
+		for {
+			select {
+			case ev := <-events:
+				detail := fmt.Sprintf("epoch=%d closed=%v err=%v", ev.epoch, ev.closed, ev.err)
+				if ev.request != nil {
+					detail += fmt.Sprintf(" request=%T", ev.request.Body)
+					if st := ev.request.GetStatus(); st != nil {
+						detail += fmt.Sprintf(" status=%v", st)
+						if st.Error != nil || st.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+							t.Fatalf("%s: reconcile failed: %s; trace=%v", label, detail, trace)
+						}
+					}
+				}
+				trace = append(trace, detail)
+				if match(ev) {
+					return ev
+				}
+			case <-ctx.Done():
+				desired, desiredErr := store.GetDesired("inst_01")
+				actual, actualErr := store.GetActual("inst_01")
+				t.Fatalf("%s: %v; trace=%v; desired=%v (%v); actual=%+v (%v)", label, ctx.Err(), trace, desired, desiredErr, actual, actualErr)
+			}
+		}
 	}
-	if err := testutil.WaitFor(3*time.Second, func() bool {
-		_, _, usage := fw.Stats()
-		return usage >= 1
-	}); err != nil {
-		t.Fatal("heartbeat:", err)
+	heartbeat := func(e int64, s *conn.Session) *nodev1.Inventory {
+		t.Helper()
+		wait("Hello", func(ev sessionEvent) bool { return ev.epoch == e && ev.request.GetHello() != nil })
+		inventory := wait("Inventory", func(ev sessionEvent) bool { return ev.epoch == e && ev.request.GetInventory() != nil })
+		// Usage is sent only after this stream's Welcome has been consumed.
+		wait("heartbeat after Welcome", func(ev sessionEvent) bool { return ev.epoch == e && ev.request.GetUsage() != nil })
+		if !s.Connected() {
+			t.Fatalf("epoch %d: heartbeat without connected session; trace=%v", e, trace)
+		}
+		return inventory.request.GetInventory()
 	}
+	assertState := func(e, generation int64, phase nodev1.InstancePhase, ready bool) {
+		t.Helper()
+		wait("reconcile status uplink", func(ev sessionEvent) bool {
+			st := ev.request.GetStatus()
+			return ev.epoch == e && st.GetInstanceId() == "inst_01" && st.GetObservedGeneration() == generation && st.GetPhase() == phase && st.GetReady() == ready
+		})
+		actual, err := store.GetActual("inst_01")
+		if err != nil || actual.Status == nil || actual.Status.ObservedGeneration != generation || actual.Status.Phase != phase || actual.Status.Ready != ready {
+			t.Fatalf("persisted status differs from uplink: %+v, %v", actual, err)
+		}
+		running, err := driver.Inspect(ctx, "inst_01")
+		if err != nil || running.Running != ready || running.Ready != ready {
+			t.Fatalf("runtime differs from uplink: %+v, %v", running, err)
+		}
+	}
+	heartbeat(1, sess)
 
 	fw.PushApply(&nodev1.InstanceSpec{
 		InstanceId: "inst_01",
@@ -221,14 +334,7 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 		Runtime:    nodev1.RuntimeKind_RUNTIME_KIND_DOCKER,
 		Desired:    nodev1.DesiredState_DESIRED_STATE_RUNNING,
 	})
-	if err := testutil.WaitFor(3*time.Second, func() bool {
-		rec, _ := store.GetActual("inst_01")
-		return rec.Status != nil && rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING && rec.Status.Ready
-	}); err != nil {
-		t.Fatal("reconcile running:", err)
-	}
-
-	helloBefore, _, _ := fw.Stats()
+	assertState(1, 1, nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, true)
 
 	fw.PushApply(&nodev1.InstanceSpec{
 		InstanceId: "inst_01",
@@ -238,21 +344,14 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 		Runtime:    nodev1.RuntimeKind_RUNTIME_KIND_DOCKER,
 		Desired:    nodev1.DesiredState_DESIRED_STATE_STOPPED,
 	})
-	if err := testutil.WaitFor(3*time.Second, func() bool {
-		rec, _ := store.GetActual("inst_01")
-		return rec.Status != nil && rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_STOPPED
-	}); err != nil {
-		t.Fatal("reconcile stopped:", err)
-	}
-
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Logf("session ended: %v", err)
+	assertState(1, 2, nodev1.InstancePhase_INSTANCE_PHASE_STOPPED, false)
+	stop()
+	wait("old server stream closed", func(ev sessionEvent) bool { return ev.epoch == 1 && ev.closed })
+	if sess.Connected() {
+		t.Fatal("old session still connected after stopping")
 	}
 
 	fw.SetDropNextSession(true)
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
 	sess2 := conn.New(conn.Config{AllowInsecure: true,
 		AgentDir:          agentDir,
 		AgentVersion:      "test",
@@ -267,19 +366,27 @@ func TestSessionHeartbeatReconnectAndReconcile(t *testing.T) {
 		RenewCheckEvery:   24 * time.Hour,
 		StableFor:         time.Millisecond,
 	})
-	go func() { _ = sess2.Run(ctx2) }()
-
-	if err := testutil.WaitFor(5*time.Second, func() bool {
-		hello, _, _ := fw.Stats()
-		// DropNextSession fails before Hello; successful reconnect adds one Hello.
-		return hello > helloBefore
-	}); err != nil {
-		t.Fatal("reconnect hello:", err)
+	activeSession.Store(sess2)
+	stop2 := start(sess2)
+	defer stop2()
+	dropped := wait("forced drop", func(ev sessionEvent) bool { return ev.epoch == 2 && ev.closed })
+	if status.Code(dropped.err) != codes.Unavailable {
+		t.Fatalf("expected forced Unavailable: %v", dropped.err)
 	}
-	if err := testutil.WaitFor(3*time.Second, sess2.Connected); err != nil {
-		t.Fatal("reconnect connected:", err)
+	inventory := heartbeat(3, sess2)
+	if len(inventory.Instances) != 1 || inventory.Instances[0].InstanceId != "inst_01" ||
+		inventory.Instances[0].ObservedGeneration != 2 || inventory.Instances[0].Phase != nodev1.InstancePhase_INSTANCE_PHASE_STOPPED || inventory.Instances[0].Ready {
+		t.Fatalf("new stream lost persisted stopped generation: %v", inventory)
 	}
-	cancel2()
+	// A fresh request on the new stream must still reach reconcile and return
+	// its exact generation. Old counters or a stale status cannot satisfy this.
+	fw.PushApply(&nodev1.InstanceSpec{
+		InstanceId: "inst_01", TenantId: "t_default", OwnerId: "u_alice", Generation: 3,
+		Runtime: nodev1.RuntimeKind_RUNTIME_KIND_DOCKER, Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING,
+	})
+	assertState(3, 3, nodev1.InstancePhase_INSTANCE_PHASE_RUNNING, true)
+	stop2()
+	wait("new server stream closed", func(ev sessionEvent) bool { return ev.epoch == 3 && ev.closed })
 }
 
 func TestReconcilerPhasesAndRestartRecovery(t *testing.T) {

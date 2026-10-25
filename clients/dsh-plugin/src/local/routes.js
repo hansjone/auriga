@@ -1,13 +1,36 @@
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
+import { createConsentRoutes } from './consent-routes.js';
+import { PlatformError } from './platform.js';
 const BASE = '/auriga/local-login';
 const assets = new Map([
   ['adapter.js', new URL('../login/local-adapter.js', import.meta.url)],
   ['index.js', new URL('../login/index.js', import.meta.url)],
   ['styles.js', new URL('../login/styles.js', import.meta.url)],
+  ['errors.js', new URL('../login/errors.js', import.meta.url)],
+  [
+    'local-controller.js',
+    new URL('../login/local-controller.js', import.meta.url),
+  ],
+  ['logout.js', new URL('../login/logout.js', import.meta.url)],
+  ['page.js', new URL('../login/page.js', import.meta.url)],
 ]);
+/** Unconfigured standalone mode exposes only the fixed page and assets.
+ * Native launch authentication is still required; no local identity is minted.
+ * @param {{requestRejection(req:import('node:http').IncomingMessage):number|undefined}} connection */
+export function createUnconfiguredLoginRoutes(connection) {
+  return createConnectRoutes({
+    runtime: null,
+    admission: {
+      nativeAuth: connection,
+      sameOrigin: (/** @type {import('node:http').IncomingMessage} */ req) =>
+        req.method === 'GET',
+    },
+  });
+}
 /** @param {{runtime:any,admission:any}} options */
 export function createConnectRoutes({ runtime, admission }) {
+  const consent = createConsentRoutes(runtime);
   /** @param {import('node:http').ServerResponse} res @param {number} status @param {unknown} body @param {string|string[]} [cookies] */
   const json = (res, status, body, cookies) => {
     res.writeHead(status, {
@@ -35,6 +58,9 @@ export function createConnectRoutes({ runtime, admission }) {
       return;
     }
     const path = (req.url ?? '').split('?')[0];
+    if (!runtime && path !== BASE && !path.startsWith(BASE + '/assets/'))
+      return json(res, 404, { code: 'common.not_found' });
+    if (path.startsWith(BASE + '/consent/')) return consent(req, res);
     try {
       if (req.method === 'GET' && path === BASE + '/status') {
         const result = runtime.prepare(req);
@@ -148,7 +174,32 @@ export function createConnectRoutes({ runtime, admission }) {
       }
       res.writeHead(404);
       res.end();
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'unsupported native login step'
+      )
+        return json(res, 501, { code: 'common.unavailable' });
+      if (
+        error instanceof Error &&
+        ['login attempt expired', 'invalid device credential'].includes(
+          error.message,
+        )
+      )
+        return json(res, 401, { code: 'common.unauthenticated' });
+      if (error instanceof PlatformError) {
+        if (['invalid_grant', 'invalid_token'].includes(error.code ?? ''))
+          return json(res, 401, { code: 'common.unauthenticated' });
+        if (
+          [
+            'iam.login_tx_expired',
+            'iam.invalid_credentials',
+            'common.rate_limited',
+            'common.unauthenticated',
+          ].includes(error.code ?? '')
+        )
+          return json(res, error.status, { code: error.code });
+      }
       json(res, 503, { code: 'common.unavailable' });
     }
   };

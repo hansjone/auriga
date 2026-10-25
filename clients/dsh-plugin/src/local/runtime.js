@@ -1,10 +1,12 @@
 /* global AbortSignal */
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { platformConfig, createPlatform, LoginJar } from './platform.js';
 import { createVault } from './vault.js';
 import { createTeam } from './team.js';
+import { createNetworkLifecycle } from '../network/lifecycle.js';
 import {
   createHttpResponseTracker,
   installHttpResponseTracking,
@@ -153,6 +155,18 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     sockets.delete(row.key);
   };
   const httpResponses = createHttpResponseTracker(resolve);
+  const network = createNetworkLifecycle({
+    directory: join(directory, 'network'),
+    ctx,
+    getAccess,
+    authorizeLocal: async (request) => !!resolve(request),
+    onRevoked: () => {
+      for (const row of sessions.values()) killSession(row);
+      team?.close();
+      team = undefined;
+      online = false;
+    },
+  });
   /** @type {(()=>void)|undefined} */
   let stopHttpTracking;
   async function getAccess() {
@@ -190,6 +204,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     try {
       return await refreshing;
     } catch (error) {
+      network.logout();
       for (const row of sessions.values()) killSession(row);
       throw error;
     } finally {
@@ -249,6 +264,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     if (team) {
       await team.verifyOnline();
       assertAttempt();
+      network.login();
       return;
     }
     if (
@@ -275,6 +291,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         if (closed || generation !== g) return;
         online = state.connected;
         if (state.unauthorized) {
+          network.logout();
           for (const row of sessions.values()) killSession(row);
           team?.close();
           team = undefined;
@@ -287,6 +304,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       assertAttempt();
       starting = false;
       team = candidate;
+      network.login();
     } catch (error) {
       candidate.close();
       throw error;
@@ -326,6 +344,11 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     resolve,
     getAccess,
     vault,
+    attachNetwork: network.attach,
+    consentUI: network.consentUI,
+    get networkStatus() {
+      return network.status;
+    },
     /** @param {import('node:http').IncomingMessage} request @param {import('node:http').ServerResponse} response */
     bindHttpResponse(request, response) {
       return httpResponses.bind(request, response);
@@ -360,6 +383,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         available: true,
         loggedIn: !!row,
         connected: !!row && !!team && online,
+        network: row
+          ? network.status
+          : { available: false, connected: false, state: 'idle' },
         account: row ? { subject: row.subject } : null,
         csrf: row?.csrf,
         remoteRevocation: (vault.snapshot().revocations ?? []).length
@@ -630,6 +656,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (!owns(vault.snapshot().credential))
         throw new Error('local device ownership changed');
       generation++;
+      network.logout();
       if (attempt) {
         attempts.delete(cookie(request, ATTEMPT_COOKIE));
         attempt.controller.abort();
@@ -700,6 +727,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       clearInterval(expiryTimer);
       clearInterval(revokeTimer);
       generation++;
+      void network.close();
       team?.close();
       for (const value of sessions.values()) killSession(value);
       for (const row of attempts.values()) {

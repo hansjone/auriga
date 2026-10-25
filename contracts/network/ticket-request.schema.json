@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/ticket-request.schema.json",
+  "title": "Network ticket request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["node"],
+  "properties": {
+    "node": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$", "description": "当前设备已注册的 node，规范 uint64 十进制字符串，最大 18446744073709551615。" }
+  }
+}

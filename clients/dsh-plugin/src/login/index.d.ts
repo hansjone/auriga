@@ -8,10 +8,13 @@ export interface LoginOptions {
   ): Promise<ClientStep>;
   onRestart(context: { signal: AbortSignal }): Promise<ClientStep>;
   onComplete(): void;
+  onCancel?(): Promise<void>;
 }
 
 export interface LoginView {
   setStep(step: ClientStep): void;
+  setFailure(reason: import('./errors.js').LoginFailureReason): void;
+  load(action: (context: { signal: AbortSignal }) => Promise<ClientStep>): void;
   setLocale(locale: string): void;
   dispose(): void;
 }

@@ -30,9 +30,48 @@ export function timeValue(value) {
     ? time
     : NaN;
 }
+const supported = new Set([
+  '$ref',
+  'description',
+  'title',
+  'type',
+  'const',
+  'enum',
+  'pattern',
+  'format',
+  'required',
+  'additionalProperties',
+  'properties',
+  'allOf',
+  'not',
+  'items',
+  'maxItems',
+  'maxLength',
+  'minLength',
+]);
+/** Check even optional/absent branches: regenerating a stronger contract must
+ * fail closed before any publication can be accepted. @param {any} schema */
+function checkSchema(schema) {
+  if (
+    !schema ||
+    Object.keys(schema).some((keyword) => !supported.has(keyword)) ||
+    (schema.type && !['object', 'array', 'string'].includes(schema.type)) ||
+    (schema.format && schema.format !== 'date-time') ||
+    (schema.additionalProperties !== undefined &&
+      typeof schema.additionalProperties !== 'boolean')
+  )
+    unavailable('unsupported keyset schema keyword');
+  for (const child of Object.values(schema.properties ?? {}))
+    checkSchema(child);
+  for (const child of schema.allOf ?? []) checkSchema(child);
+  if (schema.not) checkSchema(schema.not);
+  if (schema.items) checkSchema(schema.items);
+}
+for (const schema of Object.values(definitions)) checkSchema(schema);
 /** Evaluates the finite JSON Schema subset used by the generated keyset contract.
  * @param {any} value @param {any} schema @returns {boolean} */
-function matches(value, schema) {
+export function matches(value, schema) {
+  checkSchema(schema);
   if (schema.$ref)
     return matches(
       value,

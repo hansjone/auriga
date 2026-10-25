@@ -42,8 +42,11 @@ export function decodeJson(bytes) {
  *   resumeCursor: string,
  *   localHighWater: string,
  *   registrationRevision: string,
- *   receiptCheckpoint: string,
+ *   receiptCheckpoint: {checkpoint_seq:string,checkpoint_revision:string,summary_digest:string},
+ *   pendingRegistration?: {candidate_local:string,allocation_op_id:string,allocation_fingerprint:string}|null,
  *   adapterCapabilities?: string[],
+ *   bootId?: string,
+ *   keysetVersion?: string,
  * }} input
  */
 export function encodeReady(input) {
@@ -52,6 +55,10 @@ export function encodeReady(input) {
     type: 'ready',
     request_id: input.requestId,
     channel_nonce: input.channelNonce,
+    boot_id: input.bootId ?? 'boot-1',
+    keyset_version: input.keysetVersion ?? '1',
+    pending_registration: input.pendingRegistration ?? null,
+    features: ['server_auth_v1', 'source_attestation_v1', 'inbox_only_v1'],
     resume_cursor: input.resumeCursor,
     local_high_water: input.localHighWater,
     registration_revision: input.registrationRevision,
@@ -115,6 +122,8 @@ export function encodeFetch(input) {
  *     acceptanceMode?: string,
  *     messageDigest: string,
  *     hostRequestId: string,
+ *     target: import('../host/address.js').Address,
+ *     evidenceDigest?: string,
  *   }>,
  * }} input
  */
@@ -128,17 +137,21 @@ export function encodeReceipt(input) {
     delivery_id: input.deliveryId,
     mail_seq: input.mailSeq,
     results: input.results.map((r) => {
-      /** @type {Record<string, string>} */
+      /** @type {Record<string, any>} */
       const row = {
         recipient_id: r.recipientId,
         status: r.status === 'retry' ? 'retryable' : r.status,
         expected_state_version: r.expectedStateVersion,
         message_digest: r.messageDigest,
         host_request_id: r.hostRequestId,
+        target: r.target,
       };
-      if (r.code) row.code = r.code;
+      if (r.status === 'rejected') row.code = 'network.target_unavailable';
       if (r.acceptedBy) row.accepted_by = r.acceptedBy;
       if (r.acceptanceMode) row.acceptance_mode = r.acceptanceMode;
+      if (r.evidenceDigest) row.evidence_digest = r.evidenceDigest;
+      if (r.acceptanceMode === 'inbox_only')
+        row.execution_status = 'not_applicable';
       return row;
     }),
   });
@@ -151,10 +164,11 @@ export function frameType(frame) {
 
 /** @param {unknown} frame @param {string} epoch */
 export function assertFrameEpoch(frame, epoch) {
-  const e = /** @type {{ epoch?: string, page?: { epoch?: string } }} */ (
-    frame
-  );
-  const found = e.epoch ?? e.page?.epoch;
+  const e =
+    /** @type {{ epoch?: string, page?: { epoch?: string }, server_auth?: {audience?: {epoch?:string}} }} */ (
+      frame
+    );
+  const found = e.epoch ?? e.page?.epoch ?? e.server_auth?.audience?.epoch;
   if (found === undefined) {
     throw new SessionError('missing_epoch', 'frame missing epoch');
   }

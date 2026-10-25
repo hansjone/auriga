@@ -115,6 +115,10 @@ public final class IamNetworkAuthority implements NetworkAuthority {
               require(devices.credential(identity.tenant(), node.account(), node.device()));
           Instant expiry =
               min(clock.instant().plusSeconds(30), min(identity.expiresAt(), current.expiresAt()));
+          Instant connectionExpiry =
+              min(
+                  current.expiresAt(),
+                  clock.instant().plusSeconds(limits().get(Limit.CONNECTION_SECONDS)));
           if (!clock.instant().isBefore(expiry)) return denied();
           // Bound outstanding tickets per device, without collecting or scanning other nodes.
           jdbc.update(
@@ -147,10 +151,12 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                   node.realm(),
                   "audience",
                   audience,
+                  "connectionExpiresAt",
+                  connectionExpiry.toString(),
                   "expiresAt",
                   expiry.toString()),
               expiry);
-          return new Ticket(raw, node, audience, expiry);
+          return new Ticket(raw, node, audience, expiry, connectionExpiry);
         });
   }
 
@@ -195,7 +201,9 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                   || !clock.instant().isBefore(credential.expiresAt())) return null;
               Instant expiry =
                   min(
-                      credential.expiresAt(),
+                      min(
+                          credential.expiresAt(),
+                          Instant.parse(ticket.path("connectionExpiresAt").asString())),
                       clock
                           .instant()
                           .plusSeconds(Math.min(3600, limits().get(Limit.CONNECTION_SECONDS))));

@@ -34,6 +34,8 @@ type Provider struct {
 	MaxConcurrency          int64          `json:"maxConcurrency"`
 	ActiveCredentialId      NullableString `json:"activeCredentialId"`
 	Revision                int64          `json:"revision"`
+	// 当前资源的强 ETag（含双引号），与同一版本单项 GET 的 ETag 响应头完全一致，可原样用于该资源的 If-Match。
+	Etag string `json:"etag"`
 }
 
 type _Provider Provider
@@ -42,7 +44,7 @@ type _Provider Provider
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewProvider(id string, name string, kind string, baseUrl string, enabled bool, connectTimeoutSeconds int64, firstByteTimeoutSeconds int64, idleTimeoutSeconds int64, totalTimeoutSeconds int64, maxConcurrency int64, activeCredentialId NullableString, revision int64) *Provider {
+func NewProvider(id string, name string, kind string, baseUrl string, enabled bool, connectTimeoutSeconds int64, firstByteTimeoutSeconds int64, idleTimeoutSeconds int64, totalTimeoutSeconds int64, maxConcurrency int64, activeCredentialId NullableString, revision int64, etag string) *Provider {
 	this := Provider{}
 	this.Id = id
 	this.Name = name
@@ -56,6 +58,7 @@ func NewProvider(id string, name string, kind string, baseUrl string, enabled bo
 	this.MaxConcurrency = maxConcurrency
 	this.ActiveCredentialId = activeCredentialId
 	this.Revision = revision
+	this.Etag = etag
 	return &this
 }
 
@@ -357,6 +360,30 @@ func (o *Provider) SetRevision(v int64) {
 	o.Revision = v
 }
 
+// GetEtag returns the Etag field value
+func (o *Provider) GetEtag() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.Etag
+}
+
+// GetEtagOk returns a tuple with the Etag field value
+// and a boolean to check if the value has been set.
+func (o *Provider) GetEtagOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Etag, true
+}
+
+// SetEtag sets field value
+func (o *Provider) SetEtag(v string) {
+	o.Etag = v
+}
+
 func (o Provider) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -379,6 +406,7 @@ func (o Provider) ToMap() (map[string]interface{}, error) {
 	toSerialize["maxConcurrency"] = o.MaxConcurrency
 	toSerialize["activeCredentialId"] = o.ActiveCredentialId.Get()
 	toSerialize["revision"] = o.Revision
+	toSerialize["etag"] = o.Etag
 	return toSerialize, nil
 }
 
@@ -399,6 +427,7 @@ func (o *Provider) UnmarshalJSON(data []byte) (err error) {
 		"maxConcurrency",
 		"activeCredentialId",
 		"revision",
+		"etag",
 	}
 
 	allProperties := make(map[string]interface{})
