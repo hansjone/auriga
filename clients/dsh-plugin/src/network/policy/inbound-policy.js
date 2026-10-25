@@ -12,9 +12,10 @@ export const LONG_SCAN_LOCAL_THRESHOLD = 100;
  * @typedef {{ id: string, local: string, at: number }} InvalidHit
  * @typedef {{ hits: InvalidHit[], blockedUntil: number, manual: boolean, lastSeen?: number, longTargets?: Array<{ local: string, at: number }> }} SourceState
  * @typedef {{ id: string, kind: 'scan', sourceNode: string, invalidHits: number, distinctLocals: number, longDistinctLocals: number, at: number }} ScanReport
- * @typedef {{ id: string, kind: 'source_capacity', evictedSources: number, untrackedSources: number, at: number }} CapacityReport
+ * @typedef {{ sources: number, shortHits: number, longTargetStrikes: number, lastAt: number }} EvictedScanTotals
+ * @typedef {{ id: string, kind: 'source_capacity', evictedSources: number, untrackedSources: number, evictedScan: EvictedScanTotals, at: number }} CapacityReport
  * @typedef {ScanReport|CapacityReport} SecurityReport
- * @typedef {{ sources: Record<string, SourceState>, reports: SecurityReport[], lastCapacityAlertAt?: number }} InboundPolicyState
+ * @typedef {{ sources: Record<string, SourceState>, reports: SecurityReport[], lastCapacityAlertAt?: number, evictedScan?: EvictedScanTotals }} InboundPolicyState
  */
 
 /**
@@ -28,6 +29,8 @@ export const LONG_SCAN_LOCAL_THRESHOLD = 100;
  *   longWindowMs?: number, longLocalThreshold?: number,
  *   maxSources?: number, maxReports?: number,
  * }} options
+ * maxReports caps scan summaries. A separate single slot is reserved for
+ * the coalesced capacity warning, for a total bound of maxReports + 1.
  */
 export function createInboundPolicy({
   ledger,
@@ -64,38 +67,68 @@ export function createInboundPolicy({
   /** @param {SourceState} source @param {number} at */
   const blocked = (source, at) => source.manual || source.blockedUntil > at;
 
+  /** @param {SourceState} source */
+  const hasStrikes = (source) =>
+    source.hits.length > 0 || (source.longTargets?.length ?? 0) > 0;
+
+  /** @param {InboundPolicyState} state */
+  function evictionSnapshot(state) {
+    return {
+      ...(state.evictedScan ?? {
+        sources: 0,
+        shortHits: 0,
+        longTargetStrikes: 0,
+        lastAt: 0,
+      }),
+    };
+  }
+
+  /** Preserve bounded, source-free evidence before deleting any live strike.
+   * This commits in the same ledger transaction as replacement and alert.
+   * @param {InboundPolicyState} state @param {SourceState} source @param {number} at */
+  function accumulateEvictedScan(state, source, at) {
+    const totals = evictionSnapshot(state);
+    totals.sources++;
+    totals.shortHits += source.hits.length;
+    totals.longTargetStrikes += source.longTargets?.length ?? 0;
+    totals.lastAt = at;
+    state.evictedScan = totals;
+  }
+
   /** Keep a single bounded, coalesced pressure warning. Cooling entries
    * are never evicted, and capacity exhaustion never blocks unknown peers.
-   * @param {InboundPolicyState} state @param {number} at @param {boolean} evicted */
-  function reportCapacity(state, at, evicted) {
+   * @param {InboundPolicyState} state @param {number} at @param {boolean} evicted @param {boolean} evictedStrike */
+  function reportCapacity(state, at, evicted, evictedStrike) {
     const previous = state.reports.find((r) => r.kind === 'source_capacity');
     if (previous?.kind === 'source_capacity') {
       // A stale acknowledgement must not discard an updated summary.
       previous.id = newId('capacity');
       previous.at = at;
+      previous.evictedScan = evictionSnapshot(state);
       if (evicted) previous.evictedSources++;
       else previous.untrackedSources++;
       return;
     }
     if (
+      !evictedStrike &&
       state.lastCapacityAlertAt !== undefined &&
       at - state.lastCapacityAlertAt < windowMs
     )
       return;
     state.lastCapacityAlertAt = at;
-    if (state.reports.length >= maxReports) state.reports.shift();
     state.reports.push({
       id: newId('capacity'),
       kind: 'source_capacity',
       at,
       evictedSources: evicted ? 1 : 0,
       untrackedSources: evicted ? 0 : 1,
+      evictedScan: evictionSnapshot(state),
     });
   }
 
   /** @param {InboundPolicyState} state @param {string} key @param {number} at */
   function ensureSource(state, key, at) {
-    // Never evict an active block to make room for a rotating scanner.
+    // Reclaim all strike-free entries first; never reclaim an active block.
     for (const [id, source] of Object.entries(state.sources)) {
       source.lastSeen ??= Math.max(0, ...source.hits.map((h) => h.at));
       // Existing ledgers retain the short-window evidence they already had.
@@ -108,12 +141,7 @@ export function createInboundPolicy({
       source.longTargets = source.longTargets.filter(
         (h) => h.at > at - longWindowMs,
       );
-      if (
-        !blocked(source, at) &&
-        source.hits.length === 0 &&
-        source.longTargets.length === 0
-      )
-        delete state.sources[id];
+      if (!blocked(source, at) && !hasStrikes(source)) delete state.sources[id];
     }
     if (
       !state.sources[key] &&
@@ -121,8 +149,14 @@ export function createInboundPolicy({
     ) {
       const candidate = Object.entries(state.sources)
         .filter(([, source]) => !blocked(source, at))
-        .sort((a, b) => (a[1].lastSeen ?? 0) - (b[1].lastSeen ?? 0))[0];
-      reportCapacity(state, at, !!candidate);
+        .sort(
+          (a, b) =>
+            Number(hasStrikes(a[1])) - Number(hasStrikes(b[1])) ||
+            (a[1].lastSeen ?? 0) - (b[1].lastSeen ?? 0),
+        )[0];
+      const evictedStrike = !!candidate && hasStrikes(candidate[1]);
+      if (evictedStrike) accumulateEvictedScan(state, candidate[1], at);
+      reportCapacity(state, at, !!candidate, evictedStrike);
       if (!candidate) return null;
       delete state.sources[candidate[0]];
     }
@@ -151,7 +185,11 @@ export function createInboundPolicy({
       (r) => r.kind === 'scan' && r.sourceNode === key,
     );
     if (existing >= 0) state.reports[existing] = summary;
-    else if (state.reports.length < maxReports) state.reports.push(summary);
+    else if (
+      state.reports.filter((r) => r.kind !== 'source_capacity').length <
+      maxReports
+    )
+      state.reports.push(summary);
   }
 
   /** Apply in the same transaction as refusal evidence, so a crash cannot

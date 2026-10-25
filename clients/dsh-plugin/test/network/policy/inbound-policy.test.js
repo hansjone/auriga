@@ -109,7 +109,14 @@ test('hit threshold, rolling window, cooldown and bounded reports fail closed', 
   await policy.blockSource(other);
   assert.equal(policy.pendingReports().length, 1);
   await policy.blockSource({ ...other, node: '66' });
-  assert.equal(policy.pendingReports().length, 1);
+  assert.equal(
+    policy.pendingReports().filter((r) => r.kind === 'scan').length,
+    1,
+  );
+  assert.equal(
+    policy.pendingReports().filter((r) => r.kind === 'source_capacity').length,
+    1,
+  );
   assert.equal(
     Object.keys(w.ledger.read().inboundPolicy.sources).length <= 2,
     true,
