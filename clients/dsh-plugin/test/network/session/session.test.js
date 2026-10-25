@@ -29,9 +29,10 @@ import {
  */
 async function attachFakeBroker(
   transport,
-  { epoch = '7', deliveries = [], corrupt = () => {}, refresh } = {},
+  { epoch = '7', deliveries = [], corrupt = () => {}, refresh, now } = {},
 ) {
-  const signer = await signingFixture({ refresh });
+  const signer = await signingFixture({ refresh, now });
+  const requests = [];
   let channelNonce;
   function signed(value, requestId) {
     const ctx = { ...signer.context, epoch, channelNonce, requestId };
@@ -57,6 +58,7 @@ async function attachFakeBroker(
 
   transport.onMessage(async (payload) => {
     const frame = decodeJson(payload);
+    requests.push(frame);
     const type = frameType(frame);
     if (type === 'ready') {
       channelNonce = frame.channel_nonce;
@@ -65,7 +67,13 @@ async function attachFakeBroker(
           app_version: '1.0',
           type: 'ready_result',
           request_id: frame.request_id,
-          state: 'ready',
+          status: 'ready',
+          node_identity: {
+            realm: '2',
+            node: '64',
+            incarnation: IDENTITY.nodeIncarnation,
+          },
+          required_features: [],
           epoch,
           head_seq: String(headSeq),
           committed_cursor: String(committedCursor),
@@ -178,6 +186,7 @@ async function attachFakeBroker(
 
   return {
     signer,
+    requests,
     signed,
     get committedCursor() {
       return committedCursor;
@@ -235,13 +244,14 @@ function firstContactDelivery({
   };
 }
 
-async function openWorld(deliveries, corrupt, refresh) {
+async function openWorld(deliveries, corrupt, refresh, now) {
   const pipe = createMemoryPipe();
   const broker = await attachFakeBroker(pipe.b, {
     epoch: '7',
     deliveries,
     corrupt,
     refresh,
+    now,
   });
   const store = createMemoryLedgerStore();
   const ledger = await openLedger({
@@ -267,6 +277,92 @@ async function openWorld(deliveries, corrupt, refresh) {
   });
   return { session, broker, host, ledger, adapter, platform };
 }
+
+test('successful key refresh rescans a previously rejected item from committed without reconnect', async (t) => {
+  let clock = Date.parse('2026-10-25T00:01:00Z');
+  let available = false;
+  let world;
+  const delivery = firstContactDelivery({ recipientId: 'refresh-recipient' });
+  world = await openWorld(
+    [delivery],
+    (item) => {
+      if (item.type !== 'delivery') return;
+      const auth = item.server_auth;
+      world.broker.signer.seal(
+        item,
+        {
+          ...world.broker.signer.context,
+          channelNonce: auth.channel_nonce,
+          requestId: auth.request_id,
+        },
+        '6',
+      );
+    },
+    async () => {
+      if (!available) throw new Error('temporarily unavailable');
+      return { ...world.broker.signer.config, keyset_version: '6' };
+    },
+    () => clock,
+  );
+  t.after(() => world.session.stop());
+  await world.session.start();
+  await world.session.pull();
+  assert.equal(world.session.scanAfter, '10');
+  assert.equal(world.session.resumeCursor, '0');
+  assert.equal(Object.keys(world.ledger.read().recipients).length, 0);
+  world.broker.push(delivery);
+  available = true;
+  clock += 1000;
+  let mark;
+  const committed = new Promise((resolve) => {
+    mark = resolve;
+  });
+  const original = world.adapter.markCommitted;
+  world.adapter.markCommitted = async (ids) => {
+    await original(ids);
+    mark();
+  };
+  await world.broker.signer.trust.refreshFor('business_delivery', '6');
+  await committed;
+  const fetches = world.broker.requests.filter(
+    (frame) => frame.type === 'fetch',
+  );
+  assert.equal(fetches.length, 2);
+  assert.equal(fetches[1].continuation.scan_after, '0');
+  assert.equal(world.session.resumeCursor, '10');
+});
+
+test('stop during host acceptance retains durable evidence but emits no late receipt on the closed connection', async (t) => {
+  const world = await openWorld([
+    firstContactDelivery({ recipientId: 'stop-during-host' }),
+  ]);
+  t.after(() => world.ledger.close());
+  let entered, release;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const deliver = world.adapter.deliver;
+  world.adapter.deliver = async (page) => {
+    const receipts = await deliver(page);
+    entered();
+    await gate;
+    return receipts;
+  };
+  await world.session.start();
+  const pull = world.session.pull();
+  await started;
+  await world.session.stop();
+  release();
+  await assert.rejects(pull, (error) => error.code === 'not_ready');
+  assert.equal(
+    world.broker.requests.filter((frame) => frame.type === 'receipt').length,
+    0,
+  );
+  assert.equal(world.adapter.pendingReceipts().length, 1);
+});
 
 test('FETCH page → ledger inbox + RECEIPT commit for system first_contact', async () => {
   const delivery = firstContactDelivery();
@@ -544,6 +640,12 @@ test('requested FETCH budget counts original wire whitespace as well as canonica
               request_id: request.request_id,
               epoch: '7',
               status: 'ready',
+              node_identity: {
+                realm: '2',
+                node: '64',
+                incarnation: IDENTITY.nodeIncarnation,
+              },
+              required_features: [],
             },
             ctx,
           ),

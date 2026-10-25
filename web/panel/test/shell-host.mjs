@@ -13,6 +13,7 @@ export function surfaceHost(
     slotCore,
     hostTheme = 'light',
     osTheme = 'light',
+    consentFetch,
   } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
@@ -80,19 +81,69 @@ export function surfaceHost(
       });
     },
   };
-  function patch(parent, oldNode, value) {
+  const components = new WeakMap();
+  function releaseNode(node, owner) {
+    const child = components.get(node);
+    if (child && child !== owner) {
+      child.close();
+      components.delete(node);
+    }
+    for (const nested of node.childNodes) releaseNode(nested, owner);
+  }
+  function patch(parent, oldNode, value, owner) {
+    if (typeof value === 'object' && typeof value.type === 'function') {
+      let child = oldNode && components.get(oldNode);
+      if (!child || child.Component !== value.type || child.owner !== owner) {
+        if (oldNode) releaseNode(oldNode, owner);
+        child = {
+          Component: value.type,
+          owner,
+          hooks: [],
+          effects: [],
+          children: new Set(),
+          index: 0,
+          alive: true,
+          queue: () => owner.queue(),
+          close() {
+            child.alive = false;
+            for (const nested of child.children) nested.close();
+            child.hooks.forEach((hook) => hook?.cleanup?.());
+            owner.children.delete(child);
+          },
+        };
+        owner.children.add(child);
+      }
+      const previous = current;
+      current = child;
+      child.index = 0;
+      let rendered;
+      try {
+        rendered = value.type({ ...value.props, children: value.children });
+      } finally {
+        current = previous;
+      }
+      const node = patch(parent, oldNode, rendered, child);
+      if (oldNode && oldNode !== node) components.delete(oldNode);
+      components.set(node, child);
+      child.effects.splice(0).forEach((fn) => fn());
+      return node;
+    }
+    if (oldNode && components.get(oldNode) && components.get(oldNode) !== owner)
+      releaseNode(oldNode, owner);
     if (typeof value !== 'object') {
       if (oldNode?.nodeType === 3) {
         oldNode.data = String(value);
         return oldNode;
       }
       const node = document.createTextNode(String(value));
+      if (oldNode) releaseNode(oldNode, owner);
       if (oldNode) oldNode.replaceWith(node);
       else parent.append(node);
       return node;
     }
     let node = oldNode;
     if (node?.localName !== value.type) {
+      if (oldNode) releaseNode(oldNode, owner);
       node = document.createElement(value.type);
       if (oldNode) oldNode.replaceWith(node);
       else parent.append(node);
@@ -108,10 +159,12 @@ export function surfaceHost(
       else if (key !== 'key') node.setAttribute(key, String(prop));
     }
     value.children.forEach((child, i) =>
-      patch(node, node.childNodes[i], child),
+      patch(node, node.childNodes[i], child, owner),
     );
-    while (node.childNodes.length > value.children.length)
+    while (node.childNodes.length > value.children.length) {
+      releaseNode(node.lastChild, owner);
       node.lastChild.remove();
+    }
     return node;
   }
   const mount = (Component) => {
@@ -121,6 +174,7 @@ export function surfaceHost(
       root,
       hooks: [],
       effects: [],
+      children: new Set(),
       index: 0,
       alive: true,
       queued: false,
@@ -137,11 +191,12 @@ export function surfaceHost(
         current = view;
         const value = Component();
         current = undefined;
-        patch(root, root.firstChild, value);
+        patch(root, root.firstChild, value, view);
         view.effects.splice(0).forEach((fn) => fn());
       },
       close() {
         view.alive = false;
+        for (const child of view.children) child.close();
         view.hooks.forEach((hook) => hook?.cleanup?.());
         root.remove();
       },
@@ -222,7 +277,13 @@ export function surfaceHost(
       customElements: window.customElements,
       URL,
       AbortController: globalThis.AbortController,
-      fetch: fetchImpl,
+      fetch: (url, init) => {
+        if (new URL(url).pathname.includes('/auriga/local-login/consent/'))
+          return consentFetch
+            ? consentFetch(url, init)
+            : Promise.resolve(response(503, { code: 'common.unavailable' }));
+        return fetchImpl(url, init);
+      },
       setTimeout(fn, delay) {
         const id = ++nextTimer;
         counts.timers.set(id, { fn, delay });

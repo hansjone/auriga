@@ -10,6 +10,7 @@ package network
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base32"
 	"errors"
 	"strings"
@@ -58,7 +59,13 @@ func ValidIngressID(id string) bool {
 	return true
 }
 
-func UpSubject(ingress string) string   { return upRoot + ingress }
+// The shard is a routing hint only: 32 stable buckets, determined from ingress.
+// It conveys no authority and must match the exact callout-issued subject.
+func ingressShard(ingress string) string {
+	digest := sha256.Sum256([]byte(ingress))
+	return string("abcdefghijklmnopqrstuvwxyz234567"[digest[0]&31])
+}
+func UpSubject(ingress string) string   { return upRoot + ingressShard(ingress) + "." + ingress }
 func DownSubject(ingress string) string { return downRoot + ingress }
 
 // ReplyPrefix is the private inbox prefix handed to the SDK (nats.go
@@ -66,7 +73,7 @@ func DownSubject(ingress string) string { return downRoot + ingress }
 func ReplyPrefix(ingress string) string { return strings.TrimSuffix(replyRoot, ".") + "." + ingress }
 
 // UpWildcard is the only subscription the adapter needs on the client side.
-const UpWildcard = upRoot + "*"
+const UpWildcard = upRoot + "*.*"
 
 // IngressFromUp extracts the ingress from a received up subject. The adapter
 // must use this, never a tenant/node/ingress claimed inside the payload.
@@ -74,11 +81,11 @@ func IngressFromUp(subject string) (string, error) {
 	if !strings.HasPrefix(subject, upRoot) {
 		return "", ErrInvalidIngress
 	}
-	id := subject[len(upRoot):]
-	if !ValidIngressID(id) {
+	parts := strings.Split(subject[len(upRoot):], ".")
+	if len(parts) != 2 || !ValidIngressID(parts[1]) || parts[0] != ingressShard(parts[1]) {
 		return "", ErrInvalidIngress
 	}
-	return id, nil
+	return parts[1], nil
 }
 
 // ValidReplyFor reports whether reply is a concrete subject inside the private

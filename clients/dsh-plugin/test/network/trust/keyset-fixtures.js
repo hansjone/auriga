@@ -37,5 +37,11 @@ export async function openTestTrust(options) {
       options.refresh &&
       (async (request) => signedKeyset(await options.refresh(request))),
   });
-  return { ...store, update: (payload) => store.update(signedKeyset(payload)) };
+  return Object.defineProperties(
+    { ...store, update: (payload) => store.update(signedKeyset(payload)) },
+    {
+      diagnostics: { get: () => store.diagnostics },
+      refreshRevision: { get: () => store.refreshRevision },
+    },
+  );
 }

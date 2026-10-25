@@ -61,6 +61,37 @@ window.__ModuleLoader__.load({
       unsupported: '协议不受支持，请升级插件。',
       verification: '界面清单验证未通过，请检查受信发行配置。',
       unavailable: '暂时无法加载，请稍后重试。',
+      inbox: '系统收件箱',
+      consent: '首联授权',
+      consentMissing: '首联授权尚未接入当前宿主。',
+      external: '外部消息',
+      previewHint: '仅供预览，不会发送给模型。允许建立对话不代表允许自动执行。',
+      onceHint:
+        '允许本次仅可使用一次；中断、超时或失败后也不能重复使用，请重新发起请求。',
+      cooldownHint:
+        '此来源处于拒绝冷却期，请等待冷却结束后再允许；不会自动重试批准，也不会保存未来允许规则。',
+      verified: '经核实的来源（DSH / 用户）',
+      conversationLayer: '建立对话',
+      executionLayer: '自动执行',
+      allow_once: '允许本次',
+      allow_source: '总是允许',
+      deny: '拒绝',
+      block: '屏蔽',
+      source_node: '此 DSH',
+      source_user: '此用户的所有 DSH',
+      scope: '持续规则范围',
+      chooseScope: '请选择范围',
+      ask_each: '每次询问（推荐）',
+      same_org: '同组织自动允许',
+      allowlist: '仅白名单自动允许',
+      deny_all: '全部拒绝',
+      locked: '由组织政策锁定，来源版本：',
+      persistent: '总是允许名单',
+      blocked: '屏蔽名单',
+      revoke: '撤销',
+      empty: '暂无待处理请求',
+      noRules: '暂无规则',
+      revokeHint: '撤销后重新核权；已执行的动作无法撤回，拒绝冷却仍然有效。',
     };
     const en = {
       panel: 'Auriga',
@@ -113,6 +144,40 @@ window.__ModuleLoader__.load({
       verification:
         'UI manifest verification failed. Check the trusted release configuration.',
       unavailable: 'Temporarily unavailable. Try again later.',
+      inbox: 'System inbox',
+      consent: 'First-contact authorization',
+      consentMissing:
+        'First-contact authorization is not connected to this host.',
+      external: 'External message',
+      previewHint:
+        'Preview only; never sent to a model. Opening a conversation does not permit automatic execution.',
+      onceHint:
+        'An allow-once permission can be used only once. Interruption, timeout or failure does not restore it; submit a new request.',
+      cooldownHint:
+        'This source is in a rejection cooldown; wait until it ends before allowing. Approval is never retried automatically and no future allow rule is saved.',
+      verified: 'Verified source (DSH / user)',
+      conversationLayer: 'Open conversation',
+      executionLayer: 'Automatic execution',
+      allow_once: 'Allow once',
+      allow_source: 'Always allow',
+      deny: 'Deny',
+      block: 'Block',
+      source_node: 'This DSH',
+      source_user: 'All DSH nodes of this user',
+      scope: 'Persistent rule scope',
+      chooseScope: 'Choose a scope',
+      ask_each: 'Ask each time (recommended)',
+      same_org: 'Automatically allow same organization',
+      allowlist: 'Automatically allow listed sources only',
+      deny_all: 'Deny all',
+      locked: 'Locked by organization policy, source revision: ',
+      persistent: 'Always-allow list',
+      blocked: 'Block list',
+      revoke: 'Revoke',
+      empty: 'No pending requests',
+      noRules: 'No rules',
+      revokeHint:
+        'Revocation requires authorization again. Completed actions cannot be undone; rejection cooldowns remain active.',
     };
     const css = `
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
@@ -128,6 +193,13 @@ window.__ModuleLoader__.load({
 .auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
 .auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
+.auriga-consent{padding:16px 0;min-width:0;overflow:auto}
+.auriga-consent article{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-consent pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:12em;overflow:auto;unicode-bidi:plaintext}
+.auriga-consent select{font:inherit;max-width:100%;padding:6px 9px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit)}
+.auriga-consent select:focus-visible{outline:2px solid var(--dsw-alias-label-secondary,currentColor)}
+.auriga-consent-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.auriga-consent p{overflow-wrap:anywhere}.auriga-consent small{color:var(--dsw-alias-label-secondary,inherit)}
 `;
     function failure(reason = 'unavailable') {
       if (
@@ -517,6 +589,370 @@ window.__ModuleLoader__.load({
                 t(refresh && phase.status === 'ready' ? 'refresh' : 'retry'),
               ),
           );
+        const consentRequest = async (action, input) => {
+          const write = input !== undefined;
+          let csrf;
+          if (write) {
+            const status = await fetch(localURL('auriga/local-login/status'), {
+              credentials: 'same-origin',
+              cache: 'no-store',
+              redirect: 'error',
+            });
+            if (!status.ok) throw failure();
+            const state = await status.json();
+            if (!state.loggedIn || !state.csrf) throw failure('auth');
+            csrf = state.csrf;
+          }
+          const response = await fetch(
+            localURL('auriga/local-login/consent/' + action),
+            {
+              credentials: 'same-origin',
+              cache: 'no-store',
+              redirect: 'error',
+              ...(write
+                ? {
+                    method: 'POST',
+                    headers: {
+                      'content-type': 'application/json',
+                      'X-Auriga-CSRF': csrf,
+                    },
+                    body: JSON.stringify(input),
+                  }
+                : {}),
+            },
+          );
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok)
+            throw Object.assign(failure(), {
+              reason: body.reason === 'cooldown' ? 'cooldown' : 'unavailable',
+            });
+          return body;
+        };
+        const consentBridge = {
+          snapshot: () => consentRequest('snapshot'),
+          decide: (input) => consentRequest('decide', input),
+          setDefault: (layer, mode) =>
+            consentRequest('default', { layer, mode }),
+          revoke: (input) => consentRequest('revoke', input),
+        };
+        function ConsentSection({ settings = false }) {
+          useHostState();
+          const api = consentBridge;
+          const readSnapshot = async () => {
+            const snapshot = await api.snapshot();
+            if (
+              !snapshot ||
+              !Array.isArray(snapshot.pending) ||
+              !Array.isArray(snapshot.rules) ||
+              !Number.isSafeInteger(snapshot.policyRevision) ||
+              !snapshot.defaults ||
+              !['conversation', 'execution'].every((layer) =>
+                ['ask_each', 'same_org', 'allowlist', 'deny_all'].includes(
+                  snapshot.defaults[layer],
+                ),
+              ) ||
+              snapshot.organization?.available !== true ||
+              typeof snapshot.organization.revision !== 'string' ||
+              !['conversation', 'execution'].every((layer) =>
+                ['allow', 'ask_each', 'deny_all'].includes(
+                  snapshot.organization[layer],
+                ),
+              )
+            )
+              throw failure();
+            return snapshot;
+          };
+          const [view, setView] = React.useState(null);
+          const [status, setStatus] = React.useState('loading');
+          const [revision, reload] = React.useReducer((n) => n + 1, 0);
+          const [scopes, setScopes] = React.useState({});
+          const active = React.useRef(false);
+          const busy = React.useRef(false);
+          const generation = React.useRef(0);
+          React.useEffect(() => {
+            generation.current++;
+            active.current = true;
+            let current = true;
+            setView(null);
+            setStatus('loading');
+            if (api) {
+              Promise.resolve()
+                .then(() => readSnapshot())
+                .then(
+                  (snapshot) => {
+                    if (current) {
+                      setView(snapshot);
+                      setStatus('ready');
+                    }
+                  },
+                  () => {
+                    if (current) setStatus('failed');
+                  },
+                );
+            }
+            return () => {
+              current = false;
+              active.current = false;
+            };
+          }, [api, revision]);
+          const change = async (operation) => {
+            if (busy.current || !active.current) return;
+            const attempt = generation.current;
+            const current = () =>
+              active.current && generation.current === attempt;
+            busy.current = true;
+            setStatus('loading');
+            setView(null);
+            try {
+              await operation();
+              if (!current()) return;
+              const snapshot = await readSnapshot();
+              if (current()) {
+                setView(snapshot);
+                setStatus('ready');
+              }
+            } catch (error) {
+              // A rejected or uncertain write is never replayed automatically.
+              if (current()) {
+                setView(null);
+                setStatus(error?.reason === 'cooldown' ? 'cooldown' : 'failed');
+              }
+            } finally {
+              busy.current = false;
+            }
+          };
+          const layerName = (layer) =>
+            t(
+              layer === 'conversation' ? 'conversationLayer' : 'executionLayer',
+            );
+          const sourceName = (source) =>
+            `${source.realm}.${source.node} / ${source.userId}`;
+          const content = !api
+            ? h('p', { role: 'status' }, t('consentMissing'))
+            : status !== 'ready'
+              ? h(
+                  'div',
+                  { role: 'status' },
+                  t(
+                    status === 'loading'
+                      ? 'loading'
+                      : status === 'cooldown'
+                        ? 'cooldownHint'
+                        : 'unavailable',
+                  ),
+                  status !== 'loading' &&
+                    h(
+                      'button',
+                      { type: 'button', onClick: () => reload() },
+                      t('retry'),
+                    ),
+                )
+              : settings
+                ? h(
+                    'div',
+                    null,
+                    ...['conversation', 'execution'].map((layer) => {
+                      const locked = view.organization[layer] !== 'allow';
+                      return h(
+                        'div',
+                        { key: layer, className: 'auriga-setting' },
+                        h(
+                          'label',
+                          null,
+                          layerName(layer),
+                          h(
+                            'select',
+                            {
+                              'aria-label': layerName(layer),
+                              disabled: locked,
+                              value: locked
+                                ? view.organization[layer]
+                                : view.defaults[layer],
+                              onChange: (event) => {
+                                if (!locked)
+                                  return change(() =>
+                                    api.setDefault(layer, event.target.value),
+                                  );
+                              },
+                            },
+                            ...[
+                              'ask_each',
+                              'same_org',
+                              'allowlist',
+                              'deny_all',
+                            ].map((mode) =>
+                              h('option', { key: mode, value: mode }, t(mode)),
+                            ),
+                          ),
+                        ),
+                        locked &&
+                          h(
+                            'small',
+                            null,
+                            t('locked') + view.organization.revision,
+                          ),
+                      );
+                    }),
+                    ...['allow_source', 'block'].map((choice) => {
+                      const rules = view.rules.filter(
+                        (rule) => rule.choice === choice,
+                      );
+                      return h(
+                        'details',
+                        { key: choice, open: true },
+                        h(
+                          'summary',
+                          null,
+                          t(choice === 'block' ? 'blocked' : 'persistent'),
+                        ),
+                        rules.length === 0 && h('p', null, t('noRules')),
+                        ...rules.map((rule) =>
+                          h(
+                            'div',
+                            { key: rule.id, className: 'auriga-setting' },
+                            h(
+                              'span',
+                              null,
+                              layerName(rule.layer) +
+                                ' · ' +
+                                sourceName(rule.source) +
+                                ' · ' +
+                                t(rule.scope),
+                            ),
+                            h(
+                              'button',
+                              {
+                                type: 'button',
+                                onClick: () =>
+                                  change(() =>
+                                    api.revoke({
+                                      layer: rule.layer,
+                                      ruleId: rule.id,
+                                    }),
+                                  ),
+                              },
+                              t('revoke'),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                    h('p', null, t('revokeHint')),
+                  )
+                : h(
+                    'div',
+                    null,
+                    h('p', null, t('previewHint')),
+                    h('p', null, t('onceHint')),
+                    view.pending.length === 0 && h('p', null, t('empty')),
+                    ...view.pending.map((row) => {
+                      const { layer, requestId } = row.request;
+                      const key = JSON.stringify([layer, requestId]);
+                      const scope = scopes[key] ?? '';
+                      return h(
+                        'article',
+                        { key },
+                        h('h4', null, layerName(layer)),
+                        h(
+                          'p',
+                          null,
+                          t('verified') + ': ' + sourceName(row.source),
+                        ),
+                        h('strong', null, t('external')),
+                        // Text child only: no markdown, HTML or automatic link handling.
+                        h(
+                          'pre',
+                          { dir: 'auto' },
+                          String(row.preview ?? '').slice(0, 1000),
+                        ),
+                        h(
+                          'label',
+                          null,
+                          t('scope'),
+                          h(
+                            'select',
+                            {
+                              'aria-label':
+                                t('scope') + ' · ' + layerName(layer),
+                              value: scope,
+                              onChange: (event) =>
+                                setScopes((old) => ({
+                                  ...old,
+                                  [key]: event.target.value,
+                                })),
+                            },
+                            h('option', { value: '' }, t('chooseScope')),
+                            ...['source_node', 'source_user'].map((value) =>
+                              h('option', { key: value, value }, t(value)),
+                            ),
+                          ),
+                        ),
+                        h(
+                          'div',
+                          { className: 'auriga-consent-actions' },
+                          ...[
+                            'allow_once',
+                            'allow_source',
+                            'deny',
+                            'block',
+                          ].map((choice) =>
+                            h(
+                              'button',
+                              {
+                                key: choice,
+                                type: 'button',
+                                disabled:
+                                  (choice === 'allow_source' ||
+                                    choice === 'block') &&
+                                  !scope,
+                                onClick: () => {
+                                  if (
+                                    (choice === 'allow_source' ||
+                                      choice === 'block') &&
+                                    !scope
+                                  )
+                                    return;
+                                  return change(() =>
+                                    api.decide({
+                                      layer,
+                                      requestId,
+                                      choice,
+                                      ...(choice === 'allow_source' ||
+                                      choice === 'block'
+                                        ? { sourceScope: scope }
+                                        : {}),
+                                      expectedRevision: view.policyRevision,
+                                    }),
+                                  );
+                                },
+                              },
+                              t(choice),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  );
+          return h(
+            'section',
+            {
+              className: 'auriga-consent',
+              'aria-label': t(settings ? 'consent' : 'inbox'),
+            },
+            h('h3', null, t(settings ? 'consent' : 'inbox')),
+            api &&
+              status === 'ready' &&
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => reload(),
+                },
+                t('refresh'),
+              ),
+            content,
+          );
+        }
         function Settings() {
           useHostState();
           const [phase, retry] = useBootstrap();
@@ -597,6 +1033,7 @@ window.__ModuleLoader__.load({
             h('h3', null, t('tools')),
             row('deployment', t('notWired')),
             h('p', null, t('toolsHint')),
+            h(ConsentSection, { settings: true }),
             h('h3', null, t('about')),
             row('pluginVersion', boot?.pluginVersion),
             row('panelVersion', boot?.panelVersion),
@@ -673,6 +1110,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'auriga-shell' },
               notice(phase, retry),
+              h(ConsentSection),
             );
           return h(
             'div',
@@ -720,6 +1158,12 @@ window.__ModuleLoader__.load({
                   t('conversation'),
                 ),
               ),
+            h(
+              'details',
+              null,
+              h('summary', null, t('inbox')),
+              h(ConsentSection),
+            ),
             h(ELEMENT, { ref, style: { flex: 1 } }),
           );
         }
