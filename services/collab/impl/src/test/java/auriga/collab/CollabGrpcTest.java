@@ -89,6 +89,15 @@ class CollabGrpcTest {
           TenantTransactionManager.class,
           () -> new TenantTransactionManager(roles.runtime().dataSource()));
       context.register(CollabRuntimeConfiguration.class);
+      context.registerBean(
+          auriga.collab.grpc.NetworkAuthorityClient.class,
+          () -> org.mockito.Mockito.mock(auriga.collab.grpc.NetworkAuthorityClient.class));
+      context.registerBean(
+          auriga.collab.grpc.NetworkSourceGrpcAuthority.class,
+          () -> org.mockito.Mockito.mock(auriga.collab.grpc.NetworkSourceGrpcAuthority.class));
+      context.registerBean(
+          auriga.collab.app.NetworkSigningKeys.class,
+          () -> new auriga.collab.app.NetworkSigningKeys(java.time.Clock.systemUTC(), 1));
       context.refresh();
       fallback = context.getBean(CollabAdmission.class);
     }
