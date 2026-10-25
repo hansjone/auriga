@@ -196,10 +196,19 @@ func (s *state) accept(ctx context.Context, c *api.ChatCompletionChunk) bool {
 	return true
 }
 func (s *state) complete() bool {
-	if s.finish == "" || ((s.finish == "tool_calls") != (len(s.tools) > 0)) {
-		return false
-	}
-	if s.value.ToolChoice != nil && *s.value.ToolChoice == "required" && len(s.tools) == 0 {
+	switch s.finish {
+	case "content_filter":
+		// Filtering terminates generation, with or without complete tool data.
+		// It does not authorize execution or require the model to produce a tool.
+	case "tool_calls":
+		if len(s.tools) == 0 {
+			return false
+		}
+	case "stop", "length":
+		if len(s.tools) > 0 || (s.value.ToolChoice != nil && *s.value.ToolChoice == "required") {
+			return false
+		}
+	default:
 		return false
 	}
 	for _, t := range s.tools {

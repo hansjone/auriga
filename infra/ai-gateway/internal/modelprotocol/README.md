@@ -41,6 +41,12 @@
   但计费保持 unknown。JSON 正式 schema **要求 usage**，缺失/不可信则返回错误和空结果，
   不伪造 0、不输出契约外的 nullable/缺省 usage。
 - `content_filter` 是正式完成原因，原样保留并正常校验最终 usage；不能仅因过滤就把可信计量丢成 unknown。
+  支持文本、空字符串及完整工具调用（可同时带文本，工具消息可用 null 内容）。
+  JSON 无工具的 null 内容仍按 D2 跨字段约束拒绝；SSE 的 nullable/空增量仅表示本块无文本。
+  `tool_choice` 缺省/auto/required 时，过滤终态允许没有工具或带完整工具；required 不强迫被过滤的生成继续调用工具。
+  none 始终禁止工具，能力/声明名/唯一 id/JSON 对象参数的校验在过滤终态也执行。
+  stop/length 仍拒绝工具及未满足 required 的正常结束；tool_calls 必须有完整工具，未知终态拒绝。
+  过滤响应中的工具数据仅保留协议事实；调用方必须识别真实 finish_reason，不能当作 tool_calls 的执行许可。
 - 只有最终 usage 通过来源判断和全部校验才设 `UsageKnown=true`。
   SSE 若在此后写失败/断流，可以同时 `Completed=false, UsageKnown=true`；handler 仍须按可信最终证据和账本规则结算。
   已报告可信 usage 后不再接受替换；未证实最终 usage 的中断始终为 unknown。
