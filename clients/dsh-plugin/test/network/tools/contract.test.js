@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Ajv from 'ajv/dist/2020.js';
 import { readFile } from 'node:fs/promises';
 import { createWorld, peer, self } from '../host/fixtures.js';
-import validateInput from '../../../src/network/tools/generated/validate-input.js';
+import validateInput from '../../../src/generated/network/validate-input.js';
 import { createAgentSendTool } from '../../../src/network/tools/index.js';
 
 // Independently compile the original schemas; do not validate generated output

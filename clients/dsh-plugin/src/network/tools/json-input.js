@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { HostSeamError } from '../host/errors.js';
-import { encoding } from './generated/contract.js';
+import { encoding } from '../../generated/network/contract.js';
 
 /**
  * Bound work before schema validation and detach model data before any await.

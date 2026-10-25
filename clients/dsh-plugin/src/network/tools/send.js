@@ -11,8 +11,8 @@ import {
   encoding,
   inputSchema,
   opaqueIdPattern,
-} from './generated/contract.js';
-import validateInput from './generated/validate-input.js';
+} from '../../generated/network/contract.js';
+import validateInput from '../../generated/network/validate-input.js';
 import { snapshotInput } from './json-input.js';
 
 /** @typedef {import('../host/address.js').Address} Address */

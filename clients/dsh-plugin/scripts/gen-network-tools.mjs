@@ -11,7 +11,7 @@ import standalone from 'ajv/dist/standalone/index.js';
 const require = createRequire(import.meta.url);
 const license = await readFile(require.resolve('ajv/LICENSE'), 'utf8');
 const root = new URL('../../../', import.meta.url);
-const out = new URL('clients/dsh-plugin/src/network/tools/generated/', root);
+const out = new URL('clients/dsh-plugin/src/generated/network/', root);
 const typesOut = new URL('clients/dsh-plugin/src/generated/network/', root);
 const load = async (name) =>
   JSON.parse(
