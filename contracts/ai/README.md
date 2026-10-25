@@ -7,6 +7,8 @@
 
 ## 身份和受信实例通道（D1）
 
+管理面每个条件写操作都有对应的读取途径取得同一资源的 ETag：提供商、模型、脱敏凭据和模型授权集合均可 GET；提供商和模型列表项的只读 `etag` 与同版本单项 GET 的响应头一致，授权集合的 ETag 由其 GET 单独取得。
+
 - 管理面只接受 `aud=auriga/ctx=admin`，每操作显式权限；敏感操作要求 `stepup_time` 在 600 秒内。
   门户令牌必须剔除 `catalog/m3.json` 的全部 `adminOnly` 权限，不能仅按 key 后缀猜测。
 - 数据面只接受单一 AI audience 的 `at+jwt/ES256`，最长 300 秒。
