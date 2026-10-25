@@ -36,6 +36,24 @@ async function openConsent(options) {
   };
 }
 
+function controlledRequestAfterCommit(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // Also update the production module's named node:timers/promises import.
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
+  });
+  return async (service, input, responseDelayMs) => {
+    const response = service.request(input);
+    // This authenticated query queues behind intake and its real disk commit.
+    // Advance only the response timer afterwards; disk latency is not the claim.
+    await service.getRequest(local, input);
+    t.mock.timers.tick(responseDelayMs);
+    return response;
+  };
+}
+
 async function fixture(t, options = {}) {
   let time = 1_000_000;
   let owner = 'alice';
@@ -660,6 +678,7 @@ test('revocation serializes with action authorization; stale approvals cannot ru
 });
 
 test('file persistence, atomic decision/outbox and uncertain write poison the service', async (t) => {
+  const requestAfterCommit = controlledRequestAfterCommit(t);
   const dir = await mkdtemp(join(tmpdir(), 'auriga-consent-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   let failure = false;
@@ -670,7 +689,11 @@ test('file persistence, atomic decision/outbox and uncertain write poison the se
     },
   });
   const f = await fixture(t, { store });
-  const r = await f.service.request(f.request());
+  const r = await requestAfterCommit(
+    f.service,
+    f.request(),
+    f.ports.responseDelayMs,
+  );
   await f.service.decide(local, {
     layer: r.request.layer,
     requestId: r.request.requestId,
@@ -682,7 +705,13 @@ test('file persistence, atomic decision/outbox and uncertain write poison the se
   const reopened = await openConsent(f.ports);
   t.after(() => reopened.close());
   assert.equal(
-    (await reopened.request(f.request('conversation', 'persisted'))).status,
+    (
+      await requestAfterCommit(
+        reopened,
+        f.request('conversation', 'persisted'),
+        f.ports.responseDelayMs,
+      )
+    ).status,
     'allowed',
   );
   assert.ok((await reopened.listOutbox(local)).length >= 2);
@@ -695,10 +724,14 @@ test('file persistence, atomic decision/outbox and uncertain write poison the se
     }),
     /disk failure/,
   );
-  await assert.rejects(
+  const unavailable = assert.rejects(
     reopened.request(f.request('conversation', 'after-failure')),
     /unavailable/,
   );
+  // Observe the queued request's poison rejection before releasing its response.
+  await assert.rejects(reopened.getSettings(local), /unavailable/);
+  t.mock.timers.tick(f.ports.responseDelayMs);
+  await unavailable;
 });
 
 test('stored rule IDs allow revocation after ownership transfer without IAM availability', async (t) => {
@@ -788,21 +821,7 @@ test('request capacity keeps revocation usable and pending byte limits stay enfo
 });
 
 test('clock rollback and commit failure before rename cannot expose an approval', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  // Also update the production module's named node:timers/promises import.
-  syncBuiltinESMExports();
-  t.after(() => {
-    t.mock.timers.reset();
-    syncBuiltinESMExports();
-  });
-  async function requestAfterCommit(service, input, responseDelayMs) {
-    const response = service.request(input);
-    // This authenticated query queues behind intake and its real disk commit.
-    // Advance only the response timer afterwards; disk latency is not the claim.
-    await service.getRequest(local, input);
-    t.mock.timers.tick(responseDelayMs);
-    return response;
-  }
+  const requestAfterCommit = controlledRequestAfterCommit(t);
   const f = await fixture(t);
   const request = f.request();
   const r = await requestAfterCommit(
