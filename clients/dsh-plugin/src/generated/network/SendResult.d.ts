@@ -1,4 +1,4 @@
-// Generated from contracts/network by test/network/tools/generate.mjs. Do not edit.
+// Generated from contracts/network by scripts/gen-network-tools.mjs. Do not edit.
 
 /**
  * 成功响应列出实际完整 from/to；受限首联只给统一“已提交请求”，不返回真实 message/delivery/mail_seq。

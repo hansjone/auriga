@@ -17,22 +17,22 @@ import { snapshotInput } from './json-input.js';
 
 /** @typedef {import('../host/address.js').Address} Address */
 /** @typedef {import('../host/ledger.js').Ledger} Ledger */
-/** @typedef {import('./generated/AgentSendToolInput.js').AgentSendToolInput} AgentSendToolInput */
-/** @typedef {import('./generated/SubmitRequest.js').SubmitRequest} SubmitRequest */
-/** @typedef {import('./generated/SendResult.js').SendResult} SendResult */
+/** @typedef {import('../../generated/network/AgentSendToolInput.js').AgentSendToolInput} AgentSendToolInput */
+/** @typedef {import('../../generated/network/SubmitRequest.js').SubmitRequest} SubmitRequest */
+/** @typedef {import('../../generated/network/SendResult.js').SendResult} SendResult */
 /** @typedef {{ agent?: { session?: { id?: string } } }} ExecutionContext */
-/** @typedef {{ messages: number, windowMs: number }} RateLimit */
+/** @typedef {{ messages: number, windowMs: number, localMessages?: number }} RateLimit */
 /**
  * Trusted plugin control-path authorization. It must be reloaded on every
  * sourceFor call and never obtained from model parameters or human UI intents.
  * @typedef {{ sourceBinding: string, producerEpoch: string, address: Address,
- * senderKind: 'agent', sendAllowed: boolean, expiresAt: number }} SourceAuthorization
+ * senderKind: 'agent', sendAllowed: boolean, firstContactAllowed?: boolean, expiresAt: number }} SourceAuthorization
  */
 /** @typedef {{ status: 'request_submitted' } | { status: 'error', code: string }} ModelResult */
 
 const opaqueId = new RegExp(opaqueIdPattern);
 /** One bounded node-wide budget per durable ledger, shared by all tool instances. */
-/** @type {WeakMap<Ledger, { policy: RateLimit, times: number[], lastNow: number }>} */
+/** @type {WeakMap<Ledger, { policy: Required<RateLimit>, times: Array<{at: number, local: string}>, lastNow: number }>} */
 const budgets = new WeakMap();
 const hiddenTargetCodes = new Set([
   'network.target_unavailable',
@@ -80,6 +80,7 @@ export function mapSendReceipt(receipt) {
  * localAddress: (local: string) => Address,
  * sourceFor: (source: { hostSessionId: string, address: Address }) => SourceAuthorization|Promise<SourceAuthorization>,
  * resolveTarget: (target: { realm: string, node: string, local: string }) => Address|null|Promise<Address|null>,
+ * releaseResult: (startedAt: number) => Promise<void>,
  * rateLimit: RateLimit,
  * now?: () => number,
  * }} options
@@ -89,6 +90,7 @@ export function createAgentSendTool({
   localAddress,
   sourceFor,
   resolveTarget,
+  releaseResult,
   rateLimit,
   now = Date.now,
 }) {
@@ -99,8 +101,20 @@ export function createAgentSendTool({
     )
   )
     throw new TypeError('an explicit positive send rate policy is required');
+  const policy = {
+    ...rateLimit,
+    localMessages: rateLimit.localMessages ?? rateLimit.messages,
+  };
   if (
-    ![localAddress, sourceFor, resolveTarget, now].every(
+    !Number.isSafeInteger(policy.localMessages) ||
+    policy.localMessages <= 0 ||
+    policy.localMessages > policy.messages
+  )
+    throw new TypeError(
+      'localMessages must be a positive integer within the node budget',
+    );
+  if (
+    ![localAddress, sourceFor, resolveTarget, releaseResult, now].every(
       (fn) => typeof fn === 'function',
     )
   )
@@ -109,11 +123,12 @@ export function createAgentSendTool({
   if (
     existing &&
     (existing.policy.messages !== rateLimit.messages ||
-      existing.policy.windowMs !== rateLimit.windowMs)
+      existing.policy.windowMs !== rateLimit.windowMs ||
+      existing.policy.localMessages !== policy.localMessages)
   )
     throw new TypeError('a ledger must share one send rate policy');
   if (!existing) {
-    existing = { policy: { ...rateLimit }, times: [], lastNow: -Infinity };
+    existing = { policy, times: [], lastNow: -Infinity };
     budgets.set(ledger, existing);
   }
   const budget = existing;
@@ -126,14 +141,34 @@ export function createAgentSendTool({
     return budget.lastNow;
   }
 
-  function reserveRate() {
+  /**
+   * The host's shared bounded queue must release responses under the same
+   * timing policy. No target, receipt or rejection reason is given to it.
+   * @param {ModelResult} result @param {number} startedAt
+   * @returns {Promise<ModelResult>}
+   */
+  async function release(result, startedAt) {
+    try {
+      await releaseResult(startedAt);
+      return result;
+    } catch {
+      return { status: 'error', code: 'network.outcome_unknown' };
+    }
+  }
+
+  /** @param {string} local */
+  function reserveRate(local) {
     const time = clock();
     budget.times = budget.times.filter(
-      (t) => time - t < budget.policy.windowMs,
+      (t) => time - t.at < budget.policy.windowMs,
     );
-    if (budget.times.length >= budget.policy.messages)
+    if (
+      budget.times.length >= budget.policy.messages ||
+      budget.times.filter((t) => t.local === local).length >=
+        budget.policy.localMessages
+    )
       throw new HostSeamError('network.quota_exceeded');
-    budget.times.push(time);
+    budget.times.push({ at: time, local });
   }
 
   /** @param {ExecutionContext|undefined} exec */
@@ -173,8 +208,8 @@ export function createAgentSendTool({
     }
   }
 
-  /** @param {{ hostSessionId: string, address: Address }} source */
-  async function authorize(source) {
+  /** @param {{ hostSessionId: string, address: Address }} source @param {boolean} firstContact */
+  async function authorize(source, firstContact) {
     try {
       const auth = await sourceFor({
         ...source,
@@ -197,12 +232,19 @@ export function createAgentSendTool({
         auth.expiresAt <= clock()
       )
         throw new Error();
+      if (firstContact && auth.firstContactAllowed !== true)
+        throw new HostSeamError('network.first_contact_forbidden');
       // Copy scalars: the port must not mutate an authorization while awaiting target lookup.
       return {
         sourceBinding: auth.sourceBinding,
         producerEpoch: auth.producerEpoch,
       };
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof HostSeamError &&
+        error.code === 'network.first_contact_forbidden'
+      )
+        throw error;
       throw new HostSeamError('network.unauthorized');
     }
   }
@@ -235,9 +277,12 @@ export function createAgentSendTool({
           ? 'network.broadcast_forbidden'
           : 'network.group_not_available',
       );
-    // Reserve before the first await/target lookup; unsuccessful probes are not refunded.
-    reserveRate();
-    const auth = await authorize(source);
+    const firstContact = target.local === '0';
+    const auth = await authorize(source, firstContact);
+    assertSameSource(exec, source);
+    // Failed authorization cannot spend the shared budget. Authorized target
+    // probes reserve synchronously before lookup and are never refunded.
+    reserveRate(source.address.local);
     let to;
     try {
       to = parseAddress(
@@ -257,7 +302,7 @@ export function createAgentSendTool({
       throw new HostSeamError('network.target_unavailable');
     }
     const current = assertSameSource(exec, source);
-    const fresh = await authorize(current);
+    const fresh = await authorize(current, firstContact);
     assertSameSource(exec, source);
     if (
       fresh.sourceBinding !== auth.sourceBinding ||
@@ -265,10 +310,11 @@ export function createAgentSendTool({
     )
       throw new HostSeamError('network.unauthorized');
     return {
-      kind: 'message',
+      kind: firstContact ? 'first_contact' : 'message',
+      ...(firstContact ? { contact_scope: 'conversation' } : {}),
       to,
       durability: 'durable',
-      intent: 'information',
+      intent: firstContact ? 'request' : 'information',
       body: data.body,
       ...(data.thread === undefined ? {} : { thread_id: data.thread }),
       source: { source_binding: auth.sourceBinding },
@@ -290,21 +336,33 @@ export function createAgentSendTool({
      * @returns {Promise<ModelResult>}
      */
     async execute(input, exec, submit) {
+      let startedAt;
+      try {
+        startedAt = clock();
+      } catch {
+        return { status: 'error', code: 'network.unauthorized' };
+      }
       let request;
       try {
         request = await prepare(input, exec);
       } catch (error) {
         if (error instanceof HostSeamError) {
           if (error.code === 'network.target_unavailable')
-            return { status: 'request_submitted' };
-          return { status: 'error', code: error.code };
+            return release({ status: 'request_submitted' }, startedAt);
+          return release({ status: 'error', code: error.code }, startedAt);
         }
-        return { status: 'error', code: 'network.protocol_error' };
+        return release(
+          { status: 'error', code: 'network.protocol_error' },
+          startedAt,
+        );
       }
       try {
-        return mapSendReceipt(await submit(request));
+        return release(mapSendReceipt(await submit(request)), startedAt);
       } catch {
-        return { status: 'error', code: 'network.outcome_unknown' };
+        return release(
+          { status: 'error', code: 'network.outcome_unknown' },
+          startedAt,
+        );
       }
     },
   };

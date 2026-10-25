@@ -1,4 +1,4 @@
-// Generated from contracts/network by test/network/tools/generate.mjs. Do not edit.
+// Generated from contracts/network by scripts/gen-network-tools.mjs. Do not edit.
 
 /**
  * 普通 agent 发送工具：仅 target、body、可选 thread。

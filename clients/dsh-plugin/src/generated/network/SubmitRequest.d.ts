@@ -1,4 +1,4 @@
-// Generated from contracts/network by test/network/tools/generate.mjs. Do not edit.
+// Generated from contracts/network by scripts/gen-network-tools.mjs. Do not edit.
 
 /**
  * 插件经 HTTPS 私有接口提交；来源只以 source_binding 或 human_intent_id 引用，总部据此生成 from/sender_kind，并按 to 生成 message_class。

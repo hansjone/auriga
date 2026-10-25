@@ -1,6 +1,5 @@
-/* eslint-disable */
 // @ts-nocheck
-// Generated from contracts/network by test/network/tools/generate.mjs. Do not edit.
+// Generated from contracts/network by scripts/gen-network-tools.mjs. Do not edit.
 /* Inlined Ajv runtime helper license:
 The MIT License (MIT)
 
@@ -387,7 +386,6 @@ function validate20(
     parentDataProperty,
     rootData = data,
     dynamicAnchors = {},
-    isAllOfVariant = 0,
   } = {},
 ) {
   let vErrors = null;

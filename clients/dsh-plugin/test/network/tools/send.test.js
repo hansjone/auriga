@@ -54,6 +54,7 @@ async function setup(t, options = {}) {
       };
     },
     rateLimit: { messages: 3, windowMs: 1_000 },
+    releaseResult: async () => {},
     now: () => clock,
     ...options,
   };
@@ -102,6 +103,8 @@ for (const field of [
   'in_reply_to',
   'idempotency',
   'producer_epoch',
+  'first_contact',
+  'firstContactAllowed',
 ]) {
   test(`rejects model-controlled reserved field ${field}`, async (t) => {
     const { tool, targetCalls } = await setup(t);
@@ -600,4 +603,141 @@ test('another registered local cannot reset the node-wide budget', async (t) => 
     expectedError('network.quota_exceeded'),
   );
   assert.equal(targetCalls(), 1);
+});
+
+test('system targets require an explicit trusted first_contact grant before resolution', async (t) => {
+  const { tool, auth, targetCalls } = await setup(t, {
+    rateLimit: { messages: 10, windowMs: 1_000 },
+  });
+  for (const firstContactAllowed of [undefined, false, 'true', 1]) {
+    auth.firstContactAllowed = firstContactAllowed;
+    await assert.rejects(
+      tool.prepare({ ...input(), target: 'aur1:3f.0' }, exec()),
+      expectedError('network.first_contact_forbidden'),
+    );
+  }
+  assert.equal(targetCalls(), 0);
+});
+
+test('verified first_contact grant fixes kind, scope and intent for short and full system targets', async (t) => {
+  const { tool, auth } = await setup(t);
+  auth.firstContactAllowed = true;
+  for (const target of ['aur1:3f.0', 'aur1:2.3f.0']) {
+    const request = await tool.prepare({ ...input(), target }, exec());
+    assert.equal(request.kind, 'first_contact');
+    assert.equal(request.contact_scope, 'conversation');
+    assert.equal(request.intent, 'request');
+    assert.equal(request.durability, 'durable');
+    assert.deepEqual(request.to, peer('0'));
+  }
+});
+
+test('first_contact grant is rechecked after asynchronous target resolution', async (t) => {
+  const { config, auth } = await setup(t);
+  auth.firstContactAllowed = true;
+  const tool = createAgentSendTool({
+    ...config,
+    resolveTarget: async () => {
+      auth.firstContactAllowed = false;
+      return peer('0');
+    },
+  });
+  await assert.rejects(
+    tool.prepare({ ...input(), target: 'aur1:3f.0' }, exec()),
+    expectedError('network.first_contact_forbidden'),
+  );
+});
+
+test('unicast to a session never becomes first_contact from an ambient grant', async (t) => {
+  const { tool, auth } = await setup(t);
+  auth.firstContactAllowed = true;
+  const request = await tool.prepare(input(), exec());
+  assert.equal(request.kind, 'message');
+  assert.equal(Object.hasOwn(request, 'contact_scope'), false);
+});
+
+test('unauthorized callers do not spend the authorized node send budget', async (t) => {
+  const { tool, auth } = await setup(t);
+  auth.sendAllowed = false;
+  for (let i = 0; i < 5; i++)
+    await assert.rejects(
+      tool.prepare(input(), exec()),
+      expectedError('network.unauthorized'),
+    );
+  auth.sendAllowed = true;
+  for (let i = 0; i < 3; i++) await tool.prepare(input(), exec());
+});
+
+test('local quota rejection preserves aggregate capacity for other registered locals', async (t) => {
+  const { tool, targetCalls } = await setup(t, {
+    rateLimit: { messages: 3, localMessages: 1, windowMs: 1_000 },
+    sourceFor: ({ address }) => ({
+      address,
+      senderKind: 'agent',
+      sourceBinding: `source-${address.local}`,
+      producerEpoch: '1',
+      sendAllowed: true,
+      expiresAt: 100_000,
+    }),
+  });
+  await tool.prepare(input(), exec());
+  await assert.rejects(
+    tool.prepare(input(), exec()),
+    expectedError('network.quota_exceeded'),
+  );
+  await tool.prepare(input(), exec('child'));
+  assert.equal(targetCalls(), 2);
+});
+
+test('model result release requires an explicit trusted privacy boundary', async (t) => {
+  const { config } = await setup(t);
+  assert.throws(
+    () => createAgentSendTool({ ...config, releaseResult: undefined }),
+    TypeError,
+  );
+});
+
+test('accepted and unavailable targets use the same result release path without target metadata', async (t) => {
+  const releases = [];
+  const { config } = await setup(t, {
+    rateLimit: { messages: 10, windowMs: 1_000 },
+  });
+  const releaseResult = async (...args) => {
+    releases.push(args);
+  };
+  for (const resolveTarget of [
+    () => peer('1'),
+    () => null,
+    () => {
+      throw new Error('private target state');
+    },
+  ]) {
+    const tool = createAgentSendTool({
+      ...config,
+      resolveTarget,
+      releaseResult,
+    });
+    assert.deepEqual(
+      await tool.execute(input(), exec(), () => ({
+        status: 'platform_stored',
+      })),
+      { status: 'request_submitted' },
+    );
+  }
+  assert.deepEqual(releases, [[1_000], [1_000], [1_000]]);
+});
+
+test('result release failure never exposes receipt details', async (t) => {
+  const { tool } = await setup(t, {
+    releaseResult: async () => {
+      throw new Error('private queue state');
+    },
+  });
+  assert.deepEqual(
+    await tool.execute(input(), exec(), () => ({
+      status: 'platform_stored',
+      message_id: 'secret',
+    })),
+    { status: 'error', code: 'network.outcome_unknown' },
+  );
 });

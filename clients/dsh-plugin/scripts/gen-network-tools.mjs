@@ -1,21 +1,18 @@
-// Regenerate with: node clients/dsh-plugin/test/network/tools/generate.mjs
+// Regenerate with: npm run gen:network-tools (in clients/dsh-plugin).
 // Uses the repository's locked development tools; no runtime dependencies.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { Buffer } from 'node:buffer';
 import { compile } from 'json-schema-to-typescript';
 import { format } from 'prettier';
+import Ajv from 'ajv/dist/2020.js';
+import standalone from 'ajv/dist/standalone/index.js';
 
 const require = createRequire(import.meta.url);
-const redocly = createRequire(
-  createRequire(require.resolve('openapi-typescript')).resolve(
-    '@redocly/openapi-core',
-  ),
-);
-const Ajv = redocly('@redocly/ajv/dist/2020.js').default;
-const standalone = redocly('@redocly/ajv/dist/standalone/index.js').default;
-const license = await readFile(redocly.resolve('@redocly/ajv/LICENSE'), 'utf8');
-const root = new URL('../../../../../', import.meta.url);
+const license = await readFile(require.resolve('ajv/LICENSE'), 'utf8');
+const root = new URL('../../../', import.meta.url);
 const out = new URL('clients/dsh-plugin/src/network/tools/generated/', root);
+const typesOut = new URL('clients/dsh-plugin/src/generated/network/', root);
 const load = async (name) =>
   JSON.parse(
     await readFile(new URL(`contracts/network/${name}`, root), 'utf8'),
@@ -68,19 +65,18 @@ const helper =
   /require\("(?:@redocly\/)?ajv\/dist\/runtime\/ucs2length"\)\.default/g;
 validator = validator.replace(
   helper,
-  () =>
-    `(${redocly('@redocly/ajv/dist/runtime/ucs2length.js').default.toString()})`,
+  () => `(${require('ajv/dist/runtime/ucs2length.js').default.toString()})`,
 );
 if (/\brequire\(/.test(validator))
   throw new Error(
     `unexpected generated runtime dependency: ${validator.match(/require\([^)]*\)/g)}`,
   );
 const banner =
-  '// Generated from contracts/network by test/network/tools/generate.mjs. Do not edit.\n';
+  '// Generated from contracts/network by scripts/gen-network-tools.mjs. Do not edit.\n';
 const artifacts = new Map([
   [
     'validate-input.js',
-    '/* eslint-disable */\n// @ts-nocheck\n' +
+    '// @ts-nocheck\n' +
       banner +
       `/* Inlined Ajv runtime helper license:\n${license}\n*/\n` +
       validator,
@@ -102,16 +98,19 @@ for (const name of ['AgentSendToolInput', 'SubmitRequest', 'SendResult']) {
   );
   artifacts.set(`${name}.d.ts`, types);
 }
-if (!process.argv.includes('--check')) await mkdir(out, { recursive: true });
+if (!process.argv.includes('--check')) {
+  await mkdir(out, { recursive: true });
+  await mkdir(typesOut, { recursive: true });
+}
 for (const [name, source] of artifacts) {
   const text = await format(source, {
     parser: name.endsWith('.d.ts') ? 'typescript' : 'babel',
     singleQuote: true,
     trailingComma: 'all',
   });
-  const target = new URL(name, out);
+  const target = new URL(name, name.endsWith('.d.ts') ? typesOut : out);
   if (process.argv.includes('--check')) {
-    if ((await readFile(target, 'utf8')) !== text)
+    if (!(await readFile(target)).equals(Buffer.from(text)))
       throw new Error(`generated artifact differs: ${name}`);
   } else await writeFile(target, text);
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
+import Ajv from 'ajv/dist/2020.js';
 import { readFile } from 'node:fs/promises';
 import { createWorld, peer, self } from '../host/fixtures.js';
 import validateInput from '../../../src/network/tools/generated/validate-input.js';
@@ -8,13 +8,6 @@ import { createAgentSendTool } from '../../../src/network/tools/index.js';
 
 // Independently compile the original schemas; do not validate generated output
 // against another copy of the generated schema.
-const require = createRequire(import.meta.url);
-const redocly = createRequire(
-  createRequire(require.resolve('openapi-typescript')).resolve(
-    '@redocly/openapi-core',
-  ),
-);
-const Ajv = redocly('@redocly/ajv/dist/2020.js').default;
 const ajv = new Ajv({ strict: false, validateFormats: false });
 for (const file of ['address', 'envelope', 'send']) {
   ajv.addSchema(
@@ -99,9 +92,11 @@ test('prepared request validates against the original SubmitRequest contract wit
       producerEpoch: '1',
       sendAllowed: true,
       expiresAt: Date.now() + 60_000,
+      firstContactAllowed: true,
     }),
-    resolveTarget: () => peer('1'),
+    resolveTarget: ({ local }) => peer(local),
     rateLimit: { messages: 3, windowMs: 1_000 },
+    releaseResult: async () => {},
   });
   for (const thread of [undefined, 'thread-1']) {
     const input = {
@@ -126,4 +121,15 @@ test('prepared request validates against the original SubmitRequest contract wit
       assert.equal(originalRequest({ ...request, [key]: value }), false, key);
     }
   }
+  const firstContact = await tool.prepare(
+    { target: 'aur1:3f.0', body: { subtype: 'text', text: 'hello' } },
+    { agent: { session: { id: 'native' } } },
+  );
+  assert.equal(firstContact.kind, 'first_contact');
+  assert.equal(firstContact.contact_scope, 'conversation');
+  assert.equal(
+    originalRequest(firstContact),
+    true,
+    JSON.stringify(originalRequest.errors),
+  );
 });
