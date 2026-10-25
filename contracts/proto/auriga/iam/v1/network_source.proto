@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+import "auriga/iam/v1/network_authority.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Internal ONLY: standard svc:collab JWT, delegated non-platform business
+// auriga-tenant-id and existing trusted transport. Never user/model callable.
+// Does not widen NetworkGatewayService or authorize a message, thread, recipient
+// or execution. Normative lifecycle, locking and signing mapping:
+// contracts/network/iam-directory.md, "Agent source authority".
+// Before Register/Get, collab MUST actually invoke the trusted native resolver,
+// check current node health/epoch and lookup/lock the current typed local witness.
+// Call IAM OUTSIDE collab transactions; activate only by a final local CAS.
+// These are trusted service duties, not independent IAM proof of a native host.
+// Missing implementation/wiring MUST fail closed (UNIMPLEMENTED/unavailable).
+service NetworkSourceAuthorityService {
+  // expected_revision=0 creates once. Same tenant/method/operation_id and exact
+  // normalized body returns the original result; changed body conflicts.
+  // Replay never renews/activates; use Get for current state, never this receipt.
+  rpc RegisterAgentSource(RegisterAgentSourceRequest) returns (RegisterAgentSourceResponse);
+  // Revalidates the exact CURRENT redeem connection, original owner/device/live
+  // backing identity, registration, source state/expiry and current permissions.
+  // Same-device reconnect may change transport, never the saved source tuple.
+  rpc GetAgentSource(GetAgentSourceRequest) returns (GetAgentSourceResponse);
+  // Positive expected_revision CAS. Commit serializes with Get/signing on the
+  // IAM source version lock; retry returns the original result without renewal.
+  rpc RevokeAgentSource(RevokeAgentSourceRequest) returns (RevokeAgentSourceResponse);
+}
+
+// Only ordinary agent/session, existing-conversation, durable unicast send.
+// Zero/unknown values MUST be rejected, never inferred from enum defaults.
+enum NetworkAgentSourceScope {
+  NETWORK_AGENT_SOURCE_SCOPE_UNSPECIFIED = 0;
+  NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND = 1;
+}
+
+enum NetworkAgentSourceState {
+  NETWORK_AGENT_SOURCE_STATE_UNSPECIFIED = 0;
+  NETWORK_AGENT_SOURCE_STATE_ACTIVE = 1;
+  NETWORK_AGENT_SOURCE_STATE_REVOKED = 2;
+  NETWORK_AGENT_SOURCE_STATE_EXPIRED = 3;
+}
+
+// Collab-owned immutable opaque local witness, NOT a native session mapping.
+// All fields required. Numeric address strings are canonical positive uint64
+// decimal; revision is positive uint64. IDs/digest use network OpaqueId/Digest.
+message NetworkAgentSourceRegistration {
+  string registration_id = 1;
+  string allocation_op_id = 2;
+  string allocation_fingerprint = 3;
+  uint64 registration_revision = 4;
+  string realm = 5;
+  string node = 6;
+  string local = 7;
+  // Exactly "session" in this contract. No system/subagent/group or fallback.
+  string address_type = 8;
+}
+
+// Minimal INTERNAL saved fact. Binding IDs are IAM-generated OpaqueIds, never
+// reassigned; original connection/registration/owner/scope/times are immutable.
+// IAM also stores the derived device/backing-session anchors, never supplied
+// by callers or returned here. No host ID/tree, message body, token or key.
+// State is current only in Get; mutation responses are immutable receipts.
+message NetworkAgentSource {
+  string source_binding = 1;
+  NetworkAuthorityConnection original_connection = 2;
+  NetworkAgentSourceRegistration registration = 3;
+  NetworkAgentSourceScope scope = 4;
+  uint64 revision = 5;
+  NetworkAgentSourceState state = 6;
+  // IAM-derived owner; only for constructing server-owned SourceContext.user.
+  string owner_user_id = 7;
+  // UTC whole-second RFC3339. Saved maximum validity, NOT a cached allow lease.
+  string not_before = 8;
+  string expires_at = 9;
+}
+
+message RegisterAgentSourceRequest {
+  // Exact authenticated source redeem tuple, not the signing target tuple.
+  NetworkAuthorityConnection connection = 1;
+  NetworkAgentSourceRegistration registration = 2;
+  // Stable OpaqueId, persisted before RPC; never an authorization credential.
+  string operation_id = 3;
+  NetworkAgentSourceScope scope = 4;
+  // Must be zero: no update, rebind, renewal or resurrection API.
+  uint64 expected_revision = 5;
+}
+
+message RegisterAgentSourceResponse {
+  // Original create receipt (revision=1). Replays may already be revoked/expired;
+  // callers MUST Get before use and cannot activate from this receipt alone.
+  NetworkAgentSource source = 1;
+}
+
+message GetAgentSourceRequest {
+  string source_binding = 1;
+  NetworkAuthorityConnection connection = 2;
+  // Actual current collab lookup/lock result, exact match to original witness.
+  NetworkAgentSourceRegistration registration = 3;
+}
+
+message GetAgentSourceResponse {
+  NetworkAgentSource source = 1;
+  // Exact current authenticated source connection echo; never replaces original.
+  NetworkAuthorityConnection connection = 2;
+  // Current IAM tenant network-policy snapshot revision, positive uint64.
+  // All relevant source/target policy mutations advance it; never supplied by
+  // collab. AuthorizeNetworkDelivery must independently reread/recheck it.
+  uint64 policy_revision = 3;
+  string observed_at = 4;
+  // Shortest current IAM-policy/identity/connection/source deadline. Empty for
+  // non-active facts. This observation does NOT grant signing or execution.
+  string valid_until = 5;
+}
+
+message RevokeAgentSourceRequest {
+  string source_binding = 1;
+  NetworkAuthorityConnection connection = 2;
+  uint64 expected_revision = 3;
+  string operation_id = 4;
+}
+
+message RevokeAgentSourceResponse {
+  // Committed terminal receipt. Never creates, extends or returns active state.
+  NetworkAgentSource source = 1;
+}

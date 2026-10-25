@@ -1,0 +1,76 @@
+package contracttest
+
+import (
+	"testing"
+
+	iamv1 "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+)
+
+// These checks exercise the generated public contract, not IAM authentication or persistence.
+func TestNetworkSourceAuthorityDescriptorBoundary(t *testing.T) {
+	file := iamv1.File_auriga_iam_v1_network_source_proto
+	service := file.Services().ByName("NetworkSourceAuthorityService")
+	if file.Services().Len() != 1 || service == nil || service.Methods().Len() != 3 {
+		t.Fatal("source lifecycle must have a separate three-method service")
+	}
+	for _, name := range []protoreflect.Name{"RegisterAgentSource", "GetAgentSource", "RevokeAgentSource"} {
+		method := service.Methods().ByName(name)
+		if method == nil || method.Input().Name() != name+"Request" || method.Output().Name() != name+"Response" || method.IsStreamingClient() || method.IsStreamingServer() {
+			t.Fatalf("missing independent unary request/response for %s", name)
+		}
+		for _, forbidden := range []protoreflect.Name{"owner_user_id", "device_id", "backing_session_id", "sender_kind", "host_session_id", "allowed"} {
+			if method.Input().Fields().ByName(forbidden) != nil {
+				t.Fatalf("request %s must not accept identity/permission claims: %s", name, forbidden)
+			}
+		}
+	}
+	witness := (&iamv1.NetworkAgentSourceRegistration{}).ProtoReflect().Descriptor()
+	for _, name := range []protoreflect.Name{"registration_id", "allocation_op_id", "allocation_fingerprint", "registration_revision", "realm", "node", "local", "address_type"} {
+		if witness.Fields().ByName(name) == nil {
+			t.Fatalf("typed local witness missing %s", name)
+		}
+	}
+	scope := (&iamv1.RegisterAgentSourceRequest{}).GetScope()
+	if scope != iamv1.NetworkAgentSourceScope_NETWORK_AGENT_SOURCE_SCOPE_UNSPECIFIED {
+		t.Fatal("empty request must not default to send scope")
+	}
+	if scope.Descriptor().Values().Len() != 2 || iamv1.NetworkAgentSourceState(0).String() != "NETWORK_AGENT_SOURCE_STATE_UNSPECIFIED" {
+		t.Fatal("scope/state must retain explicit fail-closed zero values")
+	}
+	// The existing signing request retains exactly target connection + two bounded JSON blobs.
+	delivery := (&iamv1.AuthorizeNetworkDeliveryRequest{}).ProtoReflect().Descriptor().Fields()
+	if delivery.Len() != 3 || delivery.ByNumber(1).Name() != "connection" || delivery.ByNumber(2).Name() != "message_json" || delivery.ByNumber(3).Name() != "source_context_json" {
+		t.Fatal("existing fifth RPC wire contract changed")
+	}
+}
+
+func TestNetworkSourceAuthorityWireRoundTrip(t *testing.T) {
+	const largest = uint64(18446744073709551615)
+	input := &iamv1.GetAgentSourceResponse{
+		Source: &iamv1.NetworkAgentSource{
+			SourceBinding: "019a0000-0000-7000-8000-000000000001",
+			Registration: &iamv1.NetworkAgentSourceRegistration{
+				Realm: "2", Node: "63", Local: "18446744073709551615", AddressType: "session",
+				RegistrationId: "019a0000-0000-7000-8000-000000000002", AllocationOpId: "allocate:1",
+				AllocationFingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				RegistrationRevision:  largest,
+			},
+			Scope:    iamv1.NetworkAgentSourceScope_NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND,
+			Revision: largest, State: iamv1.NetworkAgentSourceState_NETWORK_AGENT_SOURCE_STATE_REVOKED,
+			NotBefore: "2026-10-26T00:00:00Z", ExpiresAt: "2026-10-26T00:05:00Z",
+		},
+	}
+	encoded, err := proto.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := &iamv1.GetAgentSourceResponse{}
+	if err := proto.Unmarshal(encoded, output); err != nil {
+		t.Fatal(err)
+	}
+	if !proto.Equal(input, output) {
+		t.Fatal("opaque source witness, terminal state or uint64 revision changed on wire")
+	}
+}
