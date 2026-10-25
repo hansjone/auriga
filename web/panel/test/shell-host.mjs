@@ -102,6 +102,9 @@ export function surfaceHost(
       else if (key === 'style') Object.assign(node.style, prop);
       else if (key.startsWith('on')) node[key.toLowerCase()] = prop;
       else if (key === 'className') node.className = prop;
+      // React applies boolean DOM properties; disabled={false} is not an HTML
+      // disabled="false" attribute (which would still disable the element).
+      else if (key === 'disabled') node.disabled = Boolean(prop);
       else if (key !== 'key') node.setAttribute(key, String(prop));
     }
     value.children.forEach((child, i) =>
