@@ -19,14 +19,16 @@ import (
 )
 
 type adminConfig struct {
-	Listen        string         `json:"listen"`
-	TLSCertFile   string         `json:"tlsCertFile"`
-	TLSKeyFile    string         `json:"tlsKeyFile"`
-	Issuer        string         `json:"issuer"`
-	JWKSFile      string         `json:"jwksFile"`
-	MasterKeyFile string         `json:"masterKeyFile"`
-	Store         store.Config   `json:"store"`
-	Org           team.RPCConfig `json:"org"`
+	Listen          string         `json:"listen"`
+	TLSCertFile     string         `json:"tlsCertFile"`
+	TLSKeyFile      string         `json:"tlsKeyFile"`
+	TLSClientCAFile string         `json:"tlsClientCAFile"`
+	TLSEdgeDNSNames []string       `json:"tlsEdgeDNSNames"`
+	Issuer          string         `json:"issuer"`
+	JWKSFile        string         `json:"jwksFile"`
+	MasterKeyFile   string         `json:"masterKeyFile"`
+	Store           store.Config   `json:"store"`
+	Org             team.RPCConfig `json:"org"`
 }
 
 func loadAdminConfig(path string) (adminConfig, error) {
@@ -62,20 +64,18 @@ func loadAdminConfig(path string) (adminConfig, error) {
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:0"
 	}
-	host, _, err := net.SplitHostPort(cfg.Listen)
-	if err != nil {
+	if err = validateAdminTLS(cfg); err != nil {
 		return cfg, err
-	}
-	if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {
-		if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
-			return cfg, errors.New("non-loopback AI admin listener requires TLS")
-		}
 	}
 	return cfg, nil
 }
 
 func serveAdmin(path string) error {
 	cfg, err := loadAdminConfig(path)
+	if err != nil {
+		return err
+	}
+	server, err := newAdminServer(cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -110,11 +110,11 @@ func serveAdmin(path string) error {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32768}
+	server.Handler = handler
 	completed := make(chan error, 1)
 	go func() {
-		if cfg.TLSCertFile != "" {
-			completed <- server.ServeTLS(listener, cfg.TLSCertFile, cfg.TLSKeyFile)
+		if server.TLSConfig != nil {
+			completed <- server.ServeTLS(listener, "", "")
 		} else {
 			completed <- server.Serve(listener)
 		}
