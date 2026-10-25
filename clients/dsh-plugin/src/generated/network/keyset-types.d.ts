@@ -24,6 +24,8 @@ export interface KeysetPayload {
    */
   valid_until: string;
   /**
+   * 同一清单内 kid 唯一，由消费端语义检查强制；跨版本不可复用另需持久历史。
+   *
    * @maxItems 128
    */
   keys: PublicKey[];
@@ -76,6 +78,8 @@ export interface KeysetPayload1 {
    */
   valid_until: string;
   /**
+   * 同一清单内 kid 唯一，由消费端语义检查强制；跨版本不可复用另需持久历史。
+   *
    * @maxItems 128
    */
   keys: PublicKey[];
