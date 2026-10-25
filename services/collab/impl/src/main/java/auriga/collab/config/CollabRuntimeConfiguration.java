@@ -1,0 +1,39 @@
+package auriga.collab.config;
+
+import auriga.collab.api.CollabAdmission;
+import auriga.collab.app.CollabService;
+import auriga.collab.grpc.CollabGrpcService;
+import auriga.common.error.AurigaException;
+import auriga.common.error.CommonErrors;
+import auriga.common.persistence.TenantTransactionManager;
+import javax.sql.DataSource;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+/** Standalone collab schema only; combined datasource wiring is deliberately not invented. */
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnExpression(
+    "${auriga.services.collab.enabled:true} && '${auriga.service.schema:}' == 'collab'")
+public class CollabRuntimeConfiguration {
+  @Bean
+  @ConditionalOnMissingBean(CollabAdmission.class)
+  CollabAdmission collabAdmission() {
+    return (actor, operation) -> {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    };
+  }
+
+  @Bean
+  CollabService collabService(
+      DataSource source, TenantTransactionManager manager, CollabAdmission admission) {
+    return new CollabService(new JdbcTemplate(source), manager, admission);
+  }
+
+  @Bean
+  CollabGrpcService collabGrpcService(CollabService service) {
+    return new CollabGrpcService(service);
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Team communication tool arguments, version 1",
+  "description": "Contract shapes only; no external MCP service is enabled by this file. Source actor and session meta come exclusively from trusted Node execution context. Endpoint registration, binding, pull and ack are Node-only internal operations in collab.proto.",
+  "$defs": {
+    "Uuid": { "type": "string", "format": "uuid" },
+    "Text": { "type": "string", "minLength": 1, "maxLength": 16384, "pattern": "\\S", "description": "Server additionally enforces at most 16384 UTF-8 bytes." },
+    "Key": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S" },
+    "Limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "SessionMeta": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "auriga/sessionId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "auriga/toolCallId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "auriga/rootCallId": { "type": "string", "minLength": 1, "maxLength": 512 }
+      },
+      "required": ["auriga/sessionId", "auriga/toolCallId", "auriga/rootCallId"]
+    },
+    "ListEndpoints": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "limit": { "$ref": "#/$defs/Limit" }, "afterEndpointId": { "$ref": "#/$defs/Uuid" } },
+      "required": ["limit"]
+    },
+    "OpenThread": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "targetEndpointId": { "$ref": "#/$defs/Uuid" }, "text": { "$ref": "#/$defs/Text" }, "idempotencyKey": { "$ref": "#/$defs/Key" } },
+      "required": ["targetEndpointId", "text", "idempotencyKey"]
+    },
+    "ReplyThread": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "threadId": { "$ref": "#/$defs/Uuid" }, "text": { "$ref": "#/$defs/Text" }, "idempotencyKey": { "$ref": "#/$defs/Key" } },
+      "required": ["threadId", "text", "idempotencyKey"]
+    },
+    "ReadThread": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "threadId": { "$ref": "#/$defs/Uuid" }, "afterSequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }, "limit": { "$ref": "#/$defs/Limit" } },
+      "required": ["threadId", "limit"]
+    }
+  }
+}
