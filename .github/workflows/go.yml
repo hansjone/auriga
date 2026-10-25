@@ -32,7 +32,7 @@ jobs:
         shell: bash
         working-directory: infra
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure Linux AI test database
         if: runner.os == 'Linux'
         run: echo "AURIGA_AI_TEST_PG_DSN=postgres://postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/auriga_ai_test?sslmode=disable" >> "$GITHUB_ENV"
@@ -92,7 +92,7 @@ jobs:
       matrix:
         module: [gen, edge, ai-gateway, egress, agent, ctl]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.3'
