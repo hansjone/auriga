@@ -33,6 +33,13 @@ invite 必须走共享 FIRST_CONTACT/group_join：sys 或已有直接关系 loca
 预算、目标隐私、拒后冷却和屏蔽。reserveInvitation 返回耐久 contact 引用，绝不另造免审通道。
 join 要求邀请未过期、邀请/组版本一致、邀请者仍有权，目标插件 approveJoin 验证当前获准
 contact、真实用户同意及已耐久保存的本地组许可。重试不加第二成员；退出重入用新 membership_id。
+显式 `join(invitation, revision, selected)` 保留真实审批 Actor，selected 在 approveJoin
+核验同意记录、本人归属、已登记/开放状态和精确本地耐久许可之前只是候选数据。
+sys 邀请可选同 node 的 sys 或本人既有 local；精确 local 邀请不能改址。
+选择不同于审批来源的 local 须独立真人 UI 认证，不把模型声明当批准、不伪造 Actor。
+最终地址固定在预分配 membership_id 的成员记录中；重试只能查询同地址结果，不能换址增员。
+重试仍以 committed=true 核验原审批归属/精确目标，不签发新权限，也不延长原期限。
+原两参数 join 只选择已认证 Actor 的地址，不调用 CONTACT_ASSIGN 或创建宿主会话。
 组内成员不获得私聊/历史/模型执行许可。leave/delete/发言权变化终结尚未接受的受影响快照。
 
 ## 发送与派发
@@ -44,6 +51,13 @@ send 固定不可变接收快照并预分配逐 local recipient_id，按 node �
 每 node 最多 256 locals；Mailbox.preflight 必须按最终签名 FETCH 编码检查 64KiB。
 Mailbox.store 是数据库事务端口，引用固定 messageId/recipientId，不能逐页调用旧 store 生成新消息。
 页面最多 32 node，邮箱写入、逐项 dispatched 与预算进度同事务；失败整页回滚。
+已保存的 PAGED 计划使用独立 `dispatchTarget` 决策：仅该 recipient 的确定失权返回
+REVOKED，在同页事务中写 rejected/回应 unavailable 后继续其他合法目标，原快照/分母不变。
+源侧整体拒绝、IAM 暂时不可用、离线与邮箱背压必须抛错回滚重试，不能靠捕获任意
+forbidden/unavailable 猜成目标撤权；页面中途存储失败同样回滚先前写入、终态及进度。
+原子发送仍用 checkTarget，任一已知拒绝整笔回滚，不改为部分保存。
+dispatch 返回本页已创建邮箱的 node 数；整页撤权时可为 0，不能据此认定计划已完成，
+仍由 pendingDispatches/状态对账有界推进后续页。
 同线程/组内按事务分配的数据库 position 排序，fetch 按 local 阻挡更早待决项；
 一个 local 未决不会挡住同 node 其他 local 已可接收的消息。
 HEAD 只能在提交后发。源/目标权限、成员实例、冻结和广播 grant 每页及 fetch 重核。
@@ -78,6 +92,9 @@ fetch 按当前目标精确 local 裁剪；历史 accepted 保留，不因发送
 receipt 必须由目标身份和耐久证据验证端口核验，逐 recipient 幂等，不允许整 node ACK。
 status 只供原认证发送者，返回互斥收件/回应计数，分母始终为原 totalMembers，不泄露逐地址名单。
 respond 先经 verifyResponse 校验已提交的窄私信/显式拒绝证据，再记录业务回应状态，
+新增回应/修订必须由快照中的原 membership_id 当前有效授权，unavailable/timed_out
+不能被退组重入的新实例恢复。已存在幂等操作只经当前历史读取权和原提交证据核验后
+返回确认，不改旧回应/accepted 事实，不授新回应或修订权。
 与收件 ACK 分开；每原 recipient 一次最终回应、最多 3 次修订，
 截止不超过原 TTL/24 小时。实际私信应由 J2 原消息/原 recipient 的窄回复端口生成，
 不能把回应状态更新冒作已发私信。reply_all 必须显式新 send 并重新核当前成员/广播权。

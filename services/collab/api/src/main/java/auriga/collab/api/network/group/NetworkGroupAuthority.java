@@ -21,6 +21,18 @@ public interface NetworkGroupAuthority {
 
   void checkTarget(Actor source, Address target, boolean broadcast);
 
+  enum TargetAccess {
+    ALLOWED,
+    REVOKED
+  }
+
+  /**
+   * Current per-recipient decision for an already saved paged snapshot. REVOKED means confirmed
+   * loss of this target's authorization only. Source-wide denial and transient IAM/offline/backlog
+   * failures must throw, never become REVOKED. No exception-code guessing or default allow adapter.
+   */
+  TargetAccess dispatchTarget(Actor source, Address target, boolean broadcast);
+
   /**
    * Existing direct relation or shared FIRST_CONTACT/human_dialogue, with private uniform status.
    */
@@ -49,9 +61,22 @@ public interface NetworkGroupAuthority {
       Actor source, Address target, String group, UUID invitation, Instant expiresAt);
 
   /**
-   * Verify current approved contact, target owner/local, local durable permission and revisions.
+   * Verify the real user's approved contact/decision and durable permission for exactly selected,
+   * including tenant/node ownership, existing local registration/lifecycle and revisions. invited
+   * is the original contact target, not a replacement source. selected is an untrusted candidate
+   * until this call succeeds; actor always remains the authenticated approver. committed=true is
+   * only an original-approval/result reconciliation: authenticate its owner and exact target
+   * without issuing a new permission or extending the original deadline. No session creation.
    */
-  void approveJoin(Actor target, UUID contact, UUID invitation, UUID membership, long revision);
+  void approveJoin(
+      Actor actor,
+      Address invited,
+      Address selected,
+      UUID contact,
+      UUID invitation,
+      UUID membership,
+      long revision,
+      boolean committed);
 
   /**
    * Current target authentication plus durable evidence; an ACK is never a node-wide ACK. ACCEPTED

@@ -9,6 +9,50 @@ import org.junit.jupiter.api.Test;
 
 class NetworkGroupRulesTest {
   @Test
+  void sysJoinScopeAllowsASelectedLocalWithoutChangingTheApprover() {
+    var approver =
+        new Actor("bob", new Address("2", "20", "0", "system"), Sender.HUMAN, "ui", "bob");
+    GroupRules.joinScope(approver, approver.address(), new Address("2", "20", "1", "session"));
+    GroupRules.joinScope(approver, approver.address(), approver.address());
+    assertEquals("0", approver.address().local());
+    assertEquals(Sender.HUMAN, approver.sender());
+  }
+
+  @Test
+  void joinScopeRejectsCrossRealmNodeExactLocalRetargetingAndAgentSelection() {
+    var approver =
+        new Actor("bob", new Address("2", "20", "0", "system"), Sender.HUMAN, "ui", "bob");
+    var local = new Address("2", "20", "1", "session");
+    for (var selected :
+        List.of(new Address("3", "20", "1", "session"), new Address("2", "21", "1", "session")))
+      assertEquals(
+          "network.group_not_available",
+          assertThrows(
+                  AurigaException.class,
+                  () -> GroupRules.joinScope(approver, approver.address(), selected))
+              .errorCode()
+              .code());
+    assertEquals(
+        "network.group_not_available",
+        assertThrows(
+                AurigaException.class,
+                () -> GroupRules.joinScope(approver, local, new Address("2", "20", "2", "session")))
+            .errorCode()
+            .code());
+    var agent = new Actor("bob", local, Sender.AGENT, "session-binding", "bob");
+    GroupRules.joinScope(agent, approver.address(), local);
+    assertEquals(
+        "network.group_not_available",
+        assertThrows(
+                AurigaException.class,
+                () ->
+                    GroupRules.joinScope(
+                        agent, approver.address(), new Address("2", "20", "2", "session")))
+            .errorCode()
+            .code());
+  }
+
+  @Test
   void atomicAndPagedBoundariesAndNodeAggregation() {
     var recipients = new ArrayList<Recipient>();
     for (int i = 0; i < 100; i++)

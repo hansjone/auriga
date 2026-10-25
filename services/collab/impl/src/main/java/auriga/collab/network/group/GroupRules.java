@@ -79,6 +79,19 @@ final class GroupRules {
             : "session".equals(a.type()) || "subagent".equals(a.type()));
   }
 
+  static void joinScope(Actor approver, Address invited, Address selected) {
+    address(invited);
+    address(selected);
+    require(
+        approver.address().realm().equals(invited.realm())
+            && approver.address().node().equals(invited.node())
+            && selected.realm().equals(invited.realm())
+            && selected.node().equals(invited.node())
+            && (invited.local().equals("0") || invited.equals(selected))
+            && (approver.sender() == Sender.HUMAN || approver.address().equals(selected)),
+        "group_not_available");
+  }
+
   static void actor(Actor a) {
     require(
         a != null

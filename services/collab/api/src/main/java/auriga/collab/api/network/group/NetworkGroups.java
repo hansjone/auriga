@@ -173,6 +173,15 @@ public interface NetworkGroups {
   /** Requires durable local group permission and a current shared first-contact decision. */
   Group join(UUID invitation, long expectedRevision);
 
+  /**
+   * Explicit selection from the authenticated approval path. A sys invitation may select the user's
+   * existing local on the same node; a precise invitation cannot change target. Authority must
+   * verify real consent/ownership/registration/durable permission before the candidate is
+   * activated. Retries must select the same address; this never changes the actor or creates a host
+   * session.
+   */
+  Group join(UUID invitation, long expectedRevision, Address selected);
+
   Group leave(String group, long expectedRevision);
 
   UUID humanIntent(Send request);

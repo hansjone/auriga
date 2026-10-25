@@ -30,6 +30,14 @@ class NetworkGroupPostgresTest {
   boolean replyProof = true;
   boolean unicastAllowed = true;
   String deniedTarget;
+  String unavailableTarget;
+  boolean sourceDenied;
+  int storeAttempts;
+  int failStoreAt;
+  final Map<Address, String> joinOwners = new HashMap<>();
+  final Set<Address> closedJoinTargets = new HashSet<>();
+  final Set<Address> unpermittedJoinTargets = new HashSet<>();
+  Actor lastJoinApprover;
   Instant acceptedAt;
   List<Address> broadcast = List.of(address("20", "0"), address("21", "0"));
   NetworkGroupService service;
@@ -66,6 +74,7 @@ class NetworkGroupPostgresTest {
 
           public void checkSource(Actor a) {
             if (!available) throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+            if (sourceDenied) throw new AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
           }
 
           public void checkSend(
@@ -75,8 +84,17 @@ class NetworkGroupPostgresTest {
 
           public void checkTarget(Actor s, Address a, boolean b) {
             checkSource(s);
+            if (a.node().equals(unavailableTarget))
+              throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
             if (a.node().equals(deniedTarget))
               throw new AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+          }
+
+          public TargetAccess dispatchTarget(Actor s, Address a, boolean b) {
+            checkSource(s);
+            if (a.node().equals(deniedTarget)) return TargetAccess.REVOKED;
+            checkTarget(s, a, b);
+            return TargetAccess.ALLOWED;
           }
 
           public void checkHumanUnicast(Actor a, Address target, int bytes) {
@@ -114,8 +132,22 @@ class NetworkGroupPostgresTest {
             return UUID.randomUUID();
           }
 
-          public void approveJoin(Actor a, UUID c, UUID i, UUID m, long r) {
-            if (!approved) throw new AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
+          public void approveJoin(
+              Actor a,
+              Address invited,
+              Address selected,
+              UUID c,
+              UUID i,
+              UUID m,
+              long r,
+              boolean committed) {
+            lastJoinApprover = a;
+            if (!approved
+                || (joinOwners.containsKey(selected) && !a.user().equals(joinOwners.get(selected)))
+                || (!selected.equals(a.address()) && !a.user().equals(joinOwners.get(selected)))
+                || closedJoinTargets.contains(selected)
+                || unpermittedJoinTargets.contains(selected))
+              throw new AurigaException(auriga.common.error.CommonErrors.FORBIDDEN);
           }
 
           public Instant verifyReceipt(Actor a, UUID m, Recipient r, Outcome o) {
@@ -149,7 +181,9 @@ class NetworkGroupPostgresTest {
               }
 
               public void store(Item i) {
-                if (full) throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+                storeAttempts++;
+                if (full || storeAttempts == failStoreAt)
+                  throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
                 // Real database mutation proves rollback of mailbox writes and plan progress
                 // together.
                 jdbc.update(
@@ -235,6 +269,392 @@ class NetworkGroupPostgresTest {
         call(() -> service.invite(g.local(), g.revision(), target.address(), now.plusSeconds(600)));
     current = target;
     return call(() -> service.join(invitation.id(), invitation.revision()));
+  }
+
+  @Test
+  void acceptedRecipientCannotRestoreResponseAfterLeavingAndRejoining() {
+    var bob = actor("bob", "20", "1");
+    var g = add(create(), bob);
+    current = alice;
+    var sent = call(() -> service.send(human(request(g.local(), "before-leave"))));
+    current = bob;
+    var original = call(() -> service.fetch(sent.messageId())).recipients().getFirst();
+    call(
+        () -> {
+          service.receipt(sent.messageId(), original.id(), Outcome.ACCEPTED);
+          return null;
+        });
+    var left = call(() -> service.leave(g.local(), g.revision()));
+    assertEquals(
+        "unavailable",
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT response FROM collab.network_group_recipient WHERE tenant_id=? AND id=?",
+                    String.class,
+                    tenant,
+                    original.id())));
+    var rejoined = add(left, bob);
+    assertNotEquals(
+        original.membershipId(),
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT id FROM collab.network_group_member WHERE tenant_id=? AND realm='2' AND group_local=? AND node='20' AND local='1' AND active",
+                    UUID.class,
+                    tenant,
+                    g.local())));
+    denied(
+        "network.target_unavailable",
+        () ->
+            service.respond(
+                sent.messageId(), original.id(), "after-rejoin", 1, Response.RESPONDED));
+    assertEquals(
+        "accepted",
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT outcome FROM collab.network_group_recipient WHERE tenant_id=? AND id=?",
+                    String.class,
+                    tenant,
+                    original.id())));
+    assertEquals(
+        "unavailable",
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT response FROM collab.network_group_recipient WHERE tenant_id=? AND id=?",
+                    String.class,
+                    tenant,
+                    original.id())));
+    assertEquals(
+        0,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_group_response_operation WHERE tenant_id=? AND recipient_id=?",
+                    Integer.class,
+                    tenant,
+                    original.id())));
+    // A fresh snapshot for the current instance still grants its own narrow response permission.
+    current = alice;
+    var fresh = call(() -> service.send(human(request(rejoined.local(), "new-instance"))));
+    current = bob;
+    var recipient = call(() -> service.fetch(fresh.messageId())).recipients().getFirst();
+    call(
+        () -> {
+          service.respond(fresh.messageId(), recipient.id(), "fresh", 1, Response.RESPONDED);
+          service.respond(fresh.messageId(), recipient.id(), "fresh", 1, Response.RESPONDED);
+          return null;
+        });
+  }
+
+  @Test
+  void committedResponseRetryAfterLeaveDoesNotGrantANewRevision() {
+    var bob = actor("bob", "20", "1");
+    var g = add(create(), bob);
+    current = alice;
+    var sent = call(() -> service.send(human(request(g.local(), "history"))));
+    current = bob;
+    var recipient = call(() -> service.fetch(sent.messageId())).recipients().getFirst();
+    call(
+        () -> {
+          service.receipt(sent.messageId(), recipient.id(), Outcome.ACCEPTED);
+          service.respond(sent.messageId(), recipient.id(), "committed", 1, Response.RESPONDED);
+          return null;
+        });
+    var left = call(() -> service.leave(g.local(), g.revision()));
+    add(left, bob);
+    replyProof = false;
+    denied(
+        "common.forbidden",
+        () ->
+            service.respond(sent.messageId(), recipient.id(), "committed", 1, Response.RESPONDED));
+    replyProof = true;
+    call(
+        () -> {
+          service.respond(sent.messageId(), recipient.id(), "committed", 1, Response.RESPONDED);
+          return null;
+        });
+    denied(
+        "network.target_unavailable",
+        () ->
+            service.respond(
+                sent.messageId(), recipient.id(), "new-revision", 2, Response.RESPONDED));
+    assertEquals(
+        1,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT response_revision FROM collab.network_group_recipient WHERE tenant_id=? AND id=?",
+                    Integer.class,
+                    tenant,
+                    recipient.id())));
+  }
+
+  Stored pagedBroadcast(String key) {
+    broadcast =
+        java.util.stream.IntStream.range(100, 133).mapToObj(n -> address("" + n, "0")).toList();
+    grant(Scope.USER, "alice", null, null, null);
+    var r = request("1", key);
+    return call(
+        () ->
+            service.send(
+                human(
+                    new Send(
+                        r.group(),
+                        r.thread(),
+                        r.key(),
+                        r.text(),
+                        r.intent(),
+                        Mode.PAGED,
+                        r.expiresAt(),
+                        null))));
+  }
+
+  @Test
+  void firstRevokedPagedTargetDoesNotBlockOtherNodes() {
+    revokedPagedTarget("100");
+  }
+
+  @Test
+  void middleRevokedPagedTargetDoesNotBlockOtherNodes() {
+    revokedPagedTarget("116");
+  }
+
+  private void revokedPagedTarget(String revoked) {
+    var sent = pagedBroadcast("revoked-target");
+    deniedTarget = revoked;
+    assertEquals(31, call(() -> service.dispatch(sent.messageId())));
+    assertEquals(1, call(() -> service.dispatch(sent.messageId())));
+    assertEquals(0, call(() -> service.dispatch(sent.messageId())));
+    assertEquals(
+        32,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_group_test_sink WHERE tenant_id=? AND message_id=?",
+                    Integer.class,
+                    tenant,
+                    sent.messageId())));
+    assertEquals(
+        0,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_group_test_sink WHERE tenant_id=? AND message_id=? AND node=?",
+                    Integer.class,
+                    tenant,
+                    sent.messageId(),
+                    revoked)));
+    var before = call(() -> service.status(sent.messageId()));
+    assertEquals(33, before.total());
+    assertEquals(1L, before.receipts().get("rejected"));
+    assertEquals(32L, before.receipts().get("pending"));
+    for (var target : broadcast)
+      if (!target.node().equals(revoked)) {
+        current = actor("reader", target.node(), "0");
+        var recipient = call(() -> service.fetch(sent.messageId())).recipients().getFirst();
+        call(
+            () -> {
+              service.receipt(sent.messageId(), recipient.id(), Outcome.ACCEPTED);
+              return null;
+            });
+      }
+    current = alice;
+    var after = call(() -> service.status(sent.messageId()));
+    assertEquals(33, after.total());
+    assertEquals(32L, after.receipts().get("accepted"));
+    assertEquals(1L, after.receipts().get("rejected"));
+  }
+
+  @Test
+  void temporaryTargetFailureAndSourceDenialDoNotBecomeRecipientRejection() {
+    var sent = pagedBroadcast("temporary");
+    unavailableTarget = "116";
+    denied("common.unavailable", () -> service.dispatch(sent.messageId()));
+    assertTrue(storeAttempts > 0);
+    assertUntouchedPage(sent.messageId());
+    unavailableTarget = null;
+    sourceDenied = true;
+    denied("common.forbidden", () -> service.dispatch(sent.messageId()));
+    sourceDenied = false;
+    assertUntouchedPage(sent.messageId());
+    assertEquals(32, call(() -> service.dispatch(sent.messageId())));
+    assertEquals(1, call(() -> service.dispatch(sent.messageId())));
+  }
+
+  @Test
+  void mailboxFailureAfterPartialPageWritesRollsBackProgressAndTerminalDecisions() {
+    var sent = pagedBroadcast("mid-page");
+    deniedTarget = "100";
+    failStoreAt = 3;
+    denied("common.unavailable", () -> service.dispatch(sent.messageId()));
+    assertEquals(3, storeAttempts);
+    assertUntouchedPage(sent.messageId());
+    failStoreAt = 0;
+    assertEquals(31, call(() -> service.dispatch(sent.messageId())));
+    assertEquals(1, call(() -> service.dispatch(sent.messageId())));
+    assertEquals(0, call(() -> service.dispatch(sent.messageId())));
+  }
+
+  private void assertUntouchedPage(UUID message) {
+    assertEquals(
+        0,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_group_test_sink WHERE tenant_id=? AND message_id=?",
+                    Integer.class,
+                    tenant,
+                    message)));
+    assertEquals(
+        0,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_group_recipient WHERE tenant_id=? AND message_id=? AND dispatched",
+                    Integer.class,
+                    tenant,
+                    message)));
+    var status = call(() -> service.status(message));
+    assertEquals(33L, status.receipts().get("pending"));
+    assertEquals(0L, status.receipts().getOrDefault("rejected", 0L));
+  }
+
+  @Test
+  void sysInvitationCanSelectExistingLocalAndFixesItsTargetForRetries() {
+    var g = create();
+    var selected = address("20", "1");
+    joinOwners.put(selected, "bob");
+    var invitation =
+        call(
+            () ->
+                service.invite(g.local(), g.revision(), address("20", "0"), now.plusSeconds(600)));
+    var approver = actor("bob", "20", "0");
+    current = approver;
+    var joined = call(() -> service.join(invitation.id(), invitation.revision(), selected));
+    assertEquals(approver, lastJoinApprover);
+    assertEquals(approver, current);
+    assertEquals(
+        "1",
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT local FROM collab.network_group_member WHERE tenant_id=? AND id=?",
+                    String.class,
+                    tenant,
+                    invitation.membershipId())));
+    assertEquals(
+        "0",
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT local FROM collab.network_group_invitation WHERE tenant_id=? AND id=?",
+                    String.class,
+                    tenant,
+                    invitation.id())));
+    assertEquals(
+        joined, call(() -> service.join(invitation.id(), invitation.revision(), selected)));
+    current = actor("mallory", "20", "0");
+    denied(
+        "common.forbidden", () -> service.join(invitation.id(), invitation.revision(), selected));
+    current = approver;
+    joinOwners.put(address("20", "2"), "bob");
+    denied(
+        "network.conflict",
+        () -> service.join(invitation.id(), invitation.revision(), address("20", "2")));
+    assertEquals(
+        2,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_group_member WHERE tenant_id=? AND group_local=? AND active",
+                    Integer.class,
+                    tenant,
+                    g.local())));
+    current = alice;
+    var sent = call(() -> service.send(human(request(g.local(), "selected-member"))));
+    current = actor("bob", "20", "1");
+    var actual = call(() -> service.fetch(sent.messageId())).recipients().getFirst();
+    assertEquals(selected, actual.address());
+    assertEquals(invitation.membershipId(), actual.membershipId());
+  }
+
+  @Test
+  void selectedJoinTargetNeedsSameNodeOwnershipRegistrationLifecycleAndDurablePermission() {
+    var g = create();
+    var selected = address("20", "1");
+    joinOwners.put(selected, "bob");
+    joinOwners.put(address("20", "2"), "charlie");
+    var invitation =
+        call(
+            () ->
+                service.invite(g.local(), g.revision(), address("20", "0"), now.plusSeconds(600)));
+    current = actor("bob", "20", "0");
+    denied(
+        "network.group_not_available",
+        () ->
+            service.join(
+                invitation.id(), invitation.revision(), new Address("3", "20", "1", "session")));
+    denied(
+        "network.group_not_available",
+        () -> service.join(invitation.id(), invitation.revision(), address("21", "1")));
+    denied(
+        "common.forbidden",
+        () -> service.join(invitation.id(), invitation.revision(), address("20", "2")));
+    denied(
+        "common.forbidden",
+        () -> service.join(invitation.id(), invitation.revision(), address("20", "3")));
+    closedJoinTargets.add(selected);
+    denied(
+        "common.forbidden", () -> service.join(invitation.id(), invitation.revision(), selected));
+    closedJoinTargets.clear();
+    unpermittedJoinTargets.add(selected);
+    denied(
+        "common.forbidden", () -> service.join(invitation.id(), invitation.revision(), selected));
+    unpermittedJoinTargets.clear();
+    current = actor("bob", "21", "0");
+    denied(
+        "network.group_not_available",
+        () -> service.join(invitation.id(), invitation.revision(), selected));
+    current =
+        new Actor(
+            "bob", new Address("3", "20", "0", "system"), Sender.HUMAN, "other-realm-ui", "bob");
+    denied(
+        "network.group_not_available",
+        () -> service.join(invitation.id(), invitation.revision(), selected));
+    current = actor("mallory", "20", "0");
+    denied(
+        "common.forbidden", () -> service.join(invitation.id(), invitation.revision(), selected));
+    current = actor("bob", "20", "2");
+    denied(
+        "network.group_not_available",
+        () -> service.join(invitation.id(), invitation.revision(), selected));
+    current = actor("bob", "20", "0");
+    approved = false;
+    denied(
+        "common.forbidden", () -> service.join(invitation.id(), invitation.revision(), selected));
+    approved = true;
+    assertNotNull(call(() -> service.join(invitation.id(), invitation.revision(), selected)));
+  }
+
+  @Test
+  void exactLocalInvitationCannotBeRetargetedByItsOwner() {
+    var g = create();
+    var target = address("20", "1");
+    joinOwners.put(target, "bob");
+    joinOwners.put(address("20", "2"), "bob");
+    var invitation =
+        call(() -> service.invite(g.local(), g.revision(), target, now.plusSeconds(600)));
+    current = actor("bob", "20", "0");
+    denied(
+        "network.group_not_available",
+        () -> service.join(invitation.id(), invitation.revision(), address("20", "2")));
+    denied(
+        "network.group_not_available",
+        () -> service.join(invitation.id(), invitation.revision(), address("20", "0")));
+    assertNotNull(call(() -> service.join(invitation.id(), invitation.revision(), target)));
   }
 
   @Test

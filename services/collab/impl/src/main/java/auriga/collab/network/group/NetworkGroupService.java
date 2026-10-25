@@ -355,76 +355,106 @@ public final class NetworkGroupService implements NetworkGroups {
     return locked(
         () -> {
           var a = source();
-          var i =
-              one(
-                  "SELECT * FROM collab.network_group_invitation WHERE tenant_id=? AND id=?",
-                  "group_not_available",
-                  tenant(),
-                  invitation);
-          require(
-              a.address().realm().equals(i.get("realm"))
-                  && a.address().node().equals(i.get("node"))
-                  && a.address().local().equals(i.get("local")),
-              "group_not_available");
-          var g = group(a, str(i, "group_local"));
-          require(number(i, "group_revision") == expected, "conflict");
-          if (i.get("joined_revision") != null) {
-            require(
-                rows(
-                            "SELECT id FROM collab.network_group_member WHERE tenant_id=? AND id=? AND active",
-                            tenant(),
-                            i.get("membership_id"))
-                        .size()
-                    == 1,
-                "group_not_available");
-            return new Group(
-                a.address().realm(), str(i, "group_local"), number(i, "joined_revision"));
-          }
-          require(instant(i, "expires_at").isAfter(now()), "contact_expired");
-          require(number(g, "revision") == expected, "conflict");
-          require(
-              !rows(
-                      "SELECT id FROM collab.network_group_member WHERE tenant_id=? AND realm=? AND group_local=? AND node=? AND local=? AND administrator AND active",
-                      tenant(),
-                      a.address().realm(),
-                      g.get("local"),
-                      i.get("inviter_node"),
-                      i.get("inviter_local"))
-                  .isEmpty(),
-              "group_not_available");
-          authority.approveJoin(
-              a, id(i, "contact_id"), invitation, id(i, "membership_id"), expected);
-          var members =
-              rows(
-                  "SELECT node FROM collab.network_group_member WHERE tenant_id=? AND realm=? AND group_local=? AND active",
-                  tenant(),
-                  a.address().realm(),
-                  g.get("local"));
-          require(members.size() < number(g, "max_members"), "quota_exceeded");
-          var nodes = new HashSet<String>();
-          for (var m : members) nodes.add(str(m, "node"));
-          nodes.add(a.address().node());
-          require(nodes.size() <= number(g, "max_nodes"), "quota_exceeded");
-          require(
-              rows(
-                      "SELECT id FROM collab.network_group_member WHERE tenant_id=? AND realm=? AND group_local=? AND node=? AND local=? AND active",
-                      tenant(),
-                      a.address().realm(),
-                      g.get("local"),
-                      a.address().node(),
-                      a.address().local())
-                  .isEmpty(),
-              "conflict");
-          addMember(a.address(), str(g, "local"), id(i, "membership_id"), false);
-          var result = bump(g);
-          jdbc.update(
-              "UPDATE collab.network_group_invitation SET joined_revision=? WHERE tenant_id=? AND id=?",
-              result.revision(),
-              tenant(),
-              invitation);
-          audit(a, "join", invitation.toString(), "");
-          return result;
+          return join(a, invitation, expected, a.address());
         });
+  }
+
+  @Override
+  public Group join(UUID invitation, long expected, Address selected) {
+    return locked(() -> join(source(), invitation, expected, selected));
+  }
+
+  private Group join(Actor a, UUID invitation, long expected, Address selected) {
+    var i =
+        one(
+            "SELECT * FROM collab.network_group_invitation WHERE tenant_id=? AND id=?",
+            "group_not_available",
+            tenant(),
+            invitation);
+    var invited =
+        new Address(str(i, "realm"), str(i, "node"), str(i, "local"), str(i, "address_type"));
+    joinScope(a, invited, selected);
+    var g = group(a, str(i, "group_local"));
+    require(number(i, "group_revision") == expected, "conflict");
+    if (i.get("joined_revision") != null) {
+      var committed =
+          one(
+              "SELECT * FROM collab.network_group_member WHERE tenant_id=? AND id=? AND active",
+              "group_not_available",
+              tenant(),
+              i.get("membership_id"));
+      require(
+          selected.equals(
+              new Address(
+                  str(committed, "realm"),
+                  str(committed, "node"),
+                  str(committed, "local"),
+                  str(committed, "address_type"))),
+          "conflict");
+      if (!selected.equals(a.address())) authority.requireHumanUi(a);
+      authority.approveJoin(
+          a,
+          invited,
+          selected,
+          id(i, "contact_id"),
+          invitation,
+          id(i, "membership_id"),
+          expected,
+          true);
+      return new Group(a.address().realm(), str(i, "group_local"), number(i, "joined_revision"));
+    }
+    require(instant(i, "expires_at").isAfter(now()), "contact_expired");
+    require(number(g, "revision") == expected, "conflict");
+    require(
+        !rows(
+                "SELECT id FROM collab.network_group_member WHERE tenant_id=? AND realm=? AND group_local=? AND node=? AND local=? AND administrator AND active",
+                tenant(),
+                a.address().realm(),
+                g.get("local"),
+                i.get("inviter_node"),
+                i.get("inviter_local"))
+            .isEmpty(),
+        "group_not_available");
+    if (!selected.equals(a.address())) authority.requireHumanUi(a);
+    authority.approveJoin(
+        a,
+        invited,
+        selected,
+        id(i, "contact_id"),
+        invitation,
+        id(i, "membership_id"),
+        expected,
+        false);
+    var members =
+        rows(
+            "SELECT node FROM collab.network_group_member WHERE tenant_id=? AND realm=? AND group_local=? AND active",
+            tenant(),
+            a.address().realm(),
+            g.get("local"));
+    require(members.size() < number(g, "max_members"), "quota_exceeded");
+    var nodes = new HashSet<String>();
+    for (var m : members) nodes.add(str(m, "node"));
+    nodes.add(selected.node());
+    require(nodes.size() <= number(g, "max_nodes"), "quota_exceeded");
+    require(
+        rows(
+                "SELECT id FROM collab.network_group_member WHERE tenant_id=? AND realm=? AND group_local=? AND node=? AND local=? AND active",
+                tenant(),
+                a.address().realm(),
+                g.get("local"),
+                selected.node(),
+                selected.local())
+            .isEmpty(),
+        "conflict");
+    addMember(selected, str(g, "local"), id(i, "membership_id"), false);
+    var result = bump(g);
+    jdbc.update(
+        "UPDATE collab.network_group_invitation SET joined_revision=? WHERE tenant_id=? AND id=?",
+        result.revision(),
+        tenant(),
+        invitation);
+    audit(a, "join", invitation.toString(), "");
+    return result;
   }
 
   @Override
@@ -1317,10 +1347,27 @@ public final class NetworkGroupService implements NetworkGroups {
               p.get("id"),
               n.get("node"));
       // A whole node item may be created early; fetch below gates each logical local separately.
-      var recipients = rs.stream().map(this::recipient).toList();
+      var recipients = new ArrayList<Recipient>();
       var source = actorJson(str(p, "actor_json"));
-      for (var r : recipients)
-        authority.checkTarget(source, r.address(), p.get("group_local").equals("1"));
+      for (var row : rs) {
+        var r = recipient(row);
+        if (p.get("dispatch_mode").equals(Mode.PAGED.name())) {
+          var access =
+              authority.dispatchTarget(source, r.address(), p.get("group_local").equals("1"));
+          require(access != null, "protocol_error");
+          if (access == NetworkGroupAuthority.TargetAccess.REVOKED) {
+            jdbc.update(
+                "UPDATE collab.network_group_recipient SET outcome='rejected',terminal_at=?,response=CASE WHEN response='pending' THEN 'unavailable' ELSE response END WHERE tenant_id=? AND id=? AND NOT dispatched AND outcome='pending'",
+                Timestamp.from(now()),
+                tenant(),
+                r.id());
+            audit(source, "target_revoked", r.id().toString(), "");
+            continue;
+          }
+        } else authority.checkTarget(source, r.address(), p.get("group_local").equals("1"));
+        recipients.add(r);
+      }
+      if (recipients.isEmpty()) continue;
       var item = item(p, recipients);
       mailbox.preflight(item);
       mailbox.store(item);
@@ -1454,21 +1501,6 @@ public final class NetworkGroupService implements NetworkGroups {
           var a = source();
           var p = plan(message);
           var r = targetRecipient(a, message, recipient);
-          require(!(Boolean) p.get("recalled"), "message_recalled");
-          require(
-              (Boolean) r.get("dispatched")
-                  && p.get("intent").equals("REQUEST")
-                  && instant(p, "response_deadline").isAfter(now())
-                  && !Set.of("rejected", "expired", "canceled", "skipped", "unresolved")
-                      .contains(r.get("outcome")),
-              "target_unavailable");
-          if (!p.get("group_local").equals("1")) {
-            member(a, str(p, "group_local"));
-          }
-          authority.checkTarget(
-              actorJson(str(p, "actor_json")), a.address(), p.get("group_local").equals("1"));
-          authority.verifyResponse(
-              a, item(p, List.of(recipient(r))), recipient(r), key, revision, response);
           var operations =
               rows(
                   "SELECT * FROM collab.network_group_response_operation WHERE tenant_id=? AND recipient_id=? AND idempotency_key=?",
@@ -1480,8 +1512,36 @@ public final class NetworkGroupService implements NetworkGroups {
             require(
                 number(op, "revision") == revision && response.name().equals(op.get("response")),
                 "conflict");
+            // A proven committed operation may be reconciled without restoring any response right.
+            authority.checkHistoricalRead(a, item(p, List.of(recipient(r))));
+            authority.verifyResponse(
+                a, item(p, List.of(recipient(r))), recipient(r), key, revision, response);
             return null;
           }
+          require(!(Boolean) p.get("recalled"), "message_recalled");
+          require(
+              (Boolean) r.get("dispatched")
+                  && p.get("intent").equals("REQUEST")
+                  && instant(p, "response_deadline").isAfter(now())
+                  && !Set.of("rejected", "expired", "canceled", "skipped", "unresolved")
+                      .contains(r.get("outcome"))
+                  && Set.of("pending", "responded", "declined").contains(r.get("response")),
+              "target_unavailable");
+          if (!p.get("group_local").equals("1")) {
+            one(
+                "SELECT id FROM collab.network_group_member WHERE tenant_id=? AND id=? AND realm=? AND group_local=? AND node=? AND local=? AND active",
+                "target_unavailable",
+                tenant(),
+                r.get("membership_id"),
+                p.get("realm"),
+                p.get("group_local"),
+                r.get("node"),
+                r.get("local"));
+          }
+          authority.checkTarget(
+              actorJson(str(p, "actor_json")), a.address(), p.get("group_local").equals("1"));
+          authority.verifyResponse(
+              a, item(p, List.of(recipient(r))), recipient(r), key, revision, response);
           require(revision <= 4, "quota_exceeded");
           require(revision == number(r, "response_revision") + 1, "conflict");
           jdbc.update(
