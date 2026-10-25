@@ -138,6 +138,17 @@ public class NetworkMailboxService {
         });
   }
 
+  /** Current route after an online RECEIVE check, without fetching message rows. */
+  public NodeRoute head(UUID tenantId, String realm, String nodeId) {
+    return run(
+        tenantId,
+        () -> {
+          checkTarget(tenantId, realm, nodeId, Operation.RECEIVE);
+          ensureNodeLocked(tenantId, realm, nodeId);
+          return loadRoute(tenantId, realm, nodeId, null);
+        });
+  }
+
   /**
    * Atomic small-batch / unicast store: one immutable body + per-node mail items + recipients in
    * the same transaction. Returns platform_stored-shaped durability.

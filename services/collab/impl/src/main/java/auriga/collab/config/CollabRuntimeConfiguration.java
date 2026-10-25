@@ -1,21 +1,27 @@
 package auriga.collab.config;
 
 import auriga.collab.api.CollabAdmission;
-import auriga.collab.api.NetworkSourceAuthority;
 import auriga.collab.app.CollabService;
 import auriga.collab.app.NetworkMailboxService;
+import auriga.collab.app.NetworkMailboxWireService;
 import auriga.collab.app.NetworkSigningKeys;
 import auriga.collab.grpc.CollabGrpcService;
+import auriga.collab.grpc.NetworkAuthorityClient;
+import auriga.collab.grpc.NetworkMailboxGrpcService;
+import auriga.collab.grpc.NetworkSourceGrpcAuthority;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.persistence.TenantTransactionManager;
-import auriga.iam.api.NetworkAuthority;
+import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Instant;
 import javax.sql.DataSource;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Standalone collab schema only; combined datasource wiring is deliberately not invented. */
@@ -26,17 +32,44 @@ public class CollabRuntimeConfiguration {
   @Bean
   @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(
       NetworkSigningKeys.class)
-  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-      prefix = "auriga.collab.network",
-      name = "key-state-file")
-  NetworkSigningKeys networkSigningKeys(
-      @org.springframework.beans.factory.annotation.Value(
-              "${auriga.collab.network.key-state-file:}")
-          String stateFile) {
+  NetworkSigningKeys networkSigningKeys(Environment env) {
+    String stateFile = env.getRequiredProperty("auriga.collab.network.key-state-file");
     if (stateFile.isBlank())
       throw new IllegalArgumentException("Network key state storage is required");
-    return new NetworkSigningKeys(Clock.systemUTC(), 1, java.nio.file.Path.of(stateFile));
+    var configured =
+        Binder.get(env)
+            .bind("auriga.collab.network.signing-keys", Bindable.listOf(SigningKey.class))
+            .orElseThrow(() -> new IllegalArgumentException("Network signing keys are required"));
+    if (configured.isEmpty() || configured.size() > 128)
+      throw new IllegalArgumentException("Invalid signing key count");
+    var keys = new NetworkSigningKeys(Clock.systemUTC(), 1, Path.of(stateFile));
+    try {
+      for (var key : configured)
+        keys.addFromFiles(
+            key.realm(),
+            key.purpose(),
+            key.kid(),
+            key.publicFile(),
+            key.privateFile(),
+            Instant.parse(key.notBefore()),
+            Instant.parse(key.notAfter()),
+            key.state());
+      return keys;
+    } catch (RuntimeException e) {
+      keys.close();
+      throw e;
+    }
   }
+
+  public record SigningKey(
+      String realm,
+      String purpose,
+      String kid,
+      Path publicFile,
+      Path privateFile,
+      String notBefore,
+      String notAfter,
+      NetworkSigningKeys.State state) {}
 
   @Bean
   @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
@@ -60,17 +93,28 @@ public class CollabRuntimeConfiguration {
   NetworkMailboxService networkMailboxService(
       DataSource source,
       TenantTransactionManager manager,
-      ObjectProvider<NetworkSourceAuthority> authority,
-      ObjectProvider<NetworkSigningKeys> keys,
-      ObjectProvider<NetworkAuthority> iam) {
+      NetworkSourceGrpcAuthority authority,
+      NetworkSigningKeys keys,
+      NetworkAuthorityClient iam) {
     Clock clock = Clock.systemUTC();
     return new NetworkMailboxService(
-        new JdbcTemplate(source),
-        manager,
-        authority.getIfAvailable(),
-        keys.getIfAvailable(() -> new NetworkSigningKeys(clock, 1)),
-        clock,
-        iam.getIfAvailable());
+        new JdbcTemplate(source), manager, authority, keys, clock, iam);
+  }
+
+  @Bean
+  NetworkMailboxWireService networkMailboxWireService(
+      NetworkMailboxService service,
+      DataSource source,
+      TenantTransactionManager manager,
+      NetworkSourceGrpcAuthority authority,
+      NetworkSigningKeys keys) {
+    return new NetworkMailboxWireService(
+        service, new JdbcTemplate(source), manager, authority, keys, Clock.systemUTC());
+  }
+
+  @Bean
+  NetworkMailboxGrpcService networkMailboxGrpcService(NetworkMailboxWireService service) {
+    return new NetworkMailboxGrpcService(service);
   }
 
   @Bean
