@@ -222,6 +222,22 @@ class PlatformTeamTokenExportTest {
     }
   }
 
+  @Test
+  void edgeDeclaredRefreshRemainsCallableOnEveryPlatform() throws Exception {
+    try (var publisher =
+        new EdgeTokenFilePublisher(
+            (service, secret) -> {
+              fail("stopped publisher must not issue a token");
+              return null;
+            },
+            root.resolve("private/secret"),
+            root.resolve("export/token"),
+            0)) {
+      assertFalse(refresh(publisher));
+      assertFalse(publisher.isRunning());
+    }
+  }
+
   private MockEnvironment environment() {
     return new MockEnvironment()
         .withProperty("auriga.platform.combined", "true")

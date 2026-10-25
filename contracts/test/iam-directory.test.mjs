@@ -76,3 +76,32 @@ test('directory page, cursor and display fields have hard bounds', () => {
     false,
   );
 });
+
+test('directory explicitly distinguishes unknown from observed presence', () => {
+  assert.equal(
+    validate({
+      items: [{ ...entry(), onlineState: 'unknown', statusObservedAt: null }],
+    }),
+    true,
+  );
+  assert.equal(
+    validate({
+      items: [
+        {
+          ...entry(),
+          onlineState: 'unknown',
+          statusObservedAt: '2026-10-25T00:00:00Z',
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    validate({
+      items: [
+        { ...entry(), onlineState: 'online', statusObservedAt: 'not-a-time' },
+      ],
+    }),
+    false,
+  );
+});

@@ -6,7 +6,8 @@ info:
     IAM 系统地址目录补充契约。只展示当前认证组织可发现的已注册 DSH 系统地址及归属展示信息。
     接受有效 portal/admin 用户或持有 auriga.connect.collab.use 的 device；不接受服务账号、instance 或内部服务令牌。
     device 来源由认证 did 绑定且必须已注册；portal/admin 按本人所有未吊销源节点的禁用策略保守过滤。
-    组织网络关闭、节点/设备吊销或归属账号停用时不返回；离线不影响目录发现，不宣称实时在线状态。
+    组织网络关闭、节点/设备吊销或归属账号停用时不返回；底层凭据到期 30 天内仍可离线发现，超过宽限期及底层会话缺失/吊销时隐藏。
+    onlineState/statusObservedAt 为兼容追加字段；无可靠观测时明确返回 unknown/null，不宣称实时在线状态。
     不返回任何会话 local、会话数量、树或类型。展示名不具有授权效力，地址也不授予联系或发送权限。
     所有分页请求重新核当前策略；游标只是当前 tenant 内节点排序位置，不能授权任何数据。
   license:
@@ -31,7 +32,7 @@ paths:
           schema: { type: string, maxLength: 128 }
       responses:
         '200':
-          description: 仅含获权的系统地址；无下一页时省略 nextCursor。
+          description: 仅含获权系统地址；最多扫描 1000 节点，允许部分页或空页带 nextCursor。仅在 nextCursor 缺失时结束翻页。
           content:
             application/json:
               schema:

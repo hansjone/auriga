@@ -1,9 +1,9 @@
 name: Plugin
 on:
   push:
-    paths: ['clients/dsh-plugin/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
+    paths: ['clients/dsh-plugin/**', 'contracts/network/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
   pull_request:
-    paths: ['clients/dsh-plugin/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
+    paths: ['clients/dsh-plugin/**', 'contracts/network/**', 'web/pnpm-lock.yaml', '.github/workflows/plugin.yml']
 permissions:
   contents: read
 jobs:

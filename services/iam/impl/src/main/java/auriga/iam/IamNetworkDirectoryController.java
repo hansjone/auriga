@@ -35,7 +35,11 @@ public class IamNetworkDirectoryController {
               "ownerUserId",
               item.getOwnerUserId(),
               "ownerDisplayName",
-              item.getOwnerDisplayName()));
+              item.getOwnerDisplayName(),
+              "onlineState",
+              item.getOnlineState().isEmpty() ? "unknown" : item.getOnlineState(),
+              "statusObservedAt",
+              item.hasStatusObservedAt() ? item.getStatusObservedAt() : null));
     if (!page.getNextCursor().isEmpty()) response.put("nextCursor", page.getNextCursor());
     return response;
   }
