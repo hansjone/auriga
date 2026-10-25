@@ -954,9 +954,30 @@ window.__ModuleLoader__.load({
           );
         }
         function Settings() {
-          useHostState();
-          const [phase, retry] = useBootstrap();
+          const host = useHostState();
+          const [phase] = useBootstrap();
           const boot = phase.status === 'ready' ? phase.boot : undefined;
+          const [View, setView] = React.useState(null);
+          const [loadFailed, setLoadFailed] = React.useState(false);
+          React.useEffect(() => {
+            let live = true;
+            import(localURL('auriga/settings/view.js'))
+              .then((module) => {
+                if (live)
+                  setView(() =>
+                    module.createSettingsView(React, {
+                      localURL,
+                      navigate: (url) => window.location.assign(url),
+                    }),
+                  );
+              })
+              .catch(() => {
+                if (live) setLoadFailed(true);
+              });
+            return () => {
+              live = false;
+            };
+          }, []);
           const row = (key, value) =>
             h(
               'div',
@@ -971,79 +992,18 @@ window.__ModuleLoader__.load({
               'aria-label': 'Auriga',
             },
             h('h2', null, 'Auriga'),
-            h('h3', null, t('connection')),
-            notice(phase, retry, true),
-            boot && row('mode', t(boot.mode)),
-            boot && row('protocol', String(boot.protocol)),
-            boot?.connection && row('endpoint', boot.connection.endpointId),
-            boot?.connection &&
-              row('received', String(boot.connection.received ?? 0)),
-            boot?.connection &&
-              h(
-                'button',
-                {
-                  type: 'button',
-                  onClick: async () => {
-                    try {
-                      const response = await fetch(
-                        localURL('auriga/local-login/status'),
-                        {
-                          credentials: 'same-origin',
-                          cache: 'no-store',
-                          redirect: 'error',
-                        },
-                      );
-                      if (!response.ok) throw failure();
-                      const state = await response.json();
-                      const out = await fetch(
-                        localURL('auriga/local-login/logout'),
-                        {
-                          method: 'POST',
-                          credentials: 'same-origin',
-                          redirect: 'error',
-                          headers: {
-                            'content-type': 'application/json',
-                            'X-Auriga-CSRF': state.csrf,
-                          },
-                          body: '{}',
-                        },
-                      );
-                      if (!out.ok) throw failure();
-                      window.location.assign(localURL('auriga/local-login'));
-                    } catch {
-                      retry();
-                    }
-                  },
-                },
-                t('logout'),
-              ),
-            h(
-              'p',
-              null,
-              t(
-                boot
-                  ? boot.source === 'package'
-                    ? boot.connection
-                      ? 'connectHint'
-                      : 'packageHint'
-                    : 'managedHint'
-                  : 'unavailableHint',
-              ),
-            ),
-            h('h3', null, t('tools')),
-            row('deployment', t('notWired')),
-            h('p', null, t('toolsHint')),
+            View
+              ? h(View, { locale: host.locale })
+              : h(
+                  'p',
+                  { role: 'status' },
+                  t(loadFailed ? 'unavailable' : 'loading'),
+                ),
             h(ConsentSection, { settings: true }),
             h('h3', null, t('about')),
             row('pluginVersion', boot?.pluginVersion),
             row('panelVersion', boot?.panelVersion),
             boot && row('uiSource', t(boot.source)),
-            h(
-              'details',
-              { className: 'auriga-setting' },
-              h('summary', null, t('security')),
-              h('p', null, t('securityHint')),
-            ),
           );
         }
         const navigate = (to) => {
