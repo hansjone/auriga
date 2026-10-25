@@ -133,6 +133,14 @@ type brokerOpts struct {
 	noCallout     bool // do not start the callout service
 	noAcctLimits  bool // omit CLIENTS account limits
 	redeemTimeout time.Duration
+	// skipAuthTimeoutCheck leaves CalloutConfig.AuthTimeout unset so a
+	// deliberate RedeemTimeout >= auth_timeout fixture can still run.
+	skipAuthTimeoutCheck bool
+	// tls enables a WSS listener with cert/key paths and optional origins.
+	tls            bool
+	tlsCertFile    string
+	tlsKeyFile     string
+	allowedOrigins []string
 }
 
 func defaultBrokerOpts() brokerOpts {
@@ -195,12 +203,29 @@ func (h *harness) config() string {
 		// this, not the User JWT, is what the server enforces in config mode.
 		acctLimits = fmt.Sprintf("limits { max_payload: %d, max_subscriptions: %d }", h.o.limits.MaxPayload, h.o.limits.MaxSubs)
 	}
+	wsBlock := fmt.Sprintf(`websocket { host: "127.0.0.1", port: %d, no_tls: true }`, h.o.wsPort)
+	if h.o.tls {
+		origins := ""
+		if len(h.o.allowedOrigins) > 0 {
+			quoted := make([]string, len(h.o.allowedOrigins))
+			for i, o := range h.o.allowedOrigins {
+				quoted[i] = fmt.Sprintf("%q", o)
+			}
+			origins = fmt.Sprintf("allowed_origins: [%s]", strings.Join(quoted, ", "))
+		}
+		wsBlock = fmt.Sprintf(`websocket {
+  host: "127.0.0.1"
+  port: %d
+  tls { cert_file: %q, key_file: %q }
+  %s
+}`, h.o.wsPort, h.o.tlsCertFile, h.o.tlsKeyFile, origins)
+	}
 	return fmt.Sprintf(`
 server_name: "auriga-n0-%s"
 host: "127.0.0.1"
 port: %d
 system_account: SYS
-websocket { host: "127.0.0.1", port: %d, no_tls: true }
+%s
 accounts {
   AUTH { users: [ { user: %q, password: %q } ] }
   CLIENTS {
@@ -236,7 +261,7 @@ authorization {
     xkey: %q
   }
 }
-`, randHex(h.t, 3), h.o.port, h.o.wsPort,
+`, randHex(h.t, 3), h.o.port, wsBlock,
 		h.authUser, h.authPass, acctLimits, h.adptUser, h.adptPass, h.opsUser, h.opsPass,
 		`"`+strings.Join(SysPublishAllow, `", "`)+`"`,
 		h.o.authTimeout, issuerPub, h.authUser, h.adptUser, h.opsUser, xPub)
@@ -281,7 +306,7 @@ func (h *harness) stopServer() {
 
 func (h *harness) startCallout() {
 	t := h.t
-	c, err := NewCallout(CalloutConfig{
+	cfg := CalloutConfig{
 		Issuer:          h.issuer,
 		XKey:            h.xkey,
 		Account:         clientAccount,
@@ -296,7 +321,11 @@ func (h *harness) startCallout() {
 			default:
 			}
 		},
-	})
+	}
+	if !h.o.skipAuthTimeoutCheck && h.o.authTimeout > 0 {
+		cfg.AuthTimeout = time.Duration(h.o.authTimeout * float64(time.Second))
+	}
+	c, err := NewCallout(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

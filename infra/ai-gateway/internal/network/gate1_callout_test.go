@@ -117,9 +117,12 @@ func TestGate1_CalloutTimeoutAndFailureRejectNoFallback(t *testing.T) {
 		t.Logf("rejected after %v: %v", time.Since(start).Round(time.Millisecond), err)
 	})
 	t.Run("redeem-slower-than-auth-timeout", func(t *testing.T) {
+		// Evidence of the ticket-burn race when misconfigured; production
+		// wiring must set CalloutConfig.AuthTimeout so NewCallout rejects this.
 		o := defaultBrokerOpts()
 		o.authTimeout = 1
 		o.redeemTimeout = 5 * time.Second
+		o.skipAuthTimeoutCheck = true
 		h := newHarness(t, o)
 		h.tickets.delay = 2500 * time.Millisecond
 		tk, ing := h.tickets.issue(t, time.Now().Add(time.Hour))

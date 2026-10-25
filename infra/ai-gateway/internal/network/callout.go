@@ -72,7 +72,11 @@ type CalloutConfig struct {
 	ConnectionTypes []string
 	Redeemer        Redeemer
 	RedeemTimeout   time.Duration
-	Now             func() time.Time
+	// AuthTimeout is nats-server authorization.timeout. When set (>0),
+	// RedeemTimeout must be strictly less; otherwise a slow redeem can
+	// consume the ticket after the server already rejected the CONNECT.
+	AuthTimeout time.Duration
+	Now         func() time.Time
 	// OnDecision, if set, observes every decision. The error is internal
 	// detail and must not be sent to the client.
 	OnDecision func(a Attempt, claims *jwt.UserClaims, err error)
@@ -99,6 +103,9 @@ func NewCallout(cfg CalloutConfig) (*Callout, error) {
 	}
 	if cfg.RedeemTimeout <= 0 {
 		cfg.RedeemTimeout = time.Second
+	}
+	if cfg.AuthTimeout > 0 && cfg.RedeemTimeout >= cfg.AuthTimeout {
+		return nil, fmt.Errorf("network: RedeemTimeout (%v) must be less than authorization.timeout (%v)", cfg.RedeemTimeout, cfg.AuthTimeout)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
