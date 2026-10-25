@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -30,8 +31,10 @@ func TestPostgresMigrationAndIsolation(t *testing.T) {
 	}
 	defer func() { _ = conn.Close(ctx) }()
 	var count int
-	if err = conn.QueryRow(ctx, "SELECT count(*) FROM ai.schema_migration").Scan(&count); err != nil || count != 1 {
-		t.Fatalf("migration count %d: %v", count, err)
+	var versions []string
+	wantVersions := []string{"0001_admin.sql", "0010_budget.sql"}
+	if err = conn.QueryRow(ctx, "SELECT count(*),array_agg(name ORDER BY name) FROM ai.schema_migration").Scan(&count, &versions); err != nil || count != len(wantVersions) || !slices.Equal(versions, wantVersions) {
+		t.Fatalf("migration count %d, versions %v, want %v: %v", count, versions, wantVersions, err)
 	}
 	tenant := "00000000-0000-7000-8000-000000000001"
 	other := "00000000-0000-7000-8000-000000000002"
