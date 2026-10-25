@@ -280,6 +280,10 @@ window.__ModuleLoader__.load({
           entry: localURL(panel.entry).href,
           integrity: panel.integrity,
           connection: body.connection,
+          fetch:
+            body.mode === 'connect'
+              ? makeFetch({ fetchBase: localURL('auriga/resources/').href })
+              : undefined,
         };
       }
       if (
@@ -333,7 +337,7 @@ window.__ModuleLoader__.load({
           );
         return fetch(url, {
           ...init,
-          credentials: 'same-origin',
+          credentials: boot.mode === 'managed' ? 'omit' : 'same-origin',
           redirect: 'manual',
         });
       };
@@ -341,6 +345,8 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'theme'],
       apply(ctx) {
+        const listInstalled = async () =>
+          ctx.get?.('remote')?.pluginInventory?.list();
         let disposed = false;
         const cleanups = [];
         const own = (cleanup) => {
@@ -1081,6 +1087,7 @@ window.__ModuleLoader__.load({
               theme: host.theme,
               apiBase: '',
               fetch: boot.fetch,
+              listInstalled,
             };
           }, [boot, host.locale, host.theme]);
           React.useEffect(() => {

@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe('resource boundary', () => {
-  it.each(['managed', 'standalone', undefined] as const)(
+  it.each(['standalone', undefined] as const)(
     'never calls host or global fetch in %s mode',
     async (mode) => {
       const host = vi.fn();
@@ -241,7 +241,7 @@ describe('market reading', () => {
     await flushPromises();
     expect(wrapper.findAll('.card')).toHaveLength(1);
     expect(wrapper.text()).toContain('Headquarters availability · Available');
-    expect(wrapper.text()).toContain('Local installation · Unavailable');
+    expect(wrapper.text()).toContain('Local installation · Unknown');
     await click(wrapper, 'Load more');
     expect(host.mock.calls[1][0]).toBe(
       '/api/resource/v1/packages?limit=50&cursor=page%2B2%26private%3Dno',
@@ -378,13 +378,17 @@ describe('request lifecycle', () => {
     expect(wrapper.text()).not.toContain('Example plugin');
   });
   it('clears data when the host changes to managed mode', async () => {
-    const host = vi.fn().mockResolvedValue(json({ items: [plugin] }));
+    const host = vi
+      .fn()
+      .mockImplementation(async () => json({ items: [plugin] }));
     const wrapper = render(connect(host));
     await flushPromises();
     await wrapper.setProps({ context: { ...connect(host), mode: 'managed' } });
     expect(wrapper.text()).not.toContain(plugin.name);
-    expect(wrapper.text()).toContain('managed environment');
-    expect(host).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain('Loading resources');
+    await flushPromises();
+    expect(wrapper.text()).toContain(plugin.name);
+    expect(host).toHaveBeenCalledTimes(2);
   });
   it('ignores a failed detail request after returning to the market', async () => {
     let reject!: (error: Error) => void;
@@ -422,4 +426,51 @@ describe('request lifecycle', () => {
     expect(host.mock.calls[1][1].signal.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+it('reads a managed catalogue through the supplied host channel', async () => {
+  const host = vi.fn().mockResolvedValue(json({ items: [plugin] }));
+  const wrapper = render({ ...connect(host), mode: 'managed' });
+  await flushPromises();
+  expect(wrapper.text()).toContain('Example plugin');
+  expect(host).toHaveBeenCalledTimes(1);
+});
+it('shows native inventory while the platform is offline and keeps operations disabled', async () => {
+  const host = vi.fn().mockRejectedValue(new Error('offline'));
+  const listInstalled = vi.fn().mockResolvedValue({
+    entries: [
+      {
+        entryId: 'example',
+        moduleName: 'example-plugin',
+        enabled: false,
+        fiberPhase: null,
+      },
+    ],
+  });
+  const wrapper = render({ ...connect(host), listInstalled });
+  await flushPromises();
+  await click(wrapper, 'My resources');
+  expect(wrapper.text()).toContain('example-plugin');
+  expect(wrapper.text()).toContain('Disabled');
+  expect(listInstalled).toHaveBeenCalledTimes(1);
+  for (const label of ['Install', 'Update', 'Uninstall']) {
+    const button = wrapper
+      .findAll('button')
+      .find((item) => item.text() === label);
+    expect(button?.element?.hasAttribute('disabled')).toBe(true);
+  }
+  expect(host).toHaveBeenCalledTimes(1);
+});
+it('does not present malformed native inventory as an empty installation', async () => {
+  const wrapper = render({
+    mode: 'standalone',
+    protocol: 1,
+    locale: 'en',
+    listInstalled: async () => ({ entries: [{ moduleName: '<script>' }] }),
+  });
+  await click(wrapper, 'My resources');
+  expect(wrapper.text()).toContain(
+    'local installation inventory is unavailable',
+  );
+  expect(wrapper.text()).not.toContain('No local plugins');
 });

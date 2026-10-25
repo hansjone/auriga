@@ -740,3 +740,53 @@ test('host theme overrides opposite OS preference and never installs an independ
     host.close();
   }
 });
+
+test('managed resource context uses the existing channel without browser cookies and exposes only the public inventory reader', async () => {
+  const calls = [];
+  let reads = 0;
+  const inventory = {
+    entries: [
+      {
+        entryId: 'example',
+        moduleName: 'example-plugin',
+        enabled: true,
+        fiberPhase: 'active',
+      },
+    ],
+  };
+  const host = surfaceHost(
+    async (url, init) => {
+      calls.push({ url: String(url), init });
+      return response(200, boot());
+    },
+    {
+      remote: {
+        pluginInventory: {
+          async list() {
+            reads++;
+            return inventory;
+          },
+        },
+      },
+    },
+  );
+  try {
+    const main = host.mount('main');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    await panel.context.fetch('/api/resource/v1/packages?limit=50', {
+      method: 'GET',
+    });
+    assert.equal(
+      calls.at(-1).url,
+      'https://instance.example.com/api/resource/v1/packages?limit=50',
+    );
+    assert.equal(calls.at(-1).init.credentials, 'omit');
+    assert.deepEqual(await panel.context.listInstalled(), inventory);
+    assert.equal(reads, 1);
+    main.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});
