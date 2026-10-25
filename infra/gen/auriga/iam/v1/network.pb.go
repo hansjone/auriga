@@ -314,6 +314,208 @@ func (x *NetworkNodeActiveResponse) GetActive() bool {
 	return false
 }
 
+type NetworkNodeIdentity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Realm         string                 `protobuf:"bytes,2,opt,name=realm,proto3" json:"realm,omitempty"`
+	Node          string                 `protobuf:"bytes,3,opt,name=node,proto3" json:"node,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkNodeIdentity) Reset() {
+	*x = NetworkNodeIdentity{}
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkNodeIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkNodeIdentity) ProtoMessage() {}
+
+func (x *NetworkNodeIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkNodeIdentity.ProtoReflect.Descriptor instead.
+func (*NetworkNodeIdentity) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *NetworkNodeIdentity) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *NetworkNodeIdentity) GetRealm() string {
+	if x != nil {
+		return x.Realm
+	}
+	return ""
+}
+
+func (x *NetworkNodeIdentity) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+type BatchNetworkNodesActiveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Nodes         []*NetworkNodeIdentity `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchNetworkNodesActiveRequest) Reset() {
+	*x = BatchNetworkNodesActiveRequest{}
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchNetworkNodesActiveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchNetworkNodesActiveRequest) ProtoMessage() {}
+
+func (x *BatchNetworkNodesActiveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchNetworkNodesActiveRequest.ProtoReflect.Descriptor instead.
+func (*BatchNetworkNodesActiveRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *BatchNetworkNodesActiveRequest) GetNodes() []*NetworkNodeIdentity {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+type NetworkNodeStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Identity      *NetworkNodeIdentity   `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
+	Active        bool                   `protobuf:"varint,2,opt,name=active,proto3" json:"active,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkNodeStatus) Reset() {
+	*x = NetworkNodeStatus{}
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkNodeStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkNodeStatus) ProtoMessage() {}
+
+func (x *NetworkNodeStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkNodeStatus.ProtoReflect.Descriptor instead.
+func (*NetworkNodeStatus) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *NetworkNodeStatus) GetIdentity() *NetworkNodeIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *NetworkNodeStatus) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+type BatchNetworkNodesActiveResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Exactly one result for each distinct input identity. Missing, duplicate or
+	// unsolicited identities are protocol errors, never an implicit active grant.
+	Nodes         []*NetworkNodeStatus `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchNetworkNodesActiveResponse) Reset() {
+	*x = BatchNetworkNodesActiveResponse{}
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchNetworkNodesActiveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchNetworkNodesActiveResponse) ProtoMessage() {}
+
+func (x *BatchNetworkNodesActiveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchNetworkNodesActiveResponse.ProtoReflect.Descriptor instead.
+func (*BatchNetworkNodesActiveResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *BatchNetworkNodesActiveResponse) GetNodes() []*NetworkNodeStatus {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
 var File_auriga_iam_v1_network_proto protoreflect.FileDescriptor
 
 const file_auriga_iam_v1_network_proto_rawDesc = "" +
@@ -341,10 +543,22 @@ const file_auriga_iam_v1_network_proto_rawDesc = "" +
 	"\x05realm\x18\x01 \x01(\tR\x05realm\x12\x12\n" +
 	"\x04node\x18\x02 \x01(\tR\x04node\"3\n" +
 	"\x19NetworkNodeActiveResponse\x12\x16\n" +
-	"\x06active\x18\x01 \x01(\bR\x06active2\xed\x01\n" +
+	"\x06active\x18\x01 \x01(\bR\x06active\"\\\n" +
+	"\x13NetworkNodeIdentity\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x14\n" +
+	"\x05realm\x18\x02 \x01(\tR\x05realm\x12\x12\n" +
+	"\x04node\x18\x03 \x01(\tR\x04node\"Z\n" +
+	"\x1eBatchNetworkNodesActiveRequest\x128\n" +
+	"\x05nodes\x18\x01 \x03(\v2\".auriga.iam.v1.NetworkNodeIdentityR\x05nodes\"k\n" +
+	"\x11NetworkNodeStatus\x12>\n" +
+	"\bidentity\x18\x01 \x01(\v2\".auriga.iam.v1.NetworkNodeIdentityR\bidentity\x12\x16\n" +
+	"\x06active\x18\x02 \x01(\bR\x06active\"Y\n" +
+	"\x1fBatchNetworkNodesActiveResponse\x126\n" +
+	"\x05nodes\x18\x01 \x03(\v2 .auriga.iam.v1.NetworkNodeStatusR\x05nodes2\xe7\x02\n" +
 	"\x15NetworkGatewayService\x12l\n" +
 	"\x13RedeemNetworkTicket\x12).auriga.iam.v1.RedeemNetworkTicketRequest\x1a*.auriga.iam.v1.RedeemNetworkTicketResponse\x12f\n" +
-	"\x11NetworkNodeActive\x12'.auriga.iam.v1.NetworkNodeActiveRequest\x1a(.auriga.iam.v1.NetworkNodeActiveResponseBU\n" +
+	"\x11NetworkNodeActive\x12'.auriga.iam.v1.NetworkNodeActiveRequest\x1a(.auriga.iam.v1.NetworkNodeActiveResponse\x12x\n" +
+	"\x17BatchNetworkNodesActive\x12-.auriga.iam.v1.BatchNetworkNodesActiveRequest\x1a..auriga.iam.v1.BatchNetworkNodesActiveResponseBU\n" +
 	"\x17auriga.contracts.iam.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1b\x06proto3"
 
 var (
@@ -359,23 +573,32 @@ func file_auriga_iam_v1_network_proto_rawDescGZIP() []byte {
 	return file_auriga_iam_v1_network_proto_rawDescData
 }
 
-var file_auriga_iam_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_auriga_iam_v1_network_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_auriga_iam_v1_network_proto_goTypes = []any{
-	(*RedeemNetworkTicketRequest)(nil),  // 0: auriga.iam.v1.RedeemNetworkTicketRequest
-	(*RedeemNetworkTicketResponse)(nil), // 1: auriga.iam.v1.RedeemNetworkTicketResponse
-	(*NetworkNodeActiveRequest)(nil),    // 2: auriga.iam.v1.NetworkNodeActiveRequest
-	(*NetworkNodeActiveResponse)(nil),   // 3: auriga.iam.v1.NetworkNodeActiveResponse
+	(*RedeemNetworkTicketRequest)(nil),      // 0: auriga.iam.v1.RedeemNetworkTicketRequest
+	(*RedeemNetworkTicketResponse)(nil),     // 1: auriga.iam.v1.RedeemNetworkTicketResponse
+	(*NetworkNodeActiveRequest)(nil),        // 2: auriga.iam.v1.NetworkNodeActiveRequest
+	(*NetworkNodeActiveResponse)(nil),       // 3: auriga.iam.v1.NetworkNodeActiveResponse
+	(*NetworkNodeIdentity)(nil),             // 4: auriga.iam.v1.NetworkNodeIdentity
+	(*BatchNetworkNodesActiveRequest)(nil),  // 5: auriga.iam.v1.BatchNetworkNodesActiveRequest
+	(*NetworkNodeStatus)(nil),               // 6: auriga.iam.v1.NetworkNodeStatus
+	(*BatchNetworkNodesActiveResponse)(nil), // 7: auriga.iam.v1.BatchNetworkNodesActiveResponse
 }
 var file_auriga_iam_v1_network_proto_depIdxs = []int32{
-	0, // 0: auriga.iam.v1.NetworkGatewayService.RedeemNetworkTicket:input_type -> auriga.iam.v1.RedeemNetworkTicketRequest
-	2, // 1: auriga.iam.v1.NetworkGatewayService.NetworkNodeActive:input_type -> auriga.iam.v1.NetworkNodeActiveRequest
-	1, // 2: auriga.iam.v1.NetworkGatewayService.RedeemNetworkTicket:output_type -> auriga.iam.v1.RedeemNetworkTicketResponse
-	3, // 3: auriga.iam.v1.NetworkGatewayService.NetworkNodeActive:output_type -> auriga.iam.v1.NetworkNodeActiveResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	4, // 0: auriga.iam.v1.BatchNetworkNodesActiveRequest.nodes:type_name -> auriga.iam.v1.NetworkNodeIdentity
+	4, // 1: auriga.iam.v1.NetworkNodeStatus.identity:type_name -> auriga.iam.v1.NetworkNodeIdentity
+	6, // 2: auriga.iam.v1.BatchNetworkNodesActiveResponse.nodes:type_name -> auriga.iam.v1.NetworkNodeStatus
+	0, // 3: auriga.iam.v1.NetworkGatewayService.RedeemNetworkTicket:input_type -> auriga.iam.v1.RedeemNetworkTicketRequest
+	2, // 4: auriga.iam.v1.NetworkGatewayService.NetworkNodeActive:input_type -> auriga.iam.v1.NetworkNodeActiveRequest
+	5, // 5: auriga.iam.v1.NetworkGatewayService.BatchNetworkNodesActive:input_type -> auriga.iam.v1.BatchNetworkNodesActiveRequest
+	1, // 6: auriga.iam.v1.NetworkGatewayService.RedeemNetworkTicket:output_type -> auriga.iam.v1.RedeemNetworkTicketResponse
+	3, // 7: auriga.iam.v1.NetworkGatewayService.NetworkNodeActive:output_type -> auriga.iam.v1.NetworkNodeActiveResponse
+	7, // 8: auriga.iam.v1.NetworkGatewayService.BatchNetworkNodesActive:output_type -> auriga.iam.v1.BatchNetworkNodesActiveResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_auriga_iam_v1_network_proto_init() }
@@ -389,7 +612,7 @@ func file_auriga_iam_v1_network_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_iam_v1_network_proto_rawDesc), len(file_auriga_iam_v1_network_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

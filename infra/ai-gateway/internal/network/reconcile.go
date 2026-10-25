@@ -3,119 +3,217 @@ package network
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
+	"sort"
 	"sync"
 	"time"
 )
+
+const kickWorkers = 128
+const kickRoundBudget = 1500 * time.Millisecond
 
 type ReconcileConfig struct {
 	Interval        time.Duration
 	RequestTimeout  time.Duration
 	MaxKickAttempts int
-	// Called on exhausted retries or ownership conflicts; contains no credentials.
-	OnError func(Binding, error)
-	// Inspect also reclaims healthy connections that have disconnected, without
-	// waiting for their JWT to expire. Called only after the CONNECT grace period.
-	Inspect func(context.Context, Binding) error
+	// Query failures get a bounded grace; explicit inactive decisions never do.
+	FailureGrace time.Duration
+	OnError      func(Binding, error)
+	// One complete, account-filtered CONNZ snapshot per round, not per CID.
+	Snapshot func(context.Context) (map[uint64]*ConnInfo, error)
 }
 
-// Reconcile checks known connections only, with bounded memory, concurrency,
-// per-request deadlines and KICK attempts. IAM errors fail closed as well.
-// A failed KICK never clears the revoked latch. Broker JWT expiry remains the
-// final fallback when the system control account cannot close a socket.
+type reconcileState struct {
+	nextQuery     time.Time
+	queryFailures int
+}
+
+// Reconcile has one owner per redeemer. IAM and CONNZ are each batched once per
+// round. Failed KICKs retain their revocation latch; query errors have a separate
+// bounded grace. Polling, IAM retries and KICK retries are jittered.
 func (r *IAMRedeemer) Reconcile(ctx context.Context, cfg ReconcileConfig, kick func(context.Context, Binding) error) error {
-	if cfg.Interval <= 0 || cfg.RequestTimeout <= 0 || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 || kick == nil {
+	if cfg.Interval <= 0 || cfg.Interval > 500*time.Millisecond || cfg.RequestTimeout <= 0 || cfg.RequestTimeout > 250*time.Millisecond || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 || kick == nil || cfg.Snapshot == nil {
 		return errors.New("network: invalid reconciliation configuration")
 	}
-	ticker := time.NewTicker(cfg.Interval)
-	defer ticker.Stop()
+	if cfg.FailureGrace == 0 {
+		cfg.FailureGrace = 1500 * time.Millisecond
+	}
+	if cfg.FailureGrace <= 0 || cfg.FailureGrace > 1500*time.Millisecond {
+		return errors.New("network: invalid authority failure grace")
+	}
+	state := reconcileState{}
+	timer := time.NewTimer(jitter(cfg.Interval))
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ticker.C:
+		case <-timer.C:
 		}
-		jobs := make(chan liveBinding)
-		var workers sync.WaitGroup
-		for range 16 {
-			workers.Go(func() {
-				for b := range jobs {
-					r.reconcileOne(ctx, cfg, kick, b)
-				}
-			})
-		}
-		for _, b := range r.snapshot() {
-			select {
-			case jobs <- b:
-			case <-ctx.Done():
-			}
-			if ctx.Err() != nil {
-				break
-			}
-		}
-		close(jobs)
-		workers.Wait()
+		r.reconcileRound(ctx, cfg, kick, &state)
+		timer.Reset(jitter(cfg.Interval))
 	}
 }
 
-func (r *IAMRedeemer) reconcileOne(ctx context.Context, cfg ReconcileConfig, kick func(context.Context, Binding) error, b liveBinding) {
-	now := time.Now()
-	if now.Before(b.CheckAfter) {
+func jitter(base time.Duration) time.Duration {
+	spread := base / 5
+	if spread < 1 {
+		return base
+	}
+	return base - spread + time.Duration(rand.Int64N(int64(2*spread+1)))
+}
+
+func queryBackoff(base time.Duration, failures int) time.Duration {
+	for i := 1; i < failures && base < 500*time.Millisecond; i++ {
+		base *= 2
+	}
+	if base > 500*time.Millisecond {
+		base = 500 * time.Millisecond
+	}
+	return jitter(base)
+}
+
+func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, kick func(context.Context, Binding) error, state *reconcileState) {
+	start := time.Now()
+	grace := cfg.FailureGrace
+	if grace == 0 {
+		grace = 1500 * time.Millisecond
+	}
+	bindings := r.snapshot()
+	if len(bindings) == 0 {
 		return
 	}
-	remove := false
-	if cfg.Inspect != nil {
-		inspect, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
-		err := cfg.Inspect(inspect, b.Binding)
-		cancel()
-		if ctx.Err() != nil {
-			return
+	inspect, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
+	conns, snapshotErr := cfg.Snapshot(inspect)
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	eligible := make([]liveBinding, 0, len(bindings))
+	for _, b := range bindings {
+		if start.Before(b.CheckAfter) {
+			continue
 		}
-		remove = errors.Is(err, ErrNoSuchConn)
-		if errors.Is(err, ErrNotOwned) {
-			b.Revoked = true
-			b.Attempts = cfg.MaxKickAttempts
-			remove = true
-			if cfg.OnError != nil {
-				cfg.OnError(b.Binding, err)
+		if !start.Before(b.NotAfter) {
+			r.forget(b.Ingress)
+			continue
+		}
+		if snapshotErr == nil {
+			ci := conns[b.ClientID]
+			if ci == nil {
+				r.forget(b.Ingress)
+				continue
+			}
+			if ci.Account != b.Account || ci.AuthorizedUser != b.Ingress {
+				r.forget(b.Ingress)
+				if cfg.OnError != nil {
+					cfg.OnError(b.Binding, ErrNotOwned)
+				}
+				continue
 			}
 		}
+		eligible = append(eligible, b)
 	}
-	if !now.Before(b.NotAfter) {
-		remove = true
-	} else if !remove && !b.Revoked {
-		check, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
-		active, err := r.active(check, b)
-		cancel()
+	var status map[nodeIdentity]bool
+	var queryErr error
+	queried := len(eligible) > 0 && !time.Now().Before(state.nextQuery)
+	if queried {
+		check, stop := context.WithTimeout(ctx, cfg.RequestTimeout)
+		status, queryErr = r.activeBatch(check, eligible)
+		stop()
 		if ctx.Err() != nil {
 			return
 		}
-		b.Revoked = err != nil || !active
-	}
-	if !remove && b.Revoked && b.Attempts < cfg.MaxKickAttempts {
-		attempt, cancel := context.WithTimeout(ctx, cfg.RequestTimeout)
-		err := kick(attempt, b.Binding)
-		cancel()
-		if ctx.Err() != nil {
-			return
-		}
-		b.Attempts++
-		remove = err == nil || errors.Is(err, ErrNoSuchConn)
-		if errors.Is(err, ErrNotOwned) {
-			b.Attempts = cfg.MaxKickAttempts
-		}
-		if !remove && b.Attempts == cfg.MaxKickAttempts && cfg.OnError != nil {
-			cfg.OnError(b.Binding, err)
+		if queryErr != nil {
+			state.queryFailures++
+			state.nextQuery = time.Now().Add(queryBackoff(cfg.Interval, state.queryFailures))
+		} else {
+			state.queryFailures = 0
+			state.nextQuery = time.Time{}
 		}
 	}
+	pending := make([]liveBinding, 0)
+	for _, b := range eligible {
+		if !b.Revoked && queried {
+			if queryErr == nil {
+				b.Failures = 0
+				b.FailedSince = time.Time{}
+				b.Revoked = !status[nodeIdentity{b.Tenant, b.Realm, b.Node}]
+			} else {
+				b.Failures++
+				if b.FailedSince.IsZero() {
+					b.FailedSince = start
+				}
+			}
+		}
+		if !b.Revoked && (b.Failures >= 3 || !b.FailedSince.IsZero() && time.Since(b.FailedSince) >= grace) {
+			b.Revoked = true
+			// Spread outage-driven closes; authoritative active=false bypasses this
+			// delay. New ticket redemption remains fail-closed throughout the grace.
+			b.RetryAfter = time.Now().Add(time.Duration(rand.Int64N(int64(250 * time.Millisecond))))
+		}
+		r.remember(b)
+		// A complete snapshot proves account/ingress ownership for the entire round.
+		// CIDs cannot be reused within a server generation, so per-KICK CONNZ is redundant.
+		if b.Revoked && snapshotErr == nil && b.Attempts < cfg.MaxKickAttempts && !time.Now().Before(b.RetryAfter) {
+			pending = append(pending, b)
+		}
+	}
+	sort.Slice(pending, func(i, j int) bool { return pending[i].Attempts < pending[j].Attempts })
+	kickCtx, stop := context.WithTimeout(ctx, kickRoundBudget)
+	defer stop()
+	jobs := make(chan liveBinding)
+	var workers sync.WaitGroup
+	for i := 0; i < min(kickWorkers, len(pending)); i++ {
+		workers.Go(func() {
+			for b := range jobs {
+				if kickCtx.Err() != nil {
+					continue
+				}
+				attempt, cancel := context.WithTimeout(kickCtx, cfg.RequestTimeout)
+				err := kick(attempt, b.Binding)
+				cancel()
+				// Count every invoked KICK, including cancellation at the round
+				// boundary; otherwise late requests could retry forever.
+				b.Attempts++
+				if err == nil || errors.Is(err, ErrNoSuchConn) {
+					r.forget(b.Ingress)
+					continue
+				}
+				if errors.Is(err, ErrNotOwned) {
+					b.Attempts = cfg.MaxKickAttempts
+				}
+				b.RetryAfter = time.Now().Add(queryBackoff(cfg.Interval, b.Attempts))
+				r.remember(b)
+				if b.Attempts == cfg.MaxKickAttempts && cfg.OnError != nil {
+					cfg.OnError(b.Binding, err)
+				}
+			}
+		})
+	}
+	for _, b := range pending {
+		if kickCtx.Err() != nil {
+			break
+		}
+		select {
+		case jobs <- b:
+		case <-kickCtx.Done():
+		}
+	}
+	close(jobs)
+	workers.Wait()
+}
+
+func (r *IAMRedeemer) forget(ingress string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// A fresh ingress is never reused, so an older snapshot cannot overwrite a
-	// reconnect or a different connection that happens to have the same node.
+	delete(r.bindings, ingress)
+}
+
+func (r *IAMRedeemer) remember(b liveBinding) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if _, ok := r.bindings[b.Ingress]; ok {
-		if remove {
-			delete(r.bindings, b.Ingress)
-		} else {
-			r.bindings[b.Ingress] = b
-		}
+		r.bindings[b.Ingress] = b
 	}
 }

@@ -22,6 +22,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 /** Real FORCE RLS, migrations, rollback reservations and concurrent redemption. */
 @ExtendWith(PostgresExtension.class)
 class NetworkAuthorityPostgresTest {
+  static auriga.iam.api.NetworkAuthority.IngressBinding binding(String ticket) {
+    return NetworkAuthorityTest.binding(ticket);
+  }
+
   static IamStore store;
   static JdbcTemplate jdbc;
   final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
@@ -177,9 +181,7 @@ class NetworkAuthorityPostgresTest {
           Node node = network.register("access");
           var ticket = network.prepare("access", node.node(), "server-a");
           gateway();
-          var binding =
-              new auriga.iam.api.NetworkAuthority.IngressBinding(
-                  "N" + "A".repeat(55), "42", "U" + "A".repeat(55), "a".repeat(26), "CLIENTS");
+          var binding = binding(ticket.ticket());
           network.redeem(ticket.ticket(), node.node(), device.toString(), "server-a", binding);
           var stored = store.tx(() -> store.get("network_ingress", binding.ingress(), false));
           assertEquals(node.realm(), stored.path("realm").asString());
@@ -197,9 +199,122 @@ class NetworkAuthorityPostgresTest {
               RuntimeException.class,
               () ->
                   network.redeem(
-                      duplicate.ticket(), node.node(), device.toString(), "server-a", binding));
+                      duplicate.ticket(),
+                      node.node(),
+                      device.toString(),
+                      "server-a",
+                      binding(duplicate.ticket())));
           assertNull(
               store.tx(() -> store.get("network_ticket", Secrets.hash(duplicate.ticket()), false)));
+        });
+  }
+
+  @Test
+  void batchActiveUsesLiveSessionDeviceAccountAndRlsAndOfflineBindingsExpire() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          String sid = UUID.randomUUID().toString();
+          store.tx(
+              () -> {
+                store.insert(
+                    "session",
+                    sid,
+                    Json.object(
+                        "tenantId",
+                        tenant.toString(),
+                        "accountId",
+                        account.toString(),
+                        "audience",
+                        "portal",
+                        "expiresAt",
+                        clock.instant().plusSeconds(3600).toString(),
+                        "idleExpiresAt",
+                        clock.instant().plusSeconds(1800).toString()),
+                    clock.instant().plusSeconds(3600));
+                var d = store.get("device", device.toString(), true);
+                d.put("sessionId", sid);
+                d.put("scope", "auriga.connect");
+                store.save("device", d);
+                return null;
+              });
+          var ticket = network.prepare("access", node.node(), "server-a");
+          gateway();
+          network.redeem(
+              ticket.ticket(),
+              node.node(),
+              device.toString(),
+              "server-a",
+              binding(ticket.ticket()));
+          var ref = new auriga.iam.api.NetworkAuthority.NodeReference(node.realm(), node.node());
+          var wrongRealm = new auriga.iam.api.NetworkAuthority.NodeReference("1", node.node());
+          assertEquals(
+              Map.of(ref, true, wrongRealm, false), network.activeBatch(List.of(ref, wrongRealm)));
+          TenantContext.run(
+              UUID.randomUUID(), () -> assertFalse(network.activeBatch(List.of(ref)).get(ref)));
+          for (String type : List.of("device", "session", "account")) {
+            store.tx(
+                () -> {
+                  var row =
+                      store.get(
+                          type,
+                          type.equals("device")
+                              ? device.toString()
+                              : type.equals("session") ? sid : account.toString(),
+                          true);
+                  if (type.equals("account")) row.put("status", "disabled");
+                  else row.put("revoked", true);
+                  store.save(type, row);
+                  return null;
+                });
+            assertFalse(network.activeBatch(List.of(ref)).get(ref), type);
+            store.tx(
+                () -> {
+                  var row =
+                      store.get(
+                          type,
+                          type.equals("device")
+                              ? device.toString()
+                              : type.equals("session") ? sid : account.toString(),
+                          true);
+                  if (type.equals("account")) row.put("status", "active");
+                  else row.put("revoked", false);
+                  store.save(type, row);
+                  return null;
+                });
+          }
+          store.tx(
+              () -> {
+                var s = store.get("session", sid, true);
+                s.put("idleExpiresAt", clock.instant().minusSeconds(1).toString());
+                store.save("session", s);
+                jdbc.update(
+                    "UPDATE iam.network_ingress SET expires_at=? WHERE tenant_id=?",
+                    java.sql.Timestamp.from(clock.instant().minusSeconds(1)),
+                    tenant);
+                return null;
+              });
+          assertFalse(network.activeBatch(List.of(ref)).get(ref));
+          // The node never reconnects. The production retention worker still discovers it.
+          assertTrue(new NetworkIngressCleanup(store, clock).sweepOnce() > 0);
+          assertNull(
+              store.tx(
+                  () -> store.get("network_ingress", binding(ticket.ticket()).ingress(), false)));
+          store.tx(
+              () -> {
+                jdbc.execute("SET LOCAL enable_seqscan=off");
+                var plan =
+                    jdbc.queryForList(
+                        "EXPLAIN SELECT id FROM iam.network_ingress WHERE tenant_id=? AND expires_at<=? ORDER BY expires_at,id LIMIT 256",
+                        String.class,
+                        tenant,
+                        java.sql.Timestamp.from(clock.instant()));
+                assertTrue(
+                    plan.stream().anyMatch(line -> line.contains("network_ingress_expiry")),
+                    plan.toString());
+                return null;
+              });
         });
   }
 
@@ -220,7 +335,13 @@ class NetworkAuthorityPostgresTest {
                           }));
           assertThrows(
               RuntimeException.class,
-              () -> network.redeem(ticket.ticket(), node.node(), device.toString(), "server-a"));
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      node.node(),
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
           assertNull(
               store.tx(() -> store.get("network_ticket", Secrets.hash(ticket.ticket()), false)));
           doReturn(identity)
@@ -232,7 +353,11 @@ class NetworkAuthorityPostgresTest {
                       AurigaException.class,
                       () ->
                           network.redeem(
-                              ticket.ticket(), node.node(), device.toString(), "server-a"))
+                              ticket.ticket(),
+                              node.node(),
+                              device.toString(),
+                              "server-a",
+                              binding(ticket.ticket())))
                   .errorCode()
                   .code());
         });
@@ -257,7 +382,13 @@ class NetworkAuthorityPostgresTest {
                 "common.forbidden",
                 assertThrows(
                         AurigaException.class,
-                        () -> network.redeem(ticket.ticket(), wrong[0], wrong[1], wrong[2]))
+                        () ->
+                            network.redeem(
+                                ticket.ticket(),
+                                wrong[0],
+                                wrong[1],
+                                wrong[2],
+                                binding(ticket.ticket())))
                     .errorCode()
                     .code());
             assertNull(
@@ -268,7 +399,11 @@ class NetworkAuthorityPostgresTest {
                         AurigaException.class,
                         () ->
                             network.redeem(
-                                ticket.ticket(), node.node(), device.toString(), "server-a"))
+                                ticket.ticket(),
+                                node.node(),
+                                device.toString(),
+                                "server-a",
+                                binding(ticket.ticket())))
                     .errorCode()
                     .code());
           }
@@ -343,7 +478,11 @@ class NetworkAuthorityPostgresTest {
                   () -> {
                     try {
                       network.redeem(
-                          ticket.ticket(), ticket.identity().node(), device.toString(), "server-a");
+                          ticket.ticket(),
+                          ticket.identity().node(),
+                          device.toString(),
+                          "server-a",
+                          binding(ticket.ticket()));
                       return true;
                     } catch (AurigaException e) {
                       assertEquals("common.forbidden", e.errorCode().code());

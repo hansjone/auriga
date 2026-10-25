@@ -135,11 +135,9 @@ public interface NetworkAuthority {
 
   /**
    * Exact svc:ai-gateway only. The audience MUST come from the verified Broker callout. A known
-   * ticket is consumed even when the supplied node/device/audience binding is rejected.
+   * ticket is consumed even when the supplied node/device/audience binding is rejected. The exact
+   * ingress binding is committed before returning a grant.
    */
-  Connection redeem(String ticket, String node, String device, String serverAudience);
-
-  /** Wire gateway entry: persists the exact ingress binding before returning a grant. */
   Connection redeem(
       String ticket, String node, String device, String serverAudience, IngressBinding binding);
 
@@ -148,6 +146,11 @@ public interface NetworkAuthority {
 
   /** Online query for gateway KICK reconciliation; rechecks backing session/account/device. */
   boolean active(String realm, String node);
+
+  record NodeReference(String realm, String node) {}
+
+  /** At most 10000 nodes in the current business tenant, queried as a set. */
+  Map<NodeReference, Boolean> activeBatch(java.util.List<NodeReference> nodes);
 
   /** HQ admin + iam.network.manage only; changes are audited in the business transaction. */
   void configure(Configuration configuration);

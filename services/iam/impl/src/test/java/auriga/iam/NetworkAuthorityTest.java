@@ -25,6 +25,15 @@ import tools.jackson.databind.node.ObjectNode;
  * NetworkAuthorityPostgresTest is the only evidence for reservations and atomic redemption.
  */
 class NetworkAuthorityTest {
+  static IngressBinding binding(String ticket) {
+    return new IngressBinding(
+        "N" + "A".repeat(55),
+        "42",
+        "U" + "A".repeat(55),
+        IamNetworkAuthority.ingressForTicket(ticket),
+        "CLIENTS");
+  }
+
   final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
 
   static final class Time extends Clock {
@@ -291,9 +300,7 @@ class NetworkAuthorityTest {
           register();
           Ticket ticket = network.prepare("access", "1", "server-a");
           service("svc:ai-gateway");
-          var binding =
-              new IngressBinding(
-                  "N" + "A".repeat(55), "42", "U" + "A".repeat(55), "a".repeat(26), "CLIENTS");
+          var binding = binding(ticket.ticket());
           network.redeem(ticket.ticket(), "1", device.toString(), "server-a", binding);
           var record = rows.get(key("network_ingress", binding.ingress()));
           assertNotNull(record);
@@ -307,6 +314,35 @@ class NetworkAuthorityTest {
   }
 
   @Test
+  void ticketDerivedIngressMatchesSharedVector() {
+    assertEquals(
+        "b4ahhbnw7hklp3vsosdall7bve", IamNetworkAuthority.ingressForTicket("A".repeat(43)));
+  }
+
+  @Test
+  void wrongTicketDerivedIngressIsRejectedAndTicketRemainsBurned() {
+    business(
+        () -> {
+          register();
+          Ticket ticket = network.prepare("access", "1", "server-a");
+          service("svc:ai-gateway");
+          var correct = binding(ticket.ticket());
+          var wrong =
+              new IngressBinding(
+                  correct.serverId(),
+                  correct.clientId(),
+                  correct.userNkey(),
+                  "a".repeat(26),
+                  correct.account());
+          forbidden(
+              () -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a", wrong));
+          forbidden(
+              () -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a", correct));
+          assertNull(rows.get(key("network_ticket", Secrets.hash(ticket.ticket()))));
+        });
+  }
+
+  @Test
   void ticketIsHashedSingleUseAndBoundToDeviceNodeAndVerifiedServer() {
     business(
         () -> {
@@ -316,9 +352,17 @@ class NetworkAuthorityTest {
           assertFalse(rows.toString().contains(ticket.ticket()));
           service("svc:ai-gateway");
           Connection connection =
-              network.redeem(ticket.ticket(), "1", device.toString(), "server-a");
+              network.redeem(
+                  ticket.ticket(), "1", device.toString(), "server-a", binding(ticket.ticket()));
           assertEquals(clock.instant().plusSeconds(3600), connection.expiresAt());
-          forbidden(() -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a"));
+          forbidden(
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
           forbidden(() -> network.prepare("access", "1", "not-configured"));
         });
   }
@@ -331,10 +375,24 @@ class NetworkAuthorityTest {
           Ticket expired = network.prepare("access", "1", "server-a");
           clock.advance(30);
           service("svc:ai-gateway");
-          forbidden(() -> network.redeem(expired.ticket(), "1", device.toString(), "server-a"));
+          forbidden(
+              () ->
+                  network.redeem(
+                      expired.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(expired.ticket())));
           Ticket revoked = network.prepare("access", "1", "server-a");
           when(devices.credential(anyString(), anyString(), anyString())).thenReturn(null);
-          forbidden(() -> network.redeem(revoked.ticket(), "1", device.toString(), "server-a"));
+          forbidden(
+              () ->
+                  network.redeem(
+                      revoked.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(revoked.ticket())));
           assertFalse(network.active("1", "1"));
           when(devices.credential(anyString(), anyString(), anyString()))
               .thenReturn(
@@ -345,7 +403,12 @@ class NetworkAuthorityTest {
                       clock.instant().plusSeconds(9)));
           Ticket shortTicket = network.prepare("access", "1", "server-a");
           Connection connection =
-              network.redeem(shortTicket.ticket(), "1", device.toString(), "server-a");
+              network.redeem(
+                  shortTicket.ticket(),
+                  "1",
+                  device.toString(),
+                  "server-a",
+                  binding(shortTicket.ticket()));
           assertEquals(clock.instant().plusSeconds(9), connection.expiresAt());
           admin();
           network.revoke("1");
@@ -431,7 +494,14 @@ class NetworkAuthorityTest {
                   .check(new Check("2", "1", "2", "0", Sender.HUMAN, Operation.SEND, 1, 1, 1))
                   .allowed());
           Ticket ticket = network.prepare("access", "1", "server-a");
-          forbidden(() -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a"));
+          forbidden(
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
           service("svc:workspace");
           forbidden(() -> network.active("1", "1"));
           service("svc:ai-gateway");
@@ -440,7 +510,13 @@ class NetworkAuthorityTest {
               () -> {
                 assertFalse(network.active("1", "1"));
                 forbidden(
-                    () -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a"));
+                    () ->
+                        network.redeem(
+                            ticket.ticket(),
+                            "1",
+                            device.toString(),
+                            "server-a",
+                            binding(ticket.ticket())));
                 forbidden(this::register);
               });
           forbidden(
@@ -531,8 +607,18 @@ class NetworkAuthorityTest {
                   new String[] {"1", device.toString(), "server-other"},
                   new String[] {"1", device.toString(), null})) {
             var ticket = network.prepare("access", "1", "server-a");
-            forbidden(() -> network.redeem(ticket.ticket(), wrong[0], wrong[1], wrong[2]));
-            forbidden(() -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a"));
+            forbidden(
+                () ->
+                    network.redeem(
+                        ticket.ticket(), wrong[0], wrong[1], wrong[2], binding(ticket.ticket())));
+            forbidden(
+                () ->
+                    network.redeem(
+                        ticket.ticket(),
+                        "1",
+                        device.toString(),
+                        "server-a",
+                        binding(ticket.ticket())));
           }
         });
   }

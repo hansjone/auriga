@@ -166,6 +166,24 @@ func TestProductionRuntimeRequiresExplicitSharedBrokerTimeout(t *testing.T) {
 	}
 }
 
+func TestProductionRuntimeRejectsAuthGraceBeyondRevocationBudget(t *testing.T) {
+	_, cfg, _ := runtimeFixture(t)
+	raw, err := os.ReadFile(cfg.BrokerConfigFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "long-auth.conf")
+	raw = []byte(strings.Replace(string(raw), "timeout: 2", "timeout: 10", 1))
+	if err = os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.BrokerConfigFile = path
+	if runtime, err := StartRuntime(context.Background(), cfg); err == nil {
+		runtime.Close()
+		t.Fatal("unbounded connection establishment grace accepted")
+	}
+}
+
 func TestProductionRuntimeRequiresBrokerEnforcedAccountLimits(t *testing.T) {
 	_, cfg, _ := runtimeFixture(t)
 	raw, err := os.ReadFile(cfg.BrokerConfigFile)

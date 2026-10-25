@@ -61,6 +61,31 @@ type ConnInfo struct {
 type connz struct {
 	ID    string      `json:"server_id"`
 	Conns []*ConnInfo `json:"connections"`
+	Total int         `json:"total"`
+}
+
+// LookupConns gets one complete account snapshot. A truncated response is an
+// error, never proof that omitted live connections have disappeared.
+func LookupConns(ctx context.Context, nc *nats.Conn, serverID, account string, limit int) (map[uint64]*ConnInfo, error) {
+	data, err := sysRequest(ctx, nc, connzSubject(serverID), map[string]any{"auth": true, "acc": account, "state": 0, "limit": limit + 1, "offset": 0})
+	if err != nil {
+		return nil, err
+	}
+	var z connz
+	if err = json.Unmarshal(data, &z); err != nil {
+		return nil, err
+	}
+	if z.ID != serverID || z.Total > len(z.Conns) || len(z.Conns) > limit {
+		return nil, ErrSysAPI
+	}
+	result := make(map[uint64]*ConnInfo, len(z.Conns))
+	for _, ci := range z.Conns {
+		if ci.Account != account {
+			return nil, ErrNotOwned
+		}
+		result[ci.CID] = ci
+	}
+	return result, nil
 }
 
 func sysRequest(ctx context.Context, nc *nats.Conn, subj string, body any) (json.RawMessage, error) {

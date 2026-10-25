@@ -6,6 +6,7 @@ import auriga.common.security.*;
 import auriga.contracts.iam.v1.*;
 import auriga.iam.api.NetworkAuthority;
 import io.grpc.stub.StreamObserver;
+import java.util.*;
 import java.util.function.Supplier;
 
 /** Gateway-only wire adapter; shares the existing internal JWT/tenant/transport boundary. */
@@ -69,6 +70,57 @@ public class IamGrpcNetwork extends NetworkGatewayServiceGrpc.NetworkGatewayServ
             NetworkNodeActiveResponse.newBuilder()
                 .setActive(authority.active(request.getRealm(), request.getNode()))
                 .build());
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void batchNetworkNodesActive(
+      BatchNetworkNodesActiveRequest request,
+      StreamObserver<BatchNetworkNodesActiveResponse> observer) {
+    gateway();
+    respond(
+        observer,
+        () -> {
+          if (request.getNodesCount() == 0 || request.getNodesCount() > 10000)
+            throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+          var groups = new LinkedHashMap<UUID, LinkedHashSet<NetworkAuthority.NodeReference>>();
+          for (var id : request.getNodesList()) {
+            UUID tenant;
+            try {
+              tenant = UUID.fromString(id.getTenantId());
+              if (!tenant.toString().equals(id.getTenantId())
+                  || TenantContext.PLATFORM_TENANT.equals(tenant))
+                throw new IllegalArgumentException();
+            } catch (IllegalArgumentException invalid) {
+              throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+            }
+            groups
+                .computeIfAbsent(tenant, k -> new LinkedHashSet<>())
+                .add(new NetworkAuthority.NodeReference(id.getRealm(), id.getNode()));
+          }
+          var response = BatchNetworkNodesActiveResponse.newBuilder();
+          // Exact gateway identity + the original delegated-tenant interceptor authorize
+          // this trusted list; every query still enters its own FORCE RLS scope.
+          groups.forEach(
+              (tenant, nodes) ->
+                  TenantContext.run(
+                      tenant,
+                      () -> {
+                        if (io.grpc.Context.current().isCancelled())
+                          throw new AurigaException(CommonErrors.UNAVAILABLE);
+                        var statuses = authority.activeBatch(List.copyOf(nodes));
+                        for (var node : nodes)
+                          response.addNodes(
+                              NetworkNodeStatus.newBuilder()
+                                  .setIdentity(
+                                      NetworkNodeIdentity.newBuilder()
+                                          .setTenantId(tenant.toString())
+                                          .setRealm(node.realm())
+                                          .setNode(node.node()))
+                                  .setActive(Boolean.TRUE.equals(statuses.get(node))));
+                      }));
+          return response.build();
+        });
   }
 
   private static <T> void respond(StreamObserver<T> observer, Supplier<T> work) {

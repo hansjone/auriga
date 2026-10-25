@@ -223,6 +223,11 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  NetworkIngressCleanup networkIngressCleanup(IamStore store, Clock clock) {
+    return new NetworkIngressCleanup(store, clock);
+  }
+
+  @Bean
   NetworkAuthority iamNetworkAuthority(
       IamStore store,
       SessionManager sessions,

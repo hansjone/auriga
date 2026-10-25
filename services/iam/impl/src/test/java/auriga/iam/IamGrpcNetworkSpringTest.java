@@ -52,6 +52,14 @@ class IamGrpcNetworkSpringTest {
                       .setServerAudience("server-a")
                       .build();
               var active = NetworkNodeActiveRequest.newBuilder().setRealm("2").setNode("1").build();
+              var batch =
+                  BatchNetworkNodesActiveRequest.newBuilder()
+                      .addNodes(
+                          NetworkNodeIdentity.newBuilder()
+                              .setTenantId(UUID.randomUUID().toString())
+                              .setRealm("2")
+                              .setNode("1"))
+                      .build();
               var identities = new IamGrpcDevicesSpringTest();
               IamGrpcDevicesSpringTest.error(
                   "common.unauthenticated",
@@ -73,6 +81,11 @@ class IamGrpcNetworkSpringTest {
                           () ->
                               service.networkNodeActive(
                                   active, new IamGrpcDevicesSpringTest.Capture<>()));
+                      IamGrpcDevicesSpringTest.error(
+                          "common.forbidden",
+                          () ->
+                              service.batchNetworkNodesActive(
+                                  batch, new IamGrpcDevicesSpringTest.Capture<>()));
                       return null;
                     });
               }
@@ -101,6 +114,13 @@ class IamGrpcNetworkSpringTest {
                           "server-a",
                           expiry));
               when(authority.active("2", "1")).thenReturn(true);
+              when(authority.activeBatch(anyList()))
+                  .thenAnswer(
+                      call -> {
+                        assertEquals(
+                            batch.getNodes(0).getTenantId(), TenantContext.require().toString());
+                        return Map.of(new NetworkAuthority.NodeReference("2", "1"), true);
+                      });
               identities.as(
                   "svc:ai-gateway",
                   identities.tenant,
@@ -115,6 +135,23 @@ class IamGrpcNetworkSpringTest {
                     service.networkNodeActive(active, live);
                     assertTrue(live.completed);
                     assertTrue(live.values.getFirst().getActive());
+                    var many =
+                        new IamGrpcDevicesSpringTest.Capture<BatchNetworkNodesActiveResponse>();
+                    service.batchNetworkNodesActive(batch, many);
+                    assertTrue(many.completed);
+                    assertTrue(many.values.getFirst().getNodes(0).getActive());
+                    IamGrpcDevicesSpringTest.error(
+                        "common.validation_failed",
+                        () ->
+                            service.batchNetworkNodesActive(
+                                BatchNetworkNodesActiveRequest.newBuilder()
+                                    .addNodes(
+                                        NetworkNodeIdentity.newBuilder()
+                                            .setTenantId(TenantContext.PLATFORM_TENANT.toString())
+                                            .setRealm("2")
+                                            .setNode("1"))
+                                    .build(),
+                                new IamGrpcDevicesSpringTest.Capture<>()));
                     return null;
                   });
             });

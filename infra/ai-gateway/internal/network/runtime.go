@@ -175,15 +175,15 @@ func dialNATS(cfg NATSConfig, closed func(*nats.Conn)) (*nats.Conn, error) {
 }
 
 func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, err error) {
-	if cfg.BrokerConfigFile == "" || cfg.ServerAudience == "" || cfg.ClientAccount == "" || cfg.IssuerSeedFile == "" || cfg.XKeySeedFile == "" || cfg.IAM.Target == "" || cfg.IAM.ServiceTokenFile == "" || cfg.RedeemTimeoutMillis <= 0 || cfg.RedeemTimeoutMillis > 10000 || cfg.ActiveIntervalMillis <= 0 || cfg.ActiveIntervalMillis > 1000 || cfg.RequestTimeoutMillis <= 0 || cfg.RequestTimeoutMillis > 1000 || cfg.MaxConnections <= 0 || cfg.MaxConnections > 10000 || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 {
+	if cfg.BrokerConfigFile == "" || cfg.ServerAudience == "" || cfg.ClientAccount == "" || cfg.IssuerSeedFile == "" || cfg.XKeySeedFile == "" || cfg.IAM.Target == "" || cfg.IAM.ServiceTokenFile == "" || cfg.RedeemTimeoutMillis <= 0 || cfg.RedeemTimeoutMillis > 10000 || cfg.ActiveIntervalMillis <= 0 || cfg.ActiveIntervalMillis > 500 || cfg.RequestTimeoutMillis <= 0 || cfg.RequestTimeoutMillis > 250 || cfg.MaxConnections <= 0 || cfg.MaxConnections > 10000 || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 {
 		return nil, errors.New("network: incomplete runtime configuration")
 	}
 	opts, e := server.ProcessConfigFile(cfg.BrokerConfigFile)
 	if e != nil {
 		return nil, errors.New("network: invalid Broker configuration")
 	}
-	if opts.AuthCallout == nil || opts.AuthTimeout <= 0 || opts.ServerName == "" || opts.SystemAccount == "" || cfg.ClientAccount == opts.SystemAccount || cfg.ClientAccount == opts.AuthCallout.Account || opts.Websocket.AuthTimeout != 0 && opts.Websocket.AuthTimeout != opts.AuthTimeout {
-		return nil, errors.New("network: Broker needs named server, callout, accounts and shared authorization.timeout")
+	if opts.AuthCallout == nil || opts.AuthTimeout <= 0 || opts.AuthTimeout > 2 || opts.ServerName == "" || opts.SystemAccount == "" || cfg.ClientAccount == opts.SystemAccount || cfg.ClientAccount == opts.AuthCallout.Account || opts.Websocket.AuthTimeout != 0 && opts.Websocket.AuthTimeout != opts.AuthTimeout {
+		return nil, errors.New("network: Broker needs named server, callout, accounts and shared authorization.timeout within 2 seconds")
 	}
 	authTimeout := time.Duration(opts.AuthTimeout * float64(time.Second))
 	redeemTimeout := time.Duration(cfg.RedeemTimeoutMillis) * time.Millisecond
@@ -271,9 +271,11 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	ctx, cancel := context.WithCancel(parent)
 	r.cancel = cancel
 	r.done.Go(func() {
-		_ = r.redeemer.Reconcile(ctx, ReconcileConfig{Interval: time.Duration(cfg.ActiveIntervalMillis) * time.Millisecond, RequestTimeout: time.Duration(cfg.RequestTimeoutMillis) * time.Millisecond, MaxKickAttempts: cfg.MaxKickAttempts, Inspect: func(ctx context.Context, b Binding) error { return CheckBinding(ctx, r.ops, b) }, OnError: func(b Binding, err error) {
+		_ = r.redeemer.Reconcile(ctx, ReconcileConfig{Interval: time.Duration(cfg.ActiveIntervalMillis) * time.Millisecond, RequestTimeout: time.Duration(cfg.RequestTimeoutMillis) * time.Millisecond, MaxKickAttempts: cfg.MaxKickAttempts, Snapshot: func(ctx context.Context) (map[uint64]*ConnInfo, error) {
+			return LookupConns(ctx, r.ops, r.auth.ConnectedServerId(), cfg.ClientAccount, cfg.MaxConnections)
+		}, OnError: func(b Binding, err error) {
 			slog.Error("network connection KICK exhausted", "server", b.ServerID, "cid", b.ClientID, "error", err)
-		}}, func(ctx context.Context, b Binding) error { return KickBinding(ctx, r.ops, b) })
+		}}, func(ctx context.Context, b Binding) error { return Kick(ctx, r.ops, b.ServerID, b.ClientID) })
 	})
 	return r, nil
 }

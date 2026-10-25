@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NetworkGatewayService_RedeemNetworkTicket_FullMethodName = "/auriga.iam.v1.NetworkGatewayService/RedeemNetworkTicket"
-	NetworkGatewayService_NetworkNodeActive_FullMethodName   = "/auriga.iam.v1.NetworkGatewayService/NetworkNodeActive"
+	NetworkGatewayService_RedeemNetworkTicket_FullMethodName     = "/auriga.iam.v1.NetworkGatewayService/RedeemNetworkTicket"
+	NetworkGatewayService_NetworkNodeActive_FullMethodName       = "/auriga.iam.v1.NetworkGatewayService/NetworkNodeActive"
+	NetworkGatewayService_BatchNetworkNodesActive_FullMethodName = "/auriga.iam.v1.NetworkGatewayService/BatchNetworkNodesActive"
 )
 
 // NetworkGatewayServiceClient is the client API for NetworkGatewayService service.
@@ -34,6 +35,10 @@ type NetworkGatewayServiceClient interface {
 	RedeemNetworkTicket(ctx context.Context, in *RedeemNetworkTicketRequest, opts ...grpc.CallOption) (*RedeemNetworkTicketResponse, error)
 	// Online device/account/session/node/organization reconciliation for KICK.
 	NetworkNodeActive(ctx context.Context, in *NetworkNodeActiveRequest, opts ...grpc.CallOption) (*NetworkNodeActiveResponse, error)
+	// Only svc:ai-gateway, with the existing delegated-tenant metadata. Up to
+	// 10000 trusted connection identities per call; groups are checked in their
+	// own tenant RLS scope. No device token or model-supplied identity is accepted.
+	BatchNetworkNodesActive(ctx context.Context, in *BatchNetworkNodesActiveRequest, opts ...grpc.CallOption) (*BatchNetworkNodesActiveResponse, error)
 }
 
 type networkGatewayServiceClient struct {
@@ -64,6 +69,16 @@ func (c *networkGatewayServiceClient) NetworkNodeActive(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *networkGatewayServiceClient) BatchNetworkNodesActive(ctx context.Context, in *BatchNetworkNodesActiveRequest, opts ...grpc.CallOption) (*BatchNetworkNodesActiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BatchNetworkNodesActiveResponse)
+	err := c.cc.Invoke(ctx, NetworkGatewayService_BatchNetworkNodesActive_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NetworkGatewayServiceServer is the server API for NetworkGatewayService service.
 // All implementations must embed UnimplementedNetworkGatewayServiceServer
 // for forward compatibility.
@@ -75,6 +90,10 @@ type NetworkGatewayServiceServer interface {
 	RedeemNetworkTicket(context.Context, *RedeemNetworkTicketRequest) (*RedeemNetworkTicketResponse, error)
 	// Online device/account/session/node/organization reconciliation for KICK.
 	NetworkNodeActive(context.Context, *NetworkNodeActiveRequest) (*NetworkNodeActiveResponse, error)
+	// Only svc:ai-gateway, with the existing delegated-tenant metadata. Up to
+	// 10000 trusted connection identities per call; groups are checked in their
+	// own tenant RLS scope. No device token or model-supplied identity is accepted.
+	BatchNetworkNodesActive(context.Context, *BatchNetworkNodesActiveRequest) (*BatchNetworkNodesActiveResponse, error)
 	mustEmbedUnimplementedNetworkGatewayServiceServer()
 }
 
@@ -90,6 +109,9 @@ func (UnimplementedNetworkGatewayServiceServer) RedeemNetworkTicket(context.Cont
 }
 func (UnimplementedNetworkGatewayServiceServer) NetworkNodeActive(context.Context, *NetworkNodeActiveRequest) (*NetworkNodeActiveResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NetworkNodeActive not implemented")
+}
+func (UnimplementedNetworkGatewayServiceServer) BatchNetworkNodesActive(context.Context, *BatchNetworkNodesActiveRequest) (*BatchNetworkNodesActiveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BatchNetworkNodesActive not implemented")
 }
 func (UnimplementedNetworkGatewayServiceServer) mustEmbedUnimplementedNetworkGatewayServiceServer() {}
 func (UnimplementedNetworkGatewayServiceServer) testEmbeddedByValue()                               {}
@@ -148,6 +170,24 @@ func _NetworkGatewayService_NetworkNodeActive_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NetworkGatewayService_BatchNetworkNodesActive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BatchNetworkNodesActiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkGatewayServiceServer).BatchNetworkNodesActive(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkGatewayService_BatchNetworkNodesActive_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkGatewayServiceServer).BatchNetworkNodesActive(ctx, req.(*BatchNetworkNodesActiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NetworkGatewayService_ServiceDesc is the grpc.ServiceDesc for NetworkGatewayService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -162,6 +202,10 @@ var NetworkGatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "NetworkNodeActive",
 			Handler:    _NetworkGatewayService_NetworkNodeActive_Handler,
+		},
+		{
+			MethodName: "BatchNetworkNodesActive",
+			Handler:    _NetworkGatewayService_BatchNetworkNodesActive_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
