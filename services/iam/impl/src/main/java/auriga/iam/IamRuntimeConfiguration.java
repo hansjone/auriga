@@ -213,8 +213,22 @@ public class IamRuntimeConfiguration {
       IamStore store,
       SessionManager sessions,
       TokenService tokens,
-      IamGrpcSessions transportGuard) {
-    return new IamGrpcDevices(new DeviceAccessAuthority(store, sessions, tokens));
+      IamGrpcSessions transportGuard,
+      Clock clock,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    var devices = new DeviceAccessAuthority(store, sessions, tokens);
+    return new IamGrpcDevices(
+        devices,
+        new DeviceAiAccessAuthority(
+            devices,
+            tokens,
+            authorization.getIfAvailable(
+                () ->
+                    request -> {
+                      throw new auriga.common.error.AurigaException(
+                          auriga.common.error.CommonErrors.UNAVAILABLE);
+                    }),
+            clock));
   }
 
   @Bean
