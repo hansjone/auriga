@@ -133,9 +133,10 @@ type brokerOpts struct {
 	noCallout     bool // do not start the callout service
 	noAcctLimits  bool // omit CLIENTS account limits
 	redeemTimeout time.Duration
-	// skipAuthTimeoutCheck leaves CalloutConfig.AuthTimeout unset so a
-	// deliberate RedeemTimeout >= auth_timeout fixture can still run.
-	skipAuthTimeoutCheck bool
+	// calloutAuthTimeout, when >0, is passed to CalloutConfig.AuthTimeout
+	// instead of authTimeout. Used only by the deliberate mismatch evidence
+	// fixture (server auth timeout stays small).
+	calloutAuthTimeout time.Duration
 	// tls enables a WSS listener with cert/key paths and optional origins.
 	tls            bool
 	tlsCertFile    string
@@ -306,6 +307,10 @@ func (h *harness) stopServer() {
 
 func (h *harness) startCallout() {
 	t := h.t
+	authTO := time.Duration(h.o.authTimeout * float64(time.Second))
+	if h.o.calloutAuthTimeout > 0 {
+		authTO = h.o.calloutAuthTimeout
+	}
 	cfg := CalloutConfig{
 		Issuer:          h.issuer,
 		XKey:            h.xkey,
@@ -315,15 +320,13 @@ func (h *harness) startCallout() {
 		ConnectionTypes: h.o.connTypes,
 		Redeemer:        h.tickets,
 		RedeemTimeout:   h.o.redeemTimeout,
+		AuthTimeout:     authTO,
 		OnDecision: func(a Attempt, uc *jwt.UserClaims, err error) {
 			select {
 			case h.decisions <- decision{a, uc, err}:
 			default:
 			}
 		},
-	}
-	if !h.o.skipAuthTimeoutCheck && h.o.authTimeout > 0 {
-		cfg.AuthTimeout = time.Duration(h.o.authTimeout * float64(time.Second))
 	}
 	c, err := NewCallout(cfg)
 	if err != nil {

@@ -28,6 +28,19 @@ func TestNewCallout_RedeemTimeoutVsAuthTimeout(t *testing.T) {
 		}
 	})
 
+	t.Run("reject-auth-timeout-unset", func(t *testing.T) {
+		cfg := base
+		cfg.RedeemTimeout = time.Second
+		// AuthTimeout left at 0
+		_, err := NewCallout(cfg)
+		if err == nil {
+			t.Fatal("expected AuthTimeout required error")
+		}
+		if !strings.Contains(err.Error(), "AuthTimeout") || !strings.Contains(err.Error(), "required") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
 	t.Run("reject-redeem-ge-auth", func(t *testing.T) {
 		for _, tc := range []struct {
 			name   string
