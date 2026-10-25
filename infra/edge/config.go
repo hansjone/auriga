@@ -19,6 +19,7 @@ type Config struct {
 	InstanceControlIngress *InstanceControlIngressConfig `json:"instanceControlIngress,omitempty"`
 	IAMRPC                 IAMRPCConfig                  `json:"iamRpc"`
 	IAMHop                 IAMHopConfig                  `json:"iamHop"`
+	AIAdminHop             IAMHopConfig                  `json:"aiAdminHop"`
 	Listen                 string                        `json:"listen"`
 	PortalHost             string                        `json:"portalHost"`
 	AdminHost              string                        `json:"adminHost"`
@@ -178,6 +179,12 @@ func applyEnv(cfg *Config) {
 		}
 		cfg.Upstreams["workspace"] = v
 	}
+	if v := os.Getenv("AURIGA_EDGE_UPSTREAM_AI_ADMIN"); v != "" {
+		if cfg.Upstreams == nil {
+			cfg.Upstreams = map[string]string{}
+		}
+		cfg.Upstreams["ai-admin"] = v
+	}
 	if v := os.Getenv("AURIGA_EDGE_STATIC_PORTAL"); v != "" {
 		cfg.Static.PortalRoot = v
 	}
@@ -207,6 +214,9 @@ func applyEnv(cfg *Config) {
 }
 
 func (c Config) validate() error {
+	if _, err := c.parseAIAdminUpstream(); err != nil {
+		return err
+	}
 	if _, err := c.parseControlIngress(); err != nil {
 		return err
 	}
