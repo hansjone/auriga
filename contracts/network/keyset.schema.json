@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/keyset.schema.json",
+  "title": "Auriga 网络公钥清单 v1",
+  "description": "Java 公钥接口发布 KeysetPayload；可信配置端点必须封装为 SignedKeyset，由安装预置根验真，不能用本清单中的业务公钥自举信任。同版本 issued_at/valid_until 不变，重新下载不续期；生产者持久保存版本、吊销状态和发布时间，重启不得回退。",
+  "$defs": {
+    "PublicKey": {
+      "type": "object",
+      "properties": {
+        "kid": { "$ref": "envelope.schema.json#/$defs/Kid" },
+        "alg": { "const": "Ed25519" },
+        "purpose": {
+          "enum": ["business_delivery", "protocol_response", "management_state"]
+        },
+        "state": {
+          "enum": ["active", "next", "retired", "revoked"],
+          "description": "active 仅在有效期内签发/验证；next 提前公布，激活前不得用于签发或接受新封装；retired 停止签发，在有效窗口内仍可验旧封装；revoked 立即停签且不得用于接受任何封装。kid/公钥不可复用，retired/revoked 不得重新激活。"
+        },
+        "not_before": { "$ref": "envelope.schema.json#/$defs/Time" },
+        "not_after": { "$ref": "envelope.schema.json#/$defs/Time" },
+        "public_key_spki": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{59}$",
+          "description": "Ed25519 SPKI DER 的规范无填充 base64url。"
+        }
+      },
+      "required": [
+        "kid",
+        "alg",
+        "purpose",
+        "state",
+        "not_before",
+        "not_after",
+        "public_key_spki"
+      ],
+      "additionalProperties": false
+    },
+    "KeysetPayload": {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": 1 },
+        "realm": { "$ref": "envelope.schema.json#/$defs/PositiveUint64" },
+        "keyset_version": {
+          "$ref": "envelope.schema.json#/$defs/PositiveUint64",
+          "description": "持久单调版本；任何公钥、状态、有效期或发布时间改变都产生更高版本。"
+        },
+        "issued_at": { "$ref": "envelope.schema.json#/$defs/Time" },
+        "valid_until": {
+          "$ref": "envelope.schema.json#/$defs/Time",
+          "description": "不晚于 issued_at+24h，缓存硬截止；重新下载旧版本不延长。"
+        },
+        "keys": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PublicKey" },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "schema_version",
+        "realm",
+        "keyset_version",
+        "issued_at",
+        "valid_until",
+        "keys"
+      ],
+      "additionalProperties": false
+    },
+    "SignedKeyset": {
+      "description": "根签名输入为 UTF-8(Auriga.NetworkKeyset.v1) || 0x00 || JCS(keyset)。离线根由发布设施管理，不在 collab 业务签名器中。",
+      "type": "object",
+      "properties": {
+        "keyset": { "$ref": "#/$defs/KeysetPayload" },
+        "root_auth": {
+          "type": "object",
+          "properties": {
+            "alg": { "const": "Ed25519" },
+            "kid": { "$ref": "envelope.schema.json#/$defs/Kid" },
+            "signature": { "$ref": "envelope.schema.json#/$defs/Signature" }
+          },
+          "required": ["alg", "kid", "signature"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["keyset", "root_auth"],
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/KeysetPayload"
+}

@@ -155,3 +155,35 @@ node contracts/test/network-gen.mjs               # 修改合法帧后重新生�
 - `fixtures/address-cases.json`、`raw-cases.json`、`error-presentation.json`：地址解析与规范化、原始字节、错误呈现。
 
 Go/Java 实现应加载同一批 fixtures、复现 `signature-vectors.json` 字节，并对每个用例给出相同错误码；参考实现之间不一致时以本 README 与 schema 为准。
+
+## 9. 公钥发布与 Java/Node 联合样本（N1 返工1）
+
+`keyset.schema.json#/$defs/KeysetPayload` 是 Java `NetworkPublicKeys.publicKeysJson`
+返回的公钥元数据格式。字段沿网络协议使用 snake_case；状态明确区分 active、next、retired、revoked。
+next 只预发布，retired 只能在有效窗口验旧封装，revoked 立即拒绝；清单有效不延长单钥或消息期限。
+可信配置端点必须按 `SignedKeyset` 用安装预置的离线根封装，不能把未签公钥 JSON 当信任根。
+根签名的输入域为 `Auriga.NetworkKeyset.v1`、一个零字节和 `JCS(keyset)`；业务签名密钥不兼任根。
+
+生产 Java 注册表使用 `NetworkSigningKeys(clock, initialVersion, metadataFile)`；Spring 配置项为
+`auriga.collab.network.key-state-file`。不配置时不发布默认的 version=1 公钥集合，邮箱签发仍失败关闭。
+元数据文件只含公钥、状态、版本和发布时间，使用原子替换及独占 publisher 锁；私钥另从受保护配置/DER 文件加载。
+重启读取已持久化版本/吊销状态，配置重绑同 kid 不能换公钥或复活 retired/revoked；发布新钥、激活、撤回都提升版本。
+同版本下载不刷新硬截止；过期清单重新发布时先提升并持久化版本。多实例 HA 需外部受控密钥设施，不共享多个无协调写者。
+
+`NetworkMailboxService.fetchPage` 输出协议 `FetchResult`，其中 `page`（type=fetch_page）及每个条目分别签名；
+manifest 绑定条目完整对象的摘要（含签名）。整帧按调用者 max_bytes（4KiB–64KiB）限长和校验深度/值数量。
+过期项写 Expired 终态，无权或不可编码项只下发无正文 gap，pending 首联只下发 contact_prompt。
+当前内部分页入口接受上一受签页的 scan_after；next_continuation 为 null，HTTP/NATS adapter 不能将 scan_after 当授权或确认前缀。
+
+共享边界 `fixtures/raw-boundaries.json` 覆盖 UTF-8 解码后串/键字节数、根深度从 1 起算的空容器/标量边界和总值数 8192。
+valueTree 用 128 个对象各 63 个空对象成员构造；lastMembers 控制最后对象成员数，属性名和结束标记不计入值数。
+`fixtures/java-signed-samples.json` 是 Java 真实 signer 生成的 TEST ONLY 样本（公钥、4 个既有向量及完整 FETCH 页），不含私钥。
+Java 测试默认只比较已提交样本，再启动 Node 运行 `fixtures/verify-java.mjs`，核真实签名、manifest、篡改负例及共享边界。
+插件任务可复用样本接自己的接收链路；本联合检查使用契约参考实现，不代表真实插件/网络端到端已验收。
+
+在仓库根目录显式重生（其他测试不写跟踪文件）：
+
+```powershell
+.\mvnw.cmd -B -pl services/collab/api,services/collab/impl -am test '-Dtest=NetworkJavaInteropTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dauriga.network.export-fixture=true'
+node contracts/network/fixtures/verify-java.mjs
+```
