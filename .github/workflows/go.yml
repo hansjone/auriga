@@ -52,7 +52,7 @@ jobs:
           "AURIGA_AI_TEST_PG_DSN=postgres://postgres@127.0.0.1:$port/postgres?sslmode=disable" >> $env:GITHUB_ENV
       - name: Require AI test database
         run: test -n "$AURIGA_AI_TEST_PG_DSN"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.3'
           cache-dependency-path: |
@@ -93,7 +93,7 @@ jobs:
         module: [gen, edge, ai-gateway, egress, agent, ctl]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.3'
           cache-dependency-path: infra/**/go.sum
