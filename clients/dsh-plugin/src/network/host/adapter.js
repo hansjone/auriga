@@ -1399,6 +1399,19 @@ export function createHostAdapter({
 
   return {
     deliver,
+    /** Private runtime policy rejection after wire verification, with durable uniform evidence.
+     * @param {Page} page @param {PageItem} item @param {string} reason */
+    reject(page, item, reason) {
+      ledger.assertAvailable();
+      checkPage({ ...page, items: [item] });
+      return Promise.all(
+        item.recipients.map((rec) =>
+          locks.run(`thread:${rec.local}:${item.message.threadId}`, () =>
+            rejectAddressItem(page, item, rec, reason),
+          ),
+        ),
+      );
+    },
     localAddress: allocator.addressFor,
     recoverLocalRegistrations: allocator.recover,
     inboundPolicy,

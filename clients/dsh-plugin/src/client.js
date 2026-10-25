@@ -637,7 +637,7 @@ window.__ModuleLoader__.load({
         };
         function ConsentSection({ settings = false }) {
           useHostState();
-          const api = ctx.get?.('aurigaConsentUI') ?? consentBridge;
+          const api = consentBridge;
           const readSnapshot = async () => {
             const snapshot = await api.snapshot();
             if (

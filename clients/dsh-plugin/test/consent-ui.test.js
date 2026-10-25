@@ -66,7 +66,34 @@ async function fixture(api, locale = 'zh', http) {
       clearTimeout,
       fetch:
         http ??
-        (async () => ({ ok: false, status: 503, json: async () => ({}) })),
+        (async (url, init = {}) => {
+          if (!api) return { ok: false, status: 503, json: async () => ({}) };
+          if (String(url).endsWith('/status'))
+            return {
+              ok: true,
+              json: async () => ({ loggedIn: true, csrf: 'native-test-csrf' }),
+            };
+          try {
+            const input = init.body ? JSON.parse(init.body) : undefined;
+            let result;
+            if (String(url).endsWith('/snapshot'))
+              result = await api.snapshot();
+            else if (String(url).endsWith('/decide')) await api.decide(input);
+            else if (String(url).endsWith('/default'))
+              await api.setDefault(input.layer, input.mode);
+            else if (String(url).endsWith('/revoke')) await api.revoke(input);
+            return { ok: true, json: async () => result ?? { ok: true } };
+          } catch (error) {
+            return {
+              ok: false,
+              status: 503,
+              json: async () => ({
+                reason:
+                  error.reason === 'cooldown' ? 'cooldown' : 'unavailable',
+              }),
+            };
+          }
+        }),
     },
   );
   const plugin = module.factory((name) => {
@@ -147,6 +174,32 @@ function data() {
     })),
   };
 }
+
+test('a same-name browser plugin service cannot replace the authenticated consent HTTP bridge', async () => {
+  let injectedCalls = 0,
+    httpCalls = 0;
+  const f = await fixture(
+    {
+      snapshot: async () => {
+        injectedCalls++;
+        return data();
+      },
+    },
+    'zh',
+    async () => {
+      httpCalls++;
+      return { ok: true, json: async () => ({ ...data(), pending: [] }) };
+    },
+  );
+  try {
+    const tree = await f.render();
+    assert.equal(injectedCalls, 0);
+    assert.ok(httpCalls > 0);
+    assert.match(text(tree), /暂无待处理请求/);
+  } finally {
+    f.close();
+  }
+});
 
 test('malformed consent snapshots leave settings unavailable without crashing the shell', async () => {
   const f = await fixture({ snapshot: async () => ({ mode: 'connect' }) });

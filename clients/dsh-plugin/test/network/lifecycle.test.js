@@ -4,6 +4,48 @@ import { setImmediate } from 'node:timers';
 import { createNetworkLifecycle } from '../../src/network/lifecycle.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+async function until(predicate) {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('lifecycle timeout');
+    await turn();
+  }
+}
+
+test('a runtime storage failure becomes unavailable and is rebuilt with backoff without relogin', async () => {
+  const opened = [];
+  const lifecycle = createNetworkLifecycle({
+    directory: 'unused',
+    ctx: {},
+    getAccess: async () => 'native',
+    authorizeLocal: async () => true,
+    backoff: { baseMs: 10, maxMs: 20 },
+    async open(options) {
+      opened.push(options);
+      const ordinal = opened.length;
+      return {
+        status: { connected: true },
+        async start() {
+          if (ordinal === 1) await new Promise(() => {});
+        },
+        async close() {
+          options.onClosed?.('stopped');
+        },
+        consentUI: () => ({}),
+      };
+    },
+  });
+  lifecycle.attach({ prepare: async () => ({}), ports: {} });
+  lifecycle.login();
+  await until(() => opened.length === 1);
+  assert.equal(typeof opened[0].onClosed, 'function');
+  opened[0].onClosed('storage_failure');
+  assert.equal(lifecycle.status.connected, false);
+  assert.equal(lifecycle.status.state, 'unavailable');
+  assert.equal(opened.length, 1);
+  await until(() => opened.length === 2 && lifecycle.status.connected);
+  await lifecycle.close();
+});
 function fixture() {
   const calls = [];
   const lifecycle = createNetworkLifecycle({

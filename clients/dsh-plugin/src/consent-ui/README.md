@@ -4,12 +4,13 @@
 收件箱是功能页内的折叠区；授权默认值和持续名单在原生统一设置中。
 不新增浏览器入口、独立框架、模型工具或平台 API。
 
-## 主控需要完成的真实接线
+## 当前接线
 
-当前基线未创建 consent 运行时，也没有浏览器到本地 consent 的认证桥接。
-界面通过客户端 Cordis `ctx.get('aurigaConsentUI')` 查找**插件自有端口**；
-它不是已经存在的 DSH 原生服务。端口缺失时只显示未接入，不显示模拟请求。
-后续需在客户端注册这个服务，提供以下异步方法：
+Node 运行时创建真实 consent 服务和认证 HTTP 桥。浏览器固定请求
+`/auriga/local-login/consent/{snapshot,decide,default,revoke}`，不读取
+`ctx.get('aurigaConsentUI')` 或其他浏览器插件提供的服务。缺少真实生产
+provider 时显示不可用，不显示模拟请求；生产接线缺口见 `../network/README.zh.md`。
+服务端适配方法为：
 
 - `snapshot()`：使用 `createConsentUIAdapter(...).snapshot()` 的投影。
 - `decide(input)`、`setDefault(layer, mode)`、`revoke(input)`：映射同名适配方法。
@@ -36,8 +37,8 @@
 
 这要求建立认证的本地宿主桥，不能将 Node 对象直接当作浏览器服务，
 不能绕过宿主 Connection/Origin、真实本地用户校验与写请求 CSRF 防护。
-服务缺失时不要回退总部 `fetch`、全局对象、localStorage 或 MCP。
-`plugin.js` 尚未修改，不能将此 UI 交付描述成真实双 DSH 首联闭环。
+服务缺失时不回退总部 API、浏览器全局对象、localStorage、同名 Cordis 服务或 MCP。
+HTTP 桥及内存测试不能将此 UI 交付描述成真实双 DSH 首联闭环。
 
 ## 适配器输入
 

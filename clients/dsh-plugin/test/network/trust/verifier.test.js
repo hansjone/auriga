@@ -11,6 +11,7 @@ import {
   parseStrictJson,
 } from '../../../src/network/trust/jcs.js';
 import { openTestTrust as openTrustStore } from './keyset-fixtures.js';
+import { definitions } from '../../../src/generated/network/keyset-schema.js';
 import {
   verifyEnvelope,
   verifyEnvelopeWithRefresh,
@@ -74,6 +75,22 @@ function envelope(v) {
   return value;
 }
 const code = (expected) => (e) => e.code === expected;
+
+test('an unknown schema keyword rejects an otherwise valid root-signed keyset publication', async () => {
+  const schema = definitions.PublicKey.properties.kid;
+  schema.futureConstraint = true;
+  try {
+    await assert.rejects(
+      openTrustStore({ cache: cache(), config: config(), now }),
+      code('network.key_unavailable'),
+    );
+  } finally {
+    delete schema.futureConstraint;
+  }
+  await assert.doesNotReject(
+    openTrustStore({ cache: cache(), config: config(), now }),
+  );
+});
 
 test('failed durable key update can recover on a known-version refresh', async () => {
   const disk = cache();

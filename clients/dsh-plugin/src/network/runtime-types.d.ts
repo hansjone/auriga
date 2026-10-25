@@ -50,9 +50,15 @@ export interface NetworkPorts {
   ): Promise<boolean>;
   publishConsent(
     events: import('./consent/types.js').Event[],
-    intakes: Record<string, unknown>,
+    intakes: Record<string, ConsentPublication>,
     signal: AbortSignal,
   ): Promise<void>;
+}
+/** Minimal, batch-related metadata only. Never include previews, source proofs or raw frames. */
+export interface ConsentPublication {
+  requestId: string;
+  digest: string;
+  recipientIds: string[];
 }
 export interface PreparedNetwork {
   identity: LedgerIdentity;
@@ -77,6 +83,7 @@ export interface RuntimeOptions {
   authorizeLocal(context: unknown): Promise<boolean>;
   now?: () => number;
   onRevoked?: () => void;
+  onClosed?: (reason: string) => void;
   stores?: Record<string, any>;
   transportFactory?: (options: TransportOptions) => any;
   consentTiming?: Pick<

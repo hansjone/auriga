@@ -2,7 +2,7 @@ import { openNetworkRuntime, isRevocationError } from './runtime.js';
 
 /** Provider lifetime and login lifetime are independent. Late register/prepare
  * responses cannot resurrect an old login or a disposed native provider.
- * @param {{directory:string,ctx:any,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void}} options */
+ * @param {{directory:string,ctx:any,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void,backoff?:{baseMs:number,maxMs:number}}} options */
 export function createNetworkLifecycle(options) {
   let authenticated = false;
   let disposed = false;
@@ -48,6 +48,17 @@ export function createNetworkLifecycle(options) {
       let attempt = 0;
       while (valid()) {
         let candidate;
+        let ended = false;
+        /** @type {()=>void} */
+        let notifyClosed = () => {};
+        const endedPromise = new Promise((resolve) => {
+          notifyClosed = () => {
+            ended = true;
+            abort.signal.removeEventListener('abort', notifyClosed);
+            resolve(undefined);
+          };
+        });
+        abort.signal.addEventListener('abort', notifyClosed, { once: true });
         try {
           const accessToken = await options.getAccess();
           if (!valid()) return;
@@ -63,6 +74,14 @@ export function createNetworkLifecycle(options) {
             ctx: options.ctx,
             getAccess: options.getAccess,
             authorizeLocal: options.authorizeLocal,
+            onClosed() {
+              if (ended) return;
+              if (valid()) {
+                runtime = undefined;
+                phase = 'unavailable';
+              }
+              notifyClosed();
+            },
             onRevoked: () => {
               if (valid()) {
                 options.onRevoked?.();
@@ -76,14 +95,23 @@ export function createNetworkLifecycle(options) {
             return;
           }
           runtime = candidate;
-          await candidate.start();
+          await Promise.race([
+            candidate.start(),
+            endedPromise.then(() => {
+              throw new Error('network runtime closed during start');
+            }),
+          ]);
           if (!valid()) {
             await candidate.close();
             return;
           }
-          phase = 'running';
-          return;
+          if (!ended) phase = 'running';
+          await endedPromise;
+          if (!valid()) return;
+          throw new Error('network runtime closed');
         } catch (error) {
+          abort.signal.removeEventListener('abort', notifyClosed);
+          if (!valid()) return;
           await candidate?.close();
           if (!valid()) return;
           if (isRevocationError(error)) {
@@ -104,7 +132,10 @@ export function createNetworkLifecycle(options) {
             };
             const timer = setTimeout(
               wake,
-              Math.min(30000, 500 * 2 ** Math.min(attempt++, 6)),
+              Math.min(
+                options.backoff?.maxMs ?? 30000,
+                (options.backoff?.baseMs ?? 500) * 2 ** Math.min(attempt++, 6),
+              ),
             );
             timer.unref?.();
             abort.signal.addEventListener('abort', wake, { once: true });
