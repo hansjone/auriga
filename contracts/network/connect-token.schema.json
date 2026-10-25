@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/connect-token.schema.json",
+  "title": "Network CONNECT authentication token",
+  "description": "JSON serialized into NATS CONNECT auth_token. Untrusted routing hints only: IAM consumes and verifies the ticket against the delegated tenant, node and device. The server audience is never taken from this object. Private ingress is the first 16 bytes of SHA-256 over the ASCII ticket, encoded as lowercase RFC4648 base32 without padding. Preparation can return the derived up/down/reply subjects before CONNECT. The random server-issued ticket is never an identity-derived address. Never log this secret.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tenant", "node", "device", "ticket"],
+  "properties": {
+    "tenant": {"type": "string", "format": "uuid"},
+    "node": {"type": "string", "pattern": "^[1-9][0-9]{0,19}$"},
+    "device": {"type": "string", "format": "uuid"},
+    "ticket": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}
+  }
+}

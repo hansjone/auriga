@@ -156,18 +156,35 @@ public final class IamNetworkAuthority implements NetworkAuthority {
 
   @Override
   public Connection redeem(String raw, String nodeId, String device, String audience) {
+    return redeemInternal(raw, nodeId, device, audience, null);
+  }
+
+  @Override
+  public Connection redeem(
+      String raw, String nodeId, String device, String audience, IngressBinding binding) {
+    Objects.requireNonNull(binding);
+    return redeemInternal(raw, nodeId, device, audience, binding);
+  }
+
+  private Connection redeemInternal(
+      String raw, String nodeId, String device, String audience, IngressBinding binding) {
     caller("svc:ai-gateway");
     if (raw == null || !raw.matches("[A-Za-z0-9_-]{43}")) return denied();
+    // Commit consumption before calling credential(), whose participating transaction
+    // can become rollback-only even when its exception is caught by the caller.
+    ObjectNode ticket =
+        transaction(
+            () -> {
+              String hash = Secrets.hash(raw);
+              ObjectNode found = store.get("network_ticket", hash, true);
+              if (found != null) store.delete("network_ticket", hash);
+              return found;
+            });
+    if (ticket == null) return denied();
     Connection result =
         transaction(
             () -> {
               enabled();
-              String hash = Secrets.hash(raw);
-              ObjectNode ticket = store.get("network_ticket", hash, true);
-              if (ticket == null) return null;
-              // Commit consumption even for a rejected binding. Throwing inside this transaction
-              // would roll back the deletion and let a captured ticket be probed repeatedly.
-              store.delete("network_ticket", hash);
               if (!validNumber(nodeId, false)
                   || audience == null
                   || !servers.contains(audience)
@@ -194,6 +211,44 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                           .instant()
                           .plusSeconds(Math.min(3600, limits().get(Limit.CONNECTION_SECONDS))));
               if (!clock.instant().isBefore(expiry)) return null;
+              if (binding != null) {
+                if (!binding.serverId().matches("N[A-Z2-7]{55}")
+                    || !validNumber(binding.clientId(), false)
+                    || !binding.userNkey().matches("U[A-Z2-7]{55}")
+                    || !binding.ingress().matches("[a-z2-7]{26}")
+                    || binding.account().isBlank()
+                    || binding.account().length() > 256) return null;
+                // Reclaim only expired bindings for this node; other live ingresses remain
+                // distinct until READY fences the prior epoch in collab.
+                jdbc.update(
+                    "DELETE FROM iam.network_ingress WHERE tenant_id=? AND data->>'node'=? AND expires_at<=?",
+                    TenantContext.require(),
+                    nodeId,
+                    java.sql.Timestamp.from(clock.instant()));
+                store.insert(
+                    "network_ingress",
+                    binding.ingress(),
+                    Json.object(
+                        "realm",
+                        node.realm(),
+                        "node",
+                        node.node(),
+                        "device",
+                        device,
+                        "serverId",
+                        binding.serverId(),
+                        "clientId",
+                        binding.clientId(),
+                        "userNkey",
+                        binding.userNkey(),
+                        "account",
+                        binding.account(),
+                        "audience",
+                        audience,
+                        "expiresAt",
+                        expiry.toString()),
+                    expiry);
+              }
               return new Connection(node, audience, expiry);
             });
     return result == null ? denied() : result;

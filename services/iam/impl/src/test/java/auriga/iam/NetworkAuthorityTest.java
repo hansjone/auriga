@@ -285,6 +285,28 @@ class NetworkAuthorityTest {
   }
 
   @Test
+  void boundRedeemPersistsServerGenerationCidAndPrivateIngress() {
+    business(
+        () -> {
+          register();
+          Ticket ticket = network.prepare("access", "1", "server-a");
+          service("svc:ai-gateway");
+          var binding =
+              new IngressBinding(
+                  "N" + "A".repeat(55), "42", "U" + "A".repeat(55), "a".repeat(26), "CLIENTS");
+          network.redeem(ticket.ticket(), "1", device.toString(), "server-a", binding);
+          var record = rows.get(key("network_ingress", binding.ingress()));
+          assertNotNull(record);
+          assertEquals("42", record.path("clientId").asString());
+          assertEquals(binding.serverId(), record.path("serverId").asString());
+          assertEquals(binding.userNkey(), record.path("userNkey").asString());
+          assertFalse(record.toString().contains(ticket.ticket()));
+          forbidden(
+              () -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a", binding));
+        });
+  }
+
+  @Test
   void ticketIsHashedSingleUseAndBoundToDeviceNodeAndVerifiedServer() {
     business(
         () -> {

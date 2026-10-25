@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Internal service JWT, delegated business tenant and authenticated internal
+// transport, identical to DeviceAccessService. Both RPCs allow ONLY svc:ai-gateway.
+service NetworkGatewayService {
+  // Consume a ticket even if its binding is rejected. Never log the request.
+  rpc RedeemNetworkTicket(RedeemNetworkTicketRequest) returns (RedeemNetworkTicketResponse);
+  // Online device/account/session/node/organization reconciliation for KICK.
+  rpc NetworkNodeActive(NetworkNodeActiveRequest) returns (NetworkNodeActiveResponse);
+}
+
+message RedeemNetworkTicketRequest {
+  string ticket = 1;
+  string node = 2;
+  string device = 3;
+  // Trusted gateway configuration, selected by the authenticated Broker ID.
+  string server_audience = 4;
+  // Trusted callout binding, never supplied by the external client.
+  string server_id = 5;
+  string client_id = 6;
+  string user_nkey = 7;
+  string ingress = 8;
+  string client_account = 9;
+}
+
+message RedeemNetworkTicketResponse {
+  // Canonical unsigned decimal IDs, not display addresses.
+  string realm = 1;
+  string node = 2;
+  string device = 3;
+  string server_audience = 4;
+  // RFC 3339 UTC. The gateway User JWT MUST NOT outlive this deadline.
+  string expires_at = 5;
+  // Persisted with the successful grant; exact echo of the trusted binding.
+  string ingress = 6;
+}
+
+message NetworkNodeActiveRequest {
+  string realm = 1;
+  string node = 2;
+}
+
+message NetworkNodeActiveResponse {
+  bool active = 1;
+}

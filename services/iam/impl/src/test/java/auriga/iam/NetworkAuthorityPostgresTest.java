@@ -170,6 +170,75 @@ class NetworkAuthorityPostgresTest {
   }
 
   @Test
+  void successfulGrantPersistsExactBindingAndRlsHidesItFromOtherTenant() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          var ticket = network.prepare("access", node.node(), "server-a");
+          gateway();
+          var binding =
+              new auriga.iam.api.NetworkAuthority.IngressBinding(
+                  "N" + "A".repeat(55), "42", "U" + "A".repeat(55), "a".repeat(26), "CLIENTS");
+          network.redeem(ticket.ticket(), node.node(), device.toString(), "server-a", binding);
+          var stored = store.tx(() -> store.get("network_ingress", binding.ingress(), false));
+          assertEquals(node.realm(), stored.path("realm").asString());
+          assertEquals(binding.serverId(), stored.path("serverId").asString());
+          assertEquals(binding.clientId(), stored.path("clientId").asString());
+          assertEquals(binding.userNkey(), stored.path("userNkey").asString());
+          assertFalse(stored.toString().contains(ticket.ticket()));
+          TenantContext.run(
+              UUID.randomUUID(),
+              () ->
+                  assertNull(
+                      store.tx(() -> store.get("network_ingress", binding.ingress(), false))));
+          var duplicate = network.prepare("access", node.node(), "server-a");
+          assertThrows(
+              RuntimeException.class,
+              () ->
+                  network.redeem(
+                      duplicate.ticket(), node.node(), device.toString(), "server-a", binding));
+          assertNull(
+              store.tx(() -> store.get("network_ticket", Secrets.hash(duplicate.ticket()), false)));
+        });
+  }
+
+  @Test
+  void credentialExceptionDurablyBurnsTicketBeforeRejecting() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          var ticket = network.prepare("access", node.node(), "server-a");
+          gateway();
+          when(devices.credential(tenant.toString(), account.toString(), device.toString()))
+              .thenAnswer(
+                  invocation ->
+                      store.tx(
+                          () -> {
+                            throw new IllegalStateException("credential unavailable");
+                          }));
+          assertThrows(
+              RuntimeException.class,
+              () -> network.redeem(ticket.ticket(), node.node(), device.toString(), "server-a"));
+          assertNull(
+              store.tx(() -> store.get("network_ticket", Secrets.hash(ticket.ticket()), false)));
+          doReturn(identity)
+              .when(devices)
+              .credential(tenant.toString(), account.toString(), device.toString());
+          assertEquals(
+              "common.forbidden",
+              assertThrows(
+                      AurigaException.class,
+                      () ->
+                          network.redeem(
+                              ticket.ticket(), node.node(), device.toString(), "server-a"))
+                  .errorCode()
+                  .code());
+        });
+  }
+
+  @Test
   void wrongBindingDurablyInvalidatesTicketBeforeReturningForbidden() {
     TenantContext.run(
         tenant,

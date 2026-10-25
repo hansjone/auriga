@@ -26,6 +26,10 @@ public interface NetworkAuthority {
   /** The gateway signs the NATS User JWT, using precisely this identity and expiry. */
   record Connection(Node identity, String serverAudience, Instant expiresAt) {}
 
+  /** Trusted Broker connection identity. No device tokens or raw network tickets. */
+  record IngressBinding(
+      String serverId, String clientId, String userNkey, String ingress, String account) {}
+
   enum Operation {
     CONNECT,
     SEND,
@@ -134,6 +138,10 @@ public interface NetworkAuthority {
    * ticket is consumed even when the supplied node/device/audience binding is rejected.
    */
   Connection redeem(String ticket, String node, String device, String serverAudience);
+
+  /** Wire gateway entry: persists the exact ingress binding before returning a grant. */
+  Connection redeem(
+      String ticket, String node, String device, String serverAudience, IngressBinding binding);
 
   /** Exact svc:ai-gateway / svc:collab only; revoked or unknown has the same denied response. */
   Decision check(Check request);

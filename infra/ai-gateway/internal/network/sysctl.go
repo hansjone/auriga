@@ -125,6 +125,14 @@ func LameDuck(ctx context.Context, nc *nats.Conn, serverID string, cid uint64) e
 // bound ingress in the bound account, then kicks it. CIDs are never reused
 // within one server instance, so the check cannot race with reuse there.
 func KickBinding(ctx context.Context, nc *nats.Conn, b Binding) error {
+	if err := CheckBinding(ctx, nc, b); err != nil {
+		return err
+	}
+	return Kick(ctx, nc, b.ServerID, b.ClientID)
+}
+
+// CheckBinding checks the current server/account/ingress without changing it.
+func CheckBinding(ctx context.Context, nc *nats.Conn, b Binding) error {
 	ci, err := LookupConn(ctx, nc, b.ServerID, b.ClientID)
 	if err != nil {
 		return err
@@ -132,5 +140,5 @@ func KickBinding(ctx context.Context, nc *nats.Conn, b Binding) error {
 	if ci.AuthorizedUser != b.Ingress || ci.Account != b.Account {
 		return ErrNotOwned
 	}
-	return Kick(ctx, nc, b.ServerID, b.ClientID)
+	return nil
 }

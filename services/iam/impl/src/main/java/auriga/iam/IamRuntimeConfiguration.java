@@ -218,6 +218,11 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamGrpcNetwork iamGrpcNetwork(NetworkAuthority authority, IamGrpcSessions transportGuard) {
+    return new IamGrpcNetwork(authority);
+  }
+
+  @Bean
   NetworkAuthority iamNetworkAuthority(
       IamStore store,
       SessionManager sessions,
