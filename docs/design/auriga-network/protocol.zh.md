@@ -1,6 +1,6 @@
 # 网络协议、授权与宿主恢复
 
-状态：待评审协议提案。不是现有契约。本篇与 [总览](README.zh.md)、[验收](failure-validation.zh.md) 配套；后续必须先生成正式 schema/protobuf 和一致性测试，禁止各端私加同名字段。
+状态：**待实施的协议设计**，已随总览独立审查入库，尚未实施。不是现有契约。本篇与 [总览](README.zh.md)、[验收](failure-validation.zh.md) 配套；后续必须先生成正式 schema/protobuf 和一致性测试，禁止各端私加同名字段。
 
 ## 1. 稳定身份与临时标识
 
