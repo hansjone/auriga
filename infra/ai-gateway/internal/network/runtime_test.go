@@ -29,7 +29,16 @@ func startIAMRPC(t *testing.T, f *fakeIAM) team.RPCConfig {
 	}
 	srv := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		md, _ := metadata.FromIncomingContext(ctx)
-		if strings.Join(md.Get("authorization"), "") != "Bearer "+token || strings.Join(md.Get("auriga-tenant-id"), "") != testTenant {
+		tenant := testTenant
+		if batch, ok := req.(*iam.BatchNetworkNodesActiveRequest); ok && len(batch.Nodes) > 0 {
+			tenant = batch.Nodes[0].TenantId
+			for _, id := range batch.Nodes {
+				if id.TenantId != tenant {
+					t.Error("cross-tenant identity in delegated batch")
+				}
+			}
+		}
+		if strings.Join(md.Get("authorization"), "") != "Bearer "+token || strings.Join(md.Get("auriga-tenant-id"), "") != tenant {
 			t.Error("missing existing internal service identity or delegated tenant")
 		}
 		return handler(ctx, req)
@@ -39,6 +48,27 @@ func startIAMRPC(t *testing.T, f *fakeIAM) team.RPCConfig {
 	go func() { defer close(done); _ = srv.Serve(listener) }()
 	t.Cleanup(func() { srv.Stop(); _ = listener.Close(); <-done })
 	return team.RPCConfig{Target: listener.Addr().String(), ServiceTokenFile: tokenFile}
+}
+
+func TestBatchDelegationUsesEachNodesOwnTenant(t *testing.T) {
+	f := &fakeIAM{active: true}
+	conn, err := team.DialRPC(startIAMRPC(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	r, err := NewIAMRedeemer(conn, IAMConfig{ServerID: "server", ServerAudience: "server-a", Account: clientAccount, RedeemTimeout: time.Millisecond, AuthTimeout: time.Second, MaxConnections: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindings := []liveBinding{{Tenant: testTenant, Realm: "1", Node: "1"}, {Tenant: testDevice, Realm: "1", Node: "1"}, {Tenant: testTenant, Realm: "1", Node: "1"}}
+	result, failures := r.activeBatch(context.Background(), bindings, 250*time.Millisecond)
+	if failures != nil {
+		t.Fatal(failures)
+	}
+	if len(result) != 2 || !result[nodeIdentity{testTenant, "1", "1"}] || !result[nodeIdentity{testDevice, "1", "1"}] || f.calls != 2 {
+		t.Fatalf("results=%v calls=%d", result, f.calls)
+	}
 }
 
 func runtimeFixture(t *testing.T) (*harness, RuntimeConfig, *fakeIAM) {
@@ -60,6 +90,9 @@ func runtimeFixture(t *testing.T) (*harness, RuntimeConfig, *fakeIAM) {
 	cfg := RuntimeConfig{BrokerConfigFile: h.configFile, ServerAudience: "server-a", ClientAccount: clientAccount, IssuerSeedFile: write("issuer.seed", issuer), XKeySeedFile: write("xkey.seed", xkey), IAM: startIAMRPC(t, f), RedeemTimeoutMillis: 500, ActiveIntervalMillis: 10, RequestTimeoutMillis: 100, MaxKickAttempts: 3, MaxConnections: 100}
 	cfg.Auth = NATSConfig{URL: h.tcpURL(), Username: h.authUser, PasswordFile: write("auth.password", []byte(h.authPass))}
 	cfg.Ops = NATSConfig{URL: h.tcpURL(), Username: h.opsUser, PasswordFile: write("ops.password", []byte(h.opsPass))}
+	cfg.Data = NATSConfig{URL: h.tcpURL(), Username: h.adptUser, PasswordFile: write("data.password", []byte(h.adptPass))}
+	cfg.Collab = startMailboxRPC(t, &fakeMailboxRPC{})
+	cfg.ProtocolSigning = signingFixture(t)
 	return h, cfg, f
 }
 
@@ -110,11 +143,19 @@ func TestProductionRuntimeRedeemsAndKicksAfterDeviceRevocation(t *testing.T) {
 func TestProductionRuntimeRejectsMissingOrMismatchedConfiguration(t *testing.T) {
 	_, cfg, _ := runtimeFixture(t)
 	for name, change := range map[string]func(*RuntimeConfig){
-		"missing audience":   func(c *RuntimeConfig) { c.ServerAudience = "" },
-		"missing broker":     func(c *RuntimeConfig) { c.BrokerConfigFile = "" },
-		"missing issuer":     func(c *RuntimeConfig) { c.IssuerSeedFile = "" },
-		"missing xkey":       func(c *RuntimeConfig) { c.XKeySeedFile = "" },
-		"missing JWT":        func(c *RuntimeConfig) { c.IAM.ServiceTokenFile = "" },
+		"missing audience":      func(c *RuntimeConfig) { c.ServerAudience = "" },
+		"missing broker":        func(c *RuntimeConfig) { c.BrokerConfigFile = "" },
+		"missing issuer":        func(c *RuntimeConfig) { c.IssuerSeedFile = "" },
+		"missing xkey":          func(c *RuntimeConfig) { c.XKeySeedFile = "" },
+		"missing JWT":           func(c *RuntimeConfig) { c.IAM.ServiceTokenFile = "" },
+		"missing collab":        func(c *RuntimeConfig) { c.Collab.Target = "" },
+		"missing collab JWT":    func(c *RuntimeConfig) { c.Collab.ServiceTokenFile = "" },
+		"missing data identity": func(c *RuntimeConfig) { c.Data.Username = "" },
+		"system data identity":  func(c *RuntimeConfig) { c.Data = c.Ops },
+		"missing protocol key":  func(c *RuntimeConfig) { c.ProtocolSigning.PrivateKeyFile = "" },
+		"expired protocol key": func(c *RuntimeConfig) {
+			c.ProtocolSigning.NotAfter = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+		},
 		"timeout":            func(c *RuntimeConfig) { c.RedeemTimeoutMillis = 2000 },
 		"unbounded retries":  func(c *RuntimeConfig) { c.MaxKickAttempts = 0 },
 		"unbounded capacity": func(c *RuntimeConfig) { c.MaxConnections = 0 },

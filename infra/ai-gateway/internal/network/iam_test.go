@@ -20,14 +20,15 @@ const connectTicket = `{"tenant":"` + testTenant + `","node":"1","device":"` + t
 
 type fakeIAM struct {
 	iam.UnimplementedNetworkGatewayServiceServer
-	mu          sync.Mutex
-	used        bool
-	delay       time.Duration
-	failure     error
-	active      bool
-	calls       int
-	mutate      func(*iam.RedeemNetworkTicketResponse)
-	mutateBatch func(*iam.BatchNetworkNodesActiveResponse)
+	mu            sync.Mutex
+	used          bool
+	delay         time.Duration
+	failure       error
+	active        bool
+	calls         int
+	mutate        func(*iam.RedeemNetworkTicketResponse)
+	mutateBatch   func(*iam.BatchNetworkNodesActiveResponse)
+	tenantFailure func(context.Context, string) error
 }
 
 func (f *fakeIAM) Invoke(ctx context.Context, method string, args, reply any, _ ...grpc.CallOption) error {
@@ -83,6 +84,11 @@ func (f *fakeIAM) NetworkNodeActive(ctx context.Context, _ *iam.NetworkNodeActiv
 }
 
 func (f *fakeIAM) BatchNetworkNodesActive(ctx context.Context, req *iam.BatchNetworkNodesActiveRequest) (*iam.BatchNetworkNodesActiveResponse, error) {
+	if f.tenantFailure != nil && len(req.Nodes) > 0 {
+		if err := f.tenantFailure(ctx, req.Nodes[0].TenantId); err != nil {
+			return nil, err
+		}
+	}
 	if err := f.beforeCall(ctx); err != nil {
 		return nil, err
 	}
