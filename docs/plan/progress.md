@@ -14,7 +14,7 @@
 
 成员协作参照 Codex 原生 agent、子 agent 与持久会话机制，区分创建与派生、仅发消息与触发执行、运行中引导、等待通知、中断恢复及上下文范围。当前通信工具是先行基础，不代替完整能力目标；先以真实本地登录、平台连接和两个完整 DSH 的收发闭环验收。
 
-通信网络以插件／DSH 实例为连接主体，多个获权主会话和子会话共用稳定连接；总部负责可靠交换，总部系统 DSH 是执行节点。NETWORK1 设计 [#124](https://github.com/hansjone/auriga/pull/124) 已作为待实施方案合入。N0 接缝门禁已于 2026-10-25 合入 main：契约 [#125](https://github.com/hansjone/auriga/pull/125)、ai-gateway NATS callout/ACL [#126](https://github.com/hansjone/auriga/pull/126)、插件宿主 adapter/ledger [#127](https://github.com/hansjone/auriga/pull/127)、插件 NATS 硬缓冲传输 [#128](https://github.com/hansjone/auriga/pull/128)；均精确 HEAD CI 全绿且非作者独审通过。N1：collab 邮箱/游标/首联 [#129](https://github.com/hansjone/auriga/pull/129) 已合（独审第 2 轮通过）；下一步 gateway HEAD/FETCH/RECEIPT，再 edge WSS、插件接线、IAM 网络上限、两真实 DSH。完整网络 IAM、生产硬背压、HA、容量与双 DSH 往返尚未验收；旧定时 pull 仍为迁移期路径。
+通信网络以插件／DSH 实例为连接主体，多个获权主会话和子会话共用稳定连接；总部负责可靠交换，总部系统 DSH 是执行节点。NETWORK1 设计 [#124](https://github.com/hansjone/auriga/pull/124) 已作为待实施方案合入。N0 接缝门禁已于 2026-10-25 合入 main：契约 [#125](https://github.com/hansjone/auriga/pull/125)、ai-gateway NATS callout/ACL [#126](https://github.com/hansjone/auriga/pull/126)、插件宿主 adapter/ledger [#127](https://github.com/hansjone/auriga/pull/127)、插件 NATS 硬缓冲传输 [#128](https://github.com/hansjone/auriga/pull/128)；均精确 HEAD CI 全绿且非作者独审通过。N1：collab 邮箱/游标/首联 [#129](https://github.com/hansjone/auriga/pull/129)、ai-gateway HEAD/FETCH/RECEIPT 骨架 [#130](https://github.com/hansjone/auriga/pull/130) 已合（均独审通过、精确 HEAD CI 全绿）；下一步 edge WSS 路由，再插件接线、IAM 网络上限、两真实 DSH。完整网络 IAM、生产硬背压、HA、容量与双 DSH 往返尚未验收；旧定时 pull 仍为迁移期路径。
 
 2026-10-24 本地接线批次（已合入，除 #123）：
 
