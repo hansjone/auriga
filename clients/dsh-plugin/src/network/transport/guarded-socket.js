@@ -102,11 +102,13 @@ export class GuardedSocket {
     this.#inner.close(code, reason);
   }
 
-  /** Immediate teardown when the implementation has one (ws), else a normal close. */
+  /**
+   * Immediate teardown. Production sockets must expose `terminate()` (enforced
+   * by NatsLink at connect); there is no graceful-close fallback.
+   */
   terminate() {
     try {
-      if (typeof this.#inner.terminate === 'function') this.#inner.terminate();
-      else this.#inner.close(1008, 'buffer limit');
+      this.#inner.terminate();
     } catch {
       // already closing
     }

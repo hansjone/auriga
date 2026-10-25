@@ -68,6 +68,9 @@ importers:
       undici:
         specifier: 7.30.1
         version: 7.30.1
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
     devDependencies:
       json-schema-to-typescript:
         specifier: 16.0.0
