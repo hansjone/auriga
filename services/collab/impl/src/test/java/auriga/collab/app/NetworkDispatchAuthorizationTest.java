@@ -82,14 +82,14 @@ class NetworkDispatchAuthorizationTest {
   void batchesSourcesAndCachesOnlyIdenticalIamChecksWithinThisPage() {
     var check = checker(false);
     var items = items();
-    var result = check.check(tenant, items, "2", "20");
+    var result = check.check(tenant, check.prepare(tenant, items, "2", "20"), "2", "20");
     assertEquals(2, result.size());
     assertTrue(
         result.values().stream().allMatch(o -> o.failure() == null && o.deadline().isAfter(now)));
     verify(iam).activeBatch(List.of(new NodeReference("2", "10")));
     verify(iam).check(any());
     verify(authority, times(2)).authorizeDelivery(eq(tenant), anyString(), anyString(), eq("20"));
-    check.check(tenant, items, "2", "20");
+    check.check(tenant, check.prepare(tenant, items, "2", "20"), "2", "20");
     verify(iam, times(2)).check(any()); // A new page must perform a fresh decision.
   }
 
@@ -97,12 +97,12 @@ class NetworkDispatchAuthorizationTest {
   void differentLocalsNeverShareGrantsAndBatchFailureFailsClosed() {
     var check = checker(true);
     assertTrue(
-        check.check(tenant, items(), "2", "20").values().stream()
+        check.check(tenant, check.prepare(tenant, items(), "2", "20"), "2", "20").values().stream()
             .allMatch(o -> o.failure() == null));
     verify(iam, times(2)).check(any());
     when(iam.activeBatch(anyList())).thenReturn(Map.of());
     assertTrue(
-        check.check(tenant, items(), "2", "20").values().stream()
+        check.check(tenant, check.prepare(tenant, items(), "2", "20"), "2", "20").values().stream()
             .allMatch(o -> o.failure() != null));
     verify(iam, times(2)).check(any());
   }

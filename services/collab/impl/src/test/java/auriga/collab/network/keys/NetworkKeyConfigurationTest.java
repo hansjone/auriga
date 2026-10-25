@@ -6,9 +6,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import auriga.collab.CollabModuleConfiguration;
+import auriga.collab.api.NetworkLocalTargets;
 import auriga.collab.app.NetworkJson;
+import auriga.collab.app.NetworkMailboxService;
+import auriga.collab.app.NetworkMailboxWireService;
+import auriga.collab.app.NetworkSigningKeys;
+import auriga.collab.config.CollabNetworkConfiguration;
+import auriga.collab.config.CollabRuntimeConfiguration;
+import auriga.collab.grpc.NetworkAuthorityClient;
+import auriga.collab.grpc.NetworkMailboxGrpcService;
+import auriga.collab.grpc.NetworkSourceGrpcAuthority;
 import auriga.common.context.RequestContext;
 import auriga.common.error.AurigaException;
+import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.security.AurigaPrincipal;
 import auriga.common.security.PrincipalType;
 import auriga.common.security.TokenContext;
@@ -26,12 +36,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.AnnotatedElementContext;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.io.TempDirFactory;
+import org.springframework.beans.factory.support.AbstractBeanDefinition;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class NetworkKeyConfigurationTest {
@@ -429,6 +444,199 @@ class NetworkKeyConfigurationTest {
                 assertEquals(
                     "common.forbidden",
                     assertThrows(AurigaException.class, controller::keys).errorCode().code()));
+  }
+
+  @Test
+  void runtimeKeepsMainFileSigningRequirementsAndWireBindingsWhenKeyOperationsAreOff()
+      throws Exception {
+    Path state = directory.resolve("legacy.json");
+    var properties = new java.util.HashMap<String, Object>();
+    properties.put("auriga.collab.network.key-operations.enabled", "false");
+    runtimeRunner(false, properties).run(context -> assertNotNull(context.getStartupFailure()));
+    properties.put("auriga.collab.network.key-state-file", state.toString());
+    runtimeRunner(false, properties).run(context -> assertNotNull(context.getStartupFailure()));
+    Path publicFile =
+        protectedFile(directory.resolve("legacy.pub"), m.protocol.getPublic().getEncoded());
+    Path privateFile =
+        protectedFile(directory.resolve("legacy.der"), m.protocol.getPrivate().getEncoded());
+    String prefix = "auriga.collab.network.signing-keys[0].";
+    properties.put(prefix + "realm", "2");
+    properties.put(prefix + "purpose", "protocol_response");
+    properties.put(prefix + "kid", "legacy-protocol");
+    properties.put(prefix + "public-file", publicFile.toString());
+    properties.put(prefix + "private-file", privateFile.toString());
+    properties.put(prefix + "not-before", java.time.Instant.now().minusSeconds(60).toString());
+    properties.put(prefix + "not-after", java.time.Instant.now().plusSeconds(3600).toString());
+    properties.put(prefix + "state", "ACTIVE");
+    var missingState = new java.util.HashMap<>(properties);
+    missingState.remove("auriga.collab.network.key-state-file");
+    runtimeRunner(false, missingState).run(context -> assertNotNull(context.getStartupFailure()));
+    for (boolean approvedFirst : new boolean[] {false, true}) {
+      runtimeRunner(approvedFirst, properties)
+          .run(
+              context -> {
+                assertNull(context.getStartupFailure());
+                assertEquals(
+                    Set.of("networkSigningKeys"),
+                    context.getBeansOfType(NetworkSigningKeys.class).keySet());
+                assertFalse(context.containsBean("approvedNetworkSigningKeys"));
+                assertEquals(
+                    m.protocol.getPublic(),
+                    context.getBean(NetworkSigningKeys.class).publicKey("legacy-protocol"));
+                assertRuntimeBindings(context);
+              });
+    }
+    assertTrue(Files.exists(state));
+  }
+
+  @Test
+  void approvedRuntimeUsesOnlyTheRealLoaderInEitherConfigurationOrder() throws Exception {
+    var issued = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+    var payload = m.payload(6, issued);
+    for (var entry : payload.path("keys")) {
+      ((tools.jackson.databind.node.ObjectNode) entry)
+          .put("not_before", issued.minusSeconds(60).toString())
+          .put("not_after", issued.plusSeconds(86400).toString());
+    }
+    var signed = m.release(payload);
+    var approved =
+        m.verifier(Clock.fixed(issued, ZoneOffset.UTC))
+            .verify(signed.signedKeyset(), signed.announcement());
+    var operations = mock(NetworkKeyOperations.class);
+    when(operations.current()).thenReturn(approved.release());
+    var privateFiles = secrets();
+    Path root =
+        protectedFile(directory.resolve("runtime-root.der"), m.root.getPublic().getEncoded());
+    Path signedFile =
+        protectedFile(
+            directory.resolve("runtime-signed.json"),
+            signed.signedKeyset().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    Path announcement =
+        protectedFile(
+            directory.resolve("runtime-announcement.json"),
+            signed.announcement().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    for (boolean approvedFirst : new boolean[] {false, true}) {
+      Path state = directory.resolve("approved-" + approvedFirst + ".json");
+      SigningKeyLoader.installState(payload, state);
+      byte[] before = Files.readAllBytes(state);
+      var properties = new java.util.HashMap<String, Object>();
+      String prefix = "auriga.collab.network.key-operations.";
+      properties.put(prefix + "enabled", "true");
+      properties.put(prefix + "tenant-id", UUID.randomUUID().toString());
+      properties.put(prefix + "realm", "2");
+      properties.put(prefix + "root-kid", "root");
+      properties.put(prefix + "root-public-file", root.toString());
+      properties.put(
+          prefix + "root-fingerprint", RootKeyPublication.fingerprint(m.root.getPublic()));
+      properties.put(prefix + "signed-file", signedFile.toString());
+      properties.put(prefix + "announcement-file", announcement.toString());
+      properties.put(prefix + "minimum-version", "6");
+      properties.put("auriga.collab.network.key-state-file", state.toString());
+      privateFiles.forEach(
+          (kid, file) -> properties.put(prefix + "private-files[" + kid + "]", file));
+      // A stale legacy configuration must never bind or construct the other signer.
+      properties.put("auriga.collab.network.signing-keys[0].state", "INVALID");
+      approvedRunner(approvedFirst, properties, operations)
+          .run(
+              context -> {
+                assertNull(context.getStartupFailure());
+                assertEquals(
+                    Set.of("approvedNetworkSigningKeys"),
+                    context.getBeansOfType(NetworkSigningKeys.class).keySet());
+                assertFalse(context.containsBean("networkSigningKeys"));
+                assertEquals(
+                    NetworkJson.canonical(payload),
+                    context.getBean(NetworkSigningKeys.class).publicKeysJson("2"));
+                assertRuntimeBindings(context);
+              });
+      assertArrayEquals(before, Files.readAllBytes(state));
+      var missingPrivate = new java.util.HashMap<>(properties);
+      missingPrivate.remove(prefix + "private-files[management]");
+      approvedRunner(approvedFirst, missingPrivate, operations)
+          .run(context -> assertNotNull(context.getStartupFailure()));
+      assertArrayEquals(before, Files.readAllBytes(state));
+      var missingState = new java.util.HashMap<>(properties);
+      missingState.remove("auriga.collab.network.key-state-file");
+      approvedRunner(approvedFirst, missingState, operations)
+          .run(context -> assertNotNull(context.getStartupFailure()));
+      // Failed contexts must also release the approved loader's publisher lock.
+      assertHealthyLoadKeepsState(payload, state, privateFiles);
+    }
+  }
+
+  ApplicationContextRunner runtimeRunner(boolean approvedFirst, Map<String, Object> properties) {
+    var dataSource = mock(DataSource.class);
+    var manager = new TenantTransactionManager(dataSource);
+    var client = mock(NetworkAuthorityClient.class);
+    var locals = mock(NetworkLocalTargets.class);
+    var factory = new StaticListableBeanFactory(Map.of("locals", locals));
+    NetworkSourceGrpcAuthority source =
+        ReflectionTestUtils.invokeMethod(
+            new CollabNetworkConfiguration(),
+            "networkSourceGrpcAuthority",
+            client,
+            manager,
+            factory.getBeanProvider(NetworkLocalTargets.class));
+    var order =
+        approvedFirst
+            ? new Class<?>[] {
+              NetworkKeyOperationsConfiguration.class, CollabRuntimeConfiguration.class
+            }
+            : new Class<?>[] {
+              CollabRuntimeConfiguration.class, NetworkKeyOperationsConfiguration.class
+            };
+    return new ApplicationContextRunner()
+        .withUserConfiguration(order)
+        .withPropertyValues("auriga.service.schema=collab")
+        .withInitializer(
+            context ->
+                context
+                    .getEnvironment()
+                    .getPropertySources()
+                    .addFirst(
+                        new MapPropertySource("runtime-test", new java.util.HashMap<>(properties))))
+        .withBean(DataSource.class, () -> dataSource)
+        .withBean(TenantTransactionManager.class, () -> manager)
+        .withBean(NetworkAuthorityClient.class, () -> client)
+        .withBean(NetworkLocalTargets.class, () -> locals)
+        .withBean(NetworkSourceGrpcAuthority.class, () -> source);
+  }
+
+  ApplicationContextRunner approvedRunner(
+      boolean first, Map<String, Object> properties, NetworkKeyOperations operations) {
+    // Replace only the PG publication port. Root pin checks and the approved loader stay real.
+    return runtimeRunner(first, properties)
+        .withInitializer(
+            context ->
+                context.addBeanFactoryPostProcessor(
+                    factory ->
+                        ((AbstractBeanDefinition) factory.getBeanDefinition("networkKeyOperations"))
+                            .setInstanceSupplier(() -> operations)));
+  }
+
+  void assertRuntimeBindings(org.springframework.context.ApplicationContext context) {
+    var keys = context.getBean(NetworkSigningKeys.class);
+    var mailbox = context.getBean(NetworkMailboxService.class);
+    var wire = context.getBean(NetworkMailboxWireService.class);
+    var source = context.getBean(NetworkSourceGrpcAuthority.class);
+    var client = context.getBean(NetworkAuthorityClient.class);
+    assertSame(source, ReflectionTestUtils.getField(mailbox, "authority"));
+    assertSame(
+        client, ReflectionTestUtils.getField(ReflectionTestUtils.getField(mailbox, "iam"), "iam"));
+    assertSame(
+        context.getBean(NetworkLocalTargets.class), ReflectionTestUtils.getField(source, "locals"));
+    assertSame(client, ReflectionTestUtils.getField(source, "client"));
+    assertSame(mailbox, ReflectionTestUtils.getField(wire, "mailbox"));
+    assertSame(source, ReflectionTestUtils.getField(wire, "source"));
+    assertSame(
+        keys,
+        ReflectionTestUtils.getField(ReflectionTestUtils.getField(mailbox, "signer"), "keys"));
+    assertSame(
+        keys, ReflectionTestUtils.getField(ReflectionTestUtils.getField(wire, "signer"), "keys"));
+    assertSame(
+        wire,
+        ReflectionTestUtils.getField(context.getBean(NetworkMailboxGrpcService.class), "service"));
+    verifyNoInteractions(client, context.getBean(DataSource.class));
   }
 
   @Test

@@ -17,6 +17,15 @@ service DeviceAccessService {
   // Only svc:ai-gateway. Validates the external device JWT, including the Team
   // device permission ceiling, and current device/account/backing-session state.
   rpc VerifyDeviceAccess(VerifyDeviceAccessRequest) returns (VerifyDeviceAccessResponse);
+  // Only svc:ai-gateway with an internal service JWT, a delegated non-platform
+  // tenant and the existing authenticated internal transport. Accepts only the
+  // single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+  // instance, service token or ait_. Online checks current member/model-invoke
+  // permission plus device/account/backing session; no idle touch or refresh use.
+  // Determinately invalid => inactive with empty identity; dependency faults =>
+  // UNAVAILABLE. Active expires_at is min(token, current backing deadlines),
+  // still future at completion. Does not authorize model ACLs or budgets.
+  rpc VerifyDeviceAiAccess(VerifyDeviceAiAccessRequest) returns (VerifyDeviceAiAccessResponse);
   // Only svc:collab. Receiver/lock-time authority check; identity inputs are
   // compared with stored device ownership, never trusted as proof of ownership.
   rpc VerifyDeviceCredential(VerifyDeviceCredentialRequest) returns (VerifyDeviceCredentialResponse);
@@ -33,6 +42,20 @@ message VerifyDeviceAccessResponse {
   string tenant_id = 2;
   string account_id = 3;
   string device_id = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+message VerifyDeviceAiAccessRequest {
+  // Raw external AI device access JWT. Secret: never log, persist or include in errors.
+  string access_token = 1;
+}
+message VerifyDeviceAiAccessResponse {
+  // Determinately invalid => false and all other fields absent/empty.
+  // Dependency failures are UNAVAILABLE, never inactive or a cached approval.
+  bool active = 1;
+  string tenant_id = 2;
+  string account_id = 3;
+  string device_id = 4;
+  // Minimum of the AI JWT and current backing deadlines; future at completion.
   google.protobuf.Timestamp expires_at = 5;
 }
 message VerifyDeviceCredentialRequest {

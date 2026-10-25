@@ -201,8 +201,12 @@ export function responseState(hostApi, model) {
     /** Called only after a complete JSON or a terminated SSE [DONE] event.
      * @returns {import('./types.js').StreamChunk[]} */
     complete() {
-      check(finish && finish !== 'content_filter', 'SERVER');
-      check((finish === 'tool_calls') === tools.size > 0, 'SERVER');
+      check(finish, 'SERVER');
+      check(
+        finish === 'content_filter' ||
+          (finish === 'tool_calls') === tools.size > 0,
+        'SERVER',
+      );
       for (const tool of tools.values()) {
         toolName(tool.name);
         text(tool.arguments, 262144, 1);
@@ -237,6 +241,21 @@ export function responseState(hostApi, model) {
           },
         });
       if (usage) chunks.push({ type: 'usage', usage });
+      // rc.2 has no built-in filtered finish. Use its public error vocabulary;
+      // this is a local failure fact, never a gateway wire error or raw reason.
+      if (finish === 'content_filter') {
+        chunks.push({
+          type: 'finish',
+          reason: {
+            kind: 'error',
+            failure: {
+              code: 'CONTENT_FILTER',
+              message: 'Auriga AI: 内容过滤/拒绝 (content filtered/refused)',
+            },
+          },
+        });
+        return chunks;
+      }
       chunks.push({
         type: 'finish',
         reason: {

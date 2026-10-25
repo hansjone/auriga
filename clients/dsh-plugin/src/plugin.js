@@ -16,6 +16,8 @@ import {
   createUnconfiguredLoginRoutes,
 } from './local/routes.js';
 import { join } from 'node:path';
+import { installSettings } from './settings/host.js';
+import { MANAGED_MODEL_STATUS } from './ai/installation.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -26,6 +28,7 @@ export const inject = ['webServer', 'connection'];
  */
 export async function apply(ctx, config) {
   const mode = selectMode();
+  installSettings(ctx, config);
   if (mode !== 'managed') {
     if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
       throw new Error(
@@ -123,6 +126,10 @@ export async function apply(ctx, config) {
             const detach = runtime.attachNetwork(networkCtx.aurigaNetwork);
             networkCtx.effect(() => detach, 'auriga-dsh: network provider');
           });
+          connectCtx.inject(['llm'], async (llmCtx) => {
+            const detach = await runtime.attachModels(llmCtx.llm);
+            llmCtx.effect(() => detach, 'auriga-dsh: public model adapter');
+          });
           try {
             connectCtx.effect(() => {
               binding = owned;
@@ -167,6 +174,7 @@ export async function apply(ctx, config) {
     config: config ?? {},
     startHeartbeat: false,
   });
+  ctx.logger?.info?.(`[auriga-dsh] AI: ${MANAGED_MODEL_STATUS.state}`);
   let dispose;
   try {
     dispose = runtime.apply(ctx);

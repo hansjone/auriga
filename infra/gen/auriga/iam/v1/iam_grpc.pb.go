@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	DeviceAccessService_VerifyDeviceAccess_FullMethodName     = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAccess"
+	DeviceAccessService_VerifyDeviceAiAccess_FullMethodName   = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAiAccess"
 	DeviceAccessService_VerifyDeviceCredential_FullMethodName = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceCredential"
 )
 
@@ -34,6 +35,15 @@ type DeviceAccessServiceClient interface {
 	// Only svc:ai-gateway. Validates the external device JWT, including the Team
 	// device permission ceiling, and current device/account/backing-session state.
 	VerifyDeviceAccess(ctx context.Context, in *VerifyDeviceAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAccessResponse, error)
+	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
+	// tenant and the existing authenticated internal transport. Accepts only the
+	// single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+	// instance, service token or ait_. Online checks current member/model-invoke
+	// permission plus device/account/backing session; no idle touch or refresh use.
+	// Determinately invalid => inactive with empty identity; dependency faults =>
+	// UNAVAILABLE. Active expires_at is min(token, current backing deadlines),
+	// still future at completion. Does not authorize model ACLs or budgets.
+	VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAiAccessResponse, error)
 	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
 	// compared with stored device ownership, never trusted as proof of ownership.
 	VerifyDeviceCredential(ctx context.Context, in *VerifyDeviceCredentialRequest, opts ...grpc.CallOption) (*VerifyDeviceCredentialResponse, error)
@@ -51,6 +61,16 @@ func (c *deviceAccessServiceClient) VerifyDeviceAccess(ctx context.Context, in *
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(VerifyDeviceAccessResponse)
 	err := c.cc.Invoke(ctx, DeviceAccessService_VerifyDeviceAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAccessServiceClient) VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAiAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyDeviceAiAccessResponse)
+	err := c.cc.Invoke(ctx, DeviceAccessService_VerifyDeviceAiAccess_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +98,15 @@ type DeviceAccessServiceServer interface {
 	// Only svc:ai-gateway. Validates the external device JWT, including the Team
 	// device permission ceiling, and current device/account/backing-session state.
 	VerifyDeviceAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error)
+	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
+	// tenant and the existing authenticated internal transport. Accepts only the
+	// single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+	// instance, service token or ait_. Online checks current member/model-invoke
+	// permission plus device/account/backing session; no idle touch or refresh use.
+	// Determinately invalid => inactive with empty identity; dependency faults =>
+	// UNAVAILABLE. Active expires_at is min(token, current backing deadlines),
+	// still future at completion. Does not authorize model ACLs or budgets.
+	VerifyDeviceAiAccess(context.Context, *VerifyDeviceAiAccessRequest) (*VerifyDeviceAiAccessResponse, error)
 	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
 	// compared with stored device ownership, never trusted as proof of ownership.
 	VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error)
@@ -93,6 +122,9 @@ type UnimplementedDeviceAccessServiceServer struct{}
 
 func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceAccess not implemented")
+}
+func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAiAccess(context.Context, *VerifyDeviceAiAccessRequest) (*VerifyDeviceAiAccessResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceAiAccess not implemented")
 }
 func (UnimplementedDeviceAccessServiceServer) VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceCredential not implemented")
@@ -136,6 +168,24 @@ func _DeviceAccessService_VerifyDeviceAccess_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeviceAccessService_VerifyDeviceAiAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyDeviceAiAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceAiAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAccessService_VerifyDeviceAiAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceAiAccess(ctx, req.(*VerifyDeviceAiAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DeviceAccessService_VerifyDeviceCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(VerifyDeviceCredentialRequest)
 	if err := dec(in); err != nil {
@@ -164,6 +214,10 @@ var DeviceAccessService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "VerifyDeviceAccess",
 			Handler:    _DeviceAccessService_VerifyDeviceAccess_Handler,
+		},
+		{
+			MethodName: "VerifyDeviceAiAccess",
+			Handler:    _DeviceAccessService_VerifyDeviceAiAccess_Handler,
 		},
 		{
 			MethodName: "VerifyDeviceCredential",
