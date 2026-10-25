@@ -2,6 +2,7 @@ package auriga.collab.config;
 
 import auriga.collab.api.CollabAdmission;
 import auriga.collab.app.CollabService;
+import auriga.collab.app.NetworkMailboxService;
 import auriga.collab.grpc.CollabGrpcService;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
@@ -33,6 +34,12 @@ public class CollabRuntimeConfiguration {
   CollabService collabService(
       DataSource source, TenantTransactionManager manager, CollabAdmission admission) {
     return new CollabService(new JdbcTemplate(source), manager, admission);
+  }
+
+  @Bean
+  NetworkMailboxService networkMailboxService(
+      DataSource source, TenantTransactionManager manager) {
+    return new NetworkMailboxService(new JdbcTemplate(source), manager);
   }
 
   @Bean
