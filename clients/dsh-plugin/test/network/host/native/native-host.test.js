@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNativeHostPort } from '../../../../src/network/host/native/index.js';
+import { createHostPortOperations as createPort } from '../../../../src/network/host/native/host-port.js';
 import { fixture } from './fixtures.js';
 
 const incompatible = { code: 'network.host_incompatible' };
@@ -13,7 +13,7 @@ const input = {
 
 test('cold session lookup never creates/resumes; queue preserves identity, cwd and requestId', async () => {
   const f = fixture();
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   assert.deepEqual(await host.getSession('session-a'), {
     id: 'session-a',
     cwd: '/work/project',
@@ -41,7 +41,7 @@ test('cold session lookup never creates/resumes; queue preserves identity, cwd a
 
 test('missing/archived sessions do not wake or create; read failures are not absence', async () => {
   const f = fixture();
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   assert.equal(await host.getSession('missing'), null);
   f.archivedSessionIds.push('session-a');
   assert.equal(await host.getSession('session-a'), null);
@@ -59,7 +59,7 @@ test('missing/archived sessions do not wake or create; read failures are not abs
 
 test('create uses explicit id/cwd/preset and validates the resulting binding', async () => {
   const f = fixture();
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   assert.deepEqual(
     await host.createSession({
       id: 'new',
@@ -96,7 +96,7 @@ test('create uses explicit id/cwd/preset and validates the resulting binding', a
 for (const preset of ['missing', 'broken'])
   test(`invalid preset ${preset} cannot create`, async () => {
     const f = fixture();
-    const host = await createNativeHostPort(f);
+    const host = await createPort(f);
     await assert.rejects(
       host.createSession({ id: 'new', cwd: '/work/project', preset }),
       incompatible,
@@ -114,7 +114,7 @@ test('lost create response is queryable by the same id; never creates a replacem
     await create(request);
     throw new Error('lost');
   };
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   await assert.rejects(
     host.createSession({ id: 'new', cwd: '/work/project', preset: null }),
     incompatible,
@@ -127,7 +127,7 @@ test('lost create response is queryable by the same id; never creates a replacem
   assert.equal(f.calls.filter(([kind]) => kind === 'create').length, 1);
 });
 
-for (const location of ['nextTurn', 'nextStep', 'history'])
+for (const location of ['pending-evidence', 'history'])
   test(`requestId de-duplicates ${location} without invoking prompt`, async () => {
     const f = fixture();
     const source = { kind: 'user', rpcId: input.requestId };
@@ -135,8 +135,11 @@ for (const location of ['nextTurn', 'nextStep', 'history'])
       f.stored
         .get('session-a')
         .events.push({ type: 'user/message', data: { source } });
-    else f.attach('session-a').inbox[location].push({ source });
-    const host = await createNativeHostPort(f);
+    else {
+      f.attach('session-a');
+      f.pending.set(`session-a:${input.requestId}`, true);
+    }
+    const host = await createPort(f);
     assert.equal(
       await host.hasPromptRequest('session-a', input.requestId),
       true,
@@ -158,7 +161,7 @@ test('system sources and matching text do not count as a user rpcId', async () =
       text: input.requestId,
     },
   });
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   assert.equal(
     await host.hasPromptRequest('session-a', input.requestId),
     false,
@@ -171,7 +174,7 @@ test('cold persisted request evidence can flush through native resume without cr
     type: 'user/message',
     data: { source: { kind: 'user', rpcId: input.requestId } },
   });
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   assert.equal(await host.hasPromptRequest('session-a', input.requestId), true);
   assert.equal(await host.flush('session-a'), true);
   assert.equal(
@@ -191,7 +194,7 @@ test('prompt response lost after admission recovers the same inbox request and f
     await prompt(...args);
     throw new Error('lost response');
   };
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   await assert.rejects(host.prompt('session-a', input), incompatible);
   assert.equal(await host.hasPromptRequest('session-a', input.requestId), true);
   assert.equal(await host.flush('session-a'), true);
@@ -205,7 +208,7 @@ test('concurrent duplicate requests for one session serialize through async prom
     await Promise.resolve();
     return prompt(...args);
   };
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   await Promise.all([
     host.prompt('session-a', input),
     host.prompt('session-a', input),
@@ -231,7 +234,7 @@ test('a blocked session does not lock another session', async () => {
     }
     return prompt(...args);
   };
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   const first = host.prompt('session-a', input);
   await started;
   try {
@@ -246,7 +249,7 @@ test('a blocked session does not lock another session', async () => {
 test('subagents and parent-owned ordinary sessions cannot use the N1 prompt port', async () => {
   const f = fixture();
   f.seed('child', { origin: 'subagent', parentSession: 'session-a' });
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   assert.equal((await host.getSession('child')).origin, 'subagent');
   await assert.rejects(host.prompt('child', input), incompatible);
   f.ctx.sessionController.resolveAgent = async () => ({
@@ -261,7 +264,7 @@ test('subagents and parent-owned ordinary sessions cannot use the N1 prompt port
 
 test('durable-provider check and awaited flush are mandatory, errors never accept', async () => {
   const f = fixture();
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   f.state.durable = false;
   assert.equal(await host.hasDurableProvider('session-a'), false);
   await assert.rejects(host.prompt('session-a', input), incompatible);
@@ -296,7 +299,7 @@ test('durable-provider check and awaited flush are mandatory, errors never accep
 
 test('identity mismatch, missing history, invalid inputs and non-accepted prompt fail closed', async () => {
   const f = fixture();
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   await assert.rejects(
     host.createSession({ id: 'new', cwd: '', preset: null }),
     { code: 'network.protocol_error' },
@@ -323,7 +326,7 @@ test('identity mismatch, missing history, invalid inputs and non-accepted prompt
 for (const changed of ['provider', 'session', 'archive'])
   test(`flush refuses native ${changed} replacement during the barrier`, async () => {
     const f = fixture();
-    const host = await createNativeHostPort(f);
+    const host = await createPort(f);
     f.attach('session-a');
     f.ctx.sessions.flush = async () => {
       if (changed === 'provider')

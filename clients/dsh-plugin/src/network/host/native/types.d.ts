@@ -3,6 +3,7 @@ export interface Header {
   id: string;
   cwd?: string;
   origin?: 'subagent';
+  parentSession?: string;
   agentPreset?: string;
 }
 export interface Event {
@@ -17,10 +18,6 @@ export interface NativeSession {
 export interface Agent {
   id: string;
   session: NativeSession;
-  inbox: {
-    nextTurn: readonly { source: { kind: string; rpcId?: string } }[];
-    nextStep: readonly { source: { kind: string; rpcId?: string } }[];
-  };
 }
 export interface NativeContext {
   sessionController: {
@@ -58,6 +55,7 @@ export interface RuntimeFingerprint {
   dirty: boolean;
   controllerSha256: string;
   persistenceSha256: string;
+  sessionSha256: string;
 }
 /** Trusted host/broker code ONLY; never settings, tool parameters or browser IPC. */
 export interface NativeSecurity {
@@ -69,6 +67,14 @@ export interface NativeSecurity {
     provider: NativeContext['sessionPersistence'],
     id: string,
   ): Promise<void>;
+  hasPromptRequest?(
+    id: string,
+    requestId: string,
+  ): Promise<boolean | 'unverified'>;
+}
+/** Internal operation authority for port composition, not host provenance. */
+export interface HostOperationAuthority extends NativeSecurity {
+  assertReady(): Promise<void>;
 }
 export interface SourceBinding {
   local: string;

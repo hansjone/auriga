@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setImmediate } from 'node:timers';
-import { createNativeHostPort } from '../../../../src/network/host/native/index.js';
+import { createHostPortOperations as createPort } from '../../../../src/network/host/native/host-port.js';
 import { createWorld, peer, unicast } from '../fixtures.js';
 import { fixture } from './fixtures.js';
 
 test('core admission and receipts use the native seam; failed flush never accepts or re-prompts', async () => {
   const f = fixture();
-  const world = await createWorld({ host: await createNativeHostPort(f) });
+  const world = await createWorld({ host: await createPort(f) });
   const local = await world.adapter.bindExistingSession({
     opId: 'bind',
     hostSessionId: 'session-a',
@@ -41,7 +41,7 @@ test('core admission and receipts use the native seam; failed flush never accept
 
 test('first message before open-contact response waits for the fixed native binding', async () => {
   const f = fixture();
-  const world = await createWorld({ host: await createNativeHostPort(f) });
+  const world = await createWorld({ host: await createPort(f) });
   const first = unicast({
     recipientId: 'sys-r',
     local: '0',

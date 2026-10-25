@@ -15,10 +15,34 @@ test('unpacked runtime fingerprints hash actual bytes and refuse missing files w
   t.after(() => rm(dir, { recursive: true, force: true }));
   const controllerPath = join(dir, 'controller.js');
   const persistencePath = join(dir, 'persistence.js');
+  const sessionPath = join(dir, 'session.js');
+  const manifestPath = join(dir, 'package.json');
   await writeFile(controllerPath, 'controller');
   await writeFile(persistencePath, 'persistence');
-  const request = { ...PINNED_HOST, controllerPath, persistencePath };
-  const fingerprint = await readRuntimeFingerprint(request);
+  await writeFile(sessionPath, 'session');
+  await writeFile(
+    manifestPath,
+    JSON.stringify({
+      version: PINNED_HOST.version,
+      build: PINNED_HOST.build,
+      dirty: false,
+    }),
+  );
+  const request = {
+    manifestPath,
+    controllerPath,
+    persistencePath,
+    sessionPath,
+  };
+  const fingerprint = await readRuntimeFingerprint({
+    ...request,
+    version: 'forged',
+    build: 'forged',
+    dirty: true,
+  });
+  assert.equal(fingerprint.version, PINNED_HOST.version);
+  assert.equal(fingerprint.build, PINNED_HOST.build);
+  assert.equal(fingerprint.dirty, false);
   assert.equal(
     fingerprint.controllerSha256,
     createHash('sha256').update('controller').digest('hex'),
@@ -26,6 +50,10 @@ test('unpacked runtime fingerprints hash actual bytes and refuse missing files w
   assert.equal(
     fingerprint.persistenceSha256,
     createHash('sha256').update('persistence').digest('hex'),
+  );
+  assert.equal(
+    fingerprint.sessionSha256,
+    createHash('sha256').update('session').digest('hex'),
   );
   assert.throws(() => verifyRuntimeFingerprint(fingerprint), {
     code: 'network.host_incompatible',
@@ -39,4 +67,11 @@ test('unpacked runtime fingerprints hash actual bytes and refuse missing files w
       error.code === 'network.host_incompatible' &&
       !error.message.includes(dir),
   );
+  await writeFile(
+    manifestPath,
+    JSON.stringify({ version: '0.2.1-rc.3', build: null, dirty: false }),
+  );
+  await assert.rejects(readRuntimeFingerprint(request), {
+    code: 'network.host_incompatible',
+  });
 });

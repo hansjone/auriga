@@ -1,12 +1,22 @@
 import { isUint64String } from '../address.js';
-import { createNativeGate, incompatible } from './runtime.js';
+import { createNativeAuthority, incompatible } from './runtime.js';
 
 /** In-process tool callback only. Never expose this as a JSON/HTTP/IPC resolver.
  * The broker must bind its IPC peer to the capability before any serialization.
  * Human intent, rebinding and credentials are deliberately not capabilities here.
  * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').NativeSecurity, lookupBinding: (sessionId: string) => Promise<import('./types.js').SourceBinding|null>}} options */
 export function createNativeSourceResolver({ ctx, security, lookupBinding }) {
-  const ready = createNativeGate(security);
+  return createSourceResolver({
+    ctx,
+    security: createNativeAuthority(security),
+    lookupBinding,
+  });
+}
+
+/** Pure in-process context projection, not an installation/source attestation.
+ * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').HostOperationAuthority, lookupBinding: (id:string)=>Promise<import('./types.js').SourceBinding|null>}} options */
+export function createSourceResolver({ ctx, security, lookupBinding }) {
+  const ready = () => security.assertReady();
   if (typeof lookupBinding !== 'function') throw incompatible();
   /** @param {unknown} execution */
   return async (execution) => {
@@ -24,6 +34,7 @@ export function createNativeSourceResolver({ ctx, security, lookupBinding }) {
         agent.id === id &&
         agent.session.header.id === id &&
         agent.session.header.origin !== 'subagent' &&
+        agent.session.header.parentSession === undefined &&
         !ctx.workspaceRegistry.archivedSessionIds.includes(id);
       if (!live() || !id) throw incompatible();
       const native = await ctx.sessionController.resolveAgent(id);

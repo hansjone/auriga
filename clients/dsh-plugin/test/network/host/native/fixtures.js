@@ -3,6 +3,7 @@ import { PINNED_HOST } from '../../../../src/network/host/native/index.js';
 
 // Contract fixture, not an OS isolation or installed-host compatibility proof.
 export function fixture() {
+  const pending = new Map();
   const stored = new Map();
   const agents = new Map();
   const sessions = new Map();
@@ -21,7 +22,7 @@ export function fixture() {
       header: record.meta,
       snapshotEvents: () => record.events,
     };
-    const agent = { id, session, inbox: { nextTurn: [], nextStep: [] } };
+    const agent = { id, session };
     sessions.set(id, session);
     agents.set(id, agent);
     return agent;
@@ -80,15 +81,25 @@ export function fixture() {
       },
       async prompt(input, signal) {
         calls.push(['prompt', input, signal]);
-        const agent = agents.get(input.sessionId) ?? attach(input.sessionId);
-        agent.inbox.nextTurn.push({
-          source: { kind: 'user', rpcId: input.requestId },
-        });
+        if (!agents.has(input.sessionId)) attach(input.sessionId);
+        pending.set(`${input.sessionId}:${input.requestId}`, true);
         return { accepted: true };
       },
     },
   };
   const security = {
+    // Port-algorithm fixture authority ONLY. Not a branded native installation.
+    async assertReady() {
+      if (
+        JSON.stringify(await security.inspectRuntime()) !==
+          JSON.stringify(PINNED_HOST) ||
+        (await security.assertIsolated()) !== undefined
+      )
+        throw new Error('fixture authority unavailable');
+    },
+    async hasPromptRequest(id, requestId) {
+      return pending.has(`${id}:${requestId}`);
+    },
     async inspectRuntime() {
       return structuredClone(PINNED_HOST);
     },
@@ -116,5 +127,6 @@ export function fixture() {
     attach,
     seed,
     archivedSessionIds,
+    pending,
   };
 }

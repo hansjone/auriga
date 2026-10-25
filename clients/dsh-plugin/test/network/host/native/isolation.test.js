@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  createNativeHostPort,
-  createNativeSourceResolver,
+  createNativeHostPort as createInstalledPort,
+  createNativeSourceResolver as createInstalledResolver,
   PINNED_HOST,
   verifyRuntimeFingerprint,
 } from '../../../../src/network/host/native/index.js';
+import { createHostPortOperations as createPort } from '../../../../src/network/host/native/host-port.js';
+import { createSourceResolver as createProjection } from '../../../../src/network/host/native/source-context.js';
 import { fixture } from './fixtures.js';
 
 const incompatible = { code: 'network.host_incompatible' };
 
 test('runtime fingerprint requires exact version/build/clean state and both source hashes', () => {
-  assert.equal(verifyRuntimeFingerprint({ ...PINNED_HOST }), true);
+  // The dsh-session hash has not been verified: even exact copied metadata fails.
+  assert.throws(
+    () => verifyRuntimeFingerprint({ ...PINNED_HOST }),
+    incompatible,
+  );
   for (const key of Object.keys(PINNED_HOST)) {
     assert.throws(
       () =>
@@ -29,31 +35,35 @@ test('runtime fingerprint requires exact version/build/clean state and both sour
 
 test('no security service/config boolean can enable a native port', async () => {
   const f = fixture();
-  await assert.rejects(createNativeHostPort({ ctx: f.ctx }), incompatible);
+  await assert.rejects(createInstalledPort({ ctx: f.ctx }), incompatible);
+  assert.throws(
+    () => createInstalledResolver({ ...f, lookupBinding: async () => null }),
+    incompatible,
+  );
   await assert.rejects(
-    createNativeHostPort({
+    createInstalledPort({
       ctx: f.ctx,
       security: { isolated: true, durable: true },
     }),
     incompatible,
   );
   f.state.isolated = false;
-  await assert.rejects(createNativeHostPort(f), incompatible);
+  await assert.rejects(createInstalledPort(f), incompatible);
 });
 
 test('boolean isolation/provider attestations are rejected rather than treated as proof', async () => {
   const f = fixture();
   f.security.assertIsolated = async () => true;
-  await assert.rejects(createNativeHostPort(f), incompatible);
+  await assert.rejects(createPort(f), incompatible);
   f.security.assertIsolated = async () => {};
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   f.security.assertDurableProvider = async () => false;
   assert.equal(await host.hasDurableProvider('session-a'), false);
 });
 
 test('runtime and isolation are rechecked before operations and after async native calls', async () => {
   const f = fixture();
-  const host = await createNativeHostPort(f);
+  const host = await createPort(f);
   f.security.inspectRuntime = async () => ({ ...PINNED_HOST, build: 'other' });
   await assert.rejects(host.getSession('session-a'), incompatible);
   f.security.inspectRuntime = async () => ({ ...PINNED_HOST });
@@ -83,7 +93,7 @@ test('tool source comes from live host object identity and trusted local binding
     kind: 'session',
     sourceBinding: 'must-not-leak',
   };
-  const resolve = createNativeSourceResolver({
+  const resolve = createProjection({
     ...f,
     lookupBinding: async () => binding,
   });
@@ -118,13 +128,13 @@ test('source resolver revalidates live identity after awaits, rejects subagent/a
     lifecycle: 'open',
     kind: 'session',
   };
-  let resolve = createNativeSourceResolver({
+  let resolve = createProjection({
     ...f,
     lookupBinding: async () => binding,
   });
   await assert.rejects(resolve({ agent }), incompatible);
   binding.local = '1';
-  resolve = createNativeSourceResolver({
+  resolve = createProjection({
     ...f,
     lookupBinding: async () => {
       f.agents.delete('session-a');
@@ -141,7 +151,7 @@ test('native parent ownership vetoes an otherwise ordinary live tool source', as
   const f = fixture();
   const agent = f.attach('session-a');
   let lookedUp = false;
-  const resolve = createNativeSourceResolver({
+  const resolve = createProjection({
     ...f,
     lookupBinding: async () => {
       lookedUp = true;

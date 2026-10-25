@@ -1,6 +1,6 @@
 import { CODES, HostSeamError } from '../errors.js';
 import { createKeyedMutex } from '../keyed-mutex.js';
-import { createNativeGate, incompatible } from './runtime.js';
+import { createNativeAuthority, incompatible } from './runtime.js';
 
 /** @param {unknown} value @returns {value is string} */
 const opaque = (value) =>
@@ -8,6 +8,11 @@ const opaque = (value) =>
   value.length > 0 &&
   value.length <= 512 &&
   !value.includes('\0');
+/** Parent lineage alone does not prove subagent ownership (forks also have it).
+ * It remains unsupported until the host supplies verified ownership evidence.
+ * @param {import('./types.js').Header} header */
+const unsupportedLineage = (header) =>
+  header.origin === 'subagent' || header.parentSession !== undefined;
 /** @param {string} id */
 function validId(id) {
   if (!opaque(id)) throw new HostSeamError(CODES.protocolError);
@@ -36,8 +41,6 @@ function liveAgent(agent, id, ctx) {
     agent.session?.id !== id ||
     ctx.agents.get(id) !== agent ||
     ctx.sessions.get(id) !== agent.session ||
-    !Array.isArray(agent.inbox?.nextTurn) ||
-    !Array.isArray(agent.inbox?.nextStep) ||
     typeof agent.session.snapshotEvents !== 'function'
   )
     throw incompatible();
@@ -50,8 +53,36 @@ function liveAgent(agent, id, ctx) {
  * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').NativeSecurity}} options
  * @returns {Promise<import('../adapter.js').HostPort>} */
 export async function createNativeHostPort({ ctx, security }) {
-  const ready = createNativeGate(security);
+  return createHostPortOperations({
+    ctx,
+    security: createNativeAuthority(security),
+  });
+}
+
+/** Pure HostPort operations over an authority port; NOT an installation gate.
+ * Production callers must use createNativeHostPort from index.js.
+ * The separate evidence port avoids inventing native inbox field names.
+ * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').HostOperationAuthority, promptTimeoutMs?: number}} options
+ * @returns {Promise<import('../adapter.js').HostPort>} */
+export async function createHostPortOperations({
+  ctx,
+  security,
+  promptTimeoutMs = 30000,
+}) {
+  const ready = async () => {
+    try {
+      await security.assertReady();
+    } catch {
+      throw incompatible();
+    }
+  };
   await ready();
+  if (
+    !Number.isSafeInteger(promptTimeoutMs) ||
+    promptTimeoutMs < 1 ||
+    promptTimeoutMs > 30000
+  )
+    throw incompatible();
   if (
     !ctx ||
     typeof ctx.sessionController?.inspect !== 'function' ||
@@ -67,6 +98,7 @@ export async function createNativeHostPort({ ctx, security }) {
   )
     throw incompatible();
   const locks = createKeyedMutex();
+  const uncertain = new Set();
 
   /** Cold reads do not resume or create. Only authoritative not-found is null.
    * @param {string} id */
@@ -115,20 +147,24 @@ export async function createNativeHostPort({ ctx, security }) {
     validId(requestId);
     const record = await required(id);
     const agent = ctx.agents.get(id);
-    /** @param {{source?: {kind: string, rpcId?: string}}} message */
-    const matches = (message) =>
-      message.source?.kind === 'user' && message.source.rpcId === requestId;
+    const recorded = record.events.some(
+      (event) =>
+        event.type === 'user/message' &&
+        event.data.source?.kind === 'user' &&
+        event.data.source.rpcId === requestId,
+    );
+    if (recorded) return true;
     if (agent) {
       liveAgent(agent, id, ctx);
-      if (
-        agent.inbox.nextTurn.some(matches) ||
-        agent.inbox.nextStep.some(matches)
-      )
-        return true;
+      // A definite absence requires verified complete native pending evidence.
+      // oclaw does not establish an inbox layout; never infer one from a fixture.
+      if (typeof security.hasPromptRequest !== 'function') throw incompatible();
+      const found = await security.hasPromptRequest(id, requestId);
+      await ready();
+      if (typeof found !== 'boolean') throw incompatible();
+      return found;
     }
-    return record.events.some(
-      (event) => event.type === 'user/message' && matches(event.data),
-    );
+    return false;
   }
 
   return {
@@ -151,9 +187,10 @@ export async function createNativeHostPort({ ctx, security }) {
           if (
             existing.meta.cwd !== cwd ||
             (existing.meta.agentPreset ?? null) !== preset ||
-            existing.meta.origin === 'subagent'
+            unsupportedLineage(existing.meta)
           )
             throw new HostSeamError(CODES.sessionNotReady);
+          if (!(await flushSession(id))) throw incompatible();
           return { id, cwd };
         }
         // A tombstone cannot be turned into a new conversation by create.
@@ -175,18 +212,10 @@ export async function createNativeHostPort({ ctx, security }) {
           if (
             created.meta.cwd !== cwd ||
             (created.meta.agentPreset ?? null) !== preset ||
-            created.meta.origin === 'subagent'
+            unsupportedLineage(created.meta)
           )
             throw incompatible();
-          await durable(id);
-          const session = ctx.sessions.get(id);
-          if (
-            !session ||
-            session.id !== id ||
-            (await ctx.sessions.flush(session)) !== true
-          )
-            throw incompatible();
-          await ready();
+          if (!(await flushSession(id))) throw incompatible();
           return { id, cwd };
         } catch {
           // Unknown create is queried by the core with this same durable id.
@@ -201,33 +230,62 @@ export async function createNativeHostPort({ ctx, security }) {
         throw new HostSeamError(CODES.protocolError);
       return locks.run(id, async () => {
         const record = await required(id);
-        if (record.meta.origin === 'subagent') throw incompatible();
+        if (unsupportedLineage(record.meta)) throw incompatible();
         try {
           await durable(id);
-          if (await hasRequest(id, input.requestId)) return { accepted: true };
+          const requestKey = `${id}\0${input.requestId}`;
+          if (await hasRequest(id, input.requestId)) {
+            uncertain.delete(requestKey);
+            return { accepted: true };
+          }
+          if (uncertain.has(requestKey)) throw incompatible();
           const resolved = await ctx.sessionController.resolveAgent(id);
           if (resolved.error || !resolved.agent) throw incompatible();
           liveAgent(resolved.agent, id, ctx);
           if (
-            resolved.agent.session.header.origin === 'subagent' ||
+            unsupportedLineage(resolved.agent.session.header) ||
             resolved.agent.session.header.cwd !== record.meta.cwd
           )
             throw incompatible();
           await ready();
           if (ctx.workspaceRegistry.archivedSessionIds.includes(id))
             throw incompatible();
-          const result = await ctx.sessionController.prompt(
-            {
-              sessionId: id,
-              requestId: input.requestId,
-              mode: 'queue',
-              content: [{ type: 'text', text: input.text }],
-            },
-            new AbortController().signal,
-          );
+          // Resolve can attach a previously cold agent. Recheck pending evidence
+          // after that transition before invoking the native scheduling API.
+          if (await hasRequest(id, input.requestId)) return { accepted: true };
+          const controller = new AbortController();
+          /** @type {ReturnType<typeof setTimeout>|undefined} */
+          let timeout;
+          /** @type {Promise<never>} */
+          const expired = new Promise((_, reject) => {
+            timeout = setTimeout(() => {
+              controller.abort();
+              reject(incompatible());
+            }, promptTimeoutMs);
+          });
+          let result;
+          try {
+            if (uncertain.size >= 1024) throw incompatible();
+            uncertain.add(requestKey);
+            result = await Promise.race([
+              ctx.sessionController.prompt(
+                {
+                  sessionId: id,
+                  requestId: input.requestId,
+                  mode: 'queue',
+                  content: [{ type: 'text', text: input.text }],
+                },
+                controller.signal,
+              ),
+              expired,
+            ]);
+          } finally {
+            clearTimeout(timeout);
+          }
           await ready();
           liveAgent(resolved.agent, id, ctx);
           if (result?.accepted !== true) throw incompatible();
+          uncertain.delete(requestKey);
           return result;
         } catch {
           throw incompatible();
@@ -253,39 +311,43 @@ export async function createNativeHostPort({ ctx, security }) {
       }
     },
     async flush(id) {
-      return locks.run(id, async () => {
-        try {
-          const before = await required(id);
-          if (before.meta.origin === 'subagent') return false;
-          const provider = ctx.sessionPersistence;
-          await durable(id);
-          let session = ctx.sessions.get(id);
-          if (!session) {
-            const record = await required(id);
-            if (record.meta.origin === 'subagent') return false;
-            const resolved = await ctx.sessionController.resolveAgent(id);
-            if (resolved.error || !resolved.agent) return false;
-            liveAgent(resolved.agent, id, ctx);
-            session = resolved.agent.session;
-          }
-          if (
-            !session ||
-            session.id !== id ||
-            session.header.origin === 'subagent' ||
-            session.header.cwd !== before.meta.cwd
-          )
-            return false;
-          if ((await ctx.sessions.flush(session)) !== true) return false;
-          await durable(id);
-          return (
-            ctx.sessionPersistence === provider &&
-            ctx.sessions.get(id) === session &&
-            !ctx.workspaceRegistry.archivedSessionIds.includes(id)
-          );
-        } catch {
-          return false;
-        }
-      });
+      return locks.run(id, () => flushSession(id));
     },
   };
+
+  /** Called inside the existing session lock, including create adoption.
+   * @param {string} id */
+  async function flushSession(id) {
+    try {
+      const before = await required(id);
+      if (unsupportedLineage(before.meta)) return false;
+      const provider = ctx.sessionPersistence;
+      await durable(id);
+      let session = ctx.sessions.get(id);
+      if (!session) {
+        const record = await required(id);
+        if (unsupportedLineage(record.meta)) return false;
+        const resolved = await ctx.sessionController.resolveAgent(id);
+        if (resolved.error || !resolved.agent) return false;
+        liveAgent(resolved.agent, id, ctx);
+        session = resolved.agent.session;
+      }
+      if (
+        !session ||
+        session.id !== id ||
+        unsupportedLineage(session.header) ||
+        session.header.cwd !== before.meta.cwd
+      )
+        return false;
+      if ((await ctx.sessions.flush(session)) !== true) return false;
+      await durable(id);
+      return (
+        ctx.sessionPersistence === provider &&
+        ctx.sessions.get(id) === session &&
+        !ctx.workspaceRegistry.archivedSessionIds.includes(id)
+      );
+    } catch {
+      return false;
+    }
+  }
 }

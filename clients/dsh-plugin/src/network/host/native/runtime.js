@@ -11,7 +11,14 @@ export const PINNED_HOST = Object.freeze({
     'a9801acb577b03053c5d5a3191ff555c5f1d791d0acddec113bea4511e33b386',
   persistenceSha256:
     '973dd78679b2661d6f492343bc22b124ae958aa597d3b36c698a2c650f909984',
+  // dsh-session implements flush. No independently verified digest is available.
+  sessionSha256: null,
 });
+
+// Deny-by-default provenance registry. No public enrolment or caller-supplied
+// issuer: the read-only host has no authenticated isolation-handle constructor.
+// A host integration must supply that constructor in a separately reviewed change.
+const nativeSecurityHandles = new WeakSet();
 
 export function incompatible() {
   return new HostSeamError(CODES.hostIncompatible);
@@ -22,6 +29,7 @@ export function incompatible() {
 export function verifyRuntimeFingerprint(value) {
   if (!value || typeof value !== 'object') throw incompatible();
   for (const [key, expected] of Object.entries(PINNED_HOST)) {
+    if (expected === null) throw incompatible();
     if (/** @type {Record<string, unknown>} */ (value)[key] !== expected)
       throw incompatible();
   }
@@ -31,24 +39,40 @@ export function verifyRuntimeFingerprint(value) {
 /** Paths and manifest identity must come from the same running host loader.
  * Node fs cannot read inside ASAR; Electron's host fs must collect those bytes.
  * This helper is for unpacked distributions, without loading their modules.
- * @param {{version: string, build: string, dirty: boolean, controllerPath: string, persistencePath: string}} input
+ * Diagnostic only: this does not issue a security handle or prove loaded code.
+ * @param {{manifestPath: string, controllerPath: string, persistencePath: string, sessionPath: string}} input
  * @returns {Promise<import('./types.js').RuntimeFingerprint>} */
 export async function readRuntimeFingerprint({
-  version,
-  build,
-  dirty,
+  manifestPath,
   controllerPath,
   persistencePath,
+  sessionPath,
 }) {
   try {
-    const sources = await Promise.all([
+    const [manifest, ...sources] = await Promise.all([
+      readFile(manifestPath),
       readFile(controllerPath),
       readFile(persistencePath),
+      readFile(sessionPath),
     ]);
-    const [controllerSha256, persistenceSha256] = sources.map((source) =>
-      createHash('sha256').update(source).digest('hex'),
+    const { version, build, dirty } = JSON.parse(manifest.toString('utf8'));
+    if (
+      typeof version !== 'string' ||
+      typeof build !== 'string' ||
+      typeof dirty !== 'boolean'
+    )
+      throw incompatible();
+    const [controllerSha256, persistenceSha256, sessionSha256] = sources.map(
+      (source) => createHash('sha256').update(source).digest('hex'),
     );
-    return { version, build, dirty, controllerSha256, persistenceSha256 };
+    return {
+      version,
+      build,
+      dirty,
+      controllerSha256,
+      persistenceSha256,
+      sessionSha256,
+    };
   } catch {
     throw incompatible();
   }
@@ -57,6 +81,9 @@ export async function readRuntimeFingerprint({
 /** No built-in permissive provider. Missing isolation remains unconfigured.
  * @param {import('./types.js').NativeSecurity} security */
 export function createNativeGate(security) {
+  // Matching methods/constants, a copied object, a Proxy or a prototype are
+  // never proof of provenance. Current host evidence cannot mint this brand.
+  if (!nativeSecurityHandles.has(security)) throw incompatible();
   if (
     !security ||
     !['inspectRuntime', 'assertIsolated', 'assertDurableProvider'].every(
@@ -71,5 +98,24 @@ export function createNativeGate(security) {
     } catch {
       throw incompatible();
     }
+  };
+}
+
+/** Preserve genuine service receivers/private fields instead of spreading a
+ * class instance into a structural clone. Only branded handles reach here.
+ * @param {import('./types.js').NativeSecurity} security
+ * @returns {import('./types.js').HostOperationAuthority} */
+export function createNativeAuthority(security) {
+  const assertReady = createNativeGate(security);
+  return {
+    assertReady,
+    inspectRuntime: () => security.inspectRuntime(),
+    assertIsolated: () => security.assertIsolated(),
+    assertDurableProvider: (provider, id) =>
+      security.assertDurableProvider(provider, id),
+    hasPromptRequest: (id, requestId) =>
+      security.hasPromptRequest
+        ? security.hasPromptRequest(id, requestId)
+        : Promise.resolve('unverified'),
   };
 }
