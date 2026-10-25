@@ -10,9 +10,9 @@ import {
   validatePublication,
 } from './keyset.js';
 export { positiveVersion, timeValue } from './keyset.js';
-/** @typedef {import('./keyset-types.d.ts').SignedKeyset} TrustConfig
- * @typedef {import('./keyset-types.d.ts').KeysetPayload} Payload
- * @typedef {import('./keyset-types.d.ts').PublicKey} TrustKey
+/** @typedef {import('../../generated/network/keyset-types.d.ts').SignedKeyset} TrustConfig
+ * @typedef {import('../../generated/network/keyset-types.d.ts').KeysetPayload} Payload
+ * @typedef {import('../../generated/network/keyset-types.d.ts').PublicKey} TrustKey
  * @typedef {{load(): Promise<any>, commit(value: any): Promise<void>}} TrustCache */
 
 /** Cache must be private, durable and single-writer, like the host ledger.

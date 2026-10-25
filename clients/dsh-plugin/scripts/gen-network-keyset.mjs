@@ -1,9 +1,10 @@
-// Run from the plugin package: node test/network/trust/generate-keyset.mjs
-import { readFile, writeFile } from 'node:fs/promises';
+// Run from the plugin package: node scripts/gen-network-keyset.mjs
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { compile } from 'json-schema-to-typescript';
 import { format } from 'prettier';
+import { pathToFileURL } from 'node:url';
 
-const base = new URL('../../../../../contracts/network/', import.meta.url);
+const base = new URL('../../../contracts/network/', import.meta.url);
 async function resolve(value, file = 'keyset.schema.json') {
   if (Array.isArray(value))
     return Promise.all(value.map((v) => resolve(v, file)));
@@ -29,29 +30,33 @@ const original = JSON.parse(
 );
 const definitions = await resolve(original.$defs);
 const schema = { definitions, $ref: '#/definitions/KeysetPayload' };
-const output = new URL('../../../src/network/trust/', import.meta.url);
+const output = new URL('../src/generated/network/', import.meta.url);
 const style = JSON.parse(
-  await readFile(
-    new URL('../../../../../.prettierrc.json', import.meta.url),
-    'utf8',
-  ),
+  await readFile(new URL('../../../.prettierrc.json', import.meta.url), 'utf8'),
 );
-await writeFile(
-  new URL('keyset-types.d.ts', output),
-  await format(
+export const generatedKeysetFiles = {
+  'keyset-types.d.ts': await format(
     await compile(schema, 'KeysetPayload', {
       unreachableDefinitions: true,
       ignoreMinAndMaxItems: true,
     }),
     { ...style, parser: 'typescript' },
   ),
-);
-await writeFile(
-  new URL('keyset-schema.js', output),
-  await format(
+  'keyset-schema.js': await format(
     '// Generated from contracts/network/keyset.schema.json; do not edit.\nexport const definitions = ' +
       JSON.stringify(definitions, null, 2) +
       ';\n',
     { ...style, parser: 'babel' },
   ),
-);
+};
+
+// Importing this module regenerates in memory; only the CLI writes artifacts.
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
+  await mkdir(output, { recursive: true });
+  for (const [name, content] of Object.entries(generatedKeysetFiles)) {
+    await writeFile(new URL(name, output), content);
+  }
+}

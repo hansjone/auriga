@@ -1,7 +1,7 @@
 /* global structuredClone */
 import { createPublicKey, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { definitions } from './keyset-schema.js';
+import { definitions } from '../../generated/network/keyset-schema.js';
 import { canonicalize, parseStrictJson } from './jcs.js';
 import { SessionError } from '../session/errors.js';
 
@@ -167,4 +167,4 @@ export function validatePublication(input, roots) {
     return unavailable('invalid keyset publication');
   }
 }
-/** @typedef {import('./keyset-types.d.ts').SignedKeyset} SignedPublication */
+/** @typedef {import('../../generated/network/keyset-types.d.ts').SignedKeyset} SignedPublication */
