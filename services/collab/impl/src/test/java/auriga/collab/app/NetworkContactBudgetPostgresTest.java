@@ -174,15 +174,8 @@ class NetworkContactBudgetPostgresTest {
   @Test
   void atomicPendingCeilingAcrossConcurrentLocalsAndRls() throws Exception {
     limits = new Decision(true, "allowed", Map.of(Limit.FIRST_USER_PENDING, 1L));
-    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-      var a = pool.submit(() -> reserve("10", "1", "alice", "20", "a"));
-      var b = pool.submit(() -> reserve("11", "2", "alice", "21", "b"));
-      assertEquals(
-          1,
-          List.of(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS)).stream()
-              .filter(r -> r.error() == null)
-              .count());
-    }
+    assertEquals(
+        1, parallel(i -> reserve("" + (10 + i), "" + (1 + i), "alice", "" + (20 + i), "p" + i)));
     tenant = UUID.randomUUID();
     assertEquals(
         0,
@@ -190,6 +183,102 @@ class NetworkContactBudgetPostgresTest {
             () ->
                 jdbc.queryForObject(
                     "SELECT count(*) FROM collab.network_contact_submission", Integer.class)));
+  }
+
+  long parallel(java.util.function.IntFunction<NetworkContactBudget.Reservation> work)
+      throws Exception {
+    var barrier = new CyclicBarrier(8);
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var jobs = new ArrayList<Future<NetworkContactBudget.Reservation>>();
+      for (int i = 0; i < 8; i++) {
+        int index = i;
+        jobs.add(
+            pool.submit(
+                () -> {
+                  barrier.await(30, TimeUnit.SECONDS);
+                  return work.apply(index);
+                }));
+      }
+      long accepted = 0;
+      for (var job : jobs) if (job.get(30, TimeUnit.SECONDS).error() == null) accepted++;
+      return accepted;
+    }
+  }
+
+  @Test
+  void concurrentLocalAndNodeDailyLimitsHaveOnlyOneRemainingSlot() throws Exception {
+    for (boolean local : List.of(true, false)) {
+      tenant = UUID.randomUUID();
+      limits =
+          new Decision(
+              true, "allowed", local ? Map.of() : Map.of(Limit.FIRST_NODE_TARGETS_DAY, 40L));
+      for (int i = 0; i < 39; i++) {
+        now = START.plusSeconds(i * 180);
+        assertNull(
+            reserve("10", local ? "1" : "" + (i % 4 + 1), "alice", "" + (100 + i), "seed" + i)
+                .error());
+      }
+      now = START.plusSeconds(39 * 180);
+      assertEquals(
+          1,
+          parallel(
+              i -> reserve("10", local ? "1" : "" + (i + 5), "alice", "" + (900 + i), "race" + i)));
+      assertEquals(
+          40,
+          run(
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab.network_contact_submission", Integer.class)));
+    }
+  }
+
+  @Test
+  void concurrent80thTargetFreezesOtherThreadsAtomically() throws Exception {
+    for (int i = 0; i < 79; i++) {
+      now = START.plusSeconds(i * 180);
+      assertNull(reserve("10", "" + (i % 4 + 1), "alice", "" + (100 + i), "seed" + i).error());
+    }
+    now = START.plusSeconds(79 * 180);
+    assertEquals(
+        1, parallel(i -> reserve("10", "" + (i + 5), "alice", "" + (900 + i), "race" + i)));
+    assertEquals(
+        80,
+        run(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(DISTINCT target_node) FROM collab.network_contact_submission",
+                    Integer.class)));
+    assertEquals(
+        now.plusSeconds(3600),
+        run(() ->
+                jdbc.queryForObject(
+                    "SELECT frozen_until FROM collab.network_contact_budget WHERE scope='node' AND subject='10'",
+                    java.sql.Timestamp.class))
+            .toInstant());
+  }
+
+  @Test
+  void unavailableResultsRemainRetryableAndOtherErrorCodesRoundTripExactly() {
+    var reservation = reserve("10", "1", "alice", "20", "key");
+    run(
+        () -> {
+          new NetworkContactBudget(jdbc)
+              .complete(
+                  tenant, reservation.id(), null, auriga.common.error.CommonErrors.UNAVAILABLE);
+          return null;
+        });
+    var retry = reserve("10", "1", "alice", "20", "key");
+    assertNull(retry.error());
+    assertNull(retry.resultJson());
+    var error =
+        auriga.common.error.ErrorCode.of(
+            "network.contact_expired", 410, io.grpc.Status.Code.FAILED_PRECONDITION);
+    run(
+        () -> {
+          new NetworkContactBudget(jdbc).complete(tenant, reservation.id(), null, error);
+          return null;
+        });
+    assertEquals(error, reserve("10", "1", "alice", "20", "key").error());
   }
 
   @Test
