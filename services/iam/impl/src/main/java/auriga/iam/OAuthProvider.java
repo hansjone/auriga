@@ -16,6 +16,7 @@ public final class OAuthProvider {
   private final TokenService tokens;
   private final Clock clock;
   private final Map<String, OAuthClient> clients;
+  private final DeviceAiResource deviceAi;
 
   public OAuthProvider(
       IamStore store,
@@ -23,10 +24,32 @@ public final class OAuthProvider {
       TokenService tokens,
       Clock clock,
       Collection<OAuthClient> clients) {
+    this(
+        store,
+        sessions,
+        tokens,
+        clock,
+        clients,
+        request -> {
+          throw new auriga.common.error.AurigaException(
+              auriga.common.error.CommonErrors.UNAVAILABLE);
+        });
+  }
+
+  public OAuthProvider(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      Collection<OAuthClient> clients,
+      auriga.iam.api.InstanceAiAuthorization authorization) {
     this.store = store;
     this.sessions = sessions;
     this.tokens = tokens;
     this.clock = clock;
+    this.deviceAi =
+        new DeviceAiResource(
+            new DeviceAccessAuthority(store, sessions, tokens), tokens, authorization);
     Map<String, OAuthClient> registered = new HashMap<>();
     for (var client : clients)
       if (registered.putIfAbsent(client.id(), client) != null)
@@ -255,7 +278,11 @@ public final class OAuthProvider {
           if (!authenticated(c, input.get("client_secret"))) return error("invalid_client");
           String type = input.getOrDefault("grant_type", "");
           if (!c.grants().contains(type)) return error("unauthorized_client");
-          if (input.containsKey("audience") || input.containsKey("resource"))
+          if (input.containsKey("audience")
+              || input.containsKey("resource")
+                  && (!type.equals("refresh_token")
+                      || !c.nativeConnect()
+                      || !DeviceAiResource.RESOURCE.equals(input.get("resource"))))
             return error("invalid_target");
           return switch (type) {
             case "authorization_code" -> exchangeCode(c, input);
@@ -316,10 +343,13 @@ public final class OAuthProvider {
   }
 
   private ObjectNode refresh(OAuthClient c, Map<String, String> input) {
+    boolean ai = input.containsKey("resource");
     ObjectNode grant =
         store.get("oauth_grant", Secrets.hash(input.getOrDefault("refresh_token", "")), true);
+    if (ai && (grant == null || !grant.path("authorizationMode").asString().equals("native_tx")))
+      return error("invalid_grant");
     if (grant != null && grant.path("authorizationMode").asString().equals("native_tx")) {
-      if (!Set.of("grant_type", "client_id", "client_secret", "refresh_token", "scope")
+      if (!Set.of("grant_type", "client_id", "client_secret", "refresh_token", "scope", "resource")
           .containsAll(input.keySet())) return error("invalid_request");
       // Even a previously rotated native token must first respect device revocation.
       // Lock order remains refresh grant -> session -> device; never revoke a
@@ -362,41 +392,63 @@ public final class OAuthProvider {
     if (input.containsKey("scope")
         && !scopes(grant.path("scope").asString()).containsAll(scopes(input.get("scope"))))
       return error("invalid_scope");
+    TokenService.IssuedToken issued = null;
     if (grant.path("authorizationMode").asString().equals("native_tx")) {
       if (input.containsKey("scope") && !input.get("scope").equals("auriga.connect"))
         return error("invalid_scope");
-      session = sessions.touchNativeSession(session.path("sessionId").asString());
-      if (session == null) return error("invalid_grant");
+      if (ai) {
+        if (!grant.has("deviceId")) return error("invalid_grant");
+        issued = deviceAi.issue(c, grant, session);
+        if (issued == null) return error("invalid_grant");
+      } else {
+        session = sessions.touchNativeSession(session.path("sessionId").asString());
+        if (session == null) return error("invalid_grant");
+      }
     }
     grant.put("used", true);
     store.save("oauth_grant", grant);
     if (input.containsKey("scope")) grant.put("scope", input.get("scope"));
-    return userTokens(c, grant, session, true);
+    return userTokens(c, grant, session, true, issued);
   }
 
   private ObjectNode userTokens(
       OAuthClient c, ObjectNode grant, ObjectNode session, boolean issueRefresh) {
+    return userTokens(c, grant, session, issueRefresh, null);
+  }
+
+  private ObjectNode userTokens(
+      OAuthClient c,
+      ObjectNode grant,
+      ObjectNode session,
+      boolean issueRefresh,
+      TokenService.IssuedToken issued) {
     boolean device = grant.has("deviceId");
     String scope = grant.path("scope").asString();
     ObjectNode response =
         Json.object(
             "access_token",
-            tokens.access(
-                c.tenant(),
-                session.path("accountId").asString(),
-                c.audience(),
-                device ? "device" : "user",
-                device ? "device" : session.path("audience").asString(),
-                device ? null : UUID.fromString(session.path("sessionId").asString()),
-                device ? UUID.fromString(grant.path("deviceId").asString()) : null,
-                Instant.parse(session.path("authTime").asString()),
-                session.has("stepUpAt") ? Instant.parse(session.path("stepUpAt").asString()) : null,
-                scope,
-                session.path("memberType").asString("member")),
+            issued != null
+                ? issued.accessToken()
+                : tokens.access(
+                    c.tenant(),
+                    session.path("accountId").asString(),
+                    c.audience(),
+                    device ? "device" : "user",
+                    device ? "device" : session.path("audience").asString(),
+                    device ? null : UUID.fromString(session.path("sessionId").asString()),
+                    device ? UUID.fromString(grant.path("deviceId").asString()) : null,
+                    Instant.parse(session.path("authTime").asString()),
+                    session.has("stepUpAt")
+                        ? Instant.parse(session.path("stepUpAt").asString())
+                        : null,
+                    scope,
+                    session.path("memberType").asString("member")),
             "token_type",
             "Bearer",
             "expires_in",
-            300,
+            issued != null
+                ? issued.expiresAt().getEpochSecond() - clock.instant().getEpochSecond()
+                : 300,
             "scope",
             scope);
     if (scopes(scope).contains("openid") && !device)

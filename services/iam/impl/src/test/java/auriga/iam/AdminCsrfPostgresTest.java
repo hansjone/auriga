@@ -419,7 +419,7 @@ class AdminCsrfPostgresTest {
             .generate();
     var keys = mock(SigningKeys.class);
     when(keys.current()).thenReturn(jwk);
-    String secret = Secrets.random();
+    String secret = Secrets.random(), orgSecret = Secrets.random();
     var issuer =
         new TokenService(
             keys,
@@ -427,7 +427,7 @@ class AdminCsrfPostgresTest {
             (tid, sub, ctx) -> Set.of(),
             time,
             "https://portal.example.com",
-            Map.of("edge", Secrets.hash(secret), "org", Secrets.hash(secret)));
+            Map.of("edge", Secrets.hash(secret), "org", Secrets.hash(orgSecret)));
     var settings =
         new AccessTokenSettings(
             "https://portal.example.com",
@@ -513,7 +513,7 @@ class AdminCsrfPostgresTest {
                           UUID.randomUUID(), () -> edge.verifyAdminSessionCsrf(request)))
               .getStatus()
               .getCode());
-      var org = stub.apply(issuer.issue("org", secret));
+      var org = stub.apply(issuer.issue("org", orgSecret));
       assertEquals(
           io.grpc.Status.Code.PERMISSION_DENIED,
           assertThrows(

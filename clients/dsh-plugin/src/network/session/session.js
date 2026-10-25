@@ -6,6 +6,7 @@ import {
   encodeFetch,
   encodeReady,
   encodeReceipt,
+  encodeJson,
   frameType,
 } from './frames.js';
 import { SessionError } from './errors.js';
@@ -38,6 +39,9 @@ const FINAL = new Set([
  *   trust: Awaited<ReturnType<import('../trust/store.js').openTrustStore>>,
  *   now?: () => number,
  *   audit?: (event: {code: string, reason: string, index?: number}) => void,
+ *   onVerifiedItems?: (items: any[]) => Promise<void>,
+ *   submit?: (request: import('../../generated/network/SubmitRequest.js').SubmitRequest) => Promise<unknown>,
+ *   prepareDelivery?: (raw:any) => Promise<any>,
  * }} options
  */
 export function createNetworkSession(options) {
@@ -84,7 +88,22 @@ export function createNetworkSession(options) {
   /** Pagination scan tip; never written into resume_cursor. */
   let scanAfter = '0';
   let ready = false;
+  let generation = 0;
+  let awaitingKeys = false;
+  let rescan = false;
+  let seenRefresh = options.trust.refreshRevision;
+  /** @type {(() => void)|undefined} */
+  let unrefresh;
+  function refreshed() {
+    if (options.trust.refreshRevision <= seenRefresh) return;
+    seenRefresh = options.trust.refreshRevision;
+    if (!awaitingKeys) return;
+    awaitingKeys = false;
+    rescan = true;
+    if (ready && !fetchInflight) void pull().catch(() => {});
+  }
   let fetchInflight = false;
+  let nudged = false;
   /** @type {(() => void) | null} */
   let unsub = null;
   /** @type {Map<string, { resolve: (v: any) => void, reject: (e: Error) => void }>} */
@@ -126,6 +145,20 @@ export function createNetworkSession(options) {
     if (!p) return;
     pending.delete(requestId);
     p.resolve(frame);
+  }
+  /** Await both paths so send failure/stop cannot leave an unhandled waiter.
+   * @param {Uint8Array} payload @param {string} requestId */
+  async function exchange(payload, requestId) {
+    const wait = waitFor(requestId);
+    try {
+      const [result] = await Promise.all([wait, transport.send(payload)]);
+      return result;
+    } catch (error) {
+      const p = pending.get(requestId);
+      pending.delete(requestId);
+      p?.reject(new SessionError('stopped', 'request interrupted'));
+      throw error;
+    }
   }
 
   /** @param {Uint8Array} payload */
@@ -180,12 +213,40 @@ export function createNetworkSession(options) {
         return;
       }
       // Tip nudge: schedule a fetch when idle.
+      if (fetchInflight) {
+        nudged = true;
+        return;
+      }
       void pull().catch(() => {});
       return;
     }
     if (type === 'fetch_result') {
       receivedSizes.set(frame, payload.byteLength);
       settle(frame.page?.request_id, frame);
+      return;
+    }
+    if (
+      [
+        'attempt_result',
+        'admit_result',
+        'register_result',
+        'assign_result',
+        'decide_result',
+        'status',
+      ].includes(type)
+    ) {
+      if (!pending.has(frame.request_id)) return;
+      try {
+        await verifyEnvelopeWithRefresh(frame, {
+          trust: options.trust,
+          context: context(frame.request_id),
+          now,
+        });
+      } catch (error) {
+        rejectFrame(frame.request_id, error);
+        return;
+      }
+      settle(frame.request_id, frame);
       return;
     }
     if (type === 'receipt_committed') {
@@ -245,34 +306,67 @@ export function createNetworkSession(options) {
    *   resumeCursor?: string,
    *   localHighWater?: string,
    *   registrationRevision?: string,
-   *   receiptCheckpoint?: string,
+   *   receiptCheckpoint?: {checkpoint_seq:string,checkpoint_revision:string,summary_digest:string},
+   *   pendingRegistration?: {candidate_local:string,allocation_op_id:string,allocation_fingerprint:string}|null,
    * }} [hint]
    */
   async function start(hint = {}) {
     if (ready) throw new SessionError('invalid_state', 'already started');
+    const started = ++generation;
+    unsub?.();
+    unrefresh?.();
+    unrefresh = options.trust.onRefresh(refreshed);
     unsub = transport.onMessage((payload) => {
-      void onPayload(payload);
+      void onPayload(payload).catch((error) => rejectFrame(null, error));
     });
     const requestId = newId('req-ready');
     channelNonce = newId('nonce');
-    const wait = waitFor(requestId);
-    await transport.send(
+    const result = await exchange(
       encodeReady({
         requestId,
         channelNonce,
         resumeCursor: hint.resumeCursor ?? resumeCursor,
         localHighWater: hint.localHighWater ?? '0',
         registrationRevision: hint.registrationRevision ?? '0',
-        receiptCheckpoint: hint.receiptCheckpoint ?? '0',
+        receiptCheckpoint: hint.receiptCheckpoint ?? {
+          checkpoint_seq: '0',
+          checkpoint_revision: '0',
+          summary_digest: 'sha256:' + '0'.repeat(64),
+        },
+        pendingRegistration: hint.pendingRegistration,
+        bootId,
+        keysetVersion: options.trust.version,
       }),
+      requestId,
     );
-    const result = await wait;
-    if (result.status !== 'ready' && result.status !== undefined) {
-      // Some stubs omit status; require epoch.
-      if (!result.epoch) {
-        throw new SessionError('ready_failed', 'READY_RESULT not ready');
-      }
-    }
+    if (started !== generation)
+      throw new SessionError('stopped', 'handshake superseded');
+    if (
+      result.status !== 'ready' ||
+      result.node_identity?.realm !== identity.realm ||
+      result.node_identity?.node !== identity.node ||
+      result.node_identity?.incarnation !== identity.nodeIncarnation
+    )
+      throw new SessionError(
+        'ready_failed',
+        'READY_RESULT not ready or identity mismatch',
+      );
+    const supported = [
+      'server_auth_v1',
+      'source_attestation_v1',
+      'inbox_only_v1',
+      'broadcast_grants_v1',
+    ];
+    if (
+      !Array.isArray(result.required_features) ||
+      result.required_features.some(
+        (/** @type {string} */ feature) => !supported.includes(feature),
+      )
+    )
+      throw new SessionError(
+        'network.unsupported_app_version',
+        'unsupported required network feature',
+      );
     epoch = String(result.epoch);
     if (result.committed_cursor !== undefined) {
       resumeCursor = String(result.committed_cursor);
@@ -284,14 +378,21 @@ export function createNetworkSession(options) {
     return result;
   }
 
-  async function stop() {
+  function disconnect() {
+    generation++;
     ready = false;
     unsub?.();
     unsub = null;
+    unrefresh?.();
+    unrefresh = undefined;
+    scanAfter = resumeCursor;
     for (const [, p] of pending) {
       p.reject(new SessionError('stopped', 'session stopped'));
     }
     pending.clear();
+  }
+  async function stop() {
+    disconnect();
     await transport.stop?.();
   }
 
@@ -306,9 +407,12 @@ export function createNetworkSession(options) {
     }
     fetchInflight = true;
     try {
+      if (rescan) {
+        scanAfter = resumeCursor;
+        rescan = false;
+      }
       const requestId = newId('req-fetch');
-      const wait = waitFor(requestId);
-      await transport.send(
+      const result = await exchange(
         encodeFetch({
           requestId,
           epoch,
@@ -317,11 +421,15 @@ export function createNetworkSession(options) {
           maxItems: opts.maxItems,
           maxBytes: opts.maxBytes,
         }),
+        requestId,
       );
-      const result = await wait;
       return await applyFetchResult(result, requestId, opts.maxBytes);
     } finally {
       fetchInflight = false;
+      if (ready && (rescan || nudged)) {
+        nudged = false;
+        void pull().catch(() => {});
+      }
     }
   }
 
@@ -344,6 +452,7 @@ export function createNetworkSession(options) {
     const pageEpoch = String(result.page?.epoch ?? result.epoch);
     const expectedContext = context(requestId);
     let page;
+    const refreshBefore = options.trust.refreshRevision;
     try {
       page = await buildVerifiedPage({
         tenant: identity.tenant,
@@ -356,6 +465,7 @@ export function createNetworkSession(options) {
         context: expectedContext,
         now,
         maxBytes,
+        prepareDelivery: options.prepareDelivery,
       });
     } catch (error) {
       rejectFrame(null, error);
@@ -372,13 +482,38 @@ export function createNetworkSession(options) {
         'connection changed during verification',
       );
     for (const failure of page.rejections) audit(failure);
+    if (
+      page.rejections.some(
+        (failure) => failure.code === 'network.key_unavailable',
+      )
+    ) {
+      awaitingKeys = true;
+      if (options.trust.refreshRevision > refreshBefore) {
+        awaitingKeys = false;
+        rescan = true;
+      }
+    }
+    await options.onVerifiedItems?.(page.verifiedItems);
+    requireReady();
+    if (
+      channelNonce !== expectedContext.channelNonce ||
+      epoch !== expectedContext.epoch
+    )
+      throw new SessionError('stale_epoch', 'connection changed during intake');
     // scan_after advances pagination; resume_cursor only tracks confirmed prefix.
+    const previousScan = scanAfter;
     if (result.page?.scan_after !== undefined) {
       scanAfter = String(result.page.scan_after);
     }
     if (result.page?.committed_cursor !== undefined) {
       resumeCursor = String(result.page.committed_cursor);
     }
+    if (
+      result.page?.snapshot_head !== undefined &&
+      BigInt(scanAfter) > BigInt(previousScan) &&
+      BigInt(scanAfter) < BigInt(result.page.snapshot_head)
+    )
+      nudged = true;
     if (page.items.length === 0) {
       return { receipts: [], committed: [] };
     }
@@ -387,6 +522,15 @@ export function createNetworkSession(options) {
       page
     );
     const receipts = await adapter.deliver(verifiedPage);
+    requireReady();
+    if (
+      channelNonce !== expectedContext.channelNonce ||
+      epoch !== expectedContext.epoch
+    )
+      throw new SessionError(
+        'stale_epoch',
+        'connection changed during host delivery',
+      );
     await publishSystemPrompts(verifiedPage, receipts);
     const committed = await submitReceipts(verifiedPage, receipts);
     return { receipts, committed, page };
@@ -444,9 +588,14 @@ export function createNetworkSession(options) {
         code: receipt.code,
         expectedStateVersion: String(receipt.ledgerRevision ?? 0),
         acceptedBy: receipt.acceptedBy,
-        acceptanceMode: receipt.acceptanceMode,
+        acceptanceMode:
+          receipt.acceptanceMode === 'prompt'
+            ? 'normal'
+            : receipt.acceptanceMode,
         messageDigest: receipt.messageDigest,
         hostRequestId: receipt.hostRequestId,
+        target: receipt.targetAddress,
+        evidenceDigest: receipt.evidenceDigest,
       });
     }
 
@@ -456,8 +605,7 @@ export function createNetworkSession(options) {
       if (group.results.length === 0) continue;
       const requestId = newId('req-rcpt');
       const operationId = newId('op-rcpt');
-      const wait = waitFor(requestId);
-      await transport.send(
+      const committedFrame = await exchange(
         encodeReceipt({
           requestId,
           operationId,
@@ -466,8 +614,8 @@ export function createNetworkSession(options) {
           mailSeq: group.mailSeq,
           results: group.results,
         }),
+        requestId,
       );
-      const committedFrame = await wait;
       if (frameType(committedFrame) !== 'receipt_committed') {
         throw new SessionError('bad_receipt', 'expected receipt_committed');
       }
@@ -501,8 +649,44 @@ export function createNetworkSession(options) {
       return structuredClone(diagnostics);
     },
     start,
+    disconnect,
     stop,
+    /** Private HTTPS submission; never bypass readiness or expose private response to the model.
+     * @param {import('../../generated/network/SubmitRequest.js').SubmitRequest} request */
+    async submit(request) {
+      requireReady();
+      if (!options.submit)
+        throw new SessionError('not_ready', 'submission port unavailable');
+      return options.submit(request);
+    },
     pull,
+    rescan() {
+      rescan = true;
+      if (ready && !fetchInflight) void pull().catch(() => {});
+    },
+    /** Fixed protocol response type, fully verified before returning to a host port.
+     * @param {string} type @param {Record<string,unknown>} fields @param {string} responseType */
+    async request(type, fields, responseType) {
+      requireReady();
+      const requestedGeneration = generation;
+      const id = newId('req-control');
+      const result = await exchange(
+        encodeJson({ ...fields, app_version: '1.0', type, request_id: id }),
+        id,
+      );
+      requireReady();
+      if (requestedGeneration !== generation)
+        throw new SessionError(
+          'stale_epoch',
+          'connection changed during control request',
+        );
+      if (result.type !== responseType)
+        throw new SessionError(
+          'network.protocol_error',
+          'unexpected response type',
+        );
+      return result;
+    },
     /** Exposed for tests that inject a FETCH_RESULT without the wire. */
     applyFetchResult,
   };

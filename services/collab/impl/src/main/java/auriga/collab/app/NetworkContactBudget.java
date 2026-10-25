@@ -106,7 +106,7 @@ final class NetworkContactBudget {
     var prior =
         jdbc.queryForList(
             """
-        SELECT id,fingerprint,result_json,error_code FROM collab.network_contact_submission
+        SELECT id,fingerprint,result_json,error_code,error_http_status,error_grpc_status FROM collab.network_contact_submission
         WHERE tenant_id=? AND realm=? AND source_node=? AND source_local=? AND producer_epoch=? AND idempotency_key=?
         """,
             tenant,
@@ -119,15 +119,7 @@ final class NetworkContactBudget {
       var row = prior.getFirst();
       if (!fingerprint.equals(row.get("fingerprint")))
         return new Reservation((UUID) row.get("id"), true, NetworkErrors.CONFLICT, null);
-      ErrorCode error =
-          row.get("error_code") == null
-              ? null
-              : switch (row.get("error_code").toString()) {
-                case "common.unavailable" -> CommonErrors.UNAVAILABLE;
-                case "common.forbidden" -> CommonErrors.FORBIDDEN;
-                default -> NetworkErrors.UNAUTHORIZED;
-              };
-      return new Reservation((UUID) row.get("id"), true, error, (String) row.get("result_json"));
+      return restored(row);
     }
     for (var state : states) {
       var scope = state.scope();
@@ -242,12 +234,50 @@ final class NetworkContactBudget {
   }
 
   void complete(UUID tenant, UUID id, NetworkMailboxService.StoreResult result, ErrorCode error) {
+    if (error != null && CommonErrors.UNAVAILABLE.code().equals(error.code())) return;
     jdbc.update(
-        "UPDATE collab.network_contact_submission SET result_json=?,error_code=? WHERE tenant_id=? AND id=?",
+        "UPDATE collab.network_contact_submission SET result_json=?,error_code=?,error_http_status=?,error_grpc_status=? WHERE tenant_id=? AND id=?",
         result == null ? null : NetworkJson.JSON.writeValueAsString(result),
         error == null ? null : error.code(),
+        error == null ? null : error.httpStatus(),
+        error == null ? null : error.grpcStatus().name(),
         tenant,
         id);
+  }
+
+  Reservation current(UUID tenant, UUID id) {
+    return restored(
+        jdbc.queryForMap(
+            """
+        SELECT id,result_json,error_code,error_http_status,error_grpc_status
+        FROM collab.network_contact_submission WHERE tenant_id=? AND id=? FOR UPDATE
+        """,
+            tenant,
+            id));
+  }
+
+  private static Reservation restored(Map<String, Object> row) {
+    String code = (String) row.get("error_code");
+    if (CommonErrors.UNAVAILABLE.code().equals(code))
+      return new Reservation(
+          (UUID) row.get("id"), true, null, null); // Retry legacy outage results as well.
+    ErrorCode error = null;
+    if (code != null) {
+      if (row.get("error_http_status") != null && row.get("error_grpc_status") != null)
+        error =
+            ErrorCode.of(
+                code,
+                ((Number) row.get("error_http_status")).intValue(),
+                io.grpc.Status.Code.valueOf(row.get("error_grpc_status").toString()));
+      else
+        error =
+            switch (code) {
+              case "common.forbidden" -> CommonErrors.FORBIDDEN;
+              case "network.unauthorized" -> NetworkErrors.UNAUTHORIZED;
+              default -> ErrorCode.of(code, 500, io.grpc.Status.Code.UNKNOWN);
+            };
+    }
+    return new Reservation((UUID) row.get("id"), true, error, (String) row.get("result_json"));
   }
 
   Instant visibleUntil(UUID tenant, UUID id) {

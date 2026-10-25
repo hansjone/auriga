@@ -21,6 +21,28 @@ import org.springframework.core.env.MapPropertySource;
 class EdgeTokenFilePublisherTest {
   @TempDir Path dir;
 
+  String service() {
+    return "edge";
+  }
+
+  Class<?> configuration() {
+    return EdgeTokenFileConfiguration.class;
+  }
+
+  ServiceTokenFilePublisher publisher(
+      auriga.iam.api.InternalTokenIssuer issuer, Path secret, Path token, int group) {
+    return publisher(issuer, secret, token, group, -1);
+  }
+
+  ServiceTokenFilePublisher publisher(
+      auriga.iam.api.InternalTokenIssuer issuer, Path secret, Path token, int group, int owner) {
+    return new EdgeTokenFilePublisher(issuer, secret, token, group, owner);
+  }
+
+  TokenService serviceIssuer(Time time, String secret, ECKey key) {
+    return issuer(time, secret, key, service());
+  }
+
   static final class Time extends Clock {
     volatile Instant now = Instant.parse("2026-10-22T00:00:00Z");
 
@@ -38,6 +60,10 @@ class EdgeTokenFilePublisherTest {
   }
 
   static TokenService issuer(Time time, String secret, ECKey key) {
+    return issuer(time, secret, key, "edge");
+  }
+
+  static TokenService issuer(Time time, String secret, ECKey key, String service) {
     var keys = mock(SigningKeys.class);
     when(keys.current()).thenReturn(key);
     return new TokenService(
@@ -46,7 +72,7 @@ class EdgeTokenFilePublisherTest {
         (tid, sub, ctx) -> Set.of(),
         time,
         "https://portal.example.com",
-        Map.of("edge", Secrets.hash(secret)));
+        Map.of(service, Secrets.hash(secret)));
   }
 
   static AccessTokenVerifier verifier(Time time, ECKey key) {
@@ -98,12 +124,11 @@ class EdgeTokenFilePublisherTest {
     var time = new Time();
     var key = new ECKeyGenerator(Curve.P_256).keyID(UUID.randomUUID().toString()).generate();
     String credential = Secrets.random();
-    var issuer = issuer(time, credential, key);
+    var issuer = serviceIssuer(time, credential, key);
     var verifier = verifier(time, key);
     Path token = dir.resolve("export/service.jwt");
     if (!posix()) {
-      try (var publisher =
-          new EdgeTokenFilePublisher(issuer, dir.resolve("edge.secret"), token, 65532)) {
+      try (var publisher = publisher(issuer, dir.resolve("edge.secret"), token, 65532)) {
         assertThrows(IllegalStateException.class, publisher::start);
         assertFalse(publisher.isRunning());
         assertFalse(Files.exists(token));
@@ -112,14 +137,14 @@ class EdgeTokenFilePublisherTest {
     }
     Path secret = secret(credential);
     Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rw-------"));
-    try (var publisher = new EdgeTokenFilePublisher(issuer, secret, token, gid())) {
+    try (var publisher = publisher(issuer, secret, token, gid())) {
       assertFalse(Files.exists(token));
       publisher.start();
       awaitToken(token);
       assertTrue(publisher.isRunning());
       String first = Files.readString(token);
       Object inode = Files.getAttribute(token, "unix:ino");
-      assertEquals("svc:edge", verifier.verify(first).subject());
+      assertEquals("svc:" + service(), verifier.verify(first).subject());
       assertEquals(
           300,
           SignedJWT.parse(first).getJWTClaimsSet().getExpirationTime().toInstant().getEpochSecond()
@@ -136,7 +161,7 @@ class EdgeTokenFilePublisherTest {
       assertEquals(
           "common.unauthenticated",
           assertThrows(AurigaException.class, () -> verifier.verify(first)).errorCode().code());
-      assertEquals("svc:edge", verifier.verify(second).subject());
+      assertEquals("svc:" + service(), verifier.verify(second).subject());
       Files.writeString(secret, Secrets.random());
       assertFalse(publisher.refresh());
       assertEquals(second, Files.readString(token));
@@ -148,8 +173,8 @@ class EdgeTokenFilePublisherTest {
               .code());
       Files.writeString(secret, credential);
       assertTrue(publisher.refresh());
-      assertEquals("svc:edge", verifier.verify(Files.readString(token)).subject());
-      var workerField = EdgeTokenFilePublisher.class.getDeclaredField("scheduler");
+      assertEquals("svc:" + service(), verifier.verify(Files.readString(token)).subject());
+      var workerField = ServiceTokenFilePublisher.class.getDeclaredField("scheduler");
       workerField.setAccessible(true);
       var worker = (java.util.concurrent.ExecutorService) workerField.get(publisher);
       publisher.stop();
@@ -160,7 +185,7 @@ class EdgeTokenFilePublisherTest {
       assertFalse(publisher.refresh());
       publisher.start();
       awaitToken(token);
-      assertEquals("svc:edge", verifier.verify(Files.readString(token)).subject());
+      assertEquals("svc:" + service(), verifier.verify(Files.readString(token)).subject());
       assertTrue(publisher.isRunning());
     }
     assertFalse(Files.exists(token));
@@ -171,7 +196,7 @@ class EdgeTokenFilePublisherTest {
       throws Exception {
     if (!posix()) {
       var publisher =
-          new EdgeTokenFilePublisher(
+          publisher(
               (service, secret) -> "never",
               dir.resolve("secret"),
               dir.resolve("export/token"),
@@ -185,8 +210,7 @@ class EdgeTokenFilePublisherTest {
     Path token = dir.resolve("export/token");
     var time = new Time();
     var key = new ECKeyGenerator(Curve.P_256).keyID("test").generate();
-    try (var publisher =
-        new EdgeTokenFilePublisher(issuer(time, credential, key), secret, token, gid())) {
+    try (var publisher = publisher(serviceIssuer(time, credential, key), secret, token, gid())) {
       publisher.start();
       awaitToken(token);
       String original = Files.readString(token);
@@ -241,7 +265,7 @@ class EdgeTokenFilePublisherTest {
       assertThrows(
           IllegalStateException.class,
           () ->
-              new EdgeTokenFilePublisher(
+              publisher(
                       (s, c) -> "never", dir.resolve("secret"), dir.resolve("export/token"), 65532)
                   .start());
       return;
@@ -249,7 +273,7 @@ class EdgeTokenFilePublisherTest {
     var time = new Time();
     String credential = Secrets.random();
     var key = new ECKeyGenerator(Curve.P_256).keyID("failure-test").generate();
-    var issuer = issuer(time, credential, key);
+    var issuer = serviceIssuer(time, credential, key);
     var unavailable = new java.util.concurrent.atomic.AtomicBoolean(true);
     var writeFailure = new java.util.concurrent.atomic.AtomicBoolean();
     var firstAttempt = new java.util.concurrent.CountDownLatch(1);
@@ -257,7 +281,7 @@ class EdgeTokenFilePublisherTest {
     Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rw-------"));
     Path token = dir.resolve("export/token");
     try (var publisher =
-        new EdgeTokenFilePublisher(
+        publisher(
             (service, value) -> {
               if (unavailable.get()) {
                 firstAttempt.countDown();
@@ -313,7 +337,7 @@ class EdgeTokenFilePublisherTest {
       assertThrows(
           IllegalStateException.class,
           () ->
-              new EdgeTokenFilePublisher(
+              publisher(
                       (s, c) -> "never", dir.resolve("secret"), dir.resolve("export/token"), 65532)
                   .start());
       return;
@@ -330,12 +354,12 @@ class EdgeTokenFilePublisherTest {
       Path token = root.resolve("export/token");
       var time = new Time();
       var key = new ECKeyGenerator(Curve.P_256).keyID("blocked-test").generate();
-      var authority = issuer(time, credential, key);
+      var authority = serviceIssuer(time, credential, key);
       var entered = new java.util.concurrent.CountDownLatch(1);
       var release = new java.util.concurrent.CountDownLatch(1);
       var attempts = new java.util.concurrent.atomic.AtomicInteger();
       try (var publisher =
-          new EdgeTokenFilePublisher(
+          publisher(
               (service, value) -> {
                 if (attempts.incrementAndGet() == 1) {
                   entered.countDown();
@@ -356,7 +380,7 @@ class EdgeTokenFilePublisherTest {
               gid())) {
         publisher.start();
         assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS));
-        var field = EdgeTokenFilePublisher.class.getDeclaredField("scheduler");
+        var field = ServiceTokenFilePublisher.class.getDeclaredField("scheduler");
         field.setAccessible(true);
         var oldWorker = (java.util.concurrent.ExecutorService) field.get(publisher);
         assertTimeoutPreemptively(
@@ -388,7 +412,7 @@ class EdgeTokenFilePublisherTest {
       assertThrows(
           IllegalStateException.class,
           () ->
-              new EdgeTokenFilePublisher(
+              publisher(
                       (s, c) -> "never", dir.resolve("secret"), dir.resolve("export/token"), 65532)
                   .start());
       return;
@@ -398,7 +422,7 @@ class EdgeTokenFilePublisherTest {
     Files.setPosixFilePermissions(secret, PosixFilePermissions.fromString("rw-------"));
     int owner = (int) Files.getAttribute(secret, "unix:uid");
     try (var bad =
-        new EdgeTokenFilePublisher(
+        publisher(
             (s, c) -> {
               fail("wrong owner must never reach issuer");
               return "never";
@@ -413,12 +437,12 @@ class EdgeTokenFilePublisherTest {
     var time = new Time();
     var key = new ECKeyGenerator(Curve.P_256).keyID("owner-test").generate();
     try (var good =
-        new EdgeTokenFilePublisher(
-            issuer(time, value, key), secret, dir.resolve("good/token"), gid(), owner)) {
+        publisher(
+            serviceIssuer(time, value, key), secret, dir.resolve("good/token"), gid(), owner)) {
       good.start();
       awaitToken(dir.resolve("good/token"));
       assertEquals(
-          "svc:edge",
+          "svc:" + service(),
           verifier(time, key).verify(Files.readString(dir.resolve("good/token"))).subject());
     }
   }
@@ -426,9 +450,9 @@ class EdgeTokenFilePublisherTest {
   @Test
   void exportIsAbsentByDefaultAndCannotBeEnabledOutsideCombinedOrWithoutIam() {
     try (var context = new AnnotationConfigApplicationContext()) {
-      context.register(EdgeTokenFileConfiguration.class);
+      context.register(configuration());
       context.refresh();
-      assertTrue(context.getBeansOfType(EdgeTokenFilePublisher.class).isEmpty());
+      assertTrue(context.getBeansOfType(ServiceTokenFilePublisher.class).isEmpty());
     }
     try (var context = new AnnotationConfigApplicationContext()) {
       context
@@ -438,13 +462,13 @@ class EdgeTokenFilePublisherTest {
               new MapPropertySource(
                   "installation",
                   Map.of(
-                      "auriga.iam.edge-token-export.enabled",
+                      "auriga.iam." + service() + "-token-export.enabled",
                       "true",
                       "auriga.services.iam.enabled",
                       "false")));
-      context.register(EdgeTokenFileConfiguration.class);
+      context.register(configuration());
       context.refresh();
-      assertTrue(context.getBeansOfType(EdgeTokenFilePublisher.class).isEmpty());
+      assertTrue(context.getBeansOfType(ServiceTokenFilePublisher.class).isEmpty());
     }
     try (var context = new AnnotationConfigApplicationContext()) {
       context
@@ -452,16 +476,16 @@ class EdgeTokenFilePublisherTest {
           .getPropertySources()
           .addFirst(
               new MapPropertySource(
-                  "installation", Map.of("auriga.iam.edge-token-export.enabled", "true")));
+                  "installation",
+                  Map.of("auriga.iam." + service() + "-token-export.enabled", "true")));
       context.registerBean(
           auriga.iam.api.InternalTokenIssuer.class, () -> (service, secret) -> "never");
-      context.register(EdgeTokenFileConfiguration.class);
+      context.register(configuration());
       assertThrows(org.springframework.beans.BeansException.class, context::refresh);
     }
     assertThrows(
         IllegalStateException.class,
         () ->
-            new EdgeTokenFilePublisher(
-                (s, c) -> "never", Path.of("relative"), dir.resolve("export/token"), 65532));
+            publisher((s, c) -> "never", Path.of("relative"), dir.resolve("export/token"), 65532));
   }
 }

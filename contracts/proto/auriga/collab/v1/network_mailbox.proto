@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package auriga.collab.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/collab/v1;collabv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.collab.v1";
+
+// Internal service JWT (ONLY svc:ai-gateway), delegated auriga-tenant-id and
+// authenticated transport, as NetworkGatewayService in IAM. Collab MUST verify
+// the persisted IAM ingress binding and current authorization on EVERY RPC.
+service NetworkMailboxService {
+  rpc Ready(NetworkMailboxServiceReadyRequest) returns (NetworkMailboxServiceReadyResponse);
+  // Gateway/internal hint, not a new upstream application frame type.
+  rpc Head(NetworkMailboxServiceHeadRequest) returns (NetworkMailboxServiceHeadResponse);
+  rpc Fetch(NetworkMailboxServiceFetchRequest) returns (NetworkMailboxServiceFetchResponse);
+  rpc Receipt(NetworkMailboxServiceReceiptRequest) returns (NetworkMailboxServiceReceiptResponse);
+}
+
+// All fields originate in the authenticated callout/IAM grant, never JSON or
+// NATS headers. tenant_id MUST equal the delegated metadata tenant.
+message NetworkMailboxConnection {
+  string tenant_id = 1;
+  string realm = 2;
+  string node = 3;
+  string ingress = 4;
+  string server_id = 5;
+  string client_id = 6;
+  string client_account = 7;
+}
+
+// JSON is the complete contracts/network/protocol.schema.json frame (<=64KiB).
+// Preserve continuation/evidence/receipt proofs and future optional fields.
+// Collab validates the schema and binds READY nonce/incarnation/epoch atomically.
+message NetworkMailboxServiceReadyRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceReadyResponse {
+  // Complete signed ready_result or error; never an unsigned success.
+  bytes frame_json = 1;
+}
+message NetworkMailboxServiceHeadRequest {
+  NetworkMailboxConnection connection = 1;
+}
+message NetworkMailboxServiceHeadResponse {
+  // Complete signed head or error, using the current authoritative route.
+  bytes frame_json = 1;
+}
+message NetworkMailboxServiceFetchRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceFetchResponse {
+  // Complete fetch_result: signed fetch_page AND signed items, as produced by
+  // collab fetchPage. Gateway forwards bytes unchanged, never re-encodes them.
+  bytes frame_json = 1;
+}
+message NetworkMailboxServiceReceiptRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceReceiptResponse {
+  // Signed receipt_committed or error; collab owns idempotency and cursor CAS.
+  bytes frame_json = 1;
+}
