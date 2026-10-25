@@ -42,6 +42,14 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
   private Instant publicationTime;
   private final NetworkKeyPublication persistence;
   private boolean closed;
+  private final SigningGuard signingGuard;
+  private final long publicationLifetimeSeconds;
+  private final boolean automaticPublication;
+
+  @FunctionalInterface
+  public interface SigningGuard {
+    ObjectNode sign(NetworkPublicKeys keys, java.util.function.Supplier<ObjectNode> signature);
+  }
 
   /**
    * In-memory registry for explicit test/configuration use; production uses the state-file
@@ -52,8 +60,38 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
   }
 
   public NetworkSigningKeys(Clock clock, long initialVersion, Path metadataFile) {
+    this(clock, initialVersion, metadataFile, (keys, signature) -> signature.get(), 86400, true);
+  }
+
+  /** Production guard binds every new signature to a durable, root-approved publication. */
+  public NetworkSigningKeys(
+      Clock clock, long initialVersion, Path metadataFile, SigningGuard signingGuard) {
+    this(clock, initialVersion, metadataFile, signingGuard, 86400);
+  }
+
+  public NetworkSigningKeys(
+      Clock clock,
+      long initialVersion,
+      Path metadataFile,
+      SigningGuard signingGuard,
+      long publicationLifetimeSeconds) {
+    this(clock, initialVersion, metadataFile, signingGuard, publicationLifetimeSeconds, false);
+  }
+
+  private NetworkSigningKeys(
+      Clock clock,
+      long initialVersion,
+      Path metadataFile,
+      SigningGuard signingGuard,
+      long publicationLifetimeSeconds,
+      boolean automaticPublication) {
     if (initialVersion < 1) throw new IllegalArgumentException("Invalid keyset version");
+    if (publicationLifetimeSeconds < 1 || publicationLifetimeSeconds > 86400)
+      throw new IllegalArgumentException("Invalid key publication lifetime");
+    this.publicationLifetimeSeconds = publicationLifetimeSeconds;
+    this.automaticPublication = automaticPublication;
     this.clock = java.util.Objects.requireNonNull(clock);
+    this.signingGuard = java.util.Objects.requireNonNull(signingGuard);
     this.version = initialVersion;
     this.publicationTime = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     persistence = metadataFile == null ? null : new NetworkKeyPublication(metadataFile);
@@ -227,7 +265,7 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
     out.put("schema_version", 1).put("realm", realm).put("keyset_version", Long.toString(version));
     Instant issued = publicationTime;
     out.put("issued_at", issued.toString())
-        .put("valid_until", issued.plusSeconds(86400).toString());
+        .put("valid_until", issued.plusSeconds(publicationLifetimeSeconds).toString());
     var array = out.putArray("keys");
     for (Key key : keys.values()) {
       if (!key.realm.equals(realm)) continue;
@@ -271,7 +309,7 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
                         && now.isBefore(k.notAfter))
             .findFirst()
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAVAILABLE));
-    return work.apply(key, version);
+    return signingGuard.sign(this, () -> work.apply(key, version));
   }
 
   private void bumpVersion() {
@@ -288,7 +326,8 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
   }
 
   private void markPublished() {
-    if (!clock.instant().isBefore(publicationTime.plusSeconds(86400))) {
+    if (!clock.instant().isBefore(publicationTime.plusSeconds(publicationLifetimeSeconds))) {
+      if (!automaticPublication) throw new AurigaException(CommonErrors.UNAVAILABLE);
       bumpVersion();
       persist();
     }

@@ -29,6 +29,7 @@ public class CollabRuntimeConfiguration {
   @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
       prefix = "auriga.collab.network",
       name = "key-state-file")
+  @ConditionalOnExpression("!${auriga.collab.network.key-operations.enabled:false}")
   NetworkSigningKeys networkSigningKeys(
       @org.springframework.beans.factory.annotation.Value(
               "${auriga.collab.network.key-state-file:}")
