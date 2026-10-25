@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
+import { createConsentRoutes } from './consent-routes.js';
 const BASE = '/auriga/local-login';
 const assets = new Map([
   ['adapter.js', new URL('../login/local-adapter.js', import.meta.url)],
@@ -8,6 +9,7 @@ const assets = new Map([
 ]);
 /** @param {{runtime:any,admission:any}} options */
 export function createConnectRoutes({ runtime, admission }) {
+  const consent = createConsentRoutes(runtime);
   /** @param {import('node:http').ServerResponse} res @param {number} status @param {unknown} body @param {string|string[]} [cookies] */
   const json = (res, status, body, cookies) => {
     res.writeHead(status, {
@@ -35,6 +37,7 @@ export function createConnectRoutes({ runtime, admission }) {
       return;
     }
     const path = (req.url ?? '').split('?')[0];
+    if (path.startsWith(BASE + '/consent/')) return consent(req, res);
     try {
       if (req.method === 'GET' && path === BASE + '/status') {
         const result = runtime.prepare(req);
