@@ -8,4 +8,7 @@
     <relativePath>../../../pom.xml</relativePath>
   </parent>
   <artifactId>collab-api</artifactId>
+  <dependencies>
+    <dependency><groupId>auriga</groupId><artifactId>contracts</artifactId><version>${project.version}</version></dependency>
+  </dependencies>
 </project>

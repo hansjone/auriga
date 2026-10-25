@@ -185,6 +185,18 @@ public final class SessionManager implements Sessions {
         });
   }
 
+  // Called only after a native device refresh lineage and its device are validated.
+  ObjectNode touchNativeSession(String id) {
+    ObjectNode row = activeById(id);
+    if (row == null) return null;
+    Instant absolute = Instant.parse(row.path("expiresAt").asString());
+    Instant idle = clock.instant().plusSeconds(row.path("idleSeconds").asLong());
+    row.put("idleExpiresAt", (idle.isBefore(absolute) ? idle : absolute).toString());
+    store.save("session", row);
+    cache(row);
+    return row;
+  }
+
   public void permissionsChanged(String accountId) {
     store.tx(
         () -> {

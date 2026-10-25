@@ -13,6 +13,7 @@ var version = "0.0.0-dev"
 func run(args []string, out, logs io.Writer) error {
 	flags := flag.NewFlagSet("auriga-ai-gateway", flag.ContinueOnError)
 	flags.SetOutput(logs)
+	teamConfigFile := flags.String("team-config", "", "serve remote Team MCP using a configuration file")
 	showVersion := flags.Bool("version", false, "print version")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -23,6 +24,9 @@ func run(args []string, out, logs io.Writer) error {
 	if *showVersion {
 		_, err := fmt.Fprintln(out, "auriga-ai-gateway", version)
 		return err
+	}
+	if *teamConfigFile != "" {
+		return serveTeam(*teamConfigFile)
 	}
 	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "ai-gateway")
 	logger.Info("skeleton initialized", "version", version)

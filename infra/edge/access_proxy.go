@@ -42,7 +42,7 @@ func protocolOperation(r *http.Request) bool {
 	switch r.URL.Path {
 	case "/.well-known/openid-configuration", "/oauth2/jwks", "/userinfo":
 		return r.Method == "GET"
-	case "/oauth2/token", "/oauth2/device_authorization":
+	case "/oauth2/token", "/oauth2/device_authorization", "/oauth2/revoke":
 		return r.Method == "POST"
 	case "/oauth2/authorize":
 		return r.Method == "GET" || r.Method == "POST"
@@ -71,6 +71,10 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		return
 	}
 	iam := target == g.iamURL
+	if r.URL.Path == "/oauth2/revoke" && (r.Method != http.MethodPost || audience != "portal") {
+		fail(403, "common.forbidden")
+		return
+	}
 	bootstrap := r.Method == "POST" && r.URL.Path == adminCSRFBootstrapPath
 	ipAdmin := g.Cfg.Access.Mode() == "ip" && audience == "admin"
 	if r.URL.Path == adminCSRFBootstrapPath && (!bootstrap || !ipAdmin) {
@@ -226,7 +230,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			pr.Out.Header.Set("X-Auriga-Entry-Origin", origin)
 			pr.Out.Header.Set("X-Auriga-Entry-Role", audience)
 			// OAuth client credentials and userinfo have their own exact protocol authentication.
-			if r.URL.Path == "/oauth2/token" || r.URL.Path == "/oauth2/device_authorization" || r.URL.Path == "/userinfo" {
+			if r.URL.Path == "/oauth2/token" || r.URL.Path == "/oauth2/device_authorization" || r.URL.Path == "/oauth2/revoke" || r.URL.Path == "/userinfo" {
 				if auth != "" {
 					pr.Out.Header.Set("Authorization", auth)
 				}
