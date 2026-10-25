@@ -19,9 +19,10 @@ const (
 )
 
 // Attempt is what the callout learned from the server for one CONNECT. The
-// Redeemer must consume the ticket and record the binding
-// (ServerID, ClientID, UserNkey) -> ingress in one atomic step, so that later
-// kicks can be verified against the authoritative record.
+// Redeemer must durably consume the ticket (including rejected attempts), then
+// commit the live-authority decision and binding (ServerID, ClientID, UserNkey)
+// -> ingress before returning a grant. A crash may burn a ticket, never issue
+// a successful grant without a binding for later ownership-verified kicks.
 type Attempt struct {
 	Ticket     string
 	ServerID   string // nats server public key; changes on every server start

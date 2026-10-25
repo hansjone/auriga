@@ -32,6 +32,7 @@ public final class IamStore {
           "team_ceremony",
           "qr_challenge",
           "network_ticket",
+          "network_ingress",
           "network_policy",
           "network_grant",
           "network_config");

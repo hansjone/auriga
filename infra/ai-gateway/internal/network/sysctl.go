@@ -61,6 +61,31 @@ type ConnInfo struct {
 type connz struct {
 	ID    string      `json:"server_id"`
 	Conns []*ConnInfo `json:"connections"`
+	Total int         `json:"total"`
+}
+
+// LookupConns gets one complete account snapshot. A truncated response is an
+// error, never proof that omitted live connections have disappeared.
+func LookupConns(ctx context.Context, nc *nats.Conn, serverID, account string, limit int) (map[uint64]*ConnInfo, error) {
+	data, err := sysRequest(ctx, nc, connzSubject(serverID), map[string]any{"auth": true, "acc": account, "state": 0, "limit": limit + 1, "offset": 0})
+	if err != nil {
+		return nil, err
+	}
+	var z connz
+	if err = json.Unmarshal(data, &z); err != nil {
+		return nil, err
+	}
+	if z.ID != serverID || z.Total > len(z.Conns) || len(z.Conns) > limit {
+		return nil, ErrSysAPI
+	}
+	result := make(map[uint64]*ConnInfo, len(z.Conns))
+	for _, ci := range z.Conns {
+		if ci.Account != account {
+			return nil, ErrNotOwned
+		}
+		result[ci.CID] = ci
+	}
+	return result, nil
 }
 
 func sysRequest(ctx context.Context, nc *nats.Conn, subj string, body any) (json.RawMessage, error) {
@@ -125,6 +150,14 @@ func LameDuck(ctx context.Context, nc *nats.Conn, serverID string, cid uint64) e
 // bound ingress in the bound account, then kicks it. CIDs are never reused
 // within one server instance, so the check cannot race with reuse there.
 func KickBinding(ctx context.Context, nc *nats.Conn, b Binding) error {
+	if err := CheckBinding(ctx, nc, b); err != nil {
+		return err
+	}
+	return Kick(ctx, nc, b.ServerID, b.ClientID)
+}
+
+// CheckBinding checks the current server/account/ingress without changing it.
+func CheckBinding(ctx context.Context, nc *nats.Conn, b Binding) error {
 	ci, err := LookupConn(ctx, nc, b.ServerID, b.ClientID)
 	if err != nil {
 		return err
@@ -132,5 +165,5 @@ func KickBinding(ctx context.Context, nc *nats.Conn, b Binding) error {
 	if ci.AuthorizedUser != b.Ingress || ci.Account != b.Account {
 		return ErrNotOwned
 	}
-	return Kick(ctx, nc, b.ServerID, b.ClientID)
+	return nil
 }
