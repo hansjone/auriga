@@ -1,5 +1,6 @@
 package auriga.collab.grpc;
 
+import auriga.collab.api.NetworkLocalTargets;
 import auriga.collab.api.NetworkSourceAuthority;
 import auriga.collab.app.NetworkErrors;
 import auriga.common.error.AurigaException;
@@ -20,10 +21,17 @@ public class NetworkSourceGrpcAuthority implements NetworkSourceAuthority {
   private static final ScopedValue<Association> CURRENT = ScopedValue.newInstance();
   private final NetworkAuthorityClient client;
   private final TransactionTemplate outside;
+  private final NetworkLocalTargets locals;
 
   public NetworkSourceGrpcAuthority(
       NetworkAuthorityClient client, TenantTransactionManager manager) {
+    this(client, manager, null);
+  }
+
+  public NetworkSourceGrpcAuthority(
+      NetworkAuthorityClient client, TenantTransactionManager manager, NetworkLocalTargets locals) {
     this.client = client;
+    this.locals = locals;
     var suspension = new TenantTransactionManager(manager.getDataSource());
     suspension.setTransactionSynchronization(
         AbstractPlatformTransactionManager.SYNCHRONIZATION_NEVER);
@@ -71,7 +79,16 @@ public class NetworkSourceGrpcAuthority implements NetworkSourceAuthority {
     var association = current(tenant);
     if (!realm.equals(association.target().realm()) || !node.equals(association.target().node()))
       throw new AurigaException(NetworkErrors.UNAUTHORIZED);
-    return outside.execute(
-        status -> client.resolve(association.connection(), local).getTargetType());
+    if ("0".equals(local)) return "system";
+    if (locals == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    var registration = locals.lookup(tenant, realm, node, local);
+    if (registration == null
+        || !realm.equals(registration.realm())
+        || !node.equals(registration.node())
+        || !local.equals(registration.local())
+        || !java.util.Set.of("session", "subagent").contains(registration.type())
+        || registration.revision() == null
+        || registration.revision().isBlank()) throw new AurigaException(NetworkErrors.UNAUTHORIZED);
+    return registration.type();
   }
 }

@@ -60,6 +60,9 @@ class NetworkAuthorityGrpcTest {
             assertFalse(client.check(check).allowed());
             fake.allowed = true;
             var binding = connection(tenant);
+            int previous = seen.size();
+            denied(() -> client.resolve(binding, "1"), "common.forbidden");
+            assertEquals(previous, seen.size());
             assertEquals(binding, client.resolve(binding, "0").getConnection());
             assertTrue(client.authorize(binding, "{}", "{}").isAfter(Instant.now()));
             fake.mismatch = true;

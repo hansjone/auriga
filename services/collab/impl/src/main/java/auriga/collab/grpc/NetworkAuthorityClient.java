@@ -100,6 +100,7 @@ public class NetworkAuthorityClient implements NetworkAuthority {
 
   public ResolveNetworkTargetResponse resolve(NetworkAuthorityConnection connection, String local) {
     binding(connection);
+    if (!"0".equals(local)) throw new AurigaException(CommonErrors.FORBIDDEN);
     var result =
         call(
             () ->
@@ -112,8 +113,7 @@ public class NetworkAuthorityClient implements NetworkAuthority {
     if (!result.getAllowed()) throw new AurigaException(NetworkErrors.UNAUTHORIZED);
     if (!connection.equals(result.getConnection())
         || !local.equals(result.getLocal())
-        || !Set.of("system", "session", "subagent").contains(result.getTargetType())
-        || ("0".equals(local) != "system".equals(result.getTargetType())))
+        || !"system".equals(result.getTargetType()))
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     deadline(result.getValidUntil());
     return result;

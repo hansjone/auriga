@@ -28,6 +28,7 @@ public class NetworkMailboxWireService {
   private final NetworkSourceGrpcAuthority source;
   private final NetworkEnvelopeSigner signer;
   private final Clock clock;
+  private final boolean broadcast;
 
   public NetworkMailboxWireService(
       NetworkMailboxService mailbox,
@@ -36,16 +37,29 @@ public class NetworkMailboxWireService {
       NetworkSourceGrpcAuthority source,
       NetworkSigningKeys keys,
       Clock clock) {
+    this(mailbox, jdbc, manager, source, keys, clock, false);
+  }
+
+  public NetworkMailboxWireService(
+      NetworkMailboxService mailbox,
+      JdbcTemplate jdbc,
+      TenantTransactionManager manager,
+      NetworkSourceGrpcAuthority source,
+      NetworkSigningKeys keys,
+      Clock clock,
+      boolean broadcast) {
     this.mailbox = mailbox;
     this.jdbc = jdbc;
     tx = new TransactionTemplate(manager);
     this.source = source;
     signer = new NetworkEnvelopeSigner(keys, clock);
     this.clock = clock;
+    this.broadcast = broadcast;
   }
 
   public String ready(NetworkAuthorityConnection c, byte[] frame) {
     JsonNode request = frame(frame, "Ready");
+    var requiredFeatures = NetworkWireCapabilities.verify(request, broadcast);
     NetworkAuthorityClient.binding(c);
     Instant deadline = source.verify(c);
     UUID tenant = TenantContext.require();
@@ -149,7 +163,8 @@ public class NetworkMailboxWireService {
                     .put("node", c.getNode())
                     .put("incarnation", target.incarnation());
                 result.putNull("seen_checkpoint");
-                result.putArray("required_features");
+                var features = result.putArray("required_features");
+                requiredFeatures.forEach(features::add);
                 return signed(result, "ReadyResult", target);
               });
         });
@@ -216,6 +231,8 @@ public class NetworkMailboxWireService {
           }
           UUID delivery = uuid(request.path("delivery_id").asString());
           var items = new ArrayList<NetworkMailboxService.ReceiptItem>();
+          var newProofs = new LinkedHashMap<UUID, String>();
+          var replays = new LinkedHashMap<UUID, NetworkMailboxService.ReceiptResultView>();
           var unique = new HashSet<UUID>();
           for (var entry : request.path("results")) {
             UUID recipient = uuid(entry.path("recipient_id").asString());
@@ -223,7 +240,7 @@ public class NetworkMailboxWireService {
             var records =
                 jdbc.queryForList(
                     """
-            SELECT r.target_local,r.state_version,m.message_json FROM collab.network_recipient r
+            SELECT r.target_local,r.state_version,r.transport_status,m.id AS message_id,m.message_json,m.dispatch_context_json FROM collab.network_recipient r
             JOIN collab.network_mail_item i ON i.tenant_id=r.tenant_id AND i.id=r.delivery_id
             JOIN collab.network_message m ON m.tenant_id=i.tenant_id AND m.id=i.message_id
             WHERE r.tenant_id=? AND r.id=? AND i.id=? AND i.target_realm=? AND i.target_node=? AND i.mail_seq=? FOR UPDATE OF r
@@ -242,17 +259,6 @@ public class NetworkMailboxWireService {
                     && c.getNode().equals(address.path("node").asString())
                     && record.get("target_local").equals(address.path("local").asString()),
                 NetworkErrors.UNAUTHORIZED);
-            require(
-                address
-                    .path("type")
-                    .asString()
-                    .equals(
-                        source.resolveTargetType(
-                            tenant, c.getRealm(), c.getNode(), address.path("local").asString())),
-                NetworkErrors.UNAUTHORIZED);
-            require(
-                decimal(entry, "expected_state_version") == number(record, "state_version"),
-                NetworkErrors.CONFLICT);
             require(record.get("message_json") != null, NetworkErrors.PROTOCOL_ERROR);
             var message = NetworkJson.parse(record.get("message_json").toString());
             require(
@@ -262,26 +268,89 @@ public class NetworkMailboxWireService {
             require(
                 Set.of("host_accepted", "quarantined", "rejected").contains(outcome),
                 NetworkErrors.PROTOCOL_ERROR);
-            if ("host_accepted".equals(outcome)
-                && !"unicast".equals(message.path("message_class").asString("unicast")))
+            var dispatch =
+                record.get("dispatch_context_json") == null
+                    ? null
+                    : NetworkJson.parse(record.get("dispatch_context_json").toString());
+            var expected =
+                NetworkReceiptProofs.target(
+                    message,
+                    dispatch,
+                    c.getRealm(),
+                    c.getNode(),
+                    record.get("target_local").toString(),
+                    source.resolveTargetType(
+                        tenant, c.getRealm(), c.getNode(), record.get("target_local").toString()));
+            var contacts =
+                jdbc.queryForList(
+                    "SELECT status,scope FROM collab.network_contact WHERE tenant_id=? AND message_id=?",
+                    tenant,
+                    record.get("message_id"));
+            var contact =
+                contacts.isEmpty() ? null : NetworkJson.JSON.valueToTree(contacts.getFirst());
+            NetworkReceiptProofs.stage(entry, message, expected, contact);
+            if ("host_accepted".equals(outcome)) {
+              String proof = NetworkReceiptProofs.stable(entry);
+              var old =
+                  jdbc.queryForList(
+                      "SELECT proof_json FROM collab.network_acceptance_proof WHERE tenant_id=? AND recipient_id=? AND accepted_by=?",
+                      tenant,
+                      recipient,
+                      entry.path("accepted_by").asString());
+              if (!old.isEmpty()) {
+                require(proof.equals(old.getFirst().get("proof_json")), NetworkErrors.CONFLICT);
+                require(
+                    "host_accepted".equals(record.get("transport_status")), NetworkErrors.CONFLICT);
+                replays.put(
+                    recipient,
+                    new NetworkMailboxService.ReceiptResultView(
+                        recipient, "host_accepted", number(record, "state_version")));
+                continue;
+              }
               require(
-                  "inbox_only".equals(entry.path("acceptance_mode").asString())
-                      && "not_applicable".equals(entry.path("execution_status").asString()),
-                  NetworkErrors.PROTOCOL_ERROR);
+                  !"host_accepted".equals(record.get("transport_status")), NetworkErrors.CONFLICT);
+              newProofs.put(recipient, proof);
+            }
+            require(
+                decimal(entry, "expected_state_version") == number(record, "state_version"),
+                NetworkErrors.CONFLICT);
             items.add(
                 new NetworkMailboxService.ReceiptItem(
                     recipient, "rejected".equals(outcome) ? "revoked" : outcome));
           }
           var commit =
-              mailbox.receipt(
-                  new NetworkMailboxService.ReceiptRequest(
-                      tenant,
-                      c.getRealm(),
-                      c.getNode(),
-                      target.epoch(),
+              items.isEmpty()
+                  ? new NetworkMailboxService.ReceiptCommitResult(
                       delivery,
                       decimal(request, "mail_seq"),
-                      items));
+                      List.of(),
+                      jdbc.queryForObject(
+                              "SELECT count(*) FROM collab.network_recipient WHERE tenant_id=? AND delivery_id=? AND transport_status NOT IN ('host_accepted','expired','canceled','revoked','skipped','unresolved')",
+                              Integer.class,
+                              tenant,
+                              delivery)
+                          == 0,
+                      route.committedCursor())
+                  : mailbox.receipt(
+                      new NetworkMailboxService.ReceiptRequest(
+                          tenant,
+                          c.getRealm(),
+                          c.getNode(),
+                          target.epoch(),
+                          delivery,
+                          decimal(request, "mail_seq"),
+                          items));
+          for (var entry : request.path("results")) {
+            UUID id = uuid(entry.path("recipient_id").asString());
+            if (newProofs.containsKey(id))
+              jdbc.update(
+                  "INSERT INTO collab.network_acceptance_proof(tenant_id,recipient_id,delivery_id,accepted_by,proof_json) VALUES (?,?,?,?,?)",
+                  tenant,
+                  id,
+                  delivery,
+                  entry.path("accepted_by").asString(),
+                  newProofs.get(id));
+          }
           var result =
               base("receipt_committed")
                   .put("request_id", target.requestId())
@@ -291,12 +360,16 @@ public class NetworkMailboxWireService {
                   .put("mail_item_closed", commit.mailItemClosed())
                   .put("committed_cursor", Long.toString(commit.committedCursor()));
           var results = result.putArray("results");
-          for (var entry : commit.results())
+          var combined = new LinkedHashMap<UUID, NetworkMailboxService.ReceiptResultView>(replays);
+          commit.results().forEach(value -> combined.put(value.recipientId(), value));
+          for (var original : request.path("results")) {
+            var entry = combined.get(uuid(original.path("recipient_id").asString()));
             results
                 .addObject()
                 .put("recipient_id", entry.recipientId().toString())
                 .put("transport_status", entry.transportStatus())
                 .put("state_version", Long.toString(entry.stateVersion()));
+          }
           String signed = signed(result, "ReceiptCommitted", target);
           jdbc.update(
               "INSERT INTO collab.network_wire_receipt(tenant_id,realm,node_id,operation_id,request_json,result_json) VALUES (?,?,?,?,?,?)",

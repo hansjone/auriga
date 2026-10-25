@@ -10,7 +10,7 @@ public final class NetworkMailboxWireFrames {
 
   public static String receipt(String node, UUID delivery, UUID recipient, JsonNode message) {
     return """
-        {"app_version":"1.0","type":"receipt","request_id":"receipt-r","operation_id":"op-r","epoch":"1","delivery_id":"%s","mail_seq":"1","results":[{"recipient_id":"%s","target":{"version":1,"realm":"2","node":"%s","local":"0","type":"system"},"message_digest":"%s","host_request_id":"host-r","status":"host_accepted","expected_state_version":"1","accepted_by":"system","acceptance_mode":"normal","evidence_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+        {"app_version":"1.0","type":"receipt","request_id":"receipt-r","operation_id":"op-r","epoch":"1","delivery_id":"%s","mail_seq":"1","results":[{"recipient_id":"%s","target":{"version":1,"realm":"2","node":"%s","local":"0","type":"system"},"message_digest":"%s","host_request_id":"host-r","status":"host_accepted","expected_state_version":"1","accepted_by":"system","acceptance_mode":"inbox_only","execution_status":"not_applicable","evidence_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
         """
         .formatted(delivery, recipient, node, NetworkJson.digest(message));
   }

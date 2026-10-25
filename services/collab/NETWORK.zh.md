@@ -62,9 +62,12 @@ auriga:
 - `NetworkLimits`：返回当前租户所有 `NetworkAuthority.Limit` 的有效组织上限，
   key 是 Java 枚举名，值是非负 int64；缺项、未知项、溢出一律视为协议失败。
   collab 会再按平台最大值取较小者，事务预留仍归 collab。
-- `ResolveNetworkTarget`：核整个 `connection` 对应同一份成功兑换记录，且当前仍活跃；
+- `ResolveNetworkTarget`：仅核 live connection 和 local=0/sys。非零 local 必须拒绝；
+  collab 通过自身 NetworkLocalTargets 端口查询 opaque 登记的精确 realm/node/local/type/revision。
+  未装配登记查询时非零 local 显式失败关闭，不合未审 #155、不跨库读 IAM、不推断 session。
+  核整个 `connection` 对应同一份成功兑换记录，且当前仍活跃；
   realm/node/tenant 不可跨记录拼接，ingress 不可只核“存在”。local=0 类型为 system，
-  其他 local 从权威目录解析 session/subagent。允许时必须完整回显绑定和 local，
+  允许时必须完整回显绑定和 local，target_type 恒为 system；
   `valid_until` 不超过当前原凭据和连接授权期限。
 - `AuthorizeNetworkDelivery`：从已存信封与 source_context 验证来源绑定、版本、策略、
   广播授予与目标读取权；JSON 只作为待核证据，不能据其自报字段直接返回允许。
@@ -76,9 +79,15 @@ IAM 服务端没有在本变更实现；未实现 RPC 返回 UNIMPLEMENTED 时 c
 ## 当前 wire 边界
 
 READY 以 PG node 行锁原子绑定 ingress/nonce/incarnation/epoch；同 ingress 同请求重试不加 epoch，
+接管前要求 features 与 adapter_capabilities 均支持协议三项必需能力，返回相同 required_features。
+显式配置 auriga.collab.network.broadcast-enabled=true 时还要求双侧 broadcast_grants_v1。
 新 ingress 接管后旧 ingress 不能再次接管。HEAD 和 FETCH 使用当前绑定签名，FETCH 完整转交核心
 `fetchPage` 返回的签名页及 item。RECEIPT 逐项核目标、正文摘要、版本和状态，保留整份证明，
 与核心游标提交同事务保存 operation_id 结果，内容变化的重试拒绝。
+V7_1 对 (tenant,recipient,accepted_by) 保存不可变稳定接受证明：跨 operation 同证明重试不推进状态，异体冲突。
+transport request_id/epoch/operation 与 expected_state_version 不属于稳定证明，原 operation 整帧异体仍拒绝。
+按已存完整目标与类别核接受阶段；sys/广播仅 system，非零 local 仅 session；不允许任意 assigned_address。
+CONTACT_ASSIGN/首联 session 阶段尚未接入，显式拒绝；首联 system 还必须有已允许的 contact 记录。
 
 当前核心尚无 local 登记/高水位恢复和 checkpoint 证据对账能力。非零登记/证据恢复 READY
 返回签名 `recovery_conflict` 并封锁业务，不把客户端数值冒充平台见证。

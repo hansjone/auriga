@@ -74,7 +74,10 @@ public class CollabNetworkConfiguration {
 
   @Bean
   NetworkSourceGrpcAuthority networkSourceGrpcAuthority(
-      NetworkAuthorityClient client, TenantTransactionManager manager) {
-    return new NetworkSourceGrpcAuthority(client, manager);
+      NetworkAuthorityClient client,
+      TenantTransactionManager manager,
+      org.springframework.beans.factory.ObjectProvider<auriga.collab.api.NetworkLocalTargets>
+          locals) {
+    return new NetworkSourceGrpcAuthority(client, manager, locals.getIfAvailable());
   }
 }

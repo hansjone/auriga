@@ -85,7 +85,8 @@ message NetworkAuthorityConnection {
 
 message ResolveNetworkTargetRequest {
   NetworkAuthorityConnection connection = 1;
-  // Canonical unsigned decimal local; 0 means the node system mailbox.
+  // Only local=0 (the node system mailbox). Nonzero locals MUST be rejected:
+  // their opaque registration/type authority belongs to collab, never IAM.
   string local = 2;
 }
 
@@ -93,7 +94,7 @@ message ResolveNetworkTargetResponse {
   bool allowed = 1;
   // Exact verified binding echo. Missing/mismatched fields fail closed.
   NetworkAuthorityConnection connection = 2;
-  // system / session / subagent, from authoritative directory.
+  // Always system. Session/subagent types belong to collab opaque registration.
   string target_type = 3;
   // RFC3339 UTC, bounded by current backing session/device/connection expiry.
   string valid_until = 4;

@@ -107,9 +107,16 @@ public class CollabRuntimeConfiguration {
       DataSource source,
       TenantTransactionManager manager,
       NetworkSourceGrpcAuthority authority,
-      NetworkSigningKeys keys) {
+      NetworkSigningKeys keys,
+      Environment env) {
     return new NetworkMailboxWireService(
-        service, new JdbcTemplate(source), manager, authority, keys, Clock.systemUTC());
+        service,
+        new JdbcTemplate(source),
+        manager,
+        authority,
+        keys,
+        Clock.systemUTC(),
+        env.getProperty("auriga.collab.network.broadcast-enabled", Boolean.class, false));
   }
 
   @Bean
