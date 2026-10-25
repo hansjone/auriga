@@ -2,7 +2,9 @@ package auriga.collab;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import auriga.collab.api.NetworkSourceAuthority;
 import auriga.collab.app.NetworkErrors;
+import auriga.collab.app.NetworkJson;
 import auriga.collab.app.NetworkMailboxService;
 import auriga.collab.app.NetworkMailboxService.AttemptBeginRequest;
 import auriga.collab.app.NetworkMailboxService.ContactDecideRequest;
@@ -13,6 +15,7 @@ import auriga.collab.app.NetworkMailboxService.ReceiptItem;
 import auriga.collab.app.NetworkMailboxService.ReceiptRequest;
 import auriga.collab.app.NetworkMailboxService.StoreRequest;
 import auriga.collab.app.NetworkMailboxService.StoreResult;
+import auriga.collab.app.NetworkSigningKeys;
 import auriga.common.context.RequestContext;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
@@ -20,8 +23,11 @@ import auriga.common.persistence.CommonMigrations;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.security.*;
 import auriga.testsupport.PostgresExtension;
+import java.security.KeyPairGenerator;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -37,6 +43,7 @@ class NetworkMailboxPostgresTest {
   static JdbcTemplate jdbc;
   static TenantTransactionManager manager;
   static NetworkMailboxService mailbox;
+  static NetworkSigningKeys keys;
   static PostgresExtension.ServiceRoles roles;
   static final AurigaPrincipal GATEWAY =
       new AurigaPrincipal(
@@ -54,7 +61,7 @@ class NetworkMailboxPostgresTest {
           "test");
 
   @BeforeAll
-  static void migrate() {
+  static void migrate() throws Exception {
     roles =
         PostgresExtension.serviceRoles(
             NetworkMailboxPostgresTest.class, "collab_owner", "collab_app", "collab");
@@ -69,7 +76,65 @@ class NetworkMailboxPostgresTest {
         .migrate();
     jdbc = new JdbcTemplate(roles.runtime().dataSource());
     manager = new TenantTransactionManager(roles.runtime().dataSource());
-    mailbox = new NetworkMailboxService(jdbc, manager);
+    keys = new NetworkSigningKeys(Clock.systemUTC(), 1);
+    for (String purpose : List.of("business_delivery", "protocol_response", "management_state")) {
+      var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+      keys.add(
+          "2",
+          purpose,
+          purpose,
+          pair.getPublic(),
+          pair.getPrivate(),
+          Instant.now().minusSeconds(3600),
+          Instant.now().plusSeconds(86400),
+          NetworkSigningKeys.State.ACTIVE);
+    }
+    mailbox = new NetworkMailboxService(jdbc, manager, authority(null), keys, Clock.systemUTC());
+  }
+
+  static NetworkSourceAuthority authority(NetworkSourceAuthority.Dispatch dispatch) {
+    return new NetworkSourceAuthority() {
+      public Source currentSource(UUID tenant) {
+        return new Source(
+            "2",
+            "10",
+            "1",
+            "session",
+            "agent",
+            "user-alice",
+            "协作会话",
+            "1",
+            Instant.now(),
+            "binding-test",
+            "1",
+            "1",
+            Instant.now().plusSeconds(600));
+      }
+
+      public Instant authorizeDelivery(UUID tenant, String message, String source, String node) {
+        return Instant.now().plusSeconds(600);
+      }
+
+      public Target currentTarget(UUID tenant) {
+        long epoch =
+            jdbc.queryForObject(
+                "SELECT connection_epoch FROM collab.network_node WHERE tenant_id=? AND realm='2' AND node_id='20'",
+                Long.class,
+                tenant);
+        return new Target(
+            "2",
+            "20",
+            "inc-20",
+            epoch,
+            "nonce-test",
+            "request-test",
+            Instant.now().plusSeconds(600));
+      }
+
+      public Dispatch currentDispatch(UUID tenant) {
+        return dispatch;
+      }
+    };
   }
 
   static <T> T call(UUID tenant, Supplier<T> action) {
@@ -84,6 +149,27 @@ class NetworkMailboxPostgresTest {
 
   static <T> T sql(UUID tenant, Supplier<T> work) {
     return call(tenant, () -> new TransactionTemplate(manager).execute(s -> work.get()));
+  }
+
+  @Test
+  void forgedSourceNodeAndBroadcastSourceAreRejectedBeforeWriting() {
+    UUID tenant = UUID.randomUUID();
+    for (String node : List.of("0", "999")) {
+      error(
+          "network.sender_mismatch",
+          () ->
+              call(
+                  tenant,
+                  () ->
+                      mailbox.store(
+                          StoreRequest.unicast(tenant, "2", node, "1", "forged", "20", "3"))));
+    }
+    assertEquals(
+        0,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
   }
 
   @Test
@@ -434,11 +520,22 @@ class NetworkMailboxPostgresTest {
   @Test
   void fetchDoesNotChangeRecipientStatus() {
     UUID tenant = UUID.randomUUID();
+    var dispatch =
+        new NetworkSourceAuthority.Dispatch(
+            "{\"version\":1,\"realm\":\"2\",\"node\":\"0\",\"local\":\"2\",\"type\":\"group\"}",
+            "snapshot-test",
+            Map.of("20.1", "member-1", "20.2", "member-2"),
+            Map.of("20.1", "session", "20.2", "session"),
+            null,
+            null,
+            null);
+    var grouped =
+        new NetworkMailboxService(jdbc, manager, authority(dispatch), keys, Clock.systemUTC());
     StoreResult stored =
         call(
             tenant,
             () ->
-                mailbox.store(
+                grouped.store(
                     new StoreRequest(
                         tenant,
                         "2",
@@ -470,6 +567,75 @@ class NetworkMailboxPostgresTest {
                     Integer.class,
                     tenant)));
     assertEquals(stored.messageId(), page.items().getFirst().messageId());
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var signed =
+        NetworkJson.parse(
+            call(tenant, () -> mailbox.fetchSigned(tenant, "2", "20", 0, 10)).getFirst());
+    assertEquals("multicast", signed.path("message").path("message_class").asString());
+    assertEquals(2, signed.path("recipients").size());
+  }
+
+  @Test
+  void signedFetchUsesPersistedStampAndBindsCurrentConnection() {
+    UUID tenant = UUID.randomUUID();
+    var stored =
+        call(
+            tenant,
+            () ->
+                mailbox.store(
+                    StoreRequest.unicast(tenant, "2", "10", "1", "hello", "20", "3"),
+                    "{\"ext\":{\"e2e_signature\":null,\"com.example.trace\":{\"preserved\":true}}}"));
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var first =
+        NetworkJson.parse(
+            call(tenant, () -> mailbox.fetchSigned(tenant, "2", "20", 0, 10)).getFirst());
+    assertEquals("10", first.path("source_context").path("node").asString());
+    assertEquals("user-alice", first.path("source_context").path("user").asString());
+    assertEquals("agent", first.path("message").path("sender_kind").asString());
+    assertEquals(
+        NetworkJson.digest(first.path("message")),
+        first.path("source_context").path("message_digest").asString());
+    assertTrue(
+        first.path("message").path("ext").path("com.example.trace").path("preserved").asBoolean());
+    call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var second =
+        NetworkJson.parse(
+            call(tenant, () -> mailbox.fetchSigned(tenant, "2", "20", 0, 10)).getFirst());
+    assertEquals(first.path("message"), second.path("message"));
+    assertEquals(first.path("delivery_id"), second.path("delivery_id"));
+    assertNotEquals(
+        first.path("server_auth").path("audience").path("epoch"),
+        second.path("server_auth").path("audience").path("epoch"));
+    assertEquals(
+        stored.messageId().toString(), second.path("message").path("message_id").asString());
+  }
+
+  @Test
+  void clientCannotSupplyStampedFieldsAndUnwiredAuthorityFailsClosed() {
+    UUID tenant = UUID.randomUUID();
+    var request = StoreRequest.unicast(tenant, "2", "10", "1", "hello", "20", "3");
+    for (String field :
+        List.of(
+            "from",
+            "realm",
+            "node",
+            "sender_kind",
+            "source_context",
+            "server_auth",
+            "reply_to",
+            "authorization_ref")) {
+      error(
+          "network.sender_mismatch",
+          () -> call(tenant, () -> mailbox.store(request, "{\"" + field + "\":\"forged\"}")));
+    }
+    var unwired = new NetworkMailboxService(jdbc, manager);
+    error("common.unavailable", () -> call(tenant, () -> unwired.store(request)));
+    assertEquals(
+        0,
+        sql(
+            tenant,
+            () ->
+                jdbc.queryForObject("SELECT count(*) FROM collab.network_message", Integer.class)));
   }
 
   @Test

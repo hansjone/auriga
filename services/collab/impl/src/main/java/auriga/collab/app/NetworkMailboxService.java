@@ -1,5 +1,6 @@
 package auriga.collab.app;
 
+import auriga.collab.api.NetworkSourceAuthority;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
@@ -8,6 +9,7 @@ import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.persistence.UuidV7;
 import auriga.common.security.AuthorizationRules;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -19,10 +21,12 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Internal (non-proto) network mailbox API for ai-gateway HEAD/FETCH/RECEIPT wiring. Durable truth
- * lives in PostgreSQL with tenant RLS; transport and signing stay elsewhere.
+ * lives in PostgreSQL with tenant RLS. Only fetchSigned produces network envelopes; raw fetch is an
+ * internal persistence projection and must never be serialized to a plugin.
  */
 public class NetworkMailboxService {
   /** contracts/network/limits.json dispatch.atomicMaxNodes */
@@ -61,10 +65,25 @@ public class NetworkMailboxService {
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tx;
+  private final NetworkSourceAuthority authority;
+  private final NetworkEnvelopeSigner signer;
+  private final Clock clock;
 
   public NetworkMailboxService(JdbcTemplate jdbc, TenantTransactionManager manager) {
+    this(jdbc, manager, null, new NetworkSigningKeys(Clock.systemUTC(), 1), Clock.systemUTC());
+  }
+
+  public NetworkMailboxService(
+      JdbcTemplate jdbc,
+      TenantTransactionManager manager,
+      NetworkSourceAuthority authority,
+      NetworkSigningKeys keys,
+      Clock clock) {
     this.jdbc = Objects.requireNonNull(jdbc);
     this.tx = new TransactionTemplate(manager);
+    this.authority = authority;
+    this.signer = new NetworkEnvelopeSigner(Objects.requireNonNull(keys), clock);
+    this.clock = Objects.requireNonNull(clock);
   }
 
   /** READY-shaped takeover: bumps connection_epoch and returns current mailbox cursors. */
@@ -95,16 +114,59 @@ public class NetworkMailboxService {
    * the same transaction. Returns platform_stored-shaped durability.
    */
   public StoreResult store(StoreRequest request) {
+    return store(request, null);
+  }
+
+  /** Optional structured message fields retain ext values; server-owned identity is rejected. */
+  public StoreResult store(StoreRequest request, String messageFieldsJson) {
     return run(
         request.tenantId(),
         () -> {
           validateStore(request);
+          require(authority != null, CommonErrors.UNAVAILABLE);
+          var source = authority.currentSource(request.tenantId());
+          var dispatch = authority.currentDispatch(request.tenantId());
           UUID messageId = UuidV7.next();
+          ObjectNode message =
+              NetworkSourceStamp.message(
+                  request, source, messageId, clock.instant(), messageFieldsJson, dispatch);
+          UUID threadId = UUID.fromString(message.path("thread_id").asString());
+          jdbc.queryForList(
+              "SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
+              request.tenantId() + "/" + threadId);
+          String sequence =
+              jdbc.queryForObject(
+                  """
+              SELECT coalesce(max((message_json::jsonb->>'thread_sequence')::numeric),0)+1
+                FROM collab.network_message WHERE tenant_id=? AND thread_id=?
+              """,
+                  String.class,
+                  request.tenantId(),
+                  threadId);
+          message.put("thread_sequence", sequence);
+          NetworkSchemas.validate("Message", message);
+          ObjectNode sourceContext = NetworkSourceStamp.context(source, message);
+          String messageJson = NetworkJson.canonical(message);
+          String contextJson = NetworkJson.canonical(sourceContext);
+          String dispatchJson = null;
+          if (dispatch != null) {
+            dispatchJson =
+                NetworkJson.canonical(
+                    NetworkSourceStamp.dispatchContext(dispatch, request.targets()));
+          }
+          for (var target : request.targets()) {
+            Instant deadline =
+                authority.authorizeDelivery(
+                    request.tenantId(), messageJson, contextJson, target.nodeId());
+            require(
+                deadline != null && deadline.isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+          }
           jdbc.update(
               """
               INSERT INTO collab.network_message(
-                id, tenant_id, realm, kind, body, source_node, source_local, thread_id)
-              VALUES (?,?,?,?,?,?,?,?)
+                id, tenant_id, realm, kind, body, source_node, source_local, thread_id,
+                message_json, source_context_json, dispatch_context_json)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?)
               """,
               messageId,
               request.tenantId(),
@@ -113,7 +175,10 @@ public class NetworkMailboxService {
               request.body(),
               request.sourceNode(),
               request.sourceLocal(),
-              request.threadId());
+              threadId,
+              messageJson,
+              contextJson,
+              dispatchJson);
 
           List<DeliveryStored> deliveries = new ArrayList<>();
           for (NodeTarget target : request.targets()) {
@@ -212,7 +277,7 @@ public class NetworkMailboxService {
         });
   }
 
-  /** Cursor-paged fetch; does not mutate transport status. */
+  /** Internal database projection; not a network payload. Does not mutate transport status. */
   public FetchResult fetch(
       UUID tenantId, String realm, String nodeId, long afterCursor, int limit) {
     return run(
@@ -276,6 +341,150 @@ public class NetworkMailboxService {
                     List.copyOf(views)));
           }
           return new FetchResult(route, List.copyOf(items));
+        });
+  }
+
+  /**
+   * Builds signed node envelopes exclusively from committed rows. The caller must wrap the item
+   * list and cursors in the separately signed FETCH_RESULT transport envelope. No unsigned
+   * fallback.
+   */
+  public List<String> fetchSigned(
+      UUID tenantId, String realm, String nodeId, long afterCursor, int limit) {
+    return run(
+        tenantId,
+        () -> {
+          require(authority != null, CommonErrors.UNAVAILABLE);
+          var target = authority.currentTarget(tenantId);
+          require(
+              target != null && realm.equals(target.realm()) && nodeId.equals(target.node()),
+              NetworkErrors.UNAUTHORIZED);
+          require(
+              target.validUntil() != null && target.validUntil().isAfter(clock.instant()),
+              NetworkErrors.UNAUTHORIZED);
+          var raw = fetch(tenantId, realm, nodeId, afterCursor, limit);
+          require(target.epoch() > 0, NetworkErrors.STALE_EPOCH);
+          requireEpoch(raw.route().connectionEpoch(), target.epoch());
+          var context =
+              new NetworkEnvelopeSigner.Context(
+                  realm,
+                  nodeId,
+                  target.incarnation(),
+                  target.epoch(),
+                  target.channelNonce(),
+                  target.requestId());
+          List<String> signed = new ArrayList<>();
+          for (var item : raw.items()) {
+            var stored =
+                one(
+                    "SELECT message_json, source_context_json, dispatch_context_json FROM collab.network_message WHERE tenant_id=? AND id=?",
+                    tenantId,
+                    item.messageId());
+            require(
+                stored.get("message_json") != null && stored.get("source_context_json") != null,
+                NetworkErrors.UNAUTHORIZED);
+            ObjectNode message =
+                (ObjectNode) NetworkJson.parse(stored.get("message_json").toString());
+            ObjectNode source =
+                (ObjectNode) NetworkJson.parse(stored.get("source_context_json").toString());
+            require(
+                NetworkJson.digest(message).equals(source.path("message_digest").asString()),
+                NetworkErrors.PROTOCOL_ERROR);
+            var envelope = NetworkJson.object();
+            envelope
+                .put("app_version", "1.0")
+                .put("epoch", Long.toString(target.epoch()))
+                .put("delivery_id", item.deliveryId().toString())
+                .put("mail_seq", Long.toString(item.mailSeq()));
+            envelope.putObject("target_node").put("realm", realm).put("node", nodeId);
+            var recipients = envelope.putArray("recipients");
+            boolean closed =
+                item.recipients().stream().allMatch(r -> TERMINAL.contains(r.transportStatus()));
+            Instant deadline = target.validUntil();
+            String purpose;
+            String definition;
+            if (closed) {
+              envelope.put("type", "terminal");
+              purpose = "protocol_response";
+              definition = "TerminalItem";
+              for (var r : item.recipients())
+                recipients
+                    .addObject()
+                    .put("recipient_id", r.recipientId().toString())
+                    .put("transport_status", r.transportStatus())
+                    .put("state_version", Long.toString(r.stateVersion()));
+            } else {
+              Instant permission =
+                  authority.authorizeDelivery(
+                      tenantId,
+                      NetworkJson.canonical(message),
+                      NetworkJson.canonical(source),
+                      nodeId);
+              require(
+                  permission != null && permission.isAfter(clock.instant()),
+                  NetworkErrors.UNAUTHORIZED);
+              if (permission.isBefore(deadline)) deadline = permission;
+              require(
+                  message.path("to").path("realm").asString().equals(realm),
+                  NetworkErrors.PROTOCOL_ERROR);
+              var dispatchMetadata =
+                  stored.get("dispatch_context_json") == null
+                      ? null
+                      : NetworkJson.parse(stored.get("dispatch_context_json").toString());
+              if (dispatchMetadata == null) {
+                require(
+                    message.path("to").path("node").asString().equals(nodeId)
+                        && item.recipients().size() == 1,
+                    NetworkErrors.PROTOCOL_ERROR);
+              } else envelope.put("snapshot_id", dispatchMetadata.path("snapshot_id").asString());
+              for (var recipient : item.recipients()) {
+                var entry =
+                    recipients
+                        .addObject()
+                        .put("recipient_id", recipient.recipientId().toString())
+                        .put("local", recipient.targetLocal());
+                if (dispatchMetadata == null) {
+                  require(
+                      recipient.targetLocal().equals(message.path("to").path("local").asString()),
+                      NetworkErrors.PROTOCOL_ERROR);
+                  entry.put("type", message.path("to").path("type").asString());
+                } else {
+                  var member =
+                      NetworkSourceStamp.memberContext(
+                          dispatchMetadata, nodeId, recipient.targetLocal());
+                  require(member.isObject(), NetworkErrors.PROTOCOL_ERROR);
+                  entry
+                      .put("type", member.path("type").asString())
+                      .put("membership_id", member.path("membership_id").asString());
+                }
+              }
+              envelope.put("type", "delivery").put("message_state_version", "1");
+              envelope.set("message", message);
+              envelope.set("source_context", source);
+              purpose = "business_delivery";
+              definition = "Delivery";
+              if ("first_contact".equals(item.kind())) {
+                var contact =
+                    one(
+                        "SELECT status, decision_version, expires_at FROM collab.network_contact WHERE tenant_id=? AND message_id=?",
+                        tenantId,
+                        item.messageId());
+                require("allowed".equals(contact.get("status")), NetworkErrors.UNAUTHORIZED);
+                Instant expires = ((java.sql.Timestamp) contact.get("expires_at")).toInstant();
+                if (expires.isBefore(deadline)) deadline = expires;
+                envelope
+                    .putObject("contact")
+                    .put("contact_id", item.messageId().toString())
+                    .put("state", "contact_allowed")
+                    .put("request_version", contact.get("decision_version").toString())
+                    .putNull("assigned_address");
+              }
+            }
+            var result = signer.sign(envelope, purpose, context, deadline);
+            NetworkSchemas.validate(definition, result);
+            signed.add(NetworkJson.canonical(result));
+          }
+          return List.copyOf(signed);
         });
   }
 
