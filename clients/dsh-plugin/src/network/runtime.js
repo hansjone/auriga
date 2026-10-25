@@ -952,6 +952,7 @@ export async function openNetworkRuntime(options) {
       get status() {
         return {
           available: !closed,
+          isolation: adapter.isolation,
           connected: !closed && connected,
           state: closed
             ? closeReason === 'stopped'
@@ -963,6 +964,7 @@ export async function openNetworkRuntime(options) {
       get diagnostics() {
         return {
           trust: trust.diagnostics,
+          isolation: adapter.isolation,
           session: session.diagnostics,
           runtime: { ...counters },
           events: structuredClone(recent),
@@ -973,6 +975,10 @@ export async function openNetworkRuntime(options) {
         active();
         if (started) throw new Error('network runtime already started');
         started = true;
+        if (!adapter.isolation.isolated)
+          ctx.logger?.warn?.(
+            '[auriga-dsh] 未隔离（开发阶段） / Unisolated (development): local and managed network isolation is deferred',
+          );
         await transport.start();
         await handshake;
       },

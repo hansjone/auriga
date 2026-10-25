@@ -102,7 +102,7 @@ export async function apply(ctx, config) {
           const profile = connectCtx.profileContext;
           if (!profile?.dir)
             throw new Error(
-              'auriga-dsh: isolated host profile directory required',
+              'auriga-dsh: host profile directory required for persistent state',
             );
           const runtime = await createConnectRuntime({
             config: config.connect,

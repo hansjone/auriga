@@ -104,6 +104,7 @@ async function fixture(t, overrides = {}, runtimeOptions = {}) {
     getAccess: async () => 'native-access',
     authorizeLocal: async (context) => context === 'authenticated',
     ctx: {
+      logger: runtimeOptions.logger,
       tools: {
         register(tool) {
           tools.set(tool.name, tool);
@@ -307,6 +308,38 @@ test('ticket token and per-ticket subjects are private and rotate with each tick
   assert.notEqual(a.subjects.upSubject, b.subjects.upSubject);
   assert.throws(() => ticketCredentials({ ticket: 'invalid' }), /ticket/);
 });
+
+for (const mode of ['local', 'managed']) {
+  test(`${mode} can connect without host isolation and reports the development warning once`, async (t) => {
+    const previous = process.env.AURIGA_MODE;
+    process.env.AURIGA_MODE = mode;
+    t.after(() => {
+      if (previous === undefined) delete process.env.AURIGA_MODE;
+      else process.env.AURIGA_MODE = previous;
+    });
+    const warnings = [];
+    const { runtime, tools, state } = await fixture(
+      t,
+      {},
+      {
+        logger: { warn: (message) => warnings.push(message) },
+      },
+    );
+    assert.equal(runtime.status.isolation.isolated, false);
+    assert.equal(runtime.status.isolation.required, false);
+    await runtime.start();
+    assert.equal(runtime.status.connected, true);
+    assert.equal(tools.size, 1);
+    assert.equal(runtime.status.isolation.state, 'unisolated-development');
+    assert.deepEqual(runtime.diagnostics.isolation, runtime.status.isolation);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /未隔离（开发阶段）/);
+    state({ state: 'ready', epoch: 1 });
+    assert.equal(warnings.length, 1);
+    await runtime.close();
+    assert.equal(runtime.status.isolation.isolated, false);
+  });
+}
 
 test('invalid signatures never reach consent or host', async (t) => {
   const { runtime, signer, message, nonce } = await fixture(t);
@@ -590,6 +623,11 @@ test('a real metadata commit failure self-closes and notifies its owner after cl
   assert.equal(await ended, 'storage_failure');
   assert.deepEqual(runtime.status, {
     available: false,
+    isolation: {
+      required: false,
+      isolated: false,
+      state: 'unisolated-development',
+    },
     connected: false,
     state: 'unavailable',
   });

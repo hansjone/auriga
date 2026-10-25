@@ -1,5 +1,9 @@
 # N1 插件装配边界
 
+2026-10-25 用户决定：同机隔离（含云端）整体推迟。`isolation.js` 是 runtime 与 HostPort adapter 共用的唯一隔离判定点，策略写在代码内，不读取工具参数、provider 配置或环境变量。local 与 managed 在登录、票据、信任根和真实宿主适配等条件满足后均可联网，无需先证明同机隔离。状态及 diagnostics 的 `isolation` 明确返回 `required:false / isolated:false / state:unisolated-development`；运行时首次启动记录一次“未隔离（开发阶段）”警告，重连不重复记录。
+
+恢复隔离门禁前，须完成 local/managed 的进程、凭据、ledger 和 IPC 隔离验收并接入可信能力探测，再修改这一个代码判定点。profile 目录只用于耐久状态分区，不作为隔离证明；host 的去重、真实 flush、登录鉴权、授权及验签要求仍有效。本项策略变更不补齐下述生产 provider/managed 设备凭据缺口，也不代表真实双 DSH 验收通过。
+
 `runtime.js` 将生产 `ws` 工厂、NATS supervisor、根签名公钥清单、session、耐久 host ledger/local 分配器、防入侵策略及 consent 服务组合为一个 DSH 节点运行时。所有原生会话共享连接。发送工具的宿主参数为 `to/body/thread`，内部映射到已生成的 `AgentSendToolInput.target`，身份仅取 `exec.agent.session.id`。
 
 `plugin.js` 在 connect 宿主中可选注入插件自有的 Cordis `aurigaNetwork` provider；它**不是 DSH 原生服务**，仓库当前没有提供该 provider 的生产实现。已有 Team MCP 登录/退出保持运行；缺 provider 时 N1 不建立连接、也不注册发送工具，状态为 `unconfigured`。不能据此宣称真实双 DSH 联网已交付。

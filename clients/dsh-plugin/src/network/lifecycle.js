@@ -1,4 +1,5 @@
 import { openNetworkRuntime, isRevocationError } from './runtime.js';
+import { networkIsolation } from './isolation.js';
 
 /** Provider lifetime and login lifetime are independent. Late register/prepare
  * responses cannot resurrect an old login or a disposed native provider.
@@ -173,6 +174,7 @@ export function createNetworkLifecycle(options) {
       return (
         runtime?.status ?? {
           available: !!provider,
+          isolation: networkIsolation,
           connected: false,
           state: phase,
         }
