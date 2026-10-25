@@ -35,19 +35,22 @@ type NATSConfig struct {
 // RuntimeConfig references the SAME config file used to launch nats-server.
 // authorization.timeout, issuer and XKey are read/verified there, not duplicated.
 type RuntimeConfig struct {
-	BrokerConfigFile     string         `json:"brokerConfigFile"`
-	ServerAudience       string         `json:"serverAudience"`
-	ClientAccount        string         `json:"clientAccount"`
-	IssuerSeedFile       string         `json:"issuerSeedFile"`
-	XKeySeedFile         string         `json:"xkeySeedFile"`
-	IAM                  team.RPCConfig `json:"iam"`
-	Auth                 NATSConfig     `json:"auth"`
-	Ops                  NATSConfig     `json:"ops"`
-	RedeemTimeoutMillis  int            `json:"redeemTimeoutMillis"`
-	ActiveIntervalMillis int            `json:"activeIntervalMillis"`
-	RequestTimeoutMillis int            `json:"requestTimeoutMillis"`
-	MaxKickAttempts      int            `json:"maxKickAttempts"`
-	MaxConnections       int            `json:"maxConnections"`
+	BrokerConfigFile     string                `json:"brokerConfigFile"`
+	ServerAudience       string                `json:"serverAudience"`
+	ClientAccount        string                `json:"clientAccount"`
+	IssuerSeedFile       string                `json:"issuerSeedFile"`
+	XKeySeedFile         string                `json:"xkeySeedFile"`
+	IAM                  team.RPCConfig        `json:"iam"`
+	Collab               team.RPCConfig        `json:"collab"`
+	Data                 NATSConfig            `json:"data"`
+	ProtocolSigning      ProtocolSigningConfig `json:"protocolSigning"`
+	Auth                 NATSConfig            `json:"auth"`
+	Ops                  NATSConfig            `json:"ops"`
+	RedeemTimeoutMillis  int                   `json:"redeemTimeoutMillis"`
+	ActiveIntervalMillis int                   `json:"activeIntervalMillis"`
+	RequestTimeoutMillis int                   `json:"requestTimeoutMillis"`
+	MaxKickAttempts      int                   `json:"maxKickAttempts"`
+	MaxConnections       int                   `json:"maxConnections"`
 }
 
 func LoadRuntimeConfig(path string) (RuntimeConfig, error) {
@@ -72,6 +75,10 @@ type Runtime struct {
 	auth     *nats.Conn
 	ops      *nats.Conn
 	iam      *grpc.ClientConn
+	collab   *grpc.ClientConn
+	data     *nats.Conn
+	mailbox  *mailboxRouter
+	signer   *errorSigner
 	issuer   nkeys.KeyPair
 	xkey     nkeys.KeyPair
 	redeemer *IAMRedeemer
@@ -86,7 +93,19 @@ func (r *Runtime) Close() {
 		if r.cancel != nil {
 			r.cancel()
 		}
+		if r.mailbox != nil {
+			r.mailbox.close()
+		}
 		r.done.Wait()
+		if r.data != nil {
+			r.data.Close()
+		}
+		if r.collab != nil {
+			_ = r.collab.Close()
+		}
+		if r.signer != nil {
+			clear(r.signer.key)
+		}
 		if r.auth != nil {
 			r.auth.Close()
 		}
@@ -175,6 +194,9 @@ func dialNATS(cfg NATSConfig, closed func(*nats.Conn)) (*nats.Conn, error) {
 }
 
 func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, err error) {
+	if cfg.Collab.Target == "" || cfg.Collab.ServiceTokenFile == "" || cfg.Data.Username == "" || cfg.Data.Username == cfg.Auth.Username || cfg.Data.Username == cfg.Ops.Username {
+		return nil, errors.New("network: mailbox RPC and separate data identity are required")
+	}
 	if cfg.BrokerConfigFile == "" || cfg.ServerAudience == "" || cfg.ClientAccount == "" || cfg.IssuerSeedFile == "" || cfg.XKeySeedFile == "" || cfg.IAM.Target == "" || cfg.IAM.ServiceTokenFile == "" || cfg.RedeemTimeoutMillis <= 0 || cfg.RedeemTimeoutMillis > 10000 || cfg.ActiveIntervalMillis <= 0 || cfg.ActiveIntervalMillis > 500 || cfg.RequestTimeoutMillis <= 0 || cfg.RequestTimeoutMillis > 250 || cfg.MaxConnections <= 0 || cfg.MaxConnections > 10000 || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 {
 		return nil, errors.New("network: incomplete runtime configuration")
 	}
@@ -194,7 +216,7 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	if e != nil {
 		return nil, e
 	}
-	authIdentity, opsIdentity, clientAccount := false, false, false
+	authIdentity, opsIdentity, clientAccount, dataIdentity := false, false, false, false
 	for _, u := range opts.Users {
 		if u.Username == cfg.Auth.Username && u.Account != nil && u.Account.Name == opts.AuthCallout.Account {
 			authIdentity = true
@@ -202,13 +224,16 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 		if u.Username == cfg.Ops.Username && u.Account != nil && u.Account.Name == opts.SystemAccount {
 			opsIdentity = true
 		}
+		if u.Username == cfg.Data.Username && u.Account != nil && u.Account.Name != opts.SystemAccount && u.Account.Name != opts.AuthCallout.Account && u.Account.Name != cfg.ClientAccount {
+			dataIdentity = true
+		}
 	}
 	for _, account := range opts.Accounts {
 		if account.Name == cfg.ClientAccount {
 			clientAccount = true
 		}
 	}
-	if !authIdentity || !opsIdentity || !clientAccount || cfg.Auth.Username == cfg.Ops.Username || !slices.Contains(opts.AuthCallout.AuthUsers, cfg.Auth.Username) || !slices.Contains(opts.AuthCallout.AuthUsers, cfg.Ops.Username) {
+	if !authIdentity || !opsIdentity || !clientAccount || !dataIdentity || cfg.Auth.Username == cfg.Ops.Username || !slices.Contains(opts.AuthCallout.AuthUsers, cfg.Auth.Username) || !slices.Contains(opts.AuthCallout.AuthUsers, cfg.Ops.Username) || !slices.Contains(opts.AuthCallout.AuthUsers, cfg.Data.Username) {
 		return nil, errors.New("network: Broker auth/system identities or client account mismatch")
 	}
 	token, e := os.ReadFile(cfg.IAM.ServiceTokenFile)
@@ -222,6 +247,9 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 			r.Close()
 		}
 	}()
+	if r.signer, err = newErrorSigner(cfg.ProtocolSigning); err != nil {
+		return nil, err
+	}
 	if r.issuer, err = seedFile(cfg.IssuerSeedFile); err != nil {
 		return nil, err
 	}
@@ -248,14 +276,32 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	if r.ops, err = dialNATS(cfg.Ops, closed); err != nil {
 		return nil, err
 	}
-	if r.auth.ConnectedServerName() != opts.ServerName || r.ops.ConnectedServerId() != r.auth.ConnectedServerId() {
+	if r.data, err = dialNATS(cfg.Data, closed); err != nil {
+		return nil, err
+	}
+	if r.auth.ConnectedServerName() != opts.ServerName || r.ops.ConnectedServerId() != r.auth.ConnectedServerId() || r.data.ConnectedServerId() != r.auth.ConnectedServerId() {
 		return nil, errors.New("network: Broker identity/configuration mismatch")
 	}
 	if r.iam, err = team.DialRPC(cfg.IAM); err != nil {
 		return nil, err
 	}
+	if r.collab, err = team.DialRPC(cfg.Collab); err != nil {
+		return nil, err
+	}
 	r.redeemer, err = NewIAMRedeemer(r.iam, IAMConfig{ServerID: r.auth.ConnectedServerId(), ServerAudience: cfg.ServerAudience, Account: cfg.ClientAccount, RedeemTimeout: redeemTimeout, AuthTimeout: authTimeout, MaxConnections: cfg.MaxConnections})
 	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(parent)
+	r.cancel = cancel
+	client, e := NewMailboxClient(r.collab, time.Duration(cfg.RequestTimeoutMillis)*time.Millisecond)
+	if e != nil {
+		return nil, e
+	}
+	if r.mailbox, err = newMailboxRouter(ctx, r.redeemer, client, r.signer, r.data); err != nil {
+		return nil, err
+	}
+	if err = r.data.FlushTimeout(authTimeout); err != nil {
 		return nil, err
 	}
 	callout, e := NewCallout(CalloutConfig{Issuer: r.issuer, XKey: r.xkey, Account: cfg.ClientAccount, Redeemer: r.redeemer, RedeemTimeout: redeemTimeout, AuthTimeout: authTimeout, Limits: limits, ConnectionTypes: []string{jwt.ConnectionTypeWebsocket}, OnDecision: r.redeemer.onDecision})
@@ -268,13 +314,11 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	if err = r.auth.FlushTimeout(authTimeout); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(parent)
-	r.cancel = cancel
 	r.done.Go(func() {
 		_ = r.redeemer.Reconcile(ctx, ReconcileConfig{Interval: time.Duration(cfg.ActiveIntervalMillis) * time.Millisecond, RequestTimeout: time.Duration(cfg.RequestTimeoutMillis) * time.Millisecond, MaxKickAttempts: cfg.MaxKickAttempts, Snapshot: func(ctx context.Context) (map[uint64]*ConnInfo, error) {
 			return LookupConns(ctx, r.ops, r.auth.ConnectedServerId(), cfg.ClientAccount, cfg.MaxConnections)
 		}, OnError: func(b Binding, err error) {
-			slog.Error("network connection KICK exhausted", "server", b.ServerID, "cid", b.ClientID, "error", err)
+			slog.Error("network reconciliation control failure", "server", b.ServerID, "cid", b.ClientID, "error", err)
 		}}, func(ctx context.Context, b Binding) error { return Kick(ctx, r.ops, b.ServerID, b.ClientID) })
 	})
 	return r, nil

@@ -24,8 +24,10 @@ type ReconcileConfig struct {
 }
 
 type reconcileState struct {
-	nextQuery     time.Time
-	queryFailures int
+	nextQuery           time.Time
+	queryFailures       int
+	snapshotFailedSince time.Time
+	snapshotDegraded    bool
 }
 
 // Reconcile has one owner per redeemer. IAM and CONNZ are each batched once per
@@ -88,6 +90,20 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 	cancel()
 	if ctx.Err() != nil {
 		return
+	}
+	if snapshotErr == nil {
+		state.snapshotFailedSince = time.Time{}
+		state.snapshotDegraded = false
+	} else {
+		if state.snapshotFailedSince.IsZero() {
+			state.snapshotFailedSince = start
+		}
+		if !state.snapshotDegraded && time.Since(state.snapshotFailedSince) >= grace {
+			state.snapshotDegraded = true
+			if cfg.OnError != nil {
+				cfg.OnError(Binding{ServerID: r.cfg.ServerID}, errors.New("network: CONNZ outage grace exhausted; kicking known revoked CIDs"))
+			}
+		}
 	}
 	eligible := make([]liveBinding, 0, len(bindings))
 	for _, b := range bindings {
@@ -155,7 +171,11 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 		r.remember(b)
 		// A complete snapshot proves account/ingress ownership for the entire round.
 		// CIDs cannot be reused within a server generation, so per-KICK CONNZ is redundant.
-		if b.Revoked && snapshotErr == nil && b.Attempts < cfg.MaxKickAttempts && !time.Now().Before(b.RetryAfter) {
+		// During a prolonged CONNZ outage, authenticated callout bindings still
+		// identify the server generation/CID. NoReconnect prevents generation
+		// changes and CIDs are not reused within a generation. Never clear the
+		// revocation latch because control-plane inspection is unavailable.
+		if b.Revoked && (snapshotErr == nil || state.snapshotDegraded) && b.Attempts < cfg.MaxKickAttempts && !time.Now().Before(b.RetryAfter) {
 			pending = append(pending, b)
 		}
 	}
@@ -213,7 +233,8 @@ func (r *IAMRedeemer) forget(ingress string) {
 func (r *IAMRedeemer) remember(b liveBinding) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.bindings[b.Ingress]; ok {
+	if current, ok := r.bindings[b.Ingress]; ok {
+		b.Incarnation, b.ChannelNonce, b.Epoch = current.Incarnation, current.ChannelNonce, current.Epoch
 		r.bindings[b.Ingress] = b
 	}
 }

@@ -23,7 +23,7 @@ func scaleBindings(r *IAMRedeemer, n int) map[uint64]*ConnInfo {
 	return conns
 }
 
-func TestReconcile5000ConnectionsUsesOneSnapshotAndOneIAMBatch(t *testing.T) {
+func TestReconcile5000ConnectionsUsesOneSnapshotAndTenantBatches(t *testing.T) {
 	f := &fakeIAM{active: false, delay: 100 * time.Millisecond}
 	r := testRedeemer(t, f)
 	conns := scaleBindings(r, 5000)
@@ -44,7 +44,7 @@ func TestReconcile5000ConnectionsUsesOneSnapshotAndOneIAMBatch(t *testing.T) {
 			return ctx.Err()
 		}
 	}, &state)
-	if snapshots.Load() != 1 || f.calls != 1 || kicks.Load() != 5000 || len(r.snapshot()) != 0 {
+	if snapshots.Load() != 1 || f.calls != 50 || kicks.Load() != 5000 || len(r.snapshot()) != 0 {
 		t.Fatalf("snapshots=%d IAM=%d kicks=%d retained=%d", snapshots.Load(), f.calls, kicks.Load(), len(r.snapshot()))
 	}
 	if elapsed := time.Since(start); elapsed > 4*time.Second {
@@ -164,5 +164,27 @@ func TestCancelledKickStillConsumesAttemptBudget(t *testing.T) {
 	r.reconcileRound(context.Background(), cfg, func(context.Context, Binding) error { calls++; return errors.New("unavailable") }, &reconcileState{})
 	if calls != 1 {
 		t.Fatal("cancelled KICK bypassed the retry limit")
+	}
+}
+
+func TestSnapshotFailureKicksLatchedRevocationsAfterBoundedGrace(t *testing.T) {
+	r := testRedeemer(t, &fakeIAM{active: true})
+	scaleBindings(r, 1)
+	for key, b := range r.bindings {
+		b.Revoked = true
+		r.bindings[key] = b
+	}
+	alerts, kicks := 0, 0
+	cfg := ReconcileConfig{Interval: time.Millisecond, RequestTimeout: 250 * time.Millisecond, MaxKickAttempts: 1, FailureGrace: 50 * time.Millisecond, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return nil, errors.New("CONNZ unavailable") }, OnError: func(Binding, error) { alerts++ }}
+	state := reconcileState{}
+	kick := func(context.Context, Binding) error { kicks++; return nil }
+	r.reconcileRound(context.Background(), cfg, kick, &state)
+	if kicks != 0 {
+		t.Fatal("snapshot outage grace was skipped")
+	}
+	state.snapshotFailedSince = time.Now().Add(-cfg.FailureGrace)
+	r.reconcileRound(context.Background(), cfg, kick, &state)
+	if kicks != 1 || alerts != 1 || len(r.snapshot()) != 0 {
+		t.Fatalf("kicks=%d alerts=%d retained=%d", kicks, alerts, len(r.snapshot()))
 	}
 }
