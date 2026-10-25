@@ -14,12 +14,17 @@ final class NetworkReceiptProofs {
       String local,
       String registeredType) {
     NetworkSchemas.validate("Message", message);
+    require(realm.equals(message.path("to").path("realm").asString()));
     JsonNode target;
     String messageClass = message.path("message_class").asString();
     if ("unicast".equals(messageClass)) target = message.path("to");
     else {
+      require(
+          "group".equals(message.path("to").path("type").asString())
+              && "0".equals(message.path("to").path("node").asString()));
       String type = "system";
-      if ("broadcast".equals(messageClass)) require("0".equals(local));
+      if ("broadcast".equals(messageClass))
+        require("0".equals(local) && "1".equals(message.path("to").path("local").asString()));
       else {
         require(dispatch != null);
         type = NetworkSourceStamp.memberContext(dispatch, node, local).path("type").asString();

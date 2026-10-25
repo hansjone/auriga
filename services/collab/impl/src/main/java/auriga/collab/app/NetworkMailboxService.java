@@ -80,6 +80,65 @@ public class NetworkMailboxService {
   private final NetworkIamChecks iam;
   private final NetworkContactBudget budget;
   private final AuditLogger audit;
+  private static final ScopedValue<TargetDecision> TARGET_DECISION = ScopedValue.newInstance();
+
+  /**
+   * A short-lived, in-request decision minted only by this service outside database transactions.
+   */
+  static final class TargetDecision {
+    final NetworkMailboxService owner;
+    final UUID tenant;
+    final String realm, node;
+    final Set<Operation> operations;
+    final Instant deadline;
+    final NetworkSourceAuthority.Target audience;
+
+    private TargetDecision(
+        NetworkMailboxService owner,
+        UUID tenant,
+        String realm,
+        String node,
+        Set<Operation> operations,
+        Instant deadline) {
+      this.owner = owner;
+      this.tenant = tenant;
+      this.realm = realm;
+      this.node = node;
+      this.operations = Set.copyOf(operations);
+      this.deadline = deadline;
+      this.audience = owner.authority.currentTarget(tenant);
+    }
+  }
+
+  TargetDecision authorizeTarget(
+      UUID tenant, String realm, String node, Set<Operation> operations) {
+    outsideDatabase();
+    var started = clock.instant();
+    for (var operation : operations) checkTarget(tenant, realm, node, operation);
+    Instant deadline = authority.currentTarget(tenant).validUntil();
+    if (deadline.isAfter(started.plusSeconds(30))) deadline = started.plusSeconds(30);
+    return new TargetDecision(this, tenant, realm, node, operations, deadline);
+  }
+
+  <T> T withDecision(TargetDecision decision, Supplier<T> work) {
+    require(
+        decision.owner == this && decision.deadline.isAfter(clock.instant()),
+        NetworkErrors.UNAUTHORIZED);
+    return ScopedValue.where(TARGET_DECISION, decision).call(work::get);
+  }
+
+  private void outsideDatabase() {
+    require(
+        !TransactionSynchronizationManager.isActualTransactionActive()
+            && !TransactionSynchronizationManager.isSynchronizationActive()
+            && !TransactionSynchronizationManager.hasResource(jdbc.getDataSource()),
+        CommonErrors.UNAVAILABLE);
+  }
+
+  private void targetGate(UUID tenant, String realm, String node, Operation operation) {
+    if (!TARGET_DECISION.isBound()) outsideDatabase();
+    checkTarget(tenant, realm, node, operation);
+  }
 
   public NetworkMailboxService(JdbcTemplate jdbc, TenantTransactionManager manager) {
     this(jdbc, manager, null, new NetworkSigningKeys(Clock.systemUTC(), 1), Clock.systemUTC());
@@ -116,10 +175,14 @@ public class NetworkMailboxService {
 
   /** READY-shaped takeover: bumps connection_epoch and returns current mailbox cursors. */
   public NodeRoute ready(UUID tenantId, String realm, String nodeId) {
+    if (!TARGET_DECISION.isBound())
+      return withDecision(
+          authorizeTarget(tenantId, realm, nodeId, Set.of(Operation.CONNECT)),
+          () -> ready(tenantId, realm, nodeId));
+    targetGate(tenantId, realm, nodeId, Operation.CONNECT);
     return run(
         tenantId,
         () -> {
-          checkTarget(tenantId, realm, nodeId, Operation.CONNECT);
           ensureNodeLocked(tenantId, realm, nodeId);
           long epoch =
               jdbc.queryForObject(
@@ -140,10 +203,14 @@ public class NetworkMailboxService {
 
   /** Current route after an online RECEIVE check, without fetching message rows. */
   public NodeRoute head(UUID tenantId, String realm, String nodeId) {
+    if (!TARGET_DECISION.isBound())
+      return withDecision(
+          authorizeTarget(tenantId, realm, nodeId, Set.of(Operation.RECEIVE)),
+          () -> head(tenantId, realm, nodeId));
+    targetGate(tenantId, realm, nodeId, Operation.RECEIVE);
     return run(
         tenantId,
         () -> {
-          checkTarget(tenantId, realm, nodeId, Operation.RECEIVE);
           ensureNodeLocked(tenantId, realm, nodeId);
           return loadRoute(tenantId, realm, nodeId, null);
         });
@@ -620,13 +687,13 @@ public class NetworkMailboxService {
 
   private FetchResult fetch(
       UUID tenantId, String realm, String nodeId, long afterCursor, int limit, boolean authorize) {
+    if (authorize) targetGate(tenantId, realm, nodeId, Operation.RECEIVE);
     return run(
         tenantId,
         () -> {
           require(afterCursor >= 0, CommonErrors.VALIDATION_FAILED);
           require(limit >= 1 && limit <= FETCH_MAX_ITEMS, CommonErrors.VALIDATION_FAILED);
           if (authorize) {
-            checkTarget(tenantId, realm, nodeId, Operation.RECEIVE);
             ensureNodePresent(tenantId, realm, nodeId);
           }
           NodeRoute route = loadRoute(tenantId, realm, nodeId, null);
@@ -703,33 +770,109 @@ public class NetworkMailboxService {
   /** Signed page/manifest plus independently signed items, bounded by the entire wire frame. */
   public String fetchPage(
       UUID tenantId, String realm, String nodeId, long afterCursor, int limit, int maxBytes) {
+    return finishPage(preparePage(tenantId, realm, nodeId, afterCursor, limit, maxBytes));
+  }
+
+  public final class PreparedPage {
+    private final NetworkMailboxService owner = NetworkMailboxService.this;
+    private final Instant expires;
+    private final UUID tenant;
+    private final String realm, node;
+    private final long after;
+    private final int limit, maxBytes;
+    private final NetworkSourceAuthority.Target target;
+    private final FetchResult raw;
+    private final Map<UUID, NetworkDispatchAuthorization.Outcome> permissions;
+
+    List<String> targetLocals() {
+      return raw.items().stream()
+          .flatMap(item -> item.recipients().stream())
+          .map(RecipientView::targetLocal)
+          .distinct()
+          .sorted()
+          .toList();
+    }
+
+    private PreparedPage(
+        UUID tenant,
+        String realm,
+        String node,
+        long after,
+        int limit,
+        int maxBytes,
+        NetworkSourceAuthority.Target target,
+        FetchResult raw,
+        Map<UUID, NetworkDispatchAuthorization.Outcome> permissions,
+        Instant started) {
+      this.expires = started.plusSeconds(30);
+      this.tenant = tenant;
+      this.realm = realm;
+      this.node = node;
+      this.after = after;
+      this.limit = limit;
+      this.maxBytes = maxBytes;
+      this.target = target;
+      this.raw = raw;
+      this.permissions = Map.copyOf(permissions);
+    }
+  }
+
+  public PreparedPage preparePage(
+      UUID tenantId, String realm, String nodeId, long afterCursor, int limit, int maxBytes) {
+    outsideDatabase();
+    var started = clock.instant();
+    require(authority != null, CommonErrors.UNAVAILABLE);
+    require(maxBytes >= 4096 && maxBytes <= 65536, CommonErrors.VALIDATION_FAILED);
+    var target = authority.currentTarget(tenantId);
+    require(
+        target != null && realm.equals(target.realm()) && nodeId.equals(target.node()),
+        NetworkErrors.UNAUTHORIZED);
+    require(
+        target.validUntil() != null && target.validUntil().isAfter(clock.instant()),
+        NetworkErrors.UNAUTHORIZED);
+    var raw = fetch(tenantId, realm, nodeId, afterCursor, limit);
+    require(target.epoch() > 0, NetworkErrors.STALE_EPOCH);
+    requireEpoch(raw.route().connectionEpoch(), target.epoch());
+    require(afterCursor <= raw.route().headSeq(), NetworkErrors.PROTOCOL_ERROR);
+    var authorization = new NetworkDispatchAuthorization(jdbc, iam, authority, clock);
+    var batch = run(tenantId, () -> authorization.prepare(tenantId, raw.items(), realm, nodeId));
+    var permissions = authorization.check(tenantId, batch, realm, nodeId);
+    return new PreparedPage(
+        tenantId, realm, nodeId, afterCursor, limit, maxBytes, target, raw, permissions, started);
+  }
+
+  public String finishPage(PreparedPage prepared) {
+    require(
+        prepared.owner == this && prepared.expires.isAfter(clock.instant()),
+        NetworkErrors.UNAUTHORIZED);
+    UUID tenantId = prepared.tenant;
+    String realm = prepared.realm, nodeId = prepared.node;
+    long afterCursor = prepared.after;
+    int limit = prepared.limit, maxBytes = prepared.maxBytes;
+    var target = prepared.target;
+    var raw = prepared.raw;
+    var permissions = prepared.permissions;
+    require(target.validUntil().isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+    var currentTarget = authority.currentTarget(tenantId);
+    require(
+        currentTarget.realm().equals(realm)
+            && currentTarget.node().equals(nodeId)
+            && currentTarget.epoch() == target.epoch()
+            && currentTarget.incarnation().equals(target.incarnation())
+            && currentTarget.channelNonce().equals(target.channelNonce())
+            && Objects.equals(currentTarget.requestId(), target.requestId()),
+        NetworkErrors.STALE_EPOCH);
+    var context =
+        new NetworkEnvelopeSigner.Context(
+            realm,
+            nodeId,
+            target.incarnation(),
+            target.epoch(),
+            target.channelNonce(),
+            target.requestId());
     return run(
         tenantId,
         () -> {
-          require(authority != null, CommonErrors.UNAVAILABLE);
-          require(maxBytes >= 4096 && maxBytes <= 65536, CommonErrors.VALIDATION_FAILED);
-          var target = authority.currentTarget(tenantId);
-          require(
-              target != null && realm.equals(target.realm()) && nodeId.equals(target.node()),
-              NetworkErrors.UNAUTHORIZED);
-          require(
-              target.validUntil() != null && target.validUntil().isAfter(clock.instant()),
-              NetworkErrors.UNAUTHORIZED);
-          var raw = fetch(tenantId, realm, nodeId, afterCursor, limit);
-          require(target.epoch() > 0, NetworkErrors.STALE_EPOCH);
-          requireEpoch(raw.route().connectionEpoch(), target.epoch());
-          require(afterCursor <= raw.route().headSeq(), NetworkErrors.PROTOCOL_ERROR);
-          var context =
-              new NetworkEnvelopeSigner.Context(
-                  realm,
-                  nodeId,
-                  target.incarnation(),
-                  target.epoch(),
-                  target.channelNonce(),
-                  target.requestId());
-          var permissions =
-              new NetworkDispatchAuthorization(jdbc, iam, authority, clock)
-                  .check(tenantId, raw.items(), realm, nodeId);
           // Decisions are complete before any expiry, cursor, or audit mutation takes a row lock.
           var envelopes = new NetworkMailboxEnvelopeFactory(signer);
           ensureNodeLocked(tenantId, realm, nodeId);
@@ -892,6 +1035,7 @@ public class NetworkMailboxService {
   }
 
   private void checkTarget(UUID tenant, String realm, String node, Operation operation) {
+    requireCaller(tenant);
     text(realm, 32);
     text(node, 32);
     require(authority != null, CommonErrors.UNAVAILABLE);
@@ -903,6 +1047,22 @@ public class NetworkMailboxService {
             && target.validUntil() != null
             && target.validUntil().isAfter(clock.instant()),
         NetworkErrors.UNAUTHORIZED);
+    if (TARGET_DECISION.isBound()) {
+      var decision = TARGET_DECISION.get();
+      require(
+          decision.owner == this
+              && decision.tenant.equals(tenant)
+              && decision.realm.equals(realm)
+              && decision.node.equals(node)
+              && decision.operations.contains(operation)
+              && target.epoch() == decision.audience.epoch()
+              && target.incarnation().equals(decision.audience.incarnation())
+              && target.channelNonce().equals(decision.audience.channelNonce())
+              && Objects.equals(target.requestId(), decision.audience.requestId())
+              && decision.deadline.isAfter(clock.instant()),
+          NetworkErrors.UNAUTHORIZED);
+      return;
+    }
     iam.active(realm, node);
     iam.check(new Check(realm, node, node, "0", Sender.HUMAN, operation, 0, 1, 1));
   }
@@ -1148,6 +1308,12 @@ public class NetworkMailboxService {
    * Stale connection_epoch → network.stale_epoch.
    */
   public ReceiptCommitResult receipt(ReceiptRequest request) {
+    if (!TARGET_DECISION.isBound())
+      return withDecision(
+          authorizeTarget(
+              request.tenantId(), request.realm(), request.nodeId(), Set.of(Operation.RECEIVE)),
+          () -> receipt(request));
+    targetGate(request.tenantId(), request.realm(), request.nodeId(), Operation.RECEIVE);
     return run(
         request.tenantId(),
         () -> {
@@ -1156,7 +1322,6 @@ public class NetworkMailboxService {
                   && !request.results().isEmpty()
                   && request.results().size() <= RECEIPT_MAX_RESULTS,
               CommonErrors.VALIDATION_FAILED);
-          checkTarget(request.tenantId(), request.realm(), request.nodeId(), Operation.RECEIVE);
           ensureNodeLocked(request.tenantId(), request.realm(), request.nodeId());
           NodeRoute route = loadRoute(request.tenantId(), request.realm(), request.nodeId(), null);
           requireEpoch(route.connectionEpoch(), request.epoch());
@@ -1660,7 +1825,7 @@ public class NetworkMailboxService {
     require(provided == current, NetworkErrors.STALE_EPOCH);
   }
 
-  private <T> T run(UUID tenantId, Supplier<T> work) {
+  private static void requireCaller(UUID tenantId) {
     var caller =
         AuthorizationRules.currentPrincipal()
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAUTHENTICATED));
@@ -1673,6 +1838,10 @@ public class NetworkMailboxService {
         TenantContext.current().filter(tenantId::equals).isPresent()
             && !TenantContext.PLATFORM_TENANT.equals(tenantId),
         CommonErrors.FORBIDDEN);
+  }
+
+  private <T> T run(UUID tenantId, Supplier<T> work) {
+    requireCaller(tenantId);
     return tx.execute(
         status -> {
           TenantTransactionManager.verifyTransactionTenant();

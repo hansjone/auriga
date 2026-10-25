@@ -564,7 +564,8 @@ func (x *NetworkAuthorityConnection) GetClientAccount() string {
 type ResolveNetworkTargetRequest struct {
 	state      protoimpl.MessageState      `protogen:"open.v1"`
 	Connection *NetworkAuthorityConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
-	// Canonical unsigned decimal local; 0 means the node system mailbox.
+	// Only local=0 (the node system mailbox). Nonzero locals MUST be rejected:
+	// their opaque registration/type authority belongs to collab, never IAM.
 	Local         string `protobuf:"bytes,2,opt,name=local,proto3" json:"local,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -619,7 +620,7 @@ type ResolveNetworkTargetResponse struct {
 	Allowed bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
 	// Exact verified binding echo. Missing/mismatched fields fail closed.
 	Connection *NetworkAuthorityConnection `protobuf:"bytes,2,opt,name=connection,proto3" json:"connection,omitempty"`
-	// system / session / subagent, from authoritative directory.
+	// Always system. Session/subagent types belong to collab opaque registration.
 	TargetType string `protobuf:"bytes,3,opt,name=target_type,json=targetType,proto3" json:"target_type,omitempty"`
 	// RFC3339 UTC, bounded by current backing session/device/connection expiry.
 	ValidUntil    string `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`

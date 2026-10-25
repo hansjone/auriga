@@ -14,6 +14,117 @@ import tools.jackson.databind.node.ObjectNode;
 
 class NetworkWireSecurityTest {
   @Test
+  void remoteAuthorityRefusesInheritedTransactionsBeforeAnyRpc() {
+    var client = mock(auriga.collab.grpc.NetworkAuthorityClient.class);
+    var authority =
+        new NetworkSourceGrpcAuthority(
+            client, new TenantTransactionManager(mock(javax.sql.DataSource.class)));
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .setActualTransactionActive(true);
+    try {
+      reject(
+          "common.unavailable",
+          () ->
+              authority.verify(
+                  auriga.contracts.iam.v1.NetworkAuthorityConnection.getDefaultInstance()));
+      reject(
+          "common.unavailable",
+          () -> authority.authorizeDelivery(UUID.randomUUID(), "{}", "{}", "20"));
+    } finally {
+      org.springframework.transaction.support.TransactionSynchronizationManager
+          .setActualTransactionActive(false);
+    }
+    verifyNoInteractions(client);
+  }
+
+  @Test
+  void onlineDecisionIsServiceBoundOperationBoundAndExpiresBeforeCommit() {
+    UUID tenant = UUID.randomUUID();
+    var now = new java.util.concurrent.atomic.AtomicReference<>(java.time.Instant.now());
+    var clock =
+        new Clock() {
+          public java.time.ZoneId getZone() {
+            return java.time.ZoneOffset.UTC;
+          }
+
+          public Clock withZone(java.time.ZoneId zone) {
+            return this;
+          }
+
+          public java.time.Instant instant() {
+            return now.get();
+          }
+        };
+    var jdbc = mock(JdbcTemplate.class);
+    var dataSource = mock(javax.sql.DataSource.class);
+    when(jdbc.getDataSource()).thenReturn(dataSource);
+    var manager = new TenantTransactionManager(dataSource);
+    var source = mock(auriga.collab.api.NetworkSourceAuthority.class);
+    when(source.currentTarget(tenant))
+        .thenReturn(
+            new auriga.collab.api.NetworkSourceAuthority.Target(
+                "2", "20", "inc", 1, "nonce", "request", now.get().plusSeconds(60)));
+    var iam = mock(auriga.iam.api.NetworkAuthority.class);
+    when(iam.active("2", "20")).thenReturn(true);
+    when(iam.check(any()))
+        .thenReturn(new auriga.iam.api.NetworkAuthority.Decision(true, "allowed", Map.of()));
+    var service =
+        new NetworkMailboxService(
+            jdbc, manager, source, new NetworkSigningKeys(clock, 1), clock, iam);
+    var principal = mock(auriga.common.security.AurigaPrincipal.class);
+    when(principal.isInternalService()).thenReturn(true);
+    when(principal.subject()).thenReturn("svc:ai-gateway");
+    when(principal.tenantId()).thenReturn(auriga.common.context.TenantContext.PLATFORM_TENANT);
+    auriga.common.context.RequestContext.start(null, null)
+        .withPrincipal(principal)
+        .run(
+            () ->
+                auriga.common.context.TenantContext.run(
+                    tenant,
+                    () -> {
+                      var decision =
+                          service.authorizeTarget(
+                              tenant,
+                              "2",
+                              "20",
+                              Set.of(auriga.iam.api.NetworkAuthority.Operation.CONNECT));
+                      reject(
+                          "network.unauthorized",
+                          () ->
+                              service.withDecision(
+                                  decision, () -> service.head(tenant, "2", "20")));
+                      var other =
+                          new NetworkMailboxService(
+                              jdbc, manager, source, new NetworkSigningKeys(clock, 1), clock, iam);
+                      reject(
+                          "network.unauthorized",
+                          () -> other.withDecision(decision, () -> "forbidden"));
+                      when(source.currentTarget(tenant))
+                          .thenReturn(
+                              new auriga.collab.api.NetworkSourceAuthority.Target(
+                                  "2",
+                                  "20",
+                                  "inc",
+                                  2,
+                                  "nonce-new",
+                                  "request",
+                                  now.get().plusSeconds(60)));
+                      reject(
+                          "network.unauthorized",
+                          () ->
+                              service.withDecision(
+                                  decision, () -> service.ready(tenant, "2", "20")));
+                      now.set(now.get().plusSeconds(31));
+                      reject(
+                          "network.unauthorized",
+                          () -> service.withDecision(decision, () -> "expired"));
+                    }));
+    assertTrue(
+        mockingDetails(jdbc).getInvocations().stream()
+            .allMatch(i -> i.getMethod().getName().equals("getDataSource")));
+  }
+
+  @Test
   void nonzeroLocalsUseCollabRegistrationAndNeverIamGuessing() {
     UUID tenant = UUID.randomUUID();
     var client = mock(auriga.collab.grpc.NetworkAuthorityClient.class);
@@ -47,6 +158,14 @@ class NetworkWireSecurityTest {
         "subagent",
         registered.withTarget(
             c, target, () -> registered.resolveTargetType(tenant, "2", "20", "1")));
+    registered.withTarget(
+        c,
+        target,
+        () -> {
+          var snapshot = registered.localSnapshot(tenant, "2", "20", "1");
+          reject("common.unavailable", () -> registered.revalidateLocal(tenant, snapshot));
+          return null;
+        });
     var forged =
         new NetworkSourceGrpcAuthority(
             client,
@@ -77,6 +196,8 @@ class NetworkWireSecurityTest {
         missing.putArray(side);
         for (var value : ready.path(side))
           if (!feature.equals(value.asString())) missing.withArray(side).add(value);
+        reject("network.protocol_error", () -> NetworkWireCapabilities.verify(missing, false));
+        missing.withArray(side).add("unknown_required_v1");
         reject("network.protocol_error", () -> NetworkWireCapabilities.verify(missing, false));
       }
     reject("network.protocol_error", () -> NetworkWireCapabilities.verify(ready, true));
@@ -140,6 +261,7 @@ class NetworkWireSecurityTest {
             .put("execution_status", "not_applicable")
             .put("evidence_digest", "sha256:" + "a".repeat(64));
     entry.set("target", target);
+    assertEquals(target, NetworkReceiptProofs.target(message, null, "2", "64", "0", "system"));
     NetworkReceiptProofs.stage(entry, message, target, null);
     var session = entry.deepCopy().put("accepted_by", "session");
     reject(
@@ -160,6 +282,23 @@ class NetworkWireSecurityTest {
         proof,
         NetworkReceiptProofs.stable(
             entry.deepCopy().put("evidence_digest", "sha256:" + "b".repeat(64))));
+    var frames = NetworkEnvelopeSigningTest.fixture("frames.json").path("frames");
+    var sessionMessage = frames.path("delivery_session_message").path("value").path("message");
+    var sessionTarget =
+        NetworkReceiptProofs.target(sessionMessage, null, "2", "64", "5", "session");
+    var sessionEntry =
+        entry.deepCopy().put("accepted_by", "session").put("acceptance_mode", "normal");
+    sessionEntry.set("target", sessionTarget);
+    NetworkReceiptProofs.stage(sessionEntry, sessionMessage, sessionTarget, null);
+    var first = frames.path("delivery_first_contact").path("value").path("message");
+    var firstTarget = NetworkReceiptProofs.target(first, null, "2", "64", "0", "system");
+    var allowed = NetworkJson.object().put("status", "allowed").put("scope", "conversation");
+    NetworkReceiptProofs.stage(entry, first, firstTarget, allowed);
+    reject(
+        "network.unauthorized",
+        () ->
+            NetworkReceiptProofs.stage(
+                entry, first, firstTarget, allowed.deepCopy().put("status", "pending")));
   }
 
   static ObjectNode pluginReady() throws Exception {

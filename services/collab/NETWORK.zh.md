@@ -75,6 +75,14 @@ auriga:
 
 IAM 服务端没有在本变更实现；未实现 RPC 返回 UNIMPLEMENTED 时 collab 失败关闭。
 所有 IAM 调用都沿自己的 svc:collab 客户端传播业务租户，且在 collab 事务外执行。
+wire 不通过挂起持锁事务做网络调用：先用短只读事务取得 route/正文快照，再完成在线决定。
+READY/HEAD/FETCH/RECEIPT 提交时重锁 node，比较原 binding/epoch/nonce/READY 指纹；旧决定不跨接管。
+核心 preparePage/finishPage 把逐项核权与签名/游标审计提交拆开，保留 #147 的正文/dispatch 指纹复读。
+决定仅在当前 Java 调用作用域有效，最长 30 秒，按服务实例/tenant/node/operation 及 epoch/incarnation/nonce/request_id 绑定，提交前再查期限。
+收到外层数据库事务时失败关闭；需要原子回滚审计的内部调用应先 preparePage，再在自己的短事务 finishPage。
+非零 local 的后续 #155 适配须实现 NetworkLocalTargets.lookup 及同 collab datasource/事务的 lock：
+lookup 返回完整 opaque 地址、type/revision，lock 锁住当前登记见证并返回复读值；默认缺实现拒绝提交。
+本任务没有接入未审 #155、没有创建第二套登记器、没有读取 IAM 库里的 local 类型。
 
 ## 当前 wire 边界
 

@@ -63,110 +63,150 @@ public class NetworkMailboxWireService {
     NetworkAuthorityClient.binding(c);
     Instant deadline = source.verify(c);
     UUID tenant = TenantContext.require();
-    return tx.execute(
-        status -> {
-          jdbc.update(
-              "INSERT INTO collab.network_node(tenant_id,realm,node_id) VALUES (?,?,?) ON CONFLICT DO NOTHING",
-              tenant,
-              c.getRealm(),
-              c.getNode());
-          var row = locked(c);
-          String binding = bindingJson(c);
-          String requestJson = NetworkJson.canonical(request);
-          if (c.getIngress().equals(row.get("ingress_id"))) {
-            require(binding.equals(row.get("wire_binding_json")), NetworkErrors.UNAUTHORIZED);
-            require(requestJson.equals(row.get("wire_ready_json")), NetworkErrors.CONFLICT);
-          } else {
-            require(
-                jdbc.queryForObject(
-                        "SELECT count(*) FROM collab.network_wire_ingress WHERE tenant_id=? AND ingress_id=?",
-                        Integer.class,
-                        tenant,
-                        c.getIngress())
-                    == 0,
-                NetworkErrors.STALE_EPOCH);
-            String incarnation =
-                row.get("wire_incarnation") == null
-                    ? UUID.randomUUID().toString()
-                    : row.get("wire_incarnation").toString();
-            Target initial =
-                new Target(
-                    c.getRealm(),
-                    c.getNode(),
-                    incarnation,
-                    1,
-                    request.path("channel_nonce").asString(),
-                    request.path("request_id").asString(),
-                    deadline);
-            var route =
-                source.withTarget(
-                    c, initial, () -> mailbox.ready(tenant, c.getRealm(), c.getNode()));
-            boolean healthy =
-                request.path("local_high_water").asString().equals("0")
-                    && request.path("registration_revision").asString().equals("0")
-                    && request
-                        .path("resume_cursor")
-                        .asString()
-                        .equals(Long.toString(route.committedCursor()))
-                    && request
-                        .path("receipt_checkpoint")
-                        .path("checkpoint_seq")
-                        .asString()
-                        .equals("0")
-                    && request
-                        .path("receipt_checkpoint")
-                        .path("checkpoint_revision")
-                        .asString()
-                        .equals("0")
-                    && request.path("pending_registration").isNull()
-                    && (!request.has("evidence") || request.path("evidence").isEmpty());
-            jdbc.update(
-                "UPDATE collab.network_node SET ingress_id=?,wire_binding_json=?,wire_ready_json=?,wire_incarnation=?,wire_nonce=?,wire_status=?,route_expires_at=? WHERE tenant_id=? AND realm=? AND node_id=?",
-                c.getIngress(),
-                binding,
-                requestJson,
-                incarnation,
-                initial.channelNonce(),
-                healthy ? "ready" : "recovery_conflict",
-                java.sql.Timestamp.from(deadline),
-                tenant,
-                c.getRealm(),
-                c.getNode());
-            jdbc.update(
-                "INSERT INTO collab.network_wire_ingress(tenant_id,realm,node_id,ingress_id) VALUES (?,?,?,?)",
-                tenant,
-                c.getRealm(),
-                c.getNode(),
-                c.getIngress());
-            row = locked(c);
-          }
-          var target = target(c, row, request.path("request_id").asString(), deadline);
-          var current = row;
-          return source.withTarget(
-              c,
-              target,
-              () -> {
-                var route = mailbox.head(tenant, c.getRealm(), c.getNode());
-                var result =
-                    base("ready_result")
-                        .put("request_id", target.requestId())
-                        .put("status", current.get("wire_status").toString())
-                        .put("epoch", Long.toString(target.epoch()))
-                        .put("head_seq", Long.toString(route.headSeq()))
-                        .put("committed_cursor", Long.toString(route.committedCursor()))
-                        .put("retention_low_seq", "0")
-                        .put("local_high_water", "0")
-                        .put("registration_revision", "0");
-                result
-                    .putObject("node_identity")
-                    .put("realm", c.getRealm())
-                    .put("node", c.getNode())
-                    .put("incarnation", target.incarnation());
-                result.putNull("seen_checkpoint");
-                var features = result.putArray("required_features");
-                requiredFeatures.forEach(features::add);
-                return signed(result, "ReadyResult", target);
-              });
+    var before = tx.execute(status -> read(c, false));
+    var proposed =
+        new Target(
+            c.getRealm(),
+            c.getNode(),
+            before == null || before.get("wire_incarnation") == null
+                ? UUID.randomUUID().toString()
+                : before.get("wire_incarnation").toString(),
+            before == null
+                ? 1
+                : number(before, "connection_epoch")
+                    + (c.getIngress().equals(before.get("ingress_id")) ? 0 : 1),
+            request.path("channel_nonce").asString(),
+            request.path("request_id").asString(),
+            deadline);
+    return source.withTarget(
+        c,
+        proposed,
+        broadcast,
+        () -> {
+          var decision =
+              mailbox.authorizeTarget(
+                  tenant,
+                  c.getRealm(),
+                  c.getNode(),
+                  Set.of(
+                      auriga.iam.api.NetworkAuthority.Operation.CONNECT,
+                      auriga.iam.api.NetworkAuthority.Operation.RECEIVE));
+          return mailbox.withDecision(
+              decision,
+              () ->
+                  tx.execute(
+                      status -> {
+                        jdbc.update(
+                            "INSERT INTO collab.network_node(tenant_id,realm,node_id) VALUES (?,?,?) ON CONFLICT DO NOTHING",
+                            tenant,
+                            c.getRealm(),
+                            c.getNode());
+                        var row = locked(c);
+                        unchanged(before, row);
+                        String binding = bindingJson(c);
+                        String requestJson = NetworkJson.canonical(request);
+                        if (c.getIngress().equals(row.get("ingress_id"))) {
+                          require(
+                              binding.equals(row.get("wire_binding_json")),
+                              NetworkErrors.UNAUTHORIZED);
+                          require(
+                              requestJson.equals(row.get("wire_ready_json")),
+                              NetworkErrors.CONFLICT);
+                        } else {
+                          require(
+                              jdbc.queryForObject(
+                                      "SELECT count(*) FROM collab.network_wire_ingress WHERE tenant_id=? AND ingress_id=?",
+                                      Integer.class,
+                                      tenant,
+                                      c.getIngress())
+                                  == 0,
+                              NetworkErrors.STALE_EPOCH);
+                          String incarnation = proposed.incarnation();
+                          Target initial =
+                              new Target(
+                                  c.getRealm(),
+                                  c.getNode(),
+                                  incarnation,
+                                  proposed.epoch(),
+                                  request.path("channel_nonce").asString(),
+                                  request.path("request_id").asString(),
+                                  deadline);
+                          var route =
+                              source.withTarget(
+                                  c,
+                                  initial,
+                                  () -> mailbox.ready(tenant, c.getRealm(), c.getNode()));
+                          boolean healthy =
+                              request.path("local_high_water").asString().equals("0")
+                                  && request.path("registration_revision").asString().equals("0")
+                                  && request
+                                      .path("resume_cursor")
+                                      .asString()
+                                      .equals(Long.toString(route.committedCursor()))
+                                  && request
+                                      .path("receipt_checkpoint")
+                                      .path("checkpoint_seq")
+                                      .asString()
+                                      .equals("0")
+                                  && request
+                                      .path("receipt_checkpoint")
+                                      .path("checkpoint_revision")
+                                      .asString()
+                                      .equals("0")
+                                  && request.path("pending_registration").isNull()
+                                  && (!request.has("evidence")
+                                      || request.path("evidence").isEmpty());
+                          jdbc.update(
+                              "UPDATE collab.network_node SET ingress_id=?,wire_binding_json=?,wire_ready_json=?,wire_incarnation=?,wire_nonce=?,wire_status=?,route_expires_at=? WHERE tenant_id=? AND realm=? AND node_id=?",
+                              c.getIngress(),
+                              binding,
+                              requestJson,
+                              incarnation,
+                              initial.channelNonce(),
+                              healthy ? "ready" : "recovery_conflict",
+                              java.sql.Timestamp.from(deadline),
+                              tenant,
+                              c.getRealm(),
+                              c.getNode());
+                          jdbc.update(
+                              "INSERT INTO collab.network_wire_ingress(tenant_id,realm,node_id,ingress_id) VALUES (?,?,?,?)",
+                              tenant,
+                              c.getRealm(),
+                              c.getNode(),
+                              c.getIngress());
+                          row = locked(c);
+                        }
+                        var target =
+                            target(c, row, request.path("request_id").asString(), deadline);
+                        var current = row;
+                        return source.withTarget(
+                            c,
+                            target,
+                            () -> {
+                              var route = mailbox.head(tenant, c.getRealm(), c.getNode());
+                              var result =
+                                  base("ready_result")
+                                      .put("request_id", target.requestId())
+                                      .put("status", current.get("wire_status").toString())
+                                      .put("epoch", Long.toString(target.epoch()))
+                                      .put("head_seq", Long.toString(route.headSeq()))
+                                      .put(
+                                          "committed_cursor",
+                                          Long.toString(route.committedCursor()))
+                                      .put("retention_low_seq", "0")
+                                      .put("local_high_water", "0")
+                                      .put("registration_revision", "0");
+                              result
+                                  .putObject("node_identity")
+                                  .put("realm", c.getRealm())
+                                  .put("node", c.getNode())
+                                  .put("incarnation", target.incarnation());
+                              result.putNull("seen_checkpoint");
+                              var features = result.putArray("required_features");
+                              requiredFeatures.forEach(features::add);
+                              return signed(result, "ReadyResult", target);
+                            });
+                      }));
         });
   }
 
@@ -174,14 +214,16 @@ public class NetworkMailboxWireService {
     return associated(
         c,
         null,
-        (row, target, route) -> {
-          return signed(
-              base("head")
-                  .put("epoch", Long.toString(target.epoch()))
-                  .put("head_seq", Long.toString(route.headSeq())),
-              "Head",
-              target);
-        });
+        (row, target) ->
+            () -> {
+              var route = mailbox.head(TenantContext.require(), c.getRealm(), c.getNode());
+              return signed(
+                  base("head")
+                      .put("epoch", Long.toString(target.epoch()))
+                      .put("head_seq", Long.toString(route.headSeq())),
+                  "Head",
+                  target);
+            });
   }
 
   public String fetch(NetworkAuthorityConnection c, byte[] bytes) {
@@ -193,15 +235,24 @@ public class NetworkMailboxWireService {
     return associated(
         c,
         request.path("request_id").asString(),
-        (row, target, route) -> {
+        (row, target) -> {
           require(decimal(request, "epoch") == target.epoch(), NetworkErrors.STALE_EPOCH);
-          return mailbox.fetchPage(
-              TenantContext.require(),
-              c.getRealm(),
-              c.getNode(),
-              decimal(request, "resume_cursor"),
-              request.path("max_items").asInt(),
-              request.path("max_bytes").asInt());
+          var prepared =
+              mailbox.preparePage(
+                  TenantContext.require(),
+                  c.getRealm(),
+                  c.getNode(),
+                  decimal(request, "resume_cursor"),
+                  request.path("max_items").asInt(),
+                  request.path("max_bytes").asInt());
+          var locals = new ArrayList<auriga.collab.api.NetworkLocalTargets.Registration>();
+          for (String local : prepared.targetLocals())
+            locals.add(
+                source.localSnapshot(TenantContext.require(), c.getRealm(), c.getNode(), local));
+          return () -> {
+            for (var local : locals) source.revalidateLocal(TenantContext.require(), local);
+            return mailbox.finishPage(prepared);
+          };
         });
   }
 
@@ -210,210 +261,312 @@ public class NetworkMailboxWireService {
     return associated(
         c,
         request.path("request_id").asString(),
-        (row, target, route) -> {
-          UUID tenant = TenantContext.require();
+        (row, target) -> {
           require(decimal(request, "epoch") == target.epoch(), NetworkErrors.STALE_EPOCH);
-          String operation = request.path("operation_id").asString();
-          String canonical = NetworkJson.canonical(request);
-          var existing =
-              jdbc.queryForList(
-                  "SELECT request_json,result_json FROM collab.network_wire_receipt WHERE tenant_id=? AND realm=? AND node_id=? AND operation_id=?",
-                  tenant,
-                  c.getRealm(),
-                  c.getNode(),
-                  operation);
-          if (!existing.isEmpty()) {
-            require(
-                canonical.equals(existing.getFirst().get("request_json")), NetworkErrors.CONFLICT);
-            var result =
-                (ObjectNode) NetworkJson.parse(existing.getFirst().get("result_json").toString());
-            return signed(result, "ReceiptCommitted", target);
-          }
-          UUID delivery = uuid(request.path("delivery_id").asString());
-          var items = new ArrayList<NetworkMailboxService.ReceiptItem>();
-          var newProofs = new LinkedHashMap<UUID, String>();
-          var replays = new LinkedHashMap<UUID, NetworkMailboxService.ReceiptResultView>();
-          var unique = new HashSet<UUID>();
-          for (var entry : request.path("results")) {
-            UUID recipient = uuid(entry.path("recipient_id").asString());
-            require(unique.add(recipient), NetworkErrors.PROTOCOL_ERROR);
-            var records =
-                jdbc.queryForList(
-                    """
-            SELECT r.target_local,r.state_version,r.transport_status,m.id AS message_id,m.message_json,m.dispatch_context_json FROM collab.network_recipient r
-            JOIN collab.network_mail_item i ON i.tenant_id=r.tenant_id AND i.id=r.delivery_id
-            JOIN collab.network_message m ON m.tenant_id=i.tenant_id AND m.id=i.message_id
-            WHERE r.tenant_id=? AND r.id=? AND i.id=? AND i.target_realm=? AND i.target_node=? AND i.mail_seq=? FOR UPDATE OF r
-            """,
-                    tenant,
-                    recipient,
-                    delivery,
-                    c.getRealm(),
-                    c.getNode(),
-                    decimal(request, "mail_seq"));
-            require(records.size() == 1, NetworkErrors.UNAUTHORIZED);
-            var record = records.getFirst();
-            var address = entry.path("target");
-            require(
-                c.getRealm().equals(address.path("realm").asString())
-                    && c.getNode().equals(address.path("node").asString())
-                    && record.get("target_local").equals(address.path("local").asString()),
-                NetworkErrors.UNAUTHORIZED);
-            require(record.get("message_json") != null, NetworkErrors.PROTOCOL_ERROR);
-            var message = NetworkJson.parse(record.get("message_json").toString());
-            require(
-                NetworkJson.digest(message).equals(entry.path("message_digest").asString()),
-                NetworkErrors.CONFLICT);
-            String outcome = entry.path("status").asString();
-            require(
-                Set.of("host_accepted", "quarantined", "rejected").contains(outcome),
-                NetworkErrors.PROTOCOL_ERROR);
-            var dispatch =
-                record.get("dispatch_context_json") == null
-                    ? null
-                    : NetworkJson.parse(record.get("dispatch_context_json").toString());
-            var expected =
-                NetworkReceiptProofs.target(
-                    message,
-                    dispatch,
-                    c.getRealm(),
-                    c.getNode(),
-                    record.get("target_local").toString(),
-                    source.resolveTargetType(
-                        tenant, c.getRealm(), c.getNode(), record.get("target_local").toString()));
-            var contacts =
-                jdbc.queryForList(
-                    "SELECT status,scope FROM collab.network_contact WHERE tenant_id=? AND message_id=?",
-                    tenant,
-                    record.get("message_id"));
-            var contact =
-                contacts.isEmpty() ? null : NetworkJson.JSON.valueToTree(contacts.getFirst());
-            NetworkReceiptProofs.stage(entry, message, expected, contact);
-            if ("host_accepted".equals(outcome)) {
-              String proof = NetworkReceiptProofs.stable(entry);
-              var old =
-                  jdbc.queryForList(
-                      "SELECT proof_json FROM collab.network_acceptance_proof WHERE tenant_id=? AND recipient_id=? AND accepted_by=?",
-                      tenant,
-                      recipient,
-                      entry.path("accepted_by").asString());
-              if (!old.isEmpty()) {
-                require(proof.equals(old.getFirst().get("proof_json")), NetworkErrors.CONFLICT);
-                require(
-                    "host_accepted".equals(record.get("transport_status")), NetworkErrors.CONFLICT);
-                replays.put(
-                    recipient,
-                    new NetworkMailboxService.ReceiptResultView(
-                        recipient, "host_accepted", number(record, "state_version")));
-                continue;
-              }
-              require(
-                  !"host_accepted".equals(record.get("transport_status")), NetworkErrors.CONFLICT);
-              newProofs.put(recipient, proof);
-            }
-            require(
-                decimal(entry, "expected_state_version") == number(record, "state_version"),
-                NetworkErrors.CONFLICT);
-            items.add(
-                new NetworkMailboxService.ReceiptItem(
-                    recipient, "rejected".equals(outcome) ? "revoked" : outcome));
-          }
-          var commit =
-              items.isEmpty()
-                  ? new NetworkMailboxService.ReceiptCommitResult(
-                      delivery,
-                      decimal(request, "mail_seq"),
-                      List.of(),
-                      jdbc.queryForObject(
-                              "SELECT count(*) FROM collab.network_recipient WHERE tenant_id=? AND delivery_id=? AND transport_status NOT IN ('host_accepted','expired','canceled','revoked','skipped','unresolved')",
-                              Integer.class,
-                              tenant,
-                              delivery)
-                          == 0,
-                      route.committedCursor())
-                  : mailbox.receipt(
-                      new NetworkMailboxService.ReceiptRequest(
-                          tenant,
-                          c.getRealm(),
-                          c.getNode(),
-                          target.epoch(),
-                          delivery,
-                          decimal(request, "mail_seq"),
-                          items));
-          for (var entry : request.path("results")) {
-            UUID id = uuid(entry.path("recipient_id").asString());
-            if (newProofs.containsKey(id))
-              jdbc.update(
-                  "INSERT INTO collab.network_acceptance_proof(tenant_id,recipient_id,delivery_id,accepted_by,proof_json) VALUES (?,?,?,?,?)",
-                  tenant,
-                  id,
-                  delivery,
-                  entry.path("accepted_by").asString(),
-                  newProofs.get(id));
-          }
-          var result =
-              base("receipt_committed")
-                  .put("request_id", target.requestId())
-                  .put("operation_id", operation)
-                  .put("delivery_id", delivery.toString())
-                  .put("mail_seq", Long.toString(commit.mailSeq()))
-                  .put("mail_item_closed", commit.mailItemClosed())
-                  .put("committed_cursor", Long.toString(commit.committedCursor()));
-          var results = result.putArray("results");
-          var combined = new LinkedHashMap<UUID, NetworkMailboxService.ReceiptResultView>(replays);
-          commit.results().forEach(value -> combined.put(value.recipientId(), value));
-          for (var original : request.path("results")) {
-            var entry = combined.get(uuid(original.path("recipient_id").asString()));
-            results
-                .addObject()
-                .put("recipient_id", entry.recipientId().toString())
-                .put("transport_status", entry.transportStatus())
-                .put("state_version", Long.toString(entry.stateVersion()));
-          }
-          String signed = signed(result, "ReceiptCommitted", target);
-          jdbc.update(
-              "INSERT INTO collab.network_wire_receipt(tenant_id,realm,node_id,operation_id,request_json,result_json) VALUES (?,?,?,?,?,?)",
-              tenant,
-              c.getRealm(),
-              c.getNode(),
-              operation,
-              canonical,
-              NetworkJson.canonical(result));
-          return signed;
+          var prepared = prepareReceipt(c, request);
+          return () ->
+              commitReceipt(
+                  c,
+                  request,
+                  target,
+                  mailbox.head(TenantContext.require(), c.getRealm(), c.getNode()),
+                  prepared);
         });
   }
 
+  private record ReceiptSnapshot(
+      Map<UUID, Map<String, Object>> rows,
+      Map<UUID, auriga.collab.api.NetworkLocalTargets.Registration> locals) {}
+
+  private ReceiptSnapshot prepareReceipt(NetworkAuthorityConnection c, JsonNode request) {
+    var records = new LinkedHashMap<UUID, Map<String, Object>>();
+    tx.execute(
+        status -> {
+          for (var entry : request.path("results")) {
+            UUID id = uuid(entry.path("recipient_id").asString());
+            records.put(id, receiptRow(c, request, id, false));
+          }
+          return null;
+        });
+    var locals = new LinkedHashMap<UUID, auriga.collab.api.NetworkLocalTargets.Registration>();
+    for (var entry : records.entrySet())
+      locals.put(
+          entry.getKey(),
+          source.localSnapshot(
+              TenantContext.require(),
+              c.getRealm(),
+              c.getNode(),
+              entry.getValue().get("target_local").toString()));
+    return new ReceiptSnapshot(Map.copyOf(records), Map.copyOf(locals));
+  }
+
+  private Map<String, Object> receiptRow(
+      NetworkAuthorityConnection c, JsonNode request, UUID recipient, boolean lock) {
+    var rows =
+        jdbc.queryForList(
+            """
+        SELECT r.target_local,r.state_version,r.transport_status,m.id AS message_id,m.message_json,m.dispatch_context_json
+          FROM collab.network_recipient r
+          JOIN collab.network_mail_item i ON i.tenant_id=r.tenant_id AND i.id=r.delivery_id
+          JOIN collab.network_message m ON m.tenant_id=i.tenant_id AND m.id=i.message_id
+         WHERE r.tenant_id=? AND r.id=? AND i.id=? AND i.target_realm=? AND i.target_node=? AND i.mail_seq=?
+        """
+                + (lock ? " FOR UPDATE OF r" : ""),
+            TenantContext.require(),
+            recipient,
+            uuid(request.path("delivery_id").asString()),
+            c.getRealm(),
+            c.getNode(),
+            decimal(request, "mail_seq"));
+    require(rows.size() == 1, NetworkErrors.UNAUTHORIZED);
+    return rows.getFirst();
+  }
+
+  private String commitReceipt(
+      NetworkAuthorityConnection c,
+      JsonNode request,
+      Target target,
+      NetworkMailboxService.NodeRoute route,
+      ReceiptSnapshot prepared) {
+    UUID tenant = TenantContext.require();
+    require(decimal(request, "epoch") == target.epoch(), NetworkErrors.STALE_EPOCH);
+    String operation = request.path("operation_id").asString();
+    String canonical = NetworkJson.canonical(request);
+    var existing =
+        jdbc.queryForList(
+            "SELECT request_json,result_json FROM collab.network_wire_receipt WHERE tenant_id=? AND realm=? AND node_id=? AND operation_id=?",
+            tenant,
+            c.getRealm(),
+            c.getNode(),
+            operation);
+    ObjectNode cached = null;
+    if (!existing.isEmpty()) {
+      require(canonical.equals(existing.getFirst().get("request_json")), NetworkErrors.CONFLICT);
+      cached = (ObjectNode) NetworkJson.parse(existing.getFirst().get("result_json").toString());
+    }
+    UUID delivery = uuid(request.path("delivery_id").asString());
+    var items = new ArrayList<NetworkMailboxService.ReceiptItem>();
+    var newProofs = new LinkedHashMap<UUID, String>();
+    var replays = new LinkedHashMap<UUID, NetworkMailboxService.ReceiptResultView>();
+    var unique = new HashSet<UUID>();
+    for (var entry : request.path("results")) {
+      UUID recipient = uuid(entry.path("recipient_id").asString());
+      require(unique.add(recipient), NetworkErrors.PROTOCOL_ERROR);
+      var record = receiptRow(c, request, recipient, true);
+      var snapshot = prepared.rows().get(recipient);
+      // Recipient status may have advanced through an identical concurrent proof. Identity/body
+      // cannot change.
+      for (String key :
+          List.of("target_local", "message_id", "message_json", "dispatch_context_json"))
+        require(Objects.equals(record.get(key), snapshot.get(key)), NetworkErrors.CONFLICT);
+      source.revalidateLocal(tenant, prepared.locals().get(recipient));
+      var address = entry.path("target");
+      require(
+          c.getRealm().equals(address.path("realm").asString())
+              && c.getNode().equals(address.path("node").asString())
+              && record.get("target_local").equals(address.path("local").asString()),
+          NetworkErrors.UNAUTHORIZED);
+      require(record.get("message_json") != null, NetworkErrors.PROTOCOL_ERROR);
+      var message = NetworkJson.parse(record.get("message_json").toString());
+      require(
+          NetworkJson.digest(message).equals(entry.path("message_digest").asString()),
+          NetworkErrors.CONFLICT);
+      String outcome = entry.path("status").asString();
+      require(
+          Set.of("host_accepted", "quarantined", "rejected").contains(outcome),
+          NetworkErrors.PROTOCOL_ERROR);
+      var dispatch =
+          record.get("dispatch_context_json") == null
+              ? null
+              : NetworkJson.parse(record.get("dispatch_context_json").toString());
+      var expected =
+          NetworkReceiptProofs.target(
+              message,
+              dispatch,
+              c.getRealm(),
+              c.getNode(),
+              record.get("target_local").toString(),
+              prepared.locals().get(recipient).type());
+      var contacts =
+          jdbc.queryForList(
+              "SELECT status,scope FROM collab.network_contact WHERE tenant_id=? AND message_id=?",
+              tenant,
+              record.get("message_id"));
+      var contact = contacts.isEmpty() ? null : NetworkJson.JSON.valueToTree(contacts.getFirst());
+      NetworkReceiptProofs.stage(entry, message, expected, contact);
+      if (cached != null && !"host_accepted".equals(outcome)) {
+        require(
+            ("rejected".equals(outcome) ? "revoked" : outcome)
+                .equals(record.get("transport_status")),
+            NetworkErrors.CONFLICT);
+        continue;
+      }
+      if ("host_accepted".equals(outcome)) {
+        String proof = NetworkReceiptProofs.stable(entry);
+        var old =
+            jdbc.queryForList(
+                "SELECT proof_json FROM collab.network_acceptance_proof WHERE tenant_id=? AND recipient_id=? AND accepted_by=?",
+                tenant,
+                recipient,
+                entry.path("accepted_by").asString());
+        if (!old.isEmpty()) {
+          require(proof.equals(old.getFirst().get("proof_json")), NetworkErrors.CONFLICT);
+          require("host_accepted".equals(record.get("transport_status")), NetworkErrors.CONFLICT);
+          replays.put(
+              recipient,
+              new NetworkMailboxService.ReceiptResultView(
+                  recipient, "host_accepted", number(record, "state_version")));
+          continue;
+        }
+        require(!"host_accepted".equals(record.get("transport_status")), NetworkErrors.CONFLICT);
+        newProofs.put(recipient, proof);
+      }
+      require(
+          decimal(entry, "expected_state_version") == number(record, "state_version"),
+          NetworkErrors.CONFLICT);
+      items.add(
+          new NetworkMailboxService.ReceiptItem(
+              recipient, "rejected".equals(outcome) ? "revoked" : outcome));
+    }
+    if (cached != null) return signed(cached, "ReceiptCommitted", target);
+    var commit =
+        items.isEmpty()
+            ? new NetworkMailboxService.ReceiptCommitResult(
+                delivery,
+                decimal(request, "mail_seq"),
+                List.of(),
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM collab.network_recipient WHERE tenant_id=? AND delivery_id=? AND transport_status NOT IN ('host_accepted','expired','canceled','revoked','skipped','unresolved')",
+                        Integer.class,
+                        tenant,
+                        delivery)
+                    == 0,
+                route.committedCursor())
+            : mailbox.receipt(
+                new NetworkMailboxService.ReceiptRequest(
+                    tenant,
+                    c.getRealm(),
+                    c.getNode(),
+                    target.epoch(),
+                    delivery,
+                    decimal(request, "mail_seq"),
+                    items));
+    for (var entry : request.path("results")) {
+      UUID id = uuid(entry.path("recipient_id").asString());
+      if (newProofs.containsKey(id))
+        jdbc.update(
+            "INSERT INTO collab.network_acceptance_proof(tenant_id,recipient_id,delivery_id,accepted_by,proof_json) VALUES (?,?,?,?,?)",
+            tenant,
+            id,
+            delivery,
+            entry.path("accepted_by").asString(),
+            newProofs.get(id));
+    }
+    var result =
+        base("receipt_committed")
+            .put("request_id", target.requestId())
+            .put("operation_id", operation)
+            .put("delivery_id", delivery.toString())
+            .put("mail_seq", Long.toString(commit.mailSeq()))
+            .put("mail_item_closed", commit.mailItemClosed())
+            .put("committed_cursor", Long.toString(commit.committedCursor()));
+    var results = result.putArray("results");
+    var combined = new LinkedHashMap<UUID, NetworkMailboxService.ReceiptResultView>(replays);
+    commit.results().forEach(value -> combined.put(value.recipientId(), value));
+    for (var original : request.path("results")) {
+      var entry = combined.get(uuid(original.path("recipient_id").asString()));
+      results
+          .addObject()
+          .put("recipient_id", entry.recipientId().toString())
+          .put("transport_status", entry.transportStatus())
+          .put("state_version", Long.toString(entry.stateVersion()));
+    }
+    String signed = signed(result, "ReceiptCommitted", target);
+    jdbc.update(
+        "INSERT INTO collab.network_wire_receipt(tenant_id,realm,node_id,operation_id,request_json,result_json) VALUES (?,?,?,?,?,?)",
+        tenant,
+        c.getRealm(),
+        c.getNode(),
+        operation,
+        canonical,
+        NetworkJson.canonical(result));
+    return signed;
+  }
+
   private interface Work {
-    String apply(Map<String, Object> row, Target target, NetworkMailboxService.NodeRoute route);
+    java.util.function.Supplier<String> prepare(Map<String, Object> row, Target target);
   }
 
   private String associated(NetworkAuthorityConnection c, String requestId, Work work) {
     NetworkAuthorityClient.binding(c);
     Instant deadline = source.verify(c);
-    return tx.execute(
-        status -> {
-          var row = locked(c);
-          require(bindingJson(c).equals(row.get("wire_binding_json")), NetworkErrors.STALE_EPOCH);
-          require("ready".equals(row.get("wire_status")), RECOVERY);
-          var target = target(c, row, requestId, deadline);
-          return source.withTarget(
-              c,
-              target,
+    var before = tx.execute(status -> read(c, false));
+    require(before != null, NetworkErrors.STALE_EPOCH);
+    require(bindingJson(c).equals(before.get("wire_binding_json")), NetworkErrors.STALE_EPOCH);
+    require("ready".equals(before.get("wire_status")), RECOVERY);
+    NetworkWireCapabilities.verify(
+        NetworkJson.parse(before.get("wire_ready_json").toString()), broadcast);
+    var target = target(c, before, requestId, deadline);
+    return source.withTarget(
+        c,
+        target,
+        broadcast,
+        () -> {
+          var decision =
+              mailbox.authorizeTarget(
+                  TenantContext.require(),
+                  c.getRealm(),
+                  c.getNode(),
+                  Set.of(auriga.iam.api.NetworkAuthority.Operation.RECEIVE));
+          return mailbox.withDecision(
+              decision,
               () -> {
-                // Replays must recheck current RECEIVE authority too, before looking up evidence.
-                var route = mailbox.head(TenantContext.require(), c.getRealm(), c.getNode());
-                return work.apply(row, target, route);
+                var prepared = work.prepare(before, target);
+                return tx.execute(
+                    status -> {
+                      var row = locked(c);
+                      unchanged(before, row);
+                      require(
+                          bindingJson(c).equals(row.get("wire_binding_json")),
+                          NetworkErrors.STALE_EPOCH);
+                      require("ready".equals(row.get("wire_status")), RECOVERY);
+                      return mailbox.withDecision(decision, prepared);
+                    });
               });
         });
   }
 
+  private static void unchanged(Map<String, Object> before, Map<String, Object> current) {
+    if (before == null) {
+      require(
+          number(current, "connection_epoch") == 0 && current.get("wire_binding_json") == null,
+          NetworkErrors.STALE_EPOCH);
+      return;
+    }
+    for (String key :
+        List.of(
+            "connection_epoch",
+            "wire_binding_json",
+            "wire_ready_json",
+            "wire_incarnation",
+            "wire_nonce",
+            "wire_status"))
+      require(Objects.equals(before.get(key), current.get(key)), NetworkErrors.STALE_EPOCH);
+  }
+
   private Map<String, Object> locked(NetworkAuthorityConnection c) {
+    return read(c, true);
+  }
+
+  private Map<String, Object> read(NetworkAuthorityConnection c, boolean lock) {
     var rows =
         jdbc.queryForList(
-            "SELECT * FROM collab.network_node WHERE tenant_id=? AND realm=? AND node_id=? FOR UPDATE",
+            "SELECT * FROM collab.network_node WHERE tenant_id=? AND realm=? AND node_id=?"
+                + (lock ? " FOR UPDATE" : ""),
             TenantContext.require(),
             c.getRealm(),
             c.getNode());
+    if (!lock && rows.isEmpty()) return null;
     require(rows.size() == 1, NetworkErrors.STALE_EPOCH);
     return rows.getFirst();
   }

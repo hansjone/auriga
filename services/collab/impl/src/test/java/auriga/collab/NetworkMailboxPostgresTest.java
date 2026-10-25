@@ -333,13 +333,14 @@ class NetworkMailboxPostgresTest {
                 "UPDATE collab.network_message SET message_json='null' WHERE id=?",
                 two.messageId()));
     call(tenant, () -> mailbox.ready(tenant, "2", "20"));
+    var rollbackPage = call(tenant, () -> mailbox.preparePage(tenant, "2", "20", 0, 10, 65536));
     assertThrows(
         IllegalStateException.class,
         () ->
             sql(
                 tenant,
                 () -> {
-                  mailbox.fetchPage(tenant, "2", "20", 0, 10, 65536);
+                  mailbox.finishPage(rollbackPage);
                   throw new IllegalStateException("rollback fetch");
                 }));
     assertEquals(0, auditCount(tenant, "collab.network.dispatch"));
@@ -982,6 +983,7 @@ class NetworkMailboxPostgresTest {
     call(tenant, () -> guarded.store(request));
     call(tenant, () -> guarded.store(request));
     call(tenant, () -> guarded.ready(tenant, "2", "20"));
+    var sizingPage = call(tenant, () -> guarded.preparePage(tenant, "2", "20", 0, 10, 65536));
     int[] fullBytes = {0};
     assertThrows(
         IllegalStateException.class,
@@ -989,7 +991,7 @@ class NetworkMailboxPostgresTest {
             sql(
                 tenant,
                 () -> {
-                  var full = guarded.fetchPage(tenant, "2", "20", 0, 10, 65536);
+                  var full = guarded.finishPage(sizingPage);
                   fullBytes[0] = full.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
                   throw new IllegalStateException("rollback sizing fetch");
                 }));
@@ -1052,10 +1054,13 @@ class NetworkMailboxPostgresTest {
 
       public Target currentTarget(UUID tenant) {
         long epoch =
-            jdbc.queryForObject(
-                "SELECT coalesce(max(connection_epoch),0) FROM collab.network_node WHERE tenant_id=? AND realm='2' AND node_id='20'",
-                Long.class,
-                tenant);
+            new TransactionTemplate(manager)
+                .execute(
+                    status ->
+                        jdbc.queryForObject(
+                            "SELECT coalesce(max(connection_epoch),0) FROM collab.network_node WHERE tenant_id=? AND realm='2' AND node_id='20'",
+                            Long.class,
+                            tenant));
         return new Target(
             "2",
             "20",

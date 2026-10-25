@@ -85,6 +85,155 @@ class NetworkMailboxWirePostgresTest {
   }
 
   @Test
+  void missingReadyCapabilitiesCannotTakeOverAnExistingRoute() {
+    call(
+        () -> {
+          var c =
+              NetworkAuthorityGrpcTest.connection(TENANT).toBuilder()
+                  .setNode("50")
+                  .setIngress("ready-security")
+                  .build();
+          byte[] valid = ready("security-boot", "security-nonce", "security-ready");
+          var response = NetworkJson.parse(wire.ready(c, valid));
+          assertEquals(3, response.path("required_features").size());
+          int calls = mockingDetails(iam).getInvocations().size();
+          for (String side : List.of("features", "adapter_capabilities"))
+            for (String missing :
+                List.of("server_auth_v1", "source_attestation_v1", "inbox_only_v1")) {
+              var invalid = (ObjectNode) NetworkJson.parse(valid);
+              var original = invalid.path(side).deepCopy();
+              invalid.putArray(side);
+              for (var capability : original)
+                if (!missing.equals(capability.asString())) invalid.withArray(side).add(capability);
+              NetworkAuthorityGrpcTest.denied(
+                  () ->
+                      wire.ready(
+                          c.toBuilder().setIngress("bad-" + side + "-" + missing).build(),
+                          bytes(invalid.toString())),
+                  "network.protocol_error");
+            }
+          assertEquals(calls, mockingDetails(iam).getInvocations().size());
+          new TransactionTemplate(manager)
+              .execute(
+                  status -> {
+                    assertEquals(
+                        1,
+                        jdbc.queryForObject(
+                            "SELECT connection_epoch FROM collab.network_node WHERE tenant_id=? AND node_id='50'",
+                            Integer.class,
+                            TENANT));
+                    assertEquals(
+                        "ready-security",
+                        jdbc.queryForObject(
+                            "SELECT ingress_id FROM collab.network_node WHERE tenant_id=? AND node_id='50'",
+                            String.class,
+                            TENANT));
+                    return null;
+                  });
+          return null;
+        });
+  }
+
+  @Test
+  void firstContactRequiresAllowedSystemStageAndNeverInventsSessionAssignment() {
+    call(
+        () -> {
+          var c =
+              NetworkAuthorityGrpcTest.connection(TENANT).toBuilder()
+                  .setNode("51")
+                  .setIngress("contact-security")
+                  .build();
+          wire.ready(c, ready("contact-boot", "contact-nonce", "contact-ready"));
+          UUID message = UUID.randomUUID(),
+              delivery = UUID.randomUUID(),
+              recipient = UUID.randomUUID();
+          var data =
+              storedMessage(message, "51", false)
+                  .put("kind", "first_contact")
+                  .put("intent", "request")
+                  .put("contact_scope", "conversation");
+          new TransactionTemplate(manager)
+              .execute(
+                  status -> {
+                    jdbc.update(
+                        "INSERT INTO collab.network_message(id,tenant_id,realm,kind,body,source_node,source_local,message_json,source_context_json) VALUES (?,?,'2','first_contact','hello','63','1',?,'{}')",
+                        message,
+                        TENANT,
+                        data.toString());
+                    jdbc.update(
+                        "INSERT INTO collab.network_mail_item(id,tenant_id,message_id,target_realm,target_node,mail_seq) VALUES (?,?,?,'2','51',1)",
+                        delivery,
+                        TENANT,
+                        message);
+                    jdbc.update(
+                        "INSERT INTO collab.network_recipient(id,tenant_id,delivery_id,target_local) VALUES (?,?,?,'0')",
+                        recipient,
+                        TENANT,
+                        delivery);
+                    jdbc.update(
+                        "INSERT INTO collab.network_contact(id,tenant_id,message_id,source_realm,source_node,source_local,target_realm,target_node,expires_at) VALUES (?,? ,?,'2','63','1','2','51',?)",
+                        message,
+                        TENANT,
+                        message,
+                        java.sql.Timestamp.from(Instant.now().plusSeconds(3600)));
+                    jdbc.update(
+                        "UPDATE collab.network_node SET head_seq=1 WHERE tenant_id=? AND node_id='51'",
+                        TENANT);
+                    return null;
+                  });
+          String frame = NetworkMailboxWireFrames.receipt("51", delivery, recipient, data);
+          NetworkAuthorityGrpcTest.denied(
+              () -> wire.receipt(c, bytes(frame)), "network.unauthorized");
+          new TransactionTemplate(manager)
+              .execute(
+                  status -> {
+                    assertEquals(
+                        0,
+                        jdbc.queryForObject(
+                            "SELECT count(*) FROM collab.network_acceptance_proof WHERE tenant_id=? AND recipient_id=?",
+                            Integer.class,
+                            TENANT,
+                            recipient));
+                    jdbc.update(
+                        "UPDATE collab.network_contact SET status='allowed' WHERE tenant_id=? AND id=?",
+                        TENANT,
+                        message);
+                    return null;
+                  });
+          assertTrue(
+              NetworkJson.parse(wire.receipt(c, bytes(frame)))
+                  .path("mail_item_closed")
+                  .asBoolean());
+          var session =
+              (ObjectNode)
+                  NetworkJson.parse(
+                      frame
+                          .replace("op-r", "op-session")
+                          .replace("\"accepted_by\":\"system\"", "\"accepted_by\":\"session\""));
+          ((ObjectNode) session.path("results").get(0))
+              .set(
+                  "assigned_address",
+                  NetworkJson.parse(
+                      "{\"version\":1,\"realm\":\"2\",\"node\":\"51\",\"local\":\"1\",\"type\":\"session\"}"));
+          NetworkAuthorityGrpcTest.denied(
+              () -> wire.receipt(c, bytes(session.toString())), "network.unauthorized");
+          new TransactionTemplate(manager)
+              .execute(
+                  status -> {
+                    assertEquals(
+                        1,
+                        jdbc.queryForObject(
+                            "SELECT count(*) FROM collab.network_acceptance_proof WHERE tenant_id=? AND recipient_id=?",
+                            Integer.class,
+                            TENANT,
+                            recipient));
+                    return null;
+                  });
+          return null;
+        });
+  }
+
+  @Test
   void readyIsIdempotentAndNewIngressFencesOldAcrossInstances() {
     call(
         () -> {
@@ -261,6 +410,100 @@ class NetworkMailboxWirePostgresTest {
   }
 
   @Test
+  void concurrentContradictoryFirstProofsHaveExactlyOneWinner() throws Exception {
+    var c =
+        NetworkAuthorityGrpcTest.connection(TENANT).toBuilder()
+            .setNode("52")
+            .setIngress("proof-race")
+            .build();
+    call(() -> wire.ready(c, ready("race-boot", "race-nonce", "race-ready")));
+    UUID message = UUID.randomUUID(), delivery = UUID.randomUUID(), recipient = UUID.randomUUID();
+    var data = storedMessage(message, "52", false);
+    call(
+        () ->
+            new TransactionTemplate(manager)
+                .execute(
+                    status -> {
+                      jdbc.update(
+                          "INSERT INTO collab.network_message(id,tenant_id,realm,kind,body,source_node,source_local,message_json,source_context_json) VALUES (?,?,'2','message','hello','63','0',?,'{}')",
+                          message,
+                          TENANT,
+                          data.toString());
+                      jdbc.update(
+                          "INSERT INTO collab.network_mail_item(id,tenant_id,message_id,target_realm,target_node,mail_seq) VALUES (?,?,?,'2','52',1)",
+                          delivery,
+                          TENANT,
+                          message);
+                      jdbc.update(
+                          "INSERT INTO collab.network_recipient(id,tenant_id,delivery_id,target_local) VALUES (?,?,?,'0')",
+                          recipient,
+                          TENANT,
+                          delivery);
+                      jdbc.update(
+                          "UPDATE collab.network_node SET head_seq=1 WHERE tenant_id=? AND node_id='52'",
+                          TENANT);
+                      return null;
+                    }));
+    String first = NetworkMailboxWireFrames.receipt("52", delivery, recipient, data);
+    String second = first.replace("op-r", "op-race-other").replace("host-r", "host-race-other");
+    var start = new java.util.concurrent.CountDownLatch(1);
+    var outcomes = new ArrayList<String>();
+    try (var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = new ArrayList<java.util.concurrent.Future<String>>();
+      for (String frame : List.of(first, second))
+        futures.add(
+            workers.submit(
+                () -> {
+                  assertTrue(start.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                  try {
+                    call(() -> wire.receipt(c, bytes(frame)));
+                    return "committed";
+                  } catch (auriga.common.error.AurigaException error) {
+                    return error.errorCode().code();
+                  }
+                }));
+      start.countDown();
+      for (var future : futures)
+        outcomes.add(future.get(10, java.util.concurrent.TimeUnit.SECONDS));
+    }
+    assertEquals(1, Collections.frequency(outcomes, "committed"));
+    assertEquals(1, Collections.frequency(outcomes, "network.conflict"));
+    call(
+        () ->
+            new TransactionTemplate(manager)
+                .execute(
+                    status -> {
+                      assertEquals(
+                          1,
+                          jdbc.queryForObject(
+                              "SELECT count(*) FROM collab.network_acceptance_proof WHERE tenant_id=? AND recipient_id=?",
+                              Integer.class,
+                              TENANT,
+                              recipient));
+                      assertEquals(
+                          1,
+                          jdbc.queryForObject(
+                              "SELECT count(*) FROM collab.network_wire_receipt WHERE tenant_id=? AND node_id='52'",
+                              Integer.class,
+                              TENANT));
+                      assertEquals(
+                          2,
+                          jdbc.queryForObject(
+                              "SELECT state_version FROM collab.network_recipient WHERE tenant_id=? AND id=?",
+                              Integer.class,
+                              TENANT,
+                              recipient));
+                      assertEquals(
+                          1,
+                          jdbc.queryForObject(
+                              "SELECT committed_cursor FROM collab.network_node WHERE tenant_id=? AND node_id='52'",
+                              Integer.class,
+                              TENANT));
+                      return null;
+                    }));
+  }
+
+  @Test
   void impossibleAcceptanceStagesHaveNoStateCursorOrProofSideEffects() {
     call(
         () -> {
@@ -372,11 +615,15 @@ class NetworkMailboxWirePostgresTest {
   }
 
   static byte[] ready(String boot, String nonce, String id) {
-    return bytes(
-        """
-        {"app_version":"1.0","type":"ready","request_id":"%s","channel_nonce":"%s","boot_id":"%s","features":["server_auth_v1","source_attestation_v1","inbox_only_v1"],"adapter_capabilities":["server_auth_v1","source_attestation_v1","inbox_only_v1"],"resume_cursor":"0","local_high_water":"0","registration_revision":"0","receipt_checkpoint":{"checkpoint_seq":"0","checkpoint_revision":"0","summary_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"keyset_version":"1","pending_registration":null}
-        """
-            .formatted(id, nonce, boot));
+    try (var input =
+        NetworkMailboxWirePostgresTest.class.getResourceAsStream("/network/plugin-ready.json")) {
+      var ready =
+          (ObjectNode) tools.jackson.databind.json.JsonMapper.builder().build().readTree(input);
+      return bytes(
+          ready.put("boot_id", boot).put("channel_nonce", nonce).put("request_id", id).toString());
+    } catch (java.io.IOException error) {
+      throw new java.io.UncheckedIOException(error);
+    }
   }
 
   static byte[] bytes(String value) {
