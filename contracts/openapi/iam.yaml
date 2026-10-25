@@ -32,6 +32,10 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /network/register:
+    $ref: iam-network-client.yaml#/paths/~1network~1register
+  /network/tickets:
+    $ref: iam-network-client.yaml#/paths/~1network~1tickets
   # ---------------- 登录 ----------------
   /login/providers:
     get:

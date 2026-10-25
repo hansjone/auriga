@@ -260,6 +260,20 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamNetworkClient iamNetworkClient(
+      NetworkAuthority authority, IamStore store, Clock clock, Environment env) {
+    return new IamNetworkClient(
+        authority,
+        store,
+        clock,
+        env.getProperty("auriga.iam.network.client-server-audience", ""),
+        Set.copyOf(
+            Binder.get(env)
+                .bind("auriga.iam.network.server-audiences", Bindable.listOf(String.class))
+                .orElse(List.of())));
+  }
+
+  @Bean
   IamAccounts iamAccounts(IamStore store) {
     return new IamAccounts(store);
   }
