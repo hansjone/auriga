@@ -28,22 +28,29 @@ const summary = computed(() => summarizeUsage(props.rows));
     <div>
       <dt>{{ t('tokens') }}</dt>
       <dd>
-        {{
-          (summary.requests === 0 ||
-            summary.missingTokens < summary.requests) &&
-          Number.isSafeInteger(summary.inputTokens)
-            ? summary.inputTokens
-            : t('unknown')
-        }}
+        <span data-test="input-total"
+          >{{
+            (summary.requests === 0 ||
+              summary.missingInputTokens < summary.requests) &&
+            Number.isSafeInteger(summary.inputTokens)
+              ? summary.inputTokens
+              : t('unknown')
+          }}<small v-if="summary.missingInputTokens">
+            ({{ t('partial') }})</small
+          ></span
+        >
         /
-        {{
-          (summary.requests === 0 ||
-            summary.missingTokens < summary.requests) &&
-          Number.isSafeInteger(summary.outputTokens)
-            ? summary.outputTokens
-            : t('unknown')
-        }}
-        <span v-if="summary.missingTokens">({{ t('partial') }})</span>
+        <span data-test="output-total"
+          >{{
+            (summary.requests === 0 ||
+              summary.missingOutputTokens < summary.requests) &&
+            Number.isSafeInteger(summary.outputTokens)
+              ? summary.outputTokens
+              : t('unknown')
+          }}<small v-if="summary.missingOutputTokens">
+            ({{ t('partial') }})</small
+          ></span
+        >
       </dd>
     </div>
     <template v-for="money in summary.money" :key="money.currency">

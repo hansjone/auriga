@@ -74,7 +74,8 @@ export function formatMicros(value: number | null) {
 export function summarizeUsage(rows: Usage[]) {
   let inputTokens = 0,
     outputTokens = 0,
-    missingTokens = 0;
+    missingInputTokens = 0,
+    missingOutputTokens = 0;
   const money = new Map<
     string,
     {
@@ -85,10 +86,12 @@ export function summarizeUsage(rows: Usage[]) {
     }
   >();
   for (const row of rows) {
-    if (!unknownUsage(row) && safe(row.inputTokens) && safe(row.outputTokens)) {
+    if (!unknownUsage(row) && safe(row.inputTokens)) {
       inputTokens += row.inputTokens;
+    } else missingInputTokens++;
+    if (!unknownUsage(row) && safe(row.outputTokens)) {
       outputTokens += row.outputTokens;
-    } else missingTokens++;
+    } else missingOutputTokens++;
     const amount = money.get(row.currency) ?? {
       currency: row.currency,
       costMicros: 0,
@@ -107,7 +110,8 @@ export function summarizeUsage(rows: Usage[]) {
     unknown: rows.filter(unknownUsage).length,
     inputTokens,
     outputTokens,
-    missingTokens,
+    missingInputTokens,
+    missingOutputTokens,
     money: [...money.values()],
   };
 }
@@ -146,11 +150,13 @@ export function useModelUsageData() {
       if (current !== version) return;
       controller.abort();
       error.value =
-        e instanceof ApiError && e.status === 403
-          ? 'forbidden'
-          : e instanceof ApiError && e.status === 401
-            ? 'unauthenticated'
-            : 'loadError';
+        e instanceof ApiError && e.problem.code === 'iam.step_up_required'
+          ? 'stepUpRequired'
+          : e instanceof ApiError && e.status === 403
+            ? 'forbidden'
+            : e instanceof ApiError && e.status === 401
+              ? 'unauthenticated'
+              : 'loadError';
     } finally {
       if (current === version) loading.value = false;
     }

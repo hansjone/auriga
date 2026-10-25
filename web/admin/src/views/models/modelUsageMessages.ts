@@ -5,6 +5,9 @@ const zh = {
   loading: '正在读取全部分页…',
   loadError: '读取失败，请重试。',
   forbidden: '没有读取模型目录或租户用量的权限。',
+  stepUpRequired:
+    '近期身份验证已过期。请通过管理员登录流程重新验证身份，返回本页后刷新重试。',
+  verifyLogin: '前往管理员登录验证',
   unauthenticated: '登录已过期，请重新登录。',
   updated: '快照更新时间',
   endpoint: '模型调用入口',
@@ -60,6 +63,9 @@ const en: Record<keyof typeof zh, string> = {
   loading: 'Reading all pages…',
   loadError: 'Unable to load. Please retry.',
   forbidden: 'Permission to read the model catalog or tenant usage is missing.',
+  stepUpRequired:
+    'Recent verification has expired. Verify your identity again through administrator sign-in, then return to this page and refresh to retry.',
+  verifyLogin: 'Verify through administrator sign-in',
   unauthenticated: 'Session expired. Please sign in again.',
   updated: 'Snapshot updated',
   endpoint: 'Model endpoint',

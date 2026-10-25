@@ -9,6 +9,7 @@ import {
 } from './modelUsageState';
 import UsageSummary from './UsageSummary.vue';
 import UsageRecords from './UsageRecords.vue';
+import ModelUsageError from './ModelUsageError.vue';
 import './modelUsage.css';
 const { t } = useModelUsageI18n();
 const {
@@ -90,7 +91,11 @@ const modelIds = computed(() =>
     </form>
     <p v-if="invalidDates" role="alert">{{ t('invalidDates') }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
-    <p v-else-if="error" role="alert">{{ t(error) }}</p>
+    <ModelUsageError
+      v-else-if="error"
+      :error="error"
+      return-to="/models/usage"
+    />
     <template v-else-if="updatedAt && !invalidDates">
       <p>{{ t('updated') }}: {{ updatedAt }}</p>
       <UsageSummary :rows="rows" /><UsageRecords :rows="rows" />

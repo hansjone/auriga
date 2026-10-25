@@ -10,6 +10,7 @@ import {
 import UsageView from './UsageView.vue';
 import RelayView from './RelayView.vue';
 import UsageSummary from './UsageSummary.vue';
+import UsageRecords from './UsageRecords.vue';
 import type { Usage } from '../../admin/modelUsageApi';
 
 const record = (overrides: Partial<Usage> = {}): Usage => ({
@@ -72,7 +73,8 @@ it('keeps unknown and null out of known totals and retains frozen reservations',
     unknown: 1,
     inputTokens: 40,
     outputTokens: 20,
-    missingTokens: 1,
+    missingInputTokens: 1,
+    missingOutputTokens: 1,
   });
   expect(result.money).toEqual([
     { currency: 'USD', costMicros: 1234567, frozenMicros: 9000000, missing: 2 },
@@ -268,3 +270,178 @@ it('ignores pending responses after unmount', async () => {
   resolve(Response.json({ items: [] }));
   await flushPromises();
 });
+
+it.each([
+  [RelayView, '/models/relay', 'zh-CN'],
+  [UsageView, '/models/usage', 'zh-CN'],
+  [RelayView, '/models/relay', 'en'],
+  [UsageView, '/models/usage', 'en'],
+] as const)(
+  'distinguishes step-up recovery from permission denial on %s (%s, %s)',
+  async (view, path, locale) => {
+    let code = 'iam.step_up_required';
+    const fetch = vi.fn(async () =>
+      Response.json(
+        { status: 403, code, detail: 'private detail' },
+        { status: 403 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const wrapper = mount(view, {
+      global: { plugins: [createAurigaI18n(locale)] },
+    });
+    await flushPromises();
+    const alert = wrapper.get('[role="alert"]');
+    expect(alert.text()).toContain(
+      locale === 'en'
+        ? 'Recent verification has expired'
+        : '近期身份验证已过期',
+    );
+    expect(alert.text()).not.toContain('private detail');
+    expect(wrapper.get('a[data-test="verify-login"]').attributes('href')).toBe(
+      `/login?returnTo=${encodeURIComponent(path)}`,
+    );
+    expect(fetch.mock.calls).toHaveLength(3);
+    code = 'common.forbidden';
+    await wrapper.get('button').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      locale === 'en' ? 'Permission' : '没有读取',
+    );
+    expect(wrapper.find('a[data-test="verify-login"]').exists()).toBe(false);
+    wrapper.unmount();
+  },
+);
+
+it.each([
+  {
+    name: 'input only',
+    rows: [record({ outputTokens: null })],
+    input: 20,
+    output: 0,
+    missingInput: 0,
+    missingOutput: 1,
+    shownInput: '20',
+    shownOutput: '未知',
+  },
+  {
+    name: 'output only',
+    rows: [record({ inputTokens: null })],
+    input: 0,
+    output: 10,
+    missingInput: 1,
+    missingOutput: 0,
+    shownInput: '未知',
+    shownOutput: '10',
+  },
+  {
+    name: 'mixed with normal',
+    rows: [
+      record({ outputTokens: null }),
+      record({ inputTokens: null }),
+      record({ inputTokens: 5 }),
+    ],
+    input: 25,
+    output: 20,
+    missingInput: 1,
+    missingOutput: 1,
+    shownInput: '25',
+    shownOutput: '20',
+  },
+  {
+    name: 'unknown excluded despite numeric fields',
+    rows: [
+      record({ outcome: 'unknown', inputTokens: 900, outputTokens: 900 }),
+      record({ usageQuality: 'unknown' }),
+      record({ outputTokens: null }),
+    ],
+    input: 20,
+    output: 0,
+    missingInput: 2,
+    missingOutput: 3,
+    shownInput: '20',
+    shownOutput: '未知',
+  },
+  {
+    name: 'unsafe input',
+    rows: [record({ inputTokens: Number.MAX_SAFE_INTEGER + 1 })],
+    input: 0,
+    output: 10,
+    missingInput: 1,
+    missingOutput: 0,
+    shownInput: '未知',
+    shownOutput: '10',
+  },
+  {
+    name: 'input sum overflow',
+    rows: [
+      record({ inputTokens: Number.MAX_SAFE_INTEGER }),
+      record({ inputTokens: 1, outputTokens: null }),
+    ],
+    input: Number.MAX_SAFE_INTEGER + 1,
+    output: 10,
+    missingInput: 0,
+    missingOutput: 1,
+    shownInput: '未知',
+    shownOutput: '10',
+  },
+])(
+  'counts each known token side independently: $name',
+  ({
+    rows,
+    input,
+    output,
+    missingInput,
+    missingOutput,
+    shownInput,
+    shownOutput,
+  }) => {
+    const summary = summarizeUsage(rows);
+    expect(summary).toMatchObject({
+      inputTokens: input,
+      outputTokens: output,
+      missingInputTokens: missingInput,
+      missingOutputTokens: missingOutput,
+    });
+    const wrapper = mount(UsageSummary, {
+      props: { rows },
+      global: { plugins: [createAurigaI18n()] },
+    });
+    const inputTotal = wrapper.get('[data-test="input-total"]');
+    const outputTotal = wrapper.get('[data-test="output-total"]');
+    expect(inputTotal.text()).toContain(shownInput);
+    expect(outputTotal.text()).toContain(shownOutput);
+    expect(inputTotal.text().includes('不含未知部分')).toBe(missingInput > 0);
+    expect(outputTotal.text().includes('不含未知部分')).toBe(missingOutput > 0);
+    const details = mount(UsageRecords, {
+      props: {
+        rows: rows.map((row, index) => ({
+          ...row,
+          requestId: `request-${index}`,
+        })),
+      },
+      global: { plugins: [createAurigaI18n()] },
+    });
+    for (const [index, row] of rows.entries()) {
+      const cells = details.findAll('tbody tr')[index]!.findAll('td');
+      const unknown =
+        row.outcome === 'unknown' || row.usageQuality === 'unknown';
+      expect(cells[6]!.text()).toBe(
+        unknown ||
+          row.inputTokens === null ||
+          !Number.isSafeInteger(row.inputTokens)
+          ? '未知'
+          : String(row.inputTokens),
+      );
+      expect(cells[7]!.text()).toBe(
+        unknown ||
+          row.outputTokens === null ||
+          !Number.isSafeInteger(row.outputTokens)
+          ? '未知'
+          : String(row.outputTokens),
+      );
+    }
+    details.unmount();
+    wrapper.unmount();
+  },
+);

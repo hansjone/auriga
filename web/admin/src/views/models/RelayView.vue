@@ -4,6 +4,7 @@ import { ElButton } from 'element-plus';
 import { useModelUsageData, useModelUsageI18n } from './modelUsageState';
 import UsageSummary from './UsageSummary.vue';
 import UsageRecords from './UsageRecords.vue';
+import ModelUsageError from './ModelUsageError.vue';
 import './modelUsage.css';
 const { t } = useModelUsageI18n();
 const { usage, models, providers, loading, error, updatedAt, reload } =
@@ -35,7 +36,11 @@ const latest = computed(() =>
     <code>/ai/v1</code>
     <p>{{ t('endpointNote') }}</p>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
-    <p v-else-if="error" role="alert">{{ t(error) }}</p>
+    <ModelUsageError
+      v-else-if="error"
+      :error="error"
+      return-to="/models/relay"
+    />
     <template v-else-if="updatedAt">
       <p>{{ t('updated') }}: {{ updatedAt }}</p>
       <dl class="usage-summary">
