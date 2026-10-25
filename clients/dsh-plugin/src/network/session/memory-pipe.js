@@ -57,7 +57,12 @@ export function createMemoryPipe(limits = {}) {
     }
     const wireBytes = pubWireBytes(subjectBytes, payload.byteLength);
     try {
-      queue.offer({ wireBytes, payload });
+      queue.offer({
+        wireBytes,
+        payload,
+        resolve() {},
+        reject() {},
+      });
     } catch (e) {
       return Promise.reject(e);
     }
@@ -84,13 +89,16 @@ export function createMemoryPipe(limits = {}) {
       get epoch() {
         return side === 'a' ? epochA : epochB;
       },
+      /** @param {number} n */
       setEpoch(n) {
         if (side === 'a') epochA = n;
         else epochB = n;
       },
+      /** @param {Uint8Array} payload */
       send(payload) {
         return send(side, payload);
       },
+      /** @param {(payload: Uint8Array, epoch: number) => void} handler */
       onMessage(handler) {
         if (side === 'a') handlerA = handler;
         else handlerB = handler;

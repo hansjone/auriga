@@ -17,14 +17,20 @@ export function wireDeliveryToPageItem(item) {
   if (!m || !src?.message_digest) {
     throw new SessionError('bad_item', 'delivery missing message/digest');
   }
-  const recipients = (item.recipients ?? [])
-    .filter((r) => r && r.local !== undefined && r.recipient_id)
-    .map((r) => ({
-      recipientId: r.recipient_id,
-      local: String(r.local),
-      type: r.type ?? (String(r.local) === '0' ? 'system' : 'session'),
-      attemptId: r.attempt_id ?? r.attemptId,
-    }));
+  /** @type {any[]} */
+  const rawRecipients = item.recipients ?? [];
+  const recipients = rawRecipients
+    .filter(
+      /** @param {any} r */ (r) => r && r.local !== undefined && r.recipient_id,
+    )
+    .map(
+      /** @param {any} r */ (r) => ({
+        recipientId: r.recipient_id,
+        local: String(r.local),
+        type: r.type ?? (String(r.local) === '0' ? 'system' : 'session'),
+        attemptId: r.attempt_id ?? r.attemptId,
+      }),
+    );
   for (const r of recipients) {
     if (!r.attemptId) {
       throw new SessionError(

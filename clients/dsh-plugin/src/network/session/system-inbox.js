@@ -66,8 +66,10 @@ export function createSystemInbox({ maxItems = 256 } = {}) {
  * @returns {import('./system-inbox.js').SystemInboxItem}
  */
 export function systemPromptFrom(item, receipt, acceptedAt) {
-  const text =
-    typeof item.message.body?.text === 'string' ? item.message.body.text : '';
+  const body = /** @type {{ text?: unknown } | null | undefined} */ (
+    item.message.body
+  );
+  const text = typeof body?.text === 'string' ? body.text : '';
   return {
     recipientId: receipt.recipientId,
     messageId: item.message.messageId,

@@ -137,7 +137,7 @@ export function createNetworkSession(options) {
       if (id && pending.has(id)) {
         const p = pending.get(id);
         pending.delete(id);
-        p.reject(
+        p?.reject(
           new SessionError(frame.code ?? 'remote_error', 'remote ERROR frame'),
         );
       }
@@ -345,7 +345,9 @@ export function createNetworkSession(options) {
       if (committedFrame.committed_cursor !== undefined) {
         resumeCursor = String(committedFrame.committed_cursor);
       }
-      const ids = (committedFrame.results ?? []).map((r) => r.recipient_id);
+      const ids = (committedFrame.results ?? []).map(
+        /** @param {any} r */ (r) => r.recipient_id,
+      );
       await adapter.markCommitted(ids);
       committed.push(...ids);
     }
