@@ -218,6 +218,16 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamGrpcNetwork iamGrpcNetwork(NetworkAuthority authority, IamGrpcSessions transportGuard) {
+    return new IamGrpcNetwork(authority);
+  }
+
+  @Bean
+  NetworkIngressCleanup networkIngressCleanup(IamStore store, Clock clock) {
+    return new NetworkIngressCleanup(store, clock);
+  }
+
+  @Bean
   NetworkAuthority iamNetworkAuthority(
       IamStore store,
       SessionManager sessions,

@@ -36,6 +36,22 @@
     </dependency>
   </dependencies>
   <build>
+    <resources>
+      <resource><directory>src/main/resources</directory></resource>
+      <resource>
+        <directory>${project.basedir}/../../../contracts/network</directory>
+        <targetPath>auriga/contracts/network</targetPath>
+        <includes><include>*.schema.json</include></includes>
+      </resource>
+    </resources>
+    <testResources>
+      <testResource><directory>src/test/resources</directory></testResource>
+      <testResource>
+        <directory>${project.basedir}/../../../contracts/network/fixtures</directory>
+        <targetPath>network-fixtures</targetPath>
+        <includes><include>*.json</include></includes>
+      </testResource>
+    </testResources>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

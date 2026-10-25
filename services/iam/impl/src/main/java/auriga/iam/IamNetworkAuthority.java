@@ -155,19 +155,25 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   }
 
   @Override
-  public Connection redeem(String raw, String nodeId, String device, String audience) {
+  public Connection redeem(
+      String raw, String nodeId, String device, String audience, IngressBinding binding) {
     caller("svc:ai-gateway");
     if (raw == null || !raw.matches("[A-Za-z0-9_-]{43}")) return denied();
+    // Commit consumption before calling credential(), whose participating transaction
+    // can become rollback-only even when its exception is caught by the caller.
+    ObjectNode ticket =
+        transaction(
+            () -> {
+              String hash = Secrets.hash(raw);
+              ObjectNode found = store.get("network_ticket", hash, true);
+              if (found != null) store.delete("network_ticket", hash);
+              return found;
+            });
+    if (ticket == null) return denied();
     Connection result =
         transaction(
             () -> {
               enabled();
-              String hash = Secrets.hash(raw);
-              ObjectNode ticket = store.get("network_ticket", hash, true);
-              if (ticket == null) return null;
-              // Commit consumption even for a rejected binding. Throwing inside this transaction
-              // would roll back the deletion and let a captured ticket be probed repeatedly.
-              store.delete("network_ticket", hash);
               if (!validNumber(nodeId, false)
                   || audience == null
                   || !servers.contains(audience)
@@ -194,6 +200,48 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                           .instant()
                           .plusSeconds(Math.min(3600, limits().get(Limit.CONNECTION_SECONDS))));
               if (!clock.instant().isBefore(expiry)) return null;
+              if (binding == null
+                  || !Objects.toString(binding.serverId(), "").matches("N[A-Z2-7]{55}")
+                  || !validNumber(binding.clientId(), false)
+                  || !Objects.toString(binding.userNkey(), "").matches("U[A-Z2-7]{55}")
+                  || !ingressForTicket(raw).equals(binding.ingress())
+                  || binding.account() == null
+                  || binding.account().isBlank()
+                  || binding.account().length() > 256) return null;
+              // Reclaim only expired bindings for this node; other live ingresses remain
+              // distinct until READY fences the prior epoch in collab.
+              jdbc.update(
+                  "DELETE FROM iam.network_ingress WHERE tenant_id=? AND data->>'realm'=? AND data->>'node'=? AND expires_at<=?",
+                  TenantContext.require(),
+                  node.realm(),
+                  nodeId,
+                  java.sql.Timestamp.from(clock.instant()));
+              store.insert(
+                  "network_ingress",
+                  binding.ingress(),
+                  Json.object(
+                      "realm",
+                      node.realm(),
+                      "node",
+                      node.node(),
+                      "device",
+                      device,
+                      "serverId",
+                      binding.serverId(),
+                      "clientId",
+                      binding.clientId(),
+                      "userNkey",
+                      binding.userNkey(),
+                      "account",
+                      binding.account(),
+                      "audience",
+                      audience,
+                      "expiresAt",
+                      expiry.toString()),
+                  expiry);
+              jdbc.update(
+                  "INSERT INTO iam.network_ingress_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",
+                  TenantContext.require());
               return new Connection(node, audience, expiry);
             });
     return result == null ? denied() : result;
@@ -204,6 +252,84 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     caller("svc:ai-gateway", "svc:collab");
     if (!validNumber(realm, false) || !validNumber(nodeId, false)) return false;
     return transaction(() -> config().path("enabled").asBoolean(true) && live(node(nodeId), realm));
+  }
+
+  static String ingressForTicket(String raw) {
+    byte[] bytes = HexFormat.of().parseHex(Secrets.hash(raw).substring(0, 32));
+    String alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+    var result = new StringBuilder(26);
+    int buffer = 0, bits = 0;
+    for (byte value : bytes) {
+      buffer = (buffer << 8) | (value & 255);
+      bits += 8;
+      while (bits >= 5) {
+        bits -= 5;
+        result.append(alphabet.charAt((buffer >>> bits) & 31));
+      }
+    }
+    if (bits > 0) result.append(alphabet.charAt((buffer << (5 - bits)) & 31));
+    return result.toString();
+  }
+
+  @Override
+  public Map<NodeReference, Boolean> activeBatch(List<NodeReference> requested) {
+    caller("svc:ai-gateway");
+    if (requested == null || requested.size() > 10000)
+      throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    var result = new LinkedHashMap<NodeReference, Boolean>();
+    for (var key : requested) {
+      if (key == null || !validNumber(key.realm(), false) || !validNumber(key.node(), false))
+        throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+      result.put(key, false);
+    }
+    if (result.isEmpty()) return result;
+    return store.tx(
+        () -> {
+          long timeoutMillis = 2000;
+          var deadline = io.grpc.Context.current().getDeadline();
+          if (deadline != null)
+            timeoutMillis =
+                Math.min(
+                    timeoutMillis,
+                    deadline.timeRemaining(java.util.concurrent.TimeUnit.MILLISECONDS));
+          if (timeoutMillis <= 0 || io.grpc.Context.current().isCancelled())
+            throw new AurigaException(CommonErrors.UNAVAILABLE);
+          jdbc.execute("SET LOCAL statement_timeout='" + timeoutMillis + "ms'");
+          if (!config().path("enabled").asBoolean(true)) return result;
+          var ids = result.keySet().stream().map(NodeReference::node).distinct().toList();
+          var args = new ArrayList<Object>();
+          args.add(TenantContext.require());
+          args.add(java.sql.Timestamp.from(clock.instant()));
+          args.add(java.sql.Timestamp.from(clock.instant()));
+          for (var id : ids) args.add(number(id));
+          String sql =
+              """
+          SELECT r.realm::text,n.node::text FROM iam.network_node n
+          JOIN iam.network_realm r USING(tenant_id)
+          JOIN iam.device d ON d.tenant_id=n.tenant_id AND d.id=n.device_id
+          JOIN iam.session s ON s.tenant_id=n.tenant_id AND s.id=(d.data->>'sessionId')::uuid
+          JOIN iam.account a ON a.tenant_id=n.tenant_id AND a.id=n.account_id
+          WHERE n.tenant_id=? AND NOT n.revoked
+            AND d.data->>'accountId'=n.account_id::text
+            AND NOT COALESCE((d.data->>'revoked')::boolean,false)
+            AND d.data->>'scope'='auriga.connect'
+            AND s.data->>'tenantId'=n.tenant_id::text
+            AND s.data->>'accountId'=n.account_id::text
+            AND s.data->>'audience'='portal'
+            AND NOT COALESCE((s.data->>'revoked')::boolean,false)
+            AND (s.data->>'expiresAt')::timestamptz>?
+            AND (s.data->>'idleExpiresAt')::timestamptz>?
+            AND a.data->>'status'='active' AND n.node IN (
+          """
+                  + String.join(",", Collections.nCopies(ids.size(), "?"))
+                  + ")";
+          for (var key :
+              jdbc.query(
+                  sql,
+                  (rs, i) -> new NodeReference(rs.getString(1), rs.getString(2)),
+                  args.toArray())) if (result.containsKey(key)) result.put(key, true);
+          return result;
+        });
   }
 
   @Override
