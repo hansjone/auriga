@@ -94,6 +94,37 @@ func usageState(t *testing.T, db *store.Store, tenant string) string {
 	return state
 }
 
+// Use the same cross-binary catalog lock as testpg fixture GRANT/DROP OWNED.
+// Acquire it in a separate READ COMMITTED statement so ACL updates get a fresh
+// snapshot after waiting. Never keep this transaction open during HTTP probes.
+func usageCatalogACL(ctx context.Context, conn *pgx.Conn, statement string) error {
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(718245010)"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, statement); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func TestPostgresUsageCatalogConcurrency(t *testing.T) {
+	for i := range 4 {
+		t.Run(fmt.Sprintf("fixture-%d", i), func(t *testing.T) {
+			t.Parallel()
+			TestPostgresAdminUsage(t)
+		})
+	}
+}
+
 func TestPostgresAdminUsage(t *testing.T) {
 	db := testpg.Open(t)
 	l, err := budget.New(db, "USD", nil)
@@ -268,12 +299,12 @@ func TestPostgresAdminUsage(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := admin.Exec(ctx, "GRANT SELECT ON ai.budget_usage TO "+pgx.Identifier{role}.Sanitize()); err != nil {
+		if err := usageCatalogACL(ctx, admin, "GRANT SELECT ON ai.budget_usage TO "+pgx.Identifier{role}.Sanitize()); err != nil {
 			t.Error(err)
 		}
 		_ = admin.Close(ctx)
 	}()
-	if _, err = admin.Exec(t.Context(), "REVOKE SELECT ON ai.budget_usage FROM "+pgx.Identifier{role}.Sanitize()); err != nil {
+	if err = usageCatalogACL(t.Context(), admin, "REVOKE SELECT ON ai.budget_usage FROM "+pgx.Identifier{role}.Sanitize()); err != nil {
 		t.Fatal(err)
 	}
 	raw := string(call("", token, 500, "common.internal"))
