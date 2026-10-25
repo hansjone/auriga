@@ -1,9 +1,12 @@
 import { SessionError } from './errors.js';
+import { digest, verifyEnvelopeWithRefresh } from '../trust/verifier.js';
+import { canonicalize } from '../trust/jcs.js';
+import { Buffer } from 'node:buffer';
+import { FETCH_MAX_BYTES } from './constants.js';
 
 /**
  * Map a wire FETCH_RESULT delivery item into the host adapter PageItem shape.
- * N1 does not verify server_auth signatures; callers mark `verified: true` only
- * after their own trust decision (test stub / future verifier).
+ * Call only after verifying the original delivery object.
  *
  * @param {any} item wire delivery
  * @returns {import('../host/adapter.js').PageItem}
@@ -69,21 +72,95 @@ export function wireDeliveryToPageItem(item) {
  *   epoch: string,
  *   bootId: string,
  *   items: any[],
+ *   header: any,
+ *   trust: Awaited<ReturnType<import('../trust/store.js').openTrustStore>>,
+ *   context: import('../trust/verifier.js').VerifyContext,
+ *   now?: () => number,
+ *   maxBytes?: number,
  * }} input
- * @returns {import('../host/adapter.js').Page}
+ * @returns {Promise<{verified:true,items:any[],rejections:{index:number,code:string,reason:string}[]}>}
  */
-export function buildVerifiedPage(input) {
+export async function verifyFetchPage(input) {
+  const { trust, context, now } = input;
+  const encoded = canonicalize({
+    app_version: input.header?.app_version,
+    type: 'fetch_result',
+    page: input.header,
+    items: input.items,
+  });
+  if (Buffer.byteLength(encoded) > (input.maxBytes ?? FETCH_MAX_BYTES))
+    throw new SessionError(
+      'network.protocol_error',
+      'FETCH_RESULT exceeds requested max_bytes',
+    );
+  const verified = await verifyEnvelopeWithRefresh(input.header, {
+    trust,
+    context,
+    now,
+  });
+  const manifest = input.header.manifest;
+  if (
+    input.header.type !== 'fetch_page' ||
+    !Array.isArray(input.items) ||
+    !Array.isArray(manifest) ||
+    manifest.length !== input.items.length ||
+    manifest.some(
+      (m, i) =>
+        m.item_type !== input.items[i]?.type ||
+        m.mail_seq !== (input.items[i]?.mail_seq ?? null) ||
+        m.digest !== digest(input.items[i]),
+    )
+  ) {
+    throw new SessionError(
+      'network.signature_invalid',
+      'page manifest mismatch',
+    );
+  }
   const items = [];
-  for (const raw of input.items ?? []) {
-    if (raw?.type === 'delivery') items.push(wireDeliveryToPageItem(raw));
-    // terminal / hole items are skipped at the host seam for N1.
+  const rejections = [];
+  for (const [index, raw] of input.items.entries()) {
+    try {
+      await verifyEnvelopeWithRefresh(raw, { trust, context, now });
+      items.push(raw);
+      // Verified terminal / hole items have no host delivery in this seam.
+    } catch (error) {
+      if (!(error instanceof SessionError)) throw error;
+      // Never record untrusted sender/recipient IDs as authoritative audit data.
+      rejections.push({ index, code: error.code, reason: error.message });
+    }
+  }
+  return { verified, items, rejections };
+}
+
+/** Keep signature acceptance separate from the online attempt required by the host.
+ * @param {Parameters<typeof verifyFetchPage>[0]} input
+ * @returns {Promise<import('../host/adapter.js').Page & {rejections:{index:number,code:string,reason:string}[]}>}
+ */
+export async function buildVerifiedPage(input) {
+  const checked = await verifyFetchPage(input);
+  const items = [];
+  for (const raw of checked.items) {
+    if (raw.type !== 'delivery') continue;
+    try {
+      items.push(wireDeliveryToPageItem(raw));
+    } catch (error) {
+      if (!(error instanceof SessionError)) throw error;
+      checked.rejections.push({
+        index: input.items.indexOf(raw),
+        code: error.code,
+        reason: error.message,
+      });
+    }
   }
   return {
-    verified: true,
+    // Only verified members are retained; the page flag attests the header and
+    // full manifest, including when no member can enter the host path.
+    verified: checked.verified,
     tenant: input.tenant,
     nodeIncarnation: input.nodeIncarnation,
     epoch: input.epoch,
     bootId: input.bootId,
     items,
+    rejections: checked.rejections,
   };
 }

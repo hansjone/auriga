@@ -1,3 +1,4 @@
+/* global structuredClone */
 import { randomBytes } from 'node:crypto';
 import {
   assertFrameEpoch,
@@ -10,6 +11,8 @@ import {
 import { SessionError } from './errors.js';
 import { buildVerifiedPage } from './page.js';
 import { createSystemInbox, systemPromptFrom } from './system-inbox.js';
+import { verifyEnvelopeWithRefresh } from '../trust/verifier.js';
+import { FETCH_MAX_BYTES } from './constants.js';
 
 const FINAL = new Set([
   'host_accepted',
@@ -32,6 +35,9 @@ const FINAL = new Set([
  *   systemInbox?: ReturnType<typeof createSystemInbox>,
  *   nowIso?: () => string,
  *   newId?: (prefix: string) => string,
+ *   trust: Awaited<ReturnType<import('../trust/store.js').openTrustStore>>,
+ *   now?: () => number,
+ *   audit?: (event: {code: string, reason: string, index?: number}) => void,
  * }} options
  */
 export function createNetworkSession(options) {
@@ -39,6 +45,32 @@ export function createNetworkSession(options) {
   const adapter = options.adapter;
   const identity = options.identity;
   const bootId = options.bootId ?? 'boot-1';
+  const now = options.now ?? Date.now;
+  let channelNonce = '';
+  /** @type {{code: string, reason: string, index?: number}[]} */
+  const diagnostics = [];
+  let auditWindow = 0;
+  let auditCount = 0;
+  /** Connection-level bounded diagnostics, never sender/recipient penalties.
+   * @param {{code: string, reason: string, index?: number}} event */
+  function audit(event) {
+    if (now() - auditWindow >= 60000) {
+      auditWindow = now();
+      auditCount = 0;
+    }
+    if (++auditCount > 32) return;
+    diagnostics.push(event);
+    if (diagnostics.length > 64) diagnostics.shift();
+    try {
+      options.audit?.({ ...event });
+    } catch {
+      /* Diagnostics cannot open the delivery gate. */
+    }
+  }
+  /** @param {string|null} requestId @param {string} [expectedEpoch] */
+  function context(requestId, expectedEpoch = epoch) {
+    return { ...identity, epoch: expectedEpoch, requestId, channelNonce };
+  }
   const systemInbox = options.systemInbox ?? createSystemInbox();
   const nowIso = options.nowIso ?? (() => new Date().toISOString());
   const newId =
@@ -57,6 +89,8 @@ export function createNetworkSession(options) {
   let unsub = null;
   /** @type {Map<string, { resolve: (v: any) => void, reject: (e: Error) => void }>} */
   const pending = new Map();
+  /** @type {WeakMap<object,number>} */
+  const receivedSizes = new WeakMap();
 
   function requireReady() {
     if (!ready) throw new SessionError('not_ready', 'session not ready');
@@ -100,6 +134,7 @@ export function createNetworkSession(options) {
     try {
       frame = decodeJson(payload);
     } catch {
+      audit({ code: 'network.protocol_error', reason: 'invalid wire JSON' });
       return;
     }
     const type = frameType(frame);
@@ -119,31 +154,88 @@ export function createNetworkSession(options) {
     }
 
     if (type === 'ready_result') {
+      if (!pending.has(frame.request_id)) return;
+      try {
+        await verifyEnvelopeWithRefresh(frame, {
+          trust: options.trust,
+          context: context(frame.request_id, String(frame.epoch)),
+          now,
+        });
+      } catch (error) {
+        rejectFrame(frame.request_id, error);
+        return;
+      }
       settle(frame.request_id, frame);
       return;
     }
     if (type === 'head') {
+      try {
+        await verifyEnvelopeWithRefresh(frame, {
+          trust: options.trust,
+          context: context(null),
+          now,
+        });
+      } catch (error) {
+        rejectFrame(null, error);
+        return;
+      }
       // Tip nudge: schedule a fetch when idle.
       void pull().catch(() => {});
       return;
     }
     if (type === 'fetch_result') {
+      receivedSizes.set(frame, payload.byteLength);
       settle(frame.page?.request_id, frame);
       return;
     }
     if (type === 'receipt_committed') {
+      if (!pending.has(frame.request_id)) return;
+      try {
+        await verifyEnvelopeWithRefresh(frame, {
+          trust: options.trust,
+          context: context(frame.request_id),
+          now,
+        });
+      } catch (error) {
+        rejectFrame(frame.request_id, error);
+        return;
+      }
       settle(frame.request_id, frame);
       return;
     }
     if (type === 'error') {
       const id = frame.request_id;
       if (id && pending.has(id)) {
+        try {
+          await verifyEnvelopeWithRefresh(frame, {
+            trust: options.trust,
+            context: context(id),
+            now,
+          });
+        } catch (error) {
+          rejectFrame(id, error);
+          return;
+        }
         const p = pending.get(id);
         pending.delete(id);
         p?.reject(
           new SessionError(frame.code ?? 'remote_error', 'remote ERROR frame'),
         );
       }
+    }
+  }
+
+  /** @param {string|null} id @param {unknown} error */
+  function rejectFrame(id, error) {
+    const failure =
+      error instanceof SessionError
+        ? error
+        : new SessionError('network.signature_invalid', 'verification failed');
+    audit({ code: failure.code, reason: failure.message });
+    if (id) {
+      const waiter = pending.get(id);
+      pending.delete(id);
+      waiter?.reject(failure);
     }
   }
 
@@ -162,11 +254,12 @@ export function createNetworkSession(options) {
       void onPayload(payload);
     });
     const requestId = newId('req-ready');
+    channelNonce = newId('nonce');
     const wait = waitFor(requestId);
     await transport.send(
       encodeReady({
         requestId,
-        channelNonce: newId('nonce'),
+        channelNonce,
         resumeCursor: hint.resumeCursor ?? resumeCursor,
         localHighWater: hint.localHighWater ?? '0',
         registrationRevision: hint.registrationRevision ?? '0',
@@ -226,26 +319,59 @@ export function createNetworkSession(options) {
         }),
       );
       const result = await wait;
-      return applyFetchResult(result);
+      return await applyFetchResult(result, requestId, opts.maxBytes);
     } finally {
       fetchInflight = false;
     }
   }
 
-  /** @param {any} result */
-  async function applyFetchResult(result) {
+  /** @param {any} result @param {string} requestId @param {number} [maxBytes] */
+  async function applyFetchResult(result, requestId, maxBytes) {
+    requireReady();
     if (frameType(result) !== 'fetch_result') {
       throw new SessionError('bad_fetch_result', 'expected fetch_result');
     }
     assertFrameEpoch(result, epoch);
+    const wireBytes = receivedSizes.get(result);
+    if (wireBytes !== undefined && wireBytes > (maxBytes ?? FETCH_MAX_BYTES)) {
+      const error = new SessionError(
+        'network.protocol_error',
+        'FETCH_RESULT exceeds requested wire budget',
+      );
+      rejectFrame(null, error);
+      throw error;
+    }
     const pageEpoch = String(result.page?.epoch ?? result.epoch);
-    const page = buildVerifiedPage({
-      tenant: identity.tenant,
-      nodeIncarnation: identity.nodeIncarnation,
-      epoch: pageEpoch,
-      bootId,
-      items: result.items ?? [],
-    });
+    const expectedContext = context(requestId);
+    let page;
+    try {
+      page = await buildVerifiedPage({
+        tenant: identity.tenant,
+        nodeIncarnation: identity.nodeIncarnation,
+        epoch: pageEpoch,
+        bootId,
+        items: result.items ?? [],
+        header: result.page,
+        trust: options.trust,
+        context: expectedContext,
+        now,
+        maxBytes,
+      });
+    } catch (error) {
+      rejectFrame(null, error);
+      throw error;
+    }
+    // A key refresh may outlive stop/reconnect; do not apply an old connection's page.
+    requireReady();
+    if (
+      channelNonce !== expectedContext.channelNonce ||
+      epoch !== expectedContext.epoch
+    )
+      throw new SessionError(
+        'stale_epoch',
+        'connection changed during verification',
+      );
+    for (const failure of page.rejections) audit(failure);
     // scan_after advances pagination; resume_cursor only tracks confirmed prefix.
     if (result.page?.scan_after !== undefined) {
       scanAfter = String(result.page.scan_after);
@@ -257,9 +383,12 @@ export function createNetworkSession(options) {
       return { receipts: [], committed: [] };
     }
 
-    const receipts = await adapter.deliver(page);
-    await publishSystemPrompts(page, receipts);
-    const committed = await submitReceipts(page, receipts);
+    const verifiedPage = /** @type {import('../host/adapter.js').Page} */ (
+      page
+    );
+    const receipts = await adapter.deliver(verifiedPage);
+    await publishSystemPrompts(verifiedPage, receipts);
+    const committed = await submitReceipts(verifiedPage, receipts);
     return { receipts, committed, page };
   }
 
@@ -368,6 +497,9 @@ export function createNetworkSession(options) {
       return ready;
     },
     systemInbox,
+    get diagnostics() {
+      return structuredClone(diagnostics);
+    },
     start,
     stop,
     pull,

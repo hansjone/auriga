@@ -28,6 +28,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test \"test/**/*.test.js\"",
     "build": "tsc --noEmit -p tsconfig.json",
+    "gen:network-keyset": "node scripts/gen-network-keyset.mjs",
     "gen:network-tools": "node scripts/gen-network-tools.mjs",
     "gen:network-tools:check": "node scripts/gen-network-tools.mjs --check",
     "gen:steps": "json2ts -i ../../contracts/identity/steps.schema.json -o src/generated/steps.d.ts --unreachableDefinitions && json2ts -i ../../contracts/plugin/managed-config.schema.json -o src/generated/managed-config.d.ts && prettier --write src/generated/steps.d.ts src/generated/managed-config.d.ts",
