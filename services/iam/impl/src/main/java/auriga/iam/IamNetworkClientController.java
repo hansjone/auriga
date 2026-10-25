@@ -46,6 +46,10 @@ public class IamNetworkClientController {
     validate("network/ticket-request.schema.json", body);
     var ticket = client.prepare(bearer(request), body.path("node").asString());
     String ingress = IamNetworkAuthority.ingressForTicket(ticket.ticket());
+    // Match the gateway's 32-bucket routing hint; only the up subject includes a shard.
+    char shard =
+        "abcdefghijklmnopqrstuvwxyz234567"
+            .charAt(Integer.parseInt(Secrets.hash(ingress).substring(0, 2), 16) & 31);
     return new NetworkClientTicket()
         .identity(identity(ticket.identity()))
         .ticket(ticket.ticket())
@@ -53,7 +57,7 @@ public class IamNetworkClientController {
         .expiresAt(ticket.expiresAt().atOffset(ZoneOffset.UTC))
         .connectionExpiresAt(ticket.connectionExpiresAt().atOffset(ZoneOffset.UTC))
         .ingress(ingress)
-        .upSubject("auriga.net.up." + ingress)
+        .upSubject("auriga.net.up." + shard + "." + ingress)
         .downSubject("auriga.net.down." + ingress)
         .replyPrefix("auriga.net.reply." + ingress)
         .protocolVersion(NetworkClientTicket.ProtocolVersionEnum.NUMBER_1);
