@@ -399,7 +399,7 @@ class LocalRegistryPostgresTest {
     error("network.unauthorized", () -> register("7", "op", FP, "0"));
     when(iam.active("2", "20")).thenThrow(new IllegalStateException("offline"));
     error("common.unavailable", () -> register("7", "op", FP, "0"));
-    when(iam.active("2", "20")).thenReturn(true);
+    doReturn(true).when(iam).active("2", "20");
     when(iam.check(any())).thenReturn(new NetworkAuthority.Decision(false, "denied", Map.of()));
     error("network.unauthorized", () -> register("7", "op", FP, "0"));
     when(authority.currentTarget(tenant)).thenReturn(null);
@@ -412,6 +412,112 @@ class LocalRegistryPostgresTest {
         () ->
             call(() -> registry.register(UUID.randomUUID(), frame("7", "op", FP, "0").toString())));
     assertEquals("0", state("local_high_water"));
+  }
+
+  @Test
+  void unavailableAuthorityAtEveryIngressNeverWritesWitnessOrPermit() {
+    registry = new LocalRegistry(jdbc, manager, null, iam, Clock.fixed(NOW, ZoneOffset.UTC));
+    unavailableIngresses("common.unavailable");
+    registry = new LocalRegistry(jdbc, manager, authority, iam, Clock.fixed(NOW, ZoneOffset.UTC));
+    doReturn(null).when(authority).currentTarget(tenant);
+    unavailableIngresses("network.unauthorized");
+    doThrow(new IllegalStateException("offline-private-detail"))
+        .when(authority)
+        .currentTarget(tenant);
+    unavailableIngresses("common.unavailable");
+    assertNoNewIdentityWrites();
+    verify(iam, never()).active(anyString(), anyString());
+    verify(iam, never()).check(any());
+  }
+
+  @Test
+  void iamOutageOrMissingDecisionAtEveryIngressNeverWritesWitnessOrPermit() {
+    doThrow(new IllegalStateException("offline")).when(iam).active("2", "20");
+    unavailableIngresses("common.unavailable");
+    doReturn(true).when(iam).active("2", "20");
+    doThrow(new IllegalStateException("offline")).when(iam).check(any());
+    unavailableIngresses("common.unavailable");
+    doReturn(null).when(iam).check(any());
+    unavailableIngresses("common.unavailable");
+    assertNoNewIdentityWrites();
+  }
+
+  @Test
+  void deliveryAuthorityOutageRollsBackBootBindingAndNeverIssuesPermit() {
+    var registered = register("7", "op", FP, "0");
+    UUID contact = contact("allowed", "conversation", NOW.plusSeconds(600));
+    takeover();
+    doThrow(new IllegalStateException("offline-private-detail"))
+        .when(authority)
+        .authorizeDelivery(eq(tenant), anyString(), anyString(), eq("20"));
+    error("common.unavailable", () -> assign(contact, "7", registered.registrationId(), "create"));
+    doReturn(null)
+        .when(authority)
+        .authorizeDelivery(eq(tenant), anyString(), anyString(), eq("20"));
+    error(
+        "network.unauthorized", () -> assign(contact, "7", registered.registrationId(), "create"));
+    assertEquals("1", state("local_boot_epoch"));
+    assertEquals("1", state("registration_revision"));
+    assertEquals("7", state("local_high_water"));
+    assertEquals("healthy", state("local_identity_status"));
+    assertEquals(
+        0,
+        sql(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_contact_assignment WHERE tenant_id=?",
+                    Integer.class,
+                    tenant)));
+    assertEquals(
+        0,
+        sql(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.outbox_event WHERE tenant_id=?",
+                    Integer.class,
+                    tenant)));
+  }
+
+  void unavailableIngresses(String code) {
+    error(code, () -> register("7", "op", FP, "0"));
+    error(code, () -> assign(UUID.randomUUID(), "7", UUID.randomUUID(), "create"));
+    error(code, () -> recover("0", "0", null));
+  }
+
+  void assertNoNewIdentityWrites() {
+    assertEquals("0", state("local_high_water"));
+    assertEquals("0", state("registration_revision"));
+    assertEquals("healthy", state("local_identity_status"));
+    assertNull(state("local_boot_epoch"));
+    assertNull(state("local_boot_id"));
+    sql(
+        () -> {
+          assertEquals(
+              1,
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM collab.network_node WHERE tenant_id=?",
+                  Integer.class,
+                  tenant));
+          assertEquals(
+              0,
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM collab.network_local_registration WHERE tenant_id=?",
+                  Integer.class,
+                  tenant));
+          assertEquals(
+              0,
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM collab.network_contact_assignment WHERE tenant_id=?",
+                  Integer.class,
+                  tenant));
+          assertEquals(
+              0,
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM collab.outbox_event WHERE tenant_id=?",
+                  Integer.class,
+                  tenant));
+          return null;
+        });
   }
 
   @Test

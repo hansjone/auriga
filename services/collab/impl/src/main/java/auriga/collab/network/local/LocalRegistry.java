@@ -367,8 +367,20 @@ public final class LocalRegistry {
   }
 
   private Target target(UUID tenant) {
+    return resolveTarget(tenant, authority, clock);
+  }
+
+  /** Shared control-plane boundary for registration, assignment and recovery. */
+  static Target resolveTarget(UUID tenant, NetworkSourceAuthority authority, Clock clock) {
     require(authority != null, CommonErrors.UNAVAILABLE);
-    Target target = authority.currentTarget(tenant);
+    Target target;
+    try {
+      target = authority.currentTarget(tenant);
+    } catch (AurigaException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
     require(
         target != null
             && target.validUntil() != null
