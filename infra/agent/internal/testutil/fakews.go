@@ -57,6 +57,8 @@ type FakeWorkspace struct {
 
 // FakeWorkspaceOpts configures the fake platform.
 type FakeWorkspaceOpts struct {
+	// SessionInterceptor observes real stream traffic without changing the agent.
+	SessionInterceptor  grpc.StreamServerInterceptor
 	TLS                 bool
 	ArtifactSigningKeys []*nodev1.ArtifactSigningKey
 	JoinResponse        func(*nodev1.JoinResponse)
@@ -97,6 +99,9 @@ func StartFakeWorkspace(opts FakeWorkspaceOpts) (*FakeWorkspace, error) {
 
 	fw.SetArtifactSigningKeys(opts.ArtifactSigningKeys)
 	var serverOpts []grpc.ServerOption
+	if opts.SessionInterceptor != nil {
+		serverOpts = append(serverOpts, grpc.StreamInterceptor(opts.SessionInterceptor))
+	}
 	if opts.TLS {
 		certPEM, keyPEM, err := ca.IssueWorkspace([]string{"localhost"}, []net.IP{net.ParseIP("127.0.0.1")})
 		if err != nil {
