@@ -188,8 +188,16 @@ class NetworkDirectoryBoundaryTest {
     new ContractSchemas().validate("network/system-directory.schema.json", json);
     assertEquals(Set.of("items"), json.propertyNames());
     assertEquals(
-        Set.of("systemAddress", "displayName", "ownerUserId", "ownerDisplayName"),
+        Set.of(
+            "systemAddress",
+            "displayName",
+            "ownerUserId",
+            "ownerDisplayName",
+            "onlineState",
+            "statusObservedAt"),
         json.path("items").get(0).propertyNames());
+    assertEquals("unknown", json.path("items").get(0).path("onlineState").asString());
+    assertTrue(json.path("items").get(0).path("statusObservedAt").isNull());
     verify(api).list(50, "");
     mvc.perform(get("/api/iam/v1/network/systems").param("limit", "NaN"))
         .andExpect(status().isBadRequest());

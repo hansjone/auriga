@@ -39,6 +39,10 @@ message NetworkSystemEntry {
   string display_name = 2;
   string owner_user_id = 3;
   string owner_display_name = 4;
+  // unknown when IAM has no reliable connection-state observation.
+  string online_state = 5;
+  // RFC 3339 UTC observation time. Absent for unknown; HTTP serializes null.
+  optional string status_observed_at = 6;
 }
 
 message ListNetworkSystemsResponse {

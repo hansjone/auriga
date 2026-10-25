@@ -23,12 +23,52 @@
             "type": "string",
             "pattern": "^aur1:[1-9a-f][0-9a-f]{0,15}\\.[1-9a-f][0-9a-f]{0,15}\\.0$"
           },
-          "displayName": { "type": "string", "maxLength": 64 },
-          "ownerUserId": { "type": "string", "format": "uuid" },
-          "ownerDisplayName": { "type": "string", "maxLength": 128 }
-        }
+          "displayName": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerDisplayName": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "onlineState": {
+            "type": "string",
+            "enum": ["unknown", "online", "offline"]
+          },
+          "statusObservedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["onlineState"],
+              "properties": {
+                "onlineState": {
+                  "const": "unknown"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "statusObservedAt": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
       }
     },
-    "nextCursor": { "type": "string", "minLength": 1, "maxLength": 128 }
+    "nextCursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
   }
 }

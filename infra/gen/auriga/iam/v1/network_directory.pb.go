@@ -181,6 +181,10 @@ type NetworkSystemEntry struct {
 	DisplayName      string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	OwnerUserId      string                 `protobuf:"bytes,3,opt,name=owner_user_id,json=ownerUserId,proto3" json:"owner_user_id,omitempty"`
 	OwnerDisplayName string                 `protobuf:"bytes,4,opt,name=owner_display_name,json=ownerDisplayName,proto3" json:"owner_display_name,omitempty"`
+	// unknown when IAM has no reliable connection-state observation.
+	OnlineState string `protobuf:"bytes,5,opt,name=online_state,json=onlineState,proto3" json:"online_state,omitempty"`
+	// RFC 3339 UTC observation time. Absent for unknown; HTTP serializes null.
+	StatusObservedAt *string `protobuf:"bytes,6,opt,name=status_observed_at,json=statusObservedAt,proto3,oneof" json:"status_observed_at,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -239,6 +243,20 @@ func (x *NetworkSystemEntry) GetOwnerUserId() string {
 func (x *NetworkSystemEntry) GetOwnerDisplayName() string {
 	if x != nil {
 		return x.OwnerDisplayName
+	}
+	return ""
+}
+
+func (x *NetworkSystemEntry) GetOnlineState() string {
+	if x != nil {
+		return x.OnlineState
+	}
+	return ""
+}
+
+func (x *NetworkSystemEntry) GetStatusObservedAt() string {
+	if x != nil && x.StatusObservedAt != nil {
+		return *x.StatusObservedAt
 	}
 	return ""
 }
@@ -306,12 +324,15 @@ const file_auriga_iam_v1_network_directory_proto_rawDesc = "" +
 	"\x04node\x18\x02 \x01(\tR\x04node\"q\n" +
 	"\x1aResolveNetworkNodeResponse\x12\x16\n" +
 	"\x06exists\x18\x01 \x01(\bR\x06exists\x12;\n" +
-	"\x04type\x18\x02 \x01(\x0e2'.auriga.iam.v1.NetworkDirectoryNodeTypeR\x04type\"\xb0\x01\n" +
+	"\x04type\x18\x02 \x01(\x0e2'.auriga.iam.v1.NetworkDirectoryNodeTypeR\x04type\"\x9d\x02\n" +
 	"\x12NetworkSystemEntry\x12%\n" +
 	"\x0esystem_address\x18\x01 \x01(\tR\rsystemAddress\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\"\n" +
 	"\rowner_user_id\x18\x03 \x01(\tR\vownerUserId\x12,\n" +
-	"\x12owner_display_name\x18\x04 \x01(\tR\x10ownerDisplayName\"v\n" +
+	"\x12owner_display_name\x18\x04 \x01(\tR\x10ownerDisplayName\x12!\n" +
+	"\fonline_state\x18\x05 \x01(\tR\vonlineState\x121\n" +
+	"\x12status_observed_at\x18\x06 \x01(\tH\x00R\x10statusObservedAt\x88\x01\x01B\x15\n" +
+	"\x13_status_observed_at\"v\n" +
 	"\x1aListNetworkSystemsResponse\x127\n" +
 	"\x05items\x18\x01 \x03(\v2!.auriga.iam.v1.NetworkSystemEntryR\x05items\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -361,6 +382,7 @@ func file_auriga_iam_v1_network_directory_proto_init() {
 	if File_auriga_iam_v1_network_directory_proto != nil {
 		return
 	}
+	file_auriga_iam_v1_network_directory_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

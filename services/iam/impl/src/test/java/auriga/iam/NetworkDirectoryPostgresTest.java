@@ -134,6 +134,29 @@ class NetworkDirectoryPostgresTest {
                         owner.toString(),
                         Json.object("status", "active", "displayName", "Alice"),
                         null);
+                  UUID providerId = UUID.randomUUID(), sessionId = UUID.randomUUID();
+                  store.insert(
+                      "idp_provider",
+                      providerId.toString(),
+                      Json.object("providerId", providerId),
+                      null);
+                  store.insert(
+                      "session",
+                      sessionId.toString(),
+                      Json.object(
+                          "tenantId",
+                          targetTenant,
+                          "accountId",
+                          owner,
+                          "providerId",
+                          providerId,
+                          "audience",
+                          "portal",
+                          "expiresAt",
+                          Instant.now().plusSeconds(3600).toString(),
+                          "idleExpiresAt",
+                          Instant.now().plusSeconds(1800).toString()),
+                      Instant.now().plusSeconds(3600));
                   store.insert(
                       "device",
                       nativeDevice.toString(),
@@ -142,6 +165,10 @@ class NetworkDirectoryPostgresTest {
                           owner,
                           "name",
                           "DSH " + number,
+                          "sessionId",
+                          sessionId,
+                          "scope",
+                          "auriga.connect",
                           "sessionLocal",
                           "secret-session-local"),
                       null);
@@ -200,7 +227,13 @@ class NetworkDirectoryPostgresTest {
           assertFalse(json.toString().contains("secret-session-local"));
           assertFalse(json.has("nextCursor"));
           assertEquals(
-              Set.of("systemAddress", "displayName", "ownerUserId", "ownerDisplayName"),
+              Set.of(
+                  "systemAddress",
+                  "displayName",
+                  "ownerUserId",
+                  "ownerDisplayName",
+                  "onlineState",
+                  "statusObservedAt"),
               json.path("items").get(0).propertyNames());
           user(PrincipalType.USER, TokenContext.PORTAL, foreign);
           error("common.forbidden", () -> directory.list(50, ""));
@@ -328,6 +361,84 @@ class NetworkDirectoryPostgresTest {
           assertFalse(directory.resolve(realm, "1").getExists());
           service("svc:ai-gateway");
           error("common.forbidden", () -> directory.resolve(realm, "1"));
+        });
+  }
+
+  @Test
+  void staleCredentialsAreHiddenButRecentOfflineDevicesKeepUnknownStatus() {
+    UUID targetDevice = UUID.randomUUID();
+    node(tenant, "2", UUID.randomUUID(), targetDevice, false);
+    TenantContext.run(
+        tenant,
+        () -> {
+          store.tx(
+              () -> {
+                var d = store.get("device", targetDevice.toString(), false);
+                var backing = store.get("session", d.path("sessionId").asString(), true);
+                backing.put("expiresAt", Instant.now().minusSeconds(31L * 86400).toString());
+                backing.put("idleExpiresAt", Instant.now().minusSeconds(31L * 86400).toString());
+                store.save("session", backing);
+                return null;
+              });
+          assertEquals(1, directory.list(50, "").getItemsCount());
+          service("svc:collab");
+          assertEquals(
+              ResolveNetworkNodeResponse.getDefaultInstance(), directory.resolve(realm, "2"));
+          store.tx(
+              () -> {
+                var d = store.get("device", targetDevice.toString(), false);
+                var backing = store.get("session", d.path("sessionId").asString(), true);
+                backing.put("expiresAt", Instant.now().minusSeconds(86400).toString());
+                backing.put("idleExpiresAt", Instant.now().minusSeconds(86400).toString());
+                store.save("session", backing);
+                return null;
+              });
+          assertTrue(directory.resolve(realm, "2").getExists());
+          user(PrincipalType.USER, TokenContext.PORTAL, tenant);
+          var offline = directory.list(50, "").getItems(1);
+          assertEquals("unknown", offline.getOnlineState());
+          assertFalse(offline.hasStatusObservedAt());
+        });
+  }
+
+  @Test
+  void massivePolicyFilteringReturnsBoundedPartialPagesWithProgressingCursor() {
+    // More than one scan window is denied by node policy, without scanning to tenant end.
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () -> {
+                  jdbc.update(
+                      "INSERT INTO iam.device(id,tenant_id,lookup_key,data) "
+                          + "SELECT gen_random_uuid(),?,'scan-'||g,(SELECT data FROM iam.device WHERE tenant_id=? AND id=?)||jsonb_build_object('scanNode',g) FROM generate_series(2,1001) g",
+                      tenant,
+                      tenant,
+                      device);
+                  jdbc.update(
+                      "INSERT INTO iam.network_node(tenant_id,node,account_id,device_id,revoked) "
+                          + "SELECT tenant_id,(data->>'scanNode')::numeric,account_id,id,false FROM iam.device WHERE tenant_id=? AND data->>'scanNode' IS NOT NULL",
+                      tenant);
+                  return null;
+                }));
+    node(tenant, "1002", UUID.randomUUID(), UUID.randomUUID(), false);
+    TenantContext.run(
+        tenant,
+        () -> {
+          store.tx(
+              () -> {
+                jdbc.update(
+                    "INSERT INTO iam.network_policy(id,tenant_id,lookup_key,data) SELECT gen_random_uuid(),?,'1:'||g,jsonb_build_object('allowed',false) FROM generate_series(1,1001) g",
+                    tenant);
+                return null;
+              });
+          var first = directory.list(200, "");
+          assertEquals(0, first.getItemsCount());
+          assertFalse(first.getNextCursor().isEmpty());
+          var second = directory.list(200, first.getNextCursor());
+          assertEquals(1, second.getItemsCount());
+          assertEquals(address("3ea"), second.getItems(0).getSystemAddress());
+          assertTrue(second.getNextCursor().isEmpty());
         });
   }
 }

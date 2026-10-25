@@ -18,6 +18,7 @@ public class GatewayTokenFileConfiguration {
   @Bean(destroyMethod = "close")
   GatewayTokenFilePublisher iamGatewayTokenFilePublisher(
       InternalTokenIssuer issuer, Environment env) {
+    ServiceTokenExportIsolation.verify(env);
     if (!env.getProperty("auriga.platform.combined", Boolean.class, false))
       throw new IllegalStateException(
           "Gateway token export requires a same-host combined installation");
@@ -26,7 +27,7 @@ public class GatewayTokenFileConfiguration {
         Path.of(
             env.getRequiredProperty("auriga.iam.ai-gateway-token-export.installation-secret-file")),
         Path.of(env.getRequiredProperty("auriga.iam.ai-gateway-token-export.token-file")),
-        env.getProperty("auriga.iam.ai-gateway-token-export.reader-group", Integer.class, 65532),
+        env.getRequiredProperty("auriga.iam.ai-gateway-token-export.reader-group", Integer.class),
         env.getProperty(
             "auriga.iam.ai-gateway-token-export.installation-owner", Integer.class, -1));
   }
