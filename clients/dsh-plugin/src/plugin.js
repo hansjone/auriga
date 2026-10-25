@@ -16,6 +16,7 @@ import {
   createUnconfiguredLoginRoutes,
 } from './local/routes.js';
 import { join } from 'node:path';
+import { installSettings } from './settings/host.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -26,6 +27,7 @@ export const inject = ['webServer', 'connection'];
  */
 export async function apply(ctx, config) {
   const mode = selectMode();
+  installSettings(ctx, config);
   if (mode !== 'managed') {
     if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
       throw new Error(
