@@ -107,6 +107,8 @@ export const definitions = {
       },
       keys: {
         type: 'array',
+        description:
+          '同一清单内 kid 唯一，由消费端语义检查强制；跨版本不可复用另需持久历史。',
         items: {
           $ref: '#/definitions/PublicKey',
         },
