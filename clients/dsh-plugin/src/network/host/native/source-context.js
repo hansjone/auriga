@@ -5,23 +5,23 @@ import { isNativeSubagentOwned } from './upstream.js';
 /** In-process tool callback only. Never expose this as a JSON/HTTP/IPC resolver.
  * The broker must bind its IPC peer to the capability before any serialization.
  * Human intent, rebinding and credentials are deliberately not capabilities here.
- * @param {{ctx: import('./types.js').NativeContext, runtime: import('./types.js').RuntimeArtifacts, lookupBinding: (sessionId: string) => Promise<import('./types.js').SourceBinding|null>}} options */
-export async function createNativeSourceResolver({
-  ctx,
-  runtime,
-  lookupBinding,
-}) {
-  return createSourceResolver({
+ * @param {{ctx: import('./types.js').NativeContext, lookupBinding: (sessionId: string) => Promise<import('./types.js').SourceBinding|null>}} options */
+export async function createNativeSourceResolver({ ctx, lookupBinding }) {
+  const security = createNativeAuthority({ ctx });
+  const resolve = createSourceResolver({
     ctx,
-    security: await createNativeAuthority({ ctx, runtime }),
+    security,
     lookupBinding,
+  });
+  return Object.assign(resolve, {
+    getDiagnostics: () => security.getDiagnostics(),
   });
 }
 
 /** Pure in-process context projection, not an installation/source attestation.
  * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').HostOperationAuthority, lookupBinding: (id:string)=>Promise<import('./types.js').SourceBinding|null>}} options */
 export function createSourceResolver({ ctx, security, lookupBinding }) {
-  const ready = () => security.assertReady();
+  const ready = () => security.assertReady('source');
   if (typeof lookupBinding !== 'function') throw incompatible();
   /** @param {unknown} execution */
   return async (execution) => {
@@ -70,6 +70,7 @@ export function createSourceResolver({ ctx, security, lookupBinding }) {
         cwd: binding.cwd,
       });
     } catch {
+      security.reportFailure?.('source', 'public_source_failed');
       throw incompatible();
     }
   };

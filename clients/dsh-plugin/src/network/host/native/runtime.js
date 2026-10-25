@@ -1,25 +1,8 @@
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
 import { CODES, HostSeamError } from '../errors.js';
 
-/** npm ci from deploy/compose/real-dsh/package-lock.json; byte SHA-256.
- * Functional artifact baseline, not loaded-module or isolation attestation. */
-export const PINNED_HOST = Object.freeze({
-  version: '0.2.0-rc.2',
-  controllerSha256:
-    'fb0f7b96130f595db20809eeb77a195b05f4a039f931d1e67692f1f74a4dd269',
-  persistenceSha256:
-    '0845707017acc2b4a8a75eab2244fa3fd88587b8094ab32014321dce7ca1e31b',
-  sessionSha256:
-    '87ea85e2fb5318bf1f826db9a1c88c1b26d3ea328027a7f32b211880c4d62b9d',
-  agentLoopSha256:
-    '00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2',
-});
-
-/** Single isolation decision point. User deferred all same-machine isolation
- * on 2026-10-25. Restore enforcement here only after a new user decision and
- * a verified host isolation implementation; never use a config/env bypass. */
+/** Single isolation decision point. User deferred same-machine isolation on
+ * 2026-10-25. Restore only after a new user decision and a verified host
+ * isolation implementation; never use a config/env bypass. */
 export function getNativeIsolationDecision() {
   return Object.freeze({
     required: false,
@@ -33,130 +16,111 @@ export function incompatible() {
   return new HostSeamError(CODES.hostIncompatible);
 }
 
-/** Check only a fingerprint collected by trusted host code, never user config.
- * @param {unknown} value */
-export function verifyRuntimeFingerprint(value) {
-  if (!value || typeof value !== 'object') throw incompatible();
-  for (const [key, expected] of Object.entries(PINNED_HOST)) {
-    if (/** @type {Record<string, unknown>} */ (value)[key] !== expected)
-      throw incompatible();
-  }
-  return true;
-}
+const read = [
+  'sessionController.inspect',
+  'sessionPersistence.stat',
+  'workspaceRegistry.archivedSessionIds',
+];
+const live = [
+  'sessionController.resolveAgent',
+  'agents.get',
+  'agents.isOwnedBy',
+  'sessions.get',
+];
+const durability = [
+  ...read,
+  ...live,
+  'sessions.flush',
+  'sessionPersistence.flush',
+  'sessionPersistence.open',
+  'sessionPersistence.identity',
+];
+const requests = [...read, 'agents.get', 'sessionController.projections'];
+const requirements = {
+  read,
+  requests,
+  durability,
+  create: [
+    ...durability,
+    'sessionController.create',
+    'agentPresets.resolve',
+    'sessionProjections.stateOf',
+  ],
+  prompt: [...durability, ...requests, 'sessionController.prompt'],
+  source: [...read, ...live],
+};
 
-/** Paths and manifest identity must come from the same running host loader.
- * Node fs cannot read inside ASAR; Electron's host fs must collect those bytes.
- * This helper is for unpacked distributions, without loading their modules.
- * This verifies functional artifacts, not an OS isolation boundary or module origin.
- * @param {import('./types.js').RuntimeArtifacts} input
- * @returns {Promise<import('./types.js').RuntimeFingerprint>} */
-export async function readRuntimeFingerprint({
-  manifestPath,
-  controllerPath,
-  persistencePath,
-  sessionPath,
-  agentLoopPath,
-}) {
-  try {
-    const [manifest, ...sources] = await Promise.all([
-      readFile(manifestPath),
-      readFile(controllerPath),
-      readFile(persistencePath),
-      readFile(sessionPath),
-      readFile(agentLoopPath),
-    ]);
-    const { version } = JSON.parse(manifest.toString('utf8'));
-    // The published CLI manifest has version, not desktop build/dirty fields.
-    if (typeof version !== 'string') throw incompatible();
-    const [
-      controllerSha256,
-      persistenceSha256,
-      sessionSha256,
-      agentLoopSha256,
-    ] = sources.map((source) =>
-      createHash('sha256').update(source).digest('hex'),
-    );
-    return {
-      version,
-      controllerSha256,
-      persistenceSha256,
-      sessionSha256,
-      agentLoopSha256,
-    };
-  } catch {
-    throw incompatible();
-  }
-}
-
-/** Functional readiness remains mandatory despite deferred OS isolation.
- * Paths must come from the running Node host loader, not model/browser input.
- * @param {import('./types.js').RuntimeArtifacts} runtime */
-export function createNativeGate(runtime) {
-  const keys = [
-    'manifestPath',
-    'controllerPath',
-    'persistencePath',
-    'sessionPath',
-    'agentLoopPath',
-  ];
-  if (
-    !runtime ||
-    !keys.every(
-      (key) =>
-        typeof (/** @type {any} */ (runtime)[key]) === 'string' &&
-        /** @type {any} */ (runtime)[key].length > 0,
-    )
-  )
-    throw incompatible();
-  const files = Object.freeze({ ...runtime });
-  return async () => {
+/** Side-effect-free startup probe. No version, package path, backend class or
+ * private implementation fields. Reprobe on every operation for service unload.
+ * Mutating behavior is checked against the addressed session when used, never
+ * by creating a throwaway conversation at plugin startup.
+ * @param {{ctx: import('./types.js').NativeContext}} options
+ * @returns {import('./types.js').HostOperationAuthority} */
+export function createNativeAuthority({ ctx }) {
+  /** @type {Partial<Record<import('./types.js').NativeCapability, string>>} */
+  const failures = {};
+  /** @param {string} path */
+  const present = (path) => {
     try {
-      verifyRuntimeFingerprint(await readRuntimeFingerprint(files));
-      const isolation = getNativeIsolationDecision();
-      if (isolation.required && !isolation.isolated) throw incompatible();
+      const [service, method] = path.split('.');
+      const value = /** @type {any} */ (ctx)?.[service]?.[method];
+      if (path === 'workspaceRegistry.archivedSessionIds')
+        return (
+          Array.isArray(value) && value.every((id) => typeof id === 'string')
+        );
+      if (path === 'sessionPersistence.identity')
+        return typeof value === 'symbol';
+      return typeof value === 'function';
     } catch {
-      throw incompatible();
+      return false;
     }
   };
-}
-
-/** JSONL writer checks are functional durability checks, not isolation proof.
- * Exact pinned implementation fields: JSONL lib/index.js:26-46, :359-363,
- * :413-420 and :2372-2409. Preserve Cordis service receiver identities.
- * @param {{ctx:import('./types.js').NativeContext,runtime:import('./types.js').RuntimeArtifacts}} options
- * @returns {Promise<import('./types.js').HostOperationAuthority>} */
-export async function createNativeAuthority({ ctx, runtime }) {
-  const files = Object.freeze({ ...runtime });
-  const assertReady = createNativeGate(files);
-  await assertReady();
-  let JsonlPersistence;
-  try {
-    ({ default: JsonlPersistence } = await import(
-      pathToFileURL(files.persistencePath).href
-    ));
-  } catch {
-    throw incompatible();
-  }
-  /** @param {any} value */
-  const original = (value) => value?.[Symbol.for('cordis.original')] ?? value;
+  /** @param {import('./types.js').NativeCapability} capability */
+  const probe = (capability) => {
+    const missing = [...new Set(requirements[capability])].filter(
+      (p) => !present(p),
+    );
+    return {
+      available: missing.length === 0,
+      missing,
+      lastFailure: failures[capability] ?? null,
+    };
+  };
+  // Capture the startup baseline without invoking any state-changing API.
+  for (const key of Object.keys(requirements))
+    probe(/** @type {import('./types.js').NativeCapability} */ (key));
   return {
-    assertReady,
-    async assertDurableProvider(provider, id) {
-      await assertReady();
-      if (provider !== ctx.sessionPersistence) throw incompatible();
-      const backend = original(provider);
-      if (!(backend instanceof JsonlPersistence)) throw incompatible();
-      const writer = backend.tracker?.writers?.get(id);
+    async assertReady(capability = 'read') {
+      const isolation = getNativeIsolationDecision();
       if (
-        !writer ||
-        writer.id !== id ||
-        writer.header?.id !== id ||
-        writer.access !== 'write' ||
-        writer.closing !== undefined ||
-        original(writer.storage) !== backend ||
-        !backend.tracker.openHandles.has(writer) ||
-        typeof writer.drainLive !== 'function' ||
-        typeof writer.flush !== 'function'
+        !probe(capability).available ||
+        (isolation.required && !isolation.isolated)
+      )
+        throw incompatible();
+    },
+    reportFailure(capability, reason) {
+      failures[capability] = reason;
+    },
+    getDiagnostics() {
+      return {
+        isolation: getNativeIsolationDecision(),
+        capabilities: Object.fromEntries(
+          Object.keys(requirements).map((key) => [
+            key,
+            probe(/** @type {import('./types.js').NativeCapability} */ (key)),
+          ]),
+        ),
+      };
+    },
+    async assertDurableProvider(provider, id) {
+      if (!probe('durability').available || provider !== ctx.sessionPersistence)
+        throw incompatible();
+      const identity = provider.identity;
+      const snapshot = await provider.stat(id);
+      if (
+        provider !== ctx.sessionPersistence ||
+        provider.identity !== identity ||
+        snapshot?.header?.id !== id
       )
         throw incompatible();
     },

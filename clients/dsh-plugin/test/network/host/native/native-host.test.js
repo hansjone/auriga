@@ -316,7 +316,8 @@ test('identity mismatch, missing history, invalid inputs and non-accepted prompt
   });
   f.ctx.sessionController.prompt = async () => ({ accepted: false });
   await assert.rejects(host.prompt('session-a', input), incompatible);
-  f.agents.get('session-a').session.snapshotEvents = undefined;
+  f.stored.get('session-a').events = undefined;
+  f.agents.get('session-a').inbox.nextTurn.length = 0;
   await assert.rejects(
     host.hasPromptRequest('session-a', input.requestId),
     incompatible,

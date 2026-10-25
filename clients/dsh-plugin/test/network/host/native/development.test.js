@@ -3,7 +3,6 @@ import test from 'node:test';
 import {
   createNativeHostPort,
   getNativeIsolationDecision,
-  PINNED_HOST,
 } from '../../../../src/network/host/native/index.js';
 import { fixture } from './fixtures.js';
 
@@ -17,10 +16,11 @@ test('isolation is deferred at one decision point with an explicit development d
   assert.equal(Object.isFrozen(getNativeIsolationDecision()), true);
 });
 
-test('deferring isolation does not accept a copied fingerprint instead of actual runtime artifacts', async () => {
+test('deferring isolation keeps public durability capabilities mandatory', async () => {
   const f = fixture();
-  await assert.rejects(
-    createNativeHostPort({ ctx: f.ctx, runtime: { ...PINNED_HOST } }),
-    { code: 'network.host_incompatible' },
-  );
+  delete f.ctx.sessionPersistence.flush;
+  const host = await createNativeHostPort({ ctx: f.ctx });
+  assert.equal(host.getDiagnostics().capabilities.durability.available, false);
+  assert.equal(await host.flush('session-a'), false);
+  assert.equal((await host.getSession('session-a')).id, 'session-a');
 });

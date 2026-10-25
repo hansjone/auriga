@@ -1,15 +1,14 @@
-/* global structuredClone */
-import { PINNED_HOST } from '../../../../src/network/host/native/index.js';
-
 // Contract fixture, not an OS isolation or installed-host compatibility proof.
 export function fixture() {
   const stored = new Map();
+  const coldInbox = new Map();
   const agents = new Map();
   const sessions = new Map();
   const presets = new Map();
   const calls = [];
   const archivedSessionIds = [];
   const state = {
+    available: true,
     durable: true,
     flush: true,
     flushError: false,
@@ -19,7 +18,6 @@ export function fixture() {
     const session = {
       id,
       header: record.meta,
-      snapshotEvents: () => record.events,
     };
     const agent = { id, session, inbox: { nextTurn: [], nextStep: [] } };
     sessions.set(id, session);
@@ -56,12 +54,36 @@ export function fixture() {
       },
     },
     sessionPersistence: {
+      async open(id) {
+        const record = stored.get(id);
+        return {
+          header: record.meta,
+          read: async () => ({ events: record.events }),
+          close: async () => {},
+        };
+      },
+      identity: Symbol('persistence'),
+      async flush() {
+        calls.push(['persistence-flush']);
+        if (state.flushError) throw new Error('private');
+      },
       async stat(id) {
         const record = stored.get(id);
         return record && { header: record.meta };
       },
     },
     sessionController: {
+      async projections({ sessionId }) {
+        return {
+          asOfSeq: 0,
+          values: {
+            inbox: coldInbox.get(sessionId) ?? {
+              'next-turn': [],
+              'next-step': [],
+            },
+          },
+        };
+      },
       async inspect(id) {
         calls.push(['inspect', id]);
         if (!stored.has(id))
@@ -94,16 +116,8 @@ export function fixture() {
     },
   };
   const security = {
-    // Port-algorithm functional authority, not a real loaded-host verification.
     async assertReady() {
-      if (
-        JSON.stringify(await security.inspectRuntime()) !==
-        JSON.stringify(PINNED_HOST)
-      )
-        throw new Error('fixture authority unavailable');
-    },
-    async inspectRuntime() {
-      return structuredClone(PINNED_HOST);
+      if (!state.available) throw new Error('unavailable');
     },
     async assertDurableProvider(provider, id) {
       if (
@@ -121,6 +135,7 @@ export function fixture() {
     state,
     calls,
     stored,
+    coldInbox,
     agents,
     sessions,
     presets,

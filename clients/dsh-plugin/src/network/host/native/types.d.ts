@@ -1,4 +1,4 @@
-/** Structural APIs from lockfile-pinned upstream @deepseek-ai/dsh*@0.2.0-rc.2. */
+/** Minimal public host API contract, checked against upstream rc.2 exports. */
 export interface Header {
   id: string;
   cwd?: string;
@@ -13,19 +13,33 @@ export interface Event {
 export interface NativeSession {
   id: string;
   header: Header;
-  snapshotEvents(): readonly Event[];
 }
 export interface Agent {
   id: string;
   session: NativeSession;
   inbox: {
-    nextTurn: readonly { source: { kind: string; rpcId?: string } }[];
-    nextStep: readonly { source: { kind: string; rpcId?: string } }[];
+    nextTurn: readonly Message[];
+    nextStep: readonly Message[];
   };
+}
+export interface Message {
+  source?: { kind: string; rpcId?: string };
 }
 export interface NativeContext {
   sessionController: {
     inspect(id: string): Promise<{ meta: Header; events: readonly Event[] }>;
+    projections(
+      input: { sessionId: string },
+      signal: AbortSignal,
+    ): Promise<{
+      asOfSeq: number;
+      values: {
+        inbox?: {
+          'next-turn': readonly Message[];
+          'next-step': readonly Message[];
+        };
+      };
+    } | null>;
     resolveAgent(id: string): Promise<{ agent?: Agent; error?: unknown }>;
     create(input: {
       sessionId: string;
@@ -55,34 +69,48 @@ export interface NativeContext {
     resolve(id?: string): Promise<{ id: string; broken?: unknown }>;
   };
   sessionProjections: {
-    stateOf(session: NativeSession, key: 'agentPreset'): string | undefined;
+    stateOf(
+      session: NativeSession,
+      key: 'agentPreset',
+    ): string | null | undefined;
   };
   sessionPersistence: {
+    readonly identity: symbol;
+    flush(): Promise<void>;
+    open(
+      id: string,
+      access: 'read',
+    ): Promise<{
+      header: Header;
+      read(): Promise<{ events: readonly Event[] }>;
+      close(): Promise<void>;
+    }>;
     stat(id: string): Promise<{ header: Header } | undefined>;
   };
 }
-export interface RuntimeFingerprint {
-  version: string;
-  controllerSha256: string;
-  persistenceSha256: string;
-  sessionSha256: string;
-  agentLoopSha256: string;
+export type NativeCapability =
+  'read' | 'requests' | 'durability' | 'create' | 'prompt' | 'source';
+export interface NativeDiagnostics {
+  isolation: {
+    required: boolean;
+    isolated: boolean;
+    mode: string;
+    message: string;
+  };
+  capabilities: Record<
+    string,
+    { available: boolean; missing: string[]; lastFailure: string | null }
+  >;
 }
-/** Locations supplied by the running host loader. */
-export interface RuntimeArtifacts {
-  manifestPath: string;
-  controllerPath: string;
-  persistencePath: string;
-  sessionPath: string;
-  agentLoopPath: string;
-}
-/** Functional readiness and durability; does not grant or assert OS isolation. */
+/** Functional capability checks; no isolation/source attestation. */
 export interface HostOperationAuthority {
-  assertReady(): Promise<void>;
+  assertReady(capability?: NativeCapability): Promise<void>;
   assertDurableProvider(
     provider: NativeContext['sessionPersistence'],
     id: string,
   ): Promise<void>;
+  reportFailure?(capability: NativeCapability, reason: string): void;
+  getDiagnostics(): NativeDiagnostics;
 }
 export interface SourceBinding {
   local: string;

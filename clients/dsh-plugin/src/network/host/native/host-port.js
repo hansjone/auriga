@@ -1,10 +1,7 @@
 import { CODES, HostSeamError } from '../errors.js';
 import { createKeyedMutex } from '../keyed-mutex.js';
-import {
-  createNativeAuthority,
-  getNativeIsolationDecision,
-  incompatible,
-} from './runtime.js';
+import { isDeepStrictEqual } from 'node:util';
+import { createNativeAuthority, incompatible } from './runtime.js';
 import { hasNativePromptRequest, isNativeSubagentOwned } from './upstream.js';
 
 /** @param {unknown} value @returns {value is string} */
@@ -40,32 +37,24 @@ function liveAgent(agent, id, ctx) {
     agent.id !== id ||
     agent.session?.id !== id ||
     ctx.agents.get(id) !== agent ||
-    ctx.sessions.get(id) !== agent.session ||
-    typeof agent.session.snapshotEvents !== 'function'
+    ctx.sessions.get(id) !== agent.session
   )
     throw incompatible();
   validHeader(agent.session.header, id);
 }
 
-/** Implements HostPort against the lockfile-pinned upstream rc.2 services.
- * No model calls, service startup or network registration here.
- * OS isolation is deferred; runtime artifacts and native durability remain required.
- * @param {{ctx: import('./types.js').NativeContext, runtime: import('./types.js').RuntimeArtifacts}} options
- * @returns {Promise<import('../adapter.js').HostPort & {getDiagnostics(): {isolation:ReturnType<typeof getNativeIsolationDecision>}}> } */
-export async function createNativeHostPort({ ctx, runtime }) {
-  const operations = await createHostPortOperations({
-    ctx,
-    security: await createNativeAuthority({ ctx, runtime }),
-  });
-  return {
-    ...operations,
-    getDiagnostics: () => ({ isolation: getNativeIsolationDecision() }),
-  };
+/** Public service adapter. Missing capabilities stay local to their operations.
+ * @param {{ctx: import('./types.js').NativeContext}} options
+ * @returns {Promise<import('../adapter.js').HostPort & {getDiagnostics(): import('./types.js').NativeDiagnostics}>} */
+export async function createNativeHostPort({ ctx }) {
+  const security = createNativeAuthority({ ctx });
+  const operations = await createHostPortOperations({ ctx, security });
+  return { ...operations, getDiagnostics: () => security.getDiagnostics() };
 }
 
 /** Pure HostPort operations over an authority port; NOT an installation gate.
  * Production callers must use createNativeHostPort from index.js.
- * Native field shapes are pinned to the upstream package source evidence.
+ * Only documented ctx services and Agent interfaces are used.
  * @param {{ctx: import('./types.js').NativeContext, security: import('./types.js').HostOperationAuthority, promptTimeoutMs?: number}} options
  * @returns {Promise<import('../adapter.js').HostPort>} */
 export async function createHostPortOperations({
@@ -73,32 +62,18 @@ export async function createHostPortOperations({
   security,
   promptTimeoutMs = 30000,
 }) {
-  const ready = async () => {
+  /** @param {import('./types.js').NativeCapability} [capability] */
+  const ready = async (capability) => {
     try {
-      await security.assertReady();
+      await security.assertReady(capability);
     } catch {
       throw incompatible();
     }
   };
-  await ready();
   if (
     !Number.isSafeInteger(promptTimeoutMs) ||
     promptTimeoutMs < 1 ||
     promptTimeoutMs > 30000
-  )
-    throw incompatible();
-  if (
-    !ctx ||
-    typeof ctx.sessionController?.inspect !== 'function' ||
-    typeof ctx.sessionController?.resolveAgent !== 'function' ||
-    typeof ctx.sessionController?.create !== 'function' ||
-    typeof ctx.sessionController?.prompt !== 'function' ||
-    typeof ctx.sessionPersistence?.stat !== 'function' ||
-    typeof ctx.sessions?.get !== 'function' ||
-    typeof ctx.sessions?.flush !== 'function' ||
-    typeof ctx.agents?.get !== 'function' ||
-    typeof ctx.agentPresets?.resolve !== 'function' ||
-    !Array.isArray(ctx.workspaceRegistry?.archivedSessionIds)
   )
     throw incompatible();
   const locks = createKeyedMutex();
@@ -121,6 +96,7 @@ export async function createHostPortOperations({
       if (ctx.workspaceRegistry.archivedSessionIds.includes(id)) return null;
       return result;
     } catch {
+      security.reportFailure?.('read', 'public_inspect_failed');
       throw incompatible();
     }
   }
@@ -134,7 +110,7 @@ export async function createHostPortOperations({
 
   /** @param {string} id */
   async function durable(id) {
-    await ready();
+    await ready('durability');
     const stored = await ctx.sessionPersistence.stat(id);
     if (!stored) throw incompatible();
     validHeader(stored.header, id);
@@ -147,7 +123,7 @@ export async function createHostPortOperations({
   }
 
   /** Native preset identity is a projection, not necessarily the initial header.
-   * dsh-api-session-controller lib/index.js:339-340.
+   * Uses the public sessionProjections.stateOf API.
    * @param {string} id @param {string|null} expected */
   async function assertPreset(id, expected) {
     if (expected === null) return;
@@ -172,16 +148,45 @@ export async function createHostPortOperations({
   /** @param {string} id @param {string} requestId */
   async function hasRequest(id, requestId) {
     validId(requestId);
-    const record = await required(id);
+    await ready('requests');
+    await required(id);
     const agent = ctx.agents.get(id);
     if (agent) {
       liveAgent(agent, id, ctx);
-      return hasNativePromptRequest(agent, requestId);
+      // Read pending first, then a fresh public inspection to cover a claim
+      // that moves a message from the inbox to durable history.
+      const pending = hasNativePromptRequest(agent, requestId);
+      if (pending) return true;
+    } else {
+      // Public cold projection read covers queued input before user/message
+      // has been written. Absence of the inbox projection is not absence of a request.
+      const baseline = await ctx.sessionController.projections(
+        { sessionId: id },
+        new AbortController().signal,
+      );
+      const inbox = baseline?.values?.inbox;
+      if (!Number.isSafeInteger(baseline?.asOfSeq) || !inbox)
+        throw incompatible();
+      await ready('requests');
+      await required(id);
+      if (
+        hasNativePromptRequest(
+          {
+            inbox: {
+              nextTurn: inbox['next-turn'],
+              nextStep: inbox['next-step'],
+            },
+          },
+          requestId,
+        )
+      )
+        return true;
     }
+    const record = await required(id);
     const recorded = record.events.some(
       (event) =>
         event.type === 'user/message' &&
-        event.data.source?.kind === 'user' &&
+        event.data?.source?.kind === 'user' &&
         event.data.source.rpcId === requestId,
     );
     if (recorded) return true;
@@ -194,6 +199,7 @@ export async function createHostPortOperations({
       return record ? validHeader(record.meta, id) : null;
     },
     async createSession({ id, cwd, preset }) {
+      await ready('create');
       validId(id);
       if (
         typeof cwd !== 'string' ||
@@ -228,7 +234,7 @@ export async function createHostPortOperations({
             !opaque(resolvedPreset.id)
           )
             throw incompatible();
-          await ready();
+          await ready('create');
           const result = await ctx.sessionController.create({
             sessionId: id,
             cwd,
@@ -248,14 +254,17 @@ export async function createHostPortOperations({
           await assertPreset(id, resolvedPreset.id);
           if (!(await flushSession(id))) throw incompatible();
           await assertPreset(id, resolvedPreset.id);
+          await ready('create');
           return { id, cwd };
         } catch {
+          security.reportFailure?.('create', 'public_create_failed');
           // Unknown create is queried by the core with this same durable id.
           throw incompatible();
         }
       });
     },
     async prompt(id, input) {
+      await ready('prompt');
       validId(id);
       validId(input.requestId);
       if (input.mode !== 'queue' || typeof input.text !== 'string')
@@ -284,7 +293,7 @@ export async function createHostPortOperations({
             resolved.agent.session.header.cwd !== record.meta.cwd
           )
             throw incompatible();
-          await ready();
+          await ready('prompt');
           if (ctx.workspaceRegistry.archivedSessionIds.includes(id))
             throw incompatible();
           // Resolve can attach a previously cold agent. Recheck pending evidence
@@ -319,12 +328,13 @@ export async function createHostPortOperations({
           } finally {
             clearTimeout(timeout);
           }
-          await ready();
+          await ready('prompt');
           liveAgent(resolved.agent, id, ctx);
           if (result?.accepted !== true) throw incompatible();
           uncertain.delete(requestKey);
           return result;
         } catch {
+          security.reportFailure?.('prompt', 'public_prompt_failed');
           throw incompatible();
         }
       });
@@ -334,6 +344,7 @@ export async function createHostPortOperations({
         try {
           return await hasRequest(id, requestId);
         } catch {
+          security.reportFailure?.('requests', 'public_request_read_failed');
           throw incompatible();
         }
       });
@@ -356,10 +367,12 @@ export async function createHostPortOperations({
    * @param {string} id */
   async function flushSession(id) {
     try {
+      await ready('durability');
       const before = await required(id);
       if (isNativeSubagentOwned(ctx, before.meta, ctx.agents.get(id)))
         return false;
       const provider = ctx.sessionPersistence;
+      const providerIdentity = provider.identity;
       let session = ctx.sessions.get(id);
       if (!session) {
         const record = await required(id);
@@ -378,14 +391,39 @@ export async function createHostPortOperations({
       )
         return false;
       await durable(id);
-      if ((await ctx.sessions.flush(session)) !== true) return false;
+      const checkpoint = await required(id);
+      if ((await ctx.sessions.flush(session)) !== true) throw incompatible();
+      // Public backend-wide barrier, independent of backend implementation.
+      if ((await provider.flush()) !== undefined) throw incompatible();
+      // Verify the checkpoint prefix through a public read handle. A listener
+      // may return successfully with no matching live writer; API presence and
+      // stat alone cannot prove that the accepted events reached storage.
+      const reader = await provider.open(id, 'read');
+      try {
+        const persisted = await reader.read();
+        validHeader(reader.header, id);
+        if (
+          reader.header.cwd !== checkpoint.meta.cwd ||
+          !Array.isArray(persisted.events) ||
+          persisted.events.length < checkpoint.events.length ||
+          !isDeepStrictEqual(
+            persisted.events.slice(0, checkpoint.events.length),
+            checkpoint.events,
+          )
+        )
+          throw incompatible();
+      } finally {
+        await reader.close();
+      }
       await durable(id);
       return (
         ctx.sessionPersistence === provider &&
+        provider.identity === providerIdentity &&
         ctx.sessions.get(id) === session &&
         !ctx.workspaceRegistry.archivedSessionIds.includes(id)
       );
     } catch {
+      security.reportFailure?.('durability', 'public_flush_failed');
       return false;
     }
   }

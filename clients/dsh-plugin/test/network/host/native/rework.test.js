@@ -4,25 +4,19 @@ import { createNativeHostPort } from '../../../../src/network/host/native/index.
 import { createHostPortOperations } from '../../../../src/network/host/native/host-port.js';
 import { fixture } from './fixtures.js';
 
-test('self-attested security metadata cannot replace runtime artifact locations', async () => {
+test('metadata callbacks are never consulted for capability admission', async () => {
   const f = fixture();
   let invoked = false;
-  const fake = {
-    ...f.security,
-    async assertIsolated() {
-      invoked = true;
+  const host = await createNativeHostPort({
+    ctx: f.ctx,
+    security: {
+      async assertIsolated() {
+        invoked = true;
+        throw new Error('must not run');
+      },
     },
-  };
-  for (const security of [
-    fake,
-    { ...fake },
-    Object.create(fake),
-    new Proxy(fake, {}),
-  ]) {
-    await assert.rejects(createNativeHostPort({ ctx: f.ctx, security }), {
-      code: 'network.host_incompatible',
-    });
-  }
+  });
+  assert.equal(await host.flush('session-a'), true);
   assert.equal(invoked, false);
 });
 

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { PINNED_HOST } from '../../../../src/network/host/native/runtime.js';
 import {
   hasNativePromptRequest,
   isNativeSubagentOwned,
@@ -20,30 +19,18 @@ test('host baseline follows the real-dsh lockfile instead of a desktop release',
     ),
   );
   assert.equal(
-    PINNED_HOST.version,
+    '0.2.0-rc.2',
     lock.packages['node_modules/@deepseek-ai/dsh'].version,
   );
 });
 
-test('verified upstream pending queues and history de-duplicate user rpcId only', () => {
-  const agent = {
-    inbox: { nextTurn: [], nextStep: [] },
-    session: { snapshotEvents: () => [] },
-  };
+test('public Inbox contract de-duplicates pending user rpcId and rejects malformed lists', () => {
+  const agent = { inbox: { nextTurn: [], nextStep: [] } };
   for (const queue of ['nextTurn', 'nextStep']) {
     agent.inbox[queue].push({ source: { kind: 'user', rpcId: 'r' } });
     assert.equal(hasNativePromptRequest(agent, 'r'), true);
     agent.inbox[queue].length = 0;
   }
-  agent.session.snapshotEvents = () => [
-    { type: 'user/message', data: { source: { kind: 'user', rpcId: 'r' } } },
-  ];
-  assert.equal(hasNativePromptRequest(agent, 'r'), true);
-  assert.equal(hasNativePromptRequest(agent, 'other'), false);
-  agent.session.snapshotEvents = () => [
-    { type: 'system/message', data: { source: { kind: 'user', rpcId: 'r' } } },
-  ];
-  assert.equal(hasNativePromptRequest(agent, 'r'), false);
   agent.inbox.nextTurn.push({ source: { kind: 'system', rpcId: 'r' } });
   assert.equal(hasNativePromptRequest(agent, 'r'), false);
   delete agent.inbox.nextStep;

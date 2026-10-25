@@ -3,8 +3,6 @@ import test from 'node:test';
 import {
   createNativeHostPort as createInstalledPort,
   createNativeSourceResolver as createInstalledResolver,
-  PINNED_HOST,
-  verifyRuntimeFingerprint,
 } from '../../../../src/network/host/native/index.js';
 import { createHostPortOperations as createPort } from '../../../../src/network/host/native/host-port.js';
 import { createSourceResolver as createProjection } from '../../../../src/network/host/native/source-context.js';
@@ -12,38 +10,31 @@ import { fixture } from './fixtures.js';
 
 const incompatible = { code: 'network.host_incompatible' };
 
-test('diagnostic fingerprint requires the lockfile version and all four package source hashes', () => {
-  assert.equal(verifyRuntimeFingerprint({ ...PINNED_HOST }), true);
-  for (const key of Object.keys(PINNED_HOST)) {
-    assert.throws(
-      () =>
-        verifyRuntimeFingerprint({
-          ...PINNED_HOST,
-          [key]: 'other',
-        }),
-      incompatible,
-    );
-    const missing = { ...PINNED_HOST };
-    delete missing[key];
-    assert.throws(() => verifyRuntimeFingerprint(missing), incompatible);
+test('public probe reports API and non-function failures without package identities', async () => {
+  for (const value of [undefined, true, {}, 'function']) {
+    const f = fixture();
+    f.ctx.sessionController.inspect = value;
+    const host = await createInstalledPort({ ctx: f.ctx });
+    assert.deepEqual(host.getDiagnostics().capabilities.read.missing, [
+      'sessionController.inspect',
+    ]);
+    await assert.rejects(host.getSession('session-a'), incompatible);
   }
 });
 
-test('missing functional artifacts cannot be replaced by security/config booleans', async () => {
+test('security/config booleans cannot replace missing public capabilities', async () => {
   const f = fixture();
-  await assert.rejects(createInstalledPort({ ctx: f.ctx }), incompatible);
-  await assert.rejects(
-    createInstalledResolver({ ...f, lookupBinding: async () => null }),
-    incompatible,
-  );
-  await assert.rejects(
-    createInstalledPort({
-      ctx: f.ctx,
-      security: { isolated: true, durable: true },
-    }),
-    incompatible,
-  );
-  await assert.rejects(createInstalledPort(f), incompatible);
+  delete f.ctx.sessions.flush;
+  const host = await createInstalledPort({
+    ctx: f.ctx,
+    security: { durable: true },
+  });
+  assert.equal(await host.flush('session-a'), false);
+  const resolve = await createInstalledResolver({
+    ctx: f.ctx,
+    lookupBinding: async () => null,
+  });
+  await assert.rejects(resolve({}), incompatible);
 });
 
 test('durability boolean attestations are rejected rather than treated as provider evidence', async () => {
@@ -55,22 +46,17 @@ test('durability boolean attestations are rejected rather than treated as provid
   assert.equal(await host.hasDurableProvider('session-a'), false);
 });
 
-test('functional runtime is rechecked before operations and after async native calls', async () => {
+test('public capabilities are rechecked before operations and after async calls', async () => {
   const f = fixture();
-  const host = await createPort(f);
-  f.security.inspectRuntime = async () => ({
-    ...PINNED_HOST,
-    version: 'other',
-  });
+  const host = await createInstalledPort({ ctx: f.ctx });
+  const inspect = f.ctx.sessionController.inspect;
+  delete f.ctx.sessionController.inspect;
   await assert.rejects(host.getSession('session-a'), incompatible);
-  f.security.inspectRuntime = async () => ({ ...PINNED_HOST });
+  f.ctx.sessionController.inspect = inspect;
   const prompt = f.ctx.sessionController.prompt;
   f.ctx.sessionController.prompt = async (...args) => {
     const out = await prompt(...args);
-    f.security.inspectRuntime = async () => ({
-      ...PINNED_HOST,
-      version: 'changed',
-    });
+    delete f.ctx.sessionPersistence.stat;
     return out;
   };
   await assert.rejects(
