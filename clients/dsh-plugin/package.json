@@ -41,6 +41,7 @@
     }
   },
   "devDependencies": {
+    "@types/ws": "8.18.2",
     "json-schema-to-typescript": "16.0.0",
     "typescript": "5.9.3"
   },
