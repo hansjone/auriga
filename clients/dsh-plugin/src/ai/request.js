@@ -23,15 +23,8 @@ export function buildRequest(input, limits, stream, countInputTokens) {
   ]);
   check(options.provider === 'auriga');
   text(options.model, 128, 1);
-  // History declarations are metadata only; dynamic declaration blocks are rejected below.
-  if (options.toolHistory !== undefined) {
-    only(options.toolHistory, ['tools', 'updates']);
-    check(
-      Array.isArray(options.toolHistory.tools) &&
-        Array.isArray(options.toolHistory.updates),
-    );
-    check(options.toolHistory.updates.length === 0);
-  }
+  // Public Runtime projects current messages/tools for routes without toolUpdate.
+  // toolHistory remains non-wire metadata; validate the projected input below.
   integer(limits.maxOutputTokens, 1);
   const max = options.maxTokens ?? limits.defaultMaxTokens;
   integer(max, 1);

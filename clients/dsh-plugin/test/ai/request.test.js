@@ -98,6 +98,89 @@ test('request: tool history correlation and known capabilities', () => {
   });
 });
 
+test('request: non-wire tool history does not reject projected text or tool continuations', () => {
+  const history = {
+    tools: [],
+    updates: [
+      {
+        messageId: 'tool-update',
+        additions: [
+          {
+            name: 'lookup',
+            description: 'Find',
+            parameters: { type: 'object' },
+            deferLoading: true,
+          },
+        ],
+      },
+    ],
+  };
+  const options = {
+    ...input(),
+    tools: [
+      { name: 'lookup', description: 'Find', parameters: { type: 'object' } },
+    ],
+    toolHistory: history,
+  };
+  let measured;
+  const projected = buildRequest(
+    options,
+    { ...limits, contextWindow: 100 },
+    true,
+    (body) => {
+      measured = body;
+      return 68;
+    },
+  );
+  assert.deepEqual(
+    projected,
+    buildRequest({ ...options, toolHistory: undefined }, limits, true),
+  );
+  assert.deepEqual(measured, projected);
+  assert.equal('toolHistory' in projected, false);
+  const continuation = {
+    ...options,
+    messages: [
+      ...options.messages,
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool-call', id: 'call-1', name: 'lookup', arguments: '{}' },
+        ],
+      },
+      {
+        role: 'tool',
+        toolCallId: 'call-1',
+        source: { kind: 'tool', callId: 'call-1' },
+        content: [{ type: 'text', text: 'found' }],
+      },
+    ],
+  };
+  assert.equal(
+    buildRequest(continuation, limits, true).messages.at(-1).tool_call_id,
+    'call-1',
+  );
+  for (const messages of [
+    [
+      {
+        role: 'developer',
+        content: [{ type: 'tool-addition', toolName: 'lookup' }],
+      },
+    ],
+    [{ role: 'user', content: [{ type: 'image', attachment: {} }] }],
+    [{ role: 'user', content: [{ type: 'tool-removal', toolName: 'lookup' }] }],
+    [...continuation.messages, continuation.messages.at(-1)],
+  ])
+    assert.throws(() => buildRequest({ ...options, messages }, limits, true), {
+      code: 'UNSUPPORTED_OPTION',
+    });
+  assert.throws(
+    () =>
+      buildRequest(options, { ...limits, contextWindow: 100 }, true, () => 69),
+    { code: 'CONTEXT_WINDOW_EXCEEDED' },
+  );
+});
+
 test('request: actual OpenAPI schema accepts projection and rejects forbidden fields', () => {
   const spec = JSON.parse(
     readFileSync(
@@ -171,7 +254,6 @@ test('request: sampling, message/tool shape, missing limits, body size and exact
         },
       ],
     },
-    { toolHistory: { tools: [], updates: [{}] } },
   ];
   for (const extra of bad)
     assert.throws(() => buildRequest({ ...input(), ...extra }, limits, false), {

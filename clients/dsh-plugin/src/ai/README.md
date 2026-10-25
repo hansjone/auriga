@@ -33,7 +33,9 @@
 宿主重试策略明确为 normal/maxRetries=0。
 
 请求仅投影文本、普通 function 工具及对应历史结果。未知选项、思考/媒体/文件块、
-developer/动态工具更新、deferLoading、tool strict 等均拒绝，不静默丢弃语义。
+真正残留的 developer/动态工具块、deferLoading、tool strict 等均拒绝。
+本路由不声明 toolUpdate，消费公开 Runtime 已投影的当前 messages/tools；
+增删工具后保留的非 wire toolHistory 元数据不导致拒绝，也不会序列化到上游。
 源身份与会话 metadata 不进入模型正文。D2 不允许 `n` 字段，故省略它，
 并只接受 index=0 的单个 choice；不为任务中的“固定 n=1”扩大契约。
 
@@ -49,6 +51,10 @@ JSON 响应上限 1 MiB；SSE 每事件上限 256 KiB、整条流累计输入上
 宿主为可选运行时 peer；当前任务禁止更改依赖/锁文件，普通 workspace 无宿主包。
 `public-api.test.js` 会对可读的真实公开包执行类型检查与实际 Cordis/LlmRuntime
 注册、调用和注销。默认不可解析时明确 skip，不把传输 mock 算作宿主兼容证据。
+工具历史回归使用公开 createDeveloperMessage 与真实 Runtime，验证增删工具、
+文本/工具续轮、历史继承、D2 白名单/计量及直送非法输入零 POST。
+缺少该公开能力的旧构建入口会明确 skip 此回归；同版本号不代表相同编译产物，
+须将环境变量指向实际安装包实跑，不能以旧源码树 lib 的结果代替安装包验收。
 可将 `AURIGA_DSH_LLM_PACKAGE` 指向受许可只读的公开包 `package.json` 再运行：
 
 ```powershell

@@ -794,6 +794,70 @@ test('token rotation: each new request reads once; in-flight headers stay fixed'
   assert.equal(reads, 2);
 });
 
+test('tool history: projected requests submit once while raw developer/content/call id violations submit zero', async () => {
+  const bodies = [];
+  const { adapter } = setup(async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return sse([packet({}, 'stop'), '[DONE]']);
+  });
+  const input = {
+    ...options(),
+    tools: [
+      { name: 'lookup', description: 'Find', parameters: { type: 'object' } },
+    ],
+    toolHistory: {
+      tools: [],
+      updates: [{ messageId: 'added', additions: [] }],
+    },
+  };
+  assert.equal((await collect(adapter, input)).at(-1).reason.kind, 'stop');
+  assert.equal(bodies.length, 1);
+  assert.equal('toolHistory' in bodies[0], false);
+  for (const extra of [
+    {
+      messages: [
+        {
+          role: 'developer',
+          content: [{ type: 'tool-addition', toolName: 'lookup' }],
+        },
+      ],
+    },
+    {
+      messages: [
+        { role: 'user', content: [{ type: 'image', attachment: {} }] },
+      ],
+    },
+    {
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'tool-removal', toolName: 'lookup' }],
+        },
+      ],
+    },
+    {
+      messages: [
+        {
+          role: 'tool',
+          toolCallId: 'missing',
+          source: { kind: 'tool', callId: 'missing' },
+          content: [{ type: 'text', text: 'found' }],
+        },
+      ],
+    },
+    { stream_options: {} },
+    { tools: [{ ...input.tools[0], deferLoading: true }] },
+  ]) {
+    const terminal = (await collect(adapter, { ...input, ...extra })).at(-1);
+    assert.equal(terminal.reason.failure.code, 'UNSUPPORTED_OPTION');
+    assert.equal(
+      bodies.length,
+      1,
+      'rejected direct inputs must not submit a POST',
+    );
+  }
+});
+
 test('timeouts: broker, fetch, idle and total deadlines interrupt without replay', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 100000 });
   for (const stage of ['broker', 'fetch', 'idle', 'total']) {
