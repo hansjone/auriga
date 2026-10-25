@@ -233,11 +233,12 @@ func ClientUserClaims(userNkey, account, ingress string, exp time.Time, lim Clie
 	uc.Name = ingress
 	uc.Expires = exp.Unix()
 	uc.Permissions = ClientPermissions(ingress)
+	natsLim := &uc.Limits.NatsLimits //nolint:staticcheck // QF1008: UserClaims.Payload() shadows promoted field
 	if lim.MaxPayload > 0 {
-		uc.Limits.Payload = lim.MaxPayload
+		natsLim.Payload = lim.MaxPayload
 	}
 	if lim.MaxSubs > 0 {
-		uc.Limits.Subs = lim.MaxSubs
+		natsLim.Subs = lim.MaxSubs
 	}
 	for _, t := range connTypes {
 		uc.AllowedConnectionTypes.Add(strings.ToUpper(t))

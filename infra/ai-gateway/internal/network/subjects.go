@@ -3,7 +3,7 @@
 // network ticket into a scoped NATS User JWT, and the system-account
 // helpers used to kick or lame-duck a single connection.
 //
-// Design: docs/design/auriga-network (README §4.3/§7.4, protocol §2).
+// Design: docs/design/auriga-network (README 搂4.3/搂7.4, protocol 搂2).
 // This package only builds the Broker-side boundary; per-operation IAM
 // authorization stays in the adapter/collab path and is not done here.
 package network
@@ -51,7 +51,7 @@ func ValidIngressID(id string) bool {
 	}
 	for i := 0; i < len(id); i++ {
 		c := id[i]
-		if !(c >= 'a' && c <= 'z' || c >= '2' && c <= '7') {
+		if (c < 'a' || c > 'z') && (c < '2' || c > '7') {
 			return false
 		}
 	}
@@ -104,7 +104,7 @@ func ValidReplyFor(ingress, reply string) bool {
 		}
 		for i := 0; i < len(tok); i++ {
 			c := tok[i]
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
 				return false
 			}
 		}

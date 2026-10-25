@@ -56,8 +56,9 @@ func TestGate1_CalloutIssuesScopedUserJWT(t *testing.T) {
 	if uc.Resp != nil {
 		t.Fatalf("allow_responses must be absent, got %+v", uc.Resp)
 	}
-	if uc.Limits.Payload != 4096 || uc.Limits.Subs != 8 {
-		t.Fatalf("limits payload=%d subs=%d", uc.Limits.Payload, uc.Limits.Subs)
+	natsLim := uc.Limits.NatsLimits //nolint:staticcheck // QF1008: UserClaims.Payload() shadows promoted field
+	if natsLim.Payload != 4096 || natsLim.Subs != 8 {
+		t.Fatalf("limits payload=%d subs=%d", natsLim.Payload, natsLim.Subs)
 	}
 	if !reflect.DeepEqual([]string(uc.AllowedConnectionTypes), []string{jwt.ConnectionTypeWebsocket}) {
 		t.Fatalf("connection types %v", uc.AllowedConnectionTypes)
@@ -248,17 +249,17 @@ func TestGate1_AccountMaxPayloadEnforcedServerSide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	r := bufio.NewReader(conn)
 	if _, err := r.ReadString('\n'); err != nil { // INFO
 		t.Fatal(err)
 	}
-	fmt.Fprintf(conn, "CONNECT {\"auth_token\":\"nt_raw\",\"verbose\":false,\"protocol\":1}\r\nPING\r\n")
+	_, _ = fmt.Fprintf(conn, "CONNECT {\"auth_token\":\"nt_raw\",\"verbose\":false,\"protocol\":1}\r\nPING\r\n")
 	if line, _ := r.ReadString('\n'); !strings.HasPrefix(line, "PONG") {
 		t.Fatalf("raw connect: %q", line)
 	}
-	fmt.Fprintf(conn, "PUB auriga.net.up.x 4097\r\n%s\r\n", strings.Repeat("a", 4097))
+	_, _ = fmt.Fprintf(conn, "PUB auriga.net.up.x 4097\r\n%s\r\n", strings.Repeat("a", 4097))
 	// Skip the INFO the server re-sends after CONNECT (connect_info), which
 	// carries the per-connection max_payload of the account.
 	var line string
@@ -287,8 +288,11 @@ func TestGate1_UserJWTLimitsIgnored_FirstFailure(t *testing.T) {
 	h := newHarness(t, o)
 	a := h.startAdapter()
 	c := h.connectNew(time.Now().Add(time.Hour))
-	if d := h.lastDecision(); d.uc.Limits.Subs != 8 || d.uc.Limits.Payload != 4096 {
-		t.Fatalf("JWT limits not set: %+v", d.uc.Limits.NatsLimits)
+	if d := h.lastDecision(); true {
+		nl := d.uc.Limits.NatsLimits //nolint:staticcheck // QF1008: UserClaims.Payload() shadows promoted field
+		if nl.Subs != 8 || nl.Payload != 4096 {
+			t.Fatalf("JWT limits not set: %+v", nl)
+		}
 	}
 	for i := 0; i < 9; i++ {
 		if _, err := c.nc.SubscribeSync(DownSubject(c.ingress)); err != nil {

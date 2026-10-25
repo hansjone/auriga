@@ -360,8 +360,6 @@ func (c *client) noAsyncErr(t *testing.T) {
 	}
 }
 
-type clientOpt func(*nats.Options) error
-
 // connect dials like a DSH would: one websocket connection, ticket as CONNECT
 // auth_token, private inbox prefix, no automatic reconnect (the plugin
 // supervisor redeems a new ticket instead).
@@ -413,16 +411,6 @@ func (h *harness) lastDecision() decision {
 	case <-time.After(3 * time.Second):
 		h.t.Fatal("no callout decision")
 		return decision{}
-	}
-}
-
-func (h *harness) drainDecisions() {
-	for {
-		select {
-		case <-h.decisions:
-		default:
-			return
-		}
 	}
 }
 
