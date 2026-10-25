@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -35,6 +36,53 @@ func (r bridgeReporter) ReportWake(w *nodev1.WakeSchedule) { r.wakes <- w }
 func (bridgeReporter) ReportUsage(*nodev1.NodeUsage)       {}
 func (bridgeReporter) ReportReady(string, bool)            {}
 
+func writeBridgeSchedule(t *testing.T, path string, at time.Time) {
+	t.Helper()
+	body := fmt.Sprintf(`{"jobs":[{"enabled":true,"schedule":{"kind":"at","at":%q}}]}`, at.Format(time.RFC3339))
+	if err := os.WriteFile(path+".next", []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path+".next", at, at); err != nil {
+		t.Fatal(err)
+	}
+	// Root.Rename uses POSIX replacement semantics on Windows: an existing
+	// delete-sharing watcher handle may finish reading the old snapshot.
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Rename(filepath.Base(path)+".next", filepath.Base(path)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBridgeScheduleReplacementKeepsOpenSnapshot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "store.json")
+	due := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	writeBridgeSchedule(t, path, due)
+	reader, err := ingress.OpenBeneath(root, "store.json", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	old, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBridgeSchedule(t, path, due.Add(time.Minute))
+	snapshot, err := io.ReadAll(reader)
+	if err != nil || string(snapshot) != string(old) {
+		t.Fatalf("open reader lost old snapshot: %q, %v", snapshot, err)
+	}
+	current, err := os.ReadFile(path)
+	want := fmt.Sprintf(`{"jobs":[{"enabled":true,"schedule":{"kind":"at","at":%q}}]}`, due.Add(time.Minute).Format(time.RFC3339))
+	if err != nil || string(current) != want {
+		t.Fatalf("new reader did not see replacement: %q, %v", current, err)
+	}
+}
+
 func TestStoppedBridgeKeepsWakeWatcherAndReplacesRunningEndpoint(t *testing.T) {
 	cfg := config.Config{DataRoot: t.TempDir()}
 	driver := &endpointDriver{endpoint: "http://127.0.0.1:12345"}
@@ -49,16 +97,7 @@ func TestStoppedBridgeKeepsWakeWatcherAndReplacesRunningEndpoint(t *testing.T) {
 	due := now.Add(time.Minute)
 	write := func(at time.Time) {
 		t.Helper()
-		body := fmt.Sprintf(`{"jobs":[{"enabled":true,"schedule":{"kind":"at","at":%q}}]}`, at.Format(time.RFC3339))
-		if err := os.WriteFile(path+".next", []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path+".next", at, at); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Rename(path+".next", path); err != nil {
-			t.Fatal(err)
-		}
+		writeBridgeSchedule(t, path, at)
 	}
 	write(due)
 	clock := &wakeClock{}
