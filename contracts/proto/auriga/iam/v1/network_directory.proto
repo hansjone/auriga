@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Internal service JWT, delegated business tenant and authenticated internal
+// transport. Exact svc:collab only; no cross-tenant delegation in the payload.
+service NetworkDirectoryService {
+  // Registration lookup, independent of connection/session online state.
+  // Never queries or discloses a nonzero local. Collab owns local registration
+  // types and must still enforce node policy, relationships and receive grants.
+  rpc ResolveNetworkNode(ResolveNetworkNodeRequest) returns (ResolveNetworkNodeResponse);
+}
+
+message ResolveNetworkNodeRequest {
+  // Canonical uint64 decimal strings, not hexadecimal display segments.
+  string realm = 1;
+  string node = 2;
+}
+
+enum NetworkDirectoryNodeType {
+  NETWORK_DIRECTORY_NODE_TYPE_UNSPECIFIED = 0;
+  NETWORK_DIRECTORY_NODE_TYPE_DSH = 1;
+}
+
+message ResolveNetworkNodeResponse {
+  // Unknown, foreign-realm, revoked, disabled owner/device/organization all
+  // return exists=false and an unspecified type. Offline is still registered.
+  bool exists = 1;
+  NetworkDirectoryNodeType type = 2;
+}
+
+// Shared projection for IAM's HTTP /network/systems, not a local/session index.
+message NetworkSystemEntry {
+  string system_address = 1;
+  string display_name = 2;
+  string owner_user_id = 3;
+  string owner_display_name = 4;
+}
+
+message ListNetworkSystemsResponse {
+  repeated NetworkSystemEntry items = 1;
+  // Omitted by the HTTP adapter when there is no next page.
+  string next_cursor = 2;
+}
