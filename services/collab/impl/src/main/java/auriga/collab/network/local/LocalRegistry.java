@@ -18,6 +18,7 @@ import auriga.iam.api.NetworkAuthority.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -175,24 +176,27 @@ public final class LocalRegistry {
           if (health != null) return failed(health);
           require("conversation".equals(contact.get("scope")), NetworkErrors.PROTOCOL_ERROR);
           require(target.realm().equals(contact.get("source_realm")), NetworkErrors.UNAUTHORIZED);
-          require(
-              ((java.sql.Timestamp) contact.get("expires_at")).toInstant().isAfter(clock.instant()),
-              NetworkErrors.CONTACT_EXPIRED);
+          Instant contactExpiry = ((java.sql.Timestamp) contact.get("expires_at")).toInstant();
+          require(contactExpiry.isAfter(clock.instant()), NetworkErrors.CONTACT_EXPIRED);
           require("allowed".equals(contact.get("status")), NetworkErrors.CONTACT_DENIED);
           require(
               number(text(frame, "decision_version")).equals(number(contact, "decision_version")),
               NetworkErrors.CONFLICT);
+          ContactAuthorization sourceAuthorization = authorizeContact(tenant, target, contact);
           checkIam(
               contact.get("source_realm").toString(),
               contact.get("source_node").toString(),
               target.node(),
               contact.get("source_local").toString(),
               Operation.FIRST_CONTACT,
-              authorizeContact(tenant, target, contact));
-          require(
-              ((java.sql.Timestamp) contact.get("expires_at")).toInstant().isAfter(clock.instant()),
-              NetworkErrors.CONTACT_EXPIRED);
+              sourceAuthorization.sender());
+          sourceAuthorization.requireCurrent(clock);
+          require(contactExpiry.isAfter(clock.instant()), NetworkErrors.CONTACT_EXPIRED);
           require(target.validUntil().isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+          Instant validUntil = sourceAuthorization.validUntil();
+          if (contactExpiry.isBefore(validUntil)) validUntil = contactExpiry;
+          if (target.validUntil().isBefore(validUntil)) validUntil = target.validUntil();
+          var permission = new ContactAuthorization(sourceAuthorization.sender(), validUntil);
           String local = text(address, "local");
           UUID registrationId = uuid(frame, "registration_id");
           var reg = registered(tenant, target.realm(), target.node(), local, registrationId, null);
@@ -208,7 +212,8 @@ public final class LocalRegistry {
                 registrationId.equals(existing.get("registration_id"))
                     && number(local).equals(number(existing, "local_id")),
                 NetworkErrors.CONFLICT);
-            return ok(assignment(existing, false));
+            permission.requireCurrent(clock);
+            return ok(assignment(existing, false, permission.validUntil()));
           }
           require(
               one(
@@ -221,6 +226,7 @@ public final class LocalRegistry {
               NetworkErrors.CONFLICT);
           UUID id = UuidV7.next();
           String attempt = text(frame, "creation_attempt_id");
+          permission.requireCurrent(clock);
           jdbc.update(
               """
           INSERT INTO collab.network_contact_assignment(
@@ -239,6 +245,7 @@ public final class LocalRegistry {
               contact.get("decision_version"),
               target.epoch(),
               text(frame, "boot_id"));
+          permission.requireCurrent(clock);
           return ok(
               new Assignment(
                   contactId,
@@ -250,7 +257,8 @@ public final class LocalRegistry {
                   "assigned",
                   true,
                   target.epoch(),
-                  text(frame, "boot_id")));
+                  text(frame, "boot_id"),
+                  permission.validUntil()));
         });
   }
 
@@ -402,7 +410,8 @@ public final class LocalRegistry {
     checkIam(realm, source, target, local, operation, Sender.HUMAN);
   }
 
-  private Sender authorizeContact(UUID tenant, Target target, Map<String, Object> contact) {
+  private ContactAuthorization authorizeContact(
+      UUID tenant, Target target, Map<String, Object> contact) {
     var message =
         one(
             """
@@ -425,7 +434,7 @@ public final class LocalRegistry {
             && sender.equals(text(envelope, "sender_kind"))
             && NetworkJson.digest(envelope).equals(text(stamp, "message_digest")),
         NetworkErrors.UNAUTHORIZED);
-    java.time.Instant until;
+    Instant until;
     try {
       // This collab adapter may read its own witnesses in the SAME transaction, like mailbox FETCH.
       // Only calls to the separate IAM service are suspended below.
@@ -435,8 +444,18 @@ public final class LocalRegistry {
     } catch (RuntimeException e) {
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     }
-    require(until != null && until.isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
-    return "agent".equals(sender) ? Sender.AGENT : Sender.HUMAN;
+    var authorization =
+        new ContactAuthorization("agent".equals(sender) ? Sender.AGENT : Sender.HUMAN, until);
+    authorization.requireCurrent(clock);
+    return authorization;
+  }
+
+  /** Internal authorization evidence; business expiry has no clock-skew grace period. */
+  record ContactAuthorization(Sender sender, Instant validUntil) {
+    void requireCurrent(Clock clock) {
+      require(
+          validUntil != null && validUntil.isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+    }
   }
 
   private void checkIam(
@@ -541,7 +560,8 @@ public final class LocalRegistry {
         row.get("granted_boot_id").toString());
   }
 
-  private static Assignment assignment(Map<String, Object> row, boolean permit) {
+  private static Assignment assignment(
+      Map<String, Object> row, boolean permit, Instant validUntil) {
     return new Assignment(
         (UUID) row.get("contact_id"),
         row.get("realm").toString(),
@@ -552,7 +572,8 @@ public final class LocalRegistry {
         "existing",
         permit,
         ((Number) row.get("granted_epoch")).longValue(),
-        row.get("granted_boot_id").toString());
+        row.get("granted_boot_id").toString(),
+        validUntil);
   }
 
   private static ErrorCode health(Map<String, Object> node) {
@@ -681,6 +702,7 @@ public final class LocalRegistry {
       long grantedEpoch,
       String grantedBootId) {}
 
+  /** validUntil bounds the existing server_auth.not_after; it is not a new wire field. */
   public record Assignment(
       UUID contactId,
       String realm,
@@ -691,7 +713,8 @@ public final class LocalRegistry {
       String result,
       boolean creationPermit,
       long grantedEpoch,
-      String grantedBootId) {}
+      String grantedBootId,
+      Instant validUntil) {}
 
   public record Recovery(
       String status,

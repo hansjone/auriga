@@ -629,6 +629,128 @@ class LocalRegistryPostgresTest {
     error("network.contact_expired", () -> assign(contact, "7", reg.registrationId(), "create"));
   }
 
+  @Test
+  void sourceDeadlineReachedDuringIamCheckRollsBackWithoutCreationPermit() {
+    var reg = register("7", "op", FP, "0");
+    doReturn(NOW.plusSeconds(1))
+        .when(authority)
+        .authorizeDelivery(eq(tenant), anyString(), anyString(), eq("20"));
+    for (long elapsed : new long[] {1, 2}) {
+      UUID contact = contact("allowed", "conversation", NOW.plusSeconds(600));
+      takeover();
+      var clock = mock(Clock.class);
+      when(clock.instant()).thenReturn(NOW);
+      registry = new LocalRegistry(jdbc, manager, authority, iam, clock);
+      doAnswer(
+              i -> {
+                assertEquals(
+                    NetworkAuthority.Sender.AGENT,
+                    ((NetworkAuthority.Check) i.getArgument(0)).sender());
+                when(clock.instant()).thenReturn(NOW.plusSeconds(elapsed));
+                return new NetworkAuthority.Decision(true, "allowed", Map.of());
+              })
+          .when(iam)
+          .check(
+              argThat(c -> c != null && c.operation() == NetworkAuthority.Operation.FIRST_CONTACT));
+      error("network.unauthorized", () -> assign(contact, "7", reg.registrationId(), "create"));
+      assertEquals("1", state("local_boot_epoch"));
+      assertEquals("1", state("registration_revision"));
+      assertEquals("7", state("local_high_water"));
+      assertEquals("healthy", state("local_identity_status"));
+      sql(
+          () -> {
+            assertEquals(
+                1,
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_local_registration WHERE tenant_id=?",
+                    Integer.class,
+                    tenant));
+            assertEquals(
+                0,
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_contact_assignment WHERE tenant_id=?",
+                    Integer.class,
+                    tenant));
+            assertEquals(
+                0,
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.outbox_event WHERE tenant_id=?",
+                    Integer.class,
+                    tenant));
+            return null;
+          });
+    }
+  }
+
+  @Test
+  void validSourceDeadlineAllowsOnePermitAndBoundsItsExistingProofExpiry() {
+    var reg = register("7", "op", FP, "0");
+    UUID contact = contact("allowed", "conversation", NOW.plusSeconds(600));
+    var clock = mock(Clock.class);
+    when(clock.instant()).thenReturn(NOW);
+    registry = new LocalRegistry(jdbc, manager, authority, iam, clock);
+    doReturn(NOW.plusSeconds(3))
+        .when(authority)
+        .authorizeDelivery(eq(tenant), anyString(), anyString(), eq("20"));
+    doAnswer(
+            i -> {
+              when(clock.instant()).thenReturn(NOW.plusSeconds(2));
+              return new NetworkAuthority.Decision(true, "allowed", Map.of());
+            })
+        .when(iam)
+        .check(
+            argThat(c -> c != null && c.operation() == NetworkAuthority.Operation.FIRST_CONTACT));
+    var first = assign(contact, "7", reg.registrationId(), "create");
+    assertTrue(first.creationPermit());
+    assertEquals(NOW.plusSeconds(3), first.validUntil());
+    assertFalse(assign(contact, "7", reg.registrationId(), "retry").creationPermit());
+    when(clock.instant()).thenReturn(NOW.plusSeconds(3));
+    error("network.unauthorized", () -> assign(contact, "7", reg.registrationId(), "expired"));
+    assertEquals(
+        1,
+        sql(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_contact_assignment WHERE tenant_id=?",
+                    Integer.class,
+                    tenant)));
+  }
+
+  @Test
+  void permitDeadlineAlsoRespectsContactAndTargetExpiry() {
+    var first = register("7", "first", FP, "0");
+    var second = register("8", "second", FP, "1");
+    doReturn(NOW.plusSeconds(30))
+        .when(authority)
+        .authorizeDelivery(eq(tenant), anyString(), anyString(), eq("20"));
+    doReturn(
+            new NetworkSourceAuthority.Target(
+                "2", "20", "incarnation", epoch, "nonce", "request", NOW.plusSeconds(20)))
+        .when(authority)
+        .currentTarget(tenant);
+    var contactBound =
+        assign(
+            contact("allowed", "conversation", NOW.plusSeconds(10)),
+            "7",
+            first.registrationId(),
+            "first");
+    assertTrue(contactBound.creationPermit());
+    assertEquals(NOW.plusSeconds(10), contactBound.validUntil());
+    doReturn(
+            new NetworkSourceAuthority.Target(
+                "2", "20", "incarnation", epoch, "nonce", "request", NOW.plusSeconds(5)))
+        .when(authority)
+        .currentTarget(tenant);
+    var targetBound =
+        assign(
+            contact("allowed", "conversation", NOW.plusSeconds(10)),
+            "8",
+            second.registrationId(),
+            "second");
+    assertTrue(targetBound.creationPermit());
+    assertEquals(NOW.plusSeconds(5), targetBound.validUntil());
+  }
+
   LocalRegistry.Registration register(String local, String op, String fp, String revision) {
     return call(() -> registry.register(tenant, frame(local, op, fp, revision).toString()));
   }

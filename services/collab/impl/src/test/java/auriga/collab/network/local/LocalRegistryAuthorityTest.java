@@ -7,6 +7,7 @@ import auriga.collab.api.NetworkSourceAuthority;
 import auriga.collab.api.NetworkSourceAuthority.Target;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
+import auriga.iam.api.NetworkAuthority.Sender;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -73,6 +74,27 @@ class LocalRegistryAuthorityTest {
 
   private static Target target(String realm, String node, Instant until) {
     return new Target(realm, node, "incarnation", 1, "nonce", "request", until);
+  }
+
+  @Test
+  void sourceAuthorizationRetainsSenderAndRejectsTheExactDeadlineWithoutGrace() {
+    Instant deadline = NOW.plusSeconds(1);
+    var authorization = new LocalRegistry.ContactAuthorization(Sender.AGENT, deadline);
+    assertEquals(Sender.AGENT, authorization.sender());
+    assertEquals(deadline, authorization.validUntil());
+    assertDoesNotThrow(
+        () -> authorization.requireCurrent(Clock.fixed(deadline.minusNanos(1), ZoneOffset.UTC)));
+    for (Instant now : new Instant[] {deadline, deadline.plusNanos(1), deadline.plusSeconds(1)}) {
+      error(
+          "network.unauthorized",
+          () -> authorization.requireCurrent(Clock.fixed(now, ZoneOffset.UTC)));
+    }
+  }
+
+  @Test
+  void missingSourceDeadlineNeverGrantsPermission() {
+    var authorization = new LocalRegistry.ContactAuthorization(Sender.HUMAN, null);
+    error("network.unauthorized", () -> authorization.requireCurrent(CLOCK));
   }
 
   private static AurigaException error(String code, Runnable work) {
