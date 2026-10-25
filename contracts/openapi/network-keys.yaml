@@ -1,0 +1,88 @@
+openapi: 3.1.0
+info:
+  title: Auriga network verification keys
+  version: 1.0.0
+  description: Fixed authenticated configuration endpoints; installation pins the root independently.
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+servers:
+  - url: https://auriga.example.com
+security:
+  - bearerAuth: []
+tags:
+  - name: NetworkKeys
+    description: Complete offline-root-approved public network keys and revocations.
+paths:
+  /api/collab/v1/network/keys:
+    get:
+      operationId: getNetworkKeys
+      tags: [NetworkKeys]
+      summary: Get the complete root-signed public keyset
+      description: >-
+        Requires an authenticated principal belonging to the installation's tenant.
+        Realm and root are installation settings, never request parameters.
+        Returns the original release without extending issued_at or valid_until.
+        Configure this exact HTTPS URL before READY; reject redirects and message-provided URLs.
+      x-authenticated-only: true
+      responses:
+        '200':
+          description: Complete SignedKeyset with explicit revoked entries; Cache-Control no-store.
+          content:
+            application/json:
+              schema:
+                $ref: ../network/keyset.schema.json#/$defs/SignedKeyset
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/collab/v1/network/keys/announcement:
+    get:
+      operationId: getNetworkKeyAnnouncement
+      tags: [NetworkKeys]
+      summary: Get the independent root-signed keyset version announcement
+      description: >-
+        Same tenant authentication as the full keyset endpoint. The announcement digest is
+        SHA-256 of JCS(KeysetPayload). See network/key-operations.md for the signature domain.
+        A newer valid announcement blocks new processing until its complete keyset arrives.
+      x-authenticated-only: true
+      responses:
+        '200':
+          description: KeysetAnnouncement with unchanged hard deadline; Cache-Control no-store.
+          content:
+            application/json:
+              schema:
+                $ref: ../network/protocol.schema.json#/$defs/KeysetAnnouncement
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthenticated:
+      description: Missing or invalid authenticated principal (common.unauthenticated).
+      content:
+        application/problem+json:
+          schema:
+            $ref: common.yaml#/components/schemas/Problem
+    Forbidden:
+      description: Principal belongs to another tenant (common.forbidden).
+      content:
+        application/problem+json:
+          schema:
+            $ref: common.yaml#/components/schemas/Problem
+    Unavailable:
+      description: No currently valid complete approved publication (common.unavailable).
+      content:
+        application/problem+json:
+          schema:
+            $ref: common.yaml#/components/schemas/Problem
