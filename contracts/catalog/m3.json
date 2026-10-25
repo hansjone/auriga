@@ -2,6 +2,24 @@
   "schemaVersion": 1,
   "description": "M3权限、域错误和新增事件来源的单一定义；OpenAPI x-permission/x-error-codes/x-events 仅为引用。现有common.*与iam.step_up_required复用既有契约和common映射，不在此重定义。",
   "permissions": {
+    "collab.messages.use": {
+      "description": {
+        "zh-CN": "以本人身份使用本租户参与的 Team 通信",
+        "en": "Use participating tenant Team communication as the authenticated account"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": ["owner", "admin", "member"]
+    },
+    "auriga.connect.collab.use": {
+      "description": {
+        "zh-CN": "通过本人设备使用获授权的 Team 通信",
+        "en": "Use authorized Team communication through an owned device"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": ["owner", "admin", "member"]
+    },
     "ai.providers.read": {
       "description": {
         "zh-CN": "读取脱敏供应商及模型管理元数据",

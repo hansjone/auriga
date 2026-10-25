@@ -29,6 +29,10 @@ export interface paths {
      * 开始一次登录（或绑定、补验证）
      * @description 返回第一步。按本入口下发 portal/admin 分名的登录事务cookie（见文首），绑定事务和浏览器，扫码类防转发。
      *     purpose=link / stepup 时需要已登录。
+     *     nativeConnect 仅已显式登记的第一方public client在portal的team-account账号+TOTP登录使用，
+     *     purpose固定login、returnTo省略或/、不带invitationCode；拒绝任何外来设备码/主体/权限和未知字段。
+     *     创建响应nativeDevice只回一次，GET/SSE/advance不回放；完成登录仅批准本事务自己的grant，
+     *     token端点仍须S256 verifier兑换device-only凭据，不得自动调用人工核码或consent接口。
      */
     post: operations['createLoginTransaction'];
     delete?: never;
@@ -993,8 +997,26 @@ export interface components {
        */
       purpose: 'login' | 'link' | 'stepup';
       invitationCode?: string;
+      nativeConnect?: components['schemas']['NativeConnect'];
       /** @description 完成后回到哪里；只接受本入口的绝对路径（不能以 // 或 /\ 开头），服务端另做规范化与路由白名单验证。会话audience由edge按受信listener和完整scheme/authority决定。 */
       returnTo?: string;
+    };
+    NativeConnect: {
+      clientId: string;
+      codeChallenge: string;
+      /** @constant */
+      codeChallengeMethod: 'S256';
+      deviceName?: string;
+    };
+    CreateLoginTransactionResult: components['schemas']['LoginTransaction'] & {
+      nativeDevice?: {
+        /** @description 服务端自产256-bit明文，仅本创建响应一次回给Host内存。 */
+        deviceCode: string;
+        /** Format: date-time */
+        expiresAt: string;
+        /** @description token轮询间隔秒数，初始5。 */
+        interval: number;
+      };
     };
     LoginTransaction: {
       id: components['schemas']['Uuid'];
@@ -1681,7 +1703,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['LoginTransaction'];
+          'application/json': components['schemas']['CreateLoginTransactionResult'];
         };
       };
       400: components['responses']['BadRequest'];

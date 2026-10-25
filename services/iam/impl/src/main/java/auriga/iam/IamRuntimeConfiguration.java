@@ -209,6 +209,15 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamGrpcDevices iamGrpcDevices(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      IamGrpcSessions transportGuard) {
+    return new IamGrpcDevices(new DeviceAccessAuthority(store, sessions, tokens));
+  }
+
+  @Bean
   IamAccounts iamAccounts(IamStore store) {
     return new IamAccounts(store);
   }
@@ -336,20 +345,24 @@ public class IamRuntimeConfiguration {
       org.springframework.beans.factory.ObjectProvider<EventPublisher> events,
       AuditLogger audit,
       Clock clock,
-      TokenService tokens) {
-    return new LoginManager(
-        store,
-        secrets,
-        schemas,
-        registry,
-        emergency,
-        teamAccounts,
-        sessions,
-        hooks,
-        iamEvents.getIfAvailable(events::getObject),
-        audit,
-        clock,
-        tokens.issuer());
+      TokenService tokens,
+      OAuthProvider nativeDevices) {
+    var manager =
+        new LoginManager(
+            store,
+            secrets,
+            schemas,
+            registry,
+            emergency,
+            teamAccounts,
+            sessions,
+            hooks,
+            iamEvents.getIfAvailable(events::getObject),
+            audit,
+            clock,
+            tokens.issuer());
+    manager.nativeDevices(nativeDevices);
+    return manager;
   }
 
   @Bean
