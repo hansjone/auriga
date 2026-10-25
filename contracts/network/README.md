@@ -57,7 +57,8 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 | `message_id`、`thread_id`、`thread_sequence`、`created_at`、`expires_at` | 总部 | 重投不变；`expires_at` ≤ `created_at+ttl`，平台按类型夹紧，不能按接收时间重置 |
 | `from`、`reply_to`、`sender_kind`、`authorization_ref` | 总部按已核验来源授权（source_binding / human_send_intent）生成 | v1 `reply_to` 必须等于 `from`；human 固定本 node/sys，agent 固定会话/子会话 |
 | `message_class` | 总部按 `to` 生成 | 普通组 multicast、`node=0,local=1` broadcast、其余 unicast |
-| `to`、`kind`、`contact_scope`、`reply_mode`、`in_reply_to`、`intent`、`durability`、`dispatch_mode`、`ttl`、`body`、`flags`、`ext`、`origin`、`response_deadline` | 插件私有请求（`send.schema.json#SubmitRequest`），总部核权 | 模型工具只给 target/body/thread |
+| `to`、`kind`、`contact_scope`、`reply_mode`、`in_reply_to`、`intent`、`durability`、`dispatch_mode`、`ttl`、`body`、`flags`、`ext`、`response_deadline` | 插件私有请求（`send.schema.json#SubmitRequest`），总部核权 | 模型工具只给 target/body/thread |
+| `origin`、`correlation_id`、`causation_id` | 总部从权威上下文固化 | 客户端禁止提交，提交即拒绝；组消息回复的 origin 从原 recipient 推导 |
 | `source_context` | 总部从认证连接与权威存储重建 | 客户端同名字段删除；`message_digest = SHA-256(JCS(message))` |
 
 ### 3.2 kind / intent / class 规则（schema 与 `checkMessage` 双重执行）
@@ -187,3 +188,17 @@ Java 测试默认只比较已提交样本，再启动 Node 运行 `fixtures/veri
 .\mvnw.cmd -B -pl services/collab/api,services/collab/impl -am test '-Dtest=NetworkJavaInteropTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Dauriga.network.export-fixture=true'
 node contracts/network/fixtures/verify-java.mjs
 ```
+
+契约参考检查 `checkKeyset` 强制 valid_until ≤ issued_at+24h、每个 not_before < not_after、清单内 kid 唯一；标准 JSON Schema 不表达这些跨字段约束。`checkSignedKeyset` 使用独立预置根验签后执行同样检查。跨版本单调性、kid 不复用和状态不可复活仍需消费端持久历史检查。
+
+`fixtures/reply-request.json` 是携带 in_reply_to 的合法组回复提交正例（回复原组、沿用 thread）；原消息可见性、精确 recipient 和服务端 origin 固化仍由 collab 核验，此 fixture 不替代 PG 端到端验证。
+
+Contracts 的 check-schemas 同时执行 verify-java.mjs（含 12 个 raw-boundaries）与 network-keyset.test.mjs。根签名向量 `fixtures/keyset-signature-vector.json` 只含测试公钥、规范输入和签名；普通测试现生成临时密钥验证签名及负例，不写 fixtures。显式重生命令：
+
+```powershell
+$env:UPDATE_NETWORK_KEYSET_VECTORS = '1'
+node --test contracts/test/network-keyset.test.mjs
+Remove-Item Env:UPDATE_NETWORK_KEYSET_VECTORS
+```
+
+此处仅提供根签名契约参考检查及测试向量，生产配置端点的根签名接线仍由后续任务完成。
