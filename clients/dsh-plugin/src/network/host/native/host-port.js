@@ -46,10 +46,59 @@ function liveAgent(agent, id, ctx) {
   validHeader(agent.session.header, id);
 }
 
+/** Bind the exact public execution objects and provider for one registration.
+ * No JSON-shaped substitute, other live agent, archive or runtime child is valid.
+ * @param {import('./types.js').NativeContext} ctx @param {any} execution */
+export function registrationSession(ctx, execution) {
+  const agent = execution?.agent;
+  const session = agent?.session;
+  const id = session?.id;
+  validId(id);
+  const header = validHeader(session.header, id);
+  const provider = ctx.sessionPersistence;
+  const identity = provider.identity;
+  const check = () => {
+    liveAgent(agent, id, ctx);
+    if (
+      agent.session !== session ||
+      session.header.cwd !== header.cwd ||
+      isNativeSubagentOwned(ctx, session.header, agent) ||
+      ctx.workspaceRegistry.archivedSessionIds.includes(id) ||
+      ctx.sessionPersistence?.identity !== identity ||
+      provider.identity !== identity
+    )
+      throw incompatible();
+  };
+  check();
+  return {
+    id,
+    cwd: header.cwd,
+    check,
+    async verify() {
+      check();
+      const resolved = await ctx.sessionController.resolveAgent(id);
+      check();
+      if (resolved.error || resolved.agent !== agent) throw incompatible();
+    },
+  };
+}
+
 /** Public service adapter. Missing capabilities stay local to their operations.
  * @param {{ctx: import('./types.js').NativeContext}} options
  * @returns {Promise<import('../adapter.js').HostPort & {getDiagnostics(): import('./types.js').NativeDiagnostics}>} */
 export async function createNativeHostPort({ ctx }) {
+  // Cordis public service reads may produce different caller-bound proxies.
+  // Persistence.identity is the documented backend identity, so retain one
+  // public proxy per identity while still observing unload/replacement live.
+  let provider = ctx.sessionPersistence;
+  ctx = new Proxy(ctx, {
+    get(target, key) {
+      const value = Reflect.get(target, key);
+      if (key !== 'sessionPersistence') return value;
+      if (value?.identity !== provider?.identity) provider = value;
+      return provider;
+    },
+  });
   const security = createNativeAuthority({ ctx });
   const operations = await createHostPortOperations({ ctx, security });
   return { ...operations, getDiagnostics: () => security.getDiagnostics() };

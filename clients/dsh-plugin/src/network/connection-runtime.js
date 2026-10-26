@@ -16,6 +16,10 @@ import {
 } from './session/frames.js';
 import { networkIsolation } from './isolation.js';
 import {
+  createSessionRegistration,
+  connectionRegistrar,
+} from './session-registration.js';
+import {
   isDeviceRevocationError,
   DeviceControlUnavailable,
 } from './device-provider.js';
@@ -94,13 +98,32 @@ async function normalReady(transport, trust, state, signal, now) {
           });
           current();
           assertReadyResult(frame, context);
+          // Only this durable queue head can explain a missing response. READY
+          // never copies server counters into the ledger; LOCAL_REGISTER still
+          // reconciles the original op/type/fingerprint before any binding.
+          const pendingUncommitted =
+            pending &&
+            frame.local_high_water ===
+              (BigInt(pending.local) - 1n).toString() &&
+            frame.registration_revision === state.registrationRevision;
+          const pendingCommitted =
+            pending &&
+            frame.local_high_water === pending.local &&
+            frame.registration_revision ===
+              (BigInt(pending.expectedRegistrationRevision) + 1n).toString();
           if (
-            frame.local_high_water !== state.localHighWater ||
-            frame.registration_revision !== state.registrationRevision ||
+            (!(
+              frame.local_high_water === state.localHighWater &&
+              frame.registration_revision === state.registrationRevision
+            ) &&
+              !pendingUncommitted &&
+              !pendingCommitted) ||
             frame.committed_cursor !== '0' ||
             BigInt(frame.retention_low_seq) > BigInt(frame.head_seq) ||
             (frame.seen_checkpoint === null
-              ? state.revision !== 0
+              ? // Registration-only revisions are not receipt checkpoints. The
+                // empty recipient map and cursor=0 are already required above.
+                false
               : canonicalize(frame.seen_checkpoint) !==
                 canonicalize(checkpoint))
           )
@@ -134,7 +157,7 @@ async function normalReady(transport, trust, state, signal, now) {
         .catch(reject);
     });
     current();
-    return result;
+    return { ...result, channelNonce, bootId };
   } finally {
     finished = true;
     off();
@@ -143,8 +166,8 @@ async function normalReady(transport, trust, state, signal, now) {
   }
 }
 
-/** Connection-only capability. Owns no HostAdapter, consent, source, FETCH,
- * receipt, registration or SEND. One writer lock spans C1, commit and C2.
+/** Base connection plus an optional, explicitly invoked registration capability.
+ * No consent, source, FETCH, receipt or SEND. One writer spans C1, C2 and join.
  * @param {import('./runtime-types.js').ConnectionRuntimeOptions} options */
 export async function openConnectionRuntime(options) {
   const { prepared } = options,
@@ -180,6 +203,81 @@ export async function openConnectionRuntime(options) {
   let currentConnection;
   /** @type {Awaited<ReturnType<typeof openTrustStore>>|undefined} */
   let connectionTrust;
+  /** @type {import('./host/ledger.js').Ledger|undefined} */
+  let sessionLedger;
+  /** @type {ReturnType<typeof createSessionRegistration>|undefined} */
+  let registrationCapability;
+  /** @type {AbortController|undefined} */
+  let registrationController;
+  /** @type {any} */
+  let hostContext;
+  /** @type {any} */
+  let hostInjection;
+  let registrationWork = Promise.resolve();
+  function retireRegistration() {
+    registrationController?.abort();
+    registrationController = undefined;
+    registrationCapability?.close();
+    registrationCapability = undefined;
+  }
+  function installRegistration() {
+    retireRegistration();
+    const entry = currentConnection;
+    const ledger = sessionLedger;
+    const trust = connectionTrust;
+    if (
+      !connected ||
+      closed ||
+      !hostContext ||
+      !entry?.proof ||
+      !ledger ||
+      !trust
+    )
+      return;
+    const abort = new AbortController();
+    registrationController = abort;
+    const epoch = entry.transport.epoch;
+    const proof = entry.proof;
+    const assertCurrent = () => {
+      active();
+      abort.signal.throwIfAborted();
+      trust.assertUsable();
+      if (
+        !connected ||
+        currentConnection !== entry ||
+        !entry.live ||
+        entry.transport.state !== 'ready' ||
+        entry.transport.epoch !== epoch ||
+        entry.proof !== proof
+      )
+        throw new Error('registration connection changed');
+    };
+    const capability = createSessionRegistration({
+      ctx: hostContext,
+      ledger,
+      assertCurrent,
+      onStorageFailure: () => {
+        void close('storage_failure').catch(() => {});
+      },
+      registerLocal: connectionRegistrar({
+        transport: entry.facade,
+        trust,
+        identity: ledger.identity,
+        ready: proof,
+        signal: abort.signal,
+        assertCurrent,
+        now,
+      }),
+    });
+    registrationCapability = capability;
+    registrationWork = registrationWork.then(async () => {
+      try {
+        await capability.start();
+      } catch {
+        capability.close();
+      }
+    });
+  }
   const active = () => {
     signal.throwIfAborted();
     if (closed) throw new Error('connection closed');
@@ -249,6 +347,8 @@ export async function openConnectionRuntime(options) {
         new Set()
       ),
       transport: /** @type {any} */ (undefined),
+      proof: /** @type {any} */ (undefined),
+      facade: /** @type {any} */ (undefined),
       stop() {
         entry.live = false;
         entry.attempt.abort();
@@ -345,6 +445,7 @@ export async function openConnectionRuntime(options) {
                 if (frame.keyset_announcement) {
                   const resume = connected;
                   connected = false;
+                  retireRegistration();
                   await trust.announce(frame.keyset_announcement);
                   valid();
                   await refreshTrust(trust);
@@ -356,6 +457,7 @@ export async function openConnectionRuntime(options) {
                     continue;
                   trust.assertUsable();
                   connected = resume;
+                  if (connected) installRegistration();
                 }
                 valid();
                 for (const listener of entry.listeners)
@@ -376,12 +478,16 @@ export async function openConnectionRuntime(options) {
         if (!entry.live || closed || currentConnection !== entry) return;
         if (state.state !== 'ready') {
           connected = false;
+          retireRegistration();
+          entry.proof = undefined;
           entry.attempt.abort();
           return;
         }
         if (state.epoch === entry.epoch) return;
         entry.epoch = state.epoch;
         connected = false;
+        retireRegistration();
+        entry.proof = undefined;
         entry.attempt.abort();
         entry.attempt = new AbortController();
         if (!normal) return;
@@ -390,12 +496,20 @@ export async function openConnectionRuntime(options) {
           .then(async () => {
             valid();
             handshakeSignal.throwIfAborted();
-            if (!snapshot)
+            if (!sessionLedger)
               throw new Error('complete connection ledger required');
-            await normalReady(facade, trust, snapshot, handshakeSignal, now);
+            const proof = await normalReady(
+              facade,
+              trust,
+              sessionLedger.peek(),
+              handshakeSignal,
+              now,
+            );
             valid();
             handshakeSignal.throwIfAborted();
+            entry.proof = proof;
             connected = true;
+            installRegistration();
           })
           .catch(() => {
             if (!closed && !handshakeSignal.aborted)
@@ -419,10 +533,9 @@ export async function openConnectionRuntime(options) {
         return transport.epoch;
       },
     };
+    entry.facade = facade;
     return { entry, transport, facade };
   }
-  /** @type {import('./host/ledger.js').LedgerState|undefined} */
-  let snapshot;
   async function start() {
     active();
     if (started) throw new Error('connection already started');
@@ -492,7 +605,38 @@ export async function openConnectionRuntime(options) {
         active();
         connections.delete(first.entry);
       }
-      snapshot = ledger.state;
+      sessionLedger = ledger.adopt();
+      // Optional public services do not gate the base connection. Cordis owns
+      // this child scope and immediately retires tools when a service unloads.
+      try {
+        if (typeof options.ctx?.inject === 'function') {
+          hostInjection = options.ctx.inject(
+            [
+              'tools',
+              'sessions',
+              'sessionController',
+              'agents',
+              'sessionPersistence',
+              'workspaceRegistry',
+            ],
+            (/** @type {any} */ ctx) => {
+              hostContext = ctx;
+              installRegistration();
+              ctx.effect(
+                () => () => {
+                  if (hostContext === ctx) {
+                    hostContext = undefined;
+                    retireRegistration();
+                  }
+                },
+                'auriga-dsh: session registration host',
+              );
+            },
+          );
+        }
+      } catch {
+        /* Host unavailable: base READY remains independent. */
+      }
       const normal = connect(trust, true);
       await normal.transport.start();
       active();
@@ -512,6 +656,7 @@ export async function openConnectionRuntime(options) {
     reason = why;
     closed = true;
     connected = false;
+    retireRegistration();
     controller.abort();
     clearTimeout(deadline);
     options.signal?.removeEventListener('abort', onAbort);
@@ -519,7 +664,12 @@ export async function openConnectionRuntime(options) {
     closing = (async () => {
       await Promise.allSettled(stopping);
       await Promise.allSettled([work, handshakes]);
+      await registrationWork;
       await Promise.allSettled([...writes]);
+      await Promise.allSettled([
+        sessionLedger?.close(),
+        Promise.resolve().then(() => hostInjection?.dispose()),
+      ]);
       await Promise.allSettled(handles.map((h) => h.close()));
       options.onClosed?.(reason);
     })();
@@ -530,6 +680,14 @@ export async function openConnectionRuntime(options) {
   return {
     start,
     close,
+    get diagnostics() {
+      return {
+        registration: registrationCapability?.status ?? {
+          available: false,
+          reason: connected ? 'host_unavailable' : 'not_ready',
+        },
+      };
+    },
     get status() {
       let ready = !closed && connected;
       if (ready) {

@@ -895,16 +895,17 @@ export async function openNetworkRuntime(options) {
               return {
                 status: 'error',
                 code: 'network.local_registration_required',
+                message: '请先调用 auriga_network_join',
               };
             try {
-              const native = await ports.host.getSession(id);
-              active();
-              if (!native) throw new Error('native session unavailable');
-              await adapter.bindExistingSession({
-                opId: `host:${id}`,
-                hostSessionId: id,
-                cwd: native.cwd,
-              });
+              const binding = Object.values(ledger.peek().bindings).find(
+                (entry) =>
+                  entry.hostSessionId === id &&
+                  entry.state === 'bound' &&
+                  entry.lifecycle === 'open',
+              );
+              if (!binding) throw new Error('native registration required');
+              adapter.localAddress(binding.local);
               return await sendTool.execute(
                 {
                   target: input.to,
@@ -920,6 +921,7 @@ export async function openNetworkRuntime(options) {
               return {
                 status: 'error',
                 code: 'network.local_registration_required',
+                message: '请先调用 auriga_network_join',
               };
             }
           },
