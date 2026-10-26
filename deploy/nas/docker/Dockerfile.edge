@@ -2,7 +2,7 @@
 #   docker build -f deploy/nas/docker/Dockerfile.edge --platform=linux/amd64 .
 FROM node:22-bookworm AS web
 WORKDIR /src
-COPY package.json pnpm-workspace.yaml .npmrc ./
+COPY package.json pnpm-workspace.yaml .npmrc .prettierrc.json ./
 COPY web ./web
 COPY clients ./clients
 COPY contracts ./contracts
