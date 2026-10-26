@@ -20,6 +20,7 @@ type Config struct {
 	IAMRPC                 IAMRPCConfig                  `json:"iamRpc"`
 	IAMHop                 IAMHopConfig                  `json:"iamHop"`
 	AIAdminHop             IAMHopConfig                  `json:"aiAdminHop"`
+	CollabHop              IAMHopConfig                  `json:"collabHop"`
 	Listen                 string                        `json:"listen"`
 	PortalHost             string                        `json:"portalHost"`
 	AdminHost              string                        `json:"adminHost"`
@@ -185,6 +186,12 @@ func applyEnv(cfg *Config) {
 		}
 		cfg.Upstreams["ai-admin"] = v
 	}
+	if v := os.Getenv("AURIGA_EDGE_UPSTREAM_COLLAB"); v != "" {
+		if cfg.Upstreams == nil {
+			cfg.Upstreams = map[string]string{}
+		}
+		cfg.Upstreams["collab"] = v
+	}
 	if v := os.Getenv("AURIGA_EDGE_STATIC_PORTAL"); v != "" {
 		cfg.Static.PortalRoot = v
 	}
@@ -214,6 +221,9 @@ func applyEnv(cfg *Config) {
 }
 
 func (c Config) validate() error {
+	if _, err := c.parseCollabUpstream(); err != nil {
+		return err
+	}
 	if _, err := c.parseAIAdminUpstream(); err != nil {
 		return err
 	}

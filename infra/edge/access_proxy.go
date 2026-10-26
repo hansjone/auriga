@@ -209,6 +209,14 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		}
 	}
 	proxy := newReverseProxy(target, transport, true)
+	if target == g.collabURL {
+		proxy.ModifyResponse = func(resp *http.Response) error {
+			if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified {
+				return errString("collab redirect rejected")
+			}
+			return nil
+		}
+	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, request *http.Request, err error) {
 		writeProblem(w, problem(503, "common.unavailable", "Service Unavailable", "control plane unavailable", requestID(request)))
 	}
@@ -216,6 +224,13 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
 		stripUntrustedEntryHeaders(pr.Out.Header)
+		if target == g.collabURL {
+			for name := range pr.Out.Header {
+				if strings.HasPrefix(strings.ToLower(name), "auriga-forwarded-") {
+					pr.Out.Header.Del(name)
+				}
+			}
+		}
 		rewriteOutboundAPI(pr.Out, clientIP, bearer, rid, ensureTraceparent(r))
 		pr.Out.Header.Del("Cookie")
 		if iam {
