@@ -61,6 +61,21 @@ public class NetworkMailboxGrpcService
 
   @Override
   @AuthenticatedOnly
+  public void localRegister(
+      NetworkMailboxServiceLocalRegisterRequest request,
+      StreamObserver<NetworkMailboxServiceLocalRegisterResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceLocalRegisterResponse.newBuilder()
+            .setFrameJson(
+                ByteString.copyFromUtf8(
+                    service.localRegister(
+                        connection(request.getConnection()), request.getFrameJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
   public void head(
       NetworkMailboxServiceHeadRequest request,
       StreamObserver<NetworkMailboxServiceHeadResponse> observer) {
