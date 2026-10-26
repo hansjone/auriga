@@ -54,6 +54,9 @@ func (f *fixture) server(t *testing.T, transport relay.Transport) *httptest.Serv
 		t.Fatal(err)
 	}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f.finished != nil {
+			defer f.finished()
+		}
 		if f.observe != nil {
 			w = &observeWriter{ResponseWriter: w, before: f.observe}
 		}

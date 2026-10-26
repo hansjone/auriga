@@ -31,11 +31,17 @@ export function createSourceResolver({ ctx, security, lookupBinding }) {
         execution
       )?.agent;
       const id = agent?.session?.id;
+      const session = agent?.session;
+      const cwd = session?.header.cwd;
+      const provider = ctx.sessionPersistence?.identity;
       const live = () =>
         !!agent &&
         !!id &&
         ctx.agents.get(id) === agent &&
         ctx.sessions.get(id) === agent.session &&
+        agent.session === session &&
+        agent.session.header.cwd === cwd &&
+        ctx.sessionPersistence?.identity === provider &&
         agent.id === id &&
         agent.session.header.id === id &&
         !isNativeSubagentOwned(ctx, agent.session.header, agent) &&

@@ -86,14 +86,15 @@ func (s *control) GetEffectiveQuota(context.Context, *org.GetEffectiveQuotaReque
 }
 
 type fixture struct {
-	db      *store.Store
-	core    *relay.Core
-	cfg     relay.Config
-	http    Config
-	raw     string
-	observe func([]byte)
-	control *control
-	secret  []byte
+	db       *store.Store
+	core     *relay.Core
+	cfg      relay.Config
+	http     Config
+	raw      string
+	observe  func([]byte)
+	finished func()
+	control  *control
+	secret   []byte
 }
 
 func fixtureNew(t *testing.T) *fixture {

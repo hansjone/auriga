@@ -17,8 +17,17 @@ import (
 
 type watched struct {
 	io.Reader
-	once   sync.Once
-	closed chan struct{}
+	once     sync.Once
+	closed   chan struct{}
+	entered  chan struct{}
+	readOnce sync.Once
+}
+
+func (b *watched) Read(p []byte) (int, error) {
+	if b.entered != nil {
+		b.readOnce.Do(func() { close(b.entered) })
+	}
+	return b.Reader.Read(p)
 }
 
 func (b *watched) Close() error { b.once.Do(func() { close(b.closed) }); return nil }
@@ -40,6 +49,9 @@ func TestHTTPPostgresCancellation(t *testing.T) {
 			upstreamCanceled := make(chan struct{})
 			stopped := make(chan struct{})
 			closed := make(chan struct{})
+			readEntered, workerDone, transportDone, proofDone, requestDone := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var requestOnce sync.Once
+			f.finished = func() { requestOnce.Do(func() { close(requestDone) }) }
 			request := plainRequest
 			if mode != "first-byte" && mode != "total" && mode != "no-stop-proof" && mode != "missing-usage" {
 				request = strings.Replace(request, `"max_tokens":`, `"stream":true,"max_tokens":`, 1)
@@ -60,7 +72,18 @@ func TestHTTPPostgresCancellation(t *testing.T) {
 				f.http.MaxResponseBytes = 32 << 20
 			}
 			transport := func(ctx context.Context, _ relay.Submission, _ []byte) (relay.Exchange, error) {
+				defer close(transportDone)
 				context.AfterFunc(ctx, func() { close(upstreamCanceled) })
+				// Stop proof joins the submission and the real producer. Neither
+				// Body.Close nor recovery handoff is a request completion anchor.
+				go func() {
+					defer close(proofDone)
+					<-transportDone
+					<-workerDone
+					if mode != "no-stop-proof" {
+						close(stopped)
+					}
+				}()
 				if mode == "no-stop-proof" || mode == "missing-usage" || mode == "slow-writer" {
 					body := completion(textChoice)
 					if mode == "missing-usage" {
@@ -70,26 +93,35 @@ func TestHTTPPostgresCancellation(t *testing.T) {
 						chunk := strings.Replace(firstChunk, `"content":"ok"`, `"content":"`+strings.Repeat("x", 128<<10)+`"`, 1)
 						body = strings.Repeat(chunk, 100) // Exceeds kernel buffers; client never reads.
 					}
-					if mode != "no-stop-proof" {
-						close(stopped)
-					}
-					return relay.Exchange{Body: &watched{Reader: strings.NewReader(body), closed: closed}, Stopped: stopped}, nil
+					close(workerDone)
+					return relay.Exchange{Body: &watched{Reader: strings.NewReader(body), closed: closed, entered: readEntered}, Stopped: stopped}, nil
 				}
 				pr, pw := io.Pipe()
+				cleanup := make(chan struct{})
+				t.Cleanup(func() {
+					close(cleanup)
+					_ = pr.Close()
+					_ = pw.Close()
+					waitCancellationStage(t, workerDone, "producer cleanup")
+					waitCancellationStage(t, proofDone, "stop proof cleanup")
+				})
 				go func() {
+					defer close(workerDone)
+					defer func() { _ = pw.Close() }()
 					if mode != "first-byte" && mode != "total" {
 						_, _ = io.WriteString(pw, firstChunk)
 					}
-					<-ctx.Done()
-					_ = pw.Close()
-					close(stopped)
+					select {
+					case <-ctx.Done():
+					case <-cleanup:
+					}
 				}()
 				if mode == "revocation" {
 					f.control.mu.Lock()
 					f.control.active = false
 					f.control.mu.Unlock()
 				}
-				return relay.Exchange{Body: &watched{Reader: pr, closed: closed}, Stopped: stopped}, nil
+				return relay.Exchange{Body: &watched{Reader: pr, closed: closed, entered: readEntered}, Stopped: stopped}, nil
 			}
 			// Pipe Close must interrupt a read; watched alone cannot implement that.
 			// wrappedPipe below closes both the real reader and the observation signal.
@@ -125,9 +157,15 @@ func TestHTTPPostgresCancellation(t *testing.T) {
 					t.Fatalf("unknown succeeded %d %s", status, result)
 				}
 				if mode == "first-byte" || mode == "total" {
-					if status != 504 {
+					if status != 504 || !strings.Contains(result, `"code":"ai.upstream_timeout"`) {
 						t.Fatalf("%d %s", status, result)
 					}
+				}
+				if (mode == "idle" || mode == "expiry") && !strings.Contains(result, `"code":"ai.upstream_timeout"`) {
+					t.Fatalf("deadline misclassified: %d %s", status, result)
+				}
+				if mode == "revocation" && !strings.Contains(result, `"code":"ai.stream_interrupted"`) {
+					t.Fatalf("revocation misclassified: %d %s", status, result)
 				}
 			}
 			var p Pending
@@ -138,6 +176,14 @@ func TestHTTPPostgresCancellation(t *testing.T) {
 			}
 			if p.Ref.TenantID != f.control.tenant || p.Ref.AccountID != account || p.Ref.RequestID == "" || p.StopProof != stopped {
 				t.Fatal("handoff changed identity or stop proof")
+			}
+			waitCancellationStage(t, requestDone, "HTTP handler exit")
+			waitCancellationStage(t, transportDone, "transport exit")
+			waitCancellationStage(t, workerDone, "producer exit")
+			waitCancellationStage(t, proofDone, "stop proof publisher exit")
+			// Revocation can cancel before the protocol reader is entered.
+			if mode != "revocation" {
+				waitCancellationStage(t, readEntered, "body read entry")
 			}
 			select {
 			case <-closed:
@@ -168,6 +214,15 @@ func TestHTTPPostgresCancellation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func waitCancellationStage(t *testing.T, done <-chan struct{}, stage string) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Errorf("cancellation fixture did not reach %s", stage)
 	}
 }
 
