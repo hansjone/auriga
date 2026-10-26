@@ -27,10 +27,8 @@ import {
 } from './trust/keyset-fixtures.js';
 import { NatsTransport } from '../../src/network/transport/nats-transport.js';
 import { createDeviceProvider } from '../../src/network/device-provider.js';
-import {
-  startNatsServer,
-  findNatsServer,
-} from './transport/support/nats-server.js';
+import { startNatsServer } from './transport/support/nats-server.js';
+import { ensureNatsServer } from './transport/support/nats-binary.js';
 import {
   createCaSocketFactory,
   connectPeer,
@@ -555,7 +553,7 @@ test('complete ledger plus created false uses one normal connection and never in
 });
 
 test('real NATS WSS with official device factory closes C1 socket before T2 and binds distinct ingress/application epochs', async (t) => {
-  const binary = findNatsServer();
+  const binary = await ensureNatsServer();
   assert.ok(binary, 'locked nats-server 2.15.1 required');
   const server = await startNatsServer({ binary });
   t.after(() => server.close());
@@ -695,7 +693,7 @@ test('plugin actual entry resumes verified native device into official factory, 
   );
   await mkdir(root, { recursive: true });
   const profile = await mkdtemp(join(root, 'plugin-entry-'));
-  const server = await startNatsServer({ binary: findNatsServer() });
+  const server = await startNatsServer({ binary: await ensureNatsServer() });
   t.after(() => server.close());
   const peer = await connectPeer(server, { token: 'fixture-no-auth-broker' });
   t.after(() => peer.close());
