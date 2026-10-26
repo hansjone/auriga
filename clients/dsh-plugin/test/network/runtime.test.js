@@ -253,6 +253,11 @@ test('assembly performs signed READY/FETCH and registers only to/body/thread fro
     ['ready', 'fetch'],
   );
   assert.equal(frames[0].receipt_checkpoint.summary_digest, digest({}));
+  await runtime.adapter.bindExistingSession({
+    opId: 'host:native-session',
+    hostSessionId: 'native-session',
+    cwd: 'C:/dsh/default',
+  });
   const tool = tools.get('auriga_send_message');
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     'body',
@@ -634,12 +639,12 @@ test('a real metadata commit failure self-closes and notifies its owner after cl
   assert.equal(tools.size, 0);
 });
 
-test('a host ledger commit failure also self-closes before invoking any native prompt', async (t) => {
+test('an unregistered send requires explicit join without allocating or invoking native prompt', async (t) => {
   let fail = false,
     notify;
-  const ended = new Promise((resolve) => {
-    notify = resolve;
-  });
+  notify = () => {
+    throw new Error('unregistered send must not close connection');
+  };
   const storage = Object.fromEntries(
     ['ledger', 'consent', 'trust', 'outbound', 'intake'].map((name) => [
       name,
@@ -658,16 +663,21 @@ test('a host ledger commit failure also self-closes before invoking any native p
   );
   await runtime.start();
   fail = true;
-  await tools
+  const result = await tools
     .get('auriga_send_message')
     .execute(
       { to: 'aur1:2.3f.1a2', body: { subtype: 'text', text: 'hello' } },
       { agent: { session: { id: 'native-session' } } },
     );
-  assert.equal(await ended, 'storage_failure');
-  assert.equal(runtime.status.available, false);
+  assert.deepEqual(result, {
+    status: 'error',
+    code: 'network.local_registration_required',
+    message: '请先调用 auriga_network_join',
+  });
+  assert.equal(runtime.status.available, true);
+  assert.equal(storage.ledger.snapshot().localHighWater, '0');
   assert.equal(ports.host.counts.prompt, 0);
-  assert.equal(tools.size, 0);
+  assert.equal(tools.size, 1);
 });
 
 test('tools register only after READY, disappear on ticket failures, and reject forged source fields', async (t) => {

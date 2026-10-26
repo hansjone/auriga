@@ -302,6 +302,13 @@ export async function loadConnectionLedger(handle, registration) {
     get state() {
       return state;
     },
+    /** Adopt the already loaded snapshot and writer; never reopen the store.
+     * @returns {Ledger} */
+    adopt() {
+      if (!state || consumed) throw invalid();
+      consumed = true;
+      return ledgerFromHandle(handle, state);
+    },
     async initialize(/** @type {LedgerIdentity} */ identity) {
       if (
         consumed ||
@@ -315,6 +322,7 @@ export async function loadConnectionLedger(handle, registration) {
       const initial = emptyState(identity);
       await handle.commit(initial);
       state = initial;
+      consumed = false;
     },
   };
 }
@@ -361,6 +369,14 @@ export async function openLedger({
     await handle.close();
     throw error;
   }
+  return ledgerFromHandle(handle, state, now);
+}
+
+/** Same writer and same snapshot for bootstrap and all later capabilities.
+ * @param {import('./store.js').LedgerStoreHandle} handle
+ * @param {LedgerState} state @param {()=>Date} [now] */
+function ledgerFromHandle(handle, state, now = () => new Date()) {
+  const identity = state.identity;
   let tail = Promise.resolve();
   let closed = false;
   let commitFailed = false;
@@ -368,10 +384,12 @@ export async function openLedger({
   /**
    * @template T
    * @param {(draft: LedgerState) => T} mutate  must be synchronous
+   * @param {()=>void} [fence] checked inside the queue and after durable commit
    * @returns {Promise<T>}
    */
-  function update(mutate) {
+  function update(mutate, fence = () => {}) {
     const run = tail.then(async () => {
+      fence();
       if (closed || commitFailed)
         throw new HostSeamError(CODES.ledgerUnavailable);
       const draft = structuredClone(state);
@@ -401,7 +419,9 @@ export async function openLedger({
         throw new HostSeamError(CODES.recoveryConflict);
       draft.revision = state.revision + 1;
       try {
+        fence();
         await handle.commit(draft);
+        fence();
       } catch (error) {
         // Rename/fsync may have committed even when the call failed. Never
         // overwrite an uncertain durable snapshot with our old memory view.

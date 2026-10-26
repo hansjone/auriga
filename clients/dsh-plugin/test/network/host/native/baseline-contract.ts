@@ -1,6 +1,7 @@
 // Compile-only consumer of public package exports; no internal paths.
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type {
   SessionId,
   Session,
@@ -90,3 +91,26 @@ async function inspectedOrigin() {
   return { origin, parent };
 }
 void inspectedOrigin;
+
+// The join boundary consumes the native execution Agent; no session selector.
+const joinTool: ToolDefinition = {
+  name: 'auriga_network_join',
+  description: 'Register the current session address',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  output: {
+    schema: {
+      type: 'object',
+      properties: { status: { type: 'string' } },
+      required: ['status'],
+      additionalProperties: false,
+    },
+    render: (_input, value) => [{ type: 'text', text: JSON.stringify(value) }],
+  },
+  async execute(_input, exec) {
+    const native: Session | undefined = exec.agent?.session;
+    void native;
+    return { status: 'unavailable' };
+  },
+};
+const unregisterJoin: () => void = ctx.tools.register(joinTool);
+void unregisterJoin;

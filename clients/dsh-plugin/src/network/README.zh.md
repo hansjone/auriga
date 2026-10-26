@@ -4,7 +4,19 @@
 
 connect 安装具备完整 `network` pin 且原生设备登录成功后，`plugin.js → createConnectRuntime → createDeviceProvider → lifecycle → openNetworkRuntime(kind: device-connection) → openConnectionRuntime` 自动装配官方 provider。根只取安装 realm/SPKI；固定平台源上的 register、tickets、完整 keys、announcement 均使用现 `getPlatformAccess` 与已验证当前设备身份闭包，拒绝 cookie、重定向、响应超预算及迟到的失效代际。不增加可见登录或审批。票据严格核完整设备身份与随机票派生的 ingress、含 shard 的 up、down/reply，兑换截止与最长连接截止分开处理；每次新连接均取新票。无安装 pin 且无完整注入 provider 的行为仍为 unconfigured。
 
-基础分支不创建 HostAdapter/consent，不注册发送工具，不 FETCH/ACK/LOCAL_REGISTER/SEND、不建立 Host 绑定或发布授权；consent 入口明确不可用。`connected` 仅代表基础认证连接，不能据此声称双 DSH 收发或业务能力已完成。完整可信 Cordis provider 可暂时替代官方默认项，撤销注入后恢复默认；替换/退出先失效旧状态，等旧实例停止、在途提交结束并释放锁后才允许下一实例开账本。完整业务模式的 allports 检查与原 session 路径保留。
+基础分支不创建 consent，不注册发送工具，不 FETCH/ACK/SEND 或发布授权；consent 入口明确不可用。`connected` 仅代表基础认证连接，不能据此声称双 DSH 收发或业务能力已完成。完整可信 Cordis provider 可暂时替代官方默认项，撤销注入后恢复默认；替换/退出先失效旧状态，等旧实例停止、在途提交结束并释放锁后才允许下一实例开账本。完整业务模式的 allports 检查与原 session 路径保留。
+
+## 第二能力阶段：显式登记当前会话
+
+只有基础连接通过严格 READY，且公开 Host 的读取、活对象核验、归属和耐久能力齐备后，才注册零参数 `auriga_network_join`。参数必须是空对象；调用会话只取真实 `exec.agent.session`，并核对公开 registry、resolveAgent、inspect/stat、cwd、归档与子 agent 归属。缺能力只关闭登记入口，基础 connected 保持独立。登出、断线、换 epoch、密钥公告刷新及宿主卸载立即注销工具，在途调用逐边界检查原代际。
+
+登记沿基础连接持有的同一个 writer handle 和账本进行，不重开、不另建账本。实际等待 `hasDurableProvider`、`sessions.flush`、provider flush 和公开 read-back，再将稳定原操作、宿主映射摘要和 local 预留耐久保存，沿既有 LOCAL_REGISTER 等待完整签名 REGISTER_RESULT。回包校验用途、受众、READY epoch/nonce、requestId 和原 op/type/revision；原 fingerprint 由已保存请求与 requestId 绑定，回包不含 fingerprint 字段。凭据及不可变 binding 完整提交后才返回 `{status:"registered",address:"aur1:…"}`；失败仅返回 `{status:"unavailable"}`。不会返回宿主 id/cwd、token 或来源信息。
+
+同会话并发与重试使用同一原操作，不重复分配。未知结果保留队首，重连首先按原操作对账；READY 只核对本地已有 pending 能解释的计数差异，不下载服务端事实或提升本地高水位。已登记但未绑定时须重新验证当前原生对象和原映射后恢复。新 binding 使用 receive_none/inbox_only，不建立消息关系、不授来源、SEND 或执行权。发送工具不会隐式登记，未登记时提示“请先调用 auriga_network_join”；完整发送能力仍受原有独立门禁约束。
+
+测试分列公开 npm API 兼容、真实 NATS WSS 接缝和 Java/PG 服务端证据。夹具签名往返不等于全链路 Java/PG 验收，更不代表双 DSH 收发已通。
+
+插件目录下运行 `node --test test/network/session-registration.test.js test/network/connection-runtime.test.js`。按 `deploy/compose/real-dsh/package-lock.json` 安装隔离基线后，运行 `node --test test/network/host/native/upstream-check.mjs test/network/session-registration-upstream.mjs`，核公开类型、真实工具 registry/SessionStore/JSONL/WSS 与文件账本。测试只使用临时目录和随机端口，controller 为公开 API 形状的最小适配，不调用模型。`node test/network/session-registration-mutations.mjs` 在独立临时副本中分别去掉 awaited flush 与旧代 fence，要求坏实现均通过 tsc、随后被特定断言检出；原生产文件保持原样。
 
 `session/bootstrap-ready.js#bootstrapReady({registration,transport,trust,signal})` 由基础首建路径显式调用。helper 本身不接令牌、不发 register/tickets、不建/关闭 transport、不读写 ledger/host、不发 FETCH/RECEIPT/LOCAL_REGISTER/SEND，也不设置 session.ready 或 runtime.connected。原语测试或控制面夹具不替代真实 IAM/org 的跨服务验收。
 
@@ -48,7 +60,7 @@ provider 接口：
 - `submit/reconcileSubmission`：HTTPS 提交前将同一私有请求和幂等键耐久写入独立 outbound 文件；明确拒绝立即删除记录，结果未知保留最多 10 分钟，不盲目重放。全局最多 256 条、每个来源绑定最多 16 条，满时仅对此会话背压；恢复时对同一记录最多调用 3 次 reconcile，次数先落盘。没有 reconcile 端口时同样按操作/重启惰性清理过期记录。过期、重试耗尽或旧格式记录缺失年龄时记 outcome-unknown 诊断并释放元数据，不能宣称远端操作成功或重新发送。
 - `publishConsent`：耐久 outbox 的幂等发布/重新核权端口，只有确认成功后才删除事件；每批仅附事件对应的 `requestId/digest/recipientIds`，不附其他来源、预览或原始签名帧。默认/撤销也须更新平台状态，不能只修改 UI。失败后事件保留，后续 snapshot/操作会重试。
 
-真实 IAM 已提供设备 Bearer 专用的 `/api/iam/v1/network/register` 与 `/api/iam/v1/network/tickets`；固定根清单与公告端点分别为 `/api/collab/v1/network/keys`、`/api/collab/v1/network/keys/announcement`，官方基础 provider 使用这些正式端点。真实宿主 HostPort、durable 会话登记与完整双 DSH 收发仍由后续任务接线。managed 模式尚未提供设备级联网凭据通道，不把 instance token 当设备令牌使用。
+真实 IAM 已提供设备 Bearer 专用的 `/api/iam/v1/network/register` 与 `/api/iam/v1/network/tickets`；固定根清单与公告端点分别为 `/api/collab/v1/network/keys`、`/api/collab/v1/network/keys/announcement`，官方基础 provider 使用这些正式端点。普通会话耐久登记沿上述第二阶段显式触发；完整双 DSH 收发仍由后续任务接线。managed 模式尚未提供设备级联网凭据通道，不把 instance token 当设备令牌使用。
 
 本地 UI 通过 `/auriga/local-login/consent/{snapshot,decide,default,revoke}` 接真实 consent。路由先经过原生 admission/同源检查，再以当前 HTTP 请求绑定用户、检查本机登录与写请求 CSRF；浏览器不能声明主体或来源。视图沿用显式字段投影，不返回 ownershipRevision、授权证明、摘要、内部决策原因或 outbox。
 

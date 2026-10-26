@@ -16,6 +16,7 @@ import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IDENTITY } from './host/fixtures.js';
+import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
 import { signingInput } from '../../src/network/trust/verifier.js';
 import {
@@ -146,14 +147,16 @@ async function fixture(t, extra = {}) {
     stores: { ledger, trust: trustStore },
     onRevoked: extra.onRevoked,
     onClosed: extra.onClosed,
-    ctx: new Proxy(
-      {},
-      {
-        get() {
-          assert.fail('basic connection touched Host/tool context');
+    ctx:
+      extra.ctx ??
+      new Proxy(
+        {},
+        {
+          get() {
+            assert.fail('basic connection touched Host/tool context');
+          },
         },
-      },
-    ),
+      ),
     transportFactory(options) {
       if (extra.factoryError) throw new Error('transport factory failed');
       const connection = {
@@ -174,7 +177,42 @@ async function fixture(t, extra = {}) {
         },
         async send(bytes) {
           const request = decodeJson(bytes);
+          if (request.type === 'local_register') {
+            sent.push({ request, connection });
+            const frame = decodeJson(
+              response(
+                { ...request, channel_nonce: connection.nonce },
+                connection,
+                {
+                  type: 'register_result',
+                  result: 'registered',
+                  local: request.candidate_local,
+                  allocation_op_id: request.allocation_op_id,
+                  address_type: request.address_type,
+                  registration_id: 'reg-' + request.candidate_local,
+                  registration_revision: String(
+                    BigInt(request.expected_registration_revision) + 1n,
+                  ),
+                  local_high_water: request.candidate_local,
+                  ...extra.registerResult?.(request),
+                },
+              ),
+            );
+            frame.server_auth.channel_nonce = connection.nonce;
+            frame.server_auth.audience.epoch = String(connection.id);
+            extra.registerAuth?.(frame.server_auth);
+            frame.server_auth.signature = sign(
+              null,
+              signingInput(frame),
+              pair.privateKey,
+            ).toString('base64url');
+            extra.registerFrame?.(frame);
+            await extra.localRegister?.(request);
+            options.onMessage(encodeJson(frame), connection.epoch);
+            return;
+          }
           assert.equal(request.type, 'ready');
+          connection.nonce = request.channel_nonce;
           sent.push({ request, connection });
           events.push('ready-' + connection.id);
           await extra.ready?.(connection.id, request);
@@ -216,6 +254,274 @@ async function fixture(t, extra = {}) {
     trustStore,
   };
 }
+
+function registrationHost() {
+  const host = nativeFixture();
+  const agent = host.attach('session-a');
+  const tools = new Map();
+  let cleanup = () => {};
+  host.ctx.tools = {
+    register(tool) {
+      tools.set(tool.name, tool);
+      return () => tools.delete(tool.name);
+    },
+  };
+  host.ctx.inject = (_services, callback) => {
+    host.ctx.effect = (effect) => {
+      cleanup = effect();
+    };
+    callback(host.ctx);
+    return {
+      dispose() {
+        cleanup();
+      },
+    };
+  };
+  return { ...host, agent, tools, unload: () => cleanup() };
+}
+
+test('strict C2 installs real zero-input registration tool, same writer persists credentials and binding across reopen', async (t) => {
+  const host = registrationHost();
+  const root = fileURLToPath(
+    new URL('../../../../.agent-evidence/', import.meta.url),
+  );
+  await mkdir(root, { recursive: true });
+  const dir = await mkdtemp(join(root, 'session-registration-'));
+  const ledger = createFileLedgerStore({ dir });
+  let opens = 0;
+  const tracked = {
+    open() {
+      opens++;
+      return ledger.open();
+    },
+  };
+  const f = await fixture(t, { ctx: host.ctx, ledger: tracked });
+  assert.equal(host.tools.size, 0);
+  await f.runtime.start();
+  await waitFor(
+    () => host.tools.has('auriga_network_join'),
+    'registration installed',
+  );
+  const tool = host.tools.get('auriga_network_join');
+  const results = await Promise.all([
+    tool.execute({}, { agent: host.agent }),
+    tool.execute({}, { agent: host.agent }),
+  ]);
+  assert.deepEqual(results, [
+    { status: 'registered', address: 'aur1:2.40.1' },
+    { status: 'registered', address: 'aur1:2.40.1' },
+  ]);
+  assert.equal(
+    opens,
+    1,
+    'bootstrap and registration must share exactly one writer',
+  );
+  assert.deepEqual(
+    f.sent.map(({ request }) => request.type),
+    ['ready', 'ready', 'local_register'],
+  );
+  const request = f.sent.at(-1).request;
+  await f.runtime.close();
+  assert.equal(host.tools.size, 0);
+  const h = await ledger.open();
+  const saved = await h.load();
+  await h.close();
+  assert.equal(saved.locals['1'].opId, request.allocation_op_id);
+  assert.equal(
+    'sha256:' + saved.locals['1'].fingerprint,
+    request.allocation_fingerprint,
+  );
+  assert.equal(saved.locals['1'].registrationId, 'reg-1');
+  assert.equal(saved.locals['1'].registrationRevision, '1');
+  assert.equal(saved.locals['1'].addressType, 'session');
+  assert.equal(saved.bindings['1'].hostSessionId, 'session-a');
+  assert.equal(saved.bindings['1'].receiveMode, 'receive_none');
+  for (const key of ['recipients', 'relations', 'inbox', 'bodies'])
+    assert.deepEqual(saved[key], {});
+  assert.equal(
+    host.calls.some(([name]) => ['create', 'prompt'].includes(name)),
+    false,
+  );
+});
+
+for (const [name, change, auth] of [
+  ['type', { type: 'ready_result' }],
+  ['op', { allocation_op_id: 'different' }],
+  ['address type', { address_type: 'subagent' }],
+  ['local', { local: '2' }],
+  ['revision', { registration_revision: '2' }],
+  ['high water', { local_high_water: '0' }],
+  [
+    'purpose',
+    null,
+    (a) => {
+      a.purpose = 'business_delivery';
+    },
+  ],
+  [
+    'audience',
+    null,
+    (a) => {
+      a.audience.node = '65';
+    },
+  ],
+  [
+    'epoch',
+    null,
+    (a) => {
+      a.audience.epoch = '99';
+    },
+  ],
+  [
+    'nonce',
+    null,
+    (a) => {
+      a.channel_nonce = 'wrong';
+    },
+  ],
+])
+  test(
+    'registration wire rejects signed wrong ' +
+      name +
+      ' and preserves original pending',
+    async (t) => {
+      const host = registrationHost();
+      const f = await fixture(t, {
+        ctx: host.ctx,
+        registerResult: () => change ?? {},
+        registerAuth: auth,
+      });
+      await f.runtime.start();
+      await waitFor(() => host.tools.size, 'join installed');
+      assert.deepEqual(
+        await host.tools
+          .get('auriga_network_join')
+          .execute({}, { agent: host.agent }),
+        { status: 'unavailable' },
+      );
+      assert.equal(f.ledger.snapshot().locals['1'].state, 'reserved');
+      assert.deepEqual(f.ledger.snapshot().bindings, {});
+    },
+  );
+
+test('registration rejects invalid signature without binding', async (t) => {
+  const host = registrationHost();
+  const f = await fixture(t, {
+    ctx: host.ctx,
+    registerFrame: (frame) => {
+      frame.server_auth.signature = 'A'.repeat(86);
+    },
+  });
+  await f.runtime.start();
+  await waitFor(() => host.tools.size, 'join installed');
+  assert.deepEqual(
+    await host.tools
+      .get('auriga_network_join')
+      .execute({}, { agent: host.agent }),
+    { status: 'unavailable' },
+  );
+  assert.deepEqual(f.ledger.snapshot().bindings, {});
+});
+
+test('missing Host durability leaves strict base READY independent and does not install join', async (t) => {
+  const host = registrationHost();
+  delete host.ctx.sessions.flush;
+  const f = await fixture(t, { ctx: host.ctx });
+  await f.runtime.start();
+  await setImmediate();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(host.tools.size, 0);
+  assert.deepEqual(f.runtime.diagnostics.registration, {
+    available: false,
+    reason: 'host_unavailable',
+  });
+});
+
+for (const event of ['logout', 'disconnect', 'new epoch', 'host unload'])
+  test(
+    event + ' immediately unregisters and fences delayed LOCAL_REGISTER',
+    async (t) => {
+      const host = registrationHost(),
+        gate = latch();
+      let entered = false;
+      const f = await fixture(t, {
+        ctx: host.ctx,
+        localRegister: async () => {
+          entered = true;
+          await gate.promise;
+        },
+      });
+      await f.runtime.start();
+      await waitFor(() => host.tools.size, 'join installed');
+      const tool = host.tools.get('auriga_network_join');
+      const pending = tool.execute({}, { agent: host.agent });
+      await waitFor(() => entered, 'register sent');
+      const original = f.ledger.snapshot().locals['1'];
+      if (event === 'logout') f.controller.abort();
+      else if (event === 'host unload') host.unload();
+      else
+        f.connections[1].transition(
+          event === 'disconnect' ? 'reconnecting' : 'ready',
+          2,
+        );
+      assert.equal(host.tools.size, 0);
+      gate.release();
+      assert.deepEqual(await pending, { status: 'unavailable' });
+      assert.deepEqual(f.ledger.snapshot().locals['1'], original);
+      assert.deepEqual(f.ledger.snapshot().bindings, {});
+      assert.deepEqual(await tool.execute({}, { agent: host.agent }), {
+        status: 'unavailable',
+      });
+    },
+  );
+
+test('reconnect first reconciles original committed operation and reuses host binding without lifting counters', async (t) => {
+  const host = registrationHost();
+  let lose = true,
+    f;
+  f = await fixture(t, {
+    ctx: host.ctx,
+    registerFrame(frame) {
+      if (lose) frame.server_auth.signature = 'A'.repeat(86);
+    },
+    result(id) {
+      if (id !== 2 || !f?.ledger.snapshot()?.locals['1']) return {};
+      return { local_high_water: '1', registration_revision: '1' };
+    },
+  });
+  await f.runtime.start();
+  await waitFor(() => host.tools.size, 'join installed');
+  assert.deepEqual(
+    await host.tools
+      .get('auriga_network_join')
+      .execute({}, { agent: host.agent }),
+    { status: 'unavailable' },
+  );
+  const original = f.ledger.snapshot().locals['1'];
+  lose = false;
+  f.connections[1].transition('reconnecting', 2);
+  f.connections[1].transition('ready', 2);
+  await waitFor(
+    () => host.tools.size,
+    'join reinstalled after original-op reconciliation',
+  );
+  const registrations = f.sent.filter(
+    ({ request }) => request.type === 'local_register',
+  );
+  assert.equal(registrations.length, 2);
+  assert.equal(registrations[1].request.allocation_op_id, original.opId);
+  assert.equal(
+    registrations[1].request.allocation_fingerprint,
+    'sha256:' + original.fingerprint,
+  );
+  assert.deepEqual(
+    await host.tools
+      .get('auriga_network_join')
+      .execute({}, { agent: host.agent }),
+    { status: 'registered', address: 'aur1:2.40.1' },
+  );
+  assert.equal(f.ledger.snapshot().localHighWater, '1');
+});
 
 test('first connection commits complete ledger under one lock, really stops C1, then new ticket C2 gates connected', async (t) => {
   let release;

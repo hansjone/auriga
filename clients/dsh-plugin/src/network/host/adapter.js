@@ -1037,8 +1037,19 @@ export function createHostAdapter({
           CODES.hostIncompatible,
           'host category changed',
         );
-      if (ledger.peek().bindings[entry.local]?.state === 'bound')
-        return entry.local;
+      const binding = ledger.peek().bindings[entry.local];
+      if (
+        binding &&
+        (binding.hostSessionId !== hostSessionId ||
+          binding.cwd !== cwd ||
+          binding.kind !== addressType ||
+          binding.lifecycle !== 'open')
+      )
+        throw new HostSeamError(
+          CODES.recoveryConflict,
+          'immutable binding mismatch',
+        );
+      if (binding?.state === 'bound') return entry.local;
       await ledger.update((draft) => {
         draft.bindings[entry.local] = {
           local: entry.local,
