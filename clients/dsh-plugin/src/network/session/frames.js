@@ -72,6 +72,8 @@ export function encodeLocalRegister(input) {
 
 /** Call only after server authentication. RegisterResult has no fingerprint echo:
  * the request's original fingerprint stays bound by its correlated request_id.
+ * Consumers accept compatible minor versions and ignore unknown optional fields;
+ * the complete original object, including those fields, must already be verified.
  * @param {any} result @param {any} input */
 export function assertRegisterResult(result, input) {
   assertPendingRegistration(input);
@@ -81,7 +83,8 @@ export function assertRegisterResult(result, input) {
       'invalid original registration revision',
     );
   if (
-    result?.app_version !== APP_VERSION ||
+    typeof result?.app_version !== 'string' ||
+    !/^1\.(?:0|[1-9][0-9]{0,3})$/.test(result.app_version) ||
     result.type !== 'register_result' ||
     result.request_id !== input.request_id ||
     result.local !== input.candidate_local ||
@@ -93,23 +96,7 @@ export function assertRegisterResult(result, input) {
     BigInt(result.registration_revision) !==
       BigInt(input.expected_registration_revision) + 1n ||
     !uint64(result.local_high_water, true) ||
-    BigInt(result.local_high_water) < BigInt(result.local) ||
-    Object.keys(result).some(
-      (key) =>
-        ![
-          'app_version',
-          'type',
-          'request_id',
-          'local',
-          'allocation_op_id',
-          'address_type',
-          'registration_id',
-          'result',
-          'registration_revision',
-          'local_high_water',
-          'server_auth',
-        ].includes(key),
-    )
+    BigInt(result.local_high_water) < BigInt(result.local)
   )
     throw new SessionError(
       'network.protocol_error',
