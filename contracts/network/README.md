@@ -129,6 +129,31 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 
 READY 的非空 pending_registration 必须带原类别；仅完整匹配的原操作可通过原 REGISTER_RESULT 签名响应复原，READY 不做第二次分配或签发创建许可。address_type 纳入既有服务器签名，接收方确认登记前须比对原持久操作的类别，缺失/未知/不符均不能借响应确认为成功。混合版本缺字段或未知值沿严格 schema/既有操作错误失败关闭；不增加全局登录、版本协商或 READY 必需能力。旧数据库 NULL 不从新声明、活会话或 CONTACT_ASSIGN 补写：类型依赖操作拒绝，保留证据/高水位，按已有诊断和新 local 流程处理；丢失旧类型事实不能凭空恢复。
 
+### 5.1 内部 LocalRegister 搬运（契约已定义，实现待接线）
+
+[`NetworkMailboxService.LocalRegister`](../proto/auriga/collab/v1/network_mailbox.proto) 是新增 unary 内部搬运 RPC：
+独立 Request 仅 `NetworkMailboxConnection connection=1`、`bytes frame_json=2`，Response 仅 `bytes frame_json=1`；原四 RPC 不变。
+它搬运 §5 及正式 `Upstream/Downstream` 已有的 `LocalRegister/RegisterResult`，沿同一 NATS WSS up/down subject。
+请求必须保留完整原 LocalRegister 的严格 UTF-8 JSON/schema 与 ≤64KiB 字节上限，uint64 保持十进制字符串；
+不得拆成重复 DTO、改为 string、裁剪或重算原 op、fingerprint、帧 type、address_type、boot。
+
+调用仅接受 `svc:ai-gateway` 平台内部 JWT、既有受信内部传输及受信非平台委托 tenant，且 tenant 与 connection 一致。
+tenant/realm/node 只来自已认证 connection/NATS ingress，不来自应用帧或 NATS header；此调用不使用 `svc:collab` 的来源服务权限。
+生产 collab 必须每次重核当前持久 ingress 绑定、IAM CONNECT/currentTarget、READY 关联/boot，取服务端当前 epoch 与原帧 epoch 比较；
+保持 TenantContext/RLS、node health、原 op 先查、typed 不可变、revision/high-water 与耐久诊断。
+登记不授 SEND、来源、首联或执行权限，不依赖尚未实现的三来源 RPC，也不开放第五授权调用。
+
+响应只能是原字节完整已签正式 RegisterResult 或既有已签 Error；无法认证或建立签名受众时沿既有 gRPC 状态映射拒绝。
+网关不得造未签成功或省字段。RegisterResult 顶层没有 epoch/boot_id/allocation_fingerprint，epoch 位于 `server_auth.audience`；
+`protocol_response` 签名精确绑定 realm/node/incarnation/epoch、READY channel_nonce 与原 request_id，按既有消费者顺序验签。
+只遵循现 schema，不增加 recovered_registration、上行 header/server_auth、feature、subject、权限或用户流程。
+
+**尚未实施的 enforcement**：proto `bytes` 本身不执行 JSON/schema、大小、鉴权或签名校验。
+后续 Java handler 负责上述生产重核、严格解析、LocalRegistry 调用与完整结果/错误签名；
+Go ingress/codec/router/MailboxClient 负责有界严格解析、可信 connection 传递及响应原字节转发；
+插件生产 provider 负责持久原操作接线、受众/用途/签名验收及原 op、fingerprint、address_type 对应核验。
+本次只生成契约，未挂服务实现的方法继续 UNIMPLEMENTED/拒绝；生成与二进制往返测试不证明 PG、鉴权、NATS 或双 DSH 链路已通。
+
 ## 6. 错误码与呈现
 
 `errors.json` 是唯一定义。`visibility`：

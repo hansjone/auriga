@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NetworkMailboxService_Ready_FullMethodName   = "/auriga.collab.v1.NetworkMailboxService/Ready"
-	NetworkMailboxService_Head_FullMethodName    = "/auriga.collab.v1.NetworkMailboxService/Head"
-	NetworkMailboxService_Fetch_FullMethodName   = "/auriga.collab.v1.NetworkMailboxService/Fetch"
-	NetworkMailboxService_Receipt_FullMethodName = "/auriga.collab.v1.NetworkMailboxService/Receipt"
+	NetworkMailboxService_Ready_FullMethodName         = "/auriga.collab.v1.NetworkMailboxService/Ready"
+	NetworkMailboxService_Head_FullMethodName          = "/auriga.collab.v1.NetworkMailboxService/Head"
+	NetworkMailboxService_Fetch_FullMethodName         = "/auriga.collab.v1.NetworkMailboxService/Fetch"
+	NetworkMailboxService_Receipt_FullMethodName       = "/auriga.collab.v1.NetworkMailboxService/Receipt"
+	NetworkMailboxService_LocalRegister_FullMethodName = "/auriga.collab.v1.NetworkMailboxService/LocalRegister"
 )
 
 // NetworkMailboxServiceClient is the client API for NetworkMailboxService service.
@@ -38,6 +39,9 @@ type NetworkMailboxServiceClient interface {
 	Head(ctx context.Context, in *NetworkMailboxServiceHeadRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceHeadResponse, error)
 	Fetch(ctx context.Context, in *NetworkMailboxServiceFetchRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceFetchResponse, error)
 	Receipt(ctx context.Context, in *NetworkMailboxServiceReceiptRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceReceiptResponse, error)
+	// Transport the existing NATS up/down local_register/register_result frames.
+	// Contract only: an unimplemented handler MUST remain UNIMPLEMENTED/rejected.
+	LocalRegister(ctx context.Context, in *NetworkMailboxServiceLocalRegisterRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceLocalRegisterResponse, error)
 }
 
 type networkMailboxServiceClient struct {
@@ -88,6 +92,16 @@ func (c *networkMailboxServiceClient) Receipt(ctx context.Context, in *NetworkMa
 	return out, nil
 }
 
+func (c *networkMailboxServiceClient) LocalRegister(ctx context.Context, in *NetworkMailboxServiceLocalRegisterRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceLocalRegisterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NetworkMailboxServiceLocalRegisterResponse)
+	err := c.cc.Invoke(ctx, NetworkMailboxService_LocalRegister_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NetworkMailboxServiceServer is the server API for NetworkMailboxService service.
 // All implementations must embed UnimplementedNetworkMailboxServiceServer
 // for forward compatibility.
@@ -101,6 +115,9 @@ type NetworkMailboxServiceServer interface {
 	Head(context.Context, *NetworkMailboxServiceHeadRequest) (*NetworkMailboxServiceHeadResponse, error)
 	Fetch(context.Context, *NetworkMailboxServiceFetchRequest) (*NetworkMailboxServiceFetchResponse, error)
 	Receipt(context.Context, *NetworkMailboxServiceReceiptRequest) (*NetworkMailboxServiceReceiptResponse, error)
+	// Transport the existing NATS up/down local_register/register_result frames.
+	// Contract only: an unimplemented handler MUST remain UNIMPLEMENTED/rejected.
+	LocalRegister(context.Context, *NetworkMailboxServiceLocalRegisterRequest) (*NetworkMailboxServiceLocalRegisterResponse, error)
 	mustEmbedUnimplementedNetworkMailboxServiceServer()
 }
 
@@ -122,6 +139,9 @@ func (UnimplementedNetworkMailboxServiceServer) Fetch(context.Context, *NetworkM
 }
 func (UnimplementedNetworkMailboxServiceServer) Receipt(context.Context, *NetworkMailboxServiceReceiptRequest) (*NetworkMailboxServiceReceiptResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Receipt not implemented")
+}
+func (UnimplementedNetworkMailboxServiceServer) LocalRegister(context.Context, *NetworkMailboxServiceLocalRegisterRequest) (*NetworkMailboxServiceLocalRegisterResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LocalRegister not implemented")
 }
 func (UnimplementedNetworkMailboxServiceServer) mustEmbedUnimplementedNetworkMailboxServiceServer() {}
 func (UnimplementedNetworkMailboxServiceServer) testEmbeddedByValue()                               {}
@@ -216,6 +236,24 @@ func _NetworkMailboxService_Receipt_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NetworkMailboxService_LocalRegister_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NetworkMailboxServiceLocalRegisterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkMailboxServiceServer).LocalRegister(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkMailboxService_LocalRegister_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkMailboxServiceServer).LocalRegister(ctx, req.(*NetworkMailboxServiceLocalRegisterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NetworkMailboxService_ServiceDesc is the grpc.ServiceDesc for NetworkMailboxService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -238,6 +276,10 @@ var NetworkMailboxService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Receipt",
 			Handler:    _NetworkMailboxService_Receipt_Handler,
+		},
+		{
+			MethodName: "LocalRegister",
+			Handler:    _NetworkMailboxService_LocalRegister_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
