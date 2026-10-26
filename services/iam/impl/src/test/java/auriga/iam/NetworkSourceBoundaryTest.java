@@ -156,7 +156,31 @@ class NetworkSourceBoundaryTest {
   }
 
   @Test
-  void revokeRequiresPositiveRevisionAndKernelHasNoPublicSurfaceOrAuthorityGetResponse() {
+  void registerDigestIncludesDefaultsAndUnsignedStringsUsingExplicitContractJcs() {
+    // Independent Node crypto/JCS golden vector; no protobuf JSON default elision.
+    var r =
+        request().toBuilder()
+            .setConnection(
+                request().getConnection().toBuilder()
+                    .setTenantId("00000000-0000-0000-0000-000000000001"))
+            .build();
+    assertEquals(
+        "sha256:8cb6f8f9a370a310b50ba21e1b6f4cd37b2f96a46bccc31dff5e1e3b4c489eb7",
+        IamNetworkSources.registerDigest(r));
+    var wide =
+        r.toBuilder()
+            .setExpectedRevision(-1L)
+            .setPredecessorBinding("predecessor")
+            .setRegistration(r.getRegistration().toBuilder().setRegistrationRevision(-1L))
+            .setConnection(r.getConnection().toBuilder().setClientAccount("a\"\\\n\uD83D\uDE00"))
+            .build();
+    assertEquals(
+        "sha256:305b38f93385c62441ab12d439530ee8f72ee09af9b7341c45620066bf1fbc76",
+        IamNetworkSources.registerDigest(wide));
+  }
+
+  @Test
+  void revokeAcceptsEveryLegacyRevisionAndKernelHasNoPublicSurfaceOrAuthorityGetResponse() {
     var request =
         RevokeAgentSourceRequest.newBuilder()
             .setConnection(request().getConnection())
@@ -166,12 +190,11 @@ class NetworkSourceBoundaryTest {
     TenantContext.run(
         tenant,
         () -> {
-          assertEquals(
-              "common.validation_failed",
-              assertThrows(AurigaException.class, () -> IamNetworkSources.validate(request))
-                  .errorCode()
-                  .code());
-          IamNetworkSources.validate(request.toBuilder().setExpectedRevision(-1L).build());
+          for (long revision : new long[] {0, 1, 2, -1L})
+            assertDoesNotThrow(
+                () ->
+                    IamNetworkSources.validate(
+                        request.toBuilder().setExpectedRevision(revision).build()));
         });
     assertFalse(java.lang.reflect.Modifier.isPublic(IamNetworkSources.class.getModifiers()));
     for (var method : IamNetworkSources.class.getDeclaredMethods()) {

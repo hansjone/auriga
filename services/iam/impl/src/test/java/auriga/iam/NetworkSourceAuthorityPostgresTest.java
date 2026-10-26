@@ -173,6 +173,237 @@ class NetworkSourceAuthorityPostgresTest {
   }
 
   @Test
+  void revisionIndependentRevokeAndTerminalPresence() {
+    var first = call(() -> sources.register(request("first"))).getSource();
+    var active = call(() -> sources.get(getRequest(first)));
+    assertTrue(active.hasLineageStopped());
+    assertFalse(active.getLineageStopped());
+    clock.advance(31);
+    var expired = call(() -> sources.get(getRequest(first)));
+    assertTrue(expired.hasLineageStopped());
+    assertFalse(expired.getLineageStopped());
+    assertEquals("", expired.getValidUntil());
+    var next =
+        request("next").toBuilder()
+            .setPredecessorBinding(first.getSourceBinding())
+            .setExpectedRevision(expired.getSource().getRevision())
+            .build();
+    var head = call(() -> sources.register(next)).getSource();
+    var revoke = stop(first, "zero-stop").toBuilder().clearExpectedRevision().build();
+    var receipt = call(() -> sources.revoke(revoke));
+    assertEquals(expired.getSource(), receipt.getSource());
+    assertEquals(receipt, call(() -> sources.revoke(revoke)));
+    var stopped = call(() -> sources.get(getRequest(first)));
+    assertTrue(stopped.hasLineageStopped());
+    assertTrue(stopped.getLineageStopped());
+    assertEquals(expired.getSource(), stopped.getSource());
+    assertEquals("", stopped.getValidUntil());
+    var revoked = call(() -> sources.get(getRequest(head)));
+    assertTrue(revoked.getLineageStopped());
+    assertEquals(2, revoked.getSource().getStateValue());
+    assertEquals(2, revoked.getSource().getRevision());
+    assertEquals("", revoked.getValidUntil());
+    for (long revision : new long[] {0, 1, -1L}) {
+      var retry =
+          stop(first, "stop-" + Long.toUnsignedString(revision)).toBuilder()
+              .setExpectedRevision(revision)
+              .build();
+      assertEquals(expired.getSource(), call(() -> sources.revoke(retry)).getSource());
+    }
+  }
+
+  @Test
+  void definitiveRejectionsCommitOriginalReceiptsAndNeverIssueOnReplay() {
+    var first = call(() -> sources.register(request("first"))).getSource();
+    clock.advance(31);
+    var expired = call(() -> sources.get(getRequest(first))).getSource();
+    var stale =
+        request("stale").toBuilder()
+            .setPredecessorBinding(first.getSourceBinding())
+            .setExpectedRevision(1)
+            .build();
+    var rejected = call(() -> sources.register(stale));
+    assertRejection(stale, rejected, "revision_mismatch");
+    var next =
+        stale.toBuilder().setOperationId("next").setExpectedRevision(expired.getRevision()).build();
+    var head = call(() -> sources.register(next)).getSource();
+    var nonHead = next.toBuilder().setOperationId("non-head").build();
+    assertRejection(nonHead, call(() -> sources.register(nonHead)), "predecessor_not_head");
+    call(() -> sources.revoke(stop(first, "stop")));
+    var stopped =
+        request("stopped").toBuilder()
+            .setPredecessorBinding(head.getSourceBinding())
+            .setExpectedRevision(1)
+            .build();
+    assertRejection(stopped, call(() -> sources.register(stopped)), "lineage_stopped");
+    clock.advance(3601);
+    cleanExpiredOriginalIngress();
+    assertEquals(rejected, call(() -> sources.register(stale)));
+    error(
+        "common.conflict",
+        () -> call(() -> sources.register(stale.toBuilder().setExpectedRevision(2).build())));
+    mutate("device", device, "accountId", anotherActiveAccount());
+    error("common.forbidden", () -> call(() -> sources.register(stale)));
+  }
+
+  void assertRejection(
+      RegisterAgentSourceRequest request, RegisterAgentSourceResponse response, String reason) {
+    assertFalse(response.hasSource());
+    assertTrue(response.getDefinitivelyUncommitted());
+    assertEquals(request.getOperationId(), response.getOperationId());
+    assertEquals(reason, response.getRejectionReason());
+    assertTrue(response.getRequestDigest().matches("sha256:[0-9a-f]{64}"));
+    assertEquals(response, call(() -> sources.register(request)));
+    assertEquals(
+        1,
+        tx(
+            () ->
+                store
+                    .networkJdbc()
+                    .queryForObject(
+                        "SELECT count(*) FROM iam.network_source_operation WHERE tenant_id=? AND method='Register' AND operation_id=?",
+                        Integer.class,
+                        tenant,
+                        request.getOperationId())));
+  }
+
+  @Test
+  void unknownPredecessorAndDuplicateFirstAreDefinitivelyRejectedAtTheRpc() {
+    withRpc(
+        stub ->
+            TenantContext.run(
+                tenant,
+                () -> {
+                  var unknown =
+                      request("unknown-predecessor").toBuilder()
+                          .setPredecessorBinding("unknown")
+                          .setExpectedRevision(1)
+                          .build();
+                  var rejected = stub.registerAgentSource(unknown);
+                  assertRejection(unknown, rejected, "predecessor_not_head");
+                  var first = stub.registerAgentSource(request("first")).getSource();
+                  var duplicate = request("duplicate-first");
+                  assertRejection(
+                      duplicate, stub.registerAgentSource(duplicate), "predecessor_not_head");
+                  var active = stub.getAgentSource(getRequest(first));
+                  assertTrue(active.hasLineageStopped());
+                  assertFalse(active.getLineageStopped());
+                  assertFalse(active.getValidUntil().isEmpty());
+                  var stopped =
+                      stub.revokeAgentSource(
+                          stop(first, "stop").toBuilder().clearExpectedRevision().build());
+                  assertEquals(2, stopped.getSource().getStateValue());
+                  var terminal = stub.getAgentSource(getRequest(first));
+                  assertTrue(terminal.hasLineageStopped());
+                  assertTrue(terminal.getLineageStopped());
+                  assertEquals("", terminal.getValidUntil());
+                }));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void registerAndRevisionlessRevokeSerializeOnRealLineageLock(boolean registerFirst)
+      throws Exception {
+    var first = call(() -> sources.register(request("first"))).getSource();
+    clock.advance(31);
+    var expired = call(() -> sources.get(getRequest(first))).getSource();
+    var next =
+        request("next").toBuilder()
+            .setPredecessorBinding(first.getSourceBinding())
+            .setExpectedRevision(expired.getRevision())
+            .build();
+    var stop = stop(first, "stop").toBuilder().clearExpectedRevision().build();
+    var locked = new java.util.concurrent.CountDownLatch(1);
+    var unlock = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      var holder =
+          executor.submit(
+              () ->
+                  tx(
+                      () -> {
+                        store
+                            .networkJdbc()
+                            .queryForObject(
+                                "SELECT head::text FROM iam.network_source_chain WHERE tenant_id=? FOR UPDATE",
+                                String.class,
+                                tenant);
+                        locked.countDown();
+                        try {
+                          assertTrue(unlock.await(10, TimeUnit.SECONDS));
+                        } catch (InterruptedException e) {
+                          throw new AssertionError(e);
+                        }
+                        return null;
+                      }));
+      try {
+        assertTrue(locked.await(5, TimeUnit.SECONDS));
+        var pending =
+            executor.submit(
+                () ->
+                    registerFirst
+                        ? call(() -> sources.register(next))
+                        : call(() -> sources.revoke(stop)));
+        org.awaitility.Awaitility.await()
+            .atMost(Duration.ofSeconds(3))
+            .until(
+                () -> {
+                  try (var c =
+                          PostgresExtension.database(NetworkSourceAuthorityPostgresTest.class)
+                              .dataSource()
+                              .getConnection();
+                      var statement = c.createStatement();
+                      var rs =
+                          statement.executeQuery(
+                              "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()"
+                                  + " AND wait_event_type='Lock' AND query LIKE '%network_source_chain%' AND query LIKE '%FOR UPDATE%'")) {
+                    return rs.next() && rs.getLong(1) > 0;
+                  }
+                });
+        assertFalse(pending.isDone());
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var following =
+            executor.submit(
+                () -> {
+                  started.countDown();
+                  return registerFirst
+                      ? call(() -> sources.revoke(stop))
+                      : call(() -> sources.register(next));
+                });
+        assertTrue(started.await(5, TimeUnit.SECONDS));
+        unlock.countDown();
+        holder.get(5, TimeUnit.SECONDS);
+        var result =
+            registerFirst ? pending.get(10, TimeUnit.SECONDS) : following.get(10, TimeUnit.SECONDS);
+        var issued = assertInstanceOf(RegisterAgentSourceResponse.class, result);
+        var revoked =
+            registerFirst ? following.get(10, TimeUnit.SECONDS) : pending.get(10, TimeUnit.SECONDS);
+        assertEquals(
+            expired, assertInstanceOf(RevokeAgentSourceResponse.class, revoked).getSource());
+        if (registerFirst) {
+          assertTrue(issued.hasSource());
+          var head = call(() -> sources.get(getRequest(issued.getSource())));
+          assertEquals(2, head.getSource().getStateValue());
+          assertTrue(head.getLineageStopped());
+          assertEquals("", head.getValidUntil());
+        } else assertRejection(next, issued, "lineage_stopped");
+        assertEquals(
+            0,
+            tx(
+                () ->
+                    store
+                        .networkJdbc()
+                        .queryForObject(
+                            "SELECT count(*) FROM iam.network_source WHERE tenant_id=? AND state=1",
+                            Integer.class,
+                            tenant)));
+        assertTrue(call(() -> sources.get(getRequest(first))).getLineageStopped());
+      } finally {
+        unlock.countDown();
+      }
+    }
+  }
+
+  @Test
   void realAuthorityReconnectAndImmutableReceiptWholeSecondDeadlines() {
     call(
         () -> {
@@ -651,13 +882,11 @@ class NetworkSourceAuthorityPostgresTest {
             executor.submit(
                 () -> {
                   assertTrue(gate.await(5, TimeUnit.SECONDS));
-                  try {
-                    call(() -> sources.register(next.toBuilder().setOperationId(op).build()));
-                    return true;
-                  } catch (AurigaException e) {
-                    assertEquals("common.conflict", e.errorCode().code());
-                    return false;
-                  }
+                  var result =
+                      call(() -> sources.register(next.toBuilder().setOperationId(op).build()));
+                  if (!result.hasSource())
+                    assertEquals("predecessor_not_head", result.getRejectionReason());
+                  return result.hasSource();
                 }));
       gate.countDown();
       int success = 0;
@@ -1585,7 +1814,19 @@ class NetworkSourceAuthorityPostgresTest {
             auth.put("source_binding", next.getSourceBinding()).put("source_revision", "1");
             context.put("observed_at", clock.instant().toString());
             assertTrue(stub.authorizeNetworkDelivery(deliveryRequest()).getAllowed());
-            call(() -> sources.revoke(stop(expired, "stop-old")));
+            call(
+                () ->
+                    sources.revoke(
+                        stop(expired, "stop-old").toBuilder().clearExpectedRevision().build()));
+            var oldView = call(() -> sources.get(getRequest(source)));
+            assertEquals(3, oldView.getSource().getStateValue());
+            assertTrue(oldView.hasLineageStopped());
+            assertTrue(oldView.getLineageStopped());
+            assertEquals("", oldView.getValidUntil());
+            var headView = call(() -> sources.get(getRequest(next)));
+            assertEquals(2, headView.getSource().getStateValue());
+            assertTrue(headView.getLineageStopped());
+            assertEquals("", headView.getValidUntil());
             denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
           });
     }
@@ -1843,7 +2084,11 @@ class NetworkSourceAuthorityPostgresTest {
                       () ->
                           TenantContext.call(
                               tenant,
-                              () -> stub.revokeAgentSource(stop(source, "contended-stop"))));
+                              () ->
+                                  stub.revokeAgentSource(
+                                      stop(source, "contended-stop").toBuilder()
+                                          .clearExpectedRevision()
+                                          .build())));
               try {
                 org.awaitility.Awaitility.await()
                     .atMost(Duration.ofSeconds(3))

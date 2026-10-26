@@ -64,12 +64,20 @@ owner/device/IAM backing-session 关联，保存 head/永久停权；来源代�
 当前 EXPIRED head 经完整新鲜核验和正 revision CAS 才可建新代。同健康连接、同登记
 可以取得下一有界代，旧绑定、旧期限和旧操作响应保持不变。
 
-操作按 tenant/method/operation 唯一保存规范 protobuf 请求、SHA-256 摘要和完整原响应。
-回执先由操作找到原来源及耐久兑换/归属锚点，再核本库原关联；不以原 ingress 在线、
+操作按 tenant/method/operation 唯一保存完整 protobuf 请求、摘要和原响应。新 Register 使用契约显式
+snake_case JSON 的 JCS/SHA-256 摘要（含默认值、uint64 十进制串）；旧不可变回执仍按原字节核对。
+V11 允许拒绝操作不关联来源，改为永久关联独立核验并保存的原兑换/归属锚点；仍受租户外键、RLS 和不可变触发器约束。
+原连接有效且全量当前核验通过后，错 revision、非 head、链已停分别在原 op 锁内持久保存
+revision_mismatch、predecessor_not_head、lineage_stopped 拒绝回执；提交后才返回
+definitively_uncommitted、原 operation_id、request_digest 和 rejection_reason，不含 source。
+同 op 同体先返回原成功或拒绝回执，异体冲突；普通错误不是确定未提交证明。
+回执先由操作找到原来源或拒绝操作的耐久兑换/归属锚点，再核本库原关联；不以原 ingress 在线、
 当前 CAS、身份过期或当前来源状态阻止原回执对账。锚点固化真实 ingress 行主键、
 精确兑换元组及 IAM 账号/设备/session 行 ID，V7 清理 ingress 不删除这些记录。
 缺锚点或归属关联变化拒绝；回执无当前授权效力。Revoke 使用留存的原精确连接，
 同事务停链并终态化命名代及当前 head；命名过期前代保持 EXPIRED。
+Revoke 的 expected_revision 仅保留线兼容，缺失、零或任意旧值均不阻碍停权；新 op 对终态来源
+也确认永久停链，同 op 仍要求原请求完全相同。来源版本锁、单调终态更新和整链原子性保持不变。
 
 调用方拥有一个 `IamStore` 事务：先完成事务外远程核验，再以 tenant 的
 `network-authority` advisory 为第一把业务锁，按 session→device→account→政策版本行→精确 ingress
@@ -94,7 +102,9 @@ Get 只返回 `View(source, stopped, observedAt)`，没有伪造的 policy_revis
 当前 org 权限及最终快照/政策版本重核；REVOKED/EXPIRED、链 stop 和 TTL 配置关闭都不能跳过。
 原身份失效或当前连接失效时 Get 拒绝且不回原事实，不适用回执的离线恢复例外。
 Get 允许同设备、同有效 backing-session 的真实新连接重连，始终保留原 connection；
-终态经上述门禁后由原内核在 chain/source 锁下单向观察，valid_until 为空。未知 op 不适用回执例外。
+终态经上述门禁后由原内核在 chain/source 锁下单向观察，保留命名代当前 state/revision，valid_until 为空。
+所有 Get 均显式设置 optional lineage_stopped（包括 false），区分自然到期与停链前代，不改变命名代状态。
+终态 Get 无授权效力，第五 RPC 仍独立锁链/来源并拒绝终态或停链。未知 op 不适用回执例外。
 
 部署必须显式设置可信启动参数，例如：
 
