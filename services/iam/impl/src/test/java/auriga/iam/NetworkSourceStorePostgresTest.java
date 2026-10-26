@@ -1,6 +1,7 @@
 package auriga.iam;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 import auriga.common.error.AurigaException;
 import auriga.common.persistence.*;
@@ -652,6 +653,219 @@ class NetworkSourceStorePostgresTest {
         "common.conflict",
         () -> tx(() -> sources.revoke(revoke.toBuilder().setOperationId("stale-cas").build())));
     assertEquals(b, tx(() -> sources.registerReceipt(r)).getSource());
+  }
+
+  @Test
+  void fullResolveTargetAndSourceRegisterBothCommitWithContendedIdentity() throws Exception {
+    resolveWithContendedSource(false);
+  }
+
+  @Test
+  void fullResolveTargetAndSourceGetBothCommitWithContendedIdentity() throws Exception {
+    resolveWithContendedSource(true);
+  }
+
+  private void resolveWithContendedSource(boolean reading) throws Exception {
+    prepareLiveBacking();
+    var originalRequest = request("lock-order");
+    var original = reading ? register(originalRequest).getSource() : null;
+    var authorityLocked = new CountDownLatch(1);
+    var sessionLocked = new CountDownLatch(1);
+    var resolvePid = new java.util.concurrent.atomic.AtomicInteger();
+    var credentialReleased = new java.util.concurrent.atomic.AtomicBoolean();
+    var credentials = spy(realCredentials());
+    doAnswer(
+            invocation -> {
+              var result = invocation.callRealMethod();
+              assertNotNull(result);
+              store.requireTransactionReleased(); // Actual credential transaction has completed.
+              credentialReleased.set(true);
+              return result;
+            })
+        .when(credentials)
+        .credential(tenant.toString(), owner.toString(), device.toString());
+    var observedStore = spy(store);
+    doAnswer(
+            invocation -> {
+              invocation
+                  .callRealMethod(); // Observe the real final authority advisory lock, not fake
+              // SQL.
+              assertTrue(credentialReleased.get());
+              resolvePid.set(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+              authorityLocked.countDown();
+              awaitLatch(sessionLocked);
+              return null;
+            })
+        .when(observedStore)
+        .lock("network-authority");
+    var network = new IamNetworkAuthority(observedStore, credentials, null, clock, Set.of("test"));
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var source =
+          executor.submit(
+              () -> {
+                awaitLatch(authorityLocked);
+                return tx(
+                    () -> {
+                      int sourcePid = jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class);
+                      store.byId("session", session.toString(), true);
+                      sessionLocked.countDown();
+                      // Poll in THIS transaction: the identity lock remains held and no extra pool
+                      // slot is needed.
+                      // Both old and fixed implementations wait for session; never wait for the old
+                      // ingress stage.
+                      org.awaitility.Awaitility.await()
+                          .pollInSameThread()
+                          .atMost(Duration.ofSeconds(5))
+                          .until(
+                              () ->
+                                  Boolean.TRUE.equals(
+                                      jdbc.queryForObject(
+                                          "SELECT EXISTS(SELECT 1 FROM unnest(pg_blocking_pids(?)) AS p(pid) WHERE pid=?)",
+                                          Boolean.class,
+                                          resolvePid.get(),
+                                          sourcePid)));
+                      if (reading)
+                        return sources
+                            .get(
+                                GetAgentSourceRequest.newBuilder()
+                                    .setSourceBinding(original.getSourceBinding())
+                                    .setConnection(connection)
+                                    .setRegistration(registration)
+                                    .build(),
+                                fixture(connection, registration))
+                            .source();
+                      return sources
+                          .register(originalRequest, fixture(connection, registration))
+                          .getSource();
+                    });
+              });
+      var resolve = executor.submit(() -> resolve(network));
+      try {
+        // Deadlock/lock timeout is a failure, never an accepted alternative result or retry.
+        var result = source.get(15, TimeUnit.SECONDS);
+        assertEquals(clock.instant().plusSeconds(1800), resolve.get(15, TimeUnit.SECONDS));
+        assertEquals(reading ? original : result, get(result).source());
+        assertEquals(result, tx(() -> sources.registerReceipt(originalRequest)).getSource());
+        for (String table : tables()) assertEquals(1, count(table));
+        verify(credentials).credential(tenant.toString(), owner.toString(), device.toString());
+      } finally {
+        authorityLocked.countDown();
+        sessionLocked.countDown();
+        source.cancel(true);
+        resolve.cancel(true);
+      }
+    }
+  }
+
+  @Test
+  void fullResolveTargetStillRejectsIdentityIngressAndDeadlineChangesDuringCredentialCheck() {
+    prepareLiveBacking();
+    UUID otherOwner = UuidV7.next();
+    tx(
+        () -> {
+          store.insert("account", otherOwner.toString(), Json.object("status", "active"), null);
+          return null;
+        });
+    assertEquals(
+        clock.instant().plusSeconds(1800),
+        resolve(new IamNetworkAuthority(store, realCredentials(), null, clock, Set.of("test"))));
+    for (String[] change :
+        List.of(
+            new String[] {"device", device.toString(), "accountId", otherOwner.toString()},
+            new String[] {"device", device.toString(), "sessionId", UuidV7.next().toString()},
+            new String[] {"session", session.toString(), "accountId", otherOwner.toString()},
+            new String[] {
+              "session", session.toString(), "idleExpiresAt", clock.instant().toString()
+            },
+            new String[] {"account", owner.toString(), "status", "disabled"},
+            new String[] {"network_ingress", connection.getIngress(), "clientId", "2"},
+            new String[] {
+              "network_ingress", connection.getIngress(), "expiresAt", clock.instant().toString()
+            },
+            new String[] {
+              "network_ingress",
+              connection.getIngress(),
+              "expiresAt",
+              clock.instant().plusSeconds(7200).toString()
+            })) {
+      var before = tx(() -> store.get(change[0], change[1], false));
+      var credentials = spy(realCredentials());
+      doAnswer(
+              invocation -> {
+                var result = invocation.callRealMethod();
+                assertNotNull(result);
+                store.requireTransactionReleased();
+                tx(
+                    () -> {
+                      var row = store.get(change[0], change[1], true);
+                      row.put(change[2], change[3]);
+                      store.save(change[0], row);
+                      return null;
+                    });
+                return result;
+              })
+          .when(credentials)
+          .credential(tenant.toString(), owner.toString(), device.toString());
+      try {
+        assertNull(
+            resolve(new IamNetworkAuthority(store, credentials, null, clock, Set.of("test"))),
+            change[0] + "." + change[2]);
+      } finally {
+        tx(
+            () -> {
+              store.save(change[0], before);
+              return null;
+            });
+      }
+    }
+  }
+
+  private void prepareLiveBacking() {
+    tx(
+        () -> {
+          var row = store.byId("session", session.toString(), true);
+          row.put("tenantId", tenant.toString());
+          row.put("audience", "portal");
+          row.put("expiresAt", clock.instant().plusSeconds(3600).toString());
+          row.put("idleExpiresAt", clock.instant().plusSeconds(1800).toString());
+          store.save("session", row);
+          var d = store.byId("device", device.toString(), true);
+          d.put("scope", "auriga.connect");
+          store.save("device", d);
+          return null;
+        });
+  }
+
+  private DeviceAccessAuthority realCredentials() {
+    return new DeviceAccessAuthority(
+        store, new SessionManager(store, null, null, clock, null, null), null);
+  }
+
+  private Instant resolve(IamNetworkAuthority network) {
+    var c = connection;
+    return new IamGrpcDevicesSpringTest()
+        .as(
+            "svc:collab",
+            tenant,
+            () ->
+                network.resolveTarget(
+                    new IamNetworkAuthority.TargetBinding(
+                        c.getRealm(),
+                        c.getNode(),
+                        c.getIngress(),
+                        c.getServerId(),
+                        c.getClientId(),
+                        c.getClientAccount())));
+  }
+
+  private static void awaitLatch(CountDownLatch latch) {
+    try {
+      assertTrue(
+          latch.await(10, TimeUnit.SECONDS), "Expected real transaction stage was not reached");
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
   }
 
   int count(String table) {
