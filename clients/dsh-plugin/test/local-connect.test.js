@@ -1,7 +1,17 @@
 import { test } from 'node:test';
-/* global Headers */
+/* global Headers, structuredClone */
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, mkdir, rename, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  readFile,
+  mkdir,
+  rename,
+  rm,
+  readdir,
+} from 'node:fs/promises';
+import { generateKeyPairSync } from 'node:crypto';
+import { setImmediate } from 'node:timers/promises';
+import { createSettingsStore } from '../src/settings/store.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createVault } from '../src/local/vault.js';
@@ -21,6 +31,69 @@ const config = {
   clientId: 'auriga-dsh',
   providerId: 'team',
 };
+test('loader network installation alone remains unconfigured after login and never leaks to settings/status', async (t) => {
+  const network = {
+    realm: '1',
+    wssUrl: 'wss://network.example.com:9443/custom/ws',
+    roots: [
+      {
+        kid: 'root',
+        public_key_spki: generateKeyPairSync('ed25519')
+          .publicKey.export({ format: 'der', type: 'spki' })
+          .toString('base64url'),
+      },
+    ],
+  };
+  const expected = structuredClone(network);
+  const { runtime, request, directory, requests, registered } =
+    await runtimePeer(t, { config: { network } });
+  network.realm = '2';
+  network.roots[0].kid = 'injected';
+  assert.equal(runtime.networkStatus.state, 'unconfigured');
+  assert.equal(runtime.networkStatus.available, false);
+  assert.deepEqual(
+    requests.filter((path) => /network|tickets|keys|net\/v1/.test(path)),
+    [],
+  );
+  assert.equal(
+    [...registered].some((name) => /send/i.test(name)),
+    false,
+  );
+  assert.equal((await readdir(directory)).includes('network'), false);
+  const settings = await createSettingsStore(directory, config.platformOrigin);
+  await assert.rejects(
+    settings.save({ ...settings.snapshot(), network: expected }),
+    /invalidSettings/,
+  );
+  for (const value of [
+    runtime.status(request),
+    runtime.networkStatus,
+    settings.snapshot(),
+  ]) {
+    assert.equal(JSON.stringify(value).includes('public_key_spki'), false);
+    assert.equal(JSON.stringify(value).includes(expected.wssUrl), false);
+  }
+  // Even an internal adapter bypass cannot promote request data to installation authority.
+  const attempt = { headers: {} };
+  attempt.headers.cookie = runtime.prepare(attempt).setCookie.split(';')[0];
+  await runtime.login(attempt, { action: 'resume', network });
+  let prepared;
+  const detach = runtime.attachNetwork({
+    ports: {},
+    prepare(input) {
+      prepared = input;
+      return new Promise(() => {});
+    },
+  });
+  const deadline = Date.now() + 2000;
+  while (!prepared) {
+    assert.ok(Date.now() < deadline, 'trusted prepare timeout');
+    await setImmediate();
+  }
+  assert.deepEqual(prepared.installation, expected);
+  assert.ok(Object.isFrozen(prepared.installation.roots[0]));
+  detach();
+});
 test('cancelled browser attempt loses its CSRF and cannot be advanced or restarted under the old proof', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-attempt-cancel-'));
   try {

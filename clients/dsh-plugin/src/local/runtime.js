@@ -67,7 +67,7 @@ export function abandonNativeAttempt(attempt, compensate) {
 }
 
 /** Browser sessions are process-local. Restart can never revive a revoked old bearer from disk.
- * @param {{config:any,directory:string,ctx:any}} options */
+ * @param {{config:import('../generated/connect-config.js').ConnectConfig,directory:string,ctx:any}} options */
 export async function createConnectRuntime({ config: input, directory, ctx }) {
   const config = platformConfig(input),
     platform = createPlatform(config),
@@ -157,6 +157,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   const httpResponses = createHttpResponseTracker(resolve);
   const network = createNetworkLifecycle({
     directory: join(directory, 'network'),
+    installation: config.network,
     ctx,
     getAccess,
     authorizeLocal: async (request) => !!resolve(request),

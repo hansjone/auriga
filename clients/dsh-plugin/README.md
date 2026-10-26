@@ -62,6 +62,41 @@ The standalone identity library remains available, but its login transactions ar
 
 See `docs/dev/dsh-plugin.md` and `contracts/plugin/README.md`.
 
+An installer may add static network pins to the existing loader row's
+`config.connect` (replace the placeholder with the installation's public root):
+
+```yaml
+connect:
+  platformOrigin: https://portal.example.com
+  issuer: https://portal.example.com
+  clientId: auriga-dsh
+  providerId: team
+  network:
+    realm: '1'
+    wssUrl: wss://portal.example.com/net/v1/ws
+    roots:
+      - kid: root-1
+        public_key_spki: '<canonical unpadded base64url Ed25519 public SPKI DER>'
+```
+
+`network` is optional; when present every field is required and unknown fields
+are rejected. Realm is a canonical positive uint64 string; roots contain 1–16
+public pins with unique kids. PEM, private keys, root URLs, TOFU, skipVerify,
+initialize and created are rejected. SPKI itself is the pin. The fixed WSS URL
+may use a custom path, independent host/port or an IP address; userinfo, query,
+fragment and non-WSS URLs are rejected. Platform and issuer still require the
+same HTTPS origin; `allowLocalHttp` remains an isolated loopback test exception
+and never permits WS or disabling TLS.
+
+Only the installer supplies these values. They are copied, deeply frozen and
+passed to trusted provider prepare, never exposed through settings, login input,
+status, diagnostics or SDK. Configuration alone does not attach a provider,
+register a node, fetch tickets/keys, open transport, initialize a network ledger,
+register SEND or publish authorization events; without a provider the network
+remains unconfigured. No test roots are supplied by default. Static pins do not
+replace future online IAM/keyset/announcement checks. Production networking,
+first-start ledger/incarnation bootstrap and two-DSH delivery remain separate work.
+
 Protocol major version: **1** (`Auriga-Protocol: 1`).
 
 ```powershell

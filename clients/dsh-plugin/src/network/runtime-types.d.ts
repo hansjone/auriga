@@ -6,6 +6,20 @@ import type {
   SignedKeyset,
   PublicKey,
 } from '../generated/network/keyset-types.js';
+import type { ConnectNetwork } from '../generated/connect-config.js';
+
+/** Validated, detached installation pins; never a browser/SDK preference. */
+export type NetworkInstallation = Readonly<Omit<ConnectNetwork, 'roots'>> & {
+  readonly roots: ReadonlyArray<Readonly<ConnectNetwork['roots'][number]>>;
+};
+export interface NetworkProvider {
+  ports: NetworkPorts;
+  prepare(input: {
+    accessToken: string;
+    signal: AbortSignal;
+    installation?: NetworkInstallation;
+  }): Promise<PreparedNetwork>;
+}
 
 /** Installation-owned ports, never accepted from HTTP bodies, model parameters or downlink hints.
  * IAM register/prepare and private HTTPS submission have no public route yet.
