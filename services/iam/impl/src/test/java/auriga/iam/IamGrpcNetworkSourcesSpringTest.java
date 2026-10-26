@@ -18,6 +18,85 @@ import org.springframework.context.annotation.*;
 import org.springframework.mock.env.MockEnvironment;
 
 class IamGrpcNetworkSourcesSpringTest {
+  @Test
+  void everyGetReachesCurrentOrgGateEvenWhenIssuanceIsDisabled() {
+    // Ordering boundary only. Actual terminal rows/identities/transactions are covered by PG.
+    var fixture = new NetworkSourceBoundaryTest();
+    var connection = fixture.request().getConnection();
+    var request =
+        GetAgentSourceRequest.newBuilder()
+            .setConnection(connection)
+            .setRegistration(fixture.request().getRegistration())
+            .setSourceBinding(UUID.randomUUID().toString())
+            .build();
+    var store = mock(IamStore.class);
+    var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+    when(store.networkJdbc()).thenReturn(jdbc);
+    when(store.tx(any()))
+        .thenAnswer(
+            invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+    var network = mock(IamNetworkAuthority.class);
+    var devices = mock(DeviceAccessAuthority.class);
+    var organization = mock(auriga.iam.api.InstanceAiAuthorization.class);
+    String owner = UUID.randomUUID().toString(),
+        device = UUID.randomUUID().toString(),
+        session = UUID.randomUUID().toString();
+    var snapshot = mock(IamNetworkAuthority.SourceSnapshot.class);
+    when(snapshot.revision()).thenReturn(java.math.BigInteger.ONE);
+    when(snapshot.target())
+        .thenReturn(
+            new IamNetworkAuthority.TargetSnapshot(
+                new auriga.iam.api.NetworkAuthority.Node(
+                    connection.getRealm(), connection.getNode(), owner, device, false),
+                Json.object(),
+                Json.object(),
+                Json.object("sessionId", session),
+                Json.object()));
+    when(network.sourceSnapshot(any(), eq(true))).thenReturn(snapshot);
+    var clock = Clock.systemUTC();
+    when(devices.credentialSnapshot(fixture.tenant.toString(), owner, device))
+        .thenReturn(
+            new DeviceAccessAuthority.CredentialSnapshot(
+                new DeviceAccessAuthority.Identity(
+                    fixture.tenant.toString(), owner, device, clock.instant().plusSeconds(60)),
+                session));
+    var orgRequest =
+        auriga.contracts.org.v1.GetEffectivePermissionsRequest.newBuilder()
+            .setTenantId(fixture.tenant.toString())
+            .setAccountId(owner)
+            .build();
+    when(organization.getEffectivePermissions(orgRequest))
+        .thenReturn(
+            auriga.contracts.org.v1.GetEffectivePermissionsResponse.newBuilder()
+                .setMemberTypeValue(1)
+                .setStatusValue(1)
+                .build());
+    for (var policy :
+        List.of(
+            new IamNetworkSourceAuthority.Policy(30, 5),
+            new IamNetworkSourceAuthority.Policy(0, 5),
+            new IamNetworkSourceAuthority.Policy(30, 0),
+            new IamNetworkSourceAuthority.Policy(0, 0))) {
+      clearInvocations(organization);
+      var authority =
+          new IamNetworkSourceAuthority(store, network, devices, organization, clock, policy);
+      var service = new IamGrpcNetworkSources(authority);
+      var output = new IamGrpcDevicesSpringTest.Capture<GetAgentSourceResponse>();
+      new IamGrpcDevicesSpringTest()
+          .as(
+              "svc:collab",
+              fixture.tenant,
+              () -> {
+                IamGrpcDevicesSpringTest.error(
+                    "common.forbidden", () -> service.getAgentSource(request, output));
+                return null;
+              });
+      verify(organization).getEffectivePermissions(orgRequest);
+      assertTrue(output.values.isEmpty());
+      assertFalse(output.completed);
+    }
+  }
+
   @Configuration(proxyBeanMethods = false)
   static class Beans {
     @Bean

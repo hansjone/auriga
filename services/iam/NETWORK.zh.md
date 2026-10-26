@@ -70,7 +70,7 @@ owner/device/IAM backing-session 关联，保存 head/永久停权；来源代�
 不要求活跃身份；也必须在事务内调用。多来源锁按 UUID 稳定排序，竞争等待上限 5 秒。
 Get 只返回 `View(source, stopped, observedAt)`，没有伪造的 policy_revision/valid_until。
 
-`IamNetworkSourceAuthority` 与 `IamGrpcNetworkSources` 接线上述三 RPC。新建与在线 Get
+`IamNetworkSourceAuthority` 与 `IamGrpcNetworkSources` 接线上述三 RPC。新建与所有 Get（包括终态）
 先以短事务取得真实七字段兑换、node/owner/device/backing-session、完整身份/兑换/配置快照
 及本库正政策版本，释放全部事务、同步与 DataSource 绑定，再复用真实 credential 检查，
 经现有 `InstanceAiAuthorization`（同进程 org 或现有 gRPC 通道）核当前 ACTIVE MEMBER/EXTERNAL
@@ -79,10 +79,13 @@ Get 只返回 `View(source, stopped, observedAt)`，没有伪造的 policy_revis
 明确非成员/无权限 forbidden，未知枚举、缺依赖或超时 unavailable。组织接口没有 revision，
 因此仍不能保证跨服务撤权零窗口。测试 org adapter 仅证明接口边界，不证明真实 org 联通。
 
-原回执、Revoke 和合资格的终态 Get 不依赖当前发行开关、org 可达性或已清理的原 ingress；
+只有已提交 Register 同 op 同体原回执和 Revoke 不依赖当前发行开关、org 可达性或已清理的原 ingress；
 必须核耐久来源/兑换锚点及原 node/device/session/account 关联，缺失或变主失败关闭。
-Get 允许同设备、同 backing-session 的真实连接重连，始终保留原 connection；
-终态在 chain/source 锁下单向观察，valid_until 为空。未知 op 不适用回执例外。
+所有 Get 均要求本次真实有效兑换连接、原 owner/device、仍有效的原 backing-session、完整登记、
+当前 org 权限及最终快照/政策版本重核；REVOKED/EXPIRED、链 stop 和 TTL 配置关闭都不能跳过。
+原身份失效或当前连接失效时 Get 拒绝且不回原事实，不适用回执的离线恢复例外。
+Get 允许同设备、同有效 backing-session 的真实新连接重连，始终保留原 connection；
+终态经上述门禁后由原内核在 chain/source 锁下单向观察，valid_until 为空。未知 op 不适用回执例外。
 
 部署必须显式设置可信启动参数，例如：
 
@@ -91,7 +94,8 @@ auriga.iam.network.source-max-seconds=30
 auriga.iam.network.source-decision-seconds=5
 ```
 
-任一缺失或为 0 关闭新建与在线 Get，保留原回执/终态查询/单向停权；不存在默认许可。
+任一缺失或为 0 关闭新建及 Get 的在线有效决定；合法终态 Get 仍须完整活体门禁且仅返回空期限，
+不为读取而伪造正的决定期限。原回执/单向停权保持上述离线恢复边界；不存在默认许可。
 仅在 Environment 启动时解析为包内不可变策略，无热更新；改配置须重启。
 负数、小数、非法或 long 溢出导致启动失败；decision 不得大于 300，两个值为正时 decision 不得超过 source。
 大 source 值不会延长真实身份期限，也不会使 Instant 加法溢出成为许可。

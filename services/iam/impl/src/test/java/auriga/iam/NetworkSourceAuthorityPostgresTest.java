@@ -244,12 +244,20 @@ class NetworkSourceAuthorityPostgresTest {
         });
   }
 
-  @Test
-  void committedReceiptStopAndTerminalSurviveLogoutCleanupAndDisabledSwitch() {
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"revoked", "expired"})
+  void committedReceiptAndStopSurviveLogoutCleanupButGetDoesNot(String state) {
     call(
         () -> {
           var r = request("first");
           var receipt = sources.register(r);
+          NetworkAgentSource terminal;
+          if (state.equals("revoked"))
+            terminal = sources.revoke(stop(receipt.getSource(), "first-stop")).getSource();
+          else {
+            clock.advance(31);
+            terminal = sources.get(getRequest(receipt.getSource())).getSource();
+          }
           clock.advance(3601);
           assertTrue(new NetworkIngressCleanup(store, clock).sweepOnce() > 0);
           mutate("session", sessionId, "revoked", true);
@@ -258,14 +266,13 @@ class NetworkSourceAuthorityPostgresTest {
           sources = authority(new IamNetworkSourceAuthority.Policy(0, 0));
           organization =
               req -> {
-                fail("receipt/terminal/stop must not call org");
+                fail(
+                    "receipt/stop must not call org; Get must reject the missing connection first");
                 return null;
               };
           assertEquals(receipt, sources.register(r));
-          var terminal = sources.get(getRequest(receipt.getSource()));
-          assertEquals(3, terminal.getSource().getStateValue());
-          assertEquals("", terminal.getValidUntil());
-          var revoke = stop(terminal.getSource(), "stop");
+          error("common.forbidden", () -> sources.get(getRequest(receipt.getSource())));
+          var revoke = stop(terminal, "stop");
           var stopped = sources.revoke(revoke);
           assertEquals(stopped, sources.revoke(revoke));
           assertEquals(receipt, sources.register(r));
@@ -281,6 +288,207 @@ class NetworkSourceAuthorityPostgresTest {
           error("common.forbidden", () -> sources.register(r));
           error("common.forbidden", () -> sources.get(getRequest(receipt.getSource())));
           error("common.forbidden", () -> sources.revoke(revoke));
+          return null;
+        });
+  }
+
+  NetworkAgentSource terminalSource(String state) {
+    var original = sources.register(request("terminal")).getSource();
+    if (state.equals("revoked")) return sources.revoke(stop(original, "terminal-stop")).getSource();
+    clock.advance(31);
+    return sources.get(getRequest(original)).getSource();
+  }
+
+  static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> terminalCases() {
+    return java.util.stream.Stream.of("revoked", "expired")
+        .flatMap(
+            state ->
+                java.util.stream.Stream.of(
+                        new long[] {30, 5},
+                        new long[] {0, 5},
+                        new long[] {30, 0},
+                        new long[] {0, 0})
+                    .flatMap(
+                        policy ->
+                            java.util.stream.Stream.of(
+                                    "session-revoked",
+                                    "idle",
+                                    "absolute",
+                                    "device",
+                                    "account",
+                                    "missing-ingress",
+                                    "expired-ingress",
+                                    "backing-session",
+                                    "org-disabled",
+                                    "org-permission",
+                                    "org-unknown")
+                                .map(
+                                    failure ->
+                                        org.junit.jupiter.params.provider.Arguments.of(
+                                            state, policy[0], policy[1], failure))));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.MethodSource("terminalCases")
+  void terminalGetStillRequiresCurrentAuthorityAndNeverLeaksSource(
+      String state, long maximum, long decision, String failure) {
+    var terminal = call(() -> terminalSource(state));
+    sources = authority(new IamNetworkSourceAuthority.Policy(maximum, decision));
+    switch (failure) {
+      case "session-revoked" -> mutate("session", sessionId, "revoked", true);
+      case "idle" -> mutate("session", sessionId, "idleExpiresAt", clock.instant().toString());
+      case "absolute" -> mutate("session", sessionId, "expiresAt", clock.instant().toString());
+      case "device" -> mutate("device", device, "revoked", true);
+      case "account" -> mutate("account", account.toString(), "status", "disabled");
+      case "missing-ingress" ->
+          tx(
+              () -> {
+                store.delete("network_ingress", connection.getIngress());
+                return null;
+              });
+      case "expired-ingress" ->
+          tx(
+              () -> {
+                var row = store.get("network_ingress", connection.getIngress(), true);
+                row.put("expiresAt", clock.instant().toString());
+                store.save("network_ingress", row);
+                return null;
+              });
+      case "backing-session" -> {
+        var replacement =
+            tx(
+                () -> {
+                  var session = store.byId("session", sessionId, false);
+                  return sessions.create(
+                      account,
+                      UUID.fromString(session.path("providerId").asString()),
+                      "portal",
+                      true,
+                      Duration.ofHours(2),
+                      Duration.ofHours(1));
+                });
+        mutate("device", device, "sessionId", replacement.session().path("sessionId").asString());
+      }
+      case "org-disabled" ->
+          organization = request -> allowed().toBuilder().setStatusValue(2).build();
+      case "org-permission" ->
+          organization = request -> allowed().toBuilder().clearPermissions().build();
+      default -> organization = request -> allowed().toBuilder().setStatusValue(999).build();
+    }
+    String expected = failure.equals("org-unknown") ? "common.unavailable" : "common.forbidden";
+    call(
+        () -> {
+          error(expected, () -> sources.get(getRequest(terminal)));
+          return null;
+        });
+    withRpc(
+        stub ->
+            TenantContext.run(
+                tenant,
+                () -> {
+                  var rejected =
+                      assertThrows(
+                          io.grpc.StatusRuntimeException.class,
+                          () -> stub.getAgentSource(getRequest(terminal)));
+                  assertEquals(
+                      failure.equals("org-unknown")
+                          ? io.grpc.Status.Code.UNAVAILABLE
+                          : io.grpc.Status.Code.PERMISSION_DENIED,
+                      rejected.getStatus().getCode());
+                  assertFalse(rejected.toString().contains(terminal.getSourceBinding()));
+                  assertFalse(rejected.toString().contains(account.toString()));
+                }));
+  }
+
+  static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> terminalPolicies() {
+    return java.util.stream.Stream.of("revoked", "expired")
+        .flatMap(
+            state ->
+                java.util.stream.Stream.of(
+                        new long[] {30, 5},
+                        new long[] {0, 5},
+                        new long[] {30, 0},
+                        new long[] {0, 0})
+                    .map(
+                        policy ->
+                            org.junit.jupiter.params.provider.Arguments.of(
+                                state, policy[0], policy[1])));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.MethodSource("terminalPolicies")
+  void legitimateTerminalGetAndReconnectCheckOrgEvenWithIssuanceDisabled(
+      String state, long maximum, long decision) {
+    call(
+        () -> {
+          var terminal = terminalSource(state);
+          sources = authority(new IamNetworkSourceAuthority.Policy(maximum, decision));
+          var checks = new java.util.concurrent.atomic.AtomicInteger();
+          organization =
+              request -> {
+                store.requireTransactionReleased();
+                checks.incrementAndGet();
+                return allowed();
+              };
+          var originalConnection = connection;
+          var original = sources.get(getRequest(terminal));
+          assertEquals(terminal, original.getSource());
+          assertEquals("", original.getValidUntil());
+          assertEquals(1, checks.get());
+          var next = authority.prepare(access, node.node(), "server-a");
+          var b = NetworkAuthorityTest.binding(next.ticket());
+          callers.as(
+              "svc:ai-gateway",
+              tenant,
+              () -> authority.redeem(next.ticket(), node.node(), device, "server-a", b));
+          connection =
+              connection.toBuilder()
+                  .setIngress(b.ingress())
+                  .setServerId(b.serverId())
+                  .setClientId(b.clientId())
+                  .setClientAccount(b.account())
+                  .build();
+          var reconnected = sources.get(getRequest(terminal));
+          assertEquals(originalConnection, reconnected.getSource().getOriginalConnection());
+          assertEquals(connection, reconnected.getConnection());
+          assertEquals("", reconnected.getValidUntil());
+          assertEquals(2, checks.get());
+          var badRegistration =
+              getRequest(terminal).toBuilder()
+                  .setRegistration(
+                      terminal.getRegistration().toBuilder().setRegistrationRevision(2))
+                  .build();
+          error("common.forbidden", () -> sources.get(badRegistration));
+          return null;
+        });
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.MethodSource("terminalPolicies")
+  void terminalGetMustRecheckFactsAndPolicyAfterOrg(String state, long maximum, long decision) {
+    call(
+        () -> {
+          var terminal = terminalSource(state);
+          sources = authority(new IamNetworkSourceAuthority.Policy(maximum, decision));
+          organization =
+              request -> {
+                store.requireTransactionReleased();
+                mutate("session", sessionId, "changedDuringOrg", true);
+                return allowed();
+              };
+          error("common.forbidden", () -> sources.get(getRequest(terminal)));
+          organization =
+              request -> {
+                store.requireTransactionReleased();
+                tx(
+                    () -> {
+                      store.lock("network-authority");
+                      new IamNetworkPolicyRevision(store).bump();
+                      return null;
+                    });
+                return allowed();
+              };
+          error("common.forbidden", () -> sources.get(getRequest(terminal)));
           return null;
         });
   }
