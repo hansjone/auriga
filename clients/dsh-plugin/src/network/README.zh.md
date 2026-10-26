@@ -1,5 +1,17 @@
 # N1 插件装配边界
 
+## 首次 READY 内部原语（尚未接线）
+
+`session/bootstrap-ready.js#bootstrapReady({registration,transport,trust,signal})` 仅供受信内部调用；plugin、lifecycle、provider 默认入口均未调用。它不接令牌、不发 register/tickets、不建/关闭 transport、不读写 ledger/host、不发 FETCH/RECEIPT/LOCAL_REGISTER/SEND，也不设置 session.ready 或 runtime.connected。现完整注入 provider 仍走已知 incarnation 的原严格 `session.start`；runtime 顺序、allports、consent 和 SEND 未改变。本原语的测试通过不表示生产首启或真实双 DSH 已通。
+
+调用方必须先经固定 IAM HTTPS register 校验本次 `{tenant,realm,node,device,created:true}`：tenant/device 等于当前真实设备 JWT，realm 等于受批准安装配置；transport 属于该设备新票建立的当前连接，trust 由安装根批准。helper 无法从这个普通对象证明来源，也不会从下行帧取得 created/tenant/device。信封没有 tenant/device，签名只直接证明 realm/node/incarnation/application epoch；tenant/device 的绑定依赖上述可信注册、票据和 transport 链。
+
+每个 transport 同时只允许一次尝试；本次随机生成 requestId/channel_nonce/boot_id，捕获 transport.epoch 与 trust.version，恢复 hint 固定为空初值。候选 incarnation/正 uint64 epoch 先只作未可信验签参数，完整原对象（含未知可选扩展）交原严格 verifier 验签，固定 protocol_response、有效根批准业务键、realm/node、requestId/nonce/audience；再核正式 READY_RESULT 必需字段、恢复字段及 required_features，且 node_identity 与签名 audience 一致。应用 epoch 由签名接受，与客户端连接 epoch 无关。仅 ready 返回深冻结 `{identity:{tenant,realm,node,nodeIncarnation},readyResult}`；其他状态/ERROR/非 READY 均失败。超时默认 5 秒，取消、连接代际变化、异常、成功均退出自己的消息/abort 监听；刷新后及返回前重核当前尝试。
+
+输出不赋业务权，也不是可持久保存或重复消费的初始化许可。后续首启接线须在同一单写者锁内，确认 ledger 缺失、本次 created 尚未消费且无写入未知，才可通过现有 `openLedger(...initialize:true)` 原子提交完整身份；完整落盘后才开放业务。若先获得 helper 结果再申请锁，锁内必须重查，只接受一致的已有完整账本，绝不覆盖。原 transport/trust 的交接或关闭也须单独评审。
+
+created=false 且缺 ledger、首次响应丢失、落盘前崩溃/写入未知、后来丢 ledger 始终失败关闭，沿现有真实重新登录取得新 device/new node 恢复；不能缓存 true、刷新旧设备或重用 helper 输出恢复首次资格。现有 ledger 的重连仍从账本取得已知 incarnation，不用 bootstrap 覆盖。
+
 2026-10-25 用户决定：同机隔离（含云端）整体推迟。`isolation.js` 是 runtime 与 HostPort adapter 共用的唯一隔离判定点，策略写在代码内，不读取工具参数、provider 配置或环境变量。local 与 managed 在登录、票据、信任根和真实宿主适配等条件满足后均可联网，无需先证明同机隔离。状态及 diagnostics 的 `isolation` 明确返回 `required:false / isolated:false / state:unisolated-development`；运行时首次启动记录一次“未隔离（开发阶段）”警告，重连不重复记录。
 
 恢复隔离门禁前，须完成 local/managed 的进程、凭据、ledger 和 IPC 隔离验收并接入可信能力探测，再修改这一个代码判定点。profile 目录只用于耐久状态分区，不作为隔离证明；host 的去重、真实 flush、登录鉴权、授权及验签要求仍有效。本项策略变更不补齐下述生产 provider/managed 设备凭据缺口，也不代表真实双 DSH 验收通过。
