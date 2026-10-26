@@ -7,6 +7,7 @@
 | `address.schema.json` | 结构化地址、按字段角色的子集（源/目的/node/会话/系统/组）、uint64 十进制串 |
 | `envelope.schema.json` | 业务消息 `Message`、来源盖章 `SourceContext`、`AuthorizationRef`、`ServerAuth`，以及 FETCH 页条目 `Delivery`/`TerminalItem`/`GapItem`/`ContactPromptItem`/`StateUpdateItem` |
 | `protocol.schema.json` | 私有应用帧：READY/READY_RESULT、HEAD、FETCH/FETCH_RESULT、RECEIPT/RECEIPT_COMMITTED、ATTEMPT_BEGIN/ATTEMPT_RESULT、EXECUTION_ADMIT/ADMIT_RESULT、CONTACT_DECIDE/DECIDE_RESULT、CONTACT_ASSIGN/ASSIGN_RESULT、LOCAL_REGISTER/REGISTER_RESULT、STATUS_QUERY/STATUS、ERROR |
+| `source-control.schema.json` | 由 protocol 的 Upstream/Downstream 引入的 SOURCE_REGISTER/GET/REVOKE 及各自 RESULT；native 见证搬运，见 §5.2 |
 | `send.schema.json` | 模型工具参数、插件→总部私有发送请求、发送结果 |
 | `errors.json` | `network.*` 错误码唯一定义（可重试、可见性、掩码、中英文案） |
 | `limits.json` | 协议硬上限 |
@@ -165,6 +166,123 @@ tenant/realm/node 只来自已认证 connection/NATS ingress，不来自应用�
 Go ingress/codec/router/MailboxClient 负责有界严格解析、可信 connection 传递及响应原字节转发；
 插件生产 provider 负责持久原操作接线、受众/用途/签名验收及原 op、fingerprint、address_type 对应核验。
 本次只生成契约，未挂服务实现的方法继续 UNIMPLEMENTED/拒绝；生成与二进制往返测试不证明 PG、鉴权、NATS 或双 DSH 链路已通。
+
+### 5.2 来源 native 见证搬运（契约已定义，实现待接线）
+
+这是专用可信插件控制路径，不是模型工具或用户逐来源审批入口。已有真实普通会话先完成耐久 LOCAL_REGISTER/本地绑定，
+插件在受信执行回调内实际调用 `createNativeSourceResolver`，核公开宿主对象、归属、未归档、普通 session、bound/open 映射，
+再产生见证。远程 Java 不调用 Node 函数，也不能把两份 JSON 相等当作已执行 resolver。
+控制路径不得接受模型传入的 native 对象、local、binding 或见证；确定性宿主回信也须真实受信上下文。
+本节没有增加本地会话选择/登记 UI、挑战、逐来源人工批准、登录或 SEND HTTP 路由。
+
+**通道和身份。** 六个新帧类型为 `source_register` / `source_register_result`、`source_get` / `source_get_result`、
+`source_revoke` / `source_revoke_result`；沿 LOCAL_REGISTER 的同一精确 NATS up/down subject，按 request_id 关联。
+网关只传完整 `frame_json` 与已认证 `NetworkMailboxConnection`；mailbox 的调用者仍仅 `svc:ai-gateway`，
+collab→IAM 三 RPC 仍仅 `svc:collab`，两跳的业务 tenant/受信传输/委托白名单完全不变。
+对应内部搬运方法为 `NetworkMailboxService.SourceRegister/SourceGet/SourceRevoke`；各自独立的
+`NetworkMailboxServiceSource{Register,Get,Revoke}Request` 仅 `NetworkMailboxConnection connection=1` 与 `bytes frame_json=2`，
+对应 Response 仅 `bytes frame_json=1`。每个方法只收本动作请求帧，回对应结果或既有 ERROR；不能跨方法路由，
+不能拆重算 native/typed-local/op 字段。原五个 mailbox 方法与所有 IAM proto 字段不变。
+不增加公网 path、header、subject、CONNECT 权限或 READY 必需 feature；未实现/未知帧拒绝，不降级成 SEND/LOCAL_REGISTER。
+每次重核持久 ingress、IAM CONNECT 当前授权、健康节点、严格 READY、server epoch、boot 与 connection 全七字段；
+tenant/realm/node 来自认证 ingress，禁止从 JSON/header 接收自报身份。新帧顶层不带 connection、tenant/realm/node。
+
+**公共字段与见证。** 完整生产者结构见 `source-control.schema.json`；所有列出的字段均必填，除明确的 null/空串外不得省略。
+ID、摘要、时间、uint64 字符串沿 §1，所有正版本用 P64，绝不经 JS number。字段级含义如下：
+
+- 每个请求 `app_version`=1.x、`type`=对应帧、`request_id`=本次传输关联 OpaqueId、`epoch`=当前服务端正世代、
+  `boot_id`=当前 READY 进程 ID。重连可换 request_id/epoch/boot，不得据此换业务操作或改保存的 IAM connection。
+- `registration` 含 `registration_id`（原登记 ID）、`allocation_op_id`（原分配 op）、`allocation_fingerprint`（原摘要）、
+  `registration_revision`（原登记正版本）、`local`（正 uint64）、`address_type`（固定 `session`）。
+  加入 ingress 权威 realm/node 后精确对应 IAM `NetworkAgentSourceRegistration` 全八字段。插件从已耐久保存并验签的
+  原登记/分配证据取六字段；collab 必须 lookup/lock 自己的完整原见证并逐项比较，实际 IAM 请求用库中八字段。
+  不能用 API projection、node 高水位、来源 revision 或 epoch 补 registration id/op/fingerprint/revision，也不能猜 type。
+- `native_witness.witness_id`=插件本次实际 resolver 成功后生成的单次 OpaqueId；
+  `binding_id`=插件本地不可变 opaque 映射 ID（不得使用原生 sessionId）；`binding_revision`=该映射的耐久单调正版本，
+  关闭、归档、解绑、换 provider/映射或停发须先推进本地 fence/版本，不能复用旧见证。
+  `observed_at`=完成真实核验的插件 UTC 整秒时间，`valid_until`=最多 observed_at+30 秒且不越过宿主/本地许可期限。
+  witness 本身不含 token、owner、cwd、原生 sessionId/树或正文；它经同帧 registration/epoch/boot 和真实 ingress 绑定。
+  collab 持久绑定 witness_id→完整见证、六字段、connection/epoch/boot 与操作，异体复用 conflict；这不是客户端自签证明。
+- 插件负责真实采集、可信时钟和每个异步边界后的对象/映射/代际复核；collab 在接收及最终 CAS 都检查
+  `observed_at <= now+60s`、`observed_at < valid_until <= observed_at+30s`、`now < valid_until`，
+  再按接收时刻+30s、本地许可和 IAM 期限夹紧。60 秒只容忍客户端快钟，不延长 valid_until。
+  未知时钟/缺 resolver/见证过期或本地版本改变均失败关闭；重试当前使用必须重新真实核验并产生新 witness_id。
+  宿主变化先本地停发并持久撤销 outbox，不能等待网络回包后才停用。远程观察有有界竞争窗口，不声称跨机零撤销窗口。
+
+**请求与响应。** 所有下行都带 `app_version/type/request_id/server_auth`；`purpose=protocol_response`，
+完整原对象签名绑定当前 realm/node/incarnation/epoch、READY channel_nonce 与本次 request_id。
+按 §4 先验签/用途/受众/期限再处理，网关原字节转发。重新封装历史业务回执时，只更新传输签名/关联，不改原业务结果。
+
+- `source_register`：`operation_id`=先持久再发的 Register 稳定 OpaqueId；`scope` 固定 `durable_unicast_send`；
+  `predecessor_binding` 首代为空串、`expected_revision`="0"，后继为原 EXPIRED head ID/正 CAS 版本；不能从非 head 分叉。
+  `mode=issue` 必带当前 `native_witness`；`mode=reconcile` 必为 null，仅查已保存操作，不产生 native 使用许可。
+  `registration/scope/predecessor_binding/expected_revision` 是该 op 的不可变客户端业务体；持久键为 (tenant, 方法, operation_id)，
+  认证 node/原归属固定关联该记录，换 node/归属不能借同 op 读取。
+  collab 首次 issue 将真实当前 IAM connection 及库中八字段固化成完整原 IAM 请求，记录摘要，之后不改。
+  request_id、当前 epoch/boot、mode 和新鲜 native_witness 是搬运/见证字段，不改变原 IAM 请求摘要。
+  同 op 异业务体 conflict；未持久操作的 reconcile 只回 outcome_unknown，不能按当前连接补造原请求或默默新建。
+  已提交 op 的 issue 重试也先读取原操作，不能先按现在的 CAS/过期判断后另建。未提交的新建仍须完整当前见证/权限检查。
+- `source_register_result.operation_id` 回原 op；`source` 为下述原创建事实，revision="1"、state="active"。
+  这是可能已经到期/撤销的历史原回执；不能直接激活、授 SEND、报 send_ready 或当作 Get 结果。
+  对账恢复 binding 后须当前 native 见证→Get→最终 CAS，签发前仍须第五 RPC。
+- `source_get`：`source_binding` 指精确代际，`registration` 是当前完整 typed-local 比对输入，`native_witness` 必须新鲜。
+  collab 用本次真实当前 connection 调 Get，不替换 IAM 的 original_connection；同 device/backing-session 重连按 IAM 规则。
+  Get 没有 mutation operation_id；每次是新在线观察，不从旧缓存/原回执产生当前 allow。
+- `source_get_result`：`source`=当前事实；`policy_revision`=IAM 当前正版本，`observed_at`=IAM 观察时间；
+  `valid_until`=collab 将 IAM 当前期限与上述 native/本地期限取最小，只有当前 active 且期限有效才为时间，否则 null；
+  `witness_id` 回显本次见证，插件须匹配原待决请求及当前本地 binding/revision/epoch/boot。
+  collab 还须比较 IAM connection 回显与当前精确元组，但不把内部兑换字段发给插件。
+- `source` 受限投影固定含 `source_binding`、`registration`（上述六字段）、`scope`、来源正 `revision`、
+  `state`（active/revoked/expired）、`not_before/expires_at`（IAM 不可变原时间窗，前者小于后者）、`predecessor_binding`。
+  不返回内部 owner/original_connection/device/backing-session。该 projection 只用于回执/本地比对，不是权威 native 输入。
+- `source_revoke`：`source_binding`=被点名的原代、`expected_revision`=该代正 CAS 版本、`operation_id`=独立稳定 Revoke op。
+  无 native_witness；停权不能因宿主已关闭而被阻止。插件先耐久停发，再发送；collab 用已保存的原连接/归属锚点撤销。
+  当前 mailbox 请求仍须有权且关联当前 READY；连接不可用时由已耐久的 collab 撤销 outbox 在后台继续，不能要求旧连接重上线。
+- `source_revoke_result` 仅 `operation_id/source_binding/revision/state/lineage_stopped` 加下行公共字段；
+  state 只可 revoked/expired，`lineage_stopped=true` 必须表示 IAM 已提交整个链停权（含撤销可能存在的 active 后继）。
+  expired 前代仍 expired；重放回原终态/revision，不假装刷新当前快照。仅本地停发/outbox 入队不能发此成功结果。
+
+**幂等、恢复和 collab 事务义务。** 插件在自己的同一耐久账本保存 op、不可变业务体、原 typed-local/映射版本、
+pending/停发版本，成功原回执及绑定也真提交后才可对外使用；未知落盘/回包保持 pending。
+每 node 最多一个在途来源控制请求（`limits.json#sourceControl`），并发的 local 排队，停发本地立即生效；
+持久队列有界并沿现有限流/公平预算，不得以换 local/op 绕过背压。
+
+collab 在同 tenant 短事务保存 pending/op、规范原 IAM 请求/摘要、完整 typed-local、native 见证、
+connection/epoch/boot、许可/停发版本、前代与 CAS 版本、动作 outbox。禁止持 DB 事务/行锁等 IAM。
+事务外 Register/Get，返回后短事务 lock/CAS 重核 pending/停发版本、健康、当前完整 connection/epoch/boot、
+typed-local 全八字段、native 有效期及已持久的宿主许可 fence，变动拒绝激活；再校回包完整元组/前代/新 binding 与原 op。
+跨服务 Get ACTIVE 只是观察，collab 逐次发件仍须当前来源见证和第五 RPC，最终短事务还锁业务关系/线程/recipient 版本。
+
+Register 结果未知只以原 op、保存的原 IAM 请求（包括旧 connection）对账；不得用新连接重写原请求或换 op 绕过。
+collab 从自己的持久 pending 找到原体，经 IAM 留存的真实原归属锚点核验取回完整原响应，即使原 transport 已失效；
+本节 reconcile 仍须当前有权 mailbox 身份且同 tenant/node，并核持久原操作归属，不能靠知道 op 跨归属读取。
+重连的当前 envelope 只运回原回执；collab 丢失 pending/锚点则失败关闭，不能下载 IAM 事实重建插件/本地登记。
+原 op 对账完成后，自然 EXPIRED 且链未停权才可另存新 op/前代 CAS，经新鲜全量检查申请独立新代；旧回执/旧期限永不改。
+
+撤销先短事务持久停发与 Revoke 原体/op/outbox，再事务外 IAM，最后短事务确认终态与保存原响应。
+迟到 Register/Get 无权重置停发；换连接、到期、换 op 都不得自动申请/激活后继。撤销未知只重放原 Revoke；
+新 op 对 stale CAS 不得盲增 revision，先对账/核权威当前事实；原归属已失效仍沿 IAM 受限停权路径。
+IAM 未确认只报待确认，继续本地停发；显式停权永久压过代际恢复。
+
+**大小与错误。** 六帧和 mailbox bytes 各自均受原始 UTF-8 ≤64KiB 及 §1 全部解析上限约束；单请求一 local/一 binding，
+不加批量/任意 native JSON。schema 只证明结构，时间比较、真实对象、精确连接、签名、op/CAS/库锁必须由实现执行。
+全部复用 `errors.json`，不新增错误码：结构/大小/未知 scope/type→`network.protocol_error`；
+自报或错归属/权限→`network.unauthorized`（不泄露 binding 是否存在）；错 epoch/boot→`network.stale_epoch`；
+缺 typed-local→`network.local_registration_required`；见证过期→`network.expired`；
+同 op/见证异体、typed-local 不符、版本 CAS→`network.conflict`；本地停发/链撤销→`network.revoked`；
+结果未知（含原 pending 缺失）→`network.outcome_unknown`；依赖不可用→`network.overloaded`。
+IAM 的 common.validation_failed/conflict/forbidden/unavailable 分别映射 protocol_error/conflict/unauthorized/overloaded；
+认证失败沿既有内部 gRPC 状态映射。ERROR 仍为原受签结构、request scope、原 request_id 和 catalog retryable；
+无法建立签名受众时用既有 gRPC 拒绝。outcome_unknown 不自动发新 op；overloaded 退避也只重放原 mutation。
+
+**生成与验收。** Go 沿 `cd infra; go run generate.go`；Java 沿根目录
+`./mvnw.cmd -B -pl services/contracts -am generate-sources`（生成至忽略的 target，不提交 Java 生成目录）。
+TS 使用已锁定的 json-schema-to-typescript：根目录 `node contracts/network/generate-source-control.mjs`，
+`node contracts/network/generate-source-control.mjs --check` 检查漂移。生成器沿插件既有方式仅展开所需跨文件引用并用项目 Prettier 格式化；
+TS 声明只表达结构，freshness/条件分支仍由 schema 及语义校验执行。连续重生比较字节/摘要检查漂移，Go 生成物和 TS 声明提交。
+新增 schema 正负矩阵命令 `node --test contracts/network/fixtures/source-control.test.mjs`；它不证明服务、PG、NATS 或宿主链已实现。
+后续插件须覆盖真实 resolver/耐久账本/代际 fence/签名与重连原 op；collab 须覆盖真实 PG outbox、原体对账、
+无锁远程调用与最终 CAS、停发压过迟到回包、过期前代撤销 active 后继及跨 tenant/归属负向。
 
 ## 6. 错误码与呈现
 

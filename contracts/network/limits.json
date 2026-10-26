@@ -61,5 +61,9 @@
   },
   "recovery": {
     "maxEvidencePerBatch": 128
+  },
+  "sourceControl": {
+    "maxNativeWitnessLifetimeSeconds": 30,
+    "maxInFlightPerNode": 1
   }
 }

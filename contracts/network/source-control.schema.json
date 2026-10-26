@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/source-control.schema.json",
+  "title": "Auriga 来源 native 控制帧 v1",
+  "description": "仅可信插件专用控制路径经既有 NATS mailbox 搬运；字段级语义见 README §5.2 与 iam-directory.md；不开放模型工具或新增公网 API。",
+  "$defs": {
+    "Id": {
+      "$ref": "envelope.schema.json#/$defs/OpaqueId"
+    },
+    "Time": {
+      "$ref": "envelope.schema.json#/$defs/Time"
+    },
+    "ServerAuth": {
+      "$ref": "envelope.schema.json#/$defs/ServerAuth"
+    },
+    "AppVersion": {
+      "$ref": "envelope.schema.json#/$defs/AppVersion"
+    },
+    "Digest": {
+      "$ref": "envelope.schema.json#/$defs/Digest"
+    },
+    "U64": {
+      "$ref": "address.schema.json#/$defs/Uint64"
+    },
+    "P64": {
+      "$ref": "address.schema.json#/$defs/PositiveUint64"
+    },
+    "EmptyOrId": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "$ref": "#/$defs/Id"
+        }
+      ]
+    },
+    "Scope": {
+      "const": "durable_unicast_send"
+    },
+    "Registration": {
+      "description": "原 typed-local 六字段；realm/node 仅从认证 ingress 补全为 IAM 八字段，不能由 API projection 编造。",
+      "type": "object",
+      "properties": {
+        "registration_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "allocation_op_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "allocation_fingerprint": {
+          "$ref": "#/$defs/Digest"
+        },
+        "registration_revision": {
+          "$ref": "#/$defs/P64"
+        },
+        "local": {
+          "$ref": "#/$defs/P64"
+        },
+        "address_type": {
+          "const": "session"
+        }
+      },
+      "required": [
+        "registration_id",
+        "allocation_op_id",
+        "allocation_fingerprint",
+        "registration_revision",
+        "local",
+        "address_type"
+      ],
+      "additionalProperties": false
+    },
+    "NativeWitness": {
+      "description": "可信插件实际调用 native resolver 后生成；绑定本帧 registration、epoch、boot 与真实当前连接。binding_id 不得为宿主 sessionId。语义及最多 30 秒 freshness 见 README §5.2。",
+      "type": "object",
+      "properties": {
+        "witness_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "binding_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "binding_revision": {
+          "$ref": "#/$defs/P64"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "witness_id",
+        "binding_id",
+        "binding_revision",
+        "observed_at",
+        "valid_until"
+      ],
+      "additionalProperties": false
+    },
+    "SourceFact": {
+      "description": "IAM 原事实的受限投影；不含 owner、原兑换连接、宿主标识或 SEND 许可。mutation 为历史回执，只有 Get 为当前观察。",
+      "type": "object",
+      "properties": {
+        "source_binding": {
+          "$ref": "#/$defs/Id"
+        },
+        "registration": {
+          "$ref": "#/$defs/Registration"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "revision": {
+          "$ref": "#/$defs/P64"
+        },
+        "state": {
+          "enum": ["active", "revoked", "expired"]
+        },
+        "not_before": {
+          "$ref": "#/$defs/Time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "predecessor_binding": {
+          "$ref": "#/$defs/EmptyOrId"
+        }
+      },
+      "required": [
+        "source_binding",
+        "registration",
+        "scope",
+        "revision",
+        "state",
+        "not_before",
+        "expires_at",
+        "predecessor_binding"
+      ],
+      "additionalProperties": false
+    },
+    "SourceRegister": {
+      "description": "issue 要求当前见证；reconcile 只读取 collab 已持久原操作，不新建/改写 IAM 请求。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "source_register"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mode": {
+          "enum": ["issue", "reconcile"]
+        },
+        "registration": {
+          "$ref": "#/$defs/Registration"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/U64"
+        },
+        "predecessor_binding": {
+          "$ref": "#/$defs/EmptyOrId"
+        },
+        "native_witness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeWitness"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "operation_id",
+        "mode",
+        "registration",
+        "scope",
+        "expected_revision",
+        "predecessor_binding",
+        "native_witness"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "issue"
+              }
+            },
+            "required": ["mode"],
+            "type": "object"
+          },
+          "then": {
+            "properties": {
+              "native_witness": {
+                "$ref": "#/$defs/NativeWitness"
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "properties": {
+              "native_witness": {
+                "type": "null"
+              }
+            },
+            "type": "object"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "predecessor_binding": {
+                "const": ""
+              }
+            },
+            "required": ["predecessor_binding"],
+            "type": "object"
+          },
+          "then": {
+            "properties": {
+              "expected_revision": {
+                "const": "0"
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "properties": {
+              "expected_revision": {
+                "$ref": "#/$defs/P64"
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "SourceRegisterResult": {
+      "description": "仅原创建回执；不得激活或声明 send_ready。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "source_register_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceFact"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "server_auth",
+        "operation_id",
+        "source"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "source": {
+              "properties": {
+                "revision": {
+                  "const": "1"
+                },
+                "state": {
+                  "const": "active"
+                }
+              },
+              "required": ["revision", "state"],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "SourceGet": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "source_get"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_binding": {
+          "$ref": "#/$defs/Id"
+        },
+        "registration": {
+          "$ref": "#/$defs/Registration"
+        },
+        "native_witness": {
+          "$ref": "#/$defs/NativeWitness"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "source_binding",
+        "registration",
+        "native_witness"
+      ],
+      "additionalProperties": false
+    },
+    "SourceGetResult": {
+      "description": "当前观察，非 allow 租约。valid_until 由 collab 夹紧 IAM/见证/本地期限；终态为 null。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "source_get_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        },
+        "source": {
+          "$ref": "#/$defs/SourceFact"
+        },
+        "policy_revision": {
+          "$ref": "#/$defs/P64"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "witness_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "server_auth",
+        "source",
+        "policy_revision",
+        "observed_at",
+        "valid_until",
+        "witness_id"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "state": {
+                    "const": "active"
+                  }
+                },
+                "required": ["state"],
+                "type": "object"
+              }
+            },
+            "required": ["source"],
+            "type": "object"
+          },
+          "then": {
+            "properties": {
+              "valid_until": {
+                "$ref": "#/$defs/Time"
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "properties": {
+              "valid_until": {
+                "type": "null"
+              }
+            },
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "SourceRevoke": {
+      "description": "先本地持久停发；无需 native 见证。collab 用原归属锚点及保存的原连接撤销，失效原身份不妨碍既有 outbox。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "source_revoke"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_binding": {
+          "$ref": "#/$defs/Id"
+        },
+        "expected_revision": {
+          "$ref": "#/$defs/P64"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "source_binding",
+        "expected_revision",
+        "operation_id"
+      ],
+      "additionalProperties": false
+    },
+    "SourceRevokeResult": {
+      "description": "IAM 已提交终态原回执和许可链停权确认；不是本地 outbox 入队成功。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "source_revoke_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_binding": {
+          "$ref": "#/$defs/Id"
+        },
+        "revision": {
+          "$ref": "#/$defs/P64"
+        },
+        "state": {
+          "enum": ["revoked", "expired"]
+        },
+        "lineage_stopped": {
+          "const": true
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "server_auth",
+        "operation_id",
+        "source_binding",
+        "revision",
+        "state",
+        "lineage_stopped"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SourceRegister"
+    },
+    {
+      "$ref": "#/$defs/SourceRegisterResult"
+    },
+    {
+      "$ref": "#/$defs/SourceGet"
+    },
+    {
+      "$ref": "#/$defs/SourceGetResult"
+    },
+    {
+      "$ref": "#/$defs/SourceRevoke"
+    },
+    {
+      "$ref": "#/$defs/SourceRevokeResult"
+    }
+  ]
+}

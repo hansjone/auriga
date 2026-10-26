@@ -255,6 +255,39 @@ collab 独占 typed-local 见证、不可变 type 与业务关系，注册/使�
 
 callout只负责CONNECT身份及subject边界；**每条应用操作**依然由adapter→collab核网络授权所关联的当前 IAM 会话/设备状态、node 策略、tenant、完整地址的对话关系与 epoch；会话 binding/grant 在源和目标插件核验，禁止把ACL当每操作IAM。网络ticket/subject不能让模型指定session，`exec.agent.session.id`等仍来自可信宿主；外部通过网络收到的他人消息也不获得本地工具能力。
 
+### 2.1.1 来源 native 控制搬运（契约，未实施）
+
+插件在已有真实普通会话完成耐久 typed-local 登记/绑定后，从可信执行上下文实际调用 native resolver；
+不接收模型参数选择 local/binding，不新增逐来源人工批准、挑战或登录。远程 collab 不直接调用 Node helper，
+只在现有 LOCAL_REGISTER 的 NATS up/down mailbox 通道搬运三对新帧：
+`source_register/source_register_result`、`source_get/source_get_result`、`source_revoke/source_revoke_result`。
+不新增公网路径、header、subject 或服务白名单；入口仍是 svc:ai-gateway→collab，权威仍是 svc:collab→IAM。
+
+字段级规范及 schema 以 [`contracts/network/README §5.2`](../../../contracts/network/README.md#52-来源-native-见证搬运契约已定义实现待接线)
+和 [`source-control.schema.json`](../../../contracts/network/source-control.schema.json) 为唯一 wire 定义。
+请求公共 app_version/type/request_id/epoch/boot_id 关联当前认证 ingress/READY；registration 六字段为
+原 registration_id/allocation_op_id/allocation_fingerprint/registration_revision/local/address_type=session，
+加权威 ingress realm/node 后与 collab 库内八字段逐项 lock 比对，不由 API projection 补造。
+native_witness 的 witness_id/binding_id/binding_revision/observed_at/valid_until 绑定真实本地映射和该次观察，
+最多 30 秒；opaque binding_id 不得为宿主 sessionId，不上传 cwd/树/正文/凭据。插件每个异步边界重核，
+collab 接收及最终 CAS 重核有效期、健康/连接/epoch/boot、typed-local 与已持久的许可/停发 fence。
+
+Register 的稳定 operation_id 与 registration/scope/前代/CAS 先耐久保存；issue 带新鲜见证，
+reconcile 只以 null 见证读取已存原操作；collab 固化完整 IAM 原请求后，即使重连也用旧 connection 原体对账。
+未知结果不能换 op/改原体；新 envelope 只重新签运原回执，不刷新回执事实。自然 EXPIRED head 未停权，
+对账后才能另存新 op/前代版本，在全量新鲜核验后 CAS 新有界代际；停发/显式撤销禁止自动替代。
+Get 必须新鲜见证/当前连接，回当前 source、policy_revision、observed_at、夹紧 valid_until 和 witness_id；
+active Register 原回执不激活来源，Get active 也不授 SEND。source 投影只含 binding/登记/scope/revision/state/原时间窗/前代，
+不回内部 owner/兑换连接。所有结果都是 purpose=protocol_response 的完整受签下行，绑定当前受众、nonce、request_id。
+
+Revoke 无 native 见证，先本地和 collab 耐久停发/outbox，再事务外调 IAM，最终短事务记录终态；
+result 的原 op/binding/revision/state 与 lineage_stopped=true 仅表示 IAM 已提交链停权，expired 前代不复活、active 后继一并停权。
+掉线时已存 collab outbox 可用原归属锚点继续，未确认只报待确认。迟到 Register/Get 不能压过停发。
+pending/op/原 IAM 请求摘要/完整见证/连接及许可版本/outbox 均在短事务耐久保存，远程 IAM 一律事务外，
+最终短事务 CAS 再核健康、epoch/boot、typed-local 和停发/许可版本；签发前仍须第五 RPC 与业务关系/recipient 版本重核。
+这不保证跨服务零撤销窗口。每帧 ≤64KiB、全部原 JSON 上限、每 node 一个在途来源请求；
+只复用现有 network 错误 catalog，不把结构测试、类型生成当真实宿主/PG/NATS/SEND 闭环实证。
+
 ### 2.2 精确 subject 隔离
 
 网关精确命名 `auriga.net.up.<shard>.<ingress>` 与 `auriga.net.down.<ingress>`，其中 ingress 为服务端随机不透明值。shard 是 `abcdefghijklmnopqrstuvwxyz234567[SHA256(ASCII(ingress))[0] & 31]` 的单个字符，仅作 32 桶路由提示，不授身份；网关同时校验 shard 与 ingress 的对应关系。IAM tickets 响应的 `upSubject`/`downSubject` 必须返回相同的完整 subject，客户端直接采用服务端返回值，不自行删改 shard；旧无 shard 的 up 不接受。默认 Node 只可 PUB 自己 up、SUB 自己 down；经下述验证后才允许私有 reply 前缀订阅，不允许 DSH 直发其他 DSH。Broker 不按逻辑会话造 consumer；网关按已认证连接建立精确 up 订阅，并分别限制 pending，单节点灌包不占用其他 ingress 的待收队列。完整不透明地址/thread 在信封中，collab 核节点与对话关系，DSH 才解析 local 映射。

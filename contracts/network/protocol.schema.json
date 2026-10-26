@@ -1999,6 +1999,15 @@
         },
         {
           "$ref": "#/$defs/StatusQuery"
+        },
+        {
+          "$ref": "#/$defs/SourceRegister"
+        },
+        {
+          "$ref": "#/$defs/SourceGet"
+        },
+        {
+          "$ref": "#/$defs/SourceRevoke"
         }
       ]
     },
@@ -2036,8 +2045,35 @@
         },
         {
           "$ref": "#/$defs/Error"
+        },
+        {
+          "$ref": "#/$defs/SourceRegisterResult"
+        },
+        {
+          "$ref": "#/$defs/SourceGetResult"
+        },
+        {
+          "$ref": "#/$defs/SourceRevokeResult"
         }
       ]
+    },
+    "SourceRegister": {
+      "$ref": "source-control.schema.json#/$defs/SourceRegister"
+    },
+    "SourceRegisterResult": {
+      "$ref": "source-control.schema.json#/$defs/SourceRegisterResult"
+    },
+    "SourceGet": {
+      "$ref": "source-control.schema.json#/$defs/SourceGet"
+    },
+    "SourceGetResult": {
+      "$ref": "source-control.schema.json#/$defs/SourceGetResult"
+    },
+    "SourceRevoke": {
+      "$ref": "source-control.schema.json#/$defs/SourceRevoke"
+    },
+    "SourceRevokeResult": {
+      "$ref": "source-control.schema.json#/$defs/SourceRevokeResult"
     }
   },
   "anyOf": [

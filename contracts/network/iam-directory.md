@@ -54,6 +54,42 @@
 
 ### 消息、字段和不可变元组
 
+#### native 控制搬运与本节义务的对应
+
+远程 collab 取得真实插件见证的唯一新增 wire 是
+[`README §5.2`](README.md#52-来源-native-见证搬运契约已定义实现待接线) 与
+[`source-control.schema.json`](source-control.schema.json)，沿已有 LOCAL_REGISTER mailbox 帧通道。
+它是对本节 native 前置的搬运细化，不给 IAM 增加 RPC、native JSON、用户入口或服务调用者。
+以下对应均为强制条件：
+
+- 本节“实际 native resolver”：插件在真实受信执行上下文调用；wire `native_witness` 五字段为
+  witness_id、opaque binding_id、耐久 binding_revision、observed_at、valid_until；当前帧 epoch/boot、
+  registration 和认证 ingress 共同绑定该观察，最多 30 秒，细则见 §5.2。collab 只见受信插件声明，
+  仍不证明 IAM 独立见证宿主；不向 IAM 转发原生 ID/cwd/对象，不把 native 摘要当认证材料。
+- 本节“八字段 lookup/lock”：wire registration 六字段（原 ID/op/fingerprint/revision/local/type）
+  与 ingress 权威 realm/node 合成，逐项比对 collab 的完整持久见证；IAM 请求只用实际库中八字段。
+  native binding_revision、来源 revision、node registration_revision 与 typed-local 原版本含义各自独立。
+- 本节“先查原 op”：source_register.operation_id 对应 IAM Register.operation_id；首次 issue 冻结
+  当前精确 connection 与库中登记、scope、前代/CAS 成为完整 IAM 原体。重连 mode=reconcile 时仅从
+  collab pending 取旧体，不能把新 envelope 的 connection 改进旧体；null native_witness 只允许这个无授权回执读取。
+  标准 mailbox 当前鉴权和持久原操作归属核验仍在；IAM 留存锚点规则完全不变。
+  无已存 pending/原体不能凭 op 补建，不适用 IAM 已提交回执例外，返回 outcome_unknown 并停用。
+- 本节“Get 当前来源”：source_get 必须重新真实 native 核验，以当前连接调用 IAM，严格校 connection 回显；
+  source_get_result 的 witness_id 与有效期绑定这一次观察，期限再夹紧 native/本地许可，非 active 为 null。
+  source_register_result 的 active/revision=1 仍仅历史原创建回执；不能因为外层新签名而变成当前 Get。
+- 本节“pending/outbox 与最终 CAS”：collab 持久完整 IAM 原体/摘要、见证、连接/boot/epoch、typed-local、
+  停发版本、许可 fence、前代与预期版本；事务外 IAM，最终短事务 lock/CAS 重核所有这些事实。
+  超过见证期限、断线/换代、typed-local/许可改变、停发或旧代回包均不得激活。重新观察不用改旧 mutation 原体。
+- 本节“停发与撤销”：source_revoke 不要求仍能打开宿主，先本地/服务端耐久停发并保存原 op/原请求 outbox；
+  当前 mailbox 不可用时既有服务 outbox 用原归属锚点继续停权，不能要求旧 transport 在线。
+  source_revoke_result 的 lineage_stopped=true 仅在 IAM 原终态回执已提交后发出；命名 expired 前代也停 active 后继。
+  未确认继续停发，只能重放原 Revoke op/原体；不知道结果不得换 op/预计版本越过原操作。
+- 本节“第五 RPC”：所有 source wire 成功都没有 allowed、消息/线程/目标权、人工审批或 SEND 许可。
+  来源映射与签前第五 RPC 保持下节定义，目标 connection 语义不变；后续最终业务版本重核不能省略。
+
+mailbox 出口仅映射现有 network catalog，IAM 保持下面原有 common 错误语义；对应关系见 README §5.2。
+响应给插件只投影 source 的 opaque 事实，不输出 IAM owner/原兑换连接；collab 内部保存的完整 IAM 原响应不得因此裁剪。
+
 - `NetworkAgentSourceRegistration` 的八字段全部必填：`registration_id`、`allocation_op_id`、
   `allocation_fingerprint`、`registration_revision`、`realm`、`node`、`local`、`address_type`。
   前三项分别是原 local 登记编号/原分配操作/原不可变指纹；revision 是该 typed-local 登记见证版本，
