@@ -46,7 +46,7 @@ import { assertNetworkIsolation } from '../isolation.js';
  * @typedef {{
  *   admit(input: { recipientId: string, targetAddress: Address, assignedAddress: Address|null, connectionEpoch: string, hostRequestId: string, attemptId: string, bootId: string }): Promise<{ status: 'admitted', admissionId: string }|{ status: 'denied', code?: string }>,
  *   queryAdmission?(input: { recipientId: string }): Promise<{ status: 'none' }|{ status: 'admitted', admissionId: string }>,
- *   registerLocal(entry: import('./ledger.js').LocalRegistration): Promise<{ status: 'registered', registrationId: string }|{ status: 'conflict' }>,
+ *   registerLocal(entry: import('./ledger.js').LocalRegistration): Promise<import('./ledger.js').RegistrationResult>,
  *   assignContact(input: { contactId: string, recipientId: string, assignedAddress: Address, creationAttemptId: string }): Promise<{ status: 'assigned', creationPermit: boolean }|{ status: 'denied' }>,
  * }} NetworkPort
  *
@@ -102,6 +102,25 @@ const SCAN_REASONS = new Set([
   'lifecycle_closed',
   'lifecycle_deleted',
 ]);
+
+/** Header already read through the trusted host port; never infer from lineage.
+ * @param {{id:string,cwd:string,origin?:string}} session @param {string} id
+ * @returns {'session'|'subagent'} */
+function sessionType(session, id) {
+  if (
+    !session ||
+    typeof session !== 'object' ||
+    Array.isArray(session) ||
+    session.id !== id ||
+    typeof session.cwd !== 'string' ||
+    !session.cwd ||
+    session.cwd.includes('\0')
+  )
+    throw new HostSeamError(CODES.hostIncompatible, 'invalid host header');
+  if (!('origin' in session)) return 'session';
+  if (session.origin === 'subagent') return 'subagent';
+  throw new HostSeamError(CODES.hostIncompatible, 'unknown host origin');
+}
 
 /**
  * @param {{
@@ -656,6 +675,11 @@ export function createHostAdapter({
       const b = ledger.peek().bindings[local];
       if (!b || b.state !== 'bound')
         return { ok: false, code: CODES.sessionNotReady };
+      if (
+        ledger.peek().identityConflict ||
+        ledger.peek().locals[local]?.addressType !== b.kind
+      )
+        return { ok: false, code: CODES.recoveryConflict };
       let session;
       try {
         session = await host.getSession(b.hostSessionId);
@@ -664,8 +688,15 @@ export function createHostAdapter({
       }
       if (!session || session.cwd !== b.cwd)
         return { ok: false, code: CODES.sessionNotReady };
-      if (session.origin === 'subagent')
+      try {
+        if (
+          sessionType(session, b.hostSessionId) !== b.kind ||
+          b.kind === 'subagent'
+        )
+          return { ok: false, code: CODES.hostIncompatible };
+      } catch {
         return { ok: false, code: CODES.hostIncompatible };
+      }
       return { ok: true, binding: structuredClone(b) };
     });
   }
@@ -960,7 +991,7 @@ export function createHostAdapter({
 
   /**
    * Bind an already existing host session to a newly registered local.
-   * Reserve → LOCAL_REGISTER → verify host session → bind. Retrying with the
+   * Verify host session → reserve → LOCAL_REGISTER → bind. Retrying with the
    * same opId resumes the same local; it never creates a host session.
    * @param {{ opId: string, hostSessionId: string, cwd: string, receiveMode?: Binding['receiveMode'], kind?: Binding['kind'], executeMode?: 'prompt'|'inbox_only' }} input
    */
@@ -969,7 +1000,7 @@ export function createHostAdapter({
     hostSessionId,
     cwd,
     receiveMode = 'replies_only',
-    kind = 'session',
+    kind,
     executeMode = 'inbox_only',
   }) {
     if (!opId || !hostSessionId || !cwd)
@@ -982,16 +1013,30 @@ export function createHostAdapter({
     const session = await host.getSession(hostSessionId);
     if (!session || session.cwd !== cwd)
       throw new HostSeamError(CODES.sessionNotReady, 'host session missing');
+    const addressType = sessionType(session, hostSessionId);
+    if (kind !== undefined && kind !== addressType)
+      throw new HostSeamError(CODES.hostIncompatible, 'host kind mismatch');
     const entry = await allocator.allocate({
       opId,
+      addressType,
       purpose: 'bind_existing',
       mappingDigest: digestOf({
         hostSessionId,
         cwd,
-        kind: session.origin === 'subagent' ? 'subagent' : kind,
+        kind: addressType,
       }),
     });
     return locks.run(`binding:${entry.local}`, async () => {
+      const currentHost = await host.getSession(hostSessionId);
+      if (
+        !currentHost ||
+        currentHost.cwd !== cwd ||
+        sessionType(currentHost, hostSessionId) !== addressType
+      )
+        throw new HostSeamError(
+          CODES.hostIncompatible,
+          'host category changed',
+        );
       if (ledger.peek().bindings[entry.local]?.state === 'bound')
         return entry.local;
       await ledger.update((draft) => {
@@ -1001,7 +1046,7 @@ export function createHostAdapter({
           hostSessionId,
           cwd,
           preset: null,
-          kind: session.origin === 'subagent' ? 'subagent' : kind,
+          kind: addressType,
           state: 'bound',
           lifecycle: 'open',
           receiveMode,
@@ -1032,6 +1077,9 @@ export function createHostAdapter({
     receiveMode = 'replies_only',
     executeMode = 'inbox_only',
   }) {
+    ledger.assertAvailable();
+    if (ledger.peek().identityConflict)
+      throw new HostSeamError(CODES.recoveryConflict);
     if (!cwd)
       throw new HostSeamError(CODES.protocolError, 'explicit cwd required');
     return locks.run(`contact:${contactId}`, async () => {
@@ -1060,6 +1108,7 @@ export function createHostAdapter({
         const entry = await allocator.allocate({
           opId: `contact:${contactId}`,
           purpose: 'contact',
+          addressType: 'session',
           mappingDigest: digestOf({
             hostSessionId: c.hostSessionId,
             cwd: c.cwd,
@@ -1156,7 +1205,17 @@ export function createHostAdapter({
     } catch {
       return;
     }
-    const ok = !!session && session.cwd === c.cwd;
+    let ok = false;
+    try {
+      ok =
+        !!session &&
+        session.cwd === c.cwd &&
+        sessionType(session, /** @type {string} */ (c.hostSessionId)) ===
+          'session' &&
+        ledger.peek().locals[local]?.addressType === 'session';
+    } catch {
+      // A created host with a different category cannot upgrade this intent.
+    }
     await ledger.update((draft) => {
       draft.contacts[contactId].state = ok ? 'session_ready' : 'unknown';
       draft.bindings[local].state = ok ? 'bound' : 'unknown';

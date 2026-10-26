@@ -10,6 +10,113 @@ import { SessionError } from './errors.js';
 
 const enc = new TextEncoder();
 
+/** @param {unknown} value @param {boolean} [positive] */
+function uint64(value, positive = false) {
+  return (
+    typeof value === 'string' &&
+    /^(0|[1-9][0-9]{0,19})$/.test(value) &&
+    BigInt(value) <= 18446744073709551615n &&
+    (!positive || value !== '0')
+  );
+}
+/** @param {unknown} value */
+function id(value) {
+  return (
+    typeof value === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+  );
+}
+/** @param {any} entry */
+function assertPendingRegistration(entry) {
+  if (
+    !entry ||
+    !uint64(entry.candidate_local, true) ||
+    !id(entry.allocation_op_id) ||
+    typeof entry.allocation_fingerprint !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(entry.allocation_fingerprint) ||
+    !['session', 'subagent'].includes(entry.address_type)
+  )
+    throw new SessionError(
+      'network.protocol_error',
+      'invalid typed local registration',
+    );
+}
+
+/** Pure formal LOCAL_REGISTER construction; the production provider owns sending.
+ * @param {{requestId:string,epoch:string,bootId:string,candidate_local:string,allocation_op_id:string,allocation_fingerprint:string,address_type:'session'|'subagent',expected_registration_revision:string}} input */
+export function encodeLocalRegister(input) {
+  assertPendingRegistration(input);
+  if (
+    !id(input.requestId) ||
+    !id(input.bootId) ||
+    !uint64(input.epoch, true) ||
+    !uint64(input.expected_registration_revision)
+  )
+    throw new SessionError(
+      'network.protocol_error',
+      'invalid registration context',
+    );
+  return encodeJson({
+    app_version: APP_VERSION,
+    type: 'local_register',
+    request_id: input.requestId,
+    epoch: input.epoch,
+    boot_id: input.bootId,
+    candidate_local: input.candidate_local,
+    allocation_op_id: input.allocation_op_id,
+    allocation_fingerprint: input.allocation_fingerprint,
+    address_type: input.address_type,
+    expected_registration_revision: input.expected_registration_revision,
+  });
+}
+
+/** Call only after server authentication. RegisterResult has no fingerprint echo:
+ * the request's original fingerprint stays bound by its correlated request_id.
+ * @param {any} result @param {any} input */
+export function assertRegisterResult(result, input) {
+  assertPendingRegistration(input);
+  if (!uint64(input.expected_registration_revision))
+    throw new SessionError(
+      'network.protocol_error',
+      'invalid original registration revision',
+    );
+  if (
+    result?.app_version !== APP_VERSION ||
+    result.type !== 'register_result' ||
+    result.request_id !== input.request_id ||
+    result.local !== input.candidate_local ||
+    result.allocation_op_id !== input.allocation_op_id ||
+    result.address_type !== input.address_type ||
+    !id(result.registration_id) ||
+    !['registered', 'existing'].includes(result.result) ||
+    !uint64(result.registration_revision, true) ||
+    BigInt(result.registration_revision) !==
+      BigInt(input.expected_registration_revision) + 1n ||
+    !uint64(result.local_high_water, true) ||
+    BigInt(result.local_high_water) < BigInt(result.local) ||
+    Object.keys(result).some(
+      (key) =>
+        ![
+          'app_version',
+          'type',
+          'request_id',
+          'local',
+          'allocation_op_id',
+          'address_type',
+          'registration_id',
+          'result',
+          'registration_revision',
+          'local_high_water',
+          'server_auth',
+        ].includes(key),
+    )
+  )
+    throw new SessionError(
+      'network.protocol_error',
+      'registration response mismatch',
+    );
+}
+
 /** @param {unknown} value */
 export function encodeJson(value) {
   const bytes = enc.encode(JSON.stringify(value));
@@ -43,13 +150,18 @@ export function decodeJson(bytes) {
  *   localHighWater: string,
  *   registrationRevision: string,
  *   receiptCheckpoint: {checkpoint_seq:string,checkpoint_revision:string,summary_digest:string},
- *   pendingRegistration?: {candidate_local:string,allocation_op_id:string,allocation_fingerprint:string}|null,
+ *   pendingRegistration?: {candidate_local:string,allocation_op_id:string,allocation_fingerprint:string,address_type:'session'|'subagent'}|null,
  *   adapterCapabilities?: string[],
  *   bootId?: string,
  *   keysetVersion?: string,
  * }} input
  */
 export function encodeReady(input) {
+  if (
+    input.pendingRegistration !== undefined &&
+    input.pendingRegistration !== null
+  )
+    assertPendingRegistration(input.pendingRegistration);
   return encodeJson({
     app_version: APP_VERSION,
     type: 'ready',

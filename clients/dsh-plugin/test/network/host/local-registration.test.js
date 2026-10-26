@@ -19,6 +19,7 @@ import { IDENTITY, createFixturePlatform, createWorld } from './fixtures.js';
 const input = (opId) => ({
   opId,
   purpose: 'test',
+  addressType: 'session',
   mappingDigest: `mapping:${opId}`,
 });
 const deferred = () => {

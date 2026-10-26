@@ -781,9 +781,13 @@ export async function openNetworkRuntime(options) {
             active();
             if (expectedEpoch !== connectionEpoch) return;
             const snapshot = ledger.read();
-            const pending = snapshot.locals[snapshot.localQueue[0]];
+            if (snapshot.identityConflict)
+              throw new Error('local recovery conflict');
+            const pending =
+              snapshot.locals[snapshot.registrations[snapshot.localQueue[0]]];
             await session.start({
               localHighWater: snapshot.localHighWater,
+              registrationRevision: snapshot.registrationRevision ?? '0',
               receiptCheckpoint: {
                 checkpoint_seq: session.resumeCursor,
                 checkpoint_revision: String(snapshot.revision),
@@ -794,6 +798,7 @@ export async function openNetworkRuntime(options) {
                     candidate_local: pending.local,
                     allocation_op_id: pending.opId,
                     allocation_fingerprint: 'sha256:' + pending.fingerprint,
+                    address_type: pending.addressType,
                   }
                 : null,
             });

@@ -22,6 +22,8 @@ export function createLocalAllocator({ ledger, registerLocal }) {
 
   async function recoverHead() {
     ledger.assertAvailable();
+    if (ledger.peek().identityConflict)
+      throw new HostSeamError(CODES.recoveryConflict);
     const head = ledger.peek().localQueue[0];
     if (head !== undefined)
       await registerReservedLocal(ledger, head, registerLocal);
@@ -32,9 +34,21 @@ export function createLocalAllocator({ ledger, registerLocal }) {
     recover() {
       return nodeQueue.run('allocate', recoverHead);
     },
-    /** @param {{ opId: string, purpose: string, mappingDigest: string }} input */
+    /** @param {{ opId: string, purpose: string, mappingDigest: string, addressType: 'session'|'subagent' }} input */
     allocate(input) {
       return nodeQueue.run('allocate', async () => {
+        const existing =
+          ledger.peek().locals[ledger.peek().registrations[input.opId]];
+        if (
+          existing &&
+          (existing.addressType !== input.addressType ||
+            existing.mappingDigest !== input.mappingDigest ||
+            existing.purpose !== input.purpose)
+        )
+          throw new HostSeamError(
+            CODES.localAllocationConflict,
+            'allocation intent changed',
+          );
         await recoverHead();
         await reserveLocal(ledger, input);
         return registerReservedLocal(ledger, input.opId, registerLocal);
@@ -56,7 +70,9 @@ export function createLocalAllocator({ ledger, registerLocal }) {
         binding.lifecycle !== 'open'
       )
         throw new HostSeamError(CODES.targetUnavailable);
-      return makeAddress(ledger.identity, local, binding.kind);
+      if (reg.addressType !== binding.kind)
+        throw new HostSeamError(CODES.recoveryConflict);
+      return makeAddress(ledger.identity, local, reg.addressType);
     },
   };
 }

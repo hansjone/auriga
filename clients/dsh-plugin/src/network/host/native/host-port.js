@@ -18,16 +18,19 @@ function validId(id) {
 function validHeader(header, id) {
   if (
     !header ||
+    typeof header !== 'object' ||
+    Array.isArray(header) ||
     header.id !== id ||
     typeof header.cwd !== 'string' ||
     !header.cwd ||
-    header.cwd.includes('\0')
+    header.cwd.includes('\0') ||
+    ('origin' in header && header.origin !== 'subagent')
   )
     throw incompatible();
   return {
     id,
     cwd: header.cwd,
-    ...(header.origin ? { origin: header.origin } : {}),
+    ...('origin' in header ? { origin: header.origin } : {}),
   };
 }
 /** @param {import('./types.js').Agent} agent @param {string} id @param {import('./types.js').NativeContext} ctx */
@@ -88,9 +91,11 @@ export async function createHostPortOperations({
       if (ctx.workspaceRegistry.archivedSessionIds.includes(id)) return null;
       const stored = await ctx.sessionPersistence.stat(id);
       if (!stored) return null;
-      validHeader(stored.header, id);
+      const storedHeader = validHeader(stored.header, id);
       const result = await ctx.sessionController.inspect(id);
-      validHeader(result.meta, id);
+      const inspectedHeader = validHeader(result.meta, id);
+      if (!isDeepStrictEqual(storedHeader, inspectedHeader))
+        throw incompatible();
       if (!Array.isArray(result.events)) throw incompatible();
       await ready();
       if (ctx.workspaceRegistry.archivedSessionIds.includes(id)) return null;

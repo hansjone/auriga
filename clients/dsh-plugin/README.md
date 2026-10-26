@@ -72,3 +72,26 @@ node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
 Runtime dependencies: `@noble/hashes` (Argon2id), `undici` (DNS-pinned OIDC fetch).
 
 Copyright (c) 2026 hansjone. See [LICENSE](LICENSE).
+
+# Typed local registration compatibility
+
+Nonzero locals retain an immutable `addressType` and typed allocation fingerprint.
+Existing sessions are classified only after trusted stat/inspect Header validation:
+explicit `origin: 'subagent'` means subagent, an absent origin means session;
+unknown or empty origins fail closed. Fork lineage does not grant execution.
+New conversation creation fixes a session intent before registration and verifies
+the created Header. Subagent execution remains unavailable before N2.
+
+Version 1 allocation history without type keeps its original records, queue and
+high-water mark; recovery reports an identity conflict instead of guessing a type
+or rewriting old fingerprints. A valid empty history can start typed allocation.
+READY includes the original typed pending operation. Registration success requires
+matching operation/local/type/fingerprint and valid original registration revision.
+The internal trusted port returns the correlated fingerprint; the formal signed
+`RegisterResult` has no fingerprint echo, so its request correlation must preserve
+the original fingerprint. Missing or mismatched fields cannot settle the queue.
+
+The session module provides pure formal LOCAL_REGISTER frames and verifies signed
+responses on its existing request port. This does not install a production WSS
+LOCAL_REGISTER provider; runtime still requires that trusted provider externally.
+Tests using fake hosts/controllers/brokers do not demonstrate a connected DSH pair.
