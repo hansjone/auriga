@@ -2,11 +2,13 @@
 import { randomBytes } from 'node:crypto';
 import {
   assertFrameEpoch,
+  assertRegisterResult,
   decodeJson,
   encodeFetch,
   encodeReady,
   encodeReceipt,
   encodeJson,
+  encodeLocalRegister,
   frameType,
 } from './frames.js';
 import { SessionError } from './errors.js';
@@ -307,7 +309,7 @@ export function createNetworkSession(options) {
    *   localHighWater?: string,
    *   registrationRevision?: string,
    *   receiptCheckpoint?: {checkpoint_seq:string,checkpoint_revision:string,summary_digest:string},
-   *   pendingRegistration?: {candidate_local:string,allocation_op_id:string,allocation_fingerprint:string}|null,
+   *   pendingRegistration?: {candidate_local:string,allocation_op_id:string,allocation_fingerprint:string,address_type:'session'|'subagent'}|null,
    * }} [hint]
    */
   async function start(hint = {}) {
@@ -670,8 +672,21 @@ export function createNetworkSession(options) {
       requireReady();
       const requestedGeneration = generation;
       const id = newId('req-control');
+      const registration =
+        type === 'local_register'
+          ? decodeJson(
+              encodeLocalRegister({
+                .../** @type {any} */ (fields),
+                requestId: id,
+                epoch,
+                bootId,
+              }),
+            )
+          : null;
       const result = await exchange(
-        encodeJson({ ...fields, app_version: '1.0', type, request_id: id }),
+        registration
+          ? encodeJson(registration)
+          : encodeJson({ ...fields, app_version: '1.0', type, request_id: id }),
         id,
       );
       requireReady();
@@ -685,6 +700,7 @@ export function createNetworkSession(options) {
           'network.protocol_error',
           'unexpected response type',
         );
+      if (registration) assertRegisterResult(result, registration);
       return result;
     },
     /** Exposed for tests that inject a FETCH_RESULT without the wire. */

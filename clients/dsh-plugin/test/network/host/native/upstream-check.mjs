@@ -14,10 +14,9 @@ import {
 } from '../../../../src/network/host/native/index.js';
 import { fixture } from './fixtures.js';
 
-const baseline = new URL(
-  '../../../../../../deploy/compose/real-dsh/',
-  import.meta.url,
-);
+const baseline = process.env.AURIGA_DSH_BASELINE
+  ? pathToFileURL(process.env.AURIGA_DSH_BASELINE.replace(/[\\/]?$/, '/'))
+  : new URL('../../../../../../deploy/compose/real-dsh/', import.meta.url);
 const requireBaseline = createRequire(new URL('package.json', baseline));
 const load = (name) =>
   import(pathToFileURL(requireBaseline.resolve(name)).href);
@@ -44,8 +43,8 @@ async function storage(t) {
     for (const detach of detachers.values()) detach();
     await rm(dir, { recursive: true, force: true });
   });
-  async function create(id = 'real') {
-    const session = store.prepare(id, { meta: { cwd: dir } });
+  async function create(id = 'real', meta = {}) {
+    const session = store.prepare(id, { meta: { cwd: dir, ...meta } });
     detachers.set(id, store.enter(session));
     handles.set(id, await provider.create(session.header));
     return session;
@@ -105,6 +104,32 @@ test('public JSONL barrier materializes a header without inspecting writer inter
   assert.equal(await s.store.flush(session), true);
   assert.equal(await s.provider.flush(), undefined);
   assert.equal((await s.inspect(session.id)).meta.cwd, s.dir);
+});
+
+test('public JSONL and fake controller facade preserve origin; lineage alone is ordinary session', async (t) => {
+  const s = await storage(t),
+    f = fixture();
+  f.ctx.sessions = s.store;
+  f.ctx.sessionPersistence = s.provider;
+  f.ctx.sessionController.inspect = s.inspect;
+  const host = await createNativeHostPort({ ctx: f.ctx });
+  for (const [id, meta] of [
+    ['ordinary', {}],
+    ['fork', { parentSession: 'ordinary' }],
+    ['child', { origin: 'subagent', parentSession: 'ordinary' }],
+  ]) {
+    await s.create(id, meta);
+    await s.provider.flush();
+    const inspected = await s.inspect(id);
+    assert.equal(inspected.meta.origin, meta.origin);
+    assert.equal((await host.getSession(id)).origin, meta.origin);
+  }
+  // Public stat returns undefined for an absent session; read failures still reject.
+  assert.equal(await host.getSession('missing'), null);
+  for (const origin of ['', null, false, 'user', 'unknown'])
+    assert.throws(() =>
+      s.store.prepare('bad', { meta: { cwd: s.dir, origin } }),
+    );
 });
 
 test('public SessionStore flush reports missing listeners rather than durability success', async () => {

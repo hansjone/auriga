@@ -70,14 +70,11 @@ export function createFakeHost({ defaultCwd = 'C:/dsh/default' } = {}) {
   const perSession = new Map();
   let maxPerSession = 0;
 
-  function addSession(
-    id,
-    { cwd = defaultCwd, origin = 'user', participants = 1 } = {},
-  ) {
+  function addSession(id, { cwd = defaultCwd, origin, participants = 1 } = {}) {
     sessions.set(id, {
       id,
       cwd,
-      origin,
+      ...(origin === undefined ? {} : { origin }),
       participants,
       live: [],
       history: [],
@@ -110,7 +107,13 @@ export function createFakeHost({ defaultCwd = 'C:/dsh/default' } = {}) {
     async getSession(id) {
       await tick();
       const s = sessions.get(id);
-      return s ? { id: s.id, cwd: s.cwd, origin: s.origin } : null;
+      return s
+        ? {
+            id: s.id,
+            cwd: s.cwd,
+            ...('origin' in s ? { origin: s.origin } : {}),
+          }
+        : null;
     },
     async createSession({ id, cwd, preset }) {
       await tick();
@@ -262,16 +265,32 @@ export function createFixturePlatform() {
       if (existing) {
         result =
           existing.opId === entry.opId &&
-          existing.fingerprint === entry.fingerprint
-            ? { status: 'registered', registrationId: existing.registrationId }
+          existing.fingerprint === entry.fingerprint &&
+          existing.addressType === entry.addressType
+            ? {
+                status: 'registered',
+                ...existing,
+                localHighWater: state.highWater.toString(),
+              }
             : { status: 'conflict' };
       } else if (local <= state.highWater) {
         result = { status: 'conflict' };
       } else {
         const registrationId = `reg-${entry.local}`;
-        state.registrations.set(entry.local, { ...entry, registrationId });
+        const registrationRevision = String(state.registrations.size + 1);
+        state.registrations.set(entry.local, {
+          ...entry,
+          registrationId,
+          registrationRevision,
+        });
         state.highWater = local;
-        result = { status: 'registered', registrationId };
+        result = {
+          status: 'registered',
+          ...entry,
+          registrationId,
+          registrationRevision,
+          localHighWater: state.highWater.toString(),
+        };
       }
       if (drop.register > 0) {
         drop.register--;

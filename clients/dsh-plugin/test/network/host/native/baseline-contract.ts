@@ -1,7 +1,11 @@
 // Compile-only consumer of public package exports; no internal paths.
 import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
-import type { SessionId, Session } from '@deepseek-ai/dsh-session';
+import type {
+  SessionId,
+  Session,
+  SessionHeader,
+} from '@deepseek-ai/dsh-session';
 import type {} from '@deepseek-ai/dsh-api-session-controller';
 import type {} from '@deepseek-ai/dsh-agent-preset-registry';
 import type {} from '@deepseek-ai/dsh-session-persistence';
@@ -76,3 +80,13 @@ async function persistedPrefix() {
 void checked;
 void coldInbox;
 void persistedPrefix;
+
+// Origin is a coarse product category; parentSession only records fork lineage.
+async function inspectedOrigin() {
+  const inspected = await ctx.sessionController.inspect(id);
+  const header: SessionHeader = inspected.meta;
+  const origin: 'subagent' | undefined = header.origin;
+  const parent: string | undefined = header.parentSession;
+  return { origin, parent };
+}
+void inspectedOrigin;

@@ -23,7 +23,10 @@ async function setup(t, options = {}) {
     ['native', 'session'],
     ['child', 'subagent'],
   ]) {
-    w.host.addSession(id, { cwd: 'D:/example' });
+    w.host.addSession(id, {
+      cwd: 'D:/example',
+      ...(kind === 'subagent' ? { origin: 'subagent' } : {}),
+    });
     await w.adapter.bindExistingSession({
       opId: id,
       hostSessionId: id,

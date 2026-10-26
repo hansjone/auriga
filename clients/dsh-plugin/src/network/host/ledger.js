@@ -16,7 +16,7 @@ function registrationLocks(ledger) {
   return locks;
 }
 
-const LEDGER_VERSION = 1;
+const LEDGER_VERSION = 2;
 const UINT64_MAX = (1n << 64n) - 1n;
 const MAX_AUDIT = 256;
 
@@ -60,9 +60,14 @@ const MAX_AUDIT = 256;
  *
  * @typedef {{
  *   opId: string, local: string, nonce: string, fingerprint: string,
+ *   addressType: 'session'|'subagent', expectedRegistrationRevision: string,
+ *   registrationRevision?: string,
  *   purpose: string, mappingDigest: string, state: 'reserved'|'registered'|'abandoned'|'conflict',
  *   registrationId: string|null,
  * }} LocalRegistration
+ * @typedef {{status:'registered', registrationId:string, opId:string, local:string,
+ *   addressType:'session'|'subagent', fingerprint:string, registrationRevision:string,
+ *   localHighWater:string}|{status:'conflict'}} RegistrationResult
  *
  * @typedef {{
  *   contactId: string, recipientId: string, from: import('./address.js').Address,
@@ -75,6 +80,7 @@ const MAX_AUDIT = 256;
  *   version: number, identity: LedgerIdentity, revision: number,
  *   identityConflict: string|null,
  *   localHighWater: string,
+ *   registrationRevision?: string,
  *   localQueue: string[],
  *   locals: Record<string, LocalRegistration>,
  *   registrations: Record<string, string>,
@@ -98,6 +104,7 @@ function emptyState(identity) {
     revision: 0,
     identityConflict: null,
     localHighWater: '0',
+    registrationRevision: '0',
     localQueue: [],
     locals: {},
     registrations: {},
@@ -118,7 +125,7 @@ function checkState(value, identity) {
   if (
     !s ||
     typeof s !== 'object' ||
-    s.version !== LEDGER_VERSION ||
+    ![1, LEDGER_VERSION].includes(s.version) ||
     !Number.isSafeInteger(s.revision) ||
     !isUint64String(s.localHighWater) ||
     !s.identity ||
@@ -132,6 +139,19 @@ function checkState(value, identity) {
       'ledger identity mismatch',
     );
   checkAllocationState(s);
+  if (Object.values(s.locals).some((entry) => !entry.addressType))
+    s.identityConflict = CODES.recoveryConflict;
+  else if (s.registrationRevision === undefined) {
+    if (Object.keys(s.locals).length)
+      s.identityConflict = CODES.recoveryConflict;
+    else s.registrationRevision = '0';
+  }
+  if (
+    Object.values(s.bindings).some(
+      (b) => s.locals[b.local]?.addressType !== b.kind,
+    )
+  )
+    s.identityConflict = CODES.recoveryConflict;
   return s;
 }
 
@@ -157,6 +177,8 @@ function checkAllocationState(s) {
   )
     invalid();
   let maximum = 0n;
+  let registrationRevision = 0n;
+  let legacy = false;
   for (const [local, entry] of Object.entries(s.locals)) {
     if (
       !isUint64String(local) ||
@@ -177,11 +199,17 @@ function checkAllocationState(s) {
       s.registrations[entry.opId] !== local
     )
       invalid();
+    const typed =
+      entry.addressType === 'session' || entry.addressType === 'subagent';
+    legacy ||= !typed;
+    if ('addressType' in entry && !typed) invalid();
+    if (typed && !isUint64String(entry.expectedRegistrationRevision)) invalid();
     if (
       entry.fingerprint !==
       createHash('sha256')
         .update(
-          `${entry.opId}\0${local}\0${entry.nonce}\0${entry.mappingDigest}`,
+          `${entry.opId}\0${local}\0${entry.nonce}\0${entry.mappingDigest}` +
+            (typed ? `\0${entry.addressType}` : ''),
         )
         .digest('hex')
     )
@@ -193,6 +221,16 @@ function checkAllocationState(s) {
       (typeof entry.registrationId !== 'string' || !entry.registrationId)
     )
       invalid();
+    if (typed && !unsettled) {
+      if (
+        !isUint64String(entry.registrationRevision) ||
+        BigInt(entry.registrationRevision ?? '0') !==
+          BigInt(entry.expectedRegistrationRevision) + 1n
+      )
+        invalid();
+      if (BigInt(entry.registrationRevision ?? '0') > registrationRevision)
+        registrationRevision = BigInt(entry.registrationRevision ?? '0');
+    }
     if (BigInt(local) > maximum) maximum = BigInt(local);
   }
   if (
@@ -201,6 +239,15 @@ function checkAllocationState(s) {
     s.localQueue.some((id) => !s.locals[s.registrations[id]])
   )
     invalid();
+  if (
+    !legacy &&
+    (Object.keys(s.locals).length || s.registrationRevision !== undefined)
+  ) {
+    if (s.registrationRevision !== registrationRevision.toString()) invalid();
+    const head = s.locals[s.registrations[s.localQueue[0]]];
+    if (head && head.expectedRegistrationRevision !== s.registrationRevision)
+      invalid();
+  }
 }
 
 /**
@@ -260,6 +307,29 @@ export async function openLedger({
         throw new HostSeamError(CODES.ledgerUnavailable);
       const draft = structuredClone(state);
       const result = mutate(draft);
+      for (const [local, original] of Object.entries(state.locals)) {
+        const next = draft.locals[local];
+        for (const key of /** @type {const} */ ([
+          'opId',
+          'local',
+          'nonce',
+          'fingerprint',
+          'mappingDigest',
+          'purpose',
+          'addressType',
+          'expectedRegistrationRevision',
+        ]))
+          if (!next || next[key] !== original[key])
+            throw new HostSeamError(
+              CODES.localAllocationConflict,
+              'immutable local witness',
+            );
+      }
+      if (
+        state.identityConflict &&
+        draft.identityConflict !== state.identityConflict
+      )
+        throw new HostSeamError(CODES.recoveryConflict);
       draft.revision = state.revision + 1;
       try {
         await handle.commit(draft);
@@ -338,11 +408,19 @@ export function digestOf(value) {
  * unsettled.
  *
  * @param {Ledger} ledger
- * @param {{ opId: string, purpose: string, mappingDigest: string }} input
+ * @param {{ opId: string, purpose: string, mappingDigest: string, addressType:'session'|'subagent' }} input
  * @returns {Promise<LocalRegistration>}
  */
-export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
-  if (!opId || !purpose || !mappingDigest)
+export async function reserveLocal(
+  ledger,
+  { opId, purpose, mappingDigest, addressType },
+) {
+  if (
+    !opId ||
+    !purpose ||
+    !mappingDigest ||
+    !['session', 'subagent'].includes(addressType)
+  )
     throw new HostSeamError(CODES.protocolError, 'allocation intent required');
   return ledger.update((draft) => {
     if (draft.identityConflict)
@@ -351,7 +429,8 @@ export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
     if (existing) {
       if (
         existing.purpose !== purpose ||
-        existing.mappingDigest !== mappingDigest
+        existing.mappingDigest !== mappingDigest ||
+        existing.addressType !== addressType
       )
         throw new HostSeamError(
           CODES.localAllocationConflict,
@@ -372,8 +451,10 @@ export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
       opId,
       local,
       nonce,
+      addressType,
+      expectedRegistrationRevision: draft.registrationRevision ?? '0',
       fingerprint: createHash('sha256')
-        .update(`${opId}\0${local}\0${nonce}\0${mappingDigest}`)
+        .update(`${opId}\0${local}\0${nonce}\0${mappingDigest}\0${addressType}`)
         .digest('hex'),
       purpose,
       mappingDigest,
@@ -393,7 +474,7 @@ export async function reserveLocal(ledger, { opId, purpose, mappingDigest }) {
  * head in place; retrying uses the same op/local/fingerprint.
  * @param {Ledger} ledger
  * @param {string} opId
- * @param {(entry: LocalRegistration) => Promise<{ status: 'registered', registrationId: string }|{ status: 'conflict' }>} registerLocal
+ * @param {(entry: LocalRegistration) => Promise<RegistrationResult>} registerLocal
  * @returns {Promise<LocalRegistration>}
  */
 export async function registerReservedLocal(ledger, opId, registerLocal) {
@@ -414,7 +495,17 @@ export async function registerReservedLocal(ledger, opId, registerLocal) {
       result?.status === 'conflict' ||
       (result?.status === 'registered' &&
         typeof result.registrationId === 'string' &&
-        result.registrationId)
+        /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(result.registrationId) &&
+        result.local === entry.local &&
+        result.opId === entry.opId &&
+        result.addressType === entry.addressType &&
+        result.fingerprint === entry.fingerprint &&
+        isUint64String(result.registrationRevision) &&
+        result.registrationRevision !== '0' &&
+        BigInt(result.registrationRevision) ===
+          BigInt(entry.expectedRegistrationRevision) + 1n &&
+        isUint64String(result.localHighWater) &&
+        BigInt(result.localHighWater) >= BigInt(entry.local))
     ))
       throw new HostSeamError(
         CODES.protocolError,
@@ -422,9 +513,13 @@ export async function registerReservedLocal(ledger, opId, registerLocal) {
       );
     const outcome = await ledger.update((draft) => {
       const current = draft.locals[entry.local];
+      if (current.state !== 'reserved' || draft.localQueue[0] !== opId)
+        throw new HostSeamError(CODES.recoveryConflict);
       if (result?.status === 'registered' && result.registrationId) {
         current.state = 'registered';
         current.registrationId = result.registrationId;
+        current.registrationRevision = result.registrationRevision;
+        draft.registrationRevision = result.registrationRevision;
         draft.localQueue = draft.localQueue.filter((id) => id !== opId);
         return structuredClone(current);
       }

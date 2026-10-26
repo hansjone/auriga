@@ -839,3 +839,44 @@ test('uncertain submission reconciliation never exceeds three durable attempts a
   assert.equal(reconciled, 3);
   assert.equal(world.runtime.diagnostics.pending.outbound, 0);
 });
+
+test('READY after lost registration response replays original typed operation without creating host', async (t) => {
+  const platform = createFixturePlatform();
+  let world = await fixture(t, { network: platform.network });
+  await world.runtime.start();
+  platform.drop.register = 1;
+  await assert.rejects(
+    world.runtime.adapter.bindExistingSession({
+      opId: 'typed-restart',
+      hostSessionId: 'native-session',
+      cwd: 'C:/dsh/default',
+    }),
+  );
+  const before = world.storage.ledger.snapshot();
+  const entry = before.locals['1'];
+  assert.equal(entry.addressType, 'session');
+  assert.deepEqual(before.localQueue, ['typed-restart']);
+  const { storage, signer } = world;
+  await world.runtime.close();
+  world = await fixture(t, { network: platform.network }, { storage, signer });
+  await world.runtime.start();
+  assert.equal(world.runtime.status.connected, true);
+  assert.deepEqual(
+    { ...world.frames[0].pending_registration },
+    {
+      candidate_local: '1',
+      allocation_op_id: entry.opId,
+      allocation_fingerprint: 'sha256:' + entry.fingerprint,
+      address_type: 'session',
+    },
+  );
+  assert.equal(world.frames[0].registration_revision, '0');
+  const after = storage.ledger.snapshot();
+  assert.equal(after.localHighWater, '1');
+  assert.equal(after.locals['1'].fingerprint, entry.fingerprint);
+  assert.equal(after.locals['1'].state, 'registered');
+  assert.deepEqual(after.localQueue, []);
+  assert.equal(world.ports.host.counts.create, 0);
+  assert.equal(platform.state.registrations.size, 1);
+  assert.equal(platform.state.calls.register, 2);
+});

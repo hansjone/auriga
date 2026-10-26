@@ -108,7 +108,12 @@ test('file ledger: crash mid-commit keeps the previous snapshot; ENOSPC never ha
     identity: IDENTITY,
     initialize: true,
   });
-  await reserveLocal(ledger, { opId: 'a', purpose: 't', mappingDigest: 'm' });
+  await reserveLocal(ledger, {
+    opId: 'a',
+    purpose: 't',
+    mappingDigest: 'm',
+    addressType: 'session',
+  });
   failAt = 'rename';
   await assert.rejects(
     ledger.update((d) => {
@@ -148,6 +153,7 @@ test('local counter: starts at 1, persists before exposure, burns on crash, neve
     opId: 'op1',
     purpose: 't',
     mappingDigest: 'm',
+    addressType: 'session',
   });
   assert.equal(first.local, '1');
   await registerReservedLocal(ledger, 'op1', platform.network.registerLocal);
@@ -155,11 +161,17 @@ test('local counter: starts at 1, persists before exposure, burns on crash, neve
     opId: 'op2',
     purpose: 't',
     mappingDigest: 'm',
+    addressType: 'session',
   });
   assert.equal(second.local, '2');
   // Queue head unsettled: a later op cannot reserve a bigger number.
   await assert.rejects(
-    reserveLocal(ledger, { opId: 'op3', purpose: 't', mappingDigest: 'm' }),
+    reserveLocal(ledger, {
+      opId: 'op3',
+      purpose: 't',
+      mappingDigest: 'm',
+      addressType: 'session',
+    }),
     code(CODES.localQueueBusy),
   );
   // LOCAL_REGISTER response lost, then the process dies.
@@ -173,6 +185,7 @@ test('local counter: starts at 1, persists before exposure, burns on crash, neve
     opId: 'op2',
     purpose: 't',
     mappingDigest: 'm',
+    addressType: 'session',
   });
   assert.equal(resumed.local, '2');
   assert.equal(resumed.fingerprint, second.fingerprint);
@@ -186,6 +199,7 @@ test('local counter: starts at 1, persists before exposure, burns on crash, neve
     opId: 'op3',
     purpose: 't',
     mappingDigest: 'm',
+    addressType: 'session',
   });
   assert.equal(third.local, '3');
   // Crash after reserve, before register: 3 is reserved and stays the head.
@@ -230,6 +244,7 @@ test('rolled-back ledger snapshot collides with the platform high-water → reco
       opId: 'b4',
       purpose: 't',
       mappingDigest: 'm',
+      addressType: 'session',
     }),
     code(CODES.recoveryConflict),
   );
