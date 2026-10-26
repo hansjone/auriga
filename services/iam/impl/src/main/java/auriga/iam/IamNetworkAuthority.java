@@ -44,6 +44,11 @@ public final class IamNetworkAuthority implements NetworkAuthority {
 
   @Override
   public Node register(String accessToken) {
+    return registerWithOutcome(accessToken).identity();
+  }
+
+  @Override
+  public RegistrationOutcome registerWithOutcome(String accessToken) {
     store.requireTransactionReleased();
     if (TenantContext.PLATFORM_TENANT.equals(TenantContext.require())) return denied();
     var identity = require(devices.access(accessToken));
@@ -96,7 +101,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
           if (node == null || node.revoked() || !node.account().equals(identity.account())) deny();
           if (inserted == 1) policyRevision.bump();
           record("register", node.node(), Map.of("device", node.device()));
-          return node;
+          // Returned to the caller only after TransactionTemplate has committed.
+          return new RegistrationOutcome(node, inserted == 1);
         });
   }
 

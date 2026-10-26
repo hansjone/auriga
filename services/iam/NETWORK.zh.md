@@ -1,5 +1,15 @@
 # 网络 IAM 内部权威
 
+HTTPS `POST /api/iam/v1/network/register` 沿已审契约返回原身份五字段和布尔 `created`。
+`NetworkAuthority.registerWithOutcome` 只由最终节点事务的实际 INSERT 计数构造结果，
+节点、首次政策版本递增和审计同事务提交，提交失败不返回成功；号码预留仍是原独立事务。
+同设备已有节点、重试或并发落败均返回 false 和稳定身份，不重放历史 true。
+旧 `register` 继续只返回原 Node；不支持提交结果的替代实现由 HTTPS 明确返回 unavailable。
+prepare/tickets 继续使用原五字段身份，不再次注册，也不含 created。
+首次回包丢失或未保存后重试只能得到 false；刷新仍是同设备，真实重新登录才取得新 device/node，
+旧节点吊销边界不变。created 不是授权票据，不提供来源/SEND/FIRST_CONTACT 或第五 RPC 放行。
+本接线不证明生产来源 provider、首次初始化全链或真实双 DSH。
+
 `IamGrpcNetworkAuthority` 由 `IamRuntimeConfiguration` 装配到现有内部 gRPC 服务，
 使用正式生成的 `NetworkAuthorityService` 类型。每个方法要求平台租户的真实
 `svc:collab` 服务 JWT，以及非平台业务租户委托；Resolve/Authorize 请求里的 tenant
