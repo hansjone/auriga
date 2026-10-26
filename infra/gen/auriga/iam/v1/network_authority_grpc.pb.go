@@ -42,6 +42,8 @@ type NetworkAuthorityServiceClient interface {
 	ResolveNetworkTarget(ctx context.Context, in *ResolveNetworkTargetRequest, opts ...grpc.CallOption) (*ResolveNetworkTargetResponse, error)
 	// Recheck stored source binding/revision, sender policy/grant and target read
 	// permission before signing. Stored JSON is evidence, never an allow grant.
+	// Agent source lifecycle: NetworkSourceAuthorityService in network_source.proto;
+	// field mapping and lock/CAS semantics: contracts/network/iam-directory.md.
 	AuthorizeNetworkDelivery(ctx context.Context, in *AuthorizeNetworkDeliveryRequest, opts ...grpc.CallOption) (*AuthorizeNetworkDeliveryResponse, error)
 }
 
@@ -119,6 +121,8 @@ type NetworkAuthorityServiceServer interface {
 	ResolveNetworkTarget(context.Context, *ResolveNetworkTargetRequest) (*ResolveNetworkTargetResponse, error)
 	// Recheck stored source binding/revision, sender policy/grant and target read
 	// permission before signing. Stored JSON is evidence, never an allow grant.
+	// Agent source lifecycle: NetworkSourceAuthorityService in network_source.proto;
+	// field mapping and lock/CAS semantics: contracts/network/iam-directory.md.
 	AuthorizeNetworkDelivery(context.Context, *AuthorizeNetworkDeliveryRequest) (*AuthorizeNetworkDeliveryResponse, error)
 	mustEmbedUnimplementedNetworkAuthorityServiceServer()
 }

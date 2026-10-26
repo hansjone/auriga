@@ -59,6 +59,16 @@ JWT 使用 Team 同一 jwt/v5 库，校验 at+jwt / ES256 / issuer / auriga audi
 IAM 公共 JWKS 文件由部署可信同步并原子替换，每次请求重新读取，旧 key 保留至旧 token 全部到期。
 文件不可用则失败关闭，不回退旧缓存。所有写操作要求近期二次验证。
 
+`GET /api/ai/v1/admin/usage` 已接入同一管理 handler，仅接受显式 `ai.usage.admin` 权限；
+仍校验管理用户 JWT、单一 `aud=auriga`、`ctx=admin` 和期限，沿上述受信管理入口策略。
+此只读 GET 不要求 stepup，不修改账本、revision 或 outbox，也不返回 ETag。
+仅支持 `limit`（默认 50，1–200）和 `cursor`（最长 512 字符）；未知、重复或非法参数返回
+`common.validation_failed`。使用上一页的 `nextCursor` 获取后续页，按落账时间和 requestId 稳定升序；
+游标带完整性校验并绑定当前租户和管理查询范围，不能使用本人用量游标或跨租户复用。
+同租户同范围重读游标允许重复读取同页。结果包含当前租户全部主体的已落账 `Usage`，
+空页 `items=[]`，没有下一页时省略 `nextCursor`；不包含 reserved/dispatching 记录。
+unknown 的 input/output/cost 保持 null，保留原冻结值、价格版本和 UTC 周期，不按当前模型价格重算。
+
 迁移连接只用于启动迁移；运行连接必须为无 SUPERUSER/BYPASSRLS/CREATEROLE/CREATEDB 的独立 DML 角色，
 不可拥有 schema/表或继承迁移角色。部署用迁移角色授予运行角色：
 

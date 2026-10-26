@@ -136,12 +136,21 @@
         },
         "allocation_fingerprint": {
           "$ref": "#/$defs/Digest"
+        },
+        "address_type": {
+          "description": "所属已认证 node 固定的不可变地址粗类别；与帧 type 无关，不授予权限。",
+          "type": "string",
+          "enum": [
+            "session",
+            "subagent"
+          ]
         }
       },
       "required": [
         "candidate_local",
         "allocation_op_id",
-        "allocation_fingerprint"
+        "allocation_fingerprint",
+        "address_type"
       ],
       "additionalProperties": false
     },
@@ -1537,6 +1546,14 @@
         },
         "expected_registration_revision": {
           "$ref": "#/$defs/U64"
+        },
+        "address_type": {
+          "description": "所属已认证 node 固定的不可变地址粗类别；与帧 type 无关，不授予权限。",
+          "type": "string",
+          "enum": [
+            "session",
+            "subagent"
+          ]
         }
       },
       "required": [
@@ -1548,7 +1565,8 @@
         "candidate_local",
         "allocation_op_id",
         "allocation_fingerprint",
-        "expected_registration_revision"
+        "expected_registration_revision",
+        "address_type"
       ],
       "additionalProperties": false
     },
@@ -1588,6 +1606,14 @@
         },
         "server_auth": {
           "$ref": "#/$defs/ServerAuth"
+        },
+        "address_type": {
+          "description": "所属已认证 node 固定的不可变地址粗类别；与帧 type 无关，不授予权限。",
+          "type": "string",
+          "enum": [
+            "session",
+            "subagent"
+          ]
         }
       },
       "required": [
@@ -1600,7 +1626,8 @@
         "result",
         "registration_revision",
         "local_high_water",
-        "server_auth"
+        "server_auth",
+        "address_type"
       ],
       "additionalProperties": false
     },

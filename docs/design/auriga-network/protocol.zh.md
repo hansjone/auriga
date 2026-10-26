@@ -4,6 +4,8 @@
 
 ## 1. 稳定身份与临时标识
 
+非零 local 的 `address_type`（仅 session/subagent）由所属已认证 node 首次 LOCAL_REGISTER 固定，与帧 type 分开，绑定原 registration_id/allocation_op_id/指纹；同元组换类别冲突。READY 未决队首必须保存并提交原类别，REGISTER_RESULT 回显原类别并沿原服务器签名覆盖；确认前须核类别一致，恢复只返回完整原操作，不二次分配或发创建许可。缺失/未知类别沿严格 schema 和既有操作失败关闭，不扩大 READY 三能力要求或增加用户步骤。旧 NULL 保留原证据，不从重试、活会话或 ContactAssign 补型；类型依赖新操作拒绝，按已有诊断/新 local 流程处理。总部只存粗类别，不存宿主 ID/树，类别不是权限。
+
 | 标识 | 分配者、范围与含义 |
 |---|---|
 | tenant_id / realm / owner_user_id | IAM/org 决定 tenant 与节点归属用户；realm 是独立顺序 uint64 组织/部署域 ID，由总部验证其与认证 tenant 的绑定，不能把 tenant UUID 当 realm。首发仅本 realm。owner_user_id 仅归属属性，不进入地址，不能合并同用户的多个 node。 |
@@ -209,6 +211,17 @@ CONTACT_DECIDE(scope=group_join) 决定 join_allowed，用户或明确涵盖 gro
 **human 发送**：人从插件受信 UI 操作，from=本 node/sys、sender_kind=human。DSH 连接凭据只证明 node，不证明此操作由人发起；总部另校验 human_send_intent：通过真实用户认证且与 agent/MCP 隔离的管理入口签发一次性意图记录，绑定用户、realm/node、规范目标、正文摘要、线程、操作/幂等键与期限（建议 60 秒）。插件在人的私有发送路径持有其句柄，不把用户 token/句柄交模型、工具、正文或日志。消费与发送幂等事务绑定，同键重试返回原结果，不生成新发送；换正文/目标/操作者失败。只有系统地址或自报 human 而无此凭据不够，后台定时器不能伪造人点击。本人可以显式提交 agent 起草的内容，但这是经过 UI 确认的新 human 操作，不是 agent 自动借权。
 
 **agent 发送**：受信插件将宿主执行上下文绑定到总部可核验的 opaque source_binding 记录：realm/node/local/type= session 或 subagent、principal_kind=agent、版本/到期与 send 范围；总部只存不透明地址/授权引用，不新增宿主会话树。注册/使用来自专用插件控制路径，模型无权注册来源或挑其他 source_binding。普通确定性宿主回信也沿相同会话记录，provenance=host 不改变 agent 类别。总部以该记录而不是消息自报字段生成 sender_kind/from；用户拥有 sys/广播权不会扩展这条记录。受损 DSH 或窃取用户独立认证材料仍可能冒充本机操作者，签名不能证明物理键盘或修复已失守的信任端；正常工具隔离与授权检查须实际验收。
+
+最小正式内部权威归属：IAM 持久拥有 opaque 来源授权事实，owner/device/backing-session 从现行兑换权威推导；
+collab 独占 typed-local 见证、不可变 type 与业务关系，注册/使用前须真实 native resolver 及当前健康/epoch/lookup/lock，
+不是 IAM 凭 JSON 独立证明宿主。内部三 RPC、幂等/CAS、期限/撤销与签前字段映射见
+[`network_source.proto`](../../../contracts/proto/auriga/iam/v1/network_source.proto) 及
+[`来源权威规范`](../../../contracts/network/iam-directory.md#agent-source-authorityagent-来源权威)。
+首期只定义普通 agent/session durable 单播 send，subagent 发送及 human/广播/组播/控制/首联等继续拒绝；
+不增加逐来源人工批准、挑战或登录，不改变本节产品流程。契约不等于来源链已实施；同机隔离已整体推迟，
+不以远程签名声称证明真人/宿主，仍须实现跨 node/tenant、当前身份及每次签前授权检查。
+同健康连接/同登记自然到期后可经全量新鲜核验/CAS 取得新有界来源代际，旧 binding/原操作不续期、不复活；
+显式撤销/持久停发禁止自动替代。丢失的已提交原登记回执可在原 transport 失效后受限读取，仍不产生当前发送许可。
 
 **工具面**：普通 agent 发送工具参数仅 target、body 和可选 thread；from、sender_kind、message_class、reply_to、server_auth、source_context、授权引用、flags 等不是模型字段，额外顶层字段直接 schema 拒绝，不先接收再丢弃。插件用真实执行上下文组装私有请求；回复动作由可信当前消息上下文绑定 in_reply_to/原 recipient，普通发件工具不能以自造引用攫取回复许可。body 只接收受支持信息/请求 schema；正文内出现“from=总部”只是数据，不递归当信封解析。执行控制使用独立有专权的单播入口，不能藏进普通 send 的 flags/ext。总部再次检查来源和目的权限：插件预拒只是体验优化，无广播权会话即使直接调私有接口也返回 broadcast_forbidden。
 

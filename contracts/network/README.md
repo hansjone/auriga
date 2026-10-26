@@ -103,7 +103,7 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 | `execution_admit` | admit(recipient_id, target, connection_epoch, host_request_id, attempt_id, boot_id)；target 为 sys 时（仅首联）必带 CONTACT_ASSIGN 固化的 `assigned_address` |
 | `contact_decide` | decision_scope = conversation / human_dialogue / group_join / execution；conversation 带 conversation_allowed 与 execution_allowed（null=未决），human_dialogue 的 execution_allowed 恒 null，group_join 只带 join（join_allowed、选定既有地址、membership 实例），execution 只带 authorization_request_id 与布尔 execution_allowed |
 | `contact_assign` | contact_id、已登记的会话 `assigned_address`、registration_id、creation_attempt_id、decision_version |
-| `local_register` | candidate_local ≥1、allocation_op_id、allocation_fingerprint、expected_registration_revision |
+| `local_register` | candidate_local ≥1、address_type（session / subagent）、allocation_op_id、allocation_fingerprint、expected_registration_revision |
 | `status_query` | message_id 或 submission_id 二选一 |
 
 下行（全部 `server_auth`；FETCH_RESULT 见 §4）：
@@ -117,13 +117,17 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 | `admit_result` | admitted / already_admitted（只返回既有状态，不是第二次许可）、admission_id、admitted_epoch |
 | `decide_result` | contact_state / join_state / execution_permission 三层分开 |
 | `assign_result` | assigned / existing；`creation_permit` 仅首次为 true，existing 恒 false |
-| `register_result` | registered / existing、registration_revision、local_high_water |
+| `register_result` | registered / existing、address_type（原登记类别）、registration_revision、local_high_water |
 | `status` | full：dispatch_status、total_members/nodes、七个互斥收件桶（accepted+rejected+expired+canceled+skipped+unresolved+pending = total_members）、quarantined ⊆ pending、请求回应五桶（同分母）；restricted：只有 `request_submitted`、submission_id、wait_until，禁止出现 message_id/计数 |
 | `error` | code ∈ `errors.json` 且不是 local_only；scope、retryable、retry_after、related |
 
 状态集合（与设计一致）：传输 `pending/quarantined/host_accepted/expired/canceled/revoked/skipped/unresolved`；执行 `not_applicable/not_started/admitted/running/completed/failed/canceled/outcome_unknown`；首联 `contact_pending/contact_allowed/contact_denied/contact_expired`；入组 `pending/allowed/joined/denied/expired/revoked`；第二层 `pending/allowed/denied`。
 
 三类消息硬上限（`limits.json#dispatch`）：小批原子 ≤32 node 且 ≤256 local；单 node 项 ≤256 local、编码 ≤64KiB；普通组 ≤1,024 成员/256 node；广播 ≤10,000 node；超原子上限必须 `dispatch_mode=paged`（否则 `network.requires_paged_dispatch`），分页每页 ≤32 node。
+
+非零 local 的类型由所属已认证 node 首次登记时固定，独立字段 `address_type` 仅允许 session/subagent，与帧 `type` 分开。类别同 tenant/realm/node/local、registration_id、allocation_op_id 和原指纹一起成为不可变见证，不增加权限，不上传宿主 ID、父子树或内容。同原操作同类别重试先查原登记，再核新分配 revision；换类别冲突，墓碑不可复用。
+
+READY 的非空 pending_registration 必须带原类别；仅完整匹配的原操作可通过原 REGISTER_RESULT 签名响应复原，READY 不做第二次分配或签发创建许可。address_type 纳入既有服务器签名，接收方确认登记前须比对原持久操作的类别，缺失/未知/不符均不能借响应确认为成功。混合版本缺字段或未知值沿严格 schema/既有操作错误失败关闭；不增加全局登录、版本协商或 READY 必需能力。旧数据库 NULL 不从新声明、活会话或 CONTACT_ASSIGN 补写：类型依赖操作拒绝，保留证据/高水位，按已有诊断和新 local 流程处理；丢失旧类型事实不能凭空恢复。
 
 ## 6. 错误码与呈现
 
@@ -142,6 +146,27 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 - `AgentSendToolInput`：只有 `target`（文本地址）、`body`（text/progress/status/artifact_ref，不得带 provenance）、可选 `thread`。`AgentReplyToolInput` 只有 body，in_reply_to 与原 recipient 由可信当前消息上下文绑定。`AgentFirstContactToolInput`：sys 目标 + text，另需独立 first_contact 能力。from/sender_kind/message_class/reply_to/server_auth/source_context/授权引用等额外字段 schema 直接拒绝。
 - `SubmitRequest`（插件经 HTTPS 私有接口）：`source` 二选一 source_binding / human_intent_id，`idempotency` = producer_epoch + key；同样不接受任何总部盖章字段。
 - `SendResult`：platform_stored / contact_pending 带实际完整 from/to、message_id 等；`request_submitted` 只带 submission_id 与 wait_until，不返回真实 message/delivery/mail_seq。
+
+### 7.1 agent 来源内部权威（契约已定义，实现待接线）
+
+独立 [`NetworkSourceAuthorityService`](../proto/auriga/iam/v1/network_source.proto) 定义
+`RegisterAgentSource`、`GetAgentSource`、`RevokeAgentSource`，各用独立 Request/Response；
+只供 `svc:collab` + 非平台业务 tenant + 既有可信内部传输，不给用户/模型或旧网关增加入口。
+IAM 从现行兑换/设备权威推导 owner/device/backing-session，保存最小 opaque 来源事实；collab 在真实 native
+resolver、健康/epoch、typed-local lookup/lock 后见证登记，并保留 local type 与线程/recipient/关系最终权威。
+只覆盖普通 agent/session 的已有关系 durable 单播 send；human、subagent 发送、组播/广播、控制、首联等继续拒绝。
+源许可不等于任何消息、收件或执行许可，也不新增人工批准/挑战/登录。
+
+不可变元组、永久不重绑、同 op 同体原回执/异体冲突、revision CAS、期限最小值、撤销锁序、
+collab 无锁 RPC/outbox/最终 CAS、既有第五 RPC 字段映射及后续真实 PG 负向要求，统一见
+[`iam-directory.md` 的来源权威规范](iam-directory.md#agent-source-authorityagent-来源权威)。
+登记回执不是当前授权状态；每次使用须 Get，签前第五 RPC 仍须查真实来源行/版本、完整来源政策和目标当前读取身份，
+collab 再短事务重核 typed-local/业务关系。未实现服务保持拒绝，本节不表示来源链已启用。
+
+自然到期不复活旧来源：同健康连接/同登记经全量当前核验，可用 Register 的 `predecessor_binding` 与
+`expected_revision` CAS 取得新 binding/独立有界期限，同代并发仅一个后继；持久停发或显式撤销不能靠新 op/连接绕过。
+已提交 Register 的原回包丢失时，svc:collab 可持原 op/原体经 IAM 留存归属锚点核验读取原响应，即使原 transport
+已失效；这不授当前权，取得原 binding 后仍须当前连接 Get 与本地 CAS。未知/未提交操作不享该回执读取例外。
 
 ## 8. Fixtures 与校验
 

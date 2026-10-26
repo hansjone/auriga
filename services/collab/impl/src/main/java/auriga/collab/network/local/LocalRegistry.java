@@ -76,9 +76,10 @@ public final class LocalRegistry {
           String local = text(frame, "candidate_local");
           String op = text(frame, "allocation_op_id");
           String fingerprint = text(frame, "allocation_fingerprint");
+          String addressType = text(frame, "address_type");
           var original = registration(tenant, target.realm(), target.node(), local, op);
           if (original != null) {
-            if (LocalRecovery.matches(original, local, op, fingerprint))
+            if (LocalRecovery.matches(original, local, op, fingerprint, addressType))
               return ok(view(original, "existing"));
             return conflict(tenant, target, "node_identity_conflict", ALLOCATION_CONFLICT);
           }
@@ -97,8 +98,8 @@ public final class LocalRegistry {
               """
           INSERT INTO collab.network_local_registration(
             id,tenant_id,realm,node_id,local_id,allocation_op_id,allocation_fingerprint,
-            registration_revision,previous_high_water,granted_epoch,granted_boot_id)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            registration_revision,previous_high_water,granted_epoch,granted_boot_id,address_type)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
           """,
               id,
               tenant,
@@ -110,7 +111,8 @@ public final class LocalRegistry {
               new BigDecimal(next),
               node.get("local_high_water"),
               target.epoch(),
-              text(frame, "boot_id"));
+              text(frame, "boot_id"),
+              addressType);
           int changed =
               jdbc.update(
                   """
@@ -133,6 +135,7 @@ public final class LocalRegistry {
                   next.toString(),
                   local,
                   "registered",
+                  addressType,
                   target.epoch(),
                   text(frame, "boot_id")));
         });
@@ -200,6 +203,7 @@ public final class LocalRegistry {
           String local = text(address, "local");
           UUID registrationId = uuid(frame, "registration_id");
           var reg = registered(tenant, target.realm(), target.node(), local, registrationId, null);
+          require(text(address, "type").equals(reg.get("address_type")), REGISTRATION_REQUIRED);
           var existing =
               one(
                   """
@@ -368,6 +372,8 @@ public final class LocalRegistry {
     require(
         row != null
             && "registered".equals(row.get("status"))
+            && ("session".equals(row.get("address_type"))
+                || "subagent".equals(row.get("address_type")))
             && (id == null || id.equals(row.get("id")))
             && (fingerprint == null || fingerprint.equals(row.get("allocation_fingerprint"))),
         REGISTRATION_REQUIRED);
@@ -556,6 +562,7 @@ public final class LocalRegistry {
         number(row, "registration_revision").toString(),
         local,
         result,
+        row.get("address_type").toString(),
         ((Number) row.get("granted_epoch")).longValue(),
         row.get("granted_boot_id").toString());
   }
@@ -699,6 +706,7 @@ public final class LocalRegistry {
       String registrationRevision,
       String localHighWater,
       String result,
+      String addressType,
       long grantedEpoch,
       String grantedBootId) {}
 

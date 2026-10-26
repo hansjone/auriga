@@ -57,6 +57,8 @@ func route(method, path string) (operation, bool) {
 	parts := strings.Split(strings.TrimPrefix(path, prefix), "/")
 	o := operation{}
 	switch {
+	case len(parts) == 1 && parts[0] == "usage" && method == "GET":
+		o.name = "listTenantAiUsage"
 	case len(parts) == 1 && parts[0] == "providers" && method == "GET":
 		o.name = "listProviders"
 	case len(parts) == 1 && parts[0] == "providers" && method == "POST":
@@ -99,6 +101,8 @@ func route(method, path string) (operation, bool) {
 	}
 	o.write = method != "GET"
 	switch o.name {
+	case "listTenantAiUsage":
+		o.permission = "ai.usage.admin"
 	case "createCredential", "activate", "revoke":
 		o.permission = "ai.credentials.rotate"
 	case "grants":
@@ -242,6 +246,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func recentStepUp(stepup, now int64) bool { return stepup > 0 && stepup <= now+30 && stepup >= now-600 }
 
 func validateQuery(r *http.Request, o operation) error {
+	if o.name == "listTenantAiUsage" {
+		return validateUsageQuery(r)
+	}
 	q, err := baseQuery(r)
 	if err != nil {
 		return err
