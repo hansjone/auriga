@@ -21,6 +21,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   private static final BigInteger MAX = new BigInteger("18446744073709551615");
   private final IamStore store;
   private final JdbcTemplate jdbc;
+  private final IamNetworkPolicyRevision policyRevision;
   private final DeviceAccessAuthority devices;
   private final AuditLogger audit;
   private final Clock clock;
@@ -34,6 +35,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
       Set<String> servers) {
     this.store = store;
     this.jdbc = store.networkJdbc();
+    this.policyRevision = new IamNetworkPolicyRevision(store);
     this.devices = devices;
     this.audit = audit;
     this.clock = clock;
@@ -80,17 +82,19 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         () -> {
           require(devices.credential(identity.tenant(), identity.account(), identity.device()));
           enabled();
-          jdbc.update(
-              """
+          int inserted =
+              jdbc.update(
+                  """
               INSERT INTO iam.network_node(tenant_id,node,account_id,device_id)
               VALUES (?,?,?,?) ON CONFLICT (tenant_id,device_id) DO NOTHING
               """,
-              TenantContext.require(),
-              number(reserved),
-              UUID.fromString(identity.account()),
-              UUID.fromString(identity.device()));
+                  TenantContext.require(),
+                  number(reserved),
+                  UUID.fromString(identity.account()),
+                  UUID.fromString(identity.device()));
           Node node = nodeByDevice(identity.device());
           if (node == null || node.revoked() || !node.account().equals(identity.account())) deny();
+          if (inserted == 1) policyRevision.bump();
           record("register", node.node(), Map.of("device", node.device()));
           return node;
         });
@@ -495,6 +499,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                   "limits",
                   configuration.limits());
           put("network_config", "organization", value, null);
+          policyRevision.bump();
           record("configure", "organization", Map.of("configuration", value));
           return null;
         });
@@ -509,6 +514,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         () -> {
           if (node(source) == null || node(target) == null) return denied();
           put("network_policy", source + ":" + target, Json.object("allowed", allowed), null);
+          policyRevision.bump();
           record("policy", source, Map.of("targetNode", target, "allowed", allowed));
           return null;
         });
@@ -532,6 +538,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
               grantKey(nodeId, sender, local, operation),
               Json.object("expiresAt", expiry.toString()),
               expiry);
+          policyRevision.bump();
           record(
               "grant",
               nodeId,
@@ -555,6 +562,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     transaction(
         () -> {
           store.delete("network_grant", key);
+          policyRevision.bump();
           record(
               "withdraw",
               nodeId,
@@ -573,6 +581,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
               "UPDATE iam.network_node SET revoked=true WHERE tenant_id=? AND node=?",
               TenantContext.require(),
               number(nodeId));
+          policyRevision.bump();
           record("revoke", nodeId, Map.of());
           return null;
         });
