@@ -18,13 +18,16 @@ import org.junit.jupiter.api.Test;
 
 class NetworkMailboxGrpcTest {
   @Test
-  void realCommonInterceptorGuardsAllFiveMethodsAndMapsErrors() throws Exception {
+  void realCommonInterceptorGuardsAllEightMethodsAndMapsErrors() throws Exception {
     var wire = mock(NetworkMailboxWireService.class);
     when(wire.ready(any(), any())).thenReturn("ready-result");
     when(wire.head(any())).thenReturn("head-result");
     when(wire.fetch(any(), any())).thenReturn("fetch-result");
     when(wire.receipt(any(), any())).thenReturn("receipt-result");
     when(wire.localRegister(any(), any())).thenReturn("register-result");
+    when(wire.sourceRegister(any(), any())).thenReturn("source-register-result");
+    when(wire.sourceGet(any(), any())).thenReturn("source-get-result");
+    when(wire.sourceRevoke(any(), any())).thenReturn("source-revoke-result");
     var verifier = mock(AccessTokenVerifier.class);
     when(verifier.verify(anyString()))
         .thenAnswer(
@@ -120,6 +123,38 @@ class NetworkMailboxGrpcTest {
                               .getFrameJson()
                               .toStringUtf8()));
               for (Runnable call : allCalls) {
+                if (caller.equals("svc:ai-gateway")) call.run();
+                else rejected(call, Status.Code.PERMISSION_DENIED, "common.forbidden");
+              }
+              for (Runnable call :
+                  List.<Runnable>of(
+                      () ->
+                          assertEquals(
+                              "source-register-result",
+                              rpc.sourceRegister(
+                                      NetworkMailboxServiceSourceRegisterRequest.newBuilder()
+                                          .setConnection(connection)
+                                          .build())
+                                  .getFrameJson()
+                                  .toStringUtf8()),
+                      () ->
+                          assertEquals(
+                              "source-get-result",
+                              rpc.sourceGet(
+                                      NetworkMailboxServiceSourceGetRequest.newBuilder()
+                                          .setConnection(connection)
+                                          .build())
+                                  .getFrameJson()
+                                  .toStringUtf8()),
+                      () ->
+                          assertEquals(
+                              "source-revoke-result",
+                              rpc.sourceRevoke(
+                                      NetworkMailboxServiceSourceRevokeRequest.newBuilder()
+                                          .setConnection(connection)
+                                          .build())
+                                  .getFrameJson()
+                                  .toStringUtf8()))) {
                 if (caller.equals("svc:ai-gateway")) call.run();
                 else rejected(call, Status.Code.PERMISSION_DENIED, "common.forbidden");
               }

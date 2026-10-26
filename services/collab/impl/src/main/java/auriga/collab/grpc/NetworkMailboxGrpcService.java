@@ -89,6 +89,51 @@ public class NetworkMailboxGrpcService
 
   @Override
   @AuthenticatedOnly
+  public void sourceRegister(
+      NetworkMailboxServiceSourceRegisterRequest request,
+      StreamObserver<NetworkMailboxServiceSourceRegisterResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceSourceRegisterResponse.newBuilder()
+            .setFrameJson(
+                ByteString.copyFromUtf8(
+                    service.sourceRegister(
+                        connection(request.getConnection()), request.getFrameJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void sourceGet(
+      NetworkMailboxServiceSourceGetRequest request,
+      StreamObserver<NetworkMailboxServiceSourceGetResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceSourceGetResponse.newBuilder()
+            .setFrameJson(
+                ByteString.copyFromUtf8(
+                    service.sourceGet(
+                        connection(request.getConnection()), request.getFrameJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void sourceRevoke(
+      NetworkMailboxServiceSourceRevokeRequest request,
+      StreamObserver<NetworkMailboxServiceSourceRevokeResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceSourceRevokeResponse.newBuilder()
+            .setFrameJson(
+                ByteString.copyFromUtf8(
+                    service.sourceRevoke(
+                        connection(request.getConnection()), request.getFrameJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
   public void fetch(
       NetworkMailboxServiceFetchRequest request,
       StreamObserver<NetworkMailboxServiceFetchResponse> observer) {

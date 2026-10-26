@@ -38,6 +38,28 @@ public class NetworkSourceGrpcAuthority implements NetworkSourceAuthority {
     return NetworkAuthorityClient.deadline(client.resolve(connection, "0").getValidUntil());
   }
 
+  public auriga.contracts.iam.v1.RegisterAgentSourceResponse registerSource(
+      auriga.contracts.iam.v1.RegisterAgentSourceRequest request) {
+    outsideDatabase();
+    return client.registerSource(request);
+  }
+
+  public auriga.contracts.iam.v1.GetAgentSourceResponse getSource(
+      auriga.contracts.iam.v1.GetAgentSourceRequest request) {
+    outsideDatabase();
+    return client.getSource(request);
+  }
+
+  public auriga.contracts.iam.v1.RevokeAgentSourceResponse revokeSource(
+      auriga.contracts.iam.v1.RevokeAgentSourceRequest request) {
+    outsideDatabase();
+    return client.revokeSource(request);
+  }
+
+  public <T> T sourceRequest(Supplier<T> work) {
+    return client.sourceRequest(work);
+  }
+
   public <T> T withTarget(NetworkAuthorityConnection connection, Target target, Supplier<T> work) {
     return withTarget(connection, target, false, work);
   }

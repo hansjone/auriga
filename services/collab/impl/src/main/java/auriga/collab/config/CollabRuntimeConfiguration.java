@@ -27,6 +27,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Standalone collab schema only; combined datasource wiring is deliberately not invented. */
 @Configuration(proxyBeanMethods = false)
+@org.springframework.scheduling.annotation.EnableScheduling
 @ConditionalOnExpression(
     "${auriga.services.collab.enabled:true} && '${auriga.service.schema:}' == 'collab'")
 public class CollabRuntimeConfiguration {
@@ -135,6 +136,12 @@ public class CollabRuntimeConfiguration {
   @Bean
   NetworkMailboxGrpcService networkMailboxGrpcService(NetworkMailboxWireService service) {
     return new NetworkMailboxGrpcService(service);
+  }
+
+  @Bean
+  auriga.collab.app.NetworkSourceMaintenance networkSourceMaintenance(
+      DataSource source, TenantTransactionManager manager, NetworkMailboxWireService wire) {
+    return new auriga.collab.app.NetworkSourceMaintenance(new JdbcTemplate(source), manager, wire);
   }
 
   @Bean

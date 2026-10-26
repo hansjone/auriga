@@ -8,6 +8,12 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.ObjectNode;
 
 class LocalFramesTest {
+  @Test
+  void protocolSourceDefinitionsResolveTheirExternalResource() throws Exception {
+    for (var entry : auriga.collab.app.NetworkSourceSchemasTest.frames().entrySet())
+      assertEquals(entry.getValue(), LocalFrames.read(entry.getKey(), entry.getValue().toString()));
+  }
+
   static String register(String local, String revision) {
     return """
         {"app_version":"1.0","type":"local_register","request_id":"request","epoch":"1",

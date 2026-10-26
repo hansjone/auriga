@@ -15,6 +15,39 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 class NetworkMailboxWireFramesTest {
   @Test
+  void sourceRpcsRejectWrongMethodDuplicateKeysAndInvalidUtf8BeforeIamOrStorage() throws Exception {
+    var source = mock(NetworkSourceGrpcAuthority.class);
+    var jdbc = mock(JdbcTemplate.class);
+    var wire = wire(source, jdbc);
+    var frames = NetworkSourceSchemasTest.frames();
+    for (var definition : List.of("SourceRegister", "SourceGet", "SourceRevoke")) {
+      var frame = frames.get(definition).deepCopy().put("type", "head");
+      reject(
+          "network.protocol_error", () -> sourceInvoke(wire, definition, bytes(frame.toString())));
+      byte[] duplicate =
+          bytes(
+              frames
+                  .get(definition)
+                  .toString()
+                  .replace("\"app_version\":", "\"app_version\":\"1.0\",\"app_version\":"));
+      reject("network.protocol_error", () -> sourceInvoke(wire, definition, duplicate));
+      reject(
+          "network.protocol_error", () -> sourceInvoke(wire, definition, new byte[] {(byte) 0xff}));
+    }
+    verifyNoInteractions(source, jdbc);
+  }
+
+  private static void sourceInvoke(
+      NetworkMailboxWireService wire, String definition, byte[] bytes) {
+    switch (definition) {
+      case "SourceRegister" -> wire.sourceRegister(null, bytes);
+      case "SourceGet" -> wire.sourceGet(null, bytes);
+      case "SourceRevoke" -> wire.sourceRevoke(null, bytes);
+      default -> throw new IllegalArgumentException();
+    }
+  }
+
+  @Test
   void receiptFixtureAndItsConflictVariantsAreSchemaValid() {
     String frame = receipt();
     String changed = frame.replace("host-r", "host-changed");
