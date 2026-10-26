@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	ai "github.com/hansjone/auriga/infra/gen/auriga/ai/v1"
@@ -43,7 +44,9 @@ func lockSubject(ctx context.Context, tx pgx.Tx, tenant, owner string) (subject,
 }
 
 func (l *Ledger) Admit(ctx context.Context, s TrustedSnapshot, req Request) (*Reservation, error) {
-	if s.Admission == nil || !uuidPattern.MatchString(s.Admission.TenantId) || !uuidPattern.MatchString(s.Admission.AccountId) || req.Method != "POST" || req.Path != "/ai/v1/chat/completions" || len(req.Key) > 256 || req.Fingerprint == ([32]byte{}) {
+	// HTTP validates at most 128 UTF-8 code points; this internal byte capacity
+	// must fit even four-byte code points without transforming the original key.
+	if s.Admission == nil || !uuidPattern.MatchString(s.Admission.TenantId) || !uuidPattern.MatchString(s.Admission.AccountId) || req.Method != "POST" || req.Path != "/ai/v1/chat/completions" || len(req.Key) > 128*utf8.UTFMax || req.Fingerprint == ([32]byte{}) {
 		return nil, failure("common.validation_failed")
 	}
 	var result *Reservation
