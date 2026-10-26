@@ -215,6 +215,7 @@ class NetworkWireSecurityTest {
     var wire =
         new NetworkMailboxWireService(
             core,
+            mock(auriga.collab.network.local.LocalRegistry.class),
             jdbc,
             mock(TenantTransactionManager.class),
             source,
