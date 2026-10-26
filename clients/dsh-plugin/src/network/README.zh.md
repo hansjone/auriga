@@ -12,6 +12,12 @@
 
 created=false 且缺 ledger、首次响应丢失、落盘前崩溃/写入未知、后来丢 ledger 始终失败关闭，沿现有真实重新登录取得新 device/new node 恢复；不能缓存 true、刷新旧设备或重用 helper 输出恢复首次资格。现有 ledger 的重连仍从账本取得已知 incarnation，不用 bootstrap 覆盖。
 
+### 官方设备 provider 首启接线前置
+
+现服务端 `NetworkMailboxWireService.prepareReady` 将同一 ingress 绑定到第一次完整 READY；仅相同连接身份、完整请求及应用 epoch 的原样重放可通过。helper 返回后若在该连接换新 requestId、channel_nonce 或 boot_id，服务端返回 `network.conflict`。helper 也不返回可接管的 nonce/bootId/session，因此不能直接把其结果置为正常会话 ready。
+
+“首次 helper → 同锁完整账本原子提交 → 同连接新上下文正常 READY”的装配还需要服务端明确支持该交接，或另行批准落账后持原锁、换新票和真实新连接再严格 READY。不能通过放松现有重放检查、伪造另一连接、回填 helper 上下文或提前显示 connected 绕过。该前置解决前，官方设备 provider 尚未接入默认入口，静态安装 pin 仍不代表已联网；本说明不声称完成数据库/WSS/真实 IAM 的整链验收。
+
 2026-10-25 用户决定：同机隔离（含云端）整体推迟。`isolation.js` 是 runtime 与 HostPort adapter 共用的唯一隔离判定点，策略写在代码内，不读取工具参数、provider 配置或环境变量。local 与 managed 在登录、票据、信任根和真实宿主适配等条件满足后均可联网，无需先证明同机隔离。状态及 diagnostics 的 `isolation` 明确返回 `required:false / isolated:false / state:unisolated-development`；运行时首次启动记录一次“未隔离（开发阶段）”警告，重连不重复记录。
 
 恢复隔离门禁前，须完成 local/managed 的进程、凭据、ledger 和 IPC 隔离验收并接入可信能力探测，再修改这一个代码判定点。profile 目录只用于耐久状态分区，不作为隔离证明；host 的去重、真实 flush、登录鉴权、授权及验签要求仍有效。本项策略变更不补齐下述生产 provider/managed 设备凭据缺口，也不代表真实双 DSH 验收通过。
@@ -30,7 +36,7 @@ provider 接口：
 - `submit/reconcileSubmission`：HTTPS 提交前将同一私有请求和幂等键耐久写入独立 outbound 文件；明确拒绝立即删除记录，结果未知保留最多 10 分钟，不盲目重放。全局最多 256 条、每个来源绑定最多 16 条，满时仅对此会话背压；恢复时对同一记录最多调用 3 次 reconcile，次数先落盘。没有 reconcile 端口时同样按操作/重启惰性清理过期记录。过期、重试耗尽或旧格式记录缺失年龄时记 outcome-unknown 诊断并释放元数据，不能宣称远端操作成功或重新发送。
 - `publishConsent`：耐久 outbox 的幂等发布/重新核权端口，只有确认成功后才删除事件；每批仅附事件对应的 `requestId/digest/recipientIds`，不附其他来源、预览或原始签名帧。默认/撤销也须更新平台状态，不能只修改 UI。失败后事件保留，后续 snapshot/操作会重试。
 
-真实 IAM 目前只公开内部 gRPC，没有客户端 HTTPS register/prepare；本次没有发明路径，也没有修改 IAM、网关、契约。根清单 HTTP 分发、上述生产 provider、真实宿主 HostPort 和完整双 DSH 验收仍由主控接线。managed 模式尚未提供设备级联网凭据通道，不把 instance token 当设备令牌使用。
+真实 IAM 已提供设备 Bearer 专用的 `/api/iam/v1/network/register` 与 `/api/iam/v1/network/tickets`；固定根清单与公告端点分别为 `/api/collab/v1/network/keys`、`/api/collab/v1/network/keys/announcement`。这些正式控制面契约与首次 READY 原语已存在，但默认入口的官方设备 provider、公告持久门槛及同锁首建尚未接通。真实宿主 HostPort 和完整双 DSH 验收仍由后续任务接线。managed 模式尚未提供设备级联网凭据通道，不把 instance token 当设备令牌使用。
 
 本地 UI 通过 `/auriga/local-login/consent/{snapshot,decide,default,revoke}` 接真实 consent。路由先经过原生 admission/同源检查，再以当前 HTTP 请求绑定用户、检查本机登录与写请求 CSRF；浏览器不能声明主体或来源。视图沿用显式字段投影，不返回 ownershipRevision、授权证明、摘要、内部决策原因或 outbox。
 

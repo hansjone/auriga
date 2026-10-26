@@ -97,6 +97,13 @@ remains unconfigured. No test roots are supplied by default. Static pins do not
 replace future online IAM/keyset/announcement checks. Production networking,
 first-start ledger/incarnation bootstrap and two-DSH delivery remain separate work.
 
+The current server binds an ingress to its first complete READY request. Reusing
+that ingress with a new request ID, channel nonce or boot ID returns
+`network.conflict`; only an exact READY replay is accepted. The internal bootstrap
+helper does not return a session context to transfer. Default device networking
+therefore still needs an agreed handshake handoff before it can expose connected
+status. See [the network integration boundary](src/network/README.zh.md).
+
 Protocol major version: **1** (`Auriga-Protocol: 1`).
 
 ```powershell
