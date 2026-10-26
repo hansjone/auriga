@@ -85,18 +85,19 @@ final class NetworkSourceControl {
     try {
       acquire(gate, slot, holder);
       acquired = true;
-      ObjectNode result =
+      SourceResult response =
           switch (definition) {
             case "SourceRegister" -> register(gate, bytes, invalid);
-            case "SourceGet" -> get(gate);
-            case "SourceRevoke" -> revoke(gate, bytes);
+            case "SourceGet" -> new SourceResult(get(gate), true);
+            case "SourceRevoke" -> new SourceResult(revoke(gate, bytes), true);
             default -> throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
           };
+      ObjectNode result = response.frame();
       Instant until = wire.refreshSourceGate(gate);
       return transaction(
           s -> {
-            if ("not_accepted".equals(text(result, "result"))) wire.lockSourceErrorGate(gate);
-            else wire.lockSourceGate(gate, true);
+            if (response.frameFence()) wire.lockSourceGate(gate, true);
+            else wire.lockSourceErrorGate(gate);
             requireSlot(gate, slot, holder);
             if ("SourceGet".equals(definition)) finalObservation(gate, result);
             Instant signingUntil =
@@ -195,7 +196,9 @@ final class NetworkSourceControl {
 
   private record PreparedRegister(Map<String, Object> row, boolean existing) {}
 
-  private ObjectNode register(SourceGate gate, byte[] bytes, boolean invalid) {
+  private record SourceResult(ObjectNode frame, boolean frameFence) {}
+
+  private SourceResult register(SourceGate gate, byte[] bytes, boolean invalid) {
     var frame = gate.request();
     String op = text(frame, "operation_id");
     String business = NetworkJson.canonical(business(frame));
@@ -207,6 +210,12 @@ final class NetworkSourceControl {
               if (original != null) {
                 owned(gate, original);
                 require(business.equals(original.get("business_json")), NetworkErrors.CONFLICT);
+                if ("not_accepted".equals(original.get("status"))) {
+                  validateLocalTombstone(original);
+                  // Current IAM verified node ownership comes from sourceGate, never wire owner
+                  // fields or client_account. Recovery still requires the current READY/health/CAS.
+                  wire.lockSourceGate(gate, true);
+                }
                 if (invalid && "pending".equals(original.get("status")))
                   throw new AurigaException(UNKNOWN);
                 return new PreparedRegister(original, true);
@@ -288,8 +297,11 @@ final class NetworkSourceControl {
                 || "reconcile".equals(text(frame, "mode"))
                 || !sameConnection);
     if (!"pending".equals(pending.get("status")) && !receiptRead) {
-      require(sameConnection, UNKNOWN);
-      return result(pending);
+      if (!"not_accepted".equals(pending.get("status"))) require(sameConnection, UNKNOWN);
+      // New pre-pending failures can describe invalid frame fences. Historical recovery must
+      // instead pass the current full frame fence again in the final signing transaction.
+      return new SourceResult(
+          result(pending), prepared.existing() || !"not_accepted".equals(pending.get("status")));
     }
     try {
       var original = frozenRegister(pending);
@@ -380,9 +392,57 @@ final class NetworkSourceControl {
                 complete(current, state, response.toByteArray(), responseFrame);
                 return responseFrame;
               });
-      return value;
+      return new SourceResult(value, true);
     } catch (RuntimeException e) {
       // No ordinary RPC, storage or post-pending validation failure is a negative receipt.
+      throw new AurigaException(UNKNOWN);
+    }
+  }
+
+  private static void validateLocalTombstone(Map<String, Object> row) {
+    try {
+      var original = NetworkAuthorityConnection.parseFrom((byte[]) row.get("original_connection"));
+      var frame = NetworkJson.parse((byte[]) row.get("original_frame"));
+      String business = NetworkJson.canonical(business(frame));
+      String digest = NetworkJson.digest(NetworkJson.parse(business));
+      var expected =
+          registerResult(
+              row.get("operation_id").toString(),
+              "not_accepted",
+              null,
+              NetworkJson.object()
+                  .put("authority", "collab")
+                  .put("reason", "rejected_before_pending")
+                  .put("request_digest", digest));
+      require(
+          original.getTenantId().equals(tenant().toString())
+              && original.getRealm().equals(row.get("realm"))
+              && original.getNode().equals(row.get("node_id"))
+              && !original.getIngress().isBlank()
+              && !original.getServerId().isBlank()
+              && !original.getClientId().isBlank()
+              && !original.getClientAccount().isBlank()
+              && "source_register".equals(text(frame, "type"))
+              && text(frame, "operation_id").equals(row.get("operation_id"))
+              && text(frame, "boot_id").equals(row.get("boot_id"))
+              // The original frame may itself have failed its epoch fence before pending.
+              && ((Number) row.get("epoch")).longValue() > 0
+              && business.equals(row.get("business_json"))
+              && digest.equals(row.get("request_digest"))
+              && expected.equals(result(row))
+              && row.get("iam_request") == null
+              && row.get("iam_request_json") == null
+              && row.get("iam_response") == null
+              && row.get("lineage_id") == null
+              && Objects.equals(
+                  frame.hasNonNull("native_witness")
+                      ? NetworkJson.canonical(frame.path("native_witness"))
+                      : null,
+                  row.get("witness_json"))
+              && row.get("stop_version") == null
+              && row.get("permission_version") == null,
+          UNKNOWN);
+    } catch (RuntimeException | com.google.protobuf.InvalidProtocolBufferException e) {
       throw new AurigaException(UNKNOWN);
     }
   }

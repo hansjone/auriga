@@ -20,7 +20,9 @@ import io.grpc.*;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.StreamObserver;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
+import java.security.Signature;
 import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -61,14 +63,20 @@ class NetworkSourceControlPostgresTest {
 
   static class Authority extends NetworkAuthorityGrpcTest.Authority {
     final Set<String> invalid = ConcurrentHashMap.newKeySet();
+    final Set<NetworkAuthorityConnection> wrongOwner = ConcurrentHashMap.newKeySet();
+    volatile Runnable beforeResolveReply = () -> {};
 
     @Override
     public void resolveNetworkTarget(
         ResolveNetworkTargetRequest r, StreamObserver<ResolveNetworkTargetResponse> o) {
-      if (invalid.contains(r.getConnection().getIngress())) {
+      if (invalid.contains(r.getConnection().getIngress())
+          || wrongOwner.contains(r.getConnection())) {
         o.onNext(ResolveNetworkTargetResponse.newBuilder().setAllowed(false).build());
         o.onCompleted();
-      } else super.resolveNetworkTarget(r, o);
+      } else {
+        beforeResolveReply.run();
+        super.resolveNetworkTarget(r, o);
+      }
     }
   }
 
@@ -414,6 +422,7 @@ class NetworkSourceControlPostgresTest {
 
   @AfterEach
   void reset() {
+    authority.beforeResolveReply = () -> {};
     peer.afterRegister = () -> {};
     peer.afterGet = () -> {};
     peer.afterRevoke = () -> {};
@@ -599,6 +608,297 @@ class NetworkSourceControlPostgresTest {
                 "SELECT * FROM collab.network_source_operation WHERE tenant_id=? AND method='Register' AND operation_id=?",
                 TENANT,
                 request.path("operation_id").asString()));
+  }
+
+  @Test
+  void localNotAcceptedLostReplyRecoversAcrossConnectionsWithoutIamSourceCalls() throws Exception {
+    int registrations = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    for (String cause :
+        List.of("expired_native", "invalid_field", "stale_epoch", "absent_reconcile")) {
+      var first = fresh();
+      var request = frame(first, "source_register");
+      switch (cause) {
+        case "expired_native" ->
+            ((ObjectNode) request.path("native_witness"))
+                .put("observed_at", now().minusSeconds(40).toString())
+                .put("valid_until", now().minusSeconds(10).toString());
+        case "invalid_field" -> request.put("scope", "invalid");
+        case "stale_epoch" -> request.put("epoch", "99");
+        case "absent_reconcile" -> request.put("mode", "reconcile").putNull("native_witness");
+        default -> throw new AssertionError(cause);
+      }
+      // The client loses this response; only the committed PG tombstone survives a new wire
+      // instance.
+      var lost = register(first, request);
+      assertEquals("not_accepted", lost.path("result").asString(), lost.toString());
+      var saved = operationRow(request);
+      assertNull(saved.get("iam_request"));
+      var current = reconnect(first);
+      wire = newWire();
+      var retry = reconcile(current, request);
+      for (int attempt = 0; attempt < 3; attempt++) {
+        retry.put("request_id", "tombstone-" + UUID.randomUUID());
+        var recovered = register(current, retry);
+        assertRecoveredTombstone(saved, current, retry, recovered);
+        assertTombstoneUnchanged(saved, operationRow(request));
+      }
+      // A late issue with fresh native still replays the original permanent failure.
+      retry.put("mode", "issue").set("native_witness", witness(current));
+      assertRecoveredTombstone(saved, current, retry, register(current, retry));
+      assertTombstoneUnchanged(saved, operationRow(request));
+      NetworkAuthorityGrpcTest.denied(() -> register(first, request), "network.unauthorized");
+      assertEquals(0, sourceCount(current));
+      assertEquals(
+          Integer.valueOf(0),
+          db(
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab.network_source_outbox WHERE tenant_id=? AND operation_id=?",
+                      Integer.class,
+                      TENANT,
+                      saved.get("id"))));
+    }
+    assertEquals(registrations, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  static void assertRecoveredTombstone(
+      Map<String, Object> saved, Fixture current, ObjectNode request, JsonNode response)
+      throws Exception {
+    assertEquals("not_accepted", response.path("result").asString(), response.toString());
+    var businessResult = (ObjectNode) response.deepCopy();
+    businessResult.remove("request_id");
+    businessResult.remove("server_auth");
+    assertEquals(NetworkJson.parse(saved.get("result_json").toString()), businessResult);
+    assertEquals(request.path("request_id"), response.path("request_id"));
+    assertEquals("2", response.path("server_auth").path("audience").path("epoch").asString());
+    assertEquals(
+        current.ready().path("channel_nonce"), response.path("server_auth").path("channel_nonce"));
+    assertEquals(request.path("request_id"), response.path("server_auth").path("request_id"));
+    var unsigned = (ObjectNode) response.deepCopy();
+    String signature = unsigned.path("server_auth").path("signature").asString();
+    ((ObjectNode) unsigned.path("server_auth")).remove("signature");
+    var verifier = Signature.getInstance("Ed25519");
+    verifier.initVerify(keys.publicKey("source-test"));
+    verifier.update("Auriga.ServerEnvelope.v1\0".getBytes(StandardCharsets.UTF_8));
+    verifier.update(bytes(unsigned));
+    assertTrue(verifier.verify(Base64.getUrlDecoder().decode(signature)));
+  }
+
+  static void assertTombstoneUnchanged(Map<String, Object> before, Map<String, Object> after) {
+    assertEquals(before.keySet(), after.keySet());
+    before.forEach(
+        (key, value) -> {
+          if (value instanceof byte[] original)
+            assertArrayEquals(original, (byte[]) after.get(key), key);
+          else assertEquals(value, after.get(key), key);
+        });
+  }
+
+  @Test
+  void localTombstoneRecoveryRejectsDifferentBodiesNodesTenantsAndOriginalAssociations()
+      throws Exception {
+    var first = fresh();
+    var request =
+        frame(first, "source_register").put("mode", "reconcile").putNull("native_witness");
+    assertEquals("not_accepted", register(first, request).path("result").asString());
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    int registrations = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    code("conflict", register(current, retry.deepCopy().put("expected_revision", "1")));
+    var other = fresh();
+    code("unauthorized", register(other, reconcile(other, request)));
+    var foreign = current.c().toBuilder().setTenantId(UUID.randomUUID().toString()).build();
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> wire.sourceRegister(foreign, bytes(retry))), "common.forbidden");
+    var original = NetworkAuthorityConnection.parseFrom((byte[]) saved.get("original_connection"));
+    for (var corrupted :
+        List.of(
+            original.toBuilder().setTenantId(UUID.randomUUID().toString()).build(),
+            original.toBuilder().setNode(other.c().getNode()).build(),
+            original.toBuilder().setRealm("999").build())) {
+      db(
+          () ->
+              jdbc.update(
+                  "UPDATE collab.network_source_operation SET original_connection=? WHERE tenant_id=? AND id=?",
+                  corrupted.toByteArray(),
+                  TENANT,
+                  saved.get("id")));
+      code("outcome_unknown", register(current, retry));
+    }
+    db(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_source_operation SET original_connection=? WHERE tenant_id=? AND id=?",
+                original.toByteArray(),
+                TENANT,
+                saved.get("id")));
+    assertRecoveredTombstone(saved, current, retry, register(current, retry));
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(registrations, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  @Test
+  void incompleteLocalTombstoneHistoryStaysUnknownWithoutRepairOrIamCalls() {
+    var first = fresh();
+    var request =
+        frame(first, "source_register").put("mode", "reconcile").putNull("native_witness");
+    assertEquals("not_accepted", register(first, request).path("result").asString());
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    int registrations = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    var wrongFrame = request.deepCopy().put("operation_id", "another-op");
+    for (String column :
+        List.of(
+            "request_digest",
+            "result_json",
+            "original_frame",
+            "boot_id",
+            "epoch",
+            "business_json")) {
+      Object bad =
+          switch (column) {
+            case "request_digest" -> "sha256:" + "b".repeat(64);
+            case "result_json" ->
+                saved
+                    .get("result_json")
+                    .toString()
+                    .replace("rejected_before_pending", "another_reason");
+            case "original_frame" -> bytes(wrongFrame);
+            case "boot_id" -> "another-boot";
+            case "epoch" -> 0L;
+            case "business_json" -> "{}";
+            default -> throw new AssertionError(column);
+          };
+      // Column names are a fixed test list, never input from a wire request.
+      db(
+          () ->
+              jdbc.update(
+                  "UPDATE collab.network_source_operation SET "
+                      + column
+                      + "=? WHERE tenant_id=? AND id=?",
+                  bad,
+                  TENANT,
+                  saved.get("id")));
+      code(
+          "business_json".equals(column) ? "conflict" : "outcome_unknown",
+          register(current, retry));
+      db(
+          () ->
+              jdbc.update(
+                  "UPDATE collab.network_source_operation SET "
+                      + column
+                      + "=? WHERE tenant_id=? AND id=?",
+                  saved.get(column),
+                  TENANT,
+                  saved.get("id")));
+    }
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(registrations, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  @Test
+  void localTombstoneRecoveryRequiresLiveReadyHealthyCurrentConnectionAndFrameFences()
+      throws Exception {
+    var first = fresh();
+    var request =
+        frame(first, "source_register").put("mode", "reconcile").putNull("native_witness");
+    assertEquals("not_accepted", register(first, request).path("result").asString());
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    int registrations = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    code("stale_epoch", register(current, retry.deepCopy().put("epoch", "1")));
+    code("stale_epoch", register(current, retry.deepCopy().put("boot_id", "old-boot")));
+    db(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_node SET local_identity_status='identity_rollback' WHERE tenant_id=? AND node_id=?",
+                TENANT,
+                current.c().getNode()));
+    code("identity_rollback", register(current, retry));
+    db(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_node SET local_identity_status='healthy',wire_status='reconciling' WHERE tenant_id=? AND node_id=?",
+                TENANT,
+                current.c().getNode()));
+    NetworkAuthorityGrpcTest.denied(() -> register(current, retry), "network.recovery_conflict");
+    db(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_node SET wire_status='ready' WHERE tenant_id=? AND node_id=?",
+                TENANT,
+                current.c().getNode()));
+    authority.expired = true;
+    try {
+      NetworkAuthorityGrpcTest.denied(() -> register(current, retry), "network.unauthorized");
+    } finally {
+      authority.expired = false;
+    }
+    authority.invalid.add(current.c().getIngress());
+    NetworkAuthorityGrpcTest.denied(() -> register(current, retry), "network.unauthorized");
+    authority.invalid.remove(current.c().getIngress());
+    // IAM's authoritative fixture rejects an exact current association with a changed owner.
+    authority.wrongOwner.add(current.c());
+    try {
+      NetworkAuthorityGrpcTest.denied(() -> register(current, retry), "network.unauthorized");
+    } finally {
+      authority.wrongOwner.remove(current.c());
+    }
+    assertRecoveredTombstone(saved, current, retry, register(current, retry));
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(registrations, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  @Test
+  void localTombstoneRecoveryRechecksHealthInFinalSigningTransaction() {
+    var first = fresh();
+    var request =
+        frame(first, "source_register").put("mode", "reconcile").putNull("native_witness");
+    assertEquals("not_accepted", register(first, request).path("result").asString());
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    int registrations = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    var resolves = new AtomicInteger();
+    authority.beforeResolveReply =
+        () -> {
+          if (resolves.incrementAndGet() == 2)
+            db(
+                () ->
+                    jdbc.update(
+                        "UPDATE collab.network_node SET local_identity_status='identity_rollback' WHERE tenant_id=? AND node_id=?",
+                        TENANT,
+                        current.c().getNode()));
+        };
+    // First gate and history checks pass; health changes during the final outside-transaction IAM
+    // refresh.
+    code("identity_rollback", register(current, retry));
+    assertEquals(2, resolves.get());
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(registrations, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
   }
 
   @Test
