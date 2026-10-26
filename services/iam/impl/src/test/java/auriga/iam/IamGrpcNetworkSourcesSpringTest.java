@@ -19,6 +19,40 @@ import org.springframework.mock.env.MockEnvironment;
 
 class IamGrpcNetworkSourcesSpringTest {
   @Test
+  void receiptWrapperRequiresOriginalAndRejectsUnknownFieldsBeforeDatabaseAccess() {
+    var store = mock(IamStore.class);
+    var network = mock(IamNetworkAuthority.class);
+    var devices = mock(DeviceAccessAuthority.class);
+    var org = mock(auriga.iam.api.InstanceAiAuthorization.class);
+    var authority =
+        new IamNetworkSourceAuthority(
+            store,
+            network,
+            devices,
+            org,
+            Clock.systemUTC(),
+            new IamNetworkSourceAuthority.Policy(0, 0));
+    var unknown =
+        com.google.protobuf.UnknownFieldSet.newBuilder()
+            .addField(
+                100, com.google.protobuf.UnknownFieldSet.Field.newBuilder().addVarint(1).build())
+            .build();
+    for (var request :
+        List.of(
+            ReadAgentSourceReceiptRequest.getDefaultInstance(),
+            ReadAgentSourceReceiptRequest.newBuilder()
+                .setOriginalRequest(new NetworkSourceBoundaryTest().request())
+                .setUnknownFields(unknown)
+                .build()))
+      IamGrpcDevicesSpringTest.error(
+          "common.validation_failed", () -> authority.readReceipt(request));
+    IamGrpcDevicesSpringTest.error("common.validation_failed", () -> authority.readReceipt(null));
+    verify(store, times(2)).networkJdbc();
+    verifyNoMoreInteractions(store);
+    verifyNoInteractions(network, devices, org);
+  }
+
+  @Test
   void everyGetReachesCurrentOrgGateEvenWhenIssuanceIsDisabled() {
     // Ordering boundary only. Actual terminal rows/identities/transactions are covered by PG.
     var fixture = new NetworkSourceBoundaryTest();
@@ -159,9 +193,13 @@ class IamGrpcNetworkSourcesSpringTest {
                   new NetworkSourceBoundaryTest()
                       .request().getConnection().toBuilder().setTenantId(tenant.toString()).build();
               var register = RegisterAgentSourceRequest.newBuilder().setConnection(c).build();
+              var receipt =
+                  ReadAgentSourceReceiptRequest.newBuilder().setOriginalRequest(register).build();
               var get = GetAgentSourceRequest.newBuilder().setConnection(c).build();
               var revoke = RevokeAgentSourceRequest.newBuilder().setConnection(c).build();
               when(authority.register(register))
+                  .thenReturn(RegisterAgentSourceResponse.getDefaultInstance());
+              when(authority.readReceipt(receipt))
                   .thenReturn(RegisterAgentSourceResponse.getDefaultInstance());
               when(authority.get(get)).thenReturn(GetAgentSourceResponse.getDefaultInstance());
               when(authority.revoke(revoke))
@@ -199,6 +237,9 @@ class IamGrpcNetworkSourcesSpringTest {
                           RegisterAgentSourceResponse.getDefaultInstance(),
                           stub.registerAgentSource(register));
                       assertEquals(
+                          RegisterAgentSourceResponse.getDefaultInstance(),
+                          stub.readAgentSourceReceipt(receipt));
+                      assertEquals(
                           GetAgentSourceResponse.getDefaultInstance(), stub.getAgentSource(get));
                       assertEquals(
                           RevokeAgentSourceResponse.getDefaultInstance(),
@@ -212,6 +253,9 @@ class IamGrpcNetworkSourcesSpringTest {
                         doThrow(new auriga.common.error.AurigaException(error))
                             .when(authority)
                             .register(register);
+                        doThrow(new auriga.common.error.AurigaException(error))
+                            .when(authority)
+                            .readReceipt(receipt);
                         io.grpc.Status.Code status =
                             switch (error.code()) {
                               case "common.conflict" -> io.grpc.Status.Code.ABORTED;
@@ -222,8 +266,30 @@ class IamGrpcNetworkSourcesSpringTest {
                             };
                         IamGrpcNetworkAuthoritySpringTest.grpc(
                             status, () -> stub.registerAgentSource(register));
+                        IamGrpcNetworkAuthoritySpringTest.grpc(
+                            status, () -> stub.readAgentSourceReceipt(receipt));
                       }
                       var other = open.apply(edge);
+                      doThrow(new IllegalStateException("private database failure"))
+                          .when(authority)
+                          .readReceipt(receipt);
+                      IamGrpcNetworkAuthoritySpringTest.grpc(
+                          io.grpc.Status.Code.UNAVAILABLE,
+                          () -> stub.readAgentSourceReceipt(receipt));
+                      IamGrpcNetworkAuthoritySpringTest.grpc(
+                          io.grpc.Status.Code.PERMISSION_DENIED,
+                          () -> other.readAgentSourceReceipt(receipt));
+                      IamGrpcNetworkAuthoritySpringTest.grpc(
+                          io.grpc.Status.Code.PERMISSION_DENIED,
+                          () ->
+                              stub.readAgentSourceReceipt(
+                                  receipt.toBuilder()
+                                      .setOriginalRequest(
+                                          register.toBuilder()
+                                              .setConnection(
+                                                  c.toBuilder()
+                                                      .setTenantId(UUID.randomUUID().toString())))
+                                      .build()));
                       IamGrpcNetworkAuthoritySpringTest.grpc(
                           io.grpc.Status.Code.PERMISSION_DENIED, () -> other.getAgentSource(get));
                       IamGrpcNetworkAuthoritySpringTest.grpc(
@@ -237,11 +303,20 @@ class IamGrpcNetworkSourcesSpringTest {
                     });
                 IamGrpcNetworkAuthoritySpringTest.grpc(
                     io.grpc.Status.Code.PERMISSION_DENIED, () -> stub.getAgentSource(get));
+                IamGrpcNetworkAuthoritySpringTest.grpc(
+                    io.grpc.Status.Code.PERMISSION_DENIED,
+                    () -> stub.readAgentSourceReceipt(receipt));
                 TenantContext.run(
                     TenantContext.PLATFORM_TENANT,
                     () ->
                         IamGrpcNetworkAuthoritySpringTest.grpc(
                             io.grpc.Status.Code.INVALID_ARGUMENT, () -> stub.getAgentSource(get)));
+                TenantContext.run(
+                    TenantContext.PLATFORM_TENANT,
+                    () ->
+                        IamGrpcNetworkAuthoritySpringTest.grpc(
+                            io.grpc.Status.Code.INVALID_ARGUMENT,
+                            () -> stub.readAgentSourceReceipt(receipt)));
                 for (String type : List.of("user", "device")) {
                   String token =
                       tokens.access(
@@ -256,6 +331,12 @@ class IamGrpcNetworkSourcesSpringTest {
                           null,
                           "openid");
                   var external = open.apply(token);
+                  TenantContext.run(
+                      tenant,
+                      () ->
+                          IamGrpcNetworkAuthoritySpringTest.grpc(
+                              io.grpc.Status.Code.UNAUTHENTICATED,
+                              () -> external.readAgentSourceReceipt(receipt)));
                   TenantContext.run(
                       tenant,
                       () ->

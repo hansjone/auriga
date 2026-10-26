@@ -23,6 +23,9 @@ import {
   isDeviceRevocationError,
   DeviceControlUnavailable,
 } from './device-provider.js';
+import { createSourceControl } from './source-control/controller.js';
+import { connectionSourceClient } from './source-control/connection.js';
+import { stopSource } from './source-control/state.js';
 
 // At most 64 pending protocol payloads (each already bounded by NatsLink).
 const MESSAGE_QUEUE_CAPACITY = 64;
@@ -166,8 +169,8 @@ async function normalReady(transport, trust, state, signal, now) {
   }
 }
 
-/** Base connection plus an optional, explicitly invoked registration capability.
- * No consent, source, FETCH, receipt or SEND. One writer spans C1, C2 and join.
+/** Base connection, explicit registration and automatic internal source control.
+ * No consent, FETCH, receipt or SEND. One writer spans all capabilities.
  * @param {import('./runtime-types.js').ConnectionRuntimeOptions} options */
 export async function openConnectionRuntime(options) {
   const { prepared } = options,
@@ -214,7 +217,22 @@ export async function openConnectionRuntime(options) {
   /** @type {any} */
   let hostInjection;
   let registrationWork = Promise.resolve();
-  function retireRegistration() {
+  /** Exact local stop snapshot alone may cross shutdown, never protocol writes. */
+  let shutdownSnapshot = /** @type {unknown} */ (undefined);
+  /** @type {ReturnType<typeof createSourceControl>|undefined} */
+  let sourceCapability;
+  /** @type {AbortController|undefined} */ let sourceController;
+  /** @type {Set<ReturnType<typeof createSourceControl>>} */ const sources =
+    new Set();
+  function retireRegistration(retireSource = true) {
+    if (retireSource) {
+      sourceController?.abort();
+      sourceController = undefined;
+      const retired = sourceCapability;
+      retired?.close();
+      if (retired) void retired.idle().then(() => sources.delete(retired));
+      sourceCapability = undefined;
+    }
     registrationController?.abort();
     registrationController = undefined;
     registrationCapability?.close();
@@ -225,15 +243,54 @@ export async function openConnectionRuntime(options) {
     const entry = currentConnection;
     const ledger = sessionLedger;
     const trust = connectionTrust;
-    if (
-      !connected ||
-      closed ||
-      !hostContext ||
-      !entry?.proof ||
-      !ledger ||
-      !trust
-    )
-      return;
+    if (!connected || closed || !entry?.proof || !ledger || !trust) return;
+    const sourceAbort = new AbortController();
+    sourceController = sourceAbort;
+    const sourceEpoch = entry.transport.epoch,
+      sourceProof = entry.proof;
+    const sourceCurrent = () => {
+      active();
+      sourceAbort.signal.throwIfAborted();
+      trust.assertUsable();
+      if (
+        !connected ||
+        currentConnection !== entry ||
+        !entry.live ||
+        entry.transport.state !== 'ready' ||
+        entry.transport.epoch !== sourceEpoch ||
+        entry.proof !== sourceProof
+      )
+        throw new Error('source connection changed');
+    };
+    const source = createSourceControl({
+      ledger,
+      getContext: () => hostContext,
+      ready: sourceProof,
+      now,
+      assertCurrent: sourceCurrent,
+      onStorageFailure: () => {
+        void close('storage_failure').catch(() => {});
+      },
+      request: connectionSourceClient({
+        transport: entry.facade,
+        trust,
+        identity: ledger.identity,
+        ready: sourceProof,
+        signal: sourceAbort.signal,
+        assertCurrent: sourceCurrent,
+        now,
+      }),
+    });
+    sourceCapability = source;
+    sources.add(source);
+    registrationWork = registrationWork.then(async () => {
+      try {
+        await source.start();
+      } catch {
+        /* Base connection stays available. */
+      }
+    });
+    if (!hostContext) return;
     const abort = new AbortController();
     registrationController = abort;
     const epoch = entry.transport.epoch;
@@ -259,6 +316,7 @@ export async function openConnectionRuntime(options) {
       onStorageFailure: () => {
         void close('storage_failure').catch(() => {});
       },
+      onRegistered: (local) => source.establish(local),
       registerLocal: connectionRegistrar({
         transport: entry.facade,
         trust,
@@ -315,15 +373,18 @@ export async function openConnectionRuntime(options) {
   }
   /** @param {import('./host/store.js').LedgerStoreHandle} h */
   function guarded(h) {
+    const writable = (/** @type {unknown} */ value) => {
+      if (value !== shutdownSnapshot) active();
+    };
     return {
       load: () => h.load(),
       async commit(/** @type {unknown} */ value) {
-        active();
+        writable(value);
         const writing = h.commit(value);
         writes.add(writing);
         try {
           await writing;
-          active();
+          writable(value);
         } catch (error) {
           void close('storage_failure').catch(() => {});
           throw error;
@@ -622,12 +683,59 @@ export async function openConnectionRuntime(options) {
             (/** @type {any} */ ctx) => {
               hostContext = ctx;
               installRegistration();
+              const stopSession = (/** @type {string} */ id) => {
+                for (const e of Object.values(
+                  sessionLedger?.peek().sourceControl?.entries ?? {},
+                ))
+                  if (e.mapping.hostSessionId === id) {
+                    if (sourceCapability)
+                      void sourceCapability
+                        .stop(e.local, 'host_closed')
+                        .catch(() => {});
+                    else
+                      void sessionLedger
+                        ?.update((draft) =>
+                          stopSource(draft, e.local, 'host_closed'),
+                        )
+                        .catch(() => {});
+                  }
+              };
+              // Documented rc.2 lifecycle hooks; every operation also probes
+              // live objects, archive set and provider after each await.
+              const disposers =
+                typeof ctx.on === 'function'
+                  ? [
+                      ctx.on('session/disposed', (/** @type {any} */ session) =>
+                        stopSession(session.id),
+                      ),
+                      ctx.on('agent/disposed', (/** @type {any} */ payload) =>
+                        stopSession(payload.agent.id),
+                      ),
+                      ctx.on(
+                        'workspace/session-stop',
+                        (/** @type {any} */ request) =>
+                          stopSession(request.sessionId),
+                      ),
+                    ]
+                  : [];
               ctx.effect(
                 () => () => {
                   if (hostContext === ctx) {
                     hostContext = undefined;
-                    retireRegistration();
+                    if (sourceCapability)
+                      void sourceCapability.stopAll().catch(() => {});
+                    else
+                      void sessionLedger
+                        ?.update((draft) => {
+                          for (const local of Object.keys(
+                            draft.sourceControl?.entries ?? {},
+                          ))
+                            stopSource(draft, local, 'host_unavailable');
+                        })
+                        .catch(() => {});
+                    retireRegistration(false);
                   }
+                  for (const dispose of disposers) dispose();
                 },
                 'auriga-dsh: session registration host',
               );
@@ -665,7 +773,18 @@ export async function openConnectionRuntime(options) {
       await Promise.allSettled(stopping);
       await Promise.allSettled([work, handshakes]);
       await registrationWork;
+      await Promise.allSettled([...sources].map((source) => source.idle()));
       await Promise.allSettled([...writes]);
+      if (
+        Object.keys(sessionLedger?.peek().sourceControl?.entries ?? {}).length
+      )
+        await sessionLedger
+          ?.update((draft) => {
+            for (const local of Object.keys(draft.sourceControl?.entries ?? {}))
+              stopSource(draft, local, 'connection_closed');
+            shutdownSnapshot = draft;
+          })
+          .catch(() => {});
       await Promise.allSettled([
         sessionLedger?.close(),
         Promise.resolve().then(() => hostInjection?.dispose()),
@@ -689,7 +808,7 @@ export async function openConnectionRuntime(options) {
       };
     },
     get status() {
-      let ready = !closed && connected;
+      let ready = !closed && !closing && connected;
       if (ready) {
         try {
           connectionTrust?.assertUsable();

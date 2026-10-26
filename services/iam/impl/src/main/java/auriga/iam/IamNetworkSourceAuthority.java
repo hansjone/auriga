@@ -95,6 +95,20 @@ final class IamNetworkSourceAuthority {
         });
   }
 
+  RegisterAgentSourceResponse readReceipt(ReadAgentSourceReceiptRequest r) {
+    require(
+        r != null && r.hasOriginalRequest() && r.getUnknownFields().asMap().isEmpty(),
+        VALIDATION_FAILED);
+    return tx(
+        () -> {
+          // This path must never fall back to register: a miss is only an unknown result.
+          var receipt = kernel.registerReceipt(r.getOriginalRequest());
+          require(receipt != null, UNAVAILABLE);
+          require(receipt.hasSource() != receipt.getDefinitivelyUncommitted(), UNAVAILABLE);
+          return receipt;
+        });
+  }
+
   GetAgentSourceResponse get(GetAgentSourceRequest r) {
     IamNetworkSources.validate(r);
     Instant began = clock.instant();
@@ -124,7 +138,7 @@ final class IamNetworkSourceAuthority {
             require(clock.instant().isBefore(until), FORBIDDEN);
             validUntil = until.toString();
           }
-          return response(r, source, current.revision(), observed, validUntil);
+          return response(r, source, current.revision(), observed, validUntil, view.stopped());
         });
   }
 
@@ -378,7 +392,8 @@ final class IamNetworkSourceAuthority {
       NetworkAgentSource source,
       BigInteger revision,
       Instant observed,
-      String until) {
+      String until,
+      boolean stopped) {
     require(revision != null && revision.signum() > 0 && revision.bitLength() <= 64, UNAVAILABLE);
     return GetAgentSourceResponse.newBuilder()
         .setSource(source)
@@ -386,6 +401,7 @@ final class IamNetworkSourceAuthority {
         .setPolicyRevision(revision.longValue())
         .setObservedAt(observed.toString())
         .setValidUntil(until)
+        .setLineageStopped(stopped)
         .build();
   }
 

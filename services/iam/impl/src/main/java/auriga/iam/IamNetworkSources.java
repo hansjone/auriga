@@ -147,7 +147,8 @@ final class IamNetworkSources {
 
   private record Source(UUID id, UUID chain, UUID anchor, NetworkAgentSource fact) {}
 
-  private record Operation(byte[] digest, byte[] request, byte[] response, UUID source) {}
+  private record Operation(
+      byte[] digest, byte[] request, byte[] response, UUID source, UUID anchor) {}
 
   RegisterAgentSourceResponse registerReceipt(RegisterAgentSourceRequest request) {
     validate(request);
@@ -179,7 +180,8 @@ final class IamNetworkSources {
     Chain chain = chain(r.getRegistrationId(), request.getScopeValue());
     UUID predecessor = null;
     if (chain == null) {
-      check(request.getPredecessorBinding().isEmpty(), CONFLICT);
+      if (!request.getPredecessorBinding().isEmpty())
+        return rejectRegister(request, anchor, "predecessor_not_head");
       retain(anchor);
       chain =
           new Chain(
@@ -193,18 +195,17 @@ final class IamNetworkSources {
           chain.scope(),
           chain.anchor());
     } else {
-      check(!chain.stopped() && Arrays.equals(chain.registration(), r.toByteArray()), CONFLICT);
+      check(Arrays.equals(chain.registration(), r.toByteArray()), CONFLICT);
       check(sameIdentity(anchor(chain.anchor()), anchor), FORBIDDEN);
-      check(
-          !request.getPredecessorBinding().isEmpty()
-              && chain.head() != null
-              && chain.head().toString().equals(request.getPredecessorBinding()),
-          CONFLICT);
+      if (chain.stopped()) return rejectRegister(request, anchor, "lineage_stopped");
+      if (request.getPredecessorBinding().isEmpty()
+          || chain.head() == null
+          || !chain.head().toString().equals(request.getPredecessorBinding()))
+        return rejectRegister(request, anchor, "predecessor_not_head");
       Source previous = observe(source(chain.head(), true));
-      check(
-          previous.fact().getStateValue() == 3
-              && previous.fact().getRevision() == request.getExpectedRevision(),
-          CONFLICT);
+      if (previous.fact().getRevision() != request.getExpectedRevision())
+        return rejectRegister(request, anchor, "revision_mismatch");
+      check(previous.fact().getStateValue() == 3, CONFLICT);
       predecessor = previous.id();
       retain(anchor);
     }
@@ -242,6 +243,71 @@ final class IamNetworkSources {
     var response = RegisterAgentSourceResponse.newBuilder().setSource(fact).build();
     saveOperation("Register", request.getOperationId(), request, response, id);
     return response;
+  }
+
+  /** Caller holds the original operation lock and has proved the current connection/identity. */
+  private RegisterAgentSourceResponse rejectRegister(
+      RegisterAgentSourceRequest request, Anchor anchor, String reason) {
+    retain(anchor);
+    var response =
+        RegisterAgentSourceResponse.newBuilder()
+            .setDefinitivelyUncommitted(true)
+            .setOperationId(request.getOperationId())
+            .setRequestDigest(registerDigest(request))
+            .setRejectionReason(reason)
+            .build();
+    saveOperation("Register", request.getOperationId(), request, response, null, anchor.id());
+    return response;
+  }
+
+  /** Explicit contract JSON: include defaults and encode every uint64 as a decimal string. */
+  static String registerDigest(RegisterAgentSourceRequest request) {
+    var c = request.getConnection();
+    var r = request.getRegistration();
+    return IamNetworkDeliveryJson.digest(
+        Json.object(
+            "connection",
+            Json.object(
+                "tenant_id",
+                c.getTenantId(),
+                "realm",
+                c.getRealm(),
+                "node",
+                c.getNode(),
+                "ingress",
+                c.getIngress(),
+                "server_id",
+                c.getServerId(),
+                "client_id",
+                c.getClientId(),
+                "client_account",
+                c.getClientAccount()),
+            "registration",
+            Json.object(
+                "registration_id",
+                r.getRegistrationId(),
+                "allocation_op_id",
+                r.getAllocationOpId(),
+                "allocation_fingerprint",
+                r.getAllocationFingerprint(),
+                "registration_revision",
+                Long.toUnsignedString(r.getRegistrationRevision()),
+                "realm",
+                r.getRealm(),
+                "node",
+                r.getNode(),
+                "local",
+                r.getLocal(),
+                "address_type",
+                r.getAddressType()),
+            "operation_id",
+            request.getOperationId(),
+            "scope",
+            request.getScope().name(),
+            "expected_revision",
+            Long.toUnsignedString(request.getExpectedRevision()),
+            "predecessor_binding",
+            request.getPredecessorBinding()));
   }
 
   View get(GetAgentSourceRequest request, VerifiedSnapshot verified) {
@@ -286,8 +352,6 @@ final class IamNetworkSources {
     var ids = new TreeSet<UUID>(List.of(initial.id(), chain.head()));
     var locked = new HashMap<UUID, Source>();
     for (UUID id : ids) locked.put(id, source(id, true));
-    Source named = locked.get(initial.id());
-    check(named.fact().getRevision() == request.getExpectedRevision(), CONFLICT);
     jdbc.update(
         "UPDATE iam.network_source_chain SET stopped=true WHERE tenant_id=? AND id=?",
         tenant(),
@@ -497,10 +561,14 @@ final class IamNetworkSources {
   private Operation operation(String method, String id) {
     var rows =
         jdbc.query(
-            "SELECT request_digest,request,response,source_id FROM iam.network_source_operation WHERE tenant_id=? AND method=? AND operation_id=?",
+            "SELECT request_digest,request,response,source_id,anchor_id FROM iam.network_source_operation WHERE tenant_id=? AND method=? AND operation_id=?",
             (rs, i) ->
                 new Operation(
-                    rs.getBytes(1), rs.getBytes(2), rs.getBytes(3), rs.getObject(4, UUID.class)),
+                    rs.getBytes(1),
+                    rs.getBytes(2),
+                    rs.getBytes(3),
+                    rs.getObject(4, UUID.class),
+                    rs.getObject(5, UUID.class)),
             tenant(),
             method,
             id);
@@ -509,9 +577,19 @@ final class IamNetworkSources {
 
   private byte[] receipt(Operation op, Message request) {
     check(
-        Arrays.equals(op.digest(), digest(request.toByteArray()))
+        (Arrays.equals(op.digest(), operationDigest(request))
+                || Arrays.equals(op.digest(), digest(request.toByteArray())))
             && Arrays.equals(op.request(), request.toByteArray()),
         CONFLICT);
+    if (op.source() == null) {
+      check(request instanceof RegisterAgentSourceRequest && op.anchor() != null, UNAVAILABLE);
+      Anchor original = anchor(op.anchor());
+      check(
+          original.connection().equals(((RegisterAgentSourceRequest) request).getConnection()),
+          FORBIDDEN);
+      ownership(original);
+      return op.response();
+    }
     Source source = source(op.source(), false);
     check(source != null, FORBIDDEN);
     Anchor anchor = anchor(source.anchor());
@@ -531,16 +609,22 @@ final class IamNetworkSources {
 
   private void saveOperation(
       String method, String op, Message request, Message response, UUID source) {
+    saveOperation(method, op, request, response, source, null);
+  }
+
+  private void saveOperation(
+      String method, String op, Message request, Message response, UUID source, UUID anchor) {
     jdbc.update(
-        "INSERT INTO iam.network_source_operation(id,tenant_id,method,operation_id,request_digest,request,response,source_id) VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO iam.network_source_operation(id,tenant_id,method,operation_id,request_digest,request,response,source_id,anchor_id) VALUES (?,?,?,?,?,?,?,?,?)",
         UuidV7.next(),
         tenant(),
         method,
         op,
-        digest(request.toByteArray()),
+        operationDigest(request),
         request.toByteArray(),
         response.toByteArray(),
-        source);
+        source,
+        anchor);
   }
 
   private Object transaction() {
@@ -582,7 +666,6 @@ final class IamNetworkSources {
     connection(r.getConnection());
     opaque(r.getOperationId());
     unknown(r);
-    check(r.getExpectedRevision() != 0, VALIDATION_FAILED);
   }
 
   static void validate(GetAgentSourceRequest r) {
@@ -654,6 +737,13 @@ final class IamNetworkSources {
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  private static byte[] operationDigest(Message request) {
+    // Existing immutable receipts used protobuf bytes; new Register rows store the contract digest.
+    return request instanceof RegisterAgentSourceRequest r
+        ? HexFormat.of().parseHex(registerDigest(r).substring(7))
+        : digest(request.toByteArray());
   }
 
   private static <T> T parse(byte[] bytes, Parser<T> parser) {

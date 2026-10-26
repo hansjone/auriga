@@ -204,7 +204,7 @@ class NetworkSourceStorePostgresTest {
   void healthyConnectionGetsNewGenerationAndOldReceiptsNeverChange() {
     var r1 = request("first");
     var b1 = register(r1).getSource();
-    code("common.conflict", () -> register(request("duplicate-first")));
+    rejected(request("duplicate-first"), "predecessor_not_head");
     code("common.conflict", () -> register(successor(b1, "active-predecessor")));
     var terminal = expired(b1);
     var r2 = successor(terminal, "second");
@@ -217,10 +217,10 @@ class NetworkSourceStorePostgresTest {
     assertTrue(Instant.parse(b2.getExpiresAt()).isAfter(Instant.parse(b1.getExpiresAt())));
     assertEquals(b1, tx(() -> sources.registerReceipt(r1)).getSource());
     assertEquals(terminal, get(b1).source());
-    code("common.conflict", () -> register(successor(terminal, "fork")));
-    code(
-        "common.conflict",
-        () -> register(r2.toBuilder().setExpectedRevision(1).setOperationId("stale").build()));
+    rejected(successor(terminal, "fork"), "predecessor_not_head");
+    rejected(
+        r2.toBuilder().setExpectedRevision(1).setOperationId("stale").build(),
+        "predecessor_not_head");
   }
 
   @Test
@@ -265,11 +265,74 @@ class NetworkSourceStorePostgresTest {
     assertEquals(2, head.source().getStateValue());
     assertEquals(2, head.source().getRevision());
     assertEquals(response, tx(() -> sources.revoke(stop)));
-    code("common.conflict", () -> register(successor(head.source(), "after-stop")));
+    rejected(successor(head.source(), "after-stop"), "lineage_stopped");
     assertEquals(b1, tx(() -> sources.registerReceipt(r)).getSource());
     assertEquals(
         response.getSource(),
         tx(() -> sources.revoke(revokeRequest(e1, "stop-again"))).getSource());
+  }
+
+  @Test
+  void rejectionRaceCommitsOneReceiptAndIndependentAnchorWithoutCreatingSource() throws Exception {
+    var first = register(request("first")).getSource();
+    var terminal = expired(first);
+    var stale = successor(first, "stale");
+    var results = race(() -> register(stale), () -> register(stale));
+    assertEquals(results.getFirst(), results.getLast());
+    assertEquals("revision_mismatch", results.getFirst().getRejectionReason());
+    assertFalse(results.getFirst().hasSource());
+    assertEquals(1, count("network_source"));
+    assertEquals(2, count("network_source_operation"));
+    assertEquals(2, count("network_source_anchor"));
+    assertEquals(
+        results.getFirst().getRequestDigest().substring(7),
+        tx(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT encode(request_digest,'hex') FROM iam.network_source_operation WHERE tenant_id=? AND operation_id='stale'",
+                    String.class,
+                    tenant)));
+    var next = register(successor(terminal, "next")).getSource();
+    assertEquals(results.getFirst(), register(stale));
+    assertEquals(1, get(next).source().getStateValue());
+    code("common.conflict", () -> register(stale.toBuilder().setExpectedRevision(2).build()));
+    tx(
+        () ->
+            sources.revoke(
+                revokeRequest(first, "stop").toBuilder().clearExpectedRevision().build()));
+    assertEquals(results.getFirst(), register(stale));
+    clock.advance(3601);
+    assertTrue(new NetworkIngressCleanup(store, clock).sweepOnce() > 0);
+    assertEquals(results.getFirst(), tx(() -> sources.registerReceipt(stale)));
+  }
+
+  @Test
+  void rejectionRollbackLeavesNoFenceOrOrphanAnchorAndIdentityMismatchIsNotAReceipt() {
+    var first = register(request("first")).getSource();
+    var terminal = expired(first);
+    var stale = successor(first, "aborted-rejection");
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            tx(
+                () -> {
+                  assertTrue(
+                      sources
+                          .register(stale, fixture(connection, registration))
+                          .getDefinitivelyUncommitted());
+                  throw new IllegalStateException("fault before rejection commit");
+                }));
+    assertNull(tx(() -> sources.registerReceipt(stale)));
+    assertEquals(1, count("network_source_anchor"));
+    assertEquals(1, count("network_source_operation"));
+    var mismatched =
+        successor(terminal, "different-registration").toBuilder()
+            .setRegistration(registration.toBuilder().setLocal("2"))
+            .build();
+    code("common.conflict", () -> register(mismatched));
+    assertNull(tx(() -> sources.registerReceipt(mismatched)));
+    register(successor(terminal, "next"));
+    rejected(stale, "predecessor_not_head");
   }
 
   @Test
@@ -292,7 +355,7 @@ class NetworkSourceStorePostgresTest {
                             other.toBuilder()
                                 .setRegistration(registration.toBuilder().setLocal("2"))
                                 .build())));
-    assertEquals(List.of("common.conflict", "common.conflict"), outcomes);
+    assertEquals(List.of("ok", "common.conflict"), outcomes);
   }
 
   @Test
@@ -314,10 +377,10 @@ class NetworkSourceStorePostgresTest {
     var e1 = expired(register(request("first")).getSource());
     var results =
         race(
-            () -> outcome(() -> register(successor(e1, "next-a"))),
-            () -> outcome(() -> register(successor(e1, "next-b"))));
+            () -> issuanceOutcome(register(successor(e1, "next-a"))),
+            () -> issuanceOutcome(register(successor(e1, "next-b"))));
     assertEquals(1, results.stream().filter("ok"::equals).count());
-    assertEquals(1, results.stream().filter("common.conflict"::equals).count());
+    assertEquals(1, results.stream().filter("predecessor_not_head"::equals).count());
     assertEquals(2, count("network_source"));
     tx(() -> sources.revoke(revokeRequest(e1, "stop")));
     assertEquals(
@@ -336,10 +399,10 @@ class NetworkSourceStorePostgresTest {
     var stop = revokeRequest(e1, "stop");
     var results =
         race(
-            () -> outcome(() -> register(successor(e1, "next"))),
+            () -> issuanceOutcome(register(successor(e1, "next"))),
             () -> outcome(() -> tx(() -> sources.revoke(stop))));
     assertEquals("ok", results.getLast());
-    assertTrue(Set.of("ok", "common.conflict").contains(results.getFirst()));
+    assertTrue(Set.of("ok", "lineage_stopped").contains(results.getFirst()));
     assertEquals(
         0,
         tx(
@@ -349,7 +412,7 @@ class NetworkSourceStorePostgresTest {
                     Integer.class,
                     tenant)));
     assertTrue(get(e1).stopped());
-    code("common.conflict", () -> register(successor(e1, "late")));
+    rejected(successor(e1, "late"), "lineage_stopped");
   }
 
   @Test
@@ -649,9 +712,8 @@ class NetworkSourceStorePostgresTest {
     code(
         "common.conflict",
         () -> tx(() -> sources.revoke(revoke.toBuilder().setExpectedRevision(2).build())));
-    code(
-        "common.conflict",
-        () -> tx(() -> sources.revoke(revoke.toBuilder().setOperationId("stale-cas").build())));
+    assertEquals(
+        response, tx(() -> sources.revoke(revoke.toBuilder().setOperationId("stale-cas").build())));
     assertEquals(b, tx(() -> sources.registerReceipt(r)).getSource());
   }
 
@@ -890,6 +952,19 @@ class NetworkSourceStorePostgresTest {
     } catch (AurigaException e) {
       return e.errorCode().code();
     }
+  }
+
+  String issuanceOutcome(RegisterAgentSourceResponse response) {
+    return response.hasSource() ? "ok" : response.getRejectionReason();
+  }
+
+  void rejected(RegisterAgentSourceRequest request, String reason) {
+    var response = register(request);
+    assertFalse(response.hasSource());
+    assertTrue(response.getDefinitivelyUncommitted());
+    assertEquals(reason, response.getRejectionReason());
+    assertEquals(request.getOperationId(), response.getOperationId());
+    assertEquals(response, tx(() -> sources.registerReceipt(request)));
   }
 
   <T> List<T> race(Callable<T> first, Callable<T> second) throws Exception {

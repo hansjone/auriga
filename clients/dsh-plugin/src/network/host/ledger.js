@@ -3,6 +3,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { CODES, HostSeamError } from './errors.js';
 import { isUint64String } from './address.js';
 import { createKeyedMutex } from './keyed-mutex.js';
+import { checkSources, fenceSourceChanges } from '../source-control/state.js';
 
 /** @type {WeakMap<Ledger, ReturnType<typeof createKeyedMutex>>} */
 const registerMutexes = new WeakMap();
@@ -93,6 +94,7 @@ const MAX_AUDIT = 256;
  *   results: Record<string, { resultId: string, recipientId: string, status: string, sent: boolean }>,
  *   audit: Array<{ at: string, recipientId: string, reason: string }>,
  *   inboundPolicy?: import('../policy/inbound-policy.js').InboundPolicyState,
+ *   sourceControl?: import('../source-control/types.js').SourceState,
  * }} LedgerState
  */
 
@@ -125,7 +127,7 @@ function checkState(value, identity) {
   if (
     !s ||
     typeof s !== 'object' ||
-    ![1, LEDGER_VERSION].includes(s.version) ||
+    ![1, LEDGER_VERSION, 3].includes(s.version) ||
     !Number.isSafeInteger(s.revision) ||
     !isUint64String(s.localHighWater) ||
     !s.identity ||
@@ -139,6 +141,7 @@ function checkState(value, identity) {
       'ledger identity mismatch',
     );
   checkAllocationState(s);
+  checkSources(s);
   if (Object.values(s.locals).some((entry) => !entry.addressType))
     s.identityConflict = CODES.recoveryConflict;
   else if (s.registrationRevision === undefined) {
@@ -394,6 +397,7 @@ function ledgerFromHandle(handle, state, now = () => new Date()) {
         throw new HostSeamError(CODES.ledgerUnavailable);
       const draft = structuredClone(state);
       const result = mutate(draft);
+      fenceSourceChanges(state, draft);
       for (const [local, original] of Object.entries(state.locals)) {
         const next = draft.locals[local];
         for (const key of /** @type {const} */ ([
