@@ -54,6 +54,8 @@ class NetworkClientSubjectsTest {
                       .andReturn()
                       .getResponse();
               var json = Json.read(response.getContentAsString());
+              assertEquals(5, json.path("identity").size());
+              assertFalse(json.path("identity").has("created"));
               for (String field : Set.of("ingress", "upSubject", "downSubject", "replyPrefix"))
                 assertEquals(
                     vector.path(field).asString(),
@@ -69,6 +71,7 @@ class NetworkClientSubjectsTest {
           }
         });
     assertEquals(32, vectors.size());
+    verify(client, never()).register(anyString());
     assertEquals(Set.of("abcdefghijklmnopqrstuvwxyz234567".split("")), shards);
   }
 }

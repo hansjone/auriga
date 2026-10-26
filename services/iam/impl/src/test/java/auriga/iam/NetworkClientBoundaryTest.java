@@ -130,6 +130,18 @@ class NetworkClientBoundaryTest {
   }
 
   @Test
+  void unsupportedCommittedOutcomeIsUnavailableWithoutIdentityOnlyFallback() {
+    var identityOnly = mock(NetworkAuthority.class, CALLS_REAL_METHODS);
+    var unsupported =
+        new IamNetworkClient(identityOnly, store, clock, "server-a", Set.of("server-a"));
+    device();
+    TenantContext.run(
+        tenant, () -> error("common.unavailable", () -> unsupported.register("access")));
+    verify(identityOnly).registerWithOutcome("access");
+    verify(identityOnly, never()).register(anyString());
+  }
+
+  @Test
   void httpRejectsAudienceIdentityAndTokenInjectionAndNeverCachesSecrets() throws Exception {
     var controller = new IamNetworkClientController(client, new ContractSchemas());
     var mvc =
@@ -141,7 +153,10 @@ class NetworkClientBoundaryTest {
             .build();
     device();
     var node = new NetworkAuthority.Node("1", "1", account.toString(), device.toString(), false);
-    when(authority.register("access")).thenReturn(node);
+    when(authority.registerWithOutcome("access"))
+        .thenReturn(
+            new NetworkAuthority.RegistrationOutcome(node, true),
+            new NetworkAuthority.RegistrationOutcome(node, false));
     when(authority.prepare("access", "1", "server-a"))
         .thenReturn(
             new NetworkAuthority.Ticket(
@@ -156,7 +171,14 @@ class NetworkClientBoundaryTest {
           try {
             for (String path : List.of("register", "tickets")) {
               for (String field :
-                  List.of("serverAudience", "tenant", "account", "device", "accessToken")) {
+                  List.of(
+                      "serverAudience",
+                      "audience",
+                      "tenant",
+                      "account",
+                      "device",
+                      "accessToken",
+                      "created")) {
                 var body = Json.object(field, "attacker");
                 if (path.equals("tickets")) body.put("node", "1");
                 var rejected =
@@ -206,6 +228,22 @@ class NetworkClientBoundaryTest {
                     .andReturn()
                     .getResponse();
             assertEquals("no-store", registration.getHeader("Cache-Control"));
+            var registrationJson = Json.read(registration.getContentAsString());
+            assertTrue(registrationJson.path("created").isBoolean());
+            assertTrue(registrationJson.path("created").asBoolean());
+            assertEquals(6, registrationJson.size());
+            assertEquals("no-cache", registration.getHeader("Pragma"));
+            var repeated =
+                mvc.perform(
+                        post("/api/iam/v1/network/register")
+                            .header("Authorization", "Bearer access"))
+                    .andExpect(status().isOk())
+                    .andReturn()
+                    .getResponse();
+            var repeatedJson = Json.read(repeated.getContentAsString());
+            assertTrue(repeatedJson.path("created").isBoolean());
+            assertFalse(repeatedJson.path("created").asBoolean());
+            assertEquals(registrationJson.path("node"), repeatedJson.path("node"));
             assertEquals(
                 "aur1:1.1.0",
                 Json.read(registration.getContentAsString()).path("systemAddress").asString());
@@ -220,6 +258,10 @@ class NetworkClientBoundaryTest {
                     .getResponse();
             assertEquals("no-store", ticket.getHeader("Cache-Control"));
             var json = Json.read(ticket.getContentAsString());
+            assertEquals(5, json.path("identity").size());
+            assertFalse(json.path("identity").has("created"));
+            verify(authority, times(2)).registerWithOutcome("access");
+            verify(authority, never()).register(anyString());
             assertEquals("2026-01-01T01:00:00Z", json.path("connectionExpiresAt").asString());
             assertEquals("2026-01-01T00:00:30Z", json.path("expiresAt").asString());
             assertEquals("server-a", json.path("serverAudience").asString());

@@ -174,8 +174,12 @@ class NetworkClientPostgresTest {
     TenantContext.run(
         tenant,
         () -> {
-          var node = client.register(access);
-          assertEquals(node, client.register(access));
+          var first = client.register(access);
+          var node = first.identity();
+          assertTrue(first.created());
+          var repeated = client.register(access);
+          assertFalse(repeated.created());
+          assertEquals(node, repeated.identity());
           var ticket = client.prepare(access, node.node());
           assertEquals(clock.instant().plusSeconds(30), ticket.expiresAt());
           assertEquals(clock.instant().plusSeconds(3600), ticket.connectionExpiresAt());
@@ -210,7 +214,7 @@ class NetworkClientPostgresTest {
     TenantContext.run(
         tenant,
         () -> {
-          var node = client.register(access);
+          var node = client.register(access).identity();
           String sessionId = session.session().path("sessionId").asString();
           for (String kind : List.of("device", "session", "account", "organization")) {
             switch (kind) {
