@@ -11,17 +11,18 @@ import io.grpc.stub.StreamObserver;
 import java.time.Clock;
 import java.util.function.Supplier;
 
-/**
- * Online collab authority. This service grants neither source bindings nor execution permission.
- */
+/** Online collab authority. Recipient relationships and execution permission remain outside IAM. */
 public class IamGrpcNetworkAuthority
     extends NetworkAuthorityServiceGrpc.NetworkAuthorityServiceImplBase {
   private final IamNetworkAuthority authority;
   private final Clock clock;
+  private final IamNetworkSourceAuthority sources;
 
-  public IamGrpcNetworkAuthority(IamNetworkAuthority authority, Clock clock) {
+  IamGrpcNetworkAuthority(
+      IamNetworkAuthority authority, Clock clock, IamNetworkSourceAuthority sources) {
     this.authority = authority;
     this.clock = clock;
+    this.sources = sources;
   }
 
   private static void collab() {
@@ -172,11 +173,12 @@ public class IamGrpcNetworkAuthority
   public void authorizeNetworkDelivery(
       AuthorizeNetworkDeliveryRequest request,
       StreamObserver<AuthorizeNetworkDeliveryResponse> observer) {
-    collab();
-    tenant(request.getConnection());
-    // Fixed installation diagnostic only; never parse or expose source/message evidence.
-    throw AurigaException.of(
-        CommonErrors.UNAVAILABLE, "reason", "network_delivery_authority_not_configured");
+    respond(
+        observer,
+        () -> {
+          tenant(request.getConnection());
+          return sources.authorizeDelivery(request);
+        });
   }
 
   private static void tenant(NetworkAuthorityConnection connection) {

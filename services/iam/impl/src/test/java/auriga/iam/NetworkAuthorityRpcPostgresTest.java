@@ -107,7 +107,7 @@ class NetworkAuthorityRpcPostgresTest {
             mock(AuditLogger.class),
             clock,
             Set.of("server-a"));
-    rpc = new IamGrpcNetworkAuthority(authority, clock);
+    rpc = new IamGrpcNetworkAuthority(authority, clock, mock(IamNetworkSourceAuthority.class));
     TenantContext.run(
         tenant,
         () -> {

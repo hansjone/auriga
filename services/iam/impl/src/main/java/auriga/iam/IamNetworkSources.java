@@ -93,6 +93,47 @@ final class IamNetworkSources {
   /** Saved facts only: intentionally cannot manufacture a Get RPC policy_revision/valid_until. */
   record View(NetworkAgentSource source, boolean stopped, Instant observedAt) {}
 
+  record DeliveryEvidence(NetworkAgentSource source, NetworkAuthorityConnection connection) {}
+
+  /**
+   * Locate source transport using retained IAM evidence only; wire target/from cannot select it.
+   */
+  DeliveryEvidence deliveryEvidence(String id) {
+    transaction();
+    Source row = source(binding(id), false);
+    check(row != null, FORBIDDEN);
+    Anchor original = anchor(row.anchor());
+    check(
+        original.connection().equals(row.fact().getOriginalConnection())
+            && original.owner().toString().equals(row.fact().getOwnerUserId()),
+        FORBIDDEN);
+    var c = original.connection();
+    var connections =
+        jdbc.query(
+            "SELECT lookup_key,data::text FROM iam.network_ingress WHERE tenant_id=?"
+                + " AND data->>'realm'=? AND data->>'node'=? AND data->>'device'=? AND data->>'sessionId'=? AND expires_at>?"
+                + " ORDER BY (lookup_key=?) DESC,id DESC LIMIT 1",
+            (rs, i) -> {
+              var data = Json.read(rs.getString(2));
+              return c.toBuilder()
+                  .setIngress(rs.getString(1))
+                  .setServerId(data.path("serverId").asString())
+                  .setClientId(data.path("clientId").asString())
+                  .setClientAccount(data.path("account").asString())
+                  .build();
+            },
+            tenant(),
+            c.getRealm(),
+            c.getNode(),
+            original.device().toString(),
+            original.session().toString(),
+            Timestamp.from(clock.instant()),
+            c.getIngress());
+    check(connections.size() == 1, FORBIDDEN);
+    connection(connections.getFirst());
+    return new DeliveryEvidence(row.fact(), connections.getFirst());
+  }
+
   private record Anchor(
       UUID id,
       UUID ingress,
@@ -552,7 +593,7 @@ final class IamNetworkSources {
     unknown(r);
   }
 
-  private static void connection(NetworkAuthorityConnection c) {
+  static void connection(NetworkAuthorityConnection c) {
     unknown(c);
     check(
         c.getTenantId().equals(TenantContext.require().toString())

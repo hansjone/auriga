@@ -8,6 +8,7 @@ import auriga.common.error.ErrorCode;
 import auriga.contracts.iam.v1.*;
 import auriga.contracts.org.v1.*;
 import auriga.iam.api.InstanceAiAuthorization;
+import auriga.iam.api.NetworkAuthority;
 import java.math.BigInteger;
 import java.time.*;
 import java.time.temporal.ChronoUnit;
@@ -16,7 +17,9 @@ import java.util.function.Supplier;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-/** Three restricted source operations. No delivery authority, native mapping or cached allow. */
+/**
+ * Online source and delivery authority. Native mapping and recipient relationships stay in collab.
+ */
 final class IamNetworkSourceAuthority {
   record Policy(long sourceSeconds, long decisionSeconds) {
     static Policy from(Environment env) {
@@ -130,13 +133,154 @@ final class IamNetworkSourceAuthority {
     return tx(() -> kernel.revoke(r));
   }
 
+  private record DeliverySnapshot(
+      IamNetworkSources.DeliveryEvidence evidence,
+      IamNetworkAuthority.SourceSnapshot source,
+      IamNetworkAuthority.SourceSnapshot target) {}
+
+  private DeliverySnapshot deliverySnapshot(String id, NetworkAuthorityConnection target) {
+    var evidence = kernel.deliveryEvidence(id);
+    var pair = network.deliverySnapshots(binding(evidence.connection()), binding(target));
+    require(pair != null, FORBIDDEN);
+    var source = checkedSnapshot(pair.source());
+    var destination = checkedSnapshot(pair.target());
+    require(source.revision().equals(destination.revision()), FORBIDDEN);
+    return new DeliverySnapshot(evidence, source, destination);
+  }
+
+  AuthorizeNetworkDeliveryResponse authorizeDelivery(AuthorizeNetworkDeliveryRequest r) {
+    IamNetworkSources.connection(r.getConnection());
+    require(r.getUnknownFields().asMap().isEmpty(), VALIDATION_FAILED);
+    var message = IamNetworkDeliveryJson.parse(r.getMessageJson().toByteArray());
+    var context = IamNetworkDeliveryJson.parse(r.getSourceContextJson().toByteArray());
+    IamNetworkDeliveryJson.validate(message, context);
+    require(policy.enabled(), UNAVAILABLE);
+    var reference = message.path("authorization_ref");
+    String id = reference.path("source_binding").asString();
+    Instant began = clock.instant();
+    var before = tx(() -> deliverySnapshot(id, r.getConnection()));
+    var sourceCredential = authorize(before.source());
+    var targetCredential = authorize(before.target());
+    var response =
+        tx(
+            () -> {
+              require(!clock.instant().isBefore(began), UNAVAILABLE);
+              var current = deliverySnapshot(id, r.getConnection());
+              require(before.equals(current), FORBIDDEN);
+              var source =
+                  recheck(current.evidence().connection(), before.source(), sourceCredential);
+              var target = recheck(r.getConnection(), before.target(), targetCredential);
+              require(
+                  reference.path("policy_revision").asString().equals(source.revision().toString()),
+                  FORBIDDEN);
+              var to = message.path("to");
+              require(
+                  r.getConnection().getRealm().equals(to.path("realm").asString())
+                      && r.getConnection().getNode().equals(to.path("node").asString()),
+                  FORBIDDEN);
+              var limits = network.deliveryLimits();
+              int bodyBytes =
+                  IamNetworkDeliveryJson.bytes(
+                      IamNetworkDeliveryJson.canonical(message.path("body")));
+              require(
+                  r.getMessageJson().size() <= limits.get(NetworkAuthority.Limit.PAYLOAD_BYTES)
+                      && r.getSourceContextJson().size()
+                          <= limits.get(NetworkAuthority.Limit.PAYLOAD_BYTES)
+                      && bodyBytes <= limits.get(NetworkAuthority.Limit.BODY_BYTES),
+                  FORBIDDEN);
+              var from = message.path("from");
+              for (var operation :
+                  List.of(NetworkAuthority.Operation.SEND, NetworkAuthority.Operation.RECEIVE)) {
+                require(
+                    network.permitsDelivery(
+                        new NetworkAuthority.Check(
+                            from.path("realm").asString(),
+                            from.path("node").asString(),
+                            to.path("node").asString(),
+                            from.path("local").asString(),
+                            NetworkAuthority.Sender.AGENT,
+                            operation,
+                            bodyBytes,
+                            1,
+                            1)),
+                    FORBIDDEN);
+              }
+              // Get's kernel checks original identity/registration and locks the NAMED generation
+              // and chain.
+              var evidence = current.evidence();
+              var fact = evidence.source();
+              Instant sourceUntil = second(deadline(source, sourceCredential));
+              var view =
+                  kernel.get(
+                      GetAgentSourceRequest.newBuilder()
+                          .setSourceBinding(id)
+                          .setConnection(evidence.connection())
+                          .setRegistration(fact.getRegistration())
+                          .build(),
+                      verified(evidence.connection(), fact.getRegistration(), source, sourceUntil));
+              var live = view.source();
+              var registration = live.getRegistration();
+              // Commit a newly observed EXPIRED tombstone even though the outer RPC will deny.
+              if (view.stopped() || live.getStateValue() != 1)
+                return AuthorizeNetworkDeliveryResponse.getDefaultInstance();
+              require(
+                  live.getScopeValue() == 1
+                      && reference
+                          .path("source_revision")
+                          .asString()
+                          .equals(Long.toUnsignedString(live.getRevision()))
+                      && registration.getRealm().equals(from.path("realm").asString())
+                      && registration.getNode().equals(from.path("node").asString())
+                      && registration.getLocal().equals(from.path("local").asString())
+                      && registration.getAddressType().equals(from.path("type").asString())
+                      && live.getOwnerUserId().equals(context.path("user").asString()),
+                  FORBIDDEN);
+              Instant now = clock.instant(), notBefore = Instant.parse(live.getNotBefore());
+              Instant observed = Instant.parse(context.path("observed_at").asString());
+              Instant created = Instant.parse(message.path("created_at").asString());
+              require(
+                  !now.isBefore(notBefore)
+                      && !observed.isBefore(notBefore)
+                      && !observed.isAfter(now)
+                      && !created.isAfter(now),
+                  FORBIDDEN);
+              Instant until =
+                  second(
+                      min(
+                          plus(now, Math.min(300, policy.decisionSeconds())),
+                          min(
+                              Instant.parse(live.getExpiresAt()),
+                              min(
+                                  sourceUntil,
+                                  min(
+                                      deadline(target, targetCredential),
+                                      Instant.parse(message.path("expires_at").asString()))))));
+              require(now.isBefore(until), FORBIDDEN);
+              return AuthorizeNetworkDeliveryResponse.newBuilder()
+                  .setAllowed(true)
+                  .setConnection(r.getConnection())
+                  .setValidUntil(until.toString())
+                  .build();
+            });
+    require(response.getAllowed(), FORBIDDEN);
+    require(
+        !clock.instant().isBefore(began)
+            && clock.instant().isBefore(Instant.parse(response.getValidUntil())),
+        FORBIDDEN);
+    return response;
+  }
+
   private IamNetworkAuthority.SourceSnapshot online(NetworkAuthorityConnection c) {
     require(policy.enabled(), UNAVAILABLE);
     return tx(() -> snapshot(c));
   }
 
   private IamNetworkAuthority.SourceSnapshot snapshot(NetworkAuthorityConnection c) {
-    var value = network.sourceSnapshot(binding(c), true);
+    return checkedSnapshot(network.sourceSnapshot(binding(c), true));
+  }
+
+  private IamNetworkAuthority.SourceSnapshot checkedSnapshot(
+      IamNetworkAuthority.SourceSnapshot value) {
     require(value != null, FORBIDDEN);
     require(value.config() == null || value.config().path("enabled").asBoolean(true), FORBIDDEN);
     require(value.revision() != null && value.revision().signum() > 0, UNAVAILABLE);

@@ -36,13 +36,22 @@ OAuth 每次授权新建 device，现有流程不重绑其 owner/session。
 旧 ingress 不会被新 tuple 替代或从 node 重建；同节点多个仍有效的兑换按既有设计共存，
 collab READY 负责其 epoch 围栏。本服务不冒充 collab 的最新连接/来源/会话登记权威。
 
-`AuthorizeNetworkDelivery` **明确未装配且不可批准**：通过 caller/委托 tenant 检查后，
-固定返回 `UNAVAILABLE`（`common.unavailable`），诊断参数为
-`reason=network_delivery_authority_not_configured`。不解析 message/source JSON，
-不以 JSON 一致或 Check(SEND) 代替真实 source_binding/revision、人意图和关系权威。
-最终交付授权、SEND、非零 local 登记、执行准入与双 DSH 闭环仍需后续任务。
+`AuthorizeNetworkDelivery` 只支持已有关系的普通 agent/session 来源、durable 单播
+message 或 private reply、information/request。严格有界解析两份原始 JSON，消费 schema
+保留未知可选字段，对完整 Message 做 JCS/SHA-256；不授 human、subagent 来源、组播、
+广播、首联、ephemeral 或 control 权限。两端独立核真实兑换、当前身份与 org 的
+ACTIVE MEMBER/EXTERNAL 和 `auriga.connect.collab.use`，再锁定重读全部本库快照、政策版本、
+许可链与消息命名的来源代。终态/停链/旧 revision/原归属变化统一拒绝；后继不延长旧引用。
+目标 connection 精确回显，期限夹紧短政策、双方身份/兑换、原来源与消息期限并取整秒。
 
-四个已实现 RPC 的错误仅返回固定公共错误码，不带底层错误原因、证据或绑定详情；
+兑换时新增内部 sessionId 证据；第五 RPC 不为缺证据的历史 ingress 补造关联，须重新兑换。
+源连接仅从原耐久锚点和同 owner/device/backing-session 的本库真实兑换选择，不取自目标
+connection 或 Message。多身份按 session→device→account、同类 ID 排序取锁，然后政策/ingress、
+chain/source；全部远程核验在事务外。组织接口仍无跨服务提交屏障，不能声称撤权零窗口。
+非零目标 local、线程/recipient/关系权限及最终 CAS 由 collab 另行接线；本任务不证明完整交付、
+执行准入或真实双 DSH 闭环。
+
+所有 RPC 的错误仅返回固定公共错误码，不带底层错误原因、证据或绑定详情；
 合法拒绝使用 `allowed=false` / `active=false`。每次调用在线重核，不缓存 allow，
 不 touch idle、不刷新令牌/票，不调用 collab 或读取其他服务 schema。
 原 `NetworkGatewayService` 的 Redeem/Active/BatchActive 仍仅允许 `svc:ai-gateway`。
