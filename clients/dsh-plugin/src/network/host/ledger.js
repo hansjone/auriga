@@ -250,6 +250,75 @@ function checkAllocationState(s) {
   }
 }
 
+/** Caller owns this one writer handle through connection shutdown. Never probe
+ * outside its lock or open the same path again to discover an incarnation.
+ * @param {import('./store.js').LedgerStoreHandle} handle
+ * @param {{tenant:string,realm:string,node:string,created:boolean}} registration */
+export async function loadConnectionLedger(handle, registration) {
+  const loaded = await handle.load();
+  /** @type {LedgerState|undefined} */
+  let state;
+  let consumed = false;
+  const invalid = () =>
+    new HostSeamError(CODES.ledgerUnavailable, 'connection ledger unavailable');
+  /** @param {LedgerIdentity} identity */
+  const identityValid = (identity) =>
+    identity &&
+    identity.tenant === registration.tenant &&
+    identity.realm === registration.realm &&
+    identity.node === registration.node &&
+    ['realm', 'node'].every(
+      (key) =>
+        isUint64String(/** @type {any} */ (identity)[key]) &&
+        /** @type {any} */ (identity)[key] !== '0',
+    ) &&
+    typeof identity.nodeIncarnation === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(identity.nodeIncarnation);
+  if (loaded !== undefined) {
+    const value = /** @type {LedgerState} */ (loaded);
+    if (
+      !identityValid(value?.identity) ||
+      !Number.isSafeInteger(value.revision) ||
+      value.revision < 0 ||
+      ![
+        'bindings',
+        'relations',
+        'contacts',
+        'bodies',
+        'inbox',
+        'recipients',
+        'results',
+      ].every((key) => {
+        const map = /** @type {any} */ (value)[key];
+        return map && typeof map === 'object' && !Array.isArray(map);
+      }) ||
+      !Array.isArray(value.audit)
+    )
+      throw invalid();
+    state = checkState(value, value.identity);
+    if (state.identityConflict) throw invalid();
+  } else if (registration.created !== true) throw invalid();
+  return {
+    get state() {
+      return state;
+    },
+    async initialize(/** @type {LedgerIdentity} */ identity) {
+      if (
+        consumed ||
+        state ||
+        loaded !== undefined ||
+        registration.created !== true ||
+        !identityValid(identity)
+      )
+        throw invalid();
+      consumed = true; // Includes uncertain writes: this permission is never replayable.
+      const initial = emptyState(identity);
+      await handle.commit(initial);
+      state = initial;
+    },
+  };
+}
+
 /**
  * Open the durable host ledger. Mutations are serialized in-process and each
  * one commits a full snapshot before its result becomes visible; a failed
