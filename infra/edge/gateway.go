@@ -41,6 +41,7 @@ type Gateway struct {
 	workspaceURL *url.URL
 	teamURL      *url.URL
 	aiAdminURL   *url.URL
+	collabURL    *url.URL
 
 	portalStatic http.Handler
 	adminStatic  http.Handler
@@ -50,6 +51,10 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	collabURL, err := cfg.parseCollabUpstream()
+	if err != nil {
+		return nil, err
+	}
 	aiAdminURL, err := cfg.parseAIAdminUpstream()
 	if err != nil {
 		return nil, err
@@ -113,6 +118,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		workspaceURL: wsURL,
 		teamURL:      teamURL,
 		aiAdminURL:   aiAdminURL,
+		collabURL:    collabURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
@@ -126,6 +132,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	}
 	if cfg.Access.Valid() {
 		g.APITransports = make(map[*url.URL]http.RoundTripper)
+		if collabURL != nil {
+			transport, err := newIAMHopTransport(cfg.CollabHop, collabURL)
+			if err != nil {
+				return nil, err
+			}
+			g.APITransports[collabURL] = transport
+		}
 		if aiAdminURL != nil {
 			transport, err := newIAMHopTransport(cfg.AIAdminHop, aiAdminURL)
 			if err != nil {
@@ -274,6 +287,10 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Platform API / oauth routes
+	if path == "/api/collab" || strings.HasPrefix(path, "/api/collab/") {
+		g.proxyNetworkKeys(w, r, audience, clientIP, rid)
+		return
+	}
 	if upstream := g.matchUpstream(path); upstream != nil {
 		if upstream == g.aiAdminURL {
 			g.proxyAIAdmin(w, r, upstream, audience, clientIP, rid)

@@ -289,6 +289,51 @@ Touch 节流，IP 管理写逐次在线核 CSRF，域名管理写核同源 CSRF 
 真实 PostgreSQL 管理 API 全链。ai-gateway 服务端 TLS 配置由 ADMINMTLS 任务提供；整合时
 仍须验证其 edge 客户端身份白名单、管理令牌权限/step-up 和真实管理读写。
 
+## 网络根签名清单的精确 GET
+
+有效 Access 安装配置下，可在基础 edge JSON 中加入以下公开脱敏片段（原有
+Access、IAM RPC、IAM/org/workspace 配置仍需提供）：
+
+```json
+{
+  "upstreams": {
+    "collab": "https://192.0.2.10:9443"
+  },
+  "collabHop": {
+    "serverName": "collab.internal.example.com",
+    "certFile": "/run/auriga/pki/edge-collab.crt",
+    "keyFile": "/run/auriga/pki/edge-collab.key",
+    "caFile": "/run/auriga/pki/collab-ca.crt"
+  }
+}
+```
+
+`AURIGA_EDGE_UPSTREAM_COLLAB` 可覆盖固定上游 Origin。HTTPS 使用独立 `collabHop`，
+复用现有 IAM TLS helper 的 CA、客户端证书/私钥、固定 DNS SNI 和超时策略；即使
+与 IAM 同地址也不共享 IAM 凭据。地址不允许 userinfo、路径前缀、query（含空 `?`）
+或 fragment。配置缺失默认关闭，孤立 hop、旧单 listener 配置或坏 URL/材料启动失败。
+仅显式 `collabHop.allowLoopbackHttp=true` 允许数值回环开发 HTTP；`localhost` DNS
+和非回环 HTTP 不可用。运行时证书链、SAN、客户端证书校验失败均拒绝发送 HTTP。
+
+只代理 `GET /api/collab/v1/network/keys` 与
+`GET /api/collab/v1/network/keys/announcement`，要求字面精确路径、不带查询参数。
+其他方法/近似路径/其他 collab API 返回 Problem 错误，缺配置也不落 SPA 200。
+portal/admin 的实际域名或 IP listener、authority 和安装 tenant 映射沿 Access；
+有 Origin 时必须完整匹配当前入口源。浏览器会话复用 IAM 内省/Touch 与现有访问令牌，
+客户端设备 Bearer 原样传播，不兑换 AI/实例/服务票。所有 cookie、可伪造入口/租户头
+及 `Auriga-Forwarded-*` 托管身份头剥离；后端仍负责真实令牌用途、签名及本安装 tenant
+的认证授权。此入口不要求仅设备或仅管理浏览器身份，也不改变 AI 管理 API 的浏览器门禁。
+
+后端状态、完整 root-signed body、版本、硬截止及 `Cache-Control: no-store` 原样透传，
+edge 不解析、重签、续期或缓存。重定向响应失败关闭且不跟随；原有代理超时保持。
+realm/root 由安装与后端配置固定，不从请求选择。根 pin 必须由独立可信安装流程提供，
+这些 GET 不能为客户端建立首次根信任。
+
+测试使用实际 Access socket、HTTP/mTLS 后端夹具及生成的临时根签名 bytes；IP 前台请求
+使用真实 IP:port、不覆盖 Host。域名测试以 Host 映射本地 listener，不代表公网 DNS/TLS
+部署验收；重定向/超时用 Gateway handler 夹具连接实际后端 socket。它们均不冒充真实
+Java NetworkKeysController、真实 IAM、生产 provider 或双 DSH 验收。
+
 ## 远程 Team MCP 入口
 
 安装配置可选 `upstreams["ai-gateway"]`：一个固定受信 HTTPS Origin，或同机数字回环 HTTP。
