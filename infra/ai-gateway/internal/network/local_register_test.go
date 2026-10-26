@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -64,18 +65,33 @@ func TestLocalRegisterOperationAndLegacyRejection(t *testing.T) {
 // route. IAM/collab are explicit test fakes, not real Java services.
 func localRegisterFixture(t *testing.T, f *fakeMailboxRPC) (*Runtime, *nats.Conn, *nats.Subscription, liveBinding, RuntimeConfig) {
 	t.Helper()
+	run, nc, down, b, cfg, err := localRegisterPhaseFixture(t, f, nil)
+	if err != nil {
+		t.Fatalf("%v; %s", err, registrationPhaseDiagnostic(run, nc, b))
+	}
+	return run, nc, down, b, cfg
+}
+
+func localRegisterPhaseFixture(t *testing.T, f *fakeMailboxRPC, configure func(*registrationPhasePublisher)) (*Runtime, *nats.Conn, *nats.Subscription, liveBinding, RuntimeConfig, error) {
+	t.Helper()
 	h, cfg, _ := runtimeFixture(t)
 	cfg.Collab = startMailboxRPC(t, f)
 	run, err := StartRuntime(context.Background(), cfg)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("runtime start before READY: %v", err)
 	}
 	t.Cleanup(run.Close)
+	p := &registrationPhasePublisher{nc: run.mailbox.nc, completed: make(chan registrationPublication, 4)}
+	if configure != nil {
+		configure(p)
+	}
+	run.mailbox.publisher = p
 	nc, err := nats.Connect(h.wsURL(), nats.Token(connectTicket), nats.NoReconnect())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("WSS connect before READY: %v", err)
 	}
 	t.Cleanup(nc.Close)
+	p.client = nc
 	b := run.redeemer.snapshot()[0]
 	b.Epoch, b.Incarnation, b.ChannelNonce = 42, "inc-1", "nonce-1"
 	down, err := nc.SubscribeSync(DownSubject(b.Ingress))
@@ -91,11 +107,33 @@ func localRegisterFixture(t *testing.T, f *fakeMailboxRPC) (*Runtime, *nats.Conn
 	if err = nc.Publish(UpSubject(b.Ingress), []byte(`{"app_version":"1.0","type":"ready","request_id":"req-ready","channel_nonce":"nonce-1","boot_id":"boot-1"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = down.NextMsg(time.Second); err != nil {
-		t.Fatal(err)
+	if err = nc.FlushTimeout(registrationPhaseGuard); err != nil {
+		return run, nc, down, b, cfg, fmt.Errorf("READY ingress flush: %w", err)
 	}
+	publication, err := awaitRegistrationPublication(p, registrationPhaseGuard)
+	if err != nil {
+		return run, nc, down, b, cfg, err
+	}
+	msg, err := down.NextMsg(time.Second)
+	if err != nil {
+		return run, nc, down, b, cfg, err
+	}
+	if msg.Subject != publication.subject || !bytes.Equal(msg.Data, publication.raw) {
+		return run, nc, down, b, cfg, fmt.Errorf("READY downlink differs from completed publication")
+	}
+	if err = validateRegistrationReady(cfg.ProtocolSigning, b, msg.Data); err != nil {
+		return run, nc, down, b, cfg, err
+	}
+	// The completed publication proves a worker entered; Wait alone cannot.
 	run.mailbox.workers.Wait()
-	return run, nc, down, b, cfg
+	run.redeemer.mu.Lock()
+	current, ok := run.redeemer.bindings[b.Ingress]
+	run.redeemer.mu.Unlock()
+	if !ok || !sameMailboxBinding(current, b) || current.Revoked || !time.Now().Before(current.NotAfter) || current.NotAfter != b.NotAfter {
+		return run, nc, down, b, cfg, fmt.Errorf("READY binding not effective: got=%+v want=%+v", current, b)
+	}
+	// IAM's active check may refresh scheduling metadata during slow preparation.
+	return run, nc, down, current, cfg, nil
 }
 
 func TestProductionLocalRegisterRoundTrip(t *testing.T) {
@@ -135,6 +173,9 @@ func publishRegistration(t *testing.T, nc *nats.Conn, b liveBinding, raw []byte)
 	if err := nc.PublishMsg(msg); err != nil {
 		t.Fatal(err)
 	}
+	if err := nc.FlushTimeout(registrationPhaseGuard); err != nil {
+		t.Fatalf("registration ingress flush: %v; connection=%v last_error=%v", err, nc.Status(), nc.LastError())
+	}
 }
 
 func registrationPublicationCounter(run *Runtime) *countingPublisher {
@@ -158,22 +199,35 @@ func assertRegistrationCounts(t *testing.T, run *Runtime, f *fakeMailboxRPC, p *
 	}
 }
 
-func expectRegistrationCode(t *testing.T, sub *nats.Subscription, cfg ProtocolSigningConfig, b liveBinding, code string) {
+func expectRegistrationCode(t *testing.T, run *Runtime, sub *nats.Subscription, cfg ProtocolSigningConfig, b liveBinding, code string) {
 	t.Helper()
-	expectRegistrationError(t, sub, cfg, b, code, "req-1")
+	expectRegistrationError(t, run, sub, cfg, b, code, "req-1")
 }
 
-func expectRegistrationError(t *testing.T, sub *nats.Subscription, cfg ProtocolSigningConfig, b liveBinding, code string, requestID any) {
+func expectRegistrationError(t *testing.T, run *Runtime, sub *nats.Subscription, cfg ProtocolSigningConfig, b liveBinding, code string, requestID any) {
 	t.Helper()
+	p := registrationPhaseObserver(run)
+	publication, err := awaitRegistrationPublication(p, registrationPhaseGuard)
+	if err != nil {
+		t.Fatalf("%v; %s", err, registrationPhaseDiagnostic(run, p.nc, b))
+	}
+	expectRegistrationDownlink(t, run, sub, cfg, b, code, requestID, publication)
+}
+
+func expectRegistrationDownlink(t *testing.T, run *Runtime, sub *nats.Subscription, cfg ProtocolSigningConfig, b liveBinding, code string, requestID any, publication registrationPublication) {
+	t.Helper()
+	p := registrationPhaseObserver(run)
+	// Completion proves entry into the real publisher; unrelated RPCs may be held.
 	msg, err := sub.NextMsg(time.Second)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("completed publication missing downlink: %v; %s", err, registrationPhaseDiagnostic(run, p.nc, b))
 	}
-	m := decodeObject(t, msg.Data)
-	if msg.Subject != DownSubject(b.Ingress) || m["type"] != "error" || m["code"] != code || m["request_id"] != requestID || strings.Contains(string(msg.Data), "private backend") {
-		t.Fatalf("wrong rejection subject=%s body=%s", msg.Subject, msg.Data)
+	if msg.Subject != publication.subject || !bytes.Equal(msg.Data, publication.raw) {
+		t.Fatal("downlink differs from completed publication")
 	}
-	verifyErrorSignature(t, cfg, msg.Data)
+	if err := validateRegistrationRejection(cfg, b, msg, code, requestID); err != nil {
+		t.Fatalf("%v; %s", err, registrationPhaseDiagnostic(run, p.nc, b))
+	}
 }
 
 func TestProductionLocalRegisterTypesAndErrorBytes(t *testing.T) {
@@ -278,8 +332,7 @@ func TestProductionLocalRegisterRejectsRequest(t *testing.T) {
 			if name == "trailing object" || name == "trailing token" {
 				requestID = nil // A malformed envelope has no trustworthy request ID.
 			}
-			expectRegistrationError(t, down, cfg.ProtocolSigning, b, CodeProtocolError, requestID)
-			assertRegistrationCounts(t, run, f, p, b, 1, 1)
+			expectLocalRegistrationRejection(t, run, f, p, down, cfg.ProtocolSigning, b, requestID)
 		})
 	}
 }
@@ -296,13 +349,14 @@ func TestProductionLocalRegisterRejectsOldOrUnreadyEpoch(t *testing.T) {
 				current.Epoch = 0
 				run.redeemer.bindings[b.Ingress] = current
 				run.redeemer.mu.Unlock()
+				b.Epoch = 0
 			}
 			raw := []byte(validLocalRegister)
 			if epoch != 0 {
 				raw = []byte(strings.Replace(validLocalRegister, `"epoch":"42"`, `"epoch":"`+u64str(epoch)+`"`, 1))
 			}
 			publishRegistration(t, nc, b, raw)
-			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeStaleEpoch)
+			expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeStaleEpoch)
 			assertRegistrationCounts(t, run, f, p, b, 1, 1)
 		})
 	}
@@ -365,7 +419,7 @@ func TestProductionLocalRegisterRejectsResponse(t *testing.T) {
 			f.response = marshalRegister(t, m)
 			f.mu.Unlock()
 			publishRegistration(t, nc, b, []byte(validLocalRegister))
-			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+			expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError)
 			assertRegistrationCounts(t, run, f, p, b, 2, 1)
 		})
 	}
@@ -402,7 +456,7 @@ func TestProductionLocalRegisterRejectsRawResponse(t *testing.T) {
 			if name == "oversize" { // gRPC rejects before a body reaches the validator.
 				code = "network.overloaded"
 			}
-			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, code)
+			expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, code)
 			assertRegistrationCounts(t, run, f, p, b, 2, 1)
 		})
 	}
@@ -428,7 +482,7 @@ func TestProductionLocalRegisterRPCFailure(t *testing.T) {
 			f.block, f.failure = tc.block, tc.failure
 			f.mu.Unlock()
 			publishRegistration(t, nc, b, []byte(validLocalRegister))
-			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, tc.code)
+			expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, tc.code)
 			assertRegistrationCounts(t, run, f, p, b, 2, 1)
 		})
 	}
@@ -510,7 +564,7 @@ func TestProductionLocalRegisterBindingChange(t *testing.T) {
 				if change == "revoked" {
 					// The original result/error is suppressed. Only the existing,
 					// freshly signed revocation diagnostic may reach this binding.
-					expectRegistrationCode(t, down, cfg.ProtocolSigning, b, "network.revoked")
+					expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, "network.revoked")
 					publications = 1
 				}
 				assertRegistrationCounts(t, run, f, p, b, 2, publications)
@@ -581,7 +635,7 @@ func TestProductionLocalRegisterSerialAdmission(t *testing.T) {
 		t.Fatal("LocalRegister did not enter RPC")
 	}
 	publishRegistration(t, nc, b, []byte(validLocalRegister))
-	expectRegistrationCode(t, down, cfg.ProtocolSigning, b, "network.overloaded")
+	expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, "network.overloaded")
 	close(f.release)
 	msg, err := down.NextMsg(time.Second)
 	if err != nil || string(msg.Data) != string(response) {
@@ -959,7 +1013,7 @@ func TestProductionLocalRegisterRejectsUnknownRaw(t *testing.T) {
 			if name == "raw control" || name == "NaN" {
 				requestID = nil
 			}
-			expectRegistrationError(t, down, cfg.ProtocolSigning, b, CodeProtocolError, requestID)
+			expectRegistrationError(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError, requestID)
 			assertRegistrationCounts(t, run, f, p, b, 1, 1)
 		})
 	}
@@ -989,7 +1043,7 @@ func TestProductionLocalRegisterRejectsVersionAndRequirements(t *testing.T) {
 				f.response = resignRegistration(t, cfg.ProtocolSigning, m)
 				f.mu.Unlock()
 				publishRegistration(t, nc, b, marshalRegister(t, q))
-				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+				expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError)
 				assertRegistrationCounts(t, run, f, p, b, calls, 1)
 			})
 		}
@@ -1011,7 +1065,7 @@ func TestProductionLocalRegisterRejectsVersionAndRequirements(t *testing.T) {
 				f.response = resignRegistration(t, cfg.ProtocolSigning, m)
 				f.mu.Unlock()
 				publishRegistration(t, nc, b, marshalRegister(t, q))
-				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+				expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError)
 				assertRegistrationCounts(t, run, f, p, b, calls, 1)
 			})
 		}
@@ -1044,7 +1098,7 @@ func TestProductionLocalRegisterRejectsUnknownResponseRaw(t *testing.T) {
 				f.response = []byte(response)
 				f.mu.Unlock()
 				publishRegistration(t, nc, b, []byte(validLocalRegister))
-				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+				expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError)
 				assertRegistrationCounts(t, run, f, p, b, 2, 1)
 			})
 		}
@@ -1097,7 +1151,7 @@ func TestProductionLocalRegisterRawBudget(t *testing.T) {
 					t.Fatalf("boundary response=%v err=%v", msg, err)
 				}
 			} else {
-				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+				expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError)
 			}
 			assertRegistrationCounts(t, run, f, p, b, calls, 1)
 		})
@@ -1123,7 +1177,7 @@ func TestProductionLocalRegisterKnownFieldsCannotBeReplaced(t *testing.T) {
 			f.response = reverseRegistrationKeys(t, decodeObject(t, resignRegistration(t, cfg.ProtocolSigning, m)))
 			f.mu.Unlock()
 			publishRegistration(t, nc, b, reverseRegistrationKeys(t, q))
-			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+			expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError)
 			assertRegistrationCounts(t, run, f, p, b, calls, 1)
 		})
 	}
