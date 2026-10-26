@@ -126,7 +126,9 @@ Core 仍负责首字节、idle、总期限与取消，连接及 TLS 握手使用
 设 N 为所有已批准模型 maxOutputTokens 的最大值（至多 32768，超过则拒绝启动）；共享 Core 与
 Transport/Handler 的 MaxBytes=min(1 MiB+N*1024,32 MiB)、MaxEvents=min(4*N+64,131136)，留出帧、
 usage 和进度注释余量。单事件沿既有协议上限，注释与 data 分帧，不增大 data 事件，每帧最多
-发送一次进度注释。synthetic 仍为 1 MiB/32 事件。以下三类证据可关闭现场 Stopped：未获得
+发送一次进度注释。SSE 停止证明的结构校验逐帧执行，通过无缓冲 pipe 保持背压；不缓存或在 DONE
+时重放整条 SSE 响应，避免收尾 CPU 工作占满 Core 的 idle 期限。取消或 Close 会结束校验，不自动算作停止证明。
+synthetic 仍为 1 MiB/32 事件。以下三类证据可关闭现场 Stopped：未获得
 可写 HTTP 连接（含 DNS、SSRF、拨号、TLS 失败）；上游错误响应在同一字节上限内完整读完并关闭；
 经协议状态机验证的终结 JSON/SSE。断流、超限、取消和 Close 单独不是停止证明，unknown 可能持槽并
 使停机非零。正常收完的 4xx/5xx 和未提交失败不再占槽；账务仍沿 Core 的 unknown 路径保守留置，

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
 )
@@ -177,6 +178,74 @@ func TestRevisionTLSFailureHasStopProof(t *testing.T) {
 	case <-x.Stopped:
 	default:
 		t.Fatal("TLS failure leaked stop proof")
+	}
+}
+
+func TestGotConnFailureKeepsStopProofOpen(t *testing.T) {
+	var requests atomic.Int64
+	s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		requests.Add(1)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close() // No terminal response: submission/execution is ambiguous.
+	}))
+	defer s.Close()
+	x, err := clientFor(t).Transport(t.Context(), submission(s.URL, false), []byte(rand.Text()))
+	if x.Body != nil {
+		_ = x.Body.Close()
+	}
+	if err == nil || requests.Load() != 1 {
+		t.Fatal("fixture must fail after the request actually reaches the peer")
+	}
+	select {
+	case <-x.Stopped:
+		t.Fatal("failure after GotConn fabricated stop proof")
+	default:
+	}
+}
+
+func TestStreamValidationStopsOnCloseAndCancel(t *testing.T) {
+	for _, mode := range []string{"close", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				_, _ = io.WriteString(w, "data: {")
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer s.Close()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			x, err := clientFor(t).Transport(ctx, submission(s.URL, true), []byte(rand.Text()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = x.Body.Close() }()
+			var p [1]byte
+			if _, err = x.Body.Read(p[:]); err != nil {
+				t.Fatal(err)
+			}
+			validation := x.Body.(*body).validation
+			if mode == "close" {
+				_ = x.Body.Close()
+			} else {
+				cancel()
+			}
+			select {
+			case <-validation.done:
+			case <-time.After(time.Second):
+				t.Fatal("stream validator did not stop promptly")
+			}
+			select {
+			case <-x.Stopped:
+				t.Fatal("closing validation fabricated remote stop proof")
+			default:
+			}
+		})
 	}
 }
 

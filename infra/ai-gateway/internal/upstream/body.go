@@ -13,7 +13,6 @@ import (
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relay"
-	api "github.com/hansjone/auriga/infra/gen/aiapi"
 )
 
 // Normalization is lazy and synchronous: no response pump, unbounded read or
@@ -30,7 +29,7 @@ type body struct {
 	closeOnce    sync.Once
 	closeErr     error
 	pending      []byte
-	transcript   []byte
+	validation   *streamValidation
 	rawBytes     int64
 	finished     bool
 	skipLF       bool
@@ -45,10 +44,14 @@ type body struct {
 var errProgress = errors.New("upstream read progress")
 
 func newBody(ctx context.Context, raw io.ReadCloser, s relay.Submission, l modelprotocol.Limits, proof chan struct{}) *body {
-	return &body{ctx: ctx, raw: raw, reader: bufio.NewReaderSize(io.LimitReader(raw, l.MaxBytes+1), 4096), s: s, limits: l, proof: proof}
+	b := &body{ctx: ctx, raw: raw, reader: bufio.NewReaderSize(io.LimitReader(raw, l.MaxBytes+1), 4096), s: s, limits: l, proof: proof}
+	if s.Request.GetStream() {
+		b.validation = newStreamValidation(ctx, s, l)
+	}
+	return b
 }
 func (b *body) Close() error {
-	b.closeOnce.Do(func() { b.closeErr = b.raw.Close() })
+	b.closeOnce.Do(func() { b.validation.close(); b.closeErr = b.raw.Close() })
 	return b.closeErr
 }
 
@@ -84,11 +87,13 @@ func (b *body) Read(p []byte) (int, error) {
 			}
 		} else if err != nil {
 			b.finished = true
+			b.pending = nil
 			return 0, fault("ai.upstream_unavailable")
 		}
 	}
 	if int64(len(b.pending)) > b.limits.MaxBytes-b.emitted {
 		b.finished = true
+		b.pending = nil
 		return 0, fault("ai.upstream_unavailable")
 	}
 	n := copy(p, b.pending)
@@ -116,7 +121,7 @@ func (b *body) complete() error {
 		return fault("ai.upstream_rejected")
 	}
 	b.pending, b.finished = normalized, true
-	b.prove(normalized, false)
+	b.proveJSON(normalized)
 	return nil
 }
 
@@ -180,13 +185,14 @@ func (b *body) frame() error {
 				}
 			}
 			b.pending = append(append([]byte("data: "), normalized...), '\n', '\n')
-			if len(b.pending) > b.limits.MaxEventBytes || int64(len(b.transcript)+len(b.pending)) > b.limits.MaxBytes {
+			if len(b.pending) > b.limits.MaxEventBytes {
 				return io.ErrUnexpectedEOF
 			}
-			b.transcript = append(b.transcript, b.pending...)
-			if b.finished {
-				b.prove(b.transcript, true)
-				b.transcript = nil
+			if !b.validation.feed(b.pending, b.finished) {
+				return io.ErrUnexpectedEOF
+			}
+			if b.finished && b.ctx.Err() == nil {
+				b.stopOnce.Do(func() { close(b.proof) })
 			}
 			return nil
 		}
@@ -213,20 +219,12 @@ func (b *body) frame() error {
 // is stop evidence. EOF alone, arbitrary DONE, Close and context
 // cancellation are not. This check authorizes no usage settlement: Core still
 // applies the actual pinned policy, usage attestation and accounting.
-func (b *body) prove(payload []byte, stream bool) {
-	v := b.s.Request
-	v.Model = b.s.PublicModel
-	const safe = int64(9007199254740991)
-	r, err := modelprotocol.ValidateRequest(b.ctx, v, modelprotocol.Policy{Model: v.Model, ContextWindow: safe, MaxOutputTokens: safe, Tools: true, Temperature: true, TopP: true, Stop: true, MeasureInput: func(context.Context, api.ChatCompletionRequest) (int64, error) { return safe - v.MaxTokens, nil }, VerifyUsage: func(context.Context, api.TokenUsage) bool { return true }})
+func (b *body) proveJSON(payload []byte) {
+	r, err := validationRequest(b.ctx, b.s)
 	if err != nil {
 		return
 	}
-	var result modelprotocol.Result
-	if stream {
-		result, err = modelprotocol.Stream(b.ctx, io.NopCloser(bytes.NewReader(payload)), r, b.limits, b.s.RequestID, func(_ context.Context, p []byte) (int, error) { return len(p), nil })
-	} else {
-		result, err = modelprotocol.Complete(b.ctx, io.NopCloser(bytes.NewReader(payload)), r, b.limits)
-	}
+	result, err := modelprotocol.Complete(b.ctx, io.NopCloser(bytes.NewReader(payload)), r, b.limits)
 	if err == nil && result.Completed && b.ctx.Err() == nil {
 		b.stopOnce.Do(func() { close(b.proof) })
 	}

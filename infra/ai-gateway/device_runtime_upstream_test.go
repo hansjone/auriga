@@ -380,7 +380,8 @@ func TestDeviceUpstreamFailureReleasesProviderSlots(t *testing.T) {
 	}
 }
 
-func TestDeviceUpstreamLargeStream(t *testing.T) {
+func largeUpstreamFixture(t *testing.T) *deviceFixture {
+	t.Helper()
 	f := newDeviceFixture(t)
 	s := devicePrivateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
@@ -390,7 +391,7 @@ func TestDeviceUpstreamLargeStream(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, "data: {\"id\":\"large\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"snapshot\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":32,\"completion_tokens\":5000,\"total_tokens\":5032}}\n\ndata: [DONE]\n\n")
 	}))
-	defer s.Close()
+	t.Cleanup(s.Close)
 	configureUpstreamFixture(t, f, s.URL)
 	f.cfg.Upstream.Models[0].ContextWindow = 16384
 	f.cfg.Upstream.Models[0].MaxOutputTokens = 8192
@@ -403,6 +404,11 @@ func TestDeviceUpstreamLargeStream(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return f
+}
+
+func TestDeviceUpstreamLargeStream(t *testing.T) {
+	f := largeUpstreamFixture(t)
 	r, err := newDeviceRuntime(t.Context(), f.cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -419,6 +425,6 @@ func TestDeviceUpstreamLargeStream(t *testing.T) {
 	response := &upstreamRecorder{httptest.NewRecorder()}
 	r.handler.ServeHTTP(response, request)
 	if response.Code != 200 || !strings.Contains(response.Body.String(), "data: [DONE]") || strings.Contains(response.Body.String(), "stream_interrupted") || response.Body.Len() <= 1<<20 {
-		t.Fatalf("large output was truncated: status=%d bytes=%d", response.Code, response.Body.Len())
+		t.Fatalf("large output was truncated: status=%d bytes=%d content_frames=%d timeout=%t", response.Code, response.Body.Len(), strings.Count(response.Body.String(), `"content":"x"`), strings.Contains(response.Body.String(), "ai.upstream_timeout"))
 	}
 }
