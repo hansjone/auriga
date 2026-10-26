@@ -410,6 +410,20 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   private TargetSnapshot targetSnapshot(TargetBinding b, boolean lock) {
     Node n = node(b.node());
     if (n == null || n.revoked() || !n.realm().equals(b.realm())) return null;
+    // Shared identity -> ingress order also used by source transactions and device refresh.
+    // Read the device without a lock only to locate the backing session, then re-read under locks.
+    ObjectNode device = store.get("device", n.device(), false);
+    if (device == null) return null;
+    ObjectNode session = store.byId("session", device.path("sessionId").asString(), lock);
+    if (lock) device = store.get("device", n.device(), true);
+    ObjectNode account = store.get("account", n.account(), lock);
+    if (device == null
+        || session == null
+        || account == null
+        || !n.account().equals(device.path("accountId").asString())
+        || !device.path("sessionId").asString().equals(session.path("sessionId").asString())
+        || !n.account().equals(session.path("accountId").asString())) return null;
+    // Fetch the complete exact ingress after identity locks; never return an earlier unlocked copy.
     ObjectNode ingress = store.get("network_ingress", b.ingress(), lock);
     if (ingress == null
         || !b.realm().equals(ingress.path("realm").asString())
@@ -424,18 +438,6 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         || !servers.contains(ingress.path("audience").asString())
         || !clock.instant().isBefore(Instant.parse(ingress.path("expiresAt").asString())))
       return null;
-    // Session -> device follows the existing refresh lock order. Initial reads hold no row locks.
-    ObjectNode device = store.get("device", n.device(), false);
-    if (device == null) return null;
-    ObjectNode session = store.byId("session", device.path("sessionId").asString(), lock);
-    if (lock) device = store.get("device", n.device(), true);
-    ObjectNode account = store.get("account", n.account(), lock);
-    if (device == null
-        || session == null
-        || account == null
-        || !n.account().equals(device.path("accountId").asString())
-        || !device.path("sessionId").asString().equals(session.path("sessionId").asString())
-        || !n.account().equals(session.path("accountId").asString())) return null;
     return new TargetSnapshot(n, ingress, device, session, account);
   }
 
