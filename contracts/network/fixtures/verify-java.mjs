@@ -76,6 +76,7 @@ const definitions = {
   delivery: 'envelope#Delivery',
   head: 'protocol#Head',
   error: 'protocol#Error',
+  register_result: 'protocol#RegisterResult',
   fetch_result: 'protocol#FetchResult',
 };
 const validate = (frame) => {

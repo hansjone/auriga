@@ -459,6 +459,7 @@ put(
   'protocol#RegisterResult',
   proto('register_result', {
     local: '419',
+    address_type: 'session',
     registration_id: 'reg-419',
     allocation_op_id: 'alloc-419',
     result: 'registered',
@@ -693,6 +694,7 @@ put(
     epoch: ctx.epoch,
     boot_id: 'boot-0001',
     candidate_local: '419',
+    address_type: 'session',
     allocation_op_id: 'alloc-419',
     allocation_fingerprint: digest('alloc-419-nonce'),
     expected_registration_revision: '418',
@@ -754,6 +756,23 @@ for (const f of Object.values(frames))
   )
     f.context = { requestId: f.value.request_id };
 
+// Typed variants retain the same protocol signing and recovery boundaries.
+for (const [name, type] of [['register_result_subagent', 'subagent']]) {
+  const value = structuredClone(frames.register_result.value);
+  value.address_type = type;
+  put(name, 'protocol#RegisterResult', value, { requestId: value.request_id });
+}
+put('ready_pending_registration', 'protocol#Ready', {
+  ...structuredClone(frames.ready.value),
+  local_high_water: '419',
+  pending_registration: {
+    candidate_local: '419',
+    allocation_op_id: 'alloc-419',
+    allocation_fingerprint: digest('alloc-419-nonce'),
+    address_type: 'session',
+  },
+});
+
 // ---- seal ----
 const keyFor = (obj) => keys[obj.server_auth.purpose].key;
 for (const f of Object.values(frames)) seal(f.value, keyFor);
@@ -809,6 +828,8 @@ writeFileSync(
         'delivery_broadcast',
         'head',
         'error',
+        'register_result',
+        'register_result_subagent',
       ].map(vector),
     },
     null,

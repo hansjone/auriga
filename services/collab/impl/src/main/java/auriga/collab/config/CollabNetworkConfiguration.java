@@ -73,6 +73,12 @@ public class CollabNetworkConfiguration {
   }
 
   @Bean
+  auriga.collab.network.local.LocalTargets networkLocalTargets(TenantTransactionManager manager) {
+    return new auriga.collab.network.local.LocalTargets(
+        new org.springframework.jdbc.core.JdbcTemplate(manager.getDataSource()), manager);
+  }
+
+  @Bean
   NetworkSourceGrpcAuthority networkSourceGrpcAuthority(
       NetworkAuthorityClient client,
       TenantTransactionManager manager,
