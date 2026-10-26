@@ -7,9 +7,73 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { Buffer } from 'node:buffer';
 import { Socket } from 'node:net';
+import { setTimeout, clearTimeout } from 'node:timers';
 import { createSettingsStore } from '../../../clients/dsh-plugin/src/settings/store.js';
 import { createSettingsHandler } from '../../../clients/dsh-plugin/src/settings/host.js';
 import { mountLocalLoginPage } from '../../../clients/dsh-plugin/src/login/page.js';
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
+// One test-only deadline covers asset I/O, status consumption and DOM commit.
+// A generic input exists before Promise.all(state, status) has settled.
+function waitForSettings(host, root, statusBody, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    let statusComplete = false;
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    const check = () => {
+      if (settled || !statusComplete) return;
+      const input = root.querySelector('input[aria-label="平台地址"]');
+      const save = [...root.querySelectorAll('button')].find(
+        (button) => button.textContent === '保存',
+      );
+      if (
+        input?.value === 'https://example.com' &&
+        /alice.*Auriga DSH/.test(root.textContent) &&
+        save &&
+        !save.disabled
+      )
+        finish();
+    };
+    const observer = new host.window.MutationObserver(check);
+    observer.observe(root, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+    });
+    const timer = setTimeout(
+      () =>
+        finish(new Error('settings readiness timed out: ' + root.textContent)),
+      timeout,
+    );
+    statusBody.then(({ ok, data }) => {
+      try {
+        assert.equal(ok, true, 'settings status response must succeed');
+        assert.equal(data.loggedIn, true);
+        assert.equal(data.connected, true);
+        assert.equal(data.account?.subject, 'alice');
+        statusComplete = true;
+        check();
+      } catch (error) {
+        finish(error);
+      }
+    }, finish);
+  });
+}
+
 const localBoot = (connected) => ({
   mode: 'connect',
   protocol: 1,
@@ -29,10 +93,13 @@ const localBoot = (connected) => ({
   fetchBase: null,
 });
 
-test('registered settings loads its real authenticated asset and saves through the real API without replacing main', async () => {
+async function exerciseRealSettings(delayed) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-shell-settings-'));
   const socket = new Socket();
   let host;
+  const gate = deferred(),
+    entered = deferred(),
+    statusBody = deferred();
   try {
     const store = await createSettingsStore(directory, 'https://example.com');
     const handler = createSettingsHandler({
@@ -44,18 +111,28 @@ test('registered settings loads its real authenticated asset and saves through t
     });
     const calls = [];
     host = surfaceHost(
-      async (url) =>
-        response(
-          200,
-          String(url).endsWith('/status')
-            ? {
-                loggedIn: true,
-                connected: true,
-                account: { subject: 'alice' },
-                csrf: 'native-csrf',
-              }
-            : localBoot(true),
-        ),
+      async (url) => {
+        const data = String(url).endsWith('/status')
+          ? {
+              loggedIn: true,
+              connected: true,
+              account: { subject: 'alice' },
+              csrf: 'native-csrf',
+            }
+          : localBoot(true);
+        const result = response(200, data);
+        if (new URL(url).pathname.endsWith('/local-login/status')) {
+          result.json = async () => {
+            if (delayed === 'status') {
+              entered.resolve();
+              await gate.promise;
+            }
+            statusBody.resolve({ ok: result.ok, data });
+            return data;
+          };
+        }
+        return result;
+      },
       {
         async settingsFetch(url, init = {}) {
           calls.push({ url: String(url), init });
@@ -77,6 +154,13 @@ test('registered settings loads its real authenticated asset and saves through t
           });
           req.rawHeaders = Object.entries(req.headers).flat();
           let status, body;
+          if (
+            delayed === 'asset' &&
+            new URL(url).pathname.endsWith('/view.js')
+          ) {
+            entered.resolve();
+            await gate.promise;
+          }
           await handler(req, {
             writeHead(code) {
               status = code;
@@ -96,9 +180,27 @@ test('registered settings loads its real authenticated asset and saves through t
     );
     const main = host.mount('main'),
       settings = host.mount('settings.section');
-    // The asset route reads a file asynchronously; drain actual I/O, not a fake export.
-    for (let i = 0; i < 100 && !settings.root.querySelector('input'); i++)
-      await flush();
+    const ready = waitForSettings(host, settings.root, statusBody.promise);
+    if (delayed !== 'none') {
+      // Hold the real route/body beyond every turn of the old guard.
+      // Release by an explicit event, never by guessed I/O latency.
+      await Promise.race([entered.promise, ready]);
+      let completed = false;
+      void ready.then(
+        () => {
+          completed = true;
+        },
+        () => {},
+      );
+      for (let i = 0; i < 100; i++) await flush();
+      assert.equal(
+        completed,
+        false,
+        'pending real resource/status is not ready',
+      );
+      gate.resolve();
+    }
+    await ready;
     const panel = main.root.querySelector('auriga-team-panel'),
       context = panel.context;
     assert.match(settings.root.textContent, /本机通信端点.*已接受的消息3/);
@@ -169,11 +271,21 @@ test('registered settings loads its real authenticated asset and saves through t
     assert.equal(host.counts.timers.size, 0);
     assert.equal(host.subscriptions.size, 0);
   } finally {
+    gate.resolve();
     host?.close();
     socket.destroy();
     await rm(directory, { recursive: true, force: true });
   }
-});
+}
+
+for (const delayed of ['none', 'asset', 'status']) {
+  test(
+    'registered settings loads its real authenticated asset and saves through the real API without replacing main: ' +
+      delayed,
+    () => exerciseRealSettings(delayed),
+  );
+}
+
 test('local connection state drives the real shell entry and endpoint/acceptance settings', async () => {
   for (const connected of [true, false]) {
     const host = surfaceHost(async () => response(200, localBoot(connected)));
