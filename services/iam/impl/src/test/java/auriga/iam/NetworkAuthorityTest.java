@@ -14,10 +14,12 @@ import java.time.*;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
@@ -62,6 +64,8 @@ class NetworkAuthorityTest {
   final AuditLogger audit = mock(AuditLogger.class);
   final Map<String, ObjectNode> rows = new HashMap<>();
   final Map<String, Node> nodes = new HashMap<>();
+  final Map<UUID, BigInteger> policyRevisions = new HashMap<>();
+  final DataSource dataSource = mock(DataSource.class);
   final ReentrantLock lock = new ReentrantLock();
   BigInteger next = BigInteger.ONE;
   IamNetworkAuthority network;
@@ -74,7 +78,7 @@ class NetworkAuthorityTest {
   @BeforeEach
   void setup() {
     JdbcTemplate jdbc =
-        new JdbcTemplate() {
+        new JdbcTemplate(dataSource) {
           @SuppressWarnings("unchecked")
           @Override
           public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
@@ -97,11 +101,26 @@ class NetworkAuthorityTest {
 
           @Override
           public int update(String sql, Object... args) {
+            if (sql.contains("iam.network_policy_revision")) {
+              assertTrue(lock.isHeldByCurrentThread());
+              assertEquals(TenantContext.require(), args[0]);
+              if (sql.startsWith("INSERT INTO"))
+                return policyRevisions.putIfAbsent(TenantContext.require(), BigInteger.ONE) == null
+                    ? 1
+                    : 0;
+              assertTrue(
+                  sql.startsWith("UPDATE iam.network_policy_revision SET revision=revision+1"));
+              return policyRevisions.computeIfPresent(
+                          TenantContext.require(), (t, revision) -> revision.add(BigInteger.ONE))
+                      == null
+                  ? 0
+                  : 1;
+            }
             if (sql.contains("INSERT INTO iam.network_node")) {
               Node n =
                   new Node("1", args[1].toString(), args[2].toString(), args[3].toString(), false);
-              if (nodes.values().stream().noneMatch(v -> v.device().equals(n.device())))
-                nodes.put(key("node", n.node()), n);
+              if (nodes.values().stream().anyMatch(v -> v.device().equals(n.device()))) return 0;
+              nodes.put(key("node", n.node()), n);
             } else if (sql.contains("SET revoked=true")) {
               String k = key("node", args[1].toString());
               Node n = nodes.get(k);
@@ -119,6 +138,24 @@ class NetworkAuthorityTest {
                                       Instant.parse(e.getValue().path("expiresAt").asString())));
             }
             return 1;
+          }
+
+          @Override
+          public <T> T queryForObject(String sql, RowMapper<T> mapper, Object... args) {
+            assertEquals(
+                "SELECT revision::text FROM iam.network_policy_revision WHERE tenant_id=? FOR UPDATE",
+                sql);
+            assertTrue(lock.isHeldByCurrentThread());
+            assertEquals(TenantContext.require(), args[0]);
+            BigInteger revision = policyRevisions.get(TenantContext.require());
+            assertNotNull(revision);
+            var result = mock(java.sql.ResultSet.class);
+            try {
+              when(result.getString(1)).thenReturn(revision.toString());
+              return mapper.mapRow(result, 0);
+            } catch (java.sql.SQLException e) {
+              throw new AssertionError(e);
+            }
           }
 
           @SuppressWarnings("unchecked")
@@ -186,9 +223,20 @@ class NetworkAuthorityTest {
 
   Object atomic(Supplier<?> work) {
     lock.lock();
+    boolean wasActive = TransactionSynchronizationManager.isActualTransactionActive();
+    boolean bound = false;
     try {
+      // In-memory transaction only: satisfy the production helper's resource/state checks while
+      // executing its real version SQL against this fixture, without claiming PostgreSQL evidence.
+      if (!TransactionSynchronizationManager.hasResource(dataSource)) {
+        TransactionSynchronizationManager.bindResource(dataSource, this);
+        bound = true;
+      }
+      TransactionSynchronizationManager.setActualTransactionActive(true);
       return work.get();
     } finally {
+      TransactionSynchronizationManager.setActualTransactionActive(wasActive);
+      if (bound) TransactionSynchronizationManager.unbindResource(dataSource);
       lock.unlock();
     }
   }
