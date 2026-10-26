@@ -6,6 +6,7 @@ import auriga.common.security.AuthenticatedOnly;
 import auriga.iam.api.NetworkAuthority;
 import auriga.iam.web.model.NetworkClientTicket;
 import auriga.iam.web.model.NetworkRegistration;
+import auriga.iam.web.model.RegisterResultSchema;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.ZoneOffset;
@@ -29,13 +30,21 @@ public class IamNetworkClientController {
 
   @PostMapping("/register")
   @AuthenticatedOnly
-  public NetworkRegistration register(
+  public RegisterResultSchema register(
       @RequestBody(required = false) ObjectNode body,
       HttpServletRequest request,
       HttpServletResponse response) {
     noStore(response);
     validate("network/register.schema.json", body == null ? Json.object() : body);
-    return identity(client.register(bearer(request)));
+    var result = client.register(bearer(request));
+    var node = result.identity();
+    return new RegisterResultSchema()
+        .tenant(auriga.common.context.TenantContext.require())
+        .realm(node.realm())
+        .node(node.node())
+        .device(java.util.UUID.fromString(node.device()))
+        .systemAddress(node.systemAddress())
+        .created(result.created());
   }
 
   @PostMapping("/tickets")

@@ -34,9 +34,13 @@ public final class IamNetworkClient {
             : selected;
   }
 
-  public NetworkAuthority.Node register(String accessToken) {
+  public NetworkAuthority.RegistrationOutcome register(String accessToken) {
     limit();
-    return authority.register(accessToken);
+    try {
+      return authority.registerWithOutcome(accessToken);
+    } catch (UnsupportedOperationException unavailable) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
   }
 
   public NetworkAuthority.Ticket prepare(String accessToken, String node) {

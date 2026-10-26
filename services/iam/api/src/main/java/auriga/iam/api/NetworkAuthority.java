@@ -21,6 +21,9 @@ public interface NetworkAuthority {
     }
   }
 
+  /** Per-call committed INSERT fact; never part of stable node or ticket identity. */
+  record RegistrationOutcome(Node identity, boolean created) {}
+
   /** Redemption window and absolute connection deadline are separate, server-enforced bounds. */
   record Ticket(
       String ticket,
@@ -136,6 +139,16 @@ public interface NetworkAuthority {
 
   /** Idempotent per native device credential. A reinstall/clone must enroll a NEW credential. */
   Node register(String deviceAccessToken);
+
+  /**
+   * Returns only after the final registration transaction commits. Existing nodes, retries and
+   * concurrent losers return created=false. Implementations without this fact must report
+   * unsupported; they must not infer it from an identity-only registration or replay historical
+   * true. HTTPS maps unsupported to common.unavailable without calling the identity-only method.
+   */
+  default RegistrationOutcome registerWithOutcome(String deviceAccessToken) {
+    throw new UnsupportedOperationException("Committed registration outcome unavailable");
+  }
 
   Ticket prepare(String deviceAccessToken, String node, String serverAudience);
 
