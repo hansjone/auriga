@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -148,37 +149,143 @@ func TestRenewLoopReplacesCertificateAndReconnectLoadsIt(t *testing.T) {
 }
 
 func TestRenewLoopFailureBackoffAndRetry(t *testing.T) {
-	attempts := make(chan time.Time, 8)
+	// These are scheduling guards, not a certificate-renewal business SLA.
+	const guard = 10 * time.Second
+	type result struct {
+		started, returned time.Time
+		cert              []byte
+		err               error
+	}
+	results := make(chan result, 3)
 	var count atomic.Int32
-	release := make(chan struct{})
+	var handlers sync.WaitGroup
 	var fw *testutil.FakeWorkspace
 	s, workspace, mat := sessionFixture(t, func(ctx context.Context, req *nodev1.RenewCertificateRequest) (*nodev1.RenewCertificateResponse, error) {
+		handlers.Add(1)
+		defer handlers.Done()
+		r := result{started: time.Now()}
+		if count.Add(1) <= 2 {
+			r.err = status.Error(codes.Unavailable, "retry renewal")
+		} else {
+			r.cert, r.err = fw.CA.IssueNodeFromCSR("n_test01", req.GetCsr(), time.Now().Add(30*24*time.Hour))
+		}
+		r.returned = time.Now()
 		select {
-		case <-release:
+		case results <- r:
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		attempts <- time.Now()
-		if count.Add(1) <= 2 {
-			return nil, status.Error(codes.Unavailable, "retry renewal")
-		}
-		cert, err := fw.CA.IssueNodeFromCSR("n_test01", req.GetCsr(), time.Now().Add(30*24*time.Hour))
-		return &nodev1.RenewCertificateResponse{CertificateChain: cert}, err
+		return &nodev1.RenewCertificateResponse{CertificateChain: r.cert}, r.err
 	})
 	fw = workspace
 	old := nearExpiry(t, s, fw, mat)
-	close(release)
-	runSession(t, s)
-	if err := testutil.WaitFor(3*time.Second, func() bool {
-		b, err := os.ReadFile(filepath.Join(s.cfg.AgentDir, identity.CertFileName))
-		return err == nil && !bytes.Equal(b, old)
-	}); err != nil {
-		t.Fatal(err)
+	// Complete PKI and file preparation before starting any phase guard.
+	phase := "RPC 1 failure"
+	var lastErr error
+	certPath := filepath.Join(s.cfg.AgentDir, identity.CertFileName)
+	diagnostic := func() string {
+		b, err := os.ReadFile(certPath)
+		return fmt.Sprintf("phase=%s attempts=%d last_error=%v certificate_changed=%t file_error=%v",
+			phase, count.Load(), lastErr, err == nil && !bytes.Equal(b, old), err)
 	}
-	first, second, third := <-attempts, <-attempts, <-attempts
-	if second.Sub(first) < 80*time.Millisecond || third.Sub(second) < 160*time.Millisecond {
-		t.Fatalf("backoff bypassed: %v, %v", second.Sub(first), third.Sub(second))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	joined := false
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		cancel()
+		if !joined {
+			select {
+			case err := <-done:
+				joined = true
+				if !errors.Is(err, context.Canceled) {
+					t.Errorf("session exit: %v; %s", err, diagnostic())
+				}
+			case <-time.After(guard):
+				t.Errorf("session join guard expired; %s", diagnostic())
+				return
+			}
+		}
+		// Stop dispatch before joining server callbacks, including canceled RPCs.
+		fw.Close()
+		handlersDone := make(chan struct{})
+		go func() { handlers.Wait(); close(handlersDone) }()
+		select {
+		case <-handlersDone:
+		case <-time.After(guard):
+			t.Errorf("RPC handler join guard expired; %s", diagnostic())
+		}
 	}
+	// Registered after fixture cleanup: cancel + join precede store/TempDir removal.
+	t.Cleanup(stop)
+	var previous time.Time
+	var issued []byte
+	for i := 0; i < 3; i++ {
+		phase = fmt.Sprintf("RPC %d return", i+1)
+		timer := time.NewTimer(guard)
+		var r result
+		select {
+		case r = <-results:
+			timer.Stop()
+		case err := <-done:
+			timer.Stop()
+			joined = true
+			t.Fatalf("session ended before renewal: %v; %s", err, diagnostic())
+		case <-timer.C:
+			t.Fatalf("RPC scheduling guard expired; %s", diagnostic())
+		}
+		lastErr = r.err
+		if i > 0 {
+			minimum := time.Duration(80*i) * time.Millisecond
+			if gap := r.started.Sub(previous); gap < minimum {
+				t.Fatalf("backoff bypassed: got %v want >= %v; %s", gap, minimum, diagnostic())
+			}
+		}
+		previous = r.returned
+		if i < 2 {
+			if status.Code(r.err) != codes.Unavailable {
+				t.Fatalf("expected Unavailable; %s", diagnostic())
+			}
+		} else {
+			if r.err != nil || len(r.cert) == 0 || bytes.Equal(r.cert, old) {
+				t.Fatalf("third RPC did not issue a new certificate; %s", diagnostic())
+			}
+			issued = r.cert
+		}
+	}
+	phase = "new certificate persisted and reloadable"
+	timer := time.NewTimer(guard)
+	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		b, err := os.ReadFile(certPath)
+		if err == nil && bytes.Equal(b, issued) {
+			got, _, cert, loadErr := s.loadCreds()
+			lastErr = loadErr
+			if loadErr == nil && bytes.Equal(got.CertificatePEM, issued) &&
+				!bytes.Equal(got.CertificatePEM, old) && cert.Leaf.NotAfter.After(time.Now().Add(20*24*time.Hour)) {
+				break
+			}
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ticker.C:
+		case err := <-done:
+			joined = true
+			t.Fatalf("session ended before persistence: %v; %s", err, diagnostic())
+		case <-timer.C:
+			t.Fatalf("persistence scheduling guard expired; %s", diagnostic())
+		}
+	}
+	phase = "session cancellation and join"
+	stop()
 }
 
 // Exercise the reloaded TLS credentials over an in-memory transport; the
