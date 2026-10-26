@@ -11,27 +11,30 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/upstream"
 
 	"github.com/jackc/pgx/v5"
 )
 
 type deviceConfig struct {
-	Listen          string          `json:"listen"`
-	MasterKeyFile   string          `json:"masterKeyFile"`
-	Store           store.Config    `json:"store"`
-	IAM             deviceRPCConfig `json:"iam"`
-	Org             deviceRPCConfig `json:"org"`
-	SyntheticTenant string          `json:"syntheticTenant"`
-	D7SyntheticOnly bool            `json:"d7SyntheticOnly"`
-	Capacity        int             `json:"capacity"`
-	MaxConnections  int             `json:"maxConnections"`
-	MaxInFlight     int             `json:"maxInFlight"`
-	HeaderMillis    int             `json:"headerMillis"`
-	ReadMillis      int             `json:"readMillis"`
-	WriteMillis     int             `json:"writeMillis"`
-	IdleMillis      int             `json:"idleMillis"`
-	ShutdownMillis  int             `json:"shutdownMillis"`
+	Listen          string                `json:"listen"`
+	MasterKeyFile   string                `json:"masterKeyFile"`
+	Store           store.Config          `json:"store"`
+	IAM             deviceRPCConfig       `json:"iam"`
+	Org             deviceRPCConfig       `json:"org"`
+	SyntheticTenant string                `json:"syntheticTenant"`
+	D7SyntheticOnly bool                  `json:"d7SyntheticOnly"`
+	Upstream        *deviceUpstreamConfig `json:"upstream,omitempty"`
+	Capacity        int                   `json:"capacity"`
+	MaxConnections  int                   `json:"maxConnections"`
+	MaxInFlight     int                   `json:"maxInFlight"`
+	HeaderMillis    int                   `json:"headerMillis"`
+	ReadMillis      int                   `json:"readMillis"`
+	WriteMillis     int                   `json:"writeMillis"`
+	IdleMillis      int                   `json:"idleMillis"`
+	ShutdownMillis  int                   `json:"shutdownMillis"`
 }
 
 // Wire configuration stays local; RPC validation/authentication still uses team.DialRPC.
@@ -83,8 +86,28 @@ func validateDeviceConfig(c deviceConfig) error {
 	if e != nil || pe != nil || n < 0 || n > 65535 || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		return deviceError()
 	}
-	if !c.D7SyntheticOnly || !deviceTenantPattern.MatchString(c.SyntheticTenant) || c.MasterKeyFile == "" {
+	if c.MasterKeyFile == "" {
 		return deviceError()
+	}
+	if c.Upstream == nil {
+		if !c.D7SyntheticOnly || !deviceTenantPattern.MatchString(c.SyntheticTenant) {
+			return deviceError()
+		}
+	} else {
+		if c.D7SyntheticOnly || c.SyntheticTenant != "" || len(c.Upstream.Models) == 0 {
+			return deviceError()
+		}
+		if _, err := upstream.New(upstream.Config{AllowedHosts: c.Upstream.AllowedHosts, MaxResponseBytes: 1 << 20, MaxEventBytes: modelprotocol.EventLimit}); err != nil {
+			return deviceError()
+		}
+		seen := map[string]bool{}
+		for _, m := range c.Upstream.Models {
+			key := m.Tenant + "/" + m.Model
+			if !deviceTenantPattern.MatchString(m.Tenant) || !deviceTenantPattern.MatchString(m.ProviderID) || m.Model == "" || len(m.Model) > 128 || m.UpstreamModel == "" || len(m.UpstreamModel) > 256 || !m.ContextLimitEnforced || !m.TrustUsage || m.ContextWindow < 2 || m.ContextWindow > 9007199254740991 || m.MaxOutputTokens < 1 || m.MaxOutputTokens >= m.ContextWindow || seen[key] {
+				return deviceError()
+			}
+			seen[key] = true
+		}
 	}
 	for _, dsn := range []string{c.Store.DSN, c.Store.MigrationDSN} {
 		p, e := pgx.ParseConfig(dsn)

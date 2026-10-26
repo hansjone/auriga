@@ -80,7 +80,16 @@ func newDeviceRuntime(ctx context.Context, c deviceConfig) (*deviceRuntime, erro
 		closeResources()
 		return nil, err
 	}
-	core, err := relay.New(relay.Config{Gate: gate, Reader: reader, Cipher: cipher, Ledger: ledger, Policy: syntheticPolicy(db, c.SyntheticTenant), Transport: syntheticTransport, Limits: modelprotocol.Limits{MaxBytes: 1 << 20, MaxEvents: 32, MaxEventBytes: modelprotocol.EventLimit}, RecheckInterval: 100 * time.Millisecond, CheckTimeout: time.Second, StopTimeout: 100 * time.Millisecond, AccountingTimeout: time.Second})
+	transport, policy, err := deviceTransportPolicy(db, c)
+	if err != nil {
+		closeResources()
+		return nil, err
+	}
+	maxEvents := 32
+	if c.Upstream != nil {
+		maxEvents = 4096
+	}
+	core, err := relay.New(relay.Config{Gate: gate, Reader: reader, Cipher: cipher, Ledger: ledger, Policy: policy, Transport: transport, Limits: modelprotocol.Limits{MaxBytes: 1 << 20, MaxEvents: maxEvents, MaxEventBytes: modelprotocol.EventLimit}, RecheckInterval: 100 * time.Millisecond, CheckTimeout: time.Second, StopTimeout: 100 * time.Millisecond, AccountingTimeout: time.Second})
 	if err != nil {
 		closeResources()
 		return nil, err
@@ -193,6 +202,10 @@ func serveDevice(path string, logs io.Writer) error {
 	defer func() { _ = l.Close() }()
 	logger := slog.New(slog.NewJSONHandler(logs, nil))
 	r.server.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelError)
-	logger.Info("D7 synthetic device listener", "address", l.Addr().String())
+	mode := "synthetic"
+	if c.Upstream != nil {
+		mode = "upstream"
+	}
+	logger.Info("D7 device listener", "address", l.Addr().String(), "mode", mode)
 	return r.serve(ctx, l, c.MaxConnections)
 }
