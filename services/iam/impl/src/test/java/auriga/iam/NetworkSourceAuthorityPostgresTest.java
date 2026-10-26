@@ -280,21 +280,26 @@ class NetworkSourceAuthorityPostgresTest {
                           stub.readAgentSourceReceipt(
                               receipt(original.toBuilder().setConnection(connection).build())));
                   assertEquals(before, receiptDatabase());
-                  clock.advance(3601);
-                  // Cleanup refers to C, while the current transport remains C2.
-                  var current = connection;
-                  connection = original.getConnection();
-                  cleanExpiredOriginalIngress();
-                  connection = current;
-                  mutate("device", device, "revoked", true);
-                  mutate("account", account.toString(), "status", "disabled");
-                  organization =
-                      r -> {
-                        throw new AssertionError("Receipt read must not authorize online");
-                      };
-                  sources = authority(new IamNetworkSourceAuthority.Policy(0, 0));
-                  // Existing RPC holds the original authority; both have identical read-only
-                  // semantics.
+                }));
+    clock.advance(3601);
+    // Cleanup refers to C, while the current transport remains C2.
+    var current = connection;
+    connection = original.getConnection();
+    cleanExpiredOriginalIngress();
+    connection = current;
+    mutate("device", device, "revoked", true);
+    mutate("account", account.toString(), "status", "disabled");
+    organization =
+        r -> {
+          throw new AssertionError("Receipt read must not authorize online");
+        };
+    sources = authority(new IamNetworkSourceAuthority.Policy(0, 0));
+    // The original transport and identity expired, but this service JWT must be current.
+    withSpringRpc(
+        stub ->
+            TenantContext.run(
+                tenant,
+                () -> {
                   var expired = receiptDatabase();
                   assertEquals(committed, stub.readAgentSourceReceipt(receipt(original)));
                   assertEquals(1, committed.getSource().getStateValue());
