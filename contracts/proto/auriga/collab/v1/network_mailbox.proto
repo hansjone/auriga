@@ -15,6 +15,9 @@ service NetworkMailboxService {
   rpc Head(NetworkMailboxServiceHeadRequest) returns (NetworkMailboxServiceHeadResponse);
   rpc Fetch(NetworkMailboxServiceFetchRequest) returns (NetworkMailboxServiceFetchResponse);
   rpc Receipt(NetworkMailboxServiceReceiptRequest) returns (NetworkMailboxServiceReceiptResponse);
+  // Transport the existing NATS up/down local_register/register_result frames.
+  // Contract only: an unimplemented handler MUST remain UNIMPLEMENTED/rejected.
+  rpc LocalRegister(NetworkMailboxServiceLocalRegisterRequest) returns (NetworkMailboxServiceLocalRegisterResponse);
 }
 
 // All fields originate in the authenticated callout/IAM grant, never JSON or
@@ -62,5 +65,32 @@ message NetworkMailboxServiceReceiptRequest {
 }
 message NetworkMailboxServiceReceiptResponse {
   // Signed receipt_committed or error; collab owns idempotency and cursor CAS.
+  bytes frame_json = 1;
+}
+
+// Complete original LocalRegister: strict UTF-8 JSON/schema, <=64KiB; uint64s
+// remain decimal strings. Never split/recompute op, fingerprint, type or boot.
+// Identity comes ONLY from authenticated connection/NATS ingress, not frame or
+// headers. ONLY svc:ai-gateway platform internal JWT over trusted internal
+// transport, with trusted non-platform delegated tenant equal to connection;
+// this is NOT svc:collab source authority permission.
+// Production MUST recheck persisted ingress/IAM CONNECT/currentTarget, READY
+// association/boot and server epoch against frame epoch; preserve RLS, node
+// health, original-op-first lookup, immutable type, revision/high-water and
+// durable diagnostics. Registration grants no SEND/source/contact/execution
+// authority; it needs neither the three source RPCs nor the fifth authorization
+// call. Protobuf bytes enforce none of JSON, size, authorization or signatures;
+// future Java/Go/provider enforcement responsibilities are in network/README.md.
+message NetworkMailboxServiceLocalRegisterRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceLocalRegisterResponse {
+  // Original complete signed RegisterResult or existing signed Error bytes.
+  // If authentication/signing audience cannot be established, reject via existing
+  // gRPC status mapping. Gateway MUST NOT fabricate unsigned/partial success.
+  // RegisterResult has NO top-level epoch/boot/fingerprint; epoch is in
+  // server_auth.audience. protocol_response binds realm/node/incarnation/epoch,
+  // READY channel_nonce and original request_id. Forward unchanged; no re-encode.
   bytes frame_json = 1;
 }
