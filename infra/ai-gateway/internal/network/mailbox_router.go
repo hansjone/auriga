@@ -19,56 +19,69 @@ const headHintRoot = "auriga.internal.network.head."
 type mailboxPublisher interface{ Publish(string, []byte) error }
 
 type mailboxRouter struct {
-	redeemer        *IAMRedeemer
-	client          *MailboxClient
-	signer          *errorSigner
-	nc              *nats.Conn
-	slots           chan struct{}
-	ctx             context.Context
-	workers         sync.WaitGroup
-	subscriptions   []*nats.Subscription
-	mu              sync.Mutex
-	closing         bool
-	publisher       mailboxPublisher
-	headPending     map[nodeIdentity]string
-	headRunning     map[nodeIdentity]bool
-	headSlots       chan struct{}
-	upSubscriptions map[string]*nats.Subscription
-	ingressNodes    map[string]nodeIdentity
-	nodeRefs        map[nodeIdentity]int
-	tenantRefs      map[string]int
-	nodeBusy        map[nodeIdentity]bool
-	nodeBudgets     map[nodeIdentity]*nodeBudget
-	tenantBudgets   map[string]*requestBucket
-	tenantActive    map[string]int
-	errorSlots      chan struct{}
-	tenantErrors    map[string]int
-	tenantHeads     map[string]int
+	redeemer            *IAMRedeemer
+	client              *MailboxClient
+	signer              *errorSigner
+	nc                  *nats.Conn
+	slots               chan struct{}
+	ctx                 context.Context
+	workers             sync.WaitGroup
+	subscriptions       []*nats.Subscription
+	mu                  sync.Mutex
+	closing             bool
+	publisher           mailboxPublisher
+	headPending         map[nodeIdentity]string
+	headRunning         map[nodeIdentity]bool
+	headSlots           chan struct{}
+	upSubscriptions     map[string]*nats.Subscription
+	ingressNodes        map[string]nodeIdentity
+	nodeRefs            map[nodeIdentity]int
+	tenantRefs          map[string]int
+	nodeBusy            map[nodeIdentity]bool
+	nodeBudgets         map[nodeIdentity]*nodeBudget
+	tenantBudgets       map[string]*requestBucket
+	tenantActive        map[string]int
+	errorSlots          chan struct{}
+	tenantErrors        map[string]int
+	tenantHeads         map[string]int
+	sources             map[sourceLane]*sourceCall
+	sourceRevokes       chan struct{}
+	tenantRevokes       map[string]int
+	revokeBudgets       map[nodeIdentity]*requestBucket
+	tenantRevokeBudgets map[string]*requestBucket
+	// Protected by redeemer.mu, together with the authenticated READY binding.
+	sourceBoot map[string]string
 }
 
 func newMailboxRouter(ctx context.Context, r *IAMRedeemer, c *MailboxClient, s *errorSigner, nc *nats.Conn) (*mailboxRouter, error) {
 	router := &mailboxRouter{
-		redeemer:        r,
-		client:          c,
-		signer:          s,
-		nc:              nc,
-		ctx:             ctx,
-		slots:           make(chan struct{}, mailboxWorkers),
-		publisher:       nc,
-		headPending:     make(map[nodeIdentity]string),
-		headRunning:     make(map[nodeIdentity]bool),
-		headSlots:       make(chan struct{}, 16),
-		upSubscriptions: make(map[string]*nats.Subscription),
-		ingressNodes:    make(map[string]nodeIdentity),
-		nodeRefs:        make(map[nodeIdentity]int),
-		tenantRefs:      make(map[string]int),
-		nodeBusy:        make(map[nodeIdentity]bool),
-		nodeBudgets:     make(map[nodeIdentity]*nodeBudget),
-		tenantBudgets:   make(map[string]*requestBucket),
-		tenantActive:    make(map[string]int),
-		errorSlots:      make(chan struct{}, 16),
-		tenantErrors:    make(map[string]int),
-		tenantHeads:     make(map[string]int),
+		redeemer:            r,
+		client:              c,
+		signer:              s,
+		nc:                  nc,
+		ctx:                 ctx,
+		slots:               make(chan struct{}, mailboxWorkers),
+		publisher:           nc,
+		headPending:         make(map[nodeIdentity]string),
+		headRunning:         make(map[nodeIdentity]bool),
+		headSlots:           make(chan struct{}, 16),
+		upSubscriptions:     make(map[string]*nats.Subscription),
+		ingressNodes:        make(map[string]nodeIdentity),
+		nodeRefs:            make(map[nodeIdentity]int),
+		tenantRefs:          make(map[string]int),
+		nodeBusy:            make(map[nodeIdentity]bool),
+		nodeBudgets:         make(map[nodeIdentity]*nodeBudget),
+		tenantBudgets:       make(map[string]*requestBucket),
+		tenantActive:        make(map[string]int),
+		errorSlots:          make(chan struct{}, 16),
+		tenantErrors:        make(map[string]int),
+		tenantHeads:         make(map[string]int),
+		sources:             make(map[sourceLane]*sourceCall),
+		sourceRevokes:       make(chan struct{}, 16),
+		tenantRevokes:       make(map[string]int),
+		revokeBudgets:       make(map[nodeIdentity]*requestBucket),
+		tenantRevokeBudgets: make(map[string]*requestBucket),
+		sourceBoot:          make(map[string]string),
 	}
 	for _, subject := range []string{headHintRoot + "*"} {
 		sub, err := nc.Subscribe(subject, router.receive)
@@ -90,6 +103,9 @@ func newMailboxRouter(ctx context.Context, r *IAMRedeemer, c *MailboxClient, s *
 func (r *mailboxRouter) close() {
 	r.mu.Lock()
 	r.closing = true
+	for _, call := range r.sources {
+		call.cancel()
+	}
 	for _, sub := range r.subscriptions {
 		_ = sub.Unsubscribe()
 	}
@@ -133,6 +149,9 @@ func (r *mailboxRouter) receive(msg *nats.Msg) {
 	}
 	r.redeemer.mu.Unlock()
 	node := nodeIdentity{b.Tenant, b.Realm, b.Node}
+	if r.receiveSourceLocked(b, msg.Data) {
+		return
+	}
 	if !r.allowRequestLocked(node, time.Now()) {
 		return
 	}
@@ -224,6 +243,10 @@ func (r *mailboxRouter) dispatchHeadsLocked() {
 }
 
 func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
+	r.handleContext(r.ctx, b, raw, head)
+}
+
+func (r *mailboxRouter) handleContext(ctx context.Context, b liveBinding, raw []byte, head bool) {
 	operation, requestID, ae := mailboxOperation(raw, head)
 	if ae != nil {
 		if !head {
@@ -237,18 +260,29 @@ func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
 		}
 		return
 	}
-	if operation == "local_register" {
-		q, decErr := decodeLocalRegister(raw)
+	var sourceBoot string
+	if operation == "local_register" || sourceOperation(operation) {
+		var q map[string]json.RawMessage
+		var decErr *AppError
+		if sourceOperation(operation) {
+			q, decErr = decodeSourceRequest(raw, operation)
+			sourceBoot = registrationString(q["boot_id"])
+		} else {
+			q, decErr = decodeLocalRegister(raw)
+		}
 		r.redeemer.mu.Lock()
 		current, ok := r.redeemer.bindings[b.Ingress]
 		live := ok && sameMailboxBinding(current, b) && !current.Revoked && time.Now().Before(current.NotAfter)
+		if sourceOperation(operation) {
+			live = live && sourceBoot == r.sourceBoot[b.Ingress]
+		}
 		r.redeemer.mu.Unlock()
 		if decErr != nil || !live || registrationString(q["epoch"]) != u64str(b.Epoch) {
 			r.sendError(b, raw, staleEpoch(requestID))
 			return
 		}
 	}
-	response, ae := r.client.Call(r.ctx, b, operation, raw)
+	response, ae := r.client.Call(ctx, b, operation, raw)
 	if ae != nil {
 		if !head {
 			r.sendError(b, raw, ae)
@@ -277,13 +311,32 @@ func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
 		return
 	}
 	guard.Lock()
+	if sourceOperation(operation) && ctx.Err() != nil {
+		guard.Unlock()
+		r.sendError(b, raw, mailboxError(ctx.Err()))
+		return
+	}
 	r.redeemer.mu.Lock()
 	current, ok := r.redeemer.bindings[b.Ingress]
 	allowed := ok && !current.Revoked && time.Now().Before(current.NotAfter) && (operation == "ready" || sameMailboxBinding(current, b))
+	if sourceOperation(operation) {
+		allowed = allowed && ctx.Err() == nil && sourceBoot == r.sourceBoot[b.Ingress]
+	}
 	if allowed {
 		if operation == "ready" {
 			current.Incarnation, current.ChannelNonce, current.Epoch = updated.Incarnation, updated.ChannelNonce, updated.Epoch
 			r.redeemer.bindings[b.Ingress] = current
+			var result, q map[string]json.RawMessage
+			_ = json.Unmarshal(response, &result)
+			if registrationString(result["type"]) == "ready_result" {
+				_ = json.Unmarshal(raw, &q)
+				boot := registrationString(q["boot_id"])
+				if opaqueID.MatchString(boot) {
+					r.sourceBoot[b.Ingress] = boot
+				} else {
+					delete(r.sourceBoot, b.Ingress)
+				}
+			}
 		}
 	} else {
 		err = errUnauthorized
@@ -312,6 +365,14 @@ func mailboxOperation(raw []byte, head bool) (string, string, *AppError) {
 		return "", "", protocolError("", "frame size")
 	}
 	var registration map[string]json.RawMessage
+	if json.Unmarshal(raw, &registration) == nil && sourceOperation(registrationString(registration["type"])) {
+		op := registrationString(registration["type"])
+		q, ae := decodeSourceRequest(raw, op)
+		if ae != nil {
+			return "", registrationString(registration["request_id"]), ae
+		}
+		return op, registrationString(q["request_id"]), nil
+	}
 	if json.Unmarshal(raw, &registration) == nil && registrationString(registration["type"]) == "local_register" {
 		q, ae := decodeLocalRegister(raw)
 		if ae != nil {
@@ -368,6 +429,9 @@ type mailboxResponse struct {
 }
 
 func validateMailboxResponse(b liveBinding, operation, requestID string, request, response []byte) (liveBinding, error) {
+	if sourceOperation(operation) {
+		return b, validateSourceResponse(b, operation, requestID, request, response)
+	}
 	if operation == "local_register" {
 		return b, validateRegisterResponse(b, requestID, request, response)
 	}

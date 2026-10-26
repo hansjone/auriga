@@ -27,7 +27,14 @@ func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*Ma
 }
 
 func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation string, raw []byte) ([]byte, *AppError) {
-	ctx, cancel := context.WithTimeout(team.WithActor(ctx, &collab.Actor{TenantId: b.Tenant}), c.timeout)
+	timeout := c.timeout
+	if sourceOperation(operation) {
+		if _, ae := decodeSourceRequest(raw, operation); ae != nil {
+			return nil, ae
+		}
+		timeout = sourceRequestTimeout
+	}
+	ctx, cancel := context.WithTimeout(team.WithActor(ctx, &collab.Actor{TenantId: b.Tenant}), timeout)
 	defer cancel()
 	id := &collab.NetworkMailboxConnection{TenantId: b.Tenant, Realm: b.Realm, Node: b.Node, Ingress: b.Ingress, ServerId: b.ServerID, ClientId: u64str(b.ClientID), ClientAccount: b.Account}
 	options := []grpc.CallOption{grpc.MaxCallRecvMsgSize(EncodingMaxPayloadBytes + 16), grpc.MaxCallSendMsgSize(EncodingMaxPayloadBytes + 2048)}
@@ -56,6 +63,18 @@ func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation strin
 		}
 		var resp *collab.NetworkMailboxServiceLocalRegisterResponse
 		resp, err = c.rpc.LocalRegister(ctx, &collab.NetworkMailboxServiceLocalRegisterRequest{Connection: id, FrameJson: raw}, options...)
+		data = resp.GetFrameJson()
+	case "source_register":
+		var resp *collab.NetworkMailboxServiceSourceRegisterResponse
+		resp, err = c.rpc.SourceRegister(ctx, &collab.NetworkMailboxServiceSourceRegisterRequest{Connection: id, FrameJson: raw}, options...)
+		data = resp.GetFrameJson()
+	case "source_get":
+		var resp *collab.NetworkMailboxServiceSourceGetResponse
+		resp, err = c.rpc.SourceGet(ctx, &collab.NetworkMailboxServiceSourceGetRequest{Connection: id, FrameJson: raw}, options...)
+		data = resp.GetFrameJson()
+	case "source_revoke":
+		var resp *collab.NetworkMailboxServiceSourceRevokeResponse
+		resp, err = c.rpc.SourceRevoke(ctx, &collab.NetworkMailboxServiceSourceRevokeRequest{Connection: id, FrameJson: raw}, options...)
 		data = resp.GetFrameJson()
 	default:
 		return nil, protocolError("", "unsupported mailbox operation")
