@@ -15,6 +15,11 @@ export interface paths {
      *     重新安装/克隆必须取得新设备凭据；客户端不能指定 node、系统地址或 audience。请求体省略时等同空对象。
      *     register/tickets 共用数据库固定五分钟窗口，单设备 30、单账号 120、单组织 3000 次；超限 common.rate_limited。
      *     所有响应禁止缓存；公网经 HTTPS，内部 edge→IAM 传输沿现有可信 hop 规则。
+     *     created 仅表示本次调用最终提交事务实际 INSERT 新 node；已有 node、幂等重试或并发落败为 false，不重放历史 true。
+     *     true 仅供认证 HTTPS 当前 device/node、当前真实请求 generation 一次初始化；完整验签 READY 确认 incarnation 并原子落完整 ledger 后才开放业务。
+     *     false 或旧后端缺 created 且无完整 ledger 必须拒绝初始化；已有完整 ledger 按原身份恢复。前后端须联动升级。
+     *     响应不确定、提交后回包丢失或落盘未知不能无损自动恢复；沿现有真实重登获取新 device/node，不刷新同设备冒首次。
+     *     created 不是授权令牌，不存为永久配置，不从缺目录/空 vault/零高水位/keyset 推断；不重置 local 或补造 operation 回执。
      */
     post: operations['registerNetworkClient'];
     delete?: never;
@@ -1348,7 +1353,11 @@ export interface components {
     };
     /** Network register request */
     'register.schema': Record<string, never>;
-    NetworkRegistration: {
+    /**
+     * Network register result
+     * @description Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.
+     */
+    'register-result.schema': {
       /** Format: uuid */
       tenant: string;
       realm: string;
@@ -1356,6 +1365,8 @@ export interface components {
       /** Format: uuid */
       device: string;
       systemAddress: string;
+      /** @description true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission. */
+      created: boolean;
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -1392,6 +1403,15 @@ export interface components {
     'ticket-request.schema': {
       /** @description 当前设备已注册的 node，规范 uint64 十进制字符串，最大 18446744073709551615。 */
       node: string;
+    };
+    NetworkRegistration: {
+      /** Format: uuid */
+      tenant: string;
+      realm: string;
+      node: string;
+      /** Format: uuid */
+      device: string;
+      systemAddress: string;
     };
     NetworkClientTicket: {
       identity: components['schemas']['NetworkRegistration'];
@@ -1761,7 +1781,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description 已注册或已存在的稳定 DSH 身份。 */
+      /** @description 稳定 DSH 身份及本次事务实际创建事实；初始化消费边界见 network/README.md 的 HTTPS 注册初始化事实。 */
       200: {
         headers: {
           /** @description 禁止缓存。 */
@@ -1769,7 +1789,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['NetworkRegistration'];
+          'application/json': components['schemas']['register-result.schema'];
         };
       };
       400: components['responses']['BadRequest'];

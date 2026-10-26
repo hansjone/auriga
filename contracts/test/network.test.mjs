@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { verify } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import Ajv2020 from '../../services/contracts/node_modules/ajv/dist/2020.js';
 import addFormats from '../../services/contracts/node_modules/ajv-formats/dist/index.js';
 import {
@@ -163,6 +165,121 @@ function apply(value, ops) {
 }
 
 // ---- schemas and catalogs ----
+
+const registration = {
+  tenant: '01900000-0000-7000-8000-000000000001',
+  realm: '2',
+  node: '63',
+  device: '01900000-0000-7000-8000-000000000002',
+  systemAddress: 'aur1:2.3f.0',
+};
+const httpValidator = (file) => ajv.getSchema(schemas[file].$id);
+
+test('HTTPS register result requires exactly six fields and a boolean created', () => {
+  const validate = httpValidator('register-result');
+  assert.ok(validate);
+  for (const created of [true, false]) {
+    const result = { ...registration, created };
+    assert.equal(validate(result), true, JSON.stringify(validate.errors));
+    for (const field of Object.keys(result)) {
+      const missing = { ...result };
+      delete missing[field];
+      assert.equal(validate(missing), false, 'missing ' + field);
+      for (const value of [null, 0, 1, [], {}])
+        assert.equal(validate({ ...result, [field]: value }), false, field);
+    }
+    for (const value of ['true', 'false', ''])
+      assert.equal(validate({ ...result, created: value }), false);
+    assert.equal(validate({ ...result, serverAudience: 'forged' }), false);
+    for (const field of ['tenant', 'device', 'realm', 'node', 'systemAddress'])
+      assert.equal(validate({ ...result, [field]: 'invalid' }), false, field);
+  }
+  for (const value of [null, true, 1, 'result', []])
+    assert.equal(validate(value), false);
+});
+
+test('HTTPS requests and CONNECT cannot supply created or server-selected identity', () => {
+  const register = httpValidator('register');
+  const ticket = httpValidator('ticket-request');
+  const connect = httpValidator('connect-token');
+  assert.equal(register({}), true);
+  assert.equal(ticket({ node: registration.node }), true);
+  const token = {
+    tenant: registration.tenant,
+    node: registration.node,
+    device: registration.device,
+    ticket: 'A'.repeat(43),
+  };
+  assert.equal(connect(token), true);
+  for (const field of [
+    ...Object.keys(registration),
+    'serverAudience',
+    'created',
+  ]) {
+    assert.equal(register({ [field]: true }), false, field);
+    if (field !== 'node')
+      assert.equal(
+        ticket({ node: registration.node, [field]: true }),
+        false,
+        field,
+      );
+  }
+  assert.equal(connect({ ...token, created: true }), false);
+  assert.equal(connect({ ...token, serverAudience: 'forged' }), false);
+});
+
+test('HTTPS OpenAPI register uses the result schema while ticket identity stays unchanged', () => {
+  const root = new URL('../../', import.meta.url);
+  const output = new URL(
+    'services/contracts/target/network-client-test.json',
+    root,
+  );
+  mkdirSync(new URL('services/contracts/target/', root), { recursive: true });
+  const bundled = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(
+        new URL(
+          'services/contracts/node_modules/@redocly/cli/bin/cli.js',
+          root,
+        ),
+      ),
+      'bundle',
+      fileURLToPath(new URL('contracts/openapi/iam-network-client.yaml', root)),
+      '--config',
+      fileURLToPath(new URL('contracts/redocly.yaml', root)),
+      '--output',
+      fileURLToPath(output),
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(bundled.status, 0, bundled.stderr);
+  const spec = JSON.parse(readFileSync(output, 'utf8'));
+  const resolve = (schema) =>
+    schema.$ref
+      ? spec.components.schemas[schema.$ref.split('/').at(-1)]
+      : schema;
+  const response = (path) =>
+    resolve(
+      spec.paths[path].post.responses['200'].content['application/json'].schema,
+    );
+  assert.deepEqual(response('/network/register'), schemas['register-result']);
+  const identity = resolve(response('/network/tickets').properties.identity);
+  assert.deepEqual(identity.required, Object.keys(registration));
+  assert.deepEqual(
+    identity.properties,
+    Object.fromEntries(
+      Object.keys(registration).map((field) => [
+        field,
+        schemas['register-result'].properties[field],
+      ]),
+    ),
+  );
+  const validate = ajv.compile(identity);
+  assert.equal(validate(registration), true);
+  assert.equal(validate({ ...registration, created: true }), false);
+  assert.equal(Object.hasOwn(identity.properties, 'created'), false);
+});
 
 test('network schema 全部在严格模式下编译', () => {
   for (const [file, s] of Object.entries(schemas)) {

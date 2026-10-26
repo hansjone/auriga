@@ -23,6 +23,18 @@
 - **严格解析**（任何下行页在 JCS/验签/正文解析前，任何上行帧在处理前）：原始字节 ≤64KiB；拒绝重复键、孤立代理项、字符串内原始控制字符、非整数/超安全整数/指数写法的数字、NaN、尾随数据；嵌套深度 ≤16、单对象成员 ≤128、单数组 ≤256、单串 ≤16KiB、全帧值 ≤8192。全部返回 `network.protocol_error`。
 - **生产方/消费方**：schema 里的 `additionalProperties:false` 只给生产方自测；消费方放宽为允许额外字段（与 `contracts/README.md` 约定一致）。**与 resource/runtime 严格受签对象不同**：网络信封允许未知可选字段，存储/转发方原样保留，签名与摘要都覆盖它们；验签必须对“收到并严格解析的原始对象”做 JCS，禁止先映射成类型化结构丢字段再验签。未知可选字段不能覆盖已知字段（重复键已在解析时拒绝）、不能改变授权/期限/默认动作。未知 `kind`、未知控制动作、未知地址主版本、未知 required feature 一律拒绝，不“忽略后执行”。
 
+<a id="https-register-initialization"></a>
+
+### HTTPS 注册初始化事实
+
+`POST /api/iam/v1/network/register` 成功输出由 `register-result.schema.json` 定义：原 `tenant/realm/node/device/systemAddress` 身份语义不变，仅增加必需布尔 `created`。它是 HTTPS 当前调用的事务事实，不是网络署名帧或新授权令牌；不改变上述 raw 帧、1.x 消费兼容规则，也不进入 `/tickets.identity`、CONNECT token 或请求。旧设备授权、空请求、端点、错误、限额和凭据租户来源均不变。
+
+- `true` 仅在该次调用最终提交事务实际 INSERT 当前认证设备的新 node 时返回；已有 node、幂等重试、并发落败均为 `false`。事务重试不能沿用已回滚尝试的 `true`，更不能无限重放历史首次结果。
+- 客户端只在认证 HTTPS 校对当前 device/node 与完整身份、当前真实请求 generation 内一次消费实时 `true`。完整签名 READY 校验（受信根、tenant/realm/node、请求 nonce/requestId/epoch、时效）确认服务端 incarnation 后，必须原子落完整初始 ledger，才可开放业务；不能先信未验签 incarnation 或自造值。
+- 迟到、缓存、跨 generation 的 `true` 不得再次初始化，也不能存为永久配置或可重用 vault 许可；缺目录、空 vault、零高水位或 keyset 均不证明首次。`false` 或旧服务缺 `created` 且无完整 ledger 时一律拒绝初始化；已有完整 ledger 按原身份和 incarnation 严格恢复。
+- 响应不确定、事务提交后回包丢失、落盘前崩溃或落盘结果未知，均不承诺无损自动恢复；重试为 `false` 且无完整 ledger 时继续失败关闭。ledger 后来丢失同样拒绝，不重置 local、不补造 operation 回执。恢复沿现有真实重新登录取得新 device/new node，不能刷新同 device 冒首次，也不能继承旧 node 的本地证据。
+- 前后端须联动升级：本次仅补契约，生产 handler 仍未返回 `created`；新 provider 对旧后端缺字段默认失败关闭，不能据此宣称生产首启已可验。后续 Java 事务返回值和 provider 消费/READY/落盘接线须分别实现并验证。
+
 ## 2. 地址
 
 文本 `aur1:[realm.]node.local`：各段无前导零小写十六进制、1–16 位；只解析 2 段或 3 段。JSON 始终完整：
