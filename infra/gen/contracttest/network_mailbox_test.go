@@ -18,9 +18,9 @@ import (
 func TestNetworkMailboxLocalRegisterDescriptor(t *testing.T) {
 	file := collabv1.File_auriga_collab_v1_network_mailbox_proto
 	service := file.Services().ByName("NetworkMailboxService")
-	names := []protoreflect.Name{"Ready", "Head", "Fetch", "Receipt", "LocalRegister"}
-	if file.Services().Len() != 1 || file.Messages().Len() != 11 || service == nil || service.Methods().Len() != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Methods) != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Streams) != 0 {
-		t.Fatal("expected original four methods plus one unary and two messages")
+	names := []protoreflect.Name{"Ready", "Head", "Fetch", "Receipt", "LocalRegister", "SourceRegister", "SourceGet", "SourceRevoke"}
+	if file.Services().Len() != 1 || file.Messages().Len() != 17 || service == nil || service.Methods().Len() != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Methods) != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Streams) != 0 {
+		t.Fatal("expected original four methods plus four unary and eight messages")
 	}
 	for i, name := range names {
 		method := service.Methods().Get(i)
