@@ -30,8 +30,15 @@ Node 原生 fetch 同样发送的 `Sec-Fetch-Mode` 仅为元数据，不授予�
   开始后只尽力发送一次 AiError 并结束，失败不伪造 JSON 成功或 DONE。
 - `Recover(Pending)` 是强制同步交接；必须在有限时间内接管，并独立于响应取消保留责任，不能因易失队列满而丢弃。
   Pending 只交付受信 `budget.Ref` 与现场 `StopProof`，从不写到 HTTP。
-  空 Ref 表示 Admit COMMIT 不明，runtime 必须触发耐久扫描；有 Ref 时通过 `Ledger.GetReservation` 读取最新 revision，
-  再按真实证据调用 `Ledger.Recover`。缺停止证明继续保留槽，unknown 金额/token 继续冻结。
+  回调只取 Core 的专用 `Output.PendingRef`；Admit INSERT/回调成功但事务返回错误时，
+  精确定位仅在此内部端口交接，公开 `Output.Ref` 保持空，不写入 header、JSON/SSE、错误或日志。
+  原成功请求的公开关联 ID 和幂等错误语义不变；客户取消后仍同步交接。
+  空 Ref 表示仍未定位的不明责任，不能从请求头/体、参数、幂等键或旧请求 ID 补造。
+  非空 Ref 仅表示本次行可能存在，不证明提交、准入或行存在；先在 RLS 下重读真实状态/revision，
+  再按真实证据 CAS 调用 `Ledger.Recover`，绝不重派。首次 not_found 不证明最终回滚或责任已清。
+  缺停止证明继续保留槽，unknown 金额/token 继续冻结；StopProof 必须是现场全部执行停止的
+  closed channel，重启、时间、发送值或缺行均不能替代。reserved 取消 CAS 可 fence 旧提交。
+  此定位不是耐久 Pending 队列，进程崩溃仍可能丢失现场交接，不承诺跨重启全覆盖。
   跨重启扫描、后台恢复及真实 Transport 属于后续任务，本包没有完成这些工作。
 
 ## 验证

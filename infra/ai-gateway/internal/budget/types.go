@@ -3,13 +3,16 @@
 package budget
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	ai "github.com/hansjone/auriga/infra/gen/auriga/ai/v1"
+	"github.com/jackc/pgx/v5"
 )
 
 const maxInteger int64 = 9007199254740991
@@ -43,6 +46,29 @@ type Request struct {
 }
 
 type Ref struct{ TenantID, AccountID, RequestID string }
+
+// admissionPending is internal location evidence only, never a reservation or
+// proof of commit/existence. Keep its cause available without formatting it.
+type admissionPending struct {
+	ref   Ref
+	cause error
+}
+
+func (e *admissionPending) Error() string   { return e.String() }
+func (e admissionPending) String() string   { return "ai.budget_unavailable" }
+func (e admissionPending) GoString() string { return e.String() }
+func (e *admissionPending) Unwrap() error   { return e.cause }
+
+// AdmissionPendingRef extracts only this invocation's successfully inserted
+// location after Transaction failed. Missing rows do not resolve the ambiguity.
+func AdmissionPendingRef(err error) (Ref, bool) {
+	var pending *admissionPending
+	if errors.As(err, &pending) && pending != nil {
+		return pending.ref, true
+	}
+	return Ref{}, false
+}
+
 type Reservation struct {
 	Admission *ai.BudgetAdmission
 	State     string
@@ -66,13 +92,21 @@ type Finish struct {
 // lease expiry alone is not evidence that execution stopped or never submitted.
 type RecoveryEvidence struct{ NeverSubmitted, ExecutionStopped bool }
 
+// transactionStore preserves Store's callback-then-commit boundary.
+type transactionStore interface {
+	Transaction(context.Context, string, func(pgx.Tx) error) error
+}
+
 type Ledger struct {
-	store    *store.Store
+	store    transactionStore
 	currency string
 	policy   api.AdmissionPolicy
 }
 
-func New(s *store.Store, currency string, policy *api.AdmissionPolicy) (*Ledger, error) {
+func New(s transactionStore, currency string, policy *api.AdmissionPolicy) (*Ledger, error) {
+	if concrete, ok := s.(*store.Store); ok && concrete == nil {
+		return nil, failure("ai.budget_unavailable")
+	}
 	p := api.AdmissionPolicy{MaxActiveRequestsPerSubject: 2, MaxInFlightPercent: 25}
 	if policy != nil {
 		p = *policy
