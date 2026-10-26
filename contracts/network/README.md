@@ -328,6 +328,10 @@ typed-local 全八字段、native 有效期及已持久的宿主许可 fence，�
 
 Register 结果未知只以原 op、保存的原 IAM 请求（包括旧 connection）对账；不得用新连接重写原请求或换 op 绕过。
 collab 从自己的持久 pending 找到原体，经 IAM 留存的真实原归属锚点核验取回完整原响应，即使原 transport 已失效；
+无 native 的历史对账调用独立 `ReadAgentSourceReceipt`，wrapper 的 `original_request` 为完整冻结的
+原 Register 请求（原 C，不是当前 C2），返回原 `RegisterAgentSourceResponse` 成功或已提交拒绝回执。
+查询不调用新建 Register，也不写来源/操作/墓碑/代际或改期限、状态、revision；缺记录/锚点、依赖故障
+按 `UNAVAILABLE`/`FORBIDDEN` 关闭，异体仍冲突，不能从未命中推断 not_committed。
 本节 reconcile 仍须当前有权 mailbox 身份且同 tenant/node，并核持久原操作归属，不能靠知道 op 跨归属读取。
 重连的当前 envelope 只运回原回执；完整账本能证明从未接受时按 not_accepted 围栏处理，
 账本丢失/锚点缺失则保持 outcome_unknown，不能下载 IAM 事实重建插件/本地登记，也不能伪造失败终态。
@@ -383,7 +387,8 @@ schema 正负矩阵 `node --test contracts/network/fixtures/source-control.test.
 ### 7.1 agent 来源内部权威（契约已定义，实现待接线）
 
 独立 [`NetworkSourceAuthorityService`](../proto/auriga/iam/v1/network_source.proto) 定义
-`RegisterAgentSource`、`GetAgentSource`、`RevokeAgentSource`，各用独立 Request/Response；
+`RegisterAgentSource`、`ReadAgentSourceReceipt`、`GetAgentSource`、`RevokeAgentSource`；
+读取方法使用独立 wrapper Request 并复用 Register Response，其余各用独立 Request/Response；
 只供 `svc:collab` + 非平台业务 tenant + 既有可信内部传输，不给用户/模型或旧网关增加入口。
 IAM 从现行兑换/设备权威推导 owner/device/backing-session，保存最小 opaque 来源事实；collab 在真实 native
 resolver、健康/epoch、typed-local lookup/lock 后见证登记，并保留 local type 与线程/recipient/关系最终权威。
@@ -400,6 +405,8 @@ collab 再短事务重核 typed-local/业务关系。未实现服务保持拒绝
 `expected_revision` CAS 取得新 binding/独立有界期限，同代并发仅一个后继；持久停发或显式撤销不能靠新 op/连接绕过。
 已提交 Register 的原回包丢失时，svc:collab 可持原 op/原体经 IAM 留存归属锚点核验读取原响应，即使原 transport
 已失效；这不授当前权，取得原 binding 后仍须当前连接 Get 与本地 CAS。未知/未提交操作不享该回执读取例外。
+该只读方法不要求 native，历史 ACTIVE 也不是当前许可；不能替代有写入的原连接失效未提交围栏，
+不能据此声称所有 pending 均可收敛。用户/模型/网关无此入口。
 
 ## 8. Fixtures 与校验
 

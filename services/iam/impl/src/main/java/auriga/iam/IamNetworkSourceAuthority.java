@@ -95,6 +95,20 @@ final class IamNetworkSourceAuthority {
         });
   }
 
+  RegisterAgentSourceResponse readReceipt(ReadAgentSourceReceiptRequest r) {
+    require(
+        r != null && r.hasOriginalRequest() && r.getUnknownFields().asMap().isEmpty(),
+        VALIDATION_FAILED);
+    return tx(
+        () -> {
+          // This path must never fall back to register: a miss is only an unknown result.
+          var receipt = kernel.registerReceipt(r.getOriginalRequest());
+          require(receipt != null, UNAVAILABLE);
+          require(receipt.hasSource() != receipt.getDefinitivelyUncommitted(), UNAVAILABLE);
+          return receipt;
+        });
+  }
+
   GetAgentSourceResponse get(GetAgentSourceRequest r) {
     IamNetworkSources.validate(r);
     Instant began = clock.instant();

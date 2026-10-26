@@ -12,8 +12,16 @@ import (
 func TestNetworkSourceAuthorityDescriptorBoundary(t *testing.T) {
 	file := iamv1.File_auriga_iam_v1_network_source_proto
 	service := file.Services().ByName("NetworkSourceAuthorityService")
-	if file.Services().Len() != 1 || service == nil || service.Methods().Len() != 3 {
-		t.Fatal("source lifecycle must have a separate three-method service")
+	if file.Services().Len() != 1 || service == nil || service.Methods().Len() != 4 {
+		t.Fatal("source lifecycle must have a separate four-method service")
+	}
+	read := service.Methods().ByName("ReadAgentSourceReceipt")
+	if read == nil || read.Input().FullName() != (&iamv1.ReadAgentSourceReceiptRequest{}).ProtoReflect().Descriptor().FullName() || read.Output().FullName() != (&iamv1.RegisterAgentSourceResponse{}).ProtoReflect().Descriptor().FullName() || read.IsStreamingClient() || read.IsStreamingServer() {
+		t.Fatal("receipt read must be unary and reuse the complete original Register response")
+	}
+	original := read.Input().Fields().ByNumber(1)
+	if read.Input().Fields().Len() != 1 || original == nil || original.Name() != "original_request" || original.Message().FullName() != (&iamv1.RegisterAgentSourceRequest{}).ProtoReflect().Descriptor().FullName() {
+		t.Fatal("receipt wrapper must contain only the complete immutable original Register request")
 	}
 	for _, name := range []protoreflect.Name{"RegisterAgentSource", "GetAgentSource", "RevokeAgentSource"} {
 		method := service.Methods().ByName(name)
