@@ -26,6 +26,84 @@ function id(value) {
     /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
   );
 }
+
+/** Untrusted parameters only; never identity authority before full verification.
+ * @param {any} result */
+export function readyCandidate(result) {
+  if (!id(result?.node_identity?.incarnation) || !uint64(result?.epoch, true))
+    throw new SessionError('network.protocol_error', 'invalid READY candidate');
+  return {
+    nodeIncarnation: result.node_identity.incarnation,
+    epoch: result.epoch,
+  };
+}
+
+/** Call only after authenticating the complete original READY_RESULT object.
+ * Unknown optional fields remain covered by its signature.
+ * @param {any} result
+ * @param {{realm:string,node:string,nodeIncarnation:string,epoch:string,requestId:string}} expected */
+export function assertReadyResult(result, expected) {
+  readyCandidate(result);
+  const identity = result.node_identity;
+  const audience = result.server_auth?.audience;
+  const checkpoint = result.seen_checkpoint;
+  if (
+    typeof result.app_version !== 'string' ||
+    !/^1\.(?:0|[1-9][0-9]{0,3})$/.test(result.app_version) ||
+    result.type !== 'ready_result' ||
+    result.request_id !== expected.requestId ||
+    typeof result.status !== 'string' ||
+    identity.realm !== expected.realm ||
+    identity.node !== expected.node ||
+    identity.incarnation !== expected.nodeIncarnation ||
+    audience?.realm !== identity.realm ||
+    audience?.node !== identity.node ||
+    audience?.incarnation !== identity.incarnation ||
+    audience?.epoch !== result.epoch ||
+    result.epoch !== expected.epoch ||
+    ![
+      'head_seq',
+      'committed_cursor',
+      'retention_low_seq',
+      'local_high_water',
+      'registration_revision',
+    ].every((field) => uint64(result[field])) ||
+    !(
+      checkpoint === null ||
+      (checkpoint &&
+        uint64(checkpoint.checkpoint_seq) &&
+        uint64(checkpoint.checkpoint_revision) &&
+        typeof checkpoint.summary_digest === 'string' &&
+        /^sha256:[0-9a-f]{64}$/.test(checkpoint.summary_digest))
+    ) ||
+    !Array.isArray(result.required_features) ||
+    result.required_features.length > 64 ||
+    !result.required_features.every(
+      (/** @type {unknown} */ feature) =>
+        typeof feature === 'string' && /^[a-z][a-z0-9_]{0,47}$/.test(feature),
+    ) ||
+    new Set(result.required_features).size !== result.required_features.length
+  )
+    throw new SessionError('network.protocol_error', 'invalid READY_RESULT');
+  if (result.status !== 'ready')
+    throw new SessionError('ready_failed', 'READY_RESULT not ready');
+  const supported = [
+    'server_auth_v1',
+    'source_attestation_v1',
+    'inbox_only_v1',
+    'broadcast_grants_v1',
+  ];
+  if (
+    result.required_features.some(
+      (/** @type {unknown} */ feature) =>
+        !supported.includes(/** @type {string} */ (feature)),
+    )
+  )
+    throw new SessionError(
+      'network.unsupported_app_version',
+      'unsupported required network feature',
+    );
+}
 /** @param {any} entry */
 function assertPendingRegistration(entry) {
   if (
