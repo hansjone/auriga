@@ -13,7 +13,8 @@ import org.junit.jupiter.api.Test;
 class IamGrpcNetworkAuthorityTest {
   final IamNetworkAuthority authority = mock(IamNetworkAuthority.class);
   final NetworkAuthorityTest.Time clock = new NetworkAuthorityTest.Time();
-  final IamGrpcNetworkAuthority service = new IamGrpcNetworkAuthority(authority, clock);
+  final IamNetworkSourceAuthority sources = mock(IamNetworkSourceAuthority.class);
+  final IamGrpcNetworkAuthority service = new IamGrpcNetworkAuthority(authority, clock, sources);
   final IamGrpcDevicesSpringTest identity = new IamGrpcDevicesSpringTest();
 
   CheckNetworkRequest check() {
@@ -236,7 +237,9 @@ class IamGrpcNetworkAuthorityTest {
   }
 
   @Test
-  void deliveryRemainsUnavailableForValidCallerWithoutParsingEvidence() {
+  void deliveryErrorsAreSanitizedAndTenantIsCheckedBeforeWork() {
+    when(sources.authorizeDelivery(any()))
+        .thenThrow(AurigaException.of(CommonErrors.UNAVAILABLE, "private", "evidence"));
     collab(
         () -> {
           var error =
@@ -252,8 +255,7 @@ class IamGrpcNetworkAuthorityTest {
                               .build(),
                           new IamGrpcDevicesSpringTest.Capture<>()));
           assertEquals("common.unavailable", error.errorCode().code());
-          assertEquals(
-              Map.of("reason", "network_delivery_authority_not_configured"), error.params());
+          assertTrue(error.params().isEmpty());
           assertNull(error.getCause());
           error(
               "common.forbidden",

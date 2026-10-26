@@ -234,6 +234,11 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                   node.realm(),
                   nodeId,
                   java.sql.Timestamp.from(clock.instant()));
+              // credential() already holds session/device locks in this transaction. Persist the
+              // real redeem backing-session; delivery must never attach old ingress to a new login.
+              ObjectNode backingDevice = store.get("device", device, false);
+              String backingSession =
+                  backingDevice == null ? "" : backingDevice.path("sessionId").asString();
               store.insert(
                   "network_ingress",
                   binding.ingress(),
@@ -244,6 +249,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                       node.node(),
                       "device",
                       device,
+                      "sessionId",
+                      backingSession,
                       "serverId",
                       binding.serverId(),
                       "clientId",
@@ -367,6 +374,15 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     return transaction(this::limits);
   }
 
+  /** Package-only policy portion inside delivery's identity/policy/source transaction. */
+  Map<Limit, Long> deliveryLimits() {
+    return limits();
+  }
+
+  boolean permitsDelivery(Check request) {
+    return permitted(request, limits());
+  }
+
   record TargetBinding(
       String realm,
       String node,
@@ -466,6 +482,46 @@ public final class IamNetworkAuthority implements NetworkAuthority {
       List<Instant> identityExpiries,
       BigInteger revision,
       ObjectNode config) {}
+
+  record DeliverySnapshots(SourceSnapshot source, SourceSnapshot target) {}
+
+  /** Caller holds tenant network-authority first; multiple identity rows lock by class then ID. */
+  DeliverySnapshots deliverySnapshots(TargetBinding source, TargetBinding target) {
+    var bindings = List.of(source, target);
+    var identities = new ArrayList<TargetSnapshot>();
+    var sessionIds = new TreeSet<String>();
+    var deviceIds = new TreeSet<String>();
+    var accountIds = new TreeSet<String>();
+    for (var binding : bindings) {
+      var identity = targetIdentity(binding, false);
+      if (identity == null) return null;
+      identities.add(identity);
+      sessionIds.add(identity.session().path("sessionId").asString());
+      deviceIds.add(identity.node().device());
+      accountIds.add(identity.node().account());
+    }
+    for (String id : sessionIds) if (store.byId("session", id, true) == null) return null;
+    for (String id : deviceIds) if (store.byId("device", id, true) == null) return null;
+    for (String id : accountIds) if (store.byId("account", id, true) == null) return null;
+    // A changed backing-session requires a fresh attempt, never an out-of-order extra lock.
+    for (int i = 0; i < bindings.size(); i++)
+      if (!identities.get(i).equals(targetIdentity(bindings.get(i), false))) return null;
+    store.get("network_config", "organization", true);
+    policyRevision.current();
+    for (String ingress : new TreeSet<>(List.of(source.ingress(), target.ingress())))
+      if (store.get("network_ingress", ingress, true) == null) return null;
+    var sender = sourceSnapshot(source, true);
+    var receiver = sourceSnapshot(target, true);
+    for (var snapshot : new SourceSnapshot[] {sender, receiver}) {
+      if (snapshot == null
+          || !snapshot
+              .target()
+              .session()
+              .path("sessionId")
+              .equals(snapshot.target().ingress().path("sessionId"))) return null;
+    }
+    return new DeliverySnapshots(sender, receiver);
+  }
 
   /** Real redeem evidence, including indexed expiry; caller owns the tenant-first transaction. */
   SourceSnapshot sourceSnapshot(TargetBinding binding, boolean lock) {

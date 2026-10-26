@@ -238,8 +238,11 @@ public class IamRuntimeConfiguration {
 
   @Bean
   IamGrpcNetworkAuthority iamGrpcNetworkAuthority(
-      IamNetworkAuthority authority, IamGrpcSessions transportGuard, Clock clock) {
-    return new IamGrpcNetworkAuthority(authority, clock);
+      IamNetworkAuthority authority,
+      IamGrpcSessions transportGuard,
+      Clock clock,
+      IamNetworkSourceAuthority sources) {
+    return new IamGrpcNetworkAuthority(authority, clock, sources);
   }
 
   @Bean

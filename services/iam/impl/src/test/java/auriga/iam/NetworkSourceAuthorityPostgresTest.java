@@ -845,7 +845,9 @@ class NetworkSourceAuthorityPostgresTest {
         new GrpcServer(
             "127.0.0.1",
             0,
-            List.of(new IamGrpcNetworkSources(sources)),
+            List.of(
+                new IamGrpcNetworkSources(sources),
+                new IamGrpcNetworkAuthority(authority, clock, sources)),
             new AurigaServerInterceptor(verifier, Set.of(), Set.of("svc:collab")),
             null,
             false,
@@ -1128,5 +1130,752 @@ class NetworkSourceAuthorityPostgresTest {
       if (observed.getSource().getStateValue() != 1) assertEquals("", observed.getValidUntil());
     }
     assertEquals("", call(() -> sources.get(getRequest(first))).getValidUntil());
+  }
+
+  /** Uses the same real OAuth/redeem/PG fixture, with a distinct target owner/device/session. */
+  @Nested
+  class NetworkDeliveryPostgresTest {
+    NetworkAgentSource source;
+    NetworkAuthorityConnection target;
+    UUID targetAccount;
+    String targetDevice, targetSession;
+    tools.jackson.databind.node.ObjectNode message, context;
+
+    @BeforeEach
+    void delivery() {
+      source = call(() -> sources.register(request("delivery"))).getSource();
+      targetAccount = UUID.randomUUID();
+      TenantContext.run(
+          tenant,
+          () -> {
+            var issued =
+                tx(
+                    () -> {
+                      UUID provider = UUID.randomUUID();
+                      store.insert(
+                          "account",
+                          targetAccount.toString(),
+                          Json.object("status", "active"),
+                          null);
+                      store.insert("idp_provider", provider.toString(), Json.object(), null);
+                      return sessions.create(
+                          targetAccount,
+                          provider,
+                          "portal",
+                          true,
+                          Duration.ofHours(2),
+                          Duration.ofHours(1));
+                    });
+            targetSession = issued.session().path("sessionId").asString();
+            var grant =
+                oauth.deviceAuthorization(
+                    Map.of("client_id", "device-example", "scope", "auriga.connect"));
+            oauth.decideDevice(grant.path("user_code").asString(), targetSession, true);
+            String token =
+                oauth
+                    .token(
+                        Map.of(
+                            "grant_type",
+                            OAuthProvider.DEVICE,
+                            "client_id",
+                            "device-example",
+                            "device_code",
+                            grant.path("device_code").asString()))
+                    .path("access_token")
+                    .asString();
+            targetDevice = tokens.verify(token).path("did").asString();
+            var node2 = authority.register(token);
+            var ticket2 = authority.prepare(token, node2.node(), "server-a");
+            var b = newTransport(ticket2.ticket());
+            callers.as(
+                "svc:ai-gateway",
+                tenant,
+                () ->
+                    authority.redeem(ticket2.ticket(), node2.node(), targetDevice, "server-a", b));
+            target =
+                connection.toBuilder()
+                    .setNode(node2.node())
+                    .setIngress(b.ingress())
+                    .setServerId(b.serverId())
+                    .setClientId(b.clientId())
+                    .setClientAccount(b.account())
+                    .build();
+          });
+      organization =
+          r -> {
+            store.requireTransactionReleased();
+            assertEquals(tenant.toString(), r.getTenantId());
+            assertTrue(
+                Set.of(account.toString(), targetAccount.toString()).contains(r.getAccountId()));
+            return allowed();
+          };
+      // Registering the target advances the real policy barrier; observe the current source again.
+      var view = call(() -> sources.get(getRequest(source)));
+      message = NetworkDeliveryJsonTest.message();
+      var from = NetworkDeliveryJsonTest.address("session", node.node(), "1");
+      from.put("realm", node.realm());
+      message.set("from", from);
+      message.set("reply_to", from.deepCopy());
+      var to = NetworkDeliveryJsonTest.address("system", target.getNode(), "0");
+      to.put("realm", target.getRealm());
+      message.set("to", to);
+      message
+          .put("created_at", clock.instant().toString())
+          .put("expires_at", clock.instant().plusSeconds(60).toString());
+      message.set(
+          "authorization_ref",
+          Json.object(
+              "source_binding",
+              source.getSourceBinding(),
+              "source_revision",
+              Long.toUnsignedString(source.getRevision()),
+              "policy_revision",
+              Long.toUnsignedString(view.getPolicyRevision()),
+              "broadcast_grant_id",
+              null));
+      context =
+          Json.object(
+              "realm",
+              node.realm(),
+              "node",
+              node.node(),
+              "user",
+              account.toString(),
+              "sender_kind",
+              "agent",
+              "display_label",
+              "Alice",
+              "observed_at",
+              view.getObservedAt());
+    }
+
+    AuthorizeNetworkDeliveryRequest deliveryRequest() {
+      context.put("message_digest", IamNetworkDeliveryJson.digest(message));
+      return AuthorizeNetworkDeliveryRequest.newBuilder()
+          .setConnection(target)
+          .setMessageJson(com.google.protobuf.ByteString.copyFromUtf8(message.toString()))
+          .setSourceContextJson(com.google.protobuf.ByteString.copyFromUtf8(context.toString()))
+          .build();
+    }
+
+    void rpc(
+        java.util.function.Consumer<NetworkAuthorityServiceGrpc.NetworkAuthorityServiceBlockingStub>
+            work) {
+      withRpc(
+          stub ->
+              TenantContext.run(
+                  tenant,
+                  () ->
+                      work.accept(NetworkAuthorityServiceGrpc.newBlockingStub(stub.getChannel()))));
+    }
+
+    void denied(
+        NetworkAuthorityServiceGrpc.NetworkAuthorityServiceBlockingStub stub,
+        io.grpc.Status.Code code) {
+      var error =
+          assertThrows(
+              io.grpc.StatusRuntimeException.class,
+              () -> stub.authorizeNetworkDelivery(deliveryRequest()));
+      assertEquals(code, error.getStatus().getCode());
+      String description = Objects.toString(error.getStatus().getDescription(), "");
+      for (String secret :
+          List.of(
+              source.getSourceBinding(),
+              account.toString(),
+              device,
+              sessionId,
+              targetAccount.toString(),
+              target.getIngress(),
+              "message_digest",
+              "Alice")) assertFalse(description.contains(secret));
+    }
+
+    @Test
+    void realFifthRpcAllowsOnlyCompleteAuthorityAndClampsEveryDeadline() {
+      message.set("future", Json.object("😀", "é", "unknown", List.of(1, 2, 3)));
+      var idleBefore = tx(() -> store.byId("session", sessionId, false)).path("idleExpiresAt");
+      rpc(
+          stub -> {
+            var response = stub.authorizeNetworkDelivery(deliveryRequest());
+            assertTrue(response.getAllowed());
+            assertEquals(target, response.getConnection());
+            assertEquals(clock.instant().plusSeconds(5).toString(), response.getValidUntil());
+            assertEquals(
+                idleBefore,
+                tx(() -> store.byId("session", sessionId, false)).path("idleExpiresAt"));
+            message.put("expires_at", clock.instant().plusSeconds(2).toString());
+            assertEquals(
+                clock.instant().plusSeconds(2).toString(),
+                stub.authorizeNetworkDelivery(deliveryRequest()).getValidUntil());
+            message.put("expires_at", clock.instant().plusSeconds(60).toString());
+            mutate(
+                "session",
+                targetSession,
+                "idleExpiresAt",
+                clock.instant().plusSeconds(3).plusMillis(900).toString());
+            assertEquals(
+                clock.instant().plusSeconds(3).toString(),
+                stub.authorizeNetworkDelivery(deliveryRequest()).getValidUntil());
+            mutate(
+                "session",
+                sessionId,
+                "idleExpiresAt",
+                clock.instant().plusSeconds(1).plusMillis(900).toString());
+            assertEquals(
+                clock.instant().plusSeconds(1).toString(),
+                stub.authorizeNetworkDelivery(deliveryRequest()).getValidUntil());
+          });
+    }
+
+    @Test
+    void bothRawInputsAreStrictAtTheActualRpcAndDigestCoversUnknownFields() {
+      rpc(
+          stub -> {
+            var original = deliveryRequest();
+            for (byte[] raw : NetworkDeliveryJsonTest.badRaw()) {
+              var bytes = com.google.protobuf.ByteString.copyFrom(raw);
+              IamGrpcNetworkAuthoritySpringTest.grpc(
+                  io.grpc.Status.Code.INVALID_ARGUMENT,
+                  () ->
+                      stub.authorizeNetworkDelivery(
+                          original.toBuilder().setMessageJson(bytes).build()));
+              IamGrpcNetworkAuthoritySpringTest.grpc(
+                  io.grpc.Status.Code.INVALID_ARGUMENT,
+                  () ->
+                      stub.authorizeNetworkDelivery(
+                          original.toBuilder().setSourceContextJson(bytes).build()));
+            }
+            context.put("message_digest", "sha256:" + "0".repeat(64));
+            IamGrpcNetworkAuthoritySpringTest.grpc(
+                io.grpc.Status.Code.INVALID_ARGUMENT,
+                () ->
+                    stub.authorizeNetworkDelivery(
+                        original.toBuilder()
+                            .setSourceContextJson(
+                                com.google.protobuf.ByteString.copyFromUtf8(context.toString()))
+                            .build()));
+            message.put("future", "preserved");
+            IamGrpcNetworkAuthoritySpringTest.grpc(
+                io.grpc.Status.Code.INVALID_ARGUMENT,
+                () ->
+                    stub.authorizeNetworkDelivery(
+                        original.toBuilder()
+                            .setMessageJson(
+                                com.google.protobuf.ByteString.copyFromUtf8(message.toString()))
+                            .build()));
+          });
+    }
+
+    @Test
+    void sourceLifetimeAndExactTargetIngressAlsoClampTheDecision() {
+      rpc(
+          stub -> {
+            clock.advance(28);
+            assertEquals(
+                source.getExpiresAt(),
+                stub.authorizeNetworkDelivery(deliveryRequest()).getValidUntil());
+            var row = tx(() -> store.get("network_ingress", target.getIngress(), false));
+            mutate(
+                "network_ingress",
+                row.path("id").asString(),
+                "expiresAt",
+                clock.instant().plusSeconds(1).plusMillis(900).toString());
+            assertEquals(
+                clock.instant().plusSeconds(1).toString(),
+                stub.authorizeNetworkDelivery(deliveryRequest()).getValidUntil());
+          });
+    }
+
+    @Test
+    void currentCeilingsAndNodePolicyCannotBeBypassedByAnOldReference() {
+      admin(
+          () ->
+              authority.configure(
+                  new Configuration(true, true, true, Map.of(Limit.BODY_BYTES, 32L))));
+      var view = call(() -> sources.get(getRequest(source)));
+      ((tools.jackson.databind.node.ObjectNode) message.path("authorization_ref"))
+          .put("policy_revision", Long.toUnsignedString(view.getPolicyRevision()));
+      message.set("body", Json.object("subtype", "text", "text", "a".repeat(64)));
+      rpc(
+          stub -> {
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            message.set("body", Json.object("subtype", "text", "text", "x"));
+            assertTrue(stub.authorizeNetworkDelivery(deliveryRequest()).getAllowed());
+            admin(() -> authority.nodePolicy(node.node(), target.getNode(), false));
+            var latest = call(() -> sources.get(getRequest(source)));
+            ((tools.jackson.databind.node.ObjectNode) message.path("authorization_ref"))
+                .put("policy_revision", Long.toUnsignedString(latest.getPolicyRevision()));
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+          });
+    }
+
+    @Test
+    void exactTargetTupleCannotBeReplacedByPolicyAllowOrSourceConnection() {
+      rpc(
+          stub -> {
+            var original = target;
+            target = connection;
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            target = original;
+            for (var field : target.getDescriptorForType().getFields()) {
+              String bad =
+                  switch (field.getName()) {
+                    case "tenant_id" -> UUID.randomUUID().toString();
+                    case "realm", "node", "client_id" -> "18446744073709551615";
+                    case "ingress" -> "b".repeat(26);
+                    case "server_id" -> "N" + "C".repeat(55);
+                    default -> "OTHER";
+                  };
+              target = original.toBuilder().setField(field, bad).build();
+              denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            }
+            target = original;
+          });
+    }
+
+    @Test
+    void jsonAgreementNeverSubstitutesForRealSourceTupleOwnerOrPositiveVersions() {
+      rpc(
+          stub -> {
+            var original = message.deepCopy();
+            var stamp = context.deepCopy();
+            var auth = (tools.jackson.databind.node.ObjectNode) message.path("authorization_ref");
+            auth.put("source_binding", UUID.randomUUID().toString());
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            message = original.deepCopy();
+            auth = (tools.jackson.databind.node.ObjectNode) message.path("authorization_ref");
+            auth.put("source_revision", "2");
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            auth.put("source_revision", "1");
+            auth.put("policy_revision", "18446744073709551615");
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            for (String field : List.of("realm", "node", "local", "type")) {
+              message = original.deepCopy();
+              context = stamp.deepCopy();
+              var from = (tools.jackson.databind.node.ObjectNode) message.path("from");
+              from.put(field, field.equals("type") ? "subagent" : "18446744073709551615");
+              message.set("reply_to", from.deepCopy());
+              if (Set.of("realm", "node").contains(field))
+                context.put(field, from.path(field).asString());
+              if (field.equals("realm"))
+                ((tools.jackson.databind.node.ObjectNode) message.path("to"))
+                    .put("realm", from.path("realm").asString());
+              denied(
+                  stub,
+                  field.equals("type")
+                      ? io.grpc.Status.Code.INVALID_ARGUMENT
+                      : io.grpc.Status.Code.PERMISSION_DENIED);
+            }
+            message = original;
+            context = stamp;
+            context.put("user", targetAccount.toString());
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+          });
+    }
+
+    @Test
+    void everyCurrentSourceAndTargetIdentityFailureRejectsEvenWhenPolicyAllows() {
+      rpc(
+          stub -> {
+            for (String[] change :
+                List.of(
+                    new String[] {"device", device, "revoked", "true"},
+                    new String[] {"account", account.toString(), "status", "disabled"},
+                    new String[] {"session", sessionId, "revoked", "true"},
+                    new String[] {"session", sessionId, "expiresAt", clock.instant().toString()},
+                    new String[] {
+                      "session", sessionId, "idleExpiresAt", clock.instant().toString()
+                    },
+                    new String[] {"device", device, "accountId", targetAccount.toString()},
+                    new String[] {"device", device, "sessionId", targetSession},
+                    new String[] {"device", targetDevice, "revoked", "true"},
+                    new String[] {"device", targetDevice, "scope", "unknown"},
+                    new String[] {"account", targetAccount.toString(), "status", "disabled"},
+                    new String[] {"session", targetSession, "revoked", "true"},
+                    new String[] {
+                      "session", targetSession, "idleExpiresAt", clock.instant().toString()
+                    },
+                    new String[] {
+                      "network_ingress",
+                      target.getIngress(),
+                      "expiresAt",
+                      clock.instant().toString()
+                    })) {
+              var saved = tx(() -> store.byId(change[0], change[1], false));
+              if (change[0].equals("network_ingress"))
+                saved = tx(() -> store.get(change[0], change[1], false));
+              mutate(
+                  change[0],
+                  saved.path("id").asString(),
+                  change[2],
+                  change[3].equals("true") ? true : change[3]);
+              denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+              var restored = saved;
+              tx(
+                  () -> {
+                    store.save(change[0], restored);
+                    return null;
+                  });
+            }
+          });
+    }
+
+    @Test
+    void sourceAndTargetCurrentOrgPermissionAndUnknownEnumsFailClosed() {
+      rpc(
+          stub -> {
+            for (String subject : List.of(account.toString(), targetAccount.toString())) {
+              for (var response :
+                  List.of(
+                      allowed().toBuilder().clearPermissions().build(),
+                      allowed().toBuilder().setStatusValue(2).build(),
+                      allowed().toBuilder().setStatusValue(3).build(),
+                      allowed().toBuilder().setStatusValue(999).build(),
+                      allowed().toBuilder().setMemberTypeValue(0).build())) {
+                organization = r -> r.getAccountId().equals(subject) ? response : allowed();
+                denied(
+                    stub,
+                    response.getStatusValue() > 3 || response.getMemberTypeValue() == 0
+                        ? io.grpc.Status.Code.UNAVAILABLE
+                        : io.grpc.Status.Code.PERMISSION_DENIED);
+              }
+            }
+            organization = r -> null;
+            denied(stub, io.grpc.Status.Code.UNAVAILABLE);
+            organization =
+                r -> {
+                  throw io.grpc.Status.DEADLINE_EXCEEDED.asRuntimeException();
+                };
+            denied(stub, io.grpc.Status.Code.UNAVAILABLE);
+          });
+    }
+
+    @Test
+    void oldGenerationCannotBorrowSuccessorExpiryAndExpiredObservationCommits() {
+      rpc(
+          stub -> {
+            clock.advance(31);
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            assertEquals(
+                3,
+                tx(
+                    () ->
+                        store
+                            .networkJdbc()
+                            .queryForObject(
+                                "SELECT state FROM iam.network_source WHERE tenant_id=? AND id=?",
+                                Integer.class,
+                                tenant,
+                                UUID.fromString(source.getSourceBinding()))));
+            var expired = call(() -> sources.get(getRequest(source))).getSource();
+            assertEquals(3, expired.getStateValue());
+            assertEquals(2, expired.getRevision());
+            var next =
+                call(() ->
+                        sources.register(
+                            request("successor").toBuilder()
+                                .setPredecessorBinding(source.getSourceBinding())
+                                .setExpectedRevision(expired.getRevision())
+                                .build()))
+                    .getSource();
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            assertTrue(
+                Instant.parse(next.getExpiresAt()).isAfter(Instant.parse(source.getExpiresAt())));
+            var auth = (tools.jackson.databind.node.ObjectNode) message.path("authorization_ref");
+            auth.put("source_binding", next.getSourceBinding()).put("source_revision", "1");
+            context.put("observed_at", clock.instant().toString());
+            assertTrue(stub.authorizeNetworkDelivery(deliveryRequest()).getAllowed());
+            call(() -> sources.revoke(stop(expired, "stop-old")));
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+          });
+    }
+
+    @Test
+    void originalTransportMayReconnectOnlyWithinRetainedIdentity() {
+      rpc(
+          stub -> {
+            var next =
+                TenantContext.call(
+                    tenant, () -> authority.prepare(access, node.node(), "server-a"));
+            var b = newTransport(next.ticket());
+            callers.as(
+                "svc:ai-gateway",
+                tenant,
+                () -> authority.redeem(next.ticket(), node.node(), device, "server-a", b));
+            tx(
+                () -> {
+                  var old = store.get("network_ingress", connection.getIngress(), true);
+                  old.put("expiresAt", clock.instant().toString());
+                  store.save("network_ingress", old);
+                  store
+                      .networkJdbc()
+                      .update(
+                          "UPDATE iam.network_ingress SET expires_at=? WHERE tenant_id=? AND lookup_key=?",
+                          java.sql.Timestamp.from(clock.instant()),
+                          tenant,
+                          connection.getIngress());
+                  return null;
+                });
+            assertTrue(stub.authorizeNetworkDelivery(deliveryRequest()).getAllowed());
+            assertEquals(connection, source.getOriginalConnection());
+            mutate("device", device, "sessionId", targetSession);
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+          });
+    }
+
+    @Test
+    void aNewLoginOfTheSameOwnerAndMissingRedeemSessionEvidenceCannotInherit() {
+      rpc(
+          stub -> {
+            var ingress = tx(() -> store.get("network_ingress", target.getIngress(), false));
+            var missing = ingress.deepCopy();
+            missing.remove("sessionId");
+            tx(
+                () -> {
+                  store.save("network_ingress", missing);
+                  return null;
+                });
+            denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            tx(
+                () -> {
+                  store.save("network_ingress", ingress);
+                  return null;
+                });
+            for (boolean sender : List.of(true, false)) {
+              String did = sender ? device : targetDevice;
+              UUID owner = sender ? account : targetAccount;
+              String originalSession = sender ? sessionId : targetSession;
+              var old = tx(() -> store.byId("session", originalSession, false));
+              var replacement =
+                  tx(
+                      () ->
+                          sessions.create(
+                              owner,
+                              UUID.fromString(old.path("providerId").asString()),
+                              "portal",
+                              true,
+                              Duration.ofHours(2),
+                              Duration.ofHours(1)));
+              mutate(
+                  "device", did, "sessionId", replacement.session().path("sessionId").asString());
+              denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+              mutate("device", did, "sessionId", originalSession);
+            }
+          });
+    }
+
+    @Test
+    void remoteChecksHoldNoDatabaseResourcesAndChangedFactsCannotBeReused() {
+      rpc(
+          stub -> {
+            for (String side : List.of("source", "target", "policy")) {
+              var changed = new java.util.concurrent.atomic.AtomicBoolean();
+              organization =
+                  r -> {
+                    store.requireTransactionReleased();
+                    if (changed.compareAndSet(false, true)) {
+                      if (side.equals("policy"))
+                        tx(
+                            () -> {
+                              store.lock("network-authority");
+                              new IamNetworkPolicyRevision(store).bump();
+                              return null;
+                            });
+                      else
+                        mutate(
+                            "session",
+                            side.equals("source") ? sessionId : targetSession,
+                            "changedDuringOrg",
+                            side);
+                    }
+                    return allowed();
+                  };
+              denied(stub, io.grpc.Status.Code.PERMISSION_DENIED);
+            }
+          });
+    }
+
+    @Test
+    void anotherTenantsRealSourceBindingIsNotReadable() throws Exception {
+      var foreign = new NetworkSourceAuthorityPostgresTest();
+      foreign.issuedDeviceAndRealRedemption();
+      var fact =
+          foreign.call(() -> foreign.sources.register(foreign.request("foreign"))).getSource();
+      ((tools.jackson.databind.node.ObjectNode) message.path("authorization_ref"))
+          .put("source_binding", fact.getSourceBinding());
+      rpc(stub -> denied(stub, io.grpc.Status.Code.PERMISSION_DENIED));
+    }
+
+    @Test
+    void deliveryActuallyWaitsForTheNamedGenerationVersionLock() throws Exception {
+      var locked = new java.util.concurrent.CountDownLatch(1);
+      var unlock = new java.util.concurrent.CountDownLatch(1);
+      withRpc(
+          stub -> {
+            try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+              var held =
+                  executor.submit(
+                      () ->
+                          tx(
+                              () -> {
+                                store
+                                    .networkJdbc()
+                                    .queryForObject(
+                                        "SELECT revision FROM iam.network_source WHERE tenant_id=? AND id=? FOR UPDATE",
+                                        Long.class,
+                                        tenant,
+                                        UUID.fromString(source.getSourceBinding()));
+                                locked.countDown();
+                                try {
+                                  assertTrue(unlock.await(5, TimeUnit.SECONDS));
+                                } catch (InterruptedException e) {
+                                  throw new AssertionError(e);
+                                }
+                                return null;
+                              }));
+              assertTrue(locked.await(5, TimeUnit.SECONDS));
+              var pending =
+                  executor.submit(
+                      () ->
+                          TenantContext.call(
+                              tenant,
+                              () ->
+                                  NetworkAuthorityServiceGrpc.newBlockingStub(stub.getChannel())
+                                      .authorizeNetworkDelivery(deliveryRequest())));
+              try {
+                awaitSourceRowWait();
+              } finally {
+                unlock.countDown();
+              }
+              held.get(5, TimeUnit.SECONDS);
+              assertTrue(pending.get(5, TimeUnit.SECONDS).getAllowed());
+              TenantContext.run(
+                  tenant, () -> stub.revokeAgentSource(stop(source, "after-delivery")));
+              TenantContext.run(
+                  tenant,
+                  () ->
+                      denied(
+                          NetworkAuthorityServiceGrpc.newBlockingStub(stub.getChannel()),
+                          io.grpc.Status.Code.PERMISSION_DENIED));
+            } catch (Exception e) {
+              throw new AssertionError(e);
+            } finally {
+              unlock.countDown();
+            }
+          });
+    }
+
+    void awaitSourceRowWait() {
+      org.awaitility.Awaitility.await()
+          .atMost(Duration.ofSeconds(3))
+          .until(
+              () -> {
+                try (var c =
+                        PostgresExtension.database(NetworkSourceAuthorityPostgresTest.class)
+                            .dataSource()
+                            .getConnection();
+                    var s = c.createStatement();
+                    var rs =
+                        s.executeQuery(
+                            "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()"
+                                + " AND wait_event_type='Lock' AND query LIKE '%network_source%' AND query LIKE '%FOR UPDATE%'")) {
+                  return rs.next() && rs.getLong(1) > 0;
+                }
+              });
+    }
+
+    @Test
+    void realVersionLockRevokeCommitsBeforeDeliveryAndNoDeadlock() throws Exception {
+      var remote = new java.util.concurrent.CountDownLatch(1);
+      var resume = new java.util.concurrent.CountDownLatch(1);
+      organization =
+          r -> {
+            store.requireTransactionReleased();
+            remote.countDown();
+            try {
+              assertTrue(resume.await(10, TimeUnit.SECONDS));
+            } catch (InterruptedException e) {
+              throw new AssertionError(e);
+            }
+            return allowed();
+          };
+      withRpc(
+          stub -> {
+            try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+              var pending =
+                  executor.submit(
+                      () ->
+                          TenantContext.call(
+                              tenant,
+                              () ->
+                                  assertThrows(
+                                      io.grpc.StatusRuntimeException.class,
+                                      () ->
+                                          NetworkAuthorityServiceGrpc.newBlockingStub(
+                                                  stub.getChannel())
+                                              .authorizeNetworkDelivery(deliveryRequest()))));
+              assertTrue(remote.await(5, TimeUnit.SECONDS));
+              var locked = new java.util.concurrent.CountDownLatch(1);
+              var unlock = new java.util.concurrent.CountDownLatch(1);
+              var held =
+                  executor.submit(
+                      () ->
+                          tx(
+                              () -> {
+                                store
+                                    .networkJdbc()
+                                    .queryForObject(
+                                        "SELECT revision FROM iam.network_source WHERE tenant_id=? AND id=? FOR UPDATE",
+                                        Long.class,
+                                        tenant,
+                                        UUID.fromString(source.getSourceBinding()));
+                                locked.countDown();
+                                try {
+                                  assertTrue(unlock.await(5, TimeUnit.SECONDS));
+                                } catch (InterruptedException e) {
+                                  throw new AssertionError(e);
+                                }
+                                return null;
+                              }));
+              assertTrue(locked.await(5, TimeUnit.SECONDS));
+              var revoked =
+                  executor.submit(
+                      () ->
+                          TenantContext.call(
+                              tenant,
+                              () -> stub.revokeAgentSource(stop(source, "contended-stop"))));
+              try {
+                org.awaitility.Awaitility.await()
+                    .atMost(Duration.ofSeconds(3))
+                    .until(
+                        () -> {
+                          try (var c =
+                                  PostgresExtension.database(
+                                          NetworkSourceAuthorityPostgresTest.class)
+                                      .dataSource()
+                                      .getConnection();
+                              var s = c.createStatement();
+                              var rs =
+                                  s.executeQuery(
+                                      "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%network_source%' AND query LIKE '%FOR UPDATE%'")) {
+                            return rs.next() && rs.getLong(1) > 0;
+                          }
+                        });
+              } finally {
+                unlock.countDown();
+              }
+              held.get(5, TimeUnit.SECONDS);
+              assertEquals(2, revoked.get(5, TimeUnit.SECONDS).getSource().getStateValue());
+              resume.countDown();
+              assertEquals(
+                  io.grpc.Status.Code.PERMISSION_DENIED,
+                  pending.get(5, TimeUnit.SECONDS).getStatus().getCode());
+            } catch (Exception e) {
+              throw new AssertionError(e);
+            } finally {
+              resume.countDown();
+            }
+          });
+    }
   }
 }

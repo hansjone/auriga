@@ -36,8 +36,13 @@ class IamGrpcNetworkAuthoritySpringTest {
 
     @Bean
     IamGrpcNetworkAuthority service(IamNetworkAuthority authority, Clock clock) {
+      var sources = mock(IamNetworkSourceAuthority.class);
+      when(sources.authorizeDelivery(any()))
+          .thenThrow(
+              new auriga.common.error.AurigaException(
+                  auriga.common.error.CommonErrors.UNAVAILABLE));
       return new IamRuntimeConfiguration()
-          .iamGrpcNetworkAuthority(authority, mock(IamGrpcSessions.class), clock);
+          .iamGrpcNetworkAuthority(authority, mock(IamGrpcSessions.class), clock, sources);
     }
 
     @Bean
@@ -201,6 +206,19 @@ class IamGrpcNetworkAuthoritySpringTest {
                 grpc(
                     io.grpc.Status.Code.PERMISSION_DENIED,
                     () -> stub.networkAuthorityActive(active));
+                grpc(
+                    io.grpc.Status.Code.PERMISSION_DENIED,
+                    () ->
+                        stub.authorizeNetworkDelivery(
+                            AuthorizeNetworkDeliveryRequest.getDefaultInstance()));
+                TenantContext.run(
+                    TenantContext.PLATFORM_TENANT,
+                    () ->
+                        grpc(
+                            io.grpc.Status.Code.INVALID_ARGUMENT,
+                            () ->
+                                stub.authorizeNetworkDelivery(
+                                    AuthorizeNetworkDeliveryRequest.getDefaultInstance())));
                 String user =
                     tokens.access(
                         tenant,
@@ -221,6 +239,15 @@ class IamGrpcNetworkAuthoritySpringTest {
                             () ->
                                 NetworkAuthorityServiceGrpc.newBlockingStub(open.apply(user))
                                     .networkAuthorityActive(active)));
+                TenantContext.run(
+                    tenant,
+                    () ->
+                        grpc(
+                            io.grpc.Status.Code.UNAUTHENTICATED,
+                            () ->
+                                NetworkAuthorityServiceGrpc.newBlockingStub(open.apply(user))
+                                    .authorizeNetworkDelivery(
+                                        AuthorizeNetworkDeliveryRequest.getDefaultInstance())));
               } finally {
                 for (var channel : channels) channel.shutdownNow();
                 server.stop();
