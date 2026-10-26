@@ -30,7 +30,17 @@ service NetworkSourceAuthorityService {
   // specified below. Saved failure receipts never issue. Changed body conflicts.
   // Receipt reads never authorize,
   // create, extend or revive; then Get with the current connection and local CAS.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   rpc RegisterAgentSource(RegisterAgentSourceRequest) returns (RegisterAgentSourceResponse);
+  // Historical result ONLY, without native/current-transport checks. Exact frozen
+  // original request and IAM-retained ownership anchors are required. A miss or
+  // indeterminate result fails closed (UNAVAILABLE/FORBIDDEN), never registers or
+  // establishes not_committed. No source/operation/tombstone/generation writes.
+  // Even an original ACTIVE receipt grants no current permission or activation.
+  // Both RPCs deliberately return the same immutable original receipt.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc ReadAgentSourceReceipt(ReadAgentSourceReceiptRequest) returns (RegisterAgentSourceResponse);
   // Revalidates the exact CURRENT redeem connection, original owner/device/live
   // backing identity, registration, source state/expiry and current permissions.
   // Same-device reconnect may change transport, never the saved source tuple.
@@ -106,6 +116,12 @@ message RegisterAgentSourceRequest {
   // OpaqueId of the current lineage head, same immutable registration/scope and
   // IAM identity anchors. Explicit stop/revocation forbids any successor.
   string predecessor_binding = 6;
+}
+
+// Deliberately no current connection, claimed owner or independently mutable op.
+// Collab supplies its complete durable original request, including the OLD C.
+message ReadAgentSourceReceiptRequest {
+  RegisterAgentSourceRequest original_request = 1;
 }
 
 message RegisterAgentSourceResponse {
