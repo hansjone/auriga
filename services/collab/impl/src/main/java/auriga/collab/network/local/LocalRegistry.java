@@ -272,15 +272,17 @@ public final class LocalRegistry {
    * missing registration response; counters alone cannot repair an old installation/backup.
    */
   public Recovery reconcileRegistration(UUID tenant, String json) {
+    authorize(tenant);
+    outsideTransaction();
+    var frame = LocalFrames.read("Ready", json);
+    Target target = target(tenant);
+    require(target.channelNonce().equals(text(frame, "channel_nonce")), NetworkErrors.UNAUTHORIZED);
+    // READY prepares its epoch in a separate committed transaction. Do not borrow a database
+    // connection while waiting for IAM, and never perform RPC after taking the node lock.
+    checkIam(target.realm(), target.node(), target.node(), "0", Operation.CONNECT);
     return run(
         tenant,
         () -> {
-          var frame = LocalFrames.read("Ready", json);
-          Target target = target(tenant);
-          require(
-              target.channelNonce().equals(text(frame, "channel_nonce")),
-              NetworkErrors.UNAUTHORIZED);
-          checkIam(target.realm(), target.node(), target.node(), "0", Operation.CONNECT);
           var node = lockNode(tenant, target);
           fence(tenant, target, node, frame);
           if (health(node) != null) return ok(recovery(node, null));
@@ -627,12 +629,7 @@ public final class LocalRegistry {
 
   private <T> T run(UUID tenant, Supplier<Outcome<T>> work) {
     authorize(tenant);
-    // An outer rollback must not erase a committed identity-conflict diagnosis or reissue a permit.
-    require(
-        !TransactionSynchronizationManager.isActualTransactionActive()
-            && !TransactionSynchronizationManager.isSynchronizationActive()
-            && !TransactionSynchronizationManager.hasResource(jdbc.getDataSource()),
-        CommonErrors.UNAVAILABLE);
+    outsideTransaction();
     Outcome<T> outcome =
         tx.execute(
             status -> {
@@ -641,6 +638,15 @@ public final class LocalRegistry {
             });
     if (outcome.error() != null) throw new AurigaException(outcome.error());
     return outcome.value();
+  }
+
+  private void outsideTransaction() {
+    // An outer rollback must not erase a committed identity-conflict diagnosis or reissue a permit.
+    require(
+        !TransactionSynchronizationManager.isActualTransactionActive()
+            && !TransactionSynchronizationManager.isSynchronizationActive()
+            && !TransactionSynchronizationManager.hasResource(jdbc.getDataSource()),
+        CommonErrors.UNAVAILABLE);
   }
 
   private static void authorize(UUID tenant) {

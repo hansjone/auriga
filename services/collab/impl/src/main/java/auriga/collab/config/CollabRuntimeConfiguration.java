@@ -9,6 +9,7 @@ import auriga.collab.grpc.CollabGrpcService;
 import auriga.collab.grpc.NetworkAuthorityClient;
 import auriga.collab.grpc.NetworkMailboxGrpcService;
 import auriga.collab.grpc.NetworkSourceGrpcAuthority;
+import auriga.collab.network.local.LocalRegistry;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.persistence.TenantTransactionManager;
@@ -103,8 +104,18 @@ public class CollabRuntimeConfiguration {
   }
 
   @Bean
+  LocalRegistry localRegistry(
+      DataSource source,
+      TenantTransactionManager manager,
+      NetworkSourceGrpcAuthority authority,
+      NetworkAuthorityClient iam) {
+    return new LocalRegistry(new JdbcTemplate(source), manager, authority, iam, Clock.systemUTC());
+  }
+
+  @Bean
   NetworkMailboxWireService networkMailboxWireService(
       NetworkMailboxService service,
+      LocalRegistry locals,
       DataSource source,
       TenantTransactionManager manager,
       NetworkSourceGrpcAuthority authority,
@@ -112,6 +123,7 @@ public class CollabRuntimeConfiguration {
       Environment env) {
     return new NetworkMailboxWireService(
         service,
+        locals,
         new JdbcTemplate(source),
         manager,
         authority,

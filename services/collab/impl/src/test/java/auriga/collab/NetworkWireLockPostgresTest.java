@@ -111,7 +111,16 @@ class NetworkWireLockPostgresTest {
           NetworkSigningKeys.State.ACTIVE);
     }
     core = new NetworkMailboxService(jdbc, manager, source, keys, Clock.systemUTC(), iam);
-    wire = new NetworkMailboxWireService(core, jdbc, manager, source, keys, Clock.systemUTC());
+    wire =
+        new NetworkMailboxWireService(
+            core,
+            new auriga.collab.network.local.LocalRegistry(
+                jdbc, manager, source, iam, Clock.systemUTC()),
+            jdbc,
+            manager,
+            source,
+            keys,
+            Clock.systemUTC());
   }
 
   static void waitFor(String phase) {
