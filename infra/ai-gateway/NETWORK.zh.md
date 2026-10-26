@@ -173,3 +173,26 @@ HEAD 自有全局 16/每租户 2 的 RPC 预算，未 READY 或被吊销时静�
 首次 READY 尚未拿到权威 incarnation 时，本地失败 ERROR 使用 epoch=0、incarnation=unbound 和本次
 READY nonce；该拒绝只作诊断，不能建立身份或推动游标。若客户端只接受已登记 incarnation 的 ERROR，
 应继续按 READY 超时有界重试；需要协同约定该初始拒绝的展示方式，不放宽成功/正文帧的受众检查。
+### 来源控制搬运
+
+source_register/source_get/source_revoke 复用同一精确 up/down subject，分别调用正式生成的
+SourceRegister/SourceGet/SourceRevoke RPC；connection 全七字段只取认证 ingress，委托 tenant 取同一 connection。
+网关按正式 1.x 消费边界严格检查原 UTF-8 JSON、已知字段、关联和签名结构，保留未知可选字段；
+完整请求和响应均原字节转发，不重编码、不重签业务结果。boot 必须对应该 ingress 最近成功的 READY，
+RPC 前后都检查当前连接、epoch、nonce 和 boot；断线取消在途来源请求，旧连接回包不发给新连接。
+
+每个 tenant/realm/node 的 Register/Get 共用一个普通来源槽，Revoke 独占一个保留槽，均无等待队列。
+普通来源与原 mailbox 共用全局 128/每租户 16 的普通池及原请求限速；撤销独立保留全局 16/每租户 2，
+并独立限速（每 node 64/s、burst=8；每 tenant 256/s、burst=32），普通池或普通限速耗尽不阻塞撤销。
+加上原 HEAD 16 和 ERROR 16，所有池总硬上限为 176；请求拒绝仍走原有界错误预算，超预算可静默丢弃。
+NATS 每 ingress 的 8 帧/128KiB pending 上限不变；回调只作有界 type 提取，完整来源校验在 worker 执行。
+
+三来源请求从受理起最多 30 秒，专用 mailbox 拨号器仅对这三种生成方法解除原公共 10 秒拦截器截短，
+仍使用相同配置的 mTLS/轮换服务 JWT；其余方法的 requestTimeoutMillis 和 busy 语义不变。
+超时/取消释放本次槽并返回可重试诊断，不能据此声明 mutation 未提交；插件保留原 op/outbox 对账。
+迟到响应不会发布或释放后来请求的槽。未实现 RPC、坏响应、错受众及超限均失败关闭。
+
+来源响应校验只检查关联和结构，权威验签仍由插件对完整原对象执行，不增加来源信任根。
+历史 Register 的 active/revision=1 只是创建回执；Get 的 expired/revoked/stopped 正常搬运且必须省略
+valid_until，active 则必须有时间字段；任何状态均不授 SEND，也不绕过插件当前观察、验签和最终 CAS。
+来源集成测试使用明确的 collab/IAM 协议夹具与真实 gRPC/NATS WSS，不代表真实 IAM、PG 或双 DSH 整链验收。

@@ -120,6 +120,14 @@ func (r *mailboxRouter) registerIngress(ingress string) error {
 func (r *mailboxRouter) forgetIngress(ingress string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	for _, call := range r.sources {
+		if call.ingress == ingress {
+			call.cancel()
+		}
+	}
+	r.redeemer.mu.Lock()
+	delete(r.sourceBoot, ingress)
+	r.redeemer.mu.Unlock()
 	sub := r.upSubscriptions[ingress]
 	if sub == nil {
 		return
@@ -133,10 +141,12 @@ func (r *mailboxRouter) forgetIngress(ingress string) {
 		delete(r.nodeRefs, node)
 		delete(r.nodeBudgets, node)
 		delete(r.headPending, node)
+		delete(r.revokeBudgets, node)
 	}
 	r.tenantRefs[node.Tenant]--
 	if r.tenantRefs[node.Tenant] == 0 {
 		delete(r.tenantRefs, node.Tenant)
 		delete(r.tenantBudgets, node.Tenant)
+		delete(r.tenantRevokeBudgets, node.Tenant)
 	}
 }
