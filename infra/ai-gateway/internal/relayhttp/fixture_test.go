@@ -251,14 +251,36 @@ func (f *fixture) denyUsageWrites(t *testing.T) {
 		_ = conn.Close(ctx)
 	})
 	quoted := pgx.Identifier{role}.Sanitize()
-	if _, err = conn.Exec(t.Context(), "REVOKE INSERT ON ai.budget_usage FROM "+quoted); err != nil {
+	if err = usageCatalogACL(t.Context(), conn, "REVOKE INSERT ON ai.budget_usage FROM "+quoted); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, err := conn.Exec(ctx, "GRANT INSERT ON ai.budget_usage TO "+quoted); err != nil {
+		if err := usageCatalogACL(ctx, conn, "GRANT INSERT ON ai.budget_usage TO "+quoted); err != nil {
 			t.Error(err)
 		}
 	})
+}
+
+// Use the same cross-binary catalog lock as testpg fixture GRANT/DROP OWNED.
+// Acquire it in a separate READ COMMITTED statement so ACL updates get a fresh
+// snapshot after waiting. Never keep this transaction open during HTTP probes.
+func usageCatalogACL(ctx context.Context, conn *pgx.Conn, statement string) error {
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
+	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(718245010)"); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, statement); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
