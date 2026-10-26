@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/budget"
@@ -134,7 +135,7 @@ func postHeaders(r *http.Request) (string, error) {
 		return "", errors.New("common.validation_failed")
 	}
 	v = values(r.Header, "Idempotency-Key")
-	if len(v) > 1 || (len(v) == 1 && (!utf8.ValidString(v[0]) || utf8.RuneCountInString(v[0]) > 128 || strings.ContainsAny(v[0], ",\r\n"))) {
+	if len(v) > 1 || (len(v) == 1 && (v[0] == "" || !utf8.ValidString(v[0]) || utf8.RuneCountInString(v[0]) > 128 || strings.ContainsRune(v[0], ',') || strings.IndexFunc(v[0], unicode.IsControl) >= 0)) {
 		return "", errors.New("common.validation_failed")
 	}
 	if len(v) == 1 {
