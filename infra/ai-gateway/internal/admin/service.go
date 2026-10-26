@@ -202,6 +202,8 @@ func grantsResponse(g api.ModelGrants, tenant, model string, revision int64) (re
 
 func (s *Server) execute(ctx context.Context, tx pgx.Tx, p *Principal, o operation, raw []byte, r *http.Request) (result, error) {
 	switch o.name {
+	case "listTenantAiUsage":
+		return s.listUsage(ctx, tx, p.Tenant, r)
 	case "listProviders", "listModels":
 		return list(ctx, tx, p.Tenant, o, r)
 	case "getProvider":
