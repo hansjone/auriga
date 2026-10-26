@@ -14,14 +14,15 @@ import { verifyEnvelopeWithRefresh } from './trust/verifier.js';
 import { createKeyedMutex } from './host/keyed-mutex.js';
 import { digestOf } from './host/ledger.js';
 
-/** Explicit second capability; no source, SEND, delivery or session creation.
- * @param {{ctx:any,ledger:import('./host/ledger.js').Ledger,registerLocal:import('./host/adapter.js').NetworkPort['registerLocal'],assertCurrent:()=>void,onStorageFailure?:()=>void}} options */
+/** Explicit registration capability; source establishment is automatic afterward.
+ * @param {{ctx:any,ledger:import('./host/ledger.js').Ledger,registerLocal:import('./host/adapter.js').NetworkPort['registerLocal'],assertCurrent:()=>void,onStorageFailure?:()=>void,onRegistered?:(local:string)=>Promise<void>}} options */
 export function createSessionRegistration({
   ctx,
   ledger,
   registerLocal,
   assertCurrent,
   onStorageFailure,
+  onRegistered,
 }) {
   let closed = false;
   let reason = 'host_unavailable';
@@ -217,6 +218,14 @@ export function createSessionRegistration({
                 kind: 'session',
                 receiveMode: 'receive_none',
               });
+              check();
+              // The local registration remains successful even if the optional
+              // source path is unavailable. Source work is never a model choice.
+              try {
+                await onRegistered?.(local);
+              } catch {
+                /* Source stays closed. */
+              }
               check();
               return {
                 status: 'registered',
