@@ -82,6 +82,19 @@ public final class DeviceAccessAuthority {
         });
   }
 
+  record CredentialSnapshot(Identity identity, String session) {}
+
+  /** Same canonical checks and lock order as credential; no activity or token mutation. */
+  CredentialSnapshot credentialSnapshot(String tenant, String account, String device) {
+    return store.tx(
+        () -> {
+          Identity identity = credential(tenant, account, device);
+          if (identity == null) return null;
+          ObjectNode current = store.get("device", device, true);
+          return new CredentialSnapshot(identity, current.path("sessionId").asString());
+        });
+  }
+
   private static boolean uuid(String value) {
     try {
       return UUID.fromString(value).toString().equals(value);

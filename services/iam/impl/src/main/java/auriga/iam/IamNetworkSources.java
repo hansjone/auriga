@@ -24,9 +24,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 /**
  * Package-only persistence kernel, deliberately NOT a Bean or authority. Caller authenticates the
  * service/tenant and completes all remote checks outside transactions, then revalidates under
- * session -> device -> policy locks before constructing a VerifiedSnapshot in that SAME
- * transaction. Only then enter operation -> chain -> source locks below. No callback or remote work
- * runs here.
+ * tenant network-authority FIRST -> session -> device -> account/policy/ingress locks before
+ * constructing a VerifiedSnapshot in that SAME transaction. Only then enter operation -> chain ->
+ * source locks below. No callback or remote work runs here.
  */
 final class IamNetworkSources {
   private final IamStore store;
@@ -205,11 +205,7 @@ final class IamNetworkSources {
 
   View get(GetAgentSourceRequest request, VerifiedSnapshot verified) {
     transaction();
-    check(request != null, VALIDATION_FAILED);
-    binding(request.getSourceBinding());
-    connection(request.getConnection());
-    registration(request.getRegistration());
-    unknown(request);
+    validate(request);
     Source initial = source(binding(request.getSourceBinding()), false);
     check(initial != null, FORBIDDEN);
     Anchor current = fresh(verified, request.getConnection(), request.getRegistration());
@@ -546,6 +542,14 @@ final class IamNetworkSources {
     opaque(r.getOperationId());
     unknown(r);
     check(r.getExpectedRevision() != 0, VALIDATION_FAILED);
+  }
+
+  static void validate(GetAgentSourceRequest r) {
+    check(r != null, VALIDATION_FAILED);
+    binding(r.getSourceBinding());
+    connection(r.getConnection());
+    registration(r.getRegistration());
+    unknown(r);
   }
 
   private static void connection(NetworkAuthorityConnection c) {
