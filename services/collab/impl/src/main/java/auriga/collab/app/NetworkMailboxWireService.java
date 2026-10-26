@@ -3,6 +3,7 @@ package auriga.collab.app;
 import auriga.collab.api.NetworkSourceAuthority.Target;
 import auriga.collab.grpc.NetworkAuthorityClient;
 import auriga.collab.grpc.NetworkSourceGrpcAuthority;
+import auriga.collab.network.local.LocalRegistry;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.error.ErrorCode;
@@ -29,19 +30,22 @@ public class NetworkMailboxWireService {
   private final NetworkEnvelopeSigner signer;
   private final Clock clock;
   private final boolean broadcast;
+  private final LocalRegistry locals;
 
   public NetworkMailboxWireService(
       NetworkMailboxService mailbox,
+      LocalRegistry locals,
       JdbcTemplate jdbc,
       TenantTransactionManager manager,
       NetworkSourceGrpcAuthority source,
       NetworkSigningKeys keys,
       Clock clock) {
-    this(mailbox, jdbc, manager, source, keys, clock, false);
+    this(mailbox, locals, jdbc, manager, source, keys, clock, false);
   }
 
   public NetworkMailboxWireService(
       NetworkMailboxService mailbox,
+      LocalRegistry locals,
       JdbcTemplate jdbc,
       TenantTransactionManager manager,
       NetworkSourceGrpcAuthority source,
@@ -49,6 +53,7 @@ public class NetworkMailboxWireService {
       Clock clock,
       boolean broadcast) {
     this.mailbox = mailbox;
+    this.locals = Objects.requireNonNull(locals);
     this.jdbc = jdbc;
     tx = new TransactionTemplate(manager);
     this.source = source;
@@ -61,7 +66,7 @@ public class NetworkMailboxWireService {
     JsonNode request = frame(frame, "Ready");
     var requiredFeatures = NetworkWireCapabilities.verify(request, broadcast);
     NetworkAuthorityClient.binding(c);
-    Instant deadline = source.verify(c);
+    Instant deadline = source.verify(c); // Rejects inherited transactions before any mutation.
     UUID tenant = TenantContext.require();
     var before = tx.execute(status -> read(c, false));
     var proposed =
@@ -91,111 +96,85 @@ public class NetworkMailboxWireService {
                   Set.of(
                       auriga.iam.api.NetworkAuthority.Operation.CONNECT,
                       auriga.iam.api.NetworkAuthority.Operation.RECEIVE));
-          return mailbox.withDecision(
-              decision,
-              () ->
-                  tx.execute(
-                      status -> {
-                        jdbc.update(
-                            "INSERT INTO collab.network_node(tenant_id,realm,node_id) VALUES (?,?,?) ON CONFLICT DO NOTHING",
-                            tenant,
-                            c.getRealm(),
-                            c.getNode());
-                        var row = locked(c);
-                        unchanged(before, row);
-                        String binding = bindingJson(c);
-                        String requestJson = NetworkJson.canonical(request);
-                        if (c.getIngress().equals(row.get("ingress_id"))) {
-                          require(
-                              binding.equals(row.get("wire_binding_json")),
-                              NetworkErrors.UNAUTHORIZED);
-                          require(
-                              requestJson.equals(row.get("wire_ready_json")),
-                              NetworkErrors.CONFLICT);
-                        } else {
-                          require(
-                              jdbc.queryForObject(
-                                      "SELECT count(*) FROM collab.network_wire_ingress WHERE tenant_id=? AND ingress_id=?",
-                                      Integer.class,
-                                      tenant,
-                                      c.getIngress())
-                                  == 0,
-                              NetworkErrors.STALE_EPOCH);
-                          String incarnation = proposed.incarnation();
-                          Target initial =
-                              new Target(
-                                  c.getRealm(),
-                                  c.getNode(),
-                                  incarnation,
-                                  proposed.epoch(),
-                                  request.path("channel_nonce").asString(),
-                                  request.path("request_id").asString(),
-                                  deadline);
-                          var route =
-                              source.withTarget(
-                                  c,
-                                  initial,
-                                  () -> mailbox.ready(tenant, c.getRealm(), c.getNode()));
-                          boolean healthy =
-                              request.path("local_high_water").asString().equals("0")
-                                  && request.path("registration_revision").asString().equals("0")
-                                  && request
-                                      .path("resume_cursor")
-                                      .asString()
-                                      .equals(Long.toString(route.committedCursor()))
-                                  && request
-                                      .path("receipt_checkpoint")
-                                      .path("checkpoint_seq")
-                                      .asString()
-                                      .equals("0")
-                                  && request
-                                      .path("receipt_checkpoint")
-                                      .path("checkpoint_revision")
-                                      .asString()
-                                      .equals("0")
-                                  && request.path("pending_registration").isNull()
-                                  && (!request.has("evidence")
-                                      || request.path("evidence").isEmpty());
-                          jdbc.update(
-                              "UPDATE collab.network_node SET ingress_id=?,wire_binding_json=?,wire_ready_json=?,wire_incarnation=?,wire_nonce=?,wire_status=?,route_expires_at=? WHERE tenant_id=? AND realm=? AND node_id=?",
-                              c.getIngress(),
-                              binding,
-                              requestJson,
-                              incarnation,
-                              initial.channelNonce(),
-                              healthy ? "ready" : "recovery_conflict",
-                              java.sql.Timestamp.from(deadline),
-                              tenant,
-                              c.getRealm(),
-                              c.getNode());
-                          jdbc.update(
-                              "INSERT INTO collab.network_wire_ingress(tenant_id,realm,node_id,ingress_id) VALUES (?,?,?,?)",
-                              tenant,
-                              c.getRealm(),
-                              c.getNode(),
-                              c.getIngress());
-                          row = locked(c);
-                        }
-                        var target =
-                            target(c, row, request.path("request_id").asString(), deadline);
-                        var current = row;
-                        return source.withTarget(
-                            c,
-                            target,
+          // Phase 1 commits the association/epoch, but NEVER opens business. A crash leaves
+          // reconciling.
+          var prepared =
+              mailbox.withDecision(
+                  decision,
+                  () ->
+                      tx.execute(
+                          status ->
+                              mailbox.withDecision(
+                                  decision, () -> prepareReady(c, request, proposed, before))));
+          var target = target(c, prepared, proposed.requestId(), deadline);
+          return source.withTarget(
+              c,
+              target,
+              broadcast,
+              () -> {
+                boolean recovering = "reconciling".equals(prepared.get("wire_status"));
+                // Phase 2 owns its commit: later signing/fencing failures cannot erase a diagnosis.
+                // A completed identical READY is a transport replay, not an old backup after new
+                // registers.
+                var recovery =
+                    recovering
+                        ? locals.reconcileRegistration(tenant, NetworkJson.canonical(request))
+                        : null;
+                // Phase 3 has no RPC. Compare the exact association and durable registration
+                // version under
+                // the SAME datasource/node lock before signing or changing the business gate.
+                return tx.execute(
+                    status ->
+                        mailbox.withDecision(
+                            decision,
                             () -> {
+                              var row = locked(c);
+                              unchanged(prepared, row);
+                              require(
+                                  bindingJson(c).equals(row.get("wire_binding_json")),
+                                  NetworkErrors.STALE_EPOCH);
+                              require(
+                                  target.epoch() == number(row, "connection_epoch"),
+                                  NetworkErrors.STALE_EPOCH);
+                              if (recovering) {
+                                require(
+                                    Objects.equals(
+                                            row.get("local_boot_id"),
+                                            request.path("boot_id").asString())
+                                        && row.get("local_boot_epoch") != null
+                                        && number(row, "local_boot_epoch") == target.epoch(),
+                                    NetworkErrors.STALE_EPOCH);
+                                require(
+                                    counter(row, "local_high_water")
+                                            .equals(recovery.localHighWater())
+                                        && counter(row, "registration_revision")
+                                            .equals(recovery.registrationRevision())
+                                        && registrationStatus(row).equals(recovery.status()),
+                                    NetworkErrors.CONFLICT);
+                              }
                               var route = mailbox.head(tenant, c.getRealm(), c.getNode());
+                              String state = registrationStatus(row);
+                              if ("ready".equals(state))
+                                state =
+                                    recovering
+                                        ? (receiptReady(request, route)
+                                            ? "ready"
+                                            : "recovery_conflict")
+                                        : row.get("wire_status").toString();
                               var result =
                                   base("ready_result")
                                       .put("request_id", target.requestId())
-                                      .put("status", current.get("wire_status").toString())
+                                      .put("status", state)
                                       .put("epoch", Long.toString(target.epoch()))
                                       .put("head_seq", Long.toString(route.headSeq()))
                                       .put(
                                           "committed_cursor",
                                           Long.toString(route.committedCursor()))
                                       .put("retention_low_seq", "0")
-                                      .put("local_high_water", "0")
-                                      .put("registration_revision", "0");
+                                      .put("local_high_water", counter(row, "local_high_water"))
+                                      .put(
+                                          "registration_revision",
+                                          counter(row, "registration_revision"));
                               result
                                   .putObject("node_identity")
                                   .put("realm", c.getRealm())
@@ -204,10 +183,90 @@ public class NetworkMailboxWireService {
                               result.putNull("seen_checkpoint");
                               var features = result.putArray("required_features");
                               requiredFeatures.forEach(features::add);
-                              return signed(result, "ReadyResult", target);
-                            });
-                      }));
+                              // Lock waits must not extend the original scoped decision or source
+                              // lifetime.
+                              String signed =
+                                  mailbox.withDecision(
+                                      decision, () -> signed(result, "ReadyResult", target));
+                              jdbc.update(
+                                  "UPDATE collab.network_node SET wire_status=? WHERE tenant_id=? AND realm=? AND node_id=?",
+                                  state,
+                                  tenant,
+                                  c.getRealm(),
+                                  c.getNode());
+                              return signed;
+                            }));
+              });
         });
+  }
+
+  private Map<String, Object> prepareReady(
+      NetworkAuthorityConnection c, JsonNode request, Target proposed, Map<String, Object> before) {
+    UUID tenant = TenantContext.require();
+    jdbc.update(
+        "INSERT INTO collab.network_node(tenant_id,realm,node_id) VALUES (?,?,?) ON CONFLICT DO NOTHING",
+        tenant,
+        c.getRealm(),
+        c.getNode());
+    var row = locked(c);
+    // Simultaneous identical retries may have completed phase 1 already. Only that exact binding
+    // and frame may join the prepared epoch; an old ingress can never join a takeover.
+    if (c.getIngress().equals(row.get("ingress_id"))) {
+      require(bindingJson(c).equals(row.get("wire_binding_json")), NetworkErrors.UNAUTHORIZED);
+      require(
+          NetworkJson.canonical(request).equals(row.get("wire_ready_json")),
+          NetworkErrors.CONFLICT);
+      require(number(row, "connection_epoch") == proposed.epoch(), NetworkErrors.STALE_EPOCH);
+      return row;
+    }
+    unchanged(before, row);
+    require(
+        jdbc.queryForObject(
+                "SELECT count(*) FROM collab.network_wire_ingress WHERE tenant_id=? AND ingress_id=?",
+                Integer.class,
+                tenant,
+                c.getIngress())
+            == 0,
+        NetworkErrors.STALE_EPOCH);
+    var route = mailbox.ready(tenant, c.getRealm(), c.getNode());
+    require(route.connectionEpoch() == proposed.epoch(), NetworkErrors.STALE_EPOCH);
+    jdbc.update(
+        "UPDATE collab.network_node SET ingress_id=?,wire_binding_json=?,wire_ready_json=?,wire_incarnation=?,wire_nonce=?,wire_status='reconciling',route_expires_at=? WHERE tenant_id=? AND realm=? AND node_id=?",
+        c.getIngress(),
+        bindingJson(c),
+        NetworkJson.canonical(request),
+        proposed.incarnation(),
+        proposed.channelNonce(),
+        java.sql.Timestamp.from(proposed.validUntil()),
+        tenant,
+        c.getRealm(),
+        c.getNode());
+    jdbc.update(
+        "INSERT INTO collab.network_wire_ingress(tenant_id,realm,node_id,ingress_id) VALUES (?,?,?,?)",
+        tenant,
+        c.getRealm(),
+        c.getNode(),
+        c.getIngress());
+    return locked(c);
+  }
+
+  private static boolean receiptReady(JsonNode request, NetworkMailboxService.NodeRoute route) {
+    return request.path("resume_cursor").asString().equals(Long.toString(route.committedCursor()))
+        && request.path("receipt_checkpoint").path("checkpoint_seq").asString().equals("0")
+        && request.path("receipt_checkpoint").path("checkpoint_revision").asString().equals("0")
+        && (!request.has("evidence") || request.path("evidence").isEmpty());
+  }
+
+  private static String registrationStatus(Map<String, Object> row) {
+    return switch (row.get("local_identity_status").toString()) {
+      case "healthy" -> "ready";
+      case "identity_rollback" -> "identity_rollback";
+      default -> "recovery_conflict";
+    };
+  }
+
+  private static String counter(Map<String, Object> row, String field) {
+    return new java.math.BigDecimal(row.get(field).toString()).toBigIntegerExact().toString();
   }
 
   public String head(NetworkAuthorityConnection c) {
@@ -530,6 +589,7 @@ public class NetworkMailboxWireService {
                           bindingJson(c).equals(row.get("wire_binding_json")),
                           NetworkErrors.STALE_EPOCH);
                       require("ready".equals(row.get("wire_status")), RECOVERY);
+                      locals.requireHealthy(TenantContext.require(), c.getRealm(), c.getNode());
                       return mailbox.withDecision(decision, prepared);
                     });
               });
@@ -546,6 +606,7 @@ public class NetworkMailboxWireService {
     for (String key :
         List.of(
             "connection_epoch",
+            "ingress_id",
             "wire_binding_json",
             "wire_ready_json",
             "wire_incarnation",

@@ -319,6 +319,85 @@ for (const c of addressCases.json)
 
 // ---- legal frames ----
 
+test('LocalRegister/RegisterResult 正式上下行边界与签名消费者不回退', () => {
+  const upstream = validator('protocol#Upstream');
+  const downstream = validator('protocol#Downstream');
+  assert.ok(
+    schemas.protocol.$defs.Upstream.oneOf.some(
+      (r) => r.$ref === '#/$defs/LocalRegister',
+    ),
+  );
+  assert.ok(
+    schemas.protocol.$defs.Downstream.oneOf.some(
+      (r) => r.$ref === '#/$defs/RegisterResult',
+    ),
+  );
+  const request = structuredClone(fixtures.frames.local_register.value);
+  for (const field of [
+    'epoch',
+    'candidate_local',
+    'expected_registration_revision',
+  ])
+    request[field] = '18446744073709551615';
+  assert.equal(upstream(request), true);
+  assert.equal(downstream(request), false);
+  assert.equal(upstream({ ...request, candidate_local: 419 }), false);
+  for (const field of [
+    'tenant',
+    'realm',
+    'node',
+    'header',
+    'server_auth',
+    'recovered_registration',
+  ])
+    assert.equal(upstream({ ...request, [field]: 'forged' }), false, field);
+  for (const name of ['register_result', 'register_result_subagent']) {
+    const fixture = fixtures.frames[name];
+    const result = fixture.value;
+    assert.equal(downstream(result), true);
+    assert.equal(upstream(result), false);
+    assert.equal(result.server_auth.purpose, 'protocol_response');
+    assert.equal(
+      checkDownstream(structuredClone(result), receiverCtx(fixture)),
+      null,
+    );
+    for (const field of ['epoch', 'boot_id', 'allocation_fingerprint']) {
+      assert.equal(Object.hasOwn(result, field), false);
+      assert.equal(downstream({ ...result, [field]: 'forged' }), false, field);
+    }
+    const unsigned = structuredClone(result);
+    delete unsigned.server_auth;
+    assert.equal(downstream(unsigned), false);
+    assert.equal(
+      checkDownstream(unsigned, receiverCtx(fixture)),
+      'network.signature_required',
+    );
+    for (const field of [
+      'realm',
+      'node',
+      'incarnation',
+      'epoch',
+      'channelNonce',
+      'requestId',
+    ])
+      assert.equal(
+        checkDownstream(
+          structuredClone(result),
+          receiverCtx(fixture, { [field]: 'other' }),
+        ),
+        'network.signature_invalid',
+        field,
+      );
+    const tampered = structuredClone(result);
+    tampered.address_type =
+      result.address_type === 'session' ? 'subagent' : 'session';
+    assert.equal(
+      checkDownstream(tampered, receiverCtx(fixture)),
+      'network.signature_invalid',
+    );
+  }
+});
+
 test('合法回复私有请求携带 in_reply_to，不携带平台固化字段', () => {
   const validate = validator('send#SubmitRequest');
   assert.equal(validate(replyRequest), true, JSON.stringify(validate.errors));

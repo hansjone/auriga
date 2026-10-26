@@ -101,8 +101,18 @@ transport request_id/epoch/operation 与 expected_state_version 不属于稳定�
 按已存完整目标与类别核接受阶段；sys/广播仅 system，非零 local 仅 session；不允许任意 assigned_address。
 CONTACT_ASSIGN/首联 session 阶段尚未接入，显式拒绝；首联 system 还必须有已允许的 contact 记录。
 
-当前 wire 尚未接入 LocalRegistry 的登记/高水位恢复和 checkpoint 证据对账能力。非零登记/证据恢复 READY
-返回签名 `recovery_conflict` 并封锁业务，不把客户端数值冒充平台见证。
+正式 READY 已装配 LocalRegistry 的登记恢复：严格读取原帧的 boot、计数和 typed pending，
+使用已验证连接与委托 tenant，返回平台耐久 high-water/revision 和现恢复状态。
+流程分为三个阶段：短事务接管 ingress/epoch 并保持 `reconciling`，事务外完成 IAM CONNECT
+并独立提交登记恢复/隔离诊断，最后在同 datasource 的 node 锁内重核原关联、boot、计数版本和健康状态。
+只有登记恢复和现有 receipt 条件都通过才提交 `ready`；最终签名/提交失败不回滚已提交的隔离诊断。
+准备后崩溃保持业务关闭，同 ingress 同帧可重试；新 ingress 接管后旧准备/恢复结果不能复活。
+已完成的同帧重放不再次按旧计数恢复，以免把其后合法登记误判为备份回滚；仍重核当前健康和计数。
+登记恢复期间高水位/revision/健康变化会拒绝本次完成，不以旧快照开放业务；所有业务 RPC 最终仍核健康。
+匹配 pending 只核原 typed 见证，READY 不返回登记回执、不授创建许可；未知 pending 不隐式登记。
+原登记回执须后续以原 LOCAL_REGISTER 操作重试取得；该操作的生产 NATS/provider 接线尚未实现。
+checkpoint 证据对账仍未实现：非零 checkpoint、非空 evidence 或不匹配的 cursor 独立返回
+`recovery_conflict` 并封锁业务，不能由登记恢复成功覆盖。登记身份回滚返回 `identity_rollback`。
 FETCH 的非空 continuation、held_ids、paused、state_barrier，以及 RECEIPT 的 retryable /
 outcome_unknown 尚不被核心支持，入口明确拒绝而不忽略。旧 epoch 回执暂按 stale_epoch 拒绝，
 跨 epoch 证据对账需要后续实现。这些边界不能宣称为完整 NATS/插件恢复链路已交付。

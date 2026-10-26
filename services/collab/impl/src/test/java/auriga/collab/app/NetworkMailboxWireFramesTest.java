@@ -88,6 +88,7 @@ class NetworkMailboxWireFramesTest {
       NetworkSourceGrpcAuthority source, JdbcTemplate jdbc) {
     return new NetworkMailboxWireService(
         mock(NetworkMailboxService.class),
+        mock(auriga.collab.network.local.LocalRegistry.class),
         jdbc,
         mock(TenantTransactionManager.class),
         source,

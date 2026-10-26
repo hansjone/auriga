@@ -77,11 +77,62 @@ class NetworkMailboxWirePostgresTest {
   static NetworkMailboxWireService newWire() {
     return new NetworkMailboxWireService(
         new NetworkMailboxService(jdbc, manager, source, keys, Clock.systemUTC(), iam),
+        new auriga.collab.network.local.LocalRegistry(
+            jdbc, manager, source, iam, Clock.systemUTC()),
         jdbc,
         manager,
         source,
         keys,
         Clock.systemUTC());
+  }
+
+  @Test
+  void readyReturnsDurableTypedRegistrationCounters() {
+    call(
+        () -> {
+          var c =
+              NetworkAuthorityGrpcTest.connection(TENANT).toBuilder()
+                  .setNode("91")
+                  .setIngress("typed-original")
+                  .build();
+          var initial =
+              NetworkJson.parse(wire.ready(c, ready("typed-boot", "typed-nonce", "typed-ready")));
+          var registry =
+              new auriga.collab.network.local.LocalRegistry(
+                  jdbc, manager, source, iam, Clock.systemUTC());
+          var target =
+              new auriga.collab.api.NetworkSourceAuthority.Target(
+                  "2",
+                  "91",
+                  initial.path("node_identity").path("incarnation").asString(),
+                  1,
+                  "typed-nonce",
+                  "register-typed",
+                  Instant.now().plusSeconds(60));
+          source.withTarget(
+              c,
+              target,
+              () ->
+                  registry.register(
+                      TENANT,
+                      """
+              {"app_version":"1.0","type":"local_register","request_id":"register-typed","epoch":"1","boot_id":"typed-boot","candidate_local":"7","allocation_op_id":"typed-op","allocation_fingerprint":"sha256:%s","address_type":"subagent","expected_registration_revision":"0"}
+              """
+                          .formatted("a".repeat(64))));
+          var request =
+              (ObjectNode)
+                  NetworkJson.parse(ready("typed-next", "typed-next-nonce", "typed-next-ready"));
+          request.put("local_high_water", "7").put("registration_revision", "1");
+          var result =
+              NetworkJson.parse(
+                  wire.ready(
+                      c.toBuilder().setIngress("typed-next").build(), bytes(request.toString())));
+          assertEquals("ready", result.path("status").asString());
+          assertEquals("7", result.path("local_high_water").asString());
+          assertEquals("1", result.path("registration_revision").asString());
+          assertFalse(result.has("recovered_registration"));
+          return null;
+        });
   }
 
   @Test
