@@ -375,7 +375,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
       String clientId,
       String account) {}
 
-  private record TargetSnapshot(
+  record TargetSnapshot(
       Node node, ObjectNode ingress, ObjectNode device, ObjectNode session, ObjectNode account) {}
 
   /**
@@ -418,21 +418,9 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   }
 
   private TargetSnapshot targetSnapshot(TargetBinding b, boolean lock) {
-    Node n = node(b.node());
-    if (n == null || n.revoked() || !n.realm().equals(b.realm())) return null;
-    // Shared identity -> ingress order also used by source transactions and device refresh.
-    // Read the device without a lock only to locate the backing session, then re-read under locks.
-    ObjectNode device = store.get("device", n.device(), false);
-    if (device == null) return null;
-    ObjectNode session = store.byId("session", device.path("sessionId").asString(), lock);
-    if (lock) device = store.get("device", n.device(), true);
-    ObjectNode account = store.get("account", n.account(), lock);
-    if (device == null
-        || session == null
-        || account == null
-        || !n.account().equals(device.path("accountId").asString())
-        || !device.path("sessionId").asString().equals(session.path("sessionId").asString())
-        || !n.account().equals(session.path("accountId").asString())) return null;
+    TargetSnapshot identity = targetIdentity(b, lock);
+    if (identity == null) return null;
+    Node n = identity.node();
     // Fetch the complete exact ingress after identity locks; never return an earlier unlocked copy.
     ObjectNode ingress = store.get("network_ingress", b.ingress(), lock);
     if (ingress == null
@@ -448,7 +436,81 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         || !servers.contains(ingress.path("audience").asString())
         || !clock.instant().isBefore(Instant.parse(ingress.path("expiresAt").asString())))
       return null;
-    return new TargetSnapshot(n, ingress, device, session, account);
+    return new TargetSnapshot(
+        n, ingress, identity.device(), identity.session(), identity.account());
+  }
+
+  private TargetSnapshot targetIdentity(TargetBinding b, boolean lock) {
+    Node n = node(b.node());
+    if (n == null || n.revoked() || !n.realm().equals(b.realm())) return null;
+    // Shared identity -> ingress order also used by source transactions and device refresh.
+    // Read the device without a lock only to locate the backing session, then re-read under locks.
+    ObjectNode device = store.get("device", n.device(), false);
+    if (device == null) return null;
+    ObjectNode session = store.byId("session", device.path("sessionId").asString(), lock);
+    if (lock) device = store.get("device", n.device(), true);
+    ObjectNode account = store.get("account", n.account(), lock);
+    if (device == null
+        || session == null
+        || account == null
+        || !n.account().equals(device.path("accountId").asString())
+        || !device.path("sessionId").asString().equals(session.path("sessionId").asString())
+        || !n.account().equals(session.path("accountId").asString())) return null;
+    return new TargetSnapshot(n, null, device, session, account);
+  }
+
+  record SourceSnapshot(
+      TargetSnapshot target,
+      UUID ingressId,
+      Instant ingressExpiry,
+      List<Instant> identityExpiries,
+      BigInteger revision,
+      ObjectNode config) {}
+
+  /** Real redeem evidence, including indexed expiry; caller owns the tenant-first transaction. */
+  SourceSnapshot sourceSnapshot(TargetBinding binding, boolean lock) {
+    var identity = targetIdentity(binding, lock);
+    if (identity == null) return null;
+    var identityExpiries =
+        jdbc.queryForObject(
+            "SELECT s.expires_at,d.expires_at,a.expires_at FROM iam.session s"
+                + " JOIN iam.device d ON d.tenant_id=s.tenant_id AND d.id=?"
+                + " JOIN iam.account a ON a.tenant_id=s.tenant_id AND a.id=? WHERE s.tenant_id=? AND s.id=?",
+            (rs, i) -> {
+              var values = new ArrayList<Instant>();
+              for (int column = 1; column <= 3; column++)
+                values.add(
+                    rs.getTimestamp(column) == null
+                        ? Instant.MAX
+                        : rs.getTimestamp(column).toInstant());
+              return List.copyOf(values);
+            },
+            UUID.fromString(identity.node().device()),
+            UUID.fromString(identity.node().account()),
+            TenantContext.require(),
+            UUID.fromString(identity.session().path("id").asString()));
+    ObjectNode configuration = store.get("network_config", "organization", lock);
+    BigInteger revision = policyRevision.current();
+    TargetSnapshot target = targetSnapshot(binding, lock);
+    if (target == null) return null;
+    var rows =
+        jdbc.query(
+            "SELECT id,expires_at FROM iam.network_ingress WHERE tenant_id=? AND lookup_key=?"
+                + (lock ? " FOR UPDATE" : ""),
+            (rs, i) ->
+                new SourceSnapshot(
+                    target,
+                    rs.getObject(1, UUID.class),
+                    rs.getTimestamp(2) == null ? null : rs.getTimestamp(2).toInstant(),
+                    identityExpiries,
+                    revision,
+                    configuration),
+            TenantContext.require(),
+            binding.ingress());
+    if (rows.size() != 1
+        || rows.getFirst().ingressExpiry() == null
+        || !clock.instant().isBefore(rows.getFirst().ingressExpiry())) return null;
+    return rows.getFirst();
   }
 
   private boolean permitted(Check r, Map<Limit, Long> limits) {
