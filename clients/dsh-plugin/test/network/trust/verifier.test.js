@@ -10,7 +10,14 @@ import {
   canonicalize,
   parseStrictJson,
 } from '../../../src/network/trust/jcs.js';
-import { openTestTrust as openTrustStore } from './keyset-fixtures.js';
+import {
+  openTestTrust as openTrustStore,
+  publicationFixture,
+  signedKeyset,
+  signedAnnouncement,
+  testRoots,
+} from './keyset-fixtures.js';
+import { openTrustStore as openRootTrustStore } from '../../../src/network/trust/store.js';
 import { definitions } from '../../../src/generated/network/keyset-schema.js';
 import {
   verifyEnvelope,
@@ -546,4 +553,48 @@ test('successive genuine rotations can refresh immediately without a cooldown fa
       true,
     );
   assert.equal(version, 7);
+});
+
+test('official announcement persists a blocking high-water before its full publication', async () => {
+  const { payload, now } = publicationFixture();
+  let saved;
+  const cache = {
+    async load() {
+      return saved;
+    },
+    async commit(v) {
+      saved = structuredClone(v);
+    },
+  };
+  const trust = await openRootTrustStore({
+    cache,
+    roots: testRoots,
+    config: signedKeyset(payload),
+    realm: '2',
+    requireAnnouncement: true,
+    now,
+  });
+  assert.throws(() => trust.assertUsable(), /announcement/);
+  await trust.announce(signedAnnouncement(payload));
+  trust.assertUsable();
+  const next = { ...payload, keyset_version: '6' };
+  await trust.announce(signedAnnouncement(next));
+  assert.throws(
+    () => trust.key('response', 'protocol_response', '5'),
+    /announcement/,
+  );
+  const restarted = await openRootTrustStore({
+    cache,
+    roots: testRoots,
+    realm: '2',
+    requireAnnouncement: true,
+    now,
+  });
+  assert.throws(() => restarted.assertUsable(), /announcement/);
+  await assert.rejects(
+    restarted.announce(signedAnnouncement(payload)),
+    /rollback/,
+  );
+  await restarted.update(signedKeyset(next));
+  restarted.assertUsable();
 });

@@ -206,4 +206,43 @@ export function validatePublication(input, roots) {
     return unavailable('invalid keyset publication');
   }
 }
+/** Formal KeysetAnnouncement has no realm field: the installation root and
+ * the matching full publication bind it to the installation realm.
+ * @param {any} input @param {Map<string,import('node:crypto').KeyObject>} roots */
+export function validateAnnouncement(input, roots) {
+  const value =
+    typeof input === 'string' || input instanceof Uint8Array
+      ? parseStrictJson(Buffer.from(input))
+      : structuredClone(input);
+  if (
+    !value ||
+    Object.keys(value).sort().join(',') !==
+      'keyset_version,manifest_digest,root_kid,root_signature,valid_until' ||
+    !positiveVersion(value.keyset_version) ||
+    !/^sha256:[0-9a-f]{64}$/.test(value.manifest_digest) ||
+    !Number.isFinite(timeValue(value.valid_until)) ||
+    typeof value.root_kid !== 'string' ||
+    !/^[A-Za-z0-9._-]{1,128}$/.test(value.root_kid) ||
+    typeof value.root_signature !== 'string'
+  )
+    unavailable('invalid announcement');
+  const { root_signature, ...payload } = value;
+  const signature = Buffer.from(root_signature, 'base64url');
+  const root = roots.get(value.root_kid);
+  if (
+    !root ||
+    signature.length !== 64 ||
+    signature.toString('base64url') !== root_signature ||
+    !verify(
+      null,
+      Buffer.from(
+        'Auriga.NetworkKeysetAnnouncement.v1\0' + canonicalize(payload),
+      ),
+      root,
+      signature,
+    )
+  )
+    unavailable('invalid announcement root signature');
+  return value;
+}
 /** @typedef {import('../../generated/network/keyset-types.d.ts').SignedKeyset} SignedPublication */
