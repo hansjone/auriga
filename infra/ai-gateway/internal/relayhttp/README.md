@@ -18,7 +18,7 @@ Node 原生 fetch 同样发送的 `Sec-Fetch-Mode` 仅为元数据，不授予�
 - Core/Gate/Authority/Ledger 必须来自同一套受信装配；本 factory 不读取请求提供的配置、端点、计量或能力。
   每进程共享 Core；Policy 缺真实可证明计量仍失败关闭。D7 只注入 fake Transport。
 - 直接按原始 RequestURI 分派给本 handler；前层不得清理路径、补斜杠、解码路径、自动 HEAD/OPTIONS、
-  添加 CORS 或把浏览器、托管、Team、管理请求送入此通道。本轮没有 main/CLI/runtime/edge 接线。
+  添加 CORS 或把浏览器、托管、Team、管理请求送入此通道。main 的 --device-config 已接入隔离 D7 回环 runtime；不提供公网/edge 路由。
 - `ReadTimeout` 是完整 body 读截止；读取最多 1MiB+1（判超限），不是信任 Content-Length。
   `WriteTimeout` 是每次真实 Write/Flush 的截止，取 sink ctx 截止最小值；取消立即压到当前 socket 截止。
   callback 在 I/O 返回前被撤销或等待完成，没有脱离请求的写 goroutine/队列。
@@ -28,7 +28,7 @@ Node 原生 fetch 同样发送的 `Sec-Fetch-Mode` 仅为元数据，不授予�
   核心另有协议总量/事件限制、第一字节/idle/总时限及原短票期限；本包不重复预算、计量或结算。
 - SSE 第一片准备就绪才提交 200；header 提交状态独立于写入 n，零字节失败不能改状态。
   开始后只尽力发送一次 AiError 并结束，失败不伪造 JSON 成功或 DONE。
-- `Recover(Pending)` 是强制同步交接；必须在有限时间内接管，并独立于响应取消保留责任，不能因易失队列满而丢弃。
+- `ReserveRecovery() (finish func(*Pending), ok bool)` 是强制同步预留协议；Handler 在 Execute 前占固定容量，满/关闭按 ai.budget_unavailable 拒绝，Admit/Transport 均不运行。finish(nil) 释放，finish(Pending) 原位交接；回调不做 I/O、扩容或二次排队，请求取消不取消责任。
   Pending 只交付受信 `budget.Ref` 与现场 `StopProof`，从不写到 HTTP。
   回调只取 Core 的专用 `Output.PendingRef`；Admit INSERT/回调成功但事务返回错误时，
   精确定位仅在此内部端口交接，公开 `Output.Ref` 保持空，不写入 header、JSON/SSE、错误或日志。
@@ -39,7 +39,7 @@ Node 原生 fetch 同样发送的 `Sec-Fetch-Mode` 仅为元数据，不授予�
   缺停止证明继续保留槽，unknown 金额/token 继续冻结；StopProof 必须是现场全部执行停止的
   closed channel，重启、时间、发送值或缺行均不能替代。reserved 取消 CAS 可 fence 旧提交。
   此定位不是耐久 Pending 队列，进程崩溃仍可能丢失现场交接，不承诺跨重启全覆盖。
-  跨重启扫描、后台恢复及真实 Transport 属于后续任务，本包没有完成这些工作。
+  本进程现场后台恢复由 relaysupervisor 接管；跨重启扫描及真实 Transport 属于后续任务。
 
 ## 验证
 

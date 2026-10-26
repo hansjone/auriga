@@ -30,7 +30,13 @@ func TestHTTPPostgresCancellation(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := fixtureNew(t)
 			pending := make(chan Pending, 1)
-			f.http.Recover = func(p Pending) { pending <- p }
+			f.http.ReserveRecovery = func() (func(*Pending), bool) {
+				return func(p *Pending) {
+					if p != nil {
+						pending <- *p
+					}
+				}, true
+			}
 			upstreamCanceled := make(chan struct{})
 			stopped := make(chan struct{})
 			closed := make(chan struct{})

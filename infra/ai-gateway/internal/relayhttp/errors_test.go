@@ -79,7 +79,7 @@ func TestSafeErrorsAndReplayFields(t *testing.T) {
 
 func TestConfigurationAndDeadlineCapabilityFailClosed(t *testing.T) {
 	for _, mutate := range []func(*Config){
-		func(c *Config) { c.Core = nil }, func(c *Config) { c.Gate = nil }, func(c *Config) { c.Authority = nil }, func(c *Config) { c.Ledger = nil }, func(c *Config) { c.Recover = nil },
+		func(c *Config) { c.Core = nil }, func(c *Config) { c.Gate = nil }, func(c *Config) { c.Authority = nil }, func(c *Config) { c.Ledger = nil }, func(c *Config) { c.ReserveRecovery = nil },
 		func(c *Config) { c.ReadTimeout = 0 }, func(c *Config) { c.WriteTimeout = 0 }, func(c *Config) { c.QueryTimeout = 0 }, func(c *Config) { c.MaxResponseBytes = 1 },
 	} {
 		c := testConfig()

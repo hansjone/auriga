@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelgate"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relay"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/relaysupervisor"
 )
 
 const modelsPath = "/ai/v1/models"
@@ -29,36 +31,37 @@ const usagePath = "/api/ai/v1/me/usage"
 // means uncertainty is still unlocated. A nonempty Ref does not prove that an
 // admission committed or a row exists; recovery must re-read durable RLS state.
 // StopProof is live process evidence only; it must not be inferred after restart.
-type Pending struct {
-	Ref       budget.Ref      `json:"-"`
-	StopProof <-chan struct{} `json:"-"`
-}
-
-func (p Pending) String() string   { return "AI relay pending" }
-func (p Pending) GoString() string { return p.String() }
+type Pending = relaysupervisor.Pending
 
 type Config struct {
 	Core      *relay.Core
 	Gate      *modelgate.Gate
 	Authority *modelgate.Authority
 	Ledger    *budget.Ledger
-	// Recover must synchronously accept ownership, even after client cancellation.
-	// It must be bounded and must not discard a handoff on a full volatile queue.
-	Recover                                 func(Pending)
+	// ReserveRecovery must reserve fixed capacity before Execute. The returned
+	// finish synchronously accepts ownership even after client cancellation.
+	ReserveRecovery                         func() (finish func(*Pending), ok bool)
 	ReadTimeout, WriteTimeout, QueryTimeout time.Duration
 	MaxResponseBytes                        int64
+	MaxInFlight                             int
 }
 
-type Handler struct{ c Config }
+type Handler struct {
+	c        Config
+	inFlight chan struct{}
+	closed   atomic.Bool
+}
+
+func (h *Handler) CloseAdmission() { h.closed.Store(true) }
 
 // New requires already constructed, mutually consistent trusted components.
 // Mount directly, without ServeMux path cleaning, redirects, retries or CORS.
 func New(c Config) (*Handler, error) {
-	if c.Core == nil || c.Gate == nil || c.Authority == nil || c.Ledger == nil || c.Recover == nil ||
-		c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.QueryTimeout <= 0 || c.MaxResponseBytes < modelprotocol.EventLimit {
+	if c.Core == nil || c.Gate == nil || c.Authority == nil || c.Ledger == nil || c.ReserveRecovery == nil ||
+		c.ReadTimeout <= 0 || c.WriteTimeout <= 0 || c.QueryTimeout <= 0 || c.MaxResponseBytes < modelprotocol.EventLimit || c.MaxInFlight < 1 || c.MaxInFlight > 1024 {
 		return nil, errors.New("common.validation_failed")
 	}
-	return &Handler{c: c}, nil
+	return &Handler{c: c, inFlight: make(chan struct{}, c.MaxInFlight)}, nil
 }
 
 func rawRoute(r *http.Request) (string, bool) {
@@ -169,6 +172,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = s.rc.SetReadDeadline(time.Now())
 		s.failure(r.Context(), id, problem, err)
 	}
+	if h.closed.Load() {
+		fail(errors.New("ai.budget_unavailable"))
+		return
+	}
+	select {
+	case h.inFlight <- struct{}{}:
+		defer func() { <-h.inFlight }()
+	default:
+		fail(errors.New("common.rate_limited"))
+		return
+	}
 	if !ok {
 		fail(errors.New("common.not_found"))
 		return
@@ -201,9 +215,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = s.rc.SetReadDeadline(time.Time{})
+		finish, accepted := h.c.ReserveRecovery()
+		if !accepted || finish == nil {
+			fail(errors.New("ai.budget_unavailable"))
+			return
+		}
 		out, e := h.c.Core.Execute(r.Context(), raw, bytes.NewReader(body), key, s.sink)
 		if out.Pending {
-			h.c.Recover(Pending{Ref: out.PendingRef, StopProof: out.StopProof})
+			finish(&Pending{Ref: out.PendingRef, StopProof: out.StopProof})
+		} else {
+			finish(nil)
 		}
 		if out.Ref.RequestID != "" {
 			id = out.Ref.RequestID

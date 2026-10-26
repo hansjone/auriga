@@ -21,6 +21,7 @@ func run(args []string, out, logs io.Writer) error {
 	teamConfigFile := flags.String("team-config", "", "serve remote Team MCP using a configuration file")
 	networkConfigFile := flags.String("network-config", "", "serve network callout and revocation reconciliation using a configuration file")
 	adminConfigFile := flags.String("admin-config", "", "serve AI management API using a configuration file")
+	deviceConfigFile := flags.String("device-config", "", "serve isolated D7 synthetic device runtime")
 	showVersion := flags.Bool("version", false, "print version")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -28,9 +29,21 @@ func run(args []string, out, logs io.Writer) error {
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
+	selected := 0
+	for _, path := range []string{*adminConfigFile, *teamConfigFile, *networkConfigFile, *deviceConfigFile} {
+		if path != "" {
+			selected++
+		}
+	}
+	if selected > 1 {
+		return fmt.Errorf("choose one runtime per process: --admin-config, --team-config, --network-config or --device-config")
+	}
 	if *showVersion {
 		_, err := fmt.Fprintln(out, "auriga-ai-gateway", version)
 		return err
+	}
+	if *deviceConfigFile != "" {
+		return serveDevice(*deviceConfigFile)
 	}
 	if *adminConfigFile != "" {
 		if *teamConfigFile != "" || *networkConfigFile != "" {
@@ -53,7 +66,7 @@ func run(args []string, out, logs io.Writer) error {
 		defer stop()
 		return network.RunRuntime(ctx, cfg)
 	}
-	return fmt.Errorf("runtime configuration required: --admin-config, --team-config or --network-config")
+	return fmt.Errorf("runtime configuration required: --admin-config, --team-config, --network-config or --device-config")
 }
 
 func main() {

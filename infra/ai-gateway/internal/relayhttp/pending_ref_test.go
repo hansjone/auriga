@@ -66,7 +66,13 @@ func TestHTTPAdmissionPendingRef(t *testing.T) {
 					}
 					f.cfg.Ledger = l
 					pending := make(chan Pending, 1)
-					f.http.Recover = func(p Pending) { pending <- p }
+					f.http.ReserveRecovery = func() (func(*Pending), bool) {
+						return func(p *Pending) {
+							if p != nil {
+								pending <- *p
+							}
+						}, true
+					}
 					var calls atomic.Int32
 					s := f.server(t, finite(completion(textChoice), &calls))
 					var logs bytes.Buffer

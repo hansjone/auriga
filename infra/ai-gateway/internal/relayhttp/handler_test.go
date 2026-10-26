@@ -16,7 +16,7 @@ import (
 )
 
 func testConfig() Config {
-	return Config{Core: new(relay.Core), Gate: new(modelgate.Gate), Authority: new(modelgate.Authority), Ledger: new(budget.Ledger), Recover: func(Pending) {}, ReadTimeout: 100 * time.Millisecond, WriteTimeout: 100 * time.Millisecond, QueryTimeout: time.Second, MaxResponseBytes: 1 << 20}
+	return Config{Core: new(relay.Core), Gate: new(modelgate.Gate), Authority: new(modelgate.Authority), Ledger: new(budget.Ledger), ReserveRecovery: func() (func(*Pending), bool) { return func(*Pending) {}, true }, ReadTimeout: 100 * time.Millisecond, WriteTimeout: 100 * time.Millisecond, QueryTimeout: time.Second, MaxInFlight: 32, MaxResponseBytes: 1 << 20}
 }
 
 // Deadline support is mandatory even when an embedding wrapper is present.
