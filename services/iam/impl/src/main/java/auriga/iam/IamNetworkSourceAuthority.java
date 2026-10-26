@@ -124,7 +124,7 @@ final class IamNetworkSourceAuthority {
             require(clock.instant().isBefore(until), FORBIDDEN);
             validUntil = until.toString();
           }
-          return response(r, source, current.revision(), observed, validUntil);
+          return response(r, source, current.revision(), observed, validUntil, view.stopped());
         });
   }
 
@@ -378,7 +378,8 @@ final class IamNetworkSourceAuthority {
       NetworkAgentSource source,
       BigInteger revision,
       Instant observed,
-      String until) {
+      String until,
+      boolean stopped) {
     require(revision != null && revision.signum() > 0 && revision.bitLength() <= 64, UNAVAILABLE);
     return GetAgentSourceResponse.newBuilder()
         .setSource(source)
@@ -386,6 +387,7 @@ final class IamNetworkSourceAuthority {
         .setPolicyRevision(revision.longValue())
         .setObservedAt(observed.toString())
         .setValidUntil(until)
+        .setLineageStopped(stopped)
         .build();
   }
 
