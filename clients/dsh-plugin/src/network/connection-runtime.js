@@ -15,6 +15,13 @@ import {
   encodeReady,
 } from './session/frames.js';
 import { networkIsolation } from './isolation.js';
+import {
+  isDeviceRevocationError,
+  DeviceControlUnavailable,
+} from './device-provider.js';
+
+// At most 64 pending protocol payloads (each already bounded by NatsLink).
+const MESSAGE_QUEUE_CAPACITY = 64;
 
 /** Strict known-identity handshake only; no delivery session or business ports.
  * @param {import('./session/memory-pipe.js').TransportLike} transport
@@ -171,6 +178,8 @@ export async function openConnectionRuntime(options) {
   const connections = new Set();
   /** @type {any} */
   let currentConnection;
+  /** @type {Awaited<ReturnType<typeof openTrustStore>>|undefined} */
+  let connectionTrust;
   const active = () => {
     signal.throwIfAborted();
     if (closed) throw new Error('connection closed');
@@ -233,6 +242,7 @@ export async function openConnectionRuntime(options) {
     const entry = {
       live: true,
       receiving: false,
+      messages: /** @type {{bytes:Uint8Array,epoch:number}[]} */ ([]),
       epoch: 0,
       attempt,
       listeners: /** @type {Set<(bytes:Uint8Array,epoch:number)=>void>} */ (
@@ -243,7 +253,10 @@ export async function openConnectionRuntime(options) {
         entry.live = false;
         entry.attempt.abort();
         entry.listeners.clear();
-        return (stopping ??= Promise.resolve(entry.transport.stop()));
+        entry.messages.length = 0;
+        return (stopping ??= Promise.resolve().then(() =>
+          entry.transport?.stop(),
+        ));
       },
     };
     currentConnection = entry;
@@ -261,21 +274,43 @@ export async function openConnectionRuntime(options) {
       downSubject: 'auriga.net.down.' + 'a'.repeat(26),
       inboxPrefix: 'auriga.net.reply.' + 'a'.repeat(26),
       createSocket: createWsSocketFactory(),
-      async getTicket() {
+      async getTicket({ reason: ticketReason }) {
+        let requestingTicket = false;
         try {
           valid();
           await refreshTrust(trust);
           valid();
+          requestingTicket = true;
           const ticket = await prepared.getTicket(signal);
           valid();
           return ticket;
         } catch (error) {
           const e = /** @type {any} */ (error);
-          if ([401, 403].includes(e?.status)) {
+          if (!entry.live || closed || currentConnection !== entry) throw error;
+          if (isDeviceRevocationError(error)) {
             options.onRevoked?.();
             void close('revoked').catch(() => {});
-          } else if (![429, 503].includes(e?.status))
+          } else if (e?.status === 403) {
+            void close('forbidden').catch(() => {});
+          } else if (
+            ![429, 503].includes(e?.status) &&
+            !(
+              ticketReason === 'refresh' &&
+              transport.state === 'ready' &&
+              (e instanceof DeviceControlUnavailable ||
+                (requestingTicket &&
+                  (e instanceof TypeError ||
+                    ['TimeoutError', 'AbortError'].includes(e?.name))))
+            )
+          )
             void close('unavailable').catch(() => {});
+          else {
+            try {
+              trust.assertUsable();
+            } catch {
+              void close('key_unavailable').catch(() => {});
+            }
+          }
           throw error;
         }
       },
@@ -287,40 +322,59 @@ export async function openConnectionRuntime(options) {
           epoch !== transport.epoch
         )
           return;
-        if (entry.receiving) {
+        if (entry.messages.length >= MESSAGE_QUEUE_CAPACITY) {
           void close('message_backpressure').catch(() => {});
           return;
         }
+        entry.messages.push({ bytes, epoch });
+        if (entry.receiving) return;
         entry.receiving = true;
         const receive = async () => {
-          const frame = decodeJson(bytes),
-            expected = transport.epoch;
-          if (frame.keyset_announcement) {
-            const resume = connected;
-            connected = false;
-            await trust.announce(frame.keyset_announcement);
-            valid();
-            await refreshTrust(trust);
-            valid();
-            if (transport.epoch !== expected || transport.state !== 'ready')
-              throw new Error('announcement connection changed');
-            trust.assertUsable();
-            connected = resume;
-          }
-          valid();
-          for (const listener of entry.listeners) listener(bytes, epoch);
-        };
-        void receive()
-          .catch(() => {
-            void close('unavailable').catch(() => {});
-          })
-          .finally(() => {
+          try {
+            while (entry.messages.length) {
+              const message = entry.messages.shift();
+              if (!message) return;
+              valid();
+              if (
+                message.epoch !== transport.epoch ||
+                transport.state !== 'ready'
+              )
+                continue;
+              try {
+                const frame = decodeJson(message.bytes);
+                if (frame.keyset_announcement) {
+                  const resume = connected;
+                  connected = false;
+                  await trust.announce(frame.keyset_announcement);
+                  valid();
+                  await refreshTrust(trust);
+                  valid();
+                  if (
+                    message.epoch !== transport.epoch ||
+                    transport.state !== 'ready'
+                  )
+                    continue;
+                  trust.assertUsable();
+                  connected = resume;
+                }
+                valid();
+                for (const listener of entry.listeners)
+                  listener(message.bytes, message.epoch);
+              } catch (error) {
+                if (message.epoch === transport.epoch) throw error;
+              }
+            }
+          } finally {
             entry.receiving = false;
-          });
+          }
+        };
+        void receive().catch(() => {
+          void close('unavailable').catch(() => {});
+        });
       },
       onState(state) {
         if (!entry.live || closed || currentConnection !== entry) return;
-        if (state.state !== 'ready' || state.error) {
+        if (state.state !== 'ready') {
           connected = false;
           entry.attempt.abort();
           return;
@@ -400,6 +454,7 @@ export async function openConnectionRuntime(options) {
           active();
         },
       });
+      connectionTrust = trust;
       active();
       await refreshTrust(trust);
       active();
@@ -476,15 +531,24 @@ export async function openConnectionRuntime(options) {
     start,
     close,
     get status() {
+      let ready = !closed && connected;
+      if (ready) {
+        try {
+          connectionTrust?.assertUsable();
+        } catch {
+          ready = false;
+        }
+      }
       return {
         available: !closed,
-        connected: !closed && connected,
+        connected: ready,
         isolation: networkIsolation,
+        reason,
         state: closed
           ? reason === 'stopped'
             ? 'stopped'
             : 'unavailable'
-          : connected
+          : ready
             ? 'ready'
             : 'connecting',
       };

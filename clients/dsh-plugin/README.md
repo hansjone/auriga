@@ -107,6 +107,14 @@ The basic provider creates no HostAdapter or consent service and sends no
 FETCH/ACK/LOCAL_REGISTER/SEND. Connected means this basic authenticated connection;
 two-DSH messaging is not delivered. Old business ledgers without a provable
 receipt cursor remain unavailable rather than resetting revision or history.
+If first registration succeeds but no complete ledger is committed, a later
+`created=false` registration fails closed. Signing in again does not guarantee
+a new device/node. An original complete ledger can continue only after identity
+and recovery evidence checks. Recovery when that ledger is missing has not been
+validated; platform device retirement/new-device registration needs separate
+acceptance. Only an authoritative new-node `created=true` permits bootstrap.
+There is currently no automatic repair/reset flow. A failure on C2 after a complete
+commit can retry using that ledger without bootstrapping again.
 See [the network integration boundary](src/network/README.zh.md).
 
 Protocol major version: **1** (`Auriga-Protocol: 1`).

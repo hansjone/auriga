@@ -5,6 +5,16 @@ import { parseStrictJson } from './trust/jcs.js';
 import { positiveVersion } from './trust/keyset.js';
 
 const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+const CLOCK_SKEW_MS = 60000;
+/** Transient fetch failure only; validation and persistence errors never use it. */
+export class DeviceControlUnavailable extends Error {}
+/** Only proven credential invalidation may end the native login.
+ * A network permission/quota denial says nothing about the model credential.
+ * @param {unknown} error */
+export function isDeviceRevocationError(error) {
+  const value = /** @type {{status?:number,code?:string}|null} */ (error);
+  return value?.status === 401 || value?.code === 'network.revoked';
+}
 /** @param {string} ticket */
 function ingressFor(ticket) {
   let bits = 0,
@@ -104,6 +114,9 @@ export function createDeviceProvider({
               : { 'content-type': 'application/json' }),
           },
           body: body === undefined ? undefined : JSON.stringify(body),
+        }).catch(() => {
+          active.throwIfAborted();
+          throw new DeviceControlUnavailable('network control unavailable');
         });
         active.throwIfAborted();
         const parts = [];
@@ -112,7 +125,12 @@ export function createDeviceProvider({
           const reader = response.body.getReader();
           try {
             for (;;) {
-              const { done, value } = await reader.read();
+              const { done, value } = await reader.read().catch(() => {
+                active.throwIfAborted();
+                throw new DeviceControlUnavailable(
+                  'network control unavailable',
+                );
+              });
               active.throwIfAborted();
               if (done) break;
               size += value.byteLength;
@@ -126,7 +144,16 @@ export function createDeviceProvider({
             reader.releaseLock();
           }
         }
-        if (!response.ok) throw new PlatformError(response.status);
+        if (!response.ok) {
+          let code;
+          try {
+            const problem = parseStrictJson(Buffer.concat(parts));
+            if (problem?.code === 'network.revoked') code = problem.code;
+          } catch {
+            // An unreadable error body never upgrades a denial to revocation.
+          }
+          throw new PlatformError(response.status, code);
+        }
         active.throwIfAborted();
         return Buffer.concat(parts);
       }
@@ -185,7 +212,8 @@ export function createDeviceProvider({
           const shard =
             alphabet[createHash('sha256').update(ingress).digest()[0] & 31];
           const expires = Date.parse(raw.expiresAt),
-            connectionExpires = Date.parse(raw.connectionExpiresAt);
+            connectionExpires = Date.parse(raw.connectionExpiresAt),
+            currentTime = now();
           if (
             !exact(raw, [
               'identity',
@@ -215,11 +243,12 @@ export function createDeviceProvider({
                 /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(v),
             ) ||
             !Number.isFinite(expires) ||
-            expires <= now() ||
-            expires > now() + 30000 ||
+            expires <= currentTime - CLOCK_SKEW_MS ||
+            expires > currentTime + 30000 + CLOCK_SKEW_MS ||
             !Number.isFinite(connectionExpires) ||
             connectionExpires < expires ||
-            connectionExpires > now() + 3600000
+            connectionExpires <= currentTime - CLOCK_SKEW_MS ||
+            connectionExpires > currentTime + 3600000 + CLOCK_SKEW_MS
           )
             throw new Error('invalid device network ticket');
           active.throwIfAborted();

@@ -6,6 +6,102 @@ import { generateKeyPairSync } from 'node:crypto';
 import { platformConfig } from '../../src/local/platform.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('network-only forbidden reason remains diagnostic after a running runtime closes', async () => {
+  let input,
+    revoked = 0;
+  const lifecycle = createNetworkLifecycle({
+    directory: 'unused',
+    ctx: {},
+    getAccess: async () => 'native',
+    authorizeLocal: async () => false,
+    defaultProvider: {
+      kind: 'device-connection',
+      async prepare() {
+        return { kind: 'device-connection' };
+      },
+    },
+    onRevoked: () => {
+      revoked++;
+    },
+    async open(options) {
+      input = options;
+      return {
+        status: { connected: true },
+        async start() {},
+        async close() {},
+        consentUI() {},
+      };
+    },
+  });
+  lifecycle.login();
+  try {
+    await until(() => lifecycle.status.connected);
+    input.onClosed('forbidden');
+    await turn();
+    assert.equal(lifecycle.status.state, 'unavailable');
+    assert.equal(lifecycle.status.reason, 'forbidden');
+    assert.equal(revoked, 0);
+  } finally {
+    await lifecycle.close();
+  }
+});
+
+for (const point of ['prepare', 'start'])
+  for (const error of [
+    { status: 403 },
+    { status: 403, code: 'network.unauthorized' },
+    { status: 401 },
+    { status: 403, code: 'network.revoked' },
+  ])
+    test(
+      'official lifecycle ' +
+        point +
+        ' distinguishes denial ' +
+        JSON.stringify(error),
+      async () => {
+        let revoked = 0;
+        const lifecycle = createNetworkLifecycle({
+          directory: 'unused',
+          ctx: {},
+          getAccess: async () => 'native',
+          authorizeLocal: async () => false,
+          defaultProvider: {
+            kind: 'device-connection',
+            async prepare() {
+              if (point === 'prepare') throw error;
+              return { kind: 'device-connection' };
+            },
+          },
+          onRevoked: () => {
+            revoked++;
+          },
+          async open() {
+            return {
+              async start() {
+                throw error;
+              },
+              async close() {},
+              consentUI() {},
+            };
+          },
+        });
+        lifecycle.login();
+        try {
+          await until(() => lifecycle.status.state !== 'connecting');
+          const expected =
+            error.status === 401 || error.code === 'network.revoked';
+          assert.equal(revoked, expected ? 1 : 0);
+          assert.equal(
+            lifecycle.status.state,
+            expected ? 'idle' : 'unavailable',
+          );
+          if (!expected) assert.equal(lifecycle.status.reason, 'forbidden');
+        } finally {
+          await lifecycle.close();
+        }
+      },
+    );
 test('complete provider detach restores official default after old runtime releases its lock', async () => {
   const calls = [];
   let release;

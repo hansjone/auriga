@@ -1,3 +1,4 @@
+/* global ReadableStream */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -10,7 +11,7 @@ import {
   testRoots,
 } from './trust/keyset-fixtures.js';
 
-async function deviceFixture(t) {
+async function deviceFixture(t, clockOffset = 0) {
   const { createDeviceProvider } = await import(
     process.env.AURIGA_DEVICE_PROVIDER_MODULE ??
       '../../src/network/device-provider.js'
@@ -63,7 +64,7 @@ async function deviceFixture(t) {
       },
     },
     getDevice: async () => ({ accessToken: 'device', claims: { ...claims } }),
-    now,
+    now: () => now() + clockOffset,
   });
   const controller = new AbortController();
   const prepared = await provider.prepare({ signal: controller.signal });
@@ -79,6 +80,42 @@ async function deviceFixture(t) {
     },
   };
 }
+
+for (const offset of [-200, -59000, 59000])
+  test('ticket tolerates client clock offset ' + offset + 'ms', async (t) => {
+    const f = await deviceFixture(t, offset);
+    await f.prepared.register(f.controller.signal);
+    const ticket = await f.prepared.getTicket(f.controller.signal);
+    assert.equal(
+      ticket.expiresAtMs,
+      Date.parse(f.responses.tickets.connectionExpiresAt),
+    );
+  });
+
+for (const offset of [-60001, 90001])
+  test(
+    'ticket rejects client clock beyond lifetime tolerance ' + offset + 'ms',
+    async (t) => {
+      const f = await deviceFixture(t, offset);
+      await f.prepared.register(f.controller.signal);
+      await assert.rejects(
+        f.prepared.getTicket(f.controller.signal),
+        /invalid device network ticket/,
+      );
+    },
+  );
+
+test('ticket connection deadline has its own 60 second upper tolerance', async (t) => {
+  const f = await deviceFixture(t);
+  await f.prepared.register(f.controller.signal);
+  f.responses.tickets.connectionExpiresAt = new Date(
+    Date.parse(f.responses.tickets.connectionExpiresAt) + 60001,
+  ).toISOString();
+  await assert.rejects(
+    f.prepared.getTicket(f.controller.signal),
+    /invalid device network ticket/,
+  );
+});
 
 for (const [name, mutate] of [
   ['missing created', (r) => delete r.created],
@@ -161,6 +198,53 @@ for (const status of [401, 403, 429, 503])
       (e) => e.status === status,
     );
   });
+
+for (const code of [
+  'network.revoked',
+  'network.unauthorized',
+  'common.forbidden',
+])
+  test(
+    'HTTP denial only propagates an explicit revocation code ' + code,
+    async (t) => {
+      const f = await deviceFixture(t);
+      f.respond(() => Response.json({ code }, { status: 403 }));
+      await assert.rejects(
+        f.prepared.register(f.controller.signal),
+        (e) =>
+          e.status === 403 &&
+          e.code === (code === 'network.revoked' ? code : undefined),
+      );
+    },
+  );
+
+test('native fetch and body-stream failure are transient control errors, not validation errors', async (t) => {
+  const { DeviceControlUnavailable } =
+    await import('../../src/network/device-provider.js');
+  const f = await deviceFixture(t);
+  await f.prepared.register(f.controller.signal);
+  f.respond(() => {
+    throw new TypeError('fetch failed');
+  });
+  await assert.rejects(
+    f.prepared.getTicket(f.controller.signal),
+    DeviceControlUnavailable,
+  );
+  f.respond(
+    () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError('stream failed'));
+          },
+        }),
+      ),
+  );
+  await assert.rejects(
+    f.prepared.getTicket(f.controller.signal),
+    DeviceControlUnavailable,
+  );
+});
 
 for (const [name, mutate] of [
   ['bad root', (a) => (a.root_kid = 'unknown')],

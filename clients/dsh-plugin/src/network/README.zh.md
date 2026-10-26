@@ -14,7 +14,9 @@ connect 安装具备完整 `network` pin 且原生设备登录成功后，`plugi
 
 输出不赋业务权，也不是可持久保存或重复消费的初始化许可。基础 runtime 先取得原 host store 单写者 handle，再注册并在锁内 load 一次；已有完整账本先核结构、原身份及权威 tenant/realm/node，从原账本取 incarnation。缺账本仅当前真实 created=true 可以用 helper 验签结果，经原 emptyState/handle.commit 原子首建。写入未知消费本次许可并关闭，不能重复 initialize。
 
-created=false 且缺 ledger、首次响应丢失、落盘前崩溃/写入未知、后来丢 ledger 始终失败关闭，沿现有真实重新登录取得新 device/new node 恢复；不能缓存 true、刷新旧设备或重用 helper 输出恢复首次资格。现有 ledger 的重连仍从账本取得已知 incarnation，不用 bootstrap 覆盖。
+created=false 且缺 ledger、首次响应丢失、落盘前崩溃/写入未知、后来丢 ledger 始终失败关闭。普通重新登录不保证获得新 device/new node，不能承诺因此自动恢复。若保有完整原账本，只能在原身份与所有恢复证据校验通过后继续；若账本确实缺失，当前没有已验收的恢复入口，需主控另行完成平台侧设备退役/新设备登记恢复流程的验收。只有权威注册实际返回新 node 的 created=true 才能重新首建。插件不提供自动修复或重置入口，缺账本状态保持 unavailable。不能删除账本、缓存 true、刷新旧设备或重用 helper 输出恢复首次资格。现有完整 ledger 的重连仍取原 incarnation；C2 失败后重试可继续该账本，不用 bootstrap 覆盖。
+
+官方基础连接只在 HTTP 401 或明确的 network.revoked 凭据吊销时终止本机登录。网络功能关闭、平台租户、未兑换票配额等普通 403 仅关闭网络，状态为 unavailable / reason=forbidden，保留模型登录和 DSH 会话。票据两个期限的本地合理性检查统一容忍 ±60 秒时钟差；服务器仍决定是否兑换成功。消息桥顺序处理，公告刷新期间最多排队 64 帧，超限才以 message_backpressure 关闭。健康连接的暂时取票网络错误/超时/429/503 交原 transport 做有上限的指数退避，原连接继续可用；凭据吊销、普通 403、非法票据和密钥硬截止仍失败关闭。
 
 ### 同锁 C1 → 原子落账 → 新票 C2
 

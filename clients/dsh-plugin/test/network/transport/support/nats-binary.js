@@ -89,7 +89,11 @@ async function extractMember(archive, member, target) {
   let result;
   try {
     // Only one fixed member goes to stdout. tar never writes archive paths.
-    result = await run('tar', ['-xOf', archive, member], {
+    const tar =
+      process.platform === 'win32'
+        ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+        : 'tar';
+    result = await run(tar, ['-xOf', archive, member], {
       encoding: 'buffer',
       maxBuffer: MAX_BINARY,
       timeout: 30000,

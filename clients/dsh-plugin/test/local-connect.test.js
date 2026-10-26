@@ -24,6 +24,13 @@ import {
 import { createConnectRuntime, cookie } from '../src/local/runtime.js';
 import { createTeam } from '../src/local/team.js';
 import { runtimePeer } from './local-runtime-peer.js';
+import { createDeviceProvider } from '../src/network/device-provider.js';
+import {
+  publicationFixture,
+  testRoots,
+  signedKeyset,
+  signedAnnouncement,
+} from './network/trust/keyset-fixtures.js';
 
 const config = {
   platformOrigin: 'https://portal.example.com',
@@ -31,6 +38,110 @@ const config = {
   clientId: 'auriga-dsh',
   providerId: 'team',
 };
+
+for (const status of [403, 401])
+  test(
+    'official network HTTP ' +
+      status +
+      ' has the correct native login and model scope',
+    async (t) => {
+      const { runtime, request, credential } = await runtimePeer(t);
+      const before = runtime.modelStatus;
+      let denied = false;
+      runtime.attachNetwork({
+        kind: 'device-connection',
+        async prepare() {
+          denied = true;
+          throw Object.assign(new Error('network denied'), { status });
+        },
+      });
+      const deadline = Date.now() + 2000;
+      while (!denied || runtime.networkStatus.state === 'connecting') {
+        assert.ok(Date.now() < deadline, 'network denial handled');
+        await setImmediate();
+      }
+      if (status === 403) {
+        assert.ok(
+          runtime.resolve(request),
+          'native session survives a network-only denial',
+        );
+        assert.deepEqual(runtime.modelStatus, before);
+        assert.equal(
+          runtime.vault.snapshot().credential.accessToken,
+          credential.accessToken,
+        );
+        assert.equal(runtime.networkStatus.reason, 'forbidden');
+      } else {
+        assert.equal(runtime.resolve(request), null);
+        assert.equal(runtime.modelStatus.reauthenticationRequired, true);
+      }
+    },
+  );
+for (const point of ['register', 'tickets'])
+  test(
+    'real official provider HTTP 403 at ' +
+      point +
+      ' preserves native session and model login',
+    async (t) => {
+      const { runtime, request, credential } = await runtimePeer(t);
+      const { payload } = publicationFixture();
+      const originalFetch = globalThis.fetch;
+      t.after(() => {
+        globalThis.fetch = originalFetch;
+      });
+      let denied = false;
+      globalThis.fetch = async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith('/' + point)) {
+          denied = true;
+          return Response.json({ code: 'common.forbidden' }, { status: 403 });
+        }
+        if (path.endsWith('/network/register'))
+          return Response.json({
+            tenant: credential.claims.tid,
+            device: credential.claims.did,
+            realm: '2',
+            node: '64',
+            systemAddress: 'aur1:2.40.0',
+            created: true,
+          });
+        if (path.endsWith('/keys/announcement'))
+          return Response.json(signedAnnouncement(payload));
+        if (path.endsWith('/network/keys'))
+          return Response.json(signedKeyset(payload));
+        return originalFetch(url, init);
+      };
+      const before = runtime.modelStatus;
+      runtime.attachNetwork(
+        createDeviceProvider({
+          config: {
+            ...config,
+            network: {
+              realm: '2',
+              roots: testRoots,
+              wssUrl: 'wss://network.example.com/',
+            },
+          },
+          getDevice: async () => ({
+            accessToken: credential.accessToken,
+            claims: credential.claims,
+          }),
+        }),
+      );
+      const deadline = Date.now() + 3000;
+      while (!denied || runtime.networkStatus.reason !== 'forbidden') {
+        assert.ok(Date.now() < deadline, 'official network denial diagnosed');
+        await setImmediate();
+      }
+      assert.ok(runtime.resolve(request));
+      assert.deepEqual(runtime.modelStatus, before);
+      assert.equal(
+        runtime.vault.snapshot().credential.accessToken,
+        credential.accessToken,
+      );
+    },
+  );
+
 test('loader network installation selects official device default after login and never leaks to settings/status', async (t) => {
   const network = {
     realm: '1',
@@ -86,6 +197,7 @@ test('loader network installation selects official device default after login an
       return new Promise(() => {});
     },
   });
+
   const deadline = Date.now() + 2000;
   while (!prepared) {
     assert.ok(Date.now() < deadline, 'trusted prepare timeout');

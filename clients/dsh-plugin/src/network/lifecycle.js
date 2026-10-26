@@ -1,5 +1,6 @@
 import { openNetworkRuntime, isRevocationError } from './runtime.js';
 import { networkIsolation } from './isolation.js';
+import { isDeviceRevocationError } from './device-provider.js';
 
 /** Provider lifetime and login lifetime are independent. Late register/prepare
  * responses cannot resurrect an old login or a disposed native provider.
@@ -19,6 +20,7 @@ export function createNetworkLifecycle(options) {
   let tail = Promise.resolve();
   let cleanup = Promise.resolve();
   let phase = provider ? 'idle' : 'unconfigured';
+  let reason = 'stopped';
   function retire() {
     generation++;
     controller?.abort();
@@ -76,11 +78,12 @@ export function createNetworkLifecycle(options) {
             ctx: options.ctx,
             getAccess: options.getAccess,
             authorizeLocal: options.authorizeLocal,
-            onClosed() {
+            onClosed(/** @type {string} */ why) {
               if (ended) return;
               if (valid()) {
                 runtime = undefined;
                 phase = 'unavailable';
+                reason = why === 'forbidden' ? 'forbidden' : 'unavailable';
               }
               notifyClosed();
             },
@@ -136,7 +139,11 @@ export function createNetworkLifecycle(options) {
           if (!valid()) return;
           await candidate?.close();
           if (!valid()) return;
-          if (isRevocationError(error)) {
+          if (
+            (currentProvider.kind === 'device-connection'
+              ? isDeviceRevocationError
+              : isRevocationError)(error)
+          ) {
             options.onRevoked?.();
             authenticated = false;
             begin();
@@ -144,6 +151,8 @@ export function createNetworkLifecycle(options) {
           }
           runtime = undefined;
           phase = 'unavailable';
+          if (/** @type {any} */ (error)?.status === 403) reason = 'forbidden';
+          else if (!ended) reason = 'unavailable';
           // Initial register/prepare uses the same bounded exponential retry
           // principle as transport ticket refresh. No synchronous retry loop.
           await new Promise((resolve) => {
@@ -199,6 +208,7 @@ export function createNetworkLifecycle(options) {
           isolation: networkIsolation,
           connected: false,
           state: phase,
+          reason,
         }
       );
     },

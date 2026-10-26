@@ -26,7 +26,10 @@ import {
   signedReadyResult,
 } from './trust/keyset-fixtures.js';
 import { NatsTransport } from '../../src/network/transport/nats-transport.js';
-import { createDeviceProvider } from '../../src/network/device-provider.js';
+import {
+  createDeviceProvider,
+  DeviceControlUnavailable,
+} from '../../src/network/device-provider.js';
 import { startNatsServer } from './transport/support/nats-server.js';
 import { ensureNatsServer } from './transport/support/nats-binary.js';
 import {
@@ -141,6 +144,8 @@ async function fixture(t, extra = {}) {
     signal: controller.signal,
     now,
     stores: { ledger, trust: trustStore },
+    onRevoked: extra.onRevoked,
+    onClosed: extra.onClosed,
     ctx: new Proxy(
       {},
       {
@@ -150,6 +155,7 @@ async function fixture(t, extra = {}) {
       },
     ),
     transportFactory(options) {
+      if (extra.factoryError) throw new Error('transport factory failed');
       const connection = {
         id: connections.length + 1,
         epoch: 1,
@@ -176,9 +182,15 @@ async function fixture(t, extra = {}) {
             response(request, connection, extra.result?.(connection.id)),
             connection.epoch,
           );
+          extra.message?.(connection, request);
         },
         message(bytes) {
           options.onMessage(bytes, connection.epoch);
+        },
+        ticket: (reason = 'refresh') =>
+          options.getTicket({ reason, attempt: 0 }),
+        refreshError(error) {
+          options.onState({ state: 'ready', epoch: connection.epoch, error });
         },
         transition(state, epoch) {
           connection.state = state;
@@ -200,6 +212,8 @@ async function fixture(t, extra = {}) {
     sent,
     response,
     prepared,
+    payload,
+    trustStore,
   };
 }
 
@@ -342,6 +356,247 @@ function latch() {
   });
   return { promise, release };
 }
+
+test('one socket batch can deliver READY plus unrelated frames without disconnecting', async (t) => {
+  const f = await fixture(t, {
+    message(connection) {
+      connection.message(encodeJson({ type: 'unrelated' }));
+      connection.message(encodeJson({ type: 'unrelated' }));
+    },
+  });
+  await f.runtime.start();
+  await setImmediate();
+  assert.equal(f.runtime.status.connected, true);
+});
+
+test('announcement refresh queues later frames and resumes in order', async (t) => {
+  const gate = latch();
+  let block = false,
+    entered = false;
+  const f = await fixture(t, {
+    refresh: async () => {
+      if (block) {
+        entered = true;
+        await gate.promise;
+      }
+    },
+  });
+  await f.runtime.start();
+  block = true;
+  f.connections[1].message(
+    encodeJson({ keyset_announcement: signedAnnouncement(f.payload) }),
+  );
+  await waitFor(() => entered, 'announcement refresh');
+  assert.equal(f.runtime.status.connected, false);
+  for (let i = 0; i < 64; i++)
+    f.connections[1].message(encodeJson({ type: 'unrelated' }));
+  assert.equal(f.runtime.status.available, true);
+  gate.release();
+  await waitFor(
+    () => f.runtime.status.connected,
+    'queue resumed after announcement',
+  );
+  assert.equal(f.runtime.status.state, 'ready');
+});
+
+test('only exceeding the 64 pending frame bound closes with message_backpressure', async (t) => {
+  const gate = latch();
+  let block = false,
+    entered = false,
+    reason;
+  const f = await fixture(t, {
+    onClosed: (why) => {
+      reason = why;
+    },
+    refresh: async () => {
+      if (block) {
+        entered = true;
+        await gate.promise;
+      }
+    },
+  });
+  await f.runtime.start();
+  block = true;
+  f.connections[1].message(
+    encodeJson({ keyset_announcement: signedAnnouncement(f.payload) }),
+  );
+  await waitFor(() => entered, 'blocked refresh');
+  for (let i = 0; i < 64; i++)
+    f.connections[1].message(encodeJson({ type: 'unrelated' }));
+  assert.equal(f.runtime.status.available, true);
+  f.connections[1].message(encodeJson({ type: 'unrelated' }));
+  assert.equal(f.runtime.status.available, false);
+  gate.release();
+  await f.runtime.close();
+  assert.equal(reason, 'message_backpressure');
+});
+
+test('transport factory synchronous failure still closes and releases both store locks', async (t) => {
+  const f = await fixture(t, { factoryError: true });
+  await assert.rejects(f.runtime.start(), /transport factory failed/);
+  await assert.doesNotReject(f.runtime.close());
+  const h = await f.ledger.open();
+  await h.close();
+  const cache = await f.trustStore.open();
+  await cache.close();
+});
+
+test('synchronous transport stop failure cannot prevent ledger and trust lock release', async (t) => {
+  const f = await fixture(t);
+  await f.runtime.start();
+  f.connections[1].stop = () => {
+    throw new Error('synchronous stop failure');
+  };
+  await assert.doesNotReject(f.runtime.close());
+  for (const store of [f.ledger, f.trustStore]) {
+    const h = await store.open();
+    await h.close();
+  }
+});
+
+test('queued old-epoch frames are discarded after announcement refresh and cannot fail the new READY', async (t) => {
+  const gate = latch();
+  let block = false,
+    entered = false;
+  const f = await fixture(t, {
+    refresh: async () => {
+      if (block) {
+        entered = true;
+        await gate.promise;
+      }
+    },
+  });
+  await f.runtime.start();
+  block = true;
+  f.connections[1].message(
+    encodeJson({ keyset_announcement: signedAnnouncement(f.payload) }),
+  );
+  await waitFor(() => entered, 'old epoch refresh');
+  f.connections[1].message(new TextEncoder().encode('invalid old JSON'));
+  f.connections[1].transition('reconnecting', 1);
+  f.connections[1].transition('ready', 2);
+  await waitFor(() => f.sent.length === 3, 'new epoch READY queued');
+  block = false;
+  gate.release();
+  await waitFor(() => f.runtime.status.connected, 'new epoch verified');
+  assert.equal(f.runtime.status.available, true);
+});
+
+for (const error of [
+  { status: 401 },
+  { status: 403, code: 'network.revoked' },
+  { code: 'network.revoked' },
+  { status: 403 },
+  { status: 403, code: 'network.unauthorized' },
+])
+  test(
+    'ticket denial distinguishes credential revocation ' +
+      JSON.stringify(error),
+    async (t) => {
+      let revoked = 0,
+        closedReason;
+      const f = await fixture(t, {
+        onRevoked: () => {
+          revoked++;
+        },
+        onClosed: (reason) => {
+          closedReason = reason;
+        },
+      });
+      await f.runtime.start();
+      f.prepared.getTicket = async () => {
+        throw error;
+      };
+      await assert.rejects(f.connections[1].ticket());
+      await f.runtime.close();
+      const isRevoked =
+        error.status === 401 || error.code === 'network.revoked';
+      assert.equal(revoked, isRevoked ? 1 : 0);
+      assert.equal(closedReason, isRevoked ? 'revoked' : 'forbidden');
+    },
+  );
+
+for (const error of [
+  new TypeError('fetch failed'),
+  { name: 'TimeoutError' },
+  { status: 429 },
+  { status: 503 },
+])
+  test(
+    'healthy READY survives transient refresh failure ' +
+      (error.status ?? error.name),
+    async (t) => {
+      const f = await fixture(t);
+      await f.runtime.start();
+      const original = f.prepared.getTicket;
+      f.prepared.getTicket = async () => {
+        throw error;
+      };
+      await assert.rejects(f.connections[1].ticket());
+      f.connections[1].refreshError(error);
+      await setImmediate();
+      assert.equal(f.runtime.status.connected, true);
+      assert.equal(f.runtime.status.available, true);
+      f.prepared.getTicket = original;
+      await f.connections[1].ticket();
+      assert.equal(f.connections.length, 2);
+      assert.equal(f.runtime.status.connected, true);
+    },
+  );
+
+test('invalid refreshed ticket still fails closed on a healthy connection', async (t) => {
+  const f = await fixture(t);
+  await f.runtime.start();
+  f.prepared.getTicket = async () => {
+    throw new Error('invalid device network ticket');
+  };
+  await assert.rejects(f.connections[1].ticket(), /invalid/);
+  assert.equal(f.runtime.status.available, false);
+});
+
+test('healthy refresh retries a control fetch failure but rejects trust validation failure', async (t) => {
+  const f = await fixture(t);
+  await f.runtime.start();
+  const original = f.prepared.refresh;
+  f.prepared.refresh = async () => {
+    throw new DeviceControlUnavailable('network control unavailable');
+  };
+  await assert.rejects(f.connections[1].ticket(), DeviceControlUnavailable);
+  f.connections[1].refreshError(new DeviceControlUnavailable());
+  assert.equal(f.runtime.status.connected, true);
+  f.prepared.refresh = original;
+  await f.connections[1].ticket();
+  f.prepared.refresh = async () => {
+    throw new TypeError('invalid keyset');
+  };
+  await assert.rejects(f.connections[1].ticket(), /invalid keyset/);
+  assert.equal(f.runtime.status.available, false);
+});
+
+test('transient refresh never preserves connected past a newer announcement without its full keyset', async (t) => {
+  const f = await fixture(t);
+  await f.runtime.start();
+  const gate = latch();
+  let entered = false;
+  f.prepared.refresh = async (trust) => {
+    await trust.announce(
+      signedAnnouncement({ ...f.payload, keyset_version: '6' }),
+    );
+    entered = true;
+    await gate.promise;
+    throw new DeviceControlUnavailable('network control unavailable');
+  };
+  const refresh = assert.rejects(
+    f.connections[1].ticket(),
+    DeviceControlUnavailable,
+  );
+  await waitFor(() => entered, 'new announcement fence');
+  assert.equal(f.runtime.status.connected, false);
+  gate.release();
+  await refresh;
+  assert.equal(f.runtime.status.available, false);
+  assert.equal(f.runtime.status.reason, 'key_unavailable');
+});
 test('logout during atomic commit disables state first, stops socket and retains writer until commit settles', async (t) => {
   const gate = latch();
   let entered = false;
@@ -552,7 +807,7 @@ test('complete ledger plus created false uses one normal connection and never in
   assert.equal(second.events.includes('commit'), false);
 });
 
-test('real NATS WSS with official device factory closes C1 socket before T2 and binds distinct ingress/application epochs', async (t) => {
+test('real NATS WSS with official device factory closes C1 before T2, binds new epochs and retries transient refresh without teardown', async (t) => {
   const binary = await ensureNatsServer();
   assert.ok(binary, 'locked nats-server 2.15.1 required');
   const server = await startNatsServer({ binary });
@@ -579,7 +834,11 @@ test('real NATS WSS with official device factory closes C1 socket before T2 and 
     transports = [],
     sockets = [],
     ingresses = new Map();
-  let ticketCount = 0;
+  let ticketCount = 0,
+    refreshFailures = 0,
+    refreshMode = false;
+  const refreshGate = latch();
+  t.after(() => refreshGate.release());
   const sub = peer.subscribe('auriga.net.up.*.*', {
     callback: (error, msg) => {
       assert.ifError(error);
@@ -614,6 +873,12 @@ test('real NATS WSS with official device factory closes C1 socket before T2 and 
     if (path.endsWith('/keys'))
       return Response.json(signedKeyset(signer.payload));
     assert.equal(path, '/api/iam/v1/network/tickets');
+    if (refreshMode) {
+      if (refreshFailures++ === 0) return Response.json({}, { status: 503 });
+      if (refreshFailures === 2)
+        throw new TypeError('fixture temporary fetch failure');
+      await refreshGate.promise;
+    }
     if (ticketCount === 1) {
       assert.equal(sockets[0].readyState, 3);
       assert.equal(transports[0].state, 'stopped');
@@ -624,8 +889,8 @@ test('real NATS WSS with official device factory closes C1 socket before T2 and 
       identity,
       protocolVersion: 1,
       serverAudience: 'test-broker',
-      expiresAt: new Date(Date.now() + 30000).toISOString(),
-      connectionExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+      expiresAt: new Date(Date.now() + 1000).toISOString(),
+      connectionExpiresAt: new Date(Date.now() + 2000).toISOString(),
     });
   });
   const provider = createDeviceProvider({
@@ -658,6 +923,8 @@ test('real NATS WSS with official device factory closes C1 socket before T2 and 
       const socket = createCaSocketFactory(server.rootPem);
       const transport = new NatsTransport({
         ...options,
+        refreshLeadMs: [500, 500],
+        backoff: { baseMs: 20, maxMs: 40, stableMs: 10000 },
         createSocket: (url) => {
           const value = socket(url);
           sockets.push(value);
@@ -683,6 +950,29 @@ test('real NATS WSS with official device factory closes C1 socket before T2 and 
   await peer.flush();
   await setImmediate();
   assert.equal(runtime.status.connected, true);
+  refreshMode = true;
+  const oldSocket = sockets[1];
+  await waitFor(
+    () => refreshFailures >= 2,
+    'production transport refresh retries',
+  );
+  assert.equal(runtime.status.connected, true);
+  assert.equal(runtime.status.available, true);
+  assert.equal(ticketCount, 2);
+  assert.equal(oldSocket.readyState, 1);
+  refreshGate.release();
+  await waitFor(
+    () => transports[1].epoch === 2 && runtime.status.connected,
+    'strict READY after refresh retry',
+  );
+  assert.equal(ticketCount, 3);
+  assert.equal(frames.length, 3);
+  assert.equal(ledger.snapshot().revision, 0);
+  assert.equal(
+    transports.length,
+    2,
+    'runtime kept its normal transport and ledger',
+  );
   await runtime.close();
   assert.ok(sockets.every((socket) => socket.readyState === 3));
 });
