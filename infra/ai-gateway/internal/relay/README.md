@@ -34,9 +34,17 @@ SSE 由核心写 sink，成功 DONE 延迟到可信 usage 落账之后。
 无可信 usage、断流、取消、未证明停止均冻结为 unknown（三个数值为 null）。
 只有证实未提交的 reserved 才回收为零；dispatching 永不退款。
 
-`Output.Pending` 表示冻结 unknown 或未确认账务，必须移交 `Ref` / Reservation / StopProof。
+`Output.Pending` 表示冻结 unknown 或未确认账务，必须通过专用 `PendingRef` / StopProof 移交内部恢复。
+Admit 实际 INSERT/回调成功而事务返回错误时，Core 在净化前识别内部不明类型，
+即使底层包装了 budget.Error 也保持 Pending；公开 Ref 和成功 Reservation 仍为空。
+PendingRef 仅是本次服务端定位，可能尚不可见或最终回滚；无 hint 的旧不明分支仍为空，
+不从客户端参数、幂等键或旧 OriginalRequestID 补造定位。成功准入仍保留原 Ref 请求 ID 语义。
+该分支不调用 MarkDispatching/Transport/Settle/Refund，不自动重新 Admit。
+内部 hint 不是耐久 Pending 队列，现场交接仍有进程崩溃窗口，不承诺跨重启全覆盖。
 账务失败可能仍是 dispatching，也可能 COMMIT 已成功；用既有 `Ledger.GetReservation` 查最新 revision，
 再按可信证据调用 `Ledger.Recover`，不能由错误、租约或 ctx 推定未提交/已停止。
+后续 supervisor 须在 RLS 下重读真实状态/revision 再 CAS，读取或缺行均不授予重派/退款权；
+not_found 不能证明最终回滚或责任已清。reserved 取消 CAS 足以 fence 旧提交，无需新增 owner/lease。
 StopTimeout 后保留 StopProof 供现场 supervisor 等待；丢失现场证据或重启不能制造停止证明。
 本机 provider 槽只在关闭的现场证明可用后由下次准入惰性回收；没有证明则保守保留。
 这不会替代 PG Recover；全量扫描、跨重启对账和常驻 recovery 是另任务。

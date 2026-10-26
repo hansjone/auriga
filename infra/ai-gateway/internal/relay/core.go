@@ -82,10 +82,12 @@ func New(c Config) (*Core, error) {
 }
 
 // Output contains no raw ticket/key/prompt. Pending means the runtime must hand
-// off Ref to recovery (or scan durable requests if Admit's COMMIT was ambiguous).
+// off PendingRef to trusted recovery. Empty PendingRef remains unlocated;
+// admission ambiguity never populates the public request correlation Ref.
 // Result's completion is intended only for the authenticated caller's response.
 type Output struct {
 	Ref         budget.Ref
+	PendingRef  budget.Ref `json:"-"`
 	Reservation *budget.Reservation
 	Result      modelprotocol.Result
 	Pending     bool
@@ -204,6 +206,10 @@ func (c *Core) Execute(ctx context.Context, raw string, source io.Reader, key st
 	}
 	r, err := c.c.Ledger.Admit(ctx, admission(call, req), budget.Request{Method: "POST", Path: "/ai/v1/chat/completions", Key: key, Fingerprint: h})
 	if err != nil {
+		if pendingRef, ok := budget.AdmissionPendingRef(err); ok {
+			out.Pending, out.PendingRef = true, pendingRef
+			return out, fault("ai.budget_unavailable")
+		}
 		var be *budget.Error
 		out.Pending = !errors.As(err, &be) // Unknown COMMIT: no permission to execute.
 		return out, safe(err)
@@ -281,6 +287,9 @@ func (c *Core) Execute(ctx context.Context, raw string, source io.Reader, key st
 	}
 	if out.Pending && err == nil {
 		err = fault("ai.budget_unavailable")
+	}
+	if out.Pending {
+		out.PendingRef = out.Ref
 	}
 	return out, safe(err)
 }

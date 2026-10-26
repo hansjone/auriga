@@ -243,6 +243,35 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamNetworkSourceAuthority iamNetworkSourceAuthority(
+      IamStore store,
+      IamNetworkAuthority network,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    return new IamNetworkSourceAuthority(
+        store,
+        network,
+        new DeviceAccessAuthority(store, sessions, tokens),
+        authorization.getIfAvailable(
+            () ->
+                request -> {
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.UNAVAILABLE);
+                }),
+        clock,
+        IamNetworkSourceAuthority.Policy.from(env));
+  }
+
+  @Bean
+  IamGrpcNetworkSources iamGrpcNetworkSources(
+      IamNetworkSourceAuthority authority, IamGrpcSessions transportGuard) {
+    return new IamGrpcNetworkSources(authority);
+  }
+
+  @Bean
   NetworkDirectory iamNetworkDirectory(
       IamStore store, SessionManager sessions, TokenService tokens, Clock clock) {
     return new IamNetworkDirectory(

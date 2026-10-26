@@ -47,7 +47,7 @@ collab READY 负责其 epoch 围栏。本服务不冒充 collab 的最新连接/
 不 touch idle、不刷新令牌/票，不调用 collab 或读取其他服务 schema。
 原 `NetworkGatewayService` 的 Redeem/Active/BatchActive 仍仅允许 `svc:ai-gateway`。
 
-## 来源事务内核（未接线）
+## 来源事务内核与受限三 RPC
 
 V9 和包内 `IamNetworkSources` 仅提供本库持久事实：许可链固定登记八字段和
 owner/device/IAM backing-session 关联，保存 head/永久停权；来源代固定原连接、
@@ -70,10 +70,45 @@ owner/device/IAM backing-session 关联，保存 head/永久停权；来源代�
 不要求活跃身份；也必须在事务内调用。多来源锁按 UUID 稳定排序，竞争等待上限 5 秒。
 Get 只返回 `View(source, stopped, observedAt)`，没有伪造的 policy_revision/valid_until。
 
-**尚无生产快照提供方、Bean、三 RPC 装配或 SEND 放行。** 当前 resolveTarget/credential
-不能替代完整 collab.use、组织版本及政策提交屏障；下一任务必须补真实当前身份/权限核验、
-锁下版本屏障、期限计算、服务 JWT/委托租户鉴权和 collab 最终 CAS，再接三 RPC/第五 RPC。
-新增 PostgreSQL 用例验证内核事务/RLS，核验快照为显式测试夹具，不证明真实身份或宿主。
+`IamNetworkSourceAuthority` 与 `IamGrpcNetworkSources` 接线上述三 RPC。新建与所有 Get（包括终态）
+先以短事务取得真实七字段兑换、node/owner/device/backing-session、完整身份/兑换/配置快照
+及本库正政策版本，释放全部事务、同步与 DataSource 绑定，再复用真实 credential 检查，
+经现有 `InstanceAiAuthorization`（同进程 org 或现有 gRPC 通道）核当前 ACTIVE MEMBER/EXTERNAL
+及 `auriga.connect.collab.use`，最后按上述首锁协议重新比较全部本库材料及原身份期限。
+材料或版本变化失败关闭；不使用 JWT perms、安装 PermissionResolver 或 resolveTarget 的返回期限冒充来源权威。
+明确非成员/无权限 forbidden，未知枚举、缺依赖或超时 unavailable。组织接口没有 revision，
+因此仍不能保证跨服务撤权零窗口。测试 org adapter 仅证明接口边界，不证明真实 org 联通。
+
+只有已提交 Register 同 op 同体原回执和 Revoke 不依赖当前发行开关、org 可达性或已清理的原 ingress；
+必须核耐久来源/兑换锚点及原 node/device/session/account 关联，缺失或变主失败关闭。
+所有 Get 均要求本次真实有效兑换连接、原 owner/device、仍有效的原 backing-session、完整登记、
+当前 org 权限及最终快照/政策版本重核；REVOKED/EXPIRED、链 stop 和 TTL 配置关闭都不能跳过。
+原身份失效或当前连接失效时 Get 拒绝且不回原事实，不适用回执的离线恢复例外。
+Get 允许同设备、同有效 backing-session 的真实新连接重连，始终保留原 connection；
+终态经上述门禁后由原内核在 chain/source 锁下单向观察，valid_until 为空。未知 op 不适用回执例外。
+
+部署必须显式设置可信启动参数，例如：
+
+```properties
+auriga.iam.network.source-max-seconds=30
+auriga.iam.network.source-decision-seconds=5
+```
+
+任一缺失或为 0 关闭新建及 Get 的在线有效决定；合法终态 Get 仍须完整活体门禁且仅返回空期限，
+不为读取而伪造正的决定期限。原回执/单向停权保持上述离线恢复边界；不存在默认许可。
+仅在 Environment 启动时解析为包内不可变策略，无热更新；改配置须重启。
+负数、小数、非法或 long 溢出导致启动失败；decision 不得大于 300，两个值为正时 decision 不得超过 source。
+大 source 值不会延长真实身份期限，也不会使 Instant 加法溢出成为许可。
+首次 expires_at 取 source 上限、真实 credential/session/device 与连接期限的最短值；
+Get valid_until 再取 now+decision、原 source 期限及当前身份/连接期限的最短值。
+时间向下取 UTC 整秒，只有严格非空时间窗才能发行；原回执绝不改写/延期。
+policy_revision 不观测进程安装参数的变更，不将重启说成跨服务版本屏障。
+
+每方法 `@AuthenticatedOnly`；只接受平台认证租户的 svc:collab 服务主体及另行委托的非平台业务 tenant，
+业务 tenant 必须与 connection 一致。Bean 显式依赖原 IamGrpcSessions transportGuard，沿现可信传输与 mTLS 限制。
+validation/conflict/forbidden/unavailable 沿现通用错误精确保留，不回底层原因。
+collab 当前 native/健康/epoch/typed-local 见证与最终 CAS 仍是调用者职责；三 RPC 不证明宿主或真实双 DSH。
+第五 RPC、SEND、外部 API 和可见授权流程均未扩展，第五仍固定 unavailable。
 
 ## 本库政策版本底座（无来源出口）
 
@@ -96,4 +131,4 @@ permissions_changed 先真实失效会话 access token，disabled/offboarded 先
 这个版本只表示 **IAM 已提交观察到的本库变化**；远端 org 事件未送达时，没有跨服务
 全局强一致保证。后续真实来源 Authority 仍须事务外查询当前 org member/external 及
 collab.use，回到本库按首锁协议比较版本和完整身份/连接快照；安装配置 PermissionResolver
-或旧 JWT 权限都不能冒充实时 org 权威。当前没有来源 Bean/三 RPC 出口，第五 RPC 仍 unavailable。
+或旧 JWT 权限都不能冒充实时 org 权威。来源三 RPC 按上节接线，第五 RPC 仍 unavailable。

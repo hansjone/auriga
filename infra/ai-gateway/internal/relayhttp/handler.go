@@ -26,12 +26,16 @@ const chatPath = "/ai/v1/chat/completions"
 const usagePath = "/api/ai/v1/me/usage"
 
 // Pending is a trusted recovery handoff, never an HTTP response. An empty Ref
-// means admission COMMIT was ambiguous: the supervisor must scan durable state.
+// means uncertainty is still unlocated. A nonempty Ref does not prove that an
+// admission committed or a row exists; recovery must re-read durable RLS state.
 // StopProof is live process evidence only; it must not be inferred after restart.
 type Pending struct {
-	Ref       budget.Ref
-	StopProof <-chan struct{}
+	Ref       budget.Ref      `json:"-"`
+	StopProof <-chan struct{} `json:"-"`
 }
+
+func (p Pending) String() string   { return "AI relay pending" }
+func (p Pending) GoString() string { return p.String() }
 
 type Config struct {
 	Core      *relay.Core
@@ -199,7 +203,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = s.rc.SetReadDeadline(time.Time{})
 		out, e := h.c.Core.Execute(r.Context(), raw, bytes.NewReader(body), key, s.sink)
 		if out.Pending {
-			h.c.Recover(Pending{Ref: out.Ref, StopProof: out.StopProof})
+			h.c.Recover(Pending{Ref: out.PendingRef, StopProof: out.StopProof})
 		}
 		if out.Ref.RequestID != "" {
 			id = out.Ref.RequestID
