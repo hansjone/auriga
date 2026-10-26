@@ -103,25 +103,35 @@
   原请求 C 必须原封重放，不改成 C2；读出的 B/原期限/原 ACTIVE 回执也不代表现在有效，随后用 C2 Get(B) 并最终本地 CAS。
   未找到已提交操作时不能凭不存在推断未提交。IAM 核标准 svc:collab/tenant 及留存原兑换 C 的 node/device/account/backing-session 归属，
   在 (tenant, RegisterAgentSource, op) 键锁/唯一约束下与所有 Register 提交串行化：
-  若 C 已失效且无提交，原子保存不可再提交的失败墓碑与完整响应，才可回 `definitively_uncommitted=true`、
-  原 `operation_id` 和 `request_digest=SHA-256(JCS(冻结的完整 IAM Register 请求))`；source 缺失。
+  若无成功来源提交，且 C 已失效，或 C 仍有效但精确 CAS 不符、前代非 head、链已停，
+  原子保存不可再提交的确定拒绝回执/失败墓碑及完整响应，才可回 `definitively_uncommitted=true`、
+  原 `operation_id`、`request_digest=SHA-256(JCS(冻结的完整 IAM Register 请求))` 和 `rejection_reason`；source 缺失。
+  rejection_reason 仅允许 original_connection_invalid_uncommitted/revision_mismatch/predecessor_not_head/lineage_stopped，
+  分别对应上述四种情况。业务拒绝回执本身必须已提交；普通 conflict/forbidden 不包含这个证明。
   摘要 JSON 固定使用 proto 字段 snake_case、scope 的正式枚举名、expected_revision 十进制字符串及显式空 predecessor_binding，
   connection 七字段、registration 八字段全部输出，registration_revision 同样为十进制字符串；不得直接摘要默认会丢字段的 protojson。
-  已提交先回原 source；在途未决、锁等待超时、原锚点缺失、forbidden/unavailable 均不能给这个确认。
+  已成功提交先回原 source；在途未决、锁等待超时、原锚点缺失、普通 forbidden/unavailable 均不能给这个确认。
   C 仍有效的全新操作仍须全量实时权限/native/typed-local/新建 CAS；原失效 C 绝不新建来源。
   失败墓碑与原响应永久防复用；迟到同 op 同体回原失败、异体冲突，不允许随后提交或改 C。collab 验证并转存为 not_committed，
-  插件才可另存新 op/新鲜见证重试；旧错误码或没有 source 的空响应不证明失败终态。
+  插件才可另存新 op/新鲜见证重试；旧错误码或没有 source 的空响应不证明失败终态。插件不掌握原内部连接，
+  对 not_committed.request_digest 只作不透明保存；复核原 op/body/digest 的职责在 collab。
 - `GetAgentSourceRequest(source_binding, connection, registration)`：核当前真实兑换源连接、同 tenant/realm/node、
   原 owner/device/仍有效的原 backing-session 及当前完整登记见证；跨 owner/device/node 或换 tuple/type/指纹不能借 ID 读。
   还须核该代所属链与停权状态，不得因后继存在而把 EXPIRED 的旧代当成有效许可；链停权不能返回有效期限。
   正常同设备、同底层 session 的 transport 重连可使用新的 ingress/server/client/account 兑换元组；
   `source.original_connection` 仍返回原值，响应 `connection` 精确回显本次核验元组。新登录替换 backing-session
   不自动继承原授权。IAM 返回的是 collab 已见证登记的原值，不能据此声称 IAM 已查询 collab 当前库。
-- `GetAgentSourceResponse(source, connection, policy_revision, observed_at, valid_until)` 回当前状态及版本。
+- `GetAgentSourceResponse(source, connection, policy_revision, observed_at, valid_until, lineage_stopped)` 回当前状态及版本。
   `policy_revision` 是 IAM 当前业务 tenant 网络政策的正 uint64 单调快照版本；任何影响来源/目标节点策略或
   collab 使用权限的政策变更都推进它，不能用固定 0/常量伪造。它仅供绑定现有 authorization_ref，绝非目标 allow。
   `observed_at` 是 IAM 本次在线观察时间。只有当前 ACTIVE 且在时间窗内才回非空 `valid_until`；
   合法归属查询 REVOKED/EXPIRED 回原元组、当前状态/revision、空 `valid_until`，不得再当来源使用。
+  新增 optional bool lineage_stopped=6，必须显式返回 true 或 false；缺 presence 表示依赖未升级，不能推断未停链。
+  这是链事实，不能改变命名代的状态/revision；用于区分自然 EXPIRED 与停链中的 EXPIRED 前代。
+  collab 将 IAM 命名代 REVOKED 投影为 revoked；否则已停链/本地已持久停发为 stopped；否则 EXPIRED 为 expired。
+  三种终态均正常回 source_get_result，保留当前命名代 revision，省略 JSON valid_until；历史原时间窗不作为许可。
+  stopped 若来自本地 fence 只表示本地不可用，仍须 Revoke 已提交确认才能宣称全局撤销；不使用本地版本冒充 IAM revision。
+  只有自然 expired 且链/本地未停、当前为 head，才允许用本次 revision 作后继 CAS；revoked/stopped 不得自动新代。
   调用者/身份/当前连接不合法、未知 ID、跨租户/跨归属统一拒绝且不回原事实；不能靠终态查询泄露他人身份。
 - `RevokeAgentSourceRequest(source_binding, connection, expected_revision, operation_id)`：
   同可信调用者/tenant/原归属核验后，在许可链/来源行锁下原子停权；**不要求调用方精确 revision，也不要求 native/Get**。
@@ -151,7 +161,8 @@
 - 已提交 op1、首次回包丢失、原 C 已失效：仅凭已耐久 op1+原请求 C/R 重试 Register，经上述受限归属核验取同一原 B；
   C2 Get(B) 再核当前权威。若 B 已到期，先对账再按 EXPIRED head CAS 取得新代，不能跳过未知原操作结果。
 - 同 op 异体（包括把 C 改 C2、改前代/CAS）、跨 tenant/原归属不符拒绝且不泄露原响应；未提交/未知 op 无回执读取例外。
-- C 已失效、原 op 查询在同键锁下确认无提交并保存失败围栏：回 definitively_uncommitted，不生成 source，允许插件另 op 重新全量申请。
+- C 已失效或 C 有效但原 op 因 CAS/非 head/停链已被耐久确定拒绝：原键锁下保存失败围栏后回 definitively_uncommitted/rejection_reason，
+  不生成 source，允许插件另 op 重新全量申请；不绕链停权。普通 RPC 失败不具此含义。
   collab 从未接受的 op 同样须原子保存失败围栏再回 not_accepted；任何未知结果不能按上述终态处理。
 
 结构/范围非法沿既有 `common.validation_failed`，异体/占用/CAS 冲突沿 `common.conflict`；
@@ -202,12 +213,14 @@ CAS 同时核原 pending/停发版本、当前健康/epoch、typed local 和宿�
   当前精确 connection 与库中登记、scope、前代/CAS 成为完整 IAM 原体。重连 mode=reconcile 时仅从
   collab pending 取旧体，不能把新 envelope 的 connection 改进旧体；null native_witness 只允许这个无授权回执读取。
   标准 mailbox 当前鉴权和持久原操作归属核验仍在；IAM 留存锚点规则完全不变。
-  无已存 pending/原体不能凭 op 补建；完整操作账本可证明从未接受时，先保存拒绝围栏再回 not_accepted；
-  缺账本/锚点则 outcome_unknown。原连接失效且 IAM 原键确认未提交，按前述确定失败墓碑回 not_committed。
+  无已存 pending/原体不能凭 op 补建；在主库共用 op 键锁下无记录/无 outbox 且 source_operation_recovery_gap=false，
+  才能先保存未受理墓碑再回 not_accepted；缺口/持久化不确定则 outcome_unknown。
+  pending 已持久化后的处理/RPC 失败一律未知，只有 IAM 原 op 已提交的成功/确定拒绝业务回执才能收敛；详见 README 分界表。
 - 本节“Get 当前来源”：source_get 必须重新真实 native 核验，以当前连接调用 IAM，严格校 connection 回显；
   binding_id/binding_revision 必须等于 collab 永久保存的签发 native_binding，后继 issue 也不能换；差异 conflict、先撤销。
   source_get_result 的 witness_id 与有效期绑定这一次观察，期限再夹紧 native/本地许可；只回带有效时间的 active。
-  IAM 终态仍回内部原事实/空期限，collab 一律投影为 network.revoked；active 但夹紧期限失效为 network.expired。
+  IAM 终态回内部原事实/空期限及显式停链事实；collab 正常回 expired/revoked/stopped 和当前 revision，不带有效期。
+  正常来源查询仅对不存在、跨租户/身份不符拒绝，不因终态拒绝；通用协议/见证与依赖校验不变。active 观察期限失效仍为 network.expired。
   source_register_result 的 active/revision=1 仍仅历史原创建回执；不能因为外层新签名而变成当前 Get。
 - 本节“pending/outbox 与最终 CAS”：collab 持久完整 IAM 原体/摘要、见证、连接/boot/epoch、typed-local、
   停发版本、许可 fence、前代与预期版本；事务外 IAM，最终短事务 lock/CAS 重核所有这些事实。

@@ -117,7 +117,7 @@
           "$ref": "#/$defs/P64"
         },
         "state": {
-          "const": "active"
+          "enum": ["active", "expired", "revoked", "stopped"]
         },
         "not_before": {
           "$ref": "#/$defs/Time"
@@ -437,7 +437,7 @@
       "$comment": "The consumer MUST bind native_witness.binding_id and binding_revision to const values from the trusted saved issuance native_binding, not client claims. See fixtures/source-binding-cases.json."
     },
     "SourceGetResult": {
-      "description": "Active current observation only; terminal IAM facts map to network.revoked, expired observation deadlines to network.expired. Never an allow lease.",
+      "description": "Current source observation: active requires valid_until; expired/revoked/stopped omit it and grant no permission. Revision is the current named generation revision.",
       "type": "object",
       "properties": {
         "app_version": {
@@ -453,19 +453,7 @@
           "$ref": "#/$defs/ServerAuth"
         },
         "source": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/SourceFact"
-            },
-            {
-              "type": "object",
-              "properties": {
-                "state": {
-                  "const": "active"
-                }
-              }
-            }
-          ]
+          "$ref": "#/$defs/SourceFact"
         },
         "policy_revision": {
           "$ref": "#/$defs/P64"
@@ -488,10 +476,43 @@
         "source",
         "policy_revision",
         "observed_at",
-        "valid_until",
         "witness_id"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "const": "active"
+                  }
+                },
+                "required": ["state"]
+              }
+            },
+            "required": ["source"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "valid_until": {
+                "$ref": "#/$defs/Time"
+              }
+            },
+            "required": ["valid_until"]
+          },
+          "else": {
+            "properties": {
+              "valid_until": false
+            },
+            "type": "object"
+          }
+        }
+      ]
     },
     "SourceRevoke": {
       "description": "先本地持久停发；无需 native 见证。collab 用原归属锚点及保存的原连接撤销，失效原身份不妨碍既有 outbox。",
@@ -611,7 +632,12 @@
           "const": "iam"
         },
         "reason": {
-          "const": "original_connection_invalid_uncommitted"
+          "enum": [
+            "original_connection_invalid_uncommitted",
+            "revision_mismatch",
+            "predecessor_not_head",
+            "lineage_stopped"
+          ]
         },
         "request_digest": {
           "$ref": "#/$defs/Digest"

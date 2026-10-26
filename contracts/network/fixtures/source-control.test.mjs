@@ -201,17 +201,49 @@ test('receipt reconciliation cannot carry an apparently fresh issuance witness',
   value.mode = 'issue';
   assert.equal(validate(value), false);
 });
-test('terminal Get always uses error and active Get always carries a valid time shape', () => {
-  const value = frame('source_get_result');
-  for (const state of ['expired', 'revoked']) {
-    value.source.state = state;
-    value.valid_until = '2026-10-25T00:00:30Z';
-    assert.equal(validate(value), false);
-    value.valid_until = null;
-    assert.equal(validate(value), false);
+test('every terminal Get returns its current revision without an observation validity window', () => {
+  const samples = JSON.parse(
+    readFileSync(
+      new URL('./source-get-terminal-cases.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  for (const sample of samples) {
+    const projected =
+      sample.iam_state === 'revoked'
+        ? 'revoked'
+        : sample.lineage_stopped || sample.local_stopped
+          ? 'stopped'
+          : sample.iam_state;
+    assert.equal(projected, sample.wire_state, sample.name);
+    const value = frame('source_get_result');
+    value.source.state = sample.wire_state;
+    value.source.revision = sample.revision;
+    value.observed_at = sample.observed_at;
+    delete value.valid_until;
+    assert.equal(validate(value), true, sample.name);
+    for (const deadline of [null, '2026-10-25T00:00:30Z']) {
+      value.valid_until = deadline;
+      assert.equal(validate(value), false, sample.name);
+    }
   }
-  value.source.state = 'active';
+  const value = frame('source_get_result');
+  delete value.valid_until;
   assert.equal(validate(value), false);
+});
+test('an expired Get supplies the successor CAS revision without guessing', () => {
+  const value = frame('source_get_result');
+  value.source.state = 'expired';
+  value.source.revision = '2';
+  value.observed_at = '2026-10-25T00:05:01Z';
+  delete value.valid_until;
+  assert.equal(validate(value), true);
+  const successor = frame('source_register');
+  successor.predecessor_binding = value.source.source_binding;
+  successor.expected_revision = value.source.revision;
+  successor.native_witness.observed_at = value.observed_at;
+  successor.native_witness.valid_until = '2026-10-25T00:05:31Z';
+  assert.equal(validate(successor), true);
 });
 test('revoke accepts a binding and operation without native witness or revision', () => {
   const value = frame('source_revoke');
@@ -226,6 +258,9 @@ test('Register definitive failures carry authority evidence and cannot carry an 
   for (const [result, authority, reason] of [
     ['not_accepted', 'collab', 'rejected_before_pending'],
     ['not_committed', 'iam', 'original_connection_invalid_uncommitted'],
+    ['not_committed', 'iam', 'revision_mismatch'],
+    ['not_committed', 'iam', 'predecessor_not_head'],
+    ['not_committed', 'iam', 'lineage_stopped'],
   ]) {
     const value = frame('source_register_result');
     Object.assign(value, {
@@ -247,6 +282,20 @@ test('Register definitive failures carry authority evidence and cannot carry an 
   const value = frame('source_register_result');
   value.result = 'unknown';
   assert.equal(validate(value), false);
+  Object.assign(value, {
+    result: 'not_committed',
+    source: null,
+    failure_evidence: {
+      authority: 'iam',
+      reason: 'common.conflict',
+      request_digest: `sha256:${'b'.repeat(64)}`,
+    },
+  });
+  assert.equal(
+    validate(value),
+    false,
+    'a plain error code is not a committed refusal receipt',
+  );
 });
 test('Get schema bound to the actual saved issuance rejects changed mapping IDs and revisions', () => {
   const cases = JSON.parse(

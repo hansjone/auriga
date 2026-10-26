@@ -121,7 +121,9 @@ message NetworkMailboxServiceLocalRegisterResponse {
 // a reconnect never rewrites it. Unknown outcomes reconcile with the original
 // op/body, never a new op UNLESS a durable definitive-failure receipt was saved.
 // not_accepted requires collab's pre-pending rejection fence; not_committed
-// requires IAM's original-op uncommitted confirmation and fence. Mere absence,
+// requires IAM's committed original-op uncommitted/rejection receipt and fence.
+// After pending, ordinary failures remain unknown; only such authoritative
+// receipts resolve them. Mere absence,
 // timeout or forbidden is unknown; late issue must never cross a failure fence.
 // Persist pending/witness/outbox in a short transaction, call IAM OUTSIDE it,
 // then short-transaction CAS current health/connection/epoch/boot/typed-local,
@@ -166,8 +168,9 @@ message NetworkMailboxServiceSourceGetResponse {
   // Complete signed source_get_result or existing signed error, forwarded as
   // original bytes under the same signature rules as SourceRegisterResponse.
   // Echo witness_id; clamp valid_until to IAM/native/local deadlines. Results
-  // are active with a valid time; terminal facts become network.revoked ERROR,
-  // expired observation windows network.expired. Never return active with null.
+  // are active with a valid time OR expired/revoked/stopped with current revision
+  // and NO valid_until field. Terminal facts never authorize or become errors
+  // merely because they are terminal. Never return active with null/missing time.
   // Do not expose IAM owner or original redeem connection.
   // ACTIVE grants no SEND. Signing still requires the fifth IAM RPC and final
   // local typed-local/thread/recipient/relationship version checks.

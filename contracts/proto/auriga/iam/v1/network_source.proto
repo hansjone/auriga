@@ -113,8 +113,10 @@ message RegisterAgentSourceResponse {
   // callers MUST Get before use and cannot activate from this receipt alone.
   NetworkAgentSource source = 1;
   // Mutually exclusive with source. ONLY after original connection ownership
-  // verification, same-original-op serialization and a DURABLE failure fence:
-  // the original connection is invalid and no source committed under that op.
+  // verification, same-original-op serialization and a DURABLE failure receipt:
+  // no source committed, and either the original connection is invalid OR a
+  // still-valid request is deterministically rejected for revision mismatch,
+  // non-head predecessor or stopped lineage. The rejection receipt must commit.
   // Late Register cannot commit after this fence. Unknown/forbidden/timeouts
   // are NOT proof. Replays return this original response; it never authorizes.
   bool definitively_uncommitted = 2;
@@ -123,6 +125,10 @@ message RegisterAgentSourceResponse {
   // Required with definitive failure: sha256:<lowercase hex> of JCS(original
   // request) using the explicit snake_case JSON mapping in iam-directory.md.
   string request_digest = 4;
+  // Required with definitively_uncommitted: exactly one of
+  // original_connection_invalid_uncommitted, revision_mismatch,
+  // predecessor_not_head, lineage_stopped. A plain gRPC error is not a receipt.
+  string rejection_reason = 5;
 }
 
 message GetAgentSourceRequest {
@@ -144,6 +150,11 @@ message GetAgentSourceResponse {
   // Shortest current IAM-policy/identity/connection/source deadline. Empty for
   // non-active facts. This observation does NOT grant signing or execution.
   string valid_until = 5;
+  // Required presence for the new source-control projection, including false.
+  // Distinguishes naturally expired sources from expired predecessors in a
+  // stopped lineage. Missing means unavailable, never infer false. This does
+  // not change the named generation's stored state/revision or grant authority.
+  optional bool lineage_stopped = 6;
 }
 
 message RevokeAgentSourceRequest {

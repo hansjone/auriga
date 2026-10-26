@@ -221,6 +221,8 @@ ID、摘要、时间、uint64 字符串沿 §1，所有正版本用 P64，绝不
 - `source_register`：`operation_id`=先持久再发的 Register 稳定 OpaqueId；`scope` 固定 `durable_unicast_send`；
   `predecessor_binding` 首代为空串、`expected_revision`="0"，后继为原 EXPIRED head ID/正 CAS 版本；不能从非 head 分叉。
   `mode=issue` 必带当前 `native_witness`；`mode=reconcile` 必为 null，仅查已保存操作，不产生 native 使用许可。
+  无见证的 reconcile 不得盲重放可能新建来源的 Register：原 C 仍可能有效、又无已提交回执时保持 outcome_unknown；
+  同 op issue 只有补齐新鲜见证且当前连接/epoch/boot 仍匹配冻结请求才可走潜在新建路径，原 IAM 业务体不变。
   `registration/scope/predecessor_binding/expected_revision` 是该 op 的不可变客户端业务体；持久键为 (tenant, 方法, operation_id)，
   认证 node/原归属固定关联该记录，换 node/归属不能借同 op 读取。
   collab 首次 issue 将真实当前 IAM connection 及库中八字段固化成完整原 IAM 请求，记录摘要，之后不改。
@@ -233,20 +235,30 @@ ID、摘要、时间、uint64 字符串沿 §1，所有正版本用 P64，绝不
   对账恢复 binding 后须当前 native 见证→Get→最终 CAS，签发前仍须第五 RPC。
 - `source_get`：`source_binding` 指精确代际，`registration` 是当前完整 typed-local 比对输入，`native_witness` 必须新鲜。
   native 的 binding_id/binding_revision 必须等于 collab 保存的该代签发值（与首代相同），非“任意当前映射”即可。
+  读取终态不要求被查询来源仍有 SEND 许可；native 见证证明当前真实宿主/映射，不能用该来源的历史 expires_at 截断见证，导致自然到期后无法 Get。
   collab 用本次真实当前 connection 调 Get，不替换 IAM 的 original_connection；同 device/backing-session 重连按 IAM 规则。
   Get 没有 mutation operation_id；每次是新在线观察，不从旧缓存/原回执产生当前 allow。
 - `source_get_result`：`source`=当前事实；`policy_revision`=IAM 当前正版本，`observed_at`=IAM 观察时间；
-  `valid_until`=collab 将 IAM 当前期限与上述 native/本地期限取最小，结果只允许 active 且携带尚有效的时间，绝不为 null；
-  夹紧期限已过返回 `network.expired`。IAM 返回 revoked/expired 或链/本地已停发，统一返回既有 ERROR `network.revoked`，不回终态 Get result；
+  active 时 `valid_until`=IAM/native/本地期限最小值，必须为尚有效的时间；active 观察期限已过仍按 `network.expired` 要求刷新。
+  **有效查询的终态正常返回 source_get_result**，`state=expired/revoked/stopped`、当前命名代的正 revision，完全省略 `valid_until`（不能是 null）。
+  不因来源终态返回 ERROR：来源业务查询只有 binding 不存在、跨 tenant 或身份不符才拒绝；非法帧、见证/连接校验及依赖故障仍沿原协议处理，不伪造事实。
+  已知状态投影顺序：IAM 命名代 REVOKED→revoked；否则 IAM 链停权或 collab 已持久停发→stopped；否则 IAM EXPIRED→expired；
+  只有明确 IAM ACTIVE 且未停才是 active，未知枚举/缺字段失败关闭。
+  IAM Get 的 `lineage_stopped` 必须显式存在（包括 false），缺字段失败关闭，不能把未知停链状态当自然到期。
+  stopped 只是不可使用状态，不等于全局撤销确认；revision 仍为 IAM 命名代当前值，不用本地停发版本替换。
+  只有当前 head 自然 expired 且无停权/停发，才可直接用所返回的 revision 构造后继 expected_revision，禁止猜固定值；revoked/stopped 不可续代。
   `witness_id` 回显本次见证，插件须匹配原待决请求及当前本地 binding/revision/epoch/boot。
   collab 还须比较 IAM connection 回显与当前精确元组，但不把内部兑换字段发给插件。
 - `source` 受限投影固定含 `source_binding`、`registration`（上述六字段）、`scope`、来源正 `revision`、
   `state`、`not_before/expires_at`（IAM 不可变原时间窗，前者小于后者）、`predecessor_binding`、`native_binding`（签发时二字段）。
-  wire SourceFact 仅允许 active：Register 成功是历史 active，Get 是当前 active；IAM 内部终态事实不经 SourceFact 下发。
+  Register 成功仍仅历史 active/revision=1；Get 可为 active/expired/revoked/stopped。终态的原 not_before/expires_at 仅是历史窗口，不能当有效许可；不授 SEND 或任何新权。
   不返回内部 owner/original_connection/device/backing-session。该 projection 只用于回执/本地比对，不是权威 native 输入。
 - `source_revoke`：仅 `source_binding`=被点名的已登记原代、`operation_id`=独立稳定 Revoke op，加请求公共字段。
   **不要求 native_witness 或精确 revision**；插件不先 Get，不因到期推进 revision 而卡住撤销。
-  插件先耐久停发，再发送；collab 核保存的原连接/归属锚点，用 IAM Revoke 撤销整条链；其旧 expected_revision 字段只保留线兼容且不作前置。
+  插件先耐久停发，再发送；collab 核保存的原连接/归属锚点，用 IAM Revoke 撤销整条链。
+  “线兼容”仅指 **IAM proto RevokeAgentSourceRequest.expected_revision 的字段号 3** 保留且废弃；JSON source_revoke 不定义这个字段，也不能将它解释成 CAS 前置。
+  **落地顺序：先改造 IAM Revoke 接受无 revision/字段 3=0 并原子撤整条许可链，再接 collab 撤销。**
+  现有 IAM 若仍校正 revision，collab 不能提前启用或靠假确认绕过；本轮不改 IAM 实现。
   当前 mailbox 请求仍须有权且关联当前 READY；连接不可用时由已耐久的 collab 撤销 outbox 在后台继续，不能要求旧连接重上线。
 - `source_revoke_result` 仅 `operation_id/source_binding/revision/state/lineage_stopped` 加下行公共字段；
   state 只可 revoked/expired，`lineage_stopped=true` 必须表示 IAM 已提交整个链停权（含撤销可能存在的 active 后继）。
@@ -256,22 +268,46 @@ ID、摘要、时间、uint64 字符串沿 §1，所有正版本用 P64，绝不
 必含原 operation_id/result/source/failure_evidence；不使用新错误码。
 
 - `registered`：IAM 原创建回执已提交；只恢复原成功结果，必须再 Get，不能把回执 active 当许可。
-- `not_accepted`：由 collab 判定。完整、有权的请求在 pending/outbox 接受前被拒绝；collab 在同一 op 键锁下确认
-  从未接受、没有 outbox、没有发过 IAM 调用，并先持久失败墓碑，之后才响应。failure_evidence 固定
+- `not_accepted`：只由 collab 在 **pending 持久化之前**判定，包括校验、业务鉴权、大小和限流拒绝；
+  前提是可信 tenant/node 已建立，能安全识别合法 op 及原业务体。collab 在同一 op 键锁下确认从未接受并先持久失败墓碑，之后才响应。failure_evidence 固定
   `{authority:"collab",reason:"rejected_before_pending",request_digest:Digest}`，digest 是 JCS 的不可变客户端业务体摘要。
-  同键的迟到 issue/pending 创建必须被失败墓碑挡住；单纯查不到 pending、超时或丢库不是“未受理”证据。
-  对没有 pending 的 reconcile，只有完整耐久操作账本证明从未接受且上述围栏已提交，才可返回这个终态；否则 outcome_unknown。
+  可执行判定：读主库，在所有 pending/outbox/终态写者共用的 (tenant,Register,op) 键锁下，查无任何操作记录和 outbox，
+  且该 tenant+node 的耐久 `source_operation_recovery_gap` 标记为 false，才能同事务 INSERT 失败墓碑并提交。
+  这依赖“不删除操作历史、任何 IAM 调用都必须晚于 pending+outbox 提交”的不变量；同键迟到 issue 必须读到墓碑，不能再创建 pending。
+  备份恢复、历史丢失或完整性不明必须先置 recovery_gap，不经核实不得清除；不能因表空自行判为 false，也不能用副本读缺行作证据。
+  reconcile 未命中也采用上述键锁/缺口检查/墓碑提交流程；发现既有 pending/outbox 就只原 op 对账，有缺口或提交不确定就 outcome_unknown。
 - `not_committed`：由 IAM 判定、collab 验证和持久转存。collab 保留原 IAM 请求 C/R/op，重放原 Register 作原键查询；
-  IAM 核可信服务/tenant 与原兑换归属锚点，在原 op 锁下确认原 C 已失效且没有已提交来源，并原子保存“不允许该 op 再提交”失败墓碑。
+  IAM 核可信服务/tenant 与原兑换归属锚点，在原 op 锁下确认没有成功来源提交，并原子保存“不允许该 op 再提交”的确定业务回执：
+  原 C 失效时原因为 original_connection_invalid_uncommitted；C 仍有效但 CAS 不符、前代非 head、许可链已停时，
+  分别为 revision_mismatch/predecessor_not_head/lineage_stopped。拒绝回执本身必须已提交，不能从异常文本或旧错误码推断。
   与并发/迟到 Register 用同一锁串行化；已提交必须回原成功，未能判定在途事务必须返回不可判定，不能从 SELECT 不存在推断未提交。
-  IAM 通过 Register 响应的 `definitively_uncommitted=true/operation_id/request_digest` 确认，source 必须缺失；
+  IAM 通过 Register 响应的 `definitively_uncommitted=true/operation_id/request_digest/rejection_reason` 确认，source 必须缺失；
   collab 逐项核原 op、完整冻结 IAM 原请求的 JCS digest，保存完整 IAM 原响应后投影
-  `{authority:"iam",reason:"original_connection_invalid_uncommitted",request_digest:Digest}`，source=null。
-  只有这一确认可转为 not_committed；forbidden/unauthorized/conflict/超时/空响应/UNIMPLEMENTED 都不能证明未提交。
+  `{authority:"iam",reason:<上述四种 rejection_reason>,request_digest:Digest}`，source=null。
+  插件不掌握完整内部连接：**此 request_digest 对插件是不透明证据，只保存、不复核**；原 op/body/digest 的校验由 collab 负责。
+  只有已提交的类型化回执可转为 not_committed；普通 forbidden/unauthorized/conflict/超时/空响应/UNIMPLEMENTED 都不能证明未提交。
 - 两个失败结果都 `source=null`；同 op 同体永远返回原失败结果，不得同 op 再 issue。插件持久验签后的确定失败，
   才能另存新 op，用当前新鲜见证、全量身份/健康/typed-local 检查重新申请；停发/链撤销仍禁止申请。
   未知结果保持 pending，只能同 op 对账；同 op issue 重放只查原操作，不以 C2 补建缺失原请求。
   失败墓碑、摘要、原归属及完整原响应与成功操作采用同等永久防重绑/防复用留存，不按消息去重期删除。
+
+**Register 拒绝/错误分界。** 下表 code 是既有错误分类；not_accepted 本身是正常结果，不同时发送 ERROR。
+先查 op 的耐久状态，再分类；已保存的成功或失败始终重放原响应。pending 后的处理/RPC 失败一律未知，
+只有原 op 的 IAM **已提交业务回执**（不是 RPC 失败）才能确定成功或 not_committed。
+
+| 阶段/失败 | 响应与操作规则 |
+|---|---|
+| pending 前：可安全识别 op 的字段/范围/大小校验（protocol_error） | 原子失败墓碑后 not_accepted；允许新 op |
+| pending 前：已认证 tenant/node 内的业务鉴权拒绝（unauthorized） | 同上；不改变原归属限制 |
+| pending 前：epoch/boot 旧（stale_epoch）、native/本地许可过期（expired） | 同上；新 op 必须换当前连接/新鲜见证并全量检查 |
+| pending 前：缺 typed-local（local_registration_required）、登记/映射不符（conflict）、已停发（revoked） | 同上；新 op 不绕登记、映射不变或停发约束 |
+| pending 前：大小/配额/限流/背压（protocol_error/quota_exceeded/overloaded） | 同上；仍受节点/租户预算及退避约束 |
+| pending 前：查无记录但存在恢复缺口，或失败墓碑提交不确定 | outcome_unknown；只能原 op 对账，不发 not_accepted |
+| pending 后：上述任何校验/鉴权/大小/限流错误，或 IAM 普通错误、断线、超时、存储结果不明 | outcome_unknown，保留原体/outbox；不得自判失败或换 op |
+| pending 后：IAM 原 op 已提交成功/四种确定拒绝回执 | registered/not_committed；先转存完整原响应再发结果，确定失败才允许新 op |
+| 入口尚不能认证 tenant/node，或原始超限/非法 JSON 无法安全识别 op | 既有传输鉴权拒绝/有界 ERROR，不能替未知 op 写墓碑；插件保留原 op，用合法 reconcile 获得确定结果 |
+
+not_accepted 的 digest 是插件可复核的客户端业务体 JCS 摘要；not_committed 的 digest 则仅由 collab 复核。
 
 **幂等、恢复和 collab 事务义务。** 插件在自己的同一耐久账本保存 op、不可变业务体、原 typed-local/映射版本、
 pending/停发版本，成功原回执及绑定也真提交后才可对外使用；未知落盘/回包保持 pending。
@@ -308,9 +344,10 @@ IAM 未确认只报待确认，继续本地停发；显式停权永久压过代�
 全部复用 `errors.json`，不新增错误码：结构/大小/未知 scope/type→`network.protocol_error`；
 自报或错归属/权限→`network.unauthorized`（不泄露 binding 是否存在）；错 epoch/boot→`network.stale_epoch`；
 缺 typed-local→`network.local_registration_required`；见证过期→`network.expired`；
-同 op/见证异体、typed-local 不符、版本 CAS→`network.conflict`；本地停发/链撤销→`network.revoked`；
+同 op/见证异体、typed-local 不符、版本 CAS→`network.conflict`；非 Get 的本地停发/链撤销→`network.revoked`；
 结果未知（含不能证明“从未受理”的原 pending 缺失）→`network.outcome_unknown`；依赖不可用→`network.overloaded`。
-IAM 的 common.validation_failed/conflict/forbidden/unavailable 分别映射 protocol_error/conflict/unauthorized/overloaded；
+Register 的操作阶段分界优先于常规错误映射，不能把 pending 后普通 IAM 错误当确定拒绝。其他操作的
+IAM common.validation_failed/conflict/forbidden/unavailable 分别映射 protocol_error/conflict/unauthorized/overloaded；
 认证失败沿既有内部 gRPC 状态映射。ERROR 仍为原受签结构、request scope、原 request_id 和 catalog retryable；
 无法建立签名受众时用既有 gRPC 拒绝。outcome_unknown 不自动发新 op；overloaded 退避也只重放原 mutation。
 

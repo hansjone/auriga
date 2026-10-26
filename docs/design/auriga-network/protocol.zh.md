@@ -275,7 +275,9 @@ collab 接收及最终 CAS 重核有效期、健康/连接/epoch/boot、typed-lo
 Register 的稳定 operation_id 与 registration/scope/前代/CAS 先耐久保存；issue 带新鲜见证，
 reconcile 只以 null 见证读取已存原操作；collab 固化完整 IAM 原请求后，即使重连也用旧 connection 原体对账。
 未知结果不能换 op/改原体；只有受签 not_accepted（collab 未受理围栏）/not_committed（IAM 原键未提交围栏）
-确定失败才允许新 op，不能把 forbidden/超时/缺行当证据。新 envelope 只重新签运原回执，不刷新回执事实。自然 EXPIRED head 未停权，
+确定失败才允许新 op，不能把普通 forbidden/超时/缺行当证据；有效 C 的 CAS/非 head/停链拒绝也须 IAM 先提交原 op 拒绝回执。
+not_accepted 只用于 pending 前可安全识别的拒绝；pending 后处理失败一律未知，只有 IAM 已提交业务回执能确定结果。
+新 envelope 只重新签运原回执，不刷新回执事实。自然 EXPIRED head 未停权，
 对账后才能另存新 op/前代版本，在全量新鲜核验后 CAS 新有界代际；停发/显式撤销禁止自动替代。
 Get 必须新鲜见证/当前连接，回当前 source、policy_revision、observed_at、夹紧 valid_until 和 witness_id；
 Get 的 binding_id/binding_revision 必须等于签发时固定 native_binding，后继也不得重绑；不符 conflict 并先撤销。
@@ -283,13 +285,16 @@ active Register 原回执不激活来源，Get active 也不授 SEND。source �
 不回内部 owner/兑换连接。所有结果都是 purpose=protocol_response 的完整受签下行，绑定当前受众、nonce、request_id。
 
 Revoke 无 native 见证、不要求精确 revision，仅 binding 与原归属核验；先本地和 collab 耐久停发/outbox，再事务外调 IAM，最终短事务记录终态；
+其线兼容保留仅指 IAM proto 字段 3；必须先完成 IAM 的无版本/整链撤销改造，再接 collab 撤销，本轮不改 IAM 代码。
 result 的原 op/binding/revision/state 与 lineage_stopped=true 仅表示 IAM 已提交链停权，expired 前代不复活、active 后继一并停权。
 掉线时已存 collab outbox 可用原归属锚点继续，未确认只报待确认。迟到 Register/Get 不能压过停发。
 pending/op/原 IAM 请求摘要/完整见证/连接及许可版本/outbox 均在短事务耐久保存，远程 IAM 一律事务外，
 最终短事务 CAS 再核健康、epoch/boot、typed-local 和停发/许可版本；签发前仍须第五 RPC 与业务关系/recipient 版本重核。
 发件可复用最近一次 source_get 观察，同时不超过 valid_until 且距 observed_at ≤60 秒，原时间不能刷新；
 当前身份/连接、typed-local/签发映射、停发/许可 fence 和每次签前第五仍须核验。不满足先重新 Get。
-终态 Get 一律 network.revoked，active 但观察期限失效 network.expired，成功只回 active/非空有效时间。
+终态 Get 正常回 expired/revoked/stopped 及当前命名代 revision，省略 valid_until，不授任何权限；
+只有自然过期且未停的当前 head 可用返回 revision 作后继 CAS；IAM 停链事实必须显式存在，不能从缺字段推断 false。
+active 必须带有效时间，active 观察期限失效仍 network.expired。插件对 not_committed 的内部 request_digest 只保存、不复核。
 这不保证跨服务零撤销窗口。每帧 ≤64KiB、全部原 JSON 上限；每 node 常规 1 个加撤销保留 1 个名额，
 每请求 30 秒超时释放名额但保留 mutation pending；撤销不排在登记后。witness_id 在 tenant+node 唯一，保留不短于来源最大时间窗及对账期。
 只复用现有 network 错误 catalog，不把结构测试、类型生成当真实宿主/PG/NATS/SEND 闭环实证。

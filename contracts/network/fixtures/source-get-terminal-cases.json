@@ -1,0 +1,38 @@
+[
+  {
+    "name": "natural expiry preserves the current generation revision",
+    "iam_state": "expired",
+    "lineage_stopped": false,
+    "local_stopped": false,
+    "wire_state": "expired",
+    "revision": "2",
+    "observed_at": "2026-10-25T00:05:01Z"
+  },
+  {
+    "name": "revoked named generation reports revocation",
+    "iam_state": "revoked",
+    "lineage_stopped": true,
+    "local_stopped": false,
+    "wire_state": "revoked",
+    "revision": "2",
+    "observed_at": "2026-10-25T00:00:01Z"
+  },
+  {
+    "name": "expired predecessor in a stopped lineage cannot renew",
+    "iam_state": "expired",
+    "lineage_stopped": true,
+    "local_stopped": false,
+    "wire_state": "stopped",
+    "revision": "2",
+    "observed_at": "2026-10-25T00:05:01Z"
+  },
+  {
+    "name": "durable local stop cannot be used as global revoke confirmation",
+    "iam_state": "active",
+    "lineage_stopped": false,
+    "local_stopped": true,
+    "wire_state": "stopped",
+    "revision": "1",
+    "observed_at": "2026-10-25T00:00:01Z"
+  }
+]

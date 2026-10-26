@@ -64,6 +64,38 @@ export type SourceRegisterResult = {
   result: 'registered' | 'not_accepted' | 'not_committed';
   failure_evidence: null | NotAcceptedEvidence | NotCommittedEvidence;
 };
+/**
+ * Current source observation: active requires valid_until; expired/revoked/stopped omit it and grant no permission. Revision is the current named generation revision.
+ */
+export type SourceGetResult = {
+  /**
+   * 应用协议版本 major.minor；v1 major 固定 1。
+   */
+  app_version: string;
+  type: 'source_get_result';
+  /**
+   * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
+   */
+  request_id: string;
+  server_auth: ServerAuth1;
+  source: SourceFact1;
+  /**
+   * ≥1 的 uint64 十进制字符串。
+   */
+  policy_revision: string;
+  /**
+   * UTC 整秒 RFC 3339，唯一表示。
+   */
+  observed_at: string;
+  /**
+   * UTC 整秒 RFC 3339，唯一表示。
+   */
+  valid_until?: string;
+  /**
+   * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
+   */
+  witness_id: string;
+};
 
 /**
  * 原 typed-local 六字段；realm/node 仅从认证 ingress 补全为 IAM 八字段，不能由 API projection 编造。
@@ -182,7 +214,7 @@ export interface SourceFact {
    * ≥1 的 uint64 十进制字符串。
    */
   revision: string;
-  state: 'active';
+  state: 'active' | 'expired' | 'revoked' | 'stopped';
   /**
    * UTC 整秒 RFC 3339，唯一表示。
    */
@@ -234,7 +266,11 @@ export interface NotAcceptedEvidence {
 }
 export interface NotCommittedEvidence {
   authority: 'iam';
-  reason: 'original_connection_invalid_uncommitted';
+  reason:
+    | 'original_connection_invalid_uncommitted'
+    | 'revision_mismatch'
+    | 'predecessor_not_head'
+    | 'lineage_stopped';
   request_digest: string;
 }
 export interface SourceGet {
@@ -311,41 +347,6 @@ export interface NativeWitness1 {
   valid_until: string;
 }
 /**
- * Active current observation only; terminal IAM facts map to network.revoked, expired observation deadlines to network.expired. Never an allow lease.
- */
-export interface SourceGetResult {
-  /**
-   * 应用协议版本 major.minor；v1 major 固定 1。
-   */
-  app_version: string;
-  type: 'source_get_result';
-  /**
-   * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
-   */
-  request_id: string;
-  server_auth: ServerAuth1;
-  source: SourceFact1 & {
-    state?: 'active';
-    [k: string]: unknown;
-  };
-  /**
-   * ≥1 的 uint64 十进制字符串。
-   */
-  policy_revision: string;
-  /**
-   * UTC 整秒 RFC 3339，唯一表示。
-   */
-  observed_at: string;
-  /**
-   * UTC 整秒 RFC 3339，唯一表示。
-   */
-  valid_until: string;
-  /**
-   * 平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。
-   */
-  witness_id: string;
-}
-/**
  * 总部服务器签名封装；签名输入见 README §4。
  */
 export interface ServerAuth1 {
@@ -414,7 +415,7 @@ export interface SourceFact1 {
    * ≥1 的 uint64 十进制字符串。
    */
   revision: string;
-  state: 'active';
+  state: 'active' | 'expired' | 'revoked' | 'stopped';
   /**
    * UTC 整秒 RFC 3339，唯一表示。
    */
