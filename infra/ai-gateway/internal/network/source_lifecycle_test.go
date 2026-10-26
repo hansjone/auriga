@@ -135,7 +135,7 @@ func TestProductionSourceCancellationLateReplyDoesNotReleaseNewSlot(t *testing.T
 	run.mailbox.mu.Lock()
 	run.mailbox.sources[lane].cancel()
 	run.mailbox.mu.Unlock()
-	expectRegistrationCode(t, down, cfg.ProtocolSigning, b, "network.overloaded")
+	expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, "network.overloaded")
 	run.mailbox.workers.Wait()
 	if len(run.mailbox.slots) != 0 {
 		t.Fatal("cancellation leaked regular slot")
@@ -319,13 +319,7 @@ func TestProductionSourceWSSReconnectCancelsOldIngress(t *testing.T) {
 	f.mu.Lock()
 	f.response = signedMailboxFrame(t, cfg.ProtocolSigning, "ready", next, "ready-2")
 	f.mu.Unlock()
-	if err = fresh.Publish(UpSubject(ingress), []byte(`{"app_version":"1.0","type":"ready","request_id":"ready-2","channel_nonce":"nonce-2","boot_id":"boot-2"}`)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = down.NextMsg(time.Second); err != nil {
-		t.Fatal(err)
-	}
-	run.mailbox.workers.Wait()
+	next = sourceReady(t, run, fresh, down, next, cfg.ProtocolSigning, "ready-2", []byte(`{"app_version":"1.0","type":"ready","request_id":"ready-2","channel_nonce":"nonce-2","boot_id":"boot-2"}`))
 	second := newSourcePlan(t, sourceResult(t, cfg.ProtocolSigning, next, "source_get", "active"))
 	f.planMu.Lock()
 	f.plans = append(f.plans, second)

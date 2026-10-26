@@ -1,12 +1,8 @@
 package network
 
 import (
-	"bufio"
 	"errors"
-	"fmt"
-	"net"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -245,45 +241,17 @@ func TestGate1_UserLimitsEnforced(t *testing.T) {
 
 // A client that ignores the advertised limit is cut off by the server.
 func TestGate1_AccountMaxPayloadEnforcedServerSide(t *testing.T) {
-	o := defaultBrokerOpts()
-	o.noCallout = true
-	h := newHarness(t, o)
-	h.forgedResponder(t, func(_ *jwt.AuthorizationRequestClaims, _ *jwt.UserClaims, _ *jwt.AuthorizationResponseClaims) (nkeys.KeyPair, bool) {
-		return h.issuer, true
-	})
-	conn, err := net.Dial("tcp", strings.TrimPrefix(h.tcpURL(), "nats://"))
-	if err != nil {
-		t.Fatal(err)
+	for _, mode := range []string{"oversize", "normal-close", "parse-error", "protocol-violation"} {
+		t.Run(mode, func(t *testing.T) {
+			o := defaultBrokerOpts()
+			o.noCallout = true
+			h := newHarness(t, o)
+			h.forgedResponder(t, func(_ *jwt.AuthorizationRequestClaims, _ *jwt.UserClaims, _ *jwt.AuthorizationResponseClaims) (nkeys.KeyPair, bool) {
+				return h.issuer, true
+			})
+			runPayloadGate(t, h, mode)
+		})
 	}
-	defer func() { _ = conn.Close() }()
-	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	r := bufio.NewReader(conn)
-	if _, err := r.ReadString('\n'); err != nil { // INFO
-		t.Fatal(err)
-	}
-	_, _ = fmt.Fprintf(conn, "CONNECT {\"auth_token\":\"nt_raw\",\"verbose\":false,\"protocol\":1}\r\nPING\r\n")
-	if line, _ := r.ReadString('\n'); !strings.HasPrefix(line, "PONG") {
-		t.Fatalf("raw connect: %q", line)
-	}
-	_, _ = fmt.Fprintf(conn, "PUB auriga.net.up.x 4097\r\n%s\r\n", strings.Repeat("a", 4097))
-	// Skip the INFO the server re-sends after CONNECT (connect_info), which
-	// carries the per-connection max_payload of the account.
-	var line string
-	for line == "" || strings.HasPrefix(line, "INFO") {
-		if strings.HasPrefix(line, "INFO") && !strings.Contains(line, `"max_payload":4096`) {
-			t.Fatalf("INFO without account max_payload: %q", line)
-		}
-		if line, err = r.ReadString('\n'); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !strings.Contains(line, "Maximum Payload Violation") {
-		t.Fatalf("server reply %q", line)
-	}
-	if _, err := r.ReadString('\n'); err == nil {
-		t.Fatal("connection still open after payload violation")
-	}
-	t.Logf("server: %s", strings.TrimSpace(line))
 }
 
 // First failure, kept as evidence: User JWT max_payload/max_subs from the
