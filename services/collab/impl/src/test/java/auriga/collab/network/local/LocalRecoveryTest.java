@@ -67,6 +67,21 @@ class LocalRecoveryTest {
   }
 
   @Test
+  void absentChangedAndRetiredTypeEvidenceCannotRepairOriginal() {
+    for (String changed : new String[] {"subagent", "future"}) {
+      var pending = ready("7", "0", "7");
+      ((ObjectNode) pending.path("pending_registration")).put("address_type", changed);
+      assertEquals(RECOVERY_CONFLICT, inspect("7", "1", pending, registration("7", "1")));
+    }
+    var legacy = new java.util.HashMap<>(registration("7", "1"));
+    legacy.remove("address_type");
+    assertEquals(RECOVERY_CONFLICT, inspect("7", "1", ready("7", "0", "7"), legacy));
+    legacy.put("address_type", "session");
+    legacy.put("status", "retired");
+    assertEquals(RECOVERY_CONFLICT, inspect("7", "1", ready("7", "0", "7"), legacy));
+  }
+
+  @Test
   void unsignedMaximumComparisonRemainsExact() {
     String max = "18446744073709551615";
     assertEquals(RETURN_ORIGINAL, inspect(max, "2", ready(max, "1", max), registration(max, "2")));
@@ -88,6 +103,7 @@ class LocalRecoveryTest {
     if (pending != null)
       ready
           .putObject("pending_registration")
+          .put("address_type", "session")
           .put("candidate_local", pending)
           .put("allocation_op_id", "op")
           .put("allocation_fingerprint", FP);
@@ -96,6 +112,10 @@ class LocalRecoveryTest {
 
   Map<String, Object> registration(String local, String revision) {
     return Map.of(
+        "address_type",
+        "session",
+        "status",
+        "registered",
         "local_id",
         new BigDecimal(local),
         "registration_revision",
