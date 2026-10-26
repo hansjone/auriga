@@ -50,6 +50,13 @@ func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation strin
 		var resp *collab.NetworkMailboxServiceReceiptResponse
 		resp, err = c.rpc.Receipt(ctx, &collab.NetworkMailboxServiceReceiptRequest{Connection: id, FrameJson: raw}, options...)
 		data = resp.GetFrameJson()
+	case "local_register":
+		if _, ae := decodeLocalRegister(raw); ae != nil {
+			return nil, ae
+		}
+		var resp *collab.NetworkMailboxServiceLocalRegisterResponse
+		resp, err = c.rpc.LocalRegister(ctx, &collab.NetworkMailboxServiceLocalRegisterRequest{Connection: id, FrameJson: raw}, options...)
+		data = resp.GetFrameJson()
 	default:
 		return nil, protocolError("", "unsupported mailbox operation")
 	}

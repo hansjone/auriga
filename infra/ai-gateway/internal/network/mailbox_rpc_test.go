@@ -75,7 +75,12 @@ func (f *fakeMailboxRPC) Receipt(ctx context.Context, r *collab.NetworkMailboxSe
 	return &collab.NetworkMailboxServiceReceiptResponse{FrameJson: b}, e
 }
 
-func startMailboxRPC(t *testing.T, f *fakeMailboxRPC) team.RPCConfig {
+func (f *fakeMailboxRPC) LocalRegister(ctx context.Context, r *collab.NetworkMailboxServiceLocalRegisterRequest) (*collab.NetworkMailboxServiceLocalRegisterResponse, error) {
+	b, e := f.call(ctx, "local_register", r.Connection, r.FrameJson)
+	return &collab.NetworkMailboxServiceLocalRegisterResponse{FrameJson: b}, e
+}
+
+func startMailboxRPC(t *testing.T, f collab.NetworkMailboxServiceServer) team.RPCConfig {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

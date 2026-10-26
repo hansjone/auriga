@@ -237,6 +237,17 @@ func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
 		}
 		return
 	}
+	if operation == "local_register" {
+		q, decErr := decodeLocalRegister(raw)
+		r.redeemer.mu.Lock()
+		current, ok := r.redeemer.bindings[b.Ingress]
+		live := ok && sameMailboxBinding(current, b) && !current.Revoked && time.Now().Before(current.NotAfter)
+		r.redeemer.mu.Unlock()
+		if decErr != nil || !live || registrationString(q["epoch"]) != u64str(b.Epoch) {
+			r.sendError(b, raw, staleEpoch(requestID))
+			return
+		}
+	}
 	response, ae := r.client.Call(r.ctx, b, operation, raw)
 	if ae != nil {
 		if !head {
@@ -268,10 +279,12 @@ func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
 	guard.Lock()
 	r.redeemer.mu.Lock()
 	current, ok := r.redeemer.bindings[b.Ingress]
-	allowed := ok && !current.Revoked && time.Now().Before(current.NotAfter) && (operation == "ready" || current.Epoch == b.Epoch && current.ChannelNonce == b.ChannelNonce)
+	allowed := ok && !current.Revoked && time.Now().Before(current.NotAfter) && (operation == "ready" || sameMailboxBinding(current, b))
 	if allowed {
-		current.Incarnation, current.ChannelNonce, current.Epoch = updated.Incarnation, updated.ChannelNonce, updated.Epoch
-		r.redeemer.bindings[b.Ingress] = current
+		if operation == "ready" {
+			current.Incarnation, current.ChannelNonce, current.Epoch = updated.Incarnation, updated.ChannelNonce, updated.Epoch
+			r.redeemer.bindings[b.Ingress] = current
+		}
 	} else {
 		err = errUnauthorized
 	}
@@ -284,7 +297,7 @@ func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
 	guard.Unlock()
 	if errors.Is(err, errUnauthorized) {
 		if !head {
-			r.sendError(current, raw, &AppError{Code: "network.revoked", Scope: "node"})
+			r.sendError(b, raw, &AppError{Code: "network.revoked", Scope: "node"})
 		}
 	} else if err != nil {
 		slog.Error("network mailbox response publish failed", "server", b.ServerID, "cid", b.ClientID)
@@ -310,6 +323,10 @@ func mailboxOperation(raw []byte, head bool) (string, string, *AppError) {
 	if envelope.Type == "ready" {
 		if !opaqueID.MatchString(envelope.ChannelNonce) {
 			return "", envelope.RequestID, protocolError(envelope.RequestID, "channel nonce")
+		}
+	} else if envelope.Type == "local_register" {
+		if _, ae := decodeLocalRegister(raw); ae != nil {
+			return "", envelope.RequestID, ae
 		}
 	} else if _, ae := DecodeUpstream(raw); ae != nil {
 		return "", envelope.RequestID, ae
@@ -347,11 +364,14 @@ type mailboxResponse struct {
 }
 
 func validateMailboxResponse(b liveBinding, operation, requestID string, request, response []byte) (liveBinding, error) {
+	if operation == "local_register" && validateRegisterResponse(request, response) != nil {
+		return b, errUnauthorized
+	}
 	var frame mailboxResponse
 	if json.Unmarshal(response, &frame) != nil || frame.AppVersion != AppVersion {
 		return b, errUnauthorized
 	}
-	expected := map[string]string{"ready": "ready_result", "head": "head", "fetch": "fetch_result", "receipt": "receipt_committed"}[operation]
+	expected := map[string]string{"ready": "ready_result", "head": "head", "fetch": "fetch_result", "receipt": "receipt_committed", "local_register": "register_result"}[operation]
 	if frame.Type != expected && frame.Type != "error" {
 		return b, errUnauthorized
 	}
@@ -404,6 +424,22 @@ func (r *mailboxRouter) writeError(b liveBinding, raw []byte, ae *AppError) {
 	if b.Ingress == "" || r.ctx.Err() != nil {
 		return
 	}
+	guard := r.redeemer.connectionGuard(b.Ingress)
+	if guard == nil {
+		return
+	}
+	guard.Lock()
+	defer guard.Unlock()
+	r.redeemer.mu.Lock()
+	current, ok := r.redeemer.bindings[b.Ingress]
+	r.redeemer.mu.Unlock()
+	if !ok || !sameMailboxBinding(current, b) || !time.Now().Before(current.NotAfter) {
+		return
+	}
+	b = current
+	if b.Revoked {
+		ae = &AppError{Code: "network.revoked", Scope: "node"}
+	}
 	var request struct {
 		RequestID string `json:"request_id"`
 		Type      string `json:"type"`
@@ -422,4 +458,8 @@ func (r *mailboxRouter) writeError(b liveBinding, raw []byte, ae *AppError) {
 	if err != nil {
 		slog.Error("network mailbox error response unavailable", "server", b.ServerID, "cid", b.ClientID)
 	}
+}
+
+func sameMailboxBinding(a, b liveBinding) bool {
+	return a.Binding == b.Binding && a.Tenant == b.Tenant && a.Realm == b.Realm && a.Node == b.Node && a.Epoch == b.Epoch && a.Incarnation == b.Incarnation && a.ChannelNonce == b.ChannelNonce
 }
