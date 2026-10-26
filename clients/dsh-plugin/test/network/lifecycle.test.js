@@ -2,8 +2,102 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers';
 import { createNetworkLifecycle } from '../../src/network/lifecycle.js';
+import { generateKeyPairSync } from 'node:crypto';
+import { platformConfig } from '../../src/local/platform.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+test('installation alone has zero network side effects; only trusted prepare receives immutable pins', async () => {
+  const installation = platformConfig({
+    platformOrigin: 'https://portal.example.com',
+    issuer: 'https://portal.example.com',
+    clientId: 'auriga-dsh',
+    providerId: 'team',
+    network: {
+      realm: '1',
+      wssUrl: 'wss://network.example.com/custom/ws',
+      roots: [
+        {
+          kid: 'root',
+          public_key_spki: generateKeyPairSync('ed25519')
+            .publicKey.export({ format: 'der', type: 'spki' })
+            .toString('base64url'),
+        },
+      ],
+    },
+  }).network;
+  const calls = {
+    access: 0,
+    tickets: 0,
+    keys: 0,
+    send: 0,
+    authorization: 0,
+    open: 0,
+  };
+  const options = {
+    directory: 'unused',
+    installation,
+    ctx: {
+      tools: {
+        register() {
+          calls.send++;
+        },
+      },
+      emit() {
+        calls.authorization++;
+      },
+    },
+    getAccess: async () => {
+      calls.access++;
+      return 'native';
+    },
+    authorizeLocal: async () => true,
+    async open() {
+      calls.open++;
+      throw new Error('unexpected open');
+    },
+  };
+  const lifecycle = createNetworkLifecycle(options);
+  options.installation = undefined;
+  lifecycle.login();
+  await turn();
+  assert.equal(lifecycle.status.state, 'unconfigured');
+  assert.equal(lifecycle.status.available, false);
+  assert.ok(Object.values(calls).every((count) => count === 0));
+  assert.equal(
+    JSON.stringify(lifecycle.status).includes('public_key_spki'),
+    false,
+  );
+  let received;
+  lifecycle.attach({
+    ports: {
+      prepareTicket() {
+        calls.tickets++;
+      },
+      refreshKeys() {
+        calls.keys++;
+      },
+    },
+    prepare(input) {
+      received = input;
+      return new Promise(() => {});
+    },
+  });
+  await until(() => received);
+  assert.equal(received.installation, installation);
+  assert.deepEqual(Object.keys(received).sort(), [
+    'accessToken',
+    'installation',
+    'signal',
+  ]);
+  assert.ok(Object.isFrozen(received.installation.roots[0]));
+  assert.equal(calls.access, 1);
+  assert.ok(
+    Object.entries(calls)
+      .filter(([key]) => key !== 'access')
+      .every(([, count]) => count === 0),
+  );
+  await lifecycle.close();
+});
 async function until(predicate) {
   const deadline = Date.now() + 2000;
   while (!predicate()) {
@@ -73,6 +167,7 @@ function fixture() {
     provider: {
       ports: {},
       async prepare(input) {
+        assert.equal(input.installation, undefined);
         calls.push(['prepare', input.accessToken]);
         return { id: 'node' };
       },
