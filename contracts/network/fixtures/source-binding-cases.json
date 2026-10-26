@@ -1,0 +1,50 @@
+[
+  {
+    "name": "same durable mapping",
+    "issued_native_binding": {
+      "binding_id": "local-binding-1",
+      "binding_revision": "2"
+    },
+    "native_binding": {
+      "binding_id": "local-binding-1",
+      "binding_revision": "2"
+    },
+    "code": null
+  },
+  {
+    "name": "different mapping at same typed local",
+    "issued_native_binding": {
+      "binding_id": "local-binding-1",
+      "binding_revision": "2"
+    },
+    "native_binding": {
+      "binding_id": "local-binding-2",
+      "binding_revision": "2"
+    },
+    "code": "network.conflict"
+  },
+  {
+    "name": "advanced mapping revision",
+    "issued_native_binding": {
+      "binding_id": "local-binding-1",
+      "binding_revision": "2"
+    },
+    "native_binding": {
+      "binding_id": "local-binding-1",
+      "binding_revision": "3"
+    },
+    "code": "network.conflict"
+  },
+  {
+    "name": "rolled back mapping revision",
+    "issued_native_binding": {
+      "binding_id": "local-binding-1",
+      "binding_revision": "2"
+    },
+    "native_binding": {
+      "binding_id": "local-binding-1",
+      "binding_revision": "1"
+    },
+    "code": "network.conflict"
+  }
+]

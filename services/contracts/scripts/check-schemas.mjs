@@ -3,6 +3,7 @@ import addFormats from 'ajv-formats';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 const directory = fileURLToPath(new URL('../../../contracts/', import.meta.url));
 function find(folder) {
   return readdirSync(folder, { withFileTypes: true }).flatMap(entry => {
@@ -32,3 +33,17 @@ for (const file of files) {
 }
 if (failures) process.exitCode = 1;
 console.log(files.length + ' schema files, ' + failures + ' failed');
+if (!failures) {
+  const checks = [
+    ['--test', fileURLToPath(new URL('../../../contracts/network/fixtures/source-control.test.mjs', import.meta.url))],
+    [fileURLToPath(new URL('../../../contracts/network/generate-source-control.mjs', import.meta.url)), '--check'],
+  ];
+  for (const args of checks) {
+    const result = spawnSync(process.execPath, args, { stdio: 'inherit' });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      process.exitCode = result.status ?? 1;
+      break;
+    }
+  }
+}

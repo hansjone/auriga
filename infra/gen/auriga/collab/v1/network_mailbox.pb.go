@@ -614,6 +614,369 @@ func (x *NetworkMailboxServiceLocalRegisterResponse) GetFrameJson() []byte {
 	return nil
 }
 
+// Source-control frames use the SAME authenticated mailbox ingress and existing
+// svc:ai-gateway allowlist as LocalRegister. They do NOT expose IAM's internal
+// svc:collab authority to the gateway, user or model. No new path/header/subject.
+// Normative JSON fields and duties: contracts/network/source-control.schema.json,
+// network/README.md section 5.2 and network/iam-directory.md. Each method accepts
+// only its named request frame, <=64KiB strict original UTF-8 JSON. Preserve all
+// bytes, uint64 decimal strings, native/typed-local witnesses and optional fields.
+// connection comes ONLY from authenticated ingress; tenant must match trusted
+// delegated business tenant. Collab rechecks persisted ingress/IAM authorization,
+// READY association, node health, current epoch/boot and full typed-local witness.
+// Protobuf bytes alone enforce none of these checks or the signatures below.
+//
+// source_register: stable operation_id plus immutable registration/scope/
+// predecessor_binding/expected_revision. mode=issue requires a freshly acquired
+// native_witness; mode=reconcile requires null and reads only a durable original
+// operation. Collab freezes the full original IAM request including connection;
+// a reconnect never rewrites it. Unknown outcomes reconcile with the original
+// op/body, never a new op UNLESS a durable definitive-failure receipt was saved.
+// not_accepted requires collab's pre-pending rejection fence; not_committed
+// requires IAM's committed original-op uncommitted/rejection receipt and fence.
+// After pending, ordinary failures remain unknown; only such authoritative
+// receipts resolve them. Mere absence,
+// timeout or forbidden is unknown; late issue must never cross a failure fence.
+// Persist pending/witness/outbox in a short transaction, call IAM OUTSIDE it,
+// then short-transaction CAS current health/connection/epoch/boot/typed-local,
+// witness freshness and local permission/stop versions before activation.
+type NetworkMailboxServiceSourceRegisterRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	FrameJson     []byte                    `protobuf:"bytes,2,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSourceRegisterRequest) Reset() {
+	*x = NetworkMailboxServiceSourceRegisterRequest{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSourceRegisterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSourceRegisterRequest) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSourceRegisterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSourceRegisterRequest.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSourceRegisterRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *NetworkMailboxServiceSourceRegisterRequest) GetConnection() *NetworkMailboxConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *NetworkMailboxServiceSourceRegisterRequest) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceSourceRegisterResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Complete signed source_register_result or existing signed error. The saved
+	// revision=1/active creation receipt is historical, NOT current authorization.
+	// Replays preserve the original business result; only the current transport
+	// signature/association changes. Current Get and final CAS are still required.
+	// result=registered has source and null failure_evidence. Definitive failures
+	// not_accepted/not_committed have null source and the saved authority/digest
+	// evidence; only then may the plugin persist a NEW op after fresh checks.
+	// All source responses use protocol_response and bind current authenticated
+	// realm/node/incarnation/epoch, READY channel_nonce and this request_id.
+	// Gateway forwards original response bytes unchanged. If no authenticated
+	// signing audience can be established, use the existing gRPC rejection mapping.
+	FrameJson     []byte `protobuf:"bytes,1,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSourceRegisterResponse) Reset() {
+	*x = NetworkMailboxServiceSourceRegisterResponse{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSourceRegisterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSourceRegisterResponse) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSourceRegisterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSourceRegisterResponse.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSourceRegisterResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *NetworkMailboxServiceSourceRegisterResponse) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+// source_get: source_binding, current registration and fresh native_witness.
+// Native witness fields are witness_id, opaque local binding_id, durable
+// binding_revision, observed_at and valid_until (<=30s lifetime). The frame's
+// registration/epoch/boot plus authenticated ingress bind it to this observation.
+// No native session ID/cwd/owner/token is uploaded; realm/node come from ingress.
+// Collab must lookup/lock the full original typed-local eight-field witness;
+// API projections cannot manufacture registration id/op/fingerprint/revision.
+// IAM receives the current exact authenticated source connection, not a cached
+// or rewritten original tuple. Check its connection echo and source facts, then
+// final local CAS. This remains an observation, never a message allow lease.
+// Both native binding_id and binding_revision MUST equal the saved issuance
+// values, including on successor issuance; mismatch conflicts and requires stop/
+// revocation. Never derive these comparison consts from the incoming frame.
+type NetworkMailboxServiceSourceGetRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	FrameJson     []byte                    `protobuf:"bytes,2,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSourceGetRequest) Reset() {
+	*x = NetworkMailboxServiceSourceGetRequest{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSourceGetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSourceGetRequest) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSourceGetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSourceGetRequest.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSourceGetRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *NetworkMailboxServiceSourceGetRequest) GetConnection() *NetworkMailboxConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *NetworkMailboxServiceSourceGetRequest) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceSourceGetResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Complete signed source_get_result or existing signed error, forwarded as
+	// original bytes under the same signature rules as SourceRegisterResponse.
+	// Echo witness_id; clamp valid_until to IAM/native/local deadlines. Results
+	// are active with a valid time OR expired/revoked/stopped with current revision
+	// and NO valid_until field. Terminal facts never authorize or become errors
+	// merely because they are terminal. Never return active with null/missing time.
+	// Do not expose IAM owner or original redeem connection.
+	// ACTIVE grants no SEND. Signing still requires the fifth IAM RPC and final
+	// local typed-local/thread/recipient/relationship version checks.
+	FrameJson     []byte `protobuf:"bytes,1,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSourceGetResponse) Reset() {
+	*x = NetworkMailboxServiceSourceGetResponse{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSourceGetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSourceGetResponse) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSourceGetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSourceGetResponse.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSourceGetResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *NetworkMailboxServiceSourceGetResponse) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+// source_revoke: source_binding and stable operation_id, NO exact revision or
+// native witness: closing the host must not prevent narrowing revocation.
+// Persist stop/version and original revoke request/outbox first; call IAM outside
+// transactions using retained original ownership/connection anchors, then record
+// the terminal receipt in a short transaction. Existing durable outbox continues
+// even if the original transport expired; current mailbox calls still need their
+// own authenticated READY association. Unknown results replay the original op.
+// Stop wins over every late Register/Get response and successor activation.
+// Every request times out at 30s without losing durable pending/outbox; Revoke
+// uses its own reserved slot and never waits behind a Register/Get request.
+type NetworkMailboxServiceSourceRevokeRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	FrameJson     []byte                    `protobuf:"bytes,2,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSourceRevokeRequest) Reset() {
+	*x = NetworkMailboxServiceSourceRevokeRequest{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSourceRevokeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSourceRevokeRequest) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSourceRevokeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSourceRevokeRequest.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSourceRevokeRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *NetworkMailboxServiceSourceRevokeRequest) GetConnection() *NetworkMailboxConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *NetworkMailboxServiceSourceRevokeRequest) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceSourceRevokeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Complete signed source_revoke_result or existing signed error, under the
+	// same signature/forwarding rules as SourceRegisterResponse. Success confirms
+	// IAM's COMMITTED terminal receipt and lineage_stopped=true, not local enqueue.
+	// An expired named predecessor stays expired while any active head is revoked
+	// and successors are permanently stopped. Unconfirmed revocation stays pending
+	// and locally stopped. No approval/challenge/login or new error code is added.
+	FrameJson     []byte `protobuf:"bytes,1,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSourceRevokeResponse) Reset() {
+	*x = NetworkMailboxServiceSourceRevokeResponse{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSourceRevokeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSourceRevokeResponse) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSourceRevokeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSourceRevokeResponse.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSourceRevokeResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *NetworkMailboxServiceSourceRevokeResponse) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
 var File_auriga_collab_v1_network_mailbox_proto protoreflect.FileDescriptor
 
 const file_auriga_collab_v1_network_mailbox_proto_rawDesc = "" +
@@ -669,13 +1032,43 @@ const file_auriga_collab_v1_network_mailbox_proto_rawDesc = "" +
 	"frame_json\x18\x02 \x01(\fR\tframeJson\"K\n" +
 	"*NetworkMailboxServiceLocalRegisterResponse\x12\x1d\n" +
 	"\n" +
-	"frame_json\x18\x01 \x01(\fR\tframeJson2\xf7\x04\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson\"\x97\x01\n" +
+	"*NetworkMailboxServiceSourceRegisterRequest\x12J\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2*.auriga.collab.v1.NetworkMailboxConnectionR\n" +
+	"connection\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x02 \x01(\fR\tframeJson\"L\n" +
+	"+NetworkMailboxServiceSourceRegisterResponse\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson\"\x92\x01\n" +
+	"%NetworkMailboxServiceSourceGetRequest\x12J\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2*.auriga.collab.v1.NetworkMailboxConnectionR\n" +
+	"connection\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x02 \x01(\fR\tframeJson\"G\n" +
+	"&NetworkMailboxServiceSourceGetResponse\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson\"\x95\x01\n" +
+	"(NetworkMailboxServiceSourceRevokeRequest\x12J\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2*.auriga.collab.v1.NetworkMailboxConnectionR\n" +
+	"connection\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x02 \x01(\fR\tframeJson\"J\n" +
+	")NetworkMailboxServiceSourceRevokeResponse\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson2\x91\b\n" +
 	"\x15NetworkMailboxService\x12r\n" +
 	"\x05Ready\x123.auriga.collab.v1.NetworkMailboxServiceReadyRequest\x1a4.auriga.collab.v1.NetworkMailboxServiceReadyResponse\x12o\n" +
 	"\x04Head\x122.auriga.collab.v1.NetworkMailboxServiceHeadRequest\x1a3.auriga.collab.v1.NetworkMailboxServiceHeadResponse\x12r\n" +
 	"\x05Fetch\x123.auriga.collab.v1.NetworkMailboxServiceFetchRequest\x1a4.auriga.collab.v1.NetworkMailboxServiceFetchResponse\x12x\n" +
 	"\aReceipt\x125.auriga.collab.v1.NetworkMailboxServiceReceiptRequest\x1a6.auriga.collab.v1.NetworkMailboxServiceReceiptResponse\x12\x8a\x01\n" +
-	"\rLocalRegister\x12;.auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest\x1a<.auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponseB^\n" +
+	"\rLocalRegister\x12;.auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest\x1a<.auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse\x12\x8d\x01\n" +
+	"\x0eSourceRegister\x12<.auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest\x1a=.auriga.collab.v1.NetworkMailboxServiceSourceRegisterResponse\x12~\n" +
+	"\tSourceGet\x127.auriga.collab.v1.NetworkMailboxServiceSourceGetRequest\x1a8.auriga.collab.v1.NetworkMailboxServiceSourceGetResponse\x12\x87\x01\n" +
+	"\fSourceRevoke\x12:.auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest\x1a;.auriga.collab.v1.NetworkMailboxServiceSourceRevokeResponseB^\n" +
 	"\x1aauriga.contracts.collab.v1P\x01Z>github.com/hansjone/auriga/infra/gen/auriga/collab/v1;collabv1b\x06proto3"
 
 var (
@@ -690,19 +1083,25 @@ func file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP() []byte {
 	return file_auriga_collab_v1_network_mailbox_proto_rawDescData
 }
 
-var file_auriga_collab_v1_network_mailbox_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_auriga_collab_v1_network_mailbox_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_auriga_collab_v1_network_mailbox_proto_goTypes = []any{
-	(*NetworkMailboxConnection)(nil),                   // 0: auriga.collab.v1.NetworkMailboxConnection
-	(*NetworkMailboxServiceReadyRequest)(nil),          // 1: auriga.collab.v1.NetworkMailboxServiceReadyRequest
-	(*NetworkMailboxServiceReadyResponse)(nil),         // 2: auriga.collab.v1.NetworkMailboxServiceReadyResponse
-	(*NetworkMailboxServiceHeadRequest)(nil),           // 3: auriga.collab.v1.NetworkMailboxServiceHeadRequest
-	(*NetworkMailboxServiceHeadResponse)(nil),          // 4: auriga.collab.v1.NetworkMailboxServiceHeadResponse
-	(*NetworkMailboxServiceFetchRequest)(nil),          // 5: auriga.collab.v1.NetworkMailboxServiceFetchRequest
-	(*NetworkMailboxServiceFetchResponse)(nil),         // 6: auriga.collab.v1.NetworkMailboxServiceFetchResponse
-	(*NetworkMailboxServiceReceiptRequest)(nil),        // 7: auriga.collab.v1.NetworkMailboxServiceReceiptRequest
-	(*NetworkMailboxServiceReceiptResponse)(nil),       // 8: auriga.collab.v1.NetworkMailboxServiceReceiptResponse
-	(*NetworkMailboxServiceLocalRegisterRequest)(nil),  // 9: auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
-	(*NetworkMailboxServiceLocalRegisterResponse)(nil), // 10: auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
+	(*NetworkMailboxConnection)(nil),                    // 0: auriga.collab.v1.NetworkMailboxConnection
+	(*NetworkMailboxServiceReadyRequest)(nil),           // 1: auriga.collab.v1.NetworkMailboxServiceReadyRequest
+	(*NetworkMailboxServiceReadyResponse)(nil),          // 2: auriga.collab.v1.NetworkMailboxServiceReadyResponse
+	(*NetworkMailboxServiceHeadRequest)(nil),            // 3: auriga.collab.v1.NetworkMailboxServiceHeadRequest
+	(*NetworkMailboxServiceHeadResponse)(nil),           // 4: auriga.collab.v1.NetworkMailboxServiceHeadResponse
+	(*NetworkMailboxServiceFetchRequest)(nil),           // 5: auriga.collab.v1.NetworkMailboxServiceFetchRequest
+	(*NetworkMailboxServiceFetchResponse)(nil),          // 6: auriga.collab.v1.NetworkMailboxServiceFetchResponse
+	(*NetworkMailboxServiceReceiptRequest)(nil),         // 7: auriga.collab.v1.NetworkMailboxServiceReceiptRequest
+	(*NetworkMailboxServiceReceiptResponse)(nil),        // 8: auriga.collab.v1.NetworkMailboxServiceReceiptResponse
+	(*NetworkMailboxServiceLocalRegisterRequest)(nil),   // 9: auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
+	(*NetworkMailboxServiceLocalRegisterResponse)(nil),  // 10: auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
+	(*NetworkMailboxServiceSourceRegisterRequest)(nil),  // 11: auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest
+	(*NetworkMailboxServiceSourceRegisterResponse)(nil), // 12: auriga.collab.v1.NetworkMailboxServiceSourceRegisterResponse
+	(*NetworkMailboxServiceSourceGetRequest)(nil),       // 13: auriga.collab.v1.NetworkMailboxServiceSourceGetRequest
+	(*NetworkMailboxServiceSourceGetResponse)(nil),      // 14: auriga.collab.v1.NetworkMailboxServiceSourceGetResponse
+	(*NetworkMailboxServiceSourceRevokeRequest)(nil),    // 15: auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest
+	(*NetworkMailboxServiceSourceRevokeResponse)(nil),   // 16: auriga.collab.v1.NetworkMailboxServiceSourceRevokeResponse
 }
 var file_auriga_collab_v1_network_mailbox_proto_depIdxs = []int32{
 	0,  // 0: auriga.collab.v1.NetworkMailboxServiceReadyRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
@@ -710,21 +1109,30 @@ var file_auriga_collab_v1_network_mailbox_proto_depIdxs = []int32{
 	0,  // 2: auriga.collab.v1.NetworkMailboxServiceFetchRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
 	0,  // 3: auriga.collab.v1.NetworkMailboxServiceReceiptRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
 	0,  // 4: auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	1,  // 5: auriga.collab.v1.NetworkMailboxService.Ready:input_type -> auriga.collab.v1.NetworkMailboxServiceReadyRequest
-	3,  // 6: auriga.collab.v1.NetworkMailboxService.Head:input_type -> auriga.collab.v1.NetworkMailboxServiceHeadRequest
-	5,  // 7: auriga.collab.v1.NetworkMailboxService.Fetch:input_type -> auriga.collab.v1.NetworkMailboxServiceFetchRequest
-	7,  // 8: auriga.collab.v1.NetworkMailboxService.Receipt:input_type -> auriga.collab.v1.NetworkMailboxServiceReceiptRequest
-	9,  // 9: auriga.collab.v1.NetworkMailboxService.LocalRegister:input_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
-	2,  // 10: auriga.collab.v1.NetworkMailboxService.Ready:output_type -> auriga.collab.v1.NetworkMailboxServiceReadyResponse
-	4,  // 11: auriga.collab.v1.NetworkMailboxService.Head:output_type -> auriga.collab.v1.NetworkMailboxServiceHeadResponse
-	6,  // 12: auriga.collab.v1.NetworkMailboxService.Fetch:output_type -> auriga.collab.v1.NetworkMailboxServiceFetchResponse
-	8,  // 13: auriga.collab.v1.NetworkMailboxService.Receipt:output_type -> auriga.collab.v1.NetworkMailboxServiceReceiptResponse
-	10, // 14: auriga.collab.v1.NetworkMailboxService.LocalRegister:output_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
-	10, // [10:15] is the sub-list for method output_type
-	5,  // [5:10] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	0,  // 5: auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	0,  // 6: auriga.collab.v1.NetworkMailboxServiceSourceGetRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	0,  // 7: auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	1,  // 8: auriga.collab.v1.NetworkMailboxService.Ready:input_type -> auriga.collab.v1.NetworkMailboxServiceReadyRequest
+	3,  // 9: auriga.collab.v1.NetworkMailboxService.Head:input_type -> auriga.collab.v1.NetworkMailboxServiceHeadRequest
+	5,  // 10: auriga.collab.v1.NetworkMailboxService.Fetch:input_type -> auriga.collab.v1.NetworkMailboxServiceFetchRequest
+	7,  // 11: auriga.collab.v1.NetworkMailboxService.Receipt:input_type -> auriga.collab.v1.NetworkMailboxServiceReceiptRequest
+	9,  // 12: auriga.collab.v1.NetworkMailboxService.LocalRegister:input_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
+	11, // 13: auriga.collab.v1.NetworkMailboxService.SourceRegister:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest
+	13, // 14: auriga.collab.v1.NetworkMailboxService.SourceGet:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceGetRequest
+	15, // 15: auriga.collab.v1.NetworkMailboxService.SourceRevoke:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest
+	2,  // 16: auriga.collab.v1.NetworkMailboxService.Ready:output_type -> auriga.collab.v1.NetworkMailboxServiceReadyResponse
+	4,  // 17: auriga.collab.v1.NetworkMailboxService.Head:output_type -> auriga.collab.v1.NetworkMailboxServiceHeadResponse
+	6,  // 18: auriga.collab.v1.NetworkMailboxService.Fetch:output_type -> auriga.collab.v1.NetworkMailboxServiceFetchResponse
+	8,  // 19: auriga.collab.v1.NetworkMailboxService.Receipt:output_type -> auriga.collab.v1.NetworkMailboxServiceReceiptResponse
+	10, // 20: auriga.collab.v1.NetworkMailboxService.LocalRegister:output_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
+	12, // 21: auriga.collab.v1.NetworkMailboxService.SourceRegister:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceRegisterResponse
+	14, // 22: auriga.collab.v1.NetworkMailboxService.SourceGet:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceGetResponse
+	16, // 23: auriga.collab.v1.NetworkMailboxService.SourceRevoke:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceRevokeResponse
+	16, // [16:24] is the sub-list for method output_type
+	8,  // [8:16] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_auriga_collab_v1_network_mailbox_proto_init() }
@@ -738,7 +1146,7 @@ func file_auriga_collab_v1_network_mailbox_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_collab_v1_network_mailbox_proto_rawDesc), len(file_auriga_collab_v1_network_mailbox_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

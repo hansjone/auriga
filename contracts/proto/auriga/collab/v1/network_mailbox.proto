@@ -18,6 +18,13 @@ service NetworkMailboxService {
   // Transport the existing NATS up/down local_register/register_result frames.
   // Contract only: an unimplemented handler MUST remain UNIMPLEMENTED/rejected.
   rpc LocalRegister(NetworkMailboxServiceLocalRegisterRequest) returns (NetworkMailboxServiceLocalRegisterResponse);
+  // Transport source_register/source_register_result, never LOCAL_REGISTER or
+  // SEND. Contract only; missing implementation MUST remain UNIMPLEMENTED.
+  rpc SourceRegister(NetworkMailboxServiceSourceRegisterRequest) returns (NetworkMailboxServiceSourceRegisterResponse);
+  // A fresh native witness and current connection are required on EVERY Get.
+  rpc SourceGet(NetworkMailboxServiceSourceGetRequest) returns (NetworkMailboxServiceSourceGetResponse);
+  // Stop locally and persist the revocation outbox before calling IAM.
+  rpc SourceRevoke(NetworkMailboxServiceSourceRevokeRequest) returns (NetworkMailboxServiceSourceRevokeResponse);
 }
 
 // All fields originate in the authenticated callout/IAM grant, never JSON or
@@ -92,5 +99,104 @@ message NetworkMailboxServiceLocalRegisterResponse {
   // RegisterResult has NO top-level epoch/boot/fingerprint; epoch is in
   // server_auth.audience. protocol_response binds realm/node/incarnation/epoch,
   // READY channel_nonce and original request_id. Forward unchanged; no re-encode.
+  bytes frame_json = 1;
+}
+
+// Source-control frames use the SAME authenticated mailbox ingress and existing
+// svc:ai-gateway allowlist as LocalRegister. They do NOT expose IAM's internal
+// svc:collab authority to the gateway, user or model. No new path/header/subject.
+// Normative JSON fields and duties: contracts/network/source-control.schema.json,
+// network/README.md section 5.2 and network/iam-directory.md. Each method accepts
+// only its named request frame, <=64KiB strict original UTF-8 JSON. Preserve all
+// bytes, uint64 decimal strings, native/typed-local witnesses and optional fields.
+// connection comes ONLY from authenticated ingress; tenant must match trusted
+// delegated business tenant. Collab rechecks persisted ingress/IAM authorization,
+// READY association, node health, current epoch/boot and full typed-local witness.
+// Protobuf bytes alone enforce none of these checks or the signatures below.
+//
+// source_register: stable operation_id plus immutable registration/scope/
+// predecessor_binding/expected_revision. mode=issue requires a freshly acquired
+// native_witness; mode=reconcile requires null and reads only a durable original
+// operation. Collab freezes the full original IAM request including connection;
+// a reconnect never rewrites it. Unknown outcomes reconcile with the original
+// op/body, never a new op UNLESS a durable definitive-failure receipt was saved.
+// not_accepted requires collab's pre-pending rejection fence; not_committed
+// requires IAM's committed original-op uncommitted/rejection receipt and fence.
+// After pending, ordinary failures remain unknown; only such authoritative
+// receipts resolve them. Mere absence,
+// timeout or forbidden is unknown; late issue must never cross a failure fence.
+// Persist pending/witness/outbox in a short transaction, call IAM OUTSIDE it,
+// then short-transaction CAS current health/connection/epoch/boot/typed-local,
+// witness freshness and local permission/stop versions before activation.
+message NetworkMailboxServiceSourceRegisterRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceSourceRegisterResponse {
+  // Complete signed source_register_result or existing signed error. The saved
+  // revision=1/active creation receipt is historical, NOT current authorization.
+  // Replays preserve the original business result; only the current transport
+  // signature/association changes. Current Get and final CAS are still required.
+  // result=registered has source and null failure_evidence. Definitive failures
+  // not_accepted/not_committed have null source and the saved authority/digest
+  // evidence; only then may the plugin persist a NEW op after fresh checks.
+  // All source responses use protocol_response and bind current authenticated
+  // realm/node/incarnation/epoch, READY channel_nonce and this request_id.
+  // Gateway forwards original response bytes unchanged. If no authenticated
+  // signing audience can be established, use the existing gRPC rejection mapping.
+  bytes frame_json = 1;
+}
+
+// source_get: source_binding, current registration and fresh native_witness.
+// Native witness fields are witness_id, opaque local binding_id, durable
+// binding_revision, observed_at and valid_until (<=30s lifetime). The frame's
+// registration/epoch/boot plus authenticated ingress bind it to this observation.
+// No native session ID/cwd/owner/token is uploaded; realm/node come from ingress.
+// Collab must lookup/lock the full original typed-local eight-field witness;
+// API projections cannot manufacture registration id/op/fingerprint/revision.
+// IAM receives the current exact authenticated source connection, not a cached
+// or rewritten original tuple. Check its connection echo and source facts, then
+// final local CAS. This remains an observation, never a message allow lease.
+// Both native binding_id and binding_revision MUST equal the saved issuance
+// values, including on successor issuance; mismatch conflicts and requires stop/
+// revocation. Never derive these comparison consts from the incoming frame.
+message NetworkMailboxServiceSourceGetRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceSourceGetResponse {
+  // Complete signed source_get_result or existing signed error, forwarded as
+  // original bytes under the same signature rules as SourceRegisterResponse.
+  // Echo witness_id; clamp valid_until to IAM/native/local deadlines. Results
+  // are active with a valid time OR expired/revoked/stopped with current revision
+  // and NO valid_until field. Terminal facts never authorize or become errors
+  // merely because they are terminal. Never return active with null/missing time.
+  // Do not expose IAM owner or original redeem connection.
+  // ACTIVE grants no SEND. Signing still requires the fifth IAM RPC and final
+  // local typed-local/thread/recipient/relationship version checks.
+  bytes frame_json = 1;
+}
+
+// source_revoke: source_binding and stable operation_id, NO exact revision or
+// native witness: closing the host must not prevent narrowing revocation.
+// Persist stop/version and original revoke request/outbox first; call IAM outside
+// transactions using retained original ownership/connection anchors, then record
+// the terminal receipt in a short transaction. Existing durable outbox continues
+// even if the original transport expired; current mailbox calls still need their
+// own authenticated READY association. Unknown results replay the original op.
+// Stop wins over every late Register/Get response and successor activation.
+// Every request times out at 30s without losing durable pending/outbox; Revoke
+// uses its own reserved slot and never waits behind a Register/Get request.
+message NetworkMailboxServiceSourceRevokeRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceSourceRevokeResponse {
+  // Complete signed source_revoke_result or existing signed error, under the
+  // same signature/forwarding rules as SourceRegisterResponse. Success confirms
+  // IAM's COMMITTED terminal receipt and lineage_stopped=true, not local enqueue.
+  // An expired named predecessor stays expired while any active head is revoked
+  // and successors are permanently stopped. Unconfirmed revocation stays pending
+  // and locally stopped. No approval/challenge/login or new error code is added.
   bytes frame_json = 1;
 }

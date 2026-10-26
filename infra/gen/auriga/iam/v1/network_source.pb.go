@@ -445,9 +445,26 @@ type RegisterAgentSourceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Original create receipt (revision=1). Replays may already be revoked/expired;
 	// callers MUST Get before use and cannot activate from this receipt alone.
-	Source        *NetworkAgentSource `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Source *NetworkAgentSource `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
+	// Mutually exclusive with source. ONLY after original connection ownership
+	// verification, same-original-op serialization and a DURABLE failure receipt:
+	// no source committed, and either the original connection is invalid OR a
+	// still-valid request is deterministically rejected for revision mismatch,
+	// non-head predecessor or stopped lineage. The rejection receipt must commit.
+	// Late Register cannot commit after this fence. Unknown/forbidden/timeouts
+	// are NOT proof. Replays return this original response; it never authorizes.
+	DefinitivelyUncommitted bool `protobuf:"varint,2,opt,name=definitively_uncommitted,json=definitivelyUncommitted,proto3" json:"definitively_uncommitted,omitempty"`
+	// Required only for the definitive-failure branch, exactly the original op.
+	OperationId string `protobuf:"bytes,3,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	// Required with definitive failure: sha256:<lowercase hex> of JCS(original
+	// request) using the explicit snake_case JSON mapping in iam-directory.md.
+	RequestDigest string `protobuf:"bytes,4,opt,name=request_digest,json=requestDigest,proto3" json:"request_digest,omitempty"`
+	// Required with definitively_uncommitted: exactly one of
+	// original_connection_invalid_uncommitted, revision_mismatch,
+	// predecessor_not_head, lineage_stopped. A plain gRPC error is not a receipt.
+	RejectionReason string `protobuf:"bytes,5,opt,name=rejection_reason,json=rejectionReason,proto3" json:"rejection_reason,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RegisterAgentSourceResponse) Reset() {
@@ -485,6 +502,34 @@ func (x *RegisterAgentSourceResponse) GetSource() *NetworkAgentSource {
 		return x.Source
 	}
 	return nil
+}
+
+func (x *RegisterAgentSourceResponse) GetDefinitivelyUncommitted() bool {
+	if x != nil {
+		return x.DefinitivelyUncommitted
+	}
+	return false
+}
+
+func (x *RegisterAgentSourceResponse) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *RegisterAgentSourceResponse) GetRequestDigest() string {
+	if x != nil {
+		return x.RequestDigest
+	}
+	return ""
+}
+
+func (x *RegisterAgentSourceResponse) GetRejectionReason() string {
+	if x != nil {
+		return x.RejectionReason
+	}
+	return ""
 }
 
 type GetAgentSourceRequest struct {
@@ -560,9 +605,14 @@ type GetAgentSourceResponse struct {
 	ObservedAt     string `protobuf:"bytes,4,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
 	// Shortest current IAM-policy/identity/connection/source deadline. Empty for
 	// non-active facts. This observation does NOT grant signing or execution.
-	ValidUntil    string `protobuf:"bytes,5,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ValidUntil string `protobuf:"bytes,5,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	// Required presence for the new source-control projection, including false.
+	// Distinguishes naturally expired sources from expired predecessors in a
+	// stopped lineage. Missing means unavailable, never infer false. This does
+	// not change the named generation's stored state/revision or grant authority.
+	LineageStopped *bool `protobuf:"varint,6,opt,name=lineage_stopped,json=lineageStopped,proto3,oneof" json:"lineage_stopped,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetAgentSourceResponse) Reset() {
@@ -630,12 +680,23 @@ func (x *GetAgentSourceResponse) GetValidUntil() string {
 	return ""
 }
 
+func (x *GetAgentSourceResponse) GetLineageStopped() bool {
+	if x != nil && x.LineageStopped != nil {
+		return *x.LineageStopped
+	}
+	return false
+}
+
 type RevokeAgentSourceRequest struct {
-	state            protoimpl.MessageState      `protogen:"open.v1"`
-	SourceBinding    string                      `protobuf:"bytes,1,opt,name=source_binding,json=sourceBinding,proto3" json:"source_binding,omitempty"`
-	Connection       *NetworkAuthorityConnection `protobuf:"bytes,2,opt,name=connection,proto3" json:"connection,omitempty"`
-	ExpectedRevision uint64                      `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
-	OperationId      string                      `protobuf:"bytes,4,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	SourceBinding string                      `protobuf:"bytes,1,opt,name=source_binding,json=sourceBinding,proto3" json:"source_binding,omitempty"`
+	Connection    *NetworkAuthorityConnection `protobuf:"bytes,2,opt,name=connection,proto3" json:"connection,omitempty"`
+	// Retained for wire compatibility only, NOT an exact-revision precondition.
+	// Missing/zero/stale values never block narrowing revocation. Collab emits 0.
+	//
+	// Deprecated: Marked as deprecated in auriga/iam/v1/network_source.proto.
+	ExpectedRevision uint64 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	OperationId      string `protobuf:"bytes,4,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -684,6 +745,7 @@ func (x *RevokeAgentSourceRequest) GetConnection() *NetworkAuthorityConnection {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in auriga/iam/v1/network_source.proto.
 func (x *RevokeAgentSourceRequest) GetExpectedRevision() uint64 {
 	if x != nil {
 		return x.ExpectedRevision
@@ -781,15 +843,19 @@ const file_auriga_iam_v1_network_source_proto_rawDesc = "" +
 	"\foperation_id\x18\x03 \x01(\tR\voperationId\x12<\n" +
 	"\x05scope\x18\x04 \x01(\x0e2&.auriga.iam.v1.NetworkAgentSourceScopeR\x05scope\x12+\n" +
 	"\x11expected_revision\x18\x05 \x01(\x04R\x10expectedRevision\x12/\n" +
-	"\x13predecessor_binding\x18\x06 \x01(\tR\x12predecessorBinding\"X\n" +
+	"\x13predecessor_binding\x18\x06 \x01(\tR\x12predecessorBinding\"\x88\x02\n" +
 	"\x1bRegisterAgentSourceResponse\x129\n" +
-	"\x06source\x18\x01 \x01(\v2!.auriga.iam.v1.NetworkAgentSourceR\x06source\"\xdc\x01\n" +
+	"\x06source\x18\x01 \x01(\v2!.auriga.iam.v1.NetworkAgentSourceR\x06source\x129\n" +
+	"\x18definitively_uncommitted\x18\x02 \x01(\bR\x17definitivelyUncommitted\x12!\n" +
+	"\foperation_id\x18\x03 \x01(\tR\voperationId\x12%\n" +
+	"\x0erequest_digest\x18\x04 \x01(\tR\rrequestDigest\x12)\n" +
+	"\x10rejection_reason\x18\x05 \x01(\tR\x0frejectionReason\"\xdc\x01\n" +
 	"\x15GetAgentSourceRequest\x12%\n" +
 	"\x0esource_binding\x18\x01 \x01(\tR\rsourceBinding\x12I\n" +
 	"\n" +
 	"connection\x18\x02 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\n" +
 	"connection\x12Q\n" +
-	"\fregistration\x18\x03 \x01(\v2-.auriga.iam.v1.NetworkAgentSourceRegistrationR\fregistration\"\x89\x02\n" +
+	"\fregistration\x18\x03 \x01(\v2-.auriga.iam.v1.NetworkAgentSourceRegistrationR\fregistration\"\xcb\x02\n" +
 	"\x16GetAgentSourceResponse\x129\n" +
 	"\x06source\x18\x01 \x01(\v2!.auriga.iam.v1.NetworkAgentSourceR\x06source\x12I\n" +
 	"\n" +
@@ -799,13 +865,15 @@ const file_auriga_iam_v1_network_source_proto_rawDesc = "" +
 	"\vobserved_at\x18\x04 \x01(\tR\n" +
 	"observedAt\x12\x1f\n" +
 	"\vvalid_until\x18\x05 \x01(\tR\n" +
-	"validUntil\"\xdc\x01\n" +
+	"validUntil\x12,\n" +
+	"\x0flineage_stopped\x18\x06 \x01(\bH\x00R\x0elineageStopped\x88\x01\x01B\x12\n" +
+	"\x10_lineage_stopped\"\xe0\x01\n" +
 	"\x18RevokeAgentSourceRequest\x12%\n" +
 	"\x0esource_binding\x18\x01 \x01(\tR\rsourceBinding\x12I\n" +
 	"\n" +
 	"connection\x18\x02 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\n" +
-	"connection\x12+\n" +
-	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\x12!\n" +
+	"connection\x12/\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04B\x02\x18\x01R\x10expectedRevision\x12!\n" +
 	"\foperation_id\x18\x04 \x01(\tR\voperationId\"V\n" +
 	"\x19RevokeAgentSourceResponse\x129\n" +
 	"\x06source\x18\x01 \x01(\v2!.auriga.iam.v1.NetworkAgentSourceR\x06source*z\n" +
@@ -884,6 +952,7 @@ func file_auriga_iam_v1_network_source_proto_init() {
 		return
 	}
 	file_auriga_iam_v1_network_authority_proto_init()
+	file_auriga_iam_v1_network_source_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

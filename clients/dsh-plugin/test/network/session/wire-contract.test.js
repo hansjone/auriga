@@ -11,7 +11,7 @@ import { self } from '../host/fixtures.js';
 import { matches } from '../../../src/network/trust/keyset.js';
 
 const ajv = new Ajv({ strict: false, validateFormats: false });
-for (const file of ['address', 'envelope', 'protocol'])
+for (const file of ['address', 'envelope', 'source-control', 'protocol'])
   ajv.addSchema(
     JSON.parse(
       await readFile(
