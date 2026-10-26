@@ -193,11 +193,13 @@ final class NetworkSourceControl {
         EXPIRED);
   }
 
+  private record PreparedRegister(Map<String, Object> row, boolean existing) {}
+
   private ObjectNode register(SourceGate gate, byte[] bytes, boolean invalid) {
     var frame = gate.request();
     String op = text(frame, "operation_id");
     String business = NetworkJson.canonical(business(frame));
-    Map<String, Object> pending =
+    PreparedRegister prepared =
         transaction(
             s -> {
               lockOp("Register", op);
@@ -207,7 +209,7 @@ final class NetworkSourceControl {
                 require(business.equals(original.get("business_json")), NetworkErrors.CONFLICT);
                 if (invalid && "pending".equals(original.get("status")))
                   throw new AurigaException(UNKNOWN);
-                return original;
+                return new PreparedRegister(original, true);
               }
               // Only the primary ledger, while holding the same key lock as every writer, can
               // prove non-acceptance. Restored/uncertain node histories cannot produce tombstones.
@@ -225,8 +227,8 @@ final class NetworkSourceControl {
                       == null,
                   UNKNOWN);
               if ("reconcile".equals(text(frame, "mode")))
-                return notAccepted(gate, bytes, business);
-              if (invalid) return notAccepted(gate, bytes, business);
+                return new PreparedRegister(notAccepted(gate, bytes, business), false);
+              if (invalid) return new PreparedRegister(notAccepted(gate, bytes, business), false);
               NetworkAgentSourceRegistration registration;
               Map<String, Object> lineage;
               try {
@@ -237,7 +239,7 @@ final class NetworkSourceControl {
                 require(!Boolean.TRUE.equals(lineage.get("stopped")), REVOKED);
                 if (!matchesNative(lineage, frame.path("native_witness"))) {
                   stopAndEnqueue(gate, lineage);
-                  return notAccepted(gate, bytes, business);
+                  return new PreparedRegister(notAccepted(gate, bytes, business), false);
                 }
                 // An unresolved mutation cannot be bypassed by another local or operation id.
                 require(
@@ -250,7 +252,7 @@ final class NetworkSourceControl {
                     UNKNOWN);
               } catch (AurigaException e) {
                 if (e.errorCode().equals(UNKNOWN) || e.errorCode().equals(OVERLOADED)) throw e;
-                return notAccepted(gate, bytes, business);
+                return new PreparedRegister(notAccepted(gate, bytes, business), false);
               }
               var request =
                   RegisterAgentSourceRequest.newBuilder()
@@ -274,24 +276,28 @@ final class NetworkSourceControl {
                   lineage,
                   "pending",
                   null);
-              return operation("Register", op);
+              return new PreparedRegister(operation("Register", op), false);
             });
-    if (!"pending".equals(pending.get("status"))) {
-      // A live current Get is not an ownership receipt for this historical mutation.
-      // Cross-connection replay waits for IAM's dedicated no-create receipt RPC.
-      require(
-          Arrays.equals(
-              gate.connection().toByteArray(), (byte[]) pending.get("original_connection")),
-          UNKNOWN);
+    var pending = prepared.row();
+    boolean sameConnection =
+        Arrays.equals(gate.connection().toByteArray(), (byte[]) pending.get("original_connection"));
+    boolean receiptRead =
+        prepared.existing()
+            && pending.get("iam_request") != null
+            && ("pending".equals(pending.get("status"))
+                || "reconcile".equals(text(frame, "mode"))
+                || !sameConnection);
+    if (!"pending".equals(pending.get("status")) && !receiptRead) {
+      require(sameConnection, UNKNOWN);
       return result(pending);
     }
     try {
-      var original = RegisterAgentSourceRequest.parseFrom((byte[]) pending.get("iam_request"));
-      if ("reconcile".equals(text(frame, "mode"))) {
-        // ResolveTarget denial also covers reversible policy/configuration changes. Its wire
-        // response cannot prove that the original connection is permanently invalid. Without
-        // a saved receipt or a no-create IAM lookup, replay could issue without a native witness.
-        throw new AurigaException(UNKNOWN);
+      var original = frozenRegister(pending);
+      RegisterAgentSourceResponse response;
+      if (receiptRead) {
+        transactionWithoutResult(s -> wire.lockSourceGate(gate, true));
+        // A miss never falls back to Register, even if the old C might still be live.
+        response = iam.readSourceReceipt(original);
       } else {
         require(gate.connection().equals(original.getConnection()), UNKNOWN);
         require(
@@ -310,8 +316,8 @@ final class NetworkSourceControl {
               witness(gate, "Register:" + op);
               nativeBinding(lineage, frame.path("native_witness"));
             });
+        response = iam.registerSource(original);
       }
-      var response = iam.registerSource(original);
       validateRegister(original, response, pending.get("request_digest").toString());
       // Commit the complete original receipt before attempting any transport/freshness CAS.
       var value =
@@ -319,7 +325,23 @@ final class NetworkSourceControl {
               s -> {
                 lockOp("Register", op);
                 var current = operation("Register", op);
-                if (!"pending".equals(current.get("status"))) return result(current);
+                require(
+                    current != null
+                        && Arrays.equals(
+                            (byte[]) current.get("iam_request"),
+                            (byte[]) pending.get("iam_request"))
+                        && Objects.equals(
+                            current.get("request_digest"), pending.get("request_digest"))
+                        && Objects.equals(
+                            current.get("business_json"), pending.get("business_json")),
+                    UNKNOWN);
+                if (!"pending".equals(current.get("status"))) {
+                  require(
+                      current.get("iam_response") != null
+                          && response.equals(registerResponse(current.get("iam_response"))),
+                      UNKNOWN);
+                  return result(current);
+                }
                 var lineage = lockLineage((UUID) current.get("lineage_id"));
                 ObjectNode responseFrame;
                 String state;
@@ -359,7 +381,7 @@ final class NetworkSourceControl {
                 return responseFrame;
               });
       return value;
-    } catch (RuntimeException | com.google.protobuf.InvalidProtocolBufferException e) {
+    } catch (RuntimeException e) {
       // No ordinary RPC, storage or post-pending validation failure is a negative receipt.
       throw new AurigaException(UNKNOWN);
     }
@@ -942,6 +964,46 @@ final class NetworkSourceControl {
             && !source.getOwnerUserId().isBlank()
             && instant(source.getExpiresAt()).isAfter(instant(source.getNotBefore())),
         UNKNOWN);
+  }
+
+  private static RegisterAgentSourceRequest frozenRegister(Map<String, Object> row) {
+    try {
+      var original = RegisterAgentSourceRequest.parseFrom((byte[]) row.get("iam_request"));
+      String json = NetworkJson.canonical(requestJson(original));
+      var business = NetworkJson.parse(row.get("business_json").toString());
+      require(
+          original.getOperationId().equals(row.get("operation_id"))
+              && original.getConnection().getTenantId().equals(tenant().toString())
+              && original.getConnection().getRealm().equals(row.get("realm"))
+              && original.getConnection().getNode().equals(row.get("node_id"))
+              && Arrays.equals(
+                  original.getConnection().toByteArray(), (byte[]) row.get("original_connection"))
+              && original.getRegistration().getRealm().equals(original.getConnection().getRealm())
+              && original.getRegistration().getNode().equals(original.getConnection().getNode())
+              && original.getScope()
+                  == NetworkAgentSourceScope.NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND
+              && "durable_unicast_send".equals(text(business, "scope"))
+              && original.getPredecessorBinding().equals(text(business, "predecessor_binding"))
+              && Long.toUnsignedString(original.getExpectedRevision())
+                  .equals(text(business, "expected_revision"))
+              && json.equals(row.get("iam_request_json"))
+              && NetworkJson.digest(NetworkJson.parse(json)).equals(row.get("request_digest")),
+          UNKNOWN);
+      for (var field : registrationJson(original.getRegistration()).properties())
+        require(
+            field.getValue().equals(business.path("registration").path(field.getKey())), UNKNOWN);
+      return original;
+    } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+      throw new AurigaException(UNKNOWN);
+    }
+  }
+
+  private static RegisterAgentSourceResponse registerResponse(Object bytes) {
+    try {
+      return RegisterAgentSourceResponse.parseFrom((byte[]) bytes);
+    } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+      throw new AurigaException(UNKNOWN);
+    }
   }
 
   private void validateGet(

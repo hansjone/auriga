@@ -27,6 +27,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +56,8 @@ class NetworkSourceControlPostgresTest {
   static final SourcePeer peer = new SourcePeer();
   static final Authority authority = new Authority();
   static final Clock CLOCK = Clock.systemUTC();
+  static final Context.Key<String> IAM_TENANT = Context.key("source-fixture-tenant");
+  static final Context.Key<String> IAM_CALLER = Context.key("source-fixture-caller");
 
   static class Authority extends NetworkAuthorityGrpcTest.Authority {
     final Set<String> invalid = ConcurrentHashMap.newKeySet();
@@ -78,6 +81,12 @@ class NetworkSourceControlPostgresTest {
     final Set<String> stopped = ConcurrentHashMap.newKeySet();
     final AtomicInteger registerCalls = new AtomicInteger();
     final AtomicInteger getCalls = new AtomicInteger();
+    final AtomicInteger readCalls = new AtomicInteger();
+    volatile ReadAgentSourceReceiptRequest lastRead;
+    volatile Status readFailure;
+    volatile boolean dropRegisterBeforeCommit, receiptOwnerValid = true;
+    volatile Runnable afterRead = () -> {};
+    volatile UnaryOperator<RegisterAgentSourceResponse> readReply = UnaryOperator.identity();
     volatile Runnable afterRegister = () -> {}, afterGet = () -> {}, afterRevoke = () -> {};
     volatile boolean loseRegister, loseRevoke, missingPresence, wrongEcho, reject;
     volatile RevokeAgentSourceRequest lastRevoke;
@@ -87,14 +96,18 @@ class NetworkSourceControlPostgresTest {
     public void registerAgentSource(
         RegisterAgentSourceRequest r, StreamObserver<RegisterAgentSourceResponse> o) {
       registerCalls.incrementAndGet();
+      if (dropRegisterBeforeCommit) {
+        o.onError(Status.UNAVAILABLE.asRuntimeException());
+        return;
+      }
       RegisterAgentSourceResponse result;
       synchronized (this) {
-        var old = requests.putIfAbsent(r.getOperationId(), r);
+        var old = requests.putIfAbsent(key(r), r);
         if (old != null && !old.equals(r)) {
           o.onError(Status.ABORTED.asRuntimeException());
           return;
         }
-        result = receipts.get(r.getOperationId());
+        result = receipts.get(key(r));
         if (result == null) {
           String registrationId = r.getRegistration().getRegistrationId();
           String head = heads.get(registrationId);
@@ -134,7 +147,7 @@ class NetworkSourceControlPostgresTest {
           } else {
             var fact =
                 NetworkAgentSource.newBuilder()
-                    .setSourceBinding("binding-" + r.getOperationId())
+                    .setSourceBinding("binding-" + UuidV7.next())
                     .setOriginalConnection(r.getConnection())
                     .setRegistration(r.getRegistration())
                     .setScope(r.getScope())
@@ -149,7 +162,7 @@ class NetworkSourceControlPostgresTest {
             heads.put(registrationId, fact.getSourceBinding());
             result = RegisterAgentSourceResponse.newBuilder().setSource(fact).build();
           }
-          receipts.put(r.getOperationId(), result);
+          receipts.put(key(r), result);
         }
       }
       afterRegister.run();
@@ -158,6 +171,46 @@ class NetworkSourceControlPostgresTest {
         o.onNext(result);
         o.onCompleted();
       }
+    }
+
+    static String key(RegisterAgentSourceRequest r) {
+      return r.getConnection().getTenantId() + "/" + r.getOperationId();
+    }
+
+    @Override
+    public void readAgentSourceReceipt(
+        ReadAgentSourceReceiptRequest r, StreamObserver<RegisterAgentSourceResponse> o) {
+      readCalls.incrementAndGet();
+      lastRead = r;
+      if (!r.hasOriginalRequest()
+          || !"Bearer collab-test".equals(IAM_CALLER.get())
+          || !r.getOriginalRequest().getConnection().getTenantId().equals(IAM_TENANT.get())
+          || TenantContext.PLATFORM_TENANT.toString().equals(IAM_TENANT.get())
+          || !receiptOwnerValid) {
+        o.onError(Status.PERMISSION_DENIED.asRuntimeException());
+        return;
+      }
+      if (readFailure != null) {
+        o.onError(readFailure.asRuntimeException());
+        return;
+      }
+      var request = r.getOriginalRequest();
+      RegisterAgentSourceResponse receipt;
+      synchronized (this) {
+        var original = requests.get(key(request));
+        receipt = receipts.get(key(request));
+        if (original == null || receipt == null) {
+          o.onError(Status.UNAVAILABLE.asRuntimeException());
+          return;
+        }
+        if (!original.equals(request)) {
+          o.onError(Status.ABORTED.asRuntimeException());
+          return;
+        }
+      }
+      afterRead.run();
+      o.onNext(readReply.apply(receipt));
+      o.onCompleted();
     }
 
     @Override
@@ -244,6 +297,12 @@ class NetworkSourceControlPostgresTest {
     }
 
     @Override
+    public RegisterAgentSourceResponse readSourceReceipt(RegisterAgentSourceRequest r) {
+      outside();
+      return super.readSourceReceipt(r);
+    }
+
+    @Override
     public GetAgentSourceResponse getSource(GetAgentSourceRequest r) {
       outside();
       return super.getSource(r);
@@ -286,7 +345,22 @@ class NetworkSourceControlPostgresTest {
     server =
         NettyServerBuilder.forAddress(new InetSocketAddress("127.0.0.1", 0))
             .addService(authority)
-            .addService(peer)
+            .addService(
+                ServerInterceptors.intercept(
+                    peer,
+                    new ServerInterceptor() {
+                      @Override
+                      public <Q, R> ServerCall.Listener<Q> interceptCall(
+                          ServerCall<Q, R> call, Metadata headers, ServerCallHandler<Q, R> next) {
+                        return Contexts.interceptCall(
+                            Context.current()
+                                .withValue(IAM_TENANT, headers.get(GrpcMetadata.TENANT_ID))
+                                .withValue(IAM_CALLER, headers.get(GrpcMetadata.AUTHORIZATION)),
+                            call,
+                            headers,
+                            next);
+                      }
+                    }))
             .build()
             .start();
     channel =
@@ -348,6 +422,11 @@ class NetworkSourceControlPostgresTest {
     peer.missingPresence = false;
     peer.wrongEcho = false;
     peer.reject = false;
+    peer.readFailure = null;
+    peer.receiptOwnerValid = true;
+    peer.dropRegisterBeforeCommit = false;
+    peer.afterRead = () -> {};
+    peer.readReply = UnaryOperator.identity();
   }
 
   @AfterAll
@@ -488,6 +567,334 @@ class NetworkSourceControlPostgresTest {
     assertEquals("network." + code, response.path("code").asString());
   }
 
+  static Fixture reconnect(Fixture f) {
+    authority.invalid.add(f.c().getIngress());
+    var next = f.c().toBuilder().setIngress(f.c().getIngress() + "-next").build();
+    var ready =
+        f.ready()
+            .deepCopy()
+            .put("boot_id", f.ready().path("boot_id").asString() + "-next")
+            .put("channel_nonce", f.ready().path("channel_nonce").asString() + "-next")
+            .put("request_id", "ready-" + UUID.randomUUID())
+            .put("local_high_water", "1")
+            .put("registration_revision", "1");
+    call(() -> wire.ready(next, bytes(ready)));
+    return new Fixture(next, ready, f.registration());
+  }
+
+  static ObjectNode reconcile(Fixture current, ObjectNode original) {
+    return original
+        .deepCopy()
+        .put("mode", "reconcile")
+        .putNull("native_witness")
+        .put("epoch", current.ready().path("boot_id").equals(original.path("boot_id")) ? "1" : "2")
+        .put("boot_id", current.ready().path("boot_id").asString())
+        .put("request_id", "read-" + UUID.randomUUID());
+  }
+
+  static Map<String, Object> operationRow(ObjectNode request) {
+    return db(
+        () ->
+            jdbc.queryForMap(
+                "SELECT * FROM collab.network_source_operation WHERE tenant_id=? AND method='Register' AND operation_id=?",
+                TENANT,
+                request.path("operation_id").asString()));
+  }
+
+  @Test
+  void committedIamReceiptLostByCollabRecoversAfterReconnectWithFrozenOriginalRequest()
+      throws Exception {
+    var first = fresh();
+    var request = frame(first, "source_register");
+    peer.loseRegister = true;
+    code("outcome_unknown", register(first, request));
+    peer.loseRegister = false;
+    var before = operationRow(request);
+    var original = RegisterAgentSourceRequest.parseFrom((byte[]) before.get("iam_request"));
+    int registrations = peer.registerCalls.get(),
+        gets = peer.getCalls.get(),
+        reads = peer.readCalls.get();
+    var current = reconnect(first);
+    var read = reconcile(current, request);
+    var recovered = register(current, read);
+    String id = binding(recovered);
+    assertEquals(original, peer.lastRead.getOriginalRequest());
+    assertEquals(reads + 1, peer.readCalls.get());
+    assertEquals(registrations, peer.registerCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+    var saved = operationRow(request);
+    assertEquals("registered", saved.get("status"));
+    assertArrayEquals((byte[]) before.get("iam_request"), (byte[]) saved.get("iam_request"));
+    assertArrayEquals((byte[]) before.get("original_frame"), (byte[]) saved.get("original_frame"));
+    assertEquals(before.get("request_digest"), saved.get("request_digest"));
+    assertEquals(
+        peer.receipts.get(SourcePeer.key(original)),
+        RegisterAgentSourceResponse.parseFrom((byte[]) saved.get("iam_response")));
+    assertEquals("2", recovered.path("server_auth").path("audience").path("epoch").asString());
+    assertEquals(
+        current.ready().path("channel_nonce"), recovered.path("server_auth").path("channel_nonce"));
+    assertEquals(read.path("request_id"), recovered.path("request_id"));
+    assertNoActiveObservation(id);
+    var missingWitness = frame(current, "source_get").put("epoch", "2").put("source_binding", id);
+    missingWitness.remove("native_witness");
+    NetworkAuthorityGrpcTest.denied(() -> get(current, missingWitness), "network.protocol_error");
+    assertEquals(gets, peer.getCalls.get());
+    assertEquals(
+        "active",
+        get(current, frame(current, "source_get").put("epoch", "2").put("source_binding", id))
+            .path("source")
+            .path("state")
+            .asString());
+  }
+
+  @Test
+  void readMissAndAllIndeterminateStatusesRetainPendingWithoutRegistrationFallback() {
+    var f = fresh();
+    var request = frame(f, "source_register");
+    peer.dropRegisterBeforeCommit = true;
+    code("outcome_unknown", register(f, request));
+    peer.dropRegisterBeforeCommit = false;
+    int registrations = peer.registerCalls.get();
+    var read = reconcile(f, request);
+    for (Status status :
+        List.of(
+            Status.UNAVAILABLE,
+            Status.PERMISSION_DENIED,
+            Status.UNIMPLEMENTED,
+            Status.NOT_FOUND,
+            Status.CANCELLED,
+            Status.DEADLINE_EXCEEDED)) {
+      peer.readFailure = status;
+      code("outcome_unknown", register(f, read));
+      assertEquals("pending", operationRow(request).get("status"));
+      assertNull(operationRow(request).get("iam_response"));
+    }
+    peer.readFailure = null;
+    code("outcome_unknown", register(f, read));
+    assertEquals(registrations, peer.registerCalls.get());
+    assertEquals(0, sourceCount(f));
+    int reads = peer.readCalls.get();
+    var absent = frame(f, "source_register").put("mode", "reconcile").putNull("native_witness");
+    assertEquals("not_accepted", register(f, absent).path("result").asString());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(registrations, peer.registerCalls.get());
+  }
+
+  @Test
+  void readFailureReceiptRequiresExactSavedDigestBeforeDurableProjection() throws Exception {
+    var f = fresh();
+    var request = frame(f, "source_register");
+    peer.reject = true;
+    peer.loseRegister = true;
+    code("outcome_unknown", register(f, request));
+    peer.loseRegister = false;
+    var current = reconnect(f);
+    var read = reconcile(current, request);
+    peer.readReply = r -> r.toBuilder().setRequestDigest("sha256:" + "b".repeat(64)).build();
+    code("outcome_unknown", register(current, read));
+    assertNull(operationRow(request).get("iam_response"));
+    assertEquals("pending", operationRow(request).get("status"));
+    peer.readReply = UnaryOperator.identity();
+    var response = register(current, read);
+    assertEquals("not_committed", response.path("result").asString(), response.toString());
+    var saved = operationRow(request);
+    assertEquals(
+        saved.get("request_digest"),
+        response.path("failure_evidence").path("request_digest").asString());
+    var receipt = RegisterAgentSourceResponse.parseFrom((byte[]) saved.get("iam_response"));
+    assertEquals(peer.receipts.get(SourcePeer.key(peer.lastRead.getOriginalRequest())), receipt);
+    assertEquals("revision_mismatch", receipt.getRejectionReason());
+    assertEquals(0, sourceCount(f));
+  }
+
+  @Test
+  void badReadTuplesFrozenBodiesAndOwnerFailuresNeverReplaceSavedTruth() throws Exception {
+    var f = fresh();
+    var request = frame(f, "source_register");
+    peer.loseRegister = true;
+    code("outcome_unknown", register(f, request));
+    peer.loseRegister = false;
+    var originalRow = operationRow(request);
+    var original = RegisterAgentSourceRequest.parseFrom((byte[]) originalRow.get("iam_request"));
+    var current = reconnect(f);
+    var read = reconcile(current, request);
+    List<UnaryOperator<RegisterAgentSourceResponse>> invalid =
+        List.of(
+            r ->
+                r.toBuilder()
+                    .setSource(
+                        r.getSource().toBuilder()
+                            .setOriginalConnection(
+                                original.getConnection().toBuilder()
+                                    .setTenantId(UUID.randomUUID().toString())))
+                    .build(),
+            r ->
+                r.toBuilder()
+                    .setSource(
+                        r.getSource().toBuilder()
+                            .setRegistration(
+                                original.getRegistration().toBuilder().setNode("99999")))
+                    .build(),
+            r -> r.toBuilder().setSource(r.getSource().toBuilder().setScopeValue(0)).build(),
+            r ->
+                r.toBuilder()
+                    .setSource(r.getSource().toBuilder().setPredecessorBinding("wrong-head"))
+                    .build(),
+            r -> r.toBuilder().setSource(r.getSource().toBuilder().setRevision(2)).build());
+    for (var change : invalid) {
+      peer.readReply = change;
+      code("outcome_unknown", register(current, read));
+      assertNull(operationRow(request).get("iam_response"));
+    }
+    peer.readReply = UnaryOperator.identity();
+    int reads = peer.readCalls.get();
+    var alteredFrame = read.deepCopy();
+    ((ObjectNode) alteredFrame.path("registration"))
+        .put("allocation_fingerprint", "sha256:" + "b".repeat(64));
+    code("conflict", register(current, alteredFrame));
+    assertEquals(reads, peer.readCalls.get());
+    var changed = original.toBuilder().setExpectedRevision(1).build();
+    db(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_source_operation SET iam_request=? WHERE tenant_id=? AND id=?",
+                changed.toByteArray(),
+                TENANT,
+                originalRow.get("id")));
+    code("outcome_unknown", register(current, read));
+    assertEquals(reads, peer.readCalls.get());
+    db(
+        () ->
+            jdbc.update(
+                "UPDATE collab.network_source_operation SET iam_request=? WHERE tenant_id=? AND id=?",
+                original.toByteArray(),
+                TENANT,
+                originalRow.get("id")));
+    peer.receiptOwnerValid = false;
+    code("outcome_unknown", register(current, read));
+    peer.receiptOwnerValid = true;
+    String id = binding(register(current, read));
+    assertNoActiveObservation(id);
+    var savedReceipt = (byte[]) operationRow(request).get("iam_response");
+    peer.readReply =
+        r ->
+            r.toBuilder()
+                .setSource(r.getSource().toBuilder().setSourceBinding("other-valid-binding"))
+                .build();
+    code("outcome_unknown", register(current, read));
+    assertArrayEquals(savedReceipt, (byte[]) operationRow(request).get("iam_response"));
+    peer.readReply = UnaryOperator.identity();
+    peer.receiptOwnerValid = false;
+    code("outcome_unknown", register(current, read));
+    peer.receiptOwnerValid = true;
+    var other = fresh();
+    code(
+        "unauthorized",
+        register(other, reconcile(other, request))); // Same op is not enough for another node.
+    UUID foreign = UUID.randomUUID();
+    reads = peer.readCalls.get();
+    TenantContext.run(
+        foreign,
+        () ->
+            NetworkAuthorityGrpcTest.denied(
+                () -> client.readSourceReceipt(original), "common.forbidden"));
+    assertEquals(reads, peer.readCalls.get());
+    assertNoActiveObservation(id);
+  }
+
+  @Test
+  void lateHistoricalReadCannotUndoReservedSlotRevocation() throws Exception {
+    var first = fresh();
+    var request = frame(first, "source_register");
+    String id = binding(register(first, request));
+    get(first, id);
+    var current = reconnect(first);
+    var read = reconcile(current, request);
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    peer.afterRead =
+        () -> {
+          entered.countDown();
+          await(release);
+        };
+    int gets = peer.getCalls.get();
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var pending = executor.submit(() -> register(current, read));
+      assertTrue(entered.await(3, TimeUnit.SECONDS));
+      var revoke =
+          frame(current, "source_revoke")
+              .put("epoch", "2")
+              .put("source_binding", id)
+              .put("operation_id", "stop-" + UUID.randomUUID());
+      var result = NetworkJson.parse(call(() -> wire.sourceRevoke(current.c(), bytes(revoke))));
+      assertTrue(result.path("lineage_stopped").asBoolean(), result.toString());
+      release.countDown();
+      var receipt = pending.get(5, TimeUnit.SECONDS);
+      assertEquals("registered", receipt.path("result").asString());
+      assertEquals(
+          "active",
+          receipt.path("source").path("state").asString(),
+          "The historical receipt stays immutable");
+      assertEquals(gets, peer.getCalls.get());
+      assertNoActiveObservation(id);
+      assertTrue(
+          db(
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT stopped FROM collab.network_source_lineage WHERE tenant_id=? AND registration_id=?",
+                      Boolean.class,
+                      TENANT,
+                      UUID.fromString(first.registration().path("registration_id").asString()))));
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
+  void compiledReadMissRegisterFallbackViolatesTheSameNoCreationInvariant() throws Exception {
+    var f = fresh();
+    var request = frame(f, "source_register");
+    peer.dropRegisterBeforeCommit = true;
+    code("outcome_unknown", register(f, request));
+    peer.dropRegisterBeforeCommit = false;
+    var original =
+        RegisterAgentSourceRequest.parseFrom((byte[]) operationRow(request).get("iam_request"));
+    int registrations = peer.registerCalls.get();
+    code("outcome_unknown", register(f, reconcile(f, request)));
+    assertEquals(registrations, peer.registerCalls.get());
+    assertNoReadCreation(f);
+    var bad = call(() -> UnsafeReadFallback.read(source, original));
+    assertTrue(bad.hasSource());
+    assertThrows(AssertionError.class, () -> assertNoReadCreation(f));
+    assertEquals(registrations + 1, peer.registerCalls.get());
+  }
+
+  static final class UnsafeReadFallback {
+    static RegisterAgentSourceResponse read(
+        NetworkSourceGrpcAuthority source, RegisterAgentSourceRequest original) {
+      try {
+        return source.readSourceReceipt(original);
+      } catch (auriga.common.error.AurigaException e) {
+        return source.registerSource(original);
+      }
+    }
+  }
+
+  static int sourceCount(Fixture f) {
+    return (int)
+        peer.sources.values().stream()
+            .filter(
+                s ->
+                    s.getRegistration()
+                        .getRegistrationId()
+                        .equals(f.registration().path("registration_id").asString()))
+            .count();
+  }
+
+  static void assertNoReadCreation(Fixture f) {
+    assertEquals(0, sourceCount(f), "A receipt read must never create an IAM source");
+  }
+
   @Test
   void realGrpcUsesFullTypedWitnessAndStoresOriginalRequestAndObservation() {
     var f = fresh();
@@ -549,7 +956,7 @@ class NetworkSourceControlPostgresTest {
   }
 
   @Test
-  void unknownOriginalNeedsFreshWitnessAndCrossConnectionReceiptWaitsForReceiptRpc() {
+  void pendingAndSavedReceiptsUsePureReadWithoutCurrentGetOrRegisterReplay() {
     var f = fresh();
     var request = frame(f, "source_register");
     peer.loseRegister = true;
@@ -557,11 +964,11 @@ class NetworkSourceControlPostgresTest {
     peer.loseRegister = false;
     var reconcile = request.deepCopy().put("mode", "reconcile").putNull("native_witness");
     int before = peer.registerCalls.get();
-    code("outcome_unknown", register(f, reconcile));
+    String binding = binding(register(f, reconcile));
     assertEquals(before, peer.registerCalls.get());
     request.set("native_witness", witness(f));
     int getsBeforeIssue = peer.getCalls.get();
-    String binding = binding(register(f, request));
+    assertEquals(binding, binding(register(f, request)));
     assertEquals(
         getsBeforeIssue,
         peer.getCalls.get(),
@@ -580,12 +987,23 @@ class NetworkSourceControlPostgresTest {
     var nextFixture = new Fixture(next, ready, f.registration());
     reconcile.put("epoch", "2").put("boot_id", "next-boot");
     int getsBeforeReplay = peer.getCalls.get();
-    code("outcome_unknown", register(nextFixture, reconcile));
+    assertEquals(binding, binding(register(nextFixture, reconcile)));
     assertEquals(
         getsBeforeReplay,
         peer.getCalls.get(),
         "Cross-connection receipt reads need the dedicated IAM RPC");
-    assertEquals(f.c(), peer.requests.get(request.path("operation_id").asString()).getConnection());
+    assertEquals(f.c(), peer.lastRead.getOriginalRequest().getConnection());
+    assertEquals(
+        f.c(),
+        peer.requests.get(TENANT + "/" + request.path("operation_id").asString()).getConnection());
+    assertNoActiveObservation(binding);
+    assertEquals(
+        "2",
+        NetworkJson.parse(call(() -> wire.sourceRegister(nextFixture.c(), bytes(reconcile))))
+            .path("server_auth")
+            .path("audience")
+            .path("epoch")
+            .asString());
     var get = frame(nextFixture, "source_get").put("source_binding", binding).put("epoch", "2");
     assertEquals("active", get(nextFixture, get).path("source").path("state").asString());
     assertEquals(next, peer.lastGet.getConnection());
@@ -602,7 +1020,7 @@ class NetworkSourceControlPostgresTest {
     assertEquals("not_accepted", failed.path("result").asString(), failed.toString());
     request.set("native_witness", witness(f));
     assertEquals(failed.path("failure_evidence"), register(f, request).path("failure_evidence"));
-    assertFalse(peer.requests.containsKey(request.path("operation_id").asString()));
+    assertFalse(peer.requests.containsKey(TENANT + "/" + request.path("operation_id").asString()));
     var missing = frame(f, "source_register").put("mode", "reconcile").putNull("native_witness");
     assertEquals("not_accepted", register(f, missing).path("result").asString());
     db(
@@ -621,9 +1039,9 @@ class NetworkSourceControlPostgresTest {
   void unknownAfterConnectionReplacementNeverUsesResolveDenialAsANoCreateProof() {
     var f = fresh();
     var request = frame(f, "source_register");
-    peer.loseRegister = true;
+    peer.dropRegisterBeforeCommit = true;
     code("outcome_unknown", register(f, request));
-    peer.loseRegister = false;
+    peer.dropRegisterBeforeCommit = false;
     int calls = peer.registerCalls.get();
     authority.invalid.add(f.c().getIngress());
     var next = f.c().toBuilder().setIngress(f.c().getIngress() + "-next").build();

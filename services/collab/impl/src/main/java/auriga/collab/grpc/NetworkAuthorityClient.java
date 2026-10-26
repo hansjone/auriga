@@ -70,6 +70,21 @@ public class NetworkAuthorityClient implements NetworkAuthority {
                 .registerAgentSource(request));
   }
 
+  public RegisterAgentSourceResponse readSourceReceipt(RegisterAgentSourceRequest original) {
+    // Validate the delegated tenant, not the liveness of this retained OLD connection.
+    if (!original.hasConnection()
+        || !tenant().toString().equals(original.getConnection().getTenantId()))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    return sourceCall(
+        () ->
+            sources
+                .withDeadlineAfter(remainingMillis(), TimeUnit.MILLISECONDS)
+                .readAgentSourceReceipt(
+                    ReadAgentSourceReceiptRequest.newBuilder()
+                        .setOriginalRequest(original)
+                        .build()));
+  }
+
   public GetAgentSourceResponse getSource(GetAgentSourceRequest request) {
     binding(request.getConnection());
     return sourceCall(

@@ -6,13 +6,14 @@ V14 在 collab schema 保存完整来源操作、原 IAM 请求/回执、native 
 后台在平台上下文通过仅针对索引的 SELECT policy 发现租户，再切入对应业务租户按原请求重试撤销，IAM 调用期间不持数据库事务。
 回执只是历史事实，只有在线 Get 经本地最终 CAS 后才保存有界观察；未开放 SEND，签前第五 RPC 保持独立。
 
-当前恢复限制：已保存回执仅在原连接仍匹配时重新封装；pending 的原连接仍匹配时可凭新鲜见证原 op 重试。
-跨连接的历史回执读取，以及无回执的无见证 reconcile，均保持 `network.outcome_unknown`，待 IAM 纯回执读取 RPC 接线。
-不以当前 Get 代替历史 mutation 的归属核验。
-现有 Resolve 的拒绝同时包含可恢复的配置停用，无法证明旧连接永久失效；不能据此盲重放可能签发的 Register。
-这一分支需要具备“绝不新建”语义的权威回执读取/原连接失效围栏后才能安全放开。
+未决操作对账和跨连接的已存 IAM 回执恢复通过 `ReadAgentSourceReceipt` 纯读取 RPC。
+请求只使用 PG 冻结的原 op/C/registration/scope/前代/CAS，不以当前 C2 改写原体，也不调用当前 Get 核历史归属。
+响应核原请求 JCS 摘要、完整业务元组和已存原响应后才耐久保存；当前 C2 仅用于认证门禁和签回历史结果。
+Read 不产生观察缓存或激活，真正 Get/使用仍需新鲜 native、typed-local、当前连接/epoch/boot 与最终 CAS。
+仅首次新操作在 pending/outbox 提交后调用 Register；已受理操作的 Read 缺行/锚点/不可判定/依赖故障保持 `network.outcome_unknown`，绝不盲回退 Register 或推断 not_committed。
+原 C 确定未提交的有写围栏仍待整链接线；纯读不保证所有 pending 都能收敛。
 备份恢复或历史完整性不明时，须先持久设置节点 `source_operation_recovery_gap=true`；核实前不可清除。
-未完成真 IAM 联调：需与 IAMSOURCEV2 合入后验证无版本整链撤销、Register 拒绝回执和 Get 字段 6 presence。
+IAM/网关/插件前置已合入；本模块测试中的 IAM 是契约 gRPC fixture，不冒真实 IAM/双 DSH 整链联调。
 
 `NetworkMailboxService` 的内部 gRPC 入口由 common `GrpcServer` 自动收集，八个 RPC
 只接受 `svc:ai-gateway` 内部服务 JWT、平台服务租户和已授权的业务租户委托。
