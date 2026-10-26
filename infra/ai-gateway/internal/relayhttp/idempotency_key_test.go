@@ -20,11 +20,16 @@ func TestIdempotencyHeaderUnicodeAndInvalidValues(t *testing.T) {
 		{"129", []string{strings.Repeat("中", 129)}, false},
 		{"badUTF8", []string{string([]byte{0xff})}, false},
 		{"duplicate", []string{"one", "two"}, false},
-		{"empty", []string{""}, false},
-		{"nul", []string{"a\x00b"}, false},
-		{"tab", []string{"a\tb"}, false},
-		{"del", []string{"a\x7fb"}, false},
-		{"unicodeControl", []string{"a\u0085b"}, false},
+		// Preserve the reviewed postHeaders behavior, without extending its
+		// restrictions. HTTP wire syntax is separately enforced by net/http.
+		{"empty", []string{""}, true},
+		{"nul", []string{"a\x00b"}, true},
+		{"tab", []string{"a\tb"}, true},
+		{"del", []string{"a\x7fb"}, true},
+		{"unicodeControl", []string{"a\u0085b"}, true},
+		{"comma", []string{"a,b"}, false},
+		{"cr", []string{"a\rb"}, false},
+		{"lf", []string{"a\nb"}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := httptest.NewRequest("POST", chatPath, nil)
@@ -65,10 +70,7 @@ func TestHTTPInvalidUTF8KeysRejectedBeforeExecution(t *testing.T) {
 		{"han129", []string{strings.Repeat("中", 129)}},
 		{"fourbyte129", []string{strings.Repeat("😀", 129)}},
 		{"badUTF8", []string{string([]byte{0xff})}},
-		{"empty", []string{""}},
 		{"duplicate", []string{"same", "same"}},
-		{"tab", []string{"a\tb"}},
-		{"unicodeControl", []string{"a\u0085b"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			keyError(t, f.keyRequest(t.Context(), s, c.keys, plainRequest), 400, "common.validation_failed")

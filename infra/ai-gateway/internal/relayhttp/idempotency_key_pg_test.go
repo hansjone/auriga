@@ -93,8 +93,6 @@ func TestHTTPUTF8IdempotencyKeyBoundaries(t *testing.T) {
 		{"han129", []string{strings.Repeat("中", 129)}, false},
 		{"fourbyte129", []string{strings.Repeat("😀", 129)}, false},
 		{"badUTF8", []string{string([]byte{0xff})}, false},
-		{"empty", []string{""}, false},
-		{"unicodeControl", []string{"a\u0085b"}, false},
 		{"duplicate", []string{strings.Repeat("中", 128), strings.Repeat("中", 128)}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -131,6 +129,37 @@ func TestHTTPUTF8IdempotencyKeyBoundaries(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestHTTPEmptyAndAbsentKeysRemainIndependentRequests(t *testing.T) {
+	f := fixtureNew(t)
+	var calls atomic.Int32
+	s := f.server(t, finite(completion(textChoice), &calls))
+	ids := map[string]bool{}
+	for _, keys := range [][]string{nil, {""}, nil, {""}} {
+		r := f.keyRequest(t.Context(), s, keys, plainRequest)
+		if r.err != nil || r.status != 200 || r.requestID == "" || ids[r.requestID] {
+			t.Fatalf("empty/absent key replayed or rejected: %+v", r)
+		}
+		ids[r.requestID] = true
+	}
+	if calls.Load() != 4 {
+		t.Fatal("empty/absent keys did not execute independently")
+	}
+	f.keyFacts(t, 4, 0, 0, 4)
+	err := f.db.Transaction(t.Context(), f.control.tenant, func(tx pgx.Tx) error {
+		var hashed int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM ai.budget_request WHERE tenant_id=$1 AND key_hash IS NOT NULL`, f.control.tenant).Scan(&hashed); err != nil {
+			return err
+		}
+		if hashed != 0 {
+			t.Error("empty/absent keys acquired idempotency hashes")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
