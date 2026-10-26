@@ -18,14 +18,22 @@ import org.junit.jupiter.api.Test;
 
 class NetworkMailboxGrpcTest {
   @Test
-  void realCommonInterceptorGuardsAllFourMethodsAndMapsErrors() throws Exception {
+  void realCommonInterceptorGuardsAllFiveMethodsAndMapsErrors() throws Exception {
     var wire = mock(NetworkMailboxWireService.class);
     when(wire.ready(any(), any())).thenReturn("ready-result");
     when(wire.head(any())).thenReturn("head-result");
     when(wire.fetch(any(), any())).thenReturn("fetch-result");
     when(wire.receipt(any(), any())).thenReturn("receipt-result");
+    when(wire.localRegister(any(), any())).thenReturn("register-result");
     var verifier = mock(AccessTokenVerifier.class);
-    when(verifier.verify(anyString())).thenAnswer(i -> principal(i.getArgument(0)));
+    when(verifier.verify(anyString()))
+        .thenAnswer(
+            i -> {
+              String token = i.getArgument(0);
+              return token.equals("tenant-gateway")
+                  ? principal("svc:ai-gateway", UUID.randomUUID())
+                  : principal(token);
+            });
     var server =
         new GrpcServer(
             "127.0.0.1",
@@ -49,7 +57,7 @@ class NetworkMailboxGrpcTest {
             .setClientAccount("clients-test")
             .build();
     try {
-      for (String caller : List.of("svc:ai-gateway", "svc:other", "user")) {
+      for (String caller : List.of("svc:ai-gateway", "svc:other", "user", "tenant-gateway")) {
         ManagedChannel channel =
             GrpcChannels.open(
                 "127.0.0.1:" + server.port(),
@@ -97,12 +105,46 @@ class NetworkMailboxGrpcTest {
                                           .build())
                                   .getFrameJson()
                                   .toStringUtf8()));
-              for (Runnable call : calls) {
+              var allCalls = new ArrayList<Runnable>(calls);
+              allCalls.add(
+                  () ->
+                      assertEquals(
+                          "register-result",
+                          rpc.localRegister(
+                                  NetworkMailboxServiceLocalRegisterRequest.newBuilder()
+                                      .setConnection(connection)
+                                      .setFrameJson(
+                                          com.google.protobuf.ByteString.copyFrom(
+                                              new byte[] {(byte) 0xff}))
+                                      .build())
+                              .getFrameJson()
+                              .toStringUtf8()));
+              for (Runnable call : allCalls) {
                 if (caller.equals("svc:ai-gateway")) call.run();
                 else rejected(call, Status.Code.PERMISSION_DENIED, "common.forbidden");
               }
             });
         if (caller.equals("svc:ai-gateway")) {
+          var registration =
+              NetworkMailboxServiceLocalRegisterRequest.newBuilder()
+                  .setConnection(connection)
+                  .build();
+          rejected(
+              () -> rpc.localRegister(registration),
+              Status.Code.PERMISSION_DENIED,
+              "common.forbidden");
+          for (UUID delegated : List.of(TenantContext.PLATFORM_TENANT, UUID.randomUUID()))
+            TenantContext.run(
+                delegated,
+                () ->
+                    rejected(
+                        () -> rpc.localRegister(registration),
+                        delegated.equals(TenantContext.PLATFORM_TENANT)
+                            ? Status.Code.INVALID_ARGUMENT
+                            : Status.Code.PERMISSION_DENIED,
+                        delegated.equals(TenantContext.PLATFORM_TENANT)
+                            ? "common.validation_failed"
+                            : "common.forbidden"));
           rejected(
               () ->
                   rpc.head(
@@ -158,9 +200,17 @@ class NetworkMailboxGrpcTest {
                   .head(NetworkMailboxServiceHeadRequest.getDefaultInstance()),
           Status.Code.UNAUTHENTICATED,
           "common.unauthenticated");
+      rejected(
+          () ->
+              NetworkMailboxServiceGrpc.newBlockingStub(anonymous)
+                  .localRegister(NetworkMailboxServiceLocalRegisterRequest.getDefaultInstance()),
+          Status.Code.UNAUTHENTICATED,
+          "common.unauthenticated");
       verify(wire, times(1)).ready(any(), any());
       verify(wire, times(1)).fetch(any(), any());
       verify(wire, times(1)).receipt(any(), any());
+      verify(wire)
+          .localRegister(any(), org.mockito.AdditionalMatchers.aryEq(new byte[] {(byte) 0xff}));
     } finally {
       for (var channel : channels) channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
       server.stop();
@@ -168,9 +218,13 @@ class NetworkMailboxGrpcTest {
   }
 
   static AurigaPrincipal principal(String subject) {
+    return principal(subject, TenantContext.PLATFORM_TENANT);
+  }
+
+  static AurigaPrincipal principal(String subject, UUID tenant) {
     return new AurigaPrincipal(
         subject,
-        TenantContext.PLATFORM_TENANT,
+        tenant,
         subject.equals("user") ? PrincipalType.USER : PrincipalType.INTERNAL_SERVICE,
         TokenContext.SERVICE,
         null,
