@@ -1263,6 +1263,7 @@
         "type": "register_result",
         "request_id": "req-op-0001",
         "local": "419",
+        "address_type": "session",
         "registration_id": "reg-419",
         "allocation_op_id": "alloc-419",
         "result": "registered",
@@ -1285,7 +1286,7 @@
           "request_id": "req-op-0001",
           "channel_nonce": "nonce-ready-0001",
           "keyset_version": "5",
-          "signature": "CnxL3Bf7Ofu96g-wQbxISWCB8gXVMtb3uBfqEFeBMbLmBjHGMUWEvdeM_oC2XbPCwFNqMUWIRiU9YLfsvtMmCg"
+          "signature": "zh9pVavLFz42RnAyjtP-WNjYrrM1KH-l5gDJ5_yP6h7pTPhsI_fpS_3KPy8ariQWdi5Ge0owpypFMvuHuFVKCg"
         }
       }
     },
@@ -1653,6 +1654,7 @@
         "epoch": "42",
         "boot_id": "boot-0001",
         "candidate_local": "419",
+        "address_type": "session",
         "allocation_op_id": "alloc-419",
         "allocation_fingerprint": "sha256:88764ef69a181f0c678fece6f9707b3d5e53389999c06bca2b8e1530bf661c81",
         "expected_registration_revision": "418"
@@ -1777,6 +1779,79 @@
         },
         "submission_id": "sub-0001",
         "wait_until": "2026-10-26T00:00:00Z"
+      }
+    },
+    "register_result_subagent": {
+      "def": "protocol#RegisterResult",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "register_result",
+        "request_id": "req-op-0001",
+        "local": "419",
+        "address_type": "subagent",
+        "registration_id": "reg-419",
+        "allocation_op_id": "alloc-419",
+        "result": "registered",
+        "registration_revision": "419",
+        "local_high_water": "419",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "MLu2vOHJz_ZodxvZL5oPEDCG6XyN_7Ky8-oh1o33dD5tVapgk7HkSHwa6iQCD3XO4qt0cqRF6caqLr4Wd7-cAg"
+        }
+      }
+    },
+    "ready_pending_registration": {
+      "def": "protocol#Ready",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "ready",
+        "request_id": "req-ready-0001",
+        "channel_nonce": "nonce-ready-0001",
+        "boot_id": "boot-0001",
+        "features": [
+          "server_auth_v1",
+          "source_attestation_v1",
+          "inbox_only_v1",
+          "broadcast_grants_v1"
+        ],
+        "adapter_capabilities": [
+          "session_inbox",
+          "system_inbox"
+        ],
+        "resume_cursor": "1200",
+        "local_high_water": "419",
+        "registration_revision": "418",
+        "receipt_checkpoint": {
+          "checkpoint_seq": "1200",
+          "checkpoint_revision": "77",
+          "summary_digest": "sha256:348bcfe97a8d0212a277bd4e0ebf074432b93a0b4a49a53d42d42ff76bb458e6"
+        },
+        "keyset_version": "5",
+        "pending_registration": {
+          "candidate_local": "419",
+          "allocation_op_id": "alloc-419",
+          "allocation_fingerprint": "sha256:88764ef69a181f0c678fece6f9707b3d5e53389999c06bca2b8e1530bf661c81",
+          "address_type": "session"
+        }
       }
     }
   }

@@ -103,7 +103,7 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 | `execution_admit` | admit(recipient_id, target, connection_epoch, host_request_id, attempt_id, boot_id)；target 为 sys 时（仅首联）必带 CONTACT_ASSIGN 固化的 `assigned_address` |
 | `contact_decide` | decision_scope = conversation / human_dialogue / group_join / execution；conversation 带 conversation_allowed 与 execution_allowed（null=未决），human_dialogue 的 execution_allowed 恒 null，group_join 只带 join（join_allowed、选定既有地址、membership 实例），execution 只带 authorization_request_id 与布尔 execution_allowed |
 | `contact_assign` | contact_id、已登记的会话 `assigned_address`、registration_id、creation_attempt_id、decision_version |
-| `local_register` | candidate_local ≥1、allocation_op_id、allocation_fingerprint、expected_registration_revision |
+| `local_register` | candidate_local ≥1、address_type（session / subagent）、allocation_op_id、allocation_fingerprint、expected_registration_revision |
 | `status_query` | message_id 或 submission_id 二选一 |
 
 下行（全部 `server_auth`；FETCH_RESULT 见 §4）：
@@ -117,13 +117,17 @@ JSON 地址检查（`checkAddressJson`，按字段角色）：`version` 为大�
 | `admit_result` | admitted / already_admitted（只返回既有状态，不是第二次许可）、admission_id、admitted_epoch |
 | `decide_result` | contact_state / join_state / execution_permission 三层分开 |
 | `assign_result` | assigned / existing；`creation_permit` 仅首次为 true，existing 恒 false |
-| `register_result` | registered / existing、registration_revision、local_high_water |
+| `register_result` | registered / existing、address_type（原登记类别）、registration_revision、local_high_water |
 | `status` | full：dispatch_status、total_members/nodes、七个互斥收件桶（accepted+rejected+expired+canceled+skipped+unresolved+pending = total_members）、quarantined ⊆ pending、请求回应五桶（同分母）；restricted：只有 `request_submitted`、submission_id、wait_until，禁止出现 message_id/计数 |
 | `error` | code ∈ `errors.json` 且不是 local_only；scope、retryable、retry_after、related |
 
 状态集合（与设计一致）：传输 `pending/quarantined/host_accepted/expired/canceled/revoked/skipped/unresolved`；执行 `not_applicable/not_started/admitted/running/completed/failed/canceled/outcome_unknown`；首联 `contact_pending/contact_allowed/contact_denied/contact_expired`；入组 `pending/allowed/joined/denied/expired/revoked`；第二层 `pending/allowed/denied`。
 
 三类消息硬上限（`limits.json#dispatch`）：小批原子 ≤32 node 且 ≤256 local；单 node 项 ≤256 local、编码 ≤64KiB；普通组 ≤1,024 成员/256 node；广播 ≤10,000 node；超原子上限必须 `dispatch_mode=paged`（否则 `network.requires_paged_dispatch`），分页每页 ≤32 node。
+
+非零 local 的类型由所属已认证 node 首次登记时固定，独立字段 `address_type` 仅允许 session/subagent，与帧 `type` 分开。类别同 tenant/realm/node/local、registration_id、allocation_op_id 和原指纹一起成为不可变见证，不增加权限，不上传宿主 ID、父子树或内容。同原操作同类别重试先查原登记，再核新分配 revision；换类别冲突，墓碑不可复用。
+
+READY 的非空 pending_registration 必须带原类别；仅完整匹配的原操作可通过原 REGISTER_RESULT 签名响应复原，READY 不做第二次分配或签发创建许可。address_type 纳入既有服务器签名，接收方确认登记前须比对原持久操作的类别，缺失/未知/不符均不能借响应确认为成功。混合版本缺字段或未知值沿严格 schema/既有操作错误失败关闭；不增加全局登录、版本协商或 READY 必需能力。旧数据库 NULL 不从新声明、活会话或 CONTACT_ASSIGN 补写：类型依赖操作拒绝，保留证据/高水位，按已有诊断和新 local 流程处理；丢失旧类型事实不能凭空恢复。
 
 ## 6. 错误码与呈现
 

@@ -58,6 +58,20 @@
       "canonical": "{\"app_version\":\"1.0\",\"code\":\"network.stale_epoch\",\"related\":{\"recipient_id\":\"rcp-0001\"},\"request_id\":\"req-op-0001\",\"retry_after\":null,\"retryable\":false,\"scope\":\"connection\",\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"protocol_response\",\"request_id\":\"req-op-0001\",\"version\":1},\"type\":\"error\"}",
       "signature": "gH0rzLK2bufrIDq8Gz0IAHi6wcGnjANSm36hvPCqiUDX0LKWg0QJtQzAzolaxE45IuPPnaVFnJuhS0jyKM_TDA",
       "kid": "test-r2-protocol-1"
+    },
+    {
+      "name": "register_result",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"address_type\":\"session\",\"allocation_op_id\":\"alloc-419\",\"app_version\":\"1.0\",\"local\":\"419\",\"local_high_water\":\"419\",\"registration_id\":\"reg-419\",\"registration_revision\":\"419\",\"request_id\":\"req-op-0001\",\"result\":\"registered\",\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"protocol_response\",\"request_id\":\"req-op-0001\",\"version\":1},\"type\":\"register_result\"}",
+      "signature": "zh9pVavLFz42RnAyjtP-WNjYrrM1KH-l5gDJ5_yP6h7pTPhsI_fpS_3KPy8ariQWdi5Ge0owpypFMvuHuFVKCg",
+      "kid": "test-r2-protocol-1"
+    },
+    {
+      "name": "register_result_subagent",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"address_type\":\"subagent\",\"allocation_op_id\":\"alloc-419\",\"app_version\":\"1.0\",\"local\":\"419\",\"local_high_water\":\"419\",\"registration_id\":\"reg-419\",\"registration_revision\":\"419\",\"request_id\":\"req-op-0001\",\"result\":\"registered\",\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"protocol_response\",\"request_id\":\"req-op-0001\",\"version\":1},\"type\":\"register_result\"}",
+      "signature": "MLu2vOHJz_ZodxvZL5oPEDCG6XyN_7Ky8-oh1o33dD5tVapgk7HkSHwa6iQCD3XO4qt0cqRF6caqLr4Wd7-cAg",
+      "kid": "test-r2-protocol-1"
     }
   ]
 }
