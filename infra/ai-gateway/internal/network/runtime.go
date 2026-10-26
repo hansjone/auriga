@@ -285,7 +285,7 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	if r.iam, err = team.DialRPC(cfg.IAM); err != nil {
 		return nil, err
 	}
-	if r.collab, err = team.DialRPC(cfg.Collab); err != nil {
+	if r.collab, err = dialMailboxRPC(cfg.Collab); err != nil {
 		return nil, err
 	}
 	r.redeemer, err = NewIAMRedeemer(r.iam, IAMConfig{ServerID: r.auth.ConnectedServerId(), ServerAudience: cfg.ServerAudience, Account: cfg.ClientAccount, RedeemTimeout: redeemTimeout, AuthTimeout: authTimeout, MaxConnections: cfg.MaxConnections})

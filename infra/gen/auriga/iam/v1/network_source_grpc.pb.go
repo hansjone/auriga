@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NetworkSourceAuthorityService_RegisterAgentSource_FullMethodName = "/auriga.iam.v1.NetworkSourceAuthorityService/RegisterAgentSource"
-	NetworkSourceAuthorityService_GetAgentSource_FullMethodName      = "/auriga.iam.v1.NetworkSourceAuthorityService/GetAgentSource"
-	NetworkSourceAuthorityService_RevokeAgentSource_FullMethodName   = "/auriga.iam.v1.NetworkSourceAuthorityService/RevokeAgentSource"
+	NetworkSourceAuthorityService_RegisterAgentSource_FullMethodName    = "/auriga.iam.v1.NetworkSourceAuthorityService/RegisterAgentSource"
+	NetworkSourceAuthorityService_ReadAgentSourceReceipt_FullMethodName = "/auriga.iam.v1.NetworkSourceAuthorityService/ReadAgentSourceReceipt"
+	NetworkSourceAuthorityService_GetAgentSource_FullMethodName         = "/auriga.iam.v1.NetworkSourceAuthorityService/GetAgentSource"
+	NetworkSourceAuthorityService_RevokeAgentSource_FullMethodName      = "/auriga.iam.v1.NetworkSourceAuthorityService/RevokeAgentSource"
 )
 
 // NetworkSourceAuthorityServiceClient is the client API for NetworkSourceAuthorityService service.
@@ -50,7 +51,17 @@ type NetworkSourceAuthorityServiceClient interface {
 	// specified below. Saved failure receipts never issue. Changed body conflicts.
 	// Receipt reads never authorize,
 	// create, extend or revive; then Get with the current connection and local CAS.
+	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
 	RegisterAgentSource(ctx context.Context, in *RegisterAgentSourceRequest, opts ...grpc.CallOption) (*RegisterAgentSourceResponse, error)
+	// Historical result ONLY, without native/current-transport checks. Exact frozen
+	// original request and IAM-retained ownership anchors are required. A miss or
+	// indeterminate result fails closed (UNAVAILABLE/FORBIDDEN), never registers or
+	// establishes not_committed. No source/operation/tombstone/generation writes.
+	// Even an original ACTIVE receipt grants no current permission or activation.
+	// Both RPCs deliberately return the same immutable original receipt.
+	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	ReadAgentSourceReceipt(ctx context.Context, in *ReadAgentSourceReceiptRequest, opts ...grpc.CallOption) (*RegisterAgentSourceResponse, error)
 	// Revalidates the exact CURRENT redeem connection, original owner/device/live
 	// backing identity, registration, source state/expiry and current permissions.
 	// Same-device reconnect may change transport, never the saved source tuple.
@@ -73,6 +84,16 @@ func (c *networkSourceAuthorityServiceClient) RegisterAgentSource(ctx context.Co
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterAgentSourceResponse)
 	err := c.cc.Invoke(ctx, NetworkSourceAuthorityService_RegisterAgentSource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *networkSourceAuthorityServiceClient) ReadAgentSourceReceipt(ctx context.Context, in *ReadAgentSourceReceiptRequest, opts ...grpc.CallOption) (*RegisterAgentSourceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterAgentSourceResponse)
+	err := c.cc.Invoke(ctx, NetworkSourceAuthorityService_ReadAgentSourceReceipt_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +146,17 @@ type NetworkSourceAuthorityServiceServer interface {
 	// specified below. Saved failure receipts never issue. Changed body conflicts.
 	// Receipt reads never authorize,
 	// create, extend or revive; then Get with the current connection and local CAS.
+	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
 	RegisterAgentSource(context.Context, *RegisterAgentSourceRequest) (*RegisterAgentSourceResponse, error)
+	// Historical result ONLY, without native/current-transport checks. Exact frozen
+	// original request and IAM-retained ownership anchors are required. A miss or
+	// indeterminate result fails closed (UNAVAILABLE/FORBIDDEN), never registers or
+	// establishes not_committed. No source/operation/tombstone/generation writes.
+	// Even an original ACTIVE receipt grants no current permission or activation.
+	// Both RPCs deliberately return the same immutable original receipt.
+	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	ReadAgentSourceReceipt(context.Context, *ReadAgentSourceReceiptRequest) (*RegisterAgentSourceResponse, error)
 	// Revalidates the exact CURRENT redeem connection, original owner/device/live
 	// backing identity, registration, source state/expiry and current permissions.
 	// Same-device reconnect may change transport, never the saved source tuple.
@@ -146,6 +177,9 @@ type UnimplementedNetworkSourceAuthorityServiceServer struct{}
 
 func (UnimplementedNetworkSourceAuthorityServiceServer) RegisterAgentSource(context.Context, *RegisterAgentSourceRequest) (*RegisterAgentSourceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterAgentSource not implemented")
+}
+func (UnimplementedNetworkSourceAuthorityServiceServer) ReadAgentSourceReceipt(context.Context, *ReadAgentSourceReceiptRequest) (*RegisterAgentSourceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReadAgentSourceReceipt not implemented")
 }
 func (UnimplementedNetworkSourceAuthorityServiceServer) GetAgentSource(context.Context, *GetAgentSourceRequest) (*GetAgentSourceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAgentSource not implemented")
@@ -189,6 +223,24 @@ func _NetworkSourceAuthorityService_RegisterAgentSource_Handler(srv interface{},
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(NetworkSourceAuthorityServiceServer).RegisterAgentSource(ctx, req.(*RegisterAgentSourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NetworkSourceAuthorityService_ReadAgentSourceReceipt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadAgentSourceReceiptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkSourceAuthorityServiceServer).ReadAgentSourceReceipt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkSourceAuthorityService_ReadAgentSourceReceipt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkSourceAuthorityServiceServer).ReadAgentSourceReceipt(ctx, req.(*ReadAgentSourceReceiptRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -239,6 +291,10 @@ var NetworkSourceAuthorityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterAgentSource",
 			Handler:    _NetworkSourceAuthorityService_RegisterAgentSource_Handler,
+		},
+		{
+			MethodName: "ReadAgentSourceReceipt",
+			Handler:    _NetworkSourceAuthorityService_ReadAgentSourceReceipt_Handler,
 		},
 		{
 			MethodName: "GetAgentSource",

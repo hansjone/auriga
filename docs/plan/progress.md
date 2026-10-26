@@ -16,7 +16,14 @@
 
 通信网络以插件／DSH 实例为连接主体，多个获权主会话和子会话共用稳定连接；总部负责可靠交换，总部系统 DSH 是执行节点。NETWORK1 设计 [#124](https://github.com/hansjone/auriga/pull/124) 已作为待实施方案合入。N0 接缝门禁已于 2026-10-25 合入 main：契约 [#125](https://github.com/hansjone/auriga/pull/125)、ai-gateway NATS callout/ACL [#126](https://github.com/hansjone/auriga/pull/126)、插件宿主 adapter/ledger [#127](https://github.com/hansjone/auriga/pull/127)、插件 NATS 硬缓冲传输 [#128](https://github.com/hansjone/auriga/pull/128)；均精确 HEAD CI 全绿且非作者独审通过。N1：collab 邮箱/游标/首联 [#129](https://github.com/hansjone/auriga/pull/129)、ai-gateway HEAD/FETCH/RECEIPT 骨架 [#130](https://github.com/hansjone/auriga/pull/130)、edge NATS-over-WSS 升级路由 [#131](https://github.com/hansjone/auriga/pull/131) 已合（均独审通过、精确 HEAD CI 全绿）；下一步插件接线（宿主 adapter↔传输/系统收件箱），再 IAM 网络上限、两真实 DSH。完整网络 IAM、生产硬背压、HA、容量与双 DSH 往返尚未验收；旧定时 pull 仍为迁移期路径。
 
-2026-10-26 Beta 推进（当前检查点）：
+2026-10-27 Beta 阶段进度：
+
+- 插件来源控制 [#213](https://github.com/hansjone/auriga/pull/213)、IAM 纯回执读取 [#216](https://github.com/hansjone/auriga/pull/216)、网关来源三帧搬运 [#217](https://github.com/hansjone/auriga/pull/217) 已合入。精确候选 CI 分别 12/12、16/16、22/22 全绿，本批按用户明确指示合并；独立外部审查尚未完成，不把作者或主控补充检查记作独审通过，也不扩展为以后免审。
+- 基础设备连接 [#206](https://github.com/hansjone/auriga/pull/206)、普通会话登记 [#210](https://github.com/hansjone/auriga/pull/210)、第五投递批准 [#208](https://github.com/hansjone/auriga/pull/208)、来源搬运契约 [#211](https://github.com/hansjone/auriga/pull/211)、整链无版本撤销 [#212](https://github.com/hansjone/auriga/pull/212) 均已合入。只读回执接口只恢复原操作结果；历史 ACTIVE 不授当前使用权，仍须新鲜见证、Get、最终本地 CAS 和签前第五 RPC。
+- collab 来源处理的迁移/RLS 与来源 PostgreSQL 场景已在本机完整模块验证，纯回执读取接线仍在继续。真 IAM、collab、插件和 NATS WSS 的来源整链，以及 durable 单播 SEND 尚未完成；不以组件测试代替两真实 DSH 对话验收。
+- 中转站有界 runtime [#207](https://github.com/hansjone/auriga/pull/207) 与实际上游 Transport [#209](https://github.com/hansjone/auriga/pull/209) 已合。取消原因/测试阶段修复 [#215](https://github.com/hansjone/auriga/pull/215)、MiniMax 流式兼容 [#214](https://github.com/hansjone/auriga/pull/214) 仍待新精确 CI 与审查；正常 DNS 下的流式真机复测、完整真实模型结算及 Beta 整体目标仍待验收。
+
+2026-10-26 Beta 推进（此前组件检查点）：
 
 - Beta 先完成两个真实 DSH 对话、插件登录和前端、模型中转站；Auto、调用方模型 Key、总部系统 DSH 及完整资源治理留到后续。同机隔离整体推迟。下面的组件通过不表示真实双 DSH 或收费模型已完成验收。
 - N1 插件总装 [#151](https://github.com/hansjone/auriga/pull/151)、公开 HostPort [#153](https://github.com/hansjone/auriga/pull/153)、IAM 客户端 [#152](https://github.com/hansjone/auriga/pull/152)、COLLABIAM [#147](https://github.com/hansjone/auriga/pull/147)、wire [#154](https://github.com/hansjone/auriga/pull/154)、opaque local 登记 [#155](https://github.com/hansjone/auriga/pull/155) 均已精确 CI 与非作者独审后合入。密钥运营 [#156](https://github.com/hansjone/auriga/pull/156) 关闭加载失败污染状态问题、整合两种装配模式后经新 20 CI 与第二轮独审合入，随后群组 [#173](https://github.com/hansjone/auriga/pull/173) 关闭三项功能问题，经 19 CI 与第二轮独审合入，保持 V11→V12 顺序。合后网络/local 真实 PG 定向 204/204、零跳过通过。IAM 服务端 [#178](https://github.com/hansjone/auriga/pull/178) 四身份/限额 RPC 已合，主控 54/54、独审 55/55 零跳过；第五投递批准仍失败关闭。

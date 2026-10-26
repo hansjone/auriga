@@ -27,13 +27,14 @@
 ## Agent source authority（agent 来源权威）
 
 正式内部入口是 [`network_source.proto`](../proto/auriga/iam/v1/network_source.proto)
-的独立 `NetworkSourceAuthorityService`。本节是该契约的规范性语义；本轮只交付契约和生成类型，
-新增搬运、确定失败围栏与无版本撤销语义尚待生产接线。缺实现/配置时维持 `UNIMPLEMENTED`/拒绝；旧
+的独立 `NetworkSourceAuthorityService`。本节是该契约的规范性语义；
+历史回执只读入口由 IAM 实现，collab 恢复接线及原连接失效的确定失败围栏仍须分别验收。
+缺实现/配置时维持 `UNIMPLEMENTED`/拒绝；旧
 `NetworkGatewayService` 的允许调用者、旧五 RPC 的请求/响应及 SEND 外部接口均不变。
 
 ### 调用与权威边界
 
-- 三 RPC 都只接受标准内部 JWT（`aud=auriga.internal`、`ptyp=internal_service`、
+- 四 RPC 都只接受标准内部 JWT（`aud=auriga.internal`、`ptyp=internal_service`、
   `ctx=service`、`sub=svc:collab`）、受信 `auriga-tenant-id` 非平台业务租户和既有可信内部传输。
   `connection.tenant_id`、IAM 兑换行、来源行和委托 tenant 必须完全相同。外部用户、设备 token、
   模型、普通 SEND JSON 不能调用，也不能因知道 binding/op ID 获权；未列入的主体默认拒绝。
@@ -44,6 +45,18 @@
   IAM 不回调 collab、不跨库读表；这是受信服务职责声明，不能声称 IAM 凭 JSON 独立证明宿主。
   已提交 Register 的原响应受限读取只恢复操作结果，不是新建/当前来源使用；下文规定独立的 IAM 留存锚点核验，
   读取后仍须当前 native/健康/epoch/typed-local 见证、Get 与最终本地 CAS，不降低使用路径要求。
+- `ReadAgentSourceReceipt(ReadAgentSourceReceiptRequest)` 是独立的无新建内部读取入口，
+  wrapper 只含完整不可变 `RegisterAgentSourceRequest original_request`，复用
+  `RegisterAgentSourceResponse` 返回完整原成功或已提交拒绝回执，不新增未知成功分支。
+  collab 从耐久 pending 取原请求（仍为原 C），不得改成当前 C2、改 op 或自报 owner。
+  本方法不要求 native 或当前 transport 有效；网关、用户、设备与模型均不可调用。
+  IAM 在短事务复用 Register 的完整字节/摘要及真实原归属锚点核验，绝不进入
+  online/authorize/register、新建来源/操作/墓碑/代际路径，也不改期限、状态或 revision。
+  缺记录/锚点、不可判定或依赖故障沿既有 `UNAVAILABLE`/`FORBIDDEN` 失败关闭；
+  同 op 异原体仍为 `CONFLICT`。查询未命中不证明 not_committed；查询与 Register
+  竞态只能返回已提交原回执或未知错误，不能自行写拒绝围栏。
+  历史 ACTIVE 仅是原回执，不能激活或授当前许可；本接口不解决未提交 pending 的全部收敛，
+  `original_connection_invalid_uncommitted` 有写围栏留待整链接线。
 - 新建许可或当前 Get 时，IAM 精确核 `NetworkAuthorityConnection` 七字段对应的真实兑换记录，重查当前节点、设备、
   归属账号、底层 session、现行 collab 使用权限及组织网络状态，从本库推导 owner/device/backing-session。
   请求没有这些自报身份字段；`client_account` 只是既有兑换元组的一部分，不能单独当 owner。
