@@ -36,3 +36,30 @@ collab READY 负责其 epoch 围栏。本服务不冒充 collab 的最新连接/
 合法拒绝使用 `allowed=false` / `active=false`。每次调用在线重核，不缓存 allow，
 不 touch idle、不刷新令牌/票，不调用 collab 或读取其他服务 schema。
 原 `NetworkGatewayService` 的 Redeem/Active/BatchActive 仍仅允许 `svc:ai-gateway`。
+
+## 来源事务内核（未接线）
+
+V9 和包内 `IamNetworkSources` 仅提供本库持久事实：许可链固定登记八字段和
+owner/device/IAM backing-session 关联，保存 head/永久停权；来源代固定原连接、
+时间窗与前代，仅状态/revision 可单向改变。每前代最多一个后继；只有未停权链的
+当前 EXPIRED head 经完整新鲜核验和正 revision CAS 才可建新代。同健康连接、同登记
+可以取得下一有界代，旧绑定、旧期限和旧操作响应保持不变。
+
+操作按 tenant/method/operation 唯一保存规范 protobuf 请求、SHA-256 摘要和完整原响应。
+回执先由操作找到原来源及耐久兑换/归属锚点，再核本库原关联；不以原 ingress 在线、
+当前 CAS、身份过期或当前来源状态阻止原回执对账。锚点固化真实 ingress 行主键、
+精确兑换元组及 IAM 账号/设备/session 行 ID，V7 清理 ingress 不删除这些记录。
+缺锚点或归属关联变化拒绝；回执无当前授权效力。Revoke 使用留存的原精确连接，
+同事务停链并终态化命名代及当前 head；命名过期前代保持 EXPIRED。
+
+调用方拥有一个 `IamStore` 事务：先完成事务外远程核验，再按 session→device→政策
+锁序重核，构造同包、绑定该事务的 `VerifiedSnapshot`，内核随后取 operation→chain→source
+锁。新建的固锚点、写代、推 head、写操作不可拆开提交；变更使用同事务保存点，
+调用方即使捕获异常也不能提交半成品。回执/原连接撤销仅核归属关联，
+不要求活跃身份；也必须在事务内调用。多来源锁按 UUID 稳定排序，竞争等待上限 5 秒。
+Get 只返回 `View(source, stopped, observedAt)`，没有伪造的 policy_revision/valid_until。
+
+**尚无生产快照提供方、Bean、三 RPC 装配或 SEND 放行。** 当前 resolveTarget/credential
+不能替代完整 collab.use、组织版本及政策提交屏障；下一任务必须补真实当前身份/权限核验、
+锁下版本屏障、期限计算、服务 JWT/委托租户鉴权和 collab 最终 CAS，再接三 RPC/第五 RPC。
+新增 PostgreSQL 用例验证内核事务/RLS，核验快照为显式测试夹具，不证明真实身份或宿主。
