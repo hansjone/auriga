@@ -8,9 +8,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -131,8 +133,74 @@ func TestDockerStartRejectsMissingAmbiguousOrInvalidContainerPort(t *testing.T) 
 	}
 }
 
+// Preparation runs on the test goroutine, outside the scheduling guard. No
+// goroutine can lazily create PKI/state after TempDir cleanup has started.
+func startPreparedHealthTest(t *testing.T, d *runtime.Docker, id string, trace *httptrace.ClientTrace) (context.Context, <-chan error, func()) {
+	t.Helper()
+	seedDockerRecord(t, d, id, 7)
+	ctx, cancel := context.WithCancel(t.Context())
+	if trace != nil {
+		ctx = httptrace.WithClientTrace(ctx, trace)
+	}
+	// This bounds test scheduling, not installation or the production HTTP phase.
+	guard, stop := context.WithTimeout(t.Context(), 30*time.Second)
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		done <- startDocker(t, d, ctx, id)
+	}()
+	join := func() {
+		cancel()
+		<-finished
+		stop()
+	}
+	t.Cleanup(join)
+	return guard, done, join
+}
+
+func awaitHealthEvent(t *testing.T, guard context.Context, done <-chan error, event <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-event:
+	case err := <-done:
+		t.Fatalf("Start returned before controlled health event: %v", err)
+	case <-guard.Done():
+		t.Fatal("health event scheduling guard expired")
+	}
+}
+
+func assertHealthPending(t *testing.T, d *runtime.Docker, id string, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		t.Fatalf("Start returned before ready response: %v", err)
+	default:
+	}
+	if endpoint, err := d.Endpoint(id); err == nil {
+		t.Fatalf("endpoint published before ready response: %+v", endpoint)
+	}
+}
+
+func awaitHealthyEndpoint(t *testing.T, guard context.Context, done <-chan error, d *runtime.Docker, id, want string) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-guard.Done():
+		t.Fatal("healthy Start completion scheduling guard expired")
+	}
+	if endpoint, err := d.Endpoint(id); err != nil || endpoint.URL != want {
+		t.Fatalf("healthy endpoint not published: %+v %v", endpoint, err)
+	}
+}
+
 func TestDockerStartWaitsForRealHealth(t *testing.T) {
 	var attempts atomic.Int64
+	readyEntered := make(chan struct{}, 1)
+	releaseReady := make(chan struct{})
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/_auriga/health" {
 			t.Errorf("unexpected health path %s", r.URL.Path)
@@ -140,29 +208,36 @@ func TestDockerStartWaitsForRealHealth(t *testing.T) {
 		switch attempts.Add(1) {
 		case 1:
 			connection, _, err := w.(http.Hijacker).Hijack()
-			if err == nil {
-				_ = connection.Close()
+			if err != nil {
+				t.Errorf("interrupt health connection: %v", err)
+				return
 			}
+			_ = connection.Close()
 		case 2:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"status":"ok","ready":false,"protocol":1,"pluginVersion":"0.0.0"}`)
 		default:
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, readyBody)
+			select {
+			case readyEntered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-releaseReady:
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, readyBody)
+			case <-r.Context().Done():
+			}
 		}
 	}))
 	t.Cleanup(health.Close)
 	d := readyDocker(t, health.URL)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := startDocker(t, d, ctx, "ready-test"); err != nil {
-		t.Fatal(err)
-	}
+	guard, done, _ := startPreparedHealthTest(t, d, "ready-test", nil)
+	awaitHealthEvent(t, guard, done, readyEntered)
+	assertHealthPending(t, d, "ready-test", done)
+	close(releaseReady)
+	awaitHealthyEndpoint(t, guard, done, d, "ready-test", health.URL)
 	if attempts.Load() < 3 {
 		t.Fatal("start succeeded before transient error and not-ready health recovered")
-	}
-	if endpoint, err := d.Endpoint("ready-test"); err != nil || endpoint.URL != health.URL {
-		t.Fatalf("healthy endpoint not published: %+v %v", endpoint, err)
 	}
 }
 
@@ -174,29 +249,46 @@ func TestDockerStartWaitsAcrossConnectionRefused(t *testing.T) {
 	address := reservation.Addr().String()
 	_ = reservation.Close()
 	d := readyDocker(t, "http://"+address)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- startDocker(t, d, ctx, "refused-test") }()
-	select {
-	case err := <-done:
-		t.Fatalf("start returned while health port refused connections: %v", err)
-	case <-time.After(30 * time.Millisecond):
-	}
+	refused := make(chan struct{}, 1)
+	trace := &httptrace.ClientTrace{ConnectDone: func(_, addr string, err error) {
+		// Ignore Engine connections: only the production health dial counts.
+		// Windows reports WSAECONNREFUSED (10061), Unix ECONNREFUSED.
+		if addr == address && (errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.Errno(10061))) {
+			select {
+			case refused <- struct{}{}:
+			default:
+			}
+		}
+	}}
+	guard, done, joinStart := startPreparedHealthTest(t, d, "refused-test", trace)
+	awaitHealthEvent(t, guard, done, refused)
+	assertHealthPending(t, d, "refused-test", done)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, readyBody) }), ReadHeaderTimeout: time.Second}
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(func() { _ = server.Close() })
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+	var probes atomic.Int64
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_auriga/health" {
+			t.Errorf("unexpected health path %s", r.URL.Path)
 		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+		probes.Add(1)
+		_, _ = io.WriteString(w, readyBody)
+	}), ReadHeaderTimeout: time.Second}
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
+	// Cancel/join Start before closing health, then join Serve before the
+	// earlier engine, state store and TempDir cleanups.
+	t.Cleanup(func() {
+		joinStart()
+		_ = server.Close()
+		if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("health Serve: %v", err)
+		}
+	})
+	awaitHealthyEndpoint(t, guard, done, d, "refused-test", "http://"+address)
+	if probes.Load() == 0 {
+		t.Fatal("recovery skipped real health on the original address")
 	}
 }
 
