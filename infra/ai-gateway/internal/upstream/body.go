@@ -39,6 +39,8 @@ type body struct {
 	emitted      int64
 	frameSize    int
 	progressSent bool
+	sse          streamNormalizer
+	rawEvents    int
 }
 
 var errProgress = errors.New("upstream read progress")
@@ -167,6 +169,10 @@ func (b *body) frame() error {
 			return io.ErrUnexpectedEOF
 		}
 		if line == "" {
+			b.rawEvents++
+			if b.rawEvents > b.limits.MaxEvents {
+				return io.ErrUnexpectedEOF
+			}
 			b.frameSize = 0
 			b.progressSent = false
 			if len(b.data) == 0 {
@@ -174,22 +180,20 @@ func (b *body) frame() error {
 			}
 			payload := strings.Join(b.data, "\n")
 			b.data = nil
-			var normalized []byte
-			if payload == "[DONE]" {
-				normalized = []byte(payload)
-				b.finished = true
-			} else {
-				normalized, err = normalize([]byte(payload), b.s.PublicModel)
-				if err != nil {
-					return err
+			frames, err := b.sse.frame(b.ctx, payload, b.s.PublicModel)
+			if err != nil {
+				return err
+			}
+			b.finished = payload == "[DONE]"
+			for i, normalized := range frames {
+				p := append(append([]byte("data: "), normalized...), '\n', '\n')
+				if len(p) > b.limits.MaxEventBytes || !b.validation.feed(p, b.finished && i == len(frames)-1) {
+					return io.ErrUnexpectedEOF
 				}
+				b.pending = append(b.pending, p...)
 			}
-			b.pending = append(append([]byte("data: "), normalized...), '\n', '\n')
-			if len(b.pending) > b.limits.MaxEventBytes {
-				return io.ErrUnexpectedEOF
-			}
-			if !b.validation.feed(b.pending, b.finished) {
-				return io.ErrUnexpectedEOF
+			if len(frames) == 0 {
+				continue
 			}
 			if b.finished && b.ctx.Err() == nil {
 				b.stopOnce.Do(func() { close(b.proof) })
