@@ -105,13 +105,21 @@ func (l *Ledger) Admit(ctx context.Context, s TrustedSnapshot, req Request) (*Re
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO ai.budget_request(tenant_id,subject,request_id,method,path,key_hash,fingerprint,admission,price,state,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',$10)`, a.TenantId, a.AccountId, a.RequestId, req.Method, req.Path, key, req.Fingerprint[:], raw, price, now)
-		if err == nil {
-			result = &Reservation{Admission: a, State: "reserved", Revision: 1}
+		tag, err := tx.Exec(ctx, `INSERT INTO ai.budget_request(tenant_id,subject,request_id,method,path,key_hash,fingerprint,admission,price,state,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reserved',$10)`, a.TenantId, a.AccountId, a.RequestId, req.Method, req.Path, key, req.Fingerprint[:], raw, price, now)
+		if err != nil {
+			return err
 		}
-		return err
+		if tag.RowsAffected() != 1 {
+			return failure("ai.budget_unavailable")
+		}
+		result = &Reservation{Admission: a, State: "reserved", Revision: 1}
+		return nil
 	})
 	if err != nil {
+		if result != nil {
+			a := result.Admission
+			return nil, &admissionPending{ref: Ref{TenantID: a.TenantId, AccountID: a.AccountId, RequestID: a.RequestId}, cause: err}
+		}
 		return nil, err
 	}
 	return result, nil

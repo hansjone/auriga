@@ -24,6 +24,17 @@
 
 ### 内部恢复观察（不执行恢复）
 
+`Admit` 只有实际 INSERT 一行并成功完成事务回调后，若 Transaction/Commit 返回错误，
+才通过专用内部错误携带本次服务端生成的完整 tenant/account/request 定位。
+`AdmissionPendingRef(err)` 仅供可信内部调用方提取；错误常规格式化隐藏定位与原因，
+`Unwrap` 保留内部 `errors.Is/As`。验证、预算拒绝、回调/INSERT 失败、仅生成 UUID，
+以及幂等命中的旧 `OriginalRequestID` 都没有本次 hint。
+事务端口仍要求真实 Store 的 RLS、回调成功后 Commit 语义；受控测试包装仅注入该边界的失败。
+hint 只表示本次行可能存在，不证明提交/存在，也不授予 Reservation、派发、结算或退款权。
+失败仍返回 nil Reservation，不重试 Admit；后续须在 RLS 下重读真实状态/revision 再 CAS，绝不重派。
+即使 `GetRecoveryCandidate` 返回 not_found，也不能断言最终回滚或责任已清。
+它不是耐久 Pending 队列，不提供跨重启全覆盖；后台扫描/恢复与租户发现仍未实现。
+
 `ListRecoveryCandidates(ctx, tenant, limit, cursor) (*RecoveryPage, error)` 仅供可信 runtime 内部调用；
 显式提供一个经 UUID 验证的 tenant，不能从未验证的客户端参数直接调用。它不发现全局租户，
 没有 HTTP、新权限或外部 API。完整部署租户集合及对所有新准入的集合约束由后续任务负责。
