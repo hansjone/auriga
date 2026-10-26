@@ -124,9 +124,8 @@ test('public JSONL and fake controller facade preserve origin; lineage alone is 
     assert.equal(inspected.meta.origin, meta.origin);
     assert.equal((await host.getSession(id)).origin, meta.origin);
   }
-  await assert.rejects(host.getSession('missing'), {
-    code: 'network.host_incompatible',
-  });
+  // Public stat returns undefined for an absent session; read failures still reject.
+  assert.equal(await host.getSession('missing'), null);
   for (const origin of ['', null, false, 'user', 'unknown'])
     assert.throws(() =>
       s.store.prepare('bad', { meta: { cwd: s.dir, origin } }),
