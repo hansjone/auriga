@@ -2,11 +2,13 @@
 
 来源控制新增 `SourceRegister/SourceGet/SourceRevoke`，沿同一 `svc:ai-gateway` 委托边界。
 V14 在 collab schema 保存完整来源操作、原 IAM 请求/回执、native 见证、停发 fence 和撤销 outbox；
-后台轮询平台租户中的路由索引，再切入对应业务租户按原请求重试撤销，IAM 调用期间不持数据库事务。
+唤醒触发器以调用方的原业务租户上下文写入路由索引；不切换 GUC、不借用 migration owner 权限。
+后台在平台上下文通过仅针对索引的 SELECT policy 发现租户，再切入对应业务租户按原请求重试撤销，IAM 调用期间不持数据库事务。
 回执只是历史事实，只有在线 Get 经本地最终 CAS 后才保存有界观察；未开放 SEND，签前第五 RPC 保持独立。
 
-当前恢复限制：已保存回执可以重连后重新封装；pending 的原连接仍匹配时可凭新鲜见证原 op 重试。
-尚无回执且原连接已换的无见证 reconcile 保持 `network.outcome_unknown`。
+当前恢复限制：已保存回执仅在原连接仍匹配时重新封装；pending 的原连接仍匹配时可凭新鲜见证原 op 重试。
+跨连接的历史回执读取，以及无回执的无见证 reconcile，均保持 `network.outcome_unknown`，待 IAM 纯回执读取 RPC 接线。
+不以当前 Get 代替历史 mutation 的归属核验。
 现有 Resolve 的拒绝同时包含可恢复的配置停用，无法证明旧连接永久失效；不能据此盲重放可能签发的 Register。
 这一分支需要具备“绝不新建”语义的权威回执读取/原连接失效围栏后才能安全放开。
 备份恢复或历史完整性不明时，须先持久设置节点 `source_operation_recovery_gap=true`；核实前不可清除。

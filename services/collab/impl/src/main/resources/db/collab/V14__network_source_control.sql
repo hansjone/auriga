@@ -113,25 +113,26 @@ SELECT auriga_enable_tenant_rls('network_source_binding');
 SELECT auriga_enable_tenant_rls('network_source_witness');
 SELECT auriga_enable_tenant_rls('network_source_slot');
 
--- Platform-owned routing index contains only tenant identifiers, never source facts or requests.
--- A transaction-local trigger inserts this wakeup atomically with each durable outbox row.
+-- Business-owned routing metadata, written in the outbox's existing tenant context.
+-- Platform discovery may read tenant identifiers only; source facts keep ordinary tenant RLS.
 CREATE TABLE network_source_worker_tenant (
   id uuid PRIMARY KEY,
   tenant_id uuid NOT NULL,
   business_tenant uuid NOT NULL UNIQUE,
   created_at timestamptz NOT NULL DEFAULT now(),
-  CHECK (tenant_id='00000000-0000-0000-0000-000000000000'::uuid)
+  CHECK (tenant_id=business_tenant)
 );
 SELECT auriga_enable_tenant_rls('network_source_worker_tenant');
+CREATE POLICY network_source_worker_discovery ON network_source_worker_tenant
+  FOR SELECT USING (auriga_current_tenant()='00000000-0000-0000-0000-000000000000'::uuid);
 
 CREATE FUNCTION network_source_wake_worker() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER
+LANGUAGE plpgsql SECURITY INVOKER
 SET search_path=collab,pg_temp
-SET "auriga.tenant_id"='00000000-0000-0000-0000-000000000000'
 AS $$
 BEGIN
   INSERT INTO network_source_worker_tenant(id,tenant_id,business_tenant)
-  VALUES (NEW.id,'00000000-0000-0000-0000-000000000000',NEW.tenant_id)
+  VALUES (NEW.id,NEW.tenant_id,NEW.tenant_id)
   ON CONFLICT (business_tenant) DO NOTHING;
   RETURN NEW;
 END;

@@ -34,9 +34,8 @@ public final class NetworkSourceMaintenance {
                   tx.execute(
                       s ->
                           jdbc.queryForList(
-                              "SELECT business_tenant FROM collab.network_source_worker_tenant WHERE tenant_id=? AND business_tenant>? ORDER BY business_tenant LIMIT 32",
+                              "SELECT business_tenant FROM collab.network_source_worker_tenant WHERE business_tenant>? ORDER BY business_tenant LIMIT 32",
                               UUID.class,
-                              TenantContext.PLATFORM_TENANT,
                               cursor)));
       if (tenants.isEmpty()) {
         cursor = TenantContext.PLATFORM_TENANT;

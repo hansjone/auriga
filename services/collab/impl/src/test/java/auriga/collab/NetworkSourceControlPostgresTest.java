@@ -77,6 +77,7 @@ class NetworkSourceControlPostgresTest {
     final Map<String, String> heads = new ConcurrentHashMap<>();
     final Set<String> stopped = ConcurrentHashMap.newKeySet();
     final AtomicInteger registerCalls = new AtomicInteger();
+    final AtomicInteger getCalls = new AtomicInteger();
     volatile Runnable afterRegister = () -> {}, afterGet = () -> {}, afterRevoke = () -> {};
     volatile boolean loseRegister, loseRevoke, missingPresence, wrongEcho, reject;
     volatile RevokeAgentSourceRequest lastRevoke;
@@ -161,6 +162,7 @@ class NetworkSourceControlPostgresTest {
 
     @Override
     public void getAgentSource(GetAgentSourceRequest r, StreamObserver<GetAgentSourceResponse> o) {
+      getCalls.incrementAndGet();
       lastGet = r;
       var fact = sources.get(r.getSourceBinding());
       if (fact == null
@@ -547,7 +549,7 @@ class NetworkSourceControlPostgresTest {
   }
 
   @Test
-  void unknownOriginalNeedsFreshWitnessThenSavedReceiptSurvivesReconnect() {
+  void unknownOriginalNeedsFreshWitnessAndCrossConnectionReceiptWaitsForReceiptRpc() {
     var f = fresh();
     var request = frame(f, "source_register");
     peer.loseRegister = true;
@@ -558,7 +560,12 @@ class NetworkSourceControlPostgresTest {
     code("outcome_unknown", register(f, reconcile));
     assertEquals(before, peer.registerCalls.get());
     request.set("native_witness", witness(f));
-    binding(register(f, request));
+    int getsBeforeIssue = peer.getCalls.get();
+    String binding = binding(register(f, request));
+    assertEquals(
+        getsBeforeIssue,
+        peer.getCalls.get(),
+        "Register must not substitute current Get for a historical receipt read");
     authority.invalid.add(f.c().getIngress());
     var next = f.c().toBuilder().setIngress(f.c().getIngress() + "-next").build();
     var ready =
@@ -572,8 +579,12 @@ class NetworkSourceControlPostgresTest {
     call(() -> wire.ready(next, bytes(ready)));
     var nextFixture = new Fixture(next, ready, f.registration());
     reconcile.put("epoch", "2").put("boot_id", "next-boot");
-    var receipt = register(nextFixture, reconcile);
-    String binding = binding(receipt);
+    int getsBeforeReplay = peer.getCalls.get();
+    code("outcome_unknown", register(nextFixture, reconcile));
+    assertEquals(
+        getsBeforeReplay,
+        peer.getCalls.get(),
+        "Cross-connection receipt reads need the dedicated IAM RPC");
     assertEquals(f.c(), peer.requests.get(request.path("operation_id").asString()).getConnection());
     var get = frame(nextFixture, "source_get").put("source_binding", binding).put("epoch", "2");
     assertEquals("active", get(nextFixture, get).path("source").path("state").asString());

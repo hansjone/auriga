@@ -277,7 +277,12 @@ final class NetworkSourceControl {
               return operation("Register", op);
             });
     if (!"pending".equals(pending.get("status"))) {
-      if ("registered".equals(pending.get("status"))) verifyReceiptOwner(gate, pending);
+      // A live current Get is not an ownership receipt for this historical mutation.
+      // Cross-connection replay waits for IAM's dedicated no-create receipt RPC.
+      require(
+          Arrays.equals(
+              gate.connection().toByteArray(), (byte[]) pending.get("original_connection")),
+          UNKNOWN);
       return result(pending);
     }
     try {
@@ -353,10 +358,6 @@ final class NetworkSourceControl {
                 complete(current, state, response.toByteArray(), responseFrame);
                 return responseFrame;
               });
-      if (response.hasSource()) {
-        var saved = transaction(s -> operation("Register", op));
-        verifyReceiptOwner(gate, saved);
-      }
       return value;
     } catch (RuntimeException | com.google.protobuf.InvalidProtocolBufferException e) {
       // No ordinary RPC, storage or post-pending validation failure is a negative receipt.
@@ -817,27 +818,6 @@ final class NetworkSourceControl {
         lockLineage((UUID) lineage.get("id")),
         "pending",
         null);
-  }
-
-  private void verifyReceiptOwner(SourceGate gate, Map<String, Object> op) {
-    try {
-      var request = RegisterAgentSourceRequest.parseFrom((byte[]) op.get("iam_request"));
-      var receipt = RegisterAgentSourceResponse.parseFrom((byte[]) op.get("iam_response"));
-      // This is an ownership check only: never save it as a native Get observation.
-      var current =
-          iam.getSource(
-              GetAgentSourceRequest.newBuilder()
-                  .setSourceBinding(receipt.getSource().getSourceBinding())
-                  .setConnection(gate.connection())
-                  .setRegistration(request.getRegistration())
-                  .build());
-      require(
-          current.hasSource() && current.getConnection().equals(gate.connection()),
-          NetworkErrors.UNAUTHORIZED);
-      immutable(receipt.getSource(), current.getSource());
-    } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-      throw new AurigaException(UNKNOWN);
-    }
   }
 
   private void witness(SourceGate gate, String action) {
