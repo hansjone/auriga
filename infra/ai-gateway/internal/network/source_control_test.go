@@ -124,7 +124,7 @@ func TestProductionSourceReservedLane(t *testing.T) {
 	// The regular RPC remains blocked. A second regular request must be busy,
 	// but revocation must enter the real generated RPC independently.
 	publishRegistration(t, nc, b, sourceRequest("source_get"))
-	expectRegistrationCode(t, down, cfg.ProtocolSigning, b, "network.overloaded")
+	expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, "network.overloaded")
 	run.mailbox.mu.Lock()
 	run.mailbox.budgetLocked(nodeIdentity{b.Tenant, b.Realm, b.Node}).requests = requestBucket{updated: time.Now(), tokens: -1000}
 	run.mailbox.mu.Unlock()
@@ -154,11 +154,11 @@ func TestProductionSourceRevokeBusyAndCancelRelease(t *testing.T) {
 		t.Fatal("revoke did not enter")
 	}
 	publishRegistration(t, nc, b, sourceRequest("source_revoke"))
-	expectRegistrationCode(t, down, cfg.ProtocolSigning, b, "network.overloaded")
+	expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, "network.overloaded")
 	run.mailbox.mu.Lock()
 	run.mailbox.sources[sourceLane{nodeIdentity{b.Tenant, b.Realm, b.Node}, true}].cancel()
 	run.mailbox.mu.Unlock()
-	expectRegistrationCode(t, down, cfg.ProtocolSigning, b, "network.overloaded")
+	expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, "network.overloaded")
 	run.mailbox.workers.Wait()
 	if len(run.mailbox.sourceRevokes) != 0 {
 		t.Fatal("canceled revoke leaked reserved slot")
