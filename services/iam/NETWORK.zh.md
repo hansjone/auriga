@@ -52,7 +52,8 @@ owner/device/IAM backing-session 关联，保存 head/永久停权；来源代�
 缺锚点或归属关联变化拒绝；回执无当前授权效力。Revoke 使用留存的原精确连接，
 同事务停链并终态化命名代及当前 head；命名过期前代保持 EXPIRED。
 
-调用方拥有一个 `IamStore` 事务：先完成事务外远程核验，再按 session→device→政策
+调用方拥有一个 `IamStore` 事务：先完成事务外远程核验，再以 tenant 的
+`network-authority` advisory 为第一把业务锁，按 session→device→account→政策版本行→精确 ingress
 锁序重核，构造同包、绑定该事务的 `VerifiedSnapshot`，内核随后取 operation→chain→source
 锁。新建的固锚点、写代、推 head、写操作不可拆开提交；变更使用同事务保存点，
 调用方即使捕获异常也不能提交半成品。回执/原连接撤销仅核归属关联，
@@ -63,3 +64,26 @@ Get 只返回 `View(source, stopped, observedAt)`，没有伪造的 policy_revis
 不能替代完整 collab.use、组织版本及政策提交屏障；下一任务必须补真实当前身份/权限核验、
 锁下版本屏障、期限计算、服务 JWT/委托租户鉴权和 collab 最终 CAS，再接三 RPC/第五 RPC。
 新增 PostgreSQL 用例验证内核事务/RLS，核验快照为显式测试夹具，不证明真实身份或宿主。
+
+## 本库政策版本底座（无来源出口）
+
+V10 的 `iam.network_policy_revision` 以 tenant 为主键，正 `numeric(20,0)` 限于
+1..18446744073709551615，沿用 FORCE RLS 与迁移角色/运行角色分离。
+包内 `IamNetworkPolicyRevision` 只复用调用方当前同 tenant 事务，不装 Bean、不另开事务；
+调用方必须先取得上述 tenant advisory，随后 lazy 初始化 1、锁行读取或递增。
+该行锁保持到同事务提交。溢出以现有 `common.unavailable` 失败关闭，业务写入一起回滚。
+
+configure/nodePolicy/grant/withdraw/revoke 成功事务推进版本；成功幂等写可保守递增。
+register 只在最终事务实际插入新 node 时递增，重复返回不递增；号码预留及 realm 计数
+仍沿原独立事务，不单独推进政策版本。prepare/redeem/cleanup 等连接事实不使用政策版本
+替代真实身份、完整连接快照及期限核验。
+
+账户事件在原 tenant 事务先取同 advisory，再无锁检查账号存在性；
+permissions_changed 先真实失效会话 access token，disabled/offboarded 先真实撤销会话及设备，
+之后才 account FOR UPDATE 重读并按原语义写状态，最后递增版本。enabled 仅锁账号写状态，
+再递增版本；不存在账号仍无操作。会话投影、撤销事件、审计及版本沿原事务原子提交。
+
+这个版本只表示 **IAM 已提交观察到的本库变化**；远端 org 事件未送达时，没有跨服务
+全局强一致保证。后续真实来源 Authority 仍须事务外查询当前 org member/external 及
+collab.use，回到本库按首锁协议比较版本和完整身份/连接快照；安装配置 PermissionResolver
+或旧 JWT 权限都不能冒充实时 org 权威。当前没有来源 Bean/三 RPC 出口，第五 RPC 仍 unavailable。
