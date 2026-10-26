@@ -117,7 +117,7 @@
           "$ref": "#/$defs/P64"
         },
         "state": {
-          "enum": ["active", "revoked", "expired"]
+          "const": "active"
         },
         "not_before": {
           "$ref": "#/$defs/Time"
@@ -127,6 +127,9 @@
         },
         "predecessor_binding": {
           "$ref": "#/$defs/EmptyOrId"
+        },
+        "native_binding": {
+          "$ref": "#/$defs/NativeBinding"
         }
       },
       "required": [
@@ -137,7 +140,8 @@
         "state",
         "not_before",
         "expires_at",
-        "predecessor_binding"
+        "predecessor_binding",
+        "native_binding"
       ],
       "additionalProperties": false
     },
@@ -281,7 +285,30 @@
           "$ref": "#/$defs/Id"
         },
         "source": {
-          "$ref": "#/$defs/SourceFact"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceFact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "enum": ["registered", "not_accepted", "not_committed"]
+        },
+        "failure_evidence": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/NotAcceptedEvidence"
+            },
+            {
+              "$ref": "#/$defs/NotCommittedEvidence"
+            }
+          ]
         }
       },
       "required": [
@@ -290,26 +317,81 @@
         "request_id",
         "server_auth",
         "operation_id",
-        "source"
+        "source",
+        "result",
+        "failure_evidence"
       ],
       "additionalProperties": false,
       "allOf": [
         {
-          "properties": {
-            "source": {
+          "if": {
+            "properties": {
+              "result": {
+                "const": "registered"
+              }
+            },
+            "required": ["result"],
+            "type": "object"
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/SourceFact"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "revision": {
+                        "const": "1"
+                      },
+                      "state": {
+                        "const": "active"
+                      }
+                    }
+                  }
+                ]
+              },
+              "failure_evidence": {
+                "type": "null"
+              }
+            },
+            "type": "object"
+          },
+          "else": {
+            "properties": {
+              "source": {
+                "type": "null"
+              }
+            },
+            "if": {
               "properties": {
-                "revision": {
-                  "const": "1"
-                },
-                "state": {
-                  "const": "active"
+                "result": {
+                  "const": "not_accepted"
                 }
               },
-              "required": ["revision", "state"],
+              "required": ["result"],
               "type": "object"
-            }
-          },
-          "type": "object"
+            },
+            "then": {
+              "properties": {
+                "failure_evidence": {
+                  "$ref": "#/$defs/NotAcceptedEvidence"
+                }
+              },
+              "type": "object"
+            },
+            "else": {
+              "properties": {
+                "failure_evidence": {
+                  "$ref": "#/$defs/NotCommittedEvidence"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          }
         }
       ]
     },
@@ -351,10 +433,11 @@
         "registration",
         "native_witness"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$comment": "The consumer MUST bind native_witness.binding_id and binding_revision to const values from the trusted saved issuance native_binding, not client claims. See fixtures/source-binding-cases.json."
     },
     "SourceGetResult": {
-      "description": "当前观察，非 allow 租约。valid_until 由 collab 夹紧 IAM/见证/本地期限；终态为 null。",
+      "description": "Active current observation only; terminal IAM facts map to network.revoked, expired observation deadlines to network.expired. Never an allow lease.",
       "type": "object",
       "properties": {
         "app_version": {
@@ -370,7 +453,19 @@
           "$ref": "#/$defs/ServerAuth"
         },
         "source": {
-          "$ref": "#/$defs/SourceFact"
+          "allOf": [
+            {
+              "$ref": "#/$defs/SourceFact"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "const": "active"
+                }
+              }
+            }
+          ]
         },
         "policy_revision": {
           "$ref": "#/$defs/P64"
@@ -379,14 +474,7 @@
           "$ref": "#/$defs/Time"
         },
         "valid_until": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Time"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/Time"
         },
         "witness_id": {
           "$ref": "#/$defs/Id"
@@ -403,42 +491,7 @@
         "valid_until",
         "witness_id"
       ],
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "source": {
-                "properties": {
-                  "state": {
-                    "const": "active"
-                  }
-                },
-                "required": ["state"],
-                "type": "object"
-              }
-            },
-            "required": ["source"],
-            "type": "object"
-          },
-          "then": {
-            "properties": {
-              "valid_until": {
-                "$ref": "#/$defs/Time"
-              }
-            },
-            "type": "object"
-          },
-          "else": {
-            "properties": {
-              "valid_until": {
-                "type": "null"
-              }
-            },
-            "type": "object"
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "SourceRevoke": {
       "description": "先本地持久停发；无需 native 见证。collab 用原归属锚点及保存的原连接撤销，失效原身份不妨碍既有 outbox。",
@@ -462,9 +515,6 @@
         "source_binding": {
           "$ref": "#/$defs/Id"
         },
-        "expected_revision": {
-          "$ref": "#/$defs/P64"
-        },
         "operation_id": {
           "$ref": "#/$defs/Id"
         }
@@ -476,7 +526,6 @@
         "epoch",
         "boot_id",
         "source_binding",
-        "expected_revision",
         "operation_id"
       ],
       "additionalProperties": false
@@ -524,6 +573,51 @@
         "state",
         "lineage_stopped"
       ],
+      "additionalProperties": false
+    },
+    "NativeBinding": {
+      "type": "object",
+      "properties": {
+        "binding_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "binding_revision": {
+          "$ref": "#/$defs/P64"
+        }
+      },
+      "required": ["binding_id", "binding_revision"],
+      "additionalProperties": false
+    },
+    "NotAcceptedEvidence": {
+      "type": "object",
+      "properties": {
+        "authority": {
+          "const": "collab"
+        },
+        "reason": {
+          "const": "rejected_before_pending"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": ["authority", "reason", "request_digest"],
+      "additionalProperties": false
+    },
+    "NotCommittedEvidence": {
+      "type": "object",
+      "properties": {
+        "authority": {
+          "const": "iam"
+        },
+        "reason": {
+          "const": "original_connection_invalid_uncommitted"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": ["authority", "reason", "request_digest"],
       "additionalProperties": false
     }
   },

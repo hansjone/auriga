@@ -64,6 +64,10 @@
   },
   "sourceControl": {
     "maxNativeWitnessLifetimeSeconds": 30,
-    "maxInFlightPerNode": 1
+    "maxInFlightPerNode": 2,
+    "maxRegularInFlightPerNode": 1,
+    "maxRevocationsInFlightPerNode": 1,
+    "maxRequestSeconds": 30,
+    "maxGetObservationAgeSeconds": 60
   }
 }

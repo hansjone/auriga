@@ -631,7 +631,10 @@ func (x *NetworkMailboxServiceLocalRegisterResponse) GetFrameJson() []byte {
 // native_witness; mode=reconcile requires null and reads only a durable original
 // operation. Collab freezes the full original IAM request including connection;
 // a reconnect never rewrites it. Unknown outcomes reconcile with the original
-// op/body, never a new op. Missing original pending/ownership anchors fail closed.
+// op/body, never a new op UNLESS a durable definitive-failure receipt was saved.
+// not_accepted requires collab's pre-pending rejection fence; not_committed
+// requires IAM's original-op uncommitted confirmation and fence. Mere absence,
+// timeout or forbidden is unknown; late issue must never cross a failure fence.
 // Persist pending/witness/outbox in a short transaction, call IAM OUTSIDE it,
 // then short-transaction CAS current health/connection/epoch/boot/typed-local,
 // witness freshness and local permission/stop versions before activation.
@@ -693,6 +696,9 @@ type NetworkMailboxServiceSourceRegisterResponse struct {
 	// revision=1/active creation receipt is historical, NOT current authorization.
 	// Replays preserve the original business result; only the current transport
 	// signature/association changes. Current Get and final CAS are still required.
+	// result=registered has source and null failure_evidence. Definitive failures
+	// not_accepted/not_committed have null source and the saved authority/digest
+	// evidence; only then may the plugin persist a NEW op after fresh checks.
 	// All source responses use protocol_response and bind current authenticated
 	// realm/node/incarnation/epoch, READY channel_nonce and this request_id.
 	// Gateway forwards original response bytes unchanged. If no authenticated
@@ -749,6 +755,9 @@ func (x *NetworkMailboxServiceSourceRegisterResponse) GetFrameJson() []byte {
 // IAM receives the current exact authenticated source connection, not a cached
 // or rewritten original tuple. Check its connection echo and source facts, then
 // final local CAS. This remains an observation, never a message allow lease.
+// Both native binding_id and binding_revision MUST equal the saved issuance
+// values, including on successor issuance; mismatch conflicts and requires stop/
+// revocation. Never derive these comparison consts from the incoming frame.
 type NetworkMailboxServiceSourceGetRequest struct {
 	state         protoimpl.MessageState    `protogen:"open.v1"`
 	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
@@ -805,8 +814,10 @@ type NetworkMailboxServiceSourceGetResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Complete signed source_get_result or existing signed error, forwarded as
 	// original bytes under the same signature rules as SourceRegisterResponse.
-	// Echo witness_id; clamp valid_until to IAM/native/local deadlines, null for
-	// terminal facts. Do not expose IAM owner or original redeem connection.
+	// Echo witness_id; clamp valid_until to IAM/native/local deadlines. Results
+	// are active with a valid time; terminal facts become network.revoked ERROR,
+	// expired observation windows network.expired. Never return active with null.
+	// Do not expose IAM owner or original redeem connection.
 	// ACTIVE grants no SEND. Signing still requires the fifth IAM RPC and final
 	// local typed-local/thread/recipient/relationship version checks.
 	FrameJson     []byte `protobuf:"bytes,1,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
@@ -851,14 +862,16 @@ func (x *NetworkMailboxServiceSourceGetResponse) GetFrameJson() []byte {
 	return nil
 }
 
-// source_revoke: source_binding, positive expected_revision and stable
-// operation_id. No native witness: closing the host must not prevent revocation.
+// source_revoke: source_binding and stable operation_id, NO exact revision or
+// native witness: closing the host must not prevent narrowing revocation.
 // Persist stop/version and original revoke request/outbox first; call IAM outside
 // transactions using retained original ownership/connection anchors, then record
 // the terminal receipt in a short transaction. Existing durable outbox continues
 // even if the original transport expired; current mailbox calls still need their
 // own authenticated READY association. Unknown results replay the original op.
 // Stop wins over every late Register/Get response and successor activation.
+// Every request times out at 30s without losing durable pending/outbox; Revoke
+// uses its own reserved slot and never waits behind a Register/Get request.
 type NetworkMailboxServiceSourceRevokeRequest struct {
 	state         protoimpl.MessageState    `protogen:"open.v1"`
 	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`

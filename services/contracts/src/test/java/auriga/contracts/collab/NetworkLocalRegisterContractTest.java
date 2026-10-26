@@ -15,10 +15,19 @@ import tools.jackson.databind.json.JsonMapper;
 /** Generated contract and byte transport only; no production authentication or persistence. */
 class NetworkLocalRegisterContractTest {
   @Test
-  void exactlyOneAdditionalUnaryAndTwoMessages() {
+  void exactlyEightUnaryMethodsAndSeventeenMessages() {
     var file = NetworkMailboxServiceLocalRegisterRequest.getDescriptor().getFile();
     var service = file.findServiceByName("NetworkMailboxService");
-    var names = List.of("Ready", "Head", "Fetch", "Receipt", "LocalRegister", "SourceRegister", "SourceGet", "SourceRevoke");
+    var names =
+        List.of(
+            "Ready",
+            "Head",
+            "Fetch",
+            "Receipt",
+            "LocalRegister",
+            "SourceRegister",
+            "SourceGet",
+            "SourceRevoke");
     assertEquals(1, file.getServices().size());
     assertEquals(17, file.getMessageTypes().size());
     assertEquals(

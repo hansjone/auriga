@@ -59,6 +59,7 @@ const source = () => ({
   not_before: '2026-10-25T00:00:00Z',
   expires_at: '2026-10-25T00:05:00Z',
   predecessor_binding: '',
+  native_binding: { binding_id: 'local-binding-1', binding_revision: '2' },
 });
 function frame(type) {
   const base = { app_version: '1.0', type, request_id: 'request-1' };
@@ -84,11 +85,15 @@ function frame(type) {
   if (type === 'source_revoke')
     Object.assign(base, {
       source_binding: 'source-1',
-      expected_revision: '1',
       operation_id: 'revoke-1',
     });
   if (type === 'source_register_result')
-    Object.assign(base, { operation_id: 'register-1', source: source() });
+    Object.assign(base, {
+      operation_id: 'register-1',
+      result: 'registered',
+      source: source(),
+      failure_evidence: null,
+    });
   if (type === 'source_get_result')
     Object.assign(base, {
       source: source(),
@@ -196,14 +201,87 @@ test('receipt reconciliation cannot carry an apparently fresh issuance witness',
   value.mode = 'issue';
   assert.equal(validate(value), false);
 });
-test('terminal Get cannot carry an active validity window', () => {
+test('terminal Get always uses error and active Get always carries a valid time shape', () => {
   const value = frame('source_get_result');
-  value.source.state = 'expired';
-  assert.equal(validate(value), false);
-  value.valid_until = null;
-  assert.equal(validate(value), true);
+  for (const state of ['expired', 'revoked']) {
+    value.source.state = state;
+    value.valid_until = '2026-10-25T00:00:30Z';
+    assert.equal(validate(value), false);
+    value.valid_until = null;
+    assert.equal(validate(value), false);
+  }
   value.source.state = 'active';
   assert.equal(validate(value), false);
+});
+test('revoke accepts a binding and operation without native witness or revision', () => {
+  const value = frame('source_revoke');
+  assert.equal(validate(value), true);
+  for (const field of ['native_witness', 'expected_revision']) {
+    const changed = structuredClone(value);
+    changed[field] = field === 'expected_revision' ? '1' : witness();
+    assert.equal(validate(changed), false);
+  }
+});
+test('Register definitive failures carry authority evidence and cannot carry an active source', () => {
+  for (const [result, authority, reason] of [
+    ['not_accepted', 'collab', 'rejected_before_pending'],
+    ['not_committed', 'iam', 'original_connection_invalid_uncommitted'],
+  ]) {
+    const value = frame('source_register_result');
+    Object.assign(value, {
+      result,
+      source: null,
+      failure_evidence: {
+        authority,
+        reason,
+        request_digest: `sha256:${'b'.repeat(64)}`,
+      },
+    });
+    assert.equal(validate(value), true, JSON.stringify(validate.errors));
+    value.source = source();
+    assert.equal(validate(value), false);
+    value.source = null;
+    value.failure_evidence.authority = authority === 'iam' ? 'collab' : 'iam';
+    assert.equal(validate(value), false);
+  }
+  const value = frame('source_register_result');
+  value.result = 'unknown';
+  assert.equal(validate(value), false);
+});
+test('Get schema bound to the actual saved issuance rejects changed mapping IDs and revisions', () => {
+  const cases = JSON.parse(
+    readFileSync(
+      new URL('./source-binding-cases.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  for (const sample of cases) {
+    // consts come from the trusted persisted issuance, never the incoming frame.
+    const bound = ajv.compile({
+      $ref: 'https://auriga.example.com/contracts/network/source-control.schema.json#/$defs/SourceGet',
+      type: 'object',
+      properties: {
+        native_witness: {
+          type: 'object',
+          properties: {
+            binding_id: { const: sample.issued_native_binding.binding_id },
+            binding_revision: {
+              const: sample.issued_native_binding.binding_revision,
+            },
+          },
+        },
+      },
+    });
+    const value = frame('source_get');
+    Object.assign(value.native_witness, sample.native_binding);
+    assert.equal(
+      validate(value),
+      true,
+      'shape alone cannot prove a saved mapping',
+    );
+    assert.equal(bound(value), sample.code === null, sample.name);
+    if (sample.code !== null) assert.equal(sample.code, 'network.conflict');
+  }
 });
 test('mutation receipts cannot claim current allow or successful active revocation', () => {
   const value = frame('source_revoke_result');
@@ -219,6 +297,21 @@ test('mutation receipts cannot claim current allow or successful active revocati
   registered.source.revision = '1';
   registered.allowed = true;
   assert.equal(validate(registered), false);
+});
+test('source facts must retain the original positive native mapping without host identifiers', () => {
+  for (const type of ['source_register_result', 'source_get_result']) {
+    const value = frame(type);
+    delete value.source.native_binding;
+    assert.equal(validate(value), false);
+    value.source.native_binding = {
+      binding_id: 'local-binding-1',
+      binding_revision: '0',
+    };
+    assert.equal(validate(value), false);
+    value.source.native_binding.binding_revision = '2';
+    value.source.native_binding.host_session_id = 'forged';
+    assert.equal(validate(value), false);
+  }
 });
 test('every source result requires a complete server signature envelope', () => {
   for (const type of types.filter((t) => t.endsWith('_result'))) {

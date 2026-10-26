@@ -274,18 +274,24 @@ collab 接收及最终 CAS 重核有效期、健康/连接/epoch/boot、typed-lo
 
 Register 的稳定 operation_id 与 registration/scope/前代/CAS 先耐久保存；issue 带新鲜见证，
 reconcile 只以 null 见证读取已存原操作；collab 固化完整 IAM 原请求后，即使重连也用旧 connection 原体对账。
-未知结果不能换 op/改原体；新 envelope 只重新签运原回执，不刷新回执事实。自然 EXPIRED head 未停权，
+未知结果不能换 op/改原体；只有受签 not_accepted（collab 未受理围栏）/not_committed（IAM 原键未提交围栏）
+确定失败才允许新 op，不能把 forbidden/超时/缺行当证据。新 envelope 只重新签运原回执，不刷新回执事实。自然 EXPIRED head 未停权，
 对账后才能另存新 op/前代版本，在全量新鲜核验后 CAS 新有界代际；停发/显式撤销禁止自动替代。
 Get 必须新鲜见证/当前连接，回当前 source、policy_revision、observed_at、夹紧 valid_until 和 witness_id；
-active Register 原回执不激活来源，Get active 也不授 SEND。source 投影只含 binding/登记/scope/revision/state/原时间窗/前代，
+Get 的 binding_id/binding_revision 必须等于签发时固定 native_binding，后继也不得重绑；不符 conflict 并先撤销。
+active Register 原回执不激活来源，Get active 也不授 SEND。source 投影只含 binding/登记/scope/revision/state/原时间窗/前代/native_binding，
 不回内部 owner/兑换连接。所有结果都是 purpose=protocol_response 的完整受签下行，绑定当前受众、nonce、request_id。
 
-Revoke 无 native 见证，先本地和 collab 耐久停发/outbox，再事务外调 IAM，最终短事务记录终态；
+Revoke 无 native 见证、不要求精确 revision，仅 binding 与原归属核验；先本地和 collab 耐久停发/outbox，再事务外调 IAM，最终短事务记录终态；
 result 的原 op/binding/revision/state 与 lineage_stopped=true 仅表示 IAM 已提交链停权，expired 前代不复活、active 后继一并停权。
 掉线时已存 collab outbox 可用原归属锚点继续，未确认只报待确认。迟到 Register/Get 不能压过停发。
 pending/op/原 IAM 请求摘要/完整见证/连接及许可版本/outbox 均在短事务耐久保存，远程 IAM 一律事务外，
 最终短事务 CAS 再核健康、epoch/boot、typed-local 和停发/许可版本；签发前仍须第五 RPC 与业务关系/recipient 版本重核。
-这不保证跨服务零撤销窗口。每帧 ≤64KiB、全部原 JSON 上限、每 node 一个在途来源请求；
+发件可复用最近一次 source_get 观察，同时不超过 valid_until 且距 observed_at ≤60 秒，原时间不能刷新；
+当前身份/连接、typed-local/签发映射、停发/许可 fence 和每次签前第五仍须核验。不满足先重新 Get。
+终态 Get 一律 network.revoked，active 但观察期限失效 network.expired，成功只回 active/非空有效时间。
+这不保证跨服务零撤销窗口。每帧 ≤64KiB、全部原 JSON 上限；每 node 常规 1 个加撤销保留 1 个名额，
+每请求 30 秒超时释放名额但保留 mutation pending；撤销不排在登记后。witness_id 在 tenant+node 唯一，保留不短于来源最大时间窗及对账期。
 只复用现有 network 错误 catalog，不把结构测试、类型生成当真实宿主/PG/NATS/SEND 闭环实证。
 
 ### 2.2 精确 subject 隔离
