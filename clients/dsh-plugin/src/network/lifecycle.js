@@ -1,23 +1,26 @@
 import { openNetworkRuntime, isRevocationError } from './runtime.js';
 import { networkIsolation } from './isolation.js';
+import { isDeviceRevocationError } from './device-provider.js';
 
 /** Provider lifetime and login lifetime are independent. Late register/prepare
  * responses cannot resurrect an old login or a disposed native provider.
- * @param {{directory:string,ctx:any,installation?:import('./runtime-types.js').NetworkInstallation,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void,backoff?:{baseMs:number,maxMs:number}}} options */
+ * @param {{directory:string,ctx:any,installation?:import('./runtime-types.js').NetworkInstallation,defaultProvider?:import('./runtime-types.js').DeviceNetworkProvider,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void,backoff?:{baseMs:number,maxMs:number}}} options */
 export function createNetworkLifecycle(options) {
   const installation = options.installation;
   let authenticated = false;
   let disposed = false;
   let generation = 0;
   /** @type {import('./runtime-types.js').NetworkProvider|undefined} */
-  let provider;
+  let provider = options.defaultProvider;
+  let attachment = 0;
   /** @type {Awaited<ReturnType<typeof openNetworkRuntime>>|undefined} */
   let runtime;
   /** @type {AbortController|undefined} */
   let controller;
   let tail = Promise.resolve();
   let cleanup = Promise.resolve();
-  let phase = 'unconfigured';
+  let phase = provider ? 'idle' : 'unconfigured';
+  let reason = 'stopped';
   function retire() {
     generation++;
     controller?.abort();
@@ -70,18 +73,17 @@ export function createNetworkLifecycle(options) {
             installation,
           });
           if (!valid()) return;
-          candidate = await (options.open ?? openNetworkRuntime)({
-            prepared,
-            ports: currentProvider.ports,
+          const input = {
             directory: options.directory,
             ctx: options.ctx,
             getAccess: options.getAccess,
             authorizeLocal: options.authorizeLocal,
-            onClosed() {
+            onClosed(/** @type {string} */ why) {
               if (ended) return;
               if (valid()) {
                 runtime = undefined;
                 phase = 'unavailable';
+                reason = why === 'forbidden' ? 'forbidden' : 'unavailable';
               }
               notifyClosed();
             },
@@ -92,7 +94,27 @@ export function createNetworkLifecycle(options) {
                 begin();
               }
             },
-          });
+          };
+          candidate = await (options.open ?? openNetworkRuntime)(
+            currentProvider.kind === 'device-connection'
+              ? {
+                  ...input,
+                  kind: 'device-connection',
+                  signal: abort.signal,
+                  prepared:
+                    /** @type {import('./runtime-types.js').PreparedConnection} */ (
+                      prepared
+                    ),
+                }
+              : {
+                  ...input,
+                  prepared:
+                    /** @type {import('./runtime-types.js').PreparedNetwork} */ (
+                      prepared
+                    ),
+                  ports: currentProvider.ports,
+                },
+          );
           if (!valid()) {
             await candidate.close();
             return;
@@ -117,7 +139,11 @@ export function createNetworkLifecycle(options) {
           if (!valid()) return;
           await candidate?.close();
           if (!valid()) return;
-          if (isRevocationError(error)) {
+          if (
+            (currentProvider.kind === 'device-connection'
+              ? isDeviceRevocationError
+              : isRevocationError)(error)
+          ) {
             options.onRevoked?.();
             authenticated = false;
             begin();
@@ -125,6 +151,8 @@ export function createNetworkLifecycle(options) {
           }
           runtime = undefined;
           phase = 'unavailable';
+          if (/** @type {any} */ (error)?.status === 403) reason = 'forbidden';
+          else if (!ended) reason = 'unavailable';
           // Initial register/prepare uses the same bounded exponential retry
           // principle as transport ticket refresh. No synchronous retry loop.
           await new Promise((resolve) => {
@@ -154,10 +182,11 @@ export function createNetworkLifecycle(options) {
     attach(value) {
       if (disposed) throw new Error('network lifecycle closed');
       provider = value;
+      const token = ++attachment;
       begin();
       return () => {
-        if (provider === value) {
-          provider = undefined;
+        if (provider === value && token === attachment) {
+          provider = options.defaultProvider;
           begin();
         }
       };
@@ -179,6 +208,7 @@ export function createNetworkLifecycle(options) {
           isolation: networkIsolation,
           connected: false,
           state: phase,
+          reason,
         }
       );
     },

@@ -6,6 +6,156 @@ import { generateKeyPairSync } from 'node:crypto';
 import { platformConfig } from '../../src/local/platform.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('network-only forbidden reason remains diagnostic after a running runtime closes', async () => {
+  let input,
+    revoked = 0;
+  const lifecycle = createNetworkLifecycle({
+    directory: 'unused',
+    ctx: {},
+    getAccess: async () => 'native',
+    authorizeLocal: async () => false,
+    defaultProvider: {
+      kind: 'device-connection',
+      async prepare() {
+        return { kind: 'device-connection' };
+      },
+    },
+    onRevoked: () => {
+      revoked++;
+    },
+    async open(options) {
+      input = options;
+      return {
+        status: { connected: true },
+        async start() {},
+        async close() {},
+        consentUI() {},
+      };
+    },
+  });
+  lifecycle.login();
+  try {
+    await until(() => lifecycle.status.connected);
+    input.onClosed('forbidden');
+    await turn();
+    assert.equal(lifecycle.status.state, 'unavailable');
+    assert.equal(lifecycle.status.reason, 'forbidden');
+    assert.equal(revoked, 0);
+  } finally {
+    await lifecycle.close();
+  }
+});
+
+for (const point of ['prepare', 'start'])
+  for (const error of [
+    { status: 403 },
+    { status: 403, code: 'network.unauthorized' },
+    { status: 401 },
+    { status: 403, code: 'network.revoked' },
+  ])
+    test(
+      'official lifecycle ' +
+        point +
+        ' distinguishes denial ' +
+        JSON.stringify(error),
+      async () => {
+        let revoked = 0;
+        const lifecycle = createNetworkLifecycle({
+          directory: 'unused',
+          ctx: {},
+          getAccess: async () => 'native',
+          authorizeLocal: async () => false,
+          defaultProvider: {
+            kind: 'device-connection',
+            async prepare() {
+              if (point === 'prepare') throw error;
+              return { kind: 'device-connection' };
+            },
+          },
+          onRevoked: () => {
+            revoked++;
+          },
+          async open() {
+            return {
+              async start() {
+                throw error;
+              },
+              async close() {},
+              consentUI() {},
+            };
+          },
+        });
+        lifecycle.login();
+        try {
+          await until(() => lifecycle.status.state !== 'connecting');
+          const expected =
+            error.status === 401 || error.code === 'network.revoked';
+          assert.equal(revoked, expected ? 1 : 0);
+          assert.equal(
+            lifecycle.status.state,
+            expected ? 'idle' : 'unavailable',
+          );
+          if (!expected) assert.equal(lifecycle.status.reason, 'forbidden');
+        } finally {
+          await lifecycle.close();
+        }
+      },
+    );
+test('complete provider detach restores official default after old runtime releases its lock', async () => {
+  const calls = [];
+  let release;
+  const gate = new Promise((r) => {
+    release = r;
+  });
+  const fallback = {
+    kind: 'device-connection',
+    async prepare() {
+      calls.push('default-prepare');
+      return { kind: 'device-connection' };
+    },
+  };
+  const lifecycle = createNetworkLifecycle({
+    directory: 'unused',
+    ctx: {},
+    defaultProvider: fallback,
+    getAccess: async () => '',
+    authorizeLocal: async () => false,
+    async open(input) {
+      const kind = input.kind ?? 'full';
+      calls.push(kind + '-open');
+      return {
+        status: { connected: true },
+        async start() {},
+        async close() {
+          calls.push(kind + '-close');
+          if (kind === 'full') await gate;
+        },
+        consentUI() {},
+      };
+    },
+  });
+  const full = {
+    ports: {},
+    async prepare() {
+      calls.push('full-prepare');
+      return {};
+    },
+  };
+  const detach = lifecycle.attach(full);
+  lifecycle.login();
+  await turn();
+  await turn();
+  detach();
+  await turn();
+  assert.equal(calls.includes('default-prepare'), false);
+  release();
+  await turn();
+  await turn();
+  assert.equal(calls.includes('default-prepare'), true);
+  assert.ok(calls.indexOf('full-close') < calls.indexOf('default-prepare'));
+  await lifecycle.close();
+});
 test('installation alone has zero network side effects; only trusted prepare receives immutable pins', async () => {
   const installation = platformConfig({
     platformOrigin: 'https://portal.example.com',

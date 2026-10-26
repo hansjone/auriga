@@ -7,6 +7,7 @@ import {
   openLedger,
   reserveLocal,
   registerReservedLocal,
+  loadConnectionLedger,
 } from '../../../src/network/host/ledger.js';
 import {
   createFileLedgerStore,
@@ -28,6 +29,43 @@ async function tempDir(t) {
 }
 
 const code = (c) => (e) => e?.code === c;
+
+test('connection ledger loads once under caller handle and consumes missing-ledger initialization once', async () => {
+  const store = createMemoryLedgerStore();
+  const handle = await store.open();
+  const registration = { ...IDENTITY, created: true };
+  let loads = 0;
+  const locked = await loadConnectionLedger(
+    {
+      ...handle,
+      load: () => {
+        loads++;
+        return handle.load();
+      },
+    },
+    registration,
+  );
+  assert.equal(locked.state, undefined);
+  await locked.initialize(IDENTITY);
+  assert.deepEqual(locked.state.identity, IDENTITY);
+  await assert.rejects(
+    locked.initialize(IDENTITY),
+    code(CODES.ledgerUnavailable),
+  );
+  await assert.rejects(store.open(), code(CODES.ledgerUnavailable));
+  assert.equal(loads, 1);
+  await handle.close();
+  const next = await store.open();
+  const existing = await loadConnectionLedger(next, {
+    ...registration,
+    created: false,
+  });
+  assert.equal(
+    existing.state.identity.nodeIncarnation,
+    IDENTITY.nodeIncarnation,
+  );
+  await next.close();
+});
 
 test('file ledger: explicit init, single writer, durable reopen', async (t) => {
   const dir = await tempDir(t);

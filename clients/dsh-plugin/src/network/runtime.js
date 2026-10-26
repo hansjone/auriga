@@ -14,6 +14,7 @@ import { parseAddress } from './host/address.js';
 import { SessionError } from './session/errors.js';
 import { openPendingBuffer } from './pending-buffer.js';
 import { canonicalize } from './trust/jcs.js';
+import { openConnectionRuntime } from './connection-runtime.js';
 
 /** @param {unknown} error */
 export function isRevocationError(error) {
@@ -96,6 +97,8 @@ export function ticketCredentials(value) {
  * implements missing IAM HTTPS/control ports; no guessed API paths are used.
  * @param {import('./runtime-types.js').RuntimeOptions} options */
 export async function openNetworkRuntime(options) {
+  if (options.kind === 'device-connection')
+    return openConnectionRuntime(options);
   const { prepared, ports, ctx } = options;
   const required = [
     ports?.prepareTicket,

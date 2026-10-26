@@ -1,4 +1,5 @@
 import { SessionError } from '../session/errors.js';
+import { createHash } from 'node:crypto';
 import { canonicalize } from './jcs.js';
 
 import {
@@ -8,6 +9,7 @@ import {
   publicKey,
   validatePublicKey,
   validatePublication,
+  validateAnnouncement,
 } from './keyset.js';
 export { positiveVersion, timeValue } from './keyset.js';
 /** @typedef {import('../../generated/network/keyset-types.d.ts').SignedKeyset} TrustConfig
@@ -20,7 +22,8 @@ export { positiveVersion, timeValue } from './keyset.js';
  * refresh fetches a SignedKeyset from fixed trusted configuration; roots verify it;
  * frame-provided version/kid are hints, never authority or a URL.
  * @param {{cache: TrustCache, config?: TrustConfig|string|Uint8Array, roots: Pick<TrustKey, 'kid'|'public_key_spki'>[], now?: () => number,
- * refresh?: (request: {realm: string, minimumVersion: string, kid: string}) => Promise<TrustConfig>}} options
+ * realm?:string, requireAnnouncement?:boolean,
+ * refresh?: (request: {realm: string, minimumVersion: string, kid: string}) => Promise<TrustConfig|string|Uint8Array|void>}} options
  */
 export async function openTrustStore({
   cache,
@@ -28,6 +31,8 @@ export async function openTrustStore({
   roots,
   now = Date.now,
   refresh,
+  realm,
+  requireAnnouncement = false,
 }) {
   /** @type {Payload | undefined} */
   let current;
@@ -36,6 +41,11 @@ export async function openTrustStore({
   let blocked = false;
   /** @type {Payload | undefined} */
   let uncertain;
+  /** @type {TrustConfig|undefined} */
+  let publication;
+  /** @type {any} */
+  let announcement;
+  let announcementUncertain = false;
   const listeners = new Set();
   let refreshRevision = 0;
   const diagnostics = {
@@ -87,18 +97,56 @@ export async function openTrustStore({
   }
   const persisted = await cache.load();
   if (persisted !== undefined) {
-    const checked = validatePublication(persisted.publication, rootKeys);
+    if (persisted.announcement)
+      announcement = validateAnnouncement(persisted.announcement, rootKeys);
+    const checked =
+      persisted.publication === undefined && announcement
+        ? undefined
+        : validatePublication(persisted.publication, rootKeys);
     if (!Array.isArray(persisted.history)) unavailable('invalid key history');
     for (const k of persisted.history) {
       validatePublicKey(k);
       if (history.has(k.kid)) unavailable('duplicate key history');
       history.set(k.kid, k);
     }
-    if (checked.publication.keyset.keys.some((k) => !history.has(k.kid)))
+    if (checked?.publication.keyset.keys.some((k) => !history.has(k.kid)))
       unavailable('incomplete key history');
-    history = nextHistory(checked.publication.keyset);
-    current = checked.publication.keyset;
-    publicKeys = checked.keys;
+    if (checked) {
+      history = nextHistory(checked.publication.keyset);
+      current = checked.publication.keyset;
+      publication = checked.publication;
+      publicKeys = checked.keys;
+      if (realm && current.realm !== realm)
+        unavailable('keyset realm mismatch');
+    }
+  }
+  /** An observed higher announcement fences keys immediately, including while
+   * either durable write is in flight. Never clear a newer fence after an await. */
+  async function announce(/** @type {any} */ input) {
+    const next = validateAnnouncement(input, rootKeys);
+    if (
+      (announcement &&
+        (BigInt(next.keyset_version) < BigInt(announcement.keyset_version) ||
+          (next.keyset_version === announcement.keyset_version &&
+            canonicalize(next) !== canonicalize(announcement)))) ||
+      (current && BigInt(next.keyset_version) < BigInt(current.keyset_version))
+    )
+      unavailable('announcement rollback');
+    if (!Number.isFinite(now()) || now() >= timeValue(next.valid_until))
+      unavailable('announcement expired');
+    announcement = next;
+    announcementUncertain = true;
+    const op = queue.then(async () => {
+      const written = announcement;
+      await cache.commit({
+        publication,
+        history: [...history.values()],
+        announcement: written,
+      });
+      if (announcement === written) announcementUncertain = false;
+    });
+    queue = op.catch(() => {});
+    return op;
   }
   /** @param {TrustConfig|string|Uint8Array} input */
   async function update(input) {
@@ -106,6 +154,7 @@ export async function openTrustStore({
     const checked = validatePublication(input, rootKeys);
     const op = queue.then(async () => {
       const c = checked.publication.keyset;
+      if (realm && c.realm !== realm) unavailable('keyset realm mismatch');
       if (
         uncertain &&
         (BigInt(c.keyset_version) < BigInt(uncertain.keyset_version) ||
@@ -130,21 +179,57 @@ export async function openTrustStore({
       uncertain = c;
       // Retain monotonic key history even when fsync/rename has an uncertain outcome.
       history = next;
+      const written = announcement;
       await cache.commit({
         publication: checked.publication,
         history: [...next.values()],
+        ...(written ? { announcement: written } : {}),
       }); // No new key is live before durable commit.
       current = c;
+      publication = checked.publication;
       history = next;
       publicKeys = checked.keys;
       blocked = false;
       uncertain = undefined;
+      if (announcement === written) announcementUncertain = false;
     });
     queue = op.catch(() => {});
     return op;
   }
   const store = {
     update,
+    announce,
+    get expiresAt() {
+      return current
+        ? Math.min(
+            timeValue(current.valid_until),
+            timeValue(current.issued_at) + 86400000,
+            announcement ? timeValue(announcement.valid_until) : Infinity,
+          )
+        : 0;
+    },
+    assertUsable() {
+      if (
+        blocked ||
+        !current ||
+        !Number.isFinite(now()) ||
+        now() < timeValue(current.issued_at) ||
+        now() >= timeValue(current.valid_until)
+      )
+        unavailable('keyset unavailable');
+      if (
+        (requireAnnouncement || announcement) &&
+        (!announcement ||
+          announcementUncertain ||
+          announcement.keyset_version !== current.keyset_version ||
+          announcement.valid_until !== current.valid_until ||
+          now() >= timeValue(announcement.valid_until) ||
+          announcement.manifest_digest !==
+            'sha256:' +
+              createHash('sha256').update(canonicalize(current)).digest('hex'))
+      )
+        unavailable('announcement requires complete durable keyset');
+    },
     get version() {
       return current?.keyset_version ?? '1';
     },
@@ -163,6 +248,12 @@ export async function openTrustStore({
      * attempt per second, including failed/stale responses. No automatic loop.
      * @param {string} kid @param {string} version */
     async refreshFor(kid, version) {
+      let usable = true;
+      try {
+        store.assertUsable();
+      } catch {
+        usable = false;
+      }
       if (
         !current ||
         !positiveVersion(version) ||
@@ -171,6 +262,7 @@ export async function openTrustStore({
       )
         return;
       if (
+        usable &&
         !blocked &&
         now() < timeValue(current.valid_until) &&
         now() >= timeValue(current.issued_at) &&
@@ -189,7 +281,9 @@ export async function openTrustStore({
       refreshing = Promise.resolve()
         .then(async () => {
           try {
-            await update(await refresh(request));
+            const publication = await refresh(request);
+            if (publication !== undefined) await update(publication);
+            store.assertUsable();
             // Successful rotations must not delay a subsequent real rotation.
             if (
               current &&
@@ -224,6 +318,7 @@ export async function openTrustStore({
     },
     /** @param {string} kid @param {string} purpose @param {string} version */
     key(kid, purpose, version) {
+      store.assertUsable();
       const clock = now();
       if (
         blocked ||
