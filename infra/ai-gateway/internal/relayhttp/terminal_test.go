@@ -32,7 +32,13 @@ func TestHTTPStreamErrorsAndAccountingRollback(t *testing.T) {
 				request = plainRequest
 			}
 			pending := make(chan Pending, 1)
-			f.http.Recover = func(p Pending) { pending <- p }
+			f.http.ReserveRecovery = func() (func(*Pending), bool) {
+				return func(p *Pending) {
+					if p != nil {
+						pending <- *p
+					}
+				}, true
+			}
 			s := f.server(t, func(ctx context.Context, s relay.Submission, key []byte) (relay.Exchange, error) {
 				if strings.HasPrefix(mode, "accounting-") {
 					f.denyUsageWrites(t)

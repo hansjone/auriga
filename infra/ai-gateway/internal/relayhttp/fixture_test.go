@@ -217,7 +217,7 @@ func fixtureNew(t *testing.T) *fixture {
 	},
 		Limits: modelprotocol.Limits{MaxBytes: 65536, MaxEvents: 32, MaxEventBytes: 8192}, RecheckInterval: 20 * time.Millisecond, CheckTimeout: time.Second, StopTimeout: 100 * time.Millisecond, AccountingTimeout: time.Second}
 	f.cfg = cfg
-	f.http = Config{Gate: gate, Authority: a, Ledger: ledger, ReadTimeout: 200 * time.Millisecond, WriteTimeout: 200 * time.Millisecond, QueryTimeout: time.Second, MaxResponseBytes: 1 << 20, Recover: func(Pending) {}}
+	f.http = Config{Gate: gate, Authority: a, Ledger: ledger, ReadTimeout: 200 * time.Millisecond, WriteTimeout: 200 * time.Millisecond, QueryTimeout: time.Second, MaxInFlight: 32, MaxResponseBytes: 1 << 20, ReserveRecovery: func() (func(*Pending), bool) { return func(*Pending) {}, true }}
 	f.core, err = relay.New(cfg)
 	if err != nil {
 		t.Fatal(err)
