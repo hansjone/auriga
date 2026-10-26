@@ -501,7 +501,12 @@ class NetworkLocalRegisterWirePostgresTest {
     var missing = valid.deepCopy();
     missing.remove("address_type");
     malformed.add(bytes(missing));
-    malformed.add(bytes(valid.deepCopy().put("owner", "self-claimed")));
+    for (String value :
+        List.of("{\"key\":1,\"key\":2}", "1e0", "1.0", "9007199254740992", "\"\\uD800\""))
+      malformed.add(
+          NetworkJson.canonical(valid)
+              .replace("\"request_id\":", "\"future\":" + value + ",\"request_id\":")
+              .getBytes(StandardCharsets.UTF_8));
     for (var raw : malformed)
       NetworkMailboxGrpcTest.rejected(
           () -> rpc(f, raw), Status.Code.INVALID_ARGUMENT, "network.protocol_error");
@@ -874,5 +879,89 @@ class NetworkLocalRegisterWirePostgresTest {
     CLOCK.offset = Duration.ZERO;
     reset(registry);
     assertEquals("existing", rpc(f, bytes(registration(f, "session"))).path("result").asString());
+  }
+
+  @Test
+  void minorVersionsAndUnknownOptionalFieldsPreserveTheOriginalSignedRegistration()
+      throws Exception {
+    for (String version : List.of("1.0", "1.1")) {
+      for (String type : List.of("session", "subagent")) {
+        var f = fresh();
+        ready(f);
+        var request =
+            registration(f, type)
+                .put("app_version", version)
+                .put("future_flag", true)
+                .put("future_number", 42)
+                .put("future_string", "opaque")
+                .putNull("future_null")
+                .put("tenant", "untrusted")
+                .put("owner", "self-claimed");
+        request
+            .putObject("future_object")
+            .put("epoch", "999")
+            .put("boot_id", "wrong")
+            .put("address_type", "future")
+            .putArray("items")
+            .addNull()
+            .addObject()
+            .put("label", "opaque");
+        var first = rpc(f, bytes(request));
+        verifyCompatibleResult(f, request, first, type, "registered");
+        request
+            .put("app_version", version.equals("1.0") ? "1.1" : "1.0")
+            .put("request_id", "request-retry")
+            .put("future_string", "changed");
+        request.remove("future_object");
+        var retry = rpc(f, bytes(request));
+        verifyCompatibleResult(f, request, retry, type, "existing");
+        assertEquals(first.path("registration_id"), retry.path("registration_id"));
+        var recovered =
+            call(() -> NetworkJson.parse(cold(keys).localRegister(f.c(), bytes(request))));
+        verifyCompatibleResult(f, request, recovered, type, "existing");
+        assertEquals(first.path("registration_id"), recovered.path("registration_id"));
+        assertEquals(1, count(f));
+        assertEquals("1", row(f).get("registration_revision").toString());
+        var conflict = request.deepCopy().put("allocation_fingerprint", "sha256:" + "b".repeat(64));
+        NetworkMailboxGrpcTest.rejected(
+            () -> rpc(f, bytes(conflict)),
+            Status.Code.FAILED_PRECONDITION,
+            "network.local_allocation_conflict");
+        assertEquals(1, count(f));
+        assertEquals("node_identity_conflict", row(f).get("local_identity_status"));
+      }
+    }
+  }
+
+  static void verifyCompatibleResult(
+      Fixture f, ObjectNode request, JsonNode result, String type, String outcome)
+      throws Exception {
+    validateResult(result); // Strict producer schema: no input extensions can leak into the result.
+    assertEquals("1.0", result.path("app_version").asString());
+    assertEquals("register_result", result.path("type").asString());
+    assertEquals(request.path("request_id"), result.path("request_id"));
+    assertEquals(request.path("allocation_op_id"), result.path("allocation_op_id"));
+    assertEquals("7", result.path("local").asString());
+    assertEquals(type, result.path("address_type").asString());
+    assertEquals(outcome, result.path("result").asString());
+    assertEquals("1", result.path("registration_revision").asString());
+    assertEquals("7", result.path("local_high_water").asString());
+    var auth = result.path("server_auth");
+    assertEquals("protocol_response", auth.path("purpose").asString());
+    assertEquals(request.path("request_id"), auth.path("request_id"));
+    assertEquals(f.ready().path("channel_nonce"), auth.path("channel_nonce"));
+    assertEquals("2", auth.path("audience").path("realm").asString());
+    assertEquals(f.c().getNode(), auth.path("audience").path("node").asString());
+    assertEquals("1", auth.path("audience").path("epoch").asString());
+    assertEquals(
+        row(f).get("wire_incarnation"), auth.path("audience").path("incarnation").asString());
+    var unsigned = (ObjectNode) result.deepCopy();
+    String signature = unsigned.path("server_auth").path("signature").asString();
+    ((ObjectNode) unsigned.path("server_auth")).remove("signature");
+    var verifier = Signature.getInstance("Ed25519");
+    verifier.initVerify(publicKey);
+    verifier.update("Auriga.ServerEnvelope.v1\0".getBytes(StandardCharsets.UTF_8));
+    verifier.update(NetworkJson.canonical(unsigned).getBytes(StandardCharsets.UTF_8));
+    assertTrue(verifier.verify(Base64.getUrlDecoder().decode(signature)));
   }
 }
