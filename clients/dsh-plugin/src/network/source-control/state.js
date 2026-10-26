@@ -137,6 +137,7 @@ export function checkSources(ledger) {
       !id(e.mapping?.bindingId) ||
       !u64(e.bindingRevision) ||
       typeof e.stopped !== 'boolean' ||
+      (e.policyRevision !== undefined && !u64(e.policyRevision, false)) ||
       !e.facts ||
       !r ||
       r.state !== 'registered' ||

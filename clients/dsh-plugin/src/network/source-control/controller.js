@@ -139,17 +139,8 @@ export function createSourceControl({
       revision = e.bindingRevision;
     let observedAt = -Infinity,
       validUntil = Infinity;
-    const check = () => {
+    const checkNative = () => {
       current();
-      signal.throwIfAborted();
-      const clock = now();
-      if (
-        !Number.isSafeInteger(clock) ||
-        clock < 0 ||
-        clock < observedAt ||
-        clock >= validUntil
-      )
-        throw new Error('source witness clock or deadline');
       n.token.check();
       const latest = entry(e.local);
       if (
@@ -160,6 +151,21 @@ export function createSourceControl({
       )
         throw new Error('source native fence');
       native(latest);
+    };
+    const checkFresh = () => {
+      signal.throwIfAborted();
+      const clock = now();
+      if (
+        !Number.isSafeInteger(clock) ||
+        clock < 0 ||
+        clock < observedAt ||
+        clock >= validUntil
+      )
+        throw new Error('source witness clock or deadline');
+    };
+    const check = () => {
+      checkNative();
+      checkFresh();
     };
     check();
     const resolver = await createNativeSourceResolver({
@@ -186,6 +192,8 @@ export function createSourceControl({
     validUntil = observed + REQUEST_MS;
     return {
       check,
+      checkNative,
+      checkFresh,
       value: {
         witness_id: randomUUID(),
         binding_id: e.mapping.bindingId,
@@ -224,7 +232,7 @@ export function createSourceControl({
       mode: issue ? 'issue' : 'reconcile',
       native_witness: w?.value ?? null,
     };
-    if (w) await saveWitness(frame, w.check);
+    if (w) await saveWitness(frame, w);
     current();
     signal.throwIfAborted();
     w?.check();
@@ -242,13 +250,23 @@ export function createSourceControl({
     let live = false;
     if (!entry(op.local).stopped) {
       try {
-        w?.check();
+        w?.checkNative();
         native(entry(op.local));
         live = true;
       } catch {
         await stop(op.local, 'native_changed');
         current();
         signal.throwIfAborted();
+      }
+    }
+    if (live) {
+      try {
+        w?.checkFresh();
+      } catch {
+        // A historic Register receipt remains reconcilable. Freshness expiry
+        // only disables immediate use; a later Get needs a new resolver call.
+        live = false;
+        await discardObservation(op.local);
       }
     }
     await update((draft) => {
@@ -282,16 +300,31 @@ export function createSourceControl({
     if (live && !entry(op.local).stopped && result.source)
       await get(op.local, signal);
   }
-  /** @param {import('../../generated/network/SourceControl.js').SourceRegister | import('../../generated/network/SourceControl.js').SourceGet} frame @param {()=>void} check */
-  async function saveWitness(frame, check) {
+  /** @param {string} local @param {string} [requestId] */
+  async function discardObservation(local, requestId) {
+    if (!entry(local).observation) return;
+    await update((draft) => {
+      const e = draft.sourceControl?.entries[local];
+      if (
+        e?.observation &&
+        (!requestId || e.observation.request_id === requestId)
+      ) {
+        e.policyRevision = e.observation.policy_revision;
+        e.observation = null;
+      }
+    });
+  }
+  /** @param {import('../../generated/network/SourceControl.js').SourceRegister | import('../../generated/network/SourceControl.js').SourceGet} frame @param {{check:()=>void,checkNative:()=>void,checkFresh:()=>void}} w */
+  async function saveWitness(frame, w) {
     const witnessId = frame.native_witness?.witness_id;
     if (!witnessId) invalid();
     await update((draft) => {
+      w.checkFresh();
       const s = draft.sourceControl;
       if (!s || s.witnesses[witnessId]) invalid();
       s.witnesses[witnessId] = { request: structuredClone(frame) };
-    }, check);
-    check();
+    }, w.checkNative);
+    w.check();
   }
   /** @param {string} local @param {AbortSignal} signal */
   async function get(local, signal) {
@@ -302,6 +335,13 @@ export function createSourceControl({
       (o) => o.receipt?.source?.source_binding === head,
     );
     if (!op) invalid();
+    // An observation is not a reusable allow lease while a new query is pending
+    // or times out. Keep its policy revision for this response's monotonic check.
+    const policyRevision =
+      e.policyRevision ?? e.observation?.policy_revision ?? '0';
+    await discardObservation(local);
+    current();
+    signal.throwIfAborted();
     const w = await witness(e, signal);
     /** @type {import('../../generated/network/SourceControl.js').SourceGet} */
     const frame = {
@@ -311,48 +351,56 @@ export function createSourceControl({
       registration: structuredClone(e.registration),
       native_witness: w.value,
     };
-    await saveWitness(frame, w.check);
-    w.check();
-    if (now() >= timeValue(w.value.valid_until))
-      throw new Error('source witness expired');
-    const result =
-      /** @type {import('../../generated/network/SourceControl.js').SourceGetResult} */ (
-        await request(frame, signal)
-      );
-    current();
-    signal.throwIfAborted();
     try {
+      await saveWitness(frame, w);
       w.check();
+      if (now() >= timeValue(w.value.valid_until))
+        throw new Error('source witness expired');
+      const result =
+        /** @type {import('../../generated/network/SourceControl.js').SourceGetResult} */ (
+          await request(frame, signal)
+        );
+      current();
+      signal.throwIfAborted();
+      w.check();
+      assertFact(result.source, op.body, op);
+      const previous = entry(local).facts[head];
+      if (
+        result.source.source_binding !== head ||
+        BigInt(result.source.revision) < BigInt(previous.revision) ||
+        result.source.not_before !== previous.not_before ||
+        result.source.expires_at !== previous.expires_at ||
+        (previous.state !== 'active' && result.source.state === 'active') ||
+        BigInt(result.policy_revision) < BigInt(policyRevision)
+      )
+        invalid();
+      await update((draft) => {
+        w.checkFresh();
+        const latest = draft.sourceControl?.entries[local];
+        if (!latest || latest.head !== head) invalid();
+        latest.facts[head] = result.source;
+        latest.policyRevision = result.policy_revision;
+        latest.observation = result;
+        if (['revoked', 'stopped'].includes(result.source.state))
+          stopSource(draft, local, 'remote_stopped');
+      }, w.checkNative);
+      w.check();
+      if (result.source.state === 'active') retryAt.set(local, now() + 15000);
+      if (result.source.state === 'expired' && !entry(local).stopped)
+        queue.add(local);
     } catch (error) {
-      await stop(local, 'native_changed');
+      current();
+      try {
+        w.checkNative();
+      } catch {
+        await stop(local, 'native_changed');
+        throw error;
+      }
+      // Pure freshness/request expiry (or a failed response) never stops a
+      // healthy lineage. Only discard this attempt, not a newer observation.
+      await discardObservation(local, frame.request_id);
       throw error;
     }
-    assertFact(result.source, op.body, op);
-    const previous = entry(local).facts[head];
-    if (
-      result.source.source_binding !== head ||
-      BigInt(result.source.revision) < BigInt(previous.revision) ||
-      result.source.not_before !== previous.not_before ||
-      result.source.expires_at !== previous.expires_at ||
-      (previous.state !== 'active' && result.source.state === 'active') ||
-      (entry(local).observation &&
-        BigInt(result.policy_revision) <
-          BigInt(entry(local).observation?.policy_revision ?? '0'))
-    )
-      invalid();
-    await update((draft) => {
-      const latest = draft.sourceControl?.entries[local];
-      if (!latest || latest.head !== head) invalid();
-      latest.facts[head] = result.source;
-      latest.observation = result;
-      if (['revoked', 'stopped'].includes(result.source.state))
-        stopSource(draft, local, 'remote_stopped');
-    }, w.check);
-    current();
-    signal.throwIfAborted();
-    if (result.source.state === 'active') retryAt.set(local, now() + 15000);
-    if (result.source.state === 'expired' && !entry(local).stopped)
-      queue.add(local);
   }
   /** @param {string} local @param {AbortSignal} signal */
   async function drive(local, signal) {

@@ -24,6 +24,7 @@ export interface SourceEntry {
   head: string | null;
   facts: Record<string, SourceFact>;
   observation: SourceGetResult | null;
+  policyRevision?: string;
 }
 export interface RegisterOperation {
   id: string;

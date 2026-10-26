@@ -28,6 +28,8 @@ connect 安装具备完整 `network` pin 且原生设备登录成功后，`plugi
 
 Register 成功只保存原历史回执，随后重新见证并 Get；当前事实和原回执分开保存，Get 终态保留当前 revision，完全省略 valid_until。只有本账本当前 head 的自然 expired 观察允许以该 revision CAS 续代；revoked/stopped、已停发和已知非 head 拒绝续代。失败未知只用原 op/reconcile；只有已落账的 not_accepted/not_committed 才允许新 op，普通 ERROR/超时/断线不能换键。collab 的 not_accepted digest 复核原业务体；IAM 的 not_committed digest 仅作不透明证据保存。
 
+见证 freshness 到期和单次请求超时只使当前观察不可使用，保留政策版本高水位，不推进停发 fence，也不撤销健康许可链；下一次必须重新实际 resolver、生成新 witness 再 Get。Register 的迟到历史回执仍耐久保存，但不能据此激活。宿主对象、provider、映射或停发 fence 的真实变化则继续耐久停链撤销，过期不能掩盖这些变化。存储屏障保留硬性 native/代际复核；纯 freshness 跨过落盘边界时丢弃观察，不把正常到期误作账本损坏。
+
 本地 stop 先同步阻断续体，再在同一账本推进映射 fence、清当前观察并写稳定撤销 outbox；直接修改 binding 生命周期也在其提交内同时停发。公开 session/disposed、agent/disposed、workspace/session-stop 及宿主卸载触发停发，周期能力复核兜底归档/服务替换；没有当前 native 时不恢复冷会话。每条许可链只需一个原代锚点即可请求整链撤销。撤销不要求 native/Get/revision，独占保留名额，能越过在途 Register/Get；IAM 已提交且 lineage_stopped=true 才确认成功。连接丢失保留 outbox，下次严格 READY 恢复；插件关闭也落本地停发，存储结果不明保持失败关闭，不能承诺远端已撤销。
 
 每 node 一个常规名额加一个撤销名额，请求自受理起最多 30 秒，超时释放名额并保留原 op/outbox。常规来源观察最多每 15 秒刷新，失败/未决最少间隔 1 秒，撤销未决间隔 30 秒；撤销优先。协议 limits 只冻结并发/期限，未给队列数值，本实现保守限制为最多 128 个活动或仍有未决操作/outbox 的来源，不能换 local/op 绕背压。原操作、终态回执及见证历史永久保留，磁盘使用随历史增长；尚未实现外部归档或恢复管理入口。无已提交确定结果的 op 可能长期 pending（backlog L30），插件不删除它来解锁。

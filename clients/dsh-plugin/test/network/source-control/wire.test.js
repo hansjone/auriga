@@ -397,10 +397,17 @@ test('terminal Get crossing the native witness deadline cannot seed successor is
   f.peer.facts.get(head).revision = '8';
   armed = true;
   await f.control.refresh('1');
-  assert.equal(f.store.snapshot().sourceControl.entries['1'].stopped, true);
+  assert.equal(f.store.snapshot().sourceControl.entries['1'].stopped, false);
   assert.equal(f.store.snapshot().sourceControl.entries['1'].observation, null);
   assert.equal(
     f.requests.filter((r) => r.type === 'source_register').length,
     1,
   );
+  armed = false;
+  await f.control.refresh('1');
+  assert.equal(
+    f.store.snapshot().sourceControl.entries['1'].observation.source.state,
+    'expired',
+  );
+  assert.equal(f.requests.filter((r) => r.type === 'source_revoke').length, 0);
 });

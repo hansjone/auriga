@@ -20,7 +20,7 @@ export function latch() {
   return { promise, release };
 }
 export const iso = (value) =>
-  new Date(value).toISOString().replace('.000Z', 'Z');
+  new Date(Math.floor(value / 1000) * 1000).toISOString().replace('.000Z', 'Z');
 
 // Explicit collab/IAM contract peer fixture. No Java, PG or real collab claim.
 export function sourcePeer(signer, options = {}) {
