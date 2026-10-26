@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/admin"
@@ -46,7 +45,7 @@ func (b *watchedBody) Close() error {
 	return nil
 }
 
-func (c *Core) monitor(ctx context.Context, call *modelgate.Call, cancel context.CancelFunc) <-chan struct{} {
+func (c *Core) monitor(ctx context.Context, call *modelgate.Call, cancel context.CancelCauseFunc) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -57,8 +56,17 @@ func (c *Core) monitor(ctx context.Context, call *modelgate.Call, cancel context
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if c.check(ctx, call, true) != nil {
-					cancel()
+				if err := c.check(ctx, call, true); err != nil {
+					// Recheck sanitizes dependency errors. The execution deadline
+					// can expire before its parent's Done reaches this child.
+					// Capture that fact now, never at delayed transport return:
+					// an earlier revocation/client cancellation must stay such.
+					if ctx.Err() != nil {
+						err = context.Cause(ctx)
+					} else if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+						err = context.DeadlineExceeded
+					}
+					cancel(err)
 					return
 				}
 			}
@@ -68,11 +76,10 @@ func (c *Core) monitor(ctx context.Context, call *modelgate.Call, cancel context
 }
 
 func (c *Core) run(ctx context.Context, call *modelgate.Call, target admin.RelayTarget, secret []byte, req *modelprotocol.Request, requestID string, sink modelprotocol.Sink) (result modelprotocol.Result, stopped bool, proof <-chan struct{}, err error) {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	monitorDone := c.monitor(ctx, call, cancel)
 	// Timer cancellation also closes a blocking body through modelprotocol.
-	var timedOut atomic.Bool
-	first := time.AfterFunc(time.Duration(target.FirstByteTimeoutSeconds)*time.Second, func() { timedOut.Store(true); cancel() })
+	first := time.AfterFunc(time.Duration(target.FirstByteTimeoutSeconds)*time.Second, func() { cancel(context.DeadlineExceeded) })
 	wire := req.Value()
 	publicModel := wire.Model
 	wire.Model = target.UpstreamModel
@@ -93,13 +100,13 @@ func (c *Core) run(ctx context.Context, call *modelgate.Call, target admin.Relay
 	}
 	if ctx.Err() != nil {
 		code, message := "ai.stream_interrupted", "The model response stream was interrupted"
-		if timedOut.Load() || ctx.Err() == context.DeadlineExceeded {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 			code, message = "ai.upstream_timeout", "The model provider timed out"
 		}
 		err = &modelprotocol.Error{Code: code, Message: message}
 	}
 	first.Stop()
-	cancel() // No accounting/recovery context is ever passed to upstream work.
+	cancel(nil) // No accounting/recovery context is ever passed to upstream work.
 	<-monitorDone
 	timer := time.NewTimer(c.c.StopTimeout)
 	defer timer.Stop()

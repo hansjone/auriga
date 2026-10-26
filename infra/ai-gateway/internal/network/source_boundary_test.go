@@ -130,7 +130,7 @@ func TestProductionSourceRejectsRequestsBeforeRPC(t *testing.T) {
 				raw = strings.Replace(raw, "ignored", "\xff", 1)
 			}
 			publishRegistration(t, nc, b, []byte(raw))
-			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, code)
+			expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, code)
 			run.mailbox.workers.Wait()
 			f.mu.Lock()
 			defer f.mu.Unlock()
@@ -181,7 +181,7 @@ func TestProductionSourceResponseBoundaries(t *testing.T) {
 			f.response = marshalRegister(t, m)
 			f.mu.Unlock()
 			publishRegistration(t, nc, b, sourceRequest("source_get"))
-			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+			expectRegistrationCode(t, run, down, cfg.ProtocolSigning, b, CodeProtocolError)
 			run.mailbox.workers.Wait()
 		})
 	}

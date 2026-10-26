@@ -1,6 +1,7 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"os"
@@ -50,6 +51,10 @@ func sourceFixture(t *testing.T, f *fakeMailboxRPC, server collab.NetworkMailbox
 		t.Fatal(err)
 	}
 	t.Cleanup(run.Close)
+	// Some source tests cancel the entire reserved pool without reading its
+	// diagnostics. Keep completion evidence bounded by the existing worker pools.
+	p := &registrationPhasePublisher{nc: run.mailbox.nc, completed: make(chan registrationPublication, mailboxWorkers+cap(run.mailbox.sourceRevokes)+cap(run.mailbox.errorSlots))}
+	run.mailbox.publisher = p
 	if !strings.HasPrefix(h.wsURL(), "wss://") {
 		t.Fatal("source fixture requires real WSS")
 	}
@@ -70,12 +75,48 @@ func sourceFixture(t *testing.T, f *fakeMailboxRPC, server collab.NetworkMailbox
 	f.mu.Lock()
 	f.response = signedMailboxFrame(t, cfg.ProtocolSigning, "ready", b, "req-ready")
 	f.mu.Unlock()
-	if err = nc.Publish(UpSubject(b.Ingress), []byte(`{"app_version":"1.0","type":"ready","request_id":"req-ready","channel_nonce":"nonce-1","boot_id":"boot-1"}`)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = down.NextMsg(time.Second); err != nil {
-		t.Fatal(err)
-	}
-	run.mailbox.workers.Wait()
+	b = sourceReady(t, run, nc, down, b, cfg.ProtocolSigning, "req-ready", []byte(`{"app_version":"1.0","type":"ready","request_id":"req-ready","channel_nonce":"nonce-1","boot_id":"boot-1"}`))
 	return run, nc, down, b, cfg
+}
+
+func sourceReady(t *testing.T, run *Runtime, nc *nats.Conn, down *nats.Subscription, b liveBinding, cfg ProtocolSigningConfig, requestID string, raw []byte) liveBinding {
+	t.Helper()
+	p := registrationPhaseObserver(run)
+	p.client = nc
+	if err := nc.Publish(UpSubject(b.Ingress), raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := nc.FlushTimeout(registrationPhaseGuard); err != nil {
+		t.Fatal(err)
+	}
+	publication, err := awaitRegistrationPublication(p, registrationPhaseGuard)
+	if err != nil {
+		t.Fatalf("READY publication: %v; %s", err, registrationPhaseDiagnostic(run, nc, b))
+	}
+	msg, err := down.NextMsg(time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Subject != DownSubject(b.Ingress) || msg.Subject != publication.subject || !bytes.Equal(msg.Data, publication.raw) {
+		t.Fatal("READY downlink differs from completed publication")
+	}
+	if decodeObject(t, msg.Data)["type"] != "ready_result" {
+		t.Fatalf("READY success required; %s", registrationPhaseDiagnostic(run, nc, b))
+	}
+	updated, err := validateMailboxResponse(b, "ready", requestID, raw, msg.Data)
+	if err != nil || updated != b {
+		t.Fatalf("READY binding mismatch: %v", err)
+	}
+	if err := validateRegistrationPhaseAuth(cfg, b, msg.Data, requestID); err != nil {
+		t.Fatal(err)
+	}
+	// Publication completion proves worker entry; Wait alone cannot do so.
+	run.mailbox.workers.Wait()
+	run.redeemer.mu.Lock()
+	current, ok := run.redeemer.bindings[b.Ingress]
+	run.redeemer.mu.Unlock()
+	if !ok || !sameMailboxBinding(current, b) || current.Revoked || !time.Now().Before(current.NotAfter) || current.NotAfter != b.NotAfter {
+		t.Fatal("READY binding not effective")
+	}
+	return current
 }
