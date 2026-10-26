@@ -42,6 +42,7 @@ class NetworkSourceAuthorityPostgresTest {
   Ticket ticket;
   IngressBinding binding;
   NetworkAuthorityConnection connection;
+  long transportClient = 42;
   ECKey key;
   IamNetworkSourceAuthority sources;
   auriga.iam.api.InstanceAiAuthorization organization =
@@ -123,6 +124,54 @@ class NetworkSourceAuthorityPostgresTest {
     IamGrpcDevicesSpringTest.error(code, work);
   }
 
+  IngressBinding newTransport(String rawTicket) {
+    var initial = NetworkAuthorityTest.binding(rawTicket);
+    return new IngressBinding(
+        "N" + "B".repeat(55),
+        Long.toString(++transportClient),
+        initial.userNkey(),
+        initial.ingress(),
+        initial.account());
+  }
+
+  String anotherActiveAccount() {
+    String id = UUID.randomUUID().toString();
+    tx(() -> store.insert("account", id, Json.object("status", "active"), null));
+    return id;
+  }
+
+  void cleanExpiredOriginalIngress() {
+    var original = tx(() -> store.get("network_ingress", connection.getIngress(), false));
+    assertNotNull(original, "Original ingress must exist before V7 cleanup");
+    var expires =
+        tx(
+            () ->
+                store
+                    .networkJdbc()
+                    .queryForObject(
+                        "SELECT expires_at FROM iam.network_ingress WHERE tenant_id=? AND lookup_key=?",
+                        java.sql.Timestamp.class,
+                        tenant,
+                        connection.getIngress()));
+    assertNotNull(expires);
+    assertFalse(expires.toInstant().isAfter(clock.instant()), "Original ingress must be expired");
+    Long tenants =
+        store
+            .networkJdbc()
+            .queryForObject("SELECT count(*) FROM iam.network_ingress_tenant", Long.class);
+    assertNotNull(tenants);
+    assertTrue(tenants > 0);
+    long maximumSweeps = (tenants - 1) / 32 + 1;
+    var cleanup = new NetworkIngressCleanup(store, clock);
+    for (long sweep = 0; sweep < maximumSweeps; sweep++) {
+      cleanup.sweepOnce();
+      if (tx(() -> store.get("network_ingress", connection.getIngress(), false)) == null) break;
+    }
+    assertNull(
+        tx(() -> store.get("network_ingress", connection.getIngress(), false)),
+        "V7 cleanup must actually remove this tenant's original ingress within the directory bound");
+  }
+
   @Test
   void realAuthorityReconnectAndImmutableReceiptWholeSecondDeadlines() {
     call(
@@ -141,7 +190,7 @@ class NetworkSourceAuthorityPostgresTest {
           assertTrue(view.getPolicyRevision() > 0);
           assertEquals(s, sources.register(original).getSource());
           var next = authority.prepare(access, node.node(), "server-a");
-          var b = NetworkAuthorityTest.binding(next.ticket());
+          var b = newTransport(next.ticket());
           callers.as(
               "svc:ai-gateway",
               tenant,
@@ -196,7 +245,7 @@ class NetworkSourceAuthorityPostgresTest {
                   new String[] {"account", account.toString(), "status", "disabled"},
                   new String[] {"session", sessionId, "expiresAt", clock.instant().toString()},
                   new String[] {"session", sessionId, "idleExpiresAt", clock.instant().toString()},
-                  new String[] {"device", device, "accountId", UUID.randomUUID().toString()},
+                  new String[] {"device", device, "accountId", anotherActiveAccount()},
                   new String[] {"device", device, "sessionId", UUID.randomUUID().toString()})) {
             var saved = tx(() -> store.byId(change[0], change[1], false));
             mutate(change[0], change[1], change[2], change[3].equals("true") ? true : change[3]);
@@ -259,7 +308,7 @@ class NetworkSourceAuthorityPostgresTest {
             terminal = sources.get(getRequest(receipt.getSource())).getSource();
           }
           clock.advance(3601);
-          assertTrue(new NetworkIngressCleanup(store, clock).sweepOnce() > 0);
+          cleanExpiredOriginalIngress();
           mutate("session", sessionId, "revoked", true);
           mutate("device", device, "revoked", true);
           mutate("account", account.toString(), "status", "disabled");
@@ -284,7 +333,7 @@ class NetworkSourceAuthorityPostgresTest {
           error("common.unavailable", () -> sources.register(request("unknown")));
           sources = authority(new IamNetworkSourceAuthority.Policy(30, 5));
           error("common.forbidden", () -> sources.register(request("unknown")));
-          mutate("device", device, "accountId", UUID.randomUUID().toString());
+          mutate("device", device, "accountId", anotherActiveAccount());
           error("common.forbidden", () -> sources.register(r));
           error("common.forbidden", () -> sources.get(getRequest(receipt.getSource())));
           error("common.forbidden", () -> sources.revoke(revoke));
@@ -436,7 +485,7 @@ class NetworkSourceAuthorityPostgresTest {
           assertEquals("", original.getValidUntil());
           assertEquals(1, checks.get());
           var next = authority.prepare(access, node.node(), "server-a");
-          var b = NetworkAuthorityTest.binding(next.ticket());
+          var b = newTransport(next.ticket());
           callers.as(
               "svc:ai-gateway",
               tenant,
@@ -996,7 +1045,7 @@ class NetworkSourceAuthorityPostgresTest {
           var otherDevice = tokens.verify(token).path("did").asString();
           var otherNode = authority.register(token);
           var ticket2 = authority.prepare(token, otherNode.node(), "server-a");
-          var b = NetworkAuthorityTest.binding(ticket2.ticket());
+          var b = newTransport(ticket2.ticket());
           callers.as(
               "svc:ai-gateway",
               tenant,
