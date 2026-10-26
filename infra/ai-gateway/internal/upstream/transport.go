@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
@@ -21,14 +23,20 @@ import (
 )
 
 type Config struct {
-	AllowedHosts     []string
+	AllowedHosts     []HostRule
 	MaxResponseBytes int64
 	MaxEventBytes    int
 }
 
+// HostRule only exempts private address ranges. Plain HTTP needs its own opt-in.
+type HostRule struct {
+	Host           string `json:"host"`
+	AllowPlaintext bool   `json:"allowPlaintext"`
+}
+
 // Client contains deployment policy only, never a credential or request.
 type Client struct {
-	allowed map[string]bool
+	allowed map[string]HostRule
 	limits  modelprotocol.Limits
 	lookup  func(context.Context, string) ([]netip.Addr, error)
 	dial    func(context.Context, string, string) (net.Conn, error)
@@ -38,27 +46,33 @@ var dnsName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z
 
 func canonicalHost(host string) string {
 	if ip, err := netip.ParseAddr(host); err == nil && ip.Zone() == "" {
-		return ip.Unmap().String()
+		return ip.String()
 	}
 	return strings.TrimSuffix(strings.ToLower(host), ".")
 }
 
 func New(c Config) (*Client, error) {
-	if c.MaxResponseBytes < 1 || c.MaxResponseBytes > 1<<24 || c.MaxEventBytes < 1 || c.MaxEventBytes > modelprotocol.EventLimit {
+	if c.MaxResponseBytes < 1 || c.MaxResponseBytes > 32<<20 || c.MaxEventBytes < 1 || c.MaxEventBytes > modelprotocol.EventLimit {
 		return nil, errors.New("invalid upstream configuration")
 	}
-	v := &Client{allowed: map[string]bool{}, limits: modelprotocol.Limits{MaxBytes: c.MaxResponseBytes, MaxEventBytes: c.MaxEventBytes, MaxEvents: int(c.MaxResponseBytes)}, dial: (&net.Dialer{}).DialContext}
+	v := &Client{allowed: map[string]HostRule{}, limits: modelprotocol.Limits{MaxBytes: c.MaxResponseBytes, MaxEventBytes: c.MaxEventBytes, MaxEvents: int(c.MaxResponseBytes)}, dial: (&net.Dialer{}).DialContext}
 	// The resolver method also takes a network; keep that detail private.
 	v.lookup = func(ctx context.Context, host string) ([]netip.Addr, error) {
 		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	}
-	for _, host := range c.AllowedHosts {
-		h := canonicalHost(host)
+	for _, rule := range c.AllowedHosts {
+		h := canonicalHost(rule.Host)
 		ip, err := netip.ParseAddr(h)
 		if len(h) > 253 || (err != nil && !dnsName.MatchString(h)) || (err == nil && ip.Zone() != "") {
 			return nil, errors.New("invalid upstream configuration")
 		}
-		v.allowed[h] = true
+		if err == nil && !safeIP(ip) {
+			return nil, errors.New("invalid upstream configuration")
+		}
+		if _, duplicate := v.allowed[h]; duplicate {
+			return nil, errors.New("invalid upstream configuration")
+		}
+		v.allowed[h] = rule
 	}
 	return v, nil
 }
@@ -75,18 +89,30 @@ func fault(code string) *modelprotocol.Error {
 }
 
 func publicIP(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	if !ip.IsValid() || ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+	return safeIP(ip) && !privateIP(ip)
+}
+
+func privateIP(ip netip.Addr) bool {
+	return ip.IsPrivate() || netip.MustParsePrefix("100.64.0.0/10").Contains(ip)
+}
+
+func safeIP(ip netip.Addr) bool {
+	if !ip.IsValid() || ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 		return false
 	}
-	// Shared-address space includes several cloud metadata endpoints. Reject
-	// IPv6 translation/tunnel prefixes too: they can encode forbidden IPv4.
-	for _, prefix := range []string{"100.64.0.0/10", "0.0.0.0/8", "192.0.0.0/24", "168.63.129.16/32", "240.0.0.0/4", "fec0::/10", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32", "::/96"} { // gitleaks:allow
+	// These addresses are never exempted, including metadata in private ranges,
+	// transition encodings, documentation ranges and benchmark/discard networks.
+	for _, prefix := range []string{"0.0.0.0/8", "192.0.0.0/24", "168.63.129.16/32", "100.100.100.200/32", "fd00:ec2::254/128", "198.18.0.0/15", "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32", "3fff::/20", "100::/64", "240.0.0.0/4", "fec0::/10", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32", "::/96", "::ffff:0:0/96", "::ffff:0:0:0/96"} { // gitleaks:allow
 		if netip.MustParsePrefix(prefix).Contains(ip) {
 			return false
 		}
 	}
 	return true
+}
+
+func (c *Client) allows(host string, ip netip.Addr) bool {
+	_, listed := c.allowed[host]
+	return safeIP(ip) && (publicIP(ip) || (listed && privateIP(ip)))
 }
 
 func (c *Client) resolve(ctx context.Context, host string) ([]netip.Addr, error) {
@@ -104,7 +130,7 @@ func (c *Client) resolve(ctx context.Context, host string) ([]netip.Addr, error)
 		return nil, fault("ai.upstream_unavailable")
 	}
 	for _, ip := range ips {
-		if !ip.IsValid() || ip.Zone() != "" || (!c.allowed[host] && !publicIP(ip)) {
+		if !c.allows(host, ip) {
 			return nil, fault("ai.upstream_unavailable")
 		}
 	}
@@ -120,7 +146,7 @@ func (c *Client) endpoint(base string) (*url.URL, error) {
 	if ip, err := netip.ParseAddr(host); (err != nil && !dnsName.MatchString(host)) || (err == nil && ip.Zone() != "") {
 		return nil, fault("ai.upstream_unavailable")
 	}
-	if u.Scheme != "https" && (u.Scheme != "http" || !c.allowed[host]) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !c.allowed[host].AllowPlaintext) {
 		return nil, fault("ai.upstream_unavailable")
 	}
 	u.Path = strings.TrimRight(u.Path, "/") + "/chat/completions"
@@ -129,7 +155,16 @@ func (c *Client) endpoint(base string) (*url.URL, error) {
 }
 
 func (c *Client) Transport(ctx context.Context, s relay.Submission, secret []byte) (relay.Exchange, error) {
-	proof := make(chan struct{}) // Failure, Close and cancellation never close it.
+	proof := make(chan struct{})
+	var stoppedOnce sync.Once
+	stopped := func() { stoppedOnce.Do(func() { close(proof) }) }
+	// No connection has been assigned before these checks complete.
+	var assigned atomic.Bool
+	defer func() {
+		if !assigned.Load() {
+			stopped()
+		}
+	}()
 	x := relay.Exchange{Stopped: proof}
 	u, err := c.endpoint(s.Target.BaseURL)
 	if err != nil || len(secret) == 0 || s.Target.UpstreamModel == "" || s.Target.ConnectTimeoutSeconds < 1 || s.Target.ConnectTimeoutSeconds > 300 || ctx.Err() != nil {
@@ -168,9 +203,9 @@ func (c *Client) Transport(ctx context.Context, s relay.Submission, secret []byt
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept-Encoding", "identity")
 	request.Header.Set("Authorization", "Bearer "+string(secret))
-	defer request.Header.Del("Authorization")
 	written := make(chan struct{})
-	request = request.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { close(written) }}))
+	var writtenOnce sync.Once
+	request = request.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { assigned.Store(true) }, WroteRequest: func(httptrace.WroteRequestInfo) { writtenOnce.Do(func() { close(written) }) }}))
 	tr := &http.Transport{Proxy: nil, DisableKeepAlives: true, DisableCompression: true, TLSHandshakeTimeout: connect, MaxResponseHeaderBytes: 32768,
 		DialContext: func(dialCtx context.Context, network, address string) (net.Conn, error) {
 			dialCtx, stop := context.WithTimeout(dialCtx, connect)
@@ -179,22 +214,28 @@ func (c *Client) Transport(ctx context.Context, s relay.Submission, secret []byt
 			if e != nil || canonicalHost(h) != host {
 				return nil, fault("ai.upstream_unavailable")
 			}
-			// Resolve again at the actual connection boundary, validate every
-			// answer, then dial exactly one numeric IP (no second DNS lookup).
+			// Resolve again at the connection boundary and validate every answer.
+			// Address fallback is connection establishment, never HTTP replay.
 			ips, e := c.resolve(dialCtx, host)
 			if e != nil {
 				return nil, e
 			}
-			conn, e := c.dial(dialCtx, network, net.JoinHostPort(ips[0].String(), port))
-			if e != nil {
-				return nil, fault("ai.upstream_unavailable")
+			for _, ip := range ips {
+				conn, e := c.dial(dialCtx, network, net.JoinHostPort(ip.String(), port))
+				if e != nil {
+					if dialCtx.Err() != nil {
+						break
+					}
+					continue
+				}
+				remote, ok := conn.RemoteAddr().(*net.TCPAddr)
+				if !ok || !c.allows(host, remote.AddrPort().Addr()) || remote.AddrPort().Addr().Unmap() != ip.Unmap() {
+					_ = conn.Close()
+					return nil, fault("ai.upstream_unavailable")
+				}
+				return conn, nil
 			}
-			remote, ok := conn.RemoteAddr().(*net.TCPAddr)
-			if !ok || (!c.allowed[host] && !publicIP(remote.AddrPort().Addr())) {
-				_ = conn.Close()
-				return nil, fault("ai.upstream_unavailable")
-			}
-			return conn, nil
+			return nil, fault("ai.upstream_unavailable")
 		}}
 	defer tr.CloseIdleConnections()
 	// RoundTrip has no redirect handling, cookie jar, proxy environment or client
@@ -209,12 +250,20 @@ func (c *Client) Transport(ctx context.Context, s relay.Submission, secret []byt
 	// The writer must no longer borrow request headers when we erase auth.
 	select {
 	case <-written:
+		request.Header.Del("Authorization") // The writer has finished borrowing it.
 	case <-ctx.Done():
 		_ = response.Body.Close()
 		return x, fault("ai.upstream_unavailable")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_ = response.Body.Close() // Never read, return or log an upstream error body.
+		// Only a fully consumed and closed error response proves that the
+		// provider finished. Discard within the same deployment byte bound;
+		// truncation, cancellation and I/O errors leave execution ambiguous.
+		n, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, c.limits.MaxBytes+1))
+		closeErr := response.Body.Close()
+		if readErr == nil && closeErr == nil && n <= c.limits.MaxBytes {
+			stopped()
+		}
 		code := "ai.upstream_unavailable"
 		if response.StatusCode < 500 {
 			code = "ai.upstream_rejected"

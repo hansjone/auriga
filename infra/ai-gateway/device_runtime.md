@@ -70,7 +70,7 @@ Transport 无 HTTP client、DNS、上游连接、重试或收费调用；真实/
 ```json
 {
   "upstream": {
-    "allowedHosts": ["models.example.com"],
+    "allowedHosts": [{"host": "models.example.com", "allowPlaintext": false}],
     "models": [{
       "tenant": "01900000-0000-7000-8000-000000000001",
       "model": "beta-model",
@@ -99,17 +99,21 @@ Transport 仅向受信 target 的 `{baseURL}/chat/completions` POST，模型名�
 借用解密凭据设置 Bearer；不转发设备票据、Cookie 或客户端头。不重试、不 failover、不跟随
 任何重定向、不读取代理环境变量，不保留 Authorization。stream 布尔值保持原样；SSE 增加
 `stream_options.include_usage=true`，provider 必须支持该选项和最终 usage。JSON/SSE 的模型名
-归一化为公开别名，只移除已知 OpenAI 元数据，其余响应仍由 Core 严格校验。4xx/重定向映射
+归一化为公开别名，接受与请求名不同的上游快照名；逐层仅保留 D2 契约白名单字段，
+丢弃 annotations、obfuscation、reasoning_content 等供应商扩展，由 Core 校验保留的字段。4xx/重定向映射
 `ai.upstream_rejected`，5xx 映射 `ai.upstream_unavailable`，408/504 映射
 `ai.upstream_timeout`；上游错误正文、Location、地址和底层错误均不进入公开错误或日志。
 
 默认只允许 HTTPS（系统证书验证），拒绝 loopback、私网、链路本地、元数据、共享地址空间、
 组播／未指定地址及可嵌入 IPv4 的转换／隧道地址。解析所有结果均须通过；实际拨号重新解析并
-校验，再固定单个数值 IP 拨号并检查连接远端，防止 DNS rebinding；不尝试第二个 IP。
-`allowedHosts` 是部署方的**精确主机名或无方括号 IP 清单**，大小写及末尾一点规范化；
+校验，再依次尝试已校验的数值 IP 建立连接，复核实际远端与选定 IP 一致及地址政策，防止
+DNS rebinding。仅建连失败时回退其他 IP，不重试或重放 HTTP 请求，合用一次 connect timeout。
+`allowedHosts[].host` 是部署方的**精确主机名或无方括号 IP**，大小写及末尾一点规范化；
 不支持通配、子域继承、端口或 URL。空清单可以访问公网 HTTPS。
-清单允许指定主机访问内网并使用 HTTP，方便团队内网模型；也会允许该主机解析到其他内网／
-元数据地址及其所有端口。仅列入完全可信、部署方控制的模型主机，保护配置与 DNS；
+清单仅豁免 RFC1918、ULA 和 CGNAT 私网段；loopback、链路本地、元数据、组播／未指定、
+转换／隧道、基准测试和文档地址永不豁免（包括私网中的已知元数据端点）。HTTP 须每个
+主机额外显式设 `allowPlaintext: true`，默认 false。清单仍允许该主机访问私网的所有端口，
+只列入完全可信、部署方控制的模型主机，保护配置与 DNS。
 HTTP 会明文传递上游凭据和提示词，应优先部署 HTTPS。不得由设备请求控制此清单。
 
 当前管理面 `ValidateEndpointDNS` 和 `RelayReader` 的 provider 校验仍独立拒绝私网数值 IP、
@@ -119,10 +123,14 @@ HTTP 会明文传递上游凭据和提示词，应优先部署 HTTPS。不得由
 不要绕过管理面或直接写数据库作为部署步骤。
 
 Core 仍负责首字节、idle、总期限与取消，连接及 TLS 握手使用 provider 的 connect timeout。
-原始及归一化响应均有 1 MiB 上限，单事件沿既有协议上限；Core 对 upstream 最多 4096 个事件，
-synthetic 仍为 32。仅经协议状态机验证的终结 JSON 或完整终结 SSE 可关闭现场 Stopped；
-断流、超限、取消、Close 和 HTTP 错误都不证明远端模型停止，因此 unknown 可能持续占槽，
-停机可能非零退出。不能将断开 HTTP 当退款依据。
+设 N 为所有已批准模型 maxOutputTokens 的最大值（至多 32768，超过则拒绝启动）；共享 Core 与
+Transport/Handler 的 MaxBytes=min(1 MiB+N*1024,32 MiB)、MaxEvents=min(4*N+64,131136)，留出帧、
+usage 和进度注释余量。单事件沿既有协议上限，注释与 data 分帧，不增大 data 事件，每帧最多
+发送一次进度注释。synthetic 仍为 1 MiB/32 事件。以下三类证据可关闭现场 Stopped：未获得
+可写 HTTP 连接（含 DNS、SSRF、拨号、TLS 失败）；上游错误响应在同一字节上限内完整读完并关闭；
+经协议状态机验证的终结 JSON/SSE。断流、超限、取消和 Close 单独不是停止证明，unknown 可能持槽并
+使停机非零。正常收完的 4xx/5xx 和未提交失败不再占槽；账务仍沿 Core 的 unknown 路径保守留置，
+不从停止证明推导免费或退款。
 
 ## 责任与停机
 

@@ -25,9 +25,39 @@ import (
 func submission(base string, stream bool) relay.Submission {
 	return relay.Submission{Target: admin.RelayTarget{BaseURL: base, UpstreamModel: "provider-model", ConnectTimeoutSeconds: 1}, PublicModel: "public-model", RequestID: "local-request", Request: api.ChatCompletionRequest{Model: "ignored-model", Stream: &stream, MaxTokens: 2, Messages: []api.ChatMessage{{Role: "user", Content: *api.NewNullableString(new("hi"))}}}}
 }
+
+func privateIPForTest(t *testing.T) net.IP {
+	t.Helper()
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range addresses {
+		if n, ok := address.(*net.IPNet); ok {
+			if ip := n.IP.To4(); ip != nil && ip.IsPrivate() && !ip.IsLoopback() {
+				return ip
+			}
+		}
+	}
+	t.Fatal("a local private IPv4 interface is required for private-host integration")
+	return nil
+}
+
+func privateServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	s := httptest.NewUnstartedServer(handler)
+	_ = s.Listener.Close()
+	l, err := net.Listen("tcp", net.JoinHostPort(privateIPForTest(t).String(), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Listener = l
+	s.Start()
+	return s
+}
 func clientFor(t *testing.T) *Client {
 	t.Helper()
-	c, err := New(Config{AllowedHosts: []string{"127.0.0.1"}, MaxResponseBytes: 4096, MaxEventBytes: 2048})
+	c, err := New(Config{AllowedHosts: []HostRule{{Host: privateIPForTest(t).String(), AllowPlaintext: true}}, MaxResponseBytes: 4096, MaxEventBytes: 2048})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +84,7 @@ func chunks() string {
 func TestTransportJSON(t *testing.T) {
 	secret := []byte(rand.Text())
 	var calls atomic.Int64
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.Method != "POST" || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer "+string(secret) || r.Header.Get("Content-Type") != "application/json" {
 			t.Error("incorrect dispatch")
@@ -86,7 +116,7 @@ func protocolRequest(t *testing.T, stream bool) *modelprotocol.Request {
 	return r
 }
 func TestTransportSSE(t *testing.T) {
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var v map[string]any
 		if json.NewDecoder(r.Body).Decode(&v) != nil || v["stream"] != true {
 			t.Error("stream changed")
@@ -118,7 +148,7 @@ func TestTransportStatusRedaction(t *testing.T) {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			secret := []byte(rand.Text())
 			var calls atomic.Int64
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
 				w.WriteHeader(status)
 				_, _ = w.Write(secret)
@@ -146,7 +176,7 @@ func TestTransportStatusRedaction(t *testing.T) {
 func TestTransportInterruptedAndLimited(t *testing.T) {
 	for _, mode := range []string{"interrupted", "oversized", "closed"} {
 		t.Run(mode, func(t *testing.T) {
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				if mode == "oversized" {
 					_, _ = io.WriteString(w, strings.Repeat("x", 10000))
@@ -188,7 +218,7 @@ func TestTransportCancellation(t *testing.T) {
 	for _, headers := range []bool{false, true} {
 		t.Run(fmt.Sprint(headers), func(t *testing.T) {
 			entered := make(chan struct{})
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				if headers {
 					w.WriteHeader(200)
@@ -227,6 +257,11 @@ func TestOutboundPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var forbiddenDials atomic.Int64
+	c.dial = func(context.Context, string, string) (net.Conn, error) {
+		forbiddenDials.Add(1)
+		return nil, errors.New("unexpected dial")
+	}
 	for _, host := range []string{"127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.0.1", "169.254.1.1", "169.254.169.254", "0.0.0.0", "100.100.100.200", "224.0.0.1", "::1", "fc00::1", "fe80::1", "::", "::ffff:127.0.0.1"} { // gitleaks:allow
 		t.Run(host, func(t *testing.T) {
 			if _, err := c.Transport(t.Context(), submission("https://"+net.JoinHostPort(host, "443"), false), []byte(rand.Text())); err == nil {
@@ -234,26 +269,29 @@ func TestOutboundPolicy(t *testing.T) {
 			}
 		})
 	}
+	if forbiddenDials.Load() != 0 {
+		t.Fatal("blocked addresses reached the dialer")
+	}
 	for _, base := range []string{"http://example.com", "https://alice:password@example.com", "https://example.com?secret=yes", "https://example.com#fragment", "ftp://example.com"} {
 		if _, err := c.Transport(t.Context(), submission(base, false), []byte(rand.Text())); err == nil {
 			t.Fatal("unsafe URL accepted")
 		}
 	}
 	for _, host := range []string{"*", "*.example.com", "example.com:443", "https://example.com", "example.com/path", "example.com@evil.example"} {
-		if _, err := New(Config{AllowedHosts: []string{host}, MaxResponseBytes: 4096, MaxEventBytes: 2048}); err == nil {
+		if _, err := New(Config{AllowedHosts: []HostRule{{Host: host}}, MaxResponseBytes: 4096, MaxEventBytes: 2048}); err == nil {
 			t.Fatal("unsafe allowlist accepted")
 		}
 	}
 }
 func TestRedirectNotFollowed(t *testing.T) {
 	var destinationCalls atomic.Int64
-	dest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	dest := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		destinationCalls.Add(1)
 		_, _ = io.WriteString(w, completion())
 	}))
 	defer dest.Close()
 	for _, status := range []int{301, 302, 303, 307, 308} {
-		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, dest.URL, status) }))
+		s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, dest.URL, status) }))
 		x, err := clientFor(t).Transport(t.Context(), submission(s.URL, false), []byte(rand.Text()))
 		b := readExchange(t, x, err)
 		s.Close()
@@ -267,7 +305,7 @@ func TestDNSRebinding(t *testing.T) {
 	var lookups, dials atomic.Int64
 	c.lookup = func(context.Context, string) ([]netip.Addr, error) {
 		if lookups.Add(1) == 1 {
-			return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
+			return []netip.Addr{fixturePublicIP()}, nil
 		}
 		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
 	}
@@ -285,7 +323,7 @@ func TestStreamingStatusRedaction(t *testing.T) {
 	for _, status := range []int{400, 500, 504} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			secret := []byte(rand.Text())
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status); _, _ = w.Write(secret) }))
+			s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status); _, _ = w.Write(secret) }))
 			defer s.Close()
 			x, err := clientFor(t).Transport(t.Context(), submission(s.URL, true), secret)
 			if err != nil {
@@ -323,12 +361,12 @@ func TestConnectTimeoutAndErrorRedaction(t *testing.T) {
 
 func TestNormalizationRejectsDuplicateAndFalseTerminal(t *testing.T) {
 	for _, payload := range []string{strings.Replace(completion(), `"model":"provider-model"`, `"model":"other","model":"provider-model"`, 1), strings.Replace(completion(), `"OK"`, "\"\xff\"", 1)} {
-		if _, err := normalize([]byte(payload), "public-model", "provider-model"); err == nil {
+		if _, err := normalize([]byte(payload), "public-model"); err == nil {
 			t.Fatal("ambiguous provider JSON accepted")
 		}
 	}
 	for _, payload := range []string{"data: [DONE]\n\n", strings.ReplaceAll(chunks(), `"finish_reason":"stop"`, `"finish_reason":null`)} {
-		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, payload) }))
+		s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, payload) }))
 		x, err := clientFor(t).Transport(t.Context(), submission(s.URL, true), []byte(rand.Text()))
 		if err != nil {
 			t.Fatal(err)
@@ -346,7 +384,7 @@ func TestNormalizationRejectsDuplicateAndFalseTerminal(t *testing.T) {
 
 func TestSSELineEndings(t *testing.T) {
 	for _, ending := range []string{"\r", "\r\n"} {
-		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, strings.ReplaceAll(chunks(), "\n", ending))
 		}))
 		x, err := clientFor(t).Transport(t.Context(), submission(s.URL, true), []byte(rand.Text()))
@@ -367,7 +405,7 @@ func TestBodyProgressFollowsNetworkReads(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {
 			release := make(chan struct{})
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				prefix := "{"
 				if stream {

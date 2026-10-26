@@ -17,7 +17,6 @@ import (
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/admin"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/budget"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelgate"
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relay"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relayhttp"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relaysupervisor"
@@ -85,11 +84,8 @@ func newDeviceRuntime(ctx context.Context, c deviceConfig) (*deviceRuntime, erro
 		closeResources()
 		return nil, err
 	}
-	maxEvents := 32
-	if c.Upstream != nil {
-		maxEvents = 4096
-	}
-	core, err := relay.New(relay.Config{Gate: gate, Reader: reader, Cipher: cipher, Ledger: ledger, Policy: policy, Transport: transport, Limits: modelprotocol.Limits{MaxBytes: 1 << 20, MaxEvents: maxEvents, MaxEventBytes: modelprotocol.EventLimit}, RecheckInterval: 100 * time.Millisecond, CheckTimeout: time.Second, StopTimeout: 100 * time.Millisecond, AccountingTimeout: time.Second})
+	limits := deviceProtocolLimits(c)
+	core, err := relay.New(relay.Config{Gate: gate, Reader: reader, Cipher: cipher, Ledger: ledger, Policy: policy, Transport: transport, Limits: limits, RecheckInterval: 100 * time.Millisecond, CheckTimeout: time.Second, StopTimeout: 100 * time.Millisecond, AccountingTimeout: time.Second})
 	if err != nil {
 		closeResources()
 		return nil, err
@@ -99,7 +95,7 @@ func newDeviceRuntime(ctx context.Context, c deviceConfig) (*deviceRuntime, erro
 		closeResources()
 		return nil, err
 	}
-	h, err := relayhttp.New(relayhttp.Config{Core: core, Gate: gate, Authority: a, Ledger: ledger, ReserveRecovery: sup.Reserve, ReadTimeout: millis(c.ReadMillis), WriteTimeout: millis(c.WriteMillis), QueryTimeout: time.Second, MaxResponseBytes: 1 << 20, MaxInFlight: c.MaxInFlight})
+	h, err := relayhttp.New(relayhttp.Config{Core: core, Gate: gate, Authority: a, Ledger: ledger, ReserveRecovery: sup.Reserve, ReadTimeout: millis(c.ReadMillis), WriteTimeout: millis(c.WriteMillis), QueryTimeout: time.Second, MaxResponseBytes: limits.MaxBytes, MaxInFlight: c.MaxInFlight})
 	if err != nil {
 		_ = sup.Drain(context.Background())
 		closeResources()

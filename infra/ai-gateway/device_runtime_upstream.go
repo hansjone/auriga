@@ -15,7 +15,7 @@ import (
 )
 
 type deviceUpstreamConfig struct {
-	AllowedHosts []string              `json:"allowedHosts"`
+	AllowedHosts []upstream.HostRule   `json:"allowedHosts"`
 	Models       []deviceUpstreamModel `json:"models"`
 }
 
@@ -80,9 +80,24 @@ func deviceTransportPolicy(db *store.Store, c deviceConfig) (relay.Transport, re
 	if c.Upstream == nil {
 		return syntheticTransport, syntheticPolicy(db, c.SyntheticTenant), nil
 	}
-	client, err := upstream.New(upstream.Config{AllowedHosts: c.Upstream.AllowedHosts, MaxResponseBytes: 1 << 20, MaxEventBytes: modelprotocol.EventLimit})
+	limits := deviceProtocolLimits(c)
+	client, err := upstream.New(upstream.Config{AllowedHosts: c.Upstream.AllowedHosts, MaxResponseBytes: limits.MaxBytes, MaxEventBytes: limits.MaxEventBytes})
 	if err != nil {
 		return nil, nil, deviceError()
 	}
 	return client.Transport, deviceUpstreamPolicy(db, *c.Upstream), nil
+}
+
+const upstreamMaxOutputTokens = 32768
+
+func deviceProtocolLimits(c deviceConfig) modelprotocol.Limits {
+	if c.Upstream == nil {
+		return modelprotocol.Limits{MaxBytes: 1 << 20, MaxEvents: 32, MaxEventBytes: modelprotocol.EventLimit}
+	}
+	var tokens int64
+	for _, m := range c.Upstream.Models {
+		tokens = max(tokens, m.MaxOutputTokens)
+	}
+	// Budget for content, framing, final usage and a progress comment per event.
+	return modelprotocol.Limits{MaxBytes: min((1<<20)+tokens*1024, 32<<20), MaxEvents: int(min(tokens*4+64, 131136)), MaxEventBytes: modelprotocol.EventLimit}
 }

@@ -102,6 +102,9 @@ func validateDeviceConfig(c deviceConfig) error {
 		}
 		seen := map[string]bool{}
 		for _, m := range c.Upstream.Models {
+			if m.MaxOutputTokens > upstreamMaxOutputTokens {
+				return deviceError()
+			}
 			key := m.Tenant + "/" + m.Model
 			if !deviceTenantPattern.MatchString(m.Tenant) || !deviceTenantPattern.MatchString(m.ProviderID) || m.Model == "" || len(m.Model) > 128 || m.UpstreamModel == "" || len(m.UpstreamModel) > 256 || !m.ContextLimitEnforced || !m.TrustUsage || m.ContextWindow < 2 || m.ContextWindow > 9007199254740991 || m.MaxOutputTokens < 1 || m.MaxOutputTokens >= m.ContextWindow || seen[key] {
 				return deviceError()
