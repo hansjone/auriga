@@ -12,7 +12,9 @@ import type { ConnectNetwork } from '../generated/connect-config.js';
 export type NetworkInstallation = Readonly<Omit<ConnectNetwork, 'roots'>> & {
   readonly roots: ReadonlyArray<Readonly<ConnectNetwork['roots'][number]>>;
 };
-export interface NetworkProvider {
+export type NetworkProvider = FullNetworkProvider | DeviceNetworkProvider;
+export interface FullNetworkProvider {
+  kind?: undefined;
   ports: NetworkPorts;
   prepare(input: {
     accessToken: string;
@@ -22,8 +24,7 @@ export interface NetworkProvider {
 }
 
 /** Installation-owned ports, never accepted from HTTP bodies, model parameters or downlink hints.
- * IAM register/prepare and private HTTPS submission have no public route yet.
- * The Cordis aurigaNetwork provider supplies these ports using native credentials. */
+ * The complete Cordis aurigaNetwork provider supplies these business/host ports. */
 export interface NetworkPorts {
   host: HostPort;
   network: NetworkPort;
@@ -88,7 +89,8 @@ export interface PreparedNetwork {
     windowMs: number;
   };
 }
-export interface RuntimeOptions {
+export interface FullRuntimeOptions {
+  kind?: undefined;
   directory?: string;
   prepared: PreparedNetwork;
   ports: NetworkPorts;
@@ -105,3 +107,43 @@ export interface RuntimeOptions {
     'responseDelayMs' | 'callbackTimeoutMs' | 'actionTimeoutMs'
   >;
 }
+export interface DeviceRegistration {
+  tenant: string;
+  realm: string;
+  node: string;
+  device: string;
+  systemAddress: string;
+  created: boolean;
+}
+export interface PreparedConnection {
+  kind: 'device-connection';
+  url: string;
+  roots: NetworkInstallation['roots'];
+  register(signal: AbortSignal): Promise<DeviceRegistration>;
+  getTicket(
+    signal: AbortSignal,
+  ): Promise<import('./transport/nats-transport.js').Ticket>;
+  refresh(
+    trust: Awaited<
+      ReturnType<typeof import('./trust/store.js').openTrustStore>
+    >,
+    signal: AbortSignal,
+  ): Promise<void>;
+}
+export interface DeviceNetworkProvider {
+  kind: 'device-connection';
+  prepare(input: {
+    accessToken?: string;
+    signal: AbortSignal;
+    installation?: NetworkInstallation;
+  }): Promise<PreparedConnection>;
+}
+export type ConnectionRuntimeOptions = Omit<
+  FullRuntimeOptions,
+  'kind' | 'prepared' | 'ports' | 'consentTiming'
+> & {
+  kind: 'device-connection';
+  prepared: PreparedConnection;
+  signal?: AbortSignal;
+};
+export type RuntimeOptions = FullRuntimeOptions | ConnectionRuntimeOptions;

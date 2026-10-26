@@ -90,19 +90,24 @@ and never permits WS or disabling TLS.
 
 Only the installer supplies these values. They are copied, deeply frozen and
 passed to trusted provider prepare, never exposed through settings, login input,
-status, diagnostics or SDK. Configuration alone does not attach a provider,
-register a node, fetch tickets/keys, open transport, initialize a network ledger,
-register SEND or publish authorization events; without a provider the network
-remains unconfigured. No test roots are supplied by default. Static pins do not
-replace future online IAM/keyset/announcement checks. Production networking,
-first-start ledger/incarnation bootstrap and two-DSH delivery remain separate work.
+status, diagnostics or SDK. In connect mode, successful native device login starts
+the official connection-only provider when these pins are installed. It validates
+the fixed IAM registration/ticket and collab keyset/announcement endpoints with
+the existing device credential, without another login or approval. Without pins
+or a trusted injected provider, networking remains unconfigured. No test roots
+are supplied by default. A complete trusted `aurigaNetwork` provider temporarily
+replaces the default; detaching it restores the installed default.
 
-The current server binds an ingress to its first complete READY request. Reusing
-that ingress with a new request ID, channel nonce or boot ID returns
-`network.conflict`; only an exact READY replay is accepted. The internal bootstrap
-helper does not return a session context to transfer. Default device networking
-therefore still needs an agreed handshake handoff before it can expose connected
-status. See [the network integration boundary](src/network/README.zh.md).
+First creation holds one host-ledger writer lock throughout bootstrap connection
+C1, atomic complete-ledger commit, actual C1 shutdown, a fresh ticket and normal
+strict READY on connection C2. Only C2 success exposes connected. Existing ledgers
+use their original incarnation directly and never bootstrap again. Signed root
+announcements fence old keys until the matching complete keyset is durable.
+The basic provider creates no HostAdapter or consent service and sends no
+FETCH/ACK/LOCAL_REGISTER/SEND. Connected means this basic authenticated connection;
+two-DSH messaging is not delivered. Old business ledgers without a provable
+receipt cursor remain unavailable rather than resetting revision or history.
+See [the network integration boundary](src/network/README.zh.md).
 
 Protocol major version: **1** (`Auriga-Protocol: 1`).
 

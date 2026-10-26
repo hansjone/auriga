@@ -31,7 +31,7 @@ const config = {
   clientId: 'auriga-dsh',
   providerId: 'team',
 };
-test('loader network installation alone remains unconfigured after login and never leaks to settings/status', async (t) => {
+test('loader network installation selects official device default after login and never leaks to settings/status', async (t) => {
   const network = {
     realm: '1',
     wssUrl: 'wss://network.example.com:9443/custom/ws',
@@ -49,17 +49,18 @@ test('loader network installation alone remains unconfigured after login and nev
     await runtimePeer(t, { config: { network } });
   network.realm = '2';
   network.roots[0].kid = 'injected';
-  assert.equal(runtime.networkStatus.state, 'unconfigured');
-  assert.equal(runtime.networkStatus.available, false);
-  assert.deepEqual(
-    requests.filter((path) => /network|tickets|keys|net\/v1/.test(path)),
-    [],
+  assert.equal(runtime.networkStatus.available, true);
+  assert.equal(runtime.networkStatus.connected, false);
+  assert.equal(
+    requests.some((path) => /tickets|keys|net\/v1/.test(path)),
+    false,
   );
   assert.equal(
     [...registered].some((name) => /send/i.test(name)),
     false,
   );
-  assert.equal((await readdir(directory)).includes('network'), false);
+  // Official default may already own its writer lock while register is pending.
+  assert.ok(Array.isArray(await readdir(directory)));
   const settings = await createSettingsStore(directory, config.platformOrigin);
   await assert.rejects(
     settings.save({ ...settings.snapshot(), network: expected }),
@@ -93,6 +94,7 @@ test('loader network installation alone remains unconfigured after login and nev
   assert.deepEqual(prepared.installation, expected);
   assert.ok(Object.isFrozen(prepared.installation.roots[0]));
   detach();
+  await runtime.close();
 });
 test('cancelled browser attempt loses its CSRF and cannot be advanced or restarted under the old proof', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-attempt-cancel-'));

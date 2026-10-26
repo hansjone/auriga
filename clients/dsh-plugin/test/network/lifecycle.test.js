@@ -6,6 +6,60 @@ import { generateKeyPairSync } from 'node:crypto';
 import { platformConfig } from '../../src/local/platform.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+test('complete provider detach restores official default after old runtime releases its lock', async () => {
+  const calls = [];
+  let release;
+  const gate = new Promise((r) => {
+    release = r;
+  });
+  const fallback = {
+    kind: 'device-connection',
+    async prepare() {
+      calls.push('default-prepare');
+      return { kind: 'device-connection' };
+    },
+  };
+  const lifecycle = createNetworkLifecycle({
+    directory: 'unused',
+    ctx: {},
+    defaultProvider: fallback,
+    getAccess: async () => '',
+    authorizeLocal: async () => false,
+    async open(input) {
+      const kind = input.kind ?? 'full';
+      calls.push(kind + '-open');
+      return {
+        status: { connected: true },
+        async start() {},
+        async close() {
+          calls.push(kind + '-close');
+          if (kind === 'full') await gate;
+        },
+        consentUI() {},
+      };
+    },
+  });
+  const full = {
+    ports: {},
+    async prepare() {
+      calls.push('full-prepare');
+      return {};
+    },
+  };
+  const detach = lifecycle.attach(full);
+  lifecycle.login();
+  await turn();
+  await turn();
+  detach();
+  await turn();
+  assert.equal(calls.includes('default-prepare'), false);
+  release();
+  await turn();
+  await turn();
+  assert.equal(calls.includes('default-prepare'), true);
+  assert.ok(calls.indexOf('full-close') < calls.indexOf('default-prepare'));
+  await lifecycle.close();
+});
 test('installation alone has zero network side effects; only trusted prepare receives immutable pins', async () => {
   const installation = platformConfig({
     platformOrigin: 'https://portal.example.com',

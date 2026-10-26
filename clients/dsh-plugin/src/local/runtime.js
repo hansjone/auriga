@@ -9,6 +9,7 @@ import { createTeam } from './team.js';
 import { createRefreshBroker } from '../ai/refresh-broker.js';
 import { createModelLifecycle } from '../ai/installation.js';
 import { createNetworkLifecycle } from '../network/lifecycle.js';
+import { createDeviceProvider } from '../network/device-provider.js';
 import {
   createHttpResponseTracker,
   installHttpResponseTracking,
@@ -158,6 +159,33 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   const network = createNetworkLifecycle({
     directory: join(directory, 'network'),
     installation: config.network,
+    defaultProvider: config.network
+      ? createDeviceProvider({
+          config,
+          async getDevice(signal) {
+            const g = generation,
+              saved = vault.snapshot().credential;
+            const accessToken = await getAccess();
+            active(g);
+            signal.throwIfAborted();
+            if (!saved) throw new Error('device credential required');
+            const claims = await platform.verifyDevice(
+              accessToken,
+              saved.claims,
+            );
+            active(g);
+            signal.throwIfAborted();
+            if (
+              ['tid', 'sub', 'did'].some(
+                (key) =>
+                  vault.snapshot().credential?.claims[key] !== claims[key],
+              )
+            )
+              throw new Error('device credential changed');
+            return { accessToken, claims };
+          },
+        })
+      : undefined,
     ctx,
     getAccess,
     authorizeLocal: async (request) => !!resolve(request),
@@ -193,6 +221,8 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
   });
   /** @type {(()=>void)|undefined} */
   let stopHttpTracking;
+  /** @type {Promise<void>|undefined} */
+  let networkClosing;
   async function getAccess() {
     active();
     return broker.getPlatformAccess();
@@ -755,7 +785,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       };
     },
     close() {
-      if (disposed) return;
+      if (disposed) return networkClosing;
       disposed = true;
       closed = true;
       broker.invalidate('closed');
@@ -764,7 +794,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       clearInterval(expiryTimer);
       clearInterval(revokeTimer);
       generation++;
-      void network.close();
+      networkClosing = network.close();
       team?.close();
       for (const value of sessions.values()) killSession(value);
       for (const row of attempts.values()) {
@@ -773,6 +803,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       }
       attempts.clear();
       vault.close();
+      return networkClosing;
     },
   };
 }
