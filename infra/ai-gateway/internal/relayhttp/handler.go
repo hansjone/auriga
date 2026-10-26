@@ -220,12 +220,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(errors.New("ai.budget_unavailable"))
 			return
 		}
-		out, e := h.c.Core.Execute(r.Context(), raw, bytes.NewReader(body), key, s.sink)
-		if out.Pending {
-			finish(&Pending{Ref: out.PendingRef, StopProof: out.StopProof})
-		} else {
-			finish(nil)
-		}
+		out, e := h.execute(r.Context(), raw, body, key, s.sink, finish)
 		if out.Ref.RequestID != "" {
 			id = out.Ref.RequestID
 			if !s.committed {
@@ -278,4 +273,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(ctx, 200, "application/json", page)
+}
+
+func (h *Handler) execute(ctx context.Context, raw string, body []byte, key string, sink modelprotocol.Sink, finish func(*Pending)) (out relay.Output, err error) {
+	returned := false
+	defer func() {
+		if !returned {
+			// A panic may follow dispatch; its missing Ref proves nothing. Keep
+			// the reserved cell faulted and let the original panic propagate.
+			finish(&Pending{Faulted: true})
+		}
+	}()
+	out, err = h.c.Core.Execute(ctx, raw, bytes.NewReader(body), key, sink)
+	returned = true
+	if out.Pending && out.PendingRef != (budget.Ref{}) {
+		finish(&Pending{Ref: out.PendingRef, StopProof: out.StopProof})
+	} else {
+		// Admit assigns result only after INSERT succeeds, before COMMIT. On
+		// error that result always supplies PendingRef; an empty Ref on normal
+		// return therefore means this admission never committed a durable row.
+		// Nonempty Ref (including not-found/COMMIT ambiguity) is never released here.
+		finish(nil)
+	}
+	return out, err
 }

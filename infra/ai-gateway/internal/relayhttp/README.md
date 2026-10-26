@@ -33,7 +33,9 @@ Node 原生 fetch 同样发送的 `Sec-Fetch-Mode` 仅为元数据，不授予�
   回调只取 Core 的专用 `Output.PendingRef`；Admit INSERT/回调成功但事务返回错误时，
   精确定位仅在此内部端口交接，公开 `Output.Ref` 保持空，不写入 header、JSON/SSE、错误或日志。
   原成功请求的公开关联 ID 和幂等错误语义不变；客户取消后仍同步交接。
-  空 Ref 表示仍未定位的不明责任，不能从请求头/体、参数、幂等键或旧请求 ID 补造。
+  正常返回空 PendingRef 表示 Admit 尚未提交：INSERT 成功才设置 result，事务提交在其后，之后失败必带 Ref。
+  此时 finish(nil) 归还容量，响应仍失败关闭；不能从请求头/体、参数、幂等键或旧 ID 补造 Ref。
+  panic 不适用该推理，独立 Faulted 标记保留并计故障，原 panic 继续传播。
   非空 Ref 仅表示本次行可能存在，不证明提交、准入或行存在；先在 RLS 下重读真实状态/revision，
   再按真实证据 CAS 调用 `Ledger.Recover`，绝不重派。首次 not_found 不证明最终回滚或责任已清。
   缺停止证明继续保留槽，unknown 金额/token 继续冻结；StopProof 必须是现场全部执行停止的

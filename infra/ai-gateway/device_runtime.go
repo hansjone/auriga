@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -47,12 +48,12 @@ func newDeviceRuntime(ctx context.Context, c deviceConfig) (*deviceRuntime, erro
 	if err != nil {
 		return nil, errors.New("D7 store unavailable")
 	}
-	iamConn, err := team.DialRPC(c.IAM)
+	iamConn, err := team.DialRPC(team.RPCConfig(c.IAM))
 	if err != nil {
 		db.Close()
 		return nil, errors.New("D7 IAM RPC unavailable")
 	}
-	orgConn, err := team.DialRPC(c.Org)
+	orgConn, err := team.DialRPC(team.RPCConfig(c.Org))
 	if err != nil {
 		_ = iamConn.Close()
 		db.Close()
@@ -105,10 +106,10 @@ func newDeviceRuntime(ctx context.Context, c deviceConfig) (*deviceRuntime, erro
 func (r *deviceRuntime) shutdownRuntime() error {
 	r.handler.CloseAdmission()
 	r.supervisor.CloseAdmission()
-	r.cancel()
 	ctx, cancel := context.WithTimeout(context.Background(), r.shutdown)
 	err := r.server.Shutdown(ctx)
 	cancel()
+	r.cancel() // Give HTTP its grace period before cancelling remaining calls.
 	if err != nil {
 		_ = r.server.Close()
 	}
@@ -117,10 +118,12 @@ func (r *deviceRuntime) shutdownRuntime() error {
 	drainErr := r.supervisor.Drain(drain)
 	cancelDrain()
 	stats := r.supervisor.Stats()
-	r.closeResources()
 	if err != nil || drainErr != nil {
+		// pool.Close waits for borrowed connections. With unresolved handlers or
+		// cells that is unbounded here; leave resources for process exit instead.
 		return fmt.Errorf("D7 shutdown incomplete: occupied=%d pending=%d faulted=%d", stats.Occupied, stats.Pending, stats.Faulted)
 	}
+	r.closeResources()
 	return nil
 }
 func (r *deviceRuntime) serve(ctx context.Context, l net.Listener, maximum int) error {
@@ -169,7 +172,7 @@ func (l *deviceListener) Accept() (net.Conn, error) {
 		}
 	}
 }
-func serveDevice(path string) error {
+func serveDevice(path string, logs io.Writer) error {
 	c, err := loadDeviceConfig(path)
 	if err != nil {
 		return err
@@ -188,6 +191,8 @@ func serveDevice(path string) error {
 		return errors.New("D7 listener unavailable")
 	}
 	defer func() { _ = l.Close() }()
-	slog.Info("D7 synthetic device listener", "address", l.Addr().String())
+	logger := slog.New(slog.NewJSONHandler(logs, nil))
+	r.server.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelError)
+	logger.Info("D7 synthetic device listener", "address", l.Addr().String())
 	return r.serve(ctx, l, c.MaxConnections)
 }

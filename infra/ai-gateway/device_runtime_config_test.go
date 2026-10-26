@@ -9,11 +9,10 @@ import (
 	"testing"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/team"
 )
 
 func validDeviceConfig() deviceConfig {
-	return deviceConfig{Listen: "127.0.0.1:0", MasterKeyFile: "master.key", Store: store.Config{DSN: "postgres://alice@127.0.0.1/auriga_d7", MigrationDSN: "postgres://alice@127.0.0.1/auriga_d7"}, IAM: team.RPCConfig{Target: "127.0.0.1:1", ServiceTokenFile: "iam.jwt"}, Org: team.RPCConfig{Target: "127.0.0.1:2", ServiceTokenFile: "org.jwt"}, D7SyntheticOnly: true, SyntheticTenant: "01900000-0000-7000-8000-000000000001", Capacity: 1, MaxConnections: 2, MaxInFlight: 1, HeaderMillis: 100, ReadMillis: 100, WriteMillis: 100, IdleMillis: 100, ShutdownMillis: 100}
+	return deviceConfig{Listen: "127.0.0.1:0", MasterKeyFile: "master.key", Store: store.Config{DSN: "postgres://alice@127.0.0.1/auriga_d7", MigrationDSN: "postgres://alice@127.0.0.1/auriga_d7"}, IAM: deviceRPCConfig{Target: "127.0.0.1:1", ServiceTokenFile: "iam.jwt"}, Org: deviceRPCConfig{Target: "127.0.0.1:2", ServiceTokenFile: "org.jwt"}, D7SyntheticOnly: true, SyntheticTenant: "01900000-0000-7000-8000-000000000001", Capacity: 1, MaxConnections: 2, MaxInFlight: 1, HeaderMillis: 100, ReadMillis: 100, WriteMillis: 100, IdleMillis: 100, ShutdownMillis: 100}
 }
 func TestDeviceConfigBoundariesAndSecretRedaction(t *testing.T) {
 	for _, name := range []string{"AURIGA_AI_PG_DSN", "AURIGA_AI_MIGRATION_PG_DSN", "AURIGA_AI_MASTER_KEY_FILE"} {
@@ -34,7 +33,7 @@ func TestDeviceConfigBoundariesAndSecretRedaction(t *testing.T) {
 		func(c *deviceConfig) { c.Listen = "localhost:0" }, func(c *deviceConfig) { c.Listen = "0.0.0.0:0" }, func(c *deviceConfig) { c.Listen = "127.0.0.1:65536" },
 		func(c *deviceConfig) { c.D7SyntheticOnly = false }, func(c *deviceConfig) { c.Store.DSN = "postgres://alice@127.0.0.1/production" },
 		func(c *deviceConfig) { c.Capacity = -1 }, func(c *deviceConfig) { c.HeaderMillis = 60001 }, func(c *deviceConfig) { c.MaxInFlight = 3 },
-		func(c *deviceConfig) { c.Org = team.RPCConfig{} }, func(c *deviceConfig) { c.IAM = team.RPCConfig{} }, func(c *deviceConfig) { c.SyntheticTenant = "00000000-0000-0000-0000-000000000000" },
+		func(c *deviceConfig) { c.Org = deviceRPCConfig{} }, func(c *deviceConfig) { c.IAM = deviceRPCConfig{} }, func(c *deviceConfig) { c.SyntheticTenant = "00000000-0000-0000-0000-000000000000" },
 	} {
 		c := validDeviceConfig()
 		mutate(&c)

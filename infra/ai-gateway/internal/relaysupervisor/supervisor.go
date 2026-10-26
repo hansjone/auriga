@@ -13,6 +13,7 @@ import (
 type Pending struct {
 	Ref       budget.Ref      `json:"-"`
 	StopProof <-chan struct{} `json:"-"`
+	Faulted   bool            `json:"-"` // Abnormal exit: empty Ref is not admission evidence.
 }
 
 func (p Pending) String() string   { return "AI relay pending" }
@@ -25,6 +26,9 @@ type ledger interface {
 type cell struct {
 	occupied, handed, fault bool
 	pending                 Pending
+	waitProof, stopped      bool
+	failures                uint8
+	next                    time.Time
 }
 type Stats struct {
 	Occupied, Pending, Faulted int
@@ -40,13 +44,14 @@ type Supervisor struct {
 	wake    chan struct{}
 	stop    context.CancelFunc
 	done    chan struct{}
+	latest  int // Coalesced scheduling hint only; ownership remains in cells.
 }
 
 func New(l ledger, capacity int, timeout, backoff time.Duration) (*Supervisor, error) {
 	if l == nil || capacity < 1 || capacity > 4096 || timeout <= 0 || timeout > time.Second || backoff < time.Millisecond || backoff > time.Second {
 		return nil, errors.New("common.validation_failed")
 	}
-	s := &Supervisor{l: l, cells: make([]cell, capacity), free: make([]int, capacity), timeout: timeout, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	s := &Supervisor{l: l, cells: make([]cell, capacity), free: make([]int, capacity), timeout: timeout, wake: make(chan struct{}, 1), done: make(chan struct{}), latest: -1}
 	for i := range s.free {
 		s.free[i] = i
 	}
@@ -72,11 +77,13 @@ func (s *Supervisor) Reserve() (func(*Pending), bool) {
 	return func(p *Pending) {
 		once.Do(func() {
 			s.mu.Lock()
-			if p == nil {
+			if p == nil || (p.Ref == (budget.Ref{}) && !p.Faulted) {
 				s.release(i)
 			} else {
 				s.cells[i].pending = *p
 				s.cells[i].handed = true
+				s.cells[i].fault = p.Faulted
+				s.latest = i
 			}
 			s.mu.Unlock()
 			s.signal()
@@ -119,7 +126,6 @@ func (s *Supervisor) Drain(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			s.stop()
-			<-s.done
 			return errors.New("device recovery unresolved")
 		case <-tick.C:
 		}
@@ -132,6 +138,7 @@ func (s *Supervisor) run(ctx context.Context, backoff time.Duration) {
 	defer close(s.done)
 	tick := time.NewTicker(backoff)
 	defer tick.Stop()
+	cursor := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -139,37 +146,73 @@ func (s *Supervisor) run(ctx context.Context, backoff time.Duration) {
 		case <-tick.C:
 		case <-s.wake:
 		}
-		for i := range s.cells {
-			if ctx.Err() != nil {
-				return
-			}
+		if ctx.Err() != nil {
+			return
+		}
+		// One PG round has a fixed time budget. A new handoff can be selected
+		// next round rather than waiting behind capacity*timeout of DB failures.
+		round, cancel := context.WithTimeout(ctx, min(s.timeout, 50*time.Millisecond))
+		attempts := 0
+		for scanned := 0; scanned < len(s.cells) && attempts < 16 && round.Err() == nil; scanned++ {
 			s.mu.Lock()
+			i := cursor
+			if scanned == 0 && s.latest >= 0 {
+				i, s.latest = s.latest, -1
+			} else {
+				cursor = (cursor + 1) % len(s.cells)
+			}
 			c := s.cells[i]
 			s.mu.Unlock()
-			if !c.handed {
+			if !c.handed || c.pending.Faulted {
 				continue
 			}
-			complete, fault := s.reconcile(ctx, c.pending)
+			// StopProof's contract permits close only, never sends. A received
+			// value is consumed but is not stop evidence, and never releases a slot.
+			if !c.stopped {
+				select {
+				case _, open := <-c.pending.StopProof:
+					c.stopped = !open
+				default:
+				}
+			}
+			if (c.waitProof && !c.stopped) || time.Now().Before(c.next) {
+				continue
+			}
+			attempts++
+			complete, waitProof, fault := s.reconcile(round, c.pending, c.stopped)
 			s.mu.Lock()
 			if complete {
 				s.release(i)
 			} else {
-				s.cells[i].fault = fault
+				c.fault, c.waitProof = fault, waitProof
+				delay := backoff
+				if fault {
+					c.failures = min(c.failures+1, 8)
+					delay = min(backoff*time.Duration(1<<c.failures), 5*time.Second)
+				} else {
+					c.failures = 0
+				}
+				c.next = time.Now().Add(delay)
+				s.cells[i] = c
 			}
 			s.mu.Unlock()
 		}
+		if attempts == 16 || round.Err() != nil {
+			s.signal()
+		}
+		cancel()
 	}
 }
-func (s *Supervisor) reconcile(ctx context.Context, p Pending) (bool, bool) {
+func (s *Supervisor) reconcile(ctx context.Context, p Pending, stopped bool) (bool, bool, bool) {
 	// Missing/invalid references are unresolved responsibility, never rollback.
 	if p.Ref.TenantID == "" || p.Ref.AccountID == "" || p.Ref.RequestID == "" {
-		return false, true
+		return false, false, true
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	c, err := s.l.GetRecoveryCandidate(ctx, p.Ref)
 	if err != nil || c == nil || c.Ref != p.Ref {
-		return false, true
+		return false, false, true
 	}
 	proof := budget.RecoveryEvidence{}
 	switch c.State {
@@ -177,23 +220,19 @@ func (s *Supervisor) reconcile(ctx context.Context, p Pending) (bool, bool) {
 		proof.NeverSubmitted = true // Execute returned; same Core cannot dispatch this call again.
 	case "dispatching", "unknown":
 		if c.State == "unknown" && !c.SlotHeld {
-			return true, false
+			return true, false, false
 		}
-		select {
-		case _, open := <-p.StopProof:
-			proof.ExecutionStopped = !open
-		default:
-		}
+		proof.ExecutionStopped = stopped
 		if c.State == "unknown" && !proof.ExecutionStopped {
-			return false, false
+			return false, true, false
 		}
 	case "completed", "failed", "cancelled":
-		return !c.SlotHeld, c.SlotHeld
+		return !c.SlotHeld, false, c.SlotHeld
 	default:
-		return false, true
+		return false, false, true
 	}
 	_, err = s.l.Recover(ctx, p.Ref, c.Revision, proof)
 	// Always reread, even after success: a COMMIT response is not a new dispatch
 	// right, and concurrent recovery/CAS or ambiguous commit needs current state.
-	return false, err != nil
+	return false, err == nil && c.State == "dispatching" && !stopped, err != nil
 }

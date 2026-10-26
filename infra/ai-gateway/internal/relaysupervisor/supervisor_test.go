@@ -234,10 +234,10 @@ func TestSupervisorPGTwoWorkersAndMissingReferences(t *testing.T) {
 	missing := ref
 	missing.RequestID = pgID(t)
 	f(&Pending{Ref: missing})
-	eventually(t, func() bool { return s.Stats().Faulted == 2 })
+	eventually(t, func() bool { return s.Stats().Faulted == 1 })
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
-	if s.Drain(ctx) == nil || s.Stats().Occupied != 2 {
+	if s.Drain(ctx) == nil || s.Stats().Occupied != 1 {
 		t.Fatal("missing refs reported clean drain")
 	}
 }
@@ -427,7 +427,7 @@ func TestReservationOwnsCapacityBeforeHandoff(t *testing.T) {
 	}
 	l.mu.Unlock()
 	finish(nil)
-	finish(&Pending{})
+	finish(&Pending{Faulted: true})
 	if s.Stats().Occupied != 0 {
 		t.Fatal("finish was not exactly once")
 	}
@@ -439,9 +439,124 @@ func TestReservationOwnsCapacityBeforeHandoff(t *testing.T) {
 	if _, ok = s.Reserve(); ok {
 		t.Fatal("closed admission")
 	}
-	finish(&Pending{})
+	finish(&Pending{Ref: budget.Ref{TenantID: "late", AccountID: "a", RequestID: "r"}})
 	if s.Stats().Occupied != 1 {
 		t.Fatal("late handoff lost")
+	}
+}
+
+func TestEmptyAdmissionRefCanDrain(t *testing.T) {
+	l := &memoryLedger{}
+	s := newTest(t, l, 1)
+	finish, _ := s.Reserve()
+	finish(&Pending{})
+	if s.Stats().Occupied != 0 {
+		t.Fatal("empty admission Ref retained capacity")
+	}
+	if e := s.Drain(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.reads != 0 {
+		t.Fatal("empty Ref queried PG")
+	}
+}
+func TestUnknownWaitsLocallyForClosedProof(t *testing.T) {
+	ref := budget.Ref{TenantID: "t", AccountID: "a", RequestID: "r"}
+	l := &memoryLedger{c: budget.RecoveryCandidate{Ref: ref, State: "unknown", Revision: 4, SlotHeld: true}}
+	s := newTest(t, l, 1)
+	proof := make(chan struct{}, 1)
+	finish, _ := s.Reserve()
+	finish(&Pending{Ref: ref, StopProof: proof})
+	eventually(t, func() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.cells[0].waitProof })
+	l.mu.Lock()
+	reads := l.reads
+	l.mu.Unlock()
+	proof <- struct{}{}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+		case <-tick.C:
+			s.signal()
+			l.mu.Lock()
+			got := l.reads
+			l.mu.Unlock()
+			if got != reads {
+				t.Fatal("waiting proof caused PG polling")
+			}
+		}
+	}
+	close(proof)
+	eventually(t, func() bool { return s.Stats().Occupied == 0 })
+}
+func TestDatabaseFaultUsesPerCellBackoff(t *testing.T) {
+	ref := budget.Ref{TenantID: "t", AccountID: "a", RequestID: "r"}
+	l := &memoryLedger{fail: true, c: budget.RecoveryCandidate{Ref: ref}}
+	s := newTest(t, l, 1)
+	finish, _ := s.Reserve()
+	finish(&Pending{Ref: ref})
+	eventually(t, func() bool { return s.Stats().Faulted == 1 })
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Millisecond)
+	defer cancel()
+	<-ctx.Done()
+	l.mu.Lock()
+	reads := l.reads
+	l.mu.Unlock()
+	if reads < 2 || reads > 5 {
+		t.Fatal("fault retry did not back off", reads)
+	}
+}
+
+type stalledRecovery struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (l *stalledRecovery) GetRecoveryCandidate(ctx context.Context, r budget.Ref) (*budget.RecoveryCandidate, error) {
+	if r.RequestID == "good" {
+		return &budget.RecoveryCandidate{Ref: r, State: "completed", Revision: 3}, nil
+	}
+	l.once.Do(func() { close(l.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (*stalledRecovery) Recover(context.Context, budget.Ref, int64, budget.RecoveryEvidence) (*budget.Reservation, error) {
+	return nil, errors.New("unexpected recovery")
+}
+func TestNewHandoffNotBehindFullDatabaseFailureSweep(t *testing.T) {
+	l := &stalledRecovery{started: make(chan struct{})}
+	s, e := New(l, 32, time.Second, 5*time.Millisecond)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		defer cancel()
+		_ = s.Drain(ctx)
+		<-s.done
+	})
+	for range 31 {
+		finish, _ := s.Reserve()
+		finish(&Pending{Ref: budget.Ref{TenantID: "t", AccountID: "a", RequestID: "bad"}})
+	}
+	<-l.started
+	finish, _ := s.Reserve()
+	finish(&Pending{Ref: budget.Ref{TenantID: "t", AccountID: "a", RequestID: "good"}})
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for s.Stats().Occupied == 32 {
+		select {
+		case <-ctx.Done():
+			t.Fatal("new handoff stuck behind capacity*timeout sweep")
+		case <-tick.C:
+		}
 	}
 }
 func TestSentValueIsNotStopProof(t *testing.T) {
@@ -470,7 +585,7 @@ func TestSentValueIsNotStopProof(t *testing.T) {
 func TestUnlocatedMissingAndDatabaseFailureRetainCells(t *testing.T) {
 	l := &memoryLedger{fail: true}
 	s := newTest(t, l, 3)
-	for _, p := range []Pending{{}, {Ref: budget.Ref{TenantID: "wrong"}}, {Ref: l.c.Ref}} {
+	for _, p := range []Pending{{Faulted: true}, {Ref: budget.Ref{TenantID: "wrong"}}, {Ref: budget.Ref{TenantID: "t", AccountID: "a", RequestID: "r"}}} {
 		f, ok := s.Reserve()
 		if !ok {
 			t.Fatal("reserve")

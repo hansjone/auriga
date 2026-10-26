@@ -17,6 +17,7 @@ import (
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relay"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relaysupervisor"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/testpg"
 	"github.com/jackc/pgx/v5"
 )
@@ -272,4 +273,123 @@ func TestFullRecoveryCapacityRejectsBeforeExecute(t *testing.T) {
 	if w.Code != 503 || !strings.Contains(w.Body.String(), "ai.budget_unavailable") {
 		t.Fatalf("capacity bypassed: %d %s", w.Code, w.Body.String())
 	}
+}
+
+type cancelAdmissionStore struct {
+	db     *store.Store
+	cancel context.CancelFunc
+	calls  atomic.Int32
+}
+
+func (s *cancelAdmissionStore) Transaction(ctx context.Context, tenant string, fn func(pgx.Tx) error) error {
+	s.calls.Add(1)
+	s.cancel()
+	return s.db.Transaction(ctx, tenant, fn)
+}
+
+func TestRecoveryPGEmptyRefReturnsCapacity(t *testing.T) {
+	for _, mode := range []string{"cancel-before-admit", "database-rejects-insert"} {
+		t.Run(mode, func(t *testing.T) {
+			f := fixtureNew(t)
+			sup := socketSupervisor(t, f)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var calls atomic.Int32
+			var admissionCalls *atomic.Int32
+			if mode == "cancel-before-admit" {
+				db := &cancelAdmissionStore{db: f.db, cancel: cancel}
+				admissionCalls = &db.calls
+				l, e := budget.New(db, "USD", nil)
+				if e != nil {
+					t.Fatal(e)
+				}
+				f.cfg.Ledger = l
+			} else {
+				var role string
+				if e := f.db.Transaction(t.Context(), f.control.tenant, func(tx pgx.Tx) error { return tx.QueryRow(t.Context(), "SELECT current_user").Scan(&role) }); e != nil {
+					t.Fatal(e)
+				}
+				conn, e := pgx.Connect(t.Context(), testpg.DSN(t))
+				if e != nil {
+					t.Fatal(e)
+				}
+				t.Cleanup(func() { _ = conn.Close(context.Background()) })
+				quoted := pgx.Identifier{role}.Sanitize()
+				if e = usageCatalogACL(t.Context(), conn, "REVOKE INSERT ON ai.budget_request FROM "+quoted); e != nil {
+					t.Fatal(e)
+				}
+				t.Cleanup(func() {
+					if e := usageCatalogACL(context.Background(), conn, "GRANT INSERT ON ai.budget_request TO "+quoted); e != nil {
+						t.Error(e)
+					}
+				})
+			}
+			f.cfg.Transport = finite(completion(textChoice), &calls)
+			core, e := relay.New(f.cfg)
+			if e != nil {
+				t.Fatal(e)
+			}
+			f.http.Core = core
+			h, e := New(f.http)
+			if e != nil {
+				t.Fatal(e)
+			}
+			req := httptest.NewRequest("POST", chatPath, strings.NewReader(plainRequest)).WithContext(ctx)
+			req.Header.Set("Authorization", "Bearer "+f.raw)
+			req.Header.Set("Content-Type", "application/json")
+			w := &deadlineRecorder{httptest.NewRecorder()}
+			h.ServeHTTP(w, req)
+			if w.Code != 503 || calls.Load() != 0 {
+				t.Fatal("failed admission executed or succeeded", w.Code, calls.Load())
+			}
+			if admissionCalls != nil && admissionCalls.Load() != 1 {
+				t.Fatal("cancellation never reached the admission boundary")
+			}
+			if mode == "database-rejects-insert" && !strings.Contains(w.Body.String(), "ai.budget_unavailable") {
+				t.Fatal("database error was not safely mapped")
+			}
+			if sup.Stats().Occupied != 0 {
+				t.Fatalf("uncommitted admission leaked recovery capacity: %+v", sup.Stats())
+			}
+			var rows int
+			if e = f.db.Transaction(t.Context(), f.control.tenant, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), "SELECT count(*) FROM ai.budget_request WHERE tenant_id=$1", f.control.tenant).Scan(&rows)
+			}); e != nil {
+				t.Fatal(e)
+			}
+			if rows != 0 {
+				t.Fatal("failed admission left durable rows", rows)
+			}
+		})
+	}
+}
+
+func TestExecutePanicRetainsFaultedResponsibility(t *testing.T) {
+	s, e := relaysupervisor.New(noRecoveryIO{t}, 1, time.Millisecond, 10*time.Millisecond)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		_ = s.Drain(ctx)
+	})
+	c := testConfig()
+	c.ReserveRecovery = s.Reserve
+	h, e := New(c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r := httptest.NewRequest("POST", chatPath, strings.NewReader(`{"model":"anything"}`))
+	r.Header.Set("Authorization", "Bearer original")
+	r.Header.Set("Content-Type", "application/json")
+	defer func() {
+		if recover() == nil {
+			t.Fatal("sentinel Core did not panic")
+		}
+		if stats := s.Stats(); stats.Occupied != 1 || stats.Faulted != 1 {
+			t.Fatal("panic liability not diagnosed", stats)
+		}
+	}()
+	h.ServeHTTP(&deadlineRecorder{httptest.NewRecorder()}, r)
 }

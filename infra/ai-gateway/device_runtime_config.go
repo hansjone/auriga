@@ -12,27 +12,39 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/team"
+
 	"github.com/jackc/pgx/v5"
 )
 
 type deviceConfig struct {
-	Listen          string         `json:"listen"`
-	MasterKeyFile   string         `json:"masterKeyFile"`
-	Store           store.Config   `json:"store"`
-	IAM             team.RPCConfig `json:"iam"`
-	Org             team.RPCConfig `json:"org"`
-	SyntheticTenant string         `json:"syntheticTenant"`
-	D7SyntheticOnly bool           `json:"d7SyntheticOnly"`
-	Capacity        int            `json:"capacity"`
-	MaxConnections  int            `json:"maxConnections"`
-	MaxInFlight     int            `json:"maxInFlight"`
-	HeaderMillis    int            `json:"headerMillis"`
-	ReadMillis      int            `json:"readMillis"`
-	WriteMillis     int            `json:"writeMillis"`
-	IdleMillis      int            `json:"idleMillis"`
-	ShutdownMillis  int            `json:"shutdownMillis"`
+	Listen          string          `json:"listen"`
+	MasterKeyFile   string          `json:"masterKeyFile"`
+	Store           store.Config    `json:"store"`
+	IAM             deviceRPCConfig `json:"iam"`
+	Org             deviceRPCConfig `json:"org"`
+	SyntheticTenant string          `json:"syntheticTenant"`
+	D7SyntheticOnly bool            `json:"d7SyntheticOnly"`
+	Capacity        int             `json:"capacity"`
+	MaxConnections  int             `json:"maxConnections"`
+	MaxInFlight     int             `json:"maxInFlight"`
+	HeaderMillis    int             `json:"headerMillis"`
+	ReadMillis      int             `json:"readMillis"`
+	WriteMillis     int             `json:"writeMillis"`
+	IdleMillis      int             `json:"idleMillis"`
+	ShutdownMillis  int             `json:"shutdownMillis"`
 }
+
+// Wire configuration stays local; RPC validation/authentication still uses team.DialRPC.
+type deviceRPCConfig struct {
+	Target           string `json:"target"`
+	ServiceTokenFile string `json:"serviceTokenFile"`
+	CertFile         string `json:"certFile"`
+	KeyFile          string `json:"keyFile"`
+	CAFile           string `json:"caFile"`
+	ServerName       string `json:"serverName"`
+}
+
+var deviceTenantPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 func deviceError() error         { return errors.New("invalid D7 device configuration") }
 func millis(n int) time.Duration { return time.Duration(n) * time.Millisecond }
@@ -71,7 +83,7 @@ func validateDeviceConfig(c deviceConfig) error {
 	if e != nil || pe != nil || n < 0 || n > 65535 || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 		return deviceError()
 	}
-	if !c.D7SyntheticOnly || !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(c.SyntheticTenant) || c.MasterKeyFile == "" {
+	if !c.D7SyntheticOnly || !deviceTenantPattern.MatchString(c.SyntheticTenant) || c.MasterKeyFile == "" {
 		return deviceError()
 	}
 	for _, dsn := range []string{c.Store.DSN, c.Store.MigrationDSN} {
@@ -88,7 +100,7 @@ func validateDeviceConfig(c deviceConfig) error {
 			return deviceError()
 		}
 	}
-	for _, rpc := range []team.RPCConfig{c.IAM, c.Org} {
+	for _, rpc := range []deviceRPCConfig{c.IAM, c.Org} {
 		if rpc.Target == "" || rpc.ServiceTokenFile == "" {
 			return deviceError()
 		}

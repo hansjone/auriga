@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -303,17 +305,128 @@ func TestDeviceShutdownRetainsUnhandedReservation(t *testing.T) {
 		t.Fatal(e)
 	}
 	finish, ok := r.supervisor.Reserve()
+	defer r.closeResources()
 	if !ok {
 		t.Fatal("reserve")
 	}
 	if e = r.shutdownRuntime(); e == nil || !strings.Contains(e.Error(), "occupied=1") {
 		t.Fatal("false clean shutdown", e)
 	}
-	finish(&relaysupervisor.Pending{})
+	finish(&relaysupervisor.Pending{Faulted: true})
 	if r.supervisor.Stats().Occupied != 1 || r.supervisor.Stats().Pending != 1 {
 		t.Fatal("late handoff lost after timeout")
 	}
 	if _, ok = r.supervisor.Reserve(); ok {
 		t.Fatal("shutdown admission open")
 	}
+}
+
+func TestDeviceShutdownLetsActiveHTTPFinishGracefully(t *testing.T) {
+	f := newDeviceFixture(t)
+	f.cfg.ShutdownMillis = 1000
+	entered, release, cancelled := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	f.control.memberHook = func(ctx context.Context) error {
+		close(entered)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			close(cancelled)
+			return ctx.Err()
+		}
+	}
+	r, e := newDeviceRuntime(t.Context(), f.cfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	l, e := net.Listen("tcp", f.cfg.Listen)
+	if e != nil {
+		t.Fatal(e)
+	}
+	served := make(chan error, 1)
+	go func() { served <- r.server.Serve(l) }()
+	status := make(chan int, 1)
+	go func() {
+		req, _ := http.NewRequest("GET", "http://"+l.Addr().String()+"/ai/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+f.control.raw)
+		res, e := http.DefaultClient.Do(req)
+		if e != nil {
+			status <- 0
+			return
+		}
+		_, _ = io.Copy(io.Discard, res.Body)
+		_ = res.Body.Close()
+		status <- res.StatusCode
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("no control-plane call")
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.shutdownRuntime() }()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for !r.supervisor.Stats().Closed {
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			t.Fatal("shutdown did not start")
+		}
+	}
+	select {
+	case <-cancelled:
+		t.Fatal("HTTP cancelled before its grace period")
+	default:
+	}
+	close(release)
+	if code := <-status; code != 200 {
+		t.Fatal("active HTTP lost graceful completion", code)
+	}
+	if e = <-done; e != nil {
+		t.Fatal(e)
+	}
+	if e = <-served; !errors.Is(e, http.ErrServerClosed) {
+		t.Fatal(e)
+	}
+}
+
+func TestDeviceShutdownTimeoutDoesNotWaitForBorrowedPoolConnection(t *testing.T) {
+	f := newDeviceFixture(t)
+	f.cfg.ShutdownMillis = 20
+	r, e := newDeviceRuntime(t.Context(), f.cfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer r.closeResources()
+	borrowed, release := make(chan struct{}), make(chan struct{})
+	txDone := make(chan error, 1)
+	go func() {
+		txDone <- f.db.Transaction(t.Context(), f.control.tenant, func(pgx.Tx) error { close(borrowed); <-release; return nil })
+	}()
+	<-borrowed
+	original := r.closeResources
+	var closeCalled atomic.Bool
+	r.closeResources = func() { closeCalled.Store(true); f.db.Close(); original() }
+	finish, _ := r.supervisor.Reserve()
+	done := make(chan error, 1)
+	go func() { done <- r.shutdownRuntime() }()
+	select {
+	case e = <-done:
+		if e == nil {
+			t.Error("unresolved drain reported clean")
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Error("shutdown waited for pool.Close")
+	}
+	if closeCalled.Load() {
+		t.Error("timed-out shutdown closed borrowed pool")
+	}
+	close(release)
+	if e := <-txDone; e != nil {
+		t.Fatal(e)
+	}
+	finish(nil)
 }

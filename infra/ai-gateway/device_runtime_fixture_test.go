@@ -44,6 +44,7 @@ type deviceControl struct {
 	revoked, expired, orgFailed atomic.Bool
 	wrongTenant                 atomic.Bool
 	calls                       atomic.Int64
+	memberHook                  func(context.Context) error
 }
 
 func (c *deviceControl) VerifyDeviceAiAccess(_ context.Context, r *iam.VerifyDeviceAiAccessRequest) (*iam.VerifyDeviceAiAccessResponse, error) {
@@ -61,7 +62,12 @@ func (c *deviceControl) VerifyDeviceAiAccess(_ context.Context, r *iam.VerifyDev
 	}
 	return &iam.VerifyDeviceAiAccessResponse{Active: !c.revoked.Load(), TenantId: tenant, AccountId: deviceAccount, DeviceId: deviceID, ExpiresAt: timestamppb.New(exp)}, nil
 }
-func (c *deviceControl) GetMember(context.Context, *org.GetMemberRequest) (*org.GetMemberResponse, error) {
+func (c *deviceControl) GetMember(ctx context.Context, _ *org.GetMemberRequest) (*org.GetMemberResponse, error) {
+	if c.memberHook != nil {
+		if e := c.memberHook(ctx); e != nil {
+			return nil, e
+		}
+	}
 	if c.orgFailed.Load() {
 		return nil, status.Error(codes.Unavailable, "private error")
 	}
@@ -194,8 +200,8 @@ func newDeviceFixture(t *testing.T) *deviceFixture {
 	c := &deviceControl{tenant: cfg.SyntheticTenant}
 	claims, _ := json.Marshal(map[string]any{"tid": c.tenant, "sub": deviceAccount, "did": deviceID, "exp": time.Now().Add(2 * time.Minute).Unix()})
 	c.raw = base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256","typ":"at+jwt"}`)) + "." + base64.RawURLEncoding.EncodeToString(claims) + ".ZmFrZQ"
-	cfg.IAM = deviceRPC(t, c, true)
-	cfg.Org = deviceRPC(t, c, false)
+	cfg.IAM = deviceRPCConfig(deviceRPC(t, c, true))
+	cfg.Org = deviceRPCConfig(deviceRPC(t, c, false))
 	key := make([]byte, 32)
 	if _, e = rand.Read(key); e != nil {
 		t.Fatal(e)

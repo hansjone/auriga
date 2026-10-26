@@ -43,18 +43,12 @@ func run(args []string, out, logs io.Writer) error {
 		return err
 	}
 	if *deviceConfigFile != "" {
-		return serveDevice(*deviceConfigFile)
+		return serveDevice(*deviceConfigFile, logs)
 	}
 	if *adminConfigFile != "" {
-		if *teamConfigFile != "" || *networkConfigFile != "" {
-			return fmt.Errorf("choose one runtime per process: --admin-config, --team-config or --network-config")
-		}
 		return serveAdmin(*adminConfigFile)
 	}
 	if *teamConfigFile != "" {
-		if *networkConfigFile != "" {
-			return fmt.Errorf("choose one runtime per process: --team-config or --network-config")
-		}
 		return serveTeam(*teamConfigFile)
 	}
 	if *networkConfigFile != "" {

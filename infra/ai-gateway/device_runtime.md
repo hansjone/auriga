@@ -14,8 +14,8 @@
   "syntheticTenant": "01900000-0000-7000-8000-000000000001",
   "masterKeyFile": "/protected/master.key",
   "store": {"dsn": "", "migrationDsn": "", "maxConnections": 8},
-  "iam": {"Target": "127.0.0.1:19001", "ServiceTokenFile": "/protected/iam.jwt"},
-  "org": {"Target": "127.0.0.1:19002", "ServiceTokenFile": "/protected/org.jwt"},
+  "iam": {"target": "127.0.0.1:19001", "serviceTokenFile": "/protected/iam.jwt"},
+  "org": {"target": "127.0.0.1:19002", "serviceTokenFile": "/protected/org.jwt"},
   "capacity": 64,
   "maxConnections": 64,
   "maxInFlight": 32,
@@ -29,7 +29,7 @@
 
 监听只接受数值 loopback IP；端口 0 表示随机端口，启动日志给出实际地址。无公网、edge 或 TLS
 监听扩展。IAM 和 Org 必须分别配置，可同址；RPC 完整沿用 `team.DialRPC` 的每次读取 service JWT
-和非回环 mTLS 校验。远端 mTLS 另配置 `CertFile`、`KeyFile`、`CAFile`、`ServerName`。
+和非回环 mTLS 校验。远端 mTLS 另配置 `certFile`、`keyFile`、`caFile`、`serverName`。
 身份仍由 DeviceAccess 与 Org 在线核验，不能用 admin 登录或证书代替设备身份。
 
 DSN 使用 `AURIGA_AI_PG_DSN`、`AURIGA_AI_MIGRATION_PG_DSN` 覆盖，master key 使用
@@ -66,12 +66,23 @@ Transport 无 HTTP client、DNS、上游连接、重试或收费调用；真实/
 每次 Execute 前先同步预留固定 cell，满或关闭时 Admit/Transport 为 0。Execute 完成后恰好一次
 finish(nil) 释放，或 finish(Pending) 将原 PendingRef/StopProof 原位交接；交接不访问 PG、扩容或二次排队。
 worker 独立于请求取消，单 worker 轮转这些现场 cell，短 context 重读完整 Ref 和最新 revision 后做 CAS。
-无租户发现、启动/周期盲扫、重派或猜退款。缺行/提交不明/空 Ref/PG 故障均保留 cell，容量可能耗尽。
+无租户发现、启动/周期盲扫、重派或猜退款。带 Ref 的缺行/提交不明/PG 故障保留 cell，容量可能耗尽。
+正常 Execute 返回空 PendingRef 时按未提交释放：Admit 只在 INSERT 成功后赋 result，COMMIT 位于其后；
+只要 result 已赋值，事务失败就带完整 PendingRef。因此正常返回的空 Ref 可证明本事务未提交耐久行，
+Handler 调 finish(nil)，错误响应仍失败关闭。该推理不适用于 panic；panic 可能发生在派发后，
+按独立 Faulted 标记保留 cell 并计故障，不因丢失返回值而虚构未提交或停止证明。
 reserved 取消 fence 旧 dispatch；dispatching 转 unknown；只有实际关闭的现场 channel 才释放 unknown 槽，
 发送值、超时、取消和 Close 均不算停止证明，金额/token 保守留置，usage/outbox 不重复。
 
-停机先关闭 Handler/Supervisor 新准入并取消 HTTP，然后分别以 shutdownMillis 有界排空 HTTP 和恢复；
-已预留调用仍能交接。恢复结束后才关闭 RPC/Store。期限到返回非成功，仅输出未决/故障计数，不暴露 Ref。
+已确认 unknown 持槽且无闭合证明时先本地检查 channel，未关闭不查 PG；首次读取仍须区分可取消的 reserved。
+故障按 cell 指数退避（上限 5 秒）；每轮 PG 预算最多 min(操作期限,50ms)、最多 16 次操作，跨轮轮转，
+新交接以一个合并调度提示优先处理，责任始终在原 cell，不增加责任队列。StopProof 只允许 close，不能 send。
+
+停机先关闭 Handler/Supervisor 新准入，以 shutdownMillis 给 HTTP 优雅完成宽限；之后才取消剩余 HTTP，
+超时则 Close，再以独立 shutdownMillis drain。已预留调用仍能交接。HTTP/恢复均正常完成才关 RPC/Store。
+任一窗口超时都返回非成功，仅输出未决/故障计数，不暴露 Ref；不在错误路径同步调用 pgxpool.Close
+或等待不响应取消的 worker。未决路径的主动等待上界是两个窗口之和（最多120秒，另计调度开销），
+不会再附加等待借出连接归还。CLI 非零退出由进程回收剩余资源；嵌入式调用者须待旧工作退出后收尾，不能复用该 runtime。
 进程退出或崩溃会丢失内存 cell/proof；重启不构造 proof、不重新接管旧责任，durable unknown/slot 仍保守留置。
 本项不承诺跨进程、跨重启责任全覆盖，生产恢复和真实 Transport 需要后续设计。
 
