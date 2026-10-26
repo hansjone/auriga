@@ -67,7 +67,7 @@ func New(c Config) (*Client, error) {
 		if len(h) > 253 || (err != nil && !dnsName.MatchString(h)) || (err == nil && ip.Zone() != "") {
 			return nil, errors.New("invalid upstream configuration")
 		}
-		if err == nil && !safeIP(ip) {
+		if err == nil && !trustedIP(ip) {
 			return nil, errors.New("invalid upstream configuration")
 		}
 		if _, duplicate := v.allowed[h]; duplicate {
@@ -116,6 +116,11 @@ func (c *Client) allows(host string, ip netip.Addr) bool {
 	if !listed {
 		return publicIP(ip)
 	}
+	return trustedIP(ip)
+}
+
+// Use the same deployment trust boundary at construction and connection time.
+func trustedIP(ip netip.Addr) bool {
 	if !ip.IsValid() || ip.Zone() != "" {
 		return false
 	}
