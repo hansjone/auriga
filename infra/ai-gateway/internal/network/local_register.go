@@ -1,57 +1,41 @@
 package network
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 var registrationDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var registrationErrorCode = regexp.MustCompile(`^network\.[a-z][a-z0-9_]{0,63}$`)
+var registrationVersion = regexp.MustCompile(`^1\.(?:0|[1-9][0-9]{0,3})$`)
 
 const localRegisterFields = "app_version type request_id epoch boot_id candidate_local allocation_op_id allocation_fingerprint expected_registration_revision address_type"
 const registerResultFields = "app_version type request_id local registration_id allocation_op_id result registration_revision local_high_water address_type server_auth"
 
-// Only the small, closed objects used by LocalRegister are decoded here. Keys
-// are exact (encoding/json struct matching is case insensitive), unique even
-// after JSON escaping, and the entire input must be one UTF-8 JSON object.
-// Values remain raw; callers validate every allowed nested object separately.
-func registrationObject(raw []byte, required, optional string) (map[string]json.RawMessage, error) {
-	if len(raw) == 0 || len(raw) > EncodingMaxPayloadBytes || !utf8.Valid(raw) {
+// Network consumers preserve unknown optional fields. Extract known names
+// exactly after strict preflight; struct decoding would fold case and allow an
+// unknown optional "TYPE" or "Epoch" to overwrite a known structural field.
+func registrationObject(raw []byte, required string) (map[string]json.RawMessage, error) {
+	if validateRegistrationJSON(raw) != nil {
 		return nil, errUnauthorized
 	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	if token, err := d.Token(); err != nil || token != json.Delim('{') {
-		return nil, errUnauthorized
-	}
-	m := make(map[string]json.RawMessage)
-	allowed := strings.Fields(required + " " + optional)
-	for d.More() {
-		token, err := d.Token()
-		key, ok := token.(string)
-		if err != nil || !ok || !slices.Contains(allowed, key) || m[key] != nil {
-			return nil, errUnauthorized
-		}
-		var value json.RawMessage
-		if d.Decode(&value) != nil {
-			return nil, errUnauthorized
-		}
-		m[key] = value
-	}
-	if token, err := d.Token(); err != nil || token != json.Delim('}') {
-		return nil, errUnauthorized
-	}
-	if _, err := d.Token(); err != io.EOF {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil || m == nil {
 		return nil, errUnauthorized
 	}
 	for _, key := range strings.Fields(required) {
 		if m[key] == nil {
+			return nil, errUnauthorized
+		}
+	}
+	if feature := m["required_features"]; feature != nil {
+		// LocalRegister has no negotiated required-feature extension. Never
+		// silently execute a request/response requiring an unknown capability.
+		var required []string
+		if json.Unmarshal(feature, &required) != nil || required == nil || len(required) != 0 {
 			return nil, errUnauthorized
 		}
 	}
@@ -71,8 +55,8 @@ func registrationNumber(raw json.RawMessage, positive bool) bool {
 }
 
 func decodeLocalRegister(raw []byte) (map[string]json.RawMessage, *AppError) {
-	m, err := registrationObject(raw, localRegisterFields, "")
-	valid := err == nil && registrationString(m["app_version"]) == AppVersion && registrationString(m["type"]) == "local_register"
+	m, err := registrationObject(raw, localRegisterFields)
+	valid := err == nil && registrationVersion.MatchString(registrationString(m["app_version"])) && registrationString(m["type"]) == "local_register"
 	for _, field := range []string{"request_id", "boot_id", "allocation_op_id"} {
 		valid = valid && opaqueID.MatchString(registrationString(m[field]))
 	}
@@ -88,31 +72,31 @@ func decodeLocalRegister(raw []byte) (map[string]json.RawMessage, *AppError) {
 
 // Validate structure/association only. The plugin verifies the cryptographic
 // signature against its trusted keyset; the gateway never re-signs this body.
-func validateRegisterResponse(request, response []byte) error {
+func validateRegisterResponse(b liveBinding, requestID string, request, response []byte) error {
 	q, ae := decodeLocalRegister(request)
 	if ae != nil {
 		return errUnauthorized
 	}
-	var peek struct {
-		Type string `json:"type"`
-	}
-	if json.Unmarshal(response, &peek) != nil {
+	m, err := registrationObject(response, "app_version type request_id server_auth")
+	if err != nil || !registrationVersion.MatchString(registrationString(m["app_version"])) || registrationString(m["request_id"]) != requestID || requestID != registrationString(q["request_id"]) {
 		return errUnauthorized
 	}
-	fields, optional := registerResultFields, ""
-	if peek.Type == "error" {
-		fields, optional = "app_version type request_id code scope retryable retry_after server_auth", "related"
+	fields := registerResultFields
+	kind := registrationString(m["type"])
+	if kind == "error" {
+		fields = "app_version type request_id code scope retryable retry_after server_auth"
 	}
-	m, err := registrationObject(response, fields, optional)
-	if err != nil {
-		return err
+	for _, field := range strings.Fields(fields) {
+		if m[field] == nil {
+			return errUnauthorized
+		}
 	}
-	if peek.Type == "error" {
+	if kind == "error" {
 		if !validRegistrationError(m) {
 			return errUnauthorized
 		}
 	} else {
-		if peek.Type != "register_result" || !opaqueID.MatchString(registrationString(m["registration_id"])) {
+		if kind != "register_result" || !opaqueID.MatchString(registrationString(m["registration_id"])) {
 			return errUnauthorized
 		}
 		for _, field := range []string{"local", "registration_revision", "local_high_water"} {
@@ -125,11 +109,11 @@ func validateRegisterResponse(request, response []byte) error {
 			return errUnauthorized
 		}
 	}
-	return validateRegistrationAuth(m["server_auth"])
+	return validateRegistrationAuth(m["server_auth"], b, requestID)
 }
 
 func validRegistrationError(m map[string]json.RawMessage) bool {
-	// The existing signed Error remains opaque apart from its closed structure;
+	// The existing signed Error remains opaque apart from its known fields;
 	// collab owns error visibility/presentation, as on the other mailbox RPCs.
 	code := registrationString(m["code"])
 	if !registrationErrorCode.MatchString(code) {
@@ -149,12 +133,15 @@ func validRegistrationError(m map[string]json.RawMessage) bool {
 		}
 	}
 	if raw := m["related"]; raw != nil {
-		related, err := registrationObject(raw, "", "recipient_id contact_id message_id contact_scope")
+		related, err := registrationObject(raw, "")
 		if err != nil {
 			return false
 		}
-		for key, value := range related {
-			s := registrationString(value)
+		for _, key := range []string{"recipient_id", "contact_id", "message_id", "contact_scope"} {
+			if related[key] == nil {
+				continue
+			}
+			s := registrationString(related[key])
 			if key == "contact_scope" {
 				if s != "conversation" && s != "human_dialogue" && s != "group_join" {
 					return false
@@ -167,10 +154,14 @@ func validRegistrationError(m map[string]json.RawMessage) bool {
 	return true
 }
 
-func validateRegistrationAuth(raw []byte) error {
-	m, err := registrationObject(raw, "version purpose alg kid issuer_realm issued_at not_after audience request_id channel_nonce keyset_version signature", "")
+func validateRegistrationAuth(raw []byte, b liveBinding, requestID string) error {
+	m, err := registrationObject(raw, "version purpose alg kid issuer_realm issued_at not_after audience request_id channel_nonce keyset_version signature")
 	if err != nil {
 		return err
+	}
+	kid := registrationString(m["kid"])
+	if registrationString(m["alg"]) != "Ed25519" || registrationString(m["purpose"]) != "protocol_response" || !keyID.MatchString(kid) || kid == "stub-unsigned" || registrationString(m["request_id"]) != requestID || !opaqueID.MatchString(registrationString(m["channel_nonce"])) || registrationString(m["channel_nonce"]) != b.ChannelNonce {
+		return errUnauthorized
 	}
 	var version int
 	if json.Unmarshal(m["version"], &version) != nil || version != 1 || !registrationNumber(m["issuer_realm"], true) || !registrationNumber(m["keyset_version"], true) {
@@ -186,7 +177,7 @@ func validateRegistrationAuth(raw []byte) error {
 	if err != nil || len(sig) != 64 || base64.RawURLEncoding.EncodeToString(sig) != signature {
 		return errUnauthorized
 	}
-	audience, err := registrationObject(m["audience"], "realm node incarnation epoch", "")
+	audience, err := registrationObject(m["audience"], "realm node incarnation epoch")
 	if err != nil {
 		return err
 	}
@@ -195,5 +186,8 @@ func validateRegistrationAuth(raw []byte) error {
 			return errUnauthorized
 		}
 	}
-	return nil // Existing mailbox checks bind purpose, IDs, audience and nonce.
+	if registrationString(audience["realm"]) != b.Realm || registrationString(audience["node"]) != b.Node || registrationString(audience["epoch"]) != u64str(b.Epoch) || !opaqueID.MatchString(registrationString(audience["incarnation"])) || registrationString(audience["incarnation"]) != b.Incarnation {
+		return errUnauthorized
+	}
+	return nil
 }

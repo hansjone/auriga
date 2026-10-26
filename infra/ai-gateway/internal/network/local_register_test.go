@@ -1,10 +1,14 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -233,9 +237,9 @@ func TestProductionLocalRegisterRejectsRequest(t *testing.T) {
 		"invalid UTF8":         []byte(strings.Replace(validLocalRegister, "boot-1", "boot-\xff", 1)),
 		"duplicate":            []byte(strings.Replace(validLocalRegister, `"epoch":"42"`, `"epoch":"41","epoch":"42"`, 1)),
 		"escaped duplicate":    []byte(strings.Replace(validLocalRegister, `"epoch":"42"`, `"ep\u006fch":"41","epoch":"42"`, 1)),
-		"extra":                []byte(strings.Replace(validLocalRegister, `"boot_id"`, `"tenant":"forged","boot_id"`, 1)),
-		"empty key":            []byte(strings.Replace(validLocalRegister, `"boot_id"`, `"":"forged","boot_id"`, 1)),
-		"combined key":         []byte(strings.Replace(validLocalRegister, `"boot_id"`, `"app_version type":"forged","boot_id"`, 1)),
+		"unknown action":       []byte(strings.Replace(validLocalRegister, `"local_register"`, `"contact_assign"`, 1)),
+		"optional decimal":     registrationExtension(`{"number":1.0}`),
+		"optional exponent":    registrationExtension(`{"number":1e0}`),
 		"case variant":         []byte(strings.Replace(validLocalRegister, `"boot_id"`, `"Boot_id"`, 1)),
 		"trailing object":      []byte(validLocalRegister + `{}`),
 		"trailing token":       []byte(validLocalRegister + `true`),
@@ -315,9 +319,9 @@ func TestProductionLocalRegisterRejectsResponse(t *testing.T) {
 		"zero revision":       func(m map[string]any) { m["registration_revision"] = "0" },
 		"overflow high water": func(m map[string]any) { m["local_high_water"] = "18446744073709551616" },
 		"unknown result":      func(m map[string]any) { m["result"] = "created" },
-		"top epoch":           func(m map[string]any) { m["epoch"] = "42" },
-		"top boot":            func(m map[string]any) { m["boot_id"] = "boot-1" },
-		"top fingerprint":     func(m map[string]any) { m["allocation_fingerprint"] = "sha256:invalid" },
+		"wrong major":         func(m map[string]any) { m["app_version"] = "2.0" },
+		"bad minor format":    func(m map[string]any) { m["app_version"] = "1.01" },
+		"unknown category":    func(m map[string]any) { m["address_type"] = "system" },
 	}
 	for _, field := range strings.Fields(registerResultFields) {
 		key := field
@@ -334,7 +338,7 @@ func TestProductionLocalRegisterRejectsResponse(t *testing.T) {
 		"nonce":             func(a map[string]any) { a["channel_nonce"] = "other-nonce" },
 		"auth request":      func(a map[string]any) { a["request_id"] = "other-request" },
 		"null auth request": func(a map[string]any) { a["request_id"] = nil },
-		"extra auth":        func(a map[string]any) { a["trusted"] = true },
+		"null purpose":      func(a map[string]any) { a["purpose"] = nil },
 		"auth version":      func(a map[string]any) { a["version"] = 2 },
 		"missing auth time": func(a map[string]any) { delete(a, "issued_at") },
 		"bad auth time":     func(a map[string]any) { a["not_after"] = "tomorrow" },
@@ -347,8 +351,8 @@ func TestProductionLocalRegisterRejectsResponse(t *testing.T) {
 		changes["wrong audience "+key] = func(m map[string]any) { m["server_auth"].(map[string]any)["audience"].(map[string]any)[key] = "123" }
 		changes["missing audience "+key] = func(m map[string]any) { delete(m["server_auth"].(map[string]any)["audience"].(map[string]any), key) }
 	}
-	changes["extra audience"] = func(m map[string]any) {
-		m["server_auth"].(map[string]any)["audience"].(map[string]any)["tenant"] = "forged"
+	changes["numeric audience epoch"] = func(m map[string]any) {
+		m["server_auth"].(map[string]any)["audience"].(map[string]any)["epoch"] = 42
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {
@@ -678,4 +682,470 @@ func TestProductionLocalRegisterConsumerOwnsCryptographicVerification(t *testing
 		t.Fatal("incorrect signature passed consumer verification")
 	}
 	assertRegistrationCounts(t, run, f, p, b, 2, 1)
+}
+
+func TestProductionLocalRegisterConsumerExtensions(t *testing.T) {
+	for _, variant := range []string{"minor version", "maximum minor", "upstream extensions", "result extensions", "auth extensions", "audience extensions", "error extensions", "case shadows", "empty required features"} {
+		t.Run(variant, func(t *testing.T) {
+			f := &fakeMailboxRPC{}
+			run, nc, down, b, cfg := localRegisterFixture(t, f)
+			p := registrationPublicationCounter(run)
+			q := decodeObject(t, []byte(validLocalRegister))
+			ext := map[string]any{"objects": []any{nil, true, map[string]any{"text": "汉😀", "number": -9007199254740991}}, "list": []any{1, 2}}
+			switch variant {
+			case "minor version":
+				q["app_version"] = "1.1"
+			case "maximum minor":
+				q["app_version"] = "1.9999"
+			case "upstream extensions":
+				q["future"], q["tenant"], q["node"] = ext, "forged", "999"
+				q[""], q["app_version type"] = ext, ext
+			case "case shadows":
+				q["TYPE"], q["App_version"], q["EPOCH"] = "send", "2.0", "0"
+			case "empty required features":
+				q["required_features"] = []any{}
+			}
+			raw := marshalRegister(t, q)
+			m := decodeObject(t, signedRegisterResult(t, cfg.ProtocolSigning, b, raw))
+			switch variant {
+			case "minor version":
+				m["app_version"], m["future"] = "1.1", ext
+			case "maximum minor":
+				m["app_version"] = "1.9999"
+			case "result extensions":
+				m["future"], m["epoch"], m["boot_id"], m["allocation_fingerprint"] = ext, "optional", "optional", "optional"
+			case "auth extensions":
+				m["server_auth"].(map[string]any)["future"] = ext
+			case "audience extensions":
+				m["server_auth"].(map[string]any)["audience"].(map[string]any)["tenant"] = ext
+			case "error extensions":
+				errorRaw, err := run.mailbox.signer.encode(b, "req-1", &AppError{Code: CodeConflict, Scope: "request"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				m = decodeObject(t, errorRaw)
+				m["app_version"], m["future"] = "1.1", ext
+				m["related"] = map[string]any{"recipient_id": "r-1", "future": ext}
+				m["server_auth"].(map[string]any)["future"] = ext
+				m["server_auth"].(map[string]any)["audience"].(map[string]any)["future"] = ext
+			case "case shadows":
+				m["TYPE"], m["App_version"], m["Request_id"] = "assign_result", "2.0", "other"
+				a := m["server_auth"].(map[string]any)
+				a["Purpose"], a["Channel_nonce"], a["Request_id"] = "management_state", "other", "other"
+				a["audience"].(map[string]any)["Epoch"] = "0"
+			case "empty required features":
+				m["required_features"] = []any{}
+			}
+			response := resignRegistration(t, cfg.ProtocolSigning, m)
+			if variant == "case shadows" {
+				// Force aliases AFTER known names at every object level. A struct
+				// decoder would overwrite known fields; the JCS signature is intact.
+				raw = reverseRegistrationKeys(t, q)
+				response = reverseRegistrationKeys(t, decodeObject(t, response))
+			}
+			verifyErrorSignature(t, cfg.ProtocolSigning, response)
+			f.mu.Lock()
+			f.response = response
+			f.mu.Unlock()
+			publishRegistration(t, nc, b, raw)
+			msg, err := down.NextMsg(time.Second)
+			if err != nil || string(msg.Data) != string(response) {
+				t.Fatalf("compatible extension changed/rejected: %v %v", msg, err)
+			}
+			verifyErrorSignature(t, cfg.ProtocolSigning, msg.Data)
+			assertRegistrationCounts(t, run, f, p, b, 2, 1)
+			f.mu.Lock()
+			if string(f.frames[1]) != string(raw) || f.identities[1].TenantId != b.Tenant || f.identities[1].Node != b.Node {
+				t.Error("extension altered bytes/trusted identity")
+			}
+			f.mu.Unlock()
+		})
+	}
+}
+
+func reverseRegistrationKeys(t *testing.T, value any) []byte {
+	t.Helper()
+	switch v := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Sort(sort.Reverse(sort.StringSlice(keys)))
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			quoted, err := json.Marshal(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts = append(parts, string(quoted)+":"+string(reverseRegistrationKeys(t, v[key])))
+		}
+		return []byte("{" + strings.Join(parts, ",") + "}")
+	case []any:
+		parts := make([]string, len(v))
+		for i, item := range v {
+			parts[i] = string(reverseRegistrationKeys(t, item))
+		}
+		return []byte("[" + strings.Join(parts, ",") + "]")
+	default:
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+}
+
+func registrationExtension(extension string) []byte {
+	base := strings.TrimSpace(validLocalRegister)
+	return []byte(base[:len(base)-1] + `,"future":` + extension + `}`)
+}
+
+func readRegistrationFixture(t *testing.T, name string, out any) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "contracts", "network", "fixtures", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func registrationMembers(n int) string {
+	members := make([]string, n)
+	for i := range members {
+		members[i] = `"k` + u64str(uint64(i)) + `":0`
+	}
+	return "{" + strings.Join(members, ",") + "}"
+}
+
+func registrationValueTree(branches, members, lastMembers int) string {
+	parts := make([]string, branches)
+	for i := range parts {
+		n := members
+		if i == branches-1 {
+			n = lastMembers
+		}
+		parts[i] = registrationMembers(n)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func TestLocalRegisterSharedRawFixtures(t *testing.T) {
+	type rawCase struct {
+		Name         string
+		Base         string
+		Replace      []string
+		Append       string
+		RepeatAppend int
+		Nest         int
+		Members      int
+	}
+	var rawCases struct {
+		Cases  []rawCase
+		Accept []rawCase
+	}
+	var frames struct {
+		Frames map[string]struct{ Value json.RawMessage }
+	}
+	readRegistrationFixture(t, "raw-cases.json", &rawCases)
+	readRegistrationFixture(t, "frames.json", &frames)
+	check := func(c rawCase, accept bool) {
+		t.Run(c.Name, func(t *testing.T) {
+			var raw string
+			switch {
+			case c.Nest != 0:
+				raw = strings.Repeat("[", c.Nest) + strings.Repeat("]", c.Nest)
+			case c.Members != 0:
+				raw = registrationMembers(c.Members)
+			default:
+				var compact bytes.Buffer
+				if err := json.Compact(&compact, frames.Frames[c.Base].Value); err != nil {
+					t.Fatal(err)
+				}
+				raw = compact.String()
+				if len(c.Replace) != 0 {
+					if !strings.Contains(raw, c.Replace[0]) {
+						t.Fatalf("shared fixture replacement not found: %q", c.Replace[0])
+					}
+					raw = strings.Replace(raw, c.Replace[0], c.Replace[1], 1)
+				}
+				raw += strings.Repeat(c.Append, max(c.RepeatAppend, 1))
+			}
+			err := validateRegistrationJSON([]byte(raw))
+			if accept && err != nil || !accept && err != errUnauthorized {
+				t.Fatalf("accepted=%v want=%v error=%v", err == nil, accept, err)
+			}
+		})
+	}
+	for _, c := range rawCases.Cases {
+		check(c, false)
+	}
+	for _, c := range rawCases.Accept {
+		check(c, true)
+	}
+	var boundaries struct {
+		Cases []struct {
+			Name        string
+			Kind        string
+			Unit        string
+			Repeat      int
+			Suffix      string
+			Containers  int
+			Branches    int
+			Members     int
+			LastMembers int
+			Accept      bool
+		}
+	}
+	readRegistrationFixture(t, "raw-boundaries.json", &boundaries)
+	for _, c := range boundaries.Cases {
+		t.Run(c.Name, func(t *testing.T) {
+			var raw string
+			switch c.Kind {
+			case "string", "key":
+				s, err := json.Marshal(strings.Repeat(c.Unit, c.Repeat) + c.Suffix)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw = string(s)
+				if c.Kind == "key" {
+					raw = "{" + raw + ":0}"
+				}
+			case "nestedScalar":
+				raw = strings.Repeat("[", c.Containers) + "0" + strings.Repeat("]", c.Containers)
+			case "nestedEmpty":
+				raw = strings.Repeat("[", c.Containers) + strings.Repeat("]", c.Containers)
+			case "valueTree":
+				raw = registrationValueTree(c.Branches, c.Members, c.LastMembers)
+			default:
+				t.Fatal("unhandled shared boundary kind", c.Kind)
+			}
+			err := validateRegistrationJSON([]byte(raw))
+			if c.Accept && err != nil || !c.Accept && err != errUnauthorized {
+				t.Fatalf("accepted=%v want=%v error=%v", err == nil, c.Accept, err)
+			}
+		})
+	}
+}
+
+func TestProductionLocalRegisterRejectsUnknownRaw(t *testing.T) {
+	for name, extension := range map[string]string{
+		"nested duplicate":   `{"nested":[{"k":1,"k":2}]}`,
+		"escaped duplicate":  `{"nested":{"key":1,"k\u0065y":2}}`,
+		"high surrogate":     `{"text":"\ud800"}`,
+		"low surrogate":      `{"text":"\udc00"}`,
+		"bad surrogate pair": `{"text":"\ud800\u0041"}`,
+		"raw control":        "{\"text\":\"a\x01b\"}",
+		"invalid UTF8":       "{\"text\":\"a\xffb\"}",
+		"unsafe positive":    `{"number":9007199254740992}`,
+		"unsafe negative":    `{"number":-9007199254740992}`,
+		"decimal":            `{"number":1.0}`,
+		"fraction":           `{"number":0.5}`,
+		"exponent":           `{"number":1e0}`,
+		"NaN":                `{"number":NaN}`,
+		"depth":              strings.Repeat("[", 15) + "0" + strings.Repeat("]", 15),
+		"object members":     registrationMembers(129),
+		"array items":        "[" + strings.Repeat("0,", 256) + "0]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeMailboxRPC{}
+			run, nc, down, b, cfg := localRegisterFixture(t, f)
+			p := registrationPublicationCounter(run)
+			raw := registrationExtension(extension)
+			publishRegistration(t, nc, b, raw)
+			var requestID any = "req-1"
+			if name == "raw control" || name == "NaN" {
+				requestID = nil
+			}
+			expectRegistrationError(t, down, cfg.ProtocolSigning, b, CodeProtocolError, requestID)
+			assertRegistrationCounts(t, run, f, p, b, 1, 1)
+		})
+	}
+}
+
+func TestProductionLocalRegisterRejectsVersionAndRequirements(t *testing.T) {
+	for _, direction := range []string{"request", "response"} {
+		cases := map[string]any{
+			"wrong major": "2.0", "zero major": "0.1", "leading major": "01.1", "leading minor": "1.01", "too long minor": "1.10000",
+			"missing minor": "1.", "no minor": "1", "patch version": "1.1.0", "negative minor": "1.-1", "space": "1.1 ", "numeric": 1, "null": nil,
+		}
+		for name, version := range cases {
+			t.Run(direction+"/"+name, func(t *testing.T) {
+				f := &fakeMailboxRPC{}
+				run, nc, down, b, cfg := localRegisterFixture(t, f)
+				p := registrationPublicationCounter(run)
+				q := decodeObject(t, []byte(validLocalRegister))
+				m := decodeObject(t, signedRegisterResult(t, cfg.ProtocolSigning, b, []byte(validLocalRegister)))
+				calls := 2
+				if direction == "request" {
+					q["app_version"] = version
+					calls = 1
+				} else {
+					m["app_version"] = version
+				}
+				f.mu.Lock()
+				f.response = resignRegistration(t, cfg.ProtocolSigning, m)
+				f.mu.Unlock()
+				publishRegistration(t, nc, b, marshalRegister(t, q))
+				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+				assertRegistrationCounts(t, run, f, p, b, calls, 1)
+			})
+		}
+		for _, required := range []any{[]any{"unknown_feature_v1"}, "unknown_feature_v1", nil} {
+			t.Run(direction+"/required-feature-"+string(reverseRegistrationKeys(t, required)), func(t *testing.T) {
+				f := &fakeMailboxRPC{}
+				run, nc, down, b, cfg := localRegisterFixture(t, f)
+				p := registrationPublicationCounter(run)
+				q := decodeObject(t, []byte(validLocalRegister))
+				m := decodeObject(t, signedRegisterResult(t, cfg.ProtocolSigning, b, []byte(validLocalRegister)))
+				calls := 2
+				if direction == "request" {
+					q["required_features"] = required
+					calls = 1
+				} else {
+					m["required_features"] = required
+				}
+				f.mu.Lock()
+				f.response = resignRegistration(t, cfg.ProtocolSigning, m)
+				f.mu.Unlock()
+				publishRegistration(t, nc, b, marshalRegister(t, q))
+				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+				assertRegistrationCounts(t, run, f, p, b, calls, 1)
+			})
+		}
+	}
+}
+
+func TestProductionLocalRegisterRejectsUnknownResponseRaw(t *testing.T) {
+	for _, location := range []string{"result", "auth", "audience", "error related"} {
+		for _, extension := range []string{`{"a":0,"\u0061":1}`, `{"a":"\ud800"}`, `{"a":1e0}`, `{"a":9007199254740992}`} {
+			t.Run(location+"/"+extension, func(t *testing.T) {
+				f := &fakeMailboxRPC{}
+				run, nc, down, b, cfg := localRegisterFixture(t, f)
+				p := registrationPublicationCounter(run)
+				response := string(signedRegisterResult(t, cfg.ProtocolSigning, b, []byte(validLocalRegister)))
+				switch location {
+				case "result":
+					response = strings.Replace(response, `"server_auth":`, `"future":`+extension+`,"server_auth":`, 1)
+				case "auth":
+					response = strings.Replace(response, `"signature":`, `"future":`+extension+`,"signature":`, 1)
+				case "audience":
+					response = strings.Replace(response, `"epoch":"42"`, `"future":`+extension+`,"epoch":"42"`, 1)
+				case "error related":
+					raw, err := run.mailbox.signer.encode(b, "req-1", &AppError{Code: CodeConflict, Scope: "request"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					response = strings.Replace(string(raw), `"code":`, `"related":{"future":`+extension+`},"code":`, 1)
+				}
+				f.mu.Lock()
+				f.response = []byte(response)
+				f.mu.Unlock()
+				publishRegistration(t, nc, b, []byte(validLocalRegister))
+				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+				assertRegistrationCounts(t, run, f, p, b, 2, 1)
+			})
+		}
+	}
+}
+
+func TestProductionLocalRegisterRawBudget(t *testing.T) {
+	zeros := func(n int) string { return "[" + strings.Repeat("0,", n-1) + "0]" }
+	values := func(last int) string {
+		parts := make([]string, 32)
+		for i := range parts {
+			parts[i] = zeros(256)
+		}
+		parts[31] = zeros(last)
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+	for _, tc := range []struct {
+		name, extension string
+		accept          bool
+	}{
+		{"depth16", strings.Repeat("[", 14) + "0" + strings.Repeat("]", 14), true},
+		{"depth17", strings.Repeat("[", 15) + "0" + strings.Repeat("]", 15), false},
+		{"members128", registrationMembers(128), true},
+		{"members129", registrationMembers(129), false},
+		{"array256", zeros(256), true},
+		{"array257", zeros(257), false},
+		{"string16384", `"` + strings.Repeat(`\u6c49`, 5461) + `a"`, true},
+		{"string16385", `"` + strings.Repeat(`\u6c49`, 5461) + `ab"`, false},
+		{"astral16384", `"` + strings.Repeat(`\ud83d\ude00`, 4096) + `"`, true},
+		{"values8192", values(212), true},
+		{"values8193", values(213), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeMailboxRPC{}
+			run, _, down, b, cfg := localRegisterFixture(t, f)
+			p := registrationPublicationCounter(run)
+			raw := registrationExtension(tc.extension)
+			response := signedRegisterResult(t, cfg.ProtocolSigning, b, []byte(validLocalRegister))
+			f.mu.Lock()
+			f.response = response
+			f.mu.Unlock()
+			// Large vectors exceed this fixture client's existing 4KiB broker
+			// cap. Exercise the production callback and real gRPC/down NATS path.
+			run.mailbox.receive(&nats.Msg{Subject: UpSubject(b.Ingress), Data: raw})
+			calls := 1
+			if tc.accept {
+				calls = 2
+				msg, err := down.NextMsg(time.Second)
+				if err != nil || string(msg.Data) != string(response) {
+					t.Fatalf("boundary response=%v err=%v", msg, err)
+				}
+			} else {
+				expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+			}
+			assertRegistrationCounts(t, run, f, p, b, calls, 1)
+		})
+	}
+}
+
+func TestProductionLocalRegisterKnownFieldsCannotBeReplaced(t *testing.T) {
+	for _, direction := range []string{"request", "response"} {
+		t.Run(direction, func(t *testing.T) {
+			f := &fakeMailboxRPC{}
+			run, nc, down, b, cfg := localRegisterFixture(t, f)
+			p := registrationPublicationCounter(run)
+			q := decodeObject(t, []byte(validLocalRegister))
+			m := decodeObject(t, signedRegisterResult(t, cfg.ProtocolSigning, b, []byte(validLocalRegister)))
+			calls := 2
+			if direction == "request" {
+				q["candidate_local"], q["Candidate_local"], q["Request_id"] = "0", "18446744073709551615", "other-request"
+				calls = 1
+			} else {
+				m["allocation_op_id"], m["Allocation_op_id"] = "wrong-op", "Op-1:A"
+			}
+			f.mu.Lock()
+			f.response = reverseRegistrationKeys(t, decodeObject(t, resignRegistration(t, cfg.ProtocolSigning, m)))
+			f.mu.Unlock()
+			publishRegistration(t, nc, b, reverseRegistrationKeys(t, q))
+			expectRegistrationCode(t, down, cfg.ProtocolSigning, b, CodeProtocolError)
+			assertRegistrationCounts(t, run, f, p, b, calls, 1)
+		})
+	}
+}
+
+func TestLocalRegisterCompatibilityDoesNotChangeOriginalOperations(t *testing.T) {
+	cfg := signingFixture(t)
+	b := liveBinding{Realm: "2", Node: "64", Incarnation: "inc-1", Epoch: 42, ChannelNonce: "nonce-1", NotAfter: time.Now().Add(time.Hour)}
+	for _, op := range []string{"ready", "head", "fetch", "receipt"} {
+		t.Run(op, func(t *testing.T) {
+			requestID := "req-1"
+			if op == "head" {
+				requestID = ""
+			}
+			response := decodeObject(t, signedMailboxFrame(t, cfg, op, b, requestID))
+			response["app_version"] = "1.1"
+			if _, err := validateMailboxResponse(b, op, requestID, []byte(validMailboxFetch), marshalRegister(t, response)); err != errUnauthorized {
+				t.Fatalf("original %s version policy changed: %v", op, err)
+			}
+		})
+	}
+	if _, _, ae := mailboxOperation([]byte(strings.Replace(validMailboxFetch, `"app_version":"1.0"`, `"app_version":"1.1"`, 1)), false); ae == nil || ae.Code != CodeProtocolError {
+		t.Fatalf("original FETCH upstream version policy changed: %v", ae)
+	}
 }

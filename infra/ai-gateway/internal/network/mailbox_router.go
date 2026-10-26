@@ -311,6 +311,14 @@ func mailboxOperation(raw []byte, head bool) (string, string, *AppError) {
 	if len(raw) == 0 || len(raw) > EncodingMaxPayloadBytes {
 		return "", "", protocolError("", "frame size")
 	}
+	var registration map[string]json.RawMessage
+	if json.Unmarshal(raw, &registration) == nil && registrationString(registration["type"]) == "local_register" {
+		q, ae := decodeLocalRegister(raw)
+		if ae != nil {
+			return "", registrationString(registration["request_id"]), ae
+		}
+		return "local_register", registrationString(q["request_id"]), nil
+	}
 	var envelope struct {
 		AppVersion   string `json:"app_version"`
 		Type         string `json:"type"`
@@ -323,10 +331,6 @@ func mailboxOperation(raw []byte, head bool) (string, string, *AppError) {
 	if envelope.Type == "ready" {
 		if !opaqueID.MatchString(envelope.ChannelNonce) {
 			return "", envelope.RequestID, protocolError(envelope.RequestID, "channel nonce")
-		}
-	} else if envelope.Type == "local_register" {
-		if _, ae := decodeLocalRegister(raw); ae != nil {
-			return "", envelope.RequestID, ae
 		}
 	} else if _, ae := DecodeUpstream(raw); ae != nil {
 		return "", envelope.RequestID, ae
@@ -364,14 +368,14 @@ type mailboxResponse struct {
 }
 
 func validateMailboxResponse(b liveBinding, operation, requestID string, request, response []byte) (liveBinding, error) {
-	if operation == "local_register" && validateRegisterResponse(request, response) != nil {
-		return b, errUnauthorized
+	if operation == "local_register" {
+		return b, validateRegisterResponse(b, requestID, request, response)
 	}
 	var frame mailboxResponse
 	if json.Unmarshal(response, &frame) != nil || frame.AppVersion != AppVersion {
 		return b, errUnauthorized
 	}
-	expected := map[string]string{"ready": "ready_result", "head": "head", "fetch": "fetch_result", "receipt": "receipt_committed", "local_register": "register_result"}[operation]
+	expected := map[string]string{"ready": "ready_result", "head": "head", "fetch": "fetch_result", "receipt": "receipt_committed"}[operation]
 	if frame.Type != expected && frame.Type != "error" {
 		return b, errUnauthorized
 	}
@@ -446,7 +450,12 @@ func (r *mailboxRouter) writeError(b liveBinding, raw []byte, ae *AppError) {
 		Nonce     string `json:"channel_nonce"`
 	}
 	if len(raw) <= EncodingMaxPayloadBytes {
-		_ = json.Unmarshal(raw, &request)
+		var registration map[string]json.RawMessage
+		if json.Unmarshal(raw, &registration) == nil && registrationString(registration["type"]) == "local_register" {
+			request.RequestID, request.Type = registrationString(registration["request_id"]), "local_register"
+		} else {
+			_ = json.Unmarshal(raw, &request)
+		}
 	}
 	if b.Epoch == 0 && request.Type == "ready" && opaqueID.MatchString(request.Nonce) {
 		b.ChannelNonce = request.Nonce
