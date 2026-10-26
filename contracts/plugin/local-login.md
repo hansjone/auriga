@@ -4,6 +4,14 @@
 
 安装者在 `auriga-dsh` loader row 的 `config.connect` 写 ConnectConfig；未配置时保留独立模式壳。只接受受信 HTTPS 平台纯 origin，`allowLocalHttp=true` 仅准本机隔离测试。issuer 必须同 origin，JWKS 固定取 issuer + `/oauth2/jwks`，不消费 JWT 自带的远端 key URL。`clientId` 必须由 IAM 登记 nativeConnect 公共设备客户端，providerId 必须是真实 team-account。
 
+可选 `config.connect.network` 是安装者提供的静态安装配置：`{realm,wssUrl,roots:[{kid,public_key_spki}]}`。存在时三项全部必需，各层拒绝未知字段。realm 是 1..18446744073709551615 的无前导零十进制字符串；roots 为 1..16 项，kid 使用 `[A-Za-z0-9._-]{1,128}` 且不得重复。公钥沿已有 `trust/keyset.js#publicKey` 导入、核对 Ed25519 算法并重导出比较，必须是规范无填充 base64url SPKI DER，拒绝坏 DER、非 Ed25519、私钥和 PEM。JSON Schema 检查形状，重复 kid 和公钥算法/DER 的语义检查由真实 parser 强制；SPKI 本身就是 pin，不另要求 fingerprint。
+
+完整固定 `wssUrl` 默认例子为 `wss://portal.example.com/net/v1/ws`；支持安装自定义路径、独立主机和端口、HTTPS IP 部署，不限制为同 origin 或公网 DNS。拒绝 userinfo、query、hash 和非 wss；`allowLocalHttp` 仍仅适用于原有 loopback HTTP 隔离测试，不允许 ws 或关闭 TLS。platformOrigin/issuer 的同 origin HTTPS 规则不变。
+
+唯一权威来源是 loader row；平台解析后复制并冻结 network、roots 和每项公钥，只由 `local/runtime → createNetworkLifecycle → 受信 provider.prepare({accessToken,signal,installation})` 传递。HTTP 登录输入、浏览器设置、模型、SDK、首次 keyset 或远端 rootUrl 均不能覆盖安装根，不接受 TOFU、skipVerify、initialize、created。静态 realm/root 不替代未来 IAM 登记、keyset 与 announcement 的在线一致性核验。缺省没有测试根；已有测试 provider 可继续不带 installation 工作。类型由 `scripts/gen-connect-config.mjs` 随 `gen:steps` 正常生成。
+
+配置单独存在不 attach provider，不调用网络 register/tickets/keys、不打开 transport、不创建或初始化 network ledger、不注册 SEND 或产授权事件。无 provider 时仍为 unconfigured；本配置交付不实现生产 provider、runtime allports、首次 READY incarnation bootstrap 或真实双 DSH 通信。
+
 本地路由前缀 `/auriga/local-login`：
 
 - GET `/status`：保持原生 DSH 启动 cookie/Peer 的认证，再创建当前进程的登录尝试。返回 Status，浏览器只得到会话 CSRF；尝试 cookie 为 HttpOnly/SameSite=Strict、300 秒。

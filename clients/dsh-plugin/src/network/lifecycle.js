@@ -3,12 +3,13 @@ import { networkIsolation } from './isolation.js';
 
 /** Provider lifetime and login lifetime are independent. Late register/prepare
  * responses cannot resurrect an old login or a disposed native provider.
- * @param {{directory:string,ctx:any,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void,backoff?:{baseMs:number,maxMs:number}}} options */
+ * @param {{directory:string,ctx:any,installation?:import('./runtime-types.js').NetworkInstallation,getAccess:()=>Promise<string>,authorizeLocal:(context:unknown)=>Promise<boolean>,open?:typeof openNetworkRuntime,onRevoked?:()=>void,backoff?:{baseMs:number,maxMs:number}}} options */
 export function createNetworkLifecycle(options) {
+  const installation = options.installation;
   let authenticated = false;
   let disposed = false;
   let generation = 0;
-  /** @type {any} */
+  /** @type {import('./runtime-types.js').NetworkProvider|undefined} */
   let provider;
   /** @type {Awaited<ReturnType<typeof openNetworkRuntime>>|undefined} */
   let runtime;
@@ -66,6 +67,7 @@ export function createNetworkLifecycle(options) {
           const prepared = await currentProvider.prepare({
             accessToken,
             signal: abort.signal,
+            installation,
           });
           if (!valid()) return;
           candidate = await (options.open ?? openNetworkRuntime)({
@@ -148,7 +150,7 @@ export function createNetworkLifecycle(options) {
   }
   return {
     /** Cordis-owned trusted provider; not a serialized plugin configuration.
-     * @param {any} value */
+     * @param {import('./runtime-types.js').NetworkProvider} value */
     attach(value) {
       if (disposed) throw new Error('network lifecycle closed');
       provider = value;

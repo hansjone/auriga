@@ -1,9 +1,11 @@
 /* global Headers, AbortSignal */
 import { createPublicKey, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
+import { networkInstallation } from '../network/installation.js';
 
 /** Installation-owned origin. No URL, issuer or redirect is accepted from UI/model input.
- * @param {any} input */
+ * @param {any} input
+ * @returns {Readonly<Omit<import('../generated/connect-config.js').ConnectConfig,'network'>> & {readonly network?:import('../network/runtime-types.js').NetworkInstallation}} */
 export function platformConfig(input) {
   if (
     !input ||
@@ -18,6 +20,7 @@ export function platformConfig(input) {
           'providerId',
           'deviceName',
           'allowLocalHttp',
+          'network',
         ].includes(k),
     )
   )
@@ -62,6 +65,9 @@ export function platformConfig(input) {
     ...input,
     platformOrigin: url.origin,
     issuer: input.issuer.replace(/\/$/, ''),
+    ...(Object.hasOwn(input, 'network')
+      ? { network: networkInstallation(input.network) }
+      : {}),
   });
 }
 
