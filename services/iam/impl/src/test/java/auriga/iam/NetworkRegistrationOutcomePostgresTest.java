@@ -14,6 +14,8 @@ import auriga.testsupport.PostgresExtension;
 import com.nimbusds.jose.jwk.*;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -216,7 +218,12 @@ class NetworkRegistrationOutcomePostgresTest {
     assertEquals("no-cache", response.getHeader("Pragma"));
     assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
     var json = Json.read(response.getContentAsString());
-    new ContractSchemas().validate("network/register-result.schema.json", json);
+    new ContractSchemas()
+        .config(
+            Json.MAPPER.readTree(
+                Files.readString(
+                    Path.of("../../../contracts/network/register-result.schema.json"))),
+            json);
     assertEquals(6, json.size());
     assertTrue(json.path("created").isBoolean());
     return json;
@@ -545,8 +552,13 @@ class NetworkRegistrationOutcomePostgresTest {
                     ? device
                     : table.equals("account")
                         ? account.toString()
-                        : session.session().path("sessionId").asString();
-            var row = store.get(table, id, true);
+                        : session.session().path("id").asString();
+            var row =
+                table.equals("session") ? store.byId(table, id, true) : store.get(table, id, true);
+            assertNotNull(row, "expected persisted " + table + " fixture");
+            if (table.equals("session"))
+              assertEquals(
+                  session.session().path("sessionId").asString(), row.path("sessionId").asString());
             if (table.equals("account")) row.put("status", "disabled");
             else if (kind.equals("expired-session"))
               row.put("idleExpiresAt", clock.instant().minusSeconds(1).toString());
