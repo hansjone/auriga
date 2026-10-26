@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/register-result.schema.json",
+  "title": "Network register result",
+  "description": "Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tenant", "realm", "node", "device", "systemAddress", "created"],
+  "properties": {
+    "tenant": { "type": "string", "format": "uuid" },
+    "realm": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+    "node": { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" },
+    "device": { "type": "string", "format": "uuid" },
+    "systemAddress": { "type": "string", "pattern": "^aur1:[1-9a-f][0-9a-f]{0,15}\\.[1-9a-f][0-9a-f]{0,15}\\.0$" },
+    "created": {
+      "type": "boolean",
+      "description": "true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission."
+    }
+  }
+}
