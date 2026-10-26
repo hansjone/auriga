@@ -285,6 +285,125 @@ public class NetworkMailboxWireService {
             });
   }
 
+  public String localRegister(NetworkAuthorityConnection c, byte[] bytes) {
+    var request = frame(bytes, "LocalRegister");
+    NetworkAuthorityClient.binding(c);
+    Instant deadline = source.verify(c); // Reject inherited transactions before any IAM/mutation.
+    UUID tenant = TenantContext.require();
+    var before = tx.execute(status -> read(c, false));
+    require(before != null, NetworkErrors.STALE_EPOCH);
+    require(bindingJson(c).equals(before.get("wire_binding_json")), NetworkErrors.STALE_EPOCH);
+    require("ready".equals(before.get("wire_status")), RECOVERY);
+    var target = target(c, before, request.path("request_id").asString(), deadline);
+    registrationAssociation(c, request, before, before, target);
+    NetworkWireCapabilities.verify(
+        NetworkJson.parse(before.get("wire_ready_json").toString()), broadcast);
+    return source.withTarget(
+        c,
+        target,
+        broadcast,
+        () -> {
+          var decision =
+              mailbox.authorizeTarget(
+                  tenant,
+                  c.getRealm(),
+                  c.getNode(),
+                  Set.of(auriga.iam.api.NetworkAuthority.Operation.CONNECT));
+          // Registry owns its commit and diagnostic outcome. Never wrap it in associated()'s tx.
+          var registration =
+              locals.register(
+                  tenant,
+                  NetworkJson.canonical(request),
+                  () ->
+                      mailbox.withDecision(
+                          decision,
+                          () -> {
+                            registrationAssociation(c, request, before, locked(c), target);
+                            return null;
+                          }));
+          // A crash/signing failure here leaves the witness committed; the original op recovers it.
+          // Recheck revocation outside PG, retaining the original decision's lifetime as well.
+          Instant currentDeadline = source.verify(c);
+          var currentDecision =
+              mailbox.authorizeTarget(
+                  tenant,
+                  c.getRealm(),
+                  c.getNode(),
+                  Set.of(auriga.iam.api.NetworkAuthority.Operation.CONNECT));
+          Instant signingDeadline =
+              Collections.min(
+                  List.of(deadline, currentDeadline, decision.deadline, currentDecision.deadline));
+          var audience = target(c, before, target.requestId(), signingDeadline);
+          String response =
+              tx.execute(
+                  status -> {
+                    registrationAssociation(c, request, before, locked(c), target);
+                    var durable =
+                        locals.requireRegistered(
+                            tenant,
+                            c.getRealm(),
+                            c.getNode(),
+                            registration.local(),
+                            registration.registrationId(),
+                            registration.allocationFingerprint());
+                    require(
+                        durable.allocationOpId().equals(registration.allocationOpId())
+                            && durable.addressType().equals(registration.addressType())
+                            && durable
+                                .registrationRevision()
+                                .equals(registration.registrationRevision())
+                            && durable.localHighWater().equals(registration.localHighWater())
+                            && durable.grantedEpoch() == registration.grantedEpoch()
+                            && durable.grantedBootId().equals(registration.grantedBootId()),
+                        NetworkErrors.CONFLICT);
+                    var result =
+                        base("register_result")
+                            .put("request_id", target.requestId())
+                            .put("allocation_op_id", registration.allocationOpId())
+                            .put("local", registration.local())
+                            .put("registration_id", registration.registrationId().toString())
+                            .put("result", registration.result())
+                            .put("registration_revision", registration.registrationRevision())
+                            .put("local_high_water", registration.localHighWater())
+                            .put("address_type", registration.addressType());
+                    return mailbox.withDecision(
+                        decision,
+                        () ->
+                            mailbox.withDecision(
+                                currentDecision, () -> signed(result, "RegisterResult", audience)));
+                  });
+          // Local signing/key-lock waits and COMMIT must not turn an expired decision into success.
+          return mailbox.withDecision(
+              decision,
+              () ->
+                  mailbox.withDecision(
+                      currentDecision,
+                      () -> {
+                        require(
+                            signingDeadline.isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+                        return response;
+                      }));
+        });
+  }
+
+  private void registrationAssociation(
+      NetworkAuthorityConnection c,
+      JsonNode request,
+      Map<String, Object> before,
+      Map<String, Object> row,
+      Target target) {
+    unchanged(before, row);
+    require(bindingJson(c).equals(row.get("wire_binding_json")), NetworkErrors.STALE_EPOCH);
+    require("ready".equals(row.get("wire_status")), RECOVERY);
+    require(
+        request.path("epoch").asString().equals(Long.toString(target.epoch()))
+            && Objects.equals(row.get("local_boot_id"), request.path("boot_id").asString())
+            && row.get("local_boot_epoch") != null
+            && number(row, "local_boot_epoch") == target.epoch(),
+        NetworkErrors.STALE_EPOCH);
+    require(target.validUntil().isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+  }
+
   public String fetch(NetworkAuthorityConnection c, byte[] bytes) {
     var request = frame(bytes, "Fetch");
     // Existing core has cursor pagination only. Never discard proof/hold/barrier instructions.
@@ -665,7 +784,10 @@ public class NetworkMailboxWireService {
   private static JsonNode frame(byte[] bytes, String definition) {
     var frame = NetworkJson.parse(bytes);
     require(
-        definition.toLowerCase(Locale.ROOT).equals(frame.path("type").asString()),
+        ("LocalRegister".equals(definition)
+                ? "local_register"
+                : definition.toLowerCase(Locale.ROOT))
+            .equals(frame.path("type").asString()),
         NetworkErrors.PROTOCOL_ERROR);
     NetworkSchemas.validate("protocol", definition, frame);
     return frame;

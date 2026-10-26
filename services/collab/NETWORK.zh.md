@@ -110,7 +110,7 @@ CONTACT_ASSIGN/首联 session 阶段尚未接入，显式拒绝；首联 system 
 已完成的同帧重放不再次按旧计数恢复，以免把其后合法登记误判为备份回滚；仍重核当前健康和计数。
 登记恢复期间高水位/revision/健康变化会拒绝本次完成，不以旧快照开放业务；所有业务 RPC 最终仍核健康。
 匹配 pending 只核原 typed 见证，READY 不返回登记回执、不授创建许可；未知 pending 不隐式登记。
-原登记回执须后续以原 LOCAL_REGISTER 操作重试取得；该操作的生产 NATS/provider 接线尚未实现。
+原登记回执以原 LOCAL_REGISTER 操作重试取得；内部 gRPC/wire 已接线，生产 NATS/provider 接线尚未实现。
 checkpoint 证据对账仍未实现：非零 checkpoint、非空 evidence 或不匹配的 cursor 独立返回
 `recovery_conflict` 并封锁业务，不能由登记恢复成功覆盖。登记身份回滚返回 `identity_rollback`。
 FETCH 的非空 continuation、held_ids、paused、state_barrier，以及 RECEIPT 的 retryable /
@@ -119,6 +119,19 @@ outcome_unknown 尚不被核心支持，入口明确拒绝而不忽略。旧 epo
 
 每个携帧 RPC 都在严格 JSON 解析后校验对应 type 与完整 schema；顶层或嵌套重复键直接拒绝。
 RECEIPT 的 target 必须包含地址契约的 version=1，合法同 operation_id 异体才进入 conflict 判定。
+
+内部 `LocalRegister` 沿相同 `svc:ai-gateway` 平台服务身份和受信非平台 tenant 委托，
+保留原始 UTF-8 字节的 64KiB 上限、严格解析及正式 LocalFrames schema；不接受自报 owner。
+先在线核 connection/currentTarget/IAM CONNECT，再由 LocalRegistry 独立事务锁 node 复核
+当前 READY/ingress/epoch/boot 后登记，沿原操作先查、不可变类别、高水位和 revision CAS。
+Registry 的 CONNECT 检查在借用 PG 连接之前完成，不挂起外层事务或持锁调用 IAM。
+登记提交后再次锁外重核连接和 CONNECT，最后短事务在同 node 锁内复核原关联、nonce、boot、
+健康与耐久登记事实，签完整 `RegisterResult`；签名受众只取当前关联，保留原决定的截止期限。
+仅登记 session/subagent 粗类别，不授来源、SEND、首联、递归宿主关系或执行权限。
+登记提交与最终签名/响应之间可崩溃：签名、最终提交或回包失败均不抹掉已提交登记和隔离诊断；
+同原 op/fingerprint/type 重试恢复原 registration_id/计数。跨 READY 恢复仍须先通过现有登记和 receipt
+恢复门槛，再以新 epoch/boot 重试原操作。最终事务提交完成前不向 RPC 调用者返回成功。
+无法建立受众、鉴权或签名时沿既有 gRPC 错误映射拒绝，不返回未签成功。
 
 V7__network_wire_association.sql 添加 node 的 wire 字段和两张 RLS 表，不改旧迁移。
 V6 保留给 #147 的 network_audit_decisions；wire 迁移尚未发行，仅本分支改名。

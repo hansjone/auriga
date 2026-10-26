@@ -65,13 +65,22 @@ public final class LocalRegistry {
 
   /** Original-operation lookup precedes revision/high-water checks. Never allocates implicitly. */
   public Registration register(UUID tenant, String json) {
+    return register(tenant, json, () -> {});
+  }
+
+  /** Wire association fence, executed under the registration's node lock without remote calls. */
+  public Registration register(UUID tenant, String json, Runnable associationFence) {
+    authorize(tenant);
+    outsideTransaction();
+    var frame = LocalFrames.read("LocalRegister", json);
+    Target target = target(tenant);
+    // Do not borrow a PG connection or suspend a registration transaction while waiting for IAM.
+    checkIam(target.realm(), target.node(), target.node(), "0", Operation.CONNECT);
     return run(
         tenant,
         () -> {
-          var frame = LocalFrames.read("LocalRegister", json);
-          Target target = target(tenant);
-          checkIam(target.realm(), target.node(), target.node(), "0", Operation.CONNECT);
           var node = lockNode(tenant, target);
+          associationFence.run();
           fence(tenant, target, node, frame);
           String local = text(frame, "candidate_local");
           String op = text(frame, "allocation_op_id");
