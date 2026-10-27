@@ -12,6 +12,7 @@ export async function criticalMatrix({
   snapshot,
   checks,
   artifacts,
+  onPhase = () => {},
 }) {
   const java = (command) => control({ op: 'java', command });
   const trace = async () => (await java({ op: 'trace' })).events;
@@ -103,6 +104,7 @@ export async function criticalMatrix({
     e.listeners.get('session/disposed')({ id: value.id });
   }
   try {
+    onPhase('critical/live-C miss and pending outcome');
     // Avoid unrelated natural-expiry writes during pure Read/Fence assertions.
     await waitUntil(
       async () => {
@@ -213,6 +215,7 @@ export async function criticalMatrix({
 
     // Deadlines and explicit cancellation are real client/context events; the
     // hook merely keeps business dispatch outside the boundary until they occur.
+    onPhase('critical/deadline cancellation and old service');
     const timeoutRequest = { ...base, operation_id: `timeout-${randomUUID()}` };
     await arm('deadline-read', 'ReadAgentSourceReceipt', 'before', 'hold', {
       operation: timeoutRequest.operation_id,
@@ -270,6 +273,7 @@ export async function criticalMatrix({
 
     // Actual JDBC COMMIT succeeds; only acknowledgement is lost. The complete
     // IAM receipt exists while collab is pending and its saved response is null.
+    onPhase('critical/commit acknowledgement unknown and receipt recovery');
     const lost = await fresh('critical-commit', async (local) => {
       await arm('commit-unknown', 'RegisterAgentSource', 'commit', 'ack-lost', {
         local,
@@ -343,6 +347,7 @@ export async function criticalMatrix({
 
     // Hold an actual ACTIVE IAM Get result outside its completed transaction.
     // The independent revoke lane must stop first; only then release the late result.
+    onPhase('critical/late ACTIVE Get after committed revoke');
     const active = forSession(ledger, lost.id),
       binding = active.head;
     await arm('late-get', 'GetAgentSource', 'after', 'hold', {
@@ -426,6 +431,7 @@ export async function criticalMatrix({
 
     // The source originated in the full chain. Query it through real generated
     // IAM both before and after real OrgService role removal; no JWT-perms fixture.
+    onPhase('critical/Org revocation and forbidden receipt');
     ledger = await e.ledger();
     db = await snapshot('critical-org-before');
     const liveEntry = ledger.sourceControl.entries['1'];

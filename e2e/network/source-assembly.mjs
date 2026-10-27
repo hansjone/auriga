@@ -12,6 +12,7 @@ import {
   javaClasspath,
   stopChild,
 } from './support/assembly-process.mjs';
+import { redactDiagnostics } from './support/assembly-failure.mjs';
 
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -194,8 +195,10 @@ export async function runAssembly() {
         360_000,
       );
       if (verdict.stage === 'failed') {
-        manifest.businessFailure = verdict;
-        throw new Error('plugin matrix failed: ' + verdict.message);
+        manifest.businessFailure = redactDiagnostics(verdict, secrets);
+        throw new Error(
+          'plugin matrix failed: ' + manifest.businessFailure.message,
+        );
       }
       manifest.checks = verdict.checks;
       await plugin.stop('stop');

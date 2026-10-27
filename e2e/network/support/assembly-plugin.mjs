@@ -17,6 +17,8 @@ import { waitUntil } from './assembly-process.mjs';
 import { brokerGuards } from './assembly-broker.mjs';
 import { criticalMatrix } from './assembly-critical.mjs';
 import { prepareDevice } from './assembly-device.mjs';
+import { assertReadyReplacement } from './assembly-ready.mjs';
+import { describeBusinessFailure } from './assembly-failure.mjs';
 
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
 const input = createInterface({ input: process.stdin });
@@ -68,6 +70,8 @@ const spec = JSON.parse(
 const { ready, config, gateway, artifacts } = spec;
 const endpoints = [];
 const checks = [];
+const privateValues = [];
+let phase = 'initialization';
 let snapshotIndex = 0;
 async function snapshot(label) {
   const result = (await control({ op: 'snapshot' })).tables;
@@ -86,6 +90,7 @@ const sourceRow = (s, binding) =>
   table(s, 'iam.network_source').find((v) => v.id === binding);
 
 async function endpoint(name, devicePath) {
+  phase = `P1/initialize/${name}`;
   const directory = join(dirname(ready.config), name);
   const cwd = join(directory, 'cwd');
   await mkdir(cwd, { recursive: true });
@@ -137,6 +142,7 @@ async function endpoint(name, devicePath) {
     },
     async getDevice() {
       const device = JSON.parse(await readFile(devicePath, 'utf8'));
+      privateValues.push(device.access_token, device.refresh_token);
       const claims = JSON.parse(
         Buffer.from(device.access_token.split('.')[1], 'base64url').toString(),
       );
@@ -291,6 +297,7 @@ function delivery(source, observation, connection, target) {
 try {
   const member = await endpoint('member', config.device);
   const external = await endpoint('external', config.externalDevice);
+  phase = 'P1/READY persistence';
   assert.notEqual(member.directory, external.directory);
   let db = await snapshot('ready');
   assert.equal(table(db, 'iam.network_source').length, 0);
@@ -302,19 +309,22 @@ try {
     4,
     'both plugins must bootstrap C1 then replace it with C2',
   );
+  const readyRecords = (await control({ op: 'trace' })).records;
   for (const e of endpoints) {
-    assert.ok(e.sockets.length >= 2);
-    assert.equal(e.sockets[0].readyState, 3, 'bootstrap C1 must be closed');
-    assert.equal(
-      e.frames.filter((f) => f.direction === 'up' && f.frame.type === 'ready')
-        .length,
-      2,
-    );
+    phase = `P1/READY replacement/${e.name}`;
+    assertReadyReplacement({
+      endpoint: e,
+      anchors: table(db, 'iam.network_connection_anchor'),
+      nodes: table(db, 'collab.network_node'),
+      records: readyRecords,
+      identity: (await e.ledger()).identity,
+    });
   }
   checks.push(
     'P1: HTTPS device-provider, real callout Redeem, C1 closed/C2 READY, two independent ledgers',
   );
 
+  phase = 'P2/P4/F2/committed receipt and real C replacement';
   await control({ op: 'fault', method: 'SourceRegister', mode: 'drop' });
   await member.join();
   const lost = await waitUntil(async () => {
@@ -379,6 +389,7 @@ try {
     'P2/P4/F2: lost outer reply, real C replacement, identical persisted request/receipt, fresh Get required',
   );
 
+  phase = 'F6/Get signature and persisted observations';
   await control({ op: 'fault', method: 'SourceGet', mode: 'corrupt' });
   const beforeCorruption = member.sockets.length;
   member.sockets.at(-1).terminate();
@@ -422,6 +433,7 @@ try {
     'F6: corrupt real signed Get rejected without plugin activation or new issuance; genuine Get restores observation',
   );
 
+  phase = 'MEMBER/EXTERNAL/source issuance';
   await external.join();
   await waitUntil(
     async () =>
@@ -436,6 +448,7 @@ try {
 
   // No virtual clock. IAM uses T3a's real 180s source policy; the native
   // witness separately bounds each observation. Wait through the saved expiry.
+  phase = 'P3/natural expiry and successor';
   const firstBinding = ledger.sourceControl.entries['1'].head;
   const realExpiry = Date.parse(
     ledger.sourceControl.entries['1'].facts[firstBinding].expires_at,
@@ -468,6 +481,7 @@ try {
     'P3: natural real-clock expiry, fresh Get, new op/successor CAS, immutable original receipt',
   );
 
+  phase = 'P5/P6/revoke and delivery authorization';
   const active = entry.observation.source;
   const targetLedger = await external.ledger();
   const targetTrace = (await control({ op: 'trace' })).records
@@ -532,6 +546,7 @@ try {
   );
 
   // Every claim is backed by frames, delegated generated RPC and DB snapshots.
+  phase = 'Broker/ticket replay ACL and limits';
   const guards = await brokerGuards(external.prepared, external.socketFactory);
   await writeFile(
     join(artifacts, 'broker-guards.json'),
@@ -547,8 +562,12 @@ try {
     snapshot,
     checks,
     artifacts,
+    onPhase(value) {
+      phase = value;
+    },
   });
 
+  phase = 'final RPC and file evidence';
   const finalTrace = (await control({ op: 'trace' })).records;
   assert.ok(
     finalTrace.filter(
@@ -591,6 +610,7 @@ try {
   emit({ stage: 'verified', checks });
   await stopRequested;
 } catch (error) {
+  const diagnostic = describeBusinessFailure(error, phase, privateValues);
   // Preserve the real file commits/frames/DB facts on a business failure too.
   // A mutant's accepted bad signature must remain independently inspectable.
   for (const e of endpoints) {
@@ -616,12 +636,7 @@ try {
   } catch {
     /* Preserve the first failure. */
   }
-  emit({
-    stage: 'failed',
-    name: error.name,
-    code: error.code,
-    message: error.message,
-  });
+  emit({ ...diagnostic, completedChecks: [...checks] });
   process.exitCode = 1;
 } finally {
   for (const e of endpoints.reverse()) await e.runtime.close();

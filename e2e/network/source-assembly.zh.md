@@ -17,7 +17,7 @@ typed-local 登记和 source controller，不注入全业务 provider 或假业�
 ```powershell
 .\mvnw.cmd -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest,NetworkSourceJavaFaultsTest' '-Dsurefire.failIfNoSpecifiedTests=false'
 .\mvnw.cmd -B -pl services/platform-app -am spotless:check
-node --test e2e/network/assembly-guards.test.mjs
+node --test e2e/network/assembly-guards.test.mjs e2e/network/assembly-ready.test.mjs e2e/network/assembly-failure.test.mjs
 powershell -NoProfile -File services/platform-app/src/test/resources/network-source-history/test-java-bridge-verifier.ps1
 $head = (git rev-parse HEAD).Trim()
 powershell -NoProfile -File services/platform-app/src/test/resources/network-source-history/verify-source-assembly.ps1 -ExpectedHead $head -CompileOnly
@@ -135,6 +135,20 @@ retryable=true、匹配请求/nonce/realm/node 且 epoch=0/incarnation=unbound �
 从拒绝初始化身份。该未绑定受众仅用于拒绝验签，绝不作为成功受众；真实成功仍核完整
 READY_RESULT、公钥、正 epoch/incarnation 和 ledger 证据。取消/5s 到期/重试耗尽均失败，
 并释放重试 timer；晚到或非法签名不能初始化。重试没有改变生产内层 timeout。
+
+主控对 b65595c 实跑已确认 READY 推进：member 有 3 次发送但仅 2 次逻辑握手，
+首组两帧完全一致；external 为 2 次发送/2 次握手。两边均 epoch 1→2，共有 4 个真实
+connection anchor、2 个 collab 节点且来源为零。旧 `3 !== 2` 是驱动把发送次数当成
+连接数，并非 node/epoch 产品错误。新 P1 要求每插件恰有 2 次逻辑握手，每组原帧一致、
+发送≤5，并用真实 generated READY_RESULT/完整七字段 C/保留 anchor/ledger 与 collab
+节点的 epoch/incarnation/ingress 对照；还要求 C1 socket CLOSED、C2 OPEN、新 ingress/CID。
+原4个anchor/零来源判据保留；入RPC前拒绝不算成功，只有实际成功回包和持久事实能证明C。
+
+业务失败写入 manifest.businessFailure 的 phase、assertion、operator、actual/expected
+（分别标注 observed/required）、代码栈和 completedChecks，数值保留精确含义；复杂值只给
+类型/长度，完整事实仍查原帧/DB/ledger证据。栈只保留代码位置，避免生成式 deep diff 泄漏
+任意值；子进程清除已见令牌/Bearer/JWT/私钥块，主控用已收集凭据再次脱敏后写manifest。
+失败与业务反证判据仍保持原约束，初始化、SQL、其他断言和清理错误都不算指定反证。
 
 按追加授权2“其余待办，不必一次做全”：F5 tenant/owner/device/backing-session 七字段
 换值、F6 digest/ref/异体全套、F7 collab SQL 提交确认未知、真正 kill/同 PG 目录重开及
