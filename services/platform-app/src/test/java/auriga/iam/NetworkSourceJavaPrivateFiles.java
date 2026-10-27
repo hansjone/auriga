@@ -3,11 +3,52 @@ package auriga.iam;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.*;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-/** Checks existing Windows ACLs without changing them; POSIX files are created owner-only. */
+/** Creates only this test's root with private permissions; checks never change existing ACLs. */
 final class NetworkSourceJavaPrivateFiles {
   private NetworkSourceJavaPrivateFiles() {}
+
+  static Path createDirectory() throws IOException {
+    if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix"))
+      return Files.createTempDirectory(
+          "auriga-java-bridge-",
+          PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+    var directory =
+        Path.of(System.getProperty("java.io.tmpdir"))
+            .resolve("auriga-java-bridge-" + UUID.randomUUID())
+            .toAbsolutePath();
+    // Supply the descriptor at creation: an inherited descriptor can deny WRITE_DAC even
+    // on a newly created directory. Never change any pre-existing directory's permissions.
+    windows(
+        directory,
+        """
+        $directory=[IO.DirectoryInfo]::new($env:AURIGA_BRIDGE_PRIVATE_ROOT)
+        if ($directory.Exists) { throw 'Test root already exists' }
+        $user=[Security.Principal.WindowsIdentity]::GetCurrent().User
+        $acl=[Security.AccessControl.DirectorySecurity]::new()
+        $acl.SetAccessRuleProtection($true,$false)
+        $rule=[Security.AccessControl.FileSystemAccessRule]::new($user,
+          [Security.AccessControl.FileSystemRights]::FullControl,
+          [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',
+          [Security.AccessControl.PropagationFlags]::None,
+          [Security.AccessControl.AccessControlType]::Allow)
+        $acl.AddAccessRule($rule)
+        $directory.Create($acl)
+        """);
+    try {
+      requirePrivate(directory);
+      return directory;
+    } catch (IOException failure) {
+      try {
+        Files.deleteIfExists(directory);
+      } catch (IOException cleanup) {
+        failure.addSuppressed(cleanup);
+      }
+      throw failure;
+    }
+  }
 
   static void requirePrivate(Path directory) throws IOException {
     if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(directory))
@@ -27,26 +68,33 @@ final class NetworkSourceJavaPrivateFiles {
         Files.getFileAttributeView(
             directory, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
     if (acl == null) throw new IOException("Cannot verify host credential root privacy");
-    // Java's Windows principal lookup accepts account names, not SID strings. .NET exposes
-    // language-independent SIDs directly. This command only reads the existing descriptor.
-    String script =
+    // Use .NET directly: Windows PowerShell 5.1 may inherit pwsh 7's incompatible module path.
+    // No Get-Acl/Set-Acl, Import-Module, profile or localized account-name lookup is needed.
+    windows(
+        directory,
         """
-        $ErrorActionPreference='Stop'
-        $a=Get-Acl -LiteralPath $env:AURIGA_BRIDGE_PRIVATE_ROOT
+        $a=([IO.DirectoryInfo]::new($env:AURIGA_BRIDGE_PRIVATE_ROOT)).GetAccessControl()
         $ok=@([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,
-          'S-1-5-18','S-1-5-32-544','S-1-3-0')
-        $owner=([Security.Principal.NTAccount]::new($a.Owner)).Translate(
-          [Security.Principal.SecurityIdentifier]).Value
-        if ($owner -notin $ok) { exit 2 }
+          'S-1-5-18','S-1-5-32-544')
+        $owner=$a.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if (-not $a.AreAccessRulesProtected -or $owner -notin $ok) { exit 2 }
         foreach ($r in $a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
           if ($r.AccessControlType -eq 'Allow' -and
               ($r.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 -and
               $r.IdentityReference.Value -notin $ok) { exit 2 }
         }
         exit 0
-        """;
+        """);
+  }
+
+  private static void windows(Path directory, String script) throws IOException {
     var builder =
-        new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script);
+        new ProcessBuilder(
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference='Stop'\n" + script);
     builder.environment().put("AURIGA_BRIDGE_PRIVATE_ROOT", directory.toAbsolutePath().toString());
     builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
     builder.redirectError(ProcessBuilder.Redirect.DISCARD);

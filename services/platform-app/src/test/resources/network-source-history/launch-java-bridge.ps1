@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Get-Location).Path
 if (-not (Test-Path -LiteralPath (Join-Path $root 'mvnw.cmd'))) { throw 'Run from worktree root' }
 [xml]$xml = [IO.File]::ReadAllText((Join-Path $root $Report))
-if ([int]$xml.testsuite.tests -lt 2 -or [int]$xml.testsuite.failures -ne 0 -or
+if ([int]$xml.testsuite.tests -lt 4 -or [int]$xml.testsuite.failures -ne 0 -or
     [int]$xml.testsuite.errors -ne 0 -or [int]$xml.testsuite.skipped -ne 0) {
   throw 'Run the non-PG NetworkSourceJavaHostTest successfully before launching'
 }

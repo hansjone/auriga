@@ -19,7 +19,6 @@ import java.io.*;
 import java.net.*;
 import java.net.http.*;
 import java.nio.file.*;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.security.*;
 import java.time.*;
 import java.util.*;
@@ -593,12 +592,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
   }
 
   static Path privateDirectory() throws IOException {
-    if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix"))
-      return Files.createTempDirectory(
-          "auriga-java-bridge-",
-          PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-    // Windows inherits the user's temporary-directory ACL. Never mutate ACLs or system trust.
-    return Files.createTempDirectory("auriga-java-bridge-");
+    return NetworkSourceJavaPrivateFiles.createDirectory();
   }
 
   @Override

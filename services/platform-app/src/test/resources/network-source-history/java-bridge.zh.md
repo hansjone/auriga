@@ -16,7 +16,7 @@ powershell -NoProfile -File services/platform-app/src/test/resources/network-sou
 
 `NetworkSourceJavaHostTest` 仅用解码公钥 fixture 检验真实 TLS、生产安全链的拒绝及私有文件生命周期，**不计真实登录/成功注册/生产发行器证据**。
 测试 CA 只有一天有效期，SAN 为 localhost/127.0.0.1；只交给本次 HttpClient/后续子进程信任。
-不会更改系统信任、ACL、DNS、profile 或关闭 TLS 校验。
+不会更改系统信任、既有用户/系统目录的 ACL、DNS、profile 或关闭 TLS 校验。
 
 ## T3b 子进程入口
 
@@ -34,8 +34,8 @@ powershell -NoProfile -File services/platform-app/src/test/resources/network-sou
 `ready` 行只含随机回环 HTTPS/IAM gRPC/collab gRPC 地址、CA/配置路径与 PID/创建时间/PG 根谱系。
 `bridge.json` 是本次私有临时目录内的配置：业务 tenant、realm、serverAudience、两份设备凭据路径
 （`device` 为 MEMBER，`externalDevice` 为 EXTERNAL）、gateway/collab 服务 JWT 文件路径、公开 network 根与 pin、到期时间。
-凭据不得复制到 stdout/报告/共享 profile。Windows 仅检查继承 ACL；不满足私有条件便失败，不自行修改 ACL。
-本工位 Windows 沙箱继承额外读者，因此非 PG 用例验证拒绝写入并清理；这不证明本机能启动含凭据的完整桥。主控须选已有私有临时目录的正常权限环境运行，不能放宽 ACL 检查或修改 ACL。POSIX 临时目录 0700、文件 0600；文件在同目录原子替换，关闭删除全部本次文件。
+凭据不得复制到 stdout/报告/共享 profile。Windows 在创建本测试全新的随机临时目录时，指定禁止继承、仅当前用户可访问并向子文件继承的 ACL；既有目录权限不变。随后只读检查受保护的 ACL、所有者与读权限，不满足便拒绝写入。
+Windows PowerShell 5.1 子进程直接调用 .NET ACL API，不依赖 Get-Acl/Set-Acl 或模块自动加载；非 PG 回归包含 Java 继承不可用 PSModulePath 后的私有目录创建/凭据替换/清理。POSIX 临时目录 0700、文件 0600；文件在同目录原子替换，关闭删除全部本次文件。
 
 stdin 控制命令：
 
