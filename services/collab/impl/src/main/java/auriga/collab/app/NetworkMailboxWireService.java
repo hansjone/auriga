@@ -33,6 +33,7 @@ public class NetworkMailboxWireService {
   private final boolean broadcast;
   private final LocalRegistry locals;
   private final NetworkSourceControl sources;
+  private final NetworkDurableSubmit submissions;
 
   public NetworkMailboxWireService(
       NetworkMailboxService mailbox,
@@ -63,6 +64,278 @@ public class NetworkMailboxWireService {
     this.clock = clock;
     this.broadcast = broadcast;
     sources = new NetworkSourceControl(this, jdbc, manager, source, clock);
+    submissions = new NetworkDurableSubmit(this, jdbc, manager, source, clock);
+  }
+
+  public String submit(NetworkAuthorityConnection c, byte[] bytes) {
+    return submissions.submit(c, bytes);
+  }
+
+  public String receiveSet(NetworkAuthorityConnection c, byte[] bytes) {
+    var request = frame(bytes, "ReceiveSet");
+    return source.sourceRequest(
+        () -> {
+          var gate = sourceGate(c, request);
+          return tx.execute(
+              s -> {
+                lockSourceGate(gate, true);
+                var registration = request.path("registration");
+                var actual =
+                    locals.requireRegistered(
+                        TenantContext.require(),
+                        c.getRealm(),
+                        c.getNode(),
+                        registration.path("local").asString(),
+                        uuid(registration.path("registration_id").asString()),
+                        registration.path("allocation_fingerprint").asString());
+                require(
+                    "session".equals(actual.addressType())
+                        && actual
+                            .allocationOpId()
+                            .equals(registration.path("allocation_op_id").asString())
+                        && actual
+                            .registrationRevision()
+                            .equals(registration.path("registration_revision").asString())
+                        && "session".equals(registration.path("address_type").asString()),
+                    NetworkErrors.CONFLICT);
+                var row =
+                    jdbc.queryForMap(
+                        "SELECT receive_enabled,receive_version FROM collab.network_local_registration WHERE tenant_id=? AND id=? FOR UPDATE",
+                        TenantContext.require(),
+                        actual.registrationId());
+                long expected = decimal(request, "expected_version");
+                boolean enabled = request.path("enabled").asBoolean();
+                long version = number(row, "receive_version");
+                if (version == expected) {
+                  jdbc.update(
+                      "UPDATE collab.network_local_registration SET receive_enabled=?,receive_version=receive_version+1 WHERE tenant_id=? AND id=?",
+                      enabled,
+                      TenantContext.require(),
+                      actual.registrationId());
+                  version++;
+                } else
+                  require(
+                      version == expected + 1
+                          && Boolean.valueOf(enabled).equals(row.get("receive_enabled")),
+                      NetworkErrors.CONFLICT);
+                return signed(
+                    base("receive_set_result")
+                        .put("request_id", gate.target().requestId())
+                        .put("registration_id", actual.registrationId().toString())
+                        .put("enabled", enabled)
+                        .put("state_version", Long.toString(version)),
+                    "ReceiveSetResult",
+                    gate.target());
+              });
+        });
+  }
+
+  public String attemptBegin(NetworkAuthorityConnection c, byte[] bytes) {
+    var request = NetworkJson.parse(bytes);
+    NetworkSchemas.validate("protocol", "AttemptBegin", request);
+    require(
+        "attempt_begin".equals(request.path("type").asString())
+            && "process".equals(request.path("purpose").asString()),
+        NetworkErrors.PROTOCOL_ERROR);
+    return associated(
+        c,
+        request.path("request_id").asString(),
+        (row, target) -> {
+          var permission = prepareExecution(c, request.path("recipient_id").asString());
+          return () -> {
+            registrationAssociation(c, request, row, locked(c), target);
+            var recipient = executionRecipient(c, request.path("recipient_id").asString());
+            require(
+                permission.until().isAfter(clock.instant())
+                    && permission.fingerprint().equals(executionFingerprint(recipient)),
+                NetworkErrors.CONFLICT);
+            require(
+                request
+                    .path("delivery_id")
+                    .asString()
+                    .equals(recipient.get("delivery_id").toString()),
+                NetworkErrors.UNAUTHORIZED);
+            var business = ((ObjectNode) request).deepCopy();
+            business.remove("request_id");
+            String canonical = NetworkJson.canonical(business);
+            var previous =
+                jdbc.queryForList(
+                    "SELECT request_json,result_json FROM collab.network_attempt WHERE tenant_id=? AND recipient_id=? AND attempt_id=?",
+                    TenantContext.require(),
+                    recipient.get("id"),
+                    request.path("attempt_id").asString());
+            ObjectNode result;
+            if (!previous.isEmpty()) {
+              require(
+                  canonical.equals(previous.getFirst().get("request_json")),
+                  NetworkErrors.CONFLICT);
+              result =
+                  (ObjectNode) NetworkJson.parse(previous.getFirst().get("result_json").toString());
+            } else {
+              var entered =
+                  mailbox.attemptBegin(
+                      new NetworkMailboxService.AttemptBeginRequest(
+                          TenantContext.require(),
+                          c.getRealm(),
+                          c.getNode(),
+                          target.epoch(),
+                          (UUID) recipient.get("delivery_id"),
+                          (UUID) recipient.get("id"),
+                          "process"));
+              result =
+                  base("attempt_result")
+                      .put("attempt_id", request.path("attempt_id").asString())
+                      .put("recipient_id", recipient.get("id").toString())
+                      .put("result", entered.result())
+                      .put("attempt_count", entered.attemptCount())
+                      .put("max_attempts", entered.maxAttempts());
+              jdbc.update(
+                  "INSERT INTO collab.network_attempt(id,tenant_id,recipient_id,attempt_id,request_json,result_json) VALUES (?,?,?,?,?,?)",
+                  auriga.common.persistence.UuidV7.next(),
+                  TenantContext.require(),
+                  recipient.get("id"),
+                  request.path("attempt_id").asString(),
+                  canonical,
+                  NetworkJson.canonical(result));
+            }
+            return signed(result.put("request_id", target.requestId()), "AttemptResult", target);
+          };
+        });
+  }
+
+  public String executionAdmit(NetworkAuthorityConnection c, byte[] bytes) {
+    var request = NetworkJson.parse(bytes);
+    NetworkSchemas.validate("protocol", "ExecutionAdmit", request);
+    require(
+        "execution_admit".equals(request.path("type").asString()), NetworkErrors.PROTOCOL_ERROR);
+    return associated(
+        c,
+        request.path("request_id").asString(),
+        (row, target) -> {
+          var permission = prepareExecution(c, request.path("recipient_id").asString());
+          return () -> {
+            require(
+                decimal(request, "connection_epoch") == target.epoch()
+                    && Objects.equals(row.get("local_boot_id"), request.path("boot_id").asString()),
+                NetworkErrors.STALE_EPOCH);
+            var recipient = executionRecipient(c, request.path("recipient_id").asString());
+            require(
+                permission.until().isAfter(clock.instant())
+                    && permission.fingerprint().equals(executionFingerprint(recipient)),
+                NetworkErrors.CONFLICT);
+            var address = request.path("target");
+            require(
+                c.getRealm().equals(address.path("realm").asString())
+                    && c.getNode().equals(address.path("node").asString())
+                    && recipient.get("target_local").equals(address.path("local").asString())
+                    && "session".equals(address.path("type").asString())
+                    && request
+                        .path("recipient_id")
+                        .asString()
+                        .equals(request.path("host_request_id").asString()),
+                NetworkErrors.UNAUTHORIZED);
+            require(
+                jdbc.queryForObject(
+                        "SELECT count(*) FROM collab.network_attempt WHERE tenant_id=? AND recipient_id=? AND attempt_id=?",
+                        Integer.class,
+                        TenantContext.require(),
+                        recipient.get("id"),
+                        request.path("attempt_id").asString())
+                    == 1,
+                NetworkErrors.CONFLICT);
+            var admitted =
+                mailbox.executionAdmit(
+                    new NetworkMailboxService.ExecutionAdmitRequest(
+                        TenantContext.require(),
+                        c.getRealm(),
+                        c.getNode(),
+                        target.epoch(),
+                        (UUID) recipient.get("id"),
+                        request.path("boot_id").asString(),
+                        request.path("host_request_id").asString()));
+            return signed(
+                base("admit_result")
+                    .put("request_id", target.requestId())
+                    .put("recipient_id", recipient.get("id").toString())
+                    .put("result", admitted.result())
+                    .put("admission_id", admitted.admissionId().toString())
+                    .put("admitted_epoch", Long.toString(admitted.admittedEpoch()))
+                    .put("state_version", recipient.get("state_version").toString()),
+                "AdmitResult",
+                target);
+          };
+        });
+  }
+
+  private record ExecutionPermission(Instant until, String fingerprint) {}
+
+  private ExecutionPermission prepareExecution(NetworkAuthorityConnection c, String id) {
+    var row = tx.execute(s -> executionRecipient(c, id, false));
+    Instant until =
+        source.authorizeDelivery(
+            TenantContext.require(),
+            row.get("message_json").toString(),
+            row.get("source_context_json").toString(),
+            c.getNode());
+    return new ExecutionPermission(until, executionFingerprint(row));
+  }
+
+  private static String executionFingerprint(Map<String, Object> row) {
+    var value = NetworkJson.object();
+    for (String key :
+        List.of(
+            "id",
+            "delivery_id",
+            "target_local",
+            "state_version",
+            "message_json",
+            "source_context_json",
+            "registration_id",
+            "receive_version",
+            "registration_revision",
+            "source_stop_version",
+            "source_permission_version")) value.put(key, Objects.toString(row.get(key), ""));
+    return NetworkJson.digest(value);
+  }
+
+  private Map<String, Object> executionRecipient(NetworkAuthorityConnection c, String id) {
+    // Hold the source's local stop/permission fence through commit as well as the target lock.
+    jdbc.queryForList(
+        """
+        SELECT sl.id FROM collab.network_source_lineage sl
+        JOIN collab.network_source_binding sb ON sb.tenant_id=sl.tenant_id AND sb.lineage_id=sl.id
+        JOIN collab.network_submit sub ON sub.tenant_id=sb.tenant_id AND sub.source_binding=sb.source_binding
+        JOIN collab.network_mail_item i ON i.tenant_id=sub.tenant_id AND i.message_id=sub.message_id
+        JOIN collab.network_recipient r ON r.tenant_id=i.tenant_id AND r.delivery_id=i.id
+        WHERE sl.tenant_id=? AND r.id=? FOR UPDATE OF sl
+        """,
+        TenantContext.require(),
+        uuid(id));
+    return executionRecipient(c, id, true);
+  }
+
+  private Map<String, Object> executionRecipient(
+      NetworkAuthorityConnection c, String id, boolean lock) {
+    var rows =
+        jdbc.queryForList(
+            """
+        SELECT r.*,m.message_json,m.source_context_json,l.id AS registration_id,l.receive_version,l.registration_revision,sl.stop_version AS source_stop_version,sl.permission_version AS source_permission_version FROM collab.network_recipient r JOIN collab.network_mail_item i ON i.tenant_id=r.tenant_id AND i.id=r.delivery_id
+        JOIN collab.network_message m ON m.tenant_id=i.tenant_id AND m.id=i.message_id
+        LEFT JOIN collab.network_submit sub ON sub.tenant_id=m.tenant_id AND sub.message_id=m.id
+        LEFT JOIN collab.network_source_binding sb ON sb.tenant_id=sub.tenant_id AND sb.source_binding=sub.source_binding
+        LEFT JOIN collab.network_source_lineage sl ON sl.tenant_id=sb.tenant_id AND sl.id=sb.lineage_id
+        JOIN collab.network_local_registration l ON l.tenant_id=i.tenant_id AND l.realm=i.target_realm AND l.node_id=i.target_node AND l.local_id::text=r.target_local
+        WHERE r.tenant_id=? AND r.id=? AND i.target_realm=? AND i.target_node=? AND r.transport_status='pending'
+          AND m.kind='message' AND (sub.id IS NULL OR NOT sl.stopped) AND l.address_type='session' AND l.status='registered' AND l.receive_enabled
+          AND (m.message_json::jsonb->>'expires_at')::timestamptz>now()
+        """
+                + (lock ? " FOR UPDATE OF r,l" : ""),
+            TenantContext.require(),
+            uuid(id),
+            c.getRealm(),
+            c.getNode());
+    require(rows.size() == 1, NetworkErrors.UNAUTHORIZED);
+    return rows.getFirst();
   }
 
   public String sourceRegister(NetworkAuthorityConnection c, byte[] frame) {
@@ -290,6 +563,7 @@ public class NetworkMailboxWireService {
                                       .put("request_id", target.requestId())
                                       .put("status", state)
                                       .put("epoch", Long.toString(target.epoch()))
+                                      .put("producer_epoch", row.get("producer_epoch").toString())
                                       .put("head_seq", Long.toString(route.headSeq()))
                                       .put(
                                           "committed_cursor",
@@ -530,8 +804,7 @@ public class NetworkMailboxWireService {
 
   public String fetch(NetworkAuthorityConnection c, byte[] bytes) {
     var request = frame(bytes, "Fetch");
-    // Existing core has cursor pagination only. Never discard proof/hold/barrier instructions.
-    require(request.path("continuation").isNull(), NetworkErrors.PROTOCOL_ERROR);
+    // Never discard proof/hold/barrier instructions.
     for (String field : List.of("held_ids", "paused", "state_barrier"))
       require(!request.has(field) || request.path(field).isEmpty(), NetworkErrors.PROTOCOL_ERROR);
     return associated(
@@ -539,14 +812,37 @@ public class NetworkMailboxWireService {
         request.path("request_id").asString(),
         (row, target) -> {
           require(decimal(request, "epoch") == target.epoch(), NetworkErrors.STALE_EPOCH);
+          long resume = decimal(request, "resume_cursor");
+          long[] cursor =
+              request.path("continuation").isNull()
+                  ? new long[] {resume, -1}
+                  : tx.execute(
+                      s -> {
+                        var rows =
+                            jdbc.queryForList(
+                                "SELECT scan_after,snapshot_head FROM collab.network_fetch_continuation WHERE tenant_id=? AND token=? AND realm=? AND node_id=? AND epoch=? AND resume_cursor=? AND valid_until>now()",
+                                TenantContext.require(),
+                                request.path("continuation").asString(),
+                                c.getRealm(),
+                                c.getNode(),
+                                target.epoch(),
+                                resume);
+                        require(rows.size() == 1, NetworkErrors.CONFLICT);
+                        return new long[] {
+                          number(rows.getFirst(), "scan_after"),
+                          number(rows.getFirst(), "snapshot_head")
+                        };
+                      });
           var prepared =
               mailbox.preparePage(
                   TenantContext.require(),
                   c.getRealm(),
                   c.getNode(),
-                  decimal(request, "resume_cursor"),
+                  cursor[0],
                   request.path("max_items").asInt(),
-                  request.path("max_bytes").asInt());
+                  request.path("max_bytes").asInt(),
+                  cursor[1],
+                  resume);
           var locals = new ArrayList<auriga.collab.api.NetworkLocalTargets.Registration>();
           for (String local : prepared.targetLocals())
             locals.add(
@@ -910,7 +1206,9 @@ public class NetworkMailboxWireService {
     require(
         ("LocalRegister".equals(definition)
                 ? "local_register"
-                : definition.toLowerCase(Locale.ROOT))
+                : "ReceiveSet".equals(definition)
+                    ? "receive_set"
+                    : definition.toLowerCase(Locale.ROOT))
             .equals(frame.path("type").asString()),
         NetworkErrors.PROTOCOL_ERROR);
     NetworkSchemas.validate("protocol", definition, frame);

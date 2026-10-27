@@ -18,8 +18,12 @@ import org.junit.jupiter.api.Test;
 
 class NetworkMailboxGrpcTest {
   @Test
-  void realCommonInterceptorGuardsAllEightMethodsAndMapsErrors() throws Exception {
+  void realCommonInterceptorGuardsAllTwelveMethodsAndMapsErrors() throws Exception {
     var wire = mock(NetworkMailboxWireService.class);
+    when(wire.submit(any(), any())).thenReturn("submit-result");
+    when(wire.receiveSet(any(), any())).thenReturn("receive-result");
+    when(wire.attemptBegin(any(), any())).thenReturn("attempt-result");
+    when(wire.executionAdmit(any(), any())).thenReturn("admit-result");
     when(wire.ready(any(), any())).thenReturn("ready-result");
     when(wire.head(any())).thenReturn("head-result");
     when(wire.fetch(any(), any())).thenReturn("fetch-result");
@@ -109,6 +113,46 @@ class NetworkMailboxGrpcTest {
                                   .getFrameJson()
                                   .toStringUtf8()));
               var allCalls = new ArrayList<Runnable>(calls);
+              allCalls.add(
+                  () ->
+                      assertEquals(
+                          "submit-result",
+                          rpc.submit(
+                                  NetworkMailboxServiceSubmitRequest.newBuilder()
+                                      .setConnection(connection)
+                                      .build())
+                              .getResultJson()
+                              .toStringUtf8()));
+              allCalls.add(
+                  () ->
+                      assertEquals(
+                          "receive-result",
+                          rpc.receiveSet(
+                                  NetworkMailboxServiceReceiveSetRequest.newBuilder()
+                                      .setConnection(connection)
+                                      .build())
+                              .getFrameJson()
+                              .toStringUtf8()));
+              allCalls.add(
+                  () ->
+                      assertEquals(
+                          "attempt-result",
+                          rpc.attemptBegin(
+                                  NetworkMailboxServiceAttemptBeginRequest.newBuilder()
+                                      .setConnection(connection)
+                                      .build())
+                              .getFrameJson()
+                              .toStringUtf8()));
+              allCalls.add(
+                  () ->
+                      assertEquals(
+                          "admit-result",
+                          rpc.executionAdmit(
+                                  NetworkMailboxServiceExecutionAdmitRequest.newBuilder()
+                                      .setConnection(connection)
+                                      .build())
+                              .getFrameJson()
+                              .toStringUtf8()));
               allCalls.add(
                   () ->
                       assertEquals(

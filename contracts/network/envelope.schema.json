@@ -1156,6 +1156,10 @@
         },
         "membership_id": {
           "$ref": "#/$defs/OpaqueId"
+        },
+        "state_version": {
+          "$ref": "address.schema.json#/$defs/PositiveUint64",
+          "description": "Server recipient.state_version, used as RECEIPT expected_state_version."
         }
       },
       "required": [

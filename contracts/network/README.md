@@ -1,5 +1,7 @@
 # Auriga 通信网络契约 v1（N0）
 
+普通会话耐久 SEND 的入口、幂等、显式接收及事务边界见 [durable-send.md](durable-send.md)。
+
 内部连接历史核验：IAM 成功兑换同事务保存永久最小 connection anchor，
 `ResolveNetworkTargetResponse` 追加 field6 `connection_anchor`；升级前 ingress 缺锚点时
 保留 fields1–5 行为且不补历史。`ReadNetworkConnectionAnchor(original,current)` 仅供

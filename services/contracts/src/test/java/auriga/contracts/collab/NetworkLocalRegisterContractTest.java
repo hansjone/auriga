@@ -15,11 +15,15 @@ import tools.jackson.databind.json.JsonMapper;
 /** Generated contract and byte transport only; no production authentication or persistence. */
 class NetworkLocalRegisterContractTest {
   @Test
-  void exactlyEightUnaryMethodsAndSeventeenMessages() {
+  void exactlyTwelveUnaryMethodsAndTwentyFiveMessages() {
     var file = NetworkMailboxServiceLocalRegisterRequest.getDescriptor().getFile();
     var service = file.findServiceByName("NetworkMailboxService");
     var names =
         List.of(
+            "Submit",
+            "ReceiveSet",
+            "AttemptBegin",
+            "ExecutionAdmit",
             "Ready",
             "Head",
             "Fetch",
@@ -29,10 +33,10 @@ class NetworkLocalRegisterContractTest {
             "SourceGet",
             "SourceRevoke");
     assertEquals(1, file.getServices().size());
-    assertEquals(17, file.getMessageTypes().size());
+    assertEquals(25, file.getMessageTypes().size());
     assertEquals(
         names, service.getMethods().stream().map(Descriptors.MethodDescriptor::getName).toList());
-    assertEquals(8, NetworkMailboxServiceGrpc.getServiceDescriptor().getMethods().size());
+    assertEquals(12, NetworkMailboxServiceGrpc.getServiceDescriptor().getMethods().size());
     for (var method : NetworkMailboxServiceGrpc.getServiceDescriptor().getMethods()) {
       assertEquals(MethodDescriptor.MethodType.UNARY, method.getType());
     }
@@ -50,9 +54,14 @@ class NetworkLocalRegisterContractTest {
       assertEquals(NetworkMailboxConnection.getDescriptor(), connection.getMessageType());
       assertFalse(connection.isRepeated());
       assertNull(connection.getContainingOneof());
-      if (!method.getName().equals("Head")) assertBytes(input.findFieldByNumber(2));
+      if (!method.getName().equals("Head"))
+        assertBytes(
+            input.findFieldByNumber(2),
+            method.getName().equals("Submit") ? "submit_json" : "frame_json");
       assertEquals(1, method.getOutputType().getFields().size());
-      assertBytes(method.getOutputType().findFieldByNumber(1));
+      assertBytes(
+          method.getOutputType().findFieldByNumber(1),
+          method.getName().equals("Submit") ? "result_json" : "frame_json");
     }
     var connection = NetworkMailboxConnection.getDescriptor();
     var fields =
@@ -66,9 +75,9 @@ class NetworkLocalRegisterContractTest {
     }
   }
 
-  private static void assertBytes(Descriptors.FieldDescriptor field) {
+  private static void assertBytes(Descriptors.FieldDescriptor field, String name) {
     assertNotNull(field);
-    assertEquals("frame_json", field.getName());
+    assertEquals(name, field.getName());
     assertEquals(Descriptors.FieldDescriptor.Type.BYTES, field.getType());
     assertFalse(field.isRepeated());
     assertNull(field.getContainingOneof());

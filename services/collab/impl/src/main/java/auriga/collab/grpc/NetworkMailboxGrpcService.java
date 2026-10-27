@@ -20,6 +20,67 @@ public class NetworkMailboxGrpcService
     this.service = service;
   }
 
+  @Override
+  @AuthenticatedOnly
+  public void submit(
+      NetworkMailboxServiceSubmitRequest request,
+      StreamObserver<NetworkMailboxServiceSubmitResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceSubmitResponse.newBuilder()
+            .setResultJson(
+                ByteString.copyFromUtf8(
+                    service.submit(
+                        connection(request.getConnection()),
+                        request.getSubmitJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void receiveSet(
+      NetworkMailboxServiceReceiveSetRequest request,
+      StreamObserver<NetworkMailboxServiceReceiveSetResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceReceiveSetResponse.newBuilder()
+            .setFrameJson(
+                ByteString.copyFromUtf8(
+                    service.receiveSet(
+                        connection(request.getConnection()), request.getFrameJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void attemptBegin(
+      NetworkMailboxServiceAttemptBeginRequest request,
+      StreamObserver<NetworkMailboxServiceAttemptBeginResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceAttemptBeginResponse.newBuilder()
+            .setFrameJson(
+                ByteString.copyFromUtf8(
+                    service.attemptBegin(
+                        connection(request.getConnection()), request.getFrameJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void executionAdmit(
+      NetworkMailboxServiceExecutionAdmitRequest request,
+      StreamObserver<NetworkMailboxServiceExecutionAdmitResponse> observer) {
+    observer.onNext(
+        NetworkMailboxServiceExecutionAdmitResponse.newBuilder()
+            .setFrameJson(
+                ByteString.copyFromUtf8(
+                    service.executionAdmit(
+                        connection(request.getConnection()), request.getFrameJson().toByteArray())))
+            .build());
+    observer.onCompleted();
+  }
+
   private static NetworkAuthorityConnection connection(NetworkMailboxConnection request) {
     var caller =
         AuthorizationRules.currentPrincipal()

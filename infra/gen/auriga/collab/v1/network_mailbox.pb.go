@@ -21,6 +21,391 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type NetworkMailboxServiceSubmitRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	SubmitJson    []byte                    `protobuf:"bytes,2,opt,name=submit_json,json=submitJson,proto3" json:"submit_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSubmitRequest) Reset() {
+	*x = NetworkMailboxServiceSubmitRequest{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSubmitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSubmitRequest) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSubmitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSubmitRequest.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSubmitRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *NetworkMailboxServiceSubmitRequest) GetConnection() *NetworkMailboxConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *NetworkMailboxServiceSubmitRequest) GetSubmitJson() []byte {
+	if x != nil {
+		return x.SubmitJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceSubmitResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Complete saved SendResult. Same-key retries recover this original JSON.
+	ResultJson    []byte `protobuf:"bytes,1,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceSubmitResponse) Reset() {
+	*x = NetworkMailboxServiceSubmitResponse{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceSubmitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceSubmitResponse) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceSubmitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceSubmitResponse.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceSubmitResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *NetworkMailboxServiceSubmitResponse) GetResultJson() []byte {
+	if x != nil {
+		return x.ResultJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceReceiveSetRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	FrameJson     []byte                    `protobuf:"bytes,2,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceReceiveSetRequest) Reset() {
+	*x = NetworkMailboxServiceReceiveSetRequest{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceReceiveSetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceReceiveSetRequest) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceReceiveSetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceReceiveSetRequest.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceReceiveSetRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *NetworkMailboxServiceReceiveSetRequest) GetConnection() *NetworkMailboxConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *NetworkMailboxServiceReceiveSetRequest) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceReceiveSetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FrameJson     []byte                 `protobuf:"bytes,1,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceReceiveSetResponse) Reset() {
+	*x = NetworkMailboxServiceReceiveSetResponse{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceReceiveSetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceReceiveSetResponse) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceReceiveSetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceReceiveSetResponse.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceReceiveSetResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *NetworkMailboxServiceReceiveSetResponse) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceAttemptBeginRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	FrameJson     []byte                    `protobuf:"bytes,2,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceAttemptBeginRequest) Reset() {
+	*x = NetworkMailboxServiceAttemptBeginRequest{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceAttemptBeginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceAttemptBeginRequest) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceAttemptBeginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceAttemptBeginRequest.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceAttemptBeginRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *NetworkMailboxServiceAttemptBeginRequest) GetConnection() *NetworkMailboxConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *NetworkMailboxServiceAttemptBeginRequest) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceAttemptBeginResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FrameJson     []byte                 `protobuf:"bytes,1,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceAttemptBeginResponse) Reset() {
+	*x = NetworkMailboxServiceAttemptBeginResponse{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceAttemptBeginResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceAttemptBeginResponse) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceAttemptBeginResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceAttemptBeginResponse.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceAttemptBeginResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *NetworkMailboxServiceAttemptBeginResponse) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceExecutionAdmitRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Connection    *NetworkMailboxConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	FrameJson     []byte                    `protobuf:"bytes,2,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceExecutionAdmitRequest) Reset() {
+	*x = NetworkMailboxServiceExecutionAdmitRequest{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceExecutionAdmitRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceExecutionAdmitRequest) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceExecutionAdmitRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceExecutionAdmitRequest.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceExecutionAdmitRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *NetworkMailboxServiceExecutionAdmitRequest) GetConnection() *NetworkMailboxConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *NetworkMailboxServiceExecutionAdmitRequest) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
+type NetworkMailboxServiceExecutionAdmitResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FrameJson     []byte                 `protobuf:"bytes,1,opt,name=frame_json,json=frameJson,proto3" json:"frame_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkMailboxServiceExecutionAdmitResponse) Reset() {
+	*x = NetworkMailboxServiceExecutionAdmitResponse{}
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkMailboxServiceExecutionAdmitResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkMailboxServiceExecutionAdmitResponse) ProtoMessage() {}
+
+func (x *NetworkMailboxServiceExecutionAdmitResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkMailboxServiceExecutionAdmitResponse.ProtoReflect.Descriptor instead.
+func (*NetworkMailboxServiceExecutionAdmitResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *NetworkMailboxServiceExecutionAdmitResponse) GetFrameJson() []byte {
+	if x != nil {
+		return x.FrameJson
+	}
+	return nil
+}
+
 // All fields originate in the authenticated callout/IAM grant, never JSON or
 // NATS headers. tenant_id MUST equal the delegated metadata tenant.
 type NetworkMailboxConnection struct {
@@ -38,7 +423,7 @@ type NetworkMailboxConnection struct {
 
 func (x *NetworkMailboxConnection) Reset() {
 	*x = NetworkMailboxConnection{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[0]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -50,7 +435,7 @@ func (x *NetworkMailboxConnection) String() string {
 func (*NetworkMailboxConnection) ProtoMessage() {}
 
 func (x *NetworkMailboxConnection) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[0]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -63,7 +448,7 @@ func (x *NetworkMailboxConnection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkMailboxConnection.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxConnection) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{0}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NetworkMailboxConnection) GetTenantId() string {
@@ -128,7 +513,7 @@ type NetworkMailboxServiceReadyRequest struct {
 
 func (x *NetworkMailboxServiceReadyRequest) Reset() {
 	*x = NetworkMailboxServiceReadyRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[1]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -140,7 +525,7 @@ func (x *NetworkMailboxServiceReadyRequest) String() string {
 func (*NetworkMailboxServiceReadyRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceReadyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[1]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -153,7 +538,7 @@ func (x *NetworkMailboxServiceReadyRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use NetworkMailboxServiceReadyRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceReadyRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{1}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *NetworkMailboxServiceReadyRequest) GetConnection() *NetworkMailboxConnection {
@@ -180,7 +565,7 @@ type NetworkMailboxServiceReadyResponse struct {
 
 func (x *NetworkMailboxServiceReadyResponse) Reset() {
 	*x = NetworkMailboxServiceReadyResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[2]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -192,7 +577,7 @@ func (x *NetworkMailboxServiceReadyResponse) String() string {
 func (*NetworkMailboxServiceReadyResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceReadyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[2]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -205,7 +590,7 @@ func (x *NetworkMailboxServiceReadyResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use NetworkMailboxServiceReadyResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceReadyResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{2}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *NetworkMailboxServiceReadyResponse) GetFrameJson() []byte {
@@ -224,7 +609,7 @@ type NetworkMailboxServiceHeadRequest struct {
 
 func (x *NetworkMailboxServiceHeadRequest) Reset() {
 	*x = NetworkMailboxServiceHeadRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[3]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -236,7 +621,7 @@ func (x *NetworkMailboxServiceHeadRequest) String() string {
 func (*NetworkMailboxServiceHeadRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceHeadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[3]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -249,7 +634,7 @@ func (x *NetworkMailboxServiceHeadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkMailboxServiceHeadRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceHeadRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{3}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *NetworkMailboxServiceHeadRequest) GetConnection() *NetworkMailboxConnection {
@@ -269,7 +654,7 @@ type NetworkMailboxServiceHeadResponse struct {
 
 func (x *NetworkMailboxServiceHeadResponse) Reset() {
 	*x = NetworkMailboxServiceHeadResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[4]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -281,7 +666,7 @@ func (x *NetworkMailboxServiceHeadResponse) String() string {
 func (*NetworkMailboxServiceHeadResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceHeadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[4]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -294,7 +679,7 @@ func (x *NetworkMailboxServiceHeadResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use NetworkMailboxServiceHeadResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceHeadResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{4}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *NetworkMailboxServiceHeadResponse) GetFrameJson() []byte {
@@ -314,7 +699,7 @@ type NetworkMailboxServiceFetchRequest struct {
 
 func (x *NetworkMailboxServiceFetchRequest) Reset() {
 	*x = NetworkMailboxServiceFetchRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[5]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -326,7 +711,7 @@ func (x *NetworkMailboxServiceFetchRequest) String() string {
 func (*NetworkMailboxServiceFetchRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceFetchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[5]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -339,7 +724,7 @@ func (x *NetworkMailboxServiceFetchRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use NetworkMailboxServiceFetchRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceFetchRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{5}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NetworkMailboxServiceFetchRequest) GetConnection() *NetworkMailboxConnection {
@@ -367,7 +752,7 @@ type NetworkMailboxServiceFetchResponse struct {
 
 func (x *NetworkMailboxServiceFetchResponse) Reset() {
 	*x = NetworkMailboxServiceFetchResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[6]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -379,7 +764,7 @@ func (x *NetworkMailboxServiceFetchResponse) String() string {
 func (*NetworkMailboxServiceFetchResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceFetchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[6]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -392,7 +777,7 @@ func (x *NetworkMailboxServiceFetchResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use NetworkMailboxServiceFetchResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceFetchResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{6}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *NetworkMailboxServiceFetchResponse) GetFrameJson() []byte {
@@ -412,7 +797,7 @@ type NetworkMailboxServiceReceiptRequest struct {
 
 func (x *NetworkMailboxServiceReceiptRequest) Reset() {
 	*x = NetworkMailboxServiceReceiptRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[7]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -424,7 +809,7 @@ func (x *NetworkMailboxServiceReceiptRequest) String() string {
 func (*NetworkMailboxServiceReceiptRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceReceiptRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[7]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -437,7 +822,7 @@ func (x *NetworkMailboxServiceReceiptRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use NetworkMailboxServiceReceiptRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceReceiptRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{7}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *NetworkMailboxServiceReceiptRequest) GetConnection() *NetworkMailboxConnection {
@@ -464,7 +849,7 @@ type NetworkMailboxServiceReceiptResponse struct {
 
 func (x *NetworkMailboxServiceReceiptResponse) Reset() {
 	*x = NetworkMailboxServiceReceiptResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[8]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -476,7 +861,7 @@ func (x *NetworkMailboxServiceReceiptResponse) String() string {
 func (*NetworkMailboxServiceReceiptResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceReceiptResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[8]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -489,7 +874,7 @@ func (x *NetworkMailboxServiceReceiptResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use NetworkMailboxServiceReceiptResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceReceiptResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{8}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *NetworkMailboxServiceReceiptResponse) GetFrameJson() []byte {
@@ -522,7 +907,7 @@ type NetworkMailboxServiceLocalRegisterRequest struct {
 
 func (x *NetworkMailboxServiceLocalRegisterRequest) Reset() {
 	*x = NetworkMailboxServiceLocalRegisterRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[9]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -534,7 +919,7 @@ func (x *NetworkMailboxServiceLocalRegisterRequest) String() string {
 func (*NetworkMailboxServiceLocalRegisterRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceLocalRegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[9]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -547,7 +932,7 @@ func (x *NetworkMailboxServiceLocalRegisterRequest) ProtoReflect() protoreflect.
 
 // Deprecated: Use NetworkMailboxServiceLocalRegisterRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceLocalRegisterRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{9}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *NetworkMailboxServiceLocalRegisterRequest) GetConnection() *NetworkMailboxConnection {
@@ -579,7 +964,7 @@ type NetworkMailboxServiceLocalRegisterResponse struct {
 
 func (x *NetworkMailboxServiceLocalRegisterResponse) Reset() {
 	*x = NetworkMailboxServiceLocalRegisterResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[10]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +976,7 @@ func (x *NetworkMailboxServiceLocalRegisterResponse) String() string {
 func (*NetworkMailboxServiceLocalRegisterResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceLocalRegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[10]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +989,7 @@ func (x *NetworkMailboxServiceLocalRegisterResponse) ProtoReflect() protoreflect
 
 // Deprecated: Use NetworkMailboxServiceLocalRegisterResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceLocalRegisterResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{10}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NetworkMailboxServiceLocalRegisterResponse) GetFrameJson() []byte {
@@ -650,7 +1035,7 @@ type NetworkMailboxServiceSourceRegisterRequest struct {
 
 func (x *NetworkMailboxServiceSourceRegisterRequest) Reset() {
 	*x = NetworkMailboxServiceSourceRegisterRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[11]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -662,7 +1047,7 @@ func (x *NetworkMailboxServiceSourceRegisterRequest) String() string {
 func (*NetworkMailboxServiceSourceRegisterRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceSourceRegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[11]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -675,7 +1060,7 @@ func (x *NetworkMailboxServiceSourceRegisterRequest) ProtoReflect() protoreflect
 
 // Deprecated: Use NetworkMailboxServiceSourceRegisterRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceSourceRegisterRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{11}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *NetworkMailboxServiceSourceRegisterRequest) GetConnection() *NetworkMailboxConnection {
@@ -712,7 +1097,7 @@ type NetworkMailboxServiceSourceRegisterResponse struct {
 
 func (x *NetworkMailboxServiceSourceRegisterResponse) Reset() {
 	*x = NetworkMailboxServiceSourceRegisterResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[12]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -724,7 +1109,7 @@ func (x *NetworkMailboxServiceSourceRegisterResponse) String() string {
 func (*NetworkMailboxServiceSourceRegisterResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceSourceRegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[12]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -737,7 +1122,7 @@ func (x *NetworkMailboxServiceSourceRegisterResponse) ProtoReflect() protoreflec
 
 // Deprecated: Use NetworkMailboxServiceSourceRegisterResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceSourceRegisterResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{12}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *NetworkMailboxServiceSourceRegisterResponse) GetFrameJson() []byte {
@@ -770,7 +1155,7 @@ type NetworkMailboxServiceSourceGetRequest struct {
 
 func (x *NetworkMailboxServiceSourceGetRequest) Reset() {
 	*x = NetworkMailboxServiceSourceGetRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[13]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -782,7 +1167,7 @@ func (x *NetworkMailboxServiceSourceGetRequest) String() string {
 func (*NetworkMailboxServiceSourceGetRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceSourceGetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[13]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -795,7 +1180,7 @@ func (x *NetworkMailboxServiceSourceGetRequest) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use NetworkMailboxServiceSourceGetRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceSourceGetRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{13}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *NetworkMailboxServiceSourceGetRequest) GetConnection() *NetworkMailboxConnection {
@@ -830,7 +1215,7 @@ type NetworkMailboxServiceSourceGetResponse struct {
 
 func (x *NetworkMailboxServiceSourceGetResponse) Reset() {
 	*x = NetworkMailboxServiceSourceGetResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[14]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -842,7 +1227,7 @@ func (x *NetworkMailboxServiceSourceGetResponse) String() string {
 func (*NetworkMailboxServiceSourceGetResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceSourceGetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[14]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -855,7 +1240,7 @@ func (x *NetworkMailboxServiceSourceGetResponse) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use NetworkMailboxServiceSourceGetResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceSourceGetResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{14}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *NetworkMailboxServiceSourceGetResponse) GetFrameJson() []byte {
@@ -885,7 +1270,7 @@ type NetworkMailboxServiceSourceRevokeRequest struct {
 
 func (x *NetworkMailboxServiceSourceRevokeRequest) Reset() {
 	*x = NetworkMailboxServiceSourceRevokeRequest{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[15]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -897,7 +1282,7 @@ func (x *NetworkMailboxServiceSourceRevokeRequest) String() string {
 func (*NetworkMailboxServiceSourceRevokeRequest) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceSourceRevokeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[15]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -910,7 +1295,7 @@ func (x *NetworkMailboxServiceSourceRevokeRequest) ProtoReflect() protoreflect.M
 
 // Deprecated: Use NetworkMailboxServiceSourceRevokeRequest.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceSourceRevokeRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{15}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *NetworkMailboxServiceSourceRevokeRequest) GetConnection() *NetworkMailboxConnection {
@@ -942,7 +1327,7 @@ type NetworkMailboxServiceSourceRevokeResponse struct {
 
 func (x *NetworkMailboxServiceSourceRevokeResponse) Reset() {
 	*x = NetworkMailboxServiceSourceRevokeResponse{}
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[16]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -954,7 +1339,7 @@ func (x *NetworkMailboxServiceSourceRevokeResponse) String() string {
 func (*NetworkMailboxServiceSourceRevokeResponse) ProtoMessage() {}
 
 func (x *NetworkMailboxServiceSourceRevokeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[16]
+	mi := &file_auriga_collab_v1_network_mailbox_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -967,7 +1352,7 @@ func (x *NetworkMailboxServiceSourceRevokeResponse) ProtoReflect() protoreflect.
 
 // Deprecated: Use NetworkMailboxServiceSourceRevokeResponse.ProtoReflect.Descriptor instead.
 func (*NetworkMailboxServiceSourceRevokeResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{16}
+	return file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *NetworkMailboxServiceSourceRevokeResponse) GetFrameJson() []byte {
@@ -981,7 +1366,43 @@ var File_auriga_collab_v1_network_mailbox_proto protoreflect.FileDescriptor
 
 const file_auriga_collab_v1_network_mailbox_proto_rawDesc = "" +
 	"\n" +
-	"&auriga/collab/v1/network_mailbox.proto\x12\x10auriga.collab.v1\"\xdc\x01\n" +
+	"&auriga/collab/v1/network_mailbox.proto\x12\x10auriga.collab.v1\"\x91\x01\n" +
+	"\"NetworkMailboxServiceSubmitRequest\x12J\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2*.auriga.collab.v1.NetworkMailboxConnectionR\n" +
+	"connection\x12\x1f\n" +
+	"\vsubmit_json\x18\x02 \x01(\fR\n" +
+	"submitJson\"F\n" +
+	"#NetworkMailboxServiceSubmitResponse\x12\x1f\n" +
+	"\vresult_json\x18\x01 \x01(\fR\n" +
+	"resultJson\"\x93\x01\n" +
+	"&NetworkMailboxServiceReceiveSetRequest\x12J\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2*.auriga.collab.v1.NetworkMailboxConnectionR\n" +
+	"connection\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x02 \x01(\fR\tframeJson\"H\n" +
+	"'NetworkMailboxServiceReceiveSetResponse\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson\"\x95\x01\n" +
+	"(NetworkMailboxServiceAttemptBeginRequest\x12J\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2*.auriga.collab.v1.NetworkMailboxConnectionR\n" +
+	"connection\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x02 \x01(\fR\tframeJson\"J\n" +
+	")NetworkMailboxServiceAttemptBeginResponse\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson\"\x97\x01\n" +
+	"*NetworkMailboxServiceExecutionAdmitRequest\x12J\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2*.auriga.collab.v1.NetworkMailboxConnectionR\n" +
+	"connection\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x02 \x01(\fR\tframeJson\"L\n" +
+	"+NetworkMailboxServiceExecutionAdmitResponse\x12\x1d\n" +
+	"\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson\"\xdc\x01\n" +
 	"\x18NetworkMailboxConnection\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x14\n" +
 	"\x05realm\x18\x02 \x01(\tR\x05realm\x12\x12\n" +
@@ -1059,8 +1480,13 @@ const file_auriga_collab_v1_network_mailbox_proto_rawDesc = "" +
 	"frame_json\x18\x02 \x01(\fR\tframeJson\"J\n" +
 	")NetworkMailboxServiceSourceRevokeResponse\x12\x1d\n" +
 	"\n" +
-	"frame_json\x18\x01 \x01(\fR\tframeJson2\x91\b\n" +
-	"\x15NetworkMailboxService\x12r\n" +
+	"frame_json\x18\x01 \x01(\fR\tframeJson2\xa6\f\n" +
+	"\x15NetworkMailboxService\x12u\n" +
+	"\x06Submit\x124.auriga.collab.v1.NetworkMailboxServiceSubmitRequest\x1a5.auriga.collab.v1.NetworkMailboxServiceSubmitResponse\x12\x81\x01\n" +
+	"\n" +
+	"ReceiveSet\x128.auriga.collab.v1.NetworkMailboxServiceReceiveSetRequest\x1a9.auriga.collab.v1.NetworkMailboxServiceReceiveSetResponse\x12\x87\x01\n" +
+	"\fAttemptBegin\x12:.auriga.collab.v1.NetworkMailboxServiceAttemptBeginRequest\x1a;.auriga.collab.v1.NetworkMailboxServiceAttemptBeginResponse\x12\x8d\x01\n" +
+	"\x0eExecutionAdmit\x12<.auriga.collab.v1.NetworkMailboxServiceExecutionAdmitRequest\x1a=.auriga.collab.v1.NetworkMailboxServiceExecutionAdmitResponse\x12r\n" +
 	"\x05Ready\x123.auriga.collab.v1.NetworkMailboxServiceReadyRequest\x1a4.auriga.collab.v1.NetworkMailboxServiceReadyResponse\x12o\n" +
 	"\x04Head\x122.auriga.collab.v1.NetworkMailboxServiceHeadRequest\x1a3.auriga.collab.v1.NetworkMailboxServiceHeadResponse\x12r\n" +
 	"\x05Fetch\x123.auriga.collab.v1.NetworkMailboxServiceFetchRequest\x1a4.auriga.collab.v1.NetworkMailboxServiceFetchResponse\x12x\n" +
@@ -1083,56 +1509,76 @@ func file_auriga_collab_v1_network_mailbox_proto_rawDescGZIP() []byte {
 	return file_auriga_collab_v1_network_mailbox_proto_rawDescData
 }
 
-var file_auriga_collab_v1_network_mailbox_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_auriga_collab_v1_network_mailbox_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_auriga_collab_v1_network_mailbox_proto_goTypes = []any{
-	(*NetworkMailboxConnection)(nil),                    // 0: auriga.collab.v1.NetworkMailboxConnection
-	(*NetworkMailboxServiceReadyRequest)(nil),           // 1: auriga.collab.v1.NetworkMailboxServiceReadyRequest
-	(*NetworkMailboxServiceReadyResponse)(nil),          // 2: auriga.collab.v1.NetworkMailboxServiceReadyResponse
-	(*NetworkMailboxServiceHeadRequest)(nil),            // 3: auriga.collab.v1.NetworkMailboxServiceHeadRequest
-	(*NetworkMailboxServiceHeadResponse)(nil),           // 4: auriga.collab.v1.NetworkMailboxServiceHeadResponse
-	(*NetworkMailboxServiceFetchRequest)(nil),           // 5: auriga.collab.v1.NetworkMailboxServiceFetchRequest
-	(*NetworkMailboxServiceFetchResponse)(nil),          // 6: auriga.collab.v1.NetworkMailboxServiceFetchResponse
-	(*NetworkMailboxServiceReceiptRequest)(nil),         // 7: auriga.collab.v1.NetworkMailboxServiceReceiptRequest
-	(*NetworkMailboxServiceReceiptResponse)(nil),        // 8: auriga.collab.v1.NetworkMailboxServiceReceiptResponse
-	(*NetworkMailboxServiceLocalRegisterRequest)(nil),   // 9: auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
-	(*NetworkMailboxServiceLocalRegisterResponse)(nil),  // 10: auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
-	(*NetworkMailboxServiceSourceRegisterRequest)(nil),  // 11: auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest
-	(*NetworkMailboxServiceSourceRegisterResponse)(nil), // 12: auriga.collab.v1.NetworkMailboxServiceSourceRegisterResponse
-	(*NetworkMailboxServiceSourceGetRequest)(nil),       // 13: auriga.collab.v1.NetworkMailboxServiceSourceGetRequest
-	(*NetworkMailboxServiceSourceGetResponse)(nil),      // 14: auriga.collab.v1.NetworkMailboxServiceSourceGetResponse
-	(*NetworkMailboxServiceSourceRevokeRequest)(nil),    // 15: auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest
-	(*NetworkMailboxServiceSourceRevokeResponse)(nil),   // 16: auriga.collab.v1.NetworkMailboxServiceSourceRevokeResponse
+	(*NetworkMailboxServiceSubmitRequest)(nil),          // 0: auriga.collab.v1.NetworkMailboxServiceSubmitRequest
+	(*NetworkMailboxServiceSubmitResponse)(nil),         // 1: auriga.collab.v1.NetworkMailboxServiceSubmitResponse
+	(*NetworkMailboxServiceReceiveSetRequest)(nil),      // 2: auriga.collab.v1.NetworkMailboxServiceReceiveSetRequest
+	(*NetworkMailboxServiceReceiveSetResponse)(nil),     // 3: auriga.collab.v1.NetworkMailboxServiceReceiveSetResponse
+	(*NetworkMailboxServiceAttemptBeginRequest)(nil),    // 4: auriga.collab.v1.NetworkMailboxServiceAttemptBeginRequest
+	(*NetworkMailboxServiceAttemptBeginResponse)(nil),   // 5: auriga.collab.v1.NetworkMailboxServiceAttemptBeginResponse
+	(*NetworkMailboxServiceExecutionAdmitRequest)(nil),  // 6: auriga.collab.v1.NetworkMailboxServiceExecutionAdmitRequest
+	(*NetworkMailboxServiceExecutionAdmitResponse)(nil), // 7: auriga.collab.v1.NetworkMailboxServiceExecutionAdmitResponse
+	(*NetworkMailboxConnection)(nil),                    // 8: auriga.collab.v1.NetworkMailboxConnection
+	(*NetworkMailboxServiceReadyRequest)(nil),           // 9: auriga.collab.v1.NetworkMailboxServiceReadyRequest
+	(*NetworkMailboxServiceReadyResponse)(nil),          // 10: auriga.collab.v1.NetworkMailboxServiceReadyResponse
+	(*NetworkMailboxServiceHeadRequest)(nil),            // 11: auriga.collab.v1.NetworkMailboxServiceHeadRequest
+	(*NetworkMailboxServiceHeadResponse)(nil),           // 12: auriga.collab.v1.NetworkMailboxServiceHeadResponse
+	(*NetworkMailboxServiceFetchRequest)(nil),           // 13: auriga.collab.v1.NetworkMailboxServiceFetchRequest
+	(*NetworkMailboxServiceFetchResponse)(nil),          // 14: auriga.collab.v1.NetworkMailboxServiceFetchResponse
+	(*NetworkMailboxServiceReceiptRequest)(nil),         // 15: auriga.collab.v1.NetworkMailboxServiceReceiptRequest
+	(*NetworkMailboxServiceReceiptResponse)(nil),        // 16: auriga.collab.v1.NetworkMailboxServiceReceiptResponse
+	(*NetworkMailboxServiceLocalRegisterRequest)(nil),   // 17: auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
+	(*NetworkMailboxServiceLocalRegisterResponse)(nil),  // 18: auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
+	(*NetworkMailboxServiceSourceRegisterRequest)(nil),  // 19: auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest
+	(*NetworkMailboxServiceSourceRegisterResponse)(nil), // 20: auriga.collab.v1.NetworkMailboxServiceSourceRegisterResponse
+	(*NetworkMailboxServiceSourceGetRequest)(nil),       // 21: auriga.collab.v1.NetworkMailboxServiceSourceGetRequest
+	(*NetworkMailboxServiceSourceGetResponse)(nil),      // 22: auriga.collab.v1.NetworkMailboxServiceSourceGetResponse
+	(*NetworkMailboxServiceSourceRevokeRequest)(nil),    // 23: auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest
+	(*NetworkMailboxServiceSourceRevokeResponse)(nil),   // 24: auriga.collab.v1.NetworkMailboxServiceSourceRevokeResponse
 }
 var file_auriga_collab_v1_network_mailbox_proto_depIdxs = []int32{
-	0,  // 0: auriga.collab.v1.NetworkMailboxServiceReadyRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	0,  // 1: auriga.collab.v1.NetworkMailboxServiceHeadRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	0,  // 2: auriga.collab.v1.NetworkMailboxServiceFetchRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	0,  // 3: auriga.collab.v1.NetworkMailboxServiceReceiptRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	0,  // 4: auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	0,  // 5: auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	0,  // 6: auriga.collab.v1.NetworkMailboxServiceSourceGetRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	0,  // 7: auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
-	1,  // 8: auriga.collab.v1.NetworkMailboxService.Ready:input_type -> auriga.collab.v1.NetworkMailboxServiceReadyRequest
-	3,  // 9: auriga.collab.v1.NetworkMailboxService.Head:input_type -> auriga.collab.v1.NetworkMailboxServiceHeadRequest
-	5,  // 10: auriga.collab.v1.NetworkMailboxService.Fetch:input_type -> auriga.collab.v1.NetworkMailboxServiceFetchRequest
-	7,  // 11: auriga.collab.v1.NetworkMailboxService.Receipt:input_type -> auriga.collab.v1.NetworkMailboxServiceReceiptRequest
-	9,  // 12: auriga.collab.v1.NetworkMailboxService.LocalRegister:input_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
-	11, // 13: auriga.collab.v1.NetworkMailboxService.SourceRegister:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest
-	13, // 14: auriga.collab.v1.NetworkMailboxService.SourceGet:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceGetRequest
-	15, // 15: auriga.collab.v1.NetworkMailboxService.SourceRevoke:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest
-	2,  // 16: auriga.collab.v1.NetworkMailboxService.Ready:output_type -> auriga.collab.v1.NetworkMailboxServiceReadyResponse
-	4,  // 17: auriga.collab.v1.NetworkMailboxService.Head:output_type -> auriga.collab.v1.NetworkMailboxServiceHeadResponse
-	6,  // 18: auriga.collab.v1.NetworkMailboxService.Fetch:output_type -> auriga.collab.v1.NetworkMailboxServiceFetchResponse
-	8,  // 19: auriga.collab.v1.NetworkMailboxService.Receipt:output_type -> auriga.collab.v1.NetworkMailboxServiceReceiptResponse
-	10, // 20: auriga.collab.v1.NetworkMailboxService.LocalRegister:output_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
-	12, // 21: auriga.collab.v1.NetworkMailboxService.SourceRegister:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceRegisterResponse
-	14, // 22: auriga.collab.v1.NetworkMailboxService.SourceGet:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceGetResponse
-	16, // 23: auriga.collab.v1.NetworkMailboxService.SourceRevoke:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceRevokeResponse
-	16, // [16:24] is the sub-list for method output_type
-	8,  // [8:16] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	8,  // 0: auriga.collab.v1.NetworkMailboxServiceSubmitRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 1: auriga.collab.v1.NetworkMailboxServiceReceiveSetRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 2: auriga.collab.v1.NetworkMailboxServiceAttemptBeginRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 3: auriga.collab.v1.NetworkMailboxServiceExecutionAdmitRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 4: auriga.collab.v1.NetworkMailboxServiceReadyRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 5: auriga.collab.v1.NetworkMailboxServiceHeadRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 6: auriga.collab.v1.NetworkMailboxServiceFetchRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 7: auriga.collab.v1.NetworkMailboxServiceReceiptRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 8: auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 9: auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 10: auriga.collab.v1.NetworkMailboxServiceSourceGetRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	8,  // 11: auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest.connection:type_name -> auriga.collab.v1.NetworkMailboxConnection
+	0,  // 12: auriga.collab.v1.NetworkMailboxService.Submit:input_type -> auriga.collab.v1.NetworkMailboxServiceSubmitRequest
+	2,  // 13: auriga.collab.v1.NetworkMailboxService.ReceiveSet:input_type -> auriga.collab.v1.NetworkMailboxServiceReceiveSetRequest
+	4,  // 14: auriga.collab.v1.NetworkMailboxService.AttemptBegin:input_type -> auriga.collab.v1.NetworkMailboxServiceAttemptBeginRequest
+	6,  // 15: auriga.collab.v1.NetworkMailboxService.ExecutionAdmit:input_type -> auriga.collab.v1.NetworkMailboxServiceExecutionAdmitRequest
+	9,  // 16: auriga.collab.v1.NetworkMailboxService.Ready:input_type -> auriga.collab.v1.NetworkMailboxServiceReadyRequest
+	11, // 17: auriga.collab.v1.NetworkMailboxService.Head:input_type -> auriga.collab.v1.NetworkMailboxServiceHeadRequest
+	13, // 18: auriga.collab.v1.NetworkMailboxService.Fetch:input_type -> auriga.collab.v1.NetworkMailboxServiceFetchRequest
+	15, // 19: auriga.collab.v1.NetworkMailboxService.Receipt:input_type -> auriga.collab.v1.NetworkMailboxServiceReceiptRequest
+	17, // 20: auriga.collab.v1.NetworkMailboxService.LocalRegister:input_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterRequest
+	19, // 21: auriga.collab.v1.NetworkMailboxService.SourceRegister:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceRegisterRequest
+	21, // 22: auriga.collab.v1.NetworkMailboxService.SourceGet:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceGetRequest
+	23, // 23: auriga.collab.v1.NetworkMailboxService.SourceRevoke:input_type -> auriga.collab.v1.NetworkMailboxServiceSourceRevokeRequest
+	1,  // 24: auriga.collab.v1.NetworkMailboxService.Submit:output_type -> auriga.collab.v1.NetworkMailboxServiceSubmitResponse
+	3,  // 25: auriga.collab.v1.NetworkMailboxService.ReceiveSet:output_type -> auriga.collab.v1.NetworkMailboxServiceReceiveSetResponse
+	5,  // 26: auriga.collab.v1.NetworkMailboxService.AttemptBegin:output_type -> auriga.collab.v1.NetworkMailboxServiceAttemptBeginResponse
+	7,  // 27: auriga.collab.v1.NetworkMailboxService.ExecutionAdmit:output_type -> auriga.collab.v1.NetworkMailboxServiceExecutionAdmitResponse
+	10, // 28: auriga.collab.v1.NetworkMailboxService.Ready:output_type -> auriga.collab.v1.NetworkMailboxServiceReadyResponse
+	12, // 29: auriga.collab.v1.NetworkMailboxService.Head:output_type -> auriga.collab.v1.NetworkMailboxServiceHeadResponse
+	14, // 30: auriga.collab.v1.NetworkMailboxService.Fetch:output_type -> auriga.collab.v1.NetworkMailboxServiceFetchResponse
+	16, // 31: auriga.collab.v1.NetworkMailboxService.Receipt:output_type -> auriga.collab.v1.NetworkMailboxServiceReceiptResponse
+	18, // 32: auriga.collab.v1.NetworkMailboxService.LocalRegister:output_type -> auriga.collab.v1.NetworkMailboxServiceLocalRegisterResponse
+	20, // 33: auriga.collab.v1.NetworkMailboxService.SourceRegister:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceRegisterResponse
+	22, // 34: auriga.collab.v1.NetworkMailboxService.SourceGet:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceGetResponse
+	24, // 35: auriga.collab.v1.NetworkMailboxService.SourceRevoke:output_type -> auriga.collab.v1.NetworkMailboxServiceSourceRevokeResponse
+	24, // [24:36] is the sub-list for method output_type
+	12, // [12:24] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_auriga_collab_v1_network_mailbox_proto_init() }
@@ -1146,7 +1592,7 @@ func file_auriga_collab_v1_network_mailbox_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_collab_v1_network_mailbox_proto_rawDesc), len(file_auriga_collab_v1_network_mailbox_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

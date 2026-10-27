@@ -70,6 +70,24 @@ class NetworkSourceControlPostgresTest {
   static ObjectNode legacyRequest;
 
   static class Authority extends NetworkAuthorityGrpcTest.Authority {
+    volatile boolean deliveryAllowed = true;
+    volatile Runnable afterDelivery = () -> {};
+    volatile AuthorizeNetworkDeliveryRequest lastDelivery;
+
+    @Override
+    public void authorizeNetworkDelivery(
+        AuthorizeNetworkDeliveryRequest r, StreamObserver<AuthorizeNetworkDeliveryResponse> o) {
+      lastDelivery = r;
+      afterDelivery.run();
+      o.onNext(
+          AuthorizeNetworkDeliveryResponse.newBuilder()
+              .setAllowed(deliveryAllowed)
+              .setConnection(r.getConnection())
+              .setValidUntil(expiry())
+              .build());
+      o.onCompleted();
+    }
+
     final Set<String> invalid = ConcurrentHashMap.newKeySet();
     final Set<NetworkAuthorityConnection> wrongOwner = ConcurrentHashMap.newKeySet();
     volatile Runnable beforeResolveReply = () -> {};
@@ -375,6 +393,12 @@ class NetworkSourceControlPostgresTest {
     }
 
     @Override
+    public Instant authorize(NetworkAuthorityConnection c, String message, String context) {
+      outside();
+      return super.authorize(c, message, context);
+    }
+
+    @Override
     public RegisterAgentSourceResponse registerSource(RegisterAgentSourceRequest r) {
       outside();
       return super.registerSource(r);
@@ -468,13 +492,24 @@ class NetworkSourceControlPostgresTest {
             "127.0.0.1:" + server.getPort(),
             new AurigaClientInterceptor(() -> "collab-test", Duration.ofSeconds(5)));
     client = new Client(channel);
-    source = new NetworkSourceGrpcAuthority(client, manager);
+    source =
+        new NetworkSourceGrpcAuthority(
+            client, manager, new auriga.collab.network.local.LocalTargets(jdbc, manager));
     keys = new NetworkSigningKeys(CLOCK, 1);
     var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
     keys.add(
         "2",
         "protocol_response",
         "source-test",
+        pair.getPublic(),
+        pair.getPrivate(),
+        now().minusSeconds(30),
+        now().plusSeconds(3600),
+        NetworkSigningKeys.State.ACTIVE);
+    keys.add(
+        "2",
+        "business_delivery",
+        "send-delivery-test",
         pair.getPublic(),
         pair.getPrivate(),
         now().minusSeconds(30),
@@ -514,6 +549,8 @@ class NetworkSourceControlPostgresTest {
 
   @AfterEach
   void reset() {
+    authority.deliveryAllowed = true;
+    authority.afterDelivery = () -> {};
     authority.beforeResolveReply = () -> {};
     authority.metadata = true;
     authority.sameHistoryOwner = true;
@@ -757,6 +794,259 @@ class NetworkSourceControlPostgresTest {
         .replace('1', 'b')
         .replace('8', 'c')
         .replace('9', 'd');
+  }
+
+  static ObjectNode receive(Fixture f, boolean enabled, String version) {
+    var request = frame(f, "receive_set");
+    request.remove("native_witness");
+    request.put("enabled", enabled).put("expected_version", version);
+    return request;
+  }
+
+  static ObjectNode sendRequest(Fixture from, Fixture to) {
+    String binding = binding(issue(from));
+    assertEquals("active", get(from, binding).path("source").path("state").asString());
+    var enabled =
+        NetworkJson.parse(call(() -> wire.receiveSet(to.c(), bytes(receive(to, true, "1")))));
+    assertEquals("receive_set_result", enabled.path("type").asString(), enabled.toString());
+    var request =
+        ((ObjectNode) NetworkJson.parse("{}"))
+            .put("kind", "message")
+            .put("durability", "durable")
+            .put("intent", "information");
+    request
+        .putObject("to")
+        .put("version", 1)
+        .put("realm", "2")
+        .put("node", to.c().getNode())
+        .put("local", "1")
+        .put("type", "session");
+    request.putObject("body").put("subtype", "text").put("text", "durable hello");
+    request.putObject("source").put("source_binding", binding);
+    request
+        .putObject("idempotency")
+        .put(
+            "producer_epoch",
+            db(
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT producer_epoch FROM collab.network_node WHERE tenant_id=? AND realm='2' AND node_id=?",
+                        String.class,
+                        TENANT,
+                        from.c().getNode())))
+        .put("key", "send-" + UuidV7.next());
+    return request;
+  }
+
+  static int sentCount(Fixture from, String table) {
+    return db(
+        () ->
+            jdbc.queryForObject(
+                "SELECT count(*) FROM collab."
+                    + table
+                    + ("network_message".equals(table)
+                        ? " WHERE tenant_id=? AND source_node=?"
+                        : " WHERE tenant_id=? AND message_id IN (SELECT id FROM collab.network_message WHERE source_node=?)"),
+                Integer.class,
+                TENANT,
+                from.c().getNode()));
+  }
+
+  @Test
+  void sendConcurrentSameKeyAndLostReplyRecoverOneOriginalResult() throws Exception {
+    var from = fresh();
+    var to = fresh();
+    var request = sendRequest(from, to);
+    var entered = new CountDownLatch(2);
+    var release = new CountDownLatch(1);
+    authority.afterDelivery =
+        () -> {
+          entered.countDown();
+          await(release);
+        };
+    String original;
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var a = executor.submit(() -> call(() -> wire.submit(from.c(), bytes(request))));
+      var b = executor.submit(() -> call(() -> wire.submit(from.c(), bytes(request))));
+      assertTrue(entered.await(4, TimeUnit.SECONDS));
+      release.countDown();
+      original = a.get(6, TimeUnit.SECONDS);
+      String second = b.get(6, TimeUnit.SECONDS);
+      assertEquals(1, sentCount(from, "network_message"), "duplicate body must never be stored");
+      assertEquals(
+          1, sentCount(from, "network_mail_item"), "duplicate mailbox item must never be stored");
+      assertEquals(original, second);
+    } finally {
+      release.countDown();
+      authority.afterDelivery = () -> {};
+    }
+    assertEquals(
+        to.c(), authority.lastDelivery.getConnection(), "fifth RPC must use target connection");
+    assertEquals(1, sentCount(from, "network_message"), "duplicate body must never be stored");
+    assertEquals(
+        1, sentCount(from, "network_mail_item"), "duplicate mailbox item must never be stored");
+    var changed = request.deepCopy();
+    ((ObjectNode) changed.path("body")).put("text", "different");
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> wire.submit(from.c(), bytes(changed))), "network.conflict");
+    var next = reconnect(from);
+    var restarted = newWire();
+    assertEquals(
+        original,
+        call(() -> restarted.submit(next.c(), bytes(request))),
+        "saved complete result survives reconnect/restart without restamping");
+  }
+
+  @Test
+  void sendFifthDenialHasNoBodyOrMailboxAndRetainsOriginalPending() {
+    var from = fresh();
+    var to = fresh();
+    var request = sendRequest(from, to);
+    authority.deliveryAllowed = false;
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> wire.submit(from.c(), bytes(request))), "network.unauthorized");
+    assertEquals(0, sentCount(from, "network_message"));
+    assertEquals(0, sentCount(from, "network_mail_item"));
+    assertEquals(
+        1,
+        db(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_submit WHERE tenant_id=? AND source_binding=? AND result_json IS NULL",
+                    Integer.class,
+                    TENANT,
+                    request.path("source").path("source_binding").asString())));
+  }
+
+  @Test
+  void sendFinalCasRejectsStopPermissionObservationConnectionAndReceiveRaces() {
+    for (String race :
+        List.of("stop", "permission", "observation", "connection", "receive", "registration")) {
+      var from = fresh();
+      var to = fresh();
+      var request = sendRequest(from, to);
+      String binding = request.path("source").path("source_binding").asString();
+      authority.afterDelivery =
+          () -> {
+            if ("receive".equals(race)) {
+              call(() -> wire.receiveSet(to.c(), bytes(receive(to, false, "2"))));
+              return;
+            }
+            db(
+                () -> {
+                  switch (race) {
+                    case "stop" ->
+                        jdbc.update(
+                            "UPDATE collab.network_source_lineage SET stopped=true,stop_version=stop_version+1 WHERE tenant_id=? AND node_id=?",
+                            TENANT,
+                            from.c().getNode());
+                    case "permission" ->
+                        jdbc.update(
+                            "UPDATE collab.network_source_lineage SET permission_version=permission_version+1 WHERE tenant_id=? AND node_id=?",
+                            TENANT,
+                            from.c().getNode());
+                    case "observation" ->
+                        jdbc.update(
+                            "UPDATE collab.network_source_binding SET observed_at=observed_at+interval '1 second' WHERE tenant_id=? AND source_binding=?",
+                            TENANT,
+                            binding);
+                    case "connection" ->
+                        jdbc.update(
+                            "UPDATE collab.network_node SET connection_epoch=connection_epoch+1 WHERE tenant_id=? AND node_id=?",
+                            TENANT,
+                            to.c().getNode());
+                    case "registration" ->
+                        jdbc.update(
+                            "UPDATE collab.network_local_registration SET status='retired' WHERE tenant_id=? AND node_id=?",
+                            TENANT,
+                            to.c().getNode());
+                    default -> throw new AssertionError(race);
+                  }
+                  return null;
+                });
+          };
+      assertThrows(
+          auriga.common.error.AurigaException.class,
+          () -> call(() -> wire.submit(from.c(), bytes(request))),
+          race);
+      assertEquals(0, sentCount(from, "network_message"), race);
+      assertEquals(0, sentCount(from, "network_mail_item"), race);
+      authority.afterDelivery = () -> {};
+    }
+  }
+
+  @Test
+  void sendReceiveControlRequiresFullWitnessAndCrossNodeCannotReplay() {
+    var from = fresh();
+    var to = fresh();
+    var other = fresh();
+    var request = sendRequest(from, to);
+    var forged = receive(to, false, "2");
+    ((ObjectNode) forged.path("registration")).put("allocation_op_id", "forged");
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> wire.receiveSet(to.c(), bytes(forged))), "network.conflict");
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> wire.submit(other.c(), bytes(request))), "network.conflict");
+    assertEquals(0, sentCount(from, "network_message"));
+  }
+
+  @Test
+  void sendFetchContinuationAndAttemptAdmissionExposeServerStateVersion() {
+    var from = fresh();
+    var to = fresh();
+    var request = sendRequest(from, to);
+    call(() -> wire.submit(from.c(), bytes(request)));
+    var second = request.deepCopy();
+    ((ObjectNode) second.path("idempotency")).put("key", "second-" + UuidV7.next());
+    call(() -> wire.submit(from.c(), bytes(second)));
+    var fetch =
+        ((ObjectNode) NetworkJson.parse("{}"))
+            .put("app_version", "1.0")
+            .put("type", "fetch")
+            .put("request_id", "send-fetch")
+            .put("epoch", "1")
+            .put("resume_cursor", "0")
+            .putNull("continuation")
+            .put("max_items", 1)
+            .put("max_bytes", 65536);
+    var first = NetworkJson.parse(call(() -> wire.fetch(to.c(), bytes(fetch))));
+    assertEquals(1, first.path("items").size());
+    var recipient = first.path("items").get(0).path("recipients").get(0);
+    assertEquals("1", recipient.path("state_version").asString(), first.toString());
+    assertTrue(first.path("page").path("next_continuation").isString());
+    fetch.set("continuation", first.path("page").path("next_continuation"));
+    var next = NetworkJson.parse(call(() -> wire.fetch(to.c(), bytes(fetch))));
+    assertEquals("2", next.path("items").get(0).path("mail_seq").asString());
+    assertTrue(next.path("page").path("next_continuation").isNull());
+    var attempt = frame(to, "attempt_begin");
+    attempt.remove(List.of("registration", "native_witness"));
+    attempt
+        .put("attempt_id", "attempt-send")
+        .put("purpose", "process")
+        .put("delivery_id", first.path("items").get(0).path("delivery_id").asString())
+        .put("recipient_id", recipient.path("recipient_id").asString());
+    var entered = NetworkJson.parse(call(() -> wire.attemptBegin(to.c(), bytes(attempt))));
+    assertEquals(1, entered.path("attempt_count").asInt());
+    assertEquals(
+        1,
+        NetworkJson.parse(call(() -> wire.attemptBegin(to.c(), bytes(attempt))))
+            .path("attempt_count")
+            .asInt());
+    var admit = attempt.deepCopy();
+    admit.remove(List.of("epoch", "delivery_id", "purpose"));
+    admit
+        .put("type", "execution_admit")
+        .put("connection_epoch", "1")
+        .put("host_request_id", recipient.path("recipient_id").asString());
+    admit.set("target", request.path("to"));
+    var admitted = NetworkJson.parse(call(() -> wire.executionAdmit(to.c(), bytes(admit))));
+    assertEquals("admitted", admitted.path("result").asString());
+    assertEquals("1", admitted.path("state_version").asString());
+    assertEquals(
+        "already_admitted",
+        NetworkJson.parse(call(() -> wire.executionAdmit(to.c(), bytes(admit))))
+            .path("result")
+            .asString());
   }
 
   static ObjectNode reconcile(Fixture current, ObjectNode original) {

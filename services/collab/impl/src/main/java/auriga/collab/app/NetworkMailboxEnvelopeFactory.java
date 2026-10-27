@@ -104,6 +104,17 @@ final class NetworkMailboxEnvelopeFactory {
 
   ObjectNode page(
       List<ObjectNode> items, NodeRoute route, long scanAfter, Context context, Instant deadline) {
+    return page(items, route, scanAfter, context, deadline, route.headSeq(), null);
+  }
+
+  ObjectNode page(
+      List<ObjectNode> items,
+      NodeRoute route,
+      long scanAfter,
+      Context context,
+      Instant deadline,
+      long snapshotHead,
+      String continuation) {
     var header =
         NetworkJson.object()
             .put("app_version", "1.0")
@@ -113,8 +124,9 @@ final class NetworkMailboxEnvelopeFactory {
             .put("head_seq", Long.toString(route.headSeq()))
             .put("committed_cursor", Long.toString(route.committedCursor()))
             .put("scan_after", Long.toString(scanAfter))
-            .put("snapshot_head", Long.toString(route.headSeq()));
-    header.putNull("next_continuation");
+            .put("snapshot_head", Long.toString(snapshotHead));
+    if (continuation == null) header.putNull("next_continuation");
+    else header.put("next_continuation", continuation);
     var manifest = header.putArray("manifest");
     for (var item : items) {
       var entry =
@@ -138,6 +150,7 @@ final class NetworkMailboxEnvelopeFactory {
     var entry =
         NetworkJson.object()
             .put("recipient_id", recipient.recipientId().toString())
+            .put("state_version", Long.toString(recipient.stateVersion()))
             .put("local", recipient.targetLocal());
     if (dispatch == null) {
       if (!recipient.targetLocal().equals(message.path("to").path("local").asString())) invalid();

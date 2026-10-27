@@ -18,9 +18,9 @@ import (
 func TestNetworkMailboxLocalRegisterDescriptor(t *testing.T) {
 	file := collabv1.File_auriga_collab_v1_network_mailbox_proto
 	service := file.Services().ByName("NetworkMailboxService")
-	names := []protoreflect.Name{"Ready", "Head", "Fetch", "Receipt", "LocalRegister", "SourceRegister", "SourceGet", "SourceRevoke"}
-	if file.Services().Len() != 1 || file.Messages().Len() != 17 || service == nil || service.Methods().Len() != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Methods) != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Streams) != 0 {
-		t.Fatal("expected original four methods plus four unary and eight messages")
+	names := []protoreflect.Name{"Submit", "ReceiveSet", "AttemptBegin", "ExecutionAdmit", "Ready", "Head", "Fetch", "Receipt", "LocalRegister", "SourceRegister", "SourceGet", "SourceRevoke"}
+	if file.Services().Len() != 1 || file.Messages().Len() != 25 || service == nil || service.Methods().Len() != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Methods) != len(names) || len(collabv1.NetworkMailboxService_ServiceDesc.Streams) != 0 {
+		t.Fatal("expected twelve unary mailbox methods and twenty-five messages")
 	}
 	for i, name := range names {
 		method := service.Methods().Get(i)
@@ -36,12 +36,20 @@ func TestNetworkMailboxLocalRegisterDescriptor(t *testing.T) {
 			t.Fatalf("unexpected connection shape: %s", name)
 		}
 		if count == 2 {
-			assertMailboxBytes(t, input.ByNumber(2))
+			if name == "Submit" {
+				assertSubmitBytes(t, input.ByNumber(2), "submit_json")
+			} else {
+				assertMailboxBytes(t, input.ByNumber(2))
+			}
 		}
 		if method.Output().Fields().Len() != 1 {
 			t.Fatalf("unexpected response fields: %s", name)
 		}
-		assertMailboxBytes(t, method.Output().Fields().ByNumber(1))
+		if name == "Submit" {
+			assertSubmitBytes(t, method.Output().Fields().ByNumber(1), "result_json")
+		} else {
+			assertMailboxBytes(t, method.Output().Fields().ByNumber(1))
+		}
 	}
 	connection := file.Messages().ByName("NetworkMailboxConnection").Fields()
 	if connection.Len() != 7 {
@@ -56,6 +64,13 @@ func TestNetworkMailboxLocalRegisterDescriptor(t *testing.T) {
 	response, err := (collabv1.UnimplementedNetworkMailboxServiceServer{}).LocalRegister(context.Background(), &collabv1.NetworkMailboxServiceLocalRegisterRequest{})
 	if response != nil || status.Code(err) != codes.Unimplemented {
 		t.Fatal("unimplemented registration must fail closed")
+	}
+}
+
+func assertSubmitBytes(t *testing.T, field protoreflect.FieldDescriptor, name protoreflect.Name) {
+	t.Helper()
+	if field == nil || field.Name() != name || field.Kind() != protoreflect.BytesKind || field.Cardinality() != protoreflect.Optional || field.ContainingOneof() != nil {
+		t.Fatal("submit must preserve complete JSON bytes")
 	}
 }
 
