@@ -168,16 +168,19 @@ LocalRegister RPC 在 249ms（起始剩余249ms）被取消，随后收到同 re
 signed request-scope network.overloaded/retryable=true。不是未发登记或已发现的 native
 身份失配；原证据不能判定调用链哪个环节首先取消。旧驱动只调用一次真实工具，瞬时拒绝即失败。
 
-现在仅对该工具尝试实际发出的单个 LOCAL_REGISTER，完整验签其当前受众的可重试过载后，
-间隔至少500ms再调用同一真实 ToolRuntime 工具，最多五次；签名 retry_after 仅接受能在
-本驱动有界预算内等待的 null 或1–5秒，并按其值等待。不重发 source Register，不换票、
-连接、会话、epoch/boot/nonce、local、allocation_op_id 或文件ledger预约；每次重试前核
-真实宿主活对象及原完整预约，每个发出的完整登记体（仅新的 request_id 除外）须完全一致。
-原 typed-local 成功、持久绑定及谱系断言保留，五次仍拒绝即失败；未签/坏签/异受众/非重试
-错误/无对应LOCAL_REGISTER/对象或C/R变化均不重试。trust 仅观测真实 provider 填充的
-生产 store，验签使用生产 verifier；不注入测试 signer/固定票或降低250ms单次RPC预算。
-`*-registration-attempts.json` 记录每次原请求ID、local/op及已验重试提示；root仍须重跑全链，
-单独 `assembly-join.test.mjs` 的签名夹具只验证驱动门禁，不冒真实平台或活C pending验收。
+返工3依A审r1将恢复放入生产 `connectionRegistrar`，已删除返工2的驱动旁路重试、trust观测
+与 `*-registration-attempts.json`。驱动只调用一次真实 ToolRuntime，直接断言其生产结果；
+原完整帧、持久绑定、谱系及 critical/live-C pending 断言保留。
+
+生产仅在完整验签当前C的request-scope `network.overloaded` 且retryable=true时重发同一
+LOCAL_REGISTER原始字节（包含相同request_id），不更换预约、op、票、连接或会话，不重试
+source Register/Read/Fence。至多5次，100/200/400/800ms退避，等待取退避与签名retry_after
+的较大值；总时长仍受原登记5秒期限约束，等待无法容纳时立即保留原预约并报告过载。
+每次发送、验签、刷新及退避后重核连接/执行信号与活对象；取消或对象退役禁止继续绑定。
+持续过载向工具调用者返回unavailable以及reason=network.overloaded、retryable、retryAfter、
+attempts，不吞成无原因的unavailable；未验签或异受众不获得重试资格。
+生产路径测试 `session-registration-retry.test.js` 的宿主/签名夹具仅验证生产恢复及门禁；
+新精确HEAD仍须root复跑真实PG整链与反例，不冒双DSH对话或活C pending已验收。
 
 主控对 T4 `aa8924d` 实跑通过六组来源检查，Broker payload 探针缺少错误行而超时。
 与 T3b `bec85ca` 对账：探针、Broker account limits、生产 WSS socket factory 均未改；
