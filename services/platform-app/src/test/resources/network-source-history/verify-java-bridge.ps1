@@ -1,6 +1,12 @@
 param([string]$ExpectedHead, [switch]$CompileOnly, [switch]$Run, [switch]$FunctionsOnly)
 $ErrorActionPreference = 'Stop'
+$javaBridgeArguments = @{ ExpectedHead = $ExpectedHead; CompileOnly = $CompileOnly; Run = $Run; FunctionsOnly = $FunctionsOnly }
 . (Join-Path $PSScriptRoot 'verify-fence-mutants.ps1') -FunctionsOnly
+# Dot-sourced script parameters share this scope. Restore this driver's invocation explicitly.
+$ExpectedHead = $javaBridgeArguments.ExpectedHead
+$CompileOnly = $javaBridgeArguments.CompileOnly
+$Run = $javaBridgeArguments.Run
+$FunctionsOnly = $javaBridgeArguments.FunctionsOnly
 
 function New-OrgPermissionBypass([string]$Source) {
   $before = '&& effective.getPermissionsList().contains("auriga.connect.collab.use")'

@@ -36,4 +36,5 @@ Accept {
 }
 Reject { New-OrgPermissionBypass ($source + $source) }
 Reject { New-OrgPermissionBypass '' }
+Reject { & { . (Join-Path $PSScriptRoot 'verify-java-bridge.ps1') -ExpectedHead invalid -CompileOnly } }
 Write-Output "Java bridge verifier guards: $script:checks passed"
