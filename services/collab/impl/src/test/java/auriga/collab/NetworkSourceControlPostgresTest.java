@@ -495,26 +495,7 @@ class NetworkSourceControlPostgresTest {
     source =
         new NetworkSourceGrpcAuthority(
             client, manager, new auriga.collab.network.local.LocalTargets(jdbc, manager));
-    keys = new NetworkSigningKeys(CLOCK, 1);
-    var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-    keys.add(
-        "2",
-        "protocol_response",
-        "source-test",
-        pair.getPublic(),
-        pair.getPrivate(),
-        now().minusSeconds(30),
-        now().plusSeconds(3600),
-        NetworkSigningKeys.State.ACTIVE);
-    keys.add(
-        "2",
-        "business_delivery",
-        "send-delivery-test",
-        pair.getPublic(),
-        pair.getPrivate(),
-        now().minusSeconds(30),
-        now().plusSeconds(3600),
-        NetworkSigningKeys.State.ACTIVE);
+    keys = signingKeys();
     locals = new LocalRegistry(jdbc, manager, source, client, CLOCK);
     wire = newWire();
     var verifier = mock(AccessTokenVerifier.class);
@@ -534,6 +515,31 @@ class NetworkSourceControlPostgresTest {
         GrpcChannels.open(
             "127.0.0.1:" + mailboxServer.port(),
             new AurigaClientInterceptor(() -> "gateway-test", Duration.ofSeconds(10)));
+  }
+
+  static NetworkSigningKeys signingKeys() throws Exception {
+    var fixtureKeys = new NetworkSigningKeys(CLOCK, 1);
+    var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    fixtureKeys.add(
+        "2",
+        "protocol_response",
+        "source-test",
+        pair.getPublic(),
+        pair.getPrivate(),
+        now().minusSeconds(30),
+        now().plusSeconds(3600),
+        NetworkSigningKeys.State.ACTIVE);
+    var deliveryPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    fixtureKeys.add(
+        "2",
+        "business_delivery",
+        "send-delivery-test",
+        deliveryPair.getPublic(),
+        deliveryPair.getPrivate(),
+        now().minusSeconds(30),
+        now().plusSeconds(3600),
+        NetworkSigningKeys.State.ACTIVE);
+    return fixtureKeys;
   }
 
   static NetworkMailboxWireService newWire() {
