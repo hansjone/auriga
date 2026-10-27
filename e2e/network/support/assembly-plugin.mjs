@@ -12,6 +12,7 @@ import { NatsTransport } from '../../../clients/dsh-plugin/src/network/transport
 import { createWsSocketFactory } from '../../../clients/dsh-plugin/src/network/transport/ws-socket.js';
 import { decodeJson } from '../../../clients/dsh-plugin/src/network/session/frames.js';
 import { digest } from '../../../clients/dsh-plugin/src/network/trust/verifier.js';
+import { registrationSession } from '../../../clients/dsh-plugin/src/network/host/native/host-port.js';
 import { createNativeHost } from './assembly-native.mjs';
 import { currentNativeProcess } from './native-process.mjs';
 import { waitUntil } from './assembly-process.mjs';
@@ -20,6 +21,7 @@ import { criticalMatrix } from './assembly-critical.mjs';
 import { prepareDevice } from './assembly-device.mjs';
 import { assertReadyReplacement } from './assembly-ready.mjs';
 import { describeBusinessFailure } from './assembly-failure.mjs';
+import { joinWithRegistrationRetry } from './assembly-join.mjs';
 
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
 const input = createInterface({ input: process.stdin });
@@ -152,9 +154,18 @@ async function endpoint(name, devicePath) {
     ca: await readFile(gateway.ca),
     rejectUnauthorized: true,
   });
+  let registrationTrust;
   const runtime = await openConnectionRuntime({
     kind: 'device-connection',
-    prepared,
+    prepared: {
+      ...prepared,
+      async refresh(trust, signal) {
+        await prepared.refresh(trust, signal);
+        // Observe the actual production trust store populated by the real
+        // provider; never inject a signer, keyset or permissive verifier.
+        registrationTrust = trust;
+      },
+    },
     ctx: native.ctx,
     directory,
     stores: { ledger: store },
@@ -194,6 +205,7 @@ async function endpoint(name, devicePath) {
     sockets,
     transports,
     observations,
+    joinAttempts: [],
     prepared,
     socketFactory,
     directory,
@@ -204,13 +216,62 @@ async function endpoint(name, devicePath) {
         () => tools.get('auriga_network_join'),
         'join tool missing',
       );
-      const dispatched = await native.execute(executionAgent);
-      assert.equal(
-        dispatched.isError,
-        false,
-        'real ToolRuntime join dispatch failed',
-      );
-      const result = dispatched.value;
+      const socket = sockets.at(-1);
+      const identity = (await value.ledger()).identity;
+      const result = await joinWithRegistrationRetry({
+        invoke: () => native.execute(executionAgent),
+        frames,
+        getState: value.ledger,
+        getTrust: () => registrationTrust,
+        getContext() {
+          const response = frames.findLast(
+            (event) =>
+              event.direction === 'down' &&
+              event.frame.type === 'ready_result' &&
+              event.frame.status === 'ready',
+          )?.frame;
+          const request = frames.find(
+            (event) =>
+              event.direction === 'up' &&
+              event.frame.type === 'ready' &&
+              event.frame.request_id === response?.request_id,
+          )?.frame;
+          assert.ok(
+            response && request,
+            'registration requires genuine READY context',
+          );
+          return {
+            realm: identity.realm,
+            node: identity.node,
+            nodeIncarnation: identity.nodeIncarnation,
+            epoch: response.epoch,
+            channelNonce: request.channel_nonce,
+            bootId: request.boot_id,
+          };
+        },
+        async assertNative() {
+          assert.equal(
+            runtime.status.connected,
+            true,
+            'registration connection retired',
+          );
+          assert.equal(
+            sockets.at(-1),
+            socket,
+            'registration changed physical connection',
+          );
+          assert.equal(socket.readyState, 1, 'registration socket is not open');
+          await registrationSession(native.ctx, {
+            agent: executionAgent,
+          }).verify();
+        },
+        onAttempt(attempt) {
+          value.joinAttempts.push({
+            hostSessionId: executionAgent.id,
+            ...attempt,
+          });
+        },
+      });
       assert.equal(
         result.status,
         'registered',
@@ -673,6 +734,14 @@ try {
   for (const e of endpoints.reverse()) {
     try {
       await e.runtime.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      await writeFile(
+        join(artifacts, `${e.name}-registration-attempts.json`),
+        JSON.stringify(e.joinAttempts, null, 2),
+      );
     } catch (error) {
       cleanupErrors.push(error);
     }

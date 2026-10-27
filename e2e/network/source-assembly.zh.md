@@ -161,6 +161,24 @@ file-commit observations 及 DB 快照。stdout/logs 保存前检查已知凭据
 
 ## 旧头首失与待办
 
+主控对 `3d5a3b8` 的新首失是 critical/live-C pending outcome 的工具返回 unavailable。
+对象谱系仍为当前活 agent/session，JSONL durable 正控已过，ledger 保留 local=3 的原预约。
+其真实 LOCAL_REGISTER `d3ee664f-fb00-4cb8-86a5-757a302297f6` 已发出，gateway 记录同请求
+LocalRegister RPC 在 249ms（起始剩余249ms）被取消，随后收到同 request/epoch/nonce 的
+signed request-scope network.overloaded/retryable=true。不是未发登记或已发现的 native
+身份失配；原证据不能判定调用链哪个环节首先取消。旧驱动只调用一次真实工具，瞬时拒绝即失败。
+
+现在仅对该工具尝试实际发出的单个 LOCAL_REGISTER，完整验签其当前受众的可重试过载后，
+间隔至少500ms再调用同一真实 ToolRuntime 工具，最多五次；签名 retry_after 仅接受能在
+本驱动有界预算内等待的 null 或1–5秒，并按其值等待。不重发 source Register，不换票、
+连接、会话、epoch/boot/nonce、local、allocation_op_id 或文件ledger预约；每次重试前核
+真实宿主活对象及原完整预约，每个发出的完整登记体（仅新的 request_id 除外）须完全一致。
+原 typed-local 成功、持久绑定及谱系断言保留，五次仍拒绝即失败；未签/坏签/异受众/非重试
+错误/无对应LOCAL_REGISTER/对象或C/R变化均不重试。trust 仅观测真实 provider 填充的
+生产 store，验签使用生产 verifier；不注入测试 signer/固定票或降低250ms单次RPC预算。
+`*-registration-attempts.json` 记录每次原请求ID、local/op及已验重试提示；root仍须重跑全链，
+单独 `assembly-join.test.mjs` 的签名夹具只验证驱动门禁，不冒真实平台或活C pending验收。
+
 主控对 T4 `aa8924d` 实跑通过六组来源检查，Broker payload 探针缺少错误行而超时。
 与 T3b `bec85ca` 对账：探针、Broker account limits、生产 WSS socket factory 均未改；
 旧失败未保存该 socket 的原帧或 broker.log，不能回溯断言具体关闭原因。
