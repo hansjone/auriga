@@ -1580,6 +1580,44 @@ class NetworkLocalSourceHistoryIntegrationTest {
   }
 
   @Test
+  void savedSuccessPureReadRecoversOnRealC2AfterOriginalIngressGcWithoutAnyWrites()
+      throws Exception {
+    var request = h.frame();
+    var created = h.register(request);
+    assertEquals("registered", text(created, "result"), created.toString());
+    var saved = h.row(request);
+    var original = frozen(request);
+    expireOriginal(true);
+    assertNotEquals(original.getConnection(), h.c);
+    var currentRef = h.reference(h.c);
+    assertEquals(h.c, currentRef.getConnection());
+    var before = h.facts();
+    int reads = h.observedSources.read.get(),
+        registrations = h.observedSources.register.get(),
+        gets = h.observedSources.get.get(),
+        fences = h.observedSources.fence.get();
+    var retry = h.retry(request);
+    var recovered = h.register(retry);
+    assertEquals("registered", text(recovered, "result"), recovered.toString());
+    assertEquals(created.path("source"), recovered.path("source"));
+    assertFalse(recovered.has("valid_until"), "historical ACTIVE is not a current Get observation");
+    assertEquals(h.epoch, recovered.path("server_auth").path("audience").path("epoch").asString());
+    assertEquals(
+        h.readyFrame.path("channel_nonce"), recovered.path("server_auth").path("channel_nonce"));
+    assertEquals(retry.path("request_id"), recovered.path("request_id"));
+    assertEquals(original, h.observedSources.lastRead);
+    assertEquals(reads + 1, h.observedSources.read.get());
+    assertEquals(registrations, h.observedSources.register.get());
+    assertEquals(gets, h.observedSources.get.get());
+    assertEquals(fences, h.observedSources.fence.get());
+    sameRow(saved, h.row(request));
+    assertEquals(
+        before,
+        h.facts(),
+        "pure historical replay must not change IAM/collab facts, including xmin");
+  }
+
+  @Test
   void fenceCommitPrecedesLateRegisterFinalTransactionForTheSameOriginalKey() throws Exception {
     var request = durableMiss();
     var original = frozen(request);

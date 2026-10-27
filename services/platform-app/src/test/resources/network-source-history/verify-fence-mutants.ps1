@@ -69,6 +69,20 @@ function Assert-FenceTree([string]$Directory, $Hashes, [string]$Overlay, [string
   }
 }
 
+function Assert-FenceOldHistoryCoverage($Summary, $Coverage) {
+  $expected = @($Coverage.caseKeys)
+  if ($Coverage.oldControlCases -ne 37 -or $expected.Count -ne 37 -or
+      @($expected | Select-Object -Unique).Count -ne 37) {
+    throw 'Expected exact 37 distinct real IAM joint case keys, not collab local 32+5'
+  }
+  $actual = @($Summary.cases | ForEach-Object { $_.classname + '#' + $_.name })
+  foreach ($key in $expected) {
+    if (@($actual | Where-Object { $_ -ceq $key }).Count -ne 1) {
+      throw "Control must execute each original real IAM joint case exactly once: $key"
+    }
+  }
+}
+
 if ($FunctionsOnly) { return }
 if ($Run -and $CompileOnly) { throw 'Choose Run or CompileOnly' }
 if (-not $ExpectedHead -or $ExpectedHead -notmatch '^[0-9a-f]{40}$') { throw 'Supply exact 40-character ExpectedHead' }
@@ -85,6 +99,7 @@ $utf8 = New-Object Text.UTF8Encoding($false)
 $archive = Join-Path $output 'source.tar'
 $production = 'services/collab/impl/src/main/java/auriga/collab/app/NetworkSourceControl.java'
 $test = 'services/platform-app/src/test/java/auriga/iam/NetworkLocalSourceHistoryIntegrationTest.java'
+$oldCoveragePath = 'services/platform-app/src/test/resources/network-source-history/old-history-cases.json'
 $manifest = [ordered]@{ head = $head; mode = $(if ($Run) { 'Run' } else { 'CompileOnly' })
   sourceHashes = @{}; worktreeHashes = @{}; archiveSha256 = $null; testBlob = $null; testSha256 = $null
   variants = @(); compileOnlyExitCodes = @{}; firstFailure = $null; worktreeUnchanged = $false }
@@ -198,6 +213,12 @@ try {
       $summary = Get-FenceSummary $xml
       $entry.summary = [ordered]@{ xml = $xml; tests = $summary.tests; failures = $summary.failures; errors = $summary.errors; skipped = $summary.skipped; disabled = $summary.disabled }
       Assert-FenceVerdict $summary $mode ([int]$entry.execution.exitCode)
+      if ($mode -eq 'Control') {
+        $coverage = [IO.File]::ReadAllText((Join-Path $directory $oldCoveragePath)) | ConvertFrom-Json
+        Assert-FenceOldHistoryCoverage $summary $coverage
+        $entry.summary['oldIamJointCases'] = [int]$coverage.oldControlCases
+        $entry.summary['otherCases'] = $summary.tests - [int]$coverage.oldControlCases
+      }
     }
     Assert-FenceTree $directory $manifest.sourceHashes $overlay $overlayHash
     $entry.sourceGuardAfter = $true

@@ -55,4 +55,13 @@ Reject { Assert-FenceTree $tree $hashes 'production.java' $overlay }
 [IO.File]::WriteAllText((Join-Path $tree 'test.java'), 'fixed-test', $utf8)
 [IO.File]::WriteAllText((Join-Path $tree 'extra.java'), 'untracked-extra-test', $utf8)
 Reject { Assert-FenceTree $tree $hashes 'production.java' $overlay }
+$coverage = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'old-history-cases.json')) | ConvertFrom-Json
+$oldCases = @($coverage.caseKeys | ForEach-Object {
+  $parts = $_ -split '#', 2
+  "<testcase classname='$([Security.SecurityElement]::Escape($parts[0]))' name='$([Security.SecurityElement]::Escape($parts[1]))'/>"
+})
+Accept { Assert-FenceOldHistoryCoverage (Summary 'tests="37" failures="0" errors="0" skipped="0"' ($oldCases -join '')) $coverage }
+Reject { Assert-FenceOldHistoryCoverage (Summary 'tests="36" failures="0" errors="0" skipped="0"' (($oldCases | Select-Object -Skip 1) -join '')) $coverage }
+Reject { Assert-FenceOldHistoryCoverage (Summary 'tests="38" failures="0" errors="0" skipped="0"' (($oldCases -join '') + $oldCases[0])) $coverage }
+Reject { Assert-FenceOldHistoryCoverage (Summary 'tests="37" failures="0" errors="0" skipped="0"' (($oldCases -join '').Replace('auriga.iam.', 'auriga.collab.'))) $coverage }
 Write-Output "Verifier guard checks: $passed passed; synthetic tooling checks only; $output"
