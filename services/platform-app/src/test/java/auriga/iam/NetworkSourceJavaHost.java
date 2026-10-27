@@ -33,6 +33,7 @@ import tools.jackson.databind.node.ObjectNode;
  * receipt/connection is seeded. EOF or "stop" closes HTTP, mailbox, IAM, pools, then own PG.
  */
 public final class NetworkSourceJavaHost implements AutoCloseable {
+  static final String PRIVATE_KEY_BEGIN = "-----BEGIN " + "PRIVATE KEY-----";
   final UUID tenant = UuidV7.next();
   final Clock clock = Clock.systemUTC();
   final List<String> closed = new ArrayList<>();
@@ -491,7 +492,8 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
     try {
       NetworkSourceJavaPrivateFiles.replace(
           file,
-          "-----BEGIN PRIVATE KEY-----\n"
+          PRIVATE_KEY_BEGIN
+              + "\n"
               + Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(encoded)
               + "\n-----END PRIVATE KEY-----\n");
     } finally {

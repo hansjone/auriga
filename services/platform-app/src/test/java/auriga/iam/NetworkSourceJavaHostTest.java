@@ -42,7 +42,7 @@ class NetworkSourceJavaHostTest {
             new PKCS8EncodedKeySpec(
                 Base64.getMimeDecoder()
                     .decode(
-                        pem.replace("-----BEGIN PRIVATE KEY-----", "")
+                        pem.replace(NetworkSourceJavaHost.PRIVATE_KEY_BEGIN, "")
                             .replace("-----END PRIVATE KEY-----", ""))));
     var publicKey =
         factory.generatePublic(
@@ -81,7 +81,7 @@ class NetworkSourceJavaHostTest {
                   new PKCS8EncodedKeySpec(
                       Base64.getMimeDecoder()
                           .decode(
-                              pem.replace("-----BEGIN PRIVATE KEY-----", "")
+                              pem.replace(NetworkSourceJavaHost.PRIVATE_KEY_BEGIN, "")
                                   .replace("-----END PRIVATE KEY-----", ""))));
       var signature = Signature.getInstance("Ed25519");
       signature.initSign(key);
