@@ -42,6 +42,8 @@ type Gateway struct {
 	teamURL      *url.URL
 	aiAdminURL   *url.URL
 	collabURL    *url.URL
+	resourceURL  *url.URL
+	deviceURL    *url.URL
 
 	portalStatic http.Handler
 	adminStatic  http.Handler
@@ -51,6 +53,14 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	resourceURL, err := cfg.parseResourceUpstream()
+	if err != nil {
+		return nil, err
+	}
+	deviceURL, err := cfg.parseDeviceUpstream()
+	if err != nil {
+		return nil, err
+	}
 	collabURL, err := cfg.parseCollabUpstream()
 	if err != nil {
 		return nil, err
@@ -119,6 +129,8 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		teamURL:      teamURL,
 		aiAdminURL:   aiAdminURL,
 		collabURL:    collabURL,
+		resourceURL:  resourceURL,
+		deviceURL:    deviceURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
@@ -132,6 +144,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	}
 	if cfg.Access.Valid() {
 		g.APITransports = make(map[*url.URL]http.RoundTripper)
+		if resourceURL != nil {
+			transport, err := newIAMHopTransport(cfg.IAMHop, resourceURL)
+			if err != nil {
+				return nil, err
+			}
+			g.APITransports[resourceURL] = transport
+		}
 		if collabURL != nil {
 			transport, err := newIAMHopTransport(cfg.CollabHop, collabURL)
 			if err != nil {
@@ -277,6 +296,16 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeProblem(w, problem(http.StatusForbidden, "edge.admin_host_required", "Forbidden", "admin API only on admin host", rid))
+		return
+	}
+
+	// Device AI has an exact route table and an independent runtime from Team.
+	if isDevicePath(path) && (path != "/api/ai/v1/me/usage" || audience == "portal") {
+		g.proxyDevice(w, r, audience, clientIP, rid)
+		return
+	}
+	if path == "/api/resource" || strings.HasPrefix(path, "/api/resource/") {
+		g.proxyResource(w, r, audience, clientIP, rid)
 		return
 	}
 

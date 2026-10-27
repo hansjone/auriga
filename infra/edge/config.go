@@ -186,6 +186,14 @@ func applyEnv(cfg *Config) {
 		}
 		cfg.Upstreams["ai-admin"] = v
 	}
+	for key, env := range map[string]string{"resource": "AURIGA_EDGE_UPSTREAM_RESOURCE", "ai-device": "AURIGA_EDGE_UPSTREAM_AI_DEVICE"} {
+		if v := os.Getenv(env); v != "" {
+			if cfg.Upstreams == nil {
+				cfg.Upstreams = map[string]string{}
+			}
+			cfg.Upstreams[key] = v
+		}
+	}
 	if v := os.Getenv("AURIGA_EDGE_UPSTREAM_COLLAB"); v != "" {
 		if cfg.Upstreams == nil {
 			cfg.Upstreams = map[string]string{}
@@ -221,6 +229,12 @@ func applyEnv(cfg *Config) {
 }
 
 func (c Config) validate() error {
+	if _, err := c.parseResourceUpstream(); err != nil {
+		return err
+	}
+	if _, err := c.parseDeviceUpstream(); err != nil {
+		return err
+	}
 	if _, err := c.parseCollabUpstream(); err != nil {
 		return err
 	}

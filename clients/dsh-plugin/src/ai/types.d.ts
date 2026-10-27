@@ -24,6 +24,12 @@ export interface AccessToken {
   /** Aborted by logout, device/member revocation or broker invalidation. */
   signal: AbortSignal;
 }
+/** Trusted native composition only. Never filled from browser settings or the
+ * public model directory; the gateway independently checks policy and usage. */
+export interface GenerationPorts {
+  modelLimits: Record<string, Limits>;
+  countInputTokens(body: object): number;
+}
 export interface AdapterOptions {
   hostApi: HostApi;
   /** Trusted deployment origin, with no path/query/userinfo/fragment. */
