@@ -28,6 +28,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -344,6 +346,51 @@ class NetworkSourceGetProjectionTest {
       assertArrayEquals(h.original.toByteArray(), (byte[]) h.binding.get("creation_receipt"));
       assertEquals(1, h.gets.get());
       h.verifySignature(reply);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1})
+  void independentSecondClockReadCanReplayTheIdenticalWitnessWhileOriginalDerivedChangeConflicts(
+      int secondReadOffset) throws Exception {
+    try (var h = new Harness(NOW.plusMillis(29985))) {
+      var first = h.get();
+      assertEquals("active", first.path("source").path("state").asString());
+      var witness = (ObjectNode) h.frame.path("native_witness");
+      String originalPayload = NetworkJson.canonical(witness);
+      String originalUntil = witness.path("valid_until").asString();
+      Object originalDigest = h.witness.get("witness_digest");
+      // Explicit instants simulate both sides of the whole-second boundary without sleeping.
+      String legacyUntil = NOW.plusSeconds(secondReadOffset).plusSeconds(29).toString();
+      witness.put("valid_until", legacyUntil);
+      var legacy = h.get();
+      if (secondReadOffset == 1) {
+        assertEquals(originalUntil, legacyUntil);
+        assertEquals(originalPayload, NetworkJson.canonical(witness));
+        assertEquals("active", legacy.path("source").path("state").asString());
+        h.verifySignature(legacy);
+      } else {
+        assertNotEquals(originalPayload, NetworkJson.canonical(witness));
+        assertEquals("error", legacy.path("type").asString());
+        assertEquals("network.conflict", legacy.path("code").asString());
+      }
+      int accepted = secondReadOffset == 1 ? 2 : 1;
+      assertEquals(accepted, h.gets.get());
+      assertEquals(accepted, h.observationWrites.get());
+      assertEquals(originalDigest, h.witness.get("witness_digest"));
+
+      String changedUntil = Instant.parse(originalUntil).minusSeconds(1).toString();
+      assertNotEquals(originalUntil, changedUntil);
+      assertTrue(Instant.parse(changedUntil).isAfter(NOW));
+      witness.put("valid_until", changedUntil);
+      assertNotEquals(originalPayload, NetworkJson.canonical(witness));
+      var changed = h.get();
+      assertEquals("error", changed.path("type").asString());
+      assertEquals("network.conflict", changed.path("code").asString());
+      assertEquals(originalDigest, h.witness.get("witness_digest"));
+      assertEquals(accepted, h.gets.get(), "changed witness must fail before another IAM Get");
+      assertEquals(accepted, h.observationWrites.get());
+      h.verifySignature(changed);
     }
   }
 

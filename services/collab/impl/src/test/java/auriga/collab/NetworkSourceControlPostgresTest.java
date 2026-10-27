@@ -2218,8 +2218,11 @@ class NetworkSourceControlPostgresTest {
     }
     var request = frame(f, "source_get").put("source_binding", id);
     assertEquals("active", get(f, request).path("source").path("state").asString());
-    ((ObjectNode) request.path("native_witness"))
-        .put("valid_until", now().plusSeconds(29).toString());
+    var nativeWitness = (ObjectNode) request.path("native_witness");
+    String originalUntil = nativeWitness.path("valid_until").asString();
+    String changedUntil = Instant.parse(originalUntil).minusSeconds(1).toString();
+    assertNotEquals(originalUntil, changedUntil);
+    nativeWitness.put("valid_until", changedUntil);
     code("conflict", get(f, request));
     var mismatch = frame(f, "source_get").put("source_binding", id);
     ((ObjectNode) mismatch.path("native_witness")).put("binding_revision", "1");
