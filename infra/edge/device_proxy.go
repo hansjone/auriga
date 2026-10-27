@@ -72,6 +72,14 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 	// request: reject their presence just as the device runtime does.
 	for name := range r.Header {
 		n := strings.ToLower(name)
+		// Node's native fetch automatically sends this single transport value,
+		// even with credentials omitted. It conveys no browser session identity.
+		if n == "sec-fetch-mode" {
+			values := r.Header.Values(name)
+			if len(values) == 1 && values[0] == "cors" {
+				continue
+			}
+		}
 		if n == "cookie" || n == "cookie2" || n == "origin" || n == "referer" || strings.HasPrefix(n, "sec-fetch-") || strings.HasPrefix(n, "access-control-") || strings.HasPrefix(n, "auriga-forwarded-") {
 			fail(403, "common.forbidden")
 			return
