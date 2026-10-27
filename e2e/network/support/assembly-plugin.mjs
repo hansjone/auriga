@@ -566,6 +566,10 @@ try {
       JSON.stringify(e.frames, null, 2),
     );
     await writeFile(
+      join(artifacts, `${e.name}-observations.json`),
+      JSON.stringify(e.observations, null, 2),
+    );
+    await writeFile(
       join(artifacts, `${e.name}-ledger.json`),
       JSON.stringify(await e.ledger(), null, 2),
     );
