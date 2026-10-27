@@ -55,6 +55,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
   NetworkSigningKeys signing;
   NetworkKeyOperations publications;
   NetworkKeySettings keySettings;
+  ObjectNode protocolSigning;
   IamNetworkAuthority network;
   GrpcServer iam, mailbox;
   HttpClient http;
@@ -425,17 +426,26 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
     var jdbc = new JdbcTemplate(database.runtime.get("collab"));
     var tx = new TenantTransactionManager(database.runtime.get("collab"));
     var root = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    KeyPair protocol = null;
+    Instant protocolBegin = null, protocolEnd = null;
     for (var purpose : List.of("protocol_response", "business_delivery", "management_state")) {
       var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+      var begin = clock.instant().minusSeconds(5);
+      var end = clock.instant().plusSeconds(3600);
       signing.add(
           realm,
           purpose,
           "bridge-" + purpose,
           pair.getPublic(),
           pair.getPrivate(),
-          clock.instant().minusSeconds(5),
-          clock.instant().plusSeconds(3600),
+          begin,
+          end,
           NetworkSigningKeys.State.ACTIVE);
+      if (purpose.equals("protocol_response")) {
+        protocol = pair;
+        protocolBegin = begin;
+        protocolEnd = end;
+      }
     }
     var trust =
         new RootKeyPublication(
@@ -448,6 +458,12 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
     var release =
         OfflineKeySigning.sign(signing.publicKeysJson(realm), "bridge-root", root.getPrivate());
     publications.publish(release);
+    exportProtocolSigner(
+        Objects.requireNonNull(protocol),
+        "bridge-protocol_response",
+        NetworkJson.parse(signing.publicKeysJson(realm)).path("keyset_version").asString(),
+        protocolBegin.truncatedTo(java.time.temporal.ChronoUnit.SECONDS),
+        protocolEnd.truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
     var publicFile = directory.resolve("network-root.der");
     Files.write(publicFile, root.getPublic().getEncoded());
     keySettings =
@@ -464,6 +480,35 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
             Map.of());
     Files.writeString(keySettings.signedFile(), release.signedKeyset());
     Files.writeString(keySettings.announcementFile(), release.announcement());
+  }
+
+  // The same root-approved key, never a second signer or a new approval chain.
+  void exportProtocolSigner(KeyPair pair, String kid, String version, Instant begin, Instant end)
+      throws IOException {
+    var file = directory.resolve("network-protocol.pem");
+    byte[] encoded = pair.getPrivate().getEncoded();
+    try {
+      NetworkSourceJavaPrivateFiles.replace(
+          file,
+          "-----BEGIN PRIVATE KEY-----\n"
+              + Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(encoded)
+              + "\n-----END PRIVATE KEY-----\n");
+    } finally {
+      Arrays.fill(encoded, (byte) 0);
+    }
+    NetworkSourceJavaPrivateFiles.requirePrivateFile(file);
+    protocolSigning =
+        Json.object(
+            "privateKeyFile",
+            file.toString(),
+            "keyId",
+            kid,
+            "keysetVersion",
+            version,
+            "notBefore",
+            begin.toString(),
+            "notAfter",
+            end.toString());
   }
 
   NetworkAuthorityConnection redeem(Device device, JsonNode registration) throws Exception {
@@ -757,6 +802,8 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
                 keySettings.rootPublicFile().toString(),
                 "rootFingerprint",
                 keySettings.rootFingerprint(),
+                "protocolSigning",
+                protocolSigning,
                 "expiresAt",
                 clock.instant().plusSeconds(300).toString())
             .toString());

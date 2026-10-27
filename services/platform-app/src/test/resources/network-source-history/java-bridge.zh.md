@@ -34,6 +34,10 @@ powershell -NoProfile -File services/platform-app/src/test/resources/network-sou
 `ready` 行只含随机回环 HTTPS/IAM gRPC/collab gRPC 地址、CA/配置路径与 PID/创建时间/PG 根谱系。
 `bridge.json` 是本次私有临时目录内的配置：业务 tenant、realm、serverAudience、两份设备凭据路径
 （`device` 为 MEMBER，`externalDevice` 为 EXTERNAL）、gateway/collab 服务 JWT 文件路径、公开 network 根与 pin、到期时间。
+`protocolSigning` 另给 gateway 的 `privateKeyFile/keyId/keysetVersion/notBefore/notAfter`。
+私钥是 installNetworkKeys 实际发布并获根批准的同一 protocol_response 密钥，
+按既有私有原子文件机制导出 PKCS#8 PEM，检查文件自身权限，关闭随临时根删除。
+配置/ready 不含私钥字节；refresh 不另建 signer 或变更原公钥、批准、有效期。
 凭据不得复制到 stdout/报告/共享 profile。Windows 在创建本测试全新的随机临时目录时，指定禁止继承、仅当前用户可访问并向子文件继承的 ACL；既有目录权限不变。随后只读检查受保护的 ACL、所有者与读权限，不满足便拒绝写入。
 Windows PowerShell 5.1 子进程直接调用 .NET ACL API，不依赖 Get-Acl/Set-Acl 或模块自动加载；非 PG 回归包含 Java 继承不可用 PSModulePath 后的私有目录创建/凭据替换/清理。POSIX 临时目录 0700、文件 0600；文件在同目录原子替换，关闭删除全部本次文件。
 
@@ -81,3 +85,6 @@ SQL、初始化、编译、skip、空测试或其他失败一律不算。
 
 Control 包含真实子进程 ready→refresh→stop/EOF（含两份设备凭据实际续期），并核日志无凭据、关闭后无自有进程/端口/临时目录；公开生命周期证据写入各 archive 的 platform-app/target/java-bridge-lifecycle-*。
 此检查与新非作者独审、精确 HEAD CI 全绿完成前，不得将本作者交接标成已验收/已合并。
+
+T3b 新增驱动和正反证命令见 `e2e/network/source-assembly.zh.md`。
+原三项 PG/OrgBypass 判据未弱化；新增非 PG 导出测试使 HostTest 总数为五。

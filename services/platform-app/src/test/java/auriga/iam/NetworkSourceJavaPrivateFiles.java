@@ -3,6 +3,7 @@ package auriga.iam;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.*;
+import java.util.HashSet;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -138,5 +139,34 @@ final class NetworkSourceJavaPrivateFiles {
     } finally {
       Files.deleteIfExists(temporary);
     }
+  }
+
+  static void requirePrivateFile(Path file) throws IOException {
+    requirePrivate(file.getParent());
+    if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file))
+      throw new IOException("Host credential is not a plain file");
+    var posix = Files.getFileAttributeView(file, PosixFileAttributeView.class);
+    if (posix != null) {
+      if (!posix
+          .readAttributes()
+          .permissions()
+          .equals(PosixFilePermissions.fromString("rw-------")))
+        throw new IOException("Host credential file is not private");
+      return;
+    }
+    var parent = Files.getFileAttributeView(file.getParent(), AclFileAttributeView.class);
+    var child = Files.getFileAttributeView(file, AclFileAttributeView.class);
+    if (parent == null || child == null || !parent.getOwner().equals(child.getOwner()))
+      throw new IOException("Host credential owner differs from private root");
+    var readers = new HashSet<UserPrincipal>();
+    for (var entry : parent.getAcl())
+      if (entry.type() == AclEntryType.ALLOW
+          && entry.permissions().contains(AclEntryPermission.READ_DATA))
+        readers.add(entry.principal());
+    for (var entry : child.getAcl())
+      if (entry.type() == AclEntryType.ALLOW
+          && entry.permissions().contains(AclEntryPermission.READ_DATA)
+          && !readers.contains(entry.principal()))
+        throw new IOException("Host credential file allows other readers");
   }
 }

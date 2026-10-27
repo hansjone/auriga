@@ -34,6 +34,17 @@ class NetworkSourceJavaHostPostgresTest {
       assertEquals(
           200, host.http("/api/collab/v1/network/keys", null, device.access()).statusCode());
       host.assertPublishedKeys(device);
+      host.export(device, host.seed("external"));
+      var exported =
+          auriga.collab.app.NetworkJson.parse(
+              java.nio.file.Files.readString(host.directory.resolve("bridge.json")));
+      NetworkSourceJavaHostTest.assertPublishedProtocolKey(
+          exported,
+          java.nio.file.Files.readString(
+              java.nio.file.Path.of(
+                  exported.path("protocolSigning").path("privateKeyFile").asString())),
+          auriga.collab.app.NetworkJson.parse(
+              host.http("/api/collab/v1/network/keys", null, device.access()).body()));
       var frames = new NetworkSourceJavaScenario(host, connection);
       var source = frames.register();
       assertEquals("registered", source.path("result").asString(), source.toString());
