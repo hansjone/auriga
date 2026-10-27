@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, type LoginTransaction } from '@auriga/shared';
-import { startRedirectStepUp } from '../src/admin/redirectStepUp';
+import { ApiError } from '../src/api/problem';
+import type { LoginTransaction } from '../src/api/iam';
+import { startRedirectStepUp } from '../src/steps/redirectStepUp';
 
 const tx: LoginTransaction = {
   id: 'tx',

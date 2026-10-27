@@ -14,7 +14,10 @@ import {
 } from '@auriga/shared';
 import { apiClient, iamApi } from '../api';
 import { bindStepUp } from './stepUp';
-import { RedirectStepUpError, startRedirectStepUp } from './redirectStepUp';
+import {
+  RedirectStepUpError,
+  startRedirectStepUp,
+} from '../../../shared/src/steps/redirectStepUp';
 const props = defineProps<{ me: Me | null }>();
 const { t: globalT } = useI18n({ useScope: 'global' });
 

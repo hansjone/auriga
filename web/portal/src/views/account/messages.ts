@@ -31,6 +31,13 @@ export const messages = {
     saved: '操作成功',
     failed: '操作失败，请重试',
     stepup: '验证身份后继续',
+    stepupRequired: '仍需近期身份验证，请重新操作。',
+    openPopup: '打开验证窗口',
+    popupWaiting: '请在独立窗口完成验证；当前页面及登记信息会保留。',
+    popupBlocked: '浏览器拦截了验证窗口。请允许弹窗后再次点击，草稿已保留。',
+    popupClosed: '验证窗口已关闭，请重新打开或取消操作。',
+    popupExpired: '验证已超时，请取消后重新操作，草稿已保留。',
+    popupFailed: '未能核验原验证事务，请取消后重试，草稿已保留。',
     changed: '会话已改变，请重新登录',
     ready: 'TOTP 已确认，可用于插件登录',
     portal: '门户',
@@ -70,6 +77,18 @@ export const messages = {
     saved: 'Operation succeeded',
     failed: 'Operation failed. Try again.',
     stepup: 'Verify your identity to continue',
+    stepupRequired:
+      'Recent identity verification is still required. Start the operation again.',
+    openPopup: 'Open verification window',
+    popupWaiting:
+      'Complete verification in the separate window. This page and its enrollment stay open.',
+    popupBlocked:
+      'The verification window was blocked. Allow popups and click again. Your draft is preserved.',
+    popupClosed: 'The verification window was closed. Open it again or cancel.',
+    popupExpired:
+      'Verification expired. Cancel and retry. Your draft is preserved.',
+    popupFailed:
+      'Could not verify the original transaction. Cancel and retry. Your draft is preserved.',
     changed: 'Session changed. Sign in again.',
     ready: 'TOTP confirmed. You can use it to sign in from the plugin.',
     portal: 'Portal',

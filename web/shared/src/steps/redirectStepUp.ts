@@ -1,4 +1,5 @@
-import { isApiError, type LoginTransaction } from '@auriga/shared';
+import { isApiError } from '../api/problem';
+import type { LoginTransaction } from '../api/iam';
 
 export class RedirectStepUpError extends Error {}
 

@@ -13,6 +13,10 @@ import {
 } from '@auriga/shared';
 import { iamApi } from '../../api';
 import { messages } from './messages';
+import {
+  RedirectStepUpError,
+  startRedirectStepUp,
+} from '../../../../shared/src/steps/redirectStepUp';
 
 const { t } = useI18n({ useScope: 'local', messages });
 const { t: globalT } = useI18n({ useScope: 'global' });
@@ -20,6 +24,9 @@ const me = shallowRef<Me>();
 const sessions = shallowRef<IAMComponents['schemas']['SessionView'][]>();
 const enrollment = shallowRef<IAMComponents['schemas']['TotpEnrollment']>();
 const tx = shallowRef<LoginTransaction>();
+const popupActive = ref(false);
+let popup: ReturnType<typeof startRedirectStepUp> | undefined;
+let popupReturnTo = '';
 const step = () => tx.value?.step as ClientStep | undefined;
 const currentPassword = ref(''),
   newPassword = ref(''),
@@ -33,11 +40,15 @@ let version = 0;
 let pending: (() => Promise<void>) | undefined;
 let owner: { account: string; session: string } | undefined;
 const describeError = (e: unknown) =>
-  isApiError(e)
-    ? mapProblemMessage(e.problem, globalT)
-    : e instanceof Error
-      ? e.message
-      : t('failed');
+  e instanceof RedirectStepUpError
+    ? t(e.message)
+    : isApiError(e)
+      ? e.problem.code === 'iam.step_up_required'
+        ? t('stepupRequired')
+        : mapProblemMessage(e.problem, globalT)
+      : e instanceof Error
+        ? e.message
+        : t('failed');
 async function reload() {
   loading.value = true;
   error.value = '';
@@ -65,6 +76,9 @@ function clearEnrollment() {
 }
 function cancelVerification() {
   version++;
+  popup?.close();
+  popup = undefined;
+  popupActive.value = false;
   const id = tx.value?.status === 'pending' ? tx.value.id : undefined;
   tx.value = undefined;
   pending = undefined;
@@ -74,19 +88,7 @@ function cancelVerification() {
   newPassword.value = '';
   if (id) void iamApi.cancelLoginTransaction(id).catch(() => {});
 }
-async function accept(value: LoginTransaction, current: number) {
-  if (!alive || current !== version) {
-    if (value.status === 'pending')
-      void iamApi.cancelLoginTransaction(value.id).catch(() => {});
-    return;
-  }
-  tx.value = value;
-  if (
-    value.status !== 'completed' ||
-    value.purpose !== 'stepup' ||
-    value.step.type !== 'complete'
-  )
-    return;
+async function complete(current: number) {
   const identity = await iamApi.getMe();
   if (!alive || current !== version) return;
   if (
@@ -104,6 +106,20 @@ async function accept(value: LoginTransaction, current: number) {
   owner = undefined;
   // This is the sole retry; a second denial is shown to the user.
   await operation?.();
+}
+async function accept(value: LoginTransaction, current: number) {
+  if (!alive || current !== version) {
+    if (value.status === 'pending')
+      void iamApi.cancelLoginTransaction(value.id).catch(() => {});
+    return;
+  }
+  tx.value = value;
+  if (
+    value.status === 'completed' &&
+    value.purpose === 'stepup' &&
+    value.step.type === 'complete'
+  )
+    await complete(current);
 }
 async function run(operation: () => Promise<void>) {
   if (busy.value || pending || !me.value) return;
@@ -123,11 +139,16 @@ async function run(operation: () => Promise<void>) {
       pending = operation;
       owner = { account: me.value.account.id, session: me.value.session.id };
       try {
+        const nonce = Array.from(
+          globalThis.crypto.getRandomValues(new Uint8Array(32)),
+          (byte) => byte.toString(16).padStart(2, '0'),
+        ).join('');
+        popupReturnTo = `/account/security?aurigaStepUp=${nonce}`;
         await accept(
           await iamApi.createLoginTransaction({
             providerId: me.value.session.providerId,
             purpose: 'stepup',
-            returnTo: '/account/security',
+            returnTo: popupReturnTo,
           }),
           current,
         );
@@ -140,6 +161,36 @@ async function run(operation: () => Promise<void>) {
     } else error.value = describeError(e);
   } finally {
     if (alive && current === version) busy.value = false;
+  }
+}
+function openPopup() {
+  if (!tx.value || busy.value || popupActive.value) return;
+  const current = version;
+  error.value = '';
+  try {
+    popup = startRedirectStepUp(tx.value, popupReturnTo, (id) =>
+      iamApi.getLoginTransaction(id),
+    );
+    popupActive.value = true;
+    void popup.done
+      .then(async (value) => {
+        if (!alive || current !== version) return;
+        busy.value = true;
+        if (value) await accept(value, current);
+        else await complete(current);
+      })
+      .catch((e: unknown) => {
+        if (alive && current === version) error.value = describeError(e);
+      })
+      .finally(() => {
+        if (alive && current === version) {
+          popupActive.value = false;
+          popup = undefined;
+          busy.value = false;
+        }
+      });
+  } catch (e) {
+    error.value = describeError(e);
   }
 }
 async function submit(input: StepInput) {
@@ -233,9 +284,19 @@ onBeforeUnmount(() => {
     <p v-if="notice" role="status">{{ notice }}</p>
     <section v-if="tx" class="verification" :aria-label="t('stepup')">
       <h2>{{ t('stepup') }}</h2>
+      <template v-if="step()?.type === 'redirect'">
+        <p>{{ t('popupWaiting') }}</p>
+        <button
+          data-action="redirect-step-up"
+          :disabled="busy || popupActive"
+          @click="openPopup"
+        >
+          {{ t('openPopup') }}
+        </button>
+      </template>
       <div :inert="busy">
         <StepContainer
-          v-if="step() && step()!.type !== 'complete'"
+          v-if="step() && !['complete', 'redirect'].includes(step()!.type)"
           :step="step()!"
           @submit="submit"
           @retry="submit({ type: 'form', formId: 'retry', values: {} })"
