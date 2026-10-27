@@ -79,7 +79,10 @@ async function installation(t, preferences) {
   ) {
     const req = Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []);
     const socket = new EventEmitter();
-    socket.destroy = () => socket.emit('close');
+    socket.destroy = () => {
+      socket.destroyed = true;
+      socket.emit('close');
+    };
     Object.assign(req, {
       url: path,
       method: body ? 'POST' : 'GET',
@@ -203,166 +206,277 @@ async function installation(t, preferences) {
   };
 }
 
-test('saved platform with no loader connect stays closed without tool services, then supports the normal login routes after dependency recovery', async (t) => {
-  const origin = 'https://portal.example.com';
-  const host = await installation(t, {
-    platformOrigin: origin,
-    deployment: 'cloud',
-  });
-  await host.closed();
-  host.ctx.profileContext = { dir: host.dir };
-  assert.deepEqual(await host.runReady(), []);
-  await host.closed();
-  assert.equal((await host.call('/auriga/local-login/status')).status, 503);
-  assert.equal(
-    (await host.call('/auriga/settings/state')).body.platformOrigin,
-    origin,
-  );
-  // The dependency can remain absent indefinitely: repeated requests stay shut.
-  await host.closed();
-  const { privateKey, publicKey } = generateKeyPairSync('ec', {
-    namedCurve: 'P-256',
-  });
-  t.mock.method(globalThis, 'fetch', async (url, init) => {
-    const path = new URL(url).pathname;
-    if (path === '/api/iam/v1/login/providers')
-      return Response.json({
-        items: [
-          { id: 'team', connectorType: 'team-account', primaryStep: 'form' },
-        ],
-      });
-    if (path === '/api/iam/v1/login/transactions') {
-      const input = JSON.parse(init.body);
-      assert.equal(input.nativeConnect.clientId, 'auriga-dsh');
-      assert.equal(input.nativeConnect.codeChallengeMethod, 'S256');
-      return Response.json({
-        id: 'native-startup',
-        nativeDevice: {
-          deviceCode: 'synthetic-code',
-          expiresAt: new Date(Date.now() + 300000).toISOString(),
-          interval: 1,
-        },
-        step: { type: 'form', formId: 'totp', fields: [] },
-      });
-    }
-    if (path.endsWith('/native-startup/advance'))
-      return Response.json({
-        id: 'native-startup',
-        status: 'completed',
-        step: { type: 'complete' },
-      });
-    if (path === '/oauth2/token') {
-      const input = new URLSearchParams(init.body);
-      assert.equal(
-        input.get('grant_type'),
-        'urn:ietf:params:oauth:grant-type:device_code',
+for (const startsStandalone of [false, true])
+  test(
+    startsStandalone
+      ? 'standalone WebSockets close before enabling a platform, reconnect requires login, and clearing the platform revokes authenticated sockets'
+      : 'saved platform with no loader connect stays closed without tool services, then supports the normal login routes after dependency recovery',
+    async (t) => {
+      const origin = 'https://portal.example.com';
+      const host = await installation(
+        t,
+        startsStandalone
+          ? undefined
+          : {
+              platformOrigin: origin,
+              deployment: 'cloud',
+            },
       );
-      assert.ok(input.get('code_verifier'));
-      const now = Math.floor(Date.now() / 1000);
-      const encoded = [
-        { alg: 'ES256', kid: 'startup-fixture' },
-        {
-          iss: origin,
-          aud: 'auriga',
-          ptyp: 'device',
-          ctx: 'device',
-          scope: 'auriga.connect',
-          tid: 'tenant',
-          sub: 'alice',
-          did: 'device',
-          iat: now,
-          exp: now + 300,
+      await host.closed();
+      host.ctx.profileContext = { dir: host.dir };
+      assert.deepEqual(await host.runReady(), []);
+      if (startsStandalone) {
+        await host.standalone();
+        const live = host.request('/api/ws', undefined, 'native=valid', {
+          upgrade: 'websocket',
+        });
+        const finished = host.request('/api/ws', undefined, 'native=valid', {
+          upgrade: 'websocket',
+        });
+        const http = host.request();
+        const rejected = host.request('/api/ws', undefined, '', {
+          upgrade: 'websocket',
+        });
+        assert.equal(host.ctx.connection.admit(live).peer, 'native');
+        assert.equal(host.ctx.connection.admit(live).peer, 'native');
+        assert.equal(live.socket.listenerCount('close'), 1);
+        assert.equal(host.ctx.connection.admit(finished).peer, 'native');
+        assert.equal(host.ctx.connection.admit(http).peer, 'native');
+        assert.equal(host.ctx.connection.admit(rejected).rejection, 401);
+        const finish = t.mock.method(finished.socket, 'destroy');
+        finished.socket.destroy();
+        let rejectionWhileClosing;
+        live.socket.once('close', () => {
+          rejectionWhileClosing = host.ctx.connection.admit(
+            host.request('/api/ws', undefined, 'native=valid', {
+              upgrade: 'websocket',
+            }),
+          ).rejection;
+        });
+        const save = await host.call(
+          '/auriga/settings/save',
+          {
+            platformOrigin: origin,
+            deployment: 'cloud',
+          },
+          'native=valid',
+          { 'x-auriga-settings': '1' },
+        );
+        assert.equal(save.status, 200);
+        assert.equal(
+          live.socket.destroyed,
+          true,
+          'the old multiplexed transport must be destroyed before platform login is enabled',
+        );
+        assert.equal(
+          rejectionWhileClosing,
+          401,
+          'close callbacks cannot race a native-only reconnection',
+        );
+        assert.equal(
+          finish.mock.callCount(),
+          1,
+          'naturally closed sockets are no longer tracked',
+        );
+        assert.equal(
+          http.socket.destroyed,
+          undefined,
+          'ordinary native HTTP is not a standalone WebSocket',
+        );
+        assert.equal(
+          rejected.socket.destroyed,
+          undefined,
+          'native rejection must not register a socket',
+        );
+      }
+      await host.closed();
+      assert.equal((await host.call('/auriga/local-login/status')).status, 503);
+      assert.equal(
+        (await host.call('/auriga/settings/state')).body.platformOrigin,
+        origin,
+      );
+      // The dependency can remain absent indefinitely: repeated requests stay shut.
+      await host.closed();
+      const { privateKey, publicKey } = generateKeyPairSync('ec', {
+        namedCurve: 'P-256',
+      });
+      t.mock.method(globalThis, 'fetch', async (url, init) => {
+        const path = new URL(url).pathname;
+        if (path === '/api/iam/v1/login/providers')
+          return Response.json({
+            items: [
+              {
+                id: 'team',
+                connectorType: 'team-account',
+                primaryStep: 'form',
+              },
+            ],
+          });
+        if (path === '/api/iam/v1/login/transactions') {
+          const input = JSON.parse(init.body);
+          assert.equal(input.nativeConnect.clientId, 'auriga-dsh');
+          assert.equal(input.nativeConnect.codeChallengeMethod, 'S256');
+          return Response.json({
+            id: 'native-startup',
+            nativeDevice: {
+              deviceCode: 'synthetic-code',
+              expiresAt: new Date(Date.now() + 300000).toISOString(),
+              interval: 1,
+            },
+            step: { type: 'form', formId: 'totp', fields: [] },
+          });
+        }
+        if (path.endsWith('/native-startup/advance'))
+          return Response.json({
+            id: 'native-startup',
+            status: 'completed',
+            step: { type: 'complete' },
+          });
+        if (path === '/oauth2/token') {
+          const input = new URLSearchParams(init.body);
+          assert.equal(
+            input.get('grant_type'),
+            'urn:ietf:params:oauth:grant-type:device_code',
+          );
+          assert.ok(input.get('code_verifier'));
+          const now = Math.floor(Date.now() / 1000);
+          const encoded = [
+            { alg: 'ES256', kid: 'startup-fixture' },
+            {
+              iss: origin,
+              aud: 'auriga',
+              ptyp: 'device',
+              ctx: 'device',
+              scope: 'auriga.connect',
+              tid: 'tenant',
+              sub: 'alice',
+              did: 'device',
+              iat: now,
+              exp: now + 300,
+            },
+          ]
+            .map((part) =>
+              Buffer.from(JSON.stringify(part)).toString('base64url'),
+            )
+            .join('.');
+          return Response.json({
+            token_type: 'Bearer',
+            scope: 'auriga.connect',
+            refresh_token: 'synthetic-refresh',
+            access_token:
+              encoded +
+              '.' +
+              sign('sha256', Buffer.from(encoded), {
+                key: privateKey,
+                dsaEncoding: 'ieee-p1363',
+              }).toString('base64url'),
+          });
+        }
+        if (path === '/oauth2/jwks')
+          return Response.json({
+            keys: [
+              {
+                ...publicKey.export({ format: 'jwk' }),
+                kid: 'startup-fixture',
+              },
+            ],
+          });
+        if (path === '/ai/mcp') return Response.json({}, { status: 503 });
+        throw new Error('unexpected fixture path ' + path);
+      });
+      host.ctx.tools = {
+        register() {
+          return () => {};
         },
-      ]
-        .map((part) => Buffer.from(JSON.stringify(part)).toString('base64url'))
-        .join('.');
-      return Response.json({
-        token_type: 'Bearer',
-        scope: 'auriga.connect',
-        refresh_token: 'synthetic-refresh',
-        access_token:
-          encoded +
-          '.' +
-          sign('sha256', Buffer.from(encoded), {
-            key: privateKey,
-            dsaEncoding: 'ieee-p1363',
-          }).toString('base64url'),
-      });
-    }
-    if (path === '/oauth2/jwks')
-      return Response.json({
-        keys: [
-          { ...publicKey.export({ format: 'jwk' }), kid: 'startup-fixture' },
-        ],
-      });
-    if (path === '/ai/mcp') return Response.json({}, { status: 503 });
-    throw new Error('unexpected fixture path ' + path);
-  });
-  host.ctx.tools = {
-    register() {
-      return () => {};
+      };
+      host.ctx.sessions = { get() {}, flush() {} };
+      host.ctx.sessionController = { create() {}, prompt() {} };
+      assert.deepEqual(await host.runReady(), []);
+      await host.closed();
+      const prepared = await host.call('/auriga/local-login/status');
+      assert.equal(prepared.status, 200);
+      assert.equal(prepared.body.loggedIn, false);
+      const cookies =
+        'native=valid; ' + prepared.headers['set-cookie'].split(';')[0];
+      const headers = { 'x-auriga-csrf': prepared.body.csrf };
+      const begun = await host.call(
+        '/auriga/local-login/login',
+        { action: 'begin' },
+        cookies,
+        headers,
+      );
+      assert.equal(begun.status, 200);
+      assert.equal(begun.body.step.type, 'form');
+      t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 1100 });
+      const completed = await host.call(
+        '/auriga/local-login/login',
+        {
+          action: 'advance',
+          input: {
+            type: 'form',
+            formId: 'totp',
+            values: { code: 'synthetic' },
+          },
+        },
+        cookies,
+        headers,
+      );
+      assert.equal(completed.status, 200);
+      assert.equal(completed.body.step.type, 'complete');
+      const authenticated =
+        'native=valid; ' + completed.headers['set-cookie'][0].split(';')[0];
+      assert.equal(
+        host.ctx.connection.authorizeIndex(
+          host.request('/', undefined, authenticated),
+          host.response(),
+        ),
+        true,
+      );
+      assert.equal(
+        host.ctx.connection.admit(
+          host.request('/api/test', undefined, authenticated),
+        ).peer,
+        'native',
+      );
+      const authenticatedSocket = host.request(
+        '/api/ws',
+        undefined,
+        authenticated,
+        {
+          upgrade: 'websocket',
+        },
+      );
+      assert.equal(
+        host.ctx.connection.admit(authenticatedSocket).peer,
+        'native',
+      );
+      assert.equal(
+        (
+          await host.call(
+            '/auriga/local-login/status',
+            undefined,
+            authenticated,
+          )
+        ).body.loggedIn,
+        true,
+      );
+      await host.closed();
+      if (startsStandalone) {
+        const cleared = await host.call(
+          '/auriga/settings/save',
+          {
+            platformOrigin: '',
+            deployment: 'cloud',
+          },
+          authenticated,
+          { 'x-auriga-settings': '1' },
+        );
+        assert.equal(cleared.status, 200);
+        assert.equal(authenticatedSocket.socket.destroyed, true);
+        await host.standalone();
+      }
     },
-  };
-  host.ctx.sessions = { get() {}, flush() {} };
-  host.ctx.sessionController = { create() {}, prompt() {} };
-  assert.deepEqual(await host.runReady(), []);
-  await host.closed();
-  const prepared = await host.call('/auriga/local-login/status');
-  assert.equal(prepared.status, 200);
-  assert.equal(prepared.body.loggedIn, false);
-  const cookies =
-    'native=valid; ' + prepared.headers['set-cookie'].split(';')[0];
-  const headers = { 'x-auriga-csrf': prepared.body.csrf };
-  const begun = await host.call(
-    '/auriga/local-login/login',
-    { action: 'begin' },
-    cookies,
-    headers,
   );
-  assert.equal(begun.status, 200);
-  assert.equal(begun.body.step.type, 'form');
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 1100 });
-  const completed = await host.call(
-    '/auriga/local-login/login',
-    {
-      action: 'advance',
-      input: { type: 'form', formId: 'totp', values: { code: 'synthetic' } },
-    },
-    cookies,
-    headers,
-  );
-  assert.equal(completed.status, 200);
-  assert.equal(completed.body.step.type, 'complete');
-  const authenticated =
-    'native=valid; ' + completed.headers['set-cookie'][0].split(';')[0];
-  assert.equal(
-    host.ctx.connection.authorizeIndex(
-      host.request('/', undefined, authenticated),
-      host.response(),
-    ),
-    true,
-  );
-  assert.equal(
-    host.ctx.connection.admit(
-      host.request('/api/test', undefined, authenticated),
-    ).peer,
-    'native',
-  );
-  assert.equal(
-    host.ctx.connection.admit(
-      host.request('/api/ws', undefined, authenticated, {
-        upgrade: 'websocket',
-      }),
-    ).peer,
-    'native',
-  );
-  assert.equal(
-    (await host.call('/auriga/local-login/status', undefined, authenticated))
-      .body.loggedIn,
-    true,
-  );
-  await host.closed();
-});
 
 test('only a confirmed empty profile restores standalone admission, even when tool services never arrive', async (t) => {
   const host = await installation(t);
@@ -403,5 +517,18 @@ test('saving a platform while tool services are missing immediately closes a con
   );
   assert.equal(saved.status, 200);
   assert.equal(saved.body.activeOrigin, '');
+  await host.closed();
+});
+
+test('closing a standalone profile closes its native WebSockets before returning to unknown admission', async (t) => {
+  const host = await installation(t);
+  host.ctx.profileContext = { dir: host.dir };
+  assert.deepEqual(await host.runReady(), []);
+  const req = host.request('/api/ws', undefined, 'native=valid', {
+    upgrade: 'websocket',
+  });
+  assert.equal(host.ctx.connection.admit(req).peer, 'native');
+  host.closeProfile();
+  assert.equal(req.socket.destroyed, true);
   await host.closed();
 });

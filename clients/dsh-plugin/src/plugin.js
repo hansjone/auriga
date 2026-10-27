@@ -33,6 +33,12 @@ export async function apply(ctx, config) {
   // Unknown preferences must never temporarily expose native DSH surfaces.
   let configured = true;
   let admission;
+  const setConfigured = (next) => {
+    configured = next;
+    // Close the door before destroying old transports: even synchronous close
+    // listeners must reauthenticate before opening a new native Peer.
+    if (configured) admission?.closeStandaloneSockets();
+  };
   const settings = installSettings(
     ctx,
     config,
@@ -131,13 +137,13 @@ export async function apply(ctx, config) {
       ctx.inject(['profileContext'], async (profileCtx) => {
         const owner = {};
         profileOwner = owner;
-        configured = true;
+        setConfigured(true);
         binding = undefined;
         profileCtx.effect(
           () => () => {
             if (profileOwner !== owner) return;
             profileOwner = undefined;
-            configured = true;
+            setConfigured(true);
             binding = undefined;
           },
           'auriga-dsh: profile admission',
@@ -149,17 +155,17 @@ export async function apply(ctx, config) {
           );
         const loading = settings.getStore(profile.dir).then((store) => {
           if (profileOwner !== owner) return null;
-          configured = !!store.snapshot().platformOrigin;
+          setConfigured(!!store.snapshot().platformOrigin);
           const unwatchAdmission = store.subscribe(
             async (next) => {
-              if (profileOwner === owner) configured = !!next.platformOrigin;
+              if (profileOwner === owner) setConfigured(!!next.platformOrigin);
             },
             async (next) => {
               if (
                 profileOwner === owner &&
                 next.platformOrigin !== store.snapshot().platformOrigin
               )
-                configured = true;
+                setConfigured(true);
             },
           );
           profileCtx.effect(
