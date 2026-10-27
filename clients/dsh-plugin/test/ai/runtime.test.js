@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { setImmediate } from 'node:timers/promises';
+import { performance } from 'node:perf_hooks';
 import * as hostApi from '@deepseek-ai/dsh-llm';
 import { runtimePeer } from '../local-runtime-peer.js';
 
@@ -13,7 +15,15 @@ const { Context } = await import(
   pathToFileURL(require.resolve('@deepseek-ai/cordis'))
 );
 
-test('runtime: platform device revocation unregisters models, clears Team/browser and requires fresh authentication', async (t) => {
+async function waitFor(condition) {
+  const deadline = performance.now() + 3000;
+  while (!condition()) {
+    assert.ok(performance.now() < deadline, 'Team state did not settle');
+    await setImmediate();
+  }
+}
+
+test('runtime: Team 401 disconnects communication without rejecting verified resume or removing models', async (t) => {
   const f = await runtimePeer(t);
   const ctx = new Context(),
     fiber = await ctx.plugin(hostApi.LlmRuntime);
@@ -29,17 +39,68 @@ test('runtime: platform device revocation unregisters models, clears Team/browse
   try {
     const attempt = { headers: {} };
     attempt.headers.cookie = f.runtime.prepare(attempt).setCookie.split(';')[0];
-    await assert.rejects(f.runtime.login(attempt, { action: 'resume' }));
-    assert.equal(f.runtime.resolve(f.request), null);
+    const result = await f.runtime.login(attempt, { action: 'resume' });
+    assert.equal(result.step.type, 'complete');
+    attempt.headers.cookie = result.setCookie[0].split(';')[0];
+    await waitFor(
+      () => f.runtime.status(attempt).communication === 'unavailable',
+    );
+    assert.ok(f.runtime.resolve(f.request));
+    assert.ok(f.runtime.resolve(attempt));
+    assert.equal(f.runtime.status(attempt).loggedIn, true);
+    assert.equal(f.runtime.status(attempt).connected, false);
     assert.equal(f.registered.size, 0);
-    assert.equal(f.runtime.modelStatus.reauthenticationRequired, true);
-    assert.deepEqual(ctx.llm.listProviders(), []);
+    assert.equal(f.runtime.modelStatus.reauthenticationRequired, false);
+    assert.equal(ctx.llm.listProviders().length, 1);
   } finally {
     detach();
     f.runtime.close();
     await fiber.dispose();
   }
 });
+
+for (const status of [400, 401, 403])
+  test(`runtime: IAM platform refresh HTTP ${status} still revokes browser and model access`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
+    const f = await runtimePeer(t, { accessLifetimeSeconds: 60 });
+    const ctx = new Context(),
+      fiber = await ctx.plugin(hostApi.LlmRuntime);
+    const detach = await f.runtime.attachModels(ctx.llm);
+    const previous = globalThis.fetch;
+    let exchanges = 0;
+    t.mock.method(globalThis, 'fetch', (url, init) => {
+      if (new URL(url).pathname !== '/oauth2/token') return previous(url, init);
+      const body = new URLSearchParams(init.body);
+      assert.equal(body.get('grant_type'), 'refresh_token');
+      assert.equal(body.get('resource'), null);
+      exchanges++;
+      return Promise.resolve(
+        Response.json({ error: 'invalid_grant' }, { status }),
+      );
+    });
+    try {
+      assert.ok(f.runtime.resolve(f.request));
+      assert.equal(ctx.llm.listProviders().length, 1);
+      t.mock.timers.tick(31000);
+      assert.ok(
+        f.runtime.resolve(f.request),
+        'the browser and access token have not expired',
+      );
+      await assert.rejects(f.runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
+      assert.equal(f.runtime.resolve(f.request), null);
+      assert.equal(f.runtime.status(f.request).connected, false);
+      assert.equal(f.registered.size, 0);
+      assert.equal(f.runtime.modelStatus.reauthenticationRequired, true);
+      assert.deepEqual(ctx.llm.listProviders(), []);
+      assert.equal(f.runtime.vault.snapshot().credential.refreshPending, true);
+      await assert.rejects(f.runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
+      assert.equal(exchanges, 1, 'rejected refresh is never replayed');
+    } finally {
+      detach();
+      f.runtime.close();
+      await fiber.dispose();
+    }
+  });
 
 for (const scenario of ['same_owner', 'other_owner', 'other_platform'])
   test(`runtime: fresh native login after unknown refresh enforces owner and platform binding (${scenario})`, async (t) => {
@@ -150,9 +211,10 @@ for (const scenario of ['same_owner', 'other_owner', 'other_platform'])
         assert.equal(state.credential.claims.did, 'new-device');
         assert.equal(state.revocations.length, 1);
         assert.equal(state.revocations[0].token, f.credential.refreshToken);
-        assert.equal(f.runtime.status(request).connected, true);
+        assert.equal(f.runtime.status(request).loggedIn, true);
         assert.equal(f.runtime.modelStatus.reauthenticationRequired, false);
         assert.equal(ctx.llm.listProviders().length, 1);
+        await waitFor(() => f.runtime.status(request).connected);
       }
     } finally {
       detach();

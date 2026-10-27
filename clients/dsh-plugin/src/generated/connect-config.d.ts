@@ -13,7 +13,7 @@ export type PositiveUint64 = string;
 
 export interface ConnectConfig {
   /**
-   * Pure HTTPS origin; explicit loopback HTTP tests only.
+   * Default platform origin. Saved settings override it. HTTPS or explicit loopback/RFC1918/ULA HTTP with allowLocalHttp=true.
    */
   platformOrigin: string;
   /**
@@ -23,6 +23,9 @@ export interface ConnectConfig {
   clientId: string;
   providerId: string;
   deviceName?: string;
+  /**
+   * Explicit permission for loopback or private IP HTTP. Saved HTTP settings grant this permission; public HTTP and non-loopback DNS HTTP are rejected.
+   */
   allowLocalHttp?: boolean;
   network?: ConnectNetwork;
 }

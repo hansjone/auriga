@@ -81,6 +81,14 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
   const target = connection[original] ?? connection;
   const nativeAdmit = target.admit,
     nativeIndex = target.authorizeIndex;
+  /** @type {Set<import('node:net').Socket>} */
+  const standaloneSockets = new Set();
+  function closeStandaloneSockets() {
+    for (const socket of standaloneSockets) {
+      standaloneSockets.delete(socket);
+      socket.destroy();
+    }
+  }
   const nativeAuth = {
     /** @param {any} request */
     requestRejection: (request) => {
@@ -125,6 +133,21 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
     const original = nativeAdmit.call(connection, request);
     if ('rejection' in original) return original;
     const upgrade = request.headers.upgrade?.toLowerCase() === 'websocket';
+    if (runtime.isConfigured?.() === false) {
+      // Native multiplexed peers survive subsequent admission changes. Keep
+      // their transport in the parent scope even without a platform runtime.
+      const socket = request.socket;
+      if (
+        upgrade &&
+        socket &&
+        !socket.destroyed &&
+        !standaloneSockets.has(socket)
+      ) {
+        standaloneSockets.add(socket);
+        socket.once('close', () => standaloneSockets.delete(socket));
+      }
+      return original;
+    }
     if (
       !sameOrigin(
         request,
@@ -142,6 +165,7 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
     /** @type {import('node:http').ServerResponse} */ response,
   ) {
     if (!nativeIndex.call(connection, request, response)) return false;
+    if (runtime.isConfigured?.() === false) return true;
     if (!sameOrigin(request)) {
       response.writeHead(403);
       response.end();
@@ -163,7 +187,9 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
   return {
     nativeAuth,
     sameOrigin,
+    closeStandaloneSockets,
     dispose() {
+      closeStandaloneSockets();
       stopHttpTracking();
       if (target.admit === admit) target.admit = nativeAdmit;
       if (target.authorizeIndex === authorizeIndex)

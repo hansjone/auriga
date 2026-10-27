@@ -9,6 +9,44 @@ import {
   createSettingsStore,
 } from '../../src/settings/store.js';
 
+test('platform changes invalidate credentials before persistence and publish after persistence; failed invalidation preserves saved values', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-settings-order-'));
+  try {
+    const store = await createSettingsStore(dir, 'https://old.example.com');
+    const events = [];
+    let reject = true;
+    const unsubscribe = store.subscribe(
+      async (next) => {
+        assert.equal(
+          (await createSettingsStore(dir)).snapshot().platformOrigin,
+          next.platformOrigin,
+        );
+        events.push('applied');
+      },
+      async () => {
+        assert.equal(
+          store.snapshot().platformOrigin,
+          'https://old.example.com',
+        );
+        events.push('invalidated');
+        if (reject) throw new Error('tombstone failed');
+      },
+    );
+    const next = {
+      platformOrigin: 'https://new.example.com',
+      deployment: 'local',
+    };
+    await assert.rejects(store.save(next), /tombstone failed/);
+    assert.equal(store.snapshot().platformOrigin, 'https://old.example.com');
+    reject = false;
+    await store.save(next);
+    assert.deepEqual(events, ['invalidated', 'invalidated', 'applied']);
+    unsubscribe();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('settings accepts HTTPS and explicit local HTTP origins only', () => {
   for (const value of [
     'https://example.com',

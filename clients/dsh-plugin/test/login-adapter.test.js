@@ -28,7 +28,7 @@ function fixture(replies) {
   });
   return { controller, requests };
 }
-test('begin keeps CSRF/cookies on local origin; complete requires ready status', async () => {
+test('begin keeps CSRF/cookies on local origin; complete requires verified identity independently of Team', async () => {
   const { controller, requests } = fixture([
     json(state()),
     json({ step: form }),
@@ -44,12 +44,12 @@ test('begin keeps CSRF/cookies on local origin; complete requires ready status',
   assert.equal(requests[1].headers['X-Auriga-CSRF'], 'proof');
   assert.equal(requests[1].credentials, 'same-origin');
   assert.equal(requests[1].redirect, 'error');
-  await assert.rejects(
-    controller.submit(
+  assert.deepEqual(
+    await controller.submit(
       { type: 'form', formId: 'password', values: {} },
       { signal: new AbortController().signal },
     ),
-    (error) => error.reason === 'network',
+    { type: 'complete', redirectTo: '/' },
   );
 });
 test('resume expiry has a controlled recovery; explicit restart preserves device backing and never globally logs out', async () => {
@@ -79,9 +79,9 @@ test('retry from authenticated disconnected status never posts logout', async ()
     json(state({ loggedIn: true, connected: false })),
     json(state({ loggedIn: true, connected: true })),
   ]);
-  await assert.rejects(
-    controller.restart({ signal: new AbortController().signal }),
-    (error) => error.reason === 'network',
+  assert.deepEqual(
+    await controller.restart({ signal: new AbortController().signal }),
+    { type: 'complete', redirectTo: '/' },
   );
   assert.deepEqual(
     await controller.restart({ signal: new AbortController().signal }),

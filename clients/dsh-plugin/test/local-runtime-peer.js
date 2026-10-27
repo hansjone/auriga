@@ -2,6 +2,7 @@ import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { setImmediate } from 'node:timers';
 import { createConnectRuntime } from '../src/local/runtime.js';
 
 // In-process platform peer with a generated ES256 device. Real runtime/JWKS/
@@ -28,7 +29,8 @@ export async function runtimePeer(t, options = {}) {
     sub: randomUUID(),
     did: randomUUID(),
     iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
+    exp:
+      Math.floor(Date.now() / 1000) + (options.accessLifetimeSeconds ?? 3600),
   };
   const unsigned = [{ alg: 'ES256', kid: 'test-key', typ: 'at+jwt' }, claims]
     .map((v) => Buffer.from(JSON.stringify(v)).toString('base64url'))
@@ -69,6 +71,7 @@ export async function runtimePeer(t, options = {}) {
     else if (path === '/ai/team/node/register')
       data = { endpoint: { id: endpointId } };
     else if (path === '/ai/mcp') {
+      if (options.teamRequest) return options.teamRequest(url, init);
       const body = JSON.parse(init.body);
       if (body.method === 'notifications/initialized')
         return new Response(null, { status: 202 });
@@ -114,6 +117,16 @@ export async function runtimePeer(t, options = {}) {
   const request = { headers: {} };
   request.headers.cookie = runtime.prepare(request).setCookie.split(';')[0];
   const result = await runtime.login(request, { action: 'resume' });
+  if (!options.teamRequest) {
+    const deadline = Date.now() + 3000;
+    while (!runtime.isReady()) {
+      assertReady();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    function assertReady() {
+      if (Date.now() > deadline) throw new Error('Team fixture not ready');
+    }
+  }
   request.headers.cookie = result.setCookie[0].split(';')[0];
   request.headers['x-auriga-csrf'] = runtime.status(request).csrf;
   return { runtime, request, directory, credential, registered, requests };

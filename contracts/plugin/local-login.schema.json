@@ -10,7 +10,7 @@
         "platformOrigin": {
           "type": "string",
           "format": "uri",
-          "description": "Pure HTTPS origin; explicit loopback HTTP tests only."
+          "description": "Default platform origin. Saved settings override it. HTTPS or explicit loopback/RFC1918/ULA HTTP with allowLocalHttp=true."
         },
         "issuer": {
           "type": "string",
@@ -20,7 +20,11 @@
         "clientId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "providerId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "deviceName": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "allowLocalHttp": { "type": "boolean", "default": false },
+        "allowLocalHttp": {
+          "type": "boolean",
+          "default": false,
+          "description": "Explicit permission for loopback or private IP HTTP. Saved HTTP settings grant this permission; public HTTP and non-loopback DNS HTTP are rejected."
+        },
         "network": { "$ref": "#/$defs/ConnectNetwork" }
       },
       "required": ["platformOrigin", "issuer", "clientId", "providerId"]
@@ -103,6 +107,10 @@
         "available": { "const": true },
         "loggedIn": { "type": "boolean" },
         "connected": { "type": "boolean" },
+        "communication": {
+          "enum": ["idle", "connecting", "ready", "unavailable"],
+          "description": "Team readiness is independent from verified local sign-in. Team failures never claim connected=true."
+        },
         "csrf": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
         "resumeAvailable": { "type": "boolean" },
         "remoteRevocation": { "enum": ["pending", "complete"] },
@@ -135,7 +143,21 @@
           ]
         }
       },
-      "required": ["available", "loggedIn", "connected", "account"]
+      "required": ["available", "loggedIn", "connected", "account"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "connected": { "const": true } },
+            "required": ["connected"]
+          },
+          "then": {
+            "properties": {
+              "loggedIn": { "const": true },
+              "communication": { "const": "ready" }
+            }
+          }
+        }
+      ]
     }
   }
 }

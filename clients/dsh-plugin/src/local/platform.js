@@ -2,6 +2,47 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { networkInstallation } from '../network/installation.js';
+import { normalizeOrigin } from '../settings/store.js';
+
+/** Saved preferences own the platform origin. Loader metadata is a default for
+ * that platform only; switching never sends its provider id or network pins to
+ * another installation. Public provider discovery does not authenticate anyone.
+ * @param {import('../generated/connect-config.js').ConnectConfig|undefined} loader
+ * @param {string} origin
+ * @param {{saved?:boolean}} [options] Only the profile store may assert a saved preference. */
+export async function savedPlatformConfig(
+  loader,
+  origin,
+  { saved = false } = {},
+) {
+  const platformOrigin = normalizeOrigin(origin);
+  const same =
+    loader && normalizeOrigin(loader.platformOrigin) === platformOrigin;
+  const config = platformConfig({
+    ...(same ? loader : {}),
+    platformOrigin,
+    issuer: same ? loader.issuer : platformOrigin,
+    clientId: loader?.clientId ?? 'auriga-dsh',
+    ...(loader?.deviceName ? { deviceName: loader.deviceName } : {}),
+    providerId: same ? loader.providerId : 'discover',
+    ...(saved && platformOrigin.startsWith('http:')
+      ? { allowLocalHttp: true }
+      : {}),
+  });
+  if (same) return config;
+  const providers = await createPlatform(config).request(
+    '/api/iam/v1/login/providers',
+  );
+  const teams = providers.items?.filter(
+    (/** @type {any} */ p) =>
+      p.connectorType === 'team-account' && p.primaryStep === 'form',
+  );
+  if (teams?.length !== 1)
+    throw new Error(
+      'one team-account form provider or explicit loader configuration required',
+    );
+  return platformConfig({ ...config, providerId: teams[0].id });
+}
 
 /** Installation-owned origin. No URL, issuer or redirect is accepted from UI/model input.
  * @param {any} input
@@ -25,8 +66,7 @@ export function platformConfig(input) {
     )
   )
     throw new Error('invalid platform configuration');
-  const url = new URL(input.platformOrigin);
-  const loopback = ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname);
+  const url = new URL(normalizeOrigin(input.platformOrigin));
   if (
     url.username ||
     url.password ||
@@ -34,11 +74,11 @@ export function platformConfig(input) {
     url.hash ||
     url.pathname !== '/' ||
     (url.protocol !== 'https:' &&
-      !(input.allowLocalHttp === true && loopback && url.protocol === 'http:'))
+      !(input.allowLocalHttp === true && url.protocol === 'http:'))
   )
     throw new Error('auriga-dsh: trusted HTTPS platform origin required');
-  if (input.allowLocalHttp && !loopback)
-    throw new Error('auriga-dsh: loopback test origin required');
+  if (input.allowLocalHttp && url.protocol !== 'http:')
+    throw new Error('auriga-dsh: explicit private HTTP origin required');
   if (
     ![input.clientId, input.providerId].every(
       (x) => typeof x === 'string' && x.length > 0 && x.length <= 128,

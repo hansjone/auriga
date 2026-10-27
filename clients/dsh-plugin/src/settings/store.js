@@ -124,19 +124,39 @@ export async function createSettingsStore(directory, initialOrigin = '') {
     platformOrigin: initialOrigin ? normalizeOrigin(initialOrigin) : '',
     deployment: 'cloud',
   };
+  let hasSavedSettings = false;
   try {
     state = validate(JSON.parse(await readFile(path, 'utf8')));
+    hasSavedSettings = true;
   } catch (error) {
     if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'ENOENT')
       throw error;
   }
   let pending = Promise.resolve();
+  /** @type {Set<(next:Preferences)=>Promise<void>>} */
+  const listeners = new Set();
+  /** @type {Set<(next:Preferences)=>Promise<void>>} */
+  const beforeSave = new Set();
   return {
     snapshot: () => ({ ...state }),
+    get hasSavedSettings() {
+      return hasSavedSettings;
+    },
+    /** @param {(next:Preferences)=>Promise<void>} listener
+     * @param {(next:Preferences)=>Promise<void>} [invalidate] */
+    subscribe(listener, invalidate) {
+      listeners.add(listener);
+      if (invalidate) beforeSave.add(invalidate);
+      return () => {
+        listeners.delete(listener);
+        if (invalidate) beforeSave.delete(invalidate);
+      };
+    },
     /** @param {unknown} input */
     save(input) {
       const operation = pending.then(async () => {
         const next = validate(input);
+        for (const invalidate of beforeSave) await invalidate({ ...next });
         await mkdir(directory, { recursive: true });
         const temp = path + '.' + randomUUID();
         try {
@@ -146,6 +166,8 @@ export async function createSettingsStore(directory, initialOrigin = '') {
           });
           await rename(temp, path);
           state = next;
+          hasSavedSettings = true;
+          for (const listener of listeners) await listener({ ...next });
         } finally {
           await rm(temp, { force: true });
         }

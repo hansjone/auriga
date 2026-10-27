@@ -78,9 +78,15 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     attempts = new Map(),
     sockets = new Map();
   const expiryTimer = setInterval(() => {
-    for (const row of sessions.values())
+    let renew = false;
+    for (const row of sessions.values()) {
       if (row.expiresAt <= Date.now() || row.accessExpiresAt <= Date.now())
         killSession(row);
+      else if (row.accessExpiresAt <= Date.now() + 30000) renew = true;
+    }
+    // Identity renewal belongs to live browser sessions, even if Team never
+    // starts. The broker owns refresh single-flight and failure-closed cleanup.
+    if (renew && !closed) void getAccess().catch(() => {});
   }, 1000);
   expiryTimer.unref();
   /** @type {boolean} */
@@ -90,6 +96,11 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     online = false;
   /** @type {ReturnType<typeof createTeam>|undefined} */
   let team;
+  /** @type {ReturnType<typeof createTeam>|undefined} */
+  let startingTeam;
+  let communication = 'idle';
+  /** @type {Promise<void>|undefined} */
+  let teamStarting;
   /** @type {Promise<void>|undefined} */
   let revoking;
   async function drainRevocations() {
@@ -194,8 +205,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       models.logout();
       for (const row of sessions.values()) killSession(row);
       team?.close();
+      startingTeam?.close();
       team = undefined;
       online = false;
+      communication = 'unavailable';
     },
   });
   const broker = createRefreshBroker({
@@ -210,8 +223,10 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       models.logout();
       network.logout();
       team?.close();
+      startingTeam?.close();
       team = undefined;
       online = false;
+      communication = 'unavailable';
       for (const row of sessions.values()) killSession(row);
     },
   });
@@ -309,27 +324,51 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       onState(state) {
         if (closed || generation !== g) return;
         online = state.connected;
+        communication = state.connected
+          ? team
+            ? 'ready'
+            : 'connecting'
+          : 'unavailable';
         if (state.unauthorized) {
-          broker.invalidate('revoked');
-          models.logout();
-          network.logout();
-          for (const row of sessions.values()) killSession(row);
           team?.close();
           team = undefined;
         }
       },
     });
+    startingTeam = candidate;
     try {
       await candidate.start();
       active(g);
       assertAttempt();
       starting = false;
       team = candidate;
+      communication = 'ready';
       network.login();
     } catch (error) {
       candidate.close();
       throw error;
+    } finally {
+      if (startingTeam === candidate) startingTeam = undefined;
     }
+  }
+  function connectTeam(verify = false) {
+    if (teamStarting || closed || (!verify && team && online)) return;
+    if (team && !online) {
+      team.close();
+      team = undefined;
+    }
+    const g = generation;
+    communication = 'connecting';
+    teamStarting = startTeam()
+      .catch(() => {
+        if (!closed && generation === g) {
+          online = false;
+          communication = 'unavailable';
+        }
+      })
+      .finally(() => {
+        teamStarting = undefined;
+      });
   }
   function issueBrowserSession(
     /** @type {any} */ row,
@@ -349,6 +388,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       };
     sessions.set(key, session);
     models.login();
+    connectTeam(true);
     row.jar.clear();
     row.verifier = undefined;
     row.device = undefined;
@@ -361,7 +401,66 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       ],
     };
   }
+  /** Trusted settings changes also use the normal tombstone/revocation path.
+   * @param {any} [row] */
+  async function clearAuthentication(row) {
+    const owns = (/** @type {any} */ credential) =>
+      !row ||
+      (credential?.claims.sub === row.subject &&
+        credential?.claims.tid === row.tenantId &&
+        credential?.claims.did === row.deviceId);
+    if (!owns(vault.snapshot().credential))
+      throw new Error('local device ownership changed');
+    generation++;
+    broker.invalidate('signed_out');
+    models.logout();
+    network.logout();
+    const abandoned = [...attempts.values()];
+    attempts.clear();
+    for (const attempt of abandoned) attempt.controller.abort();
+    for (const session of sessions.values()) killSession(session);
+    // Close access immediately; persist the tombstone before reporting logout success.
+    team?.close();
+    startingTeam?.close();
+    team = undefined;
+    online = false;
+    communication = 'idle';
+    try {
+      await vault.update((s) => {
+        if (!owns(s.credential))
+          throw new Error('local device ownership changed');
+        if (s.credential) {
+          s.revocations ??= [];
+          if (s.revocations.length >= 256)
+            throw new Error('revocation queue full');
+          s.revocations.push({
+            id: random(),
+            platformOrigin:
+              s.credential.platformOrigin ??
+              new URL(s.credential.claims.iss).origin,
+            clientId: s.credential.clientId ?? config.clientId,
+            token: s.credential.refreshToken,
+          });
+        }
+        s.credential = null;
+        s.endpoint = null;
+        s.threads = {};
+        s.deliveries = {};
+        s.pendingOpens = {};
+        s.openOutcomes = {};
+      });
+    } catch {
+      closed = true;
+      clearInterval(expiryTimer);
+      clearInterval(revokeTimer);
+      for (const value of sessions.values()) killSession(value);
+      throw new Error('logout persistence failed');
+    }
+    for (const attempt of abandoned) await abandon(attempt);
+    await drainRevocations();
+  }
   return {
+    resetAuthentication: clearAuthentication,
     config,
     resolve,
     getAccess,
@@ -409,6 +508,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         available: true,
         loggedIn: !!row,
         connected: !!row && !!team && online,
+        communication: row ? communication : 'idle',
         models: models.status,
         network: row
           ? network.status
@@ -441,7 +541,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     prepare(/** @type {any} */ request) {
       active();
       const current = resolve(request);
-      if (current) return { body: this.status(request) };
+      if (current) {
+        // An authenticated page/status refresh is the explicit retry trigger;
+        // communication retries never hold up identity or mint a new session.
+        connectTeam();
+        return { body: this.status(request) };
+      }
       let id = cookie(request, ATTEMPT_COOKIE),
         row = attempts.get(id);
       if (!row || row.expiresAt <= Date.now()) {
@@ -495,8 +600,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           const token = await getAccess();
           check();
           await platform.verifyDevice(token, saved.claims);
-          check();
-          await startTeam(check);
           check();
           return issueBrowserSession(row, request, vault.snapshot().credential);
         }
@@ -667,8 +770,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
             ),
           );
           check();
-          await startTeam(check);
-          check();
         });
         finalizing = finish.catch(() => {});
         await finish;
@@ -703,8 +804,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       return true;
     },
     async logout(/** @type {any} */ request) {
-      const row = resolve(request),
-        attempt = attempts.get(cookie(request, ATTEMPT_COOKIE));
+      const row = resolve(request);
       if (!row) {
         await this.cancelAttempt(request);
         return {
@@ -712,62 +812,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
           body: this.status(request),
         };
       }
-      const owns = (/** @type {any} */ credential) =>
-        credential?.claims.sub === row.subject &&
-        credential?.claims.tid === row.tenantId &&
-        credential?.claims.did === row.deviceId;
-      if (!owns(vault.snapshot().credential))
-        throw new Error('local device ownership changed');
-      generation++;
-      broker.invalidate('signed_out');
-      models.logout();
-      network.logout();
-      if (attempt) {
-        attempts.delete(cookie(request, ATTEMPT_COOKIE));
-        attempt.controller.abort();
-      }
-      for (const session of sessions.values())
-        if (
-          session.subject === row.subject &&
-          session.tenantId === row.tenantId &&
-          session.deviceId === row.deviceId
-        )
-          killSession(session);
-      // Close access immediately; persist the tombstone before reporting logout success.
-      team?.close();
-      team = undefined;
-      online = false;
-      try {
-        await vault.update((s) => {
-          if (!owns(s.credential))
-            throw new Error('local device ownership changed');
-          if (s.credential) {
-            s.revocations ??= [];
-            if (s.revocations.length >= 256)
-              throw new Error('revocation queue full');
-            s.revocations.push({
-              id: random(),
-              platformOrigin: config.platformOrigin,
-              clientId: config.clientId,
-              token: s.credential.refreshToken,
-            });
-          }
-          s.credential = null;
-          s.endpoint = null;
-          s.threads = {};
-          s.deliveries = {};
-          s.pendingOpens = {};
-          s.openOutcomes = {};
-        });
-      } catch {
-        closed = true;
-        clearInterval(expiryTimer);
-        clearInterval(revokeTimer);
-        for (const value of sessions.values()) killSession(value);
-        throw new Error('logout persistence failed');
-      }
-      if (attempt) await abandon(attempt);
-      await drainRevocations();
+      await clearAuthentication(row);
       return {
         setCookie: [
           setCookie(SESSION_COOKIE, '', 0),
@@ -796,6 +841,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       generation++;
       networkClosing = network.close();
       team?.close();
+      startingTeam?.close();
       for (const value of sessions.values()) killSession(value);
       for (const row of attempts.values()) {
         row.controller.abort();

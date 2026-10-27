@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createSettingsStore, normalizeOrigin, probe } from './store.js';
+import { createSettingsStore, probe } from './store.js';
 import { validateBrowserOrigin } from '../managed/host-auth.js';
 
 /** Only installation/renderer configuration may supply this value, never a request
@@ -19,13 +19,32 @@ function trustedOrigin(value) {
 /** Public host service adapter. Business preferences do not modify loader config
  * or reuse credentials when an origin changes.
  * @param {any} ctx @param {any} config
- * @param {{uiOrigin?:string}} [installation] Trusted process configuration. */
+ * @param {{uiOrigin?:string,activeOrigin?:()=>string,nativeAuth?:{requestRejection:(req:any)=>number|undefined}}} [installation] Trusted process configuration. */
 export function installSettings(
   ctx,
   config,
-  { uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN } = {},
+  {
+    uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN,
+    activeOrigin,
+    nativeAuth,
+  } = {},
 ) {
-  if (typeof ctx.inject !== 'function') return;
+  /** @type {Map<string,ReturnType<typeof createSettingsStore>>} */
+  const stores = new Map();
+  const getStore = (/** @type {string} */ dir) => {
+    if (!stores.has(dir))
+      stores.set(
+        dir,
+        createSettingsStore(
+          join(dir, 'auriga-settings'),
+          config?.connect?.platformOrigin,
+        ),
+      );
+    return /** @type {ReturnType<typeof createSettingsStore>} */ (
+      stores.get(dir)
+    );
+  };
+  if (typeof ctx.inject !== 'function') return { getStore };
   // Managed browserOrigin is renderer-owned (the existing managed contract).
   // A local reverse proxy can instead pin its external origin at process start.
   const browser =
@@ -35,10 +54,7 @@ export function installSettings(
     : trustedOrigin(uiOrigin);
   ctx.inject(['profileContext'], async (/** @type {any} */ scoped) => {
     if (!scoped.profileContext?.dir) return;
-    const store = await createSettingsStore(
-      join(scoped.profileContext.dir, 'auriga-settings'),
-      config?.connect?.platformOrigin,
-    );
+    const store = await getStore(scoped.profileContext.dir);
     scoped.effect(
       () =>
         scoped.webServer.register({
@@ -46,11 +62,10 @@ export function installSettings(
           path: '/auriga/settings',
           handler: createSettingsHandler({
             store,
-            auth: scoped.connection,
+            auth: nativeAuth ?? scoped.connection,
             uiOrigin: expectedOrigin,
-            activeOrigin: config?.connect?.platformOrigin
-              ? normalizeOrigin(config.connect.platformOrigin)
-              : '',
+            activeOrigin:
+              activeOrigin ?? (() => store.snapshot().platformOrigin),
             deviceName: config?.connect
               ? (config.connect.deviceName ?? 'Auriga DSH')
               : null,
@@ -59,9 +74,10 @@ export function installSettings(
       'auriga-dsh: settings',
     );
   });
+  return { getStore };
 }
 
-/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string,deviceName?:string|null,uiOrigin?:string}} options */
+/** @param {{store:Awaited<ReturnType<typeof createSettingsStore>>,auth:any,activeOrigin:string|(()=>string),deviceName?:string|null,uiOrigin?:string}} options */
 export function createSettingsHandler({
   store,
   auth,
@@ -70,6 +86,12 @@ export function createSettingsHandler({
   uiOrigin,
 }) {
   const expectedOrigin = trustedOrigin(uiOrigin);
+  const snapshot = () => ({
+    ...store.snapshot(),
+    activeOrigin:
+      typeof activeOrigin === 'function' ? activeOrigin() : activeOrigin,
+    deviceName,
+  });
   return async (
     /** @type {import('node:http').IncomingMessage} */ req,
     /** @type {import('node:http').ServerResponse} */ res,
@@ -126,7 +148,7 @@ export function createSettingsHandler({
         return;
       }
       if (req.method === 'GET' && path === '/auriga/settings/state')
-        return json(200, { ...store.snapshot(), activeOrigin, deviceName });
+        return json(200, snapshot());
       if (
         !write ||
         !['/auriga/settings/save', '/auriga/settings/test'].includes(path ?? '')
@@ -157,7 +179,7 @@ export function createSettingsHandler({
         return json(200, await probe(input.platformOrigin));
       }
       await store.save(input);
-      return json(200, { ...store.snapshot(), activeOrigin, deviceName });
+      return json(200, snapshot());
     } catch (error) {
       const reason = error instanceof Error ? error.message : '';
       return json(

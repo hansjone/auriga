@@ -78,8 +78,7 @@ export function createLocalLoginController(options = {}) {
   }
   /** @param {any} state */
   function ready(state) {
-    if (state.loggedIn !== true || state.connected !== true)
-      throw new LoginFailure('network');
+    if (state.loggedIn !== true) throw new LoginFailure('network');
     return /** @type {const} */ ({ type: 'complete', redirectTo: '/' });
   }
   /** An anonymous browser alone says nothing about the device backing.

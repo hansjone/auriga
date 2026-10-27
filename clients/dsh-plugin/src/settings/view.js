@@ -10,9 +10,10 @@ const messages = {
     reachable: '平台接口可达；不代表已登录或模型已授权。',
     unconfigured: '尚未配置平台连接',
     connected: 'Team 已连接；模型授权需单独确认。',
-    disconnected: 'Team 未连接',
-    pending:
-      '新地址已保存，尚未应用于登录连接；需由安装配置接入，旧凭据不会迁移。',
+    disconnected: '通信未就绪；身份登录与非通信功能可继续使用。',
+    pending: '设置已保存，但连接暂未生效，请确认平台可用后重新保存。',
+    reauthenticate: '平台连接已生效，请重新登录。',
+    login: '登录',
     security: '账号与安全',
     identity: '当前身份',
     device: '设备名',
@@ -50,9 +51,12 @@ const messages = {
       'Platform API reachable; sign-in and model authorization are separate.',
     unconfigured: 'Platform connection is not configured',
     connected: 'Team connected; model authorization is separate.',
-    disconnected: 'Team disconnected',
+    disconnected:
+      'Communication is not ready; sign-in and non-communication features remain available.',
     pending:
-      'Saved address is pending installation configuration. Existing credentials will not migrate.',
+      'Settings saved, but the connection could not be applied. Check the platform and save again.',
+    reauthenticate: 'Platform settings applied. Please sign in again.',
+    login: 'Sign in',
     security: 'Account and security',
     identity: 'Current identity',
     device: 'Device name',
@@ -115,6 +119,25 @@ export function createSettingsView(
       );
     return data;
   }
+  async function readState() {
+    return Promise.all([
+      call('auriga/settings/state'),
+      call('auriga/local-login/status')
+        .then((identity) => {
+          if (
+            !identity ||
+            typeof identity.loggedIn !== 'boolean' ||
+            (identity.loggedIn &&
+              (typeof identity.connected !== 'boolean' ||
+                typeof identity.account?.subject !== 'string' ||
+                !identity.account.subject))
+          )
+            throw new Error('unavailable');
+          return identity;
+        })
+        .catch(() => null),
+    ]);
+  }
   return function SettingsView(/** @type {{locale:string}} */ { locale }) {
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];
     const [state, setState] = React.useState(null);
@@ -129,32 +152,19 @@ export function createSettingsView(
     );
     const explain = (/** @type {any} */ error) =>
       t[/** @type {keyof typeof t} */ (error?.message)] ?? t.unavailable;
+    const publish = (/** @type {any} */ next, /** @type {any} */ identity) => {
+      setState(next);
+      setAddress(next.platformOrigin);
+      setDeployment(next.deployment);
+      setAccount(identity);
+    };
     React.useEffect(() => {
       let live = true;
       setBusy(true);
-      void Promise.all([
-        call('auriga/settings/state'),
-        call('auriga/local-login/status')
-          .then((identity) => {
-            if (
-              !identity ||
-              typeof identity.loggedIn !== 'boolean' ||
-              (identity.loggedIn &&
-                (typeof identity.connected !== 'boolean' ||
-                  typeof identity.account?.subject !== 'string' ||
-                  !identity.account.subject))
-            )
-              throw new Error('unavailable');
-            return identity;
-          })
-          .catch(() => null),
-      ])
+      void readState()
         .then(([next, identity]) => {
           if (!live) return;
-          setState(next);
-          setAddress(next.platformOrigin);
-          setDeployment(next.deployment);
-          setAccount(identity);
+          publish(next, identity);
           setNotice('');
         })
         .catch((error) => {
@@ -249,6 +259,17 @@ export function createSettingsView(
             ? (account.account?.subject ?? t.missing)
             : t.signedOut,
       ),
+      state?.activeOrigin &&
+        account?.loggedIn === false &&
+        h(
+          'button',
+          {
+            type: 'button',
+            disabled: busy,
+            onClick: () => navigate(localURL('auriga/local-login')),
+          },
+          t.login,
+        ),
       row(
         t.device,
         account?.loggedIn === true
@@ -323,13 +344,33 @@ export function createSettingsView(
           disabled: busy || !state,
           onClick: () =>
             run(async () => {
-              const next = await call('auriga/settings/save', {
-                platformOrigin: address,
-                deployment,
-              });
-              setState(next);
-              setAddress(next.platformOrigin);
-              setNotice(t.saved);
+              try {
+                await call('auriga/settings/save', {
+                  platformOrigin: address,
+                  deployment,
+                });
+                const [next, identity] = await readState();
+                publish(next, identity);
+                const needsLogin =
+                  next.activeOrigin &&
+                  next.platformOrigin === next.activeOrigin &&
+                  identity?.loggedIn === false;
+                setNotice(needsLogin ? t.reauthenticate : t.saved);
+                if (needsLogin) navigate(localURL('auriga/local-login'));
+              } catch (error) {
+                // A failed apply may already have signed out the old platform
+                // and saved the new address. Never keep the old identity/Team
+                // display while fetching authoritative recovery state.
+                setState(null);
+                setAccount(null);
+                try {
+                  const [next, identity] = await readState();
+                  publish(next, identity);
+                } catch {
+                  /* State remains unknown; the refresh control can retry. */
+                }
+                throw error;
+              }
             }),
         },
         t.save,
