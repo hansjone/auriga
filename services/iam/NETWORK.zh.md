@@ -129,6 +129,27 @@ validation/conflict/forbidden/unavailable 沿现通用错误精确保留，不�
 collab 当前 native/健康/epoch/typed-local 见证与最终 CAS 仍是调用者职责；三 RPC 不证明宿主或真实双 DSH。
 第五 RPC、SEND、外部 API 和可见授权流程均未扩展，第五仍固定 unavailable。
 
+## 永久连接兑换出处
+
+V12 新增独立 `network_connection_anchor`：每笔成功兑换同事务写入 UUIDv7、真实 ingress
+主键/key、完整七字段 C bytea、realm/node、锁内真实 owner/device/backing-session 与兑换时刻。
+tenant+ID/ingress 主键/key 唯一，FORCE RLS，SECURITY INVOKER 触发器拒绝 UPDATE/DELETE；
+不依赖短期 ingress/ticket 外键，无 TTL/GC，不存原票、token 或宿主 ID。写入失败兑换整体回滚。
+这是每真实 connection 一行永久成本，尚未证明 5000 连接容量。
+
+Resolve 仍核当前活体连接，在最终短事务精确核已有锚点后回 field6；旧 ingress 缺锚点不回填，
+fields1–5 保持原行为。坏锚点或真实关联不匹配不返回有效引用。
+内部 Read 仅 svc:collab+受信非平台 tenant 委托，原/当前引用都必须属于该 tenant。
+逐项核完整 C/不可变出处及原/当前 tenant/realm/node/owner/device/session 相同，随后核本库
+node→owner/device、device→account/session、session→account、account 存在，关联缺失/重绑拒绝。
+历史 C1 可离线且已实际清理 ingress；expiry/logout/revoked 不当作归属变化，Read 也不证明 C2 活着。
+
+锁序为 tenant advisory→稳定排序 session→device→account→node/realm；仅必要锁，无同值 UPDATE。
+Read 不调用 credential/online/远程 org/Get/Register，不写 anchor/source/op/chain/失败围栏/许可观察；
+返回原/当前完整引用，无 ACTIVE/valid_until。坏引用/缺记录/错归属为 forbidden，存储故障 unavailable，
+不暴露 owner 详情、不从未命中推断 not_committed。普通 Fetch/Receipt/紧急 Revoke 与 #216 Read 未变。
+契约详见 `contracts/network/iam-directory.md`；collab 保存引用、缺引用 UNKNOWN、恢复最终 CAS 另行接线。
+
 ## 本库政策版本底座（无来源出口）
 
 V10 的 `iam.network_policy_revision` 以 tenant 为主键，正 `numeric(20,0)` 限于

@@ -24,6 +24,36 @@
 先核节点，再返回 `system`；非零 local 的类型从 collab 自己的 opaque local 登记核实，
 不得回退为猜测 `session`。
 
+## 永久连接兑换锚点与内部历史核验
+
+`network_authority.proto` 的 `NetworkConnectionAnchor(anchor_id, connection)` 仅包含
+IAM UUIDv7 引用与完整七字段 C；不回传 owner/device/backing-session。
+每次成功 Redeem 与真实 ingress 同一事务永久保存一条最小连接锚点，包含原 ingress 主键/key、
+完整 C、realm/node、真实 owner/device/session 关联及兑换时刻。失败事务不留可用锚点；
+同票重试不新增。没有 ticket/token/宿主 ID，没有 GC/TTL 或绑定短期 ingress 的删除级联。
+
+`ResolveNetworkTargetResponse.connection_anchor=6` 是兼容追加字段。Resolve 仍完整核当前
+活体连接与身份，只有已有锚点的 C、真实 ingress 出处及身份关联精确一致才返回引用。
+升级前的 ingress 没有锚点时维持 fields1–5 的原语义，field6 缺失；Resolve 只读，绝不补造旧史。
+坏锚点或关联不符拒绝，不能把缺引用解释为历史相符，也不改变普通 Fetch/Receipt/紧急 Revoke 权限。
+
+`ReadNetworkConnectionAnchor` 只接受标准内部 `svc:collab` JWT、既有可信内部传输和
+白名单允许委托的非平台业务 tenant；original/current 的 tenant 均必须等于委托 tenant。
+请求与嵌套引用拒绝未知字段、缺引用/七字段、非规范 C 或坏 UUIDv7。gateway/user/device/model
+及平台默认租户不能调用，不扩大 `NetworkGatewayService` 的白名单。
+按 tenant+anchor ID 读取永久行，逐项核完整 C/原出处；两份引用的 tenant/realm/node/
+owner/device/session 必须相同，并以本库现存 node→owner/device、device→account/session、
+session→account 及 account 记录重核原关联。原 C1 不要求在线，ingress/ticket 到期或实际清理后
+仍可读取；expiry/revoked 不等于归属变化，关联缺失或重绑必须拒绝，包括同设备的新登录 session。
+
+Read 仅在短事务取必要锁，按 tenant advisory→session→device→account→node/realm 稳定锁序，
+不执行同值 UPDATE，不作 remote authorize/online/Get/Register，不写 anchor/source/operation/chain、
+失败围栏或许可观察。只回与已验证请求完全相同的 original/current，无 ACTIVE、valid_until 或许可。
+缺记录、错归属或坏引用统一 `FORBIDDEN`；存储/能力不可用为 `UNAVAILABLE`，不泄露 owner 详情。
+未命中不创建、不修复、不证明 not_committed。外层当前 C2 的活体/权限与最终 CAS 必须独立执行。
+collab 保存引用、旧墓碑缺引用 UNKNOWN 及恢复接线由后续任务完成；本增量不改变 #216 的来源回执读取，
+不实现原 C 未提交失败围栏，也不证明 5000 连接容量或跨服务零竞争窗口。
+
 ## Agent source authority（agent 来源权威）
 
 正式内部入口是 [`network_source.proto`](../proto/auriga/iam/v1/network_source.proto)

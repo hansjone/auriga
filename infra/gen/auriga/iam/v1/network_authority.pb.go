@@ -615,6 +615,163 @@ func (x *ResolveNetworkTargetRequest) GetLocal() string {
 	return ""
 }
 
+// Opaque immutable IAM redeem provenance. No owner/device/backing-session IDs.
+type NetworkConnectionAnchor struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	AnchorId      string                      `protobuf:"bytes,1,opt,name=anchor_id,json=anchorId,proto3" json:"anchor_id,omitempty"`
+	Connection    *NetworkAuthorityConnection `protobuf:"bytes,2,opt,name=connection,proto3" json:"connection,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkConnectionAnchor) Reset() {
+	*x = NetworkConnectionAnchor{}
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkConnectionAnchor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkConnectionAnchor) ProtoMessage() {}
+
+func (x *NetworkConnectionAnchor) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkConnectionAnchor.ProtoReflect.Descriptor instead.
+func (*NetworkConnectionAnchor) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *NetworkConnectionAnchor) GetAnchorId() string {
+	if x != nil {
+		return x.AnchorId
+	}
+	return ""
+}
+
+func (x *NetworkConnectionAnchor) GetConnection() *NetworkAuthorityConnection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+type ReadNetworkConnectionAnchorRequest struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Original      *NetworkConnectionAnchor `protobuf:"bytes,1,opt,name=original,proto3" json:"original,omitempty"`
+	Current       *NetworkConnectionAnchor `protobuf:"bytes,2,opt,name=current,proto3" json:"current,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadNetworkConnectionAnchorRequest) Reset() {
+	*x = ReadNetworkConnectionAnchorRequest{}
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadNetworkConnectionAnchorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadNetworkConnectionAnchorRequest) ProtoMessage() {}
+
+func (x *ReadNetworkConnectionAnchorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadNetworkConnectionAnchorRequest.ProtoReflect.Descriptor instead.
+func (*ReadNetworkConnectionAnchorRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ReadNetworkConnectionAnchorRequest) GetOriginal() *NetworkConnectionAnchor {
+	if x != nil {
+		return x.Original
+	}
+	return nil
+}
+
+func (x *ReadNetworkConnectionAnchorRequest) GetCurrent() *NetworkConnectionAnchor {
+	if x != nil {
+		return x.Current
+	}
+	return nil
+}
+
+type ReadNetworkConnectionAnchorResponse struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Original      *NetworkConnectionAnchor `protobuf:"bytes,1,opt,name=original,proto3" json:"original,omitempty"`
+	Current       *NetworkConnectionAnchor `protobuf:"bytes,2,opt,name=current,proto3" json:"current,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadNetworkConnectionAnchorResponse) Reset() {
+	*x = ReadNetworkConnectionAnchorResponse{}
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadNetworkConnectionAnchorResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadNetworkConnectionAnchorResponse) ProtoMessage() {}
+
+func (x *ReadNetworkConnectionAnchorResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadNetworkConnectionAnchorResponse.ProtoReflect.Descriptor instead.
+func (*ReadNetworkConnectionAnchorResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ReadNetworkConnectionAnchorResponse) GetOriginal() *NetworkConnectionAnchor {
+	if x != nil {
+		return x.Original
+	}
+	return nil
+}
+
+func (x *ReadNetworkConnectionAnchorResponse) GetCurrent() *NetworkConnectionAnchor {
+	if x != nil {
+		return x.Current
+	}
+	return nil
+}
+
 type ResolveNetworkTargetResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Allowed bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
@@ -623,15 +780,17 @@ type ResolveNetworkTargetResponse struct {
 	// Always system. Session/subagent types belong to collab opaque registration.
 	TargetType string `protobuf:"bytes,3,opt,name=target_type,json=targetType,proto3" json:"target_type,omitempty"`
 	// RFC3339 UTC, bounded by current backing session/device/connection expiry.
-	ValidUntil    string `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
-	Local         string `protobuf:"bytes,5,opt,name=local,proto3" json:"local,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ValidUntil string `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	Local      string `protobuf:"bytes,5,opt,name=local,proto3" json:"local,omitempty"`
+	// Absent for pre-upgrade ingresses; Resolve MUST NOT reconstruct old history.
+	ConnectionAnchor *NetworkConnectionAnchor `protobuf:"bytes,6,opt,name=connection_anchor,json=connectionAnchor,proto3" json:"connection_anchor,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ResolveNetworkTargetResponse) Reset() {
 	*x = ResolveNetworkTargetResponse{}
-	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -643,7 +802,7 @@ func (x *ResolveNetworkTargetResponse) String() string {
 func (*ResolveNetworkTargetResponse) ProtoMessage() {}
 
 func (x *ResolveNetworkTargetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -656,7 +815,7 @@ func (x *ResolveNetworkTargetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveNetworkTargetResponse.ProtoReflect.Descriptor instead.
 func (*ResolveNetworkTargetResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{8}
+	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ResolveNetworkTargetResponse) GetAllowed() bool {
@@ -694,6 +853,13 @@ func (x *ResolveNetworkTargetResponse) GetLocal() string {
 	return ""
 }
 
+func (x *ResolveNetworkTargetResponse) GetConnectionAnchor() *NetworkConnectionAnchor {
+	if x != nil {
+		return x.ConnectionAnchor
+	}
+	return nil
+}
+
 type AuthorizeNetworkDeliveryRequest struct {
 	state             protoimpl.MessageState      `protogen:"open.v1"`
 	Connection        *NetworkAuthorityConnection `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
@@ -705,7 +871,7 @@ type AuthorizeNetworkDeliveryRequest struct {
 
 func (x *AuthorizeNetworkDeliveryRequest) Reset() {
 	*x = AuthorizeNetworkDeliveryRequest{}
-	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[9]
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -717,7 +883,7 @@ func (x *AuthorizeNetworkDeliveryRequest) String() string {
 func (*AuthorizeNetworkDeliveryRequest) ProtoMessage() {}
 
 func (x *AuthorizeNetworkDeliveryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[9]
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -730,7 +896,7 @@ func (x *AuthorizeNetworkDeliveryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeNetworkDeliveryRequest.ProtoReflect.Descriptor instead.
 func (*AuthorizeNetworkDeliveryRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{9}
+	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AuthorizeNetworkDeliveryRequest) GetConnection() *NetworkAuthorityConnection {
@@ -766,7 +932,7 @@ type AuthorizeNetworkDeliveryResponse struct {
 
 func (x *AuthorizeNetworkDeliveryResponse) Reset() {
 	*x = AuthorizeNetworkDeliveryResponse{}
-	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[10]
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -778,7 +944,7 @@ func (x *AuthorizeNetworkDeliveryResponse) String() string {
 func (*AuthorizeNetworkDeliveryResponse) ProtoMessage() {}
 
 func (x *AuthorizeNetworkDeliveryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[10]
+	mi := &file_auriga_iam_v1_network_authority_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -791,7 +957,7 @@ func (x *AuthorizeNetworkDeliveryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizeNetworkDeliveryResponse.ProtoReflect.Descriptor instead.
 func (*AuthorizeNetworkDeliveryResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{10}
+	return file_auriga_iam_v1_network_authority_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AuthorizeNetworkDeliveryResponse) GetAllowed() bool {
@@ -859,7 +1025,18 @@ const file_auriga_iam_v1_network_authority_proto_rawDesc = "" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\n" +
 	"connection\x12\x14\n" +
-	"\x05local\x18\x02 \x01(\tR\x05local\"\xdb\x01\n" +
+	"\x05local\x18\x02 \x01(\tR\x05local\"\x81\x01\n" +
+	"\x17NetworkConnectionAnchor\x12\x1b\n" +
+	"\tanchor_id\x18\x01 \x01(\tR\banchorId\x12I\n" +
+	"\n" +
+	"connection\x18\x02 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\n" +
+	"connection\"\xaa\x01\n" +
+	"\"ReadNetworkConnectionAnchorRequest\x12B\n" +
+	"\boriginal\x18\x01 \x01(\v2&.auriga.iam.v1.NetworkConnectionAnchorR\boriginal\x12@\n" +
+	"\acurrent\x18\x02 \x01(\v2&.auriga.iam.v1.NetworkConnectionAnchorR\acurrent\"\xab\x01\n" +
+	"#ReadNetworkConnectionAnchorResponse\x12B\n" +
+	"\boriginal\x18\x01 \x01(\v2&.auriga.iam.v1.NetworkConnectionAnchorR\boriginal\x12@\n" +
+	"\acurrent\x18\x02 \x01(\v2&.auriga.iam.v1.NetworkConnectionAnchorR\acurrent\"\xb0\x02\n" +
 	"\x1cResolveNetworkTargetResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12I\n" +
 	"\n" +
@@ -869,7 +1046,8 @@ const file_auriga_iam_v1_network_authority_proto_rawDesc = "" +
 	"targetType\x12\x1f\n" +
 	"\vvalid_until\x18\x04 \x01(\tR\n" +
 	"validUntil\x12\x14\n" +
-	"\x05local\x18\x05 \x01(\tR\x05local\"\xbf\x01\n" +
+	"\x05local\x18\x05 \x01(\tR\x05local\x12S\n" +
+	"\x11connection_anchor\x18\x06 \x01(\v2&.auriga.iam.v1.NetworkConnectionAnchorR\x10connectionAnchor\"\xbf\x01\n" +
 	"\x1fAuthorizeNetworkDeliveryRequest\x12I\n" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\n" +
@@ -893,12 +1071,13 @@ const file_auriga_iam_v1_network_authority_proto_rawDesc = "" +
 	" NETWORK_AUTHORITY_OPERATION_SEND\x10\x02\x12'\n" +
 	"#NETWORK_AUTHORITY_OPERATION_RECEIVE\x10\x03\x12-\n" +
 	")NETWORK_AUTHORITY_OPERATION_FIRST_CONTACT\x10\x04\x12)\n" +
-	"%NETWORK_AUTHORITY_OPERATION_BROADCAST\x10\x052\xb3\x04\n" +
+	"%NETWORK_AUTHORITY_OPERATION_BROADCAST\x10\x052\xba\x05\n" +
 	"\x17NetworkAuthorityService\x12W\n" +
 	"\fCheckNetwork\x12\".auriga.iam.v1.CheckNetworkRequest\x1a#.auriga.iam.v1.CheckNetworkResponse\x12u\n" +
 	"\x16NetworkAuthorityActive\x12,.auriga.iam.v1.NetworkAuthorityActiveRequest\x1a-.auriga.iam.v1.NetworkAuthorityActiveResponse\x12Z\n" +
 	"\rNetworkLimits\x12#.auriga.iam.v1.NetworkLimitsRequest\x1a$.auriga.iam.v1.NetworkLimitsResponse\x12o\n" +
-	"\x14ResolveNetworkTarget\x12*.auriga.iam.v1.ResolveNetworkTargetRequest\x1a+.auriga.iam.v1.ResolveNetworkTargetResponse\x12{\n" +
+	"\x14ResolveNetworkTarget\x12*.auriga.iam.v1.ResolveNetworkTargetRequest\x1a+.auriga.iam.v1.ResolveNetworkTargetResponse\x12\x84\x01\n" +
+	"\x1bReadNetworkConnectionAnchor\x121.auriga.iam.v1.ReadNetworkConnectionAnchorRequest\x1a2.auriga.iam.v1.ReadNetworkConnectionAnchorResponse\x12{\n" +
 	"\x18AuthorizeNetworkDelivery\x12..auriga.iam.v1.AuthorizeNetworkDeliveryRequest\x1a/.auriga.iam.v1.AuthorizeNetworkDeliveryResponseBU\n" +
 	"\x17auriga.contracts.iam.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1b\x06proto3"
 
@@ -915,46 +1094,57 @@ func file_auriga_iam_v1_network_authority_proto_rawDescGZIP() []byte {
 }
 
 var file_auriga_iam_v1_network_authority_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_auriga_iam_v1_network_authority_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_auriga_iam_v1_network_authority_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_auriga_iam_v1_network_authority_proto_goTypes = []any{
-	(NetworkAuthoritySender)(0),              // 0: auriga.iam.v1.NetworkAuthoritySender
-	(NetworkAuthorityOperation)(0),           // 1: auriga.iam.v1.NetworkAuthorityOperation
-	(*CheckNetworkRequest)(nil),              // 2: auriga.iam.v1.CheckNetworkRequest
-	(*CheckNetworkResponse)(nil),             // 3: auriga.iam.v1.CheckNetworkResponse
-	(*NetworkAuthorityActiveRequest)(nil),    // 4: auriga.iam.v1.NetworkAuthorityActiveRequest
-	(*NetworkAuthorityActiveResponse)(nil),   // 5: auriga.iam.v1.NetworkAuthorityActiveResponse
-	(*NetworkLimitsRequest)(nil),             // 6: auriga.iam.v1.NetworkLimitsRequest
-	(*NetworkLimitsResponse)(nil),            // 7: auriga.iam.v1.NetworkLimitsResponse
-	(*NetworkAuthorityConnection)(nil),       // 8: auriga.iam.v1.NetworkAuthorityConnection
-	(*ResolveNetworkTargetRequest)(nil),      // 9: auriga.iam.v1.ResolveNetworkTargetRequest
-	(*ResolveNetworkTargetResponse)(nil),     // 10: auriga.iam.v1.ResolveNetworkTargetResponse
-	(*AuthorizeNetworkDeliveryRequest)(nil),  // 11: auriga.iam.v1.AuthorizeNetworkDeliveryRequest
-	(*AuthorizeNetworkDeliveryResponse)(nil), // 12: auriga.iam.v1.AuthorizeNetworkDeliveryResponse
-	nil,                                      // 13: auriga.iam.v1.NetworkLimitsResponse.LimitsEntry
+	(NetworkAuthoritySender)(0),                 // 0: auriga.iam.v1.NetworkAuthoritySender
+	(NetworkAuthorityOperation)(0),              // 1: auriga.iam.v1.NetworkAuthorityOperation
+	(*CheckNetworkRequest)(nil),                 // 2: auriga.iam.v1.CheckNetworkRequest
+	(*CheckNetworkResponse)(nil),                // 3: auriga.iam.v1.CheckNetworkResponse
+	(*NetworkAuthorityActiveRequest)(nil),       // 4: auriga.iam.v1.NetworkAuthorityActiveRequest
+	(*NetworkAuthorityActiveResponse)(nil),      // 5: auriga.iam.v1.NetworkAuthorityActiveResponse
+	(*NetworkLimitsRequest)(nil),                // 6: auriga.iam.v1.NetworkLimitsRequest
+	(*NetworkLimitsResponse)(nil),               // 7: auriga.iam.v1.NetworkLimitsResponse
+	(*NetworkAuthorityConnection)(nil),          // 8: auriga.iam.v1.NetworkAuthorityConnection
+	(*ResolveNetworkTargetRequest)(nil),         // 9: auriga.iam.v1.ResolveNetworkTargetRequest
+	(*NetworkConnectionAnchor)(nil),             // 10: auriga.iam.v1.NetworkConnectionAnchor
+	(*ReadNetworkConnectionAnchorRequest)(nil),  // 11: auriga.iam.v1.ReadNetworkConnectionAnchorRequest
+	(*ReadNetworkConnectionAnchorResponse)(nil), // 12: auriga.iam.v1.ReadNetworkConnectionAnchorResponse
+	(*ResolveNetworkTargetResponse)(nil),        // 13: auriga.iam.v1.ResolveNetworkTargetResponse
+	(*AuthorizeNetworkDeliveryRequest)(nil),     // 14: auriga.iam.v1.AuthorizeNetworkDeliveryRequest
+	(*AuthorizeNetworkDeliveryResponse)(nil),    // 15: auriga.iam.v1.AuthorizeNetworkDeliveryResponse
+	nil,                                         // 16: auriga.iam.v1.NetworkLimitsResponse.LimitsEntry
 }
 var file_auriga_iam_v1_network_authority_proto_depIdxs = []int32{
 	0,  // 0: auriga.iam.v1.CheckNetworkRequest.sender:type_name -> auriga.iam.v1.NetworkAuthoritySender
 	1,  // 1: auriga.iam.v1.CheckNetworkRequest.operation:type_name -> auriga.iam.v1.NetworkAuthorityOperation
-	13, // 2: auriga.iam.v1.NetworkLimitsResponse.limits:type_name -> auriga.iam.v1.NetworkLimitsResponse.LimitsEntry
+	16, // 2: auriga.iam.v1.NetworkLimitsResponse.limits:type_name -> auriga.iam.v1.NetworkLimitsResponse.LimitsEntry
 	8,  // 3: auriga.iam.v1.ResolveNetworkTargetRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
-	8,  // 4: auriga.iam.v1.ResolveNetworkTargetResponse.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
-	8,  // 5: auriga.iam.v1.AuthorizeNetworkDeliveryRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
-	8,  // 6: auriga.iam.v1.AuthorizeNetworkDeliveryResponse.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
-	2,  // 7: auriga.iam.v1.NetworkAuthorityService.CheckNetwork:input_type -> auriga.iam.v1.CheckNetworkRequest
-	4,  // 8: auriga.iam.v1.NetworkAuthorityService.NetworkAuthorityActive:input_type -> auriga.iam.v1.NetworkAuthorityActiveRequest
-	6,  // 9: auriga.iam.v1.NetworkAuthorityService.NetworkLimits:input_type -> auriga.iam.v1.NetworkLimitsRequest
-	9,  // 10: auriga.iam.v1.NetworkAuthorityService.ResolveNetworkTarget:input_type -> auriga.iam.v1.ResolveNetworkTargetRequest
-	11, // 11: auriga.iam.v1.NetworkAuthorityService.AuthorizeNetworkDelivery:input_type -> auriga.iam.v1.AuthorizeNetworkDeliveryRequest
-	3,  // 12: auriga.iam.v1.NetworkAuthorityService.CheckNetwork:output_type -> auriga.iam.v1.CheckNetworkResponse
-	5,  // 13: auriga.iam.v1.NetworkAuthorityService.NetworkAuthorityActive:output_type -> auriga.iam.v1.NetworkAuthorityActiveResponse
-	7,  // 14: auriga.iam.v1.NetworkAuthorityService.NetworkLimits:output_type -> auriga.iam.v1.NetworkLimitsResponse
-	10, // 15: auriga.iam.v1.NetworkAuthorityService.ResolveNetworkTarget:output_type -> auriga.iam.v1.ResolveNetworkTargetResponse
-	12, // 16: auriga.iam.v1.NetworkAuthorityService.AuthorizeNetworkDelivery:output_type -> auriga.iam.v1.AuthorizeNetworkDeliveryResponse
-	12, // [12:17] is the sub-list for method output_type
-	7,  // [7:12] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	8,  // 4: auriga.iam.v1.NetworkConnectionAnchor.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	10, // 5: auriga.iam.v1.ReadNetworkConnectionAnchorRequest.original:type_name -> auriga.iam.v1.NetworkConnectionAnchor
+	10, // 6: auriga.iam.v1.ReadNetworkConnectionAnchorRequest.current:type_name -> auriga.iam.v1.NetworkConnectionAnchor
+	10, // 7: auriga.iam.v1.ReadNetworkConnectionAnchorResponse.original:type_name -> auriga.iam.v1.NetworkConnectionAnchor
+	10, // 8: auriga.iam.v1.ReadNetworkConnectionAnchorResponse.current:type_name -> auriga.iam.v1.NetworkConnectionAnchor
+	8,  // 9: auriga.iam.v1.ResolveNetworkTargetResponse.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	10, // 10: auriga.iam.v1.ResolveNetworkTargetResponse.connection_anchor:type_name -> auriga.iam.v1.NetworkConnectionAnchor
+	8,  // 11: auriga.iam.v1.AuthorizeNetworkDeliveryRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	8,  // 12: auriga.iam.v1.AuthorizeNetworkDeliveryResponse.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	2,  // 13: auriga.iam.v1.NetworkAuthorityService.CheckNetwork:input_type -> auriga.iam.v1.CheckNetworkRequest
+	4,  // 14: auriga.iam.v1.NetworkAuthorityService.NetworkAuthorityActive:input_type -> auriga.iam.v1.NetworkAuthorityActiveRequest
+	6,  // 15: auriga.iam.v1.NetworkAuthorityService.NetworkLimits:input_type -> auriga.iam.v1.NetworkLimitsRequest
+	9,  // 16: auriga.iam.v1.NetworkAuthorityService.ResolveNetworkTarget:input_type -> auriga.iam.v1.ResolveNetworkTargetRequest
+	11, // 17: auriga.iam.v1.NetworkAuthorityService.ReadNetworkConnectionAnchor:input_type -> auriga.iam.v1.ReadNetworkConnectionAnchorRequest
+	14, // 18: auriga.iam.v1.NetworkAuthorityService.AuthorizeNetworkDelivery:input_type -> auriga.iam.v1.AuthorizeNetworkDeliveryRequest
+	3,  // 19: auriga.iam.v1.NetworkAuthorityService.CheckNetwork:output_type -> auriga.iam.v1.CheckNetworkResponse
+	5,  // 20: auriga.iam.v1.NetworkAuthorityService.NetworkAuthorityActive:output_type -> auriga.iam.v1.NetworkAuthorityActiveResponse
+	7,  // 21: auriga.iam.v1.NetworkAuthorityService.NetworkLimits:output_type -> auriga.iam.v1.NetworkLimitsResponse
+	13, // 22: auriga.iam.v1.NetworkAuthorityService.ResolveNetworkTarget:output_type -> auriga.iam.v1.ResolveNetworkTargetResponse
+	12, // 23: auriga.iam.v1.NetworkAuthorityService.ReadNetworkConnectionAnchor:output_type -> auriga.iam.v1.ReadNetworkConnectionAnchorResponse
+	15, // 24: auriga.iam.v1.NetworkAuthorityService.AuthorizeNetworkDelivery:output_type -> auriga.iam.v1.AuthorizeNetworkDeliveryResponse
+	19, // [19:25] is the sub-list for method output_type
+	13, // [13:19] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_auriga_iam_v1_network_authority_proto_init() }
@@ -968,7 +1158,7 @@ func file_auriga_iam_v1_network_authority_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_iam_v1_network_authority_proto_rawDesc), len(file_auriga_iam_v1_network_authority_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   12,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -19,11 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NetworkAuthorityService_CheckNetwork_FullMethodName             = "/auriga.iam.v1.NetworkAuthorityService/CheckNetwork"
-	NetworkAuthorityService_NetworkAuthorityActive_FullMethodName   = "/auriga.iam.v1.NetworkAuthorityService/NetworkAuthorityActive"
-	NetworkAuthorityService_NetworkLimits_FullMethodName            = "/auriga.iam.v1.NetworkAuthorityService/NetworkLimits"
-	NetworkAuthorityService_ResolveNetworkTarget_FullMethodName     = "/auriga.iam.v1.NetworkAuthorityService/ResolveNetworkTarget"
-	NetworkAuthorityService_AuthorizeNetworkDelivery_FullMethodName = "/auriga.iam.v1.NetworkAuthorityService/AuthorizeNetworkDelivery"
+	NetworkAuthorityService_CheckNetwork_FullMethodName                = "/auriga.iam.v1.NetworkAuthorityService/CheckNetwork"
+	NetworkAuthorityService_NetworkAuthorityActive_FullMethodName      = "/auriga.iam.v1.NetworkAuthorityService/NetworkAuthorityActive"
+	NetworkAuthorityService_NetworkLimits_FullMethodName               = "/auriga.iam.v1.NetworkAuthorityService/NetworkLimits"
+	NetworkAuthorityService_ResolveNetworkTarget_FullMethodName        = "/auriga.iam.v1.NetworkAuthorityService/ResolveNetworkTarget"
+	NetworkAuthorityService_ReadNetworkConnectionAnchor_FullMethodName = "/auriga.iam.v1.NetworkAuthorityService/ReadNetworkConnectionAnchor"
+	NetworkAuthorityService_AuthorizeNetworkDelivery_FullMethodName    = "/auriga.iam.v1.NetworkAuthorityService/AuthorizeNetworkDelivery"
 )
 
 // NetworkAuthorityServiceClient is the client API for NetworkAuthorityService service.
@@ -40,6 +41,8 @@ type NetworkAuthorityServiceClient interface {
 	// Verify the EXACT persisted redeem binding and current backing identity on
 	// every call, including realm/node/tenant, ingress, server/client/account.
 	ResolveNetworkTarget(ctx context.Context, in *ResolveNetworkTargetRequest, opts ...grpc.CallOption) (*ResolveNetworkTargetResponse, error)
+	// Historical association check only. Never an online check or permission grant.
+	ReadNetworkConnectionAnchor(ctx context.Context, in *ReadNetworkConnectionAnchorRequest, opts ...grpc.CallOption) (*ReadNetworkConnectionAnchorResponse, error)
 	// Recheck stored source binding/revision, sender policy/grant and target read
 	// permission before signing. Stored JSON is evidence, never an allow grant.
 	// Agent source lifecycle: NetworkSourceAuthorityService in network_source.proto;
@@ -95,6 +98,16 @@ func (c *networkAuthorityServiceClient) ResolveNetworkTarget(ctx context.Context
 	return out, nil
 }
 
+func (c *networkAuthorityServiceClient) ReadNetworkConnectionAnchor(ctx context.Context, in *ReadNetworkConnectionAnchorRequest, opts ...grpc.CallOption) (*ReadNetworkConnectionAnchorResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReadNetworkConnectionAnchorResponse)
+	err := c.cc.Invoke(ctx, NetworkAuthorityService_ReadNetworkConnectionAnchor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *networkAuthorityServiceClient) AuthorizeNetworkDelivery(ctx context.Context, in *AuthorizeNetworkDeliveryRequest, opts ...grpc.CallOption) (*AuthorizeNetworkDeliveryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AuthorizeNetworkDeliveryResponse)
@@ -119,6 +132,8 @@ type NetworkAuthorityServiceServer interface {
 	// Verify the EXACT persisted redeem binding and current backing identity on
 	// every call, including realm/node/tenant, ingress, server/client/account.
 	ResolveNetworkTarget(context.Context, *ResolveNetworkTargetRequest) (*ResolveNetworkTargetResponse, error)
+	// Historical association check only. Never an online check or permission grant.
+	ReadNetworkConnectionAnchor(context.Context, *ReadNetworkConnectionAnchorRequest) (*ReadNetworkConnectionAnchorResponse, error)
 	// Recheck stored source binding/revision, sender policy/grant and target read
 	// permission before signing. Stored JSON is evidence, never an allow grant.
 	// Agent source lifecycle: NetworkSourceAuthorityService in network_source.proto;
@@ -145,6 +160,9 @@ func (UnimplementedNetworkAuthorityServiceServer) NetworkLimits(context.Context,
 }
 func (UnimplementedNetworkAuthorityServiceServer) ResolveNetworkTarget(context.Context, *ResolveNetworkTargetRequest) (*ResolveNetworkTargetResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResolveNetworkTarget not implemented")
+}
+func (UnimplementedNetworkAuthorityServiceServer) ReadNetworkConnectionAnchor(context.Context, *ReadNetworkConnectionAnchorRequest) (*ReadNetworkConnectionAnchorResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReadNetworkConnectionAnchor not implemented")
 }
 func (UnimplementedNetworkAuthorityServiceServer) AuthorizeNetworkDelivery(context.Context, *AuthorizeNetworkDeliveryRequest) (*AuthorizeNetworkDeliveryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AuthorizeNetworkDelivery not implemented")
@@ -243,6 +261,24 @@ func _NetworkAuthorityService_ResolveNetworkTarget_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NetworkAuthorityService_ReadNetworkConnectionAnchor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReadNetworkConnectionAnchorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkAuthorityServiceServer).ReadNetworkConnectionAnchor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkAuthorityService_ReadNetworkConnectionAnchor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkAuthorityServiceServer).ReadNetworkConnectionAnchor(ctx, req.(*ReadNetworkConnectionAnchorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _NetworkAuthorityService_AuthorizeNetworkDelivery_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AuthorizeNetworkDeliveryRequest)
 	if err := dec(in); err != nil {
@@ -283,6 +319,10 @@ var NetworkAuthorityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResolveNetworkTarget",
 			Handler:    _NetworkAuthorityService_ResolveNetworkTarget_Handler,
+		},
+		{
+			MethodName: "ReadNetworkConnectionAnchor",
+			Handler:    _NetworkAuthorityService_ReadNetworkConnectionAnchor_Handler,
 		},
 		{
 			MethodName: "AuthorizeNetworkDelivery",
