@@ -1,20 +1,97 @@
 package network
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // A diagnostic guard, independent of production RPC/business deadlines.
 const registrationPhaseGuard = 5 * time.Second
+
+func awaitRegistrationRPC(ctx context.Context, conn *grpc.ClientConn) error {
+	conn.Connect()
+	for {
+		state := conn.GetState()
+		if state == connectivity.Ready {
+			return nil
+		}
+		if !conn.WaitForStateChange(ctx, state) {
+			return ctx.Err()
+		}
+	}
+}
+
+func TestLocalRegisterPhaseRPCReadinessHonorsCancellation(t *testing.T) {
+	conn, err := grpc.NewClient("127.0.0.1:0", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := awaitRegistrationRPC(ctx, conn); err != context.Canceled {
+		t.Fatalf("connection wait lost cancellation: %v", err)
+	}
+}
+
+func TestLocalRegisterPhaseWaitsForRPCConnection(t *testing.T) {
+	cfg := startMailboxRPC(t, &fakeMailboxRPC{})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+	conn, err := grpc.NewClient(cfg.Target, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
+		close(entered)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return (&net.Dialer{}).DialContext(ctx, "tcp", address)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), registrationPhaseGuard)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- awaitRegistrationRPC(ctx, conn) }()
+	select {
+	case <-entered:
+	case err := <-result:
+		t.Fatalf("readiness returned before connecting: %v", err)
+	case <-ctx.Done():
+		t.Fatal("connection attempt never entered")
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("readiness returned while connection held: %v", err)
+	default:
+	}
+	unblock()
+	select {
+	case err := <-result:
+		if err != nil || conn.GetState() != connectivity.Ready {
+			t.Fatalf("connection not ready: state=%v error=%v", conn.GetState(), err)
+		}
+	case <-ctx.Done():
+		t.Fatal("connection readiness guard expired")
+	}
+}
 
 type registrationPublication struct {
 	subject string

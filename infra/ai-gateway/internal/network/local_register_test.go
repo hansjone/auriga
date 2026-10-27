@@ -81,6 +81,14 @@ func localRegisterPhaseFixture(t *testing.T, f *fakeMailboxRPC, configure func(*
 		t.Fatalf("runtime start before READY: %v", err)
 	}
 	t.Cleanup(run.Close)
+	// First-use transport setup is a fixture phase, not part of the 100ms
+	// mailbox business deadline. No business RPC or retry is used to warm it.
+	connectCtx, cancelConnect := context.WithTimeout(context.Background(), registrationPhaseGuard)
+	err = awaitRegistrationRPC(connectCtx, run.collab)
+	cancelConnect()
+	if err != nil {
+		t.Fatalf("collab connection before READY: %v", err)
+	}
 	p := &registrationPhasePublisher{nc: run.mailbox.nc, completed: make(chan registrationPublication, 4)}
 	if configure != nil {
 		configure(p)
@@ -99,6 +107,11 @@ func localRegisterPhaseFixture(t *testing.T, f *fakeMailboxRPC, configure func(*
 		t.Fatal(err)
 	}
 	if err = nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	// CONNECT confirms auth on a different socket. Confirm the dynamically
+	// registered ingress SUB reached the broker before publishing READY.
+	if err = run.mailbox.nc.FlushTimeout(registrationPhaseGuard); err != nil {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
