@@ -1231,6 +1231,11 @@ class NetworkLocalSourceHistoryIntegrationTest {
     h.clock.advance(3500);
     h.reconnect();
     h.clock.advance(101);
+    checkOriginalIngress(original, sweep);
+    h.reference(h.c);
+  }
+
+  void checkOriginalIngress(NetworkAuthorityConnection original, boolean sweep) {
     if (sweep) {
       var cleanup = new NetworkIngressCleanup(store, h.clock);
       long tenants =
@@ -1243,7 +1248,6 @@ class NetworkLocalSourceHistoryIntegrationTest {
       }
       assertNull(h.tx(() -> store.get("network_ingress", original.getIngress(), false)));
     } else assertNotNull(h.tx(() -> store.get("network_ingress", original.getIngress(), false)));
-    h.reference(h.c);
   }
 
   RegisterAgentSourceRequest frozen(ObjectNode request) throws Exception {
@@ -1618,34 +1622,86 @@ class NetworkLocalSourceHistoryIntegrationTest {
   }
 
   @Test
-  void fenceCommitPrecedesLateRegisterFinalTransactionForTheSameOriginalKey() throws Exception {
+  void fenceCommitPrecedesLateRegisterFinalTransactionForTheSameOriginalKey(TestReporter reporter)
+      throws Exception {
     var request = durableMiss();
     var original = frozen(request);
+    long began = System.nanoTime();
+    var phases = new ConcurrentLinkedQueue<String>();
+    Consumer<String> phase =
+        name -> phases.add(name + "=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began));
+    var lateCode = new AtomicReference<>("not_started");
+    // Redeem preserves other live IAM ingresses. Finish OAuth, C2/ref and READY before the
+    // original Register's five-second RPC budget starts; its C1 must still pass real initial
+    // authorization. Only then advance past C1 expiry and run the real ingress GC.
+    h.clock.advance(3500);
+    h.reconnect();
+    h.reference(original.getConnection());
+    phase.accept("c2_ready_c1_still_live");
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);
+    var orgReturned = new AtomicBoolean();
     h.beforeSourceOrg =
         () -> {
+          phase.accept("original_initial_checks_passed_org_entered");
           entered.countDown();
-          assertDoesNotThrow(() -> assertTrue(release.await(10, TimeUnit.SECONDS)));
+          assertDoesNotThrow(
+              () -> assertTrue(release.await(10, TimeUnit.SECONDS), phases::toString));
+          assertFalse(Context.current().isCancelled(), phases::toString);
+          phase.accept("org_released_to_final_transaction");
+          orgReturned.set(true);
         };
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
       var late =
           executor.submit(
-              () -> TenantContext.call(h.tenant, () -> h.client.registerSource(original)));
+              () -> {
+                phase.accept("original_rpc_started");
+                lateCode.set("in_flight");
+                try {
+                  var receipt =
+                      TenantContext.call(h.tenant, () -> h.client.registerSource(original));
+                  lateCode.set(Status.Code.OK.name());
+                  return receipt;
+                } catch (NetworkAuthorityClient.SourceRpcFailure error) {
+                  lateCode.set(error.grpcCode().name());
+                  throw error;
+                } finally {
+                  phase.accept("original_rpc_finished");
+                }
+              });
       try {
-        assertTrue(entered.await(5, TimeUnit.SECONDS));
-        expireOriginal(true);
+        assertTrue(entered.await(5, TimeUnit.SECONDS), phases::toString);
+        h.clock.advance(101);
+        checkOriginalIngress(original.getConnection(), true);
+        phase.accept("c1_expired_and_gc_complete");
         assertEquals("not_committed", text(h.register(h.retry(request)), "result"));
+        phase.accept("fence_and_collab_receipt_committed");
         var committed = h.facts();
+        phase.accept("committed_facts_captured_release");
         release.countDown();
+        var lateReceipt = late.get(5, TimeUnit.SECONDS);
+        assertTrue(orgReturned.get(), "late Register must return through its final transaction");
+        assertEquals(Status.Code.OK.name(), lateCode.get(), phases::toString);
+        assertEquals(h.observedSources.lastFenceReply, lateReceipt);
         assertEquals(
             RegisterAgentSourceResponse.parseFrom((byte[]) h.row(request).get("iam_response")),
-            late.get(5, TimeUnit.SECONDS));
-        assertEquals(committed, h.facts());
-        assertTrue(h.facts().get("iam.network_source").isEmpty());
+            lateReceipt);
+        assertEquals(original, h.observedSources.lastFence);
+        assertTrue(lateReceipt.getDefinitivelyUncommitted());
+        assertFalse(lateReceipt.hasSource());
+        assertEquals(original.getOperationId(), lateReceipt.getOperationId());
+        assertEquals(h.row(request).get("request_digest"), lateReceipt.getRequestDigest());
+        assertEquals("original_connection_invalid_uncommitted", lateReceipt.getRejectionReason());
+        var after = h.facts();
+        assertEquals(committed, after);
+        assertTrue(after.get("iam.network_source").isEmpty());
+        assertTrue(after.get("iam.network_source_chain").isEmpty());
       } finally {
         release.countDown();
       }
+    } finally {
+      reporter.publishEntry(
+          Map.of("phase_elapsed_ms", phases.toString(), "late_register_grpc_code", lateCode.get()));
     }
   }
 
