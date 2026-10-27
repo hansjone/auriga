@@ -8,6 +8,7 @@ import auriga.collab.grpc.*;
 import auriga.collab.network.local.LocalRegistry;
 import auriga.common.audit.AuditLogger;
 import auriga.common.context.*;
+import auriga.common.error.AurigaException;
 import auriga.common.events.EventPublisher;
 import auriga.common.grpc.*;
 import auriga.common.persistence.*;
@@ -213,7 +214,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
           .call(() -> TenantContext.call(tenant, work::get));
     }
 
-    void start() throws Exception {
+    void security() throws Exception {
       var key = new ECKeyGenerator(Curve.P_256).keyID(UuidV7.next().toString()).generate();
       var keys = mock(SigningKeys.class);
       when(keys.current()).thenReturn(key);
@@ -243,6 +244,10 @@ class NetworkLocalSourceHistoryIntegrationTest {
                   settings,
                   new com.nimbusds.jose.jwk.source.ImmutableJWKSet<
                       com.nimbusds.jose.proc.SecurityContext>(new JWKSet(key.toPublicJWK()))));
+    }
+
+    void start() throws Exception {
+      security();
       sessions =
           new SessionManager(
               store,
@@ -286,24 +291,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
               },
               clock,
               new IamNetworkSourceAuthority.Policy(180, 30));
-      observed = new ObservedAuthority(network, clock, sourceAuthority);
-      observedSources = new ObservedSources(sourceAuthority);
-      iamServer =
-          new GrpcServer(
-              "127.0.0.1",
-              0,
-              List.of(observed, observedSources),
-              new AurigaServerInterceptor(verifier, Set.of(), Set.of("svc:collab")),
-              null,
-              false,
-              Set.of());
-      iamServer.start();
-      iamChannel =
-          GrpcChannels.open(
-              "127.0.0.1:" + iamServer.port(),
-              new AurigaClientInterceptor(
-                  () -> tokens.issue("collab", collabSecret), Duration.ofSeconds(5)));
-      client = new NetworkAuthorityClient(iamChannel, Duration.ofSeconds(5));
+      connectIam(network, sourceAuthority);
       source = new NetworkSourceGrpcAuthority(client, manager);
       owner = account();
       sid = session(owner);
@@ -350,6 +338,27 @@ class NetworkLocalSourceHistoryIntegrationTest {
               "local",
               "address_type")) registration.set(field, registered.path(field));
       registration.put("allocation_fingerprint", "sha256:" + "a".repeat(64));
+    }
+
+    void connectIam(IamNetworkAuthority authority, IamNetworkSourceAuthority sources) {
+      observed = new ObservedAuthority(authority, clock, sources);
+      observedSources = new ObservedSources(sources);
+      iamServer =
+          new GrpcServer(
+              "127.0.0.1",
+              0,
+              List.of(observed, observedSources),
+              new AurigaServerInterceptor(verifier, Set.of(), Set.of("svc:collab")),
+              null,
+              false,
+              Set.of());
+      iamServer.start();
+      iamChannel =
+          GrpcChannels.open(
+              "127.0.0.1:" + iamServer.port(),
+              new AurigaClientInterceptor(
+                  () -> tokens.issue("collab", collabSecret), Duration.ofSeconds(5)));
+      client = new NetworkAuthorityClient(iamChannel, Duration.ofSeconds(5));
     }
 
     void assemble(JdbcTemplate reads, TenantTransactionManager transactions) {
@@ -652,17 +661,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
                   text(frame, "operation_id")));
     }
 
-    JsonNode getOrRevoke(String binding, boolean revoke) {
-      if (mailboxServer == null) mailbox();
-      var connection =
-          NetworkMailboxConnection.newBuilder()
-              .setTenantId(c.getTenantId())
-              .setRealm(c.getRealm())
-              .setNode(c.getNode())
-              .setIngress(c.getIngress())
-              .setServerId(c.getServerId())
-              .setClientId(c.getClientId())
-              .setClientAccount(c.getClientAccount());
+    ObjectNode getOrRevokeFrame(String binding, boolean revoke) {
       var request =
           object()
               .put("app_version", "1.0")
@@ -676,6 +675,22 @@ class NetworkLocalSourceHistoryIntegrationTest {
         request.set("registration", registration.deepCopy());
         request.set("native_witness", frame().path("native_witness"));
       }
+      return request;
+    }
+
+    JsonNode getOrRevoke(String binding, boolean revoke) {
+      if (mailboxServer == null) mailbox();
+      var connection =
+          NetworkMailboxConnection.newBuilder()
+              .setTenantId(c.getTenantId())
+              .setRealm(c.getRealm())
+              .setNode(c.getNode())
+              .setIngress(c.getIngress())
+              .setServerId(c.getServerId())
+              .setClientId(c.getClientId())
+              .setClientAccount(c.getClientAccount());
+      var request = getOrRevokeFrame(binding, revoke);
+      LocalHistoryTestAccess.validateSourceFrame(revoke ? "SourceRevoke" : "SourceGet", request);
       return TenantContext.call(
           tenant,
           () -> {
@@ -763,17 +778,29 @@ class NetworkLocalSourceHistoryIntegrationTest {
     }
 
     public void close() throws Exception {
-      if (mailboxChannel != null) {
-        mailboxChannel.shutdownNow();
-        assertTrue(mailboxChannel.awaitTermination(5, TimeUnit.SECONDS));
-      }
-      if (iamChannel != null) {
-        iamChannel.shutdownNow();
-        assertTrue(iamChannel.awaitTermination(5, TimeUnit.SECONDS));
-      }
-      if (mailboxServer != null) mailboxServer.stop();
-      if (iamServer != null) iamServer.stop();
-      if (signing != null) signing.close();
+      assertAll(
+          "close every owned transport even if another close fails",
+          () -> {
+            if (mailboxChannel != null) {
+              mailboxChannel.shutdownNow();
+              assertTrue(mailboxChannel.awaitTermination(5, TimeUnit.SECONDS));
+            }
+          },
+          () -> {
+            if (iamChannel != null) {
+              iamChannel.shutdownNow();
+              assertTrue(iamChannel.awaitTermination(5, TimeUnit.SECONDS));
+            }
+          },
+          () -> {
+            if (mailboxServer != null) mailboxServer.stop();
+          },
+          () -> {
+            if (iamServer != null) iamServer.stop();
+          },
+          () -> {
+            if (signing != null) signing.close();
+          });
     }
   }
 
@@ -785,9 +812,19 @@ class NetworkLocalSourceHistoryIntegrationTest {
     volatile UnaryOperator<ReadNetworkConnectionAnchorResponse> echo = UnaryOperator.identity();
     volatile UnaryOperator<ResolveNetworkTargetResponse> resolveEcho = UnaryOperator.identity();
     volatile ReadNetworkConnectionAnchorRequest last;
+    volatile Runnable beforeCheck = () -> {};
+    volatile boolean dropCheckResponse;
 
     ObservedAuthority(IamNetworkAuthority network, Clock clock, IamNetworkSourceAuthority sources) {
       super(network, clock, sources);
+    }
+
+    @Override
+    @AuthenticatedOnly
+    public void checkNetwork(
+        CheckNetworkRequest request, StreamObserver<CheckNetworkResponse> observer) {
+      beforeCheck.run();
+      if (!dropCheckResponse) super.checkNetwork(request, observer);
     }
 
     @Override
@@ -847,7 +884,11 @@ class NetworkLocalSourceHistoryIntegrationTest {
   static class ObservedSources extends IamGrpcNetworkSources {
     final AtomicInteger register = new AtomicInteger(),
         read = new AtomicInteger(),
-        get = new AtomicInteger();
+        get = new AtomicInteger(),
+        revoke = new AtomicInteger();
+    volatile GetAgentSourceRequest lastGet;
+    volatile GetAgentSourceResponse lastGetReply;
+    volatile Throwable lastGetError;
 
     ObservedSources(IamNetworkSourceAuthority authority) {
       super(authority);
@@ -873,7 +914,37 @@ class NetworkLocalSourceHistoryIntegrationTest {
     @AuthenticatedOnly
     public void getAgentSource(GetAgentSourceRequest r, StreamObserver<GetAgentSourceResponse> o) {
       get.incrementAndGet();
-      super.getAgentSource(r, o);
+      lastGet = r;
+      try {
+        super.getAgentSource(
+            r,
+            new StreamObserver<>() {
+              public void onNext(GetAgentSourceResponse value) {
+                lastGetReply = value;
+                o.onNext(value);
+              }
+
+              public void onError(Throwable error) {
+                lastGetError = error;
+                o.onError(error);
+              }
+
+              public void onCompleted() {
+                o.onCompleted();
+              }
+            });
+      } catch (RuntimeException error) {
+        lastGetError = error;
+        throw error;
+      }
+    }
+
+    @Override
+    @AuthenticatedOnly
+    public void revokeAgentSource(
+        RevokeAgentSourceRequest r, StreamObserver<RevokeAgentSourceResponse> o) {
+      revoke.incrementAndGet();
+      super.revokeAgentSource(r, o);
     }
   }
 
@@ -1006,17 +1077,36 @@ class NetworkLocalSourceHistoryIntegrationTest {
     String binding = receipt.path("source").path("source_binding").asString();
     assertFalse(binding.isEmpty());
     var current = h.getOrRevoke(binding, false);
+    // Run all three production entrances even if the captured Get result later fails assertion.
+    var stopped = h.getOrRevoke(binding, true);
+    assertEquals(1, h.observedSources.get.get(), "SourceGet must reach real IAM: " + current);
+    assertNotNull(
+        h.observedSources.lastGetReply,
+        () ->
+            "IAM Get did not reply: "
+                + h.observedSources.lastGetError
+                + "; request="
+                + h.observedSources.lastGet
+                + "; wire="
+                + current);
+    assertTrue(h.observedSources.lastGetReply.hasSource());
+    assertEquals(h.c, h.observedSources.lastGetReply.getConnection());
     assertEquals("source_get_result", text(current, "type"), current.toString());
     assertEquals("active", current.path("source").path("state").asString());
     assertTrue(Instant.parse(text(current, "valid_until")).isAfter(h.clock.instant()));
-    var stopped = h.getOrRevoke(binding, true);
     assertEquals("source_revoke_result", text(stopped, "type"), stopped.toString());
     assertEquals(binding, text(stopped, "source_binding"));
     assertEquals(1, h.observedSources.register.get());
     assertEquals(1, h.observedSources.get.get());
+    assertEquals(1, h.observedSources.revoke.get());
     assertEquals(0, h.observedSources.read.get());
     h.tx(
         () -> {
+          assertEquals(
+              2,
+              store
+                  .networkJdbc()
+                  .queryForObject("SELECT state FROM iam.network_source", Integer.class));
           assertEquals(
               1,
               store
@@ -1118,7 +1208,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
     var before = h.facts();
     int reads = h.observed.reads.get();
     code(
-        "outcome_unknown",
+        change.equals("node") ? "unauthorized" : "outcome_unknown",
         h.register(h.retry(request))); // Primary assertion: no old result/digest.
     if (!change.equals("node")) {
       assertEquals(
@@ -1774,5 +1864,131 @@ class NetworkLocalSourceHistoryIntegrationTest {
       assertEquals(1, h.observed.reads.get());
     }
     h.noSourceRpc();
+  }
+}
+
+/** Frame/transport regression only; no PostgreSQL extension or identity/history claims. */
+class NetworkLocalSourceHistoryTransportTest {
+  private static Check check() {
+    return new Check("2", "1", "", "0", Sender.HUMAN, Operation.CONNECT, 0, 0, 0);
+  }
+
+  @Test
+  void sharedCheckTransportReauthenticatesAndSetsANewFiniteDeadlinePerCall() throws Exception {
+    var h = new NetworkLocalSourceHistoryIntegrationTest.Harness();
+    try {
+      h.security();
+      var authority = mock(IamNetworkAuthority.class);
+      var limits = new EnumMap<Limit, Long>(Limit.class);
+      for (var limit : Limit.values()) limits.put(limit, limit.defaultValue());
+      when(authority.check(any())).thenReturn(new Decision(true, "allowed", limits));
+      when(authority.effectiveLimits()).thenReturn(limits);
+      h.connectIam(authority, mock(IamNetworkSourceAuthority.class));
+      var deadlines = new CopyOnWriteArrayList<Deadline>();
+      h.client =
+          new NetworkAuthorityClient(
+              ClientInterceptors.intercept(
+                  h.iamChannel,
+                  new ClientInterceptor() {
+                    public <Q, R> ClientCall<Q, R> interceptCall(
+                        io.grpc.MethodDescriptor<Q, R> method, CallOptions options, Channel next) {
+                      assertNotNull(options.getDeadline());
+                      assertTrue(options.getDeadline().timeRemaining(TimeUnit.MILLISECONDS) > 0);
+                      assertTrue(
+                          options.getDeadline().timeRemaining(TimeUnit.MILLISECONDS) <= 5000);
+                      deadlines.add(options.getDeadline());
+                      return next.newCall(method, options);
+                    }
+                  }),
+              Duration.ofSeconds(5));
+      h.observed.beforeCheck =
+          () -> {
+            var p = AuthorizationRules.currentPrincipal().orElseThrow();
+            assertEquals("svc:collab", p.subject());
+            assertEquals(TenantContext.PLATFORM_TENANT, p.tenantId());
+            assertEquals(h.tenant, TenantContext.require());
+          };
+      var transportManager = new TenantTransactionManager(mock(javax.sql.DataSource.class));
+      assertTrue(
+          h.gateway(
+                  () ->
+                      LocalHistoryTestAccess.checkOutsideDatabase(
+                          h.client, transportManager, check()))
+              .allowed());
+      h.clock.advance(3500);
+      assertTrue(
+          h.gateway(
+                  () ->
+                      LocalHistoryTestAccess.checkOutsideDatabase(
+                          h.client, transportManager, check()))
+              .allowed());
+      assertEquals(4, deadlines.size()); // Each Check also gets the real generated Limits response.
+      assertNotSame(deadlines.get(0), deadlines.get(2));
+      verify(authority, times(2)).check(check());
+    } finally {
+      h.close();
+    }
+  }
+
+  @Test
+  void droppedCheckReplyTerminatesAtTheExistingFiveSecondRpcDeadline() throws Exception {
+    var h = new NetworkLocalSourceHistoryIntegrationTest.Harness();
+    var executor = Executors.newSingleThreadExecutor();
+    try {
+      h.security();
+      h.connectIam(mock(IamNetworkAuthority.class), mock(IamNetworkSourceAuthority.class));
+      var entered = new CountDownLatch(1);
+      h.observed.beforeCheck = entered::countDown;
+      h.observed.dropCheckResponse = true;
+      var transportManager = new TenantTransactionManager(mock(javax.sql.DataSource.class));
+      var call =
+          executor.submit(
+              () ->
+                  assertThrows(
+                      AurigaException.class,
+                      () ->
+                          h.gateway(
+                              () ->
+                                  LocalHistoryTestAccess.checkOutsideDatabase(
+                                      h.client, transportManager, check()))));
+      NetworkLocalSourceHistoryIntegrationTest.await(entered);
+      assertEquals("common.unavailable", call.get(8, TimeUnit.SECONDS).errorCode().code());
+    } finally {
+      try {
+        h.close();
+      } finally {
+        executor.shutdownNow();
+        assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+      }
+    }
+  }
+
+  @Test
+  void getAndRevokeUseTheirActualSourceControlSchemas() {
+    var h = new NetworkLocalSourceHistoryIntegrationTest.Harness();
+    h.c =
+        NetworkAuthorityConnection.newBuilder()
+            .setTenantId(h.tenant.toString())
+            .setRealm("2")
+            .setNode("1")
+            .setIngress("a".repeat(26))
+            .setServerId("N" + "A".repeat(55))
+            .setClientId("41")
+            .setClientAccount("BROKER-41")
+            .build();
+    h.boot = "boot-fixture";
+    h.registration =
+        NetworkLocalSourceHistoryIntegrationTest.object()
+            .put("registration_id", UuidV7.next().toString())
+            .put("allocation_op_id", "allocation-fixture")
+            .put("allocation_fingerprint", "sha256:" + "a".repeat(64))
+            .put("registration_revision", "1")
+            .put("local", "1")
+            .put("address_type", "session");
+    LocalHistoryTestAccess.validateSourceFrame("SourceRegister", h.frame());
+    LocalHistoryTestAccess.validateSourceFrame(
+        "SourceGet", h.getOrRevokeFrame(UuidV7.next().toString(), false));
+    LocalHistoryTestAccess.validateSourceFrame(
+        "SourceRevoke", h.getOrRevokeFrame(UuidV7.next().toString(), true));
   }
 }
