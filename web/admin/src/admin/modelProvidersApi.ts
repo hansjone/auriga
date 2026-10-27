@@ -5,6 +5,7 @@ import {
 } from '@auriga/shared';
 import type { components } from '../../../shared/src/generated/ai';
 import { apiClient } from '../api';
+import { withStepUp, requestStepUp } from './stepUp';
 
 type Schemas = components['schemas'];
 export type Provider = Schemas['Provider'];
@@ -21,10 +22,13 @@ const headers = (etag: string) => {
   if (!etag.trim() || etag === '*') throw new Error('ETag required');
   return { 'If-Match': etag };
 };
-export function createModelProvidersApi(options: ApiClientOptions = {}) {
+export function createModelProvidersApi(
+  options: ApiClientOptions = {},
+  verify?: () => Promise<void>,
+) {
   // Wrap successful AI responses inside the transport so each concurrent request
   // carries its own real response ETag. CSRF bootstrap and Problem stay untouched.
-  const client = createApiClient({
+  const transport = createApiClient({
     ...options,
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const response = await (options.fetch ?? globalThis.fetch)(input, init);
@@ -46,6 +50,7 @@ export function createModelProvidersApi(options: ApiClientOptions = {}) {
       );
     },
   });
+  const client = verify ? withStepUp(transport, verify) : transport;
   const get = <T>(path: string, signal?: AbortSignal) =>
     client.get<Versioned<T>>(`${base}${path}`, { cache: 'no-store', signal });
   const post = <T>(
@@ -151,17 +156,20 @@ export function createModelProvidersApi(options: ApiClientOptions = {}) {
       ),
   };
 }
-export const modelProvidersApi = createModelProvidersApi({
-  getAdminAccessMode: () => readAccessMode(),
-  getLocale: () => document.documentElement.lang || 'zh-CN',
-  onUnauthenticated: () => {
-    apiClient.resetSession();
-    void import('../router').then(({ router }) => {
-      if (router.currentRoute.value.path !== '/login')
-        void router.push({
-          path: '/login',
-          query: { returnTo: router.currentRoute.value.fullPath },
-        });
-    });
+export const modelProvidersApi = createModelProvidersApi(
+  {
+    getAdminAccessMode: () => readAccessMode(),
+    getLocale: () => document.documentElement.lang || 'zh-CN',
+    onUnauthenticated: () => {
+      apiClient.resetSession();
+      void import('../router').then(({ router }) => {
+        if (router.currentRoute.value.path !== '/login')
+          void router.push({
+            path: '/login',
+            query: { returnTo: router.currentRoute.value.fullPath },
+          });
+      });
+    },
   },
-});
+  requestStepUp,
+);

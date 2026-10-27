@@ -11,6 +11,14 @@ export type QrChallenge = components['schemas']['QrChallenge'];
 
 type ProvidersResponse =
   paths['/login/providers']['get']['responses']['200']['content']['application/json'];
+type PasswordInput =
+  paths['/me/password']['put']['requestBody']['content']['application/json'];
+type TotpConfirmation =
+  paths['/me/mfa/totp/enrollment/{enrollmentId}/confirm']['post']['requestBody']['content']['application/json'];
+type Sessions =
+  paths['/me/sessions']['get']['responses']['200']['content']['application/json'];
+type RevokedSessions =
+  paths['/me/sessions/revoke-others']['post']['responses']['200']['content']['application/json'];
 
 const IAM = '/api/iam/v1';
 
@@ -77,6 +85,26 @@ export function createIamApi(client: ApiClient) {
     },
     getMe() {
       return client.get<Me>(`${IAM}/me`);
+    },
+    beginTotpEnrollment() {
+      return client.post<components['schemas']['TotpEnrollment']>(
+        `${IAM}/me/mfa/totp/enrollment`,
+      );
+    },
+    confirmTotpEnrollment(enrollmentId: string, body: TotpConfirmation) {
+      return client.post<void>(
+        `${IAM}/me/mfa/totp/enrollment/${encodeURIComponent(enrollmentId)}/confirm`,
+        body,
+      );
+    },
+    changePassword(body: PasswordInput) {
+      return client.put<void>(`${IAM}/me/password`, body);
+    },
+    listMySessions() {
+      return client.get<Sessions>(`${IAM}/me/sessions`, { cache: 'no-store' });
+    },
+    revokeOtherSessions() {
+      return client.post<RevokedSessions>(`${IAM}/me/sessions/revoke-others`);
     },
     async logout() {
       client.invalidatePendingRequests();

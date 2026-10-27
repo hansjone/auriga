@@ -2,6 +2,49 @@ import { describe, expect, it, vi } from 'vitest';
 import { createModelProvidersApi } from './modelProvidersApi';
 
 describe('modelProvidersApi', () => {
+  it('resumes AI writes after verification with the same idempotency key and ETag', async () => {
+    const calls: RequestInit[] = [];
+    const fetch: typeof globalThis.fetch = async (_input, init) => {
+      calls.push(init!);
+      if (calls.length === 1)
+        return new Response(
+          JSON.stringify({
+            status: 403,
+            code: 'iam.step_up_required',
+            title: 'Step up',
+          }),
+          {
+            status: 403,
+            headers: { 'Content-Type': 'application/problem+json' },
+          },
+        );
+      return new Response(JSON.stringify({ id: 'credential', revision: 2 }), {
+        headers: { 'Content-Type': 'application/json', ETag: '"new-etag"' },
+      });
+    };
+    const verify = vi.fn(async () => {});
+    const api = createModelProvidersApi(
+      { fetch, getCookie: () => 'auriga_csrf=test' },
+      verify,
+    );
+    const result = await api.credentialAction(
+      'provider',
+      'credential',
+      'revoke',
+      { reason: 'rotate' },
+      '"old-etag"',
+      'same-key',
+    );
+    expect(result.etag).toBe('"new-etag"');
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(new Headers(call.headers).get('Idempotency-Key')).toBe('same-key');
+      expect(new Headers(call.headers).get('If-Match')).toBe('"old-etag"');
+      expect(new Headers(call.headers).get('X-Auriga-CSRF')).toBe('test');
+      expect(JSON.parse(call.body as string)).toEqual({ reason: 'rotate' });
+    }
+  });
   it('uses encoded paths, pagination, JSON, idempotency and actual ETags', async () => {
     const fetch = vi.fn(
       async () =>
