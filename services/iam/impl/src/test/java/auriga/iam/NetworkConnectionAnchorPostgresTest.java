@@ -233,7 +233,6 @@ class NetworkConnectionAnchorPostgresTest {
             clock,
             tokens.issuer(),
             Map.of("collab", Secrets.hash(secret)));
-    String serviceToken = internal.issue("collab", secret);
     var server =
         new GrpcServer(
             "127.0.0.1",
@@ -249,7 +248,9 @@ class NetworkConnectionAnchorPostgresTest {
       channel =
           GrpcChannels.open(
               "127.0.0.1:" + server.port(),
-              new AurigaClientInterceptor(() -> serviceToken, Duration.ofSeconds(5)));
+              // Historical tests advance the shared clock beyond the internal JWT lifetime.
+              new AurigaClientInterceptor(
+                  () -> internal.issue("collab", secret), Duration.ofSeconds(5)));
       // Keep this shared stub without an absolute deadline; resolveRpc bounds each new call.
       work.accept(NetworkAuthorityServiceGrpc.newBlockingStub(channel));
     } finally {
