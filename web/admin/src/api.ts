@@ -6,6 +6,7 @@ import {
   type ApiClientOptions,
 } from '@auriga/shared';
 import type { Router } from 'vue-router';
+import { withStepUp, requestStepUp } from './admin/stepUp';
 
 let loginRedirect: (() => void) | undefined;
 
@@ -23,9 +24,13 @@ export function bindApiRouter(router: Router) {
 const clientOptions: ApiClientOptions = {
   getAdminAccessMode: () => readAccessMode(),
   getLocale: () => document.documentElement.lang || 'zh-CN',
-  onUnauthenticated: () => loginRedirect?.(),
+  onUnauthenticated: () => {
+    apiClient.invalidatePendingRequests();
+    loginRedirect?.();
+  },
 };
-export const apiClient = createApiClient(clientOptions);
+const sessionClient = createApiClient(clientOptions);
+export const apiClient = withStepUp(sessionClient, requestStepUp);
 
 // Resource detail editing needs the actual response ETag, not a guessed revision.
 // A reader per call keeps concurrent responses isolated; writes use apiClient.
@@ -47,5 +52,5 @@ export async function readResource<T>(path: string) {
   return { data, etag };
 }
 
-export const iamApi = createIamApi(apiClient);
+export const iamApi = createIamApi(sessionClient);
 export const orgApi = createOrgApi(apiClient);

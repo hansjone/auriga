@@ -13,9 +13,11 @@ import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
 import ModelProvidersView from './views/models/ProvidersView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
+import OverviewView from './views/OverviewView.vue';
 import { navigation } from './admin/navigation';
 
 const existing = new Set([
+  '/overview',
   '/models/providers',
   '/settings',
   '/resources',
@@ -47,7 +49,8 @@ export const router = createRouter({
       path: '/',
       component: AdminLayout,
       children: [
-        { path: '', redirect: '/resources' },
+        { path: '', redirect: '/overview' },
+        { path: 'overview', component: OverviewView },
         { path: 'resources', component: ResourcesView },
         { path: 'members', component: MembersView },
         { path: 'nodes', component: NodesView },

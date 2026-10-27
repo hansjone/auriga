@@ -43,7 +43,7 @@ async function selectProvider(provider: LoginProvider) {
     const returnTo =
       typeof route.query.returnTo === 'string'
         ? route.query.returnTo
-        : '/members';
+        : '/overview';
     tx.value = await iamApi.createLoginTransaction({
       providerId: provider.id,
       purpose: 'login',
@@ -79,7 +79,7 @@ async function onRetry() {
 }
 
 function onComplete(redirectTo: string) {
-  void router.replace(redirectTo || '/members');
+  void router.replace(redirectTo || '/overview');
 }
 
 const step = (): ClientStep | null =>
