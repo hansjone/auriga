@@ -4,9 +4,10 @@ import "fmt"
 
 // Known codes from contracts/network/errors.json used by this adapter.
 const (
-	CodeProtocolError = "network.protocol_error"
-	CodeStaleEpoch    = "network.stale_epoch"
-	CodeConflict      = "network.conflict"
+	CodeProtocolError  = "network.protocol_error"
+	CodeStaleEpoch     = "network.stale_epoch"
+	CodeConflict       = "network.conflict"
+	CodeOutcomeUnknown = "network.outcome_unknown"
 )
 
 // AppError is a network.* failure returned as an ERROR frame.
