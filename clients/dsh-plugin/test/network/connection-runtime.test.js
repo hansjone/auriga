@@ -177,6 +177,11 @@ async function fixture(t, extra = {}) {
         },
         async send(bytes) {
           const request = decodeJson(bytes);
+          if (request.type.startsWith('source_') && extra.source) {
+            sent.push({ request, connection });
+            await extra.source(request, connection);
+            return;
+          }
           if (request.type === 'local_register') {
             sent.push({ request, connection });
             const frame = decodeJson(
@@ -217,7 +222,11 @@ async function fixture(t, extra = {}) {
           events.push('ready-' + connection.id);
           await extra.ready?.(connection.id, request);
           options.onMessage(
-            response(request, connection, extra.result?.(connection.id)),
+            response(
+              request,
+              connection,
+              extra.result?.(connection.id, request),
+            ),
             connection.epoch,
           );
           extra.message?.(connection, request);
@@ -657,7 +666,7 @@ for (const changes of [
     },
   );
 
-test('real pending operation and revision are transmitted intact and are not cleared for recovery', async (t) => {
+test('legacy pending operation and unproven receipt revision are transmitted intact and are not cleared for recovery', async (t) => {
   const store = createMemoryLedgerStore();
   const ledger = await openLedger({
     store,
@@ -671,6 +680,11 @@ test('real pending operation and revision are transmitted intact and are not cle
     addressType: 'session',
   });
   await ledger.close();
+  const handle = await store.open();
+  const legacy = await handle.load();
+  delete legacy.receiptRevision;
+  await handle.commit(legacy);
+  await handle.close();
   const before = store.snapshot();
   const f = await fixture(t, {
     ledger: store,
@@ -687,6 +701,115 @@ test('real pending operation and revision are transmitted intact and are not cle
     f.sent[0].request.pending_registration.allocation_op_id,
     'op-pending',
   );
+  assert.deepEqual(store.snapshot(), before);
+});
+
+test('real registration writes preserve an independent empty receipt checkpoint across reconnect and file reopen', async (t) => {
+  const host = registrationHost();
+  const root = fileURLToPath(
+    new URL('../../../../.agent-evidence/', import.meta.url),
+  );
+  await mkdir(root, { recursive: true });
+  const dir = await mkdtemp(join(root, 'receipt-reconnect-'));
+  const store = createFileLedgerStore({ dir });
+  const readyRequests = [];
+  const sourceRequests = [];
+  const result = (_id, request) => ({
+    // Match the production receiptReady gate, rather than always returning ready.
+    status:
+      request.receipt_checkpoint.checkpoint_revision === '0'
+        ? 'ready'
+        : 'recovery_conflict',
+    local_high_water: request.local_high_water,
+    registration_revision: request.registration_revision,
+  });
+  const f = await fixture(t, {
+    ctx: host.ctx,
+    ledger: store,
+    result,
+    ready: (_id, request) => readyRequests.push(request),
+    // Observe a genuine production source request after its file commit; leave
+    // its reply absent so reconnect must preserve the frozen pending operation.
+    source: (request) => sourceRequests.push(request),
+  });
+  await f.runtime.start();
+  await waitFor(
+    () => host.tools.has('auriga_network_join'),
+    'registration installed',
+  );
+  await host.tools
+    .get('auriga_network_join')
+    .execute({}, { agent: host.agent });
+  await waitFor(() => sourceRequests.length > 0, 'source request committed');
+  const before = JSON.parse(await readFile(join(dir, 'ledger.json'), 'utf8'));
+  assert.ok(before.revision > 0);
+  assert.equal(before.registrationRevision, '1');
+  const transport = f.connections.at(-1);
+  transport.transition('reconnecting', transport.epoch);
+  transport.transition('ready', transport.epoch + 1);
+  await waitFor(
+    () => f.runtime.status.connected || !f.runtime.status.available,
+    'READY completed',
+  );
+  assert.equal(f.runtime.status.connected, true);
+  const request = readyRequests.at(-1);
+  assert.equal(request.receipt_checkpoint.checkpoint_revision, '0');
+  assert.equal(request.registration_revision, before.registrationRevision);
+  assert.equal(request.local_high_water, before.localHighWater);
+  assert.equal(request.pending_registration, null);
+  await waitFor(() => sourceRequests.length > 1, 'same source op retried');
+  assert.equal(sourceRequests[1].operation_id, sourceRequests[0].operation_id);
+  await f.runtime.close();
+  const reopened = await fixture(t, {
+    ledger: store,
+    registration: { created: false },
+    result,
+  });
+  await reopened.runtime.start();
+  assert.equal(reopened.runtime.status.connected, true);
+  assert.equal(
+    reopened.sent[0].request.receipt_checkpoint.checkpoint_revision,
+    '0',
+  );
+  const saved = JSON.parse(await readFile(join(dir, 'ledger.json'), 'utf8'));
+  assert.deepEqual(saved.locals, before.locals);
+  assert.deepEqual(saved.bindings, before.bindings);
+  assert.deepEqual(
+    saved.sourceControl.operations,
+    before.sourceControl.operations,
+  );
+  assert.ok(saved.revision >= before.revision);
+});
+
+test('a nonzero receipt history is preserved and never bypasses the real receiptReady gate', async (t) => {
+  const store = createMemoryLedgerStore();
+  const ledger = await openLedger({
+    store,
+    identity: IDENTITY,
+    initialize: true,
+  });
+  await ledger.update((d) => {
+    d.audit.push({ at: 'x', recipientId: 'r', reason: 'probe' });
+  });
+  await ledger.update((d) => {
+    d.audit.length = 0;
+  });
+  await ledger.close();
+  const before = store.snapshot();
+  assert.equal(before.receiptRevision, 2);
+  const f = await fixture(t, {
+    ledger: store,
+    registration: { created: false },
+    result: (_id, request) => ({
+      status:
+        request.receipt_checkpoint.checkpoint_revision === '0'
+          ? 'ready'
+          : 'recovery_conflict',
+    }),
+  });
+  await assert.rejects(f.runtime.start());
+  assert.equal(f.sent[0].request.receipt_checkpoint.checkpoint_revision, '2');
+  assert.equal(f.runtime.status.connected, false);
   assert.deepEqual(store.snapshot(), before);
 });
 

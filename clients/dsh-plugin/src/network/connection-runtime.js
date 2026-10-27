@@ -48,7 +48,10 @@ async function normalReady(transport, trust, state, signal, now) {
     throw new Error('durable receipt cursor unavailable');
   const checkpoint = {
     checkpoint_seq: '0',
-    checkpoint_revision: String(state.revision),
+    // The ledger revision includes local/source writes. Only the independent
+    // durable receipt witness can prove an empty receipt history after those
+    // writes. Preserve the conservative value for ledgers lacking that proof.
+    checkpoint_revision: String(state.receiptRevision ?? state.revision),
     summary_digest:
       'sha256:' +
       createHash('sha256').update(canonicalize(state.recipients)).digest('hex'),

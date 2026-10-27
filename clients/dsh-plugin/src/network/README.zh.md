@@ -54,7 +54,7 @@ created=false 且缺 ledger、首次响应丢失、落盘前崩溃/写入未知�
 
 完整 keys 与公告按安装根验证原始 JSON/JCS，公告本身无 realm 字段，其 realm 归属由安装根及匹配的完整清单绑定。更高有效公告立即阻断旧 keys，版本/摘要/硬截止匹配且完整清单持久后才解除；写入未知不降高水位或恢复撤销键。连接/重连与有界密钥刷新复核固定端点，不添加定时轮询；硬截止关闭基础连接。
 
-旧业务账本的恢复仍受已合服务边界限制：ledger 没有独立持久 resume_cursor，服务端 receiptReady 当前不对非零 checkpoint/revision/evidence 直接 ready。含 recipient 证据而无可证明 cursor 的账本保持不可用；其它账本提交原 revision/高水位/pending/摘要，reconciling/recovery_conflict/identity_rollback 均不变成 connected。不下载服务端 cursor、不伪造 revision0、不清除 pending/receipt 求 READY；本项只承诺基础首建和可证明 ready 的恢复。
+业务账本的恢复仍受已合服务边界限制：ledger 没有独立持久 resume_cursor，服务端 receiptReady 当前不对非零 checkpoint/revision/evidence 直接 ready。新初始化的账本在同一文件、同一写锁下持久保存独立 `receiptRevision`：只有 recipients/inbox/results/bodies/audit 变化才递增，删除证据也递增，不能重置。local 登记和来源操作仍递增总 revision、保留原 registrationRevision/高水位/pending/完整来源操作，不把总 revision 冒充消息回执检查点。仅从初始化以来未有回执证据变动的账本能证明回执 revision 为零；缺少独立记录的旧账本保留原总 revision，不推断或补写零。含 recipient 证据而无可证明 cursor 的账本保持不可用；reconciling/recovery_conflict/identity_rollback 均不变成 connected。不下载服务端 cursor、不伪造 revision0、不清除 pending/receipt 求 READY；本项只承诺基础首建和可证明 ready 的恢复。
 
 2026-10-25 用户决定：同机隔离（含云端）整体推迟。`isolation.js` 是 runtime 与 HostPort adapter 共用的唯一隔离判定点，策略写在代码内，不读取工具参数、provider 配置或环境变量。local 与 managed 在登录、票据、信任根和真实宿主适配等条件满足后均可联网，无需先证明同机隔离。状态及 diagnostics 的 `isolation` 明确返回 `required:false / isolated:false / state:unisolated-development`；运行时首次启动记录一次“未隔离（开发阶段）”警告，重连不重复记录。
 
