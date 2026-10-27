@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'mvnw.cmd'))) { throw 'Run fro
 $head = (& git rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot determine exact HEAD' }
 if (& git status --porcelain --untracked-files=no) { throw 'Tracked/index must be clean' }
-$output = Join-Path $root ('services/platform-app/target/history-mutants-' + [Guid]::NewGuid().ToString('N'))
+$output = Join-Path $root ('target/hm-' + [Guid]::NewGuid().ToString('N').Substring(0, 12))
 New-Item -ItemType Directory -Path $output | Out-Null
 $archive = Join-Path $output 'source.tar'
 & git archive --format=tar "--output=$archive" $head
@@ -46,7 +46,10 @@ try {
   $variants = @('omit-historical-read', 'omit-complete-c-ref-equality')
   if ($Run) { $variants = @('control') + $variants }
   foreach ($name in $variants) {
-    $directory = Join-Path $output $name
+    # protoc's Windows plugin launcher has a path-length limit even when Java accepts longer
+    # paths. Only shorten the isolated archive layout; keep every source/build setting identical.
+    $leaf = switch ($name) { 'control' { 'c' }; 'omit-historical-read' { 'a' }; default { 'b' } }
+    $directory = Join-Path $output $leaf
     New-Item -ItemType Directory -Path $directory | Out-Null
     & tar -xf $archive -C $directory
     if ($LASTEXITCODE -ne 0) { throw 'archive extraction failed' }
