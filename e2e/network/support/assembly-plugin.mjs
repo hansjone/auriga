@@ -567,7 +567,17 @@ try {
 
   // Every claim is backed by frames, delegated generated RPC and DB snapshots.
   phase = 'Broker/ticket replay ACL and limits';
-  const guards = await brokerGuards(external.prepared, external.socketFactory);
+  const guards = await brokerGuards(external.prepared, external.socketFactory, {
+    async payloadEvidence(peer) {
+      return (await control({ op: 'broker-payload-evidence', peer })).proof;
+    },
+    async onEvidence(evidence) {
+      await writeFile(
+        join(artifacts, 'broker-probe.json'),
+        JSON.stringify(evidence, null, 2),
+      );
+    },
+  });
   await writeFile(
     join(artifacts, 'broker-guards.json'),
     JSON.stringify(guards, null, 2),

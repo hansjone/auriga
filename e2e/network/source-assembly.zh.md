@@ -161,6 +161,27 @@ file-commit observations 及 DB 快照。stdout/logs 保存前检查已知凭据
 
 ## 旧头首失与待办
 
+主控对 T4 `aa8924d` 实跑通过六组来源检查，Broker payload 探针缺少错误行而超时。
+与 T3b `bec85ca` 对账：探针、Broker account limits、生产 WSS socket factory 均未改；
+旧失败未保存该 socket 的原帧或 broker.log，不能回溯断言具体关闭原因。
+独立锁定 2.15.1 的真实 WSS/CLIENTS 复现表明：完整 65537 字节写入时，Broker 已记录
+`maximum payload exceeded: 65537 vs 65536`，客户端仍可能只收到 1006 异常关闭而丢失
+`-ERR`。不能将这种收包差异推断成限额失效，也不能将普通断连直接当作限额证据。
+
+新探针保留完整超限 body，增加完整 65536 字节+PONG 正控；开始前核初始及认证后 INFO
+的 server/CID 一致、账号 CLIENTS、精确 max_payload=65536。成功必须实际关闭，且由
+Node 主控只读本次 Java 私有根的固定 broker.log，以自有 Broker PID/启动 ID、公开
+WebSocket upgrade socket 的本地端口、CID、账号及 65537/65536 全部相等关联真实拒绝行。
+错误行收到与否都记录；普通关闭、协议错误、超时、其他账号/端口/CID/进程/大小或缺日志
+一律不通过。未增加监控端口或改 Broker/生产代码；CONNECT 和用户凭据不保存。
+`broker-probe.json` 在失败及成功均保存原 INFO/错误行/关闭结果；成功的
+`broker-guards.json.payloadEvidence` 另留脱敏的匹配 Broker 原日志行。
+
+`node --test e2e/network/assembly-broker.test.mjs` 核精确关联反例及两份完整 body；
+`node e2e/network/broker-payload-check.mjs --run` 用临时真实 Broker 跑 20 次完整边界/
+超限探针及普通关闭/协议错误反例，并确定性验证错误行缺失分支，finally 释放全部 socket
+和子进程。后者只有隔离静态认证夹具，无 IAM/callout/PG/DSH，不替代主控新 HEAD 全链。
+
 主控旧头 3726763 的 archive Control 首失是 prepare 参数错误和快照假定所有表都有 id，
 不是业务反证：现按真实 provider.prepare({signal}) 接线，并为复合主键 network_node
 采用完整行稳定排序，新增 API/SQL 白名单守卫。旧归档保持原样，不重写其结论。

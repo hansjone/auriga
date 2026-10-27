@@ -13,6 +13,7 @@ import {
   stopChild,
 } from './support/assembly-process.mjs';
 import { redactDiagnostics } from './support/assembly-failure.mjs';
+import { payloadCloseEvidence } from './support/assembly-broker.mjs';
 import {
   installNativeRuntime,
   isolatedEnvironment,
@@ -179,19 +180,34 @@ export async function runAssembly() {
         if (event.stage !== 'control' || handled.has(event.id)) continue;
         handled.add(event.id);
         const request =
-          event.command.op === 'java'
-            ? (async () => {
-                java.write(
-                  'fault ' +
-                    JSON.stringify({ ...event.command.command, id: event.id }),
-                );
-                return java.wait(
-                  (v) => v.stage === 'fault-control' && v.id === event.id,
-                  'Java fault control',
-                  20_000,
-                );
-              })()
-            : gateway.request(event.command, 20_000);
+          event.command.op === 'broker-payload-evidence'
+            ? (async () => ({
+                stage: 'reply',
+                proof: payloadCloseEvidence(
+                  event.command.peer,
+                  await readFile(
+                    join(dirname(ready.config), 'broker.log'),
+                    'utf8',
+                  ),
+                  gw.brokerPid,
+                ),
+              }))()
+            : event.command.op === 'java'
+              ? (async () => {
+                  java.write(
+                    'fault ' +
+                      JSON.stringify({
+                        ...event.command.command,
+                        id: event.id,
+                      }),
+                  );
+                  return java.wait(
+                    (v) => v.stage === 'fault-control' && v.id === event.id,
+                    'Java fault control',
+                    20_000,
+                  );
+                })()
+              : gateway.request(event.command, 20_000);
         void request
           .then((response) => {
             plugin.write({ ...response, id: event.id });
