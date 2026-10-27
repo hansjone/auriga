@@ -14,6 +14,7 @@ const adminCSRFBootstrapPath = "/api/iam/v1/admin/session/csrf-tokens"
 
 var loginTransactionPath = regexp.MustCompile(`^/api/iam/v1/login/transactions/[0-9a-fA-F-]+(?:/advance|/events)?$`)
 var loginCallbackPath = regexp.MustCompile(`^/api/iam/v1/login/callback/[0-9a-fA-F-]+$`)
+var invitationPreviewPath = regexp.MustCompile(`^/api/org/v1/invitations/preview/[^/]+$`)
 
 func loginOperation(r *http.Request) bool {
 	p := r.URL.Path
@@ -91,7 +92,8 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		fail(403, "common.forbidden")
 		return
 	}
-	public := iam && (loginOperation(r) || protocolOperation(r))
+	preview := target == g.orgURL && r.Method == http.MethodGet && invitationPreviewPath.MatchString(r.URL.Path)
+	public := preview || iam && (loginOperation(r) || protocolOperation(r))
 	raw, cookieOK := singleCookie(r, cookieName(e.scheme == "https", sessionCookieBase(audience)))
 	count := 0
 	for _, cookie := range r.Cookies() {
@@ -104,7 +106,8 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		return
 	}
 	var sess *Session
-	if cookieOK {
+	// Invitation previews are anonymous even when the browser has a session.
+	if cookieOK && !preview {
 		loaded, err := g.browserSession(r, raw, audience, !public && r.Method == http.MethodGet)
 		if err != nil && !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, errIAMUnauthenticated) && !public {
 			unavailable("browser_session_unavailable")
