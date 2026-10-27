@@ -73,7 +73,7 @@ platform 使用 `combined,dev,beta-ui` 和真实 PostgreSQL SessionKv。仅正�
 
 Windows 发布器要求私有目录属于当前账号、DACL 禁止继承且只授权当前账号；拒绝 UNC、重解析点、非普通文件、硬链接、宽松 ACL。生命周期内用不共享删除的原生 Windows 句柄固定整个祖先链；同目录原子替换并刷盘。数字 reader-group 仅用于 POSIX；Windows 不据此扩大 ACL，installation-owner 只接受 -1。不同 Windows 服务账号的部署不在这套本机脚本范围内。JDK 原生调用使用 `--enable-native-access=ALL-UNNAMED`，无需新增 Java 依赖。
 
-从 PowerShell 7 启动也使用 Windows PowerShell 5.1 执行子脚本；runner 为这些子进程清除继承的 PSModulePath，让 5.1 重建自己的模块路径，其余构建环境变量保留。private.ps1 通过 .NET 仅写 DACL，验证当前所有者、禁止继承和独占授权，不读写审计 SACL、不要求 SeSecurityPrivilege；已有静态目录重复构建使用同一流程。不会修改父会话或系统模块设置。
+从 PowerShell 7 启动也使用 Windows PowerShell 5.1 执行子脚本；runner 为这些子进程清除继承的 PSModulePath，让 5.1 重建自己的模块路径，其余构建环境变量保留。private.ps1 通过 .NET 显式把所有者设为当前用户 SID，并写入禁止继承、只授权当前用户的 DACL；仅修改 Owner/Access，不读写审计 SACL、不要求 SeSecurityPrivilege。提升的管理员令牌可能默认创建 Administrators 组所有的对象，因此不能只依赖默认所有者。发布器也仅对自身刚创建的输出目录和临时 JWT 文件设置当前用户所有者；对既有目录、秘密和票据仍严格校验，不接受 Administrators 组或其他主体所有权。已有静态目录重复构建使用同一流程，不会修改父会话或系统模块设置。
 
 native OAuth 客户端为 `auriga-beta-native`：公共客户端、nativeConnect=true，唯一 scope 为 auriga.connect，授权为 device_code + refresh_token。插件线使用门户 Origin 和该 client ID，并仅在隔离回环配置中允许 HTTP。应急管理员不能代替团队账号完成插件登录；应走邀请注册、账户安全/TOTP，再登录插件。脚本不改 DSH profile。
 

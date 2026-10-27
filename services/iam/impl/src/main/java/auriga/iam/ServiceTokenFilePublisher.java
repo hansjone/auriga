@@ -223,6 +223,10 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
       windows.checkToken();
       temporary = tokenFile.resolveSibling("." + service + "-" + UUID.randomUUID() + ".tmp");
       Files.createFile(temporary, windows.privateAcl());
+      // Elevated Windows tokens can default new objects to Administrators ownership.
+      // Normalize only this newly created file; existing installation owners stay strict.
+      if (!Files.getOwner(temporary, LinkOption.NOFOLLOW_LINKS).equals(processOwner))
+        Files.setOwner(temporary, processOwner);
       windows.checkPrivate(temporary, false);
       byte[] encoded = jwt.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
       try (var channel =
@@ -271,8 +275,11 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
           for (Path component : parent) {
             current = current.resolve(component);
             if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)
-                && current.equals(tokenFile.getParent()))
+                && current.equals(tokenFile.getParent())) {
               Files.createDirectory(current, privateAcl());
+              if (!Files.getOwner(current, LinkOption.NOFOLLOW_LINKS).equals(processOwner))
+                Files.setOwner(current, processOwner);
+            }
             if (pinned.add(current)) directories.add(WindowsHandle.open(current, true));
           }
         }

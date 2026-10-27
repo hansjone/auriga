@@ -93,10 +93,12 @@ class ServiceTokenFilePublisherWindowsTest {
     try (var publisher = new ServiceTokenFilePublisher("edge", issuer, secret, token, 1, -1)) {
       publisher.start();
       EdgeTokenFilePublisherTest.awaitToken(token);
+      assertEquals(Files.getOwner(secret), Files.getOwner(token));
       String first = Files.readString(token);
       assertEquals("svc:edge", verifier.verify(first).subject());
       time.now = time.now.plusSeconds(240);
       assertTrue(publisher.refresh());
+      assertEquals(Files.getOwner(secret), Files.getOwner(token));
       String second = Files.readString(token);
       assertNotEquals(first, second);
       assertEquals("svc:edge", verifier.verify(second).subject());

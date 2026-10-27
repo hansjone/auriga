@@ -19,6 +19,28 @@ import {
   windowsPowerShellEnvironment,
 } from '../../scripts/beta-ui/runner.mjs';
 
+test(
+  'private restriction replaces an Administrators default owner and verification rejects it',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const result = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-File',
+        path.resolve('e2e/beta-ui/private-owner.test.ps1'),
+      ],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+        env: windowsPowerShellEnvironment(),
+      },
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  },
+);
+
 test('Windows PowerShell children drop foreign module paths without changing build settings', () => {
   const source = {
     PSModulePath: 'core/modules',
