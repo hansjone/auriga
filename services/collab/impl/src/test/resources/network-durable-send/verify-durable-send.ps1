@@ -1,6 +1,39 @@
 param([string]$ExpectedHead, [switch]$CompileOnly, [switch]$Run, [switch]$FunctionsOnly)
 $ErrorActionPreference = 'Stop'
 
+function Get-SendArchiveBlobs([string]$Directory, [string[]]$Files) {
+  # Windows PowerShell's native pipeline uses the caller's $OutputEncoding and
+  # may prepend a BOM to the first filename. Own the stdin writer instead.
+  $encoding = New-Object Text.UTF8Encoding($false)
+  $info = New-Object Diagnostics.ProcessStartInfo
+  $info.FileName = 'git'
+  $info.Arguments = 'hash-object --stdin-paths'
+  $info.WorkingDirectory = $Directory
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.RedirectStandardInput = $true
+  $info.RedirectStandardOutput = $true
+  $info.RedirectStandardError = $true
+  $info.StandardOutputEncoding = $encoding
+  $info.StandardErrorEncoding = $encoding
+  $process = New-Object Diagnostics.Process
+  $process.StartInfo = $info
+  try {
+    if (-not $process.Start()) { throw 'Cannot start archive hash inventory' }
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $writer = [IO.StreamWriter]::new($process.StandardInput.BaseStream, $encoding)
+    try {
+      foreach ($file in $Files) { $writer.WriteLine($file) }
+    } finally { $writer.Dispose() }
+    $process.WaitForExit()
+    $result = $stdout.GetAwaiter().GetResult()
+    $failure = $stderr.GetAwaiter().GetResult()
+    if ($process.ExitCode -ne 0) { throw ('Cannot hash archive inventory: ' + $failure.Trim()) }
+    return @($result -split '\r?\n' | Where-Object { $_ -ne '' })
+  } finally { $process.Dispose() }
+}
+
 function New-NoDedup([string]$Source) {
   $before = 'var idempotency = request.path("idempotency");'
   if ([regex]::Matches($Source, [regex]::Escape($before)).Count -ne 1) { throw 'NoDedup overlay must match exactly once' }
@@ -75,8 +108,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'archive extraction failed' }
     # git archive applies declared eol attributes; normalize with the same Git filters
     # before comparing blob IDs (.ps1/.cmd deliberately export CRLF on Windows).
-    $archiveBlobs = @($files | & git -C $directory hash-object --stdin-paths)
-    if ($LASTEXITCODE -ne 0 -or $archiveBlobs.Count -ne $files.Count) { throw 'Cannot hash archive inventory' }
+    $archiveBlobs = @(Get-SendArchiveBlobs $directory $files)
+    if ($archiveBlobs.Count -ne $files.Count) { throw 'Cannot hash archive inventory' }
     for ($i = 0; $i -lt $files.Count; $i++) {
       if ($archiveBlobs[$i] -ne $blobs[$i]) { throw "Archive differs from HEAD blob: $($files[$i])" }
     }
