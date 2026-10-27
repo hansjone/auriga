@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { waitUntil } from './assembly-process.mjs';
+import { assertSourceScenarioUnblocked } from './assembly-scenario.mjs';
 
 // No business fixture: commands only arm real RPC/JDBC fault boundaries and
 // call generated Read/Fence/Get with the exact requests saved by production.
@@ -74,6 +75,11 @@ export async function criticalMatrix({
   }
   async function fresh(label, before = async () => {}) {
     const state = await e.ledger();
+    assertSourceScenarioUnblocked(
+      await snapshot(`${label}-preconditions`),
+      state.identity,
+      label,
+    );
     const local = (BigInt(state.localHighWater) + 1n).toString();
     await before(local);
     const id = `${label}-${randomUUID()}`;
@@ -127,7 +133,6 @@ export async function criticalMatrix({
     base.connection = await currentC();
     base.operation_id = `missing-${randomUUID()}`;
     const socketCount = e.sockets.length;
-    const beforeMissingFacts = iamFacts(db);
     const read = await probe('ReadAgentSourceReceipt', base, {
       requireLive: true,
     });
@@ -142,75 +147,6 @@ export async function criticalMatrix({
       iamFacts(await snapshot('critical-live-after')),
       iamFacts(db),
       'pure Read/live-C Fence must write zero IAM source facts',
-    );
-
-    // Genuine outer pending: block only the initial real Register before it
-    // executes, then let actual pure Read miss and no-create live-C Fence fail.
-    const missing = await fresh('critical-missing', (local) =>
-      arm('live-register', 'RegisterAgentSource', 'before', 'unavailable', {
-        local,
-      }),
-    );
-    const missingOp = missing.operation.id;
-    await waitUntil(
-      async () =>
-        (await trace()).some(
-          (v) =>
-            v.method === 'FenceAgentSourceReceipt' &&
-            v.operation === missingOp &&
-            v.phase === 'delegate',
-        ),
-      'pending live-C miss did not reach the real no-create Fence',
-    );
-    db = await snapshot('critical-pending-miss');
-    assert.deepEqual(
-      iamFacts(db),
-      beforeMissingFacts,
-      'pending live-C Read/Fence must not write IAM anchor/op/source/chain facts',
-    );
-    assert.equal(registerOp(db, missingOp), undefined);
-    const pending = rows(db, 'collab.network_source_operation').find(
-      (v) => v.operation_id === missingOp,
-    );
-    assert.equal(pending.status, 'pending');
-    assert.equal(pending.iam_response, null);
-    assert.ok(
-      rows(db, 'collab.network_source_outbox').some(
-        (v) => v.operation_id === pending.id && !v.completed,
-      ),
-    );
-    const unknown = await waitUntil(
-      () =>
-        e.frames.find(
-          (v) =>
-            v.direction === 'down' &&
-            v.frame.type === 'error' &&
-            v.frame.code === 'network.outcome_unknown' &&
-            e.frames.some(
-              (r) =>
-                r.direction === 'up' &&
-                r.frame.operation_id === missingOp &&
-                r.frame.request_id === v.frame.request_id,
-            ),
-        ),
-      'live-C miss must return precise signed outcome_unknown',
-    );
-    assert.equal(unknown.frame.retryable, false);
-    assert.equal('source' in unknown.frame, false);
-    assert.equal('failure_evidence' in unknown.frame, false);
-    const missingTrace = (await trace()).filter(
-      (v) => v.method === 'RegisterAgentSource' && v.operation === missingOp,
-    );
-    assert.equal(
-      missingTrace.filter((v) => v.phase === 'call').length,
-      1,
-      'pending recovery must not fall back to Register',
-    );
-    assert.equal(missingTrace.filter((v) => v.phase === 'delegate').length, 0);
-    closeNative(missing);
-    await clear();
-    checks.push(
-      'critical: live-C miss uses real Read/Fence, zero issuance/fence writes, exact UNKNOWN with original pending/outbox',
     );
 
     // Deadlines and explicit cancellation are real client/context events; the
@@ -283,7 +219,11 @@ export async function criticalMatrix({
         maxHits: 16,
       });
     });
-    await hit('commit-unknown');
+    const commitHit = await hit('commit-unknown');
+    assert.equal(commitHit.phase, 'commit-ack-lost');
+    assert.equal(commitHit.method, 'RegisterAgentSource');
+    assert.equal(commitHit.local, lost.local);
+    assert.equal(commitHit.operation, lost.operation.id);
     db = await snapshot('critical-commit-unknown');
     const committed = registerOp(db, lost.operation.id);
     assert.ok(
@@ -427,6 +367,81 @@ export async function criticalMatrix({
     await clear();
     checks.push(
       'critical: genuine late ACTIVE Get released after committed Revoke becomes exact signed stopped fact and cannot revive plugin/collab validity',
+    );
+
+    // Leave this node-wide pending case last among mutation scenarios. The
+    // production guard intentionally forbids a new local bypassing its outcome.
+    onPhase('critical/live-C pending outcome');
+    const beforeMissingFacts = iamFacts(
+      await snapshot('critical-pending-before'),
+    );
+    // Genuine outer pending: block only the initial real Register before it
+    // executes, then let actual pure Read miss and no-create live-C Fence fail.
+    const missing = await fresh('critical-missing', (local) =>
+      arm('live-register', 'RegisterAgentSource', 'before', 'unavailable', {
+        local,
+      }),
+    );
+    const missingOp = missing.operation.id;
+    await waitUntil(
+      async () =>
+        (await trace()).some(
+          (v) =>
+            v.method === 'FenceAgentSourceReceipt' &&
+            v.operation === missingOp &&
+            v.phase === 'delegate',
+        ),
+      'pending live-C miss did not reach the real no-create Fence',
+    );
+    db = await snapshot('critical-pending-miss');
+    assert.deepEqual(
+      iamFacts(db),
+      beforeMissingFacts,
+      'pending live-C Read/Fence must not write IAM anchor/op/source/chain facts',
+    );
+    assert.equal(registerOp(db, missingOp), undefined);
+    const pending = rows(db, 'collab.network_source_operation').find(
+      (v) => v.operation_id === missingOp,
+    );
+    assert.equal(pending.status, 'pending');
+    assert.equal(pending.iam_response, null);
+    assert.ok(
+      rows(db, 'collab.network_source_outbox').some(
+        (v) => v.operation_id === pending.id && !v.completed,
+      ),
+    );
+    const unknown = await waitUntil(
+      () =>
+        e.frames.find(
+          (v) =>
+            v.direction === 'down' &&
+            v.frame.type === 'error' &&
+            v.frame.code === 'network.outcome_unknown' &&
+            e.frames.some(
+              (r) =>
+                r.direction === 'up' &&
+                r.frame.operation_id === missingOp &&
+                r.frame.request_id === v.frame.request_id,
+            ),
+        ),
+      'live-C miss must return precise signed outcome_unknown',
+    );
+    assert.equal(unknown.frame.retryable, false);
+    assert.equal('source' in unknown.frame, false);
+    assert.equal('failure_evidence' in unknown.frame, false);
+    const missingTrace = (await trace()).filter(
+      (v) => v.method === 'RegisterAgentSource' && v.operation === missingOp,
+    );
+    assert.equal(
+      missingTrace.filter((v) => v.phase === 'call').length,
+      1,
+      'pending recovery must not fall back to Register',
+    );
+    assert.equal(missingTrace.filter((v) => v.phase === 'delegate').length, 0);
+    closeNative(missing);
+    await clear();
+    checks.push(
+      'critical: live-C miss uses real Read/Fence, zero issuance/fence writes, exact UNKNOWN with original pending/outbox',
     );
 
     // The source originated in the full chain. Query it through real generated

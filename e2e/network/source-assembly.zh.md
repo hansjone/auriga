@@ -158,6 +158,21 @@ anchor、ledger、持久 epoch/ingress 及 socket 约束全部保留；不以只
 任意值；子进程清除已见令牌/Bearer/JWT/私钥块，主控用已收集凭据再次脱敏后写manifest。
 失败与业务反证判据仍保持原约束，初始化、SQL、其他断言和清理错误都不算指定反证。
 
+主控对 ba14977 实跑已通过前九组检查，但 critical 的 commit-unknown 未命中。
+旧矩阵先在 EXTERNAL 节点 local 2 故意留下 live-C miss/pending，再在 local 3 尝试新发行。
+生产 collab 按节点阻止任何 local 绕过 unresolved Register；归档中 local 3 的 13 次 issue
+都收到 outcome_unknown，未进入 IAM（该 local 内层调用和 IAM 操作行均为零）。故障已启用，
+但不能把触发前序被阻断误判成 JDBC commit 钩子失效，也不能关闭生产 pending 围栏。
+
+现在先执行提交确认未知→真实换 C 同 op 纯 Read 恢复→晚到 Get/Revoke，再执行故意保留
+pending 的 live-C miss，最后在同一 C 进行 Org 撤权 Get。每次新来源场景前留 DB 快照，
+要求相同 tenant/realm/node 没有 pending Register；缺表不能当零，其他 local 的 pending
+同样阻止开始。live-C 的原 pending/outbox/零 IAM 写/精确 UNKNOWN 和不回退 Register 断言
+全部保留；不通过删除 pending、改 DB/ledger 或给该项可选标记继续。commit-unknown 必须
+命中真实 commit-ack-lost，且 op/local 与新场景严格匹配；仍要求真实 IAM 回执、collab pending、
+换 C 恢复原完整字节、仅一次 Register/无 Fence/无重复发行。非 PG 守卫只核驱动前置条件；
+本次重排后的真实命中及后续语义由主控新精确 HEAD 的 -Run 验收。
+
 按追加授权2“其余待办，不必一次做全”：F5 tenant/owner/device/backing-session 七字段
 换值、F6 digest/ref/异体全套、F7 collab SQL 提交确认未知、真正 kill/同 PG 目录重开及
 PG 写围栏；P3 双 op 争 CAS、P5 **以 EXPIRED 前代撤销当前后继** 仍待补。
