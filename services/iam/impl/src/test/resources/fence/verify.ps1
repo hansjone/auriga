@@ -28,8 +28,8 @@ function Invoke-FenceMaven([string]$Arguments, [string]$Log) {
         $outTask = $process.StandardOutput.BaseStream.CopyToAsync($stdout)
         $errTask = $process.StandardError.BaseStream.CopyToAsync($stderr)
         $process.WaitForExit()
-        $outTask.GetAwaiter().GetResult()
-        $errTask.GetAwaiter().GetResult()
+        [void]$outTask.GetAwaiter().GetResult()
+        [void]$errTask.GetAwaiter().GetResult()
         return $process.ExitCode
     } finally { $stdout.Dispose(); $stderr.Dispose(); $process.Dispose() }
 }
