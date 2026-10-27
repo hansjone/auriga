@@ -78,4 +78,3 @@ foreach ($directory in @($true, $false)) {
     if (-not $rejected -or $global:betaOwnerUnitItem.Writes -ne 1) { throw 'Verify-only must reject without rewriting ownership' }
   }
 }
-
