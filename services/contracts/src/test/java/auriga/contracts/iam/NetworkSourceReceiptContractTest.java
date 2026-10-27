@@ -13,9 +13,13 @@ class NetworkSourceReceiptContractTest {
     var service = NetworkSource.getDescriptor().findServiceByName("NetworkSourceAuthorityService");
     assertEquals(
         List.of(
-            "RegisterAgentSource", "ReadAgentSourceReceipt", "GetAgentSource", "RevokeAgentSource"),
+            "RegisterAgentSource",
+            "ReadAgentSourceReceipt",
+            "FenceAgentSourceReceipt",
+            "GetAgentSource",
+            "RevokeAgentSource"),
         service.getMethods().stream().map(Descriptors.MethodDescriptor::getName).toList());
-    assertEquals(4, NetworkSourceAuthorityServiceGrpc.getServiceDescriptor().getMethods().size());
+    assertEquals(5, NetworkSourceAuthorityServiceGrpc.getServiceDescriptor().getMethods().size());
     var read = service.findMethodByName("ReadAgentSourceReceipt");
     assertEquals(ReadAgentSourceReceiptRequest.getDescriptor(), read.getInputType());
     assertEquals(RegisterAgentSourceResponse.getDescriptor(), read.getOutputType());
@@ -27,6 +31,19 @@ class NetworkSourceReceiptContractTest {
     assertEquals(1, original.getNumber());
     assertTrue(original.hasPresence());
     assertEquals(RegisterAgentSourceRequest.getDescriptor(), original.getMessageType());
+    var fence = service.findMethodByName("FenceAgentSourceReceipt");
+    assertEquals(FenceAgentSourceReceiptRequest.getDescriptor(), fence.getInputType());
+    assertEquals(RegisterAgentSourceResponse.getDescriptor(), fence.getOutputType());
+    assertFalse(fence.isClientStreaming());
+    assertFalse(fence.isServerStreaming());
+    var frozen = fence.getInputType();
+    assertEquals(1, frozen.getFields().size());
+    var frozenOriginal = frozen.findFieldByName("original_request");
+    assertEquals(1, frozenOriginal.getNumber());
+    assertTrue(frozenOriginal.hasPresence());
+    assertEquals(RegisterAgentSourceRequest.getDescriptor(), frozenOriginal.getMessageType());
+    assertEquals(original.getMessageType(), frozenOriginal.getMessageType());
+    assertEquals(read.getOutputType(), fence.getOutputType());
     assertEquals(
         List.of(
             "source",
@@ -57,5 +74,9 @@ class NetworkSourceReceiptContractTest {
         Network.getDescriptor()
             .findServiceByName("NetworkGatewayService")
             .findMethodByName("ReadAgentSourceReceipt"));
+    assertNull(
+        Network.getDescriptor()
+            .findServiceByName("NetworkGatewayService")
+            .findMethodByName("FenceAgentSourceReceipt"));
   }
 }

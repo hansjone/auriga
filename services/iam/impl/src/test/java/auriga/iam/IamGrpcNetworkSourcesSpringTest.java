@@ -154,7 +154,9 @@ class IamGrpcNetworkSourcesSpringTest {
     var signing = mock(SigningKeys.class);
     when(signing.current()).thenReturn(key);
     var clock = Clock.systemUTC();
-    String secret = Secrets.random(), otherSecret = Secrets.random();
+    String secret = Secrets.random(),
+        otherSecret = Secrets.random(),
+        gatewaySecret = Secrets.random();
     var tokens =
         new TokenService(
             signing,
@@ -162,7 +164,13 @@ class IamGrpcNetworkSourcesSpringTest {
             (t, s, c) -> Set.of(),
             clock,
             "https://portal.example.com",
-            Map.of("collab", Secrets.hash(secret), "edge", Secrets.hash(otherSecret)));
+            Map.of(
+                "collab",
+                Secrets.hash(secret),
+                "edge",
+                Secrets.hash(otherSecret),
+                "ai-gateway",
+                Secrets.hash(gatewaySecret)));
     var settings =
         new AccessTokenSettings(
             tokens.issuer(),
@@ -195,11 +203,15 @@ class IamGrpcNetworkSourcesSpringTest {
               var register = RegisterAgentSourceRequest.newBuilder().setConnection(c).build();
               var receipt =
                   ReadAgentSourceReceiptRequest.newBuilder().setOriginalRequest(register).build();
+              var fence =
+                  FenceAgentSourceReceiptRequest.newBuilder().setOriginalRequest(register).build();
               var get = GetAgentSourceRequest.newBuilder().setConnection(c).build();
               var revoke = RevokeAgentSourceRequest.newBuilder().setConnection(c).build();
               when(authority.register(register))
                   .thenReturn(RegisterAgentSourceResponse.getDefaultInstance());
               when(authority.readReceipt(receipt))
+                  .thenReturn(RegisterAgentSourceResponse.getDefaultInstance());
+              when(authority.fenceReceipt(fence))
                   .thenReturn(RegisterAgentSourceResponse.getDefaultInstance());
               when(authority.get(get)).thenReturn(GetAgentSourceResponse.getDefaultInstance());
               when(authority.revoke(revoke))
@@ -210,7 +222,7 @@ class IamGrpcNetworkSourcesSpringTest {
                       0,
                       List.of(service),
                       new AurigaServerInterceptor(
-                          verifier, Set.of(), Set.of("svc:collab", "svc:edge")),
+                          verifier, Set.of(), Set.of("svc:collab", "svc:edge", "svc:ai-gateway")),
                       null,
                       false,
                       Set.of());
@@ -240,6 +252,10 @@ class IamGrpcNetworkSourcesSpringTest {
                           RegisterAgentSourceResponse.getDefaultInstance(),
                           stub.readAgentSourceReceipt(receipt));
                       assertEquals(
+                          RegisterAgentSourceResponse.getDefaultInstance(),
+                          stub.withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                              .fenceAgentSourceReceipt(fence));
+                      assertEquals(
                           GetAgentSourceResponse.getDefaultInstance(), stub.getAgentSource(get));
                       assertEquals(
                           RevokeAgentSourceResponse.getDefaultInstance(),
@@ -256,6 +272,9 @@ class IamGrpcNetworkSourcesSpringTest {
                         doThrow(new auriga.common.error.AurigaException(error))
                             .when(authority)
                             .readReceipt(receipt);
+                        doThrow(new auriga.common.error.AurigaException(error))
+                            .when(authority)
+                            .fenceReceipt(fence);
                         io.grpc.Status.Code status =
                             switch (error.code()) {
                               case "common.conflict" -> io.grpc.Status.Code.ABORTED;
@@ -268,8 +287,28 @@ class IamGrpcNetworkSourcesSpringTest {
                             status, () -> stub.registerAgentSource(register));
                         IamGrpcNetworkAuthoritySpringTest.grpc(
                             status, () -> stub.readAgentSourceReceipt(receipt));
+                        IamGrpcNetworkAuthoritySpringTest.grpc(
+                            status,
+                            () ->
+                                stub.withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                                    .fenceAgentSourceReceipt(fence));
                       }
                       var other = open.apply(edge);
+                      var gateway = open.apply(tokens.issue("ai-gateway", gatewaySecret));
+                      IamGrpcNetworkAuthoritySpringTest.grpc(
+                          io.grpc.Status.Code.PERMISSION_DENIED,
+                          () ->
+                              gateway
+                                  .withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                                  .fenceAgentSourceReceipt(fence));
+                      doThrow(new IllegalStateException("private database failure"))
+                          .when(authority)
+                          .fenceReceipt(fence);
+                      IamGrpcNetworkAuthoritySpringTest.grpc(
+                          io.grpc.Status.Code.UNAVAILABLE,
+                          () ->
+                              stub.withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                                  .fenceAgentSourceReceipt(fence));
                       doThrow(new IllegalStateException("private database failure"))
                           .when(authority)
                           .readReceipt(receipt);
@@ -279,6 +318,25 @@ class IamGrpcNetworkSourcesSpringTest {
                       IamGrpcNetworkAuthoritySpringTest.grpc(
                           io.grpc.Status.Code.PERMISSION_DENIED,
                           () -> other.readAgentSourceReceipt(receipt));
+                      IamGrpcNetworkAuthoritySpringTest.grpc(
+                          io.grpc.Status.Code.PERMISSION_DENIED,
+                          () ->
+                              other
+                                  .withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                                  .fenceAgentSourceReceipt(fence));
+                      IamGrpcNetworkAuthoritySpringTest.grpc(
+                          io.grpc.Status.Code.PERMISSION_DENIED,
+                          () ->
+                              stub.withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                                  .fenceAgentSourceReceipt(
+                                      fence.toBuilder()
+                                          .setOriginalRequest(
+                                              register.toBuilder()
+                                                  .setConnection(
+                                                      c.toBuilder()
+                                                          .setTenantId(
+                                                              UUID.randomUUID().toString())))
+                                          .build()));
                       IamGrpcNetworkAuthoritySpringTest.grpc(
                           io.grpc.Status.Code.PERMISSION_DENIED,
                           () ->
@@ -306,6 +364,11 @@ class IamGrpcNetworkSourcesSpringTest {
                 IamGrpcNetworkAuthoritySpringTest.grpc(
                     io.grpc.Status.Code.PERMISSION_DENIED,
                     () -> stub.readAgentSourceReceipt(receipt));
+                IamGrpcNetworkAuthoritySpringTest.grpc(
+                    io.grpc.Status.Code.PERMISSION_DENIED,
+                    () ->
+                        stub.withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                            .fenceAgentSourceReceipt(fence));
                 TenantContext.run(
                     TenantContext.PLATFORM_TENANT,
                     () ->
@@ -317,6 +380,14 @@ class IamGrpcNetworkSourcesSpringTest {
                         IamGrpcNetworkAuthoritySpringTest.grpc(
                             io.grpc.Status.Code.INVALID_ARGUMENT,
                             () -> stub.readAgentSourceReceipt(receipt)));
+                TenantContext.run(
+                    TenantContext.PLATFORM_TENANT,
+                    () ->
+                        IamGrpcNetworkAuthoritySpringTest.grpc(
+                            io.grpc.Status.Code.INVALID_ARGUMENT,
+                            () ->
+                                stub.withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                                    .fenceAgentSourceReceipt(fence)));
                 for (String type : List.of("user", "device")) {
                   String token =
                       tokens.access(
@@ -337,6 +408,15 @@ class IamGrpcNetworkSourcesSpringTest {
                           IamGrpcNetworkAuthoritySpringTest.grpc(
                               io.grpc.Status.Code.UNAUTHENTICATED,
                               () -> external.readAgentSourceReceipt(receipt)));
+                  TenantContext.run(
+                      tenant,
+                      () ->
+                          IamGrpcNetworkAuthoritySpringTest.grpc(
+                              io.grpc.Status.Code.UNAUTHENTICATED,
+                              () ->
+                                  external
+                                      .withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS)
+                                      .fenceAgentSourceReceipt(fence)));
                   TenantContext.run(
                       tenant,
                       () ->

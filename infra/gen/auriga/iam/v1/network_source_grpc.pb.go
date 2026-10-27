@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NetworkSourceAuthorityService_RegisterAgentSource_FullMethodName    = "/auriga.iam.v1.NetworkSourceAuthorityService/RegisterAgentSource"
-	NetworkSourceAuthorityService_ReadAgentSourceReceipt_FullMethodName = "/auriga.iam.v1.NetworkSourceAuthorityService/ReadAgentSourceReceipt"
-	NetworkSourceAuthorityService_GetAgentSource_FullMethodName         = "/auriga.iam.v1.NetworkSourceAuthorityService/GetAgentSource"
-	NetworkSourceAuthorityService_RevokeAgentSource_FullMethodName      = "/auriga.iam.v1.NetworkSourceAuthorityService/RevokeAgentSource"
+	NetworkSourceAuthorityService_RegisterAgentSource_FullMethodName     = "/auriga.iam.v1.NetworkSourceAuthorityService/RegisterAgentSource"
+	NetworkSourceAuthorityService_ReadAgentSourceReceipt_FullMethodName  = "/auriga.iam.v1.NetworkSourceAuthorityService/ReadAgentSourceReceipt"
+	NetworkSourceAuthorityService_FenceAgentSourceReceipt_FullMethodName = "/auriga.iam.v1.NetworkSourceAuthorityService/FenceAgentSourceReceipt"
+	NetworkSourceAuthorityService_GetAgentSource_FullMethodName          = "/auriga.iam.v1.NetworkSourceAuthorityService/GetAgentSource"
+	NetworkSourceAuthorityService_RevokeAgentSource_FullMethodName       = "/auriga.iam.v1.NetworkSourceAuthorityService/RevokeAgentSource"
 )
 
 // NetworkSourceAuthorityServiceClient is the client API for NetworkSourceAuthorityService service.
@@ -58,10 +59,19 @@ type NetworkSourceAuthorityServiceClient interface {
 	// indeterminate result fails closed (UNAVAILABLE/FORBIDDEN), never registers or
 	// establishes not_committed. No source/operation/tombstone/generation writes.
 	// Even an original ACTIVE receipt grants no current permission or activation.
-	// Both RPCs deliberately return the same immutable original receipt.
+	// Receipt RPCs deliberately return the same immutable original receipt.
 	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
 	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
 	ReadAgentSourceReceipt(ctx context.Context, in *ReadAgentSourceReceiptRequest, opts ...grpc.CallOption) (*RegisterAgentSourceResponse, error)
+	// Never issues or performs current permission/native/Get checks. Returns an
+	// existing original receipt, or durably fences the original Register key ONLY
+	// after retained redeem provenance proves the exact original C irreversibly
+	// expired/cleaned and the operation is still missing under Register's locks.
+	// Live C, absent/bad provenance and indeterminate failures never prove failure.
+	// Deliberately reuses the immutable Register response, including rejection.
+	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	FenceAgentSourceReceipt(ctx context.Context, in *FenceAgentSourceReceiptRequest, opts ...grpc.CallOption) (*RegisterAgentSourceResponse, error)
 	// Revalidates the exact CURRENT redeem connection, original owner/device/live
 	// backing identity, registration, source state/expiry and current permissions.
 	// Same-device reconnect may change transport, never the saved source tuple.
@@ -94,6 +104,16 @@ func (c *networkSourceAuthorityServiceClient) ReadAgentSourceReceipt(ctx context
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterAgentSourceResponse)
 	err := c.cc.Invoke(ctx, NetworkSourceAuthorityService_ReadAgentSourceReceipt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *networkSourceAuthorityServiceClient) FenceAgentSourceReceipt(ctx context.Context, in *FenceAgentSourceReceiptRequest, opts ...grpc.CallOption) (*RegisterAgentSourceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterAgentSourceResponse)
+	err := c.cc.Invoke(ctx, NetworkSourceAuthorityService_FenceAgentSourceReceipt_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,10 +173,19 @@ type NetworkSourceAuthorityServiceServer interface {
 	// indeterminate result fails closed (UNAVAILABLE/FORBIDDEN), never registers or
 	// establishes not_committed. No source/operation/tombstone/generation writes.
 	// Even an original ACTIVE receipt grants no current permission or activation.
-	// Both RPCs deliberately return the same immutable original receipt.
+	// Receipt RPCs deliberately return the same immutable original receipt.
 	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
 	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
 	ReadAgentSourceReceipt(context.Context, *ReadAgentSourceReceiptRequest) (*RegisterAgentSourceResponse, error)
+	// Never issues or performs current permission/native/Get checks. Returns an
+	// existing original receipt, or durably fences the original Register key ONLY
+	// after retained redeem provenance proves the exact original C irreversibly
+	// expired/cleaned and the operation is still missing under Register's locks.
+	// Live C, absent/bad provenance and indeterminate failures never prove failure.
+	// Deliberately reuses the immutable Register response, including rejection.
+	// buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	FenceAgentSourceReceipt(context.Context, *FenceAgentSourceReceiptRequest) (*RegisterAgentSourceResponse, error)
 	// Revalidates the exact CURRENT redeem connection, original owner/device/live
 	// backing identity, registration, source state/expiry and current permissions.
 	// Same-device reconnect may change transport, never the saved source tuple.
@@ -180,6 +209,9 @@ func (UnimplementedNetworkSourceAuthorityServiceServer) RegisterAgentSource(cont
 }
 func (UnimplementedNetworkSourceAuthorityServiceServer) ReadAgentSourceReceipt(context.Context, *ReadAgentSourceReceiptRequest) (*RegisterAgentSourceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReadAgentSourceReceipt not implemented")
+}
+func (UnimplementedNetworkSourceAuthorityServiceServer) FenceAgentSourceReceipt(context.Context, *FenceAgentSourceReceiptRequest) (*RegisterAgentSourceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FenceAgentSourceReceipt not implemented")
 }
 func (UnimplementedNetworkSourceAuthorityServiceServer) GetAgentSource(context.Context, *GetAgentSourceRequest) (*GetAgentSourceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetAgentSource not implemented")
@@ -245,6 +277,24 @@ func _NetworkSourceAuthorityService_ReadAgentSourceReceipt_Handler(srv interface
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NetworkSourceAuthorityService_FenceAgentSourceReceipt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FenceAgentSourceReceiptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkSourceAuthorityServiceServer).FenceAgentSourceReceipt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkSourceAuthorityService_FenceAgentSourceReceipt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkSourceAuthorityServiceServer).FenceAgentSourceReceipt(ctx, req.(*FenceAgentSourceReceiptRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _NetworkSourceAuthorityService_GetAgentSource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetAgentSourceRequest)
 	if err := dec(in); err != nil {
@@ -295,6 +345,10 @@ var NetworkSourceAuthorityService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReadAgentSourceReceipt",
 			Handler:    _NetworkSourceAuthorityService_ReadAgentSourceReceipt_Handler,
+		},
+		{
+			MethodName: "FenceAgentSourceReceipt",
+			Handler:    _NetworkSourceAuthorityService_FenceAgentSourceReceipt_Handler,
 		},
 		{
 			MethodName: "GetAgentSource",

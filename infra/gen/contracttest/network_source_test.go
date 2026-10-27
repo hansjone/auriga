@@ -12,8 +12,8 @@ import (
 func TestNetworkSourceAuthorityDescriptorBoundary(t *testing.T) {
 	file := iamv1.File_auriga_iam_v1_network_source_proto
 	service := file.Services().ByName("NetworkSourceAuthorityService")
-	if file.Services().Len() != 1 || service == nil || service.Methods().Len() != 4 {
-		t.Fatal("source lifecycle must have a separate four-method service")
+	if file.Services().Len() != 1 || service == nil || service.Methods().Len() != 5 {
+		t.Fatal("source lifecycle must have a separate five-method service")
 	}
 	read := service.Methods().ByName("ReadAgentSourceReceipt")
 	if read == nil || read.Input().FullName() != (&iamv1.ReadAgentSourceReceiptRequest{}).ProtoReflect().Descriptor().FullName() || read.Output().FullName() != (&iamv1.RegisterAgentSourceResponse{}).ProtoReflect().Descriptor().FullName() || read.IsStreamingClient() || read.IsStreamingServer() {
@@ -22,6 +22,14 @@ func TestNetworkSourceAuthorityDescriptorBoundary(t *testing.T) {
 	original := read.Input().Fields().ByNumber(1)
 	if read.Input().Fields().Len() != 1 || original == nil || original.Name() != "original_request" || original.Message().FullName() != (&iamv1.RegisterAgentSourceRequest{}).ProtoReflect().Descriptor().FullName() {
 		t.Fatal("receipt wrapper must contain only the complete immutable original Register request")
+	}
+	fence := service.Methods().ByName("FenceAgentSourceReceipt")
+	if fence == nil || fence.Input().FullName() != (&iamv1.FenceAgentSourceReceiptRequest{}).ProtoReflect().Descriptor().FullName() || fence.Output().FullName() != read.Output().FullName() || fence.IsStreamingClient() || fence.IsStreamingServer() {
+		t.Fatal("receipt fence must be unary and reuse the complete original Register response")
+	}
+	frozen := fence.Input().Fields().ByNumber(1)
+	if fence.Input().Fields().Len() != 1 || frozen == nil || frozen.Name() != "original_request" || frozen.Message().FullName() != original.Message().FullName() {
+		t.Fatal("fence accepts only the frozen original Register request, with no current identity claims")
 	}
 	for _, name := range []protoreflect.Name{"RegisterAgentSource", "GetAgentSource", "RevokeAgentSource"} {
 		method := service.Methods().ByName(name)

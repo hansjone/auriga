@@ -109,6 +109,14 @@ final class IamNetworkSourceAuthority {
         });
   }
 
+  RegisterAgentSourceResponse fenceReceipt(FenceAgentSourceReceiptRequest r) {
+    require(
+        r != null && r.hasOriginalRequest() && r.getUnknownFields().asMap().isEmpty(),
+        VALIDATION_FAILED);
+    IamNetworkSources.validate(r.getOriginalRequest());
+    return tx(() -> kernel.fence(r.getOriginalRequest()));
+  }
+
   GetAgentSourceResponse get(GetAgentSourceRequest r) {
     IamNetworkSources.validate(r);
     Instant began = clock.instant();

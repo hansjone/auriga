@@ -36,6 +36,13 @@ public class IamGrpcNetworkSources
 
   @Override
   @AuthenticatedOnly
+  public void fenceAgentSourceReceipt(
+      FenceAgentSourceReceiptRequest r, StreamObserver<RegisterAgentSourceResponse> observer) {
+    respond(r.getOriginalRequest().getConnection(), observer, () -> authority.fenceReceipt(r));
+  }
+
+  @Override
+  @AuthenticatedOnly
   public void getAgentSource(
       GetAgentSourceRequest r, StreamObserver<GetAgentSourceResponse> observer) {
     respond(r.getConnection(), observer, () -> authority.get(r));
