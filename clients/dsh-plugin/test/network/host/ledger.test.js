@@ -94,6 +94,7 @@ test('file ledger: explicit init, single writer, durable reopen', async (t) => {
   const again = await openLedger({ store, identity: IDENTITY });
   assert.equal(again.read().audit.length, 1);
   assert.equal(again.read().revision, 1);
+  assert.equal(again.read().receiptRevision, 1);
   await again.close();
   await assert.rejects(
     openLedger({ store, identity: { ...IDENTITY, nodeIncarnation: 'other' } }),
@@ -101,12 +102,126 @@ test('file ledger: explicit init, single writer, durable reopen', async (t) => {
   );
 });
 
+test('receipt witness counts evidence changes, survives removal/reopen and cannot be reset', async (t) => {
+  const store = createFileLedgerStore({ dir: await tempDir(t) });
+  const ledger = await openLedger({
+    store,
+    identity: IDENTITY,
+    initialize: true,
+  });
+  assert.equal(ledger.read().receiptRevision, 0);
+  await reserveLocal(ledger, {
+    opId: 'local-only',
+    purpose: 'bind',
+    mappingDigest: 'mapping',
+    addressType: 'session',
+  });
+  assert.equal(ledger.read().revision, 1);
+  assert.equal(ledger.read().receiptRevision, 0);
+  let expected = 0;
+  for (const field of ['recipients', 'inbox', 'results', 'bodies', 'audit']) {
+    await ledger.update((draft) => {
+      if (field === 'audit')
+        draft.audit.push({ at: 'x', recipientId: 'r', reason: 'probe' });
+      else draft[field].probe = { marker: field };
+    });
+    assert.equal(ledger.read().receiptRevision, ++expected, field + ' added');
+    await ledger.update(() => {});
+    assert.equal(ledger.read().receiptRevision, expected, field + ' unchanged');
+    await ledger.update((draft) => {
+      if (field === 'audit') draft.audit.length = 0;
+      else delete draft[field].probe;
+    });
+    assert.equal(ledger.read().receiptRevision, ++expected, field + ' removed');
+  }
+  const before = ledger.read();
+  await assert.rejects(
+    ledger.update((draft) => {
+      draft.receiptRevision = 0;
+    }),
+    code(CODES.recoveryConflict),
+  );
+  await assert.rejects(
+    ledger.update((draft) => {
+      delete draft.receiptRevision;
+    }),
+    code(CODES.recoveryConflict),
+  );
+  assert.deepEqual(ledger.read(), before);
+  await ledger.close();
+  const reopened = await openLedger({ store, identity: IDENTITY });
+  assert.equal(reopened.read().receiptRevision, expected);
+  await reopened.close();
+});
+
+test('legacy ledger never acquires a guessed empty receipt witness', async () => {
+  const store = createMemoryLedgerStore();
+  const first = await openLedger({
+    store,
+    identity: IDENTITY,
+    initialize: true,
+  });
+  await first.update(() => {});
+  await first.close();
+  const h = await store.open();
+  const old = await h.load();
+  delete old.receiptRevision;
+  await h.commit(old);
+  await h.close();
+  const ledger = await openLedger({ store, identity: IDENTITY });
+  await ledger.update(() => {});
+  assert.equal(ledger.read().receiptRevision, undefined);
+  assert.equal(ledger.read().revision, 2);
+  await ledger.close();
+});
+
+for (const receiptRevision of [-1, 0.5, '0', 1, null])
+  test(
+    'invalid durable receipt witness is rejected: ' +
+      JSON.stringify(receiptRevision),
+    async () => {
+      const store = createMemoryLedgerStore();
+      const ledger = await openLedger({
+        store,
+        identity: IDENTITY,
+        initialize: true,
+      });
+      await ledger.close();
+      const h = await store.open();
+      await h.commit({ ...(await h.load()), receiptRevision });
+      await h.close();
+      await assert.rejects(
+        openLedger({ store, identity: IDENTITY }),
+        code(CODES.ledgerUnavailable),
+      );
+    },
+  );
+
 test('file ledger: stale lock of a dead pid is reclaimed, a live one is not', async (t) => {
   const dir = await tempDir(t);
   const init = await openLedger({
     store: createFileLedgerStore({ dir }),
     identity: IDENTITY,
     initialize: true,
+  });
+
+  test('zero receipt witness cannot hide existing evidence at file load', async () => {
+    const store = createMemoryLedgerStore();
+    const ledger = await openLedger({
+      store,
+      identity: IDENTITY,
+      initialize: true,
+    });
+    await ledger.close();
+    const h = await store.open();
+    const saved = await h.load();
+    saved.audit.push({ at: 'x', recipientId: 'r', reason: 'probe' });
+    await h.commit(saved);
+    await h.close();
+    await assert.rejects(
+      openLedger({ store, identity: IDENTITY }),
+      code(CODES.ledgerUnavailable),
+    );
   });
   await init.close();
   await writeFile(

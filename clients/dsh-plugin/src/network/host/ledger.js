@@ -1,5 +1,6 @@
 /* global structuredClone */
 import { randomBytes, createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { CODES, HostSeamError } from './errors.js';
 import { isUint64String } from './address.js';
 import { createKeyedMutex } from './keyed-mutex.js';
@@ -20,6 +21,13 @@ function registrationLocks(ledger) {
 const LEDGER_VERSION = 2;
 const UINT64_MAX = (1n << 64n) - 1n;
 const MAX_AUDIT = 256;
+const RECEIPT_FIELDS = /** @type {const} */ ([
+  'recipients',
+  'inbox',
+  'results',
+  'bodies',
+  'audit',
+]);
 
 /**
  * @typedef {{ tenant: string, realm: string, node: string, nodeIncarnation: string }} LedgerIdentity
@@ -79,6 +87,7 @@ const MAX_AUDIT = 256;
  *
  * @typedef {{
  *   version: number, identity: LedgerIdentity, revision: number,
+ *   receiptRevision?: number,
  *   identityConflict: string|null,
  *   localHighWater: string,
  *   registrationRevision?: string,
@@ -104,6 +113,7 @@ function emptyState(identity) {
     version: LEDGER_VERSION,
     identity: { ...identity },
     revision: 0,
+    receiptRevision: 0,
     identityConflict: null,
     localHighWater: '0',
     registrationRevision: '0',
@@ -129,6 +139,14 @@ function checkState(value, identity) {
     typeof s !== 'object' ||
     ![1, LEDGER_VERSION, 3].includes(s.version) ||
     !Number.isSafeInteger(s.revision) ||
+    (s.receiptRevision !== undefined &&
+      (!Number.isSafeInteger(s.receiptRevision) ||
+        s.receiptRevision < 0 ||
+        s.receiptRevision > s.revision ||
+        (s.receiptRevision === 0 &&
+          RECEIPT_FIELDS.some(
+            (field) => Object.keys(s[field] ?? {}).length,
+          )))) ||
     !isUint64String(s.localHighWater) ||
     !s.identity ||
     s.identity.tenant !== identity.tenant ||
@@ -397,6 +415,22 @@ function ledgerFromHandle(handle, state, now = () => new Date()) {
         throw new HostSeamError(CODES.ledgerUnavailable);
       const draft = structuredClone(state);
       const result = mutate(draft);
+      // File commits, local registration and source operations are not message
+      // receipt checkpoints. Track receipt history under this same durable
+      // writer, including removal of evidence; it can never become zero again.
+      // An older ledger without the witness must not acquire a guessed zero.
+      if (draft.receiptRevision !== state.receiptRevision)
+        throw new HostSeamError(
+          CODES.recoveryConflict,
+          'immutable receipt revision',
+        );
+      if (
+        state.receiptRevision !== undefined &&
+        RECEIPT_FIELDS.some(
+          (field) => !isDeepStrictEqual(state[field], draft[field]),
+        )
+      )
+        draft.receiptRevision = state.receiptRevision + 1;
       fenceSourceChanges(state, draft);
       for (const [local, original] of Object.entries(state.locals)) {
         const next = draft.locals[local];

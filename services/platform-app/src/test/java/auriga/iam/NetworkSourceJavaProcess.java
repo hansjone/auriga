@@ -57,6 +57,14 @@ final class NetworkSourceJavaProcess {
       root = Path.of(ready.path("config").asString()).getParent();
       assertTrue(root.isAbsolute());
       var config = NetworkJson.parse(Files.readString(root.resolve("bridge.json")));
+      var protocolPath = Path.of(config.path("protocolSigning").path("privateKeyFile").asString());
+      assertEquals(root, protocolPath.getParent());
+      String protocolPem = Files.readString(protocolPath);
+      assertTrue(protocolPem.startsWith("-----BEGIN PRIVATE KEY-----"));
+      credentials.add(protocolPem);
+      credentials.add(protocolPem.replaceAll("-----[^-]+-----|\\s", ""));
+      NetworkSourceJavaHostTest.assertPublishedProtocolKey(
+          config, protocolPem, NetworkJson.parse(Files.readString(root.resolve("signed.json"))));
       var gatewayPath = Path.of(config.path("gatewayToken").asString());
       var collabPath = Path.of(config.path("collabToken").asString());
       var memberPath = Path.of(config.path("device").asString());

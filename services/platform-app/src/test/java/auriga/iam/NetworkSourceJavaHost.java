@@ -33,6 +33,7 @@ import tools.jackson.databind.node.ObjectNode;
  * receipt/connection is seeded. EOF or "stop" closes HTTP, mailbox, IAM, pools, then own PG.
  */
 public final class NetworkSourceJavaHost implements AutoCloseable {
+  static final String PRIVATE_KEY_BEGIN = "-----BEGIN " + "PRIVATE KEY-----";
   final UUID tenant = UuidV7.next();
   final Clock clock = Clock.systemUTC();
   final List<String> closed = new ArrayList<>();
@@ -55,6 +56,8 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
   NetworkSigningKeys signing;
   NetworkKeyOperations publications;
   NetworkKeySettings keySettings;
+  ObjectNode protocolSigning;
+  NetworkSourceJavaFaults faults = new NetworkSourceJavaFaults(false, event -> {});
   IamNetworkAuthority network;
   GrpcServer iam, mailbox;
   HttpClient http;
@@ -86,7 +89,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
       database = new NetworkSourceJavaDatabase(directory);
       database.start();
       ports.add(database.pg.getPort());
-      var iamData = database.runtime.get("iam");
+      var iamData = faults.dataSource(database.runtime.get("iam"));
       store = new IamStore(new JdbcTemplate(iamData), new TenantTransactionManager(iamData));
       var orgData = database.runtime.get("org");
       var orgJdbc = new JdbcTemplate(orgData);
@@ -147,7 +150,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
               List.of(
                   new IamGrpcNetwork(network),
                   new IamGrpcNetworkAuthority(network, clock, sources),
-                  new IamGrpcNetworkSources(sources)),
+                  faults.service(sources)),
               Set.of("svc:collab", "svc:ai-gateway"));
       var collabData = database.runtime.get("collab");
       var jdbc = new JdbcTemplate(collabData);
@@ -425,17 +428,26 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
     var jdbc = new JdbcTemplate(database.runtime.get("collab"));
     var tx = new TenantTransactionManager(database.runtime.get("collab"));
     var root = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    KeyPair protocol = null;
+    Instant protocolBegin = null, protocolEnd = null;
     for (var purpose : List.of("protocol_response", "business_delivery", "management_state")) {
       var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+      var begin = clock.instant().minusSeconds(5);
+      var end = clock.instant().plusSeconds(3600);
       signing.add(
           realm,
           purpose,
           "bridge-" + purpose,
           pair.getPublic(),
           pair.getPrivate(),
-          clock.instant().minusSeconds(5),
-          clock.instant().plusSeconds(3600),
+          begin,
+          end,
           NetworkSigningKeys.State.ACTIVE);
+      if (purpose.equals("protocol_response")) {
+        protocol = pair;
+        protocolBegin = begin;
+        protocolEnd = end;
+      }
     }
     var trust =
         new RootKeyPublication(
@@ -448,6 +460,12 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
     var release =
         OfflineKeySigning.sign(signing.publicKeysJson(realm), "bridge-root", root.getPrivate());
     publications.publish(release);
+    exportProtocolSigner(
+        Objects.requireNonNull(protocol),
+        "bridge-protocol_response",
+        NetworkJson.parse(signing.publicKeysJson(realm)).path("keyset_version").asString(),
+        protocolBegin.truncatedTo(java.time.temporal.ChronoUnit.SECONDS),
+        protocolEnd.truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
     var publicFile = directory.resolve("network-root.der");
     Files.write(publicFile, root.getPublic().getEncoded());
     keySettings =
@@ -464,6 +482,36 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
             Map.of());
     Files.writeString(keySettings.signedFile(), release.signedKeyset());
     Files.writeString(keySettings.announcementFile(), release.announcement());
+  }
+
+  // The same root-approved key, never a second signer or a new approval chain.
+  void exportProtocolSigner(KeyPair pair, String kid, String version, Instant begin, Instant end)
+      throws IOException {
+    var file = directory.resolve("network-protocol.pem");
+    byte[] encoded = pair.getPrivate().getEncoded();
+    try {
+      NetworkSourceJavaPrivateFiles.replace(
+          file,
+          PRIVATE_KEY_BEGIN
+              + "\n"
+              + Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(encoded)
+              + "\n-----END PRIVATE KEY-----\n");
+    } finally {
+      Arrays.fill(encoded, (byte) 0);
+    }
+    NetworkSourceJavaPrivateFiles.requirePrivateFile(file);
+    protocolSigning =
+        Json.object(
+            "privateKeyFile",
+            file.toString(),
+            "keyId",
+            kid,
+            "keysetVersion",
+            version,
+            "notBefore",
+            begin.toString(),
+            "notAfter",
+            end.toString());
   }
 
   NetworkAuthorityConnection redeem(Device device, JsonNode registration) throws Exception {
@@ -599,6 +647,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
   public synchronized void close() throws Exception {
     if (stopped) return;
     stopped = true;
+    faults.close();
     Exception failure = null;
     for (var stage : List.of("https", "mailbox", "channels", "iam", "keys", "pg", "files")) {
       try {
@@ -658,6 +707,8 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
     if (args.length != 0)
       throw new IllegalArgumentException("No credential or configuration arguments accepted");
     var host = new NetworkSourceJavaHost();
+    if ("1".equals(System.getenv("AURIGA_SOURCE_FAULTS")))
+      host.faults = new NetworkSourceJavaFaults(true, System.out::println);
     var hook =
         new Thread(
             () -> {
@@ -687,6 +738,21 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
         } else if (command.equals("revoke-member")) {
           host.revoke(device);
           System.out.println(Json.object("stage", "member-revoked"));
+        } else if (command.startsWith("fault ")) {
+          var request = NetworkJson.parse(command.substring(6));
+          if ("revoke-external".equals(request.path("op").asString())) {
+            // Require the opt-in guard even for this real OrgService operation.
+            host.faults.control(Json.object("id", request.path("id").asString(), "op", "trace"));
+            host.revoke(external);
+            System.out.println(
+                Json.object(
+                    "stage",
+                    "fault-control",
+                    "id",
+                    request.path("id").asString(),
+                    "revoked",
+                    true));
+          } else System.out.println(host.faults.control(request));
         } else throw new IllegalArgumentException("Unknown host control command");
       }
     } finally {
@@ -757,6 +823,8 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
                 keySettings.rootPublicFile().toString(),
                 "rootFingerprint",
                 keySettings.rootFingerprint(),
+                "protocolSigning",
+                protocolSigning,
                 "expiresAt",
                 clock.instant().plusSeconds(300).toString())
             .toString());

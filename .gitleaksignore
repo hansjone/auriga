@@ -7,3 +7,8 @@
 5044db587d5cecf8768954f6e7f4649783fce3a8:docs/dev/compose-access.md:private-ipv4:30
 5044db587d5cecf8768954f6e7f4649783fce3a8:docs/dev/compose-access.md:private-ipv4:31
 5044db587d5cecf8768954f6e7f4649783fce3a8:docs/dev/compose-access.md:private-ipv4:51
+
+# Two historical PEM delimiter string literals, not embedded key material.
+# Current source assembles the delimiter constant; keep historical scans enabled.
+56823ecdf24d8f2f74a64f75366e206b12f06c63:services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHost.java:private-key:493
+56823ecdf24d8f2f74a64f75366e206b12f06c63:services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHostTest.java:private-key:45

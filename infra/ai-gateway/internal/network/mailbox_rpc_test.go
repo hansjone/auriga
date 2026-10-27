@@ -19,6 +19,17 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func TestMailboxPreservesDurableUnknownOutcomeWithoutTreatingItAsOverload(t *testing.T) {
+	result := mailboxError(status.Error(codes.Unavailable, "network.outcome_unknown"))
+	if result.Code != "network.outcome_unknown" || result.Scope != "request" || result.Retryable {
+		t.Fatalf("source unknown outcome was reclassified: %+v", result)
+	}
+	hostile := mailboxError(status.Error(codes.Unavailable, "network.outcome_unknown private-detail"))
+	if hostile.Code != "network.overloaded" {
+		t.Fatal("arbitrary status details crossed boundary")
+	}
+}
+
 type fakeMailboxRPC struct {
 	collab.UnimplementedNetworkMailboxServiceServer
 	mu         sync.Mutex

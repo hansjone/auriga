@@ -10,13 +10,100 @@ import java.net.URI;
 import java.net.http.*;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.security.*;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLHandshakeException;
 import org.junit.jupiter.api.Test;
 
 class NetworkSourceJavaHostTest {
+  static void assertPublishedProtocolKey(
+      tools.jackson.databind.JsonNode config,
+      String pem,
+      tools.jackson.databind.JsonNode publication)
+      throws Exception {
+    var metadata = config.path("protocolSigning");
+    var keyset = publication.path("keyset");
+    assertEquals(keyset.path("keyset_version"), metadata.path("keysetVersion"));
+    tools.jackson.databind.JsonNode selected = null;
+    for (var key : keyset.path("keys"))
+      if (key.path("kid").asString().equals(metadata.path("keyId").asString())) selected = key;
+    assertNotNull(selected);
+    assertEquals("protocol_response", selected.path("purpose").asString());
+    assertEquals(selected.path("not_before"), metadata.path("notBefore"));
+    assertEquals(selected.path("not_after"), metadata.path("notAfter"));
+    var factory = KeyFactory.getInstance("Ed25519");
+    var privateKey =
+        factory.generatePrivate(
+            new PKCS8EncodedKeySpec(
+                Base64.getMimeDecoder()
+                    .decode(
+                        pem.replace(NetworkSourceJavaHost.PRIVATE_KEY_BEGIN, "")
+                            .replace("-----END PRIVATE KEY-----", ""))));
+    var publicKey =
+        factory.generatePublic(
+            new X509EncodedKeySpec(
+                Base64.getUrlDecoder().decode(selected.path("public_key_spki").asString())));
+    var signature = Signature.getInstance("Ed25519");
+    signature.initSign(privateKey);
+    signature.update(new byte[] {4, 5, 6});
+    var proof = signature.sign();
+    signature.initVerify(publicKey);
+    signature.update(new byte[] {4, 5, 6});
+    assertTrue(signature.verify(proof), "Export must match the actually published protocol key");
+  }
+
+  @Test
+  void protocolSignerExportIsPrivatePairedAndRemoved() throws Exception {
+    var host = new NetworkSourceJavaHost();
+    Path file;
+    try (host) {
+      host.directory = NetworkSourceJavaHost.privateDirectory();
+      var pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+      var begin = Instant.now().minusSeconds(5);
+      var end = begin.plusSeconds(3600);
+      host.exportProtocolSigner(pair, "export-test", "1", begin, end);
+      file = Path.of(host.protocolSigning.path("privateKeyFile").asString());
+      assertEquals(host.directory, file.getParent());
+      NetworkSourceJavaPrivateFiles.requirePrivate(host.directory);
+      NetworkSourceJavaPrivateFiles.requirePrivateFile(file);
+      if (Files.getFileStore(file).supportsFileAttributeView("posix"))
+        assertEquals(
+            PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(file));
+      String pem = Files.readString(file);
+      var key =
+          KeyFactory.getInstance("Ed25519")
+              .generatePrivate(
+                  new PKCS8EncodedKeySpec(
+                      Base64.getMimeDecoder()
+                          .decode(
+                              pem.replace(NetworkSourceJavaHost.PRIVATE_KEY_BEGIN, "")
+                                  .replace("-----END PRIVATE KEY-----", ""))));
+      var signature = Signature.getInstance("Ed25519");
+      signature.initSign(key);
+      signature.update(new byte[] {1, 2, 3});
+      var proof = signature.sign();
+      signature.initVerify(pair.getPublic());
+      signature.update(new byte[] {1, 2, 3});
+      assertTrue(signature.verify(proof));
+      assertEquals("export-test", host.protocolSigning.path("keyId").asString());
+      assertEquals("1", host.protocolSigning.path("keysetVersion").asString());
+      assertEquals(begin.toString(), host.protocolSigning.path("notBefore").asString());
+      assertEquals(end.toString(), host.protocolSigning.path("notAfter").asString());
+      assertFalse(host.protocolSigning.toString().contains("PRIVATE KEY"));
+      assertFalse(
+          host.protocolSigning
+              .toString()
+              .contains(Base64.getEncoder().encodeToString(pair.getPrivate().getEncoded())));
+    }
+    assertFalse(Files.exists(file));
+    host.assertClosed();
+  }
+
   @Test
   void privateCredentialFilesAreReplacedAndRemoved() throws Exception {
     var host = new NetworkSourceJavaHost();

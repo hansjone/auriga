@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { getEventListeners } from 'node:events';
+import { performance } from 'node:perf_hooks';
 import { bootstrapReady } from '../../../src/network/session/bootstrap-ready.js';
+import { createReadyRetry } from '../../../src/network/session/ready-retry.js';
 import { decodeJson, encodeJson } from '../../../src/network/session/frames.js';
 import { signingInput } from '../../../src/network/trust/verifier.js';
 import { openTrustStore } from '../../../src/network/trust/store.js';
@@ -121,6 +123,27 @@ async function fixture({ refresh, now = clock } = {}) {
     );
     return value;
   }
+  function overloaded() {
+    const original = result();
+    return {
+      app_version: '1.0',
+      type: 'error',
+      code: 'network.overloaded',
+      scope: 'request',
+      retryable: true,
+      retry_after: null,
+      request_id: original.request_id,
+      server_auth: {
+        ...original.server_auth,
+        audience: {
+          realm: '2',
+          node: '64',
+          incarnation: 'unbound',
+          epoch: '0',
+        },
+      },
+    };
+  }
   function emit(value, epoch = transport.epoch) {
     for (const listener of [...listeners]) listener(encodeJson(value), epoch);
   }
@@ -139,9 +162,105 @@ async function fixture({ refresh, now = clock } = {}) {
     sent,
     result,
     seal,
+    overloaded,
     emit,
     clean,
   };
+}
+
+test('signed pre-READY overload retries the exact frame before accepting genuine READY', async () => {
+  const f = await fixture();
+  const send = f.transport.send.bind(f.transport);
+  f.transport.send = async (bytes) => {
+    await send(bytes);
+    if (f.sent.length === 2) f.emit(f.seal(f.result()));
+  };
+  const pending = bootstrapReady(f.options);
+  f.emit(f.seal(f.overloaded()));
+  const output = await pending;
+  assert.equal(output.identity.nodeIncarnation, 'inc-new');
+  assert.equal(f.sent.length, 2);
+  assert.deepEqual(f.sent[1], f.sent[0]);
+  f.clean();
+});
+
+test('delayed READY retry callback cannot send beyond the original monotonic deadline', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let clock = 0,
+    sends = 0,
+    failure;
+  t.mock.method(performance, 'now', () => clock);
+  const retry = createReadyRetry(
+    async () => {
+      sends++;
+    },
+    () => {},
+    (error) => {
+      failure = error;
+    },
+  );
+  retry.schedule();
+  clock = 5001;
+  t.mock.timers.tick(500);
+  assert.equal(sends, 0);
+  assert.equal(failure.code, 'timeout');
+  retry.close();
+});
+
+test('untrusted overload cannot trigger READY retry or initialize identity', async () => {
+  const f = await fixture();
+  const pending = bootstrapReady(f.options);
+  f.emit(f.seal(f.overloaded(), generateKeyPairSync('ed25519').privateKey));
+  await assert.rejects(pending, { code: 'network.signature_invalid' });
+  assert.equal(f.sent.length, 1);
+  f.clean();
+});
+
+test('signed overload with another nonce cannot trigger READY retry', async () => {
+  const f = await fixture();
+  const pending = bootstrapReady(f.options);
+  const frame = f.overloaded();
+  frame.server_auth.channel_nonce = 'another-attempt';
+  f.emit(f.seal(frame));
+  await assert.rejects(pending, { code: 'network.signature_invalid' });
+  assert.equal(f.sent.length, 1);
+  f.clean();
+});
+
+test('persistent authenticated overload exhausts five identical READY sends without identity', async () => {
+  const f = await fixture();
+  f.options.timeoutMs = 5000;
+  const send = f.transport.send.bind(f.transport);
+  f.transport.send = async (bytes) => {
+    await send(bytes);
+    f.emit(f.seal(f.overloaded()));
+  };
+  await assert.rejects(
+    bootstrapReady(f.options),
+    /READY retry budget exhausted/,
+  );
+  assert.equal(f.sent.length, 5);
+  assert.ok(
+    f.sent.every((v) => JSON.stringify(v) === JSON.stringify(f.sent[0])),
+  );
+  f.clean();
+});
+
+for (const reason of ['abort', 'timeout']) {
+  test(`authenticated overload retry respects original ${reason} and leaves no delayed send`, async () => {
+    const f = await fixture();
+    f.options.timeoutMs = reason === 'timeout' ? 100 : 1000;
+    const pending = bootstrapReady(f.options);
+    f.emit(f.seal(f.overloaded()));
+    await tick();
+    if (reason === 'abort') f.controller.abort();
+    await assert.rejects(pending, {
+      code: reason === 'abort' ? 'stopped' : 'timeout',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    assert.equal(f.sent.length, 1);
+    f.clean();
+  });
 }
 
 test('root-approved READY returns deeply immutable identity without business effects', async () => {

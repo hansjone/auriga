@@ -7,6 +7,7 @@ import {
 } from './frames.js';
 import { SessionError } from './errors.js';
 import { verifyEnvelopeWithRefresh } from '../trust/verifier.js';
+import { createReadyRetry, readyRetryError } from './ready-retry.js';
 
 /** @type {WeakMap<object, symbol>} */
 const attempts = new WeakMap();
@@ -75,6 +76,8 @@ export async function bootstrapReady({
   let unsubscribe;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let timer;
+  /** @type {ReturnType<typeof createReadyRetry>|undefined} */
+  let retry;
   function current() {
     if (
       !active ||
@@ -92,6 +95,28 @@ export async function bootstrapReady({
       function fail(error) {
         reject(error);
       }
+      const payload = encodeReady({
+        requestId,
+        channelNonce,
+        bootId,
+        keysetVersion,
+        resumeCursor: '0',
+        localHighWater: '0',
+        registrationRevision: '0',
+        receiptCheckpoint: {
+          checkpoint_seq: '0',
+          checkpoint_revision: '0',
+          summary_digest: 'sha256:' + '0'.repeat(64),
+        },
+        pendingRegistration: null,
+      });
+      const attemptRetry = createReadyRetry(
+        () => transport.send(payload),
+        current,
+        fail,
+        timeoutMs,
+      );
+      retry = attemptRetry;
       const abort = () =>
         fail(new SessionError('stopped', 'bootstrap READY aborted'));
       signal.addEventListener('abort', abort, { once: true });
@@ -112,9 +137,40 @@ export async function bootstrapReady({
           const result = decodeJson(payload);
           // A late response from another attempt cannot finish this one.
           if (result?.request_id && result.request_id !== requestId) return;
+          verifying = true;
+          /** @type {typeof trust} */
+          const guardedTrust = {
+            ...trust,
+            key(...args) {
+              current();
+              return trust.key(...args);
+            },
+            async refreshFor(...args) {
+              current();
+              await trust.refreshFor(...args);
+              current();
+            },
+          };
+          const retryable = await readyRetryError(result, {
+            trust: guardedTrust,
+            context: {
+              realm: candidateRegistration.realm,
+              node: candidateRegistration.node,
+              nodeIncarnation: 'unbound',
+              epoch: '0',
+              requestId,
+              channelNonce,
+            },
+            now,
+          });
+          current();
+          if (retryable) {
+            verifying = false;
+            attemptRetry.schedule();
+            return;
+          }
           if (result?.type !== 'ready_result')
             throw new SessionError('ready_failed', 'expected READY_RESULT');
-          verifying = true;
           const candidate = readyCandidate(result);
           const context = {
             realm: candidateRegistration.realm,
@@ -125,18 +181,7 @@ export async function bootstrapReady({
           };
           current();
           await verifyEnvelopeWithRefresh(result, {
-            trust: {
-              ...trust,
-              key(...args) {
-                current();
-                return trust.key(...args);
-              },
-              async refreshFor(...args) {
-                current();
-                await trust.refreshFor(...args);
-                current();
-              },
-            },
+            trust: guardedTrust,
             context,
             now,
           });
@@ -164,21 +209,6 @@ export async function bootstrapReady({
           off();
         };
         current();
-        const payload = encodeReady({
-          requestId,
-          channelNonce,
-          bootId,
-          keysetVersion,
-          resumeCursor: '0',
-          localHighWater: '0',
-          registrationRevision: '0',
-          receiptCheckpoint: {
-            checkpoint_seq: '0',
-            checkpoint_revision: '0',
-            summary_digest: 'sha256:' + '0'.repeat(64),
-          },
-          pendingRegistration: null,
-        });
         void transport.send(payload).catch(fail);
       } catch (error) {
         fail(error);
@@ -188,6 +218,7 @@ export async function bootstrapReady({
     return output;
   } finally {
     active = false;
+    retry?.close();
     clearTimeout(timer);
     try {
       unsubscribe?.();

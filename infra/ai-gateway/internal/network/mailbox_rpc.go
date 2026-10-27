@@ -97,7 +97,7 @@ func mailboxError(err error) *AppError {
 	code := status.Convert(err).Message()
 	scope := "request"
 	switch code {
-	case "network.unauthorized", "network.revoked", CodeConflict, "network.expired", CodeProtocolError, "network.resume_unavailable", "network.unsupported_app_version":
+	case "network.unauthorized", "network.revoked", CodeConflict, CodeOutcomeUnknown, "network.expired", CodeProtocolError, "network.resume_unavailable", "network.unsupported_app_version":
 	case CodeStaleEpoch:
 		scope = "connection"
 	default:
