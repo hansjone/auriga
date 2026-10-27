@@ -45,6 +45,7 @@ final class NetworkSchemas {
           "envelope.schema.json",
           "address.schema.json",
           "protocol.schema.json",
+          "source-control.schema.json",
           "keyset.schema.json"
         }) {
       String path = "auriga/contracts/network/" + file;

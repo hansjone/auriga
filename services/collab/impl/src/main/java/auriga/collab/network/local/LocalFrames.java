@@ -40,7 +40,7 @@ final class LocalFrames {
 
   private static Map<String, String> resources(boolean consumer) {
     Map<String, String> resources = new HashMap<>();
-    for (String name : new String[] {"address", "envelope", "protocol"}) {
+    for (String name : new String[] {"address", "envelope", "protocol", "source-control"}) {
       String path = "auriga/contracts/network/" + name + ".schema.json";
       try (var input = LocalFrames.class.getClassLoader().getResourceAsStream(path)) {
         if (input == null) throw new IllegalStateException("Missing local registry schema");

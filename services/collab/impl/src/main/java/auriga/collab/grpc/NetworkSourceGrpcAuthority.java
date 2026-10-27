@@ -7,6 +7,8 @@ import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.contracts.iam.v1.NetworkAuthorityConnection;
+import auriga.contracts.iam.v1.NetworkConnectionAnchor;
+import auriga.contracts.iam.v1.ReadNetworkConnectionAnchorResponse;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -34,8 +36,51 @@ public class NetworkSourceGrpcAuthority implements NetworkSourceAuthority {
   }
 
   public Instant verify(NetworkAuthorityConnection connection) {
+    return verifiedConnection(connection).deadline();
+  }
+
+  public record VerifiedConnection(Instant deadline, NetworkConnectionAnchor anchor) {}
+
+  public VerifiedConnection verifiedConnection(NetworkAuthorityConnection connection) {
     outsideDatabase();
-    return NetworkAuthorityClient.deadline(client.resolve(connection, "0").getValidUntil());
+    var response = client.resolve(connection, "0");
+    return new VerifiedConnection(
+        NetworkAuthorityClient.deadline(response.getValidUntil()),
+        response.hasConnectionAnchor() ? response.getConnectionAnchor() : null);
+  }
+
+  public ReadNetworkConnectionAnchorResponse readConnectionAnchor(
+      NetworkConnectionAnchor original, NetworkConnectionAnchor current) {
+    outsideDatabase();
+    return client.readConnectionAnchor(original, current);
+  }
+
+  public auriga.contracts.iam.v1.RegisterAgentSourceResponse registerSource(
+      auriga.contracts.iam.v1.RegisterAgentSourceRequest request) {
+    outsideDatabase();
+    return client.registerSource(request);
+  }
+
+  public auriga.contracts.iam.v1.RegisterAgentSourceResponse readSourceReceipt(
+      auriga.contracts.iam.v1.RegisterAgentSourceRequest original) {
+    outsideDatabase();
+    return client.readSourceReceipt(original);
+  }
+
+  public auriga.contracts.iam.v1.GetAgentSourceResponse getSource(
+      auriga.contracts.iam.v1.GetAgentSourceRequest request) {
+    outsideDatabase();
+    return client.getSource(request);
+  }
+
+  public auriga.contracts.iam.v1.RevokeAgentSourceResponse revokeSource(
+      auriga.contracts.iam.v1.RevokeAgentSourceRequest request) {
+    outsideDatabase();
+    return client.revokeSource(request);
+  }
+
+  public <T> T sourceRequest(Supplier<T> work) {
+    return client.sourceRequest(work);
   }
 
   public <T> T withTarget(NetworkAuthorityConnection connection, Target target, Supplier<T> work) {

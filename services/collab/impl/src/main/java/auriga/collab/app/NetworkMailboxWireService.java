@@ -9,6 +9,7 @@ import auriga.common.error.AurigaException;
 import auriga.common.error.ErrorCode;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.contracts.iam.v1.NetworkAuthorityConnection;
+import auriga.contracts.iam.v1.NetworkConnectionAnchor;
 import io.grpc.Status;
 import java.time.*;
 import java.util.*;
@@ -31,6 +32,7 @@ public class NetworkMailboxWireService {
   private final Clock clock;
   private final boolean broadcast;
   private final LocalRegistry locals;
+  private final NetworkSourceControl sources;
 
   public NetworkMailboxWireService(
       NetworkMailboxService mailbox,
@@ -60,6 +62,128 @@ public class NetworkMailboxWireService {
     signer = new NetworkEnvelopeSigner(keys, clock);
     this.clock = clock;
     this.broadcast = broadcast;
+    sources = new NetworkSourceControl(this, jdbc, manager, source, clock);
+  }
+
+  public String sourceRegister(NetworkAuthorityConnection c, byte[] frame) {
+    return sources.handle(c, frame, "SourceRegister");
+  }
+
+  public String sourceGet(NetworkAuthorityConnection c, byte[] frame) {
+    return sources.handle(c, frame, "SourceGet");
+  }
+
+  public String sourceRevoke(NetworkAuthorityConnection c, byte[] frame) {
+    return sources.handle(c, frame, "SourceRevoke");
+  }
+
+  /** Durable outbox retry uses retained ownership, independent of a live mailbox association. */
+  public int retrySourceRevocations() {
+    return sources.retryRevocations();
+  }
+
+  record SourceGate(
+      NetworkAuthorityConnection connection,
+      JsonNode request,
+      Map<String, Object> before,
+      Target target,
+      NetworkMailboxService.TargetDecision decision,
+      NetworkConnectionAnchor anchor) {}
+
+  SourceGate sourceGate(NetworkAuthorityConnection c, JsonNode request) {
+    var caller =
+        auriga.common.security.AuthorizationRules.currentPrincipal()
+            .orElseThrow(
+                () -> new AurigaException(auriga.common.error.CommonErrors.UNAUTHENTICATED));
+    require(
+        caller.isInternalService()
+            && "svc:ai-gateway".equals(caller.subject())
+            && TenantContext.PLATFORM_TENANT.equals(caller.tenantId()),
+        auriga.common.error.CommonErrors.FORBIDDEN);
+    NetworkAuthorityClient.binding(c);
+    var verified = source.verifiedConnection(c);
+    Instant deadline = verified.deadline();
+    deadline =
+        Collections.min(
+            List.of(
+                deadline,
+                clock.instant().plusMillis(NetworkAuthorityClient.sourceRemainingMillis())));
+    var before = tx.execute(s -> read(c, false));
+    require(
+        before != null && bindingJson(c).equals(before.get("wire_binding_json")),
+        NetworkErrors.STALE_EPOCH);
+    require("ready".equals(before.get("wire_status")), RECOVERY);
+    var target = target(c, before, request.path("request_id").asString(), deadline);
+    var decision =
+        source.withTarget(
+            c,
+            target,
+            () ->
+                mailbox.authorizeTarget(
+                    TenantContext.require(),
+                    c.getRealm(),
+                    c.getNode(),
+                    Set.of(auriga.iam.api.NetworkAuthority.Operation.CONNECT)));
+    return new SourceGate(c, request, before, target, decision, verified.anchor());
+  }
+
+  void lockSourceGate(SourceGate gate, boolean frameFence) {
+    lockSourceErrorGate(gate);
+    if (frameFence)
+      registrationAssociation(
+          gate.connection(),
+          gate.request(),
+          gate.before(),
+          locked(gate.connection()),
+          gate.target());
+    locals.requireHealthy(
+        TenantContext.require(), gate.connection().getRealm(), gate.connection().getNode());
+  }
+
+  void lockSourceErrorGate(SourceGate gate) {
+    var row = locked(gate.connection());
+    unchanged(gate.before(), row);
+    require(gate.target().validUntil().isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+    mailbox.withDecision(gate.decision(), () -> null);
+  }
+
+  Instant refreshSourceGate(SourceGate gate) {
+    return refreshSourceGate(gate, false);
+  }
+
+  Instant refreshSourceGate(SourceGate gate, boolean requireAnchor) {
+    var current = sourceGate(gate.connection(), gate.request());
+    unchanged(gate.before(), current.before());
+    if (requireAnchor)
+      require(
+          gate.anchor() != null && gate.anchor().equals(current.anchor()),
+          ErrorCode.of("network.outcome_unknown", 503, Status.Code.FAILED_PRECONDITION));
+    return Collections.min(
+        List.of(
+            gate.target().validUntil(),
+            current.target().validUntil(),
+            gate.decision().deadline,
+            current.decision().deadline));
+  }
+
+  String signSource(SourceGate gate, ObjectNode result, String definition, Instant until) {
+    var target = gate.target();
+    require(until.isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+    var signed =
+        signer.sign(
+            result.deepCopy().put("request_id", target.requestId()),
+            "protocol_response",
+            new NetworkEnvelopeSigner.Context(
+                target.realm(),
+                target.node(),
+                target.incarnation(),
+                target.epoch(),
+                target.channelNonce(),
+                target.requestId()),
+            until);
+    NetworkSchemas.validate(
+        "Error".equals(definition) ? "protocol" : "source-control", definition, signed);
+    return NetworkJson.canonical(signed);
   }
 
   public String ready(NetworkAuthorityConnection c, byte[] frame) {
