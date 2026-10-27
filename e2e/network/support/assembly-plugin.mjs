@@ -15,6 +15,8 @@ import { digest } from '../../../clients/dsh-plugin/src/network/trust/verifier.j
 import { fixture as nativeFixture } from '../../../clients/dsh-plugin/test/network/host/native/fixtures.js';
 import { waitUntil } from './assembly-process.mjs';
 import { brokerGuards } from './assembly-broker.mjs';
+import { criticalMatrix } from './assembly-critical.mjs';
+import { prepareDevice } from './assembly-device.mjs';
 
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
 const input = createInterface({ input: process.stdin });
@@ -141,7 +143,7 @@ async function endpoint(name, devicePath) {
       return { accessToken: device.access_token, claims };
     },
   });
-  const prepared = await provider.prepare(new AbortController().signal);
+  const prepared = await prepareDevice(provider, new AbortController().signal);
   const store = createFileLedgerStore({ dir: join(directory, 'ledger') });
   const observations = [];
   const openFileStore = store.open.bind(store);
@@ -209,14 +211,14 @@ async function endpoint(name, devicePath) {
     directory,
     ledger: async () =>
       JSON.parse(await readFile(join(directory, 'ledger/ledger.json'), 'utf8')),
-    async join() {
+    async join(executionAgent = agent) {
       await waitUntil(
         () => tools.has('auriga_network_join'),
         'join tool missing',
       );
       const result = await tools
         .get('auriga_network_join')
-        .execute({}, { agent });
+        .execute({}, { agent: executionAgent });
       assert.equal(
         result.status,
         'registered',
@@ -538,6 +540,14 @@ try {
   checks.push(
     'Broker 2.15.1: spent ticket Redeem denied, foreign ingress pub/sub ACL denied, real account subscription/payload limits',
   );
+
+  await criticalMatrix({
+    endpoint: external,
+    control,
+    snapshot,
+    checks,
+    artifacts,
+  });
 
   const finalTrace = (await control({ op: 'trace' })).records;
   assert.ok(

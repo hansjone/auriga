@@ -57,6 +57,11 @@ type command struct {
 	Connection    *iam.NetworkAuthorityConnection `json:"connection"`
 	Message       json.RawMessage                 `json:"message"`
 	SourceContext json.RawMessage                 `json:"sourceContext"`
+	Original      json.RawMessage                 `json:"original"`
+	Binding       string                          `json:"binding"`
+	TimeoutMillis int                             `json:"timeoutMillis"`
+	Call          string                          `json:"call"`
+	RequireLive   bool                            `json:"requireLive"`
 }
 
 var outputMu sync.Mutex
@@ -237,6 +242,8 @@ func run() (result error) {
 		return err
 	}
 	defer func() { _ = authority.Close() }()
+	sourceCalls := newSourceCalls(ctx, authority, b.Tenant)
+	defer sourceCalls.close()
 	if err = emit(map[string]any{"stage": "gateway-ready", "wss": fmt.Sprintf("wss://127.0.0.1:%d", wsPort), "ca": ca, "brokerVersion": "2.15.1", "brokerPid": child.Process.Pid, "brokerCreationToken": brokerIdentity, "brokerLaunchWallClock": started.Format(time.RFC3339Nano), "gatewayPid": os.Getpid()}); err != nil {
 		return err
 	}
@@ -249,12 +256,21 @@ func run() (result error) {
 		}
 		response := map[string]any{"stage": "reply", "id": cmd.ID}
 		switch cmd.Op {
+		case "source-start":
+			if e := sourceCalls.start(cmd); e != nil {
+				return e
+			}
+			response["call"] = cmd.ID
+		case "source-cancel":
+			response["cancelled"] = sourceCalls.cancel(cmd.Call)
+		case "source-result":
+			response["result"] = sourceCalls.result(cmd.Call)
 		case "trace":
 			response["records"] = relay.trace()
 		case "snapshot":
 			tables, e := snapshot(ctx, ready.PGPort, b.Tenant)
 			if e != nil {
-				return errors.New("runtime-role DB snapshot failed")
+				return fmt.Errorf("runtime-role DB snapshot failed: %w", e)
 			}
 			response["tables"] = tables
 		case "fault":

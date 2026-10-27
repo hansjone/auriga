@@ -19,6 +19,17 @@ var snapshotTables = map[string][]string{
 	"collab": {"network_node", "network_local_registration", "network_source_lineage", "network_source_operation", "network_source_outbox", "network_source_binding"},
 }
 
+func snapshotQuery(schema, table string) (string, error) {
+	for _, allowed := range snapshotTables[schema] {
+		if table == allowed {
+			// network_node has a composite primary key, not an id column. Sorting the
+			// complete selected JSON also keeps every other allowlisted table stable.
+			return "SELECT row_to_json(t)::text FROM " + schema + "." + table + ` t ORDER BY row_to_json(t)::text COLLATE "C"`, nil
+		}
+	}
+	return "", errors.New("snapshot table is not allowlisted")
+}
+
 // Each snapshot uses the real runtime role, READ ONLY transaction and tenant
 // RLS. Only source-specific tables are allowlisted. No credential table/export.
 func snapshot(parent context.Context, port uint16, tenant string) (map[string]any, error) {
@@ -47,7 +58,11 @@ func snapshot(parent context.Context, port uint16, tenant string) (map[string]an
 				return e
 			}
 			for _, table := range tables {
-				rows, e := tx.Query(ctx, "SELECT row_to_json(t)::text FROM "+schema+"."+table+" t ORDER BY id")
+				query, e := snapshotQuery(schema, table)
+				if e != nil {
+					return e
+				}
+				rows, e := tx.Query(ctx, query)
 				if e != nil {
 					return e
 				}

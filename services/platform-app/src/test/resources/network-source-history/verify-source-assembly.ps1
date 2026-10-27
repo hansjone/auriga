@@ -51,7 +51,7 @@ try {
       if ($entry.compileExit -ne 0) { throw 'Mutant/control must typecheck before business execution' }
       if ((Get-FileHash -LiteralPath (Join-Path $directory $testPath) -Algorithm SHA256).Hash -cne $testHash) { throw 'Test source changed' }
       if ($Run) {
-        $compiled = Invoke-Recorded ($mode + '-java') { & .\mvnw.cmd -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest' '-Dsurefire.failIfNoSpecifiedTests=false' }
+        $compiled = Invoke-Recorded ($mode + '-java') { & .\mvnw.cmd -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest,NetworkSourceJavaFaultsTest' '-Dsurefire.failIfNoSpecifiedTests=false' }
         if ($compiled -ne 0) { throw 'Fresh Java non-PG bridge compile/test failed' }
         $entry.runExit = Invoke-Recorded ($mode + '-run') { & node e2e/network/source-assembly.mjs --run }
         $evidence = @(Get-ChildItem -LiteralPath (Join-Path $directory 'e2e/network/target') -Directory -Filter 'assembly-*')

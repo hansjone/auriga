@@ -88,3 +88,10 @@ Control 包含真实子进程 ready→refresh→stop/EOF（含两份设备凭据
 
 T3b 新增驱动和正反证命令见 `e2e/network/source-assembly.zh.md`。
 原三项 PG/OrgBypass 判据未弱化；新增非 PG 导出测试使 HostTest 总数为五。
+
+追加授权2的故障接缝仅在本次子进程环境 `AURIGA_SOURCE_FAULTS=1` 时启用，默认关闭。
+它装饰原 NetworkSourceAuthorityService 与 IAM DataSource，保留所有原认证/业务委托；
+支持有界内层调用 hold/UNAVAILABLE/UNIMPLEMENTED 和真正 source-op SQL commit 返回后
+的确认丢失，不生成成功响应或业务事实。`fault <JSON>` 控制只走本次 stdin，输出仅含
+source 方法/阶段、原 op/local、原 proto 字节及状态，不记录 JWT/元数据或私钥。
+新增 NetworkSourceJavaFaultsTest 是非 PG 机制守卫，不能当实链业务正反证。

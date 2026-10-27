@@ -11,7 +11,7 @@ typed-local 登记和 source controller，不注入全业务 provider 或假业�
 从本工位根目录保留派工环境，先完成非 PG 编译及工具守卫：
 
 ```powershell
-.\mvnw.cmd -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest,GrpcTest,AccessTokenValidationTest' '-Dsurefire.failIfNoSpecifiedTests=false'
+.\mvnw.cmd -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest,NetworkSourceJavaFaultsTest' '-Dsurefire.failIfNoSpecifiedTests=false'
 .\mvnw.cmd -B -pl services/platform-app -am spotless:check
 node --test e2e/network/assembly-guards.test.mjs
 powershell -NoProfile -File services/platform-app/src/test/resources/network-source-history/test-java-bridge-verifier.ps1
@@ -23,7 +23,7 @@ powershell -NoProfile -File services/platform-app/src/test/resources/network-sou
 typecheck Control/SignatureBypass，保存 archive/源码/测试 SHA256、命令日志和退出码。
 CompileOnly 不启动 PG，不声称业务反证。原 T3a 三项 PG/OrgBypass 工具保留原判据。
 
-主控在能正常启动 PG 的环境执行单次 Control，或完整七组检查及单坏实现：
+主控在能正常启动 PG 的环境执行单次 Control，或原七组、新增五组关键故障及单坏实现：
 
 ```powershell
 node e2e/network/source-assembly.mjs --run
@@ -50,6 +50,34 @@ classpath、失败/skip；直接启动原 `NetworkSourceJavaHost`。缺环境失
   再停链后精确 PermissionDenied/common.forbidden；不发送 SEND。
 - 原始 NATS 协议探针仍用真实设备票/callout，核消票重放、跨 ingress pub/sub ACL、
   8 subscriptions/65536 payload 账号限额；绕过 SDK 本地限额以测实际 Broker。
+
+## 追加授权2：五组关键故障
+
+Node 驱动仅向本次 Java 子进程传 `AURIGA_SOURCE_FAULTS=1`。
+普通 `NetworkSourceJavaHost` 默认关闭钩子，原 T3a 三个 PG 用例/OrgBypass 行为不变。
+启用后只装饰原生成服务，保留 @AuthenticatedOnly、原 common 拦截器、svc/tenant
+校验及真正生产业务委托；没有独立认证/宿主或成功回包替身。
+stdin 的 `fault <JSON>` 仅支持有界 source 方法/阶段/原 op 或 local 选择器、arm/release/
+clear/trace；不允许 Redeem 或“允许成功”模式。hold 在业务事务外，服从真正 Context
+取消/deadline；关闭释放闸锁。新的内层 trace 保留 generated 原请求/结果字节和委托顺序。
+
+- 活 C 先以真实 Resolve 正控，再真正 Read miss/Fence 拒绝，IAM 五张来源事实表逐字
+  零写。另用真实 typed-local 产生未提交 pending，核实际 Read/Fence、精确签名
+  outcome_unknown、pending/outbox 保留、Register 不回退且没有迟到发行事实。
+- 用正常 gRPC client deadline 和明确取消令牌终止已到达闸锁的 Read；核真实 context
+  cancellation、无 source/receipt、来源事实零写；另有旧服务 UNIMPLEMENTED 拒绝。
+- 只在实际 INSERT source operation 成功、真正 Connection.commit 返回之后注入
+  SQLException/08006，制造数据库提交确认未知；不写假事实、不预塞回执。核 IAM
+  已提交原回执、collab 仍 pending，换真实 C 后只纯 Read/Get 恢复，原请求/响应不变。
+- 持有真正 ACTIVE IAM Get 回包，允许独立 Revoke 先提交，再释放晚到回包；核准确
+  的 signed stopped fact、无 valid_until、collab 许可截止为空、插件 observation 不复活。
+  历史 observation 的原响应字节可保留；它不等于活许可。
+- 同一真实 typed source 经 generated Get 正控后，调用真实 OrgService 删除 EXTERNAL
+  角色绑定，再核完全相同 Get 为 PermissionDenied/common.forbidden 且不泄漏回执。
+
+`critical-inner-rpc.json` 和 `inner-rpc.json` 增加内层调用、闸锁和实际提交确认丢失证据。
+新 Go 控制端口只支持 generated Read/Fence/Get 和对应 call-id 取消，故意不提供 Register。
+所有上述业务正控/故障结果仍须主控实跑；非 PG hook 单测仅证明机制，不冒业务验收。
 
 ## 来源、进程与时钟
 
@@ -82,15 +110,14 @@ file-commit observations 及 DB 快照。stdout/logs 保存前检查已知凭据
 并且 Java/gateway 正常关闭。失败也保留真实文件 commit observation/回包/DB 事实。
 编译、SQL、初始化、其他断言或清理错误一律不算业务反证。
 
-## 尚未覆盖，不能宣布 T3b 全矩阵完成
+## 旧头首失与待办
 
-当前没有 F1 的 IAM 提交后/collab 保存前确定间隙、F3 内层 Read/Fence 旧服务/取消/
-活 C miss、F4 晚到竞争、F5 tenant/owner/device/backing-session 七字段换值、F6
-digest/ref/异体全套、F7 双库提交确认未知/真正 kill 后持久恢复/PG 写围栏。
-外层 generated trace 不冒 collab→IAM 内层 Read/Fence/Register 调用证据。
-P3 双 op 争 CAS、P5 **以 EXPIRED 前代撤销当前后继** 仍待补；本驱动只从当前 head
-无版本撤销，并核旧代不复活。原 37/558 例不替代上述新增链。
+主控旧头 3726763 的 archive Control 首失是 prepare 参数错误和快照假定所有表都有 id，
+不是业务反证：现按真实 provider.prepare({signal}) 接线，并为复合主键 network_node
+采用完整行稳定排序，新增 API/SQL 白名单守卫。旧归档保持原样，不重写其结论。
 
-这些确定性故障边界需后续装配；原 T3a 子进程不提供内层 RPC 插入点或持久 PG 重开
-协议，本次追加授权仅补签名出口，未扩大这些修改权限。本工位只交非 PG/编译/工具
-守卫，真实 PG Control/坏实现结果必须由主控提供。
+按追加授权2“其余待办，不必一次做全”：F5 tenant/owner/device/backing-session 七字段
+换值、F6 digest/ref/异体全套、F7 collab SQL 提交确认未知、真正 kill/同 PG 目录重开及
+PG 写围栏；P3 双 op 争 CAS、P5 **以 EXPIRED 前代撤销当前后继** 仍待补。
+本轮没有新增 PG 停启接口；保留原宿主生命周期及全部清理验证。
+原 37/558 例不替代新增链；真实 PG Control/坏实现、新非作者独审和精确头 CI 均由主控完成。

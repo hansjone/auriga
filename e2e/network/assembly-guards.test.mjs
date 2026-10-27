@@ -2,11 +2,45 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { childProcess } from './support/assembly-process.mjs';
+import { prepareDevice } from './support/assembly-device.mjs';
+import { createDeviceProvider } from '../../clients/dsh-plugin/src/network/device-provider.js';
+import { testRoots } from '../../clients/dsh-plugin/test/network/trust/keyset-fixtures.js';
 import {
   signatureBypass,
   assertVerdict,
   failureMarker,
 } from './support/assembly-verdict.mjs';
+
+test('driver prepares the real provider using its options API and preserves abort; no network acceptance', async () => {
+  const controller = new AbortController();
+  const provider = createDeviceProvider({
+    config: {
+      platformOrigin: 'https://platform.example.com',
+      issuer: 'https://platform.example.com',
+      clientId: 'fixture',
+      providerId: 'fixture',
+      network: {
+        realm: '2',
+        wssUrl: 'wss://broker.example.com',
+        roots: testRoots,
+      },
+    },
+    async getDevice(signal) {
+      assert.equal(signal, controller.signal);
+      return {
+        accessToken: 'fixture-not-authenticated',
+        claims: { tid: 'tenant', did: 'device', sub: 'owner' },
+      };
+    },
+  });
+  const prepared = await prepareDevice(provider, controller.signal);
+  assert.equal(prepared.kind, 'device-connection');
+  assert.equal(prepared.url, 'wss://broker.example.com');
+  controller.abort();
+  await assert.rejects(prepareDevice(provider, controller.signal), {
+    name: 'AbortError',
+  });
+});
 
 test('assembly child channel matches replies, stops and waits for its exact child', async () => {
   const child = childProcess(process.execPath, [
@@ -72,6 +106,11 @@ test('verdict requires every control business case and successful cleanup', () =
       'P3:',
       'P5/P6:',
       'Broker 2.15.1:',
+      'critical: live-C',
+      'critical: real deadline',
+      'critical: actual JDBC',
+      'critical: genuine late',
+      'critical: real Org',
     ],
   };
   assertVerdict(valid, 'Control', 0);

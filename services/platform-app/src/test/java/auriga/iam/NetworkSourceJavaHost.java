@@ -56,6 +56,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
   NetworkKeyOperations publications;
   NetworkKeySettings keySettings;
   ObjectNode protocolSigning;
+  NetworkSourceJavaFaults faults = new NetworkSourceJavaFaults(false, event -> {});
   IamNetworkAuthority network;
   GrpcServer iam, mailbox;
   HttpClient http;
@@ -87,7 +88,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
       database = new NetworkSourceJavaDatabase(directory);
       database.start();
       ports.add(database.pg.getPort());
-      var iamData = database.runtime.get("iam");
+      var iamData = faults.dataSource(database.runtime.get("iam"));
       store = new IamStore(new JdbcTemplate(iamData), new TenantTransactionManager(iamData));
       var orgData = database.runtime.get("org");
       var orgJdbc = new JdbcTemplate(orgData);
@@ -148,7 +149,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
               List.of(
                   new IamGrpcNetwork(network),
                   new IamGrpcNetworkAuthority(network, clock, sources),
-                  new IamGrpcNetworkSources(sources)),
+                  faults.service(sources)),
               Set.of("svc:collab", "svc:ai-gateway"));
       var collabData = database.runtime.get("collab");
       var jdbc = new JdbcTemplate(collabData);
@@ -644,6 +645,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
   public synchronized void close() throws Exception {
     if (stopped) return;
     stopped = true;
+    faults.close();
     Exception failure = null;
     for (var stage : List.of("https", "mailbox", "channels", "iam", "keys", "pg", "files")) {
       try {
@@ -703,6 +705,8 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
     if (args.length != 0)
       throw new IllegalArgumentException("No credential or configuration arguments accepted");
     var host = new NetworkSourceJavaHost();
+    if ("1".equals(System.getenv("AURIGA_SOURCE_FAULTS")))
+      host.faults = new NetworkSourceJavaFaults(true, System.out::println);
     var hook =
         new Thread(
             () -> {
@@ -732,6 +736,21 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
         } else if (command.equals("revoke-member")) {
           host.revoke(device);
           System.out.println(Json.object("stage", "member-revoked"));
+        } else if (command.startsWith("fault ")) {
+          var request = NetworkJson.parse(command.substring(6));
+          if ("revoke-external".equals(request.path("op").asString())) {
+            // Require the opt-in guard even for this real OrgService operation.
+            host.faults.control(Json.object("id", request.path("id").asString(), "op", "trace"));
+            host.revoke(external);
+            System.out.println(
+                Json.object(
+                    "stage",
+                    "fault-control",
+                    "id",
+                    request.path("id").asString(),
+                    "revoked",
+                    true));
+          } else System.out.println(host.faults.control(request));
         } else throw new IllegalArgumentException("Unknown host control command");
       }
     } finally {

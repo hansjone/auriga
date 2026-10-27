@@ -39,6 +39,11 @@ export function assertVerdict(manifest, mode, exit) {
       'P3:',
       'P5/P6:',
       'Broker 2.15.1:',
+      'critical: live-C',
+      'critical: real deadline',
+      'critical: actual JDBC',
+      'critical: genuine late',
+      'critical: real Org',
     ])
       assert.equal(
         manifest.checks.filter((v) => v.startsWith(prefix)).length,

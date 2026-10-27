@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,36 @@ import (
 	"github.com/nats-io/nkeys"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestSnapshotHandlesCompositePrimaryKeysAndCannotReadCredentials(t *testing.T) {
+	query, err := snapshotQuery("collab", "network_node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(query, "ORDER BY id") || !strings.Contains(query, "ORDER BY row_to_json(t)::text") {
+		t.Fatal("composite table requires stable whole-row order")
+	}
+	if _, err = snapshotQuery("iam", "device"); err == nil {
+		t.Fatal("credential table accepted")
+	}
+}
+
+func TestSourceProbeCannotRegisterOrAcceptAnotherTenant(t *testing.T) {
+	calls := newSourceCalls(context.Background(), nil, "tenant")
+	defer calls.close()
+	if calls.start(command{ID: "1", Method: "RegisterAgentSource"}) == nil {
+		t.Fatal("direct issuing fallback accepted")
+	}
+	if calls.start(command{ID: "2", Method: "ReadAgentSourceReceipt", Original: json.RawMessage(`{"connection":{"tenant_id":"other"},"operation_id":"op"}`)}) == nil {
+		t.Fatal("cross-tenant probe accepted")
+	}
+	if calls.start(command{ID: "3", Method: "ReadAgentSourceReceipt", Original: json.RawMessage(`{"connection":{"tenant_id":"tenant"},"operation_id":"op"}`), TimeoutMillis: 10000}) == nil {
+		t.Fatal("test control widened deadline")
+	}
+	if len(calls.results) != 0 {
+		t.Fatal("invalid source probe launched work")
+	}
+}
 
 func TestLoopbackGuardsRejectRemoteAndHostnames(t *testing.T) {
 	for _, v := range []string{"localhost:1", "example.com:443", "192.0.2.10:1", ":1", "127.0.0.1"} {

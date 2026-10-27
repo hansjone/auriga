@@ -61,7 +61,7 @@ export async function runAssembly() {
     java = childProcess(
       javaBin,
       ['-cp', classpath, 'auriga.iam.NetworkSourceJavaHost'],
-      { cwd: root },
+      { cwd: root, env: { ...process.env, AURIGA_SOURCE_FAULTS: '1' } },
     );
     ready = await java.wait((v) => v.stage === 'ready', 'Java bridge ready');
     assert.equal(ready.pid, java.child.pid);
@@ -152,8 +152,21 @@ export async function runAssembly() {
       for (const event of plugin.events) {
         if (event.stage !== 'control' || handled.has(event.id)) continue;
         handled.add(event.id);
-        void gateway
-          .request(event.command, 20_000)
+        const request =
+          event.command.op === 'java'
+            ? (async () => {
+                java.write(
+                  'fault ' +
+                    JSON.stringify({ ...event.command.command, id: event.id }),
+                );
+                return java.wait(
+                  (v) => v.stage === 'fault-control' && v.id === event.id,
+                  'Java fault control',
+                  20_000,
+                );
+              })()
+            : gateway.request(event.command, 20_000);
+        void request
           .then((response) => {
             plugin.write({ ...response, id: event.id });
           })
@@ -218,6 +231,21 @@ export async function runAssembly() {
           join(artifacts, name + '.stderr.log'),
           child.errors.join(''),
         );
+        if (name === 'java')
+          await writeFile(
+            join(artifacts, 'inner-rpc.json'),
+            JSON.stringify(
+              child.events.filter(
+                (v) =>
+                  v.stage === 'inner-rpc' ||
+                  (typeof v.stage === 'string' &&
+                    v.stage.startsWith('fault-') &&
+                    v.stage !== 'fault-control'),
+              ),
+              null,
+              2,
+            ),
+          );
       }
     }
     if (java && ready) {

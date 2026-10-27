@@ -150,16 +150,22 @@ export async function javaClasspath(root) {
   // Java defines an empty classpath entry (Surefire may append a delimiter) as
   // the controlled child cwd. Keep those exact semantics, not access('').
   for (const path of classpath.split(delimiter)) await access(path || root);
-  const source = join(
-    root,
-    'services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHost.java',
-  );
-  const compiled = join(own, 'auriga/iam/NetworkSourceJavaHost.class');
-  if (
-    (await stat(source)).mtimeMs > (await stat(compiled)).mtimeMs ||
-    (await stat(source)).mtimeMs > (await stat(report)).mtimeMs
-  )
-    throw new Error('Java bridge classpath/report predates current source');
+  for (const name of [
+    'NetworkSourceJavaHost',
+    'NetworkSourceJavaFaults',
+    'NetworkSourceJavaPrivateFiles',
+  ]) {
+    const source = join(
+      root,
+      `services/platform-app/src/test/java/auriga/iam/${name}.java`,
+    );
+    const compiled = join(own, `auriga/iam/${name}.class`);
+    if (
+      (await stat(source)).mtimeMs > (await stat(compiled)).mtimeMs ||
+      (await stat(source)).mtimeMs > (await stat(report)).mtimeMs
+    )
+      throw new Error('Java bridge classpath/report predates current source');
+  }
   return classpath;
 }
 
