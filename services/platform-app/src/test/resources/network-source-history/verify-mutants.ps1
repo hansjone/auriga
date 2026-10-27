@@ -31,12 +31,16 @@ $manifest = [ordered]@{ head = $head; mode = $(if ($Run) { 'run' } else { 'compi
 $utf8 = New-Object Text.UTF8Encoding($false)
 function Invoke-Build([string]$directory, [string]$name, [string[]]$arguments) {
   Push-Location -LiteralPath $directory
+  $savedPreference = $ErrorActionPreference
   try {
     $log = Join-Path $output ($name + '.log')
+    # Windows PowerShell represents normal JVM stderr (including JAVA_TOOL_OPTIONS) as
+    # NativeCommandError. Preserve it in the log and judge Maven by its actual exit code.
+    $ErrorActionPreference = 'Continue'
     & .\mvnw.cmd @arguments *> $log
     $code = $LASTEXITCODE
     return [ordered]@{ log = $log; exitCode = $code }
-  } finally { Pop-Location }
+  } finally { $ErrorActionPreference = $savedPreference; Pop-Location }
 }
 try {
   $variants = @('omit-historical-read', 'omit-complete-c-ref-equality')
