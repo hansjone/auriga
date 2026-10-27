@@ -2,10 +2,27 @@ import { registerAurigaAdapter } from './index.js';
 
 /** Native composition only. This import resolves the installed PUBLIC root;
  * never an environment-selected host path or a DSH internal implementation.
- * The first release has no trusted model capabilities/tokenizer port. It can
- * register/discover but MUST reject generation before exchanging or posting.
- * @param {{broker:any, origin:string}} options */
-export function createModelLifecycle({ broker, origin }) {
+ * Generation ports must be supplied by native trusted composition. Browser
+ * settings, model-directory ids and model-call inputs cannot supply them.
+ * @param {{broker:any, origin:string, generation?: import('./types.js').GenerationPorts}} options */
+export function createModelLifecycle({ broker, origin, generation }) {
+  // Without both exact capacity and a trusted tokenizer, retain discovery but
+  // supply no generation limits. buildRequest then refuses before token exchange.
+  const countInputTokens = generation?.countInputTokens;
+  const modelLimits = Object.fromEntries(
+    Object.entries(
+      JSON.parse(JSON.stringify(generation?.modelLimits ?? {})),
+    ).filter(
+      ([, limits]) =>
+        typeof countInputTokens === 'function' &&
+        typeof limits?.contextWindow === 'number' &&
+        typeof limits?.maxOutputTokens === 'number' &&
+        Number.isSafeInteger(limits?.contextWindow) &&
+        Number.isSafeInteger(limits?.maxOutputTokens) &&
+        limits.maxOutputTokens > 0 &&
+        limits.contextWindow > limits.maxOutputTokens,
+    ),
+  );
   /** @type {any} */
   let llm;
   /** @type {import('./types.js').HostApi | undefined} */
@@ -27,6 +44,8 @@ export function createModelLifecycle({ broker, origin }) {
         hostApi,
         apiBase: origin,
         fetch,
+        modelLimits,
+        countInputTokens,
         getAccessToken: async (signal) => {
           if (signal.aborted || closed || !signedIn) return null;
           return broker.getAiAccess();
@@ -84,11 +103,13 @@ export function createModelLifecycle({ broker, origin }) {
       llm = undefined;
     },
     get status() {
+      const availability = registration?.adapter.availability;
       return {
         registered: !!registration,
-        available: false,
-        authorized: false,
-        state: diagnostic,
+        directoryAvailable: availability?.directoryAvailable === true,
+        available: availability?.available === true,
+        authorized: availability?.authorized === true,
+        state: availability?.available ? 'model_ready' : diagnostic,
         credentialState: broker.status.state,
         reauthenticationRequired:
           broker.status.reauthenticationRequired === true,

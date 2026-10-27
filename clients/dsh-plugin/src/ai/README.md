@@ -3,9 +3,18 @@
 入口为 `index.js` 的 `createAurigaAdapter(options)` 与
 `registerAurigaAdapter(llm, options)`。Node `plugin.js` 通过独立的可选
 `ctx.inject(['llm'])` 生命周期装配公开 Adapter；原生登录、Team 工具不依赖 LLM 服务。
-浏览器不接收 AI token。当前生产模型链路仍不可用：没有可信模型容量/能力及精确
-tokenizer，注册后报告 `model_metadata_unavailable`，生成在换票/POST 前拒绝。
+浏览器不接收 AI token。目录可以独立于生成使用。原生可信组合层可向
+`createModelLifecycle` 提供 `generation: { modelLimits, countInputTokens }`；只接受
+精确模型容量及真实 tokenizer 端口，不能把浏览器设置、目录 id 或调用参数当作能力依据。
+两者不齐或容量不合法时，该模型生成在换票/POST 前拒绝，目录仍可读取。
+当前生产调用方未提供这些端口，仍报告 `model_metadata_unavailable`，不宣称生成已接通。
 假上游测试的明确计量规则不能用于生产。
+
+`status.directoryAvailable` 表示最近一次目录请求成功且所用 AI 短票仍有效；
+`authorized` 表示这次目录有可见模型；`available` 还要求其中至少一个模型具备完整的
+可信生成端口。目录为空、刷新失败、票据到期/撤销、退出或卸载均不能沿用旧状态。
+并发目录请求只接受最新一轮结果，迟到的旧权限响应被拒绝。该状态不是调用授权缓存，
+每次生成仍由网关在线核设备、成员、模型 ACL、额度及计量策略；目录可见不等于预算充足。
 
 `refresh-broker.js` 统一平台与 AI 的分资源缓存/单飞及跨资源串行队列；每个交换任务
 执行时读取 vault 最新 refresh，先原子写 `refreshPending`，成功验票后原子保存新

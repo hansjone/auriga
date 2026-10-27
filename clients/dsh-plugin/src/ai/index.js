@@ -50,6 +50,21 @@ export function createAurigaAdapter(options) {
   );
   const active = new Set();
   let disposed = false;
+  /** @type {{ids: string[], expiresAt: number, signal: AbortSignal} | undefined} */
+  let catalog;
+  let catalogEpoch = 0;
+  /** Capacity and tokenizer are installation-owned ports, never directory facts.
+   * @param {string} model */
+  const generationReady = (model) => {
+    const facts = limits[model];
+    return (
+      typeof countInputTokens === 'function' &&
+      Number.isSafeInteger(facts?.contextWindow) &&
+      Number.isSafeInteger(facts?.maxOutputTokens) &&
+      facts.maxOutputTokens > 0 &&
+      facts.contextWindow > facts.maxOutputTokens
+    );
+  };
   /** @param {string} provider */
   const route = (provider) => {
     check(provider === 'auriga' && !disposed, 'NO_ADAPTER');
@@ -110,6 +125,10 @@ export function createAurigaAdapter(options) {
       (response.url && response.url !== `${origin}/ai/v1/${path}`) ||
       !response.ok
     ) {
+      if (response.status === 401 || response.status === 403) {
+        catalogEpoch++;
+        catalog = undefined;
+      }
       void response.body?.cancel().catch(() => {});
       throw new AdapterError(
         response.status === 401 || response.status === 403
@@ -119,10 +138,24 @@ export function createAurigaAdapter(options) {
             : 'SERVER',
       );
     }
-    return response;
+    return { response, lease: { expiresAt, signal: revoked } };
   };
 
   class AurigaAdapter extends hostApi.LlmAdapter {
+    get availability() {
+      const current =
+        !disposed &&
+        catalog &&
+        !catalog.signal.aborted &&
+        catalog.expiresAt > Date.now()
+          ? catalog
+          : undefined;
+      return {
+        directoryAvailable: !!current,
+        authorized: !!current?.ids.length,
+        available: current?.ids.some(generationReady) === true,
+      };
+    }
     /** @param {string} provider */
     providerInfo(provider) {
       route(provider);
@@ -136,9 +169,11 @@ export function createAurigaAdapter(options) {
     /** @param {string} provider @returns {Promise<import('./types.js').ModelInfo[]>} */
     async listModels(provider) {
       route(provider);
+      const epoch = ++catalogEpoch;
+      catalog = undefined;
       const op = begin(undefined);
       try {
-        const response = await send(op, 'models', undefined);
+        const { response, lease } = await send(op, 'models', undefined);
         check(
           response.headers.get('content-type')?.split(';')[0].trim() ===
             'application/json',
@@ -152,7 +187,7 @@ export function createAurigaAdapter(options) {
           'SERVER',
         );
         const ids = new Set();
-        return list.data.map((raw) => {
+        const models = list.data.map((raw) => {
           const item = only(raw, ['id', 'object', 'created', 'owned_by']);
           text(item.id, 128, 1);
           integer(item.created);
@@ -165,6 +200,10 @@ export function createAurigaAdapter(options) {
           ids.add(item.id);
           return { provider: 'auriga', id: item.id, name: item.id };
         });
+        op.assert();
+        check(epoch === catalogEpoch, 'AUTH');
+        catalog = { ids: models.map((item) => item.id), ...lease };
+        return models;
       } catch (error) {
         throw error instanceof AdapterError
           ? error
@@ -209,7 +248,7 @@ export function createAurigaAdapter(options) {
           countInputTokens,
         );
         op = begin(input.signal);
-        const response = await send(
+        const { response } = await send(
           op,
           'chat/completions',
           JSON.stringify(body),
@@ -277,6 +316,7 @@ export function createAurigaAdapter(options) {
     }
     dispose() {
       disposed = true;
+      catalog = undefined;
       for (const op of active) op.close();
       active.clear();
     }

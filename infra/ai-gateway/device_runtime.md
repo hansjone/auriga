@@ -180,3 +180,24 @@ root fixture 会在该测试 PG 创建专用 `auriga_d7` 库和随机非所有�
 同组恢复测试还覆盖真实账本 CAS、竞争恢复、旧 revision、COMMIT 回包不明、缺行与发送值攻击。
 upstream 测试仅访问随机端口 httptest：覆盖 JSON、逐字节 SSE、错误脱敏、取消、中断、
 响应限额、SSRF 清单、重定向拒绝及模拟 DNS rebinding，不访问真实模型或产生费用。
+
+## Beta edge 接线
+
+edge 配置的 `upstreams.ai-device`（环境变量 `AURIGA_EDGE_UPSTREAM_AI_DEVICE`）指向
+独立 device runtime 的固定 origin；同机可用 `http://127.0.0.1:<device-port>`，
+跨主机仅接受 HTTPS origin。它与 Team 的 `upstreams.ai-gateway`、管理面的
+`upstreams.ai-admin` 分开，不扩展 Team 白名单。需要已校验的 DeploymentAccess。
+只在门户入口精确代理 `GET /ai/v1/models`、`POST /ai/v1/chat/completions` 和
+`GET /api/ai/v1/me/usage`；不补斜杠，不接受编码路径、浏览器 Cookie/Origin 或实例转发标记。
+设备 AI Bearer 原样送 runtime 逐次核验，edge 不以管理/门户会话兑换它。
+
+资源模块另用 `upstreams.resource`（`AURIGA_EDGE_UPSTREAM_RESOURCE`）指向 platform，
+共用 `iamHop` 的受保护传输。`/api/resource/v1/**` 沿现有浏览器会话、完整 Origin 和
+域名/IP CSRF 规则代理；Resource 服务继续检查 read/upload、租户可见性和近期 step-up，
+ETag、If-Match、Idempotency-Key 不改写。缺上游配置返回明确错误，不落入 SPA。
+
+管理与 device 进程必须使用同一套隔离 Beta 模型数据、密钥及币种，配置真实 IAM/Org RPC。
+真人验收顺序为：管理台登记 provider/凭据/模型及成员 grant → 普通成员插件读取目录 →
+撤销 grant 后重新读取目录应消失。资源页新增、读取、条件修改须落到真实 Resource 服务。
+生成另验：仅在部署方批准 upstream policy、可信 usage 和插件精确 tokenizer 都具备时调用，
+核对真实账本；synthetic/测试 IAM 夹具不构成此证明。配置独立入口不代表这些真人验收已完成。
