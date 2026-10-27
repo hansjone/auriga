@@ -97,14 +97,24 @@ final class NetworkSourceControl {
       ObjectNode result = response.frame();
       Instant until;
       try {
-        until = wire.refreshSourceGate(gate, response.history() != null);
+        until =
+            wire.refreshSourceGate(gate, response.history() != null || response.register() != null);
       } catch (AurigaException e) {
-        if (response.history() != null && "common.unavailable".equals(e.errorCode().code()))
+        if ((response.history() != null || response.register() != null)
+            && "common.unavailable".equals(e.errorCode().code()))
           throw new AurigaException(UNKNOWN);
         throw e;
       }
       return transaction(
           s -> {
+            if (response.register() != null) {
+              lockOp("Register", text(frame, "operation_id"));
+              var current = operation("Register", text(frame, "operation_id"));
+              unchangedRegister(response.register(), current);
+              for (String key : List.of("status", "iam_response", "result_json"))
+                require(
+                    Objects.deepEquals(response.register().get(key), current.get(key)), UNKNOWN);
+            }
             if (response.history() != null) {
               lockOp("Register", text(frame, "operation_id"));
               response
@@ -222,9 +232,16 @@ final class NetworkSourceControl {
   }
 
   private record SourceResult(
-      ObjectNode frame, boolean frameFence, NetworkLocalSourceHistory.Snapshot history) {
+      ObjectNode frame,
+      boolean frameFence,
+      NetworkLocalSourceHistory.Snapshot history,
+      Map<String, Object> register) {
     SourceResult(ObjectNode frame, boolean frameFence) {
-      this(frame, frameFence, null);
+      this(frame, frameFence, null, null);
+    }
+
+    SourceResult(ObjectNode frame, boolean frameFence, NetworkLocalSourceHistory.Snapshot history) {
+      this(frame, frameFence, history, null);
     }
   }
 
@@ -357,15 +374,21 @@ final class NetworkSourceControl {
                 || !sameConnection);
     if (!"pending".equals(pending.get("status")) && !receiptRead) {
       require(sameConnection, UNKNOWN);
-      return new SourceResult(result(pending), true);
+      var original = frozenRegister(pending);
+      validateRegister(
+          original,
+          registerResponse(pending.get("iam_response")),
+          pending.get("request_digest").toString());
+      return new SourceResult(result(pending), true, null, pending);
     }
     try {
       var original = frozenRegister(pending);
+      if ("pending".equals(pending.get("status")))
+        require(pending.get("iam_response") == null && pending.get("result_json") == null, UNKNOWN);
       RegisterAgentSourceResponse response;
       if (receiptRead) {
         transactionWithoutResult(s -> wire.lockSourceGate(gate, true));
-        // A miss never falls back to Register, even if the old C might still be live.
-        response = iam.readSourceReceipt(original);
+        response = recoverRegister(gate, holder, pending, original);
       } else {
         require(gate.connection().equals(original.getConnection()), UNKNOWN);
         require(
@@ -393,22 +416,15 @@ final class NetworkSourceControl {
               s -> {
                 lockOp("Register", op);
                 var current = operation("Register", op);
-                require(
-                    current != null
-                        && Arrays.equals(
-                            (byte[]) current.get("iam_request"),
-                            (byte[]) pending.get("iam_request"))
-                        && Objects.equals(
-                            current.get("request_digest"), pending.get("request_digest"))
-                        && Objects.equals(
-                            current.get("business_json"), pending.get("business_json")),
-                    UNKNOWN);
+                unchangedRegister(pending, current);
                 if (!"pending".equals(current.get("status"))) {
                   require(
-                      current.get("iam_response") != null
+                      (response.getDefinitivelyUncommitted() ? "not_committed" : "registered")
+                              .equals(current.get("status"))
+                          && current.get("iam_response") != null
                           && response.equals(registerResponse(current.get("iam_response"))),
                       UNKNOWN);
-                  return result(current);
+                  return new SourceResult(result(current), true, null, current);
                 }
                 var lineage = lockLineage((UUID) current.get("lineage_id"));
                 ObjectNode responseFrame;
@@ -446,13 +462,64 @@ final class NetworkSourceControl {
                   responseFrame = registerResult(op, state, fact(source, lineage, false), null);
                 }
                 complete(current, state, response.toByteArray(), responseFrame);
-                return responseFrame;
+                return new SourceResult(responseFrame, true, null, operation("Register", op));
               });
-      return new SourceResult(value, true);
+      return value;
     } catch (RuntimeException e) {
       // No ordinary RPC, storage or post-pending validation failure is a negative receipt.
       throw new AurigaException(UNKNOWN);
     }
+  }
+
+  private RegisterAgentSourceResponse recoverRegister(
+      SourceGate gate,
+      UUID holder,
+      Map<String, Object> pending,
+      RegisterAgentSourceRequest original) {
+    try {
+      // Pure read first, including completed operations. Malformed responses never enter Fence.
+      return iam.readSourceReceipt(original);
+    } catch (auriga.collab.grpc.NetworkAuthorityClient.SourceRpcFailure error) {
+      require(
+          "pending".equals(pending.get("status")) && error.grpcCode() == Status.Code.UNAVAILABLE,
+          UNKNOWN);
+      fenceBudget();
+      // Recheck the complete current C/ref/authorization gate, without changing original bytes.
+      wire.refreshSourceGate(gate, true);
+      transactionWithoutResult(
+          s -> {
+            lockOp("Register", original.getOperationId());
+            var current = operation("Register", original.getOperationId());
+            unchangedRegister(pending, current);
+            require(
+                "pending".equals(current.get("status"))
+                    && current.get("iam_response") == null
+                    && current.get("result_json") == null,
+                UNKNOWN);
+            wire.lockSourceGate(gate, true);
+            requireSlot(gate, "regular", holder);
+          });
+      fenceBudget();
+      // Explicit no-create RPC only. Any error remains UNKNOWN at the caller.
+      return iam.fenceSourceReceipt(original);
+    }
+  }
+
+  private static void fenceBudget() {
+    require(
+        !io.grpc.Context.current().isCancelled()
+            && !Thread.currentThread().isInterrupted()
+            && auriga.collab.grpc.NetworkAuthorityClient.sourceRemainingMillis() > 0,
+        UNKNOWN);
+  }
+
+  private static void unchangedRegister(Map<String, Object> expected, Map<String, Object> current) {
+    require(current != null && expected.keySet().equals(current.keySet()), UNKNOWN);
+    for (String key : expected.keySet()) {
+      if (Set.of("status", "iam_response", "result_json").contains(key)) continue;
+      require(Objects.deepEquals(expected.get(key), current.get(key)), UNKNOWN);
+    }
+    frozenRegister(current);
   }
 
   private Map<String, Object> notAccepted(
@@ -1030,6 +1097,7 @@ final class NetworkSourceControl {
 
   private static void validateRegister(
       RegisterAgentSourceRequest request, RegisterAgentSourceResponse response, String digest) {
+    require(response != null && response.getUnknownFields().asMap().isEmpty(), UNKNOWN);
     if (response.getDefinitivelyUncommitted()) {
       require(
           !response.hasSource()
@@ -1047,6 +1115,11 @@ final class NetworkSourceControl {
     var source = response.getSource();
     require(
         response.hasSource()
+            && response.getRejectionReason().isEmpty()
+            && (response.getOperationId().isEmpty()
+                || request.getOperationId().equals(response.getOperationId()))
+            && (response.getRequestDigest().isEmpty() || digest.equals(response.getRequestDigest()))
+            && source.getUnknownFields().asMap().isEmpty()
             && source.getRevision() == 1
             && source.getState() == NetworkAgentSourceState.NETWORK_AGENT_SOURCE_STATE_ACTIVE
             && source.getRegistration().equals(request.getRegistration())
@@ -1056,6 +1129,8 @@ final class NetworkSourceControl {
             && !source.getSourceBinding().equals(request.getPredecessorBinding())
             && source.getSourceBinding().matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
             && !source.getOwnerUserId().isBlank()
+            && instant(source.getNotBefore()).getNano() == 0
+            && instant(source.getExpiresAt()).getNano() == 0
             && instant(source.getExpiresAt()).isAfter(instant(source.getNotBefore())),
         UNKNOWN);
   }
@@ -1065,8 +1140,16 @@ final class NetworkSourceControl {
       var original = RegisterAgentSourceRequest.parseFrom((byte[]) row.get("iam_request"));
       String json = NetworkJson.canonical(requestJson(original));
       var business = NetworkJson.parse(row.get("business_json").toString());
+      var originalFrame = NetworkJson.parse((byte[]) row.get("original_frame"));
       require(
-          original.getOperationId().equals(row.get("operation_id"))
+          original.getUnknownFields().asMap().isEmpty()
+              && original.getConnection().getUnknownFields().asMap().isEmpty()
+              && original.getRegistration().getUnknownFields().asMap().isEmpty()
+              && business(originalFrame).equals(business)
+              && text(originalFrame, "operation_id").equals(row.get("operation_id"))
+              && text(originalFrame, "epoch").equals(row.get("epoch").toString())
+              && text(originalFrame, "boot_id").equals(row.get("boot_id"))
+              && original.getOperationId().equals(row.get("operation_id"))
               && original.getConnection().getTenantId().equals(tenant().toString())
               && original.getConnection().getRealm().equals(row.get("realm"))
               && original.getConnection().getNode().equals(row.get("node_id"))

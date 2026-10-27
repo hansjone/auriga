@@ -22,7 +22,9 @@ import com.nimbusds.jose.jwk.*;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import io.grpc.*;
 import io.grpc.stub.StreamObserver;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.security.KeyPairGenerator;
 import java.sql.Timestamp;
 import java.time.*;
@@ -37,6 +39,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.support.*;
 import tools.jackson.databind.JsonNode;
@@ -175,7 +178,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
 
   static final class Harness implements AutoCloseable {
     final UUID tenant = UuidV7.next();
-    final Time clock = new Time();
+    final Time clock;
     UUID owner;
     String sid, did, access, refresh, boot, epoch = "1";
     long clientId = 40;
@@ -189,6 +192,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
     AccessTokenVerifier verifier;
     ObservedAuthority observed;
     ObservedSources observedSources;
+    volatile Runnable beforeSourceOrg = () -> {};
     GrpcServer iamServer, mailboxServer;
     ManagedChannel iamChannel, mailboxChannel;
     NetworkAuthorityClient client;
@@ -197,6 +201,14 @@ class NetworkLocalSourceHistoryIntegrationTest {
     LocalRegistry locals;
     NetworkMailboxWireService wire;
     String collabSecret = Secrets.random(), gatewaySecret = Secrets.random();
+
+    Harness() {
+      this(new Time());
+    }
+
+    Harness(Time clock) {
+      this.clock = clock;
+    }
 
     <T> T tx(Supplier<T> work) {
       return store.tenant(tenant, work);
@@ -282,6 +294,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
               devices,
               r -> {
                 store.requireTransactionReleased();
+                beforeSourceOrg.run();
                 assertEquals(tenant.toString(), r.getTenantId());
                 return auriga.contracts.org.v1.GetEffectivePermissionsResponse.newBuilder()
                     .setMemberTypeValue(1)
@@ -745,7 +758,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
                   store
                       .networkJdbc()
                       .queryForList(
-                          "SELECT to_jsonb(t)::text FROM iam."
+                          "SELECT jsonb_build_object('row',to_jsonb(t),'xmin',t.xmin::text)::text FROM iam."
                               + table
                               + " t ORDER BY to_jsonb(t)::text",
                           String.class));
@@ -762,7 +775,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
               result.put(
                   "collab." + table,
                   jdbc.queryForList(
-                      "SELECT to_jsonb(t)::text FROM collab."
+                      "SELECT jsonb_build_object('row',to_jsonb(t),'xmin',t.xmin::text)::text FROM collab."
                           + table
                           + " t ORDER BY to_jsonb(t)::text",
                       String.class));
@@ -775,6 +788,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
       assertEquals(0, observedSources.register.get(), "RegisterAgentSource");
       assertEquals(0, observedSources.read.get(), "ReadAgentSourceReceipt");
       assertEquals(0, observedSources.get.get(), "GetAgentSource");
+      assertEquals(0, observedSources.fence.get(), "FenceAgentSourceReceipt");
     }
 
     public void close() throws Exception {
@@ -885,7 +899,15 @@ class NetworkLocalSourceHistoryIntegrationTest {
     final AtomicInteger register = new AtomicInteger(),
         read = new AtomicInteger(),
         get = new AtomicInteger(),
-        revoke = new AtomicInteger();
+        revoke = new AtomicInteger(),
+        fence = new AtomicInteger();
+    volatile boolean dropRegisterBeforeCommit, dropRegisterReply;
+    volatile Status readFailure, fenceFailure;
+    volatile UnaryOperator<RegisterAgentSourceResponse> readEcho = UnaryOperator.identity(),
+        fenceEcho = UnaryOperator.identity();
+    volatile Runnable afterRead = () -> {}, beforeFence = () -> {}, afterFence = () -> {};
+    volatile RegisterAgentSourceRequest lastRegister, lastRead, lastFence;
+    volatile RegisterAgentSourceResponse lastFenceReply;
     volatile GetAgentSourceRequest lastGet;
     volatile GetAgentSourceResponse lastGetReply;
     volatile Throwable lastGetError;
@@ -899,7 +921,27 @@ class NetworkLocalSourceHistoryIntegrationTest {
     public void registerAgentSource(
         RegisterAgentSourceRequest r, StreamObserver<RegisterAgentSourceResponse> o) {
       register.incrementAndGet();
-      super.registerAgentSource(r, o);
+      lastRegister = r;
+      if (dropRegisterBeforeCommit) {
+        o.onError(Status.UNAVAILABLE.asRuntimeException());
+        return;
+      }
+      super.registerAgentSource(
+          r,
+          new StreamObserver<>() {
+            public void onNext(RegisterAgentSourceResponse value) {
+              if (!dropRegisterReply) o.onNext(value);
+            }
+
+            public void onError(Throwable error) {
+              o.onError(error);
+            }
+
+            public void onCompleted() {
+              if (dropRegisterReply) o.onError(Status.UNAVAILABLE.asRuntimeException());
+              else o.onCompleted();
+            }
+          });
     }
 
     @Override
@@ -907,7 +949,64 @@ class NetworkLocalSourceHistoryIntegrationTest {
     public void readAgentSourceReceipt(
         ReadAgentSourceReceiptRequest r, StreamObserver<RegisterAgentSourceResponse> o) {
       read.incrementAndGet();
-      super.readAgentSourceReceipt(r, o);
+      lastRead = r.getOriginalRequest();
+      if (readFailure != null) {
+        afterRead.run();
+        o.onError(readFailure.asRuntimeException());
+        return;
+      }
+      try {
+        super.readAgentSourceReceipt(
+            r,
+            new StreamObserver<>() {
+              public void onNext(RegisterAgentSourceResponse value) {
+                afterRead.run();
+                o.onNext(readEcho.apply(value));
+              }
+
+              public void onError(Throwable error) {
+                afterRead.run();
+                o.onError(error);
+              }
+
+              public void onCompleted() {
+                o.onCompleted();
+              }
+            });
+      } catch (RuntimeException error) {
+        afterRead.run();
+        throw error;
+      }
+    }
+
+    @Override
+    @AuthenticatedOnly
+    public void fenceAgentSourceReceipt(
+        FenceAgentSourceReceiptRequest r, StreamObserver<RegisterAgentSourceResponse> o) {
+      fence.incrementAndGet();
+      lastFence = r.getOriginalRequest();
+      beforeFence.run();
+      if (fenceFailure != null) {
+        o.onError(fenceFailure.asRuntimeException());
+        return;
+      }
+      super.fenceAgentSourceReceipt(
+          r,
+          new StreamObserver<>() {
+            public void onNext(RegisterAgentSourceResponse value) {
+              lastFenceReply = value;
+              afterFence.run();
+              o.onNext(fenceEcho.apply(value));
+            }
+
+            public void onError(Throwable error) {
+              o.onError(error);
+            }
+
+            public void onCompleted() {
+              o.onCompleted();
+            }
+          });
     }
 
     @Override
@@ -1124,6 +1223,815 @@ class NetworkLocalSourceHistoryIntegrationTest {
                   .queryForObject("SELECT count(*) FROM iam.network_source_chain", Integer.class));
           return null;
         });
+  }
+
+  ObjectNode durableMiss() {
+    var request = h.frame();
+    h.observedSources.dropRegisterBeforeCommit = true;
+    code("outcome_unknown", h.register(request));
+    h.observedSources.dropRegisterBeforeCommit = false;
+    assertEquals("pending", h.row(request).get("status"));
+    assertNotNull(h.row(request).get("iam_request"));
+    assertNull(h.row(request).get("iam_response"));
+    assertTrue(h.facts().get("iam.network_source_operation").isEmpty());
+    return request;
+  }
+
+  void expireOriginal(boolean sweep) {
+    var original = h.c;
+    h.clock.advance(3500);
+    h.reconnect();
+    h.clock.advance(101);
+    checkOriginalIngress(original, sweep);
+    h.reference(h.c);
+  }
+
+  void checkOriginalIngress(NetworkAuthorityConnection original, boolean sweep) {
+    if (sweep) {
+      var cleanup = new NetworkIngressCleanup(store, h.clock);
+      long tenants =
+          store
+              .networkJdbc()
+              .queryForObject("SELECT count(*) FROM iam.network_ingress_tenant", Long.class);
+      for (long i = 0; i < ((tenants + 31) / 32) + 1; i++) {
+        cleanup.sweepOnce();
+        if (h.tx(() -> store.get("network_ingress", original.getIngress(), false)) == null) break;
+      }
+      assertNull(h.tx(() -> store.get("network_ingress", original.getIngress(), false)));
+    } else assertNotNull(h.tx(() -> store.get("network_ingress", original.getIngress(), false)));
+  }
+
+  RegisterAgentSourceRequest frozen(ObjectNode request) throws Exception {
+    return RegisterAgentSourceRequest.parseFrom((byte[]) h.row(request).get("iam_request"));
+  }
+
+  void pendingWithoutIamFailure(ObjectNode request, Map<String, List<String>> before) {
+    // These persistent facts are the mutation oracle; an ordinary RPC count is not sufficient.
+    assertEquals(
+        "pending", h.row(request).get("status"), "ordinary failure must retain durable pending");
+    assertNull(
+        h.row(request).get("iam_response"), "ordinary failure has no complete durable receipt");
+    assertEquals(before, h.facts(), "no IAM durable failure or collab terminal may be invented");
+  }
+
+  void onlyFenceReceiptWrites(Map<String, List<String>> before) {
+    var after = h.facts();
+    for (String table : before.keySet()) {
+      if (Set.of("iam.network_source_anchor", "iam.network_source_operation").contains(table)) {
+        assertEquals(before.get(table).size() + 1, after.get(table).size(), table);
+        assertTrue(after.get(table).containsAll(before.get(table)), table);
+      } else if (!Set.of("collab.network_source_operation", "collab.network_source_outbox")
+          .contains(table)) assertEquals(before.get(table), after.get(table), table);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void pendingMissExpiredOrSweptConvergesThroughExplicitFenceAndReplaysCompleteReceipt(
+      boolean sweep) throws Exception {
+    var request = durableMiss();
+    var saved = h.row(request);
+    var original = frozen(request);
+    expireOriginal(sweep);
+    var before = h.facts();
+    // Pure Read miss alone must leave every business fact byte-for-byte unchanged.
+    TenantContext.run(
+        h.tenant,
+        () -> assertThrows(AurigaException.class, () -> h.source.readSourceReceipt(original)));
+    assertEquals(before, h.facts());
+    var response = h.register(h.retry(request));
+    assertEquals("not_committed", text(response, "result"), response.toString());
+    var receipt =
+        RegisterAgentSourceResponse.parseFrom((byte[]) h.row(request).get("iam_response"));
+    assertEquals(
+        RegisterAgentSourceResponse.newBuilder()
+            .setDefinitivelyUncommitted(true)
+            .setOperationId(original.getOperationId())
+            .setRequestDigest(saved.get("request_digest").toString())
+            .setRejectionReason("original_connection_invalid_uncommitted")
+            .build(),
+        receipt);
+    assertEquals(receipt, h.observedSources.lastFenceReply);
+    assertArrayEquals(original.toByteArray(), h.observedSources.lastFence.toByteArray());
+    assertArrayEquals(
+        (byte[]) saved.get("original_frame"), (byte[]) h.row(request).get("original_frame"));
+    assertEquals(saved.get("business_json"), h.row(request).get("business_json"));
+    assertEquals("not_committed", h.row(request).get("status"));
+    var persisted =
+        h.tx(
+            () ->
+                store
+                    .networkJdbc()
+                    .queryForMap(
+                        "SELECT request,response FROM iam.network_source_operation WHERE tenant_id=? AND method='Register' AND operation_id=?",
+                        h.tenant,
+                        original.getOperationId()));
+    assertArrayEquals(original.toByteArray(), (byte[]) persisted.get("request"));
+    assertArrayEquals(receipt.toByteArray(), (byte[]) persisted.get("response"));
+    onlyFenceReceiptWrites(before);
+    var committed = h.facts();
+    int fences = h.observedSources.fence.get();
+    var replay = h.register(h.retry(request));
+    assertEquals(response.path("failure_evidence"), replay.path("failure_evidence"));
+    assertEquals("not_committed", text(replay, "result"));
+    TenantContext.run(
+        h.tenant,
+        () -> {
+          assertEquals(receipt, h.client.readSourceReceipt(original));
+          assertEquals(receipt, h.client.registerSource(original)); // Late Register cannot issue.
+          var differentBody =
+              original.toBuilder()
+                  .setRegistration(
+                      original.getRegistration().toBuilder()
+                          .setAllocationFingerprint("sha256:" + "b".repeat(64)))
+                  .build();
+          assertEquals(
+              "network.conflict",
+              assertThrows(AurigaException.class, () -> h.client.registerSource(differentBody))
+                  .errorCode()
+                  .code());
+        });
+    assertEquals(fences, h.observedSources.fence.get(), "completed op never fences again");
+    assertEquals(committed, h.facts());
+  }
+
+  @Test
+  void liveOriginalMissCannotCreateSourceOrDurableFence() {
+    var request = durableMiss();
+    var before = h.facts();
+    var reply = h.register(h.retry(request));
+    assertTrue(
+        h.facts().get("iam.network_source").isEmpty(),
+        "live original miss must not create an IAM source");
+    pendingWithoutIamFailure(request, before);
+    code("outcome_unknown", reply);
+    assertEquals(1, h.observedSources.fence.get(), "explicit no-create RPC must reject live C");
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "PERMISSION_DENIED",
+        "UNAUTHENTICATED",
+        "INVALID_ARGUMENT",
+        "ABORTED",
+        "ALREADY_EXISTS",
+        "CANCELLED",
+        "DEADLINE_EXCEEDED",
+        "UNIMPLEMENTED",
+        "NOT_FOUND",
+        "INTERNAL",
+        "UNKNOWN",
+        "RESOURCE_EXHAUSTED"
+      })
+  void readErrorsNeverEnterFenceOrCreateAnInventedNegativeReceipt(String status) {
+    var request = durableMiss();
+    h.observedSources.readFailure =
+        Status.fromCode(Status.Code.valueOf(status))
+            .withDescription("miss unavailable not committed");
+    var before = h.facts();
+    var reply = h.register(h.retry(request));
+    pendingWithoutIamFailure(request, before);
+    code("outcome_unknown", reply);
+    assertEquals(0, h.observedSources.fence.get());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "UNAVAILABLE",
+        "PERMISSION_DENIED",
+        "UNIMPLEMENTED",
+        "CANCELLED",
+        "DEADLINE_EXCEEDED",
+        "INTERNAL",
+        "RESOURCE_EXHAUSTED"
+      })
+  void everyFenceErrorKeepsTheOriginalDurablePending(String status) throws Exception {
+    var request = durableMiss();
+    expireOriginal(false);
+    h.observedSources.fenceFailure = Status.fromCode(Status.Code.valueOf(status));
+    var before = h.facts();
+    var reply = h.register(h.retry(request));
+    pendingWithoutIamFailure(request, before);
+    code("outcome_unknown", reply);
+    assertEquals(1, h.observedSources.fence.get());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "empty",
+        "partial",
+        "wrong-op",
+        "wrong-digest",
+        "wrong-reason",
+        "unknown",
+        "source-and-failure",
+        "lost-commit-reply"
+      })
+  void malformedOrLostFenceReplyCannotCompleteCollabPending(String fault) throws Exception {
+    var request = durableMiss();
+    expireOriginal(true);
+    h.observedSources.fenceEcho =
+        value ->
+            switch (fault) {
+              case "empty" -> RegisterAgentSourceResponse.getDefaultInstance();
+              case "partial" -> value.toBuilder().clearDefinitivelyUncommitted().build();
+              case "wrong-op" -> value.toBuilder().setOperationId("another-op").build();
+              case "wrong-digest" ->
+                  value.toBuilder().setRequestDigest("sha256:" + "b".repeat(64)).build();
+              case "wrong-reason" -> value.toBuilder().setRejectionReason("unavailable").build();
+              case "unknown" ->
+                  value.toBuilder()
+                      .setUnknownFields(
+                          com.google.protobuf.UnknownFieldSet.newBuilder()
+                              .addField(
+                                  100,
+                                  com.google.protobuf.UnknownFieldSet.Field.newBuilder()
+                                      .addVarint(1)
+                                      .build())
+                              .build())
+                      .build();
+              case "source-and-failure" ->
+                  value.toBuilder().setSource(NetworkAgentSource.getDefaultInstance()).build();
+              default -> throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+            };
+    code("outcome_unknown", h.register(h.retry(request)));
+    assertEquals("pending", h.row(request).get("status"));
+    assertNull(h.row(request).get("iam_response"));
+    assertTrue(h.facts().get("iam.network_source").isEmpty());
+    assertEquals(
+        1,
+        h.facts().get("iam.network_source_operation").size(),
+        "IAM committed complete failure, only reply is faulty");
+    h.observedSources.fenceEcho = UnaryOperator.identity();
+    assertEquals("not_committed", text(h.register(h.retry(request)), "result"));
+    assertEquals(
+        1, h.observedSources.fence.get(), "recovery of durable IAM receipt uses Read only");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"node", "owner", "device", "session", "deviceOwner", "sessionOwner"})
+  void pendingOriginalOwnershipChangesNeverCreateFenceOrTerminal(String change) throws Exception {
+    var request = durableMiss();
+    changeIdentity(change);
+    var before = h.facts();
+    var reply = h.register(h.retry(request));
+    code(change.equals("node") ? "unauthorized" : "outcome_unknown", reply);
+    pendingWithoutIamFailure(request, before);
+    assertTrue(h.facts().get("iam.network_source_operation").isEmpty());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "tenant_id",
+        "realm",
+        "node",
+        "ingress",
+        "server_id",
+        "client_id",
+        "client_account"
+      })
+  void explicitFenceRejectsEveryOriginalConnectionSubstitutionWithoutWriting(String field)
+      throws Exception {
+    var request = durableMiss();
+    var original = frozen(request);
+    expireOriginal(true);
+    var descriptor = original.getConnection().getDescriptorForType().findFieldByName(field);
+    String value =
+        switch (field) {
+          case "tenant_id" -> UuidV7.next().toString();
+          case "realm", "node", "client_id" -> "18446744073709551615";
+          case "ingress" -> "b".repeat(26);
+          case "server_id" -> "N" + "Z".repeat(55);
+          default -> "OTHER";
+        };
+    var substituted = original.getConnection().toBuilder().setField(descriptor, value).build();
+    var changed =
+        original.toBuilder()
+            .setConnection(substituted)
+            .setRegistration(
+                original.getRegistration().toBuilder()
+                    .setRealm(substituted.getRealm())
+                    .setNode(substituted.getNode()))
+            .build();
+    var before = h.facts();
+    TenantContext.run(
+        h.tenant,
+        () -> assertThrows(AurigaException.class, () -> h.source.fenceSourceReceipt(changed)));
+    pendingWithoutIamFailure(request, before);
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"empty", "partial", "wrong-op", "wrong-digest", "unknown", "source-and-failure"})
+  void malformedPureReadDoesNotEscalateToFenceOrOverwritePending(String fault) throws Exception {
+    var request = durableMiss();
+    var original = frozen(request);
+    expireOriginal(false);
+    TenantContext.run(h.tenant, () -> h.source.fenceSourceReceipt(original));
+    int fences = h.observedSources.fence.get();
+    h.observedSources.readEcho =
+        value ->
+            switch (fault) {
+              case "empty" -> RegisterAgentSourceResponse.getDefaultInstance();
+              case "partial" -> value.toBuilder().clearRequestDigest().build();
+              case "wrong-op" -> value.toBuilder().setOperationId("other-op").build();
+              case "wrong-digest" ->
+                  value.toBuilder().setRequestDigest("sha256:" + "b".repeat(64)).build();
+              case "unknown" ->
+                  value.toBuilder()
+                      .setUnknownFields(
+                          com.google.protobuf.UnknownFieldSet.newBuilder()
+                              .addField(
+                                  100,
+                                  com.google.protobuf.UnknownFieldSet.Field.newBuilder()
+                                      .addVarint(1)
+                                      .build())
+                              .build())
+                      .build();
+              default ->
+                  value.toBuilder().setSource(NetworkAgentSource.getDefaultInstance()).build();
+            };
+    var before = h.facts();
+    code("outcome_unknown", h.register(h.retry(request)));
+    assertEquals(fences, h.observedSources.fence.get());
+    assertEquals("pending", h.row(request).get("status"));
+    assertNull(h.row(request).get("iam_response"));
+    assertEquals(before, h.facts());
+  }
+
+  @Test
+  void originalRegisterSuccessWinsOverAnIndeterminateReadAndFenceWithoutActivation()
+      throws Exception {
+    var request = h.frame();
+    h.observedSources.dropRegisterReply = true;
+    code("outcome_unknown", h.register(request));
+    h.observedSources.dropRegisterReply = false;
+    assertEquals("pending", h.row(request).get("status"));
+    var original = frozen(request);
+    var created = TenantContext.call(h.tenant, () -> h.client.readSourceReceipt(original));
+    assertTrue(created.hasSource());
+    expireOriginal(true);
+    h.observedSources.readFailure = Status.UNAVAILABLE;
+    var before = h.facts();
+    var response = h.register(h.retry(request));
+    assertEquals("registered", text(response, "result"));
+    assertFalse(
+        response.has("valid_until"), "historical ACTIVE cannot activate current permission");
+    assertEquals(
+        created,
+        RegisterAgentSourceResponse.parseFrom((byte[]) h.row(request).get("iam_response")));
+    var after = h.facts();
+    for (String table : before.keySet())
+      if (table.startsWith("iam.")) assertEquals(before.get(table), after.get(table), table);
+    int fences = h.observedSources.fence.get();
+    // A completed local operation cannot Fence even when the Read is now unavailable.
+    code("outcome_unknown", h.register(h.retry(request)));
+    assertEquals(fences, h.observedSources.fence.get());
+    assertEquals(after, h.facts());
+  }
+
+  @Test
+  void savedSuccessPureReadRecoversOnRealC2AfterOriginalIngressGcWithoutAnyWrites()
+      throws Exception {
+    var request = h.frame();
+    var created = h.register(request);
+    assertEquals("registered", text(created, "result"), created.toString());
+    var saved = h.row(request);
+    var original = frozen(request);
+    expireOriginal(true);
+    assertNotEquals(original.getConnection(), h.c);
+    var currentRef = h.reference(h.c);
+    assertEquals(h.c, currentRef.getConnection());
+    var before = h.facts();
+    int reads = h.observedSources.read.get(),
+        registrations = h.observedSources.register.get(),
+        gets = h.observedSources.get.get(),
+        fences = h.observedSources.fence.get();
+    var retry = h.retry(request);
+    var recovered = h.register(retry);
+    assertEquals("registered", text(recovered, "result"), recovered.toString());
+    assertEquals(created.path("source"), recovered.path("source"));
+    assertFalse(recovered.has("valid_until"), "historical ACTIVE is not a current Get observation");
+    assertEquals(h.epoch, recovered.path("server_auth").path("audience").path("epoch").asString());
+    assertEquals(
+        h.readyFrame.path("channel_nonce"), recovered.path("server_auth").path("channel_nonce"));
+    assertEquals(retry.path("request_id"), recovered.path("request_id"));
+    assertEquals(original, h.observedSources.lastRead);
+    assertEquals(reads + 1, h.observedSources.read.get());
+    assertEquals(registrations, h.observedSources.register.get());
+    assertEquals(gets, h.observedSources.get.get());
+    assertEquals(fences, h.observedSources.fence.get());
+    sameRow(saved, h.row(request));
+    assertEquals(
+        before,
+        h.facts(),
+        "pure historical replay must not change IAM/collab facts, including xmin");
+  }
+
+  /** Records real JDBC work without replacing queries, transactions, RLS or cleanup results. */
+  static final class CleanupProbe extends JdbcTemplate {
+    final List<List<UUID>> batches = new ArrayList<>();
+    final List<UUID> visits = new ArrayList<>();
+    int deleted;
+
+    CleanupProbe() {
+      super(iamRoles.runtime().dataSource());
+    }
+
+    @Override
+    public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
+      var rows = super.query(sql, mapper, args);
+      if (sql.contains("FROM iam.network_ingress_tenant"))
+        batches.add(rows.stream().map(UUID.class::cast).toList());
+      return rows;
+    }
+
+    @Override
+    public int update(String sql, Object... args) {
+      boolean ingressDelete = sql.startsWith("DELETE FROM iam.network_ingress WHERE");
+      if (ingressDelete) {
+        assertEquals(TenantContext.require(), args[0]);
+        assertEquals(args[0], args[1]);
+        visits.add((UUID) args[0]);
+      }
+      int rows = super.update(sql, args);
+      if (ingressDelete) deleted += rows;
+      return rows;
+    }
+
+    NetworkIngressCleanup cleanup(Time clock) {
+      return new NetworkIngressCleanup(
+          new IamStore(this, new TenantTransactionManager(getDataSource())), clock);
+    }
+  }
+
+  static List<UUID> ingressTenants() {
+    return store
+        .networkJdbc()
+        .query(
+            "SELECT tenant_id FROM iam.network_ingress_tenant ORDER BY tenant_id",
+            (rs, i) -> rs.getObject(1, UUID.class));
+  }
+
+  static void walkExistingTenants(
+      NetworkIngressCleanup cleanup, CleanupProbe probe, List<UUID> tenants) {
+    for (int i = 0; i < (tenants.size() + 31) / 32; i++) cleanup.sweepOnce();
+    assertEquals(tenants, probe.batches.stream().flatMap(List::stream).toList());
+    assertEquals(tenants, probe.visits, "every historical tenant incurs a real RLS delete attempt");
+    assertEquals(
+        tenants, ingressTenants(), "preparation must not trim the global tenant directory");
+  }
+
+  /** Private files survive failed assertions; default Surefire drops TestReporter entries. */
+  static final class RaceDiagnostics implements AutoCloseable {
+    final Path path;
+    final long began = System.nanoTime();
+    final Queue<String> phases = new ConcurrentLinkedQueue<>();
+    final Map<String, Long> counts = new ConcurrentSkipListMap<>();
+    final AtomicReference<Status.Code> code = new AtomicReference<>();
+
+    RaceDiagnostics(Path directory) {
+      path = directory.resolve("late-register-" + UUID.randomUUID() + ".log");
+    }
+
+    void phase(String name) {
+      phases.add(name + "=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began));
+    }
+
+    RegisterAgentSourceResponse register(Supplier<RegisterAgentSourceResponse> call) {
+      phase("original_rpc_started");
+      try {
+        var receipt = call.get();
+        code.set(Status.Code.OK);
+        return receipt;
+      } catch (NetworkAuthorityClient.SourceRpcFailure error) {
+        code.set(error.grpcCode());
+        throw error;
+      } finally {
+        phase("original_rpc_finished");
+      }
+    }
+
+    public void close() throws IOException {
+      Files.createDirectories(path.getParent());
+      String result = "phase_elapsed_ms=" + phases + "\ncounts=" + counts + "\n";
+      if (code.get() != null) result += "late_register_grpc_code=" + code.get().name() + "\n";
+      Files.writeString(path, result, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+    }
+  }
+
+  @Test
+  void fenceCommitPrecedesLateRegisterFinalTransactionForTheSameOriginalKey() throws Exception {
+    try (var diagnostics = new RaceDiagnostics(Path.of("target", "network-source-history"))) {
+      // Walk the existing directory with the production cursor BEFORE creating the current
+      // tenant. Retained directory entries model tenants whose ingresses were already swept;
+      // no current connection, anchor, credential or source proof is seeded or rewritten.
+      h.close();
+      h = null;
+      var clock = new Time();
+      var existing = ingressTenants();
+      var baseline = new CleanupProbe();
+      walkExistingTenants(baseline.cleanup(clock), baseline, existing);
+      diagnostics.counts.put("baseline_tenants", (long) baseline.visits.size());
+      diagnostics.counts.put("baseline_batches", (long) baseline.batches.size());
+      diagnostics.counts.put("baseline_removed", (long) baseline.deleted);
+      var seeds = new ArrayList<Object[]>();
+      for (int i = 0; i < 96; i++) seeds.add(new Object[] {UuidV7.next()});
+      store
+          .networkJdbc()
+          .batchUpdate("INSERT INTO iam.network_ingress_tenant(tenant_id) VALUES (?)", seeds);
+      var history = ingressTenants();
+      assertEquals(existing.size() + 96, history.size());
+      var probe = new CleanupProbe();
+      var cleanup = probe.cleanup(clock);
+      walkExistingTenants(cleanup, probe, history);
+      diagnostics.counts.put("seeded_history", 96L);
+      diagnostics.counts.put("prepared_tenants", (long) probe.visits.size());
+      diagnostics.counts.put("prepared_batches", (long) probe.batches.size());
+      diagnostics.counts.put("prepared_removed", (long) probe.deleted);
+      assertEquals(baseline.visits.size() + 96, probe.visits.size());
+      assertEquals(baseline.batches.size() + 3, probe.batches.size());
+      diagnostics.phase("historical_cursor_prepared");
+      h = new Harness(clock);
+      h.start();
+      var expectedDirectory = new ArrayList<>(history);
+      expectedDirectory.add(h.tenant);
+      assertEquals(
+          expectedDirectory, ingressTenants(), "new real tenant must follow prepared cursor");
+      // The existing cursor's next production query must visit only this new real tenant,
+      // regardless of how many historical tenants the complete suite accumulated.
+      raceAfterCleanupPreparation(cleanup, probe, diagnostics);
+    }
+  }
+
+  void raceAfterCleanupPreparation(
+      NetworkIngressCleanup cleanup, CleanupProbe probe, RaceDiagnostics diagnostics)
+      throws Exception {
+    var request = durableMiss();
+    var original = frozen(request);
+    var phases = diagnostics.phases;
+    Consumer<String> phase = diagnostics::phase;
+    // Redeem preserves other live IAM ingresses. Finish OAuth, C2/ref and READY before the
+    // original Register's five-second RPC budget starts; its C1 must still pass real initial
+    // authorization. Only then advance past C1 expiry and run the real ingress GC.
+    h.clock.advance(3500);
+    h.reconnect();
+    h.reference(original.getConnection());
+    phase.accept("c2_ready_c1_still_live");
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var orgReturned = new AtomicBoolean();
+    h.beforeSourceOrg =
+        () -> {
+          phase.accept("original_initial_checks_passed_org_entered");
+          entered.countDown();
+          assertDoesNotThrow(
+              () -> assertTrue(release.await(10, TimeUnit.SECONDS), phases::toString));
+          assertFalse(Context.current().isCancelled(), phases::toString);
+          phase.accept("org_released_to_final_transaction");
+          orgReturned.set(true);
+        };
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var late =
+          executor.submit(
+              () ->
+                  diagnostics.register(
+                      () -> TenantContext.call(h.tenant, () -> h.client.registerSource(original))));
+      try {
+        assertTrue(entered.await(5, TimeUnit.SECONDS), phases::toString);
+        h.clock.advance(101);
+        int previousBatches = probe.batches.size(), previousVisits = probe.visits.size();
+        int removed = cleanup.sweepOnce();
+        diagnostics.counts.put("critical_batches", (long) probe.batches.size() - previousBatches);
+        diagnostics.counts.put("critical_tenants", (long) probe.visits.size() - previousVisits);
+        diagnostics.counts.put("critical_removed", (long) removed);
+        assertEquals(1, probe.batches.size() - previousBatches);
+        assertEquals(List.of(h.tenant), probe.batches.getLast());
+        assertEquals(List.of(h.tenant), probe.visits.subList(previousVisits, probe.visits.size()));
+        assertEquals(1, removed, "real production GC must remove exactly the expired C1");
+        assertNull(
+            h.tx(() -> store.get("network_ingress", original.getConnection().getIngress(), false)));
+        phase.accept("c1_expired_and_gc_complete");
+        assertEquals("not_committed", text(h.register(h.retry(request)), "result"));
+        phase.accept("fence_and_collab_receipt_committed");
+        var committed = h.facts();
+        phase.accept("committed_facts_captured_release");
+        release.countDown();
+        var lateReceipt = late.get(5, TimeUnit.SECONDS);
+        assertTrue(orgReturned.get(), "late Register must return through its final transaction");
+        assertEquals(Status.Code.OK, diagnostics.code.get(), phases::toString);
+        assertEquals(h.observedSources.lastFenceReply, lateReceipt);
+        assertEquals(
+            RegisterAgentSourceResponse.parseFrom((byte[]) h.row(request).get("iam_response")),
+            lateReceipt);
+        assertEquals(original, h.observedSources.lastFence);
+        assertTrue(lateReceipt.getDefinitivelyUncommitted());
+        assertFalse(lateReceipt.hasSource());
+        assertEquals(original.getOperationId(), lateReceipt.getOperationId());
+        assertEquals(h.row(request).get("request_digest"), lateReceipt.getRequestDigest());
+        assertEquals("original_connection_invalid_uncommitted", lateReceipt.getRejectionReason());
+        var after = h.facts();
+        assertEquals(committed, after);
+        assertTrue(after.get("iam.network_source").isEmpty());
+        assertTrue(after.get("iam.network_source_chain").isEmpty());
+      } finally {
+        release.countDown();
+      }
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"health", "ready", "epoch", "boot", "slot", "slotExpiry", "deadline", "ref"})
+  void gateChangesAfterUndeterminedReadPreventFence(String change) throws Exception {
+    var request = durableMiss();
+    expireOriginal(false);
+    h.observedSources.readFailure = Status.UNAVAILABLE;
+    var before = h.facts();
+    h.observedSources.afterRead = () -> changePendingGate(change);
+    noHistoricalResult(() -> h.register(h.retry(request)));
+    pendingWithoutIamFailure(request, before);
+    assertEquals(0, h.observedSources.fence.get());
+  }
+
+  void changePendingGate(String change) {
+    switch (change) {
+      case "health" ->
+          h.db(
+              () ->
+                  jdbc.update(
+                      "UPDATE collab.network_node SET local_identity_status='identity_rollback' WHERE tenant_id=? AND node_id=?",
+                      h.tenant,
+                      h.c.getNode()));
+      case "ready" ->
+          h.db(
+              () ->
+                  jdbc.update(
+                      "UPDATE collab.network_node SET wire_status='reconciling' WHERE tenant_id=? AND node_id=?",
+                      h.tenant,
+                      h.c.getNode()));
+      case "epoch" ->
+          h.db(
+              () ->
+                  jdbc.update(
+                      "UPDATE collab.network_node SET connection_epoch=connection_epoch+1 WHERE tenant_id=? AND node_id=?",
+                      h.tenant,
+                      h.c.getNode()));
+      case "boot" ->
+          h.db(
+              () ->
+                  jdbc.update(
+                      "UPDATE collab.network_node SET local_boot_id='changed-boot' WHERE tenant_id=? AND node_id=?",
+                      h.tenant,
+                      h.c.getNode()));
+      case "slot" ->
+          h.db(
+              () ->
+                  jdbc.update(
+                      "UPDATE collab.network_source_slot SET holder=? WHERE tenant_id=? AND node_id=?",
+                      UuidV7.next(),
+                      h.tenant,
+                      h.c.getNode()));
+      case "slotExpiry" ->
+          h.db(
+              () ->
+                  jdbc.update(
+                      "UPDATE collab.network_source_slot SET valid_until=? WHERE tenant_id=? AND node_id=?",
+                      Timestamp.from(h.clock.instant().minusSeconds(1)),
+                      h.tenant,
+                      h.c.getNode()));
+      case "deadline" -> h.clock.advance(31);
+      case "ref" ->
+          h.observed.resolveEcho =
+              value ->
+                  value.toBuilder()
+                      .setConnectionAnchor(
+                          value.getConnectionAnchor().toBuilder()
+                              .setAnchorId(UuidV7.next().toString()))
+                      .build();
+      default -> throw new AssertionError(change);
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"health", "ready", "epoch", "boot", "slot", "slotExpiry", "deadline", "ref"})
+  void completeFenceReceiptIsDurableEvenWhenCurrentGateChangesBeforeSigning(String change)
+      throws Exception {
+    var request = durableMiss();
+    expireOriginal(true);
+    h.observedSources.afterFence = () -> changePendingGate(change);
+    noHistoricalResult(() -> h.register(h.retry(request)));
+    assertEquals("not_committed", h.row(request).get("status"));
+    assertArrayEquals(
+        h.observedSources.lastFenceReply.toByteArray(),
+        (byte[]) h.row(request).get("iam_response"));
+    assertTrue(h.facts().get("iam.network_source").isEmpty());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "original_frame",
+        "original_connection",
+        "iam_request",
+        "request_digest",
+        "business_json",
+        "epoch",
+        "boot_id",
+        "witness_json"
+      })
+  void frozenPendingRowChangeAfterFenceRejectsLateCompletion(String field) throws Exception {
+    var request = durableMiss();
+    expireOriginal(false);
+    h.observedSources.afterFence =
+        () ->
+            h.db(
+                () -> {
+                  Object altered =
+                      switch (field) {
+                        case "original_frame", "original_connection", "iam_request" ->
+                            new byte[] {1};
+                        case "epoch" -> 999L;
+                        default -> "changed-original";
+                      };
+                  return jdbc.update(
+                      "UPDATE collab.network_source_operation SET "
+                          + field
+                          + "=? WHERE tenant_id=? AND operation_id=?",
+                      altered,
+                      h.tenant,
+                      text(request, "operation_id"));
+                });
+    code("outcome_unknown", h.register(h.retry(request)));
+    assertEquals("pending", h.row(request).get("status"));
+    assertNull(h.row(request).get("iam_response"));
+    assertTrue(h.facts().get("iam.network_source").isEmpty());
+    assertEquals(1, h.facts().get("iam.network_source_operation").size());
+  }
+
+  @Test
+  void concurrentSameReceiptCompletionIsReplayedWithoutLateRewrite() throws Exception {
+    var request = durableMiss();
+    expireOriginal(false);
+    var winner = new AtomicReference<Map<String, Object>>();
+    var winnerXmin = new AtomicReference<String>();
+    h.observedSources.afterFence =
+        () ->
+            h.db(
+                () -> {
+                  var receipt = h.observedSources.lastFenceReply;
+                  var result =
+                      object()
+                          .put("app_version", "1.0")
+                          .put("type", "source_register_result")
+                          .put("operation_id", receipt.getOperationId())
+                          .put("result", "not_committed")
+                          .putNull("source");
+                  result
+                      .putObject("failure_evidence")
+                      .put("authority", "iam")
+                      .put("reason", receipt.getRejectionReason())
+                      .put("request_digest", receipt.getRequestDigest());
+                  jdbc.queryForList(
+                      "SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
+                      h.tenant + ":source:Register:" + receipt.getOperationId());
+                  jdbc.update(
+                      "UPDATE collab.network_source_operation SET status='not_committed',iam_response=?,result_json=? WHERE tenant_id=? AND operation_id=? AND status='pending'",
+                      receipt.toByteArray(),
+                      NetworkJson.canonical(result),
+                      h.tenant,
+                      receipt.getOperationId());
+                  jdbc.update(
+                      "UPDATE collab.network_source_outbox SET completed=true WHERE tenant_id=? AND operation_id=?",
+                      h.tenant,
+                      h.row(request).get("id"));
+                  winner.set(h.row(request));
+                  winnerXmin.set(
+                      jdbc.queryForObject(
+                          "SELECT xmin::text FROM collab.network_source_operation WHERE tenant_id=? AND operation_id=?",
+                          String.class,
+                          h.tenant,
+                          text(request, "operation_id")));
+                  return null;
+                });
+    assertEquals("not_committed", text(h.register(h.retry(request)), "result"));
+    sameRow(winner.get(), h.row(request));
+    assertEquals(
+        winnerXmin.get(),
+        h.db(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT xmin::text FROM collab.network_source_operation WHERE tenant_id=? AND operation_id=?",
+                    String.class,
+                    h.tenant,
+                    text(request, "operation_id"))),
+        "late same receipt must not rewrite the winner, including xmin");
+    assertTrue(h.facts().get("iam.network_source").isEmpty());
   }
 
   void changeIdentity(String change) {

@@ -2025,7 +2025,7 @@ class NetworkSourceControlPostgresTest {
         peer.getCalls.get(),
         "Register must not substitute current Get for a historical receipt read");
     authority.invalid.add(f.c().getIngress());
-    var next = f.c().toBuilder().setIngress(f.c().getIngress() + "-next").build();
+    var next = receiptReconnectConnection(f.c());
     var ready =
         f.ready()
             .deepCopy()
@@ -2036,6 +2036,12 @@ class NetworkSourceControlPostgresTest {
             .put("registration_revision", "1");
     call(() -> wire.ready(next, bytes(ready)));
     var nextFixture = new Fixture(next, ready, f.registration());
+    var verified = call(() -> source.verifiedConnection(next));
+    assertNotNull(verified.anchor(), "canonical C2 must retain its authoritative reference");
+    assertEquals(next, verified.anchor().getConnection());
+    var proof = call(() -> source.readConnectionAnchor(authority.ref(f.c()), verified.anchor()));
+    assertEquals(authority.ref(f.c()), proof.getOriginal());
+    assertEquals(verified.anchor(), proof.getCurrent());
     reconcile.put("epoch", "2").put("boot_id", "next-boot");
     int getsBeforeReplay = peer.getCalls.get();
     assertEquals(binding, binding(register(nextFixture, reconcile)));
@@ -2058,6 +2064,12 @@ class NetworkSourceControlPostgresTest {
     var get = frame(nextFixture, "source_get").put("source_binding", binding).put("epoch", "2");
     assertEquals("active", get(nextFixture, get).path("source").path("state").asString());
     assertEquals(next, peer.lastGet.getConnection());
+  }
+
+  static NetworkAuthorityConnection receiptReconnectConnection(
+      NetworkAuthorityConnection original) {
+    // Resolve can return a retained reference only for a canonical redeemed C.
+    return original.toBuilder().setIngress(newIngress()).build();
   }
 
   @Test
@@ -2206,8 +2218,11 @@ class NetworkSourceControlPostgresTest {
     }
     var request = frame(f, "source_get").put("source_binding", id);
     assertEquals("active", get(f, request).path("source").path("state").asString());
-    ((ObjectNode) request.path("native_witness"))
-        .put("valid_until", now().plusSeconds(29).toString());
+    var nativeWitness = (ObjectNode) request.path("native_witness");
+    String originalUntil = nativeWitness.path("valid_until").asString();
+    String changedUntil = Instant.parse(originalUntil).minusSeconds(1).toString();
+    assertNotEquals(originalUntil, changedUntil);
+    nativeWitness.put("valid_until", changedUntil);
     code("conflict", get(f, request));
     var mismatch = frame(f, "source_get").put("source_binding", id);
     ((ObjectNode) mismatch.path("native_witness")).put("binding_revision", "1");
