@@ -7,7 +7,11 @@ import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createNatsBinaryPreparer } from '../../clients/dsh-plugin/test/network/transport/support/nats-binary.js';
-import { childProcess, javaClasspath } from './support/assembly-process.mjs';
+import {
+  childProcess,
+  javaClasspath,
+  stopChild,
+} from './support/assembly-process.mjs';
 
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -214,8 +218,7 @@ export async function runAssembly() {
     ]) {
       if (!child) continue;
       try {
-        await child.stop(command);
-        manifest.stages.push({ stage: name + '-closed' });
+        await stopChild(name, child, command, manifest.stages);
       } catch (error) {
         failures.push(error);
       }

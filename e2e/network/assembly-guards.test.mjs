@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { childProcess } from './support/assembly-process.mjs';
+import { childProcess, stopChild } from './support/assembly-process.mjs';
 import { prepareDevice } from './support/assembly-device.mjs';
 import { createDeviceProvider } from '../../clients/dsh-plugin/src/network/device-provider.js';
 import { testRoots } from '../../clients/dsh-plugin/test/network/trust/keyset-fixtures.js';
@@ -50,8 +50,29 @@ test('assembly child channel matches replies, stops and waits for its exact chil
   try {
     assert.equal((await child.request({ op: 'probe' })).answer, 42);
   } finally {
-    assert.equal((await child.stop()).code, 0);
+    const stages = [];
+    assert.equal((await stopChild('gateway', child, 'stop', stages)).code, 0);
+    assert.deepEqual(stages, [
+      { stage: 'gateway-closed', exitCode: 0, signal: null },
+    ]);
   }
+});
+
+test('failed owned child retains its actual closed exit status', async () => {
+  const stages = [];
+  const child = childProcess(process.execPath, [
+    '-e',
+    `require('node:readline').createInterface({input:process.stdin}).once('line',()=>process.exit(7));`,
+  ]);
+  assert.equal(child.exit, undefined);
+  await assert.rejects(
+    stopChild('gateway', child, 'stop', stages),
+    /owned child exited 7\/null/,
+  );
+  assert.deepEqual(child.exit, { code: 7, signal: null });
+  assert.deepEqual(stages, [
+    { stage: 'gateway-closed', exitCode: 7, signal: null },
+  ]);
 });
 
 test('business mutant changes one production Get signature check and keeps other verifications', async () => {
@@ -74,7 +95,7 @@ test('business mutant changes one production Get signature check and keeps other
 });
 
 const stages = ['ready', 'gateway-ready', 'gateway-closed', 'java-closed'].map(
-  (stage) => ({ stage }),
+  (stage) => ({ stage, exitCode: 0, signal: null }),
 );
 const base = () => ({
   brokerVersion: '2.15.1',
@@ -141,4 +162,23 @@ test('verdict refuses initialization/SQL/compile errors and a green mutant', () 
       1,
     ),
   );
+  for (const stage of ['gateway-closed', 'java-closed'])
+    assert.throws(() =>
+      assertVerdict(
+        {
+          ...mutant(),
+          stages: stages.map((v) => ({
+            ...v,
+            exitCode: v.stage === stage ? 1 : 0,
+            signal: null,
+          })),
+          failures: [
+            ...mutant().failures,
+            { message: 'owned child exited 1/null' },
+          ],
+        },
+        'SignatureBypass',
+        1,
+      ),
+    );
 });

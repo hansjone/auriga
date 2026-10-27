@@ -27,6 +27,11 @@ export function assertVerdict(manifest, mode, exit) {
       manifest.stages.some((v) => v.stage === stage),
       'incomplete real lifecycle',
     );
+  for (const stage of ['gateway-closed', 'java-closed']) {
+    const closed = manifest.stages.find((v) => v.stage === stage);
+    assert.equal(closed.exitCode, 0, 'service cleanup must succeed');
+    assert.equal(closed.signal, null, 'service must not require termination');
+  }
   if (mode === 'Control') {
     assert.equal(exit, 0);
     assert.equal(manifest.completed, true);

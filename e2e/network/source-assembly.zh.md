@@ -6,6 +6,10 @@
 插件使用生产 device-provider、connection-runtime、NatsTransport、file-ledger、
 typed-local 登记和 source controller，不注入全业务 provider 或假业务响应。
 
+关闭阶段只在自有子进程实际触发 close 后记录，包含原始 exitCode/signal；
+非零退出也保留 gateway-closed/java-closed 供诊断，同时保留失败。
+验收仍要求 gateway/Java 退出码为 0、无终止信号；仅有关闭阶段不算清理成功。
+
 ## 执行
 
 从本工位根目录保留派工环境，先完成非 PG 编译及工具守卫：

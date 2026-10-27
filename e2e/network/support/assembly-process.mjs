@@ -63,6 +63,9 @@ export function childProcess(executable, args, options = {}) {
     lines,
     errors,
     events: publicEvents,
+    get exit() {
+      return exit && { ...exit };
+    },
     async wait(predicate, name, timeout = 180_000) {
       const until = Date.now() + timeout;
       for (;;) {
@@ -115,6 +118,22 @@ export function childProcess(executable, args, options = {}) {
     },
   };
   return api;
+}
+
+// A nonzero exit still proves closure, but remains a failure for the verdict.
+// Only the actual close event can produce a stage; a shutdown timeout cannot.
+export async function stopChild(name, child, command, stages) {
+  try {
+    return await child.stop(command);
+  } finally {
+    const exit = child.exit;
+    if (exit)
+      stages.push({
+        stage: name + '-closed',
+        exitCode: exit.code,
+        signal: exit.signal,
+      });
+  }
 }
 
 const unescapeXml = (value) =>
