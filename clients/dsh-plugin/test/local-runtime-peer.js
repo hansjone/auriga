@@ -29,7 +29,8 @@ export async function runtimePeer(t, options = {}) {
     sub: randomUUID(),
     did: randomUUID(),
     iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
+    exp:
+      Math.floor(Date.now() / 1000) + (options.accessLifetimeSeconds ?? 3600),
   };
   const unsigned = [{ alg: 'ES256', kid: 'test-key', typ: 'at+jwt' }, claims]
     .map((v) => Buffer.from(JSON.stringify(v)).toString('base64url'))
