@@ -7,11 +7,11 @@
 需要 JDK 25、Go 1.27、Node 22.12+、仓库规定的 pnpm，以及 PostgreSQL 16 的 `psql.exe`。构建使用锁文件和独立 node_modules，不升级依赖；需要设置工程工作法中的 `AURIGA_PNPM_STORE`。所有操作从仓库根执行。派工会话之外先 dot-source 主控提供的 auriga-env.ps1；没有该脚本的普通开发环境，应自行设置 AURIGA_PNPM_STORE 指向可写的依赖缓存目录。
 
 ```powershell
-$betaState = Join-Path $env:LOCALAPPDATA 'Auriga\beta-ui'
+$betaState = 'D:\auriga-beta-state\beta-ui' # 仓库外的本机普通目录，按实际位置调整
 .\scripts\beta-ui\beta-ui.ps1 init -StateDir $betaState
 ```
 
-StateDir 必须是仓库外的本机普通目录。初始化先设置并核验仅当前账号可访问、禁止继承的 ACL，再产生密码、加密密钥和本机证书。不会把 CA 加入系统证书库。初始化已有目录会拒绝重新生成密钥；保留该目录才能重新登录同一个数据库。
+StateDir 必须是仓库外的本机普通目录。Claude 桌面端等 MSIX 宿主可能重定向 `%LOCALAPPDATA%`，子进程看到的路径可能不同，因此使用明确的普通绝对路径，不从 LOCALAPPDATA 推导 StateDir。初始化先设置并核验仅当前账号可访问、禁止继承的 ACL，再产生密码、加密密钥和本机证书。不会把 CA 加入系统证书库。初始化已有目录会拒绝重新生成密钥；保留该目录才能重新登录同一个数据库。
 
 使用已有 PostgreSQL 管理员的受限 pgpass 文件。若尚无该文件，可在普通 PowerShell 中交互创建；不要在命令行输入明文密码，也不要开启终端转录：
 
@@ -111,9 +111,11 @@ try { go vet ./...; go test -count=1 ./... } finally { Pop-Location }
 
 首次启动需要联网下载已锁定的依赖。构建环境沿前述 `auriga-env.ps1`/`AURIGA_PNPM_STORE`，独立 node_modules、frozen lockfile；插件类型检查、面板构建和成品打包完成后，使用正式 `dsh plugin --profile web add <本仓成品.tgz>` 安装，禁用安装生命周期脚本。不会修改全局 npm、用户 DSH 或系统 PATH。
 
+插件安装所用 pnpm 精确取自仓库根 `package.json` 的 `packageManager`（当前 `pnpm@11.28.6`）。launcher 在隔离 `COREPACK_HOME` 执行 `corepack prepare pnpm@11.28.6 --activate`，设置 `COREPACK_DEFAULT_TO_LATEST=0`，并在 StateDir/profile 的 package.json 声明同一版本。准备后禁用项目声明进行一次 `pnpm --version` 检查，确认隔离默认版本本身正确，避免工位上层仓库声明掩盖缺失默认的问题；不符就拒绝继续。实际版本记在 plugin-dsh.json，准备和版本输出分别在 pnpm-prepare.log、pnpm-version.log，不依赖或修改全局 Corepack 缓存。
+
 ```powershell
 # 父目录应已存在；StateDir 本身必须不存在，每轮换一个新目录。
-$pluginState = Join-Path $env:LOCALAPPDATA ('Auriga\plugin-beta-' + [guid]::NewGuid().ToString('N'))
+$pluginState = Join-Path 'D:\auriga-beta-state' ('plugin-' + [guid]::NewGuid().ToString('N'))
 node scripts/beta-ui/plugin-dsh.mjs launch --state $pluginState
 node scripts/beta-ui/plugin-dsh.mjs status --state $pluginState
 # 验收结束后执行；可重复 stop，不按端口或进程名杀其他 DSH。
@@ -136,6 +138,6 @@ node scripts/beta-ui/plugin-dsh.mjs stop --state $pluginState
 node --test e2e/beta-ui/plugin-dsh.test.mjs
 ```
 
-此测试覆盖参数拒绝、真实 profile 禁区、全新目录、junction 逃逸、继承环境隔离、PID 复用拒杀，以及宿主缺能力和锁定 integrity 不符时拒绝。launch 自检检查真实宿主启动、原生启动票据交换、插件本机登录/status、设置状态和设置模块可用，并要求实际生效平台等于 Beta 门户；结果记入 plugin-dsh.json 的 startupChecks。没有代填团队凭据，不计真人 TOTP、刷新续期、退出撤销或完整浏览器视觉通过。构建、安装、宿主初始化或路由失败均非通过；查看对应 host-install/build/profile-init/plugin-install/profile-config/dsh 日志，保留首次失败。启动未完成时只清理本次自有宿主，仍保留 StateDir。命令崩溃留下 plugin-dsh.lock 时，先核对原命令已退出再由主控处置，不能绕过活跃命令锁。
+此测试覆盖参数拒绝、真实 profile 禁区、全新目录、junction 逃逸、继承环境隔离、PID 复用拒杀，以及宿主缺能力、锁定 integrity 不符、隔离 pnpm 版本不符时拒绝。launch 自检检查真实宿主启动、原生启动票据交换、插件本机登录/status、设置状态和设置模块可用，并要求实际生效平台等于 Beta 门户；结果记入 plugin-dsh.json 的 startupChecks。没有代填团队凭据，不计真人 TOTP、刷新续期、退出撤销或完整浏览器视觉通过。构建、安装、宿主初始化或路由失败均非通过；查看对应 pnpm-prepare/pnpm-version/host-install/build/profile-init/plugin-install/profile-config/dsh 日志，保留首次失败。启动未完成时只清理本次自有宿主，仍保留 StateDir。命令崩溃留下 plugin-dsh.lock 时，先核对原命令已退出再由主控处置，不能绕过活跃命令锁。
 
 原 `0.2.0-rc.2` 宿主缺少现有插件要求的原生连接能力。按主控决定，本脚手架统一使用上述精确 rc.3 基线，不修改插件、不提供旧版本兼容；真人团队账号登录、TOTP、刷新和退出撤销仍由 root 按本节完成。

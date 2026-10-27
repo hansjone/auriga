@@ -42,6 +42,52 @@ export function assertRuntimeLock(lock) {
     throw new Error('DSH runtime 锁文件的版本或 integrity 与已核实基线不符');
 }
 
+export function verifyPackageManagerVersion(packageManager, output) {
+  const expected = /^pnpm@(\d+\.\d+\.\d+)$/.exec(packageManager)?.[1];
+  if (!expected || output.trim() !== expected)
+    throw new Error(
+      '隔离 pnpm 版本必须精确匹配仓库 packageManager，拒绝使用最新版或不符版本',
+    );
+  return expected;
+}
+
+function preparePackageManager(state, env) {
+  const packageManager = regularJson(
+    path.join(repo, 'package.json'),
+  ).packageManager;
+  verifyPackageManagerVersion(packageManager, packageManager?.slice(5) ?? '');
+  json(path.join(state, 'package.json'), { private: true, packageManager });
+  const root = path.join(
+    path.dirname(process.execPath),
+    'node_modules/corepack',
+  );
+  const bin = regularJson(path.join(root, 'package.json')).bin?.corepack;
+  if (!bin || !inside(root, path.resolve(root, bin)))
+    throw new Error('Node 分发缺少 Corepack CLI，不能准备隔离 pnpm');
+  const corepack = path.resolve(root, bin);
+  runLogged(
+    process.execPath,
+    [corepack, 'prepare', packageManager, '--activate'],
+    state,
+    env,
+    'pnpm-prepare',
+  );
+  // Test the activated fallback itself: do not let the enclosing checkout's
+  // packageManager accidentally hide the missing default that root encountered.
+  runLogged(
+    process.execPath,
+    [corepack, 'pnpm', '--version'],
+    state,
+    { ...env, COREPACK_ENABLE_PROJECT_SPEC: '0' },
+    'pnpm-version',
+  );
+  const version = verifyPackageManagerVersion(
+    packageManager,
+    fs.readFileSync(path.join(state, 'pnpm-version.log'), 'utf8'),
+  );
+  return { packageManager, pnpmVersion: version };
+}
+
 async function installHost(state, env) {
   const runtime = path.join(state, 'runtime');
   fs.mkdirSync(runtime, { mode: 0o700 });
@@ -203,6 +249,9 @@ export function isolatedEnvironment(state, source = process.env) {
     TMPDIR: p('tmp'),
     COREPACK_HOME: p('cache/corepack'),
     COREPACK_ENABLE_AUTO_PIN: '0',
+    COREPACK_DEFAULT_TO_LATEST: '0',
+    COREPACK_ENABLE_PROJECT_SPEC: '1',
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
     npm_config_cache: p('cache/npm'),
     npm_config_userconfig: p('config/npmrc'),
     npm_config_globalconfig: p('config/global-npmrc'),
@@ -342,6 +391,8 @@ async function prepareLaunch({ state }, providerId) {
   };
   const manifestFile = path.join(state, 'plugin-dsh.json');
   json(manifestFile, manifest);
+  Object.assign(manifest, preparePackageManager(state, env));
+  json(manifestFile, manifest);
   const dsh = await installHost(state, env);
   runLogged(
     'powershell.exe',
@@ -370,6 +421,11 @@ async function prepareLaunch({ state }, providerId) {
       path.join(state, 'workspace'),
     );
   cli(['--profile', 'web', '--dump-config'], 'profile-init');
+  const profileFile = path.join(state, 'dsh/profiles/web/package.json');
+  json(profileFile, {
+    ...regularJson(profileFile),
+    packageManager: manifest.packageManager,
+  });
   cli(
     [
       'plugin',

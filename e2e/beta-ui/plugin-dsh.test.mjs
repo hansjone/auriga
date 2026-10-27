@@ -11,6 +11,7 @@ import {
   stopOwnedProcess,
   assertHostCapabilities,
   assertRuntimeLock,
+  verifyPackageManagerVersion,
 } from '../../scripts/beta-ui/plugin-dsh.mjs';
 
 const base = path.resolve('.dev/plugin-dsh');
@@ -132,6 +133,8 @@ test('child environment drops real profiles, credentials, patches and Node injec
     USERPROFILE: 'real-user',
     npm_config_userconfig: 'real-npmrc',
     PSModulePath: 'foreign',
+    COREPACK_DEFAULT_TO_LATEST: '1',
+    COREPACK_ENABLE_PROJECT_SPEC: '0',
   };
   const env = isolatedEnvironment(base, source);
   for (const key of [
@@ -155,8 +158,24 @@ test('child environment drops real profiles, credentials, patches and Node injec
   ])
     assert.ok(env[key].startsWith(base + path.sep), key);
   assert.equal(env.AURIGA_MODE, 'connect');
+  assert.equal(env.COREPACK_DEFAULT_TO_LATEST, '0');
+  assert.equal(env.COREPACK_ENABLE_PROJECT_SPEC, '1');
   assert.equal(env.Path, 'tools');
   assert.equal(source.USERPROFILE, 'real-user');
+});
+
+test('isolated pnpm must match the exact repository packageManager and rejects latest or mismatched versions', () => {
+  const pm = JSON.parse(
+    fs.readFileSync(path.resolve('package.json')),
+  ).packageManager;
+  assert.equal(verifyPackageManagerVersion(pm, '11.28.6\r\n'), '11.28.6');
+  for (const actual of ['12.15.0', '', '11.28.6\n12.15.0', 'pnpm@11.28.6'])
+    assert.throws(() => verifyPackageManagerVersion(pm, actual), /pnpm/);
+  for (const requested of ['pnpm@latest', 'pnpm@^11.28.6', 'npm@11.28.6'])
+    assert.throws(
+      () => verifyPackageManagerVersion(requested, '11.28.6'),
+      /pnpm/,
+    );
 });
 
 test('Beta patch is enabled and contains explicit loopback HTTP plus native client, no credentials', () => {
