@@ -21,6 +21,33 @@ const localUri = new URL('../plugin/local-login.schema.json', import.meta.url)
   .href;
 ajv.addSchema(schema, localUri);
 const validate = (name) => ajv.compile({ $ref: localUri + '#/$defs/' + name });
+
+test('verified local identity does not require Team readiness and disconnected status is explicit', () => {
+  const status = validate('Status');
+  const signedIn = {
+    available: true,
+    loggedIn: true,
+    connected: false,
+    communication: 'unavailable',
+    account: { subject: 'alice' },
+  };
+  assert.equal(status(signedIn), true, JSON.stringify(status.errors));
+  assert.equal(status({ ...signedIn, communication: 'connecting' }), true);
+  assert.equal(
+    status({ ...signedIn, connected: true, communication: 'ready' }),
+    true,
+  );
+  assert.equal(status({ ...signedIn, connected: true }), false);
+  assert.equal(
+    status({
+      ...signedIn,
+      connected: true,
+      loggedIn: false,
+      communication: 'ready',
+    }),
+    false,
+  );
+});
 test('local input permits only host-owned begin/resume and existing form StepInput', () => {
   const input = validate('LoginInput');
   for (const value of [

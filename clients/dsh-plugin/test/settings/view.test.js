@@ -74,6 +74,33 @@ function text(tree) {
 const button = (tree, label) =>
   nodes(tree).find((n) => n.type === 'button' && text(n) === label);
 
+test('verified identity remains visible when communication is unavailable', async () => {
+  const fixture = harness(async (url) =>
+    Response.json(
+      url.endsWith('/status')
+        ? {
+            loggedIn: true,
+            connected: false,
+            communication: 'unavailable',
+            account: { subject: 'alice' },
+          }
+        : {
+            platformOrigin: 'https://example.com',
+            activeOrigin: 'https://example.com',
+            deployment: 'cloud',
+          },
+    ),
+  );
+  fixture.render();
+  await setImmediate();
+  const tree = fixture.render();
+  assert.match(text(tree), /通信未就绪/);
+  assert.match(text(tree), /alice/);
+  assert.doesNotMatch(text(tree), /Team 已连接|未登录/);
+  assert.ok(button(tree, '退出本机登录'));
+  fixture.dispose();
+});
+
 for (const failure of ['500', 'timeout', 'invalid-json', 'invalid-state'])
   test(`account ${failure} is unknown and retryable, distinct from a signed-out response`, async () => {
     let recover = false;
@@ -141,7 +168,7 @@ test('settings show unconfigured state and persist edited address and deployment
   tree = fixture.render();
   assert.equal(stored.deployment, 'local');
   assert.equal(stored.platformOrigin, 'https://example.com');
-  assert.match(text(tree), /尚未应用于登录连接/);
+  assert.match(text(tree), /连接暂未生效/);
   assert.equal(
     nodes(tree).find((n) => n.type === 'a').props.href,
     'https://example.com/',

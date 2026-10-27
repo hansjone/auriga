@@ -7,6 +7,7 @@ import { createManaged } from './modes/managed.js';
 import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
 import { createConnectRuntime } from './local/runtime.js';
+import { savedPlatformConfig } from './local/platform.js';
 import {
   installLocalAdmission,
   installHttpResponseTracking,
@@ -28,16 +29,32 @@ export const inject = ['webServer', 'connection'];
  */
 export async function apply(ctx, config) {
   const mode = selectMode();
-  installSettings(ctx, config);
+  let binding;
+  let configured = !!config?.connect;
+  let admission;
+  const settings = installSettings(
+    ctx,
+    config,
+    mode === 'managed'
+      ? {}
+      : {
+          activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
+          nativeAuth: {
+            requestRejection: (req) =>
+              admission
+                ? admission.nativeAuth.requestRejection(req)
+                : ctx.connection.requestRejection(req),
+          },
+        },
+  );
   if (mode !== 'managed') {
     if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
       throw new Error(
         'auriga-dsh: local UI requires native host authentication',
       );
-    if (config?.connect) {
+    {
       // The parent owns the closed door while native providers are pending or
       // being unloaded. Only the injected child owns the runtime and tools.
-      let binding;
       const current = () => {
         if (!binding) return undefined;
         try {
@@ -53,6 +70,7 @@ export async function apply(ctx, config) {
         }
       };
       const gate = {
+        isConfigured: () => configured,
         resolve: (req) => current()?.runtime.resolve(req) ?? null,
         bindSocket: (req) => current()?.runtime.bindSocket(req) ?? false,
         status: (req) =>
@@ -64,14 +82,18 @@ export async function apply(ctx, config) {
           installHttpResponseTracking(
             ctx,
             (req, res) =>
-              current()?.runtime.bindHttpResponse(req, res) ?? false,
+              !configured ||
+              (current()?.runtime.bindHttpResponse(req, res) ?? false),
           ),
       };
-      const admission = installLocalAdmission(ctx.connection, gate, {
-        protocol: ctx.webServer.protocol,
-      });
+      const ensureAdmission = () => {
+        admission ??= installLocalAdmission(ctx.connection, gate, {
+          protocol: ctx.webServer.protocol,
+        });
+      };
+      if (configured) ensureAdmission();
       ctx.effect(
-        () => () => admission.dispose(),
+        () => () => admission?.dispose(),
         'auriga-dsh: persistent local door',
       );
       ctx.effect(
@@ -82,6 +104,10 @@ export async function apply(ctx, config) {
             handler(req, res) {
               const active = current();
               if (active) return active.handler(req, res);
+              if (!configured)
+                return createUnconfiguredLoginRoutes(
+                  admission?.nativeAuth ?? ctx.connection,
+                )(req, res);
               const rejected = admission.nativeAuth.requestRejection(req);
               res.writeHead(rejected ?? 503, { 'cache-control': 'no-store' });
               res.end();
@@ -94,11 +120,13 @@ export async function apply(ctx, config) {
           ctx.webServer.register({
             kind: 'prefix',
             path: '/auriga',
-            handler: createLocalSurfaceHandler({
-              mode: 'connect',
-              auth: ctx.connection,
-              runtime: gate,
-            }),
+            handler(req, res) {
+              return createLocalSurfaceHandler({
+                mode: configured ? 'connect' : 'standalone',
+                auth: admission?.nativeAuth ?? ctx.connection,
+                ...(configured ? { runtime: gate } : {}),
+              })(req, res);
+            },
           }),
         'auriga-dsh: connect surfaces',
       );
@@ -110,64 +138,129 @@ export async function apply(ctx, config) {
             throw new Error(
               'auriga-dsh: host profile directory required for persistent state',
             );
-          const runtime = await createConnectRuntime({
-            config: config.connect,
-            directory: join(profile.dir, 'auriga-connect'),
-            ctx: connectCtx,
-          });
-          const owned = {
-            ctx: connectCtx,
-            runtime,
-            handler: createConnectRoutes({ runtime, admission }),
+          const store = await settings.getStore(profile.dir);
+          let owned, networkProvider, modelProvider;
+          let detachNetwork, detachModels;
+          let disposed = false;
+          let configuring = Promise.resolve();
+          const invalidate = async (origin) => {
+            if (owned?.runtime.config.platformOrigin === origin) return;
+            const previous = owned;
+            binding = undefined;
+            owned = undefined;
+            detachNetwork = undefined;
+            detachModels = undefined;
+            if (previous) {
+              try {
+                await previous.runtime.resetAuthentication();
+              } finally {
+                await previous.runtime.close();
+              }
+            }
           };
-          // Optional trusted complete provider replaces the installation's
-          // official connection-only default for this injection lifetime.
+          const configure = (origin) => {
+            const operation = configuring.then(async () => {
+              if (disposed) return;
+              if (owned?.runtime.config.platformOrigin === origin) return;
+              await invalidate(origin);
+              configured = !!origin;
+              if (configured) ensureAdmission();
+              if (!origin || disposed) return;
+              const effective = await savedPlatformConfig(
+                config?.connect,
+                origin,
+              );
+              if (disposed) return;
+              const runtime = await createConnectRuntime({
+                config: effective,
+                directory: join(profile.dir, 'auriga-connect'),
+                ctx: connectCtx,
+              });
+              try {
+                const saved = runtime.vault.snapshot().credential;
+                if (
+                  saved &&
+                  ((saved.platformOrigin ??
+                    new URL(saved.claims.iss).origin) !==
+                    effective.platformOrigin ||
+                    (saved.issuer ?? saved.claims.iss) !== effective.issuer ||
+                    (saved.clientId ?? effective.clientId) !==
+                      effective.clientId)
+                )
+                  await runtime.resetAuthentication();
+                if (disposed) {
+                  await runtime.close();
+                  return;
+                }
+                if (networkProvider)
+                  detachNetwork = runtime.attachNetwork(networkProvider);
+                if (modelProvider)
+                  detachModels = await runtime.attachModels(modelProvider);
+                if (disposed) {
+                  await runtime.close();
+                  return;
+                }
+                owned = {
+                  ctx: connectCtx,
+                  runtime,
+                  handler: createConnectRoutes({ runtime, admission }),
+                };
+                binding = owned;
+              } catch (error) {
+                await runtime.close();
+                throw error;
+              }
+            });
+            configuring = operation.catch(() => {});
+            return operation;
+          };
+          const unsubscribe = store.subscribe(
+            (next) => configure(next.platformOrigin),
+            async (next) => {
+              await configuring;
+              await invalidate(next.platformOrigin);
+            },
+          );
+          connectCtx.effect(
+            () => () => {
+              disposed = true;
+              unsubscribe();
+              if (binding === owned) binding = undefined;
+              return owned?.runtime.close();
+            },
+            'auriga-dsh: injected local runtime',
+          );
           connectCtx.inject(['aurigaNetwork'], (networkCtx) => {
-            const detach = runtime.attachNetwork(networkCtx.aurigaNetwork);
-            networkCtx.effect(() => detach, 'auriga-dsh: network provider');
+            networkProvider = networkCtx.aurigaNetwork;
+            detachNetwork = owned?.runtime.attachNetwork(networkProvider);
+            networkCtx.effect(
+              () => () => {
+                networkProvider = undefined;
+                detachNetwork?.();
+                detachNetwork = undefined;
+              },
+              'auriga-dsh: network provider',
+            );
           });
           connectCtx.inject(['llm'], async (llmCtx) => {
-            const detach = await runtime.attachModels(llmCtx.llm);
-            llmCtx.effect(() => detach, 'auriga-dsh: public model adapter');
+            modelProvider = llmCtx.llm;
+            detachModels = await owned?.runtime.attachModels(modelProvider);
+            llmCtx.effect(
+              () => () => {
+                modelProvider = undefined;
+                detachModels?.();
+                detachModels = undefined;
+              },
+              'auriga-dsh: public model adapter',
+            );
           });
-          try {
-            connectCtx.effect(() => {
-              binding = owned;
-              return () => {
-                if (binding === owned) binding = undefined;
-                runtime.close();
-              };
-            }, 'auriga-dsh: injected local runtime');
-          } catch (error) {
-            runtime.close();
-            throw error;
-          }
+          // Keep settings/retry ownership alive even when the platform is down.
+          // The parent login door stays closed and activeOrigin remains empty.
+          await configure(store.snapshot().platformOrigin).catch(() => {});
         },
       );
       return;
     }
-    ctx.effect?.(
-      () =>
-        ctx.webServer.register({
-          kind: 'prefix',
-          path: '/auriga',
-          handler: createLocalSurfaceHandler({
-            mode,
-            auth: ctx.connection,
-          }),
-        }),
-      'auriga-dsh: local surfaces',
-    );
-    ctx.effect?.(
-      () =>
-        ctx.webServer.register({
-          kind: 'prefix',
-          path: '/auriga/local-login',
-          handler: createUnconfiguredLoginRoutes(ctx.connection),
-        }),
-      'auriga-dsh: unconfigured login',
-    );
-    return;
   }
   const runtime = await createManaged({
     env: process.env,

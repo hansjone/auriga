@@ -10,9 +10,10 @@ const messages = {
     reachable: '平台接口可达；不代表已登录或模型已授权。',
     unconfigured: '尚未配置平台连接',
     connected: 'Team 已连接；模型授权需单独确认。',
-    disconnected: 'Team 未连接',
-    pending:
-      '新地址已保存，尚未应用于登录连接；需由安装配置接入，旧凭据不会迁移。',
+    disconnected: '通信未就绪；身份登录与非通信功能可继续使用。',
+    pending: '设置已保存，但连接暂未生效，请确认平台可用后重新保存。',
+    reauthenticate: '平台已更换，请重新登录。',
+    login: '登录',
     security: '账号与安全',
     identity: '当前身份',
     device: '设备名',
@@ -50,9 +51,12 @@ const messages = {
       'Platform API reachable; sign-in and model authorization are separate.',
     unconfigured: 'Platform connection is not configured',
     connected: 'Team connected; model authorization is separate.',
-    disconnected: 'Team disconnected',
+    disconnected:
+      'Communication is not ready; sign-in and non-communication features remain available.',
     pending:
-      'Saved address is pending installation configuration. Existing credentials will not migrate.',
+      'Settings saved, but the connection could not be applied. Check the platform and save again.',
+    reauthenticate: 'Platform changed. Please sign in again.',
+    login: 'Sign in',
     security: 'Account and security',
     identity: 'Current identity',
     device: 'Device name',
@@ -249,6 +253,17 @@ export function createSettingsView(
             ? (account.account?.subject ?? t.missing)
             : t.signedOut,
       ),
+      state?.activeOrigin &&
+        account?.loggedIn === false &&
+        h(
+          'button',
+          {
+            type: 'button',
+            disabled: busy,
+            onClick: () => navigate(localURL('auriga/local-login')),
+          },
+          t.login,
+        ),
       row(
         t.device,
         account?.loggedIn === true
@@ -329,7 +344,13 @@ export function createSettingsView(
               });
               setState(next);
               setAddress(next.platformOrigin);
-              setNotice(t.saved);
+              const changed = next.platformOrigin !== state.platformOrigin;
+              const applied = next.platformOrigin === next.activeOrigin;
+              if (changed && applied)
+                setAccount({ loggedIn: false, connected: false });
+              setNotice(changed && applied ? t.reauthenticate : t.saved);
+              if (changed && applied && next.activeOrigin)
+                navigate(localURL('auriga/local-login'));
             }),
         },
         t.save,

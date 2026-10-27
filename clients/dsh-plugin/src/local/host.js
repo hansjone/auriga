@@ -124,6 +124,7 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
   ) {
     const original = nativeAdmit.call(connection, request);
     if ('rejection' in original) return original;
+    if (runtime.isConfigured?.() === false) return original;
     const upgrade = request.headers.upgrade?.toLowerCase() === 'websocket';
     if (
       !sameOrigin(
@@ -142,6 +143,7 @@ export function installLocalAdmission(connection, runtime, { protocol }) {
     /** @type {import('node:http').ServerResponse} */ response,
   ) {
     if (!nativeIndex.call(connection, request, response)) return false;
+    if (runtime.isConfigured?.() === false) return true;
     if (!sameOrigin(request)) {
       response.writeHead(403);
       response.end();

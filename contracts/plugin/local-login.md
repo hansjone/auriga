@@ -2,24 +2,26 @@
 
 本契约只覆盖安装者配置和当前 DSH 原生登录适配，不提供模型可调用的签会话接口。`local-login.schema.json` 是请求形状来源。接线不得将设备凭据当成门户 USER 凭据，或把账号、租户、源会话由模型参数指定。
 
-安装者在 `auriga-dsh` loader row 的 `config.connect` 写 ConnectConfig；未配置时保留独立模式壳。只接受受信 HTTPS 平台纯 origin，`allowLocalHttp=true` 仅准本机隔离测试。issuer 必须同 origin，JWKS 固定取 issuer + `/oauth2/jwks`，不消费 JWT 自带的远端 key URL。`clientId` 必须由 IAM 登记 nativeConnect 公共设备客户端，providerId 必须是真实 team-account。
+安装者可在 loader row 的 `config.connect` 写 ConnectConfig 默认值。profile 已保存的设置是平台地址的生效来源，包括显式清空；没有保存值时才使用 loader 默认地址。保存后立即应用，不要求重启。设置与连接使用同一地址校验：HTTPS，或显式回环/RFC1918/ULA IP HTTP；loader HTTP 仍需 `allowLocalHttp=true`，公网 HTTP 与内网 DNS HTTP 拒绝。issuer 必须同 origin，JWKS 固定取 issuer + `/oauth2/jwks`，不消费 JWT 自带的远端 key URL。`clientId` 必须由 IAM 登记 nativeConnect 公共设备客户端，默认 `auriga-dsh`。同 loader 平台沿用其 issuer/providerId；其他平台 issuer 默认为该 origin，公开 `/api/iam/v1/login/providers` 必须恰有一个 team-account/form 身份源，否则连接不可用，需安装者配置该平台的 providerId。不猜测应急管理员或随机身份源。
 
 可选 `config.connect.network` 是安装者提供的静态安装配置：`{realm,wssUrl,roots:[{kid,public_key_spki}]}`。存在时三项全部必需，各层拒绝未知字段。realm 是 1..18446744073709551615 的无前导零十进制字符串；roots 为 1..16 项，kid 使用 `[A-Za-z0-9._-]{1,128}` 且不得重复。公钥沿已有 `trust/keyset.js#publicKey` 导入、核对 Ed25519 算法并重导出比较，必须是规范无填充 base64url SPKI DER，拒绝坏 DER、非 Ed25519、私钥和 PEM。JSON Schema 检查形状，重复 kid 和公钥算法/DER 的语义检查由真实 parser 强制；SPKI 本身就是 pin，不另要求 fingerprint。
 
-完整固定 `wssUrl` 默认例子为 `wss://portal.example.com/net/v1/ws`；支持安装自定义路径、独立主机和端口、HTTPS IP 部署，不限制为同 origin 或公网 DNS。拒绝 userinfo、query、hash 和非 wss；`allowLocalHttp` 仍仅适用于原有 loopback HTTP 隔离测试，不允许 ws 或关闭 TLS。platformOrigin/issuer 的同 origin HTTPS 规则不变。
+完整固定 `wssUrl` 默认例子为 `wss://portal.example.com/net/v1/ws`；支持安装自定义路径、独立主机和端口、HTTPS IP 部署，不限制为同 origin 或公网 DNS。拒绝 userinfo、query、hash 和非 wss；`allowLocalHttp` 适用于显式回环或内网 IP HTTP，不允许 ws 或关闭 TLS。platformOrigin/issuer 仍要求同 origin。
 
-唯一权威来源是 loader row；平台解析后复制并冻结 network、roots 和每项公钥，只由 `local/runtime → createNetworkLifecycle → 受信 provider.prepare({accessToken,signal,installation})` 传递。HTTP 登录输入、浏览器设置、模型、SDK、首次 keyset 或远端 rootUrl 均不能覆盖安装根，不接受 TOFU、skipVerify、initialize、created。静态 realm/root 不替代未来 IAM 登记、keyset 与 announcement 的在线一致性核验。缺省没有测试根；已有测试 provider 可继续不带 installation 工作。类型由 `scripts/gen-connect-config.mjs` 随 `gen:steps` 正常生成。
+network 安装根的唯一权威来源是 loader row；保存的平台地址不同于 loader 平台时不启用其 network 配置，避免把旧平台的安装根套用到新平台。平台解析后复制并冻结 network、roots 和每项公钥，只由 `local/runtime → createNetworkLifecycle → 受信 provider.prepare({accessToken,signal,installation})` 传递。HTTP 登录输入、浏览器设置、模型、SDK、首次 keyset 或远端 rootUrl 均不能覆盖安装根，不接受 TOFU、skipVerify、initialize、created。静态 realm/root 不替代未来 IAM 登记、keyset 与 announcement 的在线一致性核验。缺省没有测试根；已有测试 provider 可继续不带 installation 工作。类型由 `scripts/gen-connect-config.mjs` 随 `gen:steps` 正常生成。
 
 配置单独存在不 attach provider，不调用网络 register/tickets/keys、不打开 transport、不创建或初始化 network ledger、不注册 SEND 或产授权事件。无 provider 时仍为 unconfigured；本配置交付不实现生产 provider、runtime allports、首次 READY incarnation bootstrap 或真实双 DSH 通信。
 
 本地路由前缀 `/auriga/local-login`：
 
 - GET `/status`：保持原生 DSH 启动 cookie/Peer 的认证，再创建当前进程的登录尝试。返回 Status，浏览器只得到会话 CSRF；尝试 cookie 为 HttpOnly/SameSite=Strict、300 秒。
-- POST `/login`：严格同 Origin、JSON、尝试/会话 CSRF。Begin 创建全新独立平台 jar 与 S256 verifier；Advance 只承接原 FormInput；Resume 仅在 Node 已有加密设备凭据时可用，重新 JWKS 验证及在线远程 Team 认证成功才重新建立本地浏览器会话。
+- POST `/login`：严格同 Origin、JSON、尝试/会话 CSRF。Begin 创建全新独立平台 jar 与 S256 verifier；Advance 只承接原 FormInput；Resume 仅在 Node 已有加密设备凭据时可用，重新 JWKS 验证身份后重新建立本地浏览器会话；Team 在后台独立连接，不参与身份登录成功条件。
 - POST `/logout`：严格同 Origin、JSON、会话或本次尝试 CSRF。匿名尝试只取消自身并清除该 attempt cookie，不修改已有设备、Team、其他浏览器会话或 HTTP/WS 流，取消后可重新获取尝试。全局设备退出要求已认证本机浏览器会话的 sub/tid/did 与当前设备一致，并在原子持久更新时再次核对。先失效同一设备的本机浏览器会话和其 WS、共享原生 API 已绑定的 HTTP 响应，再原子持久退出状态与加密撤销补偿；不停止 DSH Agent、会话任务或进程。本地持久失败不报告成功。Node 随后 POST `/oauth2/revoke`，form-urlencoded `{client_id,token}`，只用本设备 refresh，不传 did/浏览器 cookie；远端不可达返回 `remoteRevocation=pending` 并重试，不能冒称撤销完成。成功/未知/重复幂等200后才持久移除补偿。重启只对相同平台 origin/clientId 重试，避免配置更换泄露旧凭据。
 - GET `/` 与固定 `/assets/{adapter,index,styles}.js`：原生步骤视图与适配器，不接受任意文件路径、redirect、平台 URL、主体或令牌。
 
-Host 独立内存 jar 保存平台事务 cookie/门户 backing session cookie，仅当前认证尝试可用。nativeDevice、verifier、access/refresh、平台 cookie 不进 UI、URL、日志。UI complete 只提示步骤；Host 还须兑换设备 token、校验 ES256/JWKS/iss/aud/ptyp/ctx/did/tid/sub/scope/到期、原子持久设备凭据、在线 Team 初始化与原生工具注册，然后才发本机 cookie。成功清 jar 不调用平台 logout；仅未持久的失败尝试可用本次 jar 尽力补偿。已持久设备遇临时 Team 失败/浏览器取消时保留 backing，经重新在线验证后可 resume，不发未就绪的浏览器会话。取消须等待 commit 结果再决定补偿；显式退出仍串行持久 tombstone/设备撤销，不声称跨 IAM/FS 两阶段提交。
+Host 独立内存 jar 保存平台事务 cookie/门户 backing session cookie，仅当前认证尝试可用。nativeDevice、verifier、access/refresh、平台 cookie 不进 UI、URL、日志。UI complete 只提示步骤；Host 还须兑换设备 token、校验 ES256/JWKS/iss/aud/ptyp/ctx/did/tid/sub/scope/到期、原子持久设备凭据，然后即发本机 cookie。Team 初始化与原生工具注册在后台独立执行。成功清 jar 不调用平台 logout；仅未持久的失败尝试可用本次 jar 尽力补偿。Team 失败保留已验证身份及 backing；`loggedIn` 表示身份已验证，`connected` 只表示 Team 真正就绪，可选 `communication` 为 idle/connecting/ready/unavailable。Team 的 401/403/网络失败只显示“通信未就绪”，不等同于 IAM 身份失效；IAM 刷新与设备撤销仍失败关闭。浏览器刷新在 loggedIn=true、connected=false 时仍进入当前 DSH。取消须等待 commit 结果再决定补偿；显式退出仍串行持久 tombstone/设备撤销，不声称跨 IAM/FS 两阶段提交。
+
+换平台或清空平台时先使旧浏览器 bearer、绑定的 HTTP/WS 和在途登录尝试失效，沿退出路径持久 tombstone 与设备撤销补偿，再启用新地址；旧认证不得随设置迁移。保存已落盘而运行时应用失败时返回 503，activeOrigin 为空，界面提示重新保存，不冒称已生效。补偿只向其原平台发送；切到新平台后保留旧补偿，重新配置原平台才继续重试。
 
 浏览器 bearer 仅在进程内；重启不从磁盘恢复旧 bearer。设备凭据与通信投递映射放在 profile 私有目录 AES-GCM 文件，copy-on-write + 同目录原子 rename 后才发布内存快照。设备 refresh 单飞、检查同一 did/tid/sub 并先持久后发布；401/403 或到期关闭会话 WS 及共享原生 API 已绑定的 HTTP 响应，网络不可用显式显示断开。写操作不自动重放。
 
