@@ -20,12 +20,24 @@ const json = (file, value) =>
   fs.writeFileSync(file, JSON.stringify(value, null, 2), { mode: 0o600 });
 const unix = (value) => value.replaceAll('\\', '/');
 
+export function windowsPowerShellEnvironment(source = process.env) {
+  // Windows PowerShell rebuilds its own module paths when this variable is absent.
+  return Object.fromEntries(
+    Object.entries(source).filter(
+      ([key]) => key.toUpperCase() !== 'PSMODULEPATH',
+    ),
+  );
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: repo,
     windowsHide: true,
     encoding: 'utf8',
     ...options,
+    ...(command === 'powershell.exe'
+      ? { env: windowsPowerShellEnvironment(options.env) }
+      : {}),
   });
   if (result.error || result.status !== 0)
     throw new Error('Beta subprocess failed; inspect private logs');
@@ -501,7 +513,11 @@ export function processIdentity(pid) {
       '-Command',
       `$p=Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks.ToString() }`,
     ],
-    { encoding: 'utf8', windowsHide: true },
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+      env: windowsPowerShellEnvironment(),
+    },
   );
   return result.status === 0 && result.stdout.trim()
     ? result.stdout.trim()

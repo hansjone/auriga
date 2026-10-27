@@ -14,16 +14,21 @@ import org.junit.jupiter.api.io.TempDir;
 class ServiceTokenFilePublisherWindowsTest {
   @TempDir Path dir;
 
+  ProcessBuilder windowsPowerShell(String... arguments) {
+    var args = new ArrayList<>(List.of("powershell.exe", "-NoProfile", "-NonInteractive"));
+    args.addAll(List.of(arguments));
+    var command = new ProcessBuilder(args);
+    command.environment().keySet().removeIf(key -> key.equalsIgnoreCase("PSModulePath"));
+    return command;
+  }
+
   void restrict(Path path) throws Exception {
     Path root = Path.of("").toAbsolutePath();
     while (root != null && !Files.isRegularFile(root.resolve("scripts/beta-ui/private.ps1")))
       root = root.getParent();
     assertNotNull(root, "repository private ACL installer must be available");
     var command =
-        new ProcessBuilder(
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
+        windowsPowerShell(
                 "-File",
                 root.resolve("scripts/beta-ui/private.ps1").toString(),
                 "-Path",
@@ -37,10 +42,7 @@ class ServiceTokenFilePublisherWindowsTest {
 
   UserPrincipal everyone() throws Exception {
     var child =
-        new ProcessBuilder(
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
+        windowsPowerShell(
                 "-Command",
                 "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); ([Security.Principal.SecurityIdentifier]::new('S-1-1-0')).Translate([Security.Principal.NTAccount]).Value")
             .start();
@@ -60,6 +62,21 @@ class ServiceTokenFilePublisherWindowsTest {
     Path secret = Files.writeString(secretDir.resolve("secret"), Secrets.random());
     restrict(secret);
     return secret;
+  }
+
+  @Test
+  void repeatedRestrictionPreservesOwnerOnlyDirectoryAndFile() throws Exception {
+    Path secret = setup();
+    for (int rebuild = 0; rebuild < 3; rebuild++) {
+      restrict(dir.resolve("output"));
+      restrict(secret);
+      var view = Files.getFileAttributeView(secret, AclFileAttributeView.class);
+      assertFalse(view.getAcl().isEmpty());
+      for (var entry : view.getAcl()) {
+        if (entry.type() == AclEntryType.ALLOW) assertEquals(view.getOwner(), entry.principal());
+      }
+      Files.writeString(dir.resolve("output/asset"), "rebuilt " + rebuild);
+    }
   }
 
   @Test

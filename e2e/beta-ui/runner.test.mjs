@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
   configuration,
@@ -16,7 +16,92 @@ import {
   startServices,
   stopProcesses,
   waitUntil,
+  windowsPowerShellEnvironment,
 } from '../../scripts/beta-ui/runner.mjs';
+
+test('Windows PowerShell children drop foreign module paths without changing build settings', () => {
+  const source = {
+    PSModulePath: 'core/modules',
+    psmodulepath: 'foreign/modules',
+    PATH: 'tools',
+    JAVA_TOOL_OPTIONS: 'injected-options',
+    AURIGA_PNPM_STORE: 'cache',
+  };
+  assert.deepEqual(windowsPowerShellEnvironment(source), {
+    PATH: 'tools',
+    JAVA_TOOL_OPTIONS: 'injected-options',
+    AURIGA_PNPM_STORE: 'cache',
+  });
+  assert.equal(source.PSModulePath, 'core/modules');
+});
+
+test(
+  'private ACL installation survives foreign module paths and rebuilding an existing directory',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'auriga-beta-acl-'));
+    const target = path.join(state, 'static', 'admin');
+    fs.mkdirSync(target, { recursive: true });
+    const module = path.join(state, 'Microsoft.PowerShell.Security');
+    fs.mkdirSync(module);
+    fs.writeFileSync(
+      path.join(module, 'Microsoft.PowerShell.Security.psd1'),
+      "@{ RootModule='Microsoft.PowerShell.Security.psm1'; ModuleVersion='99.0'; GUID='66d12774-4058-4c85-a69b-4d2b59dfb8f6'; FunctionsToExport=@('Get-Acl','Set-Acl') }",
+    );
+    fs.writeFileSync(
+      path.join(module, 'Microsoft.PowerShell.Security.psm1'),
+      "throw 'Foreign PowerShell module must not load in Windows PowerShell'",
+    );
+    try {
+      const clean = spawnSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; if ((Get-Command Set-Acl).Module.Path -notlike "$PSHOME\\Modules\\Microsoft.PowerShell.Security\\*") { exit 2 }',
+        ],
+        {
+          encoding: 'utf8',
+          windowsHide: true,
+          env: windowsPowerShellEnvironment({
+            ...process.env,
+            PSModulePath: state,
+          }),
+        },
+      );
+      assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+      for (let build = 0; build < 3; build++) {
+        const result = spawnSync(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-File',
+            path.resolve('scripts/beta-ui/private.ps1'),
+            '-Path',
+            target,
+          ],
+          {
+            encoding: 'utf8',
+            windowsHide: true,
+            env: { ...process.env, PSModulePath: state },
+          },
+        );
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        fs.mkdirSync(path.join(target, 'assets'), { recursive: true });
+        const asset = path.join(target, 'assets', 'main.js');
+        fs.writeFileSync(asset, `build ${build}`);
+        privatePath(target);
+        privatePath(asset, true);
+        privatePath(asset);
+        assert.equal(fs.readFileSync(asset, 'utf8'), `build ${build}`);
+      }
+    } finally {
+      fs.rmSync(state, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   'stop removes only owned private projection result files',

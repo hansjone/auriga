@@ -12,17 +12,19 @@ if ($item.PSIsContainer) {
   $rule = New-Object Security.AccessControl.FileSystemAccessRule($owner, 'FullControl', 'Allow')
 }
 if (-not $VerifyOnly) {
-  $acl.SetOwner($owner)
+  # Only Access is modified: do not read/write SACL or request SeSecurityPrivilege.
+  # Use .NET directly so a PowerShell 7 parent's modules cannot replace 5.1 cmdlets.
   $acl.SetAccessRuleProtection($true, $false)
   $acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $full -AclObject $acl
+  $item.SetAccessControl($acl)
 }
-$actual = Get-Acl -LiteralPath $full
-if ($actual.Owner -ne $owner.Translate([Security.Principal.NTAccount]).Value -or -not $actual.AreAccessRulesProtected) {
+$sections = [Security.AccessControl.AccessControlSections]::Access -bor [Security.AccessControl.AccessControlSections]::Owner
+$actual = $item.GetAccessControl($sections)
+if ($actual.GetOwner([Security.Principal.SecurityIdentifier]) -ne $owner -or -not $actual.AreAccessRulesProtected) {
   throw 'Beta path owner or inheritance verification failed'
 }
-foreach ($entry in $actual.Access) {
-  if ($entry.AccessControlType -eq 'Allow' -and $entry.IdentityReference.Translate([Security.Principal.SecurityIdentifier]) -ne $owner) {
+foreach ($entry in $actual.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+  if ($entry.AccessControlType -eq 'Allow' -and $entry.IdentityReference -ne $owner) {
     throw 'Beta path ACL verification failed'
   }
 }
