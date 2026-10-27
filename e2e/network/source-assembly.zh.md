@@ -144,6 +144,14 @@ connection anchor、2 个 collab 节点且来源为零。旧 `3 !== 2` 是驱动
 节点的 epoch/incarnation/ingress 对照；还要求 C1 socket CLOSED、C2 OPEN、新 ingress/CID。
 原4个anchor/零来源判据保留；入RPC前拒绝不算成功，只有实际成功回包和持久事实能证明C。
 
+主控对 bec01af 的新失败属于实时证据关联：四个 C 的成功 generated READY_RESULT
+和插件原帧实际均存在。插件生产 decodeJson/parseStrictJson 创建 null 原型对象，
+控制通道 JSON.parse 创建普通对象；旧 isDeepStrictEqual 把相同完整 JSON 判成不同。
+先前归档重放也用 JSON.parse，意外抹掉差异。现在守卫用生产解码器还原实时帧，
+按既有协议 JCS 比较完整 JSON 内容，忽略内存原型和键顺序而不忽略字段、值或类型；
+未知签名字段与 server_auth 也须完整一致。每个 C 的真实成功回包、完整请求/七字段 C、
+anchor、ledger、持久 epoch/ingress 及 socket 约束全部保留；不以只匹配 request_id 代替。
+
 业务失败写入 manifest.businessFailure 的 phase、assertion、operator、actual/expected
 （分别标注 observed/required）、代码栈和 completedChecks，数值保留精确含义；复杂值只给
 类型/长度，完整事实仍查原帧/DB/ledger证据。栈只保留代码位置，避免生成式 deep diff 泄漏

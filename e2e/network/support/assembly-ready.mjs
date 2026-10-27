@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { isDeepStrictEqual } from 'node:util';
+import { canonicalize } from '../../../clients/dsh-plugin/src/network/trust/jcs.js';
+
+// The strict wire decoder creates null-prototype objects; control replies use
+// JSON.parse. Compare the full protocol JSON, including unknown signed fields.
+const sameWireJson = (left, right) =>
+  canonicalize(left) === canonicalize(right);
 
 export function assertReadyReplacement(value) {
   const e = value.endpoint;
@@ -73,9 +78,9 @@ export function assertReadyEvidence({
     );
     const original = group[0];
     for (const retry of group)
-      assert.deepEqual(
-        retry,
-        original,
+      assert.equal(
+        canonicalize(retry),
+        canonicalize(original),
         `${label}: retry preserves the entire READY frame`,
       );
     const calls = records.filter(
@@ -94,8 +99,7 @@ export function assertReadyEvidence({
         v.response?.type === 'ready_result' &&
         v.response.status === 'ready' &&
         e.frames.some(
-          (f) =>
-            f.direction === 'down' && isDeepStrictEqual(f.frame, v.response),
+          (f) => f.direction === 'down' && sameWireJson(f.frame, v.response),
         ),
     );
     assert.ok(
@@ -103,37 +107,37 @@ export function assertReadyEvidence({
       `${label}: a successful real READY_RESULT is required for each C`,
     );
     for (const call of calls) {
-      assert.deepEqual(
-        call.request,
-        original,
+      assert.equal(
+        canonicalize(call.request),
+        canonicalize(original),
         `${label}: relay retains the complete original request`,
       );
-      assert.deepEqual(
-        call.connection,
-        success.connection,
+      assert.equal(
+        canonicalize(call.connection),
+        canonicalize(success.connection),
         `${label}: a retry cannot move the original request to another C`,
       );
     }
     assert.ok(
       ownAnchors.some((v) =>
-        isDeepStrictEqual(v.connection_decoded, success.connection),
+        sameWireJson(v.connection_decoded, success.connection),
       ),
       `${label}: successful C must match an actual retained anchor`,
     );
     const response = success.response;
     assert.ok(
       e.frames.some(
-        (v) => v.direction === 'down' && isDeepStrictEqual(v.frame, response),
+        (v) => v.direction === 'down' && sameWireJson(v.frame, response),
       ),
       `${label}: original READY_RESULT must reach the production plugin`,
     );
-    assert.deepEqual(
-      response.node_identity,
-      {
+    assert.equal(
+      canonicalize(response.node_identity),
+      canonicalize({
         realm: identity.realm,
         node: identity.node,
         incarnation: identity.nodeIncarnation,
-      },
+      }),
       `${label}: READY identity must match the durable ledger`,
     );
     assert.equal(

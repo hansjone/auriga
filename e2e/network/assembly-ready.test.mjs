@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertReadyReplacement } from './support/assembly-ready.mjs';
+import { decodeJson } from '../../clients/dsh-plugin/src/network/session/frames.js';
+
+const wireFrame = (value) => decodeJson(Buffer.from(JSON.stringify(value)));
 
 // Evidence-verifier fixtures only: no authentication or real chain acceptance.
 function evidence(retry = true) {
@@ -56,7 +59,8 @@ function evidence(retry = true) {
   return {
     endpoint: {
       name: 'member',
-      frames,
+      // Match the actual production capture, not a JSON.parse archive replay.
+      frames: frames.map((v) => ({ ...v, frame: wireFrame(v.frame) })),
       sockets: [{ readyState: 3 }, { readyState: 1 }],
       transports: [{}, {}],
     },
@@ -85,6 +89,23 @@ test('P1 accepts two real logical connections when bootstrap READY is identicall
   assertReadyReplacement(admissionRefusal);
 });
 
+test('P1 matches complete wire JSON across decoder prototypes and object-key order', () => {
+  const value = evidence();
+  const response = value.records[1].response;
+  response.future_extension = { a: 1, z: [true, 'signed future field'] };
+  value.endpoint.frames[2].frame = wireFrame({
+    ...response,
+    future_extension: { z: [true, 'signed future field'], a: 1 },
+  });
+  assert.equal(Object.getPrototypeOf(value.endpoint.frames[2].frame), null);
+  assertReadyReplacement(value);
+  value.endpoint.frames[2].frame.future_extension.a = 2;
+  assert.throws(
+    () => assertReadyReplacement(value),
+    /a successful real READY_RESULT is required for each C/,
+  );
+});
+
 test('P1 refuses changed retry, replay on another C, missing commit, missing success and wrong ledger', () => {
   for (const change of [
     (v) => {
@@ -98,6 +119,13 @@ test('P1 refuses changed retry, replay on another C, missing commit, missing suc
     },
     (v) => {
       v.records[2].code = 'Canceled';
+    },
+    (v) => {
+      v.endpoint.frames[2].frame.server_auth.signature =
+        'changed-original-frame';
+    },
+    (v) => {
+      v.endpoint.frames[2].frame.epoch = 1;
     },
     (v) => {
       v.identity.nodeIncarnation = 'other';
