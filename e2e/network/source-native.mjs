@@ -38,7 +38,6 @@ async function recorded(command, args, cwd, env, log) {
     });
     result = { code: 0, stdout: value.stdout, stderr: value.stderr };
   } catch (error) {
-    if (!Number.isInteger(error.code)) throw error;
     result = {
       code: error.code,
       stdout: error.stdout ?? '',
@@ -52,10 +51,13 @@ async function recorded(command, args, cwd, env, log) {
       result.stdout +
       result.stderr,
   );
+  if (!Number.isInteger(result.code))
+    throw new Error(`native command failed (${result.code}); see ${log}`);
   return result;
 }
 
 async function check(directory, runtime, evidence, mode) {
+  await mkdir(join(directory, 'e2e/network/target'), { recursive: true });
   const profile = join(evidence, mode + '-profile');
   const nativeEvidence = join(evidence, mode + '-native');
   await mkdir(nativeEvidence);
