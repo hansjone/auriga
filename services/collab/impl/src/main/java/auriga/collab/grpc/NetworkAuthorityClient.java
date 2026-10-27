@@ -85,6 +85,42 @@ public class NetworkAuthorityClient implements NetworkAuthority {
                         .build()));
   }
 
+  public RegisterAgentSourceResponse fenceSourceReceipt(RegisterAgentSourceRequest original) {
+    if (!original.hasConnection()
+        || !tenant().toString().equals(original.getConnection().getTenantId()))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    return sourceCall(
+        () ->
+            sources
+                .withDeadlineAfter(remainingMillis(), TimeUnit.MILLISECONDS)
+                .fenceAgentSourceReceipt(
+                    FenceAgentSourceReceiptRequest.newBuilder()
+                        .setOriginalRequest(original)
+                        .build()));
+  }
+
+  /** Retains transport classification internally; overloaded alone never proves a read miss. */
+  public static final class SourceRpcFailure extends AurigaException {
+    private final io.grpc.Status.Code grpcCode;
+
+    private SourceRpcFailure(StatusRuntimeException error) {
+      super(
+          switch (error.getStatus().getCode()) {
+            case INVALID_ARGUMENT -> NetworkErrors.PROTOCOL_ERROR;
+            case ABORTED, ALREADY_EXISTS -> NetworkErrors.CONFLICT;
+            case PERMISSION_DENIED, UNAUTHENTICATED -> NetworkErrors.UNAUTHORIZED;
+            default ->
+                auriga.common.error.ErrorCode.of(
+                    "network.overloaded", 503, io.grpc.Status.Code.UNAVAILABLE);
+          });
+      grpcCode = error.getStatus().getCode();
+    }
+
+    public io.grpc.Status.Code grpcCode() {
+      return grpcCode;
+    }
+  }
+
   public GetAgentSourceResponse getSource(GetAgentSourceRequest request) {
     binding(request.getConnection());
     return sourceCall(
@@ -148,15 +184,7 @@ public class NetworkAuthorityClient implements NetworkAuthority {
     try {
       return action.get();
     } catch (StatusRuntimeException e) {
-      throw new AurigaException(
-          switch (e.getStatus().getCode()) {
-            case INVALID_ARGUMENT -> NetworkErrors.PROTOCOL_ERROR;
-            case ABORTED, ALREADY_EXISTS -> NetworkErrors.CONFLICT;
-            case PERMISSION_DENIED, UNAUTHENTICATED -> NetworkErrors.UNAUTHORIZED;
-            default ->
-                auriga.common.error.ErrorCode.of(
-                    "network.overloaded", 503, io.grpc.Status.Code.UNAVAILABLE);
-          });
+      throw new SourceRpcFailure(e);
     }
   }
 

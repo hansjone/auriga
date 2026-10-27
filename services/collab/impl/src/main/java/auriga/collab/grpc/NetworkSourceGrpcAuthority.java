@@ -73,6 +73,12 @@ public class NetworkSourceGrpcAuthority implements NetworkSourceAuthority {
     return client.getSource(request);
   }
 
+  public auriga.contracts.iam.v1.RegisterAgentSourceResponse fenceSourceReceipt(
+      auriga.contracts.iam.v1.RegisterAgentSourceRequest original) {
+    outsideDatabase();
+    return client.fenceSourceReceipt(original);
+  }
+
   public auriga.contracts.iam.v1.RevokeAgentSourceResponse revokeSource(
       auriga.contracts.iam.v1.RevokeAgentSourceRequest request) {
     outsideDatabase();

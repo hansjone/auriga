@@ -22,10 +22,142 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Transport fixture, not real IAM: exact old request, service token, delegation and budget. */
 class NetworkSourceReceiptGrpcTest {
+  @ParameterizedTest
+  @EnumSource(
+      value = Status.Code.class,
+      names = {
+        "UNAVAILABLE",
+        "CANCELLED",
+        "DEADLINE_EXCEEDED",
+        "PERMISSION_DENIED",
+        "UNAUTHENTICATED",
+        "INVALID_ARGUMENT",
+        "ABORTED",
+        "ALREADY_EXISTS",
+        "UNIMPLEMENTED",
+        "INTERNAL",
+        "UNKNOWN",
+        "RESOURCE_EXHAUSTED"
+      })
+  void pureReadPreservesExactTransportClassificationWithoutFencing(Status.Code code)
+      throws Exception {
+    var fences = new AtomicInteger();
+    var mutations = new AtomicInteger();
+    var tenant = UUID.randomUUID();
+    var server =
+        NettyServerBuilder.forAddress(new InetSocketAddress("127.0.0.1", 0))
+            .addService(
+                new NetworkSourceAuthorityServiceGrpc.NetworkSourceAuthorityServiceImplBase() {
+                  @Override
+                  public void readAgentSourceReceipt(
+                      ReadAgentSourceReceiptRequest r,
+                      StreamObserver<RegisterAgentSourceResponse> o) {
+                    o.onError(
+                        Status.fromCode(code)
+                            .withDescription("miss unavailable not committed")
+                            .asRuntimeException());
+                  }
+
+                  @Override
+                  public void fenceAgentSourceReceipt(
+                      FenceAgentSourceReceiptRequest r,
+                      StreamObserver<RegisterAgentSourceResponse> o) {
+                    fences.incrementAndGet();
+                    o.onError(Status.INTERNAL.asRuntimeException());
+                  }
+
+                  @Override
+                  public void registerAgentSource(
+                      RegisterAgentSourceRequest r, StreamObserver<RegisterAgentSourceResponse> o) {
+                    mutations.incrementAndGet();
+                    o.onError(Status.INTERNAL.asRuntimeException());
+                  }
+                })
+            .build()
+            .start();
+    var channel = GrpcChannels.open("127.0.0.1:" + server.getPort());
+    try {
+      var client = new NetworkAuthorityClient(channel, Duration.ofSeconds(2));
+      TenantContext.run(
+          tenant,
+          () ->
+              assertEquals(
+                  code,
+                  assertThrows(
+                          NetworkAuthorityClient.SourceRpcFailure.class,
+                          () ->
+                              client.sourceRequest(
+                                  () -> client.readSourceReceipt(original(tenant))))
+                      .grpcCode()));
+      assertEquals(0, fences.get());
+      assertEquals(0, mutations.get());
+    } finally {
+      channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+      server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
+  void explicitFencePreservesFrozenBytesTenantBudgetAndResourceBoundary() throws Exception {
+    var tenant = UUID.randomUUID();
+    var original = original(tenant);
+    var fences = new AtomicInteger();
+    var response =
+        RegisterAgentSourceResponse.newBuilder().setOperationId(original.getOperationId()).build();
+    var server =
+        NettyServerBuilder.forAddress(new InetSocketAddress("127.0.0.1", 0))
+            .addService(
+                new NetworkSourceAuthorityServiceGrpc.NetworkSourceAuthorityServiceImplBase() {
+                  @Override
+                  public void fenceAgentSourceReceipt(
+                      FenceAgentSourceReceiptRequest r,
+                      StreamObserver<RegisterAgentSourceResponse> o) {
+                    assertArrayEquals(original.toByteArray(), r.getOriginalRequest().toByteArray());
+                    assertTrue(
+                        Context.current().getDeadline().timeRemaining(TimeUnit.MILLISECONDS)
+                            <= 2000);
+                    fences.incrementAndGet();
+                    o.onNext(response);
+                    o.onCompleted();
+                  }
+                })
+            .build()
+            .start();
+    var channel = GrpcChannels.open("127.0.0.1:" + server.getPort());
+    var database = mock(DataSource.class);
+    try {
+      var source =
+          new NetworkSourceGrpcAuthority(
+              new NetworkAuthorityClient(channel, Duration.ofSeconds(2)),
+              new TenantTransactionManager(database));
+      TenantContext.run(
+          tenant,
+          () ->
+              assertEquals(
+                  response, source.sourceRequest(() -> source.fenceSourceReceipt(original))));
+      TenantContext.run(
+          UUID.randomUUID(),
+          () -> denied("common.forbidden", () -> source.fenceSourceReceipt(original)));
+      TransactionSynchronizationManager.bindResource(database, new Object());
+      try {
+        TenantContext.run(
+            tenant, () -> denied("common.unavailable", () -> source.fenceSourceReceipt(original)));
+      } finally {
+        TransactionSynchronizationManager.unbindResource(database);
+      }
+      assertEquals(1, fences.get());
+    } finally {
+      channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+      server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+    }
+  }
+
   @Test
   void generatedReadRpcPreservesTheFrozenBodyAndDelegatedTenant() throws Exception {
     UUID tenant = UUID.randomUUID();
