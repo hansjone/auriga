@@ -169,6 +169,7 @@ export async function apply(ctx, config) {
               const effective = await savedPlatformConfig(
                 config?.connect,
                 origin,
+                { saved: store.hasSavedSettings },
               );
               if (disposed) return;
               const runtime = await createConnectRuntime({

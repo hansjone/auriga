@@ -74,6 +74,72 @@ function text(tree) {
 const button = (tree, label) =>
   nodes(tree).find((n) => n.type === 'button' && text(n) === label);
 
+test('switch failure clears stale identity from authoritative state and same-address retry prompts sign-in', async () => {
+  let saved = {
+    platformOrigin: 'https://old.example.com',
+    activeOrigin: 'https://old.example.com',
+    deployment: 'cloud',
+  };
+  let saves = 0;
+  const calls = [];
+  const fixture = harness(async (url, init) => {
+    const path = new URL(url).pathname;
+    calls.push(path);
+    if (path.endsWith('/save')) {
+      saves++;
+      const input = JSON.parse(init.body);
+      saved = {
+        ...input,
+        activeOrigin: saves === 1 ? '' : input.platformOrigin,
+      };
+      return Response.json(saves === 1 ? { reason: 'unavailable' } : saved, {
+        status: saves === 1 ? 503 : 200,
+      });
+    }
+    if (path.endsWith('/status'))
+      return saves === 0
+        ? Response.json({
+            loggedIn: true,
+            connected: true,
+            account: { subject: 'alice' },
+          })
+        : saves === 1
+          ? Response.json({}, { status: 503 })
+          : Response.json({ loggedIn: false, connected: false });
+    return Response.json(saved);
+  });
+  try {
+    fixture.render();
+    await setImmediate();
+    let tree = fixture.render();
+    assert.match(text(tree), /alice/);
+    assert.match(text(tree), /Team 已连接/);
+    nodes(tree)
+      .find((n) => n.type === 'input')
+      .props.onChange({ target: { value: 'https://new.example.com' } });
+    await button(fixture.render(), '保存').props.onClick();
+    tree = fixture.render();
+    assert.equal(
+      nodes(tree).find((n) => n.type === 'input').props.value,
+      'https://new.example.com',
+    );
+    assert.doesNotMatch(text(tree), /alice|Team 已连接/);
+    assert.match(text(tree), /连接暂未生效/);
+    assert.equal(button(tree, '退出本机登录'), undefined);
+    assert.equal(fixture.navigated, undefined);
+    await button(tree, '保存').props.onClick();
+    tree = fixture.render();
+    assert.match(text(tree), /未登录/);
+    assert.doesNotMatch(text(tree), /alice|Team 已连接|连接暂未生效/);
+    assert.equal(fixture.navigated, 'https://example.com/auriga/local-login');
+    assert.equal(calls.filter((path) => path.endsWith('/save')).length, 2);
+    assert.equal(calls.filter((path) => path.endsWith('/state')).length, 3);
+    assert.equal(calls.filter((path) => path.endsWith('/status')).length, 3);
+  } finally {
+    fixture.dispose();
+  }
+});
+
 test('verified identity remains visible when communication is unavailable', async () => {
   const fixture = harness(async (url) =>
     Response.json(

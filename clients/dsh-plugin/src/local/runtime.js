@@ -78,9 +78,15 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     attempts = new Map(),
     sockets = new Map();
   const expiryTimer = setInterval(() => {
-    for (const row of sessions.values())
+    let renew = false;
+    for (const row of sessions.values()) {
       if (row.expiresAt <= Date.now() || row.accessExpiresAt <= Date.now())
         killSession(row);
+      else if (row.accessExpiresAt <= Date.now() + 30000) renew = true;
+    }
+    // Identity renewal belongs to live browser sessions, even if Team never
+    // starts. The broker owns refresh single-flight and failure-closed cleanup.
+    if (renew && !closed) void getAccess().catch(() => {});
   }, 1000);
   expiryTimer.unref();
   /** @type {boolean} */
@@ -199,6 +205,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       models.logout();
       for (const row of sessions.values()) killSession(row);
       team?.close();
+      startingTeam?.close();
       team = undefined;
       online = false;
       communication = 'unavailable';
@@ -216,6 +223,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       models.logout();
       network.logout();
       team?.close();
+      startingTeam?.close();
       team = undefined;
       online = false;
       communication = 'unavailable';
@@ -343,8 +351,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       if (startingTeam === candidate) startingTeam = undefined;
     }
   }
-  function connectTeam() {
-    if (teamStarting || closed) return;
+  function connectTeam(verify = false) {
+    if (teamStarting || closed || (!verify && team && online)) return;
+    if (team && !online) {
+      team.close();
+      team = undefined;
+    }
     const g = generation;
     communication = 'connecting';
     teamStarting = startTeam()
@@ -376,7 +388,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       };
     sessions.set(key, session);
     models.login();
-    connectTeam();
+    connectTeam(true);
     row.jar.clear();
     row.verifier = undefined;
     row.device = undefined;
@@ -529,7 +541,12 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     prepare(/** @type {any} */ request) {
       active();
       const current = resolve(request);
-      if (current) return { body: this.status(request) };
+      if (current) {
+        // An authenticated page/status refresh is the explicit retry trigger;
+        // communication retries never hold up identity or mint a new session.
+        connectTeam();
+        return { body: this.status(request) };
+      }
       let id = cookie(request, ATTEMPT_COOKIE),
         row = attempts.get(id);
       if (!row || row.expiresAt <= Date.now()) {

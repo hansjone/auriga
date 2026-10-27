@@ -12,6 +12,163 @@ import { Readable } from 'node:stream';
 import { apply } from '../../src/plugin.js';
 import { createSettingsStore } from '../../src/settings/store.js';
 import { savedPlatformConfig } from '../../src/local/platform.js';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+
+async function waitFor(condition) {
+  const deadline = performance.now() + 3000;
+  while (!condition()) {
+    assert.ok(performance.now() < deadline, 'runtime state did not settle');
+    await setImmediate();
+  }
+}
+
+for (const outcome of ['success', 'refused'])
+  test(`Team stays 503 while independent IAM renewal ${outcome} controls live browser/HTTP/WS access`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: 2000000000000 });
+    const { runtime, request, credential } = await runtimePeer(t, {
+      accessLifetimeSeconds: 60,
+      teamRequest: async () => Response.json({}, { status: 503 }),
+    });
+    await waitFor(
+      () => runtime.status(request).communication === 'unavailable',
+    );
+    let httpClosed = false,
+      wsClosed = false,
+      exchanges = 0;
+    const response = new EventEmitter();
+    response.destroy = () => {
+      httpClosed = true;
+    };
+    const socket = new EventEmitter();
+    socket.destroy = () => {
+      wsClosed = true;
+    };
+    assert.equal(runtime.bindHttpResponse(request, response), true);
+    assert.equal(
+      runtime.bindSocket({
+        headers: { ...request.headers, upgrade: 'websocket' },
+        socket,
+      }),
+      true,
+    );
+    const { privateKey, publicKey } = generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+    });
+    const previous = globalThis.fetch;
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      const path = new URL(url).pathname;
+      if (path === '/oauth2/jwks')
+        return Response.json({
+          keys: [
+            { ...publicKey.export({ format: 'jwk' }), kid: 'renewal-test' },
+          ],
+        });
+      if (path !== '/oauth2/token') return previous(url, init);
+      exchanges++;
+      const body = new URLSearchParams(init.body);
+      assert.equal(body.get('grant_type'), 'refresh_token');
+      assert.equal(body.get('resource'), null);
+      if (outcome === 'refused')
+        return Response.json({ error: 'invalid_grant' }, { status: 401 });
+      const claims = {
+        ...credential.claims,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 120,
+      };
+      const encoded = [{ alg: 'ES256', kid: 'renewal-test' }, claims]
+        .map((part) => Buffer.from(JSON.stringify(part)).toString('base64url'))
+        .join('.');
+      return Response.json({
+        token_type: 'Bearer',
+        scope: 'auriga.connect',
+        refresh_token: 'renewal-' + exchanges,
+        access_token:
+          encoded +
+          '.' +
+          sign('sha256', Buffer.from(encoded), {
+            key: privateKey,
+            dsaEncoding: 'ieee-p1363',
+          }).toString('base64url'),
+      });
+    });
+    t.mock.timers.tick(31000);
+    await waitFor(() =>
+      outcome === 'success'
+        ? runtime.resolve(request)?.accessExpiresAt >
+          credential.claims.exp * 1000
+        : runtime.modelStatus.reauthenticationRequired,
+    );
+    assert.equal(exchanges, 1);
+    if (outcome === 'success') {
+      t.mock.timers.tick(30000);
+      assert.ok(
+        Date.now() > credential.claims.exp * 1000,
+        'crossed the original access expiry',
+      );
+      assert.ok(runtime.resolve(request));
+      assert.equal(runtime.status(request).loggedIn, true);
+      assert.equal(runtime.status(request).connected, false);
+      assert.equal(httpClosed, false);
+      assert.equal(wsClosed, false);
+    } else {
+      assert.ok(
+        Date.now() < credential.claims.exp * 1000,
+        'revocation precedes natural expiry',
+      );
+      assert.equal(runtime.resolve(request), null);
+      assert.equal(httpClosed, true);
+      assert.equal(wsClosed, true);
+      await assert.rejects(runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
+    }
+    await runtime.close();
+    t.mock.timers.tick(200000);
+    await setImmediate();
+    assert.equal(exchanges, 1, 'closed runtime must not renew');
+  });
+
+test('an authenticated page refresh reconnects Team after recovery without issuing another browser session', async (t) => {
+  let ready = false,
+    initializes = 0;
+  const { runtime, request } = await runtimePeer(t, {
+    teamRequest: async (_url, init) => {
+      if (!ready) return Response.json({}, { status: 503 });
+      const body = JSON.parse(init.body);
+      if (body.method === 'notifications/initialized')
+        return new Response(null, { status: 202 });
+      if (body.method === 'initialize') initializes++;
+      const result =
+        body.method === 'initialize'
+          ? { protocolVersion: '2025-06-18' }
+          : body.method === 'tools/list'
+            ? {
+                tools: [
+                  'auriga_list_endpoints',
+                  'auriga_open_thread',
+                  'auriga_reply_thread',
+                  'auriga_read_thread',
+                ].map((name) => ({ name, inputSchema: { type: 'object' } })),
+              }
+            : {};
+      return Response.json({ jsonrpc: '2.0', id: body.id, result });
+    },
+  });
+  await waitFor(() => runtime.status(request).communication === 'unavailable');
+  await setImmediate();
+  ready = true;
+  for (let i = 0; i < 3; i++) {
+    const refreshed = runtime.prepare(request);
+    assert.equal(refreshed.body.loggedIn, true);
+    assert.equal(refreshed.setCookie, undefined);
+  }
+  await waitFor(() => runtime.isReady());
+  assert.equal(
+    initializes,
+    1,
+    'concurrent page refreshes share one Team start',
+  );
+  assert.ok(runtime.resolve(request));
+});
 
 test('fresh native credential commit issues a browser session while Team is unavailable (synthetic IAM fixture only)', async (t) => {
   const { runtime, credential } = await runtimePeer(t);

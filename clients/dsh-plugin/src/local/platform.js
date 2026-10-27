@@ -8,8 +8,13 @@ import { normalizeOrigin } from '../settings/store.js';
  * that platform only; switching never sends its provider id or network pins to
  * another installation. Public provider discovery does not authenticate anyone.
  * @param {import('../generated/connect-config.js').ConnectConfig|undefined} loader
- * @param {string} origin */
-export async function savedPlatformConfig(loader, origin) {
+ * @param {string} origin
+ * @param {{saved?:boolean}} [options] Only the profile store may assert a saved preference. */
+export async function savedPlatformConfig(
+  loader,
+  origin,
+  { saved = false } = {},
+) {
   const platformOrigin = normalizeOrigin(origin);
   const same =
     loader && normalizeOrigin(loader.platformOrigin) === platformOrigin;
@@ -20,7 +25,9 @@ export async function savedPlatformConfig(loader, origin) {
     clientId: loader?.clientId ?? 'auriga-dsh',
     ...(loader?.deviceName ? { deviceName: loader.deviceName } : {}),
     providerId: same ? loader.providerId : 'discover',
-    ...(platformOrigin.startsWith('http:') ? { allowLocalHttp: true } : {}),
+    ...(saved && platformOrigin.startsWith('http:')
+      ? { allowLocalHttp: true }
+      : {}),
   });
   if (same) return config;
   const providers = await createPlatform(config).request(
