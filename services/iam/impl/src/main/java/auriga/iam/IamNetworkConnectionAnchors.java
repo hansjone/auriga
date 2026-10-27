@@ -39,6 +39,43 @@ final class IamNetworkConnectionAnchors {
     }
   }
 
+  record InvalidatedConnection(UUID ingress, UUID owner, UUID device, UUID session) {}
+
+  /** Caller owns network-authority first. No current identity or permission is granted. */
+  InvalidatedConnection invalidated(NetworkAuthorityConnection c, Instant now) {
+    validate(c);
+    var rows = load("ingress_key", c.getIngress());
+    check(rows.size() == 1);
+    var original = rows.getFirst();
+    check(original.connection().equals(c));
+    ownership(List.of(original));
+    var ingress =
+        jdbc.query(
+            "SELECT id,expires_at,data::text FROM iam.network_ingress WHERE tenant_id=? AND lookup_key=? FOR SHARE",
+            (rs, i) -> {
+              var data = Json.read(rs.getString(3));
+              var sqlExpiry = rs.getTimestamp(2);
+              check(sqlExpiry != null);
+              Instant expiry = Instant.parse(data.path("expiresAt").asString());
+              check(
+                  original.ingress().equals(rs.getObject(1, UUID.class))
+                      && original.ingress().toString().equals(data.path("id").asString())
+                      && sqlExpiry.toInstant().equals(expiry));
+              return expiry;
+            },
+            TenantContext.require(),
+            original.key());
+    if (!ingress.isEmpty()) {
+      check(ingress.size() == 1);
+      checkIngress(original); // Complete original C and real device/session, under the row lock.
+      check(!now.isBefore(ingress.getFirst()));
+    }
+    // Redeem is the sole ingress writer: absolute expiry is never renewed. If cleaned,
+    // atomic redeem + V12 UNIQUE(tenant,ingress_key) prevents recreating this exact C.
+    return new InvalidatedConnection(
+        original.ingress(), original.owner(), original.device(), original.session());
+  }
+
   /** Caller owns network-authority -> session -> device -> account locks, in the redeem tx. */
   void retain(
       NetworkAuthorityConnection c,

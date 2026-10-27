@@ -158,6 +158,22 @@ collab 保存引用、旧墓碑缺引用 UNKNOWN 及恢复接线由后续任务�
   失败墓碑与原响应永久防复用；迟到同 op 同体回原失败、异体冲突，不允许随后提交或改 C。collab 验证并转存为 not_committed，
   插件才可另存新 op/新鲜见证重试；旧错误码或没有 source 的空响应不证明失败终态。插件不掌握原内部连接，
   对 not_committed.request_digest 只作不透明保存；复核原 op/body/digest 的职责在 collab。
+- `FenceAgentSourceReceiptRequest(original_request)`：仅标准 svc:collab 与受信非平台业务 tenant 可调用的内部无发行入口，
+  返回 `RegisterAgentSourceResponse`；不增加 JSON 帧、外部 API、角色或错误码。缺实现沿 UNIMPLEMENTED 失败关闭。
+  外层只有完整冻结原 Register 请求（含旧 C），没有当前 C、owner 或 native 参数；结构、未知字段、C/R/op/scope/CAS
+  与 Register 同样严格。先沿既有 source_anchor 核原归属并恢复同 op 同体已提交回执；异体 conflict。
+  已提交历史不依赖 V12、原 C 在线或发行政策，不强制补出处，也不授当前许可。
+  仅 miss 时按受信 tenant+原 ingress_key 查 V12 唯一永久出处，逐字匹配完整 C、真实 ingress PK 及原身份关联。
+  本轮只接受精确原 ingress 的不可延展绝对期限已到（SQL expires_at 与 JSON expiresAt 必须相等），
+  或该 ingress 已清理；后者由原子 Redeem 与 V12 UNIQUE(tenant_id,ingress_key) 保证不能重建原 C。
+  活 C、缺证据、归属换主、期限不一致均为 common.forbidden，坏证据不可判定沿 common.forbidden/unavailable，零围栏；
+  不能以禁发、远端错误、短暂不健康或断线判死。
+  全程 network-authority 首锁→原 session/device/account/node 关联锁→与 Register 相同的 Register 原 op 锁，
+  同事务重读回执，仍 miss 才从永久出处保存 source_anchor、原请求/JCS 摘要及完整失败回执，method 仍为 Register。
+  响应为 definitively_uncommitted=true、原 operation_id/digest、original_connection_invalid_uncommitted，且无 source；
+  不写来源/链/head/观察，不延长任何期限，不调用远端 org/Get 或普通 Register。提交异常回滚，确认不明保持未知。
+  所有 Register 最终发行事务先重读原回执；Fence 先提交则迟到 Register 只能回同一完整失败，Register 先提交则 Fence 回原成功。
+  失败回执可由纯读 ReadAgentSourceReceipt 离线读取；Read miss 始终未知、零写入，不能代 Fence。
 - `GetAgentSourceRequest(source_binding, connection, registration)`：核当前真实兑换源连接、同 tenant/realm/node、
   原 owner/device/仍有效的原 backing-session 及当前完整登记见证；跨 owner/device/node 或换 tuple/type/指纹不能借 ID 读。
   还须核该代所属链与停权状态，不得因后继存在而把 EXPIRED 的旧代当成有效许可；链停权不能返回有效期限。
@@ -196,7 +212,8 @@ collab 保存引用、旧墓碑缺引用 UNKNOWN 及恢复接线由后续任务�
 
 ### 许可代际与回执状态/操作矩阵（规范，不是运行时实证）
 
-- 无历史链 + 空前代/0 + 全量当前检查通过：首代 B；再以空前代另 op 创建，冲突。
+- 无历史链 + 空前代/0 + 全量当前检查通过：首代 B；已有未停链 head 时再以空前代/0 另 op 创建，
+  保存 `predecessor_not_head` 确定失败回执；若链已停则优先保存 `lineage_stopped`。两者均非普通 common.conflict/未知结果。
 - head=B/ACTIVE：Get 返回其当前有界观察；以 B 请求后继拒绝，原 op 仅受限读取原回执。
 - head=B/EXPIRED/未停权：Get 返回原 B、终态 revision 和空期限；新 op + B/该 revision + 全量新鲜检查可建 B2。
   B2.predecessor_binding=B、revision=1，固定新期限；旧 B、旧期限与 op1 原结果不变。同代并发只有一个 B2。

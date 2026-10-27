@@ -487,6 +487,52 @@ func (x *ReadAgentSourceReceiptRequest) GetOriginalRequest() *RegisterAgentSourc
 	return nil
 }
 
+// Exact durable original Register body, including OLD C; no current connection,
+// claimed owner, native witness or independently mutable operation/digest.
+type FenceAgentSourceReceiptRequest struct {
+	state           protoimpl.MessageState      `protogen:"open.v1"`
+	OriginalRequest *RegisterAgentSourceRequest `protobuf:"bytes,1,opt,name=original_request,json=originalRequest,proto3" json:"original_request,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *FenceAgentSourceReceiptRequest) Reset() {
+	*x = FenceAgentSourceReceiptRequest{}
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FenceAgentSourceReceiptRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FenceAgentSourceReceiptRequest) ProtoMessage() {}
+
+func (x *FenceAgentSourceReceiptRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FenceAgentSourceReceiptRequest.ProtoReflect.Descriptor instead.
+func (*FenceAgentSourceReceiptRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *FenceAgentSourceReceiptRequest) GetOriginalRequest() *RegisterAgentSourceRequest {
+	if x != nil {
+		return x.OriginalRequest
+	}
+	return nil
+}
+
 type RegisterAgentSourceResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Original create receipt (revision=1). Replays may already be revoked/expired;
@@ -515,7 +561,7 @@ type RegisterAgentSourceResponse struct {
 
 func (x *RegisterAgentSourceResponse) Reset() {
 	*x = RegisterAgentSourceResponse{}
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[4]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -527,7 +573,7 @@ func (x *RegisterAgentSourceResponse) String() string {
 func (*RegisterAgentSourceResponse) ProtoMessage() {}
 
 func (x *RegisterAgentSourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[4]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -540,7 +586,7 @@ func (x *RegisterAgentSourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterAgentSourceResponse.ProtoReflect.Descriptor instead.
 func (*RegisterAgentSourceResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{4}
+	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RegisterAgentSourceResponse) GetSource() *NetworkAgentSource {
@@ -590,7 +636,7 @@ type GetAgentSourceRequest struct {
 
 func (x *GetAgentSourceRequest) Reset() {
 	*x = GetAgentSourceRequest{}
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[5]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -602,7 +648,7 @@ func (x *GetAgentSourceRequest) String() string {
 func (*GetAgentSourceRequest) ProtoMessage() {}
 
 func (x *GetAgentSourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[5]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -615,7 +661,7 @@ func (x *GetAgentSourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentSourceRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentSourceRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{5}
+	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetAgentSourceRequest) GetSourceBinding() string {
@@ -663,7 +709,7 @@ type GetAgentSourceResponse struct {
 
 func (x *GetAgentSourceResponse) Reset() {
 	*x = GetAgentSourceResponse{}
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[6]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -675,7 +721,7 @@ func (x *GetAgentSourceResponse) String() string {
 func (*GetAgentSourceResponse) ProtoMessage() {}
 
 func (x *GetAgentSourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[6]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -688,7 +734,7 @@ func (x *GetAgentSourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentSourceResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentSourceResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{6}
+	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetAgentSourceResponse) GetSource() *NetworkAgentSource {
@@ -749,7 +795,7 @@ type RevokeAgentSourceRequest struct {
 
 func (x *RevokeAgentSourceRequest) Reset() {
 	*x = RevokeAgentSourceRequest{}
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[7]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -761,7 +807,7 @@ func (x *RevokeAgentSourceRequest) String() string {
 func (*RevokeAgentSourceRequest) ProtoMessage() {}
 
 func (x *RevokeAgentSourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[7]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -774,7 +820,7 @@ func (x *RevokeAgentSourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAgentSourceRequest.ProtoReflect.Descriptor instead.
 func (*RevokeAgentSourceRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{7}
+	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RevokeAgentSourceRequest) GetSourceBinding() string {
@@ -818,7 +864,7 @@ type RevokeAgentSourceResponse struct {
 
 func (x *RevokeAgentSourceResponse) Reset() {
 	*x = RevokeAgentSourceResponse{}
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -830,7 +876,7 @@ func (x *RevokeAgentSourceResponse) String() string {
 func (*RevokeAgentSourceResponse) ProtoMessage() {}
 
 func (x *RevokeAgentSourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[8]
+	mi := &file_auriga_iam_v1_network_source_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -843,7 +889,7 @@ func (x *RevokeAgentSourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAgentSourceResponse.ProtoReflect.Descriptor instead.
 func (*RevokeAgentSourceResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{8}
+	return file_auriga_iam_v1_network_source_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RevokeAgentSourceResponse) GetSource() *NetworkAgentSource {
@@ -891,6 +937,8 @@ const file_auriga_iam_v1_network_source_proto_rawDesc = "" +
 	"\x11expected_revision\x18\x05 \x01(\x04R\x10expectedRevision\x12/\n" +
 	"\x13predecessor_binding\x18\x06 \x01(\tR\x12predecessorBinding\"u\n" +
 	"\x1dReadAgentSourceReceiptRequest\x12T\n" +
+	"\x10original_request\x18\x01 \x01(\v2).auriga.iam.v1.RegisterAgentSourceRequestR\x0foriginalRequest\"v\n" +
+	"\x1eFenceAgentSourceReceiptRequest\x12T\n" +
 	"\x10original_request\x18\x01 \x01(\v2).auriga.iam.v1.RegisterAgentSourceRequestR\x0foriginalRequest\"\x88\x02\n" +
 	"\x1bRegisterAgentSourceResponse\x129\n" +
 	"\x06source\x18\x01 \x01(\v2!.auriga.iam.v1.NetworkAgentSourceR\x06source\x129\n" +
@@ -932,10 +980,11 @@ const file_auriga_iam_v1_network_source_proto_rawDesc = "" +
 	"&NETWORK_AGENT_SOURCE_STATE_UNSPECIFIED\x10\x00\x12%\n" +
 	"!NETWORK_AGENT_SOURCE_STATE_ACTIVE\x10\x01\x12&\n" +
 	"\"NETWORK_AGENT_SOURCE_STATE_REVOKED\x10\x02\x12&\n" +
-	"\"NETWORK_AGENT_SOURCE_STATE_EXPIRED\x10\x032\xc8\x03\n" +
+	"\"NETWORK_AGENT_SOURCE_STATE_EXPIRED\x10\x032\xbe\x04\n" +
 	"\x1dNetworkSourceAuthorityService\x12l\n" +
 	"\x13RegisterAgentSource\x12).auriga.iam.v1.RegisterAgentSourceRequest\x1a*.auriga.iam.v1.RegisterAgentSourceResponse\x12r\n" +
-	"\x16ReadAgentSourceReceipt\x12,.auriga.iam.v1.ReadAgentSourceReceiptRequest\x1a*.auriga.iam.v1.RegisterAgentSourceResponse\x12]\n" +
+	"\x16ReadAgentSourceReceipt\x12,.auriga.iam.v1.ReadAgentSourceReceiptRequest\x1a*.auriga.iam.v1.RegisterAgentSourceResponse\x12t\n" +
+	"\x17FenceAgentSourceReceipt\x12-.auriga.iam.v1.FenceAgentSourceReceiptRequest\x1a*.auriga.iam.v1.RegisterAgentSourceResponse\x12]\n" +
 	"\x0eGetAgentSource\x12$.auriga.iam.v1.GetAgentSourceRequest\x1a%.auriga.iam.v1.GetAgentSourceResponse\x12f\n" +
 	"\x11RevokeAgentSource\x12'.auriga.iam.v1.RevokeAgentSourceRequest\x1a(.auriga.iam.v1.RevokeAgentSourceResponseBU\n" +
 	"\x17auriga.contracts.iam.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1b\x06proto3"
@@ -953,7 +1002,7 @@ func file_auriga_iam_v1_network_source_proto_rawDescGZIP() []byte {
 }
 
 var file_auriga_iam_v1_network_source_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_auriga_iam_v1_network_source_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_auriga_iam_v1_network_source_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_auriga_iam_v1_network_source_proto_goTypes = []any{
 	(NetworkAgentSourceScope)(0),           // 0: auriga.iam.v1.NetworkAgentSourceScope
 	(NetworkAgentSourceState)(0),           // 1: auriga.iam.v1.NetworkAgentSourceState
@@ -961,42 +1010,46 @@ var file_auriga_iam_v1_network_source_proto_goTypes = []any{
 	(*NetworkAgentSource)(nil),             // 3: auriga.iam.v1.NetworkAgentSource
 	(*RegisterAgentSourceRequest)(nil),     // 4: auriga.iam.v1.RegisterAgentSourceRequest
 	(*ReadAgentSourceReceiptRequest)(nil),  // 5: auriga.iam.v1.ReadAgentSourceReceiptRequest
-	(*RegisterAgentSourceResponse)(nil),    // 6: auriga.iam.v1.RegisterAgentSourceResponse
-	(*GetAgentSourceRequest)(nil),          // 7: auriga.iam.v1.GetAgentSourceRequest
-	(*GetAgentSourceResponse)(nil),         // 8: auriga.iam.v1.GetAgentSourceResponse
-	(*RevokeAgentSourceRequest)(nil),       // 9: auriga.iam.v1.RevokeAgentSourceRequest
-	(*RevokeAgentSourceResponse)(nil),      // 10: auriga.iam.v1.RevokeAgentSourceResponse
-	(*NetworkAuthorityConnection)(nil),     // 11: auriga.iam.v1.NetworkAuthorityConnection
+	(*FenceAgentSourceReceiptRequest)(nil), // 6: auriga.iam.v1.FenceAgentSourceReceiptRequest
+	(*RegisterAgentSourceResponse)(nil),    // 7: auriga.iam.v1.RegisterAgentSourceResponse
+	(*GetAgentSourceRequest)(nil),          // 8: auriga.iam.v1.GetAgentSourceRequest
+	(*GetAgentSourceResponse)(nil),         // 9: auriga.iam.v1.GetAgentSourceResponse
+	(*RevokeAgentSourceRequest)(nil),       // 10: auriga.iam.v1.RevokeAgentSourceRequest
+	(*RevokeAgentSourceResponse)(nil),      // 11: auriga.iam.v1.RevokeAgentSourceResponse
+	(*NetworkAuthorityConnection)(nil),     // 12: auriga.iam.v1.NetworkAuthorityConnection
 }
 var file_auriga_iam_v1_network_source_proto_depIdxs = []int32{
-	11, // 0: auriga.iam.v1.NetworkAgentSource.original_connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	12, // 0: auriga.iam.v1.NetworkAgentSource.original_connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
 	2,  // 1: auriga.iam.v1.NetworkAgentSource.registration:type_name -> auriga.iam.v1.NetworkAgentSourceRegistration
 	0,  // 2: auriga.iam.v1.NetworkAgentSource.scope:type_name -> auriga.iam.v1.NetworkAgentSourceScope
 	1,  // 3: auriga.iam.v1.NetworkAgentSource.state:type_name -> auriga.iam.v1.NetworkAgentSourceState
-	11, // 4: auriga.iam.v1.RegisterAgentSourceRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	12, // 4: auriga.iam.v1.RegisterAgentSourceRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
 	2,  // 5: auriga.iam.v1.RegisterAgentSourceRequest.registration:type_name -> auriga.iam.v1.NetworkAgentSourceRegistration
 	0,  // 6: auriga.iam.v1.RegisterAgentSourceRequest.scope:type_name -> auriga.iam.v1.NetworkAgentSourceScope
 	4,  // 7: auriga.iam.v1.ReadAgentSourceReceiptRequest.original_request:type_name -> auriga.iam.v1.RegisterAgentSourceRequest
-	3,  // 8: auriga.iam.v1.RegisterAgentSourceResponse.source:type_name -> auriga.iam.v1.NetworkAgentSource
-	11, // 9: auriga.iam.v1.GetAgentSourceRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
-	2,  // 10: auriga.iam.v1.GetAgentSourceRequest.registration:type_name -> auriga.iam.v1.NetworkAgentSourceRegistration
-	3,  // 11: auriga.iam.v1.GetAgentSourceResponse.source:type_name -> auriga.iam.v1.NetworkAgentSource
-	11, // 12: auriga.iam.v1.GetAgentSourceResponse.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
-	11, // 13: auriga.iam.v1.RevokeAgentSourceRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
-	3,  // 14: auriga.iam.v1.RevokeAgentSourceResponse.source:type_name -> auriga.iam.v1.NetworkAgentSource
-	4,  // 15: auriga.iam.v1.NetworkSourceAuthorityService.RegisterAgentSource:input_type -> auriga.iam.v1.RegisterAgentSourceRequest
-	5,  // 16: auriga.iam.v1.NetworkSourceAuthorityService.ReadAgentSourceReceipt:input_type -> auriga.iam.v1.ReadAgentSourceReceiptRequest
-	7,  // 17: auriga.iam.v1.NetworkSourceAuthorityService.GetAgentSource:input_type -> auriga.iam.v1.GetAgentSourceRequest
-	9,  // 18: auriga.iam.v1.NetworkSourceAuthorityService.RevokeAgentSource:input_type -> auriga.iam.v1.RevokeAgentSourceRequest
-	6,  // 19: auriga.iam.v1.NetworkSourceAuthorityService.RegisterAgentSource:output_type -> auriga.iam.v1.RegisterAgentSourceResponse
-	6,  // 20: auriga.iam.v1.NetworkSourceAuthorityService.ReadAgentSourceReceipt:output_type -> auriga.iam.v1.RegisterAgentSourceResponse
-	8,  // 21: auriga.iam.v1.NetworkSourceAuthorityService.GetAgentSource:output_type -> auriga.iam.v1.GetAgentSourceResponse
-	10, // 22: auriga.iam.v1.NetworkSourceAuthorityService.RevokeAgentSource:output_type -> auriga.iam.v1.RevokeAgentSourceResponse
-	19, // [19:23] is the sub-list for method output_type
-	15, // [15:19] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	4,  // 8: auriga.iam.v1.FenceAgentSourceReceiptRequest.original_request:type_name -> auriga.iam.v1.RegisterAgentSourceRequest
+	3,  // 9: auriga.iam.v1.RegisterAgentSourceResponse.source:type_name -> auriga.iam.v1.NetworkAgentSource
+	12, // 10: auriga.iam.v1.GetAgentSourceRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	2,  // 11: auriga.iam.v1.GetAgentSourceRequest.registration:type_name -> auriga.iam.v1.NetworkAgentSourceRegistration
+	3,  // 12: auriga.iam.v1.GetAgentSourceResponse.source:type_name -> auriga.iam.v1.NetworkAgentSource
+	12, // 13: auriga.iam.v1.GetAgentSourceResponse.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	12, // 14: auriga.iam.v1.RevokeAgentSourceRequest.connection:type_name -> auriga.iam.v1.NetworkAuthorityConnection
+	3,  // 15: auriga.iam.v1.RevokeAgentSourceResponse.source:type_name -> auriga.iam.v1.NetworkAgentSource
+	4,  // 16: auriga.iam.v1.NetworkSourceAuthorityService.RegisterAgentSource:input_type -> auriga.iam.v1.RegisterAgentSourceRequest
+	5,  // 17: auriga.iam.v1.NetworkSourceAuthorityService.ReadAgentSourceReceipt:input_type -> auriga.iam.v1.ReadAgentSourceReceiptRequest
+	6,  // 18: auriga.iam.v1.NetworkSourceAuthorityService.FenceAgentSourceReceipt:input_type -> auriga.iam.v1.FenceAgentSourceReceiptRequest
+	8,  // 19: auriga.iam.v1.NetworkSourceAuthorityService.GetAgentSource:input_type -> auriga.iam.v1.GetAgentSourceRequest
+	10, // 20: auriga.iam.v1.NetworkSourceAuthorityService.RevokeAgentSource:input_type -> auriga.iam.v1.RevokeAgentSourceRequest
+	7,  // 21: auriga.iam.v1.NetworkSourceAuthorityService.RegisterAgentSource:output_type -> auriga.iam.v1.RegisterAgentSourceResponse
+	7,  // 22: auriga.iam.v1.NetworkSourceAuthorityService.ReadAgentSourceReceipt:output_type -> auriga.iam.v1.RegisterAgentSourceResponse
+	7,  // 23: auriga.iam.v1.NetworkSourceAuthorityService.FenceAgentSourceReceipt:output_type -> auriga.iam.v1.RegisterAgentSourceResponse
+	9,  // 24: auriga.iam.v1.NetworkSourceAuthorityService.GetAgentSource:output_type -> auriga.iam.v1.GetAgentSourceResponse
+	11, // 25: auriga.iam.v1.NetworkSourceAuthorityService.RevokeAgentSource:output_type -> auriga.iam.v1.RevokeAgentSourceResponse
+	21, // [21:26] is the sub-list for method output_type
+	16, // [16:21] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_auriga_iam_v1_network_source_proto_init() }
@@ -1005,14 +1058,14 @@ func file_auriga_iam_v1_network_source_proto_init() {
 		return
 	}
 	file_auriga_iam_v1_network_authority_proto_init()
-	file_auriga_iam_v1_network_source_proto_msgTypes[6].OneofWrappers = []any{}
+	file_auriga_iam_v1_network_source_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_iam_v1_network_source_proto_rawDesc), len(file_auriga_iam_v1_network_source_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

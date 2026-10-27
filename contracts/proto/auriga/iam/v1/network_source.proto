@@ -37,10 +37,19 @@ service NetworkSourceAuthorityService {
   // indeterminate result fails closed (UNAVAILABLE/FORBIDDEN), never registers or
   // establishes not_committed. No source/operation/tombstone/generation writes.
   // Even an original ACTIVE receipt grants no current permission or activation.
-  // Both RPCs deliberately return the same immutable original receipt.
+  // Receipt RPCs deliberately return the same immutable original receipt.
   // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
   // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
   rpc ReadAgentSourceReceipt(ReadAgentSourceReceiptRequest) returns (RegisterAgentSourceResponse);
+  // Never issues or performs current permission/native/Get checks. Returns an
+  // existing original receipt, or durably fences the original Register key ONLY
+  // after retained redeem provenance proves the exact original C irreversibly
+  // expired/cleaned and the operation is still missing under Register's locks.
+  // Live C, absent/bad provenance and indeterminate failures never prove failure.
+  // Deliberately reuses the immutable Register response, including rejection.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc FenceAgentSourceReceipt(FenceAgentSourceReceiptRequest) returns (RegisterAgentSourceResponse);
   // Revalidates the exact CURRENT redeem connection, original owner/device/live
   // backing identity, registration, source state/expiry and current permissions.
   // Same-device reconnect may change transport, never the saved source tuple.
@@ -121,6 +130,12 @@ message RegisterAgentSourceRequest {
 // Deliberately no current connection, claimed owner or independently mutable op.
 // Collab supplies its complete durable original request, including the OLD C.
 message ReadAgentSourceReceiptRequest {
+  RegisterAgentSourceRequest original_request = 1;
+}
+
+// Exact durable original Register body, including OLD C; no current connection,
+// claimed owner, native witness or independently mutable operation/digest.
+message FenceAgentSourceReceiptRequest {
   RegisterAgentSourceRequest original_request = 1;
 }
 

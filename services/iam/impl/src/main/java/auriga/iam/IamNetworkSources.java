@@ -163,6 +163,29 @@ final class IamNetworkSources {
     return store.atomic(() -> registerWithin(request, verified));
   }
 
+  RegisterAgentSourceResponse fence(RegisterAgentSourceRequest request) {
+    validate(request);
+    transaction();
+    var saved = registerReceipt(request);
+    if (saved != null) return saved; // Pre-V12 receipts remain sufficient on their own.
+    var original =
+        new IamNetworkConnectionAnchors(store)
+            .invalidated(request.getConnection(), clock.instant());
+    operationLock("Register", request.getOperationId());
+    saved = registerReceipt(request);
+    if (saved != null) return saved;
+    return rejectRegister(
+        request,
+        new Anchor(
+            UuidV7.next(),
+            original.ingress(),
+            request.getConnection(),
+            original.owner(),
+            original.device(),
+            original.session()),
+        "original_connection_invalid_uncommitted");
+  }
+
   private RegisterAgentSourceResponse registerWithin(
       RegisterAgentSourceRequest request, VerifiedSnapshot verified) {
     var saved =

@@ -118,6 +118,10 @@ class NetworkSourceAuthorityPostgresTest {
           store.save(table, row);
           return null;
         });
+    assertEquals(
+        Json.MAPPER.valueToTree(value),
+        tx(() -> store.byId(table, id, false)).path(field),
+        "read back committed identity mutation including FK checks");
   }
 
   void error(String code, Runnable work) {
@@ -531,6 +535,7 @@ class NetworkSourceAuthorityPostgresTest {
                   "network_source_operation",
                   "network_source_chain",
                   "network_source_anchor",
+                  "network_connection_anchor",
                   "network_ingress",
                   "network_node",
                   "network_realm",
@@ -703,6 +708,11 @@ class NetworkSourceAuthorityPostgresTest {
                   assertTrue(terminal.hasLineageStopped());
                   assertTrue(terminal.getLineageStopped());
                   assertEquals("", terminal.getValidUntil());
+                  var duplicateStopped = request("duplicate-stopped");
+                  assertRejection(
+                      duplicateStopped,
+                      stub.registerAgentSource(duplicateStopped),
+                      "lineage_stopped");
                 }));
   }
 
@@ -1458,6 +1468,15 @@ class NetworkSourceAuthorityPostgresTest {
       java.util.function.Consumer<
               NetworkSourceAuthorityServiceGrpc.NetworkSourceAuthorityServiceBlockingStub>
           work) {
+    withRpc(service, (source, network) -> work.accept(source));
+  }
+
+  void withRpc(
+      IamGrpcNetworkSources service,
+      java.util.function.BiConsumer<
+              NetworkSourceAuthorityServiceGrpc.NetworkSourceAuthorityServiceBlockingStub,
+              NetworkAuthorityServiceGrpc.NetworkAuthorityServiceBlockingStub>
+          work) {
     var settings =
         new AccessTokenSettings(
             tokens.issuer(),
@@ -1483,7 +1502,6 @@ class NetworkSourceAuthorityPostgresTest {
             clock,
             tokens.issuer(),
             Map.of("collab", Secrets.hash(secret)));
-    String serviceToken = internal.issue("collab", secret);
     var server =
         new GrpcServer(
             "127.0.0.1",
@@ -1499,9 +1517,12 @@ class NetworkSourceAuthorityPostgresTest {
       channel =
           GrpcChannels.open(
               "127.0.0.1:" + server.port(),
-              new AurigaClientInterceptor(() -> serviceToken, Duration.ofSeconds(5)));
+              new AurigaClientInterceptor(
+                  () -> internal.issue("collab", secret), Duration.ofSeconds(5)));
       // Keep this shared stub without an absolute deadline; resolveRpc bounds each new call.
-      work.accept(NetworkSourceAuthorityServiceGrpc.newBlockingStub(channel));
+      work.accept(
+          NetworkSourceAuthorityServiceGrpc.newBlockingStub(channel),
+          NetworkAuthorityServiceGrpc.newBlockingStub(channel));
     } finally {
       if (channel != null) channel.shutdownNow();
       server.stop();
