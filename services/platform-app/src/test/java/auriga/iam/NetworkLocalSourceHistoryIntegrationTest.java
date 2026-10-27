@@ -22,7 +22,9 @@ import com.nimbusds.jose.jwk.*;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import io.grpc.*;
 import io.grpc.stub.StreamObserver;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.security.KeyPairGenerator;
 import java.sql.Timestamp;
 import java.time.*;
@@ -37,6 +39,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.support.*;
 import tools.jackson.databind.JsonNode;
@@ -175,7 +178,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
 
   static final class Harness implements AutoCloseable {
     final UUID tenant = UuidV7.next();
-    final Time clock = new Time();
+    final Time clock;
     UUID owner;
     String sid, did, access, refresh, boot, epoch = "1";
     long clientId = 40;
@@ -198,6 +201,14 @@ class NetworkLocalSourceHistoryIntegrationTest {
     LocalRegistry locals;
     NetworkMailboxWireService wire;
     String collabSecret = Secrets.random(), gatewaySecret = Secrets.random();
+
+    Harness() {
+      this(new Time());
+    }
+
+    Harness(Time clock) {
+      this.clock = clock;
+    }
 
     <T> T tx(Supplier<T> work) {
       return store.tenant(tenant, work);
@@ -1621,16 +1632,149 @@ class NetworkLocalSourceHistoryIntegrationTest {
         "pure historical replay must not change IAM/collab facts, including xmin");
   }
 
+  /** Records real JDBC work without replacing queries, transactions, RLS or cleanup results. */
+  static final class CleanupProbe extends JdbcTemplate {
+    final List<List<UUID>> batches = new ArrayList<>();
+    final List<UUID> visits = new ArrayList<>();
+    int deleted;
+
+    CleanupProbe() {
+      super(iamRoles.runtime().dataSource());
+    }
+
+    @Override
+    public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
+      var rows = super.query(sql, mapper, args);
+      if (sql.contains("FROM iam.network_ingress_tenant"))
+        batches.add(rows.stream().map(UUID.class::cast).toList());
+      return rows;
+    }
+
+    @Override
+    public int update(String sql, Object... args) {
+      boolean ingressDelete = sql.startsWith("DELETE FROM iam.network_ingress WHERE");
+      if (ingressDelete) {
+        assertEquals(TenantContext.require(), args[0]);
+        assertEquals(args[0], args[1]);
+        visits.add((UUID) args[0]);
+      }
+      int rows = super.update(sql, args);
+      if (ingressDelete) deleted += rows;
+      return rows;
+    }
+
+    NetworkIngressCleanup cleanup(Time clock) {
+      return new NetworkIngressCleanup(
+          new IamStore(this, new TenantTransactionManager(getDataSource())), clock);
+    }
+  }
+
+  static List<UUID> ingressTenants() {
+    return store
+        .networkJdbc()
+        .query(
+            "SELECT tenant_id FROM iam.network_ingress_tenant ORDER BY tenant_id",
+            (rs, i) -> rs.getObject(1, UUID.class));
+  }
+
+  static void walkExistingTenants(
+      NetworkIngressCleanup cleanup, CleanupProbe probe, List<UUID> tenants) {
+    for (int i = 0; i < (tenants.size() + 31) / 32; i++) cleanup.sweepOnce();
+    assertEquals(tenants, probe.batches.stream().flatMap(List::stream).toList());
+    assertEquals(tenants, probe.visits, "every historical tenant incurs a real RLS delete attempt");
+    assertEquals(
+        tenants, ingressTenants(), "preparation must not trim the global tenant directory");
+  }
+
+  /** Private files survive failed assertions; default Surefire drops TestReporter entries. */
+  static final class RaceDiagnostics implements AutoCloseable {
+    final Path path;
+    final long began = System.nanoTime();
+    final Queue<String> phases = new ConcurrentLinkedQueue<>();
+    final Map<String, Long> counts = new ConcurrentSkipListMap<>();
+    final AtomicReference<Status.Code> code = new AtomicReference<>();
+
+    RaceDiagnostics(Path directory) {
+      path = directory.resolve("late-register-" + UUID.randomUUID() + ".log");
+    }
+
+    void phase(String name) {
+      phases.add(name + "=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began));
+    }
+
+    RegisterAgentSourceResponse register(Supplier<RegisterAgentSourceResponse> call) {
+      phase("original_rpc_started");
+      try {
+        var receipt = call.get();
+        code.set(Status.Code.OK);
+        return receipt;
+      } catch (NetworkAuthorityClient.SourceRpcFailure error) {
+        code.set(error.grpcCode());
+        throw error;
+      } finally {
+        phase("original_rpc_finished");
+      }
+    }
+
+    public void close() throws IOException {
+      Files.createDirectories(path.getParent());
+      String result = "phase_elapsed_ms=" + phases + "\ncounts=" + counts + "\n";
+      if (code.get() != null) result += "late_register_grpc_code=" + code.get().name() + "\n";
+      Files.writeString(path, result, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+    }
+  }
+
   @Test
-  void fenceCommitPrecedesLateRegisterFinalTransactionForTheSameOriginalKey(TestReporter reporter)
+  void fenceCommitPrecedesLateRegisterFinalTransactionForTheSameOriginalKey() throws Exception {
+    try (var diagnostics = new RaceDiagnostics(Path.of("target", "network-source-history"))) {
+      // Walk the existing directory with the production cursor BEFORE creating the current
+      // tenant. Retained directory entries model tenants whose ingresses were already swept;
+      // no current connection, anchor, credential or source proof is seeded or rewritten.
+      h.close();
+      h = null;
+      var clock = new Time();
+      var existing = ingressTenants();
+      var baseline = new CleanupProbe();
+      walkExistingTenants(baseline.cleanup(clock), baseline, existing);
+      diagnostics.counts.put("baseline_tenants", (long) baseline.visits.size());
+      diagnostics.counts.put("baseline_batches", (long) baseline.batches.size());
+      diagnostics.counts.put("baseline_removed", (long) baseline.deleted);
+      var seeds = new ArrayList<Object[]>();
+      for (int i = 0; i < 96; i++) seeds.add(new Object[] {UuidV7.next()});
+      store
+          .networkJdbc()
+          .batchUpdate("INSERT INTO iam.network_ingress_tenant(tenant_id) VALUES (?)", seeds);
+      var history = ingressTenants();
+      assertEquals(existing.size() + 96, history.size());
+      var probe = new CleanupProbe();
+      var cleanup = probe.cleanup(clock);
+      walkExistingTenants(cleanup, probe, history);
+      diagnostics.counts.put("seeded_history", 96L);
+      diagnostics.counts.put("prepared_tenants", (long) probe.visits.size());
+      diagnostics.counts.put("prepared_batches", (long) probe.batches.size());
+      diagnostics.counts.put("prepared_removed", (long) probe.deleted);
+      assertEquals(baseline.visits.size() + 96, probe.visits.size());
+      assertEquals(baseline.batches.size() + 3, probe.batches.size());
+      diagnostics.phase("historical_cursor_prepared");
+      h = new Harness(clock);
+      h.start();
+      var expectedDirectory = new ArrayList<>(history);
+      expectedDirectory.add(h.tenant);
+      assertEquals(
+          expectedDirectory, ingressTenants(), "new real tenant must follow prepared cursor");
+      // The existing cursor's next production query must visit only this new real tenant,
+      // regardless of how many historical tenants the complete suite accumulated.
+      raceAfterCleanupPreparation(cleanup, probe, diagnostics);
+    }
+  }
+
+  void raceAfterCleanupPreparation(
+      NetworkIngressCleanup cleanup, CleanupProbe probe, RaceDiagnostics diagnostics)
       throws Exception {
     var request = durableMiss();
     var original = frozen(request);
-    long began = System.nanoTime();
-    var phases = new ConcurrentLinkedQueue<String>();
-    Consumer<String> phase =
-        name -> phases.add(name + "=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began));
-    var lateCode = new AtomicReference<>("not_started");
+    var phases = diagnostics.phases;
+    Consumer<String> phase = diagnostics::phase;
     // Redeem preserves other live IAM ingresses. Finish OAuth, C2/ref and READY before the
     // original Register's five-second RPC budget starts; its C1 must still pass real initial
     // authorization. Only then advance past C1 expiry and run the real ingress GC.
@@ -1654,25 +1798,23 @@ class NetworkLocalSourceHistoryIntegrationTest {
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
       var late =
           executor.submit(
-              () -> {
-                phase.accept("original_rpc_started");
-                lateCode.set("in_flight");
-                try {
-                  var receipt =
-                      TenantContext.call(h.tenant, () -> h.client.registerSource(original));
-                  lateCode.set(Status.Code.OK.name());
-                  return receipt;
-                } catch (NetworkAuthorityClient.SourceRpcFailure error) {
-                  lateCode.set(error.grpcCode().name());
-                  throw error;
-                } finally {
-                  phase.accept("original_rpc_finished");
-                }
-              });
+              () ->
+                  diagnostics.register(
+                      () -> TenantContext.call(h.tenant, () -> h.client.registerSource(original))));
       try {
         assertTrue(entered.await(5, TimeUnit.SECONDS), phases::toString);
         h.clock.advance(101);
-        checkOriginalIngress(original.getConnection(), true);
+        int previousBatches = probe.batches.size(), previousVisits = probe.visits.size();
+        int removed = cleanup.sweepOnce();
+        diagnostics.counts.put("critical_batches", (long) probe.batches.size() - previousBatches);
+        diagnostics.counts.put("critical_tenants", (long) probe.visits.size() - previousVisits);
+        diagnostics.counts.put("critical_removed", (long) removed);
+        assertEquals(1, probe.batches.size() - previousBatches);
+        assertEquals(List.of(h.tenant), probe.batches.getLast());
+        assertEquals(List.of(h.tenant), probe.visits.subList(previousVisits, probe.visits.size()));
+        assertEquals(1, removed, "real production GC must remove exactly the expired C1");
+        assertNull(
+            h.tx(() -> store.get("network_ingress", original.getConnection().getIngress(), false)));
         phase.accept("c1_expired_and_gc_complete");
         assertEquals("not_committed", text(h.register(h.retry(request)), "result"));
         phase.accept("fence_and_collab_receipt_committed");
@@ -1681,7 +1823,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
         release.countDown();
         var lateReceipt = late.get(5, TimeUnit.SECONDS);
         assertTrue(orgReturned.get(), "late Register must return through its final transaction");
-        assertEquals(Status.Code.OK.name(), lateCode.get(), phases::toString);
+        assertEquals(Status.Code.OK, diagnostics.code.get(), phases::toString);
         assertEquals(h.observedSources.lastFenceReply, lateReceipt);
         assertEquals(
             RegisterAgentSourceResponse.parseFrom((byte[]) h.row(request).get("iam_response")),
@@ -1699,9 +1841,6 @@ class NetworkLocalSourceHistoryIntegrationTest {
       } finally {
         release.countDown();
       }
-    } finally {
-      reporter.publishEntry(
-          Map.of("phase_elapsed_ms", phases.toString(), "late_register_grpc_code", lateCode.get()));
     }
   }
 
