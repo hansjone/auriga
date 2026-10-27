@@ -2,36 +2,52 @@ param([string]$ExpectedHead, [switch]$CompileOnly, [switch]$Run, [switch]$Functi
 $ErrorActionPreference = 'Stop'
 
 function Get-SendArchiveBlobs([string]$Directory, [string[]]$Files) {
-  # Windows PowerShell's native pipeline uses the caller's $OutputEncoding and
-  # may prepend a BOM to the first filename. Own the stdin writer instead.
+  # Let cmd open a BOM-free file as Git stdin: neither PowerShell's encoding nor
+  # an early Git exit can corrupt a path or interrupt a managed pipe writer.
   $encoding = New-Object Text.UTF8Encoding($false)
+  $inventoryName = 'send-inventory-' + [Guid]::NewGuid().ToString('N')
+  $evidence = Join-Path $Directory ('target/' + $inventoryName)
+  New-Item -ItemType Directory -Path $evidence | Out-Null
+  $inputPath = Join-Path $evidence 'paths.utf8'
+  [IO.File]::WriteAllLines($inputPath, $Files, $encoding)
   $info = New-Object Diagnostics.ProcessStartInfo
-  $info.FileName = 'git'
-  $info.Arguments = 'hash-object --stdin-paths'
+  $info.FileName = $env:ComSpec
+  # Only this generated ASCII basename enters the shell expression. Repository
+  # filenames are data in paths.utf8 and never become shell commands.
+  $info.Arguments = '/d /s /c "git.exe hash-object --stdin-paths < target\' + $inventoryName + '\paths.utf8"'
   $info.WorkingDirectory = $Directory
   $info.UseShellExecute = $false
   $info.CreateNoWindow = $true
-  $info.RedirectStandardInput = $true
   $info.RedirectStandardOutput = $true
   $info.RedirectStandardError = $true
   $info.StandardOutputEncoding = $encoding
   $info.StandardErrorEncoding = $encoding
   $process = New-Object Diagnostics.Process
   $process.StartInfo = $info
+  $diagnosticPath = Join-Path $evidence 'diagnostics.json'
+  $diagnostic = [ordered]@{ executable=$info.FileName; arguments=$info.Arguments;
+    directory=$Directory; input=$inputPath; fileCount=$Files.Count; exitCode=$null; failure=$null }
   try {
     if (-not $process.Start()) { throw 'Cannot start archive hash inventory' }
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    $writer = [IO.StreamWriter]::new($process.StandardInput.BaseStream, $encoding)
-    try {
-      foreach ($file in $Files) { $writer.WriteLine($file) }
-    } finally { $writer.Dispose() }
     $process.WaitForExit()
     $result = $stdout.GetAwaiter().GetResult()
     $failure = $stderr.GetAwaiter().GetResult()
-    if ($process.ExitCode -ne 0) { throw ('Cannot hash archive inventory: ' + $failure.Trim()) }
+    $diagnostic.exitCode = [int]$process.ExitCode
+    [IO.File]::WriteAllText((Join-Path $evidence 'stdout.log'), $result, $encoding)
+    [IO.File]::WriteAllText((Join-Path $evidence 'stderr.log'), $failure, $encoding)
+    if ($process.ExitCode -ne 0) {
+      throw ('Cannot hash archive inventory: Git exit code ' + $process.ExitCode + '; stderr: ' + $failure.Trim() + '; diagnostics: ' + $diagnosticPath)
+    }
     return @($result -split '\r?\n' | Where-Object { $_ -ne '' })
-  } finally { $process.Dispose() }
+  } catch {
+    $diagnostic.failure = $_.Exception.Message
+    throw
+  } finally {
+    [IO.File]::WriteAllText($diagnosticPath, ($diagnostic | ConvertTo-Json -Depth 4), $encoding)
+    $process.Dispose()
+  }
 }
 
 function New-NoDedup([string]$Source) {

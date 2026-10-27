@@ -38,11 +38,33 @@ try {
   try { Get-SendArchiveBlobs $WorktreeRoot @('target/send-rework1/does-not-exist') | Out-Null }
   catch { $rejected = $_.Exception.Message -like 'Cannot hash archive inventory:*' }
   if (-not $rejected) { throw 'Native Git failure was accepted as a valid inventory' }
+  # Force Git to exit before a pipe writer can finish a large inventory. The
+  # caller must receive the original native diagnostics, never a broken-pipe error.
+  $earlyExitPaths = [string[]](@('target/send-rework2/does-not-exist') + @('.editorconfig') * 20000)
+  $diagnosed = $false
+  try { Get-SendArchiveBlobs $WorktreeRoot $earlyExitPaths | Out-Null }
+  catch {
+    $message = $_.Exception.Message
+    $diagnosed = $message -like '*exit code 128*' -and $message -like '*fatal:*' -and $message -like '*does-not-exist*'
+    if (-not $diagnosed) { throw ('Native early-exit diagnostics were lost: ' + $message) }
+    $marker = '; diagnostics: '
+    $diagnosticPath = $message.Substring($message.IndexOf($marker) + $marker.Length)
+    $diagnostic = [IO.File]::ReadAllText($diagnosticPath) | ConvertFrom-Json
+    if ($diagnostic.exitCode -ne 128 -or $diagnostic.fileCount -ne 20001) { throw 'Persisted native exit diagnostics differ' }
+    $inputBytes = [IO.File]::ReadAllBytes($diagnostic.input)
+    if ($inputBytes.Length -lt 3 -or ($inputBytes[0] -eq 239 -and $inputBytes[1] -eq 187 -and $inputBytes[2] -eq 191)) {
+      throw 'Redirected inventory contains a BOM'
+    }
+    $savedStderr = [IO.File]::ReadAllText((Join-Path (Split-Path -Parent $diagnosticPath) 'stderr.log'))
+    if ($savedStderr -notlike '*fatal:*does-not-exist*') { throw 'Raw native stderr was not retained' }
+  }
+  if (-not $diagnosed) { throw 'Early Git exit was accepted as a valid inventory' }
   if ($OutputEncoding.GetPreamble().Length -ne 3 -or [Console]::OutputEncoding.GetPreamble().Length -ne 3) {
     throw 'Hash helper changed inherited output encodings'
   }
   Write-Output 'PASS: first filename has no BOM; all three blobs match under Windows PowerShell 5.1 with BOM output encodings'
   Write-Output 'PASS: UTF-8/space filename preserved; native Git failure rejected; inherited encodings unchanged'
+  Write-Output 'PASS: early Git exit retains stderr and exit code for a 20001-entry inventory'
 } finally {
   $OutputEncoding = $savedOutput
   [Console]::OutputEncoding = $savedConsole
