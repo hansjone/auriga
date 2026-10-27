@@ -1324,9 +1324,17 @@ class NetworkLocalSourceHistoryIntegrationTest {
         () -> {
           assertEquals(receipt, h.client.readSourceReceipt(original));
           assertEquals(receipt, h.client.registerSource(original)); // Late Register cannot issue.
-          assertThrows(
-              AurigaException.class,
-              () -> h.client.registerSource(original.toBuilder().setExpectedRevision(1).build()));
+          var differentBody =
+              original.toBuilder()
+                  .setRegistration(
+                      original.getRegistration().toBuilder()
+                          .setAllocationFingerprint("sha256:" + "b".repeat(64)))
+                  .build();
+          assertEquals(
+              "network.conflict",
+              assertThrows(AurigaException.class, () -> h.client.registerSource(differentBody))
+                  .errorCode()
+                  .code());
         });
     assertEquals(fences, h.observedSources.fence.get(), "completed op never fences again");
     assertEquals(committed, h.facts());
@@ -1738,7 +1746,7 @@ class NetworkLocalSourceHistoryIntegrationTest {
     var request = durableMiss();
     expireOriginal(false);
     var winner = new AtomicReference<Map<String, Object>>();
-    var winnerFacts = new AtomicReference<Map<String, List<String>>>();
+    var winnerXmin = new AtomicReference<String>();
     h.observedSources.afterFence =
         () ->
             h.db(
@@ -1770,14 +1778,25 @@ class NetworkLocalSourceHistoryIntegrationTest {
                       h.tenant,
                       h.row(request).get("id"));
                   winner.set(h.row(request));
-                  winnerFacts.set(h.facts());
+                  winnerXmin.set(
+                      jdbc.queryForObject(
+                          "SELECT xmin::text FROM collab.network_source_operation WHERE tenant_id=? AND operation_id=?",
+                          String.class,
+                          h.tenant,
+                          text(request, "operation_id")));
                   return null;
                 });
     assertEquals("not_committed", text(h.register(h.retry(request)), "result"));
     sameRow(winner.get(), h.row(request));
     assertEquals(
-        winnerFacts.get(),
-        h.facts(),
+        winnerXmin.get(),
+        h.db(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT xmin::text FROM collab.network_source_operation WHERE tenant_id=? AND operation_id=?",
+                    String.class,
+                    h.tenant,
+                    text(request, "operation_id"))),
         "late same receipt must not rewrite the winner, including xmin");
     assertTrue(h.facts().get("iam.network_source").isEmpty());
   }
