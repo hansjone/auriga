@@ -9,6 +9,8 @@ import {
   connectionPatch,
   claimState,
   stopOwnedProcess,
+  assertHostCapabilities,
+  assertRuntimeLock,
 } from '../../scripts/beta-ui/plugin-dsh.mjs';
 
 const base = path.resolve('.dev/plugin-dsh');
@@ -28,13 +30,50 @@ test('arguments reject missing, duplicate, unknown and unsafe launch values', ()
     ['stop', '--state', base, '--port', '1'],
     ['launch', '--state', base, '--port', '18080'],
     ['launch', '--state', base, '--profile', 'desktop'],
+    ['launch', '--state', base, '--dsh-package', base],
   ]) {
     assert.throws(() => parseArguments(args));
   }
-  assert.equal(
-    parseArguments(['launch', '--state', base, '--dsh-package', base]).port,
-    0,
+  assert.equal(parseArguments(['launch', '--state', base]).port, 0);
+});
+
+test('selected host fails explicitly if a required public connection capability is absent', () => {
+  const connection = { admit() {}, authorizeIndex() {}, isTrusted() {} };
+  assert.doesNotThrow(() => assertHostCapabilities(connection));
+  for (const key of Object.keys(connection)) {
+    const missing = { ...connection, [key]: undefined };
+    assert.throws(
+      () => assertHostCapabilities(missing),
+      new RegExp('DSH.*connection\\.' + key),
+    );
+    assert.throws(
+      () => assertHostCapabilities({ ...connection, [key]: true }),
+      new RegExp(key),
+    );
+  }
+  assert.throws(() => assertHostCapabilities(undefined), /connection\.admit/);
+});
+
+test('runtime lock rejects changed host version or integrity and all dependencies are registry pinned', () => {
+  const lock = JSON.parse(
+    fs.readFileSync(
+      new URL(
+        '../../scripts/beta-ui/dsh-runtime/package-lock.json',
+        import.meta.url,
+      ),
+    ),
   );
+  assert.doesNotThrow(() => assertRuntimeLock(lock));
+  for (const key of ['version', 'integrity']) {
+    const bad = JSON.parse(JSON.stringify(lock));
+    bad.packages['node_modules/@deepseek-ai/dsh'][key] = 'changed';
+    assert.throws(() => assertRuntimeLock(bad), /integrity/);
+  }
+  for (const [name, entry] of Object.entries(lock.packages)) {
+    if (!name) continue;
+    assert.match(entry.resolved, /^https:\/\/registry\.npmjs\.org\//, name);
+    assert.match(entry.integrity, /^sha512-/, name);
+  }
 });
 
 test('state rejects real DSH home, ancestors, default profile and repository source', () => {

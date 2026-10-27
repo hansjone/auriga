@@ -4,7 +4,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { stripVTControlCharacters } from 'node:util';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import {
   privatePath,
   processIdentity,
@@ -15,6 +16,74 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const origin = 'http://127.0.0.1:18080';
+export const hostPin = Object.freeze({
+  version: '0.2.1-rc.3',
+  integrity:
+    'sha512-H+E9HLnHf7fJqzen84Z9Bq8ggb5xbrcbyhZjXTJLE9NabHr3zteGvTRvdvGkxPl4ov80is4WLglFmSo+/olJjg==',
+});
+
+export function assertHostCapabilities(connection) {
+  for (const method of ['admit', 'authorizeIndex', 'isTrusted']) {
+    if (typeof connection?.[method] !== 'function')
+      throw new Error(
+        `DSH ${hostPin.version} 缺少必要能力 connection.${method}；拒绝启动插件`,
+      );
+  }
+}
+
+export function assertRuntimeLock(lock) {
+  const pinned = lock.packages?.['node_modules/@deepseek-ai/dsh'];
+  if (
+    lock.packages?.['']?.dependencies?.['@deepseek-ai/dsh'] !==
+      hostPin.version ||
+    pinned?.version !== hostPin.version ||
+    pinned?.integrity !== hostPin.integrity
+  )
+    throw new Error('DSH runtime 锁文件的版本或 integrity 与已核实基线不符');
+}
+
+async function installHost(state, env) {
+  const runtime = path.join(state, 'runtime');
+  fs.mkdirSync(runtime, { mode: 0o700 });
+  const template = path.join(here, 'dsh-runtime');
+  assertRuntimeLock(regularJson(path.join(template, 'package-lock.json')));
+  for (const file of ['package.json', 'package-lock.json'])
+    fs.copyFileSync(path.join(template, file), path.join(runtime, file));
+  const npm = path.join(
+    path.dirname(process.execPath),
+    'node_modules/npm/bin/npm-cli.js',
+  );
+  if (!fs.existsSync(npm))
+    throw new Error('Node 分发缺少 npm CLI，不能安装锁定的隔离宿主');
+  runLogged(
+    process.execPath,
+    [npm, 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+    state,
+    env,
+    'host-install',
+    runtime,
+  );
+  const root = path.join(runtime, 'node_modules/@deepseek-ai/dsh');
+  const pkg = regularJson(path.join(root, 'package.json'));
+  if (pkg.name !== '@deepseek-ai/dsh' || pkg.version !== hostPin.version)
+    throw new Error('隔离宿主没有安装预期精确版本');
+  // Only the package's published root export is loaded; no private module paths.
+  const require = createRequire(path.join(root, 'package.json'));
+  const connection = await import(
+    pathToFileURL(require.resolve('@deepseek-ai/dsh-client-connection')).href
+  );
+  assertHostCapabilities(connection.HostConnectionService?.prototype);
+  json(path.join(state, 'host-capabilities.json'), {
+    ...hostPin,
+    connectionVersion:
+      require('@deepseek-ai/dsh-client-connection/package.json').version,
+    methods: ['admit', 'authorizeIndex', 'isTrusted'],
+  });
+  const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.dsh;
+  if (!bin || !inside(root, path.resolve(root, bin)))
+    throw new Error('DSH 未声明公开 dsh CLI');
+  return { bin: path.resolve(root, bin), version: pkg.version };
+}
 const inside = (parent, child) => {
   const rel = path.relative(parent, child);
   return (
@@ -29,11 +98,10 @@ export function parseArguments(args) {
   const [action, ...rest] = args;
   if (!['launch', 'status', 'stop'].includes(action) || rest.length % 2)
     throw new Error(
-      '用法：plugin-dsh.mjs launch|status|stop --state <绝对路径> [--dsh-package <已安装的 @deepseek-ai/dsh 目录>]',
+      '用法：plugin-dsh.mjs launch|status|stop --state <绝对路径>',
     );
   const values = {};
-  const allowed =
-    action === 'launch' ? ['--state', '--dsh-package', '--port'] : ['--state'];
+  const allowed = action === 'launch' ? ['--state', '--port'] : ['--state'];
   for (let i = 0; i < rest.length; i += 2) {
     if (
       !allowed.includes(rest[i]) ||
@@ -49,17 +117,9 @@ export function parseArguments(args) {
   // Random ports only: this acceptance host must not replace an existing service.
   if (values['--port'] !== undefined && values['--port'] !== '0')
     throw new Error('仅允许随机端口 --port 0');
-  if (
-    action === 'launch' &&
-    (!values['--dsh-package'] || !path.isAbsolute(values['--dsh-package']))
-  )
-    throw new Error(
-      '--dsh-package 必须指定本机已有 DSH 包的绝对目录，不自动下载或升级宿主',
-    );
   return {
     action,
     state: path.resolve(values['--state']),
-    dshPackage: values['--dsh-package'],
     port: 0,
   };
 }
@@ -238,36 +298,23 @@ async function discoverProvider() {
   return providers[0].id;
 }
 
-function dshCommand(root, state) {
-  if (inside(root, state) || inside(state, root))
-    throw new Error('StateDir 不能与已安装宿主重叠');
-  const pkg = regularJson(path.join(root, 'package.json'));
-  if (pkg.name !== '@deepseek-ai/dsh')
-    throw new Error('--dsh-package 不是 @deepseek-ai/dsh 包');
-  const bin = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.dsh;
-  if (!bin || !inside(path.resolve(root), path.resolve(root, bin)))
-    throw new Error('DSH 未声明公开 dsh CLI');
-  return { bin: path.resolve(root, bin), version: pkg.version };
-}
-
 async function launch(options) {
   const { state } = options;
   assertStatePath(state);
-  const dsh = dshCommand(path.resolve(options.dshPackage), state);
   const providerId = await discoverProvider();
   claimState(state);
   privatePath(state, true);
   const lock = path.join(state, 'plugin-dsh.lock');
   const handle = fs.openSync(lock, 'wx', 0o600);
   try {
-    return await prepareLaunch(options, dsh, providerId);
+    return await prepareLaunch(options, providerId);
   } finally {
     fs.closeSync(handle);
     fs.unlinkSync(lock);
   }
 }
 
-async function prepareLaunch({ state }, dsh, providerId) {
+async function prepareLaunch({ state }, providerId) {
   const env = isolatedEnvironment(state);
   for (const dir of [
     'dsh',
@@ -288,12 +335,14 @@ async function prepareLaunch({ state }, dsh, providerId) {
     kind: 'auriga-beta-plugin-dsh',
     schema: 1,
     state,
-    dshVersion: dsh.version,
+    dshVersion: hostPin.version,
+    dshIntegrity: hostPin.integrity,
     nodeVersion: process.version,
     process: null,
   };
   const manifestFile = path.join(state, 'plugin-dsh.json');
   json(manifestFile, manifest);
+  const dsh = await installHost(state, env);
   runLogged(
     'powershell.exe',
     [
@@ -410,6 +459,28 @@ async function prepareLaunch({ state }, dsh, providerId) {
           );
           if (!status.ok || (await status.json()).available !== true)
             return false;
+          const settings = await fetch(
+            parsed.origin + '/auriga/settings/state',
+            {
+              headers: { cookie },
+              redirect: 'manual',
+              signal: AbortSignal.timeout(2000),
+            },
+          );
+          if (!settings.ok) return false;
+          const configured = await settings.json();
+          if (
+            configured.platformOrigin !== origin ||
+            configured.activeOrigin !== origin
+          )
+            return false;
+          const view = await fetch(parsed.origin + '/auriga/settings/view.js', {
+            headers: { cookie },
+            redirect: 'manual',
+            signal: AbortSignal.timeout(2000),
+          });
+          if (!view.ok || !(await view.text()).includes('createSettingsView'))
+            return false;
         } catch {
           return false;
         }
@@ -420,8 +491,14 @@ async function prepareLaunch({ state }, dsh, providerId) {
       60000,
     );
     child.unref();
+    manifest.startupChecks = {
+      login: true,
+      settingsState: true,
+      settingsModule: true,
+    };
+    json(manifestFile, manifest);
     console.log(
-      `DSH ${dsh.version}；全新隔离 profile 已启动。\n本机 URL（含宿主启动票据，仅私下打开）：${url}\nStateDir：${state}`,
+      `DSH ${dsh.version}；全新隔离 profile 已启动，登录入口和设置接口自检通过。\n本机 URL（含宿主启动票据，仅私下打开）：${url}\nStateDir：${state}`,
     );
   } catch (error) {
     if (manifest.process) await stopOwnedProcess(manifest.process);

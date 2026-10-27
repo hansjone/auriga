@@ -107,13 +107,14 @@ try { go vet ./...; go test -count=1 ./... } finally { Pop-Location }
 
 在原生 Windows PowerShell 中从仓库根执行。先确认既有 Beta 门户 `http://127.0.0.1:18080` 已运行，已用邀请完成团队账号注册和 TOTP 设置。应急管理员不能代替团队账号。此脚手架只启动隔离的 DSH Web 宿主，不启动或重置 Beta，不创建云端实例。
 
-指定本机**已经安装且可正常运行**的 `@deepseek-ai/dsh` 包目录（包含 package.json，其 bin.dsh 声明公开 CLI）；基线版本为 `0.2.0-rc.2`。脚本不下载或升级宿主，不调用内部 API。不要传 Desktop 的 app.asar 内目录给普通 Node；Desktop 配套运行时需另行评估。构建环境沿前述 `auriga-env.ps1`/`AURIGA_PNPM_STORE`，独立 node_modules、frozen lockfile；插件类型检查、面板构建和成品打包完成后，使用正式 `dsh plugin --profile web add <本仓成品.tgz>` 安装，禁用安装生命周期脚本。
+本脚手架的宿主基线为 npm `@deepseek-ai/dsh@0.2.1-rc.3`。launcher 把 `scripts/beta-ui/dsh-runtime/` 的完整 npm 锁文件复制到 `StateDir/runtime`，用 `npm ci --ignore-scripts --no-audit --no-fund` 在该目录安装本地宿主。锁文件包含所有依赖的精确解析与 integrity，宿主 tar 的 npm integrity 固定为 `sha512-H+E9HLnHf7fJqzen84Z9Bq8ggb5xbrcbyhZjXTJLE9NabHr3zteGvTRvdvGkxPl4ov80is4WLglFmSo+/olJjg==`；版本或 integrity 不符即失败。安装后通过包的公开根导出检查现有插件要求的 `connection.admit/authorizeIndex/isTrusted`，缺失时明确失败，不回退旧版本。`host-capabilities.json` 记录检查结果。只运行本次 StateDir 中由 package.json 的 bin.dsh 声明的本地 CLI，不使用全局 DSH、Desktop 安装或源码工位。
+
+首次启动需要联网下载已锁定的依赖。构建环境沿前述 `auriga-env.ps1`/`AURIGA_PNPM_STORE`，独立 node_modules、frozen lockfile；插件类型检查、面板构建和成品打包完成后，使用正式 `dsh plugin --profile web add <本仓成品.tgz>` 安装，禁用安装生命周期脚本。不会修改全局 npm、用户 DSH 或系统 PATH。
 
 ```powershell
 # 父目录应已存在；StateDir 本身必须不存在，每轮换一个新目录。
 $pluginState = Join-Path $env:LOCALAPPDATA ('Auriga\plugin-beta-' + [guid]::NewGuid().ToString('N'))
-$dshPackage = 'C:\path\to\installed\node_modules\@deepseek-ai\dsh' # 换成本机实际包目录
-node scripts/beta-ui/plugin-dsh.mjs launch --state $pluginState --dsh-package $dshPackage
+node scripts/beta-ui/plugin-dsh.mjs launch --state $pluginState
 node scripts/beta-ui/plugin-dsh.mjs status --state $pluginState
 # 验收结束后执行；可重复 stop，不按端口或进程名杀其他 DSH。
 node scripts/beta-ui/plugin-dsh.mjs stop --state $pluginState
@@ -135,6 +136,6 @@ node scripts/beta-ui/plugin-dsh.mjs stop --state $pluginState
 node --test e2e/beta-ui/plugin-dsh.test.mjs
 ```
 
-此测试覆盖参数拒绝、真实 profile 禁区、全新目录、junction 逃逸、继承环境隔离和 PID 复用拒杀。launch 自检只检查真实宿主启动、原生启动票据交换及插件本机登录/status 路由可用；没有代填团队凭据，不计真人 TOTP、刷新续期、退出撤销或完整浏览器视觉通过。构建、安装、宿主初始化或路由失败均非通过；查看对应 build/profile-init/plugin-install/profile-config/dsh 日志，保留首次失败。启动未完成时只清理本次自有宿主，仍保留 StateDir。命令崩溃留下 plugin-dsh.lock 时，先核对原命令已退出再由主控处置，不能绕过活跃命令锁。
+此测试覆盖参数拒绝、真实 profile 禁区、全新目录、junction 逃逸、继承环境隔离、PID 复用拒杀，以及宿主缺能力和锁定 integrity 不符时拒绝。launch 自检检查真实宿主启动、原生启动票据交换、插件本机登录/status、设置状态和设置模块可用，并要求实际生效平台等于 Beta 门户；结果记入 plugin-dsh.json 的 startupChecks。没有代填团队凭据，不计真人 TOTP、刷新续期、退出撤销或完整浏览器视觉通过。构建、安装、宿主初始化或路由失败均非通过；查看对应 host-install/build/profile-init/plugin-install/profile-config/dsh 日志，保留首次失败。启动未完成时只清理本次自有宿主，仍保留 StateDir。命令崩溃留下 plugin-dsh.lock 时，先核对原命令已退出再由主控处置，不能绕过活跃命令锁。
 
-当前基线的实测阻塞：公开锁定的 DSH `0.2.0-rc.2` 可完成 profile 初始化和本仓 tar 安装，但插件激活报 `rc.3 native connection admission required`（`clients/dsh-plugin/src/local/host.js`）。因此这条版本组合尚不能完成真实登录。需主控先评估插件公开 API 适配或明确调整宿主基线；本脚手架不改插件、不升级 DSH，也不把安装成功记作启用或登录通过。
+原 `0.2.0-rc.2` 宿主缺少现有插件要求的原生连接能力。按主控决定，本脚手架统一使用上述精确 rc.3 基线，不修改插件、不提供旧版本兼容；真人团队账号登录、TOTP、刷新和退出撤销仍由 root 按本节完成。
