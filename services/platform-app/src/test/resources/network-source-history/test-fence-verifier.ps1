@@ -64,4 +64,46 @@ Accept { Assert-FenceOldHistoryCoverage (Summary 'tests="37" failures="0" errors
 Reject { Assert-FenceOldHistoryCoverage (Summary 'tests="36" failures="0" errors="0" skipped="0"' (($oldCases | Select-Object -Skip 1) -join '')) $coverage }
 Reject { Assert-FenceOldHistoryCoverage (Summary 'tests="38" failures="0" errors="0" skipped="0"' (($oldCases -join '') + $oldCases[0])) $coverage }
 Reject { Assert-FenceOldHistoryCoverage (Summary 'tests="37" failures="0" errors="0" skipped="0"' (($oldCases -join '').Replace('auriga.iam.', 'auriga.collab.'))) $coverage }
+
+Accept {
+  if ((@(Get-FenceModes $true $false) -join ',') -cne 'Control,FenceAsRegister,ErrorAsFailure') {
+    throw 'Default Run must still execute Control and both mutants'
+  }
+}
+Accept {
+  if ((@(Get-FenceModes $false $false) -join ',') -cne 'FenceAsRegister,ErrorAsFailure') {
+    throw 'Default CompileOnly must still compile both mutants'
+  }
+}
+foreach ($execute in @($true, $false)) {
+  Accept {
+    if ((@(Get-FenceModes $execute $true) -join ',') -cne 'ErrorAsFailure') {
+      throw 'ErrorAsFailureOnly must not select Control or the first mutant'
+    }
+  }
+}
+$production = 'services/collab/impl/src/main/java/auriga/collab/app/NetworkSourceControl.java'
+$original = [IO.File]::ReadAllText((Join-Path $root $production)).Replace("`r`n", "`n")
+$readMutant = New-FenceReadErrorOverlay $original
+$readTree = Join-Path $output 'read-overlay-tree'
+New-Item -ItemType Directory -Path $readTree | Out-Null
+[IO.File]::WriteAllText((Join-Path $readTree 'production.java'), $original, $utf8)
+[IO.File]::WriteAllText((Join-Path $readTree 'test.java'), 'fixed-test', $utf8)
+$readHashes = @{ 'production.java' = (Get-FenceHash (Join-Path $readTree 'production.java')); 'test.java' = (Get-FenceHash (Join-Path $readTree 'test.java')) }
+[IO.File]::WriteAllText((Join-Path $readTree 'production.java'), $readMutant, $utf8)
+Accept {
+  Assert-FenceReadErrorOverlay $original $readMutant
+  $recovery = $original.IndexOf('  private RegisterAgentSourceResponse recoverRegister(')
+  if ($original.Substring(0, $recovery) -cne $readMutant.Substring(0, $recovery)) {
+    throw 'Initial Register, pending preparation and total catch must be byte-identical'
+  }
+  Assert-FenceTree $readTree $readHashes 'production.java' (Get-FenceHash (Join-Path $readTree 'production.java'))
+}
+Reject {
+  $totalCatch = '      // No ordinary RPC, storage or post-pending validation failure is a negative receipt.'
+  Assert-FenceReadErrorOverlay $original ($readMutant.Replace($totalCatch, '      return inventedNegativeReceipt();'))
+}
+Reject { Assert-FenceReadErrorOverlay $original ($readMutant + "`n// unrelated production change") }
+Reject { New-FenceReadErrorOverlay ($original.Replace('  private RegisterAgentSourceResponse recoverRegister(', '  private RegisterAgentSourceResponse otherRecovery(')) }
+Reject { New-FenceReadErrorOverlay ($original + "`n      return iam.readSourceReceipt(original);") }
 Write-Output "Verifier guard checks: $passed passed; synthetic tooling checks only; $output"

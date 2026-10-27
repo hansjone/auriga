@@ -1,10 +1,57 @@
-param([string]$ExpectedHead, [switch]$Run, [switch]$CompileOnly, [switch]$FunctionsOnly)
+param([string]$ExpectedHead, [switch]$Run, [switch]$CompileOnly, [switch]$ErrorAsFailureOnly, [switch]$FunctionsOnly)
 $ErrorActionPreference = 'Stop'
 
 function Get-FenceHash([string]$Path) {
   $algorithm = [Security.Cryptography.SHA256]::Create()
   try { return [BitConverter]::ToString($algorithm.ComputeHash([IO.File]::ReadAllBytes($Path))).Replace('-', '').ToLowerInvariant() }
   finally { $algorithm.Dispose() }
+}
+
+function Get-FenceModes([bool]$Execute, [bool]$ReadErrorOnly) {
+  if ($ReadErrorOnly) { return @('ErrorAsFailure') }
+  if ($Execute) { return @('Control', 'FenceAsRegister', 'ErrorAsFailure') }
+  return @('FenceAsRegister', 'ErrorAsFailure')
+}
+
+function Assert-FenceReadErrorOverlay([string]$Original, [string]$Mutated) {
+  $read = '      return iam.readSourceReceipt(original);'
+  $start = $Original.IndexOf($read, [StringComparison]::Ordinal)
+  $method = $Original.IndexOf('  private RegisterAgentSourceResponse recoverRegister(', [StringComparison]::Ordinal)
+  $end = $Original.IndexOf('  private static void fenceBudget()', [StringComparison]::Ordinal)
+  if ([regex]::Matches($Original, [regex]::Escape($read)).Count -ne 1 -or
+      $method -lt 0 -or $start -le $method -or $end -le $start) {
+    throw 'Read-error overlay must target exactly one read inside recoverRegister'
+  }
+  $prefix = $Original.Substring(0, $start)
+  $suffix = $Original.Substring($start + $read.Length)
+  if ($Mutated.Length -le ($prefix.Length + $suffix.Length) -or
+      -not $Mutated.StartsWith($prefix, [StringComparison]::Ordinal) -or
+      -not $Mutated.EndsWith($suffix, [StringComparison]::Ordinal)) {
+    throw 'Read-error overlay changed initial Register/catch or code outside the recovery read'
+  }
+  $injected = $Mutated.Substring($prefix.Length, $Mutated.Length - $prefix.Length - $suffix.Length)
+  if ([regex]::Matches($injected, 'iam\.readSourceReceipt\(original\)').Count -ne 1 -or
+      -not $injected.Contains('catch (RuntimeException readError)')) {
+    throw 'Read-error overlay must retain the read and intercept only its failure'
+  }
+}
+
+function New-FenceReadErrorOverlay([string]$Source) {
+  $before = '      return iam.readSourceReceipt(original);'
+  $after = @'
+      try {
+        return iam.readSourceReceipt(original);
+      } catch (RuntimeException readError) {
+        return RegisterAgentSourceResponse.newBuilder().setDefinitivelyUncommitted(true)
+            .setOperationId(original.getOperationId())
+            .setRequestDigest(pending.get("request_digest").toString())
+            .setRejectionReason("original_connection_invalid_uncommitted").build();
+      }
+'@
+  $after = $after.Replace("`r`n", "`n")
+  $mutated = $Source.Replace($before, $after)
+  Assert-FenceReadErrorOverlay $Source $mutated
+  return $mutated
 }
 
 function Get-FenceSummary([string]$Path) {
@@ -100,7 +147,9 @@ $archive = Join-Path $output 'source.tar'
 $production = 'services/collab/impl/src/main/java/auriga/collab/app/NetworkSourceControl.java'
 $test = 'services/platform-app/src/test/java/auriga/iam/NetworkLocalSourceHistoryIntegrationTest.java'
 $oldCoveragePath = 'services/platform-app/src/test/resources/network-source-history/old-history-cases.json'
+$modes = @(Get-FenceModes ([bool]$Run) ([bool]$ErrorAsFailureOnly))
 $manifest = [ordered]@{ head = $head; mode = $(if ($Run) { 'Run' } else { 'CompileOnly' })
+  scope = $(if ($ErrorAsFailureOnly) { 'ErrorAsFailureOnly' } else { 'Full' }); requestedModes = $modes
   sourceHashes = @{}; worktreeHashes = @{}; archiveSha256 = $null; testBlob = $null; testSha256 = $null
   variants = @(); compileOnlyExitCodes = @{}; firstFailure = $null; worktreeUnchanged = $false }
 $events = Join-Path $output 'events.jsonl'
@@ -155,8 +204,6 @@ try {
   }
   $manifest.testSha256 = $manifest.sourceHashes[$test]
   if ($manifest.testSha256 -ne $manifest.worktreeHashes[$test]) { throw 'Delivered Java test bytes differ from HEAD archive blob' }
-  $modes = @('FenceAsRegister', 'ErrorAsFailure')
-  if ($Run) { $modes = @('Control') + $modes }
   foreach ($mode in $modes) {
     $leaf = switch ($mode) { 'Control' { 'c' }; 'FenceAsRegister' { 'a' }; default { 'b' } }
     $directory = Join-Path $output $leaf
@@ -172,28 +219,12 @@ try {
       if ($mode -eq 'FenceAsRegister') {
         $before = 'return iam.fenceSourceReceipt(original);'
         $after = 'return iam.registerSource(original);'
+        if ([regex]::Matches($source, [regex]::Escape($before)).Count -ne 1) { throw "Overlay must match exactly once: $mode" }
+        $mutated = $source.Replace($before, $after)
       } else {
-        $before = @'
-      // No ordinary RPC, storage or post-pending validation failure is a negative receipt.
-      throw new AurigaException(UNKNOWN);
-'@
-        $after = @'
-      return transaction(s -> {
-        lockOp("Register", op);
-        var current = operation("Register", op);
-        var receipt = RegisterAgentSourceResponse.newBuilder().setDefinitivelyUncommitted(true)
-            .setOperationId(op).setRequestDigest(current.get("request_digest").toString())
-            .setRejectionReason("original_connection_invalid_uncommitted").build();
-        var invented = registerResult(op, "not_committed", null, NetworkJson.object()
-            .put("authority", "iam").put("reason", receipt.getRejectionReason())
-            .put("request_digest", receipt.getRequestDigest()));
-        complete(current, "not_committed", receipt.toByteArray(), invented);
-        return new SourceResult(invented, true, null, operation("Register", op));
-      });
-'@
+        $mutated = New-FenceReadErrorOverlay $source
       }
-      if ([regex]::Matches($source, [regex]::Escape($before)).Count -ne 1) { throw "Overlay must match exactly once: $mode" }
-      [IO.File]::WriteAllText($path, $source.Replace($before, $after), $utf8)
+      [IO.File]::WriteAllText($path, $mutated, $utf8)
       $overlayHash = Get-FenceHash $path
     }
     Assert-FenceTree $directory $manifest.sourceHashes $overlay $overlayHash
