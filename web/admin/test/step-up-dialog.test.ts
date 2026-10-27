@@ -54,10 +54,12 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
-async function setup() {
+async function setup(transaction = tx) {
   vi.spyOn(iamApi, 'getMe').mockResolvedValue(me);
-  vi.spyOn(iamApi, 'createLoginTransaction').mockResolvedValue(tx);
+  vi.spyOn(iamApi, 'createLoginTransaction').mockResolvedValue(transaction);
   vi.spyOn(iamApi, 'cancelLoginTransaction').mockResolvedValue();
   const router = createRouter({
     history: createMemoryHistory(),
@@ -102,6 +104,12 @@ async function setup() {
 }
 describe('in-place step-up dialog', () => {
   it('submits real step input and resumes only after IAM reports completed', async () => {
+    // Plain HTTP IP deployments can expose getRandomValues without randomUUID.
+    vi.stubGlobal('crypto', {
+      getRandomValues: globalThis.crypto.getRandomValues.bind(
+        globalThis.crypto,
+      ),
+    });
     vi.spyOn(iamApi, 'advanceLoginTransaction').mockResolvedValue({
       ...tx,
       status: 'completed',
@@ -111,7 +119,7 @@ describe('in-place step-up dialog', () => {
     expect(iamApi.createLoginTransaction).toHaveBeenCalledWith({
       providerId: 'provider',
       purpose: 'stepup',
-      returnTo: '/models/providers',
+      returnTo: expect.stringMatching(/^\/overview\?aurigaStepUp=[a-f\d-]+$/),
     });
     await wrapper!.get('input[name="code"]').setValue('123456');
     await wrapper!.get('form').trigger('submit');
@@ -124,6 +132,153 @@ describe('in-place step-up dialog', () => {
     expect(await result).toBe('saved');
     expect(request).toHaveBeenCalledTimes(2);
     expect(router.currentRoute.value.path).toBe('/models/providers');
+  });
+  it('keeps the original write and parent route through a redirect popup', async () => {
+    const child = {
+      closed: false,
+      opener: null,
+      close: vi.fn(),
+      location: { href: 'about:blank', replace: vi.fn() },
+    };
+    vi.spyOn(window, 'open').mockReturnValue(child as unknown as Window);
+    vi.spyOn(iamApi, 'getLoginTransaction').mockResolvedValue({
+      ...tx,
+      status: 'completed',
+      step: { type: 'complete', redirectTo: '/overview' },
+    });
+    const { request, result, router } = await setup({
+      ...tx,
+      step: {
+        type: 'redirect',
+        method: 'GET',
+        url: 'https://idp.example.com/authorize',
+      },
+    });
+    expect(wrapper!.find('[data-step-type="redirect"]').exists()).toBe(false);
+    expect(window.open).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledTimes(1);
+    await wrapper!.get('[data-action="redirect-step-up"]').trigger('click');
+    await flushPromises();
+    expect(await result).toBe('saved');
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[0]).toEqual(request.mock.calls[1]);
+    expect(router.currentRoute.value.path).toBe('/models/providers');
+    expect(child.close).toHaveBeenCalledOnce();
+  });
+  it('keeps the operation pending when a popup is blocked and permits a second click', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const read = vi.spyOn(iamApi, 'getLoginTransaction').mockResolvedValue({
+      ...tx,
+      status: 'completed',
+      step: { type: 'complete', redirectTo: '/overview' },
+    });
+    const { request, result } = await setup({
+      ...tx,
+      step: {
+        type: 'redirect',
+        method: 'GET',
+        url: 'https://idp.example.com/authorize',
+      },
+    });
+    await wrapper!.get('[data-action="redirect-step-up"]').trigger('click');
+    await flushPromises();
+    expect(wrapper!.text()).toContain('浏览器拦截了验证窗口');
+    expect(wrapper!.text()).toContain('草稿已保留');
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
+    open.mockReturnValue({
+      closed: false,
+      opener: null,
+      close: vi.fn(),
+      location: { href: 'about:blank', replace: vi.fn() },
+    } as unknown as Window);
+    await wrapper!.get('[data-action="redirect-step-up"]').trigger('click');
+    await flushPromises();
+    expect(await result).toBe('saved');
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+  it.each([false, true])(
+    'checks the original session after the callback cleared the transaction cookie (changed=%s)',
+    async (changed) => {
+      const child = {
+        closed: false,
+        opener: null,
+        close: vi.fn(),
+        location: { href: 'about:blank', replace: vi.fn() },
+      };
+      vi.spyOn(window, 'open').mockReturnValue(child as unknown as Window);
+      vi.spyOn(iamApi, 'getLoginTransaction').mockRejectedValue(
+        new ApiError({
+          status: 404,
+          code: 'common.not_found',
+          title: 'Not found',
+        }),
+      );
+      const { request, result } = await setup({
+        ...tx,
+        step: {
+          type: 'redirect',
+          method: 'GET',
+          url: 'https://idp.example.com/authorize',
+        },
+      });
+      const returnTo = vi.mocked(iamApi.createLoginTransaction).mock
+        .calls[0]![0].returnTo!;
+      child.location.href = `${location.origin}${returnTo}`;
+      if (changed)
+        vi.mocked(iamApi.getMe).mockResolvedValue({
+          ...me,
+          session: { ...me.session, id: 'other-session' },
+        });
+      await wrapper!.get('[data-action="redirect-step-up"]').trigger('click');
+      await flushPromises();
+      if (changed) {
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(wrapper!.text()).toContain('会话已改变');
+        wrapper!.unmount();
+        wrapper = undefined;
+        expect(await result).toBeInstanceOf(Error);
+      } else {
+        expect(await result).toBe('saved');
+        expect(request).toHaveBeenCalledTimes(2);
+      }
+    },
+  );
+  it('closes an active popup on navigation and never replays a late completion', async () => {
+    const child = {
+      closed: false,
+      opener: null,
+      close: vi.fn(),
+      location: { href: 'about:blank', replace: vi.fn() },
+    };
+    vi.spyOn(window, 'open').mockReturnValue(child as unknown as Window);
+    let finish!: (value: LoginTransaction) => void;
+    vi.spyOn(iamApi, 'getLoginTransaction').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { request, result, router } = await setup({
+      ...tx,
+      step: {
+        type: 'redirect',
+        method: 'GET',
+        url: 'https://idp.example.com/authorize',
+      },
+    });
+    await wrapper!.get('[data-action="redirect-step-up"]').trigger('click');
+    await flushPromises();
+    await router.push('/overview');
+    finish({
+      ...tx,
+      status: 'completed',
+      step: { type: 'complete', redirectTo: '/overview' },
+    });
+    await flushPromises();
+    expect(await result).toBeInstanceOf(Error);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(child.close).toHaveBeenCalledOnce();
   });
   it('cancels without replaying and cancels the IAM transaction', async () => {
     const { request, result } = await setup();

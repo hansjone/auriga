@@ -1,4 +1,5 @@
 import { mount, flushPromises } from '@vue/test-utils';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
@@ -7,7 +8,7 @@ import {
   type Me,
 } from '@auriga/shared';
 import SecurityView from '../src/views/account/SecurityView.vue';
-import { iamApi } from '../src/api';
+import { bindApiRouter, iamApi } from '../src/api';
 
 const me: Me = {
   account: {
@@ -29,8 +30,67 @@ const me: Me = {
   identities: [],
   mfa: { totp: false, passkeys: 0, required: false },
 };
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 describe('account security', () => {
+  it.each(['iam.invalid_credentials', 'common.unauthenticated'])(
+    'handles password rejection through the real API client (%s)',
+    async (code) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof fetch>(async (input, init) => {
+          const path = new URL(String(input), 'http://localhost').pathname;
+          const json = (body: unknown, status = 200) =>
+            new Response(JSON.stringify(body), {
+              status,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          if (path === '/api/iam/v1/me') return json(me);
+          if (path === '/api/iam/v1/me/sessions')
+            return json({ items: [me.session] });
+          if (path === '/api/iam/v1/me/password' && init?.method === 'PUT') {
+            expect(JSON.parse(String(init.body)).currentPassword).toBe('wrong');
+            return json({ title: 'Denied', status: 401, code }, 401);
+          }
+          throw new Error(`Unexpected request: ${path}`);
+        }),
+      );
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: '/account/security', component: SecurityView },
+          { path: '/login', component: { template: '<div />' } },
+        ],
+      });
+      bindApiRouter(router);
+      await router.push('/account/security');
+      const wrapper = mount(SecurityView, {
+        global: { plugins: [router, createAurigaI18n('zh-CN')] },
+      });
+      await flushPromises();
+      await wrapper
+        .get('input[autocomplete="current-password"]')
+        .setValue('wrong');
+      await wrapper
+        .get('input[autocomplete="new-password"]')
+        .setValue('new-password');
+      await wrapper.get('form').trigger('submit');
+      await flushPromises();
+      expect(router.currentRoute.value.path).toBe(
+        code === 'iam.invalid_credentials' ? '/account/security' : '/login',
+      );
+      expect(wrapper.find('[role="alert"]').exists()).toBe(true);
+      if (code === 'iam.invalid_credentials') {
+        expect(wrapper.text()).toContain('用户名或口令不正确');
+        expect(
+          wrapper.find('input[autocomplete="current-password"]').exists(),
+        ).toBe(true);
+      }
+      wrapper.unmount();
+    },
+  );
   it('shows enrollment only in memory and confirms through IAM before reporting enabled', async () => {
     vi.spyOn(iamApi, 'getMe').mockResolvedValue(me);
     vi.spyOn(iamApi, 'listMySessions').mockResolvedValue({
@@ -183,9 +243,6 @@ describe('account security', () => {
       .spyOn(iamApi, 'listMySessions')
       .mockResolvedValue({ items: [me.session] });
     const change = vi.spyOn(iamApi, 'changePassword').mockResolvedValue();
-    const revoke = vi
-      .spyOn(iamApi, 'revokeOtherSessions')
-      .mockResolvedValue({ revoked: 1 });
     const wrapper = mount(SecurityView, {
       global: { plugins: [createAurigaI18n('zh-CN')] },
     });
@@ -208,10 +265,37 @@ describe('account security', () => {
           .element as HTMLInputElement
       ).value,
     ).toBe('');
+    expect(list).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+  it('removes other sessions after revocation and keeps the current session', async () => {
+    vi.spyOn(iamApi, 'getMe').mockResolvedValue(me);
+    const other = {
+      ...me.session,
+      id: 'other-session',
+      current: false,
+      userAgent: 'Other browser',
+    };
+    const list = vi
+      .spyOn(iamApi, 'listMySessions')
+      .mockResolvedValueOnce({ items: [me.session, other] })
+      .mockResolvedValue({ items: [me.session] });
+    const revoke = vi
+      .spyOn(iamApi, 'revokeOtherSessions')
+      .mockResolvedValue({ revoked: 1 });
+    const wrapper = mount(SecurityView, {
+      global: { plugins: [createAurigaI18n('zh-CN')] },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain('Other browser');
+    expect(wrapper.findAll('li')).toHaveLength(2);
     await wrapper.get('[data-action="revoke"]').trigger('click');
     await flushPromises();
     expect(revoke).toHaveBeenCalledTimes(1);
-    expect(list).toHaveBeenCalledTimes(3);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).not.toContain('Other browser');
+    expect(wrapper.text()).toContain('当前会话');
+    expect(wrapper.findAll('li')).toHaveLength(1);
     wrapper.unmount();
   });
 });
