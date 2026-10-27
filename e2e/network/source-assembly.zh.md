@@ -120,6 +120,22 @@ file-commit observations 及 DB 快照。stdout/logs 保存前检查已知凭据
 不是业务反证：现按真实 provider.prepare({signal}) 接线，并为复合主键 network_node
 采用完整行稳定排序，新增 API/SQL 白名单守卫。旧归档保持原样，不重写其结论。
 
+主控对 14e9843 实跑已越过上述首失，关闭记录也完整；新首失是 READY 的内层
+RPC Canceled，插件收到真实 signed network.overloaded 后立即 expected READY_RESULT。
+Java 同时记录 READY 中 NetworkIamChecks/NetworkLimits 的 common.unavailable；结合约
+250ms 时序，推断为冷启动调用链耗尽单次预算，原证据未记录剩余 deadline，不能只凭
+Canceled 断言具体哪层首先取消。新 trace 记录 peer、生成 rpc 全名、gRPC code、contextCode、
+elapsedMillis、remainingMillisAtStart 和 deadlineExpired，不记录元数据或任意错误描述。
+
+READY/FETCH/RECEIPT 的生产单次 RPC 仍为 ≤250ms；Java IAM 上限 5s 受传入剩余期限约束，
+插件 bootstrap/正常 READY 的整体等待仍为 5s，鉴权/JWT/TLS/业务期限均未放宽。
+bootstrap 和正常 READY 仅在原信任根完整验签的 request-scope network.overloaded、
+retryable=true、匹配请求/nonce/realm/node 且 epoch=0/incarnation=unbound 的拒绝后，
+隔 500ms 原样重发同一已编码 READY（最多 5 次总发送），不换票/连接、不重建请求或
+从拒绝初始化身份。该未绑定受众仅用于拒绝验签，绝不作为成功受众；真实成功仍核完整
+READY_RESULT、公钥、正 epoch/incarnation 和 ledger 证据。取消/5s 到期/重试耗尽均失败，
+并释放重试 timer；晚到或非法签名不能初始化。重试没有改变生产内层 timeout。
+
 按追加授权2“其余待办，不必一次做全”：F5 tenant/owner/device/backing-session 七字段
 换值、F6 digest/ref/异体全套、F7 collab SQL 提交确认未知、真正 kill/同 PG 目录重开及
 PG 写围栏；P3 双 op 争 CAS、P5 **以 EXPIRED 前代撤销当前后继** 仍待补。

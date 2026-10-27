@@ -8,6 +8,7 @@ import { openTrustStore } from './trust/store.js';
 import { canonicalize } from './trust/jcs.js';
 import { verifyEnvelopeWithRefresh } from './trust/verifier.js';
 import { bootstrapReady } from './session/bootstrap-ready.js';
+import { createReadyRetry, readyRetryError } from './session/ready-retry.js';
 import {
   assertReadyResult,
   readyCandidate,
@@ -60,12 +61,38 @@ async function normalReady(transport, trust, state, signal, now) {
   };
   let off = () => {},
     timer;
+  /** @type {ReturnType<typeof createReadyRetry>|undefined} */
+  let retry;
   let verifying = false,
     finished = false;
   /** @type {()=>void} */
   let abort = () => {};
   try {
+    const payload = encodeReady({
+      requestId,
+      channelNonce,
+      bootId,
+      keysetVersion: trust.version,
+      resumeCursor: '0',
+      localHighWater: state.localHighWater,
+      registrationRevision: state.registrationRevision ?? '0',
+      receiptCheckpoint: checkpoint,
+      pendingRegistration: pending
+        ? {
+            candidate_local: pending.local,
+            allocation_op_id: pending.opId,
+            allocation_fingerprint: 'sha256:' + pending.fingerprint,
+            address_type: pending.addressType,
+          }
+        : null,
+    });
     const result = await new Promise((resolve, reject) => {
+      const attemptRetry = createReadyRetry(
+        () => transport.send(payload),
+        current,
+        reject,
+      );
+      retry = attemptRetry;
       abort = () => reject(new Error('READY interrupted'));
       signal.addEventListener('abort', abort, { once: true });
       timer = setTimeout(() => reject(new Error('READY timeout')), 5000);
@@ -76,6 +103,30 @@ async function normalReady(transport, trust, state, signal, now) {
           const frame = decodeJson(bytes);
           if (frame.request_id !== requestId) return;
           verifying = true;
+          /** @type {typeof trust} */
+          const guardedTrust = {
+            ...trust,
+            key(...args) {
+              current();
+              return trust.key(...args);
+            },
+            async refreshFor(...args) {
+              current();
+              await trust.refreshFor(...args);
+              current();
+            },
+          };
+          const retryable = await readyRetryError(frame, {
+            trust: guardedTrust,
+            context: { ...identity, requestId, channelNonce, epoch: '0' },
+            now,
+          });
+          current();
+          if (retryable) {
+            verifying = false;
+            attemptRetry.schedule();
+            return;
+          }
           const candidate = readyCandidate(frame);
           const context = {
             ...identity,
@@ -84,18 +135,7 @@ async function normalReady(transport, trust, state, signal, now) {
             epoch: candidate.epoch,
           };
           await verifyEnvelopeWithRefresh(frame, {
-            trust: {
-              ...trust,
-              key(...args) {
-                current();
-                return trust.key(...args);
-              },
-              async refreshFor(...args) {
-                current();
-                await trust.refreshFor(...args);
-                current();
-              },
-            },
+            trust: guardedTrust,
             context,
             now,
           });
@@ -136,33 +176,13 @@ async function normalReady(transport, trust, state, signal, now) {
         })().catch(reject);
       });
       current();
-      void transport
-        .send(
-          encodeReady({
-            requestId,
-            channelNonce,
-            bootId,
-            keysetVersion: trust.version,
-            resumeCursor: '0',
-            localHighWater: state.localHighWater,
-            registrationRevision: state.registrationRevision ?? '0',
-            receiptCheckpoint: checkpoint,
-            pendingRegistration: pending
-              ? {
-                  candidate_local: pending.local,
-                  allocation_op_id: pending.opId,
-                  allocation_fingerprint: 'sha256:' + pending.fingerprint,
-                  address_type: pending.addressType,
-                }
-              : null,
-          }),
-        )
-        .catch(reject);
+      void transport.send(payload).catch(reject);
     });
     current();
     return { ...result, channelNonce, bootId };
   } finally {
     finished = true;
+    retry?.close();
     off();
     clearTimeout(timer);
     signal.removeEventListener('abort', abort);

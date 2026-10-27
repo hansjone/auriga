@@ -280,6 +280,41 @@ function registrationHost() {
   return { ...host, agent, tools, unload: () => cleanup() };
 }
 
+test('bootstrap and normal READY retry authenticated overload with identical requests and no extra connections', async (t) => {
+  const sends = new Map();
+  const f = await fixture(t, {
+    result(id) {
+      sends.set(id, (sends.get(id) ?? 0) + 1);
+      return sends.get(id) === 1
+        ? {
+            type: 'error',
+            epoch: '0',
+            code: 'network.overloaded',
+            scope: 'request',
+            retryable: true,
+          }
+        : {};
+    },
+    auth(auth, id) {
+      if (sends.get(id) === 1) {
+        auth.audience.incarnation = 'unbound';
+        auth.audience.epoch = '0';
+      }
+    },
+  });
+  await f.runtime.start();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(f.connections.length, 2);
+  assert.equal(f.events.filter((v) => v === 'register').length, 1);
+  for (const id of [1, 2]) {
+    const requests = f.sent
+      .filter((v) => v.connection.id === id)
+      .map((v) => v.request);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[1], requests[0]);
+  }
+});
+
 test('strict C2 installs real zero-input registration tool, same writer persists credentials and binding across reopen', async (t) => {
   const host = registrationHost();
   const root = fileURLToPath(

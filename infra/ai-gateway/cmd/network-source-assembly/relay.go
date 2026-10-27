@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"time"
 
 	collab "github.com/hansjone/auriga/infra/gen/auriga/collab/v1"
 	iam "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
@@ -107,8 +108,24 @@ func (r *relay) forward(ctx context.Context, method string, req, reply proto.Mes
 	if connection == nil {
 		target, service = r.iam, "/auriga.iam.v1.NetworkGatewayService/"
 	}
+	started := time.Now()
+	deadline, bounded := ctx.Deadline()
 	err := target.Invoke(ctx, service+method, req, reply)
-	event := map[string]any{"stage": "rpc", "method": method, "code": status.Code(err).String()}
+	contextCode := codes.OK
+	if ctx.Err() != nil {
+		contextCode = status.FromContextError(ctx.Err()).Code()
+	}
+	// Numeric loopback peer/method/status identify this hop without copying any
+	// status description, metadata, service token or arbitrary transport details.
+	event := map[string]any{
+		"stage": "rpc", "method": method, "code": status.Code(err).String(),
+		"peer": target.Target(), "rpc": service + method,
+		"elapsedMillis": time.Since(started).Milliseconds(), "contextCode": contextCode.String(),
+	}
+	if bounded {
+		event["remainingMillisAtStart"] = max(int64(0), deadline.Sub(started).Milliseconds())
+		event["deadlineExpired"] = !time.Now().Before(deadline)
+	}
 	r.mu.Lock()
 	mode := ""
 	if err == nil && r.method == method {
