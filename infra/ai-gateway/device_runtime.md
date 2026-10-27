@@ -104,17 +104,30 @@ Transport 仅向受信 target 的 `{baseURL}/chat/completions` POST，模型名�
 `ai.upstream_rejected`，5xx 映射 `ai.upstream_unavailable`，408/504 映射
 `ai.upstream_timeout`；上游错误正文、Location、地址和底层错误均不进入公开错误或日志。
 
+兼容 MiniMax 风格 SSE：delta 缺少 `finish_reason` 时补 `null`；只含推理等扩展的 delta
+按白名单投影，投影后为空仍输出空 delta。普通 chunk 中缺少 prompt/completion tokens 的占位 usage，
+以及尚未结束时两者均为 0 的 usage 均丢弃；非零 usage 仍走既有严格校验。合法的零用量 finish chunk
+最多暂存一个事件：若随后有最终 usage 则替换占位值，否则在 `[DONE]` 时原样输出。
+已有 finish_reason 后、`[DONE]` 前，最多接受一个 `object: chat.completion`、恰好单 choice 的汇总事件，
+仅投影为 D2 usage-only chunk，不重复转发 message。汇总 usage 必须是非负安全整数且
+prompt+completion=total，仍受原请求及可信计量策略限制；completion_tokens 已含 reasoning_tokens，
+不另加计。正文用摘要与累计流比较，不一致时以累计流为准，仅记无正文、无摘要值的内部诊断。
+提前/重复汇总、汇总后继续 chunk、非法计量、多 choice、未完成工具调用、字节/事件超限均失败关闭。
+
 默认只允许 HTTPS（系统证书验证），拒绝 loopback、私网、链路本地、元数据、共享地址空间、
 组播／未指定地址及可嵌入 IPv4 的转换／隧道地址。解析所有结果均须通过；实际拨号重新解析并
 校验，再依次尝试已校验的数值 IP 建立连接，复核实际远端与选定 IP 一致及地址政策，防止
 DNS rebinding。仅建连失败时回退其他 IP，不重试或重放 HTTP 请求，合用一次 connect timeout。
 `allowedHosts[].host` 是部署方的**精确主机名或无方括号 IP**，大小写及末尾一点规范化；
 不支持通配、子域继承、端口或 URL。空清单可以访问公网 HTTPS。
-清单仅豁免 RFC1918、ULA 和 CGNAT 私网段；loopback、链路本地、元数据、组播／未指定、
-转换／隧道、基准测试和文档地址永不豁免（包括私网中的已知元数据端点）。HTTP 须每个
-主机额外显式设 `allowPlaintext: true`，默认 false。清单仍允许该主机访问私网的所有端口，
+清单代表部署方对该主机的信任：解析和实际拨号 IP 除回环（127/8、::1）及已知云元数据端点
+（169.254.169.254、fd00:ec2::254、168.63.129.16、100.100.100.200）外均放行；IPv4-mapped
+地址先还原后检查。私网、CGNAT、ULA、198.18/15 代理 fake-IP、文档段和其他链路本地地址均可用。
+无效地址及带 zone 的地址仍拒绝。非清单主机保持上述严格默认过滤，清单不继承到子域。
+HTTP 须每个主机额外显式设 `allowPlaintext: true`，默认 false。
+清单允许该受信主机访问所有端口，只能由受保护的部署配置设置，租户、页面和设备请求均不能修改；
 只列入完全可信、部署方控制的模型主机，保护配置与 DNS。
-HTTP 会明文传递上游凭据和提示词，应优先部署 HTTPS。不得由设备请求控制此清单。
+HTTP 会明文传递上游凭据和提示词，应优先部署 HTTPS。
 
 当前管理面 `ValidateEndpointDNS` 和 `RelayReader` 的 provider 校验仍独立拒绝私网数值 IP、
 `.local`／`.internal`／localhost；管理面也拒绝注册解析到私网的域名。
