@@ -7,11 +7,11 @@
 需要 JDK 25、Go 1.27、Node 22.12+、仓库规定的 pnpm，以及 PostgreSQL 16 的 `psql.exe`。构建使用锁文件和独立 node_modules，不升级依赖；需要设置工程工作法中的 `AURIGA_PNPM_STORE`。所有操作从仓库根执行。派工会话之外先 dot-source 主控提供的 auriga-env.ps1；没有该脚本的普通开发环境，应自行设置 AURIGA_PNPM_STORE 指向可写的依赖缓存目录。
 
 ```powershell
-$betaState = Join-Path $env:LOCALAPPDATA 'Auriga\beta-ui'
+$betaState = 'D:\auriga-beta-state\beta-ui' # 仓库外的本机普通目录，按实际位置调整
 .\scripts\beta-ui\beta-ui.ps1 init -StateDir $betaState
 ```
 
-StateDir 必须是仓库外的本机普通目录。初始化先设置并核验仅当前账号可访问、禁止继承的 ACL，再产生密码、加密密钥和本机证书。不会把 CA 加入系统证书库。初始化已有目录会拒绝重新生成密钥；保留该目录才能重新登录同一个数据库。
+StateDir 必须是仓库外的本机普通目录。Claude 桌面端等 MSIX 宿主可能重定向 `%LOCALAPPDATA%`，子进程看到的路径可能不同，因此使用明确的普通绝对路径，不从 LOCALAPPDATA 推导 StateDir。初始化先设置并核验仅当前账号可访问、禁止继承的 ACL，再产生密码、加密密钥和本机证书。不会把 CA 加入系统证书库。初始化已有目录会拒绝重新生成密钥；保留该目录才能重新登录同一个数据库。
 
 使用已有 PostgreSQL 管理员的受限 pgpass 文件。若尚无该文件，可在普通 PowerShell 中交互创建；不要在命令行输入明文密码，也不要开启终端转录：
 
@@ -102,3 +102,46 @@ try { go vet ./...; go test -count=1 ./... } finally { Pop-Location }
 未含 Docker 实例、Team/通信、用户真实 DSH 接入与模型生产调用验收；它们分别由对应实现线和主控完成。修改 IAM/edge 的候选必须经非作者独审并标【待审查】，工人不自行合并。
 
 可选真实 PG 集成：设置 AURIGA_BETA_TEST_PG_BIN 为本机 PostgreSQL bin 目录，在 infra/edge 执行 go test -count=1 -run TestBetaPostgresProjection -v。它创建随机端口的独立临时集群并停止清理，检查真实 PG 的视图/RLS、测试投影读取、跨租户与只读权限及撤销可见性，不连接既有 Beta 库。沙箱 initdb 失败需保留失败日志，由主控在普通 Windows 会话重跑。该集成测试不执行真人 IAM 登录；CLI 边界单测使用测试进程模拟输出，仅证明参数、结果文件及失败清理，也不计真人 IAM 验收。
+
+## 插件真机验收
+
+在原生 Windows PowerShell 中从仓库根执行。先确认既有 Beta 门户 `http://127.0.0.1:18080` 已运行，已用邀请完成团队账号注册和 TOTP 设置。应急管理员不能代替团队账号。此脚手架只启动隔离的 DSH Web 宿主，不启动或重置 Beta，不创建云端实例。
+
+本脚手架的宿主基线为 npm `@deepseek-ai/dsh@0.2.1-rc.3`。launcher 把 `scripts/beta-ui/dsh-runtime/` 的完整 npm 锁文件复制到 `StateDir/runtime`，用 `npm ci --ignore-scripts --no-audit --no-fund` 在该目录安装本地宿主。锁文件包含所有依赖的精确解析与 integrity，宿主 tar 的 npm integrity 固定为 `sha512-H+E9HLnHf7fJqzen84Z9Bq8ggb5xbrcbyhZjXTJLE9NabHr3zteGvTRvdvGkxPl4ov80is4WLglFmSo+/olJjg==`；版本或 integrity 不符即失败。安装后通过包的公开根导出检查现有插件要求的 `connection.admit/authorizeIndex/isTrusted`，缺失时明确失败，不回退旧版本。`host-capabilities.json` 记录检查结果。只运行本次 StateDir 中由 package.json 的 bin.dsh 声明的本地 CLI，不使用全局 DSH、Desktop 安装或源码工位。
+
+首次启动需要联网下载已锁定的依赖。构建环境沿前述 `auriga-env.ps1`/`AURIGA_PNPM_STORE`，独立 node_modules、frozen lockfile；插件类型检查、面板构建和成品打包完成后，使用正式 `dsh plugin --profile web add <本仓成品.tgz>` 安装，禁用安装生命周期脚本。不会修改全局 npm、用户 DSH 或系统 PATH。
+
+插件安装所用 pnpm 精确取自仓库根 `package.json` 的 `packageManager`（当前 `pnpm@11.28.6`）。launcher 在隔离 `COREPACK_HOME` 执行 `corepack prepare pnpm@11.28.6 --activate`，设置 `COREPACK_DEFAULT_TO_LATEST=0`，并在 StateDir/profile 的 package.json 声明同一版本。准备后禁用项目声明进行一次 `pnpm --version` 检查，确认隔离默认版本本身正确，避免工位上层仓库声明掩盖缺失默认的问题；不符就拒绝继续。实际版本记在 plugin-dsh.json，准备和版本输出分别在 pnpm-prepare.log、pnpm-version.log，不依赖或修改全局 Corepack 缓存。
+
+宿主启动 URL 在内存解析，仅输出到 stdout，不写入 StateDir 文件。独立日志转发进程持续接收宿主 stdout/stderr，完整行在落盘前移除 URL 查询参数和片段；跨分块票据不会写入日志，超长行直接省略。`dsh.log` 只保留脱敏内容，不能用它恢复原始启动 URL。不要将 launcher 的 stdout 重定向或 tee 到持久文件。stop 同时核对并清理本次 DSH 和日志转发进程的 PID/启动时间。
+
+构建子进程也使用环境白名单：保留工具路径、证书/代理和批准的 `AURIGA_PNPM_STORE`、`COREPACK_HOME` 缓存，HOME、DSH_HOME、npm 用户/全局配置与临时目录固定在本次 StateDir；不继承 NODE_OPTIONS、API 凭据、真实用户 DSH 配置或 PSModulePath。批准的构建缓存可复用，验收宿主的数据目录仍独立。
+
+```powershell
+# 父目录应已存在；StateDir 本身必须不存在，每轮换一个新目录。
+$pluginState = Join-Path 'D:\auriga-beta-state' ('plugin-' + [guid]::NewGuid().ToString('N'))
+node scripts/beta-ui/plugin-dsh.mjs launch --state $pluginState
+node scripts/beta-ui/plugin-dsh.mjs status --state $pluginState
+# 验收结束后执行；可重复 stop，不按端口或进程名杀其他 DSH。
+node scripts/beta-ui/plugin-dsh.mjs stop --state $pluginState
+```
+
+隔离依据是上游公开的 [DSH_HOME 目录规则](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/util/home-paths/README.md) 和 [CLI/profile/plugin 管理规则](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/reference/README.md)。脚本把 `DSH_HOME` 固定为 `StateDir/dsh`，profile 为其中新建的 `profiles/web`；HOME、USERPROFILE、XDG、AppData、包缓存与临时目录也全部重定向到 StateDir，子进程从空 workspace 启动，不继承 DSH/Auriga 覆盖、API 凭据、Node 注入或现有用户配置。不复制用户 profile，也不修改系统设置。拒绝真实 DSH_HOME、`.dsh`、用户主目录及其祖先、已有 StateDir、UNC、目录链接和 junction 祖先。推荐仓库外独立私有目录；工位内测试仅允许被 git 忽略的 `.dev/plugin-dsh/` 子目录。StateDir 设置仅当前用户访问的 ACL，stop 保留数据和日志，不删除或复用它。
+
+脚本只读取 Beta 公开身份源列表来选择团队账号 provider，并写入无凭据的 profile patch：平台和 issuer 为 `http://127.0.0.1:18080`，clientId 为 `auriga-beta-native`，显式 `allowLocalHttp: true`。scope `auriga.connect` 由现有本机登录流程申请，不另造可见授权步骤。不配置 Team 地址或网络信任根来伪装通信成功。
+
+1. 用独立浏览器 profile 打开脚本输出的本机 URL。URL 包含 DSH 原生启动票据，只私下打开，不贴报告。先在 DSH 插件管理中确认 `auriga-dsh` 已安装、启用且 active，再确认侧栏 Auriga 功能入口、原生设置入口和登录页面实际可用；路由可达不等于浏览器模块完成挂载。
+2. 打开 DSH 设置中的 Auriga，确认平台地址、实际生效地址和本机设备名。可测试连接、保存同一平台并重读；不随意改到其他平台。保存业务设置不会把本次 client/provider 配置发送到另一安装。
+3. 进入普通 Auriga 本机登录页，使用已注册团队账号输入口令，再完成真实 TOTP，登录后返回当前 DSH。设备凭据获取在现有内部流程完成；不要求另点“登录总部”，不把门户登录当插件已登录。不要在命令行、脚本配置、报告或截图写入密码、验证码、二维码、Cookie 或令牌。
+4. 刷新页面并打开第二个 tab，确认身份保持、设置仍可读。若验收设备刷新令牌续期，需跨过真实 access token 到期时间并观察后续请求仍成功；一次页面刷新只证明浏览器会话保持。不要导出 HAR 或复制凭据文件。
+5. Beta 未启动 Team 时，继续完成登录、设置、刷新和退出，功能页应显示“通信未就绪”（或同义的宿主本地化状态），不能显示已连接、模拟成员或消息。身份已登录与通信未就绪可同时成立；双 DSH 收发、模型生成和计量仍另行验收。实际显示缺失或登录被 Team 故障阻断时记录缺口，交主控处理，勿改插件绕过。
+6. 在开发者工具内存中保留一个已成功的受保护 DSH 原生 API 请求及当前插件旧会话，执行插件退出。旧 tab 刷新应回登录；重放旧 Cookie 请求必须被拒绝（401/403 或回登录，不能返回受保护数据），旧 WS 应关闭，插件状态应为未登录且不可恢复旧身份。区分仅宿主启动 Cookie 与插件登录会话；不要用公开登录页或公开静态资源验证撤销。若远端撤销仍 pending，等 Beta 可达后确认 complete，不能以本地退出冒远端撤销成功。随后重新登录应走新流程，退出不停止 DSH。
+7. 执行 stop，核对 status 为 running=false，本次随机端口释放；用户原 DSH 和 Beta 仍运行。stop 核对登记 PID 与 Windows 启动时间，PID 复用会拒绝，绝不按端口杀进程。失败日志和测试数据保留在 StateDir 供私下排查，重新验收使用另一个全新目录。
+
+```powershell
+node --test e2e/beta-ui/plugin-dsh.test.mjs
+```
+
+此测试覆盖参数拒绝、真实 profile 禁区、全新目录、junction 逃逸、宿主/构建环境隔离、PID 复用拒杀、真实日志转发及 StateDir 全文件无假票据，以及宿主缺能力、锁定 integrity 不符、隔离 pnpm 版本不符时拒绝。launch 自检检查真实宿主启动、原生启动票据交换、插件本机登录/status、设置状态和设置模块可用，并要求实际生效平台等于 Beta 门户；结果记入 plugin-dsh.json 的 startupChecks。没有代填团队凭据，不计真人 TOTP、刷新续期、退出撤销或完整浏览器视觉通过。构建、安装、宿主初始化或路由失败均非通过；查看对应 pnpm-prepare/pnpm-version/host-install/build/profile-init/plugin-install/profile-config/dsh 日志，保留首次失败。启动未完成时只清理本次自有宿主，仍保留 StateDir。命令崩溃留下 plugin-dsh.lock 时，先核对原命令已退出再由主控处置，不能绕过活跃命令锁。
+
+原 `0.2.0-rc.2` 宿主缺少现有插件要求的原生连接能力。按主控决定，本脚手架统一使用上述精确 rc.3 基线，不修改插件、不提供旧版本兼容；真人团队账号登录、TOTP、刷新和退出撤销仍由 root 按本节完成。
