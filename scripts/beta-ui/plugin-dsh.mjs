@@ -3,19 +3,60 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { stripVTControlCharacters } from 'node:util';
-import { spawn, spawnSync } from 'node:child_process';
+import { fork, spawnSync } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
+import { Buffer } from 'node:buffer';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import {
-  privatePath,
-  processIdentity,
-  waitUntil,
-  repo,
-  windowsPowerShellEnvironment,
-} from './runner.mjs';
+import { privatePath, processIdentity, waitUntil, repo } from './runner.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const origin = 'http://127.0.0.1:18080';
+
+// One collector per stream: never persist partial lines, including split query
+// credentials. An overlong line is discarded until its next newline.
+export function createHostOutput(write, onURL) {
+  const decoder = new StringDecoder('utf8');
+  let pending = '',
+    dropping = false;
+  const line = (value) => {
+    const clean = stripVTControlCharacters(value);
+    for (const url of clean.match(/http:\/\/127\.0\.0\.1:\d+\/[^\s<>"']*/g) ??
+      [])
+      onURL(url);
+    write(
+      clean.replace(/https?:\/\/[^\s<>"']+/gi, (url) =>
+        url.replace(/[?#].*$/, '?[redacted]'),
+      ) + '\n',
+    );
+  };
+  const accept = (text, end = false) => {
+    pending += text;
+    for (;;) {
+      const index = pending.search(/[\r\n]/);
+      if (index < 0) break;
+      const value = pending.slice(0, index);
+      pending = pending.slice(index + 1);
+      if (!dropping && value.length <= 65536) line(value);
+      else write('[host output line omitted]\n');
+      dropping = false;
+    }
+    if (pending.length > 65536) {
+      pending = '';
+      dropping = true;
+    }
+    if (end) {
+      if (dropping) write('[host output line omitted]\n');
+      else if (pending) line(pending);
+      pending = '';
+      dropping = false;
+    }
+  };
+  return {
+    write: (chunk) => accept(decoder.write(Buffer.from(chunk))),
+    end: () => accept(decoder.end(), true),
+  };
+}
 export const hostPin = Object.freeze({
   version: '0.2.1-rc.3',
   integrity:
@@ -262,6 +303,17 @@ export function isolatedEnvironment(state, source = process.env) {
   };
 }
 
+export function buildEnvironment(state, source = process.env) {
+  const env = isolatedEnvironment(state, source);
+  const approved = Object.fromEntries(
+    Object.entries(source)
+      .filter(([key]) => /^(AURIGA_PNPM_STORE|COREPACK_HOME)$/i.test(key))
+      .map(([key, value]) => [key.toUpperCase(), value]),
+  );
+  delete env.AURIGA_MODE;
+  return { ...env, ...approved };
+}
+
 export function connectionPatch(providerId) {
   if (typeof providerId !== 'string' || !providerId || providerId.length > 128)
     throw new Error('团队身份源无效');
@@ -304,6 +356,37 @@ export async function stopOwnedProcess(
     '自有 DSH 进程没有退出',
     10000,
   );
+}
+
+async function stopHostProcesses(state, manifest) {
+  let host = manifest.process;
+  if (
+    !host &&
+    manifest.outputProcess &&
+    fs.existsSync(path.join(state, 'host-process.json'))
+  ) {
+    const record = regularJson(path.join(state, 'host-process.json'));
+    if (
+      record.worker.pid !== manifest.outputProcess.pid ||
+      record.worker.identity !== manifest.outputProcess.identity
+    )
+      throw new Error('输出转发进程记录不匹配，拒绝停止');
+    host = record.host;
+  }
+  await stopOwnedProcess(host);
+  if (manifest.outputProcess) {
+    try {
+      await waitUntil(
+        () =>
+          processIdentity(manifest.outputProcess.pid) !==
+          manifest.outputProcess.identity,
+        '输出转发进程未退出',
+        5000,
+      );
+    } catch {
+      await stopOwnedProcess(manifest.outputProcess);
+    }
+  }
 }
 
 function regularJson(file) {
@@ -405,7 +488,7 @@ async function prepareLaunch({ state }, providerId) {
       state,
     ],
     state,
-    windowsPowerShellEnvironment(),
+    buildEnvironment(state),
     'build',
     repo,
   );
@@ -444,48 +527,47 @@ async function prepareLaunch({ state }, providerId) {
     connectionPatch(providerId),
   );
   cli(['--profile', 'web', '--dump-config'], 'profile-config');
-  const output = fs.openSync(path.join(state, 'dsh.log'), 'a', 0o600);
-  let child;
+  let worker;
   try {
-    child = spawn(
-      process.execPath,
-      [
-        dsh.bin,
-        '--profile',
-        'web',
-        '--host',
-        '127.0.0.1',
-        '--port',
-        '0',
-        '--no-open',
-      ],
-      {
-        cwd: path.join(state, 'workspace'),
-        env,
-        windowsHide: true,
-        detached: true,
-        stdio: ['ignore', output, output],
-      },
-    );
-    await new Promise((resolve, reject) => {
-      child.once('spawn', resolve);
-      child.once('error', reject);
+    let startupURL, host, failure;
+    worker = fork(path.join(here, 'plugin-dsh-output.mjs'), [state, dsh.bin], {
+      cwd: path.join(state, 'workspace'),
+      env,
+      windowsHide: true,
+      detached: true,
+      execArgv: [],
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     });
-    const identity = processIdentity(child.pid);
-    if (!identity) throw new Error('DSH 在登记前退出，请检查私有日志');
-    manifest.process = { pid: child.pid, identity };
+    worker.on('message', (message) => {
+      if (message.type === 'started') host = message.host;
+      if (message.type === 'url') startupURL = message.url;
+      if (message.type === 'failure' || message.type === 'exit') failure = true;
+    });
+    await new Promise((resolve, reject) => {
+      worker.once('spawn', resolve);
+      worker.once('error', reject);
+    });
+    const identity = processIdentity(worker.pid);
+    if (!identity) throw new Error('输出转发进程在登记前退出');
+    manifest.outputProcess = { pid: worker.pid, identity };
+    json(manifestFile, manifest);
+    await waitUntil(
+      () => {
+        if (failure || processIdentity(worker.pid) !== identity)
+          throw new Error('DSH 启动失败，请检查 StateDir/dsh.log');
+        return !!host;
+      },
+      'DSH 未登记，请检查 StateDir/dsh.log',
+      10000,
+    );
+    manifest.process = host;
     json(manifestFile, manifest);
     let url;
     await waitUntil(
       async () => {
-        if (processIdentity(child.pid) !== identity)
+        if (failure || processIdentity(host.pid) !== host.identity)
           throw new Error('DSH 启动失败，请检查 StateDir/dsh.log');
-        const log = stripVTControlCharacters(
-          fs.readFileSync(path.join(state, 'dsh.log'), 'utf8'),
-        );
-        const found = log
-          .match(/http:\/\/127\.0\.0\.1:\d+\/[^\s<>"']*/g)
-          ?.at(-1);
+        const found = startupURL;
         if (!found) return false;
         const parsed = new URL(found);
         try {
@@ -546,7 +628,6 @@ async function prepareLaunch({ state }, providerId) {
       'DSH 插件登录路由未就绪，请检查 StateDir/dsh.log',
       60000,
     );
-    child.unref();
     manifest.startupChecks = {
       login: true,
       settingsState: true,
@@ -556,14 +637,15 @@ async function prepareLaunch({ state }, providerId) {
     console.log(
       `DSH ${dsh.version}；全新隔离 profile 已启动，登录入口和设置接口自检通过。\n本机 URL（含宿主启动票据，仅私下打开）：${url}\nStateDir：${state}`,
     );
+    worker.disconnect();
+    worker.unref();
   } catch (error) {
-    if (manifest.process) await stopOwnedProcess(manifest.process);
-    else if (child?.pid) child.kill();
+    await stopHostProcesses(state, manifest);
+    if (!manifest.outputProcess && worker?.pid) worker.kill();
     manifest.process = null;
+    manifest.outputProcess = null;
     json(manifestFile, manifest);
     throw error;
-  } finally {
-    fs.closeSync(output);
   }
 }
 
@@ -585,8 +667,9 @@ export async function main(args) {
   const handle = fs.openSync(lock, 'wx', 0o600);
   try {
     if (options.action === 'stop') {
-      await stopOwnedProcess(manifest.process);
+      await stopHostProcesses(options.state, manifest);
       manifest.process = null;
+      manifest.outputProcess = null;
       json(file, manifest);
       console.log('隔离 DSH 已停止；保留测试数据，不影响 Beta 或用户 DSH。');
     } else {

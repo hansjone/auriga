@@ -113,6 +113,10 @@ try { go vet ./...; go test -count=1 ./... } finally { Pop-Location }
 
 插件安装所用 pnpm 精确取自仓库根 `package.json` 的 `packageManager`（当前 `pnpm@11.28.6`）。launcher 在隔离 `COREPACK_HOME` 执行 `corepack prepare pnpm@11.28.6 --activate`，设置 `COREPACK_DEFAULT_TO_LATEST=0`，并在 StateDir/profile 的 package.json 声明同一版本。准备后禁用项目声明进行一次 `pnpm --version` 检查，确认隔离默认版本本身正确，避免工位上层仓库声明掩盖缺失默认的问题；不符就拒绝继续。实际版本记在 plugin-dsh.json，准备和版本输出分别在 pnpm-prepare.log、pnpm-version.log，不依赖或修改全局 Corepack 缓存。
 
+宿主启动 URL 在内存解析，仅输出到 stdout，不写入 StateDir 文件。独立日志转发进程持续接收宿主 stdout/stderr，完整行在落盘前移除 URL 查询参数和片段；跨分块票据不会写入日志，超长行直接省略。`dsh.log` 只保留脱敏内容，不能用它恢复原始启动 URL。不要将 launcher 的 stdout 重定向或 tee 到持久文件。stop 同时核对并清理本次 DSH 和日志转发进程的 PID/启动时间。
+
+构建子进程也使用环境白名单：保留工具路径、证书/代理和批准的 `AURIGA_PNPM_STORE`、`COREPACK_HOME` 缓存，HOME、DSH_HOME、npm 用户/全局配置与临时目录固定在本次 StateDir；不继承 NODE_OPTIONS、API 凭据、真实用户 DSH 配置或 PSModulePath。批准的构建缓存可复用，验收宿主的数据目录仍独立。
+
 ```powershell
 # 父目录应已存在；StateDir 本身必须不存在，每轮换一个新目录。
 $pluginState = Join-Path 'D:\auriga-beta-state' ('plugin-' + [guid]::NewGuid().ToString('N'))
@@ -138,6 +142,6 @@ node scripts/beta-ui/plugin-dsh.mjs stop --state $pluginState
 node --test e2e/beta-ui/plugin-dsh.test.mjs
 ```
 
-此测试覆盖参数拒绝、真实 profile 禁区、全新目录、junction 逃逸、继承环境隔离、PID 复用拒杀，以及宿主缺能力、锁定 integrity 不符、隔离 pnpm 版本不符时拒绝。launch 自检检查真实宿主启动、原生启动票据交换、插件本机登录/status、设置状态和设置模块可用，并要求实际生效平台等于 Beta 门户；结果记入 plugin-dsh.json 的 startupChecks。没有代填团队凭据，不计真人 TOTP、刷新续期、退出撤销或完整浏览器视觉通过。构建、安装、宿主初始化或路由失败均非通过；查看对应 pnpm-prepare/pnpm-version/host-install/build/profile-init/plugin-install/profile-config/dsh 日志，保留首次失败。启动未完成时只清理本次自有宿主，仍保留 StateDir。命令崩溃留下 plugin-dsh.lock 时，先核对原命令已退出再由主控处置，不能绕过活跃命令锁。
+此测试覆盖参数拒绝、真实 profile 禁区、全新目录、junction 逃逸、宿主/构建环境隔离、PID 复用拒杀、真实日志转发及 StateDir 全文件无假票据，以及宿主缺能力、锁定 integrity 不符、隔离 pnpm 版本不符时拒绝。launch 自检检查真实宿主启动、原生启动票据交换、插件本机登录/status、设置状态和设置模块可用，并要求实际生效平台等于 Beta 门户；结果记入 plugin-dsh.json 的 startupChecks。没有代填团队凭据，不计真人 TOTP、刷新续期、退出撤销或完整浏览器视觉通过。构建、安装、宿主初始化或路由失败均非通过；查看对应 pnpm-prepare/pnpm-version/host-install/build/profile-init/plugin-install/profile-config/dsh 日志，保留首次失败。启动未完成时只清理本次自有宿主，仍保留 StateDir。命令崩溃留下 plugin-dsh.lock 时，先核对原命令已退出再由主控处置，不能绕过活跃命令锁。
 
 原 `0.2.0-rc.2` 宿主缺少现有插件要求的原生连接能力。按主控决定，本脚手架统一使用上述精确 rc.3 基线，不修改插件、不提供旧版本兼容；真人团队账号登录、TOTP、刷新和退出撤销仍由 root 按本节完成。

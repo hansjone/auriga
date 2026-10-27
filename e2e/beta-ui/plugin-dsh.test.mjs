@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fork, spawn } from 'node:child_process';
+import { privatePath, waitUntil } from '../../scripts/beta-ui/runner.mjs';
 import {
   parseArguments,
   assertStatePath,
@@ -12,6 +14,8 @@ import {
   assertHostCapabilities,
   assertRuntimeLock,
   verifyPackageManagerVersion,
+  buildEnvironment,
+  createHostOutput,
 } from '../../scripts/beta-ui/plugin-dsh.mjs';
 
 const base = path.resolve('.dev/plugin-dsh');
@@ -37,6 +41,173 @@ test('arguments reject missing, duplicate, unknown and unsafe launch values', ()
   }
   assert.equal(parseArguments(['launch', '--state', base]).port, 0);
 });
+
+test('host stdout/stderr parse split launch URL in memory and never persist query tickets', async (t) => {
+  const dir = temporary(t);
+  const secret = 'fake-' + Date.now() + '-launch-credential';
+  const ticket = 'fake-' + Date.now() + '-ticket';
+  const url = 'http://127.0.0.1:12345/?token=' + secret;
+  const file = path.join(dir, 'dsh.log');
+  const urls = [];
+  const collectors = [0, 1].map(() =>
+    createHostOutput(
+      (line) => fs.appendFileSync(file, line),
+      (value) => urls.push(value),
+    ),
+  );
+  const code = `process.stdout.write(${JSON.stringify(url.slice(0, -10))});
+    setTimeout(() => {process.stdout.write(${JSON.stringify(url.slice(-10) + '\n')});
+    process.stderr.write(${JSON.stringify('error: https://example.com/path?%74icket=' + ticket + '&access_token=' + secret + '#token=' + ticket)});}, 10);`;
+  const child = spawn(process.execPath, ['-e', code], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  for (const [i, stream] of [child.stdout, child.stderr].entries()) {
+    stream.on('data', (chunk) => collectors[i].write(chunk));
+    stream.on('end', () => collectors[i].end());
+  }
+  const exit = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', resolve);
+  });
+  assert.equal(exit, 0);
+  assert.equal(urls[0], url);
+  assert.match(fs.readFileSync(file, 'utf8'), /redacted/);
+  for (const name of fs.readdirSync(dir)) {
+    const contents = fs.readFileSync(path.join(dir, name), 'utf8');
+    assert.ok(!contents.includes(secret) && !contents.includes(ticket), name);
+  }
+});
+
+test('build environment keeps approved tool caches and certificates while isolating user config and secrets', () => {
+  const env = buildEnvironment(base, {
+    Path: 'tools',
+    SystemRoot: 'windows',
+    AURIGA_PNPM_STORE: 'approved-store',
+    COREPACK_HOME: 'approved-corepack',
+    NODE_EXTRA_CA_CERTS: 'approved-cert',
+    NODE_OPTIONS: '--import=untrusted',
+    OPENAI_API_KEY: 'api-secret',
+    DEEPSEEK_API_KEY: 'api-secret',
+    DSH_HOME: 'real-dsh',
+    HOME: 'real-user',
+    npm_config_userconfig: 'real-npmrc',
+    npm_config_globalconfig: 'real-global-npmrc',
+    PSModulePath: 'foreign-modules',
+    AURIGA_INSTANCE_TOKEN_FILE: 'real-token',
+  });
+  for (const key of [
+    'NODE_OPTIONS',
+    'OPENAI_API_KEY',
+    'DEEPSEEK_API_KEY',
+    'PSModulePath',
+    'AURIGA_INSTANCE_TOKEN_FILE',
+  ])
+    assert.equal(env[key], undefined, key);
+  for (const key of [
+    'DSH_HOME',
+    'HOME',
+    'USERPROFILE',
+    'npm_config_userconfig',
+    'npm_config_globalconfig',
+  ])
+    assert.ok(env[key].startsWith(base + path.sep), key);
+  assert.equal(env.AURIGA_PNPM_STORE, 'approved-store');
+  assert.equal(env.COREPACK_HOME, 'approved-corepack');
+  assert.equal(env.NODE_EXTRA_CA_CERTS, 'approved-cert');
+  assert.equal(env.Path, 'tools');
+});
+
+test(
+  'real detached relay keeps launch tickets out of every StateDir file and exits with its host',
+  { skip: process.platform !== 'win32', timeout: 20000 },
+  async (t) => {
+    const dir = temporary(t);
+    privatePath(dir, true);
+    fs.mkdirSync(path.join(dir, 'workspace'));
+    const bin = path.join(dir, 'fake-host.mjs');
+    fs.writeFileSync(
+      bin,
+      `const url='http://127.0.0.1:12345/?token='+process.env.FAKE_HOST_TICKET;
+      process.stdout.write(url.slice(0,-5));
+      setTimeout(()=>process.stdout.write(url.slice(-5)+'\\n'),10);
+      process.stderr.write('https://example.com/?ticket='+process.env.FAKE_HOST_EXTRA_TICKET+'\\n');
+      setInterval(()=>{},1000);`,
+    );
+    const secret = 'fake-' + Date.now() + '-launch-ticket';
+    const extra = 'fake-' + Date.now() + '-other-ticket';
+    const worker = fork(
+      path.resolve('scripts/beta-ui/plugin-dsh-output.mjs'),
+      [dir, bin],
+      {
+        cwd: dir,
+        env: {
+          ...isolatedEnvironment(dir),
+          FAKE_HOST_TICKET: secret,
+          FAKE_HOST_EXTRA_TICKET: extra,
+        },
+        windowsHide: true,
+        execArgv: [],
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      },
+    );
+    let host, url, failure;
+    let closed = false;
+    worker.on('message', (message) => {
+      if (message.type === 'started') host = message.host;
+      if (message.type === 'url') url = message.url;
+      if (message.type === 'failure') failure = true;
+    });
+    worker.once('exit', () => {
+      closed = true;
+    });
+    try {
+      await waitUntil(
+        () => {
+          assert.ok(!failure && !closed, 'relay exited before startup');
+          return host && url;
+        },
+        'relay did not provide host and URL',
+        10000,
+      );
+      assert.equal(url, 'http://127.0.0.1:12345/?token=' + secret);
+      worker.disconnect();
+      const scan = (directory) => {
+        for (const entry of fs.readdirSync(directory, {
+          withFileTypes: true,
+        })) {
+          const file = path.join(directory, entry.name);
+          if (entry.isDirectory()) scan(file);
+          else {
+            const content = fs.readFileSync(file, 'utf8');
+            assert.ok(
+              !content.includes(secret) && !content.includes(extra),
+              file,
+            );
+          }
+        }
+      };
+      scan(dir);
+      assert.match(
+        fs.readFileSync(path.join(dir, 'dsh.log'), 'utf8'),
+        /redacted/,
+      );
+    } finally {
+      if (!host && fs.existsSync(path.join(dir, 'host-process.json')))
+        host = JSON.parse(
+          fs.readFileSync(path.join(dir, 'host-process.json')),
+        ).host;
+      await stopOwnedProcess(host);
+      if (!closed) {
+        try {
+          await waitUntil(() => closed, 'relay did not exit with host', 5000);
+        } finally {
+          if (!closed) worker.kill();
+        }
+      }
+    }
+  },
+);
 
 test('selected host fails explicitly if a required public connection capability is absent', () => {
   const connection = { admit() {}, authorizeIndex() {}, isTrusted() {} };
