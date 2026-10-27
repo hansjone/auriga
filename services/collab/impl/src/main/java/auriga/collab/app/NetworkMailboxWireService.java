@@ -9,6 +9,7 @@ import auriga.common.error.AurigaException;
 import auriga.common.error.ErrorCode;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.contracts.iam.v1.NetworkAuthorityConnection;
+import auriga.contracts.iam.v1.NetworkConnectionAnchor;
 import io.grpc.Status;
 import java.time.*;
 import java.util.*;
@@ -86,7 +87,8 @@ public class NetworkMailboxWireService {
       JsonNode request,
       Map<String, Object> before,
       Target target,
-      NetworkMailboxService.TargetDecision decision) {}
+      NetworkMailboxService.TargetDecision decision,
+      NetworkConnectionAnchor anchor) {}
 
   SourceGate sourceGate(NetworkAuthorityConnection c, JsonNode request) {
     var caller =
@@ -99,7 +101,8 @@ public class NetworkMailboxWireService {
             && TenantContext.PLATFORM_TENANT.equals(caller.tenantId()),
         auriga.common.error.CommonErrors.FORBIDDEN);
     NetworkAuthorityClient.binding(c);
-    Instant deadline = source.verify(c);
+    var verified = source.verifiedConnection(c);
+    Instant deadline = verified.deadline();
     deadline =
         Collections.min(
             List.of(
@@ -121,7 +124,7 @@ public class NetworkMailboxWireService {
                     c.getRealm(),
                     c.getNode(),
                     Set.of(auriga.iam.api.NetworkAuthority.Operation.CONNECT)));
-    return new SourceGate(c, request, before, target, decision);
+    return new SourceGate(c, request, before, target, decision, verified.anchor());
   }
 
   void lockSourceGate(SourceGate gate, boolean frameFence) {
@@ -145,8 +148,16 @@ public class NetworkMailboxWireService {
   }
 
   Instant refreshSourceGate(SourceGate gate) {
+    return refreshSourceGate(gate, false);
+  }
+
+  Instant refreshSourceGate(SourceGate gate, boolean requireAnchor) {
     var current = sourceGate(gate.connection(), gate.request());
     unchanged(gate.before(), current.before());
+    if (requireAnchor)
+      require(
+          gate.anchor() != null && gate.anchor().equals(current.anchor()),
+          ErrorCode.of("network.outcome_unknown", 503, Status.Code.FAILED_PRECONDITION));
     return Collections.min(
         List.of(
             gate.target().validUntil(),

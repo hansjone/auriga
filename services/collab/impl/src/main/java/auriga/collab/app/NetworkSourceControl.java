@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
@@ -87,16 +88,29 @@ final class NetworkSourceControl {
       acquired = true;
       SourceResult response =
           switch (definition) {
-            case "SourceRegister" -> register(gate, bytes, invalid);
+            case "SourceRegister" -> register(gate, holder, bytes, invalid);
             case "SourceGet" -> new SourceResult(get(gate), true);
             case "SourceRevoke" -> new SourceResult(revoke(gate, bytes), true);
             default -> throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
           };
       ObjectNode result = response.frame();
-      Instant until = wire.refreshSourceGate(gate);
+      Instant until;
+      try {
+        until = wire.refreshSourceGate(gate, response.history() != null);
+      } catch (AurigaException e) {
+        if (response.history() != null && "common.unavailable".equals(e.errorCode().code()))
+          throw new AurigaException(UNKNOWN);
+        throw e;
+      }
       return transaction(
           s -> {
-            if (response.frameFence()) wire.lockSourceGate(gate, true);
+            if (response.history() != null) {
+              lockOp("Register", text(frame, "operation_id"));
+              response
+                  .history()
+                  .requireUnchanged(operation("Register", text(frame, "operation_id")));
+              wire.lockSourceGate(gate, response.frameFence());
+            } else if (response.frameFence()) wire.lockSourceGate(gate, true);
             else wire.lockSourceErrorGate(gate);
             requireSlot(gate, slot, holder);
             if ("SourceGet".equals(definition)) finalObservation(gate, result);
@@ -194,100 +208,144 @@ final class NetworkSourceControl {
         EXPIRED);
   }
 
-  private record PreparedRegister(Map<String, Object> row, boolean existing) {}
+  private record PreparedRegister(
+      Map<String, Object> row, boolean existing, NetworkLocalSourceHistory.Snapshot history) {
+    PreparedRegister(Map<String, Object> row, boolean existing) {
+      this(
+          row,
+          existing,
+          "not_accepted".equals(row.get("status")) && row.get("iam_request") == null
+              ? NetworkLocalSourceHistory.freeze(row)
+              : null);
+    }
+  }
 
-  private record SourceResult(ObjectNode frame, boolean frameFence) {}
+  private record SourceResult(
+      ObjectNode frame, boolean frameFence, NetworkLocalSourceHistory.Snapshot history) {
+    SourceResult(ObjectNode frame, boolean frameFence) {
+      this(frame, frameFence, null);
+    }
+  }
 
-  private SourceResult register(SourceGate gate, byte[] bytes, boolean invalid) {
+  private SourceResult register(SourceGate gate, UUID holder, byte[] bytes, boolean invalid) {
     var frame = gate.request();
     String op = text(frame, "operation_id");
     String business = NetworkJson.canonical(business(frame));
-    PreparedRegister prepared =
-        transaction(
-            s -> {
-              lockOp("Register", op);
-              var original = operation("Register", op);
-              if (original != null) {
-                owned(gate, original);
-                require(business.equals(original.get("business_json")), NetworkErrors.CONFLICT);
-                if ("not_accepted".equals(original.get("status"))) {
-                  validateLocalTombstone(original);
-                  // Current IAM verified node ownership comes from sourceGate, never wire owner
-                  // fields or client_account. Recovery still requires the current READY/health/CAS.
-                  wire.lockSourceGate(gate, true);
+    PreparedRegister prepared;
+    try {
+      prepared =
+          transaction(
+              s -> {
+                lockOp("Register", op);
+                var original = operation("Register", op);
+                if (original != null) {
+                  owned(gate, original);
+                  require(business.equals(original.get("business_json")), NetworkErrors.CONFLICT);
+                  if ("not_accepted".equals(original.get("status"))) {
+                    NetworkLocalSourceHistory.freeze(original);
+                    require(gate.anchor() != null, UNKNOWN);
+                    wire.lockSourceGate(gate, true);
+                    requireSlot(gate, "regular", holder);
+                  }
+                  if (invalid && "pending".equals(original.get("status")))
+                    throw new AurigaException(UNKNOWN);
+                  return new PreparedRegister(original, true);
                 }
-                if (invalid && "pending".equals(original.get("status")))
-                  throw new AurigaException(UNKNOWN);
-                return new PreparedRegister(original, true);
-              }
-              // Only the primary ledger, while holding the same key lock as every writer, can
-              // prove non-acceptance. Restored/uncertain node histories cannot produce tombstones.
-              var node = node(gate);
-              require(!Boolean.TRUE.equals(node.get("source_operation_recovery_gap")), UNKNOWN);
-              require(
-                  one(
-                          """
+                // Only the primary ledger, while holding the same key lock as every writer, can
+                // prove non-acceptance. Restored/uncertain node histories cannot produce
+                // tombstones.
+                var node = node(gate);
+                require(!Boolean.TRUE.equals(node.get("source_operation_recovery_gap")), UNKNOWN);
+                require(
+                    one(
+                            """
           SELECT o.id FROM collab.network_source_outbox b JOIN collab.network_source_operation o
           ON o.tenant_id=b.tenant_id AND o.id=b.operation_id
           WHERE o.tenant_id=? AND o.method='Register' AND o.operation_id=?
           """,
-                          tenant(),
-                          op)
-                      == null,
-                  UNKNOWN);
-              if ("reconcile".equals(text(frame, "mode")))
-                return new PreparedRegister(notAccepted(gate, bytes, business), false);
-              if (invalid) return new PreparedRegister(notAccepted(gate, bytes, business), false);
-              NetworkAgentSourceRegistration registration;
-              Map<String, Object> lineage;
-              try {
-                wire.lockSourceGate(gate, true);
-                registration = registration(gate);
-                witness(gate, "Register:" + op);
-                lineage = lineage(gate, registration, true);
-                require(!Boolean.TRUE.equals(lineage.get("stopped")), REVOKED);
-                if (!matchesNative(lineage, frame.path("native_witness"))) {
-                  stopAndEnqueue(gate, lineage);
-                  return new PreparedRegister(notAccepted(gate, bytes, business), false);
-                }
-                // An unresolved mutation cannot be bypassed by another local or operation id.
-                require(
-                    one(
-                            "SELECT id FROM collab.network_source_operation WHERE tenant_id=? AND realm=? AND node_id=? AND method='Register' AND status='pending'",
                             tenant(),
-                            gate.connection().getRealm(),
-                            gate.connection().getNode())
+                            op)
                         == null,
                     UNKNOWN);
-              } catch (AurigaException e) {
-                if (e.errorCode().equals(UNKNOWN) || e.errorCode().equals(OVERLOADED)) throw e;
-                return new PreparedRegister(notAccepted(gate, bytes, business), false);
-              }
-              var request =
-                  RegisterAgentSourceRequest.newBuilder()
-                      .setConnection(gate.connection())
-                      .setRegistration(registration)
-                      .setOperationId(op)
-                      .setScope(
-                          NetworkAgentSourceScope.NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND)
-                      .setExpectedRevision(unsigned(text(frame, "expected_revision")))
-                      .setPredecessorBinding(text(frame, "predecessor_binding"))
-                      .build();
-              String json = NetworkJson.canonical(requestJson(request));
-              insertOperation(
-                  gate,
-                  "Register",
-                  business,
-                  bytes,
-                  request.toByteArray(),
-                  json,
-                  NetworkJson.digest(NetworkJson.parse(json)),
-                  lineage,
-                  "pending",
-                  null);
-              return new PreparedRegister(operation("Register", op), false);
-            });
+                if ("reconcile".equals(text(frame, "mode")))
+                  return new PreparedRegister(notAccepted(gate, holder, bytes, business), false);
+                if (invalid)
+                  return new PreparedRegister(notAccepted(gate, holder, bytes, business), false);
+                NetworkAgentSourceRegistration registration;
+                Map<String, Object> lineage;
+                try {
+                  wire.lockSourceGate(gate, true);
+                  registration = registration(gate);
+                  witness(gate, "Register:" + op);
+                  lineage = lineage(gate, registration, true);
+                  require(!Boolean.TRUE.equals(lineage.get("stopped")), REVOKED);
+                  if (!matchesNative(lineage, frame.path("native_witness"))) {
+                    stopAndEnqueue(gate, lineage);
+                    return new PreparedRegister(notAccepted(gate, holder, bytes, business), false);
+                  }
+                  // An unresolved mutation cannot be bypassed by another local or operation id.
+                  require(
+                      one(
+                              "SELECT id FROM collab.network_source_operation WHERE tenant_id=? AND realm=? AND node_id=? AND method='Register' AND status='pending'",
+                              tenant(),
+                              gate.connection().getRealm(),
+                              gate.connection().getNode())
+                          == null,
+                      UNKNOWN);
+                } catch (AurigaException e) {
+                  if (e.errorCode().equals(UNKNOWN) || e.errorCode().equals(OVERLOADED)) throw e;
+                  return new PreparedRegister(notAccepted(gate, holder, bytes, business), false);
+                }
+                var request =
+                    RegisterAgentSourceRequest.newBuilder()
+                        .setConnection(gate.connection())
+                        .setRegistration(registration)
+                        .setOperationId(op)
+                        .setScope(
+                            NetworkAgentSourceScope.NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND)
+                        .setExpectedRevision(unsigned(text(frame, "expected_revision")))
+                        .setPredecessorBinding(text(frame, "predecessor_binding"))
+                        .build();
+                String json = NetworkJson.canonical(requestJson(request));
+                insertOperation(
+                    gate,
+                    "Register",
+                    business,
+                    bytes,
+                    request.toByteArray(),
+                    json,
+                    NetworkJson.digest(NetworkJson.parse(json)),
+                    lineage,
+                    "pending",
+                    null);
+                return new PreparedRegister(operation("Register", op), false);
+              });
+    } catch (AurigaException e) {
+      throw e;
+    } catch (RuntimeException e) {
+      // A commit acknowledgement failure is never a definitive pre-pending rejection.
+      throw new AurigaException(UNKNOWN);
+    }
     var pending = prepared.row();
+    if (prepared.history() != null) {
+      if (prepared.existing()) {
+        try {
+          // Pure provenance read, outside the op transaction. Never use any source RPC here.
+          var proof = iam.readConnectionAnchor(prepared.history().anchor(), gate.anchor());
+          require(
+              proof != null
+                  && proof.getUnknownFields().asMap().isEmpty()
+                  && proof.hasOriginal()
+                  && proof.hasCurrent()
+                  && prepared.history().anchor().equals(proof.getOriginal())
+                  && gate.anchor().equals(proof.getCurrent()),
+              UNKNOWN);
+        } catch (RuntimeException e) {
+          throw new AurigaException(UNKNOWN);
+        }
+      }
+      return new SourceResult(prepared.history().result(), prepared.existing(), prepared.history());
+    }
     boolean sameConnection =
         Arrays.equals(gate.connection().toByteArray(), (byte[]) pending.get("original_connection"));
     boolean receiptRead =
@@ -297,11 +355,8 @@ final class NetworkSourceControl {
                 || "reconcile".equals(text(frame, "mode"))
                 || !sameConnection);
     if (!"pending".equals(pending.get("status")) && !receiptRead) {
-      if (!"not_accepted".equals(pending.get("status"))) require(sameConnection, UNKNOWN);
-      // New pre-pending failures can describe invalid frame fences. Historical recovery must
-      // instead pass the current full frame fence again in the final signing transaction.
-      return new SourceResult(
-          result(pending), prepared.existing() || !"not_accepted".equals(pending.get("status")));
+      require(sameConnection, UNKNOWN);
+      return new SourceResult(result(pending), true);
     }
     try {
       var original = frozenRegister(pending);
@@ -399,55 +454,11 @@ final class NetworkSourceControl {
     }
   }
 
-  private static void validateLocalTombstone(Map<String, Object> row) {
-    try {
-      var original = NetworkAuthorityConnection.parseFrom((byte[]) row.get("original_connection"));
-      var frame = NetworkJson.parse((byte[]) row.get("original_frame"));
-      String business = NetworkJson.canonical(business(frame));
-      String digest = NetworkJson.digest(NetworkJson.parse(business));
-      var expected =
-          registerResult(
-              row.get("operation_id").toString(),
-              "not_accepted",
-              null,
-              NetworkJson.object()
-                  .put("authority", "collab")
-                  .put("reason", "rejected_before_pending")
-                  .put("request_digest", digest));
-      require(
-          original.getTenantId().equals(tenant().toString())
-              && original.getRealm().equals(row.get("realm"))
-              && original.getNode().equals(row.get("node_id"))
-              && !original.getIngress().isBlank()
-              && !original.getServerId().isBlank()
-              && !original.getClientId().isBlank()
-              && !original.getClientAccount().isBlank()
-              && "source_register".equals(text(frame, "type"))
-              && text(frame, "operation_id").equals(row.get("operation_id"))
-              && text(frame, "boot_id").equals(row.get("boot_id"))
-              // The original frame may itself have failed its epoch fence before pending.
-              && ((Number) row.get("epoch")).longValue() > 0
-              && business.equals(row.get("business_json"))
-              && digest.equals(row.get("request_digest"))
-              && expected.equals(result(row))
-              && row.get("iam_request") == null
-              && row.get("iam_request_json") == null
-              && row.get("iam_response") == null
-              && row.get("lineage_id") == null
-              && Objects.equals(
-                  frame.hasNonNull("native_witness")
-                      ? NetworkJson.canonical(frame.path("native_witness"))
-                      : null,
-                  row.get("witness_json"))
-              && row.get("stop_version") == null
-              && row.get("permission_version") == null,
-          UNKNOWN);
-    } catch (RuntimeException | com.google.protobuf.InvalidProtocolBufferException e) {
-      throw new AurigaException(UNKNOWN);
-    }
-  }
-
-  private Map<String, Object> notAccepted(SourceGate gate, byte[] bytes, String business) {
+  private Map<String, Object> notAccepted(
+      SourceGate gate, UUID holder, byte[] bytes, String business) {
+    require(gate.anchor() != null, UNKNOWN);
+    wire.lockSourceGate(gate, false);
+    requireSlot(gate, "regular", holder);
     String digest = NetworkJson.digest(NetworkJson.parse(business));
     var value =
         registerResult(
@@ -475,35 +486,53 @@ final class NetworkSourceControl {
       String state,
       ObjectNode result) {
     UUID id = UuidV7.next();
-    jdbc.update(
-        """
-        INSERT INTO collab.network_source_operation(id,tenant_id,method,operation_id,realm,node_id,
-        business_json,request_digest,original_frame,original_connection,iam_request,iam_request_json,lineage_id,witness_json,
-        epoch,boot_id,stop_version,permission_version,status,result_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """,
-        id,
-        tenant(),
-        method,
-        text(gate.request(), "operation_id"),
-        gate.connection().getRealm(),
-        gate.connection().getNode(),
-        business,
-        digest,
-        bytes,
-        gate.connection().toByteArray(),
-        request,
-        requestJson,
-        lineage == null ? null : lineage.get("id"),
+    var row = new LinkedHashMap<String, Object>();
+    row.put("id", id);
+    row.put("tenant_id", tenant());
+    row.put("method", method);
+    row.put("operation_id", text(gate.request(), "operation_id"));
+    row.put("realm", gate.connection().getRealm());
+    row.put("node_id", gate.connection().getNode());
+    row.put("business_json", business);
+    row.put("request_digest", digest);
+    row.put("original_frame", bytes);
+    row.put("original_connection", gate.connection().toByteArray());
+    row.put("iam_request", request);
+    row.put("iam_request_json", requestJson);
+    row.put("iam_response", null);
+    row.put("lineage_id", lineage == null ? null : lineage.get("id"));
+    row.put(
+        "witness_json",
         gate.request().hasNonNull("native_witness")
             ? NetworkJson.canonical(gate.request().path("native_witness"))
-            : null,
-        gate.target().epoch(),
-        text(gate.request(), "boot_id"),
-        lineage == null ? null : lineage.get("stop_version"),
-        lineage == null ? null : lineage.get("permission_version"),
-        state,
-        result == null ? null : NetworkJson.canonical(result));
+            : null);
+    row.put("epoch", gate.target().epoch());
+    row.put("boot_id", text(gate.request(), "boot_id"));
+    row.put("stop_version", lineage == null ? null : lineage.get("stop_version"));
+    row.put("permission_version", lineage == null ? null : lineage.get("permission_version"));
+    row.put("status", state);
+    row.put("result_json", result == null ? null : NetworkJson.canonical(result));
+    row.put(
+        "created_at",
+        Timestamp.from(clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS)));
+    boolean localHistory = "not_accepted".equals(state) && request == null;
+    row.put("local_history_version", localHistory ? 1 : null);
+    row.put("original_connection_anchor", localHistory ? gate.anchor().toByteArray() : null);
+    row.put("local_history_digest", localHistory ? NetworkLocalSourceHistory.digest(row) : null);
+    if (localHistory) NetworkLocalSourceHistory.freeze(row);
+    new NamedParameterJdbcTemplate(jdbc)
+        .update(
+            """
+        INSERT INTO collab.network_source_operation(id,tenant_id,method,operation_id,realm,node_id,
+        business_json,request_digest,original_frame,original_connection,iam_request,iam_request_json,lineage_id,witness_json,
+        epoch,boot_id,stop_version,permission_version,status,result_json,created_at,
+        local_history_version,original_connection_anchor,local_history_digest)
+        VALUES (:id,:tenant_id,:method,:operation_id,:realm,:node_id,:business_json,:request_digest,
+        :original_frame,:original_connection,:iam_request,:iam_request_json,:lineage_id,:witness_json,
+        :epoch,:boot_id,:stop_version,:permission_version,:status,:result_json,:created_at,
+        :local_history_version,:original_connection_anchor,:local_history_digest)
+        """,
+            row);
     if (request != null)
       jdbc.update(
           "INSERT INTO collab.network_source_outbox(id,tenant_id,operation_id) VALUES (?,?,?)",
@@ -881,7 +910,8 @@ final class NetworkSourceControl {
             .put("epoch", Long.toString(gate.target().epoch()))
             .put("boot_id", text(gate.request(), "boot_id"));
     var revokeGate =
-        new SourceGate(gate.connection(), frame, gate.before(), gate.target(), gate.decision());
+        new SourceGate(
+            gate.connection(), frame, gate.before(), gate.target(), gate.decision(), gate.anchor());
     var request =
         RevokeAgentSourceRequest.newBuilder()
             .setSourceBinding(original.getSourceBinding())

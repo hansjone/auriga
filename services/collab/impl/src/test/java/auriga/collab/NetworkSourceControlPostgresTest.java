@@ -27,13 +27,16 @@ import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.transaction.support.*;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -60,11 +63,36 @@ class NetworkSourceControlPostgresTest {
   static final Clock CLOCK = Clock.systemUTC();
   static final Context.Key<String> IAM_TENANT = Context.key("source-fixture-tenant");
   static final Context.Key<String> IAM_CALLER = Context.key("source-fixture-caller");
+  static final NetworkAuthorityConnection LEGACY_CONNECTION =
+      NetworkConnectionAnchorGrpcTest.connection(TENANT, newIngress()).toBuilder()
+          .setNode("4999")
+          .build();
+  static ObjectNode legacyRequest;
 
   static class Authority extends NetworkAuthorityGrpcTest.Authority {
     final Set<String> invalid = ConcurrentHashMap.newKeySet();
     final Set<NetworkAuthorityConnection> wrongOwner = ConcurrentHashMap.newKeySet();
     volatile Runnable beforeResolveReply = () -> {};
+    final Map<NetworkAuthorityConnection, NetworkConnectionAnchor> anchors =
+        new ConcurrentHashMap<>();
+    final AtomicInteger anchorReads = new AtomicInteger();
+    volatile boolean metadata = true, sameHistoryOwner = true;
+    volatile Status anchorFailure;
+    volatile ReadNetworkConnectionAnchorRequest lastAnchorRead;
+    volatile Runnable beforeAnchorRead = () -> {}, afterAnchorRead = () -> {};
+    volatile UnaryOperator<NetworkConnectionAnchor> anchorView = UnaryOperator.identity();
+    volatile UnaryOperator<ReadNetworkConnectionAnchorResponse> anchorReply =
+        UnaryOperator.identity();
+
+    NetworkConnectionAnchor ref(NetworkAuthorityConnection c) {
+      return anchors.computeIfAbsent(
+          c,
+          value ->
+              NetworkConnectionAnchor.newBuilder()
+                  .setAnchorId(UuidV7.next().toString())
+                  .setConnection(value)
+                  .build());
+    }
 
     @Override
     public void resolveNetworkTarget(
@@ -75,8 +103,56 @@ class NetworkSourceControlPostgresTest {
         o.onCompleted();
       } else {
         beforeResolveReply.run();
-        super.resolveNetworkTarget(r, o);
+        var b =
+            ResolveNetworkTargetResponse.newBuilder()
+                .setAllowed(allowed)
+                .setConnection(echo(r.getConnection()))
+                .setLocal(r.getLocal())
+                .setTargetType("system")
+                .setValidUntil(expiry());
+        if (metadata && r.getConnection().getIngress().matches("[a-z2-7]{26}"))
+          b.setConnectionAnchor(anchorView.apply(ref(r.getConnection())));
+        o.onNext(b.build());
+        o.onCompleted();
       }
+    }
+
+    @Override
+    public void readNetworkConnectionAnchor(
+        ReadNetworkConnectionAnchorRequest r,
+        StreamObserver<ReadNetworkConnectionAnchorResponse> o) {
+      anchorReads.incrementAndGet();
+      lastAnchorRead = r;
+      beforeAnchorRead.run();
+      if (anchorFailure != null) {
+        o.onError(anchorFailure.asRuntimeException());
+        return;
+      }
+      if (!"Bearer collab-test".equals(IAM_CALLER.get())
+          || !r.getOriginal().getConnection().getTenantId().equals(IAM_TENANT.get())
+          || !r.getCurrent().getConnection().getTenantId().equals(IAM_TENANT.get())
+          || !Objects.equals(anchors.get(r.getOriginal().getConnection()), r.getOriginal())
+          || !Objects.equals(anchors.get(r.getCurrent().getConnection()), r.getCurrent())
+          || !r.getOriginal()
+              .getConnection()
+              .getRealm()
+              .equals(r.getCurrent().getConnection().getRealm())
+          || !r.getOriginal()
+              .getConnection()
+              .getNode()
+              .equals(r.getCurrent().getConnection().getNode())
+          || !sameHistoryOwner) {
+        o.onError(Status.PERMISSION_DENIED.asRuntimeException());
+        return;
+      }
+      var result =
+          ReadNetworkConnectionAnchorResponse.newBuilder()
+              .setOriginal(r.getOriginal())
+              .setCurrent(r.getCurrent())
+              .build();
+      afterAnchorRead.run();
+      o.onNext(anchorReply.apply(result));
+      o.onCompleted();
     }
   }
 
@@ -327,6 +403,13 @@ class NetworkSourceControlPostgresTest {
       outside();
       return super.resolve(c, local);
     }
+
+    @Override
+    public ReadNetworkConnectionAnchorResponse readConnectionAnchor(
+        NetworkConnectionAnchor original, NetworkConnectionAnchor current) {
+      outside();
+      return super.readConnectionAnchor(original, current);
+    }
   }
 
   @BeforeAll
@@ -341,6 +424,7 @@ class NetworkSourceControlPostgresTest {
                 .schemas("collab")
                 .defaultSchema("collab")
                 .locations("classpath:db/collab")
+                .target("14")
                 .load())
         .migrate();
     var config = new HikariConfig();
@@ -350,25 +434,33 @@ class NetworkSourceControlPostgresTest {
     pool = new HikariDataSource(config);
     jdbc = new JdbcTemplate(pool);
     manager = new TenantTransactionManager(pool);
+    seedPreV15Tombstone();
+    CommonMigrations.serviceFlyway(
+            Flyway.configure()
+                .dataSource(roles.owner().dataSource())
+                .schemas("collab")
+                .defaultSchema("collab")
+                .locations("classpath:db/collab")
+                .load())
+        .migrate();
     server =
         NettyServerBuilder.forAddress(new InetSocketAddress("127.0.0.1", 0))
+            .intercept(
+                new ServerInterceptor() {
+                  @Override
+                  public <Q, R> ServerCall.Listener<Q> interceptCall(
+                      ServerCall<Q, R> call, Metadata headers, ServerCallHandler<Q, R> next) {
+                    return Contexts.interceptCall(
+                        Context.current()
+                            .withValue(IAM_TENANT, headers.get(GrpcMetadata.TENANT_ID))
+                            .withValue(IAM_CALLER, headers.get(GrpcMetadata.AUTHORIZATION)),
+                        call,
+                        headers,
+                        next);
+                  }
+                })
             .addService(authority)
-            .addService(
-                ServerInterceptors.intercept(
-                    peer,
-                    new ServerInterceptor() {
-                      @Override
-                      public <Q, R> ServerCall.Listener<Q> interceptCall(
-                          ServerCall<Q, R> call, Metadata headers, ServerCallHandler<Q, R> next) {
-                        return Contexts.interceptCall(
-                            Context.current()
-                                .withValue(IAM_TENANT, headers.get(GrpcMetadata.TENANT_ID))
-                                .withValue(IAM_CALLER, headers.get(GrpcMetadata.AUTHORIZATION)),
-                            call,
-                            headers,
-                            next);
-                      }
-                    }))
+            .addService(peer)
             .build()
             .start();
     channel =
@@ -423,6 +515,13 @@ class NetworkSourceControlPostgresTest {
   @AfterEach
   void reset() {
     authority.beforeResolveReply = () -> {};
+    authority.metadata = true;
+    authority.sameHistoryOwner = true;
+    authority.anchorFailure = null;
+    authority.beforeAnchorRead = () -> {};
+    authority.afterAnchorRead = () -> {};
+    authority.anchorView = UnaryOperator.identity();
+    authority.anchorReply = UnaryOperator.identity();
     peer.afterRegister = () -> {};
     peer.afterGet = () -> {};
     peer.afterRevoke = () -> {};
@@ -455,8 +554,14 @@ class NetworkSourceControlPostgresTest {
     var c =
         NetworkAuthorityGrpcTest.connection(TENANT).toBuilder()
             .setNode(node)
-            .setIngress("ingress-" + node)
+            .setIngress(newIngress())
+            .setServerId("N" + "A".repeat(55))
             .build();
+    return fresh(c);
+  }
+
+  static Fixture fresh(NetworkAuthorityConnection c) {
+    String node = c.getNode();
     var ready =
         (ObjectNode)
             NetworkJson.parse(
@@ -486,6 +591,58 @@ class NetworkSourceControlPostgresTest {
             "address_type")) registration.set(field, registered.path(field));
     registration.put("allocation_fingerprint", FP);
     return new Fixture(c, ready, registration);
+  }
+
+  static void seedPreV15Tombstone() {
+    var ready =
+        (ObjectNode)
+            NetworkJson.parse(
+                NetworkMailboxWirePostgresTest.ready("boot-4999", "nonce-4999", "ready-4999"));
+    var registration = (ObjectNode) NetworkJson.parse("{}");
+    registration
+        .put("registration_id", UuidV7.next().toString())
+        .put("allocation_op_id", "legacy-allocation")
+        .put("allocation_fingerprint", FP)
+        .put("registration_revision", "1")
+        .put("local", "1")
+        .put("address_type", "session");
+    legacyRequest =
+        frame(new Fixture(LEGACY_CONNECTION, ready, registration), "source_register")
+            .put("operation_id", "pre-v15-operation")
+            .put("mode", "reconcile")
+            .putNull("native_witness");
+    var business = (ObjectNode) NetworkJson.parse("{}");
+    for (String field :
+        List.of("registration", "scope", "expected_revision", "predecessor_binding"))
+      business.set(field, legacyRequest.path(field));
+    String digest = NetworkJson.digest(business);
+    var result = (ObjectNode) NetworkJson.parse("{}");
+    result
+        .put("app_version", "1.0")
+        .put("type", "source_register_result")
+        .put("operation_id", "pre-v15-operation")
+        .put("result", "not_accepted")
+        .putNull("source");
+    result
+        .putObject("failure_evidence")
+        .put("authority", "collab")
+        .put("reason", "rejected_before_pending")
+        .put("request_digest", digest);
+    db(
+        () ->
+            jdbc.update(
+                """
+        INSERT INTO collab.network_source_operation(id,tenant_id,method,operation_id,realm,node_id,
+        business_json,request_digest,original_frame,original_connection,epoch,boot_id,status,result_json)
+        VALUES (?,?,'Register','pre-v15-operation','2','4999',?,?,?,?,1,'boot-4999','not_accepted',?)
+        """,
+                UuidV7.next(),
+                TENANT,
+                NetworkJson.canonical(business),
+                digest,
+                bytes(legacyRequest),
+                LEGACY_CONNECTION.toByteArray(),
+                NetworkJson.canonical(result)));
   }
 
   static ObjectNode frame(Fixture f, String type) {
@@ -578,7 +735,7 @@ class NetworkSourceControlPostgresTest {
 
   static Fixture reconnect(Fixture f) {
     authority.invalid.add(f.c().getIngress());
-    var next = f.c().toBuilder().setIngress(f.c().getIngress() + "-next").build();
+    var next = f.c().toBuilder().setIngress(newIngress()).build();
     var ready =
         f.ready()
             .deepCopy()
@@ -589,6 +746,17 @@ class NetworkSourceControlPostgresTest {
             .put("registration_revision", "1");
     call(() -> wire.ready(next, bytes(ready)));
     return new Fixture(next, ready, f.registration());
+  }
+
+  static String newIngress() {
+    return UUID.randomUUID()
+        .toString()
+        .replace("-", "")
+        .substring(0, 26)
+        .replace('0', 'a')
+        .replace('1', 'b')
+        .replace('8', 'c')
+        .replace('9', 'd');
   }
 
   static ObjectNode reconcile(Fixture current, ObjectNode original) {
@@ -608,6 +776,577 @@ class NetworkSourceControlPostgresTest {
                 "SELECT * FROM collab.network_source_operation WHERE tenant_id=? AND method='Register' AND operation_id=?",
                 TENANT,
                 request.path("operation_id").asString()));
+  }
+
+  @Test
+  void preV15HistoryRemainsUnknownEvenOnTheSameLiveConnectionAndNeverGetsBackfilled() {
+    var current = fresh(LEGACY_CONNECTION);
+    var saved = operationRow(legacyRequest);
+    int sourceReads = peer.readCalls.get(),
+        sourceRegisters = peer.registerCalls.get(),
+        sourceGets = peer.getCalls.get(),
+        anchorReads = authority.anchorReads.get();
+    code("outcome_unknown", register(current, legacyRequest));
+    var next = reconnect(current);
+    code("outcome_unknown", register(next, reconcile(next, legacyRequest)));
+    assertNull(saved.get("local_history_version"));
+    assertNull(saved.get("original_connection_anchor"));
+    assertNull(saved.get("local_history_digest"));
+    assertTombstoneUnchanged(saved, operationRow(legacyRequest));
+    assertEquals(anchorReads, authority.anchorReads.get());
+    assertEquals(sourceReads, peer.readCalls.get());
+    assertEquals(sourceRegisters, peer.registerCalls.get());
+    assertEquals(sourceGets, peer.getCalls.get());
+  }
+
+  static ObjectNode localFailure(Fixture first) {
+    var request =
+        frame(first, "source_register").put("mode", "reconcile").putNull("native_witness");
+    assertEquals("not_accepted", register(first, request).path("result").asString());
+    return request;
+  }
+
+  static Map<String, Object> sourceFacts() {
+    return db(
+        () ->
+            jdbc.queryForMap(
+                """
+        SELECT (SELECT count(*) FROM collab.network_source_lineage) AS lineages,
+        (SELECT count(*) FROM collab.network_source_binding) AS bindings,
+        (SELECT count(*) FROM collab.network_source_outbox) AS outbox
+        """));
+  }
+
+  static void assertNoHistoricalResult(Runnable call) {
+    try {
+      call.run();
+    } catch (auriga.common.error.AurigaException e) {
+      assertTrue(
+          Set.of("network.stale_epoch", "network.recovery_conflict", "network.unauthorized")
+              .contains(e.errorCode().code()),
+          e.errorCode().code());
+    }
+  }
+
+  static void notHistorical(JsonNode response) {
+    assertEquals("error", response.path("type").asString(), response.toString());
+    assertFalse(response.has("failure_evidence"));
+    assertFalse(response.has("result"));
+  }
+
+  @Test
+  void pureAnchorReadRejectsOldOwnershipEvenWhenNewConnectionIsFullyAllowed() throws Exception {
+    var first = fresh();
+    var request = localFailure(first);
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    assertTrue(call(() -> source.verify(current.c())).isAfter(now()));
+    var facts = sourceFacts();
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    var originalRef =
+        NetworkConnectionAnchor.parseFrom((byte[]) saved.get("original_connection_anchor"));
+    int anchorReads = authority.anchorReads.get();
+    int anchors = authority.anchors.size();
+    authority.sameHistoryOwner = false;
+    code("outcome_unknown", register(current, retry));
+    assertEquals(anchorReads + 1, authority.anchorReads.get());
+    assertEquals(originalRef, authority.lastAnchorRead.getOriginal());
+    assertEquals(authority.ref(current.c()), authority.lastAnchorRead.getCurrent());
+    authority.sameHistoryOwner = true;
+    for (var failure :
+        List.of(
+            Status.UNAVAILABLE,
+            Status.PERMISSION_DENIED,
+            Status.NOT_FOUND,
+            Status.UNIMPLEMENTED,
+            Status.CANCELLED,
+            Status.DEADLINE_EXCEEDED)) {
+      authority.anchorFailure = failure;
+      code("outcome_unknown", register(current, retry));
+    }
+    authority.anchorFailure = null;
+    authority.anchorReply = r -> r.toBuilder().setOriginal(r.getCurrent()).build();
+    code("outcome_unknown", register(current, retry));
+    authority.anchorReply = UnaryOperator.identity();
+    assertRecoveredTombstone(saved, current, retry, register(current, retry));
+    authority.sameHistoryOwner = false;
+    code(
+        "outcome_unknown",
+        register(current, retry)); // A successful old read is never cached as authority.
+    authority.sameHistoryOwner = true;
+    assertEquals(anchors, authority.anchors.size());
+    assertEquals(facts, sourceFacts());
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  @Test
+  void missingResolveProofDoesNotCreateLocalHistoryOrDisableEmergencySourceRevocation() {
+    var f = fresh();
+    String id = binding(issue(f));
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    authority.metadata = false;
+    for (var absent :
+        List.of(
+            frame(f, "source_register").put("mode", "reconcile").putNull("native_witness"),
+            frame(f, "source_register").put("scope", "invalid"))) {
+      code("outcome_unknown", register(f, absent));
+      assertEquals(
+          Integer.valueOf(0),
+          db(
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab.network_source_operation WHERE tenant_id=? AND operation_id=?",
+                      Integer.class,
+                      TENANT,
+                      absent.path("operation_id").asString())));
+    }
+    assertEquals("source_revoke_result", revoke(f, id).path("type").asString());
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  static ObjectNode insertHistoryVariant(
+      Map<String, Object> saved, Consumer<Map<String, Object>> change) {
+    var row = new LinkedHashMap<>(saved);
+    String op = "forged-history-" + UUID.randomUUID();
+    row.put("id", UuidV7.next());
+    row.put("operation_id", op);
+    var frame = (ObjectNode) NetworkJson.parse((byte[]) saved.get("original_frame"));
+    frame.put("operation_id", op);
+    var result = (ObjectNode) NetworkJson.parse(saved.get("result_json").toString());
+    result.put("operation_id", op);
+    row.put("original_frame", bytes(frame));
+    row.put("result_json", NetworkJson.canonical(result));
+    LocalSourceHistoryFixtures.seal(row);
+    change.accept(row);
+    db(
+        () ->
+            new NamedParameterJdbcTemplate(jdbc)
+                .update(
+                    "INSERT INTO collab.network_source_operation ("
+                        + String.join(",", row.keySet())
+                        + ") VALUES (:"
+                        + String.join(",:", row.keySet())
+                        + ")",
+                    row));
+    return frame;
+  }
+
+  @Test
+  void recomputedDigestsCannotRebindNonemptyOriginalFieldsOrAuthoritativeAnchorIds()
+      throws Exception {
+    var first = fresh();
+    var request = localFailure(first);
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var original = first.c();
+    var originalRef =
+        NetworkConnectionAnchor.parseFrom((byte[]) saved.get("original_connection_anchor"));
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    for (String field : List.of("ingress", "server", "client", "account")) {
+      var changed = original.toBuilder();
+      switch (field) {
+        case "ingress" -> changed.setIngress(current.c().getIngress());
+        case "server" -> changed.setServerId("N" + "B".repeat(55));
+        case "client" -> changed.setClientId("999");
+        case "account" -> changed.setClientAccount("another-account");
+        default -> throw new AssertionError(field);
+      }
+      var bad =
+          insertHistoryVariant(
+              saved,
+              row -> {
+                row.put("original_connection", changed.build().toByteArray());
+                LocalSourceHistoryFixtures.seal(row);
+              });
+      code("outcome_unknown", register(current, reconcile(current, bad)));
+      // Even changing both references and recomputing the digest cannot change an IAM anchor's C.
+      var forged =
+          insertHistoryVariant(
+              saved,
+              row -> {
+                row.put("original_connection", changed.build().toByteArray());
+                row.put(
+                    "original_connection_anchor",
+                    originalRef.toBuilder().setConnection(changed).build().toByteArray());
+                LocalSourceHistoryFixtures.seal(row);
+              });
+      code("outcome_unknown", register(current, reconcile(current, forged)));
+    }
+    var wrongId =
+        insertHistoryVariant(
+            saved,
+            row -> {
+              row.put(
+                  "original_connection_anchor",
+                  originalRef.toBuilder()
+                      .setAnchorId(UuidV7.next().toString())
+                      .build()
+                      .toByteArray());
+              LocalSourceHistoryFixtures.seal(row);
+            });
+    code("outcome_unknown", register(current, reconcile(current, wrongId)));
+    for (String field : List.of("original_connection_anchor", "original_frame")) {
+      var bad = insertHistoryVariant(saved, row -> row.put(field, new byte[] {1}));
+      code("outcome_unknown", register(current, reconcile(current, bad)));
+    }
+    for (String missing :
+        List.of("local_history_version", "local_history_digest", "original_connection_anchor"))
+      immutable(() -> insertHistoryVariant(saved, row -> row.put(missing, null)));
+    var foreign = original.toBuilder().setTenantId(UUID.randomUUID().toString()).build();
+    var wrongTenant =
+        insertHistoryVariant(
+            saved,
+            row -> {
+              row.put("original_connection", foreign.toByteArray());
+              row.put(
+                  "original_connection_anchor",
+                  originalRef.toBuilder().setConnection(foreign).build().toByteArray());
+              LocalSourceHistoryFixtures.seal(row);
+            });
+    code("outcome_unknown", register(current, reconcile(current, wrongTenant)));
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  @Test
+  void afterPureReadAllCurrentAssociationAndAdmissionFencesStillRejectHistoricalResults() {
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    for (String phase : List.of("before", "after")) {
+      for (String fence :
+          List.of(
+              "health",
+              "ready",
+              "epoch",
+              "boot",
+              "connection",
+              "ref",
+              "missing_ref",
+              "slot",
+              "expired_slot",
+              "expired_identity")) {
+        var first = fresh();
+        var request = localFailure(first);
+        var saved = operationRow(request);
+        var current = reconnect(first);
+        var retry = reconcile(current, request);
+        var facts = sourceFacts();
+        String changedId = UuidV7.next().toString();
+        Runnable changeFence =
+            () -> {
+              switch (fence) {
+                case "health" ->
+                    db(
+                        () ->
+                            jdbc.update(
+                                "UPDATE collab.network_node SET local_identity_status='identity_rollback' WHERE tenant_id=? AND node_id=?",
+                                TENANT,
+                                current.c().getNode()));
+                case "ready" ->
+                    db(
+                        () ->
+                            jdbc.update(
+                                "UPDATE collab.network_node SET wire_status='reconciling' WHERE tenant_id=? AND node_id=?",
+                                TENANT,
+                                current.c().getNode()));
+                case "epoch" ->
+                    db(
+                        () ->
+                            jdbc.update(
+                                "UPDATE collab.network_node SET connection_epoch=connection_epoch+1 WHERE tenant_id=? AND node_id=?",
+                                TENANT,
+                                current.c().getNode()));
+                case "boot" ->
+                    db(
+                        () ->
+                            jdbc.update(
+                                "UPDATE collab.network_node SET local_boot_id='another-boot' WHERE tenant_id=? AND node_id=?",
+                                TENANT,
+                                current.c().getNode()));
+                case "connection" ->
+                    db(
+                        () ->
+                            jdbc.update(
+                                "UPDATE collab.network_node SET wire_binding_json='{}' WHERE tenant_id=? AND node_id=?",
+                                TENANT,
+                                current.c().getNode()));
+                case "ref" ->
+                    authority.anchorView = a -> a.toBuilder().setAnchorId(changedId).build();
+                case "missing_ref" -> authority.metadata = false;
+                case "slot" ->
+                    db(
+                        () ->
+                            jdbc.update(
+                                "UPDATE collab.network_source_slot SET holder=? WHERE tenant_id=? AND node_id=? AND slot='regular'",
+                                UuidV7.next(),
+                                TENANT,
+                                current.c().getNode()));
+                case "expired_slot" ->
+                    db(
+                        () ->
+                            jdbc.update(
+                                "UPDATE collab.network_source_slot SET valid_until=now()-interval '1 second' WHERE tenant_id=? AND node_id=? AND slot='regular'",
+                                TENANT,
+                                current.c().getNode()));
+                case "expired_identity" -> authority.expired = true;
+                default -> throw new AssertionError(fence);
+              }
+            };
+        if ("before".equals(phase)) authority.beforeAnchorRead = changeFence;
+        else authority.afterAnchorRead = changeFence;
+        try {
+          assertNoHistoricalResult(() -> notHistorical(register(current, retry)));
+        } finally {
+          authority.afterAnchorRead = () -> {};
+          authority.beforeAnchorRead = () -> {};
+          authority.anchorView = UnaryOperator.identity();
+          authority.metadata = true;
+          authority.expired = false;
+          db(
+              () ->
+                  jdbc.update(
+                      "DELETE FROM collab.network_source_slot WHERE tenant_id=? AND node_id=?",
+                      TENANT,
+                      current.c().getNode()));
+        }
+        assertTombstoneUnchanged(saved, operationRow(request));
+        assertEquals(facts, sourceFacts());
+      }
+    }
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  @Test
+  void concurrentReconcileAndLateIssueKeepTheSamePermanentResultWithBoundedAdmission()
+      throws Exception {
+    var first = fresh();
+    var request = localFailure(first);
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var executor = Executors.newSingleThreadExecutor();
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    int anchorReads = authority.anchorReads.get();
+    authority.afterAnchorRead =
+        () -> {
+          entered.countDown();
+          await(release);
+        };
+    try {
+      var recovering = executor.submit(() -> register(current, retry));
+      await(entered);
+      var late = retry.deepCopy().put("mode", "issue");
+      late.set("native_witness", witness(current));
+      code("overloaded", register(current, late));
+      release.countDown();
+      assertRecoveredTombstone(saved, current, retry, recovering.get(5, TimeUnit.SECONDS));
+      authority.afterAnchorRead = () -> {};
+      assertRecoveredTombstone(saved, current, late, register(current, late));
+      assertTombstoneUnchanged(saved, operationRow(request));
+      assertEquals(anchorReads + 2, authority.anchorReads.get());
+    } finally {
+      release.countDown();
+      executor.shutdownNow();
+      assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+    }
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  static final class UnsafeAnchorReadOmission extends NetworkSourceGrpcAuthority {
+    UnsafeAnchorReadOmission() {
+      super(client, manager);
+    }
+
+    @Override
+    public ReadNetworkConnectionAnchorResponse readConnectionAnchor(
+        NetworkConnectionAnchor original, NetworkConnectionAnchor current) {
+      // Deliberately bad compiled variant: local structural matches are not an IAM ownership read.
+      return ReadNetworkConnectionAnchorResponse.newBuilder()
+          .setOriginal(original)
+          .setCurrent(current)
+          .build();
+    }
+  }
+
+  @Test
+  void compiledPureReadOmissionLeaksHistoryUnderTheSameWrongOwnershipInvariant() {
+    var first = fresh();
+    var request = localFailure(first);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    var saved = operationRow(request);
+    var facts = sourceFacts();
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    authority.sameHistoryOwner = false;
+    code("outcome_unknown", register(current, retry));
+    var productionSource = source;
+    try {
+      source = new UnsafeAnchorReadOmission();
+      wire = newWire();
+      assertThrows(AssertionError.class, () -> code("outcome_unknown", register(current, retry)));
+    } finally {
+      source = productionSource;
+      wire = newWire();
+    }
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(facts, sourceFacts());
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  static NetworkMailboxWireService assembled(
+      JdbcTemplate reads, TenantTransactionManager transactions) {
+    return new NetworkMailboxWireService(
+        new NetworkMailboxService(reads, transactions, source, keys, CLOCK, client),
+        locals,
+        reads,
+        transactions,
+        source,
+        keys,
+        CLOCK);
+  }
+
+  @Test
+  void finalCasRejectsChangedFrozenRowsFromARestrictedReaderWithoutWeakeningDatabaseGuards() {
+    var first = fresh();
+    var request = localFailure(first);
+    var saved = operationRow(request);
+    var current = reconnect(first);
+    var retry = reconcile(current, request);
+    var afterRead = new AtomicBoolean();
+    var changedRead = new AtomicBoolean();
+    var restricted =
+        new JdbcTemplate(pool) {
+          @Override
+          public List<Map<String, Object>> queryForList(String sql, Object... args) {
+            var rows = super.queryForList(sql, args);
+            if (afterRead.get()
+                && sql.startsWith("SELECT * FROM collab.network_source_operation")
+                && !rows.isEmpty()) {
+              var changed = new LinkedHashMap<>(rows.getFirst());
+              changed.put("request_digest", "sha256:" + "b".repeat(64));
+              changedRead.set(true);
+              return List.of(changed);
+            }
+            return rows;
+          }
+        };
+    authority.afterAnchorRead = () -> afterRead.set(true);
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    try {
+      // Real PG reads/transactions; only the final returned row is fault-injected in this assembly.
+      wire = assembled(restricted, manager);
+      code("outcome_unknown", register(current, retry));
+      assertTrue(changedRead.get());
+    } finally {
+      wire = newWire();
+    }
+    assertTombstoneUnchanged(saved, operationRow(request));
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
+  }
+
+  @Test
+  void failedOrUncertainLocalCommitNeverSignsANewFactAndCommittedRetryUsesPureHistoryRead() {
+    int registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get(),
+        gets = peer.getCalls.get();
+    for (boolean committed : List.of(false, true)) {
+      var first = fresh();
+      var request =
+          frame(first, "source_register").put("mode", "reconcile").putNull("native_witness");
+      var faulted = new AtomicBoolean();
+      var armCommitFailure = new AtomicBoolean();
+      var facts = sourceFacts();
+      var transactions =
+          new TenantTransactionManager(pool) {
+            @Override
+            protected void doCommit(DefaultTransactionStatus status) {
+              super.doCommit(status);
+              if (armCommitFailure.getAndSet(false))
+                throw new org.springframework.transaction.TransactionSystemException(
+                    "test commit acknowledgement lost");
+            }
+          };
+      var readsWithFault =
+          new JdbcTemplate(pool) {
+            @Override
+            public List<Map<String, Object>> queryForList(String sql, Object... args) {
+              var rows = super.queryForList(sql, args);
+              if (sql.startsWith("SELECT * FROM collab.network_source_operation")
+                  && !rows.isEmpty()
+                  && request
+                      .path("operation_id")
+                      .asString()
+                      .equals(rows.getFirst().get("operation_id"))
+                  && "not_accepted".equals(rows.getFirst().get("status"))
+                  && faulted.compareAndSet(false, true)) {
+                if (!committed)
+                  throw new org.springframework.dao.DataIntegrityViolationException(
+                      "test before commit failure");
+                armCommitFailure.set(true);
+              }
+              return rows;
+            }
+          };
+      int anchorReads = authority.anchorReads.get();
+      try {
+        wire = assembled(readsWithFault, transactions);
+        code("outcome_unknown", register(first, request));
+      } finally {
+        wire = newWire();
+      }
+      assertTrue(faulted.get());
+      assertEquals(anchorReads, authority.anchorReads.get());
+      assertEquals(facts, sourceFacts());
+      if (committed) {
+        var saved = operationRow(request);
+        assertEquals("not_accepted", register(first, request).path("result").asString());
+        assertEquals(anchorReads + 1, authority.anchorReads.get());
+        assertTombstoneUnchanged(saved, operationRow(request));
+      } else
+        assertEquals(
+            Integer.valueOf(0),
+            db(
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM collab.network_source_operation WHERE tenant_id=? AND operation_id=?",
+                        Integer.class,
+                        TENANT,
+                        request.path("operation_id").asString())));
+    }
+    assertEquals(registers, peer.registerCalls.get());
+    assertEquals(reads, peer.readCalls.get());
+    assertEquals(gets, peer.getCalls.get());
   }
 
   @Test
@@ -723,22 +1462,16 @@ class NetworkSourceControlPostgresTest {
             original.toBuilder().setTenantId(UUID.randomUUID().toString()).build(),
             original.toBuilder().setNode(other.c().getNode()).build(),
             original.toBuilder().setRealm("999").build())) {
-      db(
+      immutable(
           () ->
-              jdbc.update(
-                  "UPDATE collab.network_source_operation SET original_connection=? WHERE tenant_id=? AND id=?",
-                  corrupted.toByteArray(),
-                  TENANT,
-                  saved.get("id")));
-      code("outcome_unknown", register(current, retry));
+              db(
+                  () ->
+                      jdbc.update(
+                          "UPDATE collab.network_source_operation SET original_connection=? WHERE tenant_id=? AND id=?",
+                          corrupted.toByteArray(),
+                          TENANT,
+                          saved.get("id"))));
     }
-    db(
-        () ->
-            jdbc.update(
-                "UPDATE collab.network_source_operation SET original_connection=? WHERE tenant_id=? AND id=?",
-                original.toByteArray(),
-                TENANT,
-                saved.get("id")));
     assertRecoveredTombstone(saved, current, retry, register(current, retry));
     assertTombstoneUnchanged(saved, operationRow(request));
     assertEquals(registrations, peer.registerCalls.get());
@@ -747,14 +1480,12 @@ class NetworkSourceControlPostgresTest {
   }
 
   @Test
-  void incompleteLocalTombstoneHistoryStaysUnknownWithoutRepairOrIamCalls() {
+  void localTombstonesCannotBeReboundDeletedOrDowngradedByRuntime() {
     var first = fresh();
     var request =
         frame(first, "source_register").put("mode", "reconcile").putNull("native_witness");
     assertEquals("not_accepted", register(first, request).path("result").asString());
     var saved = operationRow(request);
-    var current = reconnect(first);
-    var retry = reconcile(current, request);
     int registrations = peer.registerCalls.get(),
         reads = peer.readCalls.get(),
         gets = peer.getCalls.get();
@@ -766,7 +1497,10 @@ class NetworkSourceControlPostgresTest {
             "original_frame",
             "boot_id",
             "epoch",
-            "business_json")) {
+            "business_json",
+            "local_history_version",
+            "original_connection_anchor",
+            "local_history_digest")) {
       Object bad =
           switch (column) {
             case "request_digest" -> "sha256:" + "b".repeat(64);
@@ -779,35 +1513,52 @@ class NetworkSourceControlPostgresTest {
             case "boot_id" -> "another-boot";
             case "epoch" -> 0L;
             case "business_json" -> "{}";
+            case "local_history_version" -> null;
+            case "original_connection_anchor" -> new byte[] {7};
+            case "local_history_digest" -> null;
             default -> throw new AssertionError(column);
           };
       // Column names are a fixed test list, never input from a wire request.
-      db(
+      immutable(
           () ->
-              jdbc.update(
-                  "UPDATE collab.network_source_operation SET "
-                      + column
-                      + "=? WHERE tenant_id=? AND id=?",
-                  bad,
-                  TENANT,
-                  saved.get("id")));
-      code(
-          "business_json".equals(column) ? "conflict" : "outcome_unknown",
-          register(current, retry));
-      db(
-          () ->
-              jdbc.update(
-                  "UPDATE collab.network_source_operation SET "
-                      + column
-                      + "=? WHERE tenant_id=? AND id=?",
-                  saved.get(column),
-                  TENANT,
-                  saved.get("id")));
+              db(
+                  () ->
+                      jdbc.update(
+                          "UPDATE collab.network_source_operation SET "
+                              + column
+                              + "=? WHERE tenant_id=? AND id=?",
+                          bad,
+                          TENANT,
+                          saved.get("id"))));
     }
+    immutable(
+        () ->
+            db(
+                () ->
+                    jdbc.update(
+                        "DELETE FROM collab.network_source_operation WHERE tenant_id=? AND id=?",
+                        TENANT,
+                        saved.get("id"))));
+    immutable(
+        () ->
+            db(
+                () ->
+                    jdbc.update(
+                        "UPDATE collab.network_source_operation SET status='pending' WHERE tenant_id=? AND id=?",
+                        TENANT,
+                        saved.get("id"))));
     assertTombstoneUnchanged(saved, operationRow(request));
     assertEquals(registrations, peer.registerCalls.get());
     assertEquals(reads, peer.readCalls.get());
     assertEquals(gets, peer.getCalls.get());
+  }
+
+  static void immutable(Runnable work) {
+    var failure = assertThrows(org.springframework.dao.DataAccessException.class, work::run);
+    assertEquals(
+        "23514",
+        assertInstanceOf(java.sql.SQLException.class, failure.getMostSpecificCause())
+            .getSQLState());
   }
 
   @Test

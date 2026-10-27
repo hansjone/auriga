@@ -25,6 +25,7 @@ class NetworkSourceMigrationPostgresTest {
   static JdbcTemplate jdbc;
   static TransactionTemplate tx;
   static boolean ownerSetBefore, runtimeSetBefore;
+  static final UUID LEGACY_TENANT = UUID.randomUUID(), LEGACY_ID = UuidV7.next();
 
   @BeforeAll
   static void migrate() {
@@ -40,6 +41,32 @@ class NetworkSourceMigrationPostgresTest {
     ownerSetBefore = canSet(admin, roles.owner().role());
     runtimeSetBefore = canSet(admin, roles.runtime().role());
     CommonMigrations.migrate(roles.owner().dataSource(), "collab");
+    CommonMigrations.serviceFlyway(
+            Flyway.configure()
+                .dataSource(roles.owner().dataSource())
+                .schemas("collab")
+                .defaultSchema("collab")
+                .locations("classpath:db/collab")
+                .target("14")
+                .load())
+        .migrate();
+    jdbc = new JdbcTemplate(roles.runtime().dataSource());
+    tx = new TransactionTemplate(new TenantTransactionManager(roles.runtime().dataSource()));
+    // An actual pre-V15 runtime fixture, never disabling the new immutable guard.
+    in(
+        LEGACY_TENANT,
+        () ->
+            jdbc.update(
+                """
+        INSERT INTO collab.network_source_operation(id,tenant_id,method,operation_id,realm,node_id,
+          business_json,request_digest,original_frame,original_connection,epoch,boot_id,status,result_json)
+        VALUES (?,?,'Register','legacy-source','2','20','{}',?,?,?,1,'boot','not_accepted','{}')
+        """,
+                LEGACY_ID,
+                LEGACY_TENANT,
+                "sha256:" + "a".repeat(64),
+                new byte[] {1},
+                new byte[] {2}));
     CommonMigrations.serviceFlyway(
             Flyway.configure()
                 .dataSource(roles.owner().dataSource())
@@ -192,6 +219,89 @@ class NetworkSourceMigrationPostgresTest {
           assertEquals(0, count("network_source_worker_tenant", tenant));
           return null;
         });
+  }
+
+  @Test
+  void migrationDoesNotInventProofForLegacyHistoryAndProtectsItFromRuntimeMutation() {
+    in(
+        LEGACY_TENANT,
+        () -> {
+          var row =
+              jdbc.queryForMap(
+                  "SELECT * FROM collab.network_source_operation WHERE tenant_id=? AND id=?",
+                  LEGACY_TENANT,
+                  LEGACY_ID);
+          assertNull(row.get("local_history_version"));
+          assertNull(row.get("original_connection_anchor"));
+          assertNull(row.get("local_history_digest"));
+          return null;
+        });
+    immutable(
+        () ->
+            in(
+                LEGACY_TENANT,
+                () ->
+                    jdbc.update(
+                        "UPDATE collab.network_source_operation SET local_history_version=1 WHERE tenant_id=? AND id=?",
+                        LEGACY_TENANT,
+                        LEGACY_ID)));
+    immutable(
+        () ->
+            in(
+                LEGACY_TENANT,
+                () ->
+                    jdbc.update(
+                        "DELETE FROM collab.network_source_operation WHERE tenant_id=? AND id=?",
+                        LEGACY_TENANT,
+                        LEGACY_ID)));
+    var guard =
+        jdbc.queryForMap(
+            """
+        SELECT p.prosecdef,p.proconfig::text AS settings FROM pg_proc p
+        JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='collab' AND p.proname='network_source_local_history_guard'
+        """);
+    assertEquals(false, guard.get("prosecdef"));
+    assertFalse(guard.get("settings").toString().contains("auriga.tenant_id"));
+  }
+
+  @Test
+  void newUnprovenTombstonesAreRejectedButNormalIamOperationTransitionsRemainLegal() {
+    UUID tenant = UUID.randomUUID();
+    immutable(
+        () ->
+            in(
+                tenant,
+                () ->
+                    jdbc.update(
+                        """
+        INSERT INTO collab.network_source_operation(id,tenant_id,method,operation_id,realm,node_id,
+          business_json,request_digest,original_frame,original_connection,epoch,boot_id,status,result_json)
+        VALUES (?,?,'Register','unproven','2','20','{}',?,?,?,1,'boot','not_accepted','{}')
+        """,
+                        UuidV7.next(),
+                        tenant,
+                        "sha256:" + "a".repeat(64),
+                        new byte[] {1},
+                        new byte[] {2})));
+    in(
+        tenant,
+        () -> {
+          enqueue(tenant);
+          assertEquals(
+              1,
+              jdbc.update(
+                  "UPDATE collab.network_source_operation SET status='revoked',iam_response=? WHERE tenant_id=? AND status='pending'",
+                  new byte[] {3},
+                  tenant));
+          return null;
+        });
+  }
+
+  static void immutable(Runnable work) {
+    var failure = assertThrows(DataAccessException.class, work::run);
+    assertEquals(
+        "23514",
+        assertInstanceOf(SQLException.class, failure.getMostSpecificCause()).getSQLState());
   }
 
   private static void enqueue(UUID tenant) {

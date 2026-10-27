@@ -102,6 +102,47 @@ public class NetworkAuthorityClient implements NetworkAuthority {
                 .revokeAgentSource(request));
   }
 
+  public ReadNetworkConnectionAnchorResponse readConnectionAnchor(
+      NetworkConnectionAnchor original, NetworkConnectionAnchor current) {
+    connectionAnchor(original);
+    connectionAnchor(current);
+    if (!original.getConnection().getRealm().equals(current.getConnection().getRealm())
+        || !original.getConnection().getNode().equals(current.getConnection().getNode()))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    var request =
+        ReadNetworkConnectionAnchorRequest.newBuilder()
+            .setOriginal(original)
+            .setCurrent(current)
+            .build();
+    var response = call(() -> rpc().readNetworkConnectionAnchor(request));
+    if (!response.getUnknownFields().asMap().isEmpty()
+        || !response.hasOriginal()
+        || !response.hasCurrent()
+        || !original.equals(response.getOriginal())
+        || !current.equals(response.getCurrent()))
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    return response;
+  }
+
+  /** Structural validation only; the pure IAM reader establishes historical ownership. */
+  public static void connectionAnchor(NetworkConnectionAnchor anchor) {
+    if (anchor == null
+        || !anchor.getUnknownFields().asMap().isEmpty()
+        || !anchor.hasConnection()
+        || !anchor
+            .getAnchorId()
+            .matches("[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    var c = anchor.getConnection();
+    binding(c);
+    if (!c.getUnknownFields().asMap().isEmpty()
+        || !c.getIngress().matches("[a-z2-7]{26}")
+        || !c.getServerId().matches("N[A-Z2-7]{55}")
+        || !c.getClientId().matches("[1-9][0-9]{0,19}")
+        || new java.math.BigInteger(c.getClientId()).bitLength() > 64)
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+  }
+
   private <T> T sourceCall(Supplier<T> action) {
     tenant();
     try {
@@ -196,6 +237,15 @@ public class NetworkAuthorityClient implements NetworkAuthority {
         || !"system".equals(result.getTargetType()))
       throw new AurigaException(CommonErrors.UNAVAILABLE);
     deadline(result.getValidUntil());
+    if (result.hasConnectionAnchor()) {
+      try {
+        connectionAnchor(result.getConnectionAnchor());
+        if (!connection.equals(result.getConnectionAnchor().getConnection()))
+          throw new AurigaException(CommonErrors.UNAVAILABLE);
+      } catch (AurigaException e) {
+        throw new AurigaException(CommonErrors.UNAVAILABLE);
+      }
+    }
     return result;
   }
 
