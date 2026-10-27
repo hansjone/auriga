@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -247,6 +247,14 @@ export async function runAssembly() {
         failures.push(error);
       }
       const captured = child.lines.join('\n') + child.errors.join('');
+      if (name === 'plugin') {
+        const nativeClosed = child.events.find(
+          (event) => event.stage === 'native-closed',
+        );
+        if (nativeClosed?.complete !== true)
+          failures.push(new Error('native cleanup not verified'));
+        if (nativeClosed) manifest.stages.push(nativeClosed);
+      }
       if (secrets.some((secret) => secret && captured.includes(secret))) {
         failures.push(new Error(`${name} output leaked private material`));
       } else {

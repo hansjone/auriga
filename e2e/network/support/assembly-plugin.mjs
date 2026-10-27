@@ -1,4 +1,5 @@
 // Real rc.3 public services in this isolated integration process. No model/SEND.
+/* global structuredClone */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -678,6 +679,6 @@ try {
     }
   }
   input.close();
-  if (cleanupErrors.length)
-    throw new AggregateError(cleanupErrors, 'plugin/native cleanup failed');
+  emit({ stage: 'native-closed', complete: cleanupErrors.length === 0 });
+  if (cleanupErrors.length) process.exitCode = 1;
 }
