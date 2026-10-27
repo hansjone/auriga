@@ -111,20 +111,27 @@ func (r *relay) forward(ctx context.Context, method string, req, reply proto.Mes
 	started := time.Now()
 	deadline, bounded := ctx.Deadline()
 	err := target.Invoke(ctx, service+method, req, reply)
+	finished := time.Now()
+	deadlineExpired := bounded && !finished.Before(deadline)
 	contextCode := codes.OK
-	if ctx.Err() != nil {
-		contextCode = status.FromContextError(ctx.Err()).Code()
+	if contextErr := ctx.Err(); contextErr != nil {
+		contextCode = status.FromContextError(contextErr).Code()
+	} else if deadlineExpired {
+		// The transport can finish before the incoming context's timer runs.
+		// Classify the elapsed deadline without waiting for timer delivery or
+		// replacing the actual downstream RPC status.
+		contextCode = codes.DeadlineExceeded
 	}
 	// Numeric loopback peer/method/status identify this hop without copying any
 	// status description, metadata, service token or arbitrary transport details.
 	event := map[string]any{
 		"stage": "rpc", "method": method, "code": status.Code(err).String(),
 		"peer": target.Target(), "rpc": service + method,
-		"elapsedMillis": time.Since(started).Milliseconds(), "contextCode": contextCode.String(),
+		"elapsedMillis": finished.Sub(started).Milliseconds(), "contextCode": contextCode.String(),
 	}
 	if bounded {
 		event["remainingMillisAtStart"] = max(int64(0), deadline.Sub(started).Milliseconds())
-		event["deadlineExpired"] = !time.Now().Before(deadline)
+		event["deadlineExpired"] = deadlineExpired
 	}
 	r.mu.Lock()
 	mode := ""

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,42 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+// The deadline timer is controlled independently from the advertised deadline,
+// so transport completion and timer delivery can be tested without a race.
+type relayDeadlineContext struct {
+	context.Context
+	deadline time.Time
+	done     chan struct{}
+}
+
+func (c *relayDeadlineContext) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c *relayDeadlineContext) Done() <-chan struct{}       { return c.done }
+func (c *relayDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func TestRelayReadyDiagnosticsClassifiesExpiredDeadlineBeforeContextTimer(t *testing.T) {
+	r, err := startRelay(context.Background(), "127.0.0.1:0", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.close()
+	ctx := &relayDeadlineContext{Context: context.Background(), deadline: time.Now().Add(-time.Second), done: make(chan struct{})}
+	_, err = r.Ready(ctx, &collab.NetworkMailboxServiceReadyRequest{Connection: &collab.NetworkMailboxConnection{TenantId: "tenant"}})
+	if err == nil || ctx.Err() != nil {
+		t.Fatalf("did not exercise transport expiry before context timer: %v / %v", err, ctx.Err())
+	}
+	event := r.trace()[0]
+	if event["contextCode"] != "DeadlineExceeded" || event["deadlineExpired"] != true || event["code"] != status.Code(err).String() {
+		t.Fatalf("expired incoming deadline misclassified: %v", event)
+	}
+}
 
 // Transport guards only, not IAM/collab business or authentication acceptance.
 type relayReadyGuard struct {
@@ -50,23 +87,37 @@ func TestRelayReadyDiagnosticsPreserveDeadlineCancellationAndHidePrivateDetails(
 				t.Fatal(err)
 			}
 			defer r.close()
-			budget := time.Second
-			if mode == "deadline" {
-				budget = 80 * time.Millisecond
-			}
+			budget := 5 * time.Second // A failure guard, never the deadline trigger.
 			ctx, cancel := context.WithTimeout(context.Background(), budget)
 			defer cancel()
-			if mode == "cancel" {
-				go func(callContext context.Context) {
-					select {
-					case <-guard.entered:
-						cancel()
-					case <-callContext.Done():
-					}
-				}(ctx)
+			stop := cancel
+			if mode == "deadline" {
+				deadline, _ := ctx.Deadline()
+				controlled := &relayDeadlineContext{Context: ctx, deadline: deadline, done: make(chan struct{})}
+				var once sync.Once
+				stop = func() { once.Do(func() { close(controlled.done) }) }
+				defer stop()
+				ctx = controlled
 			}
 			ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("authorization", "Bearer private-credential-marker"))
-			_, err = r.Ready(ctx, &collab.NetworkMailboxServiceReadyRequest{Connection: &collab.NetworkMailboxConnection{TenantId: "tenant"}, FrameJson: []byte(`{"type":"ready"}`)})
+			result := make(chan error, 1)
+			go func() {
+				_, callErr := r.Ready(ctx, &collab.NetworkMailboxServiceReadyRequest{Connection: &collab.NetworkMailboxConnection{TenantId: "tenant"}, FrameJson: []byte(`{"type":"ready"}`)})
+				result <- callErr
+			}()
+			select {
+			case <-guard.entered:
+			case <-time.After(budget):
+				t.Fatal("downstream RPC never entered")
+			}
+			if mode != "downstream" {
+				stop()
+			}
+			select {
+			case err = <-result:
+			case <-time.After(budget):
+				t.Fatal("relay RPC did not finish")
+			}
 			if err == nil {
 				t.Fatal("transport failure became success")
 			}
