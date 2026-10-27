@@ -19,6 +19,7 @@ func run(args []string, out, logs io.Writer) error {
 	showVersion := flags.Bool("version", false, "print version")
 	configPath := flags.String("config", "", "path to JSON config file")
 	accessPath := flags.String("access-config", "", "path to trusted deployment access configuration")
+	routeMode := flags.String("instance-routes", "nats", "instance route store: nats or explicit local memory")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -49,15 +50,11 @@ func run(args []string, out, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
-	routesCreds := cfg.RoutesNATSCredsFile
-	if routesCreds == "" {
-		routesCreds = cfg.NATSCredsFile
-	}
-	routes, err := NewNATSRouteStore(cfg.NATSURL, routesCreds)
+	routes, closeRoutes, err := openInstanceRoutes(cfg, *routeMode)
 	if err != nil {
 		return err
 	}
-	defer routes.Close()
+	defer closeRoutes()
 	tickets := NewMemoryTicketStore()
 
 	gw, err := NewGateway(cfg, sessions, routes, tickets, signer, logger)
@@ -89,6 +86,26 @@ func run(args []string, out, logs io.Writer) error {
 	srv := &Server{Cfg: cfg, Handler: gw.Handler(), Log: logger}
 	logger.Info("edge starting", "version", version, "listen", cfg.Listen, "tls", cfg.TLS.Mode)
 	return srv.Run(ctx)
+}
+
+func openInstanceRoutes(cfg Config, mode string) (RouteStore, func(), error) {
+	switch mode {
+	case "memory":
+		// No routes are seeded: instance access continues to fail closed.
+		return NewMemoryRouteStore(), func() {}, nil
+	case "nats", "":
+		creds := cfg.RoutesNATSCredsFile
+		if creds == "" {
+			creds = cfg.NATSCredsFile
+		}
+		routes, err := NewNATSRouteStore(cfg.NATSURL, creds)
+		if err != nil {
+			return nil, nil, err
+		}
+		return routes, routes.Close, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown instance route store")
+	}
 }
 
 func openSessionStore(cfg Config, log *slog.Logger) (SessionStore, error) {

@@ -2,6 +2,8 @@ package auriga.iam;
 
 import auriga.iam.api.InternalTokenIssuer;
 import java.io.IOException;
+import java.lang.foreign.*;
+import java.lang.invoke.MethodHandle;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
@@ -11,9 +13,7 @@ import java.util.concurrent.*;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 
-/**
- * Shared installation-only POSIX service JWT export, with atomic replacement and fixed subjects.
- */
+/** Installation-only service JWT export, with atomic replacement and fixed subjects. */
 public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable {
   private static final Set<PosixFilePermission> DIRECTORY =
       PosixFilePermissions.fromString("rwxr-x---");
@@ -28,6 +28,7 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
   private ScheduledExecutorService scheduler;
   private boolean running;
   private long generation;
+  private WindowsInstallation windows;
 
   ServiceTokenFilePublisher(
       String service,
@@ -50,7 +51,10 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
           tokenFile
               .getFileSystem()
               .getUserPrincipalLookupService()
-              .lookupPrincipalByName(System.getProperty("user.name"));
+              .lookupPrincipalByName(
+                  System.getProperty("os.name").startsWith("Windows")
+                      ? WindowsHandle.currentUser()
+                      : System.getProperty("user.name"));
     } catch (IOException e) {
       throw invalid();
     }
@@ -71,18 +75,26 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
   public synchronized void start() {
     if (running) return;
     try {
-      checkAncestors(tokenFile.getParent().getParent());
-      if (!Files.exists(tokenFile.getParent(), LinkOption.NOFOLLOW_LINKS)) {
-        Files.createDirectory(
-            tokenFile.getParent(), PosixFilePermissions.asFileAttribute(DIRECTORY));
-        Files.setAttribute(
-            tokenFile.getParent(), "unix:gid", readerGroup, LinkOption.NOFOLLOW_LINKS);
-        Files.setPosixFilePermissions(tokenFile.getParent(), DIRECTORY);
+      if (tokenFile.getFileSystem().supportedFileAttributeViews().contains("acl")
+          && System.getProperty("os.name").startsWith("Windows")) {
+        if (installationOwner != -1) throw invalid(); // POSIX UIDs have no Windows meaning.
+        windows = new WindowsInstallation();
+      } else {
+        checkAncestors(tokenFile.getParent().getParent());
+        if (!Files.exists(tokenFile.getParent(), LinkOption.NOFOLLOW_LINKS)) {
+          Files.createDirectory(
+              tokenFile.getParent(), PosixFilePermissions.asFileAttribute(DIRECTORY));
+          Files.setAttribute(
+              tokenFile.getParent(), "unix:gid", readerGroup, LinkOption.NOFOLLOW_LINKS);
+          Files.setPosixFilePermissions(tokenFile.getParent(), DIRECTORY);
+        }
+        checkDirectory(tokenFile.getParent(), false);
+        checkOutputGroup();
+        checkDirectory(secretFile.getParent(), true);
       }
-      checkDirectory(tokenFile.getParent(), false);
-      checkOutputGroup();
-      checkDirectory(secretFile.getParent(), true);
     } catch (IOException | UnsupportedOperationException e) {
+      if (windows != null) windows.close();
+      windows = null;
       throw invalid();
     }
     running = true;
@@ -108,6 +120,7 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
   private boolean refresh(long activeGeneration) {
     synchronized (this) {
       if (!running || generation != activeGeneration) return false;
+      if (windows != null) return refreshWindows();
     }
     byte[] raw = null;
     Path temporary = null;
@@ -184,6 +197,273 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
         } catch (IOException | RuntimeException ignored) {
           // The private directory remains inaccessible to untrusted users.
         }
+      }
+    }
+  }
+
+  // Windows readers use the same account as the publisher. The numeric POSIX reader-group is
+  // deliberately not translated into a broader Windows group; private ACLs are owner-only.
+  private boolean refreshWindows() {
+    Path temporary = null;
+    byte[] raw = null;
+    try {
+      windows.checkPrivate(secretFile.getParent(), true);
+      windows.checkPrivate(tokenFile.getParent(), true);
+      try (var pinned = WindowsHandle.open(secretFile, false)) {
+        windows.checkPrivate(secretFile, false);
+        if (Files.size(secretFile) < 1 || Files.size(secretFile) > 128) throw invalid();
+        raw = Files.readAllBytes(secretFile);
+      }
+      String secret = new String(raw, java.nio.charset.StandardCharsets.US_ASCII);
+      if (!secret.matches("[A-Za-z0-9_-]{43}")) throw invalid();
+      String jwt = issuer.issue(service, secret);
+      if (jwt == null
+          || jwt.length() > 16 * 1024
+          || !jwt.matches("[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+")) throw invalid();
+      windows.checkToken();
+      temporary = tokenFile.resolveSibling("." + service + "-" + UUID.randomUUID() + ".tmp");
+      Files.createFile(temporary, windows.privateAcl());
+      windows.checkPrivate(temporary, false);
+      byte[] encoded = jwt.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+      try (var channel =
+          FileChannel.open(temporary, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+        var bytes = ByteBuffer.wrap(encoded);
+        while (bytes.hasRemaining()) channel.write(bytes);
+        channel.force(true);
+      } finally {
+        Arrays.fill(encoded, (byte) 0);
+      }
+      windows.checkPrivate(tokenFile.getParent(), true);
+      windows.checkToken();
+      Files.move(
+          temporary,
+          tokenFile,
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING);
+      temporary = null;
+      return true;
+    } catch (IOException | RuntimeException e) {
+      LoggerFactory.getLogger(ServiceTokenFilePublisher.class)
+          .warn("Service token refresh failed; previous token expiry is unchanged");
+      return false;
+    } finally {
+      if (raw != null) Arrays.fill(raw, (byte) 0);
+      if (temporary != null) {
+        try {
+          Files.deleteIfExists(temporary);
+        } catch (IOException ignored) {
+        }
+      }
+    }
+  }
+
+  private final class WindowsInstallation implements AutoCloseable {
+    private final List<WindowsHandle> directories = new ArrayList<>();
+
+    WindowsInstallation() throws IOException {
+      try {
+        Set<Path> pinned = new HashSet<>();
+        // Hold every ancestor without FILE_SHARE_DELETE for the entire lifecycle. This prevents
+        // path substitution, including through a writable ancestor, between refresh attempts.
+        for (Path parent : List.of(secretFile.getParent(), tokenFile.getParent())) {
+          Path current = parent.getRoot();
+          if (pinned.add(current)) directories.add(WindowsHandle.open(current, true));
+          for (Path component : parent) {
+            current = current.resolve(component);
+            if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)
+                && current.equals(tokenFile.getParent()))
+              Files.createDirectory(current, privateAcl());
+            if (pinned.add(current)) directories.add(WindowsHandle.open(current, true));
+          }
+        }
+        checkPrivate(secretFile.getParent(), true);
+        checkPrivate(tokenFile.getParent(), true);
+        checkPrivate(secretFile, false);
+        checkToken();
+      } catch (IOException | RuntimeException e) {
+        close();
+        throw e;
+      }
+    }
+
+    FileAttribute<List<AclEntry>> privateAcl() {
+      List<AclEntry> acl =
+          List.of(
+              AclEntry.newBuilder()
+                  .setType(AclEntryType.ALLOW)
+                  .setPrincipal(processOwner)
+                  .setPermissions(EnumSet.allOf(AclEntryPermission.class))
+                  .build());
+      return new FileAttribute<>() {
+        public String name() {
+          return "acl:acl";
+        }
+
+        public List<AclEntry> value() {
+          return acl;
+        }
+      };
+    }
+
+    void checkPrivate(Path path, boolean directory) throws IOException {
+      var basic = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      if (basic.isSymbolicLink()
+          || basic.isOther()
+          || (directory ? !basic.isDirectory() : !basic.isRegularFile())) throw invalid();
+      var view =
+          Files.getFileAttributeView(path, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+      if (view == null || !processOwner.equals(view.getOwner())) throw invalid();
+      if (directory) {
+        try (var pinned = WindowsHandle.open(path, true)) {
+          if (!pinned.protectedDacl()) throw invalid();
+        }
+      }
+      boolean ownerRead = false;
+      for (AclEntry entry : view.getAcl()) {
+        if (entry.type() != AclEntryType.ALLOW) continue;
+        // Even read access to installation secrets/JWTs is denied to other principals.
+        if (!entry.principal().equals(processOwner) && !entry.permissions().isEmpty())
+          throw invalid();
+        if (entry.principal().equals(processOwner)
+            && entry.permissions().contains(AclEntryPermission.READ_DATA)) ownerRead = true;
+      }
+      if (!ownerRead) throw invalid();
+    }
+
+    void checkToken() throws IOException {
+      if (!Files.exists(tokenFile, LinkOption.NOFOLLOW_LINKS)) return;
+      try (var pinned = WindowsHandle.open(tokenFile, false)) {
+        checkPrivate(tokenFile, false);
+        if (Files.size(tokenFile) < 1 || Files.size(tokenFile) > 16 * 1024) throw invalid();
+      }
+    }
+
+    @Override
+    public void close() {
+      for (int i = directories.size() - 1; i >= 0; i--) directories.get(i).close();
+      directories.clear();
+    }
+  }
+
+  /** Minimal Win32 handles: no shell invocation and no credentials cross a process boundary. */
+  private static final class WindowsHandle implements AutoCloseable {
+    private static final Linker LINKER = Linker.nativeLinker();
+    private static final SymbolLookup KERNEL =
+        SymbolLookup.libraryLookup("kernel32", Arena.global());
+    private static final MethodHandle CREATE =
+        function(
+            "CreateFileW",
+            ValueLayout.ADDRESS,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+            ValueLayout.JAVA_INT,
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS);
+    private static final MethodHandle INFO =
+        function(
+            "GetFileInformationByHandle",
+            ValueLayout.JAVA_INT,
+            ValueLayout.ADDRESS,
+            ValueLayout.ADDRESS);
+    private static final MethodHandle CLOSE =
+        function("CloseHandle", ValueLayout.JAVA_INT, ValueLayout.ADDRESS);
+    private static final SymbolLookup ADVAPI =
+        SymbolLookup.libraryLookup("advapi32", Arena.global());
+    private static final MethodHandle SECURITY =
+        LINKER.downcallHandle(
+            ADVAPI.find("GetKernelObjectSecurity").orElseThrow(),
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS));
+    private static final SymbolLookup SECUR32 =
+        SymbolLookup.libraryLookup("secur32", Arena.global());
+    private static final MethodHandle USER =
+        LINKER.downcallHandle(
+            SECUR32.find("GetUserNameExW").orElseThrow(),
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_BYTE,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS));
+    private final MemorySegment handle;
+
+    static String currentUser() throws IOException {
+      try (var arena = Arena.ofConfined()) {
+        var name = arena.allocate(1024, 2);
+        var length = arena.allocate(ValueLayout.JAVA_INT);
+        length.set(ValueLayout.JAVA_INT, 0, 512);
+        if ((byte) USER.invokeExact(2, name, length) == 0) throw invalid();
+        return name.getString(0, java.nio.charset.StandardCharsets.UTF_16LE);
+      } catch (Throwable e) {
+        throw new IOException("Cannot determine service process identity");
+      }
+    }
+
+    private WindowsHandle(MemorySegment handle) {
+      this.handle = handle;
+    }
+
+    private static MethodHandle function(String name, MemoryLayout result, MemoryLayout... args) {
+      return LINKER.downcallHandle(
+          KERNEL.find(name).orElseThrow(), FunctionDescriptor.of(result, args));
+    }
+
+    static WindowsHandle open(Path path, boolean directory) throws IOException {
+      WindowsHandle opened = null;
+      try (var arena = Arena.ofConfined()) {
+        if (path.toString().startsWith("\\\\")) throw invalid(); // Only local volumes.
+        var name = arena.allocateFrom(path.toString(), java.nio.charset.StandardCharsets.UTF_16LE);
+        // UTF-16 allocation needs a second zero byte beyond allocateFrom's single terminator.
+        var wide = arena.allocate((path.toString().length() + 1L) * 2, 2);
+        wide.copyFrom(name.asSlice(0, path.toString().length() * 2L));
+        MemorySegment handle =
+            (MemorySegment)
+                CREATE.invokeExact(
+                    wide,
+                    0x80000000,
+                    directory ? 3 : 1,
+                    MemorySegment.NULL,
+                    3,
+                    0x02200000,
+                    MemorySegment.NULL);
+        if (handle.address() == -1L) throw invalid();
+        opened = new WindowsHandle(handle);
+        var info = arena.allocate(52, 4);
+        if ((int) INFO.invokeExact(handle, info) == 0) throw invalid();
+        int attributes = info.get(ValueLayout.JAVA_INT, 0);
+        if ((attributes & 0x400) != 0
+            || ((attributes & 0x10) != 0) != directory
+            || (!directory && info.get(ValueLayout.JAVA_INT, 40) != 1)) throw invalid();
+        return opened;
+      } catch (Throwable e) {
+        if (opened != null) opened.close();
+        throw new IOException("Invalid private service token installation files");
+      }
+    }
+
+    boolean protectedDacl() throws IOException {
+      try (var arena = Arena.ofConfined()) {
+        var descriptor = arena.allocate(65536, 4);
+        var length = arena.allocate(ValueLayout.JAVA_INT);
+        if ((int) SECURITY.invokeExact(handle, 4, descriptor, 65536, length) == 0) throw invalid();
+        return (descriptor.get(ValueLayout.JAVA_SHORT, 2) & 0x1000) != 0;
+      } catch (Throwable e) {
+        throw new IOException("Cannot verify private directory DACL");
+      }
+    }
+
+    @Override
+    public void close() {
+      try {
+        int ignored = (int) CLOSE.invokeExact(handle);
+      } catch (Throwable e) {
+        throw invalid();
       }
     }
   }
@@ -276,6 +556,19 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
     if (scheduler != null) {
       scheduler.shutdownNow();
       scheduler = null;
+    }
+    if (windows != null) {
+      try {
+        windows.checkPrivate(tokenFile.getParent(), true);
+        windows.checkToken();
+        Files.deleteIfExists(tokenFile);
+      } catch (IOException | RuntimeException ignored) {
+        // An unchanged old signed token expires normally if cleanup is impossible.
+      } finally {
+        windows.close();
+        windows = null;
+      }
+      return;
     }
     try {
       checkDirectory(tokenFile.getParent(), false);
