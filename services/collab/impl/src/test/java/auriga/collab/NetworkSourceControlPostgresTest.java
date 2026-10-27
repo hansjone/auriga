@@ -2347,6 +2347,67 @@ class NetworkSourceControlPostgresTest {
   }
 
   @Test
+  void getNormalizesFractionalRequestBudgetBeforePersistingAndSigning() throws Exception {
+    var f = fresh();
+    String id = binding(issue(f));
+    var original =
+        db(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT creation_receipt FROM collab.network_source_binding WHERE tenant_id=? AND source_binding=?",
+                    byte[].class,
+                    TENANT,
+                    id));
+    int gets = peer.getCalls.get(),
+        registers = peer.registerCalls.get(),
+        reads = peer.readCalls.get();
+    // As in the real-IAM integration harness, a fixed whole-second clock leaves the nano budget
+    // cap just below the witness's whole-second +30s limit. The IAM fixture still returns UTC
+    // seconds.
+    var clock = Clock.fixed(now().plusSeconds(5), ZoneOffset.UTC);
+    var ordinary = wire;
+    var request = frame(f, "source_get").put("source_binding", id);
+    ((ObjectNode) request.path("native_witness"))
+        .put("observed_at", clock.instant().toString())
+        .put("valid_until", clock.instant().plusSeconds(30).toString());
+    try {
+      wire =
+          new NetworkMailboxWireService(
+              new NetworkMailboxService(jdbc, manager, source, keys, clock, client),
+              locals,
+              jdbc,
+              manager,
+              source,
+              keys,
+              clock);
+      var reply = get(f, request);
+      assertEquals("source_get_result", reply.path("type").asString(), reply.toString());
+      assertEquals("active", reply.path("source").path("state").asString());
+      var until = Instant.parse(reply.path("valid_until").asString());
+      assertEquals(0, until.getNano());
+      assertTrue(until.isAfter(clock.instant()));
+      assertFalse(until.isAfter(clock.instant().plusSeconds(30)));
+      var saved =
+          db(
+              () ->
+                  jdbc.queryForMap(
+                      "SELECT * FROM collab.network_source_binding WHERE tenant_id=? AND source_binding=?",
+                      TENANT,
+                      id));
+      assertEquals(java.sql.Timestamp.from(until), saved.get("valid_until"));
+      assertArrayEquals(original, (byte[]) saved.get("creation_receipt"));
+      var observation = GetAgentSourceResponse.parseFrom((byte[]) saved.get("observation"));
+      assertEquals(f.c(), observation.getConnection());
+      assertEquals(peer.sources.get(id), observation.getSource());
+      assertEquals(gets + 1, peer.getCalls.get());
+      assertEquals(registers, peer.registerCalls.get());
+      assertEquals(reads, peer.readCalls.get());
+    } finally {
+      wire = ordinary;
+    }
+  }
+
+  @Test
   void postRpcTypedLocalMutationAndWitnessExpiryCannotActivate() {
     var f = fresh();
     String id = binding(issue(f));

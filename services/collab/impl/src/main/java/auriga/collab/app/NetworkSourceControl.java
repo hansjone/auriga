@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -620,13 +621,16 @@ final class NetworkSourceControl {
           result.set("source", fact(response.getSource(), lineage, stopped));
           Instant until = null;
           if ("active".equals(result.path("source").path("state").asString())) {
+            // The request budget may end between seconds; wire Time is UTC whole seconds.
+            // Round the earliest bound down before both persistence and the expiry check.
             until =
                 Collections.min(
-                    List.of(
-                        deadline,
-                        instant(response.getValidUntil()),
-                        instant(response.getSource().getExpiresAt()),
-                        instant(text(gate.request().path("native_witness"), "valid_until"))));
+                        List.of(
+                            deadline,
+                            instant(response.getValidUntil()),
+                            instant(response.getSource().getExpiresAt()),
+                            instant(text(gate.request().path("native_witness"), "valid_until"))))
+                    .truncatedTo(ChronoUnit.SECONDS);
             require(until.isAfter(clock.instant()), EXPIRED);
             result.put("valid_until", until.toString());
           }
