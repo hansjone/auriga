@@ -13,6 +13,11 @@ import {
   stopChild,
 } from './support/assembly-process.mjs';
 import { redactDiagnostics } from './support/assembly-failure.mjs';
+import {
+  installNativeRuntime,
+  isolatedEnvironment,
+  hostPin,
+} from './support/native-install.mjs';
 
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -29,6 +34,9 @@ export async function runAssembly() {
     stageRoot: join(artifactRoot, 'nats-cache'),
   })();
   const artifacts = await mkdtemp(join(artifactRoot, 'assembly-'));
+  const nativeRuntime = await installNativeRuntime(
+    join(artifacts, 'native-runtime'),
+  );
   const executable = join(
     artifacts,
     process.platform === 'win32' ? 'gateway-assembly.exe' : 'gateway-assembly',
@@ -47,7 +55,10 @@ export async function runAssembly() {
     head,
     brokerVersion: '2.15.1',
     node: process.version,
-    fixture: 'native-only; no real DSH or SEND',
+    host: {
+      ...hostPin,
+      kind: 'real public services; no CLI/UI, model or SEND',
+    },
     stages: [],
     checks: [],
     completed: false,
@@ -135,23 +146,33 @@ export async function runAssembly() {
       { mode: 0o600, flag: 'wx' },
     );
     const pluginConfig = join(dirname(ready.config), 'plugin-driver.json');
+    const nativeProcessRoot = join(dirname(ready.config), 'native-process');
+    for (const path of ['cwd', 'dsh', 'home', 'config', 'tmp'])
+      await mkdir(join(nativeProcessRoot, path), { recursive: true });
     await writeFile(
       pluginConfig,
-      JSON.stringify({ ready, config, gateway: gw, artifacts }),
+      JSON.stringify({ ready, config, gateway: gw, artifacts, nativeRuntime }),
       { mode: 0o600, flag: 'wx' },
     );
     plugin = childProcess(
       process.execPath,
       [join(root, 'e2e/network/support/assembly-plugin.mjs')],
       {
-        cwd: root,
+        cwd: join(nativeProcessRoot, 'cwd'),
         env: {
-          ...process.env,
+          ...isolatedEnvironment(nativeProcessRoot),
           NODE_EXTRA_CA_CERTS: combinedCa,
           AURIGA_ASSEMBLY_PLUGIN: pluginConfig,
         },
       },
     );
+    const nativeProcess = await plugin.wait(
+      (event) => event.stage === 'native-process',
+      'native process identity',
+    );
+    assert.equal(nativeProcess.pid, plugin.child.pid);
+    assert.equal(nativeProcess.parentPid, process.pid);
+    manifest.stages.push(nativeProcess);
     const handled = new Set();
     const relayTimer = setInterval(() => {
       for (const event of plugin.events) {
