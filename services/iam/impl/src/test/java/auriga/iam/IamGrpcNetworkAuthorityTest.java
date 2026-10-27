@@ -65,6 +65,10 @@ class IamGrpcNetworkAuthorityTest {
   void allMethodsRejectOtherCallersAndMissingBusinessDelegationBeforeWork() {
     List<Runnable> calls =
         List.of(
+            () ->
+                service.readNetworkConnectionAnchor(
+                    ReadNetworkConnectionAnchorRequest.getDefaultInstance(),
+                    new IamGrpcDevicesSpringTest.Capture<>()),
             () -> service.checkNetwork(check(), new IamGrpcDevicesSpringTest.Capture<>()),
             () ->
                 service.networkAuthorityActive(
@@ -216,18 +220,20 @@ class IamGrpcNetworkAuthorityTest {
                         request.toBuilder().setLocal(local).build(),
                         new IamGrpcDevicesSpringTest.Capture<>()));
           verifyNoInteractions(authority);
-          when(authority.resolveTarget(any())).thenReturn(clock.instant().plusSeconds(1));
+          when(authority.resolveConnection(any()))
+              .thenReturn(
+                  new IamNetworkAuthority.ResolvedTarget(clock.instant().plusSeconds(1), null));
           var ok = new IamGrpcDevicesSpringTest.Capture<ResolveNetworkTargetResponse>();
           service.resolveNetworkTarget(request, ok);
           assertTrue(ok.values.getFirst().getAllowed());
           assertEquals(connection(), ok.values.getFirst().getConnection());
           assertEquals("system", ok.values.getFirst().getTargetType());
-          when(authority.resolveTarget(any()))
+          when(authority.resolveConnection(any()))
               .thenAnswer(
                   c -> {
                     var expiry = clock.instant().plusSeconds(1);
                     clock.advance(1);
-                    return expiry;
+                    return new IamNetworkAuthority.ResolvedTarget(expiry, null);
                   });
           var expired = new IamGrpcDevicesSpringTest.Capture<ResolveNetworkTargetResponse>();
           service.resolveNetworkTarget(request, expired);

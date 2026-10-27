@@ -6,6 +6,10 @@ import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.security.AuthorizationRules;
+import auriga.contracts.iam.v1.NetworkAuthorityConnection;
+import auriga.contracts.iam.v1.NetworkConnectionAnchor;
+import auriga.contracts.iam.v1.ReadNetworkConnectionAnchorRequest;
+import auriga.contracts.iam.v1.ReadNetworkConnectionAnchorResponse;
 import auriga.iam.api.NetworkAuthority;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -22,6 +26,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   private final IamStore store;
   private final JdbcTemplate jdbc;
   private final IamNetworkPolicyRevision policyRevision;
+  private final IamNetworkConnectionAnchors connectionAnchors;
   private final DeviceAccessAuthority devices;
   private final AuditLogger audit;
   private final Clock clock;
@@ -36,6 +41,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     this.store = store;
     this.jdbc = store.networkJdbc();
     this.policyRevision = new IamNetworkPolicyRevision(store);
+    this.connectionAnchors = new IamNetworkConnectionAnchors(store);
     this.devices = devices;
     this.audit = audit;
     this.clock = clock;
@@ -208,6 +214,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                   devices.credential(TenantContext.require().toString(), node.account(), device);
               if (credential == null
                   || !TenantContext.require().toString().equals(credential.tenant())
+                  || !node.account().equals(credential.account())
+                  || !node.device().equals(credential.device())
                   || !clock.instant().isBefore(credential.expiresAt())) return null;
               Instant expiry =
                   min(
@@ -239,31 +247,46 @@ public final class IamNetworkAuthority implements NetworkAuthority {
               ObjectNode backingDevice = store.get("device", device, false);
               String backingSession =
                   backingDevice == null ? "" : backingDevice.path("sessionId").asString();
-              store.insert(
-                  "network_ingress",
-                  binding.ingress(),
-                  Json.object(
-                      "realm",
-                      node.realm(),
-                      "node",
-                      node.node(),
-                      "device",
-                      device,
-                      "sessionId",
-                      backingSession,
-                      "serverId",
-                      binding.serverId(),
-                      "clientId",
-                      binding.clientId(),
-                      "userNkey",
-                      binding.userNkey(),
-                      "account",
-                      binding.account(),
-                      "audience",
-                      audience,
-                      "expiresAt",
-                      expiry.toString()),
-                  expiry);
+              ObjectNode ingress =
+                  store.insert(
+                      "network_ingress",
+                      binding.ingress(),
+                      Json.object(
+                          "realm",
+                          node.realm(),
+                          "node",
+                          node.node(),
+                          "device",
+                          device,
+                          "sessionId",
+                          backingSession,
+                          "serverId",
+                          binding.serverId(),
+                          "clientId",
+                          binding.clientId(),
+                          "userNkey",
+                          binding.userNkey(),
+                          "account",
+                          binding.account(),
+                          "audience",
+                          audience,
+                          "expiresAt",
+                          expiry.toString()),
+                      expiry);
+              connectionAnchors.retain(
+                  connection(
+                      new TargetBinding(
+                          node.realm(),
+                          node.node(),
+                          binding.ingress(),
+                          binding.serverId(),
+                          binding.clientId(),
+                          binding.account())),
+                  UUID.fromString(ingress.path("id").asString()),
+                  UUID.fromString(node.account()),
+                  UUID.fromString(node.device()),
+                  UUID.fromString(backingSession),
+                  clock.instant());
               jdbc.update(
                   "INSERT INTO iam.network_ingress_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",
                   TenantContext.require());
@@ -394,6 +417,26 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   record TargetSnapshot(
       Node node, ObjectNode ingress, ObjectNode device, ObjectNode session, ObjectNode account) {}
 
+  record ResolvedTarget(Instant expiresAt, NetworkConnectionAnchor anchor) {}
+
+  ReadNetworkConnectionAnchorResponse readConnectionAnchor(
+      ReadNetworkConnectionAnchorRequest request) {
+    caller("svc:collab");
+    return connectionAnchors.read(request);
+  }
+
+  private static NetworkAuthorityConnection connection(TargetBinding b) {
+    return NetworkAuthorityConnection.newBuilder()
+        .setTenantId(TenantContext.require().toString())
+        .setRealm(b.realm())
+        .setNode(b.node())
+        .setIngress(b.ingress())
+        .setServerId(b.serverId())
+        .setClientId(b.clientId())
+        .setClientAccount(b.account())
+        .build();
+  }
+
   /**
    * Resolve only an existing redeem generation. Native device IDs are never rebound by OAuth;
    * serverId/ingress identify the broker/redeem generation. No source/local registry is inferred.
@@ -401,6 +444,11 @@ public final class IamNetworkAuthority implements NetworkAuthority {
    * snapshots under locks. Even an expiry extension during the call requires a fresh query.
    */
   Instant resolveTarget(TargetBinding binding) {
+    var result = resolveConnection(binding);
+    return result == null ? null : result.expiresAt();
+  }
+
+  ResolvedTarget resolveConnection(TargetBinding binding) {
     caller("svc:collab");
     store.requireTransactionReleased();
     if (binding == null
@@ -418,7 +466,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         || !TenantContext.require().toString().equals(credential.tenant())
         || !before.node().account().equals(credential.account())
         || !before.node().device().equals(credential.device())) return null;
-    Instant result =
+    ResolvedTarget result =
         transaction(
             () -> {
               TargetSnapshot after = targetSnapshot(binding, true);
@@ -427,10 +475,18 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                   min(
                       credential.expiresAt(),
                       Instant.parse(after.ingress().path("expiresAt").asString()));
-              return clock.instant().isBefore(expiry) ? expiry : null;
+              if (!clock.instant().isBefore(expiry)) return null;
+              var anchor =
+                  connectionAnchors.existing(
+                      connection(binding),
+                      UUID.fromString(after.ingress().path("id").asString()),
+                      UUID.fromString(after.node().account()),
+                      UUID.fromString(after.node().device()),
+                      UUID.fromString(after.session().path("sessionId").asString()));
+              return new ResolvedTarget(expiry, anchor);
             });
     // Commit and lock release consume time too; never return an already expired grant.
-    return result != null && clock.instant().isBefore(result) ? result : null;
+    return result != null && clock.instant().isBefore(result.expiresAt()) ? result : null;
   }
 
   private TargetSnapshot targetSnapshot(TargetBinding b, boolean lock) {

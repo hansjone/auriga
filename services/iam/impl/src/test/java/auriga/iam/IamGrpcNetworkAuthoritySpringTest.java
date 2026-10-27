@@ -105,8 +105,12 @@ class IamGrpcNetworkAuthoritySpringTest {
               for (var limit : Limit.values()) ceilings.put(limit, limit.defaultValue());
               when(authority.effectiveLimits()).thenReturn(ceilings);
               when(authority.check(any())).thenReturn(new Decision(true, "private", ceilings));
-              when(authority.resolveTarget(any())).thenReturn(clock.instant().plusSeconds(60));
+              when(authority.resolveConnection(any()))
+                  .thenReturn(
+                      new IamNetworkAuthority.ResolvedTarget(
+                          clock.instant().plusSeconds(60), null));
               var server =
+                  // Both new and old authority RPCs use the same authenticated service transport.
                   new GrpcServer(
                       "127.0.0.1",
                       0,
@@ -145,6 +149,28 @@ class IamGrpcNetworkAuthoritySpringTest {
                       assertTrue(stub.checkNetwork(fixture.check()).getAllowed());
                       var binding =
                           fixture.connection().toBuilder().setTenantId(tenant.toString()).build();
+                      var anchor =
+                          NetworkConnectionAnchor.newBuilder()
+                              .setAnchorId(auriga.common.persistence.UuidV7.next().toString())
+                              .setConnection(binding)
+                              .build();
+                      var read =
+                          ReadNetworkConnectionAnchorRequest.newBuilder()
+                              .setOriginal(anchor)
+                              .setCurrent(anchor)
+                              .build();
+                      when(authority.readConnectionAnchor(read))
+                          .thenReturn(
+                              ReadNetworkConnectionAnchorResponse.newBuilder()
+                                  .setOriginal(anchor)
+                                  .setCurrent(anchor)
+                                  .build());
+                      assertEquals(anchor, stub.readNetworkConnectionAnchor(read).getOriginal());
+                      grpc(
+                          io.grpc.Status.Code.PERMISSION_DENIED,
+                          () ->
+                              NetworkAuthorityServiceGrpc.newBlockingStub(gatewayChannel)
+                                  .readNetworkConnectionAnchor(read));
                       assertEquals(
                           binding,
                           stub.resolveNetworkTarget(
@@ -231,6 +257,28 @@ class IamGrpcNetworkAuthoritySpringTest {
                         clock.instant(),
                         null,
                         "openid");
+                TenantContext.run(
+                    tenant,
+                    () ->
+                        grpc(
+                            io.grpc.Status.Code.UNAUTHENTICATED,
+                            () ->
+                                NetworkAuthorityServiceGrpc.newBlockingStub(open.apply(user))
+                                    .readNetworkConnectionAnchor(
+                                        ReadNetworkConnectionAnchorRequest.getDefaultInstance())));
+                grpc(
+                    io.grpc.Status.Code.PERMISSION_DENIED,
+                    () ->
+                        stub.readNetworkConnectionAnchor(
+                            ReadNetworkConnectionAnchorRequest.getDefaultInstance()));
+                TenantContext.run(
+                    TenantContext.PLATFORM_TENANT,
+                    () ->
+                        grpc(
+                            io.grpc.Status.Code.INVALID_ARGUMENT,
+                            () ->
+                                stub.readNetworkConnectionAnchor(
+                                    ReadNetworkConnectionAnchorRequest.getDefaultInstance())));
                 grpc(
                     io.grpc.Status.Code.UNAUTHENTICATED,
                     () ->
