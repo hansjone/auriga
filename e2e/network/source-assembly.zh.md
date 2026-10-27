@@ -161,6 +161,20 @@ file-commit observations 及 DB 快照。stdout/logs 保存前检查已知凭据
 
 ## 旧头首失与待办
 
+主控对 `dfab776` 的返工4首失虽标注P2/F2，实际在第一次member.join等待工具时失败，
+尚无tools/execute或LOCAL_REGISTER，ledger localHighWater=0。非PG真实rc.3复现证明，
+新增输出schema的retryAfter使用type数组和minimum/maximum、attempts使用minimum/maximum，
+超出宿主强制JSON Schema子集，ToolRuntime.register抛UNSUPPORTED_SCHEMA；连接运行时
+捕获可选能力安装失败，因此基础READY正常但join工具缺失，并非删除了驱动取工具逻辑。
+
+输出改用宿主公开支持的oneOf(integer/null)与整数enum[1..5]。retry_after范围仍由经验签的
+生产帧检查保持1..86400，登记重试/期限/取消逻辑不变，未恢复驱动旁路。现有非PG
+`node e2e/network/source-native.mjs --check` 的普通会话检查改为实际安装生产登记能力、
+通过真实ToolRuntime登记、退役旧代能力并重新安装、新工具复用原R而旧工具拒绝；另以
+生产schema检查null/整数过载输出与非法attempts拒绝。真实宿主/JSONL/工具服务成立，
+该用例远端登记端口和输出探针是明确夹具，能力换代不是完整READY C替换或PG平台验收，
+后者仍由root在新精确HEAD复跑原整链；既有真实对象身份反证继续保留。
+
 主控对 `3d5a3b8` 的新首失是 critical/live-C pending outcome 的工具返回 unavailable。
 对象谱系仍为当前活 agent/session，JSONL durable 正控已过，ledger 保留 local=3 的原预约。
 其真实 LOCAL_REGISTER `d3ee664f-fb00-4cb8-86a5-757a302297f6` 已发出，gateway 记录同请求

@@ -123,11 +123,9 @@ export function createSessionRegistration({
               reason: { type: 'string', enum: ['network.overloaded'] },
               retryable: { type: 'boolean' },
               retryAfter: {
-                type: ['integer', 'null'],
-                minimum: 1,
-                maximum: 86400,
+                oneOf: [{ type: 'integer' }, { type: 'null' }],
               },
-              attempts: { type: 'integer', minimum: 1, maximum: 5 },
+              attempts: { type: 'integer', enum: [1, 2, 3, 4, 5] },
             },
             required: ['status'],
             additionalProperties: false,

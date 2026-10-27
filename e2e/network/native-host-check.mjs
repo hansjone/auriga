@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createNativeHost } from './support/assembly-native.mjs';
-import {
-  createNativeHostPort,
-  registrationSession,
-} from '../../clients/dsh-plugin/src/network/host/native/host-port.js';
+import { createNativeHostPort } from '../../clients/dsh-plugin/src/network/host/native/host-port.js';
 import { createNativeSourceResolver } from '../../clients/dsh-plugin/src/network/host/native/source-context.js';
 import { currentNativeProcess } from './support/native-process.mjs';
+import { createSessionRegistration } from '../../clients/dsh-plugin/src/network/session-registration.js';
+import { openLedger } from '../../clients/dsh-plugin/src/network/host/ledger.js';
+import { createMemoryLedgerStore } from '../../clients/dsh-plugin/src/network/host/store.js';
+import {
+  IDENTITY,
+  createFixturePlatform,
+} from '../../clients/dsh-plugin/test/network/host/fixtures.js';
 
 const processRecord = await currentNativeProcess();
 async function cleanup(native, directory, label) {
@@ -80,28 +84,103 @@ test('rc.3 public controller and factory create ordinary real agents; ToolRuntim
     assert.equal(agent.session.header.origin, undefined);
     assert.equal(await host.flush(agent.id), true);
     assert.equal((await host.getSession(agent.id)).cwd, join(directory, 'cwd'));
-    const off = scoped.tools.register({
-      name: 'native_probe',
-      description: 'Observe a real public callback',
-      parameters: {
-        type: 'object',
-        properties: {},
-        additionalProperties: false,
-      },
-      output: {
-        schema: { type: 'boolean' },
-        render: (_args, value) => [{ type: 'text', text: String(value) }],
-      },
-      async execute(_args, execution) {
-        assert.equal(execution.agent, agent);
-        await registrationSession(scoped, execution).verify();
-        return true;
-      },
+    // Real public ToolRuntime enforces its schema subset at registration time.
+    // The remote registration port is a fixture; this is NOT platform/PG proof.
+    const store = createMemoryLedgerStore();
+    const ledger = await openLedger({
+      store,
+      identity: IDENTITY,
+      initialize: true,
     });
+    const platform = createFixturePlatform();
+    let generation = 1;
+    const registration = (expected) =>
+      createSessionRegistration({
+        ctx: scoped,
+        ledger,
+        registerLocal: platform.network.registerLocal,
+        assertCurrent: () => assert.equal(generation, expected),
+      });
+    let capability = registration(1);
     try {
-      assert.equal((await native.execute(agent, 'native_probe')).value, true);
+      // start() exposes actual registration rejection instead of swallowing it
+      // as connection-runtime's optional capability installation must do.
+      await capability.start();
+      const oldTool = scoped.tools.get('auriga_network_join');
+      assert.ok(oldTool, 'production join tool must be installed');
+      const result = await native.execute(agent);
+      assert.equal(result.isError, false);
+      assert.deepEqual(result.value, {
+        status: 'registered',
+        address: 'aur1:2.40.1',
+      });
+      const original = store.snapshot().locals['1'];
+      assert.equal(store.snapshot().bindings['1'].hostSessionId, agent.id);
+      // Exercise the production capability boundary used when READY C changes.
+      // This does not substitute for the real C replacement in the PG chain.
+      generation = 2;
+      capability.close();
+      assert.equal(scoped.tools.get('auriga_network_join'), undefined);
+      capability = registration(2);
+      await capability.start();
+      assert.ok(
+        scoped.tools.get('auriga_network_join'),
+        'replacement join tool must be installed',
+      );
+      assert.deepEqual(await oldTool.execute({}, { agent }), {
+        status: 'unavailable',
+      });
+      const replacement = await native.execute(agent);
+      assert.equal(replacement.isError, false);
+      assert.deepEqual(replacement.value, result.value);
+      assert.deepEqual(store.snapshot().locals['1'], original);
+      assert.equal(store.snapshot().localHighWater, '1');
+      const dispatched = native.events.filter(
+        (event) => event.event === 'tools/execute',
+      );
+      assert.equal(dispatched.length, 2);
+      assert.ok(
+        dispatched.every(
+          (event) =>
+            event.id === agent.id && event.current && event.sessionCurrent,
+        ),
+      );
+      // Validate overload result values through the actual host output schema.
+      // These probe values are fixtures, not remote overload acceptance.
+      let probeValue;
+      const off = scoped.tools.register({
+        name: 'join_output_probe',
+        description: 'Validate production join output schema in the real host',
+        parameters: oldTool.parameters,
+        output: oldTool.output,
+        async execute() {
+          return probeValue;
+        },
+      });
+      try {
+        for (const retryAfter of [null, 6]) {
+          probeValue = {
+            status: 'unavailable',
+            reason: 'network.overloaded',
+            retryable: true,
+            retryAfter,
+            attempts: 5,
+          };
+          const probe = await native.execute(agent, 'join_output_probe');
+          assert.equal(probe.isError, false);
+          assert.deepEqual(probe.value, probeValue);
+        }
+        probeValue = { ...probeValue, attempts: 6 };
+        assert.equal(
+          (await native.execute(agent, 'join_output_probe')).isError,
+          true,
+        );
+      } finally {
+        off();
+      }
     } finally {
-      off();
+      capability.close();
+      await ledger.close();
       await injection.dispose();
     }
     assert.deepEqual(native.ctx.llm.listProviders(), []);
