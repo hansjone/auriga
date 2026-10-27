@@ -187,7 +187,16 @@ export function configuration(state, manifest, secrets) {
       ServerName: 'platform.beta.internal',
     },
   };
-  return { access, platform, edge, ai };
+  const sessionKV = {
+    psql: manifest.psql || 'psql.exe',
+    port: manifest.pgPort,
+    database,
+    username: roles.edgeKv,
+    passFile: path.join(state, 'session-reader.pgpass'),
+    directory: path.join(state, 'session-projections'),
+    tenantId: tenant,
+  };
+  return { access, platform, edge, ai, sessionKV };
 }
 
 export function writeConfiguration(state, manifest, secrets) {
@@ -197,6 +206,17 @@ export function writeConfiguration(state, manifest, secrets) {
       path.join(state, `${name}.${name === 'platform' ? 'yaml' : 'json'}`),
       value,
     );
+  for (const [name, role, password] of [
+    ['session-reader.pgpass', manifest.roles.edgeKv, secrets.edgeKv],
+    ['session-setup.pgpass', manifest.roles.iam, secrets.iam],
+  ]) {
+    fs.writeFileSync(
+      path.join(state, name),
+      `127.0.0.1:${manifest.pgPort}:${manifest.database}:${role}:${password}\n`,
+      { mode: 0o600 },
+    );
+    privatePath(path.join(state, name), true);
+  }
 }
 
 function initialize(state, pgPort) {
@@ -218,6 +238,7 @@ function initialize(state, pgPort) {
     'gateway-secret',
     'gateway-token',
     'static',
+    'session-projections',
   ]) {
     fs.mkdirSync(path.join(state, name));
     privatePath(path.join(state, name), true);
@@ -225,7 +246,7 @@ function initialize(state, pgPort) {
   const suffix = randomBytes(5).toString('hex');
   const database = `auriga_beta_${suffix}`;
   const roles = Object.fromEntries(
-    ['dbOwner', 'iam', 'org', 'aiOwner', 'aiApp'].map((name) => [
+    ['dbOwner', 'iam', 'org', 'aiOwner', 'aiApp', 'edgeKv'].map((name) => [
       name,
       `${database}_${name.toLowerCase()}`,
     ]),
@@ -246,9 +267,15 @@ function initialize(state, pgPort) {
     },
   };
   const secrets = Object.fromEntries(
-    ['iam', 'org', 'aiOwner', 'aiApp', 'edgeSecret', 'gatewaySecret'].map(
-      (name) => [name, randomBytes(32).toString('base64url')],
-    ),
+    [
+      'iam',
+      'org',
+      'aiOwner',
+      'aiApp',
+      'edgeKv',
+      'edgeSecret',
+      'gatewaySecret',
+    ].map((name) => [name, randomBytes(32).toString('base64url')]),
   );
   secrets.encryptionKey = randomBytes(32).toString('base64');
   json(path.join(state, 'installation.json'), manifest);
@@ -274,54 +301,98 @@ function initialize(state, pgPort) {
   ]);
 }
 
+export function postgresEnvironment(passfile, inherited = process.env) {
+  return {
+    ...Object.fromEntries(
+      Object.entries(inherited).filter(
+        ([key]) => !key.toUpperCase().startsWith('PG'),
+      ),
+    ),
+    PGPASSFILE: passfile,
+    PGCONNECT_TIMEOUT: '5',
+    PGOPTIONS: '-c statement_timeout=15000 -c lock_timeout=5000',
+  };
+}
+
 function initializeDatabase(state, manifest, psql, passfile) {
-  if (manifest.dbReady) return;
+  sessionProjectionDDL({
+    ...manifest,
+    roles: {
+      ...manifest.roles,
+      edgeKv: manifest.roles.edgeKv || manifest.database + '_edgekv',
+    },
+  });
+  if (manifest.dbReady && manifest.roles.edgeKv) {
+    manifest.psql ||= psql;
+    const directory = path.join(state, 'session-projections');
+    if (!fs.existsSync(directory)) fs.mkdirSync(directory);
+    privatePath(directory, true);
+    writeConfiguration(state, manifest, read(path.join(state, 'secrets.json')));
+    json(path.join(state, 'installation.json'), manifest);
+    return;
+  }
   if (!passfile || !fs.statSync(passfile).isFile())
     throw new Error(
       'init-db requires a protected PostgreSQL administrator pgpass file',
     );
   privatePath(passfile);
   const secrets = read(path.join(state, 'secrets.json'));
+  if (manifest.dbReady) {
+    // Upgrade only our existing isolated Beta installation; preserve data, signing/enrollment keys.
+    manifest.roles.edgeKv = `${manifest.database}_edgekv`;
+    secrets.edgeKv = randomBytes(32).toString('base64url');
+  }
   const lines = ['\\set ON_ERROR_STOP on', 'BEGIN;'];
-  for (const [name, role] of Object.entries(manifest.roles)) {
+  for (const [name, role] of Object.entries(manifest.roles).filter(
+    ([name]) => !manifest.dbReady || name === 'edgeKv',
+  )) {
     lines.push(
       `CREATE ROLE ${role} ${name === 'dbOwner' ? 'NOLOGIN' : `LOGIN PASSWORD '${secrets[name]}'`} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;`,
     );
   }
-  lines.push(
-    'COMMIT;',
-    `CREATE DATABASE ${manifest.database} OWNER ${manifest.roles.dbOwner};`,
-    `\\connect ${manifest.database}`,
-  );
-  lines.push(
-    'REVOKE ALL ON SCHEMA public FROM PUBLIC;',
-    `REVOKE ALL ON DATABASE ${manifest.database} FROM PUBLIC;`,
-  );
-  for (const name of ['iam', 'org', 'aiOwner', 'aiApp'])
+  if (manifest.dbReady) {
     lines.push(
-      `GRANT CONNECT ON DATABASE ${manifest.database} TO ${manifest.roles[name]};`,
+      `ALTER ROLE ${manifest.roles.edgeKv} SET default_transaction_read_only=on;`,
+      `GRANT CONNECT ON DATABASE ${manifest.database} TO ${manifest.roles.edgeKv};`,
+      'COMMIT;',
     );
-  for (const name of ['iam', 'org', 'aiOwner']) {
+  } else {
     lines.push(
-      `GRANT CREATE ON DATABASE ${manifest.database} TO ${manifest.roles[name]};`,
+      'COMMIT;',
+      `CREATE DATABASE ${manifest.database} OWNER ${manifest.roles.dbOwner};`,
+      `\\connect ${manifest.database}`,
+    );
+    lines.push(
+      'REVOKE ALL ON SCHEMA public FROM PUBLIC;',
+      `REVOKE ALL ON DATABASE ${manifest.database} FROM PUBLIC;`,
+    );
+    for (const name of ['iam', 'org', 'aiOwner', 'aiApp', 'edgeKv'])
+      lines.push(
+        `GRANT CONNECT ON DATABASE ${manifest.database} TO ${manifest.roles[name]};`,
+      );
+    for (const name of ['iam', 'org', 'aiOwner']) {
+      lines.push(
+        `GRANT CREATE ON DATABASE ${manifest.database} TO ${manifest.roles[name]};`,
+      );
+    }
+    for (const [schema, role] of [
+      ['iam', manifest.roles.iam],
+      ['org', manifest.roles.org],
+      ['ai', manifest.roles.aiOwner],
+    ]) {
+      lines.push(
+        `CREATE SCHEMA ${schema} AUTHORIZATION ${role};`,
+        `ALTER ROLE ${role} IN DATABASE ${manifest.database} SET search_path = ${schema};`,
+      );
+    }
+    lines.push(
+      `GRANT USAGE ON SCHEMA ai TO ${manifest.roles.aiApp};`,
+      `ALTER ROLE ${manifest.roles.aiApp} IN DATABASE ${manifest.database} SET search_path = ai;`,
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${manifest.roles.aiOwner} IN SCHEMA ai GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO ${manifest.roles.aiApp};`,
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${manifest.roles.aiOwner} IN SCHEMA ai GRANT USAGE,SELECT ON SEQUENCES TO ${manifest.roles.aiApp};`,
+      `ALTER ROLE ${manifest.roles.edgeKv} SET default_transaction_read_only=on;`,
     );
   }
-  for (const [schema, role] of [
-    ['iam', manifest.roles.iam],
-    ['org', manifest.roles.org],
-    ['ai', manifest.roles.aiOwner],
-  ]) {
-    lines.push(
-      `CREATE SCHEMA ${schema} AUTHORIZATION ${role};`,
-      `ALTER ROLE ${role} IN DATABASE ${manifest.database} SET search_path = ${schema};`,
-    );
-  }
-  lines.push(
-    `GRANT USAGE ON SCHEMA ai TO ${manifest.roles.aiApp};`,
-    `ALTER ROLE ${manifest.roles.aiApp} IN DATABASE ${manifest.database} SET search_path = ai;`,
-    `ALTER DEFAULT PRIVILEGES FOR ROLE ${manifest.roles.aiOwner} IN SCHEMA ai GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO ${manifest.roles.aiApp};`,
-    `ALTER DEFAULT PRIVILEGES FOR ROLE ${manifest.roles.aiOwner} IN SCHEMA ai GRANT USAGE,SELECT ON SEQUENCES TO ${manifest.roles.aiApp};`,
-  );
   const sql = path.join(state, 'initialize.sql');
   fs.writeFileSync(sql, lines.join('\n'), { mode: 0o600 });
   const log = fs.openSync(path.join(state, 'logs/database.log'), 'a', 0o600);
@@ -343,12 +414,77 @@ function initializeDatabase(state, manifest, psql, passfile) {
         sql,
       ],
       {
-        env: { ...process.env, PGPASSFILE: passfile },
+        env: postgresEnvironment(passfile),
         stdio: ['ignore', log, log],
       },
     );
     manifest.dbReady = true;
+    manifest.psql = psql;
+    json(path.join(state, 'secrets.json'), secrets);
     json(path.join(state, 'installation.json'), manifest);
+    const directory = path.join(state, 'session-projections');
+    if (!fs.existsSync(directory)) fs.mkdirSync(directory);
+    privatePath(directory, true);
+    writeConfiguration(state, manifest, secrets);
+  } finally {
+    fs.closeSync(log);
+    fs.rmSync(sql, { force: true });
+  }
+}
+
+export function sessionProjectionDDL(manifest) {
+  if (
+    !/^auriga_beta_[a-f0-9]{10}$/.test(manifest.database) ||
+    manifest.roles.iam !== `${manifest.database}_iam` ||
+    manifest.roles.edgeKv !== `${manifest.database}_edgekv`
+  )
+    throw new Error('Invalid Beta session projection roles');
+  return `BEGIN;
+CREATE SCHEMA IF NOT EXISTS edge_session_cache;
+REVOKE ALL ON SCHEMA edge_session_cache FROM PUBLIC;
+CREATE OR REPLACE VIEW edge_session_cache.sessions WITH (security_barrier=true) AS
+SELECT tenant_id, lookup_key AS cookie_hash, data->'value' AS value, expires_at
+FROM iam.session_kv WHERE tenant_id='${tenant}'::uuid;
+REVOKE ALL ON edge_session_cache.sessions FROM PUBLIC;
+GRANT USAGE ON SCHEMA edge_session_cache TO ${manifest.roles.edgeKv};
+GRANT SELECT ON edge_session_cache.sessions TO ${manifest.roles.edgeKv};
+COMMIT;
+`;
+}
+
+function prepareSessionProjection(state, manifest) {
+  const sql = path.join(state, 'session-projection.sql');
+  fs.writeFileSync(sql, sessionProjectionDDL(manifest), { mode: 0o600 });
+  const log = fs.openSync(
+    path.join(state, 'logs/session-projection.log'),
+    'a',
+    0o600,
+  );
+  try {
+    run(
+      manifest.psql || 'psql.exe',
+      [
+        '-X',
+        '-q',
+        '-w',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-h',
+        '127.0.0.1',
+        '-p',
+        String(manifest.pgPort),
+        '-U',
+        manifest.roles.iam,
+        '-d',
+        manifest.database,
+        '-f',
+        sql,
+      ],
+      {
+        env: postgresEnvironment(path.join(state, 'session-setup.pgpass')),
+        stdio: ['ignore', log, log],
+      },
+    );
   } finally {
     fs.closeSync(log);
     fs.rmSync(sql, { force: true });
@@ -419,10 +555,37 @@ export async function stopProcesses(state, ports) {
   json(path.join(state, 'processes.json'), []);
   for (const name of ['edge-token/service.jwt', 'gateway-token/service.jwt'])
     fs.rmSync(path.join(state, name), { force: true });
+  const projections = path.join(state, 'session-projections');
+  if (fs.existsSync(projections)) {
+    privatePath(projections);
+    // An abrupt Windows edge stop can interrupt its finally block. Only remove our result files;
+    // a short-lived psql still closing one gets time to finish its bounded database operation.
+    await waitUntil(
+      () => {
+        try {
+          for (const entry of fs.readdirSync(projections, {
+            withFileTypes: true,
+          })) {
+            if (entry.isFile() && /^projection-[0-9]+\.json$/.test(entry.name))
+              fs.rmSync(path.join(projections, entry.name), { force: true });
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      'Private session result files are still busy',
+      5000,
+    );
+  }
 }
 
 export async function startServices(state, manifest) {
   if (!manifest.dbReady) throw new Error('Run init-db first');
+  if (!manifest.roles?.edgeKv)
+    throw new Error(
+      'Run init-db with the protected administrator pgpass once to upgrade Beta session projections',
+    );
   const ports = Object.values(manifest.ports);
   const previous = ownedProcesses(state);
   if (
@@ -490,6 +653,7 @@ export async function startServices(state, manifest) {
       'Platform did not become healthy; inspect private platform.log',
       120000,
     );
+    prepareSessionProjection(state, manifest);
     await waitUntil(
       () =>
         ['edge-token/service.jwt', 'gateway-token/service.jwt'].every((name) =>
@@ -520,6 +684,8 @@ export async function startServices(state, manifest) {
       path.join(state, 'edge.json'),
       '--instance-routes',
       'memory',
+      '--session-kv-config',
+      path.join(state, 'sessionKV.json'),
     ]);
     await waitUntil(async () => {
       if (

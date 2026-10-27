@@ -10,10 +10,38 @@ import {
   configuration,
   portFree,
   processIdentity,
+  privatePath,
+  postgresEnvironment,
+  sessionProjectionDDL,
   startServices,
   stopProcesses,
   waitUntil,
 } from '../../scripts/beta-ui/runner.mjs';
+
+test(
+  'stop removes only owned private projection result files',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    const state = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'auriga-beta-results-'),
+    );
+    const projections = path.join(state, 'session-projections');
+    try {
+      fs.mkdirSync(projections);
+      privatePath(projections, true);
+      fs.writeFileSync(
+        path.join(projections, 'projection-12345.json'),
+        'unit private result',
+      );
+      fs.writeFileSync(path.join(projections, 'operator-notes.txt'), 'keep');
+      await stopProcesses(state, []);
+      await stopProcesses(state, []);
+      assert.deepEqual(fs.readdirSync(projections), ['operator-notes.txt']);
+    } finally {
+      fs.rmSync(state, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   'repeated start retains the three owned processes and stop releases their ports',
@@ -54,8 +82,16 @@ test(
         path.join(dir, 'processes.json'),
         JSON.stringify(records),
       );
-      await startServices(dir, { dbReady: true, ports });
-      await startServices(dir, { dbReady: true, ports });
+      await startServices(dir, {
+        dbReady: true,
+        ports,
+        roles: { edgeKv: 'owned-test-role' },
+      });
+      await startServices(dir, {
+        dbReady: true,
+        ports,
+        roles: { edgeKv: 'owned-test-role' },
+      });
       assert.deepEqual(
         JSON.parse(fs.readFileSync(path.join(dir, 'processes.json'))),
         records,
@@ -101,6 +137,16 @@ test('configuration uses real IAM, isolated roles, fixed loopback origins and di
     manifest,
     secrets,
   );
+  assert.equal(cfg.sessionKV.username, manifest.roles.edgeKv);
+  assert.equal(cfg.sessionKV.tenantId, cfg.access.tenantId);
+  assert.equal(
+    cfg.sessionKV.passFile,
+    path.join(
+      path.resolve(os.tmpdir(), 'auriga-beta-test'),
+      'session-reader.pgpass',
+    ),
+  );
+  assert.equal(cfg.sessionKV.password, undefined);
   assert.equal(cfg.platform['auriga.iam.session-kv-nats'], false);
   assert.equal(cfg.platform['auriga.events.nats-url'], '');
   assert.equal(cfg.access.portalOrigin.host, '127.0.0.1');
@@ -188,3 +234,48 @@ test(
     }
   },
 );
+
+test('session projection view grants only the installed tenant cache and rejects foreign role names', () => {
+  const database = 'auriga_beta_0123456789';
+  const manifest = {
+    database,
+    roles: { iam: database + '_iam', edgeKv: database + '_edgekv' },
+  };
+  const sql = sessionProjectionDDL(manifest);
+  assert.match(sql, /security_barrier=true/);
+  assert.match(
+    sql,
+    /FROM iam.session_kv WHERE tenant_id='00000000-0000-0000-0000-000000000001'::uuid/,
+  );
+  assert.match(
+    sql,
+    /GRANT SELECT ON edge_session_cache.sessions TO auriga_beta_0123456789_edgekv/,
+  );
+  assert.doesNotMatch(
+    sql,
+    /GRANT.*(?:INSERT|UPDATE|DELETE|ALL|BYPASSRLS|iam\.)/,
+  );
+  assert.throws(() =>
+    sessionProjectionDDL({
+      ...manifest,
+      roles: { ...manifest.roles, edgeKv: 'other_owner' },
+    }),
+  );
+});
+
+test('PostgreSQL subprocesses use only the intended credential file', () => {
+  const env = postgresEnvironment('private.pgpass', {
+    PATH: 'tools',
+    PGPASSWORD: 'unit-private-password',
+    PGSERVICE: 'unrelated',
+    PGHOST: 'remote.invalid',
+    pgoptions: 'unrelated',
+  });
+  assert.equal(env.PGPASSFILE, 'private.pgpass');
+  assert.equal(env.PATH, 'tools');
+  assert.equal(env.PGPASSWORD, undefined);
+  assert.equal(env.PGSERVICE, undefined);
+  assert.equal(env.PGHOST, undefined);
+  assert.equal(env.pgoptions, undefined);
+  assert.equal(env.PGCONNECT_TIMEOUT, '5');
+});

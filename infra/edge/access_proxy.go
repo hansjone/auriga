@@ -65,6 +65,12 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	fail := func(status int, code string) {
 		writeProblem(w, problem(status, code, http.StatusText(status), "request rejected", rid))
 	}
+	unavailable := func(reason string) {
+		if g.Log != nil {
+			g.Log.Warn("Access API request rejected", "reason", reason, "requestId", rid)
+		}
+		fail(503, "common.unavailable")
+	}
 	e, ok := r.Context().Value(accessEntryKey{}).(accessEntry)
 	if !ok {
 		fail(403, "common.forbidden")
@@ -101,7 +107,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	if cookieOK {
 		loaded, err := g.browserSession(r, raw, audience, !public && r.Method == http.MethodGet)
 		if err != nil && !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, errIAMUnauthenticated) && !public {
-			fail(503, "common.unavailable")
+			unavailable("browser_session_unavailable")
 			return
 		}
 		if err == nil && loaded.Valid(g.Now().UTC(), audience) == nil && loaded.TenantID == g.Cfg.Access.TenantID() {
@@ -127,7 +133,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	} else if sess != nil && isWriteMethod(r.Method) && !public {
 		if ipAdmin {
 			if g.AdminCSRF == nil {
-				fail(503, "common.unavailable")
+				unavailable("admin_csrf_verifier_unavailable")
 				return
 			}
 			if len(r.Header.Values("X-Auriga-CSRF")) != 1 {
@@ -142,7 +148,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 				case errors.Is(err, errCSRF):
 					fail(403, "common.forbidden")
 				default:
-					fail(503, "common.unavailable")
+					unavailable("admin_csrf_rpc_unavailable")
 				}
 				return
 			}
@@ -164,7 +170,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		}
 	}
 	if iam && g.IAMTransport == nil {
-		fail(503, "common.unavailable")
+		unavailable("iam_transport_unavailable")
 		return
 	}
 	selectedCookies, err := g.iamCookies(r, e, bootstrap)
@@ -190,7 +196,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		transport = g.IAMTransport
 	}
 	if transport == nil {
-		fail(503, "common.unavailable")
+		unavailable("api_transport_unavailable")
 		return
 	}
 	if sess != nil && !public {
@@ -199,12 +205,12 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			if errors.Is(err, errIAMUnauthenticated) {
 				fail(401, "common.unauthenticated")
 			} else {
-				fail(503, "common.unavailable")
+				unavailable("browser_session_touch_unavailable")
 			}
 			return
 		}
 		if !g.Now().UTC().Before(sess.AccessTokenExpiresAt) {
-			fail(503, "common.unavailable")
+			unavailable("browser_access_token_expired")
 			return
 		}
 	}
@@ -218,6 +224,9 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		}
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, request *http.Request, err error) {
+		if g.Log != nil {
+			g.Log.Warn("Access API request rejected", "reason", "upstream_transport_unavailable", "requestId", requestID(request))
+		}
 		writeProblem(w, problem(503, "common.unavailable", "Service Unavailable", "control plane unavailable", requestID(request)))
 	}
 	base := proxy.Rewrite
