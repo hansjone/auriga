@@ -73,8 +73,9 @@ try {
     New-Item -ItemType Directory -Path $directory | Out-Null
     & tar -xf $archive -C $directory
     if ($LASTEXITCODE -ne 0) { throw 'archive extraction failed' }
-    # Compare exact Git blobs, not checkout CRLF bytes (.ps1/.cmd deliberately use CRLF).
-    $archiveBlobs = @($files | & git -C $directory hash-object --no-filters --stdin-paths)
+    # git archive applies declared eol attributes; normalize with the same Git filters
+    # before comparing blob IDs (.ps1/.cmd deliberately export CRLF on Windows).
+    $archiveBlobs = @($files | & git -C $directory hash-object --stdin-paths)
     if ($LASTEXITCODE -ne 0 -or $archiveBlobs.Count -ne $files.Count) { throw 'Cannot hash archive inventory' }
     for ($i = 0; $i -lt $files.Count; $i++) {
       if ($archiveBlobs[$i] -ne $blobs[$i]) { throw "Archive differs from HEAD blob: $($files[$i])" }
