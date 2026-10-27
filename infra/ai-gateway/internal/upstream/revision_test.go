@@ -325,12 +325,9 @@ func TestRevisionSSRFNeverConnects(t *testing.T) {
 	}
 	s.Start()
 	defer s.Close()
-	privateOnly := map[string]bool{"10.0.0.1": true, "172.16.0.1": true, "192.168.0.1": true, "fc00::1": true, "100.64.0.1": true}                                                                                                                                                                                                                                                                           // gitleaks:allow
+	neverAllowed := map[string]bool{"127.0.0.1": true, "::1": true, "169.254.169.254": true, "fd00:ec2::254": true, "100.100.100.200": true}                                                                                                                                                                                                                                                                 // gitleaks:allow
 	for _, ip := range []string{"10.0.0.1", "172.16.0.1", "192.168.0.1", "fc00::1", "100.64.0.1", "127.0.0.1", "::1", "169.254.169.254", "169.254.1.1", "fe80::1", "fd00:ec2::254", "100.100.100.200", "0.0.0.0", "::", "224.0.0.1", "ff02::1", "198.18.0.1", "192.0.2.10", "198.51.100.10", "203.0.113.10", "2001:db8::1", "100::1", "::ffff:0:192.0.2.10", "64:ff9b::a00:1", "2002:7f00:1::", "2001::1"} { // gitleaks:allow
 		for _, listed := range []bool{false, true} {
-			if listed && privateOnly[ip] {
-				continue
-			}
 			t.Run(ip+map[bool]string{false: "/default", true: "/listed"}[listed], func(t *testing.T) {
 				cfg := Config{MaxResponseBytes: 4096, MaxEventBytes: 2048}
 				if listed {
@@ -338,6 +335,12 @@ func TestRevisionSSRFNeverConnects(t *testing.T) {
 				}
 				c, _ := New(cfg)
 				c.lookup = func(context.Context, string) ([]netip.Addr, error) { return []netip.Addr{netip.MustParseAddr(ip)}, nil }
+				if listed && !neverAllowed[ip] {
+					if _, err := c.resolve(t.Context(), "models.example.com"); err != nil {
+						t.Fatal("deployment-trusted address rejected")
+					}
+					return
+				}
 				var dials atomic.Int64
 				c.dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
 					dials.Add(1)

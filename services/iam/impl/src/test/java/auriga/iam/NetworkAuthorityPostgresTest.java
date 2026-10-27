@@ -69,10 +69,25 @@ class NetworkAuthorityPostgresTest {
                 () -> {
                   store.insert(
                       "account", account.toString(), Json.object("status", "active"), null);
+                  UUID session = UUID.randomUUID(), provider = UUID.randomUUID();
+                  store.insert("idp_provider", provider.toString(), Json.object(), null);
+                  store.insert(
+                      "session",
+                      session.toString(),
+                      Json.object(
+                          "sessionId",
+                          session,
+                          "tenantId",
+                          tenant,
+                          "accountId",
+                          account,
+                          "providerId",
+                          provider),
+                      null);
                   store.insert(
                       "device",
                       device.toString(),
-                      Json.object("accountId", account.toString()),
+                      Json.object("accountId", account.toString(), "sessionId", session),
                       null);
                   return null;
                 }));
@@ -225,6 +240,8 @@ class NetworkAuthorityPostgresTest {
                     "session",
                     sid,
                     Json.object(
+                        "sessionId",
+                        sid,
                         "tenantId",
                         tenant.toString(),
                         "accountId",

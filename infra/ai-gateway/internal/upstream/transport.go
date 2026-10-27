@@ -28,7 +28,8 @@ type Config struct {
 	MaxEventBytes    int
 }
 
-// HostRule only exempts private address ranges. Plain HTTP needs its own opt-in.
+// HostRule trusts a deployment host except for loopback and metadata peers.
+// Plain HTTP needs its own opt-in.
 type HostRule struct {
 	Host           string `json:"host"`
 	AllowPlaintext bool   `json:"allowPlaintext"`
@@ -66,7 +67,7 @@ func New(c Config) (*Client, error) {
 		if len(h) > 253 || (err != nil && !dnsName.MatchString(h)) || (err == nil && ip.Zone() != "") {
 			return nil, errors.New("invalid upstream configuration")
 		}
-		if err == nil && !safeIP(ip) {
+		if err == nil && !trustedIP(ip) {
 			return nil, errors.New("invalid upstream configuration")
 		}
 		if _, duplicate := v.allowed[h]; duplicate {
@@ -100,8 +101,8 @@ func safeIP(ip netip.Addr) bool {
 	if !ip.IsValid() || ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 		return false
 	}
-	// These addresses are never exempted, including metadata in private ranges,
-	// transition encodings, documentation ranges and benchmark/discard networks.
+	// Strict defaults for unlisted hosts include transition encodings,
+	// documentation ranges and benchmark/discard networks.
 	for _, prefix := range []string{"0.0.0.0/8", "192.0.0.0/24", "168.63.129.16/32", "100.100.100.200/32", "fd00:ec2::254/128", "198.18.0.0/15", "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32", "3fff::/20", "100::/64", "240.0.0.0/4", "fec0::/10", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32", "::/96", "::ffff:0:0/96", "::ffff:0:0:0/96"} { // gitleaks:allow
 		if netip.MustParsePrefix(prefix).Contains(ip) {
 			return false
@@ -112,7 +113,27 @@ func safeIP(ip netip.Addr) bool {
 
 func (c *Client) allows(host string, ip netip.Addr) bool {
 	_, listed := c.allowed[host]
-	return safeIP(ip) && (publicIP(ip) || (listed && privateIP(ip)))
+	if !listed {
+		return publicIP(ip)
+	}
+	return trustedIP(ip)
+}
+
+// Use the same deployment trust boundary at construction and connection time.
+func trustedIP(ip netip.Addr) bool {
+	if !ip.IsValid() || ip.Zone() != "" {
+		return false
+	}
+	ip = ip.Unmap()
+	if ip.IsLoopback() {
+		return false
+	}
+	for _, metadata := range []string{"169.254.169.254", "fd00:ec2::254", "168.63.129.16", "100.100.100.200"} { // gitleaks:allow
+		if ip == netip.MustParseAddr(metadata) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Client) resolve(ctx context.Context, host string) ([]netip.Addr, error) {

@@ -16,6 +16,8 @@ service NetworkAuthorityService {
   // Verify the EXACT persisted redeem binding and current backing identity on
   // every call, including realm/node/tenant, ingress, server/client/account.
   rpc ResolveNetworkTarget(ResolveNetworkTargetRequest) returns (ResolveNetworkTargetResponse);
+  // Historical association check only. Never an online check or permission grant.
+  rpc ReadNetworkConnectionAnchor(ReadNetworkConnectionAnchorRequest) returns (ReadNetworkConnectionAnchorResponse);
   // Recheck stored source binding/revision, sender policy/grant and target read
   // permission before signing. Stored JSON is evidence, never an allow grant.
   // Agent source lifecycle: NetworkSourceAuthorityService in network_source.proto;
@@ -92,6 +94,22 @@ message ResolveNetworkTargetRequest {
   string local = 2;
 }
 
+// Opaque immutable IAM redeem provenance. No owner/device/backing-session IDs.
+message NetworkConnectionAnchor {
+  string anchor_id = 1;
+  NetworkAuthorityConnection connection = 2;
+}
+
+message ReadNetworkConnectionAnchorRequest {
+  NetworkConnectionAnchor original = 1;
+  NetworkConnectionAnchor current = 2;
+}
+
+message ReadNetworkConnectionAnchorResponse {
+  NetworkConnectionAnchor original = 1;
+  NetworkConnectionAnchor current = 2;
+}
+
 message ResolveNetworkTargetResponse {
   bool allowed = 1;
   // Exact verified binding echo. Missing/mismatched fields fail closed.
@@ -101,6 +119,8 @@ message ResolveNetworkTargetResponse {
   // RFC3339 UTC, bounded by current backing session/device/connection expiry.
   string valid_until = 4;
   string local = 5;
+  // Absent for pre-upgrade ingresses; Resolve MUST NOT reconstruct old history.
+  NetworkConnectionAnchor connection_anchor = 6;
 }
 
 message AuthorizeNetworkDeliveryRequest {

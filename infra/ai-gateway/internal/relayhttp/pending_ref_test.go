@@ -84,7 +84,7 @@ func TestHTTPAdmissionPendingRef(t *testing.T) {
 					if stream {
 						body = strings.Replace(body, `"max_tokens":`, `"stream":true,"max_tokens":`, 1)
 					}
-					var public string
+					var public pendingPublic
 					if mode == "cancel" {
 						c := socket(t, s)
 						if _, err := fmt.Fprintf(c, "POST %s HTTP/1.1\r\nHost: example.com\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nIdempotency-Key: %s\r\nX-Request-ID: forged-client-request\r\nContent-Length: %d\r\n\r\n%s", chatPath, f.raw, key, len(body), body); err != nil {
@@ -114,9 +114,9 @@ func TestHTTPAdmissionPendingRef(t *testing.T) {
 							t.Fatal(err)
 						}
 						b := readPendingBody(t, res)
-						public = fmt.Sprint(res.Header) + b
+						public.hasResponse, public.header, public.body = true, res.Header, b
 						if res.StatusCode != 503 || res.Header.Get("Content-Type") != "application/json" || !strings.Contains(b, "ai.budget_unavailable") || strings.Contains(b, "data:") || strings.Contains(b, "[DONE]") {
-							t.Fatal("ambiguous admission escaped as success/stream", res.StatusCode, b)
+							t.Fatal("ambiguous admission escaped as success/stream; surface=body", res.StatusCode)
 						}
 					}
 					var p Pending
@@ -147,14 +147,13 @@ func TestHTTPAdmissionPendingRef(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					public += fmt.Sprintf("%v %+v %#v", p, p, p) + string(b)
+					public.formats = [3]string{fmt.Sprintf("%v", p), fmt.Sprintf("%+v", p), fmt.Sprintf("%#v", p)}
+					public.json = string(b)
 					// Wait for the real handler to finish before inspecting its log.
 					s.Close()
-					public += logs.String()
-					for _, secret := range []string{db.ref.RequestID, f.control.tenant, account, device, "private", "SQL", "forged-client-request", "forged-tenant", "forged-account", "common.conflict"} {
-						if secret != "" && strings.Contains(public, secret) {
-							t.Fatal("internal hint/cause or client identity leaked to public output/log/formatting")
-						}
+					public.handlerLog = logs.String()
+					if hits := pendingPrivacyViolations(public, pendingPrivateValues(db.ref, f.control.tenant)); len(hits) != 0 {
+						t.Fatal("internal hint/cause or client identity leaked or public ID invalid; labels:", hits)
 					}
 					select {
 					case <-pending:

@@ -147,8 +147,8 @@ public class IamGrpcNetworkAuthority
               || c.getClientAccount().isBlank()
               || c.getClientAccount().length() > 256)
             throw new AurigaException(CommonErrors.VALIDATION_FAILED);
-          var expiry =
-              authority.resolveTarget(
+          var resolved =
+              authority.resolveConnection(
                   new IamNetworkAuthority.TargetBinding(
                       c.getRealm(),
                       c.getNode(),
@@ -156,15 +156,48 @@ public class IamGrpcNetworkAuthority
                       c.getServerId(),
                       c.getClientId(),
                       c.getClientAccount()));
-          if (expiry == null || !clock.instant().isBefore(expiry))
+          if (resolved == null || !clock.instant().isBefore(resolved.expiresAt()))
             return ResolveNetworkTargetResponse.getDefaultInstance();
-          return ResolveNetworkTargetResponse.newBuilder()
-              .setAllowed(true)
-              .setConnection(c)
-              .setTargetType("system")
-              .setLocal("0")
-              .setValidUntil(expiry.toString())
-              .build();
+          var response =
+              ResolveNetworkTargetResponse.newBuilder()
+                  .setAllowed(true)
+                  .setConnection(c)
+                  .setTargetType("system")
+                  .setLocal("0")
+                  .setValidUntil(resolved.expiresAt().toString());
+          if (resolved.anchor() != null) {
+            IamNetworkConnectionAnchors.validate(resolved.anchor());
+            if (!resolved.anchor().getConnection().equals(c))
+              throw new AurigaException(CommonErrors.UNAVAILABLE);
+            response.setConnectionAnchor(resolved.anchor());
+          }
+          return response.build();
+        });
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void readNetworkConnectionAnchor(
+      ReadNetworkConnectionAnchorRequest request,
+      StreamObserver<ReadNetworkConnectionAnchorResponse> observer) {
+    respond(
+        observer,
+        () -> {
+          // Validate at the boundary as well as in persistence. No partial/unknown references.
+          if (!request.getUnknownFields().asMap().isEmpty()
+              || !request.hasOriginal()
+              || !request.hasCurrent()) throw new AurigaException(CommonErrors.FORBIDDEN);
+          IamNetworkConnectionAnchors.validate(request.getOriginal());
+          IamNetworkConnectionAnchors.validate(request.getCurrent());
+          var result = authority.readConnectionAnchor(request);
+          if (result == null
+              || !result.getUnknownFields().asMap().isEmpty()
+              || !result.hasOriginal()
+              || !result.hasCurrent()
+              || !result.getOriginal().equals(request.getOriginal())
+              || !result.getCurrent().equals(request.getCurrent()))
+            throw new AurigaException(CommonErrors.UNAVAILABLE);
+          return result;
         });
   }
 

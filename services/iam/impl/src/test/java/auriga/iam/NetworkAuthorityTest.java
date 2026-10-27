@@ -82,6 +82,33 @@ class NetworkAuthorityTest {
           @SuppressWarnings("unchecked")
           @Override
           public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
+            // This policy fixture has no durable anchor store; PG tests cover retention/rollback.
+            if (sql.contains("FROM iam.network_connection_anchor")) return List.of();
+            if (sql.startsWith("SELECT id,data::text FROM iam.network_ingress")) {
+              var row = rows.get(key("network_ingress", args[1].toString()));
+              if (row == null) return List.of();
+              var rs = mock(java.sql.ResultSet.class);
+              try {
+                when(rs.getObject(1, UUID.class))
+                    .thenReturn(UUID.fromString(row.path("id").asString()));
+                when(rs.getString(2)).thenReturn(row.toString());
+                return List.of(mapper.mapRow(rs, 0));
+              } catch (java.sql.SQLException e) {
+                throw new AssertionError(e);
+              }
+            }
+            if (sql.contains("SELECT n.account_id,n.device_id")) {
+              Node n = nodes.get(key("node", args[1].toString()));
+              if (n == null) return List.of();
+              var rs = mock(java.sql.ResultSet.class);
+              try {
+                when(rs.getObject(1, UUID.class)).thenReturn(UUID.fromString(n.account()));
+                when(rs.getObject(2, UUID.class)).thenReturn(UUID.fromString(n.device()));
+                return List.of(mapper.mapRow(rs, 0));
+              } catch (java.sql.SQLException e) {
+                throw new AssertionError(e);
+              }
+            }
             if (sql.contains("SET next_node")) {
               String value = next.toString();
               next = next.add(BigInteger.ONE);
@@ -178,6 +205,30 @@ class NetworkAuthorityTest {
               var value = rows.get(key(i.getArgument(0), i.getArgument(1)));
               return value == null ? null : value.deepCopy();
             });
+    when(store.byId(anyString(), anyString(), anyBoolean()))
+        .thenAnswer(
+            i -> {
+              var value = rows.get(key(i.getArgument(0), i.getArgument(1)));
+              return value == null ? null : value.deepCopy();
+            });
+    TenantContext.run(
+        tenant,
+        () -> {
+          String sid = UUID.randomUUID().toString();
+          rows.put(
+              key("device", device.toString()),
+              Json.object("accountId", account.toString(), "sessionId", sid));
+          rows.put(
+              key("session", sid),
+              Json.object(
+                  "sessionId",
+                  sid,
+                  "tenantId",
+                  tenant.toString(),
+                  "accountId",
+                  account.toString()));
+          rows.put(key("account", account.toString()), Json.object("status", "active"));
+        });
     when(store.insert(anyString(), anyString(), any(), nullable(Instant.class)))
         .thenAnswer(
             i -> {

@@ -21,15 +21,15 @@ class NetworkAuthorityResolveTest extends NetworkAuthorityTest {
               Json.object("accountId", account.toString(), "sessionId", session));
           rows.put(
               key("session", session),
-              Json.object("sessionId", session, "accountId", account.toString()));
+              Json.object(
+                  "sessionId",
+                  session,
+                  "tenantId",
+                  tenant.toString(),
+                  "accountId",
+                  account.toString()));
           rows.put(key("account", account.toString()), Json.object("status", "active"));
         });
-    when(store.byId(anyString(), anyString(), anyBoolean()))
-        .thenAnswer(
-            c -> {
-              var row = rows.get(key(c.getArgument(0), c.getArgument(1)));
-              return row == null ? null : row.deepCopy();
-            });
   }
 
   java.time.Instant resolve(IamNetworkAuthority.TargetBinding binding) {

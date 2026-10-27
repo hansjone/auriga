@@ -1,5 +1,13 @@
 # Auriga 通信网络契约 v1（N0）
 
+内部连接历史核验：IAM 成功兑换同事务保存永久最小 connection anchor，
+`ResolveNetworkTargetResponse` 追加 field6 `connection_anchor`；升级前 ingress 缺锚点时
+保留 fields1–5 行为且不补历史。`ReadNetworkConnectionAnchor(original,current)` 仅供
+受信业务租户委托的内部 svc:collab，核完整 C/原真实出处及未重绑身份关联，不要求旧 C 在线，
+不写来源/操作/失败围栏，不回当前许可。缺引用/坏引用/错归属失败关闭；外层当前 C2 的活体核验
+及最终 CAS 仍独立。精确语义见 [IAM 目录契约](iam-directory.md#永久连接兑换锚点与内部历史核验)。
+collab 保存引用及墓碑恢复接线留待后续，不扩大网关白名单、不改变 #216 Read、不宣称 SEND 或容量已验。
+
 本目录把已合入的待实施设计 [`docs/design/auriga-network/`](../../docs/design/auriga-network/README.zh.md) 落成可校验契约，供 Go（adapter/edge）、Java（collab/iam）、Node（dsh-plugin）三端共用。**N0 只冻结契约与一致性 fixtures，未实现任何服务**；运营默认值（速率、配额、留存）仍以设计总览 §10 为准且待压测，这里只冻结影响编码与互通的硬上限。
 
 | 文件 | 内容 |
