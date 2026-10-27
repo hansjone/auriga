@@ -29,8 +29,9 @@ export const inject = ['webServer', 'connection'];
  */
 export async function apply(ctx, config) {
   const mode = selectMode();
-  let binding;
-  let configured = !!config?.connect;
+  let binding, profileOwner;
+  // Unknown preferences must never temporarily expose native DSH surfaces.
+  let configured = true;
   let admission;
   const settings = installSettings(
     ctx,
@@ -86,12 +87,9 @@ export async function apply(ctx, config) {
               (current()?.runtime.bindHttpResponse(req, res) ?? false),
           ),
       };
-      const ensureAdmission = () => {
-        admission ??= installLocalAdmission(ctx.connection, gate, {
-          protocol: ctx.webServer.protocol,
-        });
-      };
-      if (configured) ensureAdmission();
+      admission = installLocalAdmission(ctx.connection, gate, {
+        protocol: ctx.webServer.protocol,
+      });
       ctx.effect(
         () => () => admission?.dispose(),
         'auriga-dsh: persistent local door',
@@ -130,136 +128,172 @@ export async function apply(ctx, config) {
           }),
         'auriga-dsh: connect surfaces',
       );
-      ctx.inject(
-        ['profileContext', 'tools', 'sessions', 'sessionController'],
-        async (connectCtx) => {
-          const profile = connectCtx.profileContext;
-          if (!profile?.dir)
-            throw new Error(
-              'auriga-dsh: host profile directory required for persistent state',
-            );
-          const store = await settings.getStore(profile.dir);
-          let owned, networkProvider, modelProvider;
-          let detachNetwork, detachModels;
-          let disposed = false;
-          let configuring = Promise.resolve();
-          const invalidate = async (origin) => {
-            if (owned?.runtime.config.platformOrigin === origin) return;
-            const previous = owned;
+      ctx.inject(['profileContext'], async (profileCtx) => {
+        const owner = {};
+        profileOwner = owner;
+        configured = true;
+        binding = undefined;
+        profileCtx.effect(
+          () => () => {
+            if (profileOwner !== owner) return;
+            profileOwner = undefined;
+            configured = true;
             binding = undefined;
-            owned = undefined;
-            detachNetwork = undefined;
-            detachModels = undefined;
-            if (previous) {
-              try {
-                await previous.runtime.resetAuthentication();
-              } finally {
-                await previous.runtime.close();
-              }
-            }
-          };
-          const configure = (origin) => {
-            const operation = configuring.then(async () => {
-              if (disposed) return;
-              if (owned?.runtime.config.platformOrigin === origin) return;
-              await invalidate(origin);
-              configured = !!origin;
-              if (configured) ensureAdmission();
-              if (!origin || disposed) return;
-              const effective = await savedPlatformConfig(
-                config?.connect,
-                origin,
-                { saved: store.hasSavedSettings },
-              );
-              if (disposed) return;
-              const runtime = await createConnectRuntime({
-                config: effective,
-                directory: join(profile.dir, 'auriga-connect'),
-                ctx: connectCtx,
-              });
-              try {
-                const saved = runtime.vault.snapshot().credential;
-                if (
-                  saved &&
-                  ((saved.platformOrigin ??
-                    new URL(saved.claims.iss).origin) !==
-                    effective.platformOrigin ||
-                    (saved.issuer ?? saved.claims.iss) !== effective.issuer ||
-                    (saved.clientId ?? effective.clientId) !==
-                      effective.clientId)
-                )
-                  await runtime.resetAuthentication();
-                if (disposed) {
-                  await runtime.close();
-                  return;
-                }
-                if (networkProvider)
-                  detachNetwork = runtime.attachNetwork(networkProvider);
-                if (modelProvider)
-                  detachModels = await runtime.attachModels(modelProvider);
-                if (disposed) {
-                  await runtime.close();
-                  return;
-                }
-                owned = {
-                  ctx: connectCtx,
-                  runtime,
-                  handler: createConnectRoutes({ runtime, admission }),
-                };
-                binding = owned;
-              } catch (error) {
-                await runtime.close();
-                throw error;
-              }
-            });
-            configuring = operation.catch(() => {});
-            return operation;
-          };
-          const unsubscribe = store.subscribe(
-            (next) => configure(next.platformOrigin),
+          },
+          'auriga-dsh: profile admission',
+        );
+        const profile = profileCtx.profileContext;
+        if (!profile?.dir)
+          throw new Error(
+            'auriga-dsh: host profile directory required for persistent state',
+          );
+        const loading = settings.getStore(profile.dir).then((store) => {
+          if (profileOwner !== owner) return null;
+          configured = !!store.snapshot().platformOrigin;
+          const unwatchAdmission = store.subscribe(
             async (next) => {
-              await configuring;
-              await invalidate(next.platformOrigin);
+              if (profileOwner === owner) configured = !!next.platformOrigin;
+            },
+            async (next) => {
+              if (
+                profileOwner === owner &&
+                next.platformOrigin !== store.snapshot().platformOrigin
+              )
+                configured = true;
             },
           );
-          connectCtx.effect(
-            () => () => {
-              disposed = true;
-              unsubscribe();
-              if (binding === owned) binding = undefined;
-              return owned?.runtime.close();
-            },
-            'auriga-dsh: injected local runtime',
+          profileCtx.effect(
+            () => unwatchAdmission,
+            'auriga-dsh: saved platform admission',
           );
-          connectCtx.inject(['aurigaNetwork'], (networkCtx) => {
-            networkProvider = networkCtx.aurigaNetwork;
-            detachNetwork = owned?.runtime.attachNetwork(networkProvider);
-            networkCtx.effect(
-              () => () => {
-                networkProvider = undefined;
-                detachNetwork?.();
-                detachNetwork = undefined;
+          return store;
+        });
+        profileCtx.inject(
+          ['tools', 'sessions', 'sessionController'],
+          async (connectCtx) => {
+            const store = await loading;
+            if (!store || profileOwner !== owner) return;
+            let owned, networkProvider, modelProvider;
+            let detachNetwork, detachModels;
+            let disposed = false;
+            let configuring = Promise.resolve();
+            const invalidate = async (origin) => {
+              if (owned?.runtime.config.platformOrigin === origin) return;
+              const previous = owned;
+              binding = undefined;
+              owned = undefined;
+              detachNetwork = undefined;
+              detachModels = undefined;
+              if (previous) {
+                try {
+                  await previous.runtime.resetAuthentication();
+                } finally {
+                  await previous.runtime.close();
+                }
+              }
+            };
+            const configure = (origin) => {
+              const operation = configuring.then(async () => {
+                if (disposed || profileOwner !== owner) return;
+                if (owned?.runtime.config.platformOrigin === origin) return;
+                await invalidate(origin);
+                if (!origin || disposed) return;
+                const effective = await savedPlatformConfig(
+                  config?.connect,
+                  origin,
+                  { saved: store.hasSavedSettings },
+                );
+                if (disposed) return;
+                const runtime = await createConnectRuntime({
+                  config: effective,
+                  directory: join(profile.dir, 'auriga-connect'),
+                  ctx: connectCtx,
+                });
+                try {
+                  const saved = runtime.vault.snapshot().credential;
+                  if (
+                    saved &&
+                    ((saved.platformOrigin ??
+                      new URL(saved.claims.iss).origin) !==
+                      effective.platformOrigin ||
+                      (saved.issuer ?? saved.claims.iss) !== effective.issuer ||
+                      (saved.clientId ?? effective.clientId) !==
+                        effective.clientId)
+                  )
+                    await runtime.resetAuthentication();
+                  if (disposed || profileOwner !== owner) {
+                    await runtime.close();
+                    return;
+                  }
+                  if (networkProvider)
+                    detachNetwork = runtime.attachNetwork(networkProvider);
+                  if (modelProvider)
+                    detachModels = await runtime.attachModels(modelProvider);
+                  if (disposed || profileOwner !== owner) {
+                    await runtime.close();
+                    return;
+                  }
+                  owned = {
+                    ctx: connectCtx,
+                    runtime,
+                    handler: createConnectRoutes({ runtime, admission }),
+                  };
+                  binding = owned;
+                } catch (error) {
+                  await runtime.close();
+                  throw error;
+                }
+              });
+              configuring = operation.catch(() => {});
+              return operation;
+            };
+            const unsubscribe = store.subscribe(
+              (next) => configure(next.platformOrigin),
+              async (next) => {
+                await configuring;
+                await invalidate(next.platformOrigin);
               },
-              'auriga-dsh: network provider',
             );
-          });
-          connectCtx.inject(['llm'], async (llmCtx) => {
-            modelProvider = llmCtx.llm;
-            detachModels = await owned?.runtime.attachModels(modelProvider);
-            llmCtx.effect(
+            connectCtx.effect(
               () => () => {
-                modelProvider = undefined;
-                detachModels?.();
-                detachModels = undefined;
+                disposed = true;
+                unsubscribe();
+                if (binding === owned) binding = undefined;
+                return owned?.runtime.close();
               },
-              'auriga-dsh: public model adapter',
+              'auriga-dsh: injected local runtime',
             );
-          });
-          // Keep settings/retry ownership alive even when the platform is down.
-          // The parent login door stays closed and activeOrigin remains empty.
-          await configure(store.snapshot().platformOrigin).catch(() => {});
-        },
-      );
+            connectCtx.inject(['aurigaNetwork'], (networkCtx) => {
+              networkProvider = networkCtx.aurigaNetwork;
+              detachNetwork = owned?.runtime.attachNetwork(networkProvider);
+              networkCtx.effect(
+                () => () => {
+                  networkProvider = undefined;
+                  detachNetwork?.();
+                  detachNetwork = undefined;
+                },
+                'auriga-dsh: network provider',
+              );
+            });
+            connectCtx.inject(['llm'], async (llmCtx) => {
+              modelProvider = llmCtx.llm;
+              detachModels = await owned?.runtime.attachModels(modelProvider);
+              llmCtx.effect(
+                () => () => {
+                  modelProvider = undefined;
+                  detachModels?.();
+                  detachModels = undefined;
+                },
+                'auriga-dsh: public model adapter',
+              );
+            });
+            // Keep settings/retry ownership alive even when the platform is down.
+            // The parent login door stays closed and activeOrigin remains empty.
+            await configure(store.snapshot().platformOrigin).catch(() => {});
+          },
+        );
+        await loading;
+      });
       return;
     }
   }
