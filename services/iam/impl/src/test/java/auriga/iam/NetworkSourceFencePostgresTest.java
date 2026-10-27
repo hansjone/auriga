@@ -372,16 +372,22 @@ class NetworkSourceFencePostgresTest {
 
   @Test
   void preV12CommittedReceiptStillWinsAfterCleanupAndPolicyDisable() {
-    // Explicit legacy fixture: real identity + a copy of the real redeemed ingress,
-    // but without V12 provenance, as retained by pre-V12 issuance. Not a new redeem.
+    // Explicit pre-V12 fixture: real identity and a separate broker client/ingress,
+    // copied from the real redemption without its V12 provenance. Not a new redeem.
     var old = f.connection;
-    f.connection = old.toBuilder().setIngress("b".repeat(26)).build();
+    f.connection =
+        old.toBuilder()
+            .setIngress("b".repeat(26))
+            .setClientId(Long.toString(++f.transportClient))
+            .build();
+    assertNotEquals(old.getClientId(), f.connection.getClientId());
     f.tx(
         () -> {
           var data =
               NetworkSourceAuthorityPostgresTest.store
                   .get("network_ingress", old.getIngress(), false)
                   .deepCopy();
+          data.put("clientId", f.connection.getClientId());
           NetworkSourceAuthorityPostgresTest.store.insert(
               "network_ingress",
               f.connection.getIngress(),
@@ -390,23 +396,44 @@ class NetworkSourceFencePostgresTest {
           return null;
         });
     assertEquals(
-        0,
+        f.connection.getClientId(),
         f.tx(
-            () ->
-                NetworkSourceAuthorityPostgresTest.store
-                    .networkJdbc()
-                    .queryForObject(
-                        "SELECT count(*) FROM iam.network_connection_anchor WHERE tenant_id=? AND ingress_key=?",
-                        Integer.class,
-                        f.tenant,
-                        f.connection.getIngress())));
+                () ->
+                    NetworkSourceAuthorityPostgresTest.store.get(
+                        "network_ingress", f.connection.getIngress(), false))
+            .path("clientId")
+            .asString());
+    assertEquals(
+        old.getClientId(),
+        f.tx(
+                () ->
+                    NetworkSourceAuthorityPostgresTest.store.get(
+                        "network_ingress", old.getIngress(), false))
+            .path("clientId")
+            .asString());
+    java.util.function.IntSupplier legacyProvenanceCount =
+        () ->
+            f.tx(
+                () ->
+                    NetworkSourceAuthorityPostgresTest.store
+                        .networkJdbc()
+                        .queryForObject(
+                            "SELECT count(*) FROM iam.network_connection_anchor WHERE tenant_id=? AND ingress_key=?",
+                            Integer.class,
+                            f.tenant,
+                            f.connection.getIngress()));
+    assertEquals(0, legacyProvenanceCount.getAsInt());
     var r = f.request("committed");
     var response = f.call(() -> f.sources.register(r));
+    assertTrue(response.hasSource());
+    assertFalse(response.getDefinitivelyUncommitted());
+    assertEquals(r.getConnection(), response.getSource().getOriginalConnection());
     f.clock.advance(3601);
     f.cleanExpiredOriginalIngress();
     f.sources = spy(f.authority(new IamNetworkSourceAuthority.Policy(0, 0)));
     orgCalls.set(0);
     clearInvocations(f.authority);
+    assertEquals(0, legacyProvenanceCount.getAsInt());
     var before = database();
     assertEquals(response, fenceRpc(r));
     assertEquals(before, database());
