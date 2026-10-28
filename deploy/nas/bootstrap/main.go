@@ -99,6 +99,9 @@ func main() {
 		if err := guard.Validate(false); err != nil {
 			fatalf("%v", err)
 		}
+		if err := networkdeploy.CheckCertificates(filepath.Join(*out, "network"), time.Now(), os.Stderr); err != nil {
+			fatalf("%v", err)
+		}
 		fmt.Println("nas-bootstrap ok (existing installation)")
 		return
 	}

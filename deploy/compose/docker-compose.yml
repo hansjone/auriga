@@ -119,7 +119,8 @@ services:
       - ./var/runtime-keys:/etc/auriga/runtime-keys:ro
       - ./var/enrollment:/var/auriga
       - ./var/iam-installation:/run/auriga-installation:ro
-      - ./var/network:/etc/auriga/network:ro
+      - ./var/network/platform.properties:/etc/auriga/network/platform.properties:ro
+      - ./var/network/gateway.secret:/etc/auriga/network/gateway.secret:ro
       - network-tokens:/run/auriga-network-token
       - internal-tokens:/run/auriga-internal
     healthcheck:
@@ -169,18 +170,28 @@ services:
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
-    user: '0:0'
+    user: '10001:10001'
+    cap_drop: [ALL]
+    read_only: true
+    security_opt: ['no-new-privileges:true']
     network_mode: host
     entrypoint: ['/auriga-network-broker']
     command: ['-c', '/etc/auriga/network/broker.conf']
     volumes:
-      - ./var/network:/etc/auriga/network:ro
+      - ./var/network/broker.conf:/etc/auriga/network/broker.conf:ro
+      - ./var/network/broker.pem:/etc/auriga/network/broker.pem:ro
+      - ./var/network/broker.key:/etc/auriga/network/broker.key:ro
+      - ./var/network/server-ca.pem:/etc/auriga/network/server-ca.pem:ro
 
   network:
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
-    user: '0:0'
+    user: '10001:10001'
+    group_add: ['65533']
+    cap_drop: [ALL]
+    read_only: true
+    security_opt: ['no-new-privileges:true']
     network_mode: host
     restart: on-failure
     entrypoint: ['/auriga-ai-gateway']
@@ -197,11 +208,10 @@ services:
       - ./var/pki/gateway.key:/etc/auriga/pki/gateway.key:ro
       - network-tokens:/run/auriga-network-token:ro
     healthcheck:
-      test:
-        [
+      test: [
           'CMD',
           '/auriga-network-probe',
-          'https://127.0.0.1:18443',
+          'https://172.29.240.1:18443', # gitleaks:allow disposable M2 network
           '/etc/auriga/network',
         ]
       interval: 3s
@@ -261,3 +271,4 @@ networks:
     ipam:
       config:
         - subnet: 172.29.240.0/24 # gitleaks:allow disposable M2 network
+          gateway: 172.29.240.1 # gitleaks:allow disposable M2 network

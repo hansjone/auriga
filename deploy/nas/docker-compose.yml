@@ -129,7 +129,8 @@ services:
       - ${AURIGA_DATA_ROOT}/config/materials/iam-healthcheck.sh:/etc/auriga/iam-healthcheck.sh:ro
       - ${AURIGA_DATA_ROOT}/config/materials/iam-installation:/run/auriga-installation:ro
       - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal
-      - ${AURIGA_DATA_ROOT}/config/materials/network:/etc/auriga/network:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/network/platform.properties:/etc/auriga/network/platform.properties:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/network/gateway.secret:/etc/auriga/network/gateway.secret:ro
       - ${AURIGA_DATA_ROOT}/network-tokens:/run/auriga-network-token
       - ${AURIGA_DATA_ROOT}/config/materials/pki:/etc/auriga/pki:ro
       - ${AURIGA_DATA_ROOT}/config/materials/templates:/etc/auriga/templates:ro
@@ -206,7 +207,10 @@ services:
     entrypoint: ['/auriga-network-broker']
     command: ['-c', '/etc/auriga/network/broker.conf']
     volumes:
-      - ${AURIGA_DATA_ROOT}/config/materials/network:/etc/auriga/network:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/network/broker.conf:/etc/auriga/network/broker.conf:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/network/broker.pem:/etc/auriga/network/broker.pem:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/network/broker.key:/etc/auriga/network/broker.key:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/network/server-ca.pem:/etc/auriga/network/server-ca.pem:ro
     networks: [internal]
     mem_limit: 128m
     cpus: 0.25

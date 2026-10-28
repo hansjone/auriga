@@ -49,7 +49,7 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	if edge.AccessConfigFile != "/etc/auriga/access.json" {
 		t.Fatal("edge must load shared access.json")
 	}
-	if edge.Upstreams["network-submit"] != "https://host.docker.internal:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] {
+	if edge.Upstreams["network-submit"] != "https://172.29.240.1:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] { // gitleaks:allow disposable M2 network
 		t.Fatal("submit must use an independent HTTPS listener and trust material")
 	}
 	var network struct {
@@ -59,7 +59,7 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	if err := json.Unmarshal(read("network/runtime.json"), &network); err != nil {
 		t.Fatal(err)
 	}
-	if network.SubmitHTTP.ClientCAFile != "/etc/auriga/network/client-ca.pem" || network.SubmitHTTP.Listen != "0.0.0.0:18443" || network.IAM.ServiceTokenFile != "/run/auriga-network-token/gateway/service.jwt" {
+	if network.SubmitHTTP.ClientCAFile != "/etc/auriga/network/client-ca.pem" || network.SubmitHTTP.Listen != "172.29.240.1:18443" || network.IAM.ServiceTokenFile != "/run/auriga-network-token/gateway/service.jwt" { // gitleaks:allow disposable M2 network
 		t.Fatal("incomplete network runtime configuration")
 	}
 	for _, service := range []string{"iam", "org", "workspace"} {

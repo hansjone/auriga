@@ -14,7 +14,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -42,22 +44,77 @@ type Options struct {
 	ExportServiceToken bool              `json:"exportServiceToken"`
 }
 
-func Generate(dir string, o Options) error {
-	if o.Root == "" || o.SubmitListen == "" || o.BrokerHost == "" || o.BrokerURL == "" || o.BrokerPort < 1 || o.WebsocketPort < 1 || o.Audience == "" || o.IAM["ServiceTokenFile"] == "" || o.Collab["ServiceTokenFile"] == "" {
-		return fmt.Errorf("incomplete network deployment options")
+var (
+	errOptions   = errors.New("invalid network deployment options")
+	errDirectory = errors.New("network directory refused")
+	errCleanup   = errors.New("network material cleanup failed")
+)
+
+// ErrorCategory returns a fixed diagnostic label, never option values or paths.
+func ErrorCategory(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, errCleanup):
+		return "cleanup_failed"
+	case errors.Is(err, errOptions):
+		return "invalid_options"
+	case errors.Is(err, errDirectory):
+		return "directory_refused"
+	default:
+		return "generation_failed"
 	}
+}
+
+func Generate(dir string, o Options) error {
+	return generate(dir, o, rand.Reader)
+}
+
+func generate(dir string, o Options, entropy io.Reader) (result error) {
+	if o.Root == "" || o.SubmitListen == "" || o.BrokerHost == "" || o.BrokerURL == "" || o.BrokerPort < 1 || o.WebsocketPort < 1 || o.Audience == "" || o.IAM["ServiceTokenFile"] == "" || o.Collab["ServiceTokenFile"] == "" {
+		return errOptions
+	}
+	createdDirectory := true
 	if err := os.Mkdir(dir, 0700); err != nil {
 		info, statErr := os.Lstat(dir)
 		entries, readErr := os.ReadDir(dir)
 		if !os.IsExist(err) || statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || readErr != nil || len(entries) != 0 {
-			return fmt.Errorf("network directory must be new: %w", err)
+			return errDirectory
 		}
+		createdDirectory = false
 	}
+	// NAS pins an existing empty directory by FD, so keep its inode on failure.
+	// Remove only inodes created by this attempt; never recurse into foreign data.
+	created := map[string]os.FileInfo{}
+	defer func() {
+		if result == nil {
+			return
+		}
+		for name, original := range created {
+			path := filepath.Join(dir, name)
+			current, err := os.Lstat(path)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil || !os.SameFile(original, current) || os.Remove(path) != nil {
+				result = errors.Join(result, errCleanup)
+			}
+		}
+		if createdDirectory && os.Remove(dir) != nil {
+			result = errors.Join(result, errCleanup)
+		}
+	}()
 	write := func(name string, raw []byte) error {
 		f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
 			return err
 		}
+		info, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return err
+		}
+		created[name] = info
 		_, err = f.Write(raw)
 		closeErr := f.Close()
 		if err != nil {
@@ -67,7 +124,7 @@ func Generate(dir string, o Options) error {
 	}
 	if o.ExportServiceToken {
 		raw := make([]byte, 32)
-		if _, err := rand.Read(raw); err != nil {
+		if _, err := io.ReadFull(entropy, raw); err != nil {
 			return err
 		}
 		secret := []byte(base64.RawURLEncoding.EncodeToString(raw))
@@ -84,16 +141,16 @@ func Generate(dir string, o Options) error {
 		}
 	}
 	ca := func(name string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		key, err := ecdsa.GenerateKey(elliptic.P256(), entropy)
 		if err != nil {
 			return nil, nil, err
 		}
-		serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 120))
+		serial, err := rand.Int(entropy, new(big.Int).Lsh(big.NewInt(1), 120))
 		if err != nil {
 			return nil, nil, err
 		}
 		cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: "Auriga network " + name}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().AddDate(1, 0, 0), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign}
-		der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
+		der, err := x509.CreateCertificate(entropy, cert, cert, &key.PublicKey, key)
 		if err == nil {
 			err = write(name+".pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 		}
@@ -108,11 +165,11 @@ func Generate(dir string, o Options) error {
 		return err
 	}
 	for _, name := range []string{"submit", "edge", "broker", "broker-client"} {
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		key, err := ecdsa.GenerateKey(elliptic.P256(), entropy)
 		if err != nil {
 			return err
 		}
-		serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 120))
+		serial, err := rand.Int(entropy, new(big.Int).Lsh(big.NewInt(1), 120))
 		if err != nil {
 			return err
 		}
@@ -128,7 +185,7 @@ func Generate(dir string, o Options) error {
 			cert.DNSNames = append(cert.DNSNames, "network-broker")
 			cert.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
 		}
-		der, err := x509.CreateCertificate(rand.Reader, cert, parent, &key.PublicKey, signer)
+		der, err := x509.CreateCertificate(entropy, cert, parent, &key.PublicKey, signer)
 		if err != nil {
 			return err
 		}
@@ -176,7 +233,7 @@ func Generate(dir string, o Options) error {
 	passwords := map[string]string{}
 	for _, user := range []string{"auth", "ops", "data"} {
 		raw := make([]byte, 32)
-		if _, err := rand.Read(raw); err != nil {
+		if _, err := io.ReadFull(entropy, raw); err != nil {
 			return err
 		}
 		passwords[user] = hex.EncodeToString(raw)
@@ -185,7 +242,7 @@ func Generate(dir string, o Options) error {
 			return err
 		}
 	}
-	_, protocolKey, err := ed25519.GenerateKey(rand.Reader)
+	_, protocolKey, err := ed25519.GenerateKey(entropy)
 	if err != nil {
 		return err
 	}

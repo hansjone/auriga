@@ -248,6 +248,10 @@ PostgreSQL 的 PGDATA 分阶段检查：仅当丢弃全部 capability 的 root �
 
 ## 验证与证据边界
 
+Network 使用独立一年有效期的 CA/叶子，与上述节点 PKI 的有效期不同。platform 只挂载 network 的 `platform.properties`/`gateway.secret`，broker 只挂载 `broker.conf`/`broker.pem`/`broker.key`/`server-ca.pem`；原源文件、安装回执与 uid10001:10001、目录0700/文件0600校验保持一致。按文件挂载后，更换材料须重新创建相关容器。
+
+start/render 重入、network 健康探针及 `sh deploy/nas/scripts/status.sh` 检查独立 network CA 和全部叶子：到期前30天输出 `network_certificate_expiring`，过期/损坏分别输出 `expired`/`invalid` 并检查失败，普通重入不更换私钥。停机或无法取得容器状态时 status 报 `unavailable_or_invalid`，不能当正常。请每天采集状态输出告警并提前安排维护；本次提供到期告警，不提供在线自动轮换。命令、权限与维护边界见 [部署材料维护](../../deploy/bootstrap/network/README.md)。
+
 ```sh
 (cd deploy/bootstrap && go test -count=1 ./...)
 (cd deploy/compose/bootstrap && go test -count=1 ./...)
