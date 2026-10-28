@@ -110,6 +110,18 @@ func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet
 	if cfg.PortalOrigin().Scheme == "https" {
 		set.PublicFiles = append(set.PublicFiles, "browser-tls/browser.crt", "browser-tls/browser.key")
 	}
+	if _, err := os.Lstat(filepath.Join(out, "collab-installation")); err == nil {
+		if !validateCollabSource(out) {
+			return set, fmt.Errorf("invalid managed collab source metadata")
+		}
+		set.ManagedDirectories = append(set.ManagedDirectories, "collab-installation")
+		for _, name := range collabLeaves {
+			set.PublicFiles = append(set.PublicFiles, "collab-installation/"+name)
+		}
+		set.PublicFiles = append(set.PublicFiles, "network-platform/collab.secret", "pki/edge-collab.crt", "pki/edge-collab.key")
+	} else if !os.IsNotExist(err) {
+		return set, err
+	}
 	if err := networkdeploy.ValidateBrowserSource(out, cfg.PortalOrigin().Scheme == "https"); err != nil {
 		return set, err
 	}
@@ -315,7 +327,7 @@ func validateComposeAccess(cfg deploymentconfig.Config, edgeContainer string) er
 		}
 	}
 	for _, origin := range []deployment.Origin{cfg.PortalOrigin(), cfg.AdminOrigin()} {
-		for _, reserved := range []int32{15432, 4222, 8222, 5000, iamPort, observerPort, 7443, iamRPCPort} {
+		for _, reserved := range []int32{15432, 4222, 8222, 5000, iamPort, observerPort, 7443, iamRPCPort, 8085, 9092} {
 			if origin.Port == reserved {
 				return fmt.Errorf("compose access: browser port conflicts with a fixed combined host service")
 			}

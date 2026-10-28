@@ -6,7 +6,7 @@ COMPOSE="$ROOT/deploy/compose"
 VAR="$COMPOSE/var"
 ACCESS_ARGS=()
 while [ "$#" -gt 0 ]; do
-  case "$1" in --access-file|--https-cert-file|--https-key-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
+  case "$1" in --access-file|--https-cert-file|--https-key-file|--network-collab-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
   [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing prepare input' >&2; exit 1; }
   # Resolve once before changing directory; only the public Go loader parses it.
   ACCESS_DIR="$(cd -- "$(dirname -- "$2")" 2>/dev/null && pwd)" || { echo 'invalid prepare input' >&2; exit 1; }
@@ -29,7 +29,7 @@ PROOF_TMP="$PREPARE_TMP/proofs"
 trap 'rm -rf -- "$PREPARE_TMP"' EXIT
 
 echo "==> start local registry if needed"
-docker compose -f "$COMPOSE/docker-compose.yml" up -d registry
+bash "$COMPOSE/scripts/compose.sh" bootstrap-registry
 sleep 2
 
 case "$FIXTURE" in
@@ -125,6 +125,11 @@ else
   sudo -n chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem"
 fi
 bash "$COMPOSE/scripts/https-materials.sh" "$VAR"
+if [ "$(id -u)" -eq 0 ]; then
+  sh "$COMPOSE/scripts/collab-materials.sh" "$VAR"
+else
+  sudo -n sh "$COMPOSE/scripts/collab-materials.sh" "$VAR"
+fi
 chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/identity-signing-keys.json" "$VAR/identity-keys.json" \
   "$VAR/edge.config.json" || true
