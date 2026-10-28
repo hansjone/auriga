@@ -67,7 +67,7 @@ services:
       AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
       AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
-      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties
+      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties,file:/etc/auriga/network/platform.properties
       AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: 'true'
       AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE: /run/auriga-installation/edge.secret
       AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
@@ -76,7 +76,7 @@ services:
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
       AURIGA_GRPC_SERVER_TLS_PRIVATE_KEY: /etc/auriga/pki/iam.key
       AURIGA_GRPC_SERVER_TLS_TRUST_CERT_COLLECTION: /etc/auriga/pki/ca.crt
-      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge
+      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway
       # Exact TCP source: fixed edge control-network address + local health probe.
       SPRING_APPLICATION_JSON: '{"auriga":{"iam":{"edge-hop":{"peer-addresses":["172.29.240.10","127.0.0.1"],"allow-loopback-http":false}}}}' # gitleaks:allow disposable M2 network
       AURIGA_IAM_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
@@ -119,6 +119,8 @@ services:
       - ./var/runtime-keys:/etc/auriga/runtime-keys:ro
       - ./var/enrollment:/var/auriga
       - ./var/iam-installation:/run/auriga-installation:ro
+      - ./var/network:/etc/auriga/network:ro
+      - network-tokens:/run/auriga-network-token
       - internal-tokens:/run/auriga-internal
     healthcheck:
       test: ['CMD-SHELL', 'sh /etc/auriga/iam-healthcheck.sh']
@@ -147,6 +149,8 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      network:
+        condition: service_healthy
     command: ['-config', '/etc/auriga/edge.config.json']
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
@@ -158,7 +162,51 @@ services:
       - internal-tokens:/run/auriga-internal:ro
       # pki rw: edge chmod's cert/key on startup (ro bind → EROFS)
       - ./var/pki:/etc/auriga/pki
+      - ./var/network-edge:/etc/auriga/network-edge:ro
       - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:ro
+
+  network-broker:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.edge
+    user: '0:0'
+    network_mode: host
+    entrypoint: ['/auriga-network-broker']
+    command: ['-c', '/etc/auriga/network/broker.conf']
+    volumes:
+      - ./var/network:/etc/auriga/network:ro
+
+  network:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.edge
+    user: '0:0'
+    network_mode: host
+    restart: on-failure
+    entrypoint: ['/auriga-ai-gateway']
+    command: ['--network-config', '/etc/auriga/network/runtime.json']
+    depends_on:
+      platform:
+        condition: service_healthy
+      network-broker:
+        condition: service_started
+    volumes:
+      - ./var/network:/etc/auriga/network:ro
+      - ./var/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
+      - ./var/pki/gateway.crt:/etc/auriga/pki/gateway.crt:ro
+      - ./var/pki/gateway.key:/etc/auriga/pki/gateway.key:ro
+      - network-tokens:/run/auriga-network-token:ro
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/auriga-network-probe',
+          'https://127.0.0.1:18443',
+          '/etc/auriga/network',
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 30
 
   agent:
     build:
@@ -206,6 +254,7 @@ volumes:
   pgdata:
   natsdata:
   internal-tokens:
+  network-tokens:
 
 networks:
   default:

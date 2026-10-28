@@ -51,40 +51,60 @@ export function isTerminalEvidence(state, item) {
  * native acceptances or fully verified server terminal witnesses. A terminal
  * is not a local HostPort acceptance and never authorizes a host invocation.
  * @param {import('../host/ledger.js').LedgerState} state @param {string} cursor */
-export function hasCursorEvidence(state, cursor) {
+export function cursorEvidencePrefix(state, cursor) {
   const durable = state.durable;
-  if (!durable || !/^(0|[1-9][0-9]{0,19})$/.test(cursor)) return false;
+  if (!durable || !isUint64String(cursor)) return null;
   const from = BigInt(durable.resumeCursor),
     to = BigInt(cursor);
-  if (to <= from || to - from > 128n) return false;
-  for (let seq = from + 1n; seq <= to; seq++) {
-    const terminal = durable.terminal?.[String(seq)];
-    if (terminal) {
-      if (
-        terminal.mail_seq !== String(seq) ||
-        !isTerminalEvidence(state, terminal)
-      )
-        return false;
-      continue;
-    }
-    const entries = Object.values(durable.inbound).filter(
-      (value) => value.delivery.mail_seq === String(seq),
-    );
-    if (entries.length !== 1) return false;
-    const r = entries[0],
-      proof = r.receipt?.results?.[0];
-    if (
-      !['accepted', 'committed'].includes(r.stage) ||
-      !r.receipt ||
-      r.receipt.results.length !== 1 ||
-      r.receipt.delivery_id !== r.delivery.delivery_id ||
-      r.receipt.mail_seq !== String(seq) ||
-      proof.recipient_id !== r.recipientId ||
-      proof.host_request_id !== r.recipientId ||
-      proof.message_digest !== r.delivery.source_context.message_digest ||
-      proof.status !== 'host_accepted'
-    )
-      return false;
+  if (to <= from) return durable.resumeCursor;
+  // Index retained entries once. Work stops at the first hole and is bounded
+  // by local evidence, even if the server cursor is near uint64's maximum.
+  const inbound = new Map();
+  for (const r of Object.values(durable.inbound)) {
+    const seq = r.delivery.mail_seq;
+    if (inbound.has(seq)) inbound.set(seq, null);
+    else inbound.set(seq, r);
   }
-  return true;
+  let verified = from;
+  while (verified < to) {
+    const end = verified + 128n < to ? verified + 128n : to;
+    for (let seq = verified + 1n; seq <= end; seq++) {
+      const terminal = durable.terminal?.[String(seq)];
+      if (terminal) {
+        if (
+          terminal.mail_seq !== String(seq) ||
+          !isTerminalEvidence(state, terminal)
+        )
+          return String(seq - 1n);
+        continue;
+      }
+      const r = inbound.get(String(seq));
+      if (!r) return String(seq - 1n);
+      const proof = r.receipt?.results?.[0];
+      if (
+        !['accepted', 'committed'].includes(r.stage) ||
+        !r.receipt ||
+        r.receipt.results.length !== 1 ||
+        r.receipt.delivery_id !== r.delivery.delivery_id ||
+        r.receipt.mail_seq !== String(seq) ||
+        proof.recipient_id !== r.recipientId ||
+        proof.host_request_id !== r.recipientId ||
+        proof.message_digest !== r.delivery.source_context.message_digest ||
+        proof.status !== 'host_accepted'
+      )
+        return String(seq - 1n);
+    }
+    verified = end;
+  }
+  return String(verified);
+}
+
+/** @param {import('../host/ledger.js').LedgerState} state @param {string} cursor */
+export function hasCursorEvidence(state, cursor) {
+  return (
+    !!state.durable &&
+    isUint64String(cursor) &&
+    BigInt(cursor) > BigInt(state.durable.resumeCursor) &&
+    cursorEvidencePrefix(state, cursor) === cursor
+  );
 }

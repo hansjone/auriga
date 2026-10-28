@@ -34,7 +34,7 @@ func sessionFixture(t *testing.T, renew func(context.Context, *nodev1.RenewCerti
 	t.Helper()
 	fw, err := testutil.StartFakeWorkspace(testutil.FakeWorkspaceOpts{Renew: renew})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("start fake workspace: %v", err)
 	}
 	t.Cleanup(fw.Close)
 	dir := filepath.Join(t.TempDir(), "agent")
@@ -42,11 +42,11 @@ func sessionFixture(t *testing.T, renew func(context.Context, *nodev1.RenewCerti
 	defer cancel()
 	mat, err := enroll.Join(ctx, enroll.Options{Server: fw.URL(), Token: fw.Token(), CAFingerprint: fw.CA.Fingerprint(), AgentDir: dir, AllowInsecure: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("enroll test agent: %v", err)
 	}
 	st, err := state.Open(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("open test agent state: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	s := New(Config{AgentDir: dir, Store: st, AllowInsecure: true, RenewCheckEvery: 10 * time.Millisecond, MinBackoff: 80 * time.Millisecond, MaxBackoff: 160 * time.Millisecond, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
@@ -137,10 +137,20 @@ func TestRenewLoopReplacesCertificateAndReconnectLoadsIt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	cfg := s.cfg
-	cfg.OnWelcome = func(*nodev1.Welcome) { cancel() }
+	welcomeReceived := false
+	cfg.OnWelcome = func(*nodev1.Welcome) {
+		welcomeReceived = true
+		cancel()
+	}
 	reconnect := New(cfg)
-	if err := reconnect.runOnce(ctx); !errors.Is(err, context.Canceled) {
+	err = reconnect.runOnce(ctx)
+	if !welcomeReceived {
 		t.Fatalf("reconnect did not reach Welcome: %v", err)
+	}
+	// Cancellation races with the gRPC receive loop: either the context or
+	// the transport can report it after OnWelcome has canceled the session.
+	if !errors.Is(err, context.Canceled) && status.Code(err) != codes.Canceled {
+		t.Fatalf("reconnect did not stop after Welcome cancellation: %v", err)
 	}
 	helloAfter, _, _ := fw.Stats()
 	if helloAfter != helloBefore+1 {

@@ -28,6 +28,10 @@ try {
     try {
       & go build -o (Join-Path $StateDir "bin/$component.exe") .
       if ($LASTEXITCODE -ne 0) { throw "Go build failed: $component" }
+      if ($component -eq 'ai-gateway') {
+        & go build -o (Join-Path $StateDir 'bin/network-broker.exe') github.com/nats-io/nats-server/v2
+        if ($LASTEXITCODE -ne 0) { throw 'Locked network broker build failed' }
+      }
     } finally { Pop-Location }
   }
 } finally { Pop-Location }

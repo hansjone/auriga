@@ -324,122 +324,133 @@ function registrationHost() {
   return { ...host, agent, tools, unload: () => cleanup() };
 }
 
-test('签名终态经生产FETCH落账后，原pending来源操作跨真实运行时重连保持不变', async (t) => {
-  const host = registrationHost();
-  const sources = [],
-    readyRequests = [];
-  let expired = false,
-    firstTerminalPage = true;
-  const f = await fixture(t, {
-    ctx: host.ctx,
-    source: (request) => sources.push(request),
-    ready: (_id, request) => readyRequests.push(request),
-    result(_id, request) {
-      return {
-        producer_epoch: '42',
-        head_seq: expired ? '1' : '0',
-        committed_cursor: expired ? '1' : '0',
-        local_high_water: request.local_high_water,
-        registration_revision: request.registration_revision,
-        status:
-          request.resume_cursor === (expired ? '1' : '0')
-            ? 'ready'
-            : 'recovery_conflict',
-      };
-    },
-    mailbox(request, connection) {
-      const context = { ...request, channel_nonce: connection.nonce };
-      const seal = (frame) =>
-        decodeJson(f.envelope(frame, context, connection));
-      const items =
-        expired && request.resume_cursor === '0'
-          ? [
-              seal({
-                app_version: '1.0',
-                type: 'terminal',
-                epoch: String(connection.id),
-                delivery_id: 'expired-delivery',
-                mail_seq: '1',
-                target_node: { realm: '2', node: '64' },
-                recipients: [
-                  {
-                    recipient_id: 'expired-recipient',
-                    transport_status: 'expired',
-                    state_version: '2',
-                  },
-                ],
-              }),
-            ]
-          : [];
-      // Expiry can commit while the FETCH header still carries the previous
-      // cursor. Reconnect between this durable witness and the next poll.
-      const committedCursor = expired && !firstTerminalPage ? '1' : '0';
-      if (items.length) firstTerminalPage = false;
-      return {
-        app_version: '1.0',
-        type: 'fetch_result',
-        items,
-        page: seal({
+for (const count of [1, 129])
+  test(`${count}条签名终态经生产FETCH落账后，原pending来源操作跨真实运行时重连保持不变`, async (t) => {
+    const cursor = String(count);
+    const host = registrationHost();
+    const sources = [],
+      readyRequests = [];
+    let expired = false,
+      firstTerminalPage = true;
+    const f = await fixture(t, {
+      ctx: host.ctx,
+      source: (request) => sources.push(request),
+      ready: (_id, request) => readyRequests.push(request),
+      result(_id, request) {
+        return {
+          producer_epoch: '42',
+          head_seq: expired ? cursor : '0',
+          committed_cursor: expired ? cursor : '0',
+          local_high_water: request.local_high_water,
+          registration_revision: request.registration_revision,
+          status:
+            request.resume_cursor === (expired ? cursor : '0')
+              ? 'ready'
+              : 'recovery_conflict',
+        };
+      },
+      mailbox(request, connection) {
+        const context = { ...request, channel_nonce: connection.nonce };
+        const seal = (frame) =>
+          decodeJson(f.envelope(frame, context, connection));
+        const offset =
+          request.continuation === null ? 0 : Number(request.continuation);
+        const end = Math.min(offset + 32, count);
+        const items =
+          expired && request.resume_cursor === '0'
+            ? Array.from({ length: end - offset }, (_, index) => {
+                const seq = String(offset + index + 1);
+                return seal({
+                  app_version: '1.0',
+                  type: 'terminal',
+                  epoch: String(connection.id),
+                  delivery_id: 'expired-delivery-' + seq,
+                  mail_seq: seq,
+                  target_node: { realm: '2', node: '64' },
+                  recipients: [
+                    {
+                      recipient_id: 'expired-recipient-' + seq,
+                      transport_status: 'expired',
+                      state_version: '2',
+                    },
+                  ],
+                });
+              })
+            : [];
+        // Expiry can commit while the FETCH header still carries the previous
+        // cursor. Reconnect between this durable witness and the next poll.
+        const committedCursor = expired && !firstTerminalPage ? cursor : '0';
+        if (items.length && end === count) firstTerminalPage = false;
+        return {
           app_version: '1.0',
-          type: 'fetch_page',
-          epoch: String(connection.id),
-          request_id: request.request_id,
-          head_seq: expired ? '1' : '0',
-          snapshot_head: expired ? '1' : '0',
-          scan_after: expired ? '1' : '0',
-          committed_cursor: committedCursor,
-          next_continuation: null,
-          manifest: items.map((item) => ({
-            item_type: 'terminal',
-            mail_seq: item.mail_seq,
-            digest: digest(item),
-          })),
-        }),
-      };
-    },
+          type: 'fetch_result',
+          items,
+          page: seal({
+            app_version: '1.0',
+            type: 'fetch_page',
+            epoch: String(connection.id),
+            request_id: request.request_id,
+            head_seq: expired ? cursor : '0',
+            snapshot_head: expired ? cursor : '0',
+            scan_after: expired ? String(end) : '0',
+            committed_cursor: committedCursor,
+            next_continuation: items.length && end < count ? String(end) : null,
+            manifest: items.map((item) => ({
+              item_type: 'terminal',
+              mail_seq: item.mail_seq,
+              digest: digest(item),
+            })),
+          }),
+        };
+      },
+    });
+    f.prepared.submit = async () => {
+      throw new Error('no HTTPS send in this fixture');
+    };
+    await f.runtime.start();
+    await waitFor(
+      () => host.tools.has('auriga_network_join'),
+      'join installed',
+    );
+    await host.tools
+      .get('auriga_network_join')
+      .execute({}, { agent: host.agent });
+    await waitFor(() => sources.length > 0, 'pending source recorded');
+    expired = true;
+    await waitFor(
+      () => f.ledger.snapshot().durable.terminal?.[cursor],
+      'signed terminal evidence committed',
+    );
+    const before = f.ledger.snapshot();
+    assert.equal(before.durable.resumeCursor, '0');
+    assert.equal(Object.keys(before.durable.inbound).length, 0);
+    const transport = f.connections.at(-1);
+    transport.transition('reconnecting', transport.epoch);
+    transport.transition('ready', transport.epoch + 1);
+    await waitFor(
+      () => f.runtime.status.connected || !f.runtime.status.available,
+      'strict READY completed',
+    );
+    assert.equal(f.runtime.status.connected, true);
+    assert.equal(
+      f.connections.length,
+      3,
+      'conflict C must close before fresh strict READY',
+    );
+    assert.equal(transport.state, 'stopped');
+    assert.equal(readyRequests.at(-1).resume_cursor, cursor);
+    assert.equal(f.ledger.snapshot().durable.resumeCursor, cursor);
+    assert.equal(Object.keys(before.durable.terminal).length, count);
+    await waitFor(() => sources.length > 1, 'original pending source resumed');
+    assert.equal(sources[1].operation_id, sources[0].operation_id);
+    const after = f.ledger.snapshot();
+    assert.deepEqual(
+      after.sourceControl.operations,
+      before.sourceControl.operations,
+    );
+    assert.deepEqual(after.durable.terminal, before.durable.terminal);
+    assert.equal(host.calls.filter((v) => v[0] === 'prompt').length, 0);
   });
-  f.prepared.submit = async () => {
-    throw new Error('no HTTPS send in this fixture');
-  };
-  await f.runtime.start();
-  await waitFor(() => host.tools.has('auriga_network_join'), 'join installed');
-  await host.tools
-    .get('auriga_network_join')
-    .execute({}, { agent: host.agent });
-  await waitFor(() => sources.length > 0, 'pending source recorded');
-  expired = true;
-  await waitFor(
-    () => f.ledger.snapshot().durable.terminal?.['1'],
-    'signed terminal evidence committed',
-  );
-  const before = f.ledger.snapshot();
-  assert.equal(before.durable.resumeCursor, '0');
-  assert.equal(Object.keys(before.durable.inbound).length, 0);
-  const transport = f.connections.at(-1);
-  transport.transition('reconnecting', transport.epoch);
-  transport.transition('ready', transport.epoch + 1);
-  await waitFor(
-    () => f.runtime.status.connected || !f.runtime.status.available,
-    'strict READY completed',
-  );
-  assert.equal(f.runtime.status.connected, true);
-  assert.equal(
-    f.connections.length,
-    3,
-    'conflict C must close before fresh strict READY',
-  );
-  assert.equal(transport.state, 'stopped');
-  assert.equal(readyRequests.at(-1).resume_cursor, '1');
-  await waitFor(() => sources.length > 1, 'original pending source resumed');
-  assert.equal(sources[1].operation_id, sources[0].operation_id);
-  const after = f.ledger.snapshot();
-  assert.deepEqual(
-    after.sourceControl.operations,
-    before.sourceControl.operations,
-  );
-  assert.deepEqual(after.durable.terminal, before.durable.terminal);
-  assert.equal(host.calls.filter((v) => v[0] === 'prompt').length, 0);
-});
 
 test('正常生产收件与终态重连共用文件账本，回执及重连后的正常收件同时成立', async (t) => {
   const host = registrationHost();

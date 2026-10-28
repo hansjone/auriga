@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -101,6 +102,10 @@ func main() {
 		fatalf("%v", err)
 	}
 	generateIdentityMaterials(*out)
+	rpc := map[string]string{"Target": fmt.Sprintf("127.0.0.1:%d", iamRPCPort), "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": iamServerName}
+	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{Root: "/etc/auriga/network", SubmitListen: "0.0.0.0:18443", BrokerHost: "127.0.0.1", BrokerURL: "tls://127.0.0.1:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil {
+		fatalf("generate network deployment: %v", err)
+	}
 	pub, fp, _, err := readIdentityPublic(*out)
 	if err != nil {
 		fatalf("%v", err)
@@ -178,14 +183,16 @@ func main() {
 		"accessConfigFile":  "/etc/auriga/access.json",
 		"allowLocalIngress": true,
 		"upstreams": map[string]string{
-			"iam":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
-			"org":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
-			"workspace": fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"network-submit": "https://host.docker.internal:18443",
+			"iam":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"org":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"workspace":      fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
 		},
 		"iamHop": map[string]string{
 			"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key",
 			"caFile": "/etc/auriga/pki/ca.crt", "serverName": iamServerName,
 		},
+		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/network-edge/edge.pem", "keyFile": "/etc/auriga/network-edge/edge.key", "caFile": "/etc/auriga/network-edge/server-ca.pem", "serverName": "submit.network.internal"},
 		"iamRpc": map[string]any{
 			"address":    fmt.Sprintf("host.docker.internal:%d", iamRPCPort),
 			"serverName": iamServerName, "timeoutMillis": 2000,
@@ -393,6 +400,9 @@ func generateIdentityMaterials(out string) {
 		[]string{edgeHopDNSName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
 	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o400)
+	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-compose", "auriga://ai-gateway/compose", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "gateway.crt"), gatewayCert, 0o644)
+	writeFile(filepath.Join(pki, "gateway.key"), gatewayKey, 0o400)
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		fatalf("%v", err)

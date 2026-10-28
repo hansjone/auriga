@@ -402,6 +402,35 @@ class NetworkDirectoryPostgresTest {
   }
 
   @Test
+  void policyFilteringUsesOnlyCanonicalPairsAndCurrentCallerSources() {
+    node(tenant, "2", account, UUID.randomUUID(), false);
+    node(tenant, "3", UUID.randomUUID(), UUID.randomUUID(), false);
+    node(tenant, "4", account, UUID.randomUUID(), true);
+    TenantContext.run(
+        tenant,
+        () -> {
+          policy("2", "3", false);
+          policy("3", "2", false);
+          policy("4", "1", false);
+          policy("01", "1", false);
+          policy("1", "1:extra", false);
+          assertEquals(
+              List.of(address("1"), address("2")),
+              directory.list(50, "").getItemsList().stream()
+                  .map(NetworkSystemEntry::getSystemAddress)
+                  .toList());
+          user(PrincipalType.DEVICE, TokenContext.DEVICE, tenant);
+          assertEquals(
+              List.of(address("1"), address("2"), address("3")),
+              directory.list(50, "").getItemsList().stream()
+                  .map(NetworkSystemEntry::getSystemAddress)
+                  .toList());
+          policy("1", "3", false);
+          assertEquals(2, directory.list(50, "").getItemsCount());
+        });
+  }
+
+  @Test
   void massivePolicyFilteringReturnsBoundedPartialPagesWithProgressingCursor() {
     // More than one scan window is denied by node policy, without scanning to tenant end.
     TenantContext.run(
@@ -434,11 +463,23 @@ class NetworkDirectoryPostgresTest {
               });
           var first = directory.list(200, "");
           assertEquals(0, first.getItemsCount());
-          assertFalse(first.getNextCursor().isEmpty());
+          assertEquals(
+              tenant + ":1000",
+              new String(
+                  Base64.getUrlDecoder().decode(first.getNextCursor()),
+                  java.nio.charset.StandardCharsets.US_ASCII));
           var second = directory.list(200, first.getNextCursor());
           assertEquals(1, second.getItemsCount());
           assertEquals(address("3ea"), second.getItems(0).getSystemAddress());
           assertTrue(second.getNextCursor().isEmpty());
+          // Portal checks every owned source; device callers only check their authenticated did.
+          policy("1001", "1002", false);
+          assertEquals(0, directory.list(200, first.getNextCursor()).getItemsCount());
+          user(PrincipalType.DEVICE, TokenContext.DEVICE, tenant);
+          var devicePage = directory.list(200, first.getNextCursor());
+          assertEquals(1, devicePage.getItemsCount());
+          assertEquals(address("3ea"), devicePage.getItems(0).getSystemAddress());
+          assertTrue(devicePage.getNextCursor().isEmpty());
         });
   }
 }

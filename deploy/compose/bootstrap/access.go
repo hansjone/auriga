@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
@@ -27,6 +28,13 @@ var identityMaterialFiles = []string{
 	"access.json", "iam-healthcheck.sh", "iam-client.json", "heartbeat-observer.json",
 	"edge.config.json", "access.env", "agent-policy.yaml",
 	"runtime-keys/root.pb",
+	"pki/gateway.crt", "pki/gateway.key",
+}
+
+func init() {
+	for _, name := range append(append([]string{}, networkdeploy.Files...), networkdeploy.CredentialFiles...) {
+		identityMaterialFiles = append(identityMaterialFiles, "network/"+name)
+	}
 }
 
 func writeComposeKeys(out string) error {
@@ -87,7 +95,7 @@ func validateComposeKeys(raw []byte) error {
 }
 
 func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet, error) {
-	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys"}}
+	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "network"}}
 	entries, err := os.ReadDir(filepath.Join(out, "templates"))
 	if err != nil {
 		return set, err

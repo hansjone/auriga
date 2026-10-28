@@ -92,7 +92,7 @@ services:
       - /tmp:size=64m,mode=1777
       - /app/tmp:size=32m,mode=1777
     user: "10001:10001"
-    group_add: ["65532"]
+    group_add: ["65532", "65533"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,7 +110,7 @@ services:
       AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
       AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
-      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties
+      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties,file:/etc/auriga/network/platform.properties
       AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: "true"
       AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE: /run/auriga-installation/edge.secret
       AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
@@ -119,7 +119,7 @@ services:
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
       AURIGA_GRPC_SERVER_TLS_PRIVATE_KEY: /etc/auriga/pki/iam.key
       AURIGA_GRPC_SERVER_TLS_TRUST_CERT_COLLECTION: /etc/auriga/pki/ca.crt
-      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge
+      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
       AURIGA_PLATFORM_PORT: "8081"
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+UseContainerSupport
@@ -129,6 +129,8 @@ services:
       - ${AURIGA_DATA_ROOT}/config/materials/iam-healthcheck.sh:/etc/auriga/iam-healthcheck.sh:ro
       - ${AURIGA_DATA_ROOT}/config/materials/iam-installation:/run/auriga-installation:ro
       - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal
+      - ${AURIGA_DATA_ROOT}/config/materials/network:/etc/auriga/network:ro
+      - ${AURIGA_DATA_ROOT}/network-tokens:/run/auriga-network-token
       - ${AURIGA_DATA_ROOT}/config/materials/pki:/etc/auriga/pki:ro
       - ${AURIGA_DATA_ROOT}/config/materials/templates:/etc/auriga/templates:ro
       - ${AURIGA_DATA_ROOT}/config/materials/runtime-keys:/etc/auriga/runtime-keys:ro
@@ -166,6 +168,8 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      network:
+        condition: service_healthy
     command: ["-config", "/etc/auriga/edge.config.json"]
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/edge.env
@@ -192,6 +196,50 @@ services:
     mem_limit: 256m
     cpus: 0.25
     pids_limit: 128
+
+  network-broker:
+    image: ${AURIGA_IMAGE_EDGE}
+    <<: *cap_drop_all
+    user: '10001:10001'
+    restart: unless-stopped
+    read_only: true
+    entrypoint: ['/auriga-network-broker']
+    command: ['-c', '/etc/auriga/network/broker.conf']
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/materials/network:/etc/auriga/network:ro
+    networks: [internal]
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+
+  network:
+    image: ${AURIGA_IMAGE_EDGE}
+    <<: *cap_drop_all
+    user: '10001:10001'
+    restart: unless-stopped
+    read_only: true
+    entrypoint: ['/auriga-ai-gateway']
+    command: ['--network-config', '/etc/auriga/network/runtime.json']
+    depends_on:
+      platform:
+        condition: service_healthy
+      network-broker:
+        condition: service_started
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/materials/network:/etc/auriga/network:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.crt:/etc/auriga/pki/gateway.crt:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.key:/etc/auriga/pki/gateway.key:ro
+      - ${AURIGA_DATA_ROOT}/network-tokens:/run/auriga-network-token:ro
+    networks: [internal]
+    healthcheck:
+      test: ['CMD', '/auriga-network-probe', 'https://127.0.0.1:18443', '/etc/auriga/network']
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
 
   agent:
     image: ${AURIGA_IMAGE_AGENT}

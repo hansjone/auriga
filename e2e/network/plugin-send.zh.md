@@ -32,6 +32,10 @@ FETCH 的 terminal 条目按契约表示服务端已终结的邮件，不含正�
 manifest 和原终态，核目标 realm/node/incarnation、正序号/版本、唯一 recipient 及终态枚举，
 保留原签名条目且禁止改写；只在连续前缀均有本机接受或终态证据后保存服务端 committed_cursor。
 分页期间仍使用原 resume_cursor，不把 scan_after/snapshot_head 当确认，也不跨越 gap/held/paused。
+每页完整验签并保存证据、校验continuation后，立即持久推进服务端确认范围内的连续前缀；
+仍保留每轮128页上限。到达上限时已完成的前缀不丢失，下一轮从新resume_cursor、
+空continuation开始；本轮后续分页仍使用本轮原resume_cursor，不把新游标混入旧续页token。
+缺口后的证据可保留，但不能提前确认；最终页仍要求与服务端确认游标之间没有证据缺口。
 终态不会进入 HostPort、不会产生本机接受证明或 RECEIPT；receive_none 不阻止保存无正文的服务端终态。
 该路径修复 SEND-2 短 TTL 邮件被 SEND-3 定期 FETCH 过期后，插件丢弃终态导致重连游标冲突的回归。
 
@@ -40,6 +44,21 @@ manifest 和原终态，核目标 realm/node/incarnation、正序号/版本、�
 持续错误仍失败关闭。插件组合用例共用真实文件账本，验证正常持久收件、终态保留/严格重连、
 重连后再次正常收件同时成立。真实链失败另存`*-runtime.json`的状态与有界文件错误码/修订号，
 以区分协议拒绝、宿主失败和文件替换失败；不降低原断言或将未知写入当作成功。
+
+同页收件按recipient隔离会话异常：关闭接收或provider失败不阻止健康会话及后续分页，
+失败邮件保留原身份，游标仍不能越过尚无接受/终态证据的邮件。已验证连续前缀按128条分段检查，
+超过128条不会被永久拒绝；遇缺口仅保存缺口之前的完整前缀，READY仍须全部证据齐备才能换C恢复。
+pending接收设置与已接受回执也逐项恢复；原会话卸载时保留原request_id/registration/版本，
+收发工具和健康会话继续可用。本地messaging快照及运行时诊断的failures最多保留128项
+scope/id/固定原因码，不记录远端错误原文；会话恢复后可经原设置入口按原请求对账并清除诊断。
+连接退役或账本写入结果未知仍整体失败关闭，不作为可隔离的单会话异常。
+
+SEND-2传输探针与SEND-3自动收件复用同一连接，探针可能在生产FETCH在途时收到
+合法的request-scope overloaded。探针独立使用固定设备配置的根、正式公告/公钥集和私有文件缓存，
+通过生产mailbox client完整验签并执行原期限内、最多5次的同字节重试；坏签名、异受众、
+取消或持续过载仍失败，不把错误当作FETCH成功，也不改原受理/正文/版本/跨身份断言。
+插件层另验证HEAD/定时/接收开关同时触发时合并轮询、同连接pull及续页串行，
+不是通过暂停自动接收或增大服务端并发来消除驱动竞争。
 
 ## 验证入口
 
@@ -66,6 +85,17 @@ Control 保留 T3b/T4 与 SEND-2 的原断言，增加真实 ToolRuntime→生�
 每个仅承担传输的provider配置platformOrigin/issuer为其自身固定origin，不沿用另一个
 端口的配置。该辅助配置不执行登录、发现公钥或验证/改写JWT；getDevice仍交付原IAM令牌，
 gateway仍按原IAM authority验签鉴权。产品对issuer的scheme/host/port严格同源校验保留。
+隔离驱动在 SEND-3 子进程中为精确 submit origin/path 安装专用 mTLS fetch 传输适配，
+复用 source-assembly 生成的客户端证书、独立服务端 CA 和固定服务端名。生产
+device-provider 的 getDevice、身份一致性检查、Bearer、15 秒期限、取消、64 KiB 响应限制、
+严格解析和 HTTP 拒绝分类照常执行；响应通过真实 HTTPS stream 交回生产读取逻辑。
+其它 fetch（包括 IAM 请求）继续使用原传输；结束时按所有权恢复原 fetch。
+两端仍走同一生产 ToolRuntime、发件箱/收件箱及同一套 Control/反证，证书不会替代设备身份。
+
+精确 HEAD archive 的宿主安装沿 main 的持久公共 npm 缓存机制：可用绝对路径
+`AURIGA_DSH_HOST_NPM_CACHE` 指定共享缓存；独立 profile、凭据、npmrc 和工作目录保持隔离。
+`host-install-cache.test.mjs` 验证缓存复用和冷缓存超时诊断；真正宿主安装及 PG 全链仍须重跑
+下述 `-Run`，不能用缓存单测或 `-CompileOnly` 代替。
 recipient快照只新增host_request_id投影：按tenant/recipient/delivery及system或session接受阶段，
 读取同一只读/RLS快照内network_acceptance_proof.proof_json的已持久字段。生产回执事务
 原本已保存该证明，recipient表自身没有此列；缺证明返回null，错误ID保留原值，

@@ -6,7 +6,7 @@ import { verifyFetchPage } from '../session/page.js';
 import { digest } from '../trust/verifier.js';
 import { isUint64String } from '../host/address.js';
 import { canonicalize } from '../trust/jcs.js';
-import { hasCursorEvidence, isTerminalEvidence } from './recovery.js';
+import { cursorEvidencePrefix, isTerminalEvidence } from './recovery.js';
 
 /** Explicit, same-tenant ordinary-session intake. HostPort is the public native
  * adapter; it proves provider acceptance before any host_accepted receipt.
@@ -22,10 +22,38 @@ export function createDurableInbox({
   now = Date.now,
 }) {
   const locks = createKeyedMutex();
+  /** @type {Map<string,{scope:string,id:string,code:string}>} */
+  const failures = new Map();
   const current = () => {
     assertCurrent();
     ledger.assertAvailable();
   };
+  /** Keep failures local to their item; a retired connection or unavailable
+   * ledger must still stop all work. Diagnostics never include remote text.
+   * @param {string} scope @param {string} id @param {()=>Promise<unknown>} run */
+  async function isolate(scope, id, run) {
+    const key = scope + ':' + id;
+    try {
+      await run();
+      failures.delete(key);
+    } catch (error) {
+      current();
+      const message = error instanceof Error ? error.message : '';
+      const code = [
+        'receive_none',
+        'network.local_registration_required',
+        'native binding changed',
+        'host durable acceptance unavailable',
+        'invalid receive result',
+      ].includes(message)
+        ? message
+        : 'network.outcome_unknown';
+      failures.delete(key);
+      failures.set(key, { scope, id, code });
+      const oldest = failures.keys().next().value;
+      if (failures.size > 128 && oldest !== undefined) failures.delete(oldest);
+    }
+  }
   /** @param {string} local @param {boolean} [receiving] */
   function native(local, receiving = false) {
     current();
@@ -48,9 +76,9 @@ export function createDurableInbox({
         state.durable.receive[local].pending?.enabled === false)
     )
       throw new Error('receive_none');
-    const token = registrationSession(ctx, {
-      agent: ctx.agents.get(b.hostSessionId),
-    });
+    const agent = ctx.agents.get(b.hostSessionId);
+    if (!agent) throw new Error('network.local_registration_required');
+    const token = registrationSession(ctx, { agent });
     if (token.id !== b.hostSessionId || token.cwd !== b.cwd)
       throw new Error('native binding changed');
     return { b, r, token };
@@ -119,6 +147,7 @@ export function createDurableInbox({
           ? 'thread_messages'
           : 'receive_none';
       }, check);
+      failures.delete('receive:' + local);
       return { local, enabled, version: result.state_version };
     });
   }
@@ -169,17 +198,17 @@ export function createDurableInbox({
         // disabled or the native session closes. This path never invokes it.
         return commitReceipt(id, accepted.delivery);
       }
-      const n = native(wire.local, true);
-      const check = () => {
+      const n = native(wire.local);
+      const checkIdentity = () => {
+        current();
         n.token.check();
-        native(wire.local, true);
         if (
           ledger.peek().bindings[wire.local]?.bindingId !== n.b.bindingId ||
           now() >= Date.parse(m.expires_at)
         )
           throw new Error('recipient fenced or expired');
       };
-      check();
+      checkIdentity();
       const previous = ledger.peek().durable?.inbound[id];
       if (
         previous &&
@@ -205,7 +234,14 @@ export function createDurableInbox({
             admission: null,
             receipt: null,
           };
-        }, check);
+        }, checkIdentity);
+      // Retain verified mail before enforcing the receive switch. A disabled
+      // session cannot invoke HostPort, but its item remains available to retry.
+      const check = () => {
+        checkIdentity();
+        native(wire.local, true);
+      };
+      check();
       let r = ledger.peek().durable?.inbound[id];
       if (!r || r.stage === 'committed') return;
       if (r.stateVersion !== wire.state_version && r.stage !== 'accepted')
@@ -362,12 +398,8 @@ export function createDurableInbox({
     await ledger.update((draft) => {
       if (!draft.durable) throw new Error('durable unavailable');
       draft.durable.inbound[id].stage = 'committed';
-      if (
-        BigInt(committed.committed_cursor) >
-          BigInt(draft.durable.resumeCursor) &&
-        hasCursorEvidence(draft, committed.committed_cursor)
-      )
-        draft.durable.resumeCursor = committed.committed_cursor;
+      const prefix = cursorEvidencePrefix(draft, committed.committed_cursor);
+      if (prefix !== null) draft.durable.resumeCursor = prefix;
     }, current);
   }
   /** Call only after verifying the complete FETCH header, manifest and item.
@@ -392,16 +424,20 @@ export function createDurableInbox({
     }, current);
   }
   /** Only a server-confirmed prefix with complete retained evidence can move.
-   * @param {string} cursor */
-  async function advanceCursor(cursor) {
+   * @param {string} cursor @param {boolean} [complete] */
+  async function advanceCursor(cursor, complete = true) {
     if (!isUint64String(cursor)) throw new Error('invalid committed cursor');
     if (BigInt(cursor) <= BigInt(ledger.peek().durable?.resumeCursor ?? '0'))
       return;
-    await ledger.update((draft) => {
-      if (!draft.durable || !hasCursorEvidence(draft, cursor))
-        throw new Error('mailbox cursor evidence missing');
-      draft.durable.resumeCursor = cursor;
-    }, current);
+    const prefix = cursorEvidencePrefix(ledger.peek(), cursor);
+    if (prefix !== null && prefix !== ledger.peek().durable?.resumeCursor)
+      await ledger.update((draft) => {
+        if (!draft.durable || cursorEvidencePrefix(draft, cursor) !== prefix)
+          throw new Error('mailbox cursor evidence changed');
+        draft.durable.resumeCursor = prefix;
+      }, current);
+    if (complete && prefix !== cursor)
+      throw new Error('mailbox cursor evidence missing');
   }
   async function pull() {
     return locks.run('fetch', async () => {
@@ -445,19 +481,28 @@ export function createDurableInbox({
           );
         for (const item of page.items) {
           if (item.type === 'terminal') await retainTerminal(item);
-          else await deliver(item);
+          else
+            await isolate(
+              'recipient',
+              item.recipients?.[0]?.recipient_id ?? item.delivery_id,
+              () => deliver(item),
+            );
         }
         if (!isUint64String(response.page.committed_cursor))
           throw new Error('invalid committed cursor');
         if (BigInt(response.page.committed_cursor) > BigInt(committedCursor))
           committedCursor = response.page.committed_cursor;
         const next = response.page.next_continuation;
-        if (next === null) {
-          await advanceCursor(committedCursor);
-          return;
-        }
-        if (typeof next !== 'string' || !next || seen.has(next))
+        if (
+          next !== null &&
+          (typeof next !== 'string' || !next || seen.has(next))
+        )
           throw new Error('invalid FETCH continuation');
+        // Retain progress even when this bounded pull cannot reach the last
+        // page. A later pull starts from the durable prefix with no token;
+        // this pull keeps its original resume for every continuation request.
+        await advanceCursor(committedCursor, next === null);
+        if (next === null) return;
         seen.add(next);
         continuation = next;
       }
@@ -468,6 +513,7 @@ export function createDurableInbox({
     setReceive,
     pull,
     deliver,
+    failures: () => [...failures.values()],
     snapshot() {
       current();
       return Object.values(ledger.peek().bindings).flatMap((b) => {
@@ -493,9 +539,13 @@ export function createDurableInbox({
       for (const [local, value] of Object.entries(
         ledger.peek().durable?.receive ?? {},
       ))
-        if (value.pending) await setReceive(local, value.pending.enabled);
+        if (value.pending)
+          await isolate('receive', local, () =>
+            setReceive(local, value.pending.enabled),
+          );
       for (const r of Object.values(ledger.peek().durable?.inbound ?? {}))
-        if (r.stage === 'accepted') await deliver(r.delivery);
+        if (r.stage === 'accepted')
+          await isolate('recipient', r.recipientId, () => deliver(r.delivery));
     },
   };
 }

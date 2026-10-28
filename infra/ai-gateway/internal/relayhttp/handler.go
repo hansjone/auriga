@@ -245,6 +245,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(errors.New("common.validation_failed"))
 		return
 	}
+	// GET has no body left to read. net/http's background disconnect read
+	// shares this deadline; letting it expire would cancel the active query
+	// (including authorization RPCs) during normal operation or shutdown drain.
+	_ = s.rc.SetReadDeadline(time.Time{})
 	ctx, cancel := context.WithTimeout(r.Context(), h.c.QueryTimeout)
 	defer cancel()
 	if path == modelsPath {

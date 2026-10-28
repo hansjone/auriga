@@ -36,6 +36,7 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		AccessConfigFile string            `json:"accessConfigFile"`
 		Upstreams        map[string]string `json:"upstreams"`
 		IAMHop           map[string]string `json:"iamHop"`
+		NetworkSubmitHop map[string]string `json:"networkSubmitHop"`
 		IAMRPC           struct {
 			Address, ServerName, ServiceTokenFile string
 			TimeoutMillis                         int
@@ -47,6 +48,19 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	}
 	if edge.AccessConfigFile != "/etc/auriga/access.json" {
 		t.Fatal("edge must load shared access.json")
+	}
+	if edge.Upstreams["network-submit"] != "https://host.docker.internal:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] {
+		t.Fatal("submit must use an independent HTTPS listener and trust material")
+	}
+	var network struct {
+		SubmitHTTP struct{ ClientCAFile, TLSCertFile, TLSKeyFile, Listen string }
+		IAM        struct{ ServiceTokenFile string }
+	}
+	if err := json.Unmarshal(read("network/runtime.json"), &network); err != nil {
+		t.Fatal(err)
+	}
+	if network.SubmitHTTP.ClientCAFile != "/etc/auriga/network/client-ca.pem" || network.SubmitHTTP.Listen != "0.0.0.0:18443" || network.IAM.ServiceTokenFile != "/run/auriga-network-token/gateway/service.jwt" {
+		t.Fatal("incomplete network runtime configuration")
 	}
 	for _, service := range []string{"iam", "org", "workspace"} {
 		port := iamPort

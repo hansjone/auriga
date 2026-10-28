@@ -93,6 +93,11 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		return
 	}
 	preview := target == g.orgURL && r.Method == http.MethodGet && invitationPreviewPath.MatchString(r.URL.Path)
+	// A second decoder upstream must not turn an anonymous code into separators or dot segments.
+	if preview && strings.Contains(strings.ToLower(r.URL.EscapedPath()), "%25") {
+		fail(http.StatusBadRequest, "edge.bad_path")
+		return
+	}
 	public := preview || iam && (loginOperation(r) || protocolOperation(r))
 	raw, cookieOK := singleCookie(r, cookieName(e.scheme == "https", sessionCookieBase(audience)))
 	count := 0
