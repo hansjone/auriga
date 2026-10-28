@@ -1,9 +1,10 @@
 // SEND-2 transport acceptance only. No host prompt, receipt proof or model call.
-/* global fetch, AbortSignal */
+/* global AbortSignal */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { postSubmit } from './gateway-submit.mjs';
 import { createFileLedgerStore } from '../../../clients/dsh-plugin/src/network/host/store.js';
 import { requestAssemblyMailbox } from './assembly-mailbox.mjs';
 
@@ -100,19 +101,8 @@ export async function gatewaySend({
 
   const device = JSON.parse(await readFile(config.device, 'utf8'));
   const otherDevice = JSON.parse(await readFile(config.externalDevice, 'utf8'));
-  const post = async (body, token = device.access_token, headers = {}) => {
-    const response = await fetch(gateway.https + '/api/ai/v1/network/submit', {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        ...headers,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    });
-    return { status: response.status, body: await response.text() };
-  };
+  const post = (body, token = device.access_token, headers = {}) =>
+    postSubmit(gateway, body, token, headers);
   const request = {
     kind: 'message',
     intent: 'information',

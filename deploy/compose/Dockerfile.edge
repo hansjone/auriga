@@ -33,9 +33,18 @@ WORKDIR /src/infra
 COPY infra/ ./
 WORKDIR /src/infra/edge
 RUN CGO_ENABLED=0 go build -o /out/auriga-edge .
+WORKDIR /src/infra/ai-gateway
+RUN CGO_ENABLED=0 go build -o /out/auriga-ai-gateway . \
+  && CGO_ENABLED=0 go build -o /out/auriga-network-broker github.com/nats-io/nats-server/v2
+WORKDIR /src/deploy/bootstrap
+COPY deploy/bootstrap/ ./
+RUN CGO_ENABLED=0 go build -o /out/auriga-network-probe ./cmd/network-probe
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/auriga-edge /auriga-edge
+COPY --from=build /out/auriga-ai-gateway /auriga-ai-gateway
+COPY --from=build /out/auriga-network-broker /auriga-network-broker
+COPY --from=build /out/auriga-network-probe /auriga-network-probe
 COPY --from=web /src/web/portal/dist /srv/auriga/static/portal
 COPY --from=web /src/web/admin/dist /srv/auriga/static/admin
 ENV AURIGA_EDGE_STATIC_PORTAL=/srv/auriga/static/portal \

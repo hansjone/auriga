@@ -20,6 +20,7 @@ import { prepareDevice, assemblyDeviceProvider } from './assembly-device.mjs';
 import { assertReadyReplacement } from './assembly-ready.mjs';
 import { describeBusinessFailure } from './assembly-failure.mjs';
 import { gatewaySend } from './gateway-send.mjs';
+import { installSubmitFetch } from './gateway-submit.mjs';
 import { assemblyMailboxTransport } from './assembly-mailbox.mjs';
 import { pluginSend } from './plugin-send.mjs';
 
@@ -76,6 +77,7 @@ const natives = [];
 const checks = [];
 const privateValues = [];
 let phase = 'initialization';
+let restoreSubmitFetch;
 let snapshotIndex = 0;
 async function snapshot(label) {
   const result = (await control({ op: 'snapshot' })).tables;
@@ -370,6 +372,8 @@ function delivery(source, observation, connection, target) {
 }
 
 try {
+  if (process.env.AURIGA_PLUGIN_SEND === '1')
+    restoreSubmitFetch = installSubmitFetch(gateway);
   emit({ stage: 'native-process', ...(await currentNativeProcess()) });
   const member = await endpoint('member', config.device);
   const external = await endpoint('external', config.externalDevice);
@@ -772,6 +776,13 @@ try {
     }
   }
   input.close();
+  if (restoreSubmitFetch) {
+    try {
+      restoreSubmitFetch();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
   emit({ stage: 'native-closed', complete: cleanupErrors.length === 0 });
   if (cleanupErrors.length) process.exitCode = 1;
 }

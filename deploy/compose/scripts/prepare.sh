@@ -96,6 +96,29 @@ else
   sudo -n chgrp 65532 "$VAR/pki/edge-iam.key"
 fi
 chmod 640 "$VAR/pki/edge-iam.key"
+# Edge receives only its submit client identity and the submit server CA.
+# The broker passwords, server keys and gateway installation credential remain private.
+if [ -e "$VAR/network-edge" ] || [ -L "$VAR/network-edge" ]; then
+  [ -d "$VAR/network-edge" ] && [ ! -L "$VAR/network-edge" ] \
+    || { echo 'invalid network edge material directory' >&2; exit 1; }
+else
+  mkdir "$VAR/network-edge"
+fi
+chmod 750 "$VAR/network-edge"
+for name in edge.pem edge.key server-ca.pem; do
+  if [ -e "$VAR/network-edge/$name" ] || [ -L "$VAR/network-edge/$name" ]; then
+    [ -f "$VAR/network-edge/$name" ] && [ ! -L "$VAR/network-edge/$name" ] && [ "$(stat -c '%h' "$VAR/network-edge/$name")" = 1 ] && cmp -s "$VAR/network/$name" "$VAR/network-edge/$name" \
+      || { echo 'existing network edge material differs; refusing rotation' >&2; exit 1; }
+  else
+    (umask 077; cp -- "$VAR/network/$name" "$VAR/network-edge/$name")
+  fi
+  chmod 640 "$VAR/network-edge/$name"
+done
+if [ "$(id -u)" -eq 0 ]; then
+  chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem"
+else
+  sudo -n chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem"
+fi
 chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/identity-signing-keys.json" "$VAR/identity-keys.json" \
   "$VAR/edge.config.json" || true

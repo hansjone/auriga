@@ -1,6 +1,8 @@
+/* global fetch, AbortSignal */
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import https from 'node:https';
 import { randomBytes, createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -78,6 +80,17 @@ export function assertExternal(state) {
 export function configuration(state, manifest, secrets) {
   const p = (name) => unix(path.join(state, name));
   const { ports, database, roles } = manifest;
+  if (
+    ['networkSubmit', 'networkBroker', 'networkWebsocket'].some(
+      (name) =>
+        !Number.isSafeInteger(ports[name]) ||
+        ports[name] < 1 ||
+        ports[name] > 65535,
+    )
+  )
+    throw new Error(
+      'Network ports are missing; use a fresh private Beta StateDir',
+    );
   const origin = (port) => ({ scheme: 'http', host: '127.0.0.1', port });
   const issuer = `http://127.0.0.1:${ports.portal}`;
   const jdbc = (schema) =>
@@ -173,6 +186,12 @@ export function configuration(state, manifest, secrets) {
       serviceTokenFile: p('edge-token/service.jwt'),
     },
     aiAdminHop: { allowLoopbackHttp: true },
+    networkSubmitHop: {
+      certFile: p('network/edge.pem'),
+      keyFile: p('network/edge.key'),
+      caFile: p('network/server-ca.pem'),
+      serverName: 'submit.network.internal',
+    },
     nodeTLS: {
       certFile: p('tls/edge.pem'),
       keyFile: p('tls/edge.key'),
@@ -183,6 +202,7 @@ export function configuration(state, manifest, secrets) {
       org: `http://127.0.0.1:${ports.platform}`,
       workspace: `http://127.0.0.1:${ports.platform}`,
       'ai-admin': `http://127.0.0.1:${ports.ai}`,
+      'network-submit': `https://127.0.0.1:${ports.networkSubmit}`,
     },
     static: { portalRoot: p('static/portal'), adminRoot: p('static/admin') },
   };
@@ -212,7 +232,20 @@ export function configuration(state, manifest, secrets) {
     directory: path.join(state, 'session-projections'),
     tenantId: tenant,
   };
-  return { access, platform, edge, ai, sessionKV };
+  platform['auriga.iam.network.server-audiences'] = ['auriga-network'];
+  platform['auriga.iam.network.client-server-audience'] = 'auriga-network';
+  const networkOptions = {
+    root: p('network'),
+    submitListen: `127.0.0.1:${ports.networkSubmit}`,
+    brokerHost: '127.0.0.1',
+    brokerURL: `tls://127.0.0.1:${ports.networkBroker}`,
+    brokerPort: ports.networkBroker,
+    websocketPort: ports.networkWebsocket,
+    audience: 'auriga-network',
+    iam: ai.org,
+    collab: ai.org,
+  };
+  return { access, platform, edge, ai, sessionKV, networkOptions };
 }
 
 export function writeConfiguration(state, manifest, secrets) {
@@ -280,6 +313,9 @@ function initialize(state, pgPort) {
       platform: 18081,
       grpc: 19090,
       ai: 18084,
+      networkBroker: 18085,
+      networkWebsocket: 18086,
+      networkSubmit: 18087,
     },
   };
   const secrets = Object.fromEntries(
@@ -315,6 +351,15 @@ function initialize(state, pgPort) {
     path.join(here, 'materialize.go'),
     path.join(state, 'tls'),
   ]);
+  run('go', [
+    '-C',
+    path.join(repo, 'deploy/bootstrap'),
+    'run',
+    './cmd/network-materialize',
+    path.join(state, 'network'),
+    path.join(state, 'networkOptions.json'),
+  ]);
+  privatePath(path.join(state, 'network'), true);
 }
 
 export function postgresEnvironment(passfile, inherited = process.env) {
@@ -609,10 +654,20 @@ export async function startServices(state, manifest) {
   const ports = Object.values(manifest.ports);
   const previous = ownedProcesses(state);
   if (
-    previous.length === 3 &&
+    previous.length === 5 &&
+    ['platform', 'ai', 'network-broker', 'network', 'edge'].every((name) =>
+      previous.some((record) => record.name === name),
+    ) &&
     previous.every((record) => processIdentity(record.pid) === record.identity)
   )
     return;
+  if (
+    !manifest.ports.networkSubmit ||
+    !fs.existsSync(path.join(state, 'network/runtime.json'))
+  )
+    throw new Error(
+      'Network deployment material is missing; use a fresh private Beta StateDir',
+    );
   await stopProcesses(state, previous.length ? ports : []);
   for (const port of ports)
     if (!(await portFree(port)))
@@ -699,6 +754,22 @@ export async function startServices(state, manifest) {
       '--admin-config',
       path.join(state, 'ai.json'),
     ]);
+    launch('network-broker', path.join(state, 'bin/network-broker.exe'), [
+      '-c',
+      path.join(state, 'network/broker.conf'),
+    ]);
+    await waitUntil(
+      async () => !(await portFree(manifest.ports.networkBroker)),
+      'Network broker did not become ready; inspect private network-broker.log',
+    );
+    launch('network', path.join(state, 'bin/ai-gateway.exe'), [
+      '--network-config',
+      path.join(state, 'network/runtime.json'),
+    ]);
+    await waitUntil(
+      () => networkSubmitReady(state, manifest),
+      'Network submit mTLS listener did not become ready; inspect private network.log',
+    );
     launch('edge', path.join(state, 'bin/edge.exe'), [
       '--config',
       path.join(state, 'edge.json'),
@@ -730,6 +801,54 @@ export async function startServices(state, manifest) {
   } catch (error) {
     await stopProcesses(state, ports);
     throw error;
+  }
+}
+
+// Reach the actual handler over the same verified mTLS hop as edge. A 401 with
+// no device token proves listener readiness without manufacturing authentication.
+export async function networkSubmitReady(state, manifest) {
+  const hop = {
+    serverName: 'submit.network.internal',
+    caFile: path.join(state, 'network/server-ca.pem'),
+    certFile: path.join(state, 'network/edge.pem'),
+    keyFile: path.join(state, 'network/edge.key'),
+  };
+  try {
+    return await new Promise((resolve) => {
+      const request = https.request(
+        {
+          hostname: '127.0.0.1',
+          port: manifest.ports.networkSubmit,
+          servername: hop.serverName,
+          ca: fs.readFileSync(hop.caFile),
+          cert: fs.readFileSync(hop.certFile),
+          key: fs.readFileSync(hop.keyFile),
+          method: 'POST',
+          path: '/api/ai/v1/network/submit',
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 2000,
+          agent: false,
+        },
+        (response) => {
+          let body = '';
+          response.on('data', (chunk) => {
+            if (body.length < 8192) body += chunk;
+          });
+          response.on('end', () =>
+            resolve(
+              response.statusCode === 401 &&
+                body.includes('network.unauthorized'),
+            ),
+          );
+          response.on('error', () => resolve(false));
+        },
+      );
+      request.on('timeout', () => request.destroy());
+      request.on('error', () => resolve(false));
+      request.end();
+    });
+  } catch {
+    return false;
   }
 }
 
