@@ -77,9 +77,14 @@ export function resolveLimits(overrides = {}, ctx = { subjectBytes: 0 }) {
  *  queue   <= queueMaxBytes                      (SendQueue refuses beyond it)
  *  handoff <= one maximum frame                  (the pump publishes one message,
  *             then yields one microtask, which is when the SDK flushes it)
- *  socket  <= socketHardCapBytes                 (GuardedSocket refuses any send()
- *             that would push bufferedAmount past it; it is the only path to the
- *             real socket)
+ *  socket  <= socketHardCapBytes                 (native bufferedAmount plus the
+ *             initial pending snapshot share this cap for send admission.)
+ * Before ready the application queue and handoff are empty. Initial snapshots
+ * have B <= min(queueMaxBytes, maxWire); transfer's old+new peak is <= 2*B,
+ * covered by those two existing budgets. Native buffering still obeys hardCap.
+ * A sent snapshot remains owned until native send callback or actual close,
+ * then is explicitly detached; NatsLink waits before allowing application sends.
+ * No GC timing assumption, protocol parsing, or additional budget is used.
  *
  * The SDK's own `outbound` buffer is unbounded while the SDK believes it is
  * disconnected, so the transport never publishes in that state: publishing is
