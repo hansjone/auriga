@@ -54,7 +54,7 @@ func TestCollabRuntimeProjection(t *testing.T) {
 			t.Fatal("initial/reentry projection failed")
 		}
 	}
-	probe := `test -r "$1/collab-runtime/config/business.der" && ! test -r "$1/collab-installation/business.der" && ! test -r "$1/collab-edge/edge-collab.key" && : > "$1/collab-runtime/state/state.json.lock"`
+	probe := `umask 077; test -r "$1/collab-runtime/config/business.der" && ! test -r "$1/collab-installation/business.der" && ! test -r "$1/collab-edge/edge-collab.key" && : > "$1/collab-runtime/state/state.json.lock"`
 	if b, e := exec.Command("setpriv", "--reuid=10002", "--regid=10002", "--clear-groups", "sh", "-c", probe, "sh", root).CombinedOutput(); e != nil {
 		t.Fatalf("collab UID separation: %v %s", e, b)
 	}

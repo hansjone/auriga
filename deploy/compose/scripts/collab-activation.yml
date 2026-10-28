@@ -1,0 +1,27 @@
+# Fixed first-N1 activation projections; base receipt/source binds stay untouched.
+services:
+  platform:
+    environment:
+      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway,svc:collab
+    volumes:
+      - ./var/collab-activation/network-platform:/etc/auriga/network:ro
+  collab:
+    volumes:
+      - ./var/collab-activation-runtime/collab-runtime/config:/etc/auriga/collab:ro
+      - ./var/collab-activation-runtime/collab-runtime/state:/var/lib/auriga/collab
+  edge:
+    depends_on:
+      collab:
+        condition: service_healthy
+        required: true
+    volumes:
+      - ./var/collab-activation-runtime/collab-edge/edge.config.json:/etc/auriga/edge.config.json:ro
+      - ./var/collab-activation-runtime/collab-edge:/etc/auriga/collab-edge:ro
+  network:
+    depends_on:
+      collab:
+        condition: service_healthy
+        required: true
+    volumes:
+      - ./var/collab-activation-runtime/network/runtime.json:/etc/auriga/network/runtime.json:ro
+      - ./var/collab-activation-runtime/network/protocol.key:/etc/auriga/network/protocol.key:ro

@@ -14,7 +14,30 @@ if [ "$1" = bootstrap-registry ]; then
 fi
 [ -f "$VAR/compose.env" ] && [ ! -L "$VAR/compose.env" ] || { echo 'missing compose installation env' >&2; exit 1; }
 ARGS+=(--env-file "$VAR/compose.env")
-if [ -e "$VAR/collab-installation" ] || [ -L "$VAR/collab-installation" ]; then
+# Fixed stop/inspection escape for interrupted activation; these actions cannot start.
+if [ "$1" = activation-stop ] || [ "$1" = activation-running ]; then
+  ACTION=$1; shift; [ "$#" -eq 0 ] || exit 2
+  ARGS+=(--profile network-collab)
+  if [ -d "$VAR/collab-activation" ] && [ ! -L "$VAR/collab-activation" ]; then
+    ARGS+=(-f "$COMPOSE/scripts/collab-activation.yml")
+  fi
+  if [ "$ACTION" = activation-stop ]; then
+    exec docker compose "${ARGS[@]}" stop platform edge network collab
+  fi
+  exec docker compose "${ARGS[@]}" ps --status running -q platform edge network collab
+fi
+if [ -e "$VAR/.collab-activation.pending" ] || [ -L "$VAR/.collab-activation.pending" ] || [ -e "$VAR/.collab-activation.lock" ] || [ -L "$VAR/.collab-activation.lock" ]; then
+  echo 'activation is incomplete or locked; inspect before lifecycle operations' >&2; exit 1
+fi
+if [ -e "$VAR/collab-activation" ] || [ -L "$VAR/collab-activation" ]; then
+  go -C "$COMPOSE/bootstrap" run . -check-collab-activation -out "$VAR"
+  if [ "$(id -u)" -eq 0 ]; then
+    sh "$COMPOSE/scripts/collab-materials.sh" --check "$VAR/collab-activation" "$VAR/collab-activation-runtime"
+  else
+    sudo -n sh "$COMPOSE/scripts/collab-materials.sh" --check "$VAR/collab-activation" "$VAR/collab-activation-runtime"
+  fi
+  ARGS+=(-f "$COMPOSE/scripts/collab-activation.yml" --profile network-collab)
+elif [ -e "$VAR/collab-installation" ] || [ -L "$VAR/collab-installation" ]; then
   [ -d "$VAR/collab-installation" ] && [ ! -L "$VAR/collab-installation" ] || exit 1
   ARGS+=(-f "$COMPOSE/scripts/collab-required.yml" --profile network-collab)
 fi
