@@ -904,6 +904,106 @@ class NetworkSourceControlPostgresTest {
   }
 
   @Test
+  void sendConcurrentDifferentKeysOnOneThreadCanRetry() throws Exception {
+    var from = fresh();
+    var to = fresh();
+    var first = sendRequest(from, to).put("thread_id", UuidV7.next().toString());
+    var second = first.deepCopy();
+    ((ObjectNode) second.path("idempotency")).put("key", "second-" + UuidV7.next());
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    authority.afterDelivery =
+        () -> {
+          entered.countDown();
+          await(release);
+        };
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var sending = executor.submit(() -> call(() -> wire.submit(from.c(), bytes(first))));
+      try {
+        assertTrue(entered.await(4, TimeUnit.SECONDS));
+        // A restarted service must see the durable reservation after freeze released its locks.
+        var restarted = newWire();
+        NetworkAuthorityGrpcTest.denied(
+            () -> call(() -> restarted.submit(from.c(), bytes(second))), "network.conflict");
+        assertEquals(
+            1,
+            db(
+                () ->
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM collab.network_submit WHERE tenant_id=? AND source_binding=?",
+                        Integer.class,
+                        TENANT,
+                        first.path("source").path("source_binding").asString())),
+            "another key must not leave an unrecoverable pending with the same sequence");
+      } finally {
+        release.countDown();
+      }
+      var original = sending.get(6, TimeUnit.SECONDS);
+      authority.afterDelivery = () -> {};
+      assertEquals(original, call(() -> newWire().submit(from.c(), bytes(first))));
+      var stored = call(() -> newWire().submit(from.c(), bytes(second)));
+      assertEquals(stored, call(() -> newWire().submit(from.c(), bytes(second))));
+      assertNotEquals(
+          NetworkJson.parse(original).path("message_id"),
+          NetworkJson.parse(stored).path("message_id"));
+      assertEquals(
+          List.of("1", "2"),
+          db(
+              () ->
+                  jdbc.queryForList(
+                      "SELECT message_json::jsonb->>'thread_sequence' FROM collab.network_message WHERE tenant_id=? AND thread_id=? ORDER BY (message_json::jsonb->>'thread_sequence')::numeric",
+                      String.class,
+                      TENANT,
+                      UUID.fromString(first.path("thread_id").asString()))));
+      assertEquals(2, sentCount(from, "network_message"));
+      assertEquals(2, sentCount(from, "network_mail_item"));
+    } finally {
+      release.countDown();
+      authority.afterDelivery = () -> {};
+    }
+  }
+
+  @Test
+  void sendOversizedDownstreamFrameWritesNothing() {
+    var from = fresh();
+    var to = fresh();
+    var request = sendRequest(from, to);
+    int recipientsBefore =
+        db(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM collab.network_recipient WHERE tenant_id=?",
+                    Integer.class,
+                    TENANT));
+    for (int i = 0; i < 4; i++) request.put("optional_padding_" + i, "x".repeat(16000));
+    assertTrue(bytes(request).length < 65536, "valid input fits; signed output does not");
+    for (int attempt = 0; attempt < 2; attempt++) {
+      NetworkAuthorityGrpcTest.denied(
+          () -> call(() -> wire.submit(from.c(), bytes(request))), "network.protocol_error");
+      assertEquals(0, sentCount(from, "network_message"));
+      assertEquals(0, sentCount(from, "network_mail_item"));
+      assertEquals(
+          0,
+          db(
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab.network_submit WHERE tenant_id=? AND source_binding=?",
+                      Integer.class,
+                      TENANT,
+                      request.path("source").path("source_binding").asString())),
+          "oversize rejection must roll back the reservation as well");
+      assertEquals(
+          recipientsBefore,
+          db(
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab.network_recipient WHERE tenant_id=?",
+                      Integer.class,
+                      TENANT)));
+    }
+  }
+
+  @Test
   void sendFifthDenialHasNoBodyOrMailboxAndRetainsOriginalPending() {
     var from = fresh();
     var to = fresh();
@@ -922,6 +1022,28 @@ class NetworkSourceControlPostgresTest {
                     Integer.class,
                     TENANT,
                     request.path("source").path("source_binding").asString())));
+    var reserved =
+        db(
+            () ->
+                jdbc.queryForMap(
+                    "SELECT message_id,message_json FROM collab.network_submit WHERE tenant_id=? AND source_binding=?",
+                    TENANT,
+                    request.path("source").path("source_binding").asString()));
+    authority.deliveryAllowed = true;
+    var recovered = NetworkJson.parse(call(() -> newWire().submit(from.c(), bytes(request))));
+    assertEquals(
+        reserved.get("message_id").toString(),
+        recovered.path("message_id").asString(),
+        "the original pending key must recover its reserved identity after restart");
+    assertEquals(
+        reserved.get("message_json"),
+        db(
+            () ->
+                jdbc.queryForObject(
+                    "SELECT message_json FROM collab.network_message WHERE tenant_id=? AND id=?",
+                    String.class,
+                    TENANT,
+                    reserved.get("message_id"))));
   }
 
   @Test
@@ -991,6 +1113,20 @@ class NetworkSourceControlPostgresTest {
     ((ObjectNode) forged.path("registration")).put("allocation_op_id", "forged");
     NetworkAuthorityGrpcTest.denied(
         () -> call(() -> wire.receiveSet(to.c(), bytes(forged))), "network.conflict");
+    for (String field : List.of("realm", "node")) {
+      var mismatched = receive(to, false, "2");
+      ((ObjectNode) mismatched.path("registration")).put(field, "999");
+      NetworkAuthorityGrpcTest.denied(
+          () -> call(() -> wire.receiveSet(to.c(), bytes(mismatched))), "network.conflict");
+      assertEquals(
+          Map.of("receive_enabled", true, "receive_version", 2L),
+          db(
+              () ->
+                  jdbc.queryForMap(
+                      "SELECT receive_enabled,receive_version FROM collab.network_local_registration WHERE tenant_id=? AND node_id=? AND local_id=1",
+                      TENANT,
+                      to.c().getNode())));
+    }
     NetworkAuthorityGrpcTest.denied(
         () -> call(() -> wire.submit(other.c(), bytes(request))), "network.conflict");
     assertEquals(0, sentCount(from, "network_message"));

@@ -64,7 +64,7 @@ public class NetworkMailboxWireService {
     this.clock = clock;
     this.broadcast = broadcast;
     sources = new NetworkSourceControl(this, jdbc, manager, source, clock);
-    submissions = new NetworkDurableSubmit(this, jdbc, manager, source, clock);
+    submissions = new NetworkDurableSubmit(this, mailbox, jdbc, manager, source, clock);
   }
 
   public String submit(NetworkAuthorityConnection c, byte[] bytes) {
@@ -89,7 +89,9 @@ public class NetworkMailboxWireService {
                         uuid(registration.path("registration_id").asString()),
                         registration.path("allocation_fingerprint").asString());
                 require(
-                    "session".equals(actual.addressType())
+                    c.getRealm().equals(registration.path("realm").asString())
+                        && c.getNode().equals(registration.path("node").asString())
+                        && "session".equals(actual.addressType())
                         && actual
                             .allocationOpId()
                             .equals(registration.path("allocation_op_id").asString())

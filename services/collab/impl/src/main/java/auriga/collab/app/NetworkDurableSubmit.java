@@ -20,6 +20,7 @@ import tools.jackson.databind.node.ObjectNode;
 /** Ordinary online session unicast: freeze, authorize without PG resources, then locked CAS. */
 final class NetworkDurableSubmit {
   private final NetworkMailboxWireService wire;
+  private final NetworkMailboxService mailbox;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tx;
   private final NetworkSourceGrpcAuthority authority;
@@ -27,11 +28,13 @@ final class NetworkDurableSubmit {
 
   NetworkDurableSubmit(
       NetworkMailboxWireService wire,
+      NetworkMailboxService mailbox,
       JdbcTemplate jdbc,
       TenantTransactionManager manager,
       NetworkSourceGrpcAuthority authority,
       Clock clock) {
     this.wire = wire;
+    this.mailbox = mailbox;
     this.jdbc = jdbc;
     tx = new TransactionTemplate(manager);
     this.authority = authority;
@@ -196,8 +199,12 @@ final class NetworkDurableSubmit {
             "session");
     UUID thread = uuid(message.path("thread_id").asString());
     lockThread(thread);
+    // The pending row remains the exclusive sequence reservation after this short transaction.
+    // Reject other keys before freezing them, so their original key can safely retry later.
+    mailbox.requireThreadUnreserved(tenant(), thread);
     message.put("thread_sequence", nextSequence(thread));
     var context = NetworkSourceStamp.context(verified, message);
+    mailbox.preflightSubmit(message, context);
     UUID id = UuidV7.next();
     jdbc.update(
         """
@@ -252,11 +259,14 @@ final class NetworkDurableSubmit {
     check(pending.get("source_fence_json").equals(fence(source, local)));
     check(
         pending.get("target_fence_json").equals(NetworkJson.canonical(target(request.path("to")))));
-    var message = NetworkJson.parse(pending.get("message_json").toString());
+    var message = (ObjectNode) NetworkJson.parse(pending.get("message_json").toString());
     check(Instant.parse(message.path("expires_at").asString()).isAfter(clock.instant()));
     UUID thread = uuid(message.path("thread_id").asString());
     lockThread(thread);
     check(nextSequence(thread).equals(message.path("thread_sequence").asString()));
+    // Check again with the current signing keys before any durable body/mailbox writes.
+    mailbox.preflightSubmit(
+        message, (ObjectNode) NetworkJson.parse(pending.get("source_context_json").toString()));
     jdbc.update(
         """
         INSERT INTO collab.network_message(id,tenant_id,realm,kind,body,source_node,source_local,thread_id,message_json,source_context_json)

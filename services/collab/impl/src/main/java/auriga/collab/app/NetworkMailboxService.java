@@ -554,6 +554,8 @@ public class NetworkMailboxService {
           jdbc.queryForList(
               "SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
               request.tenantId() + "/" + threadId);
+          // Internal stores must also respect a SEND reservation while its IAM call is in flight.
+          requireThreadUnreserved(request.tenantId(), threadId);
           if (!sequence.equals(nextThreadSequence(request.tenantId(), threadId)))
             return targetFailure(request, reservation, auditContext, NetworkErrors.CONFLICT);
           jdbc.update(
@@ -1289,6 +1291,46 @@ public class NetworkMailboxService {
             .build());
   }
 
+  /** Caller holds the tenant/thread advisory lock until its reservation or message is durable. */
+  void requireThreadUnreserved(UUID tenant, UUID thread) {
+    require(
+        !Boolean.TRUE.equals(
+            jdbc.queryForObject(
+                """
+            SELECT EXISTS (SELECT 1 FROM collab.network_submit
+              WHERE tenant_id=? AND result_json IS NULL
+              AND message_json::jsonb->>'thread_id'=?
+              AND (message_json::jsonb->>'expires_at')::timestamptz>?)
+            """,
+                Boolean.class,
+                tenant,
+                thread.toString(),
+                java.sql.Timestamp.from(clock.instant()))),
+        NetworkErrors.CONFLICT);
+  }
+
+  void preflightSubmit(ObjectNode message, ObjectNode source) {
+    var from = message.path("from");
+    var to = message.path("to");
+    preflight(
+        new StoreRequest(
+            null,
+            from.path("realm").asString(),
+            from.path("node").asString(),
+            from.path("local").asString(),
+            message.path("kind").asString(),
+            NetworkJson.canonical(message.path("body")),
+            UUID.fromString(message.path("thread_id").asString()),
+            List.of(
+                new NodeTarget(to.path("node").asString(), List.of(to.path("local").asString()))),
+            null,
+            null,
+            true),
+        message,
+        source,
+        null);
+  }
+
   private void preflight(
       StoreRequest request, ObjectNode message, ObjectNode source, String dispatchJson) {
     var factory = new NetworkMailboxEnvelopeFactory(signer);
@@ -1335,7 +1377,9 @@ public class NetworkMailboxService {
                   request.realm(), target.nodeId(), Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE),
               Long.MAX_VALUE,
               context,
-              deadline);
+              deadline,
+              Long.MAX_VALUE,
+              "x".repeat(32));
       require(frameFits(frame, 65536), NetworkErrors.PROTOCOL_ERROR);
     }
   }

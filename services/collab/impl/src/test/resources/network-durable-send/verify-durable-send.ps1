@@ -61,7 +61,7 @@ function New-NoDedup([string]$Source) {
 function Assert-SendVerdict([xml]$Report, [string]$Mode, [int]$ExitCode) {
   $suite = $Report.testsuite
   $cases = @($suite.testcase)
-  $expected = if ($Mode -eq 'Control') { 5 } else { 1 }
+  $expected = if ($Mode -eq 'Control') { 7 } else { 1 }
   if ([int]$suite.tests -ne $expected -or $cases.Count -ne $expected -or
       [int]$suite.errors -ne 0 -or [int]$suite.skipped -ne 0 -or [int]$suite.disabled -ne 0 -or
       @($cases | Where-Object { $_.SelectNodes('error|skipped|disabled').Count -gt 0 }).Count -gt 0) {
@@ -72,6 +72,8 @@ function Assert-SendVerdict([xml]$Report, [string]$Mode, [int]$ExitCode) {
   if ($Mode -eq 'Control') {
     if ($ExitCode -ne 0 -or $failures.Count -ne 0) { throw 'Unchanged Control must pass first' }
     foreach ($name in @('sendConcurrentSameKeyAndLostReplyRecoverOneOriginalResult',
+        'sendConcurrentDifferentKeysOnOneThreadCanRetry',
+        'sendOversizedDownstreamFrameWritesNothing',
         'sendFifthDenialHasNoBodyOrMailboxAndRetainsOriginalPending',
         'sendFinalCasRejectsStopPermissionObservationConnectionAndReceiveRaces',
         'sendReceiveControlRequiresFullWitnessAndCrossNodeCannotReplay',
