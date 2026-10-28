@@ -147,14 +147,16 @@ func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard tim
 
 func TestDockerStartRestoresReplacementEdgeWithoutRebuildingInstance(t *testing.T) {
 	f := newEdgeRecoveryFixture(t, "")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	// The assertions concern completed, idempotent recovery. Independent Start
+	// calls must not inherit time consumed by prior calls or test scheduling.
+	// Each Start has a separate cancel-and-join scheduling watchdog below.
+	ctx := context.Background()
 	before, err := f.client.ContainerInspect(ctx, "auriga-inst-recovery-test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := startDocker(t, f.driver, ctx, "recovery-test"); err != nil {
+		if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
 			t.Fatal(err)
 		}
 		if f.connects.Load() != 1 || f.starts.Load() != 1 || f.probes.Load() != int64(attempt+1) {

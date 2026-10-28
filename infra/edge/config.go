@@ -226,6 +226,8 @@ func applyEnv(cfg *Config) {
 		cfg.NetworkWSS.Enabled = v == "1" || strings.EqualFold(v, "true")
 	}
 	set("AURIGA_EDGE_NETWORK_WSS_UPSTREAM", &cfg.NetworkWSS.UpstreamURL)
+	set("AURIGA_EDGE_NETWORK_WSS_CA_FILE", &cfg.NetworkWSS.CAFile)
+	set("AURIGA_EDGE_NETWORK_WSS_SERVER_NAME", &cfg.NetworkWSS.ServerName)
 	set("AURIGA_EDGE_NETWORK_WSS_PATH", &cfg.NetworkWSS.Path)
 	if v := os.Getenv("AURIGA_EDGE_NETWORK_WSS_MAX_CONCURRENT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

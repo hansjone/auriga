@@ -96,6 +96,9 @@ else
   sudo -n chgrp 65532 "$VAR/pki/edge-iam.key"
 fi
 chmod 640 "$VAR/pki/edge-iam.key"
+# uid10001 runtime reads its own material via gid10001, and the live issuer
+# token via supplementary gid65533. Installation credentials stay owner-only.
+sh "$COMPOSE/scripts/network-permissions.sh" "$VAR"
 # Edge receives only its submit client identity and the submit server CA.
 # The broker passwords, server keys and gateway installation credential remain private.
 if [ -e "$VAR/network-edge" ] || [ -L "$VAR/network-edge" ]; then

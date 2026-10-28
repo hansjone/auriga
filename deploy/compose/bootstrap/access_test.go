@@ -24,6 +24,14 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		}
 		return raw
 	}
+	platformEntries, err := os.ReadDir(filepath.Join(out, "network-platform"))
+	if err != nil || len(platformEntries) != 2 {
+		t.Fatalf("platform private mount must contain exactly two credentials: %v", err)
+	}
+	if !strings.Contains(string(read("network-platform/platform.properties")), fmt.Sprintf("installation-owner=%d\n", os.Getuid())) {
+		t.Fatal("platform installation owner differs from generator uid")
+	}
+	read("network-platform/gateway.secret")
 	access, err := deploymentconfig.Load(read("access.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +57,7 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	if edge.AccessConfigFile != "/etc/auriga/access.json" {
 		t.Fatal("edge must load shared access.json")
 	}
-	if edge.Upstreams["network-submit"] != "https://host.docker.internal:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] {
+	if edge.Upstreams["network-submit"] != "https://172.29.240.1:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] { // gitleaks:allow disposable M2 network
 		t.Fatal("submit must use an independent HTTPS listener and trust material")
 	}
 	var network struct {
@@ -59,7 +67,7 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	if err := json.Unmarshal(read("network/runtime.json"), &network); err != nil {
 		t.Fatal(err)
 	}
-	if network.SubmitHTTP.ClientCAFile != "/etc/auriga/network/client-ca.pem" || network.SubmitHTTP.Listen != "0.0.0.0:18443" || network.IAM.ServiceTokenFile != "/run/auriga-network-token/gateway/service.jwt" {
+	if network.SubmitHTTP.ClientCAFile != "/etc/auriga/network/client-ca.pem" || network.SubmitHTTP.Listen != "172.29.240.1:18443" || network.IAM.ServiceTokenFile != "/run/auriga-network-token/gateway/service.jwt" { // gitleaks:allow disposable M2 network
 		t.Fatal("incomplete network runtime configuration")
 	}
 	for _, service := range []string{"iam", "org", "workspace"} {
