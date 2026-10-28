@@ -1,6 +1,22 @@
 ﻿# Windows 原生 Beta 管理台
 
-这是一套真人验收环境，使用本机已有的 PostgreSQL 16，不启动 Docker、NATS、Team 或 DSH。门户固定为 `http://127.0.0.1:18080`，管理台固定为 `http://127.0.0.1:18082`；请在浏览器直接打开这些 URL，不改 hosts。它仅供本机开发，不用于对外部署。
+这是一套真人验收环境，使用本机已有的 PostgreSQL 16，并启动专用 network Broker 和 callout runtime；不启动 Docker、Team MCP 或 DSH。门户固定为 `http://127.0.0.1:18080`，管理台固定为 `http://127.0.0.1:18082`；请在浏览器直接打开这些 URL，不改 hosts。它仅供本机开发，不用于对外部署。
+
+## Network submit 部署
+
+新安装的 `installation.json` 增加三个仅绑定回环的端口：network Broker TCP `18085`、WSS `18086`、submit HTTPS `18087`。构建从 ai-gateway 已锁定的 NATS server 依赖构建 `network-broker.exe`，不升级依赖或要求安装全局 Broker。`start` 分别运行 platform、AI 管理、network-broker、network、edge 五个进程；`status` 显示它们的所有权和运行状态，`stop` 校验 PID/启动时间并停止全部自有进程、确认端口释放。
+
+`network/runtime.json` 使用正式 `--network-config`；submit listener 与 callout/router 同进程共享 READY 绑定。`edge.json` 的 `upstreams.network-submit` 指向 `https://127.0.0.1:18087`，固定服务端身份 `submit.network.internal`。`networkSubmitHop` 引用 `network/edge.pem`、`edge.key`、`server-ca.pem`。listener 必填 `submitHTTP.clientCAFile=network/client-ca.pem`，强制校验客户端证书。两个 CA 的私钥仅在生成期间留在内存；只有专用 edge 客户端证书受 submit 客户端 CA 签发，不复用 IAM CA、证书或私钥。Broker 使用另一组叶证书及受限 auth/ops/data 身份。
+
+所有网络配置、NKeys、Broker 密码、协议签名私钥和 TLS 文件仅落入受限 ACL 的 StateDir，不写日志、仓库或系统信任库。启动就绪检查使用真实 mTLS、固定服务端名，要求无设备凭据的 POST 返回真实 `401 network.unauthorized`；这只证明 listener 和认证门可达，不证明登录、READY 建立、collab 持久化或双 DSH SEND 成功。当前 combined Beta 没有启用完整 collab 网络业务运行时，其业务装配仍需单独验收。
+
+旧 StateDir 缺少这些端口或专用材料会明确拒绝启动/重写配置。请保留原目录和数据库，使用另一个全新私有 StateDir 按初始化流程建立新环境；不要手补旧材料、复用 IAM CA、删除数据库或轮换既有凭据。此要求优先于下文旧版会话投影升级流程；该流程不负责补 network 材料。
+
+验证部署配置、真实 Broker/runtime mTLS 就绪及所有权清理：
+
+```powershell
+node --test e2e/beta-ui/runner.test.mjs e2e/beta-ui/network.test.mjs
+```
 
 ## 准备与初始化
 
@@ -67,7 +83,7 @@ edge 显式使用 --session-kv-config 指定 sessionKV.json。Beta 适配器无�
 
 build 生成正式 platform-app jar、edge 和 AI 网关二进制，并复制构建后的 admin/portal 静态文件。日志在 StateDir/logs，不回显构建和服务日志；不要把私有目录加入仓库。重建前先 stop。start/stop 支持重复执行；start 检查端口占用，失败时清理本次已登记进程；stop 同时核对 PID 和 Windows 启动时间，拒绝终止被复用的 PID，也不会按端口杀进程。
 
-使用的进程和端口：platform HTTP 18081、gRPC mTLS 19090、AI 管理网关 18084、edge 门户 18080/管理台 18082/实例控制监听 18083，全部绑定 127.0.0.1。实例路由显式 `--instance-routes memory`，无路由时拒绝访问，不创建伪实例；不传此选项的 edge 仍要求 NATS。
+使用的进程和端口：platform HTTP 18081、gRPC mTLS 19090、AI 管理网关 18084、network Broker 18085/WSS 18086、network submit HTTPS 18087、edge 门户 18080/管理台 18082/实例控制监听 18083，全部绑定 127.0.0.1。实例路由显式 `--instance-routes memory`，无路由时拒绝访问，不创建伪实例；不传此选项的 edge 仍要求独立的会话/路由 NATS，不能复用 network Broker 账号。
 
 platform 使用 `combined,dev,beta-ui` 和真实 PostgreSQL SessionKv。仅正式 DevBootstrap 创建签名密钥、应急管理员和团队身份源；账号、口令、TOTP 秘钥仅位于私有 `enrollment.json`。edge/AI 服务票据由真实 TokenService 验证各自独立安装秘密后签发，每分钟续发，停止时清理；启动等待真实票据，不从脚本签造 JWT。AI 所用公钥从运行中的 IAM 获取，不使用测试签名夹具。
 
@@ -84,7 +100,7 @@ native OAuth 客户端为 `auriga-beta-native`：公共客户端、nativeConnect
 3. 在成员页或配额页执行一次可回退的真实写入，刷新/另一个 tab 重读确认落库；记下对象 ID 与前后非敏感值。需要二次验证时完成正式 step-up。
 4. 退出登录后，用开发者工具保存于内存中的旧会话重放请求，确认服务端拒绝；刷新旧 tab 也应回登录。不要导出包含 Cookie 的 HAR。
 5. 打开 AI 模型/provider 管理页。无真实模型时如实为空；可打开页面不等于模型生成与计量通过。需模型配置时经真实管理 API 写入，不 seed 演示数据。
-6. 重复 start，确认只有三条原进程（psql 为有超时的短期读取子进程）；重复 stop，确认登记 PID 消失且六个端口均可重新绑定。stop 不删除 Beta 数据库或 enrollment；再次 start 应复用同一身份。
+6. 重复 start，确认只有五条原进程（psql 为有超时的短期读取子进程）；重复 stop，确认登记 PID 消失且九个端口均可重新绑定。stop 不删除 Beta 数据库或 enrollment；再次 start 应复用同一身份。
 
 ## 验证与故障边界
 

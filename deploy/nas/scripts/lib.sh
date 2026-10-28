@@ -188,11 +188,11 @@ load_stack_env() {
 
 validate_managed_tree() {
   # User workspaces may contain symlinks; only these deployment-owned trees are scanned.
-  for _rel in config secrets join results enrollment bin socket-share internal-tokens data data/agent data/postgres data/nats data/registry; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens data data/agent data/postgres data/nats data/registry; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ ! -L "$_managed" ] || die "managed path is a symlink: $_managed"
   done
-  for _rel in config secrets join results enrollment bin socket-share internal-tokens; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ -d "$_managed" ] || continue
     _links=$(find "$_managed" -type l -print) || die "cannot inspect managed tree: $_managed"

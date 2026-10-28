@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
@@ -91,11 +92,16 @@ func loadNASAccess(path, peerIP, subnet string, registryPort int) ([]byte, deplo
 }
 
 func nasMaterialSet() materials.MaterialSet {
-	return materials.MaterialSet{PrivateFiles: []string{"edge.secret", "internal.properties"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "runtime-proofs"}, PublicFiles: []string{
+	set := materials.MaterialSet{PrivateFiles: []string{"edge.secret", "internal.properties"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "runtime-proofs", "network"}, PublicFiles: []string{
 		"pki/proxy-ca.crt", "pki/proxy-ca.key", "pki/proxy-edge.crt", "pki/proxy-edge.key", "pki/proxy-client.crt", "pki/proxy-client.key",
 		"pki/ca.crt", "pki/ca.key", "pki/workspace.crt", "pki/workspace.key", "pki/edge.crt", "pki/edge.key", "pki/iam.crt", "pki/iam.key", "pki/edge-iam.crt", "pki/edge-iam.key",
 		"identity-signing-keys.json", "identity-keys.json", "ca-sha256.txt", "access.json", "access.env", "edge.config.json", "platform-access.yaml", "iam-healthcheck.sh", "agent-policy.yaml",
+		"pki/gateway.crt", "pki/gateway.key",
 	}}
+	for _, name := range append(append([]string{}, networkdeploy.Files...), networkdeploy.CredentialFiles...) {
+		set.PublicFiles = append(set.PublicFiles, "network/"+name)
+	}
+	return set
 }
 
 func validateNASLAN(value, subnet, componentSubnet string) error {
@@ -122,11 +128,12 @@ func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer st
 	edgeConfig := map[string]any{
 		"instanceControlIngress": map[string]any{"denyLocalIPv4": []string{lanIP}},
 		"accessConfigFile":       "/etc/auriga/access.json", "allowLocalIngress": true,
-		"upstreams": map[string]string{"iam": "https://platform:8081", "org": "https://platform:8081", "workspace": "https://platform:8081"},
-		"iamHop":    map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "platform"},
-		"iamRpc":    map[string]any{"address": "platform:9091", "serverName": "platform", "timeoutMillis": 2000, "serviceTokenFile": "/run/auriga-internal/edge/service.jwt"},
-		"static":    map[string]string{"portalRoot": "/srv/auriga/static/portal", "adminRoot": "/srv/auriga/static/admin"},
-		"tls":       map[string]string{"mode": "off"}, "rateLimit": map[string]any{"requestsPerSecond": 50, "burst": 100}, "identityKeysFile": "/etc/auriga/identity-signing-keys.json", "sessionStore": "nats",
+		"upstreams":        map[string]string{"iam": "https://platform:8081", "org": "https://platform:8081", "workspace": "https://platform:8081", "network-submit": "https://network:18443"},
+		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/pki/network-edge.pem", "keyFile": "/etc/auriga/pki/network-edge.key", "caFile": "/etc/auriga/pki/network-server-ca.pem", "serverName": "submit.network.internal"},
+		"iamHop":           map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "platform"},
+		"iamRpc":           map[string]any{"address": "platform:9091", "serverName": "platform", "timeoutMillis": 2000, "serviceTokenFile": "/run/auriga-internal/edge/service.jwt"},
+		"static":           map[string]string{"portalRoot": "/srv/auriga/static/portal", "adminRoot": "/srv/auriga/static/admin"},
+		"tls":              map[string]string{"mode": "off"}, "rateLimit": map[string]any{"requestsPerSecond": 50, "burst": 100}, "identityKeysFile": "/etc/auriga/identity-signing-keys.json", "sessionStore": "nats",
 		"nodeTLS": map[string]string{"certFile": "/etc/auriga/pki/edge.crt", "keyFile": "/etc/auriga/pki/edge.key", "caFile": "/etc/auriga/pki/ca.crt"},
 	}
 	if cfg.IngressKind() == "trusted_proxy" {

@@ -2,6 +2,16 @@
 
 本包在一个隔离的 Docker 项目 `auriga-nas-test` 中安装 combined、edge、agent、PostgreSQL、NATS 和本机 registry。NAS 不编译源码；用 `.github/workflows/nas-bundle.yml` 对完整40位提交生成包。工人只在本机验证，不访问 NAS、VPS、DNS 或旧 Hub。公开例子一律用 `example.com`、`192.0.2.x`、`/srv/container/auriga-test`，真实值只写私有现场笔记。
 
+## Network submit 私有入口
+
+新准备包复用既有 edge 镜像制品承载 ai-gateway、network Broker 和就绪探针，不新增现场拉取或第七种离线镜像。Compose 以独立 `network-broker`、`network` 服务运行，固定 `10001:10001`、只读根文件系统、无特权，仅加入 internal 网络，不发布 submit/Broker/WSS 宿主端口。两服务均由现有 start/status/stop 管理。
+
+bootstrap 在 `config/materials/network`（`10001:10001/0700`，文件 `0600`）生成 receipt 管理的专用材料、Broker 配置和 `runtime.json`。submit 服务端 CA、客户端 CA 和 IAM CA 相互独立，CA 私钥不保存。只有 edge 叶证书由 submit 客户端 CA 签发；`submitHTTP.clientCAFile` 必填，缺失或错误材料拒绝启动。Broker 使用受限 auth/ops/data 身份和另一组叶证书。
+
+edge 配置 `upstreams.network-submit=https://network:18443`，固定服务端名 `submit.network.internal`。init/render 沿既有 `install_edge_material` 机制，只复制 `network-edge.pem`、`network-edge.key`、`network-server-ca.pem` 到 pki-edge，设置 edge 所有权并检查重入一致性；不会向 edge 挂载网络服务端私钥、NKeys 或 Broker 密码。platform 读取私有票据导出配置，独立 `network-tokens/gateway` 保存固定 ai-gateway 票据，network 只读挂载；IAM RPC 证书仍与 submit 信任材料分开。
+
+健康探针在真实 mTLS 连接上发起无设备凭据 POST，收到 `401 network.unauthorized` 才标就绪；edge 等待该健康条件。该检查不代表完整 collab 网络业务已启用，也不代表 READY、SEND 或持久化成功。完整业务装配和协议公钥发布需另外验收。旧 receipt 缺新材料会拒绝重入，须准备新的隔离安装根并保留旧数据；不手补文件、不放宽 TLS、不修复旧 owner 或轮换已有凭据。
+
 ## 一份 access 配置
 
 选择包中的 `access-domain.example.json`、`access-ip.example.json` 或 `access-proxy.example.json`，复制到数据根以外的绝对路径（例如 `/srv/container/auriga-access.json`），编辑后将它写入 `stack.env` 的 `AURIGA_ACCESS_FILE`。bootstrap 对原始字节调用生产 `deploymentconfig.Load`，先按完整原 schema 和启动语义校验，再验证 NAS 装配；不会用 Compose 的开发租户、固定 M2 服务端口、模板或 seed 验证器代替生产加载。

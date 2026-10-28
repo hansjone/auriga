@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	"math/big"
 	"net"
 	"net/url"
@@ -102,6 +103,10 @@ func main() {
 		return
 	}
 	mustPKI(pki)
+	rpc := map[string]string{"Target": "platform:9091", "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": "platform"}
+	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{Root: "/etc/auriga/network", SubmitListen: "0.0.0.0:18443", BrokerHost: "0.0.0.0", BrokerURL: "tls://network-broker:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil {
+		fatalf("generate network deployment: %v", err)
+	}
 	mustIdentity(*out)
 	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB)
 	if err := writeRuntimeMaterials(*out, verified, maxMemoryMB); err != nil {
@@ -153,6 +158,9 @@ func mustPKI(pki string) {
 	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-nas", "auriga://edge/iam-nas-test", []string{"edge.auriga.internal"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
 	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o600)
+	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-nas", "auriga://ai-gateway/nas", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "gateway.crt"), gatewayCert, 0o644)
+	writeFile(filepath.Join(pki, "gateway.key"), gatewayKey, 0o600)
 
 	// Front proxy trust is independent of IAM/NodeControl identities and CA.
 	proxyKey, proxyCA, proxyCAPEM := mustCA()

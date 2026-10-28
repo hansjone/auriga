@@ -151,7 +151,7 @@ test(
 );
 
 test(
-  'repeated start retains the three owned processes and stop releases their ports',
+  'repeated start retains all five owned processes and stop releases their ports',
   { skip: process.platform !== 'win32' },
   async () => {
     const dir = fs.mkdtempSync(
@@ -160,7 +160,7 @@ test(
     const children = [];
     const ports = [];
     try {
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         const socket = net.createServer();
         await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
         const port = socket.address().port;
@@ -181,7 +181,7 @@ test(
         10000,
       );
       const records = children.map((child, i) => ({
-        name: ['platform', 'ai', 'edge'][i],
+        name: ['platform', 'ai', 'network-broker', 'network', 'edge'][i],
         pid: child.pid,
         identity: processIdentity(child.pid),
       }));
@@ -226,6 +226,9 @@ test('configuration uses real IAM, isolated roles, fixed loopback origins and di
       platform: 18081,
       grpc: 19090,
       ai: 18084,
+      networkSubmit: 18087,
+      networkBroker: 18085,
+      networkWebsocket: 18086,
     },
   };
   const secrets = Object.fromEntries(
@@ -281,6 +284,15 @@ test('configuration uses real IAM, isolated roles, fixed loopback origins and di
   );
   assert.equal(cfg.ai.issuer, cfg.platform['auriga.iam.issuer']);
   assert.notEqual(cfg.ai.store.dsn, cfg.ai.store.migrationDsn);
+  assert.equal(cfg.edge.upstreams['network-submit'], 'https://127.0.0.1:18087');
+  assert.equal(cfg.edge.networkSubmitHop.serverName, 'submit.network.internal');
+  assert.notEqual(cfg.edge.networkSubmitHop.caFile, cfg.edge.iamHop.caFile);
+  assert.notEqual(cfg.edge.networkSubmitHop.certFile, cfg.edge.iamHop.certFile);
+  assert.equal(cfg.networkOptions.submitListen, '127.0.0.1:18087');
+  assert.equal(
+    cfg.networkOptions.iam.ServiceTokenFile,
+    cfg.ai.org.ServiceTokenFile,
+  );
   const profile = fs.readFileSync(
     new URL(
       '../../services/platform-app/src/main/resources/application-beta-ui.yaml',
