@@ -200,6 +200,8 @@ export function createConnectRoutes({
       )
         return json(res, 401, { code: 'common.unauthenticated' });
       if (error instanceof PlatformError) {
+        if (error.status === 400 && error.code === 'common.validation_failed')
+          return json(res, 400, { code: error.code });
         if (['invalid_grant', 'invalid_token'].includes(error.code ?? ''))
           return json(res, 401, { code: 'common.unauthenticated' });
         if (

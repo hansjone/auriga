@@ -182,6 +182,17 @@ test('route preserves expired, unsupported and network categories without intern
       'iam.login_tx_expired',
     ],
     [new PlatformError(400, 'invalid_grant'), 401, 'common.unauthenticated'],
+    [
+      new PlatformError(400, 'common.validation_failed'),
+      400,
+      'common.validation_failed',
+    ],
+    [
+      new PlatformError(500, 'common.validation_failed'),
+      503,
+      'common.unavailable',
+    ],
+    [new PlatformError(400, 'private SECRET'), 503, 'common.unavailable'],
     [new Error('private SECRET'), 503, 'common.unavailable'],
   ]) {
     const { handler } = fixture({ error });

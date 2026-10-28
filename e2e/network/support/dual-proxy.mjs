@@ -16,6 +16,34 @@ const require = createRequire(
 const { WebSocket, WebSocketServer } = require('ws');
 export { persistenceMarker };
 
+// This adapter is a loopback installation hop. Never forward a client-supplied
+// entry identity or client IP as trusted IAM metadata.
+export function dualProxyHeaders(incoming, origin, peerAddress, iam) {
+  const headers = Object.fromEntries(
+    Object.entries(incoming).map(([key, value]) => [key.toLowerCase(), value]),
+  );
+  headers.host = new URL(origin).host;
+  for (const key of Object.keys(headers))
+    if (
+      key.startsWith('x-auriga-entry-') ||
+      key.startsWith('auriga-forwarded-') ||
+      key === 'x-auriga-client-ip'
+    )
+      delete headers[key];
+  if (iam) {
+    const peer = peerAddress?.replace(/^::ffff:/, '');
+    assert.equal(
+      peer,
+      '127.0.0.1',
+      'IAM test hop requires an actual loopback peer',
+    );
+    headers['x-auriga-entry-origin'] = origin;
+    headers['x-auriga-entry-role'] = 'portal';
+    headers['x-auriga-client-ip'] = peer;
+  }
+  return headers;
+}
+
 // Reassemble NATS protocol commands, preserving every byte. Never record CONNECT
 // or raw protocol streams: those contain the genuine one-use device ticket.
 export function natsTap(forward, observe) {
@@ -168,19 +196,12 @@ export async function createDualProxy(directory) {
         dropSubmit = false;
       }
       const url = new URL(req.url, target);
-      const headers = { ...req.headers, host: new URL(origin).host };
-      // The loopback HTTP IAM hop is a test-only installation proxy. Only fixed
-      // authority headers are supplied, never model/session/tenant identity.
-      for (const key of Object.keys(headers))
-        if (
-          key.startsWith('x-auriga-entry-') ||
-          key.startsWith('auriga-forwarded-')
-        )
-          delete headers[key];
-      if (target === backend) {
-        headers['x-auriga-entry-origin'] = origin;
-        headers['x-auriga-entry-role'] = 'portal';
-      }
+      const headers = dualProxyHeaders(
+        req.headers,
+        origin,
+        req.socket.remoteAddress,
+        target === backend,
+      );
       const transport = url.protocol === 'https:' ? https : http;
       const upstream = transport.request(
         url,

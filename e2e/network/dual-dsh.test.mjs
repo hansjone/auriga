@@ -2,12 +2,55 @@ import test from 'node:test';
 import { Buffer } from 'node:buffer';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { natsTap, persistenceMarker } from './support/dual-proxy.mjs';
+import {
+  natsTap,
+  persistenceMarker,
+  dualProxyHeaders,
+} from './support/dual-proxy.mjs';
 import { replaceOnce } from './support/dual-prepare.mjs';
 import { mutate, sourcePath, verdict } from './support/dual-verdict.mjs';
 import { authenticatorCode, readyConnectProfile } from './support/dual-cli.mjs';
 import { dualEdgeConfig } from './support/dual-edge.mjs';
 import { join } from 'node:path';
+
+test('IAM测试跳重建必需客户端IP，剥离伪造入口头且保持登录请求来源/凭据', () => {
+  const input = {
+    Host: 'forged.example.com',
+    Origin: 'https://example.com',
+    Authorization: 'Bearer probe',
+    Cookie: 'probe=value',
+    'X-Auriga-Client-IP': '192.0.2.99',
+    'x-auriga-entry-role': 'admin',
+    'x-auriga-entry-origin': 'https://other.example.com',
+    'Auriga-Forwarded-User': 'forged',
+  };
+  const headers = dualProxyHeaders(
+    input,
+    'https://example.com',
+    '::ffff:127.0.0.1',
+    true,
+  );
+  assert.equal(headers['x-auriga-client-ip'], '127.0.0.1');
+  assert.equal(headers['x-auriga-entry-role'], 'portal');
+  assert.equal(headers['x-auriga-entry-origin'], 'https://example.com');
+  assert.equal(headers['auriga-forwarded-user'], undefined);
+  assert.equal(headers.host, 'example.com');
+  assert.equal(headers.origin, input.Origin);
+  assert.equal(headers.authorization, input.Authorization);
+  assert.equal(headers.cookie, input.Cookie);
+  assert.equal(input['X-Auriga-Client-IP'], '192.0.2.99');
+  const other = dualProxyHeaders(
+    input,
+    'https://example.com',
+    '127.0.0.1',
+    false,
+  );
+  assert.equal(other['x-auriga-client-ip'], undefined);
+  assert.equal(other['x-auriga-entry-role'], undefined);
+  assert.throws(() =>
+    dualProxyHeaders(input, 'https://example.com', '192.0.2.99', true),
+  );
+});
 
 test('普通登录的验证器按 RFC 6238 SHA1 当前真实计数生成六位码', () => {
   assert.equal(

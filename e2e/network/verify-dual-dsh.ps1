@@ -20,6 +20,7 @@ $testPaths += @('scripts/beta-ui/plugin-dsh.mjs','scripts/beta-ui/runner.mjs','e
 $testPaths += @('e2e/network/support/dual-edge.mjs','e2e/network/support/dual-edge_test.go','e2e/network/support/send4-platform-origin_test.go','e2e/network/verify-dual-dsh-preflight.ps1')
 $testPaths += @('e2e/network/dual-cli-check.mjs')
 $testPaths += @('clients/dsh-plugin/src/local/routes.js','clients/dsh-plugin/src/local/diagnostic.js','clients/dsh-plugin/test/login-routes.test.js')
+$testPaths += @('e2e/network/entry-check.mjs','e2e/network/support/DualDshEntryCheck.java')
 $manifest = [ordered]@{head=$ExpectedHead; archiveSha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash; mode=$(if($Run){'Run'}else{'CompileOnly'}); variants=@(); complete=$false}
 function Save-Manifest { [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8) }
 function Hashes([string]$Directory) { $result=[ordered]@{}; foreach($path in $testPaths){$result[$path]=(Get-FileHash -LiteralPath (Join-Path $Directory $path) -Algorithm SHA256).Hash}; return $result }
@@ -59,6 +60,8 @@ try {
       if($code -ne 0){throw 'Both production variants must typecheck'}
       $code=Recorded ($mode+'-java') "$MavenCommand -B -pl services/platform-app -am test -Dtest=NetworkSourceJavaHostTest,NetworkSourceJavaFaultsTest -Dsurefire.failIfNoSpecifiedTests=false" {& $MavenCommand -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest,NetworkSourceJavaFaultsTest' '-Dsurefire.failIfNoSpecifiedTests=false'}
       if($code -ne 0){throw 'Fresh Java bridge compile/test failed'}
+      $code=Recorded ($mode+'-entry') 'node e2e/network/entry-check.mjs --run' {& node e2e/network/entry-check.mjs --run}
+      if($code -ne 0){throw 'Actual IAM entry headers must satisfy production RequestIdentity'}
       $code=Recorded ($mode+'-assembly') 'node e2e/network/support/dual-prepare.mjs --compile' {& node e2e/network/support/dual-prepare.mjs --compile}
       if($code -ne 0){throw 'Normal-login Java and real Team/network Go assembly must compile'}
       # These sources already belong to this exact archive. Do not recursively

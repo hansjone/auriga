@@ -10,8 +10,10 @@
 主控对 bec49fc 的全链运行已通过宿主安装和 Java/Team/network/edge 启动，随后首次登录状态请求返回503。
 驱动现以公开设置的 activeOrigin 和原生 profile 依赖就绪为启动条件，两个真实 CLI 的
 配置及登录状态200预检通过。主控对1dea6c6运行已进一步到登录调用503，真实异常原先被兜底吞掉；
-现补充下述脱敏分类诊断。本工位PG仍报restricted-token 87/3，尚未定位该次IAM登录失败的确切根因，
-没有完整普通登录/双向业务结果。
+已通过诊断确认22c6f11在begin收到IAM400 common.validation_failed；本轮发现测试代理漏写
+IAM强制要求的X-Auriga-Client-IP，并用生产RequestIdentity重现旧请求400及修正后的入口校验通过。
+代理现剥离客户端伪造入口/IP头，并从真实回环peer重建该字段；插件保持平台400校验错误码。
+本工位PG此前报restricted-token 87/3，仍没有完整普通登录/双向业务结果。
 因此以下收发/故障/反证断言是已实现的验收路径，不能据此宣称业务验收通过。
 `dual-dsh-blocker.zh.md` 描述的是修复候选合入前的历史首失。
 
@@ -23,6 +25,8 @@
 node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs
 .\mvnw.cmd -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest,NetworkSourceJavaFaultsTest' '-Dsurefire.failIfNoSpecifiedTests=false'
 node e2e/network/support/dual-prepare.mjs --compile
+# 无PG，仅核代理的真实入口头满足生产IAM校验；不认证或生成凭据：
+node e2e/network/entry-check.mjs --run
 node e2e/network/support/native-install.mjs --install
 node e2e/network/dual-cli-check.mjs --run
 # 启用真实连接配置，仅核两个隔离 profile 的 activeOrigin/status 与登录前准入，不认证：
@@ -46,13 +50,15 @@ available=true/loggedIn=false，并确认登录前业务控制仍被原生准入
 
 ### 登录故障诊断
 
-本机登录路由原兜底503的HTTP响应与鉴权规则不变；宿主stderr增加一行
+本机登录路由保留兜底503的公共响应与鉴权规则；宿主stderr增加一行
 `[auriga-dsh] local route failure`，只含固定操作名、类别、白名单错误码及上游状态。
 类别包括tls、network、platform_http、native_step、timeout、cancelled、unexpected。
 不记录原异常message/stack、URL、请求体/头、任意上游code或任何凭据。
 `A/B-host.log`已保存脱敏stderr；错误日志自身失败也不改变原HTTP响应。
 root重跑后先核operation为begin还是advance/resume，再依据类别检查CA/网络、IAM状态或原生步骤。
 这些分类不构成根因推测，也不放宽任何登录或业务断言。
+上游400且code为common.validation_failed时，路由现返回相同400/code，避免误报为服务不可用；
+其他未知上游code或服务端状态保留原映射，不向客户端暴露平台异常细节。
 直接运行全链默认安装本次独立锁定 runtime；开发时可通过 `AURIGA_DSH_RUNTIME` 指定
 已安装的锁定 rc.3 目录。归档验收清除此覆盖，每个变体自行安装，不继承其他工位 runtime。
 
@@ -115,6 +121,9 @@ edge-ready 保存 PID、入口地址、实际 submit 上游和 serverName；每�
 
 公共入口为仅转发的测试 HTTPS 代理，统一固定 Origin/issuer，并向回环 IAM 内跳供应固定
 安装入口 authority。Submit 路径固定为测试代理→生产 edge Handler→network runtime HTTPS listener；
+IAM跳的X-Auriga-Client-IP从实际回环socket peer产生；任意传入的同名头、入口及forwarded身份头均先剥离。
+entry-check把这些头交给生产RequestIdentity（含sameOrigin/tenant/clientIp）验证：旧缺头请求稳定400，
+新请求入口校验通过。该探针不运行LoginManager/PG，不返回模拟认证成功。
 真实 Broker WSS 和所有签名/准入/持久事务仍由生产实现完成。
 代理不从请求推导 tenant/owner/session，不改请求/响应业务字节；WSS 只重组传输分片并观察应用帧，
 不记录 CONNECT 凭据。登录与 Team 的测试代理路径保持原范围，这不是 edge 全产品验收。
