@@ -4,9 +4,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import tls from 'node:tls';
+import { platformConfig } from '../../../src/local/platform.js';
 import { openConnectionRuntime } from '../../../src/network/connection-runtime.js';
 import { createFileLedgerStore } from '../../../src/network/host/store.js';
-import { NatsTransport } from '../../../src/network/transport/nats-transport.js';
 import { decodeJson, encodeJson } from '../../../src/network/session/frames.js';
 import { fixture as nativeFixture } from '../host/native/fixtures.js';
 import {
@@ -18,11 +19,7 @@ import {
 } from '../trust/keyset-fixtures.js';
 import { startNatsServer } from '../transport/support/nats-server.js';
 import { ensureNatsServer } from '../transport/support/nats-binary.js';
-import {
-  connectPeer,
-  createCaSocketFactory,
-  waitFor,
-} from '../transport/support/client.js';
+import { connectPeer, waitFor } from '../transport/support/client.js';
 import { sourcePeer, seal, latch } from './fixtures.js';
 
 test('automatic source lifecycle over real NATS WSS: join, signed issue/Get, native close overtakes Get, hostless revoke, file recovery', async (t) => {
@@ -60,6 +57,25 @@ test('automatic source lifecycle over real NATS WSS: join, signed issue/Get, nat
   const signer = publicationFixture(),
     fixture = sourcePeer(signer);
   const server = await startNatsServer({ binary: await ensureNatsServer() });
+  const installation = platformConfig({
+    platformOrigin: 'https://portal.example.com',
+    issuer: 'https://portal.example.com',
+    clientId: 'source-fixture',
+    providerId: 'source-fixture',
+    network: { realm: '2', wssUrl: server.url, roots: testRoots },
+  });
+  // Trust only this isolated test CA/port. Keep default production runtime,
+  // transport, Origin, and TLS name/chain verification unchanged.
+  const originalTls = tls.connect;
+  t.mock.method(tls, 'connect', function (options, ...args) {
+    return originalTls.call(
+      this,
+      Number(options.port) === server.port
+        ? { ...options, ca: server.rootPem }
+        : options,
+      ...args,
+    );
+  });
   const peer = await connectPeer(server, { token: 'fixture-no-auth-broker' });
   const store = createFileLedgerStore({ dir: join(dir, 'ledger') });
   const connections = new Map(),
@@ -145,8 +161,9 @@ test('automatic source lifecycle over real NATS WSS: join, signed issue/Get, nat
   await peer.flush();
   const prepared = {
     kind: 'device-connection',
-    url: server.url,
-    roots: testRoots,
+    url: installation.network.wssUrl,
+    origin: installation.platformOrigin,
+    roots: installation.network.roots,
     async register() {
       return {
         tenant: 'tenant-fixture',
@@ -184,12 +201,6 @@ test('automatic source lifecycle over real NATS WSS: join, signed issue/Get, nat
       now: signer.now,
       getAccess: async () => 'unused',
       authorizeLocal: async () => false,
-      transportFactory(options) {
-        return new NatsTransport({
-          ...options,
-          createSocket: createCaSocketFactory(server.rootPem),
-        });
-      },
     });
     await result.start();
     return result;

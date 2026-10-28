@@ -217,6 +217,13 @@ export class NatsLink {
           }
           this.#socket = new GuardedSocket(inner, {
             hardCapBytes: this.#limits.socketHardCapBytes,
+            // SDK's synchronous initial CONNECT/PING must share one WS frame:
+            // separate TLS records can lose Broker rejection bytes on reset.
+            coalesceInitialWrites: true,
+            initialBudgetBytes: Math.min(
+              this.#limits.queueMaxBytes,
+              pubWireBytes(this.#subjectBytes, this.#limits.maxMessageBytes),
+            ),
             onOverflow: (info) =>
               this.#fail(
                 new TransportError(
@@ -247,6 +254,9 @@ export class NatsLink {
         },
       });
       this.#nc = nc;
+      // Staging uses the still-empty queue/handoff budget; release every native
+      // writer's borrowed snapshot before application publishing can begin.
+      await this.#socket?.initialWritesDone();
       if (this.#state !== 'connecting' || this.#socket?.closed) {
         throw (
           this.#failure ??
@@ -433,7 +443,13 @@ export class NatsLink {
   async close() {
     this.#fail(new TransportError('closed', 'link closed'), true);
     // A wedged socket may never report closed; do not wait for it forever.
-    await Promise.race([this.#nc?.closed().catch(() => {}), sleep(1_000)]);
+    await Promise.race([
+      Promise.all([
+        this.#nc?.closed().catch(() => {}),
+        this.#socket?.initialWritesDone(),
+      ]),
+      sleep(1_000),
+    ]);
   }
 
   /**

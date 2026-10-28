@@ -18,6 +18,39 @@ const UP = 'auriga.net.up.node1';
 const DOWN = 'auriga.net.down.node1';
 
 describe('NatsLink without a broker', () => {
+  test('only the initial SDK synchronous pair is coalesced through the production guard', async () => {
+    const frames = [];
+    const fakeNats = {
+      tokenAuthenticator: () => () => ({ auth_token: 'probe' }),
+      async wsconnect(options) {
+        const { socket } = await options.wsFactory('wss://example.invalid/');
+        socket.send(new Uint8Array([1, 2]));
+        socket.send(new Uint8Array([3]));
+        socket.send(new Uint8Array([4]));
+        throw new Error('configuration probe complete');
+      },
+    };
+    const link = new NatsLink({
+      url: 'wss://example.invalid/',
+      auth: { token: 'probe' },
+      upSubject: UP,
+      downSubject: DOWN,
+      inboxPrefix: 'probe',
+      nats: fakeNats,
+      createSocket: () => ({
+        bufferedAmount: 0,
+        addEventListener() {},
+        terminate() {},
+        close() {},
+        send(data, _options, done) {
+          frames.push([...new Uint8Array(data)]);
+          done?.();
+        },
+      }),
+    });
+    await assert.rejects(link.open());
+    assert.deepEqual(frames, [[1, 2, 3], [4]]);
+  });
   test('wsconnect is configured without SDK reconnect, with the private inbox prefix, and the authenticator never throws', async () => {
     let captured;
     let calls = 0;
