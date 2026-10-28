@@ -261,6 +261,22 @@ func (r *mailboxRouter) handleContext(ctx context.Context, b liveBinding, raw []
 		return
 	}
 	var sourceBoot string
+	if receiveOperation(operation) {
+		q, decErr := decodeReceiveRequest(raw, operation)
+		sourceBoot = registrationString(q["boot_id"])
+		epoch := "epoch"
+		if operation == "execution_admit" {
+			epoch = "connection_epoch"
+		}
+		r.redeemer.mu.Lock()
+		current, ok := r.redeemer.bindings[b.Ingress]
+		live := ok && sameMailboxBinding(current, b) && !current.Revoked && time.Now().Before(current.NotAfter) && registrationString(q["boot_id"]) == r.sourceBoot[b.Ingress]
+		r.redeemer.mu.Unlock()
+		if decErr != nil || !live || registrationString(q[epoch]) != u64str(b.Epoch) {
+			r.sendError(b, raw, staleEpoch(requestID))
+			return
+		}
+	}
 	if operation == "local_register" || sourceOperation(operation) {
 		var q map[string]json.RawMessage
 		var decErr *AppError
@@ -311,7 +327,7 @@ func (r *mailboxRouter) handleContext(ctx context.Context, b liveBinding, raw []
 		return
 	}
 	guard.Lock()
-	if sourceOperation(operation) && ctx.Err() != nil {
+	if (sourceOperation(operation) || receiveOperation(operation)) && ctx.Err() != nil {
 		guard.Unlock()
 		r.sendError(b, raw, mailboxError(ctx.Err()))
 		return
@@ -319,7 +335,7 @@ func (r *mailboxRouter) handleContext(ctx context.Context, b liveBinding, raw []
 	r.redeemer.mu.Lock()
 	current, ok := r.redeemer.bindings[b.Ingress]
 	allowed := ok && !current.Revoked && time.Now().Before(current.NotAfter) && (operation == "ready" || sameMailboxBinding(current, b))
-	if sourceOperation(operation) {
+	if sourceOperation(operation) || receiveOperation(operation) {
 		allowed = allowed && ctx.Err() == nil && sourceBoot == r.sourceBoot[b.Ingress]
 	}
 	if allowed {
@@ -380,6 +396,14 @@ func mailboxOperation(raw []byte, head bool) (string, string, *AppError) {
 		}
 		return "local_register", registrationString(q["request_id"]), nil
 	}
+	if receiveOperation(registrationString(registration["type"])) {
+		op := registrationString(registration["type"])
+		q, ae := decodeReceiveRequest(raw, op)
+		if ae != nil {
+			return "", registrationString(registration["request_id"]), ae
+		}
+		return op, registrationString(q["request_id"]), nil
+	}
 	var envelope struct {
 		AppVersion   string `json:"app_version"`
 		Type         string `json:"type"`
@@ -439,7 +463,7 @@ func validateMailboxResponse(b liveBinding, operation, requestID string, request
 	if json.Unmarshal(response, &frame) != nil || frame.AppVersion != AppVersion {
 		return b, errUnauthorized
 	}
-	expected := map[string]string{"ready": "ready_result", "head": "head", "fetch": "fetch_result", "receipt": "receipt_committed"}[operation]
+	expected := map[string]string{"ready": "ready_result", "head": "head", "fetch": "fetch_result", "receipt": "receipt_committed", "receive_set": "receive_set_result", "attempt_begin": "attempt_result", "execution_admit": "admit_result"}[operation]
 	if frame.Type != expected && frame.Type != "error" {
 		return b, errUnauthorized
 	}
@@ -534,5 +558,5 @@ func (r *mailboxRouter) writeError(b liveBinding, raw []byte, ae *AppError) {
 }
 
 func sameMailboxBinding(a, b liveBinding) bool {
-	return a.Binding == b.Binding && a.Tenant == b.Tenant && a.Realm == b.Realm && a.Node == b.Node && a.Epoch == b.Epoch && a.Incarnation == b.Incarnation && a.ChannelNonce == b.ChannelNonce
+	return a.Binding == b.Binding && a.Tenant == b.Tenant && a.Realm == b.Realm && a.Node == b.Node && a.Device == b.Device && a.Epoch == b.Epoch && a.Incarnation == b.Incarnation && a.ChannelNonce == b.ChannelNonce
 }

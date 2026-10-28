@@ -154,6 +154,10 @@ func run() (result error) {
 	if err != nil {
 		return err
 	}
+	httpsPort, err := freePort()
+	if err != nil {
+		return err
+	}
 	passwords := make([]string, 3)
 	configs := make([]network.NATSConfig, 3)
 	for i, user := range []string{"auth", "ops", "data"} {
@@ -203,7 +207,7 @@ func run() (result error) {
 			_ = child.Process.Kill()
 			<-done
 		}
-		for _, port := range []int{tcpPort, wsPort} {
+		for _, port := range []int{tcpPort, wsPort, httpsPort} {
 			c, e := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
 			if e == nil {
 				_ = c.Close()
@@ -225,6 +229,7 @@ func run() (result error) {
 	}
 	defer relay.close()
 	cfg := network.RuntimeConfig{
+		SubmitHTTP:       &network.SubmitHTTPConfig{Listen: fmt.Sprintf("127.0.0.1:%d", httpsPort), TLSCertFile: cert, TLSKeyFile: key},
 		BrokerConfigFile: cfgPath, ServerAudience: b.ServerAudience, ClientAccount: "CLIENTS",
 		IssuerSeedFile: issuerFile, XKeySeedFile: xFile,
 		IAM:    team.RPCConfig{Target: relay.iamAddress, ServiceTokenFile: b.GatewayToken},
@@ -244,7 +249,7 @@ func run() (result error) {
 	defer func() { _ = authority.Close() }()
 	sourceCalls := newSourceCalls(ctx, authority, b.Tenant)
 	defer sourceCalls.close()
-	if err = emit(map[string]any{"stage": "gateway-ready", "wss": fmt.Sprintf("wss://127.0.0.1:%d", wsPort), "ca": ca, "brokerVersion": "2.15.1", "brokerPid": child.Process.Pid, "brokerCreationToken": brokerIdentity, "brokerLaunchWallClock": started.Format(time.RFC3339Nano), "gatewayPid": os.Getpid()}); err != nil {
+	if err = emit(map[string]any{"stage": "gateway-ready", "https": fmt.Sprintf("https://127.0.0.1:%d", httpsPort), "wss": fmt.Sprintf("wss://127.0.0.1:%d", wsPort), "ca": ca, "brokerVersion": "2.15.1", "brokerPid": child.Process.Pid, "brokerCreationToken": brokerIdentity, "brokerLaunchWallClock": started.Format(time.RFC3339Nano), "gatewayPid": os.Getpid()}); err != nil {
 		return err
 	}
 	scan := bufio.NewScanner(os.Stdin)

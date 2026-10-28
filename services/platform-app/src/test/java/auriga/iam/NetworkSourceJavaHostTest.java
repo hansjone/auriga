@@ -3,7 +3,12 @@ package auriga.iam;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import auriga.collab.api.NetworkSourceAuthority.Target;
+import auriga.collab.grpc.NetworkAuthorityClient;
 import auriga.collab.network.keys.NetworkKeySettings;
+import auriga.common.context.TenantContext;
+import auriga.common.persistence.TenantTransactionManager;
+import auriga.contracts.iam.v1.NetworkAuthorityConnection;
 import com.nimbusds.jose.jwk.*;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import java.net.URI;
@@ -13,14 +18,65 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import javax.net.ssl.SSLHandshakeException;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.datasource.AbstractDataSource;
+import org.springframework.transaction.CannotCreateTransactionException;
 
 class NetworkSourceJavaHostTest {
+  @Test
+  void ordinaryMailboxTargetUsesDurableLocalDirectory() {
+    // No SQL rows or permissions are mocked. The real directory must reach the
+    // JDBC boundary; the probe refuses a connection before any PG work starts.
+    var data =
+        new AbstractDataSource() {
+          @Override
+          public Connection getConnection() throws SQLException {
+            throw new SQLException("durable local directory connection probe");
+          }
+
+          @Override
+          public Connection getConnection(String username, String password) throws SQLException {
+            return getConnection();
+          }
+        };
+    var authority =
+        NetworkSourceJavaHost.mailboxAuthority(
+            mock(NetworkAuthorityClient.class), new TenantTransactionManager(data));
+    var tenant = UUID.randomUUID();
+    var connection =
+        NetworkAuthorityConnection.newBuilder()
+            .setTenantId(tenant.toString())
+            .setRealm("1")
+            .setNode("2")
+            .build();
+    var target =
+        new Target("1", "2", "incarnation", 1, "nonce", "fetch", Instant.now().plusSeconds(30));
+    TenantContext.run(
+        tenant,
+        () ->
+            authority.withTarget(
+                connection,
+                target,
+                () -> {
+                  assertEquals("system", authority.localSnapshot(tenant, "1", "2", "0").type());
+                  var failure =
+                      assertThrows(
+                          CannotCreateTransactionException.class,
+                          () -> authority.localSnapshot(tenant, "1", "2", "1"));
+                  assertEquals(
+                      "durable local directory connection probe",
+                      failure.getMostSpecificCause().getMessage());
+                  return null;
+                }));
+  }
+
   static void assertPublishedProtocolKey(
       tools.jackson.databind.JsonNode config,
       String pem,

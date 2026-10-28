@@ -1,5 +1,5 @@
-// Real rc.3 public services in this isolated integration process. No model/SEND.
-/* global structuredClone */
+// Real rc.3 public services; optional SEND-2 transport probes, no model calls.
+/* global structuredClone, clearTimeout, Buffer, AbortController */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -20,6 +20,7 @@ import { criticalMatrix } from './assembly-critical.mjs';
 import { prepareDevice } from './assembly-device.mjs';
 import { assertReadyReplacement } from './assembly-ready.mjs';
 import { describeBusinessFailure } from './assembly-failure.mjs';
+import { gatewaySend } from './gateway-send.mjs';
 
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
 const input = createInterface({ input: process.stdin });
@@ -470,6 +471,19 @@ try {
 
   // No virtual clock. IAM uses T3a's real 180s source policy; the native
   // witness separately bounds each observation. Wait through the saved expiry.
+  if (process.env.AURIGA_GATEWAY_SEND === '1') {
+    phase = 'SEND-2 gateway submit and cross-identity zero writes';
+    await gatewaySend({
+      member,
+      external,
+      config,
+      gateway,
+      control,
+      snapshot,
+      checks,
+      artifacts,
+    });
+  }
   phase = 'P3/natural expiry and successor';
   const firstBinding = ledger.sourceControl.entries['1'].head;
   const realExpiry = Date.parse(

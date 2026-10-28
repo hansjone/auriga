@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"slices"
@@ -35,6 +36,7 @@ type NATSConfig struct {
 // RuntimeConfig references the SAME config file used to launch nats-server.
 // authorization.timeout, issuer and XKey are read/verified there, not duplicated.
 type RuntimeConfig struct {
+	SubmitHTTP           *SubmitHTTPConfig     `json:"submitHTTP"`
 	BrokerConfigFile     string                `json:"brokerConfigFile"`
 	ServerAudience       string                `json:"serverAudience"`
 	ClientAccount        string                `json:"clientAccount"`
@@ -72,26 +74,30 @@ func LoadRuntimeConfig(path string) (RuntimeConfig, error) {
 }
 
 type Runtime struct {
-	auth     *nats.Conn
-	ops      *nats.Conn
-	iam      *grpc.ClientConn
-	collab   *grpc.ClientConn
-	data     *nats.Conn
-	mailbox  *mailboxRouter
-	signer   *errorSigner
-	issuer   nkeys.KeyPair
-	xkey     nkeys.KeyPair
-	redeemer *IAMRedeemer
-	cancel   context.CancelFunc
-	done     sync.WaitGroup
-	once     sync.Once
-	Errors   chan error
+	submitHTTP *http.Server
+	auth       *nats.Conn
+	ops        *nats.Conn
+	iam        *grpc.ClientConn
+	collab     *grpc.ClientConn
+	data       *nats.Conn
+	mailbox    *mailboxRouter
+	signer     *errorSigner
+	issuer     nkeys.KeyPair
+	xkey       nkeys.KeyPair
+	redeemer   *IAMRedeemer
+	cancel     context.CancelFunc
+	done       sync.WaitGroup
+	once       sync.Once
+	Errors     chan error
 }
 
 func (r *Runtime) Close() {
 	r.once.Do(func() {
 		if r.cancel != nil {
 			r.cancel()
+		}
+		if r.submitHTTP != nil {
+			_ = r.submitHTTP.Close()
 		}
 		if r.mailbox != nil {
 			r.mailbox.close()
@@ -314,6 +320,9 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 		return nil, err
 	}
 	if err = r.auth.FlushTimeout(authTimeout); err != nil {
+		return nil, err
+	}
+	if err = r.startSubmitHTTP(ctx, cfg.SubmitHTTP); err != nil {
 		return nil, err
 	}
 	r.done.Go(func() {

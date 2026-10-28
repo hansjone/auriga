@@ -21,6 +21,7 @@ import (
 // Relay uses generated services and preserves incoming service JWT/delegation,
 // bytes, deadlines and cancellation. It never makes an authentication decision.
 type relay struct {
+	iam.UnimplementedDeviceAccessServiceServer
 	iam.UnimplementedNetworkGatewayServiceServer
 	collab.UnimplementedNetworkMailboxServiceServer
 	iamAddress, collabAddress string
@@ -55,6 +56,7 @@ func startRelay(_ context.Context, iamTarget, collabTarget string) (*relay, erro
 		r.servers = append(r.servers, server)
 		if i == 0 {
 			iam.RegisterNetworkGatewayServiceServer(server, r)
+			iam.RegisterDeviceAccessServiceServer(server, r)
 			r.iamAddress = listener.Addr().String()
 		} else {
 			collab.RegisterNetworkMailboxServiceServer(server, r)
@@ -107,6 +109,9 @@ func (r *relay) forward(ctx context.Context, method string, req, reply proto.Mes
 	target, service := r.collab, "/auriga.collab.v1.NetworkMailboxService/"
 	if connection == nil {
 		target, service = r.iam, "/auriga.iam.v1.NetworkGatewayService/"
+		if method == "VerifyDeviceAccess" {
+			service = "/auriga.iam.v1.DeviceAccessService/"
+		}
 	}
 	started := time.Now()
 	deadline, bounded := ctx.Deadline()
@@ -150,9 +155,15 @@ func (r *relay) forward(ctx context.Context, method string, req, reply proto.Mes
 		if frame, ok := req.(interface{ GetFrameJson() []byte }); ok {
 			event["request"] = json.RawMessage(frame.GetFrameJson())
 		}
+		if submit, ok := req.(interface{ GetSubmitJson() []byte }); ok {
+			event["request"] = json.RawMessage(submit.GetSubmitJson())
+		}
 		if err == nil {
 			if frame, ok := reply.(interface{ GetFrameJson() []byte }); ok {
 				event["response"] = json.RawMessage(frame.GetFrameJson())
+			}
+			if submit, ok := reply.(interface{ GetResultJson() []byte }); ok {
+				event["response"] = json.RawMessage(submit.GetResultJson())
 			}
 		}
 	}
@@ -196,6 +207,32 @@ func (r *relay) forward(ctx context.Context, method string, req, reply proto.Mes
 		response.FrameJson, err = json.Marshal(body)
 	}
 	return err
+}
+
+func (r *relay) VerifyDeviceAccess(c context.Context, q *iam.VerifyDeviceAccessRequest) (*iam.VerifyDeviceAccessResponse, error) {
+	p := new(iam.VerifyDeviceAccessResponse)
+	e := r.forward(c, "VerifyDeviceAccess", q, p, nil)
+	return p, e
+}
+func (r *relay) Submit(c context.Context, q *collab.NetworkMailboxServiceSubmitRequest) (*collab.NetworkMailboxServiceSubmitResponse, error) {
+	p := new(collab.NetworkMailboxServiceSubmitResponse)
+	e := r.forward(c, "Submit", q, p, q.Connection)
+	return p, e
+}
+func (r *relay) ReceiveSet(c context.Context, q *collab.NetworkMailboxServiceReceiveSetRequest) (*collab.NetworkMailboxServiceReceiveSetResponse, error) {
+	p := new(collab.NetworkMailboxServiceReceiveSetResponse)
+	e := r.forward(c, "ReceiveSet", q, p, q.Connection)
+	return p, e
+}
+func (r *relay) AttemptBegin(c context.Context, q *collab.NetworkMailboxServiceAttemptBeginRequest) (*collab.NetworkMailboxServiceAttemptBeginResponse, error) {
+	p := new(collab.NetworkMailboxServiceAttemptBeginResponse)
+	e := r.forward(c, "AttemptBegin", q, p, q.Connection)
+	return p, e
+}
+func (r *relay) ExecutionAdmit(c context.Context, q *collab.NetworkMailboxServiceExecutionAdmitRequest) (*collab.NetworkMailboxServiceExecutionAdmitResponse, error) {
+	p := new(collab.NetworkMailboxServiceExecutionAdmitResponse)
+	e := r.forward(c, "ExecutionAdmit", q, p, q.Connection)
+	return p, e
 }
 
 func (r *relay) RedeemNetworkTicket(c context.Context, q *iam.RedeemNetworkTicketRequest) (*iam.RedeemNetworkTicketResponse, error) {
