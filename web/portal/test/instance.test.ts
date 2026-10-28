@@ -64,6 +64,57 @@ afterEach(() => {
 });
 
 describe('instance lifecycle', () => {
+  it.each([
+    [500, 'common.internal'],
+    [503, 'common.unavailable'],
+    [502, 'common.internal'],
+    [404, 'common.internal'],
+    [404, 'common.not_found'],
+  ])(
+    'explains unavailable instance listing HTTP %i (%s) in both languages',
+    async (status, code) => {
+      fetcher.mockResolvedValueOnce(
+        json({ title: 'Failed', status, code }, status),
+      );
+      const view = render();
+      await flushPromises();
+      expect(view.get('[role=alert]').text()).toBe(
+        '实例服务未启用或暂时不可用，请稍后重试。',
+      );
+      expect(view.text()).not.toContain('尚无实例');
+      expect(button('启动并进入')).toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(120000);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      view.unmount();
+
+      fetcher.mockResolvedValueOnce(
+        json({ title: 'Failed', status, code }, status),
+      );
+      const english = render('en');
+      await flushPromises();
+      expect(english.get('[role=alert]').text()).toBe(
+        'The instance service is not enabled or is temporarily unavailable. Please retry later.',
+      );
+      fetcher.mockResolvedValueOnce(json({ items: [] }));
+      await button('Retry').trigger('click');
+      await flushPromises();
+      expect(english.find('[role=alert]').exists()).toBe(false);
+      expect(button('Start and enter').exists()).toBe(true);
+      expect(enterInstance).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps permission failures distinct from service availability', async () => {
+    fetcher.mockResolvedValueOnce(
+      json({ title: 'Forbidden', status: 403, code: 'common.forbidden' }, 403),
+    );
+    render();
+    await flushPromises();
+    expect(wrapper!.get('[role=alert]').text()).toContain('无法完成请求');
+    expect(wrapper!.text()).not.toContain('实例服务未启用');
+  });
+
   it('loads an empty list without creating, then explicitly opens with CSRF and waits for both running and ready', async () => {
     fetcher.mockResolvedValueOnce(json({ items: [] }));
     render();
@@ -138,7 +189,7 @@ describe('instance lifecycle', () => {
     await vi.advanceTimersByTimeAsync(120000);
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(enterInstance).not.toHaveBeenCalled();
-    expect(wrapper!.text()).toContain('common.unavailable');
+    expect(wrapper!.text()).toContain('实例服务未启用或暂时不可用');
   });
 
   it.each([403, 429, 503])(
@@ -158,7 +209,9 @@ describe('instance lifecycle', () => {
       );
       await button('启动并进入').trigger('click');
       await flushPromises();
-      expect(wrapper!.get('[role=alert]').text()).toContain(code);
+      expect(wrapper!.get('[role=alert]').text()).toContain(
+        status === 503 ? '实例服务未启用或暂时不可用' : code,
+      );
       expect(enterInstance).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);
       fetcher.mockResolvedValueOnce(

@@ -19,6 +19,7 @@ const { t } = useI18n({
       cancel: '取消等待',
       cancelled: '已取消等待，可重新读取状态。',
       error: '无法完成请求，请重试。',
+      unavailable: '实例服务未启用或暂时不可用，请稍后重试。',
       timeout: '等待超时，请重试。',
       failed: '实例启动失败，请重试。',
       expired: '登录已失效，请重新登录。',
@@ -48,6 +49,8 @@ const { t } = useI18n({
       cancel: 'Cancel waiting',
       cancelled: 'Waiting cancelled. Refresh to check the current state.',
       error: 'Request failed. Please retry.',
+      unavailable:
+        'The instance service is not enabled or is temporarily unavailable. Please retry later.',
       timeout: 'Waiting timed out. Please retry.',
       failed: 'Instance failed to start. Please retry.',
       expired: 'Your session expired. Please sign in again.',
@@ -98,11 +101,19 @@ function cancel() {
   stop();
   message.value = 'cancelled';
 }
-function fail(error: unknown) {
+function fail(error: unknown, listing = false) {
   message.value =
-    isApiError(error) && error.status === 401 ? 'expired' : 'error';
+    isApiError(error) && error.status === 401
+      ? 'expired'
+      : isApiError(error) &&
+          (error.status >= 500 || (listing && error.status === 404))
+        ? 'unavailable'
+        : 'error';
   expired.value = message.value === 'expired';
-  detail.value = isApiError(error) ? error.problem.code : '';
+  detail.value =
+    isApiError(error) && message.value !== 'unavailable'
+      ? error.problem.code
+      : '';
 }
 async function run(open: boolean) {
   if (busy.value || expired.value) return;
@@ -161,7 +172,7 @@ async function run(open: boolean) {
   } catch (error) {
     if (!current()) return;
     stop();
-    fail(error);
+    fail(error, !open);
   }
 }
 function enter() {
