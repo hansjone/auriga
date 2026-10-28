@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -90,9 +91,11 @@ func TestDeviceNativeNodeFetch(t *testing.T) {
 	if err != nil {
 		t.Skip("Node.js is required for the native fetch integration regression")
 	}
+	started := time.Now()
 	var calls atomic.Int32
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
+		count := calls.Add(1)
+		t.Logf("native-fetch upstream-request elapsed=%s count=%d tls=%v", time.Since(started), count, r.TLS != nil)
 		mode := r.Header.Values("Sec-Fetch-Mode")
 		if len(mode) != 1 || mode[0] != "cors" {
 			t.Errorf("native Node fetch mode missing or changed: %q", mode)
@@ -113,58 +116,26 @@ func TestDeviceNativeNodeFetch(t *testing.T) {
 		c.Upstreams["network-submit"], c.NetworkSubmitHop = network.URL, hop
 	})
 	closeAIAdminTransports(t, g)
-	const script = `
-import assert from 'node:assert/strict';
-const origin = process.argv[1];
-const options = {
-  headers: { authorization: 'Bearer ai-device', accept: 'application/json' },
-  credentials: 'omit', redirect: 'error', cache: 'no-store',
-  referrerPolicy: 'no-referrer',
-};
-for (const [method, path] of [
-  ['GET', '/ai/v1/models'],
-  ['POST', '/ai/v1/chat/completions'],
-  ['GET', '/api/ai/v1/me/usage?limit=2'],
-  ['POST', '/api/ai/v1/network/submit'],
-]) {
-  const response = await fetch(origin + path, {
-    ...options, method,
-    ...(method === 'POST' ? {
-      headers: { ...options.headers, 'content-type': 'application/json' },
-      body: '{}',
-    } : {}),
-  });
-  const body = await response.text();
-  assert.equal(response.status, 202, method + ' ' + path + ': ' + body);
-}
-for (const headers of [
-  { cookie: 'auriga_admin_session=browser' },
-  { origin },
-  { referer: origin + '/' },
-  { 'sec-fetch-site': 'same-origin' },
-]) {
-  for (const [method, path] of [
-    ['GET', '/ai/v1/models'],
-    ['POST', '/api/ai/v1/network/submit'],
-  ]) {
-    const response = await fetch(origin + path, {
-      ...options, method, headers: { ...options.headers, ...headers },
-    });
-    const body = await response.text();
-    assert.equal(response.status, 403, body);
-    assert.equal(JSON.parse(body).code, 'common.forbidden');
-  }
-}
-console.log('node=' + process.version + ' native-fetch=4 rejected=8');
-`
+	// Trace only this fixture's real transport; retain its mTLS configuration.
+	g.APITransports[g.networkSubmitURL] = nativeFetchTraceTransport{g.APITransports[g.networkSubmitURL], t.Logf}
+	// The unchanged guard covers process startup, all fetches/body reads, and
+	// natural process exit. Fixture construction and cleanup are outside it.
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-e", script, "http://"+addresses["portal"])
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("native Node fetch regression: %v\n%s", err, output)
+	cmd := exec.CommandContext(ctx, node, "testdata/device_native_fetch.mjs", "http://"+addresses["portal"])
+	var output bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &output
+	t.Logf("native-fetch process-start elapsed=%s", time.Since(started))
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("native Node fetch start: %v context=%v", err, ctx.Err())
 	}
-	t.Log(strings.TrimSpace(string(output)))
+	t.Logf("native-fetch process-started elapsed=%s", time.Since(started))
+	err = cmd.Wait()
+	t.Logf("native-fetch process-exited elapsed=%s context=%v upstream-calls=%d", time.Since(started), ctx.Err(), calls.Load())
+	if err != nil {
+		t.Fatalf("native Node fetch regression: %v\n%s", err, &output)
+	}
+	t.Log(strings.TrimSpace(output.String()))
 	if calls.Load() != 4 {
 		t.Fatalf("expected four native requests only, upstream calls=%d", calls.Load())
 	}
