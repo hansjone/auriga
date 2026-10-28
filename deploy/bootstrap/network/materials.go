@@ -42,6 +42,7 @@ type Options struct {
 	IAM                map[string]string `json:"iam"`
 	Collab             map[string]string `json:"collab"`
 	ExportServiceToken bool              `json:"exportServiceToken"`
+	PlatformDirectory  string            `json:"platformDirectory,omitempty"`
 }
 
 var (
@@ -74,24 +75,18 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 	if o.Root == "" || o.SubmitListen == "" || o.BrokerHost == "" || o.BrokerURL == "" || o.BrokerPort < 1 || o.WebsocketPort < 1 || o.Audience == "" || o.IAM["ServiceTokenFile"] == "" || o.Collab["ServiceTokenFile"] == "" {
 		return errOptions
 	}
-	createdDirectory := true
-	if err := os.Mkdir(dir, 0700); err != nil {
-		info, statErr := os.Lstat(dir)
-		entries, readErr := os.ReadDir(dir)
-		if !os.IsExist(err) || statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || readErr != nil || len(entries) != 0 {
-			return errDirectory
-		}
-		createdDirectory = false
+	if o.PlatformDirectory != "" && (!o.ExportServiceToken || filepath.Clean(o.PlatformDirectory) == filepath.Clean(dir) || filepath.Dir(filepath.Clean(o.PlatformDirectory)) != filepath.Dir(filepath.Clean(dir))) {
+		return errOptions
 	}
 	// NAS pins an existing empty directory by FD, so keep its inode on failure.
 	// Remove only inodes created by this attempt; never recurse into foreign data.
 	created := map[string]os.FileInfo{}
+	var createdDirectories []string
 	defer func() {
 		if result == nil {
 			return
 		}
-		for name, original := range created {
-			path := filepath.Join(dir, name)
+		for path, original := range created {
 			current, err := os.Lstat(path)
 			if os.IsNotExist(err) {
 				continue
@@ -100,12 +95,33 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 				result = errors.Join(result, errCleanup)
 			}
 		}
-		if createdDirectory && os.Remove(dir) != nil {
-			result = errors.Join(result, errCleanup)
+		for _, path := range createdDirectories {
+			if os.Remove(path) != nil {
+				result = errors.Join(result, errCleanup)
+			}
 		}
 	}()
+	for _, path := range []string{dir, o.PlatformDirectory} {
+		if path == "" {
+			continue
+		}
+		if err := os.Mkdir(path, 0700); err != nil {
+			info, statErr := os.Lstat(path)
+			entries, readErr := os.ReadDir(path)
+			if !os.IsExist(err) || statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || readErr != nil || len(entries) != 0 {
+				return errDirectory
+			}
+		} else {
+			createdDirectories = append(createdDirectories, path)
+		}
+	}
 	write := func(name string, raw []byte) error {
-		f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		root := dir
+		if o.PlatformDirectory != "" && (name == "gateway.secret" || name == "platform.properties") {
+			root = o.PlatformDirectory
+		}
+		path := filepath.Join(root, name)
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
 			return err
 		}
@@ -114,7 +130,7 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 			_ = f.Close()
 			return err
 		}
-		created[name] = info
+		created[path] = info
 		_, err = f.Write(raw)
 		closeErr := f.Close()
 		if err != nil {

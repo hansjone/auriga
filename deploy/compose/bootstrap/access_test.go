@@ -24,6 +24,14 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		}
 		return raw
 	}
+	platformEntries, err := os.ReadDir(filepath.Join(out, "network-platform"))
+	if err != nil || len(platformEntries) != 2 {
+		t.Fatalf("platform private mount must contain exactly two credentials: %v", err)
+	}
+	if !strings.Contains(string(read("network-platform/platform.properties")), fmt.Sprintf("installation-owner=%d\n", os.Getuid())) {
+		t.Fatal("platform installation owner differs from generator uid")
+	}
+	read("network-platform/gateway.secret")
 	access, err := deploymentconfig.Load(read("access.json"))
 	if err != nil {
 		t.Fatal(err)

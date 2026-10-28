@@ -6,10 +6,10 @@
 
 ## 权限与挂载
 
-- platform 只按文件只读挂载 `platform.properties`、`gateway.secret`。
+- platform 只读挂载独立 `network-platform` 目录（仅 `platform.properties`、`gateway.secret`），源目录保持生成者 UID、0700，文件0600；容器挂载路径仍为 `/etc/auriga/network`。生成的 `installation-owner` 与目录真实 UID 一致，不依赖 Docker 为逐文件挂载创建父目录。
 - network-broker 只按文件只读挂载 `broker.conf`、`broker.pem`、`broker.key`、`server-ca.pem`。
 - network 使用完整目录，因为运行时校验 broker 配置、读取账户凭据、签名种子、提交端 TLS 及健康探针的客户端证书。
-- 所有源文件继续列入原安装回执；按文件挂载不改变生成路径、配置中的容器路径或回执列表。NAS 保持源目录 uid/gid10001、0700，文件 0600，由现有元数据守卫逐项验证。
+- 所有源文件继续列入安装回执；两平台凭据改列 `network-platform/`，运行时材料仍列 `network/`。更换挂载方式不改变配置中的容器路径。NAS 保持 network 与 network-platform 源目录 uid/gid10001、0700，文件 0600，由现有元数据守卫逐项验证。
 - compose 的 network/broker 使用 uid/gid10001、`cap_drop: [ALL]`、只读根文件系统及 `no-new-privileges`。broker 未启用 JetStream，runtime 状态在内存，无需写入路径。prepare 保留材料的安装者所有权，只给 gid10001 目录遍历与运行时文件 0640 读取权限；平台凭据仍为 0600。network 额外加入 gid65533 读取动态服务令牌，令牌卷只读挂载。
 
 文件 bind mount 固定 inode，替换源文件后必须重新创建相关容器。不得以修改回执、复用旧私钥或直接删除线上源目录的方式续期。

@@ -63,6 +63,36 @@ func TestGeneratePreservesForeignDirectory(t *testing.T) {
 	}
 }
 
+func TestGenerateSeparatePlatformDirectory(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "network")
+	options := testOptions()
+	options.PlatformDirectory = filepath.Join(root, "network-platform")
+	if err := generate(dir, options, io.LimitReader(rand.Reader, 32)); ErrorCategory(err) != "generation_failed" {
+		t.Fatalf("unexpected failure: %v", err)
+	}
+	for _, path := range []string{dir, options.PlatformDirectory} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("partial directory remains: %v", err)
+		}
+	}
+	if err := Generate(dir, options); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(options.PlatformDirectory)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("private material set: %v", err)
+	}
+	for _, name := range CredentialFiles {
+		if _, err := os.ReadFile(filepath.Join(options.PlatformDirectory, name)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatal("platform secret leaked into runtime directory")
+		}
+	}
+}
+
 func TestCertificateWarnings(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "network")
 	if err := Generate(dir, testOptions()); err != nil {

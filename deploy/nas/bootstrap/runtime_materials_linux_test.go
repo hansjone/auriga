@@ -406,7 +406,7 @@ func assertRuntimeInstallation(t *testing.T, out string, r runtimeInputs, m *run
 		if st.IsDir() {
 			mode = 0o755
 			// Managed directories also include private submit keys and credentials.
-			if name == "network" {
+			if name == "network" || name == "network-platform" {
 				mode = 0o700
 			}
 		}

@@ -119,8 +119,7 @@ services:
       - ./var/runtime-keys:/etc/auriga/runtime-keys:ro
       - ./var/enrollment:/var/auriga
       - ./var/iam-installation:/run/auriga-installation:ro
-      - ./var/network/platform.properties:/etc/auriga/network/platform.properties:ro
-      - ./var/network/gateway.secret:/etc/auriga/network/gateway.secret:ro
+      - ./var/network-platform:/etc/auriga/network:ro
       - network-tokens:/run/auriga-network-token
       - internal-tokens:/run/auriga-internal
     healthcheck:

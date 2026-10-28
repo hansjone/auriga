@@ -35,6 +35,12 @@ func TestDeploymentNetworkIsolation(t *testing.T) {
 				"network-broker": {"broker.conf", "broker.pem", "broker.key", "server-ca.pem"},
 			} {
 				block := serviceBlock(t, raw, service)
+				if service == "platform" {
+					if !strings.Contains(block, "/network-platform:/etc/auriga/network:ro") || strings.Contains(block, "/network:/etc/auriga/network:ro") || strings.Contains(block, "/network/platform.properties:") {
+						t.Fatal("platform must mount only its real private credential directory")
+					}
+					continue
+				}
 				var mounts []string
 				for _, line := range strings.Split(block, "\n") {
 					if strings.HasPrefix(strings.TrimSpace(line), "- ") && strings.Contains(line, ":/etc/auriga/network") {
