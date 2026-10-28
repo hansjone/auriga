@@ -151,9 +151,14 @@ func (b *BrowserTLS) Write(out string) error {
 		if err != nil {
 			return fmt.Errorf("write managed HTTPS material")
 		}
-		_, err = f.Write(leaf.raw)
+		// O_EXCL owns this new inode; fix its mode without changing the caller's
+		// umask or repairing any existing material.
+		modeErr := f.Chmod(leaf.mode)
+		if modeErr == nil {
+			_, err = f.Write(leaf.raw)
+		}
 		closeErr := f.Close()
-		if err != nil || closeErr != nil {
+		if modeErr != nil || err != nil || closeErr != nil {
 			return fmt.Errorf("write managed HTTPS material")
 		}
 	}

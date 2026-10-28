@@ -1,11 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  writeFile,
+  rm,
+  symlink,
+  readdir,
+  access,
+} from 'node:fs/promises';
 import { join, resolve, relative, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import http from 'node:http';
+import os from 'node:os';
 import {
   hostInstallOptions,
   hostInstallFailure,
@@ -77,6 +87,193 @@ test('宿主缓存持久共享且默认在仓库外，隔离 profile/配置和 N
       hostInstallOptions({ AURIGA_DSH_HOST_INSTALL_TIMEOUT_MS: value }),
     );
 });
+
+test('缓存拒绝真实 DSH 根等父子重叠且校验前后哨兵不变', async (t) => {
+  const state = await fixture(t);
+  const home = join(state, 'home');
+  const profile = join(home, '.dsh');
+  const custom = join(state, 'custom', 'profile');
+  await mkdir(profile, { recursive: true });
+  await mkdir(custom, { recursive: true });
+  await writeFile(join(profile, 'sentinel'), 'unchanged');
+  await writeFile(join(custom, 'sentinel'), 'unchanged');
+  for (const source of [
+    { HOME: home },
+    { USERPROFILE: home },
+    { DSH_HOME: custom },
+  ]) {
+    const root = source.DSH_HOME ?? profile;
+    for (const cache of [
+      root,
+      dirname(root),
+      join(root, 'new-cache', 'leaf'),
+    ]) {
+      assert.throws(
+        () => hostInstallOptions(source, { npmCache: cache }),
+        /DSH.*profile/,
+      );
+    }
+  }
+  for (const root of [profile, custom]) {
+    assert.deepEqual(await readdir(root), ['sentinel']);
+    assert.equal(await readFile(join(root, 'sentinel'), 'utf8'), 'unchanged');
+  }
+});
+
+test('普通缓存、home 内默认形状、同前缀目录和缺失末级可持久复用且校验不写入', async (t) => {
+  const state = await fixture(t);
+  const home = join(state, 'home');
+  await mkdir(home);
+  for (const cache of [
+    join(home, '.cache', 'auriga', 'npm-dsh-host'),
+    join(home, '.dsh-other'),
+    join(state, 'ordinary'),
+  ]) {
+    const source = {
+      HOME: home,
+      USERPROFILE: home,
+      DSH_HOME: join(home, 'missing', 'profile'),
+    };
+    assert.equal(
+      hostInstallOptions(source, { npmCache: cache }).npmCache,
+      cache,
+    );
+    await assert.rejects(access(cache), { code: 'ENOENT' });
+    await mkdir(cache, { recursive: true });
+    assert.equal(
+      hostInstallOptions(source, { npmCache: cache }).npmCache,
+      cache,
+    );
+  }
+});
+
+test('缓存拒绝链接本身、链接祖先和普通文件并保护链接目标哨兵', async (t) => {
+  const state = await fixture(t);
+  const profile = join(state, 'profile');
+  const ordinary = join(state, 'ordinary');
+  await mkdir(profile);
+  await mkdir(ordinary);
+  await writeFile(join(profile, 'sentinel'), 'unchanged');
+  const file = join(state, 'file');
+  await writeFile(file, 'unchanged');
+  for (const [name, target] of [
+    ['profile-link', profile],
+    ['ordinary-link', ordinary],
+  ]) {
+    const link = join(state, name);
+    await symlink(
+      target,
+      link,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    for (const cache of [link, join(link, 'missing', 'leaf')])
+      assert.throws(
+        () => hostInstallOptions({ DSH_HOME: profile }, { npmCache: cache }),
+        /cache/,
+      );
+  }
+  for (const cache of [file, join(file, 'missing')])
+    assert.throws(() => hostInstallOptions({}, { npmCache: cache }));
+  assert.equal(await readFile(file, 'utf8'), 'unchanged');
+  assert.deepEqual(await readdir(profile), ['sentinel']);
+  assert.deepEqual(await readdir(ordinary), []);
+  assert.equal(await readFile(join(profile, 'sentinel'), 'utf8'), 'unchanged');
+});
+
+test('真实 profile 链接别名及缺失后缀按真实目录保护', async (t) => {
+  const state = await fixture(t);
+  const actual = join(state, 'actual');
+  const alias = join(state, 'alias');
+  await mkdir(actual);
+  await symlink(
+    actual,
+    alias,
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  for (const root of [alias, join(alias, 'missing-profile')]) {
+    for (const cache of [
+      actual,
+      join(actual, 'missing-profile'),
+      join(actual, 'missing-profile', 'cache'),
+    ])
+      assert.throws(
+        () => hostInstallOptions({ DSH_HOME: root }, { npmCache: cache }),
+        /DSH.*profile/,
+      );
+  }
+  assert.deepEqual(await readdir(actual), []);
+});
+
+for (const kind of ['DSH_HOME', 'HOME', 'USERPROFILE', 'missing-suffix']) {
+  test(`悬空受保护链接在缓存创建前拒绝：${kind}`, async (t) => {
+    const state = await fixture(t);
+    const home = join(state, 'home');
+    await mkdir(home);
+    const target = join(state, 'missing-target');
+    const alias = join(
+      home,
+      kind === 'HOME' || kind === 'USERPROFILE' ? '.dsh' : 'alias',
+    );
+    await writeFile(join(home, 'sentinel'), 'unchanged');
+    await symlink(
+      target,
+      alias,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const source =
+      kind === 'HOME' || kind === 'USERPROFILE'
+        ? { [kind]: home }
+        : {
+            DSH_HOME:
+              kind === 'missing-suffix'
+                ? join(alias, 'missing-profile')
+                : alias,
+          };
+    const before = await readdir(home);
+    for (const cache of [
+      target,
+      join(target, 'missing-profile'),
+      join(target, 'missing-profile', 'cache'),
+    ]) {
+      assert.throws(
+        () => hostInstallOptions(source, { npmCache: cache }),
+        /DSH.*profile/,
+      );
+      await assert.rejects(access(target), { code: 'ENOENT' });
+      assert.deepEqual(await readdir(home), before);
+      assert.equal(await readFile(join(home, 'sentinel'), 'utf8'), 'unchanged');
+    }
+  });
+}
+
+test('系统默认真实 DSH 根及祖先在无显式环境时仍拒绝', () => {
+  const root = join(os.homedir(), '.dsh');
+  for (const cache of [root, dirname(root), join(root, 'missing-cache')])
+    assert.throws(
+      () => hostInstallOptions({}, { npmCache: cache }),
+      /DSH.*profile/,
+    );
+});
+
+test(
+  'Windows 大小写与盘符变化仍识别 profile 重叠',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    const state = await fixture(t);
+    const profile = join(state, 'MixedCaseProfile');
+    await mkdir(profile);
+    for (const cache of [
+      profile.toUpperCase(),
+      join(profile.toLowerCase(), 'missing'),
+      dirname(profile).toUpperCase(),
+    ])
+      assert.throws(
+        () => hostInstallOptions({ dsh_home: profile }, { npmCache: cache }),
+        /DSH.*profile/,
+      );
+    assert.deepEqual(await readdir(profile), []);
+  },
+);
 
 test('共享缓存只允许锁定公共 npm 包，拒绝私有来源或缺少 integrity', async () => {
   const lock = JSON.parse(

@@ -79,6 +79,7 @@ export function hostInstallOptions(source = process.env, overrides = {}) {
     npmCache.includes('\0')
   )
     throw new Error('DSH host npm cache must be an absolute path');
+  assertHostCachePath(npmCache, environment);
   const timeoutMs = Number(
     overrides.timeoutMs ??
       environment.AURIGA_DSH_HOST_INSTALL_TIMEOUT_MS ??
@@ -105,6 +106,82 @@ export function hostInstallOptions(source = process.env, overrides = {}) {
       path.resolve(npmCache),
     ],
   };
+}
+
+// Resolve protected roots even when their final profile directory is absent.
+// Cache paths themselves must have only ordinary, non-aliased ancestors.
+function existingRealPath(input) {
+  let current = path.resolve(input);
+  const suffix = [];
+  for (;;) {
+    let stat;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    // A dangling link exists even though realpath reports ENOENT. Do not append
+    // its name as a missing ordinary directory: fail closed before cache mkdir.
+    if (stat) {
+      try {
+        return path.resolve(fs.realpathSync(current), ...suffix);
+      } catch (error) {
+        throw new Error(
+          'DSH profile root has an unresolved existing ancestor',
+          {
+            cause: error,
+          },
+        );
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current)
+      throw new Error('DSH profile root cannot be resolved');
+    suffix.unshift(path.basename(current));
+    current = parent;
+  }
+}
+
+function assertHostCachePath(input, env) {
+  const cache = path.resolve(input);
+  if (
+    input.startsWith('\\\\') ||
+    input.startsWith('//') ||
+    (process.platform === 'win32' && cache.slice(2).includes(':'))
+  )
+    throw new Error(
+      'DSH host npm cache must be a local path without device streams',
+    );
+  const normalize = (value) =>
+    process.platform === 'win32' ? value.toLowerCase() : value;
+  for (let current = cache; ; current = path.dirname(current)) {
+    try {
+      const stat = fs.lstatSync(current);
+      if (
+        !stat.isDirectory() ||
+        stat.isSymbolicLink() ||
+        normalize(path.resolve(fs.realpathSync(current))) !== normalize(current)
+      )
+        throw new Error(
+          'DSH host npm cache ancestors must be ordinary directories without links',
+        );
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (path.dirname(current) === current) break;
+  }
+  const roots = [
+    ...[os.homedir(), env.HOME, env.USERPROFILE]
+      .filter(Boolean)
+      .map((home) => path.resolve(home, '.dsh')),
+    env.DSH_HOME,
+  ].filter(Boolean);
+  for (const root of roots) {
+    for (const protectedPath of [path.resolve(root), existingRealPath(root)]) {
+      if (inside(protectedPath, cache) || inside(cache, protectedPath))
+        throw new Error('DSH host npm cache overlaps a real DSH profile');
+    }
+  }
 }
 
 export function assertPublicHostLock(lock) {
@@ -201,11 +278,11 @@ function preparePackageManager(state, env) {
 }
 
 async function installHost(state, env) {
+  const install = hostInstallOptions();
   const runtime = path.join(state, 'runtime');
   fs.mkdirSync(runtime, { mode: 0o700 });
   const template = path.join(here, 'dsh-runtime');
   assertRuntimeLock(regularJson(path.join(template, 'package-lock.json')));
-  const install = hostInstallOptions();
   fs.mkdirSync(install.npmCache, { recursive: true });
   for (const file of ['package.json', 'package-lock.json'])
     fs.copyFileSync(path.join(template, file), path.join(runtime, file));
