@@ -216,6 +216,9 @@ func TestCollabProjectionAndReceipt(t *testing.T) {
 		t.Fatal("gateway not bound to approved N1 component")
 	}
 	properties := read("network-platform/platform.properties")
+	if err := checkNativeClient(out); err != nil {
+		t.Fatalf("N1 projection lost native client: %v", err)
+	}
 	for _, want := range []string{"team-token-export.enabled=true", "team-token-export.collab.reader-group=65534", "team-token-export.ai-gateway.reader-group=65533", "ai-gateway-token-export.enabled=false"} {
 		if !strings.Contains(properties, want) {
 			t.Fatalf("missing issuer setting %s", want)

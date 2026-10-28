@@ -215,6 +215,9 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 	if c == nil {
 		return nil
 	}
+	if err := checkNativeClient(out); err != nil {
+		return err
+	}
 	dir := filepath.Join(out, "collab-installation")
 	if err := os.Mkdir(dir, 0700); err != nil {
 		return fmt.Errorf("collab source directory refused")
@@ -304,6 +307,7 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 	}
 	defer clear(gateway)
 	var team strings.Builder
+	team.WriteString(nativeClientProperties)
 	team.WriteString("auriga.platform.team-token-export.enabled=true\nauriga.iam.ai-gateway-token-export.enabled=false\nauriga.iam.network.server-audiences[0]=auriga-network\nauriga.iam.network.client-server-audience=auriga-network\n")
 	for _, service := range []string{"ai-gateway", "collab"} {
 		s, leaf, token, gid := gateway, "gateway.secret", "/run/auriga-network-token/gateway/service.jwt", 65533
