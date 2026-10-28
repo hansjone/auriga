@@ -64,11 +64,41 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if err := os.WriteFile(keyFile, key, 0600); err != nil {
 				t.Fatal(err)
 			}
+			sourceCertInfo, err := os.Stat(certFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceKeyInfo, err := os.Stat(keyFile)
+			if err != nil {
+				t.Fatal(err)
+			}
 			out := filepath.Join(root, mode)
+			// The host-UID copy probe traverses this test-only parent. Docker binds
+			// edge-https itself, so its source ancestors are not part of that mount.
+			if err := os.Mkdir(out, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(out, 0755); err != nil {
+				t.Fatal(err)
+			}
 			args := []string{"-out", out, "-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-https-cert-file", certFile, "-https-key-file", keyFile}
 			for i := 0; i < 2; i++ {
 				if b, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 					t.Fatalf("HTTPS generation/reentry: %v %s", err, b)
+				}
+			}
+			for _, source := range []struct {
+				path   string
+				raw    []byte
+				before os.FileInfo
+			}{{certFile, pem, sourceCertInfo}, {keyFile, key, sourceKeyInfo}} {
+				after, err := os.Stat(source.path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, err := os.ReadFile(source.path)
+				if err != nil || string(raw) != string(source.raw) || !os.SameFile(source.before, after) || source.before.Mode() != after.Mode() || !source.before.ModTime().Equal(after.ModTime()) {
+					t.Fatal("external TLS source changed during generation/reentry")
 				}
 			}
 			edge, err := os.ReadFile(filepath.Join(out, "edge.config.json"))
@@ -99,6 +129,35 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 				}
 			})
 			before = installationSnapshot(t, out)
+			if runtime.GOOS == "linux" {
+				for _, broken := range []struct {
+					name string
+					mode os.FileMode
+				}{{"browser.crt", 0600}, {"browser.key", 0644}} {
+					t.Run("reject-existing-mode/"+broken.name, func(t *testing.T) {
+						path := filepath.Join(out, "browser-tls", broken.name)
+						original, err := os.Stat(path)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Chmod(path, broken.mode); err != nil {
+							t.Fatal(err)
+						}
+						t.Cleanup(func() {
+							if err := os.Chmod(path, original.Mode().Perm()); err != nil {
+								t.Error(err)
+							}
+						})
+						badSnapshot := installationSnapshot(t, out)
+						if b, err := exec.Command(binary, args...).CombinedOutput(); err == nil || !strings.Contains(string(b), "invalid managed HTTPS metadata") {
+							t.Fatalf("bad existing mode accepted/wrong error: %v %s", err, b)
+						}
+						if badSnapshot != installationSnapshot(t, out) {
+							t.Fatal("reentry repaired existing bad material")
+						}
+					})
+				}
+			}
 			if err := os.WriteFile(keyFile, []byte("invalid private source"), 0600); err != nil {
 				t.Fatal(err)
 			}
