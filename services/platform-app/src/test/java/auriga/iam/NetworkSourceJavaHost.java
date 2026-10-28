@@ -157,7 +157,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
       var jdbc = new JdbcTemplate(collabData);
       var tx = new TenantTransactionManager(collabData);
       var client = new NetworkAuthorityClient(rpc("collab").channel(), Duration.ofSeconds(5));
-      var authority = new NetworkSourceGrpcAuthority(client, tx);
+      var authority = mailboxAuthority(client, tx);
       // Only initial realm configuration is seeded; no node or connection is seeded.
       String realm =
           store.tenant(
@@ -210,6 +210,17 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
       }
       throw failure;
     }
+  }
+
+  static NetworkSourceGrpcAuthority mailboxAuthority(
+      NetworkAuthorityClient client, TenantTransactionManager manager) {
+    // Match CollabNetworkConfiguration: FETCH of an ordinary session needs the
+    // durable directory for both its snapshot and final locked revalidation.
+    return new NetworkSourceGrpcAuthority(
+        client,
+        manager,
+        new auriga.collab.network.local.LocalTargets(
+            new JdbcTemplate(manager.getDataSource()), manager));
   }
 
   private EventPublisher events(JdbcTemplate jdbc, String schema) {
