@@ -20,6 +20,7 @@ import {
   waitUntil,
 } from './support/assembly-process.mjs';
 import { prepareDual } from './support/dual-prepare.mjs';
+import { dualEdgeConfig } from './support/dual-edge.mjs';
 import { createDualProxy } from './support/dual-proxy.mjs';
 import { launchCli } from './support/dual-cli.mjs';
 import { installNativeRuntime, hostPin } from './support/native-install.mjs';
@@ -71,6 +72,7 @@ export async function runDualDsh() {
     failures = [];
   let java,
     gateway,
+    edge,
     proxy,
     ready,
     timer,
@@ -181,7 +183,40 @@ export async function runDualDsh() {
       30000,
     );
     manifest.stages.push(team, gw);
-    await proxy.attach({ backend: ready.https, gateway: gw, team: team.url });
+    phase = 'production edge submit assembly';
+    const edgeConfig = join(dirname(ready.config), 'edge.json');
+    await save(
+      edgeConfig,
+      dualEdgeConfig({
+        accessFile,
+        backend: ready.https,
+        gateway: gw,
+        directory: dirname(ready.config),
+      }),
+    );
+    edge = childProcess(
+      built.edgeExecutable,
+      ['-test.run=^TestSEND4EdgeFixture$', '-test.timeout=20m'],
+      {
+        cwd: root,
+        env: { ...process.env, AURIGA_SEND4_EDGE_CONFIG: edgeConfig },
+      },
+    );
+    const edgeReady = await edge.wait(
+      (v) => v.stage === 'edge-ready',
+      'production edge ready',
+      30000,
+    );
+    assert.equal(edgeReady.pid, edge.child.pid);
+    assert.notEqual(edgeReady.pid, gw.gatewayPid);
+    assert.equal(edgeReady.submitUpstream, gw.https);
+    manifest.stages.push(edgeReady);
+    await proxy.attach({
+      backend: ready.https,
+      gateway: gw,
+      team: team.url,
+      edge: edgeReady,
+    });
     const ca = join(dirname(ready.config), 'send4-ca.pem');
     await writeFile(
       ca,
@@ -439,6 +474,8 @@ export async function runDualDsh() {
       const proof = {
         from: sender.name,
         to: recipient.name,
+        edgePid: edgeReady.pid,
+        submitUpstream: edgeReady.submitUpstream,
         messageId: result.message_id,
         recipientId: received.recipientId,
         deliveryId: received.delivery.delivery_id,
@@ -585,6 +622,7 @@ export async function runDualDsh() {
       failures.push(error);
     }
     for (const [name, child, command] of [
+      ['edge', edge, 'stop'],
       ['gateway', gateway, { id: 'cleanup', op: 'stop' }],
       ['java', java, 'stop'],
     ]) {

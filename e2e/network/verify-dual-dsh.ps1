@@ -17,6 +17,7 @@ $sourcePath = 'clients/dsh-plugin/src/network/durable/outbox.js'
 $testPaths += @('e2e/network/support/native-process.mjs','e2e/network/support/native-install.mjs','e2e/network/support/assembly-process.mjs','e2e/network/support/dsh-runtime/package.json','e2e/network/support/dsh-runtime/package-lock.json')
 $testPaths += @('services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHost.java','services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaWeb.java','services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaDatabase.java')
 $testPaths += @('scripts/beta-ui/plugin-dsh.mjs','scripts/beta-ui/runner.mjs','e2e/network/host-install-cache.test.mjs')
+$testPaths += @('e2e/network/support/dual-edge.mjs','e2e/network/support/dual-edge_test.go','e2e/network/support/send4-platform-origin_test.go','e2e/network/verify-dual-dsh-preflight.ps1')
 $manifest = [ordered]@{head=$ExpectedHead; archiveSha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash; mode=$(if($Run){'Run'}else{'CompileOnly'}); variants=@(); complete=$false}
 function Save-Manifest { [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8) }
 function Hashes([string]$Directory) { $result=[ordered]@{}; foreach($path in $testPaths){$result[$path]=(Get-FileHash -LiteralPath (Join-Path $Directory $path) -Algorithm SHA256).Hash}; return $result }
@@ -58,6 +59,16 @@ try {
       if($code -ne 0){throw 'Fresh Java bridge compile/test failed'}
       $code=Recorded ($mode+'-assembly') 'node e2e/network/support/dual-prepare.mjs --compile' {& node e2e/network/support/dual-prepare.mjs --compile}
       if($code -ne 0){throw 'Normal-login Java and real Team/network Go assembly must compile'}
+      # These sources already belong to this exact archive. Do not recursively
+      # git-archive from its untracked subdirectory (which is not a git tree).
+      $edgeOverlay=Join-Path $output ($mode+'-edge-overlay.json')
+      $edgeReplacements=@{}
+      $edgeReplacements[(Join-Path $directory 'infra/edge/send4_platform_origin_test.go')]=Join-Path $directory 'e2e/network/support/send4-platform-origin_test.go'
+      $edgeReplacements[(Join-Path $directory 'infra/edge/send4_edge_fixture_test.go')]=Join-Path $directory 'e2e/network/support/dual-edge_test.go'
+      [IO.File]::WriteAllText($edgeOverlay,(@{Replace=$edgeReplacements}|ConvertTo-Json -Depth 5),$utf8)
+      Push-Location infra/edge
+      try{$code=Recorded ($mode+'-edge-routing') 'go test -overlay <edge-overlay.json> -count=1 -run ^(TestSEND4PlatformOrigin|TestSEND4EdgeFixtureLifecycle|TestDeviceNetworkSubmitRuntimeSeparation)$ -v .' {& go test -overlay $edgeOverlay -count=1 -run '^(TestSEND4PlatformOrigin|TestSEND4EdgeFixtureLifecycle|TestDeviceNetworkSubmitRuntimeSeparation)$' -v .}}finally{Pop-Location}
+      if($code -ne 0){throw 'Separate HTTPS network submit edge routing must pass'}
       if($Run) {
         $runtimeBefore=$env:AURIGA_DSH_RUNTIME
         try {

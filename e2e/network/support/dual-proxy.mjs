@@ -111,6 +111,7 @@ export async function createDualProxy(directory) {
   const endpoints = new Map();
   let backend,
     gateway,
+    edge,
     team,
     gatewayCa,
     dropSubmit = false,
@@ -121,7 +122,7 @@ export async function createDualProxy(directory) {
       const path = req.url.split('?')[0];
       target =
         path === '/api/ai/v1/network/submit'
-          ? gateway?.https
+          ? edge?.https
           : path.startsWith('/ai/')
             ? team
             : backend;
@@ -155,7 +156,14 @@ export async function createDualProxy(directory) {
             saved.bindingId,
           persistenceMarker,
         );
-        submissions.push({ request, bytes: bytes.toString(), durable: true });
+        submissions.push({
+          request,
+          bytes: bytes.toString(),
+          durable: true,
+          edgePid: edge.pid,
+          edge: edge.https,
+          submitUpstream: edge.submitUpstream,
+        });
         drop = dropSubmit;
         dropSubmit = false;
       }
@@ -291,10 +299,14 @@ export async function createDualProxy(directory) {
     failures,
     endpoints,
     attach: async (input) => {
+      assert.equal(input.edge?.submitUpstream, input.gateway.https);
+      assert.notEqual(input.edge?.https, input.gateway.https);
+      assert.equal(new URL(input.edge.https).protocol, 'https:');
       backend = input.backend;
       gateway = input.gateway;
+      edge = input.edge;
       team = input.team;
-      gatewayCa = await readFile(gateway.ca);
+      gatewayCa = await readFile(edge.ca);
     },
     dropSubmit: () => {
       dropSubmit = true;

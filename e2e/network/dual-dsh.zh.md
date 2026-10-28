@@ -5,7 +5,8 @@
 复用既有 rc.3 integrity/npm 锁、隔离 pnpm 11.28.6 和环境白名单。
 不读写用户 DSH、系统信任或真实部署，也不继承模型密钥。
 
-**当前验证边界：** EDGE-SUBMIT 候选合入工位后，原路由 preflight 已转绿。
+**当前验证边界：** 已合入 EDGE-SUBMIT 独立 submit 上游修正（40846a8），
+路由 preflight 使用分别独立的 model HTTP 与 network HTTPS 上游，并核固定信任。
 双 CLI 的隔离、公开 agent 工厂、原生 session/provider 和正常退出预检已通过；
 本 Windows 沙箱的 `pg_ctl` 报 restricted-token 创建失败，全链尚未进入普通登录。
 因此以下收发/故障/反证断言是已实现的验收路径，不能据此宣称业务验收通过。
@@ -76,16 +77,27 @@ $env:AURIGA_DSH_HOST_INSTALL_TIMEOUT_MS = '600000'
 追加的 Team listener 使用生产 DeviceAuthenticator、IAM/Org generated RPC、真实 collab admission。
 保存原测试源码哈希和完整生成源码；不改产品文件或既有测试断言，也不发行替代业务回包。
 
+另以 `go test -c -overlay` 编译独立 edge 测试进程，加载生产配置校验和 `NewGateway/Handler`，
+portal 测试 TLS listener 使用与生产 listener 相同的固定角色上下文。
+`upstreams.network-submit` 指向本轮 network runtime 的真实 HTTPS listener；
+`networkSubmitHop` 显式配置本轮私有证书、密钥、CA 和固定 DNS `localhost`，
+不借用 IAM hop 或 ai-device/model 上游，不关闭证书验证，也不允许 HTTP 降级。
+edge-ready 保存 PID、入口地址、实际 submit 上游和 serverName；每条提交证据关联 edge PID。
+验收同时核 edge 与 gateway/DSH 不同进程、正确上游及 edge 正常关闭。
+
 公共入口为仅转发的测试 HTTPS 代理，统一固定 Origin/issuer，并向回环 IAM 内跳供应固定
-安装入口 authority。网关 Submit HTTPS、真实 Broker WSS 和所有签名/准入/持久事务仍由生产实现完成。
+安装入口 authority。Submit 路径固定为测试代理→生产 edge Handler→network runtime HTTPS listener；
+真实 Broker WSS 和所有签名/准入/持久事务仍由生产实现完成。
 代理不从请求推导 tenant/owner/session，不改请求/响应业务字节；WSS 只重组传输分片并观察应用帧，
-不记录 CONNECT 凭据。该代理不是生产 edge 的完整验收，edge 精确路径由既有 preflight 单独验证。
+不记录 CONNECT 凭据。登录与 Team 的测试代理路径保持原范围，这不是 edge 全产品验收。
+preflight 另外运行真实 model/network handler 分流、IP/域名路由和上述 edge 子进程生命周期检查；
+这些未授权/传输探针不伪造 SEND 成功，仍不能代替双 DSH/PG 全链。
 
 `dual-observer` 是测试插件，随正常 CLI 插件安装流程加载。控制接口经过原生准入和同源校验，
 仅调用公开 agents.create、tools.execute、sessionController、SessionPersistence。
 它观察并原样委托 prompt；不提供假 controller/agent，不直接调用工具定义 execute。
 该接口只存在测试插件目录，不进入 Auriga 成品。关闭时释放真实 agent handle 和根 fiber，
-要求 CLI、gateway/Broker、Java/PG 正常退出；强制停止仍计失败。
+要求 CLI、edge、gateway/Broker、Java/PG 正常退出；强制停止仍计失败。
 
 ## 正控、故障和反证
 

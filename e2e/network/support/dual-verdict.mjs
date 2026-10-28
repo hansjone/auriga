@@ -13,12 +13,23 @@ export const mutate = (source) =>
 export function verdict(manifest, mode, exit) {
   assert.match(manifest.head, /^[0-9a-f]{40}$/);
   assert.equal(manifest.host.version, '0.2.1-rc.3');
+  const edge = manifest.stages.filter((v) => v.stage === 'edge-ready');
+  const gateway = manifest.stages.find((v) => v.stage === 'gateway-ready');
+  assert.equal(edge.length, 1);
+  assert.equal(edge[0].submitUpstream, gateway?.https);
+  assert.match(edge[0].submitUpstream, /^https:\/\/127\.0\.0\.1:\d+$/);
+  assert.match(edge[0].https, /^https:\/\/127\.0\.0\.1:\d+$/);
+  assert.notEqual(edge[0].https, gateway.https);
+  assert.equal(edge[0].serverName, 'localhost');
+  assert.ok(Number.isInteger(edge[0].pid) && edge[0].pid > 0);
+  assert.notEqual(edge[0].pid, gateway.gatewayPid);
   const ready = manifest.stages.filter((v) => v.stage === 'dsh-ready');
   assert.equal(ready.length, 2);
   assert.notEqual(ready[0].pid, ready[1].pid);
   assert.notEqual(ready[0].profile, ready[1].profile);
   assert.notEqual(ready[0].dshHome, ready[1].dshHome);
   assert.notEqual(ready[0].cwd, ready[1].cwd);
+  for (const host of ready) assert.notEqual(host.pid, edge[0].pid);
   for (const name of ['A', 'B']) {
     const closed = manifest.stages.find(
       (v) => v.stage === 'dsh-closed' && v.name === name,
@@ -26,7 +37,7 @@ export function verdict(manifest, mode, exit) {
     assert.equal(closed?.exitCode, 0);
     assert.equal(closed.signal, null);
   }
-  for (const stage of ['gateway-closed', 'java-closed']) {
+  for (const stage of ['edge-closed', 'gateway-closed', 'java-closed']) {
     const closed = manifest.stages.find((v) => v.stage === stage);
     assert.equal(closed?.exitCode, 0);
     assert.equal(closed.signal, null);

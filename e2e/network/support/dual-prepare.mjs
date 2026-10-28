@@ -143,6 +143,45 @@ export async function prepareDual(root, output) {
     },
   );
   await writeFile(join(output, 'go-build.log'), built.stdout + built.stderr);
+  const edgeExecutable = join(
+    output,
+    process.platform === 'win32' ? 'dual-edge.exe' : 'dual-edge',
+  );
+  const edgeSource = 'e2e/network/support/dual-edge_test.go';
+  await source(edgeSource);
+  const edgeOverlay = join(output, 'edge-overlay.json');
+  await writeFile(
+    edgeOverlay,
+    JSON.stringify({
+      Replace: {
+        [join(root, 'infra/edge/send4_edge_fixture_test.go')]: join(
+          root,
+          edgeSource,
+        ),
+      },
+    }),
+  );
+  const edgeArgs = [
+    'test',
+    '-c',
+    '-overlay',
+    edgeOverlay,
+    '-o',
+    edgeExecutable,
+    '.',
+  ];
+  const edgeBuilt = await run('go', edgeArgs, {
+    cwd: join(root, 'infra/edge'),
+    windowsHide: true,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  await writeFile(
+    join(output, 'edge-build.log'),
+    JSON.stringify({ command: 'go', args: edgeArgs, exit: 0 }) +
+      '\n' +
+      edgeBuilt.stdout +
+      edgeBuilt.stderr,
+  );
   await writeFile(
     join(output, 'test-assembly-provenance.json'),
     JSON.stringify(
@@ -156,7 +195,11 @@ export async function prepareDual(root, output) {
       2,
     ),
   );
-  return { classpath: classes + delimiter + classpath, executable };
+  return {
+    classpath: classes + delimiter + classpath,
+    executable,
+    edgeExecutable,
+  };
 }
 if (
   process.argv[1] &&

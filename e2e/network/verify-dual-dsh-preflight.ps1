@@ -19,9 +19,10 @@ $test = Join-Path $directory 'e2e/network/support/send4-platform-origin_test.go'
 $overlay = Join-Path $output 'overlay.json'
 $replacement = @{}
 $replacement[(Join-Path $directory 'infra/edge/send4_platform_origin_test.go')] = $test
+$replacement[(Join-Path $directory 'infra/edge/send4_edge_fixture_test.go')] = Join-Path $directory 'e2e/network/support/dual-edge_test.go'
 [IO.File]::WriteAllText($overlay, (@{Replace=$replacement} | ConvertTo-Json -Depth 5), $utf8)
 $sources = [ordered]@{}
-foreach ($path in @('infra/edge/gateway.go', 'infra/edge/device_proxy.go', 'clients/dsh-plugin/src/network/device-provider.js')) {
+foreach ($path in @('infra/edge/config.go', 'infra/edge/iam_rpc.go', 'infra/edge/gateway.go', 'infra/edge/device_proxy.go', 'clients/dsh-plugin/src/network/device-provider.js')) {
   $sources[$path] = (Get-FileHash -LiteralPath (Join-Path $directory $path) -Algorithm SHA256).Hash
 }
 $log = Join-Path $output 'edge-routing.log'
@@ -30,8 +31,9 @@ $manifest = [ordered]@{
   scope = 'routing precondition only; no dual DSH, login, PG, SEND acceptance or business mutant'
   archiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
   testSha256 = (Get-FileHash -LiteralPath $test -Algorithm SHA256).Hash
+  edgeFixtureSha256 = (Get-FileHash -LiteralPath (Join-Path $directory 'e2e/network/support/dual-edge_test.go') -Algorithm SHA256).Hash
   sources = $sources
-  command = "go test -overlay <overlay.json> -count=1 -run ^TestSEND4PlatformOrigin$ -v ."
+  command = 'go test -overlay <overlay.json> -count=1 -run ^(TestSEND4PlatformOrigin|TestSEND4EdgeFixtureLifecycle|TestDeviceNetworkSubmitRuntimeSeparation)$ -v .'
   cwd = (Join-Path $directory 'infra/edge')
   exit = $null
   log = $log
@@ -42,7 +44,7 @@ try {
   try {
     $saved = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { & go test -overlay $overlay -count=1 -run '^TestSEND4PlatformOrigin$' -v . *> $log; $code = $LASTEXITCODE } finally { $ErrorActionPreference = $saved }
+    try { & go test -overlay $overlay -count=1 -run '^(TestSEND4PlatformOrigin|TestSEND4EdgeFixtureLifecycle|TestDeviceNetworkSubmitRuntimeSeparation)$' -v . *> $log; $code = $LASTEXITCODE } finally { $ErrorActionPreference = $saved }
     if ($null -eq $code) { throw 'Missing native exit code' }
     $manifest.exit = [int]$code
     $manifest.complete = $code -eq 0

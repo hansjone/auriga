@@ -6,6 +6,8 @@ import { natsTap, persistenceMarker } from './support/dual-proxy.mjs';
 import { replaceOnce } from './support/dual-prepare.mjs';
 import { mutate, sourcePath, verdict } from './support/dual-verdict.mjs';
 import { authenticatorCode } from './support/dual-cli.mjs';
+import { dualEdgeConfig } from './support/dual-edge.mjs';
+import { join } from 'node:path';
 
 test('普通登录的验证器按 RFC 6238 SHA1 当前真实计数生成六位码', () => {
   assert.equal(
@@ -13,6 +15,36 @@ test('普通登录的验证器按 RFC 6238 SHA1 当前真实计数生成六位�
     '287082',
   );
   assert.throws(() => authenticatorCode('invalid'));
+});
+
+test('双 DSH edge 独立配置固定 network HTTPS 上游和私有信任材料', () => {
+  const input = {
+    accessFile: 'access.json',
+    backend: 'http://127.0.0.1:30000',
+    gateway: {
+      https: 'https://127.0.0.1:30001',
+      ca: join('private', 'broker-cert.pem'),
+    },
+    directory: 'private',
+  };
+  const cfg = dualEdgeConfig(input);
+  assert.equal(cfg.upstreams['network-submit'], input.gateway.https);
+  assert.equal(cfg.upstreams.iam, input.backend);
+  assert.equal(cfg.upstreams['ai-device'], undefined);
+  assert.deepEqual(cfg.networkSubmitHop, {
+    certFile: join('private', 'broker-cert.pem'),
+    keyFile: join('private', 'broker-key.pem'),
+    caFile: input.gateway.ca,
+    serverName: 'localhost',
+  });
+  for (const https of [
+    'http://127.0.0.1:30001',
+    'https://example.com:30001',
+    'https://127.0.0.1:30001/path',
+  ])
+    assert.throws(() =>
+      dualEdgeConfig({ ...input, gateway: { ...input.gateway, https } }),
+    );
 });
 
 test('双 DSH 中继跨 WebSocket 分片保持 NATS 原字节且从不观察 CONNECT 凭据', () => {
@@ -65,6 +97,18 @@ const failure = () => ({
   host: { version: '0.2.1-rc.3' },
   completed: false,
   stages: [
+    {
+      stage: 'gateway-ready',
+      https: 'https://127.0.0.1:30001',
+      gatewayPid: 50,
+    },
+    {
+      stage: 'edge-ready',
+      pid: 100,
+      https: 'https://127.0.0.1:30002',
+      submitUpstream: 'https://127.0.0.1:30001',
+      serverName: 'localhost',
+    },
     ...['A', 'B'].map((name, i) => ({
       stage: 'dsh-ready',
       name,
@@ -79,7 +123,7 @@ const failure = () => ({
       exitCode: 0,
       signal: null,
     })),
-    ...['gateway-closed', 'java-closed'].map((stage) => ({
+    ...['edge-closed', 'gateway-closed', 'java-closed'].map((stage) => ({
       stage,
       exitCode: 0,
       signal: null,
@@ -96,8 +140,8 @@ const failure = () => ({
 test('SEND-4 反证拒绝其他错误、同进程、遗漏独立 profile 或清理失败', () => {
   verdict(failure(), 'SkipSubmissionCommit', 1);
   for (const change of [
-    (m) => (m.stages[1].pid = m.stages[0].pid),
-    (m) => (m.stages[1].profile = m.stages[0].profile),
+    (m) => (m.stages[3].pid = m.stages[2].pid),
+    (m) => (m.stages[3].profile = m.stages[2].profile),
     (m) => (m.businessFailure.message = 'timeout'),
     (m) => (m.stages.at(-1).exitCode = 1),
     (m) => m.failures.push({ message: 'PG survived' }),
@@ -108,4 +152,20 @@ test('SEND-4 反证拒绝其他错误、同进程、遗漏独立 profile 或清�
     assert.throws(() => verdict(m, 'SkipSubmissionCommit', 1));
   }
   assert.throws(() => verdict(failure(), 'SkipSubmissionCommit', 0));
+});
+
+test('SEND-4 验收必须经过独立 edge、固定 HTTPS submit 上游并干净退出', () => {
+  for (const change of [
+    (m) => (m.stages = m.stages.filter((v) => v.stage !== 'edge-ready')),
+    (m) => (m.stages[1].submitUpstream = 'https://127.0.0.1:30003'),
+    (m) => (m.stages[1].https = m.stages[0].https),
+    (m) => (m.stages[1].pid = m.stages[2].pid),
+    (m) => (m.stages[1].pid = m.stages[0].gatewayPid),
+    (m) => (m.stages[1].serverName = ''),
+    (m) => (m.stages.find((v) => v.stage === 'edge-closed').exitCode = 1),
+  ]) {
+    const m = failure();
+    change(m);
+    assert.throws(() => verdict(m, 'SkipSubmissionCommit', 1));
+  }
 });
