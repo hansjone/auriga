@@ -38,7 +38,7 @@ func TestNASNetworkSubmitConfiguration(t *testing.T) {
 	for _, name := range set.PublicFiles {
 		leaves[name] = true
 	}
-	for _, name := range []string{"network/edge.key", "network/client-ca.pem", "network/runtime.json", "network/gateway.secret", "network/platform.properties", "pki/gateway.key"} {
+	for _, name := range []string{"network/edge.key", "network/client-ca.pem", "network/runtime.json", "network-platform/gateway.secret", "network-platform/platform.properties", "network/broker.conf", "network/broker.pem", "network/broker.key", "network/server-ca.pem", "pki/gateway.key"} {
 		if !leaves[name] {
 			t.Fatalf("material absent from installation receipt: %s", name)
 		}

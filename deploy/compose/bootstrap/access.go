@@ -32,8 +32,11 @@ var identityMaterialFiles = []string{
 }
 
 func init() {
-	for _, name := range append(append([]string{}, networkdeploy.Files...), networkdeploy.CredentialFiles...) {
+	for _, name := range networkdeploy.Files {
 		identityMaterialFiles = append(identityMaterialFiles, "network/"+name)
+	}
+	for _, name := range networkdeploy.CredentialFiles {
+		identityMaterialFiles = append(identityMaterialFiles, "network-platform/"+name)
 	}
 }
 
@@ -95,7 +98,7 @@ func validateComposeKeys(raw []byte) error {
 }
 
 func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet, error) {
-	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "network"}}
+	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "network", "network-platform"}}
 	entries, err := os.ReadDir(filepath.Join(out, "templates"))
 	if err != nil {
 		return set, err

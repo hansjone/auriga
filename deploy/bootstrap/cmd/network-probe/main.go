@@ -10,10 +10,18 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/hansjone/auriga/deploy/bootstrap/network"
 )
 
 func main() {
-	if len(os.Args) != 3 || !ready(os.Args[1], os.Args[2]) {
+	if len(os.Args) != 3 {
+		os.Exit(2)
+	}
+	if err := network.CheckCertificates(os.Args[2], time.Now(), os.Stderr); err != nil {
+		os.Exit(1)
+	}
+	if os.Args[1] != "--certificates" && !ready(os.Args[1], os.Args[2]) {
 		os.Exit(1)
 	}
 }

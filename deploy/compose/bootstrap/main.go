@@ -57,7 +57,7 @@ func main() {
 	if !fixtureImagePattern.MatchString(*image) || !strings.Contains(*image, "/"+*fixture+"-dsh@") {
 		fatalf("-image must use selected exact local fixture repository@sha256:digest")
 	}
-	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%t\n%t", *image, *fixture, *observer, *accessFile != ""))...))
+	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\nnetwork-harden1-platform-dir\n%s\n%s\n%t\n%t", *image, *fixture, *observer, *accessFile != ""))...))
 	inputDigest := hex.EncodeToString(input[:])
 	existing, err := preflightRuntimeInstallation(*out)
 	if err != nil {
@@ -76,6 +76,9 @@ func main() {
 		clear(keys)
 		if err != nil {
 			fatalf("existing installation refused: %v", err)
+		}
+		if err := networkdeploy.CheckCertificates(filepath.Join(*out, "network"), time.Now(), os.Stderr); err != nil {
+			fatalf("%v", err)
 		}
 		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
 		return
@@ -103,7 +106,7 @@ func main() {
 	}
 	generateIdentityMaterials(*out)
 	rpc := map[string]string{"Target": fmt.Sprintf("127.0.0.1:%d", iamRPCPort), "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": iamServerName}
-	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{Root: "/etc/auriga/network", SubmitListen: "0.0.0.0:18443", BrokerHost: "127.0.0.1", BrokerURL: "tls://127.0.0.1:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil {
+	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "172.29.240.1:18443", BrokerHost: "127.0.0.1", BrokerURL: "tls://127.0.0.1:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil { // gitleaks:allow disposable M2 network
 		fatalf("generate network deployment: %v", err)
 	}
 	pub, fp, _, err := readIdentityPublic(*out)
@@ -183,7 +186,7 @@ func main() {
 		"accessConfigFile":  "/etc/auriga/access.json",
 		"allowLocalIngress": true,
 		"upstreams": map[string]string{
-			"network-submit": "https://host.docker.internal:18443",
+			"network-submit": "https://172.29.240.1:18443", // gitleaks:allow disposable M2 network
 			"iam":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
 			"org":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
 			"workspace":      fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
