@@ -1,10 +1,55 @@
-# T3b：生产来源链装配驱动
+# T3b/T4：生产来源链与真实公开宿主装配驱动
 
-这是隔离集成驱动，不是 Spring/安装器、真实 DSH、浏览器登录或 SEND 验收。
-唯一宿主上下文夹具来自插件现有 `host/native/fixtures.js`，不属于 T4。
+这是隔离集成驱动，不是 Spring/安装器、浏览器登录、双 DSH 往返或 SEND 验收。
+T4 已把 nativeFixture 替换成精确 `@deepseek-ai/dsh@0.2.1-rc.3` 公开服务：
+Context、SessionStore、JSONL、SessionController、AgentLoop、AgentRegistry、ToolRuntime，
+以及其实际依赖的工作区/存储/连接/凭据服务。它们在一个自有 Node 子进程中运行，
+两个 Context 仅是 MEMBER/EXTERNAL 来源测试端点，不代表两个完整 DSH 客户端。
 设备 HTTPS、Org/issuer、根批准公钥、IAM/collab/PG 均来自原 T3a Java 子进程。
 插件使用生产 device-provider、connection-runtime、NatsTransport、file-ledger、
 typed-local 登记和 source controller，不注入全业务 provider 或假业务响应。
+
+## T4 无模型宿主与独立反证
+
+`support/dsh-runtime` 原样复用 #229 隔离安装锁，npm ci 校验全部 integrity；
+顶层 DSH 的精确版本及 SHA512 另有守卫。准备/核验隔离 pnpm **11.28.6**，
+不读写用户全局 DSH、profile、系统信任或 Node 启动钩子。DSH_HOME、HOME、
+profile/cwd、JSONL、workspace/storage、credentials 均位于本次私有目录，
+子进程环境使用白名单，模型密钥不继承。没有注册任何 LLM provider，也不调用 prompt。
+SQLite 查询服务使用公开 `openAt: never`，保留真实点读/观察，不开启全文索引或 SQLite。
+
+普通会话通过公开 `ctx.agents.create` 的真实 AgentLoop 工厂创建并持有 handle；
+真实 `sessionController.resolveAgent/inspect`、SessionStore/JSONL flush 复核其对象和落盘。
+另有真实 `sessionController.create` 正控。join 由 `ctx.tools.execute` 派发到生产工具；
+不直接调用工具定义的 execute、不手造 agent、不 provide 假 controller。
+工具 waterfall/result 的对象编号与 factory publication、当前 registry/store 逐一对照，
+join 返回后还核真实 file-ledger 的 session/local 映射及 registered 状态。
+`member-native.json` / `external-native.json` 保留对象谱系和真实关闭事件；
+manifest 的 native-process 保存 PID、父 PID、OS 创建时间（Linux 为 boot/start ticks）。
+
+无 PG 的公开服务验收及可编译生产 overlay：
+
+```powershell
+node e2e/network/support/native-install.mjs --install
+node e2e/network/source-native.mjs --check
+# 提交后从干净精确 HEAD 运行，自动制作两份 archive 和独立插件依赖：
+node e2e/network/source-native.mjs --verify
+```
+
+两组使用完全相同的 `native-host-check.mjs`：正控核普通会话、真实回调、durable barrier，
+生命周期核真实 archive/unarchive、handle.dispose、真实 resume 后 agent/session 对象换代，
+以及会话身份错配。负控仅在 archive 内把生产 source-context 的三处对象相等检查降为 id
+相等，必须与正控一样通过插件 typecheck。唯一可接受的失败为 `ERR_ASSERTION`：
+`stale native object must not resolve after real agent/session replacement`，即旧真实 agent
+实际取得本地来源引用。任意异常、编译失败、其他失败或清理错误都不能算反证。
+两组均核全部已发布 agent 的 disposed 事件、测试私有目录删除及子进程正常退出。
+证据保存在 `target/native-verify-*`，包含精确 HEAD、archive/测试/生产源码 SHA256、
+完整命令日志和退出码、进程/对象谱系。这组使用本地映射测试值，不含 PG、远端来源或签名验收。
+
+真实网络矩阵仍沿下文执行；source-assembly 自动隔离安装 rc.3，保留原全部断言及
+SignatureBypass 判据。真实 stop 现在来自持有 handle 的 dispose 和公开宿主事件，
+原迟到 Get/Revoke、原 C/R/op 冻结及恢复断言不变。该全链须主控在新精确 HEAD 实跑；
+单独无 PG 两例不能证明 LOCAL_REGISTER/source register→get 或远端耐久 stop 已验收。
 
 关闭阶段只在自有子进程实际触发 close 后记录，包含原始 exitCode/signal；
 非零退出也保留 gateway-closed/java-closed 供诊断，同时保留失败。
@@ -115,6 +160,62 @@ file-commit observations 及 DB 快照。stdout/logs 保存前检查已知凭据
 编译、SQL、初始化、其他断言或清理错误一律不算业务反证。
 
 ## 旧头首失与待办
+
+主控对 `dfab776` 的返工4首失虽标注P2/F2，实际在第一次member.join等待工具时失败，
+尚无tools/execute或LOCAL_REGISTER，ledger localHighWater=0。非PG真实rc.3复现证明，
+新增输出schema的retryAfter使用type数组和minimum/maximum、attempts使用minimum/maximum，
+超出宿主强制JSON Schema子集，ToolRuntime.register抛UNSUPPORTED_SCHEMA；连接运行时
+捕获可选能力安装失败，因此基础READY正常但join工具缺失，并非删除了驱动取工具逻辑。
+
+输出改用宿主公开支持的oneOf(integer/null)与整数enum[1..5]。retry_after范围仍由经验签的
+生产帧检查保持1..86400，登记重试/期限/取消逻辑不变，未恢复驱动旁路。现有非PG
+`node e2e/network/source-native.mjs --check` 的普通会话检查改为实际安装生产登记能力、
+通过真实ToolRuntime登记、退役旧代能力并重新安装、新工具复用原R而旧工具拒绝；另以
+生产schema检查null/整数过载输出与非法attempts拒绝。真实宿主/JSONL/工具服务成立，
+该用例远端登记端口和输出探针是明确夹具，能力换代不是完整READY C替换或PG平台验收，
+后者仍由root在新精确HEAD复跑原整链；既有真实对象身份反证继续保留。
+
+主控对 `3d5a3b8` 的新首失是 critical/live-C pending outcome 的工具返回 unavailable。
+对象谱系仍为当前活 agent/session，JSONL durable 正控已过，ledger 保留 local=3 的原预约。
+其真实 LOCAL_REGISTER `d3ee664f-fb00-4cb8-86a5-757a302297f6` 已发出，gateway 记录同请求
+LocalRegister RPC 在 249ms（起始剩余249ms）被取消，随后收到同 request/epoch/nonce 的
+signed request-scope network.overloaded/retryable=true。不是未发登记或已发现的 native
+身份失配；原证据不能判定调用链哪个环节首先取消。旧驱动只调用一次真实工具，瞬时拒绝即失败。
+
+返工3依A审r1将恢复放入生产 `connectionRegistrar`，已删除返工2的驱动旁路重试、trust观测
+与 `*-registration-attempts.json`。驱动只调用一次真实 ToolRuntime，直接断言其生产结果；
+原完整帧、持久绑定、谱系及 critical/live-C pending 断言保留。
+
+生产仅在完整验签当前C的request-scope `network.overloaded` 且retryable=true时重发同一
+LOCAL_REGISTER原始字节（包含相同request_id），不更换预约、op、票、连接或会话，不重试
+source Register/Read/Fence。至多5次，100/200/400/800ms退避，等待取退避与签名retry_after
+的较大值；总时长仍受原登记5秒期限约束，等待无法容纳时立即保留原预约并报告过载。
+每次发送、验签、刷新及退避后重核连接/执行信号与活对象；取消或对象退役禁止继续绑定。
+持续过载向工具调用者返回unavailable以及reason=network.overloaded、retryable、retryAfter、
+attempts，不吞成无原因的unavailable；未验签或异受众不获得重试资格。
+生产路径测试 `session-registration-retry.test.js` 的宿主/签名夹具仅验证生产恢复及门禁；
+新精确HEAD仍须root复跑真实PG整链与反例，不冒双DSH对话或活C pending已验收。
+
+主控对 T4 `aa8924d` 实跑通过六组来源检查，Broker payload 探针缺少错误行而超时。
+与 T3b `bec85ca` 对账：探针、Broker account limits、生产 WSS socket factory 均未改；
+旧失败未保存该 socket 的原帧或 broker.log，不能回溯断言具体关闭原因。
+独立锁定 2.15.1 的真实 WSS/CLIENTS 复现表明：完整 65537 字节写入时，Broker 已记录
+`maximum payload exceeded: 65537 vs 65536`，客户端仍可能只收到 1006 异常关闭而丢失
+`-ERR`。不能将这种收包差异推断成限额失效，也不能将普通断连直接当作限额证据。
+
+新探针保留完整超限 body，增加完整 65536 字节+PONG 正控；开始前核初始及认证后 INFO
+的 server/CID 一致、账号 CLIENTS、精确 max_payload=65536。成功必须实际关闭，且由
+Node 主控只读本次 Java 私有根的固定 broker.log，以自有 Broker PID/启动 ID、公开
+WebSocket upgrade socket 的本地端口、CID、账号及 65537/65536 全部相等关联真实拒绝行。
+错误行收到与否都记录；普通关闭、协议错误、超时、其他账号/端口/CID/进程/大小或缺日志
+一律不通过。未增加监控端口或改 Broker/生产代码；CONNECT 和用户凭据不保存。
+`broker-probe.json` 在失败及成功均保存原 INFO/错误行/关闭结果；成功的
+`broker-guards.json.payloadEvidence` 另留脱敏的匹配 Broker 原日志行。
+
+`node --test e2e/network/assembly-broker.test.mjs` 核精确关联反例及两份完整 body；
+`node e2e/network/broker-payload-check.mjs --run` 用临时真实 Broker 跑 20 次完整边界/
+超限探针及普通关闭/协议错误反例，并确定性验证错误行缺失分支，finally 释放全部 socket
+和子进程。后者只有隔离静态认证夹具，无 IAM/callout/PG/DSH，不替代主控新 HEAD 全链。
 
 主控旧头 3726763 的 archive Control 首失是 prepare 参数错误和快照假定所有表都有 id，
 不是业务反证：现按真实 provider.prepare({signal}) 接线，并为复合主键 network_node

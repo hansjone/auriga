@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   createNativeHostPort,
   registrationSession,
@@ -14,8 +16,21 @@ import { verifyEnvelopeWithRefresh } from './trust/verifier.js';
 import { createKeyedMutex } from './host/keyed-mutex.js';
 import { digestOf } from './host/ledger.js';
 
+/** @typedef {{signal?:AbortSignal,assertCurrent?:()=>void}} RegistrationOperation
+ * @typedef {(entry:import('./host/ledger.js').LocalRegistration,operation?:RegistrationOperation)=>Promise<import('./host/ledger.js').RegistrationResult>} RegisterLocal */
+
+class RegistrationOverload extends Error {
+  /** @param {any} frame @param {number} attempts */
+  constructor(frame, attempts) {
+    super('network.overloaded');
+    this.retryable = frame.retryable;
+    this.retryAfter = frame.retry_after;
+    this.attempts = attempts;
+  }
+}
+
 /** Explicit registration capability; source establishment is automatic afterward.
- * @param {{ctx:any,ledger:import('./host/ledger.js').Ledger,registerLocal:import('./host/adapter.js').NetworkPort['registerLocal'],assertCurrent:()=>void,onStorageFailure?:()=>void,onRegistered?:(local:string)=>Promise<void>}} options */
+ * @param {{ctx:any,ledger:import('./host/ledger.js').Ledger,registerLocal:RegisterLocal,assertCurrent:()=>void,onStorageFailure?:()=>void,onRegistered?:(local:string)=>Promise<void>}} options */
 export function createSessionRegistration({
   ctx,
   ledger,
@@ -105,6 +120,12 @@ export function createSessionRegistration({
             properties: {
               status: { type: 'string', enum: ['registered', 'unavailable'] },
               address: { type: 'string' },
+              reason: { type: 'string', enum: ['network.overloaded'] },
+              retryable: { type: 'boolean' },
+              retryAfter: {
+                oneOf: [{ type: 'integer' }, { type: 'null' }],
+              },
+              attempts: { type: 'integer', enum: [1, 2, 3, 4, 5] },
             },
             required: ['status'],
             additionalProperties: false,
@@ -185,7 +206,10 @@ export function createSessionRegistration({
                 network: {
                   registerLocal: async (entry) => {
                     check();
-                    const result = await registerLocal(entry);
+                    const result = await registerLocal(entry, {
+                      signal: execution.signal,
+                      assertCurrent: check,
+                    });
                     check();
                     return result;
                   },
@@ -231,7 +255,23 @@ export function createSessionRegistration({
                 status: 'registered',
                 address: formatAddress(adapter.localAddress(local)),
               };
-            } catch {
+            } catch (error) {
+              if (error instanceof RegistrationOverload) {
+                try {
+                  current();
+                  execution.signal?.throwIfAborted();
+                  registrationSession(ctx, execution).check();
+                  return {
+                    status: 'unavailable',
+                    reason: 'network.overloaded',
+                    retryable: error.retryable,
+                    retryAfter: error.retryAfter,
+                    attempts: error.attempts,
+                  };
+                } catch {
+                  /* Retired execution must not report a live retry hint. */
+                }
+              }
               return { status: 'unavailable' };
             }
           });
@@ -253,7 +293,7 @@ export function createSessionRegistration({
  * Signature context uses READY nonce/epoch; fingerprint stays correlated with
  * the immutable original request, never invented from a response projection.
  * @param {{transport:import('./session/memory-pipe.js').TransportLike,trust:Awaited<ReturnType<typeof import('./trust/store.js').openTrustStore>>,identity:import('./host/ledger.js').LedgerIdentity,ready:{epoch:string,channelNonce:string,bootId:string},signal:AbortSignal,assertCurrent:()=>void,now:()=>number}} options
- * @returns {import('./host/adapter.js').NetworkPort['registerLocal']} */
+ * @returns {RegisterLocal} */
 export function connectionRegistrar({
   transport,
   trust,
@@ -263,13 +303,9 @@ export function connectionRegistrar({
   assertCurrent,
   now,
 }) {
-  return async (entry) => {
-    const current = () => {
-      signal.throwIfAborted();
-      assertCurrent();
-      trust.assertUsable();
-    };
-    current();
+  return async (entry, operation = {}) => {
+    // One logical request and original five-second budget across all attempts.
+    entry = { ...entry };
     const requestId = randomUUID();
     const bytes = encodeLocalRegister({
       requestId,
@@ -282,72 +318,126 @@ export function connectionRegistrar({
       expected_registration_revision: entry.expectedRegistrationRevision,
     });
     const request = decodeJson(bytes);
-    let off = () => {},
-      timer;
-    /** @type {()=>void} */
-    let abort = () => {};
-    let finished = false,
-      verifying = false;
+    const context = {
+      ...identity,
+      epoch: ready.epoch,
+      channelNonce: ready.channelNonce,
+      requestId,
+    };
+    const interrupted = new AbortController();
+    const abort = () =>
+      interrupted.abort(new Error('registration interrupted'));
+    const signals = [signal, operation.signal];
+    const started = performance.now();
+    /** @type {RegistrationOverload|undefined} */
+    let overload;
+    const timer = setTimeout(
+      () => interrupted.abort(overload ?? new Error('registration timeout')),
+      5000,
+    );
+    for (const value of signals) {
+      value?.addEventListener('abort', abort, { once: true });
+      if (value?.aborted) abort();
+    }
+    const current = () => {
+      interrupted.signal.throwIfAborted();
+      assertCurrent();
+      operation.assertCurrent?.();
+      trust.assertUsable();
+    };
     try {
-      const result = await new Promise((resolve, reject) => {
-        abort = () => reject(new Error('registration interrupted'));
-        signal.addEventListener('abort', abort, { once: true });
-        timer = setTimeout(
-          () => reject(new Error('registration timeout')),
-          5000,
-        );
-        off = transport.onMessage((payload) => {
-          void (async () => {
-            current();
-            if (finished || verifying) return;
-            const frame = decodeJson(payload);
-            if (frame.request_id !== requestId) return;
-            verifying = true;
-            await verifyEnvelopeWithRefresh(frame, {
-              trust: {
-                ...trust,
-                key(...args) {
-                  current();
-                  return trust.key(...args);
-                },
-                async refreshFor(...args) {
-                  current();
-                  await trust.refreshFor(...args);
-                  current();
-                },
-              },
-              context: {
-                ...identity,
-                epoch: ready.epoch,
-                channelNonce: ready.channelNonce,
-                requestId,
-              },
-              now,
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        current();
+        if (overload) overload.attempts = attempt;
+        let off = () => {},
+          finished = false,
+          verifying = false;
+        let onAbort = () => {};
+        let result;
+        try {
+          result = await new Promise((resolve, reject) => {
+            onAbort = () => reject(interrupted.signal.reason);
+            interrupted.signal.addEventListener('abort', onAbort, {
+              once: true,
+            });
+            off = transport.onMessage((payload) => {
+              void (async () => {
+                current();
+                if (finished || verifying) return;
+                const frame = decodeJson(payload);
+                if (frame.request_id !== requestId) return;
+                verifying = true;
+                await verifyEnvelopeWithRefresh(frame, {
+                  trust: {
+                    ...trust,
+                    key(...args) {
+                      current();
+                      return trust.key(...args);
+                    },
+                    async refreshFor(...args) {
+                      current();
+                      await trust.refreshFor(...args);
+                      current();
+                    },
+                  },
+                  context,
+                  now,
+                });
+                current();
+                if (!(
+                  frame.type === 'error' &&
+                  frame.code === 'network.overloaded' &&
+                  frame.scope === 'request' &&
+                  typeof frame.retryable === 'boolean' &&
+                  (frame.retry_after === null ||
+                    (Number.isSafeInteger(frame.retry_after) &&
+                      frame.retry_after >= 1 &&
+                      frame.retry_after <= 86400))
+                ))
+                  assertRegisterResult(frame, request);
+                resolve(frame);
+              })().catch(reject);
             });
             current();
-            assertRegisterResult(frame, request);
-            resolve(frame);
-          })().catch(reject);
-        });
+            void transport.send(bytes).catch(reject);
+          });
+        } finally {
+          finished = true;
+          off();
+          interrupted.signal.removeEventListener('abort', onAbort);
+        }
         current();
-        void transport.send(bytes).catch(reject);
-      });
-      current();
-      return {
-        status: 'registered',
-        registrationId: result.registration_id,
-        opId: entry.opId,
-        local: entry.local,
-        addressType: entry.addressType,
-        fingerprint: entry.fingerprint,
-        registrationRevision: result.registration_revision,
-        localHighWater: result.local_high_water,
-      };
+        if (result.type !== 'error')
+          return {
+            status: 'registered',
+            registrationId: result.registration_id,
+            opId: entry.opId,
+            local: entry.local,
+            addressType: entry.addressType,
+            fingerprint: entry.fingerprint,
+            registrationRevision: result.registration_revision,
+            localHighWater: result.local_high_water,
+          };
+        overload = new RegistrationOverload(result, attempt);
+        const backoff = Math.max(
+          100 * 2 ** (attempt - 1),
+          (overload.retryAfter ?? 0) * 1000,
+        );
+        if (
+          !overload.retryable ||
+          attempt === 5 ||
+          backoff >= 5000 - (performance.now() - started)
+        )
+          throw overload;
+        await delay(backoff, undefined, { signal: interrupted.signal });
+      }
+      throw overload;
+    } catch (error) {
+      if (interrupted.signal.aborted) throw interrupted.signal.reason;
+      throw error;
     } finally {
-      finished = true;
-      off();
       clearTimeout(timer);
-      signal.removeEventListener('abort', abort);
+      for (const value of signals) value?.removeEventListener('abort', abort);
     }
   };
 }

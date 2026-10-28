@@ -1,5 +1,5 @@
-// T3b native context is deliberately a fixture. All identity/network/key/source
-// decisions are made by the real Java/Broker/gateway production chain.
+// Real rc.3 public services in this isolated integration process. No model/SEND.
+/* global structuredClone */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -12,7 +12,8 @@ import { NatsTransport } from '../../../clients/dsh-plugin/src/network/transport
 import { createWsSocketFactory } from '../../../clients/dsh-plugin/src/network/transport/ws-socket.js';
 import { decodeJson } from '../../../clients/dsh-plugin/src/network/session/frames.js';
 import { digest } from '../../../clients/dsh-plugin/src/network/trust/verifier.js';
-import { fixture as nativeFixture } from '../../../clients/dsh-plugin/test/network/host/native/fixtures.js';
+import { createNativeHost } from './assembly-native.mjs';
+import { currentNativeProcess } from './native-process.mjs';
 import { waitUntil } from './assembly-process.mjs';
 import { brokerGuards } from './assembly-broker.mjs';
 import { criticalMatrix } from './assembly-critical.mjs';
@@ -69,6 +70,7 @@ const spec = JSON.parse(
 );
 const { ready, config, gateway, artifacts } = spec;
 const endpoints = [];
+const natives = [];
 const checks = [];
 const privateValues = [];
 let phase = 'initialization';
@@ -94,36 +96,17 @@ async function endpoint(name, devicePath) {
   const directory = join(dirname(ready.config), name);
   const cwd = join(directory, 'cwd');
   await mkdir(cwd, { recursive: true });
-  const native = nativeFixture();
-  native.stored.get('session-a').meta.cwd = cwd;
-  const agent = native.attach('session-a');
-  const tools = new Map(),
-    listeners = new Map(),
+  const native = await createNativeHost({
+    directory,
+    cwd,
+    runtime: spec.nativeRuntime,
+  });
+  natives.push({ name, native });
+  const agent = await native.create('session-a');
+  const tools = native.ctx.tools,
     frames = [],
     sockets = [],
     transports = [];
-  let cleanup = () => {};
-  native.ctx.tools = {
-    register(tool) {
-      tools.set(tool.name, tool);
-      return () => tools.delete(tool.name);
-    },
-  };
-  native.ctx.on = (event, callback) => {
-    listeners.set(event, callback);
-    return () => listeners.delete(event);
-  };
-  native.ctx.inject = (_services, callback) => {
-    native.ctx.effect = (effect) => {
-      cleanup = effect();
-    };
-    callback(native.ctx);
-    return {
-      dispose() {
-        cleanup();
-      },
-    };
-  };
   const roots = [
     {
       kid: config.rootKid,
@@ -207,7 +190,6 @@ async function endpoint(name, devicePath) {
     agent,
     runtime,
     tools,
-    listeners,
     frames,
     sockets,
     transports,
@@ -219,17 +201,56 @@ async function endpoint(name, devicePath) {
       JSON.parse(await readFile(join(directory, 'ledger/ledger.json'), 'utf8')),
     async join(executionAgent = agent) {
       await waitUntil(
-        () => tools.has('auriga_network_join'),
+        () => tools.get('auriga_network_join'),
         'join tool missing',
       );
-      const result = await tools
-        .get('auriga_network_join')
-        .execute({}, { agent: executionAgent });
+      const dispatched = await native.execute(executionAgent);
+      assert.equal(
+        dispatched.isError,
+        false,
+        'real ToolRuntime join dispatch failed',
+      );
+      const result = dispatched.value;
       assert.equal(
         result.status,
         'registered',
         'typed-local production registration failed',
       );
+      const created = native.events.find(
+        (event) =>
+          event.event === 'agent/created' && event.id === executionAgent.id,
+      );
+      const dispatchedEvent = native.events.findLast(
+        (event) =>
+          event.event === 'tools/execute' &&
+          event.name === 'auriga_network_join',
+      );
+      const completedEvent = native.events.findLast(
+        (event) =>
+          event.event === 'tools/result' &&
+          event.name === 'auriga_network_join',
+      );
+      assert.ok(
+        created?.ordinary && created.current && created.sessionCurrent,
+        'join must use a real ordinary agent factory publication',
+      );
+      for (const event of [dispatchedEvent, completedEvent]) {
+        assert.equal(event?.agentObject, created.agentObject);
+        assert.equal(event?.sessionObject, created.sessionObject);
+        assert.equal(event?.current, true);
+        assert.equal(event?.sessionCurrent, true);
+      }
+      assert.equal(completedEvent.callId, dispatchedEvent.callId);
+      assert.equal(completedEvent.status, 'registered');
+      const persisted = await value.ledger();
+      const binding = Object.values(persisted.bindings).find(
+        (entry) => entry.hostSessionId === executionAgent.id,
+      );
+      assert.ok(
+        binding,
+        'real native session must be bound in the durable ledger',
+      );
+      assert.equal(persisted.locals[binding.local].state, 'registered');
       return result;
     },
   };
@@ -295,6 +316,7 @@ function delivery(source, observation, connection, target) {
 }
 
 try {
+  emit({ stage: 'native-process', ...(await currentNativeProcess()) });
   const member = await endpoint('member', config.device);
   const external = await endpoint('external', config.externalDevice);
   phase = 'P1/READY persistence';
@@ -505,9 +527,7 @@ try {
     'fifth RPC positive control must reach live business authorization',
   );
   assert.equal(allowed.allowed, true);
-  member.native.agents.delete('session-a');
-  member.native.sessions.delete('session-a');
-  member.listeners.get('session/disposed')({ id: 'session-a' });
+  await member.native.dispose(member.agent.id);
   await waitUntil(
     async () => (await member.ledger()).sourceControl.entries['1'].stopped,
     'local stop not durable',
@@ -547,7 +567,17 @@ try {
 
   // Every claim is backed by frames, delegated generated RPC and DB snapshots.
   phase = 'Broker/ticket replay ACL and limits';
-  const guards = await brokerGuards(external.prepared, external.socketFactory);
+  const guards = await brokerGuards(external.prepared, external.socketFactory, {
+    async payloadEvidence(peer) {
+      return (await control({ op: 'broker-payload-evidence', peer })).proof;
+    },
+    async onEvidence(evidence) {
+      await writeFile(
+        join(artifacts, 'broker-probe.json'),
+        JSON.stringify(evidence, null, 2),
+      );
+    },
+  });
   await writeFile(
     join(artifacts, 'broker-guards.json'),
     JSON.stringify(guards, null, 2),
@@ -639,6 +669,26 @@ try {
   emit({ ...diagnostic, completedChecks: [...checks] });
   process.exitCode = 1;
 } finally {
-  for (const e of endpoints.reverse()) await e.runtime.close();
+  const cleanupErrors = [];
+  for (const e of endpoints.reverse()) {
+    try {
+      await e.runtime.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  for (const { name, native } of natives.reverse()) {
+    try {
+      await native.close();
+      await writeFile(
+        join(artifacts, `${name}-native.json`),
+        JSON.stringify(native.events, null, 2),
+      );
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
   input.close();
+  emit({ stage: 'native-closed', complete: cleanupErrors.length === 0 });
+  if (cleanupErrors.length) process.exitCode = 1;
 }

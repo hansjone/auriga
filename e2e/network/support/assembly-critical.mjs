@@ -1,3 +1,4 @@
+/* global structuredClone */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -83,8 +84,7 @@ export async function criticalMatrix({
     const local = (BigInt(state.localHighWater) + 1n).toString();
     await before(local);
     const id = `${label}-${randomUUID()}`;
-    e.native.seed(id, { cwd: e.agent.session.header.cwd });
-    const agent = e.native.attach(id);
+    const agent = await e.native.create(id);
     await e.join(agent);
     const value = await waitUntil(async () => {
       const s = await e.ledger(),
@@ -104,10 +104,8 @@ export async function criticalMatrix({
     );
     return { ...value, id, agent, local };
   }
-  function closeNative(value) {
-    e.native.agents.delete(value.id);
-    e.native.sessions.delete(value.id);
-    e.listeners.get('session/disposed')({ id: value.id });
+  async function closeNative(value) {
+    await e.native.dispose(value.id);
   }
   try {
     onPhase('critical/live-C miss and pending outcome');
@@ -305,7 +303,7 @@ export async function criticalMatrix({
       ),
       'late boundary must hold a real ACTIVE IAM response',
     );
-    closeNative(lost);
+    await closeNative(lost);
     await waitUntil(
       async () => forSession(await e.ledger(), lost.id).stopped,
       'native stop must be durable before revoke',
@@ -438,7 +436,7 @@ export async function criticalMatrix({
       'pending recovery must not fall back to Register',
     );
     assert.equal(missingTrace.filter((v) => v.phase === 'delegate').length, 0);
-    closeNative(missing);
+    await closeNative(missing);
     await clear();
     checks.push(
       'critical: live-C miss uses real Read/Fence, zero issuance/fence writes, exact UNKNOWN with original pending/outbox',
