@@ -169,7 +169,7 @@ services:
           '--key',
           '/etc/auriga/collab/client.key',
           '--resolve',
-          'collab.network.internal:8085:172.29.240.1',
+          'collab.network.internal:8085:172.29.240.1', # gitleaks:allow disposable M2 bridge
           'https://collab.network.internal:8085/actuator/health',
         ] # gitleaks:allow disposable M2 network
       interval: 5s
