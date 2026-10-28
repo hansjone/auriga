@@ -20,6 +20,7 @@ import { prepareDevice, assemblyDeviceProvider } from './assembly-device.mjs';
 import { assertReadyReplacement } from './assembly-ready.mjs';
 import { describeBusinessFailure } from './assembly-failure.mjs';
 import { gatewaySend } from './gateway-send.mjs';
+import { assemblyMailboxTransport } from './assembly-mailbox.mjs';
 import { pluginSend } from './plugin-send.mjs';
 
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
@@ -107,7 +108,8 @@ async function endpoint(name, devicePath) {
   const tools = native.ctx.tools,
     frames = [],
     sockets = [],
-    transports = [];
+    transports = [],
+    mailboxTransports = [];
   const roots = [
     {
       kid: config.rootKid,
@@ -208,6 +210,7 @@ async function endpoint(name, devicePath) {
     authorizeLocal: async (context) =>
       process.env.AURIGA_PLUGIN_SEND === '1' && context === localControl,
     transportFactory(options) {
+      const listeners = new Set();
       const transport = new NatsTransport({
         ...options,
         createSocket(url) {
@@ -218,6 +221,7 @@ async function endpoint(name, devicePath) {
         onMessage(bytes, epoch) {
           frames.push({ direction: 'down', frame: decodeJson(bytes) });
           options.onMessage?.(bytes, epoch);
+          for (const listener of listeners) listener(bytes, epoch);
         },
       });
       const send = transport.send.bind(transport);
@@ -226,6 +230,7 @@ async function endpoint(name, devicePath) {
         return send(bytes);
       };
       transports.push(transport);
+      mailboxTransports.push(assemblyMailboxTransport(transport, listeners));
       return transport;
     },
   });
@@ -238,6 +243,7 @@ async function endpoint(name, devicePath) {
     frames,
     sockets,
     transports,
+    mailboxTransports,
     observations,
     storageFailures,
     prepared,

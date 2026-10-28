@@ -15,6 +15,7 @@ import { IDENTITY, self, peer } from './host/fixtures.js';
 import { digest } from '../../src/network/trust/verifier.js';
 import { hasCursorEvidence } from '../../src/network/durable/recovery.js';
 import { createDeviceMessaging } from '../../src/network/durable/capability.js';
+import { setImmediate } from 'node:timers/promises';
 
 async function fixture(t, options = {}) {
   const n = nativeFixture(),
@@ -135,6 +136,7 @@ async function fixture(t, options = {}) {
           committed_cursor: options.receiptCursor ?? f.mail_seq,
         };
       } else if (f.type === 'fetch') {
+        await options.beforeFetch?.(f);
         const offset =
           f.continuation === null
             ? 0
@@ -292,6 +294,13 @@ async function fixture(t, options = {}) {
     trust: signer.trust,
     now: signer.now,
     signal: abort.signal,
+    head() {
+      const head = signer.seal(
+        { app_version: '1.0', type: 'head', epoch: '7', head_seq: '0' },
+        { ...signer.context, requestId: null },
+      );
+      for (const listener of listeners) listener(encodeJson(head), 1);
+    },
   };
 }
 
@@ -710,4 +719,120 @@ test('pending设置确认丢失且原会话卸载，messenger仍提供工具、�
   assert.equal(messaging.status.available, true);
   assert.equal(f.tools.has('auriga_send_message'), true);
   assert.deepEqual((await messaging.snapshot()).failures, []);
+});
+
+test('同连接HEAD、定时及接收控制同时触发时生产FETCH不重入也不积压轮询', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let release, entered;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const first = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let active = 0,
+    peak = 0,
+    count = 0;
+  const f = await fixture(t, {
+    async beforeFetch() {
+      active++;
+      peak = Math.max(peak, active);
+      if (++count === 1) {
+        entered();
+        await gate;
+      }
+      active--;
+    },
+  });
+  const messaging = createDeviceMessaging({
+    ctx: f.n.ctx,
+    ledger: f.ledger,
+    prepared: {
+      submit: async () => {
+        throw new Error('unused');
+      },
+    },
+    source: {},
+    transport: f.transport,
+    ready: f.ready,
+    trust: f.trust,
+    signal: f.signal,
+    assertCurrent() {},
+    now: f.now,
+  });
+  t.after(async () => {
+    release();
+    messaging.close();
+    await messaging.idle();
+  });
+  await messaging.start();
+  await first;
+  for (let i = 0; i < 32; i++) f.head();
+  t.mock.timers.tick(5000);
+  await messaging.setReceive({ local: '1', enabled: true });
+  await setImmediate();
+  assert.equal(count, 1);
+  assert.equal(
+    messaging.status.reason,
+    'ready',
+    'HEAD signatures must be accepted while FETCH is blocked',
+  );
+  release();
+  await messaging.idle();
+  assert.equal(
+    count,
+    1,
+    'busy triggers must coalesce instead of queueing extra FETCH',
+  );
+  t.mock.timers.tick(1000);
+  await messaging.idle();
+  assert.equal(count, 2, 'poll resumes after the previous FETCH completes');
+  assert.equal(peak, 1, 'only one production FETCH can be in flight per C');
+  assert.equal(f.requests.filter((v) => v.type === 'fetch').length, 2);
+  assert.equal(messaging.status.reason, 'ready');
+  messaging.close();
+  t.mock.timers.tick(5000);
+  await setImmediate();
+  assert.equal(count, 2, 'closing removes the poll timer');
+});
+
+test('同连接重复pull与continuation共用FETCH锁，服务端单并发槽始终不超限', async (t) => {
+  let release, entered;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const first = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let active = 0,
+    peak = 0,
+    count = 0;
+  const f = await fixture(t, {
+    committedCursor: '2',
+    async beforeFetch() {
+      active++;
+      peak = Math.max(peak, active);
+      if (++count === 1) {
+        entered();
+        await gate;
+      }
+      await setImmediate();
+      active--;
+    },
+  });
+  f.deliveries.push(f.terminal('1'), f.terminal('2'));
+  const pulling = f.inbox.pull();
+  await first;
+  const again = f.inbox.pull();
+  await setImmediate();
+  assert.equal(count, 1);
+  release();
+  await Promise.all([pulling, again]);
+  assert.equal(peak, 1);
+  assert.equal(count, 4);
+  assert.deepEqual(
+    f.requests.map((v) => v.continuation),
+    [null, 'opaque-next', null, 'opaque-next'],
+  );
+  assert.equal(f.store.snapshot().durable.resumeCursor, '2');
 });
