@@ -28,6 +28,9 @@ func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*Ma
 
 func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation string, raw []byte) ([]byte, *AppError) {
 	timeout := c.timeout
+	if operation == "submit" || receiveOperation(operation) {
+		timeout = 10 * time.Second
+	}
 	if sourceOperation(operation) {
 		if _, ae := decodeSourceRequest(raw, operation); ae != nil {
 			return nil, ae
@@ -41,6 +44,22 @@ func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation strin
 	var data []byte
 	var err error
 	switch operation {
+	case "submit":
+		var resp *collab.NetworkMailboxServiceSubmitResponse
+		resp, err = c.rpc.Submit(ctx, &collab.NetworkMailboxServiceSubmitRequest{Connection: id, SubmitJson: raw}, options...)
+		data = resp.GetResultJson()
+	case "receive_set":
+		var resp *collab.NetworkMailboxServiceReceiveSetResponse
+		resp, err = c.rpc.ReceiveSet(ctx, &collab.NetworkMailboxServiceReceiveSetRequest{Connection: id, FrameJson: raw}, options...)
+		data = resp.GetFrameJson()
+	case "attempt_begin":
+		var resp *collab.NetworkMailboxServiceAttemptBeginResponse
+		resp, err = c.rpc.AttemptBegin(ctx, &collab.NetworkMailboxServiceAttemptBeginRequest{Connection: id, FrameJson: raw}, options...)
+		data = resp.GetFrameJson()
+	case "execution_admit":
+		var resp *collab.NetworkMailboxServiceExecutionAdmitResponse
+		resp, err = c.rpc.ExecutionAdmit(ctx, &collab.NetworkMailboxServiceExecutionAdmitRequest{Connection: id, FrameJson: raw}, options...)
+		data = resp.GetFrameJson()
 	case "ready":
 		var resp *collab.NetworkMailboxServiceReadyResponse
 		resp, err = c.rpc.Ready(ctx, &collab.NetworkMailboxServiceReadyRequest{Connection: id, FrameJson: raw}, options...)

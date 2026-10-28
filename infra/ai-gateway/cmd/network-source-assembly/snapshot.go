@@ -16,7 +16,7 @@ import (
 
 var snapshotTables = map[string][]string{
 	"iam":    {"network_connection_anchor", "network_source_anchor", "network_source_chain", "network_source", "network_source_operation"},
-	"collab": {"network_node", "network_local_registration", "network_source_lineage", "network_source_operation", "network_source_outbox", "network_source_binding"},
+	"collab": {"network_node", "network_local_registration", "network_source_lineage", "network_source_operation", "network_source_outbox", "network_source_binding", "network_submit", "network_message", "network_mail_item", "network_recipient"},
 }
 
 func snapshotQuery(schema, table string) (string, error) {

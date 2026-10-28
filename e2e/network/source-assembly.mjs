@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { setInterval, clearInterval } from 'node:timers';
 import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -58,7 +59,10 @@ export async function runAssembly() {
     node: process.version,
     host: {
       ...hostPin,
-      kind: 'real public services; no CLI/UI, model or SEND',
+      kind:
+        process.env.AURIGA_GATEWAY_SEND === '1'
+          ? 'real public services; SEND-2 transport only, no CLI/UI, model or host acceptance'
+          : 'real public services; no CLI/UI, model or SEND',
     },
     stages: [],
     checks: [],
@@ -164,6 +168,7 @@ export async function runAssembly() {
           ...isolatedEnvironment(nativeProcessRoot),
           NODE_EXTRA_CA_CERTS: combinedCa,
           AURIGA_ASSEMBLY_PLUGIN: pluginConfig,
+          AURIGA_GATEWAY_SEND: process.env.AURIGA_GATEWAY_SEND,
         },
       },
     );

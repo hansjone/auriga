@@ -48,6 +48,7 @@ type liveBinding struct {
 	Tenant      string
 	Realm       string
 	Node        string
+	Device      string // Verified by RedeemNetworkTicket; never a submit claim.
 	NotAfter    time.Time
 	CheckAfter  time.Time
 	Revoked     bool
@@ -128,7 +129,7 @@ func (r *IAMRedeemer) Redeem(ctx context.Context, a Attempt) (Grant, error) {
 	// Store without ticket/access token. It is visible to reconciliation before
 	// sending the auth response, so successful CONNECT cannot escape tracking.
 	r.mu.Lock()
-	r.bindings[ingress] = liveBinding{Binding: Binding{ServerID: a.ServerID, ClientID: a.ClientID, Account: r.cfg.Account, Ingress: ingress}, Tenant: token.Tenant, Realm: resp.GetRealm(), Node: token.Node, NotAfter: expiry, CheckAfter: time.Now().Add(r.cfg.AuthTimeout)}
+	r.bindings[ingress] = liveBinding{Binding: Binding{ServerID: a.ServerID, ClientID: a.ClientID, Account: r.cfg.Account, Ingress: ingress}, Tenant: token.Tenant, Realm: resp.GetRealm(), Node: token.Node, Device: resp.GetDevice(), NotAfter: expiry, CheckAfter: time.Now().Add(r.cfg.AuthTimeout)}
 	onBind := r.onBind
 	r.mu.Unlock()
 	if onBind != nil {

@@ -148,6 +148,7 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
       iam =
           server(
               List.of(
+                  new IamGrpcDevices(devices),
                   new IamGrpcNetwork(network),
                   new IamGrpcNetworkAuthority(network, clock, sources),
                   faults.service(sources)),
