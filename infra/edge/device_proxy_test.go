@@ -91,7 +91,7 @@ func TestDeviceNativeNodeFetch(t *testing.T) {
 		t.Skip("Node.js is required for the native fetch integration regression")
 	}
 	var calls atomic.Int32
-	device := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		mode := r.Header.Values("Sec-Fetch-Mode")
 		if len(mode) != 1 || mode[0] != "cors" {
@@ -101,12 +101,18 @@ func TestDeviceNativeNodeFetch(t *testing.T) {
 			t.Error("native fetch device credential boundary lost")
 		}
 		w.WriteHeader(http.StatusAccepted)
-	}))
+	})
+	device := httptest.NewServer(handler)
 	t.Cleanup(device.Close)
-	_, addresses, _ := accessFixtureConfigured(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	network, hop := networkSubmitTestServer(t, handler)
+	g, addresses, _ := accessFixtureConfigured(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("native fetch reached platform instead of device runtime")
 		w.WriteHeader(http.StatusInternalServerError)
-	}), func(c *Config, _ map[string]any) { c.Upstreams["ai-device"] = device.URL })
+	}), func(c *Config, _ map[string]any) {
+		c.Upstreams["ai-device"] = device.URL
+		c.Upstreams["network-submit"], c.NetworkSubmitHop = network.URL, hop
+	})
+	closeAIAdminTransports(t, g)
 	const script = `
 import assert from 'node:assert/strict';
 const origin = process.argv[1];
