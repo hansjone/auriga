@@ -64,8 +64,8 @@ func (c *deviceControl) VerifyDeviceAiAccess(_ context.Context, r *iam.VerifyDev
 }
 func (c *deviceControl) GetMember(ctx context.Context, _ *org.GetMemberRequest) (*org.GetMemberResponse, error) {
 	if c.memberHook != nil {
-		if e := c.memberHook(ctx); e != nil {
-			return nil, e
+		if err := c.memberHook(ctx); err != nil {
+			return nil, err
 		}
 	}
 	if c.orgFailed.Load() {
