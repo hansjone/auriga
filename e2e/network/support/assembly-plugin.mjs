@@ -164,13 +164,27 @@ async function endpoint(name, devicePath) {
   }
   const store = createFileLedgerStore({ dir: join(directory, 'ledger') });
   const observations = [];
+  const storageFailures = [];
   const openFileStore = store.open.bind(store);
   store.open = async () => {
     const handle = await openFileStore();
     return {
       ...handle,
       async commit(value) {
-        await handle.commit(value);
+        try {
+          await handle.commit(value);
+        } catch (error) {
+          // Bounded metadata only: never persist arbitrary error text/paths,
+          // credentials or replacement snapshots as successful file commits.
+          if (storageFailures.length < 8)
+            storageFailures.push({
+              revision: value.revision,
+              code: /^[A-Z0-9_]{1,64}$/.test(error?.code ?? '')
+                ? error.code
+                : 'UNKNOWN',
+            });
+          throw error;
+        }
         // Observe only AFTER the genuine file ledger has completed its commit.
         for (const e of Object.values(value.sourceControl?.entries ?? {}))
           if (e.observation) observations.push(structuredClone(e.observation));
@@ -225,6 +239,7 @@ async function endpoint(name, devicePath) {
     sockets,
     transports,
     observations,
+    storageFailures,
     prepared,
     submissions,
     localControl,
@@ -694,6 +709,18 @@ try {
   // Preserve the real file commits/frames/DB facts on a business failure too.
   // A mutant's accepted bad signature must remain independently inspectable.
   for (const e of endpoints) {
+    await writeFile(
+      join(artifacts, `${e.name}-runtime.json`),
+      JSON.stringify(
+        {
+          status: e.runtime.status,
+          diagnostics: e.runtime.diagnostics,
+          storageFailures: e.storageFailures,
+        },
+        null,
+        2,
+      ),
+    );
     await writeFile(
       join(artifacts, `${e.name}-frames.json`),
       JSON.stringify(e.frames, null, 2),

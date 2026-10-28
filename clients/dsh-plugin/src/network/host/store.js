@@ -1,6 +1,7 @@
 import * as nodeFs from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { CODES, HostSeamError } from './errors.js';
 
 const MAIN = 'ledger.json';
@@ -155,7 +156,25 @@ export function createFileLedgerStore({
             await handle.close();
           }
           await beforeStep('rename');
-          await fs.rename(tmpPath, mainPath);
+          // Windows readers/scanners can briefly deny replacement. Retry only
+          // this atomic rename of the already synced bytes; never delete the
+          // destination or rewrite from an uncertain in-memory snapshot.
+          for (let attempt = 0; ; attempt++) {
+            try {
+              await fs.rename(tmpPath, mainPath);
+              break;
+            } catch (error) {
+              const failure = errno(error);
+              if (
+                platform !== 'win32' ||
+                typeof failure !== 'string' ||
+                !['EPERM', 'EACCES', 'EBUSY'].includes(failure) ||
+                attempt === 4
+              )
+                throw error;
+              await delay(10 * 2 ** attempt);
+            }
+          }
           await syncDir();
         },
         async close() {

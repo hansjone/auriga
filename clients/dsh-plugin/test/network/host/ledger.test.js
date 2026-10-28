@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as nodeFs from 'node:fs/promises';
 import { mkdtemp, rm, readFile, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -242,6 +243,124 @@ test('file ledger: stale lock of a dead pid is reclaimed, a live one is not', as
   const lock = JSON.parse(await readFile(join(dir, 'ledger.lock'), 'utf8'));
   assert.equal(lock.pid, process.pid);
   await ledger.close();
+});
+
+for (const transient of ['EPERM', 'EACCES', 'EBUSY'])
+  test(`file ledger: Windows ${transient} retries the same synced snapshot without removing the destination`, async (t) => {
+    const dir = await tempDir(t);
+    let failures = 0,
+      attempts = 0;
+    const store = createFileLedgerStore({
+      dir,
+      platform: 'win32',
+      fs: {
+        ...nodeFs,
+        async rename(from, to) {
+          attempts++;
+          if (failures-- > 0)
+            throw Object.assign(new Error('temporarily held by reader'), {
+              code: transient,
+            });
+          await nodeFs.rename(from, to);
+        },
+        async rm(path, options) {
+          assert.notEqual(
+            path,
+            join(dir, 'ledger.json'),
+            'atomic destination must never be deleted',
+          );
+          await nodeFs.rm(path, options);
+        },
+      },
+    });
+    const handle = await store.open();
+    t.after(() => handle.close());
+    await handle.commit({ original: true });
+    attempts = 0;
+    failures = 2;
+    await handle.commit({ accepted: true, originalRequest: 'unchanged' });
+    assert.equal(attempts, 3);
+    assert.deepEqual(await handle.load(), {
+      accepted: true,
+      originalRequest: 'unchanged',
+    });
+  });
+
+test('file ledger: persistent Windows rename denial remains bounded and keeps the prior snapshot', async (t) => {
+  const dir = await tempDir(t);
+  let deny = false,
+    attempts = 0;
+  const handle = await createFileLedgerStore({
+    dir,
+    platform: 'win32',
+    fs: {
+      ...nodeFs,
+      async rename(from, to) {
+        attempts++;
+        if (deny) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+        await nodeFs.rename(from, to);
+      },
+    },
+  }).open();
+  t.after(() => handle.close());
+  await handle.commit({ revision: 1 });
+  deny = true;
+  attempts = 0;
+  await assert.rejects(handle.commit({ revision: 2 }), code('EPERM'));
+  assert.equal(attempts, 5);
+  assert.deepEqual(await handle.load(), { revision: 1 });
+});
+
+test('file ledger: rename acknowledgement loss remains uncertain and never rewrites the destination', async (t) => {
+  const dir = await tempDir(t);
+  let unknown = false,
+    attempts = 0;
+  const handle = await createFileLedgerStore({
+    dir,
+    platform: 'win32',
+    fs: {
+      ...nodeFs,
+      async rename(from, to) {
+        attempts++;
+        await nodeFs.rename(from, to);
+        if (unknown)
+          throw Object.assign(new Error('rename acknowledgement lost'), {
+            code: 'EPERM',
+          });
+      },
+    },
+  }).open();
+  t.after(() => handle.close());
+  await handle.commit({ revision: 1 });
+  unknown = true;
+  attempts = 0;
+  await assert.rejects(handle.commit({ revision: 2 }), code('ENOENT'));
+  assert.equal(attempts, 2);
+  assert.deepEqual(await handle.load(), { revision: 2 });
+});
+
+test('file ledger: POSIX permission and Windows non-transient errors do not retry', async (t) => {
+  for (const [platform, failure] of [
+    ['linux', 'EPERM'],
+    ['win32', 'ENOSPC'],
+  ]) {
+    const dir = await tempDir(t);
+    let attempts = 0;
+    const handle = await createFileLedgerStore({
+      dir,
+      platform,
+      fs: {
+        ...nodeFs,
+        async rename() {
+          attempts++;
+          throw Object.assign(new Error('denied'), { code: failure });
+        },
+      },
+    }).open();
+    t.after(() => handle.close());
+    await assert.rejects(handle.commit({ revision: 1 }), code(failure));
+    assert.equal(attempts, 1);
+  }
 });
 
 test('file ledger: crash mid-commit keeps the previous snapshot; ENOSPC never half-applies', async (t) => {
