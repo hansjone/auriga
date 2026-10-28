@@ -119,6 +119,10 @@ export interface PreparedConnection {
   kind: 'device-connection';
   url: string;
   roots: NetworkInstallation['roots'];
+  submit?(
+    request: import('../generated/network/SubmitRequest.js').SubmitRequest,
+    signal: AbortSignal,
+  ): Promise<Uint8Array>;
   register(signal: AbortSignal): Promise<DeviceRegistration>;
   getTicket(
     signal: AbortSignal,

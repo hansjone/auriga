@@ -217,6 +217,11 @@ export function createNetworkLifecycle(options) {
         throw new Error('network consent unavailable');
       return runtime.consentUI(context);
     },
+    messagingUI(/** @type {unknown} */ context) {
+      if (!runtime || !authenticated || disposed || !('messagingUI' in runtime))
+        throw new Error('messaging unavailable');
+      return runtime.messagingUI(context);
+    },
     async close() {
       disposed = true;
       authenticated = false;

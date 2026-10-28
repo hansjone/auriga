@@ -60,9 +60,11 @@ export async function runAssembly() {
     host: {
       ...hostPin,
       kind:
-        process.env.AURIGA_GATEWAY_SEND === '1'
-          ? 'real public services; SEND-2 transport only, no CLI/UI, model or host acceptance'
-          : 'real public services; no CLI/UI, model or SEND',
+        process.env.AURIGA_PLUGIN_SEND === '1'
+          ? 'real public services; production ToolRuntime SEND and native durable acceptance; two Contexts in one owned process, no model conversation'
+          : process.env.AURIGA_GATEWAY_SEND === '1'
+            ? 'real public services; SEND-2 transport only, no CLI/UI, model or host acceptance'
+            : 'real public services; no CLI/UI, model or SEND',
     },
     stages: [],
     checks: [],
@@ -169,6 +171,7 @@ export async function runAssembly() {
           NODE_EXTRA_CA_CERTS: combinedCa,
           AURIGA_ASSEMBLY_PLUGIN: pluginConfig,
           AURIGA_GATEWAY_SEND: process.env.AURIGA_GATEWAY_SEND,
+          AURIGA_PLUGIN_SEND: process.env.AURIGA_PLUGIN_SEND,
         },
       },
     );

@@ -41,7 +41,7 @@ export function readyCandidate(result) {
 /** Call only after authenticating the complete original READY_RESULT object.
  * Unknown optional fields remain covered by its signature.
  * @param {any} result
- * @param {{realm:string,node:string,nodeIncarnation:string,epoch:string,requestId:string}} expected */
+ * @param {{realm:string,node:string,nodeIncarnation:string,epoch:string,requestId:string,allowRecoveryConflict?:boolean}} expected */
 export function assertReadyResult(result, expected) {
   readyCandidate(result);
   const identity = result.node_identity;
@@ -61,6 +61,8 @@ export function assertReadyResult(result, expected) {
     audience?.incarnation !== identity.incarnation ||
     audience?.epoch !== result.epoch ||
     result.epoch !== expected.epoch ||
+    (result.producer_epoch !== undefined &&
+      !uint64(result.producer_epoch, true)) ||
     ![
       'head_seq',
       'committed_cursor',
@@ -85,7 +87,10 @@ export function assertReadyResult(result, expected) {
     new Set(result.required_features).size !== result.required_features.length
   )
     throw new SessionError('network.protocol_error', 'invalid READY_RESULT');
-  if (result.status !== 'ready')
+  if (
+    result.status !== 'ready' &&
+    !(expected.allowRecoveryConflict && result.status === 'recovery_conflict')
+  )
     throw new SessionError('ready_failed', 'READY_RESULT not ready');
   const supported = [
     'server_auth_v1',

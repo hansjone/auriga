@@ -21,6 +21,7 @@ import { prepareDevice } from './assembly-device.mjs';
 import { assertReadyReplacement } from './assembly-ready.mjs';
 import { describeBusinessFailure } from './assembly-failure.mjs';
 import { gatewaySend } from './gateway-send.mjs';
+import { pluginSend } from './plugin-send.mjs';
 
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
 const input = createInterface({ input: process.stdin });
@@ -116,24 +117,57 @@ async function endpoint(name, devicePath) {
       ),
     },
   ];
-  const provider = createDeviceProvider({
-    config: {
-      platformOrigin: ready.https,
-      issuer: ready.https,
-      clientId: 'bridge-device',
-      providerId: 'bridge',
-      network: { realm: config.realm, wssUrl: gateway.wss, roots },
-    },
-    async getDevice() {
-      const device = JSON.parse(await readFile(devicePath, 'utf8'));
-      privateValues.push(device.access_token, device.refresh_token);
-      const claims = JSON.parse(
-        Buffer.from(device.access_token.split('.')[1], 'base64url').toString(),
+  const providerAt = (origin) =>
+    createDeviceProvider({
+      config: {
+        platformOrigin: origin,
+        issuer: ready.https,
+        clientId: 'bridge-device',
+        providerId: 'bridge',
+        network: { realm: config.realm, wssUrl: gateway.wss, roots },
+      },
+      async getDevice() {
+        const device = JSON.parse(await readFile(devicePath, 'utf8'));
+        privateValues.push(device.access_token, device.refresh_token);
+        const claims = JSON.parse(
+          Buffer.from(
+            device.access_token.split('.')[1],
+            'base64url',
+          ).toString(),
+        );
+        return { accessToken: device.access_token, claims };
+      },
+    });
+  const prepared = await prepareDevice(
+    providerAt(ready.https),
+    new AbortController().signal,
+  );
+  const submissions = [];
+  if (process.env.AURIGA_PLUGIN_SEND === '1') {
+    // The bridge exposes IAM and submit at separate real HTTPS origins. Both
+    // ports are production device providers with the same genuine credential;
+    // no whole-business provider or fake success response is installed.
+    const sending = await prepareDevice(
+      providerAt(gateway.https),
+      new AbortController().signal,
+    );
+    prepared.submit = async (request, signal) => {
+      const saved = JSON.parse(
+        await readFile(join(directory, 'ledger/ledger.json'), 'utf8'),
       );
-      return { accessToken: device.access_token, claims };
-    },
-  });
-  const prepared = await prepareDevice(provider, new AbortController().signal);
+      const entry = Object.values(saved.durable?.submissions ?? {}).find(
+        (v) => v.request.idempotency.key === request.idempotency.key,
+      );
+      submissions.push({
+        key: request.idempotency.key,
+        durable:
+          !!entry &&
+          JSON.stringify(entry.request) === JSON.stringify(request) &&
+          !!entry.bindingId,
+      });
+      return sending.submit(request, signal);
+    };
+  }
   const store = createFileLedgerStore({ dir: join(directory, 'ledger') });
   const observations = [];
   const openFileStore = store.open.bind(store);
@@ -153,6 +187,7 @@ async function endpoint(name, devicePath) {
     ca: await readFile(gateway.ca),
     rejectUnauthorized: true,
   });
+  const localControl = Object.freeze({});
   const runtime = await openConnectionRuntime({
     kind: 'device-connection',
     prepared,
@@ -162,7 +197,8 @@ async function endpoint(name, devicePath) {
     getAccess: async () => {
       throw new Error('AI credential is outside T3b');
     },
-    authorizeLocal: async () => false,
+    authorizeLocal: async (context) =>
+      process.env.AURIGA_PLUGIN_SEND === '1' && context === localControl,
     transportFactory(options) {
       const transport = new NatsTransport({
         ...options,
@@ -196,6 +232,8 @@ async function endpoint(name, devicePath) {
     transports,
     observations,
     prepared,
+    submissions,
+    localControl,
     socketFactory,
     directory,
     ledger: async () =>
@@ -471,6 +509,10 @@ try {
 
   // No virtual clock. IAM uses T3a's real 180s source policy; the native
   // witness separately bounds each observation. Wait through the saved expiry.
+  if (process.env.AURIGA_PLUGIN_SEND === '1') {
+    phase = 'SEND-3 production plugin send and durable native receipt';
+    await pluginSend({ member, external, snapshot, checks, artifacts });
+  }
   if (process.env.AURIGA_GATEWAY_SEND === '1') {
     phase = 'SEND-2 gateway submit and cross-identity zero writes';
     await gatewaySend({

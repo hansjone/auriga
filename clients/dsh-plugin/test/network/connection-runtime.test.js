@@ -15,7 +15,9 @@ import { openLedger, reserveLocal } from '../../src/network/host/ledger.js';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IDENTITY } from './host/fixtures.js';
+import { IDENTITY, createFixturePlatform } from './host/fixtures.js';
+import { createHostAdapter } from '../../src/network/host/adapter.js';
+import { saveProducerEpoch } from '../../src/network/durable/outbox.js';
 import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
 import { signingInput } from '../../src/network/trust/verifier.js';
@@ -288,6 +290,89 @@ function registrationHost() {
   };
   return { ...host, agent, tools, unload: () => cleanup() };
 }
+
+test('signed READY cursor only reconciles a complete retained acceptance prefix on a fresh C', async (t) => {
+  const host = registrationHost();
+  const store = createMemoryLedgerStore();
+  const ledger = await openLedger({
+    store,
+    identity: IDENTITY,
+    initialize: true,
+  });
+  await saveProducerEpoch(ledger, '42');
+  const platform = createFixturePlatform();
+  const adapter = createHostAdapter({
+    ledger,
+    host: await (
+      await import('../../src/network/host/native/host-port.js')
+    ).createNativeHostPort({ ctx: host.ctx }),
+    network: platform.network,
+  });
+  await adapter.bindExistingSession({
+    opId: 'join-1',
+    hostSessionId: host.agent.id,
+    cwd: host.agent.session.header.cwd,
+    kind: 'session',
+  });
+  const binding = ledger.peek().bindings['1'];
+  await ledger.update((draft) => {
+    draft.durable.inbound['recipient-1'] = {
+      delivery: {
+        type: 'delivery',
+        delivery_id: 'delivery-1',
+        mail_seq: '1',
+        source_context: { message_digest: 'sha256:' + 'a'.repeat(64) },
+      },
+      recipientId: 'recipient-1',
+      local: '1',
+      bindingId: binding.bindingId,
+      hostSessionId: binding.hostSessionId,
+      attemptId: 'attempt-1',
+      epoch: '1',
+      stateVersion: '1',
+      stage: 'accepted',
+      admission: {},
+      receipt: {
+        delivery_id: 'delivery-1',
+        mail_seq: '1',
+        results: [
+          {
+            recipient_id: 'recipient-1',
+            host_request_id: 'recipient-1',
+            message_digest: 'sha256:' + 'a'.repeat(64),
+            status: 'host_accepted',
+          },
+        ],
+      },
+    };
+  });
+  await ledger.close();
+  const f = await fixture(t, {
+    ledger: store,
+    ctx: {},
+    result(id, request) {
+      assert.equal(request.resume_cursor, id === 1 ? '0' : '1');
+      return {
+        producer_epoch: '42',
+        head_seq: '1',
+        committed_cursor: '1',
+        local_high_water: '1',
+        registration_revision: '1',
+        status: id === 1 ? 'recovery_conflict' : 'ready',
+      };
+    },
+  });
+  await f.runtime.start();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(f.connections.length, 2);
+  assert.equal(f.connections[0].state, 'stopped');
+  assert.equal(store.snapshot().durable.resumeCursor, '1');
+  assert.equal(
+    store.snapshot().durable.inbound['recipient-1'].stage,
+    'accepted',
+    'READY cursor is not an acceptance receipt',
+  );
+});
 
 test('bootstrap and normal READY retry authenticated overload with identical requests and no extra connections', async (t) => {
   const sends = new Map();
