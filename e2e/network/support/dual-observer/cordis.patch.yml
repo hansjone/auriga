@@ -1,0 +1,4 @@
+- insert:
+    - id: auriga-send4-observer
+      name: auriga-send4-observer
+      config: {}
