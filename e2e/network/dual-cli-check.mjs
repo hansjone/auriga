@@ -1,6 +1,6 @@
 // Independent host/control precondition only. No platform login or SEND claimed.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateKeyPairSync } from 'node:crypto';
@@ -9,11 +9,16 @@ import { defaultRuntime } from './support/native-install.mjs';
 import { createDualProxy } from './support/dual-proxy.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2).join(' ');
-assert.ok(['--run', '--run --connect'].includes(args));
-const configured = args === '--run --connect';
-const scope = configured
-  ? 'two configured CLI profiles: settings active and login status 200 only; no login, PG or SEND'
-  : 'full CLI isolation/control only; no login, PG or SEND';
+assert.ok(
+  ['--run', '--run --connect', '--run --connect --diagnostic'].includes(args),
+);
+const diagnostic = args === '--run --connect --diagnostic';
+const configured = args.includes('--connect');
+const scope = diagnostic
+  ? 'real CLI login failure diagnostics: trusted HTTPS upstream 503 versus untrusted TLS; no IAM login, PG or SEND'
+  : configured
+    ? 'two configured CLI profiles: settings active and login status 200 only; no login, PG or SEND'
+    : 'full CLI isolation/control only; no login, PG or SEND';
 await mkdir(join(root, 'e2e/network/target'), { recursive: true });
 const artifacts = await mkdtemp(
   join(root, 'e2e/network/target/dual-cli-check-'),
@@ -21,13 +26,15 @@ const artifacts = await mkdtemp(
 const hosts = [],
   evidence = [],
   failures = [];
-let proxy;
+let proxy, untrusted;
 try {
   let roots;
   if (configured) {
     // No backend is attached and no login is attempted. This supplies a real
     // random HTTPS installation origin/CA, never fake authenticated responses.
     proxy = await createDualProxy(join(artifacts, 'private/tls'));
+    if (diagnostic)
+      untrusted = await createDualProxy(join(artifacts, 'private/untrusted'));
     roots = [
       {
         kid: 'profile-check-root',
@@ -46,7 +53,7 @@ try {
       name,
       ...(configured
         ? {
-            ca: proxy.ca,
+            ca: diagnostic && name === 'B' ? untrusted.ca : proxy.ca,
             connect: {
               platformOrigin: proxy.origin,
               issuer: proxy.origin,
@@ -79,6 +86,17 @@ try {
         profile: h.profile,
         readiness: h.readiness,
       });
+      if (diagnostic) {
+        const status = await h.request('/auriga/local-login/status');
+        await assert.rejects(
+          h.request(
+            '/auriga/local-login/login',
+            { action: 'begin' },
+            status.csrf,
+          ),
+          /\/auriga\/local-login\/login: 503/,
+        );
+      }
       continue;
     }
     const created = await h.control({ op: 'create', id: 'send4-target' });
@@ -102,9 +120,32 @@ try {
     }
   try {
     await proxy?.close();
+    await untrusted?.close();
   } catch (error) {
     failures.push(error);
   }
+  if (diagnostic)
+    for (const entry of evidence) {
+      try {
+        const log = await readFile(
+          join(artifacts, entry.name + '-host.log'),
+          'utf8',
+        );
+        const lines = [...log.matchAll(/local route failure (\{[^\r\n]+\})/g)];
+        assert.equal(lines.length, 1);
+        const value = JSON.parse(lines[0][1]);
+        assert.equal(value.operation, 'begin');
+        assert.equal(
+          value.category,
+          entry.name === 'A' ? 'platform_http' : 'tls',
+        );
+        if (entry.name === 'A') assert.equal(value.status, 503);
+        else assert.equal(value.code, 'DEPTH_ZERO_SELF_SIGNED_CERT');
+        entry.diagnostic = value;
+      } catch (error) {
+        failures.push(error);
+      }
+    }
   await writeFile(
     join(artifacts, 'evidence.json'),
     JSON.stringify(

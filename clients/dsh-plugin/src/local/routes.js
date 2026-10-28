@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer';
 import { createConsentRoutes } from './consent-routes.js';
 import { createMessagingRoutes } from './messaging-routes.js';
 import { PlatformError } from './platform.js';
+import { localFailureDiagnostic } from './diagnostic.js';
 const BASE = '/auriga/local-login';
 const assets = new Map([
   ['adapter.js', new URL('../login/local-adapter.js', import.meta.url)],
@@ -29,8 +30,13 @@ export function createUnconfiguredLoginRoutes(connection) {
     },
   });
 }
-/** @param {{runtime:any,admission:any}} options */
-export function createConnectRoutes({ runtime, admission }) {
+/** @param {{runtime:any,admission:any,diagnostic?:(value:object)=>void}} options */
+export function createConnectRoutes({
+  runtime,
+  admission,
+  diagnostic = (value) =>
+    console.warn('[auriga-dsh] local route failure ' + JSON.stringify(value)),
+}) {
   const consent = createConsentRoutes(runtime);
   const messaging = createMessagingRoutes(runtime);
   /** @param {import('node:http').ServerResponse} res @param {number} status @param {unknown} body @param {string|string[]} [cookies] */
@@ -60,12 +66,14 @@ export function createConnectRoutes({ runtime, admission }) {
       return;
     }
     const path = (req.url ?? '').split('?')[0];
+    let operation = 'request';
     if (!runtime && path !== BASE && !path.startsWith(BASE + '/assets/'))
       return json(res, 404, { code: 'common.not_found' });
     if (path.startsWith(BASE + '/consent/')) return consent(req, res);
     if (path.startsWith(BASE + '/messaging/')) return messaging(req, res);
     try {
       if (req.method === 'GET' && path === BASE + '/status') {
+        operation = 'status';
         const result = runtime.prepare(req);
         return json(res, 200, result.body, result.setCookie);
       }
@@ -128,6 +136,7 @@ export function createConnectRoutes({ runtime, admission }) {
           }
         } else if (Object.keys(input).length !== 0)
           return json(res, 400, { code: 'common.validation_failed' });
+        operation = path === BASE + '/logout' ? 'logout' : input.action;
         const onClose = () => {
           if (!res.writableEnded)
             void runtime.cancelAttempt(req).catch(() => {});
@@ -202,6 +211,11 @@ export function createConnectRoutes({ runtime, admission }) {
           ].includes(error.code ?? '')
         )
           return json(res, error.status, { code: error.code });
+      }
+      try {
+        diagnostic({ operation, ...localFailureDiagnostic(error) });
+      } catch {
+        // Diagnostics must never change the existing failure-closed response.
       }
       json(res, 503, { code: 'common.unavailable' });
     }

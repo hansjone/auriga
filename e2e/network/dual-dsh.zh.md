@@ -9,7 +9,9 @@
 路由 preflight 使用分别独立的 model HTTP 与 network HTTPS 上游，并核固定信任。
 主控对 bec49fc 的全链运行已通过宿主安装和 Java/Team/network/edge 启动，随后首次登录状态请求返回503。
 驱动现以公开设置的 activeOrigin 和原生 profile 依赖就绪为启动条件，两个真实 CLI 的
-配置及登录状态200预检通过；尚未重新取得完整普通登录/双向业务结果。
+配置及登录状态200预检通过。主控对1dea6c6运行已进一步到登录调用503，真实异常原先被兜底吞掉；
+现补充下述脱敏分类诊断。本工位PG仍报restricted-token 87/3，尚未定位该次IAM登录失败的确切根因，
+没有完整普通登录/双向业务结果。
 因此以下收发/故障/反证断言是已实现的验收路径，不能据此宣称业务验收通过。
 `dual-dsh-blocker.zh.md` 描述的是修复候选合入前的历史首失。
 
@@ -25,6 +27,8 @@ node e2e/network/support/native-install.mjs --install
 node e2e/network/dual-cli-check.mjs --run
 # 启用真实连接配置，仅核两个隔离 profile 的 activeOrigin/status 与登录前准入，不认证：
 node e2e/network/dual-cli-check.mjs --run --connect
+# 故障诊断探针：真实CLI分别核受信HTTPS上游503与不受信TLS，均应失败；不是登录成功验收：
+node e2e/network/dual-cli-check.mjs --run --connect --diagnostic
 # 真实 PG/Broker/HTTPS/WSS 与两个完整客户端；失败不会 skip：
 node e2e/network/source-dual-dsh.mjs --run
 # 提交后由主控在能启动 PG 的环境执行：
@@ -37,6 +41,18 @@ $head = (git rev-parse HEAD).Trim()
 其 `--connect` 模式使用随机回环 HTTPS 安装 Origin、每端独立 network 配置及公开根公钥，
 不附加认证后端、不登录、不请求模型。要求两端 settings.activeOrigin 生效、status200且
 available=true/loggedIn=false，并确认登录前业务控制仍被原生准入拒绝401。
+`--diagnostic` 在同一真实CLI登录begin调用中，A使用受信CA并收到无后端代理的503，B故意使用
+另一份CA而被TLS拒绝。它只核诊断能区分上游HTTP失败和证书失败，不生成成功IAM响应、凭据或session。
+
+### 登录故障诊断
+
+本机登录路由原兜底503的HTTP响应与鉴权规则不变；宿主stderr增加一行
+`[auriga-dsh] local route failure`，只含固定操作名、类别、白名单错误码及上游状态。
+类别包括tls、network、platform_http、native_step、timeout、cancelled、unexpected。
+不记录原异常message/stack、URL、请求体/头、任意上游code或任何凭据。
+`A/B-host.log`已保存脱敏stderr；错误日志自身失败也不改变原HTTP响应。
+root重跑后先核operation为begin还是advance/resume，再依据类别检查CA/网络、IAM状态或原生步骤。
+这些分类不构成根因推测，也不放宽任何登录或业务断言。
 直接运行全链默认安装本次独立锁定 runtime；开发时可通过 `AURIGA_DSH_RUNTIME` 指定
 已安装的锁定 rc.3 目录。归档验收清除此覆盖，每个变体自行安装，不继承其他工位 runtime。
 

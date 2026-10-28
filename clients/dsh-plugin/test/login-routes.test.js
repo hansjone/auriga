@@ -11,6 +11,7 @@ import { PlatformError } from '../src/local/platform.js';
 function fixture(options = {}) {
   let writes = 0;
   const handler = createConnectRoutes({
+    diagnostic: options.diagnostic ?? (() => {}),
     runtime: {
       prepare: () => ({ body: {} }),
       checkCsrf: () => true,
@@ -78,6 +79,97 @@ test('fixed browser module graph is served with CSP; logout GET/query never writ
   assert.equal((await request(handler, '/logout')).status, 404);
   assert.equal((await request(handler, '/assets/../runtime.js')).status, 404);
   assert.equal(writes(), 0);
+});
+
+test('fallback diagnosis preserves TLS/platform/native categories without exception or request secrets', async () => {
+  for (const [error, expected] of [
+    [
+      new TypeError('private SECRET', {
+        cause: Object.assign(
+          new Error('https://user:password@example.com/?token=SECRET'),
+          { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' },
+        ),
+      }),
+      { category: 'tls', code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' },
+    ],
+    [
+      new TypeError('private SECRET', {
+        cause: Object.assign(new Error('Cookie: SECRET'), {
+          code: 'ECONNREFUSED',
+        }),
+      }),
+      { category: 'network', code: 'ECONNREFUSED' },
+    ],
+    [
+      new PlatformError(403, 'common.forbidden'),
+      { category: 'platform_http', status: 403, code: 'common.forbidden' },
+    ],
+    [
+      new PlatformError(500, 'SECRET'),
+      { category: 'platform_http', status: 500 },
+    ],
+    [
+      new Error('native login response incomplete'),
+      { category: 'native_step', code: 'native_response_incomplete' },
+    ],
+    [
+      Object.assign(new Error('Bearer SECRET'), {
+        name: 'SECRET',
+        code: 'SECRET',
+        stack: 'SECRET',
+      }),
+      { category: 'unexpected' },
+    ],
+  ]) {
+    const diagnoses = [];
+    const { handler } = fixture({
+      error,
+      diagnostic: (value) => diagnoses.push(value),
+    });
+    const res = await request(handler, '/login', { action: 'begin' });
+    assert.equal(res.status, 503);
+    assert.deepEqual(JSON.parse(res.body), { code: 'common.unavailable' });
+    assert.deepEqual(diagnoses, [{ operation: 'begin', ...expected }]);
+    assert.doesNotMatch(
+      JSON.stringify(diagnoses),
+      /SECRET|password|Cookie|Bearer|example\.com/,
+    );
+  }
+});
+
+test('default fallback writes only sanitized classification to host stderr; logger failure cannot change response', async (t) => {
+  const lines = [];
+  t.mock.method(console, 'warn', (...values) => lines.push(values.join(' ')));
+  // Use a separate handler to exercise the production default diagnostic sink.
+  const production = createConnectRoutes({
+    runtime: {
+      checkCsrf: () => true,
+      login: async () => {
+        throw new Error('private SECRET');
+      },
+      cancelAttempt: async () => {},
+    },
+    admission: {
+      nativeAuth: { requestRejection() {} },
+      sameOrigin: () => true,
+    },
+  });
+  assert.equal(
+    (await request(production, '/login', { action: 'begin' })).status,
+    503,
+  );
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /"operation":"begin".*"category":"unexpected"/);
+  assert.doesNotMatch(lines[0], /SECRET/);
+  const broken = fixture({
+    diagnostic: () => {
+      throw new Error('logger failure');
+    },
+  });
+  assert.equal(
+    (await request(broken.handler, '/login', { action: 'begin' })).status,
+    503,
+  );
 });
 test('route preserves expired, unsupported and network categories without internal detail', async () => {
   for (const [error, status, code] of [
