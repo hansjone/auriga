@@ -150,6 +150,7 @@ func TestRecoveryDeadlineDuringExecutionSaveWithholdsReadyAndPreservesRetry(t *t
 	f := newRecoveryFixtureWithPort(t, "8888/tcp")
 	f.healthy.Store(true)
 	// The deadline is a production Start deadline, not a wait-for-status budget.
+	startTimeout := f.rec.StartTimeout
 	f.rec.StartTimeout = time.Second
 	if err := f.rec.Store.PutDesired(&nodev1.InstanceSpec{InstanceId: "recovery-test", Generation: 2,
 		Desired: nodev1.DesiredState_DESIRED_STATE_RUNNING, Profile: &nodev1.Profile{ListenPort: 9999}}); err != nil {
@@ -186,13 +187,9 @@ func TestRecoveryDeadlineDuringExecutionSaveWithholdsReadyAndPreservesRetry(t *t
 	if s := f.next(t); s.Phase != nodev1.InstancePhase_INSTANCE_PHASE_STARTING || s.Ready {
 		t.Fatal(s)
 	}
-	select {
-	case <-gate.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("final execution save not reached")
-	}
-	startCtx := <-capture.contexts
-	<-startCtx.Done()
+	awaitRecovery(t, f, gate.entered, "final execution save")
+	startCtx := awaitRecovery(t, f, capture.contexts, "Start context")
+	awaitRecovery(t, f, startCtx.Done(), "Start deadline")
 	if !errors.Is(startCtx.Err(), context.DeadlineExceeded) {
 		t.Fatal(startCtx.Err())
 	}
@@ -221,6 +218,10 @@ func TestRecoveryDeadlineDuringExecutionSaveWithholdsReadyAndPreservesRetry(t *t
 	}
 	// Same reconciler and worker retry the original running process. The saved
 	// started record prevents a second Engine start, and Ensure must never run.
+	// The one-second deadline above injects the first failure only. A healthy
+	// retry uses the original production budget, independent of that injection.
+	f.waitTerminal(t)
+	f.rec.StartTimeout = startTimeout
 	if err := f.rec.ReconcileAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
