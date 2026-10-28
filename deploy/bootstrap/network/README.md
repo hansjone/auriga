@@ -2,6 +2,20 @@
 
 `Generate` 只接受新目录或空的真实目录。失败时仅清理本次创建的文件；已有空目录保留原 inode，以兼容 NAS 安装器持有的目录句柄。清理失败返回 `cleanup_failed`，须在重试前检查隔离目录。已有非空目录、符号链接和安装材料一律不覆盖。
 
+`Options.WebsocketHost` 独立控制 broker WSS 监听地址，省略时兼容 `BrokerHost`。compose 明确指定固定 Docker 网桥网关，保留 NATS TCP 回环监听；NAS 使用隔离 internal network 的容器监听，不发布宿主端口。WSS 始终使用 broker TLS 叶子证书，edge 固定校验 `broker.network.internal` 与独立 `server-ca.pem`，不使用明文上游或跳过证书验证。
+
+两套 edge 配置均启用精确 `/net/v1/ws`，`allowedOrigins` 只包含已验证 `PortalURL()` 的完整 Origin（含非默认端口），不加入管理台、不追加路径、不推断 HTTPS。edge 复用现有只读公开 CA：compose 的 `network-edge/server-ca.pem` 或 NAS 的 `pki-edge/network-server-ca.pem`；不获得 broker 私钥、密码或平台凭据。submit 使用同一公开 server CA，固定 SAN 分别为 `submit.network.internal` 与 `broker.network.internal`。
+
+两套回执输入版本为 `network-wss-v2-https`（含无正式 runtime 模板模式），并绑定外部 HTTPS 证书/私钥的内容摘要。旧回执重入失败且不修复材料；新安装重入仍验证全部封存文件与证书有效期。保留旧安装与备份，在新的专用测试目录重新生成，勿手改配置或回执。
+
+可选 direct HTTPS 显式输入 `-https-cert-file` 和 `-https-key-file`，两项缺一、HTTP/trusted_proxy 携带这两项、证书/密钥不匹配、过期/尚未生效、错误 SAN 均拒绝。证书必须覆盖 portal/admin；IP 使用真正 IP SAN，CN 或数值形式 DNS SAN 不替代 IP SAN；实例子域名模式还必须有精确 `*.<instanceParentDomain>` SAN。校验叶子 serverAuth、链内相邻签名和所含证书期限，允许正常 fullchain 不含根；不替部署者验证公网签发信誉、吊销状态或客户端信任，也不安装系统根。私钥只读快照后复制到受管 `browser-tls/browser.key`（0600）及证书 `browser-tls/browser.crt`（0644），原文件不改。NAS root→10001 通过匿名继承 FD 传快照，源 key 可保持 root:root/0600。
+
+compose edge 仅从独立 `edge-https` 只读挂载读取 HTTPS 副本（目录0750、叶0640，仅gid65532可读）；NAS 复用 `pki-edge` 只读挂载及既有 UID65532/0600 私钥复制。重入验证回执和来源内容，拒绝源密钥变更，不在普通启动时自动轮换；外部文件模式、信任库或网络不被修改。现有 edge Access TLS 读取路径无需 chmod。
+
+内部 WSS 接线和 submit 健康就绪不能替代设备正式入网验收。插件只接受外部 `wss://`，HTTP profile 不自动升级；TLS server CA 仅用于传输认证，不能作为插件 Ed25519 安装信任根。realm 必须来自 IAM 分配，安装信任根必须来自真实签名链。外部 HTTPS 支持边界见 [M2](../../../docs/dev/m2.md) 与 [NAS](../../../docs/dev/nas.md)。
+
+部署包测试 `TestWebsocketListenerIsolation` 可通过 `AURIGA_NETWORK_BROKER_TEST_BINARY` 指向从 `infra/ai-gateway` 的锁定依赖构建的 `github.com/nats-io/nats-server/v2` 二进制；未指定时具名跳过。它仅启动随机回环端口的 broker 子进程，验证独立 TCP/WSS 地址、正确 SAN/CA 可达、错误 SAN/CA 拒绝及反向接口不可达，结束时清理进程。此探针不运行 IAM callout，不宣称插件默认 factory 已传正确 Origin 或正式设备已入网；这些需要独立全链正控。
+
 `network-materialize OUTPUT OPTIONS.json` 失败输出固定 `category`：`usage`（退出 2）、`options_read_failed`、`options_invalid_json`、`invalid_options`、`directory_refused`、`generation_failed`、`cleanup_failed`（其余退出 1）。错误不输出参数、路径或材料内容。
 
 ## 权限与挂载

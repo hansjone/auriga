@@ -38,6 +38,8 @@ func main() {
 	}
 	out := flag.String("out", "", "private source material directory")
 	accessFile := flag.String("access-file", "", "required trusted access JSON")
+	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
+	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
 	validateOnly := flag.Bool("validate-access", false, "validate without writing installation materials")
 	peerIP := flag.String("edge-peer-ip", "", "fixed edge component-network IPv4")
 	subnet := flag.String("internal-subnet", "", "component-network IPv4 prefix")
@@ -67,10 +69,20 @@ func main() {
 	if err := validateNASLAN(*lanIP, *lanSubnet, *subnet); err != nil {
 		fatalf("%v", err)
 	}
+	directHTTPS := cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https"
+	hosts := []string{cfg.PortalOrigin().Host, cfg.AdminOrigin().Host}
+	if parent := cfg.InstanceParentDomain(); parent != "" {
+		hosts = append(hosts, "*."+parent)
+	}
+	browser, err := networkdeploy.ReadBrowserTLS(*httpsCert, *httpsKey, directHTTPS, hosts)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer browser.Clear()
 	if !*validateOnly && *out == "" {
 		fatalf("-out is required")
 	}
-	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly); err != nil {
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly, browser); err != nil {
 		fatalf("%v", err)
 	}
 	verified, err := runtime.verify()
@@ -80,14 +92,14 @@ func main() {
 	if *validateOnly {
 		return
 	}
-	set := runtimeMaterialSet(verified)
+	set := runtimeMaterialSet(verified, directHTTPS)
 	guard, err := openNASMaterialGuard(*out, set)
 	if err != nil {
 		fatalf("%v", err)
 	}
 	defer guard.Close()
 	pki := filepath.Join(*out, "pki")
-	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified)
+	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified, browser.Digest())
 	reuse, err := materials.CheckReceipt(*out, inputDigest, set)
 	if err != nil {
 		fatalf("%v", err)
@@ -106,6 +118,9 @@ func main() {
 		return
 	}
 	mustPKI(pki)
+	if err := browser.Write(*out); err != nil {
+		fatalf("%v", err)
+	}
 	rpc := map[string]string{"Target": "platform:9091", "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": "platform"}
 	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "0.0.0.0:18443", BrokerHost: "0.0.0.0", BrokerURL: "tls://network-broker:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil {
 		fatalf("generate network deployment: %v", err)

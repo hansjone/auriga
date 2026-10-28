@@ -35,6 +35,7 @@ type Options struct {
 	Root               string            `json:"root"`
 	SubmitListen       string            `json:"submitListen"`
 	BrokerHost         string            `json:"brokerHost"`
+	WebsocketHost      string            `json:"websocketHost,omitempty"`
 	BrokerURL          string            `json:"brokerURL"`
 	BrokerPort         int               `json:"brokerPort"`
 	WebsocketPort      int               `json:"websocketPort"`
@@ -72,6 +73,11 @@ func Generate(dir string, o Options) error {
 }
 
 func generate(dir string, o Options, entropy io.Reader) (result error) {
+	// Keep existing callers on their broker host; deployment recipes can expose
+	// WSS to the edge bridge without widening the privileged TCP listener.
+	if o.WebsocketHost == "" {
+		o.WebsocketHost = o.BrokerHost
+	}
 	if o.Root == "" || o.SubmitListen == "" || o.BrokerHost == "" || o.BrokerURL == "" || o.BrokerPort < 1 || o.WebsocketPort < 1 || o.Audience == "" || o.IAM["ServiceTokenFile"] == "" || o.Collab["ServiceTokenFile"] == "" {
 		return errOptions
 	}
@@ -292,7 +298,7 @@ accounts {
  SYS {users: [{user: "ops", password: %q, permissions: {publish: {allow: ["$SYS.REQ.SERVER.*.KICK", "$SYS.REQ.SERVER.*.LDM", "$SYS.REQ.SERVER.*.CONNZ"]}, subscribe: {allow: ["_INBOX.>"]}}}]}
 }
 authorization {timeout: 2, auth_callout {issuer: %q, account: AUTH, auth_users: ["auth", "ops", "data"], xkey: %q}}
-`, o.BrokerHost, o.BrokerPort, p("broker.pem"), p("broker.key"), p("server-ca.pem"), o.BrokerHost, o.WebsocketPort, p("broker.pem"), p("broker.key"), passwords["auth"], passwords["data"], passwords["ops"], issuerPub, xpub)
+`, o.BrokerHost, o.BrokerPort, p("broker.pem"), p("broker.key"), p("server-ca.pem"), o.WebsocketHost, o.WebsocketPort, p("broker.pem"), p("broker.key"), passwords["auth"], passwords["data"], passwords["ops"], issuerPub, xpub)
 	if err = write("broker.conf", []byte(broker)); err != nil {
 		return err
 	}

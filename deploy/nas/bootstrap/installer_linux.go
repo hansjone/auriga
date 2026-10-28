@@ -10,12 +10,13 @@ import (
 	"strings"
 	"syscall"
 
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	"golang.org/x/sys/unix"
 )
 
 // Only an empty newly created source root is handed to the fixed NAS installer.
 // Existing owners/permissions are checked, never repaired.
-func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, maxMemoryMB int64, runtime runtimeInputs, validateOnly bool) error {
+func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, maxMemoryMB int64, runtime runtimeInputs, validateOnly bool, browser ...*networkdeploy.BrowserTLS) error {
 	if !validateOnly && (!filepath.IsAbs(out) || filepath.Clean(out) != out || strings.Contains(out, "\\")) {
 		return fmt.Errorf("NAS material root must be a canonical absolute path")
 	}
@@ -116,6 +117,25 @@ func runAsInstaller(out string, raw []byte, peer, subnet string, registry int, l
 	}
 	cmd := exec.Command("/proc/self/fd/3", args...)
 	cmd.ExtraFiles = []*os.File{binary}
+	if len(browser) > 0 && len(browser[0].Certificate) > 0 {
+		// Pass validated bytes, never reopen or relax the operator's private key.
+		for _, raw := range [][]byte{browser[0].Certificate, browser[0].PrivateKey} {
+			fd, err := unix.MemfdCreate("auriga-https", unix.MFD_CLOEXEC)
+			if err != nil {
+				return fmt.Errorf("snapshot external HTTPS material")
+			}
+			f := os.NewFile(uintptr(fd), "HTTPS snapshot")
+			defer func() { _ = f.Close() }()
+			if _, err := f.Write(raw); err != nil {
+				return fmt.Errorf("snapshot external HTTPS material")
+			}
+			if _, err := f.Seek(0, 0); err != nil {
+				return fmt.Errorf("snapshot external HTTPS material")
+			}
+			cmd.ExtraFiles = append(cmd.ExtraFiles, f)
+		}
+		cmd.Args = append(cmd.Args, "-https-cert-file", "/proc/self/fd/4", "-https-key-file", "/proc/self/fd/5")
+	}
 	cmd.Stdin = bytes.NewReader(raw)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

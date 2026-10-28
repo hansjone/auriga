@@ -28,6 +28,10 @@ install_edge_material "$CONFIG/materials/identity-signing-keys.json" "$CONFIG/pk
 install_edge_material "$CONFIG/materials/network/server-ca.pem" "$CONFIG/pki-edge/network-server-ca.pem" 644
 install_edge_material "$CONFIG/materials/network/edge.pem" "$CONFIG/pki-edge/network-edge.pem" 644
 install_edge_material "$CONFIG/materials/network/edge.key" "$CONFIG/pki-edge/network-edge.key" 600
+if [ -f "$CONFIG/materials/browser-tls/browser.key" ]; then
+  install_edge_material "$CONFIG/materials/browser-tls/browser.crt" "$CONFIG/pki-edge/browser.crt" 644
+  install_edge_material "$CONFIG/materials/browser-tls/browser.key" "$CONFIG/pki-edge/browser.key" 600
+fi
 
 
 read_secret() {
