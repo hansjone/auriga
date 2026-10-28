@@ -50,11 +50,14 @@ type submitHandler struct {
 	redeemer *IAMRedeemer
 	client   *MailboxClient
 	verify   verifySubmitDevice
-	slots    chan struct{}
+	// Authentication is bounded separately so slow submissions cannot consume
+	// every slot needed to verify another tenant's device.
+	verifySlots chan struct{}
+	admission   submitAdmission
 }
 
 func newSubmitHandler(r *IAMRedeemer, c *MailboxClient, v verifySubmitDevice) *submitHandler {
-	return &submitHandler{redeemer: r, client: c, verify: v, slots: make(chan struct{}, mailboxWorkers)}
+	return &submitHandler{redeemer: r, client: c, verify: v, verifySlots: make(chan struct{}, mailboxWorkers)}
 }
 
 // SubmitHandler shares the callout runtime's current READY bindings. It cannot
@@ -83,13 +86,6 @@ func (h *submitHandler) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 		submitError(w, 400, CodeProtocolError)
 		return
 	}
-	select {
-	case h.slots <- struct{}{}:
-		defer func() { <-h.slots }()
-	default:
-		submitError(w, 429, "network.overloaded")
-		return
-	}
 	ctx, cancel := context.WithTimeout(q.Context(), 10*time.Second)
 	defer cancel()
 	auth := q.Header.Values("Authorization")
@@ -97,7 +93,16 @@ func (h *submitHandler) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 		submitError(w, 401, "network.unauthorized")
 		return
 	}
-	v, err := h.verify(ctx, strings.TrimPrefix(auth[0], "Bearer "))
+	select {
+	case h.verifySlots <- struct{}{}:
+	default:
+		submitError(w, 429, "network.overloaded")
+		return
+	}
+	v, err := func() (*iam.VerifyDeviceAccessResponse, error) {
+		defer func() { <-h.verifySlots }()
+		return h.verify(ctx, strings.TrimPrefix(auth[0], "Bearer "))
+	}()
 	if err != nil || !v.GetActive() || !uuidID.MatchString(v.GetTenantId()) || !uuidID.MatchString(v.GetDeviceId()) || !uuidID.MatchString(v.GetAccountId()) || v.GetExpiresAt() == nil || !v.GetExpiresAt().IsValid() || !v.GetExpiresAt().AsTime().After(time.Now()) {
 		submitError(w, 401, "network.unauthorized")
 		return
@@ -107,6 +112,11 @@ func (h *submitHandler) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 		submitError(w, code, "network.unauthorized")
 		return
 	}
+	if !h.admission.acquire(v.GetTenantId(), v.GetDeviceId()) {
+		submitError(w, 429, "network.overloaded")
+		return
+	}
+	defer h.admission.release(v.GetTenantId(), v.GetDeviceId())
 	raw, err := io.ReadAll(http.MaxBytesReader(w, q.Body, EncodingMaxPayloadBytes))
 	if err != nil || !validSubmitJSON(raw) {
 		submitError(w, 400, CodeProtocolError)
@@ -186,5 +196,9 @@ func validSubmitJSON(raw []byte) bool {
 func submitError(w http.ResponseWriter, code int, reason string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"code": reason})
+	result := map[string]any{"code": reason}
+	if reason == "network.overloaded" {
+		result["retryable"] = true
+	}
+	_ = json.NewEncoder(w).Encode(result)
 }

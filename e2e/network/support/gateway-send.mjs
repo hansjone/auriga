@@ -1,11 +1,12 @@
 // SEND-2 transport acceptance only. No host prompt, receipt proof or model call.
+/* global AbortSignal */
 import assert from 'node:assert/strict';
-import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { waitUntil } from './assembly-process.mjs';
 import { postSubmit } from './gateway-submit.mjs';
+import { createFileLedgerStore } from '../../../clients/dsh-plugin/src/network/host/store.js';
+import { requestAssemblyMailbox } from './assembly-mailbox.mjs';
 
 const rows = (db, name) => db[`collab.${name}`];
 const count = (db) =>
@@ -41,22 +42,30 @@ export async function gatewaySend({
   const frame = async (e, type, fields, expected) => {
     const s = await state(e),
       request_id = randomUUID();
-    e.transports
-      .at(-1)
-      .send(
-        Buffer.from(
-          JSON.stringify({ app_version: '1.0', type, request_id, ...fields }),
-        ),
-      );
-    const result = await waitUntil(
-      () =>
-        e.frames.find(
-          (v) =>
-            v.direction === 'down' &&
-            (v.frame.request_id ?? v.frame.page?.request_id) === request_id,
-        ),
-      `SEND-2 ${type} response missing`,
-    );
+    const cache = await createFileLedgerStore({
+      dir: join(e.directory, 'send-probe-trust'),
+    }).open();
+    let result;
+    try {
+      result = {
+        frame: await requestAssemblyMailbox({
+          prepared: e.prepared,
+          cache,
+          transport: e.mailboxTransports.at(-1),
+          identity: s.identity,
+          ready: {
+            epoch: s.ready.epoch,
+            bootId: s.boot,
+            channelNonce: s.ready.server_auth.channel_nonce,
+          },
+          frame: { app_version: '1.0', type, request_id, ...fields },
+          expected,
+          signal: AbortSignal.timeout(30_000),
+        }),
+      };
+    } finally {
+      await cache.close();
+    }
     assert.equal(
       result.frame.type,
       expected,

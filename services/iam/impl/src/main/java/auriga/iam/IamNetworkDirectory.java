@@ -91,30 +91,39 @@ public final class IamNetworkDirectory implements NetworkDirectory {
           var args = new ArrayList<Object>();
           args.add(TenantContext.require());
           args.add(new BigDecimal(after));
-          args.add(staleBefore());
-          args.add(staleBefore());
+          args.add(TenantContext.require());
           args.add(UUID.fromString(principal.subject()));
           String source = "";
           if (principal.type() == PrincipalType.DEVICE) {
             source = " AND source.device_id=?";
             args.add(UUID.fromString(principal.deviceId()));
           }
+          args.add(staleBefore());
+          args.add(staleBefore());
+          // Resolve denied pairs once per page, rather than rejoining all caller sources for
+          // each candidate. Retain exact pair matching even for noncanonical stored keys.
           var rows =
               jdbc.query(
                   "WITH candidates AS MATERIALIZED (SELECT * FROM iam.network_node WHERE tenant_id=? AND node>? ORDER BY node LIMIT "
                       + (MAX_SCAN + 1)
+                      + """
+                      ), denied_targets AS MATERIALIZED (
+                        SELECT split_part(p.lookup_key,':',2) AS node
+                        FROM iam.network_policy p
+                        JOIN iam.network_node source ON source.tenant_id=p.tenant_id
+                          AND source.node::text=split_part(p.lookup_key,':',1)
+                        WHERE p.tenant_id=? AND source.account_id=? AND NOT source.revoked
+                          AND NOT COALESCE((p.data->>'allowed')::boolean,false)
+                          AND p.lookup_key=source.node::text||':'||split_part(p.lookup_key,':',2)
+                      """
+                      + source
                       + ") "
                       + "SELECT r.realm::text,n.node::text,COALESCE(d.data->>'name',''),n.account_id::text,COALESCE(a.data->>'displayName',''),COALESCE(("
                       + ELIGIBLE
                       + """
                     AND NOT EXISTS (
-                      SELECT 1 FROM iam.network_node source
-                      JOIN iam.network_policy p ON p.tenant_id=source.tenant_id
-                        AND p.lookup_key=source.node::text||':'||n.node::text
-                      WHERE source.tenant_id=n.tenant_id AND source.account_id=? AND NOT source.revoked
-                        AND NOT COALESCE((p.data->>'allowed')::boolean,false)
+                      SELECT 1 FROM denied_targets denied WHERE denied.node=n.node::text
                   """
-                      + source
                       + ")),false) FROM candidates n "
                       + JOINS
                       + " ORDER BY n.node",

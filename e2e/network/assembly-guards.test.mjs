@@ -2,14 +2,103 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { childProcess, stopChild } from './support/assembly-process.mjs';
-import { prepareDevice } from './support/assembly-device.mjs';
+import {
+  prepareDevice,
+  assemblyDeviceProvider,
+} from './support/assembly-device.mjs';
 import { createDeviceProvider } from '../../clients/dsh-plugin/src/network/device-provider.js';
 import { testRoots } from '../../clients/dsh-plugin/test/network/trust/keyset-fixtures.js';
+import { platformConfig } from '../../clients/dsh-plugin/src/local/platform.js';
 import {
   signatureBypass,
   assertVerdict,
   failureMarker,
 } from './support/assembly-verdict.mjs';
+
+test('split-origin assembly prepares both production device providers without changing the IAM token', async (t) => {
+  const iamOrigin = 'https://platform.example.com:43111';
+  const submitOrigin = 'https://platform.example.com:43112';
+  const signal = new AbortController().signal;
+  const network = {
+    realm: '2',
+    wssUrl: 'wss://broker.example.com',
+    roots: testRoots,
+  };
+  const credential = {
+    accessToken: 'fixture-original-iam-token',
+    claims: { tid: 'tenant', did: 'device', sub: 'owner', iss: iamOrigin },
+  };
+  const original = JSON.stringify(credential);
+  const getDevice = async (active) => {
+    assert.equal(active, signal);
+    return credential;
+  };
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push({ url: url.href, options });
+    return new Response('{"fixture":true}');
+  });
+  const iam = await prepareDevice(
+    assemblyDeviceProvider({ origin: iamOrigin, network, getDevice }),
+    signal,
+  );
+  const sending = await prepareDevice(
+    assemblyDeviceProvider({ origin: submitOrigin, network, getDevice }),
+    signal,
+  );
+  assert.equal(iam.kind, 'device-connection');
+  assert.equal(sending.kind, 'device-connection');
+  const request = {
+    kind: 'message',
+    source: { source_binding: 'source-1' },
+    idempotency: { producer_epoch: '42', key: 'original-key' },
+  };
+  await sending.submit(request, signal);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, submitOrigin + '/api/ai/v1/network/submit');
+  assert.equal(
+    requests[0].options.headers.authorization,
+    'Bearer ' + credential.accessToken,
+  );
+  assert.equal(requests[0].options.body, JSON.stringify(request));
+  assert.equal(requests[0].options.redirect, 'error');
+  assert.equal(JSON.stringify(credential), original);
+});
+
+test('platform issuer stays restricted to the exact scheme, host and port', () => {
+  const config = {
+    platformOrigin: 'https://platform.example.com:43111',
+    issuer: 'https://platform.example.com:43111/realm',
+    clientId: 'fixture',
+    providerId: 'fixture',
+  };
+  assert.equal(platformConfig(config).issuer, config.issuer);
+  for (const issuer of [
+    'https://platform.example.com:43112',
+    'https://other.example.com:43111',
+    'http://platform.example.com:43111',
+    'https://user@platform.example.com:43111',
+    'https://platform.example.com:43111#fragment',
+  ])
+    assert.throws(
+      () => platformConfig({ ...config, issuer }),
+      /issuer must belong to platform origin/,
+    );
+  assert.throws(
+    () =>
+      createDeviceProvider({
+        config: {
+          ...config,
+          platformOrigin: 'https://platform.example.com:43112',
+        },
+        getDevice: async () => ({
+          accessToken: 'unused',
+          claims: { tid: 'tenant', did: 'device', sub: 'owner' },
+        }),
+      }),
+    /issuer must belong to platform origin/,
+  );
+});
 
 test('driver prepares the real provider using its options API and preserves abort; no network acceptance', async () => {
   const controller = new AbortController();

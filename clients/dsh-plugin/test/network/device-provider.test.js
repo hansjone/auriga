@@ -81,6 +81,34 @@ async function deviceFixture(t, clockOffset = 0) {
   };
 }
 
+test('device submit uses the fixed HTTPS path, device bearer and complete original bytes', async (t) => {
+  const f = await deviceFixture(t);
+  const raw = '{"status":"platform_stored","optional":{"preserved":true}}';
+  f.respond(async () => new Response(raw));
+  const request = {
+    kind: 'message',
+    source: { source_binding: 'source-1' },
+    idempotency: { producer_epoch: '42', key: 'original' },
+    body: { subtype: 'text', text: 'message' },
+  };
+  const result = await f.prepared.submit(request, f.controller.signal);
+  assert.equal(Buffer.from(result).toString(), raw);
+  assert.equal(
+    f.calls[0].url.href,
+    'https://portal.example.com/api/ai/v1/network/submit',
+  );
+  assert.equal(f.calls[0].init.headers.authorization, 'Bearer device');
+  assert.equal(f.calls[0].init.body, JSON.stringify(request));
+  assert.equal(f.calls[0].init.credentials, 'omit');
+  assert.equal(f.calls[0].init.redirect, 'error');
+  f.claims.did = 'different-device';
+  await assert.rejects(
+    f.prepared.submit(request, f.controller.signal),
+    (error) => error.status === 401,
+  );
+  assert.equal(f.calls.length, 1);
+});
+
 for (const offset of [-200, -59000, 59000])
   test('ticket tolerates client clock offset ' + offset + 'ms', async (t) => {
     const f = await deviceFixture(t, offset);

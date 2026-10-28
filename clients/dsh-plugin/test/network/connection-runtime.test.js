@@ -13,12 +13,15 @@ import {
 } from '../../src/network/host/store.js';
 import { openLedger, reserveLocal } from '../../src/network/host/ledger.js';
 import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
+import * as nodeFs from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IDENTITY } from './host/fixtures.js';
+import { IDENTITY, createFixturePlatform } from './host/fixtures.js';
+import { createHostAdapter } from '../../src/network/host/adapter.js';
+import { saveProducerEpoch } from '../../src/network/durable/outbox.js';
 import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
-import { signingInput } from '../../src/network/trust/verifier.js';
+import { digest, signingInput } from '../../src/network/trust/verifier.js';
 import {
   signedKeyset,
   signedAnnouncement,
@@ -43,6 +46,18 @@ async function fixture(t, extra = {}) {
   const { openConnectionRuntime } =
     await import('../../src/network/connection-runtime.js');
   const { pair, payload, now } = publicationFixture();
+  const businessPair = extra.businessDelivery
+    ? generateKeyPairSync('ed25519')
+    : undefined;
+  if (extra.businessDelivery)
+    payload.keys.push({
+      ...payload.keys[0],
+      kid: 'delivery',
+      purpose: 'business_delivery',
+      public_key_spki: businessPair.publicKey
+        .export({ format: 'der', type: 'spki' })
+        .toString('base64url'),
+    });
   const registration = {
     tenant: 'tenant-fixture',
     realm: '2',
@@ -111,11 +126,15 @@ async function fixture(t, extra = {}) {
       required_features: [],
       ...changes,
     };
+    return envelope(frame, request, connection);
+  }
+  function envelope(frame, request, connection) {
     frame.server_auth = {
       version: 1,
-      purpose: 'protocol_response',
+      purpose:
+        frame.type === 'delivery' ? 'business_delivery' : 'protocol_response',
       alg: 'Ed25519',
-      kid: 'response',
+      kid: frame.type === 'delivery' ? 'delivery' : 'response',
       issuer_realm: '2',
       issued_at: payload.issued_at,
       not_after: new Date(now() + 120000).toISOString().replace('.000Z', 'Z'),
@@ -123,7 +142,7 @@ async function fixture(t, extra = {}) {
         realm: '2',
         node: '64',
         incarnation: 'inc-1',
-        epoch: frame.epoch,
+        epoch: frame.epoch ?? String(connection.id),
       },
       request_id: request.request_id,
       channel_nonce: request.channel_nonce,
@@ -133,7 +152,7 @@ async function fixture(t, extra = {}) {
     frame.server_auth.signature = sign(
       null,
       signingInput(frame),
-      pair.privateKey,
+      frame.type === 'delivery' ? businessPair.privateKey : pair.privateKey,
     ).toString('base64url');
     return encodeJson(frame);
   }
@@ -141,7 +160,7 @@ async function fixture(t, extra = {}) {
     kind: 'device-connection',
     prepared,
     getAccess: async () => 'unused',
-    authorizeLocal: async () => false,
+    authorizeLocal: extra.authorizeLocal ?? (async () => false),
     signal: controller.signal,
     now,
     stores: { ledger, trust: trustStore },
@@ -177,6 +196,21 @@ async function fixture(t, extra = {}) {
         },
         async send(bytes) {
           const request = decodeJson(bytes);
+          if (
+            [
+              'fetch',
+              'receive_set',
+              'attempt_begin',
+              'execution_admit',
+              'receipt',
+            ].includes(request.type) &&
+            extra.mailbox
+          ) {
+            sent.push({ request, connection });
+            const result = await extra.mailbox(request, connection);
+            options.onMessage(encodeJson(result), connection.epoch);
+            return;
+          }
           if (request.type.startsWith('source_') && extra.source) {
             sent.push({ request, connection });
             await extra.source(request, connection);
@@ -258,6 +292,7 @@ async function fixture(t, extra = {}) {
     connections,
     sent,
     response,
+    envelope,
     prepared,
     payload,
     trustStore,
@@ -288,6 +323,524 @@ function registrationHost() {
   };
   return { ...host, agent, tools, unload: () => cleanup() };
 }
+
+for (const count of [1, 129])
+  test(`${count}条签名终态经生产FETCH落账后，原pending来源操作跨真实运行时重连保持不变`, async (t) => {
+    const cursor = String(count);
+    const host = registrationHost();
+    const sources = [],
+      readyRequests = [];
+    let expired = false,
+      firstTerminalPage = true;
+    const f = await fixture(t, {
+      ctx: host.ctx,
+      source: (request) => sources.push(request),
+      ready: (_id, request) => readyRequests.push(request),
+      result(_id, request) {
+        return {
+          producer_epoch: '42',
+          head_seq: expired ? cursor : '0',
+          committed_cursor: expired ? cursor : '0',
+          local_high_water: request.local_high_water,
+          registration_revision: request.registration_revision,
+          status:
+            request.resume_cursor === (expired ? cursor : '0')
+              ? 'ready'
+              : 'recovery_conflict',
+        };
+      },
+      mailbox(request, connection) {
+        const context = { ...request, channel_nonce: connection.nonce };
+        const seal = (frame) =>
+          decodeJson(f.envelope(frame, context, connection));
+        const offset =
+          request.continuation === null ? 0 : Number(request.continuation);
+        const end = Math.min(offset + 32, count);
+        const items =
+          expired && request.resume_cursor === '0'
+            ? Array.from({ length: end - offset }, (_, index) => {
+                const seq = String(offset + index + 1);
+                return seal({
+                  app_version: '1.0',
+                  type: 'terminal',
+                  epoch: String(connection.id),
+                  delivery_id: 'expired-delivery-' + seq,
+                  mail_seq: seq,
+                  target_node: { realm: '2', node: '64' },
+                  recipients: [
+                    {
+                      recipient_id: 'expired-recipient-' + seq,
+                      transport_status: 'expired',
+                      state_version: '2',
+                    },
+                  ],
+                });
+              })
+            : [];
+        // Expiry can commit while the FETCH header still carries the previous
+        // cursor. Reconnect between this durable witness and the next poll.
+        const committedCursor = expired && !firstTerminalPage ? cursor : '0';
+        if (items.length && end === count) firstTerminalPage = false;
+        return {
+          app_version: '1.0',
+          type: 'fetch_result',
+          items,
+          page: seal({
+            app_version: '1.0',
+            type: 'fetch_page',
+            epoch: String(connection.id),
+            request_id: request.request_id,
+            head_seq: expired ? cursor : '0',
+            snapshot_head: expired ? cursor : '0',
+            scan_after: expired ? String(end) : '0',
+            committed_cursor: committedCursor,
+            next_continuation: items.length && end < count ? String(end) : null,
+            manifest: items.map((item) => ({
+              item_type: 'terminal',
+              mail_seq: item.mail_seq,
+              digest: digest(item),
+            })),
+          }),
+        };
+      },
+    });
+    f.prepared.submit = async () => {
+      throw new Error('no HTTPS send in this fixture');
+    };
+    await f.runtime.start();
+    await waitFor(
+      () => host.tools.has('auriga_network_join'),
+      'join installed',
+    );
+    await host.tools
+      .get('auriga_network_join')
+      .execute({}, { agent: host.agent });
+    await waitFor(() => sources.length > 0, 'pending source recorded');
+    expired = true;
+    await waitFor(
+      () => f.ledger.snapshot().durable.terminal?.[cursor],
+      'signed terminal evidence committed',
+    );
+    const before = f.ledger.snapshot();
+    assert.equal(before.durable.resumeCursor, '0');
+    assert.equal(Object.keys(before.durable.inbound).length, 0);
+    const transport = f.connections.at(-1);
+    transport.transition('reconnecting', transport.epoch);
+    transport.transition('ready', transport.epoch + 1);
+    await waitFor(
+      () => f.runtime.status.connected || !f.runtime.status.available,
+      'strict READY completed',
+    );
+    assert.equal(f.runtime.status.connected, true);
+    assert.equal(
+      f.connections.length,
+      3,
+      'conflict C must close before fresh strict READY',
+    );
+    assert.equal(transport.state, 'stopped');
+    assert.equal(readyRequests.at(-1).resume_cursor, cursor);
+    assert.equal(f.ledger.snapshot().durable.resumeCursor, cursor);
+    assert.equal(Object.keys(before.durable.terminal).length, count);
+    await waitFor(() => sources.length > 1, 'original pending source resumed');
+    assert.equal(sources[1].operation_id, sources[0].operation_id);
+    const after = f.ledger.snapshot();
+    assert.deepEqual(
+      after.sourceControl.operations,
+      before.sourceControl.operations,
+    );
+    assert.deepEqual(after.durable.terminal, before.durable.terminal);
+    assert.equal(host.calls.filter((v) => v[0] === 'prompt').length, 0);
+  });
+
+test('正常生产收件与终态重连共用文件账本，回执及重连后的正常收件同时成立', async (t) => {
+  const host = registrationHost();
+  const root = fileURLToPath(
+    new URL('../../../../.agent-evidence/', import.meta.url),
+  );
+  await mkdir(root, { recursive: true });
+  const dir = await mkdtemp(join(root, 'send-receive-reconnect-'));
+  let firstIntakeRenameDenied = false;
+  const store = createFileLedgerStore({
+    dir,
+    platform: 'win32',
+    fs: {
+      ...nodeFs,
+      async rename(from, to) {
+        const draft = JSON.parse(await nodeFs.readFile(from, 'utf8'));
+        if (
+          !firstIntakeRenameDenied &&
+          draft.durable?.inbound['recipient-1']?.stage === 'received'
+        ) {
+          firstIntakeRenameDenied = true;
+          throw Object.assign(
+            new Error('reader temporarily denies first intake replacement'),
+            { code: 'EPERM' },
+          );
+        }
+        await nodeFs.rename(from, to);
+      },
+    },
+  });
+  const commitFailures = [];
+  const open = store.open.bind(store);
+  store.open = async () => {
+    const handle = await open();
+    return {
+      ...handle,
+      async commit(value) {
+        try {
+          await handle.commit(value);
+        } catch (error) {
+          commitFailures.push({
+            name: error.name,
+            code: error.code,
+            message: error.message,
+          });
+          throw error;
+        }
+      },
+    };
+  };
+  const saved = async () =>
+    JSON.parse(await readFile(join(dir, 'ledger.json'), 'utf8'));
+  const localControl = {};
+  const requests = [],
+    sources = [];
+  let stage = 0,
+    serverCursor = '0';
+  const f = await fixture(t, {
+    ledger: store,
+    ctx: host.ctx,
+    businessDelivery: true,
+    authorizeLocal: async (value) => value === localControl,
+    source: (request) => sources.push(request),
+    result(_id, request) {
+      return {
+        producer_epoch: '42',
+        head_seq: String(stage),
+        committed_cursor: serverCursor,
+        local_high_water: request.local_high_water,
+        registration_revision: request.registration_revision,
+        status:
+          request.resume_cursor === serverCursor
+            ? 'ready'
+            : 'recovery_conflict',
+      };
+    },
+    async mailbox(request, connection) {
+      requests.push(request);
+      const context = { ...request, channel_nonce: connection.nonce };
+      const seal = (frame) =>
+        decodeJson(
+          f.envelope(
+            { app_version: '1.0', epoch: String(connection.id), ...frame },
+            context,
+            connection,
+          ),
+        );
+      if (request.type === 'receive_set')
+        return seal({
+          type: 'receive_set_result',
+          request_id: request.request_id,
+          registration_id: 'reg-1',
+          enabled: request.enabled,
+          state_version: '2',
+        });
+      if (request.type === 'attempt_begin')
+        return seal({
+          type: 'attempt_result',
+          request_id: request.request_id,
+          recipient_id: request.recipient_id,
+          attempt_id: request.attempt_id,
+          result: 'entered',
+        });
+      if (request.type === 'execution_admit')
+        return seal({
+          type: 'admit_result',
+          request_id: request.request_id,
+          recipient_id: request.recipient_id,
+          result: 'admitted',
+          admitted_epoch: String(connection.id),
+          state_version: '1',
+          admission_id: 'admission-' + stage,
+        });
+      if (request.type === 'receipt') {
+        const s = await saved();
+        const recipient = request.results[0];
+        assert.equal(
+          s.durable.inbound[recipient.recipient_id].stage,
+          'accepted',
+        );
+        assert.equal(recipient.expected_state_version, '1');
+        assert.notEqual(String(s.revision), '1');
+        assert.ok(host.calls.some((v) => v[0] === 'persistence-flush'));
+        serverCursor = request.mail_seq;
+        return seal({
+          type: 'receipt_committed',
+          request_id: request.request_id,
+          operation_id: request.operation_id,
+          delivery_id: request.delivery_id,
+          mail_seq: request.mail_seq,
+          committed_cursor: serverCursor,
+          mail_item_closed: true,
+          results: [
+            {
+              recipient_id: recipient.recipient_id,
+              transport_status: 'host_accepted',
+              state_version: '2',
+            },
+          ],
+        });
+      }
+      assert.equal(request.type, 'fetch');
+      const items = [];
+      const cursor = serverCursor;
+      if (stage && BigInt(request.resume_cursor) < BigInt(stage)) {
+        if (stage === 2) {
+          items.push(
+            seal({
+              type: 'terminal',
+              delivery_id: 'delivery-2',
+              mail_seq: '2',
+              target_node: { realm: '2', node: '64' },
+              recipients: [
+                {
+                  recipient_id: 'recipient-2',
+                  transport_status: 'expired',
+                  state_version: '2',
+                },
+              ],
+            }),
+          );
+          // Header captures the cursor before expiration commits; force the
+          // next READY to reconcile retained terminal evidence on another C.
+          serverCursor = '2';
+        } else {
+          const message = {
+            message_id: 'message-' + stage,
+            kind: 'message',
+            message_class: 'unicast',
+            sender_kind: 'agent',
+            from: {
+              version: 1,
+              realm: '2',
+              node: '63',
+              local: '1',
+              type: 'session',
+            },
+            to: {
+              version: 1,
+              realm: '2',
+              node: '64',
+              local: '1',
+              type: 'session',
+            },
+            body: { subtype: 'text', text: 'normal body ' + stage },
+            expires_at: f.payload.valid_until,
+          };
+          items.push(
+            seal({
+              type: 'delivery',
+              delivery_id: 'delivery-' + stage,
+              mail_seq: String(stage),
+              target_node: { realm: '2', node: '64' },
+              message,
+              source_context: {
+                realm: '2',
+                node: '63',
+                sender_kind: 'agent',
+                message_digest: digest(message),
+              },
+              recipients: [
+                {
+                  recipient_id: 'recipient-' + stage,
+                  local: '1',
+                  type: 'session',
+                  state_version: '1',
+                },
+              ],
+            }),
+          );
+        }
+      }
+      return {
+        app_version: '1.0',
+        type: 'fetch_result',
+        items,
+        page: seal({
+          type: 'fetch_page',
+          request_id: request.request_id,
+          head_seq: String(stage),
+          snapshot_head: String(stage),
+          scan_after: String(stage),
+          committed_cursor: cursor,
+          next_continuation: null,
+          manifest: items.map((item) => ({
+            item_type: item.type,
+            mail_seq: item.mail_seq,
+            digest: digest(item),
+          })),
+        }),
+      };
+    },
+  });
+  f.prepared.submit = async () => {
+    throw new Error('no submit fixture');
+  };
+  await f.runtime.start();
+  await waitFor(() => host.tools.has('auriga_network_join'), 'join installed');
+  await host.tools
+    .get('auriga_network_join')
+    .execute({}, { agent: host.agent });
+  await waitFor(
+    () => f.runtime.diagnostics.messaging.available,
+    'messaging installed',
+  );
+  await f.runtime
+    .messagingUI(localControl)
+    .setReceive({ local: '1', enabled: true });
+  stage = 1;
+  await waitFor(
+    async () =>
+      (await saved()).durable.inbound['recipient-1']?.stage === 'committed',
+    'first normal receipt',
+  ).catch(async (error) => {
+    throw new Error(
+      error.message +
+        JSON.stringify({
+          status: f.runtime.status,
+          diagnostics: f.runtime.diagnostics,
+          requests: requests.map((v) => v.type),
+          commitFailures,
+        }),
+    );
+  });
+  assert.equal((await saved()).durable.resumeCursor, '1');
+  assert.equal(firstIntakeRenameDenied, true);
+  stage = 2;
+  await waitFor(
+    async () => (await saved()).durable.terminal?.['2'],
+    'terminal retained',
+  ).catch(async (error) => {
+    throw new Error(
+      error.message +
+        JSON.stringify({
+          status: f.runtime.status,
+          diagnostics: f.runtime.diagnostics,
+          requests: requests.map((v) => v.type),
+          commitFailures,
+        }),
+    );
+  });
+  const before = await saved();
+  const connection = f.connections.at(-1);
+  connection.transition('reconnecting', connection.epoch);
+  connection.transition('ready', connection.epoch + 1);
+  await waitFor(
+    () => f.runtime.status.connected || !f.runtime.status.available,
+    'reconnect finished',
+  );
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(connection.state, 'stopped');
+  assert.equal((await saved()).durable.resumeCursor, '2');
+  await waitFor(() => sources.length > 1, 'original source resumed');
+  assert.deepEqual(
+    (await saved()).sourceControl.operations,
+    before.sourceControl.operations,
+  );
+  stage = 3;
+  await waitFor(
+    async () =>
+      (await saved()).durable.inbound['recipient-3']?.stage === 'committed',
+    'normal receipt after terminal reconnect',
+  );
+  assert.equal((await saved()).durable.resumeCursor, '3');
+  assert.equal(requests.filter((v) => v.type === 'receipt').length, 2);
+  assert.equal(host.calls.filter((v) => v[0] === 'prompt').length, 2);
+});
+
+test('signed READY cursor only reconciles a complete retained acceptance prefix on a fresh C', async (t) => {
+  const host = registrationHost();
+  const store = createMemoryLedgerStore();
+  const ledger = await openLedger({
+    store,
+    identity: IDENTITY,
+    initialize: true,
+  });
+  await saveProducerEpoch(ledger, '42');
+  const platform = createFixturePlatform();
+  const adapter = createHostAdapter({
+    ledger,
+    host: await (
+      await import('../../src/network/host/native/host-port.js')
+    ).createNativeHostPort({ ctx: host.ctx }),
+    network: platform.network,
+  });
+  await adapter.bindExistingSession({
+    opId: 'join-1',
+    hostSessionId: host.agent.id,
+    cwd: host.agent.session.header.cwd,
+    kind: 'session',
+  });
+  const binding = ledger.peek().bindings['1'];
+  await ledger.update((draft) => {
+    draft.durable.inbound['recipient-1'] = {
+      delivery: {
+        type: 'delivery',
+        delivery_id: 'delivery-1',
+        mail_seq: '1',
+        source_context: { message_digest: 'sha256:' + 'a'.repeat(64) },
+      },
+      recipientId: 'recipient-1',
+      local: '1',
+      bindingId: binding.bindingId,
+      hostSessionId: binding.hostSessionId,
+      attemptId: 'attempt-1',
+      epoch: '1',
+      stateVersion: '1',
+      stage: 'accepted',
+      admission: {},
+      receipt: {
+        delivery_id: 'delivery-1',
+        mail_seq: '1',
+        results: [
+          {
+            recipient_id: 'recipient-1',
+            host_request_id: 'recipient-1',
+            message_digest: 'sha256:' + 'a'.repeat(64),
+            status: 'host_accepted',
+          },
+        ],
+      },
+    };
+  });
+  await ledger.close();
+  const f = await fixture(t, {
+    ledger: store,
+    ctx: {},
+    result(id, request) {
+      assert.equal(request.resume_cursor, id === 1 ? '0' : '1');
+      return {
+        producer_epoch: '42',
+        head_seq: '1',
+        committed_cursor: '1',
+        local_high_water: '1',
+        registration_revision: '1',
+        status: id === 1 ? 'recovery_conflict' : 'ready',
+      };
+    },
+  });
+  await f.runtime.start();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(f.connections.length, 2);
+  assert.equal(f.connections[0].state, 'stopped');
+  assert.equal(store.snapshot().durable.resumeCursor, '1');
+  assert.equal(
+    store.snapshot().durable.inbound['recipient-1'].stage,
+    'accepted',
+    'READY cursor is not an acceptance receipt',
+  );
+});
 
 test('bootstrap and normal READY retry authenticated overload with identical requests and no extra connections', async (t) => {
   const sends = new Map();

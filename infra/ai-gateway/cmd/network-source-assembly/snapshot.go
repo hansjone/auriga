@@ -22,9 +22,25 @@ var snapshotTables = map[string][]string{
 func snapshotQuery(schema, table string) (string, error) {
 	for _, allowed := range snapshotTables[schema] {
 		if table == allowed {
+			from := schema + "." + table
+			if schema == "collab" && table == "network_recipient" {
+				// The receipt transaction stores host_request_id in the stable proof,
+				// not a recipient column. Project that persisted value only; missing or
+				// incorrect evidence must still fail the SEND acceptance assertion.
+				from = `(
+					SELECT r.*, (
+						SELECT p.proof_json::jsonb->>'host_request_id'
+						FROM collab.network_acceptance_proof p
+						WHERE p.tenant_id=r.tenant_id AND p.recipient_id=r.id
+						  AND p.delivery_id=r.delivery_id
+						  AND p.accepted_by=CASE WHEN r.target_local='0' THEN 'system' ELSE 'session' END
+					) AS host_request_id
+					FROM collab.network_recipient r
+				)`
+			}
 			// network_node has a composite primary key, not an id column. Sorting the
 			// complete selected JSON also keeps every other allowlisted table stable.
-			return "SELECT row_to_json(t)::text FROM " + schema + "." + table + ` t ORDER BY row_to_json(t)::text COLLATE "C"`, nil
+			return "SELECT row_to_json(t)::text FROM " + from + ` t ORDER BY row_to_json(t)::text COLLATE "C"`, nil
 		}
 	}
 	return "", errors.New("snapshot table is not allowlisted")

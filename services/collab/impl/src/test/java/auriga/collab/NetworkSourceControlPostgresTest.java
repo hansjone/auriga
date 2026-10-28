@@ -721,12 +721,18 @@ class NetworkSourceControlPostgresTest {
   }
 
   static ObjectNode witness(Fixture f) {
+    return witness(f, CLOCK);
+  }
+
+  static ObjectNode witness(Fixture f, Clock clock) {
+    // One observation owns both bounds, including when the wall clock crosses a UTC second.
+    var observed = clock.instant().truncatedTo(ChronoUnit.SECONDS);
     return ((ObjectNode) NetworkJson.parse("{}"))
         .put("witness_id", "w-" + UUID.randomUUID())
         .put("binding_id", "native-" + f.c().getNode())
         .put("binding_revision", "18446744073709551615")
-        .put("observed_at", now().toString())
-        .put("valid_until", now().plusSeconds(30).toString());
+        .put("observed_at", observed.toString())
+        .put("valid_until", observed.plusSeconds(30).toString());
   }
 
   static Instant now() {
@@ -2740,7 +2746,9 @@ class NetworkSourceControlPostgresTest {
     var f = fresh();
     peer.reject = true;
     var request = frame(f, "source_register");
+    int calls = peer.registerCalls.get();
     var response = register(f, request);
+    assertEquals(calls + 1, peer.registerCalls.get());
     assertEquals("not_committed", response.path("result").asString(), response.toString());
     assertEquals("iam", response.path("failure_evidence").path("authority").asString());
     assertEquals("revision_mismatch", response.path("failure_evidence").path("reason").asString());
@@ -2752,6 +2760,22 @@ class NetworkSourceControlPostgresTest {
                     byte[].class,
                     TENANT,
                     request.path("operation_id").asString())));
+    peer.reject = false;
+    peer.dropRegisterBeforeCommit = true;
+    var other = fresh();
+    var failed = frame(other, "source_register");
+    code("outcome_unknown", register(other, failed));
+    assertEquals(calls + 2, peer.registerCalls.get());
+    var pending =
+        db(
+            () ->
+                jdbc.queryForMap(
+                    "SELECT status,iam_response,result_json FROM collab.network_source_operation WHERE tenant_id=? AND operation_id=?",
+                    TENANT,
+                    failed.path("operation_id").asString()));
+    assertEquals("pending", pending.get("status"));
+    assertNull(pending.get("iam_response"));
+    assertNull(pending.get("result_json"));
   }
 
   @Test

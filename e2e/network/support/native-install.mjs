@@ -4,6 +4,11 @@ import { promisify } from 'node:util';
 import { mkdir, readFile, copyFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  hostInstallOptions,
+  assertPublicHostLock,
+  hostInstallFailure,
+} from '../../../scripts/beta-ui/plugin-dsh.mjs';
 
 export const hostPin = Object.freeze({
   version: '0.2.1-rc.3',
@@ -65,10 +70,75 @@ export function assertRuntimeLock(lock) {
     lock.packages['node_modules/@deepseek-ai/dsh'].integrity,
     hostPin.integrity,
   );
+  assertPublicHostLock(lock);
 }
 
-export async function installNativeRuntime(runtime = defaultRuntime) {
+export async function runNativeInstallStep(
+  name,
+  args,
+  { state, env, timeoutMs = 300000, npmCache },
+) {
+  const run = promisify(execFile),
+    started = Date.now();
+  const metadata = {
+    command: process.execPath,
+    args,
+    cwd: state,
+    timeoutMs,
+    npmCache,
+  };
+  try {
+    const result = await run(process.execPath, args, {
+      cwd: state,
+      env,
+      windowsHide: true,
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    await writeFile(
+      join(state, name + '.log'),
+      JSON.stringify({
+        ...metadata,
+        exitCode: 0,
+        signal: null,
+        killed: false,
+        durationMs: Date.now() - started,
+      }) +
+        '\n' +
+        result.stdout +
+        result.stderr,
+    );
+    return result.stdout.trim();
+  } catch (error) {
+    const failure = hostInstallFailure(error, timeoutMs);
+    const log = join(state, name + '.log');
+    await writeFile(
+      log,
+      JSON.stringify({
+        ...metadata,
+        exitCode: error.code ?? null,
+        signal: error.signal ?? null,
+        killed: error.killed === true,
+        durationMs: Date.now() - started,
+        failure,
+      }) +
+        '\n' +
+        (error.stdout ?? '') +
+        (error.stderr ?? ''),
+    );
+    throw new Error(
+      `${name} failed: ${failure}${npmCache ? '; npm cache=' + npmCache : ''}; see ${log}`,
+      { cause: error },
+    );
+  }
+}
+
+export async function installNativeRuntime(
+  runtime = defaultRuntime,
+  options = {},
+) {
   const state = resolve(runtime);
+  const install = hostInstallOptions(process.env, options);
   const env = isolatedEnvironment(state);
   for (const path of [
     'dsh',
@@ -87,47 +157,9 @@ export async function installNativeRuntime(runtime = defaultRuntime) {
   );
   for (const file of ['package.json', 'package-lock.json'])
     await copyFile(new URL(file, template), join(state, file));
-  const run = promisify(execFile);
-  const invoke = async (name, args) => {
-    try {
-      const result = await run(process.execPath, args, {
-        cwd: state,
-        env,
-        windowsHide: true,
-        timeout: 300_000,
-        maxBuffer: 8 * 1024 * 1024,
-      });
-      await writeFile(
-        join(state, name + '.log'),
-        JSON.stringify({
-          command: process.execPath,
-          args,
-          cwd: state,
-          exitCode: 0,
-        }) +
-          '\n' +
-          result.stdout +
-          result.stderr,
-      );
-      return result.stdout.trim();
-    } catch (error) {
-      await writeFile(
-        join(state, name + '.log'),
-        JSON.stringify({
-          command: process.execPath,
-          args,
-          cwd: state,
-          exitCode: error.code,
-        }) +
-          '\n' +
-          (error.stdout ?? '') +
-          (error.stderr ?? ''),
-      );
-      throw new Error(
-        `${name} failed (${error.code}); see ${join(state, name + '.log')}`,
-      );
-    }
-  };
+  await mkdir(install.npmCache, { recursive: true });
+  const invoke = (name, args, settings = {}) =>
+    runNativeInstallStep(name, args, { state, env, ...settings });
   const corepack = join(
     dirname(process.execPath),
     'node_modules/corepack/dist/corepack.js',
@@ -146,13 +178,10 @@ export async function installNativeRuntime(runtime = defaultRuntime) {
     dirname(process.execPath),
     'node_modules/npm/bin/npm-cli.js',
   );
-  await invoke('host-install', [
-    npm,
-    'ci',
-    '--ignore-scripts',
-    '--no-audit',
-    '--no-fund',
-  ]);
+  await invoke('host-install', [npm, ...install.args], {
+    timeoutMs: install.timeoutMs,
+    npmCache: install.npmCache,
+  });
   const pkg = JSON.parse(
     await readFile(
       join(state, 'node_modules/@deepseek-ai/dsh/package.json'),

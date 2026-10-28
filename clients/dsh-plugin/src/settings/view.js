@@ -25,6 +25,12 @@ const messages = {
     logout: '退出本机登录',
     portal: '在门户管理账号安全',
     tools: '工具',
+    receive: '接收消息',
+    receiveHint:
+      '仅列出已登记的在线普通会话；默认关闭，开启后允许同租户成员向该会话发送消息。',
+    receiveEmpty: '暂无已登记会话，请先在会话中执行 auriga_network_join。',
+    receivePending: '设置待确认，请重试相同操作。',
+    receiveRetry: '重试接收设置',
     deployment: '默认部署位置',
     local: '本机',
     cloud: '云端',
@@ -68,6 +74,13 @@ const messages = {
     logout: 'Sign out locally',
     portal: 'Manage account security in portal',
     tools: 'Tools',
+    receive: 'Receive messages',
+    receiveHint:
+      'Registered live sessions only. Off by default; enabling allows messages from members of the same tenant.',
+    receiveEmpty:
+      'No registered sessions. Run auriga_network_join in a session first.',
+    receivePending: 'Setting awaiting confirmation. Retry the same operation.',
+    receiveRetry: 'Retry receive setting',
     deployment: 'Default deployment',
     local: 'Local',
     cloud: 'Cloud',
@@ -94,6 +107,107 @@ export function createSettingsView(
   { localURL, fetcher = fetch, navigate },
 ) {
   const h = React.createElement;
+  function ReceiveSettings(
+    /** @type {{t:typeof messages.zh,account:any,revision:number}} */ {
+      t,
+      account,
+      revision,
+    },
+  ) {
+    const [sessions, setSessions] = React.useState(null);
+    const [busy, setBusy] = React.useState(false);
+    const [error, setError] = React.useState('');
+    const [refresh, reload] = React.useReducer(
+      (/** @type {number} */ n) => n + 1,
+      0,
+    );
+    React.useEffect(() => {
+      let live = true;
+      setSessions(null);
+      if (account?.loggedIn)
+        void fetcher(localURL('auriga/local-login/messaging/snapshot'), {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        })
+          .then(async (response) => {
+            if (!response.ok) throw new Error('unavailable');
+            const value = await response.json();
+            if (!Array.isArray(value.sessions)) throw new Error('unavailable');
+            if (live) {
+              setSessions(value.sessions);
+              setError('');
+            }
+          })
+          .catch(() => {
+            if (live) setError(t.unavailable);
+          });
+      return () => {
+        live = false;
+      };
+    }, [account, revision, refresh, t]);
+    const writeReceive = async (
+      /** @type {any} */ session,
+      /** @type {boolean} */ enabled,
+    ) => {
+      setBusy(true);
+      setError('');
+      try {
+        const response = await fetcher(
+          localURL('auriga/local-login/messaging/receive'),
+          {
+            method: 'POST',
+            credentials: 'same-origin',
+            redirect: 'error',
+            signal: AbortSignal.timeout(15000),
+            headers: {
+              'content-type': 'application/json',
+              'x-auriga-csrf': account.csrf,
+            },
+            body: JSON.stringify({ local: session.local, enabled }),
+          },
+        );
+        if (!response.ok) throw new Error('unavailable');
+      } catch {
+        setError(t.receivePending);
+      } finally {
+        setBusy(false);
+        reload();
+      }
+    };
+    return h(
+      'section',
+      null,
+      h('h3', null, t.receive),
+      h('p', null, t.receiveHint),
+      sessions?.length === 0 && h('p', null, t.receiveEmpty),
+      ...(sessions ?? []).map((/** @type {any} */ session) =>
+        h(
+          'label',
+          { key: session.local, style: { display: 'block' } },
+          h('input', {
+            type: 'checkbox',
+            checked: session.enabled,
+            disabled: busy || !account?.csrf || session.pending,
+            onChange: (/** @type {any} */ event) =>
+              writeReceive(session, event.target.checked),
+          }),
+          ` ${session.sessionId} · ${session.address}`,
+          session.pending && ` · ${t.receivePending}`,
+          session.pending &&
+            h(
+              'button',
+              {
+                type: 'button',
+                disabled: busy || !account?.csrf,
+                onClick: () => writeReceive(session, session.pendingEnabled),
+              },
+              t.receiveRetry,
+            ),
+        ),
+      ),
+      error && h('p', { role: 'status' }, error),
+    );
+  }
   /** @param {string} path @param {unknown} [body] */
   async function call(path, body) {
     const response = await fetcher(localURL(path), {
@@ -250,6 +364,7 @@ export function createSettingsView(
       state &&
         state.platformOrigin !== state.activeOrigin &&
         h('p', null, t.pending),
+      h(ReceiveSettings, { t, account, revision }),
       h('h3', null, t.security),
       row(
         t.identity,

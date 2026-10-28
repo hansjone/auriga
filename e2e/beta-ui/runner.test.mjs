@@ -7,10 +7,12 @@ import net from 'node:net';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
+  assertExternal,
   configuration,
   portFree,
   processIdentity,
   privatePath,
+  repo,
   postgresEnvironment,
   sessionProjectionDDL,
   startServices,
@@ -18,6 +20,29 @@ import {
   waitUntil,
   windowsPowerShellEnvironment,
 } from '../../scripts/beta-ui/runner.mjs';
+
+test('private state rejects repository paths including dot-prefixed child names', () => {
+  for (const relative of [
+    '',
+    'beta-state',
+    '..beta-state',
+    '..beta-state/child',
+  ]) {
+    assert.throws(
+      () => assertExternal(path.resolve(repo, relative)),
+      /Private StateDir must be outside the repository/,
+    );
+  }
+});
+
+test('private state accepts actual parent and sibling paths', () => {
+  for (const state of [
+    path.dirname(repo),
+    path.resolve(repo, '../beta-state'),
+  ]) {
+    assert.doesNotThrow(() => assertExternal(state));
+  }
+});
 
 test(
   'private restriction replaces an Administrators default owner and verification rejects it',
