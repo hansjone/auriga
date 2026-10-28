@@ -270,7 +270,7 @@ func testNASMemoryBudgetAndReceipt(t *testing.T, root, binary, input string, raw
 			if err != nil {
 				t.Fatal(err)
 			}
-			oldInput := sha256.Sum256(append(append([]byte{}, raw...), []byte("\n192.0.2.138\n192.0.2.128/26\n15000\n192.0.2.10\n192.0.2.0/26\n512")...))
+			oldInput := sha256.Sum256(append(append([]byte{}, raw...), []byte("\n192.0.2.138\n192.0.2.128/26\n15000\n192.0.2.10\n192.0.2.0/26\n512\nnetwork-wss-v1")...))
 			oldReceipt := fmt.Sprintf("%x%s", oldInput, receipt[strings.IndexByte(string(receipt), '\n'):])
 			if err := os.WriteFile(receiptPath, []byte(oldReceipt), 0o600); err != nil {
 				t.Fatal(err)

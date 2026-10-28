@@ -46,8 +46,8 @@ func runtimeProofDirectory(m *runtimebundle.Material) string {
 	return "runtime-proofs/" + strings.TrimPrefix(m.Runtime().GetReleaseEnvelope().GetImageDigest(), "sha256:")
 }
 
-func runtimeMaterialSet(m *runtimebundle.Material) materials.MaterialSet {
-	set := nasMaterialSet()
+func runtimeMaterialSet(m *runtimebundle.Material, https ...bool) materials.MaterialSet {
+	set := nasMaterialSet(https...)
 	if m == nil {
 		return set
 	}
@@ -57,12 +57,16 @@ func runtimeMaterialSet(m *runtimebundle.Material) materials.MaterialSet {
 	return set
 }
 
-func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, memory int64, r runtimeInputs, m *runtimebundle.Material) string {
+func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, memory int64, r runtimeInputs, m *runtimebundle.Material, https ...string) string {
 	h := sha256.New()
 	_, _ = h.Write(raw)
 	_, _ = fmt.Fprintf(h, "\n%s\n%s\n%d\n%s\n%s\n%d", peer, subnet, registry, lanIP, lanSubnet, memory)
 	// Old receipts must not silently retain the pre-WSS edge configuration.
-	_, _ = fmt.Fprint(h, "\nnetwork-wss-v1")
+	input := "http-or-proxy"
+	if len(https) > 0 {
+		input = https[0]
+	}
+	_, _ = fmt.Fprint(h, "\nnetwork-wss-v2-https\n"+input)
 	// Runtime mode also binds the independently supplied locators and snapshot.
 	if m != nil {
 		inputs, _ := json.Marshal([]string{r.bundle, r.root, r.image})

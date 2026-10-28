@@ -42,6 +42,9 @@ func TestDeploymentNetworkIsolation(t *testing.T) {
 			if !strings.Contains(edge, caMount) {
 				t.Fatal("edge must reuse its read-only public network CA mount")
 			}
+			if recipe == "compose" && !strings.Contains(edge, "/edge-https:/etc/auriga/https:ro") {
+				t.Fatal("external HTTPS must use the minimal read-only runtime mount")
+			}
 			for _, secret := range []string{"/network:/", "broker.key", "broker.pem", "gateway.secret", "network-platform"} {
 				if strings.Contains(edge, secret) {
 					t.Fatalf("edge receives broker/runtime material: %s", secret)
@@ -53,6 +56,9 @@ func TestDeploymentNetworkIsolation(t *testing.T) {
 			} {
 				block := serviceBlock(t, raw, service)
 				if service == "platform" {
+					if strings.Contains(block, "browser-tls") || strings.Contains(block, "edge-https") {
+						t.Fatal("platform must never mount external browser TLS private material")
+					}
 					if !strings.Contains(block, "/network-platform:/etc/auriga/network:ro") || strings.Contains(block, "/network:/etc/auriga/network:ro") || strings.Contains(block, "/network/platform.properties:") {
 						t.Fatal("platform must mount only its real private credential directory")
 					}

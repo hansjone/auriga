@@ -66,8 +66,8 @@ func loadNASAccess(path, peerIP, subnet string, registryPort int) ([]byte, deplo
 		return nil, cfg, fmt.Errorf("NAS instance-control is an isolated HTTP listener")
 	}
 	if cfg.IngressKind() == "direct" {
-		if cfg.PortalOrigin().Scheme != "http" || cfg.AdminOrigin().Scheme != "http" || ls.Portal.Tls || ls.Admin.Tls {
-			return nil, cfg, fmt.Errorf("direct NAS ingress requires explicitly acknowledged HTTP; use trusted_proxy for HTTPS")
+		if cfg.PortalOrigin().Scheme != cfg.AdminOrigin().Scheme {
+			return nil, cfg, fmt.Errorf("direct NAS browser listeners require matching schemes")
 		}
 	} else if cfg.PortalOrigin().Scheme != "https" || cfg.AdminOrigin().Scheme != "https" || !ls.Portal.Tls || !ls.Admin.Tls {
 		return nil, cfg, fmt.Errorf("NAS trusted_proxy requires external HTTPS and two TLS+mTLS listeners")
@@ -91,13 +91,16 @@ func loadNASAccess(path, peerIP, subnet string, registryPort int) ([]byte, deplo
 	return raw, cfg, nil
 }
 
-func nasMaterialSet() materials.MaterialSet {
-	set := materials.MaterialSet{PrivateFiles: []string{"edge.secret", "internal.properties"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "runtime-proofs", "network", "network-platform"}, PublicFiles: []string{
+func nasMaterialSet(https ...bool) materials.MaterialSet {
+	set := materials.MaterialSet{PrivateFiles: []string{"edge.secret", "internal.properties"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "runtime-proofs", "network", "network-platform", "browser-tls"}, PublicFiles: []string{
 		"pki/proxy-ca.crt", "pki/proxy-ca.key", "pki/proxy-edge.crt", "pki/proxy-edge.key", "pki/proxy-client.crt", "pki/proxy-client.key",
 		"pki/ca.crt", "pki/ca.key", "pki/workspace.crt", "pki/workspace.key", "pki/edge.crt", "pki/edge.key", "pki/iam.crt", "pki/iam.key", "pki/edge-iam.crt", "pki/edge-iam.key",
 		"identity-signing-keys.json", "identity-keys.json", "ca-sha256.txt", "access.json", "access.env", "edge.config.json", "platform-access.yaml", "iam-healthcheck.sh", "agent-policy.yaml",
 		"pki/gateway.crt", "pki/gateway.key",
 	}}
+	if len(https) > 0 && https[0] {
+		set.PublicFiles = append(set.PublicFiles, "browser-tls/browser.crt", "browser-tls/browser.key")
+	}
 	for _, name := range networkdeploy.Files {
 		set.PublicFiles = append(set.PublicFiles, "network/"+name)
 	}
@@ -147,6 +150,9 @@ func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer st
 	if cfg.IngressKind() == "trusted_proxy" {
 		edgeConfig["tls"] = map[string]string{"mode": "files", "certFile": "/etc/auriga/pki/proxy-edge.crt", "keyFile": "/etc/auriga/pki/proxy-edge.key"}
 		edgeConfig["proxyTLS"] = map[string]string{"caFile": "/etc/auriga/pki/proxy-ca.crt", "identityUri": "auriga://proxy/nas-test"}
+	}
+	if cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https" {
+		edgeConfig["tls"] = map[string]string{"mode": "files", "certFile": "/etc/auriga/pki/browser.crt", "keyFile": "/etc/auriga/pki/browser.key"}
 	}
 	writeJSON(filepath.Join(out, "edge.config.json"), edgeConfig, 0o644)
 	writeFile(filepath.Join(out, "platform-access.yaml"), []byte(fmt.Sprintf(`auriga:

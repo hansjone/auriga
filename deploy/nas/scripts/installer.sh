@@ -41,7 +41,7 @@ set -- --mount "type=bind,src=$AURIGA_DATA_ROOT,dst=$AURIGA_DATA_ROOT" \
   --mount "type=bind,src=$NAS_ROOT,dst=$NAS_ROOT,readonly" \
   --mount "type=bind,src=$AURIGA_ACCESS_FILE,dst=$AURIGA_ACCESS_FILE,readonly"
 case "$_boot" in "$NAS_ROOT/"*) ;; *) set -- "$@" --mount "type=bind,src=$_boot,dst=$_boot,readonly" ;; esac
-for _input in "${AURIGA_RUNTIME_BUNDLE:-}" "${AURIGA_RUNTIME_ROOT:-}"; do
+for _input in "${AURIGA_RUNTIME_BUNDLE:-}" "${AURIGA_RUNTIME_ROOT:-}" "${AURIGA_HTTPS_CERT_FILE:-}" "${AURIGA_HTTPS_KEY_FILE:-}"; do
   [ -n "$_input" ] || continue
   validate_input_path "$_input"
   set -- "$@" --mount "type=bind,src=$_input,dst=$_input,readonly"

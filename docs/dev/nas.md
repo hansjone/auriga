@@ -248,9 +248,11 @@ PostgreSQL 的 PGDATA 分阶段检查：仅当丢弃全部 capability 的 root �
 
 ## 验证与证据边界
 
-设备 WSS 的内部接线由 bootstrap 生成：edge 的精确 `/net/v1/ws` 代理到 `wss://network-broker:18444`，以现有只读 `pki-edge/network-server-ca.pem` 验证固定 SAN `broker.network.internal`。broker 只在 `internal` 网络，没有 `ports` 发布；edge 不挂 broker 私钥、密码或 `network-platform`。Origin 白名单仅取已验证 PortalURL 的完整 scheme/host/port，不含管理台或 URL 路径。NAS receipt 输入升级 `network-wss-v1`，旧材料重入拒绝，不修复/轮换，需保留备份后在新专用目录安装。
+设备 WSS 的内部接线由 bootstrap 生成：edge 的精确 `/net/v1/ws` 代理到 `wss://network-broker:18444`，以现有只读 `pki-edge/network-server-ca.pem` 验证固定 SAN `broker.network.internal`。broker 只在 `internal` 网络，没有 `ports` 发布；edge 不挂 broker 私钥、密码或 `network-platform`。Origin 白名单仅取已验证 PortalURL 的完整 scheme/host/port，不含管理台或 URL 路径。NAS receipt 输入升级 `network-wss-v2-https` 并绑定外部材料内容，旧材料重入拒绝，不修复/轮换，需保留备份后在新专用目录安装。
 
-当前可用的外部 HTTPS 入口是已有 `trusted_proxy` profile；外部 TLS 由受信前置代理终止，代理到 edge 使用现有独立 mTLS 身份。前置代理还须转发门户 `/net/v1/ws` 的 WebSocket Upgrade，保留已验证的门户 Origin 与 Host，并让所有客户端信任外部证书及完整链。域名入口要求对应 DNS SAN；纯 IP HTTPS 必须有匹配该 IP 的 IP SAN 及客户端信任，不能用 DNS SAN 或内部 broker CA 代替。现有 direct IP/HTTP profile 不能自动变成正式 WSS；需要 direct IP HTTPS 时，最小后续任务是实现并审查该 access/listener/TLS profile 及外部证书供应。不得改宽现有校验或降级 WS。
+已有 `trusted_proxy` profile 保留独立 mTLS；前置代理须转发门户 `/net/v1/ws` Upgrade，保留可信 Host/Origin，并让客户端信任外部证书。可选 direct HTTPS 沿同一 Access 合同设置 portal/admin/issuer 为 HTTPS、对应 listener.tls=true，实例子域名 scheme/port 严格匹配 portal，instance-control 仍隔离 HTTP。在 `stack.env` 显式设置绝对 `AURIGA_HTTPS_CERT_FILE` / `AURIGA_HTTPS_KEY_FILE`，或 bootstrap 的 `-https-cert-file` / `-https-key-file`；container installer 只读挂载这两个外部文件。HTTP 和 trusted_proxy 不接受此直接 TLS 输入；默认 HTTP 不变。
+
+direct HTTPS 证书须覆盖门户/管理域名及精确实例通配 SAN；纯 IP 使用匹配的真正 IP SAN。安装器校验期限、所含链内签名、密钥匹配后，由 root 通过固定继承 FD 向 uid10001 传只读快照，源私钥可保持 root:root/0600，受管副本纳入 receipt/UID 守卫，再按既有方式复制为 edge UID65532/0600 并只读挂载。完整 fullchain 可不包含根，但外部签发链的客户端信任由部署者提供，不自动安装信任，不以内部 broker CA 代替；Windows 仍仅支持 `-validate-access`，不激活 NAS 私密材料。不降级 WS、不自动把 HTTP 变成 WSS。
 
 network submit 健康状态与生成 JSON 只证明部署接线的部分条件。正式设备入网还需真实 HTTPS 入口、插件 `wss://` 配置、IAM 分配的 realm、真实签名链提供的 Ed25519 安装根及真实连接/鉴权/收发证据；传输 TLS CA 不能充当安装根，本节不宣称 L55 已闭环。
 

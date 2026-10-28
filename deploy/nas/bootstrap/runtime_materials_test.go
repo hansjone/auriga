@@ -52,7 +52,7 @@ func TestNetworkWSSReceiptVersion(t *testing.T) {
 	if got == fmt.Sprintf("%x", old) {
 		t.Fatal("pre-WSS receipt input accepted")
 	}
-	current := sha256.Sum256(append(append([]byte{}, raw...), []byte("\n192.0.2.138\n192.0.2.128/26\n15000\n192.0.2.10\n192.0.2.0/26\n512\nnetwork-wss-v1")...))
+	current := sha256.Sum256(append(append([]byte{}, raw...), []byte("\n192.0.2.138\n192.0.2.128/26\n15000\n192.0.2.10\n192.0.2.0/26\n512\nnetwork-wss-v2-https\nhttp-or-proxy")...))
 	if got != fmt.Sprintf("%x", current) {
 		t.Fatal("unexpected WSS receipt input")
 	}
