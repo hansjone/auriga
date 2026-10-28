@@ -272,6 +272,7 @@ export function createDeviceMessaging(options) {
           }),
         })),
         reason,
+        failures: inbox.failures(),
       };
     },
     /** Only the authenticated local UI/control boundary exposes this method.
@@ -301,7 +302,11 @@ export function createDeviceMessaging(options) {
       while (work.size) await Promise.allSettled([...work]);
     },
     get status() {
-      return { available: !closed && !!unregister, reason };
+      return {
+        available: !closed && !!unregister,
+        reason,
+        failures: inbox?.failures() ?? [],
+      };
     },
   };
 }

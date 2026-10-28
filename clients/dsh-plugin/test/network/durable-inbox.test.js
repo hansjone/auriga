@@ -14,6 +14,7 @@ import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { IDENTITY, self, peer } from './host/fixtures.js';
 import { digest } from '../../src/network/trust/verifier.js';
 import { hasCursorEvidence } from '../../src/network/durable/recovery.js';
+import { createDeviceMessaging } from '../../src/network/durable/capability.js';
 
 async function fixture(t, options = {}) {
   const n = nativeFixture(),
@@ -40,13 +41,13 @@ async function fixture(t, options = {}) {
     async registerLocal(r) {
       return {
         status: 'registered',
-        registrationId: 'registration-1',
+        registrationId: 'registration-' + r.local,
         opId: r.opId,
         local: r.local,
         addressType: 'session',
         fingerprint: r.fingerprint,
-        registrationRevision: '1',
-        localHighWater: '1',
+        registrationRevision: r.local,
+        localHighWater: r.local,
       };
     },
   });
@@ -78,14 +79,15 @@ async function fixture(t, options = {}) {
       requests.push(f);
       const context = { ...signer.context, requestId: f.request_id };
       let result;
-      if (f.type === 'receive_set')
+      if (f.type === 'receive_set') {
+        await options.receiveSet?.(f);
         result = {
           type: 'receive_set_result',
-          registration_id: 'registration-1',
+          registration_id: f.registration.registration_id,
           enabled: f.enabled,
           state_version: (BigInt(f.expected_version) + 1n).toString(),
         };
-      else if (f.type === 'attempt_begin')
+      } else if (f.type === 'attempt_begin')
         result = {
           type: 'attempt_result',
           recipient_id: f.recipient_id,
@@ -130,12 +132,20 @@ async function fixture(t, options = {}) {
             },
           ],
           mail_item_closed: true,
-          committed_cursor: f.mail_seq,
+          committed_cursor: options.receiptCursor ?? f.mail_seq,
         };
       } else if (f.type === 'fetch') {
-        const raw = deliveries[f.continuation === null ? 0 : 1];
-        const item = raw && signer.seal(structuredClone(raw), context);
-        const items = item ? [item] : [];
+        const offset =
+          f.continuation === null
+            ? 0
+            : f.continuation === 'opaque-next'
+              ? 1
+              : Number(f.continuation.slice(12));
+        const raw = deliveries.slice(offset, offset + (options.pageSize ?? 1));
+        const items = raw.map((item) =>
+          signer.seal(structuredClone(item), context),
+        );
+        const nextOffset = offset + raw.length;
         const page = signer.seal(
           {
             app_version: '1.0',
@@ -144,11 +154,13 @@ async function fixture(t, options = {}) {
             epoch: '7',
             head_seq: String(deliveries.length),
             committed_cursor: options.committedCursor ?? '0',
-            scan_after: raw?.mail_seq ?? '0',
+            scan_after: raw.at(-1)?.mail_seq ?? '0',
             snapshot_head: String(deliveries.length),
             next_continuation:
-              deliveries.length > 1 && f.continuation === null
-                ? 'opaque-next'
+              nextOffset < deliveries.length
+                ? nextOffset === 1
+                  ? 'opaque-next'
+                  : 'opaque-next-' + nextOffset
                 : null,
             manifest: items.map((v) => ({
               item_type: v.type,
@@ -203,14 +215,14 @@ async function fixture(t, options = {}) {
     assertCurrent() {},
     now: signer.now,
   });
-  function delivery(seq = '1') {
+  function delivery(seq = '1', local = '1') {
     const message = {
       message_id: 'message-' + seq,
       kind: 'message',
       message_class: 'unicast',
       sender_kind: 'agent',
       from: peer('1'),
-      to: self('1'),
+      to: self(local),
       body: { subtype: 'text', text: '真实正文' },
       expires_at: '2026-10-25T00:05:00Z',
     };
@@ -231,7 +243,7 @@ async function fixture(t, options = {}) {
       recipients: [
         {
           recipient_id: 'recipient-' + seq,
-          local: '1',
+          local,
           type: 'session',
           state_version: '9',
         },
@@ -255,7 +267,32 @@ async function fixture(t, options = {}) {
       ],
     };
   }
-  return { n, ledger, store, inbox, requests, deliveries, delivery, terminal };
+  async function join(id) {
+    n.seed(id);
+    const agent = n.attach(id);
+    assert.equal(
+      (await tools.get('auriga_network_join').execute({}, { agent })).status,
+      'registered',
+    );
+    return agent;
+  }
+  return {
+    n,
+    ledger,
+    store,
+    inbox,
+    requests,
+    deliveries,
+    delivery,
+    terminal,
+    join,
+    tools,
+    transport,
+    ready,
+    trust: signer.trust,
+    now: signer.now,
+    signal: abort.signal,
+  };
 }
 
 test('经验签的expired终态保存原证据并推进游标，不调用宿主或生成回执', async (t) => {
@@ -444,4 +481,233 @@ test('already_admitted 不授予第二次宿主调用许可', async (t) => {
   await f.inbox.setReceive('1', true);
   await assert.rejects(f.inbox.deliver(f.delivery()), /second invocation/);
   assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 0);
+});
+
+test('关闭接收的A不阻塞同页B及continuation，保留A原邮件且游标不跨缺口', async (t) => {
+  const options = { pageSize: 2 };
+  const f = await fixture(t, options);
+  await f.join('session-b');
+  await f.inbox.setReceive('1', true);
+  await f.inbox.setReceive('2', true);
+  await f.inbox.setReceive('1', false);
+  const blocked = f.delivery('1');
+  f.deliveries.push(blocked, f.delivery('2', '2'), f.delivery('3', '2'));
+  await f.inbox.pull();
+  const saved = f.store.snapshot().durable;
+  assert.deepEqual(
+    saved.inbound['recipient-1'].delivery.message,
+    blocked.message,
+  );
+  assert.equal(saved.inbound['recipient-1'].stage, 'received');
+  assert.equal(saved.inbound['recipient-2'].stage, 'committed');
+  assert.equal(saved.inbound['recipient-3'].stage, 'committed');
+  assert.equal(saved.resumeCursor, '0');
+  assert.deepEqual(
+    f.requests.filter((v) => v.type === 'fetch').map((v) => v.continuation),
+    [null, 'opaque-next-2'],
+  );
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 2);
+  assert.deepEqual(f.inbox.failures(), [
+    { scope: 'recipient', id: 'recipient-1', code: 'receive_none' },
+  ]);
+  const original = saved.inbound['recipient-1'];
+  await f.inbox.setReceive('1', true);
+  options.receiptCursor = '3';
+  options.committedCursor = '3';
+  await f.inbox.pull();
+  assert.equal(f.store.snapshot().durable.resumeCursor, '3');
+  assert.deepEqual(
+    f.store.snapshot().durable.inbound['recipient-1'].delivery,
+    original.delivery,
+  );
+  assert.equal(
+    f.store.snapshot().durable.inbound['recipient-1'].attemptId,
+    original.attemptId,
+  );
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 3);
+  assert.deepEqual(f.inbox.failures(), []);
+});
+
+test('单会话provider失败不阻塞其他会话，恢复仅flush且不重复prompt', async (t) => {
+  const options = { pageSize: 2 };
+  const f = await fixture(t, options);
+  await f.join('session-b');
+  await f.inbox.setReceive('1', true);
+  await f.inbox.setReceive('2', true);
+  const flush = f.n.ctx.sessions.flush;
+  f.n.ctx.sessions.flush = async (session) =>
+    session.id === 'session-a' ? false : flush(session);
+  f.deliveries.push(f.delivery('1'), f.delivery('2', '2'));
+  await f.inbox.pull();
+  assert.equal(
+    f.store.snapshot().durable.inbound['recipient-1'].stage,
+    'invoking',
+  );
+  assert.equal(
+    f.store.snapshot().durable.inbound['recipient-2'].stage,
+    'committed',
+  );
+  assert.equal(f.store.snapshot().durable.resumeCursor, '0');
+  f.n.ctx.sessions.flush = flush;
+  options.receiptCursor = '2';
+  options.committedCursor = '2';
+  await f.inbox.pull();
+  assert.equal(f.store.snapshot().durable.resumeCursor, '2');
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 2);
+});
+
+test('129条合法签名终态分页能跨128边界推进且再次拉取不再卡住', async (t) => {
+  const f = await fixture(t, { pageSize: 32, committedCursor: '129' });
+  for (let seq = 1; seq <= 129; seq++)
+    f.deliveries.push(f.terminal(String(seq)));
+  await f.inbox.pull();
+  assert.equal(Object.keys(f.store.snapshot().durable.terminal).length, 129);
+  assert.equal(f.store.snapshot().durable.resumeCursor, '129');
+  assert.equal(f.requests.filter((v) => v.type === 'fetch').length, 5);
+  assert.equal(f.requests.filter((v) => v.type !== 'fetch').length, 0);
+  const lagged = f.ledger.read();
+  lagged.durable.resumeCursor = '0';
+  assert.equal(hasCursorEvidence(lagged, '129'), true);
+  delete lagged.durable.terminal['128'];
+  assert.equal(hasCursorEvidence(lagged, '129'), false);
+  assert.equal(hasCursorEvidence(lagged, '18446744073709551615'), false);
+  await f.inbox.pull();
+  assert.equal(
+    f.requests.filter((v) => v.type === 'fetch').at(-1).resume_cursor,
+    '129',
+  );
+});
+
+test('单项隔离不吞账本持久化失败，不向后续健康会话投递或推进游标', async (t) => {
+  const f = await fixture(t, {
+    pageSize: 2,
+    beforeCommit(state) {
+      if (state.durable?.inbound['recipient-1'])
+        throw new Error('intake storage failed');
+    },
+  });
+  await f.join('session-b');
+  await f.inbox.setReceive('1', true);
+  await f.inbox.setReceive('2', true);
+  f.deliveries.push(f.delivery('1'), f.delivery('2', '2'));
+  await assert.rejects(f.inbox.pull(), { code: 'host.ledger_unavailable' });
+  assert.equal(f.store.snapshot().durable.resumeCursor, '0');
+  assert.deepEqual(f.store.snapshot().durable.inbound, {});
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 0);
+  assert.equal(f.requests.filter((v) => v.type === 'receipt').length, 0);
+});
+
+test('128边界后的缺口仅推进完整前缀，补回原证据后继续且不越界', async (t) => {
+  const f = await fixture(t, { pageSize: 32, committedCursor: '130' });
+  for (let seq = 1; seq <= 130; seq++)
+    if (seq !== 129) f.deliveries.push(f.terminal(String(seq)));
+  await assert.rejects(f.inbox.pull(), /cursor evidence missing/);
+  assert.equal(f.store.snapshot().durable.resumeCursor, '128');
+  f.deliveries.splice(128, 0, f.terminal('129'));
+  await f.inbox.pull();
+  assert.equal(f.store.snapshot().durable.resumeCursor, '130');
+});
+
+test('失效会话pending恢复保留原身份并继续健康会话设置与已接受回执对账', async (t) => {
+  let unavailable = true;
+  const f = await fixture(t, {
+    loseReceipt: true,
+    async receiveSet() {
+      if (unavailable) throw new Error('ack lost');
+    },
+  });
+  await f.join('session-b');
+  await assert.rejects(f.inbox.setReceive('1', true), /ack lost/);
+  await assert.rejects(f.inbox.setReceive('2', true), /ack lost/);
+  const pending = f.store.snapshot().durable.receive['1'].pending;
+  f.n.agents.delete('session-a');
+  unavailable = false;
+  await f.inbox.recover();
+  assert.deepEqual(f.store.snapshot().durable.receive['1'].pending, pending);
+  assert.equal(f.store.snapshot().durable.receive['2'].enabled, true);
+  assert.deepEqual(f.inbox.failures(), [
+    { scope: 'receive', id: '1', code: 'network.local_registration_required' },
+  ]);
+  await assert.rejects(
+    f.inbox.deliver(f.delivery('1', '2')),
+    /receipt response lost/,
+  );
+  await f.inbox.recover();
+  assert.equal(
+    f.store.snapshot().durable.inbound['recipient-1'].stage,
+    'committed',
+  );
+  f.n.attach('session-a');
+  await f.inbox.recover();
+  const retried = f.requests.filter(
+    (v) => v.type === 'receive_set' && v.registration.local === '1',
+  );
+  assert.equal(retried.length, 2);
+  assert.equal(retried[1].request_id, pending.request_id);
+  assert.deepEqual(
+    structuredClone(retried[1].registration),
+    pending.registration,
+  );
+  assert.equal(f.store.snapshot().durable.receive['1'].pending, null);
+  assert.deepEqual(f.inbox.failures(), []);
+});
+
+test('pending设置确认丢失且原会话卸载，messenger仍提供工具、健康会话收件与设置对账入口', async (t) => {
+  let unavailable = true;
+  const f = await fixture(t, {
+    async receiveSet() {
+      if (unavailable) throw new Error('ack lost');
+    },
+  });
+  await f.join('session-b');
+  await assert.rejects(f.inbox.setReceive('1', true), /ack lost/);
+  const pending = f.store.snapshot().durable.receive['1'].pending;
+  f.n.agents.delete('session-a');
+  unavailable = false;
+  const messaging = createDeviceMessaging({
+    ctx: f.n.ctx,
+    ledger: f.ledger,
+    prepared: {
+      submit: async () => {
+        throw new Error('unused');
+      },
+    },
+    source: {},
+    transport: f.transport,
+    ready: f.ready,
+    trust: f.trust,
+    signal: f.signal,
+    assertCurrent() {},
+    now: f.now,
+  });
+  t.after(async () => {
+    messaging.close();
+    await messaging.idle();
+  });
+  await messaging.start();
+  await messaging.idle();
+  assert.equal(messaging.status.available, true);
+  assert.equal(f.tools.has('auriga_send_message'), true);
+  assert.deepEqual((await messaging.snapshot()).failures, [
+    { scope: 'receive', id: '1', code: 'network.local_registration_required' },
+  ]);
+  assert.deepEqual(f.store.snapshot().durable.receive['1'].pending, pending);
+  f.deliveries.push(f.delivery('1', '2'));
+  await messaging.setReceive({ local: '2', enabled: true });
+  await messaging.idle();
+  assert.equal(
+    f.store.snapshot().durable.inbound['recipient-1'].stage,
+    'committed',
+  );
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 1);
+  f.n.attach('session-a');
+  await messaging.setReceive({ local: '1', enabled: true });
+  const retried = f.requests
+    .filter((v) => v.type === 'receive_set' && v.registration.local === '1')
+    .at(-1);
+  assert.equal(retried.request_id, pending.request_id);
+  assert.equal(f.store.snapshot().durable.receive['1'].pending, null);
+  assert.equal(messaging.status.available, true);
+  assert.equal(f.tools.has('auriga_send_message'), true);
+  assert.deepEqual((await messaging.snapshot()).failures, []);
 });
