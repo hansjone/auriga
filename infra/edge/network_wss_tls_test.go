@@ -29,7 +29,7 @@ func networkWSSUpgradeRequest(t *testing.T, target string) *http.Request {
 	r.Header.Set("Upgrade", "websocket")
 	r.Header.Set("Origin", "https://portal.example.com")
 	r.Header.Set("Sec-WebSocket-Version", "13")
-	r.Header.Set("Sec-WebSocket-Key", "MDEyMzQ1Njc4OWFiY2RlZg==")
+	r.Header.Set("Sec-WebSocket-Key", "MDEyMzQ1Njc4OWFiY2RlZg==") // gitleaks:allow synthetic RFC6455 handshake nonce
 	return r
 }
 
