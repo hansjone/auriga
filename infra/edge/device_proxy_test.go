@@ -91,7 +91,7 @@ func TestDeviceNativeNodeFetch(t *testing.T) {
 		t.Skip("Node.js is required for the native fetch integration regression")
 	}
 	var calls atomic.Int32
-	device := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		mode := r.Header.Values("Sec-Fetch-Mode")
 		if len(mode) != 1 || mode[0] != "cors" {
@@ -101,12 +101,18 @@ func TestDeviceNativeNodeFetch(t *testing.T) {
 			t.Error("native fetch device credential boundary lost")
 		}
 		w.WriteHeader(http.StatusAccepted)
-	}))
+	})
+	device := httptest.NewServer(handler)
 	t.Cleanup(device.Close)
-	_, addresses, _ := accessFixtureConfigured(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	network, hop := networkSubmitTestServer(t, handler)
+	g, addresses, _ := accessFixtureConfigured(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("native fetch reached platform instead of device runtime")
 		w.WriteHeader(http.StatusInternalServerError)
-	}), func(c *Config, _ map[string]any) { c.Upstreams["ai-device"] = device.URL })
+	}), func(c *Config, _ map[string]any) {
+		c.Upstreams["ai-device"] = device.URL
+		c.Upstreams["network-submit"], c.NetworkSubmitHop = network.URL, hop
+	})
+	closeAIAdminTransports(t, g)
 	const script = `
 import assert from 'node:assert/strict';
 const origin = process.argv[1];
@@ -119,6 +125,7 @@ for (const [method, path] of [
   ['GET', '/ai/v1/models'],
   ['POST', '/ai/v1/chat/completions'],
   ['GET', '/api/ai/v1/me/usage?limit=2'],
+  ['POST', '/api/ai/v1/network/submit'],
 ]) {
   const response = await fetch(origin + path, {
     ...options, method,
@@ -136,14 +143,19 @@ for (const headers of [
   { referer: origin + '/' },
   { 'sec-fetch-site': 'same-origin' },
 ]) {
-  const response = await fetch(origin + '/ai/v1/models', {
-    ...options, headers: { ...options.headers, ...headers },
-  });
-  const body = await response.text();
-  assert.equal(response.status, 403, body);
-  assert.equal(JSON.parse(body).code, 'common.forbidden');
+  for (const [method, path] of [
+    ['GET', '/ai/v1/models'],
+    ['POST', '/api/ai/v1/network/submit'],
+  ]) {
+    const response = await fetch(origin + path, {
+      ...options, method, headers: { ...options.headers, ...headers },
+    });
+    const body = await response.text();
+    assert.equal(response.status, 403, body);
+    assert.equal(JSON.parse(body).code, 'common.forbidden');
+  }
 }
-console.log('node=' + process.version + ' native-fetch=3 rejected=4');
+console.log('node=' + process.version + ' native-fetch=4 rejected=8');
 `
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -153,8 +165,8 @@ console.log('node=' + process.version + ' native-fetch=3 rejected=4');
 		t.Fatalf("native Node fetch regression: %v\n%s", err, output)
 	}
 	t.Log(strings.TrimSpace(string(output)))
-	if calls.Load() != 3 {
-		t.Fatalf("expected three native requests only, upstream calls=%d", calls.Load())
+	if calls.Load() != 4 {
+		t.Fatalf("expected four native requests only, upstream calls=%d", calls.Load())
 	}
 }
 

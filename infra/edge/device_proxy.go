@@ -25,14 +25,14 @@ func (c Config) parseDeviceUpstream() (*url.URL, error) {
 }
 
 func isDevicePath(path string) bool {
-	return path == "/ai/v1" || strings.HasPrefix(path, "/ai/v1/") || path == "/api/ai/v1/me/usage"
+	return path == "/ai/v1" || strings.HasPrefix(path, "/ai/v1/") || path == "/api/ai/v1/me/usage" || path == "/api/ai/v1/network/submit"
 }
 
 func deviceMethod(path string) string {
 	switch path {
 	case "/ai/v1/models", "/api/ai/v1/me/usage":
 		return http.MethodGet
-	case "/ai/v1/chat/completions":
+	case "/ai/v1/chat/completions", "/api/ai/v1/network/submit":
 		return http.MethodPost
 	default:
 		return ""
@@ -95,14 +95,19 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 		fail(401, "common.unauthenticated")
 		return
 	}
-	if g.deviceURL == nil {
+	target, transport := g.deviceURL, apiProxyTransport
+	if r.URL.Path == "/api/ai/v1/network/submit" {
+		target = g.networkSubmitURL
+		transport = g.APITransports[target]
+	}
+	if target == nil || transport == nil {
 		fail(503, "common.unavailable")
 		return
 	}
 	if r.Body != nil && r.Body != http.NoBody {
 		r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
 	}
-	proxy := newReverseProxy(g.deviceURL, apiProxyTransport, false)
+	proxy := newReverseProxy(target, transport, false)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
