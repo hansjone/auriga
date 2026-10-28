@@ -20,3 +20,9 @@ Run 串行执行 Control 与 BypassUpstreamTLS 两个独立归档。Java bridge 
 反证只改归档内 `infra/edge/network_wss_tls.go` 的 TLS config，加入 InsecureSkipVerify。测试保持完全相同；只有 wrong-ca 的 `upstream TLS must reject HTTP upgrade` 断言失败、各真实子进程均正常退出且无其他失败才算检出。编译、初始化、证书生成、SQL或清理错误均不算反证。归档日志和每个 probe 的阶段证据保存在输出目录。
 
 边界：本验收为真正的 `127.0.0.1` IP SAN 模式，不覆盖现场域名、DNS、NAS/VPS或公开证书。edge→Java hop 使用专门签发的 clientAuth 证书和受信 CA，但 Java fixture HTTPS 没有要求客户端 mTLS；不能据此宣称该 hop 已验证双向 mTLS。可信登录完成身份沿现有 bridge 种子；本验收不覆盖交互式登录、真实 DSH 宿主或模型对话。低层 NatsLink 的无 Origin socket 工厂仍供独立 transport 使用；生产 device runtime 必须有 provider 提供的可信 Origin。
+
+Windows 局部差分确认，锁定 Broker 2.15.1 的坏票据拒绝尾帧可能在首轮 CONNECT、PING 分两个 WebSocket 帧发送时遇到 ECONNRESET，且重置先于客户端关闭；单帧对照没有该缺帧现象。这是当前平台的实测边界，不外推所有操作系统或所有 Broker 版本。生产 NatsLink 因此仅合并初次同步调用轮的两次写入，保持原始字节和顺序；不解析鉴权、不重试、不改变拒绝判据，后续应用消息不合并。
+
+首轮快照用 Node 22 的 ArrayBuffer.transfer 显式分离旧存储。令 B 不超过原队列预算与单帧 handoff 预算的较小者，可能的旧+新复制峰值不超过 2B；在应用尚未 ready、queue/handoff 均为空的阶段使用这两项既有预算，native 发送仍受原 socket hardCap 限制。已发送的快照保留至 native send 回调或实际 close 后才 detach，应用发送等待释放，不能把 GC 当即时回收。过大的首写直接沿原写法；无法合并的第二写先按原 guard 发首帧，若首 flush 失败不继续第二写。预算数值与总额不增加。
+
+局部诊断可单独运行 `node e2e/network/support/edge-wss-auth-probe.mjs --compare` 对照 CONNECT-only、单帧、双帧和碎片；`--direct-fixed` 对生产 NatsLink 连续120次真实坏 token 拒绝及首轮单 native write 逐次断言。这些探针只起临时真实 Broker，不起 IAM/PG，不算业务验收；每次结果写入独立 `edge-wss-auth-probe-*` 目录，保留全部失败与成功对照。
