@@ -65,6 +65,11 @@ See `docs/dev/dsh-plugin.md` and `contracts/plugin/README.md`.
 An installer may add static network pins to the existing loader row's
 `config.connect` (replace the placeholder with the installation's public root):
 
+For verified local public-material export, exact loader placement and isolated
+acceptance steps, see [network installation](../../docs/dev/network-installation.md).
+The helper checks consistency; trusted operators must establish the real HTTPS
+registration source and independently confirm the offline root fingerprint.
+
 ```yaml
 connect:
   platformOrigin: https://portal.example.com
