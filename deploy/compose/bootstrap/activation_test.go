@@ -18,6 +18,47 @@ func TestActivationRejectsUnsealedBase(t *testing.T) {
 	}
 }
 
+func TestActivationRejectsLegacyNativeClient(t *testing.T) {
+	f := activationFixture(t)
+	path := filepath.Join(f.out, "network-platform", "platform.properties")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), nativeClientProperties, "", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Build a local legacy fixture with a valid seal, rather than testing only
+	// ordinary drift rejection. No production code rewrites an old receipt.
+	receiptPath := filepath.Join(f.out, "iam-installation", "bootstrap.receipt")
+	receipt, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(receiptPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeIdentityManifest(f.out, strings.Split(string(receipt), "\n")[0]); err != nil {
+		t.Fatal(err)
+	}
+	receipt, _ = os.ReadFile(receiptPath)
+	f.base = digestBytes(receipt)
+	f.args[len(f.args)-3] = f.base
+	before := originalBase(t, f.out)
+	if _, err := activationBase(f.out, f.base, f.identity); err == nil || !strings.Contains(err.Error(), "requires sealed native client registration") {
+		t.Fatalf("legacy base not explicitly refused: %v", err)
+	}
+	if b, err := exec.Command(f.binary, append(f.args, "-validate-access")...).CombinedOutput(); err == nil || !strings.Contains(string(b), "requires sealed native client registration") {
+		t.Fatalf("legacy base CLI not explicitly refused: %v %s", err, b)
+	}
+	assertBase(t, f.out, before)
+	for _, name := range []string{activationDirectory, ".collab-activation.pending", ".collab-activation.lock"} {
+		if _, err := os.Lstat(filepath.Join(f.out, name)); !os.IsNotExist(err) {
+			t.Fatal("legacy refusal wrote activation material")
+		}
+	}
+}
+
 type activationFixtureData struct {
 	binary, out, input, base, identity string
 	args                               []string
@@ -221,6 +262,9 @@ func TestActivationSealAndReentry(t *testing.T) {
 	}
 	if check() != nil {
 		t.Fatal("seal refused")
+	}
+	if err := checkNativeClient(filepath.Join(f.out, activationDirectory)); err != nil {
+		t.Fatalf("activation projection lost fixed native client: %v", err)
 	}
 	inputRaw, _ := os.ReadFile(f.input)
 	var changedInput map[string]any

@@ -215,7 +215,7 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 	if c == nil {
 		return nil
 	}
-	if err := checkNativeClient(out); err != nil {
+	if err := checkNativeClient(base); err != nil {
 		return err
 	}
 	dir := filepath.Join(out, "collab-installation")

@@ -82,6 +82,9 @@ func activationBase(out, expectedReceipt, expectedIdentity string) (deploymentco
 	if err != nil || access.PortalOrigin().Scheme != "https" {
 		return empty, fmt.Errorf("activation requires sealed HTTPS base")
 	}
+	if err := checkNativeClient(out); err != nil {
+		return empty, fmt.Errorf("activation %w", err)
+	}
 	return access, nil
 }
 
