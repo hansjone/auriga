@@ -9,6 +9,7 @@ import { Buffer } from 'node:buffer';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { privatePath, processIdentity, waitUntil, repo } from './runner.mjs';
+import { readConnect } from './demo-network-send-config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const origin = 'http://127.0.0.1:18080';
@@ -262,7 +263,10 @@ export function parseArguments(args) {
       '用法：plugin-dsh.mjs launch|status|stop --state <绝对路径>',
     );
   const values = {};
-  const allowed = action === 'launch' ? ['--state', '--port'] : ['--state'];
+  const allowed =
+    action === 'launch'
+      ? ['--state', '--port', '--connect-config']
+      : ['--state'];
   for (let i = 0; i < rest.length; i += 2) {
     if (
       !allowed.includes(rest[i]) ||
@@ -282,6 +286,9 @@ export function parseArguments(args) {
     action,
     state: path.resolve(values['--state']),
     port: 0,
+    ...(values['--connect-config']
+      ? { connectConfig: values['--connect-config'] }
+      : {}),
   };
 }
 
@@ -388,14 +395,14 @@ export function buildEnvironment(state, source = process.env) {
   return { ...env, ...approved };
 }
 
-export function connectionPatch(providerId) {
+export function connectionPatch(providerId, connect) {
   if (typeof providerId !== 'string' || !providerId || providerId.length > 128)
     throw new Error('团队身份源无效');
   // JSON flow mappings are valid YAML; no interpolation into YAML syntax.
   return (
     '- id: auriga-dsh\n  disabled: false\n  config: ' +
     JSON.stringify({
-      connect: {
+      connect: connect ?? {
         platformOrigin: origin,
         issuer: origin,
         clientId: 'auriga-beta-native',
@@ -534,8 +541,11 @@ export function runLogged(
   }
 }
 
-async function discoverProvider() {
-  const response = await fetch(origin + '/api/iam/v1/login/providers', {
+export async function discoverProvider(connect) {
+  if (connect && process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0')
+    throw new Error('所选部署禁止跳过 TLS 验证');
+  const selectedOrigin = connect?.platformOrigin ?? origin;
+  const response = await fetch(selectedOrigin + '/api/iam/v1/login/providers', {
     redirect: 'error',
     signal: AbortSignal.timeout(5000),
   });
@@ -546,26 +556,32 @@ async function discoverProvider() {
   );
   if (providers?.length !== 1)
     throw new Error('Beta 必须恰有一个团队账号表单身份源');
+  if (connect && providers[0].id !== connect.providerId)
+    throw new Error('所选部署的公开身份源与受信安装配置不一致');
   return providers[0].id;
 }
 
 async function launch(options) {
   const { state } = options;
   assertStatePath(state);
-  const providerId = await discoverProvider();
+  const connect = options.connectConfig
+    ? readConnect(options.connectConfig)
+    : undefined;
+  const providerId = await discoverProvider(connect);
   claimState(state);
   privatePath(state, true);
   const lock = path.join(state, 'plugin-dsh.lock');
   const handle = fs.openSync(lock, 'wx', 0o600);
   try {
-    return await prepareLaunch(options, providerId);
+    return await prepareLaunch({ ...options, connect }, providerId);
   } finally {
     fs.closeSync(handle);
     fs.unlinkSync(lock);
   }
 }
 
-async function prepareLaunch({ state }, providerId) {
+async function prepareLaunch({ state, connect }, providerId) {
+  const selectedOrigin = connect?.platformOrigin ?? origin;
   const env = isolatedEnvironment(state);
   for (const dir of [
     'dsh',
@@ -643,7 +659,7 @@ async function prepareLaunch({ state }, providerId) {
   );
   fs.writeFileSync(
     path.join(state, 'dsh/profiles/web/cordis.patch.yml'),
-    connectionPatch(providerId),
+    connectionPatch(providerId, connect),
   );
   cli(['--profile', 'web', '--dump-config'], 'profile-config');
   let worker;
@@ -727,8 +743,8 @@ async function prepareLaunch({ state }, providerId) {
           if (!settings.ok) return false;
           const configured = await settings.json();
           if (
-            configured.platformOrigin !== origin ||
-            configured.activeOrigin !== origin
+            configured.platformOrigin !== selectedOrigin ||
+            configured.activeOrigin !== selectedOrigin
           )
             return false;
           const view = await fetch(parsed.origin + '/auriga/settings/view.js', {
