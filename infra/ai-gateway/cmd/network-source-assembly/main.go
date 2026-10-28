@@ -106,6 +106,10 @@ func run() (result error) {
 	if err != nil {
 		return errors.New("broker TLS preparation failed")
 	}
+	submit, err := submitClientFiles(dir)
+	if err != nil {
+		return errors.New("submit client TLS preparation failed")
+	}
 	issuer, err := nkeys.CreateAccount()
 	if err != nil {
 		return err
@@ -229,7 +233,7 @@ func run() (result error) {
 	}
 	defer relay.close()
 	cfg := network.RuntimeConfig{
-		SubmitHTTP:       &network.SubmitHTTPConfig{Listen: fmt.Sprintf("127.0.0.1:%d", httpsPort), TLSCertFile: cert, TLSKeyFile: key},
+		SubmitHTTP:       submit.listenerConfig(fmt.Sprintf("127.0.0.1:%d", httpsPort), cert, key),
 		BrokerConfigFile: cfgPath, ServerAudience: b.ServerAudience, ClientAccount: "CLIENTS",
 		IssuerSeedFile: issuerFile, XKeySeedFile: xFile,
 		IAM:    team.RPCConfig{Target: relay.iamAddress, ServiceTokenFile: b.GatewayToken},
@@ -249,7 +253,7 @@ func run() (result error) {
 	defer func() { _ = authority.Close() }()
 	sourceCalls := newSourceCalls(ctx, authority, b.Tenant)
 	defer sourceCalls.close()
-	if err = emit(map[string]any{"stage": "gateway-ready", "https": fmt.Sprintf("https://127.0.0.1:%d", httpsPort), "wss": fmt.Sprintf("wss://127.0.0.1:%d", wsPort), "ca": ca, "brokerVersion": "2.15.1", "brokerPid": child.Process.Pid, "brokerCreationToken": brokerIdentity, "brokerLaunchWallClock": started.Format(time.RFC3339Nano), "gatewayPid": os.Getpid()}); err != nil {
+	if err = emit(map[string]any{"stage": "gateway-ready", "https": fmt.Sprintf("https://127.0.0.1:%d", httpsPort), "wss": fmt.Sprintf("wss://127.0.0.1:%d", wsPort), "ca": ca, "submitServerName": "localhost", "submitClientCertFile": submit.ClientCertFile, "submitClientKeyFile": submit.ClientKeyFile, "brokerVersion": "2.15.1", "brokerPid": child.Process.Pid, "brokerCreationToken": brokerIdentity, "brokerLaunchWallClock": started.Format(time.RFC3339Nano), "gatewayPid": os.Getpid()}); err != nil {
 		return err
 	}
 	scan := bufio.NewScanner(os.Stdin)

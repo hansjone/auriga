@@ -13,12 +13,20 @@ ReceiveSet/AttemptBegin/ExecutionAdmit 及跨身份零写断言；原 T3b/T4 断
   "submitHTTP": {
     "listen": "127.0.0.1:8443",
     "tlsCertFile": "/run/secrets/network-cert.pem",
-    "tlsKeyFile": "/run/secrets/network-key.pem"
+    "tlsKeyFile": "/run/secrets/network-key.pem",
+    "clientCAFile": "/run/secrets/submit-client-ca.pem"
   }
 }
 ```
 
 该 HTTPS listener 必须与 callout/router 在同一进程，共用受验证 READY 连接登记。
+`clientCAFile` 必填并强制校验客户端证书；缺失或无效时拒绝启动，不兼容旧单向 TLS 配置。
+source-assembly 在 Java 已创建的私有临时目录内生成独立 submit 客户端 CA 和驱动叶证书，
+只保存 CA 公钥、客户端证书/私钥（0600），CA 私钥不落盘，不复用 IAM 或 Broker CA。
+`gateway-ready` 仅携带 `submitClientCertFile`、`submitClientKeyFile` 的私有路径及固定
+`submitServerName=localhost`，不输出证书私钥内容。SEND 驱动使用该客户端身份和
+`gateway.ca` 明确校验服务端；不会借用进程的 IAM 扩展信任或关闭 TLS 校验。
+Control 与 TrustClientIdentity 均经相同 mTLS 请求入口，精确 HEAD 归档及业务反证断言保持不变。
 入口 `POST /api/ai/v1/network/submit` 要求 `Authorization: Bearer <device access token>`
 和 `Content-Type: application/json`。body 是完整 SubmitRequest；身份字段、连接 tuple、
 身份头与 query 参数均不能选取来源。IAM 验证当前 device/owner/backing session 后，
@@ -47,3 +55,14 @@ Maven 3.9.16；脚本记录实际命令和退出码，不将下载失败计为�
 FETCH continuation、签名下行及 RECEIPT expected_state_version 在 gateway 中都按原字节转发；
 单测检查 continuation 和超出 JavaScript 安全整数范围的服务端版本不被重写。
 本驱动无真实宿主证据，RECEIPT 只由对应 Go 转发测试覆盖。
+
+不启动 PG 的 TLS/驱动回归：
+
+```powershell
+node --test e2e/network/submit-client.test.mjs e2e/network/gateway-send.test.mjs
+# 从 infra/ai-gateway 执行：
+go test -count=1 -run '^TestAssemblySubmitTLS' ./cmd/network-source-assembly
+```
+
+Go 用真实 Broker/runtime 和 SubmitHandler 验证客户端证书边界；Node 验证驱动携带证书、
+错误 CA/服务名/缺材料拒绝、请求及响应字节保持。它们不替代上述精确 HEAD 的 PG 全链验证。

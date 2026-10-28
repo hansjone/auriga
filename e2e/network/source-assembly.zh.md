@@ -1,5 +1,12 @@
 # T3b/T4：生产来源链与真实公开宿主装配驱动
 
+submit listener 现在要求独立客户端 CA。Go 装配在本次私有 T3a 临时目录生成
+`submit-client-ca.pem`、`submit-client.pem` 和 `submit-client-key.pem`，前者只签本次
+驱动客户端身份；IAM 和 Broker 信任不进入该 CA。listener 带必填 `clientCAFile`。
+gateway-ready 只公布客户端证书/私钥的路径；SEND-2 驱动以显式 HTTPS mTLS 使用这些材料，
+服务端验证仍绑定本次 Broker/submit 服务端 CA 和固定 localhost 身份。普通 T3b/T4 不调用
+submit 时仍须让 listener 正常启动，不因新增 TLS 要求跳过原矩阵。
+
 这是隔离集成驱动，不是 Spring/安装器、浏览器登录、双 DSH 往返或 SEND 验收。
 T4 已把 nativeFixture 替换成精确 `@deepseek-ai/dsh@0.2.1-rc.3` 公开服务：
 Context、SessionStore、JSONL、SessionController、AgentLoop、AgentRegistry、ToolRuntime，
