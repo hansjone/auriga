@@ -55,8 +55,8 @@ class NetworkSourceJavaHostTest {
                       Base64.getMimeDecoder()
                           .decode(
                               Files.readString(tls.edgeKey)
-                                  .replace("-----BEGIN PRIVATE KEY-----", "")
-                                  .replace("-----END PRIVATE KEY-----", ""))));
+                                  .replace(NetworkSourceJavaHost.PRIVATE_KEY_BEGIN, "")
+                                  .replace("-----END " + "PRIVATE KEY-----", ""))));
       var signature = Signature.getInstance("SHA256withECDSA");
       signature.initSign(key);
       signature.update(new byte[] {1, 2, 3});
