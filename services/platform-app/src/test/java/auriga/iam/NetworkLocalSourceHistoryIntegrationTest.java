@@ -525,18 +525,23 @@ class NetworkLocalSourceHistoryIntegrationTest {
           });
     }
 
+    ResolveNetworkTargetResponse resolveReference(NetworkAuthorityConnection connection) {
+      // Fixture preparation includes real IAM/PG work on loaded Windows runners. Give each
+      // reference its own finite budget; production client deadlines remain five seconds.
+      return TenantContext.call(
+          tenant,
+          () ->
+              NetworkAuthorityServiceGrpc.newBlockingStub(iamChannel)
+                  .withDeadlineAfter(30, TimeUnit.SECONDS)
+                  .resolveNetworkTarget(
+                      ResolveNetworkTargetRequest.newBuilder()
+                          .setConnection(connection)
+                          .setLocal("0")
+                          .build()));
+    }
+
     NetworkConnectionAnchor reference(NetworkAuthorityConnection connection) {
-      var reply =
-          TenantContext.call(
-              tenant,
-              () ->
-                  NetworkAuthorityServiceGrpc.newBlockingStub(iamChannel)
-                      .withDeadlineAfter(5, TimeUnit.SECONDS)
-                      .resolveNetworkTarget(
-                          ResolveNetworkTargetRequest.newBuilder()
-                              .setConnection(connection)
-                              .setLocal("0")
-                              .build()));
+      var reply = resolveReference(connection);
       assertTrue(reply.getAllowed(), "new C2 must really Resolve allowed=true");
       assertEquals(connection, reply.getConnection());
       assertTrue(reply.hasConnectionAnchor());
@@ -2835,6 +2840,54 @@ class NetworkLocalSourceHistoryTransportTest {
       verify(authority, times(2)).check(check());
     } finally {
       h.close();
+    }
+  }
+
+  @Test
+  void fixtureReferenceWaitsBeyondProductionDeadlineForDelayedIamReply() throws Exception {
+    var h = new NetworkLocalSourceHistoryIntegrationTest.Harness();
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    try (h;
+        var executor = Executors.newSingleThreadExecutor()) {
+      h.security();
+      var authority = mock(IamNetworkAuthority.class);
+      when(authority.resolveConnection(any()))
+          .thenReturn(
+              new IamNetworkAuthority.ResolvedTarget(h.clock.instant().plusSeconds(60), null));
+      h.connectIam(authority, mock(IamNetworkSourceAuthority.class));
+      var connection =
+          NetworkAuthorityConnection.newBuilder()
+              .setTenantId(h.tenant.toString())
+              .setRealm("2")
+              .setNode("1")
+              .setIngress("a".repeat(26))
+              .setServerId("N" + "A".repeat(55))
+              .setClientId("41")
+              .setClientAccount("BROKER-41")
+              .build();
+      h.observed.resolveEcho =
+          reply -> {
+            entered.countDown();
+            assertDoesNotThrow(
+                () -> assertTrue(release.await(20, TimeUnit.SECONDS), "IAM reply not released"));
+            return reply;
+          };
+      var reference = executor.submit(() -> h.resolveReference(connection));
+      try {
+        // The authenticated IAM handler has completed; only its reply is held back.
+        assertTrue(entered.await(15, TimeUnit.SECONDS), "IAM resolution did not reach the reply");
+        assertThrows(TimeoutException.class, () -> reference.get(6, TimeUnit.SECONDS));
+      } finally {
+        release.countDown();
+      }
+      var reply = reference.get(10, TimeUnit.SECONDS);
+      assertTrue(reply.getAllowed());
+      assertEquals(connection, reply.getConnection());
+      assertEquals(1, h.observed.resolved.get());
+      verify(authority).resolveConnection(any());
+    } finally {
+      release.countDown();
     }
   }
 
