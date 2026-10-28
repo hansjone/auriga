@@ -7,14 +7,11 @@
 
 **当前验证边界：** 已合入 EDGE-SUBMIT 独立 submit 上游修正（40846a8），
 路由 preflight 使用分别独立的 model HTTP 与 network HTTPS 上游，并核固定信任。
-主控对 bec49fc 的全链运行已通过宿主安装和 Java/Team/network/edge 启动，随后首次登录状态请求返回503。
-驱动现以公开设置的 activeOrigin 和原生 profile 依赖就绪为启动条件，两个真实 CLI 的
-配置及登录状态200预检通过。主控对1dea6c6运行已进一步到登录调用503，真实异常原先被兜底吞掉；
-已通过诊断确认22c6f11在begin收到IAM400 common.validation_failed；本轮发现测试代理漏写
-IAM强制要求的X-Auriga-Client-IP，并用生产RequestIdentity重现旧请求400及修正后的入口校验通过。
-代理现剥离客户端伪造入口/IP头，并从真实回环peer重建该字段；插件保持平台400校验错误码。
-本工位PG此前报restricted-token 87/3，仍没有完整普通登录/双向业务结果。
-因此以下收发/故障/反证断言是已实现的验收路径，不能据此宣称业务验收通过。
+主控对eab3674的Control已完成两个独立DSH普通登录、双向收发及四条SEND-4检查，进程全部正常退出。
+随后原始基线因源码文件丢失未能启动，SkipSubmissionCommit尚未执行，因此尚未完成整套验收。
+已用独占微型夹具确认Windows Java Files.walk会穿透profile中的pnpm junction并删除源码目标；
+本轮将profile移出Java清理根，交Node单独清理，并在基线之前核对清理后源码哈希。
+本工位PG此前报restricted-token 87/3，完整基线及业务反证仍需root在可启动PG的环境复验。
 `dual-dsh-blocker.zh.md` 描述的是修复候选合入前的历史首失。
 
 ## 执行与证据
@@ -23,6 +20,7 @@ IAM强制要求的X-Auriga-Client-IP，并用生产RequestIdentity重现旧请�
 
 ```powershell
 node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs
+node --test e2e/network/dual-cleanup.test.mjs
 .\mvnw.cmd -B -pl services/platform-app -am test '-Dtest=NetworkSourceJavaHostTest,NetworkSourceJavaFaultsTest' '-Dsurefire.failIfNoSpecifiedTests=false'
 node e2e/network/support/dual-prepare.mjs --compile
 # 无PG，仅核代理的真实入口头满足生产IAM校验；不认证或生成凭据：
@@ -96,6 +94,10 @@ status503仍立即失败，不重试登录、不延长业务期限。`A/B-profil
 设置与 available/loggedIn，不保存 CSRF、启动票据或任何凭据。
 归档运行的 Java/PG 临时目录放在原工位 `e2e/network/target/dual-private-*`，独占创建并
 校验真实父路径，避免 Windows 原生 PG 的归档嵌套长路径问题；不删除其他运行的目录。
+每端DSH状态放在该Node自有根下，与Java私有子目录平级。profile含指向归档源码的pnpm
+junction，绝不能置于Java Files.walk清理范围内；Windows JVM默认会将junction视为目录。
+Java只删除自己的私有子目录；CLI正常退出、Java关闭后，Node删除其自有根及链接条目，保留链接目标。
+dual-cleanup回归仅用独占微型源码哨兵，运行真实JVM和Node两阶段清理，确认目标原字节不变。
 先确认真实 Java/PG/gateway 可启动，再准备锁定 DSH runtime；启动失败不下载宿主，也不 skip。
 
 ## 真实服务与测试辅助边界
@@ -155,5 +157,8 @@ preflight 另外运行真实 model/network handler 分流、IP/域名路由和�
 verify 分别解包相同精确 HEAD，独立锁定依赖、typecheck、编译两种测试装配，
 核测试/源码 SHA256 和命令退出码。Control 全链通过后，必须原样运行原 T3b/T4/SEND-2/SEND-3
 驱动及其原判定；变体不修改这些测试。CompileOnly 不启动 PG，也不证明收发或业务反证。
+每个变体的双DSH清理结束后，先记录afterDualTests并核对所有列入门禁的源码/测试哈希，
+其中包含基线导入的nats-binary.js；完整性核对通过后才可启动原始基线。任何缺失/改动均失败，
+不以恢复文件、跳过基线或放宽反证判据掩盖清理问题。
 驱动不配置模型凭据，也不把模型回复作为断言；本线证明真实宿主持久接收，不能称为模型往返对话。
 进程重启/换 epoch、完整首联、递归子会话、跨租户及容量/HA 仍按后续任务验收。

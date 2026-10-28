@@ -21,6 +21,7 @@ $testPaths += @('e2e/network/support/dual-edge.mjs','e2e/network/support/dual-ed
 $testPaths += @('e2e/network/dual-cli-check.mjs')
 $testPaths += @('clients/dsh-plugin/src/local/routes.js','clients/dsh-plugin/src/local/diagnostic.js','clients/dsh-plugin/test/login-routes.test.js')
 $testPaths += @('e2e/network/entry-check.mjs','e2e/network/support/DualDshEntryCheck.java')
+$testPaths += @('e2e/network/support/dual-state.mjs','e2e/network/dual-cleanup.test.mjs','e2e/network/support/NodeOwnedCleanupProbe.java','clients/dsh-plugin/test/network/transport/support/nats-binary.js')
 $manifest = [ordered]@{head=$ExpectedHead; archiveSha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash; mode=$(if($Run){'Run'}else{'CompileOnly'}); variants=@(); complete=$false}
 function Save-Manifest { [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8) }
 function Hashes([string]$Directory) { $result=[ordered]@{}; foreach($path in $testPaths){$result[$path]=(Get-FileHash -LiteralPath (Join-Path $Directory $path) -Algorithm SHA256).Hash}; return $result }
@@ -42,7 +43,7 @@ try {
       & node (Join-Path $directory 'e2e/network/support/dual-verdict.mjs') --mutate (Join-Path $directory $sourcePath)
       if($LASTEXITCODE -ne 0){throw 'Exact single-production mutation failed'}
     }
-    $entry=[ordered]@{name=$mode;tests=$tests;originalSource=$original;source=(Get-FileHash -LiteralPath (Join-Path $directory $sourcePath) -Algorithm SHA256).Hash;commands=@();baseline=$null;evidence=$null}
+    $entry=[ordered]@{name=$mode;tests=$tests;afterDualTests=$null;originalSource=$original;source=(Get-FileHash -LiteralPath (Join-Path $directory $sourcePath) -Algorithm SHA256).Hash;commands=@();baseline=$null;evidence=$null}
     $manifest.variants += $entry; Save-Manifest
     if(($tests|ConvertTo-Json -Compress) -cne ($manifest.variants[0].tests|ConvertTo-Json -Compress) -or $original -cne $manifest.variants[0].originalSource){throw 'Exact archive test/source identity required'}
     if(($entry.source -ceq $original) -ne ($mode -eq 'Control')){throw 'Only the mutant outbox may change'}
@@ -52,7 +53,7 @@ try {
       try{$code=Recorded ($mode+'-install') 'pnpm install --frozen-lockfile --filter auriga-dsh... --store-dir $AURIGA_PNPM_STORE' {& pnpm install --frozen-lockfile --filter 'auriga-dsh...' --store-dir $env:AURIGA_PNPM_STORE}}finally{$env:CI=$ciBefore}
       if($code -ne 0){throw 'Locked independent dependencies failed'}
       if($mode -eq 'Control') {
-        $code=Recorded 'Control-guards' 'node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs e2e/network/host-install-cache.test.mjs e2e/network/native-install.test.mjs clients/dsh-plugin/test/login-routes.test.js' {& node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs e2e/network/host-install-cache.test.mjs e2e/network/native-install.test.mjs clients/dsh-plugin/test/login-routes.test.js}
+        $code=Recorded 'Control-guards' 'node --test e2e/network/dual-dsh.test.mjs e2e/network/dual-cleanup.test.mjs e2e/network/plugin-send.test.mjs e2e/network/host-install-cache.test.mjs e2e/network/native-install.test.mjs clients/dsh-plugin/test/login-routes.test.js' {& node --test e2e/network/dual-dsh.test.mjs e2e/network/dual-cleanup.test.mjs e2e/network/plugin-send.test.mjs e2e/network/host-install-cache.test.mjs e2e/network/native-install.test.mjs clients/dsh-plugin/test/login-routes.test.js}
         if($code -ne 0){throw 'Driver and existing SEND guards failed'}
       }
       Push-Location clients/dsh-plugin
@@ -86,6 +87,10 @@ try {
         $entry.evidence=Join-Path $evidence[0].FullName 'manifest.json'
         & node e2e/network/support/dual-verdict.mjs --verdict $entry.evidence $mode $runExit
         if($LASTEXITCODE -ne 0){throw 'Dual DSH business verdict rejected; setup/SQL/cleanup never count'}
+        # Cleanup must preserve the shared source tree before the baseline loads
+        # any modules. Record exact post-cleanup hashes, including nats-binary.
+        $entry.afterDualTests=Hashes $directory; Save-Manifest
+        if(($entry.afterDualTests|ConvertTo-Json -Compress) -cne ($tests|ConvertTo-Json -Compress)){throw 'Source/test integrity changed during dual DSH run or cleanup'}
         # Keep the original assertions and its separate two-Context scope.
         if($mode -eq 'Control') {
           $baselineExit=Recorded 'Control-baseline' 'node e2e/network/source-plugin-send.mjs --run' {& node e2e/network/source-plugin-send.mjs --run}

@@ -21,6 +21,7 @@ import {
 } from './support/assembly-process.mjs';
 import { prepareDual } from './support/dual-prepare.mjs';
 import { dualEdgeConfig } from './support/dual-edge.mjs';
+import { dualHostState } from './support/dual-state.mjs';
 import { createDualProxy } from './support/dual-proxy.mjs';
 import { launchCli } from './support/dual-cli.mjs';
 import { installNativeRuntime, hostPin } from './support/native-install.mjs';
@@ -252,7 +253,10 @@ export async function runDualDsh() {
       ['A', 'alice'],
       ['B', 'bob'],
     ]) {
-      const state = join(dirname(ready.config), 'dsh-' + name);
+      // Windows Java Files.walk treats junctions as directories even without
+      // FOLLOW_LINKS. Profiles contain pnpm source junctions, so only Node owns
+      // and removes them, as siblings of the Java private root.
+      const state = dualHostState(javaTemporary, dirname(ready.config), name);
       const host = await launchCli({
         root,
         state,
