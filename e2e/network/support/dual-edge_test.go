@@ -72,7 +72,8 @@ func TestSEND4EdgeFixture(t *testing.T) {
 	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"stage": "edge-ready", "https": server.URL, "ca": cfg.NetworkSubmitHop.CAFile,
 		"pid": os.Getpid(), "submitUpstream": cfg.Upstreams["network-submit"],
-		"serverName": cfg.NetworkSubmitHop.ServerName,
+		"serverName":           cfg.NetworkSubmitHop.ServerName,
+		"submitClientCertFile": cfg.NetworkSubmitHop.CertFile,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -157,10 +158,10 @@ func TestSEND4EdgeFixtureLifecycle(t *testing.T) {
 		t.Fatalf("edge fixture readiness: %v %s", err, stderr.String())
 	}
 	var ready struct {
-		Stage, HTTPS, SubmitUpstream string
-		PID                          int
+		Stage, HTTPS, SubmitUpstream, SubmitClientCertFile string
+		PID                                                int
 	}
-	if err := json.Unmarshal(line, &ready); err != nil || ready.Stage != "edge-ready" || ready.SubmitUpstream != upstream.URL || ready.PID != child.Process.Pid {
+	if err := json.Unmarshal(line, &ready); err != nil || ready.Stage != "edge-ready" || ready.SubmitUpstream != upstream.URL || ready.PID != child.Process.Pid || ready.SubmitClientCertFile != hop.CertFile {
 		t.Fatalf("edge fixture metadata: %s %v", line, err)
 	}
 	client := &http.Client{Transport: &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pki.roots, ServerName: "iam.internal.test"}}, Timeout: 3 * time.Second}

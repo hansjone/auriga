@@ -6,6 +6,16 @@ export function dualEdgeConfig({ accessFile, backend, gateway, directory }) {
   assert.equal(upstream.protocol, 'https:');
   assert.equal(upstream.hostname, '127.0.0.1');
   assert.equal(upstream.origin, gateway.https);
+  for (const field of [
+    'ca',
+    'submitClientCertFile',
+    'submitClientKeyFile',
+    'submitServerName',
+  ]) {
+    assert.equal(typeof gateway[field], 'string', field + ' required');
+    assert.ok(gateway[field], field + ' required');
+  }
+  assert.equal(gateway.submitServerName, 'localhost');
   const privateDirectory = dirname(gateway.ca);
   return {
     accessConfigFile: accessFile,
@@ -18,10 +28,10 @@ export function dualEdgeConfig({ accessFile, backend, gateway, directory }) {
     },
     iamHop: { allowLoopbackHttp: true },
     networkSubmitHop: {
-      certFile: join(privateDirectory, 'broker-cert.pem'),
-      keyFile: join(privateDirectory, 'broker-key.pem'),
+      certFile: gateway.submitClientCertFile,
+      keyFile: gateway.submitClientKeyFile,
       caFile: gateway.ca,
-      serverName: 'localhost',
+      serverName: gateway.submitServerName,
     },
     tls: {
       mode: 'files',

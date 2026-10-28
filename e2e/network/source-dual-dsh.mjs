@@ -211,6 +211,7 @@ export async function runDualDsh() {
     assert.equal(edgeReady.pid, edge.child.pid);
     assert.notEqual(edgeReady.pid, gw.gatewayPid);
     assert.equal(edgeReady.submitUpstream, gw.https);
+    assert.equal(edgeReady.submitClientCertFile, gw.submitClientCertFile);
     manifest.stages.push(edgeReady);
     await proxy.attach({
       backend: ready.https,

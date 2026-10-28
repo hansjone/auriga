@@ -21,6 +21,9 @@ export function verdict(manifest, mode, exit) {
   assert.match(edge[0].https, /^https:\/\/127\.0\.0\.1:\d+$/);
   assert.notEqual(edge[0].https, gateway.https);
   assert.equal(edge[0].serverName, 'localhost');
+  assert.equal(typeof gateway.submitClientCertFile, 'string');
+  assert.ok(gateway.submitClientCertFile);
+  assert.equal(edge[0].submitClientCertFile, gateway.submitClientCertFile);
   assert.ok(Number.isInteger(edge[0].pid) && edge[0].pid > 0);
   assert.notEqual(edge[0].pid, gateway.gatewayPid);
   const ready = manifest.stages.filter((v) => v.stage === 'dsh-ready');

@@ -148,13 +148,16 @@ test('连接配置错误、状态不可用或请求失败立即失败，不重�
   ]);
 });
 
-test('双 DSH edge 独立配置固定 network HTTPS 上游和私有信任材料', () => {
+test('双 DSH edge 使用装配专用 submit 客户端证书，拒绝缺失 mTLS 元数据', () => {
   const input = {
     accessFile: 'access.json',
     backend: 'http://127.0.0.1:30000',
     gateway: {
       https: 'https://127.0.0.1:30001',
       ca: join('private', 'broker-cert.pem'),
+      submitClientCertFile: join('private', 'submit-client.pem'),
+      submitClientKeyFile: join('private', 'submit-client-key.pem'),
+      submitServerName: 'localhost',
     },
     directory: 'private',
   };
@@ -163,11 +166,31 @@ test('双 DSH edge 独立配置固定 network HTTPS 上游和私有信任材料'
   assert.equal(cfg.upstreams.iam, input.backend);
   assert.equal(cfg.upstreams['ai-device'], undefined);
   assert.deepEqual(cfg.networkSubmitHop, {
-    certFile: join('private', 'broker-cert.pem'),
-    keyFile: join('private', 'broker-key.pem'),
+    certFile: input.gateway.submitClientCertFile,
+    keyFile: input.gateway.submitClientKeyFile,
     caFile: input.gateway.ca,
-    serverName: 'localhost',
+    serverName: input.gateway.submitServerName,
   });
+  assert.notEqual(cfg.networkSubmitHop.certFile, cfg.tls.certFile);
+  for (const key of [
+    'submitClientCertFile',
+    'submitClientKeyFile',
+    'submitServerName',
+    'ca',
+  ])
+    for (const value of [undefined, '', 42])
+      assert.throws(() =>
+        dualEdgeConfig({
+          ...input,
+          gateway: { ...input.gateway, [key]: value },
+        }),
+      );
+  assert.throws(() =>
+    dualEdgeConfig({
+      ...input,
+      gateway: { ...input.gateway, submitServerName: 'iam.internal.test' },
+    }),
+  );
   for (const https of [
     'http://127.0.0.1:30001',
     'https://example.com:30001',
@@ -232,6 +255,7 @@ const failure = () => ({
       stage: 'gateway-ready',
       https: 'https://127.0.0.1:30001',
       gatewayPid: 50,
+      submitClientCertFile: 'private/submit-client.pem',
     },
     {
       stage: 'edge-ready',
@@ -239,6 +263,7 @@ const failure = () => ({
       https: 'https://127.0.0.1:30002',
       submitUpstream: 'https://127.0.0.1:30001',
       serverName: 'localhost',
+      submitClientCertFile: 'private/submit-client.pem',
     },
     ...['A', 'B'].map((name, i) => ({
       stage: 'dsh-ready',
@@ -293,6 +318,9 @@ test('SEND-4 验收必须经过独立 edge、固定 HTTPS submit 上游并干净
     (m) => (m.stages[1].pid = m.stages[2].pid),
     (m) => (m.stages[1].pid = m.stages[0].gatewayPid),
     (m) => (m.stages[1].serverName = ''),
+    (m) => delete m.stages[1].submitClientCertFile,
+    (m) => delete m.stages[0].submitClientCertFile,
+    (m) => (m.stages[1].submitClientCertFile = 'private/broker-cert.pem'),
     (m) => (m.stages.find((v) => v.stage === 'edge-closed').exitCode = 1),
   ]) {
     const m = failure();

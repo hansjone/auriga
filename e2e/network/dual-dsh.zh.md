@@ -7,10 +7,10 @@
 
 **当前验证边界：** 已合入 EDGE-SUBMIT 独立 submit 上游修正（40846a8），
 路由 preflight 使用分别独立的 model HTTP 与 network HTTPS 上游，并核固定信任。
-主控对eab3674的Control已完成两个独立DSH普通登录、双向收发及四条SEND-4检查，进程全部正常退出。
-随后原始基线因源码文件丢失未能启动，SkipSubmissionCommit尚未执行，因此尚未完成整套验收。
-已用独占微型夹具确认Windows Java Files.walk会穿透profile中的pnpm junction并删除源码目标；
-本轮将profile移出Java清理根，交Node单独清理，并在基线之前核对清理后源码哈希。
+主控对ee98d59的Control再次完成两个独立DSH普通登录、双向收发及四条SEND-4检查，进程全部正常退出。
+原始基线随后因探针FETCH与插件自动收件竞争而收到network.overloaded，反证尚未执行。
+现已合入main的SEND-3生产验签/有界同字节重试修复、共享npm缓存和submit强制mTLS；
+保留返工6的profile私有同级根、Node清理和基线前源码哈希门禁，完整验收须对本次HEAD重跑。
 本工位PG此前报restricted-token 87/3，完整基线及业务反证仍需root在可启动PG的环境复验。
 `dual-dsh-blocker.zh.md` 描述的是修复候选合入前的历史首失。
 
@@ -118,7 +118,11 @@ dual-cleanup回归仅用独占微型源码哨兵，运行真实JVM和Node两阶�
 另以 `go test -c -overlay` 编译独立 edge 测试进程，加载生产配置校验和 `NewGateway/Handler`，
 portal 测试 TLS listener 使用与生产 listener 相同的固定角色上下文。
 `upstreams.network-submit` 指向本轮 network runtime 的真实 HTTPS listener；
-`networkSubmitHop` 显式配置本轮私有证书、密钥、CA 和固定 DNS `localhost`，
+`networkSubmitHop` 使用本轮gateway-ready发布的submitClientCertFile/submitClientKeyFile及
+submitServerName，服务端信任仍为本轮Broker服务端CA、固定DNS `localhost`。
+沿用main装配的submitClientFiles生成专用submit client CA及仅ClientAuth用途的edge证书；
+listener通过clientCAFile强制验证该客户端链。客户端证书不复用Broker服务端证书或IAM材料，
+缺失元数据立即失败，edge-ready与gateway-ready的客户端证书路径必须一致。
 不借用 IAM hop 或 ai-device/model 上游，不关闭证书验证，也不允许 HTTP 降级。
 edge-ready 保存 PID、入口地址、实际 submit 上游和 serverName；每条提交证据关联 edge PID。
 验收同时核 edge 与 gateway/DSH 不同进程、正确上游及 edge 正常关闭。
@@ -157,6 +161,8 @@ preflight 另外运行真实 model/network handler 分流、IP/域名路由和�
   其他初始化、SQL、超时、编译或清理错误均拒绝计为反证。
 
 verify 分别解包相同精确 HEAD，独立锁定依赖、typecheck、编译两种测试装配，
+并运行真实runtime的专用client CA守卫（专用证书到达生产401、无证书/外来CA握手拒绝），
+以及main的mTLS传输和FETCH竞争验签守卫；这些守卫不宣称认证或SEND业务成功。
 核测试/源码 SHA256 和命令退出码。Control 全链通过后，必须原样运行原 T3b/T4/SEND-2/SEND-3
 驱动及其原判定；变体不修改这些测试。CompileOnly 不启动 PG，也不证明收发或业务反证。
 每个变体的双DSH清理结束后，先记录afterDualTests并核对所有列入门禁的源码/测试哈希，
