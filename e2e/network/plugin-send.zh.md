@@ -50,6 +50,9 @@ Control 保留 T3b/T4 与 SEND-2 的原断言，增加真实 ToolRuntime→生�
 另一真实 Context 的原生会话通过生产 FETCH/attempt/admit→HostPort→持久 provider→回执提交，
 核正文、同键原结果字节和服务端版本。当前桥 IAM 与网关是两个真实 HTTPS origin，
 测试各用同一生产 device-provider 和同一真实设备凭据承接两端口；不注入全业务 provider。
+每个仅承担传输的provider配置platformOrigin/issuer为其自身固定origin，不沿用另一个
+端口的配置。该辅助配置不执行登录、发现公钥或验证/改写JWT；getDevice仍交付原IAM令牌，
+gateway仍按原IAM authority验签鉴权。产品对issuer的scheme/host/port严格同源校验保留。
 本机设置准入用仅本进程持有的控制能力，HTTP 原生认证/同源/CSRF 另有插件测试，
 不把驱动当 GUI 点击或完整登录验收。
 

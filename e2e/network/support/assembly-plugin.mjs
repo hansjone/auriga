@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createDeviceProvider } from '../../../clients/dsh-plugin/src/network/device-provider.js';
 import { openConnectionRuntime } from '../../../clients/dsh-plugin/src/network/connection-runtime.js';
 import { createFileLedgerStore } from '../../../clients/dsh-plugin/src/network/host/store.js';
 import { NatsTransport } from '../../../clients/dsh-plugin/src/network/transport/nats-transport.js';
@@ -17,7 +16,7 @@ import { currentNativeProcess } from './native-process.mjs';
 import { waitUntil } from './assembly-process.mjs';
 import { brokerGuards } from './assembly-broker.mjs';
 import { criticalMatrix } from './assembly-critical.mjs';
-import { prepareDevice } from './assembly-device.mjs';
+import { prepareDevice, assemblyDeviceProvider } from './assembly-device.mjs';
 import { assertReadyReplacement } from './assembly-ready.mjs';
 import { describeBusinessFailure } from './assembly-failure.mjs';
 import { gatewaySend } from './gateway-send.mjs';
@@ -118,14 +117,9 @@ async function endpoint(name, devicePath) {
     },
   ];
   const providerAt = (origin) =>
-    createDeviceProvider({
-      config: {
-        platformOrigin: origin,
-        issuer: ready.https,
-        clientId: 'bridge-device',
-        providerId: 'bridge',
-        network: { realm: config.realm, wssUrl: gateway.wss, roots },
-      },
+    assemblyDeviceProvider({
+      origin,
+      network: { realm: config.realm, wssUrl: gateway.wss, roots },
       async getDevice() {
         const device = JSON.parse(await readFile(devicePath, 'utf8'));
         privateValues.push(device.access_token, device.refresh_token);
