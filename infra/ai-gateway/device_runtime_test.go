@@ -418,6 +418,7 @@ func TestDeviceShutdownLetsActiveCatalogFinishGracefully(t *testing.T) {
 	f := newDeviceFixture(t)
 	f.cfg.ShutdownMillis = 1000
 	entered, release := make(chan struct{}), make(chan struct{})
+	canceled := make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
 	f.control.memberHook = func(ctx context.Context) error {
 		close(entered)
@@ -425,6 +426,7 @@ func TestDeviceShutdownLetsActiveCatalogFinishGracefully(t *testing.T) {
 		case <-release:
 			return nil
 		case <-ctx.Done():
+			close(canceled)
 			return ctx.Err()
 		}
 	}
@@ -432,10 +434,6 @@ func TestDeviceShutdownLetsActiveCatalogFinishGracefully(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The member RPC proves the real handler has admitted this request. Release
-	// it directly from the HTTP shutdown notification, without making its relay
-	// and query deadlines wait for a polling loop or a second test-driver turn.
-	r.server.RegisterOnShutdown(unblock)
 	t.Cleanup(func() {
 		unblock()
 		r.cancel()
@@ -443,10 +441,29 @@ func TestDeviceShutdownLetsActiveCatalogFinishGracefully(t *testing.T) {
 		_ = r.supervisor.Drain(context.Background())
 		r.closeResources()
 	})
-	l, err := net.Listen("tcp", f.cfg.Listen)
+	listener, err := net.Listen("tcp", f.cfg.Listen)
 	if err != nil {
 		t.Fatal(err)
 	}
+	l := &deviceDeadlineListener{Listener: listener, accepted: make(chan *deviceDeadlineConn, 1)}
+	// The member RPC proves admission. Replay expiry of any remaining request
+	// read deadline at shutdown, before releasing the RPC. Query/write/shutdown
+	// limits are unchanged; no scheduler delay is needed to expose the bug.
+	r.server.RegisterOnShutdown(func() {
+		active := <-l.accepted
+		expired, err := active.expireReadDeadline()
+		if err != nil {
+			t.Error(err)
+		}
+		if expired {
+			select {
+			case <-canceled:
+			case <-time.After(time.Second):
+				t.Error("read deadline did not cancel catalog member RPC")
+			}
+		}
+		unblock()
+	})
 	served := make(chan error, 1)
 	go func() { served <- r.server.Serve(l) }()
 	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
