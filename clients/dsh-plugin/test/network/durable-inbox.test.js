@@ -137,9 +137,16 @@ async function fixture(t, options = {}) {
         };
       } else if (f.type === 'fetch') {
         await options.beforeFetch?.(f);
+        const first = options.respectResume
+          ? deliveries.findIndex(
+              (item) => BigInt(item.mail_seq) > BigInt(f.resume_cursor),
+            )
+          : 0;
         const offset =
           f.continuation === null
-            ? 0
+            ? first < 0
+              ? deliveries.length
+              : first
             : f.continuation === 'opaque-next'
               ? 1
               : Number(f.continuation.slice(12));
@@ -154,10 +161,10 @@ async function fixture(t, options = {}) {
             type: 'fetch_page',
             request_id: f.request_id,
             epoch: '7',
-            head_seq: String(deliveries.length),
+            head_seq: deliveries.at(-1)?.mail_seq ?? '0',
             committed_cursor: options.committedCursor ?? '0',
-            scan_after: raw.at(-1)?.mail_seq ?? '0',
-            snapshot_head: String(deliveries.length),
+            scan_after: raw.at(-1)?.mail_seq ?? f.resume_cursor,
+            snapshot_head: deliveries.at(-1)?.mail_seq ?? '0',
             next_continuation:
               nextOffset < deliveries.length
                 ? nextOffset === 1
@@ -605,6 +612,134 @@ test('单项隔离不吞账本持久化失败，不向后续健康会话投递�
   assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 0);
   assert.equal(f.requests.filter((v) => v.type === 'receipt').length, 0);
 });
+
+test('129页终态积压跨多轮pull持久推进，保留续页原resume且后续正常邮件仍可处理', async (t) => {
+  const savedCursors = [];
+  const options = {
+    respectResume: true,
+    committedCursor: '129',
+    receiptCursor: '130',
+    beforeFetch() {
+      savedCursors.push(f.store.snapshot().durable.resumeCursor);
+    },
+  };
+  const f = await fixture(t, options);
+  await f.inbox.setReceive('1', true);
+  for (let seq = 1; seq <= 129; seq++)
+    f.deliveries.push(f.terminal(String(seq)));
+  f.deliveries.push(f.delivery('130'));
+  await assert.rejects(f.inbox.pull(), /FETCH page bound reached/);
+  const first = f.store.snapshot().durable;
+  assert.equal(first.resumeCursor, '128');
+  assert.equal(Object.keys(first.terminal).length, 128);
+  assert.deepEqual(
+    savedCursors,
+    Array.from({ length: 128 }, (_, i) => String(i)),
+  );
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 0);
+  await f.inbox.pull();
+  const after = f.store.snapshot().durable;
+  assert.equal(after.resumeCursor, '130');
+  assert.equal(Object.keys(after.terminal).length, 129);
+  assert.deepEqual(after.terminal['1'], first.terminal['1']);
+  assert.equal(after.inbound['recipient-130'].stage, 'committed');
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 1);
+  const fetches = f.requests.filter((v) => v.type === 'fetch');
+  assert.equal(fetches.length, 130);
+  assert.ok(fetches.slice(0, 128).every((v) => v.resume_cursor === '0'));
+  assert.ok(fetches.slice(128).every((v) => v.resume_cursor === '128'));
+  assert.equal(
+    fetches[128].continuation,
+    null,
+    'new pull must start a fresh continuation for its new resume',
+  );
+  options.committedCursor = '130';
+  await f.inbox.pull();
+  assert.equal(
+    f.requests.filter((v) => v.type === 'fetch').at(-1).resume_cursor,
+    '130',
+  );
+  assert.equal(f.store.snapshot().durable.resumeCursor, '130');
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 1);
+});
+
+test('逐页推进只保存缺口前完整证据，补齐缺口后从原游标恢复', async (t) => {
+  const f = await fixture(t, { respectResume: true, committedCursor: '3' });
+  f.deliveries.push(f.terminal('1'), f.terminal('3'));
+  await assert.rejects(f.inbox.pull(), /cursor evidence missing/);
+  assert.equal(f.store.snapshot().durable.resumeCursor, '1');
+  assert.deepEqual(Object.keys(f.store.snapshot().durable.terminal), [
+    '1',
+    '3',
+  ]);
+  assert.ok(f.requests.every((v) => v.resume_cursor === '0'));
+  f.deliveries.splice(1, 0, f.terminal('2'));
+  await f.inbox.pull();
+  assert.equal(f.store.snapshot().durable.resumeCursor, '3');
+  assert.ok(f.requests.slice(2).every((v) => v.resume_cursor === '1'));
+});
+
+test('逐页推进仍拒绝重复continuation，不确认非法续页后的游标', async (t) => {
+  let repeat = true;
+  const f = await fixture(t, {
+    respectResume: true,
+    committedCursor: '3',
+    fetchResult(page, items, context, signer) {
+      if (repeat && items[0]?.mail_seq === '2') {
+        page.next_continuation = 'opaque-next';
+        signer.seal(page, context);
+      }
+    },
+  });
+  f.deliveries.push(f.terminal('1'), f.terminal('2'), f.terminal('3'));
+  await assert.rejects(f.inbox.pull(), /invalid FETCH continuation/);
+  assert.equal(f.store.snapshot().durable.resumeCursor, '1');
+  assert.equal(f.store.snapshot().durable.terminal['3'], undefined);
+  repeat = false;
+  await f.inbox.pull();
+  assert.equal(f.store.snapshot().durable.resumeCursor, '3');
+});
+
+test('后续页游标持久化失败保留上页前缀，不请求下一页', async (t) => {
+  const f = await fixture(t, {
+    respectResume: true,
+    committedCursor: '3',
+    beforeCommit(state) {
+      if (state.durable?.resumeCursor === '2')
+        throw new Error('cursor storage failed');
+    },
+  });
+  f.deliveries.push(f.terminal('1'), f.terminal('2'), f.terminal('3'));
+  await assert.rejects(f.inbox.pull(), /cursor storage failed/);
+  assert.equal(f.store.snapshot().durable.resumeCursor, '1');
+  assert.equal(f.requests.length, 2);
+  assert.deepEqual(Object.keys(f.store.snapshot().durable.terminal), [
+    '1',
+    '2',
+  ]);
+});
+
+for (const invalid of ['signature', 'manifest'])
+  test(`后续页${invalid}非法不能越过已保存前缀`, async (t) => {
+    const f = await fixture(t, {
+      respectResume: true,
+      committedCursor: '3',
+      fetchResult(page, items, context, signer) {
+        if (items[0]?.mail_seq !== '2') return;
+        if (invalid === 'signature')
+          page.server_auth.signature = 'A'.repeat(86);
+        else {
+          page.manifest[0].digest = 'sha256:' + '0'.repeat(64);
+          signer.seal(page, context);
+        }
+      },
+    });
+    f.deliveries.push(f.terminal('1'), f.terminal('2'), f.terminal('3'));
+    await assert.rejects(f.inbox.pull());
+    assert.equal(f.store.snapshot().durable.resumeCursor, '1');
+    assert.deepEqual(Object.keys(f.store.snapshot().durable.terminal), ['1']);
+    assert.equal(f.requests.length, 2);
+  });
 
 test('128边界后的缺口仅推进完整前缀，补回原证据后继续且不越界', async (t) => {
   const f = await fixture(t, { pageSize: 32, committedCursor: '130' });

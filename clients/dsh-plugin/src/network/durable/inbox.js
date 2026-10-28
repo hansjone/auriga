@@ -424,8 +424,8 @@ export function createDurableInbox({
     }, current);
   }
   /** Only a server-confirmed prefix with complete retained evidence can move.
-   * @param {string} cursor */
-  async function advanceCursor(cursor) {
+   * @param {string} cursor @param {boolean} [complete] */
+  async function advanceCursor(cursor, complete = true) {
     if (!isUint64String(cursor)) throw new Error('invalid committed cursor');
     if (BigInt(cursor) <= BigInt(ledger.peek().durable?.resumeCursor ?? '0'))
       return;
@@ -436,7 +436,8 @@ export function createDurableInbox({
           throw new Error('mailbox cursor evidence changed');
         draft.durable.resumeCursor = prefix;
       }, current);
-    if (prefix !== cursor) throw new Error('mailbox cursor evidence missing');
+    if (complete && prefix !== cursor)
+      throw new Error('mailbox cursor evidence missing');
   }
   async function pull() {
     return locks.run('fetch', async () => {
@@ -492,12 +493,16 @@ export function createDurableInbox({
         if (BigInt(response.page.committed_cursor) > BigInt(committedCursor))
           committedCursor = response.page.committed_cursor;
         const next = response.page.next_continuation;
-        if (next === null) {
-          await advanceCursor(committedCursor);
-          return;
-        }
-        if (typeof next !== 'string' || !next || seen.has(next))
+        if (
+          next !== null &&
+          (typeof next !== 'string' || !next || seen.has(next))
+        )
           throw new Error('invalid FETCH continuation');
+        // Retain progress even when this bounded pull cannot reach the last
+        // page. A later pull starts from the durable prefix with no token;
+        // this pull keeps its original resume for every continuation request.
+        await advanceCursor(committedCursor, next === null);
+        if (next === null) return;
         seen.add(next);
         continuation = next;
       }
