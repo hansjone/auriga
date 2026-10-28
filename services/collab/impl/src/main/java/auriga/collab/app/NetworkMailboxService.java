@@ -1293,19 +1293,31 @@ public class NetworkMailboxService {
 
   /** Caller holds the tenant/thread advisory lock until its reservation or message is durable. */
   void requireThreadUnreserved(UUID tenant, UUID thread) {
+    var now = java.sql.Timestamp.from(clock.instant());
+    // The same thread lock fences expiry against a late final commit. Keep the original
+    // request and its deterministic rejection for idempotency; only release its reservation.
+    jdbc.update(
+        """
+        UPDATE collab.network_submit SET failure_code='network.conflict',reservation_until=NULL
+        WHERE tenant_id=? AND message_json::jsonb->>'thread_id'=?
+          AND result_json IS NULL AND failure_code IS NULL AND reservation_until<=?
+        """,
+        tenant,
+        thread.toString(),
+        now);
     require(
         !Boolean.TRUE.equals(
             jdbc.queryForObject(
                 """
             SELECT EXISTS (SELECT 1 FROM collab.network_submit
-              WHERE tenant_id=? AND result_json IS NULL
+              WHERE tenant_id=? AND result_json IS NULL AND failure_code IS NULL
               AND message_json::jsonb->>'thread_id'=?
-              AND (message_json::jsonb->>'expires_at')::timestamptz>?)
+              AND reservation_until>?)
             """,
                 Boolean.class,
                 tenant,
                 thread.toString(),
-                java.sql.Timestamp.from(clock.instant()))),
+                now)),
         NetworkErrors.CONFLICT);
   }
 

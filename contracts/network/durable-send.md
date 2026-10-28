@@ -39,23 +39,27 @@ READY_RESULT 中返回；数据库随 node 保存，后续 READY/连接 takeover
 最终同事务保存正文、SourceContext、线程序号、邮箱序号、recipient、幂等终态和原 SendResult；
 只有事务提交成功才返回 platform_stored。任何远程 IAM 调用都不持 PG 事务、同步器或连接资源。
 
-同线程一次只冻结一个未完成请求，其持久 pending 是线程序号预约；其他键在冻结前返回
+同线程一次只冻结一个未完成请求，其独立持久预约最多持续30秒，且不超过 Message.expires_at；其他键在冻结前返回
 `network.conflict`，不产生第二个 pending，调用方保留原键稍后重试。预约完成后才发行下一序号；
-已过 Message.expires_at 的预约不再阻塞新请求，原过期请求仍确定拒绝。进程重启不释放预约。
+预约超时后，在同一线程锁内保存原键的确定失败终态并释放预约，再允许新键取得未消费的下一序号。
+进程重启不延长预约；幂等记录及终态仍至少保留7天，预约释放不删除或改写原请求/标识。
 冻结前与最终写入前均预检完整签名下行帧，包含 SourceContext、recipient、签名及带 continuation
 的 FETCH 页头；按最大连接字段和计数宽度预算，超过 65536 字节返回 `network.protocol_error`，
 不保存正文、邮箱项或 recipient；首次冻结预检失败也不保存 pending。
 
-第五 RPC 拒绝或最终 CAS 失败可以留下原 pending，但正文、邮箱项及 recipient 均为零。
-pending 重试复用原 Message/身份与期限；不得借新观察、新连接或新政策延长原许可。
+第五 RPC 明确拒绝且冻结事实仍有效时，可在原预约期限内用原 pending 重试，但正文、邮箱项及 recipient 均为零。
+最终检查确认来源/连接/登记/接收快照失效或消息到期时，在锁内保存 `network.conflict` 失败终态并释放预约，
+事务提交后才抛出该错误。提交前的传输失败、请求取消也关闭未完成预约；已有成功终态始终优先，不被失败覆盖。
+所有最终写入都在同一线程及幂等行锁下重查终态和预约期限，已关闭操作的迟到 IAM 回复不能落正文或消耗序号。
+pending 重试复用原 Message/身份与期限，不续租；不得借新观察、新连接或新政策延长原许可。
 确认丢失/超时/断线均保留原 key；绝不自动换 key 重发。冻结事实发生变化的 pending 保持
-失败关闭，需要上层明确处理，不能把它当作 platform_stored 或擅自改写原请求。
+失败关闭；原键重放始终返回保存的失败终态，上层须明确创建新操作，不能把失败当作 platform_stored 或自动换键。
 
 ## 显式接收与最小收件包装
 
 新登记 session 默认 receive_none（`receive_enabled=false`，receive_version=1）。会话所属成员
 在插件设置/会话控制里开启“接收消息”后，插件经现有鉴权 mailbox 控制链发送
-`receive_set`：当前 epoch/boot、完整八字段 typed-local 见证、enabled 和 expected_version。
+`receive_set`：当前 epoch/boot、六字段 typed-local 见证（realm/node 从认证连接补全）、enabled 和 expected_version。
 gateway 转 `ReceiveSet`。collab 在当前连接和登记锁内 CAS，返回签名
 `receive_set_result(enabled,state_version)`；同版本同值重试不重复增加版本。
 关闭或关闭后重开均改变版本，已在途的旧发送不能越过这个 fence。
@@ -80,6 +84,7 @@ ADMIT_RESULT 同样输出服务端版本；RECEIPT 原有 CAS 与证明验证保
 对账、第五拒绝零正文/邮箱、来源 stop/permission/观察/连接/接收/登记竞争，以及 FETCH
 分页、attempt 幂等、准入版本；并覆盖同线程不同键并发的原键恢复、下行帧超限零写及完整
 接收登记见证负例。非 PG 的 NetworkSubmitFrameBoundaryTest 检查完整帧 65536/65537 字节边界。
+另外覆盖不可恢复快照失败后的同线程新键发送，以及超时/取消/到期关闭预约后的迟到提交隔离、连续序号和零重复写入。
 主控从精确 HEAD 使用本模块测试资源内
 `network-durable-send/verify-durable-send.ps1 -ExpectedHead <40位HEAD> -Run`，保留 Control
 与 NoDedup 编译突变的独立 archive、哈希、命令、退出码和 Surefire 断言证据。

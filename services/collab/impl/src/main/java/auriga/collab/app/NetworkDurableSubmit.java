@@ -19,6 +19,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 /** Ordinary online session unicast: freeze, authorize without PG resources, then locked CAS. */
 final class NetworkDurableSubmit {
+  private static final Duration RESERVATION_TTL = Duration.ofSeconds(30);
   private final NetworkMailboxWireService wire;
   private final NetworkMailboxService mailbox;
   private final JdbcTemplate jdbc;
@@ -82,35 +83,54 @@ final class NetworkDurableSubmit {
               wire.sourceGate(
                   connection, NetworkJson.object().put("request_id", UuidV7.next().toString()));
           var pending = tx.execute(s -> freeze(gate, request));
-          if (pending.get("result_json") != null) return pending.get("result_json").toString();
-          var target =
-              targetConnection(
-                  NetworkJson.parse(pending.get("target_fence_json").toString()).path("node"));
-          var targetGate =
-              wire.sourceGate(
-                  target, NetworkJson.object().put("request_id", UuidV7.next().toString()));
-          Instant until =
-              authority.withTarget(
-                  target,
-                  targetGate.target(),
-                  () ->
-                      authority.authorizeDelivery(
-                          tenant(),
-                          pending.get("message_json").toString(),
-                          pending.get("source_context_json").toString(),
-                          target.getNode()));
-          // Refresh both authenticated connections outside the final transaction; local generations
-          // and source permission/stop versions are still rechecked under locks below.
-          Instant refreshed = wire.refreshSourceGate(gate);
-          Instant targetUntil = wire.refreshSourceGate(targetGate);
-          return tx.execute(
-              s ->
-                  commit(
-                      gate,
-                      targetGate,
-                      request,
-                      pending,
-                      Collections.min(List.of(until, refreshed, targetUntil))));
+          var saved = outcome(pending);
+          if (saved.terminal()) return saved.replay();
+          SourceGate targetGate;
+          Instant until;
+          try {
+            var target =
+                targetConnection(
+                    NetworkJson.parse(pending.get("target_fence_json").toString()).path("node"));
+            targetGate =
+                wire.sourceGate(
+                    target, NetworkJson.object().put("request_id", UuidV7.next().toString()));
+            until =
+                authority.withTarget(
+                    target,
+                    targetGate.target(),
+                    () ->
+                        authority.authorizeDelivery(
+                            tenant(),
+                            pending.get("message_json").toString(),
+                            pending.get("source_context_json").toString(),
+                            target.getNode()));
+            // Refresh both authenticated connections outside the final transaction; local
+            // generations
+            // and source permission/stop versions are still rechecked under locks below.
+            Instant refreshed = wire.refreshSourceGate(gate);
+            Instant targetUntil = wire.refreshSourceGate(targetGate);
+            until = Collections.min(List.of(until, refreshed, targetUntil));
+          } catch (RuntimeException error) {
+            // A remote failure is before local storage. End transport-failed/cancelled attempts;
+            // an explicit IAM denial can retry only while the original local facts remain valid.
+            boolean interrupted = Thread.interrupted();
+            SubmitOutcome ended;
+            try {
+              boolean close =
+                  interrupted
+                      || cancelled()
+                      || !(error instanceof AurigaException a
+                          && NetworkErrors.UNAUTHORIZED.code().equals(a.errorCode().code()));
+              ended = tx.execute(s -> reconcile(gate, pending, close));
+            } finally {
+              if (interrupted) Thread.currentThread().interrupt();
+            }
+            if (ended.terminal()) return ended.replay();
+            throw error;
+          }
+          Instant authorizedUntil = until;
+          return tx.execute(s -> commit(gate, targetGate, request, pending, authorizedUntil))
+              .replay();
         });
   }
 
@@ -138,6 +158,7 @@ final class NetworkDurableSubmit {
       check(NetworkJson.canonical(request).equals(original.get("request_json")));
       // Lookup precedes fresh source/epoch checks: committed results survive source expiry,
       // stop and connection takeover, while current authenticated node ownership is required.
+      if (!outcome(original).terminal() && reservationExpired(original)) reject(original);
       return original;
     }
     var node = node(gate.connection().getRealm(), gate.connection().getNode());
@@ -209,8 +230,8 @@ final class NetworkDurableSubmit {
     jdbc.update(
         """
         INSERT INTO collab.network_submit(id,tenant_id,source_binding,producer_epoch,producer_key,request_json,
-          message_id,delivery_id,recipient_id,message_json,source_context_json,source_fence_json,target_fence_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+          message_id,delivery_id,recipient_id,message_json,source_context_json,source_fence_json,target_fence_json,reservation_until)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         id,
         tenant(),
@@ -224,12 +245,17 @@ final class NetworkDurableSubmit {
         NetworkJson.canonical(message),
         NetworkJson.canonical(context),
         fence(source, local),
-        NetworkJson.canonical(target));
+        NetworkJson.canonical(target),
+        Timestamp.from(
+            Collections.min(
+                List.of(
+                    clock.instant().plus(RESERVATION_TTL),
+                    Instant.parse(message.path("expires_at").asString())))));
     return jdbc.queryForMap(
         "SELECT * FROM collab.network_submit WHERE tenant_id=? AND id=?", tenant(), id);
   }
 
-  private String commit(
+  private SubmitOutcome commit(
       SourceGate gate,
       SourceGate targetGate,
       JsonNode request,
@@ -239,34 +265,31 @@ final class NetworkDurableSubmit {
         gate.connection().getRealm(),
         gate.connection().getNode(),
         targetGate.connection().getNode());
-    wire.lockSourceGate(gate, false);
-    wire.lockSourceGate(targetGate, false);
+    UUID thread =
+        uuid(
+            NetworkJson.parse(pending.get("message_json").toString()).path("thread_id").asString());
+    lockThread(thread);
     var current =
         jdbc.queryForMap(
             "SELECT * FROM collab.network_submit WHERE tenant_id=? AND id=? FOR UPDATE",
             tenant(),
             pending.get("id"));
-    if (current.get("result_json") != null) return current.get("result_json").toString();
-    check(until.isAfter(clock.instant()));
-    var source = source(pending.get("source_binding").toString(), true);
-    var observation = observation(source, gate);
-    var local =
-        registration(
-            gate.connection().getRealm(),
-            gate.connection().getNode(),
-            observation.getSource().getRegistration().getLocal());
-    checkRegistration(local, observation.getSource().getRegistration());
-    check(pending.get("source_fence_json").equals(fence(source, local)));
-    check(
-        pending.get("target_fence_json").equals(NetworkJson.canonical(target(request.path("to")))));
-    var message = (ObjectNode) NetworkJson.parse(pending.get("message_json").toString());
-    check(Instant.parse(message.path("expires_at").asString()).isAfter(clock.instant()));
-    UUID thread = uuid(message.path("thread_id").asString());
-    lockThread(thread);
-    check(nextSequence(thread).equals(message.path("thread_sequence").asString()));
-    // Check again with the current signing keys before any durable body/mailbox writes.
-    mailbox.preflightSubmit(
-        message, (ObjectNode) NetworkJson.parse(pending.get("source_context_json").toString()));
+    var saved = outcome(current);
+    if (saved.terminal()) return saved;
+    if (reservationExpired(current) || cancelled()) return reject(current);
+    var message = (ObjectNode) NetworkJson.parse(current.get("message_json").toString());
+    try {
+      check(until.isAfter(clock.instant()));
+      validateFrozen(gate, current);
+      wire.lockSourceGate(targetGate, false);
+      check(nextSequence(thread).equals(message.path("thread_sequence").asString()));
+      mailbox.preflightSubmit(
+          message, (ObjectNode) NetworkJson.parse(current.get("source_context_json").toString()));
+    } catch (AurigaException invalid) {
+      // Return the outcome so the transaction commits this terminal fence before replay throws.
+      return reject(current);
+    }
+    if (reservationExpired(current) || cancelled()) return reject(current);
     jdbc.update(
         """
         INSERT INTO collab.network_message(id,tenant_id,realm,kind,body,source_node,source_local,thread_id,message_json,source_context_json)
@@ -277,7 +300,7 @@ final class NetworkDurableSubmit {
         gate.connection().getRealm(),
         NetworkJson.canonical(request.path("body")),
         gate.connection().getNode(),
-        observation.getSource().getRegistration().getLocal(),
+        message.path("from").path("local").asString(),
         thread,
         pending.get("message_json"),
         pending.get("source_context_json"));
@@ -316,12 +339,96 @@ final class NetworkDurableSubmit {
     String json = NetworkJson.canonical(result);
     check(
         jdbc.update(
-                "UPDATE collab.network_submit SET result_json=? WHERE tenant_id=? AND id=? AND result_json IS NULL",
+                "UPDATE collab.network_submit SET result_json=?,reservation_until=NULL WHERE tenant_id=? AND id=? AND result_json IS NULL AND failure_code IS NULL",
                 json,
                 tenant(),
                 pending.get("id"))
             == 1);
-    return json;
+    return new SubmitOutcome(json, false);
+  }
+
+  private void validateFrozen(SourceGate gate, Map<String, Object> pending) {
+    wire.lockSourceGate(gate, false);
+    var source = source(pending.get("source_binding").toString(), true);
+    var observation = observation(source, gate);
+    var local =
+        registration(
+            gate.connection().getRealm(),
+            gate.connection().getNode(),
+            observation.getSource().getRegistration().getLocal());
+    checkRegistration(local, observation.getSource().getRegistration());
+    check(pending.get("source_fence_json").equals(fence(source, local)));
+    check(
+        pending
+            .get("target_fence_json")
+            .equals(
+                NetworkJson.canonical(
+                    target(NetworkJson.parse(pending.get("request_json").toString()).path("to")))));
+    var message = (ObjectNode) NetworkJson.parse(pending.get("message_json").toString());
+    check(Instant.parse(message.path("expires_at").asString()).isAfter(clock.instant()));
+  }
+
+  private SubmitOutcome reconcile(SourceGate gate, Map<String, Object> pending, boolean close) {
+    var request = NetworkJson.parse(pending.get("request_json").toString());
+    lockNodes(
+        gate.connection().getRealm(),
+        gate.connection().getNode(),
+        request.path("to").path("node").asString());
+    lockThread(
+        uuid(
+            NetworkJson.parse(pending.get("message_json").toString())
+                .path("thread_id")
+                .asString()));
+    var current =
+        jdbc.queryForMap(
+            "SELECT * FROM collab.network_submit WHERE tenant_id=? AND id=? FOR UPDATE",
+            tenant(),
+            pending.get("id"));
+    var saved = outcome(current);
+    if (saved.terminal()) return saved;
+    if (close || reservationExpired(current)) return reject(current);
+    try {
+      validateFrozen(gate, current);
+    } catch (AurigaException invalid) {
+      return reject(current);
+    }
+    return saved;
+  }
+
+  static boolean cancelled() {
+    return Thread.currentThread().isInterrupted() || io.grpc.Context.current().isCancelled();
+  }
+
+  private boolean reservationExpired(Map<String, Object> row) {
+    return !(row.get("reservation_until") instanceof Timestamp until)
+        || !until.toInstant().isAfter(clock.instant());
+  }
+
+  private SubmitOutcome reject(Map<String, Object> row) {
+    check(
+        jdbc.update(
+                "UPDATE collab.network_submit SET failure_code='network.conflict',reservation_until=NULL WHERE tenant_id=? AND id=? AND result_json IS NULL AND failure_code IS NULL",
+                tenant(),
+                row.get("id"))
+            == 1);
+    row.put("failure_code", NetworkErrors.CONFLICT.code());
+    row.put("reservation_until", null);
+    return outcome(row);
+  }
+
+  static SubmitOutcome outcome(Map<String, Object> row) {
+    return new SubmitOutcome((String) row.get("result_json"), row.get("failure_code") != null);
+  }
+
+  record SubmitOutcome(String json, boolean rejected) {
+    boolean terminal() {
+      return json != null || rejected;
+    }
+
+    String replay() {
+      if (rejected) throw new AurigaException(NetworkErrors.CONFLICT);
+      return json;
+    }
   }
 
   private Map<String, Object> source(String binding, boolean lock) {

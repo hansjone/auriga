@@ -72,6 +72,7 @@ class NetworkSourceControlPostgresTest {
   static class Authority extends NetworkAuthorityGrpcTest.Authority {
     volatile boolean deliveryAllowed = true;
     volatile Runnable afterDelivery = () -> {};
+    volatile Status deliveryFailure;
     volatile AuthorizeNetworkDeliveryRequest lastDelivery;
 
     @Override
@@ -79,6 +80,10 @@ class NetworkSourceControlPostgresTest {
         AuthorizeNetworkDeliveryRequest r, StreamObserver<AuthorizeNetworkDeliveryResponse> o) {
       lastDelivery = r;
       afterDelivery.run();
+      if (deliveryFailure != null) {
+        o.onError(deliveryFailure.asRuntimeException());
+        return;
+      }
       o.onNext(
           AuthorizeNetworkDeliveryResponse.newBuilder()
               .setAllowed(deliveryAllowed)
@@ -543,19 +548,24 @@ class NetworkSourceControlPostgresTest {
   }
 
   static NetworkMailboxWireService newWire() {
+    return newWire(CLOCK);
+  }
+
+  static NetworkMailboxWireService newWire(Clock clock) {
     return new NetworkMailboxWireService(
-        new NetworkMailboxService(jdbc, manager, source, keys, CLOCK, client),
+        new NetworkMailboxService(jdbc, manager, source, keys, clock, client),
         locals,
         jdbc,
         manager,
         source,
         keys,
-        CLOCK);
+        clock);
   }
 
   @AfterEach
   void reset() {
     authority.deliveryAllowed = true;
+    authority.deliveryFailure = null;
     authority.afterDelivery = () -> {};
     authority.beforeResolveReply = () -> {};
     authority.metadata = true;
@@ -961,6 +971,148 @@ class NetworkSourceControlPostgresTest {
       release.countDown();
       authority.afterDelivery = () -> {};
     }
+  }
+
+  @Test
+  void sendIrrecoverableFenceReleasesThreadAndReplaysTerminalFailure() {
+    var from = fresh();
+    var to = fresh();
+    var original = sendRequest(from, to).put("thread_id", UuidV7.next().toString());
+    authority.afterDelivery =
+        () -> {
+          call(() -> wire.receiveSet(to.c(), bytes(receive(to, false, "2"))));
+          call(() -> wire.receiveSet(to.c(), bytes(receive(to, true, "3"))));
+        };
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> wire.submit(from.c(), bytes(original))), "network.conflict");
+    authority.afterDelivery = () -> {};
+    assertEquals(0, sentCount(from, "network_message"));
+    assertEquals(0, sentCount(from, "network_mail_item"));
+    assertTerminalSubmission(original);
+    var next = original.deepCopy();
+    ((ObjectNode) next.path("idempotency")).put("key", "next-" + UuidV7.next());
+    var saved = call(() -> newWire().submit(from.c(), bytes(next)));
+    assertEquals(saved, call(() -> newWire().submit(from.c(), bytes(next))));
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> newWire().submit(from.c(), bytes(original))), "network.conflict");
+    assertEquals(List.of("1"), threadSequences(original));
+    assertEquals(1, sentCount(from, "network_message"));
+    assertEquals(1, sentCount(from, "network_mail_item"));
+  }
+
+  @Test
+  void sendTimeoutCancellationAndExpiryFenceLateCommitAndKeepSequencesContinuous()
+      throws Exception {
+    for (String mode : List.of("timeout", "cancel", "expiry", "reservation")) {
+      var from = fresh();
+      var to = fresh();
+      var original = sendRequest(from, to).put("thread_id", UuidV7.next().toString());
+      if ("expiry".equals(mode)) original.put("ttl", 1);
+      var entered = new CountDownLatch(1);
+      var release = new CountDownLatch(1);
+      var calls = new AtomicInteger();
+      var cancelled = Context.current().withCancellation();
+      authority.afterDelivery =
+          () -> {
+            int attempt = calls.incrementAndGet();
+            if (attempt == 1) {
+              entered.countDown();
+              await(release);
+            } else if (attempt == 2 && "cancel".equals(mode))
+              cancelled.cancel(new CancellationException("cancel pending SEND"));
+          };
+      var restarted =
+          newWire("expiry".equals(mode) ? Clock.offset(CLOCK, Duration.ofSeconds(2)) : CLOCK);
+      try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        var late = executor.submit(() -> call(() -> wire.submit(from.c(), bytes(original))));
+        try {
+          assertTrue(entered.await(4, TimeUnit.SECONDS), mode);
+          if ("timeout".equals(mode)) {
+            authority.deliveryFailure = Status.DEADLINE_EXCEEDED;
+            NetworkAuthorityGrpcTest.denied(
+                () -> call(() -> newWire().submit(from.c(), bytes(original))), "network.conflict");
+            authority.deliveryFailure = null;
+          } else if ("cancel".equals(mode)) {
+            cancelled.run(
+                () ->
+                    NetworkAuthorityGrpcTest.denied(
+                        () -> call(() -> newWire().submit(from.c(), bytes(original))),
+                        "network.conflict"));
+          } else if ("reservation".equals(mode)) {
+            // Simulate an abandoned attempt's elapsed lease without expiring its day-long message
+            // or sleeping past the live source observation / RPC deadline.
+            assertEquals(
+                1,
+                db(
+                    () ->
+                        jdbc.update(
+                            "UPDATE collab.network_submit SET reservation_until=now()-interval '1 second' WHERE tenant_id=? AND source_binding=? AND producer_key=? AND (message_json::jsonb->>'expires_at')::timestamptz>now()+interval '1 hour'",
+                            TENANT,
+                            original.path("source").path("source_binding").asString(),
+                            original.path("idempotency").path("key").asString())));
+          }
+          var next = original.deepCopy().put("ttl", 86400);
+          ((ObjectNode) next.path("idempotency")).put("key", "after-" + mode + UuidV7.next());
+          var saved = call(() -> restarted.submit(from.c(), bytes(next)));
+          assertEquals(saved, call(() -> restarted.submit(from.c(), bytes(next))));
+          assertTerminalSubmission(original);
+        } finally {
+          release.countDown();
+        }
+        var rejected = assertThrows(ExecutionException.class, () -> late.get(6, TimeUnit.SECONDS));
+        assertEquals(
+            "network.conflict",
+            ((auriga.common.error.AurigaException) rejected.getCause()).errorCode().code());
+        NetworkAuthorityGrpcTest.denied(
+            () -> call(() -> newWire().submit(from.c(), bytes(original))), "network.conflict");
+        authority.afterDelivery = () -> {};
+        var third = original.deepCopy().put("ttl", 86400);
+        ((ObjectNode) third.path("idempotency")).put("key", "third-" + UuidV7.next());
+        call(() -> restarted.submit(from.c(), bytes(third)));
+        assertEquals(List.of("1", "2"), threadSequences(original), mode);
+        assertEquals(2, sentCount(from, "network_message"), mode);
+        assertEquals(2, sentCount(from, "network_mail_item"), mode);
+        assertEquals(
+            List.of(1L, 2L),
+            db(
+                () ->
+                    jdbc.queryForList(
+                        "SELECT mail_seq FROM collab.network_mail_item WHERE tenant_id=? AND target_node=? ORDER BY mail_seq",
+                        Long.class,
+                        TENANT,
+                        to.c().getNode())),
+            mode);
+      } finally {
+        release.countDown();
+        cancelled.close();
+        authority.afterDelivery = () -> {};
+        authority.deliveryFailure = null;
+      }
+    }
+  }
+
+  static List<String> threadSequences(ObjectNode request) {
+    return db(
+        () ->
+            jdbc.queryForList(
+                "SELECT message_json::jsonb->>'thread_sequence' FROM collab.network_message WHERE tenant_id=? AND thread_id=? ORDER BY (message_json::jsonb->>'thread_sequence')::numeric",
+                String.class,
+                TENANT,
+                UUID.fromString(request.path("thread_id").asString())));
+  }
+
+  static void assertTerminalSubmission(ObjectNode request) {
+    var row =
+        db(
+            () ->
+                jdbc.queryForMap(
+                    "SELECT failure_code,reservation_until,result_json FROM collab.network_submit WHERE tenant_id=? AND source_binding=? AND producer_key=?",
+                    TENANT,
+                    request.path("source").path("source_binding").asString(),
+                    request.path("idempotency").path("key").asString()));
+    assertEquals("network.conflict", row.get("failure_code"));
+    assertNull(row.get("reservation_until"));
+    assertNull(row.get("result_json"));
   }
 
   @Test

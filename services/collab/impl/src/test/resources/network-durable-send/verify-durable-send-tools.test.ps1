@@ -67,21 +67,25 @@ try {
   Write-Output 'PASS: early Git exit retains stderr and exit code for a 20001-entry inventory'
   $sendCases = @('sendConcurrentSameKeyAndLostReplyRecoverOneOriginalResult',
     'sendConcurrentDifferentKeysOnOneThreadCanRetry', 'sendOversizedDownstreamFrameWritesNothing',
+    'sendIrrecoverableFenceReleasesThreadAndReplaysTerminalFailure',
+    'sendTimeoutCancellationAndExpiryFenceLateCommitAndKeepSequencesContinuous',
     'sendFifthDenialHasNoBodyOrMailboxAndRetainsOriginalPending',
     'sendFinalCasRejectsStopPermissionObservationConnectionAndReceiveRaces',
     'sendReceiveControlRequiresFullWitnessAndCrossNodeCannotReplay',
     'sendFetchContinuationAndAttemptAdmissionExposeServerStateVersion')
   $caseXml = ($sendCases | ForEach-Object { '<testcase name="' + $_ + '" />' }) -join ''
-  $controlXml = '<testsuite tests="7" errors="0" skipped="0" disabled="0" failures="0">' + $caseXml + '</testsuite>'
+  $controlXml = '<testsuite tests="9" errors="0" skipped="0" disabled="0" failures="0">' + $caseXml + '</testsuite>'
   Assert-SendVerdict ([xml]$controlXml) 'Control' 0
-  foreach ($required in @('sendConcurrentDifferentKeysOnOneThreadCanRetry', 'sendOversizedDownstreamFrameWritesNothing')) {
+  foreach ($required in @('sendConcurrentDifferentKeysOnOneThreadCanRetry', 'sendOversizedDownstreamFrameWritesNothing',
+      'sendIrrecoverableFenceReleasesThreadAndReplaysTerminalFailure',
+      'sendTimeoutCancellationAndExpiryFenceLateCommitAndKeepSequencesContinuous')) {
     $missing = $controlXml.Replace($required, 'unrelatedPassingCase')
     $rejected = $false
     try { Assert-SendVerdict ([xml]$missing) 'Control' 0 }
     catch { $rejected = $_.Exception.Message -eq 'Control omitted required SEND case' }
     if (-not $rejected) { throw ('Missing rework regression was accepted: ' + $required) }
   }
-  Write-Output 'PASS: Control requires all seven SEND cases, including both new functional regressions'
+  Write-Output 'PASS: Control requires all nine SEND cases, including terminal reservation and late commit regressions'
 } finally {
   $OutputEncoding = $savedOutput
   [Console]::OutputEncoding = $savedConsole
