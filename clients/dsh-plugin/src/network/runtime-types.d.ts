@@ -118,6 +118,7 @@ export interface DeviceRegistration {
 export interface PreparedConnection {
   kind: 'device-connection';
   url: string;
+  origin: string;
   roots: NetworkInstallation['roots'];
   submit?(
     request: import('../generated/network/SubmitRequest.js').SubmitRequest,

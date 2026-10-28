@@ -68,6 +68,8 @@ async function deviceFixture(t, clockOffset = 0) {
   });
   const controller = new AbortController();
   const prepared = await provider.prepare({ signal: controller.signal });
+  assert.equal(prepared.origin, 'https://portal.example.com');
+  assert.notEqual(new URL(prepared.url).host, new URL(prepared.origin).host);
   return {
     prepared,
     responses,
