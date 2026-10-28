@@ -2,53 +2,63 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net"
-	"path/filepath"
 	"testing"
 	"time"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/testpg"
 	"github.com/jackc/pgx/v5"
 )
 
 // SQL fixture only: this exercises the snapshot projection and RLS, not the
 // production receipt transaction or the full SEND Control/mutant matrix.
 func TestSnapshotRecipientHostRequestComesFromPersistedProof(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	// CI must use its provisioned server; DSN fails (rather than skips) when
+	// CI=true without AURIGA_AI_TEST_PG_DSN. Local absence is an explicit skip.
+	dsn := testpg.DSN(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	admin, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := uint32(listener.Addr().(*net.TCPAddr).Port)
-	if err = listener.Close(); err != nil {
+	defer func() { _ = admin.Close(context.Background()) }()
+	var suffix [8]byte
+	if _, err = rand.Read(suffix[:]); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
-	pg := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Version(embeddedpostgres.V17).Port(port).Username("fixture").Password("fixture").Database("fixture").
-		CachePath(filepath.Join(dir, "cache")).RuntimePath(filepath.Join(dir, "runtime")).
-		DataPath(filepath.Join(dir, "data")).Locale("C").Encoding("UTF8").
-		BinaryRepositoryURL("https://repo.maven.apache.org/maven2").
-		StartParameters(map[string]string{"listen_addresses": "127.0.0.1"}).
-		StartTimeout(time.Minute).Logger(io.Discard))
-	if err = pg.Start(); err != nil {
+	name := "snapshot_" + hex.EncodeToString(suffix[:])
+	database := pgx.Identifier{name}.Sanitize()
+	role := pgx.Identifier{name + "_reader"}.Sanitize()
+	if _, err = admin.Exec(ctx, "CREATE DATABASE "+database); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := pg.Stop(); err != nil {
+	// Defer before connecting so connection failure still removes our database;
+	// the fixture connection/transaction below close first, in reverse order.
+	defer func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		if _, err := admin.Exec(cleanup, "DROP DATABASE "+database); err != nil {
 			t.Error(err)
 		}
-	})
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	conn, err := pgx.Connect(ctx, fmt.Sprintf("postgres://fixture:fixture@127.0.0.1:%d/fixture?sslmode=disable", port))
+		if _, err := admin.Exec(cleanup, "DROP ROLE IF EXISTS "+role); err != nil {
+			t.Error(err)
+		}
+	}()
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Database = name
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
-	_, err = conn.Exec(ctx, `
+	_, err = conn.Exec(ctx, fmt.Sprintf(`
 		CREATE SCHEMA collab;
 		CREATE TABLE collab.network_recipient (
 		  tenant_id text, id text, delivery_id text, target_local text,
@@ -72,15 +82,15 @@ func TestSnapshotRecipientHostRequestComesFromPersistedProof(t *testing.T) {
 		  ('tenant-b','missing','delivery','session','{"host_request_id":"wrong-tenant"}'),
 		  ('tenant-a','missing','other-delivery','session','{"host_request_id":"wrong-delivery"}'),
 		  ('tenant-a','mismatch','delivery','session','{"host_request_id":"persisted-wrong-id"}');
-		CREATE ROLE snapshot_reader;
-		GRANT USAGE ON SCHEMA collab TO snapshot_reader;
-		GRANT SELECT ON ALL TABLES IN SCHEMA collab TO snapshot_reader;
+		CREATE ROLE %s;
+		GRANT USAGE ON SCHEMA collab TO %s;
+		GRANT SELECT ON ALL TABLES IN SCHEMA collab TO %s;
 		ALTER TABLE collab.network_recipient ENABLE ROW LEVEL SECURITY;
 		ALTER TABLE collab.network_acceptance_proof ENABLE ROW LEVEL SECURITY;
 		CREATE POLICY tenant ON collab.network_recipient USING (tenant_id=current_setting('auriga.tenant_id'));
 		CREATE POLICY tenant ON collab.network_acceptance_proof USING (tenant_id=current_setting('auriga.tenant_id'));
-		SET ROLE snapshot_reader;
-	`)
+		SET ROLE %s;
+	`, role, role, role, role))
 	if err != nil {
 		t.Fatal(err)
 	}
