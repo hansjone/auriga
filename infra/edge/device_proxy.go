@@ -25,14 +25,14 @@ func (c Config) parseDeviceUpstream() (*url.URL, error) {
 }
 
 func isDevicePath(path string) bool {
-	return path == "/ai/v1" || strings.HasPrefix(path, "/ai/v1/") || path == "/api/ai/v1/me/usage"
+	return path == "/ai/v1" || strings.HasPrefix(path, "/ai/v1/") || path == "/api/ai/v1/me/usage" || path == "/api/ai/v1/network/submit"
 }
 
 func deviceMethod(path string) string {
 	switch path {
 	case "/ai/v1/models", "/api/ai/v1/me/usage":
 		return http.MethodGet
-	case "/ai/v1/chat/completions":
+	case "/ai/v1/chat/completions", "/api/ai/v1/network/submit":
 		return http.MethodPost
 	default:
 		return ""
