@@ -46,7 +46,7 @@ export async function buildEdgeWSS(root, output) {
     observed,
     normalized.replace(
       marker,
-      '\tif q, ok := req.(*iam.RedeemNetworkTicketRequest); ok { event["ingress"] = q.GetIngress() }\n' +
+      '\tif q, ok := req.(*iam.RedeemNetworkTicketRequest); ok { event["ingress"] = q.GetIngress(); event["serverId"] = q.GetServerId(); event["clientId"] = q.GetClientId() }\n' +
         marker,
     ),
   );

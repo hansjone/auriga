@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
+import { brokerRejected } from './edge-wss-wire.mjs';
 export function assertBoundary({ before, response, after }, expected) {
   assert.equal(
     response.failure,
@@ -33,15 +34,26 @@ export function assertBoundary({ before, response, after }, expected) {
     assert.equal(o.tlsVerified, true);
     assert.equal(o.authorized, false);
     assert.equal(
-      o.natsAuthError,
+      brokerRejected(o.wire),
       true,
       'must receive actual Broker auth rejection',
     );
-    assert.equal(response.errorCode, 'unauthorized');
+    // SDK close classification remains diagnostic. Only the actual socket's
+    // whitelisted protocol rejection and exact connection/RPC match prove auth.
     assert.equal(calls.length, 1);
     assert.equal(calls[0].code, 'PermissionDenied');
-    assert.equal(after.decisions.at(-1).clientType, 'websocket');
-    assert.equal(after.decisions.at(-1).allowed, false);
+    const decisions = after.decisions.slice(before.decisions.length);
+    assert.equal(decisions.length, 1, 'one callout decision for this probe');
+    const decision = decisions[0];
+    assert.equal(decision.clientType, 'websocket');
+    assert.equal(decision.allowed, false);
+    assert.ok(o.wire.info, 'actual Broker INFO identity required');
+    assert.equal(decision.serverId, o.wire.info.serverId);
+    assert.equal(String(decision.clientId), o.wire.info.clientId);
+    assert.equal(calls[0].serverId, o.wire.info.serverId);
+    assert.equal(calls[0].clientId, o.wire.info.clientId);
+    assert.match(response.expectedIngress, /^[a-z2-7]{26}$/);
+    assert.equal(calls[0].ingress, response.expectedIngress);
   } else {
     assert.equal(expected, 'ready');
     assert.equal(o.upgraded, true);

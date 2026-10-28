@@ -7,6 +7,8 @@ import { bootstrapReady } from '../../../clients/dsh-plugin/src/network/session/
 import { openTrustStore } from '../../../clients/dsh-plugin/src/network/trust/store.js';
 import { assemblyDeviceProvider, prepareDevice } from './assembly-device.mjs';
 import { createInterface } from 'node:readline';
+import { setTimeout as delay } from 'node:timers/promises';
+import { createWireObserver, invalidTicketVector } from './edge-wss-wire.mjs';
 const spec = JSON.parse(
   await readFile(process.env.AURIGA_EDGE_WSS_CLIENT, 'utf8'),
 );
@@ -70,10 +72,15 @@ try {
           ? {
               token: JSON.stringify({
                 ...JSON.parse(saved.auth.token),
-                ticket: 'a'.repeat(43),
+                ticket: invalidTicketVector.ticket,
               }),
             }
           : saved.auth;
+        result.expectedIngress = command.invalid
+          ? invalidTicketVector.ingress
+          : saved.subjects.downSubject.split('.').at(-1);
+        const wire = createWireObserver();
+        const socketClosures = [];
         const observations = {
           upgraded: false,
           authorized: false,
@@ -100,12 +107,16 @@ try {
               observations.tlsVerified = response.socket.authorized === true;
             });
             socket.on('message', (data) => {
-              if (
-                data.toString().includes('-ERR') &&
-                /authorization|authentication/i.test(data.toString())
-              )
-                observations.natsAuthError = true;
+              wire.message(data);
             });
+            socketClosures.push(
+              new Promise((resolve) =>
+                socket.once('close', (code, reason) => {
+                  wire.close(code, reason);
+                  resolve();
+                }),
+              ),
+            );
             socket.on('unexpected-response', (_request, response) => {
               observations.httpStatus = response.statusCode;
               let body = '';
@@ -172,8 +183,12 @@ try {
           result.errorCode = error.code ?? 'unclassified';
         } finally {
           await link.close();
+          await Promise.race([Promise.all(socketClosures), delay(1000)]);
           links.delete(link);
         }
+        observations.wire = wire.evidence();
+        observations.natsAuthError =
+          observations.wire.authError === 'authorization-violation';
         result.observations = observations;
       } else throw new Error('unknown command');
     } catch {
