@@ -175,6 +175,8 @@ export async function runDualDsh() {
             (v) => java.events.indexOf(v) >= start && v.stage === 'refreshed',
             'service JWT refresh',
           );
+          for (const file of [config.gatewayToken, config.collabToken])
+            secrets.push((await readFile(file, 'utf8')).trim());
         })
         .catch((error) => failures.push(error));
     }, 180000);
@@ -456,7 +458,8 @@ export async function runDualDsh() {
       'SEND-4: B to A real ToolRuntime/HTTPS/PG/native receipt, lost submit response recovers identical key/result and single rows',
     );
     phase = 'receive closed and non-target zero input';
-    await B.receive('1', false);
+    assert.equal((await B.receive('1', false)).enabled, false);
+    assert.equal((await B.ledger()).bindings['1'].receiveMode, 'receive_none');
     const before = await snapshot('receive-off-before');
     const oldPrompts = (
       await B.control({ op: 'inspect', session: 'send4-target' })
