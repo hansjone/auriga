@@ -95,14 +95,19 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 		fail(401, "common.unauthenticated")
 		return
 	}
-	if g.deviceURL == nil {
+	target, transport := g.deviceURL, apiProxyTransport
+	if r.URL.Path == "/api/ai/v1/network/submit" {
+		target = g.networkSubmitURL
+		transport = g.APITransports[target]
+	}
+	if target == nil || transport == nil {
 		fail(503, "common.unavailable")
 		return
 	}
 	if r.Body != nil && r.Body != http.NoBody {
 		r.Body = http.MaxBytesReader(w, r.Body, maxAPIBodyBytes)
 	}
-	proxy := newReverseProxy(g.deviceURL, apiProxyTransport, false)
+	proxy := newReverseProxy(target, transport, false)
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)

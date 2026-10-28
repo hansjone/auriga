@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ type Config struct {
 	IAMHop                 IAMHopConfig                  `json:"iamHop"`
 	AIAdminHop             IAMHopConfig                  `json:"aiAdminHop"`
 	CollabHop              IAMHopConfig                  `json:"collabHop"`
+	NetworkSubmitHop       IAMHopConfig                  `json:"networkSubmitHop"`
 	Listen                 string                        `json:"listen"`
 	PortalHost             string                        `json:"portalHost"`
 	AdminHost              string                        `json:"adminHost"`
@@ -186,7 +188,7 @@ func applyEnv(cfg *Config) {
 		}
 		cfg.Upstreams["ai-admin"] = v
 	}
-	for key, env := range map[string]string{"resource": "AURIGA_EDGE_UPSTREAM_RESOURCE", "ai-device": "AURIGA_EDGE_UPSTREAM_AI_DEVICE"} {
+	for key, env := range map[string]string{"resource": "AURIGA_EDGE_UPSTREAM_RESOURCE", "ai-device": "AURIGA_EDGE_UPSTREAM_AI_DEVICE", "network-submit": "AURIGA_EDGE_UPSTREAM_NETWORK_SUBMIT"} {
 		if v := os.Getenv(env); v != "" {
 			if cfg.Upstreams == nil {
 				cfg.Upstreams = map[string]string{}
@@ -194,6 +196,10 @@ func applyEnv(cfg *Config) {
 			cfg.Upstreams[key] = v
 		}
 	}
+	set("AURIGA_EDGE_NETWORK_SUBMIT_CERT_FILE", &cfg.NetworkSubmitHop.CertFile)
+	set("AURIGA_EDGE_NETWORK_SUBMIT_KEY_FILE", &cfg.NetworkSubmitHop.KeyFile)
+	set("AURIGA_EDGE_NETWORK_SUBMIT_CA_FILE", &cfg.NetworkSubmitHop.CAFile)
+	set("AURIGA_EDGE_NETWORK_SUBMIT_SERVER_NAME", &cfg.NetworkSubmitHop.ServerName)
 	if v := os.Getenv("AURIGA_EDGE_UPSTREAM_COLLAB"); v != "" {
 		if cfg.Upstreams == nil {
 			cfg.Upstreams = map[string]string{}
@@ -233,6 +239,9 @@ func (c Config) validate() error {
 		return err
 	}
 	if _, err := c.parseDeviceUpstream(); err != nil {
+		return err
+	}
+	if _, err := c.parseNetworkSubmitUpstream(); err != nil {
 		return err
 	}
 	if _, err := c.parseCollabUpstream(); err != nil {
@@ -333,6 +342,34 @@ func (c Config) validate() error {
 		return fmt.Errorf("rateLimit.burst must be > 0")
 	}
 	return nil
+}
+
+// Network submit lives on the callout runtime's separate HTTPS listener. Never
+// borrow the model-device origin, system roots, proxy or IAM hop credentials.
+func (c Config) parseNetworkSubmitUpstream() (*url.URL, error) {
+	raw := c.Upstreams["network-submit"]
+	if raw == "" {
+		if c.NetworkSubmitHop != (IAMHopConfig{}) {
+			return nil, fmt.Errorf("networkSubmitHop requires upstreams.network-submit")
+		}
+		return nil, nil
+	}
+	if !c.Access.Valid() {
+		return nil, fmt.Errorf("network-submit requires validated Access configuration")
+	}
+	u, err := parseResourceDeviceOrigin(raw)
+	if err != nil {
+		return nil, fmt.Errorf("invalid network-submit upstream origin")
+	}
+	hop := c.NetworkSubmitHop
+	if u.Scheme != "https" || hop.AllowLoopbackHTTP {
+		return nil, fmt.Errorf("network-submit requires HTTPS without plaintext fallback")
+	}
+	name, _, nameErr := parseAuthority(hop.ServerName, "https")
+	if nameErr != nil || !strings.EqualFold(name, hop.ServerName) || net.ParseIP(name) != nil || hop.CertFile == "" || hop.KeyFile == "" || hop.CAFile == "" {
+		return nil, fmt.Errorf("networkSubmitHop requires fixed DNS serverName, certFile, keyFile and caFile")
+	}
+	return u, nil
 }
 
 func splitCSV(v string) []string {

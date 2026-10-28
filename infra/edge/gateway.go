@@ -45,6 +45,8 @@ type Gateway struct {
 	resourceURL  *url.URL
 	deviceURL    *url.URL
 
+	networkSubmitURL *url.URL
+
 	portalStatic http.Handler
 	adminStatic  http.Handler
 	panelStatic  http.Handler
@@ -58,6 +60,10 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		return nil, err
 	}
 	deviceURL, err := cfg.parseDeviceUpstream()
+	if err != nil {
+		return nil, err
+	}
+	networkSubmitURL, err := cfg.parseNetworkSubmitUpstream()
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +141,8 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
 		networkWSS:   networkWSS,
+
+		networkSubmitURL: networkSubmitURL,
 	}
 	if cfg.Access.Valid() && (cfg.IAMHop.CAFile != "" || cfg.IAMHop.AllowLoopbackHTTP) {
 		g.IAMTransport, err = newIAMHopTransport(cfg.IAMHop, iamURL)
@@ -144,6 +152,22 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	}
 	if cfg.Access.Valid() {
 		g.APITransports = make(map[*url.URL]http.RoundTripper)
+		if networkSubmitURL != nil {
+			transport, err := newIAMHopTransport(cfg.NetworkSubmitHop, networkSubmitURL)
+			if err != nil {
+				return nil, err
+			}
+			// Retain every device proxy timeout/limit, but use this hop's
+			// explicit trust material and never an environment proxy.
+			deviceTransport, ok := apiProxyTransport.(*http.Transport)
+			if !ok {
+				return nil, errors.New("device proxy transport unavailable")
+			}
+			trusted := deviceTransport.Clone()
+			trusted.Proxy = nil
+			trusted.TLSClientConfig = transport.TLSClientConfig
+			g.APITransports[networkSubmitURL] = trusted
+		}
 		if resourceURL != nil {
 			transport, err := newIAMHopTransport(cfg.IAMHop, resourceURL)
 			if err != nil {
