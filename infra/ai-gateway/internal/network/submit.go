@@ -99,8 +99,10 @@ func (h *submitHandler) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 		submitError(w, 429, "network.overloaded")
 		return
 	}
-	v, err := h.verify(ctx, strings.TrimPrefix(auth[0], "Bearer "))
-	<-h.verifySlots
+	v, err := func() (*iam.VerifyDeviceAccessResponse, error) {
+		defer func() { <-h.verifySlots }()
+		return h.verify(ctx, strings.TrimPrefix(auth[0], "Bearer "))
+	}()
 	if err != nil || !v.GetActive() || !uuidID.MatchString(v.GetTenantId()) || !uuidID.MatchString(v.GetDeviceId()) || !uuidID.MatchString(v.GetAccountId()) || v.GetExpiresAt() == nil || !v.GetExpiresAt().IsValid() || !v.GetExpiresAt().AsTime().After(time.Now()) {
 		submitError(w, 401, "network.unauthorized")
 		return
