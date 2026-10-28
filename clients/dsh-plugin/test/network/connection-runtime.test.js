@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { sign, generateKeyPairSync } from 'node:crypto';
 import tls from 'node:tls';
 import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { WebSocketServer } from 'ws';
 import * as Plugin from '../../src/plugin.js';
 import { createVault } from '../../src/local/vault.js';
 import { setImmediate } from 'node:timers/promises';
@@ -86,6 +88,7 @@ async function fixture(t, extra = {}) {
     kind: 'device-connection',
     roots: testRoots,
     url: 'wss://network.example.com/',
+    origin: extra.origin ?? 'https://portal.example.com',
     async register(signal) {
       signal.throwIfAborted();
       events.push('register');
@@ -177,6 +180,7 @@ async function fixture(t, extra = {}) {
         },
       ),
     transportFactory(options) {
+      extra.transportOptions?.(options);
       if (extra.factoryError) throw new Error('transport factory failed');
       const connection = {
         id: connections.length + 1,
@@ -323,6 +327,47 @@ function registrationHost() {
   };
   return { ...host, agent, tools, unload: () => cleanup() };
 }
+
+test('connection runtime refuses an empty trusted Origin before opening transport', async (t) => {
+  let opened = false;
+  const f = await fixture(t, {
+    origin: '',
+    transportOptions() {
+      opened = true;
+    },
+  });
+  await assert.rejects(f.runtime.start(), /invalidOrigin/);
+  assert.equal(opened, false);
+});
+
+test('connection runtime default socket retains trusted platform Origin independent of data URL', async (t) => {
+  const server = createServer();
+  const wss = new WebSocketServer({ server });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  let socket, opened;
+  const incoming = once(wss, 'connection');
+  try {
+    const f = await fixture(t, {
+      transportOptions(options) {
+        if (socket) return;
+        socket = options.createSocket(
+          `ws://127.0.0.1:${server.address().port}/net/v1/ws`,
+        );
+        opened = once(socket, 'open');
+      },
+    });
+    await f.runtime.start();
+    const [peer, request] = await incoming;
+    await opened;
+    assert.equal(request.headers.origin, 'https://portal.example.com');
+    peer.terminate();
+  } finally {
+    socket?.terminate();
+    await new Promise((ok) => wss.close(ok));
+    await new Promise((ok) => server.close(ok));
+  }
+});
 
 for (const count of [1, 129])
   test(`${count}条签名终态经生产FETCH落账后，原pending来源操作跨真实运行时重连保持不变`, async (t) => {

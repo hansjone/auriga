@@ -31,6 +31,44 @@ import org.springframework.transaction.CannotCreateTransactionException;
 
 class NetworkSourceJavaHostTest {
   @Test
+  void dedicatedEdgeHopHasClientEkuAndMatchingPrivateKey() throws Exception {
+    var host = new NetworkSourceJavaHost();
+    Path certPath;
+    try (host) {
+      host.directory = NetworkSourceJavaHost.privateDirectory();
+      var tls = new NetworkSourceJavaTls(host.directory);
+      certPath = tls.edgeCert;
+      var factory = java.security.cert.CertificateFactory.getInstance("X.509");
+      java.security.cert.X509Certificate cert, ca;
+      try (var input = Files.newInputStream(tls.edgeCert)) {
+        cert = (java.security.cert.X509Certificate) factory.generateCertificate(input);
+      }
+      try (var input = Files.newInputStream(tls.ca)) {
+        ca = (java.security.cert.X509Certificate) factory.generateCertificate(input);
+      }
+      cert.verify(ca.getPublicKey());
+      assertEquals(List.of("1.3.6.1.5.5.7.3.2"), cert.getExtendedKeyUsage());
+      var key =
+          KeyFactory.getInstance("EC")
+              .generatePrivate(
+                  new PKCS8EncodedKeySpec(
+                      Base64.getMimeDecoder()
+                          .decode(
+                              Files.readString(tls.edgeKey)
+                                  .replace(NetworkSourceJavaHost.PRIVATE_KEY_BEGIN, "")
+                                  .replace("-----END " + "PRIVATE KEY-----", ""))));
+      var signature = Signature.getInstance("SHA256withECDSA");
+      signature.initSign(key);
+      signature.update(new byte[] {1, 2, 3});
+      var proof = signature.sign();
+      signature.initVerify(cert);
+      signature.update(new byte[] {1, 2, 3});
+      assertTrue(signature.verify(proof));
+    }
+    assertFalse(Files.exists(certPath));
+  }
+
+  @Test
   void ordinaryMailboxTargetUsesDurableLocalDirectory() {
     // No SQL rows or permissions are mocked. The real directory must reach the
     // JDBC boundary; the probe refuses a connection before any PG work starts.

@@ -502,7 +502,7 @@ export async function openConnectionRuntime(options) {
       upSubject: 'auriga.net.up.a.' + 'a'.repeat(26),
       downSubject: 'auriga.net.down.' + 'a'.repeat(26),
       inboxPrefix: 'auriga.net.reply.' + 'a'.repeat(26),
-      createSocket: createWsSocketFactory(),
+      createSocket: createWsSocketFactory({ origin: prepared.origin ?? '' }),
       async getTicket({ reason: ticketReason }) {
         let requestingTicket = false;
         try {

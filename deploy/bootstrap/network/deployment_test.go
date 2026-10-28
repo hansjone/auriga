@@ -30,12 +30,35 @@ func TestDeploymentNetworkIsolation(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw := strings.ReplaceAll(string(content), "\r\n", "\n")
+			broker := serviceBlock(t, raw, "network-broker")
+			if strings.Contains(broker, "ports:") || (recipe == "nas" && (!strings.Contains(broker, "networks: [internal]") || strings.Contains(broker, "network_mode: host"))) {
+				t.Fatal("broker must not publish WSS to the host or NAS LAN")
+			}
+			edge := serviceBlock(t, raw, "edge")
+			caMount := "/network-edge:/etc/auriga/network-edge:ro"
+			if recipe == "nas" {
+				caMount = "/config/pki-edge:/etc/auriga/pki:ro"
+			}
+			if !strings.Contains(edge, caMount) {
+				t.Fatal("edge must reuse its read-only public network CA mount")
+			}
+			if recipe == "compose" && !strings.Contains(edge, "/edge-https:/etc/auriga/https:ro") {
+				t.Fatal("external HTTPS must use the minimal read-only runtime mount")
+			}
+			for _, secret := range []string{"/network:/", "broker.key", "broker.pem", "gateway.secret", "network-platform"} {
+				if strings.Contains(edge, secret) {
+					t.Fatalf("edge receives broker/runtime material: %s", secret)
+				}
+			}
 			for service, files := range map[string][]string{
 				"platform":       {"platform.properties", "gateway.secret"},
 				"network-broker": {"broker.conf", "broker.pem", "broker.key", "server-ca.pem"},
 			} {
 				block := serviceBlock(t, raw, service)
 				if service == "platform" {
+					if strings.Contains(block, "browser-tls") || strings.Contains(block, "edge-https") {
+						t.Fatal("platform must never mount external browser TLS private material")
+					}
 					if !strings.Contains(block, "/network-platform:/etc/auriga/network:ro") || strings.Contains(block, "/network:/etc/auriga/network:ro") || strings.Contains(block, "/network/platform.properties:") {
 						t.Fatal("platform must mount only its real private credential directory")
 					}

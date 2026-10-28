@@ -163,6 +163,7 @@ services:
       # pki rw: edge chmod's cert/key on startup (ro bind → EROFS)
       - ./var/pki:/etc/auriga/pki
       - ./var/network-edge:/etc/auriga/network-edge:ro
+      - ./var/edge-https:/etc/auriga/https:ro
       - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:ro
 
   network-broker:

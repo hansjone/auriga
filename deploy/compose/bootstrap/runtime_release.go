@@ -475,7 +475,7 @@ func preflightRuntimeInstallation(out string) (bool, error) {
 			return false, err
 		}
 	}
-	for _, name := range []string{"pki", "templates", "runtime-keys", "iam-installation", "network", "network-platform"} {
+	for _, name := range []string{"pki", "templates", "runtime-keys", "iam-installation", "network", "network-platform", "browser-tls"} {
 		path := filepath.Join(out, name)
 		info, err := os.Lstat(path)
 		if os.IsNotExist(err) {

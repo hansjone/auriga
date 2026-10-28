@@ -181,6 +181,7 @@ export function createDeviceProvider({
           return result;
         },
         url: installation.wssUrl,
+        origin: config.platformOrigin,
         roots: installation.roots,
         async refresh(trust, active) {
           await trust.announce(
