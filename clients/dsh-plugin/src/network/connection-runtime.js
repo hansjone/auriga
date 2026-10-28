@@ -29,7 +29,7 @@ import { connectionSourceClient } from './source-control/connection.js';
 import { stopSource } from './source-control/state.js';
 import { saveProducerEpoch } from './durable/outbox.js';
 import { createDeviceMessaging } from './durable/capability.js';
-import { acceptedCursor } from './durable/recovery.js';
+import { hasCursorEvidence } from './durable/recovery.js';
 
 // At most 64 pending protocol payloads (each already bounded by NatsLink).
 const MESSAGE_QUEUE_CAPACITY = 64;
@@ -149,7 +149,7 @@ async function normalReady(transport, trust, state, signal, now) {
           assertReadyResult(frame, { ...context, allowRecoveryConflict: true });
           const recoveringReceipt =
             frame.status === 'recovery_conflict' &&
-            acceptedCursor(state, frame.committed_cursor);
+            hasCursorEvidence(state, frame.committed_cursor);
           if (frame.status !== 'ready' && !recoveringReceipt)
             throw new Error('READY receipt recovery evidence missing');
           // Only this durable queue head can explain a missing response. READY
@@ -642,12 +642,12 @@ export async function openConnectionRuntime(options) {
             handshakeSignal.throwIfAborted();
             if (proof.recoverCursor) {
               // The conflict response never opens business gates. Retain the
-              // exact acceptance proofs, persist only their verified prefix,
+              // exact acceptance/terminal proofs, persist only their verified prefix,
               // close this C and perform a fresh strict READY on a new ingress.
               await sessionLedger.update((draft) => {
                 if (
                   !draft.durable ||
-                  !acceptedCursor(draft, proof.recoverCursor)
+                  !hasCursorEvidence(draft, proof.recoverCursor)
                 )
                   throw new Error('receipt recovery evidence changed');
                 draft.durable.resumeCursor = proof.recoverCursor;

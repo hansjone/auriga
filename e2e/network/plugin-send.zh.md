@@ -24,9 +24,16 @@ already_admitted 不给予第二次宿主调用许可；未知调用只查真实
 HTTP 提交失败保留原请求，交由同体工具重试或新连接对账，不自动新建 key。
 
 回执确认丢失后保留原 operation/proof。若新 READY 因服务端游标已推进而给出签名
-recovery_conflict，只在本机每个连续序号都保有完整接受与回执证据时保存该已确认前缀，
+recovery_conflict，只在本机每个连续序号都保有完整接受/回执或已验签终态证据时保存该已确认前缀，
 关闭冲突 C、另票另 C 严格 READY；之后原 proof 重提，得到真实 RECEIPT_COMMITTED
 才标宿主接受已提交。没有本机证据时失败关闭，不盲抄服务端计数。
+
+FETCH 的 terminal 条目按契约表示服务端已终结的邮件，不含正文。插件完整验签页头、
+manifest 和原终态，核目标 realm/node/incarnation、正序号/版本、唯一 recipient 及终态枚举，
+保留原签名条目且禁止改写；只在连续前缀均有本机接受或终态证据后保存服务端 committed_cursor。
+分页期间仍使用原 resume_cursor，不把 scan_after/snapshot_head 当确认，也不跨越 gap/held/paused。
+终态不会进入 HostPort、不会产生本机接受证明或 RECEIPT；receive_none 不阻止保存无正文的服务端终态。
+该路径修复 SEND-2 短 TTL 邮件被 SEND-3 定期 FETCH 过期后，插件丢弃终态导致重连游标冲突的回归。
 
 ## 验证入口
 

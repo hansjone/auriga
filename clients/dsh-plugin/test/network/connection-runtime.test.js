@@ -20,7 +20,7 @@ import { createHostAdapter } from '../../src/network/host/adapter.js';
 import { saveProducerEpoch } from '../../src/network/durable/outbox.js';
 import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
-import { signingInput } from '../../src/network/trust/verifier.js';
+import { digest, signingInput } from '../../src/network/trust/verifier.js';
 import {
   signedKeyset,
   signedAnnouncement,
@@ -113,6 +113,9 @@ async function fixture(t, extra = {}) {
       required_features: [],
       ...changes,
     };
+    return envelope(frame, request, connection);
+  }
+  function envelope(frame, request, connection) {
     frame.server_auth = {
       version: 1,
       purpose: 'protocol_response',
@@ -125,7 +128,7 @@ async function fixture(t, extra = {}) {
         realm: '2',
         node: '64',
         incarnation: 'inc-1',
-        epoch: frame.epoch,
+        epoch: frame.epoch ?? String(connection.id),
       },
       request_id: request.request_id,
       channel_nonce: request.channel_nonce,
@@ -179,6 +182,12 @@ async function fixture(t, extra = {}) {
         },
         async send(bytes) {
           const request = decodeJson(bytes);
+          if (request.type === 'fetch' && extra.mailbox) {
+            sent.push({ request, connection });
+            const result = await extra.mailbox(request, connection);
+            options.onMessage(encodeJson(result), connection.epoch);
+            return;
+          }
           if (request.type.startsWith('source_') && extra.source) {
             sent.push({ request, connection });
             await extra.source(request, connection);
@@ -260,6 +269,7 @@ async function fixture(t, extra = {}) {
     connections,
     sent,
     response,
+    envelope,
     prepared,
     payload,
     trustStore,
@@ -290,6 +300,123 @@ function registrationHost() {
   };
   return { ...host, agent, tools, unload: () => cleanup() };
 }
+
+test('签名终态经生产FETCH落账后，原pending来源操作跨真实运行时重连保持不变', async (t) => {
+  const host = registrationHost();
+  const sources = [],
+    readyRequests = [];
+  let expired = false,
+    firstTerminalPage = true;
+  const f = await fixture(t, {
+    ctx: host.ctx,
+    source: (request) => sources.push(request),
+    ready: (_id, request) => readyRequests.push(request),
+    result(_id, request) {
+      return {
+        producer_epoch: '42',
+        head_seq: expired ? '1' : '0',
+        committed_cursor: expired ? '1' : '0',
+        local_high_water: request.local_high_water,
+        registration_revision: request.registration_revision,
+        status:
+          request.resume_cursor === (expired ? '1' : '0')
+            ? 'ready'
+            : 'recovery_conflict',
+      };
+    },
+    mailbox(request, connection) {
+      const context = { ...request, channel_nonce: connection.nonce };
+      const seal = (frame) =>
+        decodeJson(f.envelope(frame, context, connection));
+      const items =
+        expired && request.resume_cursor === '0'
+          ? [
+              seal({
+                app_version: '1.0',
+                type: 'terminal',
+                epoch: String(connection.id),
+                delivery_id: 'expired-delivery',
+                mail_seq: '1',
+                target_node: { realm: '2', node: '64' },
+                recipients: [
+                  {
+                    recipient_id: 'expired-recipient',
+                    transport_status: 'expired',
+                    state_version: '2',
+                  },
+                ],
+              }),
+            ]
+          : [];
+      // Expiry can commit while the FETCH header still carries the previous
+      // cursor. Reconnect between this durable witness and the next poll.
+      const committedCursor = expired && !firstTerminalPage ? '1' : '0';
+      if (items.length) firstTerminalPage = false;
+      return {
+        app_version: '1.0',
+        type: 'fetch_result',
+        items,
+        page: seal({
+          app_version: '1.0',
+          type: 'fetch_page',
+          epoch: String(connection.id),
+          request_id: request.request_id,
+          head_seq: expired ? '1' : '0',
+          snapshot_head: expired ? '1' : '0',
+          scan_after: expired ? '1' : '0',
+          committed_cursor: committedCursor,
+          next_continuation: null,
+          manifest: items.map((item) => ({
+            item_type: 'terminal',
+            mail_seq: item.mail_seq,
+            digest: digest(item),
+          })),
+        }),
+      };
+    },
+  });
+  f.prepared.submit = async () => {
+    throw new Error('no HTTPS send in this fixture');
+  };
+  await f.runtime.start();
+  await waitFor(() => host.tools.has('auriga_network_join'), 'join installed');
+  await host.tools
+    .get('auriga_network_join')
+    .execute({}, { agent: host.agent });
+  await waitFor(() => sources.length > 0, 'pending source recorded');
+  expired = true;
+  await waitFor(
+    () => f.ledger.snapshot().durable.terminal?.['1'],
+    'signed terminal evidence committed',
+  );
+  const before = f.ledger.snapshot();
+  assert.equal(before.durable.resumeCursor, '0');
+  assert.equal(Object.keys(before.durable.inbound).length, 0);
+  const transport = f.connections.at(-1);
+  transport.transition('reconnecting', transport.epoch);
+  transport.transition('ready', transport.epoch + 1);
+  await waitFor(
+    () => f.runtime.status.connected || !f.runtime.status.available,
+    'strict READY completed',
+  );
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(
+    f.connections.length,
+    3,
+    'conflict C must close before fresh strict READY',
+  );
+  assert.equal(transport.state, 'stopped');
+  assert.equal(readyRequests.at(-1).resume_cursor, '1');
+  await waitFor(() => sources.length > 1, 'original pending source resumed');
+  assert.equal(sources[1].operation_id, sources[0].operation_id);
+  const after = f.ledger.snapshot();
+  assert.deepEqual(
+    after.sourceControl.operations,
+    before.sourceControl.operations,
+  );
+  assert.deepEqual(after.durable.terminal, before.durable.terminal);
+  assert.equal(host.calls.filter((v) => v[0] === 'prompt').length, 0);
+});
 
 test('signed READY cursor only reconciles a complete retained acceptance prefix on a fresh C', async (t) => {
   const host = registrationHost();

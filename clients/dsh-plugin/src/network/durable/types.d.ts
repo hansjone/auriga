@@ -35,5 +35,7 @@ export interface DurableState {
   submissions: Record<string, Submission>;
   receive: Record<string, { enabled: boolean; version: string; pending: any }>;
   inbound: Record<string, Intake>;
+  /** Full verified terminal envelopes, keyed by mail_seq; never host receipts. */
+  terminal?: Record<string, any>;
   resumeCursor: string;
 }

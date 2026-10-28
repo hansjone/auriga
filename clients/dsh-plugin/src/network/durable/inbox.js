@@ -5,6 +5,8 @@ import { registrationSession } from '../host/native/host-port.js';
 import { verifyFetchPage } from '../session/page.js';
 import { digest } from '../trust/verifier.js';
 import { isUint64String } from '../host/address.js';
+import { canonicalize } from '../trust/jcs.js';
+import { hasCursorEvidence, isTerminalEvidence } from './recovery.js';
 
 /** Explicit, same-tenant ordinary-session intake. HostPort is the public native
  * adapter; it proves provider acceptance before any host_accepted receipt.
@@ -361,15 +363,51 @@ export function createDurableInbox({
       if (!draft.durable) throw new Error('durable unavailable');
       draft.durable.inbound[id].stage = 'committed';
       if (
-        BigInt(committed.committed_cursor) > BigInt(draft.durable.resumeCursor)
+        BigInt(committed.committed_cursor) >
+          BigInt(draft.durable.resumeCursor) &&
+        hasCursorEvidence(draft, committed.committed_cursor)
       )
         draft.durable.resumeCursor = committed.committed_cursor;
+    }, current);
+  }
+  /** Call only after verifying the complete FETCH header, manifest and item.
+   * Repeated signatures/epochs may differ, but the terminal fact cannot change.
+   * @param {any} item */
+  async function retainTerminal(item) {
+    if (!isTerminalEvidence(ledger.peek(), item))
+      throw new Error('invalid terminal evidence');
+    const fact = (/** @type {any} */ value) =>
+      canonicalize({
+        delivery: value.delivery_id,
+        seq: value.mail_seq,
+        target: value.target_node,
+        recipients: value.recipients,
+      });
+    await ledger.update((draft) => {
+      if (!draft.durable) throw new Error('durable unavailable');
+      const entries = (draft.durable.terminal ??= {});
+      const old = entries[item.mail_seq];
+      if (old && fact(old) !== fact(item)) throw new Error('terminal conflict');
+      if (!old) entries[item.mail_seq] = structuredClone(item);
+    }, current);
+  }
+  /** Only a server-confirmed prefix with complete retained evidence can move.
+   * @param {string} cursor */
+  async function advanceCursor(cursor) {
+    if (!isUint64String(cursor)) throw new Error('invalid committed cursor');
+    if (BigInt(cursor) <= BigInt(ledger.peek().durable?.resumeCursor ?? '0'))
+      return;
+    await ledger.update((draft) => {
+      if (!draft.durable || !hasCursorEvidence(draft, cursor))
+        throw new Error('mailbox cursor evidence missing');
+      draft.durable.resumeCursor = cursor;
     }, current);
   }
   async function pull() {
     return locks.run('fetch', async () => {
       current();
       const resume = ledger.peek().durable?.resumeCursor ?? '0';
+      let committedCursor = resume;
       let continuation = null;
       const seen = new Set();
       for (let pageNumber = 0; pageNumber < 128; pageNumber++) {
@@ -405,9 +443,19 @@ export function createDurableInbox({
           throw new Error(
             'network.signature_invalid: FETCH contains rejected items',
           );
-        for (const item of page.items) await deliver(item);
+        for (const item of page.items) {
+          if (item.type === 'terminal') await retainTerminal(item);
+          else await deliver(item);
+        }
+        if (!isUint64String(response.page.committed_cursor))
+          throw new Error('invalid committed cursor');
+        if (BigInt(response.page.committed_cursor) > BigInt(committedCursor))
+          committedCursor = response.page.committed_cursor;
         const next = response.page.next_continuation;
-        if (next === null) return;
+        if (next === null) {
+          await advanceCursor(committedCursor);
+          return;
+        }
         if (typeof next !== 'string' || !next || seen.has(next))
           throw new Error('invalid FETCH continuation');
         seen.add(next);

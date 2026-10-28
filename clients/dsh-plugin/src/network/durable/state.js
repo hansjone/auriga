@@ -1,5 +1,6 @@
 import { canonicalize } from '../trust/jcs.js';
 import { isUint64String } from '../host/address.js';
+import { isTerminalEvidence } from './recovery.js';
 
 /** @returns {never} */
 const invalid = () => {
@@ -19,9 +20,12 @@ export function checkDurable(state) {
     !isUint64String(d.resumeCursor) ||
     !map(d.submissions) ||
     !map(d.receive) ||
-    !map(d.inbound)
+    !map(d.inbound) ||
+    (d.terminal !== undefined && !map(d.terminal))
   )
     invalid();
+  for (const [seq, item] of Object.entries(d.terminal ?? {}))
+    if (seq !== item?.mail_seq || !isTerminalEvidence(state, item)) invalid();
   for (const [key, saved] of Object.entries(d.submissions)) {
     if (
       !saved?.request?.source ||
@@ -91,6 +95,12 @@ export function fenceDurable(before, draft) {
       BigInt(b.resumeCursor) < BigInt(a.resumeCursor)
     )
       invalid();
+    for (const [seq, item] of Object.entries(a.terminal ?? {}))
+      if (
+        !b.terminal?.[seq] ||
+        canonicalize(item) !== canonicalize(b.terminal[seq])
+      )
+        invalid();
     for (const [key, value] of Object.entries(a.submissions)) {
       const next = b.submissions[key];
       if (

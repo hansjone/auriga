@@ -13,7 +13,7 @@ import { signingFixture } from './trust/fixtures.js';
 import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { IDENTITY, self, peer } from './host/fixtures.js';
 import { digest } from '../../src/network/trust/verifier.js';
-import { acceptedCursor } from '../../src/network/durable/recovery.js';
+import { hasCursorEvidence } from '../../src/network/durable/recovery.js';
 
 async function fixture(t, options = {}) {
   const n = nativeFixture(),
@@ -26,7 +26,7 @@ async function fixture(t, options = {}) {
     },
   };
   const signer = await signingFixture();
-  const store = createMemoryLedgerStore();
+  const store = createMemoryLedgerStore({ beforeCommit: options.beforeCommit });
   const ledger = await openLedger({
     store,
     identity: IDENTITY,
@@ -143,7 +143,7 @@ async function fixture(t, options = {}) {
             request_id: f.request_id,
             epoch: '7',
             head_seq: String(deliveries.length),
-            committed_cursor: '0',
+            committed_cursor: options.committedCursor ?? '0',
             scan_after: raw?.mail_seq ?? '0',
             snapshot_head: String(deliveries.length),
             next_continuation:
@@ -158,6 +158,7 @@ async function fixture(t, options = {}) {
           },
           context,
         );
+        options.fetchResult?.(page, items, context, signer);
         for (const listener of listeners)
           listener(
             encodeJson({
@@ -237,8 +238,148 @@ async function fixture(t, options = {}) {
       ],
     };
   }
-  return { n, ledger, store, inbox, requests, deliveries, delivery };
+  function terminal(seq = '1') {
+    return {
+      app_version: '1.0',
+      type: 'terminal',
+      epoch: '7',
+      delivery_id: 'delivery-' + seq,
+      mail_seq: seq,
+      target_node: { realm: IDENTITY.realm, node: IDENTITY.node },
+      recipients: [
+        {
+          recipient_id: 'recipient-' + seq,
+          transport_status: 'expired',
+          state_version: '10',
+        },
+      ],
+    };
+  }
+  return { n, ledger, store, inbox, requests, deliveries, delivery, terminal };
 }
+
+test('经验签的expired终态保存原证据并推进游标，不调用宿主或生成回执', async (t) => {
+  const f = await fixture(t, { committedCursor: '1' });
+  f.deliveries.push(f.terminal());
+  await f.inbox.pull();
+  const saved = f.store.snapshot().durable;
+  assert.equal(saved.resumeCursor, '1');
+  assert.equal(saved.terminal['1'].type, 'terminal');
+  assert.equal(saved.terminal['1'].recipients[0].transport_status, 'expired');
+  assert.ok(saved.terminal['1'].server_auth.signature);
+  assert.deepEqual(saved.inbound, {});
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 0);
+  assert.deepEqual(
+    f.requests.map((v) => v.type),
+    ['fetch'],
+  );
+  // Complete retained evidence may repair a lost cursor commit after reconnect.
+  const lagged = f.ledger.read();
+  lagged.durable.resumeCursor = '0';
+  assert.equal(hasCursorEvidence(lagged, '1'), true);
+  assert.equal(hasCursorEvidence(lagged, '2'), false);
+  await f.ledger.close();
+  const reopened = await openLedger({ store: f.store, identity: IDENTITY });
+  assert.equal(reopened.peek().durable.resumeCursor, '1');
+  await reopened.close();
+});
+
+test('终态分页保留原resume且连续证据完成后才推进，不采用scan_after', async (t) => {
+  const f = await fixture(t, { committedCursor: '2' });
+  f.deliveries.push(f.terminal('1'), f.terminal('2'));
+  await f.inbox.pull();
+  assert.deepEqual(
+    f.requests.map((v) => v.resume_cursor),
+    ['0', '0'],
+  );
+  assert.equal(f.store.snapshot().durable.resumeCursor, '2');
+  assert.equal(Object.keys(f.store.snapshot().durable.terminal).length, 2);
+});
+
+test('签名游标不能跨越缺失终态或本机接受证据', async (t) => {
+  const f = await fixture(t, { committedCursor: '2' });
+  f.deliveries.push(f.terminal('2'));
+  await assert.rejects(f.inbox.pull(), /cursor evidence/);
+  assert.equal(f.store.snapshot().durable.resumeCursor, '0');
+});
+
+test('终态与本机持久接受可共同证明连续前缀，终态不变成宿主回执', async (t) => {
+  const f = await fixture(t, { committedCursor: '1' });
+  await f.inbox.setReceive('1', true);
+  f.deliveries.push(f.terminal('1'), f.delivery('2'));
+  await f.inbox.pull();
+  assert.equal(f.store.snapshot().durable.resumeCursor, '2');
+  assert.deepEqual(Object.keys(f.store.snapshot().durable.inbound), [
+    'recipient-2',
+  ]);
+  const receipts = f.requests.filter((v) => v.type === 'receipt');
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].results[0].recipient_id, 'recipient-2');
+  assert.equal(f.n.calls.filter((v) => v[0] === 'prompt').length, 1);
+});
+
+for (const bad of ['signature', 'target', 'status', 'duplicate'])
+  test(`终态${bad}非法不能推进游标或保存证据`, async (t) => {
+    const f = await fixture(t, {
+      committedCursor: '1',
+      fetchResult(page, items, context, signer) {
+        if (bad === 'signature')
+          items[0].server_auth.signature = 'A'.repeat(86);
+        else {
+          if (bad === 'target') items[0].target_node.node = '65';
+          if (bad === 'status')
+            items[0].recipients[0].transport_status = 'pending';
+          if (bad === 'duplicate')
+            items[0].recipients.push(items[0].recipients[0]);
+          signer.seal(items[0], context);
+        }
+        page.manifest[0].digest = digest(items[0]);
+        signer.seal(page, context);
+      },
+    });
+    f.deliveries.push(f.terminal());
+    await assert.rejects(f.inbox.pull());
+    assert.equal(f.store.snapshot().durable.resumeCursor, '0');
+    assert.deepEqual(f.store.snapshot().durable.terminal ?? {}, {});
+  });
+
+test('已保存终态不可被删除或换成其他delivery，晚到不同终态不能改写原证据', async (t) => {
+  const f = await fixture(t, { committedCursor: '1' });
+  f.deliveries.push(f.terminal());
+  await f.inbox.pull();
+  const original = f.store.snapshot().durable.terminal['1'];
+  for (const replace of [false, true])
+    await assert.rejects(
+      f.ledger.update((draft) => {
+        if (replace) draft.durable.terminal['1'].delivery_id = 'other';
+        else delete draft.durable.terminal['1'];
+      }),
+    );
+  f.deliveries[0].delivery_id = 'other';
+  await assert.rejects(f.inbox.pull(), /terminal conflict/);
+  assert.deepEqual(f.store.snapshot().durable.terminal['1'], original);
+});
+
+test('终态证据或游标存储失败不能在耐久快照中跳过邮件', async (t) => {
+  for (const failure of ['evidence', 'cursor']) {
+    const f = await fixture(t, {
+      committedCursor: '1',
+      beforeCommit(state) {
+        if (
+          failure === 'evidence'
+            ? state.durable?.terminal?.['1']
+            : state.durable?.resumeCursor === '1'
+        )
+          throw new Error('terminal storage failed');
+      },
+    });
+    f.deliveries.push(f.terminal());
+    await assert.rejects(f.inbox.pull(), /terminal storage failed/);
+    assert.equal(f.store.snapshot().durable.resumeCursor, '0');
+    assert.deepEqual(f.store.snapshot().durable.inbound, {});
+    assert.equal(f.requests.filter((v) => v.type === 'receipt').length, 0);
+  }
+});
 test('默认 receive_none 拒收；正常控制开启后 HostPort 持久接受再 RECEIPT', async (t) => {
   const f = await fixture(t);
   await assert.rejects(f.inbox.deliver(f.delivery()), /receive_none/);
@@ -284,11 +425,11 @@ test('回执确认丢失复用原 operation_id，不再次 prompt', async (t) =>
   const f = await fixture(t, { loseReceipt: true });
   await f.inbox.setReceive('1', true);
   await assert.rejects(f.inbox.deliver(f.delivery()), /receipt response lost/);
-  assert.equal(acceptedCursor(f.ledger.peek(), '1'), true);
-  assert.equal(acceptedCursor(f.ledger.peek(), '2'), false);
+  assert.equal(hasCursorEvidence(f.ledger.peek(), '1'), true);
+  assert.equal(hasCursorEvidence(f.ledger.peek(), '2'), false);
   const incomplete = f.ledger.read();
   incomplete.durable.inbound['recipient-1'].receipt = null;
-  assert.equal(acceptedCursor(incomplete, '1'), false);
+  assert.equal(hasCursorEvidence(incomplete, '1'), false);
   // A later receive-off does not erase an already durable acceptance. The
   // reconciliation path must never re-enter HostPort.prompt.
   await f.inbox.setReceive('1', false);
