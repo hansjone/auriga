@@ -471,6 +471,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     },
     attachNetwork: network.attach,
     consentUI: network.consentUI,
+    messagingUI: network.messagingUI,
     get networkStatus() {
       return network.status;
     },

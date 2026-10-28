@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createDeviceProvider } from '../../../clients/dsh-plugin/src/network/device-provider.js';
 import { openConnectionRuntime } from '../../../clients/dsh-plugin/src/network/connection-runtime.js';
 import { createFileLedgerStore } from '../../../clients/dsh-plugin/src/network/host/store.js';
 import { NatsTransport } from '../../../clients/dsh-plugin/src/network/transport/nats-transport.js';
@@ -17,10 +16,12 @@ import { currentNativeProcess } from './native-process.mjs';
 import { waitUntil } from './assembly-process.mjs';
 import { brokerGuards } from './assembly-broker.mjs';
 import { criticalMatrix } from './assembly-critical.mjs';
-import { prepareDevice } from './assembly-device.mjs';
+import { prepareDevice, assemblyDeviceProvider } from './assembly-device.mjs';
 import { assertReadyReplacement } from './assembly-ready.mjs';
 import { describeBusinessFailure } from './assembly-failure.mjs';
 import { gatewaySend } from './gateway-send.mjs';
+import { assemblyMailboxTransport } from './assembly-mailbox.mjs';
+import { pluginSend } from './plugin-send.mjs';
 
 const emit = (value) => process.stdout.write(JSON.stringify(value) + '\n');
 const input = createInterface({ input: process.stdin });
@@ -107,7 +108,8 @@ async function endpoint(name, devicePath) {
   const tools = native.ctx.tools,
     frames = [],
     sockets = [],
-    transports = [];
+    transports = [],
+    mailboxTransports = [];
   const roots = [
     {
       kid: config.rootKid,
@@ -116,33 +118,75 @@ async function endpoint(name, devicePath) {
       ),
     },
   ];
-  const provider = createDeviceProvider({
-    config: {
-      platformOrigin: ready.https,
-      issuer: ready.https,
-      clientId: 'bridge-device',
-      providerId: 'bridge',
+  const providerAt = (origin) =>
+    assemblyDeviceProvider({
+      origin,
       network: { realm: config.realm, wssUrl: gateway.wss, roots },
-    },
-    async getDevice() {
-      const device = JSON.parse(await readFile(devicePath, 'utf8'));
-      privateValues.push(device.access_token, device.refresh_token);
-      const claims = JSON.parse(
-        Buffer.from(device.access_token.split('.')[1], 'base64url').toString(),
+      async getDevice() {
+        const device = JSON.parse(await readFile(devicePath, 'utf8'));
+        privateValues.push(device.access_token, device.refresh_token);
+        const claims = JSON.parse(
+          Buffer.from(
+            device.access_token.split('.')[1],
+            'base64url',
+          ).toString(),
+        );
+        return { accessToken: device.access_token, claims };
+      },
+    });
+  const prepared = await prepareDevice(
+    providerAt(ready.https),
+    new AbortController().signal,
+  );
+  const submissions = [];
+  if (process.env.AURIGA_PLUGIN_SEND === '1') {
+    // The bridge exposes IAM and submit at separate real HTTPS origins. Both
+    // ports are production device providers with the same genuine credential;
+    // no whole-business provider or fake success response is installed.
+    const sending = await prepareDevice(
+      providerAt(gateway.https),
+      new AbortController().signal,
+    );
+    prepared.submit = async (request, signal) => {
+      const saved = JSON.parse(
+        await readFile(join(directory, 'ledger/ledger.json'), 'utf8'),
       );
-      return { accessToken: device.access_token, claims };
-    },
-  });
-  const prepared = await prepareDevice(provider, new AbortController().signal);
+      const entry = Object.values(saved.durable?.submissions ?? {}).find(
+        (v) => v.request.idempotency.key === request.idempotency.key,
+      );
+      submissions.push({
+        key: request.idempotency.key,
+        durable:
+          !!entry &&
+          JSON.stringify(entry.request) === JSON.stringify(request) &&
+          !!entry.bindingId,
+      });
+      return sending.submit(request, signal);
+    };
+  }
   const store = createFileLedgerStore({ dir: join(directory, 'ledger') });
   const observations = [];
+  const storageFailures = [];
   const openFileStore = store.open.bind(store);
   store.open = async () => {
     const handle = await openFileStore();
     return {
       ...handle,
       async commit(value) {
-        await handle.commit(value);
+        try {
+          await handle.commit(value);
+        } catch (error) {
+          // Bounded metadata only: never persist arbitrary error text/paths,
+          // credentials or replacement snapshots as successful file commits.
+          if (storageFailures.length < 8)
+            storageFailures.push({
+              revision: value.revision,
+              code: /^[A-Z0-9_]{1,64}$/.test(error?.code ?? '')
+                ? error.code
+                : 'UNKNOWN',
+            });
+          throw error;
+        }
         // Observe only AFTER the genuine file ledger has completed its commit.
         for (const e of Object.values(value.sourceControl?.entries ?? {}))
           if (e.observation) observations.push(structuredClone(e.observation));
@@ -153,6 +197,7 @@ async function endpoint(name, devicePath) {
     ca: await readFile(gateway.ca),
     rejectUnauthorized: true,
   });
+  const localControl = Object.freeze({});
   const runtime = await openConnectionRuntime({
     kind: 'device-connection',
     prepared,
@@ -162,8 +207,10 @@ async function endpoint(name, devicePath) {
     getAccess: async () => {
       throw new Error('AI credential is outside T3b');
     },
-    authorizeLocal: async () => false,
+    authorizeLocal: async (context) =>
+      process.env.AURIGA_PLUGIN_SEND === '1' && context === localControl,
     transportFactory(options) {
+      const listeners = new Set();
       const transport = new NatsTransport({
         ...options,
         createSocket(url) {
@@ -174,6 +221,7 @@ async function endpoint(name, devicePath) {
         onMessage(bytes, epoch) {
           frames.push({ direction: 'down', frame: decodeJson(bytes) });
           options.onMessage?.(bytes, epoch);
+          for (const listener of listeners) listener(bytes, epoch);
         },
       });
       const send = transport.send.bind(transport);
@@ -182,6 +230,7 @@ async function endpoint(name, devicePath) {
         return send(bytes);
       };
       transports.push(transport);
+      mailboxTransports.push(assemblyMailboxTransport(transport, listeners));
       return transport;
     },
   });
@@ -194,8 +243,12 @@ async function endpoint(name, devicePath) {
     frames,
     sockets,
     transports,
+    mailboxTransports,
     observations,
+    storageFailures,
     prepared,
+    submissions,
+    localControl,
     socketFactory,
     directory,
     ledger: async () =>
@@ -471,6 +524,10 @@ try {
 
   // No virtual clock. IAM uses T3a's real 180s source policy; the native
   // witness separately bounds each observation. Wait through the saved expiry.
+  if (process.env.AURIGA_PLUGIN_SEND === '1') {
+    phase = 'SEND-3 production plugin send and durable native receipt';
+    await pluginSend({ member, external, snapshot, checks, artifacts });
+  }
   if (process.env.AURIGA_GATEWAY_SEND === '1') {
     phase = 'SEND-2 gateway submit and cross-identity zero writes';
     await gatewaySend({
@@ -658,6 +715,18 @@ try {
   // Preserve the real file commits/frames/DB facts on a business failure too.
   // A mutant's accepted bad signature must remain independently inspectable.
   for (const e of endpoints) {
+    await writeFile(
+      join(artifacts, `${e.name}-runtime.json`),
+      JSON.stringify(
+        {
+          status: e.runtime.status,
+          diagnostics: e.runtime.diagnostics,
+          storageFailures: e.storageFailures,
+        },
+        null,
+        2,
+      ),
+    );
     await writeFile(
       join(artifacts, `${e.name}-frames.json`),
       JSON.stringify(e.frames, null, 2),

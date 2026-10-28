@@ -162,6 +162,9 @@ export function createDeviceProvider({
       let registering = false;
       return {
         kind: 'device-connection',
+        async submit(body, active) {
+          return request('/api/ai/v1/network/submit', body, active);
+        },
         async register(active) {
           if (registering)
             throw new Error('device registration already consumed');

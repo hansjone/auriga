@@ -27,6 +27,9 @@ import {
 import { createSourceControl } from './source-control/controller.js';
 import { connectionSourceClient } from './source-control/connection.js';
 import { stopSource } from './source-control/state.js';
+import { saveProducerEpoch } from './durable/outbox.js';
+import { createDeviceMessaging } from './durable/capability.js';
+import { hasCursorEvidence } from './durable/recovery.js';
 
 // At most 64 pending protocol payloads (each already bounded by NatsLink).
 const MESSAGE_QUEUE_CAPACITY = 64;
@@ -76,7 +79,7 @@ async function normalReady(transport, trust, state, signal, now) {
       channelNonce,
       bootId,
       keysetVersion: trust.version,
-      resumeCursor: '0',
+      resumeCursor: state.durable?.resumeCursor ?? '0',
       localHighWater: state.localHighWater,
       registrationRevision: state.registrationRevision ?? '0',
       receiptCheckpoint: checkpoint,
@@ -143,7 +146,12 @@ async function normalReady(transport, trust, state, signal, now) {
             now,
           });
           current();
-          assertReadyResult(frame, context);
+          assertReadyResult(frame, { ...context, allowRecoveryConflict: true });
+          const recoveringReceipt =
+            frame.status === 'recovery_conflict' &&
+            hasCursorEvidence(state, frame.committed_cursor);
+          if (frame.status !== 'ready' && !recoveringReceipt)
+            throw new Error('READY receipt recovery evidence missing');
           // Only this durable queue head can explain a missing response. READY
           // never copies server counters into the ledger; LOCAL_REGISTER still
           // reconciles the original op/type/fingerprint before any binding.
@@ -164,7 +172,9 @@ async function normalReady(transport, trust, state, signal, now) {
             ) &&
               !pendingUncommitted &&
               !pendingCommitted) ||
-            frame.committed_cursor !== '0' ||
+            (!recoveringReceipt &&
+              frame.committed_cursor !==
+                (state.durable?.resumeCursor ?? '0')) ||
             BigInt(frame.retention_low_seq) > BigInt(frame.head_seq) ||
             (frame.seen_checkpoint === null
               ? // Registration-only revisions are not receipt checkpoints. The
@@ -175,7 +185,10 @@ async function normalReady(transport, trust, state, signal, now) {
           )
             throw new Error('READY recovery evidence mismatch');
           trust.assertUsable();
-          resolve(frame);
+          resolve({
+            ...frame,
+            recoverCursor: recoveringReceipt ? frame.committed_cursor : null,
+          });
         })().catch(reject);
       });
       current();
@@ -244,10 +257,19 @@ export async function openConnectionRuntime(options) {
   let shutdownSnapshot = /** @type {unknown} */ (undefined);
   /** @type {ReturnType<typeof createSourceControl>|undefined} */
   let sourceCapability;
+  /** @type {ReturnType<typeof createDeviceMessaging>|undefined} */
+  let messagingCapability;
+  /** @type {Set<ReturnType<typeof createDeviceMessaging>>} */
+  const messengers = new Set();
   /** @type {AbortController|undefined} */ let sourceController;
   /** @type {Set<ReturnType<typeof createSourceControl>>} */ const sources =
     new Set();
   function retireRegistration(retireSource = true) {
+    const messenger = messagingCapability;
+    messenger?.close();
+    if (messenger)
+      void messenger.idle().then(() => messengers.delete(messenger));
+    messagingCapability = undefined;
     if (retireSource) {
       sourceController?.abort();
       sourceController = undefined;
@@ -358,6 +380,29 @@ export async function openConnectionRuntime(options) {
         capability.close();
       }
     });
+    if (prepared.submit && ledger.peek().durable) {
+      const messenger = createDeviceMessaging({
+        ctx: hostContext,
+        ledger,
+        prepared,
+        source,
+        transport: entry.facade,
+        ready: proof,
+        trust,
+        signal: abort.signal,
+        assertCurrent,
+        now,
+      });
+      messagingCapability = messenger;
+      messengers.add(messenger);
+      registrationWork = registrationWork.then(async () => {
+        try {
+          await messenger.start();
+        } catch {
+          messenger.close();
+        }
+      });
+    }
   }
   const active = () => {
     signal.throwIfAborted();
@@ -591,6 +636,28 @@ export async function openConnectionRuntime(options) {
             );
             valid();
             handshakeSignal.throwIfAborted();
+            if (proof.producer_epoch !== undefined)
+              await saveProducerEpoch(sessionLedger, proof.producer_epoch);
+            valid();
+            handshakeSignal.throwIfAborted();
+            if (proof.recoverCursor) {
+              // The conflict response never opens business gates. Retain the
+              // exact acceptance/terminal proofs, persist only their verified prefix,
+              // close this C and perform a fresh strict READY on a new ingress.
+              await sessionLedger.update((draft) => {
+                if (
+                  !draft.durable ||
+                  !hasCursorEvidence(draft, proof.recoverCursor)
+                )
+                  throw new Error('receipt recovery evidence changed');
+                draft.durable.resumeCursor = proof.recoverCursor;
+              }, valid);
+              await entry.stop();
+              connections.delete(entry);
+              const replacement = connect(trust, true);
+              await replacement.transport.start();
+              return;
+            }
             entry.proof = proof;
             connected = true;
             installRegistration();
@@ -682,7 +749,10 @@ export async function openConnectionRuntime(options) {
             throw new Error('bootstrap connection changed');
         };
         firstCurrent();
-        await ledger.initialize(output.identity);
+        await ledger.initialize(
+          output.identity,
+          output.readyResult.producer_epoch,
+        );
         active();
         firstCurrent();
         await first.entry.stop();
@@ -771,7 +841,11 @@ export async function openConnectionRuntime(options) {
       const normal = connect(trust, true);
       await normal.transport.start();
       active();
-      await handshakes;
+      let pending;
+      do {
+        pending = handshakes;
+        await pending;
+      } while (pending !== handshakes);
       active();
       if (!connected) throw new Error('strict READY unavailable');
     })();
@@ -797,6 +871,9 @@ export async function openConnectionRuntime(options) {
       await Promise.allSettled([work, handshakes]);
       await registrationWork;
       await Promise.allSettled([...sources].map((source) => source.idle()));
+      await Promise.allSettled(
+        [...messengers].map((messenger) => messenger.idle()),
+      );
       await Promise.allSettled([...writes]);
       if (
         Object.keys(sessionLedger?.peek().sourceControl?.entries ?? {}).length
@@ -828,6 +905,10 @@ export async function openConnectionRuntime(options) {
           available: false,
           reason: connected ? 'host_unavailable' : 'not_ready',
         },
+        messaging: messagingCapability?.status ?? {
+          available: false,
+          reason: 'not_ready',
+        },
       };
     },
     get status() {
@@ -855,6 +936,28 @@ export async function openConnectionRuntime(options) {
     },
     consentUI(/** @type {unknown} */ _context) {
       throw new Error('network consent unavailable');
+    },
+    messagingUI(/** @type {unknown} */ context) {
+      const capability = messagingCapability;
+      const authorized = async () => {
+        active();
+        if (
+          !capability ||
+          capability !== messagingCapability ||
+          !(await options.authorizeLocal(context))
+        )
+          throw new Error('messaging unavailable');
+        active();
+        if (capability !== messagingCapability)
+          throw new Error('messaging changed');
+        return capability;
+      };
+      return {
+        snapshot: async () => (await authorized()).snapshot(),
+        setReceive: async (
+          /** @type {{local:string,enabled:boolean}} */ input,
+        ) => (await authorized()).setReceive(input),
+      };
     },
   };
 }

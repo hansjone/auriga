@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { Buffer } from 'node:buffer';
 import { createConsentRoutes } from './consent-routes.js';
+import { createMessagingRoutes } from './messaging-routes.js';
 import { PlatformError } from './platform.js';
 const BASE = '/auriga/local-login';
 const assets = new Map([
@@ -31,6 +32,7 @@ export function createUnconfiguredLoginRoutes(connection) {
 /** @param {{runtime:any,admission:any}} options */
 export function createConnectRoutes({ runtime, admission }) {
   const consent = createConsentRoutes(runtime);
+  const messaging = createMessagingRoutes(runtime);
   /** @param {import('node:http').ServerResponse} res @param {number} status @param {unknown} body @param {string|string[]} [cookies] */
   const json = (res, status, body, cookies) => {
     res.writeHead(status, {
@@ -61,6 +63,7 @@ export function createConnectRoutes({ runtime, admission }) {
     if (!runtime && path !== BASE && !path.startsWith(BASE + '/assets/'))
       return json(res, 404, { code: 'common.not_found' });
     if (path.startsWith(BASE + '/consent/')) return consent(req, res);
+    if (path.startsWith(BASE + '/messaging/')) return messaging(req, res);
     try {
       if (req.method === 'GET' && path === BASE + '/status') {
         const result = runtime.prepare(req);

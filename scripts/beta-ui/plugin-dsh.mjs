@@ -63,6 +63,76 @@ export const hostPin = Object.freeze({
     'sha512-H+E9HLnHf7fJqzen84Z9Bq8ggb5xbrcbyhZjXTJLE9NabHr3zteGvTRvdvGkxPl4ov80is4WLglFmSo+/olJjg==',
 });
 
+// Only the public, integrity-locked host package installation shares this cache.
+// Profile, credential, npmrc and Corepack environments remain private per host.
+export function hostInstallOptions(source = process.env, overrides = {}) {
+  const environment = Object.fromEntries(
+    Object.entries(source).map(([key, value]) => [key.toUpperCase(), value]),
+  );
+  const npmCache =
+    overrides.npmCache ??
+    environment.AURIGA_DSH_HOST_NPM_CACHE ??
+    path.join(os.homedir(), '.cache', 'auriga', 'npm-dsh-host');
+  if (
+    typeof npmCache !== 'string' ||
+    !path.isAbsolute(npmCache) ||
+    npmCache.includes('\0')
+  )
+    throw new Error('DSH host npm cache must be an absolute path');
+  const timeoutMs = Number(
+    overrides.timeoutMs ??
+      environment.AURIGA_DSH_HOST_INSTALL_TIMEOUT_MS ??
+      300000,
+  );
+  if (
+    !Number.isInteger(timeoutMs) ||
+    timeoutMs < 300000 ||
+    timeoutMs > 2147483647
+  )
+    throw new Error(
+      'DSH host install timeout must be an integer from 300000 to 2147483647 ms',
+    );
+  return {
+    npmCache: path.resolve(npmCache),
+    timeoutMs,
+    args: [
+      'ci',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      '--prefer-offline',
+      '--cache',
+      path.resolve(npmCache),
+    ],
+  };
+}
+
+export function assertPublicHostLock(lock) {
+  for (const [name, entry] of Object.entries(lock.packages)) {
+    if (!name) continue;
+    if (
+      !/^https:\/\/registry\.npmjs\.org\//.test(entry.resolved ?? '') ||
+      !/^sha512-[A-Za-z0-9+/]+=*$/.test(entry.integrity ?? '')
+    )
+      throw new Error(
+        'Host cache requires public npm registry packages with SHA512 integrity: ' +
+          name,
+      );
+  }
+}
+
+export function hostInstallFailure(error, timeoutMs) {
+  if (
+    error.code === 'ETIMEDOUT' ||
+    (error.code == null && error.killed === true && error.signal)
+  )
+    return `timed out after ${timeoutMs} ms`;
+  const npmCode = String(error.stderr ?? '').match(
+    /npm (?:error|ERR!) code ([A-Z][A-Z0-9_]+)/,
+  )?.[1];
+  return `${npmCode ? 'npm ' + npmCode + '; ' : ''}exit ${error.code ?? 'unknown'}${error.signal ? '; signal ' + error.signal : ''}`;
+}
+
 export function assertHostCapabilities(connection) {
   for (const method of ['admit', 'authorizeIndex', 'isTrusted']) {
     if (typeof connection?.[method] !== 'function')
@@ -81,6 +151,7 @@ export function assertRuntimeLock(lock) {
     pinned?.integrity !== hostPin.integrity
   )
     throw new Error('DSH runtime 锁文件的版本或 integrity 与已核实基线不符');
+  assertPublicHostLock(lock);
 }
 
 export function verifyPackageManagerVersion(packageManager, output) {
@@ -134,6 +205,8 @@ async function installHost(state, env) {
   fs.mkdirSync(runtime, { mode: 0o700 });
   const template = path.join(here, 'dsh-runtime');
   assertRuntimeLock(regularJson(path.join(template, 'package-lock.json')));
+  const install = hostInstallOptions();
+  fs.mkdirSync(install.npmCache, { recursive: true });
   for (const file of ['package.json', 'package-lock.json'])
     fs.copyFileSync(path.join(template, file), path.join(runtime, file));
   const npm = path.join(
@@ -144,11 +217,12 @@ async function installHost(state, env) {
     throw new Error('Node 分发缺少 npm CLI，不能安装锁定的隔离宿主');
   runLogged(
     process.execPath,
-    [npm, 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+    [npm, ...install.args],
     state,
     env,
     'host-install',
     runtime,
+    install,
   );
   const root = path.join(runtime, 'node_modules/@deepseek-ai/dsh');
   const pkg = regularJson(path.join(root, 'package.json'));
@@ -396,19 +470,64 @@ function regularJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function runLogged(command, args, state, env, name, cwd = state) {
+export function runLogged(
+  command,
+  args,
+  state,
+  env,
+  name,
+  cwd = state,
+  install,
+) {
   const log = fs.openSync(path.join(state, name + '.log'), 'a', 0o600);
+  const timeoutMs = install?.timeoutMs ?? 300000;
+  const started = Date.now();
   try {
+    if (install)
+      fs.writeSync(
+        log,
+        JSON.stringify({
+          command,
+          args,
+          cwd,
+          timeoutMs,
+          npmCache: install.npmCache,
+        }) + '\n',
+      );
     const result = spawnSync(command, args, {
       cwd,
       env,
       windowsHide: true,
       stdio: ['ignore', log, log],
-      timeout: 300000,
+      timeout: timeoutMs,
     });
+    const failure =
+      install && (result.error || result.status !== 0)
+        ? hostInstallFailure(
+            {
+              code: result.error?.code ?? result.status,
+              signal: result.signal,
+              stderr: fs.readFileSync(path.join(state, name + '.log'), 'utf8'),
+            },
+            timeoutMs,
+          )
+        : undefined;
+    if (install)
+      fs.writeSync(
+        log,
+        JSON.stringify({
+          exitCode: result.status,
+          signal: result.signal,
+          errorCode: result.error?.code ?? null,
+          durationMs: Date.now() - started,
+          failure,
+        }) + '\n',
+      );
     if (result.error || result.status !== 0)
       throw new Error(
-        `${name} 失败（退出码 ${result.status ?? result.error?.code}），查看 StateDir/${name}.log`,
+        install
+          ? `${name} 失败：${failure}; npm cache=${install.npmCache}; 查看 StateDir/${name}.log`
+          : `${name} 失败（退出码 ${result.status ?? result.error?.code}），查看 StateDir/${name}.log`,
       );
   } finally {
     fs.closeSync(log);

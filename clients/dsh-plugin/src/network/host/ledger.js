@@ -5,6 +5,7 @@ import { CODES, HostSeamError } from './errors.js';
 import { isUint64String } from './address.js';
 import { createKeyedMutex } from './keyed-mutex.js';
 import { checkSources, fenceSourceChanges } from '../source-control/state.js';
+import { checkDurable, fenceDurable } from '../durable/state.js';
 
 /** @type {WeakMap<Ledger, ReturnType<typeof createKeyedMutex>>} */
 const registerMutexes = new WeakMap();
@@ -104,6 +105,7 @@ const RECEIPT_FIELDS = /** @type {const} */ ([
  *   audit: Array<{ at: string, recipientId: string, reason: string }>,
  *   inboundPolicy?: import('../policy/inbound-policy.js').InboundPolicyState,
  *   sourceControl?: import('../source-control/types.js').SourceState,
+ *   durable?: import('../durable/types.js').DurableState,
  * }} LedgerState
  */
 
@@ -160,6 +162,7 @@ function checkState(value, identity) {
     );
   checkAllocationState(s);
   checkSources(s);
+  checkDurable(s);
   if (Object.values(s.locals).some((entry) => !entry.addressType))
     s.identityConflict = CODES.recoveryConflict;
   else if (s.registrationRevision === undefined) {
@@ -330,7 +333,10 @@ export async function loadConnectionLedger(handle, registration) {
       consumed = true;
       return ledgerFromHandle(handle, state);
     },
-    async initialize(/** @type {LedgerIdentity} */ identity) {
+    async initialize(
+      /** @type {LedgerIdentity} */ identity,
+      /** @type {string|undefined} */ producerEpoch,
+    ) {
       if (
         consumed ||
         state ||
@@ -341,6 +347,17 @@ export async function loadConnectionLedger(handle, registration) {
         throw invalid();
       consumed = true; // Includes uncertain writes: this permission is never replayable.
       const initial = emptyState(identity);
+      if (producerEpoch !== undefined) {
+        if (!isUint64String(producerEpoch) || producerEpoch === '0')
+          throw invalid();
+        initial.durable = {
+          producerEpoch,
+          submissions: {},
+          receive: {},
+          inbound: {},
+          resumeCursor: '0',
+        };
+      }
       await handle.commit(initial);
       state = initial;
       consumed = false;
@@ -432,6 +449,7 @@ function ledgerFromHandle(handle, state, now = () => new Date()) {
       )
         draft.receiptRevision = state.receiptRevision + 1;
       fenceSourceChanges(state, draft);
+      fenceDurable(state, draft);
       for (const [local, original] of Object.entries(state.locals)) {
         const next = draft.locals[local];
         for (const key of /** @type {const} */ ([
