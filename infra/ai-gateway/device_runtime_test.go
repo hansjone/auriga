@@ -389,8 +389,8 @@ func TestDeviceShutdownLetsActiveHTTPFinishGracefully(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("shutdown did not start")
 	}
-	if !r.supervisor.Stats().Closed {
-		t.Fatal("shutdown left recovery admission open")
+	if r.supervisor.Stats().Closed {
+		t.Fatal("shutdown closed recovery admission before active HTTP completed")
 	}
 	// Inspect the actual request context: a cancellation-notification goroutine
 	// might not have run yet, even when the context is already cancelled.
