@@ -10,6 +10,13 @@ option java_package = "auriga.contracts.collab.v1";
 // authenticated transport, as NetworkGatewayService in IAM. Collab MUST verify
 // the persisted IAM ingress binding and current authorization on EVERY RPC.
 service NetworkMailboxService {
+  // HTTPS device ingress; connection is the authenticated SOURCE connection.
+  // submit_json is the complete send.schema.json SubmitRequest, never identity.
+  // Collab resolves the TARGET connection for the fifth IAM RPC itself.
+  rpc Submit(NetworkMailboxServiceSubmitRequest) returns (NetworkMailboxServiceSubmitResponse);
+  rpc ReceiveSet(NetworkMailboxServiceReceiveSetRequest) returns (NetworkMailboxServiceReceiveSetResponse);
+  rpc AttemptBegin(NetworkMailboxServiceAttemptBeginRequest) returns (NetworkMailboxServiceAttemptBeginResponse);
+  rpc ExecutionAdmit(NetworkMailboxServiceExecutionAdmitRequest) returns (NetworkMailboxServiceExecutionAdmitResponse);
   rpc Ready(NetworkMailboxServiceReadyRequest) returns (NetworkMailboxServiceReadyResponse);
   // Gateway/internal hint, not a new upstream application frame type.
   rpc Head(NetworkMailboxServiceHeadRequest) returns (NetworkMailboxServiceHeadResponse);
@@ -25,6 +32,36 @@ service NetworkMailboxService {
   rpc SourceGet(NetworkMailboxServiceSourceGetRequest) returns (NetworkMailboxServiceSourceGetResponse);
   // Stop locally and persist the revocation outbox before calling IAM.
   rpc SourceRevoke(NetworkMailboxServiceSourceRevokeRequest) returns (NetworkMailboxServiceSourceRevokeResponse);
+}
+
+message NetworkMailboxServiceSubmitRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes submit_json = 2;
+}
+message NetworkMailboxServiceSubmitResponse {
+  // Complete saved SendResult. Same-key retries recover this original JSON.
+  bytes result_json = 1;
+}
+message NetworkMailboxServiceReceiveSetRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceReceiveSetResponse {
+  bytes frame_json = 1;
+}
+message NetworkMailboxServiceAttemptBeginRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceAttemptBeginResponse {
+  bytes frame_json = 1;
+}
+message NetworkMailboxServiceExecutionAdmitRequest {
+  NetworkMailboxConnection connection = 1;
+  bytes frame_json = 2;
+}
+message NetworkMailboxServiceExecutionAdmitResponse {
+  bytes frame_json = 1;
 }
 
 // All fields originate in the authenticated callout/IAM grant, never JSON or

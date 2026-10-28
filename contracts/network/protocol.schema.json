@@ -307,6 +307,10 @@
         },
         "server_auth": {
           "$ref": "#/$defs/ServerAuth"
+        },
+        "producer_epoch": {
+          "$ref": "#/$defs/P64",
+          "description": "Server-issued device producer epoch, durable across READY and reconnect."
         }
       },
       "required": [
@@ -2008,6 +2012,9 @@
         },
         {
           "$ref": "#/$defs/SourceRevoke"
+        },
+        {
+          "$ref": "#/$defs/ReceiveSet"
         }
       ]
     },
@@ -2054,6 +2061,9 @@
         },
         {
           "$ref": "#/$defs/SourceRevokeResult"
+        },
+        {
+          "$ref": "#/$defs/ReceiveSetResult"
         }
       ]
     },
@@ -2074,6 +2084,82 @@
     },
     "SourceRevokeResult": {
       "$ref": "source-control.schema.json#/$defs/SourceRevokeResult"
+    },
+    "ReceiveSet": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "receive_set"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "registration": {
+          "$ref": "source-control.schema.json#/$defs/Registration"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "expected_version": {
+          "$ref": "#/$defs/P64"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "registration",
+        "enabled",
+        "expected_version"
+      ],
+      "additionalProperties": false
+    },
+    "ReceiveSetResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "receive_set_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "registration_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "state_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "registration_id",
+        "enabled",
+        "state_version",
+        "server_auth"
+      ],
+      "additionalProperties": false
     }
   },
   "anyOf": [

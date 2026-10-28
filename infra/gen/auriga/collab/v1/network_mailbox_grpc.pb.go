@@ -19,6 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	NetworkMailboxService_Submit_FullMethodName         = "/auriga.collab.v1.NetworkMailboxService/Submit"
+	NetworkMailboxService_ReceiveSet_FullMethodName     = "/auriga.collab.v1.NetworkMailboxService/ReceiveSet"
+	NetworkMailboxService_AttemptBegin_FullMethodName   = "/auriga.collab.v1.NetworkMailboxService/AttemptBegin"
+	NetworkMailboxService_ExecutionAdmit_FullMethodName = "/auriga.collab.v1.NetworkMailboxService/ExecutionAdmit"
 	NetworkMailboxService_Ready_FullMethodName          = "/auriga.collab.v1.NetworkMailboxService/Ready"
 	NetworkMailboxService_Head_FullMethodName           = "/auriga.collab.v1.NetworkMailboxService/Head"
 	NetworkMailboxService_Fetch_FullMethodName          = "/auriga.collab.v1.NetworkMailboxService/Fetch"
@@ -37,6 +41,13 @@ const (
 // authenticated transport, as NetworkGatewayService in IAM. Collab MUST verify
 // the persisted IAM ingress binding and current authorization on EVERY RPC.
 type NetworkMailboxServiceClient interface {
+	// HTTPS device ingress; connection is the authenticated SOURCE connection.
+	// submit_json is the complete send.schema.json SubmitRequest, never identity.
+	// Collab resolves the TARGET connection for the fifth IAM RPC itself.
+	Submit(ctx context.Context, in *NetworkMailboxServiceSubmitRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceSubmitResponse, error)
+	ReceiveSet(ctx context.Context, in *NetworkMailboxServiceReceiveSetRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceReceiveSetResponse, error)
+	AttemptBegin(ctx context.Context, in *NetworkMailboxServiceAttemptBeginRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceAttemptBeginResponse, error)
+	ExecutionAdmit(ctx context.Context, in *NetworkMailboxServiceExecutionAdmitRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceExecutionAdmitResponse, error)
 	Ready(ctx context.Context, in *NetworkMailboxServiceReadyRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceReadyResponse, error)
 	// Gateway/internal hint, not a new upstream application frame type.
 	Head(ctx context.Context, in *NetworkMailboxServiceHeadRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceHeadResponse, error)
@@ -60,6 +71,46 @@ type networkMailboxServiceClient struct {
 
 func NewNetworkMailboxServiceClient(cc grpc.ClientConnInterface) NetworkMailboxServiceClient {
 	return &networkMailboxServiceClient{cc}
+}
+
+func (c *networkMailboxServiceClient) Submit(ctx context.Context, in *NetworkMailboxServiceSubmitRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceSubmitResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NetworkMailboxServiceSubmitResponse)
+	err := c.cc.Invoke(ctx, NetworkMailboxService_Submit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *networkMailboxServiceClient) ReceiveSet(ctx context.Context, in *NetworkMailboxServiceReceiveSetRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceReceiveSetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NetworkMailboxServiceReceiveSetResponse)
+	err := c.cc.Invoke(ctx, NetworkMailboxService_ReceiveSet_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *networkMailboxServiceClient) AttemptBegin(ctx context.Context, in *NetworkMailboxServiceAttemptBeginRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceAttemptBeginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NetworkMailboxServiceAttemptBeginResponse)
+	err := c.cc.Invoke(ctx, NetworkMailboxService_AttemptBegin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *networkMailboxServiceClient) ExecutionAdmit(ctx context.Context, in *NetworkMailboxServiceExecutionAdmitRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceExecutionAdmitResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NetworkMailboxServiceExecutionAdmitResponse)
+	err := c.cc.Invoke(ctx, NetworkMailboxService_ExecutionAdmit_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *networkMailboxServiceClient) Ready(ctx context.Context, in *NetworkMailboxServiceReadyRequest, opts ...grpc.CallOption) (*NetworkMailboxServiceReadyResponse, error) {
@@ -150,6 +201,13 @@ func (c *networkMailboxServiceClient) SourceRevoke(ctx context.Context, in *Netw
 // authenticated transport, as NetworkGatewayService in IAM. Collab MUST verify
 // the persisted IAM ingress binding and current authorization on EVERY RPC.
 type NetworkMailboxServiceServer interface {
+	// HTTPS device ingress; connection is the authenticated SOURCE connection.
+	// submit_json is the complete send.schema.json SubmitRequest, never identity.
+	// Collab resolves the TARGET connection for the fifth IAM RPC itself.
+	Submit(context.Context, *NetworkMailboxServiceSubmitRequest) (*NetworkMailboxServiceSubmitResponse, error)
+	ReceiveSet(context.Context, *NetworkMailboxServiceReceiveSetRequest) (*NetworkMailboxServiceReceiveSetResponse, error)
+	AttemptBegin(context.Context, *NetworkMailboxServiceAttemptBeginRequest) (*NetworkMailboxServiceAttemptBeginResponse, error)
+	ExecutionAdmit(context.Context, *NetworkMailboxServiceExecutionAdmitRequest) (*NetworkMailboxServiceExecutionAdmitResponse, error)
 	Ready(context.Context, *NetworkMailboxServiceReadyRequest) (*NetworkMailboxServiceReadyResponse, error)
 	// Gateway/internal hint, not a new upstream application frame type.
 	Head(context.Context, *NetworkMailboxServiceHeadRequest) (*NetworkMailboxServiceHeadResponse, error)
@@ -175,6 +233,18 @@ type NetworkMailboxServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedNetworkMailboxServiceServer struct{}
 
+func (UnimplementedNetworkMailboxServiceServer) Submit(context.Context, *NetworkMailboxServiceSubmitRequest) (*NetworkMailboxServiceSubmitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Submit not implemented")
+}
+func (UnimplementedNetworkMailboxServiceServer) ReceiveSet(context.Context, *NetworkMailboxServiceReceiveSetRequest) (*NetworkMailboxServiceReceiveSetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReceiveSet not implemented")
+}
+func (UnimplementedNetworkMailboxServiceServer) AttemptBegin(context.Context, *NetworkMailboxServiceAttemptBeginRequest) (*NetworkMailboxServiceAttemptBeginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AttemptBegin not implemented")
+}
+func (UnimplementedNetworkMailboxServiceServer) ExecutionAdmit(context.Context, *NetworkMailboxServiceExecutionAdmitRequest) (*NetworkMailboxServiceExecutionAdmitResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ExecutionAdmit not implemented")
+}
 func (UnimplementedNetworkMailboxServiceServer) Ready(context.Context, *NetworkMailboxServiceReadyRequest) (*NetworkMailboxServiceReadyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Ready not implemented")
 }
@@ -218,6 +288,78 @@ func RegisterNetworkMailboxServiceServer(s grpc.ServiceRegistrar, srv NetworkMai
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&NetworkMailboxService_ServiceDesc, srv)
+}
+
+func _NetworkMailboxService_Submit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NetworkMailboxServiceSubmitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkMailboxServiceServer).Submit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkMailboxService_Submit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkMailboxServiceServer).Submit(ctx, req.(*NetworkMailboxServiceSubmitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NetworkMailboxService_ReceiveSet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NetworkMailboxServiceReceiveSetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkMailboxServiceServer).ReceiveSet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkMailboxService_ReceiveSet_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkMailboxServiceServer).ReceiveSet(ctx, req.(*NetworkMailboxServiceReceiveSetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NetworkMailboxService_AttemptBegin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NetworkMailboxServiceAttemptBeginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkMailboxServiceServer).AttemptBegin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkMailboxService_AttemptBegin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkMailboxServiceServer).AttemptBegin(ctx, req.(*NetworkMailboxServiceAttemptBeginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NetworkMailboxService_ExecutionAdmit_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NetworkMailboxServiceExecutionAdmitRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkMailboxServiceServer).ExecutionAdmit(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkMailboxService_ExecutionAdmit_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkMailboxServiceServer).ExecutionAdmit(ctx, req.(*NetworkMailboxServiceExecutionAdmitRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _NetworkMailboxService_Ready_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -371,6 +513,22 @@ var NetworkMailboxService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "auriga.collab.v1.NetworkMailboxService",
 	HandlerType: (*NetworkMailboxServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Submit",
+			Handler:    _NetworkMailboxService_Submit_Handler,
+		},
+		{
+			MethodName: "ReceiveSet",
+			Handler:    _NetworkMailboxService_ReceiveSet_Handler,
+		},
+		{
+			MethodName: "AttemptBegin",
+			Handler:    _NetworkMailboxService_AttemptBegin_Handler,
+		},
+		{
+			MethodName: "ExecutionAdmit",
+			Handler:    _NetworkMailboxService_ExecutionAdmit_Handler,
+		},
 		{
 			MethodName: "Ready",
 			Handler:    _NetworkMailboxService_Ready_Handler,

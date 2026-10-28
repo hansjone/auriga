@@ -554,6 +554,8 @@ public class NetworkMailboxService {
           jdbc.queryForList(
               "SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
               request.tenantId() + "/" + threadId);
+          // Internal stores must also respect a SEND reservation while its IAM call is in flight.
+          requireThreadUnreserved(request.tenantId(), threadId);
           if (!sequence.equals(nextThreadSequence(request.tenantId(), threadId)))
             return targetFailure(request, reservation, auditContext, NetworkErrors.CONFLICT);
           jdbc.update(
@@ -782,6 +784,7 @@ public class NetworkMailboxService {
     private final int limit, maxBytes;
     private final NetworkSourceAuthority.Target target;
     private final FetchResult raw;
+    private long snapshotHead, resumeCursor;
     private final Map<UUID, NetworkDispatchAuthorization.Outcome> permissions;
 
     List<String> targetLocals() {
@@ -819,6 +822,18 @@ public class NetworkMailboxService {
 
   public PreparedPage preparePage(
       UUID tenantId, String realm, String nodeId, long afterCursor, int limit, int maxBytes) {
+    return preparePage(tenantId, realm, nodeId, afterCursor, limit, maxBytes, -1, afterCursor);
+  }
+
+  PreparedPage preparePage(
+      UUID tenantId,
+      String realm,
+      String nodeId,
+      long afterCursor,
+      int limit,
+      int maxBytes,
+      long snapshotHead,
+      long resumeCursor) {
     outsideDatabase();
     var started = clock.instant();
     require(authority != null, CommonErrors.UNAVAILABLE);
@@ -837,8 +852,24 @@ public class NetworkMailboxService {
     var authorization = new NetworkDispatchAuthorization(jdbc, iam, authority, clock);
     var batch = run(tenantId, () -> authorization.prepare(tenantId, raw.items(), realm, nodeId));
     var permissions = authorization.check(tenantId, batch, realm, nodeId);
-    return new PreparedPage(
-        tenantId, realm, nodeId, afterCursor, limit, maxBytes, target, raw, permissions, started);
+    var prepared =
+        new PreparedPage(
+            tenantId,
+            realm,
+            nodeId,
+            afterCursor,
+            limit,
+            maxBytes,
+            target,
+            raw,
+            permissions,
+            started);
+    prepared.snapshotHead = snapshotHead < 0 ? raw.route().headSeq() : snapshotHead;
+    prepared.resumeCursor = resumeCursor;
+    require(
+        afterCursor <= prepared.snapshotHead && prepared.snapshotHead <= raw.route().headSeq(),
+        NetworkErrors.PROTOCOL_ERROR);
+    return prepared;
   }
 
   public String finishPage(PreparedPage prepared) {
@@ -883,9 +914,17 @@ public class NetworkMailboxService {
           for (var item : raw.items()) authorizedIds.add(item.deliveryId());
           List<ObjectNode> items = new ArrayList<>();
           ObjectNode frame =
-              envelopes.page(items, route, afterCursor, context, target.validUntil());
+              envelopes.page(
+                  items,
+                  route,
+                  afterCursor,
+                  context,
+                  target.validUntil(),
+                  prepared.snapshotHead,
+                  afterCursor < prepared.snapshotHead ? "x".repeat(32) : null);
           require(frameFits(frame, maxBytes), NetworkErrors.PROTOCOL_ERROR);
           for (var item : current.items()) {
+            if (item.mailSeq() > prepared.snapshotHead) break;
             if (!authorizedIds.contains(item.deliveryId())) continue;
             ObjectNode candidate;
             try {
@@ -919,7 +958,13 @@ public class NetworkMailboxService {
               route = loadRoute(tenantId, realm, nodeId, null);
             if (!frameFits(
                 envelopes.page(
-                    List.of(candidate), route, item.mailSeq(), context, target.validUntil()),
+                    List.of(candidate),
+                    route,
+                    item.mailSeq(),
+                    context,
+                    target.validUntil(),
+                    prepared.snapshotHead,
+                    item.mailSeq() < prepared.snapshotHead ? "x".repeat(32) : null),
                 maxBytes)) {
               candidate =
                   envelopes.gap(item.mailSeq(), "quarantined", context, target.validUntil());
@@ -927,12 +972,45 @@ public class NetworkMailboxService {
             var proposed = new ArrayList<>(items);
             proposed.add(candidate);
             var next =
-                envelopes.page(proposed, route, item.mailSeq(), context, target.validUntil());
+                envelopes.page(
+                    proposed,
+                    route,
+                    item.mailSeq(),
+                    context,
+                    target.validUntil(),
+                    prepared.snapshotHead,
+                    item.mailSeq() < prepared.snapshotHead ? "x".repeat(32) : null);
             if (!frameFits(next, maxBytes)) break;
             items.add(candidate);
             recordDispatchUse(tenantId, item, candidate);
             frame = next;
           }
+          long scan = Long.parseLong(frame.path("page").path("scan_after").asString());
+          String continuation = null;
+          if (scan < prepared.snapshotHead) {
+            continuation = UuidV7.next().toString().replace("-", "");
+            jdbc.update(
+                "INSERT INTO collab.network_fetch_continuation(id,tenant_id,token,realm,node_id,epoch,resume_cursor,scan_after,snapshot_head) VALUES (?,?,?,?,?,?,?,?,?)",
+                UuidV7.next(),
+                tenantId,
+                continuation,
+                realm,
+                nodeId,
+                target.epoch(),
+                prepared.resumeCursor,
+                scan,
+                prepared.snapshotHead);
+          }
+          frame =
+              envelopes.page(
+                  items,
+                  route,
+                  scan,
+                  context,
+                  target.validUntil(),
+                  prepared.snapshotHead,
+                  continuation);
+          require(frameFits(frame, maxBytes), NetworkErrors.PROTOCOL_ERROR);
           return NetworkJson.canonical(frame);
         });
   }
@@ -1213,6 +1291,58 @@ public class NetworkMailboxService {
             .build());
   }
 
+  /** Caller holds the tenant/thread advisory lock until its reservation or message is durable. */
+  void requireThreadUnreserved(UUID tenant, UUID thread) {
+    var now = java.sql.Timestamp.from(clock.instant());
+    // The same thread lock fences expiry against a late final commit. Keep the original
+    // request and its deterministic rejection for idempotency; only release its reservation.
+    jdbc.update(
+        """
+        UPDATE collab.network_submit SET failure_code='network.conflict',reservation_until=NULL
+        WHERE tenant_id=? AND message_json::jsonb->>'thread_id'=?
+          AND result_json IS NULL AND failure_code IS NULL AND reservation_until<=?
+        """,
+        tenant,
+        thread.toString(),
+        now);
+    require(
+        !Boolean.TRUE.equals(
+            jdbc.queryForObject(
+                """
+            SELECT EXISTS (SELECT 1 FROM collab.network_submit
+              WHERE tenant_id=? AND result_json IS NULL AND failure_code IS NULL
+              AND message_json::jsonb->>'thread_id'=?
+              AND reservation_until>?)
+            """,
+                Boolean.class,
+                tenant,
+                thread.toString(),
+                now)),
+        NetworkErrors.CONFLICT);
+  }
+
+  void preflightSubmit(ObjectNode message, ObjectNode source) {
+    var from = message.path("from");
+    var to = message.path("to");
+    preflight(
+        new StoreRequest(
+            null,
+            from.path("realm").asString(),
+            from.path("node").asString(),
+            from.path("local").asString(),
+            message.path("kind").asString(),
+            NetworkJson.canonical(message.path("body")),
+            UUID.fromString(message.path("thread_id").asString()),
+            List.of(
+                new NodeTarget(to.path("node").asString(), List.of(to.path("local").asString()))),
+            null,
+            null,
+            true),
+        message,
+        source,
+        null);
+  }
+
   private void preflight(
       StoreRequest request, ObjectNode message, ObjectNode source, String dispatchJson) {
     var factory = new NetworkMailboxEnvelopeFactory(signer);
@@ -1259,7 +1389,9 @@ public class NetworkMailboxService {
                   request.realm(), target.nodeId(), Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE),
               Long.MAX_VALUE,
               context,
-              deadline);
+              deadline,
+              Long.MAX_VALUE,
+              "x".repeat(32));
       require(frameFits(frame, 65536), NetworkErrors.PROTOCOL_ERROR);
     }
   }
