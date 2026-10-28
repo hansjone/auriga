@@ -65,21 +65,25 @@ afterEach(() => {
 
 describe('instance lifecycle', () => {
   it.each([
-    [500, 'common.internal'],
-    [503, 'common.unavailable'],
-    [502, 'common.internal'],
-    [404, 'common.internal'],
-    [404, 'common.not_found'],
+    { params: undefined, disabled: false },
+    { params: { service: 'workspace', reason: 'disabled' }, disabled: true },
+    { params: { service: 'iam', reason: 'disabled' }, disabled: false },
+    { params: { service: 'workspace', reason: 'other' }, disabled: false },
+    { params: { reason: 'disabled' }, disabled: false },
   ])(
-    'explains unavailable instance listing HTTP %i (%s) in both languages',
-    async (status, code) => {
+    'explains explicit service unavailability in both languages: %j',
+    async ({ params, disabled }) => {
+      const status = 503;
+      const code = 'common.unavailable';
       fetcher.mockResolvedValueOnce(
-        json({ title: 'Failed', status, code }, status),
+        json({ title: 'Failed', status, code, params }, status),
       );
       const view = render();
       await flushPromises();
       expect(view.get('[role=alert]').text()).toBe(
-        '实例服务未启用或暂时不可用，请稍后重试。',
+        (disabled
+          ? '实例服务未启用，请联系管理员。'
+          : '实例服务暂时不可用，请稍后重试。') + ' (common.unavailable)',
       );
       expect(view.text()).not.toContain('尚无实例');
       expect(button('启动并进入')).toBeUndefined();
@@ -89,12 +93,15 @@ describe('instance lifecycle', () => {
       view.unmount();
 
       fetcher.mockResolvedValueOnce(
-        json({ title: 'Failed', status, code }, status),
+        json({ title: 'Failed', status, code, params }, status),
       );
       const english = render('en');
       await flushPromises();
       expect(english.get('[role=alert]').text()).toBe(
-        'The instance service is not enabled or is temporarily unavailable. Please retry later.',
+        (disabled
+          ? 'The instance service is not enabled. Please contact an administrator.'
+          : 'The instance service is temporarily unavailable. Please retry later.') +
+          ' (common.unavailable)',
       );
       fetcher.mockResolvedValueOnce(json({ items: [] }));
       await button('Retry').trigger('click');
@@ -104,6 +111,35 @@ describe('instance lifecycle', () => {
       expect(enterInstance).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    [500, 'common.internal'],
+    [502, 'common.internal'],
+    [404, 'common.internal'],
+    [404, 'common.not_found'],
+    [503, 'common.internal'],
+    [500, 'common.unavailable'],
+    [404, 'common.unavailable'],
+  ])('preserves diagnostics for HTTP %i (%s)', async (status, code) => {
+    fetcher.mockResolvedValueOnce(
+      json(
+        {
+          title: 'Failed',
+          status,
+          code,
+          params: { service: 'workspace', reason: 'disabled' },
+        },
+        status,
+      ),
+    );
+    render();
+    await flushPromises();
+    expect(wrapper!.get('[role=alert]').text()).toBe(
+      `无法完成请求，请重试。 (${code})`,
+    );
+    expect(wrapper!.text()).not.toContain('实例服务');
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it('keeps permission failures distinct from service availability', async () => {
     fetcher.mockResolvedValueOnce(
@@ -189,7 +225,7 @@ describe('instance lifecycle', () => {
     await vi.advanceTimersByTimeAsync(120000);
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(enterInstance).not.toHaveBeenCalled();
-    expect(wrapper!.text()).toContain('实例服务未启用或暂时不可用');
+    expect(wrapper!.text()).toContain('实例服务暂时不可用');
   });
 
   it.each([403, 429, 503])(
@@ -210,7 +246,7 @@ describe('instance lifecycle', () => {
       await button('启动并进入').trigger('click');
       await flushPromises();
       expect(wrapper!.get('[role=alert]').text()).toContain(
-        status === 503 ? '实例服务未启用或暂时不可用' : code,
+        status === 503 ? '实例服务暂时不可用' : code,
       );
       expect(enterInstance).not.toHaveBeenCalled();
       expect(vi.getTimerCount()).toBe(0);

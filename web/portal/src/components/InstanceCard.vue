@@ -19,7 +19,8 @@ const { t } = useI18n({
       cancel: '取消等待',
       cancelled: '已取消等待，可重新读取状态。',
       error: '无法完成请求，请重试。',
-      unavailable: '实例服务未启用或暂时不可用，请稍后重试。',
+      disabled: '实例服务未启用，请联系管理员。',
+      unavailable: '实例服务暂时不可用，请稍后重试。',
       timeout: '等待超时，请重试。',
       failed: '实例启动失败，请重试。',
       expired: '登录已失效，请重新登录。',
@@ -49,8 +50,10 @@ const { t } = useI18n({
       cancel: 'Cancel waiting',
       cancelled: 'Waiting cancelled. Refresh to check the current state.',
       error: 'Request failed. Please retry.',
+      disabled:
+        'The instance service is not enabled. Please contact an administrator.',
       unavailable:
-        'The instance service is not enabled or is temporarily unavailable. Please retry later.',
+        'The instance service is temporarily unavailable. Please retry later.',
       timeout: 'Waiting timed out. Please retry.',
       failed: 'Instance failed to start. Please retry.',
       expired: 'Your session expired. Please sign in again.',
@@ -101,19 +104,23 @@ function cancel() {
   stop();
   message.value = 'cancelled';
 }
-function fail(error: unknown, listing = false) {
-  message.value =
-    isApiError(error) && error.status === 401
-      ? 'expired'
-      : isApiError(error) &&
-          (error.status >= 500 || (listing && error.status === 404))
-        ? 'unavailable'
-        : 'error';
+function fail(error: unknown) {
+  message.value = 'error';
+  if (isApiError(error)) {
+    if (error.status === 401) message.value = 'expired';
+    else if (
+      error.status === 503 &&
+      error.problem.code === 'common.unavailable'
+    ) {
+      message.value =
+        error.problem.params?.service === 'workspace' &&
+        error.problem.params?.reason === 'disabled'
+          ? 'disabled'
+          : 'unavailable';
+    }
+  }
   expired.value = message.value === 'expired';
-  detail.value =
-    isApiError(error) && message.value !== 'unavailable'
-      ? error.problem.code
-      : '';
+  detail.value = isApiError(error) ? error.problem.code : '';
 }
 async function run(open: boolean) {
   if (busy.value || expired.value) return;
@@ -172,7 +179,7 @@ async function run(open: boolean) {
   } catch (error) {
     if (!current()) return;
     stop();
-    fail(error, !open);
+    fail(error);
   }
 }
 function enter() {
