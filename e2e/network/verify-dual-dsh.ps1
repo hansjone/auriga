@@ -16,6 +16,7 @@ $testPaths = @('e2e/network/source-dual-dsh.mjs','e2e/network/support/dual-proxy
 $sourcePath = 'clients/dsh-plugin/src/network/durable/outbox.js'
 $testPaths += @('e2e/network/support/native-process.mjs','e2e/network/support/native-install.mjs','e2e/network/support/assembly-process.mjs','e2e/network/support/dsh-runtime/package.json','e2e/network/support/dsh-runtime/package-lock.json')
 $testPaths += @('services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHost.java','services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaWeb.java','services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaDatabase.java')
+$testPaths += @('scripts/beta-ui/plugin-dsh.mjs','scripts/beta-ui/runner.mjs','e2e/network/host-install-cache.test.mjs')
 $manifest = [ordered]@{head=$ExpectedHead; archiveSha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash; mode=$(if($Run){'Run'}else{'CompileOnly'}); variants=@(); complete=$false}
 function Save-Manifest { [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8) }
 function Hashes([string]$Directory) { $result=[ordered]@{}; foreach($path in $testPaths){$result[$path]=(Get-FileHash -LiteralPath (Join-Path $Directory $path) -Algorithm SHA256).Hash}; return $result }
@@ -47,7 +48,7 @@ try {
       try{$code=Recorded ($mode+'-install') 'pnpm install --frozen-lockfile --filter auriga-dsh... --store-dir $AURIGA_PNPM_STORE' {& pnpm install --frozen-lockfile --filter 'auriga-dsh...' --store-dir $env:AURIGA_PNPM_STORE}}finally{$env:CI=$ciBefore}
       if($code -ne 0){throw 'Locked independent dependencies failed'}
       if($mode -eq 'Control') {
-        $code=Recorded 'Control-guards' 'node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs' {& node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs}
+        $code=Recorded 'Control-guards' 'node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs e2e/network/host-install-cache.test.mjs e2e/network/native-install.test.mjs' {& node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs e2e/network/host-install-cache.test.mjs e2e/network/native-install.test.mjs}
         if($code -ne 0){throw 'Driver and existing SEND guards failed'}
       }
       Push-Location clients/dsh-plugin

@@ -33,6 +33,27 @@ $head = (git rev-parse HEAD).Trim()
 直接运行全链默认安装本次独立锁定 runtime；开发时可通过 `AURIGA_DSH_RUNTIME` 指定
 已安装的锁定 rc.3 目录。归档验收清除此覆盖，每个变体自行安装，不继承其他工位 runtime。
 
+### 共享宿主 npm 缓存
+
+隔离安装仍使用原锁文件和 SHA512 校验。`npm ci` 加 `--prefer-offline`，公共包缓存跨工位、
+归档及变体复用；`node_modules`、DSH_HOME、profile、cwd、npmrc 和 Corepack 目录仍独立。
+该设置也用于 Beta 的 `scripts/beta-ui/plugin-dsh.mjs` 宿主安装，不用于其构建或用户 DSH。
+缓存只接纳锁定的 `registry.npmjs.org` 包，不保存任何 DSH 凭据或 profile。
+
+可在运行 verify 前指定获准的持久缓存，例如与已有 pnpm store 并列：
+
+```powershell
+$env:AURIGA_DSH_HOST_NPM_CACHE = Join-Path (Split-Path $env:AURIGA_PNPM_STORE -Parent) 'npm-dsh-host'
+# 可选；仅改变 npm 宿主安装期限，默认仍为 300000 ms，不改变业务超时/重试：
+$env:AURIGA_DSH_HOST_INSTALL_TIMEOUT_MS = '600000'
+```
+
+未指定缓存时使用父进程用户目录下 `.cache/auriga/npm-dsh-host`，默认在仓库外；首次运行
+仍可能下载缺失包，后续优先复用完整性缓存。`installNativeRuntime(runtime, {npmCache, timeoutMs})`
+还允许调用方显式传入选项，优先于环境变量。不要把缓存指向真实 DSH profile。
+失败的 `host-install.log` 保存完整命令、缓存、期限、耗时、退出码、signal 和 stderr，异步安装另记录 killed；
+超时明确写为 `timed out after ... ms`，不会再只显示 `exit null`。没有自动重试或跳过安装。
+
 全链证据位于 `target/dual-dsh-*`：`manifest.json`、真实脱敏进程日志、NATS 应用帧、
 原请求/结果、故障丢包、RLS 只读 PG 快照、两端真实 inspect/provider 回读。
 `messages.json` 关联 message、delivery、recipient、digest、host_request_id 和签名回执。
