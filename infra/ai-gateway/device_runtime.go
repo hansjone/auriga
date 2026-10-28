@@ -110,7 +110,9 @@ func newDeviceRuntime(ctx context.Context, c deviceConfig) (*deviceRuntime, erro
 
 func (r *deviceRuntime) shutdownRuntime() error {
 	r.handler.CloseAdmission()
-	r.supervisor.CloseAdmission()
+	// Already admitted HTTP calls may still need recovery capacity after body
+	// parsing. Keep the supervisor and all RPC/store dependencies alive until
+	// HTTP finishes its grace period; Drain closes recovery admission below.
 	ctx, cancel := context.WithTimeout(context.Background(), r.shutdown)
 	err := r.server.Shutdown(ctx)
 	cancel()
@@ -118,7 +120,8 @@ func (r *deviceRuntime) shutdownRuntime() error {
 	if err != nil {
 		_ = r.server.Close()
 	}
-	// Even after HTTP timeout, reserved cells count until their Execute finishes.
+	// Close recovery admission only after HTTP grace/cancellation. Even after
+	// HTTP timeout, reserved cells count until their Execute finishes.
 	drain, cancelDrain := context.WithTimeout(context.Background(), r.shutdown)
 	drainErr := r.supervisor.Drain(drain)
 	cancelDrain()
