@@ -15,12 +15,14 @@ import { promisify } from 'node:util';
 import { dualHostState } from './support/dual-state.mjs';
 
 test('DSH profile只能位于Node自有根，不能进入Java递归清理根', () => {
-  const owner = resolve('owned'),
-    java = join(owner, 'auriga-java-bridge-example');
+  const container = resolve('owned'),
+    owner = join(container, 'node-private'),
+    java = join(container, 'auriga-java-bridge-example');
   assert.equal(dualHostState(owner, java, 'A'), join(owner, 'dsh-A'));
   assert.equal(dualHostState(owner, java, 'B'), join(owner, 'dsh-B'));
   assert.throws(() => dualHostState(owner, resolve('outside'), 'A'));
   assert.throws(() => dualHostState(owner, java, '../outside'));
+  assert.throws(() => dualHostState(java, java, 'A'));
 });
 
 test('真实JVM清理与Node清理后，profile源码junction的目标仍完整保留', async (t) => {
@@ -30,6 +32,7 @@ test('真实JVM清理与Node清理后，profile源码junction的目标仍完整�
   const fixture = join(artifacts, 'private');
   const owner = join(fixture, 'node-owner'),
     java = join(owner, 'auriga-java-bridge-example');
+  const privateRoot = join(owner, 'node-private');
   const source = join(fixture, 'source');
   await mkdir(source, { recursive: true });
   await mkdir(java, { recursive: true });
@@ -41,8 +44,8 @@ test('真实JVM清理与Node清理后，profile源码junction的目标仍完整�
     await rm(fixture, { recursive: true, force: true });
   });
   for (const name of ['A', 'B']) {
-    const state = dualHostState(owner, java, name);
-    assert.equal(dirname(state), owner);
+    const state = dualHostState(privateRoot, java, name);
+    assert.equal(dirname(state), privateRoot);
     const modules = join(state, 'dsh/profiles/web/node_modules');
     await mkdir(modules, { recursive: true });
     const link = join(modules, 'source');

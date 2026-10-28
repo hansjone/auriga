@@ -94,7 +94,9 @@ status503仍立即失败，不重试登录、不延长业务期限。`A/B-profil
 设置与 available/loggedIn，不保存 CSRF、启动票据或任何凭据。
 归档运行的 Java/PG 临时目录放在原工位 `e2e/network/target/dual-private-*`，独占创建并
 校验真实父路径，避免 Windows 原生 PG 的归档嵌套长路径问题；不删除其他运行的目录。
-每端DSH状态放在该Node自有根下，与Java私有子目录平级。profile含指向归档源码的pnpm
+Node的profile私有根与Java私有目录平级，内部每端DSH状态独立。该根复用现有Java私有目录
+创建器，以保持原有Windows ACL/POSIX 0700，不把凭据放入继承额外读取权限的普通临时目录。
+CompileOnly实际调用该创建器并验证私有权限，完成后由Node清理。profile含指向归档源码的pnpm
 junction，绝不能置于Java Files.walk清理范围内；Windows JVM默认会将junction视为目录。
 Java只删除自己的私有子目录；CLI正常退出、Java关闭后，Node删除其自有根及链接条目，保留链接目标。
 dual-cleanup回归仅用独占微型源码哨兵，运行真实JVM和Node两阶段清理，确认目标原字节不变。

@@ -255,8 +255,16 @@ export async function runDualDsh() {
     ]) {
       // Windows Java Files.walk treats junctions as directories even without
       // FOLLOW_LINKS. Profiles contain pnpm source junctions, so only Node owns
-      // and removes them, as siblings of the Java private root.
-      const state = dualHostState(javaTemporary, dirname(ready.config), name);
+      // and removes them under a separate private sibling root.
+      assert.equal(
+        dirname(resolve(ready.nodeStateRoot)),
+        resolve(javaTemporary),
+      );
+      const state = dualHostState(
+        ready.nodeStateRoot,
+        dirname(ready.config),
+        name,
+      );
       const host = await launchCli({
         root,
         state,

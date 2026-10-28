@@ -249,6 +249,12 @@ public class DualDshLogin {
   }
 
   public static void main(String[] args) throws Exception {
+    if (args.length == 1 && args[0].equals("--check-state-root")) {
+      var root = NetworkSourceJavaPrivateFiles.createDirectory();
+      NetworkSourceJavaPrivateFiles.requirePrivate(root);
+      System.out.println(Json.object("stage", "node-state-private", "path", root.toString()));
+      return;
+    }
     if (args.length != 0) throw new IllegalArgumentException("No arguments");
     var h = new NetworkSourceJavaHost();
     try (h;
@@ -283,7 +289,13 @@ public class DualDshLogin {
       NetworkSourceJavaPrivateFiles.replace(
           h.directory.resolve("login.json"),
           Json.object("providerId", provider, "password", password).toString());
-      System.out.println(h.ready());
+      // Keep pnpm junctions outside h.directory, preserving the same private
+      // ACL/mode. Only Node cleans this sibling after both native hosts stop.
+      var nodeStateRoot = NetworkSourceJavaPrivateFiles.createDirectory();
+      NetworkSourceJavaPrivateFiles.requirePrivate(nodeStateRoot);
+      var ready = h.ready();
+      ready.put("nodeStateRoot", nodeStateRoot.toString());
+      System.out.println(ready);
       for (String line; (line = input.readLine()) != null; ) {
         if (line.equals("stop")) break;
         if (!line.equals("refresh")) throw new IllegalArgumentException("Unknown control");

@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile, mkdir, mkdtemp } from 'node:fs/promises';
+import {
+  readFile,
+  writeFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  realpath,
+} from 'node:fs/promises';
 import { join, delimiter, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -100,6 +107,36 @@ export async function prepareDual(root, output) {
       compiled.stdout +
       compiled.stderr,
   );
+  const privateCheck = join(output, 'private-check');
+  await mkdir(privateCheck);
+  try {
+    const javaBin = process.env.JAVA_HOME
+      ? join(
+          process.env.JAVA_HOME,
+          'bin',
+          process.platform === 'win32' ? 'java.exe' : 'java',
+        )
+      : 'java';
+    const checked = await run(
+      javaBin,
+      [
+        '-Djava.io.tmpdir=' + privateCheck,
+        '-cp',
+        classes + delimiter + classpath,
+        'auriga.iam.DualDshLogin',
+        '--check-state-root',
+      ],
+      { cwd: root, windowsHide: true, timeout: 30000 },
+    );
+    const result = JSON.parse(checked.stdout.trim());
+    assert.equal(result.stage, 'node-state-private');
+    assert.equal(resolve(result.path, '..'), resolve(privateCheck));
+    assert.equal(await realpath(result.path), resolve(result.path));
+    await writeFile(join(output, 'private-root-check.log'), checked.stdout);
+  } finally {
+    assert.equal(resolve(privateCheck, '..'), resolve(output));
+    await rm(privateCheck, { recursive: true, force: true });
+  }
   const gatewaySource = 'infra/ai-gateway/cmd/network-source-assembly/main.go';
   let gateway = await source(gatewaySource);
   gateway = replaceOnce(
