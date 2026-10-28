@@ -63,9 +63,13 @@ export function privatePath(target, restrict = false) {
   ]);
 }
 
-function assertExternal(state) {
+export function assertExternal(state) {
   const relative = path.relative(repo, state);
-  if (!relative.startsWith('..') && !path.isAbsolute(relative))
+  if (
+    relative !== '..' &&
+    !relative.startsWith('..' + path.sep) &&
+    !path.isAbsolute(relative)
+  )
     throw new Error('Private StateDir must be outside the repository');
   if (!path.isAbsolute(state) || state.startsWith('\\\\'))
     throw new Error('StateDir must be an absolute local path');

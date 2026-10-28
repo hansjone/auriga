@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @EnabledOnOs(OS.WINDOWS)
 class ServiceTokenFilePublisherWindowsTest {
@@ -62,6 +64,60 @@ class ServiceTokenFilePublisherWindowsTest {
     Path secret = Files.writeString(secretDir.resolve("secret"), Secrets.random());
     restrict(secret);
     return secret;
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void missingOutputDirectoryIsProtectedAndPublishesToken(boolean inheritedReaders)
+      throws Exception {
+    Path secret = setup();
+    if (inheritedReaders) {
+      var view = Files.getFileAttributeView(dir, AclFileAttributeView.class);
+      var acl = new ArrayList<>(view.getAcl());
+      acl.add(
+          AclEntry.newBuilder()
+              .setType(AclEntryType.ALLOW)
+              .setPrincipal(everyone())
+              .setPermissions(AclEntryPermission.READ_DATA)
+              .setFlags(AclEntryFlag.DIRECTORY_INHERIT, AclEntryFlag.FILE_INHERIT)
+              .build());
+      view.setAcl(acl);
+    }
+    Path output = dir.resolve("new-output");
+    Path token = output.resolve("token");
+    assertFalse(Files.exists(output));
+    try (var publisher =
+        new ServiceTokenFilePublisher("edge", (s, c) -> "a.b.c", secret, token, 1, -1)) {
+      publisher.start();
+      EdgeTokenFilePublisherTest.awaitToken(token);
+      assertEquals("a.b.c", Files.readString(token));
+      assertEquals(Files.getOwner(secret), Files.getOwner(output));
+      assertProtectedOwnerOnlyDirectory(output);
+      assertTrue(publisher.refresh());
+      publisher.stop();
+      assertFalse(Files.exists(token));
+      publisher.start();
+      EdgeTokenFilePublisherTest.awaitToken(token);
+    }
+    assertFalse(Files.exists(token));
+  }
+
+  void assertProtectedOwnerOnlyDirectory(Path path) throws Exception {
+    var child =
+        windowsPowerShell(
+                "-Command",
+                "$acl = Get-Acl -LiteralPath '"
+                    + path.toString().replace("'", "''")
+                    + "'; if (!$acl.AreAccessRulesProtected) { exit 1 }")
+            .redirectErrorStream(true)
+            .start();
+    var output =
+        new String(child.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+    assertEquals(0, child.waitFor(), output);
+    var view = Files.getFileAttributeView(path, AclFileAttributeView.class);
+    for (var entry : view.getAcl()) {
+      if (entry.type() == AclEntryType.ALLOW) assertEquals(view.getOwner(), entry.principal());
+    }
   }
 
   @Test

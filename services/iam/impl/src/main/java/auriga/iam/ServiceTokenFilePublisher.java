@@ -274,13 +274,27 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
           if (pinned.add(current)) directories.add(WindowsHandle.open(current, true));
           for (Path component : parent) {
             current = current.resolve(component);
+            boolean created = false;
             if (!Files.exists(current, LinkOption.NOFOLLOW_LINKS)
                 && current.equals(tokenFile.getParent())) {
               Files.createDirectory(current, privateAcl());
               if (!Files.getOwner(current, LinkOption.NOFOLLOW_LINKS).equals(processOwner))
                 Files.setOwner(current, processOwner);
+              created = true;
             }
-            if (pinned.add(current)) directories.add(WindowsHandle.open(current, true));
+            if (pinned.add(current)) {
+              var handle = WindowsHandle.open(current, true, created);
+              directories.add(handle);
+              if (created) {
+                // Drop any ACEs inherited at creation, before publishing credentials in this
+                // directory.
+                Files.getFileAttributeView(
+                        current, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS)
+                    .setAcl(privateAcl().value());
+                // Java's ACL setter clears protection, so apply the Win32 protection bit last.
+                handle.protectDacl();
+              }
+            }
           }
         }
         checkPrivate(secretFile.getParent(), true);
@@ -388,6 +402,27 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
                 ValueLayout.ADDRESS,
                 ValueLayout.JAVA_INT,
                 ValueLayout.ADDRESS));
+    private static final MethodHandle SET_SECURITY =
+        LINKER.downcallHandle(
+            ADVAPI.find("SetSecurityInfo").orElseThrow(),
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS));
+    private static final MethodHandle GET_DACL =
+        LINKER.downcallHandle(
+            ADVAPI.find("GetSecurityDescriptorDacl").orElseThrow(),
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS,
+                ValueLayout.ADDRESS));
     private static final SymbolLookup SECUR32 =
         SymbolLookup.libraryLookup("secur32", Arena.global());
     private static final MethodHandle USER =
@@ -422,6 +457,10 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
     }
 
     static WindowsHandle open(Path path, boolean directory) throws IOException {
+      return open(path, directory, false);
+    }
+
+    static WindowsHandle open(Path path, boolean directory, boolean writeDacl) throws IOException {
       WindowsHandle opened = null;
       try (var arena = Arena.ofConfined()) {
         if (path.toString().startsWith("\\\\")) throw invalid(); // Only local volumes.
@@ -433,7 +472,7 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
             (MemorySegment)
                 CREATE.invokeExact(
                     wide,
-                    0x80000000,
+                    0x80000000 | (writeDacl ? 0x00040000 : 0),
                     directory ? 3 : 1,
                     MemorySegment.NULL,
                     3,
@@ -462,6 +501,35 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
         return (descriptor.get(ValueLayout.JAVA_SHORT, 2) & 0x1000) != 0;
       } catch (Throwable e) {
         throw new IOException("Cannot verify private directory DACL");
+      }
+    }
+
+    void protectDacl() throws IOException {
+      try (var arena = Arena.ofConfined()) {
+        var descriptor = arena.allocate(65536, 4);
+        var length = arena.allocate(ValueLayout.JAVA_INT);
+        if ((int) SECURITY.invokeExact(handle, 4, descriptor, 65536, length) == 0) throw invalid();
+        var present = arena.allocate(ValueLayout.JAVA_INT);
+        var defaulted = arena.allocate(ValueLayout.JAVA_INT);
+        var dacl = arena.allocate(ValueLayout.ADDRESS);
+        if ((int) GET_DACL.invokeExact(descriptor, present, dacl, defaulted) == 0
+            || present.get(ValueLayout.JAVA_INT, 0) == 0
+            || dacl.get(ValueLayout.ADDRESS, 0).address() == 0) throw invalid();
+        // SE_FILE_OBJECT + DACL_SECURITY_INFORMATION + PROTECTED_DACL_SECURITY_INFORMATION.
+        // Supply the existing non-null DACL explicitly; never install a null (allow-all) DACL.
+        if ((int)
+                SET_SECURITY.invokeExact(
+                    handle,
+                    1,
+                    0x80000004,
+                    MemorySegment.NULL,
+                    MemorySegment.NULL,
+                    dacl.get(ValueLayout.ADDRESS, 0),
+                    MemorySegment.NULL)
+            != 0) throw invalid();
+        if (!protectedDacl()) throw invalid();
+      } catch (Throwable e) {
+        throw new IOException("Cannot protect private directory DACL");
       }
     }
 
