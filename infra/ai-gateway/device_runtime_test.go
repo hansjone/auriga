@@ -414,6 +414,83 @@ func TestDeviceShutdownLetsActiveHTTPFinishGracefully(t *testing.T) {
 	}
 }
 
+func TestDeviceShutdownLetsActiveCatalogFinishGracefully(t *testing.T) {
+	f := newDeviceFixture(t)
+	f.cfg.ShutdownMillis = 1000
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	f.control.memberHook = func(ctx context.Context) error {
+		close(entered)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	r, err := newDeviceRuntime(t.Context(), f.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The member RPC proves the real handler has admitted this request. Release
+	// it directly from the HTTP shutdown notification, without making its relay
+	// and query deadlines wait for a polling loop or a second test-driver turn.
+	r.server.RegisterOnShutdown(unblock)
+	t.Cleanup(func() {
+		unblock()
+		r.cancel()
+		_ = r.server.Close()
+		_ = r.supervisor.Drain(context.Background())
+		r.closeResources()
+	})
+	l, err := net.Listen("tcp", f.cfg.Listen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- r.server.Serve(l) }()
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
+	t.Cleanup(client.CloseIdleConnections)
+	req, err := http.NewRequest("GET", "http://"+l.Addr().String()+"/ai/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.control.raw)
+	type response struct {
+		status int
+		body   string
+		err    error
+	}
+	completed := make(chan response, 1)
+	go func() {
+		res, err := client.Do(req)
+		if err != nil {
+			completed <- response{err: err}
+			return
+		}
+		defer func() { _ = res.Body.Close() }()
+		body, err := io.ReadAll(res.Body)
+		completed <- response{status: res.StatusCode, body: string(body), err: err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("real handler did not enter member RPC")
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.shutdownRuntime() }()
+	result := <-completed
+	if result.err != nil || result.status != http.StatusOK || !strings.Contains(result.body, fmt.Sprintf(`"id":%q`, syntheticModel)) {
+		t.Fatalf("active catalog lost graceful completion: status=%d body=%s err=%v", result.status, result.body, result.err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		t.Fatal(err)
+	}
+}
+
 func TestDeviceShutdownTimeoutDoesNotWaitForBorrowedPoolConnection(t *testing.T) {
 	f := newDeviceFixture(t)
 	f.cfg.ShutdownMillis = 20
