@@ -12,3 +12,7 @@
 # Current source assembles the delimiter constant; keep historical scans enabled.
 56823ecdf24d8f2f74a64f75366e206b12f06c63:services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHost.java:private-key:493
 56823ecdf24d8f2f74a64f75366e206b12f06c63:services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHostTest.java:private-key:45
+
+# Exact historical fixtures: disposable M2 bridge and synthetic WebSocket nonce.
+00e5d0a972da1cbbdb27ccf8618f4b0efa068910:docs/dev/m2.md:private-ipv4:217
+718b26ed7f1df25d0ecfd29627ef1a45fb45a49d:infra/edge/network_wss_tls_test.go:generic-api-key:32

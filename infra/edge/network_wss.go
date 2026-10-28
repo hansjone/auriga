@@ -21,6 +21,8 @@ type NetworkWSSConfig struct {
 	Enabled        bool     `json:"enabled"`
 	Path           string   `json:"path"`
 	UpstreamURL    string   `json:"upstreamUrl"` // http(s)://host:port/ or ws(s)://…
+	CAFile         string   `json:"caFile"`      // optional dedicated upstream trust bundle; empty = system roots
+	ServerName     string   `json:"serverName"`  // optional certificate name; empty = upstream hostname
 	MaxConcurrent  int      `json:"maxConcurrent"`
 	AllowedOrigins []string `json:"allowedOrigins"` // empty → use portalHost when wired
 }
@@ -39,14 +41,21 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 		return nil, nil
 	}
 	if cfg.UpstreamURL == "" {
-		return nil, fmt.Errorf("networkWSS.upstreamUrl is required when enabled")
+		return nil, fmt.Errorf("networkWss.upstreamUrl is required when enabled")
 	}
-	raw := cfg.UpstreamURL
-	raw = strings.Replace(raw, "ws://", "http://", 1)
-	raw = strings.Replace(raw, "wss://", "https://", 1)
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return nil, fmt.Errorf("networkWSS.upstreamUrl: %w", err)
+	u, err := url.Parse(cfg.UpstreamURL)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "ws" && u.Scheme != "wss") {
+		return nil, fmt.Errorf("networkWss.upstreamUrl must be an HTTP(S)/WS(S) URL without credentials or fragment")
+	}
+	switch u.Scheme {
+	case "ws":
+		u.Scheme = "http"
+	case "wss":
+		u.Scheme = "https"
+	}
+	tlsConfig, err := networkWSSTLS(cfg, u.Scheme)
+	if err != nil {
+		return nil, err
 	}
 	path := cfg.Path
 	if path == "" {
@@ -64,7 +73,6 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 		origins = []string{"https://" + portalHost, "http://" + portalHost}
 	}
 	tr := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -73,6 +81,7 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 		MaxIdleConns:        32,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
+		TLSClientConfig:     tlsConfig,
 	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
