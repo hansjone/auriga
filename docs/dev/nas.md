@@ -248,6 +248,12 @@ PostgreSQL 的 PGDATA 分阶段检查：仅当丢弃全部 capability 的 root �
 
 ## 验证与证据边界
 
+设备 WSS 的内部接线由 bootstrap 生成：edge 的精确 `/net/v1/ws` 代理到 `wss://network-broker:18444`，以现有只读 `pki-edge/network-server-ca.pem` 验证固定 SAN `broker.network.internal`。broker 只在 `internal` 网络，没有 `ports` 发布；edge 不挂 broker 私钥、密码或 `network-platform`。Origin 白名单仅取已验证 PortalURL 的完整 scheme/host/port，不含管理台或 URL 路径。NAS receipt 输入升级 `network-wss-v1`，旧材料重入拒绝，不修复/轮换，需保留备份后在新专用目录安装。
+
+当前可用的外部 HTTPS 入口是已有 `trusted_proxy` profile；外部 TLS 由受信前置代理终止，代理到 edge 使用现有独立 mTLS 身份。前置代理还须转发门户 `/net/v1/ws` 的 WebSocket Upgrade，保留已验证的门户 Origin 与 Host，并让所有客户端信任外部证书及完整链。域名入口要求对应 DNS SAN；纯 IP HTTPS 必须有匹配该 IP 的 IP SAN 及客户端信任，不能用 DNS SAN 或内部 broker CA 代替。现有 direct IP/HTTP profile 不能自动变成正式 WSS；需要 direct IP HTTPS 时，最小后续任务是实现并审查该 access/listener/TLS profile 及外部证书供应。不得改宽现有校验或降级 WS。
+
+network submit 健康状态与生成 JSON 只证明部署接线的部分条件。正式设备入网还需真实 HTTPS 入口、插件 `wss://` 配置、IAM 分配的 realm、真实签名链提供的 Ed25519 安装根及真实连接/鉴权/收发证据；传输 TLS CA 不能充当安装根，本节不宣称 L55 已闭环。
+
 Network 使用独立一年有效期的 CA/叶子，与上述节点 PKI 的有效期不同。platform 只目录挂载独立 `network-platform`（仅 `platform.properties`/`gateway.secret`，源目录 uid/gid10001/0700，文件0600，生成的 installation-owner=10001），broker 只挂载 `broker.conf`/`broker.pem`/`broker.key`/`server-ca.pem`；原源文件、安装回执与 uid10001:10001、目录0700/文件0600校验保持一致。目录与文件挂载更换材料后，均须重新创建相关容器。
 
 start/render 重入、network 健康探针及 `sh deploy/nas/scripts/status.sh` 检查独立 network CA 和全部叶子：到期前30天输出 `network_certificate_expiring`，过期/损坏分别输出 `expired`/`invalid` 并检查失败，普通重入不更换私钥。停机或无法取得容器状态时 status 报 `unavailable_or_invalid`，不能当正常。请每天采集状态输出告警并提前安排维护；本次提供到期告警，不提供在线自动轮换。命令、权限与维护边界见 [部署材料维护](../../deploy/bootstrap/network/README.md)。

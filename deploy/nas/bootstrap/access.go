@@ -133,10 +133,15 @@ func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer st
 		"accessConfigFile":       "/etc/auriga/access.json", "allowLocalIngress": true,
 		"upstreams":        map[string]string{"iam": "https://platform:8081", "org": "https://platform:8081", "workspace": "https://platform:8081", "network-submit": "https://network:18443"},
 		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/pki/network-edge.pem", "keyFile": "/etc/auriga/pki/network-edge.key", "caFile": "/etc/auriga/pki/network-server-ca.pem", "serverName": "submit.network.internal"},
-		"iamHop":           map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "platform"},
-		"iamRpc":           map[string]any{"address": "platform:9091", "serverName": "platform", "timeoutMillis": 2000, "serviceTokenFile": "/run/auriga-internal/edge/service.jwt"},
-		"static":           map[string]string{"portalRoot": "/srv/auriga/static/portal", "adminRoot": "/srv/auriga/static/admin"},
-		"tls":              map[string]string{"mode": "off"}, "rateLimit": map[string]any{"requestsPerSecond": 50, "burst": 100}, "identityKeysFile": "/etc/auriga/identity-signing-keys.json", "sessionStore": "nats",
+		"networkWss": map[string]any{
+			"enabled": true, "path": "/net/v1/ws", "upstreamUrl": "wss://network-broker:18444",
+			"caFile": "/etc/auriga/pki/network-server-ca.pem", "serverName": "broker.network.internal",
+			"allowedOrigins": []string{cfg.PortalURL()},
+		},
+		"iamHop": map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "platform"},
+		"iamRpc": map[string]any{"address": "platform:9091", "serverName": "platform", "timeoutMillis": 2000, "serviceTokenFile": "/run/auriga-internal/edge/service.jwt"},
+		"static": map[string]string{"portalRoot": "/srv/auriga/static/portal", "adminRoot": "/srv/auriga/static/admin"},
+		"tls":    map[string]string{"mode": "off"}, "rateLimit": map[string]any{"requestsPerSecond": 50, "burst": 100}, "identityKeysFile": "/etc/auriga/identity-signing-keys.json", "sessionStore": "nats",
 		"nodeTLS": map[string]string{"certFile": "/etc/auriga/pki/edge.crt", "keyFile": "/etc/auriga/pki/edge.key", "caFile": "/etc/auriga/pki/ca.crt"},
 	}
 	if cfg.IngressKind() == "trusted_proxy" {

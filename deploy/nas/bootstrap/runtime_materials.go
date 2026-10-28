@@ -61,8 +61,9 @@ func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSub
 	h := sha256.New()
 	_, _ = h.Write(raw)
 	_, _ = fmt.Fprintf(h, "\n%s\n%s\n%d\n%s\n%s\n%d", peer, subnet, registry, lanIP, lanSubnet, memory)
-	// Preserve the existing no-runtime receipt bytes. Runtime mode binds both the
-	// independently supplied locators and every byte in the verified snapshot.
+	// Old receipts must not silently retain the pre-WSS edge configuration.
+	_, _ = fmt.Fprint(h, "\nnetwork-wss-v1")
+	// Runtime mode also binds the independently supplied locators and snapshot.
 	if m != nil {
 		inputs, _ := json.Marshal([]string{r.bundle, r.root, r.image})
 		_, _ = fmt.Fprintf(h, "\nruntime-v1:%x", inputs)
