@@ -563,7 +563,6 @@ public class NetworkMailboxWireService {
                                       .put("request_id", target.requestId())
                                       .put("status", state)
                                       .put("epoch", Long.toString(target.epoch()))
-                                      .put("producer_epoch", row.get("producer_epoch").toString())
                                       .put("head_seq", Long.toString(route.headSeq()))
                                       .put(
                                           "committed_cursor",
@@ -573,6 +572,7 @@ public class NetworkMailboxWireService {
                                       .put(
                                           "registration_revision",
                                           counter(row, "registration_revision"));
+                              appendProducerEpoch(result, row);
                               result
                                   .putObject("node_identity")
                                   .put("realm", c.getRealm())
@@ -800,6 +800,16 @@ public class NetworkMailboxWireService {
             && number(row, "local_boot_epoch") == target.epoch(),
         NetworkErrors.STALE_EPOCH);
     require(target.validUntil().isAfter(clock.instant()), NetworkErrors.UNAUTHORIZED);
+  }
+
+  static void appendProducerEpoch(ObjectNode result, Map<String, Object> row) {
+    // Historical migration bootstrap may run READY before the SEND column exists.
+    // This extension is optional; never invent a producer identity for that schema.
+    if (!row.containsKey("producer_epoch")) return;
+    var epoch = row.get("producer_epoch");
+    require(
+        epoch instanceof Long && (Long) epoch > 0, auriga.common.error.CommonErrors.UNAVAILABLE);
+    result.put("producer_epoch", epoch.toString());
   }
 
   public String fetch(NetworkAuthorityConnection c, byte[] bytes) {
