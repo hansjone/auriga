@@ -129,7 +129,11 @@ test('普通缓存、home 内默认形状、同前缀目录和缺失末级可持
     join(home, '.dsh-other'),
     join(state, 'ordinary'),
   ]) {
-    const source = { HOME: home, USERPROFILE: home };
+    const source = {
+      HOME: home,
+      USERPROFILE: home,
+      DSH_HOME: join(home, 'missing', 'profile'),
+    };
     assert.equal(
       hostInstallOptions(source, { npmCache: cache }).npmCache,
       cache,
@@ -199,6 +203,48 @@ test('真实 profile 链接别名及缺失后缀按真实目录保护', async (t
   }
   assert.deepEqual(await readdir(actual), []);
 });
+
+for (const kind of ['DSH_HOME', 'HOME', 'USERPROFILE', 'missing-suffix']) {
+  test(`悬空受保护链接在缓存创建前拒绝：${kind}`, async (t) => {
+    const state = await fixture(t);
+    const home = join(state, 'home');
+    await mkdir(home);
+    const target = join(state, 'missing-target');
+    const alias = join(
+      home,
+      kind === 'HOME' || kind === 'USERPROFILE' ? '.dsh' : 'alias',
+    );
+    await writeFile(join(home, 'sentinel'), 'unchanged');
+    await symlink(
+      target,
+      alias,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const source =
+      kind === 'HOME' || kind === 'USERPROFILE'
+        ? { [kind]: home }
+        : {
+            DSH_HOME:
+              kind === 'missing-suffix'
+                ? join(alias, 'missing-profile')
+                : alias,
+          };
+    const before = await readdir(home);
+    for (const cache of [
+      target,
+      join(target, 'missing-profile'),
+      join(target, 'missing-profile', 'cache'),
+    ]) {
+      assert.throws(
+        () => hostInstallOptions(source, { npmCache: cache }),
+        /DSH.*profile/,
+      );
+      await assert.rejects(access(target), { code: 'ENOENT' });
+      assert.deepEqual(await readdir(home), before);
+      assert.equal(await readFile(join(home, 'sentinel'), 'utf8'), 'unchanged');
+    }
+  });
+}
 
 test('系统默认真实 DSH 根及祖先在无显式环境时仍拒绝', () => {
   const root = join(os.homedir(), '.dsh');

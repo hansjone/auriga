@@ -114,10 +114,25 @@ function existingRealPath(input) {
   let current = path.resolve(input);
   const suffix = [];
   for (;;) {
+    let stat;
     try {
-      return path.resolve(fs.realpathSync(current), ...suffix);
+      stat = fs.lstatSync(current);
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
+    }
+    // A dangling link exists even though realpath reports ENOENT. Do not append
+    // its name as a missing ordinary directory: fail closed before cache mkdir.
+    if (stat) {
+      try {
+        return path.resolve(fs.realpathSync(current), ...suffix);
+      } catch (error) {
+        throw new Error(
+          'DSH profile root has an unresolved existing ancestor',
+          {
+            cause: error,
+          },
+        );
+      }
     }
     const parent = path.dirname(current);
     if (parent === current)
