@@ -38,6 +38,9 @@ $head = (git rev-parse HEAD).Trim()
 `messages.json` 关联 message、delivery、recipient、digest、host_request_id 和签名回执。
 记录两个原生进程的 PID/父 PID、Windows 创建时间或 Linux boot/start ticks、对象谱系与 cwd。
 凭据/profile 和 TLS 私钥仅在测试私有目录，结束删除；启动票据仅留内存，日志脱敏。
+归档运行的 Java/PG 临时目录放在原工位 `e2e/network/target/dual-private-*`，独占创建并
+校验真实父路径，避免 Windows 原生 PG 的归档嵌套长路径问题；不删除其他运行的目录。
+先确认真实 Java/PG/gateway 可启动，再准备锁定 DSH runtime；启动失败不下载宿主，也不 skip。
 
 ## 真实服务与测试辅助边界
 

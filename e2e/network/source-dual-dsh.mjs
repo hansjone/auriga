@@ -6,8 +6,9 @@ import {
   writeFile,
   access,
   rm,
+  realpath,
 } from 'node:fs/promises';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -32,6 +33,26 @@ export async function runDualDsh() {
   const head = (
     await run('git', ['rev-parse', 'HEAD'], { cwd: root, windowsHide: true })
   ).stdout.trim();
+  const checkout = resolve(
+    (
+      await run('git', ['rev-parse', '--show-toplevel'], {
+        cwd: root,
+        windowsHide: true,
+      })
+    ).stdout.trim(),
+  );
+  const archiveRelative = relative(checkout, root);
+  assert.ok(
+    !isAbsolute(archiveRelative) && !archiveRelative.startsWith('..'),
+    'archive must remain inside the owned checkout',
+  );
+  const temporaryBase = join(checkout, 'e2e/network/target');
+  await mkdir(temporaryBase, { recursive: true });
+  assert.equal(
+    (await realpath(temporaryBase)).toLowerCase(),
+    resolve(temporaryBase).toLowerCase(),
+    'test temporary parent must not redirect through a link',
+  );
   const target = join(root, 'e2e/network/target');
   await mkdir(target, { recursive: true });
   const artifacts = await mkdtemp(join(target, 'dual-dsh-'));
@@ -53,6 +74,7 @@ export async function runDualDsh() {
     proxy,
     ready,
     timer,
+    javaTemporary,
     phase = 'prepare';
   let refresh = Promise.resolve();
   const check = () => {
@@ -60,9 +82,6 @@ export async function runDualDsh() {
   };
   try {
     const built = await prepareDual(root, artifacts);
-    const runtime =
-      process.env.AURIGA_DSH_RUNTIME ??
-      (await installNativeRuntime(join(artifacts, 'native-runtime')));
     const binary = await createNatsBinaryPreparer({
       stageRoot: join(target, 'nats-cache'),
     })();
@@ -101,8 +120,10 @@ export async function runDualDsh() {
       'bin',
       process.platform === 'win32' ? 'java.exe' : 'java',
     );
-    const javaTemporary = join(artifacts, 'java-private');
-    await mkdir(javaTemporary);
+    // Keep PG's native paths short even when source is nested in an archive.
+    // This exclusive directory stays inside the original owned worktree.
+    javaTemporary = await mkdtemp(join(temporaryBase, 'dual-private-'));
+    manifest.stages.push({ stage: 'owned-private-temp', path: javaTemporary });
     java = childProcess(
       javaBin,
       [
@@ -188,6 +209,9 @@ export async function runDualDsh() {
         ),
       },
     ];
+    const runtime =
+      process.env.AURIGA_DSH_RUNTIME ??
+      (await installNativeRuntime(join(artifacts, 'native-runtime')));
     phase = 'full CLI normal authentication';
     for (const [name, username] of [
       ['A', 'alice'],
@@ -598,10 +622,15 @@ export async function runDualDsh() {
       await save(join(artifacts, 'frames.json'), proxy.frames);
       await save(join(artifacts, 'faults.json'), proxy.drops);
     }
-    for (const name of ['proxy-private', 'java-private']) {
-      const owned = resolve(artifacts, name);
-      assert.equal(dirname(owned), resolve(artifacts));
+    const privateDirectories = [
+      { path: join(artifacts, 'proxy-private'), parent: artifacts },
+    ];
+    if (javaTemporary)
+      privateDirectories.push({ path: javaTemporary, parent: temporaryBase });
+    for (const directory of privateDirectories) {
       try {
+        const owned = resolve(directory.path);
+        assert.equal(dirname(owned), resolve(directory.parent));
         await rm(owned, { recursive: true, force: true });
       } catch (error) {
         failures.push(error);
