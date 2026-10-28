@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -324,32 +325,49 @@ func TestDeviceShutdownRetainsUnhandedReservation(t *testing.T) {
 func TestDeviceShutdownLetsActiveHTTPFinishGracefully(t *testing.T) {
 	f := newDeviceFixture(t)
 	f.cfg.ShutdownMillis = 1000
-	entered, release, cancelled := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	f.control.memberHook = func(ctx context.Context) error {
-		close(entered)
-		select {
-		case <-release:
-			return nil
-		case <-ctx.Done():
-			close(cancelled)
-			return ctx.Err()
-		}
-	}
 	r, e := newDeviceRuntime(t.Context(), f.cfg)
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Exercise the runtime's HTTP lifetime independently of the fixture's 100ms
+	// relay read/write deadlines and the catalog RPC/query deadlines. Those can
+	// expire while the old memberHook waits for the shutdown goroutine to run.
+	entered := make(chan context.Context, 1)
+	release, shuttingDown := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	r.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		entered <- req.Context()
+		select {
+		case <-release:
+		case <-req.Context().Done():
+		}
+		if req.Context().Err() != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	r.server.RegisterOnShutdown(func() { close(shuttingDown) })
+	t.Cleanup(func() {
+		unblock()
+		r.cancel()
+		_ = r.server.Close()
+		_ = r.supervisor.Drain(context.Background())
+		r.closeResources()
+	})
 	l, e := net.Listen("tcp", f.cfg.Listen)
 	if e != nil {
 		t.Fatal(e)
 	}
 	served := make(chan error, 1)
 	go func() { served <- r.server.Serve(l) }()
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
+	t.Cleanup(client.CloseIdleConnections)
 	status := make(chan int, 1)
 	go func() {
 		req, _ := http.NewRequest("GET", "http://"+l.Addr().String()+"/ai/v1/models", nil)
 		req.Header.Set("Authorization", "Bearer "+f.control.raw)
-		res, e := http.DefaultClient.Do(req)
+		res, e := client.Do(req)
 		if e != nil {
 			status <- 0
 			return
@@ -358,30 +376,33 @@ func TestDeviceShutdownLetsActiveHTTPFinishGracefully(t *testing.T) {
 		_ = res.Body.Close()
 		status <- res.StatusCode
 	}()
+	var active context.Context
 	select {
-	case <-entered:
+	case active = <-entered:
 	case <-time.After(time.Second):
-		t.Fatal("no control-plane call")
+		t.Fatal("no active HTTP handler")
 	}
 	done := make(chan error, 1)
 	go func() { done <- r.shutdownRuntime() }()
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
-	tick := time.NewTicker(time.Millisecond)
-	defer tick.Stop()
-	for !r.supervisor.Stats().Closed {
-		select {
-		case <-tick.C:
-		case <-ctx.Done():
-			t.Fatal("shutdown did not start")
-		}
+	select {
+	case <-shuttingDown:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not start")
+	}
+	if !r.supervisor.Stats().Closed {
+		t.Fatal("shutdown left recovery admission open")
+	}
+	// Inspect the actual request context: a cancellation-notification goroutine
+	// might not have run yet, even when the context is already cancelled.
+	if active.Err() != nil {
+		t.Fatal("HTTP cancelled before its grace period", active.Err())
 	}
 	select {
-	case <-cancelled:
-		t.Fatal("HTTP cancelled before its grace period")
+	case e := <-done:
+		t.Fatal("shutdown returned before active HTTP completed", e)
 	default:
 	}
-	close(release)
+	unblock()
 	if code := <-status; code != 200 {
 		t.Fatal("active HTTP lost graceful completion", code)
 	}

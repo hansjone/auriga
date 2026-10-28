@@ -44,7 +44,6 @@ type deviceControl struct {
 	revoked, expired, orgFailed atomic.Bool
 	wrongTenant                 atomic.Bool
 	calls                       atomic.Int64
-	memberHook                  func(context.Context) error
 }
 
 func (c *deviceControl) VerifyDeviceAiAccess(_ context.Context, r *iam.VerifyDeviceAiAccessRequest) (*iam.VerifyDeviceAiAccessResponse, error) {
@@ -62,12 +61,7 @@ func (c *deviceControl) VerifyDeviceAiAccess(_ context.Context, r *iam.VerifyDev
 	}
 	return &iam.VerifyDeviceAiAccessResponse{Active: !c.revoked.Load(), TenantId: tenant, AccountId: deviceAccount, DeviceId: deviceID, ExpiresAt: timestamppb.New(exp)}, nil
 }
-func (c *deviceControl) GetMember(ctx context.Context, _ *org.GetMemberRequest) (*org.GetMemberResponse, error) {
-	if c.memberHook != nil {
-		if e := c.memberHook(ctx); e != nil {
-			return nil, e
-		}
-	}
+func (c *deviceControl) GetMember(context.Context, *org.GetMemberRequest) (*org.GetMemberResponse, error) {
 	if c.orgFailed.Load() {
 		return nil, status.Error(codes.Unavailable, "private error")
 	}
