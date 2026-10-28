@@ -45,7 +45,12 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		Upstreams        map[string]string `json:"upstreams"`
 		IAMHop           map[string]string `json:"iamHop"`
 		NetworkSubmitHop map[string]string `json:"networkSubmitHop"`
-		IAMRPC           struct {
+		NetworkWSS       struct {
+			Enabled                               bool
+			Path, UpstreamURL, CAFile, ServerName string
+			AllowedOrigins                        []string
+		} `json:"networkWss"`
+		IAMRPC struct {
 			Address, ServerName, ServiceTokenFile string
 			TimeoutMillis                         int
 		} `json:"iamRpc"`
@@ -56,6 +61,14 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	}
 	if edge.AccessConfigFile != "/etc/auriga/access.json" {
 		t.Fatal("edge must load shared access.json")
+	}
+	wss := edge.NetworkWSS
+	if !wss.Enabled || wss.Path != "/net/v1/ws" || wss.UpstreamURL != "wss://172.29.240.1:18444" || wss.CAFile != "/etc/auriga/network-edge/server-ca.pem" || wss.ServerName != "broker.network.internal" || len(wss.AllowedOrigins) != 1 || wss.AllowedOrigins[0] != access.PortalURL() { // gitleaks:allow disposable M2 network
+		t.Fatal("missing exact WSS upstream/trust/portal Origin")
+	}
+	broker := string(read("network/broker.conf"))
+	if !strings.Contains(broker, "\nhost: \"127.0.0.1\"\nport: 14224\n") || !strings.Contains(broker, "websocket {host: \"172.29.240.1\", port: 18444,") { // gitleaks:allow disposable M2 network
+		t.Fatal("WSS must bind the compose bridge while TCP remains loopback")
 	}
 	if edge.Upstreams["network-submit"] != "https://172.29.240.1:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] { // gitleaks:allow disposable M2 network
 		t.Fatal("submit must use an independent HTTPS listener and trust material")

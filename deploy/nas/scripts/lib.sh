@@ -484,7 +484,8 @@ validate_nas_access() {
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}" \
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
-    -runtime-image "${AURIGA_RUNTIME_IMAGE-}"
+    -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}"
 }
 
 bootstrap_nas_materials() {
@@ -495,7 +496,8 @@ bootstrap_nas_materials() {
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}" \
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
-    -runtime-image "${AURIGA_RUNTIME_IMAGE-}")
+    -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}")
 }
 
 install_edge_material() {

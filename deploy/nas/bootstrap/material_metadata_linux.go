@@ -28,7 +28,7 @@ func openNASDirectory(parent int, name string, source bool) (*os.File, error) {
 			return false
 		}
 		if source {
-			if name == "network" || name == "network-platform" {
+			if name == "network" || name == "network-platform" || name == "browser-tls" {
 				return s.Uid == 10001 && s.Gid == 10001 && s.Mode&0o7777 == 0o700
 			}
 			return s.Uid == 10001 && s.Gid == 10001 && s.Mode&0o7777 == 0o755
@@ -90,7 +90,7 @@ func openNASMaterialGuard(path string, sets ...materials.MaterialSet) (*nasMater
 	for _, name := range set.ManagedDirectories {
 		if fresh {
 			mode := uint32(0o755)
-			if name == "network" || name == "network-platform" {
+			if name == "network" || name == "network-platform" || name == "browser-tls" {
 				mode = 0o700
 			}
 			if err := unix.Mkdirat(int(root.Fd()), name, mode); err != nil {

@@ -63,8 +63,14 @@ func TestPublicAccessCLI(t *testing.T) {
 			}
 			// Access changes may never redirect the fixed authenticated internal hops.
 			edge, err := os.ReadFile(filepath.Join(out, "edge.config.json"))
-			if err != nil || !strings.Contains(string(edge), "https://host.docker.internal:8082") || !strings.Contains(string(edge), "host.docker.internal:9091") || strings.Contains(string(edge), cfg.PortalOrigin().Host) {
+			if err != nil || !strings.Contains(string(edge), "https://host.docker.internal:8082") || !strings.Contains(string(edge), "host.docker.internal:9091") {
 				t.Fatalf("internal hop changed: %v", err)
+			}
+			var wssConfig struct {
+				NetworkWSS struct{ AllowedOrigins []string } `json:"networkWss"`
+			}
+			if err := json.Unmarshal(edge, &wssConfig); err != nil || len(wssConfig.NetworkWSS.AllowedOrigins) != 1 || wssConfig.NetworkWSS.AllowedOrigins[0] != cfg.PortalURL() || strings.Contains(wssConfig.NetworkWSS.AllowedOrigins[0], "/net/") || wssConfig.NetworkWSS.AllowedOrigins[0] == cfg.AdminURL() {
+				t.Fatal("WSS Origin must retain the validated portal authority and port, excluding admin")
 			}
 			before, err := os.ReadFile(filepath.Join(out, "iam-installation", "edge.secret"))
 			if err != nil {
@@ -115,7 +121,7 @@ func TestPublicAccessCLI(t *testing.T) {
 					})
 				}
 			}
-			for _, failure := range []string{"image", "fixture", "observer", "access", "damaged public", "missing public", "missing private", "missing receipt", "damaged private"} {
+			for _, failure := range []string{"image", "fixture", "observer", "access", "damaged public", "missing public", "missing private", "missing receipt", "damaged private", "old WSS receipt"} {
 				t.Run("repeat rejects/"+failure, func(t *testing.T) {
 					badArgs := append([]string{}, args...)
 					changed := ""
@@ -148,6 +154,9 @@ func TestPublicAccessCLI(t *testing.T) {
 						if failure == "damaged private" {
 							name = "iam-installation/compose.keys"
 						}
+						if failure == "old WSS receipt" {
+							name = "iam-installation/bootstrap.receipt"
+						}
 						changed = filepath.Join(out, name)
 						var err error
 						restore, err = os.ReadFile(changed)
@@ -161,6 +170,10 @@ func TestPublicAccessCLI(t *testing.T) {
 						fileMode = info.Mode()
 						if strings.HasPrefix(failure, "missing") {
 							err = os.Remove(changed)
+						} else if failure == "old WSS receipt" {
+							old := sha256.Sum256(append(append([]byte{}, raw...), []byte(fmt.Sprintf("\nnetwork-harden1-platform-dir\n%s\nreal\ntrue\ntrue", image))...))
+							legacy := fmt.Sprintf("%x%s", old, restore[strings.IndexByte(string(restore), '\n'):])
+							err = os.WriteFile(changed, []byte(legacy), fileMode)
 						} else {
 							err = os.WriteFile(changed, []byte("damaged"), fileMode)
 						}
