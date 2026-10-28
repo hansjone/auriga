@@ -80,6 +80,7 @@ public class NetworkMailboxWireService {
               s -> {
                 lockSourceGate(gate, true);
                 var registration = request.path("registration");
+                requireReceiveRegistrationScope(c, registration);
                 var actual =
                     locals.requireRegistered(
                         TenantContext.require(),
@@ -89,9 +90,7 @@ public class NetworkMailboxWireService {
                         uuid(registration.path("registration_id").asString()),
                         registration.path("allocation_fingerprint").asString());
                 require(
-                    c.getRealm().equals(registration.path("realm").asString())
-                        && c.getNode().equals(registration.path("node").asString())
-                        && "session".equals(actual.addressType())
+                    "session".equals(actual.addressType())
                         && actual
                             .allocationOpId()
                             .equals(registration.path("allocation_op_id").asString())
@@ -130,6 +129,19 @@ public class NetworkMailboxWireService {
                     gate.target());
               });
         });
+  }
+
+  static void requireReceiveRegistrationScope(NetworkAuthorityConnection c, JsonNode registration) {
+    // The typed-local witness has six fields; requireRegistered scopes its lookup by the
+    // authenticated connection. Optional extensions must never contradict that identity.
+    require(
+        (!registration.has("realm")
+                || (registration.path("realm").isString()
+                    && c.getRealm().equals(registration.path("realm").asString())))
+            && (!registration.has("node")
+                || (registration.path("node").isString()
+                    && c.getNode().equals(registration.path("node").asString()))),
+        NetworkErrors.CONFLICT);
   }
 
   public String attemptBegin(NetworkAuthorityConnection c, byte[] bytes) {

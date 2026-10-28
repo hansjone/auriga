@@ -1127,6 +1127,19 @@ class NetworkSourceControlPostgresTest {
                       TENANT,
                       to.c().getNode())));
     }
+    var replayedReceive = receive(other, false, "1");
+    replayedReceive.set("registration", to.registration().deepCopy());
+    NetworkAuthorityGrpcTest.denied(
+        () -> call(() -> wire.receiveSet(other.c(), bytes(replayedReceive))),
+        "network.local_registration_required");
+    assertEquals(
+        Map.of("receive_enabled", true, "receive_version", 2L),
+        db(
+            () ->
+                jdbc.queryForMap(
+                    "SELECT receive_enabled,receive_version FROM collab.network_local_registration WHERE tenant_id=? AND node_id=? AND local_id=1",
+                    TENANT,
+                    to.c().getNode())));
     NetworkAuthorityGrpcTest.denied(
         () -> call(() -> wire.submit(other.c(), bytes(request))), "network.conflict");
     assertEquals(0, sentCount(from, "network_message"));
