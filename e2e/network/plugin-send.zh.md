@@ -53,6 +53,10 @@ Control 保留 T3b/T4 与 SEND-2 的原断言，增加真实 ToolRuntime→生�
 每个仅承担传输的provider配置platformOrigin/issuer为其自身固定origin，不沿用另一个
 端口的配置。该辅助配置不执行登录、发现公钥或验证/改写JWT；getDevice仍交付原IAM令牌，
 gateway仍按原IAM authority验签鉴权。产品对issuer的scheme/host/port严格同源校验保留。
+recipient快照只新增host_request_id投影：按tenant/recipient/delivery及system或session接受阶段，
+读取同一只读/RLS快照内network_acceptance_proof.proof_json的已持久字段。生产回执事务
+原本已保存该证明，recipient表自身没有此列；缺证明返回null，错误ID保留原值，
+不从recipient_id推算、不改变原断言、表清单或其他表输出，也不修改产品落库与契约。
 本机设置准入用仅本进程持有的控制能力，HTTP 原生认证/同源/CSRF 另有插件测试，
 不把驱动当 GUI 点击或完整登录验收。
 
