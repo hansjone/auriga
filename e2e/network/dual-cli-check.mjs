@@ -3,10 +3,17 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generateKeyPairSync } from 'node:crypto';
 import { launchCli } from './support/dual-cli.mjs';
 import { defaultRuntime } from './support/native-install.mjs';
+import { createDualProxy } from './support/dual-proxy.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-assert.equal(process.argv.slice(2).join(' '), '--run');
+const args = process.argv.slice(2).join(' ');
+assert.ok(['--run', '--run --connect'].includes(args));
+const configured = args === '--run --connect';
+const scope = configured
+  ? 'two configured CLI profiles: settings active and login status 200 only; no login, PG or SEND'
+  : 'full CLI isolation/control only; no login, PG or SEND';
 await mkdir(join(root, 'e2e/network/target'), { recursive: true });
 const artifacts = await mkdtemp(
   join(root, 'e2e/network/target/dual-cli-check-'),
@@ -14,7 +21,22 @@ const artifacts = await mkdtemp(
 const hosts = [],
   evidence = [],
   failures = [];
+let proxy;
 try {
+  let roots;
+  if (configured) {
+    // No backend is attached and no login is attempted. This supplies a real
+    // random HTTPS installation origin/CA, never fake authenticated responses.
+    proxy = await createDualProxy(join(artifacts, 'private/tls'));
+    roots = [
+      {
+        kid: 'profile-check-root',
+        public_key_spki: generateKeyPairSync('ed25519')
+          .publicKey.export({ type: 'spki', format: 'der' })
+          .toString('base64url'),
+      },
+    ];
+  }
   for (const name of ['A', 'B']) {
     const h = await launchCli({
       root,
@@ -22,8 +44,43 @@ try {
       runtime: process.env.AURIGA_DSH_RUNTIME ?? defaultRuntime,
       artifacts,
       name,
+      ...(configured
+        ? {
+            ca: proxy.ca,
+            connect: {
+              platformOrigin: proxy.origin,
+              issuer: proxy.origin,
+              clientId: 'bridge-device',
+              providerId: 'example-provider',
+              deviceName: 'Example ' + name,
+              network: {
+                realm: '9223372036854775810',
+                roots,
+                wssUrl:
+                  proxy.origin.replace('https:', 'wss:') + '/nats/' + name,
+              },
+            },
+          }
+        : {}),
     });
     hosts.push(h);
+    if (configured) {
+      assert.equal(h.readiness.status.available, true);
+      assert.equal(h.readiness.status.loggedIn, false);
+      assert.equal(h.readiness.settings.activeOrigin, proxy.origin);
+      // The shutdown IPC must not weaken production native HTTP admission.
+      await assert.rejects(
+        h.control({ op: 'capabilities' }),
+        /\/send4\/control: 401/,
+      );
+      evidence.push({
+        name,
+        pid: h.pid,
+        profile: h.profile,
+        readiness: h.readiness,
+      });
+      continue;
+    }
     const created = await h.control({ op: 'create', id: 'send4-target' });
     const record = await h.control({ op: 'inspect', session: 'send4-target' });
     assert.ok(created.current && created.sessionCurrent && created.ordinary);
@@ -43,11 +100,16 @@ try {
     } catch (error) {
       failures.push(error);
     }
+  try {
+    await proxy?.close();
+  } catch (error) {
+    failures.push(error);
+  }
   await writeFile(
     join(artifacts, 'evidence.json'),
     JSON.stringify(
       {
-        scope: 'full CLI isolation/control only; no login, PG or SEND',
+        scope,
         evidence,
         failures: failures.map((v) => v.message),
       },
@@ -68,6 +130,6 @@ console.log(
   JSON.stringify({
     artifacts,
     hosts: 2,
-    scope: 'CLI only, not SEND acceptance',
+    scope,
   }),
 );

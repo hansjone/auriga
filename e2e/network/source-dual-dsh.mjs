@@ -325,6 +325,7 @@ export async function runDualDsh() {
           startTicks: processEvidence.startTicks,
         },
         profile: host.profile,
+        profileReady: host.readiness,
         dshHome: join(state, 'dsh'),
         cwd: join(state, 'cwd'),
         native: ordinary,

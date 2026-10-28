@@ -25,6 +25,13 @@ export function apply(parent) {
         events = [],
         prompts = [];
       const refs = new WeakMap();
+      const disposeOwners = async () => {
+        for (const owner of owners.values()) await owner.dispose();
+        assert.ok(
+          events.filter((v) => v.event === 'disposed').length >= owners.size,
+        );
+        owners.clear();
+      };
       let ref = 0;
       const identity = (value) => {
         if (!refs.has(value)) refs.set(value, ++ref);
@@ -148,13 +155,8 @@ export function apply(parent) {
                   await reader.close();
                 }
               } else if (command.op === 'stop') {
-                for (const owner of owners.values()) await owner.dispose();
-                assert.ok(
-                  events.filter((v) => v.event === 'disposed').length >=
-                    owners.size,
-                );
                 result = { disposed: owners.size };
-                owners.clear();
+                await disposeOwners();
                 res.once('finish', () => {
                   void ctx.root.fiber.dispose().catch(() => {
                     process.exitCode = 1;
@@ -176,6 +178,28 @@ export function apply(parent) {
           },
         }),
       );
+      // Parent-owned IPC carries shutdown only, including before platform login.
+      // Native HTTP admission remains unchanged; no business control uses IPC.
+      ctx.effect(() => {
+        let stopping = false;
+        const stop = (message) => {
+          if (message?.type !== 'send4-stop' || stopping) return;
+          stopping = true;
+          void (async () => {
+            try {
+              await disposeOwners();
+              await ctx.root.fiber.dispose();
+            } catch {
+              process.exitCode = 1;
+            } finally {
+              if (process.connected) process.disconnect();
+            }
+          })();
+        };
+        process.on('message', stop);
+        process.send?.({ type: 'send4-observer-ready' });
+        return () => process.off('message', stop);
+      });
     },
   );
 }

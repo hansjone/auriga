@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { natsTap, persistenceMarker } from './support/dual-proxy.mjs';
 import { replaceOnce } from './support/dual-prepare.mjs';
 import { mutate, sourcePath, verdict } from './support/dual-verdict.mjs';
-import { authenticatorCode } from './support/dual-cli.mjs';
+import { authenticatorCode, readyConnectProfile } from './support/dual-cli.mjs';
 import { dualEdgeConfig } from './support/dual-edge.mjs';
 import { join } from 'node:path';
 
@@ -15,6 +15,94 @@ test('普通登录的验证器按 RFC 6238 SHA1 当前真实计数生成六位�
     '287082',
   );
   assert.throws(() => authenticatorCode('invalid'));
+});
+
+test('CLI 启动地址不代表连接配置生效，须等公开 activeOrigin 后只检查一次 status', async () => {
+  const connect = {
+    platformOrigin: 'https://example.com',
+    deviceName: 'Example A',
+  };
+  const calls = [];
+  let pending = true;
+  const ready = await readyConnectProfile(
+    async (path) => {
+      calls.push(path);
+      if (path === '/auriga/settings/state') {
+        const activeOrigin = pending ? '' : connect.platformOrigin;
+        pending = false;
+        return { ...connect, activeOrigin };
+      }
+      assert.equal(pending, false);
+      return { available: true, loggedIn: false };
+    },
+    connect,
+    'A',
+  );
+  assert.equal(ready.settings.activeOrigin, connect.platformOrigin);
+  assert.deepEqual(calls, [
+    '/auriga/settings/state',
+    '/auriga/settings/state',
+    '/auriga/local-login/status',
+  ]);
+});
+
+test('连接配置错误、状态不可用或请求失败立即失败，不重试状态或重新登录', async () => {
+  const connect = {
+    platformOrigin: 'https://example.com',
+    deviceName: 'Example A',
+  };
+  for (const bad of [
+    { platformOrigin: 'https://other.example.com', activeOrigin: '' },
+    { ...connect, activeOrigin: 'https://other.example.com' },
+    { ...connect, activeOrigin: connect.platformOrigin, deviceName: 'wrong' },
+  ])
+    await assert.rejects(readyConnectProfile(async () => bad, connect, 'A'));
+  for (const status of [
+    { available: false, loggedIn: false },
+    { available: true, loggedIn: true },
+  ]) {
+    await assert.rejects(
+      readyConnectProfile(
+        async (path) =>
+          path === '/auriga/settings/state'
+            ? { ...connect, activeOrigin: connect.platformOrigin }
+            : status,
+        connect,
+        'A',
+      ),
+    );
+  }
+  let calls = 0;
+  await assert.rejects(
+    readyConnectProfile(
+      async () => {
+        calls++;
+        throw new Error('503');
+      },
+      connect,
+      'A',
+    ),
+    /503/,
+  );
+  assert.equal(calls, 1);
+  const paths = [];
+  await assert.rejects(
+    readyConnectProfile(
+      async (path) => {
+        paths.push(path);
+        if (path === '/auriga/settings/state')
+          return { ...connect, activeOrigin: connect.platformOrigin };
+        throw new Error('status: 503');
+      },
+      connect,
+      'A',
+    ),
+    /status: 503/,
+  );
+  assert.deepEqual(paths, [
+    '/auriga/settings/state',
+    '/auriga/local-login/status',
+  ]);
 });
 
 test('双 DSH edge 独立配置固定 network HTTPS 上游和私有信任材料', () => {

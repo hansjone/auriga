@@ -7,8 +7,9 @@
 
 **当前验证边界：** 已合入 EDGE-SUBMIT 独立 submit 上游修正（40846a8），
 路由 preflight 使用分别独立的 model HTTP 与 network HTTPS 上游，并核固定信任。
-双 CLI 的隔离、公开 agent 工厂、原生 session/provider 和正常退出预检已通过；
-本 Windows 沙箱的 `pg_ctl` 报 restricted-token 创建失败，全链尚未进入普通登录。
+主控对 bec49fc 的全链运行已通过宿主安装和 Java/Team/network/edge 启动，随后首次登录状态请求返回503。
+驱动现以公开设置的 activeOrigin 和原生 profile 依赖就绪为启动条件，两个真实 CLI 的
+配置及登录状态200预检通过；尚未重新取得完整普通登录/双向业务结果。
 因此以下收发/故障/反证断言是已实现的验收路径，不能据此宣称业务验收通过。
 `dual-dsh-blocker.zh.md` 描述的是修复候选合入前的历史首失。
 
@@ -22,6 +23,8 @@ node --test e2e/network/dual-dsh.test.mjs e2e/network/plugin-send.test.mjs
 node e2e/network/support/dual-prepare.mjs --compile
 node e2e/network/support/native-install.mjs --install
 node e2e/network/dual-cli-check.mjs --run
+# 启用真实连接配置，仅核两个隔离 profile 的 activeOrigin/status 与登录前准入，不认证：
+node e2e/network/dual-cli-check.mjs --run --connect
 # 真实 PG/Broker/HTTPS/WSS 与两个完整客户端；失败不会 skip：
 node e2e/network/source-dual-dsh.mjs --run
 # 提交后由主控在能启动 PG 的环境执行：
@@ -31,6 +34,9 @@ $head = (git rev-parse HEAD).Trim()
 ```
 
 `dual-cli-check` 只核两个完整 CLI 的公开控制、隔离和释放，未配置平台，不证明认证或 SEND。
+其 `--connect` 模式使用随机回环 HTTPS 安装 Origin、每端独立 network 配置及公开根公钥，
+不附加认证后端、不登录、不请求模型。要求两端 settings.activeOrigin 生效、status200且
+available=true/loggedIn=false，并确认登录前业务控制仍被原生准入拒绝401。
 直接运行全链默认安装本次独立锁定 runtime；开发时可通过 `AURIGA_DSH_RUNTIME` 指定
 已安装的锁定 rc.3 目录。归档验收清除此覆盖，每个变体自行安装，不继承其他工位 runtime。
 
@@ -60,6 +66,12 @@ $env:AURIGA_DSH_HOST_INSTALL_TIMEOUT_MS = '600000'
 `messages.json` 关联 message、delivery、recipient、digest、host_request_id 和签名回执。
 记录两个原生进程的 PID/父 PID、Windows 创建时间或 Linux boot/start ticks、对象谱系与 cwd。
 凭据/profile 和 TLS 私钥仅在测试私有目录，结束删除；启动票据仅留内存，日志脱敏。
+每端安装及 profile patch 后再次调用公开 `--dump-config`，保存 `A/B-configured-profile.log`；
+不要用安装前的 `A/B-profile.log` 判断最终插件启用或连接配置。
+驱动等待观察插件实际获得原生 profile 服务，并在既有30秒界限内核公开 settings 的
+platformOrigin/deviceName/activeOrigin，随后只请求一次初始 status；错误配置、HTTP错误及
+status503仍立即失败，不重试登录、不延长业务期限。`A/B-profile-ready.json` 只保存这些公开
+设置与 available/loggedIn，不保存 CSRF、启动票据或任何凭据。
 归档运行的 Java/PG 临时目录放在原工位 `e2e/network/target/dual-private-*`，独占创建并
 校验真实父路径，避免 Windows 原生 PG 的归档嵌套长路径问题；不删除其他运行的目录。
 先确认真实 Java/PG/gateway 可启动，再准备锁定 DSH runtime；启动失败不下载宿主，也不 skip。
@@ -98,6 +110,8 @@ preflight 另外运行真实 model/network handler 分流、IP/域名路由和�
 它观察并原样委托 prompt；不提供假 controller/agent，不直接调用工具定义 execute。
 该接口只存在测试插件目录，不进入 Auriga 成品。关闭时释放真实 agent handle 和根 fiber，
 要求 CLI、edge、gateway/Broker、Java/PG 正常退出；强制停止仍计失败。
+父进程持有的 IPC 只接收原生依赖就绪通知、发送单一停机命令；停机同样释放 agent handle
+并 dispose 根 fiber。它使登录前失败也能正常清理，不经 IPC 执行业务，也不绕过 HTTP 准入。
 
 ## 正控、故障和反证
 

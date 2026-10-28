@@ -18,6 +18,7 @@ $testPaths += @('e2e/network/support/native-process.mjs','e2e/network/support/na
 $testPaths += @('services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaHost.java','services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaWeb.java','services/platform-app/src/test/java/auriga/iam/NetworkSourceJavaDatabase.java')
 $testPaths += @('scripts/beta-ui/plugin-dsh.mjs','scripts/beta-ui/runner.mjs','e2e/network/host-install-cache.test.mjs')
 $testPaths += @('e2e/network/support/dual-edge.mjs','e2e/network/support/dual-edge_test.go','e2e/network/support/send4-platform-origin_test.go','e2e/network/verify-dual-dsh-preflight.ps1')
+$testPaths += @('e2e/network/dual-cli-check.mjs')
 $manifest = [ordered]@{head=$ExpectedHead; archiveSha256=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash; mode=$(if($Run){'Run'}else{'CompileOnly'}); variants=@(); complete=$false}
 function Save-Manifest { [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ($manifest | ConvertTo-Json -Depth 20), $utf8) }
 function Hashes([string]$Directory) { $result=[ordered]@{}; foreach($path in $testPaths){$result[$path]=(Get-FileHash -LiteralPath (Join-Path $Directory $path) -Algorithm SHA256).Hash}; return $result }

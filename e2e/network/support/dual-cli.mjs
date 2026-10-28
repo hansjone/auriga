@@ -34,6 +34,48 @@ export function authenticatorCode(secret, now = Date.now()) {
   );
 }
 
+// The CLI prints its URL before asynchronous profile injection/configuration
+// finishes. Use the public settings lifecycle, never retry a failed login call.
+export async function readyConnectProfile(
+  request,
+  connect,
+  name,
+  check = () => {},
+) {
+  const settings = await waitUntil(async () => {
+    check();
+    const value = await request('/auriga/settings/state');
+    assert.equal(
+      value.platformOrigin,
+      connect.platformOrigin,
+      name + ' profile platform',
+    );
+    assert.equal(
+      value.deviceName,
+      connect.deviceName ?? 'Auriga DSH',
+      name + ' profile device',
+    );
+    if (!value.activeOrigin) return null;
+    assert.equal(
+      value.activeOrigin,
+      connect.platformOrigin,
+      name + ' active platform',
+    );
+    return value;
+  }, name + ' configured profile never became active');
+  const status = await request('/auriga/local-login/status');
+  assert.equal(status.available, true, name + ' native login available');
+  assert.equal(
+    status.loggedIn,
+    false,
+    name + ' fresh profile must not be signed in',
+  );
+  return {
+    settings,
+    status: { available: status.available, loggedIn: status.loggedIn },
+  };
+}
+
 export async function launchCli({
   root,
   state,
@@ -115,6 +157,9 @@ export async function launchCli({
       JSON.stringify({ connect }) +
       '\n',
   );
+  // Like the proven Beta installer, record the effective configuration AFTER
+  // plugin installation and the profile patch, rather than only the empty base.
+  await invoke(['--profile', 'web', '--dump-config'], 'configured-profile');
   const child = spawn(
     process.execPath,
     [
@@ -131,12 +176,16 @@ export async function launchCli({
       cwd: join(state, 'cwd'),
       env,
       windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     },
   );
   let launch,
     closed,
+    observerReady = false,
     logs = '';
+  child.on('message', (message) => {
+    if (message?.type === 'send4-observer-ready') observerReady = true;
+  });
   const done = new Promise((resolve) =>
     child.once('close', (code, signal) => {
       closed = { code, signal };
@@ -194,7 +243,11 @@ export async function launchCli({
   const stop = async () => {
     try {
       if (!closed) {
-        if (origin) await request('/send4/control', { op: 'stop' });
+        assert.ok(
+          observerReady && child.connected,
+          name + ' owned shutdown channel unavailable',
+        );
+        child.send({ type: 'send4-stop' });
         const ended = await Promise.race([
           done,
           new Promise((resolve) => {
@@ -236,9 +289,33 @@ export async function launchCli({
     });
     accept(response);
     await response.arrayBuffer();
+    const checkProcess = () => {
+      if (closed) throw new Error(name + ' CLI exited before profile ready');
+    };
+    await waitUntil(() => {
+      checkProcess();
+      return observerReady;
+    }, name + ' native profile providers unavailable');
+    let readiness;
     if (connect) {
-      const initial = await request('/auriga/local-login/status');
-      assert.equal(initial.loggedIn, false);
+      readiness = await readyConnectProfile(
+        request,
+        connect,
+        name,
+        checkProcess,
+      );
+      await writeFile(
+        join(artifacts, name + '-profile-ready.json'),
+        JSON.stringify(
+          {
+            pid: child.pid,
+            profile,
+            ...readiness,
+          },
+          null,
+          2,
+        ),
+      );
     }
     return {
       name,
@@ -246,6 +323,7 @@ export async function launchCli({
       profile,
       pid: child.pid,
       origin,
+      readiness,
       request,
       stop,
       ledgerFile: join(profile, 'auriga-connect/network/host/ledger.json'),
@@ -328,10 +406,14 @@ export async function launchCli({
       },
     };
   } catch (error) {
-    child.kill();
-    await done;
-    capture.end();
-    await writeFile(join(artifacts, name + '-host.log'), logs);
+    try {
+      await stop();
+    } catch (cleanup) {
+      throw new AggregateError(
+        [error, cleanup],
+        name + ' startup and cleanup failed: ' + error.message,
+      );
+    }
     throw error;
   }
 }
