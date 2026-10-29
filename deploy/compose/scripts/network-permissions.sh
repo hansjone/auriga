@@ -7,8 +7,13 @@ NETWORK="$VAR/network"
 [ -d "$NETWORK" ] && [ ! -L "$NETWORK" ] || exit 1
 PLATFORM="$VAR/network-platform"
 [ -d "$PLATFORM" ] && [ ! -L "$PLATFORM" ] || exit 1
-[ "$(find "$PLATFORM" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ] || exit 1
-for name in gateway.secret platform.properties; do
+FILES='gateway.secret platform.properties'
+COUNT=2
+if [ -d "$VAR/collab-installation" ] && [ ! -L "$VAR/collab-installation" ]; then
+  FILES="$FILES collab.secret"; COUNT=3
+fi
+[ "$(find "$PLATFORM" -mindepth 1 -maxdepth 1 | wc -l)" -eq "$COUNT" ] || exit 1
+for name in $FILES; do
   path="$PLATFORM/$name"
   [ -f "$path" ] && [ ! -L "$path" ] && [ "$(stat -c '%h' "$path")" = 1 ] \
     || { echo 'invalid platform credential metadata' >&2; exit 1; }

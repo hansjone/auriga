@@ -1,0 +1,12 @@
+# Enabled only by the explicit installation's COMPOSE_FILE.
+services:
+  edge:
+    depends_on:
+      collab:
+        condition: service_healthy
+        required: true
+  network:
+    depends_on:
+      collab:
+        condition: service_healthy
+        required: true

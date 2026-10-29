@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ func main() {
 	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
 	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
+	collabFile := flag.String("network-collab-file", "", "explicit offline-approved standalone collab installation JSON")
 	validateOnly := flag.Bool("validate-access", false, "validate access and Compose support without writing materials")
 	proofs := flag.String("runtime-proofs", "", "isolated collected raw OCI proof root (first installation only)")
 	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
@@ -59,8 +61,16 @@ func main() {
 		fatalf("%v", err)
 	}
 	defer browser.Clear()
+	collab, err := readCollabInput(*collabFile, access)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer collab.clear()
 	if *validateOnly {
 		return
+	}
+	if collab != nil && runtime.GOOS != "linux" {
+		fatalf("standalone collab activation requires Linux; use -validate-access")
 	}
 	if *fixture != "fake" && *fixture != "real" {
 		fatalf("-fixture must be fake or real")
@@ -68,8 +78,12 @@ func main() {
 	if !fixtureImagePattern.MatchString(*image) || !strings.Contains(*image, "/"+*fixture+"-dsh@") {
 		fatalf("-image must use selected exact local fixture repository@sha256:digest")
 	}
-	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\nnetwork-wss-v2-https\n%s\n%s\n%t\n%t\n%s", *image, *fixture, *observer, *accessFile != "", browser.Digest()))...))
+	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%s\n%t\n%t\n%s", composeRecipe(access.PortalOrigin().Scheme == "https"), *image, *fixture, *observer, *accessFile != "", browser.Digest()))...))
 	inputDigest := hex.EncodeToString(input[:])
+	if collab != nil {
+		combinedInput := sha256.Sum256(append(input[:], []byte(collab.digest())...))
+		inputDigest = hex.EncodeToString(combinedInput[:])
+	}
 	existing, err := preflightRuntimeInstallation(*out)
 	if err != nil {
 		fatalf("%v", err)
@@ -122,6 +136,14 @@ func main() {
 	rpc := map[string]string{"Target": fmt.Sprintf("127.0.0.1:%d", iamRPCPort), "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": iamServerName}
 	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "172.29.240.1:18443", BrokerHost: "127.0.0.1", WebsocketHost: "172.29.240.1", BrokerURL: "tls://127.0.0.1:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil { // gitleaks:allow disposable M2 network
 		fatalf("generate network deployment: %v", err)
+	}
+	if access.PortalOrigin().Scheme == "https" {
+		if err := writeNativeClient(*out); err != nil {
+			fatalf("%v", err)
+		}
+	}
+	if err := writeCollab(*out, collab, access.Issuer()); err != nil {
+		fatalf("%v", err)
 	}
 	pub, fp, _, err := readIdentityPublic(*out)
 	if err != nil {
@@ -235,9 +257,17 @@ func main() {
 	if access.PortalOrigin().Scheme == "https" {
 		edgeCfg["tls"] = map[string]string{"mode": "files", "certFile": "/etc/auriga/https/browser.crt", "keyFile": "/etc/auriga/https/browser.key"}
 	}
+	if collab != nil {
+		edgeCfg["upstreams"].(map[string]string)["collab"] = "https://172.29.240.1:8085" // gitleaks:allow disposable M2 network
+		edgeCfg["collabHop"] = map[string]string{"certFile": "/etc/auriga/collab-edge/edge-collab.crt", "keyFile": "/etc/auriga/collab-edge/edge-collab.key", "caFile": "/etc/auriga/collab-edge/ca.crt", "serverName": "collab.network.internal"}
+	}
 	writeJSON(filepath.Join(*out, "edge.config.json"), edgeCfg, 0o644)
 	// Public values are derived from the validated installation; no credentials.
-	writeFile(filepath.Join(*out, "access.env"), composeAccessEnv(access, *accessFile != ""), 0o644)
+	accessEnv := composeAccessEnv(access, *accessFile != "")
+	if collab != nil {
+		accessEnv = append(accessEnv, []byte("COMPOSE_PROFILES='network-collab'\nCOMPOSE_FILE='docker-compose.yml:scripts/collab-required.yml'\nAURIGA_IAM_TENANT_DELEGATES='svc:edge,svc:ai-gateway,svc:collab'\n")...)
+	}
+	writeFile(filepath.Join(*out, "access.env"), accessEnv, 0o644)
 
 	policy := map[string]any{
 		"allowedImageRepos": []string{"127.0.0.1:5000/auriga/", "localhost:5000/auriga/"},

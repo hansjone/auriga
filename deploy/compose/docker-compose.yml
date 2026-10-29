@@ -14,6 +14,7 @@ services:
       - '15432:5432'
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+      - ./scripts/collab-roles.sql:/docker-entrypoint-initdb.d/02-collab-roles.sql:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U auriga_dev -d auriga']
@@ -76,7 +77,7 @@ services:
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
       AURIGA_GRPC_SERVER_TLS_PRIVATE_KEY: /etc/auriga/pki/iam.key
       AURIGA_GRPC_SERVER_TLS_TRUST_CERT_COLLECTION: /etc/auriga/pki/ca.crt
-      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway
+      AURIGA_GRPC_SERVER_TENANT_DELEGATES: ${AURIGA_IAM_TENANT_DELEGATES:-svc:edge,svc:ai-gateway}
       # Exact TCP source: fixed edge control-network address + local health probe.
       SPRING_APPLICATION_JSON: '{"auriga":{"iam":{"edge-hop":{"peer-addresses":["172.29.240.10","127.0.0.1"],"allow-loopback-http":false}}}}' # gitleaks:allow disposable M2 network
       AURIGA_IAM_JDBC_URL: jdbc:postgresql://127.0.0.1:15432/auriga
@@ -121,12 +122,59 @@ services:
       - ./var/iam-installation:/run/auriga-installation:ro
       - ./var/network-platform:/etc/auriga/network:ro
       - network-tokens:/run/auriga-network-token
+      - collab-tokens:/run/auriga-collab-token
       - internal-tokens:/run/auriga-internal
     healthcheck:
       test: ['CMD-SHELL', 'sh /etc/auriga/iam-healthcheck.sh']
       interval: 5s
       timeout: 5s
       retries: 60
+      start_period: 60s
+
+  collab:
+    profiles: [network-collab]
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.platform
+    user: '10002:10002'
+    group_add: ['65534']
+    cap_drop: [ALL]
+    read_only: true
+    security_opt: ['no-new-privileges:true']
+    network_mode: host
+    extra_hosts: ['platform:127.0.0.1']
+    entrypoint: ['/bin/sh', '/etc/auriga/collab-entrypoint.sh']
+    depends_on:
+      platform:
+        condition: service_healthy
+    tmpfs: ['/tmp:uid=10002,gid=10002,mode=0700']
+    volumes:
+      - ./scripts/collab-entrypoint.sh:/etc/auriga/collab-entrypoint.sh:ro
+      - ./var/collab-runtime/config:/etc/auriga/collab:ro
+      - ./var/collab-runtime/state:/var/lib/auriga/collab
+      - collab-tokens:/run/auriga-collab-token:ro
+    healthcheck:
+      test: [
+          'CMD',
+          'curl',
+          '--fail',
+          '--silent',
+          '--show-error',
+          '--noproxy',
+          '*',
+          '--cacert',
+          '/etc/auriga/collab/ca.crt',
+          '--cert',
+          '/etc/auriga/collab/client.crt',
+          '--key',
+          '/etc/auriga/collab/client.key',
+          '--resolve',
+          'collab.network.internal:8085:172.29.240.1', # gitleaks:allow disposable M2 bridge
+          'https://collab.network.internal:8085/actuator/health',
+        ] # gitleaks:allow disposable M2 network
+      interval: 5s
+      timeout: 5s
+      retries: 30
       start_period: 60s
 
   edge:
@@ -151,6 +199,9 @@ services:
         condition: service_healthy
       network:
         condition: service_healthy
+      collab:
+        condition: service_healthy
+        required: false
     command: ['-config', '/etc/auriga/edge.config.json']
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
@@ -164,6 +215,7 @@ services:
       - ./var/pki:/etc/auriga/pki
       - ./var/network-edge:/etc/auriga/network-edge:ro
       - ./var/edge-https:/etc/auriga/https:ro
+      - ./var/collab-edge:/etc/auriga/collab-edge:ro
       - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:ro
 
   network-broker:
@@ -201,6 +253,9 @@ services:
         condition: service_healthy
       network-broker:
         condition: service_started
+      collab:
+        condition: service_healthy
+        required: false
     volumes:
       - ./var/network:/etc/auriga/network:ro
       - ./var/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
@@ -265,6 +320,7 @@ volumes:
   natsdata:
   internal-tokens:
   network-tokens:
+  collab-tokens:
 
 networks:
   default:

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -10,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 )
 
 func TestComposeDirectHTTPSCLI(t *testing.T) {
@@ -85,6 +89,9 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			for i := 0; i < 2; i++ {
 				if b, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 					t.Fatalf("HTTPS generation/reentry: %v %s", err, b)
+				}
+				if err := checkNativeClient(out); err != nil {
+					t.Fatalf("HTTPS native client: %v", err)
 				}
 			}
 			for _, source := range []struct {
@@ -198,7 +205,17 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(receipt, append([]byte(strings.Repeat("0", 64)), sealed[64:]...), 0600); err != nil {
+			accessJSON, _, err := loadComposeAccess(input, "public-test-edge")
+			if err != nil {
+				t.Fatal(err)
+			}
+			browser, err := networkdeploy.ReadBrowserTLS(certFile, keyFile, true, dns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			legacy := sha256.Sum256(append(accessJSON, []byte(fmt.Sprintf("\nnetwork-wss-v2-https\n%s\nreal\nfalse\ntrue\n%s", image, browser.Digest()))...))
+			browser.Clear()
+			if err := os.WriteFile(receipt, append([]byte(fmt.Sprintf("%x", legacy)), sealed[64:]...), 0600); err != nil {
 				t.Fatal(err)
 			}
 			before = installationSnapshot(t, out)
