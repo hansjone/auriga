@@ -341,9 +341,25 @@ export function createSourceControl({
       }
     });
     sourceEvent('register result retained', {
-      result: ['registered', 'not_accepted', 'rejected'].includes(result.result)
+      result: ['registered', 'not_accepted', 'not_committed'].includes(
+        result.result,
+      )
         ? result.result
         : 'other',
+      failure_authority: ['collab', 'iam'].includes(
+        result.failure_evidence?.authority ?? '',
+      )
+        ? result.failure_evidence?.authority
+        : undefined,
+      failure_reason: [
+        'rejected_before_pending',
+        'original_connection_invalid_uncommitted',
+        'revision_mismatch',
+        'predecessor_not_head',
+        'lineage_stopped',
+      ].includes(result.failure_evidence?.reason ?? '')
+        ? result.failure_evidence?.reason
+        : undefined,
     });
     current();
     signal.throwIfAborted();
@@ -440,7 +456,13 @@ export function createSourceControl({
         if (['revoked', 'stopped'].includes(result.source.state))
           stopSource(draft, local, 'remote_stopped');
       }, w.checkNative);
-      sourceEvent('get observation retained');
+      sourceEvent('get observation retained', {
+        source_state: ['active', 'expired', 'revoked', 'stopped'].includes(
+          result.source.state,
+        )
+          ? result.source.state
+          : 'other',
+      });
       w.check();
       if (result.source.state === 'active') retryAt.set(local, now() + 15000);
       if (result.source.state === 'expired' && !entry(local).stopped)

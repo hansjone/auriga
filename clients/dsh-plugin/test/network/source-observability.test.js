@@ -384,9 +384,38 @@ test('actual Register/Get frames derive RPC traces, waiting is explicit, backgro
   );
   assert.notEqual(rpc[0].source_work_trace_id, rpc[2].source_work_trace_id);
   assert.ok(rpc.every((e) => e.attempt_id === undefined));
+  assert.deepEqual(
+    events
+      .filter((e) => e.message === 'Source get observation retained')
+      .map((e) => e.source_state),
+    ['active', 'active'],
+  );
 });
 
 test('native resolver rejection and RPC rejection preserve their distinct stages and fail closed', async (t) => {
+  await t.test(
+    'verified not_committed result retains the precise public rejection reason',
+    async (t) => {
+      const f = await setup(t, { failure: 'not_committed' });
+      const { events, text } = await capture(async () => {
+        await f.control.establish('1');
+        await f.control.idle();
+      });
+      const decision = events.find(
+        (e) => e.message === 'Source register result retained',
+      );
+      assert.equal(decision.result, 'not_committed');
+      assert.equal(decision.failure_authority, 'iam');
+      assert.equal(
+        decision.failure_reason,
+        'original_connection_invalid_uncommitted',
+      );
+      assert.equal(f.requests.length, 1);
+      assert.equal(f.ledger.peek().sourceControl.entries['1'].head, null);
+      assert.ok(!events.some((e) => e.operation === 'source_get'));
+      assert.ok(!text.includes('request_digest'));
+    },
+  );
   await t.test('native source resolver rejects before any RPC', async (t) => {
     const f = await setup(t);
     f.ctx.sessionController.resolveAgent = async () => ({
