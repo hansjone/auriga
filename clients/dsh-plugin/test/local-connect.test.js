@@ -500,11 +500,31 @@ test('loader network installation selects official device default after login an
     ],
   };
   const expected = structuredClone(network);
+  let registerStarted = false,
+    releaseRegister;
+  const registerResponse = new Promise((resolve) => {
+    releaseRegister = resolve;
+  });
+  const denyRegister = () =>
+    releaseRegister(
+      Response.json({ code: 'common.forbidden' }, { status: 403 }),
+    );
+  t.after(denyRegister);
   const { runtime, request, directory, requests, registered } =
-    await runtimePeer(t, { config: { network } });
+    await runtimePeer(t, {
+      config: { network },
+      networkRegister() {
+        registerStarted = true;
+        return registerResponse;
+      },
+    });
   network.realm = '2';
   network.roots[0].kid = 'injected';
+  // Team readiness is independent of network startup. Hold the real default
+  // provider at register so this assertion cannot sample a closing candidate.
+  await until(() => registerStarted, 'official default reached register');
   assert.equal(runtime.networkStatus.available, true);
+  assert.equal(runtime.networkStatus.state, 'connecting');
   assert.equal(runtime.networkStatus.connected, false);
   assert.equal(
     requests.some((path) => /tickets|keys|net\/v1/.test(path)),
@@ -529,6 +549,13 @@ test('loader network installation selects official device default after login an
     assert.equal(JSON.stringify(value).includes('public_key_spki'), false);
     assert.equal(JSON.stringify(value).includes(expected.wssUrl), false);
   }
+  denyRegister();
+  await until(
+    () => runtime.networkStatus.reason === 'forbidden',
+    'official default completed denied register cleanup',
+  );
+  assert.equal(runtime.networkStatus.available, true);
+  assert.equal(runtime.networkStatus.connected, false);
   // Even an internal adapter bypass cannot promote request data to installation authority.
   const attempt = { headers: {} };
   attempt.headers.cookie = runtime.prepare(attempt).setCookie.split(';')[0];
