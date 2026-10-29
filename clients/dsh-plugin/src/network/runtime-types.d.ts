@@ -90,6 +90,9 @@ export interface PreparedNetwork {
   };
 }
 export interface FullRuntimeOptions {
+  diagnostics?: ReturnType<
+    typeof import('./diagnostics.js').createAttemptDiagnostics
+  >;
   kind?: undefined;
   directory?: string;
   prepared: PreparedNetwork;
@@ -138,6 +141,9 @@ export interface PreparedConnection {
 export interface DeviceNetworkProvider {
   kind: 'device-connection';
   prepare(input: {
+    diagnostics?: ReturnType<
+      typeof import('./diagnostics.js').createAttemptDiagnostics
+    >;
     accessToken?: string;
     signal: AbortSignal;
     installation?: NetworkInstallation;
