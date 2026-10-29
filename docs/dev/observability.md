@@ -91,6 +91,14 @@ sink；锁标明 PID，活进程的槽不抢占，异常退出后的死 PID 槽�
    选择时间窗，粘贴 32 位 `trace_id`，服务可多选。Grafana 仅绑定主机回环；NAS 使用
    已有 SSH 通道 `ssh -L 13000:127.0.0.1:13000 <user>@<nas-host>` 访问，不改路由/DNS/信任。
    Loki/Alloy 不发布主机端口，只连隔离的 observability 网络。
+   Grafana 另接仅供它使用的普通 bridge `grafana-publish`，为 Docker 端口发布提供网关；
+   该 bridge 也允许 Grafana 默认出站，不接业务控制网。`observability` 仍为
+   `internal: true`，Loki/Alloy 不接发布网。仅连 internal bridge 不能满足这里的宿主
+   端口发布要求，依据见 [Docker internal 网络说明](https://docs.docker.com/compose/how-tos/networking/#internal-networks)。
+   启动后应核 `docker compose -f deploy/compose/docker-compose.yml --profile observability port grafana 3000`
+   和实际 `http://127.0.0.1:13000/api/health` 返回200且 `database=ok`；登录前还须确认
+   `/api/user` 未认证请求返回401。配置中的 `ports`、HostConfig声明或容器healthy均
+   不能替代上述公开入口检查；容器IP请求只作诊断对比。
    服务查询也可在 Explore 用 `{service="edge"}`；原始 JSON 的 `service` 与 Compose
    标签重名时显示为 `service_extracted`，例如容器 `network` 的业务服务为 ai-gateway。
    `trace_id` 在 JSON 中解析，**不作为高基数 Loki 索引标签**。

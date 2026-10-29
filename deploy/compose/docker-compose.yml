@@ -356,7 +356,8 @@ services:
     profiles: [observability]
     image: grafana/grafana:12.1.1
     ports: ['127.0.0.1:13000:3000']
-    networks: [observability]
+    # Published ports need a non-internal bridge; keep Loki/Alloy isolated.
+    networks: [observability, grafana-publish]
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: 'false'
       GF_USERS_ALLOW_SIGN_UP: 'false'
@@ -424,6 +425,9 @@ volumes:
 networks:
   observability:
     internal: true
+  grafana-publish:
+    driver: bridge
+    internal: false
   default:
     ipam:
       config:

@@ -3,7 +3,129 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { options, collect } from './collect.mjs';
+
+// Reuse the YAML parser already locked as a dependency of the root lint tool.
+// These are static topology guards, not proof that Docker published a port.
+const { load } = createRequire(import.meta.resolve('eslint'))('js-yaml');
+const composePath = new URL(
+  '../../deploy/compose/docker-compose.yml',
+  import.meta.url,
+);
+const serviceNetworks = (service) =>
+  service.network_mode
+    ? []
+    : Array.isArray(service.networks)
+      ? service.networks
+      : Object.keys(service.networks ?? { default: {} });
+function assertObservabilityTopology(compose) {
+  const { services, networks } = compose;
+  const grafana = services.grafana;
+  const publishingNetworks = serviceNetworks(grafana).filter(
+    (name) =>
+      networks[name] &&
+      networks[name].internal !== true &&
+      (networks[name].driver ?? 'bridge') === 'bridge' &&
+      networks[name].external !== true,
+  );
+  assert.ok(
+    publishingNetworks.length > 0,
+    'Grafana requires a non-internal bridge for port publishing',
+  );
+  assert.deepEqual(
+    grafana.ports,
+    ['127.0.0.1:13000:3000'],
+    'Grafana must publish only the documented loopback port',
+  );
+  assert.equal(
+    String(grafana.environment.GF_AUTH_ANONYMOUS_ENABLED),
+    'false',
+    'anonymous access must remain disabled',
+  );
+  assert.equal(
+    grafana.environment.GF_SECURITY_ADMIN_PASSWORD__FILE,
+    '/run/secrets/grafana-admin-password',
+  );
+  assert.ok(
+    grafana.volumes.includes(
+      './var/observability/grafana-admin-password:/run/secrets/grafana-admin-password:ro',
+    ),
+  );
+  assert.ok(
+    serviceNetworks(grafana).some(
+      (name) =>
+        networks[name]?.internal === true &&
+        serviceNetworks(services.loki).includes(name),
+    ),
+    'Grafana must retain its internal Loki connection',
+  );
+  for (const name of ['loki', 'alloy']) {
+    assert.deepEqual(
+      services[name].ports ?? [],
+      [],
+      `${name} must not publish a host port`,
+    );
+    assert.equal(services[name].network_mode, undefined);
+    assert.ok(
+      serviceNetworks(services[name]).every(
+        (network) => networks[network]?.internal === true,
+      ),
+      `${name} must remain on internal networks only`,
+    );
+  }
+  for (const [name, service] of Object.entries(services)) {
+    if (name !== 'grafana')
+      assert.ok(
+        !serviceNetworks(service).some((network) =>
+          publishingNetworks.includes(network),
+        ),
+        'Grafana publishing bridge must remain dedicated',
+      );
+  }
+  for (const name of ['grafana', 'loki', 'alloy'])
+    assert.deepEqual(services[name].profiles, ['observability']);
+}
+
+test('observability gives Grafana a publishing gateway while keeping backends isolated', async () => {
+  assertObservabilityTopology(load(await readFile(composePath, 'utf8')));
+});
+
+test('static observability guard rejects the original internal-only topology and unsafe alternatives', async () => {
+  const compose = load(await readFile(composePath, 'utf8'));
+  const internalOnly = globalThis.structuredClone(compose);
+  internalOnly.services.grafana.networks = serviceNetworks(
+    compose.services.grafana,
+  ).filter((name) => compose.networks[name].internal === true);
+  assert.throws(
+    () => assertObservabilityTopology(internalOnly),
+    /non-internal bridge/,
+  );
+  for (const mutate of [
+    (config) => {
+      config.services.grafana.ports = ['0.0.0.0:13000:3000'];
+    },
+    (config) => {
+      config.services.loki.ports = ['127.0.0.1:3100:3100'];
+    },
+    (config) => {
+      config.services.alloy.networks = [...config.services.grafana.networks];
+    },
+    (config) => {
+      config.services.grafana.networks = [
+        ...config.services.grafana.networks,
+        'default',
+      ];
+    },
+    (config) => {
+      config.services.grafana.environment.GF_AUTH_ANONYMOUS_ENABLED = 'true';
+    },
+  ]) {
+    const unsafe = globalThis.structuredClone(compose);
+    mutate(unsafe);
+    assert.throws(() => assertObservabilityTopology(unsafe));
+  }
+});
 
 const trace = '4bf92f3577b34da6a3ce929d0e0e4736';
 test('read-only collector fixture records exact Docker arguments, local trace selection, plugin time filter and masking', async () => {
