@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { writeSync } from 'node:fs';
 
 // This is a logging protocol, not a new status/observer surface. Never serialize
 // an exception, request, identity or caller-supplied diagnostic object.
@@ -114,37 +115,181 @@ export function diagnosticErrno(error, code) {
 const integer = (value) =>
   Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 2147483647) : 0;
 
+const LOGGER_NAME = 'auriga-network-diagnostic';
+const PREFIX = 'auriga_network_diagnostic ';
+const SINK = Symbol('auriga network diagnostic sink');
+/** The context inherits only an opaque token, never the writer/permit itself.
+ * @type {WeakMap<object, {readonly active:boolean,send:(line:string)=>boolean}>} */
+const sinks = new WeakMap();
+const EVENT_KEYS = [
+  'v',
+  'event',
+  'phase',
+  'code',
+  'http_status',
+  'errno',
+  'elapsed_ms',
+  'budget_ms',
+  'generation',
+  'attempt',
+  'cancelled',
+  'created',
+];
+/** @param {Record<string, any>} event */
+function encodeEvent(event) {
+  if (
+    Object.keys(event).length !== EVENT_KEYS.length ||
+    !EVENT_KEYS.every((key) => Object.hasOwn(event, key)) ||
+    event.v !== 1 ||
+    !['failure', 'ledger_restored', 'ready'].includes(event.event) ||
+    !DIAGNOSTIC_PHASES.includes(event.phase) ||
+    !DIAGNOSTIC_CODES.includes(event.code) ||
+    !(event.errno === 'none' || DIAGNOSTIC_ERRNOS.includes(event.errno)) ||
+    !(
+      Number.isInteger(event.http_status) &&
+      (event.http_status === 0 ||
+        (event.http_status >= 400 && event.http_status <= 599))
+    ) ||
+    !['elapsed_ms', 'budget_ms', 'generation', 'attempt'].every(
+      (key) =>
+        Number.isInteger(event[key]) &&
+        event[key] >= 0 &&
+        event[key] <= 2147483647,
+    ) ||
+    typeof event.cancelled !== 'boolean' ||
+    !(event.created === null || typeof event.created === 'boolean')
+  )
+    return;
+  const line = PREFIX + JSON.stringify(event);
+  return Buffer.byteLength(line, 'utf8') <= 2048 ? line : undefined;
+}
+
+/** Install once on the plugin context. Descendants inherit its private symbol;
+ * sibling plugin instances own separate permits and never duplicate each other.
+ * Cordis's default exporter only buffers, and its default level excludes warn.
+ * @param {any} ctx */
+export function installNetworkDiagnosticSink(ctx) {
+  /** @type {undefined|(()=>unknown)} */ let remove;
+  /** @type {undefined|{line:string,delivered:boolean}} */ let pending;
+  let active = true;
+  try {
+    if (sinks.get(ctx?.[SINK])?.active) return;
+    const service = ctx?.logger;
+    if (
+      typeof service !== 'function' ||
+      typeof service.exporter !== 'function' ||
+      typeof ctx.effect !== 'function'
+    )
+      return;
+    const logger = service(LOGGER_NAME);
+    const sink = {
+      get active() {
+        return active;
+      },
+      /** The permit exists only during this exact producer call. */
+      send(/** @type {string} */ line) {
+        if (!active || pending) return false;
+        ctx.fiber?.assertActive?.();
+        const permit = { line, delivered: false };
+        pending = permit;
+        try {
+          logger.warn(line);
+        } finally {
+          if (pending === permit) pending = undefined;
+        }
+        return permit.delivered;
+      },
+    };
+    remove = service.exporter({
+      levels: { default: -1, [LOGGER_NAME]: 2 },
+      export(/** @type {any} */ message) {
+        try {
+          if (
+            !active ||
+            !pending ||
+            message.name !== LOGGER_NAME ||
+            message.type !== 'warn' ||
+            !Array.isArray(message.args) ||
+            message.args.length !== 1 ||
+            message.args[0] !== pending.line
+          )
+            return;
+          const permit = pending;
+          pending = undefined; // One use: synchronous replay cannot duplicate it.
+          // A bounded synchronous fd write also catches closed-pipe failures;
+          // no global stderr listener, formatter, metadata or raw log fallback.
+          const line = permit.line + '\n';
+          permit.delivered =
+            writeSync(2, line) === Buffer.byteLength(line, 'utf8');
+        } catch {
+          /* A diagnostic sink cannot change network control flow. */
+        }
+      },
+    });
+    ctx.effect(
+      () => () => {
+        active = false;
+        pending = undefined;
+      },
+      'auriga-dsh: network diagnostic sink',
+    );
+    const token = Object.freeze({});
+    sinks.set(token, sink);
+    Object.defineProperty(ctx, SINK, { value: token, configurable: true });
+  } catch {
+    active = false;
+    pending = undefined;
+    try {
+      Promise.resolve(remove?.()).catch(() => {});
+    } catch {
+      /* No fallback to raw logs. */
+    }
+  }
+}
+
 /** One gate per login generation. Repeated identical failures are silent; up to
  * 24 distinct failure signatures and two milestones, regardless of retry count.
  * @param {any} ctx @param {number} generation */
 export function createDiagnosticLog(ctx, generation = 0) {
   const seen = new Set();
   let failures = 0;
+  // Capture the owning installation. An old emitter cannot use a newly installed
+  // sink after its plugin has been disposed/reloaded.
+  /** @type {any} */ let sink;
+  try {
+    sink = sinks.get(ctx?.[SINK]);
+  } catch {
+    /* Non-Cordis library consumers remain supported. */
+  }
   /** @param {Record<string, any>} event */
   return (event) => {
-    const signature = [
-      event.event,
-      event.phase,
-      event.code,
-      event.http_status,
-      event.errno,
-    ].join('|');
-    if (seen.has(signature) || (event.event === 'failure' && failures >= 24))
-      return;
     try {
-      // A single string works with Cordis's normal console sink. No exception or
-      // metadata argument can be inherited by a formatter. Logger absence/failure
-      // must never become a business failure (including throwing context proxies).
-      const logger = ctx?.logger;
-      if (typeof logger?.warn !== 'function') return;
-      logger.warn(
-        'auriga_network_diagnostic ' +
-          JSON.stringify({
-            v: 1,
-            ...event,
-            generation: integer(generation),
-          }),
-      );
+      const line = encodeEvent({
+        v: 1,
+        ...event,
+        generation: integer(generation),
+      });
+      if (!line) return;
+      const signature = [
+        event.event,
+        event.phase,
+        event.code,
+        event.http_status,
+        event.errno,
+      ].join('|');
+      if (seen.has(signature) || (event.event === 'failure' && failures >= 24))
+        return;
+      if (sink) {
+        if (!sink.active) return;
+        ctx.fiber?.assertActive?.();
+        if (!sink.send(line)) return;
+      } else {
+        // Library consumers may supply their own logger. This path promises no
+        // stdio sink; the actual plugin installs the public Cordis exporter above.
+        const logger = ctx?.logger;
+        if (typeof logger?.warn !== 'function') return;
+        logger.warn(line);
+      }
       seen.add(signature);
       if (event.event === 'failure') failures++;
     } catch {
