@@ -36,6 +36,12 @@ import (
 const iamRPCPort = 9091
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "key-rotation" {
+		if err := keyRotationCLI(os.Args[2:]); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	out := flag.String("out", "deploy/compose/var", "output directory")
 	image := flag.String("image", "", "docker image ref repo@sha256:… for fake DSH template")
 	fixture := flag.String("fixture", "fake", "DSH fixture: fake or real")
