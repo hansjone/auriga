@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CODES, HostSeamError } from './errors.js';
+import { diagnosticReason } from '../diagnostics.js';
 
 const MAIN = 'ledger.json';
 const TMP = 'ledger.json.tmp';
@@ -93,7 +94,10 @@ export function createFileLedgerStore({
         !heldInProcess.has(lockPath) &&
         (pid === null || pid === process.pid || !isAlive(pid));
       if (!stale || round > 0)
-        throw new HostSeamError(CODES.ledgerUnavailable, 'ledger locked');
+        throw diagnosticReason(
+          new HostSeamError(CODES.ledgerUnavailable, 'ledger locked'),
+          'ledger_locked',
+        );
       await fs.rm(lockPath, { force: true });
     }
   }
@@ -103,7 +107,10 @@ export function createFileLedgerStore({
     async open() {
       await fs.mkdir(dir, { recursive: true });
       if (heldInProcess.has(lockPath))
-        throw new HostSeamError(CODES.ledgerUnavailable, 'ledger locked');
+        throw diagnosticReason(
+          new HostSeamError(CODES.ledgerUnavailable, 'ledger locked'),
+          'ledger_locked',
+        );
       const token = randomBytes(16).toString('hex');
       await acquire(token);
       heldInProcess.add(lockPath);

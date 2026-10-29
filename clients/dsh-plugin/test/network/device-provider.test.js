@@ -3,6 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { setImmediate } from 'node:timers';
+import {
+  createAttemptDiagnostics,
+  createDiagnosticLog,
+} from '../../src/network/diagnostics.js';
+import { openConnectionRuntime } from '../../src/network/connection-runtime.js';
+import { createMemoryLedgerStore } from '../../src/network/host/store.js';
 import { openTrustStore } from '../../src/network/trust/store.js';
 import {
   publicationFixture,
@@ -11,7 +17,7 @@ import {
   testRoots,
 } from './trust/keyset-fixtures.js';
 
-async function deviceFixture(t, clockOffset = 0) {
+async function deviceFixture(t, clockOffset = 0, diagnostics) {
   const { createDeviceProvider } = await import(
     process.env.AURIGA_DEVICE_PROVIDER_MODULE ??
       '../../src/network/device-provider.js'
@@ -67,7 +73,10 @@ async function deviceFixture(t, clockOffset = 0) {
     now: () => now() + clockOffset,
   });
   const controller = new AbortController();
-  const prepared = await provider.prepare({ signal: controller.signal });
+  const prepared = await provider.prepare({
+    signal: controller.signal,
+    diagnostics,
+  });
   assert.equal(prepared.origin, 'https://portal.example.com');
   assert.notEqual(new URL(prepared.url).host, new URL(prepared.origin).host);
   return {
@@ -82,6 +91,82 @@ async function deviceFixture(t, clockOffset = 0) {
     },
   };
 }
+
+for (const [name, respond, phase, code, status] of [
+  [
+    'HTTP拒绝',
+    () =>
+      Response.json(
+        { code: 'SECRET-code', headers: 'SECRET-headers' },
+        { status: 503 },
+      ),
+    'register_http',
+    'http_error',
+    503,
+  ],
+  [
+    'HTTP传输失败',
+    () => {
+      throw Object.assign(new Error('SECRET-url'), { code: 'SECRET-code' });
+    },
+    'register_http',
+    'control_unavailable',
+    0,
+  ],
+  [
+    '响应身份不符',
+    () => Response.json({ tenant: 'SECRET-tenant' }),
+    'register_validate',
+    'response_invalid',
+    0,
+  ],
+  [
+    '严格JSON重复字段',
+    () => new Response('{"created":true,"created":false}'),
+    'register_validate',
+    'network.protocol_error',
+    0,
+  ],
+])
+  test('安全日志官方provider区分' + name, async (t) => {
+    const lines = [];
+    const ctx = { logger: { warn: (line) => lines.push(line) } };
+    const diagnostics = createAttemptDiagnostics({
+      emit: createDiagnosticLog(ctx, 1),
+      valid: () => true,
+    });
+    const f = await deviceFixture(t, 0, diagnostics);
+    f.respond(respond);
+    const runtime = await openConnectionRuntime({
+      kind: 'device-connection',
+      prepared: f.prepared,
+      diagnostics,
+      ctx,
+      getAccess: async () => 'unused',
+      authorizeLocal: async () => false,
+      signal: f.controller.signal,
+      stores: {
+        ledger: createMemoryLedgerStore(),
+        trust: createMemoryLedgerStore(),
+      },
+    });
+    try {
+      await assert.rejects(runtime.start());
+    } finally {
+      await runtime.close();
+    }
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].includes('SECRET'), false);
+    const event = JSON.parse(
+      lines[0].slice('auriga_network_diagnostic '.length),
+    );
+    assert.equal(event.phase, phase);
+    assert.equal(event.code, code);
+    assert.equal(event.http_status, status);
+    assert.equal(event.created, null);
+    assert.equal(event.budget_ms, phase === 'register_http' ? 15000 : 0);
+    assert.equal(f.calls.length, 1);
+  });
 
 test('device submit uses the fixed HTTPS path, device bearer and complete original bytes', async (t) => {
   const f = await deviceFixture(t);

@@ -9,6 +9,7 @@ import {
 } from './limits.js';
 import { SendQueue } from './send-queue.js';
 import { createWsSocketFactory } from './ws-socket.js';
+import { diagnosticErrno, socketDiagnosticErrno } from '../diagnostics.js';
 
 /**
  * @typedef {{ jwt: string, nkeySeed?: string } | { token: string }} TicketAuth
@@ -184,6 +185,8 @@ export class NatsLink {
     }
     this.#state = 'connecting';
     const o = this.#opts;
+    let socketErrno = 'none';
+    let removeDiagnosticListener = () => {};
     try {
       const authenticator = buildAuthenticator(o.auth, this.#nats);
       // Default is production `ws` (has terminate). Injected factories that omit
@@ -204,6 +207,20 @@ export class NatsLink {
             throw new TransportError('closed', 'link closed');
           }
           const inner = await createSocket(url);
+          // NATS's WebSocket adapter drops event.error.code. Retain only one
+          // allowlisted errno during this handshake, never the event or message.
+          const capture = (/** @type {unknown} */ event) => {
+            if (socketErrno === 'none')
+              socketErrno = socketDiagnosticErrno(event);
+          };
+          try {
+            removeDiagnosticListener();
+            inner?.addEventListener?.('error', capture);
+            removeDiagnosticListener = () =>
+              inner?.removeEventListener?.('error', capture);
+          } catch {
+            /* Diagnostic support cannot change socket capability. */
+          }
           if (typeof inner?.terminate !== 'function') {
             try {
               inner?.close?.();
@@ -280,8 +297,15 @@ export class NatsLink {
         error instanceof TransportError
           ? error
           : classifyClose(/** @type {Error} */ (error));
+      diagnosticErrno(failure, socketErrno);
       this.#fail(failure);
       throw failure;
+    } finally {
+      try {
+        removeDiagnosticListener();
+      } catch {
+        /* Best effort diagnostics. */
+      }
     }
   }
 
