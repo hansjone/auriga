@@ -1,3 +1,4 @@
+import { newTraceparent, logEvent } from '../observability/index.js';
 import { AdapterError, check, integer, only, text } from './guard.js';
 import { buildRequest } from './request.js';
 import { responseState } from './response.js';
@@ -97,10 +98,14 @@ export function createAurigaAdapter(options) {
     op.watch(revoked, 'AUTH');
     op.expire(expiresAt);
     op.assert();
+    const parent = newTraceparent();
+    const trace = { trace_id: parent.slice(3, 35), path: `/ai/v1/${path}` };
+    logEvent('INFO', 'AI request started', trace);
     const pending = controlledFetch(`${origin}/ai/v1/${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       headers: {
         ...hostApi.attributionHeaders(),
+        traceparent: parent,
         authorization: `Bearer ${token}`,
         accept:
           body === undefined || mode === 'json'
@@ -115,6 +120,10 @@ export function createAurigaAdapter(options) {
       signal: op.signal,
       ...(body === undefined ? {} : { body }),
     }).then((response) => {
+      logEvent(response.ok ? 'INFO' : 'WARN', 'AI response received', {
+        ...trace,
+        http_status: response.status,
+      });
       if (op.signal.aborted) void response.body?.cancel().catch(() => {});
       return response;
     });

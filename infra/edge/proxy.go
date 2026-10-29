@@ -37,7 +37,7 @@ func newReverseProxy(target *url.URL, tr http.RoundTripper, keepHost bool) *http
 		},
 		Transport: tr,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			slog.Default().Warn("upstream request failed", "target", target.Redacted(), "path", r.URL.Path, "error", err)
+			slog.Default().WarnContext(r.Context(), "upstream request failed", "target", target.Redacted(), "path", r.URL.Path, "error", err)
 			writeProblem(w, problem(http.StatusBadGateway, "edge.upstream_error", "Bad Gateway", "upstream unavailable", requestID(r)))
 		},
 	}

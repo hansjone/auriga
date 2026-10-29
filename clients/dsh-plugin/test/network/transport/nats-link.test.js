@@ -268,6 +268,29 @@ describe(
       await link.close();
     });
 
+    test('tracing preserves the exact 64 KiB broker payload budget and sends no headers', async () => {
+      const peer = await openPeer();
+      const received = [];
+      peer.subscribe(UP, {
+        callback: (_error, message) => received.push(message),
+      });
+      await peer.flush();
+      const { link } = await openLink();
+      const frame = JSON.stringify({
+        request_id: 'f20d474e-07d3-48db-9f32-930a43329c02',
+        type: 'fetch',
+      });
+      const payload = text(
+        frame + ' '.repeat(65536 - Buffer.byteLength(frame)),
+      );
+      await link.send(payload);
+      await waitFor(() => received.length === 1, 'maximum payload delivered');
+      assert.equal(received[0].data.byteLength, 65536);
+      assert.equal(received[0].headers, undefined);
+      assert.deepEqual(received[0].data, payload);
+      await link.close();
+    });
+
     test('an inbound message over the payload limit fails the link with protocol_error', async () => {
       const peer = await openPeer();
       const { link, received, closed } = await openLink({

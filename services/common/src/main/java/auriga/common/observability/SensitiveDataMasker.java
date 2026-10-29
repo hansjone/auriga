@@ -15,10 +15,15 @@ public final class SensitiveDataMasker {
 
   private static final String SECRET_KEYS =
       "password|passwd|pwd|secret|client_secret|token|access_token|refresh_token|id_token|"
-          + "api[_-]?key|private[_-]?key|credential|cookie|authorization|session[_-]?token";
+          + "api[_-]?key|private[_-]?key|credential|cookie|authorization|session[_-]?token|totp|otp|"
+          + "[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?";
 
   private static final List<Rule> RULES =
       List.of(
+          new Rule(
+              Pattern.compile(
+                  "-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----[\\s\\S]*?-----END (?:[A-Z ]*PRIVATE KEY)-----"),
+              MASK),
           // Authorization: Bearer xxx / Basic xxx
           new Rule(
               Pattern.compile("(?i)\\b(bearer|basic)\\s+[A-Za-z0-9._~+/=-]{6,}"), "$1 " + MASK),

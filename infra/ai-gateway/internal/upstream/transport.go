@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"io"
 	"net"
 	"net/http"
@@ -221,6 +222,9 @@ func (c *Client) Transport(ctx context.Context, s relay.Submission, secret []byt
 		return x, fault("ai.upstream_unavailable")
 	}
 	request.GetBody = nil // No replay, including the standard transport retry path.
+	if parent := observability.Parent(ctx); parent != "" {
+		request.Header.Set("traceparent", parent)
+	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept-Encoding", "identity")
 	request.Header.Set("Authorization", "Bearer "+string(secret))

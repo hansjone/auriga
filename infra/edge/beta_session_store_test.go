@@ -29,10 +29,7 @@ func TestBetaMemorySessionProjectionReproducesLogin503(t *testing.T) {
 	if w.Code != 503 || backend.introspects != 1 || backend.touches != 1 {
 		t.Fatalf("expected projection failure after successful RPCs: status=%d introspects=%d touches=%d", w.Code, backend.introspects, backend.touches)
 	}
-	var event map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &event); err != nil {
-		t.Fatalf("missing structured rejection warning: %v", err)
-	}
+	event := singleBetaWarning(t, logs.Bytes())
 	requestID, requestIDOK := event["requestId"].(string)
 	if event["level"] != "WARN" || event["reason"] != "browser_session_unavailable" || !requestIDOK || requestID == "" {
 		t.Fatalf("missing rejection category/request ID: %v", event)
@@ -108,10 +105,7 @@ func TestBeta503CategoriesDoNotLogCredentials(t *testing.T) {
 			if response.Code != 503 {
 				t.Fatalf("expected 503, got %d", response.Code)
 			}
-			var event map[string]any
-			if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &event); err != nil {
-				t.Fatal("missing one structured WARN:", err)
-			}
+			event := singleBetaWarning(t, logs.Bytes())
 			if event["level"] != "WARN" || event["reason"] != reason || event["requestId"] == nil {
 				t.Fatalf("wrong rejection category: %v", event)
 			}
@@ -120,4 +114,22 @@ func TestBeta503CategoriesDoNotLogCredentials(t *testing.T) {
 			}
 		})
 	}
+}
+
+func singleBetaWarning(t *testing.T, lines []byte) map[string]any {
+	t.Helper()
+	var warnings []map[string]any
+	for _, line := range bytes.Split(bytes.TrimSpace(lines), []byte("\n")) {
+		var event map[string]any
+		if err := json.Unmarshal(line, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event["level"] == "WARN" {
+			warnings = append(warnings, event)
+		}
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected one structured WARN, got %d", len(warnings))
+	}
+	return warnings[0]
 }

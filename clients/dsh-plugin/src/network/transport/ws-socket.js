@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { newTraceparent, logEvent } from '../../observability/index.js';
 import { normalizeOrigin } from '../../settings/store.js';
 
 /**
@@ -21,10 +22,17 @@ export function createWsSocketFactory(tls = {}) {
     throw new Error('invalidOrigin');
   const origin =
     tls.origin === undefined ? undefined : normalizeOrigin(tls.origin);
-  return (url) =>
-    new WebSocket(url, {
+  return (url) => {
+    const parent = newTraceparent();
+    logEvent('INFO', 'WSS connection started', {
+      trace_id: parent.slice(3, 35),
+      path: new URL(url).pathname,
+    });
+    return new WebSocket(url, {
+      headers: { traceparent: parent },
       rejectUnauthorized,
       ...(tls.ca !== undefined ? { ca: tls.ca } : {}),
       ...(origin !== undefined ? { origin } : {}),
     });
+  };
 }

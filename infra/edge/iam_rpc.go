@@ -122,7 +122,7 @@ func (c *iamRPC) sessionContext(ctx context.Context, tenant string) (context.Con
 		cancel()
 		return nil, nil, errIAMUnavailable
 	}
-	return metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+token, "auriga-tenant-id", tenant)), cancel, nil
+	return metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+token, "auriga-tenant-id", tenant, "traceparent", edgeTraceparent(ctx))), cancel, nil
 }
 
 func (c *iamRPC) IntrospectSession(ctx context.Context, cookie, audience, tenant string) (*iamv1.IntrospectSessionResponse, error) {
@@ -242,7 +242,7 @@ func (c *iamRPC) Verify(ctx context.Context, cookie, token string, expected *Ses
 	if err != nil {
 		return errIAMUnavailable
 	}
-	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+serviceToken, "auriga-tenant-id", expected.TenantID))
+	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+serviceToken, "auriga-tenant-id", expected.TenantID, "traceparent", edgeTraceparent(ctx)))
 	response, err := c.client.VerifyAdminSessionCsrf(ctx, &iamv1.VerifyAdminSessionCsrfRequest{SessionToken: cookie, CsrfToken: token})
 	if err != nil {
 		if status.Code(err) == codes.Unauthenticated {

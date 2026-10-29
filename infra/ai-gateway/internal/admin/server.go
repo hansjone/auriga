@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"io"
 	"math/big"
 	"net/http"
@@ -145,6 +146,8 @@ func response(status int, value any, revision int64) (result, error) {
 func etag(revision int64) string { return `"` + strconv.FormatInt(revision, 10) + `"` }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r, finishTrace := observability.Begin(w, r)
+	defer finishTrace()
 	w.Header().Set("Cache-Control", "no-store")
 	o, ok := route(r.Method, r.URL.EscapedPath())
 	if !ok {

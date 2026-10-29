@@ -3,8 +3,15 @@
 # never join the control network or gain a default route to external networks.
 name: auriga-m2
 
+x-log-options: &log-options
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   postgres:
+    logging: *log-options
     image: postgres:17
     environment:
       POSTGRES_DB: auriga
@@ -23,6 +30,7 @@ services:
       retries: 30
 
   nats:
+    logging: *log-options
     # alpine variant: official scratch image has no wget for healthchecks
     image: nats:2.10-alpine
     command: ['-c', '/etc/nats/nats.conf']
@@ -39,11 +47,13 @@ services:
       retries: 30
 
   registry:
+    logging: *log-options
     image: registry:2
     ports:
       - '5000:5000'
 
   platform:
+    logging: *log-options
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.platform
@@ -58,6 +68,7 @@ services:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: combined,dev
+      AURIGA_LOG_LEVEL: ${AURIGA_LOG_LEVEL:-INFO}
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
       AURIGA_PLATFORM_PORT: '8081'
       # dev supplies seed data only; explicitly retain the production TLS hop.
@@ -132,7 +143,10 @@ services:
       start_period: 60s
 
   collab:
+    logging: *log-options
     profiles: [network-collab]
+    environment:
+      AURIGA_LOG_LEVEL: ${AURIGA_LOG_LEVEL:-INFO}
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.platform
@@ -178,6 +192,7 @@ services:
       start_period: 60s
 
   edge:
+    logging: *log-options
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
@@ -205,6 +220,7 @@ services:
     command: ['-config', '/etc/auriga/edge.config.json']
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
+      AURIGA_LOG_LEVEL: ${AURIGA_LOG_LEVEL:-INFO}
     volumes:
       - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
@@ -219,6 +235,7 @@ services:
       - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:ro
 
   network-broker:
+    logging: *log-options
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
@@ -236,6 +253,7 @@ services:
       - ./var/network/server-ca.pem:/etc/auriga/network/server-ca.pem:ro
 
   network:
+    logging: *log-options
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
@@ -247,6 +265,8 @@ services:
     network_mode: host
     restart: on-failure
     entrypoint: ['/auriga-ai-gateway']
+    environment:
+      AURIGA_LOG_LEVEL: ${AURIGA_LOG_LEVEL:-INFO}
     command: ['--network-config', '/etc/auriga/network/runtime.json']
     depends_on:
       platform:
@@ -274,6 +294,7 @@ services:
       retries: 30
 
   agent:
+    logging: *log-options
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.agent
@@ -315,7 +336,85 @@ services:
       - ./var/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
       - ./var/runtime-proofs:/etc/auriga/runtime-proofs:ro
 
+  loki:
+    logging: *log-options
+    profiles: [observability]
+    image: grafana/loki:3.5.5
+    command: ['-config.file=/etc/loki/auriga.yml']
+    networks: [observability]
+    volumes:
+      - ./observability/loki.yml:/etc/loki/auriga.yml:ro
+      - lokidata:/loki
+    healthcheck:
+      test: ['CMD', '/busybox/wget', '-qO-', 'http://127.0.0.1:3100/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  grafana:
+    logging: *log-options
+    profiles: [observability]
+    image: grafana/grafana:12.1.1
+    ports: ['127.0.0.1:13000:3000']
+    networks: [observability]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_SECURITY_ADMIN_USER: auriga-admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
+      GF_LOG_MODE: console
+      GF_LOG_CONSOLE_FORMAT: json
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./var/observability/grafana-admin-password:/run/secrets/grafana-admin-password:ro
+      - ./observability/grafana/datasources.yml:/etc/grafana/provisioning/datasources/auriga.yml:ro
+      - ./observability/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/auriga.yml:ro
+      - ./observability/grafana/trace.json:/var/lib/grafana/dashboards/auriga-trace.json:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/api/health']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  alloy:
+    logging: *log-options
+    profiles: [observability]
+    image: grafana/alloy:v1.10.2
+    command:
+      [
+        'run',
+        '--storage.path=/var/lib/alloy',
+        '--server.http.listen-addr=127.0.0.1:12345',
+        '/etc/alloy/config.alloy',
+      ]
+    networks: [observability]
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-auriga-m2}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - ./observability/health.sh:/etc/alloy/health.sh:ro
+      - ${AURIGA_PLUGIN_LOG_DIR:-./var/plugin-logs}:/var/log/auriga-plugin:ro
+      - alloydata:/var/lib/alloy
+    depends_on:
+      loki:
+        condition: service_healthy
+
+    healthcheck:
+      test: ['CMD', '/bin/bash', '/etc/alloy/health.sh']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
 volumes:
+  lokidata:
+  grafanadata:
+  alloydata:
   pgdata:
   natsdata:
   internal-tokens:
@@ -323,6 +422,8 @@ volumes:
   collab-tokens:
 
 networks:
+  observability:
+    internal: true
   default:
     ipam:
       config:

@@ -1,3 +1,4 @@
+import { tracedFetch } from '../observability/index.js';
 /* global Headers, AbortSignal */
 import { createPublicKey, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
@@ -199,7 +200,7 @@ export function createPlatform(config) {
         'content-type',
         form ? 'application/x-www-form-urlencoded' : 'application/json',
       );
-    const response = await fetch(url, {
+    const response = await tracedFetch(url, {
       method,
       headers: out,
       body:

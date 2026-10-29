@@ -1,4 +1,5 @@
 import * as natsCore from '@nats-io/nats-core';
+import { natsTraceparent, logEvent } from '../../observability/index.js';
 import { TransportError } from './errors.js';
 import { GuardedSocket } from './guarded-socket.js';
 import {
@@ -405,6 +406,10 @@ export class NatsLink {
         this.#lastBuffered = undefined;
         this.#queue.shift();
         try {
+          const parent = natsTraceparent(head.payload);
+          logEvent('INFO', 'NATS business request published', {
+            trace_id: parent.slice(3, 35),
+          });
           nc.publish(this.#opts.upSubject, head.payload);
         } catch (cause) {
           const failure = new TransportError(

@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
+import { logEvent } from '../observability/index.js';
 
 // This is a logging protocol, not a new status/observer surface. Never serialize
 // an exception, request, identity or caller-supplied diagnostic object.
@@ -132,7 +133,7 @@ process.on('uncaughtException', stop);
 setTimeout(stop, 2000);
 let busy = false;
 process.on('message', (line) => {
-  if (busy || typeof line !== 'string' || Buffer.byteLength(line) > 2049) return stop();
+  if (busy || typeof line !== 'string' || Buffer.byteLength(line) > 65536) return stop();
   busy = true;
   const bytes = Buffer.from(line);
   function part(offset) {
@@ -265,6 +266,22 @@ function queueOutput(/** @type {Output} */ item) {
   // Admission (including deliberate pressure loss) consumes the original gate.
   // It cannot synchronously promise delivery or loosen per-generation limits.
 }
+/** Shared bounded stderr writer; the structured producer owns encoding/masking.
+ * @param {any} owner @param {string} line */
+export function writeStructuredDiagnostic(owner, line) {
+  queueOutput({
+    line,
+    owner,
+    live: () => {
+      try {
+        owner.fiber?.assertActive?.();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+}
 /** The context inherits only an opaque token, never the writer/permit itself.
  * @type {WeakMap<object, {readonly active:boolean,send:(line:string,owner:any)=>boolean}>} */
 const sinks = new WeakMap();
@@ -307,7 +324,14 @@ function encodeEvent(event) {
     !(event.created === null || typeof event.created === 'boolean')
   )
     return;
-  const line = PREFIX + JSON.stringify(event);
+  const line =
+    PREFIX +
+    JSON.stringify({
+      service: 'dsh-plugin',
+      level: 'WARN',
+      trace_id: '',
+      ...event,
+    });
   return Buffer.byteLength(line, 'utf8') <= 2048 ? line : undefined;
 }
 
@@ -465,6 +489,7 @@ export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
     function fail(error) {
       if (failed || !valid() || !current()) return;
       failed = true;
+      logEvent('ERROR', 'Network attempt failed', { phase, attempt }, error);
       const status = field(error, 'status'),
         rawCode = field(error, 'code');
       const httpStatus =

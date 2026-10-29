@@ -214,7 +214,19 @@ func (g *Gateway) Handler() http.Handler {
 	if g.Cfg.Access.Valid() {
 		h = g.accessHandler(h)
 	}
-	return h
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, r = ensureRequestID(r)
+		parent := ensureTraceparent(r)
+		r.Header.Set(headerTraceparent, parent)
+		r = r.WithContext(context.WithValue(r.Context(), ctxKeyTraceparent, parent))
+		w.Header().Set(headerTraceparent, parent)
+		w.Header().Set("X-Trace-Id", parent[3:35])
+		if g.Log != nil {
+			g.Log.InfoContext(r.Context(), "HTTP request received", "method", r.Method, "path", r.URL.Path)
+			defer g.Log.InfoContext(r.Context(), "HTTP request completed", "method", r.Method, "path", r.URL.Path)
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {

@@ -76,6 +76,18 @@ class JsonLogFormatterTest {
   }
 
   @Test
+  void explicitBusinessMdcSurvivesWithoutLeakingSecretMdc() {
+    JsonNode json =
+        format(
+            "failure",
+            null,
+            Map.of("account_id", "alice", "input_tokens", "42", "password", "hidden-mdc-password"));
+    assertEquals("account_id=alice", json.get("mdc_context").get("account_id").asString());
+    assertEquals("input_tokens=42", json.get("mdc_context").get("input_tokens").asString());
+    assertFalse(json.toString().contains("hidden-mdc-password"));
+  }
+
+  @Test
   void jsonLoggingIsTheDefaultButCanBeDisabled() {
     var processor = new JsonLoggingEnvironmentPostProcessor();
     MockEnvironment env = new MockEnvironment();
