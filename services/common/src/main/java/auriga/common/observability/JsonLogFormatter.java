@@ -45,10 +45,10 @@ public final class JsonLogFormatter implements StructuredLogFormatter<ILoggingEv
     if (mdc != null) {
       for (String key : MDC_FIELDS) {
         String value = mdc.get(key);
-        if (value != null) out.put(key, value);
+        if (value != null) out.put(key, SensitiveDataMasker.mask(value));
       }
       Map<String, String> context = new LinkedHashMap<>();
-      mdc.forEach((key, value) -> context.put(key, SensitiveDataMasker.mask(key + "=" + value)));
+      mdc.forEach((key, value) -> context.put(key, SensitiveDataMasker.maskField(key, value)));
       out.put("mdc_context", context);
     }
     if (event.getKeyValuePairs() != null) {
@@ -56,7 +56,10 @@ public final class JsonLogFormatter implements StructuredLogFormatter<ILoggingEv
       event
           .getKeyValuePairs()
           .forEach(
-              pair -> fields.put(pair.key, SensitiveDataMasker.mask(pair.key + "=" + pair.value)));
+              pair ->
+                  fields.put(
+                      pair.key,
+                      SensitiveDataMasker.maskField(pair.key, String.valueOf(pair.value))));
       out.put("context", fields);
     }
     IThrowableProxy error = event.getThrowableProxy();

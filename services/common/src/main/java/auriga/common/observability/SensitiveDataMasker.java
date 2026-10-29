@@ -18,6 +18,8 @@ public final class SensitiveDataMasker {
           + "api[_-]?key|private[_-]?key|credential|cookie|authorization|session[_-]?token|totp|otp|"
           + "[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?";
 
+  private static final Pattern SECRET_KEY = Pattern.compile("(?i)^(?:" + SECRET_KEYS + ")$");
+
   private static final List<Rule> RULES =
       List.of(
           new Rule(
@@ -52,6 +54,11 @@ public final class SensitiveDataMasker {
               "$1" + MASK));
 
   private SensitiveDataMasker() {}
+
+  /** Explicit credential fields are masked in full, including whitespace/multiline values. */
+  public static String maskField(String key, String value) {
+    return SECRET_KEY.matcher(key).matches() ? MASK : mask(value);
+  }
 
   public static String mask(String text) {
     if (text == null || text.isEmpty()) return text;

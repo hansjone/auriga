@@ -81,10 +81,17 @@ class JsonLogFormatterTest {
         format(
             "failure",
             null,
-            Map.of("account_id", "alice", "input_tokens", "42", "password", "hidden-mdc-password"));
-    assertEquals("account_id=alice", json.get("mdc_context").get("account_id").asString());
-    assertEquals("input_tokens=42", json.get("mdc_context").get("input_tokens").asString());
-    assertFalse(json.toString().contains("hidden-mdc-password"));
+            Map.of(
+                "account_id",
+                "alice",
+                "input_tokens",
+                "42",
+                "password",
+                "word-one word-two\nword-three"));
+    assertEquals("alice", json.get("mdc_context").get("account_id").asString());
+    assertEquals("42", json.get("mdc_context").get("input_tokens").asString());
+    for (String word : new String[] {"word-one", "word-two", "word-three"})
+      assertFalse(json.toString().contains(word));
   }
 
   @Test
