@@ -175,7 +175,7 @@ function pumpOutput() {
     outputQueue = outputQueue.filter((item) => item.live());
     if (!outputQueue.length || writer?.stopping || writer?.current) return;
     if (!writer) {
-      const delay = nextWriterAt - Date.now();
+      const delay = nextWriterAt - performance.now();
       if (delay > 0) {
         writerWake ??= setTimeout(() => {
           writerWake = undefined;
@@ -184,7 +184,7 @@ function pumpOutput() {
         writerWake.unref();
         return;
       }
-      nextWriterAt = Date.now() + 1000; // Resource throttle, not a business retry.
+      nextWriterAt = performance.now() + 1000; // Resource throttle, not a business retry.
       const child = spawn(
         process.execPath,
         ['--input-type=commonjs', '-e', WRITER],
