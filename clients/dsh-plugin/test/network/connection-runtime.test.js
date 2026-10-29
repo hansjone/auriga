@@ -18,6 +18,7 @@ import { mkdtemp, mkdir, readFile } from 'node:fs/promises';
 import * as nodeFs from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import { IDENTITY, createFixturePlatform } from './host/fixtures.js';
 import { createHostAdapter } from '../../src/network/host/adapter.js';
 import { saveProducerEpoch } from '../../src/network/durable/outbox.js';
@@ -32,6 +33,7 @@ import {
   signedReadyResult,
 } from './trust/keyset-fixtures.js';
 import { NatsTransport } from '../../src/network/transport/nats-transport.js';
+import { TransportError } from '../../src/network/transport/errors.js';
 import {
   createDeviceProvider,
   DeviceControlUnavailable,
@@ -70,6 +72,7 @@ async function fixture(t, extra = {}) {
     ...extra.registration,
   };
   const events = [],
+    logs = [],
     connections = [],
     sent = [];
   let runtime,
@@ -174,12 +177,20 @@ async function fixture(t, extra = {}) {
       new Proxy(
         {},
         {
-          get() {
+          get(_target, property) {
+            if (property === 'logger')
+              return {
+                warn: (line) =>
+                  logs.push(
+                    JSON.parse(line.slice('auriga_network_diagnostic '.length)),
+                  ),
+              };
             assert.fail('basic connection touched Host/tool context');
           },
         },
       ),
     transportFactory(options) {
+      if (extra.transportFactory) return extra.transportFactory(options);
       extra.transportOptions?.(options);
       if (extra.factoryError) throw new Error('transport factory failed');
       const connection = {
@@ -293,6 +304,7 @@ async function fixture(t, extra = {}) {
     ledger,
     controller,
     events,
+    logs,
     connections,
     sent,
     response,
@@ -1683,6 +1695,7 @@ test('logout during atomic commit disables state first, stops socket and retains
   await h.close();
   assert.equal(f.connections.length, 1);
   assert.equal(f.ledger.snapshot().identity.nodeIncarnation, 'inc-1');
+  assert.equal(f.logs.filter((event) => event.event === 'failure').length, 0);
 });
 for (const point of ['refresh', 'c1-ready', 'c1-stop', 'ticket2', 'c2-ready'])
   test(
@@ -1853,6 +1866,10 @@ test('created false plus missing ledger fails before keys/tickets/READY', async 
   await assert.rejects(f.runtime.start(), /ledger unavailable/);
   assert.deepEqual(f.events, ['register']);
   assert.equal(f.runtime.status.connected, false);
+  assert.equal(f.logs.length, 1);
+  assert.equal(f.logs[0].phase, 'ledger_restore');
+  assert.equal(f.logs[0].code, 'ledger_missing');
+  assert.equal(f.logs[0].created, false);
 });
 
 test('complete ledger plus created false uses one normal connection and never initializes again', async (t) => {
@@ -1867,6 +1884,273 @@ test('complete ledger plus created false uses one normal connection and never in
   assert.equal(second.connections.length, 1);
   assert.equal(second.runtime.status.connected, true);
   assert.equal(second.events.includes('commit'), false);
+  assert.deepEqual(
+    second.logs.map((e) => e.event),
+    ['ledger_restored', 'ready'],
+  );
+  assert.equal(second.logs[0].created, false);
+});
+
+for (const [stage, extra, code] of [
+  [
+    'register_http',
+    {
+      register: () => {
+        throw Object.assign(new Error('SECRET-marker'), {
+          status: 503,
+          code: 'SECRET-marker',
+          headers: { secret: 'SECRET-marker' },
+        });
+      },
+    },
+    'http_error',
+  ],
+  [
+    'trust_load',
+    {
+      trust: (() => {
+        const store = createMemoryLedgerStore();
+        store.restore({ invalid: true });
+        return store;
+      })(),
+    },
+    'network.key_unavailable',
+  ],
+  [
+    'trust_refresh',
+    {
+      refresh: () => {
+        throw Object.assign(new Error('SECRET-marker'), {
+          code: 'network.key_unavailable',
+        });
+      },
+    },
+    'network.key_unavailable',
+  ],
+  [
+    'ticket_http',
+    {
+      ticket: () => {
+        throw Object.assign(new Error('SECRET-marker'), { status: 403 });
+      },
+    },
+    'http_error',
+  ],
+  ['wss_connect', { factoryError: true }, 'unknown'],
+  [
+    'bootstrap_ready',
+    {
+      ready: (id) => {
+        if (id === 1)
+          throw Object.assign(new Error('SECRET-marker'), {
+            code: 'not_connected',
+          });
+      },
+    },
+    'not_connected',
+  ],
+  [
+    'normal_ready',
+    {
+      ready: (id) => {
+        if (id === 2)
+          throw Object.assign(new Error('SECRET-marker'), {
+            code: 'not_connected',
+          });
+      },
+    },
+    'not_connected',
+  ],
+  [
+    'initial_commit',
+    {
+      commit: () => {
+        throw Object.assign(new Error('SECRET-marker'), { code: 'ENOSPC' });
+      },
+    },
+    'unknown',
+  ],
+])
+  test('安全日志保留首失阶段 ' + stage, async (t) => {
+    const f = await fixture(t, extra);
+    await assert.rejects(f.runtime.start());
+    await f.runtime.close();
+    const failures = f.logs.filter((e) => e.event === 'failure');
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].phase, stage);
+    assert.equal(failures[0].code, code);
+    assert.equal(JSON.stringify(f.logs).includes('SECRET-marker'), false);
+    assert.equal(f.runtime.status.connected, false);
+    if (stage === 'initial_commit') assert.equal(failures[0].errno, 'ENOSPC');
+  });
+
+test('安全日志生产NatsTransport重试循环保留首个WSS错误，无需真实网络', async (t) => {
+  let calls = 0;
+  const f = await fixture(t, {
+    transportFactory: (options) =>
+      new NatsTransport({
+        ...options,
+        backoff: { baseMs: 1, maxMs: 1, stableMs: 10000 },
+        nats: {
+          tokenAuthenticator: () => () => ({ auth_token: 'SECRET-token' }),
+          async wsconnect() {
+            calls++;
+            throw new TransportError('socket_incapable', 'SECRET-url', {
+              cause: new Error('SECRET-cause'),
+            });
+          },
+        },
+      }),
+  });
+  const started = f.runtime.start().catch((error) => error);
+  for (let i = 0; i < 100 && calls < 3; i++)
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.ok(calls >= 3);
+  await f.runtime.close();
+  await started;
+  const failures = f.logs.filter((e) => e.event === 'failure');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].phase, 'wss_connect');
+  assert.equal(failures[0].code, 'socket_incapable');
+  assert.equal(JSON.stringify(f.logs).includes('SECRET'), false);
+});
+
+for (const errno of [
+  'EAI_AGAIN',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'SECRET-code',
+])
+  test('安全日志在SDK丢弃原错误前保留握手errno ' + errno, async (t) => {
+    const sockets = [];
+    const f = await fixture(t, {
+      transportFactory: (options) =>
+        new NatsTransport({
+          ...options,
+          backoff: { baseMs: 30000, maxMs: 30000, stableMs: 10000 },
+          createSocket() {
+            const listeners = new Map();
+            const socket = {
+              bufferedAmount: 0,
+              send() {},
+              close() {},
+              terminate() {},
+              addEventListener(type, listener) {
+                if (!listeners.has(type)) listeners.set(type, new Set());
+                listeners.get(type).add(listener);
+              },
+              removeEventListener(type, listener) {
+                listeners.get(type)?.delete(listener);
+              },
+              error() {
+                for (const listener of listeners.get('error'))
+                  listener({
+                    error: {
+                      code: errno,
+                      message: 'SECRET-message',
+                      cause: 'SECRET-cause',
+                    },
+                    target: 'SECRET-url',
+                  });
+              },
+              get errorListeners() {
+                return listeners.get('error')?.size ?? 0;
+              },
+            };
+            sockets.push(socket);
+            return socket;
+          },
+          nats: {
+            tokenAuthenticator: () => () => ({ auth_token: 'SECRET-token' }),
+            async wsconnect(input) {
+              await input.wsFactory('wss://example.invalid/');
+              assert.equal(sockets[0].errorListeners, 2);
+              sockets[0].error();
+              // Same loss as the locked SDK: new generic error has no errno/cause.
+              throw new Error('SECRET-message');
+            },
+          },
+        }),
+    });
+    const started = f.runtime.start().catch((error) => error);
+    await waitFor(
+      () => f.logs.some((event) => event.event === 'failure'),
+      'safe WSS failure',
+    );
+    assert.equal(
+      sockets[0].errorListeners,
+      1,
+      'temporary diagnostic listener removed, original guard retained',
+    );
+    const before = JSON.stringify(f.logs);
+    sockets[0].error();
+    assert.equal(
+      JSON.stringify(f.logs),
+      before,
+      'late socket error has no diagnostic observer',
+    );
+    await f.runtime.close();
+    await started;
+    const event = f.logs.find((e) => e.event === 'failure');
+    assert.equal(event.phase, 'wss_connect');
+    assert.equal(event.code, 'connection_lost');
+    assert.equal(event.errno, errno === 'SECRET-code' ? 'none' : errno);
+    assert.equal(JSON.stringify(f.logs).includes('SECRET'), false);
+  });
+
+test('安全日志trust缓存写失败不能误报初始业务账本提交', async (t) => {
+  const f = await fixture(t, {
+    trust: createMemoryLedgerStore({
+      beforeCommit() {
+        throw Object.assign(new Error('SECRET-path'), { code: 'EACCES' });
+      },
+    }),
+  });
+  await assert.rejects(f.runtime.start());
+  await f.runtime.close();
+  assert.equal(f.logs[0].phase, 'trust_refresh');
+  assert.equal(f.logs[0].errno, 'EACCES');
+  assert.equal(f.logs.length, 1);
+});
+
+test('安全日志将真实文件双写锁归类并保持持有者账本不变', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-log-lock-'));
+  const store = createFileLedgerStore({ dir });
+  const holder = await store.open();
+  try {
+    const f = await fixture(t, { ledger: store });
+    await assert.rejects(f.runtime.start(), /locked/);
+    await f.runtime.close();
+    assert.equal(f.logs[0].phase, 'ledger_open');
+    assert.equal(f.logs[0].code, 'ledger_locked');
+    assert.equal(f.logs[0].created, null);
+    assert.deepEqual(f.events, []);
+    assert.equal(await holder.load(), undefined);
+  } finally {
+    await holder.close();
+    await nodeFs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('安全日志捕获重连中的首个WSS失败，重复和已退役连接不覆盖', async (t) => {
+  const f = await fixture(t);
+  await f.runtime.start();
+  f.connections[0].refreshError({ code: 'SECRET-marker' });
+  assert.equal(f.logs.filter((e) => e.event === 'failure').length, 0);
+  for (let i = 0; i < 100; i++)
+    f.connections[1].refreshError({
+      code: 'unauthorized',
+      message: 'SECRET-marker',
+      cause: { secret: 'SECRET-marker' },
+    });
+  assert.equal(f.logs.filter((e) => e.event === 'failure').length, 1);
+  const event = f.logs.find((e) => e.event === 'failure');
+  assert.equal(event.phase, 'wss_connect');
+  assert.equal(event.code, 'unauthorized');
+  assert.equal(event.budget_ms, 10000);
+  await f.runtime.close();
+  f.connections[1].refreshError({ code: 'SECRET-marker' });
+  assert.equal(f.logs.filter((e) => e.event === 'failure').length, 1);
+  assert.equal(JSON.stringify(f.logs).includes('SECRET-marker'), false);
 });
 
 test('real NATS WSS with official device factory closes C1 before T2, binds new epochs and retries transient refresh without teardown', async (t) => {

@@ -2,6 +2,7 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { CODES, HostSeamError } from './errors.js';
+import { diagnosticReason } from '../diagnostics.js';
 import { isUint64String } from './address.js';
 import { createKeyedMutex } from './keyed-mutex.js';
 import { checkSources, fenceSourceChanges } from '../source-control/state.js';
@@ -321,7 +322,8 @@ export async function loadConnectionLedger(handle, registration) {
       throw invalid();
     state = checkState(value, value.identity);
     if (state.identityConflict) throw invalid();
-  } else if (registration.created !== true) throw invalid();
+  } else if (registration.created !== true)
+    throw diagnosticReason(invalid(), 'ledger_missing');
   return {
     get state() {
       return state;
