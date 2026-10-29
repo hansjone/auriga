@@ -19,7 +19,10 @@ type rotationContainer struct {
 		Pid                         int
 		StartedAt, FinishedAt       string
 	}
-	Config struct{ Labels map[string]string }
+	Config struct {
+		Labels map[string]string
+		Image  string
+	}
 	Mounts []struct{ Source, Destination string }
 }
 
@@ -85,15 +88,8 @@ func (r *rotation) checkContainer(c rotationContainer) error {
 	if c.Config.Labels["com.docker.compose.project"] != r.project || c.Config.Labels["com.docker.compose.project.working_dir"] != r.compose || (service != "collab" && service != "network" && service != "platform" && service != "edge") || c.Image == "" {
 		return fmt.Errorf("rotation foreign container/project refused")
 	}
-	args := r.composeArgs()
-	var files []string
-	for i, arg := range args {
-		if arg == "-f" {
-			files = append(files, args[i+1])
-		}
-	}
-	if c.Config.Labels["com.docker.compose.project.config_files"] != strings.Join(files, ",") {
-		return fmt.Errorf("rotation running recipe differs")
+	if err := r.checkRecipe(c); err != nil {
+		return err
 	}
 	mounts := map[string]string{}
 	for _, mount := range c.Mounts {
@@ -122,6 +118,25 @@ func (r *rotation) checkContainer(c rotationContainer) error {
 		}
 	}
 	return nil
+}
+
+func (r *rotation) checkRecipe(c rotationContainer) error {
+	args := r.composeArgs()
+	var files []string
+	for i, arg := range args {
+		if arg == "-f" {
+			files = append(files, args[i+1])
+		}
+	}
+	created := c.Config.Labels["com.docker.compose.project.config_files"]
+	service := c.Config.Labels["com.docker.compose.service"]
+	// The operations overlay only changes collab/network. Compose can retain
+	// unchanged services with their exact original two-file creation labels.
+	unchanged := service == "platform" || service == "edge" || service == "postgres"
+	if created == strings.Join(files, ",") || (unchanged && len(files) == 3 && created == strings.Join(files[:2], ",")) {
+		return nil
+	}
+	return fmt.Errorf("rotation running recipe differs")
 }
 
 func (r *rotation) stop(work string) error {
@@ -530,6 +545,95 @@ func (r *rotation) liveCheckpoint() error {
 	return nil
 }
 
+type rotationPGVolume struct {
+	Name, Driver, Mountpoint, Scope, CreatedAt string
+	Labels, Options                            map[string]string
+}
+
+func (r *rotation) pgVolume() (rotationPGVolume, error) {
+	name := r.project + "_pgdata"
+	raw, err := r.run("/usr/bin/docker", "volume", "inspect", name)
+	var volumes []rotationPGVolume
+	if err != nil || json.Unmarshal(raw, &volumes) != nil || len(volumes) != 1 {
+		return rotationPGVolume{}, fmt.Errorf("rotation existing PostgreSQL volume required")
+	}
+	v := volumes[0]
+	if v.Name != name || v.Driver != "local" || v.Scope != "local" || v.CreatedAt == "" || !filepath.IsAbs(v.Mountpoint) || filepath.Clean(v.Mountpoint) != v.Mountpoint || len(v.Options) != 0 || v.Labels["com.docker.compose.project"] != r.project || v.Labels["com.docker.compose.volume"] != "pgdata" {
+		return rotationPGVolume{}, fmt.Errorf("rotation PostgreSQL volume binding refused")
+	}
+	return v, nil
+}
+
+func (r *rotation) pgContainer(volume rotationPGVolume) (*rotationContainer, error) {
+	raw, err := r.run("/usr/bin/docker", append(r.composeArgs(), "ps", "--all", "-q", "postgres")...)
+	if err != nil {
+		return nil, err
+	}
+	ids := strings.Fields(string(raw))
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if len(ids) != 1 {
+		return nil, fmt.Errorf("rotation PostgreSQL replicas refused")
+	}
+	containers, err := r.containers(ids)
+	if err != nil {
+		return nil, err
+	}
+	c := containers[0]
+	if c.Config.Labels["com.docker.compose.service"] != "postgres" || c.Config.Labels["com.docker.compose.project"] != r.project || c.Config.Labels["com.docker.compose.project.working_dir"] != r.compose || c.Config.Image != "postgres:17" || !strings.HasPrefix(c.Image, "sha256:") || !rotationHash.MatchString(strings.TrimPrefix(c.Image, "sha256:")) || c.State.Paused || c.State.Restarting {
+		return nil, fmt.Errorf("rotation PostgreSQL container binding refused")
+	}
+	if err := r.checkRecipe(c); err != nil {
+		return nil, err
+	}
+	expected := map[string]string{
+		"/var/lib/postgresql/data":                        volume.Mountpoint,
+		"/docker-entrypoint-initdb.d/01-roles.sql":        filepath.Join(r.compose, "postgres", "init.sql"),
+		"/docker-entrypoint-initdb.d/02-collab-roles.sql": filepath.Join(r.compose, "scripts", "collab-roles.sql"),
+	}
+	if len(c.Mounts) != len(expected) {
+		return nil, fmt.Errorf("rotation PostgreSQL mounts refused")
+	}
+	for _, mount := range c.Mounts {
+		if source, exists := expected[mount.Destination]; !exists || source != mount.Source {
+			return nil, fmt.Errorf("rotation PostgreSQL mounts refused")
+		}
+		delete(expected, mount.Destination)
+	}
+	return &c, nil
+}
+
+func (r *rotation) resumePostgres() error {
+	// Only this dependency may start before the authoritative PG checks. Never
+	// create a replacement volume or recreate a retained database container.
+	volume, err := r.pgVolume()
+	if err != nil {
+		return err
+	}
+	before, err := r.pgContainer(volume)
+	if err != nil {
+		return err
+	}
+	if _, err := r.run("/usr/bin/docker", append(r.composeArgs(), "up", "-d", "--no-deps", "--no-recreate", "--wait", "--wait-timeout", "120", "postgres")...); err != nil {
+		return err
+	}
+	afterVolume, err := r.pgVolume()
+	a, _ := json.Marshal(volume)
+	b, _ := json.Marshal(afterVolume)
+	if err != nil || !bytes.Equal(a, b) {
+		return fmt.Errorf("rotation PostgreSQL volume changed during recovery")
+	}
+	after, err := r.pgContainer(afterVolume)
+	if err != nil {
+		return err
+	}
+	if after == nil || !after.State.Running || after.State.Pid <= 0 || (before != nil && (before.ID != after.ID || before.Image != after.Image)) {
+		return fmt.Errorf("rotation PostgreSQL recovery instance not stable/running")
+	}
+	return nil
+}
+
 func rotationLifecycle(compose string, args []string) error {
 	if len(args) == 0 || len(args) > 6 {
 		return fmt.Errorf("rotation lifecycle arguments refused")
@@ -558,6 +662,11 @@ func rotationLifecycle(compose string, args []string) error {
 	if err != nil {
 		return err
 	}
+	return r.lifecycle(args)
+}
+
+func (r *rotation) lifecycle(args []string) error {
+	bounded := args[0] == "activation-stop" || args[0] == "activation-running"
 	if bounded {
 		command := []string{"stop", "edge", "network", "collab"}
 		if args[0] == "activation-running" {
@@ -596,10 +705,16 @@ func rotationLifecycle(compose string, args []string) error {
 	if _, err := r.installed(last); err != nil {
 		return err
 	}
+	starting := args[0] == "up" || args[0] == "start" || args[0] == "restart"
+	if starting {
+		if err := r.resumePostgres(); err != nil {
+			return err
+		}
+	}
 	if err := r.readStatus(r.expected(receipts)); err != nil {
 		return err
 	}
-	if args[0] == "up" || args[0] == "start" || args[0] == "restart" {
+	if starting {
 		work, err := os.MkdirTemp("", "auriga-key-start-check-")
 		if err != nil {
 			return err

@@ -191,7 +191,7 @@ func TestRotationStopBindsInstancesRecipeAndOriginalMount(t *testing.T) {
 	if stops != 1 {
 		t.Fatal("missing bounded stop")
 	}
-	for _, probe := range []string{"project", "recipe", "state", "protocol", "instance", "still-running", "hidden-signer", "hidden-state-file", "hidden-ancestor", "missing"} {
+	for _, probe := range []string{"project", "working-dir", "recipe", "state", "protocol", "instance", "image-change", "still-running", "hidden-signer", "hidden-state-file", "hidden-ancestor", "missing"} {
 		t.Run(probe, func(t *testing.T) {
 			r, _ := rotationFake(t)
 			original := r.run
@@ -205,6 +205,8 @@ func TestRotationStopBindsInstancesRecipeAndOriginalMount(t *testing.T) {
 				switch probe {
 				case "project":
 					cs[3].Config.Labels["com.docker.compose.project"] = "foreign"
+				case "working-dir":
+					cs[0].Config.Labels["com.docker.compose.project.working_dir"] = "foreign"
 				case "recipe":
 					cs[3].Config.Labels["com.docker.compose.project.config_files"] = "foreign.yml"
 				case "state":
@@ -213,6 +215,10 @@ func TestRotationStopBindsInstancesRecipeAndOriginalMount(t *testing.T) {
 					cs[2].Mounts[0].Source = "foreign"
 				case "instance":
 					cs[3].ID = strings.Repeat("f", 64)
+				case "image-change":
+					if cs[3].State.Pid == 0 {
+						cs[0].Image = "sha256:" + strings.Repeat("f", 64)
+					}
 				case "still-running":
 					cs[3].State.Running = true
 				case "hidden-signer", "hidden-state-file", "hidden-ancestor":
@@ -234,6 +240,225 @@ func TestRotationStopBindsInstancesRecipeAndOriginalMount(t *testing.T) {
 			}
 			if err := r.stop(t.TempDir()); err == nil {
 				t.Fatal("unsafe stop proof accepted")
+			}
+		})
+	}
+}
+
+func TestRotationUnchangedServicesKeepOriginalCreationRecipe(t *testing.T) {
+	r, calls := rotationFake(t)
+	original := r.run
+	if err := os.MkdirAll(r.root(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"8", "9"} {
+		pointer, _ := json.Marshal(rotationCurrent{version, strings.Repeat("a", 64)})
+		if err := os.WriteFile(filepath.Join(r.root(), "current.json"), pointer, 0600); err != nil {
+			t.Fatal(err)
+		}
+		r.run = func(program string, args ...string) ([]byte, error) {
+			raw, err := original(program, args...)
+			if err != nil || args[0] != "inspect" {
+				return raw, err
+			}
+			var cs []rotationContainer
+			_ = json.Unmarshal(raw, &cs)
+			for i := range cs {
+				service := cs[i].Config.Labels["com.docker.compose.service"]
+				if service == "collab" || service == "network" {
+					cs[i].Config.Labels["com.docker.compose.project.config_files"] += "," + filepath.Join(r.root(), "current.yml")
+					for j := range cs[i].Mounts {
+						if cs[i].Mounts[j].Destination == "/var/lib/auriga/collab" {
+							continue
+						}
+						kind := "network"
+						if service == "collab" {
+							kind = "config"
+						}
+						cs[i].Mounts[j].Source = filepath.Join(r.root(), "installs", version, kind, filepath.Base(cs[i].Mounts[j].Source))
+						if service == "collab" {
+							cs[i].Mounts[j].Source = filepath.Join(r.root(), "installs", version, kind)
+						}
+					}
+				}
+			}
+			return json.Marshal(cs)
+		}
+		if err := r.stop(t.TempDir()); err != nil {
+			t.Fatalf("round %s retained platform/edge rejected: %v", version, err)
+		}
+	}
+	for _, call := range *calls {
+		if strings.Contains(call, " stop ") && !strings.HasSuffix(call, " stop edge network collab") {
+			t.Fatal("unchanged platform was stopped or recreated")
+		}
+	}
+	for _, service := range []string{"platform", "edge", "collab", "network"} {
+		for _, recipe := range []string{"foreign-base", "foreign-source", "foreign-ops", "extra", "old-signer"} {
+			t.Run(service+"/"+recipe, func(t *testing.T) {
+				r, _ := rotationFake(t)
+				var c rotationContainer
+				c.Image = "sha256:" + strings.Repeat("e", 64)
+				c.Config.Labels = map[string]string{"com.docker.compose.service": service, "com.docker.compose.project": r.project, "com.docker.compose.project.working_dir": r.compose}
+				files := []string{filepath.Join(r.compose, "docker-compose.yml"), filepath.Join(r.compose, "scripts", "collab-activation.yml"), filepath.Join(r.root(), "current.yml")}
+				if err := os.MkdirAll(r.root(), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := rotationWriteJSON(filepath.Join(r.root(), "current.json"), rotationCurrent{"8", strings.Repeat("a", 64)}); err != nil {
+					t.Fatal(err)
+				}
+				switch recipe {
+				case "foreign-base":
+					files[0] = "foreign.yml"
+				case "foreign-source":
+					files[1] = filepath.Join(r.compose, "scripts", "collab-required.yml")
+				case "foreign-ops":
+					files[2] = "other-current.yml"
+				case "extra":
+					files = append(files, "evil.yml")
+				case "old-signer":
+					files = files[:2]
+				}
+				c.Config.Labels["com.docker.compose.project.config_files"] = strings.Join(files, ",")
+				err := r.checkContainer(c)
+				if recipe == "old-signer" && (service == "platform" || service == "edge") {
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), "running recipe differs") {
+					t.Fatalf("untrusted creation recipe accepted: %v", err)
+				}
+			})
+		}
+	}
+}
+
+type rotationPGFixture struct {
+	container  *rotationContainer
+	volume     *rotationPGVolume
+	calls      []string
+	afterStart func()
+	startError error
+}
+
+func rotationPGFake(t *testing.T, r *rotation) *rotationPGFixture {
+	t.Helper()
+	v := &rotationPGVolume{Name: r.project + "_pgdata", Driver: "local", Scope: "local", Mountpoint: filepath.Join(r.compose, "fixture-pgdata"), CreatedAt: "2026-10-29T00:00:00Z", Labels: map[string]string{"com.docker.compose.project": r.project, "com.docker.compose.volume": "pgdata"}}
+	c := rotationPGFakeContainer(r, v)
+	c.ID = strings.Repeat("9", 64)
+	return &rotationPGFixture{container: c, volume: v}
+}
+
+func (p *rotationPGFixture) execute(r *rotation, args []string) ([]byte, error, bool) {
+	call := strings.Join(args, " ")
+	if len(args) >= 2 && args[0] == "volume" && args[1] == "inspect" {
+		p.calls = append(p.calls, "volume")
+		if p.volume == nil {
+			return nil, errors.New("fixture missing volume"), true
+		}
+		raw, err := json.Marshal([]rotationPGVolume{*p.volume})
+		return raw, err, true
+	}
+	if strings.HasSuffix(call, " ps --all -q postgres") {
+		p.calls = append(p.calls, "inventory")
+		if p.container == nil {
+			return nil, nil, true
+		}
+		return []byte(p.container.ID), nil, true
+	}
+	if len(args) == 4 && args[0] == "inspect" && p.container != nil && args[3] == p.container.ID {
+		p.calls = append(p.calls, "inspect")
+		raw, err := json.Marshal([]rotationContainer{*p.container})
+		return raw, err, true
+	}
+	if strings.HasSuffix(call, " up -d --no-deps --no-recreate --wait --wait-timeout 120 postgres") {
+		p.calls = append(p.calls, "postgres-only-up")
+		if p.startError != nil {
+			return nil, p.startError, true
+		}
+		if p.container == nil {
+			p.container = rotationPGFakeContainer(r, p.volume)
+		}
+		p.container.State.Running, p.container.State.Pid = true, 42
+		if p.afterStart != nil {
+			p.afterStart()
+		}
+		return nil, nil, true
+	}
+	return nil, nil, false
+}
+
+func rotationPGFakeContainer(r *rotation, v *rotationPGVolume) *rotationContainer {
+	// Used after a fixture down removes only its container, preserving the volume.
+	c := &rotationContainer{ID: strings.Repeat("8", 64), Image: "sha256:" + strings.Repeat("e", 64)}
+	c.Config.Image = "postgres:17"
+	args := r.composeArgs()
+	var files []string
+	for i, arg := range args {
+		if arg == "-f" {
+			files = append(files, args[i+1])
+		}
+	}
+	c.Config.Labels = map[string]string{"com.docker.compose.service": "postgres", "com.docker.compose.project": r.project, "com.docker.compose.project.working_dir": r.compose, "com.docker.compose.project.config_files": strings.Join(files, ",")}
+	c.Mounts = append(c.Mounts, struct{ Source, Destination string }{v.Mountpoint, "/var/lib/postgresql/data"}, struct{ Source, Destination string }{filepath.Join(r.compose, "postgres", "init.sql"), "/docker-entrypoint-initdb.d/01-roles.sql"}, struct{ Source, Destination string }{filepath.Join(r.compose, "scripts", "collab-roles.sql"), "/docker-entrypoint-initdb.d/02-collab-roles.sql"})
+	return c
+}
+
+func TestRotationPostgresDependencyRecoveryIsBounded(t *testing.T) {
+	t.Run("public-postgres-selector-refused", func(t *testing.T) {
+		err := rotationLifecycle(t.TempDir(), []string{"up", "postgres"})
+		if err == nil || !strings.Contains(err.Error(), "unknown option/service refused") {
+			t.Fatalf("public dependency selector accepted: %v", err)
+		}
+	})
+	for _, probe := range []string{"stopped", "removed", "missing-volume", "volume-project", "volume-options", "project", "working-dir", "recipe", "image", "mount", "startup-failure", "replaced-instance", "changed-image", "changed-volume", "not-running"} {
+		t.Run(probe, func(t *testing.T) {
+			r, _ := rotationFake(t)
+			p := rotationPGFake(t, r)
+			switch probe {
+			case "removed":
+				p.container = nil
+			case "missing-volume":
+				p.volume = nil
+			case "volume-project":
+				p.volume.Labels["com.docker.compose.project"] = "foreign"
+			case "volume-options":
+				p.volume.Options = map[string]string{"device": "foreign"}
+			case "project":
+				p.container.Config.Labels["com.docker.compose.project"] = "foreign"
+			case "working-dir":
+				p.container.Config.Labels["com.docker.compose.project.working_dir"] = "foreign"
+			case "recipe":
+				p.container.Config.Labels["com.docker.compose.project.config_files"] += ",foreign.yml"
+			case "image":
+				p.container.Config.Image = "foreign:17"
+			case "mount":
+				p.container.Mounts[0].Source = "foreign"
+			case "startup-failure":
+				p.startError = errors.New("fixture PG startup failed")
+			case "replaced-instance":
+				p.afterStart = func() { p.container.ID = strings.Repeat("7", 64) }
+			case "changed-image":
+				p.afterStart = func() { p.container.Image = "sha256:" + strings.Repeat("f", 64) }
+			case "changed-volume":
+				p.afterStart = func() { p.volume.CreatedAt = "2026-10-30T00:00:00Z" }
+			case "not-running":
+				p.afterStart = func() { p.container.State.Running, p.container.State.Pid = false, 0 }
+			}
+			r.run = func(program string, args ...string) ([]byte, error) {
+				if raw, err, handled := p.execute(r, args); program == "/usr/bin/docker" && handled {
+					return raw, err
+				}
+				t.Fatalf("unexpected recovery executable/action: %s %v", program, args)
+				return nil, nil
+			}
+			err := r.resumePostgres()
+			if probe == "stopped" || probe == "removed" {
+				if err != nil || !strings.Contains(strings.Join(p.calls, ","), "postgres-only-up,volume,inventory,inspect") {
+					t.Fatalf("fixed dependency recovery failed: %v %v", err, p.calls)
+				}
+			} else if err == nil {
+				t.Fatal("unsafe dependency recovery accepted")
 			}
 		})
 	}
