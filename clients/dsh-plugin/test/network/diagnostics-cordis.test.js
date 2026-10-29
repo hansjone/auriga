@@ -37,8 +37,28 @@ function child(body) {
       '-e',
       `
     import assert from 'node:assert/strict';
-    import fs from 'node:fs';
+    import childProcess from 'node:child_process';
     import { syncBuiltinESMExports } from 'node:module';
+    let completedWrites = 0;
+    const waiters = [];
+    const originalSpawn = childProcess.spawn;
+    childProcess.spawn = (...args) => {
+      const worker = originalSpawn(...args);
+      worker.on('message', message => {
+        if (message === 1) completedWrites++;
+        for (const waiter of waiters) waiter();
+      });
+      return worker;
+    };
+    syncBuiltinESMExports();
+    async function flushWriter(expected = 1) {
+      const watchdog = setTimeout(() => { throw Error('writer fixture watchdog'); }, 6000);
+      try { await new Promise(resolve => {
+        const check = () => { if (completedWrites >= expected) resolve(); };
+        waiters.push(check); check();
+      }); }
+      finally { clearTimeout(watchdog); }
+    }
     const { Context } = await import(${JSON.stringify(modulePath ? pathToFileURL(modulePath).href : '')});
     const d = await import(${JSON.stringify(diagnosticUrl)});
     const { createNetworkLifecycle } = await import(${JSON.stringify(lifecycleUrl)});
@@ -84,6 +104,7 @@ test('真实Cordis默认无stdio输出且默认exporter过滤warn', options, () 
     assert.equal(info, 1);
     assert.equal(warn, 0);
     d.createDiagnosticLog(ctx, 1)(event);
+    await flushWriter(0);
     await ctx.fiber.dispose();
   `);
   assert.equal(result.stderr, '');
@@ -98,6 +119,7 @@ test(
     const ctx = new Context();
     d.installNetworkDiagnosticSink?.(ctx);
     d.createDiagnosticLog(ctx, 1)(event);
+    await flushWriter();
     await ctx.fiber.dispose();
   `);
     const output = records(result.stderr);
@@ -122,8 +144,10 @@ test(
         emit(event);
       });
     });
+    await flushWriter();
     await nested.dispose();
     emit({ ...event, phase: 'normal_ready' });
+    await flushWriter();
     await root.fiber.dispose();
   `);
     assert.equal(records(result.stderr).length, 1);
@@ -143,12 +167,14 @@ test(
       old = d.createDiagnosticLog(ctx, 1);
       old(event);
     });
+    await flushWriter();
     await first.dispose();
     await root.plugin(function second(ctx) {
       d.installNetworkDiagnosticSink(ctx);
       old({ ...event, phase: 'normal_ready' });
       d.createDiagnosticLog(ctx, 2)(event);
     });
+    await flushWriter(2);
     await root.fiber.dispose();
     old({ ...event, phase: 'bootstrap_ready' });
   `);
@@ -177,6 +203,7 @@ test(
     } });
     d.createDiagnosticLog(ctx, 1)(event);
     ctx.logger('auriga-network-diagnostic').warn(forged);
+    await flushWriter();
     await ctx.fiber.dispose();
   `);
     assert.equal(records(result.stderr).length, 1);
@@ -200,6 +227,7 @@ test('真实Cordis sink一次性permit拒绝同步重放及异步迟到原文', 
     d.createDiagnosticLog(ctx, 1)(event);
     await new Promise(r=>setImmediate(r));
     ctx.logger('auriga-network-diagnostic').warn(saved);
+    await flushWriter();
     await ctx.fiber.dispose();
   `);
   assert.equal(records(result.stderr).length, 1);
@@ -222,6 +250,7 @@ test(
       { ...event, http_status:700 }, { ...event, budget_ms:2147483648 },
     ]) emit(bad);
     emit(event);
+    await flushWriter();
     await ctx.fiber.dispose();
   `);
     assert.equal(records(result.stderr).length, 1);
@@ -229,7 +258,7 @@ test(
   },
 );
 
-for (const failure of ['exporter-install', 'logger-export', 'stderr'])
+for (const failure of ['exporter-install', 'logger-export', 'writer-spawn'])
   test(
     '真实Cordis ' + failure + '失败保持原业务拒绝且没有raw fallback',
     options,
@@ -240,13 +269,14 @@ for (const failure of ['exporter-install', 'logger-export', 'stderr'])
     if (failure === 'exporter-install') ctx.logger.exporter = () => { throw Error('SECRET-install'); };
     if (failure === 'logger-export') ctx.logger.exporter({ levels:{ default:2 }, export() { throw Error('SECRET-export'); } });
     d.installNetworkDiagnosticSink(ctx);
-    let writes = 0;
-    if (failure === 'stderr') {
-      fs.writeSync = (fd) => { assert.equal(fd, 2); writes++; throw Error('SECRET-stderr'); };
+    let spawns = 0;
+    if (failure === 'writer-spawn') {
+      childProcess.spawn = () => { spawns++; throw Error('SECRET-spawn'); };
       syncBuiltinESMExports();
     }
     await denied(ctx);
-    if (failure === 'stderr') assert.equal(writes, 1);
+    if (failure === 'writer-spawn') assert.equal(spawns, 1);
+    await flushWriter(0);
     await ctx.fiber.dispose();
   `);
       assert.equal(result.stderr, '');
@@ -254,21 +284,14 @@ for (const failure of ['exporter-install', 'logger-export', 'stderr'])
     },
   );
 
-test('真实Cordis写入失败清除permit且不消耗成功输出去重额度', options, () => {
+test('真实Cordis异步交接仍消费去重额度且只输出一次', options, () => {
   const result = child(`
     const ctx = new Context();
     d.installNetworkDiagnosticSink(ctx);
     const emit = d.createDiagnosticLog(ctx, 1);
-    const original = fs.writeSync;
-    let attempts = 0;
-    fs.writeSync = () => { attempts++; throw Error('SECRET-write'); };
-    syncBuiltinESMExports();
-    emit(event);
-    assert.equal(attempts, 1);
-    fs.writeSync = original;
-    syncBuiltinESMExports();
     emit(event);
     emit(event);
+    await flushWriter();
     await ctx.fiber.dispose();
   `);
   assert.equal(records(result.stderr).length, 1);
@@ -280,6 +303,7 @@ test('真实Cordis生产lifecycle拒绝经真实sink输出首失并过滤秘密'
     const ctx = new Context();
     d.installNetworkDiagnosticSink(ctx);
     await denied(ctx);
+    await flushWriter();
     await ctx.fiber.dispose();
   `);
   const output = records(result.stderr);
@@ -288,4 +312,180 @@ test('真实Cordis生产lifecycle拒绝经真实sink输出首失并过滤秘密'
   assert.equal(output[0].http_status, 403);
   assert.equal(output[0].code, 'http_error');
   assert.equal(result.stderr.includes('SECRET'), false);
+});
+
+test('真实writer将同步突发限制为32条且不继承预加载环境', options, () => {
+  const result = child(`
+    let spawned = 0, sends = 0, inFlight = 0, maximum = 0;
+    const trackedSpawn = childProcess.spawn;
+    childProcess.spawn = (executable, args, options) => {
+      assert.equal(executable, process.execPath);
+      assert.deepEqual(options.env, {});
+      assert.equal(options.shell, false);
+      assert.equal(options.windowsHide, true);
+      spawned++;
+      const worker = trackedSpawn(executable, args, options);
+      const send = worker.send.bind(worker);
+      worker.send = (line, callback) => {
+        assert.equal(typeof line, 'string');
+        assert.ok(Buffer.byteLength(line) <= 2049);
+        sends++; maximum = Math.max(maximum, ++inFlight);
+        return send(line, callback);
+      };
+      worker.on('message', message => { if (message === 1) inFlight--; });
+      return worker;
+    };
+    syncBuiltinESMExports();
+    const ctx = new Context();
+    d.installNetworkDiagnosticSink(ctx);
+    for (let generation = 1; generation <= 10000; generation++) d.createDiagnosticLog(ctx, generation)(event);
+    await flushWriter(32);
+    assert.equal(spawned, 1);
+    assert.equal(sends, 32);
+    assert.equal(maximum, 1);
+    await ctx.fiber.dispose();
+  `);
+  const output = records(result.stderr);
+  assert.equal(output.length, 32);
+  assert.deepEqual(
+    output.map((e) => e.generation),
+    Array.from({ length: 32 }, (_, i) => i + 1),
+  );
+});
+
+test('真实writer部分写入逐段完成一条安全行', options, () => {
+  const result = child(`
+    const trackedSpawn = childProcess.spawn;
+    childProcess.spawn = (executable, args, options) => {
+      const partial = "const fixtureFS=require('node:fs');const originalWrite=fixtureFS.write;fixtureFS.write=(fd,buffer,offset,length,position,callback)=>originalWrite(fd,buffer,offset,Math.min(length,7),position,callback);";
+      const copy = [...args]; copy[copy.indexOf('-e') + 1] = partial + copy[copy.indexOf('-e') + 1];
+      return trackedSpawn(executable, copy, options);
+    };
+    syncBuiltinESMExports();
+    const ctx = new Context();
+    d.installNetworkDiagnosticSink(ctx);
+    d.createDiagnosticLog(ctx, 1)(event);
+    await flushWriter();
+    await ctx.fiber.dispose();
+  `);
+  assert.deepEqual(records(result.stderr), [{ v: 1, ...event, generation: 1 }]);
+});
+
+test(
+  '真实writer写入错误只丢记录及积压，原403拒绝不变且无自动重启',
+  options,
+  () => {
+    const result = child(`
+    let spawned = 0;
+    const exits = [];
+    const trackedSpawn = childProcess.spawn;
+    childProcess.spawn = (executable, args, options) => {
+      spawned++;
+      const failure = "require('node:fs').write=(fd,buffer,offset,length,position,callback)=>setImmediate(()=>callback(Error('SECRET-write')));";
+      const copy = [...args]; copy[copy.indexOf('-e') + 1] = failure + copy[copy.indexOf('-e') + 1];
+      const worker = trackedSpawn(executable, copy, options);
+      exits.push(new Promise(resolve => worker.once('close', resolve)));
+      return worker;
+    };
+    syncBuiltinESMExports();
+    const ctx = new Context();
+    d.installNetworkDiagnosticSink(ctx);
+    await denied(ctx);
+    d.createDiagnosticLog(ctx, 99)(event);
+    const hold = setTimeout(() => { throw Error('writer did not stop'); }, 3000);
+    await Promise.all(exits);
+    clearTimeout(hold);
+    assert.equal(spawned, 1);
+    await ctx.fiber.dispose();
+  `);
+    assert.equal(result.stderr, '');
+  },
+);
+
+test('真实writer入队后owner卸载取消排队记录，重装不复活旧代', options, () => {
+  const result = child(`
+    const root = new Context();
+    const exits = [];
+    const starts = [];
+    let liveWriters = 0;
+    const trackedSpawn = childProcess.spawn;
+    childProcess.spawn = (...args) => {
+      assert.equal(liveWriters++, 0);
+      starts.push(Date.now());
+      const worker = trackedSpawn(...args);
+      exits.push(new Promise(resolve => worker.once('close', () => { liveWriters--; resolve(); })));
+      return worker;
+    };
+    syncBuiltinESMExports();
+    let old;
+    const first = await root.plugin(function first(ctx) {
+      d.installNetworkDiagnosticSink(ctx);
+      old = d.createDiagnosticLog(ctx, 1);
+      old(event);
+      for (let i = 2; i <= 32; i++) d.createDiagnosticLog(ctx, i)(event);
+    });
+    await first.dispose();
+    const hold = setTimeout(() => { throw Error('writer did not stop'); }, 4000);
+    await Promise.all(exits);
+    const before = completedWrites;
+    await root.plugin(function second(ctx) {
+      d.installNetworkDiagnosticSink(ctx);
+      old({ ...event, phase: 'normal_ready' });
+      d.createDiagnosticLog(ctx, 99)(event);
+    });
+    await flushWriter(before + 1);
+    assert.equal(starts.length, 2);
+    assert.ok(starts[1] - starts[0] >= 1000, 'restart throttle stays bounded across owners');
+    await root.fiber.dispose();
+    clearTimeout(hold);
+  `);
+  const output = records(result.stderr);
+  assert.ok(output.every((e) => e.generation === 1 || e.generation === 99));
+  assert.equal(output.at(-1).generation, 99);
+});
+
+test('真实writer子fiber卸载只取消其排队记录，父fiber继续输出', options, () => {
+  const result = child(`
+    const root = new Context();
+    d.installNetworkDiagnosticSink(root);
+    d.createDiagnosticLog(root, 1)(event);
+    let late;
+    const nested = await root.plugin(function child(ctx) {
+      late = d.createDiagnosticLog(ctx, 2);
+      for (let i=2;i<=32;i++) d.createDiagnosticLog(ctx,i)(event);
+    });
+    await nested.dispose();
+    late({ ...event, phase:'normal_ready' });
+    await flushWriter();
+    d.createDiagnosticLog(root,99)(event);
+    await flushWriter(2);
+    await root.fiber.dispose();
+  `);
+  assert.deepEqual(
+    records(result.stderr).map((e) => e.generation),
+    [1, 99],
+  );
+});
+
+test('真实writer部分输出后错误不重放积压或输出原错误', options, () => {
+  const result = child(`
+    const exits=[];
+    const trackedSpawn=childProcess.spawn;
+    childProcess.spawn=(executable,args,options)=>{
+      const failure="const fixtureFS=require('node:fs');const originalWrite=fixtureFS.write;let calls=0;fixtureFS.write=(fd,buffer,offset,length,position,callback)=>++calls===1?originalWrite(fd,buffer,offset,7,position,callback):setImmediate(()=>callback(Error('SECRET-partial')));";
+      const copy=[...args];copy[copy.indexOf('-e')+1]=failure+copy[copy.indexOf('-e')+1];
+      const worker=trackedSpawn(executable,copy,options);
+      exits.push(new Promise(resolve=>worker.once('close',resolve)));
+      return worker;
+    };
+    syncBuiltinESMExports();
+    const ctx=new Context();d.installNetworkDiagnosticSink(ctx);
+    d.createDiagnosticLog(ctx,1)(event);
+    d.createDiagnosticLog(ctx,2)(event);
+    const hold=setTimeout(()=>{throw Error('partial writer did not stop');},3000);
+    await Promise.all(exits);
+    clearTimeout(hold);
+    await ctx.fiber.dispose();
+  `);
+  assert.equal(result.stderr, 'auriga_');
 });

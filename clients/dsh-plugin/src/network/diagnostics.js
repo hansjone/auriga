@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { writeSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 
 // This is a logging protocol, not a new status/observer surface. Never serialize
 // an exception, request, identity or caller-supplied diagnostic object.
@@ -118,8 +118,155 @@ const integer = (value) =>
 const LOGGER_NAME = 'auriga-network-diagnostic';
 const PREFIX = 'auriga_network_diagnostic ';
 const SINK = Symbol('auriga network diagnostic sink');
+// fs.write is asynchronous, but a full pipe can retain its libuv request until
+// process exit. Isolate that request: this process has its own hard lifetime and
+// exits on IPC disconnect even while its one filesystem write is outstanding.
+const WRITER = `
+const { write } = require('node:fs');
+// process.exit can wait for a blocked filesystem worker during native teardown.
+// The private writer has no durable state: terminate it at the OS boundary.
+const stop = () => process.kill(process.pid, 'SIGKILL');
+process.on('disconnect', stop);
+process.on('error', stop);
+process.on('uncaughtException', stop);
+setTimeout(stop, 2000);
+let busy = false;
+process.on('message', (line) => {
+  if (busy || typeof line !== 'string' || Buffer.byteLength(line) > 2049) return stop();
+  busy = true;
+  const bytes = Buffer.from(line);
+  function part(offset) {
+    write(2, bytes, offset, bytes.length - offset, null, (error, count) => {
+      if (error || !count) return stop();
+      const next = offset + count;
+      if (next < bytes.length) return part(next);
+      busy = false;
+      process.send(1, (error) => { if (error) stop(); });
+    });
+  }
+  try { part(0); } catch { stop(); }
+});
+`;
+/** @typedef {{line:string,owner:any,live:()=>boolean}} Output */
+/** At most 32 records including the single in-flight record: 65568 bytes. */
+/** @type {Output[]} */ let outputQueue = [];
+/** @type {undefined|{child:import('node:child_process').ChildProcess,current?:Output,stopping:boolean,idle?:ReturnType<typeof setTimeout>,kill:()=>void}} */
+let writer;
+/** @type {ReturnType<typeof setTimeout>|undefined} */ let writerWake;
+let nextWriterAt = 0;
+const outputOwners = new WeakSet();
+function stopWriter() {
+  if (!writer || writer.stopping) return;
+  writer.stopping = true;
+  writer.current = undefined;
+  clearTimeout(writer.idle);
+  writer.kill();
+}
+function cancelOutput(/** @type {any} */ owner) {
+  outputQueue = outputQueue.filter((item) => item.owner !== owner);
+  if (writer?.current?.owner === owner) stopWriter();
+  if (!outputQueue.length) {
+    clearTimeout(writerWake);
+    writerWake = undefined;
+  }
+}
+function pumpOutput() {
+  try {
+    outputQueue = outputQueue.filter((item) => item.live());
+    if (!outputQueue.length || writer?.stopping || writer?.current) return;
+    if (!writer) {
+      const delay = nextWriterAt - Date.now();
+      if (delay > 0) {
+        writerWake ??= setTimeout(() => {
+          writerWake = undefined;
+          pumpOutput();
+        }, delay);
+        writerWake.unref();
+        return;
+      }
+      nextWriterAt = Date.now() + 1000; // Resource throttle, not a business retry.
+      const child = spawn(
+        process.execPath,
+        ['--input-type=commonjs', '-e', WRITER],
+        {
+          stdio: ['ignore', 'ignore', 2, 'ipc'],
+          env: {}, // No NODE_OPTIONS, preloads, credentials or execArgv inheritance.
+          windowsHide: true,
+          shell: false,
+        },
+      );
+      const state = {
+        child,
+        current: /** @type {Output|undefined} */ (undefined),
+        stopping: false,
+        idle: /** @type {ReturnType<typeof setTimeout>|undefined} */ (
+          undefined
+        ),
+        kill() {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* Best effort; child has a lease. */
+          }
+        },
+      };
+      writer = state;
+      process.once('exit', state.kill);
+      child.on('error', () => {
+        if (writer === state) stopWriter();
+      });
+      child.on('message', (message) => {
+        if (writer !== state || state.stopping || message !== 1) return;
+        state.current = undefined;
+        pumpOutput();
+        if (!state.current && !state.stopping) {
+          state.idle = setTimeout(stopWriter, 100);
+          state.idle.unref();
+        }
+      });
+      child.once('close', () => {
+        process.removeListener('exit', state.kill);
+        clearTimeout(state.idle);
+        if (writer !== state) return;
+        // An unacknowledged record may be partial. Drop the backlog on failure;
+        // never replay bytes or errors into a new writer/generation.
+        if (state.current) outputQueue = [];
+        writer = undefined;
+        pumpOutput();
+      });
+      child.unref();
+      child.channel?.unref();
+    }
+    clearTimeout(writer.idle);
+    const current = outputQueue.shift();
+    writer.current = current;
+    if (!current) return;
+    const state = writer;
+    state.child.send(current.line, (error) => {
+      if (error && writer === state) stopWriter();
+    });
+  } catch {
+    outputQueue = [];
+    stopWriter();
+  }
+}
+function queueOutput(/** @type {Output} */ item) {
+  if (!outputOwners.has(item.owner)) {
+    item.owner.effect(
+      () => () => cancelOutput(item.owner),
+      'auriga-dsh: diagnostic output owner',
+    );
+    outputOwners.add(item.owner);
+  }
+  if (outputQueue.length + (writer?.current ? 1 : 0) < 32) {
+    outputQueue.push(item);
+    pumpOutput();
+  }
+  // Admission (including deliberate pressure loss) consumes the original gate.
+  // It cannot synchronously promise delivery or loosen per-generation limits.
+}
 /** The context inherits only an opaque token, never the writer/permit itself.
- * @type {WeakMap<object, {readonly active:boolean,send:(line:string)=>boolean}>} */
+ * @type {WeakMap<object, {readonly active:boolean,send:(line:string,owner:any)=>boolean}>} */
 const sinks = new WeakMap();
 const EVENT_KEYS = [
   'v',
@@ -170,7 +317,7 @@ function encodeEvent(event) {
  * @param {any} ctx */
 export function installNetworkDiagnosticSink(ctx) {
   /** @type {undefined|(()=>unknown)} */ let remove;
-  /** @type {undefined|{line:string,delivered:boolean}} */ let pending;
+  /** @type {undefined|{line:string,owner:any,accepted:boolean}} */ let pending;
   let active = true;
   try {
     if (sinks.get(ctx?.[SINK])?.active) return;
@@ -187,17 +334,17 @@ export function installNetworkDiagnosticSink(ctx) {
         return active;
       },
       /** The permit exists only during this exact producer call. */
-      send(/** @type {string} */ line) {
+      send(/** @type {string} */ line, /** @type {any} */ owner) {
         if (!active || pending) return false;
         ctx.fiber?.assertActive?.();
-        const permit = { line, delivered: false };
+        const permit = { line, owner, accepted: false };
         pending = permit;
         try {
           logger.warn(line);
         } finally {
           if (pending === permit) pending = undefined;
         }
-        return permit.delivered;
+        return permit.accepted;
       },
     };
     remove = service.exporter({
@@ -216,11 +363,20 @@ export function installNetworkDiagnosticSink(ctx) {
             return;
           const permit = pending;
           pending = undefined; // One use: synchronous replay cannot duplicate it.
-          // A bounded synchronous fd write also catches closed-pipe failures;
-          // no global stderr listener, formatter, metadata or raw log fallback.
-          const line = permit.line + '\n';
-          permit.delivered =
-            writeSync(2, line) === Buffer.byteLength(line, 'utf8');
+          queueOutput({
+            line: permit.line + '\n',
+            owner: permit.owner,
+            live: () => {
+              try {
+                ctx.fiber?.assertActive?.();
+                permit.owner.fiber?.assertActive?.();
+                return active;
+              } catch {
+                return false;
+              }
+            },
+          });
+          permit.accepted = true;
         } catch {
           /* A diagnostic sink cannot change network control flow. */
         }
@@ -282,7 +438,7 @@ export function createDiagnosticLog(ctx, generation = 0) {
       if (sink) {
         if (!sink.active) return;
         ctx.fiber?.assertActive?.();
-        if (!sink.send(line)) return;
+        if (!sink.send(line, ctx)) return;
       } else {
         // Library consumers may supply their own logger. This path promises no
         // stdio sink; the actual plugin installs the public Cordis exporter above.
