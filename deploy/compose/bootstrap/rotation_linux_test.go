@@ -229,3 +229,56 @@ func TestRotationLinuxRejectsSourceLinksAndWritableAncestors(t *testing.T) {
 		})
 	}
 }
+
+func TestRotationLinuxSystemAncestorsDoNotGrantOperations(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "input.json")
+	if err := os.WriteFile(input, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("fixture uid=%d euid=%d supported=%t", os.Getuid(), os.Geteuid(), rotationSupported())
+	// A setuid context is only a gate test: its created leaf has the effective
+	// owner's identity, so it must not stand in for a caller-owned fixture.
+	if os.Getuid() == os.Geteuid() {
+		t.Run("protected-caller-leaf-under-system-ancestors", func(t *testing.T) {
+			if raw, err := rotationRead(input); err != nil || string(raw) != `{}` {
+				t.Fatalf("protected fixture refused: %v", err)
+			}
+		})
+	}
+	t.Run("writable-ancestor-rejected", func(t *testing.T) {
+		parent := filepath.Join(dir, "writable")
+		if err := os.Mkdir(parent, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(parent, 0777); err != nil {
+			t.Fatal(err)
+		}
+		if err := rotationInputParents(filepath.Join(parent, "input.json")); err == nil || !strings.Contains(err.Error(), "ancestor DAC refused") {
+			t.Fatalf("writable ancestor accepted: %v", err)
+		}
+	})
+	t.Run("symlink-ancestor-rejected", func(t *testing.T) {
+		link := filepath.Join(dir, "linked")
+		if err := os.Symlink(dir, link); err != nil {
+			t.Fatal(err)
+		}
+		if err := rotationInputParents(filepath.Join(link, "input.json")); err == nil {
+			t.Fatal("symlink ancestor accepted")
+		}
+	})
+	if os.Getuid() != 0 || os.Geteuid() != 0 {
+		t.Run("public-cli-still-requires-real-and-effective-root", func(t *testing.T) {
+			for _, entry := range os.Environ() {
+				key, _, _ := strings.Cut(entry, "=")
+				if strings.HasPrefix(key, "COMPOSE_") || strings.HasPrefix(key, "DOCKER_") || strings.HasPrefix(key, "LOADER_") || key == "JAVA_TOOL_OPTIONS" || key == "JDK_JAVA_OPTIONS" || key == "_JAVA_OPTIONS" || key == "CLASSPATH" {
+					t.Setenv(key, "")
+				}
+			}
+			err := keyRotationCLI([]string{"status", input})
+			if err == nil || !strings.Contains(err.Error(), "requires Linux installer root") {
+				t.Fatalf("unprivileged or setuid operation passed the root gate: %v", err)
+			}
+		})
+	}
+}

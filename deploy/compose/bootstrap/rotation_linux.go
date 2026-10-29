@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-func rotationSupported() bool { return os.Geteuid() == 0 }
+func rotationSupported() bool { return os.Getuid() == 0 && os.Geteuid() == 0 }
 
 func rotationDirectory(path string) bool {
 	info, err := os.Lstat(path)
@@ -114,7 +114,9 @@ func rotationInputParents(path string) error {
 			return fmt.Errorf("rotation input parent refused")
 		}
 		st, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || st.Uid != uint32(os.Getuid()) || (info.Mode().Perm()&0022 != 0 && info.Mode()&os.ModeSticky == 0) {
+		// System ancestors are trusted too; the leaf remains caller-owned and
+		// public operations separately require both real and effective root.
+		if !ok || (st.Uid != 0 && st.Uid != uint32(os.Getuid())) || (info.Mode().Perm()&0022 != 0 && info.Mode()&os.ModeSticky == 0) {
 			return fmt.Errorf("rotation input ancestor DAC refused")
 		}
 		if parent == filepath.Dir(parent) {
