@@ -18,7 +18,7 @@ export function mask(text) {
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 ****')
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, '****')
     .replace(
-      /(["']?(?:password|passwd|pwd|secret|(?:access|refresh|session|id)[_-]?token|token|client[_-]?secret|credential|totp|private[_-]?key|api[_-]?key|[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?|authorization|(?:set-)?cookie)["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^"'\\\s,;}]+)/gi,
+      /(["']?(?:password|passwd|pwd|secret|source[_-]?binding|ticket|(?:access|refresh|session|id)[_-]?token|token|client[_-]?secret|credential|totp|private[_-]?key|api[_-]?key|[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?|authorization|(?:set-)?cookie)["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^"'\\\s,;}]+)/gi,
       (_all, prefix, value) =>
         prefix +
         (value.startsWith('"')
@@ -101,6 +101,57 @@ export function natsTraceparent(payload) {
   }
   return newTraceparent();
 }
+const operations = new Set([
+  'source_register',
+  'source_get',
+  'source_revoke',
+  'fetch',
+  'ack',
+  'submit',
+  'send',
+  'ping',
+  'heartbeat',
+  'resume',
+  'receipt',
+]);
+/** Selected, bounded public metadata only. Never expose a whole parsed frame.
+ * @param {Uint8Array} payload */
+export function publicationContext(payload) {
+  try {
+    let frame;
+    if (payload.byteLength <= 65536) {
+      try {
+        frame = JSON.parse(Buffer.from(payload).toString('utf8'));
+      } catch {
+        /* unknown */
+      }
+    }
+    return {
+      trace_id: natsTraceparent(payload).slice(3, 35),
+      request_id:
+        typeof frame?.request_id === 'string' &&
+        /^[A-Za-z0-9._-]{1,128}$/.test(frame.request_id)
+          ? frame.request_id
+          : 'unknown',
+      operation: operations.has(frame?.type) ? frame.type : 'unknown',
+    };
+  } catch {
+    return undefined;
+  }
+}
+/** Only Error stacks, including the complete finite cause chain; no custom objects.
+ * @param {Error} error */
+function causes(error) {
+  const seen = new Set([error]),
+    result = [];
+  let cause = error.cause;
+  while (cause instanceof Error && !seen.has(cause)) {
+    seen.add(cause);
+    result.push(cause.stack);
+    cause = cause.cause;
+  }
+  return result.length ? result.join('\nCaused by: ') : undefined;
+}
 /** @param {string} level @param {string} message @param {Record<string, unknown>} [fields] @param {unknown} [error] */
 export function logEvent(level, message, fields = {}, error) {
   try {
@@ -124,8 +175,7 @@ export function logEvent(level, message, fields = {}, error) {
           ...(error instanceof Error
             ? {
                 exception: error.stack,
-                cause:
-                  error.cause instanceof Error ? error.cause.stack : undefined,
+                cause: causes(error),
               }
             : {}),
         }),
