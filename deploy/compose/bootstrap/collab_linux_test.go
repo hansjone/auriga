@@ -114,11 +114,20 @@ func TestCollabRuntimeProjection(t *testing.T) {
 }
 
 func TestCollabLifecycleRecipe(t *testing.T) {
-	root := t.TempDir()
+	f := activationFixture(t)
+	root := filepath.Dir(f.out)
+	// The generated executable must not occupy the recipe's bootstrap directory.
+	if f.binary == filepath.Join(root, "bootstrap") {
+		binary := filepath.Join(root, "fixture-bootstrap")
+		if e := os.Rename(f.binary, binary); e != nil {
+			t.Fatal(e)
+		}
+		f.binary = binary
+	}
 	scripts := filepath.Join(root, "scripts")
 	bin := filepath.Join(root, "bin")
-	vars := filepath.Join(root, "var")
-	for _, dir := range []string{scripts, bin, vars} {
+	vars := f.out
+	for _, dir := range []string{scripts, bin, filepath.Join(root, "bootstrap")} {
 		if e := os.Mkdir(dir, 0700); e != nil {
 			t.Fatal(e)
 		}
@@ -131,12 +140,22 @@ func TestCollabLifecycleRecipe(t *testing.T) {
 	if e = os.WriteFile(script, raw, 0700); e != nil {
 		t.Fatal(e)
 	}
-	if e = os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0700); e != nil {
+	if e = os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nprintf 'env-project=%s\\n' \"$COMPOSE_PROJECT_NAME\"\nprintf '%s\\n' \"$@\"\n"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	// The copied recipe has no source module of its own. Relay the exact Go-run
+	// shape to the real binary compiled by activationFixture, preserving errors.
+	goRelay := `#!/bin/sh
+[ "$#" -ge 4 ] && [ "$1" = -C ] && [ -d "$2" ] && [ "$2" = "$AURIGA_LIFECYCLE_TEST_ROOT/bootstrap" ] && [ "$3" = run ] && [ "$4" = . ] || exit 2
+shift 4
+exec "$AURIGA_LIFECYCLE_TEST_BOOTSTRAP" "$@"
+`
+	if e = os.WriteFile(filepath.Join(bin, "go"), []byte(goRelay), 0700); e != nil {
 		t.Fatal(e)
 	}
 	run := func(args ...string) (string, error) {
 		cmd := exec.Command("bash", append([]string{script}, args...)...)
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "AURIGA_LIFECYCLE_TEST_ROOT="+filepath.Dir(filepath.Dir(script)), "AURIGA_LIFECYCLE_TEST_BOOTSTRAP="+f.binary, "COMPOSE_PROJECT_NAME=foreign-example")
 		b, e := cmd.CombinedOutput()
 		return string(b), e
 	}
@@ -149,10 +168,52 @@ func TestCollabLifecycleRecipe(t *testing.T) {
 	if e = os.WriteFile(filepath.Join(vars, "compose.env"), []byte("COMPOSE_FILE=must-never-select.yml\n"), 0600); e != nil {
 		t.Fatal(e)
 	}
+	assertProject := func(b string) {
+		t.Helper()
+		if !strings.Contains(b, "--project-name\npublic-test\n") || !strings.Contains(b, "env-project=public-test\n") || strings.Contains(b, "foreign-example") {
+			t.Fatalf("lifecycle escaped sealed project: %s", b)
+		}
+	}
 	if b, e := run("ps"); e != nil || strings.Contains(b, "collab-required") {
 		t.Fatalf("default recipe: %v %s", e, b)
+	} else {
+		assertProject(b)
 	}
-	if e = os.Mkdir(filepath.Join(vars, "collab-installation"), 0700); e != nil {
+	// A failed real query must propagate, never become a successful fake project.
+	access := filepath.Join(vars, "access.json")
+	accessRaw, e := os.ReadFile(access)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(access, append(accessRaw, '\n'), 0644); e != nil {
+		t.Fatal(e)
+	}
+	if b, e := run("ps"); e == nil || !strings.Contains(b, "seal invalid") || strings.Contains(b, "env-project=") {
+		t.Fatalf("query failure swallowed: %v %s", e, b)
+	}
+	if e = os.WriteFile(access, accessRaw, 0644); e != nil {
+		t.Fatal(e)
+	}
+	// An empty collab-installation directory cannot stand in for a sealed N1
+	// installation. Build a separate first-install fixture; do not upgrade base.
+	n1Root := filepath.Join(root, "n1")
+	for _, dir := range []string{filepath.Join(n1Root, "scripts"), filepath.Join(n1Root, "bootstrap")} {
+		if e = os.MkdirAll(dir, 0700); e != nil {
+			t.Fatal(e)
+		}
+	}
+	script = filepath.Join(n1Root, "scripts", "compose.sh")
+	if e = os.WriteFile(script, raw, 0700); e != nil {
+		t.Fatal(e)
+	}
+	vars = filepath.Join(n1Root, "var")
+	proofs, image := runtimeProofFixture(t, "real")
+	args := []string{"-out", vars, "-access-file", access, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs,
+		"-https-cert-file", filepath.Join(f.out, "browser-tls", "browser.crt"), "-https-key-file", filepath.Join(f.out, "browser-tls", "browser.key"), "-network-collab-file", f.input}
+	if b, e := exec.Command(f.binary, args...).CombinedOutput(); e != nil {
+		t.Fatalf("sealed N1 fixture: %v %s", e, b)
+	}
+	if e = os.WriteFile(filepath.Join(vars, "compose.env"), []byte("COMPOSE_FILE=must-never-select.yml\n"), 0600); e != nil {
 		t.Fatal(e)
 	}
 	for _, action := range []string{"ps", "up", "start", "stop", "bootstrap-registry"} {
@@ -160,6 +221,7 @@ func TestCollabLifecycleRecipe(t *testing.T) {
 		if e != nil || !strings.Contains(b, "collab-required.yml") || !strings.Contains(b, "network-collab") || !strings.Contains(b, "compose.env") {
 			t.Fatalf("enabled lifecycle %s: %v %s", action, e, b)
 		}
+		assertProject(b)
 	}
 	if b, e := run("up", "--file", "foreign.yml"); e == nil {
 		t.Fatalf("recipe override accepted: %s", b)
