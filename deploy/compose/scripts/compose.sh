@@ -14,6 +14,9 @@ if [ "$1" = bootstrap-registry ]; then
 fi
 [ -f "$VAR/compose.env" ] && [ ! -L "$VAR/compose.env" ] || { echo 'missing compose installation env' >&2; exit 1; }
 ARGS+=(--env-file "$VAR/compose.env")
+if [ -e "$VAR/collab-operations" ] || [ -L "$VAR/collab-operations" ]; then
+  exec go -C "$COMPOSE/bootstrap" run . key-rotation lifecycle "$@"
+fi
 # Fixed stop/inspection escape for interrupted activation; these actions cannot start.
 if [ "$1" = activation-stop ] || [ "$1" = activation-running ]; then
   ACTION=$1; shift; [ "$#" -eq 0 ] || exit 2
