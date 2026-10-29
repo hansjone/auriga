@@ -9,6 +9,7 @@ import java.time.Clock;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -40,6 +41,7 @@ public class NetworkKeyOperationsConfiguration {
   }
 
   @Bean
+  @DependsOnDatabaseInitialization
   NetworkKeyOperations networkKeyOperations(
       DataSource source,
       TenantTransactionManager manager,
