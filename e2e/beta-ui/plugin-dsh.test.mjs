@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fork, spawn } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 import { privatePath, waitUntil } from '../../scripts/beta-ui/runner.mjs';
 import {
   parseArguments,
@@ -16,7 +17,9 @@ import {
   verifyPackageManagerVersion,
   buildEnvironment,
   createHostOutput,
+  discoverProvider,
 } from '../../scripts/beta-ui/plugin-dsh.mjs';
+import { validateConnect } from '../../scripts/beta-ui/demo-network-send-config.mjs';
 
 const base = path.resolve('.dev/plugin-dsh');
 function temporary(t) {
@@ -40,6 +43,79 @@ test('arguments reject missing, duplicate, unknown and unsafe launch values', ()
     assert.throws(() => parseArguments(args));
   }
   assert.equal(parseArguments(['launch', '--state', base]).port, 0);
+  assert.equal(
+    parseArguments([
+      'launch',
+      '--state',
+      base,
+      '--connect-config',
+      'public.json',
+    ]).connectConfig,
+    'public.json',
+  );
+  assert.throws(() =>
+    parseArguments([
+      'stop',
+      '--state',
+      base,
+      '--connect-config',
+      'public.json',
+    ]),
+  );
+});
+
+test('selected installation pins survive profile patch and provider discovery uses its verified HTTPS origin', async (t) => {
+  const connect = validateConnect({
+    platformOrigin: 'https://portal.example.com',
+    issuer: 'https://portal.example.com',
+    providerId: 'team',
+    clientId: 'auriga-dsh',
+    network: {
+      realm: '1',
+      wssUrl: 'wss://network.example.com/ws',
+      roots: [
+        {
+          kid: 'root-1',
+          public_key_spki: generateKeyPairSync('ed25519')
+            .publicKey.export({ type: 'spki', format: 'der' })
+            .toString('base64url'),
+        },
+      ],
+    },
+  });
+  const patch = connectionPatch('team', connect);
+  assert.deepEqual(JSON.parse(patch.split('config: ')[1]).connect, connect);
+  assert.ok(!patch.includes('allowLocalHttp'));
+  const original = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  let id = 'team';
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, 'https://portal.example.com/api/iam/v1/login/providers');
+    assert.equal(options.redirect, 'error');
+    return {
+      ok: true,
+      json: async () => ({
+        items: [{ id, connectorType: 'team-account', primaryStep: 'form' }],
+      }),
+    };
+  };
+  assert.equal(await discoverProvider(connect), 'team');
+  const oldTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  try {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    await assert.rejects(discoverProvider(connect), /禁止跳过 TLS/);
+  } finally {
+    if (oldTls === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = oldTls;
+  }
+  id = 'other';
+  await assert.rejects(discoverProvider(connect), /身份源.*不一致/);
+  globalThis.fetch = async () => {
+    throw new Error('untrusted TLS');
+  };
+  await assert.rejects(discoverProvider(connect), /untrusted TLS/);
 });
 
 test('host stdout/stderr parse split launch URL in memory and never persist query tickets', async (t) => {
