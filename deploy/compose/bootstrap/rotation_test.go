@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -391,4 +392,136 @@ func TestRotationArchiveRejectsRollbackPathsMissingHistoryAndChangedBytes(t *tes
 	if err := rotationCheckFiles(t.TempDir(), map[string]string{"../source": strings.Repeat("a", 64)}); err == nil {
 		t.Fatal("seal path traversal accepted")
 	}
+}
+
+func TestRotationWrapperPreservesSealedProjectGateWithoutInjectingSelectors(t *testing.T) {
+	f := activationFixture(t)
+	root := filepath.Dir(f.out)
+	if f.binary == filepath.Join(root, "bootstrap") {
+		binary := filepath.Join(root, "fixture-bootstrap")
+		if err := os.Rename(f.binary, binary); err != nil {
+			t.Fatal(err)
+		}
+		f.binary = binary
+	}
+	scripts, bin := filepath.Join(root, "scripts"), filepath.Join(root, "bin")
+	for _, dir := range []string{scripts, bin, filepath.Join(root, "bootstrap"), filepath.Join(f.out, "collab-operations")} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(path, text string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(text), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	product, err := os.ReadFile("../scripts/compose.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(scripts, "compose.sh"), string(product))
+	write(filepath.Join(f.out, "compose.env"), "COMPOSE_FILE=foreign-file.yml\n")
+	write(filepath.Join(bin, "docker"), "#!/bin/sh\necho DOCKER >> \"$AURIGA_ROTATION_WRAPPER_LOG\"\nexit 99\n")
+	write(filepath.Join(bin, "go"), `#!/bin/sh
+[ "$#" -ge 4 ] && [ "$1" = -C ] && [ -d "$2" ] && [ "$3" = run ] && [ "$4" = . ] || exit 2
+shift 4
+case "$1" in
+  -print-compose-project) exec "$AURIGA_ROTATION_WRAPPER_BOOTSTRAP" "$@" ;;
+  key-rotation)
+    printf 'OPS|project=%s|file=%s|profiles=%s|disable=%s|args=%s\n' "${COMPOSE_PROJECT_NAME:-}" "${COMPOSE_FILE:-}" "${COMPOSE_PROFILES:-}" "${COMPOSE_DISABLE_ENV_FILE:-}" "$*" >> "$AURIGA_ROTATION_WRAPPER_LOG"
+    if [ "$AURIGA_ROTATION_WRAPPER_REJECT" = 1 ]; then exec "$AURIGA_ROTATION_WRAPPER_BOOTSTRAP" "$@"; fi
+    ;;
+  *) exit 2 ;;
+esac
+`)
+	bash := "bash"
+	if runtime.GOOS == "windows" {
+		bash = `C:\Program Files\Git\bin\bash.exe`
+		if _, err := os.Stat(bash); err != nil {
+			t.Fatalf("native Git Bash required; WSL forbidden: %v", err)
+		}
+	}
+	bashPath := func(path string) string {
+		path = filepath.ToSlash(path)
+		if runtime.GOOS == "windows" {
+			return "/" + strings.ToLower(path[:1]) + path[2:]
+		}
+		return path
+	}
+	log := filepath.Join(root, "ops-wrapper.log")
+	run := func(selector string, reject bool, args ...string) (string, string, error) {
+		t.Helper()
+		write(log, "")
+		argv := []string{"--noprofile", "--norc", "-c", `export PATH="$AURIGA_ROTATION_WRAPPER_BIN:/usr/bin:/bin"; exec bash --noprofile --norc "$@"`, "fixture", bashPath(filepath.Join(scripts, "compose.sh"))}
+		cmd := exec.Command(bash, append(argv, args...)...)
+		cmd.Dir = filepath.Join(root, "bootstrap")
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			key = strings.ToUpper(key)
+			if strings.HasPrefix(key, "COMPOSE_") || strings.HasPrefix(key, "DOCKER_") || strings.HasPrefix(key, "LOADER_") || key == "JAVA_TOOL_OPTIONS" || key == "JDK_JAVA_OPTIONS" || key == "_JAVA_OPTIONS" || key == "CLASSPATH" {
+				continue
+			}
+			cmd.Env = append(cmd.Env, entry)
+		}
+		mode := "0"
+		if reject {
+			mode = "1"
+		}
+		cmd.Env = append(cmd.Env, "AURIGA_ROTATION_WRAPPER_BIN="+bashPath(bin), "AURIGA_ROTATION_WRAPPER_BOOTSTRAP="+bashPath(f.binary), "AURIGA_ROTATION_WRAPPER_LOG="+bashPath(log), "AURIGA_ROTATION_WRAPPER_REJECT="+mode)
+		if selector != "" {
+			cmd.Env = append(cmd.Env, selector)
+		}
+		output, err := cmd.CombinedOutput()
+		recorded, readErr := os.ReadFile(log)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return string(output), string(recorded), err
+	}
+	before := originalBase(t, f.out)
+	for _, action := range []string{"config", "activation-stop", "activation-running"} {
+		t.Run("clean-"+action, func(t *testing.T) {
+			output, recorded, err := run("", false, action)
+			if err != nil || !strings.Contains(recorded, "OPS|project=|file=|profiles=|disable=|args=key-rotation lifecycle "+action) || strings.Contains(recorded, "DOCKER") {
+				t.Fatalf("wrapper injected a selector or bypassed ops: %v %s %s", err, output, recorded)
+			}
+		})
+		for _, selector := range []string{"COMPOSE_PROJECT_NAME=foreign-example", "COMPOSE_FILE=foreign.yml"} {
+			t.Run(action+"-"+strings.Split(selector, "=")[0], func(t *testing.T) {
+				output, recorded, err := run(selector, true, action)
+				if err == nil || !strings.Contains(output, "rotation refuses process/recipe override environment") || strings.Contains(recorded, "DOCKER") {
+					t.Fatalf("ops selector rejection lost: %v %s %s", err, output, recorded)
+				}
+			})
+		}
+	}
+	t.Run("expected-project", func(t *testing.T) {
+		output, recorded, err := run("", false, "--expected-project", "public-test", "config", "--quiet")
+		if err != nil || !strings.Contains(recorded, "args=key-rotation lifecycle config --quiet") {
+			t.Fatalf("expected-project dispatch: %v %s %s", err, output, recorded)
+		}
+	})
+	t.Run("project-mismatch", func(t *testing.T) {
+		output, recorded, err := run("", false, "--expected-project", "other", "config")
+		if err == nil || !strings.Contains(output, "differs from preflight") || strings.Contains(recorded, "OPS|") {
+			t.Fatalf("expected-project gate bypassed: %v %s %s", err, output, recorded)
+		}
+	})
+	t.Run("unsealed-access", func(t *testing.T) {
+		path := filepath.Join(f.out, "access.json")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.WriteFile(path, raw, 0644) }()
+		if err := os.WriteFile(path, append(raw, '\n'), 0644); err != nil {
+			t.Fatal(err)
+		}
+		output, recorded, err := run("", false, "activation-running")
+		if err == nil || strings.Contains(recorded, "OPS|") || strings.Contains(recorded, "DOCKER") {
+			t.Fatalf("unsealed access reached ops: %v %s %s", err, output, recorded)
+		}
+	})
+	assertBase(t, f.out, before)
 }
