@@ -298,7 +298,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     if (team) {
       await team.verifyOnline();
       assertAttempt();
-      network.login();
       return;
     }
     if (
@@ -343,7 +342,6 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       starting = false;
       team = candidate;
       communication = 'ready';
-      network.login();
     } catch (error) {
       candidate.close();
       throw error;
@@ -388,6 +386,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
       };
     sessions.set(key, session);
     models.login();
+    // Native identity is verified and durably owned before session issuance.
+    // Independent N1 must not wait for legacy Team/MCP availability.
+    network.login();
     connectTeam(true);
     row.jar.clear();
     row.verifier = undefined;
