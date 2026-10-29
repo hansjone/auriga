@@ -22,6 +22,11 @@ fi
 PROJECT="$(go -C "$COMPOSE/bootstrap" run . -print-compose-project -out "$VAR")"
 [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || exit 1
 [ -z "$EXPECTED_PROJECT" ] || [ "$EXPECTED_PROJECT" = "$PROJECT" ] || { echo 'sealed Compose project differs from preflight' >&2; exit 1; }
+# Operations verifies the same sealed binding and rejects caller selectors itself.
+# Dispatch before the legacy recipe creates its trusted COMPOSE_* environment.
+if [ -e "$VAR/collab-operations" ] || [ -L "$VAR/collab-operations" ]; then
+  exec go -C "$COMPOSE/bootstrap" run . key-rotation lifecycle "$@"
+fi
 # Shell selection wins over env-file values. Clear external selectors, then set
 # only verified/fixed values; never source compose.env or rely on argument bans
 # to establish the project identity.
