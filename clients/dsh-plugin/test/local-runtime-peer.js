@@ -55,6 +55,8 @@ export async function runtimePeer(t, options = {}) {
     requests.push(path);
     if (path === '/oauth2/revoke' && options.revokeHttp)
       return nativeFetch(url, init);
+    if (path === '/api/iam/v1/network/register' && options.networkRegister)
+      return options.networkRegister(url, init);
     let data;
     if (path === '/oauth2/jwks')
       data = {

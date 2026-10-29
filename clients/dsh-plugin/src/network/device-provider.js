@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { platformConfig, PlatformError } from '../local/platform.js';
 import { parseStrictJson } from './trust/jcs.js';
 import { positiveVersion } from './trust/keyset.js';
+import { diagnosticReason } from './diagnostics.js';
 
 const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
 const CLOCK_SKEW_MS = 60000;
@@ -78,16 +79,24 @@ export function createDeviceProvider({
         `aur1:${BigInt(value.realm).toString(16)}.${BigInt(value.node).toString(16)}.0` ||
       (created && typeof value.created !== 'boolean')
     )
-      throw new Error('invalid device registration');
+      throw diagnosticReason(
+        new Error('invalid device registration'),
+        'response_invalid',
+      );
     return value;
   }
   return {
     kind: 'device-connection',
-    async prepare({ signal }) {
+    async prepare({ signal, diagnostics }) {
       signal.throwIfAborted();
       const device = await getDevice(signal);
       signal.throwIfAborted();
       const expected = { ...device.claims };
+      /** @template T @param {string} phase @param {()=>Promise<T>|T} operation @param {number} [budget] */
+      const run = (phase, operation, budget = 0) =>
+        diagnostics
+          ? diagnostics.scope(phase, budget).deferred(operation)
+          : operation();
       /** @param {string} path @param {unknown} body @param {AbortSignal} active */
       async function request(path, body, active) {
         active.throwIfAborted();
@@ -116,7 +125,10 @@ export function createDeviceProvider({
           body: body === undefined ? undefined : JSON.stringify(body),
         }).catch(() => {
           active.throwIfAborted();
-          throw new DeviceControlUnavailable('network control unavailable');
+          throw diagnosticReason(
+            new DeviceControlUnavailable('network control unavailable'),
+            'control_unavailable',
+          );
         });
         active.throwIfAborted();
         const parts = [];
@@ -127,8 +139,9 @@ export function createDeviceProvider({
             for (;;) {
               const { done, value } = await reader.read().catch(() => {
                 active.throwIfAborted();
-                throw new DeviceControlUnavailable(
-                  'network control unavailable',
+                throw diagnosticReason(
+                  new DeviceControlUnavailable('network control unavailable'),
+                  'control_unavailable',
                 );
               });
               active.throwIfAborted();
@@ -136,7 +149,10 @@ export function createDeviceProvider({
               size += value.byteLength;
               if (size > 65536) {
                 await reader.cancel();
-                throw new Error('network control response too large');
+                throw diagnosticReason(
+                  new Error('network control response too large'),
+                  'response_too_large',
+                );
               }
               parts.push(value);
             }
@@ -169,12 +185,13 @@ export function createDeviceProvider({
           if (registering)
             throw new Error('device registration already consumed');
           registering = true;
-          const result = registration(
-            parseStrictJson(
-              await request('/api/iam/v1/network/register', {}, active),
-            ),
-            expected,
-            true,
+          const bytes = await run(
+            'register_http',
+            () => request('/api/iam/v1/network/register', {}, active),
+            15000,
+          );
+          const result = await run('register_validate', () =>
+            registration(parseStrictJson(bytes), expected, true),
           );
           active.throwIfAborted();
           registered = Object.freeze(result);
@@ -184,94 +201,113 @@ export function createDeviceProvider({
         origin: config.platformOrigin,
         roots: installation.roots,
         async refresh(trust, active) {
-          await trust.announce(
-            await request(
-              '/api/collab/v1/network/keys/announcement',
-              undefined,
-              active,
-            ),
+          const announcement = await run(
+            'keys_announcement_http',
+            () =>
+              request(
+                '/api/collab/v1/network/keys/announcement',
+                undefined,
+                active,
+              ),
+            15000,
+          );
+          await run('keys_announcement_validate', () =>
+            trust.announce(announcement),
           );
           active.throwIfAborted();
-          await trust.update(
-            await request('/api/collab/v1/network/keys', undefined, active),
+          const keys = await run(
+            'keys_http',
+            () => request('/api/collab/v1/network/keys', undefined, active),
+            15000,
           );
+          await run('keys_validate', () => trust.update(keys));
           active.throwIfAborted();
           trust.assertUsable();
         },
         async getTicket(active) {
           if (!registered) throw new Error('device registration required');
-          const raw = parseStrictJson(
-            await request(
-              '/api/iam/v1/network/tickets',
-              { node: registered.node },
-              active,
-            ),
+          const identity = registered;
+          const bytes = await run(
+            'ticket_http',
+            () =>
+              request(
+                '/api/iam/v1/network/tickets',
+                { node: identity.node },
+                active,
+              ),
+            15000,
           );
-          registration(raw.identity, expected, false);
-          const ingress =
-            typeof raw.ticket === 'string' &&
-            /^[A-Za-z0-9_-]{43}$/.test(raw.ticket)
-              ? ingressFor(raw.ticket)
-              : '';
-          const shard =
-            alphabet[createHash('sha256').update(ingress).digest()[0] & 31];
-          const expires = Date.parse(raw.expiresAt),
-            connectionExpires = Date.parse(raw.connectionExpiresAt),
-            currentTime = now();
-          if (
-            !exact(raw, [
-              'identity',
-              'ticket',
-              'serverAudience',
-              'expiresAt',
-              'connectionExpiresAt',
-              'ingress',
-              'upSubject',
-              'downSubject',
-              'replyPrefix',
-              'protocolVersion',
-            ]) ||
-            raw.identity.node !== registered.node ||
-            raw.identity.systemAddress !== registered.systemAddress ||
-            !ingress ||
-            raw.ingress !== ingress ||
-            raw.upSubject !== `auriga.net.up.${shard}.${ingress}` ||
-            raw.downSubject !== `auriga.net.down.${ingress}` ||
-            raw.replyPrefix !== `auriga.net.reply.${ingress}` ||
-            raw.protocolVersion !== 1 ||
-            typeof raw.serverAudience !== 'string' ||
-            !/^[A-Za-z0-9._:-]{1,256}$/.test(raw.serverAudience) ||
-            ![raw.expiresAt, raw.connectionExpiresAt].every(
-              (v) =>
-                typeof v === 'string' &&
-                /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(v),
-            ) ||
-            !Number.isFinite(expires) ||
-            expires <= currentTime - CLOCK_SKEW_MS ||
-            expires > currentTime + 30000 + CLOCK_SKEW_MS ||
-            !Number.isFinite(connectionExpires) ||
-            connectionExpires < expires ||
-            connectionExpires <= currentTime - CLOCK_SKEW_MS ||
-            connectionExpires > currentTime + 3600000 + CLOCK_SKEW_MS
-          )
-            throw new Error('invalid device network ticket');
-          active.throwIfAborted();
-          return {
-            auth: {
-              token: JSON.stringify({
-                tenant: registered.tenant,
-                node: registered.node,
-                device: registered.device,
-                ticket: raw.ticket,
-              }),
-            },
-            expiresAtMs: connectionExpires,
-            subjects: {
-              upSubject: raw.upSubject,
-              downSubject: raw.downSubject,
-              inboxPrefix: raw.replyPrefix,
-            },
-          };
+          return run('ticket_validate', () => {
+            const raw = parseStrictJson(bytes);
+            registration(raw.identity, expected, false);
+            const ingress =
+              typeof raw.ticket === 'string' &&
+              /^[A-Za-z0-9_-]{43}$/.test(raw.ticket)
+                ? ingressFor(raw.ticket)
+                : '';
+            const shard =
+              alphabet[createHash('sha256').update(ingress).digest()[0] & 31];
+            const expires = Date.parse(raw.expiresAt),
+              connectionExpires = Date.parse(raw.connectionExpiresAt),
+              currentTime = now();
+            if (
+              !exact(raw, [
+                'identity',
+                'ticket',
+                'serverAudience',
+                'expiresAt',
+                'connectionExpiresAt',
+                'ingress',
+                'upSubject',
+                'downSubject',
+                'replyPrefix',
+                'protocolVersion',
+              ]) ||
+              raw.identity.node !== identity.node ||
+              raw.identity.systemAddress !== identity.systemAddress ||
+              !ingress ||
+              raw.ingress !== ingress ||
+              raw.upSubject !== `auriga.net.up.${shard}.${ingress}` ||
+              raw.downSubject !== `auriga.net.down.${ingress}` ||
+              raw.replyPrefix !== `auriga.net.reply.${ingress}` ||
+              raw.protocolVersion !== 1 ||
+              typeof raw.serverAudience !== 'string' ||
+              !/^[A-Za-z0-9._:-]{1,256}$/.test(raw.serverAudience) ||
+              ![raw.expiresAt, raw.connectionExpiresAt].every(
+                (v) =>
+                  typeof v === 'string' &&
+                  /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(v),
+              ) ||
+              !Number.isFinite(expires) ||
+              expires <= currentTime - CLOCK_SKEW_MS ||
+              expires > currentTime + 30000 + CLOCK_SKEW_MS ||
+              !Number.isFinite(connectionExpires) ||
+              connectionExpires < expires ||
+              connectionExpires <= currentTime - CLOCK_SKEW_MS ||
+              connectionExpires > currentTime + 3600000 + CLOCK_SKEW_MS
+            )
+              throw diagnosticReason(
+                new Error('invalid device network ticket'),
+                'response_invalid',
+              );
+            active.throwIfAborted();
+            return {
+              auth: {
+                token: JSON.stringify({
+                  tenant: identity.tenant,
+                  node: identity.node,
+                  device: identity.device,
+                  ticket: raw.ticket,
+                }),
+              },
+              expiresAtMs: connectionExpires,
+              subjects: {
+                upSubject: raw.upSubject,
+                downSubject: raw.downSubject,
+                inboxPrefix: raw.replyPrefix,
+              },
+            };
+          });
         },
       };
     },

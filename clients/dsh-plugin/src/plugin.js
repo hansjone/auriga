@@ -19,6 +19,7 @@ import {
 import { join } from 'node:path';
 import { installSettings } from './settings/host.js';
 import { MANAGED_MODEL_STATUS } from './ai/installation.js';
+import { installNetworkDiagnosticSink } from './network/diagnostics.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -28,6 +29,7 @@ export const inject = ['webServer', 'connection'];
  * @param {import('./generated/managed-config.js').ManagedConfig} [config] Loader row config
  */
 export async function apply(ctx, config) {
+  installNetworkDiagnosticSink(ctx);
   const mode = selectMode();
   let binding, profileOwner;
   // Unknown preferences must never temporarily expose native DSH surfaces.
