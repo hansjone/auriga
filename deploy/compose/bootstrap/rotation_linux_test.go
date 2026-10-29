@@ -23,6 +23,61 @@ type rotationLinuxRecoveryFixture struct {
 	statusError, verifyError error
 }
 
+func rotationFixtureAuthorityVersion(action, expected, candidate, current string) (string, error) {
+	if !rotationVersion(expected) || !rotationVersion(candidate) || !rotationVersion(current) || expected != current {
+		return "", fmt.Errorf("fixture authoritative PG version differs")
+	}
+	switch action {
+	case "preflight", "publish":
+		oldVersion, _ := strconv.ParseInt(expected, 10, 64)
+		newVersion, _ := strconv.ParseInt(candidate, 10, 64)
+		if newVersion <= oldVersion {
+			return "", fmt.Errorf("fixture publication must advance expected PG version")
+		}
+		if action == "publish" {
+			return candidate, nil
+		}
+		// The production preflight transaction rolls back its candidate publication.
+		return current, nil
+	case "status", "install":
+		if candidate != current {
+			return "", fmt.Errorf("fixture authoritative PG version differs")
+		}
+		return current, nil
+	default:
+		return "", fmt.Errorf("fixture authority action refused")
+	}
+}
+
+func TestRotationLinuxFixtureAuthorityVersions(t *testing.T) {
+	for _, tc := range []struct {
+		name, action, expected, candidate, current, after string
+	}{
+		{"first-preflight-rolls-back", "preflight", "7", "8", "7", "7"},
+		{"first-publish-advances", "publish", "7", "8", "7", "8"},
+		{"second-preflight-rolls-back", "preflight", "8", "9", "8", "8"},
+		{"second-publish-advances", "publish", "8", "9", "8", "9"},
+		{"current-status", "status", "8", "8", "8", "8"},
+		{"current-install", "install", "8", "8", "8", "8"},
+		{"stale-preflight-checkpoint", "preflight", "6", "8", "7", ""},
+		{"changed-PG-before-publish", "publish", "7", "8", "9", ""},
+		{"same-version-publication", "preflight", "7", "7", "7", ""},
+		{"rollback-publication", "publish", "7", "6", "7", ""},
+		{"foreign-status-candidate", "status", "8", "9", "8", ""},
+		{"unpublished-install", "install", "8", "9", "8", ""},
+		{"invalid-version", "preflight", "7", "08", "7", ""},
+		{"unknown-action", "shell", "7", "8", "7", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			after, err := rotationFixtureAuthorityVersion(tc.action, tc.expected, tc.candidate, tc.current)
+			if (tc.after == "") != (err != nil) || after != tc.after {
+				t.Fatalf("fixture authority transition: after=%s error=%v", after, err)
+			}
+			t.Logf("action=%s expected=%s candidate=%s PG-before=%s PG-after=%s rejected=%t", tc.action, tc.expected, tc.candidate, tc.current, after, err != nil)
+		})
+	}
+}
+
 func rotationLinuxRecovery(t *testing.T) *rotationLinuxRecoveryFixture {
 	t.Helper()
 	f := activationFixture(t)
@@ -156,11 +211,19 @@ func rotationLinuxRecovery(t *testing.T) *rotationLinuxRecoveryFixture {
 		if err != nil {
 			return nil, err
 		}
-		if action == "publish" {
-			x.pgVersion = version
-		} else if version != x.pgVersion {
-			return nil, fmt.Errorf("fixture authoritative PG version differs")
+		expected, err := rotationRead(plan.Expected)
+		if err != nil {
+			return nil, err
 		}
+		expectedVersion, _, err := rotationPayload(expected)
+		if err != nil {
+			return nil, err
+		}
+		after, err := rotationFixtureAuthorityVersion(action, expectedVersion, version, x.pgVersion)
+		if err != nil {
+			return nil, err
+		}
+		x.pgVersion = after
 		if action == "install" {
 			var body map[string]any
 			state, err := os.ReadFile(r.state)
