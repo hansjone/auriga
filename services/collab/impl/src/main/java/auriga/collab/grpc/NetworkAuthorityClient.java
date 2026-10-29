@@ -13,9 +13,32 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 /** Online, tenant-scoped collab-only IAM adapter. Never falls back to cached permissions. */
 public class NetworkAuthorityClient implements NetworkAuthority {
+  private static final Logger LOG = LoggerFactory.getLogger(NetworkAuthorityClient.class);
+
+  private enum Phase {
+    RESOLVE,
+    ACTIVE,
+    CHECK,
+    LIMITS,
+    OTHER
+  }
+
+  private enum InboundRemaining {
+    NONE,
+    EXPIRED,
+    LE_25_MS,
+    LE_100_MS,
+    LE_250_MS,
+    LE_1000_MS,
+    GT_1000_MS
+  }
+
   private final NetworkAuthorityServiceGrpc.NetworkAuthorityServiceBlockingStub stub;
   private final long timeoutMillis;
   private final NetworkSourceAuthorityServiceGrpc.NetworkSourceAuthorityServiceBlockingStub sources;
@@ -51,12 +74,56 @@ public class NetworkAuthorityClient implements NetworkAuthority {
     return stub.withDeadlineAfter(remainingMillis(), TimeUnit.MILLISECONDS);
   }
 
-  private <T> T call(Supplier<T> action) {
+  private <T> T call(Phase phase, Supplier<T> action) {
     tenant();
+    long started = System.nanoTime();
+    InboundRemaining inbound = inboundRemaining();
     try {
       return action.get();
     } catch (StatusRuntimeException e) {
+      classifyFailure(phase, e.getStatus().getCode(), started, inbound);
       throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
+  }
+
+  private static InboundRemaining inboundRemaining() {
+    var deadline = io.grpc.Context.current().getDeadline();
+    if (deadline == null) return InboundRemaining.NONE;
+    long remaining = deadline.timeRemaining(TimeUnit.NANOSECONDS);
+    if (remaining <= 0) return InboundRemaining.EXPIRED;
+    if (remaining <= TimeUnit.MILLISECONDS.toNanos(25)) return InboundRemaining.LE_25_MS;
+    if (remaining <= TimeUnit.MILLISECONDS.toNanos(100)) return InboundRemaining.LE_100_MS;
+    if (remaining <= TimeUnit.MILLISECONDS.toNanos(250)) return InboundRemaining.LE_250_MS;
+    if (remaining <= TimeUnit.MILLISECONDS.toNanos(1000)) return InboundRemaining.LE_1000_MS;
+    return InboundRemaining.GT_1000_MS;
+  }
+
+  private static void classifyFailure(
+      Phase phase, io.grpc.Status.Code code, long started, InboundRemaining inbound) {
+    if (!LOG.isWarnEnabled()) return;
+    // Do not implicitly attach identity/credential fields from the caller's MDC either.
+    Map<String, String> previous = MDC.getCopyOfContextMap();
+    try {
+      MDC.clear();
+      long elapsed = Math.max(0, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+      boolean cancelled = io.grpc.Context.current().isCancelled();
+      LOG.atWarn()
+          .addKeyValue("phase", phase.name())
+          .addKeyValue("grpc_code", code.name())
+          .addKeyValue("elapsed_ms", elapsed)
+          .addKeyValue("inbound_remaining", inbound.name())
+          .addKeyValue("cancelled", cancelled)
+          // Keep the same allowlisted values visible with Boot's default %m console pattern.
+          .log(
+              "collab_iam_rpc_failure phase={} grpc_code={} elapsed_ms={} inbound_remaining={} cancelled={}",
+              phase.name(),
+              code.name(),
+              elapsed,
+              inbound.name(),
+              cancelled);
+    } finally {
+      if (previous == null) MDC.clear();
+      else MDC.setContextMap(previous);
     }
   }
 
@@ -150,7 +217,7 @@ public class NetworkAuthorityClient implements NetworkAuthority {
             .setOriginal(original)
             .setCurrent(current)
             .build();
-    var response = call(() -> rpc().readNetworkConnectionAnchor(request));
+    var response = call(Phase.OTHER, () -> rpc().readNetworkConnectionAnchor(request));
     if (!response.getUnknownFields().asMap().isEmpty()
         || !response.hasOriginal()
         || !response.hasCurrent()
@@ -198,13 +265,15 @@ public class NetworkAuthorityClient implements NetworkAuthority {
 
   @Override
   public boolean active(String realm, String node) {
-    return call(() ->
-            rpc()
-                .networkAuthorityActive(
-                    NetworkAuthorityActiveRequest.newBuilder()
-                        .setRealm(realm)
-                        .setNode(node)
-                        .build()))
+    return call(
+            Phase.ACTIVE,
+            () ->
+                rpc()
+                    .networkAuthorityActive(
+                        NetworkAuthorityActiveRequest.newBuilder()
+                            .setRealm(realm)
+                            .setNode(node)
+                            .build()))
         .getActive();
   }
 
@@ -226,13 +295,14 @@ public class NetworkAuthorityClient implements NetworkAuthority {
             .setTargetNodes(request.targetNodes())
             .setTargetLocals(request.targetLocals())
             .build();
-    var result = call(() -> rpc().checkNetwork(r));
+    var result = call(Phase.CHECK, () -> rpc().checkNetwork(r));
     if (!result.getAllowed()) return new Decision(false, result.getReason(), Map.of());
     return new Decision(true, result.getReason(), limits());
   }
 
   public Map<Limit, Long> limits() {
-    var response = call(() -> rpc().networkLimits(NetworkLimitsRequest.getDefaultInstance()));
+    var response =
+        call(Phase.LIMITS, () -> rpc().networkLimits(NetworkLimitsRequest.getDefaultInstance()));
     var result = new EnumMap<Limit, Long>(Limit.class);
     try {
       for (var entry : response.getLimitsMap().entrySet()) {
@@ -252,6 +322,7 @@ public class NetworkAuthorityClient implements NetworkAuthority {
     if (!"0".equals(local)) throw new AurigaException(CommonErrors.FORBIDDEN);
     var result =
         call(
+            Phase.RESOLVE,
             () ->
                 rpc()
                     .resolveNetworkTarget(
@@ -281,6 +352,7 @@ public class NetworkAuthorityClient implements NetworkAuthority {
     binding(connection);
     var result =
         call(
+            Phase.OTHER,
             () ->
                 rpc()
                     .authorizeNetworkDelivery(
