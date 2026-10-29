@@ -22,15 +22,16 @@ const imports = `
   import {Context} from ${JSON.stringify(modulePath ? pathToFileURL(modulePath).href : '')};
 `;
 
-// Do not assume one fixed byte count fills every OS pipe. Keep a single actual
-// fs.write outstanding, advancing through partial/completed writes up to 16MiB.
-// EAGAIN is explicit POSIX pressure; Windows may instead retain the write. The
-// pending branch observes the same real request over two scheduled heartbeats.
+// A pending large write can still leave room for a small diagnostic. Fill with
+// 64-byte actual writes (smaller than a record), one at a time, up to 16MiB.
+// Keep replenishing after ready: a delayed completion must not silently end
+// pressure during writer startup. Stop explicitly before recovering the reader.
 const fillPipe = `
   async function fillPipe() {
-    const block=Buffer.alloc(1024*1024,120);
-    let bytes=0, request=0, pending=false, ended=false, sample=0;
-    const state={kind:'preparing',bytes:0};
+    const block=Buffer.alloc(64,120);
+    let bytes=0, request=0, pending=false, ended=false, sample=0, announced=false;
+    const state={kind:'preparing',bytes:0,blockBytes:64,stop(){ended=true;clearInterval(observe);}};
+    let observe;
     return new Promise((resolve,reject)=>{
       function submit() {
         if(ended)return;
@@ -40,17 +41,18 @@ const fillPipe = `
           pending=false;
           if(ended)return;
           if(error){
-            if(error.code==='EAGAIN'||error.code==='EWOULDBLOCK')return finish('eagain');
+            if(error.code==='EAGAIN'||error.code==='EWOULDBLOCK'){ended=true;return finish('eagain');}
             return fail(Error('fixture fill failed'));
           }
           if(!count)return fail(Error('fixture made no progress'));
           bytes+=count;
+          state.bytes=bytes;
           submit();
         });
       }
-      function finish(kind){ended=true;clearInterval(observe);state.kind=kind;state.bytes=bytes;resolve(state);}
+      function finish(kind){clearInterval(observe);state.kind=kind;state.bytes=bytes;if(!announced){announced=true;resolve(state);}}
       function fail(error){ended=true;clearInterval(observe);reject(error);}
-      const observe=setInterval(()=>{
+      observe=setInterval(()=>{
         if(pending && sample===request)finish('pending');
         else sample=pending?request:0;
       },25);
@@ -222,7 +224,7 @@ test(
       setTimeout(async()=>{
         clearInterval(heartbeat);
         const state=lifecycle.status;
-        await lifecycle.close();await ctx.fiber.dispose();
+        fill.stop();await lifecycle.close();await ctx.fiber.dispose();
         process.send({type:'result',heartbeats,prepared,state:state.state,reason:state.reason,disposed:true},()=>process.disconnect());
       },50);
     `);
@@ -250,14 +252,14 @@ async function writerLifetime(mode) {
   // Observe the actual write result. For lease/orphan cases only, deliberately
   // retain its completion callback: POSIX can return EAGAIN instead of hanging.
   // This is explicit fault injection, not a claim of natural Linux blocked I/O.
-  const prelude = `const fixtureFS=require('node:fs');const actualWrite=fixtureFS.write;const mark=row=>fixtureFS.writeSync(4,JSON.stringify(row)+'\\n');mark({event:'writer-ready'});fixtureFS.write=(fd,buffer,offset,length,position,callback)=>{mark({event:'write-start'});actualWrite(fd,buffer,offset,length,position,(error,count)=>{mark({event:'write-result',kind:error?(error.code==='EAGAIN'||error.code==='EWOULDBLOCK'?'eagain':'error'):count===length?'complete':'partial'});if(!${held})callback(error,count);});};`;
+  const prelude = `const fixtureFS=require('node:fs');const actualWrite=fixtureFS.write;const mark=row=>fixtureFS.writeSync(4,JSON.stringify(row)+'\\n');mark({event:'writer-ready'});fixtureFS.write=(fd,buffer,offset,length,position,callback)=>{mark({event:'write-start',bytes:length});actualWrite(fd,buffer,offset,length,position,(error,count)=>{mark({event:'write-result',kind:error?(error.code==='EAGAIN'||error.code==='EWOULDBLOCK'?'eagain':'error'):count===length?'complete':'partial'});if(!${held})callback(error,count);});};`;
   return runFixture(
     `${imports}${fillPipe}
     import childProcess from 'node:child_process';
     import {syncBuiltinESMExports} from 'node:module';
     const originalSpawn=childProcess.spawn;
-    let ended=false,scheduled=false,ctx;
-    async function finish(){if(ended&&scheduled){await ctx.fiber.dispose();process.disconnect();}}
+    let ended=false,scheduled=false,ctx,fill;
+    async function finish(){if(ended&&scheduled){fill.stop();await ctx.fiber.dispose();process.disconnect();}}
     childProcess.spawn=(executable,args,options)=>{
       const copy=[...args];copy[copy.indexOf('-e')+1]=${JSON.stringify(prelude)}+copy[copy.indexOf('-e')+1];
       const worker=originalSpawn(executable,copy,{...options,stdio:[...options.stdio,4]});
@@ -269,7 +271,7 @@ async function writerLifetime(mode) {
     syncBuiltinESMExports();
     const {installNetworkDiagnosticSink,createDiagnosticLog}=await import(${JSON.stringify(diagnosticUrl)});
     ctx=new Context();installNetworkDiagnosticSink(ctx);
-    const fill=await fillPipe();process.send({type:'ready',fill});await go;
+    fill=await fillPipe();process.send({type:'ready',fill});await go;
     process.on('message',message=>{if(message==='kill-parent')process.send({type:'killing-parent'},()=>process.kill(process.pid,'SIGKILL'));});
     createDiagnosticLog(ctx,1)({event:'failure',phase:'ledger_restore',code:'ledger_missing',http_status:0,errno:'none',elapsed_ms:1,budget_ms:0,attempt:0,cancelled:false,created:false});
     setTimeout(()=>{scheduled=true;process.send({type:'parent-scheduled',fill});void finish();},100);
@@ -295,6 +297,11 @@ for (const mode of ['natural', 'lease-held-callback', 'parent-killed'])
       result.writerStart > 0 &&
         result.writes.some((row) => row.event === 'write-start'),
       'actual writer reached fs.write',
+    );
+    assert.ok(
+      result.writes.find((row) => row.event === 'write-start').bytes >
+        result.ready.blockBytes,
+      'pressure probe must be smaller than the actual diagnostic write',
     );
     assert.equal(result.witnessBeforeDrain, true);
     assert.ok(
@@ -323,6 +330,6 @@ for (const mode of ['natural', 'lease-held-callback', 'parent-killed'])
         );
     }
     t.diagnostic(
-      `${mode}: fill=${result.ready.kind}, write=${result.writes.findLast((row) => row.event === 'write-result')?.kind ?? 'outstanding'}, writer EOF=${Math.round(result.witnessMs)}ms before drain`,
+      `${mode}: fill=${result.ready.kind}, block=${result.ready.blockBytes}, completedBytes=${result.ready.bytes}->${result.scheduled.bytes}, write=${result.writes.findLast((row) => row.event === 'write-result')?.kind ?? 'outstanding'}, writer EOF=${Math.round(result.witnessMs)}ms before drain`,
     );
   });
