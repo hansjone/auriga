@@ -1,6 +1,10 @@
 import { openNetworkRuntime, isRevocationError } from './runtime.js';
 import { networkIsolation } from './isolation.js';
 import { isDeviceRevocationError } from './device-provider.js';
+import {
+  createDiagnosticLog,
+  createAttemptDiagnostics,
+} from './diagnostics.js';
 
 /** Provider lifetime and login lifetime are independent. Late register/prepare
  * responses cannot resurrect an old login or a disposed native provider.
@@ -49,9 +53,17 @@ export function createNetworkLifecycle(options) {
       authenticated &&
       expected === generation &&
       !abort.signal.aborted;
+    const emit = createDiagnosticLog(options.ctx, expected);
     tail = tail.then(async () => {
       let attempt = 0;
       while (valid()) {
+        const diagnostics = createAttemptDiagnostics({
+          emit,
+          valid,
+          attempt,
+          signal: abort.signal,
+        });
+        let failure = diagnostics.scope('identity_prepare');
         let candidate;
         let ended = false;
         /** @type {()=>void} */
@@ -71,9 +83,13 @@ export function createNetworkLifecycle(options) {
             accessToken,
             signal: abort.signal,
             installation,
+            ...(currentProvider.kind === 'device-connection'
+              ? { diagnostics }
+              : {}),
           });
           if (!valid()) return;
           const input = {
+            diagnostics,
             directory: options.directory,
             ctx: options.ctx,
             getAccess: options.getAccess,
@@ -95,6 +111,7 @@ export function createNetworkLifecycle(options) {
               }
             },
           };
+          failure = diagnostics.scope('runtime_open');
           candidate = await (options.open ?? openNetworkRuntime)(
             currentProvider.kind === 'device-connection'
               ? {
@@ -137,6 +154,7 @@ export function createNetworkLifecycle(options) {
         } catch (error) {
           abort.signal.removeEventListener('abort', notifyClosed);
           if (!valid()) return;
+          failure.fail(error);
           await candidate?.close();
           if (!valid()) return;
           if (

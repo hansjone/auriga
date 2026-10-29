@@ -30,6 +30,11 @@ import { stopSource } from './source-control/state.js';
 import { saveProducerEpoch } from './durable/outbox.js';
 import { createDeviceMessaging } from './durable/capability.js';
 import { hasCursorEvidence } from './durable/recovery.js';
+import {
+  createDiagnosticLog,
+  createAttemptDiagnostics,
+  diagnosticReason,
+} from './diagnostics.js';
 
 // At most 64 pending protocol payloads (each already bounded by NatsLink).
 const MESSAGE_QUEUE_CAPACITY = 64;
@@ -101,7 +106,11 @@ async function normalReady(transport, trust, state, signal, now) {
       retry = attemptRetry;
       abort = () => reject(new Error('READY interrupted'));
       signal.addEventListener('abort', abort, { once: true });
-      timer = setTimeout(() => reject(new Error('READY timeout')), 5000);
+      timer = setTimeout(
+        () =>
+          reject(diagnosticReason(new Error('READY timeout'), 'ready_timeout')),
+        5000,
+      );
       off = transport.onMessage((bytes, receivedEpoch) => {
         void (async () => {
           current();
@@ -226,6 +235,18 @@ export async function openConnectionRuntime(options) {
     connected = false,
     started = false,
     reason = 'stopped';
+  const diagnostics =
+    options.diagnostics ??
+    createAttemptDiagnostics({
+      emit: createDiagnosticLog(options.ctx),
+      valid: () => !closed && !options.signal?.aborted,
+      signal,
+    });
+  /** @template T @param {string} phase @param {()=>T|Promise<T>} operation @param {number} [budget] */
+  const run = (phase, operation, budget = 0) =>
+    diagnostics
+      .scope(phase, budget, () => !closed && !signal.aborted)
+      .run(operation);
   let work = Promise.resolve(),
     handshakes = Promise.resolve();
   /** @type {Promise<void>|undefined} */
@@ -412,14 +433,24 @@ export async function openConnectionRuntime(options) {
     void close().catch(() => {});
   };
   /** @param {Parameters<import('./runtime-types.js').PreparedConnection['refresh']>[0]} value
-   * @returns {Promise<void>} */
-  async function refreshTrust(value) {
-    await prepared.refresh(value, signal);
+   * @param {()=>boolean} [current] @returns {Promise<void>} */
+  async function refreshTrust(
+    value,
+    current = () => !closed && !signal.aborted,
+  ) {
+    await diagnostics
+      .scope('trust_refresh', 0, current)
+      .run(() => prepared.refresh(value, signal));
     active();
-    value.assertUsable();
+    diagnostics
+      .scope('trust_refresh', 0, current)
+      .sync(() => value.assertUsable());
     clearTimeout(deadline);
     deadline = setTimeout(
       () => {
+        diagnostics
+          .scope('trust_refresh')
+          .fail({ code: 'network.key_unavailable' });
         void close('key_unavailable').catch(() => {});
       },
       Math.max(0, value.expiresAt - now()),
@@ -439,8 +470,8 @@ export async function openConnectionRuntime(options) {
     active();
     return h;
   }
-  /** @param {import('./host/store.js').LedgerStoreHandle} h */
-  function guarded(h) {
+  /** @param {import('./host/store.js').LedgerStoreHandle} h @param {'ledger'|'trust'} [kind] */
+  function guarded(h, kind = 'ledger') {
     const writable = (/** @type {unknown} */ value) => {
       if (value !== shutdownSnapshot) active();
     };
@@ -448,12 +479,22 @@ export async function openConnectionRuntime(options) {
       load: () => h.load(),
       async commit(/** @type {unknown} */ value) {
         writable(value);
+        const failure = diagnostics.scope(
+          kind === 'trust'
+            ? 'trust_refresh'
+            : !sessionLedger
+              ? 'initial_commit'
+              : 'durable_commit',
+          0,
+          () => !closed && !signal.aborted,
+        );
         const writing = h.commit(value);
         writes.add(writing);
         try {
           await writing;
           writable(value);
         } catch (error) {
+          failure.fail(error);
           void close('storage_failure').catch(() => {});
           throw error;
         } finally {
@@ -495,6 +536,9 @@ export async function openConnectionRuntime(options) {
       if (!entry.live || currentConnection !== entry)
         throw new Error('connection replaced');
     };
+    const isCurrent = () =>
+      entry.live && !closed && currentConnection === entry;
+    let transportFailure = diagnostics.scope('wss_connect', 10000, isCurrent);
     const transport = (
       options.transportFactory ?? ((o) => new NatsTransport(o))
     )({
@@ -504,18 +548,25 @@ export async function openConnectionRuntime(options) {
       inboxPrefix: 'auriga.net.reply.' + 'a'.repeat(26),
       createSocket: createWsSocketFactory({ origin: prepared.origin ?? '' }),
       async getTicket({ reason: ticketReason }) {
+        const ticketFailure = diagnostics.scope(
+          'ticket_http',
+          15000,
+          () => entry.live && !closed && currentConnection === entry,
+        );
         let requestingTicket = false;
         try {
           valid();
-          await refreshTrust(trust);
+          await refreshTrust(trust, isCurrent);
           valid();
           requestingTicket = true;
           const ticket = await prepared.getTicket(signal);
           valid();
+          transportFailure = diagnostics.scope('wss_connect', 10000, isCurrent);
           return ticket;
         } catch (error) {
           const e = /** @type {any} */ (error);
           if (!entry.live || closed || currentConnection !== entry) throw error;
+          ticketFailure.fail(error);
           if (isDeviceRevocationError(error)) {
             options.onRevoked?.();
             void close('revoked').catch(() => {});
@@ -599,12 +650,15 @@ export async function openConnectionRuntime(options) {
             entry.receiving = false;
           }
         };
-        void receive().catch(() => {
+        void receive().catch((error) => {
+          if (entry.live && !closed && currentConnection === entry)
+            diagnostics.scope('connection_receive').fail(error);
           void close('unavailable').catch(() => {});
         });
       },
       onState(state) {
         if (!entry.live || closed || currentConnection !== entry) return;
+        if (state.error !== undefined) transportFailure.fail(state.error);
         if (state.state !== 'ready') {
           connected = false;
           retireRegistration();
@@ -627,13 +681,20 @@ export async function openConnectionRuntime(options) {
             handshakeSignal.throwIfAborted();
             if (!sessionLedger)
               throw new Error('complete connection ledger required');
-            const proof = await normalReady(
-              facade,
-              trust,
-              sessionLedger.peek(),
-              handshakeSignal,
-              now,
-            );
+            const state = sessionLedger.peek();
+            const proof = await diagnostics
+              .scope(
+                'normal_ready',
+                5000,
+                () =>
+                  !closed &&
+                  entry.live &&
+                  currentConnection === entry &&
+                  !handshakeSignal.aborted,
+              )
+              .run(() =>
+                normalReady(facade, trust, state, handshakeSignal, now),
+              );
             valid();
             handshakeSignal.throwIfAborted();
             if (proof.producer_epoch !== undefined)
@@ -662,9 +723,11 @@ export async function openConnectionRuntime(options) {
             connected = true;
             installRegistration();
           })
-          .catch(() => {
-            if (!closed && !handshakeSignal.aborted)
+          .catch((error) => {
+            if (!closed && !handshakeSignal.aborted) {
+              diagnostics.scope('normal_ready', 5000).fail(error);
               void close('unavailable').catch(() => {});
+            }
           });
       },
     });
@@ -694,50 +757,67 @@ export async function openConnectionRuntime(options) {
     work = (async () => {
       if (!options.directory && !options.stores)
         throw new Error('private connection directory required');
-      const h = await handle('ledger');
-      const registration = await prepared.register(signal);
-      active();
-      const ledger = await loadConnectionLedger(
-        /** @type {import('./host/store.js').LedgerStoreHandle} */ ({
-          ...guarded(h),
-          close: () => h.close(),
-        }),
-        registration,
+      const h = await run('ledger_open', () => handle('ledger'));
+      const registration = await run(
+        'register_http',
+        () => prepared.register(signal),
+        15000,
       );
       active();
-      const cache = await handle('trust');
+      diagnostics.registered(registration.created);
+      const ledger = await run('ledger_restore', () =>
+        loadConnectionLedger(
+          /** @type {import('./host/store.js').LedgerStoreHandle} */ ({
+            ...guarded(h),
+            close: () => h.close(),
+          }),
+          registration,
+        ),
+      );
+      active();
+      if (ledger.state) diagnostics.milestone('ledger_restored');
+      const cache = await run('trust_open', () => handle('trust'));
       /** @type {Awaited<ReturnType<typeof openTrustStore>>} */
-      const trust = await openTrustStore({
-        cache: guarded(cache),
-        roots: [...prepared.roots],
-        realm: registration.realm,
-        requireAnnouncement: true,
-        now,
-        refresh: async () => {
-          await refreshTrust(trust);
-          active();
-        },
-      });
+      const trust = await run('trust_load', () =>
+        openTrustStore({
+          cache: guarded(cache, 'trust'),
+          roots: [...prepared.roots],
+          realm: registration.realm,
+          requireAnnouncement: true,
+          now,
+          refresh: async () => {
+            await refreshTrust(trust);
+            active();
+          },
+        }),
+      );
       connectionTrust = trust;
       active();
       await refreshTrust(trust);
       active();
       if (!ledger.state) {
-        const first = connect(trust, false);
-        await first.transport.start();
+        const first = diagnostics
+          .scope('wss_connect', 10000)
+          .sync(() => connect(trust, false));
+        await run('wss_connect', () => first.transport.start(), 10000);
         active();
         first.entry.epoch = first.transport.epoch;
         const bootstrapSignal = AbortSignal.any([
           signal,
           first.entry.attempt.signal,
         ]);
-        const output = await bootstrapReady({
-          registration: { ...registration, created: true },
-          transport: first.facade,
-          trust,
-          signal: bootstrapSignal,
-          now,
-        });
+        const output = await run(
+          'bootstrap_ready',
+          () =>
+            bootstrapReady({
+              registration: { ...registration, created: true },
+              transport: first.facade,
+              trust,
+              signal: bootstrapSignal,
+              now,
+            }),
+          5000,
+        );
         active();
         const firstCurrent = () => {
           active();
@@ -749,9 +829,8 @@ export async function openConnectionRuntime(options) {
             throw new Error('bootstrap connection changed');
         };
         firstCurrent();
-        await ledger.initialize(
-          output.identity,
-          output.readyResult.producer_epoch,
+        await run('initial_commit', () =>
+          ledger.initialize(output.identity, output.readyResult.producer_epoch),
         );
         active();
         firstCurrent();
@@ -838,8 +917,10 @@ export async function openConnectionRuntime(options) {
       } catch {
         /* Host unavailable: base READY remains independent. */
       }
-      const normal = connect(trust, true);
-      await normal.transport.start();
+      const normal = diagnostics
+        .scope('wss_connect', 10000)
+        .sync(() => connect(trust, true));
+      await run('wss_connect', () => normal.transport.start(), 10000);
       active();
       let pending;
       do {
@@ -848,6 +929,7 @@ export async function openConnectionRuntime(options) {
       } while (pending !== handshakes);
       active();
       if (!connected) throw new Error('strict READY unavailable');
+      diagnostics.milestone('ready');
     })();
     try {
       await work;
