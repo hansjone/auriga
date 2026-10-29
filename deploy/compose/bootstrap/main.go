@@ -44,10 +44,50 @@ func main() {
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
 	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
 	collabFile := flag.String("network-collab-file", "", "explicit offline-approved standalone collab installation JSON")
+	activate := flag.Bool("activate-collab", false, "seal first N1 activation without changing base")
+	checkActivation := flag.Bool("check-collab-activation", false, "verify sealed activation and unchanged base")
+	baseReceipt := flag.String("base-receipt-sha256", "", "independently checked base receipt SHA256")
+	baseIdentity := flag.String("base-identity-sha256", "", "independently checked identity public file SHA256")
+	stopped := flag.Bool("stopped-confirmed", false, "operator confirms platform/edge/network stopped")
+	printProject := flag.Bool("print-compose-project", false, "print only the project from verified sealed installation access")
 	validateOnly := flag.Bool("validate-access", false, "validate access and Compose support without writing materials")
 	proofs := flag.String("runtime-proofs", "", "isolated collected raw OCI proof root (first installation only)")
 	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
 	flag.Parse()
+	if *printProject && !*activate {
+		if *checkActivation || *validateOnly || *stopped || *collabFile != "" || *baseReceipt != "" || *baseIdentity != "" {
+			fatalf("invalid sealed Compose project arguments")
+		}
+		project, err := sealedComposeProject(*out)
+		if err != nil {
+			fatalf("%v", err)
+		}
+		fmt.Println(project)
+		return
+	}
+	if *activate || *checkActivation {
+		if *activate && *checkActivation {
+			fatalf("choose one activation action")
+		}
+		if *printProject && !*validateOnly {
+			fatalf("project output requires read-only activation preflight")
+		}
+		if err := runActivation(*out, *collabFile, *baseReceipt, *baseIdentity, *checkActivation, *validateOnly, *stopped); err != nil {
+			fatalf("%v", err)
+		}
+		if *printProject {
+			access, err := activationBase(*out, *baseReceipt, *baseIdentity)
+			if err != nil {
+				fatalf("%v", err)
+			}
+			project, err := composeAccessProject(access)
+			if err != nil {
+				fatalf("%v", err)
+			}
+			fmt.Println(project)
+		}
+		return
+	}
 	accessJSON, access, err := loadComposeAccess(*accessFile, *edgeContainer)
 	if err != nil {
 		fatalf("%v", err)

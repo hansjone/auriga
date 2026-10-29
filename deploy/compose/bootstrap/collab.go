@@ -208,21 +208,25 @@ func collabRead(path string, limit int64, secret bool) ([]byte, error) {
 }
 
 func writeCollab(out string, c *collabInput, issuer string) error {
+	return writeCollabFrom(out, out, c, issuer)
+}
+
+func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 	if c == nil {
 		return nil
 	}
-	if err := checkNativeClient(out); err != nil {
+	if err := checkNativeClient(base); err != nil {
 		return err
 	}
 	dir := filepath.Join(out, "collab-installation")
 	if err := os.Mkdir(dir, 0700); err != nil {
 		return fmt.Errorf("collab source directory refused")
 	}
-	caPEM, err := os.ReadFile(filepath.Join(out, "pki", "ca.crt"))
+	caPEM, err := os.ReadFile(filepath.Join(base, "pki", "ca.crt"))
 	if err != nil {
 		return err
 	}
-	caKeyPEM, err := os.ReadFile(filepath.Join(out, "pki", "ca.key"))
+	caKeyPEM, err := os.ReadFile(filepath.Join(base, "pki", "ca.key"))
 	if err != nil {
 		return err
 	}
@@ -253,7 +257,7 @@ func writeCollab(out string, c *collabInput, issuer string) error {
 	edgeCert, edgeKey := mustIssue(caKey, ca, "edge-collab", "auriga://edge/collab-compose", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(out, "pki", "edge-collab.crt"), edgeCert, 0644)
 	writeFile(filepath.Join(out, "pki", "edge-collab.key"), edgeKey, 0600)
-	c.files["browser.crt"], err = os.ReadFile(filepath.Join(out, "browser-tls", "browser.crt"))
+	c.files["browser.crt"], err = os.ReadFile(filepath.Join(base, "browser-tls", "browser.crt"))
 	if err != nil {
 		return err
 	}
@@ -297,7 +301,7 @@ func writeCollab(out string, c *collabInput, issuer string) error {
 	clear(secret)
 	defer clear(encoded)
 	writeFile(filepath.Join(out, "network-platform", "collab.secret"), encoded, 0600)
-	gateway, err := os.ReadFile(filepath.Join(out, "network-platform", "gateway.secret"))
+	gateway, err := os.ReadFile(filepath.Join(base, "network-platform", "gateway.secret"))
 	if err != nil {
 		return err
 	}
@@ -315,7 +319,7 @@ func writeCollab(out string, c *collabInput, issuer string) error {
 	}
 	writeFile(filepath.Join(out, "network-platform", "platform.properties"), []byte(team.String()), 0600)
 	var runtime map[string]any
-	raw, err := os.ReadFile(filepath.Join(out, "network", "runtime.json"))
+	raw, err := os.ReadFile(filepath.Join(base, "network", "runtime.json"))
 	if err != nil {
 		return err
 	}
