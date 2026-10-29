@@ -185,7 +185,9 @@ func openIAMRPC(cfg IAMRPCConfig, hop IAMHopConfig, dialer func(context.Context,
 	if timeout <= 0 || timeout > 5*time.Second {
 		return nil, fmt.Errorf("iamRpc.timeoutMillis must be 1..5000")
 	}
-	options := []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)), grpc.WithNoProxy()}
+	// This fixed installation endpoint gets credentials and RPC policy locally.
+	// Do not wait for, or accept, DNS TXT service configuration.
+	options := []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)), grpc.WithNoProxy(), grpc.WithDisableServiceConfig()}
 	if dialer != nil {
 		options = append(options, grpc.WithContextDialer(dialer))
 	}
