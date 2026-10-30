@@ -431,6 +431,46 @@ class NetworkDirectoryPostgresTest {
   }
 
   @Test
+  void paginatedDirectoryKeepsTenantScopeForPortalAndDevice() {
+    UUID foreign = UUID.randomUUID();
+    createRealm(foreign);
+    node(foreign, "2", UUID.randomUUID(), UUID.randomUUID(), false);
+    node(tenant, "2", UUID.randomUUID(), UUID.randomUUID(), false);
+    node(tenant, "3", UUID.randomUUID(), UUID.randomUUID(), false);
+    TenantContext.run(
+        tenant,
+        () -> {
+          for (PrincipalType type : List.of(PrincipalType.USER, PrincipalType.DEVICE)) {
+            policy("1", "", false);
+            policy("1", "2:extra", false);
+            user(
+                type,
+                type == PrincipalType.USER ? TokenContext.PORTAL : TokenContext.DEVICE,
+                tenant);
+            var first = directory.list(1, "");
+            assertEquals(
+                List.of(address("1")),
+                first.getItemsList().stream().map(NetworkSystemEntry::getSystemAddress).toList());
+            var second = directory.list(1, first.getNextCursor());
+            assertEquals(
+                List.of(address("2")),
+                second.getItemsList().stream().map(NetworkSystemEntry::getSystemAddress).toList());
+            var third = directory.list(1, second.getNextCursor());
+            assertEquals(
+                List.of(address("3")),
+                third.getItemsList().stream().map(NetworkSystemEntry::getSystemAddress).toList());
+            assertTrue(third.getNextCursor().isEmpty());
+            var foreignCursor =
+                Base64.getUrlEncoder()
+                    .withoutPadding()
+                    .encodeToString(
+                        (foreign + ":1").getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            error("common.validation_failed", () -> directory.list(1, foreignCursor));
+          }
+        });
+  }
+
+  @Test
   void massivePolicyFilteringReturnsBoundedPartialPagesWithProgressingCursor() {
     // More than one scan window is denied by node policy, without scanning to tenant end.
     TenantContext.run(
