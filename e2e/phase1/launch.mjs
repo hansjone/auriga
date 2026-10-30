@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { createRequire } from 'node:module';
 import { validateAccess } from './checks.mjs';
+
+// Resolve from the single E2E manifest, including in resumed worktrees with an
+// older ignored phase1/node_modules directory that has not been cleaned.
+const { chromium } = createRequire(new URL('../package.json', import.meta.url))(
+  'playwright',
+);
 
 export function launchBrowser(access, { loopback = false, ...options } = {}) {
   if (access) validateAccess(access);
