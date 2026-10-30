@@ -103,8 +103,15 @@ function request(
 }
 async function expectRequest(c, route, options, expected) {
   const result = await request(c, route, options);
-  if (!expected.includes(result.status))
-    throw new Error(`${route}: HTTP ${result.status}`);
+  if (!expected.includes(result.status)) {
+    const code = result.json?.code;
+    const detail =
+      typeof code === 'string' &&
+      /^(common|org|iam|ai|edge)\.[a-z_]+$/.test(code)
+        ? ` ${code}`
+        : '';
+    throw new Error(`${route}: HTTP ${result.status}${detail}`);
+  }
   return result;
 }
 async function otp(secret) {
@@ -269,7 +276,7 @@ try {
     await write(admin, '/api/org/v1/admin/roles', {
       key: 'relay_' + randomBytes(5).toString('hex'),
       name: { en: 'Relay test' },
-      permissions: ['auriga.connect', 'auriga.connect.models.invoke'],
+      permissions: ['auriga.connect.models.invoke'],
     })
   ).json;
   const invitation = (
@@ -403,7 +410,7 @@ try {
     '/key/generate',
   ])
     check(
-      [401, 403, 404].includes(
+      [401, 403, 404, 405].includes(
         (
           await request(outside, route, {
             browser: false,
@@ -417,7 +424,7 @@ try {
     );
   for (const route of ['/ai/key/generate', '/v1/key/generate'])
     check(
-      [401, 403, 404].includes(
+      [401, 403, 404, 405].includes(
         (
           await request(client('admin'), route, {
             browser: false,

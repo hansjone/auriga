@@ -38,7 +38,6 @@ type control struct {
 	verify             *iam.VerifyDeviceAiAccessResponse
 	member             *org.GetMemberResponse
 	permissions        *org.GetEffectivePermissionsResponse
-	quota              *org.GetEffectiveQuotaResponse
 	fail               string
 	hook               func(string)
 	calls              []string
@@ -106,7 +105,7 @@ func (s *control) GetEffectiveQuota(ctx context.Context, in *org.GetEffectiveQuo
 	if in.TenantId != tenant || in.AccountId != account {
 		return nil, status.Error(codes.PermissionDenied, "wrong subject")
 	}
-	return proto.Clone(s.quota).(*org.GetEffectiveQuotaResponse), nil
+	return nil, status.Error(codes.Unavailable, "obsolete quota service must not be called")
 }
 func routeToken(t *testing.T, now time.Time, change func(map[string]any)) string {
 	t.Helper()
@@ -123,7 +122,7 @@ func routeToken(t *testing.T, now time.Time, change func(map[string]any)) string
 func controlFixture(t *testing.T) (*control, *Authority, string) {
 	t.Helper()
 	now := time.Now().Truncate(time.Second)
-	s := &control{now: now, authorization: "Bearer fixture-service-token", verify: &iam.VerifyDeviceAiAccessResponse{Active: true, TenantId: tenant, AccountId: account, DeviceId: device, ExpiresAt: timestamppb.New(now.Add(time.Minute))}, member: &org.GetMemberResponse{Member: &org.Member{TenantId: tenant, AccountId: account, Status: org.MemberStatus_MEMBER_STATUS_ACTIVE, MemberType: org.MemberType_MEMBER_TYPE_MEMBER}}, permissions: &org.GetEffectivePermissionsResponse{Status: org.MemberStatus_MEMBER_STATUS_ACTIVE, MemberType: org.MemberType_MEMBER_TYPE_MEMBER, Permissions: []string{"auriga.connect.models.invoke"}}, quota: &org.GetEffectiveQuotaResponse{Quota: &org.Quota{Model: &org.ModelQuota{Currency: "USD"}}}}
+	s := &control{now: now, authorization: "Bearer fixture-service-token", verify: &iam.VerifyDeviceAiAccessResponse{Active: true, TenantId: tenant, AccountId: account, DeviceId: device, ExpiresAt: timestamppb.New(now.Add(time.Minute))}, member: &org.GetMemberResponse{Member: &org.Member{TenantId: tenant, AccountId: account, Status: org.MemberStatus_MEMBER_STATUS_ACTIVE, MemberType: org.MemberType_MEMBER_TYPE_MEMBER}}, permissions: &org.GetEffectivePermissionsResponse{Status: org.MemberStatus_MEMBER_STATUS_ACTIVE, MemberType: org.MemberType_MEMBER_TYPE_MEMBER, Permissions: []string{"auriga.connect.models.invoke"}}}
 	s.raw = routeToken(t, now, nil)
 	listener, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
@@ -155,7 +154,7 @@ func controlFixture(t *testing.T) (*control, *Authority, string) {
 			t.Error(e)
 		}
 	})
-	a, e := NewAuthority(iam.NewDeviceAccessServiceClient(conn), org.NewMemberServiceClient(conn), org.NewAuthorizationServiceClient(conn), org.NewQuotaServiceClient(conn), "USD", func() time.Time { s.mu.Lock(); defer s.mu.Unlock(); return s.now })
+	a, e := NewAuthority(iam.NewDeviceAccessServiceClient(conn), org.NewMemberServiceClient(conn), org.NewAuthorizationServiceClient(conn), func() time.Time { s.mu.Lock(); defer s.mu.Unlock(); return s.now })
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -177,17 +176,6 @@ func TestDeviceOnlineAuthority(t *testing.T) {
 	if id.Tenant() != tenant || id.Account() != account || id.Device() != device || id.ExpiresAt() != s.verify.ExpiresAt.AsTime() {
 		t.Fatal("identity mismatch")
 	}
-	if !id.Permissions()["ai.models.invoke"] || !id.Permissions()["ai.usage.read"] || len(id.Permissions()) != 2 {
-		t.Fatal("incorrect device permission mapping")
-	}
-	perms := id.Permissions()
-	perms["ai.providers.write"] = true
-	if id.Permissions()["ai.providers.write"] {
-		t.Fatal("mutable permissions")
-	}
-	if id.Limits().DailyTokens.Limited || id.Limits().MonthlyBudgetMicros.Limited {
-		t.Fatal("absent optional limits must remain unlimited")
-	}
 	s.mu.Lock()
 	s.authorization = "Bearer rotated-service-token"
 	s.mu.Unlock()
@@ -205,7 +193,7 @@ func TestDeviceOnlineAuthority(t *testing.T) {
 	wantCode(t, e, "common.forbidden")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if n != 8 || len(s.calls) <= n {
+	if n != 6 || len(s.calls) <= n {
 		t.Fatal("authority was cached")
 	}
 }
@@ -227,12 +215,12 @@ func TestDeviceAuthorityRejects(t *testing.T) {
 		{"permissions-disabled", "common.forbidden", func(s *control) { s.permissions.Status = org.MemberStatus_MEMBER_STATUS_DISABLED }},
 		{"missing-permission-status", "ai.budget_unavailable", func(s *control) { s.permissions = &org.GetEffectivePermissionsResponse{} }},
 		{"missing-member-type", "ai.budget_unavailable", func(s *control) { s.member.Member.MemberType = org.MemberType_MEMBER_TYPE_UNSPECIFIED }},
-		{"missing-quota", "ai.budget_unavailable", func(s *control) { s.quota = &org.GetEffectiveQuotaResponse{} }},
-		{"missing-model-quota", "ai.budget_unavailable", func(s *control) { s.quota.Quota.Model = nil }},
-		{"currency-conflict", "ai.budget_unavailable", func(s *control) { s.quota.Quota.Model.Currency = "CNY" }},
-		{"negative", "ai.budget_unavailable", func(s *control) { v := int64(-1); s.quota.Quota.Model.DailyTokens = &v }},
+		{"expired-member-lease", "common.unauthenticated", func(s *control) { s.verify.ExpiresAt = timestamppb.New(s.now) }},
+		{"disabled-member", "common.forbidden", func(s *control) { s.member.Member.Status = org.MemberStatus_MEMBER_STATUS_DISABLED }},
+		{"foreign-permission-member-type", "common.forbidden", func(s *control) { s.permissions.MemberType = org.MemberType_MEMBER_TYPE_EXTERNAL }},
+		{"missing-model-permission", "common.forbidden", func(s *control) { s.permissions.Permissions = nil }},
 	}
-	for _, method := range []string{"iam", "member", "permissions", "quota"} {
+	for _, method := range []string{"iam", "member", "permissions"} {
 		tests = append(tests, struct {
 			name, code string
 			change     func(*control)
@@ -248,7 +236,7 @@ func TestDeviceAuthorityRejects(t *testing.T) {
 	}
 }
 func TestDeviceExpiryDuringRPC(t *testing.T) {
-	for _, method := range []string{"iam", "member", "permissions", "quota"} {
+	for _, method := range []string{"iam", "member", "permissions"} {
 		t.Run(method, func(t *testing.T) {
 			s, a, _ := controlFixture(t)
 			s.hook = func(m string) {
@@ -272,23 +260,15 @@ func TestDeviceRawRoutingBounds(t *testing.T) {
 		t.Fatal("invalid route contacted IAM")
 	}
 }
-func TestDeviceQuotaSemantics(t *testing.T) {
+func TestDeviceAuthorityDoesNotFetchQuotas(t *testing.T) {
 	s, a, _ := controlFixture(t)
-	zero, finite := int64(0), int64(42)
-	s.quota.Quota.Model.DailyTokens = &zero
-	s.quota.Quota.Model.MonthlyBudgetMicros = &finite
-	id, e := a.Check(t.Context(), s.raw)
-	if e != nil {
-		t.Fatal(e)
+	s.fail = "quota"
+	if _, err := a.Check(t.Context(), s.raw); err != nil {
+		t.Fatalf("LiteLLM member access depends on obsolete org model quotas: %v", err)
 	}
-	limits := id.Limits()
-	if !limits.DailyTokens.Limited || limits.DailyTokens.Value != 0 || limits.MonthlyBudgetMicros.Value != 42 {
-		t.Fatal("optional quota changed")
-	}
-	wantCode(t, id.InvocationQuota(), "ai.budget_exceeded")
-	s.quota.Quota.Model.DailyTokens = &finite
-	id, e = a.Check(t.Context(), s.raw)
-	if e != nil || id.InvocationQuota() != nil {
-		t.Fatalf("finite quota %v", e)
+	for _, call := range s.calls {
+		if call == "quota" {
+			t.Fatal("member access fetched obsolete org model quotas")
+		}
 	}
 }

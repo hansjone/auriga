@@ -152,10 +152,9 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
-		pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/ai")
-		if pr.Out.URL.Path == "" {
-			pr.Out.URL.Path = "/"
-		}
+		// The deployment sets SERVER_ROOT_PATH=/ai. Preserve it in the ASGI
+		// request path so mounted UI/static routes resolve their nested root_path.
+		pr.Out.URL.Path = pr.In.URL.Path
 		pr.Out.URL.RawPath = ""
 		stripUntrustedEntryHeaders(pr.Out.Header)
 		for name := range pr.Out.Header {

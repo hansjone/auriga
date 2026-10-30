@@ -61,7 +61,7 @@ func serveLiteLLM(path string) error {
 		return err
 	}
 	defer func() { _ = oc.Close() }()
-	authority, err := modelgate.NewAuthority(iam.NewDeviceAccessServiceClient(ic), org.NewMemberServiceClient(oc), org.NewAuthorizationServiceClient(oc), org.NewQuotaServiceClient(oc), "USD", time.Now)
+	authority, err := modelgate.NewAuthority(iam.NewDeviceAccessServiceClient(ic), org.NewMemberServiceClient(oc), org.NewAuthorizationServiceClient(oc), time.Now)
 	if err != nil {
 		return err
 	}

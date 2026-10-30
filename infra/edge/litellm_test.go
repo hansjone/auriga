@@ -61,6 +61,8 @@ func TestLiteLLMEntryBoundary(t *testing.T) {
 				{"ui-playground", "admin", "POST", "/ai/v1/chat/completions", http.Header{"Cookie": {"auriga_admin_session=admin"}, "Origin": {g.Cfg.Access.AdminURL()}, "Authorization": {"Bearer ui-session-token"}}, 204},
 				{"ui-api-alias", "admin", "GET", "/ai/v1/model/info", http.Header{"Cookie": {"auriga_admin_session=admin"}}, 204},
 				{"api-prefix", "portal", "POST", "/ai/v1/key/generate", http.Header{"Authorization": {"Bearer sk-virtual"}}, 404},
+				{"root-management", "portal", "POST", "/key/generate", http.Header{"Authorization": {"Bearer sk-virtual"}}, 405},
+				{"root-api-management", "admin", "POST", "/v1/key/generate", http.Header{"Authorization": {"Bearer sk-virtual"}}, 405},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					before := calls.Load()
@@ -70,7 +72,7 @@ func TestLiteLLMEntryBoundary(t *testing.T) {
 					}
 					if tc.status == 204 {
 						r := <-seen
-						if strings.Contains(r.Header.Get("Cookie"), "auriga_") || r.Header.Get("Auriga-Identity") != "" || strings.HasPrefix(r.URL.Path, "/ai/") {
+						if strings.Contains(r.Header.Get("Cookie"), "auriga_") || r.Header.Get("Auriga-Identity") != "" || r.URL.Path != tc.path {
 							t.Fatalf("bad boundary %s %v", r.URL.Path, r.Header)
 						}
 					} else if calls.Load() != before {

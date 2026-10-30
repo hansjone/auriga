@@ -1,6 +1,5 @@
-// Package modelgate prepares device member model access. It provides no HTTP
-// endpoint and no approval to dispatch: trusted policy/metering and durable
-// budget admission remain mandatory responsibilities of the eventual handler.
+// Package modelgate verifies device identity and current member model ACL.
+// LiteLLM owns model budgets and usage admission.
 package modelgate
 
 import (
@@ -20,7 +19,6 @@ import (
 )
 
 var uuid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-var currency = regexp.MustCompile(`^[A-Z]{3}$`)
 
 const platformTenant = "00000000-0000-0000-0000-000000000000"
 
@@ -28,54 +26,32 @@ type fault string
 
 func (e fault) Error() string { return string(e) }
 
-type Limit struct {
-	Limited bool
-	Value   int64
-}
-type Limits struct {
-	DailyTokens, MonthlyBudgetMicros Limit
-	Currency                         string
-}
-
 // Identity is a single check result, not an allow cache. No public constructor
 // accepts caller claims. All exposed data consists of independent value copies.
 type Identity struct {
 	tenant, account, device string
 	expires                 time.Time
-	limits                  Limits
 }
 
 func (i *Identity) Tenant() string       { return i.tenant }
 func (i *Identity) Account() string      { return i.account }
 func (i *Identity) Device() string       { return i.device }
 func (i *Identity) ExpiresAt() time.Time { return i.expires }
-func (i *Identity) Limits() Limits       { return i.limits }
-func (i *Identity) Permissions() map[string]bool {
-	return map[string]bool{"ai.models.invoke": true, "ai.usage.read": true}
-}
-func (i *Identity) InvocationQuota() error {
-	if (i.limits.DailyTokens.Limited && i.limits.DailyTokens.Value == 0) || (i.limits.MonthlyBudgetMicros.Limited && i.limits.MonthlyBudgetMicros.Value == 0) {
-		return fault("ai.budget_exceeded")
-	}
-	return nil
-}
 
 type Authority struct {
 	devices     iam.DeviceAccessServiceClient
 	members     org.MemberServiceClient
 	permissions org.AuthorizationServiceClient
-	quotas      org.QuotaServiceClient
-	currency    string
 	now         func() time.Time
 }
 
 // Clients must be constructed with team.DialRPC, the existing authenticated
 // service-JWT rotation/mTLS transport. User tokens belong only in the RPC body.
-func NewAuthority(devices iam.DeviceAccessServiceClient, members org.MemberServiceClient, permissions org.AuthorizationServiceClient, quotas org.QuotaServiceClient, unit string, now func() time.Time) (*Authority, error) {
-	if devices == nil || members == nil || permissions == nil || quotas == nil || !currency.MatchString(unit) || now == nil {
+func NewAuthority(devices iam.DeviceAccessServiceClient, members org.MemberServiceClient, permissions org.AuthorizationServiceClient, now func() time.Time) (*Authority, error) {
+	if devices == nil || members == nil || permissions == nil || now == nil {
 		return nil, fault("common.validation_failed")
 	}
-	return &Authority{devices: devices, members: members, permissions: permissions, quotas: quotas, currency: unit, now: now}, nil
+	return &Authority{devices: devices, members: members, permissions: permissions, now: now}, nil
 }
 
 type routeClaims struct {
@@ -84,15 +60,6 @@ type routeClaims struct {
 	Device string `json:"did"`
 }
 
-func limit(v *int64) (Limit, error) {
-	if v == nil {
-		return Limit{}, nil
-	}
-	if *v < 0 {
-		return Limit{}, fault("ai.budget_unavailable")
-	}
-	return Limit{Limited: true, Value: *v}, nil
-}
 func memberType(t org.MemberType) bool {
 	return t == org.MemberType_MEMBER_TYPE_MEMBER || t == org.MemberType_MEMBER_TYPE_EXTERNAL
 }
@@ -152,22 +119,6 @@ func (a *Authority) Check(ctx context.Context, raw string) (*Identity, error) {
 	if permissions.Status != org.MemberStatus_MEMBER_STATUS_ACTIVE || !memberType(permissions.MemberType) || permissions.MemberType != m.MemberType || !slices.Contains(permissions.Permissions, "auriga.connect.models.invoke") {
 		return nil, fault("common.forbidden")
 	}
-	quota, e := a.quotas.GetEffectiveQuota(ctx, &org.GetEffectiveQuotaRequest{TenantId: verified.TenantId, AccountId: verified.AccountId})
-	if e != nil || quota.GetQuota().GetModel() == nil {
-		return nil, fault("ai.budget_unavailable")
-	}
-	q := quota.Quota.Model
-	if q.Currency != a.currency {
-		return nil, fault("ai.budget_unavailable")
-	}
-	daily, e := limit(q.DailyTokens)
-	if e != nil {
-		return nil, e
-	}
-	monthly, e := limit(q.MonthlyBudgetMicros)
-	if e != nil {
-		return nil, e
-	}
 	// Remote IAM/org work can consume the remainder of the backing/token lease.
 	if ctx.Err() != nil {
 		return nil, fault("ai.budget_unavailable")
@@ -175,5 +126,5 @@ func (a *Authority) Check(ctx context.Context, raw string) (*Identity, error) {
 	if !end.AsTime().After(a.now()) {
 		return nil, fault("common.unauthenticated")
 	}
-	return &Identity{tenant: verified.TenantId, account: verified.AccountId, device: verified.DeviceId, expires: end.AsTime(), limits: Limits{DailyTokens: daily, MonthlyBudgetMicros: monthly, Currency: q.Currency}}, nil
+	return &Identity{tenant: verified.TenantId, account: verified.AccountId, device: verified.DeviceId, expires: end.AsTime()}, nil
 }

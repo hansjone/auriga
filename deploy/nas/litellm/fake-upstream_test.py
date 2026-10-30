@@ -46,6 +46,11 @@ class FakeUpstreamTest(unittest.TestCase):
         self.assertTrue(any(event.get('choices') and event['choices'][0]['delta'].get('content') for event in events))
         self.assertEqual(events[-1]['usage']['total_tokens'], 2000)
 
+    def test_completion_ids_are_unique_for_usage_logs(self):
+        first = json.loads(self.request(False)[2])['id']
+        second = json.loads(self.request(False)[2])['id']
+        self.assertNotEqual(first, second)
+
 
 if __name__ == '__main__':
     unittest.main()

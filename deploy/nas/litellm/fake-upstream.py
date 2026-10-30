@@ -2,6 +2,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import time
+import uuid
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -17,7 +18,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(400)
             return
         request = json.loads(self.rfile.read(length))
-        response = {'id': 'chatcmpl-local', 'object': 'chat.completion',
+        response = {'id': 'chatcmpl-local-' + uuid.uuid4().hex, 'object': 'chat.completion',
                     'created': int(time.time()), 'model': request['model'],
                     'choices': [{'index': 0, 'message': {'role': 'assistant',
                                 'content': 'local fixture'}, 'finish_reason': 'stop'}],
