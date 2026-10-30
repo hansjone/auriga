@@ -59,3 +59,5 @@ node deploy/compose/scripts/verify-relay.mjs \
 ```
 
 `--ca` 仅供当前进程验证本机测试证书；受信任 HTTPS 可省略。脚本从该栈秘密文件读取应急账号与 master key，创建临时角色、成员、模型及虚拟 Key，只输出检查名称；它会更改测试栈数据，应在验收完成后销毁该一次性栈。检查覆盖管理员与普通成员 UI、外部调用与管理边界，以及真实 IAM 原生设备协议签发的 AI 短票和成员用量归属。该协议检查不启动 DSH 插件进程。
+
+独立 UI 组件回归可在 `infra/edge` 执行 `AURIGA_LITELLM_UI_TEST_ORIGIN=http://127.0.0.1:<临时端口> go test -count=1 -run '^TestLiteLLMUIHandoff$' -v .`。目标须为本机临时 LiteLLM，配置 `SERVER_ROOT_PATH=/ai`；测试使用随机 edge 端口，覆盖 IP/子域 Origin 的一次性交接、真实页面和 JavaScript、撤销/过期及 CORS。此组件测试的 IAM 为夹具，真实身份链路仍由上面的整栈脚本验证。

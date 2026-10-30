@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -24,7 +25,11 @@ func TestLiteLLMUIHandoff(t *testing.T) {
 				_, _ = io.WriteString(w, "<html>LiteLLM fixture</html>")
 			}))
 			defer upstream.Close()
-			g, addresses, store := accessFixtureConfigured(t, domain, nil, func(c *Config, _ map[string]any) { c.LiteLLMOrigin = upstream.URL })
+			upstreamURL := upstream.URL
+			if live := os.Getenv("AURIGA_LITELLM_UI_TEST_ORIGIN"); live != "" {
+				upstreamURL = live
+			}
+			g, addresses, store := accessFixtureConfigured(t, domain, nil, func(c *Config, _ map[string]any) { c.LiteLLMOrigin = upstreamURL })
 			backend, _ := browserRPCFixture(t, g, store)
 			admin := putBrowserSession(g, backend, "admin", "admin")
 			claims, err := json.Marshal(map[string]any{"ctx": "admin", "tid": admin.TenantID, "sub": admin.AccountID, "perms": []string{"ai.providers.write"}})
@@ -88,8 +93,22 @@ func TestLiteLLMUIHandoff(t *testing.T) {
 			if status != 303 || headers.Get("Location") != "/ai/ui/" || len(cookies) != 1 || cookies[0].Name != "auriga_litellm_session" || cookies[0].Domain != "" || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
 				t.Fatalf("handoff did not establish an isolated session: %d", status)
 			}
-			if status, _, _ := do("relayAdmin", "GET", "/ai/ui/", "", "", "auriga_litellm_session=admin"); status != 200 {
+			if status, _, page := do("relayAdmin", "GET", "/ai/ui/", "", "", "auriga_litellm_session=admin"); status != 200 {
 				t.Fatalf("authenticated UI=%d", status)
+			} else if os.Getenv("AURIGA_LITELLM_UI_TEST_ORIGIN") != "" {
+				asset := regexp.MustCompile(`src="(/ai/[^"<>?]+\.js)"`).FindStringSubmatch(page)
+				if len(asset) != 2 {
+					t.Fatal("real LiteLLM UI did not reference its prefixed JavaScript asset")
+				}
+				status, headers, body := do("relayAdmin", "GET", asset[1], "", "", "auriga_litellm_session=admin")
+				if status != 200 || len(body) == 0 || !strings.Contains(headers.Get("Content-Type"), "javascript") {
+					t.Fatalf("real UI asset=%d", status)
+				}
+				for name := range headers {
+					if strings.HasPrefix(strings.ToLower(name), "access-control-") {
+						t.Fatal("real UI CORS header escaped edge")
+					}
+				}
 			}
 			if status, _, _ := do("relayAdmin", "POST", "/ai/session", form, g.Cfg.Access.AdminURL(), ""); status != 401 {
 				t.Fatalf("replayed code=%d", status)
