@@ -16,7 +16,7 @@ private_state() {
   owner=$(stat -c '%u' "$parent"); mode=$(stat -c '%a' "$parent")
   [ "$owner" = 0 ] || [ "$owner" = "$(id -u)" ] || return 1
   [ "$((0$mode & 022))" = 0 ] || return 1
-  if [ ! -e "$state" ] && [ ! -L "$state" ]; then (umask 077; mkdir "$state") || return 1; fi
+  if [ ! -e "$state" ] && [ ! -L "$state" ]; then mkdir -m 0700 "$state" || return 1; fi
   [ -d "$state" ] && [ ! -L "$state" ] && [ "$(stat -c '%u:%a' "$state")" = "$(id -u):700" ]
 }
 read_crontab() {
@@ -30,7 +30,6 @@ case "$action" in
   install|remove)
     command -v crontab >/dev/null || { echo 'panel auto-renew unavailable: host crontab missing' >&2; exit 1; }
     if [ "$action" = install ]; then
-      command -v flock >/dev/null || { echo 'panel auto-renew unavailable: host flock missing' >&2; exit 1; }
       pgrep -x cron >/dev/null || pgrep -x crond >/dev/null || { echo 'panel auto-renew unavailable: cron daemon stopped' >&2; exit 1; }
     fi
     private_state || { echo 'panel scheduler needs an operator-writable private directory beside the data root' >&2; exit 1; }
@@ -64,8 +63,20 @@ case "$action" in
         exec "$@"
       fi
     else
-      echo 'host flock unavailable; signer OS lock still serializes publication' >&2
-      exec "$@"
+      # Atomic private-directory lock for minimal NAS hosts. Never steal a lock
+      # based on a PID (which can be reused), or repair unknown existing state.
+      if mkdir -m 0700 "$state/run-lock" 2>/dev/null; then
+        trap 'rmdir -- "$state/run-lock" 2>/dev/null || :' EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' HUP TERM
+      elif [ -d "$state/run-lock" ] && [ ! -L "$state/run-lock" ] &&
+        [ "$(stat -c '%u:%a' "$state/run-lock")" = "$(id -u):700" ]; then
+        echo 'panel renewal already running; skipped' >&2
+        exit 0
+      else
+        echo 'invalid panel renewal directory lock; refusing repair' >&2
+        exit 1
+      fi
     fi
     if "$@"; then
       rm -f -- "$state/failed"

@@ -43,6 +43,43 @@ for TEST_CRON_READ in denied empty_error; do
   cmp "$temp/saved" "$TEST_CRONTAB"
 done
 unset TEST_CRON_READ
+# A minimal NAS may have cron but no flock. Its default ACL can also override
+# umask for mkdir without an explicit mode. Exercise both public entry points.
+mkdir "$temp/noflock"
+for tool in sh dirname cksum awk readlink stat id mkdir rmdir mktemp rm cat cp mv date wc; do
+  ln -s "$(command -v "$tool")" "$temp/noflock/$tool"
+done
+cp "$temp/bin/crontab" "$temp/bin/pgrep" "$temp/noflock/"
+real_mkdir=$(command -v mkdir)
+rm "$temp/noflock/mkdir"
+cat >"$temp/noflock/mkdir" <<EOF
+#!/bin/sh
+'$real_mkdir' "\$@" || exit \$?
+case " \$* " in *' -m 0700 '*) ;; *) chmod 0770 "\$@" ;; esac
+EOF
+chmod 755 "$temp/noflock/mkdir"
+# chmod is used by the fixture, never by the scheduler to repair old state.
+ln -s "$(command -v chmod)" "$temp/noflock/chmod"
+minimal_runner="$temp/minimal-runner.sh"
+minimal_marker="auriga-panel-$(printf '%s' "$minimal_runner:" | cksum | awk '{print $1}')"
+minimal_state="$temp/.$minimal_marker"
+PATH="$temp/noflock" sh "$helper" install "$minimal_runner" "$temp/var/panel" ""
+[ "$(stat -c '%a' "$minimal_state")" = 700 ]
+PATH="$temp/noflock" sh "$helper" run "$minimal_runner" "$temp/var/panel" "" true
+[ -f "$minimal_state/checked" ]
+[ ! -e "$minimal_state/run-lock" ]
+if PATH="$temp/noflock" sh "$helper" run "$minimal_runner" "$temp/var/panel" "" sh -c 'exit 23'; then exit 1; else [ "$?" -eq 23 ]; fi
+[ -f "$minimal_state/failed" ]
+[ ! -e "$minimal_state/run-lock" ]
+mkdir -m 0700 "$minimal_state/run-lock"
+PATH="$temp/noflock" sh "$helper" run "$minimal_runner" "$temp/var/panel" "" sh -c 'touch "$1"' sh "$temp/unexpected-minimal"
+[ ! -e "$temp/unexpected-minimal" ]
+rmdir "$minimal_state/run-lock"
+ln -s "$temp/var" "$minimal_state/run-lock"
+if PATH="$temp/noflock" sh "$helper" run "$minimal_runner" "$temp/var/panel" "" true; then exit 1; fi
+rm "$minimal_state/run-lock"
+PATH="$temp/noflock" sh "$helper" remove "$minimal_runner" "$temp/var/panel" ""
+echo 'PASS minimal NAS: explicit private mode, cron without flock, success/failure cleanup, contention, symlink rejection'
 for invalid in "bad'path" 'bad%path' 'bad
 path'; do
   if sh "$helper" install "$temp/$invalid" "$temp/var/panel" ""; then exit 1; fi
