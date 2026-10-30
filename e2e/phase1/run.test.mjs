@@ -58,6 +58,43 @@ test('CLI落盘八项JSON与部分验收退出码2', async (t) => {
   assert.match(stdout, /PASS=0 FAIL=0 SKIP=8/);
 });
 
+test('CLI实际加载浏览器模块不被反向导入与顶层await锁死', async (t) => {
+  const parent = fileURLToPath(new URL('./.local/', import.meta.url));
+  await mkdir(parent, { recursive: true });
+  const directory = await mkdtemp(join(parent, 'cli-browser-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const credentials = join(directory, 'credentials.json');
+  const output = join(directory, 'report.json');
+  await writeFile(credentials, '{}');
+  const child = spawn(
+    process.execPath,
+    [
+      fileURLToPath(new URL('./run.mjs', import.meta.url)),
+      '--base-url',
+      'http://127.0.0.1:1',
+      '--admin-credentials',
+      credentials,
+      '--only',
+      '2',
+      '--output',
+      output,
+    ],
+    { stdio: 'ignore', windowsHide: true },
+  );
+  const code = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', resolve);
+  });
+  assert.equal(
+    code,
+    1,
+    '缺部署材料应正常落盘FAIL，不能以未完成顶层await的13退出',
+  );
+  const report = JSON.parse(await readFile(output, 'utf8'));
+  assert.equal(report.items[1].status, 'FAIL');
+  assert.equal(report.cloudJourney.failedStep, 'preflight');
+});
+
 test('集中Loki查询覆盖本次失败trace而不是无关成功日志', async (t) => {
   let failedTrace;
   const baseUrl = await fixture(t, (req, res) => {
