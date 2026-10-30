@@ -667,6 +667,13 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 
 func (g *Gateway) ticketRedirectURL(r *http.Request, instanceID, token string) string {
 	target := g.instanceTarget(r, instanceID)
+	// Only the browser-facing URL follows the approved presentation alias. The
+	// ticket/instance binding retains the validated installation origin.
+	if g.Cfg.Access.Valid() && g.Cfg.Access.Mode() == "ip" {
+		if origin, _ := r.Context().Value(linkOriginKey{}).(string); origin != "" {
+			target.Origin = origin
+		}
+	}
 	return target.Origin + target.Mount + "_auriga/ticket?t=" + url.QueryEscape(token)
 }
 
