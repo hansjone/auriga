@@ -98,6 +98,20 @@ check_preflight missing_LITELLM fail 'image not available locally'
 unset NAS_READY_MISSING
 NAS_READY_DIGEST_APPS=1 write_env
 check_preflight seven_digest_images pass ''
+local_litellm="sha256:$(printf '%064d' 0 | tr 0 7)"
+printf 'AURIGA_IMAGE_LITELLM=%s\n' "$local_litellm" >>"$AURIGA_DATA_ROOT/stack.env"
+NAS_READY_MISSING=$litellm_image; export NAS_READY_MISSING
+check_preflight offline_litellm_local_identity pass ''
+if ! grep -Fq "$local_litellm" "$NAS_READY_LOG"; then bad offline_litellm_identity_not_inspected; fi
+NAS_READY_MISSING=$local_litellm
+check_preflight offline_litellm_missing fail 'image not available locally'
+unset NAS_READY_MISSING
+for invalid_litellm in litellm:latest "sha256:$(printf '%064d' 0)"; do
+  write_env
+  printf 'AURIGA_IMAGE_LITELLM=%s\n' "$invalid_litellm" >>"$AURIGA_DATA_ROOT/stack.env"
+  check_preflight offline_litellm_invalid_identity fail 'invalid image ref\|placeholder image'
+done
+NAS_READY_DIGEST_APPS=1 write_env
 export NAS_READY_MISSING
 NAS_READY_MISSING=$(sed -n 's/^AURIGA_IMAGE_PLATFORM=//p' "$AURIGA_DATA_ROOT/stack.env")
 check_preflight missing_application_digest fail 'image not available locally'

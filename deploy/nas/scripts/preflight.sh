@@ -72,7 +72,7 @@ for img in \
   "${AURIGA_IMAGE_POSTGRES:?}" \
   "${AURIGA_IMAGE_NATS:?}" \
   "${AURIGA_IMAGE_REGISTRY:?}" \
-  "ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06"
+  "${AURIGA_IMAGE_LITELLM:-ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06}"
 do
   validate_image_ref "$img" || die "bad image ref"
   case "${img##*sha256:}" in

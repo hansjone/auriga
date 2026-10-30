@@ -55,7 +55,7 @@ services:
     pids_limit: 256
 
   litellm:
-    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    image: ${AURIGA_IMAGE_LITELLM:-ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06}
     <<: *cap_drop_all
     # Read only the group-readable runtime copies prepared by render.
     group_add: ['10003', '999']
@@ -90,7 +90,7 @@ services:
       start_period: 60s
 
   litellm-init:
-    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    image: ${AURIGA_IMAGE_LITELLM:-ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06}
     <<: *cap_drop_all
     group_add: ['10003', '999', '10001']
     entrypoint: ['python', '/etc/litellm/provision.py']

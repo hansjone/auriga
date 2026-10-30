@@ -8,6 +8,8 @@
 
 LiteLLM 固定为 `ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06`。该版本及 digest 来自[官方镜像目录](https://github.com/berriai/litellm/pkgs/container/litellm/versions?filters%5Bversion_type%5D=tagged)，可按[官方发行说明](https://github.com/BerriAI/litellm/releases/tag/v1.106.6)验证签名。NAS 的 start 不下载镜像，需预先在目标 Engine 准备此精确 digest（可在构建机拉取后 save/load），并通过 preflight；原三份 Auriga 制品镜像仍用现有校验流程。
 
+离线 `save/load` 可能丢失 RepoDigests。NAS 可在 `stack.env` 设置 `AURIGA_IMAGE_LITELLM=sha256:<目标 Engine 本地 Id>`，供 LiteLLM 和初始化容器共同使用；留空保持上述固定 digest。先独立核对运输包与批准镜像的关联、实际内容和 `linux/amd64`，再从目标 Engine inspect 取得本地 Id，不能直接沿用源 Engine Id 或把 config 摘要当作所有 store 的通用 Id。preflight 对这个精确引用执行原有只读检查，拒绝可变 tag、全零占位、缺失镜像和错误平台，启动仍使用 `--pull never`。
+
 安装器生成四个独立随机秘密：`litellm/master`、`salt`、`team`、`pg_password`，位于 compose `var` 或 NAS `config/materials` 下。不要提交或打印文件内容。数据库为现有 PostgreSQL 内的独立 `litellm` 库，角色 `auriga_litellm` 不能建库或建角色。首次启动的 `litellm-init` 只签发一个 `llm_api` 类型服务虚拟 Key；它先将 claim 提交到 `auriga_provisioning.service_key_state`，成功后置 ready。已有 ready 标记时不重建 Key，丢弃本地卷也不会恢复已吊销 Key。备份整个 LiteLLM 数据库、固定盐值及秘密目录；不再使用 `litellm-state` 卷。若停在 claimed 或秘密指纹变化，初始化失败关闭，须由部署管理员核查 Key 状态后显式恢复，不能删除标记自动重试。轮换时同步 gateway 的秘密文件，不能用 master key 替代。
 
 compose 默认另发布 edge 的 8086 端口；首次 prepare 可加 `--litellm-ui-origin https://admin.example.com:8446`。NAS 设置 `AURIGA_LITELLM_UI_ORIGIN`，留空同样默认 8086；域名代理可用 `https://litellm.example.com`，转到 edge 的 8086 listener，并沿用 access 文件中的代理 mTLS 边界。浏览器证书 SAN 必须覆盖 UI 主机名；防火墙与反代要允许该独立入口。它不能与门户、管理台、实例控制或实例域重合，协议须与管理台一致。UI Origin 纳入安装封存输入，已有材料不能原地换地址。
