@@ -220,6 +220,14 @@ async function normalReady(transport, trust, state, signal, now) {
 export async function openConnectionRuntime(options) {
   const { prepared } = options,
     controller = new AbortController();
+  if (
+    prepared.storageKey !== undefined &&
+    !/^[a-f0-9]{64}$/.test(prepared.storageKey)
+  )
+    throw new Error('invalid device storage key');
+  const storageDirectory = prepared.storageKey
+    ? join(options.directory ?? '', 'devices', prepared.storageKey)
+    : options.directory;
   const url = new URL(prepared.url);
   if (
     url.protocol !== 'wss:' ||
@@ -463,7 +471,7 @@ export async function openConnectionRuntime(options) {
     const store =
       options.stores?.[name] ??
       createFileLedgerStore({
-        dir: join(options.directory ?? '', name === 'ledger' ? 'host' : name),
+        dir: join(storageDirectory ?? '', name === 'ledger' ? 'host' : name),
       });
     const h = await store.open();
     handles.push(h);

@@ -182,6 +182,9 @@ export function createDeviceProvider({
       let registering = false;
       return {
         kind: 'device-connection',
+        storageKey: createHash('sha256')
+          .update(JSON.stringify([config.issuer, expected.tid, expected.did]))
+          .digest('hex'),
         async submit(body, active) {
           return request('/api/ai/v1/network/submit', body, active);
         },
