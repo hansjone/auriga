@@ -121,7 +121,9 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 
 操作类型仅 `click`、`fill`、`wait`，不执行任意 JS/外部脚本。上述 selector 是能力缺口的明确输入，须按 PLUGIN-DIST/CLOUD-DESK 实际交付的原生 UI 填写，不能照抄占位值。`valueFrom` 取本次成员字段；需要动态 TOTP 时可用 `otp`，现有连接流程有其他表单/原生承接步骤时按实际 UI 补动作。
 
-⑤ 配置 `messaging.testOnly: true`，确认两端默认模型均为免费假上游。`messaging.cloudToDesktop`、`desktopToCloud` 各包含 `sendActions`、`receivedSelector`、`replyActions`、`replyReceivedSelector`。发送动作通过 `valueFrom: "marker"` 填唯一消息；目标必须显示该 marker，再回复 `reply-<marker>`，源端必须收到回复。两个方向都成功才 PASS；旧消息或“连接成功”不算收发证据。
+⑤ 可配置 `cloudDesk` 对象（必须 `testOnly:true`），直接运行原生 Agent 的两次入网、四次真实发送及接收端四个不同消息 ID 核验。HTTPS 认证、CA、进程域名映射、隔离桌面安装记录和配置见 [cloud-desk.zh.md](./cloud-desk.zh.md)。单选⑤不会重新执行②④，也不代表八项完整验收。
+
+原有 UI 路径仍可配置 `messaging.testOnly: true`，确认两端默认模型均为免费假上游。`messaging.cloudToDesktop`、`desktopToCloud` 各包含 `sendActions`、`receivedSelector`、`replyActions`、`replyReceivedSelector`。发送动作通过 `valueFrom: "marker"` 填唯一消息；目标必须显示该 marker，再回复 `reply-<marker>`，源端必须收到回复。两个方向都成功才 PASS；旧消息或“连接成功”不算收发证据。
 
 ## 中转站与外部虚拟 Key
 

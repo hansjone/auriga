@@ -57,9 +57,8 @@ services:
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     <<: *cap_drop_all
-    # Read uid10001 installation secrets and the uid999 PostgreSQL secret.
-    # Neither service mounts writable host data or the Docker socket.
-    cap_add: [DAC_READ_SEARCH]
+    # Read only the group-readable runtime copies prepared by render.
+    group_add: ['10003', '999']
     entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/materials/litellm-public.env
@@ -93,7 +92,7 @@ services:
   litellm-init:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     <<: *cap_drop_all
-    cap_add: [DAC_READ_SEARCH]
+    group_add: ['10003', '999', '10001']
     entrypoint: ['python', '/etc/litellm/provision.py']
     secrets: [litellm_master, litellm_team, litellm_pg_password]
     volumes:
@@ -201,6 +200,8 @@ services:
       AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: 'true'
       AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE: /run/auriga-installation/edge.secret
       AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
+      AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:-3600}
+      AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:-60}
       AURIGA_GRPC_PORT: '9091'
       AURIGA_GRPC_SERVER_HOST: 0.0.0.0
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
@@ -409,12 +410,12 @@ networks:
 
 secrets:
   litellm_master:
-    file: ${AURIGA_DATA_ROOT}/config/materials/litellm/master
+    file: ${AURIGA_DATA_ROOT}/config/litellm/master
   litellm_salt:
-    file: ${AURIGA_DATA_ROOT}/config/materials/litellm/salt
+    file: ${AURIGA_DATA_ROOT}/config/litellm/salt
   litellm_team:
-    file: ${AURIGA_DATA_ROOT}/config/materials/litellm/team
+    file: ${AURIGA_DATA_ROOT}/config/litellm/team
   litellm_pg_password:
-    file: ${AURIGA_DATA_ROOT}/secrets/litellm_pg_password
+    file: ${AURIGA_DATA_ROOT}/config/litellm/pg_password
   pg_bootstrap_password:
     file: ${AURIGA_DATA_ROOT}/secrets/pg_bootstrap_password

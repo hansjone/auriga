@@ -89,6 +89,7 @@ async function fixture(t, extra = {}) {
   const controller = new AbortController();
   const prepared = {
     kind: 'device-connection',
+    ...(extra.storageKey ? { storageKey: extra.storageKey } : {}),
     roots: testRoots,
     url: 'wss://network.example.com/',
     origin: extra.origin ?? 'https://portal.example.com',
@@ -169,7 +170,9 @@ async function fixture(t, extra = {}) {
     authorizeLocal: extra.authorizeLocal ?? (async () => false),
     signal: controller.signal,
     now,
-    stores: { ledger, trust: trustStore },
+    ...(extra.directory
+      ? { directory: extra.directory }
+      : { stores: { ledger, trust: trustStore } }),
     onRevoked: extra.onRevoked,
     onClosed: extra.onClosed,
     ctx:
@@ -314,6 +317,35 @@ async function fixture(t, extra = {}) {
     trustStore,
   };
 }
+
+test('a new device leaves the old ledger intact and cannot initialize a previously registered device without its own ledger', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-device-generations-'));
+  t.after(() => nodeFs.rm(dir, { recursive: true, force: true }));
+  const old = await openLedger({
+    store: createFileLedgerStore({ dir: join(dir, 'host') }),
+    identity: { ...IDENTITY, node: '999' },
+    initialize: true,
+  });
+  await old.close();
+  const oldBytes = await readFile(join(dir, 'host/ledger.json'));
+  const fresh = await fixture(t, {
+    directory: dir,
+    storageKey: 'a'.repeat(64),
+  });
+  await fresh.runtime.start();
+  assert.equal(fresh.runtime.status.connected, true);
+  await fresh.runtime.close();
+  assert.deepEqual(await readFile(join(dir, 'host/ledger.json')), oldBytes);
+  const missing = await fixture(t, {
+    directory: dir,
+    storageKey: 'b'.repeat(64),
+    registration: { created: false },
+  });
+  await assert.rejects(
+    missing.runtime.start(),
+    /connection ledger unavailable/,
+  );
+});
 
 function registrationHost() {
   const host = nativeFixture();
@@ -2599,11 +2631,18 @@ test('plugin actual entry resumes verified native device into official factory, 
   assert.equal(wire.length, 2);
   assert.equal(hostCalls, 0);
   assert.equal(tools.has('auriga_send_message'), false);
+  const deviceDirectories = await nodeFs.readdir(
+    join(profile, 'auriga-connect/network/devices'),
+  );
+  assert.equal(deviceDirectories.length, 1);
+  const hostDirectory = join(
+    profile,
+    'auriga-connect/network/devices',
+    deviceDirectories[0],
+    'host',
+  );
   const ledger = JSON.parse(
-    await readFile(
-      join(profile, 'auriga-connect/network/host/ledger.json'),
-      'utf8',
-    ),
+    await readFile(join(hostDirectory, 'ledger.json'), 'utf8'),
   );
   assert.equal(ledger.identity.nodeIncarnation, 'inc-1');
   const logout = await nativeFetch(localOrigin + '/auriga/local-login/logout', {
@@ -2619,7 +2658,7 @@ test('plugin actual entry resumes verified native device into official factory, 
   assert.equal(logout.status, 200);
   await waitFor(async () => {
     try {
-      await readFile(join(profile, 'auriga-connect/network/host/ledger.lock'));
+      await readFile(join(hostDirectory, 'ledger.lock'));
       return false;
     } catch (e) {
       return e.code === 'ENOENT';

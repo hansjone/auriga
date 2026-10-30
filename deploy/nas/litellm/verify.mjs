@@ -20,6 +20,8 @@ if (
   throw new Error('验收仅支持本机 Docker socket；拒绝远程 context');
 mkdirSync(path.join(here, '.verify'), { recursive: true });
 const temporary = mkdtempSync(path.join(here, '.verify/runtime-'));
+const secretRoot = path.join(temporary, 'litellm');
+mkdirSync(secretRoot, { mode: 0o700 });
 const project = `auriga-relay-test-${randomBytes(8).toString('hex')}`;
 const args = [
   '--host',
@@ -36,15 +38,13 @@ const env = {
       ([name]) => !['DOCKER_HOST', 'DOCKER_CONTEXT'].includes(name),
     ),
   ),
-  AURIGA_RELAY_TEST_ROOT: temporary,
+  AURIGA_RELAY_TEST_ROOT: secretRoot,
 };
 for (const name of ['bootstrap', 'master', 'salt', 'team', 'pg_password']) {
   writeFileSync(
-    path.join(temporary, name),
+    path.join(secretRoot, name),
     `${['master', 'salt', 'team'].includes(name) ? 'sk-' : ''}${randomBytes(32).toString('hex')}`,
-    // The host directory is private. Only the disposable PostgreSQL fixture
-    // needs a cross-uid readable bind file; production uses its uid999 copy.
-    { mode: name === 'pg_password' ? 0o644 : 0o600 },
+    { mode: 0o600 },
   );
 }
 let failed = false;
@@ -59,6 +59,13 @@ function run(command) {
     throw new Error('isolated LiteLLM verification command failed');
 }
 try {
+  const permissions = spawnSync(
+    'sh',
+    [path.join(here, '../../compose/scripts/litellm-permissions.sh'), temporary],
+    { env, stdio: 'inherit', windowsHide: true },
+  );
+  if (permissions.error || permissions.status !== 0)
+    throw new Error('LiteLLM fixture permissions preparation failed');
   run([
     'up',
     '-d',
