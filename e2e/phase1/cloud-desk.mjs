@@ -658,7 +658,7 @@ async function requireTestLock() {
   );
   assert.match(
     owner,
-    /auriga-SEND-FIX R[45] 只测不重建/,
+    /auriga-SEND-FIX R[456] 只测不重建/,
     'shared-stack requests require this task own test lock',
   );
 }

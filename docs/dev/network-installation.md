@@ -5,6 +5,15 @@
 unconfigured。本工具只生成公开配置，不登录、不请求远端、不修改 DSH 或安装信任。
 工具通过不代表 compose/NAS/Beta 已接好 collab，也不代表真实设备已完成签名 READY。
 
+真实 Agent 发送还依赖 IAM 来源权威的有效期配置。公开 Compose 配方显式设置
+`AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=3600` 和
+`AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=60`，可通过同名部署变量覆盖。
+两者必须为正整数；决定有效期不超过300秒，且不超过来源有效期。任一为0时权威关闭。
+IAM 本身仍默认关闭该能力，现有成员权限、设备、来源、关系和世代检查均保持生效。
+修改部署变量后须沿公开 Compose 流程重新创建 platform 服务使其生效；单纯 restart 不会更新容器环境。
+若两端 READY/入网成功但发送报 unauthorized，应沿 trace 检查来源注册；
+缺少这两项配置时 RegisterAgentSource 会返回 common.unavailable，不能靠放宽客户端验证解决。
+
 ## 先确认来源
 
 所有输入必须来自本地受信交付目录，目录及祖先不得允许非受信主体修改。材料不提交仓库。

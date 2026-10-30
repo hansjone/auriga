@@ -44,6 +44,34 @@ test('resume preserves the existing desktop identity and rejects another authent
   await assert.rejects(loginDesktop(request, { accountId: 'same-member' }));
 });
 
+test('a saved desktop device resumes through the public login action instead of replacing it', async () => {
+  let resumed = false;
+  const request = async (path, body, csrf) => {
+    if (path === '/auriga/local-login/status')
+      return {
+        loggedIn: resumed,
+        available: true,
+        resumeAvailable: !resumed,
+        csrf: 'local-csrf',
+        account: resumed ? { subject: 'same-member' } : null,
+      };
+    assert.deepEqual(body, { action: 'resume' });
+    assert.equal(csrf, 'local-csrf');
+    resumed = true;
+    return { step: { type: 'complete' } };
+  };
+  assert.equal(
+    (
+      await loginDesktop(
+        request,
+        { accountId: 'same-member' },
+        { resume: true },
+      )
+    ).resumed,
+    true,
+  );
+});
+
 async function fixture(t) {
   const f = await startFixture({ runId: 'test-run' });
   t.after(() => f.close());

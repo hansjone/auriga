@@ -201,6 +201,19 @@ export async function configureFixtureModel(
 
 export async function loginDesktop(request, member, { resume = false } = {}) {
   let status = await request('/auriga/local-login/status');
+  if (resume && !status.loggedIn && status.resumeAvailable) {
+    assert.ok(member.accountId);
+    const result = await request(
+      '/auriga/local-login/login',
+      { action: 'resume' },
+      status.csrf,
+    );
+    assert.equal(result.step?.type, 'complete');
+    status = await poll(async () => {
+      const current = await request('/auriga/local-login/status');
+      return current.loggedIn && current.available ? current : null;
+    }, 'desktop_resume_not_ready');
+  }
   if (resume && status.loggedIn) {
     assert.ok(member.accountId);
     assert.equal(
