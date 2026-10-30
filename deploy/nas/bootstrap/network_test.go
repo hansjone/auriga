@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,7 +40,11 @@ func TestNASNetworkSubmitConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			dir := t.TempDir()
-			writeNASConfig(dir, raw, cfg, "192.0.2.138", 15000, "192.0.2.10", 512)
+			ui, err := relayui.Resolve(cfg, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeNASConfig(dir, raw, cfg, "192.0.2.138", 15000, "192.0.2.10", 512, ui)
 			content, err := os.ReadFile(filepath.Join(dir, "edge.config.json"))
 			if err != nil {
 				t.Fatal(err)

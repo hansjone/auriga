@@ -1483,9 +1483,12 @@ func (x *GetEffectiveQuotaResponse) GetQuota() *Quota {
 }
 
 type Quota struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Instance      *InstanceQuota         `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
-	Model         *ModelQuota            `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Instance *InstanceQuota         `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
+	// 仅保留协议兼容：已由 LiteLLM customer 预算取代，服务拒绝写入且不读取。
+	//
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+	Model         *ModelQuota `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1527,6 +1530,7 @@ func (x *Quota) GetInstance() *InstanceQuota {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 func (x *Quota) GetModel() *ModelQuota {
 	if x != nil {
 		return x.Model
@@ -1613,13 +1617,16 @@ func (x *InstanceQuota) GetAlwaysOnAllowed() bool {
 	return false
 }
 
+// 仅保留协议兼容，已由 LiteLLM customer 预算取代；服务拒绝写入且不读取。
+//
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 type ModelQuota struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// 每月预算，百万分之一货币单位；不设置=不限，0=禁止团队模型。UTC月，币种必须等于gateway部署币种。
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 	MonthlyBudgetMicros *int64 `protobuf:"varint,1,opt,name=monthly_budget_micros,json=monthlyBudgetMicros,proto3,oneof" json:"monthly_budget_micros,omitempty"`
-	// ISO 4217，例如 `CNY`、`USD`。
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 	Currency string `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
-	// 每日 token 上限；不设置=不限，0=禁止团队模型。UTC日；实例/设备按同一主体共享。
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 	DailyTokens   *int64 `protobuf:"varint,3,opt,name=daily_tokens,json=dailyTokens,proto3,oneof" json:"daily_tokens,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1655,6 +1662,7 @@ func (*ModelQuota) Descriptor() ([]byte, []int) {
 	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{25}
 }
 
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 func (x *ModelQuota) GetMonthlyBudgetMicros() int64 {
 	if x != nil && x.MonthlyBudgetMicros != nil {
 		return *x.MonthlyBudgetMicros
@@ -1662,6 +1670,7 @@ func (x *ModelQuota) GetMonthlyBudgetMicros() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 func (x *ModelQuota) GetCurrency() string {
 	if x != nil {
 		return x.Currency
@@ -1669,6 +1678,7 @@ func (x *ModelQuota) GetCurrency() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
 func (x *ModelQuota) GetDailyTokens() int64 {
 	if x != nil && x.DailyTokens != nil {
 		return *x.DailyTokens
@@ -1902,10 +1912,10 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"\n" +
 	"account_id\x18\x02 \x01(\tR\taccountId\"G\n" +
 	"\x19GetEffectiveQuotaResponse\x12*\n" +
-	"\x05quota\x18\x01 \x01(\v2\x14.auriga.org.v1.QuotaR\x05quota\"r\n" +
+	"\x05quota\x18\x01 \x01(\v2\x14.auriga.org.v1.QuotaR\x05quota\"v\n" +
 	"\x05Quota\x128\n" +
-	"\binstance\x18\x01 \x01(\v2\x1c.auriga.org.v1.InstanceQuotaR\binstance\x12/\n" +
-	"\x05model\x18\x02 \x01(\v2\x19.auriga.org.v1.ModelQuotaR\x05model\"\x84\x02\n" +
+	"\binstance\x18\x01 \x01(\v2\x1c.auriga.org.v1.InstanceQuotaR\binstance\x123\n" +
+	"\x05model\x18\x02 \x01(\v2\x19.auriga.org.v1.ModelQuotaB\x02\x18\x01R\x05model\"\x84\x02\n" +
 	"\rInstanceQuota\x12\"\n" +
 	"\n" +
 	"cpu_millis\x18\x01 \x01(\x03H\x00R\tcpuMillis\x88\x01\x01\x12 \n" +
@@ -1918,12 +1928,12 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"_memory_mbB\n" +
 	"\n" +
 	"\b_disk_gbB\x10\n" +
-	"\x0e_max_instances\"\xb4\x01\n" +
+	"\x0e_max_instances\"\xc4\x01\n" +
 	"\n" +
-	"ModelQuota\x127\n" +
-	"\x15monthly_budget_micros\x18\x01 \x01(\x03H\x00R\x13monthlyBudgetMicros\x88\x01\x01\x12\x1a\n" +
-	"\bcurrency\x18\x02 \x01(\tR\bcurrency\x12&\n" +
-	"\fdaily_tokens\x18\x03 \x01(\x03H\x01R\vdailyTokens\x88\x01\x01B\x18\n" +
+	"ModelQuota\x12;\n" +
+	"\x15monthly_budget_micros\x18\x01 \x01(\x03B\x02\x18\x01H\x00R\x13monthlyBudgetMicros\x88\x01\x01\x12\x1e\n" +
+	"\bcurrency\x18\x02 \x01(\tB\x02\x18\x01R\bcurrency\x12*\n" +
+	"\fdaily_tokens\x18\x03 \x01(\x03B\x02\x18\x01H\x01R\vdailyTokens\x88\x01\x01:\x02\x18\x01B\x18\n" +
 	"\x16_monthly_budget_microsB\x0f\n" +
 	"\r_daily_tokens\"A\n" +
 	"\x10GetPolicyRequest\x12\x1b\n" +

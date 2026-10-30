@@ -53,6 +53,10 @@ jobs:
           # shellcheck disable=SC1091
           source var/compose.env
           set +a
+          # Keep startup diagnostics safe even if a dependency prints a DSN/key.
+          for name in master salt team pg_password; do
+            printf '::add-mask::%s\n' "$(cat "var/litellm/$name")"
+          done
           echo "AURIGA_IAM_ENCRYPTION_KEY=$AURIGA_IAM_ENCRYPTION_KEY" >> "$GITHUB_ENV"
           echo "AURIGA_WORKSPACE_ENCRYPTION_KEY=$AURIGA_WORKSPACE_ENCRYPTION_KEY" >> "$GITHUB_ENV"
           echo "AURIGA_AGENT_CA_SHA256=$AURIGA_AGENT_CA_SHA256" >> "$GITHUB_ENV"
@@ -120,7 +124,7 @@ jobs:
         working-directory: deploy/compose
         run: |
           docker compose ps || true
-          for s in postgres nats platform edge agent registry; do
+          for s in postgres nats platform edge agent registry litellm litellm-init ai-relay; do
             echo "===== logs $s ====="
             docker compose logs --tail=200 "$s" || true
           done

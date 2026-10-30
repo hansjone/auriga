@@ -6,6 +6,12 @@ COMPOSE="$ROOT/deploy/compose"
 VAR="$COMPOSE/var"
 ACCESS_ARGS=()
 while [ "$#" -gt 0 ]; do
+  if [ "$1" = --litellm-ui-origin ]; then
+    [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing LiteLLM UI origin' >&2; exit 1; }
+    ACCESS_ARGS+=("-litellm-ui-origin" "$2")
+    shift 2
+    continue
+  fi
   case "$1" in --access-file|--https-cert-file|--https-key-file|--network-collab-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
   [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing prepare input' >&2; exit 1; }
   # Resolve once before changing directory; only the public Go loader parses it.
@@ -140,4 +146,15 @@ if [ -e "$VAR/panel" ] || [ -L "$VAR/panel" ]; then
 else
   mkdir -m 755 "$VAR/panel"
 fi
+
+# File-backed secrets: only the intended container identity can read each key.
+if [ "$(id -u)" -eq 0 ]; then
+  chgrp 999 "$VAR/litellm/pg_password"
+  chgrp 10001 "$VAR/litellm/team"
+else
+  sudo -n chgrp 999 "$VAR/litellm/pg_password"
+  sudo -n chgrp 10001 "$VAR/litellm/team"
+fi
+chmod 640 "$VAR/litellm/pg_password" "$VAR/litellm/team"
+
 echo "prepare done; env file: $VAR/compose.env"

@@ -30,6 +30,7 @@ import (
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	"github.com/hansjone/auriga/deploy/bootstrap/panel"
+	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -50,6 +51,7 @@ func main() {
 	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
 	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
+	uiOrigin := flag.String("litellm-ui-origin", "", "independent LiteLLM UI origin (default: admin host on port 8086)")
 	collabFile := flag.String("network-collab-file", "", "explicit offline-approved standalone collab installation JSON")
 	activate := flag.Bool("activate-collab", false, "seal first N1 activation without changing base")
 	checkActivation := flag.Bool("check-collab-activation", false, "verify sealed activation and unchanged base")
@@ -99,7 +101,11 @@ func main() {
 	if err != nil {
 		fatalf("%v", err)
 	}
-	hosts := []string{access.PortalOrigin().Host, access.AdminOrigin().Host}
+	ui, err := relayui.Resolve(access, *uiOrigin)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	hosts := []string{access.PortalOrigin().Host, access.AdminOrigin().Host, ui.Origin.Host}
 	if parent := access.InstanceParentDomain(); parent != "" {
 		hosts = append(hosts, "*."+parent)
 	}
@@ -125,7 +131,7 @@ func main() {
 	if !fixtureImagePattern.MatchString(*image) || !strings.Contains(*image, "/"+*fixture+"-dsh@") {
 		fatalf("-image must use selected exact local fixture repository@sha256:digest")
 	}
-	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%s\n%t\n%t\n%s", composeRecipe(access.PortalOrigin().Scheme == "https"), *image, *fixture, *observer, *accessFile != "", browser.Digest()))...))
+	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%s\n%t\n%t\n%s\n%s", composeRecipe(access.PortalOrigin().Scheme == "https"), *image, *fixture, *observer, *accessFile != "", browser.Digest(), ui.Digest()))...))
 	inputDigest := hex.EncodeToString(input[:])
 	if collab != nil {
 		combinedInput := sha256.Sum256(append(input[:], []byte(collab.digest())...))
@@ -177,6 +183,7 @@ func main() {
 		fatalf("%v", err)
 	}
 	generateIdentityMaterials(*out)
+	writeLiteLLM(*out, ui)
 	if err := browser.Write(*out); err != nil {
 		fatalf("%v", err)
 	}
@@ -270,6 +277,7 @@ func main() {
 		"accessConfigFile":  "/etc/auriga/access.json",
 		"allowLocalIngress": true,
 		"upstreams": map[string]string{
+			"ai-device":      "https://ai-relay:18445",
 			"network-submit": "https://172.29.240.1:18443", // gitleaks:allow disposable M2 network
 			"iam":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
 			"org":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
@@ -279,6 +287,9 @@ func main() {
 			"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key",
 			"caFile": "/etc/auriga/pki/ca.crt", "serverName": iamServerName,
 		},
+		"litellmOrigin":    "http://litellm:4000",
+		"litellmUI":        ui,
+		"deviceHop":        map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "ai-relay"},
 		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/network-edge/edge.pem", "keyFile": "/etc/auriga/network-edge/edge.key", "caFile": "/etc/auriga/network-edge/server-ca.pem", "serverName": "submit.network.internal"},
 		"networkWss": map[string]any{
 			"enabled": true, "path": "/net/v1/ws",
@@ -311,7 +322,7 @@ func main() {
 	}
 	writeJSON(filepath.Join(*out, "edge.config.json"), edgeCfg, 0o644)
 	// Public values are derived from the validated installation; no credentials.
-	accessEnv := composeAccessEnv(access, *accessFile != "")
+	accessEnv := composeAccessEnv(access, *accessFile != "", ui)
 	if collab != nil {
 		accessEnv = append(accessEnv, []byte("COMPOSE_PROFILES='network-collab'\nCOMPOSE_FILE='docker-compose.yml:scripts/collab-required.yml'\nAURIGA_IAM_TENANT_DELEGATES='svc:edge,svc:ai-gateway,svc:collab'\n")...)
 	}
@@ -504,7 +515,7 @@ func generateIdentityMaterials(out string) {
 		[]string{edgeHopDNSName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
 	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o400)
-	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-compose", "auriga://ai-gateway/compose", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-compose", "auriga://ai-gateway/compose", []string{"ai-relay"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth})
 	writeFile(filepath.Join(pki, "gateway.crt"), gatewayCert, 0o644)
 	writeFile(filepath.Join(pki, "gateway.key"), gatewayKey, 0o400)
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)

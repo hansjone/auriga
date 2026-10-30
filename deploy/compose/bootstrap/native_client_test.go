@@ -71,7 +71,7 @@ func TestNativeClientRegistration(t *testing.T) {
 }
 
 func TestNativeRecipeCompatibility(t *testing.T) {
-	if composeRecipe(false) != "network-wss-v2-https" || composeRecipe(true) != "network-wss-v3-https-native-client" {
+	if composeRecipe(false) != "network-wss-v2-https-litellm-ui-v2" || composeRecipe(true) != "network-wss-v3-https-native-client-litellm-ui-v2" {
 		t.Fatal("HTTP legacy input changed or HTTPS native recipe not distinguished")
 	}
 }

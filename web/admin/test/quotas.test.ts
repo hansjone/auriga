@@ -54,12 +54,10 @@ beforeEach(() => {
   ];
   defaults = {
     instance: { cpuMillis: 200, maxInstances: 2, alwaysOnAllowed: true },
-    model: { monthlyBudgetMicros: 5, currency: 'USD' },
   };
   override = undefined;
   effective = {
     instance: { maxInstances: 17, alwaysOnAllowed: false },
-    model: { dailyTokens: null },
   };
   exists = true;
   calls = [];
@@ -128,7 +126,7 @@ beforeEach(() => {
         }
         if (method === 'DELETE') {
           override = undefined;
-          effective = { model: { dailyTokens: 42 } };
+          effective = { instance: { maxInstances: 42 } };
           return new Response(null, { status: 204 });
         }
         return override === undefined ? missing() : json(override);
@@ -186,19 +184,17 @@ describe('quota form semantics', () => {
   it('retains unknown fields and unedited known values while clearing only explicitly unset fields', () => {
     const original = {
       instance: { cpuMillis: 200, futureCapacity: { count: 7 } },
-      model: { currency: 'USD', futureMode: 'example' },
       futureSection: { enabled: true },
     };
     const draft = fromQuota(original);
     draft.cpuMillis.mode = 'unset';
     expect(preserveUnknownQuota(original, toQuota(draft))).toEqual({
       instance: { futureCapacity: { count: 7 } },
-      model: { currency: 'USD', futureMode: 'example' },
       futureSection: { enabled: true },
     });
     expect(
-      unsafeQuotaFields({ model: { futureLimit: 9007199254740992 } }),
-    ).toEqual(['model.futureLimit']);
+      unsafeQuotaFields({ instance: { futureLimit: 9007199254740992 } }),
+    ).toEqual(['instance.futureLimit']);
   });
   it('round-trips omitted, null, zero and false independently', () => {
     const quota: Quota = {
@@ -209,7 +205,6 @@ describe('quota form semantics', () => {
         maxInstances: 0,
         alwaysOnAllowed: false,
       },
-      model: { monthlyBudgetMicros: null, dailyTokens: 0, currency: 'USD' },
     };
     expect(toQuota(fromQuota(quota))).toEqual(quota);
     expect(toQuota(fromQuota({}))).toEqual({});
@@ -226,29 +221,30 @@ describe('quota form semantics', () => {
     'rejects invalid or imprecise integer %s',
     (value) => {
       const draft = fromQuota({});
-      draft.dailyTokens = { mode: 'value', value };
-      expect(validateDraft(draft)).toBe('dailyTokens');
+      draft.maxInstances = { mode: 'value', value };
+      expect(validateDraft(draft)).toBe('maxInstances');
     },
   );
-  it('validates minima and uppercase three-letter currency', () => {
+  it('validates instance resource minima', () => {
     const draft = fromQuota({ instance: { cpuMillis: 99 } });
     expect(validateDraft(draft)).toBe('cpuMillis');
     draft.cpuMillis.mode = 'unset';
-    draft.currency = { enabled: true, value: 'usd' };
-    expect(validateDraft(draft)).toBe('currency');
+    draft.memoryMb = { mode: 'value', value: '255' };
+    expect(validateDraft(draft)).toBe('memoryMb');
   });
   it('identifies every removed current-layer field for replacement confirmation', () => {
     expect(
       clearedFields(defaults, { instance: { maxInstances: null } }),
-    ).toEqual([
-      'cpuMillis',
-      'alwaysOnAllowed',
-      'monthlyBudgetMicros',
-      'currency',
-    ]);
+    ).toEqual(['cpuMillis', 'alwaysOnAllowed']);
   });
 });
 describe('quota page workflows', () => {
+  it('keeps model budgets out of instance quota settings', async () => {
+    await render();
+    expect(wrapper!.text()).not.toContain('模型预算');
+    expect(wrapper!.text()).not.toContain('token 上限');
+    expect(wrapper!.find('[aria-label="模型预算币种"]').exists()).toBe(false);
+  });
   it('keeps a candidate 403 visible after clearing selection data and disabling writes', async () => {
     intercept = (path) =>
       path.startsWith('/api/org/v1/admin/members?')
@@ -266,7 +262,7 @@ describe('quota page workflows', () => {
     expect(writes()).toHaveLength(0);
   });
   it('blocks writes for unsafe returned values and explains the precision restriction', async () => {
-    defaults = { model: { monthlyBudgetMicros: 9007199254740992 } };
+    defaults = { instance: { maxInstances: 9007199254740992 } };
     await render();
     expect(wrapper!.text()).toContain('超出可安全编辑的整数精度');
     await submit();
@@ -289,29 +285,26 @@ describe('quota page workflows', () => {
       futureSection: { enabled: true },
     });
   });
-  it('does not impose a currency on a layer that sets only a numeric model limit', async () => {
+  it('sets only the edited instance limit on an empty layer', async () => {
     defaults = {};
     await render();
-    await choose('UTC 月模型预算 配置层', 'value');
-    await wrapper!.get('input[aria-label="UTC 月模型预算"]').setValue('0');
+    await choose('实例数量上限 配置层', 'value');
+    await wrapper!.get('input[aria-label="实例数量上限"]').setValue('0');
     await submit();
     await confirm();
-    expect(defaults).toEqual({ model: { monthlyBudgetMicros: 0 } });
+    expect(defaults).toEqual({ instance: { maxInstances: 0 } });
   });
   it('confirms full replacement including cleared fields and preserves null/zero/deny', async () => {
     await render();
     await choose('CPU 配置层', 'unset');
     await choose('实例数量上限 配置层', 'unlimited');
     await choose('允许常驻', 'deny');
-    await choose('UTC 月模型预算 配置层', 'value');
-    await wrapper!.get('input[aria-label="UTC 月模型预算"]').setValue('0');
     await submit();
     expect(writes()).toHaveLength(0);
     expect(wrapper!.text()).toContain('本次将清除：CPU');
     await confirm();
     expect(defaults).toEqual({
       instance: { maxInstances: null, alwaysOnAllowed: false },
-      model: { monthlyBudgetMicros: 0, currency: 'USD' },
     });
     expect(writes()[0].method).toBe('PUT');
     expect(new Headers(writes()[0].init.headers).get('X-Auriga-CSRF')).toBe(

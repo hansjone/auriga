@@ -39,13 +39,7 @@ export const navigation = [
     path: '/models/relay',
     key: 'navModels',
     icon: 'models',
-    children: [
-      ['/models/relay', 'navRelay'],
-      ['/models/providers', 'navProvidersModels'],
-      ['/models/auto', 'navAuto'],
-      ['/models/usage', 'navUsage'],
-      ['/models/keys', 'navKeys'],
-    ],
+    children: [],
   },
   {
     path: '/providers',

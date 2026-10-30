@@ -4,7 +4,6 @@ import { ApiError, createAurigaI18n, type Member } from '@auriga/shared';
 import OverviewView from '../src/views/OverviewView.vue';
 import { adminApi } from '../src/admin/api';
 import { orgApi } from '../src/api';
-import { modelUsageApi } from '../src/admin/modelUsageApi';
 import { router } from '../src/router';
 import WorkflowUnavailableView from '../src/views/WorkflowUnavailableView.vue';
 
@@ -29,7 +28,6 @@ describe('overview snapshots', () => {
       .mockResolvedValue({ items: [] });
     vi.spyOn(adminApi, 'nodes').mockRejectedValue(new Error('offline'));
     vi.spyOn(adminApi, 'instances').mockResolvedValue({ items: [] });
-    vi.spyOn(modelUsageApi, 'usage').mockResolvedValue({ items: [] });
     const wrapper = mount(OverviewView, {
       global: {
         plugins: [createAurigaI18n('zh-CN')],
@@ -45,7 +43,8 @@ describe('overview snapshots', () => {
     expect(wrapper.get('[data-summary="members"]').text()).toContain(
       '暂无数据',
     );
-    expect(wrapper.get('[data-summary="usage"]').text()).toContain('暂无数据');
+    expect(wrapper.find('[data-summary="usage"]').exists()).toBe(false);
+    expect(wrapper.get('a[href="/ai/ui/"]').text()).toBe('LiteLLM');
     expect(wrapper.text()).toContain('更新时间');
     wrapper.unmount();
   });
@@ -70,7 +69,6 @@ describe('overview snapshots', () => {
       }),
     );
     vi.spyOn(adminApi, 'instances').mockResolvedValue({ items: [] });
-    vi.spyOn(modelUsageApi, 'usage').mockResolvedValue({ items: [] });
     const wrapper = mount(OverviewView, {
       global: {
         plugins: [createAurigaI18n('zh-CN')],

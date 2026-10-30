@@ -4,19 +4,16 @@ package network
 // Production sources and route selection remain unchanged. Invalid credentials
 // and bodies deliberately stop before IAM/PG; no business success is fabricated.
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/litellm"
 	"io"
 	"net/http/httptest"
 	"os"
 	"testing"
-	"time"
-
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/budget"
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelgate"
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/relay"
-	"github.com/hansjone/auriga/infra/ai-gateway/internal/relayhttp"
 )
 
 func TestEdgeSubmitRuntimeFixture(t *testing.T) {
@@ -40,14 +37,9 @@ func TestEdgeSubmitRuntimeFixture(t *testing.T) {
 	network.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots}
 	network.StartTLS()
 	t.Cleanup(network.Close)
-	// This is the same boundary-only configuration used by relayhttp's own
-	// TestBoundaryRejections. Invalid request framing exits before these unused
-	// business components, while the real rawRoute table is still exercised.
-	deviceHandler, err := relayhttp.New(relayhttp.Config{
-		Core: new(relay.Core), Gate: new(modelgate.Gate), Authority: new(modelgate.Authority), Ledger: new(budget.Ledger),
-		ReserveRecovery: func() (func(*relayhttp.Pending), bool) { return func(*relayhttp.Pending) {}, true },
-		ReadTimeout:     5 * time.Second, WriteTimeout: 5 * time.Second, QueryTimeout: time.Second,
-		MaxResponseBytes: 1 << 20, MaxInFlight: 8,
+	// A real LiteLLM member handler rejects the invalid device ticket.
+	deviceHandler, err := litellm.New("http://litellm:4000", "unused-key", func(context.Context, string) (litellm.Principal, error) {
+		return litellm.Principal{}, errors.New("common.unauthenticated")
 	})
 	if err != nil {
 		t.Fatal(err)

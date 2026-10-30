@@ -18,35 +18,29 @@ export const quotaZh = {
   unlimited: '不限',
   allow: '允许',
   deny: '禁止',
-  currencySet: '设置币种',
   fields: {
     cpuMillis: 'CPU',
     memoryMb: '内存',
     diskGb: '磁盘',
     maxInstances: '实例数量上限',
     alwaysOnAllowed: '允许常驻',
-    monthlyBudgetMicros: 'UTC 月模型预算',
-    dailyTokens: 'UTC 每日 token 上限',
-    currency: '模型预算币种',
   },
   units: {
     mCPU: '毫核',
     MB: 'MB',
     GB: 'GB',
     count: '个',
-    micros: '百万分之一货币单位',
-    tokens: 'token',
   },
   numericHint: '整数，最小 {min}；最大可精确表示整数为 9007199254740991。',
-  invalidQuota: '「{field}」输入无效，请检查整数范围、最小值或三位大写币种。',
+  invalidQuota: '「{field}」输入无效，请检查整数范围或最小值。',
   quotaSemantics:
-    '未设置表示由下一层决定；只有明确标注“不限”的字段才是不限。0 与未设置不同：实例数为 0 禁止实例，预算或 token 上限为 0 禁止团队模型。',
+    '未设置表示由下一层决定；只有明确标注“不限”的字段才是不限。实例数为 0 表示禁止实例，与未设置不同。',
   effectiveQuota: '成员有效配额',
   effectiveUnknown: '未设置',
   effectiveOrder:
     '按字段：成员覆盖 → 所在多个组中最宽松的设置 → 默认配额。下方值来自正式有效配额接口；接口不提供具体来源组。',
   quotaImpact:
-    '配额保存不代表在途模型预占清零或已有实例立即变更；仍以服务端后续准入与执行结果为准。',
+    '配额保存不代表已有实例立即变更；仍以服务端后续准入与执行结果为准。',
   replaceQuota:
     '确认替换「{target}」的整份本层配置？本次将清除：{fields}。未设置的字段将按继承规则处理。',
   noneCleared: '无',
@@ -79,37 +73,30 @@ export const quotaEn = {
   unlimited: 'Unlimited',
   allow: 'Allow',
   deny: 'Deny',
-  currencySet: 'Set currency',
   fields: {
     cpuMillis: 'CPU',
     memoryMb: 'Memory',
     diskGb: 'Disk',
     maxInstances: 'Instance limit',
     alwaysOnAllowed: 'Allow always-on',
-    monthlyBudgetMicros: 'UTC monthly model budget',
-    dailyTokens: 'UTC daily token limit',
-    currency: 'Model budget currency',
   },
   units: {
     mCPU: 'millicores',
     MB: 'MB',
     GB: 'GB',
     count: 'instances',
-    micros: 'millionths of a currency unit',
-    tokens: 'tokens',
   },
   numericHint:
     'Integer, minimum {min}; maximum exact integer 9007199254740991.',
-  invalidQuota:
-    'Invalid “{field}”. Check integer range, minimum, or a three-letter uppercase currency.',
+  invalidQuota: 'Invalid “{field}”. Check integer range or minimum.',
   quotaSemantics:
-    'Unset inherits from the next layer; only an explicit Unlimited value is unlimited. Zero differs from unset: zero instances prohibits instances; a zero budget or token limit prohibits team models.',
+    'Unset inherits from the next layer; only an explicit Unlimited value is unlimited. Zero instances prohibits instances and differs from unset.',
   effectiveQuota: 'Effective member quota',
   effectiveUnknown: 'Unset',
   effectiveOrder:
     'Per field: member override → loosest settings across member groups → default. Values below come from the effective-quota endpoint; it does not identify a source group.',
   quotaImpact:
-    'Saving does not clear in-flight model reservations or immediately change existing instances. Subsequent server admission and execution remain authoritative.',
+    'Saving does not immediately change existing instances. Subsequent server admission and execution remain authoritative.',
   replaceQuota:
     'Replace the entire current layer for “{target}”? Fields to clear: {fields}. Unset fields follow inheritance rules.',
   noneCleared: 'None',

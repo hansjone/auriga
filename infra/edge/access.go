@@ -157,6 +157,12 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 			origin = g.Cfg.Access.PortalOrigin()
 		case "admin":
 			origin = g.Cfg.Access.AdminOrigin()
+		case "relayAdmin":
+			if g.Cfg.LiteLLMUI == nil {
+				fail(403, "common.forbidden")
+				return
+			}
+			origin = g.Cfg.LiteLLMUI.Origin
 		case "instanceControl":
 			origin = g.Cfg.Access.InstanceControl().Origin
 		default:
@@ -201,7 +207,7 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 			g.serveInstanceControl(w, r)
 			return
 		}
-		if role == "admin" && isUpgradeRequest(r) {
+		if (role == "admin" || role == "relayAdmin") && isUpgradeRequest(r) {
 			fail(403, "common.forbidden")
 			return
 		}
@@ -209,6 +215,11 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		// Origin validation through an additional Bearer or Fetch Metadata header.
 		cookieWrite := isWriteMethod(r.Method) && hasAurigaCookie(r)
 		loginWrite := isWriteMethod(r.Method) && strings.HasPrefix(r.URL.Path, "/api/iam/v1/login/")
+		if role == "relayAdmin" && r.Method == http.MethodPost && r.URL.Path == "/ai/session" && g.liteLLMHandoffOrigin(r) {
+			// Only the single-use handoff consumes a POST from the admin origin.
+			// No Auriga API is served on this listener.
+			cookieWrite, loginWrite = false, false
+		}
 		// A registered provider's form callback is authenticated by IAM's
 		// protocol state/signature and only creates a short-lived resume.
 		if r.Method == "POST" && loginCallbackPath.MatchString(r.URL.Path) {

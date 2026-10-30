@@ -628,11 +628,16 @@ export interface components {
         maxInstances?: number | null;
         alwaysOnAllowed?: boolean;
       };
-      model?: {
-        /** @description UTC每月预算，百万分之一货币单位；null 表示不限，0禁止团队模型。币种须等于gateway部署币种；已在途预占不因配额修改清零。 */
+      /**
+       * @deprecated
+       * @description 仅保留契约兼容；已由 LiteLLM customer 预算取代。服务拒绝写入，不读取也不返回该字段。
+       */
+      readonly model?: {
+        /** @deprecated */
         monthlyBudgetMicros?: number | null;
+        /** @deprecated */
         currency?: string;
-        /** @description UTC每日token限额；null 表示不限，0禁止团队模型。实例和设备按同一主体共享。 */
+        /** @deprecated */
         dailyTokens?: number | null;
       };
     };

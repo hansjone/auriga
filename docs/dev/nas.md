@@ -94,7 +94,7 @@ done
 平台及实际本地不可变身份，再将已核对的目标 Engine `sha256:...` Id 写入对应配置项。
 `config_id` 是 config 字节摘要，不能当成 containerd store 的通用 `Id`。
 
-`preflight.sh` 只读检查六项明确配置的本地镜像，包括 digest 引用；任何缺失、全零占位、错平台或
+`preflight.sh` 只读检查七项明确配置的本地镜像，包括 digest 引用；任何缺失、全零占位、错平台或
 非法 inspect 输出都会失败，不执行 pull。`start.sh` 只调用一次 `up -d --no-build --pull never`，
 Compose 失败时保留非零退出码；应修正准备步骤或 Compose 版本后重试。
 
@@ -109,8 +109,8 @@ sh deploy-nas/scripts/load-images.sh "$PWD"
 mkdir -p /srv/container/auriga-test
 cp deploy-nas/env.example /srv/container/auriga-test/stack.env
 cp deploy-nas/access-ip.example.json /srv/container/auriga-access.json
-# 将 loader 输出的三条 AURIGA_IMAGE_* 和上面已准备的三个基础镜像引用填入 stack.env。
-# 再编辑上述两份文件，六项镜像都必须已经在本机且为 linux/amd64。
+# 将 loader 输出的三条 AURIGA_IMAGE_* 和上面已准备的三个基础镜像引用填入 stack.env；另按 LiteLLM 指南预载固定镜像。
+# 再编辑上述两份文件，七项镜像都必须已经在本机且为 linux/amd64。
 # 若正式 runtime image 的已批准 locator 使用 127.0.0.1:50123，
 # 签发/审批前就把 AURIGA_HOST_PUBLISH_REGISTRY 设为 50123（示例默认15000）。
 # 数据根预置内容只能有 stack.env。
@@ -274,3 +274,5 @@ AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
 ```
 
 后3条真实权限/安装交叉测试须在独立Linux root测试环境运行；非root普通Go测试具名跳过固定uid安装，自动CI另有强制root步骤，不能以skip当通过。NAS脚本/Go负例在自动PR E2E中运行，不只在手动bundle workflow。smoke检查真实浏览器URL、mTLS健康与未登录拒绝；没有完整E2E hook时仍exit2/PARTIAL。静态Compose、配置加载或本机测试不等于真实NAS网络、浏览器登录、real DSH心跳或IP3完整验收。
+
+???????????????? Key ?????? [LiteLLM ?????](relay-litellm.md)?
