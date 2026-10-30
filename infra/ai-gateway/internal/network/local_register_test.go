@@ -81,13 +81,17 @@ func localRegisterPhaseFixture(t *testing.T, f *fakeMailboxRPC, configure func(*
 		t.Fatalf("runtime start before READY: %v", err)
 	}
 	t.Cleanup(run.Close)
-	// First-use transport setup is a fixture phase, not part of the 100ms
-	// mailbox business deadline. No business RPC or retry is used to warm it.
-	connectCtx, cancelConnect := context.WithTimeout(context.Background(), registrationPhaseGuard)
-	err = awaitRegistrationRPC(connectCtx, run.collab)
+	// Both control transports must be ready before WSS starts ticket redemption.
+	// A cold IAM dial must not consume the fixture's 500ms redemption deadline.
+	// No business RPC or retry is used to warm either connection.
+	connectCtx, cancelConnect := context.WithTimeout(t.Context(), registrationPhaseGuard)
+	err = awaitRegistrationRPC(connectCtx, run.iam)
+	if err == nil {
+		err = awaitRegistrationRPC(connectCtx, run.collab)
+	}
 	cancelConnect()
 	if err != nil {
-		t.Fatalf("collab connection before READY: %v", err)
+		t.Fatalf("control connection before WSS: %v; IAM=%v collab=%v", err, run.iam.GetState(), run.collab.GetState())
 	}
 	// These tests exercise frame validation/publication, not the deliberately
 	// short 100ms reconciliation deadline in runtimeFixture. A ready loopback
@@ -101,7 +105,7 @@ func localRegisterPhaseFixture(t *testing.T, f *fakeMailboxRPC, configure func(*
 	run.mailbox.publisher = p
 	nc, err := nats.Connect(h.wsURL(), nats.Token(connectTicket), nats.NoReconnect())
 	if err != nil {
-		t.Fatalf("WSS connect before READY: %v", err)
+		t.Fatalf("WSS connect before READY: %v; IAM=%v collab=%v", err, run.iam.GetState(), run.collab.GetState())
 	}
 	t.Cleanup(nc.Close)
 	p.client = nc
