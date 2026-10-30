@@ -162,8 +162,8 @@ export class BrowserSteps {
           '桌面连接地址与验收平台不符',
         );
       const { launchDesktop } = await import('./cloud-desk.desktop.mjs');
-      const { loginDesktop, nativeClient } =
-        await import('./cloud-desk.native.mjs');
+      const { nativeClient } = await import('./cloud-desk.native.mjs');
+      const { loginInstalledDesktop } = await import('./installed-login.mjs');
       const { openAurigaPanel } = await import('./dsh-entry.mjs');
       this.nativeDesktop = await launchDesktop(descriptor, {
         connect: descriptor.connect,
@@ -209,7 +209,11 @@ export class BrowserSteps {
         );
         return result.value;
       };
-      const login = await loginDesktop(request, member, { resume: true });
+      const login = await loginInstalledDesktop(
+        this.desktopPage,
+        member,
+        request,
+      );
       this.desktopEvidence.phase = 'native-plugin';
       const plugin = await nativeClient(request).activePlugin();
       this.desktopEvidence.phase = 'plugin-panel';
