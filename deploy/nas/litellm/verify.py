@@ -49,6 +49,13 @@ if __name__ == '__main__':
                    'user': 'tenant-fixture:member-fixture',
                    'metadata': {'tenant_id': 'tenant-fixture', 'account_id': 'member-fixture'}}
         expect(call('/v1/chat/completions', key, request)[0] == 200, 'virtual key chat through local upstream')
+        stream_request = urllib.request.Request('http://litellm:4000/v1/chat/completions',
+                                                data=json.dumps({**request, 'stream': True}).encode(),
+                                                headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
+        with opener.open(stream_request, timeout=15) as response:
+            stream = response.read().decode()
+            expect(response.status == 200 and 'text/event-stream' in response.headers.get('Content-Type', '')
+                   and 'local fixture' in stream and 'data: [DONE]' in stream, 'virtual key streaming chat')
         expect(call('/v1/chat/completions', team, request)[0] == 200, 'provisioned service virtual key')
         expect(call('/key/delete', master, {'keys': [key]})[0] == 200, 'key revoked')
         expect(call('/v1/models', key)[0] in (401, 403), 'revoked key rejected')
@@ -61,7 +68,7 @@ if __name__ == '__main__':
         while time.monotonic() < deadline:
             status, error = call('/v1/chat/completions', budget, request)
             detail = error.get('error', {})
-            if status in (400, 401, 402, 403, 429) and 'budget' in str(detail).lower():
+            if status in (400, 401, 402, 403, 422, 429) and detail.get('type') == 'budget_exceeded':
                 rejected = True
                 break
             time.sleep(0.25)

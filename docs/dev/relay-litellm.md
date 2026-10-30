@@ -37,4 +37,14 @@ node scripts/beta-ui/runner.mjs litellm --state D:\auriga-beta-example --origin 
 
 然后沿 Beta 原流程启动。命令只保存 Origin 与秘密文件路径，不取用生产密钥；未配置 LiteLLM 时 Beta 不提供中转站。原生 Beta 的端口发布仅用于本机调试，公开栈无需开放 4000。
 
-????? LiteLLM ?????`node deploy/nas/litellm/verify.mjs`???????? Docker context ????????? project ????????????????????? project????????????? LiteLLM ?????? Auriga ??? gateway ?????
+独立 LiteLLM 验收：运行 `node deploy/nas/litellm/verify.mjs`。脚本只接受本机 Docker socket，创建随机 project，使用本地假上游，并在结束时清理自己的容器和卷；这项检查不覆盖 Auriga 管理员会话或 gateway 成员身份链路。
+
+完整入口验收使用 `deploy/compose/scripts/verify-relay.mjs`。先按公开流程准备并启动全新的一次性本机栈，再将 `scripts/relay-fixture.yml` 中的假上游加入该测试 project。运行：
+
+```sh
+node deploy/compose/scripts/verify-relay.mjs \
+  --materials /path/to/test-stack/deploy/compose/var \
+  --ca /path/to/test-stack/browser-ca.crt
+```
+
+`--ca` 仅供当前进程验证本机测试证书；受信任 HTTPS 可省略。脚本从该栈秘密文件读取应急账号与 master key，创建临时角色、成员、模型及虚拟 Key，只输出检查名称；它会更改测试栈数据，应在验收完成后销毁该一次性栈。检查覆盖管理员与普通成员 UI、外部调用与管理边界，以及真实 IAM 原生设备协议签发的 AI 短票和成员用量归属。该协议检查不启动 DSH 插件进程。
