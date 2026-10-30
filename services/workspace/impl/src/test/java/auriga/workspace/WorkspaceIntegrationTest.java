@@ -412,6 +412,44 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void managedModelMaterialsAreClearedOnStopAndDelete() throws Exception {
+    for (String action : List.of("stop", "delete")) {
+      UUID id = managedFixture();
+      TenantContext.run(
+          tenant,
+          () -> {
+            store.tx(
+                () -> {
+                  byte[] encrypted =
+                      managedCrypto.encrypt(
+                          "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                          tenant + "/managed-model/" + id);
+                  store.jdbc.update(
+                      "UPDATE instance SET managed_model_credential=? WHERE tenant_id=? AND id=?",
+                      encrypted,
+                      tenant,
+                      id);
+                  var row = store.instance(id);
+                  var spec = WorkspaceService.spec(row);
+                  service.saveSpec(
+                      row, spec.toBuilder().setGeneration(spec.getGeneration() + 1).build());
+                  assertTrue(
+                      WorkspaceService.spec(store.instance(id)).getSecrets().hasModelCredential());
+                  return null;
+                });
+            if (action.equals("stop")) service.operate(id, actor(), "stop");
+            else new WorkspaceAdmin(service, inputs).delete(id, false, owner);
+            var stopped =
+                store.tx(
+                    () ->
+                        store.one("SELECT * FROM instance WHERE tenant_id=? AND id=?", tenant, id));
+            assertNull(stopped.get("managed_model_credential"), action);
+            assertFalse(WorkspaceService.spec(stopped).getSecrets().hasModelCredential(), action);
+          });
+    }
+  }
+
+  @Test
   void managedModelDiscoveryFailureDoesNotPersistCredentials() throws Exception {
     UUID id = managedFixture();
     var models =
@@ -419,19 +457,14 @@ class WorkspaceIntegrationTest {
             service,
             managedCrypto,
             WorkspaceService.JSON.createObjectNode().put("modelBaseUrl", "file:///ai/v1"));
+    assertFalse(models.enabled());
+    assertEquals("disabled_invalid_installation", models.state());
     TenantContext.run(
         tenant,
         () -> {
-          assertEquals(
-              "common.unavailable",
-              assertThrows(
-                      AurigaException.class,
-                      () ->
-                          models.reconcile(
-                              store.tx(() -> store.instance(id)),
-                              managedResponse().toBuilder().setModelCredential("invalid").build()))
-                  .errorCode()
-                  .code());
+          models.reconcile(
+              store.tx(() -> store.instance(id)),
+              managedResponse().toBuilder().setModelCredential("invalid").build());
           var row = store.tx(() -> store.instance(id));
           assertNull(row.get("managed_model_credential"));
           assertFalse(WorkspaceService.spec(row).getSecrets().hasModelCredential());

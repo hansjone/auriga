@@ -18,6 +18,7 @@ public final class WorkspaceManagedNetwork {
   private final WorkspaceCrypto crypto;
   private final ManagedDeviceCredentials devices;
   private final ObjectNode installation;
+  private final WorkspaceManagedModels models;
 
   public WorkspaceManagedNetwork(
       WorkspaceService service,
@@ -28,6 +29,7 @@ public final class WorkspaceManagedNetwork {
     this.crypto = crypto;
     this.devices = devices;
     this.installation = installation.deepCopy();
+    this.models = new WorkspaceManagedModels(service, crypto, installation);
   }
 
   public void tick() {
@@ -76,7 +78,7 @@ public final class WorkspaceManagedNetwork {
                   .setCredentialVersion(version)
                   .build());
       try {
-        new WorkspaceManagedModels(service, crypto, installation).reconcile(row, response);
+        models.reconcile(row, response);
       } catch (RuntimeException unavailable) {
         org.slf4j.LoggerFactory.getLogger(getClass())
             .warn("Managed model provisioning deferred instance={}", id);

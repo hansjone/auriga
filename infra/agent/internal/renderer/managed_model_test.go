@@ -2,15 +2,19 @@ package renderer_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"gopkg.in/yaml.v3"
 )
 
 func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
@@ -48,6 +52,59 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 		t.Fatal("native provider missing")
 	}
 	oldDigest := result.Digest
+	if runtimeRoot := os.Getenv("AURIGA_DSH_MODEL_RUNTIME"); runtimeRoot != "" {
+		ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "node", "testdata/dsh-model-probe.mjs", runtimeRoot, result.CordisPatchFile, opt.MetaDir, t.TempDir())
+		if fixture := os.Getenv("AURIGA_PI_AI_REQUEST_FIXTURE"); fixture != "" {
+			cmd.Args = append(cmd.Args, fixture)
+		}
+		for _, item := range os.Environ() {
+			name, _, _ := strings.Cut(item, "=")
+			name = strings.ToUpper(name)
+			if !strings.HasPrefix(name, "AURIGA_") && !strings.HasPrefix(name, "DSH_") {
+				cmd.Env = append(cmd.Env, item)
+			}
+		}
+		output, probeErr := cmd.CombinedOutput()
+		t.Logf("native model module probe: %s", output)
+		if probeErr != nil {
+			t.Fatal(probeErr)
+		}
+	}
+	var rows []map[string]any
+	if err = yaml.Unmarshal(patch, &rows); err != nil {
+		t.Fatal(err)
+	}
+	var provider map[string]any
+	for _, row := range rows {
+		if row["id"] == "llm-pi-ai" {
+			provider = row["config"].(map[string]any)["providers"].(map[string]any)["auriga-managed"].(map[string]any)
+		}
+	}
+	if provider == nil {
+		t.Fatal("native provider row missing")
+	}
+	compat, ok := provider["compat"].(map[string]any)
+	if !ok || compat["supportsStore"] != false {
+		t.Fatal("store must be disabled for the relay")
+	}
+	if provider["apiKeyEnv"] != "AURIGA_MANAGED_MODEL_KEY" || provider["headers"] != nil {
+		t.Fatal("configuration must contain only a credential reference")
+	}
+	keysPath := filepath.Join(opt.MetaDir, "model-keys.json")
+	assertSecretRestricted(t, keysPath)
+	keysRaw, err := os.ReadFile(keysPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys struct {
+		Version int               `json:"version"`
+		Refs    map[string]string `json:"refs"`
+	}
+	if json.Unmarshal(keysRaw, &keys) != nil || keys.Version != 1 || keys.Refs["AURIGA_MANAGED_MODEL_KEY"] != credential {
+		t.Fatal("native credential document mismatch")
+	}
 	credential = strings.TrimSuffix(credential, strings.Repeat("a", 43)) + strings.Repeat("b", 43)
 	material["credential"] = credential
 	raw, err = json.Marshal(material)
@@ -84,5 +141,8 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	}
 	if _, err = os.Stat(tokenPath); !os.IsNotExist(err) {
 		t.Fatal("revoked model secret retained")
+	}
+	if _, err = os.Stat(keysPath); !os.IsNotExist(err) {
+		t.Fatal("revoked native credential retained")
 	}
 }

@@ -27,6 +27,7 @@ const (
 	ContainerAIGatewayToken   = ContainerMetaRoot + "/ai-gateway.token"
 	ContainerDeviceCredential = ContainerMetaRoot + "/device-credential.json"
 	ContainerModelCredential  = ContainerMetaRoot + "/model-credential.json"
+	ContainerModelKeys        = ContainerMetaRoot + "/model-keys.json"
 	ContainerEnvFile          = ContainerMetaRoot + "/env"
 	ContainerCordisPatch      = ContainerMetaRoot + "/cordis.patch.yml"
 	ContainerPackageJSON      = ContainerMetaRoot + "/package.json"
@@ -115,12 +116,25 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	modelPath := filepath.Join(opt.MetaDir, "model-credential.json")
+	modelKeysPath := filepath.Join(opt.MetaDir, "model-keys.json")
 	if model != nil {
 		if err := writeAtomic(modelPath, modelRaw, 0o600, restrict, opt); err != nil {
 			return Result{}, err
 		}
+		keys, err := json.Marshal(map[string]any{"version": 1, "refs": map[string]string{managedModelKeyRef: model.Credential}, "records": map[string]any{}})
+		if err != nil {
+			return Result{}, err
+		}
+		if err := writeAtomic(modelKeysPath, keys, 0o600, restrict, opt); err != nil {
+			return Result{}, err
+		}
 	} else if err := os.Remove(modelPath); err != nil && !os.IsNotExist(err) {
 		return Result{}, err
+	}
+	if model == nil {
+		if err := os.Remove(modelKeysPath); err != nil && !os.IsNotExist(err) {
+			return Result{}, err
+		}
 	}
 	if len(deviceCredential) > 0 {
 		if err := writeAtomic(devicePath, deviceCredential, 0o600, restrict, opt); err != nil {
@@ -168,7 +182,7 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 
 	digestPaths := []string{pkgPath, cordisPath, keysPath, envPath, tokenPath}
 	if model != nil {
-		digestPaths = append(digestPaths, modelPath)
+		digestPaths = append(digestPaths, modelPath, modelKeysPath)
 	}
 	if len(deviceCredential) > 0 {
 		digestPaths = append(digestPaths, devicePath)

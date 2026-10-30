@@ -23,6 +23,9 @@ var managedSecret = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 const platformTenant = "00000000-0000-0000-0000-000000000000"
 
+// IAM owns the 300s lease; permit bounded cross-host clock skew, never expired leases.
+const managedLeaseClockSkew = 5 * time.Second
+
 type fault string
 
 func (e fault) Error() string { return string(e) }
@@ -103,7 +106,7 @@ func (a *Authority) Check(ctx context.Context, raw string) (*Identity, error) {
 	if !verified.Active || verified.TenantId != claims.Tenant || verified.AccountId != claims.Subject || verified.DeviceId != claims.Device || end == nil || !end.IsValid() || !end.AsTime().After(a.now()) {
 		return nil, fault("common.unauthenticated")
 	}
-	if managed && end.AsTime().After(a.now().Add(300*time.Second)) || !managed && end.AsTime().After(claims.ExpiresAt.Time) {
+	if managed && end.AsTime().After(a.now().Add(300*time.Second+managedLeaseClockSkew)) || !managed && end.AsTime().After(claims.ExpiresAt.Time) {
 		return nil, fault("common.unauthenticated")
 	}
 	member, e := a.members.GetMember(ctx, &org.GetMemberRequest{TenantId: verified.TenantId, AccountId: verified.AccountId})

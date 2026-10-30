@@ -39,6 +39,7 @@ var reservedRows = map[string]struct{}{
 	"web-runtime": {},
 	"connection":  {},
 	"llm-pi-ai":   {},
+	"credentials": {},
 }
 
 // Plugin config keys the renderer owns.
@@ -177,6 +178,7 @@ func buildCordisPatch(spec *nodev1.InstanceSpec, opt Options, model *managedMode
 	}
 	if model != nil {
 		rows = append(rows, managedModelRow(model))
+		rows = append(rows, map[string]any{"id": "credentials", "config": map[string]any{"path": ContainerModelKeys, "watch": false}})
 	}
 	for _, row := range overrideOrder {
 		rows = append(rows, map[string]any{"id": row, "config": overrides[row]})

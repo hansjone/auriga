@@ -216,7 +216,7 @@ func TestManagedModelKeyUsesExactOnlineAuthorityAndMemberAccounting(t *testing.T
 	wantCode(t, err, "common.unauthenticated")
 	s.mu.Lock()
 	s.verify.Active = true
-	s.verify.ExpiresAt = timestamppb.New(s.now.Add(301 * time.Second))
+	s.verify.ExpiresAt = timestamppb.New(s.now.Add(306 * time.Second))
 	s.mu.Unlock()
 	_, err = a.Check(t.Context(), s.raw)
 	wantCode(t, err, "common.unauthenticated")

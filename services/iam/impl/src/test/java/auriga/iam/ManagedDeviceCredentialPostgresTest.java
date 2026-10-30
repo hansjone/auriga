@@ -188,6 +188,9 @@ class ManagedDeviceCredentialPostgresTest {
           assertNull(
               managed.modelAccess(
                   model.replace(instance.toString(), UUID.randomUUID().toString())));
+          assertNull(
+              managed.modelAccess(
+                  model.replace(issued.getDeviceId(), UUID.randomUUID().toString())));
           TenantContext.run(UUID.randomUUID(), () -> denied(() -> managed.modelAccess(model)));
           binding = binding.toBuilder().setCredentialVersion(2).build();
           assertNull(managed.modelAccess(model));
@@ -202,6 +205,35 @@ class ManagedDeviceCredentialPostgresTest {
                   .setCredentialVersion(2)
                   .build());
           assertNull(managed.modelAccess(next.getModelCredential()));
+        });
+  }
+
+  @Test
+  void modelCredentialRejectsRevokedDeviceWithLiveLineage() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          store.tx(
+              () -> {
+                var device = store.get("device", issued.getDeviceId(), true);
+                device.put("revoked", true);
+                store.save("device", device);
+                assertFalse(
+                    store
+                        .get("managed_device", instance.toString(), false)
+                        .path("revoked")
+                        .asBoolean());
+                return null;
+              });
+          assertNull(managed.modelAccess(issued.getModelCredential()));
+          assertFalse(
+              store.tx(
+                  () ->
+                      store
+                          .get("managed_device", instance.toString(), false)
+                          .path("revoked")
+                          .asBoolean()));
         });
   }
 

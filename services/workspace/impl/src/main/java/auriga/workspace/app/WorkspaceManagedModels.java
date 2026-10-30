@@ -19,6 +19,7 @@ public final class WorkspaceManagedModels {
   private final WorkspaceService service;
   private final WorkspaceCrypto crypto;
   private final String baseUrl;
+  private final boolean enabled;
 
   public WorkspaceManagedModels(
       WorkspaceService service, WorkspaceCrypto crypto, ObjectNode installation) {
@@ -28,9 +29,37 @@ public final class WorkspaceManagedModels {
         installation
             .path("modelBaseUrl")
             .asString(installation.path("platformOrigin").asString() + "/ai/v1");
+    this.enabled = validBaseUrl(baseUrl);
+    if (!enabled)
+      org.slf4j.LoggerFactory.getLogger(getClass())
+          .warn(
+              "Managed model capability state=disabled_invalid_installation reason=invalid_model_base_url");
+  }
+
+  public boolean enabled() {
+    return enabled;
+  }
+
+  public String state() {
+    return enabled ? "enabled" : "disabled_invalid_installation";
+  }
+
+  private static boolean validBaseUrl(String value) {
+    try {
+      URI uri = URI.create(value);
+      return ("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
+          && uri.getHost() != null
+          && uri.getUserInfo() == null
+          && uri.getRawQuery() == null
+          && uri.getRawFragment() == null
+          && "/ai/v1".equals(uri.getRawPath());
+    } catch (IllegalArgumentException invalid) {
+      return false;
+    }
   }
 
   public void reconcile(Map<String, Object> row, IssueManagedDeviceResponse response) {
+    if (!enabled) return;
     if (response.getModelCredential().isEmpty() && row.get("managed_model_credential") == null)
       return;
     if (!response.getModelCredential().isEmpty() && row.get("managed_model_credential") != null)
@@ -73,13 +102,6 @@ public final class WorkspaceManagedModels {
 
   private ObjectNode catalog(IssueManagedDeviceResponse response, Map<String, Object> row) {
     try {
-      URI uri = URI.create(baseUrl);
-      if (!("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
-          || uri.getHost() == null
-          || uri.getUserInfo() != null
-          || uri.getQuery() != null
-          || uri.getFragment() != null
-          || !"/ai/v1".equals(uri.getPath())) throw new IllegalArgumentException();
       try (var client =
           HttpClient.newBuilder()
               .connectTimeout(Duration.ofSeconds(5))
