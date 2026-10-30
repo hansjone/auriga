@@ -279,7 +279,7 @@ export async function runPhase1(options, config, dependencies = {}) {
         });
       if (!config.healthChecks?.length || !config.healthInventoryComplete)
         throw new Skip(
-          '公开IAM探活已检查；缺少完整healthChecks清单及healthInventoryComplete，不能声称全部服务healthy',
+          '已完成列出的健康探测；缺少完整healthChecks清单及healthInventoryComplete，不能声称全部服务healthy',
         );
       if (!config.relay?.baseUrl)
         throw new Skip('基础服务健康检查通过；LiteLLM未部署或未配置');

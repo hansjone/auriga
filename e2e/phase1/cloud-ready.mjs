@@ -17,6 +17,7 @@ import {
   otpField,
 } from './checks.mjs';
 import { realImageDigest } from '../lib/real-dsh.mjs';
+import { openAurigaPanel } from './dsh-entry.mjs';
 
 export function cloudReadyJourney(options, config, host) {
   const compose = config.composeDir ?? process.env.AURIGA_PHASE1_COMPOSE_DIR;
@@ -464,10 +465,7 @@ export function cloudReadyJourney(options, config, host) {
         { timeout: 30_000 },
       );
       report.operation = 'open-plugin-panel';
-      await page.getByRole('button', { name: 'Auriga', exact: true }).click();
-      report.operation = 'wait-plugin-panel';
-      await page.locator('auriga-team-panel').waitFor({ state: 'visible' });
-      return {};
+      return openAurigaPanel(page);
     });
     await step('plugin-login', async () => {
       const pluginURL = new URL('auriga/bootstrap', page.url());

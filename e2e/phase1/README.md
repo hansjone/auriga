@@ -58,6 +58,8 @@ LiteLLM 未配置时，①显示已通过的基础检查和 LiteLLM SKIP，整�
 
 ③ 原门户按钮发 open，同成员第二个门户页只读观察本人实例 `ownerId`、running/pending_restart、ready=true；按 access 配置核准确实例入口，点击真实 DSH 的 Auriga 侧栏，面板必须可见。随后断言真实 bootstrap 协议、插件版本、managed context、资源界面与无二次口令表单；无 cookie 浏览器访问同一插件入口必须 401。已内置这些实际断言，不再接受 `cloud.loggedInSelector` 代替登录证据。它不证明 Team 入网或云端/桌面互发。
 
+DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮挡侧栏。脚本仅通过对应对话框的“继续 / Continue”和“稍后配置 / Configure later”完成公开引导，不写模型密钥，不调用模型；未知对话框保持阻挡。③还要求部署已提供签名面板静态文件、清单及独立的面板验签公钥；缺失时 bootstrap/面板加载记 FAIL，不放宽验签或用普通连接标签替代。
+
 配置须提供公开部署生成的 `access.json`（以 `access` 对象提供）和 `admin`；也可仅用 `composeDir` 指向同一部署的 compose 目录，自动读取 `var/access.json`、真实镜像元数据和应急 enrollment。Windows 可读 WSL UNC 路径，秘密不进入报告。
 
 `shared` 默认为 true：复用在线、可调度、Docker、template=real-dsh-e2e 的节点，不改节点。全新部署设 false：脚本要求零节点，经管理台签加入令牌写同一 composeDir 的既有 var/join/token，等待上线再设模板标签。只有不验节点的独立部署可设 `nodeEnrollment:false`，其结果不能冒节点加入通过。
