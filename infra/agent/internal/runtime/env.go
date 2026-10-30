@@ -20,6 +20,7 @@ var platformEnvKeys = map[string]struct{}{
 	"AURIGA_TENANT_ID":           {},
 	"AURIGA_PLATFORM_URL":        {},
 	"AURIGA_IDENTITY_KEYS_FILE":  {},
+	"AURIGA_PANEL_KEYS_FILE":     {},
 	"AURIGA_INSTANCE_TOKEN_FILE": {},
 	"DSH_HOME":                   {},
 	"HTTPS_PROXY":                {},
