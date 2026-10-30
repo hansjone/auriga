@@ -9,7 +9,12 @@ the old file. Its bytes participate in the rendered digest so rotation reaches
 an already running instance. The managed plugin reuses the desktop device network
 provider; `instance.token` remains exclusively for instance control.
 
-`cordis.patch.yml` is a DSH Loader patch list (`dsh web --patch`): an `insert` of the `auriga-dsh` plugin row (config: protected `browserOrigin`, spec patches `plugins.auriga-dsh.*`) and one `@deepseek-ai/dsh-mcp-client` row per team MCP server (token read by a `!!js` file expression, never inlined), then `webserver` (bind `0.0.0.0` for Docker, `127.0.0.1` otherwise) and `web-runtime` (no URL print, `trustedHosts`) overrides, then spec patches `plugins.<row>.<key…>` as whole-config row overrides. Renderer-owned rows and keys cannot be patched; model providers fail closed until they are written into the user settings document.
+`Secrets.model_credential` is separate trusted model material. It is validated
+against the instance identity and becomes `model-credential.json` (0600).
+Only this material can configure the native `llm-pi-ai` managed route; the
+Authorization expression reads its file and no key enters public config.
+
+`cordis.patch.yml` is a DSH Loader patch list (`dsh web --patch`): an `insert` of the `auriga-dsh` plugin row (config: protected `browserOrigin`, spec patches `plugins.auriga-dsh.*`) and one `@deepseek-ai/dsh-mcp-client` row per team MCP server (token read by a `!!js` file expression, never inlined), then `webserver` (bind `0.0.0.0` for Docker, `127.0.0.1` otherwise) and `web-runtime` (no URL print, `trustedHosts`) overrides, then spec patches `plugins.<row>.<key…>` as whole-config row overrides. Renderer-owned rows and keys cannot be patched; arbitrary Profile model providers fail closed. Only separately sealed managed model material can configure the renderer-owned `llm-pi-ai` row.
 
 The managed plugin row uses both `id: auriga-dsh` and `name: auriga-dsh`.
 DSH's browser collector accepts package-root names; the Node subpath

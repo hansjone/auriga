@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ManagedModelCredential",
+  "description": "Workspace-only model material, HPKE-bound to the specification generation and written as a private 0600 file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tenantId", "ownerId", "instanceId", "credentialVersion", "credential", "baseUrl", "models"],
+  "properties": {
+    "tenantId": { "type": "string", "format": "uuid" },
+    "ownerId": { "type": "string", "format": "uuid" },
+    "instanceId": { "type": "string", "format": "uuid" },
+    "credentialVersion": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "credential": { "type": "string", "pattern": "^amc\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[0-9a-f-]{36}\\.[A-Za-z0-9_-]{43}$" },
+    "baseUrl": { "type": "string", "format": "uri", "pattern": "^https?://[^/?#@]+/ai/v1$" },
+    "models": {
+      "type": "array", "minItems": 1, "maxItems": 256,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id"],
+        "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 200 } }
+      }
+    }
+  }
+}

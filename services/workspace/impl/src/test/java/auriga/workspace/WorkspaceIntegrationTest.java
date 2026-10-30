@@ -355,6 +355,90 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void managedModelsDiscoverAllowedPoolSealSeparatelyAndRemoveOnPermissionLoss() throws Exception {
+    UUID id = managedFixture();
+    String credential = "amc." + UUID.randomUUID();
+    var response = managedResponse().toBuilder().setModelCredential(credential).build();
+    var server =
+        com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    server.createContext(
+        "/ai/v1/models",
+        exchange -> {
+          assertEquals(
+              "Bearer " + credential, exchange.getRequestHeaders().getFirst("Authorization"));
+          calls.incrementAndGet();
+          byte[] body =
+              "{\"data\":[{\"id\":\"pool-a\"},{\"id\":\"pool-b\"}]}"
+                  .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, body.length);
+          try (var out = exchange.getResponseBody()) {
+            out.write(body);
+          }
+          exchange.close();
+        });
+    server.start();
+    try {
+      var installation =
+          WorkspaceService.JSON
+              .createObjectNode()
+              .put("modelBaseUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/ai/v1");
+      var models = new WorkspaceManagedModels(service, managedCrypto, installation);
+      TenantContext.run(
+          tenant,
+          () -> {
+            var row = store.tx(() -> store.instance(id));
+            models.reconcile(row, response);
+            row = store.tx(() -> store.instance(id));
+            assertNotNull(row.get("managed_model_credential"));
+            assertTrue(WorkspaceService.spec(row).getSecrets().hasModelCredential());
+            assertFalse(WorkspaceService.spec(row).getSecrets().hasDeviceCredential());
+            models.reconcile(row, response);
+            assertEquals(1, calls.get());
+            models.reconcile(row, response.toBuilder().clearModelCredential().build());
+            row = store.tx(() -> store.instance(id));
+            assertNull(row.get("managed_model_credential"));
+            assertFalse(WorkspaceService.spec(row).getSecrets().hasModelCredential());
+            // A delayed pool lookup from the prior lifecycle must not install an old key.
+            service.operate(id, actor(), "restart");
+            models.reconcile(row, response);
+            row = store.tx(() -> store.instance(id));
+            assertNull(row.get("managed_model_credential"));
+            assertFalse(WorkspaceService.spec(row).getSecrets().hasModelCredential());
+          });
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
+  void managedModelDiscoveryFailureDoesNotPersistCredentials() throws Exception {
+    UUID id = managedFixture();
+    var models =
+        new WorkspaceManagedModels(
+            service,
+            managedCrypto,
+            WorkspaceService.JSON.createObjectNode().put("modelBaseUrl", "file:///ai/v1"));
+    TenantContext.run(
+        tenant,
+        () -> {
+          assertEquals(
+              "common.unavailable",
+              assertThrows(
+                      AurigaException.class,
+                      () ->
+                          models.reconcile(
+                              store.tx(() -> store.instance(id)),
+                              managedResponse().toBuilder().setModelCredential("invalid").build()))
+                  .errorCode()
+                  .code());
+          var row = store.tx(() -> store.instance(id));
+          assertNull(row.get("managed_model_credential"));
+          assertFalse(WorkspaceService.spec(row).getSecrets().hasModelCredential());
+        });
+  }
+
+  @Test
   void managedPermanentDenialDoesNotBlockStartOrRestartOrRetryForever() throws Exception {
     var devices = org.mockito.Mockito.mock(auriga.iam.api.ManagedDeviceCredentials.class);
     org.mockito.Mockito.when(devices.issue(org.mockito.ArgumentMatchers.any()))

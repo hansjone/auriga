@@ -32,6 +32,7 @@ class ManagedDeviceCredentialPostgresTest {
   final InstanceAiAuthorization permissions = mock(InstanceAiAuthorization.class);
   IamManagedDevices managed;
   DeviceAccessAuthority authority;
+  DeviceAiAccessAuthority aiAuthority;
   GetManagedInstanceBindingResponse binding;
 
   @BeforeAll
@@ -111,6 +112,8 @@ class ManagedDeviceCredentialPostgresTest {
             clock);
     sessions.managedValidator(managed::validSession);
     authority = new DeviceAccessAuthority(store, sessions, tokens);
+    aiAuthority =
+        new DeviceAiAccessAuthority(authority, tokens, permissions, clock).managedModels(managed);
     TenantContext.run(
         tenant,
         () ->
@@ -149,6 +152,84 @@ class ManagedDeviceCredentialPostgresTest {
   void denied(Runnable action) {
     assertEquals(
         "common.forbidden", assertThrows(AurigaException.class, action::run).errorCode().code());
+  }
+
+  @Test
+  void modelCredentialIsSeparateAndBoundToCurrentInstanceMemberAndGeneration() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          String model = issued.getModelCredential();
+          assertTrue(model.startsWith("amc."));
+          assertNotEquals(issued.getCredential(), model);
+          assertEquals(model, managed.issue(request(1)).getModelCredential());
+          assertEquals(owner.toString(), managed.modelAccess(model).account());
+          assertNotNull(aiAuthority.access(model));
+          assertNull(
+              managed.modelAccess(
+                  model.substring(0, model.length() - 1) + (model.endsWith("a") ? "b" : "a")));
+          binding = binding.toBuilder().setActive(false).build();
+          assertNull(managed.modelAccess(model));
+          binding = binding.toBuilder().setActive(true).build();
+          assertNull(authority.access(model));
+          denied(
+              () ->
+                  managed.exchange(
+                      Map.of(
+                          "instance_id",
+                          instance.toString(),
+                          "owner_id",
+                          owner.toString(),
+                          "credential",
+                          model)));
+          assertNull(
+              managed.modelAccess(model.replace(owner.toString(), UUID.randomUUID().toString())));
+          assertNull(
+              managed.modelAccess(
+                  model.replace(instance.toString(), UUID.randomUUID().toString())));
+          TenantContext.run(UUID.randomUUID(), () -> denied(() -> managed.modelAccess(model)));
+          binding = binding.toBuilder().setCredentialVersion(2).build();
+          assertNull(managed.modelAccess(model));
+          var next = managed.issue(request(2));
+          assertNotEquals(model, next.getModelCredential());
+          assertNull(managed.modelAccess(model));
+          assertNotNull(managed.modelAccess(next.getModelCredential()));
+          managed.revoke(
+              RevokeManagedDeviceRequest.newBuilder()
+                  .setTenantId(tenant.toString())
+                  .setInstanceId(instance.toString())
+                  .setCredentialVersion(2)
+                  .build());
+          assertNull(managed.modelAccess(next.getModelCredential()));
+        });
+  }
+
+  @Test
+  void modelCredentialExpiresAndChecksCurrentModelPermissionAndMembership() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          var allowed =
+              permissions.getEffectivePermissions(
+                  GetEffectivePermissionsRequest.getDefaultInstance());
+          when(permissions.getEffectivePermissions(any()))
+              .thenReturn(
+                  allowed.toBuilder()
+                      .clearPermissions()
+                      .addPermissions("auriga.connect.collab.use")
+                      .build());
+          assertNull(managed.modelAccess(issued.getModelCredential()));
+          assertEquals("", managed.issue(request(1)).getModelCredential());
+          when(permissions.getEffectivePermissions(any()))
+              .thenReturn(
+                  allowed.toBuilder().setStatus(MemberStatus.MEMBER_STATUS_OFFBOARDED).build());
+          assertNull(managed.modelAccess(issued.getModelCredential()));
+          when(permissions.getEffectivePermissions(any())).thenReturn(allowed);
+          clock.now = clock.now.plus(Duration.ofDays(31));
+          assertNull(managed.modelAccess(issued.getModelCredential()));
+        });
   }
 
   @Test

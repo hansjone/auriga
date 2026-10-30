@@ -17,6 +17,12 @@ public final class DeviceAiAccessAuthority {
   private final TokenService tokens;
   private final InstanceAiAuthorization authorization;
   private final Clock clock;
+  private IamManagedDevices managed;
+
+  public DeviceAiAccessAuthority managedModels(IamManagedDevices value) {
+    managed = java.util.Objects.requireNonNull(value);
+    return this;
+  }
 
   public DeviceAiAccessAuthority(
       DeviceAccessAuthority devices,
@@ -31,6 +37,7 @@ public final class DeviceAiAccessAuthority {
 
   public DeviceAccessAuthority.Identity access(String raw) {
     if (raw == null || raw.isEmpty() || raw.length() > 16384) return null;
+    if (raw.startsWith("amc.")) return managed == null ? null : managed.modelAccess(raw);
     ObjectNode claims;
     try {
       // Reuse the authoritative signature, schema, issuer, typ, alg and kid validation.

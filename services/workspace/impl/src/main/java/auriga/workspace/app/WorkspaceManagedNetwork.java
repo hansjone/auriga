@@ -75,6 +75,12 @@ public final class WorkspaceManagedNetwork {
                   .setOwnerId(row.get("owner_id").toString())
                   .setCredentialVersion(version)
                   .build());
+      try {
+        new WorkspaceManagedModels(service, crypto, installation).reconcile(row, response);
+      } catch (RuntimeException unavailable) {
+        org.slf4j.LoggerFactory.getLogger(getClass())
+            .warn("Managed model provisioning deferred instance={}", id);
+      }
       if (Objects.equals(row.get("managed_synced_version"), row.get("managed_credential_version"))
           && row.get("managed_credential") != null) {
         if (!"ready".equals(row.get("managed_network_state"))) {
@@ -93,6 +99,7 @@ public final class WorkspaceManagedNetwork {
         return;
       }
       var file = installation.deepCopy();
+      file.remove("modelBaseUrl");
       file.put("tenantId", store.tenant().toString());
       file.put("ownerId", row.get("owner_id").toString());
       file.put("instanceId", id.toString());

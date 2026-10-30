@@ -19,6 +19,7 @@ import (
 )
 
 var uuid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var managedSecret = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 const platformTenant = "00000000-0000-0000-0000-000000000000"
 
@@ -74,7 +75,17 @@ func (a *Authority) Check(ctx context.Context, raw string) (*Identity, error) {
 		return nil, fault("common.unauthenticated")
 	}
 	claims := new(routeClaims)
-	if _, _, e := jwt.NewParser().ParseUnverified(raw, claims); e != nil || !uuid.MatchString(claims.Tenant) || claims.Tenant == platformTenant || !uuid.MatchString(claims.Subject) || !uuid.MatchString(claims.Device) || claims.ExpiresAt == nil {
+	managed := strings.HasPrefix(raw, "amc.")
+	if managed {
+		parts := strings.Split(raw, ".")
+		if len(parts) != 6 || !uuid.MatchString(parts[3]) || !managedSecret.MatchString(parts[5]) {
+			return nil, fault("common.unauthenticated")
+		}
+		claims.Tenant, claims.Subject, claims.Device = parts[1], parts[2], parts[4]
+	} else if _, _, e := jwt.NewParser().ParseUnverified(raw, claims); e != nil || claims.ExpiresAt == nil {
+		return nil, fault("common.unauthenticated")
+	}
+	if !uuid.MatchString(claims.Tenant) || claims.Tenant == platformTenant || !uuid.MatchString(claims.Subject) || !uuid.MatchString(claims.Device) {
 		return nil, fault("common.unauthenticated")
 	}
 	ctx = team.WithActor(ctx, &collab.Actor{TenantId: claims.Tenant})
@@ -89,7 +100,10 @@ func (a *Authority) Check(ctx context.Context, raw string) (*Identity, error) {
 		return nil, fault("ai.budget_unavailable")
 	}
 	end := verified.GetExpiresAt()
-	if !verified.Active || verified.TenantId != claims.Tenant || verified.AccountId != claims.Subject || verified.DeviceId != claims.Device || end == nil || !end.IsValid() || !end.AsTime().After(a.now()) || end.AsTime().After(claims.ExpiresAt.Time) {
+	if !verified.Active || verified.TenantId != claims.Tenant || verified.AccountId != claims.Subject || verified.DeviceId != claims.Device || end == nil || !end.IsValid() || !end.AsTime().After(a.now()) {
+		return nil, fault("common.unauthenticated")
+	}
+	if managed && end.AsTime().After(a.now().Add(300*time.Second)) || !managed && end.AsTime().After(claims.ExpiresAt.Time) {
 		return nil, fault("common.unauthenticated")
 	}
 	member, e := a.members.GetMember(ctx, &org.GetMemberRequest{TenantId: verified.TenantId, AccountId: verified.AccountId})

@@ -121,6 +121,11 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
             && request.getCredentialVersion() >= 1
             && request.getCredentialVersion() <= 9007199254740991L);
     require(active(request.getInstanceId(), request.getOwnerId(), request.getCredentialVersion()));
+    var modelPermissions = effective(request.getOwnerId());
+    boolean models =
+        modelPermissions != null
+            && modelPermissions.getStatus() == MemberStatus.MEMBER_STATUS_ACTIVE
+            && modelPermissions.getPermissionsList().contains(DeviceAiResource.INVOKE);
     return store.tx(
         () -> {
           store.lock("managed:" + request.getInstanceId());
@@ -140,7 +145,11 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
                 throw new AurigaException(
                     auriga.common.error.ErrorCode.of(
                         "network.revoked", 403, io.grpc.Status.Code.PERMISSION_DENIED));
-              return response(previous);
+              if (!previous.has("modelCredential")) {
+                addModelCredential(previous, request.getInstanceId());
+                store.save("managed_device", previous);
+              }
+              return response(previous, models);
             }
             retire(previous);
           }
@@ -222,13 +231,14 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
                   secrets.encrypt(
                       credential,
                       purpose(request.getInstanceId(), request.getCredentialVersion())));
+          addModelCredential(lineage, request.getInstanceId());
           if (previous == null)
             store.insert("managed_device", request.getInstanceId(), lineage, null);
           else {
             lineage.put("id", previous.path("id").asString());
             store.save("managed_device", lineage);
           }
-          return response(lineage);
+          return response(lineage, models);
         });
   }
 
@@ -236,17 +246,87 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
     return TenantContext.require() + "/managed-device/" + instance + "/" + version;
   }
 
-  private IssueManagedDeviceResponse response(ObjectNode row) {
+  private void addModelCredential(ObjectNode row, String instance) {
+    String credential =
+        "amc."
+            + TenantContext.require()
+            + "."
+            + row.path("owner").asString()
+            + "."
+            + instance
+            + "."
+            + row.path("device").asString()
+            + "."
+            + Secrets.random();
+    row.put("modelCredentialHash", Secrets.hash(credential));
+    row.put(
+        "modelCredential",
+        secrets.encrypt(credential, purpose(instance, row.path("version").asLong()) + "/model"));
+  }
+
+  private IssueManagedDeviceResponse response(ObjectNode row, boolean models) {
     return IssueManagedDeviceResponse.newBuilder()
         .setDeviceId(row.path("device").asString())
         .setCredential(
             secrets.decrypt(
                 row.path("credential").asString(),
                 purpose(row.path("id").asString(), row.path("version").asLong())))
+        .setModelCredential(
+            models
+                ? secrets.decrypt(
+                    row.path("modelCredential").asString(),
+                    purpose(row.path("id").asString(), row.path("version").asLong()) + "/model")
+                : "")
         .setExpiresAt(
             Timestamp.newBuilder()
                 .setSeconds(Instant.parse(row.path("expiresAt").asString()).getEpochSecond()))
         .build();
+  }
+
+  /** Dedicated model key admission; no OAuth grant, network token or browser session is issued. */
+  public DeviceAccessAuthority.Identity modelAccess(String raw) {
+    if (raw == null || raw.length() > 512) return null;
+    String[] parts = raw.split("\\.", -1);
+    if (parts.length != 6 || !"amc".equals(parts[0]) || !parts[5].matches("[A-Za-z0-9_-]{43}"))
+      return null;
+    for (int i = 1; i <= 4; i++) {
+      try {
+        if (!UUID.fromString(parts[i]).toString().equals(parts[i])) return null;
+      } catch (IllegalArgumentException invalid) {
+        return null;
+      }
+    }
+    tenant(parts[1]);
+    store.requireTransactionReleased();
+    boolean matches =
+        store.tx(
+            () -> {
+              var row = store.get("managed_device", parts[3], false);
+              return row != null
+                  && !row.path("revoked").asBoolean()
+                  && parts[2].equals(row.path("owner").asString())
+                  && parts[4].equals(row.path("device").asString())
+                  && clock.instant().isBefore(Instant.parse(row.path("expiresAt").asString()))
+                  && Secrets.same(row.path("modelCredentialHash").asString(), Secrets.hash(raw));
+            });
+    if (!matches) return null;
+    var authority = new DeviceAccessAuthority(store, sessions, tokens);
+    if (authority.credential(parts[1], parts[2], parts[4]) == null) return null;
+    var effective = effective(parts[2]);
+    if (effective == null
+        || effective.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
+        || !effective.getPermissionsList().contains(DeviceAiResource.INVOKE)) return null;
+    // Re-read after remote authorization, so rotation/revocation cannot revive a stale key.
+    var current = authority.credential(parts[1], parts[2], parts[4]);
+    if (current == null) return null;
+    Instant now = clock.instant();
+    if (!now.isBefore(current.expiresAt())) return null;
+    Instant lease = now.plusSeconds(300);
+    return new DeviceAccessAuthority.Identity(
+        current.tenant(),
+        current.account(),
+        current.device(),
+        current.expiresAt().isBefore(lease) ? current.expiresAt() : lease);
   }
 
   private void retire(ObjectNode lineage) {

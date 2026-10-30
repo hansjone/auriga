@@ -95,10 +95,14 @@ type IssueManagedDeviceResponse struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	// Opaque secret, retried issuance of the same live version is idempotent.
-	Credential    string                 `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Credential string                 `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
+	ExpiresAt  *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// Independent opaque model-only key. Empty when current member lacks model permission.
+	// amc.<tenant UUID>.<owner UUID>.<instance UUID>.<device UUID>.<43-char random secret>.
+	// Online verification via VerifyDeviceAiAccess only; never a network/device bearer.
+	ModelCredential string `protobuf:"bytes,4,opt,name=model_credential,json=modelCredential,proto3" json:"model_credential,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *IssueManagedDeviceResponse) Reset() {
@@ -150,6 +154,13 @@ func (x *IssueManagedDeviceResponse) GetExpiresAt() *timestamppb.Timestamp {
 		return x.ExpiresAt
 	}
 	return nil
+}
+
+func (x *IssueManagedDeviceResponse) GetModelCredential() string {
+	if x != nil {
+		return x.ModelCredential
+	}
+	return ""
 }
 
 type RevokeManagedDeviceRequest struct {
@@ -259,14 +270,15 @@ const file_auriga_iam_v1_managed_device_proto_rawDesc = "" +
 	"\bowner_id\x18\x02 \x01(\tR\aownerId\x12\x1f\n" +
 	"\vinstance_id\x18\x03 \x01(\tR\n" +
 	"instanceId\x12-\n" +
-	"\x12credential_version\x18\x04 \x01(\x04R\x11credentialVersion\"\x94\x01\n" +
+	"\x12credential_version\x18\x04 \x01(\x04R\x11credentialVersion\"\xbf\x01\n" +
 	"\x1aIssueManagedDeviceResponse\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1e\n" +
 	"\n" +
 	"credential\x18\x02 \x01(\tR\n" +
 	"credential\x129\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\x89\x01\n" +
+	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12)\n" +
+	"\x10model_credential\x18\x04 \x01(\tR\x0fmodelCredential\"\x89\x01\n" +
 	"\x1aRevokeManagedDeviceRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x1f\n" +
 	"\vinstance_id\x18\x02 \x01(\tR\n" +

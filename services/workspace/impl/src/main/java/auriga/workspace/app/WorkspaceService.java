@@ -410,7 +410,19 @@ public final class WorkspaceService {
                               token)))
               .build();
       var current = store.instance((UUID) row.get("id"));
-      var secrets = next.getSecrets().toBuilder().clearDeviceCredential();
+      var secrets = next.getSecrets().toBuilder().clearDeviceCredential().clearModelCredential();
+      if (current.get("managed_model_credential") != null
+          && next.getDesired() == DesiredState.DESIRED_STATE_RUNNING) {
+        secrets.setModelCredential(
+            WorkspaceCrypto.seal(
+                (byte[]) node.get("sealing_key"),
+                next.getInstanceId(),
+                "model_credential",
+                next.getGeneration(),
+                crypto.decrypt(
+                    (byte[]) current.get("managed_model_credential"),
+                    store.tenant() + "/managed-model/" + row.get("id"))));
+      }
       if (current.get("managed_credential") != null
           && next.getDesired() == DesiredState.DESIRED_STATE_RUNNING) {
         byte[] material =
@@ -448,7 +460,7 @@ public final class WorkspaceService {
 
   private void rotateManagedCredential(Map<String, Object> row) {
     store.jdbc.update(
-        "UPDATE instance SET managed_credential_version=managed_credential_version+1,managed_credential=NULL,managed_retry_at=?,managed_network_state='pending',managed_network_reason=NULL,managed_wait_until=? WHERE tenant_id=? AND id=?",
+        "UPDATE instance SET managed_credential_version=managed_credential_version+1,managed_credential=NULL,managed_model_credential=NULL,managed_retry_at=?,managed_network_state='pending',managed_network_reason=NULL,managed_wait_until=? WHERE tenant_id=? AND id=?",
         time(clock.instant()),
         time(clock.instant().plusSeconds(30)),
         store.tenant(),
