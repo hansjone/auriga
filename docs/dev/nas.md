@@ -173,12 +173,13 @@ sh /srv/packages/deploy-nas/scripts/admin-bootstrap.sh /srv/approved/bootstrap-r
 ```
 
 stdout 仅含 `AURIGA_BOOTSTRAP_ENVELOPE` 加密检查点，可由命令通道在本机保存。
-管理员、测试成员及轮换后的应急恢复凭据均使用 RSA-OAEP-SHA256 + AES256-GCM 封装，
+管理员、测试成员及原应急恢复凭据均使用 RSA-OAEP-SHA256 + AES256-GCM 封装，
 明文只在 helper 内存及服务端既有账号存储中存在，不写 NAS 文件、命令参数或日志。
 先封装登记的 TOTP，再提交确认；异常时保留最后密文供恢复，**不要盲目重新创建账号**。
 脚本用内置 owner 角色建立第一个正常超管，再建立 member 测试成员，各用空 cookie jar
-重新登录验证；正常管理员通过角色和节点权限检查后才按正式API轮换应急口令/TOTP，
-最后登出本次会话。原 enrollment 此后失效，妥善保管密文、收件私钥和解密后的恢复材料。
+重新登录验证；正常管理员通过角色和节点权限检查后，使用既有API登出应急会话再发布完整交接，
+最后清理本次其他会话。应急账号仍保持原来的私有、仅回环边界；保留原 enrollment，
+妥善保管密文、收件私钥和解密后的恢复材料。脚本不依赖契约中尚未实现的应急轮换接口。
 
 在本机建立隔离 Python 环境并安装固定依赖，解密到新的私有文件（不会覆盖）：
 

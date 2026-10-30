@@ -208,12 +208,18 @@ def bootstrap(access, enrollment, recipient, emit, client_type=Client, ca_file=N
         normal.request('GET', '/api/org/v1/admin/roles')
         normal.request('GET', '/api/workspace/v1/admin/nodes')
         create(normal, 'member', 'member')
-        # Only rotate after independent normal-admin login and permission checks.
-        state['emergencyRecovery'] = normal.write('/api/iam/v1/admin/emergency/rotate', {})
+        # Emergency credentials remain private and loopback-only by design.
+        # End the bootstrap session before publishing a complete handoff; do not
+        # introduce a remote-access exception or depend on an unimplemented API.
+        emergency.request('POST', '/api/iam/v1/logout', {}, {'X-Auriga-CSRF': emergency.csrf}, expected=(200, 204))
+        emergency.cookies.clear()
+        state['emergencyRecovery'] = {key: enrollment[key] for key in ('username', 'password', 'totpSecret')}
         checkpoint('complete')
         return state
     finally:
         for client in sessions:
+            if not client.cookies:
+                continue
             try:
                 token = client.csrf or next((value for key, value in client.cookies.items() if key.endswith('auriga_csrf')), None)
                 headers = {'X-Auriga-CSRF': token} if token else None

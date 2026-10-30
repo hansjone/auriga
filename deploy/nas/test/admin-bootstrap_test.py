@@ -72,14 +72,15 @@ class BootstrapTests(unittest.TestCase):
             return credentials.get('username', 'emergency')
 
         with patch.object(module, 'login', side_effect=login):
-            state = module.bootstrap({'mode': 'ip', 'adminOrigin': {}, 'portalOrigin': {}}, {}, private.public_key(), envelopes.append, client_type=Client)
+            state = module.bootstrap({'mode': 'ip', 'adminOrigin': {}, 'portalOrigin': {}}, {'username': 'fixture-emergency', 'password': base64.b64encode(__import__('os').urandom(24)).decode(), 'totpSecret': base64.b32encode(__import__('os').urandom(20)).decode()}, private.public_key(), envelopes.append, client_type=Client)
         self.assertEqual(logins, [(0, 'emergency', False), (1, 'team', True), (2, 'team', False), (3, 'team', True), (4, 'team', False)])
-        self.assertEqual(writes[-1], (2, '/api/iam/v1/admin/emergency/rotate'))
+        self.assertEqual(writes[-1], (2, '/api/org/v1/admin/invitations'))
+        self.assertFalse(any(path.endswith('/emergency/rotate') for _, path in writes))
         self.assertEqual(state['stage'], 'complete')
         self.assertEqual(module.unseal(envelopes[-1], private), state)
         self.assertNotIn(state['emergencyRecovery']['password'], json.dumps(envelopes))
 
-    def test_rotation_requires_independent_normal_admin_authorization(self):
+    def test_normal_admin_authorization_failure_never_publishes_complete_handoff(self):
         private = rsa.generate_private_key(public_exponent=65537, key_size=3072)
         created, writes, envelopes = [], [], []
 
