@@ -8,7 +8,10 @@ import {
   diagnoseNativeSession,
   loginDesktop,
 } from './cloud-desk.native.mjs';
-import { validateRunConfig } from './cloud-desk.mjs';
+import { validateRunConfig, requireTestLock } from './cloud-desk.mjs';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   accessOrigin,
   assertCloudEntry,
@@ -18,6 +21,33 @@ import {
 } from './cloud-desk.browser.mjs';
 
 const tools = [{ type: 'function', function: { name: 'auriga_send_message' } }];
+
+test('shared-stack lock accepts any exact declared owner, rejects missing/foreign locks, and permits explicit remote opt-out', async (t) => {
+  const locksDirectory = await mkdtemp(join(tmpdir(), 'auriga-lock-'));
+  t.after(() => rm(locksDirectory, { recursive: true, force: true }));
+  const cfg = {
+    sharedStackLock: {
+      locksDirectory,
+      owner: 'another-task 2026-10-30 only-test',
+    },
+  };
+  await assert.rejects(requireTestLock(cfg));
+  await mkdir(join(locksDirectory, 'compose-stack'));
+  const file = join(locksDirectory, 'compose-stack', 'owner.txt');
+  await writeFile(file, 'foreign-task');
+  await assert.rejects(requireTestLock(cfg));
+  await writeFile(file, cfg.sharedStackLock.owner + '\n');
+  await requireTestLock(cfg);
+  await assert.rejects(
+    requireTestLock({ sharedStackLock: { locksDirectory } }),
+  );
+  await assert.rejects(
+    requireTestLock({
+      sharedStackLock: { locksDirectory, owner: 'another-task' },
+    }),
+  );
+  await requireTestLock({ sharedStackLock: false });
+});
 const message = (text) => ({ role: 'user', content: text });
 const external = (marker, id = '019f0000-0000-7000-8000-000000000001') =>
   message(`[Auriga external message ${id}]\n${marker}`);

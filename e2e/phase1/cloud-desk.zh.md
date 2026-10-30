@@ -71,8 +71,12 @@ R4 复用已有成员时用 `existingCloud: { "credentialsFile": "共享栈的me
 现有实例通过真实“进入实例”按钮打开，停机实例通过“启动并进入”唤醒。
 本机示例域名模式只给本次 Chromium 设置 resolver 和明确的 direct proxy，不改系统代理或 DNS。
 
-共享栈测试前须持本任务对应的锁，结束立即释放；脚本接受R4/R5/R6“只测不重建”，
-以及已获具体授权的“R7 仅重建 platform 应用来源权威配置”锁；R7仅允许改两项来源有效期并重建platform容器，不构建镜像、不清卷。
+共享栈测试前须按当前共享规则持锁，结束立即释放。配置
+`sharedStackLock: { "locksDirectory": "共享 agent-cache/locks 的绝对路径", "owner": "owner.txt 的完整内容" }`，
+精确核对持有人，不限制任务名。也可用 `AURIGA_SHARED_STACK_LOCKS_DIR`、`AURIGA_SHARED_STACK_LOCK_OWNER`；
+目录省略时从 worktree 向祖先查找 `agent-cache/locks/compose-stack/owner.txt`，缺锁或持有人不符即拒绝。
+NAS 等远端测试在已有独立协调授权时，可显式设 `sharedStackLock:false`，不要求本机共享栈锁。
+此开关仅控制测试协调，不授予部署、重建或停止服务的权限；默认仍须声明并核对锁持有人。
 云实例禁止访问宿主私网时，可用 `fixture: { "cloudInstanceId": "同一个A实例ID" }`：
 脚本通过 Docker exec 的 stdin 在该实例临时启动仅听回环的随机端口模型服务，桌面模型另听本机回环。
 不写云端插件/配置文件，不发布端口、不修改网络隔离；私有控制键不放 argv，结束关闭两个临时服务。
@@ -87,7 +91,11 @@ HTTPS 共享栈可配置 `httpsCloud: { "credentialsFile": "本栈owner凭据文
 此分支报告 `authentication=public-iam-cookie-redirect`，不宣称浏览器 UI 已验收。
 
 第二成员可先使用 `invite-member`：`adminCredentialsFile` 指向同一测试栈管理员材料，
-`desktopMemberFile` 指向本 worktree 的私有文件（父目录须仅本人可读）。它发现真实 provider 和内置 member 角色，
+`desktopMemberFile` 指向调用方指定的私有目录中的文件。目录须预先创建且仅本人可读写，
+脚本在登录/邀请前检查父目录及已有文件，不自动收紧任意父目录，也不接受链接路径。
+Windows 目录必须禁用 ACL 继承且仅当前用户获授权（可按 `scripts/beta-ui/private.ps1` 设置）；
+新文件继承该私有 ACL 后再独立收紧并校验。Linux 检查当前 owner 及 group/other 无权限，新文件以0600独占创建。
+它发现真实 provider 和内置 member 角色，
 正常创建一次性邀请、注册及 MFA；邀请显式绑定 member 角色，避免无角色设备注册网络时返回 403。
 再次执行会保留同一成员，只通过管理员公开角色绑定接口补齐 member 角色，不重复创建账号或授管理员角色。
 

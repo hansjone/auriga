@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import https from 'node:https';
 import dns from 'node:dns';
 import { randomBytes } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, realpath, lstat } from 'node:fs/promises';
+import { resolve, dirname } from 'node:path';
+import { privatePath } from '../../scripts/beta-ui/runner.mjs';
 import { CookieJar } from '../lib/cookie-jar.mjs';
 import { createTestLookup } from './cloud-desk.dns.mjs';
 import {
@@ -223,7 +225,57 @@ export async function ensureDesktopMemberRole(admin, accountId, roleId) {
   }
 }
 
+export async function validateMemberCredentialsPath(file) {
+  const target = resolve(file);
+  const parent = dirname(target);
+  assert.equal(
+    await realpath(parent),
+    parent,
+    'member credentials parent must not contain links',
+  );
+  const check = async (path, directory) => {
+    const info = await lstat(path);
+    assert.ok(
+      directory ? info.isDirectory() : info.isFile(),
+      'member credentials require a regular private path',
+    );
+    if (process.platform === 'win32') privatePath(path);
+    else {
+      assert.equal(
+        info.uid,
+        process.getuid(),
+        'member credentials must be owned by the current user',
+      );
+      assert.equal(
+        info.mode & 0o077,
+        0,
+        'member credentials must not be accessible by group or others',
+      );
+    }
+  };
+  // Validate before login/invitation, never chmod an arbitrary caller directory.
+  await check(parent, true);
+  try {
+    await check(target, false);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  return target;
+}
+
+export async function writeMemberCredentials(file, member) {
+  const target = await validateMemberCredentialsPath(file);
+  await writeFile(target, JSON.stringify(member, null, 2), {
+    flag: 'wx',
+    mode: 0o600,
+  });
+  // On Windows the verified private parent supplies the ACL from creation.
+  if (process.platform === 'win32') privatePath(target, true);
+  await validateMemberCredentialsPath(target);
+}
+
 export async function inviteDesktopMember(cfg, access, report) {
+  await validateMemberCredentialsPath(cfg.desktopMemberFile);
   const credentials = JSON.parse(
     await readFile(cfg.adminCredentialsFile, 'utf8'),
   );
@@ -287,10 +339,7 @@ export async function inviteDesktopMember(cfg, access, report) {
       invitationCode: invitation.code,
     });
     // Explicit private handoff enables resuming without creating extra accounts.
-    await writeFile(cfg.desktopMemberFile, JSON.stringify(member, null, 2), {
-      flag: 'wx',
-      mode: 0o600,
-    });
+    await writeMemberCredentials(cfg.desktopMemberFile, member);
     return { accountId: member.accountId, registered: true };
   } finally {
     admin.close();

@@ -408,7 +408,7 @@ export async function run(cfg, output) {
       );
     }
     // The credentials belong only to this new disposable stack, never to a user vault.
-    if (cfg.httpsCloud || cfg.existingCloud) await requireTestLock();
+    if (cfg.httpsCloud || cfg.existingCloud) await requireTestLock(cfg);
     if (cfg.httpsCloud) {
       cloud = await openHttpsCloud({ cfg, access, report, stage });
     } else {
@@ -652,16 +652,38 @@ export async function run(cfg, output) {
   return report;
 }
 
-async function requireTestLock() {
-  const owner = await readFile(
-    resolve(root, '../../agent-cache/locks/compose-stack/owner.txt'),
-    'utf8',
+export async function requireTestLock(cfg) {
+  // Remote/NAS acceptance may explicitly use its own coordination mechanism.
+  if (cfg.sharedStackLock === false) return;
+  const expected =
+    cfg.sharedStackLock?.owner ?? process.env.AURIGA_SHARED_STACK_LOCK_OWNER;
+  assert.ok(
+    typeof expected === 'string' && expected.trim(),
+    'declare the exact shared-stack lock owner',
   );
-  assert.match(
-    owner,
-    /auriga-SEND-FIX R(?:[456] 只测不重建|7 仅重建 platform 应用来源权威配置)/,
-    'shared-stack requests require this task own test lock',
-  );
+  const directory =
+    cfg.sharedStackLock?.locksDirectory ??
+    process.env.AURIGA_SHARED_STACK_LOCKS_DIR;
+  let current = directory ? resolve(directory) : root;
+  for (;;) {
+    const locks = directory ? current : join(current, 'agent-cache', 'locks');
+    try {
+      const owner = await readFile(
+        join(locks, 'compose-stack', 'owner.txt'),
+        'utf8',
+      );
+      assert.equal(
+        owner.trim(),
+        expected.trim(),
+        'shared-stack lock belongs to another holder',
+      );
+      return;
+    } catch (error) {
+      if (directory || error.code !== 'ENOENT' || dirname(current) === current)
+        throw error;
+      current = dirname(current);
+    }
+  }
 }
 
 async function probeModelTransport(instanceId, url) {
@@ -734,7 +756,7 @@ export async function probeCloud(cfg, output) {
     process.stdout.write(`STEP ${value}\n`);
   };
   try {
-    await requireTestLock();
+    await requireTestLock(cfg);
     const access = await json(cfg.accessFile);
     assert.ok(
       cfg.existingCloud?.credentialsFile &&
@@ -874,7 +896,7 @@ if (
   );
   const cfg = await json(configFile);
   if (command === 'invite-member') {
-    await requireTestLock();
+    await requireTestLock(cfg);
     const result = await inviteDesktopMember(cfg, await json(cfg.accessFile), {
       httpFailures: [],
       stage: 'invite-desktop-member',

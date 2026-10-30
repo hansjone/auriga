@@ -5,12 +5,15 @@
 unconfigured。本工具只生成公开配置，不登录、不请求远端、不修改 DSH 或安装信任。
 工具通过不代表 compose/NAS/Beta 已接好 collab，也不代表真实设备已完成签名 READY。
 
-真实 Agent 发送还依赖 IAM 来源权威的有效期配置。公开 Compose 配方显式设置
+真实 Agent 发送还依赖 IAM 来源权威的有效期配置。公开 Compose 与 NAS 配方显式设置
 `AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=3600` 和
 `AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=60`，可通过同名部署变量覆盖。
-两者必须为正整数；决定有效期不超过300秒，且不超过来源有效期。任一为0时权威关闭。
+启用时两者必须为正整数；决定有效期不超过300秒，且不超过来源有效期。任一显式设为0时权威关闭，空值使用配方默认值。
 IAM 本身仍默认关闭该能力，现有成员权限、设备、来源、关系和世代检查均保持生效。
 修改部署变量后须沿公开 Compose 流程重新创建 platform 服务使其生效；单纯 restart 不会更新容器环境。
+NAS 在 `stack.env` 设置同名变量，沿公开 `render.sh` / `start.sh` 流程更新并重建 platform；
+`platform.env` 与 Compose environment 同步生效。新生成的 `network-platform/platform.properties`
+也以 Spring 环境占位符提供相同默认值；覆盖不需要修改或重新生成受收据保护的材料。
 若两端 READY/入网成功但发送报 unauthorized，应沿 trace 检查来源注册；
 缺少这两项配置时 RegisterAgentSource 会返回 common.unavailable，不能靠放宽客户端验证解决。
 
