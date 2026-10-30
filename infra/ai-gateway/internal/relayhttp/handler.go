@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"io"
 	"mime"
 	"net/http"
@@ -151,6 +152,8 @@ func postHeaders(r *http.Request) (string, error) {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r, finishTrace := observability.Begin(w, r)
+	defer finishTrace()
 	id := rand.Text()
 	w.Header().Set("X-Request-Id", id)
 	w.Header().Set("Cache-Control", "no-store")

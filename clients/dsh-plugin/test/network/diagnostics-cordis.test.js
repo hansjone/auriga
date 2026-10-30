@@ -124,8 +124,15 @@ test(
   `);
     const output = records(result.stderr);
     assert.equal(output.length, 1);
-    assert.deepEqual(output[0], { v: 1, ...event, generation: 1 });
-    assert.equal(Object.keys(output[0]).length, 12);
+    assert.deepEqual(output[0], {
+      service: 'dsh-plugin',
+      level: 'WARN',
+      trace_id: '',
+      v: 1,
+      ...event,
+      generation: 1,
+    });
+    assert.equal(Object.keys(output[0]).length, 15);
     assert.equal(result.stdout, '');
   },
 );
@@ -368,7 +375,16 @@ test('真实writer部分写入逐段完成一条安全行', options, () => {
     await flushWriter();
     await ctx.fiber.dispose();
   `);
-  assert.deepEqual(records(result.stderr), [{ v: 1, ...event, generation: 1 }]);
+  assert.deepEqual(records(result.stderr), [
+    {
+      service: 'dsh-plugin',
+      level: 'WARN',
+      trace_id: '',
+      v: 1,
+      ...event,
+      generation: 1,
+    },
+  ]);
 });
 
 test(

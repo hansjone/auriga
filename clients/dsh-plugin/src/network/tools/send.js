@@ -14,6 +14,13 @@ import {
 } from '../../generated/network/contract.js';
 import validateInput from '../../generated/network/validate-input.js';
 import { snapshotInput } from './json-input.js';
+import {
+  observeTool,
+  sourceAuthorization,
+  sourceEvent,
+  sourceReject,
+  sourceStage,
+} from '../../observability/source.js';
 
 /** @typedef {import('../host/address.js').Address} Address */
 /** @typedef {import('../host/ledger.js').Ledger} Ledger */
@@ -203,13 +210,15 @@ export function createAgentSendTool({
       )
         throw new Error();
       return { hostSessionId: id, address };
-    } catch {
+    } catch (error) {
+      sourceEvent('source address rejected', {}, error);
       throw new HostSeamError('network.local_registration_required');
     }
   }
 
-  /** @param {{ hostSessionId: string, address: Address }} source @param {boolean} firstContact */
-  async function authorize(source, firstContact) {
+  /** @param {{ hostSessionId: string, address: Address }} source @param {boolean} firstContact @param {string} pass */
+  async function authorize(source, firstContact, pass) {
+    sourceAuthorization(pass);
     try {
       const auth = await sourceFor({
         ...source,
@@ -220,26 +229,36 @@ export function createAgentSendTool({
         realm: ledger.identity.realm,
       });
       if (
-        auth.senderKind !== 'agent' ||
-        auth.sendAllowed !== true ||
-        addressKey(address) !== addressKey(source.address) ||
-        address.type !== source.address.type ||
-        typeof auth.sourceBinding !== 'string' ||
-        !opaqueId.test(auth.sourceBinding) ||
-        !isUint64String(auth.producerEpoch) ||
-        auth.producerEpoch === '0' ||
-        !Number.isFinite(auth.expiresAt) ||
-        auth.expiresAt <= clock()
+        (auth.senderKind !== 'agent' && sourceReject('sender_kind')) ||
+        (auth.sendAllowed !== true && sourceReject('send_not_allowed')) ||
+        (addressKey(address) !== addressKey(source.address) &&
+          sourceReject('address_mismatch')) ||
+        (address.type !== source.address.type &&
+          sourceReject('address_type')) ||
+        (typeof auth.sourceBinding !== 'string' &&
+          sourceReject('binding_type')) ||
+        (!opaqueId.test(auth.sourceBinding) &&
+          sourceReject('binding_format')) ||
+        (!isUint64String(auth.producerEpoch) && sourceReject('epoch_format')) ||
+        (auth.producerEpoch === '0' && sourceReject('epoch_zero')) ||
+        (!Number.isFinite(auth.expiresAt) && sourceReject('expiry_format')) ||
+        (auth.expiresAt <= clock() && sourceReject('authorization_expired'))
       )
         throw new Error();
-      if (firstContact && auth.firstContactAllowed !== true)
+      if (
+        firstContact &&
+        auth.firstContactAllowed !== true &&
+        sourceReject('first_contact_forbidden')
+      )
         throw new HostSeamError('network.first_contact_forbidden');
+      sourceEvent('authorization accepted');
       // Copy scalars: the port must not mutate an authorization while awaiting target lookup.
       return {
         sourceBinding: auth.sourceBinding,
         producerEpoch: auth.producerEpoch,
       };
     } catch (error) {
+      sourceEvent('authorization rejected', {}, error);
       if (
         error instanceof HostSeamError &&
         error.code === 'network.first_contact_forbidden'
@@ -263,13 +282,16 @@ export function createAgentSendTool({
 
   /** @param {unknown} input @param {ExecutionContext} [exec] @returns {Promise<SubmitRequest>} */
   async function prepare(input, exec) {
+    sourceStage('input');
     const snapshot = snapshotInput(input);
     if (!validateInput(snapshot))
       throw new HostSeamError('network.protocol_error');
     const data = /** @type {AgentSendToolInput} */ (snapshot);
     if (Buffer.byteLength(JSON.stringify(data.body)) > encoding.maxBodyBytes)
       throw new HostSeamError('network.quota_exceeded');
+    sourceStage('source_address');
     const source = sourceAddress(exec);
+    sourceStage('target_address');
     const target = parseAddressText(data.target, ledger.identity.realm);
     if (target.node === '0')
       throw new HostSeamError(
@@ -278,11 +300,13 @@ export function createAgentSendTool({
           : 'network.group_not_available',
       );
     const firstContact = target.local === '0';
-    const auth = await authorize(source, firstContact);
+    const auth = await authorize(source, firstContact, 'initial');
+    sourceStage('initial_source_fence');
     assertSameSource(exec, source);
     // Failed authorization cannot spend the shared budget. Authorized target
     // probes reserve synchronously before lookup and are never refunded.
     reserveRate(source.address.local);
+    sourceStage('target_lookup');
     let to;
     try {
       to = parseAddress(
@@ -301,14 +325,19 @@ export function createAgentSendTool({
     } catch {
       throw new HostSeamError('network.target_unavailable');
     }
+    sourceStage('recheck_source_fence');
     const current = assertSameSource(exec, source);
-    const fresh = await authorize(current, firstContact);
+    const fresh = await authorize(current, firstContact, 'recheck');
+    sourceStage('final_source_fence');
     assertSameSource(exec, source);
     if (
-      fresh.sourceBinding !== auth.sourceBinding ||
-      fresh.producerEpoch !== auth.producerEpoch
+      (fresh.sourceBinding !== auth.sourceBinding &&
+        sourceReject('binding_changed')) ||
+      (fresh.producerEpoch !== auth.producerEpoch &&
+        sourceReject('epoch_changed'))
     )
       throw new HostSeamError('network.unauthorized');
+    sourceEvent('prepare completed');
     return {
       kind: firstContact ? 'first_contact' : 'message',
       ...(firstContact ? { contact_scope: 'conversation' } : {}),
@@ -327,7 +356,10 @@ export function createAgentSendTool({
     inputSchema: /** @type {typeof inputSchema} */ (
       JSON.parse(JSON.stringify(inputSchema))
     ),
-    prepare,
+    prepare: (
+      /** @type {unknown} */ input,
+      /** @type {ExecutionContext|undefined} */ exec,
+    ) => observeTool(() => prepare(input, exec), true),
     /**
      * submit must durably retain this request/idempotency key before I/O and
      * reconcile response loss with the same key. This tool never retries.
@@ -335,35 +367,44 @@ export function createAgentSendTool({
      * @param {(request: SubmitRequest) => unknown|Promise<unknown>} submit
      * @returns {Promise<ModelResult>}
      */
-    async execute(input, exec, submit) {
-      let startedAt;
-      try {
-        startedAt = clock();
-      } catch {
-        return { status: 'error', code: 'network.unauthorized' };
-      }
-      let request;
-      try {
-        request = await prepare(input, exec);
-      } catch (error) {
-        if (error instanceof HostSeamError) {
-          if (error.code === 'network.target_unavailable')
-            return release({ status: 'request_submitted' }, startedAt);
-          return release({ status: 'error', code: error.code }, startedAt);
-        }
-        return release(
-          { status: 'error', code: 'network.protocol_error' },
-          startedAt,
-        );
-      }
-      try {
-        return release(mapSendReceipt(await submit(request)), startedAt);
-      } catch {
-        return release(
-          { status: 'error', code: 'network.outcome_unknown' },
-          startedAt,
-        );
-      }
+    execute(input, exec, submit) {
+      return observeTool(
+        /** @returns {Promise<ModelResult>} */ async () => {
+          let startedAt;
+          try {
+            sourceStage('clock');
+            startedAt = clock();
+          } catch (error) {
+            sourceEvent('clock rejected', { submit: 'not_started' }, error);
+            return { status: 'error', code: 'network.unauthorized' };
+          }
+          let request;
+          try {
+            request = await prepare(input, exec);
+          } catch (error) {
+            sourceEvent('prepare failed', { submit: 'not_started' }, error);
+            if (error instanceof HostSeamError) {
+              if (error.code === 'network.target_unavailable')
+                return release({ status: 'request_submitted' }, startedAt);
+              return release({ status: 'error', code: error.code }, startedAt);
+            }
+            return release(
+              { status: 'error', code: 'network.protocol_error' },
+              startedAt,
+            );
+          }
+          try {
+            sourceStage('submit');
+            return release(mapSendReceipt(await submit(request)), startedAt);
+          } catch (error) {
+            sourceEvent('submit failed', {}, error);
+            return release(
+              { status: 'error', code: 'network.outcome_unknown' },
+              startedAt,
+            );
+          }
+        },
+      );
     },
   };
 }

@@ -15,10 +15,13 @@ import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.Status;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +38,18 @@ import org.slf4j.LoggerFactory;
  */
 public final class AurigaServerInterceptor implements ServerInterceptor {
   private static final Logger log = LoggerFactory.getLogger(AurigaServerInterceptor.class);
+  private static final AtomicLong LAST_REJECTION_LOG = new AtomicLong();
+
+  private static void logRejection(String method, AurigaException error) {
+    long now = System.nanoTime(), previous = LAST_REJECTION_LOG.get();
+    if ((previous == 0 || now - previous >= TimeUnit.SECONDS.toNanos(1))
+        && LAST_REJECTION_LOG.compareAndSet(previous, now)) {
+      log.warn("gRPC request rejected method={} code={}", method, error.errorCode().code());
+    }
+    // Rejections share one bounded WARN budget across methods/tenants. Full
+    // diagnostic stacks and suppressed repetitions require explicit DEBUG.
+    log.debug("gRPC request rejected method={} code={}", method, error.errorCode().code(), error);
+  }
 
   private final AccessTokenVerifier verifier;
   private final Set<String> publicMethods;
@@ -69,17 +84,31 @@ public final class AurigaServerInterceptor implements ServerInterceptor {
         request = request.withPrincipal(principal);
       }
     } catch (AurigaException e) {
+      try (var ignored = LogFields.of(request)) {
+        logRejection(call.getMethodDescriptor().getFullMethodName(), e);
+      }
       var status = GrpcErrors.toStatus(e);
       call.close(status.getStatus(), status.getTrailers());
       return new ServerCall.Listener<>() {};
     }
-    Scope scope = new Scope(request, tenant);
+    String[] method = call.getMethodDescriptor().getFullMethodName().split("\\.");
+    Scope scope = new Scope(request, tenant, method.length > 1 ? method[1] : "platform");
     AtomicBoolean closed = new AtomicBoolean();
     ServerCall<Q, R> guarded =
         new ForwardingServerCall.SimpleForwardingServerCall<>(call) {
           @Override
           public void close(Status status, Metadata trailers) {
-            if (closed.compareAndSet(false, true)) super.close(status, trailers);
+            if (closed.compareAndSet(false, true)) {
+              try (var ignored = LogFields.of(scope.request());
+                  var component = LogFields.of(Map.of("service", scope.service()))) {
+                (status.isOk() ? log.atInfo() : log.atDebug())
+                    .log(
+                        "gRPC request completed method={} status={}",
+                        call.getMethodDescriptor().getFullMethodName(),
+                        status.getCode());
+              }
+              super.close(status, trailers);
+            }
           }
         };
     ServerCall.Listener<Q> delegate = scope.call(() -> next.startCall(guarded, headers), guarded);
@@ -149,13 +178,18 @@ public final class AurigaServerInterceptor implements ServerInterceptor {
   }
 
   /** Binds request/tenant context and MDC around a callback and maps thrown errors. */
-  private record Scope(RequestContext request, UUID tenant) {
+  private record Scope(RequestContext request, UUID tenant, String service) {
     <T> T call(ScopedValue.CallableOp<T, RuntimeException> op, ServerCall<?, ?> call) {
-      try (var a = LogFields.of(request);
+      try (var component = LogFields.of(Map.of("service", service));
+          var a = LogFields.of(request);
           var b = LogFields.tenant(tenant)) {
         return request.call(() -> tenant == null ? op.call() : TenantContext.call(tenant, op));
       } catch (RuntimeException e) {
-        fail(call, e);
+        try (var component = LogFields.of(Map.of("service", service));
+            var a = LogFields.of(request);
+            var b = LogFields.tenant(tenant)) {
+          fail(call, e);
+        }
         return null;
       }
     }
@@ -172,6 +206,8 @@ public final class AurigaServerInterceptor implements ServerInterceptor {
     private static void fail(ServerCall<?, ?> call, RuntimeException e) {
       if (!(e instanceof AurigaException ae) || ae.errorCode().httpStatus() >= 500) {
         log.error("gRPC call {} failed", call.getMethodDescriptor().getFullMethodName(), e);
+      } else {
+        logRejection(call.getMethodDescriptor().getFullMethodName(), (AurigaException) e);
       }
       var status = GrpcErrors.toStatus(e);
       try {

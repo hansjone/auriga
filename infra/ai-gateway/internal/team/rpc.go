@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	collab "github.com/hansjone/auriga/infra/gen/auriga/collab/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -62,6 +63,7 @@ func DialRPC(c RPCConfig) (*grpc.ClientConn, error) {
 		if actor, ok := ctx.Value(actorKey{}).(*collab.Actor); ok {
 			ctx = metadata.AppendToOutgoingContext(ctx, "auriga-tenant-id", actor.TenantId)
 		}
+		ctx = observability.Outgoing(ctx)
 		bounded, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		return invoke(bounded, method, req, reply, cc, opts...)

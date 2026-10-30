@@ -10,6 +10,15 @@ import {
 } from './frames.js';
 import { emptySources, stopSource, enqueueRevoke } from './state.js';
 import { timeValue } from '../trust/store.js';
+import {
+  observeSourceWork,
+  sourceEvent,
+  sourceReject,
+  sourceRpc,
+  sourceStage,
+  sourceWaiting,
+  sourceTaskFailed,
+} from '../../observability/source.js';
 
 // Local pending work is capped conservatively; terminal history is never erased.
 const MAX_PENDING = 128;
@@ -48,9 +57,15 @@ export function createSourceControl({
   };
   /** @template T @param {(draft:import('../host/ledger.js').LedgerState)=>T} mutate @param {()=>void} [fence] */
   async function update(mutate, fence = current) {
+    const previous = sourceStage('persist');
+    sourceEvent('persist started');
     try {
-      return await ledger.update(mutate, fence);
+      const result = await ledger.update(mutate, fence);
+      sourceEvent('persist completed');
+      sourceStage(previous);
+      return result;
     } catch (error) {
+      sourceEvent('persist failed', {}, error);
       try {
         ledger.assertAvailable();
       } catch {
@@ -62,42 +77,57 @@ export function createSourceControl({
   /** @param {Promise<unknown>} promise */
   function track(promise) {
     work.add(promise);
-    void promise.finally(() => work.delete(promise)).catch(() => {});
+    void promise
+      .finally(() => work.delete(promise))
+      .catch((error) => {
+        sourceTaskFailed(promise, error);
+      });
     return promise;
   }
   /** @param {string} local */
   function entry(local) {
     const e = state()?.entries[local];
-    if (!e) throw new Error('source not registered');
+    if (!e) {
+      sourceReject('entry_missing');
+      throw new Error('source not registered');
+    }
     return e;
   }
   /** @param {Entry} e */
   function native(e) {
+    const previous = sourceStage('native_guard');
     current();
-    if (e.stopped || stopping.has(e.local)) throw new Error('source stopped');
+    if ((e.stopped || stopping.has(e.local)) && sourceReject('native_stopped'))
+      throw new Error('source stopped');
     const ctx = getContext(),
       b = ledger.peek().bindings[e.local];
     if (
-      !ctx ||
-      !b ||
-      b.state !== 'bound' ||
-      b.lifecycle !== 'open' ||
-      b.bindingId === b.hostSessionId ||
-      !sameRegistration(e.registration, registration(e.local)) ||
-      ['bindingId', 'hostSessionId', 'cwd', 'kind'].some(
+      (!ctx && sourceReject('native_context_missing')) ||
+      (!b && sourceReject('native_binding_missing')) ||
+      (b.state !== 'bound' && sourceReject('native_binding_unbound')) ||
+      (b.lifecycle !== 'open' && sourceReject('native_session_closed')) ||
+      (b.bindingId === b.hostSessionId &&
+        sourceReject('native_binding_not_independent')) ||
+      (!sameRegistration(e.registration, registration(e.local)) &&
+        sourceReject('native_registration_changed')) ||
+      (['bindingId', 'hostSessionId', 'cwd', 'kind'].some(
         (k) => /** @type {any} */ (b)[k] !== /** @type {any} */ (e.mapping)[k],
-      )
+      ) &&
+        sourceReject('native_mapping_changed'))
     )
       throw new Error('source mapping changed');
     let token = natives.get(e.local);
     if (!token) {
+      sourceStage('native_registration');
       // Only already-live agents are candidates. Never resume cold history.
       token = registrationSession(ctx, {
         agent: ctx.agents.get(b.hostSessionId),
       });
       natives.set(e.local, token);
     }
+    sourceStage('native_token_check');
     token.check();
+    sourceStage(previous);
     return { ctx, token, agent: ctx.agents.get(b.hostSessionId) };
   }
   /** @param {string} local @returns {import('../../generated/network/SourceControl.js').Registration} */
@@ -126,9 +156,14 @@ export function createSourceControl({
   }
   /** @param {Entry} e @param {AbortSignal} signal */
   async function witness(e, signal) {
+    sourceStage('witness');
+    sourceEvent('witness started');
     try {
-      return await resolveWitness(e, signal);
+      const result = await resolveWitness(e, signal);
+      sourceEvent('witness completed');
+      return result;
     } catch (error) {
+      sourceEvent('witness failed', {}, error);
       if (!closed && !signal.aborted) await stop(e.local, 'native_unavailable');
       throw error;
     }
@@ -168,6 +203,7 @@ export function createSourceControl({
       checkFresh();
     };
     check();
+    sourceStage('native_resolver_create');
     const resolver = await createNativeSourceResolver({
       ctx: n.ctx,
       lookupBinding: async (id) => {
@@ -177,7 +213,10 @@ export function createSourceControl({
       },
     });
     check();
+    sourceStage('native_source_resolve');
+    sourceEvent('native source resolve started');
     const resolved = await resolver({ agent: n.agent });
+    sourceStage('native_source_fence');
     check();
     if (
       resolved.local !== e.local ||
@@ -219,6 +258,7 @@ export function createSourceControl({
   }
   /** @param {Operation} op @param {AbortSignal} signal @param {boolean} issue */
   async function register(op, signal, issue) {
+    sourceStage('register');
     const e = entry(op.local);
     const w = issue ? await witness(e, signal) : null;
     current();
@@ -238,10 +278,14 @@ export function createSourceControl({
     w?.check();
     if (w && now() >= timeValue(w.value.valid_until))
       throw new Error('source witness expired');
+    sourceStage('register_request');
+    sourceRpc(frame, 'started');
     const result =
       /** @type {import('../../generated/network/SourceControl.js').SourceRegisterResult} */ (
         await request(frame, signal)
       );
+    sourceRpc(frame, 'response_received');
+    sourceStage('register_reply_check');
     current();
     signal.throwIfAborted();
     if (result.result === 'registered') assertFact(result.source, op.body, op);
@@ -253,7 +297,8 @@ export function createSourceControl({
         w?.checkNative();
         native(entry(op.local));
         live = true;
-      } catch {
+      } catch (error) {
+        sourceEvent('register native fence failed', {}, error);
         await stop(op.local, 'native_changed');
         current();
         signal.throwIfAborted();
@@ -262,7 +307,8 @@ export function createSourceControl({
     if (live) {
       try {
         w?.checkFresh();
-      } catch {
+      } catch (error) {
+        sourceEvent('register freshness failed', {}, error);
         // A historic Register receipt remains reconcilable. Freshness expiry
         // only disables immediate use; a later Get needs a new resolver call.
         live = false;
@@ -293,6 +339,27 @@ export function createSourceControl({
           stopSource(draft, op.local, 'remote_stopped');
         else latest.observation = null;
       }
+    });
+    sourceEvent('register result retained', {
+      result: ['registered', 'not_accepted', 'not_committed'].includes(
+        result.result,
+      )
+        ? result.result
+        : 'other',
+      failure_authority: ['collab', 'iam'].includes(
+        result.failure_evidence?.authority ?? '',
+      )
+        ? result.failure_evidence?.authority
+        : undefined,
+      failure_reason: [
+        'rejected_before_pending',
+        'original_connection_invalid_uncommitted',
+        'revision_mismatch',
+        'predecessor_not_head',
+        'lineage_stopped',
+      ].includes(result.failure_evidence?.reason ?? '')
+        ? result.failure_evidence?.reason
+        : undefined,
     });
     current();
     signal.throwIfAborted();
@@ -328,6 +395,7 @@ export function createSourceControl({
   }
   /** @param {string} local @param {AbortSignal} signal */
   async function get(local, signal) {
+    sourceStage('get');
     const e = entry(local),
       head = e.head;
     if (!head) return;
@@ -356,10 +424,14 @@ export function createSourceControl({
       w.check();
       if (now() >= timeValue(w.value.valid_until))
         throw new Error('source witness expired');
+      sourceStage('get_request');
+      sourceRpc(frame, 'started');
       const result =
         /** @type {import('../../generated/network/SourceControl.js').SourceGetResult} */ (
           await request(frame, signal)
         );
+      sourceRpc(frame, 'response_received');
+      sourceStage('get_reply_check');
       current();
       signal.throwIfAborted();
       w.check();
@@ -384,11 +456,19 @@ export function createSourceControl({
         if (['revoked', 'stopped'].includes(result.source.state))
           stopSource(draft, local, 'remote_stopped');
       }, w.checkNative);
+      sourceEvent('get observation retained', {
+        source_state: ['active', 'expired', 'revoked', 'stopped'].includes(
+          result.source.state,
+        )
+          ? result.source.state
+          : 'other',
+      });
       w.check();
       if (result.source.state === 'active') retryAt.set(local, now() + 15000);
       if (result.source.state === 'expired' && !entry(local).stopped)
         queue.add(local);
     } catch (error) {
+      sourceEvent('get failed', {}, error);
       current();
       try {
         w.checkNative();
@@ -404,6 +484,7 @@ export function createSourceControl({
   }
   /** @param {string} local @param {AbortSignal} signal */
   async function drive(local, signal) {
+    sourceStage('drive');
     current();
     signal.throwIfAborted();
     const e = entry(local),
@@ -412,10 +493,16 @@ export function createSourceControl({
       await register(old, signal, false);
       return;
     }
-    if (e.stopped || stopping.has(local)) return;
+    if (e.stopped || stopping.has(local)) {
+      sourceReject('entry_stopped');
+      sourceEvent('control skipped', { rpc: 'not_started' });
+      return;
+    }
+    sourceStage('native_guard');
     try {
       native(e);
-    } catch {
+    } catch (error) {
+      sourceEvent('native guard failed', { rpc: 'not_started' }, error);
       await stop(local, 'native_changed');
       return;
     }
@@ -466,6 +553,7 @@ export function createSourceControl({
   }
   /** @param {import('./types.js').Revocation} r @param {AbortSignal} signal */
   async function revoke(r, signal) {
+    sourceStage('revoke');
     current();
     signal.throwIfAborted();
     /** @type {import('../../generated/network/SourceControl.js').SourceRevoke} */
@@ -475,10 +563,14 @@ export function createSourceControl({
       operation_id: r.id,
       source_binding: r.sourceBinding,
     };
+    sourceStage('revoke_request');
+    sourceRpc(frame, 'started');
     const result =
       /** @type {import('../../generated/network/SourceControl.js').SourceRevokeResult} */ (
         await request(frame, signal)
       );
+    sourceRpc(frame, 'response_received');
+    sourceStage('revoke_reply_check');
     current();
     signal.throwIfAborted();
     await update((draft) => {
@@ -505,22 +597,28 @@ export function createSourceControl({
         reject(new Error('source request timeout'));
       }, REQUEST_MS);
     });
-    const task = Promise.race([action(abort.signal), timeout])
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(deadline);
-        abort.abort();
-        attempts.delete(abort);
-        done();
-        pump();
-      });
+    const task = observeSourceWork(() =>
+      Promise.race([action(abort.signal), timeout])
+        .catch((error) => {
+          sourceEvent('control failed', {}, error);
+        })
+        .finally(() => {
+          sourceEvent('control task settled');
+          clearTimeout(deadline);
+          abort.abort();
+          attempts.delete(abort);
+          done();
+          pump();
+        }),
+    );
     track(task);
   }
   function pump() {
     if (closed) return;
     try {
       current();
-    } catch {
+    } catch (error) {
+      sourceEvent('pump generation rejected', { stage: 'pump_current' }, error);
       return;
     }
     // Revocations have a reserved lane, including while regular RPCs are hung.
@@ -615,7 +713,12 @@ export function createSourceControl({
       if (!e.stopped) {
         try {
           native(e);
-        } catch {
+        } catch (error) {
+          sourceEvent(
+            'sweep native guard failed',
+            { stage: 'native_guard' },
+            error,
+          );
           await stop(e.local, 'native_changed');
         }
       }
@@ -644,12 +747,15 @@ export function createSourceControl({
           b.lifecycle === 'open' &&
           ledger.peek().locals[b.local]?.state === 'registered'
         )
-          await establish(b.local).catch(() => {
+          await establish(b.local).catch((error) => {
+            sourceEvent('establish failed', { stage: 'establish' }, error);
             current();
           });
       await sweep();
       timer = setInterval(() => {
-        void sweep().catch(() => {});
+        void sweep().catch((error) => {
+          sourceEvent('sweep failed', { stage: 'sweep' }, error);
+        });
       }, 1000);
       timer.unref?.();
     },
@@ -662,7 +768,11 @@ export function createSourceControl({
       await this.idle();
     },
     async idle() {
-      while (work.size) await Promise.allSettled([...work]);
+      while (work.size) {
+        const pending = [...work];
+        sourceWaiting(pending);
+        await Promise.allSettled(pending);
+      }
     },
     close() {
       closed = true;

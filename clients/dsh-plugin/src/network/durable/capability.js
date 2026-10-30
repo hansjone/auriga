@@ -9,6 +9,12 @@ import { createMailboxClient } from './client.js';
 import { formatAddress } from '../host/address.js';
 import { decodeJson } from '../session/frames.js';
 import { canonicalize } from '../trust/jcs.js';
+import {
+  observeTool,
+  sourceEvent,
+  sourceReject,
+  sourceStage,
+} from '../../observability/source.js';
 
 /** Small default-device capability; all identities come from native execution,
  * typed-local bindings and the verified source controller, never tool input.
@@ -105,25 +111,46 @@ export function createDeviceMessaging(options) {
           type: 'session',
         }),
         async sourceFor({ hostSessionId, address }) {
+          sourceStage('source_native_registration');
           const n = registrationSession(ctx, {
             agent: ctx.agents.get(hostSessionId),
           });
+          sourceStage('source_generation');
           current();
+          sourceStage('source_native_check');
           n.check();
+          sourceStage('source_refresh');
           await source.refresh(address.local);
+          sourceEvent('refresh completed');
+          sourceStage('source_generation_after_refresh');
           current();
+          sourceStage('source_native_after_refresh');
           n.check();
+          sourceStage('source_observation');
           const state = ledger.peek(),
             entry = state.sourceControl?.entries[address.local],
             observation = entry?.observation;
+          if (!entry) {
+            sourceReject('entry_missing');
+            throw new Error('network.unauthorized');
+          }
+          if (entry.stopped) {
+            sourceReject('entry_stopped');
+            throw new Error('network.unauthorized');
+          }
+          if (!observation) {
+            sourceReject('observation_missing');
+            throw new Error('network.unauthorized');
+          }
           if (
-            !entry ||
-            entry.stopped ||
-            !observation ||
-            observation.source.state !== 'active' ||
-            observation.source.source_binding !== entry.head ||
-            now() >= Date.parse(observation.valid_until ?? '') ||
-            state.bindings[address.local]?.hostSessionId !== hostSessionId
+            (observation.source.state !== 'active' &&
+              sourceReject('source_inactive')) ||
+            (observation.source.source_binding !== entry.head &&
+              sourceReject('head_mismatch')) ||
+            (now() >= Date.parse(observation.valid_until ?? '') &&
+              sourceReject('observation_expired')) ||
+            (state.bindings[address.local]?.hostSessionId !== hostSessionId &&
+              sourceReject('session_mismatch'))
           )
             throw new Error('network.unauthorized');
           return {
@@ -182,68 +209,78 @@ export function createDeviceMessaging(options) {
             /** @type {unknown} */ value,
           ) => [{ type: 'text', text: JSON.stringify(value) }],
         },
-        async execute(
-          /** @type {unknown} */ input,
-          /** @type {any} */ execution,
-        ) {
-          try {
-            current();
-            const n = registrationSession(ctx, execution);
-            const request = await tool.prepare(input, execution);
-            current();
-            n.check();
-            execution.signal?.throwIfAborted();
-            if (request.kind !== 'message' || request.to.type !== 'session')
-              throw new Error('network.protocol_error');
-            const b = Object.values(ledger.peek().bindings).find(
-              (v) => v.hostSessionId === n.id,
-            );
-            if (!b) throw new Error('network.local_registration_required');
-            const semantic = (
-              /** @type {import('../../generated/network/SubmitRequest.js').SubmitRequest} */ value,
-            ) =>
-              canonicalize({
-                kind: value.kind,
-                to: value.to,
-                body: value.body,
-                thread: value.thread_id ?? null,
-                intent: value.intent,
-                durability: value.durability,
-              });
-            const pending = Object.values(
-              ledger.peek().durable?.submissions ?? {},
-            ).filter(
-              (value) =>
-                !value.result &&
-                value.bindingId === b.bindingId &&
-                semantic(value.request) === semantic(request),
-            );
-            if (pending.length > 1) throw new Error('network.conflict');
-            const result = await outbox.send(
-              pending[0]?.request ?? { ...request, dispatch_mode: 'atomic' },
-              b.bindingId,
-              execution.signal,
-              () => {
-                current();
-                n.check();
-                const latest = ledger.peek();
-                if (
-                  latest.bindings[b.local]?.bindingId !== b.bindingId ||
-                  latest.sourceControl?.entries[b.local]?.stopped
-                )
-                  throw new Error('network.unauthorized');
-              },
-            );
-            current();
-            n.check();
-            return mapSendReceipt(result);
-          } catch (error) {
-            return {
-              status: 'error',
-              code:
-                /** @type {any} */ (error)?.code ?? 'network.outcome_unknown',
-            };
-          }
+        execute(/** @type {unknown} */ input, /** @type {any} */ execution) {
+          return observeTool(async () => {
+            let outboxStarted = false;
+            try {
+              sourceStage('execution_generation');
+              current();
+              sourceStage('execution_native_registration');
+              const n = registrationSession(ctx, execution);
+              const request = await tool.prepare(input, execution);
+              sourceStage('execution_fence');
+              current();
+              n.check();
+              execution.signal?.throwIfAborted();
+              if (request.kind !== 'message' || request.to.type !== 'session')
+                throw new Error('network.protocol_error');
+              const b = Object.values(ledger.peek().bindings).find(
+                (v) => v.hostSessionId === n.id,
+              );
+              if (!b) throw new Error('network.local_registration_required');
+              const semantic = (
+                /** @type {import('../../generated/network/SubmitRequest.js').SubmitRequest} */ value,
+              ) =>
+                canonicalize({
+                  kind: value.kind,
+                  to: value.to,
+                  body: value.body,
+                  thread: value.thread_id ?? null,
+                  intent: value.intent,
+                  durability: value.durability,
+                });
+              const pending = Object.values(
+                ledger.peek().durable?.submissions ?? {},
+              ).filter(
+                (value) =>
+                  !value.result &&
+                  value.bindingId === b.bindingId &&
+                  semantic(value.request) === semantic(request),
+              );
+              if (pending.length > 1) throw new Error('network.conflict');
+              sourceStage('outbox');
+              outboxStarted = true;
+              const result = await outbox.send(
+                pending[0]?.request ?? { ...request, dispatch_mode: 'atomic' },
+                b.bindingId,
+                execution.signal,
+                () => {
+                  current();
+                  n.check();
+                  const latest = ledger.peek();
+                  if (
+                    latest.bindings[b.local]?.bindingId !== b.bindingId ||
+                    latest.sourceControl?.entries[b.local]?.stopped
+                  )
+                    throw new Error('network.unauthorized');
+                },
+              );
+              current();
+              n.check();
+              return mapSendReceipt(result);
+            } catch (error) {
+              sourceEvent(
+                'tool attempt failed',
+                { outbox: outboxStarted ? 'started' : 'not_started' },
+                error,
+              );
+              return {
+                status: 'error',
+                code:
+                  /** @type {any} */ (error)?.code ?? 'network.outcome_unknown',
+              };
+            }
+          });
         },
       });
       off = transport.onMessage((bytes) => {

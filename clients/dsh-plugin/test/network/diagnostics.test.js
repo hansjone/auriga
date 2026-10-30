@@ -22,7 +22,7 @@ function fixture(ctx, prepare, options = {}) {
   });
 }
 
-test('安全日志生命周期首失只含12个白名单字段，重复重试有界且未知对象不泄漏', async () => {
+test('安全日志生命周期首失保留受控诊断与统一日志字段，重复重试有界且未知对象不泄漏', async () => {
   const lines = [];
   let count = 0;
   const error = Object.assign(
@@ -72,6 +72,9 @@ test('安全日志生命周期首失只含12个白名单字段，重复重试有
       'cancelled',
       'created',
       'generation',
+      'service',
+      'level',
+      'trace_id',
     ].sort(),
   );
   assert.equal(event.event, 'failure');

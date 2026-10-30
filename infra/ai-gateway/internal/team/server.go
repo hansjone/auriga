@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"io"
 	"mime"
 	"net/http"
@@ -80,6 +81,8 @@ func expand(value any, defs map[string]any) any {
 	}
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r, finishTrace := observability.Begin(w, r)
+	defer finishTrace()
 	// Node-only API: browsers have no reason to call it; reject every Origin, including null.
 	if _, present := r.Header["Origin"]; present {
 		http.Error(w, "common.forbidden", http.StatusForbidden)

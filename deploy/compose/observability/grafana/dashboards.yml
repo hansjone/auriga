@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: Auriga
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

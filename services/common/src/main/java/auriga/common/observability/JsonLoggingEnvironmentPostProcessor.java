@@ -16,6 +16,13 @@ public final class JsonLoggingEnvironmentPostProcessor implements EnvironmentPos
 
   @Override
   public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication app) {
+    String level = environment.getProperty("AURIGA_LOG_LEVEL", "INFO");
+    if ("DEBUG".equalsIgnoreCase(level)) {
+      environment
+          .getPropertySources()
+          .addLast(
+              new MapPropertySource("aurigaLogLevel", Map.of("logging.level.auriga", "DEBUG")));
+    }
     if (!environment.getProperty("auriga.logging.json", Boolean.class, true)) return;
     if (environment.containsProperty(FORMAT_PROPERTY)) return;
     environment

@@ -1,3 +1,4 @@
+import { tracedFetch } from '../observability/index.js';
 /* global AbortSignal */
 import { createHash } from 'node:crypto';
 import { platformConfig, PlatformError } from '../local/platform.js';
@@ -110,20 +111,23 @@ export function createDeviceProvider({
           )
         )
           throw new PlatformError(401, 'network.revoked');
-        const response = await fetch(new URL(path, config.platformOrigin), {
-          method: body === undefined ? 'GET' : 'POST',
-          credentials: 'omit',
-          redirect: 'error',
-          signal: AbortSignal.any([active, AbortSignal.timeout(15000)]),
-          headers: {
-            authorization: 'Bearer ' + current.accessToken,
-            accept: 'application/json',
-            ...(body === undefined
-              ? {}
-              : { 'content-type': 'application/json' }),
+        const response = await tracedFetch(
+          new URL(path, config.platformOrigin),
+          {
+            method: body === undefined ? 'GET' : 'POST',
+            credentials: 'omit',
+            redirect: 'error',
+            signal: AbortSignal.any([active, AbortSignal.timeout(15000)]),
+            headers: {
+              authorization: 'Bearer ' + current.accessToken,
+              accept: 'application/json',
+              ...(body === undefined
+                ? {}
+                : { 'content-type': 'application/json' }),
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
           },
-          body: body === undefined ? undefined : JSON.stringify(body),
-        }).catch(() => {
+        ).catch(() => {
           active.throwIfAborted();
           throw diagnosticReason(
             new DeviceControlUnavailable('network control unavailable'),

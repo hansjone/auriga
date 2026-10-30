@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"io"
 	"log/slog"
 	"os"
@@ -16,6 +17,7 @@ import (
 var version = "0.0.0-dev"
 
 func run(args []string, out, logs io.Writer) error {
+	slog.SetDefault(observability.Logger(logs))
 	flags := flag.NewFlagSet("auriga-ai-gateway", flag.ContinueOnError)
 	flags.SetOutput(logs)
 	teamConfigFile := flags.String("team-config", "", "serve remote Team MCP using a configuration file")
@@ -65,7 +67,7 @@ func run(args []string, out, logs io.Writer) error {
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("command failed", "error", err)
+		observability.Logger(os.Stderr).Error("command failed", "error", err)
 		os.Exit(1)
 	}
 }

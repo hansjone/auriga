@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"io"
 	"log/slog"
 	"net"
@@ -199,7 +200,7 @@ func serveDevice(path string, logs io.Writer) error {
 		return errors.New("D7 listener unavailable")
 	}
 	defer func() { _ = l.Close() }()
-	logger := slog.New(slog.NewJSONHandler(logs, nil))
+	logger := observability.Logger(logs)
 	r.server.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelError)
 	mode := "synthetic"
 	if c.Upstream != nil {

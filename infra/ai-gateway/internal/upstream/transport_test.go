@@ -18,6 +18,7 @@ import (
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/admin"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/modelprotocol"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/relay"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 )
@@ -86,6 +87,9 @@ func TestTransportJSON(t *testing.T) {
 	var calls atomic.Int64
 	s := privateServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if r.Header.Get("traceparent") != "" {
+			t.Error("internal trace crossed external model trust boundary")
+		}
 		if r.Method != "POST" || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer "+string(secret) || r.Header.Get("Content-Type") != "application/json" {
 			t.Error("incorrect dispatch")
 		}
@@ -96,7 +100,7 @@ func TestTransportJSON(t *testing.T) {
 		_, _ = io.WriteString(w, completion())
 	}))
 	defer s.Close()
-	x, err := clientFor(t).Transport(t.Context(), submission(s.URL+"/v1/", false), secret)
+	x, err := clientFor(t).Transport(observability.Continue(t.Context(), "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"), submission(s.URL+"/v1/", false), secret)
 	b := readExchange(t, x, err)
 	if !strings.Contains(string(b), `"model":"public-model"`) || calls.Load() != 1 {
 		t.Fatal("model mapping or single submission failed")
