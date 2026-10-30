@@ -688,3 +688,76 @@ for (const upstreamMode of ['fixture', 'live']) {
     });
   }
 }
+
+test('virtual key cleanup failure retains the first HTTP status without private response data', async (t) => {
+  const privateKey = randomBytes(24).toString('hex');
+  const baseUrl = await fixture(t, (req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/key/generate')
+      return res.end(JSON.stringify({ key: privateKey }));
+    res.writeHead(req.url === '/key/delete' ? 500 : 403);
+    res.end(JSON.stringify({ error: { detail: privateKey } }));
+  });
+  const report = await runPhase1(
+    { baseUrl, only: [7] },
+    {
+      relay: {
+        baseUrl,
+        adminKey: 'test-master',
+        allowModelCalls: true,
+        models: [{ name: 'fake', provider: 'fake-a', testOnly: true }],
+      },
+    },
+  );
+  assert.equal(report.items[6].status, 'FAIL');
+  assert.match(
+    report.items[6].reason,
+    /虚拟Key清理失败；首失：HTTP状态403，预期200/,
+  );
+  assert.equal(JSON.stringify(report).includes(privateKey), false);
+});
+
+test('multiple virtual key cleanup failures retain the original HTTP failure', async (t) => {
+  const privateKey = randomBytes(24).toString('hex');
+  let created = 0,
+    calls = 0,
+    deleted = 0;
+  const baseUrl = await fixture(t, (req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/key/generate')
+      return res.end(JSON.stringify({ key: privateKey + ++created }));
+    if (req.url === '/key/delete') {
+      deleted++;
+      res.writeHead(500);
+      return res.end('{}');
+    }
+    if (++calls === 1)
+      return res.end(
+        '{"id":"test-request","choices":[{}],"usage":{"total_tokens":2}}',
+      );
+    res.writeHead(calls === 2 ? 429 : 500);
+    res.end(
+      JSON.stringify({
+        error: { type: calls === 2 ? 'rate_limit_exceeded' : privateKey },
+      }),
+    );
+  });
+  const report = await runPhase1(
+    { baseUrl, only: [7] },
+    {
+      relay: {
+        baseUrl,
+        adminKey: 'test-master',
+        allowModelCalls: true,
+        models: [{ name: 'fake', provider: 'fake-a', testOnly: true }],
+      },
+    },
+  );
+  assert.equal(created, 2);
+  assert.equal(deleted, 2);
+  assert.match(
+    report.items[6].reason,
+    /首失：HTTP状态500，预期400\/401\/402\/403\/429/,
+  );
+  assert.equal(JSON.stringify(report).includes(privateKey), false);
+});

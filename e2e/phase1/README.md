@@ -220,6 +220,14 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 
 `baseUrl` 是操作者可达的 LiteLLM 管理 API 根地址，管理 Key仍只从私有凭据文件读取。真实模式⑦必须给出 `publicBaseUrl`，指向调用方实际使用的 OpenAI API 根路径；管理、用量查询走 `baseUrl`，所有成功调用及限流、预算、吊销探针均经 `publicBaseUrl/chat/completions`，只携带新签发的虚拟 Key。域名入口未配置时失败，不用内部直连代替外部验收。免费夹具未配置公开入口时保留原来的 `baseUrl/v1/chat/completions`。
 
+经 Auriga 的独立 LiteLLM 管理 listener 验收时，配置 `relay.browserAdmin: true`，
+`baseUrl` 填管理 listener 的 `/ai/` 根路径，例如 `http://192.0.2.10:8086/ai/`。
+私有 JSON 的 `admin` 提供正常管理员的 `url`、`accountId`、`username`、`password`、
+`totpSecret`。验收器真实填写管理台登录表单，核本人身份后点击概览的 LiteLLM 入口，让浏览器自动
+完成跨 listener 交接；不注入 cookie、不关闭 Origin 检查、不使用应急登录。
+健康、模型清单、Key 管理和用量请求复用该浏览器的真实管理会话，管理 Key仍只留在
+私有 JSON。管理请求限制在同一已配置来源和固定 API 路径；报告只记录交接状态码。
+
 ⑥ 免费模式核至少两个独立假提供商及 apiBase；真实模式核两个不同上游模型，允许同提供商同地址。两者均检查 `/model/info` 与实际名称、地址一致，真实模式额外核上游模型名；再经两个 DSH UI 对每个模型各调用一次。`modelUi.cloud`、`modelUi.desktop` 各配 `actions`、`responseSelector`、`requestIdAttribute`；动作可用 `valueFrom: "model"/"marker"`。模型回复须含本次唯一 marker（真实模式的输入动作应要求模型原样回复 marker），回复 UI 还需提供可关联的 LiteLLM request ID 属性。脚本按该 ID查询官方 `/spend/logs?request_id=...&summarize=false`，核本次非零 token 用量，最多等10秒。无 UI 能力或请求 ID 接线时 SKIP/FAIL，不用直接代理请求代替 DSH 调用。
 
 ⑦ 需要 LiteLLM 数据库及 adminKey。签发10分钟有效、预算1 USD、RPM为1的临时 Key：标准OpenAI JSON调用成功，第二次请求必须明确命中RPM限流；另一个预算为0的Key必须返回明确预算错误；查Key spend和本次请求token用量；吊销后相同Key必须401/403。每个调用请求限定 `max_tokens: 8`，真实模式可能产生费用，仅在已有授权下启用。限流/预算错误必须符合对应语义，普通鉴权失败不能冒预算生效。所有新Key在成功/失败后均尝试删除；清理失败即FAIL，请管理员检查别名为 `phase1-*` 的短期Key。单项报告标明实际 `upstreamMode`；本地HTTP夹具仍不是提供商或NAS验收证据。

@@ -136,6 +136,11 @@ export class BrowserSteps {
     return this.journey?.report;
   }
 
+  async relayAdminRequest(url, state, options) {
+    const { relayAdminRequest } = await import('./relay-admin.mjs');
+    return relayAdminRequest(this, url, state, options);
+  }
+
   async desktop(state) {
     this.state = state;
     const descriptor = JSON.parse(
@@ -473,7 +478,15 @@ export class BrowserSteps {
           .locator(settings.responseSelector)
           .filter({ hasText: marker })
           .getAttribute(settings.requestIdAttribute);
-        await waitSpend(this.config.relay, requestId, state);
+        await waitSpend(
+          this.config.relay,
+          requestId,
+          state,
+          this.config.relay.browserAdmin === true
+            ? (url, state, options) =>
+                this.relayAdminRequest(url, state, options)
+            : undefined,
+        );
       }
     }
   }

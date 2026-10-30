@@ -211,6 +211,10 @@ export async function runPhase1(options, config, dependencies = {}) {
       identityReady = true;
     }
   };
+  const relayAdminRequest = async (url, state, settings) =>
+    config.relay?.browserAdmin === true
+      ? (await getAdapter()).relayAdminRequest(url, state, settings)
+      : request(url, state, settings);
   const cloud = async (state) => {
     if (!cloudReady) {
       await identity(state);
@@ -265,7 +269,7 @@ export async function runPhase1(options, config, dependencies = {}) {
         item.checks.push({ name: check.name, status: 'PASS' });
       }
       if (config.relay?.baseUrl) {
-        const data = await request(
+        const data = await relayAdminRequest(
           new URL('health/readiness', trailing(config.relay.baseUrl)),
           state,
           { key: config.relay.adminKey },
@@ -374,7 +378,7 @@ export async function runPhase1(options, config, dependencies = {}) {
         throw new Skip(
           '双DSH模型调用UI尚未接线：缺少modelUi；直接代理请求不能代替DSH调用',
         );
-      const pool = await request(
+      const pool = await relayAdminRequest(
         new URL('model/info', trailing(config.relay.baseUrl)),
         state,
         { key: config.relay.adminKey },
@@ -403,7 +407,11 @@ export async function runPhase1(options, config, dependencies = {}) {
       await (await getAdapter()).models(state);
     },
     async (state, item) => {
-      item.upstreamMode = await virtualKeys(config.relay, state);
+      item.upstreamMode = await virtualKeys(
+        config.relay,
+        state,
+        relayAdminRequest,
+      );
     },
     async (state, item) => {
       if (
@@ -472,6 +480,8 @@ export async function runPhase1(options, config, dependencies = {}) {
   }
   const journey = adapter?.evidence?.();
   if (adapter?.desktopEvidence) report.desktop = adapter.desktopEvidence;
+  if (adapter?.relayAdminEvidence)
+    report.relayAdmin = adapter.relayAdminEvidence;
   if (journey) report.cloudJourney = journey;
   report.finishedAt = new Date().toISOString();
   report.summary = Object.fromEntries(
@@ -524,7 +534,7 @@ function modelCallMode(relay) {
   return mode;
 }
 
-async function virtualKeys(relay, state) {
+async function virtualKeys(relay, state, adminRequest = request) {
   if (!relay?.baseUrl) throw new Skip('RELAY-LITELLM尚未部署或未配置');
   const mode = modelCallMode(relay);
   if (mode === 'live')
@@ -539,7 +549,10 @@ async function virtualKeys(relay, state) {
     : new URL('v1/chat/completions', base);
   const keys = [];
   const api = (path, options = {}) =>
-    request(new URL(path, base), state, { key: relay.adminKey, ...options });
+    adminRequest(new URL(path, base), state, {
+      key: relay.adminKey,
+      ...options,
+    });
   const generate = async (settings) => {
     const result = await api('key/generate', {
       method: 'POST',
@@ -594,21 +607,28 @@ async function virtualKeys(relay, state) {
     );
     const infoUrl = new URL('key/info', base);
     infoUrl.searchParams.set('key', key);
-    const info = await request(infoUrl, state, { key: relay.adminKey });
+    const info = await adminRequest(infoUrl, state, { key: relay.adminKey });
     requireThat(Number.isFinite(info?.info?.spend), '虚拟Key用量不可查');
-    await waitSpend(relay, completion.id, state);
+    await waitSpend(relay, completion.id, state, adminRequest);
     await api('key/delete', { method: 'POST', body: { keys: [key] } });
     keys.splice(keys.indexOf(key), 1);
     await call(key, [401, 403]);
   } catch (error) {
     failure = error;
   }
+  const first =
+    failure instanceof StepError &&
+    /^HTTP状态\d{3}，预期[\d/]+$/.test(failure.message)
+      ? '；首失：' + failure.message
+      : '';
   for (const key of keys) {
     try {
       await api('key/delete', { method: 'POST', body: { keys: [key] } });
     } catch {
       failure = new StepError(
-        '虚拟Key清理失败；10分钟到期前请在LiteLLM管理界面检查phase1测试Key',
+        '虚拟Key清理失败' +
+          first +
+          '；10分钟到期前请在LiteLLM管理界面检查phase1测试Key',
       );
     }
   }
@@ -616,7 +636,12 @@ async function virtualKeys(relay, state) {
   return mode;
 }
 
-export async function waitSpend(relay, requestId, state) {
+export async function waitSpend(
+  relay,
+  requestId,
+  state,
+  adminRequest = request,
+) {
   requireThat(
     typeof requestId === 'string' && requestId.length > 0,
     '模型响应缺少可关联的request id',
@@ -626,7 +651,7 @@ export async function waitSpend(relay, requestId, state) {
   url.searchParams.set('summarize', 'false');
   const deadline = Date.now() + 10000;
   do {
-    const rows = await request(url, state, { key: relay.adminKey });
+    const rows = await adminRequest(url, state, { key: relay.adminKey });
     requireThat(Array.isArray(rows), 'LiteLLM spend/logs返回格式不合法');
     if (
       rows.some(
