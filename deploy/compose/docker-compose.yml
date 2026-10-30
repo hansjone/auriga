@@ -35,9 +35,8 @@ services:
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     cap_drop: [ALL]
-    # Docker secrets retain the preparing runner's UID on Linux bind mounts.
-    # Read the private files without granting write/DAC override capabilities.
-    cap_add: [DAC_READ_SEARCH]
+    # File-backed secrets: master/salt gid10003; PostgreSQL password gid999.
+    group_add: ['10003', '999']
     security_opt: ['no-new-privileges:true']
     privileged: false
     entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
@@ -73,7 +72,7 @@ services:
   litellm-init:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     cap_drop: [ALL]
-    cap_add: [DAC_READ_SEARCH]
+    group_add: ['10003', '999', '10001']
     security_opt: ['no-new-privileges:true']
     privileged: false
     entrypoint: ['python', '/etc/litellm/provision.py']

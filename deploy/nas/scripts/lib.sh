@@ -502,6 +502,44 @@ bootstrap_nas_materials() {
     -litellm-ui-origin "${AURIGA_LITELLM_UI_ORIGIN-}")
 }
 
+install_litellm_materials() (
+  # A private runtime directory holds leaf bind sources. Installation originals
+  # stay uid10001/0600, independent of service readers and receipt validation.
+  _source_dir="$AURIGA_DATA_ROOT/config/materials/litellm"
+  _runtime_dir="$AURIGA_DATA_ROOT/config/litellm"
+  [ -d "$_source_dir" ] && [ ! -L "$_source_dir" ] || die "invalid LiteLLM source directory"
+  if [ -e "$_runtime_dir" ] || [ -L "$_runtime_dir" ]; then
+    [ -d "$_runtime_dir" ] && [ ! -L "$_runtime_dir" ] || die "invalid LiteLLM runtime directory"
+    [ "$(stat -c '%u:%g:%a' "$_runtime_dir")" = '0:0:700' ] || die "invalid LiteLLM runtime directory metadata"
+  else
+    (umask 077; mkdir "$_runtime_dir")
+    chown_required 0:0 "$_runtime_dir"
+    chmod 0700 "$_runtime_dir"
+  fi
+  for _name in master salt team pg_password; do
+    case "$_name" in
+      master|salt) _owner=10001:10003 ;;
+      team) _owner=10001:10001 ;;
+      pg_password) _owner=999:999 ;;
+    esac
+    _source="$_source_dir/$_name"; _target="$_runtime_dir/$_name"
+    [ -f "$_source" ] && [ ! -L "$_source" ] && [ "$(stat -c '%h' "$_source")" = 1 ] || die "invalid LiteLLM source leaf"
+    if [ -e "$_target" ] || [ -L "$_target" ]; then
+      [ -f "$_target" ] && [ ! -L "$_target" ] || die "invalid LiteLLM runtime leaf"
+      [ "$(stat -c '%u:%g:%a:%h' "$_target")" = "$_owner:640:1" ] || die "invalid LiteLLM runtime leaf metadata"
+      cmp -s "$_source" "$_target" || die "LiteLLM runtime secret changed; refusing rotation"
+    else
+      _temporary=$(umask 077; mktemp "$_runtime_dir/.install.XXXXXX")
+      trap 'rm -f -- "$_temporary"' EXIT
+      cat "$_source" >"$_temporary"
+      chown_required "$_owner" "$_temporary"
+      chmod 0640 "$_temporary"
+      mv -T "$_temporary" "$_target"
+      trap - EXIT
+    fi
+  done
+)
+
 install_edge_material() {
   _source=$1; _target=$2; _mode=$3
   if [ -e "$_target" ] || [ -L "$_target" ]; then

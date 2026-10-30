@@ -147,14 +147,6 @@ else
   mkdir -m 755 "$VAR/panel"
 fi
 
-# File-backed secrets: only the intended container identity can read each key.
-if [ "$(id -u)" -eq 0 ]; then
-  chgrp 999 "$VAR/litellm/pg_password"
-  chgrp 10001 "$VAR/litellm/team"
-else
-  sudo -n chgrp 999 "$VAR/litellm/pg_password"
-  sudo -n chgrp 10001 "$VAR/litellm/team"
-fi
-chmod 640 "$VAR/litellm/pg_password" "$VAR/litellm/team"
+sh "$COMPOSE/scripts/litellm-permissions.sh" "$VAR"
 
 echo "prepare done; env file: $VAR/compose.env"

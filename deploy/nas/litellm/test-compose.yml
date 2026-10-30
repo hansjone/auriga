@@ -20,7 +20,7 @@ services:
   litellm:
     image: *litellm
     cap_drop: [ALL]
-    cap_add: [DAC_READ_SEARCH]
+    group_add: ['10003', '999']
     security_opt: ['no-new-privileges:true']
     entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
     environment:
@@ -48,7 +48,7 @@ services:
   litellm-init:
     image: *litellm
     cap_drop: [ALL]
-    cap_add: [DAC_READ_SEARCH]
+    group_add: ['10003', '999', '10001']
     security_opt: ['no-new-privileges:true']
     profiles: [verify]
     entrypoint: ['python', '/test/provision.py']

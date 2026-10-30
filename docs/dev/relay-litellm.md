@@ -16,6 +16,14 @@ compose 默认另发布 edge 的 8086 端口；首次 prepare 可加 `--litellm-
 
 LiteLLM 不发布宿主端口。内部健康入口为 `http://litellm:4000/health/liveliness`，compose 健康检查另读 `/health/readiness`；`litellm-init` 正常退出后 ai-relay 才启动。若数据库已有旧卷但没有 LiteLLM 库，首次初始化 hook 不会重新运行，应使用新部署目录验收。
 
+两个 LiteLLM 容器均使用 `cap_drop: ALL`、`no-new-privileges`，无 `cap_add`。compose prepare 保留生成文件的 UID，设置文件为 0640：master/salt 属专用 GID **10003**，pg_password 属 GID **999**，team 属 GID **10001**。`litellm` 加入 10003/999，`litellm-init` 另加入 10001；PostgreSQL 和 ai-relay 沿各自原有组读取对应秘密。prepare 需要 root 或可非交互执行 chgrp 的 sudo；不要用额外 capability 或全局可读权限替代。
+
+NAS 的 `config/materials/litellm/` 原件保持安装器 UID10001、文件0600，不放宽原材料权限。render 在私有 `config/litellm/` 生成独立运行时副本，master/salt 为 10001:10003、team 为 10001:10001、pg_password 为 999:999，文件均0640；compose secrets 只绑定这些副本。重复 render 核对内容和元数据，拒绝链接、内容漂移和权限漂移，不自动轮换或修复。
+
+备份须保留数据库与原秘密、UID/GID 和模式。NAS 可同时保存运行时副本；恢复时先还原完整原材料与回执，再通过 render 重建缺失的运行时副本，已有副本须与原件一致。compose 恢复后重新执行 prepare 应用属组权限。更换任何被绑定的秘密文件后须重新创建消费容器。
+
+权限回归在 Linux root 下运行 `python3 deploy/nas/litellm/permissions_test.py`；本机 Docker 真实验证运行 `python3 deploy/nas/litellm/permissions_e2e.py`。后者由 UID1001 以0600创建材料，使用生产 compose/NAS 的 LiteLLM 服务定义和随机独立 project，验证 healthy、init退出0、能力集合为零，并清理自身容器与卷，不发布宿主端口。
+
 ## 接入模型与组池
 
 1. 登录 Auriga 管理台，打开“模型”，进入 `/ai/ui/`；LiteLLM 仍要求其自身管理员登录。由部署管理员安全取用 master 文件作为 LiteLLM 初始管理员凭据，不通过聊天、URL 或剪贴板日志传递。
@@ -48,7 +56,7 @@ node scripts/beta-ui/runner.mjs litellm --state D:\auriga-beta-example --origin 
 
 然后沿 Beta 原流程启动。使用新建的 Beta StateDir（含独立 UI 端口 18088），从管理台模型入口交接；外接 LiteLLM 也必须设置 `SERVER_ROOT_PATH=/ai` 和指向该 UI Origin 的 `PROXY_BASE_URL`。命令只保存 Origin 与秘密文件路径，不取用生产密钥；未配置 LiteLLM 时 Beta 不提供中转站。原生 Beta 的端口发布仅用于本机调试，公开栈无需开放 4000。
 
-独立 LiteLLM 验收：运行 `node deploy/nas/litellm/verify.mjs`。脚本只接受本机 Docker socket，创建随机 project，使用本地假上游，并在结束时清理自己的容器和卷；这项检查不覆盖 Auriga 管理员会话或 gateway 成员身份链路。
+独立 LiteLLM 验收：在 Linux 上以 root 或可非交互 chgrp 的 sudo 用户运行 `node deploy/nas/litellm/verify.mjs`。脚本只接受本机 Docker socket，按部署权限脚本准备秘密，创建随机 project，使用本地假上游，并在结束时清理自己的容器和卷；这项检查不覆盖 Auriga 管理员会话或 gateway 成员身份链路。
 
 完整入口验收使用 `deploy/compose/scripts/verify-relay.mjs`。先按公开流程准备并启动全新的一次性本机栈，再将 `scripts/relay-fixture.yml` 中的假上游加入该测试 project。运行：
 
