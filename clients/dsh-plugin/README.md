@@ -8,7 +8,9 @@ Set `AURIGA_MODE` when explicitly selecting a runtime:
 
 - `standalone` (default): local emergency account + pluggable JS identity connectors, single owner, no platform connection.
 - `managed`: platform-hosted instance — identity door, plugin/workspace guards, `/_auriga/health`, heartbeat, team panel shell, `ctx.get('auriga')`.
-- `connect`: local DSH connected to a team platform (stub).
+- `connect`: local DSH connected to a team platform. A saved platform origin in
+  native Auriga settings activates the local team login flow without requiring
+  members to set this environment variable.
 
 ## Library
 
@@ -44,6 +46,23 @@ Cordis bundle row: `auriga-dsh` (the root export is `src/plugin.js`). The explic
 
 ## Install in DSH
 
+Members: [中文安装指南](../../docs/user/install-plugin.zh.md). Requires DSH
+**0.2.1-rc.3** or a newer administrator-validated release, plus Node.js 22.12+.
+The bundle declares `engines.dsh`; missing native admission also fails with an
+explicit upgrade message. Install into the profile you use:
+
+```sh
+dsh plugin --profile web add /absolute/path/auriga-dsh-0.1.0-rc.1.tgz
+```
+
+Use the Desktop-bundled CLI with `desktop` for the Desktop profile; npm-installed
+DSH cannot manage that reserved profile. HTTPS tarball URLs are accepted by the
+same pnpm-backed command. Reload DSH, open Settings → Auriga, enter your team's
+platform origin, test and save it, then sign in. Sign out under Account and
+security. [Release preparation](../../docs/dev/plugin-distribution.md) uses
+`node scripts/plugin/package.mjs --version <SemVer>` from the repository root
+and produces a versioned tgz, SHA256 and content manifest without install hooks.
+
 Add the published package or prepared `.tgz` through DSH's native plugin manager. The package declares `dsh.bundle.patch` and ships `cordis.patch.yml`, its Node/browser entries and built native UI. Installation uses DSH's normal package/script approval policy; no installation hook builds code or contacts headquarters.
 
 For a development directory link, first install the repository's documented workspace dependencies (including this plugin's runtime dependencies), then run from the repository root:
@@ -54,11 +73,11 @@ node clients/dsh-plugin/scripts/package-ui.mjs
 
 Add **`clients/dsh-plugin`** in DSH. A fresh checkout does not contain the ignored `ui/` build output; adding an unprepared directory can install the bundle but cannot serve its UI. Rebuild after changing panel sources. To prepare the distributable tarball, run `npm pack` in this plugin directory; its existing `prepack` performs the UI build. A consumer of the resulting tarball needs neither the monorepo nor Vite.
 
-The default installed surface is the unconfigured shell, protected by native DSH authentication. Bundle installation does not complete Auriga login or the pending connect runtime.
+The default installed surface is unconfigured and protected by native DSH authentication. Bundle installation does not complete Auriga login. Save the team platform origin in native Auriga settings and use the ordinary login page.
 
 The release preparer runs `npm pack` from this monorepo. `prepack` builds the native `web/panel` module and includes `ui/auriga-team-panel.js` and its package-version/SRI metadata. Published installs have no install hook, Vue dependency, frontend build step or requirement to download a homepage from headquarters. Managed mode continues to use the verified platform manifest; it never falls back to packaged UI after verification or loading failure.
 
-The standalone identity library remains available, but its login transactions are not yet mounted as DSH HTTP login routes. Connect authentication, account/security migration and configuration writes are still pending. The unconfigured UI does not claim these capabilities are working.
+The standalone identity library remains available separately from the desktop team login flow. The unconfigured UI does not claim authentication, Team connectivity or model authorization; each has its own status after configuration.
 
 See `docs/dev/dsh-plugin.md` and `contracts/plugin/README.md`.
 
