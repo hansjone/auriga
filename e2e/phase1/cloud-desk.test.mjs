@@ -6,6 +6,7 @@ import {
   nativeClient,
   configureFixtureModel,
   diagnoseNativeSession,
+  loginDesktop,
 } from './cloud-desk.native.mjs';
 import { validateRunConfig } from './cloud-desk.mjs';
 import {
@@ -20,6 +21,28 @@ const tools = [{ type: 'function', function: { name: 'auriga_send_message' } }];
 const message = (text) => ({ role: 'user', content: text });
 const external = (marker, id = '019f0000-0000-7000-8000-000000000001') =>
   message(`[Auriga external message ${id}]\n${marker}`);
+
+test('resume preserves the existing desktop identity and rejects another authenticated subject', async () => {
+  const request = async () => ({
+    loggedIn: true,
+    available: true,
+    account: { subject: 'same-member' },
+  });
+  assert.equal(
+    (
+      await loginDesktop(
+        request,
+        { accountId: 'same-member' },
+        { resume: true },
+      )
+    ).resumed,
+    true,
+  );
+  await assert.rejects(
+    loginDesktop(request, { accountId: 'another-member' }, { resume: true }),
+  );
+  await assert.rejects(loginDesktop(request, { accountId: 'same-member' }));
+});
 
 async function fixture(t) {
   const f = await startFixture({ runId: 'test-run' });
@@ -224,6 +247,17 @@ test('a submitted send or a local echo cannot satisfy cloud/desktop conversation
   }));
   state.runId = 'test-run';
   assertConversation(report, state);
+  report.cloud.browserAuthenticated = false;
+  assert.throws(() => assertConversation(report, state));
+  Object.assign(report.cloud, {
+    memberAuthenticated: true,
+    authentication: 'public-iam-cookie-redirect',
+    httpsVerified: true,
+  });
+  assertConversation(report, state);
+  report.cloud.httpsVerified = false;
+  assert.throws(() => assertConversation(report, state));
+  report.cloud.httpsVerified = true;
   state.receipts[0].side = 'desktop';
   assert.throws(() => assertConversation(report, state));
 });

@@ -1,7 +1,7 @@
 # 云端 DSH ↔ 桌面 DSH 验收
 
 `cloud-desk.mjs` 驱动节点代理实际创建的 managed 云实例和原生 CLI 安装 tgz 的独立桌面 profile。
-使用公开浏览器登录、DSH Settings/Session RPC 和 Auriga 工具；只有模型响应来自本地固定 OpenAI 兼容服务。
+使用公开 IAM 登录/实例入口或浏览器登录、DSH Settings/Session RPC 和 Auriga 工具；只有模型响应来自本地固定 OpenAI 兼容服务。
 不注入登录态、来源身份、网络入站或回执，不调用付费模型，不修改系统 DNS、信任或 TLS 校验。
 
 ## 验收口径
@@ -11,9 +11,9 @@
 `passed` 必须同时具备两次入网结果、四次发送工具结果，以及正确接收端模型输入中的四个不同消息 ID。
 发起提示、本地回显、`request_submitted`、宿主 ACTIVE 或云实例 READY 都不能单独算互发通过。
 
-未完成真实云桌互发前，单测和桌面冒烟只能证明准备部分。当前 managed 分支尚未接入 N1 工具和接收控制，
+未完成真实云桌互发前，单测和桌面冒烟只能证明准备部分。部署须具备 managed N1 工具和接收控制，
 仅升级宿主不能证明该接线已完成。脚本遇到缺工具或缺路由会失败，不退回 connect 冒充 managed。
-接收控制目前检查现有 `/auriga/local-login/messaging/receive` 公开入口；云端尚未提供该能力时也会明确失败。
+接收控制检查 `/auriga/local-login/messaging/receive` 公开入口；先确认两端网络真正 connected，再由 Agent 入网。
 
 ## 依赖和桌面准备
 
@@ -38,10 +38,11 @@ node e2e/phase1/cloud-desk.mjs prepare .agent-evidence/cloud-desk/prepare.json
 ```
 
 生成 `desktop/cloud-desk-desktop.json`，后续运行直接复用，不重复安装。
-每次真实登录使用全新 profile；`usedForLiveRun=true` 的 profile 不自动重置或覆盖。
+首次真实登录使用全新 profile；`usedForLiveRun=true` 的 profile 不自动重置或覆盖。
+中断恢复可设 `resumeDesktop:true`，必须保持记录中的同一平台与成员；已登录状态还核对真实 subject。
 未做真实登录的 R3 profile 可以直接续用；不要重复安装或清空身份。
 
-Playwright 复用 `e2e/phase1/package-lock.json` 锁定依赖（当前为 1.56.1），不要改变产品 workspace 依赖。
+Playwright 复用 `e2e/package-lock.json` 锁定依赖（当前为 1.56.1），不要改变产品 workspace 依赖。
 可在独立测试依赖目录运行 `npm ci --ignore-scripts --no-audit --no-fund`，
 然后设置 `PLAYWRIGHT_BROWSERS_PATH` 指向测试缓存，运行其中的 `node_modules/playwright/cli.js install chromium`。
 `playwrightModuleRoot` 指向该依赖目录；已集成 phase1 依赖时可以省略。
@@ -68,12 +69,38 @@ R4 复用已有成员时用 `existingCloud: { "credentialsFile": "共享栈的me
 现有实例通过真实“进入实例”按钮打开，停机实例通过“启动并进入”唤醒。
 本机示例域名模式只给本次 Chromium 设置 resolver 和明确的 direct proxy，不改系统代理或 DNS。
 
-共享栈测试前必须持本任务“auriga-SEND-FIX R4 只测不重建”锁，结束立即释放；脚本复用已有成员时检查此锁。
+共享栈测试前必须持本任务“auriga-SEND-FIX R5 只测不重建”锁，结束立即释放；脚本也接受旧 R4 锁。
 云实例禁止访问宿主私网时，可用 `fixture: { "cloudInstanceId": "同一个A实例ID" }`：
 脚本通过 Docker exec 的 stdin 在该实例临时启动仅听回环的随机端口模型服务，桌面模型另听本机回环。
 不写云端插件/配置文件，不发布端口、不修改网络隔离；私有控制键不放 argv，结束关闭两个临时服务。
 两侧夹具使用同一 run ID 汇总真实请求/回复证据。主会话固定使用 standard Agent 预设和4096-token模型，
 64-token的标题辅助请求只返回标题，不触发工具或充当收件。报告只记请求结构和工具名，不记原始提示。
+
+HTTPS 共享栈可配置 `httpsCloud: { "credentialsFile": "本栈owner凭据文件", "instanceId": "本人实例ID" }`，
+替代浏览器登录分支；当前此传输只验收域名模式。它真实完成 IAM 表单/MFA、读取 `/me`、打开本人实例，
+再通过 `/open/{id}` 的真实重定向和合法 Domain cookie 换取实例访问权限，不注入登录态。
+`caFile` 同时用于 Node HTTPS 证书校验；`dnsMappings` 为本次测试域名到回环/私网 IPv4 的映射。
+桌面通过 Node `--import` 预载映射，只给子进程补这些域名的 `NO_PROXY`，保持原 URL、Host、SNI 和 TLS 校验。
+此分支报告 `authentication=public-iam-cookie-redirect`，不宣称浏览器 UI 已验收。
+
+第二成员可先使用 `invite-member`：`adminCredentialsFile` 指向同一测试栈管理员材料，
+`desktopMemberFile` 指向本 worktree 的私有文件（父目录须仅本人可读）。它发现真实 provider 和内置 member 角色，
+正常创建一次性邀请、注册及 MFA；邀请显式绑定 member 角色，避免无角色设备注册网络时返回 403。
+再次执行会保留同一成员，只通过管理员公开角色绑定接口补齐 member 角色，不重复创建账号或授管理员角色。
+
+```powershell
+node e2e/phase1/cloud-desk.mjs invite-member .agent-evidence/cloud-desk/run.json
+```
+
+统一入口第⑤项支持凭据配置中的 `cloudDesk` 对象，内容就是上述运行配置，另加 `testOnly:true`。
+可加 `output` 指定全新的原生证据目录；否则在统一报告旁分配随机目录。运行方式：
+
+```powershell
+node e2e/phase1/run.mjs --base-url https://portal.example.com:8080 --admin-credentials PRIVATE_CONFIG --only 5 --output .agent-evidence/cloud-desk/phase1.json
+```
+
+第⑤项只在四条真实收件及全部清理均通过时 PASS，并保留原生报告状态和 run ID；失败 trace 只取实际失败请求。
+仅选择⑤即使通过也有七项 SKIP、退出 2，不代表八项完整验收。
 
 只核云端是否能走到真实入网工具（桌面入口尚不可用时）可执行：
 

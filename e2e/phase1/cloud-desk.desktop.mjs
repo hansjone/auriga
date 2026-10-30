@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, realpath, access } from 'node:fs/promises';
 import { resolve, join, dirname, relative, isAbsolute } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createHostOutput } from '../../scripts/beta-ui/plugin-dsh.mjs';
 import { privatePath } from '../../scripts/beta-ui/runner.mjs';
 import {
@@ -174,7 +175,10 @@ export async function prepareDesktop({
   return result;
 }
 
-export async function launchDesktop(prepared, { connect, caFile } = {}) {
+export async function launchDesktop(
+  prepared,
+  { connect, caFile, dnsMappings } = {},
+) {
   const host = await nativeRuntime(prepared.runtime);
   const state = resolve(prepared.state);
   const ownedRoot = resolve(import.meta.dirname, '../..');
@@ -202,10 +206,28 @@ export async function launchDesktop(prepared, { connect, caFile } = {}) {
     ...isolatedEnvironment(state),
     AURIGA_MODE: 'connect',
     ...(caFile ? { NODE_EXTRA_CA_CERTS: resolve(caFile) } : {}),
+    ...(dnsMappings
+      ? { AURIGA_CLOUD_DESK_DNS: JSON.stringify(dnsMappings) }
+      : {}),
   };
+  if (dnsMappings) {
+    const bypass = Object.entries(env)
+      .filter(([name]) => /^no_proxy$/i.test(name))
+      .map(([, value]) => value);
+    for (const name of Object.keys(env))
+      if (/^no_proxy$/i.test(name)) delete env[name];
+    env.NO_PROXY = [...bypass, ...Object.keys(dnsMappings)].join(',');
+  }
   const child = spawn(
     process.execPath,
     [
+      ...(dnsMappings
+        ? [
+            '--import',
+            pathToFileURL(resolve(import.meta.dirname, 'cloud-desk.dns.mjs'))
+              .href,
+          ]
+        : []),
       host.bin,
       '--profile',
       'web',
@@ -277,6 +299,7 @@ export async function launchDesktop(prepared, { connect, caFile } = {}) {
     const value = await response.json();
     if (response.status !== 200)
       throw Object.assign(new Error('desktop_native_http_failed'), {
+        code: 'desktop_native_http_failed',
         status: response.status,
         ...([
           'httpsRequired',

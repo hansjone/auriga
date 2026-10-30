@@ -199,8 +199,22 @@ export async function configureFixtureModel(
   });
 }
 
-export async function loginDesktop(request, member) {
+export async function loginDesktop(request, member, { resume = false } = {}) {
   let status = await request('/auriga/local-login/status');
+  if (resume && status.loggedIn) {
+    assert.ok(member.accountId);
+    assert.equal(
+      status.account?.subject,
+      member.accountId,
+      'resume only the same authenticated test member',
+    );
+    return {
+      loggedIn: true,
+      available: status.available,
+      accountId: status.account.subject,
+      resumed: true,
+    };
+  }
   assert.equal(
     status.loggedIn,
     false,
@@ -274,13 +288,24 @@ export async function loginDesktop(request, member) {
     const value = await request('/auriga/local-login/status');
     return value.loggedIn && value.available ? value : null;
   }, 'desktop_login_not_ready');
-  return { loggedIn: status.loggedIn, available: status.available };
+  if (member.accountId) assert.equal(status.account?.subject, member.accountId);
+  return {
+    loggedIn: status.loggedIn,
+    available: status.available,
+    accountId: status.account?.subject,
+  };
 }
 
 export function assertConversation(report, state) {
   assert.equal(report.cloud?.ready, true);
   assert.equal(report.cloud?.mode, 'managed');
-  assert.equal(report.cloud?.browserAuthenticated, true);
+  assert.ok(
+    report.cloud?.browserAuthenticated === true ||
+      (report.cloud?.memberAuthenticated === true &&
+        report.cloud?.authentication === 'public-iam-cookie-redirect' &&
+        report.cloud?.httpsVerified === true),
+    'authenticated cloud entry required',
+  );
   assert.equal(report.desktop?.installation, 'native-cli-tarball');
   assert.equal(report.desktop?.dshVersion, '0.2.1-rc.3');
   assert.match(report.desktop?.packageSHA256, /^[a-f0-9]{64}$/);

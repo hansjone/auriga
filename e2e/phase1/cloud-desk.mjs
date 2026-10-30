@@ -17,6 +17,7 @@ import {
   accessOrigin,
 } from './cloud-desk.browser.mjs';
 import { startFixture } from './cloud-desk.fixture.mjs';
+import { openHttpsCloud, inviteDesktopMember } from './cloud-desk.http.mjs';
 import {
   nativeClient,
   configureFixtureModel,
@@ -47,6 +48,15 @@ export function validateRunConfig(cfg, access) {
   accessOrigin(access.portalOrigin);
   accessOrigin(access.adminOrigin);
   assert.ok(['domain', 'ip'].includes(access.mode));
+  if (cfg.httpsCloud) {
+    assert.equal(
+      access.mode,
+      'domain',
+      'public HTTPS cookie transport currently verifies domain mode',
+    );
+    assert.equal(access.portalOrigin.scheme, 'https');
+    assert.ok(cfg.caFile && cfg.dnsMappings && cfg.httpsCloud.credentialsFile);
+  }
   const connect = cfg.connect;
   if (
     !connect?.network?.roots?.length ||
@@ -65,15 +75,20 @@ export function validateRunConfig(cfg, access) {
   assert.equal(new URL(connect.network.wssUrl).protocol, 'wss:');
   assert.ok(connect.providerId && connect.clientId && connect.issuer);
   assert.equal(new URL(connect.issuer).origin, platform.origin);
+  assert.equal(
+    platform.origin,
+    accessOrigin(access.portalOrigin),
+    'desktop and cloud use the same installation',
+  );
   assert.ok(
     cfg.cloudCwd &&
       cfg.desktopDescriptor &&
-      (cfg.existingCloud || cfg.enrollmentFile),
+      (cfg.httpsCloud || cfg.existingCloud || cfg.enrollmentFile),
   );
   if (cfg.fixture?.cloudInstanceId) {
     assert.equal(
       cfg.fixture.cloudInstanceId,
-      cfg.existingCloud?.instanceId,
+      cfg.httpsCloud?.instanceId ?? cfg.existingCloud?.instanceId,
       'model fixture must run in the authenticated cloud instance',
     );
     assert.match(cfg.fixture.cloudInstanceId, /^[a-f0-9-]{36}$/);
@@ -378,57 +393,99 @@ export async function run(cfg, output) {
     );
     assert.equal(await realpath(descriptorPath), descriptorPath);
     const descriptor = await json(descriptorPath);
-    assert.equal(
-      descriptor.usedForLiveRun,
-      false,
-      'fresh isolated desktop identity required for each live run',
-    );
-    const { chromium } = createRequire(
-      join(
-        resolve(cfg.playwrightModuleRoot ?? import.meta.dirname),
-        'package.json',
-      ),
-    )('playwright');
+    const member = cfg.desktopMemberFile
+      ? await json(cfg.desktopMemberFile)
+      : null;
+    if (descriptor.usedForLiveRun) {
+      assert.ok(member?.accountId && cfg.resumeDesktop === true);
+      assert.deepEqual(
+        descriptor.liveIdentity,
+        {
+          accountId: member.accountId,
+          platformOrigin: cfg.connect.platformOrigin,
+        },
+        'resume cannot change identity or installation',
+      );
+    }
     // The credentials belong only to this new disposable stack, never to a user vault.
-    if (cfg.existingCloud) await requireTestLock();
-    cloud = await (cfg.existingCloud ? openExistingCloud : createCloudMember)({
-      chromium,
-      access,
-      ...(cfg.existingCloud
-        ? {
-            member: await json(cfg.existingCloud.credentialsFile),
-            instanceId: cfg.existingCloud.instanceId,
-          }
-        : { enrollment: await json(cfg.enrollmentFile) }),
-      resolveLoopback: cfg.resolveLoopback === true,
-      report,
-      stage,
-    });
+    if (cfg.httpsCloud || cfg.existingCloud) await requireTestLock();
+    if (cfg.httpsCloud) {
+      cloud = await openHttpsCloud({ cfg, access, report, stage });
+    } else {
+      const { chromium } = createRequire(
+        join(
+          resolve(cfg.playwrightModuleRoot ?? import.meta.dirname),
+          'package.json',
+        ),
+      )('playwright');
+      cloud = await (cfg.existingCloud ? openExistingCloud : createCloudMember)(
+        {
+          chromium,
+          access,
+          ...(cfg.existingCloud
+            ? {
+                member: await json(cfg.existingCloud.credentialsFile),
+                instanceId: cfg.existingCloud.instanceId,
+              }
+            : { enrollment: await json(cfg.enrollmentFile) }),
+          resolveLoopback: cfg.resolveLoopback === true,
+          report,
+          stage,
+        },
+      );
+    }
     stage('desktop-login');
     descriptor.usedForLiveRun = true;
+    if (member?.accountId)
+      descriptor.liveIdentity = {
+        accountId: member.accountId,
+        platformOrigin: cfg.connect.platformOrigin,
+      };
     await writeFile(descriptorPath, JSON.stringify(descriptor, null, 2));
     desktop = await launchDesktop(descriptor, {
       connect: cfg.connect,
       caFile: cfg.caFile,
+      dnsMappings: cfg.dnsMappings,
     });
     report.desktop = {
       installation: descriptor.installation,
       packageVersion: descriptor.packageVersion,
       packageSHA256: descriptor.packageSHA256,
       dshVersion: descriptor.dshVersion,
-      ...(await loginDesktop(
-        desktop.request,
-        cfg.desktopMemberFile
-          ? await json(cfg.desktopMemberFile)
-          : cloud.member,
-      )),
+      ...(await loginDesktop(desktop.request, member ?? cloud.member, {
+        resume: cfg.resumeDesktop === true,
+      })),
     };
+    assert.notEqual(
+      report.desktop.accountId,
+      report.cloud.ownerId,
+      'cloud and desktop use different members',
+    );
     const clients = {
       cloud: nativeClient(cloud.request),
       desktop: nativeClient(desktop.request),
     };
-    for (const side of ['cloud', 'desktop'])
+    for (const side of ['cloud', 'desktop']) {
+      stage(side + '-network-ready');
+      await poll(
+        async () => {
+          const status = await (
+            side === 'cloud' ? cloud.request : desktop.request
+          )('/auriga/local-login/status');
+          report[side].network = {
+            available: status.network?.available === true,
+            connected: status.network?.connected === true,
+            state: /^[a-z_]+$/.test(status.network?.state ?? '')
+              ? status.network.state
+              : 'unknown',
+          };
+          return status.network?.connected === true;
+        },
+        side + '_network_not_ready',
+        90000,
+      );
       report[side].nativePlugin = await clients[side].activePlugin();
+    }
     stage('local-model-config');
     model = await startModelHost(cfg.fixture, report.runId);
     const provider = 'cloud-desk-' + randomBytes(6).toString('hex');
@@ -544,8 +601,14 @@ export async function run(cfg, output) {
         ? error.code
         : 'assertion_or_transport_failed',
     };
+    if (/^[a-z/]+$/.test(error.rpcMethod ?? ''))
+      report.failure.rpcMethod = error.rpcMethod;
     if (Number.isInteger(error.status))
       report.failure.httpStatus = error.status;
+    if (/^[a-f0-9]{32}$/.test(error.traceId ?? ''))
+      report.failure.traceId = error.traceId;
+    if (/^[a-z_.]+$/.test(error.remoteCode ?? ''))
+      report.failure.remoteCode = error.remoteCode;
   } finally {
     if (model) {
       try {
@@ -595,8 +658,8 @@ async function requireTestLock() {
   );
   assert.match(
     owner,
-    /auriga-SEND-FIX R4 只测不重建/,
-    'R4 requires its own test lock before live requests',
+    /auriga-SEND-FIX R[45] 只测不重建/,
+    'shared-stack requests require this task own test lock',
   );
 }
 
@@ -803,13 +866,20 @@ if (
 ) {
   const [command, configFile, output] = process.argv.slice(2);
   assert.ok(
-    ['prepare', 'run', 'probe-cloud'].includes(command) &&
+    ['prepare', 'run', 'probe-cloud', 'invite-member'].includes(command) &&
       configFile &&
-      (command === 'prepare' || output),
-    'Usage: node e2e/phase1/cloud-desk.mjs prepare CONFIG | run CONFIG NEW_OUTPUT_DIR | probe-cloud CONFIG NEW_OUTPUT_DIR',
+      (['prepare', 'invite-member'].includes(command) || output),
+    'Usage: node e2e/phase1/cloud-desk.mjs prepare CONFIG | invite-member CONFIG | run CONFIG NEW_OUTPUT_DIR | probe-cloud CONFIG NEW_OUTPUT_DIR',
   );
   const cfg = await json(configFile);
-  if (command === 'prepare') {
+  if (command === 'invite-member') {
+    await requireTestLock();
+    const result = await inviteDesktopMember(cfg, await json(cfg.accessFile), {
+      httpFailures: [],
+      stage: 'invite-desktop-member',
+    });
+    process.stdout.write(JSON.stringify(result) + '\n');
+  } else if (command === 'prepare') {
     const prepared = await prepareDesktop({ ...cfg, root });
     process.stdout.write(
       JSON.stringify({
