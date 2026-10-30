@@ -4,7 +4,7 @@ IAM 是唯一签发方。workspace 经受认证内部接口提交 tenant、成�
 
 契约新增内部托管凭据签发/吊销接口、外部换取接口及节点 Secrets 字段。workspace 把凭据经现有 HPKE 封装与规格一起下发；agent renderer 解密后原子写入实例材料目录的 0600 文件，以 `AURIGA_DEVICE_CREDENTIAL_FILE` 传递路径。平台 URL、网络安装信任根等非机密材料沿可信渲染配置下发，机密不进入环境变量、镜像或日志。
 
-managed 插件从文件读取凭据，以专用 managed-device grant 向既有 `/oauth2/token` 换取最长300秒设备 Bearer，并在到期前续期。凭据最长30天，到期后拒绝，重启轮换。通过同一 `createDeviceProvider`、network lifecycle/runtime、原生宿主适配和 consent 接线注册/取票、入网和发送；工具仅在严格 READY 后注册。换取或在线校验失败时关闭旧代连接并撤销工具，异步迟到结果不能恢复旧代。
+managed 插件从文件读取凭据，以专用 managed-device grant 向既有 `/oauth2/token` 换取最长300秒设备 Bearer，并在到期前续期。凭据最长30天，到期后拒绝，重启轮换。通过同一 `createDeviceProvider`、network lifecycle/runtime、原生宿主适配和 consent 接线注册/取票、入网和发送；入网成功仅在严格 READY 后返回，发送沿用同一运行时状态门禁。换取或在线校验失败时关闭旧代连接并撤销工具，异步迟到结果不能恢复旧代。
 
 实例停止/删除时 workspace 使当前代次失效；重启签发新代次，旧凭据及旧访问令牌不能再取得网络票据或通过连接在线核权。成员失效和管理员设备吊销复用 IAM 当前权威检查及网络撤销机制。令牌换取与网络核权同时检查实例当前绑定/运行意图，跨租户、错误成员或实例一律拒绝；故障时失败封闭。
 
