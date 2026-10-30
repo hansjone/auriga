@@ -77,6 +77,10 @@ check(
     'no_new_privileges',
 )
 platform_env = services['platform']['environment']
+for key, default in [('AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS', '3600'),
+                     ('AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS', '60')]:
+    expected = values.get(key) or default
+    check(str(platform_env.get(key)) == expected, key.lower())
 check(platform_env.get('SPRING_PROFILES_ACTIVE') == 'combined', 'no_dev_profile')
 check(platform_env.get('SERVER_SSL_ENABLED') == 'true' and platform_env.get('AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED') == 'true', 'mtls_and_publisher_enabled')
 check(services['platform']['user'] == '10001:10001' and '65532' in services['platform']['group_add'], 'publisher_fixed_uid_and_reader_group')

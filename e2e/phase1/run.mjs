@@ -165,9 +165,10 @@ export async function runPhase1(options, config, dependencies = {}) {
     schemaVersion: 1,
     startedAt: new Date().toISOString(),
     target: httpUrl(options.baseUrl).origin,
-    evidenceType: dependencies.adapter
-      ? 'injected-test-adapter'
-      : 'deployed-target',
+    evidenceType:
+      dependencies.adapter || dependencies.nativeConversation
+        ? 'injected-test-adapter'
+        : 'deployed-target',
     items: [],
     cleanupErrors: [],
   };
@@ -293,7 +294,48 @@ export async function runPhase1(options, config, dependencies = {}) {
     async (state) => {
       await desktop(state);
     },
-    async (state) => {
+    async (state, item) => {
+      if (config.cloudDesk) {
+        requireThat(
+          config.cloudDesk.testOnly === true,
+          '原生云桌入口仅允许本地固定模型testOnly配置',
+        );
+        requireThat(
+          httpUrl(config.cloudDesk.connect?.platformOrigin).origin ===
+            report.target,
+          '原生云桌平台必须与统一验收目标一致',
+        );
+        const nativeRun =
+          dependencies.nativeConversation ??
+          (await import('./cloud-desk.mjs')).run;
+        const result = await nativeRun(
+          config.cloudDesk,
+          resolve(
+            config.cloudDesk.output ?? dirname(options.output),
+            config.cloudDesk.output
+              ? ''
+              : 'cloud-desk-' + randomBytes(6).toString('hex'),
+          ),
+        );
+        item.nativeConversation = {
+          status: result.status,
+          runId: result.runId,
+          stage: result.stage,
+          receivedMessages: result.fixture?.receipts?.length ?? 0,
+        };
+        if (result.status !== 'passed') {
+          const trace = result.failure?.traceId;
+          if (/^[a-f0-9]{32}$/.test(trace ?? '')) {
+            state.traceId = trace;
+            state.acknowledged = true;
+          }
+          throw new StepError(
+            '原生云桌互发失败：' +
+              (result.failure?.stage ?? result.stage ?? 'unknown'),
+          );
+        }
+        return;
+      }
       if (!config.messaging)
         throw new Skip('CLOUD-DESK双向通信UI尚未接线：缺少messaging配置');
       if (config.messaging.testOnly !== true)

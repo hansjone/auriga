@@ -120,6 +120,8 @@ export interface DeviceRegistration {
 }
 export interface PreparedConnection {
   kind: 'device-connection';
+  /** Local namespace derived only from the already verified device identity. */
+  storageKey?: string;
   url: string;
   origin: string;
   roots: NetworkInstallation['roots'];

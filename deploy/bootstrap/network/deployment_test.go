@@ -30,6 +30,11 @@ func TestDeploymentNetworkIsolation(t *testing.T) {
 				t.Fatal(err)
 			}
 			raw := strings.ReplaceAll(string(content), "\r\n", "\n")
+			for _, setting := range []string{"AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:-3600}", "AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS: ${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:-60}"} {
+				if !strings.Contains(serviceBlock(t, raw, "platform"), setting) {
+					t.Fatalf("source authority default/override missing: %s", setting)
+				}
+			}
 			broker := serviceBlock(t, raw, "network-broker")
 			if strings.Contains(broker, "ports:") || (recipe == "nas" && (!strings.Contains(broker, "networks: [internal]") || strings.Contains(broker, "network_mode: host"))) {
 				t.Fatal("broker must not publish WSS to the host or NAS LAN")

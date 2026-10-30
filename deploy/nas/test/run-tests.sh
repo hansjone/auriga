@@ -205,6 +205,30 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
     && grep -qx 'AURIGA_AGENT_RUNTIME_PROOFS_DIR=/etc/auriga/runtime-proofs' "$DATA/config/agent.env"; then
     pass runtime_consumer_wiring
   else fail_msg runtime_consumer_wiring "unreceipted templates or missing consumer configuration"; fi
+  # Rendered environment must agree with the public recipe, including zero.
+  if grep -qx 'AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=3600' "$DATA/config/platform.env" \
+    && grep -qx 'AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=60' "$DATA/config/platform.env"; then
+    pass source_authority_defaults
+  else fail_msg source_authority_defaults "missing default lifetimes"; fi
+  for _source_pair in '1200 30' '0 0'; do
+    set -- $_source_pair
+    if AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \
+      sh "$ROOT/scripts/render.sh" >"$TMP/source-render.log" 2>&1 \
+      && grep -qx "AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1" "$DATA/config/platform.env" \
+      && grep -qx "AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2" "$DATA/config/platform.env"; then
+      pass "source_authority_override_$1"
+    else fail_msg "source_authority_override_$1" "override or explicit zero lost"; fi
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
+      && command -v python3 >/dev/null 2>&1; then
+      if AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS=$1 AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS=$2 \
+        docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" config --format json >"$TMP/source-compose.json" \
+        && python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["services"]["platform"]["environment"]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS"]) == sys.argv[2]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS"]) == sys.argv[3]' "$TMP/source-compose.json" "$1" "$2"; then
+        pass "source_authority_compose_$1"
+      else fail_msg "source_authority_compose_$1" "normalized override lost"; fi
+    else printf 'SKIP source_authority_compose (need Docker Compose and Python 3)\n'; fi
+  done
+  sh "$ROOT/scripts/render.sh" >"$TMP/source-render.log" 2>&1 \
+    || fail_msg source_authority_restore "default render failed"
   if [ "$NAS_ALLOW_NONROOT" != 1 ]; then
     if [ "$(stat -c '%u:%a' "$DATA/config/postgres/init.sql")" = 999:600 ] \
       && [ "$(stat -c '%u:%g:%a' "$DATA/socket-share")" = 0:65532:750 ]; then
