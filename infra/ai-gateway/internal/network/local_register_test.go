@@ -89,6 +89,11 @@ func localRegisterPhaseFixture(t *testing.T, f *fakeMailboxRPC, configure func(*
 	if err != nil {
 		t.Fatalf("collab connection before READY: %v", err)
 	}
+	// These tests exercise frame validation/publication, not the deliberately
+	// short 100ms reconciliation deadline in runtimeFixture. A ready loopback
+	// HTTP/2 connection can still take >100ms under CI scheduling pressure.
+	// Keep the real RPC bounded by MailboxClient's supported one-second limit.
+	run.mailbox.client.timeout = time.Second
 	p := &registrationPhasePublisher{nc: run.mailbox.nc, completed: make(chan registrationPublication, 4)}
 	if configure != nil {
 		configure(p)
