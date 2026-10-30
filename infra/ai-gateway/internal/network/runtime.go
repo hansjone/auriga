@@ -300,7 +300,8 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	}
 	ctx, cancel := context.WithCancel(parent)
 	r.cancel = cancel
-	client, e := NewMailboxClient(r.collab, time.Duration(cfg.RequestTimeoutMillis)*time.Millisecond)
+	// Mailbox control RPCs use their own bounded budget, not reconciliation probes.
+	client, e := NewMailboxClient(r.collab, time.Second)
 	if e != nil {
 		return nil, e
 	}

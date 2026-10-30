@@ -15,8 +15,44 @@ import (
 	"testing"
 	"time"
 
+	collab "github.com/hansjone/auriga/infra/gen/auriga/collab/v1"
 	"github.com/nats-io/nats.go"
 )
+
+type delayedReadyMailbox struct {
+	fakeMailboxRPC
+	delay time.Duration
+}
+
+func (f *delayedReadyMailbox) Ready(ctx context.Context, req *collab.NetworkMailboxServiceReadyRequest) (*collab.NetworkMailboxServiceReadyResponse, error) {
+	select {
+	case <-time.After(f.delay):
+		return f.fakeMailboxRPC.Ready(ctx, req)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestProductionReadyBudgetIsIndependentOfReconciliationProbe(t *testing.T) {
+	for _, delay := range []time.Duration{350 * time.Millisecond, 1500 * time.Millisecond} {
+		t.Run(delay.String(), func(t *testing.T) {
+			_, cfg, _ := runtimeFixture(t)
+			cfg.Collab = startMailboxRPC(t, &delayedReadyMailbox{fakeMailboxRPC: fakeMailboxRPC{response: []byte(`{"proof":"unchanged"}`)}, delay: delay})
+			run, err := StartRuntime(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(run.Close)
+			_, ae := run.mailbox.client.Call(context.Background(), liveBinding{Tenant: testTenant, Realm: "1", Node: "1"}, "ready", []byte(`{}`))
+			if delay < time.Second && ae != nil {
+				t.Fatalf("READY was truncated by the %dms reconciliation probe: %v", cfg.RequestTimeoutMillis, ae)
+			}
+			if delay > time.Second && (ae == nil || ae.Code != "network.overloaded") {
+				t.Fatalf("mailbox control RPC escaped its hard deadline: %v", ae)
+			}
+		})
+	}
+}
 
 func signingFixture(t *testing.T) ProtocolSigningConfig {
 	t.Helper()
@@ -333,7 +369,7 @@ func TestProductionMailboxTimeoutProducesSignedContractError(t *testing.T) {
 	if err = nc.Publish(UpSubject(b.Ingress), []byte(validMailboxFetch)); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := sub.NextMsg(time.Second)
+	msg, err := sub.NextMsg(2 * time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
