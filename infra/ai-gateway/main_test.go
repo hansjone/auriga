@@ -37,3 +37,12 @@ func TestNetworkRuntimeRequiresCompleteConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovedRelayRuntimesCannotStart(t *testing.T) {
+	for _, flag := range []string{"--admin-config", "--device-config"} {
+		var out, logs bytes.Buffer
+		if err := run([]string{flag, "unused.json"}, &out, &logs); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("obsolete runtime accepted: %s %v", flag, err)
+		}
+	}
+}

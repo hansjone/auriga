@@ -13,10 +13,10 @@ func TestNASActivationPlatformBoundary(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		return // Linux's real fixed-uid boundary is covered by the root integration parent.
 	}
-	if err := runAsInstaller("unused", nil, "", "", 15000, "", "", 512, runtimeInputs{}, false); err == nil || !strings.Contains(err.Error(), "requires Linux") {
+	if err := runAsInstaller("unused", nil, "", "", 15000, "", "", 512, runtimeInputs{}, false, ""); err == nil || !strings.Contains(err.Error(), "requires Linux") {
 		t.Fatalf("unsupported platform activation accepted: %v", err)
 	}
-	if err := runAsInstaller("", nil, "", "", 15000, "", "", 512, runtimeInputs{}, true); err != nil {
+	if err := runAsInstaller("", nil, "", "", 15000, "", "", 512, runtimeInputs{}, true, ""); err != nil {
 		t.Fatalf("read-only validation denied on this platform: %v", err)
 	}
 }
@@ -48,13 +48,16 @@ func TestRuntimeInputsAllOrNothing(t *testing.T) {
 func TestNetworkWSSReceiptVersion(t *testing.T) {
 	raw := []byte("original access bytes")
 	old := sha256.Sum256(append(append([]byte{}, raw...), []byte("\n192.0.2.138\n192.0.2.128/26\n15000\n192.0.2.10\n192.0.2.0/26\n512")...))
-	got := nasInputDigest(raw, "192.0.2.138", "192.0.2.128/26", 15000, "192.0.2.10", "192.0.2.0/26", 512, runtimeInputs{}, nil)
+	got := nasInputDigest(raw, "192.0.2.138", "192.0.2.128/26", 15000, "192.0.2.10", "192.0.2.0/26", 512, runtimeInputs{}, nil, "ui-fixture")
 	if got == fmt.Sprintf("%x", old) {
 		t.Fatal("pre-WSS receipt input accepted")
 	}
-	current := sha256.Sum256(append(append([]byte{}, raw...), []byte("\n192.0.2.138\n192.0.2.128/26\n15000\n192.0.2.10\n192.0.2.0/26\n512\nnetwork-wss-v2-https\nhttp-or-proxy")...))
+	current := sha256.Sum256(append(append([]byte{}, raw...), []byte("\n192.0.2.138\n192.0.2.128/26\n15000\n192.0.2.10\n192.0.2.0/26\n512\nnetwork-wss-v2-https-litellm-ui-v2\nhttp-or-proxy\nui-fixture")...))
 	if got != fmt.Sprintf("%x", current) {
 		t.Fatal("unexpected WSS receipt input")
+	}
+	if got == nasInputDigest(raw, "192.0.2.138", "192.0.2.128/26", 15000, "192.0.2.10", "192.0.2.0/26", 512, runtimeInputs{}, nil, "changed-ui") {
+		t.Fatal("UI origin is not bound to the installation receipt")
 	}
 }
 

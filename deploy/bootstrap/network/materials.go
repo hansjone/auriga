@@ -158,6 +158,9 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 			return err
 		}
 		properties := fmt.Sprintf("auriga.iam.internal-secret-hashes.ai-gateway=%x\nauriga.iam.ai-gateway-token-export.enabled=true\nauriga.iam.ai-gateway-token-export.installation-secret-file=%s/gateway.secret\nauriga.iam.ai-gateway-token-export.token-file=/run/auriga-network-token/gateway/service.jwt\nauriga.iam.ai-gateway-token-export.reader-group=65533\nauriga.iam.ai-gateway-token-export.installation-owner=%d\nauriga.iam.network.server-audiences[0]=%s\nauriga.iam.network.client-server-audience=%s\n", hash, strings.TrimRight(o.Root, "/"), os.Getuid(), o.Audience, o.Audience)
+		// Imported by both public recipes. Environment overrides remain effective,
+		// including explicit zero; receipt-bound material need not be regenerated.
+		properties += "auriga.iam.network.source-max-seconds=${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:3600}\nauriga.iam.network.source-decision-seconds=${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:60}\n"
 		if err := write("platform.properties", []byte(properties)); err != nil {
 			return err
 		}

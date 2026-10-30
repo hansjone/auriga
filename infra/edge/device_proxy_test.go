@@ -116,8 +116,8 @@ func TestDeviceNativeNodeFetch(t *testing.T) {
 		c.Upstreams["network-submit"], c.NetworkSubmitHop = network.URL, hop
 	})
 	closeAIAdminTransports(t, g)
-	// Trace only this fixture's real transport; retain its mTLS configuration.
-	g.APITransports[g.networkSubmitURL] = nativeFetchTraceTransport{g.APITransports[g.networkSubmitURL], t.Logf}
+	// The fixture has already published its handler: leave its transport map
+	// immutable. Private transport tracing is covered by the hop diagnostics.
 	// The unchanged guard covers process startup, all fetches/body reads, and
 	// natural process exit. Fixture construction and cleanup are outside it.
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)

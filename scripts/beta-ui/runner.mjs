@@ -185,7 +185,6 @@ export function configuration(state, manifest, secrets) {
       serverName: 'platform.beta.internal',
       serviceTokenFile: p('edge-token/service.jwt'),
     },
-    aiAdminHop: { allowLoopbackHttp: true },
     networkSubmitHop: {
       certFile: p('network/edge.pem'),
       keyFile: p('network/edge.key'),
@@ -201,28 +200,46 @@ export function configuration(state, manifest, secrets) {
       iam: `http://127.0.0.1:${ports.platform}`,
       org: `http://127.0.0.1:${ports.platform}`,
       workspace: `http://127.0.0.1:${ports.platform}`,
-      'ai-admin': `http://127.0.0.1:${ports.ai}`,
       'network-submit': `https://127.0.0.1:${ports.networkSubmit}`,
     },
     static: { portalRoot: p('static/portal'), adminRoot: p('static/admin') },
   };
-  const dsn = (role) =>
-    `postgres://${roles[role]}:${secrets[role]}@127.0.0.1:${manifest.pgPort}/${database}?sslmode=disable`;
-  const ai = {
-    listen: `127.0.0.1:${ports.ai}`,
-    issuer,
-    jwksFile: p('jwks.json'),
-    masterKeyFile: p('ai-master.key'),
-    store: { dsn: dsn('aiApp'), migrationDsn: dsn('aiOwner') },
-    org: {
-      Target: `127.0.0.1:${ports.grpc}`,
-      ServiceTokenFile: p('gateway-token/service.jwt'),
-      CertFile: p('tls/ai-gateway.pem'),
-      KeyFile: p('tls/ai-gateway.key'),
-      CAFile: p('tls/ca.pem'),
-      ServerName: 'platform.beta.internal',
-    },
+  const gatewayRPC = {
+    Target: `127.0.0.1:${ports.grpc}`,
+    ServiceTokenFile: p('gateway-token/service.jwt'),
+    CertFile: p('tls/ai-gateway.pem'),
+    KeyFile: p('tls/ai-gateway.key'),
+    CAFile: p('tls/ca.pem'),
+    ServerName: 'platform.beta.internal',
   };
+  const ai = manifest.litellm
+    ? {
+        listen: `127.0.0.1:${ports.ai}`,
+        origin: manifest.litellm.origin,
+        keyFile: manifest.litellm.teamKeyFile,
+        iam: gatewayRPC,
+        org: gatewayRPC,
+      }
+    : undefined;
+  if (manifest.litellm) {
+    if (
+      !Number.isSafeInteger(ports.litellmUI) ||
+      ports.litellmUI < 1 ||
+      ports.litellmUI > 65535 ||
+      Object.entries(ports).some(
+        ([name, value]) => name !== 'litellmUI' && value === ports.litellmUI,
+      )
+    )
+      throw new Error(
+        'Independent LiteLLM UI port missing; use a fresh Beta StateDir',
+      );
+    edge.litellmOrigin = manifest.litellm.origin;
+    edge.litellmUI = {
+      origin: origin(ports.litellmUI),
+      listener: { address: '127.0.0.1', port: ports.litellmUI, tls: false },
+    };
+    edge.upstreams['ai-device'] = `http://127.0.0.1:${ports.ai}`;
+  }
   const sessionKV = {
     psql: manifest.psql || 'psql.exe',
     port: manifest.pgPort,
@@ -242,15 +259,17 @@ export function configuration(state, manifest, secrets) {
     brokerPort: ports.networkBroker,
     websocketPort: ports.networkWebsocket,
     audience: 'auriga-network',
-    iam: ai.org,
-    collab: ai.org,
+    iam: gatewayRPC,
+    collab: gatewayRPC,
   };
   return { access, platform, edge, ai, sessionKV, networkOptions };
 }
 
 export function writeConfiguration(state, manifest, secrets) {
   const cfg = configuration(state, manifest, secrets);
-  for (const [name, value] of Object.entries(cfg))
+  for (const [name, value] of Object.entries(cfg).filter(
+    ([, value]) => value !== undefined,
+  ))
     json(
       path.join(state, `${name}.${name === 'platform' ? 'yaml' : 'json'}`),
       value,
@@ -295,7 +314,7 @@ function initialize(state, pgPort) {
   const suffix = randomBytes(5).toString('hex');
   const database = `auriga_beta_${suffix}`;
   const roles = Object.fromEntries(
-    ['dbOwner', 'iam', 'org', 'aiOwner', 'aiApp', 'edgeKv'].map((name) => [
+    ['dbOwner', 'iam', 'org', 'edgeKv'].map((name) => [
       name,
       `${database}_${name.toLowerCase()}`,
     ]),
@@ -316,25 +335,18 @@ function initialize(state, pgPort) {
       networkBroker: 18085,
       networkWebsocket: 18086,
       networkSubmit: 18087,
+      litellmUI: 18088,
     },
   };
   const secrets = Object.fromEntries(
-    [
-      'iam',
-      'org',
-      'aiOwner',
-      'aiApp',
-      'edgeKv',
-      'edgeSecret',
-      'gatewaySecret',
-    ].map((name) => [name, randomBytes(32).toString('base64url')]),
+    ['iam', 'org', 'edgeKv', 'edgeSecret', 'gatewaySecret'].map((name) => [
+      name,
+      randomBytes(32).toString('base64url'),
+    ]),
   );
   secrets.encryptionKey = randomBytes(32).toString('base64');
   json(path.join(state, 'installation.json'), manifest);
   json(path.join(state, 'secrets.json'), secrets);
-  fs.writeFileSync(path.join(state, 'ai-master.key'), randomBytes(32), {
-    mode: 0o600,
-  });
   fs.writeFileSync(
     path.join(state, 'edge-secret/installation.secret'),
     secrets.edgeSecret,
@@ -427,11 +439,11 @@ function initializeDatabase(state, manifest, psql, passfile) {
       'REVOKE ALL ON SCHEMA public FROM PUBLIC;',
       `REVOKE ALL ON DATABASE ${manifest.database} FROM PUBLIC;`,
     );
-    for (const name of ['iam', 'org', 'aiOwner', 'aiApp', 'edgeKv'])
+    for (const name of ['iam', 'org', 'edgeKv'])
       lines.push(
         `GRANT CONNECT ON DATABASE ${manifest.database} TO ${manifest.roles[name]};`,
       );
-    for (const name of ['iam', 'org', 'aiOwner']) {
+    for (const name of ['iam', 'org']) {
       lines.push(
         `GRANT CREATE ON DATABASE ${manifest.database} TO ${manifest.roles[name]};`,
       );
@@ -439,7 +451,6 @@ function initializeDatabase(state, manifest, psql, passfile) {
     for (const [schema, role] of [
       ['iam', manifest.roles.iam],
       ['org', manifest.roles.org],
-      ['ai', manifest.roles.aiOwner],
     ]) {
       lines.push(
         `CREATE SCHEMA ${schema} AUTHORIZATION ${role};`,
@@ -447,10 +458,6 @@ function initializeDatabase(state, manifest, psql, passfile) {
       );
     }
     lines.push(
-      `GRANT USAGE ON SCHEMA ai TO ${manifest.roles.aiApp};`,
-      `ALTER ROLE ${manifest.roles.aiApp} IN DATABASE ${manifest.database} SET search_path = ai;`,
-      `ALTER DEFAULT PRIVILEGES FOR ROLE ${manifest.roles.aiOwner} IN SCHEMA ai GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO ${manifest.roles.aiApp};`,
-      `ALTER DEFAULT PRIVILEGES FOR ROLE ${manifest.roles.aiOwner} IN SCHEMA ai GRANT USAGE,SELECT ON SEQUENCES TO ${manifest.roles.aiApp};`,
       `ALTER ROLE ${manifest.roles.edgeKv} SET default_transaction_read_only=on;`,
     );
   }
@@ -750,10 +757,11 @@ export async function startServices(state, manifest) {
     )
       throw new Error('Invalid IAM public JWKS');
     json(path.join(state, 'jwks.json'), jwks);
-    launch('ai', path.join(state, 'bin/ai-gateway.exe'), [
-      '--admin-config',
-      path.join(state, 'ai.json'),
-    ]);
+    if (manifest.litellm)
+      launch('ai', path.join(state, 'bin/ai-gateway.exe'), [
+        '--litellm-config',
+        path.join(state, 'ai.json'),
+      ]);
     launch('network-broker', path.join(state, 'bin/network-broker.exe'), [
       '-c',
       path.join(state, 'network/broker.conf'),
@@ -789,8 +797,9 @@ export async function startServices(state, manifest) {
         const admin = await fetch(`http://127.0.0.1:${manifest.ports.admin}/`, {
           signal: AbortSignal.timeout(2000),
         });
+        if (!manifest.litellm) return admin.ok;
         const ai = await fetch(
-          `http://127.0.0.1:${manifest.ports.ai}/api/ai/v1/admin/providers`,
+          `http://127.0.0.1:${manifest.ports.ai}/ai/v1/models`,
           { signal: AbortSignal.timeout(2000) },
         );
         return admin.ok && ai.status === 401;
@@ -912,6 +921,36 @@ export async function main(args) {
         } finally {
           fs.closeSync(log);
         }
+        return;
+      }
+      case 'litellm': {
+        const origin = new URL(values['--origin']);
+        if (
+          !['http:', 'https:'].includes(origin.protocol) ||
+          origin.username ||
+          origin.password ||
+          origin.pathname !== '/' ||
+          origin.search ||
+          origin.hash
+        )
+          throw new Error('LiteLLM must be a fixed origin');
+        if (
+          origin.protocol === 'http:' &&
+          !['127.0.0.1', '[::1]'].includes(origin.hostname)
+        )
+          throw new Error('Plain HTTP LiteLLM requires numeric loopback');
+        const teamKeyFile = path.resolve(values['--team-key-file']);
+        privatePath(teamKeyFile);
+        manifest.litellm = {
+          origin: origin.origin,
+          teamKeyFile: unix(teamKeyFile),
+        };
+        json(path.join(state, 'installation.json'), manifest);
+        writeConfiguration(
+          state,
+          manifest,
+          read(path.join(state, 'secrets.json')),
+        );
         return;
       }
       case 'start':

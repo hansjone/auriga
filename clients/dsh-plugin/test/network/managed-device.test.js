@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { createManagedNetwork } from '../../src/network/managed-device.js';
 
 const ids = {
@@ -142,6 +142,36 @@ test('file rotation closes old tools before admitting the new device; revocation
   await f.network.refresh(true);
   assert.equal(f.calls.at(-1), 'logout');
   assert.equal(f.network.status.connected, false);
+});
+
+test('managed provider partitions storage by verified device and preserves the key across renewal', async (t) => {
+  const f = await fixture(t);
+  await f.network.refresh();
+  const signal = new AbortController().signal;
+  const first = await f.input.defaultProvider.prepare({ signal });
+  assert.equal(
+    first.storageKey,
+    createHash('sha256')
+      .update(JSON.stringify([f.value.issuer, ids.tenantId, ids.deviceId]))
+      .digest('hex'),
+  );
+  await f.network.refresh(true);
+  assert.equal(
+    (await f.input.defaultProvider.prepare({ signal })).storageKey,
+    first.storageKey,
+  );
+  await writeFile(
+    f.file,
+    JSON.stringify({
+      ...f.value,
+      deviceId: '00000000-0000-4000-8000-000000000005',
+      credential: 'b'.repeat(43),
+    }),
+  );
+  await f.network.refresh();
+  const rotated = await f.input.defaultProvider.prepare({ signal });
+  assert.match(rotated.storageKey, /^[a-f0-9]{64}$/);
+  assert.notEqual(rotated.storageKey, first.storageKey);
 });
 
 test('managed renewal reuses the current lifecycle and file removal revokes its tools', async (t) => {

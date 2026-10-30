@@ -945,10 +945,13 @@ components:
             alwaysOnAllowed: { type: boolean }
         model:
           type: object
+          deprecated: true
+          readOnly: true
+          description: 仅保留契约兼容；已由 LiteLLM customer 预算取代。服务拒绝写入，不读取也不返回该字段。
           properties:
-            monthlyBudgetMicros: { type: [integer, 'null'], minimum: 0, description: 'UTC每月预算，百万分之一货币单位；null 表示不限，0禁止团队模型。币种须等于gateway部署币种；已在途预占不因配额修改清零。' }
-            currency: { type: string, pattern: '^[A-Z]{3}$' }
-            dailyTokens: { type: [integer, 'null'], minimum: 0, description: 'UTC每日token限额；null 表示不限，0禁止团队模型。实例和设备按同一主体共享。' }
+            monthlyBudgetMicros: { type: [integer, 'null'], minimum: 0, deprecated: true }
+            currency: { type: string, pattern: '^[A-Z]{3}$', deprecated: true }
+            dailyTokens: { type: [integer, 'null'], minimum: 0, deprecated: true }
     InvitationInput:
       type: object
       properties:

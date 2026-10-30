@@ -36,14 +36,15 @@ type Gateway struct {
 	IAMTransport  http.RoundTripper
 	APITransports map[*url.URL]http.RoundTripper
 
-	iamURL       *url.URL
-	orgURL       *url.URL
-	workspaceURL *url.URL
-	teamURL      *url.URL
-	aiAdminURL   *url.URL
-	collabURL    *url.URL
-	resourceURL  *url.URL
-	deviceURL    *url.URL
+	iamURL          *url.URL
+	orgURL          *url.URL
+	workspaceURL    *url.URL
+	teamURL         *url.URL
+	collabURL       *url.URL
+	resourceURL     *url.URL
+	deviceURL       *url.URL
+	litellmURL      *url.URL
+	litellmHandoffs liteLLMHandoffs
 
 	networkSubmitURL *url.URL
 
@@ -55,6 +56,13 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	if err := cfg.validateLiteLLMUI(); err != nil {
+		return nil, err
+	}
+	litellmURL, err := cfg.parseLiteLLMOrigin()
+	if err != nil {
+		return nil, err
+	}
 	resourceURL, err := cfg.parseResourceUpstream()
 	if err != nil {
 		return nil, err
@@ -68,10 +76,6 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		return nil, err
 	}
 	collabURL, err := cfg.parseCollabUpstream()
-	if err != nil {
-		return nil, err
-	}
-	aiAdminURL, err := cfg.parseAIAdminUpstream()
 	if err != nil {
 		return nil, err
 	}
@@ -133,13 +137,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		orgURL:       orgURL,
 		workspaceURL: wsURL,
 		teamURL:      teamURL,
-		aiAdminURL:   aiAdminURL,
 		collabURL:    collabURL,
 		resourceURL:  resourceURL,
 		deviceURL:    deviceURL,
+		litellmURL:   litellmURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
-		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
+		panelStatic:  newPanelFileServer(cfg.Static.PanelRoot),
 		networkWSS:   networkWSS,
 
 		networkSubmitURL: networkSubmitURL,
@@ -152,6 +156,14 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	}
 	if cfg.Access.Valid() {
 		g.APITransports = make(map[*url.URL]http.RoundTripper)
+		if deviceURL != nil && cfg.DeviceHop != (IAMHopConfig{}) {
+			transport, err := newIAMHopTransport(cfg.DeviceHop, deviceURL)
+			if err != nil {
+				return nil, err
+			}
+			transport.ResponseHeaderTimeout = 60 * time.Second
+			g.APITransports[deviceURL] = transport
+		}
 		if networkSubmitURL != nil {
 			transport, err := newIAMHopTransport(cfg.NetworkSubmitHop, networkSubmitURL)
 			if err != nil {
@@ -181,13 +193,6 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 				return nil, err
 			}
 			g.APITransports[collabURL] = transport
-		}
-		if aiAdminURL != nil {
-			transport, err := newIAMHopTransport(cfg.AIAdminHop, aiAdminURL)
-			if err != nil {
-				return nil, err
-			}
-			g.APITransports[aiAdminURL] = transport
 		}
 		for _, target := range []*url.URL{orgURL, wsURL} {
 			if g.IAMTransport != nil && sameInternalHTTPSOrigin(iamURL, target) {
@@ -238,12 +243,19 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	rid, r := ensureRequestID(r)
 	clientIP := ResolveClientIP(r, g.Trusted)
 	r = r.WithContext(context.WithValue(r.Context(), ctxKeyClientIP, clientIP))
+	if entry, ok := r.Context().Value(accessEntryKey{}).(accessEntry); ok && entry.role == "relayAdmin" {
+		g.proxyLiteLLM(w, r, entry.role, rid)
+		return
+	}
 	host := requestHost(r)
 
 	// Instance host first: only reject traversal; do not apply portal/admin path strictness (N1).
 	if instID, ok := g.instanceIDFromHost(host); ok {
 		if !instancePathOK(r) {
 			writeProblem(w, problem(http.StatusBadRequest, "edge.bad_path", "Bad Request", "path traversal rejected", rid))
+			return
+		}
+		if panelPath, ok := sanitizeRequestPath(r); ok && g.servePanelStatic(w, r, panelPath) {
 			return
 		}
 		g.serveInstance(w, r, instID, "", clientIP, rid)
@@ -340,6 +352,17 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Both credential types are independently verified by their owning runtime.
+	// A virtual-key prefix selects LiteLLM; it never grants platform identity.
+	if g.litellmURL != nil && (path == "/ai" || strings.HasPrefix(path, "/ai/")) {
+		data := path == "/ai/v1/models" || path == "/ai/v1/chat/completions"
+		team, _ := teamMethod(path, r.Method)
+		deviceToken := audience == "portal" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer sk-")
+		if !team && (!data || !deviceToken) {
+			g.proxyLiteLLM(w, r, audience, rid)
+			return
+		}
+	}
 	// Device AI has an exact route table and an independent runtime from Team.
 	if isDevicePath(path) && (path != "/api/ai/v1/me/usage" || audience == "portal") {
 		g.proxyDevice(w, r, audience, clientIP, rid)
@@ -362,10 +385,6 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if upstream := g.matchUpstream(path); upstream != nil {
-		if upstream == g.aiAdminURL {
-			g.proxyAIAdmin(w, r, upstream, audience, clientIP, rid)
-			return
-		}
 		g.proxyAPI(w, r, upstream, audience, clientIP, rid)
 		return
 	}
@@ -376,17 +395,7 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Panel static
-	if strings.HasPrefix(path, "/panel/") || path == "/panel" {
-		if g.Cfg.Static.PanelRoot == "" {
-			writeProblem(w, problem(http.StatusNotFound, "edge.panel_unconfigured", "Not Found", "panel static root not configured; see docs/dev/edge.md", rid))
-			return
-		}
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = strings.TrimPrefix(path, "/panel")
-		if r2.URL.Path == "" {
-			r2.URL.Path = "/"
-		}
-		g.panelStatic.ServeHTTP(w, r2)
+	if g.servePanelStatic(w, r, path) {
 		return
 	}
 
@@ -400,8 +409,6 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) matchUpstream(path string) *url.URL {
 	switch {
-	case g.Cfg.Access.Valid() && (path == "/api/ai/v1/admin" || strings.HasPrefix(path, "/api/ai/v1/admin/")):
-		return g.aiAdminURL
 	case strings.HasPrefix(path, "/api/iam/v1/"),
 		strings.HasPrefix(path, "/oauth2/"),
 		strings.HasPrefix(path, "/.well-known/"),

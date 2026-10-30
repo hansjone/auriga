@@ -1281,7 +1281,6 @@ public final class OrgService {
   private void mergeLayer(ObjectNode target, ObjectNode layer) {
     if (layer == null) return;
     mergeSection(target, layer, "instance");
-    mergeSection(target, layer, "model");
   }
 
   private void mergeSection(ObjectNode target, ObjectNode layer, String section) {
@@ -1305,7 +1304,7 @@ public final class OrgService {
   /** For multiple groups: take loosest (max numeric, true for bool, null unlimited wins). */
   private void mergeQuotaLoosest(ObjectNode target, ObjectNode layer) {
     if (layer == null) return;
-    for (String section : List.of("instance", "model")) {
+    for (String section : List.of("instance")) {
       if (!layer.has(section)) continue;
       ObjectNode src = (ObjectNode) layer.path(section);
       ObjectNode dst =

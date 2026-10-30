@@ -48,7 +48,7 @@ digest，逐个执行 `docker pull --platform linux/amd64 'name@sha256:<已批�
 `docker image inspect --format '{{json .RepoDigests}} {{.Os}}/{{.Architecture}} {{.Id}}' 'name@sha256:<已批准摘要>'`
 核对摘要与 `linux/amd64` 平台，并把完整引用写入 `stack.env`。
 完整三镜像在线示例见 [操作指南](../../docs/dev/nas.md#初始化启动停止)。
-全零占位不允许启动；预检只读核验六项镜像（包括 digest 引用）都在本机，启动只执行一次
+全零占位不允许启动；预检只读核验七项镜像（包括 digest 引用）都在本机，启动只执行一次
 `up -d --no-build --pull never`，失败保留非零退出码，不隐式拉取或重试放宽策略。
 
 离线运输的 `docker save` / `docker load` 不保证 RepoDigests 保留。加载后应独立核对运输关联、
@@ -79,3 +79,5 @@ inspect 各 30 秒、每次不可变 Id 导出各 3 分钟，失败取消并回�
 遵照 runtime release 指南按原始 manifest 摘要运输与核验，并按对应精确版本的显式命令执行导入；
 工具不自动启动 registry、不管理 registry 认证，也不自动执行现场部署。
 完成摘要检查、材料验证或基础栈初始化不代表已能登录、真实实例已就绪或现场验收通过。
+
+模型接入、独立 UI Origin、成员预算和外部 Key 操作见 [LiteLLM 部署指南](../../docs/dev/relay-litellm.md)。

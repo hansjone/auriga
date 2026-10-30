@@ -84,7 +84,7 @@ func TestNetworkCredentialExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{fmt.Sprintf("auriga.iam.internal-secret-hashes.ai-gateway=%x", sha256.Sum256(secret)), "installation-secret-file=/etc/auriga/network/gateway.secret", "token-file=/run/auriga-network-token/gateway/service.jwt", "reader-group=65533"} {
+	for _, expected := range []string{fmt.Sprintf("auriga.iam.internal-secret-hashes.ai-gateway=%x", sha256.Sum256(secret)), "installation-secret-file=/etc/auriga/network/gateway.secret", "token-file=/run/auriga-network-token/gateway/service.jwt", "reader-group=65533", "auriga.iam.network.source-max-seconds=${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:3600}\n", "auriga.iam.network.source-decision-seconds=${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:60}\n"} {
 		if !strings.Contains(string(raw), expected) {
 			t.Fatal("incomplete isolated token export configuration")
 		}

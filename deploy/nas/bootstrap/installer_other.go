@@ -7,7 +7,7 @@ import (
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 )
 
-func runAsInstaller(_ string, _ []byte, _, _ string, _ int, _, _ string, _ int64, _ runtimeInputs, validateOnly bool, _ ...*networkdeploy.BrowserTLS) error {
+func runAsInstaller(_ string, _ []byte, _, _ string, _ int, _, _ string, _ int64, _ runtimeInputs, validateOnly bool, _ string, _ ...*networkdeploy.BrowserTLS) error {
 	if validateOnly {
 		return nil
 	}

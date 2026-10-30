@@ -9,6 +9,109 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseArgs, runPhase1, totp, nextTotp } from './run.mjs';
 
+test('第⑤项调用固定模型原生云桌入口，单项通过不声称完整八项通过', async () => {
+  let calls = 0;
+  const report = await runPhase1(
+    {
+      baseUrl: 'https://portal.example.com:8080',
+      only: [5],
+      output: 'unused.json',
+    },
+    {
+      cloudDesk: {
+        testOnly: true,
+        connect: { platformOrigin: 'https://portal.example.com:8080' },
+        output: 'native-evidence',
+      },
+    },
+    {
+      nativeConversation: async () => {
+        calls++;
+        return {
+          status: 'passed',
+          runId: 'test-run',
+          fixture: { receipts: [1, 2, 3, 4] },
+          cleanup: [],
+        };
+      },
+    },
+  );
+  assert.equal(calls, 1);
+  assert.equal(report.items[4].status, 'PASS');
+  assert.equal(report.evidenceType, 'injected-test-adapter');
+  assert.equal(report.complete, false);
+  assert.equal(report.items[4].nativeConversation.receivedMessages, 4);
+});
+
+test('第⑤项原生报告失败沿用真实失败trace，忽略不相关面板502', async () => {
+  const report = await runPhase1(
+    {
+      baseUrl: 'https://portal.example.com:8080',
+      only: [5],
+      output: 'unused.json',
+    },
+    {
+      cloudDesk: {
+        testOnly: true,
+        connect: { platformOrigin: 'https://portal.example.com:8080' },
+        output: 'native-evidence',
+      },
+    },
+    {
+      nativeConversation: async () => ({
+        status: 'failed',
+        stage: 'cloud-native-network-join',
+        failure: {
+          stage: 'cloud-native-network-join',
+          traceId: 'a'.repeat(32),
+        },
+        httpFailures: [
+          {
+            stage: 'cloud-node-plugin-health',
+            status: 502,
+            traceId: 'b'.repeat(32),
+          },
+        ],
+        cleanup: [],
+      }),
+    },
+  );
+  assert.equal(report.items[4].status, 'FAIL');
+  assert.equal(report.items[4].traceId, 'a'.repeat(32));
+  assert.equal(report.items[4].traceAcknowledged, true);
+});
+
+test('第⑤项拒绝非固定模型配置及与报告目标不同的平台', async () => {
+  for (const cloudDesk of [
+    {
+      testOnly: false,
+      connect: { platformOrigin: 'https://portal.example.com:8080' },
+    },
+    {
+      testOnly: true,
+      connect: { platformOrigin: 'https://other.example.com' },
+    },
+  ]) {
+    let calls = 0;
+    const report = await runPhase1(
+      {
+        baseUrl: 'https://portal.example.com:8080',
+        only: [5],
+        output: 'unused.json',
+      },
+      { cloudDesk },
+      {
+        nativeConversation: async () => {
+          calls++;
+          return { status: 'passed' };
+        },
+      },
+    );
+    assert.equal(report.items[4].status, 'FAIL');
+    assert.equal(calls, 0);
+  }
+});
+
 async function fixture(t, handler) {
   const server = http.createServer(handler);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

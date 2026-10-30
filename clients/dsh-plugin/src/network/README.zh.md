@@ -4,6 +4,11 @@
 
 connect 安装具备完整 `network` pin 且原生设备登录成功后，`plugin.js → createConnectRuntime → createDeviceProvider → lifecycle → openNetworkRuntime(kind: device-connection) → openConnectionRuntime` 自动装配官方 provider。根只取安装 realm/SPKI；固定平台源上的 register、tickets、完整 keys、announcement 均使用现 `getPlatformAccess` 与已验证当前设备身份闭包，拒绝 cookie、重定向、响应超预算及迟到的失效代际。不增加可见登录或审批。票据严格核完整设备身份与随机票派生的 ingress、含 shard 的 up、down/reply，兑换截止与最长连接截止分开处理；每次新连接均取新票。无安装 pin 且无完整注入 provider 的行为仍为 unconfigured。
 
+官方 provider 按已验证的 issuer、tenant、device ID 派生本地存储命名空间，账本与信任缓存位于
+`network/devices/<sha256>/`。正常退出、撤销旧设备并重新登录后，新设备不会复用旧节点账本；旧目录与审计不删除、不复制到新代际。
+它仍只能凭真实 register 的 `created=true` 初始化缺失账本；同一已注册设备丢库或换目录保持失败关闭。
+旧版固定目录不会自动迁移；升级后的旧设备缺少该目录时，应沿公开退出/登录流程注册新设备，不得删库或修改IAM回包补造首次许可。
+
 基础分支不创建 consent，不注册发送工具，不 FETCH/ACK/SEND 或发布授权；consent 入口明确不可用。`connected` 仅代表基础认证连接，不能据此声称双 DSH 收发或业务能力已完成。完整可信 Cordis provider 可暂时替代官方默认项，撤销注入后恢复默认；替换/退出先失效旧状态，等旧实例停止、在途提交结束并释放锁后才允许下一实例开账本。完整业务模式的 allports 检查与原 session 路径保留。
 
 ## 第二能力阶段：显式登记当前会话
