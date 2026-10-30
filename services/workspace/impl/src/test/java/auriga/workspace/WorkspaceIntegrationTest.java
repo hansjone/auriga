@@ -166,8 +166,35 @@ class WorkspaceIntegrationTest {
 
   @Test
   void managedCredentialLifecycleIsFencedAndMaterialIsSealed() throws Exception {
-    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    service.requireManagedNetworkCredentials();
+    var join = joinRequest(token().token(), TestPki.key());
+    var joined = enrollment.join(join);
     UUID node = UUID.fromString(joined.getNodeId());
+    var fake = new FakeNode();
+    var context =
+        Context.current()
+            .withValue(NodeSessions.PEER, NodeCa.parse(joined.getCertificateChain().toByteArray()));
+    var stream = context.call(() -> sessions.session(fake));
+    stream.onNext(
+        SessionRequest.newBuilder()
+            .setHello(
+                Hello.newBuilder()
+                    .setNodeId(node.toString())
+                    .setProtocolVersion(1)
+                    .setOs("linux")
+                    .setArch("amd64")
+                    .setIngressEndpoint("https://node.example.com:7443")
+                    .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+                    .setCapacity(
+                        Capacity.newBuilder().setCpuMillis(10000).setMemoryMb(8192).setDiskGb(100))
+                    .setSealingKeyId(
+                        HexFormat.of()
+                            .formatHex(
+                                WorkspaceCrypto.hash(join.getSealingPublicKey().toByteArray()))
+                            .substring(0, 16)))
+            .build());
+    assertTrue(fake.next().hasWelcome());
+    stream.onNext(SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
     var devices = org.mockito.Mockito.mock(auriga.iam.api.ManagedDeviceCredentials.class);
     var attempts = new java.util.concurrent.atomic.AtomicInteger();
     org.mockito.Mockito.when(devices.issue(org.mockito.ArgumentMatchers.any()))
@@ -194,6 +221,9 @@ class WorkspaceIntegrationTest {
         tenant,
         () -> {
           UUID id = (UUID) service.open(owner).instance().get("id");
+          assertFalse(service.dispatchable(store.tx(() -> store.instance(id))));
+          sessions.dispatch();
+          assertTrue(fake.responses.isEmpty(), "no initial spec before the credential is sealed");
           store.tx(
               () ->
                   store.jdbc.update(
@@ -217,6 +247,14 @@ class WorkspaceIntegrationTest {
           var row = store.tx(() -> store.instance(id));
           assertNotNull(row.get("managed_credential"));
           assertTrue(WorkspaceService.spec(row).getSecrets().hasDeviceCredential());
+          assertTrue(service.dispatchable(row));
+          sessions.dispatch();
+          assertTrue(
+              assertDoesNotThrow(fake::next)
+                  .getApply()
+                  .getSpec()
+                  .getSecrets()
+                  .hasDeviceCredential());
           assertFalse(
               new String(
                       WorkspaceService.spec(row).toByteArray(),
@@ -226,8 +264,15 @@ class WorkspaceIntegrationTest {
           service.operate(id, actor(), "restart");
           assertTrue(bindings.get(request).getCredentialVersion() > before);
           assertNull(store.tx(() -> store.instance(id)).get("managed_credential"));
+          assertFalse(service.dispatchable(store.tx(() -> store.instance(id))));
+          var delivery = new NodeDeliveries(store, clock, service::dispatchable);
+          assertTrue(
+              store.tx(() -> delivery.claim(node, UuidV7.next(), Set.of())).isEmpty(),
+              "restart cannot run with the previous credential");
           network.reconcile(store.tx(() -> store.instance(id)));
+          assertEquals(1, store.tx(() -> delivery.claim(node, UuidV7.next(), Set.of())).size());
           service.operate(id, actor(), "stop");
+          assertTrue(service.dispatchable(store.tx(() -> store.instance(id))));
           assertFalse(bindings.get(request).getActive());
           assertFalse(
               WorkspaceService.spec(store.tx(() -> store.instance(id)))

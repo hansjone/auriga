@@ -2,7 +2,7 @@
 
 IAM 是唯一签发方。workspace 经受认证内部接口提交 tenant、成员 account、instance 与凭据代次；IAM 核验活跃账号及成员后登记类型为 managed 的设备。每个实例仅保留一个当前代次。凭据是独立随机机密，IAM 保存核验散列及按租户/实例/代次隔离的加密重试副本，不能以实例控制令牌替代。设备访问令牌仅含桌面网络所需的设备权限，不附加管理员、实例或模型权限。
 
-契约新增内部托管凭据签发/吊销接口、外部换取接口及节点 Secrets 字段。workspace 把凭据经现有 HPKE 封装与规格一起下发；agent renderer 解密后原子写入实例材料目录的 0600 文件，以 `AURIGA_DEVICE_CREDENTIAL_FILE` 传递路径。平台 URL、网络安装信任根等非机密材料沿可信渲染配置下发，机密不进入环境变量、镜像或日志。
+契约新增内部托管凭据签发/吊销接口、外部换取接口及节点 Secrets 字段。启用托管网络时，workspace 等待凭据备齐后才下发 running 规格及重启任务，避免首个无凭据规格先启动。workspace 把凭据经现有 HPKE 封装与规格一起下发；agent renderer 解密后原子写入实例材料目录的 0600 文件，以 `AURIGA_DEVICE_CREDENTIAL_FILE` 传递路径。平台 URL、网络安装信任根等非机密材料沿可信渲染配置下发，机密不进入环境变量、镜像或日志。
 
 managed 插件从文件读取凭据，以专用 managed-device grant 向既有 `/oauth2/token` 换取最长300秒设备 Bearer，并在到期前续期。凭据最长30天，到期后拒绝，重启轮换。通过同一 `createDeviceProvider`、network lifecycle/runtime、原生宿主适配和 consent 接线注册/取票、入网和发送；入网成功仅在严格 READY 后返回，发送沿用同一运行时状态门禁。换取或在线校验失败时关闭旧代连接并撤销工具，异步迟到结果不能恢复旧代。
 

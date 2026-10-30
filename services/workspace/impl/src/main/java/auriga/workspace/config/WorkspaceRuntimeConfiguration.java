@@ -116,12 +116,16 @@ public class WorkspaceRuntimeConfiguration {
       WorkspaceCrypto crypto,
       Clock clock,
       ListableBeanFactory beans,
-      ObjectProvider<EventPublisher> events) {
+      ObjectProvider<EventPublisher> events,
+      Environment env) {
     var publisher =
         beans.containsBean("workspaceEventPublisher")
             ? beans.getBean("workspaceEventPublisher", EventPublisher.class)
             : events.getObject();
-    return new WorkspaceService(store, inputs, templates, crypto, publisher, clock);
+    var service = new WorkspaceService(store, inputs, templates, crypto, publisher, clock);
+    if (env.containsProperty("auriga.workspace.managed-network-installation-file"))
+      service.requireManagedNetworkCredentials();
+    return service;
   }
 
   @Bean

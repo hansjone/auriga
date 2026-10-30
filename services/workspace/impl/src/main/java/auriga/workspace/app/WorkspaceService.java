@@ -45,6 +45,20 @@ public final class WorkspaceService {
   private volatile java.util.function.Consumer<UUID> revoked = node -> {};
   public final Clock clock;
   private volatile Runnable changed = () -> {};
+  private volatile boolean managedNetworkRequired;
+
+  public void requireManagedNetworkCredentials() {
+    managedNetworkRequired = true;
+  }
+
+  public boolean dispatchable(Map<String, Object> row) {
+    return !managedNetworkRequired
+        || spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING
+        || (row.get("managed_credential") != null
+            && Objects.equals(
+                row.get("managed_synced_version"), row.get("managed_credential_version"))
+            && spec(row).getSecrets().hasDeviceCredential());
+  }
 
   public WorkspaceService(
       WorkspaceStore store,

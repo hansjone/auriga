@@ -141,7 +141,8 @@ public final class NodeSessions implements AutoCloseable {
     final UUID holder = auriga.common.persistence.UuidV7.next();
     final NodeSessionLease lease;
     final NodeOutput outbound;
-    final NodeDeliveries deliveries = new NodeDeliveries(enrollment.store, workspace.clock);
+    final NodeDeliveries deliveries =
+        new NodeDeliveries(enrollment.store, workspace.clock, workspace::dispatchable);
     final Map<UUID, NodeDeliveries.Delivery> inFlight = new HashMap<>();
     UUID specCursor;
     boolean acquired;
@@ -342,6 +343,7 @@ public final class NodeSessions implements AutoCloseable {
                           specCursor,
                           specCursor);
                   for (var row : rows) {
+                    if (!workspace.dispatchable(row)) continue;
                     var spec = WorkspaceService.spec(row);
                     String id = spec.getInstanceId();
                     if (!Objects.equals(sent.get(id), spec.getGeneration())) {
