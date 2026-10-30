@@ -11,6 +11,7 @@ import (
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
+	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
@@ -128,7 +129,7 @@ func validateNASLAN(value, subnet, componentSubnet string) error {
 	return nil
 }
 
-func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer string, registry int, lanIP string, maxMemoryMB int64) {
+func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer string, registry int, lanIP string, maxMemoryMB int64, ui relayui.Config) {
 	writeFile(filepath.Join(out, "access.json"), raw, 0o644)
 	ls := cfg.Listeners()
 	writeFile(filepath.Join(out, "access.env"), []byte(fmt.Sprintf("AURIGA_NAS_ISSUER=%s\nAURIGA_NAS_PORTAL_HOST=%s\nAURIGA_NAS_ADMIN_HOST=%s\nAURIGA_NAS_PORTAL_URL=%s\nAURIGA_NAS_ADMIN_URL=%s\nAURIGA_NAS_PORTAL_PORT=%d\nAURIGA_NAS_ADMIN_PORT=%d\nAURIGA_NAS_PORTAL_TARGET_PORT=%d\nAURIGA_NAS_ADMIN_TARGET_PORT=%d\n", cfg.Issuer(), cfg.PortalOrigin().Host, cfg.AdminOrigin().Host, cfg.PortalURL(), cfg.AdminURL(), cfg.PortalOrigin().Port, cfg.AdminOrigin().Port, ls.Portal.Port, ls.Admin.Port)), 0o644)
@@ -137,6 +138,7 @@ func writeNASConfig(out string, raw []byte, cfg deploymentconfig.Config, peer st
 		"accessConfigFile":       "/etc/auriga/access.json", "allowLocalIngress": true,
 		"upstreams":        map[string]string{"iam": "https://platform:8081", "org": "https://platform:8081", "workspace": "https://platform:8081", "network-submit": "https://network:18443", "ai-device": "https://ai-relay:18445"},
 		"litellmOrigin":    "http://litellm:4000",
+		"litellmUI":        ui,
 		"deviceHop":        map[string]string{"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key", "caFile": "/etc/auriga/pki/ca.crt", "serverName": "ai-relay"},
 		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/pki/network-edge.pem", "keyFile": "/etc/auriga/pki/network-edge.key", "caFile": "/etc/auriga/pki/network-server-ca.pem", "serverName": "submit.network.internal"},
 		"networkWss": map[string]any{

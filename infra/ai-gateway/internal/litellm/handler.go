@@ -169,6 +169,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Header.Set("Authorization", "Bearer "+key)
 		},
 		ModifyResponse: func(resp *http.Response) error {
+			for name := range resp.Header {
+				if strings.HasPrefix(strings.ToLower(name), "access-control-") {
+					resp.Header.Del(name)
+				}
+			}
 			resp.Header.Del("Set-Cookie")
 			if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 				return errors.New("LiteLLM redirect rejected")

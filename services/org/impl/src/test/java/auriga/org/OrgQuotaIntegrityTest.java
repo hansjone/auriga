@@ -162,15 +162,12 @@ class OrgQuotaIntegrityTest {
     }
     invalid.add("{\"instance\":{\"cpuMillis\":99}}");
     invalid.add("{\"instance\":{\"memoryMb\":255}}");
-    for (var field : List.of("maxInstances", "monthlyBudgetMicros", "dailyTokens")) {
-      String section = field.equals("maxInstances") ? "instance" : "model";
-      for (var value : List.of("-1", "0.5", "\"0\"", "false"))
-        invalid.add("{\"" + section + "\":{\"" + field + "\":" + value + "}}");
-    }
+    for (var value : List.of("-1", "0.5", "\"0\"", "false"))
+      invalid.add("{\"instance\":{\"maxInstances\":" + value + "}}");
     for (var value : List.of("null", "0", "\"false\""))
       invalid.add("{\"instance\":{\"alwaysOnAllowed\":" + value + "}}");
-    for (var value : List.of("null", "0", "\"usd\"", "\"US\"", "\"USDD\"", "\"US1\"", "\"USD\\n\""))
-      invalid.add("{\"model\":{\"currency\":" + value + "}}");
+    for (var value : List.of("null", "0", "{}", "[]", "{\"removedLimit\":0}"))
+      invalid.add("{\"model\":" + value + "}");
     for (String value : invalid) {
       assertError("common.validation_failed", () -> put("default", null, value));
       assertEquals(before, get("default", null), value);
@@ -188,7 +185,6 @@ class OrgQuotaIntegrityTest {
         """
         {"instance":{"cpuMillis":100,"memoryMb":256,"diskGb":1,"maxInstances":null,
           "alwaysOnAllowed":false,"futureInstance":{"mode":[null,0,false]}},
-         "model":{"monthlyBudgetMicros":0,"currency":"USD","dailyTokens":null,"futureModel":"ok"},
          "futureRoot":[null,0,false,{"nested":1}]}
         """;
     for (var target :
@@ -221,9 +217,9 @@ class OrgQuotaIntegrityTest {
           "committed",
           race(
               () -> put(target.scope(), target.id(), "{\"instance\":{\"maxInstances\":1}}"),
-              () -> put(target.scope(), target.id(), "{\"model\":{\"dailyTokens\":0}}")));
+              () -> put(target.scope(), target.id(), "{\"instance\":{\"maxInstances\":0}}")));
       assertEquals(1, count(target.scope(), target.id()));
-      assertEquals(tree("{\"model\":{\"dailyTokens\":0}}"), get(target.scope(), target.id()));
+      assertEquals(tree("{\"instance\":{\"maxInstances\":0}}"), get(target.scope(), target.id()));
     }
   }
 
@@ -271,23 +267,20 @@ class OrgQuotaIntegrityTest {
     put(
         "default",
         null,
-        "{\"instance\":{\"cpuMillis\":100,\"memoryMb\":256,\"diskGb\":1,\"maxInstances\":10,\"alwaysOnAllowed\":true},\"model\":{\"monthlyBudgetMicros\":100,\"dailyTokens\":100,\"currency\":\"USD\"}}");
+        "{\"instance\":{\"cpuMillis\":100,\"memoryMb\":256,\"diskGb\":1,\"maxInstances\":10,\"alwaysOnAllowed\":true}}");
     put(
         "group",
         group,
-        "{\"instance\":{\"cpuMillis\":200,\"maxInstances\":0,\"alwaysOnAllowed\":false},\"model\":{\"monthlyBudgetMicros\":null,\"dailyTokens\":0}}");
+        "{\"instance\":{\"cpuMillis\":200,\"maxInstances\":0,\"alwaysOnAllowed\":false}}");
     put(
         "group",
         second,
-        "{\"instance\":{\"cpuMillis\":300,\"maxInstances\":null,\"alwaysOnAllowed\":true},\"model\":{\"monthlyBudgetMicros\":200,\"dailyTokens\":10}}");
-    put(
-        "member",
-        member,
-        "{\"instance\":{\"maxInstances\":0,\"alwaysOnAllowed\":false},\"model\":{\"dailyTokens\":null}}");
+        "{\"instance\":{\"cpuMillis\":300,\"maxInstances\":null,\"alwaysOnAllowed\":true}}");
+    put("member", member, "{\"instance\":{\"maxInstances\":0,\"alwaysOnAllowed\":false}}");
     var effective = TenantContext.call(TENANT, () -> svc.getEffectiveQuota(member));
     assertEquals(
         tree(
-            "{\"instance\":{\"cpuMillis\":300,\"memoryMb\":256,\"diskGb\":1,\"maxInstances\":0,\"alwaysOnAllowed\":false},\"model\":{\"monthlyBudgetMicros\":null,\"dailyTokens\":null,\"currency\":\"USD\"}}"),
+            "{\"instance\":{\"cpuMillis\":300,\"memoryMb\":256,\"diskGb\":1,\"maxInstances\":0,\"alwaysOnAllowed\":false}}"),
         effective);
     UUID ungrouped = UuidV7.next();
     store.tenant(
@@ -309,7 +302,7 @@ class OrgQuotaIntegrityTest {
     String json =
         "{\"instance\":{\"cpuMillis\":9007199254740993,\"maxInstances\":"
             + lower
-            + "},\"model\":{\"monthlyBudgetMicros\":"
+            + ",\"diskGb\":"
             + lower
             + "}}";
     assertEquals(tree(json), put("group", group, json));
@@ -319,17 +312,12 @@ class OrgQuotaIntegrityTest {
     put(
         "group",
         second,
-        "{\"instance\":{\"maxInstances\":"
-            + upper
-            + "},\"model\":{\"monthlyBudgetMicros\":"
-            + upper
-            + "}}");
+        "{\"instance\":{\"maxInstances\":" + upper + ",\"diskGb\":" + upper + "}}");
     var effective = TenantContext.call(TENANT, () -> svc.getEffectiveQuota(member));
     assertEquals(
         new BigInteger(upper), effective.path("instance").path("maxInstances").bigIntegerValue());
     assertEquals(
-        new BigInteger(upper),
-        effective.path("model").path("monthlyBudgetMicros").bigIntegerValue());
+        new BigInteger(upper), effective.path("instance").path("diskGb").bigIntegerValue());
     assertEquals(
         new BigInteger("9007199254740993"),
         effective.path("instance").path("cpuMillis").bigIntegerValue());
@@ -346,27 +334,18 @@ class OrgQuotaIntegrityTest {
     put(
         "member",
         member,
-        "{\"instance\":{\"cpuMillis\":9223372036854775807,\"maxInstances\":0},\"model\":{\"dailyTokens\":9223372036854775807}}");
+        "{\"instance\":{\"cpuMillis\":9223372036854775807,\"maxInstances\":0,\"memoryMb\":9223372036854775807}}");
     var output = new QuotaObserver();
     service.getEffectiveQuota(request, output);
     assertTrue(output.completed);
     assertEquals(
         Long.MAX_VALUE, output.responses.getFirst().getQuota().getInstance().getCpuMillis());
     assertEquals(
-        Long.MAX_VALUE, output.responses.getFirst().getQuota().getModel().getDailyTokens());
+        Long.MAX_VALUE, output.responses.getFirst().getQuota().getInstance().getMemoryMb());
     assertTrue(output.responses.getFirst().getQuota().getInstance().hasMaxInstances());
     assertEquals(0, output.responses.getFirst().getQuota().getInstance().getMaxInstances());
-    for (String field :
-        List.of(
-            "cpuMillis",
-            "memoryMb",
-            "diskGb",
-            "maxInstances",
-            "monthlyBudgetMicros",
-            "dailyTokens")) {
-      String section =
-          List.of("monthlyBudgetMicros", "dailyTokens").contains(field) ? "model" : "instance";
-      put("member", member, "{\"" + section + "\":{\"" + field + "\":9223372036854775808}}");
+    for (String field : List.of("cpuMillis", "memoryMb", "diskGb", "maxInstances")) {
+      put("member", member, "{\"instance\":{\"" + field + "\":9223372036854775808}}");
       var rejected = new QuotaObserver();
       assertError("common.validation_failed", () -> service.getEffectiveQuota(request, rejected));
       assertTrue(rejected.responses.isEmpty());

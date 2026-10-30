@@ -26,6 +26,7 @@ func TestIdentityAndStreaming(t *testing.T) {
 			t.Error(err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Access-Control-Allow-Origin", "https://attacker.example.com")
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer upstream.Close()
@@ -51,6 +52,9 @@ func TestIdentityAndStreaming(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != 200 || w.Body.String() != "data: [DONE]\n\n" {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("upstream CORS policy leaked through member gateway")
 	}
 	metadata := got["metadata"].(map[string]any)
 	if got["user"] != "tenant:member" || metadata["tenant_id"] != "tenant" || metadata["account_id"] != "member" || metadata["device_id"] != "device" || metadata["api_key"] != nil || calls != 1 {

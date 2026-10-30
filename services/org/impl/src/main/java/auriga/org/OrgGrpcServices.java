@@ -327,16 +327,6 @@ public final class OrgGrpcServices {
       if (i.has("alwaysOnAllowed")) ib.setAlwaysOnAllowed(i.path("alwaysOnAllowed").asBoolean());
       b.setInstance(ib);
     }
-    if (q.has("model")) {
-      ObjectNode m = (ObjectNode) q.path("model");
-      ModelQuota.Builder mb = ModelQuota.newBuilder();
-      if (m.has("monthlyBudgetMicros") && !m.path("monthlyBudgetMicros").isNull())
-        mb.setMonthlyBudgetMicros(QuotaValues.int64(m.path("monthlyBudgetMicros")));
-      if (m.hasNonNull("currency")) mb.setCurrency(m.path("currency").asString());
-      if (m.has("dailyTokens") && !m.path("dailyTokens").isNull())
-        mb.setDailyTokens(QuotaValues.int64(m.path("dailyTokens")));
-      b.setModel(mb);
-    }
     return b.build();
   }
 

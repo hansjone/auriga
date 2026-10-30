@@ -16,6 +16,7 @@ function fixture(litellm) {
       'networkSubmit',
       'networkBroker',
       'networkWebsocket',
+      'litellmUI',
     ].map((name, index) => [name, 18000 + index]),
   );
   const roles = {
@@ -49,6 +50,9 @@ test('Beta uses the service key file and retains independent network control RPC
   };
   const cfg = fixture(connection);
   assert.equal(cfg.edge.litellmOrigin, connection.origin);
+  assert.equal(cfg.edge.litellmUI.origin.port, 18009);
+  assert.notDeepEqual(cfg.edge.litellmUI.origin, cfg.access.adminOrigin);
+  assert.equal(cfg.edge.litellmUI.listener.port, 18009);
   assert.equal(cfg.ai.origin, connection.origin);
   assert.equal(cfg.ai.keyFile, connection.teamKeyFile);
   assert.equal(cfg.ai.masterKeyFile, undefined);

@@ -45,6 +45,9 @@ func aiAdminRequest(t *testing.T, g *Gateway, addresses map[string]string, role,
 	if role == "instanceControl" {
 		request.Host = originAuthority(g.Cfg.Access.InstanceControl().Origin)
 	}
+	if role == "relayAdmin" {
+		request.Host = originAuthority(g.Cfg.LiteLLMUI.Origin)
+	}
 	request.Header = headers.Clone()
 	client := &http.Client{Transport: &http.Transport{}, Timeout: 5 * time.Second}
 	defer client.CloseIdleConnections()

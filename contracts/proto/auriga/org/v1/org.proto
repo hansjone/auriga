@@ -210,7 +210,8 @@ message GetEffectiveQuotaResponse {
 
 message Quota {
   InstanceQuota instance = 1;
-  ModelQuota model = 2;
+  reserved 2;
+  reserved "model";
 }
 
 // 合并后的有效配额：字段不设置（has_xxx 为 false）表示"不限"。
@@ -222,15 +223,6 @@ message InstanceQuota {
   optional int64 max_instances = 4;
   // 允许常驻（不做闲置回收）。
   bool always_on_allowed = 5;
-}
-
-message ModelQuota {
-  // 每月预算，百万分之一货币单位；不设置=不限，0=禁止团队模型。UTC月，币种必须等于gateway部署币种。
-  optional int64 monthly_budget_micros = 1;
-  // ISO 4217，例如 `CNY`、`USD`。
-  string currency = 2;
-  // 每日 token 上限；不设置=不限，0=禁止团队模型。UTC日；实例/设备按同一主体共享。
-  optional int64 daily_tokens = 3;
 }
 
 // 策略。调用方：workspace（`workspace`）、egress（`egress`）等。

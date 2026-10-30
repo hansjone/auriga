@@ -36,14 +36,15 @@ type Gateway struct {
 	IAMTransport  http.RoundTripper
 	APITransports map[*url.URL]http.RoundTripper
 
-	iamURL       *url.URL
-	orgURL       *url.URL
-	workspaceURL *url.URL
-	teamURL      *url.URL
-	collabURL    *url.URL
-	resourceURL  *url.URL
-	deviceURL    *url.URL
-	litellmURL   *url.URL
+	iamURL          *url.URL
+	orgURL          *url.URL
+	workspaceURL    *url.URL
+	teamURL         *url.URL
+	collabURL       *url.URL
+	resourceURL     *url.URL
+	deviceURL       *url.URL
+	litellmURL      *url.URL
+	litellmHandoffs liteLLMHandoffs
 
 	networkSubmitURL *url.URL
 
@@ -55,6 +56,9 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	if err := cfg.validateLiteLLMUI(); err != nil {
+		return nil, err
+	}
 	litellmURL, err := cfg.parseLiteLLMOrigin()
 	if err != nil {
 		return nil, err
@@ -222,6 +226,10 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	rid, r := ensureRequestID(r)
 	clientIP := ResolveClientIP(r, g.Trusted)
 	r = r.WithContext(context.WithValue(r.Context(), ctxKeyClientIP, clientIP))
+	if entry, ok := r.Context().Value(accessEntryKey{}).(accessEntry); ok && entry.role == "relayAdmin" {
+		g.proxyLiteLLM(w, r, entry.role, rid)
+		return
+	}
 	host := requestHost(r)
 
 	// Instance host first: only reject traversal; do not apply portal/admin path strictness (N1).

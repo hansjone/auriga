@@ -18,6 +18,10 @@ const options = Object.fromEntries(
 );
 const materials = path.resolve(options['--materials']);
 const access = JSON.parse(readFileSync(path.join(materials, 'access.json')));
+const ui = JSON.parse(
+  readFileSync(path.join(materials, 'edge.config.json')),
+).litellmUI;
+if (!ui) throw new Error('deployment lacks an independent LiteLLM UI origin');
 const enrollment = JSON.parse(
   readFileSync(path.join(materials, 'enrollment/emergency-enrollment.json')),
 );
@@ -33,6 +37,9 @@ const origins = Object.fromEntries(
       `${access[`${role}Origin`].scheme}://${access[`${role}Origin`].host}:${access[`${role}Origin`].port}`,
     ),
   ]),
+);
+origins.relayAdmin = new URL(
+  `${ui.origin.scheme}://${ui.origin.host}:${ui.origin.port}`,
 );
 const consumed = new Map();
 function check(ok, label) {
@@ -205,10 +212,11 @@ async function write(c, route, body) {
   );
 }
 const admin = client('admin');
+const uiAdmin = client('relayAdmin');
 const native = client('portal');
 const llm = (route, body) =>
   expectRequest(
-    admin,
+    uiAdmin,
     '/ai' + route,
     {
       method: body === undefined ? 'GET' : 'POST',
@@ -228,16 +236,42 @@ try {
     totp: enrollment.totpSecret,
   });
   check(
-    (await llm('/health/liveliness')).status === 200,
-    'LiteLLM liveliness through admin edge',
+    origins.relayAdmin.origin !== origins.admin.origin &&
+      origins.relayAdmin.origin !== origins.portal.origin,
+    'UI has independent origin',
   );
-  let page = await expectRequest(admin, '/ai/ui/', {}, [200, 307, 308]);
+  const handoff = await expectRequest(admin, '/ai/ui/', {}, [200]);
+  const code = handoff.text.match(
+    /name="code" value="([a-zA-Z0-9_-]{43})"/,
+  )?.[1];
+  check(
+    Boolean(code) &&
+      handoff.text.includes(`action="${origins.relayAdmin.origin}/ai/session"`),
+    'administrator received one-time UI handoff',
+  );
+  await expectRequest(
+    uiAdmin,
+    '/ai/session',
+    {
+      browser: false,
+      method: 'POST',
+      form: true,
+      body: { code },
+      headers: { Origin: origins.admin.origin },
+    },
+    [303],
+  );
+  check(
+    (await llm('/health/liveliness')).status === 200,
+    'LiteLLM liveliness through isolated UI edge',
+  );
+  let page = await expectRequest(uiAdmin, '/ai/ui/', {}, [200, 307, 308]);
   for (let n = 0; page.status !== 200 && n < 5; n++) {
-    const target = new URL(page.headers.location, origins.admin);
-    if (target.origin !== origins.admin.origin)
-      throw new Error('UI redirect left admin origin');
+    const target = new URL(page.headers.location, origins.relayAdmin);
+    if (target.origin !== origins.relayAdmin.origin)
+      throw new Error('UI redirect left independent UI origin');
     page = await expectRequest(
-      admin,
+      uiAdmin,
       target.pathname + target.search,
       {},
       [200, 307, 308],
@@ -255,13 +289,13 @@ try {
     'UI assets retain admin prefix',
   );
   for (const asset of assets.slice(0, 3)) {
-    const result = await expectRequest(admin, asset, {}, [200]);
+    const result = await expectRequest(uiAdmin, asset, {}, [200]);
     check(
       !result.headers['content-type']?.includes('text/html'),
       'administrator UI asset served',
     );
     check(
-      [401, 403].includes((await request(client('admin'), asset)).status),
+      [401, 403].includes((await request(client('relayAdmin'), asset)).status),
       'anonymous UI asset rejected',
     );
   }

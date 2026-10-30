@@ -1,6 +1,6 @@
 # 中转站部署与模型接入
 
-中转站随公开 compose / NAS 栈部署。使用 LiteLLM Proxy MIT 核心，模型、池、虚拟 Key、预算和用量均在 LiteLLM 管理；Auriga 管理台“模型”入口打开同一管理员 Origin 的 `/ai/ui/`。网络通信配置独立，不将 LiteLLM Key 用作 Auriga 登录凭据。
+中转站随公开 compose / NAS 栈部署。使用 LiteLLM Proxy MIT 核心，模型、池、虚拟 Key、预算和用量均在 LiteLLM 管理。Auriga 管理台“模型”入口经 `/ai/ui/` 的一次性交接进入独立 UI Origin，默认是管理员 scheme/host 的 **8086** 端口。网络通信配置独立，不将 LiteLLM Key 用作 Auriga 登录凭据。
 
 ## 部署
 
@@ -8,7 +8,11 @@
 
 LiteLLM 固定为 `ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06`。该版本及 digest 来自[官方镜像目录](https://github.com/berriai/litellm/pkgs/container/litellm/versions?filters%5Bversion_type%5D=tagged)，可按[官方发行说明](https://github.com/BerriAI/litellm/releases/tag/v1.106.6)验证签名。NAS 的 start 不下载镜像，需预先在目标 Engine 准备此精确 digest（可在构建机拉取后 save/load），并通过 preflight；原三份 Auriga 制品镜像仍用现有校验流程。
 
-安装器生成四个独立随机秘密：`litellm/master`、`salt`、`team`、`pg_password`，位于 compose `var` 或 NAS `config/materials` 下。不要提交或打印文件内容。数据库为现有 PostgreSQL 内的独立 `litellm` 库，角色 `auriga_litellm` 不能建库或建角色。首次启动的 `litellm-init` 只签发一个 `llm_api` 类型服务虚拟 Key；其完成标记保存在 `litellm-state` 卷。重启不自动恢复被吊销的服务 Key。备份 PostgreSQL、盐值、秘密目录及该状态卷；显式轮换服务 Key 时同时更新 gateway 挂载的文件，不能用 master key 替代它。
+安装器生成四个独立随机秘密：`litellm/master`、`salt`、`team`、`pg_password`，位于 compose `var` 或 NAS `config/materials` 下。不要提交或打印文件内容。数据库为现有 PostgreSQL 内的独立 `litellm` 库，角色 `auriga_litellm` 不能建库或建角色。首次启动的 `litellm-init` 只签发一个 `llm_api` 类型服务虚拟 Key；它先将 claim 提交到 `auriga_provisioning.service_key_state`，成功后置 ready。已有 ready 标记时不重建 Key，丢弃本地卷也不会恢复已吊销 Key。备份整个 LiteLLM 数据库、固定盐值及秘密目录；不再使用 `litellm-state` 卷。若停在 claimed 或秘密指纹变化，初始化失败关闭，须由部署管理员核查 Key 状态后显式恢复，不能删除标记自动重试。轮换时同步 gateway 的秘密文件，不能用 master key 替代。
+
+compose 默认另发布 edge 的 8086 端口；首次 prepare 可加 `--litellm-ui-origin https://admin.example.com:8446`。NAS 设置 `AURIGA_LITELLM_UI_ORIGIN`，留空同样默认 8086；域名代理可用 `https://litellm.example.com`，转到 edge 的 8086 listener，并沿用 access 文件中的代理 mTLS 边界。浏览器证书 SAN 必须覆盖 UI 主机名；防火墙与反代要允许该独立入口。它不能与门户、管理台、实例控制或实例域重合，协议须与管理台一致。UI Origin 纳入安装封存输入，已有材料不能原地换地址。
+
+独立入口只暴露 LiteLLM，不提供 Auriga API。必须先从已登录的 Auriga 管理台打开“模型”；外部 Key 不能建立 UI 会话。edge 每次检查在线 admin 会话与 `ai.providers.write`，只转发 LiteLLM cookie 白名单，UI 和数据均剥离全部 `Access-Control-*` 响应头。
 
 LiteLLM 不发布宿主端口。内部健康入口为 `http://litellm:4000/health/liveliness`，compose 健康检查另读 `/health/readiness`；`litellm-init` 正常退出后 ai-relay 才启动。若数据库已有旧卷但没有 LiteLLM 库，首次初始化 hook 不会重新运行，应使用新部署目录验收。
 
@@ -16,13 +20,20 @@ LiteLLM 不发布宿主端口。内部健康入口为 `http://litellm:4000/healt
 
 1. 登录 Auriga 管理台，打开“模型”，进入 `/ai/ui/`；LiteLLM 仍要求其自身管理员登录。由部署管理员安全取用 master 文件作为 LiteLLM 初始管理员凭据，不通过聊天、URL 或剪贴板日志传递。
 2. 在 Models 添加提供商，填写供应商模型、API Base、供应商 Key 和公开模型名。至少添加两个提供商；需要组成同一池时为多个 deployment 设置同一公开模型名，配置 LiteLLM 自带路由、限流和故障切换。
-3. 用 Playground 验证每个 deployment，再选择池的公开模型名验证调用。费用由 LiteLLM 模型价格表或管理员设置的自定义单价计算；自定义模型要核实价格，不能将未知费用当作预算已生效。
-4. 团队 DSH 保持 Auriga 登录和 AI 短票，调用原 `/ai/v1/models`、`/ai/v1/chat/completions`；edge 按凭据类型选择 gateway 或 LiteLLM。gateway 每次校验成员身份，使用服务虚拟 Key，并覆盖 `user=tenantId:accountId` 与可信 metadata。在 LiteLLM 的 End Users / Spend Logs 按该标识及 metadata 查询成员用量；成员预算与服务 Key 总预算在 LiteLLM 配置。
+3. **首次上线必做**：在 Virtual Keys 找到 `auriga-team`，显式限制团队模型/池、总预算及周期、RPM/TPM。初始化 Key 不自动替运营方决定限额；收紧前不对团队开放模型。外部专用池不要授权给服务 Key。
+4. 用 Playground 验证 deployment 和模型池。费用由模型价格表或管理员自定义单价计算；未知费用不能当作预算已生效。
+5. 团队 DSH 保持 Auriga 登录和 AI 短票，调用原两个数据入口。gateway 每次校验成员身份，使用服务 Key，覆盖 `user=tenantId:accountId` 与可信 metadata。在 LiteLLM End Users / Spend Logs 按该标识查询用量。
+
+## 成员预算与限速
+
+Auriga 配额页只保留实例资源配额，含旧 `model` 字段的配额写入会被拒绝。成员模型额度改在 LiteLLM **Customers / End Users** 管理，标识精确使用 `tenantId:accountId`，不要误配为 LiteLLM 内部登录用户。
+
+固定版本开源 `/customer/new` 支持 `user_id`、`max_budget`（USD）、`rpm_limit`、`tpm_limit`。通过独立 UI Origin 的 `/ai/customer/new` 创建，例如 `{"user_id":"<tenantId>:<accountId>","max_budget":10,"rpm_limit":30,"tpm_limit":20000}`；使用已完成 Auriga 交接和 LiteLLM 登录的管理员客户端。已有成员在 UI 或 `/ai/customer/update` 更新同一标识。预算周期和重置策略按实际运营设置；服务 Key 总预算仍需另设。先用计价假模型验一次成功、累计后超限拒绝，再开放付费模型；不要把未经验证的零值或未知费用当成封禁措施。
 
 ## 给外部调用方发 Key
 
 1. 在 LiteLLM Virtual Keys 创建 Key，设置可用模型/池、预算、预算周期、RPM/TPM、到期时间与别名。将虚拟 Key 安全交付调用方；不交付 master、salt 或团队服务 Key。
-2. 客户端 OpenAI base URL 设为门户 Origin 加 `/ai/v1`，Bearer 使用该虚拟 Key，model 使用池的公开模型名。公开数据入口只开放 models 与 chat/completions。管理 UI、登录、Key 管理和静态资源只允许管理员 Origin 且必须有在线有效的 Auriga admin 会话。
+2. 客户端 OpenAI base URL 设为门户 Origin 加 `/ai/v1`，Bearer 使用该虚拟 Key，model 使用池的公开模型名。公开数据入口只开放 models 与 chat/completions，拒绝调用方指定上游 URL、凭据、fallbacks 等控制项；外部用量 user 固定为 external:Key摘要，不能伪造成团队成员。管理 UI、登录、Key 管理和静态资源只允许独立 UI Origin 且必须有在线有效的 Auriga admin 会话。
 3. 用本地假 OpenAI 上游依次验证 models、普通 chat 和流式 chat；再验证无 Key、错误 Key、吊销 Key 和超预算 Key 均拒绝。检查 LiteLLM Spend Logs，再吊销测试 Key。不调用付费模型代替验收。
 
 参考：[虚拟 Key](https://docs.litellm.ai/docs/proxy/virtual_keys)、[用量归属](https://docs.litellm.ai/docs/proxy/cost_tracking)。
@@ -35,7 +46,7 @@ Beta 不再创建旧 AI 账本或启动 admin runtime。先准备独立的 LiteL
 node scripts/beta-ui/runner.mjs litellm --state D:\auriga-beta-example --origin http://127.0.0.1:4000 --team-key-file D:\auriga-beta-example\litellm-team.key
 ```
 
-然后沿 Beta 原流程启动。命令只保存 Origin 与秘密文件路径，不取用生产密钥；未配置 LiteLLM 时 Beta 不提供中转站。原生 Beta 的端口发布仅用于本机调试，公开栈无需开放 4000。
+然后沿 Beta 原流程启动。使用新建的 Beta StateDir（含独立 UI 端口 18088），从管理台模型入口交接；外接 LiteLLM 也必须设置 `SERVER_ROOT_PATH=/ai` 和指向该 UI Origin 的 `PROXY_BASE_URL`。命令只保存 Origin 与秘密文件路径，不取用生产密钥；未配置 LiteLLM 时 Beta 不提供中转站。原生 Beta 的端口发布仅用于本机调试，公开栈无需开放 4000。
 
 独立 LiteLLM 验收：运行 `node deploy/nas/litellm/verify.mjs`。脚本只接受本机 Docker socket，创建随机 project，使用本地假上游，并在结束时清理自己的容器和卷；这项检查不覆盖 Auriga 管理员会话或 gateway 成员身份链路。
 

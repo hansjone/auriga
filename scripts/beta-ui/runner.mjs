@@ -222,7 +222,22 @@ export function configuration(state, manifest, secrets) {
       }
     : undefined;
   if (manifest.litellm) {
+    if (
+      !Number.isSafeInteger(ports.litellmUI) ||
+      ports.litellmUI < 1 ||
+      ports.litellmUI > 65535 ||
+      Object.entries(ports).some(
+        ([name, value]) => name !== 'litellmUI' && value === ports.litellmUI,
+      )
+    )
+      throw new Error(
+        'Independent LiteLLM UI port missing; use a fresh Beta StateDir',
+      );
     edge.litellmOrigin = manifest.litellm.origin;
+    edge.litellmUI = {
+      origin: origin(ports.litellmUI),
+      listener: { address: '127.0.0.1', port: ports.litellmUI, tls: false },
+    };
     edge.upstreams['ai-device'] = `http://127.0.0.1:${ports.ai}`;
   }
   const sessionKV = {
@@ -320,6 +335,7 @@ function initialize(state, pgPort) {
       networkBroker: 18085,
       networkWebsocket: 18086,
       networkSubmit: 18087,
+      litellmUI: 18088,
     },
   };
   const secrets = Object.fromEntries(

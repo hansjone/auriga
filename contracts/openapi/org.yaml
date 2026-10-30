@@ -934,6 +934,7 @@ components:
     Quota:
       type: object
       description: 各字段都可省略；省略表示"这一层不设置"。值为 null 表示"不限"。合并时"不限"优先于任何具体数值。
+      not: { required: [model] }
       properties:
         instance:
           type: object
@@ -943,12 +944,6 @@ components:
             diskGb: { type: integer, minimum: 1 }
             maxInstances: { type: [integer, 'null'], minimum: 0, description: 0 表示不允许有实例；null 表示不限。 }
             alwaysOnAllowed: { type: boolean }
-        model:
-          type: object
-          properties:
-            monthlyBudgetMicros: { type: [integer, 'null'], minimum: 0, description: 'UTC每月预算，百万分之一货币单位；null 表示不限，0禁止团队模型。币种须等于gateway部署币种；已在途预占不因配额修改清零。' }
-            currency: { type: string, pattern: '^[A-Z]{3}$' }
-            dailyTokens: { type: [integer, 'null'], minimum: 0, description: 'UTC每日token限额；null 表示不限，0禁止团队模型。实例和设备按同一主体共享。' }
     InvitationInput:
       type: object
       properties:

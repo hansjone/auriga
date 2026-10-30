@@ -19,6 +19,9 @@ services:
     volumes: ['./fake-upstream.py:/test/fake-upstream.py:ro']
   litellm:
     image: *litellm
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
     entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
     environment:
       LITELLM_LOG: ERROR
@@ -44,23 +47,25 @@ services:
       start_period: 60s
   litellm-init:
     image: *litellm
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
     profiles: [verify]
     entrypoint: ['python', '/test/provision.py']
-    secrets: [litellm_master, litellm_team]
+    secrets: [litellm_master, litellm_team, litellm_pg_password]
     volumes:
       - ./provision.py:/test/provision.py:ro
-      - state:/state
   checker:
     image: *litellm
     profiles: [verify]
     entrypoint: ['python', '/test/verify.py']
-    secrets: [litellm_master, litellm_team]
-    volumes: ['./verify.py:/test/verify.py:ro']
+    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    volumes:
+      - ./verify.py:/test/verify.py:ro
+      - ./provision.py:/test/provision.py:ro
 secrets:
   bootstrap: { file: '${AURIGA_RELAY_TEST_ROOT}/bootstrap' }
   litellm_master: { file: '${AURIGA_RELAY_TEST_ROOT}/master' }
   litellm_salt: { file: '${AURIGA_RELAY_TEST_ROOT}/salt' }
   litellm_team: { file: '${AURIGA_RELAY_TEST_ROOT}/team' }
   litellm_pg_password: { file: '${AURIGA_RELAY_TEST_ROOT}/pg_password' }
-volumes:
-  state:

@@ -83,6 +83,32 @@ if __name__ == '__main__':
                 break
             time.sleep(0.25)
         expect(found, 'member usage persisted')
+        customer = 'tenant-fixture:budget-member-' + secrets.token_hex(8)
+        expect(call('/customer/new', master, {'user_id': customer, 'max_budget': 0.000001,
+                                              'rpm_limit': 60, 'tpm_limit': 100000})[0] == 200,
+               'open-source member budget configured')
+        customer_request = {**request, 'user': customer}
+        expect(call('/v1/chat/completions', team, customer_request)[0] == 200, 'member budget initial call')
+        deadline = time.monotonic() + 30
+        rejected = False
+        while time.monotonic() < deadline:
+            status, error = call('/v1/chat/completions', team, customer_request)
+            if status in (400, 401, 402, 403, 422, 429) and error.get('error', {}).get('type') == 'budget_exceeded':
+                rejected = True
+                break
+            time.sleep(0.25)
+        expect(rejected, 'member budget exceeded rejected')
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('service_provision', '/test/provision.py')
+        provision = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provision)
+        with provision.database_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT state FROM auriga_provisioning.service_key_state WHERE service_name='auriga-team'")
+                expect(cursor.fetchone() == ('ready',), 'service key claim persisted in PostgreSQL')
+        expect(call('/key/delete', master, {'keys': [team]})[0] == 200, 'service key revoked')
+        provision.provision()
+        expect(call('/v1/models', team)[0] in (401, 403), 'init without local state cannot resurrect revoked service key')
     except Exception as error:
         # Only fixed check names are safe to show; never echo HTTP/DB errors.
         raise SystemExit('FAIL LiteLLM acceptance; inspect preceding PASS checks') from None

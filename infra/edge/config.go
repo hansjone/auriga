@@ -21,6 +21,7 @@ type Config struct {
 	IAMRPC                 IAMRPCConfig                  `json:"iamRpc"`
 	IAMHop                 IAMHopConfig                  `json:"iamHop"`
 	LiteLLMOrigin          string                        `json:"litellmOrigin"`
+	LiteLLMUI              *LiteLLMUIConfig              `json:"litellmUI,omitempty"`
 	DeviceHop              IAMHopConfig                  `json:"deviceHop"`
 	CollabHop              IAMHopConfig                  `json:"collabHop"`
 	NetworkSubmitHop       IAMHopConfig                  `json:"networkSubmitHop"`

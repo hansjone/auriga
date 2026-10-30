@@ -27,6 +27,9 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    privileged: false
     entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
     env_file:
       - path: ./var/litellm-public.env
@@ -59,11 +62,13 @@ services:
 
   litellm-init:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    privileged: false
     entrypoint: ['python', '/etc/litellm/provision.py']
-    secrets: [litellm_master, litellm_team]
+    secrets: [litellm_master, litellm_team, litellm_pg_password]
     volumes:
       - ../nas/litellm/provision.py:/etc/litellm/provision.py:ro
-      - litellm-state:/state
     depends_on:
       litellm:
         condition: service_healthy
@@ -261,6 +266,7 @@ services:
     ports:
       - '${AURIGA_ACCESS_BIND:-127.0.0.1}:${AURIGA_PORTAL_PORT:-8080}:${AURIGA_PORTAL_TARGET_PORT:-8080}'
       - '${AURIGA_ACCESS_BIND:-127.0.0.1}:${AURIGA_ADMIN_PORT:-8084}:${AURIGA_ADMIN_TARGET_PORT:-8084}'
+      - '${AURIGA_ACCESS_BIND:-127.0.0.1}:${AURIGA_LITELLM_UI_PORT:-8086}:${AURIGA_LITELLM_UI_TARGET_PORT:-8086}'
     networks:
       default:
         ipv4_address: 172.29.240.10 # gitleaks:allow disposable M2 network
@@ -390,7 +396,6 @@ services:
       - ./var/runtime-proofs:/etc/auriga/runtime-proofs:ro
 
 volumes:
-  litellm-state:
   pgdata:
   natsdata:
   internal-tokens:
