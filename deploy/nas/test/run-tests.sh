@@ -18,6 +18,9 @@ fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib.sh"
 
+if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
+else fail_msg join_node_boundary 'private join token import failed'; fi
+
 if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
 else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi
 

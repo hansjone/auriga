@@ -232,10 +232,14 @@ export function cloudReadyJourney(options, config, host) {
 
     if (config.nodeEnrollment !== false)
       await step('node-join', async () => {
+        const template = config.nodeTemplateLabel ?? 'real-dsh-e2e';
+        assert.match(template, /^[a-z0-9][a-z0-9._-]{0,62}$/);
         await adminPage.goto(admin + '/nodes');
         const nodes = await json(adminPage, '/api/workspace/v1/admin/nodes');
         if (shared) {
-          const available = nodes.items.find(sharedNodeReady);
+          const available = nodes.items.find((node) =>
+            sharedNodeReady(node, template),
+          );
           assert.ok(
             available,
             'shared deployment has no suitable real DSH node',
@@ -261,7 +265,9 @@ export function cloudReadyJourney(options, config, host) {
         assert.equal(response.status(), 201);
         const material = await response.json();
         assert.ok(typeof material.token === 'string' && material.token);
-        const tokenFile = resolve(compose, 'var/join/token');
+        const tokenFile = config.nodeJoinTokenFile
+          ? resolve(config.nodeJoinTokenFile)
+          : resolve(compose, 'var/join/token');
         assert.ok(
           lstatSync(tokenFile).isFile() &&
             !lstatSync(tokenFile).isSymbolicLink(),
@@ -288,14 +294,14 @@ export function cloudReadyJourney(options, config, host) {
         await details
           .getByRole('textbox', { name: '标签值', exact: true })
           .last()
-          .fill('real-dsh-e2e');
+          .fill(template);
         await details
           .getByRole('button', { name: '保存配置', exact: true })
           .click();
         await adminPage.getByTestId('confirm-action').click();
         await poll(
           () => json(adminPage, '/api/workspace/v1/admin/nodes'),
-          (value) => value.items[0]?.labels?.template === 'real-dsh-e2e',
+          (value) => value.items[0]?.labels?.template === template,
           20_000,
         );
         return { nodeId: id };

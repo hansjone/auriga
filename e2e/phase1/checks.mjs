@@ -103,12 +103,12 @@ export function assertManaged(bootstrap) {
   assert.equal(bootstrap.manifest.element, 'auriga-team-panel');
 }
 
-export function sharedNodeReady(node) {
+export function sharedNodeReady(node, template = 'real-dsh-e2e') {
   return (
     node?.status === 'online' &&
     node.schedulable === true &&
     node.drivers?.includes('docker') === true &&
-    node.labels?.template === 'real-dsh-e2e'
+    node.labels?.template === template
   );
 }
 

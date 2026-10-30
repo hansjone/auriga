@@ -323,6 +323,24 @@ PostgreSQL 的 PGDATA 分阶段检查：仅当丢弃全部 capability 的 root �
 
 ## 节点 label 与模板匹配
 
+首次启动后，在内网管理台“节点”生成一次性加入材料；将 token 单独保存到 NAS operator
+自己的规范私有文件（当前 UID、0600、单硬链接，所在目录建议0700），不要把令牌放在命令行或日志。
+普通共享目录的 operator 可通过无网络、最小挂载的公开 helper 交付给既有 root-owned agent 文件：
+
+```sh
+AURIGA_DATA_ROOT=/srv/container/auriga-test sh deploy-nas/scripts/join-node.sh /srv/operator-private/join-token
+```
+
+helper只使用已批准且本地存在的 `AURIGA_INSTALLER_IMAGE`，input文件只读，join目录为唯一可写挂载，
+无Docker socket或宿主网络；root UID只加DAC_OVERRIDE以读取operator的0600输入。
+它检查原join目录0:0/0750、token叶0:0/0600/单链接/空文件，不修权限、不覆盖非空令牌、不重签身份。
+agent按原正式TLS+CA pin流程消费一次性令牌。未入网时agent等待超时可能重启，running不能代替online。
+若已存在非空文件，先核实际加入状态及令牌有效期，不能直接重复导入覆盖。
+
+统一浏览器验收用于NAS时可显式设置 `nodeTemplateLabel:"real-dsh"` 和 `nodeJoinTokenFile`（既有空的私有输入文件），
+`shared:false` 时正常在管理台签发并写该文件；operator随后执行上述helper，脚本继续等待节点online。
+共享部署 `shared:true` 只复用匹配标签的在线节点，不修改它。默认仍为开发模板 `real-dsh-e2e` 及原composeDir路径。
+
 正式NAS模板的调度标签为`template=real-dsh`。节点已经入网、在线或有足够容量仍可能因label不匹配而无法调度；还需核对驱动、OS/架构、可调度状态及剩余容量。管理台的节点详情支持编辑名称、标签及是否调度；标签变更需确认并刷新服务端状态。没有该页面的旧版本也可使用正式管理API调整。在正式管理入口以具备`workspace.nodes.read`/`workspace.nodes.admin`权限的管理员调用`GET /api/workspace/v1/admin/nodes`及`PATCH /api/workspace/v1/admin/nodes/{nodeId}`，PATCH使用`application/merge-patch+json`，示例请求体：
 
 ```json

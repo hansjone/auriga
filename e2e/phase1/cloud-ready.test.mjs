@@ -14,6 +14,17 @@ import {
   assertAdminInvitation,
 } from './checks.mjs';
 
+test('formal NAS node selection uses the explicitly configured template label', () => {
+  const node = {
+    status: 'online',
+    schedulable: true,
+    drivers: ['docker'],
+    labels: { template: 'real-dsh' },
+  };
+  assert.equal(sharedNodeReady(node, 'real-dsh'), true);
+  assert.equal(sharedNodeReady(node), false);
+});
+
 test('invitations created from the direct admin entry use the default portal, then public login is independent', () => {
   const ip = {
     mode: 'ip',
