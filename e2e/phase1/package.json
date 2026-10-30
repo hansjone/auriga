@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test cloud-ready.test.mjs",
+    "test:browser": "node --test browser-routing.test.mjs",
     "cloud-ready": "node cloud-ready.mjs"
   },
   "devDependencies": {

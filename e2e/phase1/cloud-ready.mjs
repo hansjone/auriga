@@ -12,13 +12,27 @@ import {
   origin,
   totp,
   validateAccess,
+  sharedNodeReady,
+  loginOutcome,
+  totpNotBefore,
+  otpField,
 } from './checks.mjs';
 import { realImageDigest } from '../lib/real-dsh.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
+const compose = resolve(
+  process.env.AURIGA_PHASE1_COMPOSE_DIR ?? resolve(root, 'deploy/compose'),
+);
+const shared = process.env.AURIGA_PHASE1_SHARED === '1';
 const output = resolve(import.meta.dirname, 'output');
-const report = { status: 'failed', steps: [], failures: [] };
+const report = {
+  status: 'failed',
+  deploymentKind: shared ? 'shared' : 'fresh',
+  steps: [],
+  failures: [],
+};
 let browser;
+let activePage;
 let stage = 'preflight';
 
 async function step(name, action) {
@@ -52,6 +66,7 @@ async function json(page, path) {
 }
 
 async function submit(page) {
+  report.operation = 'submit-login-form';
   const response = page.waitForResponse(
     (r) =>
       r.request().method() === 'POST' &&
@@ -62,28 +77,54 @@ async function submit(page) {
     page.locator('[data-testid="form-step"] button[type="submit"]').click(),
   ]);
   assert.equal(result.status(), 200);
-  return result.json();
+  const tx = await result.json();
+  report.loginOutcomes ??= [];
+  report.loginOutcomes.push({
+    stage,
+    ...loginOutcome(tx, result.headers()['x-trace-id']),
+  });
+  return tx;
 }
 
 async function provider(page, type) {
+  report.operation = 'read-providers';
   const list = await json(page, '/api/iam/v1/login/providers');
   const matches = list.items.filter((p) => p.connectorType === type);
   assert.equal(matches.length, 1);
   assert.match(matches[0].id, /^[0-9a-f-]{36}$/);
+  report.operation = 'select-provider';
   await page.locator(`[data-provider-id="${matches[0].id}"]`).click();
+  report.operation = 'wait-login-form';
   await page.locator('[data-testid="form-step"]').waitFor();
+}
+
+async function fillOtp(page, credentials, field = 'otp') {
+  assert.ok(credentials.totpSecret);
+  const waitUntil = totpNotBefore(Date.now(), credentials.lastTotpCounter);
+  if (waitUntil > Date.now()) await delay(waitUntil - Date.now());
+  credentials.lastTotpCounter = Math.floor(Date.now() / 30_000);
+  await page
+    .locator(`input[name="${field}"]`)
+    .fill(totp(credentials.totpSecret));
 }
 
 async function fillLogin(page, credentials) {
   await page.locator('input[name="username"]').fill(credentials.username);
   await page.locator('input[name="password"]').fill(credentials.password);
-  if (credentials.totpSecret) {
-    // Avoid submitting a code at the end of its validity window.
-    const remaining = 30_000 - (Date.now() % 30_000);
-    if (remaining < 5_000) await delay(remaining + 100);
-    await page.locator('input[name="otp"]').fill(totp(credentials.totpSecret));
+  if (
+    credentials.totpSecret &&
+    (await page.locator('input[name="otp"]').count())
+  ) {
+    await fillOtp(page, credentials);
   }
-  const tx = await submit(page);
+  let tx = await submit(page);
+  if (
+    tx.status === 'pending' &&
+    ['totp', 'platform_totp'].includes(tx.step?.formId)
+  ) {
+    await fillOtp(page, credentials, otpField(tx.step));
+    tx = await submit(page);
+  }
   assert.equal(tx.status, 'completed');
 }
 
@@ -99,21 +140,17 @@ async function poll(read, predicate, timeout = 180_000) {
 
 try {
   const access = validateAccess(
-    JSON.parse(
-      readFileSync(resolve(root, 'deploy/compose/var/access.json'), 'utf8'),
-    ),
+    JSON.parse(readFileSync(resolve(compose, 'var/access.json'), 'utf8')),
   );
   const imageDigest = realImageDigest(
-    JSON.parse(
-      readFileSync(resolve(root, 'deploy/compose/var/real-dsh.json'), 'utf8'),
-    ),
+    JSON.parse(readFileSync(resolve(compose, 'var/real-dsh.json'), 'utf8')),
   );
   report.imageDigest = imageDigest;
   const portal = origin(access.portalOrigin);
   const admin = origin(access.adminOrigin);
   const enrollment = JSON.parse(
     readFileSync(
-      resolve(root, 'deploy/compose/var/enrollment/emergency-enrollment.json'),
+      resolve(compose, 'var/enrollment/emergency-enrollment.json'),
       'utf8',
     ),
   );
@@ -121,23 +158,20 @@ try {
     enrollment.username && enrollment.password && enrollment.totpSecret,
   );
   // The browser dependency is isolated from the application workspace lock.
-  const { chromium } = await import('playwright');
+  const { launchBrowser } = await import('./browser.mjs');
   await step('browser-launch', async () => {
-    const args = [];
-    if (process.env.AURIGA_PHASE1_RESOLVE_LOOPBACK === '1') {
-      assert.equal(access.mode, 'domain');
-      args.push(
-        '--no-proxy-server',
-        `--host-resolver-rules=MAP ${access.portalOrigin.host} 127.0.0.1,MAP ${access.adminOrigin.host} 127.0.0.1,MAP *.${access.instances.parentDomain} 127.0.0.1`,
-      );
-      report.entryMode = 'domain-browser-loopback-resolver';
-    } else report.entryMode = access.mode;
-    browser = await chromium.launch({ headless: true, args });
+    const loopback = process.env.AURIGA_PHASE1_RESOLVE_LOOPBACK === '1';
+    report.entryMode = loopback
+      ? 'domain-browser-loopback-resolver'
+      : access.mode;
+    browser = await launchBrowser(access, { loopback });
     return {};
   });
   const context = async () => {
     const ctx = await browser.newContext({ locale: 'zh-CN' });
     ctx.on('response', (r) => {
+      if (r.request().isNavigationRequest() && r.frame().page() === activePage)
+        report.navigationStatus = r.status();
       // Whitelist diagnostic fields. Never persist bodies, query strings,
       // cookies, headers, DOM, Playwright errors, traces or invitation URLs.
       if (r.status() < 400 || report.failures.length >= 30) return;
@@ -146,17 +180,30 @@ try {
         /^\/api\/(iam|org|workspace)\//.exec(path)?.[1] ??
         (path.includes('/auriga/') ? 'plugin' : 'page');
       const trace = r.headers()['x-trace-id'];
-      report.failures.push({
+      const failure = {
         stage,
         service,
         status: r.status(),
         ...(trace && /^[0-9a-f]{32}$/.test(trace) ? { traceId: trace } : {}),
-      });
+      };
+      report.failures.push(failure);
+      void r
+        .json()
+        .then((body) => {
+          const safe = loginOutcome({
+            step: { type: 'fail', code: body?.code },
+          });
+          if (safe.code) failure.code = safe.code;
+          if (body?.detail === 'instance state=starting')
+            failure.routeState = 'starting';
+        })
+        .catch(() => {});
     });
     return ctx;
   };
   const adminContext = await context();
   const adminPage = await adminContext.newPage();
+  activePage = adminPage;
   adminPage.setDefaultTimeout(20_000);
   await step('admin-login', async () => {
     await adminPage.goto(admin + '/login');
@@ -171,6 +218,11 @@ try {
   await step('node-join', async () => {
     await adminPage.goto(admin + '/nodes');
     const nodes = await json(adminPage, '/api/workspace/v1/admin/nodes');
+    if (shared) {
+      const available = nodes.items.find(sharedNodeReady);
+      assert.ok(available, 'shared deployment has no suitable real DSH node');
+      return { nodeId: available.id, reused: true };
+    }
     // A fresh installation must have no previously enrolled nodes.
     assert.equal(nodes.items.length, 0);
     await adminPage.locator('[aria-controls="node-join-materials"]').click();
@@ -188,7 +240,7 @@ try {
     assert.equal(response.status(), 201);
     const material = await response.json();
     assert.ok(typeof material.token === 'string' && material.token);
-    const tokenFile = resolve(root, 'deploy/compose/var/join/token');
+    const tokenFile = resolve(compose, 'var/join/token');
     assert.ok(
       lstatSync(tokenFile).isFile() && !lstatSync(tokenFile).isSymbolicLink(),
     );
@@ -256,18 +308,35 @@ try {
 
   const registrationContext = await context();
   const registration = await registrationContext.newPage();
+  activePage = registration;
   registration.setDefaultTimeout(20_000);
   let memberId;
   await step('member-register', async () => {
+    report.operation = 'open-invitation';
     await registration.goto(invitation);
+    report.operation = 'accept-invitation';
     await registration.locator('.invite-card button').click();
     await provider(registration, 'team-account');
+    report.operation = 'fill-registration';
     await registration.locator('input[name="username"]').fill(member.username);
     await registration
       .locator('input[name="displayName"]')
       .fill(member.displayName);
     await registration.locator('input[name="password"]').fill(member.password);
-    assert.equal((await submit(registration)).status, 'completed');
+    let tx = await submit(registration);
+    if (tx.status === 'pending') {
+      assert.equal(tx.step?.formId, 'first_totp');
+      // Read the real enrollment displayed by the public form. Never persist it.
+      const info = registration.locator('[data-testid="form-step"] .info');
+      report.operation = 'read-authenticator-enrollment';
+      await info.waitFor();
+      const match = /([A-Z2-7]{16,})\s*$/.exec(await info.textContent());
+      assert.ok(match, 'first authenticator enrollment was not displayed');
+      member.totpSecret = match[1];
+      await fillOtp(registration, member, otpField(tx.step));
+      tx = await submit(registration);
+    }
+    assert.equal(tx.status, 'completed');
     await registration.waitForURL(portal + '/');
     memberId = (await json(registration, '/api/iam/v1/me')).account.id;
     assert.ok(memberId);
@@ -277,6 +346,7 @@ try {
   await registrationContext.close();
   const memberContext = await context();
   const page = await memberContext.newPage();
+  activePage = page;
   page.setDefaultTimeout(20_000);
   await step('member-login', async () => {
     await page.goto(portal + '/login');
@@ -288,36 +358,38 @@ try {
   });
 
   let instance;
-  let ready;
   await step('instance-ready', async () => {
-    // Read only actual UI-initiated open/poll responses; never start via API.
-    const responseReady = page.waitForResponse(
-      async (r) => {
-        const path = new URL(r.url()).pathname;
-        if (
-          r.status() !== 200 ||
-          !/^\/api\/workspace\/v1\/(me\/instance\/open|instances\/[^/]+)$/.test(
-            path,
-          )
-        )
-          return false;
-        const body = await r.json();
-        const value = body.instance ?? body;
-        if (
-          !value.ready ||
-          !['running', 'pending_restart'].includes(value.phase)
-        )
-          return false;
-        ready = value;
-        return true;
-      },
-      { timeout: 125_000 },
-    );
-    await Promise.all([
-      responseReady,
-      page.getByRole('button', { name: '启动并进入', exact: true }).click(),
-    ]);
-    instance = ready;
+    // Keep state observation in the portal when the original UI navigates.
+    // Only the original page's real button may issue the open write.
+    const observer = await memberContext.newPage();
+    try {
+      await observer.goto(portal + '/');
+      const open = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' &&
+          new URL(r.url()).pathname === '/api/workspace/v1/me/instance/open',
+      );
+      const [response] = await Promise.all([
+        open,
+        page.getByRole('button', { name: '启动并进入', exact: true }).click(),
+      ]);
+      assert.equal(response.status(), 200);
+      const trace = response.headers()['x-trace-id'];
+      if (/^[0-9a-f]{32}$/.test(trace ?? '')) report.openTraceId = trace;
+      const value = await poll(
+        () => json(observer, '/api/workspace/v1/me/instances'),
+        (result) =>
+          result.items.some(
+            (item) =>
+              item.ownerId === memberId &&
+              (item.ready || item.phase === 'failed'),
+          ),
+        125_000,
+      );
+      instance = value.items.find((item) => item.ownerId === memberId);
+    } finally {
+      await observer.close();
+    }
     assertReady(instance, memberId);
     return {
       instanceId: instance.id,
@@ -327,6 +399,7 @@ try {
     };
   });
   await step('dsh-page', async () => {
+    report.operation = 'wait-instance-entry';
     await page.waitForURL(
       (url) => {
         try {
@@ -338,7 +411,9 @@ try {
       },
       { timeout: 30_000 },
     );
+    report.operation = 'open-plugin-panel';
     await page.getByRole('button', { name: 'Auriga', exact: true }).click();
+    report.operation = 'wait-plugin-panel';
     await page.locator('auriga-team-panel').waitFor({ state: 'visible' });
     return {};
   });
@@ -358,9 +433,7 @@ try {
     // Same public plugin route must refuse a browser with no member session.
     const anonymous = await browser.newContext();
     try {
-      const denied = await anonymous.request.get(pluginURL.href, {
-        maxRedirects: 0,
-      });
+      const denied = await (await anonymous.newPage()).goto(pluginURL.href);
       assert.equal(denied.status(), 401);
     } finally {
       await anonymous.close();
@@ -375,6 +448,51 @@ try {
   report.status = 'passed';
 } catch (error) {
   report.failedStep = stage;
+  report.errorType = [
+    'Error',
+    'TypeError',
+    'ReferenceError',
+    'TimeoutError',
+    'AssertionError',
+  ].includes(error?.name)
+    ? error.name
+    : 'unknown';
+  try {
+    report.formState = await activePage?.evaluate(() =>
+      [...document.querySelectorAll('.form-step input')].map((input) => ({
+        name: ['username', 'displayName', 'password', 'otp', 'code'].includes(
+          input.name,
+        )
+          ? input.name
+          : 'other',
+        valid: input.validity.valid,
+        missing: input.validity.valueMissing,
+        patternMismatch: input.validity.patternMismatch,
+      })),
+    );
+    if (stage === 'dsh-page')
+      report.surfaceState = await activePage.evaluate(async () => {
+        const response = await globalThis.fetch(
+          new URL('plugins/', document.baseURI),
+          {
+            credentials: 'same-origin',
+            signal: globalThis.AbortSignal.timeout(15_000),
+          },
+        );
+        const text = await response.text();
+        return {
+          aurigaLabels: document.querySelectorAll('[aria-label="Auriga"]')
+            .length,
+          panelElements: document.querySelectorAll('auriga-team-panel').length,
+          buttons: document.querySelectorAll('button').length,
+          moduleCatalogStatus: response.status,
+          catalogMentionsAuriga: text.includes('auriga-dsh'),
+          catalogMentionsClient: text.includes('auriga-dsh/client'),
+        };
+      });
+  } catch {
+    /* The browser may have already closed. */
+  }
   // Playwright's messages include DOM and full URLs (invitation/ticket secrets).
   report.reason =
     error?.code === 'ENOENT'

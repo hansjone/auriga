@@ -63,6 +63,50 @@ export function assertManaged(bootstrap) {
   assert.equal(bootstrap.manifest.element, 'auriga-team-panel');
 }
 
+export function sharedNodeReady(node) {
+  return (
+    node?.status === 'online' &&
+    node.schedulable === true &&
+    node.drivers?.includes('docker') === true &&
+    node.labels?.template === 'real-dsh-e2e'
+  );
+}
+
+export function loginOutcome(tx, traceId) {
+  const status = [
+    'pending',
+    'completed',
+    'failed',
+    'cancelled',
+    'expired',
+  ].includes(tx?.status)
+    ? tx.status
+    : 'unknown';
+  const step = [
+    'form',
+    'complete',
+    'fail',
+    'redirect',
+    'qr',
+    'webauthn',
+    'device',
+  ].includes(tx?.step?.type)
+    ? tx.step.type
+    : 'unknown';
+  const code = tx?.step?.error?.code ?? tx?.step?.code;
+  return {
+    status,
+    step,
+    ...(typeof code === 'string' &&
+    /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(code)
+      ? { code }
+      : {}),
+    ...(typeof traceId === 'string' && /^[0-9a-f]{32}$/.test(traceId)
+      ? { traceId }
+      : {}),
+  };
+}
+
 export function totp(secret, now = Date.now()) {
   assert.match(secret, /^[A-Z2-7]+=*$/i);
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -81,4 +125,18 @@ export function totp(secret, now = Date.now()) {
   return String(
     (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000,
   ).padStart(6, '0');
+}
+
+export function totpNotBefore(now, lastCounter = -1) {
+  const counter = Math.floor(now / 30_000);
+  if (counter <= lastCounter || 30_000 - (now % 30_000) < 5_000)
+    return Math.max(counter + 1, lastCounter + 1) * 30_000 + 100;
+  return now;
+}
+
+export function otpField(step) {
+  const fields = step?.fields?.filter((field) => field.kind === 'otp') ?? [];
+  assert.equal(fields.length, 1);
+  assert.ok(['otp', 'code'].includes(fields[0].name));
+  return fields[0].name;
 }

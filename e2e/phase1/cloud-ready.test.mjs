@@ -6,7 +6,80 @@ import {
   assertManaged,
   totp,
   validateAccess,
+  sharedNodeReady,
+  loginOutcome,
+  totpNotBefore,
+  otpField,
 } from './checks.mjs';
+
+test('authenticator enrollment and team login use their declared OTP fields', () => {
+  assert.equal(otpField({ fields: [{ name: 'otp', kind: 'otp' }] }), 'otp');
+  assert.equal(otpField({ fields: [{ name: 'code', kind: 'otp' }] }), 'code');
+  assert.throws(() =>
+    otpField({ fields: [{ name: 'password', kind: 'password' }] }),
+  );
+  assert.throws(() =>
+    otpField({
+      fields: [
+        { name: 'code', kind: 'otp' },
+        { name: 'otp', kind: 'otp' },
+      ],
+    }),
+  );
+});
+
+test('TOTP scheduling avoids an expired window and counters consumed by enrollment', () => {
+  assert.equal(totpNotBefore(61_000), 61_000);
+  assert.equal(totpNotBefore(89_501), 90_100);
+  assert.equal(totpNotBefore(61_000, 2), 90_100);
+  assert.equal(totpNotBefore(61_000, 3), 120_100);
+});
+
+test('login outcome evidence retains only safe state, error code and trace id', () => {
+  const trace = 'a'.repeat(32);
+  const tx = {
+    status: 'pending',
+    token: 'secret-token',
+    step: {
+      type: 'form',
+      error: { code: 'iam.invalid_credentials', detail: 'secret-detail' },
+      fields: [{ value: 'secret-password' }],
+    },
+  };
+  assert.deepEqual(loginOutcome(tx, trace), {
+    status: 'pending',
+    step: 'form',
+    code: 'iam.invalid_credentials',
+    traceId: trace,
+  });
+  assert.deepEqual(
+    loginOutcome(
+      {
+        status: 'secret-status',
+        step: { type: 'secret-step', code: 'secret-code' },
+      },
+      'secret-trace',
+    ),
+    { status: 'unknown', step: 'unknown' },
+  );
+});
+
+test('shared runs require an online schedulable Docker node with the real template', () => {
+  const node = {
+    status: 'online',
+    schedulable: true,
+    drivers: ['docker'],
+    labels: { template: 'real-dsh-e2e' },
+  };
+  assert.equal(sharedNodeReady(node), true);
+  for (const changed of [
+    { status: 'offline' },
+    { schedulable: false },
+    { drivers: ['linux_process'] },
+    { labels: { template: 'fake-dsh-e2e' } },
+  ])
+    assert.equal(sharedNodeReady({ ...node, ...changed }), false);
+});
 
 const instance = {
   id: '01900000-0000-7000-8000-000000000001',
