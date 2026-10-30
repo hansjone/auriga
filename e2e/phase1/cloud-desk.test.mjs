@@ -8,7 +8,11 @@ import {
   diagnoseNativeSession,
   loginDesktop,
 } from './cloud-desk.native.mjs';
-import { validateRunConfig, requireTestLock } from './cloud-desk.mjs';
+import {
+  validateRunConfig,
+  requireTestLock,
+  containerNode,
+} from './cloud-desk.mjs';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,6 +25,24 @@ import {
 } from './cloud-desk.browser.mjs';
 
 const tools = [{ type: 'function', function: { name: 'auriga_send_message' } }];
+
+test('remote container executor receives only a fixed instance argv and source on stdin, never a shell', async () => {
+  const id = '00000000-0000-7000-8000-000000000001';
+  const program =
+    "let source='';process.stdin.on('data',x=>source+=x);process.stdin.on('end',()=>console.log(JSON.stringify({instance:process.argv.at(-1),source})));";
+  const child = containerNode(id, 'console.log("source-on-stdin");', [
+    process.execPath,
+    '-e',
+    program,
+  ]);
+  assert.equal((await child.done).code, 0);
+  assert.deepEqual(JSON.parse(child.output), {
+    instance: id,
+    source: 'console.log("source-on-stdin");',
+  });
+  assert.throws(() => containerNode(id, '', []));
+  assert.throws(() => containerNode(id, '', ['node', '\0']));
+});
 
 test('shared-stack lock accepts any exact declared owner, rejects missing/foreign locks, and permits explicit remote opt-out', async (t) => {
   const locksDirectory = await mkdtemp(join(tmpdir(), 'auriga-lock-'));

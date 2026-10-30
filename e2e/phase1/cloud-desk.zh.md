@@ -141,6 +141,14 @@ node e2e/phase1/cloud-desk.mjs run .agent-evidence/cloud-desk/run.json .agent-ev
 结束时取消自己创建会话的活动请求、关闭接收、移除自己唯一的模型配置/测试 key，停止临时模型及桌面进程、关闭浏览器。
 新成员、云实例和会话历史作为测试证据保留，不停止共享服务或他人实例。
 
+NAS 等远端测试可在 `fixture.cloudInstanceId` 旁设置受信任的
+`fixture.containerCommand=["操作通道程序","固定参数"]`。入口不开 shell，追加唯一的实例 UUID
+作为最后一个 argv，stdin 是要在该实例 Node 中执行的源码，stdout 为原始结果，stderr 不进入报告。
+操作通道须限制目标实例、保护源码和结果中的临时 fixture 能力键，并在退出/取消时清理自己
+启动的进程；不得打印 native 令牌或借此改宿主/DSH。远端启动和单次控制各限时 60 秒。
+不配置时仍沿原本机 WSL `docker exec`；该传输只替换测试模型的操作通道，不替代真实
+IAM、插件、WSS、READY 或消息收件证明，也不能作为真实中转站第⑥项证据。
+
 ## 检查
 
 ```powershell

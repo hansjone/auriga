@@ -39,6 +39,20 @@ case "${1:-}" in
     bootstrap_nas_materials
     validate_ingress_ancestors ;;
   export-env)
-    exec tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env ;;
+    # The host operator cannot traverse root's private collab source. Export a
+    # checked decision alongside the already protected env stream, never keys.
+    _collab=0
+    _source="$AURIGA_DATA_ROOT/config/collab-source"
+    if [ -e "$_source" ] || [ -L "$_source" ] || [ -e "$_source.pending" ]; then
+      "$(bootstrap_binary)" collab -base "$AURIGA_DATA_ROOT/config/materials" \
+        -out "$_source" -public-origin "${AURIGA_COLLAB_PUBLIC_ORIGIN:-}" -check >&2
+      _collab=1
+    fi
+    _export=$(mktemp -d)
+    trap 'rm -rf -- "$_export"' EXIT
+    printf '%s\n' "$_collab" >"$_export/collab.enabled"
+    chmod 0600 "$_export/collab.enabled"
+    tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
+      -C "$_export" collab.enabled ;;
   *) die 'unsupported installer operation' ;;
 esac

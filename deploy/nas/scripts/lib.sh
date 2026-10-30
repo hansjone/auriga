@@ -318,7 +318,11 @@ services:
         required: true
 EOF
   _cc=$(compose_cmd)
-  if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
+  case "$(cat "$_private/collab.enabled")" in
+    1) set -- -f "$NAS_ROOT/collab-compose.yml" "$@" ;;
+    0) ;;
+    *) die 'invalid privileged collab Compose decision' ;;
+  esac
   # Only the fixed main file and generated env_file override have authority.
   # shellcheck disable=SC2086
   env COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" $_cc \

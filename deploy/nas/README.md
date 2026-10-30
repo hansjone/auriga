@@ -77,6 +77,8 @@ sh deploy-nas/scripts/status.sh
 已激活后清空输入变量不会禁用 collab；已有数据库回退/密钥续签需要专门的运维批次，不能删收据重做。
 
 Compose 自动选入 `collab-compose.yml`。独立 collab 使用同一 platform 镜像、uid10002，
+容器安装模式由离线 helper 校验私有激活收据，并在既有受保护 env 导出流中附带启用标记；
+普通宿主用户不需要遍历 root 私有收据目录，缺失或无效标记拒绝执行 Compose。
 只在内部网络提供 HTTP/mTLS 8085 与 gRPC/mTLS 9092；数据库由一次性 `collab-db`
 创建独立 `auriga_collab_owner` / `auriga_collab_app`、schema 和默认 DML 权限，口令每套安装随机生成。
 JWKS 固定走 `https://platform:8081/oauth2/jwks`，进程内客户端证书/信任库保持 mTLS；

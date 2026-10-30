@@ -104,8 +104,7 @@ export function validateRunConfig(cfg, access) {
 }
 
 export async function startModelHost(cfg, runId) {
-  if (cfg.cloudInstanceId)
-    return startIsolatedModelHost(cfg.cloudInstanceId, runId);
+  if (cfg.cloudInstanceId) return startIsolatedModelHost(cfg, runId);
   let port, keys, stop;
   if (!cfg.wsl) {
     const fixture = await startFixture({
@@ -228,22 +227,38 @@ export async function startModelHost(cfg, runId) {
   };
 }
 
-function containerNode(instanceId, source) {
+export function containerNode(instanceId, source, command) {
   assert.match(instanceId, /^[a-f0-9-]{36}$/);
+  if (command !== undefined)
+    assert.ok(
+      Array.isArray(command) &&
+        command.length > 0 &&
+        command.length <= 64 &&
+        command[0] &&
+        command.every(
+          (arg) =>
+            typeof arg === 'string' &&
+            arg.length <= 8192 &&
+            !arg.includes('\0'),
+        ),
+      'containerCommand must be trusted operator argv',
+    );
   const child = spawn(
-    'wsl.exe',
-    [
-      '-d',
-      'Ubuntu',
-      '--exec',
-      'docker',
-      'exec',
-      '-i',
-      'auriga-inst-' + instanceId,
-      'node',
-      '--input-type=module',
-    ],
-    { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] },
+    command?.[0] ?? 'wsl.exe',
+    command
+      ? [...command.slice(1), instanceId]
+      : [
+          '-d',
+          'Ubuntu',
+          '--exec',
+          'docker',
+          'exec',
+          '-i',
+          'auriga-inst-' + instanceId,
+          'node',
+          '--input-type=module',
+        ],
+    { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] },
   );
   let output = '',
     closed = false;
@@ -271,7 +286,11 @@ function containerNode(instanceId, source) {
   };
 }
 
-async function startIsolatedModelHost(instanceId, runId) {
+async function startIsolatedModelHost(
+  { cloudInstanceId: instanceId, containerCommand },
+  runId,
+) {
+  const commandTimeout = containerCommand ? 60000 : 10000;
   const source = await readFile(
     resolve(import.meta.dirname, 'cloud-desk.fixture.mjs'),
     'utf8',
@@ -280,6 +299,7 @@ async function startIsolatedModelHost(instanceId, runId) {
     instanceId,
     source +
       `\nconst owned=await startFixture({host:'127.0.0.1',runId:${JSON.stringify(runId)}});process.stdout.write(JSON.stringify({port:owned.port,keys:owned.keys})+'\\n');`,
+    containerCommand,
   );
   let announcement, desktop;
   try {
@@ -293,7 +313,7 @@ async function startIsolatedModelHost(instanceId, runId) {
         }
       },
       'container_fixture_startup_missing',
-      15000,
+      containerCommand ? 60000 : 15000,
     );
     assert.ok(Number.isInteger(announcement.port));
     for (const key of Object.values(announcement.keys))
@@ -309,8 +329,9 @@ async function startIsolatedModelHost(instanceId, runId) {
     const call = containerNode(
       instanceId,
       `try{const r=await fetch(${JSON.stringify(`http://127.0.0.1:${announcement.port}/control/${announcement.keys.control}`)},{method:'POST',headers:{'content-type':'application/json'},body:${JSON.stringify(JSON.stringify({ op, value }))},signal:AbortSignal.timeout(5000)});console.log(JSON.stringify({status:r.status,body:await r.json()}));}catch{console.log(JSON.stringify({status:0}));}`,
+      containerCommand,
     );
-    const timer = setTimeout(() => call.child.kill(), 10000);
+    const timer = setTimeout(() => call.child.kill(), commandTimeout);
     try {
       await call.done;
       const response = JSON.parse(call.output);

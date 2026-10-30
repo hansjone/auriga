@@ -33,6 +33,38 @@ sh "$ROOT/scripts/render.sh"
 [ "$(sha256sum "$SOURCE/activation.receipt")" = "$ACTIVATION" ]
 [ "$(sha256sum "$DATA/config/materials/iam-installation/bootstrap.receipt")" = "$BASE" ]
 "$BOOT" collab -base "$DATA/config/materials" -out "$SOURCE" -public-origin https://network.example.com -check
+# Container operators cannot traverse root's private receipt. The privileged
+# export must carry the checked overlay decision with its existing env stream.
+EXPORT="$PARENT/collab-env-$MODE.tar"
+NAS_INSTALLER_ACTIVE=1 sh "$ROOT/scripts/installer-entry.sh" export-env >"$EXPORT"
+tar -tf "$EXPORT" | grep -qx collab.enabled
+[ "$(tar -xOf "$EXPORT" collab.enabled)" = 1 ]
+setpriv --reuid=65534 --regid=65534 --clear-groups sh -ec '! test -f "$1/activation.receipt"' sh "$SOURCE"
+# Exercise the host-side branch as an actual unprivileged operator. Its only
+# receipt knowledge is the privileged export; Compose itself is an argv recorder.
+MOCK="$PARENT/compose-operator-$MODE"
+mkdir -p "$MOCK/scripts" "$MOCK/private"
+chown 65534:65534 "$MOCK/private" "$EXPORT"
+chmod 0700 "$MOCK/private"
+cat >"$MOCK/scripts/installer.sh" <<'EOF'
+#!/bin/sh
+test "$1" = export-env
+cat "$EXPORTED_ENV"
+EOF
+cat >"$MOCK/compose" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@"
+EOF
+chmod 0755 "$MOCK/scripts/installer.sh" "$MOCK/compose"
+EXPORTED_ENV="$EXPORT" NAS_ROOT="$MOCK" LIB="$ROOT/scripts/lib.sh" \
+  setpriv --reuid=65534 --regid=65534 --clear-groups sh -ec '
+    . "$LIB"
+    compose_cmd() { printf "%s\n" "$NAS_ROOT/compose"; }
+    installer_private_dir() { mktemp -d "$NAS_ROOT/private/compose.XXXXXX"; }
+    container_compose config >"$NAS_ROOT/private/argv"
+  '
+grep -qx "$MOCK/collab-compose.yml" "$MOCK/private/argv"
+printf 'PASS collab_%s_private_receipt_export\n' "$MODE"
 # The runtime readers cannot open the installer's source or other service keys.
 (cd "$RUNTIME/collab"; setpriv --reuid=10002 --regid=10002 --clear-groups sh -ec 'test -r business.der; ! test -r "$1/collab-installation/business.der"; ! test -r ../network/protocol.key' sh "$SOURCE")
 (cd "$RUNTIME/network"; setpriv --reuid=10001 --regid=10001 --clear-groups sh -ec 'test -r protocol.key; ! test -r ../collab/business.der' sh)
