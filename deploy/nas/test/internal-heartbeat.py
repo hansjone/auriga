@@ -67,7 +67,7 @@ check(
 )
 check(
     all(services[name].get('privileged', False) is False
-        and {'ALL', 'CAP_ALL'}.intersection(services[name]['cap_drop'])
+        and {'ALL', 'CAP_ALL'}.intersection(services[name].get('cap_drop', []))
         for name in services),
     'no_privilege_expansion',
 )

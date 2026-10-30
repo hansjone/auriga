@@ -20,7 +20,9 @@ type Config struct {
 	InstanceControlIngress *InstanceControlIngressConfig `json:"instanceControlIngress,omitempty"`
 	IAMRPC                 IAMRPCConfig                  `json:"iamRpc"`
 	IAMHop                 IAMHopConfig                  `json:"iamHop"`
-	AIAdminHop             IAMHopConfig                  `json:"aiAdminHop"`
+	LiteLLMOrigin          string                        `json:"litellmOrigin"`
+	LiteLLMUI              *LiteLLMUIConfig              `json:"litellmUI,omitempty"`
+	DeviceHop              IAMHopConfig                  `json:"deviceHop"`
 	CollabHop              IAMHopConfig                  `json:"collabHop"`
 	NetworkSubmitHop       IAMHopConfig                  `json:"networkSubmitHop"`
 	Listen                 string                        `json:"listen"`
@@ -182,12 +184,6 @@ func applyEnv(cfg *Config) {
 		}
 		cfg.Upstreams["workspace"] = v
 	}
-	if v := os.Getenv("AURIGA_EDGE_UPSTREAM_AI_ADMIN"); v != "" {
-		if cfg.Upstreams == nil {
-			cfg.Upstreams = map[string]string{}
-		}
-		cfg.Upstreams["ai-admin"] = v
-	}
 	for key, env := range map[string]string{"resource": "AURIGA_EDGE_UPSTREAM_RESOURCE", "ai-device": "AURIGA_EDGE_UPSTREAM_AI_DEVICE", "network-submit": "AURIGA_EDGE_UPSTREAM_NETWORK_SUBMIT"} {
 		if v := os.Getenv(env); v != "" {
 			if cfg.Upstreams == nil {
@@ -247,9 +243,6 @@ func (c Config) validate() error {
 		return err
 	}
 	if _, err := c.parseCollabUpstream(); err != nil {
-		return err
-	}
-	if _, err := c.parseAIAdminUpstream(); err != nil {
 		return err
 	}
 	if _, err := c.parseControlIngress(); err != nil {

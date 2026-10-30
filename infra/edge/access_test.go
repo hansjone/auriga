@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
 
@@ -75,6 +76,20 @@ func accessFixtureConfigured(t *testing.T, domain bool, upstream http.Handler, c
 	control["origin"] = map[string]any{"scheme": "http", "host": control["dnsAlias"], "port": ports["instanceControl"]}
 	if configure != nil {
 		configure(&cfg, document)
+	}
+	if cfg.LiteLLMOrigin != "" {
+		ln, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		sockets["relayAdmin"], addresses["relayAdmin"] = ln, ln.Addr().String()
+		t.Cleanup(func() { _ = ln.Close() })
+		host := "127.0.0.1"
+		if domain {
+			host = "litellm.example.com"
+		}
+		port := int32(ln.Addr().(*net.TCPAddr).Port)
+		cfg.LiteLLMUI = &LiteLLMUIConfig{Origin: deployment.Origin{Scheme: "http", Host: host, Port: port}, Listener: deployment.Listener{Address: "127.0.0.1", Port: port}}
 	}
 	raw, err = json.Marshal(document)
 	if err != nil {

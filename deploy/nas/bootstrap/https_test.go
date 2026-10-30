@@ -83,6 +83,12 @@ func TestNASDirectHTTPSValidationCLI(t *testing.T) {
 			if b, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 				t.Fatalf("HTTPS validation: %v %s", err, b)
 			}
+			if mode == "domain" {
+				missingSAN := append(append([]string{}, args...), "-litellm-ui-origin", "https://litellm-separate.example.com:8446")
+				if b, err := exec.Command(binary, missingSAN...).CombinedOutput(); err == nil || !strings.Contains(string(b), "invalid external HTTPS material") {
+					t.Fatalf("UI origin without certificate SAN accepted: %v %s", err, b)
+				}
+			}
 			args[11] = ""
 			if b, err := exec.Command(binary, args...).CombinedOutput(); err == nil || !strings.Contains(string(b), "invalid external HTTPS material") {
 				t.Fatalf("missing certificate accepted: %v %s", err, b)

@@ -11,7 +11,6 @@ import RolesView from './views/RolesView.vue';
 import ResourcesView from './views/ResourcesView.vue';
 import IdentityProvidersView from './views/IdentityProvidersView.vue';
 import SettingsView from './views/SettingsView.vue';
-import ModelProvidersView from './views/models/ProvidersView.vue';
 import WorkflowUnavailableView from './views/WorkflowUnavailableView.vue';
 import OverviewView from './views/OverviewView.vue';
 import { navigation } from './admin/navigation';
@@ -60,15 +59,14 @@ export const router = createRouter({
         { path: 'quotas', component: QuotasView },
         { path: 'roles', component: RolesView },
         { path: 'providers', component: IdentityProvidersView },
-        { path: 'models/providers', component: ModelProvidersView },
         { path: 'settings', component: SettingsView },
         {
-          path: 'models/relay',
-          component: () => import('./views/models/RelayView.vue'),
-        },
-        {
-          path: 'models/usage',
-          component: () => import('./views/models/UsageView.vue'),
+          path: 'models/:pathMatch(.*)*',
+          beforeEnter: () => {
+            window.location.assign('/ai/ui/');
+            return false;
+          },
+          component: WorkflowUnavailableView,
         },
         ...unavailable.map((path) => ({
           path: path.slice(1),

@@ -311,3 +311,5 @@ GOWORK=off go build ./...
 内控 alias/端口、三个 HTTPS upstream、专用证书 SAN/EKU/CA 与原节点身份保持。
 共享 socket、issuer 漂移、缺 HTTP 确认、浏览器/内部 alias 冲突和内控端口漂移均须拒绝。
 仓库根另跑 `node --test e2e/lib/*.test.mjs`，保留全部原断言。
+
+中转站的模型接入、外部 Key 签发与验收步骤见 [LiteLLM 部署与模型接入](relay-litellm.md)。

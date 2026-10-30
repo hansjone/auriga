@@ -94,9 +94,9 @@ func TestDeviceNetworkSubmitRuntimeSeparation(t *testing.T) {
 				status                    int
 			}{
 				{"POST", "/api/ai/v1/network/submit", "application/json", "network.unauthorized", 401},
-				{"GET", "/ai/v1/models", "text/plain", "common.validation_failed", 400},
-				{"POST", "/ai/v1/chat/completions", "text/plain", "common.validation_failed", 400},
-				{"GET", "/api/ai/v1/me/usage", "text/plain", "common.validation_failed", 400},
+				{"GET", "/ai/v1/models", "text/plain", "common.unauthenticated", 401},
+				{"POST", "/ai/v1/chat/completions", "text/plain", "common.unauthenticated", 401},
+				{"GET", "/api/ai/v1/me/usage", "text/plain", "common.not_found", 404},
 			} {
 				status, _, body := aiAdminRequest(t, g, addresses, "portal", operation.method, operation.path, http.Header{
 					"Authorization": {"Bearer not-a-jwt"}, "Content-Type": {operation.media}, "Sec-Fetch-Mode": {"cors"},

@@ -96,6 +96,9 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 		return
 	}
 	target, transport := g.deviceURL, apiProxyTransport
+	if configured := g.APITransports[target]; configured != nil {
+		transport = configured
+	}
 	if r.URL.Path == "/api/ai/v1/network/submit" {
 		target = g.networkSubmitURL
 		transport = g.APITransports[target]
