@@ -48,6 +48,16 @@ export function browserPortalOrigin(access, baseUrl, proxy) {
   return target;
 }
 
+// This journey creates invitations at the direct admin entry, whose origin is
+// not a portal presentation. Follow the actual default-portal link unchanged.
+export function assertAdminInvitation(value, access) {
+  const url = new URL(value);
+  assert.equal(url.origin, origin(access.portalOrigin));
+  assert.match(url.pathname, /^\/invite\/[^/]+$/);
+  assert.equal(url.username + url.password + url.search + url.hash, '');
+  return url.origin;
+}
+
 export function assertReady(instance, memberId) {
   assert.match(
     instance?.id ?? '',

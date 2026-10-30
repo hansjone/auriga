@@ -56,6 +56,9 @@ type Gateway struct {
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	if err := cfg.validateLinkOrigins(); err != nil {
+		return nil, err
+	}
 	if err := cfg.validateLiteLLMUI(); err != nil {
 		return nil, err
 	}

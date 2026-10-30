@@ -88,6 +88,11 @@ check(
     'no_new_privileges',
 )
 platform_env = services['platform']['environment']
+edge_env = edge['environment']
+check(platform_env.get('AURIGA_LINKS_ALLOWED_ORIGINS', '') == values.get('AURIGA_LINKS_ALLOWED_ORIGINS', ''), 'links_platform_allowlist')
+check(platform_env.get('AURIGA_LINKS_TRUSTED_PROXIES') == values['AURIGA_INTERNAL_EDGE_IP'], 'links_backend_only_edge_peer')
+check(edge_env.get('AURIGA_EDGE_LINKS_ALLOWED_ORIGINS', '') == values.get('AURIGA_LINKS_ALLOWED_ORIGINS', ''), 'links_edge_allowlist')
+check(edge_env.get('AURIGA_EDGE_LINKS_TRUSTED_PROXIES', '') == values.get('AURIGA_LINKS_TRUSTED_PROXIES', ''), 'links_edge_proxy_trust')
 for key, default in [('AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS', '3600'),
                      ('AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS', '60')]:
     expected = values.get(key) or default

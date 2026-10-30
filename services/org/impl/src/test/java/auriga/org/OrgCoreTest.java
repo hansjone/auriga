@@ -214,6 +214,26 @@ class OrgCoreTest {
   }
 
   @Test
+  void invitationFollowsAllowedRequestPresentationWithoutChangingInstallationIdentity() {
+    UUID owner = seedOwner();
+    var access = invitationAccess("ip-http.json", TENANT, 8080);
+    var service = new OrgService(store, events, clock, access);
+    var links =
+        new auriga.common.web.LinkOrigins(
+            List.of("https://portal.example.com"), List.of("127.0.0.1"));
+    var request = new org.springframework.mock.web.MockHttpServletRequest();
+    request.setRemoteAddr("127.0.0.1");
+    request.addHeader("X-Forwarded-Host", "portal.example.com");
+    request.addHeader("X-Forwarded-Proto", "https");
+    var invitation = links.call(request, () -> preflightInvitation(service, owner, null));
+    assertEquals(
+        "https://portal.example.com/invite/" + invitation.path("code").asString(),
+        invitation.path("url").asString());
+    assertEquals("http://192.0.2.10:8080", access.portalUrl());
+    assertEquals(access.portalUrl(), access.issuer());
+  }
+
+  @Test
   void invitationLinksPreserveTrustedPortalOriginsAndSafeCode() {
     UUID owner = seedOwner();
     Set<String> codes = new HashSet<>();

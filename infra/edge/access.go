@@ -200,6 +200,7 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 			fail(403, "common.forbidden")
 			return
 		}
+		r = r.WithContext(context.WithValue(r.Context(), linkOriginKey{}, g.Cfg.linkOrigin(r, scheme)))
 		stripUntrustedEntryHeaders(r.Header)
 		e := accessEntry{role: role, scheme: scheme, host: host, port: port}
 		r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, e))

@@ -315,6 +315,87 @@ class IamFlowTest {
   }
 
   @Test
+  void presentationLinksFollowAllowedRequestWhileOauthIssuerRemainsInstallationIdentity() {
+    var links =
+        new auriga.common.web.LinkOrigins(
+            List.of("https://portal.example.com"), List.of("192.0.2.20"));
+    var request = new org.springframework.mock.web.MockHttpServletRequest();
+    request.setRemoteAddr("192.0.2.20");
+    request.addHeader("X-Forwarded-Host", "portal.example.com");
+    request.addHeader("X-Forwarded-Proto", "https");
+    var metadata = links.call(request, oauth::metadata);
+    assertEquals(tokens.issuer(), metadata.path("issuer").asString());
+    for (String endpoint :
+        List.of(
+            "authorization_endpoint",
+            "token_endpoint",
+            "revocation_endpoint",
+            "jwks_uri",
+            "userinfo_endpoint",
+            "device_authorization_endpoint")) {
+      assertTrue(
+          metadata.path(endpoint).asString().startsWith("https://portal.example.com/"), endpoint);
+    }
+    var device =
+        links.call(
+            request,
+            () ->
+                TenantContext.call(
+                    tenant,
+                    () ->
+                        oauth.deviceAuthorization(
+                            Map.of("client_id", "example-client", "scope", "auriga.connect"))));
+    assertEquals("https://portal.example.com/device", device.path("verification_uri").asString());
+    assertTrue(
+        device
+            .path("verification_uri_complete")
+            .asString()
+            .startsWith("https://portal.example.com/device?user_code="));
+    assertEquals(
+        tokens.issuer() + "/oauth2/token", oauth.metadata().path("token_endpoint").asString());
+  }
+
+  @Test
+  void connectorCallbackCapturesPresentationOriginWithoutChangingEntryBinding() {
+    String provider = external(true, "never");
+    var links =
+        new auriga.common.web.LinkOrigins(
+            List.of("https://portal.example.com"), List.of("192.0.2.20"));
+    var request = new org.springframework.mock.web.MockHttpServletRequest();
+    request.setRemoteAddr("192.0.2.20");
+    request.addHeader("X-Forwarded-Host", "portal.example.com");
+    request.addHeader("X-Forwarded-Proto", "https");
+    var result =
+        links.call(
+            request,
+            () ->
+                TenantContext.call(
+                    tenant,
+                    () ->
+                        login.begin(
+                            Json.object("providerId", provider),
+                            "portal",
+                            "192.0.2.30",
+                            "test",
+                            "http://192.0.2.10:8080",
+                            null)));
+    var context = org.mockito.ArgumentCaptor.forClass(JsonNode.class);
+    verify(registry.get("example-connector")).begin(context.capture(), any());
+    assertEquals(
+        "https://portal.example.com/api/iam/v1/login/callback/" + provider,
+        context.getValue().path("callbackUrl").asString());
+    TenantContext.run(
+        tenant,
+        () ->
+            assertNotNull(
+                login.checkEntry(
+                    result.transaction().path("id").asString(),
+                    result.bindingCookie(),
+                    "portal",
+                    "http://192.0.2.10:8080")));
+  }
+
+  @Test
   void externalFirstLoginProvisionsAndSubsequentLoginMatchesSameIdentity() throws Exception {
     String provider = external(true, "never");
     var first =

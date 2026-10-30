@@ -249,6 +249,12 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			}
 		}
 		rewriteOutboundAPI(pr.Out, clientIP, bearer, rid, ensureTraceparent(r))
+		if origin, _ := r.Context().Value(linkOriginKey{}).(string); origin != "" {
+			if parsed, err := url.Parse(origin); err == nil {
+				pr.Out.Header.Set("X-Forwarded-Host", parsed.Host)
+				pr.Out.Header.Set("X-Forwarded-Proto", parsed.Scheme)
+			}
+		}
 		pr.Out.Header.Del("Cookie")
 		if iam {
 			pr.Out.Host = r.Host

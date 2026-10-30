@@ -22,6 +22,39 @@ edge 配置 `upstreams.network-submit=https://network:18443`，固定服务端�
 
 同一个最终 `config/materials/access.json` 只读挂载给 edge、IAM、agent。issuer、team Origin、RP host 从它派生，包含非默认端口；agent 不再使用旧 `INSTANCE_PLATFORM_URL`/`INSTANCE_PARENT_DOMAIN`。旧 `AURIGA_PORTAL_HOST`、`ADMIN_HOST`、`INSTANCE_PARENT_DOMAIN`、`ISSUER`、`TEAM_ORIGIN`、`TEAM_RP_ID`、`TLS_UPSTREAM`、`SECURE_COOKIES`、`TRUSTED_PROXIES` 输入会明确报迁移错误，不静默降级。access 的 tenant 必须由安装者与实际 IAM/org 租户对应；加载成功不代表租户已创建。combined 的既有首次 seed 创建演示租户 `00000000-0000-0000-0000-000000000001`，无 dev profile 或远程紧急登录例外。
 
+## 按访问来源生成对外链接
+
+IP access 模式叠加外部呈现代理时，可在 `stack.env` 配置：
+
+```dotenv
+AURIGA_LINKS_ALLOWED_ORIGINS=http://192.0.2.10:8080,https://portal.example.com
+AURIGA_LINKS_TRUSTED_PROXIES=192.0.2.20/32
+```
+
+允许列表只接受完整、规范的 HTTP(S) origin（不含尾斜杠、路径、凭据、query 或 fragment）。
+edge 按实际 TCP 对端判断是否属于独立的链接代理信任列表；可信对端才可用单值
+`X-Forwarded-Host` 与 `X-Forwarded-Proto` 声明浏览器呈现来源。其他对端的这些头一律忽略，
+从原始 Host 和实际连接 scheme 选来源。候选必须精确命中允许列表，否则使用原默认来源。
+代理须覆盖客户端提供的这两个头，不透传不可信链；只登记实际代理 IP 或最小 CIDR，禁止 `/0`。
+
+edge 清除所有外来转发/内部身份头后，仅向平台 API 写入经校验的呈现头。NAS Compose 把
+platform 的链接代理信任范围固定为内部 edge IP；拆分部署须在后端配置同一允许列表和
+`auriga.links.trusted-proxies`（直接连接后端的 edge 地址），保留后端 mTLS 与网络隔离。
+后端必须使用 `server.forward-headers-strategy=none`，不能先让容器按外来头改写真实对端；
+链接信任配置与容器自动转发头处理同时启用时，启动会拒绝。
+邀请、连接器回调、OIDC 端点地址及设备验证链接跟随该请求来源；登录事务保存开始时的
+呈现地址，后续回调仍校验原 entry 绑定。相对回跳保持相对地址，自然跟随当前浏览器来源。
+重置操作目前没有生成绝对重置链接的公开接口，不新增一条私有流程。
+
+这个配置只控制链接呈现，不参与 tenant、audience、issuer、客户端 IP、Cookie 或 CSRF 判断；
+原 access 文件和来源门禁仍有效。它不替代 `trusted_proxy` 的 TLS+mTLS 配方。空列表保持原行为。
+经公网代理访问应产出公网链接，直接从 IP 访问应产出 IP 链接；从独立内网管理入口创建邀请时，
+其管理 Origin 不属于门户允许列表，邀请回落到默认门户 IP，不能把它强制改为域名链接。
+
+开发 Compose 也透传同名允许列表和 edge 链接代理列表，后端默认只认可 host 网络上
+edge 的回环对端；换用其他网络时显式设置 `AURIGA_LINKS_BACKEND_PROXY_PEERS`。
+NAS 的后端对端始终由已有 `AURIGA_INTERNAL_EDGE_IP` 派生，不能填成前置代理 IP。
+
 ## 初始化、启动、停止
 
 ### 普通共享路径的容器初始化

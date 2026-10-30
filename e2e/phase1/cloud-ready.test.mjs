@@ -11,7 +11,25 @@ import {
   totpNotBefore,
   otpField,
   browserPortalOrigin,
+  assertAdminInvitation,
 } from './checks.mjs';
+
+test('invitations created from the direct admin entry use the default portal, then public login is independent', () => {
+  const ip = {
+    mode: 'ip',
+    portalOrigin: { scheme: 'http', host: '192.0.2.10', port: 8080 },
+  };
+  const invitation = 'http://192.0.2.10:8080/invite/example-code';
+  assert.equal(assertAdminInvitation(invitation, ip), 'http://192.0.2.10:8080');
+  for (const url of [
+    'https://portal.example.com/invite/example-code',
+    'http://attacker.example.com/invite/example-code',
+    invitation + '?token=private',
+    invitation + '#private',
+    'http://alice@192.0.2.10:8080/invite/example-code',
+  ])
+    assert.throws(() => assertAdminInvitation(url, ip));
+});
 
 test('authenticator enrollment and team login use their declared OTP fields', () => {
   assert.equal(otpField({ fields: [{ name: 'otp', kind: 'otp' }] }), 'otp');

@@ -16,6 +16,7 @@ import {
   totpNotBefore,
   otpField,
   browserPortalOrigin,
+  assertAdminInvitation,
 } from './checks.mjs';
 import { realImageDigest } from '../lib/real-dsh.mjs';
 import { openAurigaPanel } from './dsh-entry.mjs';
@@ -323,10 +324,7 @@ export function cloudReadyJourney(options, config, host) {
       const result = adminPage.getByTestId('invitation-url');
       await result.waitFor();
       invitation = (await result.textContent()).trim();
-      const url = new URL(invitation);
-      assert.equal(url.origin, portal);
-      assert.match(url.pathname, /^\/invite\/[^/]+$/);
-      assert.equal(url.username + url.password + url.search + url.hash, '');
+      assertAdminInvitation(invitation, access);
       return {};
     });
 
@@ -364,7 +362,7 @@ export function cloudReadyJourney(options, config, host) {
         tx = await submit(registration);
       }
       assert.equal(tx.status, 'completed');
-      await registration.waitForURL(portal + '/');
+      await registration.waitForURL(new URL(invitation).origin + '/');
       memberId = (await json(registration, '/api/iam/v1/me')).account.id;
       assert.ok(memberId);
       const preview = await json(

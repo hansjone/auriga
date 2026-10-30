@@ -25,6 +25,22 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
   docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" \
     config --format json >"$TMP/compose.json"
   python3 "$ROOT/test/internal-heartbeat.py" "$DATA" "$TMP/compose.json"
+  AURIGA_LINKS_ALLOWED_ORIGINS='http://192.0.2.10:8080,https://portal.example.com' \
+    AURIGA_LINKS_TRUSTED_PROXIES='192.0.2.20/32' \
+    docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" \
+    config --format json >"$TMP/link-compose.json"
+  python3 - "$TMP/link-compose.json" "$AURIGA_INTERNAL_EDGE_IP" <<'PY'
+import json,sys
+services=json.load(open(sys.argv[1]))['services']
+edge=services['edge']['environment']
+platform=services['platform']['environment']
+expected='http://192.0.2.10:8080,https://portal.example.com'
+assert edge['AURIGA_EDGE_LINKS_ALLOWED_ORIGINS']==expected
+assert edge['AURIGA_EDGE_LINKS_TRUSTED_PROXIES']=='192.0.2.20/32'
+assert platform['AURIGA_LINKS_ALLOWED_ORIGINS']==expected
+assert platform['AURIGA_LINKS_TRUSTED_PROXIES']==sys.argv[2]
+print('PASS link_presentation_configured_compose_hops')
+PY
   cp "$AURIGA_ACCESS_FILE" "$TMP/access.saved"
   sed 's/00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000002/g' "$TMP/access.saved" >"$AURIGA_ACCESS_FILE"
   if sh "$ROOT/scripts/render.sh" >"$TMP/changed.log" 2>&1; then echo 'changed installation input accepted' >&2; exit 1; fi
