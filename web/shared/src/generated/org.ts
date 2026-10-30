@@ -628,6 +628,18 @@ export interface components {
         maxInstances?: number | null;
         alwaysOnAllowed?: boolean;
       };
+      /**
+       * @deprecated
+       * @description 仅保留契约兼容；已由 LiteLLM customer 预算取代。服务拒绝写入，不读取也不返回该字段。
+       */
+      readonly model?: {
+        /** @deprecated */
+        monthlyBudgetMicros?: number | null;
+        /** @deprecated */
+        currency?: string;
+        /** @deprecated */
+        dailyTokens?: number | null;
+      };
     };
     InvitationInput: {
       /** @description 限定受邀人邮箱（可选）。 */
