@@ -18,6 +18,9 @@ fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib.sh"
 
+if python3 "$ROOT/litellm/permissions_test.py"; then pass litellm_permissions
+else fail_msg litellm_permissions "LiteLLM group permissions regression failed"; fi
+
 if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi
 if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions

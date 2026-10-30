@@ -16,6 +16,8 @@ UID、祖先、receipt 和硬链接检查在容器内照常执行。宿主源目
 
 PostgreSQL仅对只读探针可确认完全为空的PGDATA放行官方entrypoint准备阶段，支持`umask 077`初始化产生的`root:root/0700`空目录。非空（含隐藏项、悬空链接）或无法确认空时，仍按999:999检查数据目录；SQL始终按999:999检查。探针不执行chown/chmod。
 
+LiteLLM 原秘密保留在 `config/materials/litellm/`，归安装器 UID10001、文件0600；render 生成 `config/litellm/` 运行时副本（文件0640，master/salt组10003、数据库口令组999、团队Key组10001）。compose secrets 仅挂副本，LiteLLM 与 init 无额外 capability。备份原件、回执和数据库并保留 UID/GID/模式；恢复后由 render 校验或重建副本，已有内容或元数据漂移会拒绝。详见[中转站部署与备份](../../docs/dev/relay-litellm.md)。
+
 - Do not put real domains, LAN IPs, or credentials in this tree
 - Build images via `.github/workflows/nas-bundle.yml` (`workflow_dispatch` + exact commit)
 - Never deploy from a worker session; main controller runs site instantiation from private notes

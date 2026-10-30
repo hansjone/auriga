@@ -17,16 +17,7 @@ CONFIG="$AURIGA_DATA_ROOT/config"
 [ -d "$SECRETS" ] || die "secrets directory missing; run init.sh first"
 bootstrap_nas_materials
 load_nas_access_env "$CONFIG/materials/access.env"
-# Keep the receipt-bound source owner/mode intact; PostgreSQL gets its own copy.
-_pg_runtime="$AURIGA_DATA_ROOT/secrets/litellm_pg_password"
-[ ! -L "$_pg_runtime" ] || die "LiteLLM PostgreSQL secret must not be a symlink"
-if [ -e "$_pg_runtime" ]; then
-  [ -f "$_pg_runtime" ] && cmp -s "$CONFIG/materials/litellm/pg_password" "$_pg_runtime" || die "LiteLLM PostgreSQL secret changed"
-else
-  (umask 077; cp "$CONFIG/materials/litellm/pg_password" "$_pg_runtime")
-fi
-chown_required 999:999 "$_pg_runtime"
-chmod 0600 "$_pg_runtime"
+install_litellm_materials
 
 for _name in ca.crt edge.crt edge-iam.crt proxy-ca.crt proxy-edge.crt; do
   install_edge_material "$CONFIG/materials/pki/$_name" "$CONFIG/pki-edge/$_name" 644
