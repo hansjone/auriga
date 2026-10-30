@@ -10,6 +10,7 @@ import {
   loginOutcome,
   totpNotBefore,
   otpField,
+  browserPortalOrigin,
 } from './checks.mjs';
 
 test('authenticator enrollment and team login use their declared OTP fields', () => {
@@ -98,6 +99,57 @@ const access = {
     port: 8080,
   },
 };
+
+test('IP reverse proxy presentation requires an explicit exact upstream and HTTPS public origin', () => {
+  const ip = {
+    ...access,
+    mode: 'ip',
+    portalOrigin: { scheme: 'http', host: '192.0.2.10', port: 8080 },
+    instances: { mode: 'path' },
+  };
+  const proxy = {
+    upstreamOrigin: 'http://192.0.2.10:8080',
+    publicOrigin: 'https://portal.example.com',
+  };
+  assert.equal(
+    browserPortalOrigin(ip, proxy.publicOrigin, proxy),
+    proxy.publicOrigin,
+  );
+  assert.equal(
+    browserPortalOrigin(ip, proxy.upstreamOrigin),
+    proxy.upstreamOrigin,
+  );
+  assert.throws(() => browserPortalOrigin(ip, proxy.publicOrigin));
+  for (const changed of [
+    { upstreamOrigin: 'http://192.0.2.11:8080' },
+    { publicOrigin: 'http://portal.example.com' },
+    { publicOrigin: 'https://alice@portal.example.com' },
+    { publicOrigin: proxy.publicOrigin + '/other' },
+    { publicOrigin: proxy.publicOrigin + '?token=private' },
+    { publicOrigin: proxy.publicOrigin + '#private' },
+  ])
+    assert.throws(() =>
+      browserPortalOrigin(ip, proxy.publicOrigin, { ...proxy, ...changed }),
+    );
+  assert.throws(() => browserPortalOrigin(access, proxy.publicOrigin, proxy));
+  assert.throws(() =>
+    browserPortalOrigin(ip, 'https://other.example.com', proxy),
+  );
+  assertEntry(
+    `${proxy.publicOrigin}/i/${instance.id}/`,
+    ip,
+    instance.id,
+    proxy.publicOrigin,
+  );
+  assert.throws(() =>
+    assertEntry(
+      `${proxy.upstreamOrigin}/i/${instance.id}/`,
+      ip,
+      instance.id,
+      proxy.publicOrigin,
+    ),
+  );
+});
 
 test('READY requires running, ready and the signed-in member as owner', () => {
   assertReady(instance, 'alice');

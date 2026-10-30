@@ -68,6 +68,11 @@ export class BrowserSteps {
               status: tx.status,
               step: tx.step && {
                 type: tx.step.type,
+                code: /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/.test(
+                  tx.step.code ?? '',
+                )
+                  ? tx.step.code
+                  : undefined,
                 formId: tx.step.formId,
                 fields: tx.step.fields?.map(({ name, kind }) => ({
                   name,

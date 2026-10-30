@@ -15,6 +15,7 @@ import {
   loginOutcome,
   totpNotBefore,
   otpField,
+  browserPortalOrigin,
 } from './checks.mjs';
 import { realImageDigest } from '../lib/real-dsh.mjs';
 import { openAurigaPanel } from './dsh-entry.mjs';
@@ -145,8 +146,7 @@ export function cloudReadyJourney(options, config, host) {
       report.imageDigest = realImageDigest(
         JSON.parse(readFileSync(resolve(compose, 'var/real-dsh.json'), 'utf8')),
       );
-    portal = origin(access.portalOrigin);
-    assert.equal(new URL(options.baseUrl).origin, portal);
+    portal = browserPortalOrigin(access, options.baseUrl, config.portalProxy);
     host.access = access;
     const admin = origin(access.adminOrigin);
     if (config.admin?.url)
@@ -456,7 +456,7 @@ export function cloudReadyJourney(options, config, host) {
       await page.waitForURL(
         (url) => {
           try {
-            assertEntry(url.href, access, instance.id);
+            assertEntry(url.href, access, instance.id, portal);
             return true;
           } catch {
             return false;

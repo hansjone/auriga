@@ -23,6 +23,31 @@ export function validateAccess(access) {
   return access;
 }
 
+// Browser presentation only. Do not alter server access, issuer, requests or
+// returned links: those still have to work through the operator's real proxy.
+export function browserPortalOrigin(access, baseUrl, proxy) {
+  const upstream = origin(access.portalOrigin);
+  const target = new URL(baseUrl).origin;
+  if (!proxy) {
+    assert.equal(target, upstream);
+    return upstream;
+  }
+  assert.equal(access.mode, 'ip');
+  const exactOrigin = (value) => {
+    const url = new URL(value);
+    assert.ok(['http:', 'https:'].includes(url.protocol));
+    assert.equal(url.username + url.password + url.search + url.hash, '');
+    assert.equal(url.pathname, '/');
+    return url;
+  };
+  assert.equal(exactOrigin(proxy.upstreamOrigin).origin, upstream);
+  const presentation = exactOrigin(proxy.publicOrigin);
+  assert.equal(presentation.protocol, 'https:');
+  assert.equal(presentation.origin, target);
+  assert.notEqual(target, origin(access.adminOrigin));
+  return target;
+}
+
 export function assertReady(instance, memberId) {
   assert.match(
     instance?.id ?? '',
@@ -34,7 +59,12 @@ export function assertReady(instance, memberId) {
   assert.ok(['running', 'pending_restart'].includes(instance.phase));
 }
 
-export function assertEntry(value, access, id) {
+export function assertEntry(
+  value,
+  access,
+  id,
+  portal = origin(access.portalOrigin),
+) {
   const url = new URL(value);
   assert.equal(url.username + url.password + url.search + url.hash, '');
   if (access.mode === 'domain') {
@@ -47,7 +77,7 @@ export function assertEntry(value, access, id) {
     );
     assert.equal(url.pathname, '/');
   } else {
-    assert.equal(url.origin, origin(access.portalOrigin));
+    assert.equal(url.origin, portal);
     assert.equal(url.pathname, `/i/${id}/`);
   }
 }

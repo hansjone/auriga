@@ -15,6 +15,12 @@ node e2e/phase1/run.mjs --base-url http://127.0.0.1:8080 --admin-credentials .de
 
 NAS 验收从本机执行同一个入口，`--base-url` 换为已部署的 NAS 门户地址，例如 `https://portal.example.com`；凭据文件中的 `admin.url` 换为对应管理入口。域名和纯 IP/HTTP 均支持；管理员和门户使用独立浏览器上下文。脚本不改 DNS、系统信任或 TLS 校验。私有 CA 需由运行环境预先信任。
 
+IP 模式经既定 HTTPS 反代呈现时，私有凭据配置可显式增加
+`portalProxy: { "upstreamOrigin": "http://192.0.2.10:8080", "publicOrigin": "https://portal.example.com" }`。
+前者必须精确匹配部署 access 的门户 Origin，后者必须为 HTTPS 且精确匹配 `--base-url`；
+不允许凭据、路径、query 或 fragment。它只声明浏览器预期入口，不修改 access、issuer、
+请求 Host/Origin 或服务器返回的邀请链接；真实邀请与实例导航仍须留在该公网入口，失败照常记 FAIL。
+
 完整运行省略 `--only`，桌面端另加 `--desktop-dsh .dev/phase1-desktop.json`。`--only` 接受逗号分隔编号，例如 `--only 3,5`。编号 3–6 必要时自动创建并登录本次受邀成员、准备双端；未被选中的编号仍标 SKIP，准备动作不冒该编号已单独验收。不要在生产租户运行：每次会留下一个验收成员及其云端实例，脚本不删除共享栈业务数据。
 
 ## 输出与判定

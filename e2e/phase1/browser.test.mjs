@@ -15,6 +15,41 @@ const secret = () =>
     randomBytes(32),
     (byte) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[byte % 32],
   ).join('');
+
+test('browser login observation retains a safe fail code without private response fields', async (t) => {
+  const path = '/api/iam/v1/login/transactions/failure/advance';
+  const server = http.createServer((req, res) => {
+    if (req.url === path) {
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          status: 'failed',
+          token: 'private-token',
+          step: {
+            type: 'fail',
+            code: 'iam.emergency_local_only',
+            detail: 'private-detail',
+          },
+        }),
+      );
+    } else res.end('<!doctype html><title>login observer fixture</title>');
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  t.after(() => new Promise((done) => server.close(done)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const adapter = new BrowserSteps({ baseUrl }, {});
+  t.after(() => adapter.close());
+  const context = await adapter.context();
+  const page = await context.newPage();
+  await page.goto(baseUrl);
+  await page.evaluate(
+    (path) => globalThis.fetch(path, { method: 'POST' }).then((r) => r.json()),
+    path,
+  );
+  const retained = await adapter.retainedLogin(path);
+  assert.equal(retained.step.code, 'iam.emergency_local_only');
+  assert.equal(JSON.stringify(retained).includes('private-'), false);
+});
 const html = (
   mode,
   admin,
