@@ -229,7 +229,10 @@ export async function runPhase1(options, config, dependencies = {}) {
       throw new Skip(
         '未提供--desktop-dsh隔离profile描述文件；不操作用户现有DSH',
       );
-    if (!config.desktop?.loggedInSelector)
+    if (
+      !config.desktop?.loggedInSelector &&
+      config.desktop?.installedApp !== true
+    )
       throw new Skip('PLUGIN-DIST尚未接线：缺少桌面安装/登录UI配置');
     if (!desktopReady) {
       await identity(state);
@@ -468,6 +471,7 @@ export async function runPhase1(options, config, dependencies = {}) {
     );
   }
   const journey = adapter?.evidence?.();
+  if (adapter?.desktopEvidence) report.desktop = adapter.desktopEvidence;
   if (journey) report.cloudJourney = journey;
   report.finishedAt = new Date().toISOString();
   report.summary = Object.fromEntries(

@@ -74,6 +74,32 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 它在空Cookie上下文正常登录、核实际 `/me` subject 和实例归属，再点击真实“进入实例”或“启动并进入”，等待同一实例READY；不创建邀请或成员。
 已有成员模式禁止选择②，不能用一次普通复登冒充邀请接受。完整邀请流程的私有交接另含最近TOTP计数，减少立即续做时的重放。
 
+第④项可复用已经通过安装版应用公开插件管理器装包的独立 `desktop` profile：
+设置 `desktop.installedApp:true`，`desktop.credentialsFile` 指向该平台测试成员的私有交接文件，
+`--desktop-dsh` 指向以下描述文件。`state` 必须位于本 worktree，不能链接到用户 HOME。
+
+```json
+{
+  "state": ".agent-evidence/desktop-app",
+  "profile": ".agent-evidence/desktop-app/dsh/profiles/desktop",
+  "runtime": {
+    "kind": "installed-app",
+    "executable": "C:/Program Files/DeepSeek Harness/DeepSeek Harness.exe",
+    "cli": "C:/Program Files/DeepSeek Harness/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js"
+  },
+  "installation": "installed-app-tarball",
+  "dshVersion": "0.2.1-rc.3",
+  "pluginPackage": ".agent-evidence/plugin-package/auriga-dsh-VERSION.tgz",
+  "packageVersion": "VERSION",
+  "packageSHA256": "发布清单中的实际SHA256"
+}
+```
+
+可选 `connect` 为管理员提供的公开安装配置，平台地址必须与验收目标相同。
+脚本核 CLI 实际版本、包摘要和该 profile 安装版本，以独立 HOME 和 Electron user-data-dir
+启动应用，再经真实启动链接建立浏览器会话、正常登录/恢复同一成员、验证原生插件 active 与功能页。
+只清理自己启动的进程树，保留 profile；不会用 npm DSH 代替安装版，也不会伪造 Cookie。
+
 本机保留示例域名可设 `resolveLoopback:true`（或 AURIGA_PHASE1_RESOLVE_LOOPBACK=1）：只给本次 Chromium 设置 resolver 与禁用代理，不改系统 DNS、TLS 或信任；纯 IP 模式不使用此项。HTTP 健康探针仍使用实际可解析的地址（本机可给 healthChecks 配置回环运维端点），该设置不改变 Node 的 DNS。
 
 示例（私有配置文件，不提交）：

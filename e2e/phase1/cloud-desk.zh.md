@@ -38,6 +38,10 @@ node e2e/phase1/cloud-desk.mjs prepare .agent-evidence/cloud-desk/prepare.json
 ```
 
 生成 `desktop/cloud-desk-desktop.json`，后续运行直接复用，不重复安装。
+已使用安装版应用准备的独立 `desktop` profile，可按 [统一入口说明](README.md) 提供
+`runtime.kind=installed-app` 的安装记录作为 `desktopDescriptor`。启动会核实际内置 CLI 版本、
+发行包摘要及 profile 的安装版本，并使用隔离 HOME/user-data-dir；Windows 结束时清理该进程树。
+该描述文件复用已有安装，不会让 npm CLI 管理安装版保留的 `desktop` profile。
 首次真实登录使用全新 profile；`usedForLiveRun=true` 的 profile 不自动重置或覆盖。
 中断恢复可设 `resumeDesktop:true`，必须保持记录中的同一平台与成员；已登录状态还核对真实 subject。
 需要正常轮换设备时可另显式设 `reauthenticateDesktop:true`：恢复并核同一成员，调用公开退出接口，

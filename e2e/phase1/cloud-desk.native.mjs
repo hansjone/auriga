@@ -345,7 +345,11 @@ export function assertConversation(report, state) {
         report.cloud?.httpsVerified === true),
     'authenticated cloud entry required',
   );
-  assert.equal(report.desktop?.installation, 'native-cli-tarball');
+  assert.ok(
+    ['native-cli-tarball', 'installed-app-tarball'].includes(
+      report.desktop?.installation,
+    ),
+  );
   assert.equal(report.desktop?.dshVersion, '0.2.1-rc.3');
   assert.match(report.desktop?.packageSHA256, /^[a-f0-9]{64}$/);
   assert.deepEqual(state.failures, []);
