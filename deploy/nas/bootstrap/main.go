@@ -118,6 +118,7 @@ func main() {
 		return
 	}
 	mustPKI(pki)
+	writeLiteLLM(*out, cfg.AdminURL())
 	if err := browser.Write(*out); err != nil {
 		fatalf("%v", err)
 	}
@@ -176,7 +177,7 @@ func mustPKI(pki string) {
 	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-nas", "auriga://edge/iam-nas-test", []string{"edge.auriga.internal"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
 	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o600)
-	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-nas", "auriga://ai-gateway/nas", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-nas", "auriga://ai-gateway/nas", []string{"ai-relay"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth})
 	writeFile(filepath.Join(pki, "gateway.crt"), gatewayCert, 0o644)
 	writeFile(filepath.Join(pki, "gateway.key"), gatewayKey, 0o600)
 

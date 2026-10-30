@@ -66,7 +66,7 @@ func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSub
 	if len(https) > 0 {
 		input = https[0]
 	}
-	_, _ = fmt.Fprint(h, "\nnetwork-wss-v2-https\n"+input)
+	_, _ = fmt.Fprint(h, "\nnetwork-wss-v2-https-litellm-v1\n"+input)
 	// Runtime mode also binds the independently supplied locators and snapshot.
 	if m != nil {
 		inputs, _ := json.Marshal([]string{r.bundle, r.root, r.image})

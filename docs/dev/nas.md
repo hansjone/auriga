@@ -274,3 +274,5 @@ AURIGA_MOUNT_TEST_IMAGE=sha256:<platform-image-id> \
 ```
 
 后3条真实权限/安装交叉测试须在独立Linux root测试环境运行；非root普通Go测试具名跳过固定uid安装，自动CI另有强制root步骤，不能以skip当通过。NAS脚本/Go负例在自动PR E2E中运行，不只在手动bundle workflow。smoke检查真实浏览器URL、mTLS健康与未登录拒绝；没有完整E2E hook时仍exit2/PARTIAL。静态Compose、配置加载或本机测试不等于真实NAS网络、浏览器登录、real DSH心跳或IP3完整验收。
+
+???????????????? Key ?????? [LiteLLM ?????](relay-litellm.md)?

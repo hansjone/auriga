@@ -56,8 +56,6 @@ func TestDeviceNetworkSubmitRoutes(t *testing.T) {
 				c.NetworkSubmitHop = hop
 				c.Upstreams["ai-device"] = c.Upstreams["iam"]
 				c.Upstreams["ai-gateway"] = c.Upstreams["iam"]
-				c.Upstreams["ai-admin"] = c.Upstreams["iam"]
-				c.AIAdminHop.AllowLoopbackHTTP = true
 			})
 			closeAIAdminTransports(t, g)
 			client := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 3 * time.Second}
@@ -111,10 +109,8 @@ func TestDeviceNetworkSubmitRejected(t *testing.T) {
 			g, addresses, _ := accessFixtureConfigured(t, domain, upstream.Config.Handler, func(c *Config, _ map[string]any) {
 				c.Upstreams["ai-device"] = upstream.URL
 				c.Upstreams["ai-gateway"] = upstream.URL
-				c.Upstreams["ai-admin"] = upstream.URL
 				c.Upstreams["network-submit"] = network.URL
 				c.NetworkSubmitHop = hop
-				c.AIAdminHop.AllowLoopbackHTTP = true
 			})
 			closeAIAdminTransports(t, g)
 			good := http.Header{"Authorization": {"Bearer submit-device"}}

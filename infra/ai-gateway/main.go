@@ -19,9 +19,8 @@ func run(args []string, out, logs io.Writer) error {
 	flags := flag.NewFlagSet("auriga-ai-gateway", flag.ContinueOnError)
 	flags.SetOutput(logs)
 	teamConfigFile := flags.String("team-config", "", "serve remote Team MCP using a configuration file")
+	litellmConfigFile := flags.String("litellm-config", "", "serve authenticated member requests through LiteLLM")
 	networkConfigFile := flags.String("network-config", "", "serve network callout and revocation reconciliation using a configuration file")
-	adminConfigFile := flags.String("admin-config", "", "serve AI management API using a configuration file")
-	deviceConfigFile := flags.String("device-config", "", "serve isolated D7 synthetic device runtime")
 	showVersion := flags.Bool("version", false, "print version")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -30,23 +29,20 @@ func run(args []string, out, logs io.Writer) error {
 		return fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
 	selected := 0
-	for _, path := range []string{*adminConfigFile, *teamConfigFile, *networkConfigFile, *deviceConfigFile} {
+	for _, path := range []string{*teamConfigFile, *networkConfigFile, *litellmConfigFile} {
 		if path != "" {
 			selected++
 		}
 	}
 	if selected > 1 {
-		return fmt.Errorf("choose one runtime per process: --admin-config, --team-config, --network-config or --device-config")
+		return fmt.Errorf("choose one runtime per process: --litellm-config, --team-config or --network-config")
 	}
 	if *showVersion {
 		_, err := fmt.Fprintln(out, "auriga-ai-gateway", version)
 		return err
 	}
-	if *deviceConfigFile != "" {
-		return serveDevice(*deviceConfigFile, logs)
-	}
-	if *adminConfigFile != "" {
-		return serveAdmin(*adminConfigFile)
+	if *litellmConfigFile != "" {
+		return serveLiteLLM(*litellmConfigFile)
 	}
 	if *teamConfigFile != "" {
 		return serveTeam(*teamConfigFile)
@@ -60,7 +56,7 @@ func run(args []string, out, logs io.Writer) error {
 		defer stop()
 		return network.RunRuntime(ctx, cfg)
 	}
-	return fmt.Errorf("runtime configuration required: --admin-config, --team-config, --network-config or --device-config")
+	return fmt.Errorf("runtime configuration required: --litellm-config, --team-config or --network-config")
 }
 
 func main() {

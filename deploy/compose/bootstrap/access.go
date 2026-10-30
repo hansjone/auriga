@@ -29,6 +29,7 @@ var identityMaterialFiles = []string{
 	"edge.config.json", "access.env", "agent-policy.yaml",
 	"runtime-keys/root.pb",
 	"pki/gateway.crt", "pki/gateway.key",
+	"litellm-runtime.json", "litellm-public.env",
 }
 
 func init() {
