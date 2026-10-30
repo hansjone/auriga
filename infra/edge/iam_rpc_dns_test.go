@@ -59,7 +59,7 @@ func (d *iamBlockedTXTDNS) dial(ctx context.Context, _, _ string) (net.Conn, err
 		}
 		reply := dnsmessage.Message{Header: dnsmessage.Header{ID: query.ID, Response: true, Authoritative: true, RecursionAvailable: true}, Questions: query.Questions}
 		if q.Name.String() != "iam-txt-blocked.test." {
-			reply.Header.RCode = dnsmessage.RCodeNameError
+			reply.RCode = dnsmessage.RCodeNameError
 		} else if q.Type == dnsmessage.TypeA {
 			d.hostCalls.Add(1)
 			reply.Answers = []dnsmessage.Resource{{Header: dnsmessage.ResourceHeader{Name: q.Name, Type: q.Type, Class: dnsmessage.ClassINET, TTL: 60}, Body: &dnsmessage.AResource{A: [4]byte{127, 0, 0, 1}}}}

@@ -20,6 +20,14 @@ Auriga 使用现有 W3C `traceparent`，日志字段为 `trace_id`、`service`�
   插件每次 HTTP 出站生成新 trace；NATS 同一逻辑 request_id 的重发保留 trace、span 各异，
   不同请求独立。没有有效 request_id 的非法帧或背景事件各自生成新 trace。
   gRPC 的请求 ID/tenant/服务身份仍由原鉴权拦截器独立处理。
+  edge 请求日志的 `external_trace` 仅表示采用了有效入站 trace，不能证明来源可信；
+  对第三方模型服务不发送内部 traceparent，内部 RPC 的 trace 接续保持。
+
+HTTP 日志只记路由模板；未匹配/被鉴权提前拒绝的请求只记固定服务前缀，不记原始
+动态路径段（邀请码、设备授权码等）。edge 的健康探针不记录逐请求 INFO，完成日志
+带耗时；不包装 ResponseWriter，保持 streaming/upgrade 的原生行为。
+gRPC 常规业务拒绝只保留 method/code 的一行 WARN，全进程每秒至多一条；重复拒绝
+和完整拒绝栈仅 DEBUG 可见。5xx/意外异常仍保留 ERROR 栈。
 
 只在测试环境设置 `AURIGA_LOG_LEVEL=DEBUG`；默认 INFO。Java 对 `auriga` 包生效，Go
 和插件使用同一变量。异常保留栈与代码位置，脱敏 token/JWT、Authorization、Cookie、
@@ -38,7 +46,9 @@ Linux `${XDG_STATE_HOME:-$HOME/.local/state}/Auriga/logs`，macOS `~/Library/Log
 sink；锁标明 PID，活进程的槽不抢占，异常退出后的死 PID 槽可回收。正常卸载会排空
 文件队列并关闭句柄/释放锁；关闭后的写入不复活 sink。队列最多 64 条，每条最多
 64 KiB，文件错误、槽耗尽或压力时丢记录，不阻塞业务。stderr 复用既有有界独立 writer，
-最多 32 条；文件和 stderr 的成功均不是投递保证。日志时间统一 UTC。
+最多 32 条，但只发送原有网络诊断的枚举/整数/布尔白名单事件，单条最多 2048 字节；
+INFO、任意业务字段和完整异常栈仅写本机文件，不写 stderr。两者的成功均不是投递保证。
+脱敏前限制单条文本为 64 KiB，超限整条省略，避免截断后泄漏凭据。日志时间统一 UTC。
 
 ## 可选集中日志
 
@@ -66,7 +76,8 @@ sink；锁标明 PID，活进程的槽不抢占，异常退出后的死 PID 槽�
    Linux/NAS 将该目录设为 `0755`、密码文件属主设为容器 Grafana UID/GID `472:472`、
    文件权限 `0400`，确保容器可读；文件不可公开分享。Windows 用当前用户私有目录/ACL。
    登录用户名是公开占位值 `auriga-admin`，密码由部署者从本机文件使用，不回显给模型。
-   不提供默认密码、匿名访问或注册入口。
+   不提供默认密码、匿名访问或注册入口。密码文件缺失时 Compose 拒绝创建宿主路径；
+   文件为空、不是普通文件或不可读时，Grafana 启动前检查退出，不回退默认密码。
 
 2. 在同一 Docker 主机创建 `deploy/compose/var/plugin-logs`。本机部署可设置
    `AURIGA_PLUGIN_LOG_DIR` 为上面的插件日志绝对目录。NAS 部署时该目录是本机证据
@@ -124,7 +135,9 @@ scripts/logs/collect --since 2026-10-29T11:00:00Z --until 2026-10-29T13:00:00Z -
 
 可只给时间窗或只给 trace（默认最近 1 小时）；`--project`、`--docker-context` 显式选择
 采集目标，`--plugin-dir` 指向另一台机器复制来的公开日志目录。输出为一个新目录，含
-各容器日志、插件固定文件、`manifest.json`；已有目录拒绝覆盖。可直接压缩整个目录。
+各容器日志、插件固定文件、`manifest.json`；已有目录拒绝覆盖。分享前须检查每个文件，
+尤其第三方容器日志和未标名的自由文本；自动脱敏不保证识别所有凭据。确认无秘密后，
+只打包排障必需的文件，不直接转交整个目录。
 
 脚本仅执行 Docker `ps` 与 `logs --since/--until`，不 inspect 配置/环境，不执行容器内
 命令，不重启/修改容器。trace 是**对 Docker 时间窗结果的本地精确 JSON 筛选**，不是

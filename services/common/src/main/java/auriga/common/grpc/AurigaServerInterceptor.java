@@ -19,7 +19,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +38,18 @@ import org.slf4j.LoggerFactory;
  */
 public final class AurigaServerInterceptor implements ServerInterceptor {
   private static final Logger log = LoggerFactory.getLogger(AurigaServerInterceptor.class);
+  private static final AtomicLong LAST_REJECTION_LOG = new AtomicLong();
+
+  private static void logRejection(String method, AurigaException error) {
+    long now = System.nanoTime(), previous = LAST_REJECTION_LOG.get();
+    if ((previous == 0 || now - previous >= TimeUnit.SECONDS.toNanos(1))
+        && LAST_REJECTION_LOG.compareAndSet(previous, now)) {
+      log.warn("gRPC request rejected method={} code={}", method, error.errorCode().code());
+    }
+    // Rejections share one bounded WARN budget across methods/tenants. Full
+    // diagnostic stacks and suppressed repetitions require explicit DEBUG.
+    log.debug("gRPC request rejected method={} code={}", method, error.errorCode().code(), error);
+  }
 
   private final AccessTokenVerifier verifier;
   private final Set<String> publicMethods;
@@ -71,10 +85,7 @@ public final class AurigaServerInterceptor implements ServerInterceptor {
       }
     } catch (AurigaException e) {
       try (var ignored = LogFields.of(request)) {
-        log.warn(
-            "gRPC request rejected method={} code={}",
-            call.getMethodDescriptor().getFullMethodName(),
-            e.errorCode().code());
+        logRejection(call.getMethodDescriptor().getFullMethodName(), e);
       }
       var status = GrpcErrors.toStatus(e);
       call.close(status.getStatus(), status.getTrailers());
@@ -90,10 +101,11 @@ public final class AurigaServerInterceptor implements ServerInterceptor {
             if (closed.compareAndSet(false, true)) {
               try (var ignored = LogFields.of(scope.request());
                   var component = LogFields.of(Map.of("service", scope.service()))) {
-                log.info(
-                    "gRPC request completed method={} status={}",
-                    call.getMethodDescriptor().getFullMethodName(),
-                    status.getCode());
+                (status.isOk() ? log.atInfo() : log.atDebug())
+                    .log(
+                        "gRPC request completed method={} status={}",
+                        call.getMethodDescriptor().getFullMethodName(),
+                        status.getCode());
               }
               super.close(status, trailers);
             }
@@ -195,7 +207,7 @@ public final class AurigaServerInterceptor implements ServerInterceptor {
       if (!(e instanceof AurigaException ae) || ae.errorCode().httpStatus() >= 500) {
         log.error("gRPC call {} failed", call.getMethodDescriptor().getFullMethodName(), e);
       } else {
-        log.warn("gRPC call {} rejected", call.getMethodDescriptor().getFullMethodName(), e);
+        logRejection(call.getMethodDescriptor().getFullMethodName(), (AurigaException) e);
       }
       var status = GrpcErrors.toStatus(e);
       try {

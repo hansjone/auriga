@@ -3,31 +3,103 @@ import { randomBytes, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createFileSink } from './file.js';
-import { writeStructuredDiagnostic } from '../network/diagnostics.js';
 
 const owners = new Set();
 /** @type {ReturnType<typeof createFileSink> | undefined} */ let sink;
+const maxLogLength = 65536;
+const secretKey =
+  /^(?:password|passwd|pwd|secret|source[_-]?binding|ticket|(?:access|refresh|session|id)[_-]?token|token|client[_-]?secret|credential|totp|private[_-]?key|api[_-]?key|[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?|authorization|(?:set-)?cookie)$/i;
+
+/** Search forward once per block, including an unterminated final key.
+ * @param {string} text */
+function maskPrivateKeys(text) {
+  const begin = /-----BEGIN (?:[A-Z]{1,16} )?PRIVATE KEY-----/g;
+  const end = /-----END (?:[A-Z]{1,16} )?PRIVATE KEY-----/g;
+  let out = '',
+    cursor = 0,
+    match;
+  while ((match = begin.exec(text))) {
+    end.lastIndex = begin.lastIndex;
+    const close = end.exec(text);
+    out += text.slice(cursor, match.index) + '****';
+    cursor = close ? end.lastIndex : text.length;
+    begin.lastIndex = cursor;
+    if (cursor === text.length) break;
+  }
+  return out + text.slice(cursor);
+}
+
+/** Tokenize dotted candidates once instead of retrying at every embedded eyJ.
+ * @param {string} text */
+function maskJWTs(text) {
+  const tokens =
+    /(?<![A-Za-z0-9_-])([A-Za-z0-9_-]+)\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g;
+  let out = '',
+    cursor = 0,
+    match;
+  while ((match = tokens.exec(text))) {
+    if (!match[1].includes('eyJ')) {
+      tokens.lastIndex = match.index + match[1].length + 1;
+      continue;
+    }
+    out += text.slice(cursor, match.index) + '****';
+    cursor = tokens.lastIndex;
+  }
+  return out + text.slice(cursor);
+}
+
+/** Scan each complete key once; never restart a suffix search inside a long token.
+ * @param {string} text */
+function maskFields(text) {
+  const keys =
+    /(?<![A-Za-z0-9_-])["']?([A-Za-z][A-Za-z0-9_-]*)["']?\s*[:=]\s*/g;
+  let out = '',
+    cursor = 0;
+  for (const match of text.matchAll(keys)) {
+    if (match.index < cursor) continue;
+    const key = match[1];
+    if (
+      !secretKey.test(key) &&
+      !secretKey.test(key.replaceAll('-', '_')) &&
+      !(
+        text[match.index - 1] === '\\' &&
+        /^[nrt]/.test(key) &&
+        secretKey.test(key.slice(1))
+      )
+    )
+      continue;
+    let end = match.index + match[0].length;
+    const start = end,
+      quote = text[start];
+    if (quote === '"' || quote === "'") {
+      end++;
+      while (end < text.length) {
+        const c = text[end++];
+        if (c === '\\') end++;
+        else if (c === quote) break;
+      }
+      end = Math.min(end, text.length);
+      out += text.slice(cursor, start) + quote + '****' + quote;
+    } else {
+      while (end < text.length && !/[\s,;&}"']/.test(text[end])) end++;
+      out += text.slice(cursor, start) + '****';
+    }
+    cursor = end;
+  }
+  return out + text.slice(cursor);
+}
 /** @param {string} text */
 export function mask(text) {
-  return text
-    .replace(
-      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-      '****',
-    )
-    .replace(/([a-z][a-z0-9+.-]*:\/\/[^/\s:@]*):[^/\s@]+@/gi, '$1:****@')
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 ****')
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, '****')
-    .replace(
-      /(["']?(?:password|passwd|pwd|secret|source[_-]?binding|ticket|(?:access|refresh|session|id)[_-]?token|token|client[_-]?secret|credential|totp|private[_-]?key|api[_-]?key|[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?|authorization|(?:set-)?cookie)["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^"'\\\s,;}]+)/gi,
-      (_all, prefix, value) =>
-        prefix +
-        (value.startsWith('"')
-          ? '"****"'
-          : value.startsWith("'")
-            ? "'****'"
-            : '****'),
-    )
-    .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"\\]+/gi, '$1****');
+  if (text.length > maxLogLength) return '[log omitted: size limit]';
+  return maskFields(
+    maskJWTs(maskPrivateKeys(text))
+      .replace(
+        /\b([a-z][a-z0-9+.-]{0,31}:\/\/[^/\s:@]*):[^/\s@]+@/gi,
+        '$1:****@',
+      )
+      .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 ****')
+      .replace(/((?:set-)?cookie\s*:\s*)[^\r\n"\\]+/gi, '$1****'),
+  );
 }
 /** Fixed, finite names on every platform; no host journal is read. */
 export function logDirectory() {
@@ -162,28 +234,29 @@ export function logEvent(level, message, fields = {}, error) {
       return;
     const { trace_id = '', ...context } = fields;
     // Call sites provide selected business context only, never headers/body/env objects.
-    const line =
-      mask(
-        JSON.stringify({
-          '@timestamp': new Date().toISOString(),
-          service: 'dsh-plugin',
-          level,
-          trace_id,
-          message,
-          ...context,
-          ...(sink?.dropped ? { dropped_logs: sink.dropped } : {}),
-          ...(error instanceof Error
-            ? {
-                exception: error.stack,
-                cause: causes(error),
-              }
-            : {}),
-        }),
-      ) + '\n';
+    const serialized = JSON.stringify({
+      '@timestamp': new Date().toISOString(),
+      service: 'dsh-plugin',
+      level,
+      trace_id,
+      message,
+      ...context,
+      ...(sink?.dropped ? { dropped_logs: sink.dropped } : {}),
+      ...(error instanceof Error
+        ? {
+            exception: error.stack,
+            cause: causes(error),
+          }
+        : {}),
+    });
+    if (
+      serialized.length > maxLogLength ||
+      Buffer.byteLength(serialized) >= maxLogLength
+    )
+      return;
+    const line = mask(serialized) + '\n';
     if (Buffer.byteLength(line) > 65536) return;
     sink?.write(line);
-    const owner = [...owners].at(-1);
-    if (owner) writeStructuredDiagnostic(owner, line);
   } catch {
     /* Logging cannot change business control flow. */
   }
@@ -200,10 +273,15 @@ export async function traceFetch(fetcher, input, init) {
   );
   headers.set('traceparent', parent);
   const url = new URL(input instanceof Request ? input.url : String(input));
+  const route =
+    /^\/api\/(iam|org|workspace|collab|ai|ops|audit|resource|knowledge)\/v1(?=\/|$)/.exec(
+      url.pathname,
+    );
   const context = {
     trace_id: parent.slice(3, 35),
     method: init?.method ?? 'GET',
-    path: url.pathname,
+    // Path segments can be invitation/device credentials even on failed calls.
+    path: route ? route[0] + '/**' : '/**',
   };
   logEvent('INFO', 'HTTP request started', context);
   try {

@@ -81,6 +81,10 @@ async function capture(action) {
 }
 
 test('durable source guards retain priority, refresh/ledger reads, result and no submit', async (t) => {
+  // This test projects the fourth foreground ledger read. A periodic inbox
+  // pull must not consume that projection while the file sink is flushing.
+  // Keep intervals idle; production deadlines and the guarded send stay real.
+  t.mock.timers.enable({ apis: ['setInterval'] });
   const f = await setup(t);
   await saveProducerEpoch(f.ledger, '42');
   let tool,

@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { options, collect } from './collect.mjs';
 
 // Reuse the YAML parser already locked as a dependency of the root lint tool.
@@ -48,8 +49,12 @@ function assertObservabilityTopology(compose) {
     '/run/secrets/grafana-admin-password',
   );
   assert.ok(
-    grafana.volumes.includes(
-      './var/observability/grafana-admin-password:/run/secrets/grafana-admin-password:ro',
+    grafana.volumes.some(
+      (v) =>
+        v.type === 'bind' &&
+        v.target === '/run/secrets/grafana-admin-password' &&
+        v.read_only === true &&
+        v.bind?.create_host_path === false,
     ),
   );
   assert.ok(
@@ -128,6 +133,46 @@ test('static observability guard rejects the original internal-only topology and
 });
 
 const trace = '4bf92f3577b34da6a3ce929d0e0e4736';
+
+test('Grafana entrypoint rejects missing, empty and directory password files before starting', async (t) => {
+  const shell =
+    process.env.AURIGA_TEST_SH ??
+    (process.platform === 'win32' ? undefined : '/bin/sh');
+  if (!shell) return t.skip('set AURIGA_TEST_SH to a POSIX shell on Windows');
+  const compose = load(await readFile(composePath, 'utf8'));
+  const entrypoint = compose.services.grafana.entrypoint;
+  assert.deepEqual(entrypoint.slice(0, 2), ['/bin/sh', '-ec']);
+  // Compose $$ escapes to one $ in the actual container command.
+  const script = entrypoint[2].replaceAll('$$', '$');
+  const root = await mkdtemp(join(tmpdir(), 'auriga-grafana-guard-'));
+  try {
+    const empty = join(root, 'empty'),
+      whitespace = join(root, 'whitespace'),
+      valid = join(root, 'valid');
+    await writeFile(empty, '');
+    await writeFile(whitespace, '\n \t\n');
+    await writeFile(valid, 'fixture-private-password');
+    for (const file of [
+      join(root, 'missing'),
+      empty,
+      whitespace,
+      root,
+      valid,
+    ]) {
+      const result = spawnSync(shell, ['-ec', script], {
+        encoding: 'utf8',
+        windowsHide: true,
+        env: { ...process.env, GF_SECURITY_ADMIN_PASSWORD__FILE: file },
+      });
+      assert.ifError(result.error);
+      // A valid file reaches the image's /run.sh (absent on this test host).
+      assert.equal(result.status, file === valid ? 127 : 78, result.stderr);
+      assert.ok(!result.stderr.includes('fixture-private-password'));
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 test('read-only collector fixture records exact Docker arguments, local trace selection, plugin time filter and masking', async () => {
   const root = await mkdtemp(join(tmpdir(), 'auriga-collect-'));
   try {
