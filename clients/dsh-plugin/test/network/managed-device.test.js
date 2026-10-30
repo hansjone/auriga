@@ -204,3 +204,50 @@ for (const field of [
     assert.equal(f.network.status.connected, false);
     assert.equal(f.calls.length, 0);
   });
+
+test('429 renewal retains unexpired access and tools, backs off, and closes after expiry', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const f = await fixture(t);
+  await f.network.refresh();
+  const initial = f.input;
+  t.mock.timers.tick(271000);
+  f.intercept(() => {
+    throw Object.assign(new Error('rate limited'), { status: 429 });
+  });
+  await f.network.refresh(true);
+  assert.equal(f.network.status.connected, true);
+  assert.equal(f.input, initial);
+  assert.equal(f.calls.includes('close'), false);
+  assert.equal(f.calls.includes('logout'), false);
+  const count = f.calls.filter((x) => typeof x === 'object').length;
+  await f.network.refresh();
+  await initial.getAccess();
+  assert.equal(f.calls.filter((x) => typeof x === 'object').length, count);
+  t.mock.timers.tick(1001);
+  f.intercept(undefined);
+  await f.network.refresh();
+  assert.equal(f.input, initial);
+  assert.equal(f.calls.filter((x) => typeof x === 'object').length, count + 1);
+  f.intercept(() => {
+    throw Object.assign(new Error('rate limited'), { status: 429 });
+  });
+  t.mock.timers.tick(271000);
+  await f.network.refresh();
+  assert.equal(f.network.status.connected, true);
+  t.mock.timers.tick(30000);
+  await f.network.refresh();
+  assert.equal(f.network.status.connected, false);
+  assert.ok(f.calls.includes('close'));
+});
+
+test('missing optional managed credential starts no network tools and accepts late material', async (t) => {
+  const f = await fixture(t);
+  await rm(f.file);
+  await f.network.refresh();
+  assert.equal(f.input, undefined);
+  assert.equal(f.calls.length, 0);
+  await writeFile(f.file, JSON.stringify(f.value), { mode: 0o600 });
+  await f.network.refresh(true);
+  assert.ok(f.input);
+  assert.equal(f.calls.filter((x) => x === 'login').length, 1);
+});

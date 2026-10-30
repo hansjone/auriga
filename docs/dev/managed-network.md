@@ -31,3 +31,17 @@ JWT/租户委托须分别授权 svc:workspace、svc:iam，不能使用 edge 或 
 真实验证须使用 HTTPS/WSS 和共享栈锁。测试 CA 仅通过测试进程的受信 CA 文件载入，
 不改系统信任，不关闭 TLS 校验。健康状态、模块测试和工具出现不能代替严格 READY；
 双端互发须另留真实会话证据。
+
+网络是可选能力。永久拒绝标记 `disabled/permission_denied`，该代不再重试，照常启动无网络实例；
+权限恢复后下次start/restart重新申请。暂时故障最多等待30秒，随后 `deferred/issuer_unavailable` 放行，
+后台每30秒至多一次签发/探测；材料到位后排配置重启下发。状态和原因通过Instance的
+`managedNetworkState`、`managedNetworkReason` 返回，日志仅记录实例、状态和公开原因码。
+
+用户自助的会话列表、登出其他会话和凭据变更不处理managed_device会话。workspace每30秒检查
+已有材料的后端会话，单独会话失效会换代重签；设备本身被管理员吊销时记录永久拒绝，不自动绕过。
+插件本地logout关闭当前材料，恢复需实例正常stop/start取得新材料。
+
+公开换取只为凭据核验失败计入5分钟失败桶：实例60、租户3000、可信edge客户端IP300；
+成功凭据不读取失败桶。来源取已认证hop的 `X-Auriga-Client-IP`，不采信任意直连/转发头。
+429时插件保持未过期Bearer及现有lifecycle，以1–30秒退避；到期仍不能换取则关闭网络。
+split未启用托管网络时无需配置新增workspace→IAM凭据通道。

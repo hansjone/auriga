@@ -58,7 +58,10 @@ public class OAuthController {
           request.getParameterMap().values().stream().allMatch(values -> values.length == 1));
       // Managed credentials have no browser-session projection. Preserve common 403/503
       // so clients can distinguish proven revocation from a transient authority outage.
-      return response(requests.call(request, () -> oauth.token(credentials(input, request))));
+      return response(
+          requests.call(
+              request,
+              () -> oauth.managedToken(credentials(input, request), requests.clientIp(request))));
     }
     String[] resources = request.getParameterValues("resource");
     if (resources != null && resources.length != 1)

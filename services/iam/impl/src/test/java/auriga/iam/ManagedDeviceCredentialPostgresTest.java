@@ -151,6 +151,145 @@ class ManagedDeviceCredentialPostgresTest {
   }
 
   @Test
+  void missingNetworkPermissionIsDeniedForMembersAndExternalAccounts() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          for (var type : List.of(MemberType.MEMBER_TYPE_MEMBER, MemberType.MEMBER_TYPE_EXTERNAL)) {
+            when(permissions.getEffectivePermissions(any()))
+                .thenReturn(
+                    GetEffectivePermissionsResponse.newBuilder()
+                        .setStatus(MemberStatus.MEMBER_STATUS_ACTIVE)
+                        .setMemberType(type)
+                        .build());
+            denied(() -> managed.issue(request(1)));
+          }
+          assertTrue(store.tx(() -> store.all("managed_device").isEmpty()));
+        });
+  }
+
+  @Test
+  void failedCredentialBucketsNeverThrottleValidCredentialsAndSourcesAreIndependent() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          var valid =
+              Map.of(
+                  "instance_id",
+                  instance.toString(),
+                  "owner_id",
+                  owner.toString(),
+                  "credential",
+                  issued.getCredential());
+          var bad =
+              Map.of(
+                  "instance_id",
+                  instance.toString(),
+                  "owner_id",
+                  owner.toString(),
+                  "credential",
+                  "wrong");
+          assertEquals(
+              "common.forbidden",
+              assertThrows(AurigaException.class, () -> managed.exchange(bad, "192.0.2.1"))
+                  .errorCode()
+                  .code());
+          store.tx(
+              () -> {
+                var count = store.all("rate_limit");
+                assertEquals(3, count.size());
+                for (var row : count) {
+                  row.put("count", 3000);
+                  store.save("rate_limit", row);
+                }
+                return null;
+              });
+          assertEquals(
+              "common.rate_limited",
+              assertThrows(AurigaException.class, () -> managed.exchange(bad, "192.0.2.1"))
+                  .errorCode()
+                  .code());
+          assertNotNull(managed.exchange(valid, "192.0.2.1").get("access_token"));
+          assertEquals(3, store.tx(() -> store.all("rate_limit").size()));
+        });
+  }
+
+  @Test
+  void sourceFailureBucketLimitsUnknownInstancesAcrossTheSameTrustedSource() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          for (int i = 0; i < 300; i++) {
+            var bad =
+                Map.of(
+                    "instance_id",
+                    UUID.randomUUID().toString(),
+                    "owner_id",
+                    owner.toString(),
+                    "credential",
+                    "wrong");
+            assertEquals(
+                403,
+                assertThrows(AurigaException.class, () -> managed.exchange(bad, "192.0.2.2"))
+                    .errorCode()
+                    .httpStatus());
+          }
+          var bad =
+              Map.of(
+                  "instance_id",
+                  UUID.randomUUID().toString(),
+                  "owner_id",
+                  owner.toString(),
+                  "credential",
+                  "wrong");
+          assertEquals(
+              429,
+              assertThrows(AurigaException.class, () -> managed.exchange(bad, "192.0.2.2"))
+                  .errorCode()
+                  .httpStatus());
+          assertEquals(
+              403,
+              assertThrows(AurigaException.class, () -> managed.exchange(bad, "192.0.2.3"))
+                  .errorCode()
+                  .httpStatus());
+        });
+  }
+
+  @Test
+  void revokedBackendSessionRequestsRotationButRevokedDeviceStaysDenied() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          store.tx(
+              () -> {
+                var device = store.get("device", issued.getDeviceId(), false);
+                var session = store.byId("session", device.path("sessionId").asString(), true);
+                session.put("revoked", true);
+                store.save("session", session);
+                return null;
+              });
+          assertEquals(
+              "network.revoked",
+              assertThrows(AurigaException.class, () -> managed.issue(request(1)))
+                  .errorCode()
+                  .code());
+          binding = binding.toBuilder().setCredentialVersion(2).build();
+          var replacement = managed.issue(request(2));
+          assertNotEquals(issued.getDeviceId(), replacement.getDeviceId());
+          store.tx(
+              () -> {
+                var device = store.get("device", replacement.getDeviceId(), true);
+                device.put("revoked", true);
+                store.save("device", device);
+                return null;
+              });
+          denied(() -> managed.issue(request(2)));
+        });
+  }
+
+  @Test
   void issueExchangeRotateAndStopInvalidateOldCredentialsAndTokens() {
     TenantContext.run(
         tenant,

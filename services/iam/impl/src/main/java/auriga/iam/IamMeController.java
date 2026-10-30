@@ -71,7 +71,7 @@ public class IamMeController {
         () ->
             Json.object(
                 "items",
-                store.all("session").stream()
+                sessions.userSessions(principal.subject()).stream()
                     .filter(
                         s ->
                             s.path("accountId").asString().equals(principal.subject())
@@ -87,7 +87,7 @@ public class IamMeController {
     return sessions.response(
         () -> {
           int revoked = 0;
-          for (ObjectNode s : store.all("session"))
+          for (ObjectNode s : sessions.userSessions(principal.subject()))
             if (s.path("accountId").asString().equals(principal.subject())
                 && !s.path("sessionId").asString().equals(principal.sessionId())) {
               boolean wasRevoked = s.path("revoked").asBoolean();
@@ -457,7 +457,7 @@ public class IamMeController {
 
   private void revokeOtherCredentialSessions() {
     var principal = AuthorizationRules.currentPrincipal().orElseThrow();
-    for (ObjectNode session : store.all("session"))
+    for (ObjectNode session : sessions.userSessions(principal.subject()))
       if (session.path("accountId").asString().equals(principal.subject())
           && !session.path("sessionId").asString().equals(principal.sessionId()))
         // Earlier credential changes may have committed while their deletion confirmation failed.

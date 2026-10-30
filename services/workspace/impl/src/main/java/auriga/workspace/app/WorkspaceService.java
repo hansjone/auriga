@@ -51,9 +51,15 @@ public final class WorkspaceService {
     managedNetworkRequired = true;
   }
 
+  public boolean managedNetworkEnabled() {
+    return managedNetworkRequired;
+  }
+
   public boolean dispatchable(Map<String, Object> row) {
     return !managedNetworkRequired
         || spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING
+        || "disabled".equals(row.get("managed_network_state"))
+        || !clock.instant().isBefore(instant(row, "managed_wait_until"))
         || (row.get("managed_credential") != null
             && Objects.equals(
                 row.get("managed_synced_version"), row.get("managed_credential_version"))
@@ -354,9 +360,10 @@ public final class WorkspaceService {
                         assigned.getGeneration(),
                         token)));
         store.jdbc.update(
-            "UPDATE instance SET node_id=?,spec=? WHERE tenant_id=? AND id=?",
+            "UPDATE instance SET node_id=?,spec=?,managed_retry_at=? WHERE tenant_id=? AND id=?",
             node.get("id"),
             assigned.build().toByteArray(),
+            time(clock.instant()),
             store.tenant(),
             row.get("id"));
         if (history > 0) saveSpec(store.instance((UUID) row.get("id")), assigned.build());
@@ -441,8 +448,9 @@ public final class WorkspaceService {
 
   private void rotateManagedCredential(Map<String, Object> row) {
     store.jdbc.update(
-        "UPDATE instance SET managed_credential_version=managed_credential_version+1,managed_credential=NULL,managed_retry_at=? WHERE tenant_id=? AND id=?",
+        "UPDATE instance SET managed_credential_version=managed_credential_version+1,managed_credential=NULL,managed_retry_at=?,managed_network_state='pending',managed_network_reason=NULL,managed_wait_until=? WHERE tenant_id=? AND id=?",
         time(clock.instant()),
+        time(clock.instant().plusSeconds(30)),
         store.tenant(),
         row.get("id"));
   }
@@ -513,6 +521,28 @@ public final class WorkspaceService {
   }
 
   private void queueRestart(UUID id, String reason) {
+    queueRestart(id, reason, true);
+  }
+
+  void queueManagedMaterialRestart(UUID id) {
+    queueRestart(id, "managed_network_ready", false);
+  }
+
+  void managedSessionRevoked(Map<String, Object> row) {
+    rotateManagedCredential(row);
+    UUID id = (UUID) row.get("id");
+    store.jdbc.update(
+        "UPDATE instance SET managed_network_reason='session_revoked',managed_restart_required=true WHERE tenant_id=? AND id=?",
+        store.tenant(),
+        id);
+    var current = store.instance(id);
+    saveSpec(
+        current,
+        spec(current).toBuilder().setGeneration(spec(current).getGeneration() + 1).build());
+    notifyCommitted();
+  }
+
+  private void queueRestart(UUID id, String reason, boolean rotate) {
     long generation = ((Number) store.instance(id).get("generation")).longValue();
     // Automatic reconciliation must not reset the retry budget for the same generation.
     if (reason.equals("apply_pending")
@@ -529,7 +559,16 @@ public final class WorkspaceService {
             store.tenant(),
             id)
         > 0) return;
-    rotateManagedCredential(store.instance(id));
+    if (rotate) {
+      rotateManagedCredential(store.instance(id));
+      if (managedNetworkRequired) {
+        var current = store.instance(id);
+        saveSpec(
+            current,
+            spec(current).toBuilder().setGeneration(spec(current).getGeneration() + 1).build());
+        generation = ((Number) store.instance(id).get("generation")).longValue();
+      }
+    }
     Command command =
         Command.newBuilder()
             .setCommandId(UuidV7.next(clock).toString())

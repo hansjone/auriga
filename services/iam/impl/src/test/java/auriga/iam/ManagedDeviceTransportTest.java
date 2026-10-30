@@ -12,6 +12,31 @@ import org.junit.jupiter.api.Test;
 
 class ManagedDeviceTransportTest {
   @Test
+  void managedTokenUsesAuthenticatedHopClientAddress() {
+    var oauth = mock(OAuthProvider.class);
+    var requests = mock(RequestIdentity.class);
+    var controller =
+        new OAuthController(
+            oauth,
+            mock(SigningKeys.class),
+            requests,
+            mock(IamStore.class),
+            mock(SessionManager.class));
+    var request = new org.springframework.mock.web.MockHttpServletRequest();
+    request.addParameter("grant_type", IamManagedDevices.GRANT);
+    request.addHeader("X-Auriga-Client-IP", "198.51.100.1");
+    when(requests.clientIp(request)).thenReturn("192.0.2.25");
+    when(requests.call(eq(request), any()))
+        .thenAnswer(i -> ((java.util.function.Supplier<?>) i.getArgument(1)).get());
+    when(oauth.managedToken(anyMap(), anyString()))
+        .thenReturn(Json.object("access_token", "fixture"));
+    controller.token(
+        Map.of("grant_type", IamManagedDevices.GRANT, "client_id", "auriga-managed-network"),
+        request);
+    verify(oauth).managedToken(anyMap(), eq("192.0.2.25"));
+  }
+
+  @Test
   void onlyWorkspaceInternalPrincipalWithDelegatedTenantMayIssueOrRevoke() {
     var devices = mock(IamManagedDevices.class);
     var grpc = new IamGrpcManagedDevices(devices);

@@ -136,7 +136,10 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
                       && request.getOwnerId().equals(previous.path("owner").asString()));
               var device = store.get("device", previous.path("device").asString(), false);
               require(device != null && !device.path("revoked").asBoolean());
-              require(sessions.activeById(device.path("sessionId").asString()) != null);
+              if (sessions.activeById(device.path("sessionId").asString()) == null)
+                throw new AurigaException(
+                    auriga.common.error.ErrorCode.of(
+                        "network.revoked", 403, io.grpc.Status.Code.PERMISSION_DENIED));
               return response(previous);
             }
             retire(previous);
@@ -282,6 +285,16 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
   }
 
   public ObjectNode exchange(Map<String, String> input) {
+    return exchange(input, "internal");
+  }
+
+  private static final class InvalidCredential extends RuntimeException {
+    InvalidCredential() {
+      super(null, null, false, false);
+    }
+  }
+
+  public ObjectNode exchange(Map<String, String> input, String trustedSource) {
     IamError.validate(
         Set.of("grant_type", "client_id", "instance_id", "owner_id", "credential")
             .containsAll(input.keySet()));
@@ -289,52 +302,60 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
         owner = input.getOrDefault("owner_id", "");
     uuid(instance);
     uuid(owner);
-    store.limit("managed-exchange:tenant", clock.instant(), 3000);
-    store.limit("managed-exchange:" + instance, clock.instant(), 60);
-    return store.tx(
-        () -> {
-          var row = store.get("managed_device", instance, false);
-          require(
-              row != null
-                  && !row.path("revoked").asBoolean()
-                  && owner.equals(row.path("owner").asString())
-                  && clock.instant().isBefore(Instant.parse(row.path("expiresAt").asString())));
-          var device = store.get("device", row.path("device").asString(), false);
-          require(
-              device != null
-                  && Secrets.same(
-                      device.path("credentialHash").asString(),
-                      Secrets.hash(input.getOrDefault("credential", ""))));
-          var identity =
-              new DeviceAccessAuthority(store, sessions, tokens)
-                  .credential(
-                      TenantContext.require().toString(), owner, row.path("device").asString());
-          require(identity != null);
-          var effective = effective(owner);
-          require(
-              effective != null
-                  && effective.getStatus() == MemberStatus.MEMBER_STATUS_ACTIVE
-                  && effective.getPermissionsList().contains("auriga.connect.collab.use")
-                  && (effective.getMemberType() == MemberType.MEMBER_TYPE_MEMBER
-                      || effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL));
-          var token =
-              tokens.managedDevice(
-                  TenantContext.require(),
-                  owner,
-                  UUID.fromString(identity.device()),
-                  identity.expiresAt(),
-                  effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL
-                      ? "external"
-                      : "member");
-          return Json.object(
-              "access_token",
-              token.accessToken(),
-              "token_type",
-              "Bearer",
-              "scope",
-              "auriga.connect",
-              "expires_in",
-              token.expiresAt().getEpochSecond() - clock.instant().getEpochSecond());
-        });
+    try {
+      return store.tx(
+          () -> {
+            var row = store.get("managed_device", instance, false);
+            if (!(row != null
+                && !row.path("revoked").asBoolean()
+                && owner.equals(row.path("owner").asString())
+                && clock.instant().isBefore(Instant.parse(row.path("expiresAt").asString()))))
+              throw new InvalidCredential();
+            var device = store.get("device", row.path("device").asString(), false);
+            if (!(device != null
+                && !device.path("revoked").asBoolean()
+                && Secrets.same(
+                    device.path("credentialHash").asString(),
+                    Secrets.hash(input.getOrDefault("credential", "")))))
+              throw new InvalidCredential();
+            var identity =
+                new DeviceAccessAuthority(store, sessions, tokens)
+                    .credential(
+                        TenantContext.require().toString(), owner, row.path("device").asString());
+            require(identity != null);
+            var effective = effective(owner);
+            require(
+                effective != null
+                    && effective.getStatus() == MemberStatus.MEMBER_STATUS_ACTIVE
+                    && effective.getPermissionsList().contains("auriga.connect.collab.use")
+                    && (effective.getMemberType() == MemberType.MEMBER_TYPE_MEMBER
+                        || effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL));
+            var token =
+                tokens.managedDevice(
+                    TenantContext.require(),
+                    owner,
+                    UUID.fromString(identity.device()),
+                    identity.expiresAt(),
+                    effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL
+                        ? "external"
+                        : "member");
+            return Json.object(
+                "access_token",
+                token.accessToken(),
+                "token_type",
+                "Bearer",
+                "scope",
+                "auriga.connect",
+                "expires_in",
+                token.expiresAt().getEpochSecond() - clock.instant().getEpochSecond());
+          });
+    } catch (InvalidCredential rejected) {
+      // Only failed credential checks consume these independent, persisted failure buckets.
+      // Authenticated callers do not consult or increment them, even when a bucket is full.
+      store.limit("managed-exchange:failure:source:" + trustedSource, clock.instant(), 300);
+      store.limit("managed-exchange:failure:instance:" + instance, clock.instant(), 60);
+      store.limit("managed-exchange:failure:tenant", clock.instant(), 3000);
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    }
   }
 }

@@ -227,9 +227,10 @@ class WorkspaceIntegrationTest {
           store.tx(
               () ->
                   store.jdbc.update(
-                      "UPDATE instance SET node_id=?,managed_retry_at=? WHERE tenant_id=? AND id=?",
+                      "UPDATE instance SET node_id=?,managed_retry_at=?,managed_wait_until=? WHERE tenant_id=? AND id=?",
                       node,
                       WorkspaceStore.time(clock.instant()),
+                      WorkspaceStore.time(clock.instant().plusSeconds(30)),
                       tenant,
                       id));
           var request =
@@ -255,6 +256,17 @@ class WorkspaceIntegrationTest {
                   .getSpec()
                   .getSecrets()
                   .hasDeviceCredential());
+          var refreshFrame = assertDoesNotThrow(fake::next);
+          assertTrue(refreshFrame.hasCommand());
+          assertEquals("managed_network_ready", refreshFrame.getCommand().getRestart().getReason());
+          stream.onNext(
+              SessionRequest.newBuilder()
+                  .setResult(
+                      CommandResult.newBuilder()
+                          .setCommandId(refreshFrame.getCommand().getCommandId())
+                          .setInstanceId(id.toString())
+                          .setOk(true))
+                  .build());
           assertFalse(
               new String(
                       WorkspaceService.spec(row).toByteArray(),
@@ -310,6 +322,164 @@ class WorkspaceIntegrationTest {
                               request.toBuilder().setTenantId(UuidV7.next().toString()).build()))
                   .errorCode()
                   .code());
+        });
+  }
+
+  UUID managedFixture() throws Exception {
+    service.requireManagedNetworkCredentials();
+    UUID node =
+        UUID.fromString(enrollment.join(joinRequest(token().token(), TestPki.key())).getNodeId());
+    return TenantContext.call(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          store.tx(
+              () ->
+                  store.jdbc.update(
+                      "UPDATE instance SET node_id=?,managed_retry_at=?,managed_wait_until=? WHERE tenant_id=? AND id=?",
+                      node,
+                      WorkspaceStore.time(clock.instant()),
+                      WorkspaceStore.time(clock.instant().plusSeconds(30)),
+                      tenant,
+                      id));
+          return id;
+        });
+  }
+
+  auriga.contracts.iam.v1.IssueManagedDeviceResponse managedResponse() {
+    return auriga.contracts.iam.v1.IssueManagedDeviceResponse.newBuilder()
+        .setDeviceId(UuidV7.next().toString())
+        .setCredential("a".repeat(43))
+        .setExpiresAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(3600)))
+        .build();
+  }
+
+  @Test
+  void managedPermanentDenialDoesNotBlockStartOrRestartOrRetryForever() throws Exception {
+    var devices = org.mockito.Mockito.mock(auriga.iam.api.ManagedDeviceCredentials.class);
+    org.mockito.Mockito.when(devices.issue(org.mockito.ArgumentMatchers.any()))
+        .thenThrow(new AurigaException(auriga.common.error.CommonErrors.FORBIDDEN));
+    UUID id = managedFixture();
+    var network =
+        new WorkspaceManagedNetwork(
+            service, managedCrypto, devices, WorkspaceService.JSON.createObjectNode());
+    TenantContext.run(
+        tenant,
+        () -> {
+          network.tickTenant();
+          var row = store.tx(() -> store.instance(id));
+          assertTrue(service.dispatchable(row));
+          assertNull(row.get("managed_credential"));
+          assertEquals("disabled", row.get("managed_network_state"));
+          assertEquals("permission_denied", row.get("managed_network_reason"));
+          clock.now = clock.now.plusSeconds(120);
+          network.tickTenant();
+          org.mockito.Mockito.verify(devices).issue(org.mockito.ArgumentMatchers.any());
+          service.operate(id, actor(), "restart");
+          network.tickTenant();
+          row = store.tx(() -> store.instance(id));
+          assertTrue(service.dispatchable(row));
+          assertFalse(WorkspaceService.spec(row).getSecrets().hasDeviceCredential());
+          var deliveries = new NodeDeliveries(store, clock, service::dispatchable);
+          UUID node = (UUID) row.get("node_id");
+          assertEquals(1, store.tx(() -> deliveries.claim(node, UuidV7.next(), Set.of())).size());
+        });
+  }
+
+  @Test
+  void managedTransientFailureReleasesStartAfterThirtySecondsAndLateSuccessQueuesRefresh()
+      throws Exception {
+    var devices = org.mockito.Mockito.mock(auriga.iam.api.ManagedDeviceCredentials.class);
+    org.mockito.Mockito.when(devices.issue(org.mockito.ArgumentMatchers.any()))
+        .thenThrow(new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE));
+    UUID id = managedFixture();
+    var network =
+        new WorkspaceManagedNetwork(
+            service, managedCrypto, devices, WorkspaceService.JSON.createObjectNode());
+    TenantContext.run(
+        tenant,
+        () -> {
+          network.tickTenant();
+          assertFalse(service.dispatchable(store.tx(() -> store.instance(id))));
+          clock.now = clock.now.plusSeconds(31);
+          network.tickTenant();
+          var row = store.tx(() -> store.instance(id));
+          assertTrue(service.dispatchable(row));
+          assertNull(row.get("managed_credential"));
+          assertEquals("deferred", row.get("managed_network_state"));
+          assertEquals("issuer_unavailable", row.get("managed_network_reason"));
+          org.mockito.Mockito.doReturn(managedResponse())
+              .when(devices)
+              .issue(org.mockito.ArgumentMatchers.any());
+          clock.now = clock.now.plusSeconds(31);
+          network.tickTenant();
+          row = store.tx(() -> store.instance(id));
+          assertEquals("ready", row.get("managed_network_state"));
+          assertTrue(WorkspaceService.spec(row).getSecrets().hasDeviceCredential());
+          assertEquals(1L, ((Number) row.get("managed_credential_version")).longValue());
+          assertEquals(
+              1,
+              store.tx(
+                  () ->
+                      store.jdbc.queryForObject(
+                          "SELECT count(*) FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='restart' AND NOT done",
+                          Integer.class,
+                          tenant,
+                          id)));
+        });
+  }
+
+  @Test
+  void managedRevokedBackendSessionAutomaticallyAdvancesCredentialGeneration() throws Exception {
+    var devices = org.mockito.Mockito.mock(auriga.iam.api.ManagedDeviceCredentials.class);
+    org.mockito.Mockito.when(devices.issue(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(managedResponse());
+    UUID id = managedFixture();
+    var network =
+        new WorkspaceManagedNetwork(
+            service, managedCrypto, devices, WorkspaceService.JSON.createObjectNode());
+    TenantContext.run(
+        tenant,
+        () -> {
+          network.tickTenant();
+          org.mockito.Mockito.doThrow(
+                  new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE))
+              .when(devices)
+              .issue(org.mockito.ArgumentMatchers.any());
+          clock.now = clock.now.plusSeconds(31);
+          network.tickTenant();
+          assertEquals("deferred", store.tx(() -> store.instance(id)).get("managed_network_state"));
+          assertNotNull(store.tx(() -> store.instance(id)).get("managed_credential"));
+          long existingGeneration =
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration();
+          org.mockito.Mockito.doReturn(managedResponse())
+              .when(devices)
+              .issue(org.mockito.ArgumentMatchers.any());
+          clock.now = clock.now.plusSeconds(31);
+          network.tickTenant();
+          assertEquals("ready", store.tx(() -> store.instance(id)).get("managed_network_state"));
+          assertEquals(
+              existingGeneration,
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration());
+          org.mockito.Mockito.doThrow(
+                  new AurigaException(
+                      auriga.common.error.ErrorCode.of(
+                          "network.revoked", 403, io.grpc.Status.Code.PERMISSION_DENIED)))
+              .when(devices)
+              .issue(org.mockito.ArgumentMatchers.any());
+          clock.now = clock.now.plusSeconds(31);
+          network.tickTenant();
+          var row = store.tx(() -> store.instance(id));
+          assertEquals(2L, ((Number) row.get("managed_credential_version")).longValue());
+          assertNull(row.get("managed_credential"));
+          assertEquals("session_revoked", row.get("managed_network_reason"));
+          org.mockito.Mockito.doReturn(managedResponse())
+              .when(devices)
+              .issue(org.mockito.ArgumentMatchers.any());
+          network.tickTenant();
+          row = store.tx(() -> store.instance(id));
+          assertEquals("ready", row.get("managed_network_state"));
+          assertTrue(WorkspaceService.spec(row).getSecrets().hasDeviceCredential());
         });
   }
 

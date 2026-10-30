@@ -185,6 +185,7 @@ public class WorkspaceRuntimeConfiguration {
 
   @Bean(destroyMethod = "shutdownNow")
   @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.workspace.managed-network-installation-file")
   io.grpc.ManagedChannel workspaceIamChannel(
       Environment env, auriga.common.grpc.AurigaClientInterceptor interceptor) {
     return auriga.common.grpc.GrpcChannels.openTls(
@@ -197,6 +198,7 @@ public class WorkspaceRuntimeConfiguration {
 
   @Bean
   @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.workspace.managed-network-installation-file")
   auriga.iam.api.ManagedDeviceCredentials remoteManagedDeviceCredentials(
       @Qualifier("workspaceIamChannel") io.grpc.ManagedChannel channel) {
     return new auriga.iam.api.ManagedDeviceCredentials() {

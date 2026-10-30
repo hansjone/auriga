@@ -281,6 +281,13 @@ public final class OAuthProvider {
     return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
   }
 
+  public ObjectNode managedToken(Map<String, String> input, String trustedSource) {
+    if (managedDevices == null
+        || !IamManagedDevices.GRANT.equals(input.get("grant_type"))
+        || !"auriga-managed-network".equals(input.get("client_id"))) return error("invalid_client");
+    return managedDevices.exchange(input, trustedSource);
+  }
+
   public ObjectNode token(Map<String, String> input) {
     if (IamManagedDevices.GRANT.equals(input.get("grant_type"))) {
       if (managedDevices == null || !"auriga-managed-network".equals(input.get("client_id")))

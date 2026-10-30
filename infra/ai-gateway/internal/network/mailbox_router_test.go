@@ -33,6 +33,14 @@ func (f *delayedReadyMailbox) Ready(ctx context.Context, req *collab.NetworkMail
 	}
 }
 
+func (f *delayedReadyMailbox) Head(ctx context.Context, req *collab.NetworkMailboxServiceHeadRequest) (*collab.NetworkMailboxServiceHeadResponse, error) {
+	select {
+	case <-time.After(f.delay):
+		return f.fakeMailboxRPC.Head(ctx, req)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 func TestProductionReadyBudgetIsIndependentOfReconciliationProbe(t *testing.T) {
 	for _, delay := range []time.Duration{350 * time.Millisecond, 1500 * time.Millisecond} {
 		t.Run(delay.String(), func(t *testing.T) {
@@ -50,6 +58,11 @@ func TestProductionReadyBudgetIsIndependentOfReconciliationProbe(t *testing.T) {
 			if delay > time.Second && (ae == nil || ae.Code != "network.overloaded") {
 				t.Fatalf("mailbox control RPC escaped its hard deadline: %v", ae)
 			}
+			_, ae = run.mailbox.client.Call(context.Background(), liveBinding{Tenant: testTenant, Realm: "1", Node: "1"}, "head", nil)
+			if ae == nil || ae.Code != "network.overloaded" {
+				t.Fatalf("HEAD escaped the configured probe-sized control budget: %v", ae)
+			}
+
 		})
 	}
 }
@@ -369,7 +382,7 @@ func TestProductionMailboxTimeoutProducesSignedContractError(t *testing.T) {
 	if err = nc.Publish(UpSubject(b.Ingress), []byte(validMailboxFetch)); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := sub.NextMsg(2 * time.Second)
+	msg, err := sub.NextMsg(time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

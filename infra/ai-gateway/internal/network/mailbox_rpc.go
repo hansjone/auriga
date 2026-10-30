@@ -28,6 +28,11 @@ func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*Ma
 
 func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation string, raw []byte) ([]byte, *AppError) {
 	timeout := c.timeout
+	// READY needs several online authority checks; other control methods retain
+	// their configured short budget and capacity occupancy.
+	if operation == "ready" {
+		timeout = time.Second
+	}
 	if operation == "submit" || receiveOperation(operation) {
 		timeout = 10 * time.Second
 	}

@@ -40,6 +40,12 @@ public final class WorkspaceViews {
             s.getResources().getMemoryMb(),
             "diskGb",
             s.getResources().getDiskGb()));
+    out.put(
+        "managedNetworkState",
+        service.managedNetworkEnabled() ? row.get("managed_network_state") : "unconfigured");
+    out.put(
+        "managedNetworkReason",
+        service.managedNetworkEnabled() ? row.get("managed_network_reason") : null);
     out.put("pendingRestart", row.get("restart_pending"));
     out.put("pendingRestartReasons", List.of());
     out.put("error", null);

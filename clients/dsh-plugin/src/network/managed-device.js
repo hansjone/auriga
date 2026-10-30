@@ -34,7 +34,7 @@ export function createManagedNetwork(options) {
   let refreshing;
   let retryAt = 0;
   let failures = 0;
-  /** @type {()=>Promise<{accessToken:string,claims:any}>} */
+  /** @type {(renew?:boolean)=>Promise<{accessToken:string,claims:any}>} */
   let getDevice = async () => {
     throw new Error('managed credential unavailable');
   };
@@ -118,7 +118,13 @@ export function createManagedNetwork(options) {
         const next = await readMaterial();
         if (closed) return;
         if (next === rejected) return;
-        if (next === raw && Date.now() < retryAt && !force) return;
+        if (
+          next === raw &&
+          Date.now() < retryAt &&
+          !force &&
+          (!access || access.claims.exp * 1000 > Date.now())
+        )
+          return;
         if (next !== raw || !lifecycle) {
           await retire();
           if (closed) return;
@@ -128,10 +134,16 @@ export function createManagedNetwork(options) {
           const expected = generation;
           const platform = (options.createPlatform ?? createPlatform)(config);
           let pending;
-          getDevice = async () => {
+          getDevice = async (renew = false) => {
             if (closed || expected !== generation)
               throw new PlatformError(401, 'network.revoked');
-            if (access && access.claims.exp * 1000 > Date.now() + 30000)
+            if (
+              !renew &&
+              access &&
+              access.claims.exp * 1000 > Date.now() &&
+              (access.claims.exp * 1000 > Date.now() + 30000 ||
+                Date.now() < retryAt)
+            )
               return access;
             pending ??= (async () => {
               const response = await platform.request('/oauth2/token', {
@@ -171,6 +183,16 @@ export function createManagedNetwork(options) {
               return await pending;
             } catch (error) {
               const status = /** @type {any} */ (error)?.status;
+              if (
+                status === 429 &&
+                access &&
+                access.claims.exp * 1000 > Date.now()
+              ) {
+                retryAt =
+                  Date.now() +
+                  Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
+                return access;
+              }
               if (status === 401 || status === 403) {
                 rejected = raw;
                 lifecycle?.logout();
@@ -206,11 +228,12 @@ export function createManagedNetwork(options) {
           lifecycle.login();
         } else {
           validate(next);
-          if (force) access = undefined;
-          await getDevice();
+          await getDevice(force);
         }
-        failures = 0;
-        retryAt = 0;
+        if (Date.now() >= retryAt) {
+          failures = 0;
+          retryAt = 0;
+        }
       } catch {
         lifecycle?.logout();
         access = undefined;

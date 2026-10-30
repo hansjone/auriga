@@ -169,6 +169,16 @@ public final class SessionManager implements Sessions {
     kv.delete(row.path("cookieHash").asString());
   }
 
+  public List<ObjectNode> userSessions(String account) {
+    return store.all("session").stream()
+        .filter(
+            row ->
+                account.equals(row.path("accountId").asString())
+                    && !"managed_device".equals(row.path("kind").asString())
+                    && !row.has("managedInstance"))
+        .toList();
+  }
+
   public boolean valid(ObjectNode row) {
     if (row == null
         || !TenantContext.require().toString().equals(row.path("tenantId").asString())
