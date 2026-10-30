@@ -27,7 +27,8 @@ func TestNATSTraceVectorAndRequestBoundaries(t *testing.T) {
 	if TraceID(first) != "fd0a7edb479e9a9982f9912dfa755842" || TraceID(first) != TraceID(second) || Parent(first) == Parent(second) || !bytes.Equal(before, raw) {
 		t.Fatal("NATS logical trace vector or immutable payload differs")
 	}
-	if TraceID(NATSContext(t.Context(), nil)) == TraceID(NATSContext(t.Context(), nil)) {
+	backgroundFirst, backgroundSecond := NATSContext(t.Context(), nil), NATSContext(t.Context(), nil)
+	if TraceID(backgroundFirst) == TraceID(backgroundSecond) {
 		t.Fatal("background events incorrectly correlated")
 	}
 }
@@ -56,7 +57,7 @@ func TestTraceHTTPToRPCWire(t *testing.T) {
 		defer done()
 		_, err := healthpb.NewHealthClient(conn).Check(Outgoing(r.Context()), &healthpb.HealthCheckRequest{})
 		if err != nil {
-			http.Error(w, "RPC failed", 502)
+			http.Error(w, "RPC failed", http.StatusBadGateway)
 			return
 		}
 		w.WriteHeader(204)
