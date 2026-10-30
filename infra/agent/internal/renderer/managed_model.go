@@ -16,8 +16,6 @@ import (
 var credentialUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var credentialSecret = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
-const managedModelKeyRef = "AURIGA_MANAGED_MODEL_KEY"
-
 type managedModel struct {
 	Tenant     string `json:"tenantId"`
 	Owner      string `json:"ownerId"`
@@ -80,7 +78,7 @@ func managedModelRow(m *managedModel) any {
 	}
 	return map[string]any{"id": "llm-pi-ai", "config": map[string]any{"providers": map[string]any{"auriga-managed": map[string]any{
 		"displayName": "Auriga", "api": "openai-completions", "baseURL": m.BaseURL, "models": models,
-		"compat":    map[string]any{"supportsStore": false},
-		"apiKeyEnv": managedModelKeyRef,
+		"compat":  map[string]any{"supportsStore": false},
+		"headers": map[string]any{"Authorization": jsExpr("'Bearer ' + JSON.parse(process.getBuiltinModule('node:fs').readFileSync(" + jsString(ContainerModelCredential) + ", 'utf8')).credential")},
 	}}}}
 }

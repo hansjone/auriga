@@ -1,14 +1,24 @@
 // Module composition only: real locked DSH Loader/settings/credentials/pi-ai,
 // disposable profile and random-port fake OpenAI upstream. No platform or user profile.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  openSync,
+  closeSync,
+  unlinkSync,
+} from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const [runtimeRoot, patchFile, metaRoot, scratch, requestFixture] =
-  process.argv.slice(2);
+const [runtimeRoot, patchFile, metaRoot, scratch, requestFixture] = process.argv
+  .slice(2)
+  .filter((arg) => arg !== '--read-only-model');
+const readOnlyModel = process.argv.includes('--read-only-model');
 const req = createRequire(
   pathToFileURL(join(resolve(runtimeRoot), 'package.json')),
 );
@@ -24,7 +34,8 @@ const [
   { default: Credentials },
   { default: Llm },
   Pi,
-  { default: SettingsController },
+  { default: SettingsController, CredentialsController },
+  { credentialRef, credentialKey },
   yaml,
 ] = await Promise.all([
   load('@deepseek-ai/dsh-app-boot'),
@@ -34,16 +45,41 @@ const [
   load('@deepseek-ai/dsh-llm'),
   load('@deepseek-ai/dsh-llm-pi-ai'),
   load('@deepseek-ai/dsh-api-settings-controller'),
+  load('@deepseek-ai/dsh-credentials'),
   load('js-yaml'),
 ]);
-const patch = yaml.load(readFileSync(patchFile, 'utf8'));
-const rows = patch.filter((row) =>
-  ['llm-pi-ai', 'credentials'].includes(row.id),
+const patch = loadOverlayPatches('model-probe', patchFile);
+assert.ok(
+  !patch.some((row) => row.id === 'credentials'),
+  'managed overlay must leave the user credential store intact',
 );
-assert.equal(rows.length, 2);
-const keyFile = join(metaRoot, 'model-keys.json');
-const key = JSON.parse(readFileSync(keyFile, 'utf8')).refs
-  .AURIGA_MANAGED_MODEL_KEY;
+const rows = patch.filter((row) => row.id === 'llm-pi-ai');
+assert.equal(rows.length, 1);
+const keyFile = join(metaRoot, 'model-credential.json');
+const key = JSON.parse(readFileSync(keyFile, 'utf8')).credential;
+const exposures = [];
+const plaintextPaths = (value, path = '$') => {
+  if (typeof value === 'string') return value.includes('amc.') ? [path] : [];
+  if (value && typeof value === 'object')
+    return Object.entries(value).flatMap(([name, child]) =>
+      plaintextPaths(child, `${path}.${name}`),
+    );
+  return [];
+};
+if (readOnlyModel) {
+  const cannotWrite = (file, flags) => {
+    assert.throws(
+      () => {
+        const fd = openSync(file, flags);
+        closeSync(fd);
+        if (flags === 'wx') unlinkSync(file);
+      },
+      (error) => ['EROFS', 'EACCES', 'EPERM'].includes(error.code),
+    );
+  };
+  cannotWrite(keyFile, 'r+');
+  cannotWrite(join(metaRoot, 'write-probe'), 'wx');
+}
 const requests = [];
 const upstream = createServer(async (request, response) => {
   try {
@@ -51,7 +87,7 @@ const upstream = createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     assert.ok(
       request.headers.authorization === 'Bearer ' + key,
-      'native credential reference must resolve',
+      'native file expression must supply Authorization',
     );
     requests.push(JSON.parse(Buffer.concat(chunks)));
     response.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -71,6 +107,26 @@ try {
     const home = join(scratch, mode);
     const dir = join(home, 'profiles', 'managed');
     initProfile(dir, ['model-probe-bundle']);
+    const userKey = randomBytes(32).toString('base64url');
+    const addedKey = randomBytes(32).toString('base64url');
+    const grant = {
+      kind: 'grant',
+      payload: {
+        access: randomBytes(16).toString('hex'),
+        refresh: randomBytes(16).toString('hex'),
+        expires: 1,
+      },
+    };
+    const userStore = join(home, '.credentials.yaml');
+    writeFileSync(
+      userStore,
+      JSON.stringify({
+        version: 1,
+        refs: { USER_EXISTING_KEY: userKey },
+        records: { 'llm-pi-ai/openai-codex': grant },
+      }),
+      { mode: 0o600 },
+    );
     const bundle = join(dir, 'node_modules', 'model-probe-bundle');
     mkdirSync(bundle, { recursive: true });
     writeFileSync(
@@ -93,7 +149,11 @@ try {
             { id: 'editor', name: 'cordis:editor' },
             { id: 'settings', name: 'cordis:settings' },
             { id: 'llm', name: 'cordis:llm' },
-            { id: 'credentials', name: 'cordis:credentials' },
+            {
+              id: 'credentials',
+              name: 'cordis:credentials',
+              config: { dshHome: home, watch: false },
+            },
             ...(missingAdapter ? [] : [{ id: 'llm-pi-ai', name: 'cordis:pi' }]),
           ],
         },
@@ -105,7 +165,12 @@ try {
       .providers['auriga-managed'];
     provider.baseURL = `http://127.0.0.1:${upstream.address().port}/v1`;
     if (!compatEnabled) delete provider.compat;
-    overlay.find((row) => row.id === 'credentials').config.path = keyFile;
+    const authorization = provider.headers.Authorization;
+    assert.equal(typeof authorization.__jsExpr, 'string');
+    authorization.__jsExpr = authorization.__jsExpr.replace(
+      '/run/auriga/model-credential.json',
+      keyFile.replaceAll('\\', '/'),
+    );
     const overlayPath = join(home, 'managed.patch.json');
     writeFileSync(overlayPath, JSON.stringify(overlay));
     const profile = {
@@ -143,11 +208,46 @@ try {
         },
       );
       const controller = new SettingsController(ctx);
-      const described = controller.describe();
+      const credentialsController = new CredentialsController(ctx);
       assert.ok(
-        !JSON.stringify(described).includes('amc.'),
-        'settings/describe must not expose model key',
+        (await ctx.credentials.resolve(credentialRef('USER_EXISTING_KEY')))
+          ?.value === userKey,
+        'existing personal key must remain readable',
       );
+      await credentialsController.set('USER_ADDED_KEY', addedKey);
+      assert.ok(
+        (await ctx.credentials.resolve(credentialRef('USER_ADDED_KEY')))
+          ?.value === addedKey,
+        'credentials/set must succeed with read-only model material',
+      );
+      const recordKey = credentialKey('llm-pi-ai', 'openai-codex');
+      assert.deepEqual(await ctx.credentials.readRecord(recordKey), grant);
+      const refreshed = {
+        ...grant,
+        payload: {
+          ...grant.payload,
+          access: randomBytes(16).toString('hex'),
+          expires: 2,
+        },
+      };
+      await ctx.credentials.modifyRecord(recordKey, async (current) => {
+        assert.deepEqual(current, grant);
+        return refreshed;
+      });
+      assert.deepEqual(await ctx.credentials.readRecord(recordKey), refreshed);
+      const persisted = yaml.load(readFileSync(userStore, 'utf8'));
+      assert.ok(
+        persisted.refs.USER_EXISTING_KEY === userKey &&
+          persisted.refs.USER_ADDED_KEY === addedKey,
+        'personal keys must persist in the original writable store',
+      );
+      assert.deepEqual(persisted.records['llm-pi-ai/openai-codex'], refreshed);
+      assert.ok(
+        !readFileSync(userStore, 'utf8').includes('amc.'),
+        'managed key must not enter the personal credential store',
+      );
+      const described = controller.describe();
+      exposures.push(...plaintextPaths(described, mode + ':settings/describe'));
       const ns = described.namespaces.find((row) => row.ns === 'llm-pi-ai');
       if (missingAdapter) {
         assert.equal(
@@ -182,7 +282,7 @@ try {
           ],
           ns.revision,
         );
-        assert.ok(!JSON.stringify(saved).includes('amc.'));
+        exposures.push(...plaintextPaths(saved, mode + ':settings/mutate'));
       } catch (error) {
         assert.equal(error.code, 'settings/rejected');
         assert.ok(
@@ -190,7 +290,12 @@ try {
           'mutation rejection must not expose model key',
         );
       }
-      assert.ok(!JSON.stringify(controller.describe()).includes('amc.'));
+      exposures.push(
+        ...plaintextPaths(
+          controller.describe(),
+          mode + ':settings/describe-after-mutate',
+        ),
+      );
       for (const file of ['cordis.yml', 'cordis.patch.yml']) {
         assert.ok(
           !readFileSync(join(dir, file), 'utf8').includes('amc.'),
@@ -245,19 +350,41 @@ try {
       await ctx?.fiber.dispose();
     }
   }
-  if (requestFixture)
+  if (requestFixture) {
     writeFileSync(requestFixture, JSON.stringify(requests[0]), { mode: 0o600 });
+    // Preserve the actual rendered input (synthetic test key only) for an
+    // independent run with this directory bind-mounted read-only at /run/auriga.
+    const fixtureDir = requestFixture + '.readonly';
+    mkdirSync(fixtureDir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(fixtureDir, 'model-credential.json'),
+      readFileSync(keyFile),
+      { mode: 0o600 },
+    );
+    writeFileSync(join(fixtureDir, 'cordis.patch.json'), JSON.stringify(rows), {
+      mode: 0o600,
+    });
+  }
   console.log(
     JSON.stringify({
       dshVersion: version,
       requests: requests.length,
-      noPlaintextInSettings: true,
+      noPlaintextInSettings: exposures.length === 0,
       noPlaintextInProfile: true,
-      credentialReferenceResolved: true,
+      fileAuthorizationResolved: true,
+      readOnlyModelMount: readOnlyModel,
+      existingUserCredentialReadable: true,
+      credentialsSetSucceeded: true,
+      oauthRecordRefreshed: true,
       storeOmittedWithCompat: true,
       controlReproducesStore: true,
       missingAdapterFailsClosed: true,
     }),
+  );
+  assert.equal(
+    exposures.length,
+    0,
+    'model key exposure locations=' + exposures.join(','),
   );
 } finally {
   await new Promise((resolve) => upstream.close(resolve));

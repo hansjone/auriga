@@ -12,11 +12,13 @@ provider; `instance.token` remains exclusively for instance control.
 `Secrets.model_credential` is separate trusted model material. It is validated
 against the instance identity and becomes `model-credential.json` (0600).
 Only this material can configure the native `llm-pi-ai` managed route. Its
-`apiKeyEnv` is a reference, resolved by native `credentials` from a separate
-0600 `model-keys.json` document. No resolved Authorization enters public config,
-settings descriptions or profile edits. The managed instance uses a platform-only
-profile; personal providers remain in separate personal profiles. Both native
-`llm-pi-ai` and `credentials` rows must exist in the standard base composition.
+Authorization is a Loader `!!js` file expression; the sole model file is read at
+evaluation. Obsolete `model-keys.json` copies are removed, and the user's native
+`credentials` row is left intact and writable. The managed instance uses a
+platform-only model-provider profile, with the standard native `llm-pi-ai` row.
+The public patch and profile contain no inline key. Release blocker: DSH
+0.2.0-rc.2 still exposes the evaluated Authorization in `settings/describe`;
+the opt-in native probe keeps a failing assertion for this disclosure.
 
 `cordis.patch.yml` is a DSH Loader patch list (`dsh web --patch`): an `insert` of the `auriga-dsh` plugin row (config: protected `browserOrigin`, spec patches `plugins.auriga-dsh.*`) and one `@deepseek-ai/dsh-mcp-client` row per team MCP server (token read by a `!!js` file expression, never inlined), then `webserver` (bind `0.0.0.0` for Docker, `127.0.0.1` otherwise) and `web-runtime` (no URL print, `trustedHosts`) overrides, then spec patches `plugins.<row>.<key…>` as whole-config row overrides. Renderer-owned rows and keys cannot be patched; arbitrary Profile model providers fail closed. Only separately sealed managed model material can configure the renderer-owned `llm-pi-ai` row.
 

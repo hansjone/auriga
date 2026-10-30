@@ -59,15 +59,13 @@ public final class WorkspaceManagedModels {
   }
 
   public void reconcile(Map<String, Object> row, IssueManagedDeviceResponse response) {
-    if (!enabled) return;
-    if (response.getModelCredential().isEmpty() && row.get("managed_model_credential") == null)
-      return;
-    if (!response.getModelCredential().isEmpty() && row.get("managed_model_credential") != null)
-      return;
+    boolean hasCredential = enabled && !response.getModelCredential().isEmpty();
+    if (!hasCredential && row.get("managed_model_credential") == null) return;
+    if (hasCredential && row.get("managed_model_credential") != null) return;
     UUID id = (UUID) row.get("id");
     long version = ((Number) row.get("managed_credential_version")).longValue();
     byte[] material =
-        response.getModelCredential().isEmpty()
+        !hasCredential
             ? null
             : crypto.encrypt(
                 catalog(response, row).toString().getBytes(StandardCharsets.UTF_8),

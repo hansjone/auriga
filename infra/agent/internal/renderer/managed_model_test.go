@@ -35,6 +35,11 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An upgrade must remove R2's obsolete copy while retaining the live key file.
+	keysPath := filepath.Join(opt.MetaDir, "model-keys.json")
+	if err = os.WriteFile(keysPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	result, err := renderer.Render(spec, opt)
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +57,9 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 		t.Fatal("native provider missing")
 	}
 	oldDigest := result.Digest
+	if _, err = os.Stat(keysPath); !os.IsNotExist(err) {
+		t.Fatal("unused plaintext model key copy retained")
+	}
 	if runtimeRoot := os.Getenv("AURIGA_DSH_MODEL_RUNTIME"); runtimeRoot != "" {
 		ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 		defer cancel()
@@ -78,6 +86,9 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	}
 	var provider map[string]any
 	for _, row := range rows {
+		if row["id"] == "credentials" {
+			t.Fatal("managed models must not replace the user's credential store")
+		}
 		if row["id"] == "llm-pi-ai" {
 			provider = row["config"].(map[string]any)["providers"].(map[string]any)["auriga-managed"].(map[string]any)
 		}
@@ -89,21 +100,9 @@ func TestManagedModelNativeConfigurationAndSecretRemoval(t *testing.T) {
 	if !ok || compat["supportsStore"] != false {
 		t.Fatal("store must be disabled for the relay")
 	}
-	if provider["apiKeyEnv"] != "AURIGA_MANAGED_MODEL_KEY" || provider["headers"] != nil {
-		t.Fatal("configuration must contain only a credential reference")
-	}
-	keysPath := filepath.Join(opt.MetaDir, "model-keys.json")
-	assertSecretRestricted(t, keysPath)
-	keysRaw, err := os.ReadFile(keysPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var keys struct {
-		Version int               `json:"version"`
-		Refs    map[string]string `json:"refs"`
-	}
-	if json.Unmarshal(keysRaw, &keys) != nil || keys.Version != 1 || keys.Refs["AURIGA_MANAGED_MODEL_KEY"] != credential {
-		t.Fatal("native credential document mismatch")
+	headers, ok := provider["headers"].(map[string]any)
+	if provider["apiKeyEnv"] != nil || !ok || !strings.Contains(headers["Authorization"].(string), renderer.ContainerModelCredential) {
+		t.Fatal("managed Authorization must read the sole model file")
 	}
 	credential = strings.TrimSuffix(credential, strings.Repeat("a", 43)) + strings.Repeat("b", 43)
 	material["credential"] = credential

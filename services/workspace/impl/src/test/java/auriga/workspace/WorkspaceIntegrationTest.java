@@ -450,6 +450,51 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void managedModelMaterialsAreClearedWhenInstallationBecomesInvalid() throws Exception {
+    UUID id = managedFixture();
+    var models =
+        new WorkspaceManagedModels(
+            service,
+            managedCrypto,
+            WorkspaceService.JSON.createObjectNode().put("modelBaseUrl", "file:///ai/v1"));
+    TenantContext.run(
+        tenant,
+        () -> {
+          store.tx(
+              () -> {
+                byte[] encrypted =
+                    managedCrypto.encrypt(
+                        "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        tenant + "/managed-model/" + id);
+                store.jdbc.update(
+                    "UPDATE instance SET managed_model_credential=? WHERE tenant_id=? AND id=?",
+                    encrypted,
+                    tenant,
+                    id);
+                var row = store.instance(id);
+                var spec = WorkspaceService.spec(row);
+                service.saveSpec(
+                    row, spec.toBuilder().setGeneration(spec.getGeneration() + 1).build());
+                return null;
+              });
+          var before = store.tx(() -> store.instance(id));
+          assertTrue(WorkspaceService.spec(before).getSecrets().hasModelCredential());
+          var response = managedResponse().toBuilder().setModelCredential("unusable").build();
+          models.reconcile(before, response);
+          var cleared = store.tx(() -> store.instance(id));
+          assertNull(cleared.get("managed_model_credential"));
+          assertFalse(WorkspaceService.spec(cleared).getSecrets().hasModelCredential());
+          assertTrue(
+              WorkspaceService.spec(cleared).getGeneration()
+                  > WorkspaceService.spec(before).getGeneration());
+          models.reconcile(cleared, response);
+          assertEquals(
+              WorkspaceService.spec(cleared).getGeneration(),
+              WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration());
+        });
+  }
+
+  @Test
   void managedModelDiscoveryFailureDoesNotPersistCredentials() throws Exception {
     UUID id = managedFixture();
     var models =

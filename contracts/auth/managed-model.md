@@ -24,11 +24,16 @@ this model-only key. Dependency failures fail closed.
 The trusted file is defined by `plugin/managed-model.schema.json`, separately
 HPKE-sealed as `Secrets.model_credential` with current specification generation.
 No credential is placed in Profile, environment, image, public YAML or logs.
-The native pi-ai route carries only `apiKeyEnv: AURIGA_MANAGED_MODEL_KEY`.
-The renderer also writes the native version-1 credential document at
-`/run/auriga/model-keys.json` (0600); the managed `credentials` row points to it.
-Settings descriptions and profile edits carry references only, never a resolved
-Authorization header. This is a platform-only profile, separate from personal
-profiles. Key replacement uses the existing material restart path.
+The native pi-ai route uses a Loader file expression for its Authorization
+header, reading the sole `/run/auriga/model-credential.json` (0600) at evaluation.
+The obsolete `model-keys.json` copy is removed. The native `credentials` service
+keeps its own writable user store, including personal references and OAuth records.
+This is a platform-only model-provider profile, separate from personal profiles.
+Key replacement uses the existing material restart path; invalid installation
+configuration clears previously delivered model material on reconciliation.
+Settings descriptions and profile edits must not disclose the key. This remains
+a release blocker: the locked DSH 0.2.0-rc.2 exposes the evaluated header in
+`settings/describe` despite preserving the raw file expression in the profile.
+The native probe deliberately fails until this disclosure is resolved.
 Gateway lease-ceiling checks permit five seconds of IAM clock skew; actual
 expiry and per-call online authorization remain mandatory.
