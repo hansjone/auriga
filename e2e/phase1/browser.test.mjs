@@ -6,7 +6,7 @@ import { Buffer } from 'node:buffer';
 import { runPhase1, totp } from './run.mjs';
 import { BrowserSteps, desktopEnvironment } from './browser.mjs';
 import { resolve, join } from 'node:path';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 
 // This deliberately tiny deployed-HTTP fixture tests browser orchestration,
 // cookies and form binding. It is not evidence of a real Auriga deployment.
@@ -83,6 +83,11 @@ function render() {
   } else if (location.pathname === '/login') {
     const data=await api('login/providers'); main.innerHTML=data.items.map(p=>'<button data-provider-id="'+p.id+'">登录</button>').join('');
     main.querySelectorAll('button').forEach(btn=>btn.onclick=async()=>{tx=await api('login/transactions',{providerId:btn.dataset.providerId,invitationCode:new URLSearchParams(location.search).get('invitation')});render();});
+  } else if (!admin && location.pathname === '/') {
+    const response=await fetch('/api/workspace/v1/me/instances'); const value=await response.json();
+    if (!value.items?.length) { main.textContent='已登录'; return; }
+    const instance=value.items[0]; main.innerHTML='<button>'+(instance.ready?'进入实例':'启动并进入')+'</button>';
+    main.querySelector('button').onclick=async()=>{ const opened=await fetch('/api/workspace/v1/me/instance/open',{method:'POST'}); const value=await opened.json(); location.href='/open/'+value.instance.id; };
   } else main.textContent='已登录';
 })();
 </script>`;
@@ -103,6 +108,8 @@ for (const [mode, adminConnector] of [
     let loginCount = 0;
     let lastOtpCounter = -1;
     let baseUrl;
+    let cloudInstance;
+    let cloudOpens = 0;
     const handler = (admin) => async (req, res) => {
       const path = new URL(req.url, 'http://localhost').pathname;
       res.setHeader('traceparent', req.headers.traceparent || '');
@@ -125,6 +132,15 @@ for (const [mode, adminConnector] of [
           .filter(Boolean)
           .map((pair) => pair.split('=')),
       );
+      if (path === '/api/workspace/v1/me/instances')
+        return json({ items: cloudInstance ? [cloudInstance] : [] });
+      if (path === '/api/workspace/v1/me/instance/open') {
+        assert.equal(sessions.get(cookies.session), 'member-account');
+        assert.equal(req.method, 'POST');
+        cloudOpens++;
+        cloudInstance = { ...cloudInstance, phase: 'running', ready: true };
+        return json({ instance: cloudInstance });
+      }
       if (path.endsWith('/login/providers'))
         return json({
           items: [
@@ -328,6 +344,56 @@ for (const [mode, adminConnector] of [
     assert.equal(JSON.stringify(report).includes(saved.totpSecret), false);
     assert.equal(adapter.loginResponses.size, 0);
     assert.equal(report.cleanupErrors.length, 0);
+    if (mode === 'ip' && adminConnector === 'team-account') {
+      saved.lastTotpCounter = Math.floor(Date.now() / 30_000);
+      await writeFile(memberCredentialsFile, JSON.stringify(saved));
+      const resume = new BrowserSteps(
+        { baseUrl, only: [3] },
+        {
+          ...config,
+          existingCloud: {
+            credentialsFile: memberCredentialsFile,
+            instanceId: '019a0000-0000-7000-8000-000000000001',
+          },
+        },
+      );
+      try {
+        assert.equal(
+          (await resume.invite({ requests: [] })).memberVerified,
+          true,
+        );
+        assert.deepEqual(
+          resume.evidence().steps.map((step) => step.name),
+          ['browser-launch', 'member-login'],
+        );
+        assert.equal(resume.evidence().memberReused, true);
+        cloudInstance = {
+          id: '019a0000-0000-7000-8000-000000000001',
+          ownerId: 'member-account',
+          phase: 'stopped',
+          ready: false,
+        };
+        // Only test browser orchestration here, not a deployed DSH surface.
+        resume.portalPage.waitForURL = async () => {
+          throw new Error('fixture_entry_boundary');
+        };
+        for (const expectedOpens of [1, 2]) {
+          await resume.portalPage.goto(baseUrl);
+          await assert.rejects(
+            resume.cloud({ requests: [] }),
+            /fixture_entry_boundary/,
+          );
+          assert.equal(cloudOpens, expectedOpens);
+          assert.equal(resume.evidence().failedStep, 'dsh-page');
+          const ready = resume.evidence().steps.at(-1);
+          assert.equal(ready.name, 'instance-ready');
+          assert.equal(ready.instanceId, cloudInstance.id);
+          assert.equal(ready.ready, true);
+        }
+      } finally {
+        await resume.close();
+      }
+    }
   });
 }
 

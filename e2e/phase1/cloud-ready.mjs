@@ -152,17 +152,19 @@ export function cloudReadyJourney(options, config, host) {
     const admin = origin(access.adminOrigin);
     if (config.admin?.url)
       assert.equal(new URL(config.admin.url).origin, admin);
-    const enrollment =
-      config.admin ??
-      JSON.parse(
-        readFileSync(
-          resolve(compose, 'var/enrollment/emergency-enrollment.json'),
-          'utf8',
-        ),
+    const enrollment = config.existingCloud
+      ? null
+      : (config.admin ??
+        JSON.parse(
+          readFileSync(
+            resolve(compose, 'var/enrollment/emergency-enrollment.json'),
+            'utf8',
+          ),
+        ));
+    if (!config.existingCloud)
+      assert.ok(
+        enrollment.username && enrollment.password && enrollment.totpSecret,
       );
-    assert.ok(
-      enrollment.username && enrollment.password && enrollment.totpSecret,
-    );
 
     await step('browser-launch', async () => {
       const loopback =
@@ -211,6 +213,36 @@ export function cloudReadyJourney(options, config, host) {
       });
       return ctx;
     };
+    if (config.existingCloud) {
+      assert.ok(
+        Array.isArray(options.only) && !options.only.includes(2),
+        'existingCloud cannot replace invitation acceptance',
+      );
+      const file = resolve(config.existingCloud.credentialsFile);
+      assert.ok(lstatSync(file).isFile() && !lstatSync(file).isSymbolicLink());
+      const credentials = JSON.parse(readFileSync(file, 'utf8'));
+      assert.equal(credentials.portalUrl, portal);
+      assert.ok(
+        credentials.accountId && credentials.username && credentials.password,
+      );
+      host.member = credentials;
+      memberId = credentials.accountId;
+      memberContext = host.memberContext = await context();
+      page = host.portalPage = await memberContext.newPage();
+      activePage = page;
+      await step('member-login', async () => {
+        await page.goto(portal + '/login');
+        await provider(page, 'team-account');
+        await fillLogin(page, credentials);
+        await page.waitForURL(portal + '/');
+        assert.equal((await json(page, '/api/iam/v1/me')).account.id, memberId);
+        return { accountId: memberId };
+      });
+      report.memberReused = true;
+      report.status = 'identity-passed';
+      return { memberVerified: true };
+    }
+
     const adminContext = await context();
     const adminPage = await adminContext.newPage();
     activePage = adminPage;
@@ -407,6 +439,7 @@ export function cloudReadyJourney(options, config, host) {
             username: member.username,
             password: member.password,
             totpSecret: member.totpSecret,
+            lastTotpCounter: member.lastTotpCounter,
           }) + '\n',
           { flag: 'wx', mode: 0o600 },
         );
@@ -426,6 +459,29 @@ export function cloudReadyJourney(options, config, host) {
       const observer = await memberContext.newPage();
       try {
         await observer.goto(portal + '/');
+        let button = '启动并进入';
+        if (config.existingCloud) {
+          const value = await json(observer, '/api/workspace/v1/me/instances');
+          instance = value.items.find(
+            (item) => item.id === config.existingCloud.instanceId,
+          );
+          assert.ok(instance, 'existing instance is missing');
+          assert.equal(instance.ownerId, memberId);
+          report.observedInstance = {
+            id: instance.id,
+            ownerId: instance.ownerId,
+            phase: instance.phase,
+            ready: instance.ready,
+            errorCode: /^[a-z][a-z0-9_.-]*$/.test(instance.error?.code ?? '')
+              ? instance.error.code
+              : undefined,
+          };
+          if (instance.ready) {
+            assertReady(instance, memberId);
+            button = '进入实例';
+          }
+        }
+        report.operation = 'open-instance-button';
         const open = page.waitForResponse(
           (r) =>
             r.request().method() === 'POST' &&
@@ -433,22 +489,26 @@ export function cloudReadyJourney(options, config, host) {
         );
         const [response] = await Promise.all([
           open,
-          page.getByRole('button', { name: '启动并进入', exact: true }).click(),
+          page.getByRole('button', { name: button, exact: true }).click(),
         ]);
         assert.equal(response.status(), 200);
         const trace = response.headers()['x-trace-id'];
         if (/^[0-9a-f]{32}$/.test(trace ?? '')) report.openTraceId = trace;
+        const matches = (item) =>
+          item.ownerId === memberId &&
+          (!config.existingCloud ||
+            item.id === config.existingCloud.instanceId);
+        report.operation = 'observe-instance-ready';
         const value = await poll(
           () => json(observer, '/api/workspace/v1/me/instances'),
           (result) =>
             result.items.some(
               (item) =>
-                item.ownerId === memberId &&
-                (item.ready || item.phase === 'failed'),
+                matches(item) && (item.ready || item.phase === 'failed'),
             ),
           125_000,
         );
-        instance = value.items.find((item) => item.ownerId === memberId);
+        instance = value.items.find(matches);
       } finally {
         await observer.close();
       }

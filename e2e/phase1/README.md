@@ -68,7 +68,11 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 
 配置须提供公开部署生成的 `access.json`（以 `access` 对象提供）和 `admin`；也可仅用 `composeDir` 指向同一部署的 compose 目录，自动读取 `var/access.json`、真实镜像元数据和应急 enrollment。Windows 可读 WSL UNC 路径，秘密不进入报告。
 
-`shared` 默认为 true：复用在线、可调度、Docker、template=real-dsh-e2e 的节点，不改节点。全新部署设 false：脚本要求零节点，经管理台签加入令牌写同一 composeDir 的既有 var/join/token，等待上线再设模板标签。只有不验节点的独立部署可设 `nodeEnrollment:false`，其结果不能冒节点加入通过。
+`shared` 默认为 true：复用在线、可调度、Docker、template=real-dsh-e2e 的节点，不改节点。全新部署设 false：脚本要求零节点，经管理台签加入令牌写同一 composeDir 的既有 var/join/token，等待上线再设模板标签。NAS可配置 `nodeTemplateLabel` 和既有私有 `nodeJoinTokenFile`，按公开 `join-node.sh` 交付令牌。只有不验节点的独立部署可设 `nodeEnrollment:false`，其结果不能冒节点加入通过。
+
+仅重跑③或其他后续步骤时，可设 `existingCloud: { "credentialsFile": "先前真实成员交接文件", "instanceId": "该成员已有的实例ID" }`。
+它在空Cookie上下文正常登录、核实际 `/me` subject 和实例归属，再点击真实“进入实例”或“启动并进入”，等待同一实例READY；不创建邀请或成员。
+已有成员模式禁止选择②，不能用一次普通复登冒充邀请接受。完整邀请流程的私有交接另含最近TOTP计数，减少立即续做时的重放。
 
 本机保留示例域名可设 `resolveLoopback:true`（或 AURIGA_PHASE1_RESOLVE_LOOPBACK=1）：只给本次 Chromium 设置 resolver 与禁用代理，不改系统 DNS、TLS 或信任；纯 IP 模式不使用此项。HTTP 健康探针仍使用实际可解析的地址（本机可给 healthChecks 配置回环运维端点），该设置不改变 Node 的 DNS。
 
