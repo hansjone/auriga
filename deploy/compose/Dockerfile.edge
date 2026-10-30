@@ -24,7 +24,7 @@ COPY web/portal/logout.html ./web/portal/
 COPY web/admin/src ./web/admin/src
 COPY web/admin/index.html web/admin/vite.config.ts ./web/admin/
 COPY web/panel/src ./web/panel/src
-COPY web/panel/vite.config.ts ./web/panel/
+COPY web/panel/vite.config.ts web/panel/tsconfig.json ./web/panel/
 ARG AURIGA_PANEL_VERSION=0.0.0
 RUN pnpm gen:api \
   && pnpm gen:steps \
