@@ -103,6 +103,7 @@ DSH 0.2.0-rc.2 还会通过 `connection.authorizeIndex` / `requestRejection` 检
 
 - Node：`GET /auriga/bootstrap`（经 DSH `connection.requestRejection`）返回已验签清单与同源 `panelBase=/panel/`。
 - 清单：JCS + Ed25519（`AURIGA_PANEL_KEYS_FILE` 或 `AURIGA_PANEL_KEYS`）；拒过期与版本回滚。
+- 公开部署的构建、独立签名钥、公钥下发与清单续签见 [面板部署](panel-deployment.md)。
 - 浏览器：`src/client.js` 挂 `sidebar.panellist` + `main`，SRI 加载 `<auriga-team-panel>`（ADR 0017）。
 
 ### SDK

@@ -79,6 +79,10 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	if opt.MetaDir == "" {
 		return Result{}, fmt.Errorf("renderer: MetaDir required")
 	}
+	panelRaw, err := panelKeys()
+	if err != nil {
+		return Result{}, err
+	}
 	if err := os.MkdirAll(opt.MetaDir, 0o700); err != nil {
 		return Result{}, err
 	}
@@ -133,6 +137,13 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	}
 
 	digestPaths := []string{pkgPath, cordisPath, keysPath, envPath, tokenPath}
+	if len(panelRaw) > 0 {
+		panelPath := filepath.Join(opt.MetaDir, "panel-keys.json")
+		if err := writeAtomic(panelPath, panelRaw, 0o644, nil, opt); err != nil {
+			return Result{}, err
+		}
+		digestPaths = append(digestPaths, panelPath)
+	}
 	if gwPath != "" {
 		digestPaths = append(digestPaths, gwPath)
 	}
@@ -241,6 +252,9 @@ func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 		"AURIGA_IDENTITY_KEYS_FILE=" + ContainerIdentityKeys,
 		"AURIGA_INSTANCE_TOKEN_FILE=" + ContainerInstanceToken,
 		"DSH_HOME=" + ContainerDSHHome,
+	}
+	if os.Getenv("AURIGA_AGENT_PANEL_KEYS_FILE") != "" {
+		lines = append(lines, "AURIGA_PANEL_KEYS_FILE="+ContainerPanelKeys)
 	}
 	if net := spec.GetNetwork(); net != nil {
 		if net.EgressProxy != "" {

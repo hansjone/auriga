@@ -273,6 +273,24 @@ services:
       retries: 30
       start_period: 60s
 
+  panel-prepare:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.edge
+      args:
+        AURIGA_PANEL_VERSION: ${AURIGA_PANEL_VERSION:-0.0.0}
+    user: '0:0'
+    cap_drop: [ALL]
+    # prepare may run as a non-root installer; only the key/output binds are visible.
+    cap_add: [DAC_OVERRIDE]
+    read_only: true
+    security_opt: ['no-new-privileges:true']
+    network_mode: none
+    entrypoint: ['/auriga-panel']
+    volumes:
+      - ./var/panel-signing.key:/run/panel.key:ro
+      - ./var/panel:/out
+
   edge:
     logging: *log-options
     build:
@@ -291,6 +309,8 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     depends_on:
+      panel-prepare:
+        condition: service_completed_successfully
       platform:
         condition: service_healthy
       nats:
@@ -307,6 +327,7 @@ services:
     volumes:
       - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/edge.config.json:/etc/auriga/edge.config.json:ro
+      - ./var/panel:/srv/auriga/panel:ro
       - ./var/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
       # Mount the directory: atomic replacement must expose the new inode per RPC.
       - internal-tokens:/run/auriga-internal:ro
@@ -405,6 +426,7 @@ services:
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_RUNTIME_PROOFS_DIR: /etc/auriga/runtime-proofs
       AURIGA_AGENT_DRIVERS: docker
+      AURIGA_AGENT_PANEL_KEYS_FILE: /etc/auriga/panel-keys.json
       # Same validated installation file as edge; internal alias and browser origin stay separate.
       AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
       DOCKER_HOST: unix:///var/run/docker.sock
@@ -415,6 +437,7 @@ services:
       - ${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}:${AURIGA_M2_DATA_ROOT:-/var/lib/auriga}
       - ./var/join:/run/auriga-join
       - ./var/identity-keys.json:/etc/auriga/identity-keys.json:ro
+      - ./var/panel-keys.json:/etc/auriga/panel-keys.json:ro
       - ./var/access.json:/etc/auriga/access.json:ro
       - ./var/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
       - ./var/runtime-proofs:/etc/auriga/runtime-proofs:ro
