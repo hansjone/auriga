@@ -1,2 +1,5 @@
 node_modules/
 output/
+.local/
+.phase1-desktop/
+phase1-report.json

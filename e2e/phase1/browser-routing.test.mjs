@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { launchBrowser } from './browser.mjs';
+import { launchBrowser } from './launch.mjs';
 
 test('loopback browser navigation, fetch and an anonymous page reach the configured authority', async () => {
   // Infrastructure-only fixture on a random port; not an Auriga login/READY proof.
