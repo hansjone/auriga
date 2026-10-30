@@ -182,7 +182,30 @@ JWKS 子集（含 `d` 私钥种子，选 `state=CURRENT`）：
 
 内存票据用完即删；限流 bucket 定期/满额淘汰，IPv6 按 /64 归并。`ReadTimeout` 不设（大上传）；实例反代无短 `ResponseHeaderTimeout`；1MiB body 上限仅 `/api/`。
 
-实例生产链路已接入 E2 的节点 mTLS 和 `auriga-routes`；冷启动页仍未实现。
+实例生产链路已接入 E2 的节点 mTLS 和 `auriga-routes`。
+
+### READY 与入口路由投影
+
+workspace 的 NodeControl 状态处理先提交实例 `ready/phase`；门户的实例卡片和云端登录页
+依据 workspace 返回的 `ready=true` 且 `running|pending_restart` 跳到 `/open/<id>`。
+`WorkspaceRoutes` 在独立 worker 中每秒将已提交状态对账到 NATS KV `auriga-routes`。
+两者之间存在数据库已 READY、KV 仍为 `starting` 的窗口。edge 的 `NATSRouteStore.Get`
+逐请求读取 KV revision；解码缓存会随 revision 更新，因此该窗口不靠清空 edge 缓存解决。
+
+`/open` 现在校验当前路由为 `running` 后才签发 nonce/票据。在 `starting` 时，接受
+HTML 的浏览器文档 GET 返回 HTTP 200 准备页，每秒刷新同一个 URL；每次重新校验会话、
+所有权、租户及实时 KV，只有读到 `running` 才跳转。页面使用 `Cache-Control: no-store`，
+不签发票据、不向实例发送请求，不根据等待时长放行。刷新不会主动创建或启动实例。
+若投影始终不追上，页面持续提示准备中并提供手动重试。
+
+实例根页的文档 GET 也处理 `starting`，覆盖票据签发与首次根页访问之间状态改变的窗口。
+其他实例路径、API/fetch、写请求及 WebSocket 保留原 Problem 503；`starting` 响应带
+`Retry-After: 1`。`stopped/failed` 仍返回 `edge.instance_not_running`；路由缺失、
+KV 故障、未登录、会话撤销、跨租户或非主人仍走原拒绝路径，不能借准备页进入实例。
+
+确定性回归见 `instance_ready_test.go`：测试显式将内存路由从 `starting` 推进到
+`running`，验证等待期间无票据/反代、投影追上后的票据兑换及首次根页成功，并覆盖
+域名、路径模式和真实 IP Access socket。该证据不等于真实数据库/NATS/DSH 部署验收。
 
 ## TLS
 

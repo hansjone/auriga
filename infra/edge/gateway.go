@@ -630,6 +630,12 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
 	}
+	// Workspace READY is committed before its asynchronous route projection.
+	// Do not send the browser to an instance which edge cannot route yet.
+	if route.State != "running" {
+		instanceNotRunning(w, r, route.State, rid, true)
+		return
+	}
 	if sess, err = g.touchBrowserSession(r.Context(), getCookie(r, cookieName(g.requestSecureCookies(r), sessionCookieBase("portal"))), sess); err != nil {
 		status := http.StatusServiceUnavailable
 		code := "common.unavailable"
@@ -734,7 +740,7 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 	}
 
 	if route.State != "running" {
-		writeProblem(w, problem(http.StatusServiceUnavailable, "edge.instance_not_running", "Service Unavailable", "instance state="+route.State, rid))
+		instanceNotRunning(w, r, route.State, rid, instPath == "/")
 		return
 	}
 
