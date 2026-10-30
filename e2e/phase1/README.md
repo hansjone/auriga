@@ -54,7 +54,7 @@ HTTP 健康/中转站/日志探针发 W3C `traceparent`；浏览器正常页面�
 }
 ```
 
-省略 `browser` 使用 Playwright 安装的完整 Chromium headless 通道（不使用独立 Headless Shell）。管理员使用 `emergency` 身份源；WebAuthn、外部跳转、二维码暂不支持。邀请注册选 `team-account`；新用户名、密码和首个 TOTP 在本次运行内生成。重新登录使用全新上下文，核相同账号 ID，不复用注册会话。
+省略 `browser` 使用 Playwright 安装的完整 Chromium headless 通道（不使用独立 Headless Shell）。管理员默认使用 `emergency` 身份源；正常管理员可明确配置 `admin.providerType: "team-account"`，按真实口令及 TOTP 表单登录。WebAuthn、外部跳转、二维码暂不支持。NAS 的应急账号仍限真实回环，先按[公开首次管理员流程](../../docs/dev/nas.md#首次正常管理员真实回环)建正常账号再验收。邀请注册选 `team-account`；新用户名、密码和首个 TOTP 在本次运行内生成。重新登录使用全新上下文，核相同账号 ID，不复用注册会话。
 
 ① 默认仅探测公开 IAM 身份源；这不足以证明所有容器 healthy，所以标 SKIP 并列出已通过子检查。部署操作者需在 `healthChecks` 列全本次 compose 服务的实际健康 URL，包括数据库/NATS/节点等可通过部署的运维健康入口或汇总端点观察到的状态；确认清单完整后才设 `healthInventoryComplete: true`。不要用静态首页替代服务健康。支持 `kind: "spring"`（JSON `status=UP`）、`providers`（`items` 数组）及 `http`（HTTP 200 且可解析 JSON）。URL 可相对门户，也可为操作者可访问的完整运维地址。任何检查失败即 FAIL。
 

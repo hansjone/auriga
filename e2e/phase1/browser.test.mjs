@@ -87,8 +87,12 @@ function render() {
 })();
 </script>`;
 
-for (const mode of ['ip', 'domain']) {
-  test(`真实Playwright表单：${mode}模式邀请消费、TOTP登记、新上下文重新登录`, async (t) => {
+for (const [mode, adminConnector] of [
+  ['ip', 'emergency'],
+  ['domain', 'emergency'],
+  ['ip', 'team-account'],
+]) {
+  test(`真实Playwright表单：${mode}模式 ${adminConnector} 管理员邀请消费、TOTP登记、新上下文重新登录`, async (t) => {
     const adminSecret = secret();
     const adminPassword = randomBytes(20).toString('base64url');
     const sessions = new Map();
@@ -128,14 +132,16 @@ for (const mode of ['ip', 'domain']) {
               id: admin
                 ? '00000000-0000-0000-0000-000000000001'
                 : '00000000-0000-0000-0000-000000000002',
-              connectorType: admin ? 'emergency' : 'team-account',
+              connectorType: admin ? adminConnector : 'team-account',
             },
           ],
         });
       if (path.endsWith('/login/transactions')) {
         const id = randomBytes(8).toString('hex');
         const formId = admin
-          ? 'emergency'
+          ? adminConnector === 'emergency'
+            ? 'emergency'
+            : 'password'
           : body.invitationCode
             ? 'register'
             : 'password';
@@ -145,7 +151,7 @@ for (const mode of ['ip', 'domain']) {
           fields: [
             'username',
             'password',
-            ...(admin ? ['otp'] : []),
+            ...(admin && adminConnector === 'emergency' ? ['otp'] : []),
             ...(formId === 'register' ? ['displayName'] : []),
           ].map((name) => ({ name, kind: 'text', required: true })),
         };
@@ -156,8 +162,21 @@ for (const mode of ['ip', 'domain']) {
       if (path.endsWith('/advance')) {
         const tx = transactions.get(path.split('/').at(-2));
         if (admin) {
-          assert.equal(body.values.password, adminPassword);
-          assert.equal(body.values.otp, totp(adminSecret));
+          if (adminConnector === 'team-account' && body.formId === 'password') {
+            assert.equal(body.values.password, adminPassword);
+            tx.step = {
+              type: 'form',
+              formId: 'totp',
+              fields: [{ name: 'code', kind: 'otp', required: true }],
+            };
+            return json(tx);
+          }
+          if (adminConnector === 'emergency')
+            assert.equal(body.values.password, adminPassword);
+          assert.equal(
+            body.values[adminConnector === 'emergency' ? 'otp' : 'code'],
+            totp(adminSecret),
+          );
         } else if (body.formId === 'register') {
           registered = { ...body.values, secret: secret() };
           tx.step = {
@@ -286,6 +305,7 @@ for (const mode of ['ip', 'domain']) {
       },
       admin: {
         url: adminUrl,
+        providerType: adminConnector,
         username: 'fixture-admin',
         password: adminPassword,
         totpSecret: adminSecret,

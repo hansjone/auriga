@@ -216,7 +216,12 @@ export function cloudReadyJourney(options, config, host) {
     adminPage.setDefaultTimeout(20_000);
     await step('admin-login', async () => {
       await adminPage.goto(admin + '/login');
-      await provider(adminPage, 'emergency');
+      const type = enrollment.providerType ?? 'emergency';
+      assert.ok(
+        ['emergency', 'team-account'].includes(type),
+        'unsupported admin provider type',
+      );
+      await provider(adminPage, type);
       await fillLogin(adminPage, enrollment);
       await adminPage.waitForURL(admin + '/overview');
       const me = await json(adminPage, '/api/iam/v1/me');
