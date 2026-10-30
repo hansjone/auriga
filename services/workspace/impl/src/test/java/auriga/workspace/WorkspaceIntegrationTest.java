@@ -46,6 +46,7 @@ class WorkspaceIntegrationTest {
   final UUID tenant = UuidV7.next(), owner = UuidV7.next();
   final MutableClock clock = new MutableClock();
   WorkspaceService service;
+  WorkspaceCrypto managedCrypto;
   NodeEnrollment enrollment;
   NodeSessions sessions;
   NodeCa ca;
@@ -138,12 +139,13 @@ class WorkspaceIntegrationTest {
             return policy;
           }
         };
+    managedCrypto = new WorkspaceCrypto(WorkspaceCrypto.random(32));
     service =
         new WorkspaceService(
             store,
             inputs,
             new WorkspaceTemplates(List.of(template)),
-            new WorkspaceCrypto(WorkspaceCrypto.random(32)),
+            managedCrypto,
             new OutboxEventPublisher(
                 store.jdbc,
                 "workspace",
@@ -160,6 +162,110 @@ class WorkspaceIntegrationTest {
   @AfterEach
   void close() {
     sessions.close();
+  }
+
+  @Test
+  void managedCredentialLifecycleIsFencedAndMaterialIsSealed() throws Exception {
+    var joined = enrollment.join(joinRequest(token().token(), TestPki.key()));
+    UUID node = UUID.fromString(joined.getNodeId());
+    var devices = org.mockito.Mockito.mock(auriga.iam.api.ManagedDeviceCredentials.class);
+    var attempts = new java.util.concurrent.atomic.AtomicInteger();
+    org.mockito.Mockito.when(devices.issue(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            invocation -> {
+              assertFalse(
+                  org.springframework.transaction.support.TransactionSynchronizationManager
+                      .isActualTransactionActive());
+              auriga.contracts.iam.v1.IssueManagedDeviceRequest request = invocation.getArgument(0);
+              assertEquals(owner.toString(), request.getOwnerId());
+              if (attempts.getAndIncrement() == 0)
+                throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+              return auriga.contracts.iam.v1.IssueManagedDeviceResponse.newBuilder()
+                  .setDeviceId(UuidV7.next().toString())
+                  .setCredential("a".repeat(43))
+                  .setExpiresAt(NodeEnrollment.timestamp(clock.instant().plusSeconds(3600)))
+                  .build();
+            });
+    var network =
+        new WorkspaceManagedNetwork(
+            service, managedCrypto, devices, WorkspaceService.JSON.createObjectNode());
+    var bindings = new WorkspaceManagedBindings(store, inputs);
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID id = (UUID) service.open(owner).instance().get("id");
+          store.tx(
+              () ->
+                  store.jdbc.update(
+                      "UPDATE instance SET node_id=?,managed_retry_at=? WHERE tenant_id=? AND id=?",
+                      node,
+                      WorkspaceStore.time(clock.instant()),
+                      tenant,
+                      id));
+          var request =
+              auriga.contracts.workspace.v1.GetManagedInstanceBindingRequest.newBuilder()
+                  .setTenantId(tenant.toString())
+                  .setInstanceId(id.toString())
+                  .build();
+          assertTrue(bindings.get(request).getActive());
+          network.tickTenant();
+          assertNull(store.tx(() -> store.instance(id)).get("managed_credential"));
+          network.tickTenant();
+          assertEquals(1, attempts.get());
+          clock.now = clock.now.plusSeconds(31);
+          network.tickTenant();
+          var row = store.tx(() -> store.instance(id));
+          assertNotNull(row.get("managed_credential"));
+          assertTrue(WorkspaceService.spec(row).getSecrets().hasDeviceCredential());
+          assertFalse(
+              new String(
+                      WorkspaceService.spec(row).toByteArray(),
+                      java.nio.charset.StandardCharsets.ISO_8859_1)
+                  .contains("a".repeat(43)));
+          long before = bindings.get(request).getCredentialVersion();
+          service.operate(id, actor(), "restart");
+          assertTrue(bindings.get(request).getCredentialVersion() > before);
+          assertNull(store.tx(() -> store.instance(id)).get("managed_credential"));
+          network.reconcile(store.tx(() -> store.instance(id)));
+          service.operate(id, actor(), "stop");
+          assertFalse(bindings.get(request).getActive());
+          assertFalse(
+              WorkspaceService.spec(store.tx(() -> store.instance(id)))
+                  .getSecrets()
+                  .hasDeviceCredential());
+          network.reconcile(store.tx(() -> store.instance(id)));
+          org.mockito.Mockito.verify(devices)
+              .revoke(
+                  org.mockito.ArgumentMatchers.argThat(
+                      r -> r.getInstanceId().equals(id.toString())));
+          memberStatus = MemberStatus.MEMBER_STATUS_OFFBOARDED;
+          assertFalse(bindings.get(request).getActive());
+          memberStatus = MemberStatus.MEMBER_STATUS_ACTIVE;
+          service.operate(id, actor(), "start");
+          network.reconcile(store.tx(() -> store.instance(id)));
+          new WorkspaceAdmin(service, inputs).delete(id, false, owner);
+          assertFalse(bindings.get(request).getActive());
+          network.reconcile(
+              store.tx(
+                  () ->
+                      store.one("SELECT * FROM instance WHERE tenant_id=? AND id=?", tenant, id)));
+          assertNull(
+              store
+                  .tx(
+                      () ->
+                          store.one(
+                              "SELECT * FROM instance WHERE tenant_id=? AND id=?", tenant, id))
+                  .get("managed_credential"));
+          assertEquals(
+              "common.forbidden",
+              assertThrows(
+                      AurigaException.class,
+                      () ->
+                          bindings.get(
+                              request.toBuilder().setTenantId(UuidV7.next().toString()).build()))
+                  .errorCode()
+                  .code());
+        });
   }
 
   AurigaPrincipal actor() {

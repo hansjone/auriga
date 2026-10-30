@@ -21,6 +21,11 @@ public final class SessionManager implements Sessions {
   private final Clock clock;
   private final EventPublisher events;
   private final AuditLogger audit;
+  private java.util.function.Predicate<ObjectNode> managedValidator = row -> false;
+
+  public void managedValidator(java.util.function.Predicate<ObjectNode> validator) {
+    managedValidator = Objects.requireNonNull(validator);
+  }
 
   public SessionManager(
       IamStore store,
@@ -141,7 +146,9 @@ public final class SessionManager implements Sessions {
       clearInvalid(row);
       return null;
     }
-    return row.path("audience").asString().equals(audience) ? row : null;
+    return !row.has("managedInstance") && row.path("audience").asString().equals(audience)
+        ? row
+        : null;
   }
 
   public ObjectNode activeById(String id) {
@@ -169,6 +176,7 @@ public final class SessionManager implements Sessions {
         || !clock.instant().isBefore(Instant.parse(row.path("expiresAt").asString()))
         || !clock.instant().isBefore(Instant.parse(row.path("idleExpiresAt").asString())))
       return false;
+    if (row.has("managedInstance") && !managedValidator.test(row)) return false;
     ObjectNode account = store.get("account", row.path("accountId").asString(), false);
     return account != null && account.path("status").asString().equals("active");
   }
@@ -203,7 +211,7 @@ public final class SessionManager implements Sessions {
           for (ObjectNode candidate : store.all("session"))
             if (candidate.path("accountId").asString().equals(accountId)) {
               ObjectNode row = store.byId("session", candidate.path("id").asString(), true);
-              if (!valid(row)) continue;
+              if (row.has("managedInstance") || !valid(row)) continue;
               row.put("accessTokenExpiresAt", Instant.EPOCH.toString());
               store.save("session", row);
               cache(row);

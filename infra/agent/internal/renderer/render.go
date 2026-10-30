@@ -21,14 +21,15 @@ import (
 
 // Container paths for files mounted read-only at /run/auriga.
 const (
-	ContainerMetaRoot       = "/run/auriga"
-	ContainerIdentityKeys   = ContainerMetaRoot + "/identity-keys.json"
-	ContainerInstanceToken  = ContainerMetaRoot + "/instance.token"
-	ContainerAIGatewayToken = ContainerMetaRoot + "/ai-gateway.token"
-	ContainerEnvFile        = ContainerMetaRoot + "/env"
-	ContainerCordisPatch    = ContainerMetaRoot + "/cordis.patch.yml"
-	ContainerPackageJSON    = ContainerMetaRoot + "/package.json"
-	ContainerDSHHome        = "/home/dsh/.dsh"
+	ContainerMetaRoot         = "/run/auriga"
+	ContainerIdentityKeys     = ContainerMetaRoot + "/identity-keys.json"
+	ContainerInstanceToken    = ContainerMetaRoot + "/instance.token"
+	ContainerAIGatewayToken   = ContainerMetaRoot + "/ai-gateway.token"
+	ContainerDeviceCredential = ContainerMetaRoot + "/device-credential.json"
+	ContainerEnvFile          = ContainerMetaRoot + "/env"
+	ContainerCordisPatch      = ContainerMetaRoot + "/cordis.patch.yml"
+	ContainerPackageJSON      = ContainerMetaRoot + "/package.json"
+	ContainerDSHHome          = "/home/dsh/.dsh"
 )
 
 // Result is the rendered digest and key file paths (never log secret contents).
@@ -95,6 +96,18 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	deviceCredential, err := openSecret(opt.SealingPrivate, spec, "device_credential", spec.GetSecrets().GetDeviceCredential())
+	if err != nil {
+		return Result{}, err
+	}
+	devicePath := filepath.Join(opt.MetaDir, "device-credential.json")
+	if len(deviceCredential) > 0 {
+		if err := writeAtomic(devicePath, deviceCredential, 0o600, restrict, opt); err != nil {
+			return Result{}, err
+		}
+	} else if err := os.Remove(devicePath); err != nil && !os.IsNotExist(err) {
+		return Result{}, err
+	}
 
 	pkgPath := filepath.Join(opt.MetaDir, "package.json")
 	if err := writeAtomic(pkgPath, buildPackageJSON(spec), 0o644, nil, opt); err != nil {
@@ -133,6 +146,9 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 	}
 
 	digestPaths := []string{pkgPath, cordisPath, keysPath, envPath, tokenPath}
+	if len(deviceCredential) > 0 {
+		digestPaths = append(digestPaths, devicePath)
+	}
 	if gwPath != "" {
 		digestPaths = append(digestPaths, gwPath)
 	}
@@ -240,6 +256,7 @@ func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 		"AURIGA_PLATFORM_URL=" + originURL(opt.Access.InstanceControl().Origin),
 		"AURIGA_IDENTITY_KEYS_FILE=" + ContainerIdentityKeys,
 		"AURIGA_INSTANCE_TOKEN_FILE=" + ContainerInstanceToken,
+		"AURIGA_DEVICE_CREDENTIAL_FILE=" + ContainerDeviceCredential,
 		"DSH_HOME=" + ContainerDSHHome,
 	}
 	if net := spec.GetNetwork(); net != nil {

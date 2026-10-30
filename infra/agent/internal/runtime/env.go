@@ -13,18 +13,19 @@ import (
 // instance (contracts/plugin/README.md §3). Values come from the renderer,
 // never from InstanceSpec.Profile.Env.
 var platformEnvKeys = map[string]struct{}{
-	"AURIGA_MODE":                {},
-	"AURIGA_PROTOCOL":            {},
-	"AURIGA_INSTANCE_ID":         {},
-	"AURIGA_OWNER_ID":            {},
-	"AURIGA_TENANT_ID":           {},
-	"AURIGA_PLATFORM_URL":        {},
-	"AURIGA_IDENTITY_KEYS_FILE":  {},
-	"AURIGA_INSTANCE_TOKEN_FILE": {},
-	"DSH_HOME":                   {},
-	"HTTPS_PROXY":                {},
-	"HTTP_PROXY":                 {},
-	"NO_PROXY":                   {},
+	"AURIGA_MODE":                   {},
+	"AURIGA_PROTOCOL":               {},
+	"AURIGA_INSTANCE_ID":            {},
+	"AURIGA_OWNER_ID":               {},
+	"AURIGA_TENANT_ID":              {},
+	"AURIGA_PLATFORM_URL":           {},
+	"AURIGA_IDENTITY_KEYS_FILE":     {},
+	"AURIGA_INSTANCE_TOKEN_FILE":    {},
+	"AURIGA_DEVICE_CREDENTIAL_FILE": {},
+	"DSH_HOME":                      {},
+	"HTTPS_PROXY":                   {},
+	"HTTP_PROXY":                    {},
+	"NO_PROXY":                      {},
 }
 
 // DefaultExtraEnvKeys are the only Profile.Env keys a spec may set unless the

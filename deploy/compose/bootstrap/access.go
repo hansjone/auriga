@@ -118,7 +118,7 @@ func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet
 		for _, name := range collabLeaves {
 			set.PublicFiles = append(set.PublicFiles, "collab-installation/"+name)
 		}
-		set.PublicFiles = append(set.PublicFiles, "network-platform/collab.secret", "pki/edge-collab.crt", "pki/edge-collab.key")
+		set.PublicFiles = append(set.PublicFiles, "network-platform/collab.secret", "network-platform/managed-network.json", "pki/edge-collab.crt", "pki/edge-collab.key")
 	} else if !os.IsNotExist(err) {
 		return set, err
 	}

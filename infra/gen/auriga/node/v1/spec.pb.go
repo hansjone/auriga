@@ -1159,8 +1159,10 @@ type Secrets struct {
 	IdentityKeys []*IdentityPublicKey `protobuf:"bytes,2,rep,name=identity_keys,json=identityKeys,proto3" json:"identity_keys,omitempty"`
 	// ai-gateway 令牌（团队 MCP、团队模型用），用节点封装公钥加密。
 	AiGatewayToken *SealedSecret `protobuf:"bytes,3,opt,name=ai_gateway_token,json=aiGatewayToken,proto3" json:"ai_gateway_token,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Managed network device credential JSON; never the instance control token.
+	DeviceCredential *SealedSecret `protobuf:"bytes,4,opt,name=device_credential,json=deviceCredential,proto3" json:"device_credential,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Secrets) Reset() {
@@ -1210,6 +1212,13 @@ func (x *Secrets) GetIdentityKeys() []*IdentityPublicKey {
 func (x *Secrets) GetAiGatewayToken() *SealedSecret {
 	if x != nil {
 		return x.AiGatewayToken
+	}
+	return nil
+}
+
+func (x *Secrets) GetDeviceCredential() *SealedSecret {
+	if x != nil {
+		return x.DeviceCredential
 	}
 	return nil
 }
@@ -1631,11 +1640,12 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\fegress_proxy\x18\x01 \x01(\tR\vegressProxy\x12\x14\n" +
 	"\x05allow\x18\x02 \x03(\tR\x05allow\"0\n" +
 	"\aStorage\x12%\n" +
-	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\"\xde\x01\n" +
+	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\"\xa9\x02\n" +
 	"\aSecrets\x12C\n" +
 	"\x0einstance_token\x18\x01 \x01(\v2\x1c.auriga.node.v1.SealedSecretR\rinstanceToken\x12F\n" +
 	"\ridentity_keys\x18\x02 \x03(\v2!.auriga.node.v1.IdentityPublicKeyR\fidentityKeys\x12F\n" +
-	"\x10ai_gateway_token\x18\x03 \x01(\v2\x1c.auriga.node.v1.SealedSecretR\x0eaiGatewayToken\"i\n" +
+	"\x10ai_gateway_token\x18\x03 \x01(\v2\x1c.auriga.node.v1.SealedSecretR\x0eaiGatewayToken\x12I\n" +
+	"\x11device_credential\x18\x04 \x01(\v2\x1c.auriga.node.v1.SealedSecretR\x10deviceCredential\"i\n" +
 	"\fSealedSecret\x12\x10\n" +
 	"\x03alg\x18\x01 \x01(\tR\x03alg\x12\x15\n" +
 	"\x06key_id\x18\x02 \x01(\tR\x05keyId\x12\x10\n" +
@@ -1759,17 +1769,18 @@ var file_auriga_node_v1_spec_proto_depIdxs = []int32{
 	16, // 24: auriga.node.v1.Secrets.instance_token:type_name -> auriga.node.v1.SealedSecret
 	17, // 25: auriga.node.v1.Secrets.identity_keys:type_name -> auriga.node.v1.IdentityPublicKey
 	16, // 26: auriga.node.v1.Secrets.ai_gateway_token:type_name -> auriga.node.v1.SealedSecret
-	28, // 27: auriga.node.v1.IdentityPublicKey.not_before:type_name -> google.protobuf.Timestamp
-	28, // 28: auriga.node.v1.IdentityPublicKey.not_after:type_name -> google.protobuf.Timestamp
-	28, // 29: auriga.node.v1.ArtifactStatement.issued_at:type_name -> google.protobuf.Timestamp
-	18, // 30: auriga.node.v1.SignedArtifact.statement:type_name -> auriga.node.v1.ArtifactStatement
-	10, // 31: auriga.node.v1.Profile.McpServersEntry.value:type_name -> auriga.node.v1.McpServer
-	11, // 32: auriga.node.v1.Profile.ModelProvidersEntry.value:type_name -> auriga.node.v1.ModelProvider
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	16, // 27: auriga.node.v1.Secrets.device_credential:type_name -> auriga.node.v1.SealedSecret
+	28, // 28: auriga.node.v1.IdentityPublicKey.not_before:type_name -> google.protobuf.Timestamp
+	28, // 29: auriga.node.v1.IdentityPublicKey.not_after:type_name -> google.protobuf.Timestamp
+	28, // 30: auriga.node.v1.ArtifactStatement.issued_at:type_name -> google.protobuf.Timestamp
+	18, // 31: auriga.node.v1.SignedArtifact.statement:type_name -> auriga.node.v1.ArtifactStatement
+	10, // 32: auriga.node.v1.Profile.McpServersEntry.value:type_name -> auriga.node.v1.McpServer
+	11, // 33: auriga.node.v1.Profile.ModelProvidersEntry.value:type_name -> auriga.node.v1.ModelProvider
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_auriga_node_v1_spec_proto_init() }

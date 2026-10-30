@@ -308,6 +308,14 @@ func writeCollabFrom(out, base string, c *collabInput, issuer string) error {
 	defer clear(gateway)
 	var team strings.Builder
 	team.WriteString(nativeClientProperties)
+	managedURL := strings.TrimSuffix(issuer, "/")
+	writeJSON(filepath.Join(out, "network-platform", "managed-network.json"), map[string]any{
+		"platformOrigin": managedURL, "issuer": managedURL,
+		"network": map[string]any{"realm": c.Realm,
+			"wssUrl": strings.Replace(managedURL, "https://", "wss://", 1) + "/net/v1/ws",
+			"roots":  []map[string]string{{"kid": c.RootKid, "public_key_spki": base64.RawURLEncoding.EncodeToString(c.files["root.der"])}}},
+	}, 0600)
+	team.WriteString("auriga.workspace.managed-network-installation-file=/etc/auriga/network/managed-network.json\n")
 	team.WriteString("auriga.platform.team-token-export.enabled=true\nauriga.iam.ai-gateway-token-export.enabled=false\nauriga.iam.network.server-audiences[0]=auriga-network\nauriga.iam.network.client-server-audience=auriga-network\n")
 	for _, service := range []string{"ai-gateway", "collab"} {
 		s, leaf, token, gid := gateway, "gateway.secret", "/run/auriga-network-token/gateway/service.jwt", 65533

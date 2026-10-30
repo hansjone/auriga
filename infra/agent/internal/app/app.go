@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -161,6 +162,10 @@ func runAgent(args []string, logs io.Writer) error {
 		dockerCfg.EdgeContainer = surface.EdgeContainer
 		if surface.EdgeContainer != "" {
 			dockerCfg.PlatformHost = surface.Access.InstanceControl().DnsAlias
+			portal := surface.Access.PortalOrigin()
+			if portal.Scheme == "https" && net.ParseIP(portal.Host) == nil {
+				dockerCfg.PortalHost = portal.Host
+			}
 		}
 	}
 	inner, err := runtime.SelectDriver(driverName, dockerCfg)

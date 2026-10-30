@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package auriga.workspace.v1;
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1;workspacev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.workspace.v1";
+
+// Only svc:iam, internal JWT + delegated tenant + mTLS. Read on every online check.
+service ManagedInstanceBindingService {
+  rpc GetManagedInstanceBinding(GetManagedInstanceBindingRequest) returns (GetManagedInstanceBindingResponse);
+}
+
+message GetManagedInstanceBindingRequest {
+  string tenant_id = 1;
+  string instance_id = 2;
+}
+
+message GetManagedInstanceBindingResponse {
+  string tenant_id = 1;
+  string instance_id = 2;
+  string owner_id = 3;
+  bool active = 4;
+  uint64 credential_version = 5;
+}

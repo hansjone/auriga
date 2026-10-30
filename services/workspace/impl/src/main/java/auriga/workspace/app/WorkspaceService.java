@@ -364,6 +364,7 @@ public final class WorkspaceService {
 
   public void saveSpec(Map<String, Object> row, InstanceSpec next) {
     var previous = spec(row);
+    if (previous.getDesired() != next.getDesired()) rotateManagedCredential(row);
     boolean restart =
         (boolean) row.get("restart_pending")
             || ("running".equals(row.get("phase"))
@@ -387,6 +388,23 @@ public final class WorkspaceService {
                               next.getGeneration(),
                               token)))
               .build();
+      var current = store.instance((UUID) row.get("id"));
+      var secrets = next.getSecrets().toBuilder().clearDeviceCredential();
+      if (current.get("managed_credential") != null
+          && next.getDesired() == DesiredState.DESIRED_STATE_RUNNING) {
+        byte[] material =
+            crypto.decrypt(
+                (byte[]) current.get("managed_credential"),
+                store.tenant() + "/managed/" + row.get("id"));
+        secrets.setDeviceCredential(
+            WorkspaceCrypto.seal(
+                (byte[]) node.get("sealing_key"),
+                next.getInstanceId(),
+                "device_credential",
+                next.getGeneration(),
+                material));
+      }
+      next = next.toBuilder().setSecrets(secrets).build();
     }
     store.jdbc.update(
         "UPDATE instance SET spec=?,ready=CASE WHEN generation<>? THEN false ELSE ready END,generation=?,restart_pending=?,updated_at=? WHERE tenant_id=? AND id=?",
@@ -405,6 +423,14 @@ public final class WorkspaceService {
         next.getGeneration(),
         next.toByteArray(),
         time(clock.instant()));
+  }
+
+  private void rotateManagedCredential(Map<String, Object> row) {
+    store.jdbc.update(
+        "UPDATE instance SET managed_credential_version=managed_credential_version+1,managed_credential=NULL,managed_retry_at=? WHERE tenant_id=? AND id=?",
+        time(clock.instant()),
+        store.tenant(),
+        row.get("id"));
   }
 
   private void desire(Map<String, Object> row, boolean running, String reason, int maximum) {
@@ -483,6 +509,13 @@ public final class WorkspaceService {
                 id,
                 generation)
             > 0) return;
+    if (store.jdbc.queryForObject(
+            "SELECT count(*) FROM workspace_job WHERE tenant_id=? AND instance_id=? AND kind='restart' AND NOT done",
+            Long.class,
+            store.tenant(),
+            id)
+        > 0) return;
+    rotateManagedCredential(store.instance(id));
     Command command =
         Command.newBuilder()
             .setCommandId(UuidV7.next(clock).toString())

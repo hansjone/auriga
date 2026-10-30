@@ -20,7 +20,7 @@ const nativeClientProperties = "auriga.iam.clients[0].id=auriga-dsh\n" +
 
 func composeRecipe(https bool) string {
 	if https {
-		return "network-wss-v3-https-native-client"
+		return "network-wss-v4-managed-device"
 	}
 	return "network-wss-v2-https"
 }

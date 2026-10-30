@@ -331,6 +331,62 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamManagedDevices iamManagedDevices(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Secrets secrets,
+      Clock clock,
+      org.springframework.beans.factory.ObjectProvider<auriga.workspace.api.ManagedInstanceBindings>
+          bindings,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    var managed =
+        new IamManagedDevices(
+            store,
+            sessions,
+            tokens,
+            secrets,
+            request -> bindings.getObject().get(request),
+            request -> authorization.getObject().getEffectivePermissions(request),
+            clock);
+    sessions.managedValidator(managed::validSession);
+    return managed;
+  }
+
+  @Bean
+  IamGrpcManagedDevices iamGrpcManagedDevices(
+      IamManagedDevices devices, IamGrpcSessions transportGuard) {
+    return new IamGrpcManagedDevices(devices);
+  }
+
+  @Bean(destroyMethod = "shutdownNow")
+  @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.remote.workspace.target")
+  io.grpc.ManagedChannel iamWorkspaceChannel(
+      Environment env, auriga.common.grpc.AurigaClientInterceptor interceptor) {
+    return auriga.common.grpc.GrpcChannels.openTls(
+        auriga.common.grpc.GrpcChannels.target(env, "workspace"),
+        Path.of(env.getRequiredProperty("auriga.iam.workspace-client-certificate-file")).toFile(),
+        Path.of(env.getRequiredProperty("auriga.iam.workspace-client-key-file")).toFile(),
+        Path.of(env.getRequiredProperty("auriga.iam.workspace-ca-file")).toFile(),
+        interceptor);
+  }
+
+  @Bean
+  @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.remote.workspace.target")
+  auriga.workspace.api.ManagedInstanceBindings remoteManagedInstanceBindings(
+      @org.springframework.beans.factory.annotation.Qualifier("iamWorkspaceChannel")
+          io.grpc.ManagedChannel channel) {
+    return request ->
+        auriga.common.grpc.GrpcErrors.call(
+            () ->
+                auriga.contracts.workspace.v1.ManagedInstanceBindingServiceGrpc.newBlockingStub(
+                        channel)
+                    .getManagedInstanceBinding(request));
+  }
+
+  @Bean
   IamInstanceAiTokens iamInstanceAiTokens(
       TokenService tokens,
       IamAccounts accounts,
@@ -491,21 +547,25 @@ public class IamRuntimeConfiguration {
       TokenService tokens,
       Clock clock,
       Environment env,
+      IamManagedDevices managedDevices,
       org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
-    return new OAuthProvider(
-        store,
-        sessions,
-        tokens,
-        clock,
-        Binder.get(env)
-            .bind("auriga.iam.clients", Bindable.listOf(OAuthClient.class))
-            .orElse(List.of()),
-        authorization.getIfAvailable(
-            () ->
-                request -> {
-                  throw new auriga.common.error.AurigaException(
-                      auriga.common.error.CommonErrors.UNAVAILABLE);
-                }));
+    var oauth =
+        new OAuthProvider(
+            store,
+            sessions,
+            tokens,
+            clock,
+            Binder.get(env)
+                .bind("auriga.iam.clients", Bindable.listOf(OAuthClient.class))
+                .orElse(List.of()),
+            authorization.getIfAvailable(
+                () ->
+                    request -> {
+                      throw new auriga.common.error.AurigaException(
+                          auriga.common.error.CommonErrors.UNAVAILABLE);
+                    }));
+    oauth.managedDevices(managedDevices);
+    return oauth;
   }
 
   @Bean
