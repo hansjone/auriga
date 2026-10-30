@@ -7,10 +7,18 @@ Deterministic instance config into `meta/` (package.json, cordis.patch.yml, env,
 The managed plugin row uses both `id: auriga-dsh` and `name: auriga-dsh`.
 DSH's browser collector accepts package-root names; the Node subpath
 `auriga-dsh/plugin` does not discover the package's browser half. This requires
-the companion PACKLINK1 packaging candidate, whose root export is the Cordis
-host entry `src/plugin.js` and whose library export is `auriga-dsh/library`.
+the package root export to be the Cordis host entry `src/plugin.js`, as declared
+by the current `clients/dsh-plugin/package.json`; the library export is
+`auriga-dsh/library`.
 The renderer change alone does not update an installed package or validate a
-managed image/deployment; the companion package must be integrated first.
+managed image/deployment; the installed image must actually contain that package.
+
+The opt-in `TestCordisRealDSHBrowserCollector` probes the actual locked DSH
+collector with a rendered row and the old-name control. Both managed Node
+entries activate; only the package-root row contributes `auriga-dsh` and its
+`src/client.js` to the browser graph. See
+[`docs/dev/pr118-dsh-collector.md`](../../../../docs/dev/pr118-dsh-collector.md)
+for reproduction and the limits of this module-level evidence.
 
 `Options.Access` is the existing `deploymentconfig.Load` result from the agent's
 `AURIGA_DEPLOYMENT_ACCESS_FILE`. A missing/zero configuration fails rendering.
