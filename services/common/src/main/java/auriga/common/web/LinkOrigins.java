@@ -8,7 +8,9 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.security.web.util.matcher.IpAddressMatcher;
 
-/** Request-scoped presentation only; never an authentication, issuer or CSRF authority. */
+/**
+ * Approved request origins for links and same-root issuers; never a principal or CSRF authority.
+ */
 public final class LinkOrigins implements Filter {
   private static final ScopedValue<String> CURRENT = ScopedValue.newInstance();
   private final Set<String> allowed;
@@ -22,6 +24,16 @@ public final class LinkOrigins implements Filter {
 
   public static String currentOr(String defaultOrigin) {
     return CURRENT.isBound() && !CURRENT.get().isEmpty() ? CURRENT.get() : defaultOrigin;
+  }
+
+  /**
+   * Installation configuration only. Issuer aliases never select another verification key source.
+   */
+  public static Set<String> issuerOrigins(String defaultIssuer, List<String> allowedOrigins) {
+    allowedOrigins.forEach(LinkOrigins::canonicalOrigin);
+    var issuers = new java.util.HashSet<>(allowedOrigins);
+    issuers.add(java.util.Objects.requireNonNull(defaultIssuer));
+    return Set.copyOf(issuers);
   }
 
   public <T, X extends Throwable> T call(

@@ -178,7 +178,8 @@ class IamFlowTest {
                     "workspace.read"),
             clock,
             "https://iam.example.com",
-            Map.of("edge", Secrets.hash("test-installation-credential")));
+            Map.of("edge", Secrets.hash("test-installation-credential")),
+            List.of("https://portal.example.com", "http://192.0.2.10:8080"));
     sessions =
         new SessionManager(
             store, new PostgresSessionKv(store, schemas, clock), tokens, clock, events, audit);
@@ -315,7 +316,7 @@ class IamFlowTest {
   }
 
   @Test
-  void presentationLinksFollowAllowedRequestWhileOauthIssuerRemainsInstallationIdentity() {
+  void metadataIssuerAndLinksFollowApprovedRequestOrigin() {
     var links =
         new auriga.common.web.LinkOrigins(
             List.of("https://portal.example.com"), List.of("192.0.2.20"));
@@ -324,7 +325,7 @@ class IamFlowTest {
     request.addHeader("X-Forwarded-Host", "portal.example.com");
     request.addHeader("X-Forwarded-Proto", "https");
     var metadata = links.call(request, oauth::metadata);
-    assertEquals(tokens.issuer(), metadata.path("issuer").asString());
+    assertEquals("https://portal.example.com", metadata.path("issuer").asString());
     for (String endpoint :
         List.of(
             "authorization_endpoint",
@@ -353,6 +354,55 @@ class IamFlowTest {
             .startsWith("https://portal.example.com/device?user_code="));
     assertEquals(
         tokens.issuer() + "/oauth2/token", oauth.metadata().path("token_endpoint").asString());
+  }
+
+  @Test
+  void issuerSelectionIsAllowlistedAndUnscopedVerificationUsesTheSameRoot() throws Exception {
+    String ip = "http://192.0.2.10:8080", domain = "https://portal.example.com";
+    var links = new auriga.common.web.LinkOrigins(List.of(ip, domain), List.of("192.0.2.20"));
+    var request = new org.springframework.mock.web.MockHttpServletRequest();
+    request.setScheme("http");
+    request.setRemoteAddr("192.0.2.20");
+    request.addHeader("Host", "192.0.2.10:8080");
+    request.addHeader("X-Forwarded-Host", "portal.example.com");
+    request.addHeader("X-Forwarded-Proto", "https");
+    java.util.function.Supplier<String> issue =
+        () ->
+            TenantContext.call(
+                tenant,
+                () ->
+                    tokens
+                        .managedDevice(
+                            tenant,
+                            UUID.randomUUID().toString(),
+                            UUID.randomUUID(),
+                            clock.instant().plusSeconds(300),
+                            "member")
+                        .accessToken());
+    String alias = links.call(request, issue::get);
+    assertEquals(domain, tokens.verify(alias).path("iss").asString());
+    request.setRemoteAddr("192.0.2.30");
+    assertEquals(ip, tokens.verify(links.call(request, issue::get)).path("iss").asString());
+    request.removeHeader("Host");
+    request.addHeader("Host", "evil.example.com");
+    assertEquals(
+        tokens.issuer(), tokens.verify(links.call(request, issue::get)).path("iss").asString());
+    assertEquals(tokens.issuer(), tokens.verify(issue.get()).path("iss").asString());
+    var parsed = SignedJWT.parse(alias);
+    var wrongIssuer = tokens.verify(alias).deepCopy().put("iss", "https://evil.example.com");
+    var forged =
+        new SignedJWT(
+            parsed.getHeader(), com.nimbusds.jwt.JWTClaimsSet.parse(wrongIssuer.toString()));
+    forged.sign(new com.nimbusds.jose.crypto.ECDSASigner(keys.current()));
+    assertThrows(
+        auriga.common.error.AurigaException.class, () -> tokens.verify(forged.serialize()));
+    var wrongRoot = new SignedJWT(parsed.getHeader(), parsed.getJWTClaimsSet());
+    wrongRoot.sign(
+        new com.nimbusds.jose.crypto.ECDSASigner(
+            new com.nimbusds.jose.jwk.gen.ECKeyGenerator(com.nimbusds.jose.jwk.Curve.P_256)
+                .generate()));
+    assertThrows(
+        auriga.common.error.AurigaException.class, () -> tokens.verify(wrongRoot.serialize()));
   }
 
   @Test

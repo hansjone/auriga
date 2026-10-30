@@ -5,8 +5,10 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * How access tokens issued by iam are validated.
@@ -21,6 +23,7 @@ import java.util.Objects;
  * @param clock time source
  * @param allowInsecureJwksUri accept a plain http JWKS URI on a non-loopback host (keys could be
  *     replaced by anyone on the network path; only for isolated networks)
+ * @param acceptedIssuers exact installation-owned issuer aliases sharing the fixed JWKS source
  */
 public record AccessTokenSettings(
     String issuer,
@@ -30,7 +33,8 @@ public record AccessTokenSettings(
     Duration jwksCacheTtl,
     Duration jwksMinRefreshInterval,
     Clock clock,
-    boolean allowInsecureJwksUri) {
+    boolean allowInsecureJwksUri,
+    Set<String> acceptedIssuers) {
   public static final String PLATFORM_AUDIENCE = "auriga";
   public static final String INTERNAL_AUDIENCE = "auriga.internal";
   public static final String ACCESS_TOKEN_TYPE = "at+jwt";
@@ -38,6 +42,12 @@ public record AccessTokenSettings(
   public AccessTokenSettings {
     Objects.requireNonNull(issuer, "issuer");
     Objects.requireNonNull(jwkSetUri, "jwkSetUri");
+    acceptedIssuers =
+        auriga.common.web.LinkOrigins.issuerOrigins(
+            issuer,
+            acceptedIssuers == null
+                ? List.of()
+                : acceptedIssuers.stream().filter(value -> !issuer.equals(value)).toList());
     audience = audience == null ? PLATFORM_AUDIENCE : audience;
     clockSkew = clockSkew == null ? Duration.ofSeconds(30) : clockSkew;
     jwksCacheTtl = jwksCacheTtl == null ? Duration.ofMinutes(5) : jwksCacheTtl;
@@ -45,6 +55,40 @@ public record AccessTokenSettings(
         jwksMinRefreshInterval == null ? Duration.ofSeconds(30) : jwksMinRefreshInterval;
     clock = clock == null ? Clock.systemUTC() : clock;
     requireSecureJwksUri(jwkSetUri, allowInsecureJwksUri);
+  }
+
+  public AccessTokenSettings(
+      String issuer,
+      URI jwkSetUri,
+      String audience,
+      Duration clockSkew,
+      Duration jwksCacheTtl,
+      Duration jwksMinRefreshInterval,
+      Clock clock,
+      boolean allowInsecureJwksUri) {
+    this(
+        issuer,
+        jwkSetUri,
+        audience,
+        clockSkew,
+        jwksCacheTtl,
+        jwksMinRefreshInterval,
+        clock,
+        allowInsecureJwksUri,
+        Set.of(issuer));
+  }
+
+  public AccessTokenSettings withIssuerOrigins(List<String> origins) {
+    return new AccessTokenSettings(
+        issuer,
+        jwkSetUri,
+        audience,
+        clockSkew,
+        jwksCacheTtl,
+        jwksMinRefreshInterval,
+        clock,
+        allowInsecureJwksUri,
+        auriga.common.web.LinkOrigins.issuerOrigins(issuer, origins));
   }
 
   public static AccessTokenSettings of(String issuer, URI jwkSetUri) {
@@ -61,7 +105,8 @@ public record AccessTokenSettings(
         jwksCacheTtl,
         jwksMinRefreshInterval,
         clock,
-        allowInsecureJwksUri);
+        allowInsecureJwksUri,
+        acceptedIssuers);
   }
 
   static void requireSecureJwksUri(URI uri, boolean allowInsecure) {

@@ -400,6 +400,36 @@ class WebSecurityTest {
   }
 
   @Test
+  void approvedIssuerOriginsUseTheSameKeysAndRetainAudienceIsolation() {
+    String domain = "https://portal.example.com";
+    runner()
+        .withUserConfiguration(DemoController.class, PublicController.class)
+        .withPropertyValues("auriga.links.allowed-origins=" + domain)
+        .run(
+            ctx -> {
+              assertNull(ctx.getStartupFailure());
+              var platform = ctx.getBean(auriga.common.security.AccessTokenVerifier.class);
+              var internal =
+                  ctx.getBean(auriga.common.security.InternalTokenVerifier.class).verifier();
+              assertNotNull(platform.verify(TOKENS.token(c -> c.issuer(domain))));
+              assertNotNull(platform.verify(TOKENS.token()));
+              assertNotNull(
+                  internal.verify(TOKENS.token(c -> TestTokens.internalService(c).issuer(domain))));
+              assertThrows(
+                  AurigaException.class,
+                  () -> platform.verify(TOKENS.token(c -> c.issuer("https://evil.example.com"))));
+              assertThrows(
+                  AurigaException.class,
+                  () ->
+                      platform.verify(
+                          TOKENS.token(c -> TestTokens.internalService(c).issuer(domain))));
+              assertThrows(
+                  AurigaException.class,
+                  () -> internal.verify(TOKENS.token(c -> c.issuer(domain))));
+            });
+  }
+
+  @Test
   void endpointWithoutAuthorizationDeclarationFailsStartup() {
     runner()
         .withUserConfiguration(UndeclaredController.class)

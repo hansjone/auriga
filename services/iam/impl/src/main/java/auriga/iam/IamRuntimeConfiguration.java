@@ -29,20 +29,22 @@ public class IamRuntimeConfiguration {
   auriga.common.security.AccessTokenSettings iamLocalTokenSettings(
       auriga.contracts.deploymentconfig.DeploymentAccess access,
       auriga.common.autoconfigure.AurigaProperties properties,
-      Clock clock) {
+      Clock clock,
+      Environment env) {
     var jwt = properties.getSecurity().getJwt();
     if (jwt.getIssuer() != null && !access.issuer().equals(jwt.getIssuer()))
       throw new IllegalStateException("IAM token verification issuer must equal deployment issuer");
     // The URI is metadata only: both decoders below receive a local, public-key-only source.
     return new auriga.common.security.AccessTokenSettings(
-        access.issuer(),
-        URI.create(access.issuer() + "/oauth2/jwks"),
-        jwt.getAudience(),
-        jwt.getClockSkew(),
-        jwt.getJwksCacheTtl(),
-        jwt.getJwksMinRefreshInterval(),
-        clock,
-        access.issuer().startsWith("http://"));
+            access.issuer(),
+            URI.create(access.issuer() + "/oauth2/jwks"),
+            jwt.getAudience(),
+            jwt.getClockSkew(),
+            jwt.getJwksCacheTtl(),
+            jwt.getJwksMinRefreshInterval(),
+            clock,
+            access.issuer().startsWith("http://"))
+        .withIssuerOrigins(issuerOrigins(env));
   }
 
   @Bean
@@ -157,7 +159,14 @@ public class IamRuntimeConfiguration {
         env.getRequiredProperty("auriga.iam.issuer"),
         Binder.get(env)
             .bind("auriga.iam.internal-secret-hashes", Bindable.mapOf(String.class, String.class))
-            .orElse(Map.of()));
+            .orElse(Map.of()),
+        issuerOrigins(env));
+  }
+
+  private static List<String> issuerOrigins(Environment env) {
+    return Binder.get(env)
+        .bind("auriga.links.allowed-origins", Bindable.listOf(String.class))
+        .orElse(List.of());
   }
 
   @Bean

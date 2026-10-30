@@ -68,7 +68,8 @@ class ManagedDeviceCredentialPostgresTest {
             (t, s, c) -> Set.of(),
             clock,
             "https://portal.example.com",
-            Map.of());
+            Map.of(),
+            List.of("https://managed.example.com"));
     var sessions =
         new SessionManager(
             store,
@@ -148,6 +149,30 @@ class ManagedDeviceCredentialPostgresTest {
   void denied(Runnable action) {
     assertEquals(
         "common.forbidden", assertThrows(AurigaException.class, action::run).errorCode().code());
+  }
+
+  @Test
+  void managedDeviceIssuedThroughApprovedOriginRemainsValidAtInternalAuthority() throws Exception {
+    var request = new org.springframework.mock.web.MockHttpServletRequest();
+    request.setScheme("https");
+    request.setRemoteAddr("192.0.2.30");
+    request.addHeader("Host", "managed.example.com");
+    var origins =
+        new auriga.common.web.LinkOrigins(List.of("https://managed.example.com"), List.of());
+    TenantContext.run(
+        tenant,
+        () -> {
+          var issued = managed.issue(request(1));
+          String token = origins.call(request, () -> access(issued));
+          try {
+            assertEquals(
+                "https://managed.example.com",
+                com.nimbusds.jwt.SignedJWT.parse(token).getJWTClaimsSet().getIssuer());
+          } catch (java.text.ParseException error) {
+            throw new AssertionError(error);
+          }
+          assertTrue(authority.access(token).expiresAt().isAfter(clock.instant()));
+        });
   }
 
   @Test

@@ -63,8 +63,8 @@ public final class OAuthProvider {
   }
 
   public ObjectNode metadata() {
-    String issuer = tokens.issuer();
-    String base = auriga.common.web.LinkOrigins.currentOr(issuer);
+    String issuer = tokens.requestIssuer();
+    String base = issuer;
     return Json.object(
         "issuer",
         issuer,
