@@ -18,6 +18,9 @@ fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib.sh"
 
+if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
+else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi
+
 if sh "$ROOT/test/panel-renew-cron.sh"; then pass panel_renewal_cron_regressions
 else fail_msg panel_renewal_cron_regressions "hourly renewal scheduling failed"; fi
 if sh "$ROOT/test/panel-renew-nonroot.sh"; then pass panel_renewal_nonroot_regressions

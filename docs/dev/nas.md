@@ -146,6 +146,54 @@ operator的 `stack.env` 与派生 `materials/access.env` 分层处理：派生�
 
 第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不要给 NAS 配方追加 dev、远程 emergency 或 observer 例外。
 
+## 首次正常管理员（真实回环）
+
+IP 部署首次启动会生成私有 emergency enrollment；应急登录保持仅回环，不能拿它从
+另一台电脑直接登录管理台。公开 `scripts/admin-bootstrap.sh` 在已运行 edge 的网络空间
+启动一个临时、无端口发布的 helper，通过真实 `127.0.0.1` 完成应急登录、普通团队账号
+注册/TOTP 登记和独立正常管理员登录。Host/Origin 使用已验证 access 的规范入口，仅用于
+listener/虚拟主机选择，不发送 Forwarded、X-Forwarded-For 或任何伪造来源头，不改数据库。
+当前脚本明确只接受 IP 模式；HTTPS 不跳过证书校验，可读取该部署的公开浏览器证书链。
+
+helper 复用已独立批准并加载的精确 LiteLLM 镜像中的 Python 3/cryptography，以10001身份、
+cap-drop ALL、只读根运行。仅只读挂脚本、access、enrollment、收件公钥及可选公开证书，
+不挂 Docker socket、私钥、模型 Key 或整个数据根。普通 NAS operator 无须 sudo。
+
+在**操作者本机**准备仅本人可读的私有目录（Windows 须受限ACL），生成一次性 RSA3072
+或更强收件密钥；只有公钥可传到 NAS 的独立规范路径：
+
+```sh
+umask 077
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /private/bootstrap-recipient.key
+openssl pkey -in /private/bootstrap-recipient.key -pubout -out /private/bootstrap-recipient.pub
+# 只传 .pub，允许安装器UID10001读取它；私钥绝不上传。
+# NAS 上，使用已初始化的数据根和包：
+export AURIGA_DATA_ROOT=/srv/container/auriga-test
+sh /srv/packages/deploy-nas/scripts/admin-bootstrap.sh /srv/approved/bootstrap-recipient.pub
+```
+
+stdout 仅含 `AURIGA_BOOTSTRAP_ENVELOPE` 加密检查点，可由命令通道在本机保存。
+管理员、测试成员及轮换后的应急恢复凭据均使用 RSA-OAEP-SHA256 + AES256-GCM 封装，
+明文只在 helper 内存及服务端既有账号存储中存在，不写 NAS 文件、命令参数或日志。
+先封装登记的 TOTP，再提交确认；异常时保留最后密文供恢复，**不要盲目重新创建账号**。
+脚本用内置 owner 角色建立第一个正常超管，再建立 member 测试成员，各用空 cookie jar
+重新登录验证；正常管理员通过角色和节点权限检查后才按正式API轮换应急口令/TOTP，
+最后登出本次会话。原 enrollment 此后失效，妥善保管密文、收件私钥和解密后的恢复材料。
+
+在本机建立隔离 Python 环境并安装固定依赖，解密到新的私有文件（不会覆盖）：
+
+```sh
+python -m venv /private/admin-python
+/private/admin-python/bin/pip install -r deploy/nas/test/admin-bootstrap-requirements.txt
+/private/admin-python/bin/python deploy/nas/scripts/admin-bootstrap-decrypt.py \
+  --input /private/bootstrap-encrypted.log --private-key /private/bootstrap-recipient.key \
+  --output /private/bootstrap-accounts.json
+```
+
+Windows 使用该环境的 `Scripts/python.exe`；解密器在写入前移除新文件的继承ACL并只授当前SID。
+默认仅接受 `stage=complete`；失败恢复须显式 `--allow-partial`，只代表取回已建立步骤的凭据。
+测试凭据不是正式运营账号；用户自行登录后应按现有账号流程更换口令/MFA。不要把该私有文件提交或粘贴到报告。
+
 ## 消费独立审核的正式运行时
 
 安装可选接收 [runtime-release](runtime-release.md) 的公开签发目录。operator 先通过可信发布渠道独立审核并固定公开根，
