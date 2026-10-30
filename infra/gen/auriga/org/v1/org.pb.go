@@ -1483,8 +1483,12 @@ func (x *GetEffectiveQuotaResponse) GetQuota() *Quota {
 }
 
 type Quota struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Instance      *InstanceQuota         `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Instance *InstanceQuota         `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
+	// 仅保留协议兼容：已由 LiteLLM customer 预算取代，服务拒绝写入且不读取。
+	//
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+	Model         *ModelQuota `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1522,6 +1526,14 @@ func (*Quota) Descriptor() ([]byte, []int) {
 func (x *Quota) GetInstance() *InstanceQuota {
 	if x != nil {
 		return x.Instance
+	}
+	return nil
+}
+
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+func (x *Quota) GetModel() *ModelQuota {
+	if x != nil {
+		return x.Model
 	}
 	return nil
 }
@@ -1605,6 +1617,75 @@ func (x *InstanceQuota) GetAlwaysOnAllowed() bool {
 	return false
 }
 
+// 仅保留协议兼容，已由 LiteLLM customer 预算取代；服务拒绝写入且不读取。
+//
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+type ModelQuota struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+	MonthlyBudgetMicros *int64 `protobuf:"varint,1,opt,name=monthly_budget_micros,json=monthlyBudgetMicros,proto3,oneof" json:"monthly_budget_micros,omitempty"`
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+	Currency string `protobuf:"bytes,2,opt,name=currency,proto3" json:"currency,omitempty"`
+	// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+	DailyTokens   *int64 `protobuf:"varint,3,opt,name=daily_tokens,json=dailyTokens,proto3,oneof" json:"daily_tokens,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelQuota) Reset() {
+	*x = ModelQuota{}
+	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelQuota) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelQuota) ProtoMessage() {}
+
+func (x *ModelQuota) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelQuota.ProtoReflect.Descriptor instead.
+func (*ModelQuota) Descriptor() ([]byte, []int) {
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{25}
+}
+
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+func (x *ModelQuota) GetMonthlyBudgetMicros() int64 {
+	if x != nil && x.MonthlyBudgetMicros != nil {
+		return *x.MonthlyBudgetMicros
+	}
+	return 0
+}
+
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+func (x *ModelQuota) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+// Deprecated: Marked as deprecated in auriga/org/v1/org.proto.
+func (x *ModelQuota) GetDailyTokens() int64 {
+	if x != nil && x.DailyTokens != nil {
+		return *x.DailyTokens
+	}
+	return 0
+}
+
 type GetPolicyRequest struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	TenantId string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
@@ -1616,7 +1697,7 @@ type GetPolicyRequest struct {
 
 func (x *GetPolicyRequest) Reset() {
 	*x = GetPolicyRequest{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1628,7 +1709,7 @@ func (x *GetPolicyRequest) String() string {
 func (*GetPolicyRequest) ProtoMessage() {}
 
 func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[25]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1641,7 +1722,7 @@ func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyRequest.ProtoReflect.Descriptor instead.
 func (*GetPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{25}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetPolicyRequest) GetTenantId() string {
@@ -1671,7 +1752,7 @@ type GetPolicyResponse struct {
 
 func (x *GetPolicyResponse) Reset() {
 	*x = GetPolicyResponse{}
-	mi := &file_auriga_org_v1_org_proto_msgTypes[26]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1683,7 +1764,7 @@ func (x *GetPolicyResponse) String() string {
 func (*GetPolicyResponse) ProtoMessage() {}
 
 func (x *GetPolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_org_v1_org_proto_msgTypes[26]
+	mi := &file_auriga_org_v1_org_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1696,7 +1777,7 @@ func (x *GetPolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyResponse.ProtoReflect.Descriptor instead.
 func (*GetPolicyResponse) Descriptor() ([]byte, []int) {
-	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{26}
+	return file_auriga_org_v1_org_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetPolicyResponse) GetKey() string {
@@ -1831,9 +1912,10 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"\n" +
 	"account_id\x18\x02 \x01(\tR\taccountId\"G\n" +
 	"\x19GetEffectiveQuotaResponse\x12*\n" +
-	"\x05quota\x18\x01 \x01(\v2\x14.auriga.org.v1.QuotaR\x05quota\"N\n" +
+	"\x05quota\x18\x01 \x01(\v2\x14.auriga.org.v1.QuotaR\x05quota\"v\n" +
 	"\x05Quota\x128\n" +
-	"\binstance\x18\x01 \x01(\v2\x1c.auriga.org.v1.InstanceQuotaR\binstanceJ\x04\b\x02\x10\x03R\x05model\"\x84\x02\n" +
+	"\binstance\x18\x01 \x01(\v2\x1c.auriga.org.v1.InstanceQuotaR\binstance\x123\n" +
+	"\x05model\x18\x02 \x01(\v2\x19.auriga.org.v1.ModelQuotaB\x02\x18\x01R\x05model\"\x84\x02\n" +
 	"\rInstanceQuota\x12\"\n" +
 	"\n" +
 	"cpu_millis\x18\x01 \x01(\x03H\x00R\tcpuMillis\x88\x01\x01\x12 \n" +
@@ -1846,7 +1928,14 @@ const file_auriga_org_v1_org_proto_rawDesc = "" +
 	"_memory_mbB\n" +
 	"\n" +
 	"\b_disk_gbB\x10\n" +
-	"\x0e_max_instances\"A\n" +
+	"\x0e_max_instances\"\xc4\x01\n" +
+	"\n" +
+	"ModelQuota\x12;\n" +
+	"\x15monthly_budget_micros\x18\x01 \x01(\x03B\x02\x18\x01H\x00R\x13monthlyBudgetMicros\x88\x01\x01\x12\x1e\n" +
+	"\bcurrency\x18\x02 \x01(\tB\x02\x18\x01R\bcurrency\x12*\n" +
+	"\fdaily_tokens\x18\x03 \x01(\x03B\x02\x18\x01H\x01R\vdailyTokens\x88\x01\x01:\x02\x18\x01B\x18\n" +
+	"\x16_monthly_budget_microsB\x0f\n" +
+	"\r_daily_tokens\"A\n" +
 	"\x10GetPolicyRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\"n\n" +
@@ -1897,7 +1986,7 @@ func file_auriga_org_v1_org_proto_rawDescGZIP() []byte {
 }
 
 var file_auriga_org_v1_org_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_auriga_org_v1_org_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_auriga_org_v1_org_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_auriga_org_v1_org_proto_goTypes = []any{
 	(MemberType)(0),                         // 0: auriga.org.v1.MemberType
 	(MemberStatus)(0),                       // 1: auriga.org.v1.MemberStatus
@@ -1926,55 +2015,57 @@ var file_auriga_org_v1_org_proto_goTypes = []any{
 	(*GetEffectiveQuotaResponse)(nil),       // 24: auriga.org.v1.GetEffectiveQuotaResponse
 	(*Quota)(nil),                           // 25: auriga.org.v1.Quota
 	(*InstanceQuota)(nil),                   // 26: auriga.org.v1.InstanceQuota
-	(*GetPolicyRequest)(nil),                // 27: auriga.org.v1.GetPolicyRequest
-	(*GetPolicyResponse)(nil),               // 28: auriga.org.v1.GetPolicyResponse
-	(*timestamppb.Timestamp)(nil),           // 29: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),                 // 30: google.protobuf.Struct
+	(*ModelQuota)(nil),                      // 27: auriga.org.v1.ModelQuota
+	(*GetPolicyRequest)(nil),                // 28: auriga.org.v1.GetPolicyRequest
+	(*GetPolicyResponse)(nil),               // 29: auriga.org.v1.GetPolicyResponse
+	(*timestamppb.Timestamp)(nil),           // 30: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),                 // 31: google.protobuf.Struct
 }
 var file_auriga_org_v1_org_proto_depIdxs = []int32{
 	2,  // 0: auriga.org.v1.GetTenantResponse.tenant:type_name -> auriga.org.v1.Tenant
 	2,  // 1: auriga.org.v1.ResolveTenantByHostResponse.tenant:type_name -> auriga.org.v1.Tenant
 	0,  // 2: auriga.org.v1.Member.member_type:type_name -> auriga.org.v1.MemberType
 	1,  // 3: auriga.org.v1.Member.status:type_name -> auriga.org.v1.MemberStatus
-	29, // 4: auriga.org.v1.Member.created_at:type_name -> google.protobuf.Timestamp
+	30, // 4: auriga.org.v1.Member.created_at:type_name -> google.protobuf.Timestamp
 	7,  // 5: auriga.org.v1.GetMemberResponse.member:type_name -> auriga.org.v1.Member
 	7,  // 6: auriga.org.v1.BatchGetMembersResponse.members:type_name -> auriga.org.v1.Member
 	0,  // 7: auriga.org.v1.GetEffectivePermissionsResponse.member_type:type_name -> auriga.org.v1.MemberType
 	1,  // 8: auriga.org.v1.GetEffectivePermissionsResponse.status:type_name -> auriga.org.v1.MemberStatus
 	0,  // 9: auriga.org.v1.Invitation.member_type:type_name -> auriga.org.v1.MemberType
-	29, // 10: auriga.org.v1.Invitation.expires_at:type_name -> google.protobuf.Timestamp
+	30, // 10: auriga.org.v1.Invitation.expires_at:type_name -> google.protobuf.Timestamp
 	18, // 11: auriga.org.v1.ResolveInvitationResponse.invitation:type_name -> auriga.org.v1.Invitation
 	7,  // 12: auriga.org.v1.RedeemInvitationResponse.member:type_name -> auriga.org.v1.Member
 	25, // 13: auriga.org.v1.GetEffectiveQuotaResponse.quota:type_name -> auriga.org.v1.Quota
 	26, // 14: auriga.org.v1.Quota.instance:type_name -> auriga.org.v1.InstanceQuota
-	30, // 15: auriga.org.v1.GetPolicyResponse.value:type_name -> google.protobuf.Struct
-	3,  // 16: auriga.org.v1.TenantService.GetTenant:input_type -> auriga.org.v1.GetTenantRequest
-	5,  // 17: auriga.org.v1.TenantService.ResolveTenantByHost:input_type -> auriga.org.v1.ResolveTenantByHostRequest
-	8,  // 18: auriga.org.v1.MemberService.GetMember:input_type -> auriga.org.v1.GetMemberRequest
-	10, // 19: auriga.org.v1.MemberService.BatchGetMembers:input_type -> auriga.org.v1.BatchGetMembersRequest
-	14, // 20: auriga.org.v1.AuthorizationService.CheckGrant:input_type -> auriga.org.v1.CheckGrantRequest
-	12, // 21: auriga.org.v1.AuthorizationService.GetEffectivePermissions:input_type -> auriga.org.v1.GetEffectivePermissionsRequest
-	16, // 22: auriga.org.v1.AuthorizationService.CheckPermission:input_type -> auriga.org.v1.CheckPermissionRequest
-	19, // 23: auriga.org.v1.InvitationService.ResolveInvitation:input_type -> auriga.org.v1.ResolveInvitationRequest
-	21, // 24: auriga.org.v1.InvitationService.RedeemInvitation:input_type -> auriga.org.v1.RedeemInvitationRequest
-	23, // 25: auriga.org.v1.QuotaService.GetEffectiveQuota:input_type -> auriga.org.v1.GetEffectiveQuotaRequest
-	27, // 26: auriga.org.v1.PolicyService.GetPolicy:input_type -> auriga.org.v1.GetPolicyRequest
-	4,  // 27: auriga.org.v1.TenantService.GetTenant:output_type -> auriga.org.v1.GetTenantResponse
-	6,  // 28: auriga.org.v1.TenantService.ResolveTenantByHost:output_type -> auriga.org.v1.ResolveTenantByHostResponse
-	9,  // 29: auriga.org.v1.MemberService.GetMember:output_type -> auriga.org.v1.GetMemberResponse
-	11, // 30: auriga.org.v1.MemberService.BatchGetMembers:output_type -> auriga.org.v1.BatchGetMembersResponse
-	15, // 31: auriga.org.v1.AuthorizationService.CheckGrant:output_type -> auriga.org.v1.CheckGrantResponse
-	13, // 32: auriga.org.v1.AuthorizationService.GetEffectivePermissions:output_type -> auriga.org.v1.GetEffectivePermissionsResponse
-	17, // 33: auriga.org.v1.AuthorizationService.CheckPermission:output_type -> auriga.org.v1.CheckPermissionResponse
-	20, // 34: auriga.org.v1.InvitationService.ResolveInvitation:output_type -> auriga.org.v1.ResolveInvitationResponse
-	22, // 35: auriga.org.v1.InvitationService.RedeemInvitation:output_type -> auriga.org.v1.RedeemInvitationResponse
-	24, // 36: auriga.org.v1.QuotaService.GetEffectiveQuota:output_type -> auriga.org.v1.GetEffectiveQuotaResponse
-	28, // 37: auriga.org.v1.PolicyService.GetPolicy:output_type -> auriga.org.v1.GetPolicyResponse
-	27, // [27:38] is the sub-list for method output_type
-	16, // [16:27] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	27, // 15: auriga.org.v1.Quota.model:type_name -> auriga.org.v1.ModelQuota
+	31, // 16: auriga.org.v1.GetPolicyResponse.value:type_name -> google.protobuf.Struct
+	3,  // 17: auriga.org.v1.TenantService.GetTenant:input_type -> auriga.org.v1.GetTenantRequest
+	5,  // 18: auriga.org.v1.TenantService.ResolveTenantByHost:input_type -> auriga.org.v1.ResolveTenantByHostRequest
+	8,  // 19: auriga.org.v1.MemberService.GetMember:input_type -> auriga.org.v1.GetMemberRequest
+	10, // 20: auriga.org.v1.MemberService.BatchGetMembers:input_type -> auriga.org.v1.BatchGetMembersRequest
+	14, // 21: auriga.org.v1.AuthorizationService.CheckGrant:input_type -> auriga.org.v1.CheckGrantRequest
+	12, // 22: auriga.org.v1.AuthorizationService.GetEffectivePermissions:input_type -> auriga.org.v1.GetEffectivePermissionsRequest
+	16, // 23: auriga.org.v1.AuthorizationService.CheckPermission:input_type -> auriga.org.v1.CheckPermissionRequest
+	19, // 24: auriga.org.v1.InvitationService.ResolveInvitation:input_type -> auriga.org.v1.ResolveInvitationRequest
+	21, // 25: auriga.org.v1.InvitationService.RedeemInvitation:input_type -> auriga.org.v1.RedeemInvitationRequest
+	23, // 26: auriga.org.v1.QuotaService.GetEffectiveQuota:input_type -> auriga.org.v1.GetEffectiveQuotaRequest
+	28, // 27: auriga.org.v1.PolicyService.GetPolicy:input_type -> auriga.org.v1.GetPolicyRequest
+	4,  // 28: auriga.org.v1.TenantService.GetTenant:output_type -> auriga.org.v1.GetTenantResponse
+	6,  // 29: auriga.org.v1.TenantService.ResolveTenantByHost:output_type -> auriga.org.v1.ResolveTenantByHostResponse
+	9,  // 30: auriga.org.v1.MemberService.GetMember:output_type -> auriga.org.v1.GetMemberResponse
+	11, // 31: auriga.org.v1.MemberService.BatchGetMembers:output_type -> auriga.org.v1.BatchGetMembersResponse
+	15, // 32: auriga.org.v1.AuthorizationService.CheckGrant:output_type -> auriga.org.v1.CheckGrantResponse
+	13, // 33: auriga.org.v1.AuthorizationService.GetEffectivePermissions:output_type -> auriga.org.v1.GetEffectivePermissionsResponse
+	17, // 34: auriga.org.v1.AuthorizationService.CheckPermission:output_type -> auriga.org.v1.CheckPermissionResponse
+	20, // 35: auriga.org.v1.InvitationService.ResolveInvitation:output_type -> auriga.org.v1.ResolveInvitationResponse
+	22, // 36: auriga.org.v1.InvitationService.RedeemInvitation:output_type -> auriga.org.v1.RedeemInvitationResponse
+	24, // 37: auriga.org.v1.QuotaService.GetEffectiveQuota:output_type -> auriga.org.v1.GetEffectiveQuotaResponse
+	29, // 38: auriga.org.v1.PolicyService.GetPolicy:output_type -> auriga.org.v1.GetPolicyResponse
+	28, // [28:39] is the sub-list for method output_type
+	17, // [17:28] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_auriga_org_v1_org_proto_init() }
@@ -1983,13 +2074,14 @@ func file_auriga_org_v1_org_proto_init() {
 		return
 	}
 	file_auriga_org_v1_org_proto_msgTypes[24].OneofWrappers = []any{}
+	file_auriga_org_v1_org_proto_msgTypes[25].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_org_v1_org_proto_rawDesc), len(file_auriga_org_v1_org_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   6,
 		},

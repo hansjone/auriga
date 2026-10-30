@@ -324,6 +324,25 @@ class OrgQuotaIntegrityTest {
   }
 
   @Test
+  @SuppressWarnings("deprecation")
+  void deprecatedModelContractDoesNotRestoreModelSettingsOrGrpcValues() {
+    put("member", member, "{\"instance\":{\"maxInstances\":2}}");
+    assertError(
+        "common.validation_failed", () -> put("member", member, "{\"model\":{\"dailyTokens\":0}}"));
+    var output = new QuotaObserver();
+    new OrgGrpcServices.QuotaGrpc(svc)
+        .getEffectiveQuota(
+            GetEffectiveQuotaRequest.newBuilder()
+                .setTenantId(TENANT.toString())
+                .setAccountId(member.toString())
+                .build(),
+            output);
+    assertTrue(output.completed);
+    assertFalse(output.responses.getFirst().getQuota().hasModel());
+    assertEquals(2, output.responses.getFirst().getQuota().getInstance().getMaxInstances());
+  }
+
+  @Test
   void grpcInt64BoundaryIsExactAndOverflowFailsWithoutPublishingResponse() {
     var service = new OrgGrpcServices.QuotaGrpc(svc);
     var request =

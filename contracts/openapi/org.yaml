@@ -934,7 +934,6 @@ components:
     Quota:
       type: object
       description: 各字段都可省略；省略表示"这一层不设置"。值为 null 表示"不限"。合并时"不限"优先于任何具体数值。
-      not: { required: [model] }
       properties:
         instance:
           type: object
@@ -944,6 +943,15 @@ components:
             diskGb: { type: integer, minimum: 1 }
             maxInstances: { type: [integer, 'null'], minimum: 0, description: 0 表示不允许有实例；null 表示不限。 }
             alwaysOnAllowed: { type: boolean }
+        model:
+          type: object
+          deprecated: true
+          readOnly: true
+          description: 仅保留契约兼容；已由 LiteLLM customer 预算取代。服务拒绝写入，不读取也不返回该字段。
+          properties:
+            monthlyBudgetMicros: { type: [integer, 'null'], minimum: 0, deprecated: true }
+            currency: { type: string, pattern: '^[A-Z]{3}$', deprecated: true }
+            dailyTokens: { type: [integer, 'null'], minimum: 0, deprecated: true }
     InvitationInput:
       type: object
       properties:

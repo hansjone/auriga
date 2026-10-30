@@ -26,7 +26,7 @@ LiteLLM 不发布宿主端口。内部健康入口为 `http://litellm:4000/healt
 
 ## 成员预算与限速
 
-Auriga 配额页只保留实例资源配额，含旧 `model` 字段的配额写入会被拒绝。成员模型额度改在 LiteLLM **Customers / End Users** 管理，标识精确使用 `tenantId:accountId`，不要误配为 LiteLLM 内部登录用户。
+Auriga 配额页只保留实例资源配额，含旧 `model` 字段的配额写入会被拒绝。proto/OpenAPI 仅保留已弃用声明用于协议兼容，服务不读取也不返回模型配额。成员模型额度改在 LiteLLM **Customers / End Users** 管理，标识精确使用 `tenantId:accountId`，不要误配为 LiteLLM 内部登录用户。
 
 固定版本开源 `/customer/new` 支持 `user_id`、`max_budget`（USD）、`rpm_limit`、`tpm_limit`。通过独立 UI Origin 的 `/ai/customer/new` 创建，例如 `{"user_id":"<tenantId>:<accountId>","max_budget":10,"rpm_limit":30,"tpm_limit":20000}`；使用已完成 Auriga 交接和 LiteLLM 登录的管理员客户端。已有成员在 UI 或 `/ai/customer/update` 更新同一标识。预算周期和重置策略按实际运营设置；服务 Key 总预算仍需另设。先用计价假模型验一次成功、累计后超限拒绝，再开放付费模型；不要把未经验证的零值或未知费用当成封禁措施。
 

@@ -177,7 +177,9 @@ func (g *Gateway) startLiteLLMHandoff(w http.ResponseWriter, r *http.Request, ri
 	nonce := base64.RawURLEncoding.EncodeToString(hash[:16])
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
+	// POST navigation needs a non-opaque Origin for the strict handoff check.
+	// Send only the admin origin as Referer; the code remains in the form body.
+	w.Header().Set("Referrer-Policy", "strict-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; form-action "+g.Cfg.liteLLMUIURL()+"; frame-ancestors 'none'; base-uri 'none'")
 	if err := liteLLMHandoffPage.Execute(w, struct{ Action, Code, Nonce string }{g.Cfg.liteLLMUIURL() + "/ai/session", code, nonce}); err != nil && g.Log != nil {

@@ -73,7 +73,7 @@ func TestLiteLLMUIHandoff(t *testing.T) {
 			issue := func() string {
 				t.Helper()
 				status, headers, body := do("admin", "GET", "/ai/ui/", "", "", "auriga_admin_session=admin")
-				if status != 200 || !strings.Contains(body, `action="`+g.Cfg.liteLLMUIURL()+`/ai/session"`) || headers.Get("Referrer-Policy") != "no-referrer" || headers.Get("Cache-Control") != "no-store" || !strings.Contains(headers.Get("Content-Security-Policy"), "form-action "+g.Cfg.liteLLMUIURL()) {
+				if status != 200 || !strings.Contains(body, `action="`+g.Cfg.liteLLMUIURL()+`/ai/session"`) || headers.Get("Referrer-Policy") != "strict-origin" || headers.Get("Cache-Control") != "no-store" || !strings.Contains(headers.Get("Content-Security-Policy"), "form-action "+g.Cfg.liteLLMUIURL()) {
 					t.Fatalf("invalid first-party handoff: status=%d headers=%v", status, headers)
 				}
 				match := regexp.MustCompile(`name="code" value="([a-zA-Z0-9_-]{43})"`).FindStringSubmatch(body)
@@ -90,7 +90,7 @@ func TestLiteLLMUIHandoff(t *testing.T) {
 			status, headers, _ := do("relayAdmin", "POST", "/ai/session", form, g.Cfg.Access.AdminURL(), "auriga_admin_session=admin")
 			response := &http.Response{Header: headers}
 			cookies := response.Cookies()
-			if status != 303 || headers.Get("Location") != "/ai/ui/" || len(cookies) != 1 || cookies[0].Name != "auriga_litellm_session" || cookies[0].Domain != "" || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
+			if status != 303 || headers.Get("Location") != "/ai/ui/" || headers.Get("Referrer-Policy") != "no-referrer" || len(cookies) != 1 || cookies[0].Name != "auriga_litellm_session" || cookies[0].Domain != "" || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
 				t.Fatalf("handoff did not establish an isolated session: %d", status)
 			}
 			if status, _, page := do("relayAdmin", "GET", "/ai/ui/", "", "", "auriga_litellm_session=admin"); status != 200 {

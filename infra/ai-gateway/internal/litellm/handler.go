@@ -15,6 +15,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 )
 
 type Principal struct {
@@ -54,6 +56,8 @@ func reject(w http.ResponseWriter, status int, code string) {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r, finishTrace := observability.Begin(w, r)
+	defer finishTrace()
 	method := ""
 	switch r.URL.Path {
 	case "/ai/v1/models":
@@ -160,11 +164,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Forward only protocol headers and trace context. No caller-selected key,
 			// LiteLLM administration headers or platform credentials cross this hop.
 			pr.Out.Header = make(http.Header)
-			for _, name := range []string{"Accept", "X-Request-Id", "traceparent", "tracestate"} {
+			for _, name := range []string{"Accept", "X-Request-Id", "tracestate"} {
 				if value := pr.In.Header.Get(name); value != "" {
 					pr.Out.Header.Set(name, value)
 				}
 			}
+			pr.Out.Header.Set("traceparent", observability.Parent(pr.In.Context()))
 			pr.Out.Header.Set("Content-Type", "application/json")
 			pr.Out.Header.Set("Authorization", "Bearer "+key)
 		},

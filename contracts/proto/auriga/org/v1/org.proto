@@ -193,7 +193,7 @@ message RedeemInvitationResponse {
   Member member = 1;
 }
 
-// 配额。调用方：workspace（实例规格）、ai-gateway（模型预算）。
+// 实例配额。调用方：workspace；模型预算已由 LiteLLM customer 预算取代。
 service QuotaService {
   // 按 成员覆盖 → 组 → 租户默认 合并后的结果。
   rpc GetEffectiveQuota(GetEffectiveQuotaRequest) returns (GetEffectiveQuotaResponse);
@@ -210,8 +210,8 @@ message GetEffectiveQuotaResponse {
 
 message Quota {
   InstanceQuota instance = 1;
-  reserved 2;
-  reserved "model";
+  // 仅保留协议兼容：已由 LiteLLM customer 预算取代，服务拒绝写入且不读取。
+  ModelQuota model = 2 [deprecated = true];
 }
 
 // 合并后的有效配额：字段不设置（has_xxx 为 false）表示"不限"。
@@ -223,6 +223,14 @@ message InstanceQuota {
   optional int64 max_instances = 4;
   // 允许常驻（不做闲置回收）。
   bool always_on_allowed = 5;
+}
+
+// 仅保留协议兼容，已由 LiteLLM customer 预算取代；服务拒绝写入且不读取。
+message ModelQuota {
+  option deprecated = true;
+  optional int64 monthly_budget_micros = 1 [deprecated = true];
+  string currency = 2 [deprecated = true];
+  optional int64 daily_tokens = 3 [deprecated = true];
 }
 
 // 策略。调用方：workspace（`workspace`）、egress（`egress`）等。

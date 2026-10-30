@@ -10,6 +10,6 @@ UI 使用第四个独立 edge Origin，默认管理员 scheme/host 的 8086 端�
 
 数据仅开放两个端点。UI 和数据响应均剥离 `Access-Control-*`。只向 LiteLLM UI 转发 `token`、`litellm_cp_return_to`、`litellm_oauth_state` 三个 cookie，所有 Auriga cookie 均剥离；响应 cookie 同样限白名单、host-only 和 `/ai`。部署使用 `SERVER_ROOT_PATH=/ai`，edge 保留此前缀，gateway 走根数据接口。
 
-删除清单：旧 admin/device runtime、internal/admin/budget/store/relay/relayhttp/relaysupervisor、modelgate/gate；旧管理台中转站页面、模型配额设置及 org 配额契约字段；旧 Beta 账本和进程。旧 AI 管理契约及 me/usage 路由尚待单独清理，不能作为可用 API；网络声明保持独立。
+删除清单：旧 admin/device runtime、internal/admin/budget/store/relay/relayhttp/relaysupervisor、modelgate/gate；旧管理台中转站页面与模型配额设置；旧 Beta 账本和进程。org 的 ModelQuota/Quota.model 仅保留 deprecated 协议声明以保持兼容，服务拒绝写入且不读取。旧 AI 管理契约及 me/usage 路由尚待单独清理，不能作为可用 API；网络声明保持独立。
 
 验收分三层：gateway/edge 正负鉴权与归属测试；compose/NAS 配置和秘密文件测试；本机独立 Docker project 上真实 LiteLLM + PostgreSQL + 假 OpenAI 上游，验证 healthy、两种调用、无/错/吊销 Key、预算拒绝及成员用量。假服务测试不替代最后一层。
