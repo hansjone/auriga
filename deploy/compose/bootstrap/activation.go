@@ -90,6 +90,7 @@ func activationBase(out, expectedReceipt, expectedIdentity string) (deploymentco
 
 func activationFiles() []string {
 	files := []string{"edge.config.json", "pki/ca.crt", "pki/edge-collab.crt", "pki/edge-collab.key", "network/runtime.json", "network/protocol.key", "network-platform/gateway.secret", "network-platform/collab.secret", "network-platform/platform.properties", "collab-installation/input.json"}
+	files = append(files, "network-platform/managed-network.json")
 	for _, name := range collabLeaves {
 		files = append(files, "collab-installation/"+name)
 	}

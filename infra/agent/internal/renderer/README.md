@@ -2,6 +2,13 @@
 
 Deterministic instance config into `meta/` (package.json, cordis.patch.yml, env, identity-keys.json, instance.token). Unseals HPKE secrets; token files are mode 0600 and never logged.
 
+`Secrets.device_credential` is independently HPKE-sealed with that field name and
+the current specification generation. It becomes `device-credential.json` (0600)
+and only its path enters `AURIGA_DEVICE_CREDENTIAL_FILE`. Missing material removes
+the old file. Its bytes participate in the rendered digest so rotation reaches
+an already running instance. The managed plugin reuses the desktop device network
+provider; `instance.token` remains exclusively for instance control.
+
 `cordis.patch.yml` is a DSH Loader patch list (`dsh web --patch`): an `insert` of the `auriga-dsh` plugin row (config: protected `browserOrigin`, spec patches `plugins.auriga-dsh.*`) and one `@deepseek-ai/dsh-mcp-client` row per team MCP server (token read by a `!!js` file expression, never inlined), then `webserver` (bind `0.0.0.0` for Docker, `127.0.0.1` otherwise) and `web-runtime` (no URL print, `trustedHosts`) overrides, then spec patches `plugins.<row>.<key…>` as whole-config row overrides. Renderer-owned rows and keys cannot be patched; model providers fail closed until they are written into the user settings document.
 
 The managed plugin row uses both `id: auriga-dsh` and `name: auriga-dsh`.

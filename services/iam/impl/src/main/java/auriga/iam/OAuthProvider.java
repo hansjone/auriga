@@ -17,6 +17,11 @@ public final class OAuthProvider {
   private final Clock clock;
   private final Map<String, OAuthClient> clients;
   private final DeviceAiResource deviceAi;
+  private IamManagedDevices managedDevices;
+
+  public void managedDevices(IamManagedDevices managed) {
+    managedDevices = managed;
+  }
 
   public OAuthProvider(
       IamStore store,
@@ -77,7 +82,12 @@ public final class OAuthProvider {
         "response_types_supported",
         List.of("code"),
         "grant_types_supported",
-        List.of("authorization_code", "refresh_token", "client_credentials", DEVICE),
+        List.of(
+            "authorization_code",
+            "refresh_token",
+            "client_credentials",
+            DEVICE,
+            IamManagedDevices.GRANT),
         "code_challenge_methods_supported",
         List.of("S256"),
         "subject_types_supported",
@@ -271,7 +281,19 @@ public final class OAuthProvider {
     return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
   }
 
+  public ObjectNode managedToken(Map<String, String> input, String trustedSource) {
+    if (managedDevices == null
+        || !IamManagedDevices.GRANT.equals(input.get("grant_type"))
+        || !"auriga-managed-network".equals(input.get("client_id"))) return error("invalid_client");
+    return managedDevices.exchange(input, trustedSource);
+  }
+
   public ObjectNode token(Map<String, String> input) {
+    if (IamManagedDevices.GRANT.equals(input.get("grant_type"))) {
+      if (managedDevices == null || !"auriga-managed-network".equals(input.get("client_id")))
+        return error("invalid_client");
+      return managedDevices.exchange(input);
+    }
     return store.tx(
         () -> {
           OAuthClient c = client(input.get("client_id"));

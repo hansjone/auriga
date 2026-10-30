@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ManagedDeviceCredential",
+  "description": "HPKE-delivered private file. Managed network only; never a browser or model parameter.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tenantId", "ownerId", "instanceId", "deviceId", "credential", "expiresAt", "platformOrigin", "issuer", "network"],
+  "properties": {
+    "tenantId": { "type": "string", "format": "uuid" },
+    "ownerId": { "type": "string", "format": "uuid" },
+    "instanceId": { "type": "string", "format": "uuid" },
+    "deviceId": { "type": "string", "format": "uuid" },
+    "credential": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "platformOrigin": { "type": "string", "format": "uri" },
+    "issuer": { "type": "string", "format": "uri" },
+    "network": { "$ref": "./local-login.schema.json#/$defs/ConnectNetwork" }
+  }
+}

@@ -21,6 +21,7 @@ public final class IamStore {
           "session",
           "session_kv",
           "device",
+          "managed_device",
           "signing_key",
           "emergency_account",
           "oauth_grant",

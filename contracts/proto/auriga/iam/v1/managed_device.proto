@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Only svc:workspace, internal JWT + delegated tenant + mTLS. Never an instance bearer.
+service ManagedDeviceService {
+  rpc IssueManagedDevice(IssueManagedDeviceRequest) returns (IssueManagedDeviceResponse);
+  rpc RevokeManagedDevice(RevokeManagedDeviceRequest) returns (RevokeManagedDeviceResponse);
+}
+
+message IssueManagedDeviceRequest {
+  string tenant_id = 1;
+  string owner_id = 2;
+  string instance_id = 3;
+  // Authoritative workspace lifecycle counter, no overlap, [1, 2^53-1].
+  uint64 credential_version = 4;
+}
+
+message IssueManagedDeviceResponse {
+  string device_id = 1;
+  // Opaque secret, retried issuance of the same live version is idempotent.
+  string credential = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message RevokeManagedDeviceRequest {
+  string tenant_id = 1;
+  string instance_id = 2;
+  // Revoke all versions <= this version; late requests cannot revoke newer versions.
+  uint64 credential_version = 3;
+}
+
+message RevokeManagedDeviceResponse {}

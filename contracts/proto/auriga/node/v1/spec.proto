@@ -189,6 +189,8 @@ message Secrets {
   repeated IdentityPublicKey identity_keys = 2;
   // ai-gateway 令牌（团队 MCP、团队模型用），用节点封装公钥加密。
   SealedSecret ai_gateway_token = 3;
+  // Managed network device credential JSON; never the instance control token.
+  SealedSecret device_credential = 4;
 }
 
 // 只有目标节点能解开的机密。

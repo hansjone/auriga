@@ -145,6 +145,19 @@ public final class TokenService implements InternalTokenIssuer {
 
   record IssuedToken(String accessToken, Instant expiresAt) {}
 
+  IssuedToken managedDevice(
+      UUID tenant, String owner, UUID device, Instant expiresAt, String memberType) {
+    ObjectNode claims = base(tenant, owner, "auriga", "device", "device");
+    claims.put("did", device.toString());
+    claims.put("scope", "auriga.connect");
+    claims.put("mtyp", memberType);
+    claims.set("perms", Json.MAPPER.valueToTree(List.of("auriga.connect.collab.use")));
+    Instant expiry = clock.instant().plusSeconds(300);
+    if (expiresAt.isBefore(expiry)) expiry = expiresAt;
+    claims.put("exp", expiry.getEpochSecond());
+    return new IssuedToken(signAccess(claims), expiry);
+  }
+
   IssuedToken deviceAi(
       DeviceAccessAuthority.Identity identity,
       Instant authTime,

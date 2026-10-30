@@ -9,6 +9,7 @@
   </parent>
   <artifactId>iam-impl</artifactId>
   <dependencies>
+    <dependency><groupId>auriga</groupId><artifactId>workspace-api</artifactId><version>${project.version}</version></dependency>
     <!-- Connection-time DNS filtering prevents OIDC SSRF and DNS rebinding. -->
     <dependency><groupId>org.apache.httpcomponents.client5</groupId><artifactId>httpclient5</artifactId></dependency>
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId><version>1.83</version></dependency>

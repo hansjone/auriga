@@ -707,10 +707,64 @@ class LoginResponsePostgresTest {
     credentialTotpRetry(true);
   }
 
+  ObjectNode managedSession(String account) {
+    return store.tenant(
+        tenant,
+        () ->
+            store.tx(
+                () -> {
+                  var row =
+                      store.insert(
+                          "session",
+                          Secrets.hash(Secrets.random()),
+                          Json.object(
+                              "kind",
+                              "managed_device",
+                              "accountId",
+                              account,
+                              "tenantId",
+                              tenant.toString(),
+                              "audience",
+                              "portal",
+                              "cookieHash",
+                              Secrets.hash(Secrets.random()),
+                              "authTime",
+                              clock.instant().toString(),
+                              "expiresAt",
+                              clock.instant().plusSeconds(3600).toString(),
+                              "idleExpiresAt",
+                              clock.instant().plusSeconds(3600).toString(),
+                              "revoked",
+                              false,
+                              "managedInstance",
+                              UUID.randomUUID().toString(),
+                              "managedVersion",
+                              1),
+                          clock.instant().plusSeconds(3600));
+                  row.put("sessionId", row.path("id").asString());
+                  store.save("session", row);
+                  return row;
+                }));
+  }
+
+  void managedNotRevoked(ObjectNode row) {
+    assertFalse(
+        store.tenant(
+            tenant,
+            () ->
+                store.tx(
+                    () ->
+                        store
+                            .byId("session", row.path("id").asString(), false)
+                            .path("revoked")
+                            .asBoolean())));
+  }
+
   void credentialTotpRetry(boolean recoverBeforeConfirmation) throws Exception {
     var old = live();
     var current = live();
     String account = current.value().path("accountId").asString();
+    var managed = managedSession(account);
     try (var readerConnection = io.nats.client.Nats.connect(NatsExtension.url())) {
       var reader = new NatsSessionKv(readerConnection, schemas);
       connection.close();
@@ -751,6 +805,7 @@ class LoginResponsePostgresTest {
       verify(events, times(1)).publish(eq("identity.session_revoked"), eq(account), any());
       verify(events, times(1)).publish(eq("identity.mfa_changed"), eq(account), any());
       assertNotNull(reader.get(current.hash()));
+      managedNotRevoked(managed);
       store.requireTransactionReleased();
       System.out.printf(
           "CREDENTIAL_TOTP_RETRY restored=%s status=%s events_once=true current=preserved%n",
@@ -762,7 +817,10 @@ class LoginResponsePostgresTest {
   void productionRevokeOthersPasswordAndLogoutConfirmBeforeReturning() {
     var first = live();
     var current = live();
+    var managed = managedSession(current.value().path("accountId").asString());
+    asUser(current.value(), () -> assertEquals(2, me.sessions().path("items").size()));
     asUser(current.value(), () -> assertEquals(1, me.revokeOthers().path("revoked").asInt()));
+    managedNotRevoked(managed);
     assertNull(consumer.get(first.hash()));
     assertNotNull(consumer.get(current.hash()));
     asUser(current.value(), () -> assertEquals(0, me.revokeOthers().path("revoked").asInt()));
@@ -773,6 +831,7 @@ class LoginResponsePostgresTest {
             me.changePassword(
                 Json.object(
                     "currentPassword", "correct-horse", "newPassword", "new-correct-horse")));
+    managedNotRevoked(managed);
     assertNull(consumer.get(other.hash()));
     assertNotNull(consumer.get(current.hash()));
     var response = new MockHttpServletResponse();

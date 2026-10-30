@@ -99,6 +99,23 @@ func edgeHasAlias(insp map[string]any, n *engineNetwork, alias string) bool {
 	return false
 }
 
+func (d *Docker) edgeAliases() []string {
+	aliases := []string{d.PlatformHost}
+	if d.PortalHost != "" && d.PortalHost != d.PlatformHost {
+		aliases = append(aliases, d.PortalHost)
+	}
+	return aliases
+}
+
+func (d *Docker) edgeHasAliases(insp map[string]any, n *engineNetwork) bool {
+	for _, alias := range d.edgeAliases() {
+		if !edgeHasAlias(insp, n, alias) {
+			return false
+		}
+	}
+	return true
+}
+
 func (d *Docker) ensureEdgeNetwork(ctx context.Context, id string) error {
 	n, err := d.ownedNetwork(ctx, id)
 	if err != nil {
@@ -142,13 +159,13 @@ func (d *Docker) ensureEdgeNetwork(ctx context.Context, id string) error {
 		}
 	}
 	if _, exists := n.Containers[edgeID]; exists {
-		if !edgeHasAlias(insp, n, d.PlatformHost) {
+		if !d.edgeHasAliases(insp, n) {
 			return fmt.Errorf("docker: existing edge endpoint has wrong platform alias")
 		}
 		return nil
 	}
 	_, _, err = d.Client.doJSON(ctx, http.MethodPost, "/networks/"+url.PathEscape(n.ID)+"/connect", map[string]any{
-		"Container": edgeID, "EndpointConfig": map[string]any{"Aliases": []string{d.PlatformHost}},
+		"Container": edgeID, "EndpointConfig": map[string]any{"Aliases": d.edgeAliases()},
 	}, http.StatusOK)
 	if err != nil {
 		return err
@@ -158,7 +175,7 @@ func (d *Docker) ensureEdgeNetwork(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if edgeIDAfter != edgeID || !edgeHasAlias(after, n, d.PlatformHost) {
+	if edgeIDAfter != edgeID || !d.edgeHasAliases(after, n) {
 		return fmt.Errorf("docker: edge platform alias was not applied")
 	}
 	return nil

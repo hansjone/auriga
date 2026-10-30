@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 )
@@ -26,8 +27,17 @@ func TestRenderTrustedPanelKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AURIGA_AGENT_PANEL_KEYS_FILE", file)
-	spec := &nodev1.InstanceSpec{InstanceId: "inst-panel", TenantId: "t1", OwnerId: "u1"}
-	opt := renderer.Options{MetaDir: filepath.Join(root, "meta"), Access: testAccess(t, "")}
+	sealingPrivate, sealingPublic, err := identity.GenerateSealingKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := []byte(`{"credential":"private-managed-material"}`)
+	sealed, err := renderer.SealForTest(sealingPublic, "inst-panel", "device_credential", 1, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &nodev1.InstanceSpec{InstanceId: "inst-panel", TenantId: "t1", OwnerId: "u1", Generation: 1, Secrets: &nodev1.Secrets{DeviceCredential: sealed}}
+	opt := renderer.Options{MetaDir: filepath.Join(root, "meta"), Access: testAccess(t, ""), SealingPrivate: sealingPrivate}
 	result, err := renderer.Render(spec, opt)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +56,28 @@ func TestRenderTrustedPanelKeys(t *testing.T) {
 	if !strings.Contains(string(env), "AURIGA_PANEL_KEYS_FILE=/run/auriga/panel-keys.json") {
 		t.Fatal("panel key path missing")
 	}
+	devicePath := filepath.Join(opt.MetaDir, "device-credential.json")
+	deviceRaw, err := os.ReadFile(devicePath)
+	if err != nil || string(deviceRaw) != string(credential) {
+		t.Fatal("managed credential missing beside panel keys")
+	}
+	assertSecretRestricted(t, devicePath)
+	if !strings.Contains(string(env), "AURIGA_DEVICE_CREDENTIAL_FILE="+renderer.ContainerDeviceCredential) || strings.Contains(string(env), string(credential)) {
+		t.Fatal("invalid managed credential environment")
+	}
 	first := result.Digest
+	spec.Secrets.DeviceCredential, err = renderer.SealForTest(sealingPublic, "inst-panel", "device_credential", 1, []byte(`{"credential":"rotated-managed-material"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = renderer.Render(spec, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == result.Digest {
+		t.Fatal("managed credential changes absent from digest when panel keys are present")
+	}
+	first = result.Digest
 	if err := os.WriteFile(file, []byte(strings.ReplaceAll(string(raw), "panel-1", "panel-2")), 0600); err != nil {
 		t.Fatal(err)
 	}

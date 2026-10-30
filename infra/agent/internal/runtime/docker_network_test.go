@@ -46,7 +46,7 @@ func TestDockerRejectsForeignNetworkConflict(t *testing.T) {
 // The fixture models actual Engine inspect/connect state: an API success alone
 // does not prove the edge is attached to the correct isolated network.
 func TestDockerTrustedEdgeNetwork(t *testing.T) {
-	for _, mode := range []string{"ok", "foreign-network", "external-network", "foreign-member", "wrong-edge", "host-edge", "wrong-alias", "connect-failure"} {
+	for _, mode := range []string{"ok", "managed-network", "managed-wrong-alias", "foreign-network", "external-network", "foreign-member", "wrong-edge", "host-edge", "wrong-alias", "connect-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			connected, created, disconnected, removedNetwork, edgeStopped := false, false, false, false, false
 			base := (&fakeEngine{}).handler()
@@ -61,7 +61,11 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 						EndpointConfig struct{ Aliases []string }
 					}
 					_ = json.NewDecoder(r.Body).Decode(&body)
-					if body.Container != "edge-id" || len(body.EndpointConfig.Aliases) != 1 || body.EndpointConfig.Aliases[0] != "portal.example.com" {
+					want := 1
+					if strings.HasPrefix(mode, "managed-") {
+						want = 2
+					}
+					if body.Container != "edge-id" || len(body.EndpointConfig.Aliases) != want || body.EndpointConfig.Aliases[0] != "portal.example.com" || (want == 2 && body.EndpointConfig.Aliases[1] != "network.example.com") {
 						t.Error("unexpected edge/alias attachment")
 					}
 					if mode == "connect-failure" {
@@ -114,7 +118,11 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 						if mode == "wrong-alias" {
 							alias = "other.example.com"
 						}
-						nets["auriga-net-inst_i1"] = map[string]any{"NetworkID": "net1", "Aliases": []string{alias}}
+						aliases := []string{alias}
+						if mode == "managed-network" {
+							aliases = append(aliases, "network.example.com")
+						}
+						nets["auriga-net-inst_i1"] = map[string]any{"NetworkID": "net1", "Aliases": aliases}
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"Id": "edge-id", "State": map[string]bool{"Running": !edgeStopped}, "Config": map[string]any{"Labels": map[string]string{"auriga.role": role}}, "HostConfig": map[string]string{"NetworkMode": networkMode}, "NetworkSettings": map[string]any{"Networks": nets}})
 				case r.URL.Path == "/containers/auriga-inst-inst_i1/json":
@@ -134,14 +142,18 @@ func TestDockerTrustedEdgeNetwork(t *testing.T) {
 				}
 			}))
 			defer srv.Close()
-			d, err := runtime.NewDocker(runtime.DockerConfig{Host: srv.URL, EdgeContainer: "test-edge", PlatformHost: "portal.example.com"})
+			portal := ""
+			if strings.HasPrefix(mode, "managed-") {
+				portal = "network.example.com"
+			}
+			d, err := runtime.NewDocker(runtime.DockerConfig{Host: srv.URL, EdgeContainer: "test-edge", PlatformHost: "portal.example.com", PortalHost: portal})
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.Policy.AllowAnyImage = true
 			s := &runtime.Spec{InstanceID: "inst_i1", Image: "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("ab", 32), HomeBind: t.TempDir(), MetaBind: t.TempDir(), HostUID: 200001}
 			err = ensureDocker(t, d, context.Background(), s, nil)
-			if mode != "ok" {
+			if mode != "ok" && mode != "managed-network" {
 				if err == nil || created {
 					t.Fatalf("unsafe instance created: err=%v created=%v", err, created)
 				}

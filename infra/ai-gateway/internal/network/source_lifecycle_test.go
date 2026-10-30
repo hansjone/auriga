@@ -116,7 +116,7 @@ func TestSourceRPCDeadlinePolicy(t *testing.T) {
 	f.block = true
 	f.mu.Unlock()
 	start := time.Now()
-	_, ae := client.Call(context.Background(), liveBinding{}, "ready", nil)
+	_, ae := client.Call(context.Background(), liveBinding{}, "head", nil)
 	if ae == nil || ae.Code != "network.overloaded" || time.Since(start) > time.Second {
 		t.Fatal("legacy timeout changed")
 	}

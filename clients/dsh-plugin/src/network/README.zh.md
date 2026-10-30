@@ -81,7 +81,7 @@ provider 接口：
 - `submit/reconcileSubmission`：HTTPS 提交前将同一私有请求和幂等键耐久写入独立 outbound 文件；明确拒绝立即删除记录，结果未知保留最多 10 分钟，不盲目重放。全局最多 256 条、每个来源绑定最多 16 条，满时仅对此会话背压；恢复时对同一记录最多调用 3 次 reconcile，次数先落盘。没有 reconcile 端口时同样按操作/重启惰性清理过期记录。过期、重试耗尽或旧格式记录缺失年龄时记 outcome-unknown 诊断并释放元数据，不能宣称远端操作成功或重新发送。
 - `publishConsent`：耐久 outbox 的幂等发布/重新核权端口，只有确认成功后才删除事件；每批仅附事件对应的 `requestId/digest/recipientIds`，不附其他来源、预览或原始签名帧。默认/撤销也须更新平台状态，不能只修改 UI。失败后事件保留，后续 snapshot/操作会重试。
 
-真实 IAM 已提供设备 Bearer 专用的 `/api/iam/v1/network/register` 与 `/api/iam/v1/network/tickets`；固定根清单与公告端点分别为 `/api/collab/v1/network/keys`、`/api/collab/v1/network/keys/announcement`，官方基础 provider 使用这些正式端点。普通会话耐久登记沿上述第二阶段显式触发；完整双 DSH 收发仍由后续任务接线。managed 模式尚未提供设备级联网凭据通道，不把 instance token 当设备令牌使用。
+真实 IAM 已提供设备 Bearer 专用的 `/api/iam/v1/network/register` 与 `/api/iam/v1/network/tickets`；固定根清单与公告端点分别为 `/api/collab/v1/network/keys`、`/api/collab/v1/network/keys/announcement`，官方基础 provider 使用这些正式端点。普通会话耐久登记沿上述第二阶段显式触发。managed 模式从 renderer 的 `AURIGA_DEVICE_CREDENTIAL_FILE` 读取独立托管设备凭据，经 IAM 专用 grant 换取短期设备 Bearer，复用同一 provider/lifecycle/runtime、宿主接线与 consent/接收控制。文件绑定 tenant/owner/instance，轮换先关旧代连接并按新 device 分区账本；停止、删除、成员移除与管理员吊销由在线实例/设备/成员权威核验。不会把 instance token 当设备令牌，真实入网与双端互发仍须独立验收。契约见 `contracts/auth/managed-device.md`。
 
 本地 UI 通过 `/auriga/local-login/consent/{snapshot,decide,default,revoke}` 接真实 consent。路由先经过原生 admission/同源检查，再以当前 HTTP 请求绑定用户、检查本机登录与写请求 CSRF；浏览器不能声明主体或来源。视图沿用显式字段投影，不返回 ownershipRevision、授权证明、摘要、内部决策原因或 outbox。
 

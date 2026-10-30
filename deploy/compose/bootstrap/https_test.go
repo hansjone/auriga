@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
+	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 )
 
 func TestComposeDirectHTTPSCLI(t *testing.T) {
@@ -219,7 +220,7 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			accessJSON, _, err := loadComposeAccess(input, "public-test-edge")
+			accessJSON, access, err := loadComposeAccess(input, "public-test-edge")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -227,7 +228,8 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			legacy := sha256.Sum256(append(accessJSON, []byte(fmt.Sprintf("\nnetwork-wss-v2-https\n%s\nreal\nfalse\ntrue\n%s", image, browser.Digest()))...))
+			browserDigest := browser.Digest()
+			legacy := sha256.Sum256(append(accessJSON, []byte(fmt.Sprintf("\nnetwork-wss-v2-https\n%s\nreal\nfalse\ntrue\n%s", image, browserDigest))...))
 			browser.Clear()
 			if err := os.WriteFile(receipt, append([]byte(fmt.Sprintf("%x", legacy)), sealed[64:]...), 0600); err != nil {
 				t.Fatal(err)
@@ -238,6 +240,23 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			}
 			if before != installationSnapshot(t, out) {
 				t.Fatal("old receipt repaired")
+			}
+			ui, err := relayui.Resolve(access, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, oldRecipe := range []string{"network-wss-v3-https-native-client-litellm-ui-v2", "network-wss-v4-managed-device"} {
+				oldInput := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\nreal\nfalse\ntrue\n%s\n%s", oldRecipe, image, browserDigest, ui.Digest()))...))
+				if err := os.WriteFile(receipt, append([]byte(fmt.Sprintf("%x", oldInput)), sealed[64:]...), 0600); err != nil {
+					t.Fatal(err)
+				}
+				before = installationSnapshot(t, out)
+				if b, err := exec.Command(binary, args...).CombinedOutput(); err == nil {
+					t.Fatalf("old recipe %s accepted: %s", oldRecipe, b)
+				}
+				if before != installationSnapshot(t, out) {
+					t.Fatalf("old recipe %s repaired managed materials", oldRecipe)
+				}
 			}
 		})
 	}

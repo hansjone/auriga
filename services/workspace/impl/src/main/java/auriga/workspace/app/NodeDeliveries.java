@@ -21,10 +21,19 @@ public final class NodeDeliveries {
 
   private final WorkspaceStore store;
   private final Clock clock;
+  private final java.util.function.Predicate<Map<String, Object>> dispatchable;
 
   public NodeDeliveries(WorkspaceStore store, Clock clock) {
+    this(store, clock, row -> true);
+  }
+
+  public NodeDeliveries(
+      WorkspaceStore store,
+      Clock clock,
+      java.util.function.Predicate<Map<String, Object>> dispatchable) {
     this.store = store;
     this.clock = clock;
+    this.dispatchable = dispatchable;
   }
 
   public List<Delivery> claim(UUID node, UUID session, Set<UUID> inFlight) {
@@ -51,6 +60,8 @@ public final class NodeDeliveries {
     for (var job : jobs) {
       UUID id = (UUID) job.get("id");
       if (inFlight.contains(id)) continue;
+      if (job.get("kind").equals("restart")
+          && !dispatchable.test(store.instance((UUID) job.get("instance_id")))) continue;
       int attempt = ((Number) job.get("attempts")).intValue() + 1;
       try {
         String kind = (String) job.get("kind");
