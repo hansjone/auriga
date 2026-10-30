@@ -2,10 +2,11 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { totp, totpNotBefore } from './checks.mjs';
 export { totp } from './checks.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { queryLoki } from './loki-query.mjs';
 
 export class StepError extends Error {}
 export class Skip extends StepError {}
@@ -374,7 +375,7 @@ export async function runPhase1(options, config, dependencies = {}) {
             .size >= 2,
           '真实提供商模式需至少两个不同的上游模型',
         );
-      if (!config.modelUi)
+      if (!config.modelUi && !config.modelNative)
         throw new Skip(
           '双DSH模型调用UI尚未接线：缺少modelUi；直接代理请求不能代替DSH调用',
         );
@@ -404,7 +405,12 @@ export async function runPhase1(options, config, dependencies = {}) {
         );
       await cloud(state);
       await desktop(state);
-      await (await getAdapter()).models(state);
+      await (await getAdapter()).models(state, item);
+      if (config.modelNative)
+        requireThat(
+          item.nativeModels?.failoverVerified === true,
+          '双端真实对话后仍须完成模型池故障切换验证',
+        );
     },
     async (state, item) => {
       item.upstreamMode = await virtualKeys(
@@ -426,11 +432,16 @@ export async function runPhase1(options, config, dependencies = {}) {
         .filter((entry) => entry.status === 'FAIL')
         .map((entry) => entry.traceId);
       if (!traces.length) {
-        // Harmless failing request; no account mutation or expensive model call.
+        // An unknown login transaction cannot advance an account. Use the
+        // public controller's validation failure, rather than a security-chain
+        // 401 that may finish before the application's request logging filter.
         await request(
-          new URL('/api/iam/v1/phase1-not-found', options.baseUrl),
+          new URL(
+            `/api/iam/v1/login/transactions/${randomUUID()}/advance`,
+            options.baseUrl,
+          ),
           state,
-          { expected: [404] },
+          { method: 'POST', body: {}, expected: [400, 404] },
         );
         traces.push(state.traceId);
       }
@@ -600,7 +611,7 @@ async function virtualKeys(relay, state, adminRequest = request) {
     );
     // A zero budget tests enforcement without consuming a paid budget.
     const exhausted = await generate({ max_budget: 0 });
-    const denied = await call(exhausted, [400, 401, 402, 403, 429]);
+    const denied = await call(exhausted, [400, 401, 402, 403, 422, 429]);
     requireThat(
       /budget|exceed.*spend/i.test(JSON.stringify(denied?.error)),
       '预算请求被拒绝但没有明确budget错误，不能视为预算生效',
@@ -668,6 +679,11 @@ export async function waitSpend(
 }
 
 async function verifyLogs(config, id, startedAt) {
+  const skew = config.clockSkewMs ?? 5000;
+  requireThat(
+    Number.isSafeInteger(skew) && skew >= 0 && skew <= 60000,
+    '日志查询clockSkewMs须为0到60000的整数',
+  );
   const url = new URL('loki/api/v1/query_range', trailing(config.lokiUrl));
   url.searchParams.set(
     'query',
@@ -675,13 +691,20 @@ async function verifyLogs(config, id, startedAt) {
   );
   url.searchParams.set(
     'start',
-    String(BigInt(new Date(startedAt).getTime()) * 1000000n),
+    String(BigInt(new Date(startedAt).getTime() - skew) * 1000000n),
   );
   url.searchParams.set('limit', '1000');
   const deadline = Date.now() + 10000;
   do {
-    url.searchParams.set('end', String(BigInt(Date.now()) * 1000000n));
-    const data = await request(url, traceState());
+    url.searchParams.set('end', String(BigInt(Date.now() + skew) * 1000000n));
+    let data;
+    if (config.queryCommand) {
+      try {
+        data = await queryLoki(config.queryCommand, url, config.queryTimeoutMs);
+      } catch {
+        throw new StepError('Loki远程查询失败、超时或返回无效JSON');
+      }
+    } else data = await request(url, traceState());
     requireThat(
       data?.status === 'success' && Array.isArray(data?.data?.result),
       'Loki query_range返回格式不合法',

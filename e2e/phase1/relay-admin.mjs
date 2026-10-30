@@ -10,13 +10,22 @@ export async function relayAdminRequest(
   adapter,
   target,
   state,
-  { method = 'GET', body, key, expected = [200], timeout = 15000 } = {},
+  {
+    method = 'GET',
+    body,
+    key,
+    expected = [200],
+    timeout = 15000,
+    discardBody = false,
+  } = {},
 ) {
   const base = httpUrl(adapter.config.relay.baseUrl);
   const url = new URL(target);
   const paths = [
     'health/readiness',
     'model/info',
+    'model/block',
+    'model/unblock',
     'key/generate',
     'key/info',
     'key/delete',
@@ -31,6 +40,16 @@ export async function relayAdminRequest(
       paths.some((path) => url.pathname === base.pathname + path),
     '管理请求必须留在已配置的LiteLLM管理入口',
   );
+  if (['/ai/model/block', '/ai/model/unblock'].includes(url.pathname))
+    requireThat(
+      adapter.config.modelNative?.allowPoolDisruption === true &&
+        method === 'POST' &&
+        discardBody === true &&
+        body &&
+        Object.keys(body).length === 1 &&
+        /^[A-Za-z0-9_-]{1,128}$/.test(body.model_id ?? ''),
+      '故障演练须显式授权、只提交一个部署id并丢弃模型响应正文',
+    );
   adapter.state = state;
   if (!adapter.relayAdminPage) {
     const admin = adapter.config.admin;
@@ -139,7 +158,7 @@ export async function relayAdminRequest(
     };
   }
   const response = await adapter.relayAdminPage.evaluate(
-    async ({ url, method, body, key, traceparent, timeout }) => {
+    async ({ url, method, body, key, traceparent, timeout, discardBody }) => {
       const result = await globalThis.fetch(url, {
         method,
         credentials: 'same-origin',
@@ -153,10 +172,11 @@ export async function relayAdminRequest(
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
+      if (discardBody) await result.body?.cancel();
       return {
         status: result.status,
         headers: { 'x-trace-id': result.headers.get('x-trace-id') },
-        body: result.status === 204 ? null : await result.json(),
+        body: discardBody || result.status === 204 ? null : await result.json(),
       };
     },
     {
@@ -166,6 +186,7 @@ export async function relayAdminRequest(
       key,
       traceparent: traceHeader(state),
       timeout,
+      discardBody,
     },
   );
   observeTrace(state, response.headers, response.status);

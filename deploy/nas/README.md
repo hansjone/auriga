@@ -83,3 +83,45 @@ inspect 各 30 秒、每次不可变 Id 导出各 3 分钟，失败取消并回�
 完成摘要检查、材料验证或基础栈初始化不代表已能登录、真实实例已就绪或现场验收通过。
 
 模型接入、独立 UI Origin、成员预算和外部 Key 操作见 [LiteLLM 部署指南](../../docs/dev/relay-litellm.md)。
+
+## 可选集中日志
+
+NAS 也支持 `observability` profile，使用与 Compose 开发栈相同版本的
+Loki 3.5.5、Alloy 1.10.2。在可信渠道独立批准这两个版本的 linux/amd64 摘要，
+显式拉取后核对 `RepoDigests`、平台和本地 Id；在数据根的 `stack.env` 添加：
+
+```dotenv
+COMPOSE_PROFILES=observability
+AURIGA_IMAGE_LOKI=grafana/loki:3.5.5@sha256:<已批准摘要>
+AURIGA_IMAGE_ALLOY=grafana/alloy:v1.10.2@sha256:<已批准摘要>
+```
+
+然后重新执行 `scripts/start.sh`。预检增加两项精确镜像检查；仍不自动拉取、
+构建或改变部署根。关闭 profile 不会删除日志卷，也不会自动停止已经运行的采集器；
+如需停采集，用同一 project 的 Compose 显式停止 `alloy loki`，保留业务服务。
+新增服务仅接内部日志网络，不发布端口；日志保存七天，资源上限约 448 MiB。
+Alloy 仅筛选固定 `auriga-nas-test` project 的容器。一次性的 `alloy-prepare` 无网络、
+只持有 CHOWN，固定其状态卷顶层为 UID/GID 0；运行时 Alloy 以 UID 0 访问 Docker socket，
+仍丢弃全部 capability，不能依赖 DAC_OVERRIDE 写入上游镜像拥有的状态目录。
+公开日志配置须能由 Loki 的 UID10001 和 Alloy 的 UID0 读取；通过 SMB 单文件更新时，
+需恢复这些公开文件的发布权限与所有权，并重新创建消费容器，不能只检查宿主的 mode 位。
+不要将此权限操作应用于签名密钥、凭据或其他部署材料。
+Docker socket 即使只读挂载仍有
+宿主 root 等效权限；只在受控测试 NAS 启用，审阅日志后才分享。
+此 profile 收集服务容器日志，独立桌面插件日志仍需另行按原日志指南收集。
+
+不必对公网暴露无鉴权 Loki。在已授权的 NAS 操作通道运行
+`scripts/observability-query.sh`，stdin 传一个换行结尾的
+`http://127.0.0.1:3100/loki/api/v1/query_range?...` URL；stdout 返回原始 Loki JSON。
+脚本只接受这个固定回环查询端点，通过 `compose exec -T loki` 查询，拒绝其他地址或多行输入。
+它使用相同 `AURIGA_DATA_ROOT`、安装模式和项目，不读取业务凭据。
+统一验收的 `observability.queryCommand` 可配置受信任的 argv 数组（例如既有 SSH
+操作通道调用此脚本），`lokiUrl` 固定为 `http://127.0.0.1:3100`。
+命令通过 stdin 接收 URL，stdout 只能输出 Loki JSON；操作通道的提示信息写 stderr。
+`streamSelector` 使用 `{job="auriga-nas"}`，`expectedServices` 填真实结构化日志的
+服务字段（如 `edge`、`iam`）。验收仍要求同一失败 trace 覆盖所有指定服务，不能用健康状态代替。
+
+锁定镜像的真实状态卷回归可在本机 Unix Docker 上运行：
+`AURIGA_IMAGE_ALLOY=sha256:<已核对本地Id> sh deploy/nas/test/observability-volume.sh`。
+它只创建带唯一标签的临时卷，先复现 capless UID0 对镜像所属目录的写拒绝，再运行正式
+prepare 命令并验证可持久写入；结束时仅清理标签匹配的测试卷，不接业务网络或 Docker socket。

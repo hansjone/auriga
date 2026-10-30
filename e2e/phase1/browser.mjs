@@ -451,8 +451,12 @@ export class BrowserSteps {
     }
   }
 
-  async models(state) {
+  async models(state, item) {
     this.state = state;
+    if (this.config.modelNative) {
+      const { nativeModels } = await import('./native-models.mjs');
+      return nativeModels(this, state, item);
+    }
     for (const model of this.config.relay.models) {
       for (const [page, settings] of [
         [this.cloudPage, this.config.modelUi.cloud],

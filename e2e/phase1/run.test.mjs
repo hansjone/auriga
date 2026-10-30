@@ -243,6 +243,49 @@ test('集中Loki查询覆盖本次失败trace而不是无关成功日志', async
   assert.equal(report.items[7].verifiedTraceCount, 1);
 });
 
+test('remote Loki query transport proves the same cross-service trace coverage', async (t) => {
+  let probe;
+  const baseUrl = await fixture(t, (req, res) => {
+    probe = { method: req.method, path: req.url };
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  const report = await runPhase1(
+    { baseUrl, only: [8] },
+    {
+      observability: {
+        lokiUrl: 'http://127.0.0.1:3100',
+        streamSelector: '{service=~".+"}',
+        expectedServices: ['edge', 'iam'],
+        queryCommand: [
+          process.execPath,
+          '-e',
+          `
+          let input = '';
+          process.stdin.on('data', chunk => input += chunk);
+          process.stdin.on('end', () => {
+            const url = new URL(input.trim());
+            if (BigInt(url.searchParams.get('end')) - BigInt(url.searchParams.get('start')) < 10000000000n) process.exit(5);
+            const query = url.searchParams.get('query');
+            const id = query.match(/trace_id="([0-9a-f]{32})"/)[1];
+            process.stdout.write(JSON.stringify({status:'success',data:{result:[{
+              values: ['edge','iam'].map(service => ['1',JSON.stringify({service,trace_id:id})])
+            }]}}));
+          });
+        `,
+        ],
+      },
+    },
+  );
+  assert.equal(report.items[7].status, 'PASS');
+  assert.equal(report.items[7].verifiedTraceCount, 1);
+  assert.equal(probe.method, 'POST');
+  assert.match(
+    probe.path,
+    /^\/api\/iam\/v1\/login\/transactions\/[a-f0-9-]{36}\/advance$/,
+  );
+});
+
 test('参数拒绝未知条目、URL凭据和缺少管理员文件', () => {
   assert.throws(() => parseArgs(['--base-url', 'http://localhost']));
   assert.throws(() =>
@@ -588,8 +631,10 @@ test('真实外部Key验收拒绝缺失公开入口或包含凭据的地址，�
 });
 
 for (const upstreamMode of ['fixture', 'live']) {
-  for (const broken of [false, true]) {
-    test(`虚拟Key真实HTTP流程与清理（${upstreamMode}）：${broken ? '错误鉴权不能冒预算生效' : '成功调用/限流/预算/用量/吊销'}`, async (t) => {
+  for (const { broken, budgetStatus } of [false, true].flatMap((broken) =>
+    [401, 422].map((budgetStatus) => ({ broken, budgetStatus })),
+  )) {
+    test(`虚拟Key真实HTTP流程与清理（${upstreamMode}，${budgetStatus}）：${broken ? '错误鉴权不能冒预算生效' : '成功调用/限流/预算/用量/吊销'}`, async (t) => {
       const keys = new Map();
       const requestId = randomBytes(8).toString('hex');
       const adminKey = randomBytes(24).toString('hex');
@@ -635,7 +680,7 @@ for (const upstreamMode of ['fixture', 'live']) {
                   type: broken ? 'authentication_error' : 'budget_exceeded',
                 },
               },
-              401,
+              budgetStatus,
             );
           if (record.calls++)
             return respond({ error: { type: 'rate_limit_exceeded' } }, 429);
@@ -757,7 +802,7 @@ test('multiple virtual key cleanup failures retain the original HTTP failure', a
   assert.equal(deleted, 2);
   assert.match(
     report.items[6].reason,
-    /首失：HTTP状态500，预期400\/401\/402\/403\/429/,
+    /首失：HTTP状态500，预期400\/401\/402\/403\/422\/429/,
   );
   assert.equal(JSON.stringify(report).includes(privateKey), false);
 });

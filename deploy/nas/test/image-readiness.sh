@@ -80,7 +80,7 @@ check_preflight() {
   : >"$NAS_READY_LOG"
   if sh "$NAS_ROOT/scripts/preflight.sh" >"$TMP/output" 2>&1; then result=0; else result=$?; fi
   if [ "$2" = pass ]; then
-    if [ "$result" = 0 ] && [ "$(grep -c '^image inspect ' "$NAS_READY_LOG")" = 7 ]; then pass "$1"; else bad "$1"; fi
+    if [ "$result" = 0 ] && [ "$(grep -c '^image inspect ' "$NAS_READY_LOG")" = "${NAS_READY_IMAGE_COUNT:-7}" ]; then pass "$1"; else bad "$1"; fi
   elif [ "$result" != 0 ] && grep -q "$3" "$TMP/output"; then pass "$1"; else bad "$1"; fi
   if grep -Eq '(^| )pull( |$)| up ' "$NAS_READY_LOG"; then bad preflight_must_be_read_only; fi
 }
@@ -153,5 +153,37 @@ for NAS_READY_UP_EXIT in 73 0; do
     && ! grep -Eq '(^| )pull( |$)' "$NAS_READY_LOG"; then
     pass "start_single_up_exit_$NAS_READY_UP_EXIT"
   else bad "start_single_up_exit_$NAS_READY_UP_EXIT"; fi
+done
+write_env
+printf 'COMPOSE_PROFILES=observability\n' >>"$AURIGA_DATA_ROOT/stack.env"
+check_preflight observability_requires_explicit_images fail 'AURIGA_IMAGE_LOKI'
+for service in LOKI ALLOY; do
+  printf 'AURIGA_IMAGE_%s=example.com/%s@sha256:%s\n' "$service" "$service" "$(printf '%064d' 0 | tr 0 8)" >>"$AURIGA_DATA_ROOT/stack.env"
+done
+NAS_READY_IMAGE_COUNT=9
+check_preflight observability_nine_local_images pass ''
+for service in LOKI ALLOY; do
+  NAS_READY_MISSING=$(sed -n "s/^AURIGA_IMAGE_$service=//p" "$AURIGA_DATA_ROOT/stack.env")
+  export NAS_READY_MISSING
+  check_preflight "observability_missing_$service" fail 'image not available locally'
+done
+unset NAS_READY_MISSING NAS_READY_IMAGE_COUNT COMPOSE_PROFILES AURIGA_IMAGE_LOKI AURIGA_IMAGE_ALLOY
+cp "$ROOT/scripts/observability-query.sh" "$NAS_ROOT/scripts/observability-query.sh"
+write_env
+: >"$NAS_READY_LOG"
+query='http://127.0.0.1:3100/loki/api/v1/query_range?query=%7Bservice%3D%22edge%22%7D'
+if printf '%s\n' "$query" | sh "$NAS_ROOT/scripts/observability-query.sh" >"$TMP/output" 2>&1 \
+ && grep -Fq "exec -T loki /busybox/wget -T 10 -qO- $query" "$NAS_READY_LOG"; then pass observability_local_query
+else bad observability_local_query; fi
+for query in 'http://example.com/loki/api/v1/query_range?x=1' \
+ 'http://127.0.0.1:3100@evil.example/loki/api/v1/query_range?x=1' \
+ 'http://127.0.0.1:3100/ready' \
+ 'http://127.0.0.1:3100/loki/api/v1/query_range?x=1#fragment' \
+ 'http://127.0.0.1:3100/loki/api/v1/query_range?x=1
+second-line'; do
+  : >"$NAS_READY_LOG"
+  if printf '%s\n' "$query" | sh "$NAS_ROOT/scripts/observability-query.sh" >"$TMP/output" 2>&1; then bad observability_query_boundary
+  elif [ ! -s "$NAS_READY_LOG" ]; then pass observability_query_rejected_before_docker
+  else bad observability_query_touched_docker; fi
 done
 [ "$fail" = 0 ]

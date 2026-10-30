@@ -12,6 +12,81 @@ x-cap-drop-all: &cap_drop_all
   privileged: false
 
 services:
+  loki:
+    image: ${AURIGA_IMAGE_LOKI:-grafana/loki:3.5.5}
+    profiles: [observability]
+    <<: *cap_drop_all
+    user: '10001:10001'
+    read_only: true
+    restart: unless-stopped
+    command: ['-config.file=/etc/loki/auriga.yml']
+    networks: [observability]
+    volumes:
+      - ./observability/loki.yml:/etc/loki/auriga.yml:ro
+      - lokidata:/loki
+    healthcheck:
+      test: ['CMD', '/busybox/wget', '-qO-', 'http://127.0.0.1:3100/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+    cpus: 0.25
+    pids_limit: 64
+
+  alloy-prepare:
+    image: ${AURIGA_IMAGE_ALLOY:-grafana/alloy:v1.10.2}
+    profiles: [observability]
+    <<: *cap_drop_all
+    cap_add: [CHOWN]
+    user: '0:0'
+    read_only: true
+    network_mode: none
+    entrypoint: ['/bin/sh', '-ec']
+    # Only the volume root is reassigned. No recursive mutation or host mount.
+    command: ['chown 0:0 /var/lib/alloy']
+    volumes:
+      - alloydata:/var/lib/alloy
+    mem_limit: 32m
+    cpus: 0.10
+    pids_limit: 16
+
+  alloy:
+    image: ${AURIGA_IMAGE_ALLOY:-grafana/alloy:v1.10.2}
+    profiles: [observability]
+    <<: *cap_drop_all
+    user: '0:0'
+    read_only: true
+    restart: unless-stopped
+    command:
+      [
+        'run',
+        '--storage.path=/var/lib/alloy',
+        '--server.http.listen-addr=127.0.0.1:12345',
+        '/etc/alloy/config.alloy',
+      ]
+    networks: [observability]
+    environment:
+      COMPOSE_PROJECT_NAME: auriga-nas-test
+    volumes:
+      # The Docker API remains host-root equivalent even through a :ro socket.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - ./observability/health.sh:/etc/alloy/health.sh:ro
+      - alloydata:/var/lib/alloy
+    depends_on:
+      alloy-prepare:
+        condition: service_completed_successfully
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', '/bin/bash', '/etc/alloy/health.sh']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 192m
+    cpus: 0.25
+    pids_limit: 64
+
   panel-prepare:
     image: ${AURIGA_IMAGE_EDGE}
     <<: *cap_drop_all
@@ -432,6 +507,8 @@ services:
     pids_limit: 256
 
 networks:
+  observability:
+    internal: true
   internal:
     name: auriga-nas-test_internal
     driver: bridge
@@ -448,6 +525,10 @@ networks:
   lan:
     external: true
     name: ${AURIGA_LAN_NETWORK}
+
+volumes:
+  lokidata:
+  alloydata:
 
 secrets:
   litellm_master:

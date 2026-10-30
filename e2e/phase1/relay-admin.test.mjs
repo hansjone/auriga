@@ -46,6 +46,8 @@ test('relay admin uses a real login and browser handoff, confines credentials, a
       await delay(300);
       return res.end('{"key":"test-key"}');
     }
+    if (req.url === '/ai/model/block')
+      return res.end('unread-private-model-body');
     res.writeHead(403);
     res.end('{"error":"test-private-error"}');
   });
@@ -117,6 +119,7 @@ document.querySelector('button').onclick=()=>{
         password: 'test-password',
       },
       relay: { baseUrl: uiOrigin + '/ai/', browserAdmin: true },
+      modelNative: { allowPoolDisruption: true },
     },
   );
   t.after(() => adapter.close());
@@ -130,6 +133,21 @@ document.querySelector('button').onclick=()=>{
     key: 'test-key',
   });
   assert.deepEqual(seen, ['login', 'handoff', '/ai/key/generate']);
+  assert.equal(
+    await call('model/block', {
+      method: 'POST',
+      body: { model_id: 'test-deployment' },
+      discardBody: true,
+    }),
+    null,
+  );
+  await assert.rejects(
+    call('model/block', {
+      method: 'POST',
+      body: { model_id: 'test-deployment' },
+    }),
+    /故障演练/,
+  );
   await assert.rejects(
     call('key/info'),
     (error) => error.message === 'HTTP状态403，预期200',

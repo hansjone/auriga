@@ -47,17 +47,17 @@ export function nativeClient(request) {
         fiberPhase: 'active',
       };
     },
-    async createSession(cwd, provider) {
+    async createSession(cwd, provider, model = 'cloud-desk-fixture') {
       const { sessionId } = await rpc('session/create', {
         request: { cwd, agentPreset: 'standard' },
       });
       assert.equal(typeof sessionId, 'string');
       sessions.push(sessionId);
       const { selected } = await rpc('session/selectModel', {
-        request: { sessionId, provider, model: 'cloud-desk-fixture' },
+        request: { sessionId, provider, model },
       });
       assert.equal(selected.provider, provider);
-      assert.equal(selected.model, 'cloud-desk-fixture');
+      assert.equal(selected.model, model);
       return sessionId;
     },
     async prompt(sessionId, marker) {

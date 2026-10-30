@@ -2,6 +2,9 @@
 
 需要管理员提供 **Auriga 平台地址、成员账号和插件发行包**。无需下载 Auriga 源码或在自己的电脑部署平台。
 
+要让 DSH 对话使用团队中转站，另按 [原生模型配置步骤](relay-models.zh.md)
+取得自己的成员虚拟 Key 并配置提供方；插件登录完成后仍需确认原生会话实际选择了该模型。
+
 ## 1. 检查 DSH
 
 使用 **DSH 0.2.1-rc.3**（最低版本和当前验收目标）、Node.js 22.12+。在终端执行 `dsh --version`，桌面版也可在“关于”查看版本。`0.2.0-rc.2` 不满足要求；更新版本先由管理员确认兼容性。请从 [DSH 官方项目](https://github.com/deepseek-ai/deepseek-harness)获取对应 Windows、macOS 或 Linux 的发行版。
