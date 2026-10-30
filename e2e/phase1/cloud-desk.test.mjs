@@ -425,7 +425,7 @@ test('a model endpoint must be an actual private IP, never a DNS name shaped lik
     fixture: { cloudHost: '127.0.0.1', desktopHost: '10.evil.example.com' },
   };
   assert.throws(() => validateRunConfig(cfg, access));
-  cfg.fixture.desktopHost = '192.168.0.2';
+  cfg.fixture.desktopHost = '192.168.0.2'; // gitleaks:allow test fixture private address, not a deployment
   validateRunConfig(cfg, access);
   cfg.connect.platformOrigin = 'http://10.evil.example.com';
   assert.throws(() => validateRunConfig(cfg, access), {
