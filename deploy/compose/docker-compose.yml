@@ -367,9 +367,23 @@ services:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
       GF_LOG_MODE: console
       GF_LOG_CONSOLE_FORMAT: json
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        if [ ! -f "$$GF_SECURITY_ADMIN_PASSWORD__FILE" ] || [ ! -r "$$GF_SECURITY_ADMIN_PASSWORD__FILE" ] || [ ! -s "$$GF_SECURITY_ADMIN_PASSWORD__FILE" ] || [ -z "$$(tr -d '[:space:]' < "$$GF_SECURITY_ADMIN_PASSWORD__FILE")" ]; then
+          echo 'Grafana requires a readable, nonempty password file' >&2
+          exit 78
+        fi
+        exec /run.sh
     volumes:
       - grafanadata:/var/lib/grafana
-      - ./var/observability/grafana-admin-password:/run/secrets/grafana-admin-password:ro
+      - type: bind
+        source: ./var/observability/grafana-admin-password
+        target: /run/secrets/grafana-admin-password
+        read_only: true
+        bind:
+          create_host_path: false
       - ./observability/grafana/datasources.yml:/etc/grafana/provisioning/datasources/auriga.yml:ro
       - ./observability/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/auriga.yml:ro
       - ./observability/grafana/trace.json:/var/lib/grafana/dashboards/auriga-trace.json:ro
@@ -397,6 +411,9 @@ services:
     environment:
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-auriga-m2}
     volumes:
+      # A read-only mount does not restrict the Docker API: this grants host-root
+      # equivalent access and collects third-party logs without Auriga masking.
+      # Enable only on a controlled test host; review collected logs before sharing.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./observability/config.alloy:/etc/alloy/config.alloy:ro
       - ./observability/health.sh:/etc/alloy/health.sh:ro

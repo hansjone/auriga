@@ -18,6 +18,10 @@ import auriga.common.testing.TestTokens;
 import auriga.contracts.org.v1.GetTenantRequest;
 import auriga.contracts.org.v1.Tenant;
 import auriga.contracts.org.v1.TenantServiceGrpc;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.grpc.BindableService;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
@@ -33,10 +37,46 @@ import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 class GrpcTest {
+  @Test
+  void rejectionLogsAreBoundedAndStacksRequireDebug() {
+    Logger logger = (Logger) LoggerFactory.getLogger(AurigaServerInterceptor.class);
+    Level previous = logger.getLevel();
+    var events = new ListAppender<ILoggingEvent>();
+    events.start();
+    logger.addAppender(events);
+    logger.setLevel(Level.INFO);
+    try {
+      var denied = stub(serviceToken(c -> c.claim("perms", List.of())), null);
+      var anonymous = stub(null, null);
+      for (int i = 0; i < 20; i++) {
+        assertStatus(Status.Code.PERMISSION_DENIED, () -> get(denied, "t1"));
+        assertStatus(Status.Code.UNAUTHENTICATED, () -> get(anonymous, "t1"));
+      }
+      assertTrue(events.list.size() <= 2, "high frequency rejections flooded INFO/WARN");
+      for (var event : events.list) {
+        assertEquals(Level.WARN, event.getLevel());
+        assertNull(event.getThrowableProxy());
+        assertTrue(event.getFormattedMessage().contains("code="));
+      }
+      events.list.clear();
+      logger.setLevel(Level.DEBUG);
+      assertStatus(Status.Code.PERMISSION_DENIED, () -> get(denied, "t1"));
+      assertTrue(
+          events.list.stream()
+              .anyMatch(
+                  event -> event.getLevel() == Level.DEBUG && event.getThrowableProxy() != null));
+    } finally {
+      logger.setLevel(previous);
+      logger.detachAppender(events);
+      events.stop();
+    }
+  }
+
   private static TestTokens tokens;
   private static GrpcServer server;
   private static final List<ManagedChannel> channels = new java.util.ArrayList<>();

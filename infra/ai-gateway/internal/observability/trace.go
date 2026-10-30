@@ -27,19 +27,72 @@ var pattern = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`)
 const secretKeys = `password|passwd|pwd|secret|(?:access|refresh|session|id)[_-]?token|token|client[_-]?secret|credential|totp|private[_-]?key|api[_-]?key|[a-z][a-z0-9_]*(?:_password|_passwd|_pass|_secret|_token|_api_key|_private_key|_credential|_totp|_access_key_id|_secret_access_key|_encryption_key)(?:_value)?|authorization|cookie|set-cookie`
 
 var secretKey = regexp.MustCompile(`(?i)^(?:` + secretKeys + `)$`)
-var secrets = regexp.MustCompile(`(?i)(["']?(?:` + secretKeys + `)["']?\s*[:=]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^"'\s,;}]+)`)
 var cookieHeader = regexp.MustCompile(`(?i)(\b(?:set-)?cookie\s*[:=]\s*)[^\r\n]+`)
 var bearer = regexp.MustCompile(`(?i)\b(Bearer|Basic)\s+[a-z0-9._~+/=-]+`)
 var jwt = regexp.MustCompile(`\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]*`)
 var pem = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`)
 var userinfo = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@]*):[^/\s@]+@`)
 
+const maxLogLength = 65536
+
+var logKeys = regexp.MustCompile(`["']?([A-Za-z][A-Za-z0-9_-]*)["']?\s*[:=]\s*`)
+
+// Classify each complete key once, and skip a masked value without parsing it.
+func maskLogFields(text string) string {
+	var out strings.Builder
+	cursor := 0
+	for _, match := range logKeys.FindAllStringSubmatchIndex(text, -1) {
+		if match[0] < cursor {
+			continue
+		}
+		key := text[match[2]:match[3]]
+		escapedLine := match[0] > 0 && text[match[0]-1] == '\\' && strings.ContainsRune("nrt", rune(key[0]))
+		sensitive := secretKey.MatchString(key) || secretKey.MatchString(strings.ReplaceAll(key, "-", "_")) || (escapedLine && secretKey.MatchString(key[1:]))
+		if !sensitive {
+			continue
+		}
+		start, end := match[1], match[1]
+		quote := byte(0)
+		if start < len(text) {
+			quote = text[start]
+		}
+		out.WriteString(text[cursor:start])
+		if quote == '"' || quote == '\'' {
+			end++
+			for end < len(text) {
+				c := text[end]
+				end++
+				if c == '\\' {
+					end++
+				} else if c == quote {
+					break
+				}
+			}
+			end = min(end, len(text))
+			out.WriteByte(quote)
+			out.WriteString("****")
+			out.WriteByte(quote)
+		} else {
+			for end < len(text) && !strings.ContainsRune(" \t\r\n,;&}\"'", rune(text[end])) {
+				end++
+			}
+			out.WriteString("****")
+		}
+		cursor = end
+	}
+	out.WriteString(text[cursor:])
+	return out.String()
+}
+
 func Mask(s string) string {
+	if len(s) > maxLogLength {
+		return "[log omitted: size limit]"
+	}
 	s = pem.ReplaceAllString(s, "****")
 	s = userinfo.ReplaceAllString(s, "$1:****@")
 	s = bearer.ReplaceAllString(s, "$1 ****")
 	s = jwt.ReplaceAllString(s, "****")
-	s = secrets.ReplaceAllString(s, "$1****")
+	s = maskLogFields(s)
 	return cookieHeader.ReplaceAllString(s, "$1****")
 }
 

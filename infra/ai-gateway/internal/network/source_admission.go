@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 )
 
 type sourceLane struct {
@@ -92,7 +94,7 @@ func (r *mailboxRouter) receiveSourceLocked(b liveBinding, raw []byte) bool {
 			}
 			r.dispatchHeadsLocked()
 		}()
-		r.handleContext(ctx, b, raw, false)
+		r.handleContext(observability.NATSContext(ctx, raw), b, raw, false)
 	})
 	return true
 }

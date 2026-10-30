@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 test(
-  'public Cordis assembly writes masked stack to stderr and finite file, then closes on disposal',
+  'public Cordis assembly keeps full masked stacks in the finite file and stderr empty',
   {
     skip: process.env.AURIGA_CORDIS_MODULE
       ? false
@@ -29,6 +29,7 @@ test(
       process.disconnect();
     });
     logEvent('ERROR', 'fixture failed', { trace_id:'4bf92f3577b34da6a3ce929d0e0e4736', account_id:'alice' }, new Error('Authorization: Bearer secret-fixture password=secret-password'));
+    process.send('ready');
   `;
     const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
       env: {
@@ -42,16 +43,12 @@ test(
     });
     try {
       let stderr = '',
-        stdout = '',
-        signalled = false;
+        stdout = '';
       const timer = setTimeout(() => child.kill('SIGKILL'), 10000);
       child.stderr.on('data', (chunk) => {
         stderr += chunk;
-        if (!signalled && stderr.includes('\n')) {
-          signalled = true;
-          child.send('close');
-        }
       });
+      child.once('message', () => child.send('close'));
       child.stdout.on('data', (chunk) => {
         stdout += chunk;
       });
@@ -61,18 +58,18 @@ test(
       });
       clearTimeout(timer);
       assert.equal(result, 0, stderr);
-      const event = JSON.parse(stderr.trim());
+      assert.equal(stderr, '');
+      const names = await readdir(stdout);
+      assert.deepEqual(names, ['auriga-dsh-0.jsonl']);
+      const file = await readFile(join(stdout, names[0]), 'utf8');
+      const event = JSON.parse(file);
       assert.equal(event.trace_id, '4bf92f3577b34da6a3ce929d0e0e4736');
       assert.equal(event.service, 'dsh-plugin');
       assert.equal(event.account_id, 'alice');
       assert.ok(event.exception.includes('Error:'));
       assert.ok(event.exception.includes('at '));
       for (const secret of ['secret-fixture', 'secret-password'])
-        assert.ok(!stderr.includes(secret));
-      const names = await readdir(stdout);
-      assert.deepEqual(names, ['auriga-dsh-0.jsonl']);
-      const file = await readFile(join(stdout, names[0]), 'utf8');
-      assert.deepEqual(JSON.parse(file), event);
+        assert.ok(!file.includes(secret));
     } finally {
       child.kill('SIGKILL');
       await rm(directory, { recursive: true, force: true });

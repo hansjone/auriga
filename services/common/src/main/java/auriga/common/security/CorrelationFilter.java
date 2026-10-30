@@ -13,6 +13,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerMapping;
 
 /**
  * First filter of every request: request id ({@code X-Request-Id}), W3C {@code traceparent}, log
@@ -58,18 +59,30 @@ public final class CorrelationFilter extends OncePerRequestFilter {
         ServletScopes.run(context::call, () -> chain.doFilter(request, response));
       } catch (ServletException | IOException | RuntimeException error) {
         LOG.error(
-            "HTTP request failed method={} path={}",
-            request.getMethod(),
-            request.getRequestURI(),
-            error);
+            "HTTP request failed method={} path={}", request.getMethod(), logPath(request), error);
         throw error;
       } finally {
         LOG.info(
             "HTTP request completed method={} path={} status={}",
             request.getMethod(),
-            request.getRequestURI(),
+            logPath(request),
             response.getStatus());
       }
     }
+  }
+
+  private static String logPath(HttpServletRequest request) {
+    Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+    if (pattern != null) return pattern.toString();
+    // Security failures and unmatched requests have no handler mapping. Never
+    // log an arbitrary segment: even an unknown route can contain a credential.
+    String[] path = request.getRequestURI().split("/", 5);
+    if (path.length > 3
+        && path[1].equals("api")
+        && Set.of(
+                "iam", "org", "workspace", "collab", "ai", "ops", "audit", "resource", "knowledge")
+            .contains(path[2])
+        && path[3].equals("v1")) return "/api/" + path[2] + "/v1/**";
+    return "/**";
   }
 }

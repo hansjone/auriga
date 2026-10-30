@@ -1,5 +1,7 @@
 # DSH 插件（auriga-dsh）
 
+成员安装见[安装指南](../user/install-plugin.zh.md)，打包与 tag 发布见[插件发行包](plugin-distribution.md)。桌面连接最低要求 DSH **0.2.1-rc.3** 的原生 admission；下文历史托管 rc.2 验收不能证明新桌面插件可在 rc.2 运行。
+
 包名 `auriga-dsh`（MIT），目录 `clients/dsh-plugin`。Node 22+，纯 ESM + JSDoc；类型来自 `contracts/identity/steps.schema.json`（`pnpm --filter auriga-dsh gen:steps`）。
 
 ## 模式

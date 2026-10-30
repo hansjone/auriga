@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "dsh": ">=0.2.1-rc.3"
   },
   "main": "./src/plugin.js",
   "exports": {

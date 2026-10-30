@@ -216,14 +216,19 @@ func (g *Gateway) Handler() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, r = ensureRequestID(r)
+		externalTrace := len(r.Header.Values(headerTraceparent)) == 1 && validTraceparent(r.Header.Get(headerTraceparent))
 		parent := ensureTraceparent(r)
 		r.Header.Set(headerTraceparent, parent)
 		r = r.WithContext(context.WithValue(r.Context(), ctxKeyTraceparent, parent))
 		w.Header().Set(headerTraceparent, parent)
 		w.Header().Set("X-Trace-Id", parent[3:35])
-		if g.Log != nil {
-			g.Log.InfoContext(r.Context(), "HTTP request received", "method", r.Method, "path", r.URL.Path)
-			defer g.Log.InfoContext(r.Context(), "HTTP request completed", "method", r.Method, "path", r.URL.Path)
+		if g.Log != nil && r.URL.Path != "/healthz" && r.URL.Path != "/readyz" {
+			path := logRequestPath(r.URL.Path)
+			started := time.Now()
+			g.Log.InfoContext(r.Context(), "HTTP request received", "method", r.Method, "path", path, "external_trace", externalTrace)
+			defer func() {
+				g.Log.InfoContext(r.Context(), "HTTP request completed", "method", r.Method, "path", path, "external_trace", externalTrace, "elapsed_ms", time.Since(started).Milliseconds())
+			}()
 		}
 		h.ServeHTTP(w, r)
 	})
@@ -611,6 +616,12 @@ func (g *Gateway) handleOpen(w http.ResponseWriter, r *http.Request, rest, clien
 		writeProblem(w, problem(http.StatusForbidden, "edge.not_owner", "Forbidden", "not instance owner", rid))
 		return
 	}
+	// Workspace READY is committed before its asynchronous route projection.
+	// Do not send the browser to an instance which edge cannot route yet.
+	if route.State != "running" {
+		instanceNotRunning(w, r, route.State, rid, true)
+		return
+	}
 	if sess, err = g.touchBrowserSession(r.Context(), getCookie(r, cookieName(g.requestSecureCookies(r), sessionCookieBase("portal"))), sess); err != nil {
 		status := http.StatusServiceUnavailable
 		code := "common.unavailable"
@@ -715,7 +726,7 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 	}
 
 	if route.State != "running" {
-		writeProblem(w, problem(http.StatusServiceUnavailable, "edge.instance_not_running", "Service Unavailable", "instance state="+route.State, rid))
+		instanceNotRunning(w, r, route.State, rid, instPath == "/")
 		return
 	}
 

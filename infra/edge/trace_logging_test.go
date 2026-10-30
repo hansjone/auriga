@@ -16,6 +16,33 @@ import (
 	"time"
 )
 
+func TestTraceRequestLogsHideCredentialPaths(t *testing.T) {
+	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
+	g := newTestGateway(t, cfg, sessions, routes, tickets, signer)
+	var logs bytes.Buffer
+	g.Log = newLogLogger(&logs)
+	for _, path := range []string{"/api/org/v1/invitations/preview/secret-invite", "/api/iam/v1/device/secret-user-code/approve", "/api/iam/v1/device/secret-user-code/deny", "/unmatched/secret-other"} {
+		g.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "http://portal.example.com"+path, nil))
+	}
+	if strings.Contains(logs.String(), "secret-") {
+		t.Fatal("request log leaked credential path")
+	}
+}
+
+func TestTraceMaskLongTokensBounded(t *testing.T) {
+	// Shared CI scheduling needs headroom; multi-second ReDoS still fails.
+	for _, input := range []string{strings.Repeat("x", 65536), strings.Repeat("a_", 32768), strings.Repeat("a.", 32768)} {
+		started := time.Now()
+		Mask(input)
+		if time.Since(started) > time.Second {
+			t.Fatal("mask exceeded 1s")
+		}
+	}
+	if len(Mask(strings.Repeat("x", 65537))) > 65536 {
+		t.Fatal("oversized log input not bounded")
+	}
+}
+
 func TestTraceCrossProxyAndResponse(t *testing.T) {
 	cfg, sessions, routes, tickets, signer, _ := testEnv(t)
 	parent := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
