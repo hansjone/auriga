@@ -134,7 +134,7 @@ func TestCollabInputMetadataFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			c, err := readCollabInput(file, access)
-			defer c.clear()
+			defer c.Clear()
 			if (err == nil) != (name == "valid") {
 				t.Fatalf("unexpected result: %v", err)
 			}
@@ -148,7 +148,7 @@ func TestCollabProjectionAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.clear()
+	defer c.Clear()
 	root := t.TempDir()
 	binary := os.Getenv("AURIGA_COLLAB_TEST_BOOTSTRAP")
 	if binary == "" {
@@ -233,7 +233,7 @@ func TestCollabProjectionAndReceipt(t *testing.T) {
 	}
 	if managed.PlatformOrigin != access.Issuer() || managed.Issuer != access.Issuer() ||
 		managed.Network.Realm != c.Realm || managed.Network.WSSURL != strings.Replace(access.Issuer(), "https://", "wss://", 1)+"/net/v1/ws" ||
-		len(managed.Network.Roots) != 1 || managed.Network.Roots[0].Kid != c.RootKid || managed.Network.Roots[0].PublicKey != base64.RawURLEncoding.EncodeToString(c.files["root.der"]) {
+		len(managed.Network.Roots) != 1 || managed.Network.Roots[0].Kid != c.RootKid || managed.Network.Roots[0].PublicKey != base64.RawURLEncoding.EncodeToString(c.Files["root.der"]) {
 		t.Fatal("managed network installation does not preserve approved origin/realm/root")
 	}
 	if !strings.Contains(properties, "auriga.workspace.managed-network-installation-file=/etc/auriga/network/managed-network.json") {

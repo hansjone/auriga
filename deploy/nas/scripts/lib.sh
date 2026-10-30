@@ -188,7 +188,7 @@ load_stack_env() {
 
 validate_managed_tree() {
   # User workspaces may contain symlinks; only these deployment-owned trees are scanned.
-  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens data data/agent data/postgres data/nats data/registry; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens collab-tokens data data/agent data/postgres data/nats data/registry; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ ! -L "$_managed" ] || die "managed path is a symlink: $_managed"
   done
@@ -283,6 +283,7 @@ run_compose() {
     return
   fi
   _cc=$(compose_cmd)
+  if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
     COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
@@ -317,6 +318,7 @@ services:
         required: true
 EOF
   _cc=$(compose_cmd)
+  if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
   # Only the fixed main file and generated env_file override have authority.
   # shellcheck disable=SC2086
   env COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" $_cc \

@@ -12,6 +12,101 @@ UID、祖先、receipt 和硬链接检查在容器内照常执行。宿主源目
 - Operator guide: [`docs/dev/nas.md`](../../docs/dev/nas.md)
 - Runtime release guide: [`docs/dev/runtime-release.md`](../../docs/dev/runtime-release.md)
 
+## 启用 collab 网络与已有 NAS 升级
+
+启用前须完成真实 IAM native 设备登记并核实租户对应的 realm，然后由离线网络根运营者
+按[密钥运维契约](../../contracts/network/key-operations.md)交付根签发布与安装状态。
+沿用[网络安装指南](../../docs/dev/network-installation.md)核对来源、独立根指纹、版本下限、
+租户和 realm。根私钥不进入 NAS；TLS CA、实例 identity key、runtime root 都不能替代网络根。
+安装器不生成网络根、不预注册目标桌面设备、不伪造 READY。
+
+在数据根外准备独立、规范绝对路径的审批目录，例如 `/srv/installation/collab`。
+目录归执行安装的 root 管理，私钥文件单硬链接、0600，禁止 symlink。
+容器安装模式会将整个目录只读挂载，目录内材料路径用相对路径，入口为 `input.json`：
+
+```json
+{
+  "tenantId": "00000000-0000-0000-0000-000000000001",
+  "realm": "1",
+  "rootKid": "offline-root",
+  "rootFingerprint": "sha256:<independently-verified-64-hex-fingerprint>",
+  "minimumVersion": "7",
+  "rootPublicFile": "root.der",
+  "signedFile": "signed.json",
+  "announcementFile": "announcement.json",
+  "stateFile": "state.json",
+  "privateFiles": {
+    "business-key-id": "business.der",
+    "protocol-key-id": "protocol.der",
+    "management-key-id": "management.der"
+  }
+}
+```
+
+以上都是占位值，须替换成独立批准的材料。DER 分别为 Ed25519 公钥 SPKI 与业务私钥
+PKCS#8；三个 active 用途为 `business_delivery`、`protocol_response`、`management_state`。
+`state.json` 必须是同一批准发布的安装状态，禁止手工拼出一个版本号冒充已发布。
+清单/公告和状态校验代码由 compose、NAS 共用；服务启动仍由 Java
+`RootKeyPublication` / `SigningKeyLoader` 完整验证根签、schema、有效期与 PostgreSQL 高水位。
+激活收据封存不代表上述服务校验通过，也不代表设备 READY。
+
+在 `stack.env` 设置 `AURIGA_COLLAB_INPUT_DIR=/srv/installation/collab`。
+直接 HTTPS 或 `trusted_proxy` access 基线默认使用其门户来源。HTTP/IP 基线必须另外设置
+`AURIGA_COLLAB_PUBLIC_ORIGIN=https://portal.example.com`，并将**同一个**来源加入既有
+`AURIGA_LINKS_ALLOWED_ORIGINS`；可信呈现反代地址仍由 `AURIGA_LINKS_TRUSTED_PROXIES`
+限定。外部反代须已按 NAS 允许来源机制处理 Host/Proto、HTTPS 证书与 WebSocket 升级。
+新变量只选择已批准的 HTTPS/WSS 呈现来源，不修改 access 基线、CORS 或客户端校验。
+只有 HTTP、没有可验证 WSS 入口时不能启用本网络；普通 HTTP/IP 部署其它功能保持可用。
+
+全新数据根：按原流程执行 `init.sh`，它会封存原安装材料后生成独立 collab 激活材料；
+然后执行 `start.sh`。已有 NAS：备份原安装根、数据库、审批材料及 uid/gid/mode，换入
+本次精确提交构建并核 SHA 的公开 NAS 包与镜像，保持原 access 和 runtime 输入，再执行：
+
+```sh
+export AURIGA_DATA_ROOT=/srv/container/auriga-test
+sh deploy-nas/scripts/activate-collab.sh
+sh deploy-nas/scripts/start.sh
+sh deploy-nas/scripts/status.sh
+```
+
+`activate-collab.sh` 仅停止固定 NAS project 的 platform/edge/network/collab，保留数据卷与
+已有实例；容器安装模式使用原有离线 helper，无宿主 Go 编译需求。
+原 `config/materials` 和 bootstrap receipt 不重写。独立 `config/collab-source` 收据绑定原
+收据、输入材料与呈现来源；`.pending` 残留、元数据变化、材料篡改都失败关闭，不自动修复。
+`render.sh` / `start.sh` 重复执行只校验和补齐缺少的运行副本，不轮换密钥或覆盖漂移文件。
+已激活后清空输入变量不会禁用 collab；已有数据库回退/密钥续签需要专门的运维批次，不能删收据重做。
+
+Compose 自动选入 `collab-compose.yml`。独立 collab 使用同一 platform 镜像、uid10002，
+只在内部网络提供 HTTP/mTLS 8085 与 gRPC/mTLS 9092；数据库由一次性 `collab-db`
+创建独立 `auriga_collab_owner` / `auriga_collab_app`、schema 和默认 DML 权限，口令每套安装随机生成。
+JWKS 固定走 `https://platform:8081/oauth2/jwks`，进程内客户端证书/信任库保持 mTLS；
+公共 issuer 及已批准别名沿 NAS 允许来源配置验证。edge、网关、platform、collab 分别仅挂所需副本。
+
+现场需要：新的 `linux/amd64` bootstrap、包含上述脚本与 overlay 的完整 NAS 包、带 curl/openssl/keytool
+及现行 collab/managed-network 后端的 platform 镜像，以及原已审核的 edge、agent、PostgreSQL、
+NATS、registry、LiteLLM 镜像与签名 DSH runtime 包。edge/agent 没有本次二进制改动，仍须与批准
+基线相容。目标桌面用同一现行 Auriga 插件包，按网络安装指南导出可信 loader 配置；
+云端新的 managed-network 文件随托管凭据下发，已有实例由原 reconcile 机制更新，必要时经公开入口重开。
+
+验收分别记录：`/api/collab/v1/network/keys` 经实际门户返回 200 且根签正确；云端插件严格
+READY；桌面正常登录、入网并严格 READY；最后云↔桌各请求和回复均有真实收件证据。
+health、keys 200 或托管实例 READY 均不能代替插件 READY/互发。
+`deploy/nas/test/collab.sh` 覆盖 domain/ip/proxy 的实际 init/render、权限与篡改负例；
+可选 `AURIGA_NAS_COLLAB_LIVE_IMAGE` 启用 `collab-live.sh`，仅启动单 collab 服务和临时 PG
+验证真实签名发布，不宣称已验证 IAM 入网、插件 READY 或整栈云↔桌。
+
+开发机回归（使用锁定 Go 工具链；脚本生命周期测试须在 Linux root 下运行）：
+
+```sh
+go -C deploy/bootstrap test -count=1 ./...
+go -C deploy/compose/bootstrap test -count=1 ./...
+go -C deploy/nas/bootstrap test -count=1 ./...
+sh deploy/nas/test/run-tests.sh
+# 可选单服务 Docker 验证；应用镜像须为已核对、本地存在的不可变 ID：
+AURIGA_NAS_COLLAB_LIVE_IMAGE=sha256:<approved-local-platform-id> \
+  go -C deploy/nas/bootstrap test -count=1 -run TestNASCollabScriptLifecycle/ip -v
+```
+
 `preflight.sh`在初始化完成后还会执行只读的`mount-access.sh`：以各服务实际UID/GID和必要补充组，检查实际挂载目录遍历、公开材料读取及必要秘密文件打开权限。它复用已pin且本地存在的platform镜像提供`sh/cat`，所有源路径只读、无网络、无额外capability、无Docker socket，不拉镜像、不修改材料或ACL。可单独运行`AURIGA_DATA_ROOT=/srv/container/auriga-test sh deploy-nas/scripts/mount-access.sh`。0755不代表继承ACL下有效可读；出现`service`/`uid:gid`/`path-category`错误时，按[公开排障指南](../../docs/dev/nas.md#挂载访问与继承-acl-排障)核查自己专用目录的有效权限。节点在线但模板无法调度时，另按[节点label指南](../../docs/dev/nas.md#节点-label-与模板匹配)经正式管理台/API核对`template=real-dsh`，禁止直接改库绕过。
 
 PostgreSQL仅对只读探针可确认完全为空的PGDATA放行官方entrypoint准备阶段，支持`umask 077`初始化产生的`root:root/0700`空目录。非空（含隐藏项、悬空链接）或无法确认空时，仍按999:999检查数据目录；SQL始终按999:999检查。探针不执行chown/chmod。

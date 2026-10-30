@@ -135,6 +135,7 @@ chown_required 65532:65532 "$AURIGA_DATA_ROOT/data/nats"
 : >"$AURIGA_DATA_ROOT/join/token"
 chmod 0600 "$AURIGA_DATA_ROOT/join/token"
 
+sh "$NAS_ROOT/scripts/render-collab.sh" --initialize
 sh "$NAS_ROOT/scripts/render.sh" || die "render failed after secrets created — fix and re-run render.sh (marker not written)"
 
 {

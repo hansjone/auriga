@@ -16,6 +16,7 @@ SECRETS="$AURIGA_DATA_ROOT/secrets"
 CONFIG="$AURIGA_DATA_ROOT/config"
 [ -d "$SECRETS" ] || die "secrets directory missing; run init.sh first"
 bootstrap_nas_materials
+sh "$NAS_ROOT/scripts/render-collab.sh"
 if [ -e "$CONFIG/panel" ] || [ -L "$CONFIG/panel" ]; then
   [ -d "$CONFIG/panel" ] && [ ! -L "$CONFIG/panel" ] || die "invalid panel output directory"
   [ "$(stat -c '%u:%g:%a' "$CONFIG/panel")" = "10001:10001:755" ] || die "invalid panel output ownership"

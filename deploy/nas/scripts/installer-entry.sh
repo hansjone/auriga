@@ -28,6 +28,9 @@ case "${1:-}" in
       chmod 0755 "$AURIGA_DATA_ROOT"
     fi
     exec sh "$NAS_ROOT/scripts/init.sh" ;;
+  activate-collab)
+    bootstrap_nas_materials
+    exec sh "$NAS_ROOT/scripts/render-collab.sh" --stopped ;;
   render) exec sh "$NAS_ROOT/scripts/render.sh" ;;
   prepare-socket) prepare_socket_parent ;;
   check)

@@ -32,6 +32,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "collab" || os.Args[1] == "collab-base") {
+		if err := nasCollabCommand(os.Args[1:]); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "image-metadata" || os.Args[1] == "image-check" || os.Args[1] == "image-resolve") {
 		if err := imageCommand(context.Background(), os.Args[1:], os.Stdout); err != nil {
 			fatalf("%v", err)
