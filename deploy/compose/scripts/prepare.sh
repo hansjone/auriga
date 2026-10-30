@@ -141,6 +141,12 @@ chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/edge.config.json" || true
 chmod 777 "$VAR/enrollment" "$VAR/join" || true
 
+if [ -e "$VAR/panel" ] || [ -L "$VAR/panel" ]; then
+  [ -d "$VAR/panel" ] && [ ! -L "$VAR/panel" ] || { echo 'invalid panel output directory' >&2; exit 1; }
+else
+  mkdir -m 755 "$VAR/panel"
+fi
+
 # File-backed secrets: only the intended container identity can read each key.
 if [ "$(id -u)" -eq 0 ]; then
   chgrp 999 "$VAR/litellm/pg_password"

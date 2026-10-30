@@ -143,7 +143,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		litellmURL:   litellmURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
-		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
+		panelStatic:  newPanelFileServer(cfg.Static.PanelRoot),
 		networkWSS:   networkWSS,
 
 		networkSubmitURL: networkSubmitURL,
@@ -253,6 +253,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if instID, ok := g.instanceIDFromHost(host); ok {
 		if !instancePathOK(r) {
 			writeProblem(w, problem(http.StatusBadRequest, "edge.bad_path", "Bad Request", "path traversal rejected", rid))
+			return
+		}
+		if panelPath, ok := sanitizeRequestPath(r); ok && g.servePanelStatic(w, r, panelPath) {
 			return
 		}
 		g.serveInstance(w, r, instID, "", clientIP, rid)
@@ -392,17 +395,7 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Panel static
-	if strings.HasPrefix(path, "/panel/") || path == "/panel" {
-		if g.Cfg.Static.PanelRoot == "" {
-			writeProblem(w, problem(http.StatusNotFound, "edge.panel_unconfigured", "Not Found", "panel static root not configured; see docs/dev/edge.md", rid))
-			return
-		}
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = strings.TrimPrefix(path, "/panel")
-		if r2.URL.Path == "" {
-			r2.URL.Path = "/"
-		}
-		g.panelStatic.ServeHTTP(w, r2)
+	if g.servePanelStatic(w, r, path) {
 		return
 	}
 

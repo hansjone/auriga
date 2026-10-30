@@ -1,0 +1,9 @@
+# Installation keys (including the panel signer) never enter a build stage.
+deploy/compose/var
+deploy/nas/var
+**/node_modules
+**/target
+**/dist
+.git
+.dev
+.agent-*

@@ -268,6 +268,11 @@ func (g *Gateway) authenticatedProxy(r *http.Request) bool {
 
 func (g *Gateway) serveInstanceControl(w http.ResponseWriter, r *http.Request) {
 	path, ok := sanitizeRequestPath(r)
+	// Signed panel files are public on every installation origin. This does not
+	// expose platform APIs or identity material through the control listener.
+	if ok && g.servePanelStatic(w, r, path) {
+		return
+	}
 	allowed := r.Method == "GET" && path == "/api/workspace/v1/instance/self" || r.Method == "POST" && path == "/api/workspace/v1/instance/heartbeat"
 	if !ok || !allowed {
 		writeProblem(w, problem(404, "common.not_found", "Not Found", "", requestID(r)))
