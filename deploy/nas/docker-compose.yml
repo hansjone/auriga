@@ -24,14 +24,16 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_bootstrap_password
     secrets:
       - pg_bootstrap_password
+      - litellm_pg_password
     volumes:
+      - ./litellm/postgres-init.sh:/docker-entrypoint-initdb.d/03-litellm.sh:ro
       - ${AURIGA_DATA_ROOT}/data/postgres:/var/lib/postgresql/data
       - ${AURIGA_DATA_ROOT}/config/postgres/init.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
     networks: [internal]
     expose:
-      - "5432"
+      - '5432'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U auriga_bootstrap -d auriga"]
+      test: ['CMD-SHELL', 'pg_isready -U auriga_bootstrap -d auriga']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -40,6 +42,79 @@ services:
     cpus: 0.50
     pids_limit: 256
 
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    <<: *cap_drop_all
+    # Read uid10001 installation secrets and the uid999 PostgreSQL secret.
+    # Neither service mounts writable host data or the Docker socket.
+    cap_add: [DAC_READ_SEARCH]
+    entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
+    env_file:
+      - path: ${AURIGA_DATA_ROOT}/config/materials/litellm-public.env
+        required: false
+    environment:
+      SERVER_ROOT_PATH: /ai
+      LITELLM_LOG: ERROR
+      NO_DOCS: 'true'
+      STORE_MODEL_IN_DB: 'True'
+    secrets: [litellm_master, litellm_salt, litellm_pg_password]
+    volumes:
+      - ./litellm/config.yaml:/etc/litellm/config.yaml:ro
+      - ./litellm/entrypoint.sh:/etc/litellm/entrypoint.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal, publish]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=4)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  litellm-init:
+    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    <<: *cap_drop_all
+    cap_add: [DAC_READ_SEARCH]
+    entrypoint: ['python', '/etc/litellm/provision.py']
+    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    volumes:
+      - ./litellm/provision.py:/etc/litellm/provision.py:ro
+    depends_on:
+      litellm:
+        condition: service_healthy
+    networks: [internal]
+    restart: 'no'
+
+  ai-relay:
+    image: ${AURIGA_IMAGE_EDGE}
+    user: '10001:10001'
+    entrypoint: ['/auriga-ai-gateway']
+    command: ['--litellm-config', '/etc/auriga/litellm-runtime.json']
+    cap_drop: [ALL]
+    read_only: true
+    security_opt: ['no-new-privileges:true']
+    depends_on:
+      litellm-init:
+        condition: service_completed_successfully
+      platform:
+        condition: service_healthy
+    secrets: [litellm_team]
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/materials/litellm-runtime.json:/etc/auriga/litellm-runtime.json:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.crt:/etc/auriga/pki/gateway.crt:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/pki/gateway.key:/etc/auriga/pki/gateway.key:ro
+      - ${AURIGA_DATA_ROOT}/network-tokens:/run/auriga-network-token:ro
+    group_add: ['65533']
+    networks: [internal]
+
   nats:
     image: ${AURIGA_IMAGE_NATS}
     <<: *cap_drop_all
@@ -47,16 +122,16 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
-    user: "65532:65532"
-    command: ["-c", "/etc/nats/nats.conf"]
+    user: '65532:65532'
+    command: ['-c', '/etc/nats/nats.conf']
     volumes:
       - ${AURIGA_DATA_ROOT}/config/nats/nats.conf:/etc/nats/nats.conf:ro
       - ${AURIGA_DATA_ROOT}/data/nats:/data
     networks: [internal]
     expose:
-      - "4222"
+      - '4222'
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8222/healthz']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -74,9 +149,9 @@ services:
       - /tmp:size=16m,mode=1777
     networks: [internal, publish]
     expose:
-      - "5000"
+      - '5000'
     ports:
-      - "127.0.0.1:${AURIGA_HOST_PUBLISH_REGISTRY}:5000"
+      - '127.0.0.1:${AURIGA_HOST_PUBLISH_REGISTRY}:5000'
     volumes:
       - ${AURIGA_DATA_ROOT}/data/registry:/var/lib/registry
     mem_limit: 256m
@@ -91,8 +166,8 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
       - /app/tmp:size=32m,mode=1777
-    user: "10001:10001"
-    group_add: ["65532", "65533"]
+    user: '10001:10001'
+    group_add: ['65532', '65533']
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,24 +179,24 @@ services:
     environment:
       SPRING_CONFIG_ADDITIONAL_LOCATION: file:/etc/auriga/platform-access.yaml
       SERVER_ADDRESS: 0.0.0.0
-      SERVER_SSL_ENABLED: "true"
+      SERVER_SSL_ENABLED: 'true'
       AURIGA_DEPLOYMENT_ACCESS_FILE: /etc/auriga/access.json
       AURIGA_IAM_TLS_CERT_FILE: /etc/auriga/pki/iam.crt
       AURIGA_IAM_TLS_KEY_FILE: /etc/auriga/pki/iam.key
       AURIGA_IAM_EDGE_CA_FILE: /etc/auriga/pki/ca.crt
       AURIGA_IAM_EDGE_DNS_SAN: edge.auriga.internal
       SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties,file:/etc/auriga/network/platform.properties
-      AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: "true"
+      AURIGA_IAM_EDGE_TOKEN_EXPORT_ENABLED: 'true'
       AURIGA_IAM_EDGE_INSTALLATION_SECRET_FILE: /run/auriga-installation/edge.secret
       AURIGA_IAM_EDGE_TOKEN_FILE: /run/auriga-internal/edge/service.jwt
-      AURIGA_GRPC_PORT: "9091"
+      AURIGA_GRPC_PORT: '9091'
       AURIGA_GRPC_SERVER_HOST: 0.0.0.0
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
       AURIGA_GRPC_SERVER_TLS_PRIVATE_KEY: /etc/auriga/pki/iam.key
       AURIGA_GRPC_SERVER_TLS_TRUST_CERT_COLLECTION: /etc/auriga/pki/ca.crt
       AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway
       AURIGA_PLATFORM_ADDRESS: 0.0.0.0
-      AURIGA_PLATFORM_PORT: "8081"
+      AURIGA_PLATFORM_PORT: '8081'
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=60 -XX:+UseContainerSupport
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/platform-access.yaml:/etc/auriga/platform-access.yaml:ro
@@ -137,13 +212,13 @@ services:
       - ${AURIGA_DATA_ROOT}/enrollment:/var/auriga
     networks: [internal, publish]
     expose:
-      - "8081"
-      - "7443"
+      - '8081'
+      - '7443'
     ports:
-      - "127.0.0.1:${AURIGA_HOST_PUBLISH_NODECONTROL}:7443"
-      - "127.0.0.1:${AURIGA_HOST_PUBLISH_PLATFORM_HTTP}:8081"
+      - '127.0.0.1:${AURIGA_HOST_PUBLISH_NODECONTROL}:7443'
+      - '127.0.0.1:${AURIGA_HOST_PUBLISH_PLATFORM_HTTP}:8081'
     healthcheck:
-      test: ["CMD-SHELL", "sh /etc/auriga/iam-healthcheck.sh"]
+      test: ['CMD-SHELL', 'sh /etc/auriga/iam-healthcheck.sh']
       interval: 5s
       timeout: 5s
       retries: 60
@@ -162,7 +237,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
-    user: "65532:65532"
+    user: '65532:65532'
     depends_on:
       platform:
         condition: service_healthy
@@ -170,12 +245,12 @@ services:
         condition: service_healthy
       network:
         condition: service_healthy
-    command: ["-config", "/etc/auriga/edge.config.json"]
+    command: ['-config', '/etc/auriga/edge.config.json']
     env_file:
       - path: ${AURIGA_DATA_ROOT}/config/edge.env
         required: true
     environment:
-      AURIGA_EDGE_ALLOW_LOCAL_INGRESS: "true"
+      AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/pki-edge/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
@@ -191,8 +266,8 @@ services:
       lan:
         ipv4_address: ${AURIGA_EDGE_LAN_IP}
     expose:
-      - "${AURIGA_NAS_PORTAL_TARGET_PORT}"
-      - "${AURIGA_NAS_ADMIN_TARGET_PORT}"
+      - '${AURIGA_NAS_PORTAL_TARGET_PORT}'
+      - '${AURIGA_NAS_ADMIN_TARGET_PORT}'
     mem_limit: 256m
     cpus: 0.25
     pids_limit: 128
@@ -236,7 +311,13 @@ services:
       - ${AURIGA_DATA_ROOT}/network-tokens:/run/auriga-network-token:ro
     networks: [internal]
     healthcheck:
-      test: ['CMD', '/auriga-network-probe', 'https://127.0.0.1:18443', '/etc/auriga/network']
+      test:
+        [
+          'CMD',
+          '/auriga-network-probe',
+          'https://127.0.0.1:18443',
+          '/etc/auriga/network',
+        ]
       interval: 3s
       timeout: 5s
       retries: 30
@@ -269,7 +350,7 @@ services:
       AURIGA_AGENT_DRIVERS: docker
       # Trusted edge identity and internal alias come only from access.json.
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
-      AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
+      AURIGA_AGENT_INGRESS_LOCAL_GID: '65532'
       AURIGA_AGENT_CAPACITY_MAX_INSTANCES: ${AURIGA_AGENT_CAPACITY_MAX_INSTANCES:-1}
       AURIGA_AGENT_CAPACITY_CPU_MILLIS: ${AURIGA_AGENT_CAPACITY_CPU_MILLIS:-500}
       AURIGA_AGENT_CAPACITY_MEMORY_MB: ${AURIGA_AGENT_CAPACITY_MEMORY_MB:-512}
@@ -307,5 +388,13 @@ networks:
     name: ${AURIGA_LAN_NETWORK}
 
 secrets:
+  litellm_master:
+    file: ${AURIGA_DATA_ROOT}/config/materials/litellm/master
+  litellm_salt:
+    file: ${AURIGA_DATA_ROOT}/config/materials/litellm/salt
+  litellm_team:
+    file: ${AURIGA_DATA_ROOT}/config/materials/litellm/team
+  litellm_pg_password:
+    file: ${AURIGA_DATA_ROOT}/secrets/litellm_pg_password
   pg_bootstrap_password:
     file: ${AURIGA_DATA_ROOT}/secrets/pg_bootstrap_password

@@ -5,8 +5,7 @@ import { ElButton } from 'element-plus';
 import { isApiError } from '@auriga/shared';
 import { orgApi } from '../api';
 import { adminApi } from '../admin/api';
-import { modelUsageApi } from '../admin/modelUsageApi';
-import { readAllPages } from './models/modelUsageState';
+import { readAllPages } from '../admin/pagination';
 
 const { t } = useI18n({
   useScope: 'local',
@@ -66,12 +65,6 @@ const cards = [
     path: '/instances',
     read: (signal: globalThis.AbortSignal) =>
       readAllPages(adminApi.instances, signal),
-  },
-  {
-    key: 'usage',
-    path: '/models/usage',
-    read: (signal: globalThis.AbortSignal) =>
-      readAllPages(modelUsageApi.usage, signal),
   },
 ];
 const values = reactive<
@@ -151,6 +144,7 @@ onBeforeUnmount(() => {
         <RouterLink :to="card.path">{{ t('details') }}</RouterLink>
       </section>
     </div>
+    <a href="/ai/ui/">LiteLLM</a>
   </section>
 </template>
 

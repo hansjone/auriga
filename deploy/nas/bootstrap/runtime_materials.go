@@ -57,7 +57,7 @@ func runtimeMaterialSet(m *runtimebundle.Material, https ...bool) materials.Mate
 	return set
 }
 
-func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, memory int64, r runtimeInputs, m *runtimebundle.Material, https ...string) string {
+func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSubnet string, memory int64, r runtimeInputs, m *runtimebundle.Material, uiDigest string, https ...string) string {
 	h := sha256.New()
 	_, _ = h.Write(raw)
 	_, _ = fmt.Fprintf(h, "\n%s\n%s\n%d\n%s\n%s\n%d", peer, subnet, registry, lanIP, lanSubnet, memory)
@@ -66,7 +66,7 @@ func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSub
 	if len(https) > 0 {
 		input = https[0]
 	}
-	_, _ = fmt.Fprint(h, "\nnetwork-wss-v2-https\n"+input)
+	_, _ = fmt.Fprint(h, "\nnetwork-wss-v2-https-litellm-ui-v2\n"+input+"\n"+uiDigest)
 	// Runtime mode also binds the independently supplied locators and snapshot.
 	if m != nil {
 		inputs, _ := json.Marshal([]string{r.bundle, r.root, r.image})

@@ -37,8 +37,6 @@ func TestSEND4PlatformOrigin(t *testing.T) {
 				// explain why the exact production submit path is rejected.
 				c.Upstreams["ai-device"] = upstream.URL
 				c.Upstreams["ai-gateway"] = upstream.URL
-				c.Upstreams["ai-admin"] = upstream.URL
-				c.AIAdminHop.AllowLoopbackHTTP = true
 				c.Upstreams["network-submit"] = submit.URL
 				c.NetworkSubmitHop = hop
 			})

@@ -1,0 +1,19 @@
+model_list:
+  - model_name: test-pool
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_base: http://fake-upstream:4001/v1
+      api_key: unused-local-fixture
+    model_info:
+      input_cost_per_token: 0.001
+      output_cost_per_token: 0.001
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
+  store_prompts_in_spend_logs: false
+litellm_settings:
+  set_verbose: false
+  json_logs: true
+router_settings:
+  num_retries: 0

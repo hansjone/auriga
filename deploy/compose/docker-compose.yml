@@ -19,7 +19,10 @@ services:
       POSTGRES_PASSWORD: e2e_pg_super
     ports:
       - '15432:5432'
+    secrets:
+      - litellm_pg_password
     volumes:
+      - ../nas/litellm/postgres-init.sh:/docker-entrypoint-initdb.d/03-litellm.sh:ro
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
       - ./scripts/collab-roles.sql:/docker-entrypoint-initdb.d/02-collab-roles.sql:ro
       - pgdata:/var/lib/postgresql/data
@@ -28,6 +31,86 @@ services:
       interval: 3s
       timeout: 5s
       retries: 30
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    cap_drop: [ALL]
+    # Docker secrets retain the preparing runner's UID on Linux bind mounts.
+    # Read the private files without granting write/DAC override capabilities.
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
+    privileged: false
+    entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
+    env_file:
+      - path: ./var/litellm-public.env
+        required: false
+    environment:
+      SERVER_ROOT_PATH: /ai
+      LITELLM_LOG: ERROR
+      NO_DOCS: 'true'
+      STORE_MODEL_IN_DB: 'True'
+    secrets: [litellm_master, litellm_salt, litellm_pg_password]
+    volumes:
+      - ../nas/litellm/config.yaml:/etc/litellm/config.yaml:ro
+      - ../nas/litellm/entrypoint.sh:/etc/litellm/entrypoint.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [default]
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=4)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  litellm-init:
+    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
+    privileged: false
+    entrypoint: ['python', '/etc/litellm/provision.py']
+    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    volumes:
+      - ../nas/litellm/provision.py:/etc/litellm/provision.py:ro
+    depends_on:
+      litellm:
+        condition: service_healthy
+    networks: [default]
+    restart: 'no'
+
+  ai-relay:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.edge
+    user: '10001:10001'
+    entrypoint: ['/auriga-ai-gateway']
+    command: ['--litellm-config', '/etc/auriga/litellm-runtime.json']
+    cap_drop: [ALL]
+    read_only: true
+    security_opt: ['no-new-privileges:true']
+    depends_on:
+      litellm-init:
+        condition: service_completed_successfully
+      platform:
+        condition: service_healthy
+    secrets: [litellm_team]
+    extra_hosts: ['host.docker.internal:host-gateway']
+    volumes:
+      - ./var/litellm-runtime.json:/etc/auriga/litellm-runtime.json:ro
+      - ./var/pki/ca.crt:/etc/auriga/pki/ca.crt:ro
+      - ./var/pki/gateway.crt:/etc/auriga/pki/gateway.crt:ro
+      - ./var/pki/gateway.key:/etc/auriga/pki/gateway.key:ro
+      - network-tokens:/run/auriga-network-token:ro
+    group_add: ['65533']
+    networks: [default]
 
   nats:
     logging: *log-options
@@ -202,6 +285,7 @@ services:
     ports:
       - '${AURIGA_ACCESS_BIND:-127.0.0.1}:${AURIGA_PORTAL_PORT:-8080}:${AURIGA_PORTAL_TARGET_PORT:-8080}'
       - '${AURIGA_ACCESS_BIND:-127.0.0.1}:${AURIGA_ADMIN_PORT:-8084}:${AURIGA_ADMIN_TARGET_PORT:-8084}'
+      - '${AURIGA_ACCESS_BIND:-127.0.0.1}:${AURIGA_LITELLM_UI_PORT:-8086}:${AURIGA_LITELLM_UI_TARGET_PORT:-8086}'
     networks:
       default:
         ipv4_address: 172.29.240.10 # gitleaks:allow disposable M2 network
@@ -450,3 +534,13 @@ networks:
       config:
         - subnet: 172.29.240.0/24 # gitleaks:allow disposable M2 network
           gateway: 172.29.240.1 # gitleaks:allow disposable M2 network
+
+secrets:
+  litellm_master:
+    file: ./var/litellm/master
+  litellm_salt:
+    file: ./var/litellm/salt
+  litellm_team:
+    file: ./var/litellm/team
+  litellm_pg_password:
+    file: ./var/litellm/pg_password
