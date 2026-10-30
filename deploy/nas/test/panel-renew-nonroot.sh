@@ -23,7 +23,8 @@ AURIGA_ACCESS_FILE=$temp/access.json
 EOF
 printf '{}\n' >"$temp/access.json"
 for leaf in platform edge agent; do printf 'FIXTURE_KEY=value\n' >"$temp/export/$leaf.env"; done
-tar -C "$temp/export" -cf "$temp/export.tar" platform.env edge.env agent.env
+printf '0\n' >"$temp/export/collab.enabled"
+tar -C "$temp/export" -cf "$temp/export.tar" platform.env edge.env agent.env collab.enabled
 for script in preflight network-preflight render; do printf '#!/bin/sh\nexit 0\n' >"$temp/package/scripts/$script.sh"; done
 cat >"$temp/package/scripts/installer.sh" <<'EOF'
 #!/bin/sh

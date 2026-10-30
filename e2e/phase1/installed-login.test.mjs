@@ -99,7 +99,13 @@ async function fixture(t, { resume = false, subject = 'test-member' } = {}) {
     res.end('<!doctype html><title>native UI fixture</title>');
   });
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
-  t.after(() => new Promise((done) => server.close(done)));
+  t.after(
+    () =>
+      new Promise((done) => {
+        server.closeAllConnections();
+        server.close(done);
+      }),
+  );
   const browser = await launchBrowser();
   t.after(() => browser.close());
   const page = await browser.newPage();

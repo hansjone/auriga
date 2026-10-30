@@ -516,6 +516,7 @@ networks:
     ipam:
       config:
         - subnet: ${AURIGA_INTERNAL_SUBNET}
+          ip_range: ${AURIGA_INTERNAL_DYNAMIC_RANGE:?set a dynamic CIDR inside the internal subnet excluding the fixed edge IP}
   publish:
     # Non-internal: required for 127.0.0.1 port publishes to reach host-network agent (H1).
     # Not attached to LAN; backends are still unreachable from the dedicated edge LAN IP path.

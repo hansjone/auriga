@@ -12,6 +12,12 @@ UID、祖先、receipt 和硬链接检查在容器内照常执行。宿主源目
 - Operator guide: [`docs/dev/nas.md`](../../docs/dev/nas.md)
 - Runtime release guide: [`docs/dev/runtime-release.md`](../../docs/dev/runtime-release.md)
 
+内部 bridge 必须设置 `AURIGA_INTERNAL_DYNAMIC_RANGE`，为 `AURIGA_INTERNAL_SUBNET` 内
+且不含固定 `AURIGA_INTERNAL_EDGE_IP` 的动态 CIDR；示例将 /26 的后半 /27 留给自动地址。
+否则新增服务可能在 edge 重建期间先占用其固定 IP，导致 Docker 返回 Address already in use。
+已有栈变更池范围前先保留数据备份，执行本包 `stop.sh`（不加实例清理参数），再设置范围并
+执行 `start.sh`；只重建固定 Auriga 项目的私有 bridge，数据卷、安装根和外部 LAN 网络保留。
+
 ## 启用 collab 网络与已有 NAS 升级
 
 启用前须完成真实 IAM native 设备登记并核实租户对应的 realm，然后由离线网络根运营者

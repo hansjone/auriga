@@ -16,7 +16,8 @@ chmod 0755 "$TMP/package/bin/auriga-nas-bootstrap"
 export NAS_ROOT="$TMP/package" AURIGA_DATA_ROOT="$TMP/container/auriga-data" INSTALL_LOG="$TMP/docker.log"
 mkdir "$TMP/export"
 for leaf in platform edge agent; do printf 'FIXTURE_KEY=value\n' >"$TMP/export/$leaf.env"; done
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env
+printf '0\n' >"$TMP/export/collab.enabled"
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled
 export INSTALL_ARCHIVE="$TMP/export.tar" INSTALL_OVERRIDE="$TMP/override-path"
 unset NAS_ALLOW_NONROOT NAS_INSTALLER_ACTIVE AURIGA_NAS_BOOTSTRAP_BINARY INSTALL_EXIT INSTALL_PLATFORM INSTALL_COMPOSE_EXIT
 cat >"$TMP/bin/docker" <<'EOF'
@@ -81,6 +82,16 @@ check preserve_compose_exit 73 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_e
 if [ -f "$INSTALL_OVERRIDE" ] && [ ! -e "$(dirname "$(cat "$INSTALL_OVERRIDE")")" ]; then printf 'PASS compose_failure_cleanup\n'
 else printf 'FAIL compose_failure_cleanup\n'; fail=1; fi
 unset INSTALL_COMPOSE_EXIT
+printf '1\n' >"$TMP/export/collab.enabled"
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled
+check compose_activated_overlay 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
+if grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'PASS compose_checked_overlay_selected\n'
+else printf 'FAIL compose_checked_overlay_selected\n'; fail=1; fi
+printf 'invalid\n' >"$TMP/export/collab.enabled"
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env collab.enabled
+check reject_invalid_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env
+check reject_missing_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 ln -s "$TMP/access.json" "$TMP/access-link.json"
 sed -i "s|^AURIGA_ACCESS_FILE=.*|AURIGA_ACCESS_FILE=$TMP/access-link.json|" "$AURIGA_DATA_ROOT/stack.env"
 check reject_input_symlink 1 sh "$NAS_ROOT/scripts/installer.sh" init
