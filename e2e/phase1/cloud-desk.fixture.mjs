@@ -55,6 +55,7 @@ export class FixtureState {
     this.receipts = [];
     this.requests = 0;
     this.failures = [];
+    this.modelRequests = [];
   }
   marker(label) {
     if (!/^[a-z0-9_-]{1,40}$/.test(label)) fail('invalid_label');
@@ -97,6 +98,34 @@ export class FixtureState {
     if (++this.requests > 256) fail('fixture_budget_exhausted');
     if (!Array.isArray(body.messages)) fail('invalid_model_payload');
     const messages = body.messages;
+    if (this.modelRequests.length < 16) {
+      const user = messages.findLast((message) => message.role === 'user');
+      const content = text(user);
+      const at = content.indexOf('CLOUD_DESK_' + this.runId + '_');
+      this.modelRequests.push({
+        side,
+        maxTokens: body.max_tokens ?? body.max_completion_tokens ?? null,
+        marker: at < 0 ? 'absent' : at === 0 ? 'start' : 'embedded',
+        contentTypes: Array.isArray(user?.content)
+          ? [
+              ...new Set(
+                user.content
+                  .map((part) => part.type)
+                  .filter((type) => /^[a-z_]{1,40}$/.test(type ?? '')),
+              ),
+            ]
+          : ['string'],
+        toolNames: (body.tools ?? [])
+          .map((tool) => tool.function?.name)
+          .filter((name) => /^[A-Za-z0-9_-]{1,80}$/.test(name ?? '')),
+      });
+    }
+    // This fixture's Agent model is fixed at 4096 tokens; native auxiliary
+    // title calls have a separate 64-token text-only budget. Their quoted
+    // conversation is never a command, a tool result, or a receipt.
+    const maxTokens = body.max_tokens ?? body.max_completion_tokens;
+    if (Number.isInteger(maxTokens) && maxTokens <= 64 && !body.tools?.length)
+      return { content: 'Cloud desktop acceptance' };
     for (const plan of this.plans.filter(
       (p) => p.side === side && p.issued && !p.result,
     )) {
@@ -108,7 +137,7 @@ export class FixtureState {
     for (const message of messages.filter((m) => m.role === 'user')) {
       const content = text(message);
       const id = content.match(
-        /\[Auriga external message ([A-Za-z0-9-]+)\]/,
+        /^\[Auriga external message ([A-Za-z0-9-]+)\]\r?\n/,
       )?.[1];
       if (!id) continue;
       for (const expected of this.expected.filter(
@@ -126,8 +155,16 @@ export class FixtureState {
           });
       }
     }
-    const last = text(messages.findLast((m) => m.role === 'user'));
-    const isExternal = /\[Auriga external message [A-Za-z0-9-]+\]/.test(last);
+    const last = text(
+      messages.findLast(
+        (m) =>
+          m.role === 'user' &&
+          text(m).includes('CLOUD_DESK_' + this.runId + '_'),
+      ),
+    );
+    const isExternal = /^\[Auriga external message [A-Za-z0-9-]+\]\r?\n/.test(
+      last,
+    );
     const plan = this.plans.find(
       (p) =>
         p.side === side &&
@@ -136,7 +173,10 @@ export class FixtureState {
     );
     if (!plan || plan.issued)
       return { content: 'Cloud/desktop native tool check acknowledged.' };
-    const names = (body.tools ?? []).map((t) => t.function?.name);
+    const names = (body.tools ?? [])
+      .map((t) => t.function?.name)
+      .filter((name) => /^[A-Za-z0-9_-]{1,80}$/.test(name ?? ''))
+      .slice(0, 128);
     const native = names.includes(plan.tool);
     if (!native && !names.includes('run_code')) {
       this.failures.push({
@@ -183,6 +223,7 @@ export class FixtureState {
       })),
       receipts: this.receipts,
       failures: this.failures,
+      modelRequests: this.modelRequests,
     });
   }
 }

@@ -8,15 +8,21 @@ import { resolve, dirname, join, relative, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
+import { clearTimeout } from 'node:timers';
 import { privatePath } from '../../scripts/beta-ui/runner.mjs';
 import { prepareDesktop, launchDesktop, poll } from './cloud-desk.desktop.mjs';
-import { createCloudMember, accessOrigin } from './cloud-desk.browser.mjs';
+import {
+  createCloudMember,
+  openExistingCloud,
+  accessOrigin,
+} from './cloud-desk.browser.mjs';
 import { startFixture } from './cloud-desk.fixture.mjs';
 import {
   nativeClient,
   configureFixtureModel,
   loginDesktop,
   assertConversation,
+  diagnoseNativeSession,
 } from './cloud-desk.native.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -59,7 +65,20 @@ export function validateRunConfig(cfg, access) {
   assert.equal(new URL(connect.network.wssUrl).protocol, 'wss:');
   assert.ok(connect.providerId && connect.clientId && connect.issuer);
   assert.equal(new URL(connect.issuer).origin, platform.origin);
-  assert.ok(cfg.cloudCwd && cfg.desktopDescriptor && cfg.enrollmentFile);
+  assert.ok(
+    cfg.cloudCwd &&
+      cfg.desktopDescriptor &&
+      (cfg.existingCloud || cfg.enrollmentFile),
+  );
+  if (cfg.fixture?.cloudInstanceId) {
+    assert.equal(
+      cfg.fixture.cloudInstanceId,
+      cfg.existingCloud?.instanceId,
+      'model fixture must run in the authenticated cloud instance',
+    );
+    assert.match(cfg.fixture.cloudInstanceId, /^[a-f0-9-]{36}$/);
+    return;
+  }
   assert.ok(cfg.fixture?.cloudHost && cfg.fixture?.desktopHost);
   for (const host of [cfg.fixture.cloudHost, cfg.fixture.desktopHost]) {
     assert.ok(
@@ -70,6 +89,8 @@ export function validateRunConfig(cfg, access) {
 }
 
 export async function startModelHost(cfg, runId) {
+  if (cfg.cloudInstanceId)
+    return startIsolatedModelHost(cfg.cloudInstanceId, runId);
   let port, keys, stop;
   if (!cfg.wsl) {
     const fixture = await startFixture({
@@ -192,6 +213,138 @@ export async function startModelHost(cfg, runId) {
   };
 }
 
+function containerNode(instanceId, source) {
+  assert.match(instanceId, /^[a-f0-9-]{36}$/);
+  const child = spawn(
+    'wsl.exe',
+    [
+      '-d',
+      'Ubuntu',
+      '--exec',
+      'docker',
+      'exec',
+      '-i',
+      'auriga-inst-' + instanceId,
+      'node',
+      '--input-type=module',
+    ],
+    { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] },
+  );
+  let output = '',
+    closed = false;
+  const done = new Promise((resolve) =>
+    child.once('close', (code) => {
+      closed = true;
+      resolve({ code });
+    }),
+  );
+  child.once('error', () => {});
+  child.stdout.on('data', (chunk) => {
+    if (output.length < 8 * 1024 * 1024) output += chunk;
+  });
+  child.stdin.on('error', () => {});
+  child.stdin.end(source);
+  return {
+    child,
+    done,
+    get output() {
+      return output;
+    },
+    get closed() {
+      return closed;
+    },
+  };
+}
+
+async function startIsolatedModelHost(instanceId, runId) {
+  const source = await readFile(
+    resolve(import.meta.dirname, 'cloud-desk.fixture.mjs'),
+    'utf8',
+  );
+  const cloud = containerNode(
+    instanceId,
+    source +
+      `\nconst owned=await startFixture({host:'127.0.0.1',runId:${JSON.stringify(runId)}});process.stdout.write(JSON.stringify({port:owned.port,keys:owned.keys})+'\\n');`,
+  );
+  let announcement, desktop;
+  try {
+    announcement = await poll(
+      () => {
+        if (cloud.closed) fail('fixture_process_exited');
+        try {
+          return JSON.parse(cloud.output.trim());
+        } catch {
+          return null;
+        }
+      },
+      'container_fixture_startup_missing',
+      15000,
+    );
+    assert.ok(Number.isInteger(announcement.port));
+    for (const key of Object.values(announcement.keys))
+      assert.match(key, /^[a-f0-9-]{36}$/);
+    desktop = await startFixture({ runId });
+  } catch (error) {
+    cloud.child.kill();
+    await cloud.done;
+    if (desktop) await desktop.close();
+    throw error;
+  }
+  const cloudControl = async (op, value) => {
+    const call = containerNode(
+      instanceId,
+      `try{const r=await fetch(${JSON.stringify(`http://127.0.0.1:${announcement.port}/control/${announcement.keys.control}`)},{method:'POST',headers:{'content-type':'application/json'},body:${JSON.stringify(JSON.stringify({ op, value }))},signal:AbortSignal.timeout(5000)});console.log(JSON.stringify({status:r.status,body:await r.json()}));}catch{console.log(JSON.stringify({status:0}));}`,
+    );
+    const timer = setTimeout(() => call.child.kill(), 10000);
+    try {
+      await call.done;
+      const response = JSON.parse(call.output);
+      assert.equal(response.status, 200, 'owned in-container fixture control');
+      return response.body;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const desktopControl = (op, value) => {
+    if (op === 'state') return desktop.state.snapshot();
+    if (op === 'plan') return { marker: desktop.state.plan(value) };
+    if (op === 'expect')
+      return { marker: desktop.state.expect(value.side, value.label) };
+    fail('invalid_control_operation');
+  };
+  const control = async (op, value) => {
+    if (op !== 'state')
+      return value?.side === 'cloud'
+        ? cloudControl(op, value)
+        : desktopControl(op, value);
+    const a = await cloudControl('state'),
+      b = desktopControl('state');
+    return {
+      runId,
+      requests: a.requests + b.requests,
+      tools: [...a.tools, ...b.tools],
+      receipts: [...a.receipts, ...b.receipts],
+      failures: [...a.failures, ...b.failures],
+      modelRequests: [...(a.modelRequests ?? []), ...(b.modelRequests ?? [])],
+    };
+  };
+  return {
+    control,
+    urls: {
+      cloud: `http://127.0.0.1:${announcement.port}/cloud/${announcement.keys.cloud}/v1`,
+      desktop: desktop.urls.desktop,
+    },
+    async stop() {
+      try {
+        await cloudControl('stop');
+        await cloud.done;
+      } finally {
+        await desktop.close();
+      }
+    },
+  };
+}
+
 export async function run(cfg, output) {
   output = resolve(output);
   const rel = relative(root, output);
@@ -237,10 +390,16 @@ export async function run(cfg, output) {
       ),
     )('playwright');
     // The credentials belong only to this new disposable stack, never to a user vault.
-    cloud = await createCloudMember({
+    if (cfg.existingCloud) await requireTestLock();
+    cloud = await (cfg.existingCloud ? openExistingCloud : createCloudMember)({
       chromium,
       access,
-      enrollment: await json(cfg.enrollmentFile),
+      ...(cfg.existingCloud
+        ? {
+            member: await json(cfg.existingCloud.credentialsFile),
+            instanceId: cfg.existingCloud.instanceId,
+          }
+        : { enrollment: await json(cfg.enrollmentFile) }),
       resolveLoopback: cfg.resolveLoopback === true,
       report,
       stage,
@@ -257,7 +416,12 @@ export async function run(cfg, output) {
       packageVersion: descriptor.packageVersion,
       packageSHA256: descriptor.packageSHA256,
       dshVersion: descriptor.dshVersion,
-      ...(await loginDesktop(desktop.request, cloud.member)),
+      ...(await loginDesktop(
+        desktop.request,
+        cfg.desktopMemberFile
+          ? await json(cfg.desktopMemberFile)
+          : cloud.member,
+      )),
     };
     const clients = {
       cloud: nativeClient(cloud.request),
@@ -424,16 +588,225 @@ export async function run(cfg, output) {
   return report;
 }
 
+async function requireTestLock() {
+  const owner = await readFile(
+    resolve(root, '../../agent-cache/locks/compose-stack/owner.txt'),
+    'utf8',
+  );
+  assert.match(
+    owner,
+    /auriga-SEND-FIX R4 只测不重建/,
+    'R4 requires its own test lock before live requests',
+  );
+}
+
+async function probeModelTransport(instanceId, url) {
+  assert.match(instanceId, /^[a-f0-9-]{36}$/);
+  return new Promise((resolve) => {
+    const child = spawn(
+      'wsl.exe',
+      [
+        '-d',
+        'Ubuntu',
+        '--exec',
+        'docker',
+        'exec',
+        '-i',
+        'auriga-inst-' + instanceId,
+        'node',
+        '--input-type=module',
+      ],
+      { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] },
+    );
+    let output = '';
+    const timer = setTimeout(() => child.kill(), 15000);
+    child.stdout.on('data', (chunk) => {
+      if (output.length < 8192) output += chunk;
+    });
+    child.once('error', () => {});
+    child.once('close', () => {
+      clearTimeout(timer);
+      try {
+        const value = JSON.parse(output);
+        resolve({
+          status: Number.isInteger(value.status) ? value.status : null,
+          reachable: value.reachable === true,
+          ...(value.code && /^[A-Z_]+$/.test(value.code)
+            ? { code: value.code }
+            : {}),
+        });
+      } catch {
+        resolve({ reachable: false, code: 'TRANSPORT_PROBE_FAILED' });
+      }
+    });
+    // Capability URL stays on the owned process's stdin, never in argv or logs.
+    child.stdin.end(
+      `try { const r=await fetch(${JSON.stringify(url + '/models')},{signal:AbortSignal.timeout(5000)});await r.arrayBuffer();console.log(JSON.stringify({reachable:true,status:r.status})); } catch(e){console.log(JSON.stringify({reachable:false,code:e.cause?.code??'FETCH_FAILED'}));}`,
+    );
+  });
+}
+
+// Isolates the real managed-host capability check when a desktop cannot yet join.
+// A successful probe is never a successful conversation acceptance run.
+export async function probeCloud(cfg, output) {
+  output = resolve(output);
+  const rel = relative(root, output);
+  assert.ok(rel && !rel.startsWith('..') && !isAbsolute(rel));
+  assert.equal(await realpath(dirname(output)), dirname(output));
+  await mkdir(output, { mode: 0o700 });
+  if (process.platform === 'win32') privatePath(output, true);
+  const report = {
+    runId: randomUUID(),
+    status: 'failed',
+    conversationPassed: false,
+    stage: 'preflight',
+    httpFailures: [],
+    cleanup: [],
+  };
+  const cleanup = [];
+  let cloud, model, client, session;
+  const stage = (value) => {
+    report.stage = value;
+    process.stdout.write(`STEP ${value}\n`);
+  };
+  try {
+    await requireTestLock();
+    const access = await json(cfg.accessFile);
+    assert.ok(
+      cfg.existingCloud?.credentialsFile &&
+        cfg.existingCloud.instanceId &&
+        cfg.cloudCwd,
+    );
+    if (cfg.fixture?.cloudInstanceId)
+      assert.equal(cfg.fixture.cloudInstanceId, cfg.existingCloud.instanceId);
+    const { chromium } = createRequire(
+      join(
+        resolve(cfg.playwrightModuleRoot ?? import.meta.dirname),
+        'package.json',
+      ),
+    )('playwright');
+    cloud = await openExistingCloud({
+      chromium,
+      access,
+      member: await json(cfg.existingCloud.credentialsFile),
+      instanceId: cfg.existingCloud.instanceId,
+      resolveLoopback: cfg.resolveLoopback === true,
+      report,
+      stage,
+    });
+    stage('cloud-native-inventory');
+    client = nativeClient(cloud.request);
+    report.cloud.nativePlugin = await client.activePlugin();
+    stage('cloud-public-model-settings');
+    const described = await client.rpc('settings/describe');
+    report.cloud.settings = {
+      writable: described.writable,
+      namespaces: described.namespaces.map(({ ns }) => ns),
+    };
+    stage('cloud-fixed-model-config');
+    model = await startModelHost(cfg.fixture, report.runId);
+    report.cloud.modelTransport = await probeModelTransport(
+      cfg.existingCloud.instanceId,
+      model.urls.cloud,
+    );
+    const provider = 'cloud-desk-' + randomBytes(6).toString('hex');
+    await configureFixtureModel(client, model.urls.cloud, provider, cleanup);
+    stage('cloud-native-session');
+    cleanup.push(() => client.cancel());
+    session = await client.createSession(cfg.cloudCwd, provider);
+    report.cloud.sessionId = session;
+    stage('cloud-native-network-join');
+    await model.control('plan', {
+      side: 'cloud',
+      label: 'cloud_join',
+      tool: 'auriga_network_join',
+      args: {},
+    });
+    await client.prompt(session, marker(report.runId, 'cloud_join'));
+    await poll(
+      async () => {
+        const state = await model.control('state');
+        if (state.failures.length) fail(state.failures[0].code);
+        const result = state.tools.find(
+          (p) => p.label === 'cloud_join',
+        )?.result;
+        if (!result) return false;
+        if (result.status !== 'registered')
+          fail(result.code ?? 'native_tool_result_rejected');
+        return true;
+      },
+      'cloud_native_tool_not_executed',
+      45000,
+    );
+    report.status = 'probe-passed';
+  } catch (error) {
+    report.failure = {
+      stage: report.stage,
+      type: error.name,
+      code: /^[a-z_.]+$/.test(error.code ?? '')
+        ? error.code
+        : 'assertion_or_transport_failed',
+      ...(error.rpcMethod ? { rpcMethod: error.rpcMethod } : {}),
+      ...(error.remoteCode ? { remoteCode: error.remoteCode } : {}),
+      ...(Number.isInteger(error.status) ? { httpStatus: error.status } : {}),
+    };
+    if (client && session) {
+      try {
+        report.cloud.sessionDiagnostic = await diagnoseNativeSession(
+          client,
+          session,
+        );
+      } catch {
+        report.cloud.sessionDiagnostic = { available: false };
+      }
+    }
+  } finally {
+    if (model) {
+      try {
+        report.fixture = await model.control('state');
+      } catch {
+        report.cleanup.push({ action: 'fixture-state', status: 'failed' });
+      }
+    }
+    for (const action of cleanup.reverse()) {
+      try {
+        await action();
+      } catch {
+        report.cleanup.push({ action: 'native-test-state', status: 'failed' });
+      }
+    }
+    for (const [name, action] of [
+      ['fixture', model && (() => model.stop())],
+      ['browser', cloud && (() => cloud.browser.close())],
+    ]) {
+      if (!action) continue;
+      try {
+        await action();
+        report.cleanup.push({ action: name, status: 'passed' });
+      } catch {
+        report.cleanup.push({ action: name, status: 'failed' });
+      }
+    }
+    if (report.cleanup.some((row) => row.status === 'failed'))
+      report.status = 'failed';
+    await writeFile(
+      join(output, 'report.json'),
+      JSON.stringify(report, null, 2),
+    );
+  }
+  return report;
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   const [command, configFile, output] = process.argv.slice(2);
   assert.ok(
-    ['prepare', 'run'].includes(command) &&
+    ['prepare', 'run', 'probe-cloud'].includes(command) &&
       configFile &&
-      (command !== 'run' || output),
-    'Usage: node e2e/phase1/cloud-desk.mjs prepare CONFIG | run CONFIG NEW_OUTPUT_DIR',
+      (command === 'prepare' || output),
+    'Usage: node e2e/phase1/cloud-desk.mjs prepare CONFIG | run CONFIG NEW_OUTPUT_DIR | probe-cloud CONFIG NEW_OUTPUT_DIR',
   );
   const cfg = await json(configFile);
   if (command === 'prepare') {
@@ -446,7 +819,10 @@ if (
       }) + '\n',
     );
   } else {
-    const report = await run(cfg, output);
+    const report = await (command === 'probe-cloud' ? probeCloud : run)(
+      cfg,
+      output,
+    );
     process.stdout.write(
       JSON.stringify({
         status: report.status,
@@ -454,6 +830,7 @@ if (
         failure: report.failure,
       }) + '\n',
     );
-    if (report.status !== 'passed') process.exitCode = 1;
+    if (!['passed', 'probe-passed'].includes(report.status))
+      process.exitCode = 1;
   }
 }

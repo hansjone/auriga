@@ -19,7 +19,14 @@ export function nativeClient(request) {
     });
     if (result.type !== 'server-response' || result.rpcId !== rpcId)
       throw failure('native_rpc_identity_mismatch');
-    if (result.result?.ok !== true) throw failure('native_rpc_failed');
+    if (result.result?.ok !== true) {
+      const error = failure('native_rpc_failed');
+      error.rpcMethod = method;
+      const remoteCode = result.result?.error?.code;
+      if (/^[A-Za-z0-9_.:-]{1,80}$/.test(remoteCode ?? ''))
+        error.remoteCode = remoteCode;
+      throw error;
+    }
     return result.result.value;
   };
   return {
@@ -42,7 +49,7 @@ export function nativeClient(request) {
     },
     async createSession(cwd, provider) {
       const { sessionId } = await rpc('session/create', {
-        request: { cwd, agentPreset: 'minimal' },
+        request: { cwd, agentPreset: 'standard' },
       });
       assert.equal(typeof sessionId, 'string');
       sessions.push(sessionId);
@@ -73,6 +80,58 @@ export function nativeClient(request) {
       for (const sessionId of sessions)
         await rpc('session/cancel', { request: { sessionId } });
     },
+  };
+}
+
+export async function diagnoseNativeSession(client, sessionId) {
+  const cut = await client.rpc('session/projections', {
+    request: { sessionId },
+  });
+  if (!Number.isInteger(cut?.asOfSeq)) return { projectionAvailable: false };
+  const page = await client.rpc('session/page', {
+    request: {
+      address: { kind: 'session', sessionId },
+      throughSeq: cut.asOfSeq,
+      maxMessages: 40,
+    },
+  });
+  const errors = new Set();
+  const known = [
+    'ECONNREFUSED',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'ETIMEDOUT',
+    'MODEL_NOT_CONFIGURED',
+    'MODEL_NOT_FOUND',
+    'MODEL_UNAVAILABLE',
+    'PROVIDER_NOT_FOUND',
+    'fetch failed',
+    'Connection error',
+    'permission denied',
+    'Unknown tool',
+    'apiKey',
+  ];
+  const scan = (value, depth = 0) => {
+    if (depth > 20) return;
+    if (typeof value === 'string') {
+      for (const code of known) if (value.includes(code)) errors.add(code);
+    } else if (Array.isArray(value))
+      for (const item of value) scan(item, depth + 1);
+    else if (value && typeof value === 'object')
+      for (const item of Object.values(value)) scan(item, depth + 1);
+  };
+  for (const row of page.records) scan(row.event?.data);
+  return {
+    projectionAvailable: true,
+    asOfSeq: cut.asOfSeq,
+    eventTypes: [
+      ...new Set(
+        page.records
+          .map((row) => row.event?.type)
+          .filter((type) => /^[a-zA-Z0-9_/-]{1,80}$/.test(type ?? '')),
+      ),
+    ],
+    errorClasses: [...errors],
   };
 }
 
@@ -185,6 +244,26 @@ export async function loginDesktop(request, member) {
           type: 'form',
           formId: 'first_totp',
           values: { otp: authenticatorCode(secret) },
+        },
+      },
+      status.csrf,
+    );
+  } else if (['totp', 'platform_totp'].includes(result.step?.formId)) {
+    const fields = result.step.fields.filter((field) => field.kind === 'otp');
+    assert.equal(fields.length, 1);
+    assert.ok(['otp', 'code'].includes(fields[0].name) && member.totpSecret);
+    await poll(
+      () => 30000 - (Date.now() % 30000) > 5000,
+      'authenticator_window',
+    );
+    result = await request(
+      '/auriga/local-login/login',
+      {
+        action: 'advance',
+        input: {
+          type: 'form',
+          formId: result.step.formId,
+          values: { [fields[0].name]: authenticatorCode(member.totpSecret) },
         },
       },
       status.csrf,

@@ -39,6 +39,7 @@ node e2e/phase1/cloud-desk.mjs prepare .agent-evidence/cloud-desk/prepare.json
 
 生成 `desktop/cloud-desk-desktop.json`，后续运行直接复用，不重复安装。
 每次真实登录使用全新 profile；`usedForLiveRun=true` 的 profile 不自动重置或覆盖。
+未做真实登录的 R3 profile 可以直接续用；不要重复安装或清空身份。
 
 Playwright 复用 `e2e/phase1/package-lock.json` 锁定依赖（当前为 1.56.1），不要改变产品 workspace 依赖。
 可在独立测试依赖目录运行 `npm ci --ignore-scripts --no-audit --no-fund`，
@@ -60,6 +61,30 @@ Playwright 复用 `e2e/phase1/package-lock.json` 锁定依赖（当前为 1.56.1
 - `fixture`：`bind`、`cloudHost`、`desktopHost`。后两项必须是明确可达的本机/私网 IPv4，不能填模型供应商地址。
   默认在当前 Node 启动随机端口；Windows 使用 WSL 时加 `wsl: { "distribution": "Ubuntu", "node": "锁定 Linux Node 的绝对路径" }`。
   WSL localhost 转发不可用时，用 `bind: "0.0.0.0"` 和实际 WSL 私网地址，不改系统转发或防火墙。
+
+R4 复用已有成员时用 `existingCloud: { "credentialsFile": "共享栈的member-a.json路径", "instanceId": "交接的A实例ID" }`，
+并指定 `desktopMemberFile` 为同一栈的 `member-b.json`，此时不需要管理员 enrollment，也不会创建新邀请/成员。
+凭据文件的 `portalUrl`、`accountId` 必须与实际登录安装和本人实例相符；支持正常 TOTP 和 `platform_totp`，不注入 cookie。
+现有实例通过真实“进入实例”按钮打开，停机实例通过“启动并进入”唤醒。
+本机示例域名模式只给本次 Chromium 设置 resolver 和明确的 direct proxy，不改系统代理或 DNS。
+
+共享栈测试前必须持本任务“auriga-SEND-FIX R4 只测不重建”锁，结束立即释放；脚本复用已有成员时检查此锁。
+云实例禁止访问宿主私网时，可用 `fixture: { "cloudInstanceId": "同一个A实例ID" }`：
+脚本通过 Docker exec 的 stdin 在该实例临时启动仅听回环的随机端口模型服务，桌面模型另听本机回环。
+不写云端插件/配置文件，不发布端口、不修改网络隔离；私有控制键不放 argv，结束关闭两个临时服务。
+两侧夹具使用同一 run ID 汇总真实请求/回复证据。主会话固定使用 standard Agent 预设和4096-token模型，
+64-token的标题辅助请求只返回标题，不触发工具或充当收件。报告只记请求结构和工具名，不记原始提示。
+
+只核云端是否能走到真实入网工具（桌面入口尚不可用时）可执行：
+
+```powershell
+node e2e/phase1/cloud-desk.mjs probe-cloud .agent-evidence/cloud-desk/run.json .agent-evidence/cloud-desk/cloud-probe-001
+```
+
+该命令不需要桌面 connect 配置；正常登录 A，核 managed Node 健康和原生 ACTIVE，读取 Settings/Session 公开 API，
+由真正 Agent 调固定模型发起 `auriga_network_join`。面板已知 502 会单独记录并继续；401/403 不跳过。
+`probe-passed` 也明确带 `conversationPassed=false`，不算双向互发通过。
+失败记录公开会话事件类型、白名单错误分类和模型连通性，清理自己的测试 provider/key 和活动请求，保留会话历史。
 
 共享栈若仅有 DNS HTTP 入口，桌面 connect 会按产品规则拒绝；应由安装发布有效 HTTPS 或受支持的私网 IP 配方，
 不能用 HTTP 域名伪装回环、关闭 TLS 校验或从用户私有凭据库补材料。

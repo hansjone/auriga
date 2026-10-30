@@ -5,9 +5,16 @@ import {
   assertConversation,
   nativeClient,
   configureFixtureModel,
+  diagnoseNativeSession,
 } from './cloud-desk.native.mjs';
 import { validateRunConfig } from './cloud-desk.mjs';
-import { accessOrigin, assertCloudEntry } from './cloud-desk.browser.mjs';
+import {
+  accessOrigin,
+  assertCloudEntry,
+  assessManagedPlugin,
+  loginOtpField,
+  loopbackBrowserArgs,
+} from './cloud-desk.browser.mjs';
 
 const tools = [{ type: 'function', function: { name: 'auriga_send_message' } }];
 const message = (text) => ({ role: 'user', content: text });
@@ -364,4 +371,191 @@ test('fixture model edits and cleanup use fresh CAS revisions and only their own
     ]);
   assert.equal(JSON.stringify(writes).includes('[redacted]'), false);
   assert.equal(writes.at(-1).method, 'credentials/unset');
+});
+
+test('a signed-panel 502 does not mask a healthy managed Node plugin or bypass failed authentication', () => {
+  const health = {
+    status: 200,
+    body: { status: 'ok', ready: true, protocol: 1, pluginVersion: 'test' },
+  };
+  assert.deepEqual(assessManagedPlugin(health, { status: 502 }), {
+    mode: 'managed',
+    pluginVersion: 'test',
+    panelStatus: 502,
+    panelAvailable: false,
+    nodeHealthy: true,
+  });
+  assert.throws(() => assessManagedPlugin(health, { status: 401 }));
+  assert.throws(() => assessManagedPlugin({ status: 503 }, { status: 502 }));
+});
+
+test('existing member MFA uses the real OTP field, including platform_totp code', () => {
+  assert.equal(
+    loginOtpField({ formId: 'totp', fields: [{ kind: 'otp', name: 'otp' }] }),
+    'otp',
+  );
+  assert.equal(
+    loginOtpField({
+      formId: 'platform_totp',
+      fields: [{ kind: 'otp', name: 'code' }],
+    }),
+    'code',
+  );
+  assert.throws(() =>
+    loginOtpField({ fields: [{ kind: 'text', name: 'password' }] }),
+  );
+});
+
+test('browser-only loopback routing explicitly selects direct proxy and leaves system routing alone', () => {
+  const access = {
+    mode: 'domain',
+    portalOrigin: { host: 'portal.example.com' },
+    adminOrigin: { host: 'admin.example.com' },
+    instances: { parentDomain: 'i.example.com' },
+  };
+  assert.deepEqual(loopbackBrowserArgs(access, false), []);
+  const args = loopbackBrowserArgs(access, true);
+  assert.ok(args.includes('--proxy-server=direct://'));
+  assert.ok(args.includes('--proxy-bypass-list=*'));
+  assert.ok(args.some((v) => v.includes('MAP portal.example.com 127.0.0.1')));
+});
+
+test('native failure evidence excludes model payloads and capability URLs', async () => {
+  const client = {
+    async rpc(method) {
+      if (method === 'session/projections') return { asOfSeq: 8 };
+      return {
+        records: [
+          {
+            event: {
+              type: 'llm/attempt-failed',
+              data: {
+                prompt: 'private prompt',
+                error: {
+                  message:
+                    'Connection error at http://127.0.0.1/private-capability',
+                },
+              },
+            },
+          },
+        ],
+      };
+    },
+  };
+  const result = await diagnoseNativeSession(client, 'own-test-session');
+  assert.deepEqual(result.errorClasses, ['Connection error']);
+  assert.equal(JSON.stringify(result).includes('private'), false);
+});
+
+test('conversation capability checks use the normal standard Agent preset', async () => {
+  const requests = [];
+  const client = nativeClient(async (_path, body) => {
+    requests.push(body);
+    return {
+      type: 'server-response',
+      rpcId: body.rpcId,
+      result: {
+        ok: true,
+        value:
+          body.method === 'session/create'
+            ? { sessionId: 'own-session' }
+            : {
+                selected: {
+                  provider: 'local-fixture',
+                  model: 'cloud-desk-fixture',
+                },
+              },
+      },
+    };
+  });
+  await client.createSession('/own-workspace', 'local-fixture');
+  assert.equal(requests[0].payload.args.request.agentPreset, 'standard');
+});
+
+test('auxiliary title input containing the marker or quoted external header is not an Agent command or receipt', async (t) => {
+  const f = await fixture(t);
+  f.state.plan({
+    side: 'cloud',
+    label: 'join',
+    tool: 'auriga_network_join',
+    args: {},
+  });
+  const title = {
+    max_tokens: 64,
+    messages: [message('User message 1:\n' + f.state.marker('join'))],
+    tools: [],
+  };
+  assert.doesNotThrow(() => f.state.respond('cloud', title));
+  assert.equal(f.state.snapshot().failures.length, 0);
+  f.state.expect('cloud', 'request');
+  f.state.respond('cloud', {
+    max_tokens: 64,
+    messages: [
+      message(
+        'User message 1:\n' + external(f.state.marker('request')).content,
+      ),
+    ],
+    tools: [],
+  });
+  assert.equal(f.state.snapshot().receipts.length, 0);
+});
+
+test('Agent context framing does not hide a genuine tool-capability failure', async (t) => {
+  const f = await fixture(t);
+  f.state.plan({
+    side: 'cloud',
+    label: 'join',
+    tool: 'auriga_network_join',
+    args: {},
+  });
+  assert.throws(
+    () =>
+      f.state.respond('cloud', {
+        max_tokens: 4096,
+        messages: [message('Agent context\n' + f.state.marker('join'))],
+        tools: [],
+      }),
+    { code: 'native_tool_unavailable' },
+  );
+});
+
+test('native trailing context does not displace the latest actual user command', async (t) => {
+  const f = await fixture(t);
+  f.state.plan({
+    side: 'cloud',
+    label: 'join',
+    tool: 'auriga_network_join',
+    args: {},
+  });
+  const response = f.state.respond('cloud', {
+    max_tokens: 4096,
+    messages: [
+      message(f.state.marker('join')),
+      message('Additional native runtime context'),
+    ],
+    tools: [{ function: { name: 'auriga_network_join' } }],
+  });
+  assert.equal(response.tool_calls?.[0]?.function.name, 'auriga_network_join');
+});
+
+test('fixture diagnostics retain only valid tool names and never raw model input', async (t) => {
+  const f = await fixture(t);
+  f.state.plan({
+    side: 'cloud',
+    label: 'join',
+    tool: 'auriga_network_join',
+    args: {},
+  });
+  assert.throws(
+    () =>
+      f.state.respond('cloud', {
+        max_tokens: 4096,
+        messages: [message('private model context\n' + f.state.marker('join'))],
+        tools: [{ function: { name: 'credential/should-not-persist' } }],
+      }),
+    { code: 'native_tool_unavailable' },
+  );
+  const evidence = JSON.stringify(f.state.snapshot());
+  assert.equal(evidence.includes('private model context'), false);
+  assert.equal(evidence.includes('should-not-persist'), false);
 });

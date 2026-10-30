@@ -265,17 +265,31 @@ export async function launchDesktop(prepared, { connect, caFile } = {}) {
           : {
               origin,
               'content-type': 'application/json',
+              ...(path.startsWith('/auriga/settings/')
+                ? { 'x-auriga-settings': '1' }
+                : {}),
               ...(csrf ? { 'x-auriga-csrf': csrf } : {}),
             }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     accept(response);
+    const value = await response.json();
     if (response.status !== 200)
       throw Object.assign(new Error('desktop_native_http_failed'), {
         status: response.status,
+        ...([
+          'httpsRequired',
+          'invalidOrigin',
+          'invalidSettings',
+          'forbidden',
+          'auth',
+          'unavailable',
+        ].includes(value.reason)
+          ? { reason: value.reason }
+          : {}),
       });
-    return response.json();
+    return value;
   };
   const stop = async () => {
     if (!closed) child.kill();

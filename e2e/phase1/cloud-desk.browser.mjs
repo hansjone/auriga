@@ -11,6 +11,16 @@ export function accessOrigin(value) {
   return url.origin;
 }
 
+export function loopbackBrowserArgs(access, enabled) {
+  if (!enabled) return [];
+  assert.equal(access.mode, 'domain');
+  return [
+    '--proxy-server=direct://',
+    '--proxy-bypass-list=*',
+    `--host-resolver-rules=MAP ${access.portalOrigin.host} 127.0.0.1,MAP ${access.adminOrigin.host} 127.0.0.1,MAP *.${access.instances.parentDomain} 127.0.0.1`,
+  ];
+}
+
 export function assertCloudEntry(value, access, id) {
   const url = new URL(value);
   assert.equal(url.username + url.password + url.search + url.hash, '');
@@ -51,7 +61,7 @@ async function provider(page, type) {
   await page.locator(`[data-provider-id="${choices[0].id}"]`).click();
   await page.getByTestId('form-step').waitFor();
 }
-async function submit(page) {
+async function submit(page, allowPending = false) {
   const response = page.waitForResponse(
     (r) =>
       r.request().method() === 'POST' &&
@@ -62,7 +72,209 @@ async function submit(page) {
     page.locator('[data-testid="form-step"] button[type="submit"]').click(),
   ]);
   assert.equal(result.status(), 200);
-  assert.equal((await result.json()).status, 'completed');
+  const value = await result.json();
+  if (!allowPending) assert.equal(value.status, 'completed');
+  return value;
+}
+
+export function loginOtpField(step) {
+  const fields = step?.fields?.filter((field) => field.kind === 'otp') ?? [];
+  assert.equal(fields.length, 1, 'one production OTP field required');
+  assert.ok(['otp', 'code'].includes(fields[0].name));
+  return fields[0].name;
+}
+
+export function assessManagedPlugin(health, panel) {
+  assert.equal(health.status, 200, 'managed Node health must succeed');
+  assert.equal(health.body?.status, 'ok');
+  assert.equal(health.body?.ready, true);
+  assert.equal(health.body?.protocol, 1);
+  assert.ok(health.body?.pluginVersion);
+  assert.ok(
+    [200, 502].includes(panel.status),
+    'panel authentication must not be bypassed',
+  );
+  if (panel.status === 200) assert.equal(panel.body?.mode, 'managed');
+  return {
+    mode: 'managed',
+    pluginVersion: health.body.pluginVersion,
+    panelStatus: panel.status,
+    panelAvailable: panel.status === 200,
+    nodeHealthy: true,
+  };
+}
+
+export async function openExistingCloud({
+  chromium,
+  access,
+  member,
+  instanceId,
+  resolveLoopback,
+  report,
+  stage,
+}) {
+  const portal = accessOrigin(access.portalOrigin);
+  assert.equal(
+    member.portalUrl,
+    portal,
+    'credentials belong to this test installation',
+  );
+  assert.match(member.accountId, /^[a-f0-9-]{36}$/);
+  assert.match(instanceId, /^[a-f0-9-]{36}$/);
+  const args = loopbackBrowserArgs(access, resolveLoopback);
+  const browser = await chromium.launch({ headless: true, args });
+  try {
+    const context = await browser.newContext({ locale: 'zh-CN' });
+    const page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    page.on('response', (r) => {
+      if (r.status() < 400 || report.httpFailures.length >= 30) return;
+      const traceId = r.headers()['x-trace-id'];
+      report.httpFailures.push({
+        stage: report.stage,
+        status: r.status(),
+        ...(/^[a-f0-9]{32}$/.test(traceId ?? '') ? { traceId } : {}),
+      });
+    });
+    stage('existing-cloud-member-login');
+    await page.goto(portal + '/login');
+    await provider(page, 'team-account');
+    await page.locator('input[name="username"]').fill(member.username);
+    await page.locator('input[name="password"]').fill(member.password);
+    const otp = async (name) => {
+      assert.ok(member.totpSecret);
+      await poll(
+        () =>
+          Math.floor(Date.now() / 30000) > (member.lastTotpCounter ?? -1) &&
+          30000 - (Date.now() % 30000) > 5000,
+        'fresh_authenticator_window',
+      );
+      member.lastTotpCounter = Math.floor(Date.now() / 30000);
+      await page
+        .locator(`input[name="${name}"]`)
+        .fill(authenticatorCode(member.totpSecret));
+    };
+    if (await page.locator('input[name="otp"]').count()) await otp('otp');
+    let tx = await submit(page, true);
+    if (
+      tx.status === 'pending' &&
+      ['totp', 'platform_totp'].includes(tx.step?.formId)
+    ) {
+      await otp(loginOtpField(tx.step));
+      tx = await submit(page, true);
+    }
+    assert.equal(tx.status, 'completed');
+    await page.waitForURL(portal + '/');
+    assert.equal(
+      (await get(page, '/api/iam/v1/me')).account.id,
+      member.accountId,
+    );
+    stage('existing-cloud-instance-ready');
+    const observer = await context.newPage();
+    let instance;
+    try {
+      await observer.goto(portal + '/');
+      const response = page.waitForResponse(
+        (r) =>
+          r.request().method() === 'POST' &&
+          new URL(r.url()).pathname === '/api/workspace/v1/me/instance/open',
+      );
+      const [opened] = await Promise.all([
+        response,
+        page.getByRole('button', { name: /^(启动并进入|进入实例)$/ }).click(),
+      ]);
+      assert.equal(opened.status(), 200);
+      const trace = opened.headers()['x-trace-id'];
+      if (/^[a-f0-9]{32}$/.test(trace ?? '')) report.openTraceId = trace;
+      instance = await poll(
+        async () => {
+          const value = (
+            await get(observer, '/api/workspace/v1/me/instances')
+          ).items.find(
+            (v) => v.id === instanceId && v.ownerId === member.accountId,
+          );
+          if (value?.phase === 'failed')
+            throw Object.assign(new Error('cloud_instance_failed'), {
+              code: 'cloud_instance_failed',
+            });
+          return value?.ready &&
+            ['running', 'pending_restart'].includes(value.phase)
+            ? value
+            : null;
+        },
+        'existing_cloud_not_ready',
+        125000,
+      );
+    } finally {
+      await observer.close();
+    }
+    await page.waitForURL(
+      (url) => {
+        try {
+          assertCloudEntry(url.href, access, instance.id);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30000 },
+    );
+    const entry = new URL(page.url());
+    const inspect = async (path, body, csrf) => {
+      const url = new URL(path.replace(/^\//, ''), entry);
+      assert.equal(url.origin, entry.origin);
+      return page.evaluate(
+        async ({ url, body, csrf }) => {
+          const response = await globalThis.fetch(url, {
+            method: body === undefined ? 'GET' : 'POST',
+            credentials: 'same-origin',
+            redirect: 'error',
+            signal: globalThis.AbortSignal.timeout(15000),
+            headers:
+              body === undefined
+                ? {}
+                : {
+                    'content-type': 'application/json',
+                    ...(csrf ? { 'x-auriga-csrf': csrf } : {}),
+                  },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          });
+          let value;
+          try {
+            value = await response.json();
+          } catch {
+            /* An HTML error is not an RPC result. */
+          }
+          return { status: response.status, body: value };
+        },
+        { url: url.href, body, csrf },
+      );
+    };
+    const request = async (path, body, csrf) => {
+      const response = await inspect(path, body, csrf);
+      if (response.status !== 200)
+        throw Object.assign(new Error('cloud_native_http_failed'), {
+          code: 'cloud_native_http_failed',
+          status: response.status,
+        });
+      return response.body;
+    };
+    stage('cloud-node-plugin-health');
+    const health = await inspect('/_auriga/health');
+    const panel = await inspect('/auriga/bootstrap');
+    const plugin = assessManagedPlugin(health, panel);
+    report.cloud = {
+      instanceId: instance.id,
+      ownerId: member.accountId,
+      ready: true,
+      browserAuthenticated: true,
+      ...plugin,
+    };
+    return { browser, request, inspect, member, instance, entry: entry.href };
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
 }
 
 export async function createCloudMember({
@@ -75,12 +287,7 @@ export async function createCloudMember({
 }) {
   const portal = accessOrigin(access.portalOrigin),
     admin = accessOrigin(access.adminOrigin);
-  const args = resolveLoopback
-    ? [
-        '--no-proxy-server',
-        `--host-resolver-rules=MAP ${access.portalOrigin.host} 127.0.0.1, MAP ${access.adminOrigin.host} 127.0.0.1, MAP *.${access.instances.parentDomain} 127.0.0.1`,
-      ]
-    : [];
+  const args = loopbackBrowserArgs(access, resolveLoopback);
   const browser = await chromium.launch({ headless: true, args });
   try {
     const context = await browser.newContext({ locale: 'zh-CN' });
