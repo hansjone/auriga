@@ -15,8 +15,8 @@ UID、祖先、receipt 和硬链接检查在容器内照常执行。宿主源目
 内部 bridge 必须设置 `AURIGA_INTERNAL_DYNAMIC_RANGE`，为 `AURIGA_INTERNAL_SUBNET` 内
 且不含固定 `AURIGA_INTERNAL_EDGE_IP` 的动态 CIDR；示例将 /26 的后半 /27 留给自动地址。
 否则新增服务可能在 edge 重建期间先占用其固定 IP，导致 Docker 返回 Address already in use。
-已有栈变更池范围前先保留数据备份，执行本包 `stop.sh`（不加实例清理参数），再设置范围并
-执行 `start.sh`；只重建固定 Auriga 项目的私有 bridge，数据卷、安装根和外部 LAN 网络保留。
+已有栈先保留数据备份并在 `stack.env` 设置范围，再执行本包 `stop.sh`（不加实例清理参数），
+最后执行 `start.sh`；只重建固定 Auriga 项目的私有 bridge，数据卷、安装根和外部 LAN 网络保留。
 
 ## 启用 collab 网络与已有 NAS 升级
 
