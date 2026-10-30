@@ -1,0 +1,12 @@
+{
+  "name": "auriga-phase1-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test cloud-ready.test.mjs",
+    "cloud-ready": "node cloud-ready.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}
