@@ -23,6 +23,8 @@ require_cmd docker
 [ "$COMPOSE_PROJECT_NAME" = "$AURIGA_NAS_PROJECT" ] \
   || die "refusing stop: COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME != $AURIGA_NAS_PROJECT"
 
+sh "$NAS_ROOT/scripts/renew-panel.sh" --remove || info "warning: could not remove panel cron; run renew-panel.sh --remove as the scheduling user"
+
 info "stopping compose project=$AURIGA_NAS_PROJECT (volumes retained; no orphans sweep)"
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" stop || true
 # No --remove-orphans (M1): only containers defined by this compose file.

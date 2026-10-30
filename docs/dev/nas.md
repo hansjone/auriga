@@ -123,6 +123,11 @@ sh deploy-nas/scripts/smoke.sh
 sh deploy-nas/scripts/stop.sh
 ```
 
+面板签名和 cron 失败只告警，不阻止其他服务启动；缺少可用面板清单时仅面板路径返回 503。
+续签任务使用 operator 在数据根父目录创建的 0700 私有目录，不要求非 root operator 写 root 所有的 config。
+`stop.sh` 自动移除本安装的 cron；卸载或移动部署材料前，先以原调度用户运行 `stop.sh` 或 `renew-panel.sh --remove`。
+详细的日志、健康信号和手动恢复见 [面板部署与续签](panel-deployment.md)。
+
 所有操作脚本都显式用 `sh` 调用，不依赖执行位。源码 checkout 对应 `deploy/nas/`。数据根须绝对路径、至少三层且 basename 为 `auriga-*`；拒绝链接、点段及未初始化的外来非空目录。首装/root初始化只为新建且空的材料根通过已打开 FD 设置固定 `10001:10001`，再让清空补充组的同一预构建 binary 子进程生成材料。重入按原身份校验 receipt、输入和完整材料，原 key 不轮换；错 owner/mode、额外链接、错误祖先、缺 receipt、template-only、PKI/模板目录链接都拒绝，不自动 chmod/chown 旧材料。
 
 应用镜像须走包内 `load-images.sh`：加载前只读验证完整校验和、新 `config_id` 元数据和固定三份真实 tar，

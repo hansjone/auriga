@@ -19,6 +19,7 @@ services:
     read_only: true
     network_mode: none
     entrypoint: ["/auriga-panel"]
+    command: ['-best-effort']
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/panel-signing.key:/run/panel.key:ro
       - ${AURIGA_DATA_ROOT}/config/panel:/out
@@ -250,9 +251,12 @@ services:
     tmpfs:
       - /tmp:size=16m,mode=1777
     user: '65532:65532'
+    healthcheck:
+      test: ['CMD', '/auriga-panel', '-check', '-out', '/srv/auriga/panel']
+      interval: 1m
+      timeout: 5s
+      retries: 1
     depends_on:
-      panel-prepare:
-        condition: service_completed_successfully
       platform:
         condition: service_healthy
       nats:

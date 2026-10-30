@@ -3,7 +3,6 @@
 package panel
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -21,6 +20,7 @@ import (
 )
 
 const Lifetime = 30 * 24 * time.Hour
+const RenewBefore = 7 * 24 * time.Hour
 
 // Generate is called only for a new, receipted installation. The private key is
 // never copied into edge or instance runtime materials.
@@ -101,10 +101,10 @@ func versionParts(v string) ([]uint64, error) {
 // Publish signs bytes from the image, retains old hashed files for readers with
 // an in-flight manifest, and atomically replaces the public manifest last.
 func Publish(keyFile, dist, out, version string, now time.Time) error {
-	next, err := versionParts(version)
-	if err != nil {
-		return err
-	}
+	return withOutputLock(out, func() error { return publish(keyFile, dist, out, version, now) })
+}
+
+func publish(keyFile, dist, out, version string, now time.Time) error {
 	key, err := readRegular(keyFile, ed25519.PrivateKeySize)
 	if err != nil {
 		return fmt.Errorf("read panel signing key: %w", err)
@@ -127,31 +127,29 @@ func Publish(keyFile, dist, out, version string, now time.Time) error {
 	sum := sha256.Sum256(code)
 	entry := "auriga-team-panel-" + hex.EncodeToString(sum[:]) + ".js"
 	sri := sha512.Sum384(code)
-	m := manifest{body: body{Element: "auriga-team-panel", Entry: entry, ExpiresAt: now.UTC().Add(Lifetime).Format(time.RFC3339), Integrity: map[string]string{entry: "sha384-" + base64.StdEncoding.EncodeToString(sri[:])}, IssuedAt: now.UTC().Format(time.RFC3339), MinPluginVersion: "0.0.0", Protocol: 1, SchemaVersion: 1, Version: version}}
-	if err := os.MkdirAll(out, 0755); err != nil {
-		return err
-	}
-	info, err := os.Lstat(out)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("invalid public panel directory")
-	}
+	automatic := version == ""
+	var old manifest
 	previous, err := readRegular(filepath.Join(out, "manifest.json"), 256<<10)
 	if err == nil {
-		var old manifest
-		decoder := json.NewDecoder(bytes.NewReader(previous))
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&old) != nil {
-			return fmt.Errorf("invalid previous panel manifest")
+		old, err = verifiedManifest(previous, pub)
+		if err != nil {
+			return err
 		}
-		encoded, err := json.Marshal(old)
-		if err != nil || !bytes.Equal(previous, encoded) {
-			return fmt.Errorf("changed previous panel manifest")
-		}
-		signed, marshalErr := json.Marshal(old.body)
-		sig, sigErr := base64.RawURLEncoding.DecodeString(old.Signature.Value)
-		if marshalErr != nil || sigErr != nil || old.Signature.Alg != "EdDSA" || old.Signature.Kid != keyID(pub) || !ed25519.Verify(pub, signed, sig) {
-			return fmt.Errorf("previous panel manifest signature invalid")
-		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	derivedVersion, err := automaticVersion(out, old, entry, pub)
+	if err != nil {
+		return err
+	}
+	if automatic {
+		version = derivedVersion
+	}
+	next, err := versionParts(version)
+	if err != nil {
+		return err
+	}
+	if len(previous) != 0 {
 		prev, err := versionParts(old.Version)
 		if err != nil {
 			return err
@@ -171,9 +169,22 @@ func Publish(keyFile, dist, out, version string, now time.Time) error {
 		if err != nil || now.Before(issued) || comparison < 0 || comparison == 0 && old.Entry != entry {
 			return fmt.Errorf("panel rollback or changed bytes without version increase")
 		}
-	} else if !os.IsNotExist(err) {
-		return err
+		expires, err := time.Parse(time.RFC3339, old.ExpiresAt)
+		if err != nil {
+			return fmt.Errorf("invalid previous panel expiry")
+		}
+		if automatic && comparison == 0 && expires.Sub(now) > RenewBefore {
+			return writePublic(filepath.Join(out, entry), code)
+		}
+		// Retired, signed manifests are the content-to-version ledger. Save before
+		// replacing the public manifest, so interruption cannot lose an old digest.
+		if old.Entry != entry {
+			if err := archiveManifest(out, old.Version, previous); err != nil {
+				return err
+			}
+		}
 	}
+	m := manifest{body: body{Element: "auriga-team-panel", Entry: entry, ExpiresAt: now.UTC().Add(Lifetime).Format(time.RFC3339), Integrity: map[string]string{entry: "sha384-" + base64.StdEncoding.EncodeToString(sri[:])}, IssuedAt: now.UTC().Format(time.RFC3339), MinPluginVersion: "0.0.0", Protocol: 1, SchemaVersion: 1, Version: version}}
 	signed, err := json.Marshal(m.body)
 	if err != nil {
 		return err

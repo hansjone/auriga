@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,7 +88,13 @@ func TestInstallationKeysAndSignedBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 3 {
+	assets := 0
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".js") {
+			assets++
+		}
+	}
+	if assets != 2 {
 		t.Fatal("old hashed asset was removed")
 	}
 	if err := os.WriteFile(filepath.Join(out, "manifest.json"), raw, 0600); err != nil {

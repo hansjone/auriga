@@ -25,13 +25,11 @@ COPY web/admin/src ./web/admin/src
 COPY web/admin/index.html web/admin/vite.config.ts ./web/admin/
 COPY web/panel/src ./web/panel/src
 COPY web/panel/vite.config.ts web/panel/tsconfig.json ./web/panel/
-ARG AURIGA_PANEL_VERSION=0.0.0
 RUN pnpm gen:api \
   && pnpm gen:steps \
   && pnpm --filter @auriga/portal build \
   && pnpm --filter @auriga/admin build \
-  && pnpm --filter @auriga/panel build \
-  && printf '%s\n' "$AURIGA_PANEL_VERSION" > web/panel/dist/version.txt
+  && pnpm --filter @auriga/panel build
 
 FROM golang:1.27.3 AS build
 WORKDIR /src/infra

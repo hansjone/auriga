@@ -280,16 +280,13 @@ services:
     build:
       context: ../..
       dockerfile: deploy/compose/Dockerfile.edge
-      args:
-        AURIGA_PANEL_VERSION: ${AURIGA_PANEL_VERSION:-0.0.0}
-    user: '0:0'
+    user: '${AURIGA_PANEL_UID:-0}:${AURIGA_PANEL_GID:-0}'
     cap_drop: [ALL]
-    # prepare may run as a non-root installer; only the key/output binds are visible.
-    cap_add: [DAC_OVERRIDE]
     read_only: true
     security_opt: ['no-new-privileges:true']
     network_mode: none
     entrypoint: ['/auriga-panel']
+    command: ['-best-effort']
     volumes:
       - ./var/panel-signing.key:/run/panel.key:ro
       - ./var/panel:/out
@@ -311,9 +308,12 @@ services:
         ipv4_address: 172.29.240.10 # gitleaks:allow disposable M2 network
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    healthcheck:
+      test: ['CMD', '/auriga-panel', '-check', '-out', '/srv/auriga/panel']
+      interval: 1m
+      timeout: 5s
+      retries: 1
     depends_on:
-      panel-prepare:
-        condition: service_completed_successfully
       platform:
         condition: service_healthy
       nats:
