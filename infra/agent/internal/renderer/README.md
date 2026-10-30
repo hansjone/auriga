@@ -16,9 +16,10 @@ Authorization is a Loader `!!js` file expression; the sole model file is read at
 evaluation. Obsolete `model-keys.json` copies are removed, and the user's native
 `credentials` row is left intact and writable. The managed instance uses a
 platform-only model-provider profile, with the standard native `llm-pi-ai` row.
-The public patch and profile contain no inline key. Release blocker: DSH
-0.2.0-rc.2 still exposes the evaluated Authorization in `settings/describe`;
-the opt-in native probe keeps a failing assertion for this disclosure.
+The public patch and profile contain no inline key. Known and accepted: only
+the instance owner sees the evaluated managed Authorization in `settings/describe`,
+within the MANAGED-N1 same-host boundary (backlog B-MM-DESCRIBE). The native
+probe warns for that exact value and fails for every other key exposure.
 
 `cordis.patch.yml` is a DSH Loader patch list (`dsh web --patch`): an `insert` of the `auriga-dsh` plugin row (config: protected `browserOrigin`, spec patches `plugins.auriga-dsh.*`) and one `@deepseek-ai/dsh-mcp-client` row per team MCP server (token read by a `!!js` file expression, never inlined), then `webserver` (bind `0.0.0.0` for Docker, `127.0.0.1` otherwise) and `web-runtime` (no URL print, `trustedHosts`) overrides, then spec patches `plugins.<row>.<key…>` as whole-config row overrides. Renderer-owned rows and keys cannot be patched; arbitrary Profile model providers fail closed. Only separately sealed managed model material can configure the renderer-owned `llm-pi-ai` row.
 

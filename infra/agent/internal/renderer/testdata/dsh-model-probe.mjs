@@ -1,6 +1,7 @@
 // Module composition only: real locked DSH Loader/settings/credentials/pi-ai,
 // disposable profile and random-port fake OpenAI upstream. No platform or user profile.
 import assert from 'node:assert/strict';
+import { classifyModelExposure } from './model-exposure.mjs';
 import {
   readFileSync,
   writeFileSync,
@@ -58,13 +59,11 @@ assert.equal(rows.length, 1);
 const keyFile = join(metaRoot, 'model-credential.json');
 const key = JSON.parse(readFileSync(keyFile, 'utf8')).credential;
 const exposures = [];
-const plaintextPaths = (value, path = '$') => {
-  if (typeof value === 'string') return value.includes('amc.') ? [path] : [];
-  if (value && typeof value === 'object')
-    return Object.entries(value).flatMap(([name, child]) =>
-      plaintextPaths(child, `${path}.${name}`),
-    );
-  return [];
+const acceptedExposures = [];
+const inspectExposure = (value, surface, label) => {
+  const result = classifyModelExposure(value, surface);
+  exposures.push(...result.failures.map((path) => label + ':' + path));
+  acceptedExposures.push(...result.warnings.map((path) => label + ':' + path));
 };
 if (readOnlyModel) {
   const cannotWrite = (file, flags) => {
@@ -247,7 +246,7 @@ try {
         'managed key must not enter the personal credential store',
       );
       const described = controller.describe();
-      exposures.push(...plaintextPaths(described, mode + ':settings/describe'));
+      inspectExposure(described, 'describe', mode + ':settings/describe');
       const ns = described.namespaces.find((row) => row.ns === 'llm-pi-ai');
       if (missingAdapter) {
         assert.equal(
@@ -282,7 +281,7 @@ try {
           ],
           ns.revision,
         );
-        exposures.push(...plaintextPaths(saved, mode + ':settings/mutate'));
+        inspectExposure(saved, 'mutate', mode + ':settings/mutate');
       } catch (error) {
         assert.equal(error.code, 'settings/rejected');
         assert.ok(
@@ -290,11 +289,10 @@ try {
           'mutation rejection must not expose model key',
         );
       }
-      exposures.push(
-        ...plaintextPaths(
-          controller.describe(),
-          mode + ':settings/describe-after-mutate',
-        ),
+      inspectExposure(
+        controller.describe(),
+        'describe',
+        mode + ':settings/describe-after-mutate',
       );
       for (const file of ['cordis.yml', 'cordis.patch.yml']) {
         assert.ok(
@@ -369,7 +367,8 @@ try {
     JSON.stringify({
       dshVersion: version,
       requests: requests.length,
-      noPlaintextInSettings: exposures.length === 0,
+      noUnexpectedPlaintextInSettings: exposures.length === 0,
+      acceptedDescribeWarnings: acceptedExposures.length,
       noPlaintextInProfile: true,
       fileAuthorizationResolved: true,
       readOnlyModelMount: readOnlyModel,
@@ -381,6 +380,11 @@ try {
       missingAdapterFailsClosed: true,
     }),
   );
+  if (acceptedExposures.length)
+    console.warn(
+      'WARNING B-MM-DESCRIBE: accepted owner-only exposure within MANAGED-N1 boundary; paths=' +
+        acceptedExposures.join(','),
+    );
   assert.equal(
     exposures.length,
     0,

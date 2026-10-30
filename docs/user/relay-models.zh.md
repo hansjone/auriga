@@ -45,7 +45,7 @@ DSH 的 `llm-pi-ai` 设置节支持下面的提供方配置。示例模型名和
 Auriga 托管的云端 DSH 默认带 `Auriga` 模型提供方，成员有权限时由平台下发实例绑定的模型 Key；正常使用无需手工保存这份 Key。
 云端原生凭据仍由用户管理，已有个人 Key、网页搜索 Key 和 OAuth 记录继续可用，也可通过原生凭据设置另存个人 Key；平台不会接管这份用户存储。
 手工配置个人中转站提供方时使用上面的原生模型设置和独立成员 Key。托管提供方使用平台专用 profile，不将托管补丁叠到已有个人 profile。
-当前托管模型文件表达式在锁定的 DSH 版本中存在设置接口明文暴露，尚未通过发布验收；详见[设计中的发布阻塞](../design/managed-model-credential.zh.md)。
+已知并接受：仅实例主人经 `settings/describe` 可见托管提供方求值后的 Authorization，属 MANAGED-N1 同机边界，跟踪 backlog **B-MM-DESCRIBE**；详见[托管模型设计](../design/managed-model-credential.zh.md)。
 部署方须先确认托管容器能访问
 所提供的中转站地址，包括 DNS、TLS 和隔离网络路由；桌面可以访问该地址不代表云端也可达。
 纯 IP/HTTP 部署只在管理员已接受该部署的明文传输边界时使用

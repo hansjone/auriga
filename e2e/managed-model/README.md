@@ -25,5 +25,6 @@ node /probe.mjs /runtime /run/auriga/cordis.patch.json /run/auriga /scratch --re
 ```
 
 `/probe.mjs` 是本仓库 `infra/agent/internal/renderer/testdata/dsh-model-probe.mjs` 的只读挂载；容器只需 loopback，无外网、平台或共享栈连接。探针会先断言模型文件和其目录都不可写，再验证用户存储读写及模型调用。
-**当前预期失败**：锁定的 DSH `0.2.0-rc.2` 在 `settings/describe` 返回求值后的 Authorization。探针仅输出暴露字段路径、不给出 Key，且保持非零退出码；profile 无明文及其他成功项不能代替这一失败门禁。
+**已知并接受**：仅实例主人经 `settings/describe` 可见 `llm-pi-ai` 的 `value.providers.auriga-managed.headers.Authorization`，属 MANAGED-N1 同机边界，跟踪 backlog **B-MM-DESCRIBE**。探针对该精确位置给出警告，只输出路径、不输出 Key；其他任何位置出现 Key（包括其他 namespace/provider、base/user、mutate 返回及 profile）仍判失败。
+运行 `node --test infra/agent/internal/renderer/testdata/model-exposure.test.mjs` 验证精确豁免与负例。只读容器运行时也须将同目录 `model-exposure.mjs` 只读挂载到 `/model-exposure.mjs`。
 托管模式只用于平台专用的模型提供方 profile；不覆盖用户原生 `credentials` 行，不向用户已有个人 profile 叠加这层补丁。

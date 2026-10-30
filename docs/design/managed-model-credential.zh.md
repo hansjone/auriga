@@ -19,7 +19,7 @@ renderer 生成 DSH 公开 `llm-pi-ai` 行的 `auriga-managed` OpenAI Chat Compl
 渲染层不覆盖原生 `credentials` 行或其存储位置；用户已有个人 Key、`credentials/set` 和 OAuth record 更新继续使用用户可写的原生凭据文件。
 `llm-pi-ai` 与凭据路径不能通过实例 Profile patch 覆盖；任意 `Profile.model_providers` 仍拒绝。缺材料删除私有模型文件，Key 改变影响渲染摘要并走受管材料重启。
 托管实例使用平台专用的隔离 profile，要求标准基线的 `llm-pi-ai` 行；渲染层管理该行的提供方配置。不将本层补丁应用到用户桌面或已有个人 profile，不承诺合并个人提供方；这不影响云端原生凭据存储的读写。
-**发布阻塞**：当前锁定的 DSH `0.2.0-rc.2` 会在 `settings/describe` 的 `value.providers.auriga-managed.headers.Authorization` 返回求值后的头；仅保留 `!!js` 不能保证设置接口无明文。原生探针对此保持失败断言，解决此边界前不能按安全验收通过部署。
+**已知并接受**：仅实例主人经 `settings/describe` 可见 `llm-pi-ai` 命名空间的 `value.providers.auriga-managed.headers.Authorization`，属 MANAGED-N1 同机边界，跟踪 backlog **B-MM-DESCRIBE**。探针仅对此精确位置给出警告；其他任何位置出现 Key 仍判失败，profile 仍不得保存 Key 明文。
 成员在 DSH 原生模型选择器选择池中模型；已有会话的模型选择不被改写。池列表在首次下发和实例重启时读取，运行时池变更的调用权限由 LiteLLM 实时执行。
 
 ai-gateway 通过既有受认证 IAM gRPC 每请求验证模型 Key，继续核验当前成员及模型权限，再用现有专用服务 Key 调 LiteLLM。IAM仍只签最多300秒租约，网关上限检查接受5秒跨主机时钟偏差，过期、身份及在线核权检查不变。

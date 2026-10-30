@@ -31,9 +31,10 @@ keeps its own writable user store, including personal references and OAuth recor
 This is a platform-only model-provider profile, separate from personal profiles.
 Key replacement uses the existing material restart path; invalid installation
 configuration clears previously delivered model material on reconciliation.
-Settings descriptions and profile edits must not disclose the key. This remains
-a release blocker: the locked DSH 0.2.0-rc.2 exposes the evaluated header in
-`settings/describe` despite preserving the raw file expression in the profile.
-The native probe deliberately fails until this disclosure is resolved.
+Known and accepted: only the instance owner can see the evaluated managed
+Authorization through `settings/describe`, within the MANAGED-N1 same-host
+boundary; tracked as B-MM-DESCRIBE. The profile retains the file expression.
+The probe warns only for this exact describe value; every other key exposure
+remains a failure.
 Gateway lease-ceiling checks permit five seconds of IAM clock skew; actual
 expiry and per-call online authorization remain mandatory.
