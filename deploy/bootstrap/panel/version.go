@@ -31,7 +31,7 @@ func verifiedManifest(raw []byte, pub ed25519.PublicKey) (manifest, error) {
 }
 
 // Versions belong to an installation: a new digest gets the next patch, while
-// a previously published digest can only renew its current version. The ledger
+// returning to older bytes also receives a higher version. The ledger
 // consists entirely of signed manifests and is never served by edge.
 func automaticVersion(out string, current manifest, entry string, pub ed25519.PublicKey) (string, error) {
 	archive := filepath.Join(out, ".panel-history")
@@ -79,9 +79,6 @@ func automaticVersion(out string, current manifest, entry string, pub ed25519.Pu
 			if parts[i] < latest[i] {
 				break
 			}
-		}
-		if old.Entry == entry && current.Entry != entry {
-			return "", fmt.Errorf("panel content rollback")
 		}
 	}
 	if current.Version == "" {

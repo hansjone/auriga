@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -29,11 +30,22 @@ func CheckHealth(out string, now time.Time) error {
 	if err != nil || !now.Before(expires) {
 		return fmt.Errorf("panel manifest expired or invalid")
 	}
+	if strings.ContainsAny(m.Entry, "/\\") || !strings.HasPrefix(m.Entry, "auriga-team-panel-") || !strings.HasSuffix(m.Entry, ".js") {
+		return fmt.Errorf("invalid panel entry")
+	}
+	code, err := readRegular(filepath.Join(out, m.Entry), 4<<20)
+	if err != nil || len(code) == 0 {
+		return fmt.Errorf("panel entry missing or invalid")
+	}
 	return nil
 }
 
 // RecordCheck exposes both startup signer failures and successful hourly checks.
 func RecordCheck(out string, failure error) error {
+	return withOutputLock(out, func() error { return recordCheck(out, failure) })
+}
+
+func recordCheck(out string, failure error) error {
 	if failure != nil {
 		return writePublic(filepath.Join(out, ".panel-renew-failed"), []byte("panel publication failed\n"))
 	}

@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -14,6 +15,9 @@ func lockOutput(out string) (func(), error) {
 	}
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		_ = f.Close()
+		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+			return nil, ErrPublicationBusy
+		}
 		return nil, err
 	}
 	return func() { _ = f.Close() }, nil

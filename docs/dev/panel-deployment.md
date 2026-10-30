@@ -1,88 +1,91 @@
-# 云端插件面板的部署与自动续签
+# 云端插件面板的部署、版本与自动续签
 
-Compose 与 NAS 使用同一条制品链：`web/panel` 构建自包含的
-`auriga-team-panel.js`，随 edge 镜像发布；镜像包含 `/auriga-panel`。
-普通 edge、platform、agent 和实例均不接触面板私钥。
+`web/panel` 构建自包含的 `auriga-team-panel.js`，随 edge 镜像发布。
+`/auriga-panel` 是短时、无网络 signer；普通 edge、platform、agent、实例及
+宿主定时器均不读取面板私钥。私钥 `panel-signing.key` 保持原安装的 0600，
+只读挂给 signer；独立公钥 `panel-keys.json` 经 agent renderer 写入实例只读材料，
+通过 `AURIGA_PANEL_KEYS_FILE` 下发。两者纳入原安装收据，与身份头钥分开。
 
-首次 bootstrap 生成独立 Ed25519 面板钥，并把以下文件纳入安装收据：
+## 启动故障只影响面板
 
-- `panel-signing.key`：0600，只读挂给无网络、短时运行的 `panel-prepare`。
-- `panel-keys.json`：公开 JWKS，由 agent renderer 校验并写入实例只读材料，
-  通过 `AURIGA_PANEL_KEYS_FILE` 下发。与身份头公钥独立。
+两套公开 Compose 的 edge 均不等待 `panel-prepare` 成功。
+NAS `start.sh` 和开发栈 `prepare.sh` 尝试安装定时器并检查签名；失败记告警，
+继续启动其他服务。启动用 signer 加 `-best-effort`：签名失败记录状态和日志，
+退出 0；手动直接调用不带此参数的 signer 仍以非零报告失败。
 
-`panel-prepare` 从镜像读取构建字节，生成内容寻址文件名和 SHA-384 SRI，
-使用 RFC8785 JCS 字节和 Ed25519 签清单，最后原子替换 `manifest.json`。
-edge 依赖首次签名成功；公开目录只读挂给 edge 的 `static.panelRoot`。
-`/panel/` 在门户、实例源和控制入口提供相同制品，不提供目录索引、
-SPA 回退、内部版本记录或私钥；实例控制 API 仍要求实例令牌。
-旧散列脚本保留，保证已取清单的浏览器能完成加载。
+edge 没有可读、结构合法、未过期且存在入口脚本的清单时，仅 `/panel/` 的
+合法制品路径返回明确 503；其他门户、管理、登录路由照常工作。
+恢复制品后无需重启 edge。此可用性检查不代替插件的 Ed25519/SRI 验证。
 
-插件在 Node 验清单签名、有效期和版本，浏览器再做 SRI。
-缺公钥、过期、未知钥、清单/脚本篡改均拒绝加载，不关闭验签绕过故障。
+## 内容版本与受控回退
 
-## 版本由内容自动派生
+不使用手填 `AURIGA_PANEL_VERSION` 或镜像版本文件。signer 按构建字节的
+SHA-256 摘要维护每个安装内的单调版本：首次 `0.0.1`，相同字节保持版本，
+内容变化则 patch 加一。旧安装 `0.0.0` 可直接升级。
 
-不再使用 `AURIGA_PANEL_VERSION` 或镜像内的手填版本文件。
-签名器根据构建脚本的 SHA-256 摘要，维护**每个安装自己的**单调版本：
+回退镜像或 revert 到历史内容时，同样分配**高于当前版本的新版本**，
+不恢复旧版本号。比如 A/0.0.1 → B/0.0.2 → A/0.0.3。
+显式发布低版本、同版本换字节、时间倒退、旧清单/历史签名异常仍拒绝。
+替换前先保存 `.panel-history/<version>.json`，每次检查记录的签名与版本。
 
-- 新安装从 `0.0.1` 开始；相同字节保持当前版本。
-- 新内容将当前版本的 patch 加一；旧 `0.0.0` 安装直接升级为 `0.0.1`，
-  既有较高版本继续递增，不重新归零。
-- 被替换的清单先保存至输出目录 `.panel-history/<version>.json`。
-  每条记录仍带原签名，每次发布都校验记录、当前清单和版本高水位；
-  恢复已经发布过的旧内容会拒绝，不能给旧字节分配一个新版本。
-- 显式版本发布的底层检查仍拒绝降版、同版换字节、时间倒退或异常旧签名。
-  对同一输出目录的发布使用操作系统文件锁串行化。
+版本是安装内的发布顺序，不是跨安装源码提交号。首次见到的摘要无法表达
+源码年代，发布者应选用正确可信镜像。完整备份/恢复安装收据、原钥、公钥和
+全部输出目录；不要只恢复旧清单或删除历史。当前历史记录不能防御拥有输出
+目录写权限的主体删除记录，插件也未保存持久版本高水位；不要把它描述为
+防御恶意宿主回放的完整客户端防回滚方案。
 
-版本是安装内的发布顺序，不是跨安装通用的源码提交号。第一次见到的摘要
-视为新内容，因此发布者仍须选用正确的可信镜像；不推断从未发布过的镜像
-之间的源码年代。不得删除版本记录、只恢复旧清单或重新初始化来绕过回滚检查。
-备份/恢复须一起保存原安装收据、面板私钥、公钥、**完整签名输出目录**。
+## 启动检查与小时级任务
 
-## 启动检查和小时级自动续签
+清单有效期 30 天，剩余 **不超过 7 天** 时以同版同字节更新签发时间和有效期。
+新内容立即发布；过期后可用原钥恢复。制品/SRI 和清单最后原子替换，旧散列脚本
+继续保留，供已取得旧清单的浏览器加载。
 
-清单有效期 30 天；剩余不超过 7 天时，同版同字节刷新签发时间与有效期。
-尚未到续签窗口时保持原清单；新内容立即发布。过期后也能用原钥恢复签发，
-无需重启 edge 或 DSH。
+宿主有 `crontab`、`flock` 和运行中的 cron/crond 时，公开 prepare/start
+幂等安装每小时第 17 分钟的任务，保留其他 cron 条目。WSL 或精简开发宿主缺少
+条件时明确告警并跳过安装，启动检查仍执行；应配置宿主 cron 或定期手动续签。
+NAS container 模式使用与 start 相同的非 root operator 安装自己的 cron，
+不要求给 operator 增加数据目录写权限或宿主 sudo。
 
-部署主机需要 `crontab`、`flock` 和运行中的 `cron`/`crond`。
-Compose `prepare.sh`、NAS `start.sh` 自动幂等安装当前部署用户的 cron：
-每小时第 17 分钟调用对应 `renew-panel.sh --scheduled`，保留其他 cron 项。
-缺少上述条件时部署报错，须先配置宿主机 cron 服务再重试。
-NAS 使用宿主机定时任务，不在 installer 容器中安装调度器。
+定时器的 job、日志、锁和宿主失败状态放在数据根的直接父目录下
+`.auriga-panel-<标识>/`（开发 Compose 放在 `deploy/compose/` 下）。
+父目录必须规范、属于当前 operator 或 root、无 group/other 写位，并可供 operator
+创建私有目录；任务目录属于当前用户且为 0700，绝不挂给 signer。
+root 定时器拒绝复用其他 UID 的目录，不在 signer 可写输出中做 chmod/mv 或写日志。
+容器模式原有的 env 导出临时目录要求不变，见 [NAS 配方](nas.md)。
 
-启动时 `panel-prepare` 检查并按需签发；NAS `start.sh` 还会主动重跑检查，
-避免复用已退出的旧 prepare 容器。每小时任务只检查正在运行的 edge，
-不会自动启动已停止的安装；原安装目录和部署脚本路径必须持续保留。
-调度器不挂私钥、不起常驻 signer，也不向容器提供 Docker socket。
-每次仅以 `--no-build --pull never` 运行原部署选定的短时无网络 signer。
-Compose signer 使用原私钥文件的 UID/GID，NAS 使用 10001；均 `cap_drop: ALL`，
-不需要 `DAC_OVERRIDE`，不修改私钥内容或放宽 0600。
-
-手动立即检查/续签：
+`crontab -l` 只有退出 1 且准确返回英文 `no crontab for <当前用户>` 才视为空表；
+权限、I/O 或其他错误均拒绝更新，不覆盖原表。日志 `renew.log` 超过 1 MiB 时
+保留一份 `renew.log.1`。定时任务只检查正在运行的 edge，不拉起已停止的安装。
 
 ```sh
+# 手动检查/续签；不重建、不拉取新镜像，沿用部署选定的短时 signer。
 sh deploy/compose/scripts/renew-panel.sh
-# 或 NAS 部署目录：
 sh deploy/nas/scripts/renew-panel.sh
+# 只安装或移除本安装的任务（用原安装任务的同一运维用户运行）。
+sh deploy/compose/scripts/renew-panel.sh --install
+sh deploy/compose/scripts/renew-panel.sh --remove
+sh deploy/nas/scripts/renew-panel.sh --install
+sh deploy/nas/scripts/renew-panel.sh --remove
 ```
 
-移动部署脚本后，重新运行公开 prepare/start 流程更新 cron；旧路径的 cron
-须由部署用户从 `crontab -e` 删除（按 `auriga-panel-` 注释定位）。
-卸载安装时同样移除该条目。
+NAS `stop.sh` 自动调用 remove；卸载时先执行 `stop.sh` 再删除部署材料。
+开发 Compose 停栈/卸载或移动脚本前先执行 `--remove`，新位置再 `--install`。
+移除只删本安装 marker 对应的条目，保留其他任务；日志留在私有目录便于诊断。
 
-## 故障信号
+## 故障信号与恢复
 
-- signer 失败写 stderr，宿主机调度失败也返回非零并写失败状态；定时日志在
-  Compose `var/panel-renew.log`、NAS 数据目录 `config/panel-renew.log`。
-- 成功检查刷新 `.panel-renew-checked`；失败留下 `.panel-renew-failed`。
-  输出状态更新不改变安装收据，不包含秘密。
-- edge 的 Docker healthcheck 只读公开目录：失败状态存在、清单过期，
-  或超过两小时没有检查心跳时，容器变为 unhealthy。
-  因而 cron 停止和 Docker 调用失败也能在到期前暴露。
-- 查看 `docker compose ps`、edge 健康日志与 `panel-prepare` 日志，修复
-  原因后手动执行上面的续签命令；成功后清除失败信号并恢复健康。
-  健康检查不替代插件验签。
+signer 在 OS 发布锁内写入/清除 `.panel-renew-failed`，成功检查刷新
+`.panel-renew-checked`。抢锁失败只记录“已有任务执行，跳过”，不写失败标记，
+也不清除当前发布者的状态。宿主 Docker 命令失败在私有目录写 `failed`，
+无需取得 uid10001 输出目录写权限。
 
-现有缺面板钥的安装仍由收据检查拒绝，不静默补钥或轮换。
-此阶段不提供自动密钥轮换。
+edge Docker healthcheck 只读公开输出：签名失败标记、过期/缺失入口脚本、
+或两小时未刷新检查心跳都会 unhealthy。宿主 cron/Docker 失败由私有状态和日志
+立即可查，并在成功 signer 检查心跳超过两小时后反映为 unhealthy。
+缺 cron 的开发栈同样可能因心跳陈旧而 unhealthy，服务本身仍继续运行。
+该健康信号不控制其他服务启动，也不会自动重启全站。
+
+检查 `docker compose ps`、edge 健康日志、`panel-prepare` 日志及任务目录的
+`failed`/`renew.log`。修复原因后手动续签，成功会恢复签名状态；宿主成功调用会
+清除私有失败状态。签名失败但旧清单仍有效时，旧面板继续可用；过期后面板503。
+不得关闭插件验签绕过问题；现有缺钥安装仍由收据拒绝，不自动补钥或轮换。

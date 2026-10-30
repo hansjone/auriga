@@ -37,9 +37,9 @@ if project_is_running; then
   info "project already running — compose up -d is idempotent"
 fi
 
-sh "$NAS_ROOT/scripts/renew-panel.sh" --install
+sh "$NAS_ROOT/scripts/renew-panel.sh" --install || info "warning: panel auto-renew scheduler unavailable; inspect renewal health/status"
 # Check even when an earlier successful panel-prepare container already exists.
-sh "$NAS_ROOT/scripts/renew-panel.sh"
+sh "$NAS_ROOT/scripts/renew-panel.sh" || info "warning: panel startup publication failed; other services will still start"
 
 info "starting project $AURIGA_NAS_PROJECT (no build, no pull)"
 # Fail closed, including when Compose does not support --pull never.

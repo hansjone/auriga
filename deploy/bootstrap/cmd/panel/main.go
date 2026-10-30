@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -16,22 +17,24 @@ func main() {
 	dist := flag.String("dist", "/srv/auriga/static/panel", "bundle embedded in edge image")
 	out := flag.String("out", "/out", "public signed panel directory")
 	check := flag.Bool("check", false, "check public manifest and renewal scheduler health without private key")
+	bestEffort := flag.Bool("best-effort", false, "log startup publication failures without blocking other services")
 	flag.Parse()
 	var err error
 	if *check {
 		err = panel.CheckHealth(*out, time.Now())
 	} else {
-		err = panel.Publish(*key, *dist, *out, "", time.Now())
-		if statusErr := panel.RecordCheck(*out, err); statusErr != nil {
-			fmt.Fprintln(os.Stderr, "panel health recording failed:", statusErr)
-			if err == nil {
-				err = statusErr
-			}
-		}
+		err = panel.PublishChecked(*key, *dist, *out, time.Now())
+	}
+	if errors.Is(err, panel.ErrPublicationBusy) {
+		fmt.Fprintln(os.Stderr, "panel publication already in progress; skipped")
+		return
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "panel publication failed:", err)
-		os.Exit(1)
+		if *check || !*bestEffort {
+			os.Exit(1)
+		}
+		return
 	}
 	if !*check {
 		fmt.Fprintln(os.Stderr, "panel publication checked successfully")

@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -15,6 +16,9 @@ func lockOutput(out string) (func(), error) {
 	var overlapped windows.Overlapped
 	if err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped); err != nil {
 		_ = f.Close()
+		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+			return nil, ErrPublicationBusy
+		}
 		return nil, err
 	}
 	return func() { _ = f.Close() }, nil

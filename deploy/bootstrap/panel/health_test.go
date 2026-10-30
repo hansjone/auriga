@@ -30,6 +30,19 @@ func TestRenewalHealth(t *testing.T) {
 	if err := CheckHealth(out, now); err != nil {
 		t.Fatal(err)
 	}
+	files, err := filepath.Glob(filepath.Join(out, "auriga-team-panel-*.js"))
+	if err != nil || len(files) != 1 {
+		t.Fatal("missing fixture bundle", err)
+	}
+	if err := os.Remove(files[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckHealth(out, now); err == nil {
+		t.Fatal("missing entry reported healthy")
+	}
+	if err := os.WriteFile(files[0], []byte("panel"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := RecordCheck(out, fmt.Errorf("signer failed")); err != nil {
 		t.Fatal(err)
 	}

@@ -68,17 +68,18 @@ func TestAutomaticVersionAndRenewal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	before, _ := read()
 	for _, code := range []string{"legacy", "upgrade", "third"} {
 		write(code)
-		if err := Publish(key, dist, out, "", now.Add(26*24*time.Hour)); err == nil || !strings.Contains(err.Error(), "rollback") {
-			t.Fatalf("historical rollback: %v", err)
+		_, previous := read()
+		if err := Publish(key, dist, out, "", now.Add(26*24*time.Hour)); err != nil {
+			t.Fatal("higher version republication:", err)
 		}
-		after, _ := read()
-		if !bytes.Equal(before, after) {
-			t.Fatal("rejected rollback changed manifest")
+		_, next := read()
+		if next.Version == previous.Version {
+			t.Fatal("returning to old bytes reused version")
 		}
 	}
+	before, _ := read()
 	write("fourth")
 	if err := os.WriteFile(filepath.Join(out, "manifest.json"), legacy, 0644); err != nil {
 		t.Fatal(err)

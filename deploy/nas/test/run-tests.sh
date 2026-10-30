@@ -20,6 +20,8 @@ fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 
 if sh "$ROOT/test/panel-renew-cron.sh"; then pass panel_renewal_cron_regressions
 else fail_msg panel_renewal_cron_regressions "hourly renewal scheduling failed"; fi
+if sh "$ROOT/test/panel-renew-nonroot.sh"; then pass panel_renewal_nonroot_regressions
+else fail_msg panel_renewal_nonroot_regressions "container-mode non-root startup failed"; fi
 
 if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi

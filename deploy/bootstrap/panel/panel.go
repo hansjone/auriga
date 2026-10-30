@@ -101,6 +101,10 @@ func versionParts(v string) ([]uint64, error) {
 // Publish signs bytes from the image, retains old hashed files for readers with
 // an in-flight manifest, and atomically replaces the public manifest last.
 func Publish(keyFile, dist, out, version string, now time.Time) error {
+	return withOutputLock(out, func() error { return publish(keyFile, dist, out, version, now) })
+}
+
+func publish(keyFile, dist, out, version string, now time.Time) error {
 	key, err := readRegular(keyFile, ed25519.PrivateKeySize)
 	if err != nil {
 		return fmt.Errorf("read panel signing key: %w", err)
@@ -123,18 +127,6 @@ func Publish(keyFile, dist, out, version string, now time.Time) error {
 	sum := sha256.Sum256(code)
 	entry := "auriga-team-panel-" + hex.EncodeToString(sum[:]) + ".js"
 	sri := sha512.Sum384(code)
-	if err := os.MkdirAll(out, 0755); err != nil {
-		return err
-	}
-	info, err := os.Lstat(out)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("invalid public panel directory")
-	}
-	unlock, err := lockOutput(out)
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	automatic := version == ""
 	var old manifest
 	previous, err := readRegular(filepath.Join(out, "manifest.json"), 256<<10)

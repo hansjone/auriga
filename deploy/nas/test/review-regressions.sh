@@ -125,7 +125,7 @@ cat >"$TMP/bin/crontab" <<'EOF'
 #!/bin/sh
 # Never alter the real host crontab from this lifecycle test.
 if [ "$1" = -l ]; then exit 0; fi
-grep -q 'auriga-panel-' "$1"
+grep -q 'auriga-panel-' "$1" || [ ! -s "$1" ]
 EOF
 cat >"$TMP/bin/pgrep" <<'EOF'
 #!/bin/sh

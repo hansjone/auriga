@@ -9,9 +9,10 @@ out="$AURIGA_DATA_ROOT/config/panel"
 helper="$NAS_ROOT/scripts/panel-renew-cron.sh"
 case "${1:-}" in
   --install) exec sh "$helper" install "$NAS_ROOT/scripts/renew-panel.sh" "$out" "$AURIGA_DATA_ROOT" ;;
+  --remove) exec sh "$helper" remove "$NAS_ROOT/scripts/renew-panel.sh" "$out" "$AURIGA_DATA_ROOT" ;;
   --scheduled)
     running=$(run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" ps --status running -q edge) || {
-      exec sh "$helper" run "$out" false
+      exec sh "$helper" run "$NAS_ROOT/scripts/renew-panel.sh" "$out" "$AURIGA_DATA_ROOT" false
     }
     [ -n "$running" ] || exit 0
     ;;
@@ -23,4 +24,4 @@ case "${1:-}" in
   '') ;;
   *) exit 2 ;;
 esac
-exec sh "$helper" run "$out" sh "$NAS_ROOT/scripts/renew-panel.sh" --invoke
+exec sh "$helper" run "$NAS_ROOT/scripts/renew-panel.sh" "$out" "$AURIGA_DATA_ROOT" sh "$NAS_ROOT/scripts/renew-panel.sh" --invoke

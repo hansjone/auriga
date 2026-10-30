@@ -50,9 +50,13 @@ if (mode === 'seed') {
   fs.writeFileSync('/dist/auriga-team-panel.js', oldCode);
 } else if (mode === 'restore') {
   fs.writeFileSync('/dist/auriga-team-panel.js', 'export const panel = 1;');
+} else if (mode === 'hide') {
+  fs.renameSync('/out/manifest.json', '/out/.manifest-saved');
+} else if (mode === 'unhide') {
+  fs.renameSync('/out/.manifest-saved', '/out/manifest.json');
 } else if (mode === 'verify') {
   const m = JSON.parse(fs.readFileSync('/out/manifest.json'));
-  assert.equal(m.version, '0.0.1');
+  assert.equal(m.version, process.argv[3] || '0.0.1');
   assert.ok(Date.parse(m.expiresAt) - Date.now() > 29 * 86400000);
 } else {
   throw new Error(`unknown fixture mode ${mode}`);

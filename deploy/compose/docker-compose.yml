@@ -284,6 +284,7 @@ services:
     security_opt: ['no-new-privileges:true']
     network_mode: none
     entrypoint: ['/auriga-panel']
+    command: ['-best-effort']
     volumes:
       - ./var/panel-signing.key:/run/panel.key:ro
       - ./var/panel:/out
@@ -311,8 +312,6 @@ services:
       timeout: 5s
       retries: 1
     depends_on:
-      panel-prepare:
-        condition: service_completed_successfully
       platform:
         condition: service_healthy
       nats:

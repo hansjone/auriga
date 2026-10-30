@@ -156,7 +156,8 @@ if [ "$(id -u)" -eq 0 ]; then
 else
   sudo -n chown "$PANEL_OWNER" "$VAR/panel"
 fi
-sh "$COMPOSE/scripts/renew-panel.sh" --install
+sh "$COMPOSE/scripts/renew-panel.sh" --install || echo "warning: panel automatic renewal unavailable; configure host cron or renew manually" >&2
+sh "$COMPOSE/scripts/renew-panel.sh" || echo "warning: panel startup check failed; stack startup remains available" >&2
 
 # File-backed secrets: only the intended container identity can read each key.
 if [ "$(id -u)" -eq 0 ]; then

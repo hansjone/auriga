@@ -14,6 +14,7 @@ values = dict(
 edge_config = json.loads((root / 'config/materials/edge.config.json').read_text())
 services = compose['services']
 edge = services['edge']
+panel = services['panel-prepare']
 agent = services['agent']
 env = agent['environment']
 failed = []
@@ -26,6 +27,9 @@ def check(ok, name):
 
 
 edge_name = 'auriga-nas-test-edge'
+check('panel-prepare' not in edge.get('depends_on', {}), 'panel_failure_not_startup_gate')
+check(panel.get('network_mode') == 'none' and not panel.get('cap_add') and panel.get('read_only'), 'panel_signer_isolation')
+check(panel.get('command') == ['-best-effort'], 'panel_startup_best_effort')
 access = json.loads((root / 'config/materials/access.json').read_text())
 check(edge.get('container_name') == edge_name, 'stable_edge_name')
 check(edge.get('labels', {}).get('auriga.role') == 'edge', 'trusted_edge_label')
