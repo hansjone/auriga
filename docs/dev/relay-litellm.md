@@ -44,6 +44,10 @@ Auriga 配额页只保留实例资源配额，含旧 `model` 字段的配额写�
 
 1. 在 LiteLLM Virtual Keys 创建 Key，设置可用模型/池、预算、预算周期、RPM/TPM、到期时间与别名。将虚拟 Key 安全交付调用方；不交付 master、salt 或团队服务 Key。
 2. 客户端 OpenAI base URL 设为门户 Origin 加 `/ai/v1`，Bearer 使用该虚拟 Key，model 使用池的公开模型名。公开数据入口只开放 models 与 chat/completions，拒绝调用方指定上游 URL、凭据、fallbacks 等控制项；外部用量 user 固定为 external:Key摘要，不能伪造成团队成员。管理 UI、登录、Key 管理和静态资源只允许独立 UI Origin 且必须有在线有效的 Auriga admin 会话。
+   外部 Key 入口接受无 `Origin` 的客户端，以及实际单个 `Origin` 精确命中部署
+   `AURIGA_LINKS_ALLOWED_ORIGINS` 的请求。反代补写的本站 Origin 也须显式列入；默认空列表
+   只接受无 Origin。跨站、重复或逗号拼接 Origin 均拒绝，`X-Forwarded-*` 不代替这项检查。
+   虚拟 Key 鉴权、成员归属隔离及剥离上游 CORS 响应头保持原样。
 3. 用本地假 OpenAI 上游依次验证 models、普通 chat 和流式 chat；再验证无 Key、错误 Key、吊销 Key 和超预算 Key 均拒绝。检查 LiteLLM Spend Logs，再吊销测试 Key。不调用付费模型代替验收。
 
 参考：[虚拟 Key](https://docs.litellm.ai/docs/proxy/virtual_keys)、[用量归属](https://docs.litellm.ai/docs/proxy/cost_tracking)。
