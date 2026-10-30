@@ -7,6 +7,7 @@ import { totp, totpNotBefore } from './checks.mjs';
 export { totp } from './checks.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { queryLoki } from './loki-query.mjs';
+import { healthInventory } from './health-inventory.mjs';
 
 export class StepError extends Error {}
 export class Skip extends StepError {}
@@ -286,7 +287,12 @@ export async function runPhase1(options, config, dependencies = {}) {
           status: 'SKIP',
           reason: '未配置relay.baseUrl；LiteLLM未部署或未接线',
         });
-      if (!config.healthChecks?.length || !config.healthInventoryComplete)
+      if (config.healthInventory)
+        item.inventory = await healthInventory(config.healthInventory);
+      if (
+        !config.healthChecks?.length ||
+        (!item.inventory?.complete && !config.healthInventoryComplete)
+      )
         throw new Skip(
           '已完成列出的健康探测；缺少完整healthChecks清单及healthInventoryComplete，不能声称全部服务healthy',
         );

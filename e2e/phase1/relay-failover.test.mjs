@@ -51,6 +51,42 @@ for (const fails of [false, true]) {
   });
 }
 
+test('desktop-only outage proof never invokes cloud and retains its narrower scope', async () => {
+  let disabled = false;
+  const called = [];
+  const entries = [
+    {
+      model_name: 'pool',
+      model_info: { id: 'a' },
+      litellm_params: { model: 'openai/a' },
+    },
+    {
+      model_name: 'pool',
+      model_info: { id: 'b' },
+      litellm_params: { model: 'openai/b' },
+    },
+  ];
+  const api = async (path) => {
+    if (path === 'model/info')
+      return { data: disabled ? [entries[1]] : entries };
+    disabled = path === 'model/block';
+  };
+  const result = await verifyPoolFailover(
+    { pool: 'pool', allowPoolDisruption: true },
+    [{ upstreamModel: 'openai/a' }, { upstreamModel: 'openai/b' }],
+    api,
+    async (side) => {
+      called.push(side);
+      return { deploymentId: 'b' };
+    },
+    {},
+    ['desktop'],
+  );
+  assert.deepEqual(called, ['desktop']);
+  assert.deepEqual(result.sides, ['desktop']);
+  assert.equal(result.restored, true);
+});
+
 test('pool outage drill refuses missing approval, an already blocked deployment, or an unverified fallback', async () => {
   const entries = [
     {

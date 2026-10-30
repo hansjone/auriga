@@ -32,3 +32,25 @@ stdout 只接受不超过 1 MiB 的原始 JSON，命令失败、超时或返回�
 无论中途失败与否都调用 `model/unblock` 恢复；已离线、额外或不匹配部署一律不执行演练。
 变更接口仅丢弃响应正文，不读取或回写供应商 Key。每次会话的临时 Key、凭据和提供方均清理，
 任一回复、归属、用量、切换或恢复证据缺失都不能使第⑥项通过。
+
+已有双端接线分批交付时，可只执行桌面池停用演练，保留此前已通过的桌面普通对话证据：
+
+```sh
+node e2e/phase1/desktop-models.mjs --base-url https://portal.example.com --admin-credentials /private/phase1.json --desktop-dsh /private/installed-desktop.json --output desktop-pool-outage.json
+```
+
+它只启动安装版的独立 HOME/profile，调用一次停用后的真实池对话并恢复原部署；
+报告固定为 `scope=desktop-pool-outage`、`completePhase6=false`，不会启动云端或冒完整第⑥项通过。
+同样须显式启用真实模型调用及 `allowPoolDisruption`，临时凭据/Key和配置全部清理。
+
+第①项可配置 `healthInventory={command,project,expectedServices,oneShotServices}`，
+由受信任操作通道采集实际部署的完整容器清单。命令接收一行
+`{"operation":"health-inventory","schemaVersion":1}`，stdout 仅返回最多 1 MiB JSON，
+默认超时 60 秒；`timeoutMs` 可设为 1–60000。结果为
+`{schemaVersion:1,project,observedAt,services:[{name,service,status,health,restarts,oom,exitCode,probe}]}`。
+须来自实际部署读取，不能把配置期望值抄成观测结果；凭据、完整 inspect/env 或探针正文不输出。
+快照须在两分钟内，项目与完整服务清单须匹配，缺服务、额外服务、重复容器、OOM、异常状态均失败。
+长期服务须运行且已有 Docker health 为 healthy；无 health 的服务须有实际 HTTP/TCP、
+agent 在线或签名 READY 探针，`probe={kind:"http"|"tcp"|"agent-online"|"signed-ready",status:"PASS"}`。
+一次性服务只按明确的 `oneShotServices` 分类并要求 exited/0，不可将失败的长期服务改成初始化任务。
+NAS 启用日志/collab 时须把这些服务及准备任务也列入；清单结果与 IAM/LiteLLM HTTP 检查一起验收。

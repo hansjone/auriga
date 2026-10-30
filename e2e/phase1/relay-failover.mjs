@@ -12,7 +12,15 @@ export async function verifyPoolFailover(
   api,
   converse,
   evidence = {},
+  sides = ['desktop', 'cloud'],
 ) {
+  requireThat(
+    Array.isArray(sides) &&
+      sides.length > 0 &&
+      new Set(sides).size === sides.length &&
+      sides.every((side) => ['desktop', 'cloud'].includes(side)),
+    '故障演练端点范围无效',
+  );
   requireThat(
     config.allowPoolDisruption === true,
     '模型池故障演练须显式allowPoolDisruption',
@@ -42,6 +50,7 @@ export async function verifyPoolFailover(
     blockedDeploymentId: idOf(unavailable),
     survivingDeploymentId: idOf(healthy),
     restored: false,
+    sides: [...sides],
   });
   const change = (path) =>
     api(path, {
@@ -64,7 +73,7 @@ export async function verifyPoolFailover(
         ),
       '未确认一个池部署不可用且另一个仍在线',
     );
-    for (const side of ['desktop', 'cloud']) {
+    for (const side of sides) {
       const evidence = await converse(side, config.pool);
       requireThat(
         evidence.deploymentId === idOf(healthy),

@@ -183,19 +183,34 @@ async function spendForKey(api, key) {
   throw new StepError('LiteLLM未查到该成员测试Key的非零token用量');
 }
 
-export async function nativeModels(adapter, state, item) {
+export async function nativeModels(
+  adapter,
+  state,
+  item,
+  { sides = ['desktop', 'cloud'], faultOnly = false } = {},
+) {
+  requireThat(
+    Array.isArray(sides) &&
+      sides.length > 0 &&
+      new Set(sides).size === sides.length &&
+      sides.every((side) => ['desktop', 'cloud'].includes(side)) &&
+      (!faultOnly || (sides.length === 1 && sides[0] === 'desktop')),
+    '原生模型验收范围无效',
+  );
   const config = adapter.config.modelNative;
   requireThat(
     adapter.config.relay.upstreamMode === 'live',
     '原生模型验收只用于显式启用的真实中转站',
   );
   requireThat(
-    config.pool && config.cloud && config.desktop,
+    config.pool && config.desktop && (!sides.includes('cloud') || config.cloud),
     '缺少原生云桌模型配置或池名称',
   );
   const members = {
-    cloud: adapter.member.accountId,
-    desktop: adapter.desktopEvidence.accountId,
+    ...(sides.includes('cloud') ? { cloud: adapter.member.accountId } : {}),
+    ...(sides.includes('desktop')
+      ? { desktop: adapter.desktopEvidence.accountId }
+      : {}),
   };
   const tenant = adapter.access.tenantId;
   requireThat(
@@ -217,8 +232,10 @@ export async function nativeModels(adapter, state, item) {
     httpUrl(config.desktop.baseUrl).href.replace(/\/$/, '') === publicUrl,
     '桌面原生模型须使用当前平台的公开中转站',
   );
-  const cloudUrl = httpUrl(config.cloud.baseUrl);
-  if (cloudUrl.href.replace(/\/$/, '') !== publicUrl) {
+  const cloudUrl = sides.includes('cloud')
+    ? httpUrl(config.cloud.baseUrl)
+    : null;
+  if (cloudUrl && cloudUrl.href.replace(/\/$/, '') !== publicUrl) {
     const portal = adapter.access.portalOrigin;
     const authority =
       portal.host + ([80, 443].includes(portal.port) ? '' : ':' + portal.port);
@@ -231,7 +248,7 @@ export async function nativeModels(adapter, state, item) {
       '云端内部模型入口须使用本部署可信edge别名与门户authority',
     );
   }
-  item.nativeModels = { conversations: [] };
+  item.nativeModels = { conversations: [], sides: [...sides], faultOnly };
   const converse = async (side, model, phase = 'normal') => {
     const settings = config[side];
     const client = nativeClient(
@@ -317,7 +334,7 @@ export async function nativeModels(adapter, state, item) {
     if (failure) throw failure;
     return proof;
   };
-  for (const side of ['desktop', 'cloud']) {
+  for (const side of faultOnly ? [] : sides) {
     for (const model of [
       ...adapter.config.relay.models.map((row) => row.name),
       config.pool,
@@ -332,7 +349,12 @@ export async function nativeModels(adapter, state, item) {
     api,
     (side, model) => converse(side, model, 'one-deployment-blocked'),
     item.nativeModels.failover,
+    sides,
   );
-  item.nativeModels.failoverVerified = item.nativeModels.failover.verified;
+  item.nativeModels.failoverVerified =
+    item.nativeModels.failover.verified &&
+    sides.includes('cloud') &&
+    sides.includes('desktop') &&
+    !faultOnly;
   return item.nativeModels;
 }
