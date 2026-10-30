@@ -35,5 +35,12 @@ unset BOOTSTRAP_TEST_EXIT
 ln -s "$TMP/recipient.pem" "$TMP/recipient-link.pem"
 if sh "$NAS_ROOT/scripts/admin-bootstrap.sh" "$TMP/recipient-link.pem"; then exit 1; fi
 if sh "$NAS_ROOT/scripts/admin-bootstrap.sh" recipient.pem; then exit 1; fi
+if [ "$(id -u)" = 0 ] && command -v setpriv >/dev/null; then
+  chmod 755 "$TMP"
+  chown 65534:65534 "$AURIGA_DATA_ROOT/stack.env" "$BOOTSTRAP_LOG"
+  chown 10001:10001 "$AURIGA_DATA_ROOT/enrollment"
+  chmod 700 "$AURIGA_DATA_ROOT/enrollment"
+  setpriv --reuid=65534 --regid=65534 --clear-groups sh "$NAS_ROOT/scripts/admin-bootstrap.sh" "$TMP/recipient.pem"
+fi
 if grep -Eq '(^| )pull( |$)' "$BOOTSTRAP_LOG"; then exit 1; fi
 echo 'PASS admin bootstrap: exact edge namespace, restricted helper, exit propagation, canonical public recipient'

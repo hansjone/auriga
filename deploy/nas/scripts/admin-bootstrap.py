@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import secrets
 import ssl
+import stat
 import struct
 import sys
 import time
@@ -232,7 +233,12 @@ def main():
     recipient = serialization.load_pem_public_key(Path(args.recipient).read_bytes())
     # Validate the recipient before authentication or any write.
     seal({}, recipient)
-    bootstrap(json.loads(Path(args.access).read_text()), json.loads(Path(args.enrollment).read_text()), recipient,
+    enrollment = Path(args.enrollment)
+    metadata = enrollment.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != os.geteuid() or metadata.st_nlink != 1):
+        raise BootstrapError('enrollment must be a private single-link file owned by the fixed helper identity')
+    bootstrap(json.loads(Path(args.access).read_text()), json.loads(enrollment.read_text()), recipient,
               lambda envelope: print('AURIGA_BOOTSTRAP_ENVELOPE ' + json.dumps(envelope), flush=True), ca_file=args.tls_ca)
 
 

@@ -25,7 +25,8 @@ edge=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$AURIG
 case "$edge" in ''|*[!0-9a-f]*) die 'expected exactly one running project edge' ;; esac
 [ "${#edge}" = 64 ] || die 'expected full edge container identity'
 enrollment="$AURIGA_DATA_ROOT/enrollment/emergency-enrollment.json"
-[ -f "$enrollment" ] && [ ! -L "$enrollment" ] || die 'emergency enrollment missing'
+# The operator cannot traverse uid10001's private enrollment directory. Docker
+# --mount refuses a missing source; the fixed-uid helper verifies the leaf.
 set -- --mount "type=bind,src=$NAS_ROOT/scripts/admin-bootstrap.py,dst=/bootstrap.py,readonly" \
   --mount "type=bind,src=$AURIGA_DATA_ROOT/config/materials/access.json,dst=/access.json,readonly" \
   --mount "type=bind,src=$enrollment,dst=/enrollment.json,readonly" \
