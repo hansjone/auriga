@@ -279,7 +279,7 @@ export function createPlatform(config) {
       !Number.isSafeInteger(claims.iat) ||
       claims.iat > now + 5 ||
       (claims.nbf !== undefined &&
-        (!Number.isSafeInteger(claims.nbf) || claims.nbf > now)) ||
+        (!Number.isSafeInteger(claims.nbf) || claims.nbf > now + 5)) ||
       ![claims.tid, claims.sub, claims.did].every(
         (x) => typeof x === 'string' && x.length > 0 && x.length <= 512,
       )
