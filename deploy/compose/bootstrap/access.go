@@ -24,7 +24,7 @@ import (
 var identityMaterialFiles = []string{
 	"pki/ca.crt", "pki/ca.key", "pki/workspace.crt", "pki/workspace.key",
 	"pki/edge.crt", "pki/edge.key", "pki/iam.crt", "pki/iam.key", "pki/edge-iam.crt", "pki/edge-iam.key",
-	"identity-signing-keys.json", "identity-keys.json", "ca-sha256.txt",
+	"identity-signing-keys.json", "identity-keys.json", "panel-keys.json", "panel-signing.key", "ca-sha256.txt",
 	"access.json", "iam-healthcheck.sh", "iam-client.json", "heartbeat-observer.json",
 	"edge.config.json", "access.env", "agent-policy.yaml",
 	"runtime-keys/root.pb",

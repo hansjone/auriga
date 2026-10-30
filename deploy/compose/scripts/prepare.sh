@@ -135,4 +135,9 @@ chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/edge.config.json" || true
 chmod 777 "$VAR/enrollment" "$VAR/join" || true
 
+if [ -e "$VAR/panel" ] || [ -L "$VAR/panel" ]; then
+  [ -d "$VAR/panel" ] && [ ! -L "$VAR/panel" ] || { echo 'invalid panel output directory' >&2; exit 1; }
+else
+  mkdir -m 755 "$VAR/panel"
+fi
 echo "prepare done; env file: $VAR/compose.env"

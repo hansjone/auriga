@@ -23,10 +23,15 @@ COPY web/portal/index.html web/portal/instance-login.html web/portal/vite.config
 COPY web/portal/logout.html ./web/portal/
 COPY web/admin/src ./web/admin/src
 COPY web/admin/index.html web/admin/vite.config.ts ./web/admin/
+COPY web/panel/src ./web/panel/src
+COPY web/panel/vite.config.ts ./web/panel/
+ARG AURIGA_PANEL_VERSION=0.0.0
 RUN pnpm gen:api \
   && pnpm gen:steps \
   && pnpm --filter @auriga/portal build \
-  && pnpm --filter @auriga/admin build
+  && pnpm --filter @auriga/admin build \
+  && pnpm --filter @auriga/panel build \
+  && printf '%s\n' "$AURIGA_PANEL_VERSION" > web/panel/dist/version.txt
 
 FROM golang:1.27.3 AS build
 WORKDIR /src/infra
@@ -39,12 +44,15 @@ RUN CGO_ENABLED=0 go build -o /out/auriga-ai-gateway . \
 WORKDIR /src/deploy/bootstrap
 COPY deploy/bootstrap/ ./
 RUN CGO_ENABLED=0 go build -o /out/auriga-network-probe ./cmd/network-probe
+RUN CGO_ENABLED=0 go build -o /out/auriga-panel ./cmd/panel
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/auriga-edge /auriga-edge
 COPY --from=build /out/auriga-ai-gateway /auriga-ai-gateway
 COPY --from=build /out/auriga-network-broker /auriga-network-broker
 COPY --from=build /out/auriga-network-probe /auriga-network-probe
+COPY --from=build /out/auriga-panel /auriga-panel
+COPY --from=web /src/web/panel/dist /srv/auriga/static/panel
 COPY --from=web /src/web/portal/dist /srv/auriga/static/portal
 COPY --from=web /src/web/admin/dist /srv/auriga/static/admin
 ENV AURIGA_EDGE_STATIC_PORTAL=/srv/auriga/static/portal \

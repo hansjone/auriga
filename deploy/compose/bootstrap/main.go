@@ -29,6 +29,7 @@ import (
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
+	"github.com/hansjone/auriga/deploy/bootstrap/panel"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -265,6 +266,7 @@ func main() {
 		upstreamPort = observerPort
 	}
 	edgeCfg := map[string]any{
+		"static":            map[string]string{"panelRoot": "/srv/auriga/panel"},
 		"accessConfigFile":  "/etc/auriga/access.json",
 		"allowLocalIngress": true,
 		"upstreams": map[string]string{
@@ -534,6 +536,9 @@ func generateIdentityMaterials(out string) {
 	}
 	writeJSON(filepath.Join(out, "identity-signing-keys.json"), signing, 0o600)
 	writeJSON(filepath.Join(out, "identity-keys.json"), pubOnly, 0o644)
+	if err := panel.Generate(out); err != nil {
+		fatalf("generate panel key: %v", err)
+	}
 
 	fp := spkiSHA256(caCert)
 	writeFile(filepath.Join(out, "ca-sha256.txt"), []byte(fp+"\n"), 0o644)

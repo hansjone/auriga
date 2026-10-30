@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
+	"github.com/hansjone/auriga/deploy/bootstrap/panel"
 	"math/big"
 	"net"
 	"net/url"
@@ -196,6 +197,9 @@ func mustPKI(pki string) {
 }
 
 func mustIdentity(out string) {
+	if err := panel.Generate(out); err != nil {
+		fatalf("generate panel key: %v", err)
+	}
 	privPath := filepath.Join(out, "identity-signing-keys.json")
 	pubPath := filepath.Join(out, "identity-keys.json")
 	if fileExists(privPath) || fileExists(pubPath) {

@@ -12,6 +12,17 @@ x-cap-drop-all: &cap_drop_all
   privileged: false
 
 services:
+  panel-prepare:
+    image: ${AURIGA_IMAGE_EDGE}
+    <<: *cap_drop_all
+    user: "10001:10001"
+    read_only: true
+    network_mode: none
+    entrypoint: ["/auriga-panel"]
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/materials/panel-signing.key:/run/panel.key:ro
+      - ${AURIGA_DATA_ROOT}/config/panel:/out
+
   postgres:
     image: ${AURIGA_IMAGE_POSTGRES}
     <<: *cap_drop_all
@@ -164,6 +175,8 @@ services:
       - /tmp:size=16m,mode=1777
     user: "65532:65532"
     depends_on:
+      panel-prepare:
+        condition: service_completed_successfully
       platform:
         condition: service_healthy
       nats:
@@ -178,6 +191,7 @@ services:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: "true"
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/edge.config.json:/etc/auriga/edge.config.json:ro
+      - ${AURIGA_DATA_ROOT}/config/panel:/srv/auriga/panel:ro
       - ${AURIGA_DATA_ROOT}/config/pki-edge/identity-signing-keys.json:/etc/auriga/identity-signing-keys.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
       - ${AURIGA_DATA_ROOT}/internal-tokens:/run/auriga-internal:ro
@@ -267,6 +281,7 @@ services:
       AURIGA_AGENT_JOIN_TOKEN_FILE: /run/auriga-join/token
       AURIGA_AGENT_POLICY_FILE: /etc/auriga/agent-policy.yaml
       AURIGA_AGENT_DRIVERS: docker
+      AURIGA_AGENT_PANEL_KEYS_FILE: /etc/auriga/panel-keys.json
       # Trusted edge identity and internal alias come only from access.json.
       AURIGA_AGENT_INGRESS_LOCAL: ${AURIGA_DATA_ROOT}/socket-share/ingress/ingress.sock
       AURIGA_AGENT_INGRESS_LOCAL_GID: "65532"
@@ -282,6 +297,7 @@ services:
       - ${AURIGA_DATA_ROOT}/join:/run/auriga-join
       - ${AURIGA_DATA_ROOT}/config/materials/access.json:/etc/auriga/access.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/identity-keys.json:/etc/auriga/identity-keys.json:ro
+      - ${AURIGA_DATA_ROOT}/config/materials/panel-keys.json:/etc/auriga/panel-keys.json:ro
       - ${AURIGA_DATA_ROOT}/config/materials/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro
       - ${AURIGA_DATA_ROOT}/config/materials/runtime-proofs:/etc/auriga/runtime-proofs:ro
     mem_limit: 512m
