@@ -1,0 +1,72 @@
+{
+  "uid": "auriga-trace",
+  "title": "Auriga trace logs",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "trace_id",
+        "label": "Trace ID（32位）",
+        "type": "textbox",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      },
+      {
+        "name": "service",
+        "label": "服务",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "auriga-loki"
+        },
+        "query": "label_values(service)",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "跨服务日志（只输入trace_id；时间窗可调整）",
+      "datasource": {
+        "type": "loki",
+        "uid": "auriga-loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=~\"${service:regex}\"} | json | trace_id=~\"${trace_id:regex}\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Ascending",
+        "enableLogDetails": true
+      }
+    }
+  ]
+}

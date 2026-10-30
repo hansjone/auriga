@@ -10,8 +10,8 @@ import org.springframework.boot.logging.structured.StructuredLogFormatter;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * One JSON object per line: {@code @timestamp, level, logger, thread, message, traceId, spanId,
- * requestId, tenantId, exception}. Message and stack trace pass through {@link
+ * One JSON object per line: {@code @timestamp, level, service, trace_id, logger, thread, message,
+ * traceId, spanId, requestId, tenantId, exception}. Message and stack trace pass through {@link
  * SensitiveDataMasker}. Activated by {@code logging.structured.format.console} (set by default by
  * {@link JsonLoggingEnvironmentPostProcessor}).
  */
@@ -26,15 +26,41 @@ public final class JsonLogFormatter implements StructuredLogFormatter<ILoggingEv
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("@timestamp", Instant.ofEpochMilli(event.getTimeStamp()).toString());
     out.put("level", event.getLevel().toString());
+    String loggerName = event.getLoggerName();
+    String service = "platform";
+    if (loggerName != null && loggerName.startsWith("auriga.")) {
+      String[] parts = loggerName.split("\\.");
+      if (parts.length > 1 && !parts[1].equals("common")) service = parts[1];
+    }
+    Map<String, String> mdc = event.getMDCPropertyMap();
+    out.put(
+        "service",
+        mdc == null || !"platform".equals(service)
+            ? service
+            : mdc.getOrDefault("service", service));
     out.put("logger", event.getLoggerName());
     out.put("thread", event.getThreadName());
     out.put("message", SensitiveDataMasker.mask(event.getFormattedMessage()));
-    Map<String, String> mdc = event.getMDCPropertyMap();
+    out.put("trace_id", mdc == null ? "" : mdc.getOrDefault(LogFields.TRACE_ID, ""));
     if (mdc != null) {
       for (String key : MDC_FIELDS) {
         String value = mdc.get(key);
-        if (value != null) out.put(key, value);
+        if (value != null) out.put(key, SensitiveDataMasker.mask(value));
       }
+      Map<String, String> context = new LinkedHashMap<>();
+      mdc.forEach((key, value) -> context.put(key, SensitiveDataMasker.maskField(key, value)));
+      out.put("mdc_context", context);
+    }
+    if (event.getKeyValuePairs() != null) {
+      Map<String, String> fields = new LinkedHashMap<>();
+      event
+          .getKeyValuePairs()
+          .forEach(
+              pair ->
+                  fields.put(
+                      pair.key,
+                      SensitiveDataMasker.maskField(pair.key, String.valueOf(pair.value))));
+      out.put("context", fields);
     }
     IThrowableProxy error = event.getThrowableProxy();
     if (error != null) {

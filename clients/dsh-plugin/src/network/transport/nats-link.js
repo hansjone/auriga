@@ -1,4 +1,5 @@
 import * as natsCore from '@nats-io/nats-core';
+import { publicationContext, logEvent } from '../../observability/index.js';
 import { TransportError } from './errors.js';
 import { GuardedSocket } from './guarded-socket.js';
 import {
@@ -404,9 +405,15 @@ export class NatsLink {
         this.#blockedSince = undefined;
         this.#lastBuffered = undefined;
         this.#queue.shift();
+        const context = publicationContext(head.payload);
         try {
+          if (context) logEvent('INFO', 'NATS SDK publish attempted', context);
           nc.publish(this.#opts.upSubject, head.payload);
+          if (context)
+            logEvent('INFO', 'NATS SDK publish accepted locally', context);
         } catch (cause) {
+          if (context)
+            logEvent('ERROR', 'NATS SDK publish failed', context, cause);
           const failure = new TransportError(
             'publish_failed',
             'SDK refused the publish',

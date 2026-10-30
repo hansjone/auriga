@@ -17,7 +17,7 @@ public record TraceContext(String traceId, String spanId, String flags) {
 
   /** Parses a {@code traceparent} header; invalid or all-zero ids are ignored (spec section 3). */
   public static Optional<TraceContext> parse(String header) {
-    if (header == null) return Optional.empty();
+    if (header == null || header.length() != 55) return Optional.empty();
     var m = TRACEPARENT.matcher(header.trim());
     if (!m.matches() || "ff".equals(m.group(1))) return Optional.empty();
     String traceId = m.group(2);

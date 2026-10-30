@@ -2,9 +2,33 @@ package auriga.common.observability;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 class SensitiveDataMaskerTest {
+  @Test
+  void boundsLongUntrustedLogTokens() {
+    for (String prefix : new String[] {"", "prefix-", "file.name."})
+      assertHidden(prefix + "eyJabcde.abcdefgh.signature", "eyJabcde");
+    assertHidden("db-password=secret-regression", "secret-regression");
+    SensitiveDataMasker.mask("warmup password=hidden");
+    for (String input :
+        new String[] {
+          "/api/org/v1/invitations/preview/" + "a".repeat(8000),
+          "x".repeat(65536),
+          "a_".repeat(32768),
+          "a.".repeat(32768),
+          "eyJ-".repeat(16384),
+          "eyJ" + "x".repeat(65000) + ".payload.signature",
+          "-----BEGIN PRIVATE KEY-----\n".repeat(2048)
+        }) {
+      // Shared CI scheduling needs headroom; multi-second ReDoS still fails.
+      assertTimeout(Duration.ofSeconds(1), () -> SensitiveDataMasker.mask(input));
+    }
+    assertTrue(SensitiveDataMasker.mask("x".repeat(65537)).length() <= 65536);
+    assertHidden("AURIGA_" + "A".repeat(8000) + "_PASSWORD=hidden-value", "hidden-value");
+  }
+
   private static void assertHidden(String input, String... secrets) {
     String masked = SensitiveDataMasker.mask(input);
     for (String secret : secrets) {

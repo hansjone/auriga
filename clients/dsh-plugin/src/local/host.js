@@ -72,7 +72,9 @@ export function installHttpResponseTracking(ctx, bind) {
  * @param {any} connection @param {any} runtime @param {{protocol:string}} options */
 export function installLocalAdmission(connection, runtime, { protocol }) {
   if (!connection.admit || !connection.authorizeIndex || !connection.isTrusted)
-    throw new Error('rc.3 native connection admission required');
+    throw new Error(
+      'auriga-dsh: 需要 DSH 0.2.1-rc.3 或更高版本的原生连接准入 API，请升级 DSH。 Native connection admission API required; upgrade DSH to 0.2.1-rc.3 or later.',
+    );
   if (typeof runtime.installHttpTracking !== 'function')
     throw new Error('native HTTP response tracking required');
   const original = Symbol.for('cordis.original');

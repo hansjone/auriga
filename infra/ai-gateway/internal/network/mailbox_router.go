@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"log/slog"
 	"strings"
 	"sync"
@@ -194,7 +195,7 @@ func (r *mailboxRouter) receive(msg *nats.Msg) {
 			}
 			r.dispatchHeadsLocked()
 		}()
-		r.handle(b, msg.Data, head)
+		r.handleContext(observability.NATSContext(r.ctx, msg.Data), b, msg.Data, head)
 	})
 }
 
@@ -243,11 +244,12 @@ func (r *mailboxRouter) dispatchHeadsLocked() {
 }
 
 func (r *mailboxRouter) handle(b liveBinding, raw []byte, head bool) {
-	r.handleContext(r.ctx, b, raw, head)
+	r.handleContext(observability.Continue(r.ctx, ""), b, raw, head)
 }
 
 func (r *mailboxRouter) handleContext(ctx context.Context, b liveBinding, raw []byte, head bool) {
 	operation, requestID, ae := mailboxOperation(raw, head)
+	slog.InfoContext(ctx, "NATS business request", "operation", operation, "request_id", requestID, "tenant_id", b.Tenant, "node_id", b.Node)
 	if ae != nil {
 		if !head {
 			r.sendError(b, raw, ae)

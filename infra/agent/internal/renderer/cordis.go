@@ -18,7 +18,9 @@ import (
 const PluginRowID = "auriga-dsh"
 
 const (
-	pluginEntry  = "auriga-dsh/plugin"
+	// The browser collector only discovers package-root Loader rows. The package
+	// root must export the Cordis host entry (src/plugin.js), not the library API.
+	pluginEntry  = "auriga-dsh"
 	mcpClientPkg = "@deepseek-ai/dsh-mcp-client"
 	mcpRowPrefix = "auriga-mcp-"
 )

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"net"
 	"os"
 	"strings"
@@ -63,6 +64,7 @@ func dialMailboxRPC(c team.RPCConfig) (*grpc.ClientConn, error) {
 		case collab.NetworkMailboxService_SourceRegister_FullMethodName, collab.NetworkMailboxService_SourceGet_FullMethodName, collab.NetworkMailboxService_SourceRevoke_FullMethodName:
 			timeout = sourceRequestTimeout
 		}
+		ctx = observability.Outgoing(ctx)
 		bounded, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		return invoke(bounded, method, req, reply, cc, opts...)

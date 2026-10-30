@@ -9,5 +9,6 @@ Auriga 是一个可以自己部署的团队平台：给团队里每个人一个�
 - 架构：[总体](docs/architecture/platform.zh.md)、[节点代理](docs/architecture/node-agent.zh.md)、[身份源](docs/architecture/identity.zh.md)
 - 架构决策记录：[docs/adr](docs/adr/README.md)
 - 接口契约：[contracts](contracts/README.md)
+- 日志定位：[trace、集中日志与只读采集](docs/dev/observability.md)
 
 许可证：平台 AGPL-3.0，另提供商业许可；DSH 插件（`clients/dsh-plugin`）MIT。详见 [LICENSING.md](LICENSING.md)。
