@@ -10,7 +10,7 @@ PLATFORM="$VAR/network-platform"
 FILES='gateway.secret platform.properties'
 COUNT=2
 if [ -d "$VAR/collab-installation" ] && [ ! -L "$VAR/collab-installation" ]; then
-  FILES="$FILES collab.secret"; COUNT=3
+  FILES="$FILES collab.secret managed-network.json"; COUNT=4
 fi
 [ "$(find "$PLATFORM" -mindepth 1 -maxdepth 1 | wc -l)" -eq "$COUNT" ] || exit 1
 for name in $FILES; do
