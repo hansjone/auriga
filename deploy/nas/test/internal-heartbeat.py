@@ -15,6 +15,7 @@ edge_config = json.loads((root / 'config/materials/edge.config.json').read_text(
 services = compose['services']
 edge = services['edge']
 panel = services['panel-prepare']
+renew = services.get('panel-renew', {})
 agent = services['agent']
 env = agent['environment']
 failed = []
@@ -30,6 +31,12 @@ edge_name = 'auriga-nas-test-edge'
 check('panel-prepare' not in edge.get('depends_on', {}), 'panel_failure_not_startup_gate')
 check(panel.get('network_mode') == 'none' and not panel.get('cap_add') and panel.get('read_only'), 'panel_signer_isolation')
 check(panel.get('command') == ['-best-effort'], 'panel_startup_best_effort')
+check(renew.get('image') == panel.get('image') and renew.get('command') == ['-renew'], 'panel_hourly_sidecar')
+check(renew.get('network_mode') == 'none' and renew.get('read_only') and not renew.get('cap_add'), 'panel_renewal_isolated')
+check(renew.get('user') == '10001:10001' and renew.get('restart') == 'unless-stopped', 'panel_renewal_identity')
+check(renew.get('volumes') == panel.get('volumes'), 'panel_renewal_exact_mounts')
+check('panel-renew' not in edge.get('depends_on', {}), 'panel_renewal_not_startup_gate')
+check('-probe-tcp' in edge.get('healthcheck', {}).get('test', []) and '-check' not in edge.get('healthcheck', {}).get('test', []), 'edge_health_independent_of_panel')
 access = json.loads((root / 'config/materials/access.json').read_text())
 check(edge.get('container_name') == edge_name, 'stable_edge_name')
 check(edge.get('labels', {}).get('auriga.role') == 'edge', 'trusted_edge_label')

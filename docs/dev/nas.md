@@ -123,9 +123,9 @@ sh deploy-nas/scripts/smoke.sh
 sh deploy-nas/scripts/stop.sh
 ```
 
-面板签名和 cron 失败只告警，不阻止其他服务启动；缺少可用面板清单时仅面板路径返回 503。
-续签任务使用 operator 在数据根父目录创建的 0700 私有目录，不要求非 root operator 写 root 所有的 config。
-`stop.sh` 自动移除本安装的 cron；卸载或移动部署材料前，先以原调度用户运行 `stop.sh` 或 `renew-panel.sh --remove`。
+面板由无网络常驻 `panel-renew` 侧车每小时检查，不依赖宿主 cron 或 sudo。
+失败/心跳陈旧仅通过侧车状态与日志暴露，edge 监听健康不依赖面板；缺少可用清单仅面板路径返回503。
+`stop.sh` 同时停止侧车；卸载或移动部署材料前先运行 `stop.sh`。
 详细的日志、健康信号和手动恢复见 [面板部署与续签](panel-deployment.md)。
 
 所有操作脚本都显式用 `sh` 调用，不依赖执行位。源码 checkout 对应 `deploy/nas/`。数据根须绝对路径、至少三层且 basename 为 `auriga-*`；拒绝链接、点段及未初始化的外来非空目录。首装/root初始化只为新建且空的材料根通过已打开 FD 设置固定 `10001:10001`，再让清空补充组的同一预构建 binary 子进程生成材料。重入按原身份校验 receipt、输入和完整材料，原 key 不轮换；错 owner/mode、额外链接、错误祖先、缺 receipt、template-only、PKI/模板目录链接都拒绝，不自动 chmod/chown 旧材料。
@@ -244,7 +244,7 @@ PostgreSQL 的 PGDATA 分阶段检查：仅当丢弃全部 capability 的 root �
 正式NAS模板的调度标签为`template=real-dsh`。节点已经入网、在线或有足够容量仍可能因label不匹配而无法调度；还需核对驱动、OS/架构、可调度状态及剩余容量。管理台的节点详情支持编辑名称、标签及是否调度；标签变更需确认并刷新服务端状态。没有该页面的旧版本也可使用正式管理API调整。在正式管理入口以具备`workspace.nodes.read`/`workspace.nodes.admin`权限的管理员调用`GET /api/workspace/v1/admin/nodes`及`PATCH /api/workspace/v1/admin/nodes/{nodeId}`，PATCH使用`application/merge-patch+json`，示例请求体：
 
 ```json
-{"labels":{"template":"real-dsh"},"schedulable":true}
+{ "labels": { "template": "real-dsh" }, "schedulable": true }
 ```
 
 `labels`更新替换整份标签映射：先读取当前值，将其他需要保留的标签一并带回；仅在节点确实可承载该正式模板且准备接收实例时设置上述值。浏览器管理写入仍走正式会话、完整管理Origin和CSRF流程（包括IP模式的内存CSRF token）；不要通过直接改数据库、修改封存模板/receipt或绕过管理权限排障。更新后重新读取节点确认，再通过正常门户重试实例申请，并检查正式调度诊断。

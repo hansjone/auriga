@@ -15,14 +15,36 @@ services:
   panel-prepare:
     image: ${AURIGA_IMAGE_EDGE}
     <<: *cap_drop_all
-    user: "10001:10001"
+    user: '10001:10001'
     read_only: true
     network_mode: none
-    entrypoint: ["/auriga-panel"]
+    entrypoint: ['/auriga-panel']
     command: ['-best-effort']
     volumes:
       - ${AURIGA_DATA_ROOT}/config/materials/panel-signing.key:/run/panel.key:ro
       - ${AURIGA_DATA_ROOT}/config/panel:/out
+
+  panel-renew:
+    image: ${AURIGA_IMAGE_EDGE}
+    <<: *cap_drop_all
+    user: '10001:10001'
+    read_only: true
+    network_mode: none
+    restart: unless-stopped
+    entrypoint: ['/auriga-panel']
+    command: ['-renew']
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/materials/panel-signing.key:/run/panel.key:ro
+      - ${AURIGA_DATA_ROOT}/config/panel:/out
+    healthcheck:
+      test: ['CMD', '/auriga-panel', '-check']
+      interval: 1m
+      timeout: 5s
+      retries: 1
+      start_period: 15s
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
 
   postgres:
     image: ${AURIGA_IMAGE_POSTGRES}
@@ -252,7 +274,13 @@ services:
       - /tmp:size=16m,mode=1777
     user: '65532:65532'
     healthcheck:
-      test: ['CMD', '/auriga-panel', '-check', '-out', '/srv/auriga/panel']
+      test:
+        [
+          'CMD',
+          '/auriga-panel',
+          '-probe-tcp',
+          '127.0.0.1:${AURIGA_NAS_PORTAL_TARGET_PORT:-8080}',
+        ]
       interval: 1m
       timeout: 5s
       retries: 1

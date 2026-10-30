@@ -37,7 +37,8 @@ exit 0
 EOF
 cat >"$temp/bin/crontab" <<'EOF'
 #!/bin/sh
-if [ "$1" = -l ]; then cat "$TEST_CRONTAB"; else cp "$1" "$TEST_CRONTAB"; fi
+echo 'NAS must never call host crontab' >>"$TEST_CRONTAB"
+exit 99
 EOF
 printf '#!/bin/sh\nexit 0\n' >"$temp/bin/pgrep"
 chmod 755 "$temp/bin/"*
@@ -52,21 +53,17 @@ if [ -n "${PANEL_R1_HELPER:-}" ]; then
   echo 'PASS reproduced R1 M1: non-root cannot create job in root-owned config'
 fi
 if ! operator sh "$temp/package/scripts/start.sh" >"$temp/start.log" 2>&1; then cat "$temp/start.log"; exit 1; fi
-# A failed signer and optional cron must not prevent the full compose start.
+# Host scheduling is absent; a failed explicit signer does not gate full start.
+if operator sh "$temp/package/scripts/renew-panel.sh" >"$temp/manual.log" 2>&1; then exit 1; else [ "$?" = 23 ]; fi
 grep -q 'up -d --no-build --pull never' "$temp/docker.log"
-grep -q 'warning: panel startup publication failed' "$temp/start.log"
 [ "$(stat -c '%u' "$temp/operator/auriga-data/config")" = 0 ]
 [ "$(stat -c '%u' "$temp/operator/auriga-data/config/panel")" = 10001 ]
-[ -n "$(find "$temp/operator" -maxdepth 1 -name '.auriga-panel-*' -user 65534)" ]
-state=$(find "$temp/operator" -maxdepth 1 -name '.auriga-panel-*' -user 65534)
-if setpriv --reuid=10001 --regid=10001 --clear-groups sh -c 'echo attacked >"$1/job.sh"' sh "$state" 2>/dev/null; then
-  echo 'signer can modify scheduler job' >&2; exit 1
-fi
+[ -z "$(find "$temp/operator" -maxdepth 1 -name '.auriga-panel-*')" ]
 if ! operator sh "$temp/package/scripts/stop.sh" >"$temp/stop.log" 2>&1; then cat "$temp/stop.log"; exit 1; fi
 [ ! -s "$temp/crontab" ]
 printf '#!/bin/sh\nexit 1\n' >"$temp/bin/pgrep"
 : >"$temp/docker.log"
 if ! operator sh "$temp/package/scripts/start.sh" >"$temp/start.log" 2>&1; then cat "$temp/start.log"; exit 1; fi
-grep -q 'warning: panel auto-renew scheduler unavailable' "$temp/start.log"
 grep -q 'up -d --no-build --pull never' "$temp/docker.log"
-echo 'PASS non-root container start with root-owned config, signer failure isolation, stop cron cleanup'
+[ ! -s "$temp/crontab" ]
+echo 'PASS non-root NAS start/stop without host cron or scheduler writes; manual signer failure isolated'
