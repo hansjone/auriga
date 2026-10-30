@@ -100,8 +100,10 @@ public final class IamNetworkDirectory implements NetworkDirectory {
           }
           args.add(staleBefore());
           args.add(staleBefore());
+          args.add(TenantContext.require());
           // Resolve denied pairs once per page, rather than rejoining all caller sources for
           // each candidate. Retain exact pair matching even for noncanonical stored keys.
+          // lookup_key is NOT NULL, so split_part cannot introduce NULL into the hashed set.
           var rows =
               jdbc.query(
                   "WITH candidates AS MATERIALIZED (SELECT * FROM iam.network_node WHERE tenant_id=? AND node>? ORDER BY node LIMIT "
@@ -121,12 +123,13 @@ public final class IamNetworkDirectory implements NetworkDirectory {
                       + "SELECT r.realm::text,n.node::text,COALESCE(d.data->>'name',''),n.account_id::text,COALESCE(a.data->>'displayName',''),COALESCE(("
                       + ELIGIBLE
                       + """
-                    AND NOT EXISTS (
-                      SELECT 1 FROM denied_targets denied WHERE denied.node=n.node::text
+                    AND n.node::text NOT IN (SELECT node FROM denied_targets)
                   """
-                      + ")),false) FROM candidates n "
+                      + "),false) FROM candidates n "
                       + JOINS
-                      + " ORDER BY n.node",
+                      // The materialized CTE loses the tenant constant for join planning.
+                      // Repeat it here so RLS joins do not rescan other tenants per candidate.
+                      + " WHERE n.tenant_id=? ORDER BY n.node",
                   (rs, i) ->
                       new Row(
                           rs.getString(2),

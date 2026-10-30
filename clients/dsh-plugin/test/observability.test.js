@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
+import { setImmediate } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFileSink } from '../src/observability/file.js';
@@ -13,6 +15,84 @@ import {
   traceFetch,
   natsTraceparent,
 } from '../src/observability/index.js';
+
+test('mask bounds work before scanning and keeps long tokens within the CI budget', () => {
+  for (const prefix of ['', 'prefix-', 'file.name.'])
+    assert.ok(
+      !mask(prefix + 'eyJabcde.abcdefgh.signature').includes('eyJabcde'),
+    );
+  assert.ok(
+    !mask('db-password=secret-regression').includes('secret-regression'),
+  );
+  mask('warmup password=hidden');
+  for (const input of [
+    '/api/org/v1/invitations/preview/' + 'a'.repeat(8000),
+    'x'.repeat(65536),
+    'a_'.repeat(32768),
+    'a.'.repeat(32768),
+    'eyJ-'.repeat(16384),
+    'eyJ' + 'x'.repeat(65000) + '.payload.signature',
+    '-----BEGIN PRIVATE KEY-----\n'.repeat(2048),
+  ]) {
+    const start = performance.now();
+    mask(input);
+    // Shared CI scheduling needs headroom; multi-second ReDoS still fails.
+    assert.ok(performance.now() - start < 1000, 'mask exceeded 1s');
+  }
+  assert.ok(mask('x'.repeat(65537)).length <= 65536);
+  assert.ok(
+    !mask('AURIGA_' + 'A'.repeat(8000) + '_PASSWORD=hidden-value').includes(
+      'hidden-value',
+    ),
+  );
+});
+
+test('INFO and complete errors stay in the local file, never stderr; HTTP paths hide credentials', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'auriga-log-private-'));
+  const source = new URL('../src/observability/index.js', import.meta.url).href;
+  const code = `
+    import { installObservability, logEvent, logDirectory, traceFetch } from ${JSON.stringify(source)};
+    const cleanups = [];
+    installObservability({ effect(setup) { cleanups.push(setup()); } });
+    logEvent('INFO', 'fixture info', { account_id: 'alice' });
+    logEvent('ERROR', 'fixture error', {}, new Error('password=secret-password'));
+    for (const path of ['/api/org/v1/invitations/preview/secret-invite', '/api/iam/v1/device/secret-code/approve', '/unmatched/secret-unknown'])
+      await traceFetch(async () => new Response('{}'), 'https://example.com' + path);
+    logEvent('ERROR', 'x'.repeat(65537));
+    await Promise.all(cleanups.map(close => close()));
+    process.stdout.write(logDirectory());
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
+    env: { ...process.env, LOCALAPPDATA: directory, XDG_STATE_HOME: directory },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  let stdout = '',
+    stderr = '';
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  try {
+    const result = await new Promise((resolve, reject) => {
+      child.once('close', resolve);
+      child.once('error', reject);
+    });
+    assert.equal(result, 0, stderr);
+    assert.equal(stderr, '');
+    const file = await readFile(join(stdout, 'auriga-dsh-0.jsonl'), 'utf8');
+    const events = file.trim().split('\n').map(JSON.parse);
+    assert.equal(events.length, 8);
+    assert.equal(events[0].level, 'INFO');
+    assert.ok(events[1].exception.includes('at '));
+    assert.ok(!file.includes('secret-'));
+  } finally {
+    child.kill('SIGKILL');
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('trace headers are valid, fresh per operation, and do not replace business request id', async () => {
   const seen = [];
@@ -134,6 +214,20 @@ test('stale slot reclamation is serialized across concurrent writers; file failu
     const sinks = Array.from({ length: 4 }, () => createFileSink(directory));
     for (const [index, sink] of sinks.entries())
       sink.write(JSON.stringify({ index }) + '\n');
+    // Keep all leases alive until every concurrent writer has written. Closing
+    // a fast writer while another is still acquiring legitimately frees a slot
+    // for reuse, which does not demonstrate overlapping live leases.
+    const deadline = performance.now() + 5000;
+    while (performance.now() < deadline) {
+      const files = (await readdir(directory)).filter((name) =>
+        name.endsWith('.jsonl'),
+      );
+      const lines = await Promise.all(
+        files.map((name) => readFile(join(directory, name), 'utf8')),
+      );
+      if (lines.join('\n').split('\n').filter(Boolean).length === 4) break;
+      await setImmediate();
+    }
     await Promise.all(sinks.map((sink) => sink.close()));
     const files = (await readdir(directory)).filter((name) =>
       name.endsWith('.jsonl'),
