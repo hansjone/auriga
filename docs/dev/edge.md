@@ -245,3 +245,109 @@ permissions: {
 实例请求体总体上限 64 MiB（已知长度和未知长度都限制，超限 413），允许超过 1 MiB 的上传；API 的 1 MiB 上限保持原样。拨号／TLS 握手上限 10 秒，不设置实例短响应头超时和服务器整体 ReadTimeout。Transport 按节点 ID 和入口复用并限制池数量，地址变化和进程退出关闭空闲连接。
 
 E2 测试见 `ingress*_test.go`、`local_*_test.go`：正常身份与路径、越权／跨租户、错误节点／CA、非法 scheme、WebSocket 吊销断连、路由迁移删除、2 MiB 上传及未知长度超限、本机 TLS。Windows 假节点使用随机命名管道上的真实 TLS，避开本机 HTTPS 扫描对 loopback TCP 证书的替换；Linux 使用 httptest 随机 TCP 端口，并另测 Unix socket。
+## 模型管理 API 的独立受信转发
+
+正式 Access 配置可选启用 `upstreams["ai-admin"]` 和独立的 `aiAdminHop`，示例为基础
+edge JSON 的片段（还须提供原有 Access、IAM RPC、IAM/org/workspace 等配置）：
+
+```json
+{
+  "upstreams": {
+    "ai-admin": "https://192.0.2.10:9443"
+  },
+  "aiAdminHop": {
+    "serverName": "ai.internal.example.com",
+    "certFile": "/run/auriga/pki/edge-ai.crt",
+    "keyFile": "/run/auriga/pki/edge-ai.key",
+    "caFile": "/run/auriga/pki/ai-ca.crt"
+  }
+}
+```
+
+可用 `AURIGA_EDGE_UPSTREAM_AI_ADMIN` 覆盖该上游地址；TLS 材料仍来自独立 `aiAdminHop`。
+HTTPS 始终新建并登记专用 transport：固定 DNS `serverName`，加载客户端证书/私钥及 CA，
+执行正常证书链、有效期和服务器名称校验。即使地址与 IAM 相同，也不复用 IAM transport
+或其服务器名；数值 IP 仅用于寻址。缺失/错误材料在启动时拒绝，错误 CA/名称或不被上游
+信任的客户端证书在握手时失败，不发送 HTTP 请求。上游地址只能是单一 Origin，不能带
+userinfo、query（包括空 `?`）、fragment 或路径前缀。
+
+开发时只有 `aiAdminHop.allowLoopbackHttp=true` 才能使用数值回环 HTTP（如
+`http://127.0.0.1:9443`）；`localhost` 和私网 IP HTTP 均拒绝。此例外不要求 TLS 材料。
+仅配置 hop 而没有上游、或在旧单 listener 模式配置 ai-admin 都会启动失败。
+
+只转发 `/api/ai/v1/admin` 集合根及 `/api/ai/v1/admin/` 下的路径，并沿用当前路径规范化
+与 Access 实际 listener/authority/Origin 规则。未配置或非管理 `/api/ai` 请求返回
+Problem 404，不落 SPA。域名 admin 和真实 IP:port admin 都要求当前管理浏览器会话及
+受信 `iamRpc`；Bearer 或上游 mTLS 本身不授予 admin 权限。沿用当前会话核验/续换和
+Touch 节流，IP 管理写逐次在线核 CSRF，域名管理写核同源 CSRF cookie/hash。所有 cookie
+与可伪造入口身份头在转发前剥离，`Auriga-Forwarded-*` 托管身份标记直接拒绝。
+保留管理会话当前 Bearer、`If-Match`、`If-None-Match`、`Idempotency-Key`、响应 `ETag`
+和后端 Problem；权限、令牌 ctx/aud 与近期 step-up 仍由管理后端逐操作验证。
+
+本入口不启用 device/managed/chat/me usage、内部实例或资源 API；原有 `/ai/**` Team
+路由保持独立。测试使用临时 CA、真实 mTLS 上游 handler 与 Access 双模式入口，尚未覆盖
+真实 PostgreSQL 管理 API 全链。ai-gateway 服务端 TLS 配置由 ADMINMTLS 任务提供；整合时
+仍须验证其 edge 客户端身份白名单、管理令牌权限/step-up 和真实管理读写。
+
+## 网络根签名清单的精确 GET
+
+有效 Access 安装配置下，可在基础 edge JSON 中加入以下公开脱敏片段（原有
+Access、IAM RPC、IAM/org/workspace 配置仍需提供）：
+
+```json
+{
+  "upstreams": {
+    "collab": "https://192.0.2.10:9443"
+  },
+  "collabHop": {
+    "serverName": "collab.internal.example.com",
+    "certFile": "/run/auriga/pki/edge-collab.crt",
+    "keyFile": "/run/auriga/pki/edge-collab.key",
+    "caFile": "/run/auriga/pki/collab-ca.crt"
+  }
+}
+```
+
+`AURIGA_EDGE_UPSTREAM_COLLAB` 可覆盖固定上游 Origin。HTTPS 使用独立 `collabHop`，
+复用现有 IAM TLS helper 的 CA、客户端证书/私钥、固定 DNS SNI 和超时策略；即使
+与 IAM 同地址也不共享 IAM 凭据。地址不允许 userinfo、路径前缀、query（含空 `?`）
+或 fragment。配置缺失默认关闭，孤立 hop、旧单 listener 配置或坏 URL/材料启动失败。
+仅显式 `collabHop.allowLoopbackHttp=true` 允许数值回环开发 HTTP；`localhost` DNS
+和非回环 HTTP 不可用。运行时证书链、SAN、客户端证书校验失败均拒绝发送 HTTP。
+
+只代理 `GET /api/collab/v1/network/keys` 与
+`GET /api/collab/v1/network/keys/announcement`，要求字面精确路径、不带查询参数。
+其他方法/近似路径/其他 collab API 返回 Problem 错误，缺配置也不落 SPA 200。
+portal/admin 的实际域名或 IP listener、authority 和安装 tenant 映射沿 Access；
+有 Origin 时必须完整匹配当前入口源。浏览器会话复用 IAM 内省/Touch 与现有访问令牌，
+客户端设备 Bearer 原样传播，不兑换 AI/实例/服务票。所有 cookie、可伪造入口/租户头
+及 `Auriga-Forwarded-*` 托管身份头剥离；后端仍负责真实令牌用途、签名及本安装 tenant
+的认证授权。此入口不要求仅设备或仅管理浏览器身份，也不改变 AI 管理 API 的浏览器门禁。
+
+后端状态、完整 root-signed body、版本、硬截止及 `Cache-Control: no-store` 原样透传，
+edge 不解析、重签、续期或缓存。重定向响应失败关闭且不跟随；原有代理超时保持。
+realm/root 由安装与后端配置固定，不从请求选择。根 pin 必须由独立可信安装流程提供，
+这些 GET 不能为客户端建立首次根信任。
+
+测试使用实际 Access socket、HTTP/mTLS 后端夹具及生成的临时根签名 bytes；IP 前台请求
+使用真实 IP:port、不覆盖 Host。域名测试以 Host 映射本地 listener，不代表公网 DNS/TLS
+部署验收；重定向/超时用 Gateway handler 夹具连接实际后端 socket。它们均不冒充真实
+Java NetworkKeysController、真实 IAM、生产 provider 或双 DSH 验收。
+
+## 远程 Team MCP 入口
+
+安装配置可选 `upstreams["ai-gateway"]`：一个固定受信 HTTPS Origin，或同机数字回环 HTTP。
+不能带用户信息、查询、片段或路径前缀。未配置时 Team 不可用，不回落到浏览器应用。
+
+只有经正式安装配置校验的 portal 入口转发 `GET/POST /ai/mcp` 和
+`POST /ai/team/node/{register,bind,pull,ack,revoke}`。后者仅供受信 Node，不是模型工具。
+其他 `/ai` 路径和方法拒绝。每次转发只接收一个设备 Bearer，删除全部浏览器 cookie，
+不会把门户或管理会话兑换成 Team 凭据。有 Origin 时须匹配完整门户源；远程网关仍须
+逐次核凭据、当前成员权限和端点/会话参与关系，代理成功本身不代表已获授权。
+
+`POST /oauth2/revoke` 只在 portal 入口经既有受认证 IAM hop 转发，保留协议认证，
+不转发浏览器会话 cookie。IAM 负责 token/client 验证及设备撤销，不能凭任意 did 撤设备；
+其他方法、子路径和 admin 入口没有新公共例外。退出不能停止 DSH 或任务。
+
+本代码改动不等于网关已部署或双 DSH 已通；须用匹配制品验证真实登录、在线准入、
+远程 MCP 和宿主投递的整条链。

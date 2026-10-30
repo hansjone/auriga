@@ -59,6 +59,7 @@ mkdir -p \
   "$CONFIG/postgres" \
   "$CONFIG/nats" \
   "$AURIGA_DATA_ROOT/internal-tokens" \
+  "$AURIGA_DATA_ROOT/network-tokens" \
   "$DATA/postgres" \
   "$DATA/nats" \
   "$DATA/registry" \
@@ -78,6 +79,8 @@ prepare_socket_parent
 chmod_strict 0755 "$CONFIG" "$CONFIG/pki-edge"
 chown_required 10001:65532 "$AURIGA_DATA_ROOT/internal-tokens"
 chmod 0750 "$AURIGA_DATA_ROOT/internal-tokens"
+chown_required 10001:10001 "$AURIGA_DATA_ROOT/network-tokens"
+chmod 0700 "$AURIGA_DATA_ROOT/network-tokens"
 
 write_secret() {
   _name=$1
@@ -119,6 +122,13 @@ for _name in edge.key edge-iam.key proxy-edge.key; do
   install_edge_material "$CONFIG/materials/pki/$_name" "$CONFIG/pki-edge/$_name" 600
 done
 install_edge_material "$CONFIG/materials/identity-signing-keys.json" "$CONFIG/pki-edge/identity-signing-keys.json" 600
+install_edge_material "$CONFIG/materials/network/server-ca.pem" "$CONFIG/pki-edge/network-server-ca.pem" 644
+install_edge_material "$CONFIG/materials/network/edge.pem" "$CONFIG/pki-edge/network-edge.pem" 644
+install_edge_material "$CONFIG/materials/network/edge.key" "$CONFIG/pki-edge/network-edge.key" 600
+if [ -f "$CONFIG/materials/browser-tls/browser.key" ]; then
+  install_edge_material "$CONFIG/materials/browser-tls/browser.crt" "$CONFIG/pki-edge/browser.crt" 644
+  install_edge_material "$CONFIG/materials/browser-tls/browser.key" "$CONFIG/pki-edge/browser.key" 600
+fi
 chown_required 10001:10001 "$AURIGA_DATA_ROOT/enrollment"
 chown_required 65532:65532 "$AURIGA_DATA_ROOT/data/nats"
 

@@ -1,0 +1,1858 @@
+{
+  "description": "已签名的合法帧；由 contracts/test/network-gen.mjs 生成，勿手改。",
+  "receiver": {
+    "realm": "2",
+    "node": "64",
+    "incarnation": "inc-64-1",
+    "epoch": "42",
+    "channelNonce": "nonce-ready-0001",
+    "requestId": "req-fetch-0001",
+    "now": "2026-10-25T00:01:00Z"
+  },
+  "frames": {
+    "delivery_first_contact": {
+      "def": "envelope#Delivery",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "delivery",
+        "epoch": "42",
+        "delivery_id": "dlv-msg-fc-0001",
+        "mail_seq": "1205",
+        "target_node": {
+          "realm": "2",
+          "node": "64"
+        },
+        "recipients": [
+          {
+            "recipient_id": "rcp-fc-sys",
+            "local": "0",
+            "type": "system"
+          }
+        ],
+        "source_context": {
+          "realm": "2",
+          "node": "63",
+          "user": "user-0193a1",
+          "message_digest": "sha256:8882b6569c1ad7931b59b36867f9d42ada5c4e0195f2b386172494ad11930432",
+          "sender_kind": "agent",
+          "display_label": "协作会话"
+        },
+        "message": {
+          "message_id": "msg-fc-0001",
+          "from": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "to": {
+            "version": 1,
+            "realm": "2",
+            "type": "system",
+            "node": "64",
+            "local": "0"
+          },
+          "reply_to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "thread_id": "thread-0001",
+          "thread_sequence": "1",
+          "in_reply_to": null,
+          "kind": "first_contact",
+          "durability": "durable",
+          "flags": [],
+          "ttl": 86400,
+          "ext": {
+            "e2e_signature": null
+          },
+          "body": {
+            "subtype": "text",
+            "text": "首次联系示例"
+          },
+          "sender_kind": "agent",
+          "message_class": "unicast",
+          "intent": "request",
+          "authorization_ref": {
+            "source_binding": "binding-a1",
+            "source_revision": "3",
+            "policy_revision": "8",
+            "broadcast_grant_id": null
+          },
+          "created_at": "2026-10-25T00:00:00Z",
+          "expires_at": "2026-10-26T00:00:00Z",
+          "contact_scope": "conversation"
+        },
+        "contact": {
+          "contact_id": "msg-fc-0001",
+          "state": "contact_allowed",
+          "request_version": "2",
+          "assigned_address": null
+        },
+        "message_state_version": "1",
+        "server_auth": {
+          "version": 1,
+          "purpose": "business_delivery",
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "Lz_zbC-Y5mtlg0AmdnoSpI6OMT2XcEvBzcZgCDCuEBI3r_exuYv9ReDnZ6wch7TEMoX8wUmPSW8w0Pl9S5kuDQ"
+        }
+      }
+    },
+    "delivery_session_message": {
+      "def": "envelope#Delivery",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "delivery",
+        "epoch": "42",
+        "delivery_id": "dlv-msg-0001",
+        "mail_seq": "1205",
+        "target_node": {
+          "realm": "2",
+          "node": "64"
+        },
+        "recipients": [
+          {
+            "recipient_id": "rcp-0001",
+            "local": "5",
+            "type": "session"
+          }
+        ],
+        "source_context": {
+          "realm": "2",
+          "node": "63",
+          "user": "user-0193a1",
+          "message_digest": "sha256:f71cef79d52cb482490cebf08d8895959a03139974bafba112b91440e5faf94f",
+          "sender_kind": "agent",
+          "display_label": "协作会话"
+        },
+        "message": {
+          "message_id": "msg-0001",
+          "from": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "64",
+            "local": "5"
+          },
+          "reply_to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "thread_id": "thread-0001",
+          "thread_sequence": "2",
+          "in_reply_to": null,
+          "kind": "message",
+          "durability": "durable",
+          "flags": [],
+          "ttl": 86400,
+          "ext": {
+            "e2e_signature": null
+          },
+          "body": {
+            "subtype": "text",
+            "text": "对话内消息示例"
+          },
+          "sender_kind": "agent",
+          "message_class": "unicast",
+          "intent": "request",
+          "authorization_ref": {
+            "source_binding": "binding-a1",
+            "source_revision": "3",
+            "policy_revision": "8",
+            "broadcast_grant_id": null
+          },
+          "created_at": "2026-10-25T00:00:00Z",
+          "expires_at": "2026-10-26T00:00:00Z"
+        },
+        "message_state_version": "1",
+        "server_auth": {
+          "version": 1,
+          "purpose": "business_delivery",
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "UjOtmiArB4DHO3X-XRIJtGYeIOQavHpgS8BLQ4kKBIwHjjg69tRI0_48atsYVKzjCAhkUUVIsRE0w3AX9t1ZDQ"
+        }
+      }
+    },
+    "delivery_reply_private": {
+      "def": "envelope#Delivery",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "delivery",
+        "epoch": "42",
+        "delivery_id": "dlv-msg-reply-0001",
+        "mail_seq": "1205",
+        "target_node": {
+          "realm": "2",
+          "node": "64"
+        },
+        "recipients": [
+          {
+            "recipient_id": "rcp-reply-0001",
+            "local": "5",
+            "type": "session"
+          }
+        ],
+        "source_context": {
+          "realm": "2",
+          "node": "63",
+          "user": "user-0193a1",
+          "message_digest": "sha256:85e0e8613efce58323bd05faa7a148f0aac264cf9bcf2def2b0720e0db3de691",
+          "sender_kind": "agent",
+          "display_label": "协作会话"
+        },
+        "message": {
+          "message_id": "msg-reply-0001",
+          "from": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "64",
+            "local": "5"
+          },
+          "reply_to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "thread_id": "thread-0001",
+          "thread_sequence": "2",
+          "in_reply_to": "msg-0000",
+          "kind": "reply",
+          "durability": "durable",
+          "flags": [],
+          "ttl": 86400,
+          "ext": {
+            "e2e_signature": null
+          },
+          "body": {
+            "subtype": "text",
+            "text": "对话内消息示例"
+          },
+          "sender_kind": "agent",
+          "message_class": "unicast",
+          "intent": "information",
+          "authorization_ref": {
+            "source_binding": "binding-a1",
+            "source_revision": "3",
+            "policy_revision": "8",
+            "broadcast_grant_id": null
+          },
+          "created_at": "2026-10-25T00:00:00Z",
+          "expires_at": "2026-10-26T00:00:00Z",
+          "reply_mode": "private"
+        },
+        "message_state_version": "1",
+        "server_auth": {
+          "version": 1,
+          "purpose": "business_delivery",
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "K1aURnQLytEdtsTsy76-9gySD4LB5khu0D7MJWOyfRvKU70mc8DHJkE5OUviCbwj6q9Yi9Y0KS-SNAEJU9DwAA"
+        }
+      }
+    },
+    "delivery_control_wake": {
+      "def": "envelope#Delivery",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "delivery",
+        "epoch": "42",
+        "delivery_id": "dlv-msg-ctl-0001",
+        "mail_seq": "1205",
+        "target_node": {
+          "realm": "2",
+          "node": "64"
+        },
+        "recipients": [
+          {
+            "recipient_id": "rcp-ctl-0001",
+            "local": "5",
+            "type": "session"
+          }
+        ],
+        "source_context": {
+          "realm": "2",
+          "node": "63",
+          "user": "user-0193a1",
+          "message_digest": "sha256:b2d5a7856a8c1c4c335883c276f6cdba4d5521c92b47c5d9071c99e313e8f16d",
+          "sender_kind": "agent",
+          "display_label": "协作会话"
+        },
+        "message": {
+          "message_id": "msg-ctl-0001",
+          "from": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "64",
+            "local": "5"
+          },
+          "reply_to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "thread_id": "thread-0001",
+          "thread_sequence": "2",
+          "in_reply_to": null,
+          "kind": "control",
+          "durability": "durable",
+          "flags": [],
+          "ttl": 86400,
+          "ext": {
+            "e2e_signature": null
+          },
+          "body": {
+            "subtype": "control",
+            "action": "wake"
+          },
+          "sender_kind": "agent",
+          "message_class": "unicast",
+          "intent": "control",
+          "authorization_ref": {
+            "source_binding": "binding-a1",
+            "source_revision": "3",
+            "policy_revision": "8",
+            "broadcast_grant_id": null
+          },
+          "created_at": "2026-10-25T00:00:00Z",
+          "expires_at": "2026-10-26T00:00:00Z"
+        },
+        "message_state_version": "1",
+        "server_auth": {
+          "version": 1,
+          "purpose": "business_delivery",
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "yRe2q50VWHBMMUdTHOddYPIC8OC_v54M9MD7mub87G_vf4w1_B3MMOoNSpj2vgtp3pVbYBWya7FkfLh5Zw8XAA"
+        }
+      }
+    },
+    "delivery_multicast": {
+      "def": "envelope#Delivery",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "delivery",
+        "epoch": "42",
+        "delivery_id": "dlv-msg-group-0001",
+        "mail_seq": "1206",
+        "snapshot_id": "snapshot-17-v8",
+        "target_node": {
+          "realm": "2",
+          "node": "64"
+        },
+        "recipients": [
+          {
+            "recipient_id": "rcp-group-a",
+            "local": "2",
+            "type": "session",
+            "membership_id": "join-a-v3"
+          },
+          {
+            "recipient_id": "rcp-group-b",
+            "local": "3",
+            "type": "session",
+            "membership_id": "join-b-v1"
+          }
+        ],
+        "source_context": {
+          "realm": "2",
+          "node": "63",
+          "user": "user-0193a1",
+          "message_digest": "sha256:bb9b28f23dff838b93fdd1f1022baaa9e1bd64440b149a46dc9f123fe0495d58",
+          "sender_kind": "agent",
+          "display_label": "协作会话"
+        },
+        "message": {
+          "message_id": "msg-group-0001",
+          "from": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "to": {
+            "version": 1,
+            "realm": "2",
+            "type": "group",
+            "node": "0",
+            "local": "23"
+          },
+          "reply_to": {
+            "version": 1,
+            "realm": "2",
+            "type": "session",
+            "node": "63",
+            "local": "418"
+          },
+          "thread_id": "thread-group-17",
+          "thread_sequence": "9",
+          "in_reply_to": null,
+          "kind": "message",
+          "durability": "durable",
+          "flags": [],
+          "ttl": 86400,
+          "ext": {
+            "e2e_signature": null
+          },
+          "body": {
+            "subtype": "text",
+            "text": "组通知正文仅此一份"
+          },
+          "sender_kind": "agent",
+          "message_class": "multicast",
+          "intent": "information",
+          "authorization_ref": {
+            "source_binding": "binding-a1",
+            "source_revision": "3",
+            "policy_revision": "8",
+            "broadcast_grant_id": null
+          },
+          "created_at": "2026-10-25T00:00:00Z",
+          "expires_at": "2026-10-26T00:00:00Z",
+          "dispatch_mode": "paged"
+        },
+        "message_state_version": "1",
+        "server_auth": {
+          "version": 1,
+          "purpose": "business_delivery",
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "1NuE_JX2VUJefy8qG53fzPkprgBjGjYnKGXM5HoU6ZP6zcKWTEamNwZIlnBRtdg6wGrciKtOMYZf7-oBn9hSDQ"
+        }
+      }
+    },
+    "delivery_broadcast": {
+      "def": "envelope#Delivery",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "delivery",
+        "epoch": "42",
+        "delivery_id": "dlv-msg-bcast-0001",
+        "mail_seq": "1207",
+        "snapshot_id": "snapshot-bcast-0001",
+        "target_node": {
+          "realm": "2",
+          "node": "64"
+        },
+        "recipients": [
+          {
+            "recipient_id": "rcp-bcast-sys",
+            "local": "0",
+            "type": "system",
+            "membership_id": "bcast-member-64"
+          }
+        ],
+        "source_context": {
+          "realm": "2",
+          "node": "63",
+          "user": "user-0193a1",
+          "message_digest": "sha256:5b3bf435ca59f83ba916e533b4d7ad5f9caedac751520ea472d548f17be0615e",
+          "sender_kind": "human",
+          "display_label": "通知发送者"
+        },
+        "message": {
+          "message_id": "msg-bcast-0001",
+          "from": {
+            "version": 1,
+            "realm": "2",
+            "type": "system",
+            "node": "63",
+            "local": "0"
+          },
+          "to": {
+            "version": 1,
+            "realm": "2",
+            "type": "group",
+            "node": "0",
+            "local": "1"
+          },
+          "reply_to": {
+            "version": 1,
+            "realm": "2",
+            "type": "system",
+            "node": "63",
+            "local": "0"
+          },
+          "thread_id": "thread-bcast-0001",
+          "thread_sequence": "1",
+          "in_reply_to": null,
+          "kind": "message",
+          "durability": "durable",
+          "flags": [],
+          "ttl": 86400,
+          "ext": {
+            "e2e_signature": null
+          },
+          "body": {
+            "subtype": "text",
+            "text": "请在方便时确认信息，回复仅回发送者"
+          },
+          "sender_kind": "human",
+          "message_class": "broadcast",
+          "intent": "request",
+          "authorization_ref": {
+            "human_intent_id": "intent-0001",
+            "broadcast_grant_id": "grant-0001",
+            "grant_revision": "4",
+            "subject_type": "user",
+            "policy_revision": "8"
+          },
+          "created_at": "2026-10-25T00:00:00Z",
+          "expires_at": "2026-10-26T00:00:00Z",
+          "dispatch_mode": "paged",
+          "response_deadline": "2026-10-26T00:00:00Z"
+        },
+        "message_state_version": "1",
+        "server_auth": {
+          "version": 1,
+          "purpose": "business_delivery",
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "oBPJTo4TrCeg7vXcWXYg_GLUckD0sIIgwWkiM7dc34lmNiBOU1lJxWzbAaPHCwVqqi0mWBMas5WWJ6XrD7pYBQ"
+        }
+      }
+    },
+    "item_terminal": {
+      "def": "envelope#TerminalItem",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "terminal",
+        "epoch": "42",
+        "delivery_id": "dlv-expired-0001",
+        "mail_seq": "1201",
+        "target_node": {
+          "realm": "2",
+          "node": "64"
+        },
+        "recipients": [
+          {
+            "recipient_id": "rcp-expired-0001",
+            "transport_status": "expired",
+            "state_version": "3"
+          }
+        ],
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "v_EY5okk8AlhIXKX73xdG314HyMBoaAwwemlL8TuQ2hNzwfX5AxpCpuGSJsp2iYaWin1C8PKJoEXt8iA6uTKAg"
+        }
+      }
+    },
+    "item_gap": {
+      "def": "envelope#GapItem",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "gap",
+        "epoch": "42",
+        "from_seq": "1202",
+        "to_seq": "1203",
+        "reason": "held",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "I9hXNYzrVQQfCYjCwimjp09yFLuJc2j18OykvpWeVGzL9GxnLbINWa_BIWD3ja5aAVpniSNTKz9C8erp2-vHAQ"
+        }
+      }
+    },
+    "item_contact_prompt": {
+      "def": "envelope#ContactPromptItem",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "contact_prompt",
+        "epoch": "42",
+        "delivery_id": "dlv-fc-pending",
+        "mail_seq": "1204",
+        "contact_id": "msg-fc-pending",
+        "contact_scope": "conversation",
+        "request_version": "1",
+        "state_version": "1",
+        "recipient": {
+          "recipient_id": "rcp-fc-pending",
+          "local": "0",
+          "type": "system"
+        },
+        "from": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "63",
+          "local": "418"
+        },
+        "source_context": {
+          "realm": "2",
+          "node": "63",
+          "user": "user-0193a1",
+          "message_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "sender_kind": "agent",
+          "display_label": "协作会话"
+        },
+        "preview": "希望建立对话（预览已限长）",
+        "expires_at": "2026-10-26T00:00:00Z",
+        "server_auth": {
+          "version": 1,
+          "purpose": "business_delivery",
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "lsnAPtCjq7k1q9OMjZyR6NnQWinr7udC7cv0Fhhc5Bc6_tj9y9Jg5YJ63W4RTgA997IVWuVAOcLXL1aRqjDaBw"
+        }
+      }
+    },
+    "item_state_update": {
+      "def": "envelope#StateUpdateItem",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "state_update",
+        "epoch": "42",
+        "update_id": "upd-0001",
+        "action": "recall_broadcast",
+        "message_id": "msg-bcast-0001",
+        "message_state_version": "2",
+        "expires_at": "2026-11-24T00:00:00Z",
+        "server_auth": {
+          "version": 1,
+          "purpose": "management_state",
+          "alg": "Ed25519",
+          "kid": "test-r2-management-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-fetch-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "MjgIJRWke3KWTzpiORpd_qZUBTM1l4XIF8WL7zKlGfrz2Ph-5sm4H6NyTj8rIXqIOIyN1uaYE7So8wW4vWEiCA"
+        }
+      }
+    },
+    "fetch_result": {
+      "def": "protocol#FetchResult",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "fetch_result",
+        "page": {
+          "app_version": "1.0",
+          "type": "fetch_page",
+          "request_id": "req-fetch-0001",
+          "epoch": "42",
+          "head_seq": "1207",
+          "committed_cursor": "1200",
+          "scan_after": "1205",
+          "snapshot_head": "1207",
+          "next_continuation": "cont-AAAAAAAAAAAAAAAA",
+          "manifest": [
+            {
+              "item_type": "terminal",
+              "mail_seq": "1201",
+              "digest": "sha256:ae9a7b7bccc0044de83e892a1ab506e8668fa2c7f65f57fa35f62f680b54abfa"
+            },
+            {
+              "item_type": "delivery",
+              "mail_seq": "1205",
+              "digest": "sha256:b0ab4c298db5955bf2a9507d13026fc59ef901b6f164cbb22bf2f4f0f96798ca"
+            }
+          ],
+          "message_states": [
+            {
+              "message_id": "msg-bcast-0001",
+              "message_state_version": "1",
+              "state": "active",
+              "sender_frozen": false
+            }
+          ],
+          "server_auth": {
+            "version": 1,
+            "purpose": "protocol_response",
+            "alg": "Ed25519",
+            "kid": "test-r2-protocol-1",
+            "issuer_realm": "2",
+            "issued_at": "2026-10-25T00:00:00Z",
+            "not_after": "2026-10-25T00:05:00Z",
+            "audience": {
+              "realm": "2",
+              "node": "64",
+              "incarnation": "inc-64-1",
+              "epoch": "42"
+            },
+            "request_id": "req-fetch-0001",
+            "channel_nonce": "nonce-ready-0001",
+            "keyset_version": "5",
+            "signature": "AiVUST1LYF5piWm7X00Ab7ZnFO8zN-120dbWGep5siD9DY74GS0m9czXsqsEIxnDSTZSzf3PFCsY5Itbh8d2DQ"
+          }
+        },
+        "items": [
+          {
+            "app_version": "1.0",
+            "type": "terminal",
+            "epoch": "42",
+            "delivery_id": "dlv-expired-0001",
+            "mail_seq": "1201",
+            "target_node": {
+              "realm": "2",
+              "node": "64"
+            },
+            "recipients": [
+              {
+                "recipient_id": "rcp-expired-0001",
+                "transport_status": "expired",
+                "state_version": "3"
+              }
+            ],
+            "server_auth": {
+              "version": 1,
+              "purpose": "protocol_response",
+              "alg": "Ed25519",
+              "kid": "test-r2-protocol-1",
+              "issuer_realm": "2",
+              "issued_at": "2026-10-25T00:00:00Z",
+              "not_after": "2026-10-25T00:05:00Z",
+              "audience": {
+                "realm": "2",
+                "node": "64",
+                "incarnation": "inc-64-1",
+                "epoch": "42"
+              },
+              "request_id": "req-fetch-0001",
+              "channel_nonce": "nonce-ready-0001",
+              "keyset_version": "5",
+              "signature": "v_EY5okk8AlhIXKX73xdG314HyMBoaAwwemlL8TuQ2hNzwfX5AxpCpuGSJsp2iYaWin1C8PKJoEXt8iA6uTKAg"
+            }
+          },
+          {
+            "app_version": "1.0",
+            "type": "delivery",
+            "epoch": "42",
+            "delivery_id": "dlv-msg-0001",
+            "mail_seq": "1205",
+            "target_node": {
+              "realm": "2",
+              "node": "64"
+            },
+            "recipients": [
+              {
+                "recipient_id": "rcp-0001",
+                "local": "5",
+                "type": "session"
+              }
+            ],
+            "source_context": {
+              "realm": "2",
+              "node": "63",
+              "user": "user-0193a1",
+              "message_digest": "sha256:f71cef79d52cb482490cebf08d8895959a03139974bafba112b91440e5faf94f",
+              "sender_kind": "agent",
+              "display_label": "协作会话"
+            },
+            "message": {
+              "message_id": "msg-0001",
+              "from": {
+                "version": 1,
+                "realm": "2",
+                "type": "session",
+                "node": "63",
+                "local": "418"
+              },
+              "to": {
+                "version": 1,
+                "realm": "2",
+                "type": "session",
+                "node": "64",
+                "local": "5"
+              },
+              "reply_to": {
+                "version": 1,
+                "realm": "2",
+                "type": "session",
+                "node": "63",
+                "local": "418"
+              },
+              "thread_id": "thread-0001",
+              "thread_sequence": "2",
+              "in_reply_to": null,
+              "kind": "message",
+              "durability": "durable",
+              "flags": [],
+              "ttl": 86400,
+              "ext": {
+                "e2e_signature": null
+              },
+              "body": {
+                "subtype": "text",
+                "text": "对话内消息示例"
+              },
+              "sender_kind": "agent",
+              "message_class": "unicast",
+              "intent": "request",
+              "authorization_ref": {
+                "source_binding": "binding-a1",
+                "source_revision": "3",
+                "policy_revision": "8",
+                "broadcast_grant_id": null
+              },
+              "created_at": "2026-10-25T00:00:00Z",
+              "expires_at": "2026-10-26T00:00:00Z"
+            },
+            "message_state_version": "1",
+            "server_auth": {
+              "version": 1,
+              "purpose": "business_delivery",
+              "alg": "Ed25519",
+              "kid": "test-r2-business-1",
+              "issuer_realm": "2",
+              "issued_at": "2026-10-25T00:00:00Z",
+              "not_after": "2026-10-25T00:05:00Z",
+              "audience": {
+                "realm": "2",
+                "node": "64",
+                "incarnation": "inc-64-1",
+                "epoch": "42"
+              },
+              "request_id": "req-fetch-0001",
+              "channel_nonce": "nonce-ready-0001",
+              "keyset_version": "5",
+              "signature": "UjOtmiArB4DHO3X-XRIJtGYeIOQavHpgS8BLQ4kKBIwHjjg69tRI0_48atsYVKzjCAhkUUVIsRE0w3AX9t1ZDQ"
+            }
+          }
+        ]
+      }
+    },
+    "ready_result": {
+      "def": "protocol#ReadyResult",
+      "context": {
+        "requestId": "req-ready-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "ready_result",
+        "request_id": "req-ready-0001",
+        "status": "ready",
+        "epoch": "42",
+        "node_identity": {
+          "realm": "2",
+          "node": "64",
+          "incarnation": "inc-64-1"
+        },
+        "head_seq": "1207",
+        "committed_cursor": "1200",
+        "retention_low_seq": "1",
+        "local_high_water": "418",
+        "registration_revision": "418",
+        "seen_checkpoint": {
+          "checkpoint_seq": "1200",
+          "checkpoint_revision": "77",
+          "summary_digest": "sha256:348bcfe97a8d0212a277bd4e0ebf074432b93a0b4a49a53d42d42ff76bb458e6"
+        },
+        "required_features": [
+          "server_auth_v1",
+          "source_attestation_v1",
+          "inbox_only_v1"
+        ],
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-ready-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "smX5dsbbzZvuuF0t9Jt4TtY9_eYy9o9uJ55tNerD2pLDMfCYlV5XPiuE37TzfxmLZZ-EQhpo9OwlnVlXSjSSCQ"
+        }
+      }
+    },
+    "head": {
+      "def": "protocol#Head",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "head",
+        "epoch": "42",
+        "head_seq": "1207",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": null,
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "xBHV0ZUJqtBcsbllwr9-YrmBMZATn-91BpKf4ESVNKJNu25GZ52aKzKWN56sofXXXP2mGDea91_OQMANXjIFCA"
+        }
+      }
+    },
+    "receipt_committed": {
+      "def": "protocol#ReceiptCommitted",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "receipt_committed",
+        "request_id": "req-op-0001",
+        "operation_id": "op-receipt-0001",
+        "delivery_id": "dlv-msg-group-0001",
+        "mail_seq": "1206",
+        "results": [
+          {
+            "recipient_id": "rcp-group-a",
+            "transport_status": "host_accepted",
+            "state_version": "2"
+          },
+          {
+            "recipient_id": "rcp-group-b",
+            "transport_status": "revoked",
+            "state_version": "2"
+          }
+        ],
+        "mail_item_closed": true,
+        "committed_cursor": "1200",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "MlHcD-Zvy8vkivKTz4o4KXSv_ccVLFCChk1IoiK_TAtZOXiAYG72lUxekrx9TMShcNBCaQ9bYEwTwf5Lq_nqAQ"
+        }
+      }
+    },
+    "attempt_result": {
+      "def": "protocol#AttemptResult",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "attempt_result",
+        "request_id": "req-op-0001",
+        "attempt_id": "att-0001",
+        "recipient_id": "rcp-0001",
+        "result": "entered",
+        "attempt_count": 1,
+        "max_attempts": 5,
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "jdqx6XBjcP20Z_COFcCIWdqdPSrH0D8Ewyplhvpcg_4FDbN4GnXEhAw8Ec6sJctCuKVN4DCFPA-14YQdf81-Dg"
+        }
+      }
+    },
+    "admit_result": {
+      "def": "protocol#AdmitResult",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "admit_result",
+        "request_id": "req-op-0001",
+        "recipient_id": "rcp-0001",
+        "result": "admitted",
+        "admission_id": "adm-0001",
+        "admitted_epoch": "42",
+        "state_version": "4",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "QuEuXvLyoXKE8b1bOPclLUugbqWY4T7mfXT6pOWrOYgaKJeZdwrg3TsBjxV8Dnm1rfIIyBtZN2OhNVEXhfsjAQ"
+        }
+      }
+    },
+    "decide_result": {
+      "def": "protocol#DecideResult",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "decide_result",
+        "request_id": "req-op-0001",
+        "decision_id": "dec-0001",
+        "contact_state": "contact_allowed",
+        "join_state": null,
+        "execution_permission": "pending",
+        "request_version": "2",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "HojLqbloDHzlHe7yBedYTWOWTJXHWITsHSmhAOZwR8n8fhpsfTsVsbJr7ks_ESDzNrWnuI0NGm1QDsVz_JeaCA"
+        }
+      }
+    },
+    "assign_result": {
+      "def": "protocol#AssignResult",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "assign_result",
+        "request_id": "req-op-0001",
+        "contact_id": "msg-fc-0001",
+        "assigned_address": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "64",
+          "local": "419"
+        },
+        "creation_attempt_id": "create-0001",
+        "result": "assigned",
+        "creation_permit": true,
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "J83EdZSMWrG_fiAsx552pgWnGsl0NKaPe3r1HrhVhJseN9vk52t0G9SA6cpgYyMqxSpj970yL0FW_8ugVXBkAQ"
+        }
+      }
+    },
+    "register_result": {
+      "def": "protocol#RegisterResult",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "register_result",
+        "request_id": "req-op-0001",
+        "local": "419",
+        "address_type": "session",
+        "registration_id": "reg-419",
+        "allocation_op_id": "alloc-419",
+        "result": "registered",
+        "registration_revision": "419",
+        "local_high_water": "419",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "zh9pVavLFz42RnAyjtP-WNjYrrM1KH-l5gDJ5_yP6h7pTPhsI_fpS_3KPy8ariQWdi5Ge0owpypFMvuHuFVKCg"
+        }
+      }
+    },
+    "status_full": {
+      "def": "protocol#Status",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "status",
+        "request_id": "req-op-0001",
+        "visibility": "full",
+        "status": "platform_stored",
+        "message_id": "msg-group-0001",
+        "message_class": "multicast",
+        "dispatch_status": "partial",
+        "total_members": "100",
+        "total_nodes": "10",
+        "receipts": {
+          "accepted": "97",
+          "rejected": "1",
+          "expired": "0",
+          "canceled": "0",
+          "skipped": "0",
+          "unresolved": "0",
+          "pending": "2"
+        },
+        "quarantined": "1",
+        "responses": {
+          "pending": "60",
+          "responded": "38",
+          "declined": "1",
+          "timed_out": "0",
+          "unavailable": "1"
+        },
+        "message_state": "active",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "h4_m2dyfMkBfh7ALJbQjM_p6XRhb-as0d2uBPLJYNuoj2Nf_3a_iyKicoKIQ6aG-6cp_JeaxEt6lpNrwPP-zCA"
+        }
+      }
+    },
+    "status_restricted": {
+      "def": "protocol#Status",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "status",
+        "request_id": "req-op-0001",
+        "visibility": "restricted",
+        "status": "request_submitted",
+        "submission_id": "sub-0001",
+        "wait_until": "2026-10-26T00:00:00Z",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "vEpCEreNGxddrirJNXOUkWcvUGxz5imGDD2w8Kh2KgZeGmz_-bSLCWwbM56g4sUHkKX0y-NH3tASe9Gi27QXDQ"
+        }
+      }
+    },
+    "error": {
+      "def": "protocol#Error",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "error",
+        "request_id": "req-op-0001",
+        "code": "network.stale_epoch",
+        "scope": "connection",
+        "retryable": false,
+        "retry_after": null,
+        "related": {
+          "recipient_id": "rcp-0001"
+        },
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "gH0rzLK2bufrIDq8Gz0IAHi6wcGnjANSm36hvPCqiUDX0LKWg0QJtQzAzolaxE45IuPPnaVFnJuhS0jyKM_TDA"
+        }
+      }
+    },
+    "ready": {
+      "def": "protocol#Ready",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "ready",
+        "request_id": "req-ready-0001",
+        "channel_nonce": "nonce-ready-0001",
+        "boot_id": "boot-0001",
+        "features": [
+          "server_auth_v1",
+          "source_attestation_v1",
+          "inbox_only_v1",
+          "broadcast_grants_v1"
+        ],
+        "adapter_capabilities": [
+          "session_inbox",
+          "system_inbox"
+        ],
+        "resume_cursor": "1200",
+        "local_high_water": "418",
+        "registration_revision": "418",
+        "receipt_checkpoint": {
+          "checkpoint_seq": "1200",
+          "checkpoint_revision": "77",
+          "summary_digest": "sha256:348bcfe97a8d0212a277bd4e0ebf074432b93a0b4a49a53d42d42ff76bb458e6"
+        },
+        "keyset_version": "5",
+        "pending_registration": null
+      }
+    },
+    "fetch": {
+      "def": "protocol#Fetch",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "fetch",
+        "request_id": "req-fetch-0001",
+        "epoch": "42",
+        "resume_cursor": "1200",
+        "continuation": null,
+        "max_items": 128,
+        "max_bytes": 65536,
+        "held_ids": [
+          "rcp-0001"
+        ],
+        "paused": [
+          {
+            "thread_id": "thread-poison",
+            "target": {
+              "version": 1,
+              "realm": "2",
+              "type": "session",
+              "node": "64",
+              "local": "5"
+            }
+          }
+        ],
+        "state_barrier": [
+          "msg-bcast-0001"
+        ]
+      }
+    },
+    "receipt": {
+      "def": "protocol#Receipt",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "receipt",
+        "request_id": "req-up-0001",
+        "operation_id": "op-receipt-0001",
+        "epoch": "42",
+        "delivery_id": "dlv-msg-group-0001",
+        "mail_seq": "1206",
+        "results": [
+          {
+            "recipient_id": "rcp-group-a",
+            "target": {
+              "version": 1,
+              "realm": "2",
+              "type": "session",
+              "node": "64",
+              "local": "2"
+            },
+            "message_digest": "sha256:54cd4bac479ebbe58884ad9fee3a264621b9ff3d7695c0909575a1ce83ba85b5",
+            "host_request_id": "rcp-group-a",
+            "status": "host_accepted",
+            "expected_state_version": "1",
+            "accepted_by": "session",
+            "acceptance_mode": "inbox_only",
+            "execution_status": "not_applicable",
+            "evidence_digest": "sha256:670f6a94d75d5d7aa24f4316fdd63237a07bf1bfacc510c6e02cc703e7395cbd"
+          },
+          {
+            "recipient_id": "rcp-group-b",
+            "target": {
+              "version": 1,
+              "realm": "2",
+              "type": "session",
+              "node": "64",
+              "local": "3"
+            },
+            "message_digest": "sha256:54cd4bac479ebbe58884ad9fee3a264621b9ff3d7695c0909575a1ce83ba85b5",
+            "host_request_id": "rcp-group-b",
+            "status": "rejected",
+            "code": "network.target_unavailable",
+            "expected_state_version": "1"
+          }
+        ]
+      }
+    },
+    "attempt_begin": {
+      "def": "protocol#AttemptBegin",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "attempt_begin",
+        "request_id": "req-up-0001",
+        "epoch": "42",
+        "boot_id": "boot-0001",
+        "attempt_id": "att-0001",
+        "delivery_id": "dlv-msg-0001",
+        "recipient_id": "rcp-0001",
+        "purpose": "process"
+      }
+    },
+    "execution_admit": {
+      "def": "protocol#ExecutionAdmit",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "execution_admit",
+        "request_id": "req-up-0001",
+        "recipient_id": "rcp-0001",
+        "target": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "64",
+          "local": "5"
+        },
+        "connection_epoch": "42",
+        "host_request_id": "rcp-0001",
+        "attempt_id": "att-0001",
+        "boot_id": "boot-0001"
+      }
+    },
+    "contact_decide_conversation": {
+      "def": "protocol#ContactDecide",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "contact_decide",
+        "request_id": "req-up-0001",
+        "epoch": "42",
+        "decision_scope": "conversation",
+        "contact_id": "msg-fc-0001",
+        "decision_id": "dec-0001",
+        "expected_request_version": "1",
+        "policy_revision": "12",
+        "conversation_allowed": true,
+        "execution_allowed": null
+      }
+    },
+    "contact_decide_group_join": {
+      "def": "protocol#ContactDecide",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "contact_decide",
+        "request_id": "req-up-0001",
+        "epoch": "42",
+        "decision_scope": "group_join",
+        "contact_id": "msg-invite-0001",
+        "decision_id": "dec-0002",
+        "expected_request_version": "1",
+        "policy_revision": "12",
+        "join": {
+          "join_allowed": true,
+          "target": {
+            "version": 1,
+            "realm": "2",
+            "type": "system",
+            "node": "64",
+            "local": "0"
+          },
+          "membership_instance_id": "member-0001"
+        }
+      }
+    },
+    "contact_decide_execution": {
+      "def": "protocol#ContactDecide",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "contact_decide",
+        "request_id": "req-up-0001",
+        "epoch": "42",
+        "decision_scope": "execution",
+        "authorization_request_id": "authz-0001",
+        "decision_id": "dec-0003",
+        "expected_request_version": "1",
+        "policy_revision": "12",
+        "execution_allowed": false
+      }
+    },
+    "contact_assign": {
+      "def": "protocol#ContactAssign",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "contact_assign",
+        "request_id": "req-up-0001",
+        "epoch": "42",
+        "boot_id": "boot-0001",
+        "contact_id": "msg-fc-0001",
+        "assigned_address": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "64",
+          "local": "419"
+        },
+        "registration_id": "reg-419",
+        "creation_attempt_id": "create-0001",
+        "decision_version": "2"
+      }
+    },
+    "local_register": {
+      "def": "protocol#LocalRegister",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "local_register",
+        "request_id": "req-up-0001",
+        "epoch": "42",
+        "boot_id": "boot-0001",
+        "candidate_local": "419",
+        "address_type": "session",
+        "allocation_op_id": "alloc-419",
+        "allocation_fingerprint": "sha256:88764ef69a181f0c678fece6f9707b3d5e53389999c06bca2b8e1530bf661c81",
+        "expected_registration_revision": "418"
+      }
+    },
+    "status_query": {
+      "def": "protocol#StatusQuery",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "status_query",
+        "request_id": "req-up-0001",
+        "message_id": "msg-group-0001"
+      }
+    },
+    "tool_send": {
+      "def": "send#AgentSendToolInput",
+      "context": {},
+      "value": {
+        "target": "aur1:40.5",
+        "body": {
+          "subtype": "text",
+          "text": "你好"
+        },
+        "thread": "thread-0001"
+      }
+    },
+    "tool_reply": {
+      "def": "send#AgentReplyToolInput",
+      "context": {},
+      "value": {
+        "body": {
+          "subtype": "text",
+          "text": "收到"
+        }
+      }
+    },
+    "tool_first_contact": {
+      "def": "send#AgentFirstContactToolInput",
+      "context": {},
+      "value": {
+        "target": "aur1:2.40.0",
+        "text": "想请你协助评审"
+      }
+    },
+    "submit_request": {
+      "def": "send#SubmitRequest",
+      "context": {},
+      "value": {
+        "kind": "message",
+        "to": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "64",
+          "local": "5"
+        },
+        "thread_id": "thread-0001",
+        "intent": "request",
+        "durability": "durable",
+        "ttl": 86400,
+        "body": {
+          "subtype": "text",
+          "text": "对话内消息示例"
+        },
+        "flags": [],
+        "ext": {
+          "e2e_signature": null
+        },
+        "source": {
+          "source_binding": "binding-a1"
+        },
+        "idempotency": {
+          "producer_epoch": "3",
+          "key": "send-0001"
+        }
+      }
+    },
+    "send_result_stored": {
+      "def": "send#SendResult",
+      "context": {},
+      "value": {
+        "status": "platform_stored",
+        "from": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "63",
+          "local": "418"
+        },
+        "to": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "64",
+          "local": "5"
+        },
+        "message_id": "msg-0001",
+        "thread_id": "thread-0001",
+        "message_class": "unicast",
+        "expires_at": "2026-10-26T00:00:00Z"
+      }
+    },
+    "send_result_submitted": {
+      "def": "send#SendResult",
+      "context": {},
+      "value": {
+        "status": "request_submitted",
+        "from": {
+          "version": 1,
+          "realm": "2",
+          "type": "session",
+          "node": "63",
+          "local": "418"
+        },
+        "to": {
+          "version": 1,
+          "realm": "2",
+          "type": "system",
+          "node": "64",
+          "local": "0"
+        },
+        "submission_id": "sub-0001",
+        "wait_until": "2026-10-26T00:00:00Z"
+      }
+    },
+    "register_result_subagent": {
+      "def": "protocol#RegisterResult",
+      "context": {
+        "requestId": "req-op-0001"
+      },
+      "value": {
+        "app_version": "1.0",
+        "type": "register_result",
+        "request_id": "req-op-0001",
+        "local": "419",
+        "address_type": "subagent",
+        "registration_id": "reg-419",
+        "allocation_op_id": "alloc-419",
+        "result": "registered",
+        "registration_revision": "419",
+        "local_high_water": "419",
+        "server_auth": {
+          "version": 1,
+          "purpose": "protocol_response",
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "issuer_realm": "2",
+          "issued_at": "2026-10-25T00:00:00Z",
+          "not_after": "2026-10-25T00:05:00Z",
+          "audience": {
+            "realm": "2",
+            "node": "64",
+            "incarnation": "inc-64-1",
+            "epoch": "42"
+          },
+          "request_id": "req-op-0001",
+          "channel_nonce": "nonce-ready-0001",
+          "keyset_version": "5",
+          "signature": "MLu2vOHJz_ZodxvZL5oPEDCG6XyN_7Ky8-oh1o33dD5tVapgk7HkSHwa6iQCD3XO4qt0cqRF6caqLr4Wd7-cAg"
+        }
+      }
+    },
+    "ready_pending_registration": {
+      "def": "protocol#Ready",
+      "context": {},
+      "value": {
+        "app_version": "1.0",
+        "type": "ready",
+        "request_id": "req-ready-0001",
+        "channel_nonce": "nonce-ready-0001",
+        "boot_id": "boot-0001",
+        "features": [
+          "server_auth_v1",
+          "source_attestation_v1",
+          "inbox_only_v1",
+          "broadcast_grants_v1"
+        ],
+        "adapter_capabilities": [
+          "session_inbox",
+          "system_inbox"
+        ],
+        "resume_cursor": "1200",
+        "local_high_water": "419",
+        "registration_revision": "418",
+        "receipt_checkpoint": {
+          "checkpoint_seq": "1200",
+          "checkpoint_revision": "77",
+          "summary_digest": "sha256:348bcfe97a8d0212a277bd4e0ebf074432b93a0b4a49a53d42d42ff76bb458e6"
+        },
+        "keyset_version": "5",
+        "pending_registration": {
+          "candidate_local": "419",
+          "allocation_op_id": "alloc-419",
+          "allocation_fingerprint": "sha256:88764ef69a181f0c678fece6f9707b3d5e53389999c06bca2b8e1530bf661c81",
+          "address_type": "session"
+        }
+      }
+    }
+  }
+}

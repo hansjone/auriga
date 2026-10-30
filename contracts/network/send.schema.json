@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/send.schema.json",
+  "title": "Auriga 网络发送入口 v1",
+  "description": "模型工具参数、插件→总部私有发送请求与发送结果。工具与私有请求都不接受 origin/correlation_id/causation_id/from/sender_kind/message_class/reply_to/server_auth/source_context/授权引用：额外字段直接拒绝，不先接收再丢弃。见 README.md §7。",
+  "$defs": {
+    "ToolBody": {
+      "description": "普通发送只接受信息/请求类 body；control 走独立有专权的单播入口。",
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "envelope.schema.json#/$defs/Body"
+        },
+        {
+          "properties": {
+            "subtype": {
+              "enum": [
+                "text",
+                "progress",
+                "status",
+                "artifact_ref"
+              ]
+            },
+            "provenance": false
+          }
+        }
+      ]
+    },
+    "AgentSendToolInput": {
+      "description": "普通 agent 发送工具：仅 target、body、可选 thread。",
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "address.schema.json#/$defs/AddressText"
+        },
+        "body": {
+          "$ref": "#/$defs/ToolBody"
+        },
+        "thread": {
+          "$ref": "envelope.schema.json#/$defs/OpaqueId"
+        }
+      },
+      "required": [
+        "target",
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "AgentReplyToolInput": {
+      "description": "回复工具：in_reply_to 与原 recipient 由可信当前消息上下文绑定，模型只给 body。",
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/ToolBody"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false
+    },
+    "AgentFirstContactToolInput": {
+      "description": "显式首联工具：目标为 DSH 系统地址（local=0），只申请 conversation；需独立 first_contact 能力。",
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "address.schema.json#/$defs/AddressText"
+        },
+        "text": {
+          "$ref": "envelope.schema.json#/$defs/Text"
+        }
+      },
+      "required": [
+        "target",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "SubmitRequest": {
+      "description": "插件经 HTTPS 私有接口提交；来源只以 source_binding 或 human_intent_id 引用，总部据此生成 from/sender_kind，并按 to 生成 message_class；origin/correlation_id/causation_id 由平台固化，客户端提交直接拒绝。",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "envelope.schema.json#/$defs/Kind"
+        },
+        "to": {
+          "$ref": "address.schema.json#/$defs/DestinationAddress"
+        },
+        "thread_id": {
+          "$ref": "envelope.schema.json#/$defs/OpaqueId"
+        },
+        "in_reply_to": {
+          "$ref": "envelope.schema.json#/$defs/OpaqueId"
+        },
+        "contact_scope": {
+          "$ref": "envelope.schema.json#/$defs/ContactScope"
+        },
+        "reply_mode": {
+          "type": "string",
+          "enum": [
+            "private",
+            "group"
+          ]
+        },
+        "intent": {
+          "description": "仅 information/request；control 由 kind=control 推出。",
+          "type": "string",
+          "enum": [
+            "information",
+            "request"
+          ]
+        },
+        "durability": {
+          "type": "string",
+          "enum": [
+            "durable",
+            "ephemeral"
+          ]
+        },
+        "dispatch_mode": {
+          "type": "string",
+          "enum": [
+            "atomic",
+            "paged"
+          ]
+        },
+        "ttl": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "response_deadline": {
+          "$ref": "envelope.schema.json#/$defs/Time"
+        },
+        "body": {
+          "$ref": "envelope.schema.json#/$defs/Body"
+        },
+        "flags": {
+          "$ref": "envelope.schema.json#/$defs/Flags"
+        },
+        "ext": {
+          "$ref": "envelope.schema.json#/$defs/Ext"
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "source_binding": {
+              "$ref": "envelope.schema.json#/$defs/OpaqueId"
+            },
+            "human_intent_id": {
+              "$ref": "envelope.schema.json#/$defs/OpaqueId"
+            }
+          },
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "source_binding"
+              ],
+              "properties": {
+                "source_binding": true
+              }
+            },
+            {
+              "required": [
+                "human_intent_id"
+              ],
+              "properties": {
+                "human_intent_id": true
+              }
+            }
+          ]
+        },
+        "idempotency": {
+          "type": "object",
+          "properties": {
+            "producer_epoch": {
+              "$ref": "address.schema.json#/$defs/PositiveUint64"
+            },
+            "key": {
+              "$ref": "envelope.schema.json#/$defs/OpaqueId"
+            }
+          },
+          "required": [
+            "producer_epoch",
+            "key"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "to",
+        "durability",
+        "body",
+        "source",
+        "idempotency"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "first_contact"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "contact_scope"
+            ],
+            "properties": {
+              "contact_scope": true
+            }
+          },
+          "else": {
+            "properties": {
+              "contact_scope": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "reply"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "in_reply_to",
+              "reply_mode"
+            ],
+            "properties": {
+              "in_reply_to": true,
+              "reply_mode": true
+            }
+          },
+          "else": {
+            "properties": {
+              "reply_mode": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "control"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "intent": false,
+              "durability": {
+                "const": "durable"
+              },
+              "body": {
+                "type": "object",
+                "properties": {
+                  "subtype": {
+                    "const": "control"
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "required": [
+              "intent"
+            ],
+            "properties": {
+              "body": {
+                "type": "object",
+                "properties": {
+                  "subtype": {
+                    "not": {
+                      "const": "control"
+                    }
+                  }
+                }
+              },
+              "intent": true
+            }
+          }
+        }
+      ]
+    },
+    "SendResult": {
+      "description": "成功响应列出实际完整 from/to；受限首联只给统一“已提交请求”，不返回真实 message/delivery/mail_seq。",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "platform_stored",
+            "request_submitted",
+            "contact_pending"
+          ]
+        },
+        "from": {
+          "$ref": "address.schema.json#/$defs/SourceAddress"
+        },
+        "to": {
+          "$ref": "address.schema.json#/$defs/DestinationAddress"
+        },
+        "message_id": {
+          "$ref": "envelope.schema.json#/$defs/OpaqueId"
+        },
+        "thread_id": {
+          "$ref": "envelope.schema.json#/$defs/OpaqueId"
+        },
+        "message_class": {
+          "$ref": "envelope.schema.json#/$defs/MessageClass"
+        },
+        "dispatch_status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "dispatched",
+            "partial",
+            "closed"
+          ]
+        },
+        "submission_id": {
+          "$ref": "envelope.schema.json#/$defs/OpaqueId"
+        },
+        "wait_until": {
+          "$ref": "envelope.schema.json#/$defs/Time"
+        },
+        "expires_at": {
+          "$ref": "envelope.schema.json#/$defs/Time"
+        }
+      },
+      "required": [
+        "status",
+        "from",
+        "to"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "status": {
+            "const": "request_submitted"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "submission_id",
+          "wait_until"
+        ],
+        "properties": {
+          "message_id": false,
+          "thread_id": false,
+          "message_class": false,
+          "dispatch_status": false,
+          "expires_at": false,
+          "submission_id": true,
+          "wait_until": true
+        }
+      },
+      "else": {
+        "required": [
+          "message_id",
+          "thread_id",
+          "message_class",
+          "expires_at"
+        ],
+        "properties": {
+          "message_id": true,
+          "thread_id": true,
+          "message_class": true,
+          "expires_at": true
+        }
+      }
+    }
+  }
+}

@@ -5,6 +5,48 @@ import { surfaceHost, flush, boot, response } from './shell-host.mjs';
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
 
+test('sidebar label uses the native SlotLabel getter contract across host locale changes', () => {
+  const host = surfaceHost(async () => response());
+  try {
+    const {
+      meta: { label },
+      Component,
+    } = host.registrations.get('sidebar.panellist');
+    assert.equal(typeof label, 'function');
+    // Native resolveSlotLabel reads a string verbatim or invokes its getter;
+    // the registration's locale namespace never translates a string label.
+    const read = () => (typeof label === 'function' ? label() : label);
+    assert.equal(read(), 'Auriga');
+    host.locale('en');
+    assert.equal(read(), 'Auriga');
+    host.locale('zh-CN');
+    assert.equal(read(), 'Auriga');
+    for (const [size, active] of [
+      [16, false],
+      [18, true],
+    ]) {
+      const icon = Component({ size, active });
+      assert.ok(icon, 'sidebar renderer supplies a decorative icon');
+      assert.equal(
+        icon.type,
+        active
+          ? host.primitives.IconUsersOutlineMedium
+          : host.primitives.IconUsersOutlineRegular,
+      );
+      assert.equal(icon.props.size, size);
+      assert.equal(icon.props['aria-hidden'], true);
+      const glyph = icon.type(icon.props);
+      assert.equal(glyph.type, 'svg');
+      assert.equal(glyph.props.width, size);
+      assert.equal(glyph.props.height, size);
+      assert.equal(glyph.props['aria-hidden'], true);
+    }
+  } finally {
+    host.dispose();
+    host.close();
+  }
+});
+
 test('review H1: registrations name the declared native slot rather than the locale namespace', () => {
   const host = surfaceHost(async () => response());
   try {
@@ -122,7 +164,7 @@ for (const variant of ['digest', 'source'])
     }
   });
 
-test('independent native slots: settings uses trusted bootstrap, distinct versions and no editing or scripts', async () => {
+test('independent native slots: settings retains trusted bootstrap and versions beside editable preferences without leaking bootstrap credentials', async () => {
   const calls = [];
   const host = surfaceHost(async (url, init) => {
     calls.push({ url, init });
@@ -146,13 +188,14 @@ test('independent native slots: settings uses trusted bootstrap, distinct versio
     await flush();
     assert.match(settings.root.textContent, /系统托管.*协议版本1/);
     assert.match(settings.root.textContent, /插件版本0\.2\.3.*界面版本2\.4\.6/);
-    assert.match(settings.root.textContent, /账号、认证与安全/);
+    assert.match(settings.root.textContent, /账号与安全/);
     assert.equal(
-      settings.root.querySelector(
-        'input,select,form,nav,[role="tab"],[role="dialog"]',
-      ),
+      settings.root.querySelector('form,nav,[role="tab"],[role="dialog"]'),
       null,
     );
+    assert.ok(settings.root.querySelector('input[aria-label="平台地址"]'));
+    assert.ok(settings.root.querySelector('select[aria-label="默认部署位置"]'));
+    assert.equal(host.settingsImports.length, 1);
     assert.equal(host.document.querySelector('script'), null);
     assert.doesNotMatch(
       settings.root.textContent,
@@ -685,7 +728,7 @@ test('host theme overrides opposite OS preference and never installs an independ
     assert.equal(panel.context.theme, 'dark');
     assert.equal(
       settings.root.querySelector(
-        'select,input[type=radio],[data-theme-toggle]',
+        'select:not([aria-label="默认部署位置"]),input[type=radio],[data-theme-toggle]',
       ),
       null,
     );

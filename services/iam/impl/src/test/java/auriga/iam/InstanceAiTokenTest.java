@@ -241,7 +241,7 @@ class InstanceAiTokenTest {
             false,
             Set.of());
     List<io.grpc.ManagedChannel> channels = new ArrayList<>();
-    String secret = Secrets.random();
+    String secret = Secrets.random(), edgeSecret = Secrets.random();
     var issuer =
         new TokenService(
             keys,
@@ -249,7 +249,7 @@ class InstanceAiTokenTest {
             permissions,
             clock,
             "https://iam.example.com",
-            Map.of("workspace", Secrets.hash(secret), "edge", Secrets.hash(secret)));
+            Map.of("workspace", Secrets.hash(secret), "edge", Secrets.hash(edgeSecret)));
     server.start();
     try {
       java.util.function.Function<
@@ -305,7 +305,7 @@ class InstanceAiTokenTest {
                   () -> TenantContext.call(tenant, () -> user.issueInstanceAiToken(request())))
               .getStatus()
               .getCode());
-      var edge = stub.apply(issuer.issue("edge", secret));
+      var edge = stub.apply(issuer.issue("edge", edgeSecret));
       assertEquals(
           io.grpc.Status.Code.PERMISSION_DENIED,
           assertThrows(
@@ -485,6 +485,11 @@ class InstanceAiTokenTest {
     Set<String> effective =
         new HashSet<>(Set.of("iam.providers.write", "org.roles.read", "ops.nodes.write"));
     M3PermissionCatalog.all().forEach(p -> effective.add(p.key()));
+    effective.addAll(
+        Set.of(
+            "auriga.connect.collab.write",
+            "auriga.connect.collab.admin",
+            "auriga.connect.collab.grant"));
     when(permissions.resolve(any(), anyString(), anyString())).thenReturn(effective);
     var portal =
         tokens.verify(
@@ -522,7 +527,7 @@ class InstanceAiTokenTest {
                 null,
                 ""));
     assertEquals(
-        List.of("auriga.connect.models.invoke"),
+        List.of("auriga.connect.collab.use", "auriga.connect.models.invoke"),
         Json.MAPPER.convertValue(device.path("perms"), List.class));
     assertEquals(
         Set.of("ai.models.invoke", "ai.usage.read"),

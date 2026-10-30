@@ -8,6 +8,54 @@ afterEach(() => {
 });
 
 describe('createApiClient', () => {
+  it('keeps credential validation failures local without resetting the session', async () => {
+    const onUnauthenticated = vi.fn();
+    const client = createApiClient({
+      onUnauthenticated,
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            title: 'Wrong password',
+            status: 401,
+            code: 'iam.invalid_credentials',
+          }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/problem+json' },
+          },
+        ),
+    });
+    await expect(
+      client.put('/api/iam/v1/me/password', {
+        currentPassword: 'wrong',
+        newPassword: 'new',
+      }),
+    ).rejects.toMatchObject({
+      status: 401,
+      problem: { code: 'iam.invalid_credentials' },
+    });
+    expect(onUnauthenticated).not.toHaveBeenCalled();
+  });
+  it.each([
+    'common.unauthenticated',
+    'iam.unauthenticated',
+    'unknown.code',
+    undefined,
+  ])('retains the global 401 behavior for %s', async (code) => {
+    const onUnauthenticated = vi.fn();
+    const client = createApiClient({
+      onUnauthenticated,
+      fetch: async () =>
+        new Response(JSON.stringify({ title: 'Expired', status: 401, code }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/problem+json' },
+        }),
+    });
+    await expect(client.get('/api/iam/v1/me')).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(onUnauthenticated).toHaveBeenCalledOnce();
+  });
   it('attaches X-Auriga-CSRF on write requests', async () => {
     let captured: RequestInit | undefined;
     const fetchMock = (async (

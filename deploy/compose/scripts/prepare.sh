@@ -5,14 +5,15 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 COMPOSE="$ROOT/deploy/compose"
 VAR="$COMPOSE/var"
 ACCESS_ARGS=()
-if [ "$#" -gt 0 ]; then
-  if [ "$#" -ne 2 ] || [ "$1" != --access-file ] || [ -z "$2" ]; then
-    echo 'usage: prepare.sh [--access-file /absolute/path/access.json]' >&2; exit 1
-  fi
+while [ "$#" -gt 0 ]; do
+  case "$1" in --access-file|--https-cert-file|--https-key-file|--network-collab-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
+  [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing prepare input' >&2; exit 1; }
   # Resolve once before changing directory; only the public Go loader parses it.
-  ACCESS_FILE="$(cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")"
-  ACCESS_ARGS=(-access-file "$ACCESS_FILE")
-fi
+  ACCESS_DIR="$(cd -- "$(dirname -- "$2")" 2>/dev/null && pwd)" || { echo 'invalid prepare input' >&2; exit 1; }
+  ACCESS_FILE="$ACCESS_DIR/$(basename -- "$2")"
+  ACCESS_ARGS+=("-${1#--}" "$ACCESS_FILE")
+  shift 2
+done
 FIXTURE="${DSH_FIXTURE:-fake}"
 case "$FIXTURE" in fake|real) ;; *) echo 'DSH_FIXTURE must be fake or real' >&2; exit 1 ;; esac
 (
@@ -28,7 +29,7 @@ PROOF_TMP="$PREPARE_TMP/proofs"
 trap 'rm -rf -- "$PREPARE_TMP"' EXIT
 
 echo "==> start local registry if needed"
-docker compose -f "$COMPOSE/docker-compose.yml" up -d registry
+bash "$COMPOSE/scripts/compose.sh" bootstrap-registry
 sleep 2
 
 case "$FIXTURE" in
@@ -96,6 +97,39 @@ else
   sudo -n chgrp 65532 "$VAR/pki/edge-iam.key"
 fi
 chmod 640 "$VAR/pki/edge-iam.key"
+# uid10001 runtime reads its own material via gid10001, and the live issuer
+# token via supplementary gid65533. Installation credentials stay owner-only.
+sh "$COMPOSE/scripts/network-permissions.sh" "$VAR"
+# Edge receives only its submit client identity and the shared public network
+# server CA (submit mTLS and broker WSS); no broker identity or private key.
+# The broker passwords, server keys and gateway installation credential remain private.
+if [ -e "$VAR/network-edge" ] || [ -L "$VAR/network-edge" ]; then
+  [ -d "$VAR/network-edge" ] && [ ! -L "$VAR/network-edge" ] \
+    || { echo 'invalid network edge material directory' >&2; exit 1; }
+else
+  mkdir "$VAR/network-edge"
+fi
+chmod 750 "$VAR/network-edge"
+for name in edge.pem edge.key server-ca.pem; do
+  if [ -e "$VAR/network-edge/$name" ] || [ -L "$VAR/network-edge/$name" ]; then
+    [ -f "$VAR/network-edge/$name" ] && [ ! -L "$VAR/network-edge/$name" ] && [ "$(stat -c '%h' "$VAR/network-edge/$name")" = 1 ] && cmp -s "$VAR/network/$name" "$VAR/network-edge/$name" \
+      || { echo 'existing network edge material differs; refusing rotation' >&2; exit 1; }
+  else
+    (umask 077; cp -- "$VAR/network/$name" "$VAR/network-edge/$name")
+  fi
+  chmod 640 "$VAR/network-edge/$name"
+done
+if [ "$(id -u)" -eq 0 ]; then
+  chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem"
+else
+  sudo -n chgrp 65532 "$VAR/network-edge" "$VAR/network-edge/edge.pem" "$VAR/network-edge/edge.key" "$VAR/network-edge/server-ca.pem"
+fi
+bash "$COMPOSE/scripts/https-materials.sh" "$VAR"
+if [ "$(id -u)" -eq 0 ]; then
+  sh "$COMPOSE/scripts/collab-materials.sh" "$VAR"
+else
+  sudo -n sh "$COMPOSE/scripts/collab-materials.sh" "$VAR"
+fi
 chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/identity-signing-keys.json" "$VAR/identity-keys.json" \
   "$VAR/edge.config.json" || true

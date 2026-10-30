@@ -13,6 +13,8 @@ export function surfaceHost(
     slotCore,
     hostTheme = 'light',
     osTheme = 'light',
+    consentFetch,
+    settingsFetch,
   } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
@@ -22,6 +24,7 @@ export function surfaceHost(
   const { document } = window;
   const modules = new Map(),
     moduleImports = [];
+  const navigations = [];
   const completeScript = (
     script,
     Constructor = class extends window.HTMLElement {},
@@ -80,19 +83,69 @@ export function surfaceHost(
       });
     },
   };
-  function patch(parent, oldNode, value) {
+  const components = new WeakMap();
+  function releaseNode(node, owner) {
+    const child = components.get(node);
+    if (child && child !== owner) {
+      child.close();
+      components.delete(node);
+    }
+    for (const nested of node.childNodes) releaseNode(nested, owner);
+  }
+  function patch(parent, oldNode, value, owner) {
+    if (typeof value === 'object' && typeof value.type === 'function') {
+      let child = oldNode && components.get(oldNode);
+      if (!child || child.Component !== value.type || child.owner !== owner) {
+        if (oldNode) releaseNode(oldNode, owner);
+        child = {
+          Component: value.type,
+          owner,
+          hooks: [],
+          effects: [],
+          children: new Set(),
+          index: 0,
+          alive: true,
+          queue: () => owner.queue(),
+          close() {
+            child.alive = false;
+            for (const nested of child.children) nested.close();
+            child.hooks.forEach((hook) => hook?.cleanup?.());
+            owner.children.delete(child);
+          },
+        };
+        owner.children.add(child);
+      }
+      const previous = current;
+      current = child;
+      child.index = 0;
+      let rendered;
+      try {
+        rendered = value.type({ ...value.props, children: value.children });
+      } finally {
+        current = previous;
+      }
+      const node = patch(parent, oldNode, rendered, child);
+      if (oldNode && oldNode !== node) components.delete(oldNode);
+      components.set(node, child);
+      child.effects.splice(0).forEach((fn) => fn());
+      return node;
+    }
+    if (oldNode && components.get(oldNode) && components.get(oldNode) !== owner)
+      releaseNode(oldNode, owner);
     if (typeof value !== 'object') {
       if (oldNode?.nodeType === 3) {
         oldNode.data = String(value);
         return oldNode;
       }
       const node = document.createTextNode(String(value));
+      if (oldNode) releaseNode(oldNode, owner);
       if (oldNode) oldNode.replaceWith(node);
       else parent.append(node);
       return node;
     }
     let node = oldNode;
     if (node?.localName !== value.type) {
+      if (oldNode) releaseNode(oldNode, owner);
       node = document.createElement(value.type);
       if (oldNode) oldNode.replaceWith(node);
       else parent.append(node);
@@ -102,13 +155,19 @@ export function surfaceHost(
       else if (key === 'style') Object.assign(node.style, prop);
       else if (key.startsWith('on')) node[key.toLowerCase()] = prop;
       else if (key === 'className') node.className = prop;
+      // React applies boolean DOM properties; disabled={false} is not an HTML
+      // disabled="false" attribute (which would still disable the element).
+      else if (key === 'disabled') node.disabled = Boolean(prop);
       else if (key !== 'key') node.setAttribute(key, String(prop));
     }
     value.children.forEach((child, i) =>
-      patch(node, node.childNodes[i], child),
+      patch(node, node.childNodes[i], child, owner),
     );
-    while (node.childNodes.length > value.children.length)
+    while (node.childNodes.length > value.children.length) {
+      releaseNode(node.lastChild, owner);
       node.lastChild.remove();
+    }
+    if ('value' in value.props) node.value = value.props.value;
     return node;
   }
   const mount = (Component) => {
@@ -118,6 +177,7 @@ export function surfaceHost(
       root,
       hooks: [],
       effects: [],
+      children: new Set(),
       index: 0,
       alive: true,
       queued: false,
@@ -134,11 +194,12 @@ export function surfaceHost(
         current = view;
         const value = Component();
         current = undefined;
-        patch(root, root.firstChild, value);
+        patch(root, root.firstChild, value, view);
         view.effects.splice(0).forEach((fn) => fn());
       },
       close() {
         view.alive = false;
+        for (const child of view.children) child.close();
         view.hooks.forEach((hook) => hook?.cleanup?.());
         root.remove();
       },
@@ -183,27 +244,74 @@ export function surfaceHost(
           });
     };
   }
+  // Routing doubles for the two exports verified in the shipped rc.3 static module table.
+  const primitives = {
+    IconUsersOutlineRegular: ({ size }) =>
+      React.createElement('svg', {
+        width: size,
+        height: size,
+        'aria-hidden': true,
+      }),
+    IconUsersOutlineMedium: ({ size }) =>
+      React.createElement('svg', {
+        width: size,
+        height: size,
+        'aria-hidden': true,
+      }),
+  };
   window.__ModuleLoader__ = {
     load(spec) {
       plugin = spec.factory((name) => {
         if (name === 'react') return React;
+        if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitives;
         throw new Error(name);
       });
     },
   };
   let nextTimer = 0;
+  const settingsImports = [];
+  let preferences = {
+    platformOrigin: '',
+    activeOrigin: '',
+    deployment: 'cloud',
+  };
+  const routeFetch = (url, init = {}) => {
+    const path = new URL(url).pathname;
+    if (path.includes('/auriga/settings/')) {
+      if (settingsFetch) return settingsFetch(url, init);
+      if (path.endsWith('/save'))
+        preferences = { ...preferences, ...JSON.parse(init.body) };
+      return Promise.resolve(
+        response(
+          200,
+          path.endsWith('/test') ? { reachable: true } : preferences,
+        ),
+      );
+    }
+    if (path.includes('/auriga/local-login/consent/'))
+      return consentFetch
+        ? consentFetch(url, init)
+        : Promise.resolve(response(503, { code: 'common.unavailable' }));
+    return fetchImpl(url, init);
+  };
   vm.runInNewContext(
     readFileSync(
       new URL('../../../clients/dsh-plugin/src/client.js', import.meta.url),
       'utf8',
     ),
     {
-      window,
+      window: new Proxy(window, {
+        get(target, key) {
+          if (key === 'location')
+            return { assign: (url) => navigations.push(String(url)) };
+          return Reflect.get(target, key);
+        },
+      }),
       document,
       customElements: window.customElements,
       URL,
       AbortController: globalThis.AbortController,
-      fetch: fetchImpl,
+      fetch: routeFetch,
       setTimeout(fn, delay) {
         const id = ++nextTimer;
         counts.timers.set(id, { fn, delay });
@@ -215,6 +323,33 @@ export function surfaceHost(
     },
     {
       importModuleDynamically: async (specifier) => {
+        if (new URL(specifier).pathname.endsWith('/auriga/settings/view.js')) {
+          settingsImports.push(specifier);
+          // Evaluate the actual browser module, not a fake exported component.
+          const source = settingsFetch
+            ? await (
+                await settingsFetch(specifier, {
+                  credentials: 'same-origin',
+                  redirect: 'error',
+                  cache: 'no-store',
+                })
+              ).text()
+            : readFileSync(
+                new URL(
+                  '../../../clients/dsh-plugin/src/settings/view.js',
+                  import.meta.url,
+                ),
+                'utf8',
+              );
+          const module = new vm.SourceTextModule(source, {
+            context: vm.createContext({ AbortSignal: globalThis.AbortSignal }),
+          });
+          await module.link(() => {
+            throw new Error('Unexpected settings dependency');
+          });
+          await module.evaluate();
+          return module;
+        }
         moduleImports.push(specifier);
         const Constructor = await modules.get(specifier);
         if (!Constructor) throw new Error('Module was not evaluated');
@@ -290,13 +425,16 @@ export function surfaceHost(
   return {
     document,
     window,
+    navigations,
     registrations,
+    primitives,
     counts,
     subscriptions,
     scheme,
     dark,
     completeScript,
     moduleImports,
+    settingsImports,
     provideModule(script, Constructor) {
       modules.set(script.src, Constructor);
     },

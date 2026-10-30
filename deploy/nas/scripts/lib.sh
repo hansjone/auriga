@@ -188,11 +188,11 @@ load_stack_env() {
 
 validate_managed_tree() {
   # User workspaces may contain symlinks; only these deployment-owned trees are scanned.
-  for _rel in config secrets join results enrollment bin socket-share internal-tokens data data/agent data/postgres data/nats data/registry; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens data data/agent data/postgres data/nats data/registry; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ ! -L "$_managed" ] || die "managed path is a symlink: $_managed"
   done
-  for _rel in config secrets join results enrollment bin socket-share internal-tokens; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ -d "$_managed" ] || continue
     _links=$(find "$_managed" -type l -print) || die "cannot inspect managed tree: $_managed"
@@ -484,7 +484,8 @@ validate_nas_access() {
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}" \
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
-    -runtime-image "${AURIGA_RUNTIME_IMAGE-}"
+    -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}"
 }
 
 bootstrap_nas_materials() {
@@ -495,7 +496,8 @@ bootstrap_nas_materials() {
     -registry-port "${AURIGA_HOST_PUBLISH_REGISTRY:-15000}" \
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
-    -runtime-image "${AURIGA_RUNTIME_IMAGE-}")
+    -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}")
 }
 
 install_edge_material() {

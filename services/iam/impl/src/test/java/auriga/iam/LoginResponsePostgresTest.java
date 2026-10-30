@@ -243,6 +243,40 @@ class LoginResponsePostgresTest {
   }
 
   @Test
+  void unsetDtoNativeOptionalsStayOrdinaryButRawExplicitNullIsRejected() {
+    var typed = new CreateLoginTransaction().providerId(provider);
+    ObjectNode serialized = Json.MAPPER.valueToTree(typed);
+    assertTrue(serialized.has("nativeConnect"));
+    assertTrue(serialized.path("nativeConnect").isNull());
+    var response = new MockHttpServletResponse();
+    var failure =
+        assertThrows(
+            auriga.common.error.AurigaException.class,
+            () ->
+                controller.begin(
+                    Json.object("providerId", provider, "purpose", "login", "nativeConnect", null),
+                    request(),
+                    response));
+    assertEquals("common.validation_failed", failure.errorCode().code());
+    assertNull(response.getHeader("Set-Cookie"));
+    assertEquals(
+        "pending",
+        controller
+            .begin(typed, request(), new MockHttpServletResponse())
+            .path("status")
+            .asString());
+    assertEquals(
+        "pending",
+        controller
+            .begin(
+                Json.object("providerId", provider, "purpose", "login"),
+                request(),
+                new MockHttpServletResponse())
+            .path("status")
+            .asString());
+  }
+
+  @Test
   void completedProductionLoginIsImmediatelyReadableByOriginalNatsConsumer() {
     var pending = begin();
     var response = new MockHttpServletResponse();

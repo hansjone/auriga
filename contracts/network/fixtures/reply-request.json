@@ -1,0 +1,31 @@
+{
+  "kind": "reply",
+  "to": {
+    "version": 1,
+    "realm": "2",
+    "type": "group",
+    "node": "0",
+    "local": "23"
+  },
+  "thread_id": "thread-group-17",
+  "intent": "request",
+  "durability": "durable",
+  "ttl": 86400,
+  "body": {
+    "subtype": "text",
+    "text": "对话内消息示例"
+  },
+  "flags": [],
+  "ext": {
+    "e2e_signature": null
+  },
+  "source": {
+    "source_binding": "binding-a1"
+  },
+  "idempotency": {
+    "producer_epoch": "3",
+    "key": "send-0001"
+  },
+  "in_reply_to": "msg-group-0001",
+  "reply_mode": "group"
+}

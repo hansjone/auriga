@@ -1,0 +1,49 @@
+{
+  "test_only": true,
+  "public_key_spki": "MCowBQYDK2VwAyEAXbgyGdaIro3twC7ezL0YKf6n4MCgivfKOhxcQ7ch0iE",
+  "canonical": "{\"issued_at\":\"2026-10-25T00:00:00Z\",\"keys\":[{\"alg\":\"Ed25519\",\"kid\":\"test-r2-business-1\",\"not_after\":\"2026-10-26T00:00:00Z\",\"not_before\":\"2026-10-24T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAc3PQSXkP3XHFUWxY5LuTz-rcLl9B3Z-saQbHCIHTDBk\",\"purpose\":\"business_delivery\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-26T00:00:00Z\",\"not_before\":\"2026-10-24T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAeC0lzyN8uqZFMQnQDBoFmX1nFosZTDBrg60wMYZ5tL4\",\"purpose\":\"protocol_response\",\"state\":\"active\"},{\"alg\":\"Ed25519\",\"kid\":\"test-r2-management-1\",\"not_after\":\"2026-10-26T00:00:00Z\",\"not_before\":\"2026-10-24T00:00:00Z\",\"public_key_spki\":\"MCowBQYDK2VwAyEAd9Rime3UT1wL2Na_tkrjt-A48iYfOnSg2_bwtFXguc0\",\"purpose\":\"management_state\",\"state\":\"active\"}],\"keyset_version\":\"5\",\"realm\":\"2\",\"schema_version\":1,\"valid_until\":\"2026-10-26T00:00:00Z\"}",
+  "signing_input_hex": "4175726967612e4e6574776f726b4b65797365742e7631007b226973737565645f6174223a22323032362d31302d32355430303a30303a30305a222c226b657973223a5b7b22616c67223a2245643235353139222c226b6964223a22746573742d72322d627573696e6573732d31222c226e6f745f6166746572223a22323032362d31302d32365430303a30303a30305a222c226e6f745f6265666f7265223a22323032362d31302d32345430303a30303a30305a222c227075626c69635f6b65795f73706b69223a224d436f77425159444b325677417945416333505153586b503358484655577859354c75547a2d72634c6c3942335a2d73615162484349485444426b222c22707572706f7365223a22627573696e6573735f64656c6976657279222c227374617465223a22616374697665227d2c7b22616c67223a2245643235353139222c226b6964223a22746573742d72322d70726f746f636f6c2d31222c226e6f745f6166746572223a22323032362d31302d32365430303a30303a30305a222c226e6f745f6265666f7265223a22323032362d31302d32345430303a30303a30305a222c227075626c69635f6b65795f73706b69223a224d436f77425159444b325677417945416543306c7a794e3875715a464d516e5144426f466d58316e466f735a54444272673630774d595a35744c34222c22707572706f7365223a2270726f746f636f6c5f726573706f6e7365222c227374617465223a22616374697665227d2c7b22616c67223a2245643235353139222c226b6964223a22746573742d72322d6d616e6167656d656e742d31222c226e6f745f6166746572223a22323032362d31302d32365430303a30303a30305a222c226e6f745f6265666f7265223a22323032362d31302d32345430303a30303a30305a222c227075626c69635f6b65795f73706b69223a224d436f77425159444b32567741794541643952696d6533555431774c324e615f746b726a742d4134386959664f6e5367325f627774465867756330222c22707572706f7365223a226d616e6167656d656e745f7374617465222c227374617465223a22616374697665227d5d2c226b65797365745f76657273696f6e223a2235222c227265616c6d223a2232222c22736368656d615f76657273696f6e223a312c2276616c69645f756e74696c223a22323032362d31302d32365430303a30303a30305a227d",
+  "signed": {
+    "keyset": {
+      "issued_at": "2026-10-25T00:00:00Z",
+      "keys": [
+        {
+          "alg": "Ed25519",
+          "kid": "test-r2-business-1",
+          "not_after": "2026-10-26T00:00:00Z",
+          "not_before": "2026-10-24T00:00:00Z",
+          "public_key_spki": "MCowBQYDK2VwAyEAc3PQSXkP3XHFUWxY5LuTz-rcLl9B3Z-saQbHCIHTDBk",
+          "purpose": "business_delivery",
+          "state": "active"
+        },
+        {
+          "alg": "Ed25519",
+          "kid": "test-r2-protocol-1",
+          "not_after": "2026-10-26T00:00:00Z",
+          "not_before": "2026-10-24T00:00:00Z",
+          "public_key_spki": "MCowBQYDK2VwAyEAeC0lzyN8uqZFMQnQDBoFmX1nFosZTDBrg60wMYZ5tL4",
+          "purpose": "protocol_response",
+          "state": "active"
+        },
+        {
+          "alg": "Ed25519",
+          "kid": "test-r2-management-1",
+          "not_after": "2026-10-26T00:00:00Z",
+          "not_before": "2026-10-24T00:00:00Z",
+          "public_key_spki": "MCowBQYDK2VwAyEAd9Rime3UT1wL2Na_tkrjt-A48iYfOnSg2_bwtFXguc0",
+          "purpose": "management_state",
+          "state": "active"
+        }
+      ],
+      "keyset_version": "5",
+      "realm": "2",
+      "schema_version": 1,
+      "valid_until": "2026-10-26T00:00:00Z"
+    },
+    "root_auth": {
+      "alg": "Ed25519",
+      "kid": "test-root",
+      "signature": "n-th-_k2whGYovggX9S5QnCD8mnf-8llUD15OnCAxOyWxLO4EdjFBKPJdppu1biy8QzrtPo_nlPJgWqnmYaPAw"
+    }
+  }
+}

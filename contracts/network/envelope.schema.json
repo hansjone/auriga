@@ -1,0 +1,1821 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/envelope.schema.json",
+  "title": "Auriga 应用信封 v1",
+  "description": "总部盖章的业务消息、node 邮箱项及其他受签下行条目。签名输入、未知字段保留与跨字段规则见 README.md §3–§4；additionalProperties:false 仅供生产方自测，消费方按 README 保留并忽略未知可选字段。",
+  "$defs": {
+    "Uint64": {
+      "$ref": "address.schema.json#/$defs/Uint64"
+    },
+    "PositiveUint64": {
+      "$ref": "address.schema.json#/$defs/PositiveUint64"
+    },
+    "OpaqueId": {
+      "description": "平台或插件生成的不透明 ID；平台生成的建议 UUIDv7。不承载语义，不可解析。",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Time": {
+      "description": "UTC 整秒 RFC 3339，唯一表示。",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$"
+    },
+    "AppVersion": {
+      "description": "应用协议版本 major.minor；v1 major 固定 1。",
+      "type": "string",
+      "pattern": "^1\\.(?:0|[1-9][0-9]{0,3})$"
+    },
+    "Kid": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "Signature": {
+      "description": "原始 64 字节 Ed25519 签名的规范无填充 base64url。",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{85}[AQgw]$"
+    },
+    "NullableId": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "Kind": {
+      "type": "string",
+      "enum": [
+        "first_contact",
+        "message",
+        "reply",
+        "control"
+      ]
+    },
+    "SenderKind": {
+      "type": "string",
+      "enum": [
+        "human",
+        "agent"
+      ]
+    },
+    "MessageClass": {
+      "type": "string",
+      "enum": [
+        "unicast",
+        "multicast",
+        "broadcast"
+      ]
+    },
+    "Intent": {
+      "type": "string",
+      "enum": [
+        "information",
+        "request",
+        "control"
+      ]
+    },
+    "ContactScope": {
+      "type": "string",
+      "enum": [
+        "conversation",
+        "human_dialogue",
+        "group_join"
+      ]
+    },
+    "TransportStatus": {
+      "description": "recipient 权威传输状态（protocol §4）。",
+      "type": "string",
+      "enum": [
+        "pending",
+        "quarantined",
+        "host_accepted",
+        "expired",
+        "canceled",
+        "revoked",
+        "skipped",
+        "unresolved"
+      ]
+    },
+    "ExecutionStatus": {
+      "type": "string",
+      "enum": [
+        "not_applicable",
+        "not_started",
+        "admitted",
+        "running",
+        "completed",
+        "failed",
+        "canceled",
+        "outcome_unknown"
+      ]
+    },
+    "ContactState": {
+      "type": "string",
+      "enum": [
+        "contact_pending",
+        "contact_allowed",
+        "contact_denied",
+        "contact_expired"
+      ]
+    },
+    "Flags": {
+      "description": "v1 生产方恒为 []；未知非关键 flag 由消费方保留并忽略，不能改变授权/执行语义。",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,31}$"
+      },
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "Ext": {
+      "description": "命名空间扩展；e2e_signature 为端到端签名预留，v1 恒为 null，无信任效力。",
+      "type": "object",
+      "properties": {
+        "e2e_signature": {
+          "description": "端到端签名预留：v1 生产方恒为 null；消费方对非空值按未知可选扩展保留并忽略，无信任效力。",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "patternProperties": {
+        "^[a-z][a-z0-9-]{0,31}(?:\\.[a-z][a-z0-9_-]{0,31}){1,4}$": {}
+      },
+      "maxProperties": 32,
+      "additionalProperties": false
+    },
+    "Text": {
+      "description": "正文文本；UTF-8 编码后另受 body 16KiB 字节上限。",
+      "type": "string",
+      "maxLength": 16384
+    },
+    "Body": {
+      "description": "受支持的 body 子类型；subtype 必填，control 动作未知时失败关闭。",
+      "type": "object",
+      "properties": {
+        "subtype": {
+          "type": "string",
+          "enum": [
+            "text",
+            "progress",
+            "status",
+            "artifact_ref",
+            "conversation_opened",
+            "execution_waiting",
+            "group_invitation",
+            "control"
+          ]
+        },
+        "text": {
+          "$ref": "#/$defs/Text"
+        },
+        "provenance": {
+          "description": "仅插件确定性回信使用 host；模型产出省略或 model。",
+          "type": "string",
+          "enum": [
+            "model",
+            "host"
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/Uint64"
+        },
+        "state": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "artifact": {
+          "type": "object",
+          "properties": {
+            "resource_id": {
+              "$ref": "#/$defs/OpaqueId"
+            },
+            "digest": {
+              "$ref": "#/$defs/Digest"
+            },
+            "size": {
+              "$ref": "#/$defs/Uint64"
+            }
+          },
+          "required": [
+            "resource_id",
+            "digest",
+            "size"
+          ],
+          "additionalProperties": false
+        },
+        "group_address": {
+          "$ref": "address.schema.json#/$defs/GroupAddress"
+        },
+        "invitation_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "invite_expires_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "wake",
+            "cancel",
+            "queue",
+            "steer",
+            "start"
+          ]
+        },
+        "target_operation_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "expected_state_version": {
+          "$ref": "#/$defs/Uint64"
+        }
+      },
+      "required": [
+        "subtype"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "subtype": {
+                "const": "text"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subtype": {
+                "enum": [
+                  "progress",
+                  "status"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "revision",
+              "state"
+            ],
+            "properties": {
+              "revision": true,
+              "state": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subtype": {
+                "const": "artifact_ref"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "artifact"
+            ],
+            "properties": {
+              "artifact": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subtype": {
+                "enum": [
+                  "conversation_opened",
+                  "execution_waiting"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "provenance"
+            ],
+            "properties": {
+              "provenance": {
+                "const": "host"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subtype": {
+                "const": "group_invitation"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "group_address",
+              "invitation_id",
+              "invite_expires_at"
+            ],
+            "properties": {
+              "group_address": {
+                "type": "object",
+                "properties": {
+                  "local": {
+                    "not": {
+                      "const": "1"
+                    }
+                  }
+                }
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "invitation_id": true,
+              "invite_expires_at": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subtype": {
+                "const": "control"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "action"
+            ],
+            "properties": {
+              "action": true
+            }
+          },
+          "else": {
+            "properties": {
+              "action": false,
+              "target_operation_id": false,
+              "expected_state_version": false
+            }
+          }
+        }
+      ]
+    },
+    "AuthorizationRef": {
+      "description": "总部按已核验来源授权生成并签名；不是客户端字段，旧引用不续权。",
+      "type": "object",
+      "properties": {
+        "source_binding": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/Uint64"
+        },
+        "human_intent_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "policy_revision": {
+          "$ref": "#/$defs/Uint64"
+        },
+        "broadcast_grant_id": {
+          "$ref": "#/$defs/NullableId"
+        },
+        "grant_revision": {
+          "$ref": "#/$defs/Uint64"
+        },
+        "subject_type": {
+          "type": "string",
+          "enum": [
+            "user",
+            "node",
+            "agent"
+          ]
+        }
+      },
+      "required": [
+        "policy_revision",
+        "broadcast_grant_id"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "broadcast_grant_id": {
+            "type": "string"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "grant_revision",
+          "subject_type"
+        ],
+        "properties": {
+          "grant_revision": true,
+          "subject_type": true
+        }
+      }
+    },
+    "SourceContext": {
+      "description": "平台从认证连接与权威存储重建的来源盖章；客户端同名字段一律删除。",
+      "type": "object",
+      "properties": {
+        "realm": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "node": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "user": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "message_digest": {
+          "description": "SHA-256(JCS(message))。",
+          "$ref": "#/$defs/Digest"
+        },
+        "sender_kind": {
+          "$ref": "#/$defs/SenderKind"
+        },
+        "display_label": {
+          "description": "签发前已做保留词校验的安全显示标签。",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "identity_revision": {
+          "$ref": "#/$defs/Uint64"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "realm",
+        "node",
+        "user",
+        "message_digest",
+        "sender_kind",
+        "display_label"
+      ],
+      "additionalProperties": false
+    },
+    "Origin": {
+      "description": "回应组播/广播请求时平台固化的原消息与原 recipient。",
+      "type": "object",
+      "properties": {
+        "message_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "recipient_id": {
+          "$ref": "#/$defs/OpaqueId"
+        }
+      },
+      "required": [
+        "message_id",
+        "recipient_id"
+      ],
+      "additionalProperties": false
+    },
+    "Message": {
+      "description": "一份不可变正文；from/to/reply_to/sender_kind/message_class/intent/authorization_ref 等由总部生成并纳入签名。",
+      "type": "object",
+      "properties": {
+        "message_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "from": {
+          "$ref": "address.schema.json#/$defs/SourceAddress"
+        },
+        "to": {
+          "$ref": "address.schema.json#/$defs/DestinationAddress"
+        },
+        "reply_to": {
+          "$ref": "address.schema.json#/$defs/SourceAddress"
+        },
+        "thread_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "thread_sequence": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "in_reply_to": {
+          "$ref": "#/$defs/NullableId"
+        },
+        "kind": {
+          "$ref": "#/$defs/Kind"
+        },
+        "contact_scope": {
+          "$ref": "#/$defs/ContactScope"
+        },
+        "reply_mode": {
+          "type": "string",
+          "enum": [
+            "private",
+            "group"
+          ]
+        },
+        "durability": {
+          "type": "string",
+          "enum": [
+            "durable",
+            "ephemeral"
+          ]
+        },
+        "dispatch_mode": {
+          "type": "string",
+          "enum": [
+            "atomic",
+            "paged"
+          ]
+        },
+        "flags": {
+          "$ref": "#/$defs/Flags"
+        },
+        "ttl": {
+          "description": "正整数秒；平台夹紧，最长 7 天。",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "ext": {
+          "$ref": "#/$defs/Ext"
+        },
+        "body": {
+          "$ref": "#/$defs/Body"
+        },
+        "sender_kind": {
+          "$ref": "#/$defs/SenderKind"
+        },
+        "message_class": {
+          "$ref": "#/$defs/MessageClass"
+        },
+        "intent": {
+          "$ref": "#/$defs/Intent"
+        },
+        "authorization_ref": {
+          "$ref": "#/$defs/AuthorizationRef"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "causation_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "origin": {
+          "$ref": "#/$defs/Origin"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "response_deadline": {
+          "$ref": "#/$defs/Time"
+        }
+      },
+      "required": [
+        "message_id",
+        "from",
+        "to",
+        "reply_to",
+        "thread_id",
+        "thread_sequence",
+        "in_reply_to",
+        "kind",
+        "durability",
+        "flags",
+        "ttl",
+        "ext",
+        "body",
+        "sender_kind",
+        "message_class",
+        "intent",
+        "authorization_ref",
+        "created_at",
+        "expires_at"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$comment": "message_class 由目的地址决定：普通组 multicast、node=0/local=1 broadcast、其余 unicast。",
+          "if": {
+            "properties": {
+              "to": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "group"
+                  },
+                  "local": {
+                    "const": "1"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "message_class": {
+                "const": "broadcast"
+              }
+            }
+          },
+          "else": {
+            "if": {
+              "properties": {
+                "to": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "group"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "message_class": {
+                  "const": "multicast"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "message_class": {
+                  "const": "unicast"
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "human 固定本 node/sys；agent 固定会话/子会话。",
+          "if": {
+            "properties": {
+              "sender_kind": {
+                "const": "human"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "from": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "system"
+                  }
+                }
+              },
+              "authorization_ref": {
+                "type": "object",
+                "required": [
+                  "human_intent_id"
+                ],
+                "properties": {
+                  "human_intent_id": true
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "from": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "session",
+                      "subagent"
+                    ]
+                  }
+                }
+              },
+              "authorization_ref": {
+                "type": "object",
+                "required": [
+                  "source_binding",
+                  "source_revision"
+                ],
+                "properties": {
+                  "source_binding": true,
+                  "source_revision": true
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "执行控制：kind=control ⇔ intent=control，且只能单播、durable、body.subtype=control。",
+          "if": {
+            "anyOf": [
+              {
+                "properties": {
+                  "kind": {
+                    "const": "control"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "intent": {
+                    "const": "control"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "body": {
+                    "type": "object",
+                    "properties": {
+                      "subtype": {
+                        "const": "control"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "const": "control"
+              },
+              "intent": {
+                "const": "control"
+              },
+              "message_class": {
+                "const": "unicast"
+              },
+              "durability": {
+                "const": "durable"
+              },
+              "body": {
+                "type": "object",
+                "properties": {
+                  "subtype": {
+                    "const": "control"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "首联：单播、request、durable，必须 contact_scope；conversation/human_dialogue 目标 sys，human_dialogue 仅 human，group_join 携带组邀请。",
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "first_contact"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "contact_scope"
+            ],
+            "properties": {
+              "message_class": {
+                "const": "unicast"
+              },
+              "intent": {
+                "const": "request"
+              },
+              "durability": {
+                "const": "durable"
+              },
+              "in_reply_to": {
+                "type": "null"
+              },
+              "contact_scope": true
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "contact_scope": {
+                      "enum": [
+                        "conversation",
+                        "human_dialogue"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "contact_scope"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "to": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "const": "system"
+                        }
+                      }
+                    },
+                    "body": {
+                      "type": "object",
+                      "properties": {
+                        "subtype": {
+                          "const": "text"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "contact_scope": {
+                      "const": "human_dialogue"
+                    }
+                  },
+                  "required": [
+                    "contact_scope"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "sender_kind": {
+                      "const": "human"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "contact_scope": {
+                      "const": "group_join"
+                    }
+                  },
+                  "required": [
+                    "contact_scope"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "body": {
+                      "type": "object",
+                      "properties": {
+                        "subtype": {
+                          "const": "group_invitation"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "else": {
+            "properties": {
+              "contact_scope": false,
+              "body": {
+                "type": "object",
+                "properties": {
+                  "subtype": {
+                    "not": {
+                      "const": "group_invitation"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "回复：必须引用原消息并声明 reply_mode；private 回单个 node 地址，group 只回普通组。",
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "reply"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reply_mode"
+            ],
+            "properties": {
+              "in_reply_to": {
+                "$ref": "#/$defs/OpaqueId"
+              },
+              "reply_mode": true
+            },
+            "if": {
+              "properties": {
+                "reply_mode": {
+                  "const": "group"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "message_class": {
+                  "const": "multicast"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "message_class": {
+                  "const": "unicast"
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reply_mode": false
+            }
+          }
+        },
+        {
+          "$comment": "ephemeral 仅进度/在线状态信息，不能是首联/回复/控制或广播。",
+          "if": {
+            "properties": {
+              "durability": {
+                "const": "ephemeral"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "const": "message"
+              },
+              "intent": {
+                "const": "information"
+              },
+              "message_class": {
+                "enum": [
+                  "unicast",
+                  "multicast"
+                ]
+              },
+              "body": {
+                "type": "object",
+                "properties": {
+                  "subtype": {
+                    "enum": [
+                      "progress",
+                      "status"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "广播必须带具体高危授予引用。",
+          "if": {
+            "properties": {
+              "message_class": {
+                "const": "broadcast"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "authorization_ref": {
+                "type": "object",
+                "properties": {
+                  "broadcast_grant_id": {
+                    "$ref": "#/$defs/OpaqueId"
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "authorization_ref": {
+                "type": "object",
+                "properties": {
+                  "broadcast_grant_id": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "response_deadline 仅 request 意图。",
+          "if": {
+            "properties": {
+              "intent": {
+                "not": {
+                  "const": "request"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "response_deadline": false
+            }
+          }
+        }
+      ]
+    },
+    "ServerAuth": {
+      "description": "总部服务器签名封装；签名输入见 README §4。",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "business_delivery",
+            "protocol_response",
+            "management_state"
+          ]
+        },
+        "alg": {
+          "type": "string",
+          "const": "Ed25519"
+        },
+        "kid": {
+          "$ref": "#/$defs/Kid"
+        },
+        "issuer_realm": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "issued_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "not_after": {
+          "$ref": "#/$defs/Time"
+        },
+        "audience": {
+          "type": "object",
+          "properties": {
+            "realm": {
+              "$ref": "#/$defs/PositiveUint64"
+            },
+            "node": {
+              "$ref": "#/$defs/PositiveUint64"
+            },
+            "incarnation": {
+              "$ref": "#/$defs/OpaqueId"
+            },
+            "epoch": {
+              "description": "connection_epoch；0 仅用于 READY 被拒时尚无 epoch 的 ERROR。",
+              "$ref": "#/$defs/Uint64"
+            }
+          },
+          "required": [
+            "realm",
+            "node",
+            "incarnation",
+            "epoch"
+          ],
+          "additionalProperties": false
+        },
+        "request_id": {
+          "description": "所响应请求的 request_id；仅 HEAD 等主动提示为 null，此时以 channel_nonce/epoch 关联。",
+          "$ref": "#/$defs/NullableId"
+        },
+        "channel_nonce": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "keyset_version": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "version",
+        "purpose",
+        "alg",
+        "kid",
+        "issuer_realm",
+        "issued_at",
+        "not_after",
+        "audience",
+        "request_id",
+        "channel_nonce",
+        "keyset_version",
+        "signature"
+      ],
+      "additionalProperties": false
+    },
+    "Recipient": {
+      "type": "object",
+      "properties": {
+        "recipient_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "local": {
+          "$ref": "#/$defs/Uint64"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "system",
+            "session",
+            "subagent"
+          ]
+        },
+        "membership_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "state_version": {
+          "$ref": "address.schema.json#/$defs/PositiveUint64",
+          "description": "Server recipient.state_version, used as RECEIPT expected_state_version."
+        }
+      },
+      "required": [
+        "recipient_id",
+        "local",
+        "type"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "type": {
+            "const": "system"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "local": {
+            "const": "0"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "local": {
+            "$ref": "#/$defs/PositiveUint64"
+          }
+        }
+      }
+    },
+    "Recipients": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Recipient"
+      },
+      "minItems": 1,
+      "maxItems": 256
+    },
+    "ContactInfo": {
+      "description": "首联获准后随正文下发的请求状态；assigned_address 未固定时为 null。",
+      "type": "object",
+      "properties": {
+        "contact_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "state": {
+          "$ref": "#/$defs/ContactState"
+        },
+        "request_version": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "assigned_address": {
+          "anyOf": [
+            {
+              "$ref": "address.schema.json#/$defs/SessionAddress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contact_id",
+        "state",
+        "request_version",
+        "assigned_address"
+      ],
+      "additionalProperties": false
+    },
+    "Delivery": {
+      "description": "一条 node 邮箱项（含正文），可独立验签。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "delivery"
+        },
+        "epoch": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "mail_seq": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "target_node": {
+          "$ref": "address.schema.json#/$defs/NodeRef"
+        },
+        "recipients": {
+          "$ref": "#/$defs/Recipients"
+        },
+        "source_context": {
+          "$ref": "#/$defs/SourceContext"
+        },
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "contact": {
+          "$ref": "#/$defs/ContactInfo"
+        },
+        "message_state_version": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "epoch",
+        "delivery_id",
+        "mail_seq",
+        "target_node",
+        "recipients",
+        "source_context",
+        "message",
+        "message_state_version",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "server_auth": {
+              "type": "object",
+              "properties": {
+                "purpose": {
+                  "const": "business_delivery"
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "组播/广播必须带快照与成员实例，且只投 durable。",
+          "if": {
+            "properties": {
+              "message": {
+                "type": "object",
+                "properties": {
+                  "message_class": {
+                    "enum": [
+                      "multicast",
+                      "broadcast"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "snapshot_id"
+            ],
+            "properties": {
+              "recipients": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "membership_id"
+                  ],
+                  "properties": {
+                    "membership_id": true
+                  }
+                }
+              },
+              "snapshot_id": true
+            }
+          },
+          "else": {
+            "properties": {
+              "snapshot_id": false,
+              "recipients": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "membership_id": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "广播只投 sys。",
+          "if": {
+            "properties": {
+              "message": {
+                "type": "object",
+                "properties": {
+                  "message_class": {
+                    "const": "broadcast"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "recipients": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "system"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "单播邮箱项只有一个 recipient；首联正文下发时必须带 contact。",
+          "if": {
+            "properties": {
+              "message": {
+                "type": "object",
+                "properties": {
+                  "message_class": {
+                    "const": "unicast"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "recipients": {
+                "type": "array",
+                "maxItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "message": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "first_contact"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "contact"
+            ],
+            "properties": {
+              "contact": true
+            }
+          },
+          "else": {
+            "properties": {
+              "contact": false
+            }
+          }
+        }
+      ]
+    },
+    "TerminalItem": {
+      "description": "受权终态条目：不含正文，供游标越过已终结的 recipient。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "terminal"
+        },
+        "epoch": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "mail_seq": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "target_node": {
+          "$ref": "address.schema.json#/$defs/NodeRef"
+        },
+        "recipients": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "recipient_id": {
+                "$ref": "#/$defs/OpaqueId"
+              },
+              "transport_status": {
+                "type": "string",
+                "enum": [
+                  "host_accepted",
+                  "expired",
+                  "canceled",
+                  "revoked",
+                  "skipped",
+                  "unresolved"
+                ]
+              },
+              "state_version": {
+                "$ref": "#/$defs/PositiveUint64"
+              }
+            },
+            "required": [
+              "recipient_id",
+              "transport_status",
+              "state_version"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "epoch",
+        "delivery_id",
+        "mail_seq",
+        "target_node",
+        "recipients",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "server_auth": {
+              "type": "object",
+              "properties": {
+                "purpose": {
+                  "const": "protocol_response"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "GapItem": {
+      "description": "不暴露正文的空洞说明（被排除、暂停、隔离或越出保留窗口）。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "gap"
+        },
+        "epoch": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "from_seq": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "to_seq": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "held",
+            "paused",
+            "quarantined",
+            "awaiting_authorization",
+            "out_of_window"
+          ]
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "epoch",
+        "from_seq",
+        "to_seq",
+        "reason",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "server_auth": {
+              "type": "object",
+              "properties": {
+                "purpose": {
+                  "const": "protocol_response"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ContactPromptItem": {
+      "description": "contact_pending 期间只给目标审批 UI 的受限预览，不是正文交付，不能形成 host_accepted。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "contact_prompt"
+        },
+        "epoch": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "mail_seq": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "contact_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "contact_scope": {
+          "$ref": "#/$defs/ContactScope"
+        },
+        "request_version": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "state_version": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "recipient": {
+          "$ref": "#/$defs/Recipient"
+        },
+        "from": {
+          "$ref": "address.schema.json#/$defs/SourceAddress"
+        },
+        "source_context": {
+          "$ref": "#/$defs/SourceContext"
+        },
+        "preview": {
+          "type": "string",
+          "maxLength": 280
+        },
+        "group_address": {
+          "$ref": "address.schema.json#/$defs/GroupAddress"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "epoch",
+        "delivery_id",
+        "mail_seq",
+        "contact_id",
+        "contact_scope",
+        "request_version",
+        "state_version",
+        "recipient",
+        "from",
+        "source_context",
+        "preview",
+        "expires_at",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "server_auth": {
+              "type": "object",
+              "properties": {
+                "purpose": {
+                  "const": "business_delivery"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "contact_scope": {
+                "const": "group_join"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "group_address"
+            ],
+            "properties": {
+              "group_address": true
+            }
+          },
+          "else": {
+            "properties": {
+              "group_address": false,
+              "recipient": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "system"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "StateUpdateItem": {
+      "description": "总部管理状态更新：只表示固定的撤回/冻结/版本通知，不携带正文或可执行动作。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "state_update"
+        },
+        "epoch": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "update_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "recall_broadcast",
+            "freeze_sender",
+            "unfreeze_sender"
+          ]
+        },
+        "message_id": {
+          "$ref": "#/$defs/OpaqueId"
+        },
+        "message_state_version": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "freeze_scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "node",
+            "agent"
+          ]
+        },
+        "freeze_revision": {
+          "$ref": "#/$defs/PositiveUint64"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Time"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "epoch",
+        "update_id",
+        "action",
+        "expires_at",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "server_auth": {
+              "type": "object",
+              "properties": {
+                "purpose": {
+                  "const": "management_state"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "recall_broadcast"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "message_id",
+              "message_state_version"
+            ],
+            "properties": {
+              "message_id": true,
+              "message_state_version": true
+            }
+          },
+          "else": {
+            "required": [
+              "freeze_scope",
+              "freeze_revision"
+            ],
+            "properties": {
+              "freeze_scope": true,
+              "freeze_revision": true
+            }
+          }
+        }
+      ]
+    },
+    "PageItem": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Delivery"
+        },
+        {
+          "$ref": "#/$defs/TerminalItem"
+        },
+        {
+          "$ref": "#/$defs/GapItem"
+        },
+        {
+          "$ref": "#/$defs/ContactPromptItem"
+        },
+        {
+          "$ref": "#/$defs/StateUpdateItem"
+        }
+      ]
+    }
+  },
+  "$ref": "#/$defs/Delivery"
+}

@@ -1,0 +1,2173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.example.com/contracts/network/protocol.schema.json",
+  "title": "Auriga 网络私有应用消息 v1",
+  "description": "经同一 NATS WSS 的 up/down subject 传输的私有应用帧；不是 Broker 控制帧，也不开放为模型工具。上行（DSH→平台）不签名，身份只从 up subject/ingress 取；下行除 FETCH_RESULT 外层容器外全部带 server_auth。语义见 README.md §5。",
+  "$defs": {
+    "U64": {
+      "$ref": "address.schema.json#/$defs/Uint64"
+    },
+    "P64": {
+      "$ref": "address.schema.json#/$defs/PositiveUint64"
+    },
+    "Id": {
+      "$ref": "envelope.schema.json#/$defs/OpaqueId"
+    },
+    "Digest": {
+      "$ref": "envelope.schema.json#/$defs/Digest"
+    },
+    "Time": {
+      "$ref": "envelope.schema.json#/$defs/Time"
+    },
+    "AppVersion": {
+      "$ref": "envelope.schema.json#/$defs/AppVersion"
+    },
+    "ServerAuth": {
+      "$ref": "envelope.schema.json#/$defs/ServerAuth"
+    },
+    "Feature": {
+      "description": "应用能力标记；未知值消费方忽略，但 required_features 中的未知值必须拒绝协商。",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,47}$"
+    },
+    "Features": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Feature"
+      },
+      "maxItems": 64,
+      "uniqueItems": true
+    },
+    "Checkpoint": {
+      "description": "插件已耐久保存的回执账本 checkpoint（单调）。",
+      "type": "object",
+      "properties": {
+        "checkpoint_seq": {
+          "$ref": "#/$defs/U64"
+        },
+        "checkpoint_revision": {
+          "$ref": "#/$defs/U64"
+        },
+        "summary_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "checkpoint_seq",
+        "checkpoint_revision",
+        "summary_digest"
+      ],
+      "additionalProperties": false
+    },
+    "KeysetAnnouncement": {
+      "description": "根签名密钥清单的版本公告；必须直接以预置信任根验签，不能只信业务签名密钥。",
+      "type": "object",
+      "properties": {
+        "keyset_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "manifest_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/Time"
+        },
+        "root_kid": {
+          "$ref": "envelope.schema.json#/$defs/Kid"
+        },
+        "root_signature": {
+          "$ref": "envelope.schema.json#/$defs/Signature"
+        }
+      },
+      "required": [
+        "keyset_version",
+        "manifest_digest",
+        "valid_until",
+        "root_kid",
+        "root_signature"
+      ],
+      "additionalProperties": false
+    },
+    "ReconcileEvidence": {
+      "type": "object",
+      "properties": {
+        "delivery_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mail_seq": {
+          "$ref": "#/$defs/P64"
+        },
+        "recipient_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "message_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "evidence_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "accepted_by": {
+          "type": "string",
+          "enum": [
+            "system",
+            "session"
+          ]
+        }
+      },
+      "required": [
+        "delivery_id",
+        "mail_seq",
+        "recipient_id",
+        "message_digest",
+        "evidence_digest",
+        "accepted_by"
+      ],
+      "additionalProperties": false
+    },
+    "PendingRegistration": {
+      "description": "node 级登记队首的未决 LOCAL_REGISTER，READY 时随附以便对账。",
+      "type": "object",
+      "properties": {
+        "candidate_local": {
+          "$ref": "#/$defs/P64"
+        },
+        "allocation_op_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "allocation_fingerprint": {
+          "$ref": "#/$defs/Digest"
+        },
+        "address_type": {
+          "description": "所属已认证 node 固定的不可变地址粗类别；与帧 type 无关，不授予权限。",
+          "type": "string",
+          "enum": [
+            "session",
+            "subagent"
+          ]
+        }
+      },
+      "required": [
+        "candidate_local",
+        "allocation_op_id",
+        "allocation_fingerprint",
+        "address_type"
+      ],
+      "additionalProperties": false
+    },
+    "Ready": {
+      "description": "READY：不携带 tenant/realm/node，服务端从 ingress 记录取身份。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "ready"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "channel_nonce": {
+          "$ref": "#/$defs/Id"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "features": {
+          "$ref": "#/$defs/Features"
+        },
+        "adapter_capabilities": {
+          "$ref": "#/$defs/Features"
+        },
+        "resume_cursor": {
+          "$ref": "#/$defs/U64"
+        },
+        "local_high_water": {
+          "$ref": "#/$defs/U64"
+        },
+        "registration_revision": {
+          "$ref": "#/$defs/U64"
+        },
+        "receipt_checkpoint": {
+          "$ref": "#/$defs/Checkpoint"
+        },
+        "keyset_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "pending_registration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PendingRegistration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReconcileEvidence"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "channel_nonce",
+        "boot_id",
+        "features",
+        "adapter_capabilities",
+        "resume_cursor",
+        "local_high_water",
+        "registration_revision",
+        "receipt_checkpoint",
+        "keyset_version",
+        "pending_registration"
+      ],
+      "additionalProperties": false
+    },
+    "ReadyResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "ready_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "description": "ready 才开放新业务；reconciling 继续分页提交证据；recovery_conflict/identity_rollback 只开放诊断。",
+          "type": "string",
+          "enum": [
+            "ready",
+            "reconciling",
+            "recovery_conflict",
+            "identity_rollback"
+          ]
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "node_identity": {
+          "type": "object",
+          "properties": {
+            "realm": {
+              "$ref": "#/$defs/P64"
+            },
+            "node": {
+              "$ref": "#/$defs/P64"
+            },
+            "incarnation": {
+              "$ref": "#/$defs/Id"
+            }
+          },
+          "required": [
+            "realm",
+            "node",
+            "incarnation"
+          ],
+          "additionalProperties": false
+        },
+        "head_seq": {
+          "$ref": "#/$defs/U64"
+        },
+        "committed_cursor": {
+          "$ref": "#/$defs/U64"
+        },
+        "retention_low_seq": {
+          "$ref": "#/$defs/U64"
+        },
+        "local_high_water": {
+          "$ref": "#/$defs/U64"
+        },
+        "registration_revision": {
+          "$ref": "#/$defs/U64"
+        },
+        "seen_checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Checkpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required_features": {
+          "$ref": "#/$defs/Features"
+        },
+        "keyset_announcement": {
+          "$ref": "#/$defs/KeysetAnnouncement"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        },
+        "producer_epoch": {
+          "$ref": "#/$defs/P64",
+          "description": "Server-issued device producer epoch, durable across READY and reconnect."
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "status",
+        "epoch",
+        "node_identity",
+        "head_seq",
+        "committed_cursor",
+        "retention_low_seq",
+        "local_high_water",
+        "registration_revision",
+        "seen_checkpoint",
+        "required_features",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    },
+    "Head": {
+      "description": "无正文提示；验签失败最多触发重新同步，不改变 head/cursor/权限。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "head"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "head_seq": {
+          "$ref": "#/$defs/U64"
+        },
+        "keyset_announcement": {
+          "$ref": "#/$defs/KeysetAnnouncement"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "epoch",
+        "head_seq",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    },
+    "Continuation": {
+      "description": "服务端签名/防篡改的不透明分页位置，只允许读取。",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{16,1024}$"
+    },
+    "Fetch": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "fetch"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "resume_cursor": {
+          "$ref": "#/$defs/U64"
+        },
+        "continuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Continuation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_items": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 4096,
+          "maximum": 65536
+        },
+        "held_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "paused": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "thread_id": {
+                "$ref": "#/$defs/Id"
+              },
+              "target": {
+                "$ref": "address.schema.json#/$defs/NodeAddress"
+              }
+            },
+            "required": [
+              "thread_id",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 128
+        },
+        "state_barrier": {
+          "description": "需展示前核当前撤回/冻结状态的广播 message_id。",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "maxItems": 128,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "resume_cursor",
+        "continuation",
+        "max_items",
+        "max_bytes"
+      ],
+      "additionalProperties": false
+    },
+    "ManifestEntry": {
+      "type": "object",
+      "properties": {
+        "item_type": {
+          "type": "string",
+          "enum": [
+            "delivery",
+            "terminal",
+            "gap",
+            "contact_prompt",
+            "state_update"
+          ]
+        },
+        "mail_seq": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "digest": {
+          "description": "SHA-256(JCS(该条目完整对象，含其 server_auth.signature))。",
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "item_type",
+        "mail_seq",
+        "digest"
+      ],
+      "additionalProperties": false
+    },
+    "MessageState": {
+      "type": "object",
+      "properties": {
+        "message_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "message_state_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "recalled",
+            "unavailable"
+          ]
+        },
+        "sender_frozen": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message_id",
+        "message_state_version",
+        "state",
+        "sender_frozen"
+      ],
+      "additionalProperties": false
+    },
+    "FetchPage": {
+      "description": "受签页头：head/cursor/continuation/条目清单；条目本身各自验签并以 manifest 摘要绑定。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "fetch_page"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "head_seq": {
+          "$ref": "#/$defs/U64"
+        },
+        "committed_cursor": {
+          "$ref": "#/$defs/U64"
+        },
+        "scan_after": {
+          "$ref": "#/$defs/U64"
+        },
+        "snapshot_head": {
+          "$ref": "#/$defs/U64"
+        },
+        "next_continuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Continuation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "manifest": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManifestEntry"
+          },
+          "maxItems": 128
+        },
+        "message_states": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MessageState"
+          },
+          "maxItems": 128
+        },
+        "keyset_announcement": {
+          "$ref": "#/$defs/KeysetAnnouncement"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "head_seq",
+        "committed_cursor",
+        "scan_after",
+        "snapshot_head",
+        "next_continuation",
+        "manifest",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    },
+    "FetchResult": {
+      "description": "未签名传输容器：page 与 items 各自受签；items 与 page.manifest 一一对应。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "fetch_result"
+        },
+        "page": {
+          "$ref": "#/$defs/FetchPage"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "envelope.schema.json#/$defs/PageItem"
+          },
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "page",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "ReceiptResult": {
+      "type": "object",
+      "properties": {
+        "recipient_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target": {
+          "$ref": "address.schema.json#/$defs/NodeAddress"
+        },
+        "message_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "host_request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "host_accepted",
+            "rejected",
+            "quarantined",
+            "retryable",
+            "outcome_unknown"
+          ]
+        },
+        "code": {
+          "description": "rejected 对外统一 network.target_unavailable，细因只留本地审计。",
+          "type": "string",
+          "const": "network.target_unavailable"
+        },
+        "expected_state_version": {
+          "$ref": "#/$defs/U64"
+        },
+        "accepted_by": {
+          "type": "string",
+          "enum": [
+            "system",
+            "session"
+          ]
+        },
+        "acceptance_mode": {
+          "type": "string",
+          "enum": [
+            "normal",
+            "inbox_only"
+          ]
+        },
+        "assigned_address": {
+          "anyOf": [
+            {
+              "$ref": "address.schema.json#/$defs/SessionAddress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_status": {
+          "$ref": "envelope.schema.json#/$defs/ExecutionStatus"
+        },
+        "evidence_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "recipient_id",
+        "target",
+        "message_digest",
+        "host_request_id",
+        "status",
+        "expected_state_version"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "host_accepted"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "accepted_by",
+              "acceptance_mode",
+              "evidence_digest"
+            ],
+            "properties": {
+              "accepted_by": true,
+              "acceptance_mode": true,
+              "evidence_digest": true
+            }
+          },
+          "else": {
+            "properties": {
+              "accepted_by": false,
+              "acceptance_mode": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "rejected"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "code"
+            ],
+            "properties": {
+              "code": true
+            }
+          },
+          "else": {
+            "properties": {
+              "code": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "accepted_by": {
+                "const": "system"
+              }
+            },
+            "required": [
+              "accepted_by"
+            ]
+          },
+          "then": {
+            "properties": {
+              "target": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "const": "system"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "acceptance_mode": {
+                "const": "inbox_only"
+              }
+            },
+            "required": [
+              "acceptance_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "execution_status"
+            ],
+            "properties": {
+              "execution_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Receipt": {
+      "description": "一个 node 邮箱项的逐 recipient 结果；缺席成员保持 pending，任一项非法整次拒绝。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "receipt"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mail_seq": {
+          "$ref": "#/$defs/P64"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReceiptResult"
+          },
+          "minItems": 1,
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "operation_id",
+        "epoch",
+        "delivery_id",
+        "mail_seq",
+        "results"
+      ],
+      "additionalProperties": false
+    },
+    "ReceiptCommitted": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "receipt_committed"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mail_seq": {
+          "$ref": "#/$defs/P64"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "recipient_id": {
+                "$ref": "#/$defs/Id"
+              },
+              "transport_status": {
+                "$ref": "envelope.schema.json#/$defs/TransportStatus"
+              },
+              "state_version": {
+                "$ref": "#/$defs/P64"
+              }
+            },
+            "required": [
+              "recipient_id",
+              "transport_status",
+              "state_version"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "mail_item_closed": {
+          "type": "boolean"
+        },
+        "committed_cursor": {
+          "$ref": "#/$defs/U64"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "operation_id",
+        "delivery_id",
+        "mail_seq",
+        "results",
+        "mail_item_closed",
+        "committed_cursor",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    },
+    "AttemptBegin": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "attempt_begin"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "delivery_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "recipient_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "purpose": {
+          "description": "preview 仅 contact_pending 审批预览解析。",
+          "type": "string",
+          "enum": [
+            "process",
+            "preview"
+          ]
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "attempt_id",
+        "delivery_id",
+        "recipient_id",
+        "purpose"
+      ],
+      "additionalProperties": false
+    },
+    "AttemptResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "attempt_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "recipient_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "entered",
+            "quarantined"
+          ]
+        },
+        "attempt_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6
+        },
+        "max_attempts": {
+          "type": "integer",
+          "const": 5
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "attempt_id",
+        "recipient_id",
+        "result",
+        "attempt_count",
+        "max_attempts",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "result": {
+            "const": "entered"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "attempt_count": {
+            "type": "integer",
+            "maximum": 5
+          }
+        }
+      }
+    },
+    "ExecutionAdmit": {
+      "description": "admit(recipient_id, target_address, connection_epoch, host_request_id, attempt_id, boot_id)。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "execution_admit"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "recipient_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target": {
+          "$ref": "address.schema.json#/$defs/NodeAddress"
+        },
+        "assigned_address": {
+          "description": "仅首联：CONTACT_ASSIGN 固化的执行地址；target 仍为 sys。",
+          "$ref": "address.schema.json#/$defs/SessionAddress"
+        },
+        "connection_epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "host_request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "recipient_id",
+        "target",
+        "connection_epoch",
+        "host_request_id",
+        "attempt_id",
+        "boot_id"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "target": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "system"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "assigned_address"
+        ],
+        "properties": {
+          "assigned_address": true
+        }
+      },
+      "else": {
+        "properties": {
+          "assigned_address": false
+        }
+      }
+    },
+    "AdmitResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "admit_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "recipient_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "result": {
+          "description": "already_admitted 只返回既有状态，不构成第二次执行许可。",
+          "type": "string",
+          "enum": [
+            "admitted",
+            "already_admitted"
+          ]
+        },
+        "admission_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "admitted_epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "state_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "recipient_id",
+        "result",
+        "admission_id",
+        "admitted_epoch",
+        "state_version",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    },
+    "ContactDecide": {
+      "description": "插件本地决定持久后提交的最小决定凭据；个人规则/名单不上传。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "contact_decide"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "decision_scope": {
+          "type": "string",
+          "enum": [
+            "conversation",
+            "human_dialogue",
+            "group_join",
+            "execution"
+          ]
+        },
+        "contact_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "authorization_request_id": {
+          "description": "仅 execution：已有对话消息的有界授权请求 ID。",
+          "$ref": "#/$defs/Id"
+        },
+        "decision_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "expected_request_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "policy_revision": {
+          "$ref": "#/$defs/U64"
+        },
+        "conversation_allowed": {
+          "type": "boolean"
+        },
+        "execution_allowed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "join": {
+          "type": "object",
+          "properties": {
+            "join_allowed": {
+              "type": "boolean"
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "$ref": "address.schema.json#/$defs/NodeAddress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "membership_instance_id": {
+              "$ref": "#/$defs/Id"
+            }
+          },
+          "required": [
+            "join_allowed",
+            "target",
+            "membership_instance_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "decision_scope",
+        "decision_id",
+        "expected_request_version",
+        "policy_revision"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decision_scope": {
+                "enum": [
+                  "conversation",
+                  "human_dialogue"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "contact_id",
+              "conversation_allowed",
+              "execution_allowed"
+            ],
+            "properties": {
+              "join": false,
+              "authorization_request_id": false,
+              "contact_id": true,
+              "conversation_allowed": true,
+              "execution_allowed": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision_scope": {
+                "const": "human_dialogue"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "execution_allowed": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision_scope": {
+                "const": "group_join"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "contact_id",
+              "join"
+            ],
+            "properties": {
+              "conversation_allowed": false,
+              "execution_allowed": false,
+              "authorization_request_id": false,
+              "contact_id": true,
+              "join": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision_scope": {
+                "const": "execution"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "authorization_request_id",
+              "execution_allowed"
+            ],
+            "properties": {
+              "contact_id": false,
+              "conversation_allowed": false,
+              "join": false,
+              "execution_allowed": {
+                "type": "boolean"
+              },
+              "authorization_request_id": true
+            }
+          }
+        }
+      ]
+    },
+    "DecideResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "decide_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "decision_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "contact_state": {
+          "anyOf": [
+            {
+              "$ref": "envelope.schema.json#/$defs/ContactState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "join_state": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "pending",
+                "allowed",
+                "joined",
+                "denied",
+                "expired",
+                "revoked"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_permission": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "pending",
+                "allowed",
+                "denied"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "decision_id",
+        "contact_state",
+        "join_state",
+        "execution_permission",
+        "request_version",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    },
+    "ContactAssign": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "contact_assign"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "contact_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "assigned_address": {
+          "$ref": "address.schema.json#/$defs/SessionAddress"
+        },
+        "registration_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "creation_attempt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "decision_version": {
+          "$ref": "#/$defs/P64"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "contact_id",
+        "assigned_address",
+        "registration_id",
+        "creation_attempt_id",
+        "decision_version"
+      ],
+      "additionalProperties": false
+    },
+    "AssignResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "assign_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "contact_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "assigned_address": {
+          "$ref": "address.schema.json#/$defs/SessionAddress"
+        },
+        "creation_attempt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "assigned",
+            "existing"
+          ]
+        },
+        "creation_permit": {
+          "description": "仅首次成功为 true；重复/查询结果不授新的 create 许可。",
+          "type": "boolean"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "contact_id",
+        "assigned_address",
+        "creation_attempt_id",
+        "result",
+        "creation_permit",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "result": {
+            "const": "existing"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "creation_permit": {
+            "const": false
+          }
+        }
+      }
+    },
+    "LocalRegister": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "local_register"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "candidate_local": {
+          "$ref": "#/$defs/P64"
+        },
+        "allocation_op_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "allocation_fingerprint": {
+          "$ref": "#/$defs/Digest"
+        },
+        "expected_registration_revision": {
+          "$ref": "#/$defs/U64"
+        },
+        "address_type": {
+          "description": "所属已认证 node 固定的不可变地址粗类别；与帧 type 无关，不授予权限。",
+          "type": "string",
+          "enum": [
+            "session",
+            "subagent"
+          ]
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "candidate_local",
+        "allocation_op_id",
+        "allocation_fingerprint",
+        "expected_registration_revision",
+        "address_type"
+      ],
+      "additionalProperties": false
+    },
+    "RegisterResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "register_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "local": {
+          "$ref": "#/$defs/P64"
+        },
+        "registration_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "allocation_op_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "registered",
+            "existing"
+          ]
+        },
+        "registration_revision": {
+          "$ref": "#/$defs/P64"
+        },
+        "local_high_water": {
+          "$ref": "#/$defs/P64"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        },
+        "address_type": {
+          "description": "所属已认证 node 固定的不可变地址粗类别；与帧 type 无关，不授予权限。",
+          "type": "string",
+          "enum": [
+            "session",
+            "subagent"
+          ]
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "local",
+        "registration_id",
+        "allocation_op_id",
+        "result",
+        "registration_revision",
+        "local_high_water",
+        "server_auth",
+        "address_type"
+      ],
+      "additionalProperties": false
+    },
+    "StatusQuery": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "status_query"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "message_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "submission_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id"
+      ],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "message_id"
+          ],
+          "properties": {
+            "message_id": true
+          }
+        },
+        {
+          "required": [
+            "submission_id"
+          ],
+          "properties": {
+            "submission_id": true
+          }
+        }
+      ]
+    },
+    "ReceiptCounts": {
+      "description": "七个互斥收件桶，总和必须等于 total_members。",
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "$ref": "#/$defs/U64"
+        },
+        "rejected": {
+          "$ref": "#/$defs/U64"
+        },
+        "expired": {
+          "$ref": "#/$defs/U64"
+        },
+        "canceled": {
+          "$ref": "#/$defs/U64"
+        },
+        "skipped": {
+          "$ref": "#/$defs/U64"
+        },
+        "unresolved": {
+          "$ref": "#/$defs/U64"
+        },
+        "pending": {
+          "$ref": "#/$defs/U64"
+        }
+      },
+      "required": [
+        "accepted",
+        "rejected",
+        "expired",
+        "canceled",
+        "skipped",
+        "unresolved",
+        "pending"
+      ],
+      "additionalProperties": false
+    },
+    "ResponseCounts": {
+      "description": "请求回应聚合，分母同 total_members，与收件桶分开。",
+      "type": "object",
+      "properties": {
+        "pending": {
+          "$ref": "#/$defs/U64"
+        },
+        "responded": {
+          "$ref": "#/$defs/U64"
+        },
+        "declined": {
+          "$ref": "#/$defs/U64"
+        },
+        "timed_out": {
+          "$ref": "#/$defs/U64"
+        },
+        "unavailable": {
+          "$ref": "#/$defs/U64"
+        }
+      },
+      "required": [
+        "pending",
+        "responded",
+        "declined",
+        "timed_out",
+        "unavailable"
+      ],
+      "additionalProperties": false
+    },
+    "Status": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "status"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "visibility": {
+          "description": "restricted：无状态查看权，只见统一“已提交请求”外观。",
+          "type": "string",
+          "enum": [
+            "full",
+            "restricted"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "request_submitted",
+            "platform_stored",
+            "contact_pending",
+            "contact_allowed",
+            "contact_denied",
+            "contact_expired"
+          ]
+        },
+        "submission_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "wait_until": {
+          "$ref": "#/$defs/Time"
+        },
+        "message_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "message_class": {
+          "$ref": "envelope.schema.json#/$defs/MessageClass"
+        },
+        "dispatch_status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "dispatched",
+            "partial",
+            "closed"
+          ]
+        },
+        "total_members": {
+          "$ref": "#/$defs/P64"
+        },
+        "total_nodes": {
+          "$ref": "#/$defs/P64"
+        },
+        "receipts": {
+          "$ref": "#/$defs/ReceiptCounts"
+        },
+        "quarantined": {
+          "description": "pending 的子集，不另加人数。",
+          "$ref": "#/$defs/U64"
+        },
+        "responses": {
+          "$ref": "#/$defs/ResponseCounts"
+        },
+        "message_state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "recalled"
+          ]
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "visibility",
+        "status",
+        "server_auth"
+      ],
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "visibility": {
+            "const": "restricted"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "submission_id",
+          "wait_until"
+        ],
+        "properties": {
+          "status": {
+            "const": "request_submitted"
+          },
+          "message_id": false,
+          "message_class": false,
+          "dispatch_status": false,
+          "total_members": false,
+          "total_nodes": false,
+          "receipts": false,
+          "quarantined": false,
+          "responses": false,
+          "message_state": false,
+          "submission_id": true,
+          "wait_until": true
+        }
+      },
+      "else": {
+        "properties": {
+          "status": {
+            "not": {
+              "const": "request_submitted"
+            }
+          }
+        },
+        "if": {
+          "properties": {
+            "status": {
+              "const": "platform_stored"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "message_id",
+            "message_class",
+            "dispatch_status",
+            "total_members",
+            "total_nodes",
+            "receipts",
+            "quarantined"
+          ],
+          "properties": {
+            "message_id": true,
+            "message_class": true,
+            "dispatch_status": true,
+            "total_members": true,
+            "total_nodes": true,
+            "receipts": true,
+            "quarantined": true
+          }
+        }
+      }
+    },
+    "Error": {
+      "description": "code 取 errors.json；目标相关错误对无状态查看权者按 README §6 裁剪。不含堆栈/凭据/local 存在性。",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "error"
+        },
+        "request_id": {
+          "$ref": "envelope.schema.json#/$defs/NullableId"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^network\\.[a-z][a-z0-9_]{0,63}$"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "request",
+            "recipient",
+            "contact",
+            "connection",
+            "node"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "retry_after": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "related": {
+          "type": "object",
+          "properties": {
+            "recipient_id": {
+              "$ref": "#/$defs/Id"
+            },
+            "contact_id": {
+              "$ref": "#/$defs/Id"
+            },
+            "message_id": {
+              "$ref": "#/$defs/Id"
+            },
+            "contact_scope": {
+              "$ref": "envelope.schema.json#/$defs/ContactScope"
+            }
+          },
+          "additionalProperties": false
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "code",
+        "scope",
+        "retryable",
+        "retry_after",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    },
+    "Upstream": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Ready"
+        },
+        {
+          "$ref": "#/$defs/Fetch"
+        },
+        {
+          "$ref": "#/$defs/Receipt"
+        },
+        {
+          "$ref": "#/$defs/AttemptBegin"
+        },
+        {
+          "$ref": "#/$defs/ExecutionAdmit"
+        },
+        {
+          "$ref": "#/$defs/ContactDecide"
+        },
+        {
+          "$ref": "#/$defs/ContactAssign"
+        },
+        {
+          "$ref": "#/$defs/LocalRegister"
+        },
+        {
+          "$ref": "#/$defs/StatusQuery"
+        },
+        {
+          "$ref": "#/$defs/SourceRegister"
+        },
+        {
+          "$ref": "#/$defs/SourceGet"
+        },
+        {
+          "$ref": "#/$defs/SourceRevoke"
+        },
+        {
+          "$ref": "#/$defs/ReceiveSet"
+        }
+      ]
+    },
+    "Downstream": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ReadyResult"
+        },
+        {
+          "$ref": "#/$defs/Head"
+        },
+        {
+          "$ref": "#/$defs/FetchResult"
+        },
+        {
+          "$ref": "#/$defs/ReceiptCommitted"
+        },
+        {
+          "$ref": "#/$defs/AttemptResult"
+        },
+        {
+          "$ref": "#/$defs/AdmitResult"
+        },
+        {
+          "$ref": "#/$defs/DecideResult"
+        },
+        {
+          "$ref": "#/$defs/AssignResult"
+        },
+        {
+          "$ref": "#/$defs/RegisterResult"
+        },
+        {
+          "$ref": "#/$defs/Status"
+        },
+        {
+          "$ref": "#/$defs/Error"
+        },
+        {
+          "$ref": "#/$defs/SourceRegisterResult"
+        },
+        {
+          "$ref": "#/$defs/SourceGetResult"
+        },
+        {
+          "$ref": "#/$defs/SourceRevokeResult"
+        },
+        {
+          "$ref": "#/$defs/ReceiveSetResult"
+        }
+      ]
+    },
+    "SourceRegister": {
+      "$ref": "source-control.schema.json#/$defs/SourceRegister"
+    },
+    "SourceRegisterResult": {
+      "$ref": "source-control.schema.json#/$defs/SourceRegisterResult"
+    },
+    "SourceGet": {
+      "$ref": "source-control.schema.json#/$defs/SourceGet"
+    },
+    "SourceGetResult": {
+      "$ref": "source-control.schema.json#/$defs/SourceGetResult"
+    },
+    "SourceRevoke": {
+      "$ref": "source-control.schema.json#/$defs/SourceRevoke"
+    },
+    "SourceRevokeResult": {
+      "$ref": "source-control.schema.json#/$defs/SourceRevokeResult"
+    },
+    "ReceiveSet": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "receive_set"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "epoch": {
+          "$ref": "#/$defs/P64"
+        },
+        "boot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "registration": {
+          "$ref": "source-control.schema.json#/$defs/Registration"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "expected_version": {
+          "$ref": "#/$defs/P64"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "epoch",
+        "boot_id",
+        "registration",
+        "enabled",
+        "expected_version"
+      ],
+      "additionalProperties": false
+    },
+    "ReceiveSetResult": {
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "$ref": "#/$defs/AppVersion"
+        },
+        "type": {
+          "const": "receive_set_result"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "registration_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "state_version": {
+          "$ref": "#/$defs/P64"
+        },
+        "server_auth": {
+          "$ref": "#/$defs/ServerAuth"
+        }
+      },
+      "required": [
+        "app_version",
+        "type",
+        "request_id",
+        "registration_id",
+        "enabled",
+        "state_version",
+        "server_auth"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Upstream"
+    },
+    {
+      "$ref": "#/$defs/Downstream"
+    }
+  ]
+}

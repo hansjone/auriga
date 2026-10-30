@@ -9,7 +9,7 @@ export type ApiClientOptions = {
   /** Prefix for API paths, default empty (paths already include /api/...). */
   baseUrl?: string;
   getLocale?: () => string;
-  /** Called on HTTP 401 before the error is thrown. */
+  /** Called on session HTTP 401; submitted-credential errors stay local. */
   onUnauthenticated?: () => void;
   /** Override fetch (tests / mock). */
   fetch?: typeof fetch;
@@ -104,14 +104,14 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   }
 
   async function responseError(res: Response): Promise<ApiError> {
-    if (res.status === 401) {
+    const problem = await parseProblem(res);
+    // IAM uses this code for rejected submitted passwords / MFA inputs, while
+    // the browser session can remain valid. All other 401s still fail closed.
+    if (res.status === 401 && problem.code !== 'iam.invalid_credentials') {
       resetSession();
       options.onUnauthenticated?.();
     }
-    return new ApiError(
-      await parseProblem(res),
-      res.headers.get('Retry-After') ?? undefined,
-    );
+    return new ApiError(problem, res.headers.get('Retry-After') ?? undefined);
   }
 
   async function memoryToken(): Promise<string> {

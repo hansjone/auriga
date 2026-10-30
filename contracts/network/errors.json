@@ -1,0 +1,386 @@
+{
+  "schemaVersion": 1,
+  "description": "network.* 错误码唯一定义。visibility：public 可返回调用方；status_viewer 仅有请求状态查看权者可见，否则按 maskedAs 呈现；diagnostic 仅有诊断权者，否则 maskedAs；own_node 只给本 node 有权操作者；local_only 仅插件本地诊断，永不作为平台 ERROR 下发。maskIfTargetRelated=true 时，目标相关的该错误对无状态查看权者同样按 maskedAs。",
+  "errors": {
+    "network.target_required": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "缺少完整目标地址",
+        "en": "A complete target address is required"
+      }
+    },
+    "network.target_mismatch": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "地址、类型、回复引用或目标集合矛盾",
+        "en": "Address, type, reply reference or target set is inconsistent"
+      }
+    },
+    "network.target_unavailable": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "目标不可接收",
+        "en": "The target cannot receive this message"
+      }
+    },
+    "network.host_incompatible": {
+      "retryable": false,
+      "visibility": "diagnostic",
+      "maskedAs": "network.target_unavailable",
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "目标宿主暂不支持该投递方式",
+        "en": "The target host does not support this delivery"
+      }
+    },
+    "network.invalid_address": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "地址格式无效",
+        "en": "The address is malformed"
+      }
+    },
+    "network.unsupported_address_version": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "不支持的地址版本",
+        "en": "Unsupported address version"
+      }
+    },
+    "network.realm_not_supported": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "不支持本域以外的地址",
+        "en": "Addresses outside this realm are not supported"
+      }
+    },
+    "network.contact_pending": {
+      "retryable": false,
+      "visibility": "status_viewer",
+      "maskedAs": "request_submitted",
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "等待对方授权",
+        "en": "Waiting for the recipient to authorize"
+      }
+    },
+    "network.contact_denied": {
+      "retryable": false,
+      "visibility": "status_viewer",
+      "maskedAs": "request_submitted",
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "对方未同意",
+        "en": "The request was declined"
+      }
+    },
+    "network.contact_expired": {
+      "retryable": false,
+      "visibility": "status_viewer",
+      "maskedAs": "request_submitted",
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "请求已过期",
+        "en": "The request has expired"
+      }
+    },
+    "network.first_contact_forbidden": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "当前来源没有首次联系能力",
+        "en": "This source is not allowed to initiate first contact"
+      }
+    },
+    "network.quota_exceeded": {
+      "retryable": true,
+      "visibility": "public",
+      "maskedAs": "request_submitted",
+      "maskIfTargetRelated": true,
+      "message": {
+        "zh-CN": "超出额度，请稍后再试",
+        "en": "Quota exceeded; retry later"
+      }
+    },
+    "network.overloaded": {
+      "retryable": true,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "服务繁忙，请稍后再试",
+        "en": "The service is overloaded; retry later"
+      }
+    },
+    "network.unauthorized": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "当前身份无权执行此操作",
+        "en": "The current identity is not authorized"
+      }
+    },
+    "network.revoked": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "授权已撤销",
+        "en": "The authorization has been revoked"
+      }
+    },
+    "network.stale_epoch": {
+      "retryable": false,
+      "visibility": "own_node",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "连接世代已过期，需重新 READY",
+        "en": "The connection epoch is stale; send READY again"
+      }
+    },
+    "network.conflict": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "同一幂等键对应不同内容或状态版本冲突",
+        "en": "Idempotency key reused with different content, or state version conflict"
+      }
+    },
+    "network.expired": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "已过期",
+        "en": "Expired"
+      }
+    },
+    "network.resume_unavailable": {
+      "retryable": false,
+      "visibility": "own_node",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "游标越出保留窗口，需重新核对",
+        "en": "The cursor is outside the retention window"
+      }
+    },
+    "network.outcome_unknown": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "结果未知，请按原幂等键查询",
+        "en": "The outcome is unknown; query with the original idempotency key"
+      }
+    },
+    "network.protocol_error": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "协议格式错误",
+        "en": "Protocol error"
+      }
+    },
+    "network.unsupported_app_version": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "应用协议版本或必需能力不兼容",
+        "en": "Incompatible application protocol version or required features"
+      }
+    },
+    "network.local_registration_required": {
+      "retryable": false,
+      "visibility": "own_node",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "该本地地址尚未登记",
+        "en": "This local address has not been registered"
+      }
+    },
+    "network.local_allocation_conflict": {
+      "retryable": false,
+      "visibility": "own_node",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "本地地址登记冲突，已暂停新分配",
+        "en": "Local address registration conflict; allocation suspended"
+      }
+    },
+    "network.recovery_conflict": {
+      "retryable": false,
+      "visibility": "own_node",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "恢复证据与总部见证不一致，已暂停新业务",
+        "en": "Recovery evidence conflicts with the platform witness; new work suspended"
+      }
+    },
+    "network.identity_rollback": {
+      "retryable": false,
+      "visibility": "own_node",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "确认身份回滚，需重新注册 node",
+        "en": "Identity rollback confirmed; register a new node"
+      }
+    },
+    "network.requires_paged_dispatch": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "超过原子派发上限，需显式分页",
+        "en": "Exceeds the atomic dispatch limit; use paged dispatch"
+      }
+    },
+    "network.group_not_available": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "组不可用",
+        "en": "The group is not available"
+      }
+    },
+    "network.group_publish_forbidden": {
+      "retryable": false,
+      "visibility": "diagnostic",
+      "maskedAs": "network.group_not_available",
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "没有该组的发言权",
+        "en": "Not allowed to publish to this group"
+      }
+    },
+    "network.broadcast_forbidden": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "没有广播发送权",
+        "en": "Not allowed to broadcast"
+      }
+    },
+    "network.sender_mismatch": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "来源与认证身份不一致",
+        "en": "The source does not match the authenticated identity"
+      }
+    },
+    "network.class_mismatch": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "消息类别与目的地址不一致",
+        "en": "The message class does not match the destination"
+      }
+    },
+    "network.dangerous_multicast_forbidden": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "执行控制只能单播",
+        "en": "Execution control is unicast only"
+      }
+    },
+    "network.reserved_display_name": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "名称包含保留词",
+        "en": "The name contains a reserved word"
+      }
+    },
+    "network.message_recalled": {
+      "retryable": false,
+      "visibility": "public",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "消息已撤回",
+        "en": "The message has been recalled"
+      }
+    },
+    "network.signature_required": {
+      "retryable": false,
+      "visibility": "local_only",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "缺少服务器签名",
+        "en": "Server signature is missing"
+      }
+    },
+    "network.signature_invalid": {
+      "retryable": false,
+      "visibility": "local_only",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "服务器签名无效",
+        "en": "Server signature is invalid"
+      }
+    },
+    "network.key_unavailable": {
+      "retryable": true,
+      "visibility": "local_only",
+      "maskedAs": null,
+      "maskIfTargetRelated": false,
+      "message": {
+        "zh-CN": "签名密钥不可用",
+        "en": "The signing key is unavailable"
+      }
+    }
+  }
+}

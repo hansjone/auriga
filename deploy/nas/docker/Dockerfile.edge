@@ -2,7 +2,7 @@
 #   docker build -f deploy/nas/docker/Dockerfile.edge --platform=linux/amd64 .
 FROM node:22-bookworm AS web
 WORKDIR /src
-COPY package.json pnpm-workspace.yaml .npmrc ./
+COPY package.json pnpm-workspace.yaml .npmrc .prettierrc.json ./
 COPY web ./web
 COPY clients ./clients
 COPY contracts ./contracts
@@ -20,9 +20,18 @@ WORKDIR /src/infra
 COPY infra/ ./
 WORKDIR /src/infra/edge
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-edge .
+WORKDIR /src/infra/ai-gateway
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-ai-gateway . \
+  && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-network-broker github.com/nats-io/nats-server/v2
+WORKDIR /src/deploy/bootstrap
+COPY deploy/bootstrap/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/auriga-network-probe ./cmd/network-probe
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=gobuild /out/auriga-edge /auriga-edge
+COPY --from=gobuild /out/auriga-ai-gateway /auriga-ai-gateway
+COPY --from=gobuild /out/auriga-network-broker /auriga-network-broker
+COPY --from=gobuild /out/auriga-network-probe /auriga-network-probe
 COPY --from=web /src/web/portal/dist /srv/auriga/static/portal
 COPY --from=web /src/web/admin/dist /srv/auriga/static/admin
 USER nonroot:nonroot

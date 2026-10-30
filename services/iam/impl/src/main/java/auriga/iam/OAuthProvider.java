@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.time.*;
 import java.util.*;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /** OAuth grants share IAM sessions, revocation, and tenant RLS; all secrets are hashed at rest. */
@@ -15,6 +16,7 @@ public final class OAuthProvider {
   private final TokenService tokens;
   private final Clock clock;
   private final Map<String, OAuthClient> clients;
+  private final DeviceAiResource deviceAi;
 
   public OAuthProvider(
       IamStore store,
@@ -22,10 +24,32 @@ public final class OAuthProvider {
       TokenService tokens,
       Clock clock,
       Collection<OAuthClient> clients) {
+    this(
+        store,
+        sessions,
+        tokens,
+        clock,
+        clients,
+        request -> {
+          throw new auriga.common.error.AurigaException(
+              auriga.common.error.CommonErrors.UNAVAILABLE);
+        });
+  }
+
+  public OAuthProvider(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      Collection<OAuthClient> clients,
+      auriga.iam.api.InstanceAiAuthorization authorization) {
     this.store = store;
     this.sessions = sessions;
     this.tokens = tokens;
     this.clock = clock;
+    this.deviceAi =
+        new DeviceAiResource(
+            new DeviceAccessAuthority(store, sessions, tokens), tokens, authorization);
     Map<String, OAuthClient> registered = new HashMap<>();
     for (var client : clients)
       if (registered.putIfAbsent(client.id(), client) != null)
@@ -42,6 +66,8 @@ public final class OAuthProvider {
         issuer + "/oauth2/authorize",
         "token_endpoint",
         issuer + "/oauth2/token",
+        "revocation_endpoint",
+        issuer + "/oauth2/revoke",
         "jwks_uri",
         issuer + "/oauth2/jwks",
         "userinfo_endpoint",
@@ -69,6 +95,97 @@ public final class OAuthProvider {
     IamError.require(
         c != null && c.tenant().equals(TenantContext.require()), "invalid_client", 401);
     return c;
+  }
+
+  ObjectNode beginNative(ObjectNode tx, JsonNode request) {
+    OAuthClient c = client(request.path("clientId").asString());
+    IamError.require(c.nativeConnect(), "invalid_client", 401);
+    String raw = Secrets.random();
+    ObjectNode grant =
+        Json.object(
+            "kind",
+            "device",
+            "authorizationMode",
+            "native_tx",
+            "clientId",
+            c.id(),
+            "nativeTxId",
+            tx.path("id").asString(),
+            "challenge",
+            request.path("codeChallenge").asString(),
+            "deviceName",
+            request.path("deviceName").asString("DSH"),
+            "scope",
+            "auriga.connect",
+            "status",
+            "pending",
+            "used",
+            false,
+            "interval",
+            5,
+            "nextPoll",
+            clock.instant().toString(),
+            "expiresAt",
+            tx.path("expiresAt").asString());
+    for (String field : List.of("bindingHash", "tenantId", "origin", "audience", "providerId"))
+      grant.set(field, tx.path(field).deepCopy());
+    store.insert(
+        "oauth_grant", Secrets.hash(raw), grant, Instant.parse(grant.path("expiresAt").asString()));
+    tx.put("nativeGrantHash", Secrets.hash(raw));
+    tx.set("nativeConnect", request.deepCopy());
+    tx.put("nativeStartedAt", clock.instant().toString());
+    store.save("login_tx", tx);
+    return Json.object(
+        "deviceCode", raw, "expiresAt", grant.path("expiresAt").asString(), "interval", 5);
+  }
+
+  private boolean nativeBinding(ObjectNode tx, ObjectNode grant) {
+    if (tx == null
+        || grant == null
+        || !grant.path("authorizationMode").asString().equals("native_tx")
+        || !grant.path("nativeTxId").asString().equals(tx.path("id").asString())
+        || tx.path("replaced").asBoolean()
+        || !tx.path("audience").asString().equals("portal")
+        || !grant.path("scope").asString().equals("auriga.connect")
+        || !grant.path("clientId").equals(tx.path("nativeConnect").path("clientId"))
+        || !grant.path("challenge").equals(tx.path("nativeConnect").path("codeChallenge")))
+      return false;
+    for (String field : List.of("bindingHash", "tenantId", "origin", "audience", "providerId"))
+      if (!tx.path(field).equals(grant.path(field))) return false;
+    return TenantContext.require().toString().equals(grant.path("tenantId").asString());
+  }
+
+  void approveNative(ObjectNode tx, ObjectNode session) {
+    ObjectNode grant = store.get("oauth_grant", tx.path("nativeGrantHash").asString(), true);
+    IamError.require(
+        nativeBinding(tx, grant)
+            && !grant.path("used").asBoolean()
+            && grant.path("status").asString().equals("pending")
+            && clock.instant().isBefore(Instant.parse(grant.path("expiresAt").asString()))
+            && client(grant.path("clientId").asString()).nativeConnect()
+            && session.path("mfa").asBoolean()
+            && session.has("stepUpAt")
+            && !Instant.parse(session.path("stepUpAt").asString())
+                .isBefore(Instant.parse(tx.path("nativeStartedAt").asString()))
+            && !Instant.parse(session.path("stepUpAt").asString())
+                .isBefore(clock.instant().minusSeconds(600)),
+        "invalid_grant",
+        400);
+    grant.put("status", "approved");
+    grant.put("sessionId", session.path("sessionId").asString());
+    grant.put("accountId", session.path("accountId").asString());
+    tx.put("nativeSessionId", session.path("sessionId").asString());
+    tx.put("nativeAccountId", session.path("accountId").asString());
+    store.save("oauth_grant", grant);
+  }
+
+  void cancelNative(ObjectNode tx) {
+    if (!tx.has("nativeGrantHash")) return;
+    ObjectNode grant = store.get("oauth_grant", tx.path("nativeGrantHash").asString(), true);
+    if (grant != null && !grant.path("used").asBoolean()) {
+      grant.put("status", "denied");
+      store.save("oauth_grant", grant);
+    }
   }
 
   private boolean authenticated(OAuthClient c, String secret) {
@@ -161,7 +278,11 @@ public final class OAuthProvider {
           if (!authenticated(c, input.get("client_secret"))) return error("invalid_client");
           String type = input.getOrDefault("grant_type", "");
           if (!c.grants().contains(type)) return error("unauthorized_client");
-          if (input.containsKey("audience") || input.containsKey("resource"))
+          if (input.containsKey("audience")
+              || input.containsKey("resource")
+                  && (!type.equals("refresh_token")
+                      || !c.nativeConnect()
+                      || !DeviceAiResource.RESOURCE.equals(input.get("resource"))))
             return error("invalid_target");
           return switch (type) {
             case "authorization_code" -> exchangeCode(c, input);
@@ -222,8 +343,29 @@ public final class OAuthProvider {
   }
 
   private ObjectNode refresh(OAuthClient c, Map<String, String> input) {
+    boolean ai = input.containsKey("resource");
     ObjectNode grant =
         store.get("oauth_grant", Secrets.hash(input.getOrDefault("refresh_token", "")), true);
+    if (ai && (grant == null || !grant.path("authorizationMode").asString().equals("native_tx")))
+      return error("invalid_grant");
+    if (grant != null && grant.path("authorizationMode").asString().equals("native_tx")) {
+      if (!Set.of("grant_type", "client_id", "client_secret", "refresh_token", "scope", "resource")
+          .containsAll(input.keySet())) return error("invalid_request");
+      // Even a previously rotated native token must first respect device revocation.
+      // Lock order remains refresh grant -> session -> device; never revoke a
+      // backing session as a side effect of replay after explicit device logout.
+      if (!grant.path("clientId").asString().equals(c.id()) || !c.nativeConnect())
+        return error("invalid_grant");
+      ObjectNode backing = sessions.activeById(grant.path("sessionId").asString());
+      ObjectNode device =
+          backing == null ? null : store.get("device", grant.path("deviceId").asString(), true);
+      if (device == null
+          || device.path("revoked").asBoolean()
+          || !device.path("clientId").asString().equals(c.id())
+          || !device.path("sessionId").asString().equals(backing.path("sessionId").asString())
+          || !device.path("accountId").asString().equals(backing.path("accountId").asString()))
+        return error("invalid_grant");
+    }
     if (grant != null
         && grant.path("used").asBoolean()
         && grant.path("clientId").asString().equals(c.id())) {
@@ -237,39 +379,76 @@ public final class OAuthProvider {
     if (grant.has("deviceId")) {
       ObjectNode device = store.get("device", grant.path("deviceId").asString(), true);
       if (device == null || device.path("revoked").asBoolean()) return error("invalid_grant");
+      if (grant.path("authorizationMode").asString().equals("native_tx")) {
+        if (!c.nativeConnect()
+            || !device.path("authorizationMode").asString().equals("native_tx")
+            || !device.path("sessionId").asString().equals(session.path("sessionId").asString())
+            || !device.path("accountId").asString().equals(session.path("accountId").asString())
+            || !device.path("clientId").asString().equals(c.id())
+            || !grant.path("scope").asString().equals("auriga.connect"))
+          return error("invalid_grant");
+      }
     }
     if (input.containsKey("scope")
         && !scopes(grant.path("scope").asString()).containsAll(scopes(input.get("scope"))))
       return error("invalid_scope");
+    TokenService.IssuedToken issued = null;
+    if (grant.path("authorizationMode").asString().equals("native_tx")) {
+      if (input.containsKey("scope") && !input.get("scope").equals("auriga.connect"))
+        return error("invalid_scope");
+      if (ai) {
+        if (!grant.has("deviceId")) return error("invalid_grant");
+        issued = deviceAi.issue(c, grant, session);
+        if (issued == null) return error("invalid_grant");
+      } else {
+        session = sessions.touchNativeSession(session.path("sessionId").asString());
+        if (session == null) return error("invalid_grant");
+      }
+    }
     grant.put("used", true);
     store.save("oauth_grant", grant);
     if (input.containsKey("scope")) grant.put("scope", input.get("scope"));
-    return userTokens(c, grant, session, true);
+    return userTokens(c, grant, session, true, issued);
   }
 
   private ObjectNode userTokens(
       OAuthClient c, ObjectNode grant, ObjectNode session, boolean issueRefresh) {
+    return userTokens(c, grant, session, issueRefresh, null);
+  }
+
+  private ObjectNode userTokens(
+      OAuthClient c,
+      ObjectNode grant,
+      ObjectNode session,
+      boolean issueRefresh,
+      TokenService.IssuedToken issued) {
     boolean device = grant.has("deviceId");
     String scope = grant.path("scope").asString();
     ObjectNode response =
         Json.object(
             "access_token",
-            tokens.access(
-                c.tenant(),
-                session.path("accountId").asString(),
-                c.audience(),
-                device ? "device" : "user",
-                device ? "device" : session.path("audience").asString(),
-                device ? null : UUID.fromString(session.path("sessionId").asString()),
-                device ? UUID.fromString(grant.path("deviceId").asString()) : null,
-                Instant.parse(session.path("authTime").asString()),
-                session.has("stepUpAt") ? Instant.parse(session.path("stepUpAt").asString()) : null,
-                scope,
-                session.path("memberType").asString("member")),
+            issued != null
+                ? issued.accessToken()
+                : tokens.access(
+                    c.tenant(),
+                    session.path("accountId").asString(),
+                    c.audience(),
+                    device ? "device" : "user",
+                    device ? "device" : session.path("audience").asString(),
+                    device ? null : UUID.fromString(session.path("sessionId").asString()),
+                    device ? UUID.fromString(grant.path("deviceId").asString()) : null,
+                    Instant.parse(session.path("authTime").asString()),
+                    session.has("stepUpAt")
+                        ? Instant.parse(session.path("stepUpAt").asString())
+                        : null,
+                    scope,
+                    session.path("memberType").asString("member")),
             "token_type",
             "Bearer",
             "expires_in",
-            300,
+            issued != null
+                ? issued.expiresAt().getEpochSecond() - clock.instant().getEpochSecond()
+                : 300,
             "scope",
             scope);
     if (scopes(scope).contains("openid") && !device)
@@ -293,6 +472,8 @@ public final class OAuthProvider {
               "used",
               false);
       if (device) next.put("deviceId", grant.path("deviceId").asString());
+      if (grant.path("authorizationMode").asString().equals("native_tx"))
+        next.put("authorizationMode", "native_tx");
       store.insert(
           "oauth_grant",
           Secrets.hash(refresh),
@@ -308,7 +489,9 @@ public final class OAuthProvider {
         () -> {
           OAuthClient c = client(input.get("client_id"));
           IamError.require(
-              authenticated(c, input.get("client_secret")) && c.grants().contains(DEVICE),
+              authenticated(c, input.get("client_secret"))
+                  && c.grants().contains(DEVICE)
+                  && !c.nativeConnect(),
               "invalid_client",
               401);
           String scope = input.getOrDefault("scope", "auriga.connect");
@@ -371,10 +554,11 @@ public final class OAuthProvider {
               store.all("oauth_grant").stream()
                   .filter(
                       g ->
-                          g.path("userCode")
-                              .asString("")
-                              .replace("-", "")
-                              .equals(userCode.replace("-", "")))
+                          !g.path("authorizationMode").asString().equals("native_tx")
+                              && g.path("userCode")
+                                  .asString("")
+                                  .replace("-", "")
+                                  .equals(userCode.replace("-", "")))
                   .findFirst()
                   .orElseThrow(() -> IamError.error("not_found", 404));
           IamError.require(
@@ -392,12 +576,29 @@ public final class OAuthProvider {
   }
 
   private ObjectNode exchangeDevice(OAuthClient c, Map<String, String> input) {
-    ObjectNode grant =
-        store.get("oauth_grant", Secrets.hash(input.getOrDefault("device_code", "")), true);
+    String lookup = Secrets.hash(input.getOrDefault("device_code", ""));
+    ObjectNode preflight = store.get("oauth_grant", lookup, false);
+    ObjectNode tx = null;
+    if (preflight != null && preflight.path("authorizationMode").asString().equals("native_tx")) {
+      // Native finish/cancel/replacement always lock login_tx before its grant.
+      tx = store.get("login_tx", preflight.path("nativeTxId").asString(), true);
+    }
+    ObjectNode grant = store.get("oauth_grant", lookup, true);
     if (grant == null
         || !grant.path("clientId").asString().equals(c.id())
         || !grant.path("kind").asString().equals("device")
         || grant.path("used").asBoolean()) return error("invalid_grant");
+    boolean nativeTx = grant.path("authorizationMode").asString().equals("native_tx");
+    if (nativeTx) {
+      String verifier = input.getOrDefault("code_verifier", "");
+      if (!c.nativeConnect()
+          || !nativeBinding(tx, grant)
+          || !Set.of("grant_type", "client_id", "client_secret", "device_code", "code_verifier")
+              .containsAll(input.keySet())
+          || !verifier.matches("[A-Za-z0-9._~-]{43,128}")
+          || !Secrets.same(challenge(verifier), grant.path("challenge").asString()))
+        return error("invalid_grant");
+    }
     if (!clock.instant().isBefore(Instant.parse(grant.path("expiresAt").asString())))
       return error("expired_token");
     if (clock.instant().isBefore(Instant.parse(grant.path("nextPoll").asString()))) {
@@ -412,6 +613,13 @@ public final class OAuthProvider {
     if (grant.path("status").asString().equals("denied")) return error("access_denied");
     ObjectNode session = sessions.activeById(grant.path("sessionId").asString());
     if (session == null) return error("invalid_grant");
+    if (nativeTx
+        && (!tx.path("status").asString().equals("completed")
+            || !tx.path("nativeAccountId").equals(session.path("accountId"))
+            || !tx.path("nativeSessionId").equals(session.path("sessionId"))
+            || !grant.path("accountId").equals(session.path("accountId"))
+            || !session.path("audience").asString().equals("portal")))
+      return error("invalid_grant");
     String id = auriga.common.persistence.UuidV7.next().toString();
     store.insert(
         "device",
@@ -422,11 +630,19 @@ public final class OAuthProvider {
             "accountId",
             session.path("accountId").asString(),
             "name",
-            "Device",
+            nativeTx ? grant.path("deviceName").asString("DSH") : "Device",
             "kind",
             "dsh_connect",
             "revoked",
             false,
+            "sessionId",
+            session.path("sessionId").asString(),
+            "clientId",
+            c.id(),
+            "scope",
+            grant.path("scope").asString(),
+            "authorizationMode",
+            nativeTx ? "native_tx" : "manual",
             "createdAt",
             clock.instant().toString()),
         null);
@@ -457,6 +673,68 @@ public final class OAuthProvider {
             info.put("email_verified", true);
           }
           return info;
+        });
+  }
+
+  /** RFC7009-style possession proof; native public clients may revoke only their own device. */
+  public ObjectNode revoke(Map<String, String> input) {
+    OAuthClient c = client(input.get("client_id"));
+    if (!c.nativeConnect() || !authenticated(c, input.get("client_secret")))
+      return error("invalid_client");
+    if (!Set.of("client_id", "client_secret", "token", "token_type_hint")
+        .containsAll(input.keySet())) return error("invalid_request");
+    String raw = input.getOrDefault("token", "");
+    if (raw.isEmpty() || raw.length() > 16384) return Json.object();
+    // JWKS uses an isolated platform transaction. Verify before borrowing the
+    // tenant connection, so a bounded pool never waits on its own connection.
+    ObjectNode verified = null;
+    try {
+      verified = tokens.verify(raw);
+    } catch (auriga.common.error.AurigaException invalid) {
+      if (invalid.errorCode().httpStatus() != 400 && invalid.errorCode().httpStatus() != 401)
+        throw invalid;
+    }
+    final ObjectNode claims = verified;
+    return store.tx(
+        () -> {
+          String deviceId = null, accountId = null, sessionId = null;
+          ObjectNode refresh = store.get("oauth_grant", Secrets.hash(raw), false);
+          if (refresh != null
+              && refresh.path("kind").asString().equals("refresh")
+              && refresh.path("authorizationMode").asString().equals("native_tx")
+              && refresh.path("clientId").asString().equals(c.id())) {
+            deviceId = refresh.path("deviceId").asString();
+            sessionId = refresh.path("sessionId").asString();
+          } else {
+            if (claims == null
+                || !DeviceAccessAuthority.platformAudience(claims)
+                || !claims.path("ptyp").asString().equals("device")
+                || !claims.path("ctx").asString().equals("device")
+                || !claims.path("scope").asString().equals("auriga.connect")
+                || !c.tenant().toString().equals(claims.path("tid").asString()))
+              return Json.object();
+            deviceId = claims.path("did").asString();
+            accountId = claims.path("sub").asString();
+          }
+          ObjectNode snapshot = store.get("device", deviceId, false);
+          if (snapshot == null
+              || !snapshot.path("clientId").asString().equals(c.id())
+              || !snapshot.path("authorizationMode").asString().equals("native_tx")
+              || accountId != null && !snapshot.path("accountId").asString().equals(accountId)
+              || sessionId != null && !snapshot.path("sessionId").asString().equals(sessionId))
+            return Json.object();
+          ObjectNode backing = store.byId("session", snapshot.path("sessionId").asString(), true);
+          ObjectNode device = store.get("device", deviceId, true);
+          if (backing == null
+              || device == null
+              || !device.path("sessionId").asString().equals(backing.path("sessionId").asString())
+              || !device.path("accountId").asString().equals(backing.path("accountId").asString())
+              || !device.path("clientId").asString().equals(c.id())) return Json.object();
+          device.put("revoked", true);
+          store.save("device", device);
+          // All refresh generations point at this authority row and are now denied.
+          // Do not revoke the backing session or any other device/session.
+          return Json.object();
         });
   }
 

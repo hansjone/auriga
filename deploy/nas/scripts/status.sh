@@ -41,6 +41,10 @@ else
 fi
 
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" ps || true
+if ! run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" exec -T network \
+  /auriga-network-probe --certificates /etc/auriga/network; then
+  info "network_certificate_status=unavailable_or_invalid (network must be running; see diagnostic above)"
+fi
 
 HP=${AURIGA_HOST_PUBLISH_PLATFORM_HTTP:-}
 if [ -n "$HP" ] && command -v curl >/dev/null 2>&1; then

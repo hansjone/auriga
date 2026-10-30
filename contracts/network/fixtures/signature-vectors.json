@@ -1,0 +1,77 @@
+{
+  "description": "JCS + Ed25519 已知答案向量；密钥只用于测试，种子由公开标签 SHA-256 得出。签名输入 = UTF-8(\"Auriga.ServerEnvelope.v1\") || 0x00 || JCS(对象去掉最外层 server_auth.signature)。",
+  "keys": [
+    {
+      "kid": "test-r2-business-1",
+      "purpose": "business_delivery",
+      "label": "auriga-network-v1 TEST ONLY test-r2-business-1",
+      "testOnlySeedHex": "cc058470fd53b3d2181b3019e998680995e01af6aaca69f0d1b4f77ea9872118",
+      "publicKeySpki": "MCowBQYDK2VwAyEAc3PQSXkP3XHFUWxY5LuTz-rcLl9B3Z-saQbHCIHTDBk"
+    },
+    {
+      "kid": "test-r2-protocol-1",
+      "purpose": "protocol_response",
+      "label": "auriga-network-v1 TEST ONLY test-r2-protocol-1",
+      "testOnlySeedHex": "f0da6ca22b030ea45c7f4190743eff37105225b8de267d08ccb0fd75da41e9a4",
+      "publicKeySpki": "MCowBQYDK2VwAyEAeC0lzyN8uqZFMQnQDBoFmX1nFosZTDBrg60wMYZ5tL4"
+    },
+    {
+      "kid": "test-r2-management-1",
+      "purpose": "management_state",
+      "label": "auriga-network-v1 TEST ONLY test-r2-management-1",
+      "testOnlySeedHex": "5887a9a5338bf7b94bacf673e6820a379985fe8c10de1726dd6ec1def7a89027",
+      "publicKeySpki": "MCowBQYDK2VwAyEAd9Rime3UT1wL2Na_tkrjt-A48iYfOnSg2_bwtFXguc0"
+    }
+  ],
+  "digests": [
+    {
+      "name": "delivery_first_contact.message",
+      "canonical": "{\"authorization_ref\":{\"broadcast_grant_id\":null,\"policy_revision\":\"8\",\"source_binding\":\"binding-a1\",\"source_revision\":\"3\"},\"body\":{\"subtype\":\"text\",\"text\":\"首次联系示例\"},\"contact_scope\":\"conversation\",\"created_at\":\"2026-10-25T00:00:00Z\",\"durability\":\"durable\",\"expires_at\":\"2026-10-26T00:00:00Z\",\"ext\":{\"e2e_signature\":null},\"flags\":[],\"from\":{\"local\":\"418\",\"node\":\"63\",\"realm\":\"2\",\"type\":\"session\",\"version\":1},\"in_reply_to\":null,\"intent\":\"request\",\"kind\":\"first_contact\",\"message_class\":\"unicast\",\"message_id\":\"msg-fc-0001\",\"reply_to\":{\"local\":\"418\",\"node\":\"63\",\"realm\":\"2\",\"type\":\"session\",\"version\":1},\"sender_kind\":\"agent\",\"thread_id\":\"thread-0001\",\"thread_sequence\":\"1\",\"to\":{\"local\":\"0\",\"node\":\"64\",\"realm\":\"2\",\"type\":\"system\",\"version\":1},\"ttl\":86400}",
+      "digest": "sha256:8882b6569c1ad7931b59b36867f9d42ada5c4e0195f2b386172494ad11930432"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "delivery_first_contact",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"app_version\":\"1.0\",\"contact\":{\"assigned_address\":null,\"contact_id\":\"msg-fc-0001\",\"request_version\":\"2\",\"state\":\"contact_allowed\"},\"delivery_id\":\"dlv-msg-fc-0001\",\"epoch\":\"42\",\"mail_seq\":\"1205\",\"message\":{\"authorization_ref\":{\"broadcast_grant_id\":null,\"policy_revision\":\"8\",\"source_binding\":\"binding-a1\",\"source_revision\":\"3\"},\"body\":{\"subtype\":\"text\",\"text\":\"首次联系示例\"},\"contact_scope\":\"conversation\",\"created_at\":\"2026-10-25T00:00:00Z\",\"durability\":\"durable\",\"expires_at\":\"2026-10-26T00:00:00Z\",\"ext\":{\"e2e_signature\":null},\"flags\":[],\"from\":{\"local\":\"418\",\"node\":\"63\",\"realm\":\"2\",\"type\":\"session\",\"version\":1},\"in_reply_to\":null,\"intent\":\"request\",\"kind\":\"first_contact\",\"message_class\":\"unicast\",\"message_id\":\"msg-fc-0001\",\"reply_to\":{\"local\":\"418\",\"node\":\"63\",\"realm\":\"2\",\"type\":\"session\",\"version\":1},\"sender_kind\":\"agent\",\"thread_id\":\"thread-0001\",\"thread_sequence\":\"1\",\"to\":{\"local\":\"0\",\"node\":\"64\",\"realm\":\"2\",\"type\":\"system\",\"version\":1},\"ttl\":86400},\"message_state_version\":\"1\",\"recipients\":[{\"local\":\"0\",\"recipient_id\":\"rcp-fc-sys\",\"type\":\"system\"}],\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-business-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"business_delivery\",\"request_id\":\"req-fetch-0001\",\"version\":1},\"source_context\":{\"display_label\":\"协作会话\",\"message_digest\":\"sha256:8882b6569c1ad7931b59b36867f9d42ada5c4e0195f2b386172494ad11930432\",\"node\":\"63\",\"realm\":\"2\",\"sender_kind\":\"agent\",\"user\":\"user-0193a1\"},\"target_node\":{\"node\":\"64\",\"realm\":\"2\"},\"type\":\"delivery\"}",
+      "signature": "Lz_zbC-Y5mtlg0AmdnoSpI6OMT2XcEvBzcZgCDCuEBI3r_exuYv9ReDnZ6wch7TEMoX8wUmPSW8w0Pl9S5kuDQ",
+      "kid": "test-r2-business-1"
+    },
+    {
+      "name": "delivery_broadcast",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"app_version\":\"1.0\",\"delivery_id\":\"dlv-msg-bcast-0001\",\"epoch\":\"42\",\"mail_seq\":\"1207\",\"message\":{\"authorization_ref\":{\"broadcast_grant_id\":\"grant-0001\",\"grant_revision\":\"4\",\"human_intent_id\":\"intent-0001\",\"policy_revision\":\"8\",\"subject_type\":\"user\"},\"body\":{\"subtype\":\"text\",\"text\":\"请在方便时确认信息，回复仅回发送者\"},\"created_at\":\"2026-10-25T00:00:00Z\",\"dispatch_mode\":\"paged\",\"durability\":\"durable\",\"expires_at\":\"2026-10-26T00:00:00Z\",\"ext\":{\"e2e_signature\":null},\"flags\":[],\"from\":{\"local\":\"0\",\"node\":\"63\",\"realm\":\"2\",\"type\":\"system\",\"version\":1},\"in_reply_to\":null,\"intent\":\"request\",\"kind\":\"message\",\"message_class\":\"broadcast\",\"message_id\":\"msg-bcast-0001\",\"reply_to\":{\"local\":\"0\",\"node\":\"63\",\"realm\":\"2\",\"type\":\"system\",\"version\":1},\"response_deadline\":\"2026-10-26T00:00:00Z\",\"sender_kind\":\"human\",\"thread_id\":\"thread-bcast-0001\",\"thread_sequence\":\"1\",\"to\":{\"local\":\"1\",\"node\":\"0\",\"realm\":\"2\",\"type\":\"group\",\"version\":1},\"ttl\":86400},\"message_state_version\":\"1\",\"recipients\":[{\"local\":\"0\",\"membership_id\":\"bcast-member-64\",\"recipient_id\":\"rcp-bcast-sys\",\"type\":\"system\"}],\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-business-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"business_delivery\",\"request_id\":\"req-fetch-0001\",\"version\":1},\"snapshot_id\":\"snapshot-bcast-0001\",\"source_context\":{\"display_label\":\"通知发送者\",\"message_digest\":\"sha256:5b3bf435ca59f83ba916e533b4d7ad5f9caedac751520ea472d548f17be0615e\",\"node\":\"63\",\"realm\":\"2\",\"sender_kind\":\"human\",\"user\":\"user-0193a1\"},\"target_node\":{\"node\":\"64\",\"realm\":\"2\"},\"type\":\"delivery\"}",
+      "signature": "oBPJTo4TrCeg7vXcWXYg_GLUckD0sIIgwWkiM7dc34lmNiBOU1lJxWzbAaPHCwVqqi0mWBMas5WWJ6XrD7pYBQ",
+      "kid": "test-r2-business-1"
+    },
+    {
+      "name": "head",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"app_version\":\"1.0\",\"epoch\":\"42\",\"head_seq\":\"1207\",\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"protocol_response\",\"request_id\":null,\"version\":1},\"type\":\"head\"}",
+      "signature": "xBHV0ZUJqtBcsbllwr9-YrmBMZATn-91BpKf4ESVNKJNu25GZ52aKzKWN56sofXXXP2mGDea91_OQMANXjIFCA",
+      "kid": "test-r2-protocol-1"
+    },
+    {
+      "name": "error",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"app_version\":\"1.0\",\"code\":\"network.stale_epoch\",\"related\":{\"recipient_id\":\"rcp-0001\"},\"request_id\":\"req-op-0001\",\"retry_after\":null,\"retryable\":false,\"scope\":\"connection\",\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"protocol_response\",\"request_id\":\"req-op-0001\",\"version\":1},\"type\":\"error\"}",
+      "signature": "gH0rzLK2bufrIDq8Gz0IAHi6wcGnjANSm36hvPCqiUDX0LKWg0QJtQzAzolaxE45IuPPnaVFnJuhS0jyKM_TDA",
+      "kid": "test-r2-protocol-1"
+    },
+    {
+      "name": "register_result",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"address_type\":\"session\",\"allocation_op_id\":\"alloc-419\",\"app_version\":\"1.0\",\"local\":\"419\",\"local_high_water\":\"419\",\"registration_id\":\"reg-419\",\"registration_revision\":\"419\",\"request_id\":\"req-op-0001\",\"result\":\"registered\",\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"protocol_response\",\"request_id\":\"req-op-0001\",\"version\":1},\"type\":\"register_result\"}",
+      "signature": "zh9pVavLFz42RnAyjtP-WNjYrrM1KH-l5gDJ5_yP6h7pTPhsI_fpS_3KPy8ariQWdi5Ge0owpypFMvuHuFVKCg",
+      "kid": "test-r2-protocol-1"
+    },
+    {
+      "name": "register_result_subagent",
+      "signingInputPrefix": "Auriga.ServerEnvelope.v1\\u0000",
+      "canonical": "{\"address_type\":\"subagent\",\"allocation_op_id\":\"alloc-419\",\"app_version\":\"1.0\",\"local\":\"419\",\"local_high_water\":\"419\",\"registration_id\":\"reg-419\",\"registration_revision\":\"419\",\"request_id\":\"req-op-0001\",\"result\":\"registered\",\"server_auth\":{\"alg\":\"Ed25519\",\"audience\":{\"epoch\":\"42\",\"incarnation\":\"inc-64-1\",\"node\":\"64\",\"realm\":\"2\"},\"channel_nonce\":\"nonce-ready-0001\",\"issued_at\":\"2026-10-25T00:00:00Z\",\"issuer_realm\":\"2\",\"keyset_version\":\"5\",\"kid\":\"test-r2-protocol-1\",\"not_after\":\"2026-10-25T00:05:00Z\",\"purpose\":\"protocol_response\",\"request_id\":\"req-op-0001\",\"version\":1},\"type\":\"register_result\"}",
+      "signature": "MLu2vOHJz_ZodxvZL5oPEDCG6XyN_7Ky8-oh1o33dD5tVapgk7HkSHwa6iQCD3XO4qt0cqRF6caqLr4Wd7-cAg",
+      "kid": "test-r2-protocol-1"
+    }
+  ]
+}

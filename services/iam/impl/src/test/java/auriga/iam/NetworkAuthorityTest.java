@@ -1,0 +1,827 @@
+package auriga.iam;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import auriga.common.audit.AuditLogger;
+import auriga.common.context.TenantContext;
+import auriga.common.error.AurigaException;
+import auriga.common.security.*;
+import auriga.iam.api.NetworkAuthority.*;
+import java.math.BigInteger;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import tools.jackson.databind.node.ObjectNode;
+
+/**
+ * In-memory policy tests only. This replacement does not model rollback or database concurrency;
+ * NetworkAuthorityPostgresTest is the only evidence for reservations and atomic redemption.
+ */
+class NetworkAuthorityTest {
+  static IngressBinding binding(String ticket) {
+    return new IngressBinding(
+        "N" + "A".repeat(55),
+        "42",
+        "U" + "A".repeat(55),
+        IamNetworkAuthority.ingressForTicket(ticket),
+        "CLIENTS");
+  }
+
+  final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
+
+  static final class Time extends Clock {
+    Instant now = Instant.parse("2026-01-01T00:00:00Z");
+
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    public Instant instant() {
+      return now;
+    }
+
+    void advance(long seconds) {
+      now = now.plusSeconds(seconds);
+    }
+  }
+
+  final Time clock = new Time();
+  final IamStore store = mock(IamStore.class);
+  final DeviceAccessAuthority devices = mock(DeviceAccessAuthority.class);
+  final AuditLogger audit = mock(AuditLogger.class);
+  final Map<String, ObjectNode> rows = new HashMap<>();
+  final Map<String, Node> nodes = new HashMap<>();
+  final Map<UUID, BigInteger> policyRevisions = new HashMap<>();
+  final DataSource dataSource = mock(DataSource.class);
+  final ReentrantLock lock = new ReentrantLock();
+  BigInteger next = BigInteger.ONE;
+  IamNetworkAuthority network;
+  DeviceAccessAuthority.Identity identity;
+
+  String key(String table, String id) {
+    return TenantContext.require() + ":" + table + ":" + id;
+  }
+
+  @BeforeEach
+  void setup() {
+    JdbcTemplate jdbc =
+        new JdbcTemplate(dataSource) {
+          @SuppressWarnings("unchecked")
+          @Override
+          public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
+            // This policy fixture has no durable anchor store; PG tests cover retention/rollback.
+            if (sql.contains("FROM iam.network_connection_anchor")) return List.of();
+            if (sql.startsWith("SELECT id,data::text FROM iam.network_ingress")) {
+              var row = rows.get(key("network_ingress", args[1].toString()));
+              if (row == null) return List.of();
+              var rs = mock(java.sql.ResultSet.class);
+              try {
+                when(rs.getObject(1, UUID.class))
+                    .thenReturn(UUID.fromString(row.path("id").asString()));
+                when(rs.getString(2)).thenReturn(row.toString());
+                return List.of(mapper.mapRow(rs, 0));
+              } catch (java.sql.SQLException e) {
+                throw new AssertionError(e);
+              }
+            }
+            if (sql.contains("SELECT n.account_id,n.device_id")) {
+              Node n = nodes.get(key("node", args[1].toString()));
+              if (n == null) return List.of();
+              var rs = mock(java.sql.ResultSet.class);
+              try {
+                when(rs.getObject(1, UUID.class)).thenReturn(UUID.fromString(n.account()));
+                when(rs.getObject(2, UUID.class)).thenReturn(UUID.fromString(n.device()));
+                return List.of(mapper.mapRow(rs, 0));
+              } catch (java.sql.SQLException e) {
+                throw new AssertionError(e);
+              }
+            }
+            if (sql.contains("SET next_node")) {
+              String value = next.toString();
+              next = next.add(BigInteger.ONE);
+              return (List<T>) List.of(value);
+            }
+            return (List<T>)
+                nodes.entrySet().stream()
+                    .filter(e -> e.getKey().startsWith(TenantContext.require() + ":node:"))
+                    .map(Map.Entry::getValue)
+                    .filter(
+                        n ->
+                            sql.contains("n.device_id=?")
+                                ? n.device().equals(args[1].toString())
+                                : n.node().equals(args[1].toString()))
+                    .toList();
+          }
+
+          @Override
+          public int update(String sql, Object... args) {
+            if (sql.contains("iam.network_policy_revision")) {
+              assertTrue(lock.isHeldByCurrentThread());
+              assertEquals(TenantContext.require(), args[0]);
+              if (sql.startsWith("INSERT INTO"))
+                return policyRevisions.putIfAbsent(TenantContext.require(), BigInteger.ONE) == null
+                    ? 1
+                    : 0;
+              assertTrue(
+                  sql.startsWith("UPDATE iam.network_policy_revision SET revision=revision+1"));
+              return policyRevisions.computeIfPresent(
+                          TenantContext.require(), (t, revision) -> revision.add(BigInteger.ONE))
+                      == null
+                  ? 0
+                  : 1;
+            }
+            if (sql.contains("INSERT INTO iam.network_node")) {
+              Node n =
+                  new Node("1", args[1].toString(), args[2].toString(), args[3].toString(), false);
+              if (nodes.values().stream().anyMatch(v -> v.device().equals(n.device()))) return 0;
+              nodes.put(key("node", n.node()), n);
+            } else if (sql.contains("SET revoked=true")) {
+              String k = key("node", args[1].toString());
+              Node n = nodes.get(k);
+              if (n != null)
+                nodes.put(k, new Node(n.realm(), n.node(), n.account(), n.device(), true));
+            } else if (sql.contains("DELETE FROM iam.network_ticket")) {
+              rows.entrySet()
+                  .removeIf(
+                      e ->
+                          e.getKey().startsWith(key("network_ticket", ""))
+                              && e.getValue().path("node").asString().equals(args[1])
+                              && !clock
+                                  .instant()
+                                  .isBefore(
+                                      Instant.parse(e.getValue().path("expiresAt").asString())));
+            }
+            return 1;
+          }
+
+          @Override
+          public <T> T queryForObject(String sql, RowMapper<T> mapper, Object... args) {
+            assertEquals(
+                "SELECT revision::text FROM iam.network_policy_revision WHERE tenant_id=? FOR UPDATE",
+                sql);
+            assertTrue(lock.isHeldByCurrentThread());
+            assertEquals(TenantContext.require(), args[0]);
+            BigInteger revision = policyRevisions.get(TenantContext.require());
+            assertNotNull(revision);
+            var result = mock(java.sql.ResultSet.class);
+            try {
+              when(result.getString(1)).thenReturn(revision.toString());
+              return mapper.mapRow(result, 0);
+            } catch (java.sql.SQLException e) {
+              throw new AssertionError(e);
+            }
+          }
+
+          @SuppressWarnings("unchecked")
+          @Override
+          public <T> T queryForObject(String sql, Class<T> type, Object... args) {
+            return (T)
+                Long.valueOf(
+                    rows.entrySet().stream()
+                        .filter(e -> e.getKey().startsWith(key("network_ticket", "")))
+                        .filter(e -> e.getValue().path("node").asString().equals(args[1]))
+                        .count());
+          }
+        };
+    when(store.networkJdbc()).thenReturn(jdbc);
+    when(store.tx(any())).thenAnswer(i -> atomic(i.getArgument(0)));
+    when(store.isolated(any(), any())).thenAnswer(i -> atomic(i.getArgument(1)));
+    when(store.get(anyString(), anyString(), anyBoolean()))
+        .thenAnswer(
+            i -> {
+              var value = rows.get(key(i.getArgument(0), i.getArgument(1)));
+              return value == null ? null : value.deepCopy();
+            });
+    when(store.byId(anyString(), anyString(), anyBoolean()))
+        .thenAnswer(
+            i -> {
+              var value = rows.get(key(i.getArgument(0), i.getArgument(1)));
+              return value == null ? null : value.deepCopy();
+            });
+    TenantContext.run(
+        tenant,
+        () -> {
+          String sid = UUID.randomUUID().toString();
+          rows.put(
+              key("device", device.toString()),
+              Json.object("accountId", account.toString(), "sessionId", sid));
+          rows.put(
+              key("session", sid),
+              Json.object(
+                  "sessionId",
+                  sid,
+                  "tenantId",
+                  tenant.toString(),
+                  "accountId",
+                  account.toString()));
+          rows.put(key("account", account.toString()), Json.object("status", "active"));
+        });
+    when(store.insert(anyString(), anyString(), any(), nullable(Instant.class)))
+        .thenAnswer(
+            i -> {
+              ObjectNode value = i.getArgument(2);
+              value.put("id", UUID.randomUUID().toString());
+              rows.put(key(i.getArgument(0), i.getArgument(1)), value.deepCopy());
+              return value;
+            });
+    doAnswer(
+            i -> {
+              ObjectNode value = i.getArgument(1);
+              rows.entrySet().stream()
+                  .filter(e -> e.getKey().startsWith(key(i.getArgument(0), "")))
+                  .filter(e -> e.getValue().path("id").equals(value.path("id")))
+                  .forEach(e -> e.setValue(value.deepCopy()));
+              return null;
+            })
+        .when(store)
+        .save(anyString(), any());
+    doAnswer(
+            i -> {
+              rows.remove(key(i.getArgument(0), i.getArgument(1)));
+              return null;
+            })
+        .when(store)
+        .delete(anyString(), anyString());
+    identity =
+        new DeviceAccessAuthority.Identity(
+            tenant.toString(),
+            account.toString(),
+            device.toString(),
+            clock.instant().plusSeconds(7200));
+    when(devices.access("access")).thenReturn(identity);
+    when(devices.credential(anyString(), anyString(), anyString()))
+        .thenAnswer(
+            i ->
+                tenant.toString().equals(i.getArgument(0))
+                    ? new DeviceAccessAuthority.Identity(
+                        i.getArgument(0), i.getArgument(1), i.getArgument(2), identity.expiresAt())
+                    : null);
+    network = new IamNetworkAuthority(store, devices, audit, clock, Set.of("server-a", "server-b"));
+  }
+
+  Object atomic(Supplier<?> work) {
+    lock.lock();
+    boolean wasActive = TransactionSynchronizationManager.isActualTransactionActive();
+    boolean bound = false;
+    try {
+      // In-memory transaction only: satisfy the production helper's resource/state checks while
+      // executing its real version SQL against this fixture, without claiming PostgreSQL evidence.
+      if (!TransactionSynchronizationManager.hasResource(dataSource)) {
+        TransactionSynchronizationManager.bindResource(dataSource, this);
+        bound = true;
+      }
+      TransactionSynchronizationManager.setActualTransactionActive(true);
+      return work.get();
+    } finally {
+      TransactionSynchronizationManager.setActualTransactionActive(wasActive);
+      if (bound) TransactionSynchronizationManager.unbindResource(dataSource);
+      lock.unlock();
+    }
+  }
+
+  @AfterEach
+  void clear() {
+    SecurityContextHolder.clearContext();
+  }
+
+  void service(String subject) {
+    principal(
+        new AurigaPrincipal(
+            subject,
+            TenantContext.PLATFORM_TENANT,
+            PrincipalType.INTERNAL_SERVICE,
+            TokenContext.SERVICE,
+            null,
+            null,
+            null,
+            List.of(),
+            Set.of(),
+            null,
+            null,
+            null));
+  }
+
+  void admin() {
+    principal(
+        new AurigaPrincipal(
+            account.toString(),
+            tenant,
+            PrincipalType.USER,
+            TokenContext.ADMIN,
+            null,
+            null,
+            null,
+            List.of(),
+            Set.of("iam.network.manage"),
+            null,
+            null,
+            null));
+  }
+
+  void principal(AurigaPrincipal value) {
+    SecurityContextHolder.getContext().setAuthentication(new AurigaAuthentication(value));
+  }
+
+  void business(Runnable work) {
+    TenantContext.run(tenant, work);
+  }
+
+  Node register() {
+    return network.register("access");
+  }
+
+  void forbidden(Runnable work) {
+    assertEquals(
+        "common.forbidden", assertThrows(AurigaException.class, work::run).errorCode().code());
+  }
+
+  Check request(Sender sender, String local, Operation operation) {
+    return new Check("1", "1", "2", local, sender, operation, 10, 1, 1);
+  }
+
+  void twoNodes() {
+    register();
+    String second = UUID.randomUUID().toString();
+    when(devices.access("second"))
+        .thenReturn(
+            new DeviceAccessAuthority.Identity(
+                tenant.toString(), account.toString(), second, identity.expiresAt()));
+    network.register("second");
+  }
+
+  @Test
+  void registrationIsIdempotentAndReinstallAndRevocationNeverReuseNode() {
+    business(
+        () -> {
+          Node first = register();
+          assertEquals(first, register());
+          assertEquals("aur1:1.1.0", first.systemAddress());
+          admin();
+          network.revoke("1");
+          forbidden(this::register);
+          String newDevice = UUID.randomUUID().toString();
+          when(devices.access("reinstalled"))
+              .thenReturn(
+                  new DeviceAccessAuthority.Identity(
+                      tenant.toString(), account.toString(), newDevice, identity.expiresAt()));
+          assertEquals("2", network.register("reinstalled").node());
+        });
+  }
+
+  @Test
+  void preparedConnectionDeadlineIsDistinctAndCannotSlideAtRedemption() {
+    business(
+        () -> {
+          register();
+          admin();
+          network.configure(
+              new Configuration(true, true, true, Map.of(Limit.CONNECTION_SECONDS, 120L)));
+          var ticket = network.prepare("access", "1", "server-a");
+          assertEquals(clock.instant().plusSeconds(30), ticket.expiresAt());
+          assertEquals(clock.instant().plusSeconds(120), ticket.connectionExpiresAt());
+          clock.advance(20);
+          service("svc:ai-gateway");
+          var connection =
+              network.redeem(
+                  ticket.ticket(), "1", device.toString(), "server-a", binding(ticket.ticket()));
+          assertEquals(ticket.connectionExpiresAt(), connection.expiresAt());
+        });
+  }
+
+  @Test
+  void supportsFullUnsignedDisplay() {
+    assertTrue(IamNetworkAuthority.validNumber("18446744073709551615", false));
+    assertFalse(IamNetworkAuthority.validNumber("18446744073709551616", false));
+    for (String bad : List.of("0", "01", "-1", "1.0", "ff"))
+      assertFalse(IamNetworkAuthority.validNumber(bad, false));
+    assertEquals(
+        "aur1:ffffffffffffffff.ffffffffffffffff.0",
+        new Node("18446744073709551615", "18446744073709551615", "a", "d", false).systemAddress());
+  }
+
+  @Test
+  void boundRedeemPersistsServerGenerationCidAndPrivateIngress() {
+    business(
+        () -> {
+          register();
+          Ticket ticket = network.prepare("access", "1", "server-a");
+          service("svc:ai-gateway");
+          var binding = binding(ticket.ticket());
+          network.redeem(ticket.ticket(), "1", device.toString(), "server-a", binding);
+          var record = rows.get(key("network_ingress", binding.ingress()));
+          assertNotNull(record);
+          assertEquals("42", record.path("clientId").asString());
+          assertEquals(binding.serverId(), record.path("serverId").asString());
+          assertEquals(binding.userNkey(), record.path("userNkey").asString());
+          assertFalse(record.toString().contains(ticket.ticket()));
+          forbidden(
+              () -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a", binding));
+        });
+  }
+
+  @Test
+  void ticketDerivedIngressMatchesSharedVector() {
+    assertEquals(
+        "b4ahhbnw7hklp3vsosdall7bve", IamNetworkAuthority.ingressForTicket("A".repeat(43)));
+  }
+
+  @Test
+  void wrongTicketDerivedIngressIsRejectedAndTicketRemainsBurned() {
+    business(
+        () -> {
+          register();
+          Ticket ticket = network.prepare("access", "1", "server-a");
+          service("svc:ai-gateway");
+          var correct = binding(ticket.ticket());
+          var wrong =
+              new IngressBinding(
+                  correct.serverId(),
+                  correct.clientId(),
+                  correct.userNkey(),
+                  "a".repeat(26),
+                  correct.account());
+          forbidden(
+              () -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a", wrong));
+          forbidden(
+              () -> network.redeem(ticket.ticket(), "1", device.toString(), "server-a", correct));
+          assertNull(rows.get(key("network_ticket", Secrets.hash(ticket.ticket()))));
+        });
+  }
+
+  @Test
+  void ticketIsHashedSingleUseAndBoundToDeviceNodeAndVerifiedServer() {
+    business(
+        () -> {
+          register();
+          Ticket ticket = network.prepare("access", "1", "server-a");
+          assertEquals(clock.instant().plusSeconds(30), ticket.expiresAt());
+          assertFalse(rows.toString().contains(ticket.ticket()));
+          service("svc:ai-gateway");
+          Connection connection =
+              network.redeem(
+                  ticket.ticket(), "1", device.toString(), "server-a", binding(ticket.ticket()));
+          assertEquals(clock.instant().plusSeconds(3600), connection.expiresAt());
+          forbidden(
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+          forbidden(() -> network.prepare("access", "1", "not-configured"));
+        });
+  }
+
+  @Test
+  void expiryDeviceRevocationAndBackingCredentialExpiryRejectAndKickQueryFailsClosed() {
+    business(
+        () -> {
+          register();
+          Ticket expired = network.prepare("access", "1", "server-a");
+          clock.advance(30);
+          service("svc:ai-gateway");
+          forbidden(
+              () ->
+                  network.redeem(
+                      expired.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(expired.ticket())));
+          Ticket revoked = network.prepare("access", "1", "server-a");
+          when(devices.credential(anyString(), anyString(), anyString())).thenReturn(null);
+          forbidden(
+              () ->
+                  network.redeem(
+                      revoked.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(revoked.ticket())));
+          assertFalse(network.active("1", "1"));
+          when(devices.credential(anyString(), anyString(), anyString()))
+              .thenReturn(
+                  new DeviceAccessAuthority.Identity(
+                      tenant.toString(),
+                      account.toString(),
+                      device.toString(),
+                      clock.instant().plusSeconds(9)));
+          Ticket shortTicket = network.prepare("access", "1", "server-a");
+          Connection connection =
+              network.redeem(
+                  shortTicket.ticket(),
+                  "1",
+                  device.toString(),
+                  "server-a",
+                  binding(shortTicket.ticket()));
+          assertEquals(clock.instant().plusSeconds(9), connection.expiresAt());
+          admin();
+          network.revoke("1");
+          service("svc:ai-gateway");
+          assertFalse(network.active("1", "1"));
+        });
+  }
+
+  @Test
+  void agentsHaveNoFirstContactOrBroadcastAndNeverInheritHumanGrants() {
+    business(
+        () -> {
+          twoNodes();
+          service("svc:collab");
+          assertFalse(network.check(request(Sender.AGENT, "9", Operation.FIRST_CONTACT)).allowed());
+          assertTrue(network.check(request(Sender.HUMAN, "0", Operation.FIRST_CONTACT)).allowed());
+          assertFalse(network.check(request(Sender.HUMAN, "0", Operation.BROADCAST)).allowed());
+          admin();
+          network.grant(
+              "1", Sender.HUMAN, "0", Operation.BROADCAST, clock.instant().plusSeconds(3600));
+          service("svc:collab");
+          assertTrue(network.check(request(Sender.HUMAN, "0", Operation.BROADCAST)).allowed());
+          assertFalse(network.check(request(Sender.AGENT, "9", Operation.BROADCAST)).allowed());
+          admin();
+          network.grant(
+              "1", Sender.AGENT, "9", Operation.FIRST_CONTACT, clock.instant().plusSeconds(30));
+          service("svc:collab");
+          assertTrue(network.check(request(Sender.AGENT, "9", Operation.FIRST_CONTACT)).allowed());
+          assertFalse(
+              network.check(request(Sender.AGENT, "10", Operation.FIRST_CONTACT)).allowed());
+          clock.advance(30);
+          assertFalse(network.check(request(Sender.AGENT, "9", Operation.FIRST_CONTACT)).allowed());
+          admin();
+          network.withdraw("1", Sender.HUMAN, "0", Operation.BROADCAST);
+          service("svc:collab");
+          assertFalse(network.check(request(Sender.HUMAN, "0", Operation.BROADCAST)).allowed());
+          verify(audit, atLeast(4)).record(any());
+        });
+  }
+
+  @Test
+  void organizationPolicyAndLimitsOverrideIndividualGrantsAndHideTargetExistence() {
+    business(
+        () -> {
+          twoNodes();
+          admin();
+          network.grant(
+              "1", Sender.AGENT, "9", Operation.FIRST_CONTACT, clock.instant().plusSeconds(30));
+          network.nodePolicy("1", "2", false);
+          service("svc:collab");
+          Decision policyDenied =
+              network.check(request(Sender.AGENT, "9", Operation.FIRST_CONTACT));
+          Decision unknown =
+              network.check(
+                  new Check("1", "1", "999", "9", Sender.AGENT, Operation.SEND, 10, 1, 1));
+          assertEquals(policyDenied, unknown);
+          admin();
+          network.nodePolicy("1", "2", true);
+          network.configure(new Configuration(true, false, true, Map.of(Limit.BODY_BYTES, 5L)));
+          service("svc:collab");
+          assertFalse(network.check(request(Sender.AGENT, "9", Operation.SEND)).allowed());
+          Decision first =
+              network.check(
+                  new Check("1", "1", "2", "0", Sender.HUMAN, Operation.FIRST_CONTACT, 1, 1, 1));
+          assertFalse(first.allowed());
+          assertEquals(10L, first.limits().get(Limit.FIRST_NODE_PER_MINUTE));
+          admin();
+          network.configure(new Configuration(false, true, true, Map.of()));
+          service("svc:ai-gateway");
+          assertFalse(network.active("1", "1"));
+          forbidden(() -> network.prepare("access", "1", "server-a"));
+        });
+  }
+
+  @Test
+  void crossTenantAndRealmAndCallerSpoofingAreDenied() {
+    business(
+        () -> {
+          twoNodes();
+          service("svc:collab");
+          assertFalse(
+              network
+                  .check(new Check("2", "1", "2", "0", Sender.HUMAN, Operation.SEND, 1, 1, 1))
+                  .allowed());
+          Ticket ticket = network.prepare("access", "1", "server-a");
+          forbidden(
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      "1",
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+          service("svc:workspace");
+          forbidden(() -> network.active("1", "1"));
+          service("svc:ai-gateway");
+          TenantContext.run(
+              UUID.randomUUID(),
+              () -> {
+                assertFalse(network.active("1", "1"));
+                forbidden(
+                    () ->
+                        network.redeem(
+                            ticket.ticket(),
+                            "1",
+                            device.toString(),
+                            "server-a",
+                            binding(ticket.ticket())));
+                forbidden(this::register);
+              });
+          forbidden(
+              () ->
+                  network.grant(
+                      "1",
+                      Sender.AGENT,
+                      "9",
+                      Operation.BROADCAST,
+                      clock.instant().plusSeconds(30)));
+          admin();
+          forbiddenInOtherTenant();
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  network.grant(
+                      "1",
+                      Sender.HUMAN,
+                      "9",
+                      Operation.BROADCAST,
+                      clock.instant().plusSeconds(30)));
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  network.grant(
+                      "1",
+                      Sender.HUMAN,
+                      "0",
+                      Operation.BROADCAST,
+                      clock.instant().plusSeconds(86401)));
+        });
+  }
+
+  void forbiddenInOtherTenant() {
+    TenantContext.run(UUID.randomUUID(), () -> forbidden(() -> network.revoke("1")));
+  }
+
+  @Test
+  void broadcastCannotBypassPairPolicyOrTargetRevocationAndPendingTicketsAreBounded() {
+    business(
+        () -> {
+          twoNodes();
+          admin();
+          network.grant(
+              "1", Sender.HUMAN, "0", Operation.BROADCAST, clock.instant().plusSeconds(3600));
+          network.nodePolicy("1", "2", false);
+          service("svc:collab");
+          assertFalse(network.check(request(Sender.HUMAN, "0", Operation.BROADCAST)).allowed());
+          admin();
+          network.nodePolicy("1", "2", true);
+          network.revoke("2");
+          service("svc:collab");
+          assertFalse(network.check(request(Sender.HUMAN, "0", Operation.BROADCAST)).allowed());
+          for (int i = 0; i < 8; i++) network.prepare("access", "1", "server-a");
+          forbidden(() -> network.prepare("access", "1", "server-a"));
+          clock.advance(30);
+          assertNotNull(network.prepare("access", "1", "server-a"));
+        });
+  }
+
+  @Test
+  void rejectedRegistrationDoesNotReachAllocation() {
+    business(
+        () -> {
+          admin();
+          network.configure(new Configuration(false, true, true, Map.of()));
+          forbidden(this::register);
+          assertEquals(BigInteger.ONE, next);
+          network.configure(new Configuration(true, true, true, Map.of()));
+          when(devices.credential(anyString(), anyString(), anyString())).thenReturn(null);
+          forbidden(this::register);
+          assertEquals(BigInteger.ONE, next);
+        });
+  }
+
+  @Test
+  void mismatchedBindingInvalidatesTicketForCorrectCaller() {
+    business(
+        () -> {
+          register();
+          service("svc:ai-gateway");
+          for (String[] wrong :
+              List.of(
+                  new String[] {"2", device.toString(), "server-a"},
+                  new String[] {"0", device.toString(), "server-a"},
+                  new String[] {"1", UUID.randomUUID().toString(), "server-a"},
+                  new String[] {"1", device.toString(), "server-b"},
+                  new String[] {"1", device.toString(), "server-other"},
+                  new String[] {"1", device.toString(), null})) {
+            var ticket = network.prepare("access", "1", "server-a");
+            forbidden(
+                () ->
+                    network.redeem(
+                        ticket.ticket(), wrong[0], wrong[1], wrong[2], binding(ticket.ticket())));
+            forbidden(
+                () ->
+                    network.redeem(
+                        ticket.ticket(),
+                        "1",
+                        device.toString(),
+                        "server-a",
+                        binding(ticket.ticket())));
+          }
+        });
+  }
+
+  @Test
+  void organizationCanOnlyTightenPlatformLimits() {
+    business(
+        () -> {
+          admin();
+          for (Limit limit : Limit.values()) {
+            network.configure(
+                new Configuration(true, true, true, Map.of(limit, limit.defaultValue())));
+            network.configure(new Configuration(true, true, true, Map.of(limit, 1L)));
+            for (long invalid : new long[] {0, -1, limit.defaultValue() + 1, 9007199254740991L}) {
+              assertEquals(
+                  "common.validation_failed",
+                  assertThrows(
+                          AurigaException.class,
+                          () ->
+                              network.configure(
+                                  new Configuration(true, true, true, Map.of(limit, invalid))))
+                      .errorCode()
+                      .code());
+            }
+          }
+        });
+  }
+
+  @Test
+  void storedOverlargeLimitsCannotRelaxPlatformCeiling() {
+    business(
+        () -> {
+          var configured = Json.object();
+          for (Limit limit : Limit.values()) configured.put(limit.name(), 9007199254740991L);
+          rows.put(key("network_config", "organization"), Json.object("limits", configured));
+          service("svc:collab");
+          var decision = network.check(null);
+          for (Limit limit : Limit.values())
+            assertEquals(limit.defaultValue(), decision.limits().get(limit));
+          configured.put(Limit.BODY_BYTES.name(), 1);
+          rows.put(key("network_config", "organization"), Json.object("limits", configured));
+          assertEquals(1L, network.check(null).limits().get(Limit.BODY_BYTES));
+        });
+  }
+
+  @Test
+  void realCredentialAuthorityRechecksDeviceAndBackingSessionWithoutCache() {
+    business(
+        () -> {
+          String sessionId = UUID.randomUUID().toString();
+          var sessions = mock(SessionManager.class);
+          when(sessions.activeById(sessionId))
+              .thenReturn(
+                  Json.object(
+                      "sessionId",
+                      sessionId,
+                      "accountId",
+                      account.toString(),
+                      "audience",
+                      "portal",
+                      "expiresAt",
+                      clock.instant().plusSeconds(7200).toString(),
+                      "idleExpiresAt",
+                      clock.instant().plusSeconds(60).toString()));
+          ObjectNode deviceRow =
+              Json.object(
+                  "accountId",
+                  account.toString(),
+                  "sessionId",
+                  sessionId,
+                  "scope",
+                  "auriga.connect",
+                  "revoked",
+                  false);
+          rows.put(key("device", device.toString()), deviceRow);
+          var real = new DeviceAccessAuthority(store, sessions, mock(TokenService.class));
+          var valid = real.credential(tenant.toString(), account.toString(), device.toString());
+          assertNotNull(valid);
+          assertEquals(clock.instant().plusSeconds(60), valid.expiresAt());
+          deviceRow.put("revoked", true);
+          assertNull(real.credential(tenant.toString(), account.toString(), device.toString()));
+          deviceRow.put("revoked", false);
+          when(sessions.activeById(sessionId)).thenReturn(null);
+          assertNull(real.credential(tenant.toString(), account.toString(), device.toString()));
+        });
+  }
+}

@@ -7,10 +7,12 @@ import java.util.Set;
 public final class IamAccountEvents implements EventHandler {
   private final IamStore store;
   private final SessionManager sessions;
+  private final IamNetworkPolicyRevision policyRevision;
 
   public IamAccountEvents(IamStore store, SessionManager sessions) {
     this.store = store;
     this.sessions = sessions;
+    this.policyRevision = new IamNetworkPolicyRevision(store);
   }
 
   @Override
@@ -27,16 +29,14 @@ public final class IamAccountEvents implements EventHandler {
   public void handle(ReceivedEvent event) {
     store.tx(
         () -> {
+          // Same FIRST business lock as network target/source final verification. Session/device
+          // effects must precede account FOR UPDATE, never account -> session.
+          store.lock("network-authority");
           String id = event.data().path("userId").asString();
-          var account = store.get("account", id, true);
-          if (account == null) return null;
-          if (event.type().equals("user.permissions_changed")) {
-            sessions.permissionsChanged(id);
-            return null;
-          }
-          account.put("status", event.type().equals("user.enabled") ? "active" : "disabled");
-          store.save("account", account);
-          if (!event.type().equals("user.enabled"))
+          if (store.get("account", id, false) == null) return null;
+          boolean permissions = event.type().equals("user.permissions_changed");
+          if (permissions) sessions.permissionsChanged(id);
+          else if (!event.type().equals("user.enabled"))
             sessions.revoke(
                 RevokeSessionsRequest.newBuilder()
                     .setTenantId(event.tenantId().toString())
@@ -47,6 +47,12 @@ public final class IamAccountEvents implements EventHandler {
                             ? RevokeReason.REVOKE_REASON_USER_OFFBOARDED
                             : RevokeReason.REVOKE_REASON_USER_DISABLED)
                     .build());
+          var account = store.get("account", id, true);
+          if (account != null && !permissions) {
+            account.put("status", event.type().equals("user.enabled") ? "active" : "disabled");
+            store.save("account", account);
+          }
+          policyRevision.bump();
           return null;
         });
   }

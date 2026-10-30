@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+import "auriga/iam/v1/network_authority.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Internal ONLY: standard svc:collab JWT, delegated non-platform business
+// auriga-tenant-id and existing trusted transport. Never user/model callable.
+// Does not widen NetworkGatewayService or authorize a message, thread, recipient
+// or execution. Normative lifecycle, locking and signing mapping:
+// contracts/network/iam-directory.md, "Agent source authority".
+// Before NEW Register issuance/Get, the plugin invokes the trusted native resolver
+// and pushes its current witness. Collab verifies it, current node health/epoch
+// and the locked typed-local witness; Java does not invoke a Node resolver.
+// Call IAM OUTSIDE collab transactions; activate only by a final local CAS.
+// These are trusted service duties, not independent IAM proof of a native host.
+// Missing implementation/wiring MUST fail closed (UNIMPLEMENTED/unavailable).
+service NetworkSourceAuthorityService {
+  // Empty predecessor + expected_revision=0 creates the first generation only.
+  // An EXPIRED current head + positive predecessor revision CAS creates a NEW
+  // binding after full fresh checks, even on the same healthy connection.
+  // Same tenant/method/operation_id + identical original body reads the saved
+  // response after service/tenant/IAM-retained ownership-anchor checks, even if
+  // the original transport expired. Unknown operations require full live issuance
+  // checks unless an original-op definitive-uncommitted fence is established as
+  // specified below. Saved failure receipts never issue. Changed body conflicts.
+  // Receipt reads never authorize,
+  // create, extend or revive; then Get with the current connection and local CAS.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc RegisterAgentSource(RegisterAgentSourceRequest) returns (RegisterAgentSourceResponse);
+  // Historical result ONLY, without native/current-transport checks. Exact frozen
+  // original request and IAM-retained ownership anchors are required. A miss or
+  // indeterminate result fails closed (UNAVAILABLE/FORBIDDEN), never registers or
+  // establishes not_committed. No source/operation/tombstone/generation writes.
+  // Even an original ACTIVE receipt grants no current permission or activation.
+  // Receipt RPCs deliberately return the same immutable original receipt.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc ReadAgentSourceReceipt(ReadAgentSourceReceiptRequest) returns (RegisterAgentSourceResponse);
+  // Never issues or performs current permission/native/Get checks. Returns an
+  // existing original receipt, or durably fences the original Register key ONLY
+  // after retained redeem provenance proves the exact original C irreversibly
+  // expired/cleaned and the operation is still missing under Register's locks.
+  // Live C, absent/bad provenance and indeterminate failures never prove failure.
+  // Deliberately reuses the immutable Register response, including rejection.
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc FenceAgentSourceReceipt(FenceAgentSourceReceiptRequest) returns (RegisterAgentSourceResponse);
+  // Revalidates the exact CURRENT redeem connection, original owner/device/live
+  // backing identity, registration, source state/expiry and current permissions.
+  // Same-device reconnect may change transport, never the saved source tuple.
+  rpc GetAgentSource(GetAgentSourceRequest) returns (GetAgentSourceResponse);
+  // Revision-independent narrowing revocation. Commit serializes with Get/signing on the
+  // IAM lineage/source locks; explicit revocation also stops successor issuance
+  // and revokes the active lineage head. Retry never renews or removes this stop.
+  rpc RevokeAgentSource(RevokeAgentSourceRequest) returns (RevokeAgentSourceResponse);
+}
+
+// Only ordinary agent/session, existing-conversation, durable unicast send.
+// Zero/unknown values MUST be rejected, never inferred from enum defaults.
+enum NetworkAgentSourceScope {
+  NETWORK_AGENT_SOURCE_SCOPE_UNSPECIFIED = 0;
+  NETWORK_AGENT_SOURCE_SCOPE_DURABLE_UNICAST_SEND = 1;
+}
+
+enum NetworkAgentSourceState {
+  NETWORK_AGENT_SOURCE_STATE_UNSPECIFIED = 0;
+  NETWORK_AGENT_SOURCE_STATE_ACTIVE = 1;
+  NETWORK_AGENT_SOURCE_STATE_REVOKED = 2;
+  NETWORK_AGENT_SOURCE_STATE_EXPIRED = 3;
+}
+
+// Collab-owned immutable opaque local witness, NOT a native session mapping.
+// All fields required. Numeric address strings are canonical positive uint64
+// decimal; revision is positive uint64. IDs/digest use network OpaqueId/Digest.
+message NetworkAgentSourceRegistration {
+  string registration_id = 1;
+  string allocation_op_id = 2;
+  string allocation_fingerprint = 3;
+  uint64 registration_revision = 4;
+  string realm = 5;
+  string node = 6;
+  string local = 7;
+  // Exactly "session" in this contract. No system/subagent/group or fallback.
+  string address_type = 8;
+}
+
+// Minimal INTERNAL saved fact. Binding IDs are IAM-generated OpaqueIds, never
+// reassigned; connection/registration/owner/scope/times/predecessor are immutable.
+// IAM also stores the derived device/backing-session anchors, never supplied
+// by callers or returned here. No host ID/tree, message body, token or key.
+// State is current only in Get; mutation responses are immutable receipts.
+message NetworkAgentSource {
+  string source_binding = 1;
+  NetworkAuthorityConnection original_connection = 2;
+  NetworkAgentSourceRegistration registration = 3;
+  NetworkAgentSourceScope scope = 4;
+  uint64 revision = 5;
+  NetworkAgentSourceState state = 6;
+  // IAM-derived owner; only for constructing server-owned SourceContext.user.
+  string owner_user_id = 7;
+  // UTC whole-second RFC3339. Saved maximum validity, NOT a cached allow lease.
+  string not_before = 8;
+  string expires_at = 9;
+  // Empty for first issuance; otherwise the EXPIRED predecessor. This is an
+  // opaque permission-generation link, never a host session/parent relationship.
+  string predecessor_binding = 10;
+}
+
+message RegisterAgentSourceRequest {
+  // Exact authenticated source redeem tuple, not the signing target tuple.
+  NetworkAuthorityConnection connection = 1;
+  NetworkAgentSourceRegistration registration = 2;
+  // Stable OpaqueId, persisted before RPC; never an authorization credential.
+  string operation_id = 3;
+  NetworkAgentSourceScope scope = 4;
+  // Zero iff predecessor_binding is empty. Otherwise the current EXPIRED
+  // predecessor's positive revision; CAS serializes exactly one successor.
+  // Always creates a new binding, never updates/revives the predecessor.
+  uint64 expected_revision = 5;
+  // OpaqueId of the current lineage head, same immutable registration/scope and
+  // IAM identity anchors. Explicit stop/revocation forbids any successor.
+  string predecessor_binding = 6;
+}
+
+// Deliberately no current connection, claimed owner or independently mutable op.
+// Collab supplies its complete durable original request, including the OLD C.
+message ReadAgentSourceReceiptRequest {
+  RegisterAgentSourceRequest original_request = 1;
+}
+
+// Exact durable original Register body, including OLD C; no current connection,
+// claimed owner, native witness or independently mutable operation/digest.
+message FenceAgentSourceReceiptRequest {
+  RegisterAgentSourceRequest original_request = 1;
+}
+
+message RegisterAgentSourceResponse {
+  // Original create receipt (revision=1). Replays may already be revoked/expired;
+  // callers MUST Get before use and cannot activate from this receipt alone.
+  NetworkAgentSource source = 1;
+  // Mutually exclusive with source. ONLY after original connection ownership
+  // verification, same-original-op serialization and a DURABLE failure receipt:
+  // no source committed, and either the original connection is invalid OR a
+  // still-valid request is deterministically rejected for revision mismatch,
+  // non-head predecessor or stopped lineage. The rejection receipt must commit.
+  // Late Register cannot commit after this fence. Unknown/forbidden/timeouts
+  // are NOT proof. Replays return this original response; it never authorizes.
+  bool definitively_uncommitted = 2;
+  // Required only for the definitive-failure branch, exactly the original op.
+  string operation_id = 3;
+  // Required with definitive failure: sha256:<lowercase hex> of JCS(original
+  // request) using the explicit snake_case JSON mapping in iam-directory.md.
+  string request_digest = 4;
+  // Required with definitively_uncommitted: exactly one of
+  // original_connection_invalid_uncommitted, revision_mismatch,
+  // predecessor_not_head, lineage_stopped. A plain gRPC error is not a receipt.
+  string rejection_reason = 5;
+}
+
+message GetAgentSourceRequest {
+  string source_binding = 1;
+  NetworkAuthorityConnection connection = 2;
+  // Actual current collab lookup/lock result, exact match to original witness.
+  NetworkAgentSourceRegistration registration = 3;
+}
+
+message GetAgentSourceResponse {
+  NetworkAgentSource source = 1;
+  // Exact current authenticated source connection echo; never replaces original.
+  NetworkAuthorityConnection connection = 2;
+  // Current IAM tenant network-policy snapshot revision, positive uint64.
+  // All relevant source/target policy mutations advance it; never supplied by
+  // collab. AuthorizeNetworkDelivery must independently reread/recheck it.
+  uint64 policy_revision = 3;
+  string observed_at = 4;
+  // Shortest current IAM-policy/identity/connection/source deadline. Empty for
+  // non-active facts. This observation does NOT grant signing or execution.
+  string valid_until = 5;
+  // Required presence for the new source-control projection, including false.
+  // Distinguishes naturally expired sources from expired predecessors in a
+  // stopped lineage. Missing means unavailable, never infer false. This does
+  // not change the named generation's stored state/revision or grant authority.
+  optional bool lineage_stopped = 6;
+}
+
+message RevokeAgentSourceRequest {
+  string source_binding = 1;
+  NetworkAuthorityConnection connection = 2;
+  // Retained for wire compatibility only, NOT an exact-revision precondition.
+  // Missing/zero/stale values never block narrowing revocation. Collab emits 0.
+  uint64 expected_revision = 3 [deprecated = true];
+  string operation_id = 4;
+}
+
+message RevokeAgentSourceResponse {
+  // Committed terminal receipt AND durable lineage stop confirmation. Expired
+  // named generations remain expired; any active head is revoked atomically.
+  // Never creates, extends or returns active state.
+  NetworkAgentSource source = 1;
+}

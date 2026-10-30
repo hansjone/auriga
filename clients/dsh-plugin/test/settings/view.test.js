@@ -1,0 +1,305 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { setImmediate } from 'node:timers/promises';
+import { createSettingsView } from '../../src/settings/view.js';
+
+function harness(fetcher, locale = 'zh') {
+  const values = [],
+    effects = [];
+  let cursor = 0,
+    navigated;
+  const React = {
+    createElement: (type, props, ...children) => ({
+      type,
+      props: props ?? {},
+      children: children.flat(Infinity),
+    }),
+    useState(initial) {
+      const i = cursor++;
+      if (!(i in values)) values[i] = initial;
+      return [
+        values[i],
+        (next) => {
+          values[i] = typeof next === 'function' ? next(values[i]) : next;
+        },
+      ];
+    },
+    useReducer(fn, initial) {
+      const [value, set] = React.useState(initial);
+      return [value, () => set(fn)];
+    },
+    useEffect(fn, deps) {
+      const i = cursor++;
+      if (!values[i] || values[i].deps.some((v, j) => v !== deps[j])) {
+        values[i]?.cleanup?.();
+        values[i] = { deps };
+        effects.push(() => {
+          values[i].cleanup = fn();
+        });
+      }
+    },
+  };
+  const View = createSettingsView(React, {
+    localURL: (p) => 'https://example.com/' + p,
+    fetcher,
+    navigate: (to) => {
+      navigated = to;
+    },
+  });
+  return {
+    render() {
+      cursor = 0;
+      const tree = View({ locale });
+      effects.splice(0).forEach((fn) => fn());
+      return tree;
+    },
+    get navigated() {
+      return navigated;
+    },
+    dispose() {
+      values.forEach((v) => v?.cleanup?.());
+    },
+  };
+}
+function nodes(tree) {
+  return tree && typeof tree === 'object'
+    ? [tree, ...tree.children.flatMap(nodes)]
+    : [];
+}
+function text(tree) {
+  return tree && typeof tree === 'object'
+    ? tree.children.map(text).join(' ')
+    : String(tree ?? '');
+}
+const button = (tree, label) =>
+  nodes(tree).find((n) => n.type === 'button' && text(n) === label);
+
+test('switch failure clears stale identity from authoritative state and same-address retry prompts sign-in', async () => {
+  let saved = {
+    platformOrigin: 'https://old.example.com',
+    activeOrigin: 'https://old.example.com',
+    deployment: 'cloud',
+  };
+  let saves = 0;
+  const calls = [];
+  const fixture = harness(async (url, init) => {
+    const path = new URL(url).pathname;
+    calls.push(path);
+    if (path.endsWith('/save')) {
+      saves++;
+      const input = JSON.parse(init.body);
+      saved = {
+        ...input,
+        activeOrigin: saves === 1 ? '' : input.platformOrigin,
+      };
+      return Response.json(saves === 1 ? { reason: 'unavailable' } : saved, {
+        status: saves === 1 ? 503 : 200,
+      });
+    }
+    if (path.endsWith('/status'))
+      return saves === 0
+        ? Response.json({
+            loggedIn: true,
+            connected: true,
+            account: { subject: 'alice' },
+          })
+        : saves === 1
+          ? Response.json({}, { status: 503 })
+          : Response.json({ loggedIn: false, connected: false });
+    return Response.json(saved);
+  });
+  try {
+    fixture.render();
+    await setImmediate();
+    let tree = fixture.render();
+    assert.match(text(tree), /alice/);
+    assert.match(text(tree), /Team 已连接/);
+    nodes(tree)
+      .find((n) => n.type === 'input')
+      .props.onChange({ target: { value: 'https://new.example.com' } });
+    await button(fixture.render(), '保存').props.onClick();
+    tree = fixture.render();
+    assert.equal(
+      nodes(tree).find((n) => n.type === 'input').props.value,
+      'https://new.example.com',
+    );
+    assert.doesNotMatch(text(tree), /alice|Team 已连接/);
+    assert.match(text(tree), /连接暂未生效/);
+    assert.equal(button(tree, '退出本机登录'), undefined);
+    assert.equal(fixture.navigated, undefined);
+    await button(tree, '保存').props.onClick();
+    tree = fixture.render();
+    assert.match(text(tree), /未登录/);
+    assert.doesNotMatch(text(tree), /alice|Team 已连接|连接暂未生效/);
+    assert.equal(fixture.navigated, 'https://example.com/auriga/local-login');
+    assert.equal(calls.filter((path) => path.endsWith('/save')).length, 2);
+    assert.equal(calls.filter((path) => path.endsWith('/state')).length, 3);
+    assert.equal(calls.filter((path) => path.endsWith('/status')).length, 3);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test('verified identity remains visible when communication is unavailable', async () => {
+  const fixture = harness(async (url) =>
+    Response.json(
+      url.endsWith('/status')
+        ? {
+            loggedIn: true,
+            connected: false,
+            communication: 'unavailable',
+            account: { subject: 'alice' },
+          }
+        : {
+            platformOrigin: 'https://example.com',
+            activeOrigin: 'https://example.com',
+            deployment: 'cloud',
+          },
+    ),
+  );
+  fixture.render();
+  await setImmediate();
+  const tree = fixture.render();
+  assert.match(text(tree), /通信未就绪/);
+  assert.match(text(tree), /alice/);
+  assert.doesNotMatch(text(tree), /Team 已连接|未登录/);
+  assert.ok(button(tree, '退出本机登录'));
+  fixture.dispose();
+});
+
+for (const failure of ['500', 'timeout', 'invalid-json', 'invalid-state'])
+  test(`account ${failure} is unknown and retryable, distinct from a signed-out response`, async () => {
+    let recover = false;
+    const fixture = harness(async (url) => {
+      if (!url.endsWith('/status'))
+        return Response.json({
+          platformOrigin: 'https://example.com',
+          activeOrigin: 'https://example.com',
+          deployment: 'cloud',
+        });
+      if (recover) return Response.json({ loggedIn: false, connected: false });
+      if (failure === '500') return Response.json({}, { status: 500 });
+      if (failure === 'timeout')
+        throw Object.assign(new Error('private'), { name: 'TimeoutError' });
+      if (failure === 'invalid-json') return new Response('private');
+      return Response.json({ loggedIn: 'false', connected: true });
+    });
+    fixture.render();
+    await setImmediate();
+    let tree = fixture.render();
+    assert.match(text(tree), /登录状态暂时无法读取/);
+    assert.doesNotMatch(text(tree), /未登录|Team 未连接|Team 已连接|private/);
+    assert.ok(
+      nodes(tree).some(
+        (n) =>
+          n.type === 'button' && n.props['aria-label'] === '刷新设置与登录状态',
+      ),
+    );
+    recover = true;
+    nodes(tree)
+      .find(
+        (n) =>
+          n.type === 'button' && n.props['aria-label'] === '刷新设置与登录状态',
+      )
+      .props.onClick();
+    fixture.render();
+    await setImmediate();
+    tree = fixture.render();
+    assert.match(text(tree), /未登录/);
+    assert.doesNotMatch(text(tree), /登录状态暂时无法读取/);
+    fixture.dispose();
+  });
+
+test('settings show unconfigured state and persist edited address and deployment through save', async () => {
+  let stored = { platformOrigin: '', activeOrigin: '', deployment: 'cloud' };
+  const fixture = harness(async (url, init) => {
+    if (url.endsWith('/status'))
+      return Response.json({ loggedIn: false, connected: true });
+    if (url.endsWith('/save'))
+      stored = { ...JSON.parse(init.body), activeOrigin: '' };
+    return Response.json(stored);
+  });
+  fixture.render();
+  await setImmediate();
+  let tree = fixture.render();
+  assert.match(text(tree), /尚未配置平台连接/);
+  assert.doesNotMatch(text(tree), /Team 已连接/);
+  nodes(tree)
+    .find((n) => n.type === 'input')
+    .props.onChange({ target: { value: 'https://example.com' } });
+  nodes(tree)
+    .find((n) => n.type === 'select')
+    .props.onChange({ target: { value: 'local' } });
+  await button(fixture.render(), '保存').props.onClick();
+  tree = fixture.render();
+  assert.equal(stored.deployment, 'local');
+  assert.equal(stored.platformOrigin, 'https://example.com');
+  assert.match(text(tree), /连接暂未生效/);
+  assert.equal(
+    nodes(tree).find((n) => n.type === 'a').props.href,
+    'https://example.com/',
+  );
+  fixture.dispose();
+});
+
+test('account view uses sign-in identity, reports missing metadata, and reuses CSRF logout route', async () => {
+  const requests = [];
+  const fixture = harness(async (url, init) => {
+    requests.push([url, init]);
+    if (url.endsWith('/status'))
+      return Response.json({
+        loggedIn: true,
+        connected: true,
+        account: { subject: 'alice' },
+        csrf: 'test-csrf',
+      });
+    return Response.json({
+      platformOrigin: 'https://example.com',
+      activeOrigin: 'https://example.com',
+      deployment: 'cloud',
+      deviceName: 'Auriga DSH',
+    });
+  });
+  fixture.render();
+  await setImmediate();
+  const tree = fixture.render();
+  assert.match(text(tree), /alice/);
+  assert.match(text(tree), /Auriga DSH/);
+  assert.match(text(tree), /当前登录接口未提供/);
+  assert.match(text(tree), /模型授权需单独确认/);
+  await button(tree, '退出本机登录').props.onClick();
+  const [url, init] = requests.at(-1);
+  assert.ok(url.endsWith('/auriga/local-login/logout'));
+  assert.equal(init.headers['X-Auriga-CSRF'], 'test-csrf');
+  assert.equal(init.body, '{}');
+  assert.equal(fixture.navigated, 'https://example.com/auriga/local-login');
+  fixture.dispose();
+});
+
+test('failed connection and failed logout remain visible without navigating or reporting success', async () => {
+  const fixture = harness(async (url) => {
+    if (url.endsWith('/status'))
+      return Response.json({
+        loggedIn: true,
+        connected: false,
+        account: { subject: 'alice' },
+        csrf: 'test-csrf',
+      });
+    if (url.endsWith('/logout')) return new Response(null, { status: 503 });
+    if (url.endsWith('/test'))
+      return Response.json({ reachable: false, reason: 'http', status: 503 });
+    return Response.json({
+      platformOrigin: 'https://example.com',
+      activeOrigin: 'https://example.com',
+      deployment: 'cloud',
+    });
+  }, 'en');
+  fixture.render();
+  await setImmediate();
+  await button(fixture.render(), 'Test connection').props.onClick();
+  assert.match(text(fixture.render()), /HTTP 503/);
+  await button(fixture.render(), 'Sign out locally').props.onClick();
+  assert.match(text(fixture.render()), /Please sign in again/);
+  assert.equal(fixture.navigated, undefined);
+  fixture.dispose();
+});

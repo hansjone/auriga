@@ -1,0 +1,16 @@
+# Local Windows only. Pair with combined,dev; paths and secrets are supplied by the private launcher.
+auriga:
+  iam:
+    session-kv-nats: false
+    clients:
+      - id: auriga-beta-native
+        tenant: 00000000-0000-0000-0000-000000000001
+        secret-hash: ''
+        redirect-uris: []
+        scopes: [auriga.connect]
+        grants: [urn:ietf:params:oauth:grant-type:device_code, refresh_token]
+        platform: true
+        native-connect: true
+  events:
+    nats-url: ''
+    ensure-streams: false

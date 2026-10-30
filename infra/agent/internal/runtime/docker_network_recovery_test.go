@@ -3,6 +3,7 @@ package runtime_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -28,11 +29,18 @@ type edgeRecoveryFixture struct {
 	starts   atomic.Int64
 	connects atomic.Int64
 	probes   atomic.Int64
+	request  atomic.Value // Last Engine request, for scheduling-guard diagnostics.
 }
 
 func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 	t.Helper()
+	return newEdgeRecoveryFixtureWithIOGuard(t, failure, time.Second)
+}
+
+func newEdgeRecoveryFixtureWithIOGuard(t *testing.T, failure string, ioGuard time.Duration) *edgeRecoveryFixture {
+	t.Helper()
 	f := &edgeRecoveryFixture{failure: failure, attached: failure == "existing-alias"}
+	f.request.Store("no Engine request")
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		f.probes.Add(1)
 		_, _ = w.Write([]byte(readyBody))
@@ -43,6 +51,7 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 		t.Fatal(err)
 	}
 	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.request.Store(r.Method + " " + r.URL.Path)
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		switch {
@@ -122,7 +131,7 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 		}
 	}))
 	t.Cleanup(engine.Close)
-	f.client, err = runtime.DialEngine(engine.URL, time.Second)
+	f.client, err = runtime.DialEngine(engine.URL, ioGuard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +147,16 @@ func newEdgeRecoveryFixture(t *testing.T, failure string) *edgeRecoveryFixture {
 
 func TestDockerStartRestoresReplacementEdgeWithoutRebuildingInstance(t *testing.T) {
 	f := newEdgeRecoveryFixture(t, "")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	// The assertions concern completed, idempotent recovery. Independent Start
+	// calls must not inherit time consumed by prior calls or test scheduling.
+	// Each Start has a separate cancel-and-join scheduling watchdog below.
+	ctx := context.Background()
 	before, err := f.client.ContainerInspect(ctx, "auriga-inst-recovery-test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := startDocker(t, f.driver, ctx, "recovery-test"); err != nil {
+		if err := completedEdgeRecoveryStart(t, f, 15*time.Second); err != nil {
 			t.Fatal(err)
 		}
 		if f.connects.Load() != 1 || f.starts.Load() != 1 || f.probes.Load() != int64(attempt+1) {
@@ -162,6 +173,9 @@ func TestDockerStartRestoresReplacementEdgeWithoutRebuildingInstance(t *testing.
 }
 
 func TestDockerStartRejectsUnsafeEdgeRecoveryBeforeStartingOrProbing(t *testing.T) {
+	// This is a safety assertion, not a one-second business SLA. The separate
+	// guard bounds scheduling/Engine stalls; only completed Start can reject.
+	const schedulingGuard = 15 * time.Second
 	for failure, expected := range map[string]string{
 		"network-owner": "ownership/isolation mismatch", "external-network": "ownership/isolation mismatch", "network-driver": "ownership/isolation mismatch",
 		"foreign-member": "unexpected instance network member", "instance-owner": "actual container identity mismatch",
@@ -170,10 +184,13 @@ func TestDockerStartRejectsUnsafeEdgeRecoveryBeforeStartingOrProbing(t *testing.
 		"connect-noop": "edge platform alias was not applied", "connect-alias": "edge platform alias was not applied", "connect-network": "edge platform alias was not applied",
 	} {
 		t.Run(failure, func(t *testing.T) {
-			f := newEdgeRecoveryFixture(t, failure)
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			err := startDocker(t, f.driver, ctx, "recovery-test")
+			// Only this negative fixture has a longer fake I/O guard. Leave the
+			// positive fixtures' client and three-second contexts unchanged.
+			f := newEdgeRecoveryFixtureWithIOGuard(t, failure, 2*schedulingGuard)
+			err := completedEdgeRecoveryStart(t, f, schedulingGuard)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("unsafe recovery did not reach business rejection: %v", err)
+			}
 			if err == nil || !strings.Contains(err.Error(), expected) {
 				t.Fatalf("unsafe recovery accepted or wrong error: %v; want %q", err, expected)
 			}
@@ -184,6 +201,37 @@ func TestDockerStartRejectsUnsafeEdgeRecoveryBeforeStartingOrProbing(t *testing.
 				t.Fatal("unsafe pre-existing state was changed")
 			}
 		})
+	}
+}
+
+func completedEdgeRecoveryStart(t *testing.T, f *edgeRecoveryFixture, guard time.Duration) error {
+	t.Helper()
+	// All PKI, Store seeding and fixture setup has completed before this guard.
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var result error
+	go func() {
+		defer close(done)
+		result = startDocker(t, f.driver, ctx, "recovery-test")
+	}()
+	// Registered after fixture/Store/TempDir cleanup: cancel and join first,
+	// including on failed assertions. No Start may write after resource cleanup.
+	join := func() {
+		cancel()
+		<-done
+	}
+	t.Cleanup(join)
+	defer join()
+	timer := time.NewTimer(guard)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return result
+	case <-timer.C:
+		request := f.request.Load()
+		join()
+		t.Fatalf("recovery scheduling guard expired after %s; last Engine request: %v; Start joined: %v", guard, request, result)
+		return nil
 	}
 }
 

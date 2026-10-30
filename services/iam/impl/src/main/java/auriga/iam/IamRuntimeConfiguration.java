@@ -209,6 +209,123 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  IamGrpcDevices iamGrpcDevices(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      IamGrpcSessions transportGuard,
+      Clock clock,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    var devices = new DeviceAccessAuthority(store, sessions, tokens);
+    return new IamGrpcDevices(
+        devices,
+        new DeviceAiAccessAuthority(
+            devices,
+            tokens,
+            authorization.getIfAvailable(
+                () ->
+                    request -> {
+                      throw new auriga.common.error.AurigaException(
+                          auriga.common.error.CommonErrors.UNAVAILABLE);
+                    }),
+            clock));
+  }
+
+  @Bean
+  IamGrpcNetwork iamGrpcNetwork(NetworkAuthority authority, IamGrpcSessions transportGuard) {
+    return new IamGrpcNetwork(authority);
+  }
+
+  @Bean
+  IamGrpcNetworkAuthority iamGrpcNetworkAuthority(
+      IamNetworkAuthority authority,
+      IamGrpcSessions transportGuard,
+      Clock clock,
+      IamNetworkSourceAuthority sources) {
+    return new IamGrpcNetworkAuthority(authority, clock, sources);
+  }
+
+  @Bean
+  IamNetworkSourceAuthority iamNetworkSourceAuthority(
+      IamStore store,
+      IamNetworkAuthority network,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    return new IamNetworkSourceAuthority(
+        store,
+        network,
+        new DeviceAccessAuthority(store, sessions, tokens),
+        authorization.getIfAvailable(
+            () ->
+                request -> {
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.UNAVAILABLE);
+                }),
+        clock,
+        IamNetworkSourceAuthority.Policy.from(env));
+  }
+
+  @Bean
+  IamGrpcNetworkSources iamGrpcNetworkSources(
+      IamNetworkSourceAuthority authority, IamGrpcSessions transportGuard) {
+    return new IamGrpcNetworkSources(authority);
+  }
+
+  @Bean
+  NetworkDirectory iamNetworkDirectory(
+      IamStore store, SessionManager sessions, TokenService tokens, Clock clock) {
+    return new IamNetworkDirectory(
+        store, sessions, new DeviceAccessAuthority(store, sessions, tokens), clock);
+  }
+
+  @Bean
+  IamGrpcNetworkDirectory iamGrpcNetworkDirectory(
+      NetworkDirectory directory, IamGrpcSessions transportGuard) {
+    return new IamGrpcNetworkDirectory(directory);
+  }
+
+  @Bean
+  NetworkIngressCleanup networkIngressCleanup(IamStore store, Clock clock) {
+    return new NetworkIngressCleanup(store, clock);
+  }
+
+  @Bean
+  IamNetworkAuthority iamNetworkAuthority(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      AuditLogger audit,
+      Clock clock,
+      Environment env) {
+    return new IamNetworkAuthority(
+        store,
+        new DeviceAccessAuthority(store, sessions, tokens),
+        audit,
+        clock,
+        Set.copyOf(
+            Binder.get(env)
+                .bind("auriga.iam.network.server-audiences", Bindable.listOf(String.class))
+                .orElse(List.of())));
+  }
+
+  @Bean
+  IamNetworkClient iamNetworkClient(
+      NetworkAuthority authority, IamStore store, Clock clock, Environment env) {
+    return new IamNetworkClient(
+        authority,
+        store,
+        clock,
+        env.getProperty("auriga.iam.network.client-server-audience", ""),
+        Set.copyOf(
+            Binder.get(env)
+                .bind("auriga.iam.network.server-audiences", Bindable.listOf(String.class))
+                .orElse(List.of())));
+  }
+
+  @Bean
   IamAccounts iamAccounts(IamStore store) {
     return new IamAccounts(store);
   }
@@ -336,20 +453,24 @@ public class IamRuntimeConfiguration {
       org.springframework.beans.factory.ObjectProvider<EventPublisher> events,
       AuditLogger audit,
       Clock clock,
-      TokenService tokens) {
-    return new LoginManager(
-        store,
-        secrets,
-        schemas,
-        registry,
-        emergency,
-        teamAccounts,
-        sessions,
-        hooks,
-        iamEvents.getIfAvailable(events::getObject),
-        audit,
-        clock,
-        tokens.issuer());
+      TokenService tokens,
+      OAuthProvider nativeDevices) {
+    var manager =
+        new LoginManager(
+            store,
+            secrets,
+            schemas,
+            registry,
+            emergency,
+            teamAccounts,
+            sessions,
+            hooks,
+            iamEvents.getIfAvailable(events::getObject),
+            audit,
+            clock,
+            tokens.issuer());
+    manager.nativeDevices(nativeDevices);
+    return manager;
   }
 
   @Bean
@@ -365,7 +486,12 @@ public class IamRuntimeConfiguration {
 
   @Bean
   OAuthProvider iamOAuth(
-      IamStore store, SessionManager sessions, TokenService tokens, Clock clock, Environment env) {
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Clock clock,
+      Environment env,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
     return new OAuthProvider(
         store,
         sessions,
@@ -373,7 +499,13 @@ public class IamRuntimeConfiguration {
         clock,
         Binder.get(env)
             .bind("auriga.iam.clients", Bindable.listOf(OAuthClient.class))
-            .orElse(List.of()));
+            .orElse(List.of()),
+        authorization.getIfAvailable(
+            () ->
+                request -> {
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.UNAVAILABLE);
+                }));
   }
 
   @Bean

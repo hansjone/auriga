@@ -14,6 +14,7 @@ const adminCSRFBootstrapPath = "/api/iam/v1/admin/session/csrf-tokens"
 
 var loginTransactionPath = regexp.MustCompile(`^/api/iam/v1/login/transactions/[0-9a-fA-F-]+(?:/advance|/events)?$`)
 var loginCallbackPath = regexp.MustCompile(`^/api/iam/v1/login/callback/[0-9a-fA-F-]+$`)
+var invitationPreviewPath = regexp.MustCompile(`^/api/org/v1/invitations/preview/[^/]+$`)
 
 func loginOperation(r *http.Request) bool {
 	p := r.URL.Path
@@ -42,7 +43,7 @@ func protocolOperation(r *http.Request) bool {
 	switch r.URL.Path {
 	case "/.well-known/openid-configuration", "/oauth2/jwks", "/userinfo":
 		return r.Method == "GET"
-	case "/oauth2/token", "/oauth2/device_authorization":
+	case "/oauth2/token", "/oauth2/device_authorization", "/oauth2/revoke":
 		return r.Method == "POST"
 	case "/oauth2/authorize":
 		return r.Method == "GET" || r.Method == "POST"
@@ -65,12 +66,22 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	fail := func(status int, code string) {
 		writeProblem(w, problem(status, code, http.StatusText(status), "request rejected", rid))
 	}
+	unavailable := func(reason string) {
+		if g.Log != nil {
+			g.Log.Warn("Access API request rejected", "reason", reason, "requestId", rid)
+		}
+		fail(503, "common.unavailable")
+	}
 	e, ok := r.Context().Value(accessEntryKey{}).(accessEntry)
 	if !ok {
 		fail(403, "common.forbidden")
 		return
 	}
 	iam := target == g.iamURL
+	if r.URL.Path == "/oauth2/revoke" && (r.Method != http.MethodPost || audience != "portal") {
+		fail(403, "common.forbidden")
+		return
+	}
 	bootstrap := r.Method == "POST" && r.URL.Path == adminCSRFBootstrapPath
 	ipAdmin := g.Cfg.Access.Mode() == "ip" && audience == "admin"
 	if r.URL.Path == adminCSRFBootstrapPath && (!bootstrap || !ipAdmin) {
@@ -81,7 +92,13 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		fail(403, "common.forbidden")
 		return
 	}
-	public := iam && (loginOperation(r) || protocolOperation(r))
+	preview := target == g.orgURL && r.Method == http.MethodGet && invitationPreviewPath.MatchString(r.URL.Path)
+	// A second decoder upstream must not turn an anonymous code into separators or dot segments.
+	if preview && strings.Contains(strings.ToLower(r.URL.EscapedPath()), "%25") {
+		fail(http.StatusBadRequest, "edge.bad_path")
+		return
+	}
+	public := preview || iam && (loginOperation(r) || protocolOperation(r))
 	raw, cookieOK := singleCookie(r, cookieName(e.scheme == "https", sessionCookieBase(audience)))
 	count := 0
 	for _, cookie := range r.Cookies() {
@@ -94,10 +111,11 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		return
 	}
 	var sess *Session
-	if cookieOK {
+	// Invitation previews are anonymous even when the browser has a session.
+	if cookieOK && !preview {
 		loaded, err := g.browserSession(r, raw, audience, !public && r.Method == http.MethodGet)
 		if err != nil && !errors.Is(err, ErrSessionNotFound) && !errors.Is(err, errIAMUnauthenticated) && !public {
-			fail(503, "common.unavailable")
+			unavailable("browser_session_unavailable")
 			return
 		}
 		if err == nil && loaded.Valid(g.Now().UTC(), audience) == nil && loaded.TenantID == g.Cfg.Access.TenantID() {
@@ -123,7 +141,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	} else if sess != nil && isWriteMethod(r.Method) && !public {
 		if ipAdmin {
 			if g.AdminCSRF == nil {
-				fail(503, "common.unavailable")
+				unavailable("admin_csrf_verifier_unavailable")
 				return
 			}
 			if len(r.Header.Values("X-Auriga-CSRF")) != 1 {
@@ -138,7 +156,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 				case errors.Is(err, errCSRF):
 					fail(403, "common.forbidden")
 				default:
-					fail(503, "common.unavailable")
+					unavailable("admin_csrf_rpc_unavailable")
 				}
 				return
 			}
@@ -160,7 +178,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		}
 	}
 	if iam && g.IAMTransport == nil {
-		fail(503, "common.unavailable")
+		unavailable("iam_transport_unavailable")
 		return
 	}
 	selectedCookies, err := g.iamCookies(r, e, bootstrap)
@@ -186,7 +204,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		transport = g.IAMTransport
 	}
 	if transport == nil {
-		fail(503, "common.unavailable")
+		unavailable("api_transport_unavailable")
 		return
 	}
 	if sess != nil && !public {
@@ -195,23 +213,41 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			if errors.Is(err, errIAMUnauthenticated) {
 				fail(401, "common.unauthenticated")
 			} else {
-				fail(503, "common.unavailable")
+				unavailable("browser_session_touch_unavailable")
 			}
 			return
 		}
 		if !g.Now().UTC().Before(sess.AccessTokenExpiresAt) {
-			fail(503, "common.unavailable")
+			unavailable("browser_access_token_expired")
 			return
 		}
 	}
 	proxy := newReverseProxy(target, transport, true)
+	if target == g.collabURL {
+		proxy.ModifyResponse = func(resp *http.Response) error {
+			if resp.StatusCode >= 300 && resp.StatusCode < 400 && resp.StatusCode != http.StatusNotModified {
+				return errString("collab redirect rejected")
+			}
+			return nil
+		}
+	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, request *http.Request, err error) {
+		if g.Log != nil {
+			g.Log.Warn("Access API request rejected", "reason", "upstream_transport_unavailable", "requestId", requestID(request))
+		}
 		writeProblem(w, problem(503, "common.unavailable", "Service Unavailable", "control plane unavailable", requestID(request)))
 	}
 	base := proxy.Rewrite
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
 		stripUntrustedEntryHeaders(pr.Out.Header)
+		if target == g.collabURL {
+			for name := range pr.Out.Header {
+				if strings.HasPrefix(strings.ToLower(name), "auriga-forwarded-") {
+					pr.Out.Header.Del(name)
+				}
+			}
+		}
 		rewriteOutboundAPI(pr.Out, clientIP, bearer, rid, ensureTraceparent(r))
 		pr.Out.Header.Del("Cookie")
 		if iam {
@@ -226,7 +262,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			pr.Out.Header.Set("X-Auriga-Entry-Origin", origin)
 			pr.Out.Header.Set("X-Auriga-Entry-Role", audience)
 			// OAuth client credentials and userinfo have their own exact protocol authentication.
-			if r.URL.Path == "/oauth2/token" || r.URL.Path == "/oauth2/device_authorization" || r.URL.Path == "/userinfo" {
+			if r.URL.Path == "/oauth2/token" || r.URL.Path == "/oauth2/device_authorization" || r.URL.Path == "/oauth2/revoke" || r.URL.Path == "/userinfo" {
 				if auth != "" {
 					pr.Out.Header.Set("Authorization", auth)
 				}

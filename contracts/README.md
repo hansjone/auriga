@@ -23,6 +23,7 @@
 | `kv/` | NATS KV 里跨服务共享的数据（会话缓存、实例路由） | JSON Schema |
 | `deployment/` | domain/单IPv4受信入口schema、启动语义、cookie/CSRF/实例路径及双模式验收矩阵（IP0，待IP1–IP3接线） | JSON Schema、JSON、Markdown |
 | `runtime/` | 正式 DSH 发行/standalone/背书/根/高水位契约及 Java→Go 向量（RT0，生产待 RT1/RT2） | JSON Schema、JSON、Markdown |
+| `network/` | 通信网络 v1（N0，未实施）：aur1 地址、总部盖章信封与 Ed25519/JCS 服务器签名、NATS 私有应用帧、`network.*` 错误码、硬上限及签名向量/fixtures，见 network/README.md | JSON Schema、JSON、Markdown |
 
 ## 版本与兼容
 

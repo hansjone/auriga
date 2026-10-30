@@ -101,7 +101,7 @@ prettier --write src/generated/managed-config.d.ts
 6. 登录后插件调用 `GET /api/workspace/v1/connect/manifest` 取团队 MCP、团队模型和面板信息，按清单接入；
 7. 连接模式下插件只放行来自本机 loopback 的访问，并校验 `Host` 必须是 `127.0.0.1`、`[::1]` 或 `localhost`（加端口），防 DNS 重绑定。平台的 CORS 白名单放行 DSH Desktop 的来源 `dsh-app://app` 和 loopback 来源，但对 loopback 来源不返回 `Access-Control-Allow-Credentials`，只接受设备 Bearer 令牌。
 8. 批准设备时，门户的确认页必须让用户**手动输入或逐字核对** `user_code`，并显示发起端的 IP 和大致位置；批准要求 10 分钟内做过二次验证（防设备码钓鱼）。
-9. 调团队 MCP 和团队模型用 `aud=auriga.ai-gateway` 的访问令牌（用刷新令牌按 RFC 8707 `resource` 参数换取）；清单里的 MCP 和模型地址必须与平台 `apiBase` 同源，插件拒绝其他地址。
+9. 团队模型用 `aud=auriga.ai-gateway` 的专用访问令牌；原生 `native_tx` 设备通过现有刷新接口的唯一 `resource=urn:auriga:ai-gateway` 换取，精确请求、权限、≤300秒寿命及一次性轮换见 [原生设备 AI resource 契约](../auth/device-ai-resource.md)。平台与 AI 刷新必须由单一串行 broker 协调；普通平台 token 不得充当 AI token。此 Beta 仅覆盖模型，不授予团队 MCP/collab 权限；MCP 授权另依其正式契约。清单里的 MCP 和模型地址必须与平台 `apiBase` 同源，插件拒绝其他地址。
 
 ## 5. 团队面板加载
 

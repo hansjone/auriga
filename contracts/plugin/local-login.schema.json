@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auriga local host connection and sign-in v1",
+  "description": "Trusted installation configuration and loopback browser adapter only. Device tokens, PKCE proofs and platform cookies never cross this adapter.",
+  "$defs": {
+    "ConnectConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platformOrigin": {
+          "type": "string",
+          "format": "uri",
+          "description": "Default platform origin. Saved settings override it. HTTPS or explicit loopback/RFC1918/ULA HTTP with allowLocalHttp=true."
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri",
+          "description": "Installation-owned issuer on the same origin; JWKS at issuer + /oauth2/jwks."
+        },
+        "clientId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "providerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "allowLocalHttp": {
+          "type": "boolean",
+          "default": false,
+          "description": "Explicit permission for loopback or private IP HTTP. Saved HTTP settings grant this permission; public HTTP and non-loopback DNS HTTP are rejected."
+        },
+        "network": { "$ref": "#/$defs/ConnectNetwork" }
+      },
+      "required": ["platformOrigin", "issuer", "clientId", "providerId"]
+    },
+    "ConnectNetwork": {
+      "description": "Optional static installation pins, exclusively from loader config.connect.network. Presence grants no network capability. Runtime must additionally reject duplicate kid and validate canonical Ed25519 SPKI DER with the existing publicKey validator; JSON Schema only checks key encoding shape. Static realm/roots never replace online IAM/keyset/announcement verification.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "realm": {
+          "$ref": "../network/address.schema.json#/$defs/PositiveUint64"
+        },
+        "wssUrl": {
+          "description": "Fixed complete WSS URL; custom path, independent host/port and HTTPS IP deployments supported. No userinfo, query or fragment; never ws or disabled TLS verification.",
+          "type": "string",
+          "format": "uri",
+          "pattern": "^wss://[^/?#@\\s]+(?:/[^?#\\s]*)?$"
+        },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/NetworkRootPin" },
+          "description": "Installation-provisioned public roots; kid must be unique, enforced semantically by the consumer. SPKI itself is the pin; no extra fingerprint is required."
+        }
+      },
+      "required": ["realm", "wssUrl", "roots"]
+    },
+    "NetworkRootPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kid": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" },
+        "public_key_spki": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{59}$",
+          "description": "Canonical unpadded base64url Ed25519 public SPKI DER; runtime imports and re-exports it to validate algorithm and canonical bytes. No PEM or private key."
+        }
+      },
+      "required": ["kid", "public_key_spki"]
+    },
+    "Begin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "action": { "const": "begin" } },
+      "required": ["action"]
+    },
+    "Resume": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "action": { "const": "resume" } },
+      "required": ["action"]
+    },
+    "Advance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "action": { "const": "advance" },
+        "input": {
+          "allOf": [
+            { "$ref": "../identity/steps.schema.json#/$defs/StepInput" },
+            { "type": "object", "properties": { "type": { "const": "form" } } }
+          ]
+        }
+      },
+      "required": ["action", "input"]
+    },
+    "LoginInput": {
+      "oneOf": [
+        { "$ref": "#/$defs/Begin" },
+        { "$ref": "#/$defs/Resume" },
+        { "$ref": "#/$defs/Advance" }
+      ]
+    },
+    "Status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "available": { "const": true },
+        "loggedIn": { "type": "boolean" },
+        "connected": { "type": "boolean" },
+        "communication": {
+          "enum": ["idle", "connecting", "ready", "unavailable"],
+          "description": "Team readiness is independent from verified local sign-in. Team failures never claim connected=true."
+        },
+        "csrf": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "resumeAvailable": { "type": "boolean" },
+        "remoteRevocation": { "enum": ["pending", "complete"] },
+        "account": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "subject": { "type": "string" } },
+              "required": ["subject"]
+            }
+          ]
+        },
+        "connection": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "endpointId": { "type": ["string", "null"] },
+                "received": { "type": "integer", "minimum": 0 },
+                "unsupported": { "type": "integer", "minimum": 0 },
+                "pendingSourceOpens": { "type": "integer", "minimum": 0 },
+                "unknownSourceOpens": { "type": "integer", "minimum": 0 }
+              },
+              "required": ["endpointId", "received"]
+            }
+          ]
+        }
+      },
+      "required": ["available", "loggedIn", "connected", "account"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "connected": { "const": true } },
+            "required": ["connected"]
+          },
+          "then": {
+            "properties": {
+              "loggedIn": { "const": true },
+              "communication": { "const": "ready" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -36,6 +37,10 @@ func TestFixtureTemplates(t *testing.T) {
 			t.Fatalf("bootstrap %s: %v: %s", fixture, err, output)
 		}
 		assertAccessMaterials(t, out, fixture == "real")
+		properties, err := os.ReadFile(filepath.Join(out, "network-platform", "platform.properties"))
+		if err != nil || strings.Contains(string(properties), "auriga.iam.clients") {
+			t.Fatal("default HTTP recipe gained a native registration")
+		}
 		name, version := fixture+"-dsh", "0.0.0-fake"
 		if fixture == "real" {
 			version = "0.2.0-rc.2"

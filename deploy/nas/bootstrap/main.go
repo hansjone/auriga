@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	"math/big"
 	"net"
 	"net/url"
@@ -37,6 +38,8 @@ func main() {
 	}
 	out := flag.String("out", "", "private source material directory")
 	accessFile := flag.String("access-file", "", "required trusted access JSON")
+	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
+	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
 	validateOnly := flag.Bool("validate-access", false, "validate without writing installation materials")
 	peerIP := flag.String("edge-peer-ip", "", "fixed edge component-network IPv4")
 	subnet := flag.String("internal-subnet", "", "component-network IPv4 prefix")
@@ -66,10 +69,20 @@ func main() {
 	if err := validateNASLAN(*lanIP, *lanSubnet, *subnet); err != nil {
 		fatalf("%v", err)
 	}
+	directHTTPS := cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https"
+	hosts := []string{cfg.PortalOrigin().Host, cfg.AdminOrigin().Host}
+	if parent := cfg.InstanceParentDomain(); parent != "" {
+		hosts = append(hosts, "*."+parent)
+	}
+	browser, err := networkdeploy.ReadBrowserTLS(*httpsCert, *httpsKey, directHTTPS, hosts)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer browser.Clear()
 	if !*validateOnly && *out == "" {
 		fatalf("-out is required")
 	}
-	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly); err != nil {
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly, browser); err != nil {
 		fatalf("%v", err)
 	}
 	verified, err := runtime.verify()
@@ -79,14 +92,14 @@ func main() {
 	if *validateOnly {
 		return
 	}
-	set := runtimeMaterialSet(verified)
+	set := runtimeMaterialSet(verified, directHTTPS)
 	guard, err := openNASMaterialGuard(*out, set)
 	if err != nil {
 		fatalf("%v", err)
 	}
 	defer guard.Close()
 	pki := filepath.Join(*out, "pki")
-	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified)
+	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified, browser.Digest())
 	reuse, err := materials.CheckReceipt(*out, inputDigest, set)
 	if err != nil {
 		fatalf("%v", err)
@@ -98,10 +111,20 @@ func main() {
 		if err := guard.Validate(false); err != nil {
 			fatalf("%v", err)
 		}
+		if err := networkdeploy.CheckCertificates(filepath.Join(*out, "network"), time.Now(), os.Stderr); err != nil {
+			fatalf("%v", err)
+		}
 		fmt.Println("nas-bootstrap ok (existing installation)")
 		return
 	}
 	mustPKI(pki)
+	if err := browser.Write(*out); err != nil {
+		fatalf("%v", err)
+	}
+	rpc := map[string]string{"Target": "platform:9091", "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": "platform"}
+	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "0.0.0.0:18443", BrokerHost: "0.0.0.0", BrokerURL: "tls://network-broker:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil {
+		fatalf("generate network deployment: %v", err)
+	}
 	mustIdentity(*out)
 	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB)
 	if err := writeRuntimeMaterials(*out, verified, maxMemoryMB); err != nil {
@@ -153,6 +176,9 @@ func mustPKI(pki string) {
 	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-nas", "auriga://edge/iam-nas-test", []string{"edge.auriga.internal"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
 	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o600)
+	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-nas", "auriga://ai-gateway/nas", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "gateway.crt"), gatewayCert, 0o644)
+	writeFile(filepath.Join(pki, "gateway.key"), gatewayKey, 0o600)
 
 	// Front proxy trust is independent of IAM/NodeControl identities and CA.
 	proxyKey, proxyCA, proxyCAPEM := mustCA()

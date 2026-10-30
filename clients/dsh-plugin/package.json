@@ -28,7 +28,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test \"test/**/*.test.js\"",
     "build": "tsc --noEmit -p tsconfig.json",
-    "gen:steps": "json2ts -i ../../contracts/identity/steps.schema.json -o src/generated/steps.d.ts --unreachableDefinitions && json2ts -i ../../contracts/plugin/managed-config.schema.json -o src/generated/managed-config.d.ts && prettier --write src/generated/steps.d.ts src/generated/managed-config.d.ts",
+    "gen:network-keyset": "node scripts/gen-network-keyset.mjs",
+    "gen:network-tools": "node scripts/gen-network-tools.mjs",
+    "gen:network-tools:check": "node scripts/gen-network-tools.mjs --check",
+    "gen:steps": "json2ts -i ../../contracts/identity/steps.schema.json -o src/generated/steps.d.ts --unreachableDefinitions && json2ts -i ../../contracts/plugin/managed-config.schema.json -o src/generated/managed-config.d.ts && node scripts/gen-connect-config.mjs && prettier --write src/generated/steps.d.ts src/generated/managed-config.d.ts src/generated/connect-config.d.ts",
     "prepack": "node scripts/package-ui.mjs"
   },
   "dsh": {
@@ -41,11 +44,24 @@
     }
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@types/ws": "8.18.2",
+    "ajv": "8.20.0",
     "json-schema-to-typescript": "16.0.0",
     "typescript": "5.9.3"
   },
   "dependencies": {
+    "@nats-io/nats-core": "3.4.0",
     "@noble/hashes": "1.8.0",
-    "undici": "7.30.1"
+    "undici": "7.30.1",
+    "ws": "8.22.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.0.0-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    }
   }
 }

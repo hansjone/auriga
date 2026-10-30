@@ -7,6 +7,8 @@
 
 ## 身份和受信实例通道（D1）
 
+管理面每个条件写操作都有对应的读取途径取得同一资源的 ETag：提供商、模型、脱敏凭据和模型授权集合均可 GET；提供商和模型列表项的只读 `etag` 与同版本单项 GET 的响应头一致，授权集合的 ETag 由其 GET 单独取得。
+
 - 管理面只接受 `aud=auriga/ctx=admin`，每操作显式权限；敏感操作要求 `stepup_time` 在 600 秒内。
   门户令牌必须剔除 `catalog/m3.json` 的全部 `adminOnly` 权限，不能仅按 key 后缀猜测。
 - 数据面只接受单一 AI audience 的 `at+jwt/ES256`，最长 300 秒。
@@ -14,6 +16,11 @@
   `perms` 是主人有效权限与 `{ai.models.invoke,ai.usage.read}` 的交集，不能从 roles 再扩权。
   `device/ptyp=device` 必须有 `did`，仍仅用 `auriga.connect.*`；
   `auriga.connect.models.invoke` 映射为本人模型调用和本人用量读取，仍在线检查模型 ACL。
+  设备每次准入通过 IAM `DeviceAccessService.VerifyDeviceAiAccess` 在线核当前成员、
+  invoke 权限及设备/账户/backing 会话；仅 `svc:ai-gateway` 内部凭据加非平台委托 tenant
+  可调用。无效返回空身份的 inactive，依赖故障返回 `UNAVAILABLE`；active 的截止取
+  AI JWT 和当前 backing 期限最小值，完成时仍须未过期，详见
+  [设备 AI resource](../auth/device-ai-resource.md#每次准入的专用在线核验)。
   `ait_`、身份头、浏览器、外部服务账号、内部服务 JWT 不得调用数据面。
 - 每个托管实例使用节点在本地创建的**专有实例 socket**访问内部 AI 代理。
   socket 以实例独立的运行身份/挂载权限隔离，不能让实例选择任意实例 id 或访问别人的 socket。

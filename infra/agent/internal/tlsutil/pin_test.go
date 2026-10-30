@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"math/big"
@@ -29,7 +30,12 @@ func TestVerifyPinnedPeerChainAcceptsMatchingCA(t *testing.T) {
 	if err := tlsutil.VerifyPinnedPeerChain(raw, want, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := tlsutil.VerifyPinnedPeerChain(raw, "00"+want[2:], ""); err == nil {
+	wrong, err := hex.DecodeString(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong[0] ^= 1
+	if err := tlsutil.VerifyPinnedPeerChain(raw, hex.EncodeToString(wrong), ""); err == nil {
 		t.Fatal("expected mismatch")
 	}
 }

@@ -405,9 +405,13 @@ func assertRuntimeInstallation(t *testing.T, out string, r runtimeInputs, m *run
 		mode := os.FileMode(0o644)
 		if st.IsDir() {
 			mode = 0o755
+			// Managed directories also include private submit keys and credentials.
+			if name == "network" || name == "network-platform" || name == "browser-tls" {
+				mode = 0o700
+			}
 		}
 		if s.Uid != 10001 || s.Gid != 10001 || st.Mode().Perm() != mode || !st.IsDir() && s.Nlink != 1 {
-			t.Fatalf("wrong public metadata: %s", name)
+			t.Fatalf("wrong installed metadata: %s", name)
 		}
 	}
 }

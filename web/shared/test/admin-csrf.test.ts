@@ -328,6 +328,26 @@ describe('IP administrative CSRF', () => {
     await h.client.post('/write');
     expect(h.calls).toHaveLength(5);
   });
+  it('retains the registered CSRF token after a rejected submitted credential', async () => {
+    const h = harness();
+    await h.client.post('/write');
+    h.handler.mockImplementationOnce(async () =>
+      json({ status: 401, code: 'iam.invalid_credentials' }, 401),
+    );
+    await expect(
+      h.client.put('/api/iam/v1/me/password', { currentPassword: 'wrong' }),
+    ).rejects.toMatchObject({
+      status: 401,
+      problem: { code: 'iam.invalid_credentials' },
+    });
+    await h.client.post('/write');
+    expect(
+      h.calls.filter((call) => call.url.endsWith('/csrf-tokens')),
+    ).toHaveLength(1);
+    expect(new Headers(h.calls[1].init.headers).get('X-Auriga-CSRF')).toBe(
+      new Headers(h.calls[3].init.headers).get('X-Auriga-CSRF'),
+    );
+  });
   it('a concurrent read returning 401 prevents an older bootstrap from publishing', async () => {
     const h = harness();
     let finish!: () => void;

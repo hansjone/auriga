@@ -1,7 +1,7 @@
 # Build from repository root: docker build -f deploy/compose/Dockerfile.edge .
 FROM node:22-bookworm AS web
 WORKDIR /src
-COPY package.json pnpm-workspace.yaml .npmrc tsconfig.base.json ./
+COPY package.json pnpm-workspace.yaml .npmrc .prettierrc.json tsconfig.base.json ./
 # Keep the workspace importers and the configured lockfileDir; never copy host
 # node_modules or a previous dist into the image build.
 COPY web/pnpm-lock.yaml ./web/pnpm-lock.yaml
@@ -17,6 +17,7 @@ COPY contracts ./contracts
 COPY web/shared/src ./web/shared/src
 COPY web/shared/scripts ./web/shared/scripts
 COPY clients/dsh-plugin/src ./clients/dsh-plugin/src
+COPY clients/dsh-plugin/scripts/gen-connect-config.mjs ./clients/dsh-plugin/scripts/gen-connect-config.mjs
 COPY web/portal/src ./web/portal/src
 COPY web/portal/index.html web/portal/instance-login.html web/portal/vite.config.ts ./web/portal/
 COPY web/portal/logout.html ./web/portal/
@@ -32,9 +33,18 @@ WORKDIR /src/infra
 COPY infra/ ./
 WORKDIR /src/infra/edge
 RUN CGO_ENABLED=0 go build -o /out/auriga-edge .
+WORKDIR /src/infra/ai-gateway
+RUN CGO_ENABLED=0 go build -o /out/auriga-ai-gateway . \
+  && CGO_ENABLED=0 go build -o /out/auriga-network-broker github.com/nats-io/nats-server/v2
+WORKDIR /src/deploy/bootstrap
+COPY deploy/bootstrap/ ./
+RUN CGO_ENABLED=0 go build -o /out/auriga-network-probe ./cmd/network-probe
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/auriga-edge /auriga-edge
+COPY --from=build /out/auriga-ai-gateway /auriga-ai-gateway
+COPY --from=build /out/auriga-network-broker /auriga-network-broker
+COPY --from=build /out/auriga-network-probe /auriga-network-probe
 COPY --from=web /src/web/portal/dist /srv/auriga/static/portal
 COPY --from=web /src/web/admin/dist /srv/auriga/static/admin
 ENV AURIGA_EDGE_STATIC_PORTAL=/srv/auriga/static/portal \

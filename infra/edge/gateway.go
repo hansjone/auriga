@@ -39,13 +39,42 @@ type Gateway struct {
 	iamURL       *url.URL
 	orgURL       *url.URL
 	workspaceURL *url.URL
+	teamURL      *url.URL
+	aiAdminURL   *url.URL
+	collabURL    *url.URL
+	resourceURL  *url.URL
+	deviceURL    *url.URL
+
+	networkSubmitURL *url.URL
 
 	portalStatic http.Handler
 	adminStatic  http.Handler
 	panelStatic  http.Handler
+
+	networkWSS *NetworkWSS
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
+	resourceURL, err := cfg.parseResourceUpstream()
+	if err != nil {
+		return nil, err
+	}
+	deviceURL, err := cfg.parseDeviceUpstream()
+	if err != nil {
+		return nil, err
+	}
+	networkSubmitURL, err := cfg.parseNetworkSubmitUpstream()
+	if err != nil {
+		return nil, err
+	}
+	collabURL, err := cfg.parseCollabUpstream()
+	if err != nil {
+		return nil, err
+	}
+	aiAdminURL, err := cfg.parseAIAdminUpstream()
+	if err != nil {
+		return nil, err
+	}
 	trusted, err := NewTrustedProxies(cfg.TrustedProxies)
 	if err != nil {
 		return nil, err
@@ -62,6 +91,13 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	if err != nil {
 		return nil, err
 	}
+	var teamURL *url.URL
+	if raw := cfg.Upstreams["ai-gateway"]; raw != "" {
+		teamURL, err = parseTeamUpstream(raw)
+		if err != nil {
+			return nil, err
+		}
+	}
 	hub := NewSessionConnHub()
 	ingress, err := loadNodeIngress(cfg.NodeTLS)
 	if err != nil {
@@ -75,6 +111,10 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		activity.revoke(sid)
 		hub.CancelSession(sid)
 	})
+	networkWSS, err := newNetworkWSS(cfg.NetworkWSS, cfg.PortalHost)
+	if err != nil {
+		return nil, err
+	}
 	g := &Gateway{
 		Cfg:          cfg,
 		Log:          log,
@@ -92,9 +132,17 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		iamURL:       iamURL,
 		orgURL:       orgURL,
 		workspaceURL: wsURL,
+		teamURL:      teamURL,
+		aiAdminURL:   aiAdminURL,
+		collabURL:    collabURL,
+		resourceURL:  resourceURL,
+		deviceURL:    deviceURL,
 		portalStatic: newSPAFileServer(cfg.Static.PortalRoot),
 		adminStatic:  newSPAFileServer(cfg.Static.AdminRoot),
 		panelStatic:  newSPAFileServer(cfg.Static.PanelRoot),
+		networkWSS:   networkWSS,
+
+		networkSubmitURL: networkSubmitURL,
 	}
 	if cfg.Access.Valid() && (cfg.IAMHop.CAFile != "" || cfg.IAMHop.AllowLoopbackHTTP) {
 		g.IAMTransport, err = newIAMHopTransport(cfg.IAMHop, iamURL)
@@ -104,6 +152,43 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 	}
 	if cfg.Access.Valid() {
 		g.APITransports = make(map[*url.URL]http.RoundTripper)
+		if networkSubmitURL != nil {
+			transport, err := newIAMHopTransport(cfg.NetworkSubmitHop, networkSubmitURL)
+			if err != nil {
+				return nil, err
+			}
+			// Retain every device proxy timeout/limit, but use this hop's
+			// explicit trust material and never an environment proxy.
+			deviceTransport, ok := apiProxyTransport.(*http.Transport)
+			if !ok {
+				return nil, errors.New("device proxy transport unavailable")
+			}
+			trusted := deviceTransport.Clone()
+			trusted.Proxy = nil
+			trusted.TLSClientConfig = transport.TLSClientConfig
+			g.APITransports[networkSubmitURL] = trusted
+		}
+		if resourceURL != nil {
+			transport, err := newIAMHopTransport(cfg.IAMHop, resourceURL)
+			if err != nil {
+				return nil, err
+			}
+			g.APITransports[resourceURL] = transport
+		}
+		if collabURL != nil {
+			transport, err := newIAMHopTransport(cfg.CollabHop, collabURL)
+			if err != nil {
+				return nil, err
+			}
+			g.APITransports[collabURL] = transport
+		}
+		if aiAdminURL != nil {
+			transport, err := newIAMHopTransport(cfg.AIAdminHop, aiAdminURL)
+			if err != nil {
+				return nil, err
+			}
+			g.APITransports[aiAdminURL] = transport
+		}
 		for _, target := range []*url.URL{orgURL, wsURL} {
 			if g.IAMTransport != nil && sameInternalHTTPSOrigin(iamURL, target) {
 				g.APITransports[target] = g.IAMTransport
@@ -218,6 +303,16 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Network data plane: NATS-over-WSS upgrade (auth is NATS CONNECT / callout, not browser session).
+	if g.networkWSS != nil && g.networkWSS.Match(path) {
+		if audience != "portal" {
+			writeProblem(w, problem(http.StatusForbidden, "edge.forbidden", "Forbidden", "network wss only on portal host", rid))
+			return
+		}
+		g.networkWSS.ServeHTTP(w, r)
+		return
+	}
+
 	// Admin API isolation (use sanitized path)
 	if isAdminAPIPath(path) && audience != "admin" {
 		if g.Cfg.Access.Valid() {
@@ -228,9 +323,38 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Device AI has an exact route table and an independent runtime from Team.
+	if isDevicePath(path) && (path != "/api/ai/v1/me/usage" || audience == "portal") {
+		g.proxyDevice(w, r, audience, clientIP, rid)
+		return
+	}
+	if path == "/api/resource" || strings.HasPrefix(path, "/api/resource/") {
+		g.proxyResource(w, r, audience, clientIP, rid)
+		return
+	}
+
+	// Team uses only device Bearer credentials, never browser-session exchange.
+	if path == "/ai" || strings.HasPrefix(path, "/ai/") {
+		g.proxyTeam(w, r, audience, clientIP, rid)
+		return
+	}
+
 	// Platform API / oauth routes
+	if path == "/api/collab" || strings.HasPrefix(path, "/api/collab/") {
+		g.proxyNetworkKeys(w, r, audience, clientIP, rid)
+		return
+	}
 	if upstream := g.matchUpstream(path); upstream != nil {
+		if upstream == g.aiAdminURL {
+			g.proxyAIAdmin(w, r, upstream, audience, clientIP, rid)
+			return
+		}
 		g.proxyAPI(w, r, upstream, audience, clientIP, rid)
+		return
+	}
+	// Unconfigured and non-management AI APIs must never fall through to a SPA.
+	if path == "/api/ai" || strings.HasPrefix(path, "/api/ai/") {
+		writeProblem(w, problem(http.StatusNotFound, "common.not_found", "Not Found", "AI API not configured or allowed", rid))
 		return
 	}
 
@@ -259,6 +383,8 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) matchUpstream(path string) *url.URL {
 	switch {
+	case g.Cfg.Access.Valid() && (path == "/api/ai/v1/admin" || strings.HasPrefix(path, "/api/ai/v1/admin/")):
+		return g.aiAdminURL
 	case strings.HasPrefix(path, "/api/iam/v1/"),
 		strings.HasPrefix(path, "/oauth2/"),
 		strings.HasPrefix(path, "/.well-known/"),

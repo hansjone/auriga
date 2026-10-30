@@ -28,6 +28,9 @@ func openNASDirectory(parent int, name string, source bool) (*os.File, error) {
 			return false
 		}
 		if source {
+			if name == "network" || name == "network-platform" || name == "browser-tls" {
+				return s.Uid == 10001 && s.Gid == 10001 && s.Mode&0o7777 == 0o700
+			}
 			return s.Uid == 10001 && s.Gid == 10001 && s.Mode&0o7777 == 0o755
 		}
 		return (s.Uid == 0 || s.Uid == 10001) && (s.Mode&0o022 == 0 || s.Uid == 0 && s.Mode&unix.S_ISVTX != 0)
@@ -86,7 +89,11 @@ func openNASMaterialGuard(path string, sets ...materials.MaterialSet) (*nasMater
 	fresh := len(entries) == 0
 	for _, name := range set.ManagedDirectories {
 		if fresh {
-			if err := unix.Mkdirat(int(root.Fd()), name, 0o755); err != nil {
+			mode := uint32(0o755)
+			if name == "network" || name == "network-platform" || name == "browser-tls" {
+				mode = 0o700
+			}
+			if err := unix.Mkdirat(int(root.Fd()), name, mode); err != nil {
 				g.Close()
 				return nil, fmt.Errorf("create fresh NAS source directory")
 			}
@@ -202,7 +209,7 @@ func (g *nasMaterialGuard) Validate(allowMissing bool) error {
 			continue
 		}
 		mode := uint32(0o644)
-		if strings.HasSuffix(name, ".key") || name == "identity-signing-keys.json" {
+		if (strings.HasPrefix(name, "network/") || strings.HasPrefix(name, "network-platform/")) || strings.HasSuffix(name, ".key") || name == "identity-signing-keys.json" {
 			mode = 0o600
 		}
 		valid := func(s unix.Stat_t) bool {

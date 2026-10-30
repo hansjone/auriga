@@ -23,10 +23,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 )
@@ -34,21 +36,87 @@ import (
 const iamRPCPort = 9091
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "key-rotation" {
+		if err := keyRotationCLI(os.Args[2:]); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	out := flag.String("out", "deploy/compose/var", "output directory")
 	image := flag.String("image", "", "docker image ref repo@sha256:… for fake DSH template")
 	fixture := flag.String("fixture", "fake", "DSH fixture: fake or real")
 	edgeContainer := flag.String("edge-container", "auriga-m2-edge", "trusted edge container identity (must match Compose project)")
 	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
+	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
+	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
+	collabFile := flag.String("network-collab-file", "", "explicit offline-approved standalone collab installation JSON")
+	activate := flag.Bool("activate-collab", false, "seal first N1 activation without changing base")
+	checkActivation := flag.Bool("check-collab-activation", false, "verify sealed activation and unchanged base")
+	baseReceipt := flag.String("base-receipt-sha256", "", "independently checked base receipt SHA256")
+	baseIdentity := flag.String("base-identity-sha256", "", "independently checked identity public file SHA256")
+	stopped := flag.Bool("stopped-confirmed", false, "operator confirms platform/edge/network stopped")
+	printProject := flag.Bool("print-compose-project", false, "print only the project from verified sealed installation access")
 	validateOnly := flag.Bool("validate-access", false, "validate access and Compose support without writing materials")
 	proofs := flag.String("runtime-proofs", "", "isolated collected raw OCI proof root (first installation only)")
 	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
 	flag.Parse()
+	if *printProject && !*activate {
+		if *checkActivation || *validateOnly || *stopped || *collabFile != "" || *baseReceipt != "" || *baseIdentity != "" {
+			fatalf("invalid sealed Compose project arguments")
+		}
+		project, err := sealedComposeProject(*out)
+		if err != nil {
+			fatalf("%v", err)
+		}
+		fmt.Println(project)
+		return
+	}
+	if *activate || *checkActivation {
+		if *activate && *checkActivation {
+			fatalf("choose one activation action")
+		}
+		if *printProject && !*validateOnly {
+			fatalf("project output requires read-only activation preflight")
+		}
+		if err := runActivation(*out, *collabFile, *baseReceipt, *baseIdentity, *checkActivation, *validateOnly, *stopped); err != nil {
+			fatalf("%v", err)
+		}
+		if *printProject {
+			access, err := activationBase(*out, *baseReceipt, *baseIdentity)
+			if err != nil {
+				fatalf("%v", err)
+			}
+			project, err := composeAccessProject(access)
+			if err != nil {
+				fatalf("%v", err)
+			}
+			fmt.Println(project)
+		}
+		return
+	}
 	accessJSON, access, err := loadComposeAccess(*accessFile, *edgeContainer)
 	if err != nil {
 		fatalf("%v", err)
 	}
+	hosts := []string{access.PortalOrigin().Host, access.AdminOrigin().Host}
+	if parent := access.InstanceParentDomain(); parent != "" {
+		hosts = append(hosts, "*."+parent)
+	}
+	browser, err := networkdeploy.ReadBrowserTLS(*httpsCert, *httpsKey, access.PortalOrigin().Scheme == "https", hosts)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer browser.Clear()
+	collab, err := readCollabInput(*collabFile, access)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	defer collab.clear()
 	if *validateOnly {
 		return
+	}
+	if collab != nil && runtime.GOOS != "linux" {
+		fatalf("standalone collab activation requires Linux; use -validate-access")
 	}
 	if *fixture != "fake" && *fixture != "real" {
 		fatalf("-fixture must be fake or real")
@@ -56,8 +124,12 @@ func main() {
 	if !fixtureImagePattern.MatchString(*image) || !strings.Contains(*image, "/"+*fixture+"-dsh@") {
 		fatalf("-image must use selected exact local fixture repository@sha256:digest")
 	}
-	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%t\n%t", *image, *fixture, *observer, *accessFile != ""))...))
+	input := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\n%s\n%t\n%t\n%s", composeRecipe(access.PortalOrigin().Scheme == "https"), *image, *fixture, *observer, *accessFile != "", browser.Digest()))...))
 	inputDigest := hex.EncodeToString(input[:])
+	if collab != nil {
+		combinedInput := sha256.Sum256(append(input[:], []byte(collab.digest())...))
+		inputDigest = hex.EncodeToString(combinedInput[:])
+	}
 	existing, err := preflightRuntimeInstallation(*out)
 	if err != nil {
 		fatalf("%v", err)
@@ -75,6 +147,9 @@ func main() {
 		clear(keys)
 		if err != nil {
 			fatalf("existing installation refused: %v", err)
+		}
+		if err := networkdeploy.CheckCertificates(filepath.Join(*out, "network"), time.Now(), os.Stderr); err != nil {
+			fatalf("%v", err)
 		}
 		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
 		return
@@ -101,6 +176,21 @@ func main() {
 		fatalf("%v", err)
 	}
 	generateIdentityMaterials(*out)
+	if err := browser.Write(*out); err != nil {
+		fatalf("%v", err)
+	}
+	rpc := map[string]string{"Target": fmt.Sprintf("127.0.0.1:%d", iamRPCPort), "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": iamServerName}
+	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "172.29.240.1:18443", BrokerHost: "127.0.0.1", WebsocketHost: "172.29.240.1", BrokerURL: "tls://127.0.0.1:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil { // gitleaks:allow disposable M2 network
+		fatalf("generate network deployment: %v", err)
+	}
+	if access.PortalOrigin().Scheme == "https" {
+		if err := writeNativeClient(*out); err != nil {
+			fatalf("%v", err)
+		}
+	}
+	if err := writeCollab(*out, collab, access.Issuer()); err != nil {
+		fatalf("%v", err)
+	}
 	pub, fp, _, err := readIdentityPublic(*out)
 	if err != nil {
 		fatalf("%v", err)
@@ -178,13 +268,21 @@ func main() {
 		"accessConfigFile":  "/etc/auriga/access.json",
 		"allowLocalIngress": true,
 		"upstreams": map[string]string{
-			"iam":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
-			"org":       fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
-			"workspace": fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"network-submit": "https://172.29.240.1:18443", // gitleaks:allow disposable M2 network
+			"iam":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"org":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
+			"workspace":      fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
 		},
 		"iamHop": map[string]string{
 			"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key",
 			"caFile": "/etc/auriga/pki/ca.crt", "serverName": iamServerName,
+		},
+		"networkSubmitHop": map[string]string{"certFile": "/etc/auriga/network-edge/edge.pem", "keyFile": "/etc/auriga/network-edge/edge.key", "caFile": "/etc/auriga/network-edge/server-ca.pem", "serverName": "submit.network.internal"},
+		"networkWss": map[string]any{
+			"enabled": true, "path": "/net/v1/ws",
+			"upstreamUrl": "wss://172.29.240.1:18444", // gitleaks:allow disposable M2 network
+			"caFile":      "/etc/auriga/network-edge/server-ca.pem", "serverName": "broker.network.internal",
+			"allowedOrigins": []string{access.PortalURL()},
 		},
 		"iamRpc": map[string]any{
 			"address":    fmt.Sprintf("host.docker.internal:%d", iamRPCPort),
@@ -202,9 +300,20 @@ func main() {
 			"caFile":   "/etc/auriga/pki/ca.crt",
 		},
 	}
+	if access.PortalOrigin().Scheme == "https" {
+		edgeCfg["tls"] = map[string]string{"mode": "files", "certFile": "/etc/auriga/https/browser.crt", "keyFile": "/etc/auriga/https/browser.key"}
+	}
+	if collab != nil {
+		edgeCfg["upstreams"].(map[string]string)["collab"] = "https://172.29.240.1:8085" // gitleaks:allow disposable M2 network
+		edgeCfg["collabHop"] = map[string]string{"certFile": "/etc/auriga/collab-edge/edge-collab.crt", "keyFile": "/etc/auriga/collab-edge/edge-collab.key", "caFile": "/etc/auriga/collab-edge/ca.crt", "serverName": "collab.network.internal"}
+	}
 	writeJSON(filepath.Join(*out, "edge.config.json"), edgeCfg, 0o644)
 	// Public values are derived from the validated installation; no credentials.
-	writeFile(filepath.Join(*out, "access.env"), composeAccessEnv(access, *accessFile != ""), 0o644)
+	accessEnv := composeAccessEnv(access, *accessFile != "")
+	if collab != nil {
+		accessEnv = append(accessEnv, []byte("COMPOSE_PROFILES='network-collab'\nCOMPOSE_FILE='docker-compose.yml:scripts/collab-required.yml'\nAURIGA_IAM_TENANT_DELEGATES='svc:edge,svc:ai-gateway,svc:collab'\n")...)
+	}
+	writeFile(filepath.Join(*out, "access.env"), accessEnv, 0o644)
 
 	policy := map[string]any{
 		"allowedImageRepos": []string{"127.0.0.1:5000/auriga/", "localhost:5000/auriga/"},
@@ -393,6 +502,9 @@ func generateIdentityMaterials(out string) {
 		[]string{edgeHopDNSName}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
 	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o400)
+	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-compose", "auriga://ai-gateway/compose", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	writeFile(filepath.Join(pki, "gateway.crt"), gatewayCert, 0o644)
+	writeFile(filepath.Join(pki, "gateway.key"), gatewayKey, 0o400)
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		fatalf("%v", err)

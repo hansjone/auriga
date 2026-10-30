@@ -1,0 +1,252 @@
+package network
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	iam "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
+)
+
+func scaleBindings(r *IAMRedeemer, n int) map[uint64]*ConnInfo {
+	r.cfg.MaxConnections = max(r.cfg.MaxConnections, n)
+	conns := make(map[uint64]*ConnInfo, n)
+	for i := 0; i < n; i++ {
+		ingress := fmt.Sprintf("ingress-%d", i)
+		b := liveBinding{Binding: Binding{ServerID: r.cfg.ServerID, ClientID: uint64(i + 1), Account: clientAccount, Ingress: ingress}, Tenant: testTenant, Realm: "1", Node: fmt.Sprint(i + 1), NotAfter: time.Now().Add(time.Hour)}
+		r.bindings[ingress] = b
+		conns[b.ClientID] = &ConnInfo{CID: b.ClientID, Account: b.Account, AuthorizedUser: ingress}
+	}
+	return conns
+}
+
+func TestReconcile5000ConnectionsUsesOneSnapshotAndTenantBatches(t *testing.T) {
+	f := &fakeIAM{active: false, delay: 100 * time.Millisecond}
+	r := testRedeemer(t, f)
+	conns := scaleBindings(r, 5000)
+	for key, b := range r.bindings {
+		b.Tenant = fmt.Sprintf("01900000-0000-7000-8000-%012d", b.ClientID%50+1)
+		r.bindings[key] = b
+	}
+	var snapshots, kicks atomic.Int32
+	cfg := ReconcileConfig{Interval: 100 * time.Millisecond, RequestTimeout: 250 * time.Millisecond, MaxKickAttempts: 3, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { snapshots.Add(1); return conns, nil }}
+	start := time.Now()
+	state := reconcileState{}
+	r.reconcileRound(context.Background(), cfg, func(ctx context.Context, _ Binding) error {
+		select {
+		case <-time.After(10 * time.Millisecond):
+			kicks.Add(1)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}, &state)
+	if snapshots.Load() != 1 || f.calls != 50 || kicks.Load() != 5000 || len(r.snapshot()) != 0 {
+		t.Fatalf("snapshots=%d IAM=%d kicks=%d retained=%d", snapshots.Load(), f.calls, kicks.Load(), len(r.snapshot()))
+	}
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("5000 revocations exceeded round budget: %v", elapsed)
+	}
+}
+
+func TestReconcileTransientIAMErrorDoesNotRevokeAndRecoveryResetsFailures(t *testing.T) {
+	f := &fakeIAM{failure: errors.New("temporary outage")}
+	r := testRedeemer(t, f)
+	conns := scaleBindings(r, 1)
+	cfg := ReconcileConfig{Interval: time.Millisecond, RequestTimeout: time.Second / 4, MaxKickAttempts: 3, FailureGrace: time.Second, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return conns, nil }}
+	var kicks int
+	kick := func(context.Context, Binding) error { kicks++; return nil }
+	state := reconcileState{}
+	r.reconcileRound(context.Background(), cfg, kick, &state)
+	if kicks != 0 || r.snapshot()[0].Revoked {
+		t.Fatal("single query error revoked connection")
+	}
+	f.mu.Lock()
+	f.failure = nil
+	f.active = true
+	f.mu.Unlock()
+	state.queries = nil
+	r.reconcileRound(context.Background(), cfg, kick, &state)
+	if kicks != 0 || r.snapshot()[0].Failures != 0 {
+		t.Fatal("recovery did not reset failures")
+	}
+}
+
+func TestReconcilePersistentIAMErrorKicksWithinGrace(t *testing.T) {
+	f := &fakeIAM{failure: errors.New("persistent outage")}
+	r := testRedeemer(t, f)
+	conns := scaleBindings(r, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	kicked := make(chan struct{}, 1)
+	cfg := ReconcileConfig{Interval: 5 * time.Millisecond, RequestTimeout: time.Second / 4, MaxKickAttempts: 3, FailureGrace: 50 * time.Millisecond, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return conns, nil }}
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Reconcile(ctx, cfg, func(context.Context, Binding) error {
+			select {
+			case kicked <- struct{}{}:
+			default:
+			}
+			return nil
+		})
+	}()
+	select {
+	case <-kicked:
+	case <-ctx.Done():
+		t.Fatal("persistent IAM error exceeded revocation bound")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStrictConnectTokenRejectsUnknownFields(t *testing.T) {
+	f := &fakeIAM{}
+	r := testRedeemer(t, f)
+	a := testAttempt()
+	a.Ticket = a.Ticket[:len(a.Ticket)-1] + `,"audience":"forged"}`
+	if _, err := r.Redeem(context.Background(), a); err == nil {
+		t.Fatal("unknown CONNECT field accepted")
+	}
+	if f.calls != 0 {
+		t.Fatal("invalid token reached IAM")
+	}
+}
+
+func TestBatchAuthorityRejectsMissingDuplicateAndForeignResults(t *testing.T) {
+	for name, mutate := range map[string]func(*iam.BatchNetworkNodesActiveResponse){
+		"missing":   func(r *iam.BatchNetworkNodesActiveResponse) { r.Nodes = nil },
+		"duplicate": func(r *iam.BatchNetworkNodesActiveResponse) { r.Nodes = append(r.Nodes, r.Nodes[0]) },
+		"foreign":   func(r *iam.BatchNetworkNodesActiveResponse) { r.Nodes[0].Identity.Node = "foreign" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := testRedeemer(t, &fakeIAM{active: true, mutateBatch: mutate})
+			scaleBindings(r, 1)
+			if status, err := r.activeBatch(context.Background(), r.snapshot(), 250*time.Millisecond); err == nil || status != nil {
+				t.Fatal("invalid authority batch accepted")
+			}
+		})
+	}
+}
+
+func TestBatchSnapshotNeverKicksAnotherIngress(t *testing.T) {
+	r := testRedeemer(t, &fakeIAM{})
+	conns := scaleBindings(r, 1)
+	conns[1].AuthorizedUser = "another-ingress"
+	errorsSeen := 0
+	cfg := ReconcileConfig{Interval: time.Millisecond, RequestTimeout: time.Second / 4, MaxKickAttempts: 3, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return conns, nil }, OnError: func(_ Binding, err error) {
+		if !errors.Is(err, ErrNotOwned) {
+			t.Error(err)
+		}
+		errorsSeen++
+	}}
+	r.reconcileRound(context.Background(), cfg, func(context.Context, Binding) error { t.Error("foreign connection kicked"); return nil }, &reconcileState{})
+	if len(r.snapshot()) != 0 || errorsSeen != 1 {
+		t.Fatal("ownership conflict was not reported and reclaimed")
+	}
+}
+
+func TestCancelledKickStillConsumesAttemptBudget(t *testing.T) {
+	r := testRedeemer(t, &fakeIAM{})
+	conns := scaleBindings(r, 1)
+	cfg := ReconcileConfig{Interval: time.Millisecond, RequestTimeout: 250 * time.Millisecond, MaxKickAttempts: 1, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return conns, nil }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	r.reconcileRound(ctx, cfg, func(ctx context.Context, _ Binding) error { calls++; cancel(); return ctx.Err() }, &reconcileState{})
+	if b := r.snapshot(); len(b) != 1 || b[0].Attempts != 1 {
+		t.Fatal("attempt was lost when round context ended")
+	}
+	r.reconcileRound(context.Background(), cfg, func(context.Context, Binding) error { calls++; return errors.New("unavailable") }, &reconcileState{})
+	if calls != 1 {
+		t.Fatal("cancelled KICK bypassed the retry limit")
+	}
+}
+
+func TestSnapshotFailureKicksLatchedRevocationsAfterBoundedGrace(t *testing.T) {
+	r := testRedeemer(t, &fakeIAM{active: true})
+	scaleBindings(r, 1)
+	for key, b := range r.bindings {
+		b.Revoked = true
+		r.bindings[key] = b
+	}
+	alerts, kicks := 0, 0
+	cfg := ReconcileConfig{Interval: time.Millisecond, RequestTimeout: 250 * time.Millisecond, MaxKickAttempts: 1, FailureGrace: 50 * time.Millisecond, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return nil, errors.New("CONNZ unavailable") }, OnError: func(Binding, error) { alerts++ }}
+	state := reconcileState{}
+	kick := func(context.Context, Binding) error { kicks++; return nil }
+	r.reconcileRound(context.Background(), cfg, kick, &state)
+	if kicks != 0 {
+		t.Fatal("snapshot outage grace was skipped")
+	}
+	state.snapshotFailedSince = time.Now().Add(-cfg.FailureGrace)
+	r.reconcileRound(context.Background(), cfg, kick, &state)
+	if kicks != 1 || alerts != 1 || len(r.snapshot()) != 0 {
+		t.Fatalf("kicks=%d alerts=%d retained=%d", kicks, alerts, len(r.snapshot()))
+	}
+}
+
+func TestReconcileTenantFailureNeverRevokesHealthyTenants(t *testing.T) {
+	f := &fakeIAM{active: true, tenantFailure: func(_ context.Context, tenant string) error {
+		if tenant == testDevice {
+			return errors.New("tenant unavailable")
+		}
+		return nil
+	}}
+	r := testRedeemer(t, f)
+	conns := scaleBindings(r, 2)
+	for key, b := range r.bindings {
+		if b.ClientID == 2 {
+			b.Tenant = testDevice
+		}
+		r.bindings[key] = b
+	}
+	cfg := ReconcileConfig{Interval: time.Millisecond, RequestTimeout: 100 * time.Millisecond, MaxKickAttempts: 1, FailureGrace: time.Second, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return conns, nil }}
+	state := reconcileState{}
+	for i := 0; i < 3; i++ {
+		state.queries = nil
+		r.reconcileRound(context.Background(), cfg, func(context.Context, Binding) error { return nil }, &state)
+	}
+	for _, b := range r.snapshot() {
+		if b.Tenant == testTenant && (b.Failures != 0 || b.Revoked) {
+			t.Fatalf("healthy tenant punished: %+v", b)
+		}
+	}
+}
+
+func TestReconcileManyTenantsGetIndependentRPCDeadlines(t *testing.T) {
+	var deadlineMu sync.Mutex
+	deadlines := make(map[time.Time]bool)
+	f := &fakeIAM{active: true, delay: 15 * time.Millisecond, tenantFailure: func(ctx context.Context, _ string) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return errors.New("RPC has no deadline")
+		}
+		deadlineMu.Lock()
+		deadlines[deadline] = true
+		deadlineMu.Unlock()
+		return nil
+	}}
+	r := testRedeemer(t, f)
+	conns := scaleBindings(r, 1600)
+	for key, b := range r.bindings {
+		b.Tenant = fmt.Sprint(b.ClientID)
+		r.bindings[key] = b
+	}
+	cfg := ReconcileConfig{Interval: time.Millisecond, RequestTimeout: 250 * time.Millisecond, MaxKickAttempts: 1, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return conns, nil }}
+	r.reconcileRound(context.Background(), cfg, func(context.Context, Binding) error { t.Error("healthy tenant kicked"); return nil }, &reconcileState{})
+	for _, b := range r.snapshot() {
+		if b.Failures != 0 || b.Revoked {
+			t.Fatalf("queued tenant inherited another group's deadline: %+v", b)
+		}
+	}
+	// Windows may give many calls the same clock tick; later worker waves must
+	// still receive a fresh deadline rather than one shared, expiring round.
+	if len(deadlines) < 2 || f.calls != 1600 {
+		t.Fatalf("independent deadlines=%d calls=%d", len(deadlines), f.calls)
+	}
+}

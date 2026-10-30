@@ -19,6 +19,216 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	DeviceAccessService_VerifyDeviceAccess_FullMethodName     = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAccess"
+	DeviceAccessService_VerifyDeviceAiAccess_FullMethodName   = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceAiAccess"
+	DeviceAccessService_VerifyDeviceCredential_FullMethodName = "/auriga.iam.v1.DeviceAccessService/VerifyDeviceCredential"
+)
+
+// DeviceAccessServiceClient is the client API for DeviceAccessService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// 会话。
+// Dedicated online device authority. Internal service JWT + delegated tenant and
+// authenticated internal transport are mandatory; never accepts browser cookies.
+type DeviceAccessServiceClient interface {
+	// Only svc:ai-gateway. Validates the external device JWT, including the Team
+	// device permission ceiling, and current device/account/backing-session state.
+	VerifyDeviceAccess(ctx context.Context, in *VerifyDeviceAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAccessResponse, error)
+	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
+	// tenant and the existing authenticated internal transport. Accepts only the
+	// single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+	// instance, service token or ait_. Online checks current member/model-invoke
+	// permission plus device/account/backing session; no idle touch or refresh use.
+	// Determinately invalid => inactive with empty identity; dependency faults =>
+	// UNAVAILABLE. Active expires_at is min(token, current backing deadlines),
+	// still future at completion. Does not authorize model ACLs or budgets.
+	VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAiAccessResponse, error)
+	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
+	// compared with stored device ownership, never trusted as proof of ownership.
+	VerifyDeviceCredential(ctx context.Context, in *VerifyDeviceCredentialRequest, opts ...grpc.CallOption) (*VerifyDeviceCredentialResponse, error)
+}
+
+type deviceAccessServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewDeviceAccessServiceClient(cc grpc.ClientConnInterface) DeviceAccessServiceClient {
+	return &deviceAccessServiceClient{cc}
+}
+
+func (c *deviceAccessServiceClient) VerifyDeviceAccess(ctx context.Context, in *VerifyDeviceAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyDeviceAccessResponse)
+	err := c.cc.Invoke(ctx, DeviceAccessService_VerifyDeviceAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAccessServiceClient) VerifyDeviceAiAccess(ctx context.Context, in *VerifyDeviceAiAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAiAccessResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyDeviceAiAccessResponse)
+	err := c.cc.Invoke(ctx, DeviceAccessService_VerifyDeviceAiAccess_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *deviceAccessServiceClient) VerifyDeviceCredential(ctx context.Context, in *VerifyDeviceCredentialRequest, opts ...grpc.CallOption) (*VerifyDeviceCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyDeviceCredentialResponse)
+	err := c.cc.Invoke(ctx, DeviceAccessService_VerifyDeviceCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeviceAccessServiceServer is the server API for DeviceAccessService service.
+// All implementations must embed UnimplementedDeviceAccessServiceServer
+// for forward compatibility.
+//
+// 会话。
+// Dedicated online device authority. Internal service JWT + delegated tenant and
+// authenticated internal transport are mandatory; never accepts browser cookies.
+type DeviceAccessServiceServer interface {
+	// Only svc:ai-gateway. Validates the external device JWT, including the Team
+	// device permission ceiling, and current device/account/backing-session state.
+	VerifyDeviceAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error)
+	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
+	// tenant and the existing authenticated internal transport. Accepts only the
+	// single-AI-audience device JWT (at+jwt/ES256, <=300s), never a platform/Team,
+	// instance, service token or ait_. Online checks current member/model-invoke
+	// permission plus device/account/backing session; no idle touch or refresh use.
+	// Determinately invalid => inactive with empty identity; dependency faults =>
+	// UNAVAILABLE. Active expires_at is min(token, current backing deadlines),
+	// still future at completion. Does not authorize model ACLs or budgets.
+	VerifyDeviceAiAccess(context.Context, *VerifyDeviceAiAccessRequest) (*VerifyDeviceAiAccessResponse, error)
+	// Only svc:collab. Receiver/lock-time authority check; identity inputs are
+	// compared with stored device ownership, never trusted as proof of ownership.
+	VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error)
+	mustEmbedUnimplementedDeviceAccessServiceServer()
+}
+
+// UnimplementedDeviceAccessServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedDeviceAccessServiceServer struct{}
+
+func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceAccess not implemented")
+}
+func (UnimplementedDeviceAccessServiceServer) VerifyDeviceAiAccess(context.Context, *VerifyDeviceAiAccessRequest) (*VerifyDeviceAiAccessResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceAiAccess not implemented")
+}
+func (UnimplementedDeviceAccessServiceServer) VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyDeviceCredential not implemented")
+}
+func (UnimplementedDeviceAccessServiceServer) mustEmbedUnimplementedDeviceAccessServiceServer() {}
+func (UnimplementedDeviceAccessServiceServer) testEmbeddedByValue()                             {}
+
+// UnsafeDeviceAccessServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to DeviceAccessServiceServer will
+// result in compilation errors.
+type UnsafeDeviceAccessServiceServer interface {
+	mustEmbedUnimplementedDeviceAccessServiceServer()
+}
+
+func RegisterDeviceAccessServiceServer(s grpc.ServiceRegistrar, srv DeviceAccessServiceServer) {
+	// If the following call pancis, it indicates UnimplementedDeviceAccessServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&DeviceAccessService_ServiceDesc, srv)
+}
+
+func _DeviceAccessService_VerifyDeviceAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyDeviceAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAccessService_VerifyDeviceAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceAccess(ctx, req.(*VerifyDeviceAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAccessService_VerifyDeviceAiAccess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyDeviceAiAccessRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceAiAccess(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAccessService_VerifyDeviceAiAccess_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceAiAccess(ctx, req.(*VerifyDeviceAiAccessRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DeviceAccessService_VerifyDeviceCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyDeviceCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeviceAccessService_VerifyDeviceCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeviceAccessServiceServer).VerifyDeviceCredential(ctx, req.(*VerifyDeviceCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// DeviceAccessService_ServiceDesc is the grpc.ServiceDesc for DeviceAccessService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var DeviceAccessService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "auriga.iam.v1.DeviceAccessService",
+	HandlerType: (*DeviceAccessServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "VerifyDeviceAccess",
+			Handler:    _DeviceAccessService_VerifyDeviceAccess_Handler,
+		},
+		{
+			MethodName: "VerifyDeviceAiAccess",
+			Handler:    _DeviceAccessService_VerifyDeviceAiAccess_Handler,
+		},
+		{
+			MethodName: "VerifyDeviceCredential",
+			Handler:    _DeviceAccessService_VerifyDeviceCredential_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "auriga/iam/v1/iam.proto",
+}
+
+const (
 	SessionService_IntrospectSession_FullMethodName      = "/auriga.iam.v1.SessionService/IntrospectSession"
 	SessionService_RevokeSessions_FullMethodName         = "/auriga.iam.v1.SessionService/RevokeSessions"
 	SessionService_TouchSession_FullMethodName           = "/auriga.iam.v1.SessionService/TouchSession"
@@ -28,8 +238,6 @@ const (
 // SessionServiceClient is the client API for SessionService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// 会话。
 type SessionServiceClient interface {
 	// 校验浏览器会话，返回给业务服务用的访问令牌。调用方：edge（NATS KV 缓存没命中时）。
 	// 会话无效时返回 active=false，不返回错误。
@@ -101,8 +309,6 @@ func (c *sessionServiceClient) VerifyAdminSessionCsrf(ctx context.Context, in *V
 // SessionServiceServer is the server API for SessionService service.
 // All implementations must embed UnimplementedSessionServiceServer
 // for forward compatibility.
-//
-// 会话。
 type SessionServiceServer interface {
 	// 校验浏览器会话，返回给业务服务用的访问令牌。调用方：edge（NATS KV 缓存没命中时）。
 	// 会话无效时返回 active=false，不返回错误。

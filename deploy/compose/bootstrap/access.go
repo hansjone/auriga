@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
+	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"github.com/hansjone/auriga/infra/gen/deployment"
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
@@ -27,6 +28,16 @@ var identityMaterialFiles = []string{
 	"access.json", "iam-healthcheck.sh", "iam-client.json", "heartbeat-observer.json",
 	"edge.config.json", "access.env", "agent-policy.yaml",
 	"runtime-keys/root.pb",
+	"pki/gateway.crt", "pki/gateway.key",
+}
+
+func init() {
+	for _, name := range networkdeploy.Files {
+		identityMaterialFiles = append(identityMaterialFiles, "network/"+name)
+	}
+	for _, name := range networkdeploy.CredentialFiles {
+		identityMaterialFiles = append(identityMaterialFiles, "network-platform/"+name)
+	}
 }
 
 func writeComposeKeys(out string) error {
@@ -87,7 +98,33 @@ func validateComposeKeys(raw []byte) error {
 }
 
 func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet, error) {
-	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys"}}
+	set := materials.MaterialSet{PublicFiles: append([]string{}, identityMaterialFiles...), PrivateFiles: []string{"edge.secret", "internal.properties", "compose.keys"}, ManagedDirectories: []string{"pki", "templates", "runtime-keys", "network", "network-platform", "browser-tls"}}
+	access, err := os.ReadFile(filepath.Join(out, "access.json"))
+	if err != nil {
+		return set, fmt.Errorf("read managed access")
+	}
+	cfg, err := deploymentconfig.Load(access)
+	if err != nil {
+		return set, err
+	}
+	if cfg.PortalOrigin().Scheme == "https" {
+		set.PublicFiles = append(set.PublicFiles, "browser-tls/browser.crt", "browser-tls/browser.key")
+	}
+	if _, err := os.Lstat(filepath.Join(out, "collab-installation")); err == nil {
+		if !validateCollabSource(out) {
+			return set, fmt.Errorf("invalid managed collab source metadata")
+		}
+		set.ManagedDirectories = append(set.ManagedDirectories, "collab-installation")
+		for _, name := range collabLeaves {
+			set.PublicFiles = append(set.PublicFiles, "collab-installation/"+name)
+		}
+		set.PublicFiles = append(set.PublicFiles, "network-platform/collab.secret", "pki/edge-collab.crt", "pki/edge-collab.key")
+	} else if !os.IsNotExist(err) {
+		return set, err
+	}
+	if err := networkdeploy.ValidateBrowserSource(out, cfg.PortalOrigin().Scheme == "https"); err != nil {
+		return set, err
+	}
 	entries, err := os.ReadDir(filepath.Join(out, "templates"))
 	if err != nil {
 		return set, err
@@ -280,17 +317,17 @@ func validateComposeAccess(cfg deploymentconfig.Config, edgeContainer string) er
 	if cfg.PortalOrigin().Port == cfg.AdminOrigin().Port {
 		return fmt.Errorf("compose access: this recipe requires distinct external portal and admin ports")
 	}
-	if cfg.IngressKind() != "direct" || cfg.PortalOrigin().Scheme != "http" || cfg.AdminOrigin().Scheme != "http" || cfg.InstanceControl().Origin.Scheme != "http" {
-		return fmt.Errorf("compose access: only direct HTTP browser and instance-control ingress is supported")
+	if cfg.IngressKind() != "direct" || cfg.PortalOrigin().Scheme != cfg.AdminOrigin().Scheme || cfg.InstanceControl().Origin.Scheme != "http" || cfg.Listeners().InstanceControl.Tls {
+		return fmt.Errorf("compose access: direct browser ingress and isolated HTTP instance-control required")
 	}
 	ls := cfg.Listeners()
 	for _, listener := range []deployment.Listener{ls.Portal, ls.Admin, ls.InstanceControl} {
-		if listener.Address != "0.0.0.0" || listener.Tls {
-			return fmt.Errorf("compose access: container listeners require 0.0.0.0 without TLS")
+		if listener.Address != "0.0.0.0" {
+			return fmt.Errorf("compose access: container listeners require 0.0.0.0")
 		}
 	}
 	for _, origin := range []deployment.Origin{cfg.PortalOrigin(), cfg.AdminOrigin()} {
-		for _, reserved := range []int32{15432, 4222, 8222, 5000, iamPort, observerPort, 7443, iamRPCPort} {
+		for _, reserved := range []int32{15432, 4222, 8222, 5000, iamPort, observerPort, 7443, iamRPCPort, 8085, 9092} {
 			if origin.Port == reserved {
 				return fmt.Errorf("compose access: browser port conflicts with a fixed combined host service")
 			}

@@ -24,6 +24,14 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		}
 		return raw
 	}
+	platformEntries, err := os.ReadDir(filepath.Join(out, "network-platform"))
+	if err != nil || len(platformEntries) != 2 {
+		t.Fatalf("platform private mount must contain exactly two credentials: %v", err)
+	}
+	if !strings.Contains(string(read("network-platform/platform.properties")), fmt.Sprintf("installation-owner=%d\n", os.Getuid())) {
+		t.Fatal("platform installation owner differs from generator uid")
+	}
+	read("network-platform/gateway.secret")
 	access, err := deploymentconfig.Load(read("access.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +44,13 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 		AccessConfigFile string            `json:"accessConfigFile"`
 		Upstreams        map[string]string `json:"upstreams"`
 		IAMHop           map[string]string `json:"iamHop"`
-		IAMRPC           struct {
+		NetworkSubmitHop map[string]string `json:"networkSubmitHop"`
+		NetworkWSS       struct {
+			Enabled                               bool
+			Path, UpstreamURL, CAFile, ServerName string
+			AllowedOrigins                        []string
+		} `json:"networkWss"`
+		IAMRPC struct {
 			Address, ServerName, ServiceTokenFile string
 			TimeoutMillis                         int
 		} `json:"iamRpc"`
@@ -47,6 +61,27 @@ func assertAccessMaterials(t *testing.T, out string, observer bool) {
 	}
 	if edge.AccessConfigFile != "/etc/auriga/access.json" {
 		t.Fatal("edge must load shared access.json")
+	}
+	wss := edge.NetworkWSS
+	if !wss.Enabled || wss.Path != "/net/v1/ws" || wss.UpstreamURL != "wss://172.29.240.1:18444" || wss.CAFile != "/etc/auriga/network-edge/server-ca.pem" || wss.ServerName != "broker.network.internal" || len(wss.AllowedOrigins) != 1 || wss.AllowedOrigins[0] != access.PortalURL() { // gitleaks:allow disposable M2 network
+		t.Fatal("missing exact WSS upstream/trust/portal Origin")
+	}
+	broker := string(read("network/broker.conf"))
+	if !strings.Contains(broker, "\nhost: \"127.0.0.1\"\nport: 14224\n") || !strings.Contains(broker, "websocket {host: \"172.29.240.1\", port: 18444,") { // gitleaks:allow disposable M2 network
+		t.Fatal("WSS must bind the compose bridge while TCP remains loopback")
+	}
+	if edge.Upstreams["network-submit"] != "https://172.29.240.1:18443" || edge.NetworkSubmitHop["serverName"] != "submit.network.internal" || edge.NetworkSubmitHop["caFile"] == edge.IAMHop["caFile"] || edge.NetworkSubmitHop["certFile"] == edge.IAMHop["certFile"] { // gitleaks:allow disposable M2 network
+		t.Fatal("submit must use an independent HTTPS listener and trust material")
+	}
+	var network struct {
+		SubmitHTTP struct{ ClientCAFile, TLSCertFile, TLSKeyFile, Listen string }
+		IAM        struct{ ServiceTokenFile string }
+	}
+	if err := json.Unmarshal(read("network/runtime.json"), &network); err != nil {
+		t.Fatal(err)
+	}
+	if network.SubmitHTTP.ClientCAFile != "/etc/auriga/network/client-ca.pem" || network.SubmitHTTP.Listen != "172.29.240.1:18443" || network.IAM.ServiceTokenFile != "/run/auriga-network-token/gateway/service.jwt" { // gitleaks:allow disposable M2 network
+		t.Fatal("incomplete network runtime configuration")
 	}
 	for _, service := range []string{"iam", "org", "workspace"} {
 		port := iamPort
