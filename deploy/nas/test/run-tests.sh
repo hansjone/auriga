@@ -18,6 +18,9 @@ fail_msg() { printf 'FAIL %s: %s\n' "$1" "$2"; fail=1; }
 # shellcheck disable=SC1091
 . "$ROOT/scripts/lib.sh"
 
+if sh "$ROOT/test/panel-renew-cron.sh"; then pass panel_renewal_cron_regressions
+else fail_msg panel_renewal_cron_regressions "hourly renewal scheduling failed"; fi
+
 if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi
 if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions

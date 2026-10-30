@@ -7,7 +7,6 @@ COPY web ./web
 COPY clients ./clients
 COPY contracts ./contracts
 COPY tsconfig.base.json ./
-ARG AURIGA_PANEL_VERSION=0.0.0
 RUN corepack enable \
   && corepack prepare pnpm@11.28.6 --activate \
   && pnpm install --frozen-lockfile \
@@ -15,8 +14,7 @@ RUN corepack enable \
   && pnpm gen:steps \
   && pnpm --filter @auriga/portal build \
   && pnpm --filter @auriga/admin build \
-  && pnpm --filter @auriga/panel build \
-  && printf '%s\n' "$AURIGA_PANEL_VERSION" > web/panel/dist/version.txt
+  && pnpm --filter @auriga/panel build
 
 FROM golang:1.27.3 AS gobuild
 WORKDIR /src/infra

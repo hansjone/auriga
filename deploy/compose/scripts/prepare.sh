@@ -84,6 +84,8 @@ trap 'rm -f -- "$COMPOSE_ENV_TMP"' EXIT
 cat "$VAR/iam-installation/compose.keys" > "$COMPOSE_ENV_TMP"
 cat >> "$COMPOSE_ENV_TMP" <<EOF
 AURIGA_AGENT_CA_SHA256=$CA_SHA
+AURIGA_PANEL_UID=$(stat -c '%u' "$VAR/panel-signing.key")
+AURIGA_PANEL_GID=$(stat -c '%g' "$VAR/panel-signing.key")
 EOF
 cat "$VAR/access.env" >> "$COMPOSE_ENV_TMP"
 mv -fT -- "$COMPOSE_ENV_TMP" "$VAR/compose.env"
@@ -146,6 +148,15 @@ if [ -e "$VAR/panel" ] || [ -L "$VAR/panel" ]; then
 else
   mkdir -m 755 "$VAR/panel"
 fi
+
+# The signer runs as the existing key owner; no extra DAC capability is needed.
+PANEL_OWNER="$(stat -c '%u:%g' "$VAR/panel-signing.key")"
+if [ "$(id -u)" -eq 0 ]; then
+  chown "$PANEL_OWNER" "$VAR/panel"
+else
+  sudo -n chown "$PANEL_OWNER" "$VAR/panel"
+fi
+sh "$COMPOSE/scripts/renew-panel.sh" --install
 
 # File-backed secrets: only the intended container identity can read each key.
 if [ "$(id -u)" -eq 0 ]; then

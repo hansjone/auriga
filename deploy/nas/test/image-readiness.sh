@@ -8,7 +8,7 @@ mkdir -p "$TMP/bin" "$TMP/nas/scripts" "$TMP/srv/container/auriga-test"
 cp "$ROOT/scripts/lib.sh" "$TMP/nas/scripts/lib.sh"
 cp "$ROOT/scripts/preflight.sh" "$TMP/nas/scripts/preflight.sh"
 cp "$ROOT/scripts/start.sh" "$TMP/nas/scripts/start.sh"
-for script in network-preflight render mount-access; do
+for script in network-preflight render mount-access renew-panel; do
   printf '#!/bin/sh\nexit 0\n' >"$TMP/nas/scripts/$script.sh"
 done
 printf '#!/bin/sh\nexit "${NAS_READY_MOUNT_EXIT:-0}"\n' >"$TMP/nas/scripts/mount-access.sh"

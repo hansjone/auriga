@@ -121,7 +121,17 @@ cat >"$TMP/bin/ss" <<'EOF'
 #!/bin/sh
 echo 'LISTEN 0 128 127.0.0.1:17443 0.0.0.0:*'
 EOF
-chmod +x "$TMP/bin/docker" "$TMP/bin/ss"
+cat >"$TMP/bin/crontab" <<'EOF'
+#!/bin/sh
+# Never alter the real host crontab from this lifecycle test.
+if [ "$1" = -l ]; then exit 0; fi
+grep -q 'auriga-panel-' "$1"
+EOF
+cat >"$TMP/bin/pgrep" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$TMP/bin/docker" "$TMP/bin/ss" "$TMP/bin/crontab" "$TMP/bin/pgrep"
 export PATH="$TMP/bin:$PATH"
 # All registration entries receive the same label AND path checks as discovery.
 printf '%s\n' bbbbbbbbbbbb cccccccccccc unrelated-name >"$DATA/results/registered-instances.txt"
