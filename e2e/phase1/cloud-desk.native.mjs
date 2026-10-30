@@ -199,8 +199,13 @@ export async function configureFixtureModel(
   });
 }
 
-export async function loginDesktop(request, member, { resume = false } = {}) {
+export async function loginDesktop(
+  request,
+  member,
+  { resume = false, reauthenticate = false } = {},
+) {
   let status = await request('/auriga/local-login/status');
+  let reauthenticated = false;
   if (resume && !status.loggedIn && status.resumeAvailable) {
     assert.ok(member.accountId);
     const result = await request(
@@ -221,12 +226,32 @@ export async function loginDesktop(request, member, { resume = false } = {}) {
       member.accountId,
       'resume only the same authenticated test member',
     );
-    return {
-      loggedIn: true,
-      available: status.available,
-      accountId: status.account.subject,
-      resumed: true,
-    };
+    if (!reauthenticate)
+      return {
+        loggedIn: true,
+        available: status.available,
+        accountId: status.account.subject,
+        resumed: true,
+      };
+    const signedOut = await request(
+      '/auriga/local-login/logout',
+      {},
+      status.csrf,
+    );
+    assert.equal(signedOut.loggedIn, false);
+    status = await poll(
+      async () => {
+        const current = await request('/auriga/local-login/status');
+        return current.loggedIn === false &&
+          current.resumeAvailable === false &&
+          current.remoteRevocation === 'complete'
+          ? current
+          : null;
+      },
+      'desktop_revocation_not_complete',
+      90000,
+    );
+    reauthenticated = true;
   }
   assert.equal(
     status.loggedIn,
@@ -306,6 +331,7 @@ export async function loginDesktop(request, member, { resume = false } = {}) {
     loggedIn: status.loggedIn,
     available: status.available,
     accountId: status.account?.subject,
+    ...(reauthenticated ? { reauthenticated: true } : {}),
   };
 }
 

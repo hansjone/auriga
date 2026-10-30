@@ -290,6 +290,41 @@ test('a submitted send or a local echo cannot satisfy cloud/desktop conversation
   assert.throws(() => assertConversation(report, state));
 });
 
+test('explicit desktop reauthentication signs out the verified member and waits for revocation before a new login', async () => {
+  const actions = [];
+  let phase = 'old';
+  const request = async (path, body) => {
+    if (path === '/auriga/local-login/status')
+      return {
+        loggedIn: phase !== 'signed-out',
+        available: true,
+        resumeAvailable: false,
+        remoteRevocation: 'complete',
+        csrf: 'local-csrf',
+        account: phase === 'signed-out' ? null : { subject: 'same-member' },
+      };
+    if (path === '/auriga/local-login/logout') {
+      actions.push('logout');
+      phase = 'signed-out';
+      return { loggedIn: false, remoteRevocation: 'pending' };
+    }
+    actions.push(body.action);
+    if (body.action === 'begin') {
+      assert.equal(phase, 'signed-out');
+      return { step: { type: 'form', formId: 'login' } };
+    }
+    phase = 'fresh';
+    return { step: { type: 'complete' } };
+  };
+  const result = await loginDesktop(
+    request,
+    { accountId: 'same-member', username: 'alice', password: 'test-only' },
+    { resume: true, reauthenticate: true },
+  );
+  assert.equal(result.reauthenticated, true);
+  assert.deepEqual(actions, ['logout', 'begin', 'advance']);
+});
+
 test('native RPC rejects mismatched response identity and never exposes returned error text', async () => {
   const client = nativeClient(async (_path, body) => ({
     type: 'server-response',

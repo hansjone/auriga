@@ -80,6 +80,7 @@ async function deviceFixture(t, clockOffset = 0, diagnostics) {
   assert.equal(prepared.origin, 'https://portal.example.com');
   assert.notEqual(new URL(prepared.url).host, new URL(prepared.origin).host);
   return {
+    provider,
     prepared,
     responses,
     claims,
@@ -167,6 +168,21 @@ for (const [name, respond, phase, code, status] of [
     assert.equal(event.budget_ms, phase === 'register_http' ? 15000 : 0);
     assert.equal(f.calls.length, 1);
   });
+
+test('verified device generations have stable distinct private storage keys', async (t) => {
+  const f = await deviceFixture(t);
+  const key = f.prepared.storageKey;
+  assert.match(key, /^[a-f0-9]{64}$/);
+  assert.equal(
+    (await f.provider.prepare({ signal: f.controller.signal })).storageKey,
+    key,
+  );
+  f.claims.did = 'another-real-device';
+  assert.notEqual(
+    (await f.provider.prepare({ signal: f.controller.signal })).storageKey,
+    key,
+  );
+});
 
 test('device submit uses the fixed HTTPS path, device bearer and complete original bytes', async (t) => {
   const f = await deviceFixture(t);

@@ -454,6 +454,7 @@ export async function run(cfg, output) {
       dshVersion: descriptor.dshVersion,
       ...(await loginDesktop(desktop.request, member ?? cloud.member, {
         resume: cfg.resumeDesktop === true,
+        reauthenticate: cfg.reauthenticateDesktop === true,
       })),
     };
     assert.notEqual(
@@ -658,7 +659,7 @@ async function requireTestLock() {
   );
   assert.match(
     owner,
-    /auriga-SEND-FIX R[456] 只测不重建/,
+    /auriga-SEND-FIX R(?:[456] 只测不重建|7 仅重建 platform 应用来源权威配置)/,
     'shared-stack requests require this task own test lock',
   );
 }

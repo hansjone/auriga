@@ -40,6 +40,8 @@ node e2e/phase1/cloud-desk.mjs prepare .agent-evidence/cloud-desk/prepare.json
 生成 `desktop/cloud-desk-desktop.json`，后续运行直接复用，不重复安装。
 首次真实登录使用全新 profile；`usedForLiveRun=true` 的 profile 不自动重置或覆盖。
 中断恢复可设 `resumeDesktop:true`，必须保持记录中的同一平台与成员；已登录状态还核对真实 subject。
+需要正常轮换设备时可另显式设 `reauthenticateDesktop:true`：恢复并核同一成员，调用公开退出接口，
+等待远程撤销完成，再正常登录同一成员。它不删除profile或账本，不可用于跳过来源未决操作的真实性检查。
 未做真实登录的 R3 profile 可以直接续用；不要重复安装或清空身份。
 
 Playwright 复用 `e2e/package-lock.json` 锁定依赖（当前为 1.56.1），不要改变产品 workspace 依赖。
@@ -69,7 +71,8 @@ R4 复用已有成员时用 `existingCloud: { "credentialsFile": "共享栈的me
 现有实例通过真实“进入实例”按钮打开，停机实例通过“启动并进入”唤醒。
 本机示例域名模式只给本次 Chromium 设置 resolver 和明确的 direct proxy，不改系统代理或 DNS。
 
-共享栈测试前必须持本任务“auriga-SEND-FIX R6 只测不重建”锁，结束立即释放；脚本也接受旧 R4/R5 锁。
+共享栈测试前须持本任务对应的锁，结束立即释放；脚本接受R4/R5/R6“只测不重建”，
+以及已获具体授权的“R7 仅重建 platform 应用来源权威配置”锁；R7仅允许改两项来源有效期并重建platform容器，不构建镜像、不清卷。
 云实例禁止访问宿主私网时，可用 `fixture: { "cloudInstanceId": "同一个A实例ID" }`：
 脚本通过 Docker exec 的 stdin 在该实例临时启动仅听回环的随机端口模型服务，桌面模型另听本机回环。
 不写云端插件/配置文件，不发布端口、不修改网络隔离；私有控制键不放 argv，结束关闭两个临时服务。
