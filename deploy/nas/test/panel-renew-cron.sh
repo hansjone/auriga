@@ -49,7 +49,9 @@ mkdir "$temp/noflock"
 for tool in sh dirname cksum awk readlink stat id mkdir rmdir mktemp rm cat cp mv date wc; do
   ln -s "$(command -v "$tool")" "$temp/noflock/$tool"
 done
-cp "$temp/bin/crontab" "$temp/bin/pgrep" "$temp/noflock/"
+cp "$temp/bin/crontab" "$temp/noflock/"
+printf '#!/bin/sh\n[ "$1" = crond ]\n' >"$temp/noflock/pidof"
+chmod 755 "$temp/noflock/pidof"
 real_mkdir=$(command -v mkdir)
 rm "$temp/noflock/mkdir"
 cat >"$temp/noflock/mkdir" <<EOF
@@ -65,6 +67,16 @@ minimal_marker="auriga-panel-$(printf '%s' "$minimal_runner:" | cksum | awk '{pr
 minimal_state="$temp/.$minimal_marker"
 PATH="$temp/noflock" sh "$helper" install "$minimal_runner" "$temp/var/panel" ""
 [ "$(stat -c '%a' "$minimal_state")" = 700 ]
+cp "$TEST_CRONTAB" "$temp/minimal-table"
+for daemon_state in missing stopped; do
+  rm -f "$temp/noflock/pidof"
+  if [ "$daemon_state" = stopped ]; then
+    printf '#!/bin/sh\nexit 1\n' >"$temp/noflock/pidof"
+    chmod 755 "$temp/noflock/pidof"
+  fi
+  if PATH="$temp/noflock" sh "$helper" install "$minimal_runner" "$temp/var/panel" ""; then exit 1; fi
+  cmp "$temp/minimal-table" "$TEST_CRONTAB"
+done
 PATH="$temp/noflock" sh "$helper" run "$minimal_runner" "$temp/var/panel" "" true
 [ -f "$minimal_state/checked" ]
 [ ! -e "$minimal_state/run-lock" ]

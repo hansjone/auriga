@@ -26,11 +26,20 @@ read_crontab() {
   cat "$temp/error" >&2
   return 1
 }
+cron_running() {
+  if command -v pgrep >/dev/null; then
+    pgrep -x cron >/dev/null || pgrep -x crond >/dev/null
+  elif command -v pidof >/dev/null; then
+    pidof cron >/dev/null || pidof crond >/dev/null
+  else
+    return 1
+  fi
+}
 case "$action" in
   install|remove)
     command -v crontab >/dev/null || { echo 'panel auto-renew unavailable: host crontab missing' >&2; exit 1; }
     if [ "$action" = install ]; then
-      pgrep -x cron >/dev/null || pgrep -x crond >/dev/null || { echo 'panel auto-renew unavailable: cron daemon stopped' >&2; exit 1; }
+      cron_running || { echo 'panel auto-renew unavailable: cron daemon not confirmed running' >&2; exit 1; }
     fi
     private_state || { echo 'panel scheduler needs an operator-writable private directory beside the data root' >&2; exit 1; }
     temp=$(umask 077; mktemp -d "$state/.update.XXXXXX")
