@@ -346,22 +346,27 @@ export async function runPhase1(options, config, dependencies = {}) {
       await desktop(state);
       await (await getAdapter()).messages(state);
     },
-    async (state) => {
+    async (state, item) => {
       if (!config.relay?.baseUrl)
         throw new Skip('RELAY-LITELLM尚未部署或未配置');
-      if (config.relay.allowModelCalls !== true || !config.relay.models?.length)
-        throw new Skip(
-          '模型调用未启用；需显式配置仅连接免费假上游的models和allowModelCalls',
+      const mode = modelCallMode(config.relay);
+      item.upstreamMode = mode;
+      requireThat(
+        new Set(config.relay.models.map((model) => model.name)).size >= 2,
+        '需至少两个不同的模型名称',
+      );
+      if (mode === 'fixture')
+        requireThat(
+          new Set(config.relay.models.map((model) => model.provider)).size >=
+            2 && config.relay.models.every((model) => model.provider),
+          '需至少两个独立假提供商',
         );
-      requireThat(
-        config.relay.models.every((model) => model.testOnly === true),
-        '拒绝未标testOnly的模型配置',
-      );
-      requireThat(
-        new Set(config.relay.models.map((model) => model.provider)).size >= 2 &&
-          config.relay.models.every((model) => model.provider),
-        '需至少两个独立假提供商',
-      );
+      else
+        requireThat(
+          new Set(config.relay.models.map((model) => model.upstreamModel))
+            .size >= 2,
+          '真实提供商模式需至少两个不同的上游模型',
+        );
       if (!config.modelUi)
         throw new Skip(
           '双DSH模型调用UI尚未接线：缺少modelUi；直接代理请求不能代替DSH调用',
@@ -378,21 +383,24 @@ export async function runPhase1(options, config, dependencies = {}) {
             pool?.data?.some(
               (entry) =>
                 entry.model_name === model.name &&
-                entry.litellm_params?.api_base === model.apiBase,
+                entry.litellm_params?.api_base === model.apiBase &&
+                (mode !== 'live' ||
+                  entry.litellm_params?.model === model.upstreamModel),
             ),
         ),
-        'LiteLLM模型池与配置的免费假上游不匹配',
+        'LiteLLM模型池与配置的上游模型或地址不匹配',
       );
-      requireThat(
-        new Set(config.relay.models.map((model) => model.apiBase)).size >= 2,
-        '至少需要两个独立假上游地址',
-      );
+      if (mode === 'fixture')
+        requireThat(
+          new Set(config.relay.models.map((model) => model.apiBase)).size >= 2,
+          '至少需要两个独立假上游地址',
+        );
       await cloud(state);
       await desktop(state);
       await (await getAdapter()).models(state);
     },
-    async (state) => {
-      await virtualKeys(config.relay, state);
+    async (state, item) => {
+      item.upstreamMode = await virtualKeys(config.relay, state);
     },
     async (state, item) => {
       if (
@@ -476,16 +484,55 @@ function trailing(url) {
   return httpUrl(url).href.replace(/\/?$/, '/');
 }
 
+function modelCallMode(relay) {
+  if (relay.allowModelCalls !== true || !relay.models?.length)
+    throw new Skip('模型调用未启用；需显式配置models和allowModelCalls');
+  const mode = relay.upstreamMode ?? 'fixture';
+  requireThat(['fixture', 'live'].includes(mode), '未知的模型上游模式');
+  if (mode === 'fixture') {
+    requireThat(
+      relay.models.every((model) => model.testOnly === true),
+      '假上游模式拒绝未标testOnly的模型配置',
+    );
+    return mode;
+  }
+  requireThat(
+    relay.models.every(
+      (model) =>
+        (model.testOnly === undefined || model.testOnly === false) &&
+        typeof model.name === 'string' &&
+        model.name &&
+        typeof model.provider === 'string' &&
+        model.provider &&
+        typeof model.upstreamModel === 'string' &&
+        model.upstreamModel &&
+        typeof model.apiBase === 'string' &&
+        model.apiBase,
+    ),
+    '真实提供商须声明模型、提供商和上游地址，且不能伪标testOnly',
+  );
+  requireThat(
+    new Set(relay.models.map((model) => model.name)).size ===
+      relay.models.length,
+    '真实模型名称不能重复',
+  );
+  for (const model of relay.models) httpUrl(model.apiBase);
+  return mode;
+}
+
 async function virtualKeys(relay, state) {
   if (!relay?.baseUrl) throw new Skip('RELAY-LITELLM尚未部署或未配置');
-  if (relay.allowModelCalls !== true || !relay.models?.length)
-    throw new Skip('外部虚拟Key调用未启用；需仅连接免费假上游的模型配置');
-  requireThat(
-    relay.models.every((model) => model.testOnly === true),
-    '拒绝未标testOnly的模型配置',
-  );
+  const mode = modelCallMode(relay);
+  if (mode === 'live')
+    requireThat(
+      relay.publicBaseUrl,
+      '真实外部Key验收须声明publicBaseUrl公开OpenAI入口',
+    );
   requireThat(relay.adminKey, '虚拟Key管理缺少relay.adminKey');
   const base = trailing(relay.baseUrl);
+  const completionUrl = relay.publicBaseUrl
+    ? new URL('chat/completions', trailing(relay.publicBaseUrl))
+    : new URL('v1/chat/completions', base);
   const keys = [];
   const api = (path, options = {}) =>
     request(new URL(path, base), state, { key: relay.adminKey, ...options });
@@ -507,12 +554,12 @@ async function virtualKeys(relay, state) {
     return result.key;
   };
   const call = (key, expected = [200]) =>
-    api('v1/chat/completions', {
+    request(completionUrl, state, {
       method: 'POST',
       key,
       body: {
         model: relay.models[0].name,
-        messages: [{ role: 'user', content: 'phase1-free-upstream-probe' }],
+        messages: [{ role: 'user', content: `phase1-${mode}-upstream-probe` }],
         max_tokens: 8,
         stream: false,
       },
@@ -562,6 +609,7 @@ async function virtualKeys(relay, state) {
     }
   }
   if (failure) throw failure;
+  return mode;
 }
 
 export async function waitSpend(relay, requestId, state) {

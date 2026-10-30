@@ -153,11 +153,40 @@ DSH 首启的“预览版说明 / Preview Notice”与可选模型设置会遮�
 }
 ```
 
-默认禁止模型请求。仅在这两个部署已接**免费本地假上游**后，把 `allowModelCalls` 设 true；`testOnly` 是操作者对免费上游的明确声明，脚本不能证明任意外部服务不会收费，不要指向付费提供商。脚本不会代管理员改 LiteLLM 模型池。
+默认禁止模型请求。免费夹具保持默认 `upstreamMode: "fixture"`，仅在两个部署已接**免费本地假上游**后把 `allowModelCalls` 设 true，并逐模型声明 `testOnly: true`；该声明不能证明任意外部服务不会收费。脚本不会代管理员改 LiteLLM 模型池。
 
-⑥ 先核配置至少两个独立假提供商及 apiBase，且 `/model/info` 的模型与实际 apiBase 一致；再经两个 DSH UI 对每个模型各调用一次。`modelUi.cloud`、`modelUi.desktop` 各配 `actions`、`responseSelector`、`requestIdAttribute`；动作可用 `valueFrom: "model"/"marker"`。假上游须回显唯一 marker，回复 UI 还需暴露可关联的 LiteLLM request ID 属性。脚本按该 ID 查询官方 `/spend/logs?request_id=...&summarize=false`，核本次非零 token 用量，最多等 10 秒。无 UI 能力或请求 ID 接线时 SKIP/FAIL，不用直接代理请求代替 DSH 调用。
+已有明确真实模型调用授权时，可配置 `relay.upstreamMode: "live"` 和 `allowModelCalls: true`。每个模型声明 `name`（LiteLLM公开模型名）、`provider`、`apiBase`、`upstreamModel`（对应 `/model/info` 的 `litellm_params.model`，如 `openai/model-a`），省略 `testOnly` 或明确设为 false；真实模式拒绝 `testOnly: true`。⑥要求至少两个不同公开模型名和上游模型，同一提供商及同一 API Base 可以承载这两个模型。示例：
 
-⑦ 需要 LiteLLM 数据库及 adminKey。签发 10 分钟有效的临时 Key：标准 OpenAI JSON 调用成功，第二次请求必须明确命中 RPM 限流；另一个预算为 0 的 Key 必须返回明确预算错误；查 Key spend 和本次请求 token 用量；吊销后相同 Key 必须 401/403。限流/预算的错误类型或消息必须符合对应语义，普通鉴权失败不能冒预算生效。所有新 Key 在成功/失败后均尝试删除；清理失败即 FAIL，请管理员检查别名为 `phase1-*` 的短期 Key。不调用付费模型。
+```json
+{
+  "relay": {
+    "baseUrl": "http://127.0.0.1:4000",
+    "publicBaseUrl": "https://portal.example.com/ai/v1",
+    "upstreamMode": "live",
+    "allowModelCalls": true,
+    "models": [
+      {
+        "name": "model-a",
+        "provider": "provider-a",
+        "apiBase": "https://models.example.com/v1",
+        "upstreamModel": "openai/model-a"
+      },
+      {
+        "name": "model-b",
+        "provider": "provider-a",
+        "apiBase": "https://models.example.com/v1",
+        "upstreamModel": "openai/model-b"
+      }
+    ]
+  }
+}
+```
+
+`baseUrl` 是操作者可达的 LiteLLM 管理 API 根地址，管理 Key仍只从私有凭据文件读取。真实模式⑦必须给出 `publicBaseUrl`，指向调用方实际使用的 OpenAI API 根路径；管理、用量查询走 `baseUrl`，所有成功调用及限流、预算、吊销探针均经 `publicBaseUrl/chat/completions`，只携带新签发的虚拟 Key。域名入口未配置时失败，不用内部直连代替外部验收。免费夹具未配置公开入口时保留原来的 `baseUrl/v1/chat/completions`。
+
+⑥ 免费模式核至少两个独立假提供商及 apiBase；真实模式核两个不同上游模型，允许同提供商同地址。两者均检查 `/model/info` 与实际名称、地址一致，真实模式额外核上游模型名；再经两个 DSH UI 对每个模型各调用一次。`modelUi.cloud`、`modelUi.desktop` 各配 `actions`、`responseSelector`、`requestIdAttribute`；动作可用 `valueFrom: "model"/"marker"`。模型回复须含本次唯一 marker（真实模式的输入动作应要求模型原样回复 marker），回复 UI 还需提供可关联的 LiteLLM request ID 属性。脚本按该 ID查询官方 `/spend/logs?request_id=...&summarize=false`，核本次非零 token 用量，最多等10秒。无 UI 能力或请求 ID 接线时 SKIP/FAIL，不用直接代理请求代替 DSH 调用。
+
+⑦ 需要 LiteLLM 数据库及 adminKey。签发10分钟有效、预算1 USD、RPM为1的临时 Key：标准OpenAI JSON调用成功，第二次请求必须明确命中RPM限流；另一个预算为0的Key必须返回明确预算错误；查Key spend和本次请求token用量；吊销后相同Key必须401/403。每个调用请求限定 `max_tokens: 8`，真实模式可能产生费用，仅在已有授权下启用。限流/预算错误必须符合对应语义，普通鉴权失败不能冒预算生效。所有新Key在成功/失败后均尝试删除；清理失败即FAIL，请管理员检查别名为 `phase1-*` 的短期Key。单项报告标明实际 `upstreamMode`；本地HTTP夹具仍不是提供商或NAS验收证据。
 
 参考：[LiteLLM 虚拟 Key](https://docs.litellm.ai/docs/proxy/virtual_keys)、[预算与限流](https://docs.litellm.ai/docs/proxy/users)、[用量记录](https://docs.litellm.ai/docs/proxy/cost_tracking)。实际固定镜像对零预算、RPM、日志异步落库的行为仍须部署验收；不能用本分支 HTTP 夹具替代。
 

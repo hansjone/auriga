@@ -453,72 +453,238 @@ test('已配置的LiteLLM 503不能冒未部署SKIP', async (t) => {
   assert.equal(report.items[0].status, 'FAIL');
 });
 
-for (const broken of [false, true]) {
-  test(`虚拟Key真实HTTP流程与清理：${broken ? '错误鉴权不能冒预算生效' : '成功调用/限流/预算/用量/吊销'}`, async (t) => {
-    const keys = new Map();
-    const requestId = randomBytes(8).toString('hex');
-    const adminKey = randomBytes(24).toString('hex');
-    const baseUrl = await fixture(t, async (req, res) => {
-      const url = new URL(req.url, 'http://localhost');
-      const chunks = [];
-      for await (const chunk of req) chunks.push(chunk);
-      const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : {};
-      const respond = (data, status = 200) => {
-        res.writeHead(status, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(data));
-      };
-      const key = req.headers.authorization?.slice(7);
-      if (url.pathname !== '/v1/chat/completions') assert.equal(key, adminKey);
-      if (url.pathname === '/key/generate') {
-        const created = randomBytes(20).toString('hex');
-        keys.set(created, { ...body, calls: 0 });
-        return respond({ key: created });
-      }
-      if (url.pathname === '/key/delete') {
-        for (const key of body.keys) keys.delete(key);
-        return respond({});
-      }
-      if (url.pathname === '/key/info') return respond({ info: { spend: 0 } });
-      if (url.pathname === '/spend/logs') {
-        assert.equal(url.searchParams.get('request_id'), requestId);
-        return respond([{ request_id: requestId, total_tokens: 2 }]);
-      }
-      if (url.pathname === '/v1/chat/completions') {
-        if (!keys.has(key))
-          return respond({ error: { type: 'authentication_error' } }, 401);
-        const record = keys.get(key);
-        if (record.max_budget === 0)
-          return respond(
-            {
-              error: {
-                type: broken ? 'authentication_error' : 'budget_exceeded',
-              },
+for (const mismatch of [false, true]) {
+  test(`真实提供商模式允许同提供商与同地址的两个模型，实际池不匹配则拒绝：${mismatch}`, async (t) => {
+    const models = ['model-a', 'model-b'].map((name) => ({
+      name,
+      provider: 'provider-a',
+      apiBase: 'https://models.example.com/v1',
+      upstreamModel: 'openai/' + name,
+    }));
+    const baseUrl = await fixture(t, (req, res) => {
+      assert.equal(req.url, '/model/info');
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          data: models.map((model, index) => ({
+            model_name: model.name,
+            litellm_params: {
+              api_base:
+                mismatch && index === 1
+                  ? 'https://other.example.com/v1'
+                  : model.apiBase,
+              model: model.upstreamModel,
             },
-            401,
-          );
-        if (record.calls++)
-          return respond({ error: { type: 'rate_limit_exceeded' } }, 429);
-        return respond({
-          id: requestId,
-          choices: [{}],
-          usage: { total_tokens: 2 },
-        });
-      }
-      respond({}, 404);
+          })),
+        }),
+      );
     });
+    let calls = 0;
+    const report = await runPhase1(
+      { baseUrl, only: [6], desktopDsh: 'isolated-test-descriptor.json' },
+      {
+        relay: { baseUrl, upstreamMode: 'live', allowModelCalls: true, models },
+        desktop: { loggedInSelector: '#signed-in' },
+        modelUi: {},
+      },
+      {
+        adapter: {
+          invite: async () => ({ memberVerified: true }),
+          cloud: async () => ({ ready: true, pluginLoggedIn: true }),
+          desktop: async () => ({ installed: true, pluginLoggedIn: true }),
+          models: async () => {
+            calls++;
+          },
+          close: async () => {},
+        },
+      },
+    );
+    assert.equal(report.items[5].status, mismatch ? 'FAIL' : 'PASS');
+    assert.equal(calls, mismatch ? 0 : 1);
+    assert.equal(report.evidenceType, 'injected-test-adapter');
+  });
+}
+
+test('真实提供商模式须显式开启且不接受伪标testOnly或重复模型', async () => {
+  const model = {
+    name: 'model-a',
+    provider: 'provider-a',
+    apiBase: 'https://models.example.com/v1',
+    upstreamModel: 'openai/model-a',
+  };
+  for (const relay of [
+    {
+      upstreamMode: 'unknown',
+      allowModelCalls: true,
+      models: [model, { ...model, name: 'model-b' }],
+    },
+    {
+      upstreamMode: 'live',
+      allowModelCalls: true,
+      models: [
+        { ...model, testOnly: true },
+        { ...model, name: 'model-b' },
+      ],
+    },
+    { upstreamMode: 'live', allowModelCalls: true, models: [model, model] },
+  ]) {
+    const report = await runPhase1(
+      { baseUrl: 'http://127.0.0.1', only: [6] },
+      { relay: { baseUrl: 'http://127.0.0.1', ...relay } },
+    );
+    assert.equal(report.items[5].status, 'FAIL');
+  }
+  const skipped = await runPhase1(
+    { baseUrl: 'http://127.0.0.1', only: [6, 7] },
+    {
+      relay: {
+        baseUrl: 'http://127.0.0.1',
+        upstreamMode: 'live',
+        models: [model],
+      },
+    },
+  );
+  assert.equal(skipped.items[5].status, 'SKIP');
+  assert.equal(skipped.items[6].status, 'SKIP');
+});
+
+test('真实外部Key验收拒绝缺失公开入口或包含凭据的地址，且不签发Key', async (t) => {
+  let requests = 0;
+  const baseUrl = await fixture(t, (_req, res) => {
+    requests++;
+    res.writeHead(500).end('{}');
+  });
+  const model = {
+    name: 'model-a',
+    provider: 'provider-a',
+    apiBase: 'https://models.example.com/v1',
+    upstreamModel: 'openai/model-a',
+  };
+  for (const overrides of [
+    {},
+    { publicBaseUrl: 'https://username:password@example.com/ai/v1' },
+    {
+      publicBaseUrl: 'https://portal.example.com/ai/v1',
+      models: [{ ...model, testOnly: 'true' }],
+    },
+  ]) {
     const report = await runPhase1(
       { baseUrl, only: [7] },
       {
         relay: {
           baseUrl,
-          adminKey,
+          adminKey: 'test-admin',
+          upstreamMode: 'live',
           allowModelCalls: true,
-          models: [{ name: 'fake', provider: 'fake-a', testOnly: true }],
+          models: [model],
+          ...overrides,
         },
       },
     );
-    assert.equal(report.items[6].status, broken ? 'FAIL' : 'PASS');
-    assert.equal(keys.size, 0);
-    assert.equal(JSON.stringify(report).includes(adminKey), false);
-  });
+    assert.equal(report.items[6].status, 'FAIL');
+    assert.equal(requests, 0);
+    assert.equal(JSON.stringify(report).includes('username:password'), false);
+  }
+});
+
+for (const upstreamMode of ['fixture', 'live']) {
+  for (const broken of [false, true]) {
+    test(`虚拟Key真实HTTP流程与清理（${upstreamMode}）：${broken ? '错误鉴权不能冒预算生效' : '成功调用/限流/预算/用量/吊销'}`, async (t) => {
+      const keys = new Map();
+      const requestId = randomBytes(8).toString('hex');
+      const adminKey = randomBytes(24).toString('hex');
+      const handler = async (req, res) => {
+        const url = new URL(req.url, 'http://localhost');
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : {};
+        const respond = (data, status = 200) => {
+          res.writeHead(status, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(data));
+        };
+        const key = req.headers.authorization?.slice(7);
+        const completion = [
+          '/v1/chat/completions',
+          '/ai/v1/chat/completions',
+        ].includes(url.pathname);
+        if (!completion) assert.equal(key, adminKey);
+        else assert.notEqual(key, adminKey);
+        if (url.pathname === '/key/generate') {
+          const created = randomBytes(20).toString('hex');
+          keys.set(created, { ...body, calls: 0 });
+          return respond({ key: created });
+        }
+        if (url.pathname === '/key/delete') {
+          for (const key of body.keys) keys.delete(key);
+          return respond({});
+        }
+        if (url.pathname === '/key/info')
+          return respond({ info: { spend: 0 } });
+        if (url.pathname === '/spend/logs') {
+          assert.equal(url.searchParams.get('request_id'), requestId);
+          return respond([{ request_id: requestId, total_tokens: 2 }]);
+        }
+        if (completion) {
+          if (!keys.has(key))
+            return respond({ error: { type: 'authentication_error' } }, 401);
+          const record = keys.get(key);
+          if (record.max_budget === 0)
+            return respond(
+              {
+                error: {
+                  type: broken ? 'authentication_error' : 'budget_exceeded',
+                },
+              },
+              401,
+            );
+          if (record.calls++)
+            return respond({ error: { type: 'rate_limit_exceeded' } }, 429);
+          return respond({
+            id: requestId,
+            choices: [{}],
+            usage: { total_tokens: 2 },
+          });
+        }
+        respond({}, 404);
+      };
+      const baseUrl = await fixture(t, (req, res) => {
+        if (upstreamMode === 'live')
+          assert.ok(!req.url.includes('chat/completions'));
+        void handler(req, res);
+      });
+      const publicUrl =
+        upstreamMode === 'live'
+          ? await fixture(t, (req, res) => {
+              assert.equal(req.url, '/ai/v1/chat/completions');
+              void handler(req, res);
+            })
+          : undefined;
+      const report = await runPhase1(
+        { baseUrl, only: [7] },
+        {
+          relay: {
+            baseUrl,
+            upstreamMode,
+            publicBaseUrl: publicUrl && publicUrl + '/ai/v1',
+            adminKey,
+            allowModelCalls: true,
+            models:
+              upstreamMode === 'live'
+                ? [
+                    {
+                      name: 'model-a',
+                      provider: 'provider-a',
+                      apiBase: 'https://models.example.com/v1',
+                      upstreamModel: 'openai/model-a',
+                    },
+                  ]
+                : [{ name: 'fake', provider: 'fake-a', testOnly: true }],
+          },
+        },
+      );
+      assert.equal(report.items[6].status, broken ? 'FAIL' : 'PASS');
+      assert.equal(keys.size, 0);
+      assert.equal(JSON.stringify(report).includes(adminKey), false);
+    });
+  }
 }
