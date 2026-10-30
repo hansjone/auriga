@@ -167,7 +167,7 @@ test('access preflight rejects unsupported modes, unsafe origins and mismatched 
 });
 
 test('TOTP matches RFC 6238 SHA-1 vectors (six digits)', () => {
-  const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'; // gitleaks:allow RFC 6238 public test vector
   assert.equal(totp(secret, 59_000), '287082');
   assert.equal(totp(secret, 1_111_111_109_000), '081804');
   assert.throws(() => totp('invalid!'));

@@ -180,7 +180,7 @@ test('RFC6238 TOTP 向量', () => {
 test('连续注册/登录等待下一个TOTP窗口，避免真实IAM重放拒绝', async () => {
   let time = 60000;
   const credentials = {
-    totpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+    totpSecret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', // gitleaks:allow RFC 6238 public test vector
     otpCounter: 2,
   };
   const otp = await nextTotp(credentials, {
