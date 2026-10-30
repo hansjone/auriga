@@ -88,6 +88,23 @@ check(
     'no_new_privileges',
 )
 platform_env = services['platform']['environment']
+native = {
+    'ID': 'auriga-dsh',
+    'TENANT': values.get('AURIGA_NAS_NATIVE_CLIENT_TENANT_ID') or '00000000-0000-0000-0000-000000000001',
+    'SECRETHASH': '',
+    'REDIRECTURIS': '',
+    'SCOPES': 'auriga.connect',
+    'GRANTS': 'urn:ietf:params:oauth:grant-type:device_code,refresh_token',
+    'PLATFORM': 'true',
+    'NATIVECONNECT': 'true',
+}
+check(
+    {key: str(value) for key, value in platform_env.items()
+     if key.startswith('AURIGA_IAM_CLIENTS_')}
+    == {'AURIGA_IAM_CLIENTS_0_' + key: value for key, value in native.items()},
+    'native_public_client_exact_registration',
+)
+check(native['TENANT'] == access['tenantId'], 'native_client_matches_installation_tenant')
 edge_env = edge['environment']
 check(platform_env.get('AURIGA_LINKS_ALLOWED_ORIGINS', '') == values.get('AURIGA_LINKS_ALLOWED_ORIGINS', ''), 'links_platform_allowlist')
 check(platform_env.get('AURIGA_LINKS_TRUSTED_PROXIES') == values['AURIGA_INTERNAL_EDGE_IP'], 'links_backend_only_edge_peer')

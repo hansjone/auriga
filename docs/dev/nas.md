@@ -22,6 +22,16 @@ edge 配置 `upstreams.network-submit=https://network:18443`，固定服务端�
 
 同一个最终 `config/materials/access.json` 只读挂载给 edge、IAM、agent。issuer、team Origin、RP host 从它派生，包含非默认端口；agent 不再使用旧 `INSTANCE_PLATFORM_URL`/`INSTANCE_PARENT_DOMAIN`。旧 `AURIGA_PORTAL_HOST`、`ADMIN_HOST`、`INSTANCE_PARENT_DOMAIN`、`ISSUER`、`TEAM_ORIGIN`、`TEAM_RP_ID`、`TLS_UPSTREAM`、`SECURE_COOKIES`、`TRUSTED_PROXIES` 输入会明确报迁移错误，不静默降级。access 的 tenant 必须由安装者与实际 IAM/org 租户对应；加载成功不代表租户已创建。combined 的既有首次 seed 创建演示租户 `00000000-0000-0000-0000-000000000001`，无 dev profile 或远程紧急登录例外。
 
+## 桌面原生登录客户端
+
+NAS Compose 注册与开发 HTTPS 配方相同的 `auriga-dsh` 公共客户端：只允许
+`auriga.connect`、PKCE 设备授权和刷新令牌；无客户端秘密、回调地址或浏览器授权码能力。
+`stack.env` 的 `AURIGA_NAS_NATIVE_CLIENT_TENANT_ID` 必须等于安装的 IAM 租户及
+`access.json.tenantId`，默认是首次 seed 的演示租户。修改为其他租户不会创建或迁移账号。
+此配置由 Compose 传给平台，不改写已封存的安装材料或身份根；更新已有部署后按公开
+`start.sh` 重新创建平台容器。未注册时原生登录返回 `iam.invalid_client`，门户登录成功
+不能代替桌面登录验收。
+
 ## 按访问来源生成对外链接
 
 IP access 模式叠加外部呈现代理时，可在 `stack.env` 配置：
