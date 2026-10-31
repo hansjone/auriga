@@ -218,6 +218,13 @@ func (r *Reconciler) loop(id string, ch chan workItem) {
 }
 
 func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.InstanceSpec) {
+	r.applySpec(ctx, id, spec, false)
+}
+
+// replaceStoppedExecution is used only after an authorized restart has durably
+// stopped an older execution. Its target must pass normal Ensure/activation;
+// ordinary recovery continues to preserve the original execution without rebuild.
+func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.InstanceSpec, replaceStoppedExecution bool) {
 	if spec == nil {
 		var err error
 		spec, err = r.Store.GetDesired(id)
@@ -256,7 +263,7 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 			return
 		}
 	}
-	if rec.Status != nil &&
+	if !replaceStoppedExecution && rec.Status != nil &&
 		rec.Status.ObservedGeneration == spec.Generation &&
 		(spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING || rec.Status.Phase == desiredPhase(spec)) {
 		// Persisted ready is not evidence after an agent restart. Rediscover and
@@ -289,7 +296,7 @@ func (r *Reconciler) handleApply(ctx context.Context, id string, spec *nodev1.In
 	}
 	// Spec changed while still desired=running → PendingRestart (workspace decides when to restart).
 	// desired=stopped falls through and stops the instance.
-	if rec.Status != nil &&
+	if !replaceStoppedExecution && rec.Status != nil &&
 		spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING &&
 		(rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_RUNNING ||
 			rec.Status.Phase == nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART ||

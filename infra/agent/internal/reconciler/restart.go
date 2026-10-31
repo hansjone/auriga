@@ -126,7 +126,22 @@ func (r *Reconciler) handleRestart(ctx context.Context, command *nodev1.Command)
 			return failed()
 		}
 	}
-	r.handleApply(ctx, command.InstanceId, spec)
+	// A stopped status at the target generation is not an actual execution of
+	// that generation. Preparing a new signed release must not enter Recover on
+	// the older execution. If Ensure already created the target before a failed
+	// Start, retain the normal recovery path instead of replacing it again.
+	replaceStoppedExecution := false
+	if r.Activation != nil {
+		execution, err := r.Store.GetExecution(command.InstanceId)
+		if err != nil {
+			return failed()
+		}
+		if execution != nil && execution.Generation > spec.Generation {
+			return denied()
+		}
+		replaceStoppedExecution = execution == nil || execution.Generation != spec.Generation
+	}
+	r.applySpec(ctx, command.InstanceId, spec, replaceStoppedExecution)
 	actual, err = r.Store.GetActual(command.InstanceId)
 	if err != nil || actual.Status == nil || actual.Status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_RUNNING || !actual.Status.Ready || actual.Status.ObservedGeneration != spec.Generation {
 		return failed()
