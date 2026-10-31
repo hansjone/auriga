@@ -6,7 +6,7 @@
 
 LiteLLM 只加入内部控制网络及模型出站网络，不发布其 4000 端口；通过现有 PostgreSQL 独立 `litellm` 库和 `auriga_litellm` 角色持久化。初始化先提交 `auriga_provisioning.service_key_state` claim，再创建服务 Key；已有 ready 标记绝不自动重建已吊销 Key，中断需人工恢复。数据库、固定 salt 和四份秘密文件一起备份，不依赖命名状态卷。镜像固定为官方 v1.106.6 digest；健康检查含存活与数据库就绪。
 
-UI 使用第四个独立 edge Origin，默认管理员 scheme/host 的 8086 端口，域名模式可配独立子域。管理台 `/ai/ui/` 校验在线 admin 会话与 `ai.providers.write`，通过限时单次 POST code 交接；code 不进 URL。UI 使用独立 HttpOnly host-only cookie，每次在线检查权限，只代理 `/ai/*`，不提供 Auriga API。配置、证书 SAN 与安装 receipt 绑定 UI Origin。LiteLLM 自身仍需登录，master key 不注入页面。
+UI 使用第四个独立 edge Origin，默认管理员 scheme/host 的 8086 端口，域名模式可配独立子域。管理台 `/ai/ui/` 校验在线 admin 会话与 `ai.providers.write`，通过限时单次 POST code 交接；code 不进 URL并绑定目标来源。UI 使用独立 HttpOnly host-only cookie，每次在线检查权限，只代理 `/ai/*`，不提供 Auriga API。配置、证书 SAN 与安装 receipt 绑定 UI Origin。edge 在服务端调用固定版本原生 `/v2/login`，仅将 UI JWT 作为原生 token cookie 交给浏览器，master key 留在只读秘密文件。运行时可声明 HTTPS 管理台→relay 来源配对，沿受信代理来源生成外部链接，不改安装身份或封存 Origin。
 
 数据仅开放两个端点。UI 和数据响应均剥离 `Access-Control-*`。只向 LiteLLM UI 转发 `token`、`litellm_cp_return_to`、`litellm_oauth_state` 三个 cookie，所有 Auriga cookie 均剥离；响应 cookie 同样限白名单、host-only 和 `/ai`。部署使用 `SERVER_ROOT_PATH=/ai`，edge 保留此前缀，gateway 走根数据接口。
 

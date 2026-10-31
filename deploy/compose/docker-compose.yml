@@ -326,10 +326,14 @@ services:
         condition: service_healthy
         required: false
     command: ['-config', '/etc/auriga/edge.config.json']
+    secrets: [litellm_master]
+    group_add: ['10003']
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
       AURIGA_EDGE_LINKS_ALLOWED_ORIGINS: ${AURIGA_LINKS_ALLOWED_ORIGINS:-}
       AURIGA_EDGE_LINKS_TRUSTED_PROXIES: ${AURIGA_LINKS_TRUSTED_PROXIES:-}
+      AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE: /run/secrets/litellm_master
+      AURIGA_EDGE_LITELLM_UI_EXTERNAL_ORIGINS: ${AURIGA_LITELLM_UI_EXTERNAL_ORIGINS:-}
       AURIGA_LOG_LEVEL: ${AURIGA_LOG_LEVEL:-INFO}
     volumes:
       - ./var/access.json:/etc/auriga/access.json:ro

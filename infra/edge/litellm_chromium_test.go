@@ -51,11 +51,26 @@ func TestLiteLLMChromiumHandoff(t *testing.T) {
 			}
 			admin.AccessToken = "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".fixture"
 			store.Put("admin", admin)
-			input, err := json.Marshal(map[string]any{"admin": g.Cfg.Access.AdminURL(), "ui": g.Cfg.liteLLMUIURL(), "live": os.Getenv("AURIGA_LITELLM_UI_TEST_ORIGIN") != ""})
+			native := os.Getenv("AURIGA_LITELLM_UI_TEST_PASSWORD_FILE") != ""
+			if native {
+				ui := *g.Cfg.LiteLLMUI
+				ui.Login = &LiteLLMUILogin{PasswordFile: os.Getenv("AURIGA_LITELLM_UI_TEST_PASSWORD_FILE")}
+				g.Cfg.LiteLLMUI = &ui
+			}
+			revoke := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					w.WriteHeader(405)
+					return
+				}
+				store.Revoke(admin.SessionID)
+				w.WriteHeader(204)
+			}))
+			defer revoke.Close()
+			input, err := json.Marshal(map[string]any{"admin": g.Cfg.Access.AdminURL(), "portal": g.Cfg.Access.PortalURL(), "ui": g.Cfg.liteLLMUIURL(), "live": os.Getenv("AURIGA_LITELLM_UI_TEST_ORIGIN") != "", "native": native, "revoke": revoke.URL, "mode": map[bool]string{false: "ip", true: "domain"}[domain], "evidence": os.Getenv("AURIGA_LITELLM_UI_TEST_EVIDENCE")})
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, "node", filepath.Join("browser-tests", "litellm-handoff.mjs"))
 			cmd.Stdin = bytes.NewReader(input)

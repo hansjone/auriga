@@ -18,4 +18,6 @@ Pop-Location
 
 默认上游为测试 UI。设置 `AURIGA_LITELLM_UI_TEST_ORIGIN=http://127.0.0.1:<临时端口>` 可改用本机真实 LiteLLM（需 `SERVER_ROOT_PATH=/ai`），仍使用真实 Chromium；这不是完整 Vue 管理台登录或真实 IAM 整栈验收。IP 独立端口与独立子域两种模式均执行，子域仅通过 Chromium 的进程参数解析到回环。
 
-使用真实上游时，交接后还须看到 LiteLLM 的 Username、Password 和 Login 控件；仅收到 HTML 200 或第一份 JavaScript 不算通过。
+使用真实上游且配置 `AURIGA_LITELLM_UI_TEST_PASSWORD_FILE` 时，edge 从临时文件读取测试实例的 UI 凭据，通过原生登录换取 JWT。测试等待模型、Virtual Keys、Usage 的实际路由和页面标题，确认无登录表单、UI Key 不能经公开数据入口调用模型，并在平台会话撤销后保留 UI cookie 重访，必须返回 401。可设置 `AURIGA_LITELLM_UI_TEST_EVIDENCE` 保存三个页面和撤销后的截图；截图目录应位于不入库的测试产物目录。未配置密码文件时保留原先的独立登录表单回归。
+
+本机一次性 LiteLLM/PostgreSQL 夹具与真实部署验收见 `e2e/litellm-ui2/README.md`。夹具 IAM 为受控 gRPC，不代表真实平台登录；真实部署脚本另走平台登录和登出。

@@ -18,8 +18,10 @@ import (
 )
 
 type LiteLLMUIConfig struct {
-	Origin   deployment.Origin   `json:"origin"`
-	Listener deployment.Listener `json:"listener"`
+	Origin          deployment.Origin   `json:"origin"`
+	Listener        deployment.Listener `json:"listener"`
+	Login           *LiteLLMUILogin     `json:"login,omitempty"`
+	ExternalOrigins map[string]string   `json:"externalOrigins,omitempty"`
 }
 
 func (c Config) validateLiteLLMUI() error {
@@ -61,7 +63,10 @@ func (c Config) validateLiteLLMUI() error {
 	if c.Access.IngressKind() == "direct" && (u.Listener.Port != u.Origin.Port || u.Listener.Tls != (u.Origin.Scheme == "https")) {
 		return invalid
 	}
-	return nil
+	if u.Login != nil && u.Login.PasswordFile == "" {
+		return fmt.Errorf("LiteLLM UI passwordFile is required")
+	}
+	return c.validateLiteLLMExternalOrigins()
 }
 
 func (c Config) liteLLMUIURL() string {
@@ -74,6 +79,7 @@ func (c Config) liteLLMUIURL() string {
 type liteLLMHandoff struct {
 	session string
 	expires time.Time
+	target  string
 }
 
 type liteLLMHandoffs struct {
@@ -112,7 +118,7 @@ func (g *Gateway) checkLiteLLMAdministrator(r *http.Request, raw string) (int, s
 	return 0, ""
 }
 
-func (g *Gateway) issueLiteLLMHandoff(raw string) (string, error) {
+func (g *Gateway) issueLiteLLMHandoff(raw string, targets ...string) (string, error) {
 	var entropy [32]byte
 	if _, err := rand.Read(entropy[:]); err != nil {
 		return "", err
@@ -133,11 +139,15 @@ func (g *Gateway) issueLiteLLMHandoff(raw string) (string, error) {
 	if len(state.grants) >= 1024 {
 		return "", fmt.Errorf("LiteLLM handoff capacity exhausted")
 	}
-	state.grants[sha256.Sum256([]byte(code))] = liteLLMHandoff{raw, now.Add(time.Minute)}
+	target := g.Cfg.liteLLMUIURL()
+	if len(targets) == 1 {
+		target = targets[0]
+	}
+	state.grants[sha256.Sum256([]byte(code))] = liteLLMHandoff{raw, now.Add(time.Minute), target}
 	return code, nil
 }
 
-func (g *Gateway) consumeLiteLLMHandoff(code string) string {
+func (g *Gateway) consumeLiteLLMHandoff(code string, targets ...string) string {
 	if len(code) != 43 {
 		return ""
 	}
@@ -147,7 +157,11 @@ func (g *Gateway) consumeLiteLLMHandoff(code string) string {
 	key := sha256.Sum256([]byte(code))
 	grant, exists := state.grants[key]
 	delete(state.grants, key)
-	if !exists || !g.Now().UTC().Before(grant.expires) {
+	target := g.Cfg.liteLLMUIURL()
+	if len(targets) == 1 {
+		target = targets[0]
+	}
+	if !exists || !g.Now().UTC().Before(grant.expires) || grant.target != target {
 		return ""
 	}
 	return grant.session
@@ -168,7 +182,12 @@ func (g *Gateway) startLiteLLMHandoff(w http.ResponseWriter, r *http.Request, ri
 		fail(status, code)
 		return
 	}
-	code, err := g.issueLiteLLMHandoff(raw)
+	target := g.liteLLMHandoffTarget(r)
+	if target == "" {
+		fail(403, "common.forbidden")
+		return
+	}
+	code, err := g.issueLiteLLMHandoff(raw, target)
 	if err != nil {
 		fail(503, "common.unavailable")
 		return
@@ -181,13 +200,23 @@ func (g *Gateway) startLiteLLMHandoff(w http.ResponseWriter, r *http.Request, ri
 	// Send only the admin origin as Referer; the code remains in the form body.
 	w.Header().Set("Referrer-Policy", "strict-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; form-action "+g.Cfg.liteLLMUIURL()+"; frame-ancestors 'none'; base-uri 'none'")
-	if err := liteLLMHandoffPage.Execute(w, struct{ Action, Code, Nonce string }{g.Cfg.liteLLMUIURL() + "/ai/session", code, nonce}); err != nil && g.Log != nil {
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'nonce-"+nonce+"'; form-action "+target+"; frame-ancestors 'none'; base-uri 'none'")
+	if err := liteLLMHandoffPage.Execute(w, struct{ Action, Code, Nonce string }{target + "/ai/session", code, nonce}); err != nil && g.Log != nil {
 		g.Log.Warn("LiteLLM handoff response interrupted")
 	}
 }
 
 func (g *Gateway) liteLLMHandoffOrigin(r *http.Request) bool {
+	target := g.liteLLMPresentationOrigin(r)
+	if target == "" {
+		return false
+	}
+	if target != g.Cfg.liteLLMUIURL() {
+		if len(r.Header.Values("Origin")) != 1 {
+			return false
+		}
+		return g.Cfg.LiteLLMUI.ExternalOrigins[r.Header.Get("Origin")] == target
+	}
 	o := g.Cfg.Access.AdminOrigin()
 	return strictOrigin(r, accessEntry{role: "admin", scheme: o.Scheme, host: o.Host, port: int(o.Port)})
 }
@@ -206,12 +235,26 @@ func (g *Gateway) finishLiteLLMHandoff(w http.ResponseWriter, r *http.Request, r
 		fail(400, "common.validation_failed")
 		return
 	}
-	raw := g.consumeLiteLLMHandoff(r.PostForm.Get("code"))
+	raw := g.consumeLiteLLMHandoff(r.PostForm.Get("code"), g.liteLLMPresentationOrigin(r))
 	if status, code := g.checkLiteLLMAdministrator(r, raw); status != 0 {
 		fail(status, code)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName(g.Cfg.LiteLLMUI.Origin.Scheme == "https", "auriga_litellm_session"), Value: raw, Path: "/", HttpOnly: true, Secure: g.Cfg.LiteLLMUI.Origin.Scheme == "https", SameSite: http.SameSiteStrictMode})
+	token, err := g.loginLiteLLMUI(r)
+	if err != nil {
+		fail(503, "common.unavailable")
+		return
+	}
+	// Recheck after the exchange: a concurrent logout must not establish a new gate.
+	if status, code := g.checkLiteLLMAdministrator(r, raw); status != 0 {
+		fail(status, code)
+		return
+	}
+	secure := strings.HasPrefix(g.liteLLMPresentationOrigin(r), "https://")
+	http.SetCookie(w, &http.Cookie{Name: cookieName(secure, "auriga_litellm_session"), Value: raw, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode})
+	if token != "" {
+		http.SetCookie(w, &http.Cookie{Name: "token", Value: token, Path: "/ai", Secure: secure, SameSite: http.SameSiteStrictMode})
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	http.Redirect(w, r, "/ai/ui/", http.StatusSeeOther)

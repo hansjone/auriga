@@ -36,15 +36,16 @@ type Gateway struct {
 	IAMTransport  http.RoundTripper
 	APITransports map[*url.URL]http.RoundTripper
 
-	iamURL          *url.URL
-	orgURL          *url.URL
-	workspaceURL    *url.URL
-	teamURL         *url.URL
-	collabURL       *url.URL
-	resourceURL     *url.URL
-	deviceURL       *url.URL
-	litellmURL      *url.URL
-	litellmHandoffs liteLLMHandoffs
+	iamURL             *url.URL
+	orgURL             *url.URL
+	workspaceURL       *url.URL
+	teamURL            *url.URL
+	collabURL          *url.URL
+	resourceURL        *url.URL
+	deviceURL          *url.URL
+	litellmURL         *url.URL
+	litellmHandoffs    liteLLMHandoffs
+	litellmStaticCache staticGzipCache
 
 	networkSubmitURL *url.URL
 

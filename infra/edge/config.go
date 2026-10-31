@@ -102,6 +102,17 @@ func loadConfigWithAccess(path, accessPath string) (Config, error) {
 		}
 	}
 	applyEnv(&cfg)
+	if raw := os.Getenv("AURIGA_EDGE_LITELLM_UI_EXTERNAL_ORIGINS"); raw != "" {
+		if cfg.LiteLLMUI == nil || json.Unmarshal([]byte(raw), &cfg.LiteLLMUI.ExternalOrigins) != nil {
+			return Config{}, fmt.Errorf("invalid LiteLLM UI external origins JSON")
+		}
+	}
+	if file := os.Getenv("AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE"); file != "" {
+		if cfg.LiteLLMUI == nil {
+			return Config{}, fmt.Errorf("LiteLLM UI login requires UI configuration")
+		}
+		cfg.LiteLLMUI.Login = &LiteLLMUILogin{PasswordFile: file}
+	}
 	if accessPath != "" {
 		cfg.AccessConfigFile = accessPath
 	}

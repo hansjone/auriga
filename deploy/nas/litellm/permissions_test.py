@@ -43,6 +43,15 @@ class ComposePermissionsTest(unittest.TestCase):
             self.assertIn('/config/litellm/' + name, raw)
         self.assertNotIn('/config/materials/litellm/', raw)
 
+    def test_edge_native_ui_exchange_uses_readonly_master_secret(self):
+        for file in [DEPLOY / 'compose/docker-compose.yml', DEPLOY / 'nas/docker-compose.yml']:
+            block = re.search(r'^  edge:\n(.*?)(?=^  [\w-]+:|\Z)', file.read_text(), re.M | re.S).group(1)
+            self.assertIn('secrets: [litellm_master]', block)
+            self.assertIn("group_add: ['10003']", block)
+            self.assertIn('AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE: /run/secrets/litellm_master', block)
+            self.assertIn('AURIGA_EDGE_LITELLM_UI_EXTERNAL_ORIGINS:', block)
+            self.assertNotIn('cap_add:', block)
+
 
 @unittest.skipUnless(os.geteuid() == 0, 'requires Linux root for real UID/GID checks')
 class MaterialPermissionsTest(unittest.TestCase):

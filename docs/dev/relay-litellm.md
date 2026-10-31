@@ -16,7 +16,15 @@ compose 默认另发布 edge 的 8086 端口；首次 prepare 可加 `--litellm-
 
 独立入口只暴露 LiteLLM，不提供 Auriga API。必须先从已登录的 Auriga 管理台打开“模型”；外部 Key 不能建立 UI 会话。edge 每次检查在线 admin 会话与 `ai.providers.write`，只转发 LiteLLM cookie 白名单，UI 和数据均剥离全部 `Access-Control-*` 响应头。
 
-若页面长期显示 `LiteLLM Loading...`，检查浏览器网络面板中每个 JavaScript 请求是否完整结束；HTML 或响应头为 200 不代表前端已就绪。edge 对 `/ai/_next/static/` 和管理台 `/assets/` 的 JS/CSS 协商 gzip，降低大脚本在慢链路上的传输量；仅压缩不超过 8 MiB 的构建资源，不压缩登录 HTML、配置 JSON、管理 API 或模型流。Range 请求保持原表示，匿名资源请求仍先经过管理员门禁。不要为加载问题放开根路径、CORS、会话或写请求 Origin。
+compose / NAS 的 edge 通过只读 `litellm_master` secret（补充组 10003）在服务端调用固定版本的 `/ai/v2/login`，默认用户名 `admin`。只将其原生 UI JWT 放入 JS 可读的 host-only `token` cookie，master 不进入页面、URL、浏览器请求或日志。平台会话 cookie 保持 HttpOnly；UI HTML、资源、管理接口仍逐次校验 IAM，平台登出、过期、撤销及权限收回后拒绝访问，IAM 不可用失败关闭。换取失败不建立交接会话，不退回自动填写密码的页面。自定义 UI 账号时可在 edge JSON 的 `litellmUI.login` 配置 `username`、`passwordFile` 与 `masterKeyFile`；环境变量 `AURIGA_EDGE_LITELLM_UI_PASSWORD_FILE` 使用默认账号。
+
+固定版本的原生 dashboard Key 不能被当作普通外部虚拟 Key 使用。启用免登录时，公开模型入口每次先由 edge 使用 master 调用私有 `/ai/key/info?key=<SHA256>`，拒绝 `team_id=litellm-dashboard`，再让 LiteLLM 原有鉴权处理普通虚拟 Key；master 只在私有请求的 Authorization 头内，URL 中只有调用方 Key 的摘要。核验超时、秘密不可读或无有效元数据时失败关闭，不使用重启后会丢失的内存拒绝名单。这多一次有 5 秒上限的元数据调用，故 LiteLLM 管理 API 故障时公开模型入口也会暂时不可用。自定义 UI 密码不同于 master 时必须另配 `masterKeyFile`，默认与 `passwordFile` 相同。
+
+HTTP/IP 安装经外部 HTTPS 代理访问时，不修改已封存的 `AURIGA_LITELLM_UI_ORIGIN`。在运行时设置 `AURIGA_LITELLM_UI_EXTERNAL_ORIGINS={"https://admin.example.com":"https://relay.example.com"}`，将两个来源都加入 `AURIGA_LINKS_ALLOWED_ORIGINS`，并在 `AURIGA_LINKS_TRUSTED_PROXIES` 中只列 edge 实际看到的立即代理地址。edge JSON 等价配置是 `litellmUI.externalOrigins`。内部管理台仍跳内部 relay；被明确识别的外部管理台跳配对的外部 relay，一次性 code 绑定目标来源。两个外部地址必须互异且为 HTTPS；不从任意 Host、Origin 或未受信转发头构造跳转。
+
+代理到 relay 时保持安装的 Host 门禁，并设置可信 `X-Forwarded-Host/Proto`。`/ai/session` 的 POST 必须保留浏览器原始 Origin，让 edge 核对配对的外部管理员来源；其他 UI 写请求仅在原始 Origin 精确等于外部 relay 来源时才能改写为安装 relay Origin，不能无条件覆盖任意 Origin。这些是代理配置责任；不要通过放开 CORS 或删除 edge Origin 检查替代。修改运行时环境后仅重建 edge；具体发布、备份与回滚仍沿部署流程。
+
+若页面长期显示 `LiteLLM Loading...`，检查浏览器网络面板中每个 JavaScript 请求是否完整结束；HTML 或响应头为 200 不代表前端已就绪。edge 对 `/ai/_next/static/` 和管理台 `/assets/` 的 JS/CSS 协商 gzip，降低大脚本在慢链路上的传输量；仅压缩不超过 8 MiB 的构建资源，不压缩登录 HTML、配置 JSON、管理 API 或模型流。每个静态服务拥有按路径、大小、mtime 区分的内存 LRU，最多 128 项 / 32 MiB；上游还包含 ETag，缺少有效 mtime/大小或携带其他 Vary 维度时不复用。上游每次仍经过管理员门禁并核对响应元数据，缓存不成为认证旁路。保留 Last-Modified 与既有 Vary，本地条件请求支持 304；HEAD 与 GET 使用同一压缩表示和长度，Range 保持原表示。静态上游读取有 15 秒总时限，不影响模型流。不要为加载问题放开根路径、CORS、会话或写请求 Origin。
 
 Next.js 的 UI 分段资源名可能包含布局标记 `!`，浏览器既会发送字面字符，也会编码为 `%21`。edge 仅在 `/ai/ui/` 下固定 `__next.*.txt` 文件的 GET/HEAD 中接受这两种写法，避免客户端导航退回整页加载；其他编码、目录穿越、编码分隔符及写方法仍拒绝。这些资源同样要求有效管理员会话和同源检查。
 
@@ -32,7 +40,7 @@ NAS 的 `config/materials/litellm/` 原件保持安装器 UID10001、文件0600�
 
 ## 接入模型与组池
 
-1. 登录 Auriga 管理台，打开“模型”，进入 `/ai/ui/`；LiteLLM 仍要求其自身管理员登录。由部署管理员安全取用 master 文件作为 LiteLLM 初始管理员凭据，不通过聊天、URL 或剪贴板日志传递。
+1. 登录 Auriga 管理台，打开“模型”，由一次性交接直接进入 LiteLLM；公开 compose/NAS 配置会在服务端完成原生 UI 会话换取，无须再输入 master。
 2. 在 Models 添加提供商，填写供应商模型、API Base、供应商 Key 和公开模型名。至少添加两个提供商；需要组成同一池时为多个 deployment 设置同一公开模型名，配置 LiteLLM 自带路由、限流和故障切换。
 3. **首次上线必做**：在 Virtual Keys 找到 `auriga-team`，显式限制团队模型/池、总预算及周期、RPM/TPM。初始化 Key 不自动替运营方决定限额；收紧前不对团队开放模型。外部专用池不要授权给服务 Key。
 4. 用 Playground 验证 deployment 和模型池。费用由模型价格表或管理员自定义单价计算；未知费用不能当作预算已生效。
@@ -80,4 +88,4 @@ node deploy/compose/scripts/verify-relay.mjs \
 
 独立 UI 组件回归可在 `infra/edge` 执行 `AURIGA_LITELLM_UI_TEST_ORIGIN=http://127.0.0.1:<临时端口> go test -count=1 -run '^TestLiteLLMUIHandoff$' -v .`。目标须为本机临时 LiteLLM，配置 `SERVER_ROOT_PATH=/ai`；测试使用随机 edge 端口，覆盖 IP/子域 Origin 的一次性交接、真实页面和 JavaScript、撤销/过期及 CORS。此组件测试的 IAM 为夹具，真实身份链路仍由上面的整栈脚本验证。
 
-真实浏览器就绪检查见 `infra/edge/browser-tests/README.md`：同时设置真实 LiteLLM 上游与 `AURIGA_LITELLM_CHROMIUM_TEST=1`，会等待登录表单可见，避免把服务端 Loading 壳当作页面加载成功。`PROXY_BASE_URL` 应与安装输入的独立 UI Origin 加 `/ai` 一致；域名部署使用自己的受信 UI Origin，不复用另一现场的 IP，也不信任任意请求头改写该配置。
+真实浏览器就绪检查见 `infra/edge/browser-tests/README.md`：设置真实 LiteLLM 上游、临时 UI 密码文件与 `AURIGA_LITELLM_CHROMIUM_TEST=1`，检查模型、Key、用量界面及撤销后的拒绝，避免把服务端 Loading 壳当作页面加载成功。`PROXY_BASE_URL` 仍对应安装输入的独立 UI Origin 加 `/ai`；外部来源跟随只使用上面的显式配对，不信任任意请求头改写该配置。

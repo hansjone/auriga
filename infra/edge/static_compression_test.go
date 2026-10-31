@@ -61,6 +61,19 @@ func TestLiteLLMStaticCompression(t *testing.T) {
 			assertStaticEncoding(t, w, asset, tc.compressed, tc.status == 200)
 		})
 	}
+	r := httptest.NewRequest(http.MethodHead, "/ai/_next/static/chunks/dashboard.js", nil)
+	r.Header.Set("Accept-Encoding", "gzip")
+	r.Header.Set("Cookie", "auriga_litellm_session=admin")
+	r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, accessEntry{role: "relayAdmin", scheme: "http"}))
+	w := httptest.NewRecorder()
+	g.proxyLiteLLM(w, r, "relayAdmin", "head-compression")
+	get := r.Clone(r.Context())
+	get.Method = http.MethodGet
+	want := httptest.NewRecorder()
+	g.proxyLiteLLM(want, get, "relayAdmin", "get-compression")
+	if w.Code != 200 || w.Body.Len() != 0 || w.Header().Get("Content-Encoding") != "gzip" || w.Header().Get("Content-Length") != want.Header().Get("Content-Length") {
+		t.Fatal("upstream HEAD differs from compressed GET")
+	}
 }
 
 func TestSPAStaticCompression(t *testing.T) {

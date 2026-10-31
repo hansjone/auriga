@@ -18,6 +18,7 @@ type spaFileServer struct {
 	root       http.Dir
 	fs         http.Handler
 	accessMode string
+	gzipCache  staticGzipCache
 }
 
 func newAccessSPAFileServer(root, mode string) http.Handler {
@@ -44,6 +45,8 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upath := path.Clean("/" + r.URL.Path)
+	r = r.Clone(r.Context())
+	r.URL.Path, r.URL.RawPath = upath, ""
 	if blockedStaticPath(upath) {
 		writeProblem(w, problem(http.StatusNotFound, "edge.not_found", "Not Found", "", requestID(r)))
 		return
@@ -55,7 +58,7 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.serveAccessIndex(w, r, full)
 			return
 		}
-		if serveGzipStaticFile(w, r, full, fi) {
+		if s.gzipCache.serveFile(w, r, full, fi) {
 			return
 		}
 		s.fs.ServeHTTP(w, r)
