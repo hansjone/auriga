@@ -2,7 +2,9 @@
  * @param {any} connection @param {any} runtime @param {{protocol:string}} options */
 export function installLocalAdmission(connection, runtime, { protocol }) {
   if (!connection.admit || !connection.authorizeIndex || !connection.isTrusted)
-    throw new Error('auriga-dsh: native connection admission API required');
+    throw new Error(
+      'auriga-dsh: 需要 DSH 0.2.1-rc.3 或更高版本的原生连接准入 API，请升级 DSH。 Native connection admission API required; upgrade DSH to 0.2.1-rc.3 or later.',
+    );
   const target = connection[Symbol.for('cordis.original')] ?? connection;
   const nativeAdmit = target.admit;
   const admit = (/** @type {any} */ request) => {
