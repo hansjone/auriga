@@ -1,4 +1,5 @@
 import { networkTiming } from './timing.js';
+import { clockToleranceMs } from './clock.js';
 import { tracedFetch } from '../observability/index.js';
 /* global AbortSignal */
 import { createHash } from 'node:crypto';
@@ -8,7 +9,6 @@ import { positiveVersion } from './trust/keyset.js';
 import { diagnosticReason } from './diagnostics.js';
 
 const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
-const CLOCK_SKEW_MS = 60000;
 /** Transient fetch failure only; validation and persistence errors never use it. */
 export class DeviceControlUnavailable extends Error {}
 /** Only proven credential invalidation may end the native login.
@@ -290,12 +290,12 @@ export function createDeviceProvider({
                   /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(v),
               ) ||
               !Number.isFinite(expires) ||
-              expires <= currentTime - CLOCK_SKEW_MS ||
-              expires > currentTime + 30000 + CLOCK_SKEW_MS ||
+              expires <= currentTime - clockToleranceMs ||
+              expires > currentTime + 30000 + clockToleranceMs ||
               !Number.isFinite(connectionExpires) ||
               connectionExpires < expires ||
-              connectionExpires <= currentTime - CLOCK_SKEW_MS ||
-              connectionExpires > currentTime + 3600000 + CLOCK_SKEW_MS
+              connectionExpires <= currentTime - clockToleranceMs ||
+              connectionExpires > currentTime + 3600000 + clockToleranceMs
             )
               throw diagnosticReason(
                 new Error('invalid device network ticket'),

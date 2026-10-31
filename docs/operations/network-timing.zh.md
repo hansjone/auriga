@@ -29,6 +29,7 @@ edge 对 WSS 是透明字节隧道，不解析每条 join；其连接日志只�
 | 比较位置 | 时间域与处理 |
 |---|---|
 | source-control/frames：observed_at、not_before 对本机 now | 共享可配置容差；超界拒绝 |
+| device-provider：平台票据兑换/连接截止对本机的响应范围检查 | 复用共享容差；只是响应合理性检查，服务端兑换/连接授权最终过期仍严格 |
 | source-control/controller：witness 观察、到期、持久化与 native fence | 本机对本机，严格；时钟倒退也拒绝 |
 | durable/capability → tools/send：观察授权截止 | 一次保守换算，再按本机截止严格检查 |
 | trust/store、trust/verifier：发布/密钥/封装的起始时间对本机 | 复用同一容差；签名、用途、版本、同平台签发窗口严格 |
