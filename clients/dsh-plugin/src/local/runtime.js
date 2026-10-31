@@ -586,6 +586,9 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
     attachNetwork: network.attach,
     consentUI: network.consentUI,
     messagingUI: network.messagingUI,
+    get consentAvailable() {
+      return network.consentAvailable;
+    },
     get networkStatus() {
       return network.status;
     },
@@ -618,6 +621,7 @@ export async function createConnectRuntime({ config: input, directory, ctx }) {
         connected: !!row && !!team && online,
         communication: row ? communication : 'idle',
         models: models.status,
+        capabilities: { consent: !!row && network.consentAvailable },
         network: row
           ? network.status
           : { available: false, connected: false, state: 'idle' },

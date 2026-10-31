@@ -563,7 +563,7 @@ export function createSettingsView(
           String(account?.connection?.received ?? network?.received ?? 0),
         ),
         loggedIn && receiveControls,
-        loggedIn && consent,
+        loggedIn && account?.capabilities?.consent === true && consent,
       ),
       h(
         'details',

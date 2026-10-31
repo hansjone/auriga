@@ -367,6 +367,9 @@ export async function createManaged(options = {}) {
         const authorized = (req) =>
           door.isAuthenticated(req) && browserFenceOk(req, browserOrigin);
         const facade = {
+          get consentAvailable() {
+            return network?.consentAvailable === true;
+          },
           resolve: authorized,
           checkCsrf: (req) =>
             authorized(req) && typeof req.headers.origin === 'string',
@@ -408,6 +411,9 @@ export async function createManaged(options = {}) {
                       connected: network?.status?.connected === true,
                       account: network?.account ?? { subject: ownerId },
                       models: models.status,
+                      capabilities: {
+                        consent: network?.consentAvailable === true,
+                      },
                       network: network?.status ?? {
                         connected: false,
                         state: 'unavailable',

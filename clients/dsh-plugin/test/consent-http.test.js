@@ -6,6 +6,39 @@ import { createConnectRoutes } from '../src/local/routes.js';
 import { openConsent } from '../src/network/consent/index.js';
 import { createMemoryLedgerStore } from '../src/network/host/store.js';
 import { createConsentUIAdapter } from '../src/consent-ui/adapter.js';
+import { createConsentRoutes } from '../src/local/consent-routes.js';
+
+test('R2 unsupported consent route is absent, preserves authentication and never returns 503', async () => {
+  const runtime = {
+    resolve: () => true,
+    consentAvailable: false,
+    consentUI() {
+      throw Error('must not call unsupported port');
+    },
+  };
+  const route = createConsentRoutes(runtime);
+  let code, body;
+  const res = {
+    writeHead(value) {
+      code = value;
+    },
+    end(value) {
+      body = JSON.parse(value);
+    },
+  };
+  await route(
+    { method: 'GET', url: '/auriga/local-login/consent/snapshot', headers: {} },
+    res,
+  );
+  assert.equal(code, 404);
+  assert.equal(body.code, 'common.not_found');
+  runtime.resolve = () => false;
+  await route(
+    { method: 'GET', url: '/auriga/local-login/consent/snapshot', headers: {} },
+    res,
+  );
+  assert.equal(code, 401);
+});
 
 test('consent HTTP bridge binds native session, origin and CSRF, returning only public projections', async (t) => {
   const identity = {
@@ -37,6 +70,7 @@ test('consent HTTP bridge binds native session, origin and CSRF, returning only 
   });
   t.after(() => consent.close());
   const runtime = {
+    consentAvailable: true,
     resolve,
     checkCsrf: (req) => req.headers['x-auriga-csrf'] === 'csrf-proof',
     consentUI: (req) =>

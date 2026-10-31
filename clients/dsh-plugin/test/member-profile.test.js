@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setImmediate } from 'node:timers/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { runtimePeer } from './local-runtime-peer.js';
 import {
   loginMemberName,
@@ -17,12 +17,14 @@ test('member profile: restored native owner reads the current name and persists 
     },
   });
   runtime.status(request);
-  for (
-    let attempt = 0;
-    attempt < 100 && !runtime.vault.snapshot().credential.displayName;
-    attempt++
-  )
-    await setImmediate();
+  const deadline = Date.now() + 3000;
+  while (!runtime.vault.snapshot().credential.displayName) {
+    assert.ok(
+      Date.now() < deadline,
+      'authenticated member name was not persisted',
+    );
+    await delay(5);
+  }
   assert.equal(runtime.status(request).account.displayName, 'Alice');
   assert.equal(runtime.vault.snapshot().credential.displayName, 'Alice');
 });

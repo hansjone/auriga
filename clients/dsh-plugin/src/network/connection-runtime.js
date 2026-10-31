@@ -1141,6 +1141,7 @@ export async function openConnectionRuntime(options) {
             : 'connecting',
       };
     },
+    consentAvailable: false,
     consentUI(/** @type {unknown} */ _context) {
       throw new Error('network consent unavailable');
     },

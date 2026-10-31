@@ -993,6 +993,7 @@ export async function openNetworkRuntime(options) {
         await handshake;
       },
       /** Bind every method to the HTTP request; never capture a browser identity string. */
+      consentAvailable: true,
       consentUI(/** @type {unknown} */ context) {
         const ui = createConsentUIAdapter({
           consent,

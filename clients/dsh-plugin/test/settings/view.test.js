@@ -49,7 +49,7 @@ function harness(fetcher, locale = 'zh') {
   return {
     render() {
       cursor = 0;
-      const tree = View({ locale });
+      const tree = View({ locale, consent: 'consent-capability-marker' });
       effects.splice(0).forEach((fn) => fn());
       return tree;
     },
@@ -91,6 +91,30 @@ const signedIn = {
   network: { connected: true, state: 'ready' },
   models: { available: false },
 };
+for (const consent of [false, true, undefined])
+  test(
+    'R2 settings only mount first-contact controls for an advertised capability: ' +
+      consent,
+    async () => {
+      const fixture = harness(async (url) =>
+        Response.json(
+          url.endsWith('/status')
+            ? { ...signedIn, capabilities: { consent } }
+            : settings,
+        ),
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        assert.equal(
+          text(fixture.render()).includes('consent-capability-marker'),
+          consent === true,
+        );
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
 for (const managed of [false, true])
   test(
     'status fix: missing names and optional facts never produce UUID or empty rows: ' +

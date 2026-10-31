@@ -273,6 +273,9 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    get consentAvailable() {
+      return !closed && lifecycle?.consentAvailable === true;
+    },
     get account() {
       return {
         subject: options.ownerId,

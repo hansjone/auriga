@@ -93,6 +93,15 @@ export function surfaceHost(
     for (const nested of node.childNodes) releaseNode(nested, owner);
   }
   function patch(parent, oldNode, value, owner) {
+    if (value == null || typeof value === 'boolean') {
+      if (oldNode?.nodeType === 8) return oldNode;
+      const node = document.createComment('');
+      if (oldNode) {
+        releaseNode(oldNode, owner);
+        oldNode.replaceWith(node);
+      } else parent.append(node);
+      return node;
+    }
     if (typeof value === 'object' && typeof value.type === 'function') {
       let child = oldNode && components.get(oldNode);
       if (!child || child.Component !== value.type || child.owner !== owner) {

@@ -230,6 +230,9 @@ export function createNetworkLifecycle(options) {
         }
       );
     },
+    get consentAvailable() {
+      return !disposed && authenticated && runtime?.consentAvailable === true;
+    },
     consentUI(/** @type {unknown} */ context) {
       if (!runtime || !authenticated || disposed)
         throw new Error('network consent unavailable');
