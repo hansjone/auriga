@@ -2,8 +2,10 @@
 #   docker build -f deploy/nas/docker/Dockerfile.platform --platform=linux/amd64 .
 FROM eclipse-temurin:25-jdk AS build
 WORKDIR /src
-COPY . .
+COPY mvnw ./
+COPY .mvn .mvn
 RUN sh .mvn/wrapper/bootstrap.sh
+COPY . .
 RUN ./mvnw -q -pl services/platform-app -am -DskipTests package
 
 FROM eclipse-temurin:25-jre
