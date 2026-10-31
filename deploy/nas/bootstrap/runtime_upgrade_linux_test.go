@@ -1,6 +1,7 @@
 package main
 
 import (
+	binaryencoding "encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/runtimebundle"
+	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -73,12 +75,27 @@ func testNASRuntimeUpgradeLifecycle(t *testing.T) {
 	}
 	newBundle := makeRelease("release8", 8, "1.2.4")
 	currentBundle = newBundle
+	// Reproduce inherited NAS ACL: named uid10001 is denied despite mode0755.
+	acl := make([]byte, 4+5*8)
+	binaryencoding.LittleEndian.PutUint32(acl, 2)
+	for i, e := range [][3]uint32{{1, 7, ^uint32(0)}, {2, 0, 10001}, {4, 5, ^uint32(0)}, {16, 5, ^uint32(0)}, {32, 5, ^uint32(0)}} {
+		p := acl[4+i*8:]
+		binaryencoding.LittleEndian.PutUint16(p, uint16(e[0]))
+		binaryencoding.LittleEndian.PutUint16(p[2:], uint16(e[1]))
+		binaryencoding.LittleEndian.PutUint32(p[4:], e[2])
+	}
+	if err := unix.Setxattr(parent, "system.posix_acl_default", acl, 0); err != nil {
+		t.Fatalf("NAS ACL fixture: %v", err)
+	}
 	run("stage", r.bundle, r.image, false) // rejects initial sequence replay
 	run("stage", newBundle, r.image+"bad", false)
 	run("stage", newBundle, r.image, true)
 	active := run("path", "", "", true)
 	if active == base || !strings.HasPrefix(active, out+"/") {
 		t.Fatal(active)
+	}
+	if b, err := exec.Command("setpriv", "--reuid=10001", "--regid=10001", "--clear-groups", "cat", filepath.Join(active, "templates/real-dsh.pb")).CombinedOutput(); err != nil {
+		t.Fatalf("runtime uid cannot read new public projection: %v (%d bytes)", err, len(b))
 	}
 	snapshot := nasSnapshot(t, out)
 	run("stage", newBundle, r.image, true)

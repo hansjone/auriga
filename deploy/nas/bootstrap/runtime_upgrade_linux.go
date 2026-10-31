@@ -85,7 +85,7 @@ func nasRuntimeUpgrade(args []string, stdout io.Writer) error {
 		if err := os.Mkdir(*out, 0755); err != nil {
 			return err
 		}
-		if err := os.Chmod(*out, 0755); err != nil {
+		if err := runtimePublicDirectory(*out); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -200,7 +200,7 @@ func nasRuntimeUpgrade(args []string, stdout io.Writer) error {
 			return err
 		}
 		defer func() { _ = os.RemoveAll(stage) }()
-		if err := os.Chmod(stage, 0755); err != nil {
+		if err := runtimePublicDirectory(stage); err != nil {
 			return err
 		}
 		if err := writeRuntimeGeneration(stage, *base, spec, m, gens); err != nil {
@@ -398,7 +398,25 @@ func runtimeMkdir(path string) error {
 	if err := os.Mkdir(path, 0755); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0755)
+	return runtimePublicDirectory(path)
+}
+
+// A NAS share may inherit a named ACL denying the runtime uid even when mode is
+// 0755. Normalize only directories this transaction has just created, before
+// placing public release files in them. Never change the sealed source, an
+// existing directory or a private input's ACL.
+func runtimePublicDirectory(path string) error {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	for _, name := range []string{"system.posix_acl_access", "system.posix_acl_default"} {
+		if err := unix.Fremovexattr(fd, name); err != nil && err != unix.ENODATA && err != unix.ENOTSUP {
+			return fmt.Errorf("prepare new public runtime directory ACL: %w", err)
+		}
+	}
+	return unix.Fchmod(fd, 0755)
 }
 
 func runtimeSyncTree(path string) error {

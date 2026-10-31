@@ -210,6 +210,20 @@ chmod 0755 deploy-nas/bin/auriga-nas-bootstrap deploy-nas/bin/runtime-release
 sh deploy-nas/scripts/load-images.sh "$PWD"
 ```
 
+部分 NAS 共享目录给新解包文件继承命名 ACL；即使显示 `0755`，仍可能显式拒绝固定
+installer UID10001，表现为降权执行或挂载探针 `permission denied`。先用 `getfacl` 核对
+已验 SHA 的**新发布包公开配方**。若存在这种继承拒绝，在新包根仅对 `deploy-nas` 的
+公开目录和文件去除继承命名 ACL，再恢复两个工具的 `0755`（脚本等文件保持包内模式）：
+
+```sh
+find deploy-nas -type d -exec setfacl -b -k {} \;
+find deploy-nas -type f -exec setfacl -b {} \;
+chmod 0755 deploy-nas/bin/auriga-nas-bootstrap deploy-nas/bin/runtime-release
+```
+
+不更改共享目录/NAS 系统 ACL，不对安装数据根、封存材料、外部审批根或私钥使用此步骤。
+升级器只对本次新建的公开投影目录去除继承 ACL，不修复现有目录或改变原封存源。
+
 `load-images.sh` 是公开包的应用镜像加载入口。它先用已核对的静态 bootstrap 验证根和镜像校验和、
 固定三份 tar 的 tag、原 config 摘要 `config_id`、唯一 `linux/amd64` 与实际层字节的有序 diffID 链，
 再只加载 `platform.tar`、`edge.tar`、`agent.tar`。加载后从目标 Engine 结构化 inspect 得到精确本地 Id，
