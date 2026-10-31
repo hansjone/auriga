@@ -17,8 +17,10 @@ Linux/macOS 首次检出后 `chmod +x mvnw`，在仓库根目录执行：
 Windows 使用 `.\mvnw.cmd -B verify`。PowerShell 中带点号的属性参数整体加引号，
 例如 `'-DskipTests=true'`。首次构建下载工具与依赖，需要联网；无需 Docker、全局
 Maven、Node 或 npm。独立 Node 22.19.0 和 npm 缓存均放在 contracts 模块的 `target`。
-Windows Wrapper 用 JDK 源文件启动下载器，让引导下载与 Maven 使用同一 Java 信任库，
-避免 PowerShell TLS 下载差异；wrapper jar 不提交。不要在仓库写入本机缓存路径。
+Wrapper 3.3.4 jar 已校验官方发布签名后提交，Windows/Linux/Docker 均直接使用；
+wrapper 与 Maven 3.9.16 发行包 SHA-256 固定在 `.mvn/wrapper/maven-wrapper.properties`，
+启动时由 wrapper 校验。CI/Docker 的发行包获取最多尝试三次，不重跑构建或测试。
+不要在仓库写入本机缓存路径。
 
 `verify` 包含契约生成与编译、JUnit、ArchUnit 和 Spotless。选择
 **google-java-format 1.33.0**（Spotless 3.10.4），只检查各模块的 `src/main/java`
