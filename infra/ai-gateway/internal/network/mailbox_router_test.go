@@ -382,7 +382,8 @@ func TestProductionMailboxTimeoutProducesSignedContractError(t *testing.T) {
 	if err = nc.Publish(UpSubject(b.Ingress), []byte(validMailboxFetch)); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := sub.NextMsg(time.Second)
+	// The caller's five-second attempt includes the independent business deadline.
+	msg, err := sub.NextMsg(localRegistrationTimeout + time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
