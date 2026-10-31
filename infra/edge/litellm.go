@@ -110,7 +110,7 @@ func (g *Gateway) proxyLiteLLM(w http.ResponseWriter, r *http.Request, audience,
 			fail(401, "common.unauthenticated")
 			return
 		}
-		if !g.Cfg.externalKeyOriginAllowed(r) {
+		if !g.Cfg.bearerOriginAllowed(r) {
 			fail(403, "common.forbidden")
 			return
 		}

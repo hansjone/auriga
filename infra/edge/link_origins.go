@@ -10,10 +10,10 @@ import (
 
 type linkOriginKey struct{}
 
-// External key clients may arrive through a proxy that supplies its own Origin.
+// Bearer clients may arrive through a proxy that supplies its own Origin.
 // Match the actual single header against explicit deployment origins only;
 // forwarded presentation headers never grant this permission.
-func (c Config) externalKeyOriginAllowed(r *http.Request) bool {
+func (c Config) bearerOriginAllowed(r *http.Request) bool {
 	origins := r.Header.Values("Origin")
 	if len(origins) == 0 {
 		return true
