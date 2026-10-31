@@ -156,6 +156,17 @@ NAS 等远端测试可在 `fixture.cloudInstanceId` 旁设置受信任的
 不配置时仍沿原本机 WSL `docker exec`；该传输只替换测试模型的操作通道，不替代真实
 IAM、插件、WSS、READY 或消息收件证明，也不能作为真实中转站第⑥项证据。
 
+编程调用 `run(cfg, output)` 的真实托管模型验收可提供受信任的
+`cfg.readReceiptWitness({sessionId, marker})` 异步只读回调。原生宿主用收件项 ID 去重，
+它与消息 ID 不同；回调须从真实、未改写的 durable inbox 中读取已完成的收件映射，返回
+`{sessionId, marker, messageId, recipientId, stage: 'committed'}`，尚未提交时返回 `null`。
+操作者应同时核对持久收件项、宿主会话及 `host_accepted` 回执；不返回正文、签名能力或凭据。
+脚本再将消息头/唯一正文、原生 `user/message` 的请求 ID 和这份映射逐一比对。
+模型参数、助手复述、已提交发送及未提交的 inbox 项不能提供此见证；未配置回调时保留原有直接请求 ID 匹配。
+
+云端 join 只有明确返回 `unavailable` 且 `retryable: true` 时，调用方才在原 120 秒总截止内
+最多重试三次并保留每次工具结果。发送动作不自动重试，最终仍须四条真实收件及全部清理通过。
+
 ## 检查
 
 ```powershell
