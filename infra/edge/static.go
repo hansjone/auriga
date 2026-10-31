@@ -55,6 +55,9 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.serveAccessIndex(w, r, full)
 			return
 		}
+		if serveGzipStaticFile(w, r, full, fi) {
+			return
+		}
 		s.fs.ServeHTTP(w, r)
 		return
 	}
