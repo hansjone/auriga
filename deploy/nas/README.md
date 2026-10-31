@@ -2,6 +2,42 @@
 
 公网预算、时钟容差、断线工具行为与 join 日志定位见 [网络运维说明](../../docs/operations/network-timing.zh.md)。
 
+## 首次安装：装 → 看应急账号 → 登录管理台 → 邀请成员
+
+1. 按[安装指南](../../docs/dev/nas.md#初始化启动停止)准备公开制品、已批准的本地镜像、
+   `stack.env` 和 domain / ip / proxy 对应的 access 配置，再执行 `init.sh`、预检和 `start.sh`。
+   `init` 准备材料；应急账号由 platform 首次 seed 生成，Compose 等其健康后完成启动。
+2. 在私密交互终端运行 `start.sh`，首次成功会直接显示管理台地址、用户名、口令、
+   TOTP 密钥和可导入验证器的 `otpauth://` URI。无额外二维码依赖时只提供 URI。
+   管理台使用已安装 access 的 `adminOrigin`，proxy 模式显示外部 HTTPS 来源，
+   不是内部 listener 或门户链接。无需为手工首装准备收件人公钥。
+3. 将 TOTP 导入验证器，用应急账号登录管理台，再进入“成员 → 邀请”。应急登录仍只
+   接受真实回环来源；远程浏览器直接访问上述地址会被拒绝。须使用部署者已有的受信回环
+   访问通道；本配方没有为普通远程浏览器新增该通道。没有该通道的 IP 部署可选下述自动化。
+4. 成功显示后仅在已有私有 enrollment 目录记录 `.emergency-displayed`（不含凭据）。
+   重复启动不再显示；显示失败保留重试机会，正常 Compose 启动结果不受显示失败影响。
+   seed 完成后按指南关闭 `AURIGA_PLATFORM_SEED`，继续用正常成员账号工作。
+
+需要再次查看时，在 NAS 上用 root 或具有本机 Docker 权限的操作者执行：
+
+```sh
+export AURIGA_DATA_ROOT=/srv/container/auriga-test
+sh deploy-nas/scripts/emergency.sh show
+sh deploy-nas/scripts/emergency.sh rotate
+```
+
+`show` 只接受 stdout 为 TTY，管道和重定向均拒绝；SSH 使用分配了 TTY 的交互会话。
+首次启动被重定向时仅提示执行 `show`，不会显示凭据或写“已显示”标记。
+helper 复用已批准的本地 LiteLLM 镜像，以固定 UID10001、无网络、无 Docker socket、
+只读根运行；关闭 Docker 日志驱动，不经过 Compose/服务日志，不创建新的明文凭据文件。
+终端自身的录屏、会话记录和滚屏仍由操作者管理，不要在共享或录制中的终端查看。
+`rotate` 当前明确失败：公开契约已有轮换定义，平台尚无对应实现，因此不会改数据库、
+重跑 seed 或修改现有 enrollment。`show` 读取的是原始安装凭据，不会验证当前凭据是否有效。
+
+[`admin-bootstrap.sh`](scripts/admin-bootstrap.sh) 保留为**可选自动化**，不是手工首装必经步骤：
+目前只支持 IP 模式，通过真实回环登录、邀请并建立普通管理员/测试成员，将交接材料加密给
+操作者提供的公钥。详细过程见[可选自动化说明](../../docs/dev/nas.md#可选admin-bootstrap-自动化真实回环)。
+
 ## Managed instances on isolated networks
 
 Managed device registration, tickets, keys, WSS and native model calls can use

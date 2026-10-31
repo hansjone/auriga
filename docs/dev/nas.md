@@ -170,6 +170,10 @@ sh deploy-nas/scripts/init.sh
 sh deploy-nas/scripts/preflight.sh
 sh deploy-nas/scripts/network-preflight.sh
 sh deploy-nas/scripts/start.sh
+# 首次 seed 成功后，私密 TTY 中会显示应急账号及管理台地址。
+# 导入 TOTP，用它登录管理台 → 成员 → 邀请（须满足下文的回环来源限制）。
+# 需要重新查看，或之前的 start 输出被重定向：
+sh deploy-nas/scripts/emergency.sh show
 sh deploy-nas/scripts/smoke.sh
 sh deploy-nas/scripts/stop.sh
 ```
@@ -197,10 +201,37 @@ operator的 `stack.env` 与派生 `materials/access.env` 分层处理：派生�
 
 第一次 `AURIGA_PLATFORM_SEED=true` 仅使用既有 `combined,e2e` seed；完成后设回 false，重新 render 后为 `combined`。不要给 NAS 配方追加 dev、远程 emergency 或 observer 例外。
 
-## 首次正常管理员（真实回环）
+## 首次登录与邀请成员
 
-IP 部署首次启动会生成私有 emergency enrollment；应急登录保持仅回环，不能拿它从
-另一台电脑直接登录管理台。公开 `scripts/admin-bootstrap.sh` 在已运行 edge 的网络空间
+首装顺序为“安装 → 查看应急账号 → 登录管理台 → 成员 → 邀请”。`init.sh` 准备安装材料，
+`start.sh` 在 platform 首次 seed 完成后向操作者 TTY 显示一次应急用户名、口令、TOTP 密钥、
+`otpauth://` URI 和管理台地址；无需执行 admin-bootstrap 或准备收件公钥来取得这些凭据。
+URI 可导入验证器，无二维码依赖时不生成终端二维码。
+
+domain、ip 和 trusted_proxy 配方均使用已安装 `config/materials/access.json` 的
+`adminOrigin`（完整 scheme、host、port）；proxy 显示外部 HTTPS 管理来源，
+不是代理上游端口或门户链接。当前安装配置只有一个管理 Origin，门户的
+`AURIGA_LINKS_ALLOWED_ORIGINS` 不自动成为管理台来源列表。
+
+应急认证仍只接受真实回环来源。另一台电脑直接打开管理台不能凭它登录；需已有的受信
+回环浏览器访问通道，同时保持配置的完整管理 Origin 和 TLS/代理边界。本配方不自动提供
+此通道，也不以伪造来源头或开启远程应急登录代替。没有通道的 IP 部署可用下节可选自动化
+先建立普通管理员，再从正常管理入口邀请成员。显示成功不代表浏览器登录已经验证。
+
+再次查看：`sh deploy-nas/scripts/emergency.sh show`，需本机 root 或 Docker 权限，stdout
+必须是私密 TTY；重定向、管道均拒绝。非 TTY 首启仅给 show 提示，不创建已显示标记。
+成功显示后在已有 enrollment 目录写无凭据的 `.emergency-displayed`，重复启动跳过，
+显式 show 可重新显示。helper 无网络、不挂 Docker socket、关闭日志驱动，仅挂脚本、
+安装 access 和 enrollment；原 enrollment 叶只读，目录仅为写显示标记而可写。
+不创建新明文凭据文件，不进入 Compose/服务日志；操作者应关闭终端会话录制并保护滚屏。
+
+`sh deploy-nas/scripts/emergency.sh rotate` 目前返回非零并说明平台公开轮换 API 尚未实现，
+不直接修改数据库，也不重跑 seed。show 仅显示原安装凭据；后续公开轮换落地后还需接入
+安全交接和旧 enrollment 的处理，不能假定该文件会自动更新。
+
+## 可选：admin-bootstrap 自动化（真实回环）
+
+IP 部署可选择公开 `scripts/admin-bootstrap.sh`，在已运行 edge 的网络空间
 启动一个临时、无端口发布的 helper，通过真实 `127.0.0.1` 完成应急登录、普通团队账号
 注册/TOTP 登记和独立正常管理员登录。Host/Origin 使用已验证 access 的规范入口，仅用于
 listener/虚拟主机选择，不发送 Forwarded、X-Forwarded-For 或任何伪造来源头，不改数据库。
