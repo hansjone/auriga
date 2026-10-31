@@ -109,6 +109,15 @@ test('fallback diagnosis preserves TLS/platform/native categories without except
       { category: 'dns', code: 'ENOTFOUND' },
     ],
     [
+      new TypeError('SECRET', {
+        cause: new AggregateError([
+          Object.assign(new Error('SECRET'), { code: 'ENOTFOUND' }),
+          Object.assign(new Error('SECRET'), { code: 'ECONNREFUSED' }),
+        ]),
+      }),
+      { category: 'dns', code: 'ENOTFOUND' },
+    ],
+    [
       new TypeError('private SECRET', {
         cause: Object.assign(new Error('private timeout target'), {
           code: 'UND_ERR_CONNECT_TIMEOUT',
@@ -144,7 +153,10 @@ test('fallback diagnosis preserves TLS/platform/native categories without except
     });
     const res = await request(handler, '/login', { action: 'begin' });
     assert.equal(res.status, 503);
-    assert.deepEqual(JSON.parse(res.body), { code: 'common.unavailable' });
+    assert.deepEqual(JSON.parse(res.body), {
+      code: 'common.unavailable',
+      diagnostic: expected,
+    });
     assert.deepEqual(diagnoses, [{ operation: 'begin', ...expected }]);
     assert.doesNotMatch(
       JSON.stringify(diagnoses),

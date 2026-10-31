@@ -1,10 +1,10 @@
+import { ownerRequest } from '../owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { runtimePeer } from '../local-runtime-peer.js';
 import { platformConfig } from '../../src/local/platform.js';
 import { createLocalLoginController } from '../../src/login/local-controller.js';
-import { EventEmitter } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -33,25 +33,7 @@ for (const outcome of ['success', 'refused'])
     await waitFor(
       () => runtime.status(request).communication === 'unavailable',
     );
-    let httpClosed = false,
-      wsClosed = false,
-      exchanges = 0;
-    const response = new EventEmitter();
-    response.destroy = () => {
-      httpClosed = true;
-    };
-    const socket = new EventEmitter();
-    socket.destroy = () => {
-      wsClosed = true;
-    };
-    assert.equal(runtime.bindHttpResponse(request, response), true);
-    assert.equal(
-      runtime.bindSocket({
-        headers: { ...request.headers, upgrade: 'websocket' },
-        socket,
-      }),
-      true,
-    );
+    let exchanges = 0;
     const { privateKey, publicKey } = generateKeyPairSync('ec', {
       namedCurve: 'P-256',
     });
@@ -109,16 +91,13 @@ for (const outcome of ['success', 'refused'])
       assert.ok(runtime.resolve(request));
       assert.equal(runtime.status(request).loggedIn, true);
       assert.equal(runtime.status(request).connected, false);
-      assert.equal(httpClosed, false);
-      assert.equal(wsClosed, false);
     } else {
       assert.ok(
         Date.now() < credential.claims.exp * 1000,
         'revocation precedes natural expiry',
       );
       assert.equal(runtime.resolve(request), null);
-      assert.equal(httpClosed, true);
-      assert.equal(wsClosed, true);
+
       await assert.rejects(runtime.getAccess(), { code: 'REAUTH_REQUIRED' });
     }
     await runtime.close();
@@ -157,7 +136,7 @@ test('an authenticated page refresh reconnects Team after recovery without issui
   await setImmediate();
   ready = true;
   for (let i = 0; i < 3; i++) {
-    const refreshed = runtime.prepare(request);
+    const refreshed = runtime.prepare(ownerRequest(runtime, request));
     assert.equal(refreshed.body.loggedIn, true);
     assert.equal(refreshed.setCookie, undefined);
   }
@@ -203,8 +182,9 @@ test('fresh native credential commit issues a browser session while Team is unav
     if (path === '/ai/mcp') return Response.json({}, { status: 503 });
     return previous(url, init);
   });
-  const request = { headers: {} };
-  request.headers.cookie = runtime.prepare(request).setCookie.split(';')[0];
+  const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
+  runtime.prepare(request);
+
   assert.equal(
     (await runtime.login(request, { action: 'begin' })).step.type,
     'form',
@@ -215,7 +195,7 @@ test('fresh native credential commit issues a browser session while Team is unav
     input: { type: 'form', formId: 'totp', values: { code: 'synthetic' } },
   });
   assert.equal(result.step.type, 'complete');
-  request.headers.cookie = result.setCookie[0].split(';')[0];
+
   await setImmediate();
   assert.equal(runtime.status(request).loggedIn, true);
   assert.equal(runtime.status(request).connected, false);
@@ -238,7 +218,8 @@ for (const status of [401, 403, 503])
     assert.equal(state.communication, 'unavailable');
     assert.ok(runtime.resolve(request));
     const controller = createLocalLoginController({
-      fetch: async () => Response.json(runtime.prepare(request).body),
+      fetch: async () =>
+        Response.json(runtime.prepare(ownerRequest(runtime, request)).body),
     });
     assert.equal(
       (await controller.start({ signal: new AbortController().signal })).type,
@@ -296,30 +277,15 @@ test('connection configuration accepts the same explicit private HTTP origins as
 
 test('trusted platform switch tombstones credentials and closes old HTTP/WS without stopping tasks', async (t) => {
   const { runtime, request, requests } = await runtimePeer(t);
-  let httpClosed = false,
-    wsClosed = false;
-  const response = new EventEmitter();
-  response.destroy = () => {
-    httpClosed = true;
-  };
-  assert.equal(runtime.bindHttpResponse(request, response), true);
-  const socket = new EventEmitter();
-  socket.destroy = () => {
-    wsClosed = true;
-  };
-  assert.equal(
-    runtime.bindSocket({
-      headers: { ...request.headers, upgrade: 'websocket' },
-      socket,
-    }),
-    true,
-  );
   await runtime.resetAuthentication();
-  assert.equal(httpClosed, true);
-  assert.equal(wsClosed, true);
+
   assert.equal(runtime.resolve(request), null);
   assert.equal(runtime.vault.snapshot().credential, null);
-  assert.equal(runtime.prepare({ headers: {} }).body.resumeAvailable, false);
+  assert.equal(
+    runtime.prepare(ownerRequest(runtime, { headers: {} })).body
+      .resumeAvailable,
+    false,
+  );
   assert.ok(requests.includes('/oauth2/revoke'));
 });
 

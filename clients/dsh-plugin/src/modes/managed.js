@@ -392,7 +392,6 @@ export async function createManaged(options = {}) {
                       connected: network?.status?.connected === true,
                       account: { subject: ownerId },
                       models: MANAGED_MODEL_STATUS,
-                      csrf: 'managed-origin',
                       network: network?.status ?? {
                         connected: false,
                         state: 'unavailable',

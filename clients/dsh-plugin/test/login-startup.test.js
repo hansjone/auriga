@@ -1,29 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
-for (const protocol of ['dsh-app:', 'http:'])
+import { installLocalAdmission } from '../src/local/host.js';
+for (const protocol of ['https:', 'http:'])
   for (const platform of ['unconfigured', 'signed-out', 'offline', 'expired'])
     test(
-      'R2 bootstrap never blocks local DSH: ' + protocol + ' ' + platform,
-      async () => {
-        const source = await readFile(
-          new URL('../src/login/startup.js', import.meta.url),
-          'utf8',
-        );
-        let calls = 0;
-        await runInNewContext(source, {
-          location: {
-            protocol,
-            replace() {
-              calls++;
-            },
-          },
-          fetch() {
-            calls++;
-            throw Error('unexpected');
-          },
-        });
-        assert.equal(calls, 0);
+      'R4 no login bootstrap changes native index access: ' +
+        protocol +
+        ' ' +
+        platform,
+      () => {
+        const peer = { principal: { kind: 'owner' } };
+        const connection = {
+          admit: () => ({ peer }),
+          authorizeIndex: () => true,
+          isTrusted: () => true,
+        };
+        const index = connection.authorizeIndex;
+        const admission = installLocalAdmission(connection, {}, { protocol });
+        assert.equal(connection.authorizeIndex, index);
+        assert.equal(connection.admit({ headers: {}, url: '/' }).peer, peer);
+        admission.dispose();
       },
     );

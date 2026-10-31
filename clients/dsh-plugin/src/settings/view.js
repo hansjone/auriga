@@ -25,6 +25,7 @@ const messages = {
     networkReady: '就绪',
     networkPending: '未就绪',
     network: '总部不可达',
+    recovering: '总部不可达，联网后自动恢复',
     unauthorized: '未登录',
     unconfiguredNetwork: '未配置消息网络',
     joining: '正在连接',
@@ -88,6 +89,7 @@ const messages = {
     networkReady: 'Ready',
     networkPending: 'Not ready',
     network: 'Platform unreachable',
+    recovering: 'Platform unreachable; reconnects automatically',
     unauthorized: 'Signed out',
     unconfiguredNetwork: 'Message network not configured',
     joining: 'Connecting',
@@ -188,7 +190,7 @@ export function createSettingsView(
             signal: AbortSignal.timeout(15000),
             headers: {
               'content-type': 'application/json',
-              'x-auriga-csrf': account.csrf,
+              ...(account.csrf ? { 'x-auriga-csrf': account.csrf } : {}),
             },
             body: JSON.stringify({ local: session.local, enabled }),
           },
@@ -366,6 +368,7 @@ export function createSettingsView(
     const managed = state?.mode === 'managed' || boot?.mode === 'managed';
     const configured = managed || !!state?.platformOrigin;
     const loggedIn = account?.loggedIn === true;
+    const recovering = !loggedIn && account?.resumeAvailable === true;
     const network = account?.network;
     const ready = network?.connected === true;
     const name =
@@ -373,9 +376,11 @@ export function createSettingsView(
       account?.account?.subject ??
       t.notProvided;
     const reason = !loggedIn
-      ? account?.models?.reauthenticationRequired
-        ? t.expired
-        : t.signedOut
+      ? recovering
+        ? t.recovering
+        : account?.models?.reauthenticationRequired
+          ? t.expired
+          : t.signedOut
       : network?.state === 'unconfigured' ||
           network?.reason === 'configuration_missing'
         ? t.unconfiguredNetwork
@@ -446,9 +451,11 @@ export function createSettingsView(
                 )
                 ?.scrollIntoView({ block: 'center' }),
             )
-          : !loggedIn
-            ? button(t.login, enter)
-            : button(t.refresh, reload);
+          : recovering
+            ? button(t.retry, reload)
+            : !loggedIn
+              ? button(t.login, enter)
+              : button(t.refresh, reload);
     const logout = () => navigate(localURL('auriga/local-login') + '?logout=1');
     const receiveControls = useReceiveSettings({ t, account, revision });
     return h(
@@ -525,7 +532,10 @@ export function createSettingsView(
         'section',
         { 'aria-label': t.account },
         h('h3', null, t.account),
-        row(t.identity, statusError || (loggedIn ? name : t.signedOut)),
+        row(
+          t.identity,
+          statusError || (loggedIn || recovering ? name : t.signedOut),
+        ),
         loggedIn &&
           account?.account?.displayName === undefined &&
           row(t.memberId, account.account.subject),
@@ -543,13 +553,13 @@ export function createSettingsView(
               null,
               row(
                 t.device,
-                loggedIn
+                loggedIn || recovering
                   ? (account.deviceName ?? state?.deviceName ?? t.missing)
                   : t.signedOut,
               ),
               row(
                 t.loginTime,
-                loggedIn
+                loggedIn || recovering
                   ? account.loginTime
                     ? new Date(account.loginTime).toLocaleString(locale)
                     : t.missing
@@ -558,7 +568,7 @@ export function createSettingsView(
               !statusError &&
                 (loggedIn
                   ? button(t.logout, logout)
-                  : configured
+                  : configured && !recovering
                     ? button(t.login, enter)
                     : null),
             ),

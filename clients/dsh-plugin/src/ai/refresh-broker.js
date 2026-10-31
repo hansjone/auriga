@@ -1,4 +1,6 @@
 import { AdapterError } from './guard.js';
+import { requestWasNotSent } from '../local/transport-errors.js';
+import { logEvent } from '../observability/index.js';
 
 /** One rotating refresh family, one queue. The durable pending fence is written
  * BEFORE transport: a crash/lost response/failed save can never replay it.
@@ -100,6 +102,7 @@ export function createRefreshBroker({
         }
         assert();
       }
+      let phase = 'pending_fence';
       try {
         await vault.update((/** @type {any} */ s) => {
           assert();
@@ -109,6 +112,7 @@ export function createRefreshBroker({
         });
         assert();
         let tokens;
+        phase = 'exchange';
         try {
           tokens = await platform.request('/oauth2/token', {
             method: 'POST',
@@ -127,16 +131,7 @@ export function createRefreshBroker({
           const e = /** @type {any} */ (error);
           // DNS/connect failures establish that no HTTP request was sent.
           // Timeouts, resets and lost responses remain uncertain and fenced.
-          if (
-            [
-              'ECONNREFUSED',
-              'ENOTFOUND',
-              'EAI_AGAIN',
-              'ENETUNREACH',
-              'EHOSTUNREACH',
-              'UND_ERR_CONNECT_TIMEOUT',
-            ].includes(e.cause?.code)
-          ) {
+          if (requestWasNotSent(error)) {
             assert();
             await vault.update((/** @type {any} */ s) => {
               assert();
@@ -175,6 +170,7 @@ export function createRefreshBroker({
           throw new AdapterError('AI_NOT_AUTHORIZED');
         }
         assert();
+        phase = 'response_validation';
         if (
           tokens.token_type?.toLowerCase() !== 'bearer' ||
           tokens.scope !== 'auriga.connect' ||
@@ -183,20 +179,31 @@ export function createRefreshBroker({
           tokens.refresh_token === saved.refreshToken
         )
           throw fail();
+        phase = 'token_verification';
         const claims = await (resource === 'ai'
           ? platform.verifyAi(tokens.access_token, saved.claims)
           : platform.verifyDevice(tokens.access_token, saved.claims));
         assert();
-        const expiresAt = claims.exp * 1000;
+        // Compare signed issuer timestamps with each other, not a different
+        // machine's clock. Locally cap the lease by expires_in as well as the
+        // strict JWT expiry, so skew never extends usable token lifetime.
+        const expiresAt =
+          resource === 'ai'
+            ? Math.min(claims.exp * 1000, now() + tokens.expires_in * 1000)
+            : claims.exp * 1000;
+        phase = 'expiry_validation';
         if (
           expiresAt <= now() ||
           (resource === 'ai' &&
             (!Number.isSafeInteger(tokens.expires_in) ||
               tokens.expires_in < 1 ||
               tokens.expires_in > 300 ||
-              expiresAt > now() + tokens.expires_in * 1000 + 1000))
+              !Number.isSafeInteger(claims.iat) ||
+              claims.exp <= claims.iat ||
+              claims.exp - claims.iat > tokens.expires_in + 1))
         )
           throw fail();
+        phase = 'result_persistence';
         await vault.update((/** @type {any} */ s) => {
           assert();
           if (!matches(s.credential)) throw fail();
@@ -232,6 +239,10 @@ export function createRefreshBroker({
           ['AI_NOT_AUTHORIZED', 'UPSTREAM_UNAVAILABLE'].includes(error.code)
         )
           throw error;
+        logEvent('WARN', 'Device refresh requires reauthentication', {
+          resource,
+          phase,
+        });
         invalidate('reauth_required');
         onUncertain();
         throw fail();

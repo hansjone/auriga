@@ -3,6 +3,44 @@ import assert from 'node:assert/strict';
 import { createRefreshBroker } from '../../src/ai/refresh-broker.js';
 /* global structuredClone */
 
+for (const code of ['ENOTFOUND', 'ECONNREFUSED', 'CERT_HAS_EXPIRED'])
+  test(
+    'R4 nested/aggregate pre-write failure remains recoverable: ' + code,
+    async () => {
+      const f = fixture();
+      f.failExchange(
+        new TypeError('private', {
+          cause: new AggregateError([
+            new TypeError('nested', {
+              cause: Object.assign(new Error('private'), { code }),
+            }),
+            Object.assign(new Error('private'), { code: 'ECONNREFUSED' }),
+          ]),
+        }),
+      );
+      await assert.rejects(f.broker.getPlatformAccess(), {
+        code: 'UPSTREAM_UNAVAILABLE',
+      });
+      assert.equal(f.vault.snapshot().credential.refreshPending, false);
+      assert.equal(f.broker.status.reauthenticationRequired, false);
+    },
+  );
+test('R4 mixed aggregate reset remains uncertain and cannot replay refresh', async () => {
+  const f = fixture();
+  f.failExchange(
+    new TypeError('private', {
+      cause: new AggregateError([
+        Object.assign(new Error('private'), { code: 'ECONNREFUSED' }),
+        Object.assign(new Error('private'), { code: 'ECONNRESET' }),
+      ]),
+    }),
+  );
+  await assert.rejects(f.broker.getPlatformAccess(), {
+    code: 'REAUTH_REQUIRED',
+  });
+  assert.equal(f.vault.snapshot().credential.refreshPending, true);
+});
+
 function fixture() {
   let now = 1000000;
   let state = {
@@ -45,7 +83,11 @@ function fixture() {
       return { ...state.credential.claims, exp: now / 1000 + 120 };
     },
     async verifyAi() {
-      return { ...state.credential.claims, exp: now / 1000 + 120 };
+      return {
+        ...state.credential.claims,
+        iat: now / 1000,
+        exp: now / 1000 + 120,
+      };
     },
   };
   const broker = createRefreshBroker({
@@ -74,6 +116,32 @@ function fixture() {
     },
   };
 }
+
+test('R4 signed AI lifetime tolerates a different issuer clock without extending the local lease', async () => {
+  const f = fixture();
+  f.platform.verifyAi = async () => ({
+    tid: 'tenant',
+    sub: 'owner',
+    did: 'device',
+    iat: 1002,
+    exp: 1122,
+  });
+  const lease = await f.broker.getAiAccess();
+  assert.equal(lease.expiresAt, 1120000);
+  assert.equal(f.broker.status.reauthenticationRequired, false);
+});
+test('R4 AI lifetime exceeding expires_in remains fenced', async () => {
+  const f = fixture();
+  f.platform.verifyAi = async () => ({
+    tid: 'tenant',
+    sub: 'owner',
+    did: 'device',
+    iat: 1002,
+    exp: 1182,
+  });
+  await assert.rejects(f.broker.getAiAccess(), { code: 'REAUTH_REQUIRED' });
+  assert.equal(f.vault.snapshot().credential.refreshPending, true);
+});
 
 test('broker: cross-resource serial rotation and same-resource single flight', async () => {
   const { broker, vault, requests } = fixture();

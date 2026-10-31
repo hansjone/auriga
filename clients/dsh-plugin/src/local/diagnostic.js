@@ -45,8 +45,29 @@ const nativeMessages = new Map([
 
 // Whitelist classifications only. Error message/stack, URL, headers, request
 // body and arbitrary upstream codes may contain credentials and never leave.
-/** @param {unknown} error */
-export function localFailureDiagnostic(error) {
+/** @param {unknown} error @param {number} [level]
+ * @returns {{category:string,code?:string,status?:number}} */
+export function localFailureDiagnostic(error, level = 0) {
+  if (level > 8) return { category: 'unexpected' };
+  if (error instanceof AggregateError) {
+    if (!error.errors.length || error.errors.length > 16)
+      return { category: 'unexpected' };
+    const diagnoses = error.errors.map((value) =>
+      localFailureDiagnostic(value, level + 1),
+    );
+    return diagnoses.every((value) =>
+      ['dns', 'connection', 'tls', 'timeout'].includes(value.category),
+    )
+      ? diagnoses[0]
+      : { category: 'unexpected' };
+  }
+  if (error instanceof Error && error.message === 'login attempt busy')
+    return { category: 'busy', code: 'attempt_busy' };
+  if (
+    error instanceof Error &&
+    error.message === 'team account login unavailable'
+  )
+    return { category: 'configuration', code: 'team_provider_unavailable' };
   if (error instanceof PlatformError)
     return {
       category: 'platform_http',
@@ -61,6 +82,8 @@ export function localFailureDiagnostic(error) {
     };
   let current = error;
   for (let depth = 0; depth < 4 && current instanceof Error; depth++) {
+    if (current instanceof AggregateError)
+      return localFailureDiagnostic(current, level + depth + 1);
     const value = /** @type {Error & {code?:string,cause?:unknown}} */ (
       current
     );

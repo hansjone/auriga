@@ -1,3 +1,4 @@
+import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -5,55 +6,30 @@ import { Readable } from 'node:stream';
 import { createConnectRoutes } from '../src/local/routes.js';
 import { runtimePeer } from './local-runtime-peer.js';
 
-test('anonymous B cancels with its own CSRF while authenticated A keeps device, Team, HTTP and WS without revoke', async (t) => {
+test('R4 another admitted owner cancels a form without revoking shared device or Team', async (t) => {
   const { runtime, request: a, registered, requests } = await runtimePeer(t);
-  const stream = new EventEmitter(),
-    socket = new EventEmitter();
-  let httpClosed = 0,
-    wsClosed = 0;
-  stream.destroy = () => {
-    httpClosed++;
-    stream.emit('close');
-  };
-  socket.destroy = () => {
-    wsClosed++;
-    socket.emit('close');
-  };
-  runtime.bindHttpResponse(a, stream);
-  runtime.bindSocket({
-    ...a,
-    headers: { ...a.headers, upgrade: 'websocket' },
-    socket,
-  });
-  await runtime.vault.update((s) => {
-    s.threads.existing = { sessionId: 'source-A', bindingId: 'binding-A' };
-    s.deliveries.existing = {
-      sessionId: 'source-A',
-      messageId: 'message-A',
-      accepted: true,
-    };
-  });
-  const before = runtime.vault.snapshot(),
-    status = runtime.status(a);
-  const prepared = runtime.prepare({ headers: {} });
-  const bCookie = prepared.setCookie.split(';')[0];
-  const b = {
-    headers: { cookie: bCookie, 'x-auriga-csrf': prepared.body.csrf },
-  };
-  assert.equal(runtime.resolve(b), null);
-  assert.equal(runtime.checkCsrf(b), true);
+  const before = runtime.vault.snapshot();
+  const status = runtime.status(a);
   const routes = createConnectRoutes({
     runtime,
     admission: {
-      nativeAuth: { requestRejection: () => undefined },
+      nativeAuth: {
+        requestRejection: (req) => {
+          ownerRequest(runtime, req);
+          return undefined;
+        },
+      },
       sameOrigin: () => true,
     },
   });
   const req = Readable.from([Buffer.from('{}')]);
   Object.assign(req, {
     method: 'POST',
-    url: '/auriga/local-login/logout',
-    headers: { ...b.headers, 'content-type': 'application/json' },
+    url: '/auriga/local-login/cancel',
+    headers: {
+      'x-auriga-csrf': status.csrf,
+      'content-type': 'application/json',
+    },
   });
   const res = new EventEmitter();
   res.writeHead = (code) => {
@@ -65,20 +41,14 @@ test('anonymous B cancels with its own CSRF while authenticated A keeps device, 
   };
   await routes(req, res);
   assert.equal(res.status, 200);
-  assert.equal(res.body.loggedIn, false);
+  assert.equal(res.body.cancelled, true);
   assert.deepEqual(runtime.vault.snapshot(), before);
   assert.deepEqual(runtime.status(a), status);
   assert.equal(runtime.isReady(), true);
   assert.equal(registered.size, 4);
-  assert.equal(httpClosed, 0);
-  assert.equal(wsClosed, 0);
   assert.equal(requests.includes('/oauth2/revoke'), false);
-  assert.equal(runtime.checkCsrf(b), false);
-  assert.notEqual(runtime.prepare(b).body.csrf, prepared.body.csrf);
   await runtime.logout(a);
   assert.equal(runtime.resolve(a), null);
-  assert.equal(httpClosed, 1);
-  assert.equal(wsClosed, 1);
   assert.equal(registered.size, 0);
   assert.equal(requests.filter((path) => path === '/oauth2/revoke').length, 1);
 });

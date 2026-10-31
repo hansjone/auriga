@@ -89,7 +89,12 @@ export function createConnectRoutes({
         const result = runtime.prepare(req);
         return json(res, 200, result.body, result.setCookie);
       }
-      if (write && (path === BASE + '/login' || path === BASE + '/logout')) {
+      if (
+        write &&
+        ['/login', '/logout', '/cancel'].some(
+          (suffix) => path === BASE + suffix,
+        )
+      ) {
         if (
           req.headers['content-type']?.split(';')[0].trim() !==
           'application/json'
@@ -148,20 +153,19 @@ export function createConnectRoutes({
           }
         } else if (Object.keys(input).length !== 0)
           return json(res, 400, { code: 'common.validation_failed' });
-        operation = path === BASE + '/logout' ? 'logout' : input.action;
-        const onClose = () => {
-          if (!res.writableEnded)
-            void runtime.cancelAttempt(req).catch(() => {});
-        };
-        if (path === BASE + '/login') res.once('close', onClose);
+        operation =
+          path === BASE + '/login'
+            ? input.action
+            : path.slice((BASE + '/').length);
         let result;
-        try {
+        if (path === BASE + '/cancel') {
+          await runtime.cancelAttempt(req);
+          result = { body: { cancelled: true } };
+        } else {
           result =
             path === BASE + '/logout'
               ? await runtime.logout(req)
               : await runtime.login(req, input);
-        } finally {
-          res.off('close', onClose);
         }
         return json(
           res,
@@ -203,7 +207,10 @@ export function createConnectRoutes({
         error instanceof Error &&
         error.message === 'unsupported native login step'
       )
-        return json(res, 501, { code: 'common.unavailable' });
+        return json(res, 501, {
+          code: 'common.unavailable',
+          diagnostic: localFailureDiagnostic(error),
+        });
       if (
         error instanceof Error &&
         ['login attempt expired', 'invalid device credential'].includes(
@@ -231,7 +238,10 @@ export function createConnectRoutes({
       } catch {
         // Diagnostics must never change the existing failure-closed response.
       }
-      json(res, 503, { code: 'common.unavailable' });
+      json(res, 503, {
+        code: 'common.unavailable',
+        diagnostic: localFailureDiagnostic(error),
+      });
     }
   };
 }

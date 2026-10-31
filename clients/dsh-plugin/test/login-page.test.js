@@ -39,6 +39,61 @@ const status = (extra = {}) =>
 const flush = async () => {
   for (let i = 0; i < 60; i++) await Promise.resolve();
 };
+for (const locale of ['zh-CN', 'en'])
+  for (const [category, statusCode, zh, en] of [
+    ['dns', undefined, '总部不可达', 'Platform unreachable'],
+    ['connection', undefined, '总部不可达', 'Platform unreachable'],
+    ['tls', undefined, '总部不可达', 'Platform unreachable'],
+    ['timeout', undefined, '总部不可达', 'Platform unreachable'],
+    [
+      'platform_http',
+      503,
+      '平台登录暂不可用 (HTTP 503)',
+      'Platform sign-in unavailable (HTTP 503)',
+    ],
+    [
+      'platform_http',
+      400,
+      '平台登录暂不可用 (HTTP 400)',
+      'Platform sign-in unavailable (HTTP 400)',
+    ],
+    [
+      'configuration',
+      undefined,
+      '平台登录配置异常',
+      'Platform sign-in configuration error',
+    ],
+    ['busy', undefined, '另一窗口正在登录', 'Another window is signing in'],
+    [
+      'unexpected',
+      undefined,
+      '平台登录暂不可用',
+      'Platform sign-in unavailable',
+    ],
+  ])
+    test(`R4 ${locale} login classification ${category} ${statusCode}`, async (t) => {
+      const { root } = fixture(
+        t,
+        [
+          status(),
+          Response.json(
+            {
+              code: 'common.unavailable',
+              message: 'SECRET',
+              diagnostic: { category, status: statusCode, message: 'SECRET' },
+            },
+            { status: 503 },
+          ),
+        ],
+        { locale },
+      );
+      await flush();
+      const message = root.querySelector('[role=alert]').textContent;
+      assert.equal(message, locale === 'en' ? en : zh);
+      assert.doesNotMatch(message, /SECRET/);
+      if (!['dns', 'connection', 'tls', 'timeout'].includes(category))
+        assert.doesNotMatch(message, /总部不可达|Platform unreachable/);
+    });
 
 test('actual login page mounts transport and exposes a recoverable network failure', async (t) => {
   const { root, requests } = fixture(t, [

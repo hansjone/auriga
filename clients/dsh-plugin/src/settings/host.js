@@ -135,6 +135,9 @@ export function createSettingsHandler({
       /* invalid host rejected */
     }
     if (
+      // Origin-less desktop forwarding relies on owner admission AND the
+      // custom JSON header requiring a browser CORS preflight (not permitted
+      // by DSH cross-origin). A self-claimed header alone is never authority.
       (req.headers['sec-fetch-site'] &&
         !['same-origin', 'none'].includes(req.headers['sec-fetch-site'])) ||
       ((write || req.headers.origin) &&

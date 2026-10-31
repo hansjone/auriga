@@ -72,6 +72,33 @@ export function apply(_ctx, options) {
                   ? 'login'
                   : 'other';
         diagnosis.responses.push({ operation, status: response.status });
+        if (operation === 'ai_token' && response.ok) {
+          try {
+            const tokens = await response.clone().json();
+            const [header, payload] = tokens.access_token
+              .split('.')
+              .slice(0, 2)
+              .map((value) =>
+                JSON.parse(Buffer.from(value, 'base64url').toString('utf8')),
+              );
+            diagnosis.aiTokenShape = {
+              bearer: tokens.token_type?.toLowerCase() === 'bearer',
+              scope: tokens.scope === 'auriga.connect',
+              refreshPresent:
+                typeof tokens.refresh_token === 'string' &&
+                !!tokens.refresh_token,
+              expiresInValid:
+                Number.isSafeInteger(tokens.expires_in) &&
+                tokens.expires_in > 0 &&
+                tokens.expires_in <= 300,
+              typ: header.typ === 'at+jwt',
+              expiryAheadOfLocalBudgetMs:
+                payload.exp * 1000 - (Date.now() + tokens.expires_in * 1000),
+            };
+          } catch {
+            diagnosis.aiTokenShape = { unreadable: true };
+          }
+        }
         diagnosis.responses = diagnosis.responses.slice(-40);
         record();
       }

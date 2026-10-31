@@ -1,3 +1,4 @@
+import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 /* global Headers, structuredClone */
 import assert from 'node:assert/strict';
@@ -21,7 +22,7 @@ import {
   platformConfig,
   LoginJar,
 } from '../src/local/platform.js';
-import { createConnectRuntime, cookie } from '../src/local/runtime.js';
+import { createConnectRuntime } from '../src/local/runtime.js';
 import { createTeam } from '../src/local/team.js';
 import { runtimePeer } from './local-runtime-peer.js';
 import { createDeviceProvider } from '../src/network/device-provider.js';
@@ -181,8 +182,9 @@ async function nativeNetworkPeer(t, options = {}) {
     await runtime.close();
     await rm(directory, { recursive: true, force: true });
   });
-  const request = { headers: {} };
-  request.headers.cookie = runtime.prepare(request).setCookie.split(';')[0];
+  const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
+  runtime.prepare(request);
+
   const advance = (values) =>
     runtime.login(request, {
       action: 'advance',
@@ -205,8 +207,8 @@ for (const noTeamCapabilities of [false, true])
     async (t) => {
       const peer = await nativeNetworkPeer(t, { noTeamCapabilities });
       const { runtime, request, requests, complete } = peer;
-      const result = await complete();
-      request.headers.cookie = result.setCookie[0].split(';')[0];
+      await complete();
+
       await until(
         () => runtime.networkStatus.reason === 'forbidden',
         'default provider must reach the denied register endpoint independently of Team',
@@ -361,8 +363,8 @@ for (const stop of ['logout', 'reset', 'close'])
           }),
       });
       const { runtime, request, requests, complete } = peer;
-      const result = await complete();
-      request.headers.cookie = result.setCookie[0].split(';')[0];
+      await complete();
+
       await until(
         () => releaseRegister && releaseTeam,
         'default register and legacy MCP both in flight',
@@ -563,9 +565,10 @@ test('loader network installation selects official device default after login an
   assert.equal(runtime.networkStatus.available, true);
   assert.equal(runtime.networkStatus.connected, false);
   // Even an internal adapter bypass cannot promote request data to installation authority.
-  const attempt = { headers: {} };
-  attempt.headers.cookie = runtime.prepare(attempt).setCookie.split(';')[0];
-  await runtime.login(attempt, { action: 'resume', network });
+  const attempt = runtime.nativeRequest({ principal: { kind: 'owner' } });
+  runtime.prepare(attempt);
+
+  assert.equal(runtime.status(attempt).loggedIn, true);
   let prepared;
   const detach = runtime.attachNetwork({
     ports: {},
@@ -594,8 +597,8 @@ test('cancelled browser attempt loses its CSRF and cannot be advanced or restart
       ctx: { webServer: { protocol: 'http:' } },
     });
     const request = { headers: {} };
-    const prepared = runtime.prepare(request);
-    request.headers.cookie = prepared.setCookie.split(';')[0];
+    const prepared = runtime.prepare(ownerRequest(runtime, request));
+
     request.headers['x-auriga-csrf'] = prepared.body.csrf;
     assert.equal(runtime.checkCsrf(request), true);
     await runtime.cancelAttempt(request);
@@ -823,13 +826,6 @@ test('login cookie jar is isolated, host-only and clears sensitive material', ()
   );
   first.clear();
   assert.equal(first.header('/'), '');
-  assert.equal(
-    cookie(
-      { headers: { cookie: 'auriga_local_session=a; auriga_local_session=b' } },
-      'auriga_local_session',
-    ),
-    undefined,
-  );
 });
 test('vault encrypts state, serializes mutations and refuses corrupt ciphertext', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-vault-'));
@@ -894,8 +890,8 @@ test('runtime status/CSRF cannot mint a session and logout cannot restore a prev
       ctx: { webServer: { protocol: 'http:' } },
     });
     const req = { headers: {} };
-    const prepared = runtime.prepare(req);
-    req.headers.cookie = prepared.setCookie.split(';')[0];
+    const prepared = runtime.prepare(ownerRequest(runtime, req));
+
     assert.equal(prepared.body.loggedIn, false);
     assert.equal(runtime.resolve(req), null);
     assert.equal(runtime.checkCsrf(req), false);

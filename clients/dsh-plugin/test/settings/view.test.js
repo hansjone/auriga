@@ -92,6 +92,48 @@ const signedIn = {
   models: { available: false },
 };
 for (const locale of ['zh', 'en'])
+  test(
+    'R4 saved device offline is recovering, not signed out: ' + locale,
+    async () => {
+      const fixture = harness(
+        async (url) =>
+          Response.json(
+            url.endsWith('/status')
+              ? {
+                  loggedIn: false,
+                  connected: false,
+                  resumeAvailable: true,
+                  account: { subject: 'member-id' },
+                  models: { reauthenticationRequired: false },
+                }
+              : settings,
+          ),
+        locale,
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        const tree = fixture.render();
+        assert.match(
+          text(tree),
+          locale === 'zh'
+            ? /总部不可达，联网后自动恢复/
+            : /Platform unreachable; reconnects automatically/,
+        );
+        assert.equal(
+          button(tree, locale === 'zh' ? '登录' : 'Sign in'),
+          undefined,
+        );
+        assert.equal(
+          button(tree, locale === 'zh' ? '退出登录' : 'Sign out'),
+          undefined,
+        );
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
+for (const locale of ['zh', 'en'])
   for (const mode of ['connect', 'managed'])
     for (const phase of [
       'unconfigured',

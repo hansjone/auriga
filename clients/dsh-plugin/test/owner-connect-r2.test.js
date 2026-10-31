@@ -1,3 +1,4 @@
+import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installLocalAdmission } from '../src/local/host.js';
@@ -78,7 +79,7 @@ test('R2 discovery accepts only the team-account form and never offers emergency
   const { runtime } = await runtimePeer(t);
   const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
   await runtime.logout(request);
-  runtime.prepare(request);
+  runtime.prepare(ownerRequest(runtime, request));
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     if (new URL(url).pathname.endsWith('/providers'))
       return Response.json({
@@ -114,7 +115,7 @@ test('R3 cancellation finishing late cannot erase a new owner login attempt', as
   const { runtime } = await runtimePeer(t);
   const request = runtime.nativeRequest({ principal: { kind: 'owner' } });
   await runtime.logout(request);
-  runtime.prepare(request);
+  runtime.prepare(ownerRequest(runtime, request));
   let release;
   const pending = new Promise((resolve) => {
     release = resolve;
@@ -123,7 +124,7 @@ test('R3 cancellation finishing late cannot erase a new owner login attempt', as
   const old = runtime.login(request, { action: 'begin' });
   const rejected = assert.rejects(old, /superseded/);
   await runtime.cancelAttempt(request);
-  runtime.prepare(request);
+  runtime.prepare(ownerRequest(runtime, request));
   const fresh = runtime.attemptToken(request);
   release(Response.json({ items: [] }));
   await rejected;

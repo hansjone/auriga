@@ -600,7 +600,8 @@ window.__ModuleLoader__.load({
             });
             if (!status.ok) throw failure();
             const state = await status.json();
-            if (!state.loggedIn || !state.csrf) throw failure('auth');
+            if (!state.loggedIn || (state.mode !== 'managed' && !state.csrf))
+              throw failure('auth');
             csrf = state.csrf;
           }
           const response = await fetch(
@@ -614,7 +615,7 @@ window.__ModuleLoader__.load({
                     method: 'POST',
                     headers: {
                       'content-type': 'application/json',
-                      'X-Auriga-CSRF': csrf,
+                      ...(csrf ? { 'X-Auriga-CSRF': csrf } : {}),
                     },
                     body: JSON.stringify(input),
                   }

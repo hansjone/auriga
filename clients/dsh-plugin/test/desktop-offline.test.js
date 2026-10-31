@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
 import { installLocalAdmission } from '../src/local/host.js';
 import { savedPlatformConfig } from '../src/local/platform.js';
 
@@ -55,28 +54,12 @@ test('native owner local API and WS survive offline cold start without a platfor
   }
 });
 
-test('Electron startup never redirects to a platform login even when offline', async () => {
-  const script = await readFile(
-    new URL('../src/login/startup.js', import.meta.url),
+test('Electron startup has no plugin login injection', async () => {
+  const source = await readFile(
+    new URL('../src/plugin.js', import.meta.url),
     'utf8',
   );
-  const navigations = [];
-  await runInNewContext(script, {
-    location: {
-      protocol: 'dsh-app:',
-      replace: (path) => navigations.push(path),
-    },
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({
-        platformOrigin: 'https://portal.example.com',
-        result: { ok: true, value: { loggedIn: false } },
-      }),
-    }),
-    Date,
-    setTimeout,
-  });
-  assert.deepEqual(navigations, []);
+  assert.doesNotMatch(source, /installLocalLoginBootstrap|login\/startup/);
 });
 
 test('saved platform configuration can be loaded while discovery is unreachable', async (t) => {

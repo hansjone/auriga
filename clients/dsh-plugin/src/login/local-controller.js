@@ -1,4 +1,4 @@
-import { LoginFailure } from './errors.js';
+import { LoginFailure, wireFailure } from './errors.js';
 
 export const LOCAL_LOGIN_BASE = '/auriga/local-login';
 /** Browser transport for the existing local host contract, never the platform.
@@ -59,20 +59,13 @@ export function createLocalLoginController(options = {}) {
       try {
         data = await response.json();
       } catch {
-        throw new LoginFailure('network');
+        throw new LoginFailure('platform');
       }
       if (native && response.ok) {
         if (data?.type !== 'server-response' || data.rpcId !== rpcId)
-          throw new LoginFailure('network');
+          throw new LoginFailure('platform');
         if (data.result?.ok !== true) {
-          const code = data.result?.error?.code;
-          throw new LoginFailure(
-            code === 'iam.invalid_credentials'
-              ? 'failed'
-              : code === 'common.unauthenticated'
-                ? 'expired'
-                : 'network',
-          );
+          throw wireFailure(data.result?.error);
         }
         data = data.result.value;
       }
@@ -84,8 +77,7 @@ export function createLocalLoginController(options = {}) {
           response.status === 401
         )
           throw new LoginFailure('expired');
-        if (response.status === 501) throw new LoginFailure('unavailable');
-        throw new LoginFailure(response.status >= 500 ? 'network' : 'failed');
+        throw wireFailure(data, response.status);
       }
       if (!data || typeof data !== 'object' || Array.isArray(data))
         throw new LoginFailure('failed');
@@ -145,10 +137,10 @@ export function createLocalLoginController(options = {}) {
   async function cancel(signal) {
     // Never acquire an authenticated session's proof for an anonymous cancel.
     const state = await status(signal);
-    if (state.loggedIn) throw new LoginFailure('expired');
+    if (state.loggedIn) return state;
     if (!native && !csrf) throw new LoginFailure('expired');
-    const result = await call('logout', {}, signal);
-    if (result.loggedIn !== false) throw new LoginFailure('failed');
+    const result = await call('cancel', {}, signal);
+    if (result.cancelled !== true) throw new LoginFailure('failed');
     csrf = '';
   }
   return {
@@ -172,7 +164,8 @@ export function createLocalLoginController(options = {}) {
     async restart({ signal }) {
       const state = await status(signal);
       if (state.loggedIn) return ready(state);
-      await cancel(signal);
+      const cancelled = await cancel(signal);
+      if (cancelled?.loggedIn) return ready(cancelled);
       const fresh = await status(signal);
       if (fresh.loggedIn) return ready(fresh);
       if (!native && !csrf) throw new LoginFailure('expired');

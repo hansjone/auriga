@@ -5,7 +5,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readFile, writeFile, stat, readdir } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { isolatedEnvironment } from '../network/support/native-install.mjs';
 import { privatePath } from '../../scripts/beta-ui/runner.mjs';
@@ -14,6 +14,12 @@ import { poll } from './cloud-desk.desktop.mjs';
 import { nativeClient, configureFixtureModel } from './cloud-desk.native.mjs';
 import { startFixture } from './cloud-desk.fixture.mjs';
 import { loginInstalledDesktop } from './installed-login.mjs';
+import { nextTotp } from './run.mjs';
+import { createLocalLoginController } from '../../clients/dsh-plugin/src/login/local-controller.js';
+
+// Protocol-only acceptance is also usable while the Windows desktop is locked.
+// It never drives, navigates or captures the UI and cannot pass screenshot gates.
+const functionalOnly = process.argv.includes('--functional-only');
 
 const [fixtureArgument, packageArgument, stateArgument] = process.argv.slice(2);
 assert.ok(
@@ -44,7 +50,55 @@ const report = {
   dshVersion: '0.2.1-rc.3',
   steps: [],
   cleanup: [],
+  functionalOnly,
+  packageSHA256: createHash('sha256')
+    .update(await readFile(spec))
+    .digest('hex'),
 };
+const runtimeCrashes = new Set(),
+  teardownCrashes = new Set();
+async function crashFiles() {
+  return (await readdir(join(state, 'electron/logs')).catch(() => [])).filter(
+    (n) => n.startsWith('crash-'),
+  );
+}
+async function httpCarrier(launchURL) {
+  const base = new URL(launchURL).origin,
+    cookies = new Map();
+  const accept = (response) => {
+    for (const line of response.headers.getSetCookie()) {
+      const pair = line.split(';')[0],
+        at = pair.indexOf('=');
+      cookies.set(pair.slice(0, at), pair.slice(at + 1));
+    }
+  };
+  const first = await fetch(launchURL, {
+    redirect: 'manual',
+    signal: AbortSignal.timeout(10000),
+  });
+  accept(first);
+  await first.arrayBuffer();
+  return async (path, body) => {
+    const response = await fetch(base + path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: {
+        cookie: [...cookies].map(([k, v]) => k + '=' + v).join('; '),
+        ...(body === undefined
+          ? {}
+          : {
+              origin: base,
+              'content-type': 'application/json',
+              'x-auriga-settings': '1',
+            }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(180000),
+    });
+    accept(response);
+    if (!response.ok) throw new Error('native_http_' + response.status);
+    return response.json();
+  };
+}
 await mkdir(state);
 privatePath(state, true);
 for (const p of [
@@ -105,18 +159,45 @@ async function launch(label, isolation = false) {
     stream.on('data', (x) => collector.write(x));
   let browser;
   const stop = async () => {
+    const before = new Set(await crashFiles());
+    for (const name of before)
+      if (!teardownCrashes.has(name)) runtimeCrashes.add(name);
     if (!closed)
       await promisify(execFile)(
         join(process.env.SystemRoot, 'System32/taskkill.exe'),
         ['/PID', String(child.pid), '/T', '/F'],
         { windowsHide: true },
-      );
+      ).catch(async (error) => {
+        // taskkill may report an already-exiting descendant after killing the
+        // owned root. Collect the root's close event before judging failure.
+        await Promise.race([
+          done,
+          new Promise((resolve) => setTimeout(resolve, 1000)),
+        ]);
+        if (!closed) throw error;
+      });
     await done;
     await browser?.close().catch(() => {});
     collector.end();
     await writeFile(join(state, label + '-host.log'), logs);
+    for (const name of await crashFiles())
+      if (!before.has(name)) teardownCrashes.add(name);
   };
   try {
+    if (functionalOnly) {
+      const url = await poll(() => launchURL, 'native_launch_url_missing');
+      const carrier = await httpCarrier(url);
+      const client = nativeClient(carrier);
+      await poll(async () => {
+        try {
+          await client.rpc('settings/describe');
+          return true;
+        } catch {
+          return null;
+        }
+      }, 'native_startup_not_ready');
+      return { page: carrier, stop, launchURL: () => launchURL };
+    }
     const port = await poll(async () => {
       if (closed) throw new Error('owned_electron_exited');
       try {
@@ -169,6 +250,7 @@ async function launch(label, isolation = false) {
   }
 }
 async function request(page, path, body) {
+  if (functionalOnly) return page(path, body);
   return page.evaluate(
     async ({ path, body }) => {
       const r = await fetch(path, {
@@ -199,14 +281,16 @@ async function auth(page, action, args = {}) {
   return result.result.value;
 }
 async function assertLocal(page, label, fixtureProvider) {
-  assert.equal(
-    new URL(page.url()).pathname,
-    '/',
-    'desktop startup must stay on main page',
-  );
-  await page
-    .getByRole('button', { name: 'Auriga', exact: true })
-    .waitFor({ timeout: 30000 });
+  if (!functionalOnly) {
+    assert.equal(
+      new URL(page.url()).pathname,
+      '/',
+      'desktop startup must stay on main page',
+    );
+    await page
+      .getByRole('button', { name: 'Auriga', exact: true })
+      .waitFor({ timeout: 30000 });
+  }
   const client = nativeClient((path, body) => request(page, path, body));
   await client.activePlugin();
   const id = await client.createSession(
@@ -220,18 +304,71 @@ async function assertLocal(page, label, fixtureProvider) {
   report.steps.push(label);
 }
 async function login(page, credential) {
-  await page.goto('dsh-app://app/auriga/local-login');
-  await loginInstalledDesktop(page, credential, (path, body) =>
-    request(page, path, body),
-  );
+  if (functionalOnly) {
+    const state = await auth(page, 'status');
+    assert.equal(state.loggedIn, false);
+    let { step } = await auth(page, 'login', { input: { action: 'begin' } });
+    for (let i = 0; i < 3 && step.type === 'form'; i++) {
+      const values = {};
+      for (const field of step.fields) {
+        if (field.name === 'username') values[field.name] = credential.username;
+        else if (field.kind === 'password')
+          values[field.name] = credential.password;
+        else if (field.kind === 'otp')
+          values[field.name] = await nextTotp(credential);
+      }
+      ({ step } = await auth(page, 'login', {
+        input: {
+          action: 'advance',
+          input: { type: 'form', formId: step.formId, values },
+        },
+      }));
+    }
+    assert.equal(step.type, 'complete');
+    assert.equal(
+      (await auth(page, 'status')).account.subject,
+      credential.accountId,
+    );
+  } else {
+    await page.goto('dsh-app://app/auriga/local-login');
+    await loginInstalledDesktop(page, credential, (path, body) =>
+      request(page, path, body),
+    );
+  }
   report.steps.push('team-login-identity');
   await poll(
-    async () => (await auth(page, 'status')).network?.connected === true,
+    async () => {
+      const status = await auth(page, 'status');
+      report.loginStatus = {
+        loggedIn: status.loggedIn,
+        resumeAvailable: status.resumeAvailable,
+        communication: status.communication,
+        network: {
+          connected: status.network?.connected,
+          state: status.network?.state,
+          reason: status.network?.reason,
+        },
+        models: {
+          state: status.models?.state,
+          credentialState: status.models?.credentialState,
+          reauthenticationRequired: status.models?.reauthenticationRequired,
+        },
+      };
+      return status.network?.connected === true;
+    },
     'platform_network_not_ready',
     90000,
   );
 }
 async function captureSettings(page, label) {
+  if (functionalOnly) {
+    (report.screenshots ??= []).push({
+      label,
+      status: 'not_run',
+      reason: 'functional_only_no_ui',
+    });
+    return;
+  }
   let stage = 'foreground';
   try {
     await page.bringToFront();
@@ -301,6 +438,10 @@ async function captureSettings(page, label) {
   }
 }
 async function skipLogin(page, offline) {
+  if (functionalOnly) {
+    await auth(page, 'status');
+    return;
+  }
   await page.goto('dsh-app://app/auriga/local-login');
   const skip = page.locator('[data-action=skip]');
   await skip.waitFor();
@@ -441,7 +582,9 @@ try {
   await skipLogin(app.page, true);
   await assertLocal(
     app.page,
-    'unreachable-login-skipped-local-prompt',
+    functionalOnly
+      ? 'offline-optional-login-local-prompt'
+      : 'unreachable-login-skipped-local-prompt',
     provider,
   );
   report.stage = 'team-login';
@@ -458,10 +601,45 @@ try {
   );
   await skipLogin(app.page, false);
   assert.equal((await auth(app.page, 'status')).loggedIn, false);
-  await assertLocal(app.page, 'team-login-skipped-local-prompt', provider);
+  await assertLocal(
+    app.page,
+    functionalOnly
+      ? 'online-optional-login-local-prompt'
+      : 'team-login-skipped-local-prompt',
+    provider,
+  );
   await login(app.page, member);
   report.steps.push('team-login-ready');
   await captureSettings(app.page, 'settings-ready');
+  report.stage = 'saved-offline-cold-start';
+  await writeFile(switchFile, 'offline');
+  await app.stop();
+  app = await launch('saved-offline', true);
+  await assertLocal(
+    app.page,
+    'saved-offline-cold-start-local-prompt',
+    provider,
+  );
+  const transport = createLocalLoginController({
+    native: true,
+    fetch: async (path, init) =>
+      Response.json(await request(app.page, path, JSON.parse(init.body))),
+  });
+  const signal = new AbortController().signal;
+  await assert.rejects(
+    transport.start({ signal }),
+    (error) => error.reason === 'network',
+  );
+  await transport.cancel(signal);
+  await assert.rejects(
+    transport.restart({ signal }),
+    (error) => error.reason === 'network',
+  );
+  const savedOffline = await auth(app.page, 'status');
+  assert.equal(savedOffline.resumeAvailable, true);
+  assert.equal(savedOffline.platform, 'recovering');
+  assert.equal(savedOffline.remoteRevocation, 'complete');
+  report.steps.push('saved-device-cancel-restart-preserved');
   report.stage = 'offline-after-login';
   await writeFile(switchFile, 'offline');
   await poll(
@@ -490,12 +668,15 @@ try {
     'final-offline-cold-start-local-prompt',
     provider,
   );
-  report.status = report.screenshots?.some((x) => x.status !== 'passed')
-    ? 'failed'
-    : 'passed';
-  if (report.status !== 'passed') process.exitCode = 1;
+  report.functionalStatus = 'passed';
+  report.status = functionalOnly
+    ? 'screenshots_pending'
+    : report.screenshots?.some((x) => x.status !== 'passed')
+      ? 'failed'
+      : 'passed';
+  if (!functionalOnly && report.status !== 'passed') process.exitCode = 1;
 } catch (error) {
-  if (app)
+  if (app && !functionalOnly)
     await writeFile(
       join(state, 'failure-ui.txt'),
       await app.page
@@ -503,13 +684,14 @@ try {
         .innerText()
         .catch(() => ''),
     );
-  await app?.page
-    .screenshot({
-      timeout: 5000,
-      path: join(state, 'failure.png'),
-      fullPage: true,
-    })
-    .catch(() => {});
+  if (!functionalOnly)
+    await app?.page
+      .screenshot({
+        timeout: 5000,
+        path: join(state, 'failure.png'),
+        fullPage: true,
+      })
+      .catch(() => {});
   report.failure = {
     name: error.name,
     code: error.code,
@@ -531,14 +713,23 @@ try {
   process.exitCode = 1;
 } finally {
   if (app) {
-    await app.stop();
-    report.cleanup.push('owned-electron-stopped');
+    try {
+      await app.stop();
+      report.cleanup.push('owned-electron-stopped');
+    } catch (error) {
+      report.cleanup.push('owned-electron-stop-failed');
+      report.cleanupFailure = {
+        code: typeof error.code === 'number' ? error.code : 'unknown',
+      };
+      report.status = 'failed';
+      process.exitCode = 1;
+    }
   }
   await model?.close();
-  report.crashLogCount = (
-    await readdir(join(state, 'electron/logs')).catch(() => [])
-  ).filter((n) => n.startsWith('crash-')).length;
-  if (report.crashLogCount) {
+  report.crashLogCount = (await crashFiles()).length;
+  report.runtimeCrashLogCount = runtimeCrashes.size;
+  report.teardownCrashLogCount = teardownCrashes.size;
+  if (report.runtimeCrashLogCount) {
     report.status = 'failed';
     process.exitCode = 1;
   }

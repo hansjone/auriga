@@ -9,10 +9,7 @@ import { createLocalSurfaceHandler } from './local-ui.js';
 import { createConnectRuntime } from './local/runtime.js';
 import { savedPlatformConfig } from './local/platform.js';
 import { installNativeLoginRPC } from './local/native-rpc.js';
-import {
-  installLocalAdmission,
-  installLocalLoginBootstrap,
-} from './local/host.js';
+import { installLocalAdmission } from './local/host.js';
 import {
   createConnectRoutes,
   createUnconfiguredLoginRoutes,
@@ -38,9 +35,6 @@ export async function apply(ctx, config) {
   // Preferences select Auriga surfaces; DSH owns local admission independently.
   let configured = true;
   let admission;
-  const setConfigured = (next) => {
-    configured = next;
-  };
   const settings = installSettings(
     ctx,
     config,
@@ -57,7 +51,6 @@ export async function apply(ctx, config) {
         },
   );
   if (mode !== 'managed') {
-    installLocalLoginBootstrap(ctx);
     if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
       throw new Error(
         'auriga-dsh: local UI requires native host authentication',
@@ -132,13 +125,13 @@ export async function apply(ctx, config) {
       ctx.inject(['profileContext'], async (profileCtx) => {
         const owner = {};
         profileOwner = owner;
-        setConfigured(true);
+        configured = true;
         binding = undefined;
         profileCtx.effect(
           () => () => {
             if (profileOwner !== owner) return;
             profileOwner = undefined;
-            setConfigured(true);
+            configured = true;
             binding = undefined;
           },
           'auriga-dsh: profile admission',
@@ -150,17 +143,17 @@ export async function apply(ctx, config) {
           );
         const loading = settings.getStore(profile.dir).then((store) => {
           if (profileOwner !== owner) return null;
-          setConfigured(!!store.snapshot().platformOrigin);
+          configured = !!store.snapshot().platformOrigin;
           const unwatchAdmission = store.subscribe(
             async (next) => {
-              if (profileOwner === owner) setConfigured(!!next.platformOrigin);
+              if (profileOwner === owner) configured = !!next.platformOrigin;
             },
             async (next) => {
               if (
                 profileOwner === owner &&
                 next.platformOrigin !== store.snapshot().platformOrigin
               )
-                setConfigured(true);
+                configured = true;
             },
           );
           profileCtx.effect(
