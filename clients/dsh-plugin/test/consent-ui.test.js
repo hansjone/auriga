@@ -128,9 +128,9 @@ async function fixture(api, locale = 'zh', http) {
     effects = [];
     return component(props);
   };
-  const settings = shallow(slots.get('settings.section'));
+  const settings = shallow(slots.get('main'));
   const section = all(settings).find((n) => n.type?.name === 'ConsentSection');
-  assert.ok(section, 'native settings includes consent component');
+  assert.ok(section, 'native shell includes shared consent component');
   values = [];
   effects = [];
   const render = async (settings = false) => {
@@ -212,41 +212,51 @@ test('malformed consent snapshots leave settings unavailable without crashing th
   }
 });
 
-test('native inbox HTTP bridge fetches a fresh CSRF and sends only the user choice', async () => {
-  const state = data();
-  const requests = [];
-  const f = await fixture(undefined, 'zh', async (url, init) => {
-    requests.push({ url: String(url), init });
-    let body = state;
-    if (String(url).endsWith('/status'))
-      body = { loggedIn: true, csrf: 'fresh-native-csrf' };
-    if (String(url).endsWith('/decide')) {
-      body = { ok: true };
-      state.pending = [];
-    }
-    return { ok: true, json: async () => body };
-  });
-  try {
-    const tree = await f.render();
-    const allow = all(tree).find(
-      (n) => n.type === 'button' && text(n) === '允许本次',
-    );
-    await allow.props.onClick();
-    const request = requests.find((r) => r.url.endsWith('/decide'));
-    assert.equal(request.init.method, 'POST');
-    assert.equal(request.init.credentials, 'same-origin');
-    assert.equal(request.init.headers['X-Auriga-CSRF'], 'fresh-native-csrf');
-    assert.deepEqual(Object.keys(JSON.parse(request.init.body)).sort(), [
-      'choice',
-      'expectedRevision',
-      'layer',
-      'requestId',
-    ]);
-    assert.ok(requests.some((r) => r.url.endsWith('/status')));
-  } finally {
-    f.close();
-  }
-});
+for (const managed of [false, true])
+  test(
+    'native inbox HTTP bridge uses actual CSRF policy and only the user choice: managed=' +
+      managed,
+    async () => {
+      const state = data();
+      const requests = [];
+      const f = await fixture(undefined, 'zh', async (url, init) => {
+        requests.push({ url: String(url), init });
+        let body = state;
+        if (String(url).endsWith('/status'))
+          body = managed
+            ? { loggedIn: true, mode: 'managed' }
+            : { loggedIn: true, csrf: 'fresh-native-csrf' };
+        if (String(url).endsWith('/decide')) {
+          body = { ok: true };
+          state.pending = [];
+        }
+        return { ok: true, json: async () => body };
+      });
+      try {
+        const tree = await f.render();
+        const allow = all(tree).find(
+          (n) => n.type === 'button' && text(n) === '允许本次',
+        );
+        await allow.props.onClick();
+        const request = requests.find((r) => r.url.endsWith('/decide'));
+        assert.equal(request.init.method, 'POST');
+        assert.equal(request.init.credentials, 'same-origin');
+        assert.equal(
+          request.init.headers['X-Auriga-CSRF'],
+          managed ? undefined : 'fresh-native-csrf',
+        );
+        assert.deepEqual(Object.keys(JSON.parse(request.init.body)).sort(), [
+          'choice',
+          'expectedRevision',
+          'layer',
+          'requestId',
+        ]);
+        assert.ok(requests.some((r) => r.url.endsWith('/status')));
+      } finally {
+        f.close();
+      }
+    },
+  );
 test('native inbox keeps layer choices separate and treats malicious body as text', async () => {
   const state = data(),
     calls = [];

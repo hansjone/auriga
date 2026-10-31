@@ -1,103 +1,133 @@
-/* global AbortSignal */
-/** Native React content loaded from the plugin's authenticated asset route. */
+/* global AbortSignal, document */
+/** Native React settings. Status is supplied by the authenticated runtime. */
 const messages = {
   zh: {
-    connection: '总部连接',
+    platform: '平台',
     address: '平台地址',
     save: '保存',
     test: '测试连接',
-    saved: '设置已保存',
-    reachable: '平台接口可达；不代表已登录或模型已授权。',
-    unconfigured: '尚未配置平台连接',
-    connected: 'Team 已连接；模型授权需单独确认。',
-    disconnected: '通信未就绪；身份登录与非通信功能可继续使用。',
-    pending: '设置已保存，但连接暂未生效，请确认平台可用后重新保存。',
-    reauthenticate: '平台连接已生效，请重新登录。',
+    saved: '已保存',
+    reachable: '平台可达',
+    unconfigured: '未配置平台',
+    configure: '填写平台地址',
     login: '登录',
-    security: '账号与安全',
-    identity: '当前身份',
+    logout: '退出登录',
+    account: '账号',
+    identity: '成员',
+    memberId: '成员 ID',
     device: '设备名',
     loginTime: '登录时间',
-    missing: '当前登录接口未提供',
+    missing: '当前凭据未提供',
     signedOut: '未登录',
-    statusUnavailable: '登录状态暂时无法读取，请重试。',
-    refresh: '刷新设置与登录状态',
-    logout: '退出本机登录',
-    portal: '在门户管理账号安全',
-    tools: '工具',
+    local: '本地可正常使用，平台功能暂停',
+    managed: '系统托管',
+    networkTitle: '消息网络',
+    networkReady: '就绪',
+    networkPending: '未就绪',
+    network: '总部不可达',
+    recovering: '总部不可达，联网后自动恢复',
+    unauthorized: '未登录',
+    unconfiguredNetwork: '未配置消息网络',
+    joining: '正在连接',
+    model: '模型',
+    modelReady: '中转站可用',
+    modelMissing: '中转站未就绪',
+    refresh: '刷新状态',
+    diagnostics: '诊断',
+    protocol: '协议版本',
+    version: '插件版本',
+    source: '界面来源',
+    endpoint: '本机端点',
+    received: '已收消息',
+    reason: '原因',
     receive: '接收消息',
-    receiveHint:
-      '仅列出已登记的在线普通会话；默认关闭，开启后允许同租户成员向该会话发送消息。',
-    receiveEmpty: '暂无已登记会话，请先在会话中执行 auriga_network_join。',
-    receivePending: '设置待确认，请重试相同操作。',
-    receiveRetry: '重试接收设置',
-    deployment: '默认部署位置',
-    local: '本机',
-    cloud: '云端',
-    toolsHint: '已保存默认位置；工具创建页尚未读取此设置。',
-    unavailable: '设置服务不可用，请重试。',
-    auth: '登录状态不可用，请重新登录。',
-    forbidden: '无权执行此操作。',
-    invalidSettings: '设置无效。',
-    invalidOrigin: '请填写纯平台地址，不含路径、凭据、查询或片段。',
-    httpsRequired: '请使用 HTTPS；HTTP 仅允许回环或明确的内网 IP。',
-    network: '网络、DNS 或 TLS 连接失败，或平台返回了重定向。',
-    timeout: '连接测试超时。',
-    invalidPlatform: '响应不是有效的平台 JWKS 接口。',
-    http: '平台接口返回 HTTP ',
+    receiveHint: '开启后，此会话可接收成员消息。',
+    receiveEmpty: '暂无已登记会话',
+    receivePending: '设置待确认',
+    receiveRetry: '重试',
+    unavailable: '状态服务不可用',
+    auth: 'DSH 主人认证已失效',
+    forbidden: 'DSH 拒绝访问',
+    invalidState: '状态响应格式无效',
+    statusHttp: '状态接口返回 HTTP ',
+    timeout: '状态读取超时',
+    loadNetwork: '无法连接本机状态服务',
     busy: '正在处理…',
+    pending: '平台连接未生效',
+    invalidSettings: '设置无效',
+    invalidOrigin: '请输入纯平台地址',
+    httpsRequired: '请使用 HTTPS',
+    invalidPlatform: '此地址不是 Auriga 平台',
+    http: '平台返回 HTTP ',
+    tools: '平台工具',
+    managedIdentity: '托管成员凭据未提供姓名',
+    notProvided: '未提供',
+    expired: '平台登录已过期',
+    retry: '重试',
   },
   en: {
-    connection: 'Platform connection',
+    platform: 'Platform',
     address: 'Platform address',
     save: 'Save',
     test: 'Test connection',
-    saved: 'Settings saved',
-    reachable:
-      'Platform API reachable; sign-in and model authorization are separate.',
-    unconfigured: 'Platform connection is not configured',
-    connected: 'Team connected; model authorization is separate.',
-    disconnected:
-      'Communication is not ready; sign-in and non-communication features remain available.',
-    pending:
-      'Settings saved, but the connection could not be applied. Check the platform and save again.',
-    reauthenticate: 'Platform settings applied. Please sign in again.',
+    saved: 'Saved',
+    reachable: 'Platform reachable',
+    unconfigured: 'Platform not configured',
+    configure: 'Enter platform address',
     login: 'Sign in',
-    security: 'Account and security',
-    identity: 'Current identity',
+    logout: 'Sign out',
+    account: 'Account',
+    identity: 'Member',
+    memberId: 'Member ID',
     device: 'Device name',
     loginTime: 'Sign-in time',
-    missing: 'Not provided by the current sign-in API',
+    missing: 'Not supplied by current credential',
     signedOut: 'Signed out',
-    statusUnavailable: 'Sign-in status is unavailable. Please retry.',
-    refresh: 'Refresh settings and sign-in status',
-    logout: 'Sign out locally',
-    portal: 'Manage account security in portal',
-    tools: 'Tools',
+    local: 'Local DSH available; platform features paused',
+    managed: 'System managed',
+    networkTitle: 'Message network',
+    networkReady: 'Ready',
+    networkPending: 'Not ready',
+    network: 'Platform unreachable',
+    recovering: 'Platform unreachable; reconnects automatically',
+    unauthorized: 'Signed out',
+    unconfiguredNetwork: 'Message network not configured',
+    joining: 'Connecting',
+    model: 'Models',
+    modelReady: 'Relay available',
+    modelMissing: 'Relay not ready',
+    refresh: 'Refresh status',
+    diagnostics: 'Diagnostics',
+    protocol: 'Protocol version',
+    version: 'Plugin version',
+    source: 'UI source',
+    endpoint: 'Local endpoint',
+    received: 'Received messages',
+    reason: 'Reason',
     receive: 'Receive messages',
-    receiveHint:
-      'Registered live sessions only. Off by default; enabling allows messages from members of the same tenant.',
-    receiveEmpty:
-      'No registered sessions. Run auriga_network_join in a session first.',
-    receivePending: 'Setting awaiting confirmation. Retry the same operation.',
-    receiveRetry: 'Retry receive setting',
-    deployment: 'Default deployment',
-    local: 'Local',
-    cloud: 'Cloud',
-    toolsHint: 'Preference saved; tool creation does not consume it yet.',
-    unavailable: 'Settings service unavailable. Please retry.',
-    auth: 'Sign-in unavailable. Please sign in again.',
-    forbidden: 'Permission denied.',
-    invalidSettings: 'Invalid settings.',
-    invalidOrigin:
-      'Enter a platform origin without a path, credentials, query or fragment.',
-    httpsRequired:
-      'HTTPS required; HTTP only allows loopback or explicit private IPs.',
-    network: 'Network, DNS or TLS failure, or a refused redirect.',
-    timeout: 'Connection test timed out.',
-    invalidPlatform: 'Response is not a valid platform JWKS endpoint.',
-    http: 'Platform API returned HTTP ',
+    receiveHint: 'Allow member messages to this session.',
+    receiveEmpty: 'No registered sessions',
+    receivePending: 'Awaiting confirmation',
+    receiveRetry: 'Retry',
+    unavailable: 'Status service unavailable',
+    auth: 'DSH owner authentication expired',
+    forbidden: 'DSH denied access',
+    invalidState: 'Invalid status response',
+    statusHttp: 'Status endpoint returned HTTP ',
+    timeout: 'Status read timed out',
+    loadNetwork: 'Cannot reach local status service',
     busy: 'Working…',
+    pending: 'Platform connection not applied',
+    invalidSettings: 'Invalid settings',
+    invalidOrigin: 'Enter a platform origin',
+    httpsRequired: 'HTTPS required',
+    invalidPlatform: 'Not an Auriga platform',
+    http: 'Platform returned HTTP ',
+    tools: 'Platform tools',
+    managedIdentity: 'Managed credential does not supply a member name',
+    notProvided: 'Not supplied',
+    expired: 'Platform sign-in expired',
+    retry: 'Retry',
   },
 };
 
@@ -107,7 +137,7 @@ export function createSettingsView(
   { localURL, fetcher = fetch, navigate },
 ) {
   const h = React.createElement;
-  function ReceiveSettings(
+  function useReceiveSettings(
     /** @type {{t:typeof messages.zh,account:any,revision:number}} */ {
       t,
       account,
@@ -123,7 +153,6 @@ export function createSettingsView(
     );
     React.useEffect(() => {
       let live = true;
-      setSessions(null);
       if (account?.loggedIn)
         void fetcher(localURL('auriga/local-login/messaging/snapshot'), {
           credentials: 'same-origin',
@@ -161,7 +190,7 @@ export function createSettingsView(
             signal: AbortSignal.timeout(15000),
             headers: {
               'content-type': 'application/json',
-              'x-auriga-csrf': account.csrf,
+              ...(account.csrf ? { 'x-auriga-csrf': account.csrf } : {}),
             },
             body: JSON.stringify({ local: session.local, enabled }),
           },
@@ -208,8 +237,11 @@ export function createSettingsView(
       error && h('p', { role: 'status' }, error),
     );
   }
-  /** @param {string} path @param {unknown} [body] */
-  async function call(path, body) {
+
+  async function call(
+    /** @type {string} */ path,
+    /** @type {any} */ body = undefined,
+  ) {
     const response = await fetcher(localURL(path), {
       method: body === undefined ? 'GET' : 'POST',
       credentials: 'same-origin',
@@ -222,75 +254,106 @@ export function createSettingsView(
           : { 'content-type': 'application/json', 'X-Auriga-Settings': '1' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const data = await response.json();
     if (!response.ok)
       throw new Error(
         response.status === 401
           ? 'auth'
           : response.status === 403
             ? 'forbidden'
-            : (data.reason ?? 'unavailable'),
+            : 'statusHttp:' + response.status,
       );
-    return data;
+    try {
+      return await response.json();
+    } catch {
+      throw new Error('invalidState');
+    }
   }
-  async function readState() {
-    return Promise.all([
-      call('auriga/settings/state'),
-      call('auriga/local-login/status')
-        .then((identity) => {
-          if (
-            !identity ||
-            typeof identity.loggedIn !== 'boolean' ||
-            (identity.loggedIn &&
-              (typeof identity.connected !== 'boolean' ||
-                typeof identity.account?.subject !== 'string' ||
-                !identity.account.subject))
-          )
-            throw new Error('unavailable');
-          return identity;
-        })
-        .catch(() => null),
-    ]);
-  }
-  return function SettingsView(/** @type {{locale:string}} */ { locale }) {
+  return function SettingsView(
+    /** @type {{locale:string,boot?:any,consent?:any}} */ {
+      locale,
+      boot,
+      consent,
+    },
+  ) {
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];
-    const [state, setState] = React.useState(null);
-    const [account, setAccount] = React.useState(null);
-    const [address, setAddress] = React.useState('');
-    const [deployment, setDeployment] = React.useState('cloud');
-    const [notice, setNotice] = React.useState('');
+    const [state, setState] = React.useState(null),
+      [account, setAccount] = React.useState(null);
+    const [address, setAddress] = React.useState(''),
+      [notice, setNotice] = React.useState(''),
+      [statusError, setStatusError] = React.useState('');
     const [busy, setBusy] = React.useState(false);
     const [revision, reload] = React.useReducer(
       (/** @type {number} */ n) => n + 1,
       0,
     );
     const explain = (/** @type {any} */ error) =>
-      t[/** @type {keyof typeof t} */ (error?.message)] ?? t.unavailable;
-    const publish = (/** @type {any} */ next, /** @type {any} */ identity) => {
+      error.message?.startsWith('statusHttp:')
+        ? t.statusHttp + error.message.split(':')[1]
+        : error.name === 'TimeoutError'
+          ? t.timeout
+          : error instanceof TypeError
+            ? t.loadNetwork
+            : (t[/** @type {keyof typeof t} */ (error.message)] ??
+              t.unavailable);
+    const readState = async () => {
+      const next = await call('auriga/settings/state');
       setState(next);
-      setAddress(next.platformOrigin);
-      setDeployment(next.deployment);
-      setAccount(identity);
+      setAddress(next.platformOrigin ?? '');
+      try {
+        const identity = await call('auriga/local-login/status');
+        if (
+          typeof identity?.loggedIn !== 'boolean' ||
+          (identity.loggedIn && typeof identity.account?.subject !== 'string')
+        )
+          throw new Error('invalidState');
+        setAccount(identity);
+        setStatusError('');
+      } catch (error) {
+        setAccount(null);
+        setStatusError(explain(error));
+      }
     };
     React.useEffect(() => {
       let live = true;
-      setBusy(true);
-      void readState()
-        .then(([next, identity]) => {
+      let first = true;
+      const update = async () => {
+        // Each read owns its cancellation guard; unmounted windows never publish.
+        try {
+          const next = await call('auriga/settings/state');
+          const identity = await call('auriga/local-login/status').catch(
+            (error) => ({ readError: explain(error) }),
+          );
           if (!live) return;
-          publish(next, identity);
-          setNotice('');
-        })
-        .catch((error) => {
-          if (live) setNotice(explain(error));
-        })
-        .finally(() => {
-          if (live) setBusy(false);
-        });
+          setState(next);
+          if (first) setAddress(next.platformOrigin ?? '');
+          first = false;
+          if (
+            identity.readError ||
+            typeof identity.loggedIn !== 'boolean' ||
+            (identity.loggedIn && typeof identity.account?.subject !== 'string')
+          ) {
+            setAccount(null);
+            setStatusError(identity.readError ?? t.invalidState);
+          } else {
+            setAccount(identity);
+            setStatusError('');
+          }
+        } catch (error) {
+          if (live) {
+            setAccount(null);
+            setStatusError(explain(error));
+          }
+        }
+      };
+      void update();
+      const timer = setInterval(() => {
+        void update();
+      }, 5000);
       return () => {
         live = false;
+        clearInterval(timer);
       };
-    }, [revision]);
+    }, [revision, locale]);
     const run = async (/** @type {()=>Promise<void>} */ action) => {
       setBusy(true);
       setNotice('');
@@ -302,205 +365,244 @@ export function createSettingsView(
         setBusy(false);
       }
     };
+    const managed = state?.mode === 'managed' || boot?.mode === 'managed';
+    const configured = managed || !!state?.platformOrigin;
+    const loggedIn = account?.loggedIn === true;
+    const recovering = !loggedIn && account?.resumeAvailable === true;
+    const network = account?.network;
+    const ready = network?.connected === true;
+    const name =
+      account?.account?.displayName ??
+      account?.account?.subject ??
+      t.notProvided;
+    const reason = !loggedIn
+      ? recovering
+        ? t.recovering
+        : account?.models?.reauthenticationRequired
+          ? t.expired
+          : t.signedOut
+      : network?.state === 'unconfigured' ||
+          network?.reason === 'configuration_missing'
+        ? t.unconfiguredNetwork
+        : ['connecting', 'registering', 'joining'].includes(network?.state)
+          ? t.joining
+          : account?.communication === 'unavailable' ||
+              ['unavailable', 'reconnecting', 'disconnected'].includes(
+                network?.state,
+              )
+            ? t.network
+            : network?.reason
+              ? network.reason
+              : t.networkPending;
+    const networkText = ready
+      ? t.networkReady
+      : t.networkPending + ' · ' + reason;
+    const modelText = account?.models?.available
+      ? t.modelReady
+      : t.modelMissing;
+    const summary =
+      statusError ||
+      (!configured
+        ? t.unconfigured
+        : !loggedIn
+          ? reason
+          : managed
+            ? t.managed +
+              ' · ' +
+              t.identity +
+              ' ' +
+              name +
+              ' · ' +
+              t.networkTitle +
+              ' ' +
+              networkText +
+              ' · ' +
+              t.model +
+              ' ' +
+              modelText
+            : name + ' · ' + t.networkTitle + ' ' + networkText);
     const row = (/** @type {string} */ label, /** @type {any} */ value) =>
-      h('div', { className: 'auriga-setting' }, h('span', null, label), value);
-    const controlStyle = {
-      font: 'inherit',
-      color: 'inherit',
-      background: 'var(--dsw-alias-bg-layer-1,transparent)',
-      border: '1px solid var(--dsw-alias-border-l2,currentColor)',
-      borderRadius: 6,
-      padding: 6,
-      maxWidth: '100%',
-    };
+      h(
+        'div',
+        { className: 'auriga-setting' },
+        h('span', null, label),
+        h('span', { className: 'auriga-setting-value' }, value),
+      );
+    const button = (
+      /** @type {string} */ label,
+      /** @type {()=>any} */ action,
+      disabled = false,
+    ) =>
+      h(
+        'button',
+        { type: 'button', disabled: busy || disabled, onClick: action },
+        label,
+      );
+    const enter = () => navigate(localURL('auriga/local-login'));
+    const action = statusError
+      ? button(t.retry, reload)
+      : managed
+        ? button(t.refresh, reload)
+        : !configured
+          ? button(t.configure, () =>
+              document
+                .querySelector(
+                  /** @type {string} */ ('#auriga-platform-address'),
+                )
+                ?.scrollIntoView({ block: 'center' }),
+            )
+          : recovering
+            ? button(t.retry, reload)
+            : !loggedIn
+              ? button(t.login, enter)
+              : button(t.refresh, reload);
+    const logout = () => navigate(localURL('auriga/local-login') + '?logout=1');
+    const receiveControls = useReceiveSettings({ t, account, revision });
     return h(
       'div',
-      null,
-      h('h3', null, t.connection),
+      { className: 'auriga-settings-content' },
       h(
-        'p',
-        { role: 'status' },
-        !state?.activeOrigin
-          ? t.unconfigured
-          : account === null
-            ? t.statusUnavailable
-            : account?.loggedIn === true && account?.connected === true
-              ? t.connected
-              : t.disconnected,
+        'section',
+        { className: 'auriga-status-card', 'aria-label': 'Auriga status' },
+        h('p', { role: 'status' }, summary),
+        !managed && (!loggedIn || !ready) && h('p', null, t.local),
+        action,
       ),
-      row(
-        t.address,
-        h('input', {
-          'aria-label': t.address,
-          value: address,
-          disabled: busy || !state,
-          style: controlStyle,
-          onChange: (/** @type {any} */ event) =>
-            setAddress(event.target.value),
-        }),
-      ),
-      h(
-        'button',
-        {
-          type: 'button',
-          disabled: busy || !state || !address.trim(),
-          onClick: () =>
-            run(async () => {
-              const result = await call('auriga/settings/test', {
-                platformOrigin: address,
-              });
-              setNotice(
-                result.reachable
-                  ? t.reachable
-                  : result.reason === 'http'
-                    ? t.http + result.status
-                    : (t[/** @type {keyof typeof t} */ (result.reason)] ??
-                      t.unavailable),
-              );
+      !managed &&
+        h(
+          'section',
+          { 'aria-label': t.platform },
+          h('h3', null, t.platform),
+          h(
+            'label',
+            { className: 'auriga-setting' },
+            h('span', null, t.address),
+            h('input', {
+              id: 'auriga-platform-address',
+              'aria-label': t.address,
+              value: address,
+              disabled: busy || !state,
+              onChange: (/** @type {any} */ event) =>
+                setAddress(event.target.value),
             }),
-        },
-        t.test,
-      ),
-      state &&
-        state.platformOrigin !== state.activeOrigin &&
-        h('p', null, t.pending),
-      h(ReceiveSettings, { t, account, revision }),
-      h('h3', null, t.security),
-      row(
-        t.identity,
-        account === null
-          ? t.statusUnavailable
-          : account?.loggedIn === true
-            ? (account.account?.subject ?? t.missing)
-            : t.signedOut,
-      ),
-      state?.activeOrigin &&
-        account?.loggedIn === false &&
-        h(
-          'button',
-          {
-            type: 'button',
-            disabled: busy,
-            onClick: () => navigate(localURL('auriga/local-login')),
-          },
-          t.login,
+          ),
+          h(
+            'div',
+            { className: 'auriga-setting-actions' },
+            button(
+              t.test,
+              () =>
+                run(async () => {
+                  const result = await call('auriga/settings/test', {
+                    platformOrigin: address,
+                  });
+                  setNotice(
+                    result.reachable
+                      ? t.reachable
+                      : result.reason === 'http'
+                        ? t.http + result.status
+                        : (t[/** @type {keyof typeof t} */ (result.reason)] ??
+                          t.unavailable),
+                  );
+                }),
+              !address.trim(),
+            ),
+            button(
+              t.save,
+              () =>
+                run(async () => {
+                  try {
+                    await call('auriga/settings/save', {
+                      platformOrigin: address,
+                      deployment: state?.deployment ?? 'local',
+                    });
+                  } finally {
+                    await readState();
+                  }
+                  setNotice(t.saved);
+                }),
+              !state,
+            ),
+          ),
+          state &&
+            state.platformOrigin !== state.activeOrigin &&
+            h('p', null, t.pending),
         ),
-      row(
-        t.device,
-        account?.loggedIn === true
-          ? (account.deviceName ?? state?.deviceName ?? t.missing)
-          : '—',
-      ),
-      row(
-        t.loginTime,
-        account?.loggedIn === true ? (account.loginTime ?? t.missing) : '—',
-      ),
-      account?.loggedIn === true &&
-        h(
-          'button',
-          {
-            type: 'button',
-            disabled: busy,
-            onClick: () =>
-              run(async () => {
-                const fresh = await call('auriga/local-login/status');
-                const response = await fetcher(
-                  localURL('auriga/local-login/logout'),
-                  {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    redirect: 'error',
-                    headers: {
-                      'content-type': 'application/json',
-                      'X-Auriga-CSRF': fresh.csrf,
-                    },
-                    body: '{}',
-                  },
-                );
-                if (!response.ok) throw new Error('auth');
-                setAccount(null);
-                navigate(localURL('auriga/local-login'));
-              }),
-          },
-          t.logout,
-        ),
-      state?.platformOrigin &&
-        h(
-          'a',
-          {
-            href: state.platformOrigin + '/',
-            target: '_blank',
-            rel: 'noopener noreferrer',
-          },
-          t.portal,
-        ),
-      h('h3', null, t.tools),
-      row(
-        t.deployment,
-        h(
-          'select',
-          {
-            'aria-label': t.deployment,
-            value: deployment,
-            disabled: busy || !state,
-            style: controlStyle,
-            onChange: (/** @type {any} */ event) =>
-              setDeployment(event.target.value),
-          },
-          h('option', { value: 'local' }, t.local),
-          h('option', { value: 'cloud' }, t.cloud),
-        ),
-      ),
-      h('p', null, t.toolsHint),
       h(
-        'button',
-        {
-          type: 'button',
-          disabled: busy || !state,
-          onClick: () =>
-            run(async () => {
-              try {
-                await call('auriga/settings/save', {
-                  platformOrigin: address,
-                  deployment,
-                });
-                const [next, identity] = await readState();
-                publish(next, identity);
-                const needsLogin =
-                  next.activeOrigin &&
-                  next.platformOrigin === next.activeOrigin &&
-                  identity?.loggedIn === false;
-                setNotice(needsLogin ? t.reauthenticate : t.saved);
-                if (needsLogin) navigate(localURL('auriga/local-login'));
-              } catch (error) {
-                // A failed apply may already have signed out the old platform
-                // and saved the new address. Never keep the old identity/Team
-                // display while fetching authoritative recovery state.
-                setState(null);
-                setAccount(null);
-                try {
-                  const [next, identity] = await readState();
-                  publish(next, identity);
-                } catch {
-                  /* State remains unknown; the refresh control can retry. */
-                }
-                throw error;
-              }
-            }),
-        },
-        t.save,
+        'section',
+        { 'aria-label': t.account },
+        h('h3', null, t.account),
+        row(
+          t.identity,
+          statusError || (loggedIn || recovering ? name : t.signedOut),
+        ),
+        loggedIn &&
+          account?.account?.displayName === undefined &&
+          row(t.memberId, account.account.subject),
+        managed
+          ? h(
+              'p',
+              null,
+              t.managed +
+                (account?.account?.displayName
+                  ? ''
+                  : ' · ' + t.managedIdentity),
+            )
+          : h(
+              'div',
+              null,
+              row(
+                t.device,
+                loggedIn || recovering
+                  ? (account.deviceName ?? state?.deviceName ?? t.missing)
+                  : t.signedOut,
+              ),
+              row(
+                t.loginTime,
+                loggedIn || recovering
+                  ? account.loginTime
+                    ? new Date(account.loginTime).toLocaleString(locale)
+                    : t.missing
+                  : t.signedOut,
+              ),
+              !statusError &&
+                (loggedIn
+                  ? button(t.logout, logout)
+                  : configured && !recovering
+                    ? button(t.login, enter)
+                    : null),
+            ),
       ),
       h(
-        'button',
-        {
-          type: 'button',
-          disabled: busy,
-          onClick: reload,
-          'aria-label': t.refresh,
-        },
-        '↻',
+        'section',
+        { 'aria-label': t.networkTitle },
+        h('h3', null, t.networkTitle),
+        row(t.networkTitle, statusError || networkText),
+        row(
+          t.endpoint,
+          network?.address ?? account?.connection?.endpointId ?? t.notProvided,
+        ),
+        row(
+          t.received,
+          String(account?.connection?.received ?? network?.received ?? 0),
+        ),
+        loggedIn && receiveControls,
+        loggedIn && consent,
       ),
-      h('p', { role: 'status', 'aria-live': 'polite' }, busy ? t.busy : notice),
+      h(
+        'details',
+        null,
+        h('summary', null, t.diagnostics),
+        row(t.protocol, String(boot?.protocol ?? t.notProvided)),
+        row(t.version, boot?.pluginVersion ?? t.notProvided),
+        row(t.source, boot?.source ?? t.notProvided),
+        row(t.model, modelText),
+        row(
+          t.reason,
+          network?.reason ?? account?.communication ?? t.notProvided,
+        ),
+      ),
+      notice && h('p', { role: 'status', 'aria-live': 'polite' }, notice),
     );
   };
 }

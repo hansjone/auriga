@@ -306,7 +306,7 @@ test('public host adapter owns a profile-scoped route and disposal', async () =>
     assert.equal((await send(route.handler, denied)).status, 403);
     assert.equal(
       JSON.parse((await send(route.handler, request('state'))).body).deviceName,
-      'Auriga DSH',
+      null,
     );
     assert.equal(
       JSON.parse((await send(route.handler, request('state'))).body)

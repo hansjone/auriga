@@ -1,3 +1,4 @@
+import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runtimePeer } from './local-runtime-peer.js';
@@ -8,22 +9,27 @@ test('admitted owner resumes without plugin cookies; logout and expiry fence nat
   const peer = { principal: { kind: 'owner' } };
   const request = runtime.nativeRequest(peer);
   assert.equal(request.headers.cookie, undefined);
-  const prepared = runtime.prepare(request);
+  const prepared = runtime.prepare(ownerRequest(runtime, request));
   assert.equal(prepared.setCookie, undefined);
-  assert.equal(prepared.body.loggedIn, false);
-  const loggedIn = await runtime.login(request, { action: 'resume' });
-  assert.equal(loggedIn.setCookie, undefined);
-  assert.equal(runtime.resolveNative(peer).subject, credential.claims.sub);
+  assert.equal(prepared.body.loggedIn, true);
+
+  assert.equal(
+    runtime.resolve(runtime.nativeRequest(peer)).subject,
+    credential.claims.sub,
+  );
   const business = { headers: {} };
   assert.ok(runtime.bindNativeRequest(peer, business));
   assert.equal(runtime.status(business).loggedIn, true);
   const other = { principal: { kind: 'owner' } };
-  assert.equal(runtime.resolveNative(other), null);
+  assert.equal(
+    runtime.resolve(runtime.nativeRequest(other)).subject,
+    credential.claims.sub,
+  );
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 1800001 });
-  assert.equal(runtime.resolveNative(peer), null);
+  assert.equal(runtime.resolve(runtime.nativeRequest(peer)), null);
   assert.equal(runtime.bindNativeRequest(peer, { headers: {} }), null);
   await runtime.logout(request);
-  assert.equal(runtime.resolveNative(peer), null);
+  assert.equal(runtime.resolve(runtime.nativeRequest(peer)), null);
   assert.equal(runtime.vault.snapshot().credential, null);
 });
 
@@ -33,7 +39,7 @@ test('native RPC bootstrap needs a real admitted Peer; browser native-looking he
   const connection = {
     admit: (req) =>
       req.headers.cookie === 'native=valid' ? { peer } : { rejection: 401 },
-    authorizeIndex: () => true,
+    authorizeIndex: () => false,
     isTrusted: () => true,
   };
   const runtime = {
@@ -67,9 +73,8 @@ test('native RPC bootstrap needs a real admitted Peer; browser native-looking he
       peer,
     );
     assert.equal(
-      connection.admit(request('native=valid', '/api/session/create'))
-        .rejection,
-      403,
+      connection.admit(request('native=valid', '/api/session/create')).peer,
+      peer,
     );
     signedIn = true;
     assert.equal(
@@ -78,9 +83,8 @@ test('native RPC bootstrap needs a real admitted Peer; browser native-looking he
     );
     signedIn = false;
     assert.equal(
-      connection.admit(request('native=valid', '/api/session/create'))
-        .rejection,
-      403,
+      connection.admit(request('native=valid', '/api/session/create')).peer,
+      peer,
     );
   } finally {
     admission.dispose();
