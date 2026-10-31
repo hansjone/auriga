@@ -41,6 +41,11 @@ info "starting project $AURIGA_NAS_PROJECT (no build, no pull)"
 # Fail closed, including when Compose does not support --pull never.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-build --pull never
 
+# Compose may replace edge while leaving an unchanged agent running. Its old
+# instance-network endpoints disappear with that edge. Agent startup recovers
+# only its verified instance bridges, preserving the existing DSH processes.
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" restart --no-deps agent
+
 info "start requested; use status.sh / smoke.sh to verify"
 info "after first seed start, set AURIGA_PLATFORM_SEED=false in stack.env and re-render"
 

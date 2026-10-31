@@ -9,6 +9,8 @@ import { createDeviceProvider } from './device-provider.js';
 import { createNetworkLifecycle } from './lifecycle.js';
 import { networkIsolation } from './isolation.js';
 import { parseStrictJson } from './trust/jcs.js';
+import { deviceMemberName } from '../local/member-profile.js';
+/* global AbortSignal */
 
 /** One managed credential owns the same lifecycle/provider/runtime as native login.
  * Only renderer-owned file material can select identity or installation pins.
@@ -34,6 +36,9 @@ export function createManagedNetwork(options) {
   let refreshing;
   let retryAt = 0;
   let failures = 0;
+  /** @type {string|undefined} */
+  let displayName;
+  let profileRetryAt = 0;
   /** @type {(renew?:boolean)=>Promise<{accessToken:string,claims:any}>} */
   let getDevice = async () => {
     throw new Error('managed credential unavailable');
@@ -103,6 +108,8 @@ export function createManagedNetwork(options) {
   async function retire() {
     generation++;
     access = undefined;
+    displayName = undefined;
+    profileRetryAt = 0;
     const previous = lifecycle;
     lifecycle = undefined;
     detach = undefined;
@@ -234,6 +241,22 @@ export function createManagedNetwork(options) {
           failures = 0;
           retryAt = 0;
         }
+        if (Date.now() >= profileRetryAt && access) {
+          profileRetryAt = Date.now() + 60000;
+          const expected = generation;
+          const { config } = validate(next);
+          const platform = (options.createPlatform ?? createPlatform)(config);
+          void deviceMemberName(
+            platform,
+            access.accessToken,
+            options.ownerId,
+            AbortSignal.timeout(4000),
+          )
+            .then((name) => {
+              if (!closed && expected === generation) displayName = name;
+            })
+            .catch(() => {});
+        }
       } catch {
         lifecycle?.logout();
         access = undefined;
@@ -250,6 +273,12 @@ export function createManagedNetwork(options) {
   }
 
   return {
+    get account() {
+      return {
+        subject: options.ownerId,
+        ...(displayName ? { displayName } : {}),
+      };
+    },
     refresh,
     start() {
       if (timer || closed) return;

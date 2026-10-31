@@ -26,8 +26,10 @@ refresh，最后才发布 access。AI access 只留内存，不覆盖有效平�
 
 `installation.js` 管注册/注销及缺能力诊断，退出/吊销/身份切换/卸载清缓存并取消流；
 每条流保留固定到期时刻，新票不延长旧流。仅使用当前安装可信 origin 和同源
-`/ai/v1`，新保存的平台设置不迁移旧凭据。managed 缺专有实例 socket 时诊断
-`managed_socket_unavailable`，不以公网 device 或实例令牌替代。
+`/ai/v1`，新保存的平台设置不迁移旧凭据。managed 使用 renderer 安装的原生
+`auriga-managed` provider；`managed-status.js` 读取绑定当前租户/主人/实例的私有模型文件，
+同时核对原生 provider 和携该专用模型凭据在线读取的目录，交集非空才报可用。
+文件缺失、权限不安全、provider 缺失、目录拒绝或不可达均失败关闭，不以 device 或实例令牌替代。
 
 组合层从 **`@deepseek-ai/dsh-llm` 公开包根**加载模块，将其作为 `hostApi`
 注入，再将公开服务 `ctx.llm` 传给注册入口。工厂继承实际 `LlmAdapter`，

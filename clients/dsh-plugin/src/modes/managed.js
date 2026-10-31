@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { MANAGED_MODEL_STATUS } from '../ai/installation.js';
+import { createManagedModelStatus } from '../ai/managed-status.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
@@ -243,7 +243,7 @@ export async function createManaged(options = {}) {
   const sdk = createAurigaSdk({
     getIdentity: () => ({
       uid: ownerId,
-      displayName: ownerId,
+      displayName: network?.account?.displayName ?? ownerId,
       role: 'owner',
     }),
   });
@@ -254,9 +254,14 @@ export async function createManaged(options = {}) {
   let disposeDoor;
   let disposeHttpGuard;
   let network;
+  let llm;
+  const models = createManagedModelStatus({ tenantId, ownerId, instanceId });
 
   return {
     mode: /** @type {const} */ ('managed'),
+    get modelStatus() {
+      return models.status;
+    },
     protocol: PROTOCOL_VERSION,
     protocolInfo: protocolInfo(),
     instanceId,
@@ -293,6 +298,16 @@ export async function createManaged(options = {}) {
       }
 
       host.ctx = ctx;
+      ctx.inject?.(['llm'], (modelCtx) => {
+        const service = modelCtx.llm;
+        llm = service;
+        modelCtx.effect(
+          () => () => {
+            if (llm === service) llm = undefined;
+          },
+          'auriga-dsh: managed model status',
+        );
+      });
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
         browserOrigin,
       });
@@ -301,7 +316,7 @@ export async function createManaged(options = {}) {
       provideAurigaSdk(ctx, {
         getIdentity: () => ({
           uid: ownerId,
-          displayName: ownerId,
+          displayName: network?.account?.displayName ?? ownerId,
           role: 'owner',
         }),
       });
@@ -365,7 +380,7 @@ export async function createManaged(options = {}) {
             ctx.webServer.register({
               kind: 'prefix',
               path: '/auriga/local-login',
-              handler(req, res) {
+              async handler(req, res) {
                 if (!authorized(req)) {
                   res.writeHead(401, { 'cache-control': 'no-store' });
                   res.end();
@@ -380,6 +395,7 @@ export async function createManaged(options = {}) {
                   req.method === 'GET' &&
                   path === '/auriga/local-login/status'
                 ) {
+                  await models.refresh(llm);
                   res.writeHead(200, {
                     'content-type': 'application/json',
                     'cache-control': 'no-store',
@@ -390,8 +406,8 @@ export async function createManaged(options = {}) {
                       mode: 'managed',
                       loggedIn: true,
                       connected: network?.status?.connected === true,
-                      account: { subject: ownerId },
-                      models: MANAGED_MODEL_STATUS,
+                      account: network?.account ?? { subject: ownerId },
+                      models: models.status,
                       network: network?.status ?? {
                         connected: false,
                         state: 'unavailable',
@@ -464,6 +480,7 @@ export async function createManaged(options = {}) {
       if (options.startHeartbeat !== false) heartbeat.start();
 
       return () => {
+        models.close();
         void network?.close();
         heartbeat.stop();
         disposeActivity?.();
@@ -483,6 +500,7 @@ export async function createManaged(options = {}) {
       guardWorkspaceRegistry(registry, workspaceRoot),
     getManifest,
     close() {
+      models.close();
       void network?.close();
       heartbeat.stop();
       disposeActivity?.();

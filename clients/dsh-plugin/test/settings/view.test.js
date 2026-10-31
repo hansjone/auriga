@@ -91,6 +91,50 @@ const signedIn = {
   network: { connected: true, state: 'ready' },
   models: { available: false },
 };
+for (const managed of [false, true])
+  test(
+    'status fix: missing names and optional facts never produce UUID or empty rows: ' +
+      managed,
+    async () => {
+      const fixture = harness(async (url) =>
+        Response.json(
+          url.endsWith('/status')
+            ? {
+                ...signedIn,
+                account: { subject: '00000000-0000-4000-8000-000000000002' },
+                deviceName: null,
+                loginTime: null,
+                connection: null,
+              }
+            : {
+                ...settings,
+                deviceName: null,
+                mode: managed ? 'managed' : 'connect',
+              },
+        ),
+      );
+      try {
+        fixture.render();
+        await setImmediate();
+        const tree = fixture.render();
+        const content = tree.children
+          .filter((n) => n?.type !== 'details')
+          .map(text)
+          .join(' ');
+        assert.match(
+          text(nodes(tree).find((n) => n.type === 'details')),
+          /00000000/,
+        );
+        assert.doesNotMatch(
+          content,
+          /00000000|设备名|登录时间|本机端点|未提供姓名|当前凭据未提供/,
+        );
+        assert.match(content, /成员/);
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
 for (const locale of ['zh', 'en'])
   test(
     'R4 saved device offline is recovering, not signed out: ' + locale,

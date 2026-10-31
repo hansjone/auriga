@@ -17,7 +17,6 @@ const messages = {
     memberId: '成员 ID',
     device: '设备名',
     loginTime: '登录时间',
-    missing: '当前凭据未提供',
     signedOut: '未登录',
     local: '本地可正常使用，平台功能暂停',
     managed: '系统托管',
@@ -60,7 +59,6 @@ const messages = {
     invalidPlatform: '此地址不是 Auriga 平台',
     http: '平台返回 HTTP ',
     tools: '平台工具',
-    managedIdentity: '托管成员凭据未提供姓名',
     notProvided: '未提供',
     expired: '平台登录已过期',
     retry: '重试',
@@ -81,7 +79,6 @@ const messages = {
     memberId: 'Member ID',
     device: 'Device name',
     loginTime: 'Sign-in time',
-    missing: 'Not supplied by current credential',
     signedOut: 'Signed out',
     local: 'Local DSH available; platform features paused',
     managed: 'System managed',
@@ -124,7 +121,6 @@ const messages = {
     invalidPlatform: 'Not an Auriga platform',
     http: 'Platform returned HTTP ',
     tools: 'Platform tools',
-    managedIdentity: 'Managed credential does not supply a member name',
     notProvided: 'Not supplied',
     expired: 'Platform sign-in expired',
     retry: 'Retry',
@@ -371,10 +367,7 @@ export function createSettingsView(
     const recovering = !loggedIn && account?.resumeAvailable === true;
     const network = account?.network;
     const ready = network?.connected === true;
-    const name =
-      account?.account?.displayName ??
-      account?.account?.subject ??
-      t.notProvided;
+    const name = account?.account?.displayName ?? t.notProvided;
     const reason = !loggedIn
       ? recovering
         ? t.recovering
@@ -536,35 +529,20 @@ export function createSettingsView(
           t.identity,
           statusError || (loggedIn || recovering ? name : t.signedOut),
         ),
-        loggedIn &&
-          account?.account?.displayName === undefined &&
-          row(t.memberId, account.account.subject),
         managed
-          ? h(
-              'p',
-              null,
-              t.managed +
-                (account?.account?.displayName
-                  ? ''
-                  : ' · ' + t.managedIdentity),
-            )
+          ? h('p', null, t.managed)
           : h(
               'div',
               null,
-              row(
-                t.device,
-                loggedIn || recovering
-                  ? (account.deviceName ?? state?.deviceName ?? t.missing)
-                  : t.signedOut,
-              ),
-              row(
-                t.loginTime,
-                loggedIn || recovering
-                  ? account.loginTime
-                    ? new Date(account.loginTime).toLocaleString(locale)
-                    : t.missing
-                  : t.signedOut,
-              ),
+              (loggedIn || recovering) &&
+                (account.deviceName ?? state?.deviceName) &&
+                row(t.device, account.deviceName ?? state?.deviceName),
+              (loggedIn || recovering) &&
+                account.loginTime &&
+                row(
+                  t.loginTime,
+                  new Date(account.loginTime).toLocaleString(locale),
+                ),
               !statusError &&
                 (loggedIn
                   ? button(t.logout, logout)
@@ -578,10 +556,8 @@ export function createSettingsView(
         { 'aria-label': t.networkTitle },
         h('h3', null, t.networkTitle),
         row(t.networkTitle, statusError || networkText),
-        row(
-          t.endpoint,
-          network?.address ?? account?.connection?.endpointId ?? t.notProvided,
-        ),
+        (network?.address ?? account?.connection?.endpointId) &&
+          row(t.endpoint, network?.address ?? account?.connection?.endpointId),
         row(
           t.received,
           String(account?.connection?.received ?? network?.received ?? 0),
@@ -593,6 +569,9 @@ export function createSettingsView(
         'details',
         null,
         h('summary', null, t.diagnostics),
+        (loggedIn || recovering) &&
+          account?.account?.subject &&
+          row(t.memberId, account.account.subject),
         row(t.protocol, String(boot?.protocol ?? t.notProvided)),
         row(t.version, boot?.pluginVersion ?? t.notProvided),
         row(t.source, boot?.source ?? t.notProvided),

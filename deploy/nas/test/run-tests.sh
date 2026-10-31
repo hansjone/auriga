@@ -34,6 +34,9 @@ else fail_msg internal_dynamic_pool_excludes_edge 'dynamic allocation must not c
 if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
 else fail_msg join_node_boundary 'private join token import failed'; fi
 
+if sh "$ROOT/test/start-edge-recovery.sh"; then pass start_edge_recovery
+else fail_msg start_edge_recovery 'public start did not recover instance bridges'; fi
+
 if sh "$ROOT/test/admin-bootstrap.sh"; then pass admin_bootstrap_boundary
 else fail_msg admin_bootstrap_boundary 'local first-admin helper boundary failed'; fi
 

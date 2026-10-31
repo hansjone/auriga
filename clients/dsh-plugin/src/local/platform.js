@@ -210,6 +210,7 @@ export function createPlatform(
             ? new URLSearchParams(body)
             : JSON.stringify(body),
       redirect: 'error',
+      credentials: 'omit',
       signal: signal
         ? AbortSignal.any([
             signal,

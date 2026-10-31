@@ -77,6 +77,8 @@ export async function runtimePeer(t, options = {}) {
         ],
       };
     else if (path === '/oauth2/revoke') data = {};
+    else if (path === '/api/iam/v1/network/systems')
+      data = options.memberDirectory ?? { items: [] };
     else if (path === '/ai/team/node/register')
       data = { endpoint: { id: endpointId } };
     else if (path === '/ai/mcp') {

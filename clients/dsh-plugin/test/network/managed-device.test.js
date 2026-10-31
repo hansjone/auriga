@@ -51,6 +51,10 @@ async function fixture(t, change = (x) => x) {
     createPlatform() {
       return {
         async request(path, options) {
+          if (path.startsWith('/api/iam/v1/network/systems'))
+            return {
+              items: [{ ownerUserId: ids.ownerId, ownerDisplayName: 'Alice' }],
+            };
           calls.push({ path, options });
           await requestHook?.();
           if (invalid)

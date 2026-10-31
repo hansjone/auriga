@@ -116,7 +116,7 @@ async function exerciseRealSettings(delayed) {
           ? {
               loggedIn: true,
               connected: true,
-              account: { subject: 'alice' },
+                account: { subject: 'alice', displayName: 'alice' },
               network: { connected: true, state: 'ready' },
               connection: localBoot(true).connection,
               csrf: 'native-csrf',
