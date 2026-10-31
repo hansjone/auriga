@@ -128,7 +128,7 @@ func TestProductionRuntimeRedeemsAndKicksAfterDeviceRevocation(t *testing.T) {
 	f.mu.Lock()
 	f.active = false
 	f.mu.Unlock()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(20 * time.Second)
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for !nc.IsClosed() {
@@ -214,7 +214,7 @@ func TestProductionRuntimeRejectsAuthGraceBeyondRevocationBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "long-auth.conf")
-	raw = []byte(strings.Replace(string(raw), "timeout: 2", "timeout: 10", 1))
+	raw = []byte(strings.Replace(string(raw), "timeout: 2", "timeout: 41", 1))
 	if err = os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestProductionRuntimeFailsClosedOnIAMOutageAndReclaimsClosedConnections(t *
 	f.mu.Unlock()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(20 * time.Second)
 	for !nc.IsClosed() {
 		select {
 		case <-ticker.C:

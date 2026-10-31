@@ -19,13 +19,9 @@ type MailboxClient struct {
 	timeout time.Duration
 }
 
-// Leave time for the response within the client's five-second attempt.
-// Registration, durable fetch and receipts perform online authority checks and
-// business work independently of the short connection-reconciliation probe.
-const localRegistrationTimeout = 4 * time.Second
-
+// The caller supplies the derived business deadline; parent cancellation wins.
 func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*MailboxClient, error) {
-	if conn == nil || timeout <= 0 || timeout > time.Second {
+	if conn == nil || timeout <= 0 || timeout > 80*time.Second {
 		return nil, errors.New("network: invalid mailbox RPC configuration")
 	}
 	return &MailboxClient{rpc: collab.NewNetworkMailboxServiceClient(conn), timeout: timeout}, nil
@@ -33,22 +29,10 @@ func NewMailboxClient(conn grpc.ClientConnInterface, timeout time.Duration) (*Ma
 
 func (c *MailboxClient) Call(ctx context.Context, b liveBinding, operation string, raw []byte) ([]byte, *AppError) {
 	timeout := c.timeout
-	// READY needs several online authority checks. HEAD and reconciliation
-	// probes retain their configured short budget and capacity occupancy.
-	if operation == "ready" {
-		timeout = time.Second
-	}
-	if operation == "local_register" || operation == "fetch" || operation == "receipt" {
-		timeout = localRegistrationTimeout
-	}
-	if operation == "submit" || receiveOperation(operation) {
-		timeout = 10 * time.Second
-	}
 	if sourceOperation(operation) {
 		if _, ae := decodeSourceRequest(raw, operation); ae != nil {
 			return nil, ae
 		}
-		timeout = sourceRequestTimeout
 	}
 	ctx, cancel := context.WithTimeout(team.WithActor(ctx, &collab.Actor{TenantId: b.Tenant}), timeout)
 	defer cancel()

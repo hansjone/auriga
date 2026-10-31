@@ -53,7 +53,7 @@ func TestLocalRegistrationHasIndependentBoundedBusinessBudget(t *testing.T) {
 			}
 			select {
 			case remaining := <-f.remaining:
-				if remaining <= 0 || remaining > 4*time.Second || parentBudget == 0 && remaining < 3*time.Second {
+				if remaining <= 0 || remaining > 20*time.Second || parentBudget == 0 && remaining < 19*time.Second {
 					t.Fatalf("unexpected registration deadline: %s", remaining)
 				}
 			case <-time.After(time.Second):

@@ -1,3 +1,4 @@
+import { networkTiming } from '../timing.js';
 import { randomBytes } from 'node:crypto';
 import {
   assertReadyResult,
@@ -36,7 +37,7 @@ export async function bootstrapReady({
   transport,
   trust,
   signal,
-  timeoutMs = 5000,
+  timeoutMs = networkTiming.operationMs,
   now = Date.now,
 }) {
   const candidateRegistration = { ...registration };

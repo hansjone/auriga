@@ -165,7 +165,7 @@ for (const [name, respond, phase, code, status] of [
     assert.equal(event.code, code);
     assert.equal(event.http_status, status);
     assert.equal(event.created, null);
-    assert.equal(event.budget_ms, phase === 'register_http' ? 15000 : 0);
+    assert.equal(event.budget_ms, phase === 'register_http' ? 30000 : 0);
     assert.equal(f.calls.length, 1);
   });
 

@@ -17,7 +17,7 @@ import java.util.Set;
  * @param jwkSetUri iam's {@code /oauth2/jwks}; must be https unless it points at a loopback address
  *     (or {@code allowInsecureJwksUri} is set explicitly)
  * @param audience audience every platform token must contain ({@code auriga})
- * @param clockSkew tolerance for exp/nbf (30 seconds)
+ * @param clockSkew tolerance for exp/iat/nbf (60 seconds)
  * @param jwksCacheTtl how long a fetched key set is trusted before re-fetching
  * @param jwksMinRefreshInterval minimum time between re-fetches triggered by unknown key ids
  * @param clock time source
@@ -49,7 +49,9 @@ public record AccessTokenSettings(
                 ? List.of()
                 : acceptedIssuers.stream().filter(value -> !issuer.equals(value)).toList());
     audience = audience == null ? PLATFORM_AUDIENCE : audience;
-    clockSkew = clockSkew == null ? Duration.ofSeconds(30) : clockSkew;
+    clockSkew = clockSkew == null ? Duration.ofSeconds(60) : clockSkew;
+    if (clockSkew.isNegative() || clockSkew.compareTo(Duration.ofSeconds(120)) > 0)
+      throw new IllegalArgumentException("JWT clock skew must be in [0,120s]");
     jwksCacheTtl = jwksCacheTtl == null ? Duration.ofMinutes(5) : jwksCacheTtl;
     jwksMinRefreshInterval =
         jwksMinRefreshInterval == null ? Duration.ofSeconds(30) : jwksMinRefreshInterval;

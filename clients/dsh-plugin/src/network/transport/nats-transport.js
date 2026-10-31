@@ -1,3 +1,4 @@
+import { networkTiming } from '../timing.js';
 import { TransportError } from './errors.js';
 import { NatsLink } from './nats-link.js';
 import { resolveLimits, worstCaseBufferBound } from './limits.js';
@@ -259,7 +260,9 @@ export class NatsTransport {
     );
     this.#refreshTimer.unref?.();
     if (previous && previous !== link) {
-      void previous.drainAndClose(this.#o.drainTimeoutMs ?? 5_000);
+      void previous.drainAndClose(
+        this.#o.drainTimeoutMs ?? networkTiming.authorityMs,
+      );
     }
   }
 

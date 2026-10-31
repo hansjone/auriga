@@ -1126,7 +1126,8 @@ test('missing Host durability leaves strict base READY independent and does not 
 
 for (const event of ['logout', 'disconnect', 'new epoch', 'host unload'])
   test(
-    event + ' immediately unregisters and fences delayed LOCAL_REGISTER',
+    event +
+      ' fences delayed LOCAL_REGISTER while transient loss preserves the tool schema',
     async (t) => {
       const host = registrationHost(),
         gate = latch();
@@ -1151,14 +1152,20 @@ for (const event of ['logout', 'disconnect', 'new epoch', 'host unload'])
           event === 'disconnect' ? 'reconnecting' : 'ready',
           2,
         );
-      assert.equal(host.tools.size, 0);
+      const transient = event === 'disconnect' || event === 'new epoch';
+      assert.equal(host.tools.size, transient ? 1 : 0);
       gate.release();
-      assert.deepEqual(await pending, { status: 'unavailable' });
+      const expected = transient
+        ? {
+            status: 'unavailable',
+            reason: 'network.overloaded',
+            retryable: true,
+          }
+        : { status: 'unavailable', retryable: false };
+      assert.deepEqual(await pending, expected);
       assert.deepEqual(f.ledger.snapshot().locals['1'], original);
       assert.deepEqual(f.ledger.snapshot().bindings, {});
-      assert.deepEqual(await tool.execute({}, { agent: host.agent }), {
-        status: 'unavailable',
-      });
+      assert.deepEqual(await tool.execute({}, { agent: host.agent }), expected);
     },
   );
 
@@ -1189,7 +1196,7 @@ test('reconnect first reconciles original committed operation and reuses host bi
   f.connections[1].transition('reconnecting', 2);
   f.connections[1].transition('ready', 2);
   await waitFor(
-    () => host.tools.size,
+    () => f.runtime.diagnostics.registration.available,
     'join reinstalled after original-op reconciliation',
   );
   const registrations = f.sent.filter(
@@ -2225,7 +2232,7 @@ test('安全日志捕获重连中的首个WSS失败，重复和已退役连接�
   const event = f.logs.find((e) => e.event === 'failure');
   assert.equal(event.phase, 'wss_connect');
   assert.equal(event.code, 'unauthorized');
-  assert.equal(event.budget_ms, 10000);
+  assert.equal(event.budget_ms, 30000);
   await f.runtime.close();
   f.connections[1].refreshError({ code: 'SECRET-marker' });
   assert.equal(f.logs.filter((e) => e.event === 'failure').length, 1);

@@ -255,7 +255,7 @@ func TestSourceRPCWrongMethodAndDependencyFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	client, err := NewMailboxClient(conn, time.Millisecond)
+	client, err := NewMailboxClient(conn, 20*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

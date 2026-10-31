@@ -1,5 +1,7 @@
 # Auriga NAS isolated test pack
 
+公网预算、时钟容差、断线工具行为与 join 日志定位见 [网络运维说明](../../docs/operations/network-timing.zh.md)。
+
 ## Managed instances on isolated networks
 
 Managed device registration, tickets, keys, WSS and native model calls can use

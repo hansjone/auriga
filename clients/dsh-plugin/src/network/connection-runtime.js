@@ -1,3 +1,4 @@
+import { networkTiming } from './timing.js';
 /* global AbortSignal */
 import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as retryDelay } from 'node:timers/promises';
@@ -32,6 +33,7 @@ import { connectionSourceClient } from './source-control/connection.js';
 import { stopSource } from './source-control/state.js';
 import { saveProducerEpoch } from './durable/outbox.js';
 import { createDeviceMessaging } from './durable/capability.js';
+import { createStableNetworkTools } from './stable-tools.js';
 import { hasCursorEvidence } from './durable/recovery.js';
 import {
   createDiagnosticLog,
@@ -123,7 +125,7 @@ async function normalReady(transport, trust, state, signal, now) {
       timer = setTimeout(
         () =>
           reject(diagnosticReason(new Error('READY timeout'), 'ready_timeout')),
-        5000,
+        networkTiming.operationMs,
       );
       off = transport.onMessage((bytes, receivedEpoch) => {
         void (async () => {
@@ -253,6 +255,7 @@ export async function openConnectionRuntime(options) {
     throw new Error('trusted WSS endpoint required');
   const signal = controller.signal,
     now = options.now ?? Date.now;
+  const stableRegistries = new Set();
   let closed = false,
     connected = false,
     started = false,
@@ -560,10 +563,15 @@ export async function openConnectionRuntime(options) {
     };
     const isCurrent = () =>
       entry.live && !closed && currentConnection === entry;
-    let transportFailure = diagnostics.scope('wss_connect', 10000, isCurrent);
+    let transportFailure = diagnostics.scope(
+      'wss_connect',
+      networkTiming.operationMs,
+      isCurrent,
+    );
     const transport = (
       options.transportFactory ?? ((o) => new NatsTransport(o))
     )({
+      connectTimeoutMs: networkTiming.operationMs,
       url: prepared.url,
       upSubject: 'auriga.net.up.a.' + 'a'.repeat(26),
       downSubject: 'auriga.net.down.' + 'a'.repeat(26),
@@ -572,7 +580,7 @@ export async function openConnectionRuntime(options) {
       async getTicket({ reason: ticketReason }) {
         const ticketFailure = diagnostics.scope(
           'ticket_http',
-          15000,
+          networkTiming.operationMs,
           () => entry.live && !closed && currentConnection === entry,
         );
         let requestingTicket = false;
@@ -583,7 +591,11 @@ export async function openConnectionRuntime(options) {
           requestingTicket = true;
           const ticket = await prepared.getTicket(signal);
           valid();
-          transportFailure = diagnostics.scope('wss_connect', 10000, isCurrent);
+          transportFailure = diagnostics.scope(
+            'wss_connect',
+            networkTiming.operationMs,
+            isCurrent,
+          );
           return ticket;
         } catch (error) {
           const e = /** @type {any} */ (error);
@@ -710,7 +722,7 @@ export async function openConnectionRuntime(options) {
             const proof = await diagnostics
               .scope(
                 'normal_ready',
-                5000,
+                networkTiming.operationMs,
                 () =>
                   !closed &&
                   entry.live &&
@@ -750,7 +762,9 @@ export async function openConnectionRuntime(options) {
           })
           .catch((error) => {
             if (!closed && !handshakeSignal.aborted) {
-              diagnostics.scope('normal_ready', 5000).fail(error);
+              diagnostics
+                .scope('normal_ready', networkTiming.operationMs)
+                .fail(error);
               void close('unavailable').catch(() => {});
             }
           });
@@ -786,7 +800,7 @@ export async function openConnectionRuntime(options) {
       const registration = await run(
         'register_http',
         () => prepared.register(signal),
-        15000,
+        networkTiming.operationMs,
       );
       active();
       diagnostics.registered(registration.created);
@@ -849,13 +863,13 @@ export async function openConnectionRuntime(options) {
           active();
           try {
             first = diagnostics
-              .scope('wss_connect', 10000)
+              .scope('wss_connect', networkTiming.operationMs)
               .sync(() => connect(trust, false));
             const currentFirst = first;
             await run(
               'wss_connect',
               () => currentFirst.transport.start(),
-              10000,
+              networkTiming.operationMs,
             );
             active();
             first.entry.epoch = first.transport.epoch;
@@ -873,7 +887,7 @@ export async function openConnectionRuntime(options) {
                   signal: bootstrapSignal,
                   now,
                 }),
-              5000,
+              networkTiming.operationMs,
             );
             active();
             break;
@@ -945,6 +959,17 @@ export async function openConnectionRuntime(options) {
               'workspaceRegistry',
             ],
             (/** @type {any} */ ctx) => {
+              const stable = createStableNetworkTools(ctx.tools);
+              stableRegistries.add(stable);
+              const facade = {
+                register: (/** @type {any} */ definition) =>
+                  stable.register(definition),
+              };
+              ctx = new Proxy(ctx, {
+                get(target, key) {
+                  return key === 'tools' ? facade : Reflect.get(target, key);
+                },
+              });
               hostContext = ctx;
               installRegistration();
               const stopSession = (/** @type {string} */ id) => {
@@ -984,6 +1009,8 @@ export async function openConnectionRuntime(options) {
                   : [];
               ctx.effect(
                 () => () => {
+                  stable.close();
+                  stableRegistries.delete(stable);
                   if (hostContext === ctx) {
                     hostContext = undefined;
                     if (sourceCapability)
@@ -1010,9 +1037,13 @@ export async function openConnectionRuntime(options) {
         /* Host unavailable: base READY remains independent. */
       }
       const normal = diagnostics
-        .scope('wss_connect', 10000)
+        .scope('wss_connect', networkTiming.operationMs)
         .sync(() => connect(trust, true));
-      await run('wss_connect', () => normal.transport.start(), 10000);
+      await run(
+        'wss_connect',
+        () => normal.transport.start(),
+        networkTiming.operationMs,
+      );
       active();
       let pending;
       do {
@@ -1034,6 +1065,8 @@ export async function openConnectionRuntime(options) {
     if (closing) return closing;
     reason = why;
     closed = true;
+    for (const stable of stableRegistries) stable.close();
+    stableRegistries.clear();
     connected = false;
     retireRegistration();
     controller.abort();

@@ -1,8 +1,10 @@
+import { performance } from 'node:perf_hooks';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { logEvent, newTraceparent, publicationContext } from './index.js';
 
 /** Observational context only: no identity, grant, payload or ledger state.
- * @typedef {{trace_id:string,attempt_id?:string,stage:string,reason?:string,authorization_round?:string,rpc_count:number,rpc?:ReturnType<typeof publicationContext>}} Context */
+ * @typedef {{trace_id:string,started:number,join?:boolean,attempt_id?:string,stage:string,reason?:string,authorization_round?:string,rpc_count:number,rpc?:ReturnType<typeof publicationContext>}} Context */
 /** @type {AsyncLocalStorage<Context>} */ const contexts =
   new AsyncLocalStorage();
 /** @type {WeakMap<Promise<unknown>, Context>} */ const tasks = new WeakMap();
@@ -10,6 +12,7 @@ import { logEvent, newTraceparent, publicationContext } from './index.js';
 function fresh() {
   return {
     trace_id: newTraceparent().slice(3, 35),
+    started: performance.now(),
     stage: 'start',
     rpc_count: 0,
   };
@@ -32,6 +35,7 @@ export function sourceEvent(event, fields = {}, error) {
       'Source ' + event,
       {
         trace_id: c.trace_id,
+        elapsed_ms: Math.max(0, Math.floor(performance.now() - c.started)),
         attempt_id: c.attempt_id,
         stage: c.stage,
         reason: c.reason,
@@ -85,6 +89,21 @@ export function observeTool(action, reuse = false) {
     sourceEvent('tool attempt started');
     return action();
   });
+}
+/** @template T @param {()=>T} action */
+export function observeJoin(action) {
+  return observeTool(() => {
+    const context = contexts.getStore();
+    if (context) context.join = true;
+    return action();
+  });
+}
+/** Each RPC keeps a unique request identity under the same observational join trace. */
+export function joinRequestId() {
+  const context = contexts.getStore();
+  return context?.join
+    ? `join-${context.trace_id}-${randomUUID()}`
+    : randomUUID();
 }
 /** Each queued control action is independent, even when pump runs inside a tool.
  * @param {()=>Promise<unknown>} action */

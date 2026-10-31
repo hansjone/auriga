@@ -102,6 +102,13 @@ public final class AccessTokenDecoders {
     validators.add(timestamps);
     validators.add(
         jwt ->
+            jwt.getIssuedAt() != null
+                    && jwt.getIssuedAt()
+                        .isAfter(settings.clock().instant().plus(settings.clockSkew()))
+                ? failure("iat is beyond the configured clock tolerance")
+                : success());
+    validators.add(
+        jwt ->
             settings.acceptedIssuers().contains(jwt.getClaimAsString("iss"))
                 ? success()
                 : failure("iss must match an approved installation origin"));

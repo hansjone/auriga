@@ -67,9 +67,13 @@ services:
     volumes:
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/edge/edge.config.json:/etc/auriga/edge.config.json:ro
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/edge:/etc/auriga/collab-edge:ro
+  network-broker:
+    volumes:
+      - ${AURIGA_DATA_ROOT}/config/network-policy/broker.conf:/etc/auriga/network/broker.conf:ro
   network:
     depends_on:
       collab: {condition: service_healthy}
     volumes:
-      - ${AURIGA_DATA_ROOT}/config/collab-runtime/network/runtime.json:/etc/auriga/network/runtime.json:ro
+      - ${AURIGA_DATA_ROOT}/config/network-policy/broker.conf:/etc/auriga/network/broker.conf:ro
+      - ${AURIGA_DATA_ROOT}/config/network-policy/runtime.json:/etc/auriga/network/runtime.json:ro
       - ${AURIGA_DATA_ROOT}/config/collab-runtime/network/protocol.key:/etc/auriga/network/protocol.key:ro

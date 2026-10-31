@@ -1,6 +1,6 @@
 {
   "name": "auriga-dsh",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Auriga DSH plugin (standalone identity, managed host, team panel shell)",
   "license": "MIT",
   "type": "module",

@@ -337,7 +337,7 @@ export async function launchDesktop(
     const response = await globalThis.fetch(origin + path, {
       method: body === undefined ? 'GET' : 'POST',
       redirect: 'error',
-      signal: globalThis.AbortSignal.timeout(15000),
+      signal: globalThis.AbortSignal.timeout(45000),
       headers: {
         cookie: [...cookies].map(([k, v]) => `${k}=${v}`).join('; '),
         ...(body === undefined

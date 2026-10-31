@@ -24,6 +24,15 @@ else
   exit 0
 fi
 sh "$NAS_ROOT/scripts/collab-materials.sh" "$_source" "$AURIGA_DATA_ROOT/config/collab-runtime"
+# Public policy projections are separate from all sealed/byte-exact materials.
+_policy="$AURIGA_DATA_ROOT/config/network-policy"
+if [ -e "$_policy" ] || [ -L "$_policy" ]; then
+  [ -d "$_policy" ] && [ ! -L "$_policy" ] && [ "$(stat -c '%u:%g:%a' "$_policy")" = 0:0:755 ] || die 'invalid network policy directory'
+else
+  mkdir "$_policy"; chown 0:0 "$_policy"; chmod 0755 "$_policy"
+fi
+"$_boot" network-budget -runtime "$AURIGA_DATA_ROOT/config/collab-runtime/network/runtime.json" -broker "$AURIGA_DATA_ROOT/config/materials/network/broker.conf" -out-runtime "$_policy/runtime.json" -out-broker "$_policy/broker.conf" -operation-ms "${AURIGA_NETWORK_OPERATION_TIMEOUT_MS:-30000}"
+
 if [ -e "$AURIGA_DATA_ROOT/collab-tokens" ] || [ -L "$AURIGA_DATA_ROOT/collab-tokens" ]; then
   [ -d "$AURIGA_DATA_ROOT/collab-tokens" ] && [ ! -L "$AURIGA_DATA_ROOT/collab-tokens" ] \
     && [ "$(stat -c '%u:%g:%a' "$AURIGA_DATA_ROOT/collab-tokens")" = 10001:65534:750 ] || die 'invalid collab token directory'

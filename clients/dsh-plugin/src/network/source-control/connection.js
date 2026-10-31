@@ -1,3 +1,4 @@
+import { networkTiming } from '../timing.js';
 import { decodeJson, encodeJson } from '../session/frames.js';
 import { verifyEnvelopeWithRefresh } from '../trust/verifier.js';
 import { assertSourceResult } from './frames.js';
@@ -42,7 +43,10 @@ export function connectionSourceClient({
         abort = () => reject(new Error('source interrupted'));
         signal.addEventListener('abort', abort, { once: true });
         attempt.addEventListener('abort', abort, { once: true });
-        timer = setTimeout(() => reject(new Error('source timeout')), 30000);
+        timer = setTimeout(
+          () => reject(new Error('source timeout')),
+          networkTiming.operationMs,
+        );
         off = transport.onMessage((bytes, receivedEpoch) => {
           void (async () => {
             if (finished || verifying || receivedEpoch !== transportEpoch)

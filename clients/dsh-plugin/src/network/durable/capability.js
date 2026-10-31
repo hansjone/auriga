@@ -200,6 +200,7 @@ export function createDeviceMessaging(options) {
             properties: {
               status: { type: 'string', enum: ['request_submitted', 'error'] },
               code: { type: 'string' },
+              retryable: { type: 'boolean' },
             },
             required: ['status'],
             additionalProperties: false,

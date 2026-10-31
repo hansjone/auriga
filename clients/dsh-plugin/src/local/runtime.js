@@ -71,7 +71,7 @@ export function abandonNativeAttempt(attempt, compensate) {
  * @param {{config:import('../generated/connect-config.js').ConnectConfig,directory:string,ctx:any}} options */
 export async function createConnectRuntime({ config: input, directory, ctx }) {
   const config = platformConfig(input),
-    platform = createPlatform(config, { waitForValidity: true }),
+    platform = createPlatform(config),
     vault = await createVault(directory);
   /** @type {Map<string,any>} */
   const sessions = new Map(),

@@ -1,4 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import {
+  observeJoin,
+  joinRequestId,
+  sourceStage,
+  sourceEvent,
+  sourceRpc,
+} from '../observability/source.js';
+import { networkTiming } from './timing.js';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -139,142 +146,156 @@ export function createSessionRegistration({
           /** @type {unknown} */ input,
           /** @type {any} */ execution,
         ) {
-          return operations.run('join', async () => {
-            try {
-              current();
-              if (
-                !input ||
-                typeof input !== 'object' ||
-                Array.isArray(input) ||
-                Reflect.ownKeys(input).length
-              )
-                throw new Error('zero arguments required');
-              const native = registrationSession(ctx, execution);
-              const check = () => {
-                current();
-                execution.signal?.throwIfAborted();
-                native.check();
-              };
-              check();
-              const scopedLedger = {
-                ...guarded,
-                update(
-                  /** @type {(draft:import('./host/ledger.js').LedgerState)=>any} */ mutate,
-                ) {
-                  return update(mutate, check);
-                },
-              };
-              // bindExistingSession reads once before allocation and again before
-              // binding. Both reads must prove the actual native durable barrier.
-              const durableHost = {
-                ...host,
-                async getSession(/** @type {string} */ id) {
-                  check();
-                  if (id !== native.id) throw new Error('wrong native session');
-                  await native.verify();
-                  check();
-                  const record = await host.getSession(id);
-                  check();
-                  if (
-                    !record ||
-                    record.cwd !== native.cwd ||
-                    record.origin !== undefined
-                  )
-                    throw new Error('native mapping changed');
-                  const durable = await host.hasDurableProvider?.(id);
-                  check();
-                  if (durable !== true)
-                    throw new Error('durable provider required');
-                  const flushed = await host.flush(id);
-                  check();
-                  if (flushed !== true)
-                    throw new Error('durable session barrier required');
-                  const persisted = await host.getSession(id);
-                  check();
-                  if (
-                    !persisted ||
-                    persisted.cwd !== native.cwd ||
-                    persisted.origin !== undefined
-                  )
-                    throw new Error('durable native mapping changed');
-                  return persisted;
-                },
-              };
-              const adapter = createHostAdapter({
-                ledger: scopedLedger,
-                host: durableHost,
-                network: {
-                  registerLocal: async (entry) => {
-                    check();
-                    const result = await registerLocal(entry, {
-                      signal: execution.signal,
-                      assertCurrent: check,
-                    });
-                    check();
-                    return result;
-                  },
-                  admit: unavailable,
-                  assignContact: unavailable,
-                },
-              });
-              const state = ledger.peek();
-              const prior = Object.values(state.bindings).filter(
-                (binding) => binding.hostSessionId === native.id,
-              );
-              if (
-                prior.length > 1 ||
-                (prior[0] &&
-                  (prior[0].cwd !== native.cwd ||
-                    prior[0].kind !== 'session' ||
-                    prior[0].lifecycle !== 'open'))
-              )
-                throw new Error('native binding changed');
-              const original =
-                state.locals[
-                  prior[0]?.local ?? state.registrations[`host:${native.id}`]
-                ];
-              const local = await adapter.bindExistingSession({
-                // Host ids are opaque and may exceed protocol ID bounds. Only
-                // a bounded digest goes on the wire; existing ops never change.
-                opId: original?.opId ?? `host:${digestOf(native.id)}`,
-                hostSessionId: native.id,
-                cwd: native.cwd,
-                kind: 'session',
-                receiveMode: 'receive_none',
-              });
-              check();
-              // The local registration remains successful even if the optional
-              // source path is unavailable. Source work is never a model choice.
+          return observeJoin(() =>
+            operations.run('join', async () => {
               try {
-                await onRegistered?.(local);
-              } catch {
-                /* Source stays closed. */
-              }
-              check();
-              return {
-                status: 'registered',
-                address: formatAddress(adapter.localAddress(local)),
-              };
-            } catch (error) {
-              if (error instanceof RegistrationOverload) {
-                try {
+                sourceStage('join_input');
+                current();
+                if (
+                  !input ||
+                  typeof input !== 'object' ||
+                  Array.isArray(input) ||
+                  Reflect.ownKeys(input).length
+                )
+                  throw new Error('zero arguments required');
+                sourceStage('join_native_identity');
+                const native = registrationSession(ctx, execution);
+                const check = () => {
                   current();
                   execution.signal?.throwIfAborted();
-                  registrationSession(ctx, execution).check();
-                  return {
-                    status: 'unavailable',
-                    reason: 'network.overloaded',
-                    retryable: error.retryable,
-                    retryAfter: error.retryAfter,
-                    attempts: error.attempts,
-                  };
+                  native.check();
+                };
+                check();
+                const scopedLedger = {
+                  ...guarded,
+                  update(
+                    /** @type {(draft:import('./host/ledger.js').LedgerState)=>any} */ mutate,
+                  ) {
+                    return update(mutate, check);
+                  },
+                };
+                // bindExistingSession reads once before allocation and again before
+                // binding. Both reads must prove the actual native durable barrier.
+                const durableHost = {
+                  ...host,
+                  async getSession(/** @type {string} */ id) {
+                    check();
+                    if (id !== native.id)
+                      throw new Error('wrong native session');
+                    sourceStage('join_native_resolve');
+                    await native.verify();
+                    check();
+                    sourceStage('join_host_session');
+                    const record = await host.getSession(id);
+                    check();
+                    if (
+                      !record ||
+                      record.cwd !== native.cwd ||
+                      record.origin !== undefined
+                    )
+                      throw new Error('native mapping changed');
+                    sourceStage('join_durable_provider');
+                    const durable = await host.hasDurableProvider?.(id);
+                    check();
+                    if (durable !== true)
+                      throw new Error('durable provider required');
+                    sourceStage('join_flush');
+                    const flushed = await host.flush(id);
+                    check();
+                    if (flushed !== true)
+                      throw new Error('durable session barrier required');
+                    sourceStage('join_persisted_mapping');
+                    const persisted = await host.getSession(id);
+                    check();
+                    if (
+                      !persisted ||
+                      persisted.cwd !== native.cwd ||
+                      persisted.origin !== undefined
+                    )
+                      throw new Error('durable native mapping changed');
+                    return persisted;
+                  },
+                };
+                const adapter = createHostAdapter({
+                  ledger: scopedLedger,
+                  host: durableHost,
+                  network: {
+                    registerLocal: async (entry) => {
+                      check();
+                      sourceStage('join_local_register');
+                      const result = await registerLocal(entry, {
+                        signal: execution.signal,
+                        assertCurrent: check,
+                      });
+                      check();
+                      return result;
+                    },
+                    admit: unavailable,
+                    assignContact: unavailable,
+                  },
+                });
+                const state = ledger.peek();
+                const prior = Object.values(state.bindings).filter(
+                  (binding) => binding.hostSessionId === native.id,
+                );
+                if (
+                  prior.length > 1 ||
+                  (prior[0] &&
+                    (prior[0].cwd !== native.cwd ||
+                      prior[0].kind !== 'session' ||
+                      prior[0].lifecycle !== 'open'))
+                )
+                  throw new Error('native binding changed');
+                const original =
+                  state.locals[
+                    prior[0]?.local ?? state.registrations[`host:${native.id}`]
+                  ];
+                const local = await adapter.bindExistingSession({
+                  // Host ids are opaque and may exceed protocol ID bounds. Only
+                  // a bounded digest goes on the wire; existing ops never change.
+                  opId: original?.opId ?? `host:${digestOf(native.id)}`,
+                  hostSessionId: native.id,
+                  cwd: native.cwd,
+                  kind: 'session',
+                  receiveMode: 'receive_none',
+                });
+                check();
+                // The local registration remains successful even if the optional
+                // source path is unavailable. Source work is never a model choice.
+                try {
+                  await onRegistered?.(local);
                 } catch {
-                  /* Retired execution must not report a live retry hint. */
+                  /* Source stays closed. */
                 }
+                check();
+                sourceStage('join_registered');
+                sourceEvent('join registered');
+                return {
+                  status: 'registered',
+                  address: formatAddress(adapter.localAddress(local)),
+                };
+              } catch (error) {
+                if (error instanceof RegistrationOverload) {
+                  try {
+                    current();
+                    execution.signal?.throwIfAborted();
+                    registrationSession(ctx, execution).check();
+                    return {
+                      status: 'unavailable',
+                      reason: 'network.overloaded',
+                      retryable: error.retryable,
+                      retryAfter: error.retryAfter,
+                      attempts: error.attempts,
+                    };
+                  } catch {
+                    /* Retired execution must not report a live retry hint. */
+                  }
+                }
+                sourceEvent('join failed', {}, error);
+                return { status: 'unavailable' };
               }
-              return { status: 'unavailable' };
-            }
-          });
+            }),
+          );
         },
       });
       current();
@@ -306,7 +327,7 @@ export function connectionRegistrar({
   return async (entry, operation = {}) => {
     // One logical request and original five-second budget across all attempts.
     entry = { ...entry };
-    const requestId = randomUUID();
+    const requestId = joinRequestId();
     const bytes = encodeLocalRegister({
       requestId,
       epoch: ready.epoch,
@@ -333,7 +354,7 @@ export function connectionRegistrar({
     let overload;
     const timer = setTimeout(
       () => interrupted.abort(overload ?? new Error('registration timeout')),
-      5000,
+      networkTiming.operationMs,
     );
     for (const value of signals) {
       value?.addEventListener('abort', abort, { once: true });
@@ -395,10 +416,15 @@ export function connectionRegistrar({
                       frame.retry_after <= 86400))
                 ))
                   assertRegisterResult(frame, request);
+                sourceRpc(frame, 'verified');
                 resolve(frame);
               })().catch(reject);
             });
             current();
+            sourceRpc(
+              { request_id: requestId, type: 'local_register' },
+              'started',
+            );
             void transport.send(bytes).catch(reject);
           });
         } finally {
@@ -426,7 +452,7 @@ export function connectionRegistrar({
         if (
           !overload.retryable ||
           attempt === 5 ||
-          backoff >= 5000 - (performance.now() - started)
+          backoff >= networkTiming.operationMs - (performance.now() - started)
         )
           throw overload;
         await delay(backoff, undefined, { signal: interrupted.signal });

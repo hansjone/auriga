@@ -1,3 +1,4 @@
+import { networkTiming } from '../network/timing.js';
 import { tracedFetch } from '../observability/index.js';
 /* global Headers, AbortSignal */
 import { createPublicKey, verify } from 'node:crypto';
@@ -167,8 +168,21 @@ export class LoginJar {
 
 /** Every network request has a timeout, body cap and redirect refusal. No automatic write retries.
  * @param {ReturnType<typeof platformConfig>} config
- * @param {{waitForValidity?:boolean}} [options] Native authentication may wait for signed activation time. */
-export function createPlatform(config, { waitForValidity = false } = {}) {
+ * @param {{clockToleranceSeconds?:number}} [options] Bounded iat/nbf skew; expiry remains strict. */
+export function createPlatform(
+  config,
+  {
+    clockToleranceSeconds = Number(
+      process.env.AURIGA_JWT_CLOCK_SKEW_SECONDS ?? 60,
+    ),
+  } = {},
+) {
+  if (
+    !Number.isSafeInteger(clockToleranceSeconds) ||
+    clockToleranceSeconds < 0 ||
+    clockToleranceSeconds > 120
+  )
+    throw new Error('invalid JWT clock tolerance');
   /** @param {string} path @param {any} [options] */
   async function request(
     path,
@@ -212,8 +226,11 @@ export function createPlatform(config, { waitForValidity = false } = {}) {
             : JSON.stringify(body),
       redirect: 'error',
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-        : AbortSignal.timeout(15000),
+        ? AbortSignal.any([
+            signal,
+            AbortSignal.timeout(networkTiming.operationMs),
+          ])
+        : AbortSignal.timeout(networkTiming.operationMs),
     });
     jar?.accept(response.headers);
     let size = 0;
@@ -249,13 +266,8 @@ export function createPlatform(config, { waitForValidity = false } = {}) {
       );
     return data;
   }
-  /** @param {string} token @param {any} [expected] @param {boolean} [ai] @param {boolean} [futurePreflight] */
-  async function verifyToken(
-    token,
-    expected,
-    ai = false,
-    futurePreflight = false,
-  ) {
+  /** @param {string} token @param {any} [expected] @param {boolean} [ai] */
+  async function verifyToken(token, expected, ai = false) {
     if (typeof token !== 'string' || token.length > 16384)
       throw new Error('invalid device credential');
     const parts = token.split('.');
@@ -283,10 +295,10 @@ export function createPlatform(config, { waitForValidity = false } = {}) {
       !Number.isSafeInteger(claims.exp) ||
       claims.exp <= now ||
       !Number.isSafeInteger(claims.iat) ||
-      claims.iat > now + (futurePreflight ? 30 : 5) ||
+      claims.iat > now + clockToleranceSeconds ||
       (claims.nbf !== undefined &&
         (!Number.isSafeInteger(claims.nbf) ||
-          claims.nbf > now + (futurePreflight ? 30 : 5))) ||
+          claims.nbf > now + clockToleranceSeconds)) ||
       ![claims.tid, claims.sub, claims.did].every(
         (x) => typeof x === 'string' && x.length > 0 && x.length <= 512,
       )
@@ -297,7 +309,7 @@ export function createPlatform(config, { waitForValidity = false } = {}) {
       (header.typ !== 'at+jwt' ||
         claims.exp - claims.iat > 300 ||
         claims.exp <= claims.iat ||
-        claims.exp > now + (futurePreflight ? 330 : 300) ||
+        claims.exp > now + (300 + clockToleranceSeconds) ||
         claims.sid !== undefined ||
         claims.instanceId !== undefined ||
         !Array.isArray(claims.perms) ||
@@ -337,37 +349,10 @@ export function createPlatform(config, { waitForValidity = false } = {}) {
       throw new Error('invalid device signature');
     return claims;
   }
-  /** @param {string} token @param {any} [expected] @param {boolean} [ai] */
-  async function verifyDevice(token, expected, ai = false) {
-    try {
-      return await verifyToken(token, expected, ai);
-    } catch (error) {
-      if (
-        !waitForValidity ||
-        !(error instanceof Error) ||
-        !['invalid device credential', 'invalid device AI credential'].includes(
-          error.message,
-        )
-      )
-        throw error;
-      // This is only a signed-time preflight, never an admission result. Keep
-      // the ordinary verifier and its five-second tolerance unchanged.
-      const claims = await verifyToken(token, expected, ai, true);
-      const current = Math.floor(Date.now() / 1000);
-      const validAfter = Math.max(claims.iat, claims.nbf ?? claims.iat);
-      if (validAfter <= current || validAfter > current + 30) throw error;
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.max(0, validAfter * 1000 - Date.now())),
-      );
-      // Real time must have advanced. Recheck expiry, identity, purpose and
-      // the independently fetched signature after the bounded wait.
-      return verifyToken(token, expected, ai);
-    }
-  }
   return {
     request,
-    verifyDevice,
+    verifyDevice: verifyToken,
     verifyAi: (/** @type {string} */ token, /** @type {any} */ expected) =>
-      verifyDevice(token, expected, true),
+      verifyToken(token, expected, true),
   };
 }
