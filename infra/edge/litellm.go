@@ -77,10 +77,10 @@ func liteLLMPathAllowed(r *http.Request) bool {
 	if r.URL.RawPath == "" && escaped == r.URL.Path {
 		return true
 	}
-	// Next.js segment files encode their layout marker as %21. Permit only
-	// that encoding in fixed UI text resources; APIs and writes remain strict.
+	// Next.js sends its layout marker both literally and as %21. Permit only
+	// those spellings in fixed UI text resources; APIs and writes remain strict.
 	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || !strings.HasPrefix(r.URL.Path, "/ai/ui/") ||
-		!strings.Contains(escaped, "%21") || strings.ReplaceAll(escaped, "%21", "!") != r.URL.Path {
+		!strings.Contains(r.URL.Path, "!") || strings.ReplaceAll(escaped, "%21", "!") != r.URL.Path {
 		return false
 	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/ai/ui/"), "/")

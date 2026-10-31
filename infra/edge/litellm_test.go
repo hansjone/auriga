@@ -179,6 +179,7 @@ func TestLiteLLMEntryBoundary(t *testing.T) {
 				{"ui-playground", "relayAdmin", "POST", "/ai/v1/chat/completions", http.Header{"Cookie": {"auriga_litellm_session=admin"}, "Origin": {g.Cfg.liteLLMUIURL()}, "Authorization": {"Bearer ui-session-token"}}, 204},
 				{"ui-api-alias", "relayAdmin", "GET", "/ai/v1/model/info", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 204},
 				{"ui-next-segment", "relayAdmin", "GET", "/ai/ui/models-and-endpoints/__next.%21KGRhc2hib2FyZCk.models-and-endpoints.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 204},
+				{"ui-next-literal-layout", "relayAdmin", "GET", "/ai/ui/models-and-endpoints/__next.!KGRhc2hib2FyZCk.models-and-endpoints.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 204},
 				{"ui-next-head", "relayAdmin", "HEAD", "/ai/ui/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}}, 204},
 				{"ui-next-anonymous", "relayAdmin", "GET", "/ai/ui/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{}, 401},
 				{"ui-next-cross-site", "relayAdmin", "GET", "/ai/ui/__next.%21KGRhc2hib2FyZCk.__PAGE__.txt", http.Header{"Cookie": {"auriga_litellm_session=admin"}, "Sec-Fetch-Site": {"same-site"}, "Sec-Fetch-Mode": {"cors"}}, 403},
