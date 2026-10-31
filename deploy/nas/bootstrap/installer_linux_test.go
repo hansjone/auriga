@@ -17,6 +17,7 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 		t.Skip("requires Linux root for the real fixed uid boundary")
 	}
 	t.Run("executable-boundary", testNASFixedInstallerExecutableBoundary)
+	t.Run("runtime-upgrade", testNASRuntimeUpgradeLifecycle)
 	root, err := os.MkdirTemp("", "auriga-nas-installer-")
 	if err != nil {
 		t.Fatal(err)

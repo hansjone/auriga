@@ -277,18 +277,56 @@ compose_cmd() {
   fi
 }
 
-run_compose() {
+runtime_directory() {
+  if [ ! -e "$AURIGA_DATA_ROOT/config/runtime-source" ] && [ ! -L "$AURIGA_DATA_ROOT/config/runtime-source" ]; then
+    printf '%s' "$AURIGA_DATA_ROOT/config/materials"
+    return
+  fi
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" runtime-path
+  else
+    "$(bootstrap_binary)" runtime-upgrade -action path -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"
+  fi
+}
+
+write_runtime_override() {
+  _runtime_path=$1
+  case "$_runtime_path" in
+    "$AURIGA_DATA_ROOT/config/materials") return ;;
+    "$AURIGA_DATA_ROOT/config/runtime-source/s-"*) ;;
+    *) die 'invalid privileged runtime path' ;;
+  esac
+  _runtime_yaml=$(printf '%s' "$_runtime_path" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat <<EOF
+services:
+  platform:
+    volumes:
+      - '$_runtime_yaml/templates:/etc/auriga/templates:ro'
+      - '$_runtime_yaml/runtime-keys:/etc/auriga/runtime-keys:ro'
+  agent:
+    volumes:
+      - '$_runtime_yaml/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro'
+      - '$_runtime_yaml/runtime-proofs:/etc/auriga/runtime-proofs:ro'
+EOF
+}
+
+run_compose() (
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
     return
   fi
   _cc=$(compose_cmd)
+  _runtime_private=$(installer_private_dir runtime-compose)
+  trap 'rm -rf -- "$_runtime_private"' EXIT
+  _runtime=$(runtime_directory)
+  write_runtime_override "$_runtime" >"$_runtime_private/runtime.yml"
+  if [ -s "$_runtime_private/runtime.yml" ]; then set -- -f "$_runtime_private/runtime.yml" "$@"; fi
   if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
     COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
     $_cc -f "$NAS_ROOT/docker-compose.yml" -p "$AURIGA_NAS_PROJECT" "$@"
-}
+)
 
 # A subshell owns the private copies and trap, including on Compose failure.
 container_compose() (
@@ -318,6 +356,9 @@ services:
         required: true
 EOF
   _cc=$(compose_cmd)
+  _runtime=$(cat "$_private/runtime.path")
+  write_runtime_override "$_runtime" >"$_private/runtime.yml"
+  if [ -s "$_private/runtime.yml" ]; then set -- -f "$_private/runtime.yml" "$@"; fi
   case "$(cat "$_private/collab.enabled")" in
     1) set -- -f "$NAS_ROOT/collab-compose.yml" "$@" ;;
     0) ;;

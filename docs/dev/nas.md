@@ -271,6 +271,8 @@ bootstrap 不修改输入的 owner/mode，不复制发布私钥。即使以 root
 基础栈准备模式仍接受原来的内存输入范围。
 
 上述模板、公开根、原字节 proof、三项原输入与内容摘要和预算一起封入安装 receipt。
+已有安装的后续发行使用 [NAS runtime-upgrade 命令](../../deploy/nas/README.md#已有-nas-的签名-runtime-升级)，
+在原封存源之外追加验签、反回滚记录与活动投影；不能直接变更本段的 bootstrap 输入。
 同本版本同输入重入逐字节无损复用，不旋转、补叶或修权限；变 image、bundle/root 路径或内容、预算、启用模式，以及坏/缺 receipt、
 未知模板或 proof、链接/硬链接和异常 owner/mode 均拒绝。首装中途 I/O 失败保留痕迹，不能删除 receipt 来补全旧信任，
 应保留材料诊断并使用全新安装目录。旧目录缺新增固定叶/目录时拒绝，不自动补写或迁移；保留无 runtime 的原 receipt 摘要字节语义不代表完成旧安装兼容迁移。

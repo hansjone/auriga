@@ -3,10 +3,17 @@
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
-  init|render|check|prepare-socket|export-env|activate-collab) operation=$1 ;;
+  init|render|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
-[ "$#" = 1 ] || die 'installer accepts exactly one operation'
+upgrade_bundle=
+upgrade_image=
+case "$operation" in
+  runtime-stage|runtime-commit|runtime-rollback)
+    [ "$#" = 3 ] || die 'runtime operation requires bundle and exact image'
+    upgrade_bundle=$2; upgrade_image=$3 ;;
+  *) [ "$#" = 1 ] || die 'installer accepts exactly one operation' ;;
+esac
 load_stack_env >&2
 [ "${AURIGA_INSTALL_MODE:-host}" = container ] || die 'set AURIGA_INSTALL_MODE=container explicitly'
 require_cmd docker readlink stat mktemp
@@ -46,6 +53,10 @@ for _input in "${AURIGA_RUNTIME_BUNDLE:-}" "${AURIGA_RUNTIME_ROOT:-}" "${AURIGA_
   validate_input_path "$_input"
   set -- "$@" --mount "type=bind,src=$_input,dst=$_input,readonly"
 done
+if [ -n "$upgrade_bundle" ]; then
+  validate_input_path "$upgrade_bundle"
+  set -- "$@" --mount "type=bind,src=$upgrade_bundle,dst=$upgrade_bundle,readonly"
+fi
 # A bootstrap located inside the writable root was already rejected above.
 # No socket, host parent, host root, or network is exposed to this helper.
 (
@@ -70,5 +81,6 @@ done
     --security-opt no-new-privileges:true --read-only --tmpfs /tmp:mode=1777 \
     "$@" --env "NAS_ROOT=$NAS_ROOT" --env "AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT" \
     --env "AURIGA_NAS_BOOTSTRAP_BINARY=$_boot" --env NAS_INSTALLER_ACTIVE=1 \
+    --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \
     --entrypoint /bin/sh "$_image" "$NAS_ROOT/scripts/installer-entry.sh" "$operation"
 )

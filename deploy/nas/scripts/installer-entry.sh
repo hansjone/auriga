@@ -16,6 +16,11 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
+  runtime-path|runtime-stage|runtime-commit|runtime-rollback)
+    _action=${1#runtime-}
+    set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"
+    [ "$_action" = path ] || set -- "$@" -image "${NAS_RUNTIME_UPGRADE_IMAGE:?}" -bundle "${NAS_RUNTIME_UPGRADE_BUNDLE:?}"
+    exec "$(bootstrap_binary)" runtime-upgrade "$@" ;;
   init)
     if [ ! -e "$(marker_path)" ]; then
       # Only an empty directory or a single regular stack.env is adoptable.
@@ -51,8 +56,9 @@ case "${1:-}" in
     _export=$(mktemp -d)
     trap 'rm -rf -- "$_export"' EXIT
     printf '%s\n' "$_collab" >"$_export/collab.enabled"
+    runtime_directory >"$_export/runtime.path"
     chmod 0600 "$_export/collab.enabled"
     tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env \
-      -C "$_export" collab.enabled ;;
+      -C "$_export" collab.enabled runtime.path ;;
   *) die 'unsupported installer operation' ;;
 esac

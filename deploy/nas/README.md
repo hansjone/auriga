@@ -54,6 +54,41 @@ UID、祖先、receipt 和硬链接检查在容器内照常执行。宿主源目
 已有栈先保留数据备份并在 `stack.env` 设置范围，再执行本包 `stop.sh`（不加实例清理参数），
 最后执行 `start.sh`；只重建固定 Auriga 项目的私有 bridge，数据卷、安装根和外部 LAN 网络保留。
 
+## 已有 NAS 的签名 runtime 升级
+
+保留原 `stack.env` 中的 `AURIGA_RUNTIME_BUNDLE/ROOT/IMAGE` 和预算。这些输入、
+`config/materials`、bootstrap receipt、identity 和 collab 源继续按原封存规则检查，不能改写。
+先备份数据根及数据库，独立核对新发布包、原始 OCI manifest 摘要和批准的完整镜像 locator，
+沿 [runtime 发行指南](../../docs/dev/runtime-release.md) 导入 registry 全部原始层并核验。
+更新 agent 镜像仍用 `load-images.sh`，使用其目标 Engine ID 建议更新 `stack.env`；不得填运输 ConfigID。
+
+换入同一精确源码构建、已核 SHA 的 NAS 脚本和 bootstrap 后执行（host 模式须 root，
+container 模式沿既有无网络 installer，不需要宿主 sudo）：
+
+```sh
+export AURIGA_DATA_ROOT=/share/Container/auriga-test
+sh deploy-nas/scripts/runtime-upgrade.sh /absolute/approved/release-bundle \
+  registry.example.com/auriga/dsh@sha256:<independently-approved-manifest-digest>
+```
+
+命令只信原封存 `runtime-keys/root.pb`，不从候选包接受新根；独立核验签名与 OCI 证据，
+严格递增 release sequence。同 sequence 仅接受完全相同的发行声明和 locator 重入。
+`config/runtime-source/s-<sequence>` 保存完整公开投影和追加的 `upgrade.receipt`，
+绑定原 receipt 摘要、上轮记录及文件摘要。活动指针经同文件系统 rename 与 fsync 原子切换，
+只重建 platform/agent，等待两者就绪后提交；失败自动恢复前指针及服务，记录的 sequence
+高水位仍保留。原模板预算、公开身份、旧实例所需证明和精确镜像允许列表继续保留。
+`render.sh/start.sh`、容器模式 Compose 和挂载探针均读取经校验的活动投影。
+
+中断留下 pending 激活时，重新执行同候选命令即可继续。若需明确撤回尚未提交的激活，
+container 模式执行 `installer.sh runtime-rollback /absolute/approved/release-bundle <same-image>`，
+host root 执行 `auriga-nas-bootstrap runtime-upgrade -action rollback -base <data>/config/materials
+-out <data>/config/runtime-source -bundle <same-bundle> -image <same-image>`，随后 `start.sh`。已提交版本不能用此命令降级。
+未知中间文件、源篡改或不安全权限失败封闭，保留现场供检查；不能删除 receipt 或修改活动文件来修复。
+
+更新默认模板不等于已有实例已升级。已有实例须经公开 Workspace 更新规格和 restart API，
+核实同实例 generation、observedGeneration、pendingRestart、实际插件版本及 network READY；
+身份/collab 未轮换、控制服务健康也不能替代这些实例验收。
+
 ## 启用 collab 网络与已有 NAS 升级
 
 启用前须完成真实 IAM native 设备登记并核实租户对应的 realm，然后由离线网络根运营者

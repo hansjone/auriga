@@ -32,6 +32,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "runtime-upgrade" {
+		if err := nasRuntimeUpgrade(os.Args[2:], os.Stdout); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "collab" || os.Args[1] == "collab-base") {
 		if err := nasCollabCommand(os.Args[1:]); err != nil {
 			fatalf("%v", err)
