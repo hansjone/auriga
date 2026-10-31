@@ -304,6 +304,7 @@ export interface paths {
     };
     get: operations['listRoleBindings'];
     put?: never;
+    /** @description 只能授予本人权限覆盖的角色（403 org.grant_exceeds_own）；成员主体须在职且启用（非 active 返回 409 org.conflict）。 */
     post: operations['createRoleBinding'];
     delete?: never;
     options?: never;
@@ -321,7 +322,7 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** @description 不能撤销最后一个超管（409 org.last_owner）。 */
+    /** @description 只能撤销本人权限覆盖的角色（403 org.grant_exceeds_own）；不能撤销最后一个超管（409 org.last_owner）。 */
     delete: operations['deleteRoleBinding'];
     options?: never;
     head?: never;
@@ -1478,6 +1479,7 @@ export interface operations {
         };
       };
       403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
     };
   };
   deleteRoleBinding: {
@@ -1498,6 +1500,7 @@ export interface operations {
         };
         content?: never;
       };
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };

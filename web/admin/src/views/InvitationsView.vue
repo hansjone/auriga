@@ -22,6 +22,7 @@ import { useCursorList } from '../admin/useCursorList';
 import { useOrgActions, orgError } from '../admin/useOrgActions';
 import ActionConfirm from '../admin/ActionConfirm.vue';
 import { rolesApi, type Role } from '../admin/rolesApi';
+import { hasPermission } from '../admin/permissions';
 import '../admin/management.css';
 
 const { t, state, locale } = useAdminI18n();
@@ -78,7 +79,7 @@ const roleOptions = computed(() =>
     value: role.id,
     label: `${roleName(role)} · ${t(role.builtin ? 'roleBuiltin' : 'roleCustom')}`,
     disabled: !role.permissions.every((p) =>
-      access.permissions.value.includes(p),
+      hasPermission(access.permissions.value, p),
     ),
   })),
 );
@@ -91,7 +92,7 @@ async function loadRoles() {
   roles.value = [];
   try {
     if (!(await access.authorize())) return;
-    if (!access.permissions.value.includes('org.roles.read')) {
+    if (!hasPermission(access.permissions.value, 'org.roles.read')) {
       rolesError.value = t('invitationRolesReadRequired');
       return;
     }
@@ -101,7 +102,9 @@ async function loadRoles() {
     const member = roles.value.find((r) => r.key === 'member' && r.builtin);
     if (
       !member ||
-      !member.permissions.every((p) => access.permissions.value.includes(p))
+      !member.permissions.every((p) =>
+        hasPermission(access.permissions.value, p),
+      )
     ) {
       rolesError.value = t('defaultMemberRoleUnavailable');
       return;
@@ -205,12 +208,14 @@ function create() {
     }),
     async () => {
       if (
-        !access.permissions.value.includes('org.roles.read') ||
+        !hasPermission(access.permissions.value, 'org.roles.read') ||
         body.roleIds?.some(
           (id) =>
             !roles.value
               .find((r) => r.id === id)
-              ?.permissions.every((p) => access.permissions.value.includes(p)),
+              ?.permissions.every((p) =>
+                hasPermission(access.permissions.value, p),
+              ),
         )
       ) {
         error.value = t('forbidden');

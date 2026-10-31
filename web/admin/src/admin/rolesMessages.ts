@@ -1,4 +1,5 @@
 export const rolesZh = {
+  activeMemberRequired: '仅可向在职且启用的成员授予角色。',
   directBinding: '直接绑定',
   inheritedBinding: '继承自分组：{group}（只读）',
   chooseMemberRole: '选择要授予的角色',
@@ -65,6 +66,7 @@ export const rolesZh = {
   bindingCount: '绑定数',
 };
 export const rolesEn = {
+  activeMemberRequired: 'Roles can only be granted to active, enabled members.',
   directBinding: 'Direct binding',
   inheritedBinding: 'Inherited from group: {group} (read-only)',
   chooseMemberRole: 'Select a role to grant',

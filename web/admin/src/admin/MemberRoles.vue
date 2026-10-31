@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { ElButton, ElSelect, ElTable, ElTableColumn } from 'element-plus';
-import { isApiError } from '@auriga/shared';
+import { ApiError, isApiError, type Member } from '@auriga/shared';
+import { adminApi } from './api';
+import { hasPermission } from './permissions';
 import { rolesApi, type Role, type RoleBinding } from './rolesApi';
 import { orgAdminApi, type Group } from './orgApi';
 import { useAdminI18n } from './messages';
@@ -11,6 +13,7 @@ import ActionConfirm from './ActionConfirm.vue';
 const props = defineProps<{
   memberId: string;
   memberName: string;
+  memberStatus: Member['status'];
   disabled: boolean;
 }>();
 const emit = defineEmits<{ locked: [value: boolean]; updated: [] }>();
@@ -23,6 +26,13 @@ const roles = ref<Role[]>([]);
 const bindings = ref<RoleBinding[]>([]);
 const groups = ref<Group[]>([]);
 const roleId = ref('');
+const memberStatus = ref(props.memberStatus);
+watch(
+  () => props.memberStatus,
+  (status) => {
+    memberStatus.value = status;
+  },
+);
 const disabled = computed(
   () => props.disabled || loading.value || locked.value,
 );
@@ -52,7 +62,7 @@ const options = computed(() =>
     value: role.id,
     label: `${name(role)} · ${t(role.builtin ? 'roleBuiltin' : 'roleCustom')}`,
     disabled:
-      !role.permissions.every((p) => permissions.value.includes(p)) ||
+      !role.permissions.every((p) => hasPermission(permissions.value, p)) ||
       bindings.value.some((b) => direct(b) && b.roleId === role.id),
   })),
 );
@@ -82,7 +92,7 @@ async function load() {
     const [catalog, current, sources] = await Promise.all([
       rolesApi.list(),
       rolesApi.memberBindings(props.memberId),
-      permissions.value.includes('org.groups.read')
+      hasPermission(permissions.value, 'org.groups.read')
         ? orgAdminApi.groups()
         : Promise.resolve({ items: [] }),
     ]);
@@ -102,7 +112,7 @@ async function load() {
   }
 }
 function grant() {
-  if (disabled.value || !ready.value) return;
+  if (disabled.value || !ready.value || memberStatus.value !== 'active') return;
   const role = roles.value.find((r) => r.id === roleId.value);
   if (!role || options.value.find((o) => o.value === role.id)?.disabled) return;
   access.ask(
@@ -112,6 +122,15 @@ function grant() {
       permissions: role.permissions.join(', ') || t('noneSelected'),
     }),
     async () => {
+      const member = await adminApi.member(props.memberId);
+      if (!access.isAlive()) return;
+      memberStatus.value = member.status;
+      if (member.status !== 'active')
+        throw new ApiError({
+          status: 409,
+          code: 'org.conflict',
+          title: t('activeMemberRequired'),
+        });
       await rolesApi.grant({
         roleId: role.id,
         subject: { type: 'member', id: props.memberId },
@@ -132,6 +151,14 @@ function revoke(binding: RoleBinding) {
       if (access.isAlive()) emit('updated');
     },
   );
+}
+async function confirm() {
+  await access.confirm();
+  if (!access.isAlive() || !error.value) return;
+  const rejection = error.value;
+  await load();
+  if (access.isAlive())
+    error.value = [rejection, error.value].filter(Boolean).join(' ');
 }
 watch(
   () => props.disabled,
@@ -173,7 +200,10 @@ watch(
         >
       </ElTable>
       <p class="muted">{{ t('memberRoleHint') }}</p>
-      <div v-if="canWrite" class="actions">
+      <p v-if="memberStatus !== 'active'" class="muted">
+        {{ t('activeMemberRequired') }}
+      </p>
+      <div v-if="canWrite && memberStatus === 'active'" class="actions">
         <ElSelect
           v-model="roleId"
           :aria-label="t('chooseMemberRole')"
@@ -187,12 +217,12 @@ watch(
           t('grantRole')
         }}</ElButton>
       </div>
-      <p v-else class="muted">{{ t('grantPermissionRequired') }}</p>
+      <p v-if="!canWrite" class="muted">{{ t('grantPermissionRequired') }}</p>
     </template>
     <ActionConfirm
       :message="pending?.message"
       :busy="busy"
-      @confirm="access.confirm"
+      @confirm="confirm"
       @cancel="!busy && (pending = undefined)"
     />
   </section>

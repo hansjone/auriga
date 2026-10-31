@@ -467,6 +467,64 @@ describe('role definition workflows', () => {
 });
 
 describe('binding workflows and permission separation', () => {
+  it.each(['disabled', 'offboarded'] as const)(
+    'does not offer a %s member for grants',
+    async (status) => {
+      intercept = (path) =>
+        path === `${base}/members?limit=50`
+          ? Promise.resolve(json({ items: [{ ...member, status }] }))
+          : undefined;
+      await render();
+      await click('详情');
+      await click('读取授权候选');
+      const select = wrapper!
+        .findAllComponents({ name: 'ElSelect' })
+        .find((item) => item.props('ariaLabel') === '选择授权主体')!;
+      expect(select.props('options')).toEqual([]);
+      expect(writes()).toHaveLength(0);
+    },
+  );
+  it.each(['disabled', 'offboarded'] as const)(
+    'rejects a member changed to %s before confirmation',
+    async (status) => {
+      await render();
+      await prepareGrant();
+      intercept = (path) =>
+        path === `${base}/members/${memberId}`
+          ? Promise.resolve(json({ ...member, status }))
+          : undefined;
+      await confirm();
+      expect(writes()).toHaveLength(0);
+      expect(wrapper!.text()).toContain('org.conflict');
+    },
+  );
+  it.each(['POST', 'DELETE'])(
+    'rereads roles and bindings after a failed %s binding write',
+    async (method) => {
+      bindings = [binding()];
+      await render();
+      if (method === 'POST') await prepareGrant();
+      else {
+        await click('详情');
+        await click('撤销授权');
+      }
+      const before = calls.length;
+      fail = {
+        path: `${base}/role-bindings${method === 'DELETE' ? `/${bindingId}` : ''}`,
+        method,
+        status: 403,
+        code: 'org.grant_exceeds_own',
+      };
+      await confirm();
+      const reads = calls.slice(before).filter((call) => call.method === 'GET');
+      expect(reads.some((call) => call.path === `${base}/roles`)).toBe(true);
+      expect(
+        reads.some((call) => call.path.startsWith(`${base}/role-bindings?`)),
+      ).toBe(true);
+      expect(wrapper!.text()).toContain('org.grant_exceeds_own');
+      expect(writes()).toHaveLength(1);
+    },
+  );
   it('grants a role with grant-only permission and no role-write permission', async () => {
     permissions = all.filter((key) => key !== 'org.roles.write');
     await render();

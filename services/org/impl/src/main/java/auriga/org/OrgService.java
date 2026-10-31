@@ -919,9 +919,11 @@ public final class OrgService {
         () -> {
           store.lockGroupHierarchy();
           getRole(roleId);
-          if ("member".equals(subjectType))
-            store.member(subjectId).orElseThrow(() -> OrgError.error("not_found", 404));
-          else if ("group".equals(subjectType)) getGroup(subjectId);
+          if ("member".equals(subjectType)) {
+            var member =
+                store.member(subjectId).orElseThrow(() -> OrgError.error("not_found", 404));
+            OrgError.require("active".equals(member.status()), "conflict", 409);
+          } else if ("group".equals(subjectType)) getGroup(subjectId);
           ensureGrantAllowed(requireActor(), List.of(roleId), null);
           if ("group".equals(subjectType)) ensureGrantAllowed(requireActor(), null, subjectId);
           UUID id = UuidV7.next();
@@ -981,6 +983,8 @@ public final class OrgService {
                       bindingId);
           OrgError.require(!rows.isEmpty(), "not_found", 404);
           var row = rows.getFirst();
+          UUID actor = requireActor();
+          ensureGrantAllowed(actor, List.of((UUID) row.get("role_id")), null);
           if ("owner".equals(row.get("key")) && "member".equals(row.get("subject_type"))) {
             UUID subject = (UUID) row.get("subject_id");
             if (store.isOwner(subject))
@@ -992,7 +996,6 @@ public final class OrgService {
                   "DELETE FROM role_binding WHERE tenant_id=? AND id=?",
                   store.tenantId(),
                   bindingId);
-          UUID actor = actorId();
           String st = (String) row.get("subject_type");
           UUID sid = (UUID) row.get("subject_id");
           if ("member".equals(st)) userEvents.permissionsChanged(sid, roleKeysOf(sid), actor);

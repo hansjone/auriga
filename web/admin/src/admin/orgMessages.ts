@@ -10,7 +10,8 @@ export const orgZh = {
   },
   newInvitation: '创建成员邀请',
   initialRoles: '初始角色',
-  invitationRolesReadRequired: '选择初始角色需要角色查看权限，请联系管理员。',
+  invitationRolesReadRequired:
+    '创建邀请需要角色查看权限（org.roles.read），以确认默认普通成员角色；请联系管理员授权。',
   defaultMemberRoleUnavailable:
     '普通成员角色不可用或超出本人权限，请检查角色配置。',
   invitationDefaults:
@@ -89,7 +90,7 @@ export const orgEn = {
   newInvitation: 'Create invitation',
   initialRoles: 'Initial roles',
   invitationRolesReadRequired:
-    'Role-read permission is required to select initial roles. Contact an administrator.',
+    'Creating invitations requires role-read permission (org.roles.read) to verify the default member role. Contact an administrator for access.',
   defaultMemberRoleUnavailable:
     'The ordinary member role is unavailable or exceeds your permissions. Check role configuration.',
   invitationDefaults:
