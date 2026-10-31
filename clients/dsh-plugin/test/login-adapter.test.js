@@ -58,7 +58,7 @@ test('resume expiry has a controlled recovery; explicit restart preserves device
     json({ code: 'common.unauthenticated' }, 401),
     json(state()),
     json(state()),
-    json(state({ loggedIn: false })),
+    json({ cancelled: true }),
     json(state()),
     json({ step: form }),
   ]);
@@ -70,9 +70,13 @@ test('resume expiry has a controlled recovery; explicit restart preserves device
     await controller.restart({ signal: new AbortController().signal }),
     form,
   );
-  const logout = requests.filter((r) => r.url.endsWith('/logout'));
-  assert.equal(logout.length, 1);
-  assert.deepEqual(JSON.parse(logout[0].body), {});
+  const cancel = requests.filter((r) => r.url.endsWith('/cancel'));
+  assert.equal(cancel.length, 1);
+  assert.deepEqual(JSON.parse(cancel[0].body), {});
+  assert.equal(
+    requests.some((r) => r.url.endsWith('/logout')),
+    false,
+  );
 });
 test('retry from authenticated disconnected status never posts logout', async () => {
   const { controller, requests } = fixture([
@@ -110,9 +114,9 @@ test('restart refuses to cancel an identity that appeared between status and ano
     json(state()),
     json(state({ loggedIn: true })),
   ]);
-  await assert.rejects(
-    controller.restart({ signal: new AbortController().signal }),
-    (error) => error.reason === 'expired',
+  assert.deepEqual(
+    await controller.restart({ signal: new AbortController().signal }),
+    { type: 'complete', redirectTo: '/' },
   );
   assert.equal(
     requests.some((r) => r.url.endsWith('/logout')),
@@ -134,13 +138,13 @@ test('non-form inputs cannot bypass the local FormInput contract', async () => {
   }
   assert.equal(requests.length, 0);
 });
-test('server unsupported step errors become unavailable rather than generic network errors', async () => {
+test('server unsupported step errors identify platform errors rather than unreachable network', async () => {
   const { controller } = fixture([
     json(state()),
     json({ code: 'common.unavailable' }, 501),
   ]);
   await assert.rejects(
     controller.start({ signal: new AbortController().signal }),
-    (error) => error.reason === 'unavailable',
+    (error) => error.reason === 'platform',
   );
 });

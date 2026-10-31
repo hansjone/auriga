@@ -35,6 +35,11 @@ export function mountLocalLoginPage(root, options) {
         onSubmit: controller.submit,
         onRestart: controller.restart,
         onCancel: () => controller.cancel(scope.signal),
+        onSkip: () => {
+          scope.abort();
+          view.dispose();
+          options.navigate('/');
+        },
         onComplete: () => {
           if (!scope.signal.aborted) options.navigate('/');
         },

@@ -30,7 +30,7 @@ for (const scenario of ['missing', 'false', 'true', 'saved'])
       connection: {
         requestRejection() {},
         admit() {
-          return { peer: {} };
+          return { peer: { principal: { kind: 'owner' } } };
         },
         authorizeIndex() {
           return true;

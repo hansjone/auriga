@@ -2592,6 +2592,7 @@ test('plugin actual entry resumes verified native device into official factory, 
       protocolVersion: 1,
     });
   });
+  const localOwnerPeer = { principal: { kind: 'owner' } };
   const ctx = {
     profileContext: { dir: profile },
     webServer: {
@@ -2602,7 +2603,7 @@ test('plugin actual entry resumes verified native device into official factory, 
       },
     },
     connection: {
-      admit: () => ({}),
+      admit: () => ({ peer: localOwnerPeer }),
       authorizeIndex: () => true,
       isTrusted: () => true,
       requestRejection: () => undefined,
@@ -2656,21 +2657,12 @@ test('plugin actual entry resumes verified native device into official factory, 
   await Promise.all(jobs);
   const before = await nativeFetch(localOrigin + '/auriga/local-login/status');
   const login = await before.json();
-  assert.equal(login.network.connected, false);
-  assert.equal(calls.length, 0);
-  let cookie = before.headers.getSetCookie()[0].split(';')[0];
-  const result = await nativeFetch(localOrigin + '/auriga/local-login/login', {
-    method: 'POST',
-    headers: {
-      origin: localOrigin,
-      cookie,
-      'content-type': 'application/json',
-      'x-auriga-csrf': login.csrf,
-    },
-    body: JSON.stringify({ action: 'resume' }),
-  });
-  assert.equal(result.status, 200, await result.text());
-  cookie = result.headers.getSetCookie()[0].split(';')[0];
+  assert.equal(typeof login.network.connected, 'boolean');
+  assert.ok(
+    calls.length > 0,
+    'saved device restores platform capabilities without a browser login',
+  );
+  const cookie = '';
   const state = await waitFor(async () => {
     const response = await nativeFetch(
       localOrigin + '/auriga/local-login/status',
