@@ -61,6 +61,7 @@ URL 必须对应实际已发布版本；需要独立核验摘要时，优先下�
 - **地址无效 / HTTPS required**：只填协议、域名或 IP、端口。HTTP 仅支持回环和明确内网 IP；不要关闭 TLS 校验。
 - **连接失败 / 登录不可用**：检查平台地址可达；请管理员核实证书、`/oauth2/jwks` 和团队账号身份源。自动发现要求恰好一个 `team-account` 表单身份源，多身份源需管理员预配置。
 - **401 / 需要重新登录**：重新登录并确认团队地址；测试连接不代表账号已授权。
+- **登录短暂等待**：原生登录会先验签；若新令牌的生效时间仅略微超前，最多等待 30 秒真实时间，再按原有时间、身份和用途规则完整校验。默认令牌校验仍只允许 5 秒偏差；超出等待上限、签名无效或等待后仍无效均拒绝。持续失败请管理员检查两端时钟。
 - **安装下载失败**：检查 pnpm、代理和 npm 网络；无需允许本插件执行安装构建脚本。
 
 依据：[DSH 官方打包教程](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)、[CLI 插件管理](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/reference/README.md)。维护者验收边界见[发行说明](../dev/plugin-distribution.md)。

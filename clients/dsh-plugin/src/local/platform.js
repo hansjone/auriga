@@ -166,8 +166,9 @@ export class LoginJar {
 }
 
 /** Every network request has a timeout, body cap and redirect refusal. No automatic write retries.
- * @param {ReturnType<typeof platformConfig>} config */
-export function createPlatform(config) {
+ * @param {ReturnType<typeof platformConfig>} config
+ * @param {{waitForValidity?:boolean}} [options] Native authentication may wait for signed activation time. */
+export function createPlatform(config, { waitForValidity = false } = {}) {
   /** @param {string} path @param {any} [options] */
   async function request(
     path,
@@ -248,8 +249,13 @@ export function createPlatform(config) {
       );
     return data;
   }
-  /** @param {string} token @param {any} [expected] @param {boolean} [ai] */
-  async function verifyDevice(token, expected, ai = false) {
+  /** @param {string} token @param {any} [expected] @param {boolean} [ai] @param {boolean} [futurePreflight] */
+  async function verifyToken(
+    token,
+    expected,
+    ai = false,
+    futurePreflight = false,
+  ) {
     if (typeof token !== 'string' || token.length > 16384)
       throw new Error('invalid device credential');
     const parts = token.split('.');
@@ -277,9 +283,10 @@ export function createPlatform(config) {
       !Number.isSafeInteger(claims.exp) ||
       claims.exp <= now ||
       !Number.isSafeInteger(claims.iat) ||
-      claims.iat > now + 5 ||
+      claims.iat > now + (futurePreflight ? 30 : 5) ||
       (claims.nbf !== undefined &&
-        (!Number.isSafeInteger(claims.nbf) || claims.nbf > now + 5)) ||
+        (!Number.isSafeInteger(claims.nbf) ||
+          claims.nbf > now + (futurePreflight ? 30 : 5))) ||
       ![claims.tid, claims.sub, claims.did].every(
         (x) => typeof x === 'string' && x.length > 0 && x.length <= 512,
       )
@@ -290,7 +297,7 @@ export function createPlatform(config) {
       (header.typ !== 'at+jwt' ||
         claims.exp - claims.iat > 300 ||
         claims.exp <= claims.iat ||
-        claims.exp > now + 300 ||
+        claims.exp > now + (futurePreflight ? 330 : 300) ||
         claims.sid !== undefined ||
         claims.instanceId !== undefined ||
         !Array.isArray(claims.perms) ||
@@ -329,6 +336,33 @@ export function createPlatform(config) {
     )
       throw new Error('invalid device signature');
     return claims;
+  }
+  /** @param {string} token @param {any} [expected] @param {boolean} [ai] */
+  async function verifyDevice(token, expected, ai = false) {
+    try {
+      return await verifyToken(token, expected, ai);
+    } catch (error) {
+      if (
+        !waitForValidity ||
+        !(error instanceof Error) ||
+        !['invalid device credential', 'invalid device AI credential'].includes(
+          error.message,
+        )
+      )
+        throw error;
+      // This is only a signed-time preflight, never an admission result. Keep
+      // the ordinary verifier and its five-second tolerance unchanged.
+      const claims = await verifyToken(token, expected, ai, true);
+      const current = Math.floor(Date.now() / 1000);
+      const validAfter = Math.max(claims.iat, claims.nbf ?? claims.iat);
+      if (validAfter <= current || validAfter > current + 30) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, validAfter * 1000 - Date.now())),
+      );
+      // Real time must have advanced. Recheck expiry, identity, purpose and
+      // the independently fetched signature after the bounded wait.
+      return verifyToken(token, expected, ai);
+    }
   }
   return {
     request,
