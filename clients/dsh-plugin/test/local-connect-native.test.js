@@ -157,6 +157,16 @@ test(
           providerId: 'team',
         },
       });
+      assert.ok(
+        ctx.webServer
+          .collectIndexInjections()
+          .some(
+            (row) =>
+              row.kind === 'script' &&
+              row.text.includes("location.replace('/auriga/local-login')"),
+          ),
+        'both native HTML carriers receive the pre-login redirect bootstrap',
+      );
       const exchange = await fetch(
         ctx.connection.authenticatedUrl(base + '/'),
         { redirect: 'manual' },
@@ -167,8 +177,8 @@ test(
         headers: { cookie: nativeCookie },
         redirect: 'manual',
       });
-      assert.equal(index.status, 303);
-      assert.equal(index.headers.get('location'), '/auriga/local-login');
+      assert.equal(index.status, 200);
+      assert.equal(await index.text(), 'native app');
       assert.equal(
         (await fetch(base + '/api/', { headers: { cookie: nativeCookie } }))
           .status,

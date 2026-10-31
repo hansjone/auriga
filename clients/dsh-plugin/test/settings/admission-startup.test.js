@@ -148,11 +148,10 @@ async function installation(t, preferences) {
       index = response();
     assert.equal(
       ctx.connection.authorizeIndex(req, index),
-      false,
-      'native launch credentials must not open the index',
+      true,
+      'native shell index remains bootable without a platform session',
     );
-    assert.equal(index.status, 303);
-    assert.equal(index.headers.location, '/auriga/local-login');
+    assert.equal(index.status, undefined);
     assert.equal(
       ctx.connection.admit(req).rejection,
       401,
@@ -168,8 +167,13 @@ async function installation(t, preferences) {
     let forwarded = false;
     await hook?.(req, stream, async () => {
       forwarded = true;
+      const admitted = ctx.connection.admit(req);
+      if (admitted.rejection) {
+        stream.writeHead(admitted.rejection);
+        stream.end();
+      }
     });
-    assert.equal(forwarded, false);
+    assert.equal(forwarded, true, 'tracking defers to route admission');
     assert.equal(stream.status, 401);
   }
   async function standalone() {

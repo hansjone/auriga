@@ -11,6 +11,7 @@ import { savedPlatformConfig } from './local/platform.js';
 import {
   installLocalAdmission,
   installHttpResponseTracking,
+  installLocalLoginBootstrap,
 } from './local/host.js';
 import {
   createConnectRoutes,
@@ -59,6 +60,7 @@ export async function apply(ctx, config) {
         },
   );
   if (mode !== 'managed') {
+    installLocalLoginBootstrap(ctx);
     if (!ctx.webServer?.register || !ctx.connection?.requestRejection)
       throw new Error(
         'auriga-dsh: local UI requires native host authentication',
