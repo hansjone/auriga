@@ -138,12 +138,25 @@ export async function managedCloudConversation({
   async function receipt(side, label) {
     return poll(
       async () => {
+        let witness;
+        if (side === 'cloud' && cfg.readReceiptWitness) {
+          assert.equal(typeof cfg.readReceiptWitness, 'function');
+          witness = await cfg.readReceiptWitness({
+            sessionId: sessions.cloud,
+            marker: marker(label),
+          });
+          if (witness) assert.equal(witness.sessionId, sessions.cloud);
+        }
         const proof =
           side === 'desktop'
             ? fixture.state.receipts.find(
                 (item) => item.side === side && item.marker === marker(label),
               )
-            : nativeNetworkReceipt(await events('cloud'), marker(label));
+            : nativeNetworkReceipt(
+                await events('cloud'),
+                marker(label),
+                witness,
+              );
         return proof ? { ...proof, side } : null;
       },
       `${side}_network_receipt_missing`,

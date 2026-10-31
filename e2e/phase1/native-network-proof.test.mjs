@@ -137,3 +137,39 @@ test('native receipt requires the exact external body and its durable native req
   ])
     assert.equal(nativeNetworkReceipt([event], 'unique-marker'), null);
 });
+
+test('durable receipt binds distinct message and recipient IDs to an operator-read committed witness', () => {
+  const event = {
+    type: 'user/message',
+    data: {
+      content: [
+        {
+          type: 'text',
+          text: '[Auriga external message message-1]\nunique-marker',
+        },
+      ],
+      source: { kind: 'user', rpcId: 'recipient-2' },
+    },
+  };
+  const witness = {
+    messageId: 'message-1',
+    recipientId: 'recipient-2',
+    marker: 'unique-marker',
+    sessionId: 'native-session',
+    stage: 'committed',
+  };
+  assert.equal(nativeNetworkReceipt([event], 'unique-marker'), null);
+  assert.equal(
+    nativeNetworkReceipt([event], 'unique-marker', witness).recipientId,
+    'recipient-2',
+  );
+  for (const wrong of [
+    { ...witness, messageId: 'other-message' },
+    { ...witness, recipientId: 'other-recipient' },
+    { ...witness, marker: 'other-marker' },
+    { ...witness, sessionId: '' },
+    { ...witness, stage: 'received' },
+    { ...witness, stage: 'invoking' },
+  ])
+    assert.equal(nativeNetworkReceipt([event], 'unique-marker', wrong), null);
+});

@@ -67,22 +67,36 @@ export function nativeToolEvidence(events, name, accepts) {
   return null;
 }
 
-export function nativeNetworkReceipt(events, marker) {
+// The native host deduplicates durable input by recipient ID. An optional
+// trusted operator read of committed inbox state binds that ID to the message;
+// model text and an initiating prompt cannot provide this witness.
+export function nativeNetworkReceipt(events, marker, witness) {
   for (const event of events) {
     if (event.type !== 'user/message') continue;
     const content = text(event.data);
     const match = content.match(
       /^\[Auriga external message ([A-Za-z0-9-]{1,128})\]\r?\n/,
     );
+    const witnessed =
+      match &&
+      witness?.stage === 'committed' &&
+      typeof witness.sessionId === 'string' &&
+      witness.sessionId.length > 0 &&
+      typeof witness.recipientId === 'string' &&
+      /^[A-Za-z0-9-]{1,128}$/.test(witness.recipientId) &&
+      witness.marker === marker &&
+      witness.messageId === match[1] &&
+      witness.recipientId === event.data.source?.rpcId;
     if (
       match &&
       content.slice(match[0].length) === marker &&
       event.data.source?.kind === 'user' &&
-      event.data.source.rpcId === match[1]
+      (event.data.source.rpcId === match[1] || witnessed)
     )
       return {
         marker,
         messageId: match[1],
+        ...(witnessed ? { recipientId: witness.recipientId } : {}),
         via: 'native-session-user-message',
       };
   }
