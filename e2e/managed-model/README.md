@@ -28,3 +28,5 @@ node /probe.mjs /runtime /run/auriga/cordis.patch.json /run/auriga /scratch --re
 **已知并接受**：仅实例主人经 `settings/describe` 可见 `llm-pi-ai` 的 `value.providers.auriga-managed.headers.Authorization`，属 MANAGED-N1 同机边界，跟踪 backlog **B-MM-DESCRIBE**。探针对该精确位置给出警告，只输出路径、不输出 Key；其他任何位置出现 Key（包括其他 namespace/provider、base/user、mutate 返回及 profile）仍判失败。
 运行 `node --test infra/agent/internal/renderer/testdata/model-exposure.test.mjs` 验证精确豁免与负例。只读容器运行时也须将同目录 `model-exposure.mjs` 只读挂载到 `/model-exposure.mjs`。
 托管模式只用于平台专用的模型提供方 profile；不覆盖用户原生 `credentials` 行，不向用户已有个人 profile 叠加这层补丁。
+
+NAS 隔离云端使用托管提供方时，将 phase1 凭据文件的 `modelNative.cloud` 配置为 `managed:true`，`baseUrl` 指向部署批准的内部 HTTPS `/ai/v1`，`cwd` 为实例目录，不配置 `hostHeader`。第⑥项会核对已交付的 `auriga-managed` 提供方、直接创建原生会话，并要求本次调用后出现新的 `end_user=tenantId:accountId` 非零用量；不会生成/配置个人虚拟 Key，不读取或输出托管 Authorization 头。失败同样保留原生会话诊断并取消本轮活动请求。桌面继续按现有公开成员模型配置验收。

@@ -183,6 +183,66 @@ async function spendForKey(api, key) {
   throw new StepError('LiteLLM未查到该成员测试Key的非零token用量');
 }
 
+// Owner-side native APIs only. Do not read/copy the managed Authorization header
+// or substitute a personal/admin virtual key for the instance-bound credential.
+export async function managedConversation(client, api, settings) {
+  const described = await client.rpc('settings/describe');
+  const provider = described.namespaces?.find((row) => row.ns === 'llm-pi-ai')
+    ?.value?.providers?.['auriga-managed'];
+  requireThat(
+    provider?.baseURL === settings.baseUrl &&
+      provider.compat?.supportsStore === false &&
+      provider.models?.some((row) => row.id === settings.model),
+    '托管提供方未按部署入口及池模型交付',
+  );
+  const member = settings.tenant + ':' + settings.member;
+  const rows = () =>
+    api(
+      'spend/logs?end_user=' +
+        encodeURIComponent(member) +
+        '&limit=1000&summarize=false',
+    );
+  const before = await rows();
+  requireThat(Array.isArray(before), 'LiteLLM用量日志不是数组');
+  const previous = new Set(before.map((row) => row.request_id));
+  const sessionId = await client.createSession(
+    settings.cwd,
+    'auriga-managed',
+    settings.model,
+  );
+  settings.onSession?.(sessionId);
+  await client.prompt(
+    sessionId,
+    'Reply with exactly ' + settings.marker + '. Do not use tools.',
+  );
+  const response = await waitAssistant(client, sessionId, settings.marker);
+  const deadline = Date.now() + 15000;
+  do {
+    const current = await rows();
+    requireThat(Array.isArray(current), 'LiteLLM用量日志不是数组');
+    const row = current.find(
+      (row) =>
+        row.end_user === member &&
+        row.total_tokens > 0 &&
+        /^[A-Za-z0-9._:-]{1,128}$/.test(row.request_id ?? '') &&
+        !previous.has(row.request_id),
+    );
+    if (row)
+      return {
+        sessionId,
+        ...response,
+        totalTokens: row.total_tokens,
+        requestId: row.request_id,
+        memberAttribution: member,
+        ...(/^[A-Za-z0-9_-]{1,128}$/.test(row.model_id ?? '')
+          ? { deploymentId: row.model_id }
+          : {}),
+      };
+    await delay(500);
+  } while (Date.now() < deadline);
+  throw new StepError('LiteLLM未查到本次托管会话的新成员用量');
+}
+
 export async function nativeModels(
   adapter,
   state,
@@ -241,10 +301,13 @@ export async function nativeModels(
       portal.host + ([80, 443].includes(portal.port) ? '' : ':' + portal.port);
     requireThat(
       adapter.access.mode === 'ip' &&
-        cloudUrl.protocol === 'http:' &&
+        (config.cloud.managed === true
+          ? cloudUrl.protocol === 'https:' && !config.cloud.hostHeader
+          : cloudUrl.protocol === 'http:' &&
+            Number(cloudUrl.port || 80) === portal.port &&
+            config.cloud.hostHeader === authority) &&
         cloudUrl.hostname === adapter.access.instanceControl.dnsAlias &&
-        Number(cloudUrl.port || 80) === portal.port &&
-        config.cloud.hostHeader === authority,
+        cloudUrl.pathname === '/ai/v1',
       '云端内部模型入口须使用本部署可信edge别名与门户authority',
     );
   }
@@ -259,58 +322,81 @@ export async function nativeModels(
     let sessionId;
     let proof;
     try {
-      const created = await api('key/generate', {
-        method: 'POST',
-        body: {
-          user_id: tenant + ':' + members[side],
-          models: [model],
-          duration: '10m',
-          max_budget: 0.05,
-          key_alias: 'phase1-native-' + randomBytes(8).toString('hex'),
-        },
-      });
-      requireThat(
-        typeof created.key === 'string' && created.key.startsWith('sk-'),
-        '未签发成员测试Key',
-      );
-      cleanup.push(() =>
-        api('key/delete', { method: 'POST', body: { keys: [created.key] } }),
-      );
-      const bound = await api(
-        'key/info?key=' + encodeURIComponent(created.key),
-      );
-      requireThat(
-        bound.info?.user_id === tenant + ':' + members[side],
-        '成员模型测试Key归属未绑定已登录成员',
-      );
-      const provider = 'auriga-relay-' + randomBytes(6).toString('hex');
-      await configureRelayProvider(
-        client,
-        settings,
-        provider,
-        created.key,
-        model,
-        cleanup,
-      );
-      cleanup.push(() => client.cancel());
-      sessionId = await client.createSession(settings.cwd, provider, model);
-      const marker = 'PHASE1_NATIVE_' + randomBytes(12).toString('hex');
-      await client.prompt(
-        sessionId,
-        'Reply with exactly ' + marker + '. Do not use tools.',
-      );
-      const response = await waitAssistant(client, sessionId, marker);
-      const spend = await spendForKey(api, created.key);
-      proof = spend;
-      item.nativeModels.conversations.push({
-        phase,
-        side,
-        model,
-        memberId: members[side],
-        sessionId,
-        ...response,
-        ...spend,
-      });
+      if (side === 'cloud' && settings.managed === true) {
+        cleanup.push(() => client.cancel());
+        const result = await managedConversation(client, api, {
+          ...settings,
+          tenant,
+          member: members[side],
+          model,
+          marker: 'PHASE1_MANAGED_' + randomBytes(12).toString('hex'),
+          onSession: (id) => {
+            sessionId = id;
+          },
+        });
+        item.nativeModels.conversations.push({
+          phase,
+          side,
+          model,
+          managed: true,
+          memberId: members[side],
+          ...result,
+        });
+        proof = result;
+      } else {
+        const created = await api('key/generate', {
+          method: 'POST',
+          body: {
+            user_id: tenant + ':' + members[side],
+            models: [model],
+            duration: '10m',
+            max_budget: 0.05,
+            key_alias: 'phase1-native-' + randomBytes(8).toString('hex'),
+          },
+        });
+        requireThat(
+          typeof created.key === 'string' && created.key.startsWith('sk-'),
+          '未签发成员测试Key',
+        );
+        cleanup.push(() =>
+          api('key/delete', { method: 'POST', body: { keys: [created.key] } }),
+        );
+        const bound = await api(
+          'key/info?key=' + encodeURIComponent(created.key),
+        );
+        requireThat(
+          bound.info?.user_id === tenant + ':' + members[side],
+          '成员模型测试Key归属未绑定已登录成员',
+        );
+        const provider = 'auriga-relay-' + randomBytes(6).toString('hex');
+        await configureRelayProvider(
+          client,
+          settings,
+          provider,
+          created.key,
+          model,
+          cleanup,
+        );
+        cleanup.push(() => client.cancel());
+        sessionId = await client.createSession(settings.cwd, provider, model);
+        const marker = 'PHASE1_NATIVE_' + randomBytes(12).toString('hex');
+        await client.prompt(
+          sessionId,
+          'Reply with exactly ' + marker + '. Do not use tools.',
+        );
+        const response = await waitAssistant(client, sessionId, marker);
+        const spend = await spendForKey(api, created.key);
+        proof = spend;
+        item.nativeModels.conversations.push({
+          phase,
+          side,
+          model,
+          memberId: members[side],
+          sessionId,
+          ...response,
+          ...spend,
+        });
+      }
     } catch (error) {
       failure = error;
       if (sessionId) {
