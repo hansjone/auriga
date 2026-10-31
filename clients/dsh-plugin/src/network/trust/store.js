@@ -1,3 +1,4 @@
+import { platformStarted } from '../clock.js';
 import { SessionError } from '../session/errors.js';
 import { createHash } from 'node:crypto';
 import { canonicalize } from './jcs.js';
@@ -213,7 +214,7 @@ export async function openTrustStore({
         blocked ||
         !current ||
         !Number.isFinite(now()) ||
-        now() < timeValue(current.issued_at) ||
+        !platformStarted(timeValue(current.issued_at), now()) ||
         now() >= timeValue(current.valid_until)
       )
         unavailable('keyset unavailable');
@@ -265,7 +266,7 @@ export async function openTrustStore({
         usable &&
         !blocked &&
         now() < timeValue(current.valid_until) &&
-        now() >= timeValue(current.issued_at) &&
+        platformStarted(timeValue(current.issued_at), now()) &&
         BigInt(version) <= BigInt(current.keyset_version) &&
         current.keys.some((k) => k.kid === kid)
       )
@@ -288,7 +289,7 @@ export async function openTrustStore({
             if (
               current &&
               !blocked &&
-              now() >= timeValue(current.issued_at) &&
+              platformStarted(timeValue(current.issued_at), now()) &&
               now() < timeValue(current.valid_until) &&
               BigInt(current.keyset_version) >= BigInt(version) &&
               current.keys.some((k) => k.kid === kid)
@@ -324,7 +325,7 @@ export async function openTrustStore({
         blocked ||
         !current ||
         !Number.isFinite(clock) ||
-        clock < timeValue(current.issued_at) ||
+        !platformStarted(timeValue(current.issued_at), clock) ||
         clock >=
           Math.min(
             timeValue(current.valid_until),
@@ -338,7 +339,7 @@ export async function openTrustStore({
       if (
         !k ||
         !['active', 'retired'].includes(k.state) ||
-        clock < timeValue(k.not_before) ||
+        !platformStarted(timeValue(k.not_before), clock) ||
         clock >= timeValue(k.not_after)
       )
         return unavailable('key unavailable');

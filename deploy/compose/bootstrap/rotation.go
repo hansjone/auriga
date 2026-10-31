@@ -272,11 +272,9 @@ func (r *rotation) binding() error {
 	if err != nil {
 		return err
 	}
-	expectedEnv := append(append(append([]byte{}, keys...), []byte("AURIGA_AGENT_CA_SHA256="+strings.TrimSpace(string(ca))+"\n")...), access...)
 	env, err := rotationRead(filepath.Join(r.out, "compose.env"))
 	defer clear(env)
-	defer clear(expectedEnv)
-	if err != nil || !bytes.Equal(env, expectedEnv) {
+	if err != nil || !matchesPanelComposeEnvironment(r.out, keys, ca, access, env) {
 		return fmt.Errorf("rotation compose environment differs from sealed inputs")
 	}
 	match := regexp.MustCompile(`(?m)^COMPOSE_PROJECT_NAME='([a-z0-9][a-z0-9_-]*)'$`).FindSubmatch(access)

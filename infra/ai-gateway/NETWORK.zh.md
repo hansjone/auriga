@@ -152,7 +152,8 @@ READY/FETCH/RECEIPT 经生成的 NetworkMailboxService 转发完整原始 JSON�
 没有私造客户端 HEAD 请求，也没有用逐连接短 poll 取邮箱；collab 的批量修复扫描/提示合并由后续任务接线。
 
 客户端 READY/FETCH/RECEIPT 按 tenant/realm/node 最多 1 个 RPC 在途（续接 ingress 共享），
-每租户最多 16 个、全局 128 个；RPC 时限复用 requestTimeoutMillis（≤250ms）。每节点请求
+每租户最多 16 个、全局 128 个；READY 单独使用 1s 硬上限以完成多次在线核权，其他普通控制方法
+复用 requestTimeoutMillis（≤250ms）。READY 最多占用同一在途槽 1s，容量上限不变。每节点请求
 64/s、burst=8，每租户 256/s、burst=32，限额先在轻量回调检查，不在回调解析 JSON 或签名。
 每个已认证 ingress 独立精确订阅，pending ≤8 帧且 ≤128KiB，随连接授权失败/断开回收；
 订阅总数受 maxConnections 限制，不随 DSH 内的逻辑会话增长。
@@ -188,7 +189,7 @@ RPC 前后都检查当前连接、epoch、nonce 和 boot；断线取消在途来
 NATS 每 ingress 的 8 帧/128KiB pending 上限不变；回调只作有界 type 提取，完整来源校验在 worker 执行。
 
 三来源请求从受理起最多 30 秒，专用 mailbox 拨号器仅对这三种生成方法解除原公共 10 秒拦截器截短，
-仍使用相同配置的 mTLS/轮换服务 JWT；其余方法的 requestTimeoutMillis 和 busy 语义不变。
+仍使用相同配置的 mTLS/轮换服务 JWT；READY 为 1s，其他普通控制方法的 requestTimeoutMillis 和 busy 语义不变。
 超时/取消释放本次槽并返回可重试诊断，不能据此声明 mutation 未提交；插件保留原 op/outbox 对账。
 迟到响应不会发布或释放后来请求的槽。未实现 RPC、坏响应、错受众及超限均失败关闭。
 

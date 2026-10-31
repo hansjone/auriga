@@ -134,7 +134,7 @@ func TestCollabInputMetadataFailures(t *testing.T) {
 				t.Fatal(err)
 			}
 			c, err := readCollabInput(file, access)
-			defer c.clear()
+			defer c.Clear()
 			if (err == nil) != (name == "valid") {
 				t.Fatalf("unexpected result: %v", err)
 			}
@@ -148,7 +148,7 @@ func TestCollabProjectionAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.clear()
+	defer c.Clear()
 	root := t.TempDir()
 	binary := os.Getenv("AURIGA_COLLAB_TEST_BOOTSTRAP")
 	if binary == "" {
@@ -216,6 +216,29 @@ func TestCollabProjectionAndReceipt(t *testing.T) {
 		t.Fatal("gateway not bound to approved N1 component")
 	}
 	properties := read("network-platform/platform.properties")
+	var managed struct {
+		PlatformOrigin string `json:"platformOrigin"`
+		Issuer         string `json:"issuer"`
+		Network        struct {
+			Realm  string `json:"realm"`
+			WSSURL string `json:"wssUrl"`
+			Roots  []struct {
+				Kid       string `json:"kid"`
+				PublicKey string `json:"public_key_spki"`
+			} `json:"roots"`
+		} `json:"network"`
+	}
+	if err := json.Unmarshal([]byte(read("network-platform/managed-network.json")), &managed); err != nil {
+		t.Fatal(err)
+	}
+	if managed.PlatformOrigin != access.Issuer() || managed.Issuer != access.Issuer() ||
+		managed.Network.Realm != c.Realm || managed.Network.WSSURL != strings.Replace(access.Issuer(), "https://", "wss://", 1)+"/net/v1/ws" ||
+		len(managed.Network.Roots) != 1 || managed.Network.Roots[0].Kid != c.RootKid || managed.Network.Roots[0].PublicKey != base64.RawURLEncoding.EncodeToString(c.Files["root.der"]) {
+		t.Fatal("managed network installation does not preserve approved origin/realm/root")
+	}
+	if !strings.Contains(properties, "auriga.workspace.managed-network-installation-file=/etc/auriga/network/managed-network.json") {
+		t.Fatal("managed network provisioning not enabled")
+	}
 	if err := checkNativeClient(out); err != nil {
 		t.Fatalf("N1 projection lost native client: %v", err)
 	}

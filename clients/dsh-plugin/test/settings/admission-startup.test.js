@@ -9,6 +9,8 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { apply } from '../../src/plugin.js';
 import { createSettingsStore } from '../../src/settings/store.js';
 
+const nativePeer = { principal: { kind: 'owner' } };
+
 // Public host-port lifecycle fixture, not a real DSH/browser or IAM claim.
 async function installation(t, preferences) {
   const dir = await mkdtemp(join(tmpdir(), 'auriga-startup-admission-'));
@@ -22,7 +24,7 @@ async function installation(t, preferences) {
   const ctx = {
     connection: {
       admit(req) {
-        return native(req) ? { peer: 'native' } : { rejection: 401 };
+        return native(req) ? { peer: nativePeer } : { rejection: 401 };
       },
       requestRejection(req) {
         return this.admit(req).rejection;
@@ -144,53 +146,26 @@ async function installation(t, preferences) {
     return outcomes;
   }
   async function closed() {
-    const req = request(),
-      index = response();
-    assert.equal(
-      ctx.connection.authorizeIndex(req, index),
-      false,
-      'native launch credentials must not open the index',
-    );
-    assert.equal(index.status, 303);
-    assert.equal(index.headers.location, '/auriga/local-login');
-    assert.equal(
-      ctx.connection.admit(req).rejection,
-      401,
-      'shared API requires platform login',
-    );
-    assert.equal(
-      ctx.connection.admit(
-        request('/api/ws', undefined, 'native=valid', { upgrade: 'websocket' }),
-      ).rejection,
-      401,
-    );
-    const stream = response();
-    let forwarded = false;
-    await hook?.(req, stream, async () => {
-      forwarded = true;
-    });
-    assert.equal(forwarded, false);
-    assert.equal(stream.status, 401);
+    await standalone();
   }
   async function standalone() {
     assert.equal(ctx.connection.authorizeIndex(request('/'), response()), true);
-    assert.equal(ctx.connection.admit(request()).peer, 'native');
-    assert.equal(
-      ctx.connection.admit(
-        request('/api/ws', undefined, 'native=valid', { upgrade: 'websocket' }),
-      ).peer,
-      'native',
-    );
+    for (const upgrade of [undefined, 'websocket'])
+      assert.equal(
+        ctx.connection.admit(
+          request('/api/test', undefined, 'native=valid', { upgrade }),
+        ).peer,
+        nativePeer,
+      );
     assert.equal(
       ctx.connection.admit(request('/api/test', undefined, '')).rejection,
       401,
-      'standalone still enforces native authentication',
     );
-    let forwarded = false;
-    await hook?.(request(), response(), async () => {
-      forwarded = true;
-    });
-    assert.equal(forwarded, true);
+    assert.equal(
+      hook,
+      undefined,
+      'local DSH HTTP is not bound to platform response lifetimes',
+    );
   }
   await apply(ctx);
   return {
@@ -209,8 +184,8 @@ async function installation(t, preferences) {
 for (const startsStandalone of [false, true])
   test(
     startsStandalone
-      ? 'standalone WebSockets close before enabling a platform, reconnect requires login, and clearing the platform revokes authenticated sockets'
-      : 'saved platform with no loader connect stays closed without tool services, then supports the normal login routes after dependency recovery',
+      ? 'R2 local WebSockets survive platform configuration changes'
+      : 'R2 saved platform does not block local owner while dependencies recover',
     async (t) => {
       const origin = 'https://portal.example.com';
       const host = await installation(
@@ -237,11 +212,11 @@ for (const startsStandalone of [false, true])
         const rejected = host.request('/api/ws', undefined, '', {
           upgrade: 'websocket',
         });
-        assert.equal(host.ctx.connection.admit(live).peer, 'native');
-        assert.equal(host.ctx.connection.admit(live).peer, 'native');
-        assert.equal(live.socket.listenerCount('close'), 1);
-        assert.equal(host.ctx.connection.admit(finished).peer, 'native');
-        assert.equal(host.ctx.connection.admit(http).peer, 'native');
+        assert.equal(host.ctx.connection.admit(live).peer, nativePeer);
+        assert.equal(host.ctx.connection.admit(live).peer, nativePeer);
+        assert.equal(live.socket.listenerCount('close'), 0);
+        assert.equal(host.ctx.connection.admit(finished).peer, nativePeer);
+        assert.equal(host.ctx.connection.admit(http).peer, nativePeer);
         assert.equal(host.ctx.connection.admit(rejected).rejection, 401);
         const finish = t.mock.method(finished.socket, 'destroy');
         finished.socket.destroy();
@@ -265,12 +240,12 @@ for (const startsStandalone of [false, true])
         assert.equal(save.status, 200);
         assert.equal(
           live.socket.destroyed,
-          true,
+          undefined,
           'the old multiplexed transport must be destroyed before platform login is enabled',
         );
         assert.equal(
           rejectionWhileClosing,
-          401,
+          undefined,
           'close callbacks cannot race a native-only reconnection',
         );
         assert.equal(
@@ -396,8 +371,7 @@ for (const startsStandalone of [false, true])
       const prepared = await host.call('/auriga/local-login/status');
       assert.equal(prepared.status, 200);
       assert.equal(prepared.body.loggedIn, false);
-      const cookies =
-        'native=valid; ' + prepared.headers['set-cookie'].split(';')[0];
+      const cookies = 'native=valid';
       const headers = { 'x-auriga-csrf': prepared.body.csrf };
       const begun = await host.call(
         '/auriga/local-login/login',
@@ -423,8 +397,7 @@ for (const startsStandalone of [false, true])
       );
       assert.equal(completed.status, 200);
       assert.equal(completed.body.step.type, 'complete');
-      const authenticated =
-        'native=valid; ' + completed.headers['set-cookie'][0].split(';')[0];
+      const authenticated = 'native=valid';
       assert.equal(
         host.ctx.connection.authorizeIndex(
           host.request('/', undefined, authenticated),
@@ -436,7 +409,7 @@ for (const startsStandalone of [false, true])
         host.ctx.connection.admit(
           host.request('/api/test', undefined, authenticated),
         ).peer,
-        'native',
+        nativePeer,
       );
       const authenticatedSocket = host.request(
         '/api/ws',
@@ -448,7 +421,7 @@ for (const startsStandalone of [false, true])
       );
       assert.equal(
         host.ctx.connection.admit(authenticatedSocket).peer,
-        'native',
+        nativePeer,
       );
       assert.equal(
         (
@@ -472,13 +445,13 @@ for (const startsStandalone of [false, true])
           { 'x-auriga-settings': '1' },
         );
         assert.equal(cleared.status, 200);
-        assert.equal(authenticatedSocket.socket.destroyed, true);
+        assert.equal(authenticatedSocket.socket.destroyed, undefined);
         await host.standalone();
       }
     },
   );
 
-test('only a confirmed empty profile restores standalone admission, even when tool services never arrive', async (t) => {
+test('R2 empty profile keeps DSH owner access while tool services are absent', async (t) => {
   const host = await installation(t);
   await host.closed();
   host.ctx.profileContext = { dir: host.dir };
@@ -486,7 +459,7 @@ test('only a confirmed empty profile restores standalone admission, even when to
   await host.standalone();
 });
 
-test('a corrupt saved settings file fails closed while platform state cannot be determined', async (t) => {
+test('R2 corrupt platform settings do not revoke DSH owner access', async (t) => {
   const host = await installation(t);
   await mkdir(join(host.dir, 'auriga-settings'), { recursive: true });
   await writeFile(join(host.dir, 'auriga-settings/settings.json'), '{');
@@ -495,7 +468,7 @@ test('a corrupt saved settings file fails closed while platform state cannot be 
   await host.closed();
 });
 
-test('a late empty settings result cannot reopen admission after the profile scope closes', async (t) => {
+test('R2 late platform settings do not change DSH owner authority', async (t) => {
   const host = await installation(t);
   host.ctx.profileContext = { dir: host.dir };
   const reading = host.runReady();
@@ -504,7 +477,7 @@ test('a late empty settings result cannot reopen admission after the profile sco
   await host.closed();
 });
 
-test('saving a platform while tool services are missing immediately closes a confirmed standalone installation', async (t) => {
+test('R2 saving a platform while tools are missing preserves owner admission', async (t) => {
   const host = await installation(t);
   host.ctx.profileContext = { dir: host.dir };
   assert.deepEqual(await host.runReady(), []);
@@ -520,15 +493,15 @@ test('saving a platform while tool services are missing immediately closes a con
   await host.closed();
 });
 
-test('closing a standalone profile closes its native WebSockets before returning to unknown admission', async (t) => {
+test('R2 plugin profile disposal does not destroy DSH local WebSockets', async (t) => {
   const host = await installation(t);
   host.ctx.profileContext = { dir: host.dir };
   assert.deepEqual(await host.runReady(), []);
   const req = host.request('/api/ws', undefined, 'native=valid', {
     upgrade: 'websocket',
   });
-  assert.equal(host.ctx.connection.admit(req).peer, 'native');
+  assert.equal(host.ctx.connection.admit(req).peer, nativePeer);
   host.closeProfile();
-  assert.equal(req.socket.destroyed, true);
+  assert.equal(req.socket.destroyed, undefined);
   await host.closed();
 });

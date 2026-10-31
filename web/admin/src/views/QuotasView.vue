@@ -8,14 +8,7 @@ import {
   shallowRef,
   watch,
 } from 'vue';
-import {
-  ElButton,
-  ElSelect,
-  ElInput,
-  ElForm,
-  ElFormItem,
-  ElCheckbox,
-} from 'element-plus';
+import { ElButton, ElSelect, ElInput, ElForm, ElFormItem } from 'element-plus';
 import { ApiError, isApiError } from '@auriga/shared';
 import { orgApi } from '../api';
 import { adminApi } from '../admin/api';
@@ -441,17 +434,6 @@ function effectiveValue(field: QuotaField) {
             :aria-label="t('fields.alwaysOnAllowed')"
             :options="booleanModes"
         /></ElFormItem>
-        <ElFormItem :label="t('fields.currency')"
-          ><ElCheckbox v-model="draft.currency.enabled">{{
-            t('currencySet')
-          }}</ElCheckbox
-          ><ElInput
-            v-if="draft.currency.enabled"
-            v-model="draft.currency.value"
-            maxlength="3"
-            :aria-label="t('fields.currency')"
-            placeholder="USD"
-        /></ElFormItem>
         <ElButton v-if="canWrite" native-type="submit" type="primary">{{
           t('saveQuota')
         }}</ElButton>
@@ -483,8 +465,6 @@ function effectiveValue(field: QuotaField) {
               : t(effective.instance.alwaysOnAllowed ? 'allow' : 'deny')
           }}
         </dd>
-        <dt>{{ t('fields.currency') }}</dt>
-        <dd>{{ effective.model?.currency ?? t('effectiveUnknown') }}</dd>
       </dl>
     </section>
     <ActionConfirm

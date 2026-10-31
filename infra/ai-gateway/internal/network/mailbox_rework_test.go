@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -55,6 +56,102 @@ func (p *countingPublisher) Publish(subject string, data []byte) error {
 	return p.delegate.Publish(subject, data)
 }
 
+// Runtime.Close joins admitted workers, but NATS Close/Unsubscribe can return
+// while a subscription dispatcher is still returning from receive. Join those
+// dispatchers too before the test ends (or reads its final publication counts).
+func mailboxFixtureCloser(t *testing.T, run *Runtime) func() {
+	t.Helper()
+	run.mailbox.mu.Lock()
+	subs := append([]*nats.Subscription(nil), run.mailbox.subscriptions...)
+	for _, sub := range run.mailbox.upSubscriptions {
+		subs = append(subs, sub)
+	}
+	run.mailbox.mu.Unlock()
+	done := make([]chan struct{}, len(subs))
+	for i, sub := range subs {
+		done[i] = make(chan struct{})
+		sub.SetClosedHandler(func(string) { close(done[i]) })
+	}
+	closeFixture := sync.OnceFunc(func() {
+		defer run.Close()
+		// Drain preserves queued flood messages. Closing the connection here
+		// would discard them and weaken the final diagnostic-count assertion.
+		for _, sub := range subs {
+			if err := sub.Drain(); err != nil && !errors.Is(err, nats.ErrBadSubscription) && !errors.Is(err, nats.ErrConnectionClosed) {
+				t.Errorf("drain mailbox subscription %s: %v", sub.Subject, err)
+			}
+		}
+		guard := time.NewTimer(5 * time.Second)
+		defer guard.Stop()
+		for i, exited := range done {
+			select {
+			case <-exited:
+			case <-guard.C:
+				t.Errorf("mailbox callback did not exit: %s", subs[i].Subject)
+				return
+			}
+		}
+		// No dispatcher can start another worker after all close notifications.
+		run.mailbox.workers.Wait()
+	})
+	t.Cleanup(closeFixture)
+	return closeFixture
+}
+
+func TestMailboxFixtureCloseJoinsSubscriptionCallback(t *testing.T) {
+	h, cfg, _ := runtimeFixture(t)
+	run, err := StartRuntime(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(run.Close)
+	nc, err := nats.Connect(h.wsURL(), nats.Token(connectTicket), nats.NoReconnect())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	b := run.redeemer.snapshot()[0]
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	// A second real dispatcher on the same authenticated ingress makes the
+	// Close-vs-callback ordering deterministic, independently of worker timing.
+	sub, err := run.data.Subscribe(UpSubject(b.Ingress), func(*nats.Msg) {
+		close(entered)
+		<-release
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.mailbox.mu.Lock()
+	run.mailbox.subscriptions = append(run.mailbox.subscriptions, sub)
+	run.mailbox.mu.Unlock()
+	if err = run.data.FlushTimeout(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	closeFixture := mailboxFixtureCloser(t, run)
+	if err = nc.Publish(UpSubject(b.Ingress), []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("subscription callback never entered")
+	}
+	// Runtime.Close itself does not join the held dispatcher.
+	run.Close()
+	closed := make(chan struct{})
+	go func() { closeFixture(); close(closed) }()
+	defer func() { unblock(); <-closed }()
+	select {
+	case <-closed:
+		t.Fatal("fixture closed before subscription callback exited")
+	case <-time.After(20 * time.Millisecond):
+		// A negative observation window, after callback entry and runtime close.
+	}
+	unblock()
+}
+
 func TestBrokerIngressFloodDoesNotStarveAnotherNode(t *testing.T) {
 	h, cfg, authority := runtimeFixture(t)
 	backend := &fakeMailboxRPC{}
@@ -64,6 +161,15 @@ func TestBrokerIngressFloodDoesNotStarveAnotherNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(run.Close)
+	// Connection setup is outside the fairness observation. This fixture's
+	// 100ms reconciliation budget is not a scheduling budget for mailbox RPCs.
+	connectCtx, cancelConnect := context.WithTimeout(t.Context(), registrationPhaseGuard)
+	err = awaitRegistrationRPC(connectCtx, run.collab)
+	cancelConnect()
+	if err != nil {
+		t.Fatal("collab connection before flood:", err)
+	}
+	run.mailbox.client.timeout = time.Second
 	first, err := nats.Connect(h.wsURL(), nats.Token(connectTicket), nats.NoReconnect())
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +207,7 @@ func TestBrokerIngressFloodDoesNotStarveAnotherNode(t *testing.T) {
 	if err = second.Flush(); err != nil {
 		t.Fatal(err)
 	}
+	closeFixture := mailboxFixtureCloser(t, run)
 	for i := 0; i < 1024; i++ {
 		if err = first.Publish(UpSubject(ingressA), []byte(validMailboxFetch)); err != nil {
 			t.Fatal(err)
@@ -109,14 +216,14 @@ func TestBrokerIngressFloodDoesNotStarveAnotherNode(t *testing.T) {
 	if err = second.Publish(UpSubject(ingressB), []byte(validMailboxFetch)); err != nil {
 		t.Fatal(err)
 	}
-	msg, err := sub.NextMsg(time.Second)
+	msg, err := sub.NextMsg(registrationPhaseGuard)
 	if err != nil || string(msg.Data) != string(response) {
 		t.Fatalf("healthy node starved: %v %v", msg, err)
 	}
 	if err = first.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	run.mailbox.workers.Wait()
+	closeFixture()
 	published.mu.Lock()
 	count := published.counts[DownSubject(ingressA)]
 	published.mu.Unlock()

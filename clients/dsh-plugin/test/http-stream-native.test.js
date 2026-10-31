@@ -8,12 +8,15 @@ import { pathToFileURL } from 'node:url';
 import { ReadableStream } from 'node:stream/web';
 import { TextDecoder } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
-import {
-  createHttpResponseTracker,
-  installLocalAdmission,
-} from '../src/local/host.js';
+import { installLocalAdmission } from '../src/local/host.js';
+import { createHttpResponseTracker } from './http-response-fixture.js';
 import { createConnectRoutes } from '../src/local/routes.js';
-import { cookie } from '../src/local/runtime.js';
+const cookie = (req, name) =>
+  (req.headers.cookie ?? '')
+    .split(';')
+    .map((x) => x.trim())
+    .find((x) => x.startsWith(name + '='))
+    ?.slice(name.length + 1);
 
 test(
   'actual rc.3 HTTP stream closes at the local-session boundary; late events and unrelated streams stay isolated',

@@ -90,6 +90,7 @@ func activationBase(out, expectedReceipt, expectedIdentity string) (deploymentco
 
 func activationFiles() []string {
 	files := []string{"edge.config.json", "pki/ca.crt", "pki/edge-collab.crt", "pki/edge-collab.key", "network/runtime.json", "network/protocol.key", "network-platform/gateway.secret", "network-platform/collab.secret", "network-platform/platform.properties", "collab-installation/input.json"}
+	files = append(files, "network-platform/managed-network.json")
 	for _, name := range collabLeaves {
 		files = append(files, "collab-installation/"+name)
 	}
@@ -183,11 +184,11 @@ func runActivation(out, input, baseHash, identityHash string, check, validate, s
 	if err != nil || c == nil {
 		return fmt.Errorf("activation input refused")
 	}
-	defer c.clear()
+	defer c.Clear()
 	if err := checkActivationState(c); err != nil {
 		return err
 	}
-	inputHash := c.digest()
+	inputHash := c.Digest()
 	if !validate && runtime.GOOS != "linux" {
 		return fmt.Errorf("collab activation requires Linux; use -validate-access")
 	}
@@ -298,39 +299,7 @@ func runActivation(out, input, baseHash, identityHash string, check, validate, s
 	return nil
 }
 
-// Compare public installed state to the approved manifest; Java remains the
-// root-signature/schema/PG authority. This never constructs or signs a state.
-func checkActivationState(c *collabInput) error {
-	var signed struct {
-		Keyset struct {
-			Issued  string `json:"issued_at"`
-			Version string `json:"keyset_version"`
-			Keys    []map[string]any
-		}
-	}
-	var state struct {
-		Version string
-		Issued  string `json:"issued_at"`
-		Keys    []map[string]any
-	}
-	if json.Unmarshal(c.files["signed.json"], &signed) != nil || len(signed.Keyset.Keys) != 3 {
-		return fmt.Errorf("activation manifest refused")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(c.files["state.json"]))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&state) != nil || decoder.Decode(new(any)) != io.EOF || state.Version != signed.Keyset.Version || state.Issued != signed.Keyset.Issued || len(state.Keys) != 3 {
-		return fmt.Errorf("activation state mismatch")
-	}
-	for i, key := range signed.Keyset.Keys {
-		expected := map[string]any{"kid": key["kid"], "realm": c.Realm, "purpose": key["purpose"], "state": "ACTIVE", "not_before": key["not_before"], "not_after": key["not_after"], "public_key_spki": key["public_key_spki"]}
-		a, _ := json.Marshal(expected)
-		b, _ := json.Marshal(state.Keys[i])
-		if !bytes.Equal(a, b) {
-			return fmt.Errorf("activation state mismatch")
-		}
-	}
-	return nil
-}
+func checkActivationState(c *collabInput) error { return c.CheckState() }
 
 func writeActivationInput(stage string, c *collabInput) error {
 	copy := *c
@@ -344,7 +313,7 @@ func writeActivationInput(stage string, c *collabInput) error {
 			Keys []struct{ Kid, Purpose string }
 		}
 	}
-	if json.Unmarshal(c.files["signed.json"], &release) != nil {
+	if json.Unmarshal(c.Files["signed.json"], &release) != nil {
 		return fmt.Errorf("activation manifest refused")
 	}
 	for _, key := range release.Keyset.Keys {

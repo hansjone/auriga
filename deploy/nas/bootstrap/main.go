@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"github.com/hansjone/auriga/deploy/bootstrap/materials"
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
+	"github.com/hansjone/auriga/deploy/bootstrap/panel"
+	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 	"math/big"
 	"net"
 	"net/url"
@@ -30,6 +32,24 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "network-budget" {
+		if err := networkBudgetCommand(os.Args[2:]); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "runtime-upgrade" {
+		if err := nasRuntimeUpgrade(os.Args[2:], os.Stdout); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "collab" || os.Args[1] == "collab-base") {
+		if err := nasCollabCommand(os.Args[1:]); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && (os.Args[1] == "image-metadata" || os.Args[1] == "image-check" || os.Args[1] == "image-resolve") {
 		if err := imageCommand(context.Background(), os.Args[1:], os.Stdout); err != nil {
 			fatalf("%v", err)
@@ -40,6 +60,7 @@ func main() {
 	accessFile := flag.String("access-file", "", "required trusted access JSON")
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
 	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
+	uiOrigin := flag.String("litellm-ui-origin", "", "independent LiteLLM UI origin (default: admin host on port 8086)")
 	validateOnly := flag.Bool("validate-access", false, "validate without writing installation materials")
 	peerIP := flag.String("edge-peer-ip", "", "fixed edge component-network IPv4")
 	subnet := flag.String("internal-subnet", "", "component-network IPv4 prefix")
@@ -69,8 +90,12 @@ func main() {
 	if err := validateNASLAN(*lanIP, *lanSubnet, *subnet); err != nil {
 		fatalf("%v", err)
 	}
+	ui, err := relayui.Resolve(cfg, *uiOrigin)
+	if err != nil {
+		fatalf("%v", err)
+	}
 	directHTTPS := cfg.IngressKind() == "direct" && cfg.PortalOrigin().Scheme == "https"
-	hosts := []string{cfg.PortalOrigin().Host, cfg.AdminOrigin().Host}
+	hosts := []string{cfg.PortalOrigin().Host, cfg.AdminOrigin().Host, ui.Origin.Host}
 	if parent := cfg.InstanceParentDomain(); parent != "" {
 		hosts = append(hosts, "*."+parent)
 	}
@@ -82,7 +107,7 @@ func main() {
 	if !*validateOnly && *out == "" {
 		fatalf("-out is required")
 	}
-	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly, browser); err != nil {
+	if err := runAsInstaller(*out, raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, *validateOnly, *uiOrigin, browser); err != nil {
 		fatalf("%v", err)
 	}
 	verified, err := runtime.verify()
@@ -99,7 +124,7 @@ func main() {
 	}
 	defer guard.Close()
 	pki := filepath.Join(*out, "pki")
-	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified, browser.Digest())
+	inputDigest := nasInputDigest(raw, *peerIP, *subnet, *registryPort, *lanIP, *lanSubnet, maxMemoryMB, runtime, verified, ui.Digest(), browser.Digest())
 	reuse, err := materials.CheckReceipt(*out, inputDigest, set)
 	if err != nil {
 		fatalf("%v", err)
@@ -118,6 +143,7 @@ func main() {
 		return
 	}
 	mustPKI(pki)
+	writeLiteLLM(*out, ui)
 	if err := browser.Write(*out); err != nil {
 		fatalf("%v", err)
 	}
@@ -126,7 +152,7 @@ func main() {
 		fatalf("generate network deployment: %v", err)
 	}
 	mustIdentity(*out)
-	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB)
+	writeNASConfig(*out, raw, cfg, *peerIP, *registryPort, *lanIP, maxMemoryMB, ui)
 	if err := writeRuntimeMaterials(*out, verified, maxMemoryMB); err != nil {
 		fatalf("%v", err)
 	}
@@ -176,7 +202,7 @@ func mustPKI(pki string) {
 	hopCert, hopKey := mustIssue(caKey, caCert, "edge-iam-nas", "auriga://edge/iam-nas-test", []string{"edge.auriga.internal"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
 	writeFile(filepath.Join(pki, "edge-iam.crt"), hopCert, 0o644)
 	writeFile(filepath.Join(pki, "edge-iam.key"), hopKey, 0o600)
-	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-nas", "auriga://ai-gateway/nas", nil, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth})
+	gatewayCert, gatewayKey := mustIssue(caKey, caCert, "gateway-nas", "auriga://ai-gateway/nas", []string{"ai-relay"}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth})
 	writeFile(filepath.Join(pki, "gateway.crt"), gatewayCert, 0o644)
 	writeFile(filepath.Join(pki, "gateway.key"), gatewayKey, 0o600)
 
@@ -196,6 +222,9 @@ func mustPKI(pki string) {
 }
 
 func mustIdentity(out string) {
+	if err := panel.Generate(out); err != nil {
+		fatalf("generate panel key: %v", err)
+	}
 	privPath := filepath.Join(out, "identity-signing-keys.json")
 	pubPath := filepath.Join(out, "identity-keys.json")
 	if fileExists(privPath) || fileExists(pubPath) {

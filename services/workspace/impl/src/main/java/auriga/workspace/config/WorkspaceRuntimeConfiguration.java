@@ -116,17 +116,113 @@ public class WorkspaceRuntimeConfiguration {
       WorkspaceCrypto crypto,
       Clock clock,
       ListableBeanFactory beans,
-      ObjectProvider<EventPublisher> events) {
+      ObjectProvider<EventPublisher> events,
+      Environment env) {
     var publisher =
         beans.containsBean("workspaceEventPublisher")
             ? beans.getBean("workspaceEventPublisher", EventPublisher.class)
             : events.getObject();
-    return new WorkspaceService(store, inputs, templates, crypto, publisher, clock);
+    var service = new WorkspaceService(store, inputs, templates, crypto, publisher, clock);
+    if (env.containsProperty("auriga.workspace.managed-network-installation-file"))
+      service.requireManagedNetworkCredentials();
+    return service;
   }
 
   @Bean
   WorkspaceQueries workspaceQueries(WorkspaceService service) {
     return new WorkspaceQueries(service);
+  }
+
+  @Bean
+  auriga.workspace.api.ManagedInstanceBindings workspaceManagedBindings(
+      WorkspaceStore store, WorkspaceInputs inputs) {
+    return new WorkspaceManagedBindings(store, inputs);
+  }
+
+  @Bean
+  ManagedInstanceBindingGrpc managedInstanceBindingGrpc(
+      auriga.workspace.api.ManagedInstanceBindings bindings) {
+    return new ManagedInstanceBindingGrpc(bindings);
+  }
+
+  @Bean(destroyMethod = "shutdownNow")
+  @ConditionalOnProperty(name = "auriga.workspace.managed-network-installation-file")
+  ScheduledExecutorService workspaceManagedNetworkExecutor(
+      WorkspaceService service,
+      WorkspaceCrypto crypto,
+      auriga.iam.api.ManagedDeviceCredentials devices,
+      Environment env)
+      throws java.io.IOException {
+    var installation =
+        (tools.jackson.databind.node.ObjectNode)
+            WorkspaceService.JSON.readTree(
+                Files.readAllBytes(
+                    Path.of(
+                        env.getRequiredProperty(
+                            "auriga.workspace.managed-network-installation-file"))));
+    installation =
+        auriga.workspace.app.WorkspaceManagedInstallation.project(
+            installation,
+            env.getProperty("auriga.workspace.managed-platform-origin", ""),
+            java.util.Arrays.asList(env.getProperty("auriga.links.allowed-origins", "").split(",")),
+            env.getProperty("auriga.workspace.managed-ca-file", ""));
+    var network = new WorkspaceManagedNetwork(service, crypto, devices, installation);
+    var executor =
+        Executors.newSingleThreadScheduledExecutor(
+            r -> {
+              var thread = new Thread(r, "workspace-managed-network");
+              thread.setDaemon(true);
+              return thread;
+            });
+    executor.scheduleWithFixedDelay(
+        () -> {
+          try {
+            network.tick();
+          } catch (RuntimeException error) {
+            org.slf4j.LoggerFactory.getLogger(WorkspaceManagedNetwork.class)
+                .warn("Managed network reconciliation deferred");
+          }
+        },
+        0,
+        1,
+        TimeUnit.SECONDS);
+    return executor;
+  }
+
+  @Bean(destroyMethod = "shutdownNow")
+  @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.workspace.managed-network-installation-file")
+  io.grpc.ManagedChannel workspaceIamChannel(
+      Environment env, auriga.common.grpc.AurigaClientInterceptor interceptor) {
+    return auriga.common.grpc.GrpcChannels.openTls(
+        auriga.common.grpc.GrpcChannels.target(env, "iam"),
+        Path.of(env.getRequiredProperty("auriga.workspace.iam-client-certificate-file")).toFile(),
+        Path.of(env.getRequiredProperty("auriga.workspace.iam-client-key-file")).toFile(),
+        Path.of(env.getRequiredProperty("auriga.workspace.iam-ca-file")).toFile(),
+        interceptor);
+  }
+
+  @Bean
+  @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.workspace.managed-network-installation-file")
+  auriga.iam.api.ManagedDeviceCredentials remoteManagedDeviceCredentials(
+      @Qualifier("workspaceIamChannel") io.grpc.ManagedChannel channel) {
+    return new auriga.iam.api.ManagedDeviceCredentials() {
+      public auriga.contracts.iam.v1.IssueManagedDeviceResponse issue(
+          auriga.contracts.iam.v1.IssueManagedDeviceRequest request) {
+        return auriga.common.grpc.GrpcErrors.call(
+            () ->
+                auriga.contracts.iam.v1.ManagedDeviceServiceGrpc.newBlockingStub(channel)
+                    .issueManagedDevice(request));
+      }
+
+      public void revoke(auriga.contracts.iam.v1.RevokeManagedDeviceRequest request) {
+        auriga.common.grpc.GrpcErrors.call(
+            () ->
+                auriga.contracts.iam.v1.ManagedDeviceServiceGrpc.newBlockingStub(channel)
+                    .revokeManagedDevice(request));
+      }
+    };
   }
 
   @Bean(initMethod = "start", destroyMethod = "close")

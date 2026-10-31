@@ -1,3 +1,9 @@
+import { networkTiming } from '../network/timing.js';
+import {
+  clockToleranceSeconds as defaultClockToleranceSeconds,
+  resolveClockToleranceSeconds,
+} from '../network/clock.js';
+import { tracedFetch } from '../observability/index.js';
 /* global Headers, AbortSignal */
 import { createPublicKey, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
@@ -30,18 +36,8 @@ export async function savedPlatformConfig(
       : {}),
   });
   if (same) return config;
-  const providers = await createPlatform(config).request(
-    '/api/iam/v1/login/providers',
-  );
-  const teams = providers.items?.filter(
-    (/** @type {any} */ p) =>
-      p.connectorType === 'team-account' && p.primaryStep === 'form',
-  );
-  if (teams?.length !== 1)
-    throw new Error(
-      'one team-account form provider or explicit loader configuration required',
-    );
-  return platformConfig({ ...config, providerId: teams[0].id });
+  // Discovery belongs to login, never offline local runtime construction.
+  return config;
 }
 
 /** Installation-owned origin. No URL, issuer or redirect is accepted from UI/model input.
@@ -165,8 +161,13 @@ export class LoginJar {
 }
 
 /** Every network request has a timeout, body cap and redirect refusal. No automatic write retries.
- * @param {ReturnType<typeof platformConfig>} config */
-export function createPlatform(config) {
+ * @param {ReturnType<typeof platformConfig>} config
+ * @param {{clockToleranceSeconds?:number}} [options] Bounded iat/nbf skew; expiry remains strict. */
+export function createPlatform(
+  config,
+  { clockToleranceSeconds = defaultClockToleranceSeconds } = {},
+) {
+  resolveClockToleranceSeconds(clockToleranceSeconds);
   /** @param {string} path @param {any} [options] */
   async function request(
     path,
@@ -199,7 +200,7 @@ export function createPlatform(config) {
         'content-type',
         form ? 'application/x-www-form-urlencoded' : 'application/json',
       );
-    const response = await fetch(url, {
+    const response = await tracedFetch(url, {
       method,
       headers: out,
       body:
@@ -210,8 +211,11 @@ export function createPlatform(config) {
             : JSON.stringify(body),
       redirect: 'error',
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-        : AbortSignal.timeout(15000),
+        ? AbortSignal.any([
+            signal,
+            AbortSignal.timeout(networkTiming.operationMs),
+          ])
+        : AbortSignal.timeout(networkTiming.operationMs),
     });
     jar?.accept(response.headers);
     let size = 0;
@@ -248,7 +252,7 @@ export function createPlatform(config) {
     return data;
   }
   /** @param {string} token @param {any} [expected] @param {boolean} [ai] */
-  async function verifyDevice(token, expected, ai = false) {
+  async function verifyToken(token, expected, ai = false) {
     if (typeof token !== 'string' || token.length > 16384)
       throw new Error('invalid device credential');
     const parts = token.split('.');
@@ -276,9 +280,10 @@ export function createPlatform(config) {
       !Number.isSafeInteger(claims.exp) ||
       claims.exp <= now ||
       !Number.isSafeInteger(claims.iat) ||
-      claims.iat > now + 5 ||
+      claims.iat > now + clockToleranceSeconds ||
       (claims.nbf !== undefined &&
-        (!Number.isSafeInteger(claims.nbf) || claims.nbf > now)) ||
+        (!Number.isSafeInteger(claims.nbf) ||
+          claims.nbf > now + clockToleranceSeconds)) ||
       ![claims.tid, claims.sub, claims.did].every(
         (x) => typeof x === 'string' && x.length > 0 && x.length <= 512,
       )
@@ -289,7 +294,7 @@ export function createPlatform(config) {
       (header.typ !== 'at+jwt' ||
         claims.exp - claims.iat > 300 ||
         claims.exp <= claims.iat ||
-        claims.exp > now + 300 ||
+        claims.exp > now + (300 + clockToleranceSeconds) ||
         claims.sid !== undefined ||
         claims.instanceId !== undefined ||
         !Array.isArray(claims.perms) ||
@@ -331,8 +336,13 @@ export function createPlatform(config) {
   }
   return {
     request,
-    verifyDevice,
+    probe: (/** @type {AbortSignal} */ signal) =>
+      request(
+        new URL(config.issuer).pathname.replace(/\/$/, '') + '/oauth2/jwks',
+        { signal },
+      ),
+    verifyDevice: verifyToken,
     verifyAi: (/** @type {string} */ token, /** @type {any} */ expected) =>
-      verifyDevice(token, expected, true),
+      verifyToken(token, expected, true),
   };
 }

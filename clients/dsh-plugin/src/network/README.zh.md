@@ -4,6 +4,11 @@
 
 connect 安装具备完整 `network` pin 且原生设备登录成功后，`plugin.js → createConnectRuntime → createDeviceProvider → lifecycle → openNetworkRuntime(kind: device-connection) → openConnectionRuntime` 自动装配官方 provider。根只取安装 realm/SPKI；固定平台源上的 register、tickets、完整 keys、announcement 均使用现 `getPlatformAccess` 与已验证当前设备身份闭包，拒绝 cookie、重定向、响应超预算及迟到的失效代际。不增加可见登录或审批。票据严格核完整设备身份与随机票派生的 ingress、含 shard 的 up、down/reply，兑换截止与最长连接截止分开处理；每次新连接均取新票。无安装 pin 且无完整注入 provider 的行为仍为 unconfigured。
 
+官方 provider 按已验证的 issuer、tenant、device ID 派生本地存储命名空间，账本与信任缓存位于
+`network/devices/<sha256>/`。正常退出、撤销旧设备并重新登录后，新设备不会复用旧节点账本；旧目录与审计不删除、不复制到新代际。
+它仍只能凭真实 register 的 `created=true` 初始化缺失账本；同一已注册设备丢库或换目录保持失败关闭。
+旧版固定目录不会自动迁移；升级后的旧设备缺少该目录时，应沿公开退出/登录流程注册新设备，不得删库或修改IAM回包补造首次许可。
+
 基础分支不创建 consent，不注册发送工具，不 FETCH/ACK/SEND 或发布授权；consent 入口明确不可用。`connected` 仅代表基础认证连接，不能据此声称双 DSH 收发或业务能力已完成。完整可信 Cordis provider 可暂时替代官方默认项，撤销注入后恢复默认；替换/退出先失效旧状态，等旧实例停止、在途提交结束并释放锁后才允许下一实例开账本。完整业务模式的 allports 检查与原 session 路径保留。
 
 ## 第二能力阶段：显式登记当前会话
@@ -76,7 +81,7 @@ provider 接口：
 - `submit/reconcileSubmission`：HTTPS 提交前将同一私有请求和幂等键耐久写入独立 outbound 文件；明确拒绝立即删除记录，结果未知保留最多 10 分钟，不盲目重放。全局最多 256 条、每个来源绑定最多 16 条，满时仅对此会话背压；恢复时对同一记录最多调用 3 次 reconcile，次数先落盘。没有 reconcile 端口时同样按操作/重启惰性清理过期记录。过期、重试耗尽或旧格式记录缺失年龄时记 outcome-unknown 诊断并释放元数据，不能宣称远端操作成功或重新发送。
 - `publishConsent`：耐久 outbox 的幂等发布/重新核权端口，只有确认成功后才删除事件；每批仅附事件对应的 `requestId/digest/recipientIds`，不附其他来源、预览或原始签名帧。默认/撤销也须更新平台状态，不能只修改 UI。失败后事件保留，后续 snapshot/操作会重试。
 
-真实 IAM 已提供设备 Bearer 专用的 `/api/iam/v1/network/register` 与 `/api/iam/v1/network/tickets`；固定根清单与公告端点分别为 `/api/collab/v1/network/keys`、`/api/collab/v1/network/keys/announcement`，官方基础 provider 使用这些正式端点。普通会话耐久登记沿上述第二阶段显式触发；完整双 DSH 收发仍由后续任务接线。managed 模式尚未提供设备级联网凭据通道，不把 instance token 当设备令牌使用。
+真实 IAM 已提供设备 Bearer 专用的 `/api/iam/v1/network/register` 与 `/api/iam/v1/network/tickets`；固定根清单与公告端点分别为 `/api/collab/v1/network/keys`、`/api/collab/v1/network/keys/announcement`，官方基础 provider 使用这些正式端点。普通会话耐久登记沿上述第二阶段显式触发。managed 模式从 renderer 的 `AURIGA_DEVICE_CREDENTIAL_FILE` 读取独立托管设备凭据，经 IAM 专用 grant 换取短期设备 Bearer，复用同一 provider/lifecycle/runtime、宿主接线与 consent/接收控制。文件绑定 tenant/owner/instance，轮换先关旧代连接并按新 device 分区账本；停止、删除、成员移除与管理员吊销由在线实例/设备/成员权威核验。不会把 instance token 当设备令牌，真实入网与双端互发仍须独立验收。契约见 `contracts/auth/managed-device.md`。
 
 本地 UI 通过 `/auriga/local-login/consent/{snapshot,decide,default,revoke}` 接真实 consent。路由先经过原生 admission/同源检查，再以当前 HTTP 请求绑定用户、检查本机登录与写请求 CSRF；浏览器不能声明主体或来源。视图沿用显式字段投影，不返回 ownershipRevision、授权证明、摘要、内部决策原因或 outbox。
 
@@ -85,3 +90,5 @@ provider 接口：
 退出、凭据刷新失效、明确设备吊销、provider 卸载都会立即关闭发送入口、取消连接与订阅，晚到的 prepare/READY/验签结果不能恢复旧登录。文件写入结果不确定时保持失败关闭。密钥刷新统计在 runtime diagnostics；已知版本的缓存过期/写入失败仍可受限刷新；刷新成功后从 committed 游标重扫，不跳过暂时未知密钥的消息。
 
 工具在 READY 成功后注册，断连、票据错误或握手失败时撤销。runtime 通过 `onClosed(reason)` 在存储清理结束后通知 lifecycle；意外停机显示 unavailable，并按 500ms 至 30s 的有界退避重建。退出/吊销会使 generation 失效，不触发旧身份重建。故障诊断只含固定原因计数与最多 64 条摘要。
+
+首次连接尚未尝试账本提交时，socket 关闭/丢失、READY 超时等明确瞬时故障，允许在原运行时、原登记响应和原单写者句柄内退避重试。每轮先真实停止旧 transport，再取新票、建立新连接并重新验证新 nonce 的签名 READY；只有成功后才执行一次 initialize。退出、吊销、信任失效、协议/签名拒绝或写入未知不沿此路径重试。不持久缓存 created=true，也不把后续 created=false 改成 true；进程已退出且确实缺失账本的旧设备仍须权威恢复流程。

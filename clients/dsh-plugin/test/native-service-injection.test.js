@@ -308,7 +308,7 @@ test(
           ).status,
           401,
         );
-        assert.notEqual(
+        assert.equal(
           (
             await fetch(base + '/', {
               headers: { cookie: nativeCookie },
@@ -316,6 +316,7 @@ test(
             })
           ).status,
           200,
+          'the native shell boots while business providers remain unavailable',
         );
         assert.equal(transportCalls.length, 0);
         provider = await ctx.plugin(ControllerCapabilities);
@@ -359,6 +360,11 @@ test(
       );
       const body = await resumed.json();
       assert.equal(body.step.type, 'complete');
+      // Identity admission completes independently of the asynchronous legacy
+      // Team transport. Require its actual handshake before checking tools.
+      const teamDeadline = Date.now() + 5000;
+      while (transportCalls.length < 4 && Date.now() < teamDeadline)
+        await delay(10);
       assert.deepEqual(transportCalls.slice(0, 4), [
         'initialize',
         'notifications/initialized',
@@ -370,6 +376,11 @@ test(
           .find((value) => value.startsWith('auriga_local_session='))
           .split(';')[0],
         authenticated = nativeCookie + '; ' + localCookie;
+      while (
+        names.some((name) => !ctx.get('tools').get(name)) &&
+        Date.now() < teamDeadline
+      )
+        await delay(10);
       for (const name of names)
         assert.equal(typeof ctx.get('tools').get(name).execute, 'function');
       const stream = await fetch(base + '/api/injection-stream', {

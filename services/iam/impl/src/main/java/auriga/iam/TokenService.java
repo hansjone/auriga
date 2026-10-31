@@ -16,6 +16,7 @@ public final class TokenService implements InternalTokenIssuer {
   private final PermissionResolver permissions;
   private final Clock clock;
   private final String issuer;
+  private final Set<String> acceptedIssuers;
   private final Map<String, String> internalSecrets;
   private final ScopedValue<ECKey> requestSigningKey = ScopedValue.newInstance();
 
@@ -32,11 +33,23 @@ public final class TokenService implements InternalTokenIssuer {
       Clock clock,
       String issuer,
       Map<String, String> internalSecretHashes) {
+    this(keys, schemas, permissions, clock, issuer, internalSecretHashes, List.of());
+  }
+
+  public TokenService(
+      SigningKeys keys,
+      ContractSchemas schemas,
+      PermissionResolver permissions,
+      Clock clock,
+      String issuer,
+      Map<String, String> internalSecretHashes,
+      List<String> allowedOrigins) {
     this.keys = keys;
     this.schemas = schemas;
     this.permissions = permissions;
     this.clock = clock;
     this.issuer = issuer.replaceAll("/$", "");
+    this.acceptedIssuers = auriga.common.web.LinkOrigins.issuerOrigins(this.issuer, allowedOrigins);
     this.internalSecrets = Map.copyOf(internalSecretHashes);
     var unique = new HashSet<String>();
     for (String digest : internalSecrets.values())
@@ -46,6 +59,14 @@ public final class TokenService implements InternalTokenIssuer {
 
   public String issuer() {
     return issuer;
+  }
+
+  /**
+   * Only a trusted request origin also approved by this issuer configuration can select an alias.
+   */
+  public String requestIssuer() {
+    String selected = auriga.common.web.LinkOrigins.currentOr(issuer);
+    return acceptedIssuers.contains(selected) ? selected : issuer;
   }
 
   public String access(
@@ -145,6 +166,19 @@ public final class TokenService implements InternalTokenIssuer {
 
   record IssuedToken(String accessToken, Instant expiresAt) {}
 
+  IssuedToken managedDevice(
+      UUID tenant, String owner, UUID device, Instant expiresAt, String memberType) {
+    ObjectNode claims = base(tenant, owner, "auriga", "device", "device");
+    claims.put("did", device.toString());
+    claims.put("scope", "auriga.connect");
+    claims.put("mtyp", memberType);
+    claims.set("perms", Json.MAPPER.valueToTree(List.of("auriga.connect.collab.use")));
+    Instant expiry = clock.instant().plusSeconds(300);
+    if (expiresAt.isBefore(expiry)) expiry = expiresAt;
+    claims.put("exp", expiry.getEpochSecond());
+    return new IssuedToken(signAccess(claims), expiry);
+  }
+
   IssuedToken deviceAi(
       DeviceAccessAuthority.Identity identity,
       Instant authTime,
@@ -195,7 +229,7 @@ public final class TokenService implements InternalTokenIssuer {
     long now = clock.instant().getEpochSecond();
     return Json.object(
         "iss",
-        issuer,
+        requestIssuer(),
         "sub",
         sub,
         "aud",
@@ -242,7 +276,7 @@ public final class TokenService implements InternalTokenIssuer {
     ObjectNode c =
         Json.object(
             "iss",
-            issuer,
+            requestIssuer(),
             "sub",
             session.path("accountId").asString(),
             "aud",
@@ -273,7 +307,7 @@ public final class TokenService implements InternalTokenIssuer {
       ObjectNode c = Json.read(jwt.getJWTClaimsSet().toString());
       schemas.validate("auth/access-token.schema.json", c);
       IamError.require(
-          c.path("iss").asString().equals(issuer)
+          acceptedIssuers.contains(c.path("iss").asString())
               && c.path("exp").asLong() > clock.instant().getEpochSecond()
               && c.path("nbf").asLong() <= clock.instant().getEpochSecond() + 30
               && !c.path("ptyp").asString().equals("internal_service"),

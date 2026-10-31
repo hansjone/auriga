@@ -34,3 +34,18 @@ await writeFile(
     { ...style, parser: 'typescript' },
   ),
 );
+
+const managed = JSON.parse(
+  await readFile(new URL('managed-device.schema.json', directory), 'utf8'),
+);
+managed.properties.network = { $ref: '#/$defs/ConnectNetwork' };
+managed.$defs = schema.$defs;
+await writeFile(
+  new URL('../src/generated/managed-device.d.ts', import.meta.url),
+  await format(
+    await compile(managed, 'ManagedDeviceCredential', {
+      ignoreMinAndMaxItems: true,
+    }),
+    { ...style, parser: 'typescript' },
+  ),
+);

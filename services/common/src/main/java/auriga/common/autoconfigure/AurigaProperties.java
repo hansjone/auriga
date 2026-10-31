@@ -114,7 +114,7 @@ public class AurigaProperties {
 
     private String jwkSetUri;
     private String audience = "auriga";
-    private Duration clockSkew = Duration.ofSeconds(30);
+    private Duration clockSkew = Duration.ofSeconds(60);
     private Duration jwksCacheTtl = Duration.ofMinutes(5);
     private Duration jwksMinRefreshInterval = Duration.ofSeconds(30);
 

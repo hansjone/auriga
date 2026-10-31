@@ -10,6 +10,7 @@ import tools.jackson.databind.node.ObjectNode;
 final class QuotaValues {
   static ObjectNode validate(JsonNode value) {
     require(value != null && value.isObject());
+    require(!value.has("model"));
     JsonNode instance = value.get("instance");
     if (instance != null) {
       require(instance.isObject());
@@ -19,15 +20,6 @@ final class QuotaValues {
       integer(instance.get("maxInstances"), 0, true);
       JsonNode alwaysOn = instance.get("alwaysOnAllowed");
       require(alwaysOn == null || alwaysOn.isBoolean());
-    }
-    JsonNode model = value.get("model");
-    if (model != null) {
-      require(model.isObject());
-      integer(model.get("monthlyBudgetMicros"), 0, true);
-      integer(model.get("dailyTokens"), 0, true);
-      JsonNode currency = model.get("currency");
-      require(
-          currency == null || (currency.isTextual() && currency.asString().matches("[A-Z]{3}")));
     }
     return (ObjectNode) value;
   }

@@ -17,27 +17,31 @@ func TestContainerEnvAllowlist(t *testing.T) {
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, nil))
 	rendered := map[string]string{
-		"AURIGA_MODE":          "managed",
-		"AURIGA_INSTANCE_ID":   "i1",
-		"DSH_HOME":             "/home/dsh/.dsh",
-		"HTTPS_PROXY":          "http://proxy.example.com:3128",
-		"TZ":                   "Asia/Shanghai",
-		"LD_AUDIT":             "/tmp/evil-value.so",
-		"FOO":                  "bar-secret-ish",
-		"LANG":                 "C.UTF-8", // in allowlist but not declared by spec
-		"AURIGA_UNKNOWN_EXTRA": "x",
+		"AURIGA_MODE":                   "managed",
+		"AURIGA_INSTANCE_ID":            "i1",
+		"AURIGA_PANEL_KEYS_FILE":        "/run/auriga/panel-keys.json",
+		"AURIGA_DEVICE_CREDENTIAL_FILE": "/run/auriga/device-credential.json",
+		"DSH_HOME":                      "/home/dsh/.dsh",
+		"HTTPS_PROXY":                   "http://proxy.example.com:3128",
+		"TZ":                            "Asia/Shanghai",
+		"LD_AUDIT":                      "/tmp/evil-value.so",
+		"FOO":                           "bar-secret-ish",
+		"LANG":                          "C.UTF-8", // in allowlist but not declared by spec
+		"AURIGA_UNKNOWN_EXTRA":          "x",
 	}
-	specEnv := map[string]string{"TZ": "Asia/Shanghai", "LD_AUDIT": "x", "FOO": "y", "AURIGA_MODE": "evil"}
+	specEnv := map[string]string{"AURIGA_PANEL_KEYS_FILE": "/untrusted/panel.json", "AURIGA_DEVICE_CREDENTIAL_FILE": "/untrusted/device.json", "TZ": "Asia/Shanghai", "LD_AUDIT": "x", "FOO": "y", "AURIGA_MODE": "evil"}
 	got, err := runtime.ContainerEnv(rendered, specEnv, runtime.DefaultExtraEnvKeys, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"AURIGA_MODE":        "managed",
-		"AURIGA_INSTANCE_ID": "i1",
-		"DSH_HOME":           "/home/dsh/.dsh",
-		"HTTPS_PROXY":        "http://proxy.example.com:3128",
-		"TZ":                 "Asia/Shanghai",
+		"AURIGA_MODE":                   "managed",
+		"AURIGA_INSTANCE_ID":            "i1",
+		"AURIGA_PANEL_KEYS_FILE":        "/run/auriga/panel-keys.json",
+		"AURIGA_DEVICE_CREDENTIAL_FILE": "/run/auriga/device-credential.json",
+		"DSH_HOME":                      "/home/dsh/.dsh",
+		"HTTPS_PROXY":                   "http://proxy.example.com:3128",
+		"TZ":                            "Asia/Shanghai",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)

@@ -89,6 +89,7 @@ async function fixture(t, extra = {}) {
   const controller = new AbortController();
   const prepared = {
     kind: 'device-connection',
+    ...(extra.storageKey ? { storageKey: extra.storageKey } : {}),
     roots: testRoots,
     url: 'wss://network.example.com/',
     origin: extra.origin ?? 'https://portal.example.com',
@@ -169,7 +170,9 @@ async function fixture(t, extra = {}) {
     authorizeLocal: extra.authorizeLocal ?? (async () => false),
     signal: controller.signal,
     now,
-    stores: { ledger, trust: trustStore },
+    ...(extra.directory
+      ? { directory: extra.directory }
+      : { stores: { ledger, trust: trustStore } }),
     onRevoked: extra.onRevoked,
     onClosed: extra.onClosed,
     ctx:
@@ -199,6 +202,7 @@ async function fixture(t, extra = {}) {
         state: 'idle',
         async start() {
           options.onState({ state: 'connecting', epoch: 0 });
+          await extra.start?.(connection.id);
           await options.getTicket({ reason: 'start', attempt: 0 });
           connection.state = 'ready';
           options.onState({ state: 'ready', epoch: 1 });
@@ -314,6 +318,35 @@ async function fixture(t, extra = {}) {
     trustStore,
   };
 }
+
+test('a new device leaves the old ledger intact and cannot initialize a previously registered device without its own ledger', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-device-generations-'));
+  t.after(() => nodeFs.rm(dir, { recursive: true, force: true }));
+  const old = await openLedger({
+    store: createFileLedgerStore({ dir: join(dir, 'host') }),
+    identity: { ...IDENTITY, node: '999' },
+    initialize: true,
+  });
+  await old.close();
+  const oldBytes = await readFile(join(dir, 'host/ledger.json'));
+  const fresh = await fixture(t, {
+    directory: dir,
+    storageKey: 'a'.repeat(64),
+  });
+  await fresh.runtime.start();
+  assert.equal(fresh.runtime.status.connected, true);
+  await fresh.runtime.close();
+  assert.deepEqual(await readFile(join(dir, 'host/ledger.json')), oldBytes);
+  const missing = await fixture(t, {
+    directory: dir,
+    storageKey: 'b'.repeat(64),
+    registration: { created: false },
+  });
+  await assert.rejects(
+    missing.runtime.start(),
+    /connection ledger unavailable/,
+  );
+});
 
 function registrationHost() {
   const host = nativeFixture();
@@ -1093,7 +1126,8 @@ test('missing Host durability leaves strict base READY independent and does not 
 
 for (const event of ['logout', 'disconnect', 'new epoch', 'host unload'])
   test(
-    event + ' immediately unregisters and fences delayed LOCAL_REGISTER',
+    event +
+      ' fences delayed LOCAL_REGISTER while transient loss preserves the tool schema',
     async (t) => {
       const host = registrationHost(),
         gate = latch();
@@ -1118,14 +1152,20 @@ for (const event of ['logout', 'disconnect', 'new epoch', 'host unload'])
           event === 'disconnect' ? 'reconnecting' : 'ready',
           2,
         );
-      assert.equal(host.tools.size, 0);
+      const transient = event === 'disconnect' || event === 'new epoch';
+      assert.equal(host.tools.size, transient ? 1 : 0);
       gate.release();
-      assert.deepEqual(await pending, { status: 'unavailable' });
+      const expected = transient
+        ? {
+            status: 'unavailable',
+            reason: 'network.overloaded',
+            retryable: true,
+          }
+        : { status: 'unavailable', retryable: false };
+      assert.deepEqual(await pending, expected);
       assert.deepEqual(f.ledger.snapshot().locals['1'], original);
       assert.deepEqual(f.ledger.snapshot().bindings, {});
-      assert.deepEqual(await tool.execute({}, { agent: host.agent }), {
-        status: 'unavailable',
-      });
+      assert.deepEqual(await tool.execute({}, { agent: host.agent }), expected);
     },
   );
 
@@ -1156,7 +1196,7 @@ test('reconnect first reconciles original committed operation and reuses host bi
   f.connections[1].transition('reconnecting', 2);
   f.connections[1].transition('ready', 2);
   await waitFor(
-    () => host.tools.size,
+    () => f.runtime.diagnostics.registration.available,
     'join reinstalled after original-op reconciliation',
   );
   const registrations = f.sent.filter(
@@ -1778,6 +1818,52 @@ test('uncertain register response never reuses created and missing ledger is den
   assert.equal(next.connections.length, 0);
   assert.equal(first.ledger.snapshot(), undefined);
 });
+
+test('first socket failure retries under the original registration and writer lock', async (t) => {
+  const f = await fixture(t, {
+    start(id) {
+      if (id === 1)
+        throw new TransportError('connection_closed', 'connection closed');
+    },
+  });
+  await f.runtime.start();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(f.events.filter((x) => x === 'register').length, 1);
+  assert.equal(f.events.filter((x) => x === 'commit').length, 1);
+  assert.equal(f.connections.length, 3);
+  assert.ok(f.events.indexOf('stop-1') < f.events.indexOf('ready-2'));
+});
+
+test('first keys or ticket fetch outage does not abandon the original empty-ledger registration', async (t) => {
+  for (const phase of ['refresh', 'ticket']) {
+    let calls = 0;
+    const f = await fixture(t, {
+      [phase]() {
+        if (++calls === 1)
+          throw new DeviceControlUnavailable('temporary control failure');
+      },
+    });
+    await f.runtime.start();
+    assert.equal(f.runtime.status.connected, true);
+    assert.equal(f.events.filter((x) => x === 'register').length, 1);
+    assert.equal(f.events.filter((x) => x === 'commit').length, 1);
+    await f.runtime.close();
+  }
+});
+
+test('C1 socket loss before commit retries a fresh nonce without replaying initialize authority', async (t) => {
+  const f = await fixture(t, {
+    ready(id) {
+      if (id === 1)
+        throw new TransportError('connection_lost', 'connection lost');
+    },
+  });
+  await f.runtime.start();
+  assert.equal(f.runtime.status.connected, true);
+  assert.equal(f.events.filter((x) => x === 'register').length, 1);
+  assert.equal(f.events.filter((x) => x === 'commit').length, 1);
+  assert.equal(new Set(f.sent.map((s) => s.request.channel_nonce)).size, 3);
+});
 test('C2 failure leaves complete ledger and next created false attempt skips bootstrap', async (t) => {
   const first = await fixture(t, {
     result: (id) => (id === 2 ? { status: 'recovery_conflict' } : {}),
@@ -2146,7 +2232,7 @@ test('安全日志捕获重连中的首个WSS失败，重复和已退役连接�
   const event = f.logs.find((e) => e.event === 'failure');
   assert.equal(event.phase, 'wss_connect');
   assert.equal(event.code, 'unauthorized');
-  assert.equal(event.budget_ms, 10000);
+  assert.equal(event.budget_ms, 30000);
   await f.runtime.close();
   f.connections[1].refreshError({ code: 'SECRET-marker' });
   assert.equal(f.logs.filter((e) => e.event === 'failure').length, 1);
@@ -2506,6 +2592,7 @@ test('plugin actual entry resumes verified native device into official factory, 
       protocolVersion: 1,
     });
   });
+  const localOwnerPeer = { principal: { kind: 'owner' } };
   const ctx = {
     profileContext: { dir: profile },
     webServer: {
@@ -2516,7 +2603,7 @@ test('plugin actual entry resumes verified native device into official factory, 
       },
     },
     connection: {
-      admit: () => ({}),
+      admit: () => ({ peer: localOwnerPeer }),
       authorizeIndex: () => true,
       isTrusted: () => true,
       requestRejection: () => undefined,
@@ -2570,21 +2657,12 @@ test('plugin actual entry resumes verified native device into official factory, 
   await Promise.all(jobs);
   const before = await nativeFetch(localOrigin + '/auriga/local-login/status');
   const login = await before.json();
-  assert.equal(login.network.connected, false);
-  assert.equal(calls.length, 0);
-  let cookie = before.headers.getSetCookie()[0].split(';')[0];
-  const result = await nativeFetch(localOrigin + '/auriga/local-login/login', {
-    method: 'POST',
-    headers: {
-      origin: localOrigin,
-      cookie,
-      'content-type': 'application/json',
-      'x-auriga-csrf': login.csrf,
-    },
-    body: JSON.stringify({ action: 'resume' }),
-  });
-  assert.equal(result.status, 200, await result.text());
-  cookie = result.headers.getSetCookie()[0].split(';')[0];
+  assert.equal(typeof login.network.connected, 'boolean');
+  assert.ok(
+    calls.length > 0,
+    'saved device restores platform capabilities without a browser login',
+  );
+  const cookie = '';
   const state = await waitFor(async () => {
     const response = await nativeFetch(
       localOrigin + '/auriga/local-login/status',
@@ -2599,11 +2677,18 @@ test('plugin actual entry resumes verified native device into official factory, 
   assert.equal(wire.length, 2);
   assert.equal(hostCalls, 0);
   assert.equal(tools.has('auriga_send_message'), false);
+  const deviceDirectories = await nodeFs.readdir(
+    join(profile, 'auriga-connect/network/devices'),
+  );
+  assert.equal(deviceDirectories.length, 1);
+  const hostDirectory = join(
+    profile,
+    'auriga-connect/network/devices',
+    deviceDirectories[0],
+    'host',
+  );
   const ledger = JSON.parse(
-    await readFile(
-      join(profile, 'auriga-connect/network/host/ledger.json'),
-      'utf8',
-    ),
+    await readFile(join(hostDirectory, 'ledger.json'), 'utf8'),
   );
   assert.equal(ledger.identity.nodeIncarnation, 'inc-1');
   const logout = await nativeFetch(localOrigin + '/auriga/local-login/logout', {
@@ -2619,7 +2704,7 @@ test('plugin actual entry resumes verified native device into official factory, 
   assert.equal(logout.status, 200);
   await waitFor(async () => {
     try {
-      await readFile(join(profile, 'auriga-connect/network/host/ledger.lock'));
+      await readFile(join(hostDirectory, 'ledger.lock'));
       return false;
     } catch (e) {
       return e.code === 'ENOENT';

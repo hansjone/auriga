@@ -158,6 +158,9 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 			return err
 		}
 		properties := fmt.Sprintf("auriga.iam.internal-secret-hashes.ai-gateway=%x\nauriga.iam.ai-gateway-token-export.enabled=true\nauriga.iam.ai-gateway-token-export.installation-secret-file=%s/gateway.secret\nauriga.iam.ai-gateway-token-export.token-file=/run/auriga-network-token/gateway/service.jwt\nauriga.iam.ai-gateway-token-export.reader-group=65533\nauriga.iam.ai-gateway-token-export.installation-owner=%d\nauriga.iam.network.server-audiences[0]=%s\nauriga.iam.network.client-server-audience=%s\n", hash, strings.TrimRight(o.Root, "/"), os.Getuid(), o.Audience, o.Audience)
+		// Imported by both public recipes. Environment overrides remain effective,
+		// including explicit zero; receipt-bound material need not be regenerated.
+		properties += "auriga.iam.network.source-max-seconds=${AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS:3600}\nauriga.iam.network.source-decision-seconds=${AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS:60}\n"
 		if err := write("platform.properties", []byte(properties)); err != nil {
 			return err
 		}
@@ -280,7 +283,7 @@ func generate(dir string, o Options, entropy io.Reader) (result error) {
 	broker := fmt.Sprintf(`server_name: "auriga-network"
 host: %q
 port: %d
-tls {cert_file: %q, key_file: %q, ca_file: %q, verify: true, timeout: 2}
+tls {cert_file: %q, key_file: %q, ca_file: %q, verify: true, timeout: 10}
 system_account: SYS
 websocket {host: %q, port: %d, tls {cert_file: %q, key_file: %q}}
 accounts {
@@ -297,7 +300,7 @@ accounts {
  }
  SYS {users: [{user: "ops", password: %q, permissions: {publish: {allow: ["$SYS.REQ.SERVER.*.KICK", "$SYS.REQ.SERVER.*.LDM", "$SYS.REQ.SERVER.*.CONNZ"]}, subscribe: {allow: ["_INBOX.>"]}}}]}
 }
-authorization {timeout: 2, auth_callout {issuer: %q, account: AUTH, auth_users: ["auth", "ops", "data"], xkey: %q}}
+authorization {timeout: 10, auth_callout {issuer: %q, account: AUTH, auth_users: ["auth", "ops", "data"], xkey: %q}}
 `, o.BrokerHost, o.BrokerPort, p("broker.pem"), p("broker.key"), p("server-ca.pem"), o.WebsocketHost, o.WebsocketPort, p("broker.pem"), p("broker.key"), passwords["auth"], passwords["data"], passwords["ops"], issuerPub, xpub)
 	if err = write("broker.conf", []byte(broker)); err != nil {
 		return err
@@ -305,7 +308,7 @@ authorization {timeout: 2, auth_callout {issuer: %q, account: AUTH, auth_users: 
 	nats := func(user string) any {
 		return map[string]any{"url": o.BrokerURL, "username": user, "passwordFile": p(user + ".password"), "certFile": p("broker-client.pem"), "keyFile": p("broker-client.key"), "caFile": p("server-ca.pem")}
 	}
-	cfg := map[string]any{"submitHTTP": map[string]string{"listen": o.SubmitListen, "tlsCertFile": p("submit.pem"), "tlsKeyFile": p("submit.key"), "clientCAFile": p("client-ca.pem")}, "brokerConfigFile": p("broker.conf"), "serverAudience": o.Audience, "clientAccount": "CLIENTS", "issuerSeedFile": p("issuer.seed"), "xkeySeedFile": p("xkey.seed"), "iam": o.IAM, "collab": o.Collab, "auth": nats("auth"), "ops": nats("ops"), "data": nats("data"), "protocolSigning": map[string]string{"privateKeyFile": p("protocol.key"), "keyId": "network-protocol-1", "keysetVersion": "1", "notBefore": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), "notAfter": serverCA.NotAfter.UTC().Format(time.RFC3339)}, "redeemTimeoutMillis": 1000, "activeIntervalMillis": 250, "requestTimeoutMillis": 250, "maxKickAttempts": 3, "maxConnections": 1000}
+	cfg := map[string]any{"submitHTTP": map[string]string{"listen": o.SubmitListen, "tlsCertFile": p("submit.pem"), "tlsKeyFile": p("submit.key"), "clientCAFile": p("client-ca.pem")}, "brokerConfigFile": p("broker.conf"), "serverAudience": o.Audience, "clientAccount": "CLIENTS", "issuerSeedFile": p("issuer.seed"), "xkeySeedFile": p("xkey.seed"), "iam": o.IAM, "collab": o.Collab, "auth": nats("auth"), "ops": nats("ops"), "data": nats("data"), "protocolSigning": map[string]string{"privateKeyFile": p("protocol.key"), "keyId": "network-protocol-1", "keysetVersion": "1", "notBefore": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), "notAfter": serverCA.NotAfter.UTC().Format(time.RFC3339)}, "operationTimeoutMillis": 30000, "redeemTimeoutMillis": 8000, "activeIntervalMillis": 1000, "requestTimeoutMillis": 5000, "maxKickAttempts": 3, "maxConnections": 1000}
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err

@@ -68,7 +68,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	}
 	unavailable := func(reason string) {
 		if g.Log != nil {
-			g.Log.Warn("Access API request rejected", "reason", reason, "requestId", rid)
+			g.Log.WarnContext(r.Context(), "Access API request rejected", "reason", reason, "requestId", rid)
 		}
 		fail(503, "common.unavailable")
 	}
@@ -233,7 +233,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, request *http.Request, err error) {
 		if g.Log != nil {
-			g.Log.Warn("Access API request rejected", "reason", "upstream_transport_unavailable", "requestId", requestID(request))
+			g.Log.WarnContext(request.Context(), "Access API request rejected", "reason", "upstream_transport_unavailable", "requestId", requestID(request))
 		}
 		writeProblem(w, problem(503, "common.unavailable", "Service Unavailable", "control plane unavailable", requestID(request)))
 	}
@@ -249,9 +249,20 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			}
 		}
 		rewriteOutboundAPI(pr.Out, clientIP, bearer, rid, ensureTraceparent(r))
+		if origin, _ := r.Context().Value(linkOriginKey{}).(string); origin != "" {
+			if parsed, err := url.Parse(origin); err == nil {
+				pr.Out.Header.Set("X-Forwarded-Host", parsed.Host)
+				pr.Out.Header.Set("X-Forwarded-Proto", parsed.Scheme)
+			}
+		}
 		pr.Out.Header.Del("Cookie")
 		if iam {
 			pr.Out.Host = r.Host
+			if role, _ := r.Context().Value(accessRoleKey{}).(string); role == "managed" {
+				// IAM authenticates the canonical portal hop. The approved managed
+				// presentation remains in the sanitized forwarding headers above.
+				pr.Out.Host = originAuthority(g.Cfg.Access.PortalOrigin())
+			}
 			if selectedCookies != "" {
 				pr.Out.Header.Set("Cookie", selectedCookies)
 			}

@@ -1,3 +1,4 @@
+import { networkTiming } from '../timing.js';
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -73,7 +74,7 @@ export function createMailboxClient({
     if (signal.aborted || execution?.aborted) stop();
     const timer = setTimeout(
       () => abort.abort(overload ?? new Error('mailbox timeout')),
-      5000,
+      networkTiming.operationMs,
     );
     const check = () => {
       abort.signal.throwIfAborted();
@@ -143,7 +144,10 @@ export function createMailboxClient({
           100 * 2 ** (attempt - 1),
           (result.retry_after ?? 0) * 1000,
         );
-        if (attempt === 5 || backoff >= 5000 - (performance.now() - started))
+        if (
+          attempt === 5 ||
+          backoff >= networkTiming.operationMs - (performance.now() - started)
+        )
           throw error;
         await delay(backoff, undefined, { signal: abort.signal });
         check();

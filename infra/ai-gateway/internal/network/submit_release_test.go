@@ -122,8 +122,12 @@ func TestSubmitRPCContextRelease(t *testing.T) {
 						t.Fatalf("wrong slots while RPC waits: verification=%d active=%d tenants=%d devices=%d", len(h.verifySlots), active, tenants, devices)
 					}
 					deadline, ok := rpcContext.Deadline()
-					if !ok || deadline.Sub(started) != 10*time.Second || rpcContext.Err() != nil {
-						t.Fatal("RPC did not start with the original live 10-second deadline")
+					wantDeadline := 10 * time.Second
+					if stage == "submission" {
+						wantDeadline = h.client.timeout
+					}
+					if !ok || deadline.Sub(started) != wantDeadline || rpcContext.Err() != nil {
+						t.Fatal("RPC did not start with the original bounded live deadline")
 					}
 					wantErr := context.DeadlineExceeded
 					if cause == "cancellation" {
@@ -136,7 +140,7 @@ func TestSubmitRPCContextRelease(t *testing.T) {
 					if rpcContext.Err() != wantErr {
 						t.Fatalf("want RPC context error %v, got %v", wantErr, rpcContext.Err())
 					}
-					if cause == "timeout" && time.Since(started) != 10*time.Second {
+					if cause == "timeout" && time.Since(started) != wantDeadline {
 						t.Fatalf("request did not stop at its deadline: %v", time.Since(started))
 					}
 					var result struct {

@@ -16,6 +16,7 @@ import { buildVerifiedPage } from './page.js';
 import { createSystemInbox, systemPromptFrom } from './system-inbox.js';
 import { verifyEnvelopeWithRefresh } from '../trust/verifier.js';
 import { FETCH_MAX_BYTES } from './constants.js';
+import { networkTiming } from '../timing.js';
 
 const FINAL = new Set([
   'host_accepted',
@@ -121,7 +122,7 @@ export function createNetworkSession(options) {
    * @param {string} requestId
    * @param {number} [timeoutMs]
    */
-  function waitFor(requestId, timeoutMs = 5_000) {
+  function waitFor(requestId, timeoutMs = networkTiming.operationMs) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(requestId);

@@ -1,4 +1,14 @@
 export const rolesZh = {
+  directBinding: '直接绑定',
+  inheritedBinding: '继承自分组：{group}（只读）',
+  chooseMemberRole: '选择要授予的角色',
+  memberRoleHint:
+    '组继承的角色仅可在来源组管理；超出本人权限或已直接绑定的角色不可再次授予。最后一位所有者保护由服务端校验。',
+  memberGrantConfirm:
+    '确认将「{role}」授予成员「{name}」？角色权限：{permissions}。权限将立即变化。',
+  memberRevokeConfirm:
+    '确认撤销成员「{name}」直接绑定的「{role}」？权限将立即变化；不能撤销最后一位所有者。',
+  memberRolesSaved: '成员角色已更新，并重新读取当前权限。',
   roleType: '角色类型',
   unknownPermissionMetadata: '权限目录未提供此项的敏感级别',
   roleTitle: '角色与授权',
@@ -55,6 +65,16 @@ export const rolesZh = {
   bindingCount: '绑定数',
 };
 export const rolesEn = {
+  directBinding: 'Direct binding',
+  inheritedBinding: 'Inherited from group: {group} (read-only)',
+  chooseMemberRole: 'Select a role to grant',
+  memberRoleHint:
+    'Manage inherited roles in their source group. Roles exceeding your permissions or already bound directly cannot be granted again. The server enforces last-owner protection.',
+  memberGrantConfirm:
+    'Grant “{role}” to member “{name}”? Role permissions: {permissions}. Permissions change immediately.',
+  memberRevokeConfirm:
+    'Revoke the direct “{role}” binding from member “{name}”? Permissions change immediately. The last owner cannot be revoked.',
+  memberRolesSaved: 'Member roles updated and current permissions reloaded.',
   roleType: 'Role type',
   unknownPermissionMetadata:
     'Sensitivity is not specified in the permission catalog',

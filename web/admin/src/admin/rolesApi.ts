@@ -13,9 +13,15 @@ type BindingList =
   OrgPaths['/admin/role-bindings']['get']['responses']['200']['content']['application/json'];
 type BindingInput =
   OrgPaths['/admin/role-bindings']['post']['requestBody']['content']['application/json'];
+type MemberBindings =
+  OrgPaths['/admin/members/{accountId}/role-bindings']['get']['responses']['200']['content']['application/json'];
 const base = '/api/org/v1/admin';
 const id = encodeURIComponent;
 export const rolesApi = {
+  memberBindings: (memberId: string) =>
+    apiClient.get<MemberBindings>(
+      `${base}/members/${id(memberId)}/role-bindings`,
+    ),
   list: () => apiClient.get<RoleList>(`${base}/roles`),
   permissions: () => apiClient.get<PermissionList>(`${base}/permissions`),
   get: (roleId: string) => apiClient.get<Role>(`${base}/roles/${id(roleId)}`),

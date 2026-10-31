@@ -8,7 +8,7 @@ mkdir -p "$TMP/bin" "$TMP/nas/scripts" "$TMP/srv/container/auriga-test"
 cp "$ROOT/scripts/lib.sh" "$TMP/nas/scripts/lib.sh"
 cp "$ROOT/scripts/preflight.sh" "$TMP/nas/scripts/preflight.sh"
 cp "$ROOT/scripts/start.sh" "$TMP/nas/scripts/start.sh"
-for script in network-preflight render mount-access; do
+for script in network-preflight render mount-access renew-panel; do
   printf '#!/bin/sh\nexit 0\n' >"$TMP/nas/scripts/$script.sh"
 done
 printf '#!/bin/sh\nexit "${NAS_READY_MOUNT_EXIT:-0}"\n' >"$TMP/nas/scripts/mount-access.sh"
@@ -16,6 +16,7 @@ export NAS_ROOT="$TMP/nas" NAS_ALLOW_NONROOT=1
 export AURIGA_DATA_ROOT="$TMP/srv/container/auriga-test"
 export AURIGA_TEST_MIN_MEMORY_KB=0 AURIGA_TEST_MIN_DISK_KB=0
 export NAS_READY_LOG="$TMP/docker.log"
+litellm_image='ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06'
 touch "$AURIGA_DATA_ROOT/.auriga-initialized"
 cat >"$TMP/bin/docker" <<'EOF'
 #!/bin/sh
@@ -79,20 +80,38 @@ check_preflight() {
   : >"$NAS_READY_LOG"
   if sh "$NAS_ROOT/scripts/preflight.sh" >"$TMP/output" 2>&1; then result=0; else result=$?; fi
   if [ "$2" = pass ]; then
-    if [ "$result" = 0 ] && [ "$(grep -c '^image inspect ' "$NAS_READY_LOG")" = 6 ]; then pass "$1"; else bad "$1"; fi
+    if [ "$result" = 0 ] && [ "$(grep -c '^image inspect ' "$NAS_READY_LOG")" = "${NAS_READY_IMAGE_COUNT:-7}" ]; then pass "$1"; else bad "$1"; fi
   elif [ "$result" != 0 ] && grep -q "$3" "$TMP/output"; then pass "$1"; else bad "$1"; fi
   if grep -Eq '(^| )pull( |$)| up ' "$NAS_READY_LOG"; then bad preflight_must_be_read_only; fi
 }
 write_env
-check_preflight six_local_images pass ''
+check_preflight seven_local_images pass ''
 for service in PLATFORM EDGE AGENT POSTGRES NATS REGISTRY; do
   NAS_READY_MISSING=$(sed -n "s/^AURIGA_IMAGE_$service=//p" "$AURIGA_DATA_ROOT/stack.env")
   export NAS_READY_MISSING
   check_preflight "missing_$service" fail 'image not available locally'
 done
 unset NAS_READY_MISSING
+NAS_READY_MISSING=$litellm_image
+export NAS_READY_MISSING
+check_preflight missing_LITELLM fail 'image not available locally'
+unset NAS_READY_MISSING
 NAS_READY_DIGEST_APPS=1 write_env
-check_preflight six_digest_images pass ''
+check_preflight seven_digest_images pass ''
+local_litellm="sha256:$(printf '%064d' 0 | tr 0 7)"
+printf 'AURIGA_IMAGE_LITELLM=%s\n' "$local_litellm" >>"$AURIGA_DATA_ROOT/stack.env"
+NAS_READY_MISSING=$litellm_image; export NAS_READY_MISSING
+check_preflight offline_litellm_local_identity pass ''
+if ! grep -Fq "$local_litellm" "$NAS_READY_LOG"; then bad offline_litellm_identity_not_inspected; fi
+NAS_READY_MISSING=$local_litellm
+check_preflight offline_litellm_missing fail 'image not available locally'
+unset NAS_READY_MISSING
+for invalid_litellm in litellm:latest "sha256:$(printf '%064d' 0)"; do
+  write_env
+  printf 'AURIGA_IMAGE_LITELLM=%s\n' "$invalid_litellm" >>"$AURIGA_DATA_ROOT/stack.env"
+  check_preflight offline_litellm_invalid_identity fail 'invalid image ref\|placeholder image'
+done
+NAS_READY_DIGEST_APPS=1 write_env
 export NAS_READY_MISSING
 NAS_READY_MISSING=$(sed -n 's/^AURIGA_IMAGE_PLATFORM=//p' "$AURIGA_DATA_ROOT/stack.env")
 check_preflight missing_application_digest fail 'image not available locally'
@@ -102,6 +121,9 @@ for service in PLATFORM EDGE AGENT POSTGRES NATS REGISTRY; do
   NAS_READY_BAD_REF=$(sed -n "s/^AURIGA_IMAGE_$service=//p" "$AURIGA_DATA_ROOT/stack.env")
   check_preflight "wrong_arch_$service" fail 'expected linux/amd64'
 done
+NAS_READY_BAD_REF=$litellm_image
+export NAS_READY_BAD_REF NAS_READY_OUTPUT=linux/arm64
+check_preflight wrong_arch_LITELLM fail 'expected linux/amd64'
 for NAS_READY_OUTPUT in windows/amd64 '' garbage 'linux/amd64 extra' 'linux/amd64
 linux/amd64'; do
   export NAS_READY_OUTPUT
@@ -131,5 +153,37 @@ for NAS_READY_UP_EXIT in 73 0; do
     && ! grep -Eq '(^| )pull( |$)' "$NAS_READY_LOG"; then
     pass "start_single_up_exit_$NAS_READY_UP_EXIT"
   else bad "start_single_up_exit_$NAS_READY_UP_EXIT"; fi
+done
+write_env
+printf 'COMPOSE_PROFILES=observability\n' >>"$AURIGA_DATA_ROOT/stack.env"
+check_preflight observability_requires_explicit_images fail 'AURIGA_IMAGE_LOKI'
+for service in LOKI ALLOY; do
+  printf 'AURIGA_IMAGE_%s=example.com/%s@sha256:%s\n' "$service" "$service" "$(printf '%064d' 0 | tr 0 8)" >>"$AURIGA_DATA_ROOT/stack.env"
+done
+NAS_READY_IMAGE_COUNT=9
+check_preflight observability_nine_local_images pass ''
+for service in LOKI ALLOY; do
+  NAS_READY_MISSING=$(sed -n "s/^AURIGA_IMAGE_$service=//p" "$AURIGA_DATA_ROOT/stack.env")
+  export NAS_READY_MISSING
+  check_preflight "observability_missing_$service" fail 'image not available locally'
+done
+unset NAS_READY_MISSING NAS_READY_IMAGE_COUNT COMPOSE_PROFILES AURIGA_IMAGE_LOKI AURIGA_IMAGE_ALLOY
+cp "$ROOT/scripts/observability-query.sh" "$NAS_ROOT/scripts/observability-query.sh"
+write_env
+: >"$NAS_READY_LOG"
+query='http://127.0.0.1:3100/loki/api/v1/query_range?query=%7Bservice%3D%22edge%22%7D'
+if printf '%s\n' "$query" | sh "$NAS_ROOT/scripts/observability-query.sh" >"$TMP/output" 2>&1 \
+ && grep -Fq "exec -T loki /busybox/wget -T 10 -qO- $query" "$NAS_READY_LOG"; then pass observability_local_query
+else bad observability_local_query; fi
+for query in 'http://example.com/loki/api/v1/query_range?x=1' \
+ 'http://127.0.0.1:3100@evil.example/loki/api/v1/query_range?x=1' \
+ 'http://127.0.0.1:3100/ready' \
+ 'http://127.0.0.1:3100/loki/api/v1/query_range?x=1#fragment' \
+ 'http://127.0.0.1:3100/loki/api/v1/query_range?x=1
+second-line'; do
+  : >"$NAS_READY_LOG"
+  if printf '%s\n' "$query" | sh "$NAS_ROOT/scripts/observability-query.sh" >"$TMP/output" 2>&1; then bad observability_query_boundary
+  elif [ ! -s "$NAS_READY_LOG" ]; then pass observability_query_rejected_before_docker
+  else bad observability_query_touched_docker; fi
 done
 [ "$fail" = 0 ]

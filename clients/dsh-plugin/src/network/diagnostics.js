@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
+import { logEvent } from '../observability/index.js';
 
 // This is a logging protocol, not a new status/observer surface. Never serialize
 // an exception, request, identity or caller-supplied diagnostic object.
@@ -307,7 +308,14 @@ function encodeEvent(event) {
     !(event.created === null || typeof event.created === 'boolean')
   )
     return;
-  const line = PREFIX + JSON.stringify(event);
+  const line =
+    PREFIX +
+    JSON.stringify({
+      service: 'dsh-plugin',
+      level: 'WARN',
+      trace_id: '',
+      ...event,
+    });
   return Buffer.byteLength(line, 'utf8') <= 2048 ? line : undefined;
 }
 
@@ -465,6 +473,7 @@ export function createAttemptDiagnostics({ emit, valid, attempt = 0, signal }) {
     function fail(error) {
       if (failed || !valid() || !current()) return;
       failed = true;
+      logEvent('ERROR', 'Network attempt failed', { phase, attempt }, error);
       const status = field(error, 'status'),
         rawCode = field(error, 'code');
       const httpStatus =

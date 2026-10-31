@@ -36,23 +36,24 @@ type NATSConfig struct {
 // RuntimeConfig references the SAME config file used to launch nats-server.
 // authorization.timeout, issuer and XKey are read/verified there, not duplicated.
 type RuntimeConfig struct {
-	SubmitHTTP           *SubmitHTTPConfig     `json:"submitHTTP"`
-	BrokerConfigFile     string                `json:"brokerConfigFile"`
-	ServerAudience       string                `json:"serverAudience"`
-	ClientAccount        string                `json:"clientAccount"`
-	IssuerSeedFile       string                `json:"issuerSeedFile"`
-	XKeySeedFile         string                `json:"xkeySeedFile"`
-	IAM                  team.RPCConfig        `json:"iam"`
-	Collab               team.RPCConfig        `json:"collab"`
-	Data                 NATSConfig            `json:"data"`
-	ProtocolSigning      ProtocolSigningConfig `json:"protocolSigning"`
-	Auth                 NATSConfig            `json:"auth"`
-	Ops                  NATSConfig            `json:"ops"`
-	RedeemTimeoutMillis  int                   `json:"redeemTimeoutMillis"`
-	ActiveIntervalMillis int                   `json:"activeIntervalMillis"`
-	RequestTimeoutMillis int                   `json:"requestTimeoutMillis"`
-	MaxKickAttempts      int                   `json:"maxKickAttempts"`
-	MaxConnections       int                   `json:"maxConnections"`
+	OperationTimeoutMillis int                   `json:"operationTimeoutMillis"`
+	SubmitHTTP             *SubmitHTTPConfig     `json:"submitHTTP"`
+	BrokerConfigFile       string                `json:"brokerConfigFile"`
+	ServerAudience         string                `json:"serverAudience"`
+	ClientAccount          string                `json:"clientAccount"`
+	IssuerSeedFile         string                `json:"issuerSeedFile"`
+	XKeySeedFile           string                `json:"xkeySeedFile"`
+	IAM                    team.RPCConfig        `json:"iam"`
+	Collab                 team.RPCConfig        `json:"collab"`
+	Data                   NATSConfig            `json:"data"`
+	ProtocolSigning        ProtocolSigningConfig `json:"protocolSigning"`
+	Auth                   NATSConfig            `json:"auth"`
+	Ops                    NATSConfig            `json:"ops"`
+	RedeemTimeoutMillis    int                   `json:"redeemTimeoutMillis"`
+	ActiveIntervalMillis   int                   `json:"activeIntervalMillis"`
+	RequestTimeoutMillis   int                   `json:"requestTimeoutMillis"`
+	MaxKickAttempts        int                   `json:"maxKickAttempts"`
+	MaxConnections         int                   `json:"maxConnections"`
 }
 
 func LoadRuntimeConfig(path string) (RuntimeConfig, error) {
@@ -74,6 +75,7 @@ func LoadRuntimeConfig(path string) (RuntimeConfig, error) {
 }
 
 type Runtime struct {
+	budget     timeoutBudget
 	submitHTTP *http.Server
 	auth       *nats.Conn
 	ops        *nats.Conn
@@ -188,7 +190,7 @@ func dialNATS(cfg NATSConfig, closed func(*nats.Conn)) (*nats.Conn, error) {
 		return nil, errors.New("network: required Broker identity file unavailable")
 	}
 	defer clear(password)
-	options := []nats.Option{nats.UserInfo(cfg.Username, strings.TrimSpace(string(password))), nats.NoReconnect(), nats.Timeout(2 * time.Second), nats.ClosedHandler(closed)}
+	options := []nats.Option{nats.UserInfo(cfg.Username, strings.TrimSpace(string(password))), nats.NoReconnect(), nats.Timeout(10 * time.Second), nats.ClosedHandler(closed)}
 	if !plain || cfg.CertFile != "" || cfg.KeyFile != "" || cfg.CAFile != "" {
 		options = append(options, nats.RootCAs(cfg.CAFile), nats.ClientCert(cfg.CertFile, cfg.KeyFile))
 	}
@@ -200,18 +202,22 @@ func dialNATS(cfg NATSConfig, closed func(*nats.Conn)) (*nats.Conn, error) {
 }
 
 func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, err error) {
+	budget, e := networkTimeoutBudget(cfg.OperationTimeoutMillis)
+	if e != nil {
+		return nil, e
+	}
 	if cfg.Collab.Target == "" || cfg.Collab.ServiceTokenFile == "" || cfg.Data.Username == "" || cfg.Data.Username == cfg.Auth.Username || cfg.Data.Username == cfg.Ops.Username {
 		return nil, errors.New("network: mailbox RPC and separate data identity are required")
 	}
-	if cfg.BrokerConfigFile == "" || cfg.ServerAudience == "" || cfg.ClientAccount == "" || cfg.IssuerSeedFile == "" || cfg.XKeySeedFile == "" || cfg.IAM.Target == "" || cfg.IAM.ServiceTokenFile == "" || cfg.RedeemTimeoutMillis <= 0 || cfg.RedeemTimeoutMillis > 10000 || cfg.ActiveIntervalMillis <= 0 || cfg.ActiveIntervalMillis > 500 || cfg.RequestTimeoutMillis <= 0 || cfg.RequestTimeoutMillis > 250 || cfg.MaxConnections <= 0 || cfg.MaxConnections > 10000 || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 {
+	if cfg.BrokerConfigFile == "" || cfg.ServerAudience == "" || cfg.ClientAccount == "" || cfg.IssuerSeedFile == "" || cfg.XKeySeedFile == "" || cfg.IAM.Target == "" || cfg.IAM.ServiceTokenFile == "" || cfg.RedeemTimeoutMillis <= 0 || cfg.RedeemTimeoutMillis > 40000 || cfg.ActiveIntervalMillis <= 0 || cfg.ActiveIntervalMillis > 5000 || cfg.RequestTimeoutMillis <= 0 || cfg.RequestTimeoutMillis > 20000 || cfg.MaxConnections <= 0 || cfg.MaxConnections > 10000 || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 {
 		return nil, errors.New("network: incomplete runtime configuration")
 	}
 	opts, e := server.ProcessConfigFile(cfg.BrokerConfigFile)
 	if e != nil {
 		return nil, errors.New("network: invalid Broker configuration")
 	}
-	if opts.AuthCallout == nil || opts.AuthTimeout <= 0 || opts.AuthTimeout > 2 || opts.ServerName == "" || opts.SystemAccount == "" || cfg.ClientAccount == opts.SystemAccount || cfg.ClientAccount == opts.AuthCallout.Account || opts.Websocket.AuthTimeout != 0 && opts.Websocket.AuthTimeout != opts.AuthTimeout {
-		return nil, errors.New("network: Broker needs named server, callout, accounts and shared authorization.timeout within 2 seconds")
+	if opts.AuthCallout == nil || opts.AuthTimeout <= 0 || opts.AuthTimeout > 40 || opts.ServerName == "" || opts.SystemAccount == "" || cfg.ClientAccount == opts.SystemAccount || cfg.ClientAccount == opts.AuthCallout.Account || opts.Websocket.AuthTimeout != 0 && opts.Websocket.AuthTimeout != opts.AuthTimeout {
+		return nil, errors.New("network: Broker needs named server, callout, accounts and shared authorization.timeout within 40 seconds")
 	}
 	authTimeout := time.Duration(opts.AuthTimeout * float64(time.Second))
 	redeemTimeout := time.Duration(cfg.RedeemTimeoutMillis) * time.Millisecond
@@ -247,7 +253,7 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 		return nil, errors.New("network: internal service JWT file unavailable")
 	}
 	clear(token)
-	r := &Runtime{Errors: make(chan error, 2)}
+	r := &Runtime{budget: budget, Errors: make(chan error, 2)}
 	defer func() {
 		if err != nil {
 			r.Close()
@@ -300,7 +306,7 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 	}
 	ctx, cancel := context.WithCancel(parent)
 	r.cancel = cancel
-	client, e := NewMailboxClient(r.collab, time.Duration(cfg.RequestTimeoutMillis)*time.Millisecond)
+	client, e := NewMailboxClient(r.collab, budget.RPC)
 	if e != nil {
 		return nil, e
 	}
@@ -326,7 +332,7 @@ func StartRuntime(parent context.Context, cfg RuntimeConfig) (runtime *Runtime, 
 		return nil, err
 	}
 	r.done.Go(func() {
-		_ = r.redeemer.Reconcile(ctx, ReconcileConfig{Interval: time.Duration(cfg.ActiveIntervalMillis) * time.Millisecond, RequestTimeout: time.Duration(cfg.RequestTimeoutMillis) * time.Millisecond, MaxKickAttempts: cfg.MaxKickAttempts, Snapshot: func(ctx context.Context) (map[uint64]*ConnInfo, error) {
+		_ = r.redeemer.Reconcile(ctx, ReconcileConfig{Interval: time.Duration(cfg.ActiveIntervalMillis) * time.Millisecond, RequestTimeout: time.Duration(cfg.RequestTimeoutMillis) * time.Millisecond, MaxKickAttempts: cfg.MaxKickAttempts, FailureGrace: budget.Grace, Snapshot: func(ctx context.Context) (map[uint64]*ConnInfo, error) {
 			return LookupConns(ctx, r.ops, r.auth.ConnectedServerId(), cfg.ClientAccount, cfg.MaxConnections)
 		}, OnError: func(b Binding, err error) {
 			slog.Error("network reconciliation control failure", "server", b.ServerID, "cid", b.ClientID, "error", err)

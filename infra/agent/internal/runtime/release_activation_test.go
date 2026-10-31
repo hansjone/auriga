@@ -1190,3 +1190,109 @@ func TestReleaseReconcilerStoppedCreationStillRequiresAuthorization(t *testing.T
 		})
 	}
 }
+
+type countedReleaseRestartDriver struct {
+	*configuredReleaseDriver
+	stops atomic.Int64
+}
+
+func (d *countedReleaseRestartDriver) Stop(ctx context.Context, id string, grace time.Duration) error {
+	d.stops.Add(1)
+	return d.Docker.Stop(ctx, id, grace)
+}
+
+func TestReleaseRestartPreparesPendingGenerationAfterDurableStop(t *testing.T) {
+	for _, mode := range []string{"signed-next", "bad-signature", "resume-failed-start"} {
+		t.Run(mode, func(t *testing.T) {
+			e, d, f := newReleaseEngine(t)
+			driver := &countedReleaseRestartDriver{configuredReleaseDriver: &configuredReleaseDriver{Docker: d, home: t.TempDir(), meta: t.TempDir()}}
+			rec := reconciler.New(f.store, driver, nil, 1)
+			defer rec.Close()
+			statuses := make(chan *nodev1.InstanceStatus, 64)
+			rec.Sink = func(s *nodev1.InstanceStatus) { statuses <- s }
+			await := func(phase nodev1.InstancePhase) {
+				t.Helper()
+				timer := time.NewTimer(5 * time.Second)
+				defer timer.Stop()
+				for {
+					select {
+					case s := <-statuses:
+						if s.Phase == phase {
+							return
+						}
+						if s.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+							t.Fatal(s)
+						}
+					case <-timer.C:
+						t.Fatal("missing phase", phase)
+					}
+				}
+			}
+			old := releaseSpec(f, "restart-release", 7)
+			if err := rec.Apply(old); err != nil {
+				t.Fatal(err)
+			}
+			await(nodev1.InstancePhase_INSTANCE_PHASE_RUNNING)
+			next := proto.Clone(old).(*nodev1.InstanceSpec)
+			next.Generation = 2
+			next.Dsh.ReleaseEnvelope.ReleaseSequence = 8
+			signRelease(t, next.Dsh, f.key)
+			if mode == "bad-signature" {
+				next.Dsh.ReleaseEnvelope.Signature.Value = "invalid-signature"
+			}
+			if err := rec.Apply(next); err != nil {
+				t.Fatal(err)
+			}
+			await(nodev1.InstancePhase_INSTANCE_PHASE_PENDING_RESTART)
+			if mode == "resume-failed-start" {
+				e.healthy.Store(false)
+				rec.StartTimeout = 40 * time.Millisecond
+			}
+			command := &nodev1.Command{CommandId: "signed-runtime-restart", InstanceId: old.InstanceId, Kind: &nodev1.Command_Restart{Restart: &nodev1.RestartCommand{}}}
+			result := rec.Command(context.Background(), command)
+			if mode == "resume-failed-start" {
+				if result.Ok {
+					t.Fatal("unhealthy target completed restart")
+				}
+				created, err := f.store.GetExecution(old.InstanceId)
+				if err != nil || created == nil || created.Generation != 2 {
+					t.Fatal("target was not durably created before failed Start", created, err)
+				}
+				e.healthy.Store(true)
+				rec.StartTimeout = 2 * time.Second
+				result = rec.Command(context.Background(), command)
+			}
+			actual, err := f.store.GetActual(old.InstanceId)
+			if err != nil {
+				t.Fatal(err)
+			}
+			execution, err := f.store.GetExecution(old.InstanceId)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.mu.Lock()
+			creates, starts := e.creates, len(e.starts)
+			e.mu.Unlock()
+			if driver.stops.Load() != 1 {
+				t.Fatal("resumed restart stopped an already stopped execution")
+			}
+			if mode == "bad-signature" {
+				if result.Ok || actual.Status.Ready || creates != 1 || starts != 1 || execution.Generation != 1 {
+					t.Fatalf("restart bypassed signed activation: result=%v actual=%v creates=%d starts=%d execution=%v", result, actual.Status, creates, starts, execution)
+				}
+				return
+			}
+			if !result.Ok || !actual.Status.Ready || actual.Status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_RUNNING || actual.Status.ObservedGeneration != 2 || execution.Generation != 2 || execution.DSH.ReleaseEnvelope.ReleaseSequence != 8 || creates != 2 || starts < 2 {
+				t.Fatalf("new release was treated as old-execution recovery: result=%v actual=%v execution=%v creates=%d starts=%d", result, actual.Status, execution, creates, starts)
+			}
+			if !rec.Command(context.Background(), command).Ok {
+				t.Fatal("completed command replay failed")
+			}
+			e.mu.Lock()
+			defer e.mu.Unlock()
+			if e.creates != creates || len(e.starts) != starts {
+				t.Fatal("completed replay rebuilt or restarted runtime")
+			}
+		})
+	}
+}

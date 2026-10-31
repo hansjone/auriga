@@ -182,7 +182,30 @@ JWKS 子集（含 `d` 私钥种子，选 `state=CURRENT`）：
 
 内存票据用完即删；限流 bucket 定期/满额淘汰，IPv6 按 /64 归并。`ReadTimeout` 不设（大上传）；实例反代无短 `ResponseHeaderTimeout`；1MiB body 上限仅 `/api/`。
 
-实例生产链路已接入 E2 的节点 mTLS 和 `auriga-routes`；冷启动页仍未实现。
+实例生产链路已接入 E2 的节点 mTLS 和 `auriga-routes`。
+
+### READY 与入口路由投影
+
+workspace 的 NodeControl 状态处理先提交实例 `ready/phase`；门户的实例卡片和云端登录页
+依据 workspace 返回的 `ready=true` 且 `running|pending_restart` 跳到 `/open/<id>`。
+`WorkspaceRoutes` 在独立 worker 中每秒将已提交状态对账到 NATS KV `auriga-routes`。
+两者之间存在数据库已 READY、KV 仍为 `starting` 的窗口。edge 的 `NATSRouteStore.Get`
+逐请求读取 KV revision；解码缓存会随 revision 更新，因此该窗口不靠清空 edge 缓存解决。
+
+`/open` 现在校验当前路由为 `running` 后才签发 nonce/票据。在 `starting` 时，接受
+HTML 的浏览器文档 GET 返回 HTTP 200 准备页，每秒刷新同一个 URL；每次重新校验会话、
+所有权、租户及实时 KV，只有读到 `running` 才跳转。页面使用 `Cache-Control: no-store`，
+不签发票据、不向实例发送请求，不根据等待时长放行。刷新不会主动创建或启动实例。
+若投影始终不追上，页面持续提示准备中并提供手动重试。
+
+实例根页的文档 GET 也处理 `starting`，覆盖票据签发与首次根页访问之间状态改变的窗口。
+其他实例路径、API/fetch、写请求及 WebSocket 保留原 Problem 503；`starting` 响应带
+`Retry-After: 1`。`stopped/failed` 仍返回 `edge.instance_not_running`；路由缺失、
+KV 故障、未登录、会话撤销、跨租户或非主人仍走原拒绝路径，不能借准备页进入实例。
+
+确定性回归见 `instance_ready_test.go`：测试显式将内存路由从 `starting` 推进到
+`running`，验证等待期间无票据/反代、投影追上后的票据兑换及首次根页成功，并覆盖
+域名、路径模式和真实 IP Access socket。该证据不等于真实数据库/NATS/DSH 部署验收。
 
 ## TLS
 
@@ -245,49 +268,21 @@ permissions: {
 实例请求体总体上限 64 MiB（已知长度和未知长度都限制，超限 413），允许超过 1 MiB 的上传；API 的 1 MiB 上限保持原样。拨号／TLS 握手上限 10 秒，不设置实例短响应头超时和服务器整体 ReadTimeout。Transport 按节点 ID 和入口复用并限制池数量，地址变化和进程退出关闭空闲连接。
 
 E2 测试见 `ingress*_test.go`、`local_*_test.go`：正常身份与路径、越权／跨租户、错误节点／CA、非法 scheme、WebSocket 吊销断连、路由迁移删除、2 MiB 上传及未知长度超限、本机 TLS。Windows 假节点使用随机命名管道上的真实 TLS，避开本机 HTTPS 扫描对 loopback TCP 证书的替换；Linux 使用 httptest 随机 TCP 端口，并另测 Unix socket。
-## 模型管理 API 的独立受信转发
+## LiteLLM 独立管理入口
 
-正式 Access 配置可选启用 `upstreams["ai-admin"]` 和独立的 `aiAdminHop`，示例为基础
-edge JSON 的片段（还须提供原有 Access、IAM RPC、IAM/org/workspace 等配置）：
+旧 ai-admin 上游与 aiAdminHop 已删除。安装器生成 LiteLLM 数据上游和第四个独立 UI listener，配置片段如下（其余 Access、IAM RPC 和上游仍必需）：
 
 ```json
 {
-  "upstreams": {
-    "ai-admin": "https://192.0.2.10:9443"
-  },
-  "aiAdminHop": {
-    "serverName": "ai.internal.example.com",
-    "certFile": "/run/auriga/pki/edge-ai.crt",
-    "keyFile": "/run/auriga/pki/edge-ai.key",
-    "caFile": "/run/auriga/pki/ai-ca.crt"
+  "litellmOrigin": "http://litellm:4000",
+  "litellmUI": {
+    "origin": { "scheme": "https", "host": "admin.example.com", "port": 8086 },
+    "listener": { "address": "0.0.0.0", "port": 8086, "tls": true }
   }
 }
 ```
 
-可用 `AURIGA_EDGE_UPSTREAM_AI_ADMIN` 覆盖该上游地址；TLS 材料仍来自独立 `aiAdminHop`。
-HTTPS 始终新建并登记专用 transport：固定 DNS `serverName`，加载客户端证书/私钥及 CA，
-执行正常证书链、有效期和服务器名称校验。即使地址与 IAM 相同，也不复用 IAM transport
-或其服务器名；数值 IP 仅用于寻址。缺失/错误材料在启动时拒绝，错误 CA/名称或不被上游
-信任的客户端证书在握手时失败，不发送 HTTP 请求。上游地址只能是单一 Origin，不能带
-userinfo、query（包括空 `?`）、fragment 或路径前缀。
-
-开发时只有 `aiAdminHop.allowLoopbackHttp=true` 才能使用数值回环 HTTP（如
-`http://127.0.0.1:9443`）；`localhost` 和私网 IP HTTP 均拒绝。此例外不要求 TLS 材料。
-仅配置 hop 而没有上游、或在旧单 listener 模式配置 ai-admin 都会启动失败。
-
-只转发 `/api/ai/v1/admin` 集合根及 `/api/ai/v1/admin/` 下的路径，并沿用当前路径规范化
-与 Access 实际 listener/authority/Origin 规则。未配置或非管理 `/api/ai` 请求返回
-Problem 404，不落 SPA。域名 admin 和真实 IP:port admin 都要求当前管理浏览器会话及
-受信 `iamRpc`；Bearer 或上游 mTLS 本身不授予 admin 权限。沿用当前会话核验/续换和
-Touch 节流，IP 管理写逐次在线核 CSRF，域名管理写核同源 CSRF cookie/hash。所有 cookie
-与可伪造入口身份头在转发前剥离，`Auriga-Forwarded-*` 托管身份标记直接拒绝。
-保留管理会话当前 Bearer、`If-Match`、`If-None-Match`、`Idempotency-Key`、响应 `ETag`
-和后端 Problem；权限、令牌 ctx/aud 与近期 step-up 仍由管理后端逐操作验证。
-
-本入口不启用 device/managed/chat/me usage、内部实例或资源 API；原有 `/ai/**` Team
-路由保持独立。测试使用临时 CA、真实 mTLS 上游 handler 与 Access 双模式入口，尚未覆盖
-真实 PostgreSQL 管理 API 全链。ai-gateway 服务端 TLS 配置由 ADMINMTLS 任务提供；整合时
-仍须验证其 edge 客户端身份白名单、管理令牌权限/step-up 和真实管理读写。
+管理台 /ai/ui/ 通过一次性 POST code 交接至独立 UI Origin；每次请求仍在线检查 admin 会话和 ai.providers.write。UI socket 不提供 Auriga API。TLS 证书必须覆盖 UI hostname。数据接口仍在门户 /ai/v1，只开放 models 和 chat/completions；管理接口不接受外部 Key。部署说明见 [LiteLLM](relay-litellm.md)。
 
 ## 网络根签名清单的精确 GET
 
@@ -351,3 +346,8 @@ Java NetworkKeysController、真实 IAM、生产 provider 或双 DSH 验收。
 
 本代码改动不等于网关已部署或双 DSH 已通；须用匹配制品验证真实登录、在线准入、
 远程 MCP 和宿主投递的整条链。
+
+托管实例内部入口向 IAM 转发时，受认证 hop 的 `Host` 与门户入口标识均使用部署的
+规范门户来源；通过入口校验的内部 HTTPS 来源则保留在清洗后的 `X-Forwarded-Host/Proto`
+中，供 IAM 按允许来源列表派生 issuer。内部入口不会成为新的浏览器入口，客户端自带的
+转发头不能覆盖此来源，设备凭据及 IAM 在线授权检查保持不变。

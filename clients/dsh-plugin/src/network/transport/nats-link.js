@@ -1,4 +1,6 @@
+import { networkTiming } from '../timing.js';
 import * as natsCore from '@nats-io/nats-core';
+import { publicationContext, logEvent } from '../../observability/index.js';
 import { TransportError } from './errors.js';
 import { GuardedSocket } from './guarded-socket.js';
 import {
@@ -196,7 +198,7 @@ export class NatsLink {
         servers: o.url,
         name: o.name ?? 'auriga-dsh',
         reconnect: false,
-        timeout: o.connectTimeoutMs ?? 10_000,
+        timeout: o.connectTimeoutMs ?? networkTiming.operationMs,
         pingInterval: o.pingIntervalMs ?? 30_000,
         maxPingOut: 2,
         inboxPrefix: o.inboxPrefix,
@@ -404,9 +406,15 @@ export class NatsLink {
         this.#blockedSince = undefined;
         this.#lastBuffered = undefined;
         this.#queue.shift();
+        const context = publicationContext(head.payload);
         try {
+          if (context) logEvent('INFO', 'NATS SDK publish attempted', context);
           nc.publish(this.#opts.upSubject, head.payload);
+          if (context)
+            logEvent('INFO', 'NATS SDK publish accepted locally', context);
         } catch (cause) {
+          if (context)
+            logEvent('ERROR', 'NATS SDK publish failed', context, cause);
           const failure = new TransportError(
             'publish_failed',
             'SDK refused the publish',
@@ -434,7 +442,7 @@ export class NatsLink {
    * Stop accepting sends and unsubscribe, let already accepted messages reach
    * the socket and the broker (bounded by `timeoutMs`), then close.
    */
-  async drainAndClose(timeoutMs = 5_000) {
+  async drainAndClose(timeoutMs = networkTiming.authorityMs) {
     if (this.#state !== 'ready') return this.close();
     this.#state = 'draining';
     try {

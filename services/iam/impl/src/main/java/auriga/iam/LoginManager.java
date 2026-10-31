@@ -242,6 +242,8 @@ public final class LoginManager {
                   audience,
                   "origin",
                   origin,
+                  "linkOrigin",
+                  auriga.common.web.LinkOrigins.currentOr(origin),
                   "tenantId",
                   TenantContext.require().toString(),
                   "ip",
@@ -423,7 +425,7 @@ public final class LoginManager {
                             tx.path("firstTotpSecret").asString(), aad(tx) + ":first-totp"),
                         input.path("values").path("otp").asString(""));
                     tx.remove("firstTotpSecret");
-                    for (ObjectNode session : store.all("session"))
+                    for (ObjectNode session : sessions.userSessions(account.toString()))
                       if (session.path("accountId").asString().equals(account.toString())
                           && !session
                               .path("sessionId")
@@ -924,7 +926,7 @@ public final class LoginManager {
             "userAgent",
             tx.path("userAgent").asString(),
             "callbackUrl",
-            tx.path("origin").asString()
+            tx.path("linkOrigin").asString(tx.path("origin").asString())
                 + "/api/iam/v1/login/callback/"
                 + provider.path("providerId").asString(),
             "state",

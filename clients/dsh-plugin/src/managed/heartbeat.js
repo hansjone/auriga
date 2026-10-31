@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { traceFetch } from '../observability/index.js';
 import { PROTOCOL_VERSION, protocolInfo, userAgent } from './protocol.js';
 import { checkProtocol } from './protocol.js';
 
@@ -74,7 +75,7 @@ export function createHeartbeatClient(opts) {
         '/api/workspace/v1/instance/heartbeat',
         opts.platformUrl,
       );
-      const res = await fetchImpl(url, {
+      const res = await traceFetch(fetchImpl, url, {
         method: 'POST',
         redirect: 'error',
         headers: {

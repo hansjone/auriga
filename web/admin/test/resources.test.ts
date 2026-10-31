@@ -719,7 +719,7 @@ describe('resource async boundaries and navigation', () => {
       realRouter.resolve('/resources').matched.at(-1)?.components?.default,
     ).toBe(ResourcesView);
   });
-  it('preserves headquarters, devices, relay and Auto as honest unavailable entries', async () => {
+  it('preserves headquarters and devices as unavailable and links relay to LiteLLM', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [
@@ -733,12 +733,9 @@ describe('resource async boundaries and navigation', () => {
     expect(wrapper.text()).toContain('独立系统 DSH');
     expect(wrapper.text()).toContain('尚未开放');
     expect(navigation.flatMap((n) => n.children.map((c) => c[0]))).toEqual(
-      expect.arrayContaining([
-        '/models/auto',
-        '/models/relay',
-        '/runtime/devices',
-      ]),
+      expect.arrayContaining(['/runtime/devices']),
     );
+    expect(navigation.some((item) => item.path === '/models/relay')).toBe(true);
     expect(calls).toHaveLength(0);
   });
 });

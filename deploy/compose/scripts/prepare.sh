@@ -6,6 +6,12 @@ COMPOSE="$ROOT/deploy/compose"
 VAR="$COMPOSE/var"
 ACCESS_ARGS=()
 while [ "$#" -gt 0 ]; do
+  if [ "$1" = --litellm-ui-origin ]; then
+    [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing LiteLLM UI origin' >&2; exit 1; }
+    ACCESS_ARGS+=("-litellm-ui-origin" "$2")
+    shift 2
+    continue
+  fi
   case "$1" in --access-file|--https-cert-file|--https-key-file|--network-collab-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
   [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing prepare input' >&2; exit 1; }
   # Resolve once before changing directory; only the public Go loader parses it.
@@ -78,6 +84,8 @@ trap 'rm -f -- "$COMPOSE_ENV_TMP"' EXIT
 cat "$VAR/iam-installation/compose.keys" > "$COMPOSE_ENV_TMP"
 cat >> "$COMPOSE_ENV_TMP" <<EOF
 AURIGA_AGENT_CA_SHA256=$CA_SHA
+AURIGA_PANEL_UID=$(stat -c '%u' "$VAR/panel-signing.key")
+AURIGA_PANEL_GID=$(stat -c '%g' "$VAR/panel-signing.key")
 EOF
 cat "$VAR/access.env" >> "$COMPOSE_ENV_TMP"
 mv -fT -- "$COMPOSE_ENV_TMP" "$VAR/compose.env"
@@ -134,5 +142,23 @@ chmod 644 "$VAR/pki/"*.crt "$VAR/pki/edge.key" \
   "$VAR/identity-signing-keys.json" "$VAR/identity-keys.json" \
   "$VAR/edge.config.json" || true
 chmod 777 "$VAR/enrollment" "$VAR/join" || true
+
+if [ -e "$VAR/panel" ] || [ -L "$VAR/panel" ]; then
+  [ -d "$VAR/panel" ] && [ ! -L "$VAR/panel" ] || { echo 'invalid panel output directory' >&2; exit 1; }
+else
+  mkdir -m 755 "$VAR/panel"
+fi
+
+# The signer runs as the existing key owner; no extra DAC capability is needed.
+PANEL_OWNER="$(stat -c '%u:%g' "$VAR/panel-signing.key")"
+if [ "$(id -u)" -eq 0 ]; then
+  chown "$PANEL_OWNER" "$VAR/panel"
+else
+  sudo -n chown "$PANEL_OWNER" "$VAR/panel"
+fi
+sh "$COMPOSE/scripts/renew-panel.sh" --install || echo "warning: panel automatic renewal unavailable; configure host cron or renew manually" >&2
+sh "$COMPOSE/scripts/renew-panel.sh" || echo "warning: panel startup check failed; stack startup remains available" >&2
+
+sh "$COMPOSE/scripts/litellm-permissions.sh" "$VAR"
 
 echo "prepare done; env file: $VAR/compose.env"

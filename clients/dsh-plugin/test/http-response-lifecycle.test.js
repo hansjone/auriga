@@ -1,126 +1,67 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { createHttpResponseTracker } from '../src/local/host.js';
-import { createConnectRuntime } from '../src/local/runtime.js';
-
-function response() {
-  const value = new EventEmitter();
-  value.destroyed = false;
-  value.writableEnded = false;
-  value.destroyCalls = 0;
-  value.destroy = () => {
-    value.destroyCalls++;
-    value.destroyed = true;
+import { installLocalAdmission } from '../src/local/host.js';
+import { runtimePeer } from './local-runtime-peer.js';
+test('R4 platform logout leaves the native DSH admission and transport owner intact', async (t) => {
+  const { runtime, request } = await runtimePeer(t);
+  const peer = { principal: { kind: 'owner' } };
+  const connection = {
+    admit: () => ({ peer }),
+    authorizeIndex: () => true,
+    isTrusted: () => true,
   };
-  return value;
-}
-test('response finish/close releases listeners and never destroys an unrelated or completed response', () => {
-  const sessions = new Map([
-      ['A', { key: 'A' }],
-      ['B', { key: 'B' }],
-    ]),
-    tracker = createHttpResponseTracker(
-      (req) => sessions.get(req.headers.session) ?? null,
-    );
-  const done = response(),
-    active = response(),
-    other = response();
-  assert.equal(tracker.bind({ headers: { session: 'A' } }, done), true);
-  assert.equal(done.listenerCount('close'), 1);
-  done.writableEnded = true;
-  done.emit('finish');
-  assert.equal(done.listenerCount('close'), 0);
-  assert.equal(done.listenerCount('finish'), 0);
-  tracker.bind({ headers: { session: 'A' } }, active);
-  tracker.bind({ headers: { session: 'B' } }, other);
-  sessions.delete('A');
-  tracker.close('A');
-  assert.equal(done.destroyCalls, 0);
-  assert.equal(active.destroyCalls, 1);
-  assert.equal(other.destroyCalls, 0);
-  active.emit('close');
-  assert.equal(active.listenerCount('finish'), 0);
-  assert.equal(
-    tracker.bind({ headers: { session: 'anonymous' } }, response()),
-    false,
-  );
-  tracker.close('B');
-  other.emit('close');
-});
-test('late close of an old response cannot remove a newly tracked response for the same key', () => {
-  const tracker = createHttpResponseTracker(() => ({ key: 'A' })),
-    old = response(),
-    next = response();
-  tracker.bind({ headers: {} }, old);
-  tracker.close('A');
-  tracker.bind({ headers: {} }, next);
-  old.emit('close');
-  tracker.close('A');
-  assert.equal(next.destroyCalls, 1);
-  next.emit('close');
-});
-test('runtime requires a native hook, refuses anonymous admission before next, and unregisters idempotently', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'auriga-http-hook-'));
-  let handler,
-    unregistered = 0,
-    nextCalls = 0;
-  const config = {
-    platformOrigin: 'https://portal.example.com',
-    issuer: 'https://portal.example.com',
-    clientId: 'native-probe',
-    providerId: 'team',
-  };
-  const ctx = {
-    webServer: { protocol: 'http:' },
-    on(name, callback) {
-      assert.equal(name, 'connection/request');
-      handler = callback;
-      return () => {
-        unregistered++;
-      };
-    },
-  };
-  const runtime = await createConnectRuntime({ directory, config, ctx });
+  const admission = installLocalAdmission(connection, runtime, {
+    protocol: 'http:',
+  });
   try {
-    const stop = runtime.installHttpTracking();
-    assert.throws(() => runtime.installHttpTracking(), /already installed/);
-    const res = response();
-    res.writeHead = (status) => {
-      res.status = status;
-    };
-    res.end = () => {
-      res.writableEnded = true;
-      res.emit('finish');
-    };
-    const request = { headers: {} };
-    request.headers.cookie = runtime.prepare(request).setCookie.split(';')[0];
-    await handler(request, res, () => {
-      nextCalls++;
-    });
-    assert.equal(res.status, 401);
-    assert.equal(nextCalls, 0);
-    assert.equal(res.listenerCount('close'), 0);
-    stop();
-    stop();
-    assert.equal(unregistered, 1);
-    runtime.close();
-    assert.equal(unregistered, 1);
-    const absent = await createConnectRuntime({
-      directory: join(directory, 'no-hook'),
-      config,
-      ctx: { webServer: { protocol: 'http:' } },
-    });
-    assert.throws(
-      () => absent.installHttpTracking(),
-      /connection\/request hook required/,
+    await runtime.logout(request);
+    assert.equal(runtime.status(request).loggedIn, false);
+    assert.equal(
+      connection.admit({ headers: {}, url: '/api/session/create' }).peer,
+      peer,
     );
-    absent.close();
   } finally {
-    runtime.close();
-    await rm(directory, { recursive: true, force: true });
+    admission.dispose();
   }
+});
+test('R4 native DSH rejection and non-owner rejection survive removed transport tracking', () => {
+  const connection = {
+    admit: (req) =>
+      req.headers.cookie
+        ? { peer: { principal: { kind: 'guest' } } }
+        : { rejection: 401 },
+    authorizeIndex: () => false,
+    isTrusted: () => true,
+  };
+  const original = connection.admit;
+  const admission = installLocalAdmission(
+    connection,
+    {},
+    { protocol: 'http:' },
+  );
+  assert.equal(
+    connection.admit({ headers: { 'x-auriga-native': 'true' } }).rejection,
+    401,
+  );
+  assert.equal(
+    connection.admit({ headers: { cookie: 'guest' } }).rejection,
+    403,
+  );
+  admission.dispose();
+  assert.equal(connection.admit, original);
+});
+test('R4 runtime has no browser bearer or local transport-lifetime hooks', async (t) => {
+  const { runtime } = await runtimePeer(t);
+  for (const name of [
+    'bindHttpResponse',
+    'bindSocket',
+    'installHttpTracking',
+    'resolveNative',
+  ])
+    assert.equal(runtime[name], undefined);
+  assert.equal(
+    runtime.resolve({ headers: { cookie: 'auriga_local_session=forged' } }),
+    null,
+  );
+  assert.throws(() => runtime.prepare({ headers: {} }), /owner admission/);
 });

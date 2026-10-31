@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	networkdeploy "github.com/hansjone/auriga/deploy/bootstrap/network"
+	"github.com/hansjone/auriga/deploy/bootstrap/relayui"
 )
 
 func TestComposeDirectHTTPSCLI(t *testing.T) {
@@ -86,6 +87,12 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 				t.Fatal(err)
 			}
 			args := []string{"-out", out, "-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-https-cert-file", certFile, "-https-key-file", keyFile}
+			if mode == "domain" {
+				missingSAN := append(append([]string{}, args...), "-validate-access", "-litellm-ui-origin", "https://litellm-separate.example.com:8446")
+				if b, err := exec.Command(binary, missingSAN...).CombinedOutput(); err == nil || !strings.Contains(string(b), "invalid external HTTPS material") {
+					t.Fatalf("UI origin without certificate SAN accepted: %v %s", err, b)
+				}
+			}
 			for i := 0; i < 2; i++ {
 				if b, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 					t.Fatalf("HTTPS generation/reentry: %v %s", err, b)
@@ -165,6 +172,14 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 					})
 				}
 			}
+			uiURL := fmt.Sprintf("https://%s:18446", a.AdminOrigin.Host)
+			changedUI := append(append([]string{}, args...), "-litellm-ui-origin", uiURL)
+			if b, err := exec.Command(binary, changedUI...).CombinedOutput(); err == nil || !strings.Contains(string(b), "installation inputs or identity materials changed") {
+				t.Fatalf("UI origin drift accepted: %v %s", err, b)
+			}
+			if before != installationSnapshot(t, out) {
+				t.Fatal("rejected UI origin drift changed installation")
+			}
 			if err := os.WriteFile(keyFile, []byte("invalid private source"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +220,7 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			accessJSON, _, err := loadComposeAccess(input, "public-test-edge")
+			accessJSON, access, err := loadComposeAccess(input, "public-test-edge")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -213,7 +228,8 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			legacy := sha256.Sum256(append(accessJSON, []byte(fmt.Sprintf("\nnetwork-wss-v2-https\n%s\nreal\nfalse\ntrue\n%s", image, browser.Digest()))...))
+			browserDigest := browser.Digest()
+			legacy := sha256.Sum256(append(accessJSON, []byte(fmt.Sprintf("\nnetwork-wss-v2-https\n%s\nreal\nfalse\ntrue\n%s", image, browserDigest))...))
 			browser.Clear()
 			if err := os.WriteFile(receipt, append([]byte(fmt.Sprintf("%x", legacy)), sealed[64:]...), 0600); err != nil {
 				t.Fatal(err)
@@ -224,6 +240,23 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			}
 			if before != installationSnapshot(t, out) {
 				t.Fatal("old receipt repaired")
+			}
+			ui, err := relayui.Resolve(access, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, oldRecipe := range []string{"network-wss-v3-https-native-client-litellm-ui-v2", "network-wss-v4-managed-device"} {
+				oldInput := sha256.Sum256(append(append([]byte{}, accessJSON...), []byte(fmt.Sprintf("\n%s\n%s\nreal\nfalse\ntrue\n%s\n%s", oldRecipe, image, browserDigest, ui.Digest()))...))
+				if err := os.WriteFile(receipt, append([]byte(fmt.Sprintf("%x", oldInput)), sealed[64:]...), 0600); err != nil {
+					t.Fatal(err)
+				}
+				before = installationSnapshot(t, out)
+				if b, err := exec.Command(binary, args...).CombinedOutput(); err == nil {
+					t.Fatalf("old recipe %s accepted: %s", oldRecipe, b)
+				}
+				if before != installationSnapshot(t, out) {
+					t.Fatalf("old recipe %s repaired managed materials", oldRecipe)
+				}
 			}
 		})
 	}

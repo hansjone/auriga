@@ -376,6 +376,17 @@ export interface components {
       ready: boolean;
       generation: number;
       observedGeneration: number;
+      /** @enum {string} */
+      managedNetworkState?:
+        | 'unconfigured'
+        | 'pending'
+        | 'ready'
+        | 'deferred'
+        | 'disabled'
+        | 'stopped';
+      /** @enum {string|null} */
+      managedNetworkReason?:
+        'issuer_unavailable' | 'permission_denied' | 'session_revoked' | null;
       pendingRestart: boolean;
       pendingRestartReasons?: (
         'dsh_version' | 'plugins' | 'config' | 'resources'

@@ -490,6 +490,8 @@ components:
         ready: { type: boolean }
         generation: { type: integer }
         observedGeneration: { type: integer }
+        managedNetworkState: { type: string, enum: [unconfigured, pending, ready, deferred, disabled, stopped] }
+        managedNetworkReason: { type: [string, 'null'], enum: [issuer_unavailable, permission_denied, session_revoked, null] }
         pendingRestart: { type: boolean }
         pendingRestartReasons: { type: array, items: { type: string, enum: [dsh_version, plugins, config, resources] } }
         alwaysOn: { type: boolean }

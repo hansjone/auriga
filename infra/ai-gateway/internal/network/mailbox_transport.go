@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"net"
 	"os"
 	"strings"
@@ -20,9 +21,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Same trusted transport and rotating service JWT as team.DialRPC. Its fixed
-// 10s interceptor cannot carry the source-control contract's 30s budget. Keep
-// the exception here, scoped to the three generated mailbox methods only.
+// Same trusted transport and rotating service JWT as team.DialRPC. Preserve
+// the caller's operation budget; only unbounded callers receive a fallback.
 func dialMailboxRPC(c team.RPCConfig) (*grpc.ClientConn, error) {
 	var transport credentials.TransportCredentials
 	if c.CertFile == "" && c.KeyFile == "" && c.CAFile == "" {
@@ -62,6 +62,10 @@ func dialMailboxRPC(c team.RPCConfig) (*grpc.ClientConn, error) {
 		switch method {
 		case collab.NetworkMailboxService_SourceRegister_FullMethodName, collab.NetworkMailboxService_SourceGet_FullMethodName, collab.NetworkMailboxService_SourceRevoke_FullMethodName:
 			timeout = sourceRequestTimeout
+		}
+		ctx = observability.Outgoing(ctx)
+		if _, bounded := ctx.Deadline(); bounded {
+			return invoke(ctx, method, req, reply, cc, opts...)
 		}
 		bounded, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()

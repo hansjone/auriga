@@ -6,6 +6,7 @@ import ElementPlus from 'element-plus';
 import { createAurigaI18n, type Member, type OrgPaths } from '@auriga/shared';
 import { apiClient, bindApiRouter } from '../src/api';
 import { orgAdminApi, type Group, type Invitation } from '../src/admin/orgApi';
+import { rolesApi, type Role } from '../src/admin/rolesApi';
 import InvitationsView from '../src/views/InvitationsView.vue';
 import GroupsView from '../src/views/GroupsView.vue';
 
@@ -17,6 +18,7 @@ const tenantId = '01900000-0000-7000-8000-000000000005';
 const timestamp = '2026-10-24T00:00:00Z';
 const credential = 'invitation-example-credential';
 const permissionsAll = [
+  'org.roles.read',
   'org.invitations.read',
   'org.invitations.write',
   'org.groups.read',
@@ -25,6 +27,32 @@ const permissionsAll = [
 ];
 type Membership =
   OrgPaths['/me']['get']['responses']['200']['content']['application/json'];
+const invitationRoles: Role[] = [
+  {
+    id: 'member-role',
+    key: 'member',
+    name: { en: 'Member', zh: '普通成员' },
+    builtin: true,
+    permissions: [],
+    bindingCount: 0,
+  },
+  {
+    id: 'custom-role',
+    key: 'reader',
+    name: { en: 'Reader', zh: '只读角色' },
+    builtin: false,
+    permissions: ['org.members.read'],
+    bindingCount: 0,
+  },
+  {
+    id: 'owner-role',
+    key: 'owner',
+    name: { en: 'Owner', zh: '所有者' },
+    builtin: true,
+    permissions: ['system.write'],
+    bindingCount: 1,
+  },
+];
 let permissions: string[];
 let invitations: Invitation[];
 let groups: Group[];
@@ -47,6 +75,7 @@ const noContent = () => new Response(null, { status: 204 });
 const writes = () => calls.filter((call) => call.method !== 'GET');
 
 beforeEach(() => {
+  vi.spyOn(rolesApi, 'list').mockResolvedValue({ items: invitationRoles });
   permissions = [...permissionsAll];
   calls = [];
   fail = undefined;
@@ -250,7 +279,7 @@ async function confirm() {
   await wrapper!.get('[data-testid="confirm-action"]').trigger('click');
   await flushPromises();
 }
-async function choose(label: string, value: string) {
+async function choose(label: string, value: string | string[]) {
   const select = wrapper!
     .findAllComponents({ name: 'ElSelect' })
     .find((item) => item.props('ariaLabel') === label);
@@ -259,13 +288,72 @@ async function choose(label: string, value: string) {
   await flushPromises();
 }
 async function createInvitation() {
-  await click('创建普通成员邀请');
+  await click('创建成员邀请');
   await wrapper!.findAll('form').at(-1)!.trigger('submit');
   await flushPromises();
   await confirm();
 }
 
 describe('invitation management', () => {
+  it('submits the chosen external type and multiple initial roles', async () => {
+    await render(InvitationsView);
+    await click('创建成员邀请');
+    await choose('成员类型', 'external');
+    await choose('初始角色', ['member-role', 'custom-role']);
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    await confirm();
+    expect(JSON.parse(String(writes()[0].init.body))).toMatchObject({
+      memberType: 'external',
+      roleIds: ['member-role', 'custom-role'],
+    });
+  });
+  it('blocks unavailable defaults instead of silently inviting with no role', async () => {
+    vi.mocked(rolesApi.list).mockResolvedValue({ items: [] });
+    await render(InvitationsView);
+    await click('创建成员邀请');
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    expect(writes()).toHaveLength(0);
+    expect(wrapper!.text()).toContain('普通成员角色不可用');
+  });
+  it('blocks role option failures and supports an explicit retry', async () => {
+    vi.mocked(rolesApi.list).mockRejectedValueOnce(new Error('unavailable'));
+    await render(InvitationsView);
+    await click('创建成员邀请');
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    expect(writes()).toHaveLength(0);
+    await click('重新加载选项');
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    await confirm();
+    expect(writes()).toHaveLength(1);
+  });
+  it('requires role-read and disables roles exceeding the operator permissions', async () => {
+    await render(InvitationsView);
+    await click('创建成员邀请');
+    const select = wrapper!
+      .findAllComponents({ name: 'ElSelect' })
+      .find((s) => s.props('ariaLabel') === '初始角色')!;
+    expect(select.props('options')).toContainEqual(
+      expect.objectContaining({ value: 'owner-role', disabled: true }),
+    );
+    select.vm.$emit('update:modelValue', ['owner-role']);
+    await flushPromises();
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    expect(writes()).toHaveLength(0);
+  });
+  it('does not fetch roles or submit defaults without role-read', async () => {
+    permissions = permissions.filter((p) => p !== 'org.roles.read');
+    await render(InvitationsView);
+    await click('创建成员邀请');
+    expect(rolesApi.list).not.toHaveBeenCalled();
+    await wrapper!.findAll('form').at(-1)!.trigger('submit');
+    await flushPromises();
+    expect(writes()).toHaveLength(0);
+  });
   it.each([
     'https://portal.example.com:9443/team/invite/example%2Bcode?source=invitation',
     'http://192.0.2.10:8080/invite/example-code',
@@ -294,7 +382,7 @@ describe('invitation management', () => {
     await click('刷新');
     expect(wrapper!.text()).not.toContain(returnedUrl);
     await createInvitation();
-    await click('创建普通成员邀请');
+    await click('创建成员邀请');
     expect(wrapper!.text()).not.toContain(returnedUrl);
     expect(wrapper!.text()).not.toContain(credential);
   });
@@ -475,7 +563,7 @@ describe('invitation management', () => {
           })
         : undefined;
     await render(InvitationsView);
-    await click('创建普通成员邀请');
+    await click('创建成员邀请');
     await wrapper!.findAll('form').at(-1)!.trigger('submit');
     await flushPromises();
     await confirm();
@@ -490,7 +578,7 @@ describe('invitation management', () => {
   });
   it('uses English link and copy labels', async () => {
     await render(InvitationsView, 'en');
-    await click('Create member invitation');
+    await click('Create invitation');
     await wrapper!.findAll('form').at(-1)!.trigger('submit');
     await flushPromises();
     await confirm();
@@ -498,9 +586,9 @@ describe('invitation management', () => {
     await click('Copy invitation link');
     expect(clipboardWrite).toHaveBeenLastCalledWith(returnedUrl);
   });
-  it('creates only an ordinary member invitation and shows the returned code and URL once', async () => {
+  it('defaults to a discovered member role invitation and shows the returned code and URL once', async () => {
     await render(InvitationsView);
-    await click('创建普通成员邀请');
+    await click('创建成员邀请');
     await wrapper!
       .get('input[aria-label="邮箱"]')
       .setValue('alice@example.com');
@@ -511,7 +599,7 @@ describe('invitation management', () => {
     expect(JSON.parse(String(writes()[0].init.body))).toEqual({
       memberType: 'member',
       maxUses: 1,
-      roleIds: [],
+      roleIds: ['member-role'],
       groupIds: [],
       providerIds: [],
       email: 'alice@example.com',
@@ -557,7 +645,7 @@ describe('invitation management', () => {
   });
   it('cancels creation without making a write', async () => {
     await render(InvitationsView);
-    await click('创建普通成员邀请');
+    await click('创建成员邀请');
     await wrapper!.findAll('form').at(-1)!.trigger('submit');
     await flushPromises();
     await wrapper!
@@ -620,7 +708,7 @@ describe('invitation management', () => {
           })
         : undefined;
     await render(InvitationsView);
-    await click('创建普通成员邀请');
+    await click('创建成员邀请');
     await wrapper!.findAll('form').at(-1)!.trigger('submit');
     await flushPromises();
     await confirm();
@@ -663,7 +751,7 @@ describe('invitation management', () => {
           })
         : undefined;
     await render(InvitationsView);
-    await click('创建普通成员邀请');
+    await click('创建成员邀请');
     await wrapper!.findAll('form').at(-1)!.trigger('submit');
     await flushPromises();
     await confirm();
@@ -984,7 +1072,7 @@ describe('permissions and API boundaries', () => {
       permissions = [permission];
       await render(component);
       expect(wrapper!.text()).toContain('当前权限仅允许查看');
-      expect(wrapper!.text()).not.toContain('创建普通成员邀请');
+      expect(wrapper!.text()).not.toContain('创建成员邀请');
       expect(wrapper!.text()).not.toContain('创建分组');
     },
   );
@@ -1044,7 +1132,7 @@ describe('permissions and API boundaries', () => {
   it('uses English invitation copy', async () => {
     await render(InvitationsView, 'en');
     expect(wrapper!.text()).toContain('Invitations');
-    await click('Create member invitation');
+    await click('Create invitation');
     expect(wrapper!.text()).toContain('No email is sent automatically');
   });
   it('encodes group and invitation identifiers', async () => {

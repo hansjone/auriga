@@ -9,6 +9,7 @@
   </parent>
   <artifactId>workspace-impl</artifactId>
   <dependencies>
+    <dependency><groupId>auriga</groupId><artifactId>iam-api</artifactId><version>${project.version}</version></dependency>
     <!-- Same crypto implementation/version already used by iam; ASN.1 X.509/PKCS#10. -->
     <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId><version>1.83</version></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>

@@ -188,7 +188,7 @@ load_stack_env() {
 
 validate_managed_tree() {
   # User workspaces may contain symlinks; only these deployment-owned trees are scanned.
-  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens data data/agent data/postgres data/nats data/registry; do
+  for _rel in config secrets join results enrollment bin socket-share internal-tokens network-tokens collab-tokens data data/agent data/postgres data/nats data/registry; do
     _managed="$AURIGA_DATA_ROOT/$_rel"
     [ ! -L "$_managed" ] || die "managed path is a symlink: $_managed"
   done
@@ -277,17 +277,56 @@ compose_cmd() {
   fi
 }
 
-run_compose() {
+runtime_directory() {
+  if [ ! -e "$AURIGA_DATA_ROOT/config/runtime-source" ] && [ ! -L "$AURIGA_DATA_ROOT/config/runtime-source" ]; then
+    printf '%s' "$AURIGA_DATA_ROOT/config/materials"
+    return
+  fi
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" runtime-path
+  else
+    "$(bootstrap_binary)" runtime-upgrade -action path -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"
+  fi
+}
+
+write_runtime_override() {
+  _runtime_path=$1
+  case "$_runtime_path" in
+    "$AURIGA_DATA_ROOT/config/materials") return ;;
+    "$AURIGA_DATA_ROOT/config/runtime-source/s-"*) ;;
+    *) die 'invalid privileged runtime path' ;;
+  esac
+  _runtime_yaml=$(printf '%s' "$_runtime_path" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat <<EOF
+services:
+  platform:
+    volumes:
+      - '$_runtime_yaml/templates:/etc/auriga/templates:ro'
+      - '$_runtime_yaml/runtime-keys:/etc/auriga/runtime-keys:ro'
+  agent:
+    volumes:
+      - '$_runtime_yaml/agent-policy.yaml:/etc/auriga/agent-policy.yaml:ro'
+      - '$_runtime_yaml/runtime-proofs:/etc/auriga/runtime-proofs:ro'
+EOF
+}
+
+run_compose() (
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
     return
   fi
   _cc=$(compose_cmd)
+  _runtime_private=$(installer_private_dir runtime-compose)
+  trap 'rm -rf -- "$_runtime_private"' EXIT
+  _runtime=$(runtime_directory)
+  write_runtime_override "$_runtime" >"$_runtime_private/runtime.yml"
+  if [ -s "$_runtime_private/runtime.yml" ]; then set -- -f "$_runtime_private/runtime.yml" "$@"; fi
+  if [ -f "$AURIGA_DATA_ROOT/config/collab-source/activation.receipt" ]; then set -- -f "$NAS_ROOT/collab-compose.yml" "$@"; fi
   # shellcheck disable=SC2086
   env AURIGA_DATA_ROOT="$AURIGA_DATA_ROOT" \
     COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" \
     $_cc -f "$NAS_ROOT/docker-compose.yml" -p "$AURIGA_NAS_PROJECT" "$@"
-}
+)
 
 # A subshell owns the private copies and trap, including on Compose failure.
 container_compose() (
@@ -317,6 +356,14 @@ services:
         required: true
 EOF
   _cc=$(compose_cmd)
+  _runtime=$(cat "$_private/runtime.path")
+  write_runtime_override "$_runtime" >"$_private/runtime.yml"
+  if [ -s "$_private/runtime.yml" ]; then set -- -f "$_private/runtime.yml" "$@"; fi
+  case "$(cat "$_private/collab.enabled")" in
+    1) set -- -f "$NAS_ROOT/collab-compose.yml" "$@" ;;
+    0) ;;
+    *) die 'invalid privileged collab Compose decision' ;;
+  esac
   # Only the fixed main file and generated env_file override have authority.
   # shellcheck disable=SC2086
   env COMPOSE_PROJECT_NAME="$AURIGA_NAS_PROJECT" $_cc \
@@ -485,7 +532,8 @@ validate_nas_access() {
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
     -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
-    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}"
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}" \
+    -litellm-ui-origin "${AURIGA_LITELLM_UI_ORIGIN-}"
 }
 
 bootstrap_nas_materials() {
@@ -497,8 +545,47 @@ bootstrap_nas_materials() {
     -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" \
     -runtime-bundle "${AURIGA_RUNTIME_BUNDLE-}" -runtime-root "${AURIGA_RUNTIME_ROOT-}" \
     -runtime-image "${AURIGA_RUNTIME_IMAGE-}" \
-    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}")
+    -https-cert-file "${AURIGA_HTTPS_CERT_FILE-}" -https-key-file "${AURIGA_HTTPS_KEY_FILE-}" \
+    -litellm-ui-origin "${AURIGA_LITELLM_UI_ORIGIN-}")
 }
+
+install_litellm_materials() (
+  # A private runtime directory holds leaf bind sources. Installation originals
+  # stay uid10001/0600, independent of service readers and receipt validation.
+  _source_dir="$AURIGA_DATA_ROOT/config/materials/litellm"
+  _runtime_dir="$AURIGA_DATA_ROOT/config/litellm"
+  [ -d "$_source_dir" ] && [ ! -L "$_source_dir" ] || die "invalid LiteLLM source directory"
+  if [ -e "$_runtime_dir" ] || [ -L "$_runtime_dir" ]; then
+    [ -d "$_runtime_dir" ] && [ ! -L "$_runtime_dir" ] || die "invalid LiteLLM runtime directory"
+    [ "$(stat -c '%u:%g:%a' "$_runtime_dir")" = '0:0:700' ] || die "invalid LiteLLM runtime directory metadata"
+  else
+    (umask 077; mkdir "$_runtime_dir")
+    chown_required 0:0 "$_runtime_dir"
+    chmod 0700 "$_runtime_dir"
+  fi
+  for _name in master salt team pg_password; do
+    case "$_name" in
+      master|salt) _owner=10001:10003 ;;
+      team) _owner=10001:10001 ;;
+      pg_password) _owner=999:999 ;;
+    esac
+    _source="$_source_dir/$_name"; _target="$_runtime_dir/$_name"
+    [ -f "$_source" ] && [ ! -L "$_source" ] && [ "$(stat -c '%h' "$_source")" = 1 ] || die "invalid LiteLLM source leaf"
+    if [ -e "$_target" ] || [ -L "$_target" ]; then
+      [ -f "$_target" ] && [ ! -L "$_target" ] || die "invalid LiteLLM runtime leaf"
+      [ "$(stat -c '%u:%g:%a:%h' "$_target")" = "$_owner:640:1" ] || die "invalid LiteLLM runtime leaf metadata"
+      cmp -s "$_source" "$_target" || die "LiteLLM runtime secret changed; refusing rotation"
+    else
+      _temporary=$(umask 077; mktemp "$_runtime_dir/.install.XXXXXX")
+      trap 'rm -f -- "$_temporary"' EXIT
+      cat "$_source" >"$_temporary"
+      chown_required "$_owner" "$_temporary"
+      chmod 0640 "$_temporary"
+      mv -T "$_temporary" "$_target"
+      trap - EXIT
+    fi
+  done
+)
 
 install_edge_material() {
   _source=$1; _target=$2; _mode=$3

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElButton, ElInput, ElTable, ElTableColumn } from 'element-plus';
 import type { Member } from '@auriga/shared';
 import { orgApi } from '../api';
@@ -7,10 +7,12 @@ import { adminApi } from '../admin/api';
 import { useManagement } from '../admin/useManagement';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import MemberRoles from '../admin/MemberRoles.vue';
 import '../admin/management.css';
 
 const { t, state } = useAdminI18n();
 const q = ref('');
+const roleLocked = ref(false);
 const {
   items,
   selected,
@@ -41,6 +43,17 @@ const {
   detail: (member) => adminApi.member(member.id),
   t,
 });
+const pageLocked = computed(() => locked.value || roleLocked.value);
+watch(selected, () => {
+  roleLocked.value = false;
+});
+async function rolesUpdated() {
+  const refreshed = await load();
+  notice.value =
+    !refreshed || detailError.value
+      ? t('refreshFailedAfterWrite')
+      : t('memberRolesSaved');
+}
 onMounted(() => void load());
 let timer: ReturnType<typeof setTimeout> | undefined;
 watch(q, () => {
@@ -70,19 +83,21 @@ function setStatus(action: 'enable' | 'disable') {
       <h1>{{ t('members') }}</h1>
       <ElInput
         v-model="q"
-        :disabled="busy || !!pending"
+        :disabled="roleLocked || busy || !!pending"
         clearable
         :placeholder="t('search')"
         :aria-label="t('search')"
         style="max-width: 280px"
-      /><ElButton :disabled="locked" @click="load()">{{
+      /><ElButton :disabled="pageLocked" @click="load()">{{
         t('refresh')
       }}</ElButton>
     </header>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
     <p v-if="error" class="error" role="alert">
       {{ error }}
-      <ElButton :disabled="locked" @click="load()">{{ t('retry') }}</ElButton>
+      <ElButton :disabled="pageLocked" @click="load()">{{
+        t('retry')
+      }}</ElButton>
     </p>
     <ElTable :data="items" :empty-text="loading || error ? ' ' : t('empty')">
       <ElTableColumn prop="displayName" :label="t('displayName')" />
@@ -104,17 +119,17 @@ function setStatus(action: 'enable' | 'disable') {
       >
       <ElTableColumn :label="t('details')"
         ><template #default="{ row }"
-          ><ElButton :disabled="locked" @click="select(row as Member)">{{
+          ><ElButton :disabled="pageLocked" @click="select(row as Member)">{{
             t('details')
           }}</ElButton></template
         ></ElTableColumn
       >
     </ElTable>
     <div class="pager">
-      <ElButton :disabled="locked || !history.length" @click="previous">{{
+      <ElButton :disabled="pageLocked || !history.length" @click="previous">{{
         t('previous')
       }}</ElButton
-      ><ElButton :disabled="locked || !nextCursor" @click="next">{{
+      ><ElButton :disabled="pageLocked || !nextCursor" @click="next">{{
         t('next')
       }}</ElButton>
     </div>
@@ -124,7 +139,9 @@ function setStatus(action: 'enable' | 'disable') {
     <section v-if="selected" class="details" :aria-label="t('details')">
       <header class="head">
         <h2>{{ selected.displayName }}</h2>
-        <ElButton :disabled="locked" @click="close">{{ t('close') }}</ElButton>
+        <ElButton :disabled="pageLocked" @click="close">{{
+          t('close')
+        }}</ElButton>
       </header>
       <dl>
         <dt>{{ t('id') }}</dt>
@@ -142,17 +159,25 @@ function setStatus(action: 'enable' | 'disable') {
         <dt>{{ t('created') }}</dt>
         <dd>{{ selected.createdAt }}</dd>
       </dl>
+      <MemberRoles
+        :key="selected.id"
+        :member-id="selected.id"
+        :member-name="selected.displayName"
+        :disabled="locked"
+        @locked="roleLocked = $event"
+        @updated="rolesUpdated"
+      />
       <p v-if="!canWrite" class="muted">{{ t('readonly') }}</p>
       <div v-if="canWrite" class="actions">
         <ElButton
           v-if="selected.status === 'active'"
           type="warning"
-          :disabled="locked"
+          :disabled="pageLocked"
           @click="setStatus('disable')"
           >{{ t('disable') }}</ElButton
         ><ElButton
           v-if="selected.status === 'disabled'"
-          :disabled="locked"
+          :disabled="pageLocked"
           @click="setStatus('enable')"
           >{{ t('enable') }}</ElButton
         >

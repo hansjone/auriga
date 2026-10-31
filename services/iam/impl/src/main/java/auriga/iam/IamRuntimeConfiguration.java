@@ -29,20 +29,22 @@ public class IamRuntimeConfiguration {
   auriga.common.security.AccessTokenSettings iamLocalTokenSettings(
       auriga.contracts.deploymentconfig.DeploymentAccess access,
       auriga.common.autoconfigure.AurigaProperties properties,
-      Clock clock) {
+      Clock clock,
+      Environment env) {
     var jwt = properties.getSecurity().getJwt();
     if (jwt.getIssuer() != null && !access.issuer().equals(jwt.getIssuer()))
       throw new IllegalStateException("IAM token verification issuer must equal deployment issuer");
     // The URI is metadata only: both decoders below receive a local, public-key-only source.
     return new auriga.common.security.AccessTokenSettings(
-        access.issuer(),
-        URI.create(access.issuer() + "/oauth2/jwks"),
-        jwt.getAudience(),
-        jwt.getClockSkew(),
-        jwt.getJwksCacheTtl(),
-        jwt.getJwksMinRefreshInterval(),
-        clock,
-        access.issuer().startsWith("http://"));
+            access.issuer(),
+            URI.create(access.issuer() + "/oauth2/jwks"),
+            jwt.getAudience(),
+            jwt.getClockSkew(),
+            jwt.getJwksCacheTtl(),
+            jwt.getJwksMinRefreshInterval(),
+            clock,
+            access.issuer().startsWith("http://"))
+        .withIssuerOrigins(issuerOrigins(env));
   }
 
   @Bean
@@ -157,7 +159,14 @@ public class IamRuntimeConfiguration {
         env.getRequiredProperty("auriga.iam.issuer"),
         Binder.get(env)
             .bind("auriga.iam.internal-secret-hashes", Bindable.mapOf(String.class, String.class))
-            .orElse(Map.of()));
+            .orElse(Map.of()),
+        issuerOrigins(env));
+  }
+
+  private static List<String> issuerOrigins(Environment env) {
+    return Binder.get(env)
+        .bind("auriga.links.allowed-origins", Bindable.listOf(String.class))
+        .orElse(List.of());
   }
 
   @Bean
@@ -214,21 +223,23 @@ public class IamRuntimeConfiguration {
       SessionManager sessions,
       TokenService tokens,
       IamGrpcSessions transportGuard,
+      IamManagedDevices managed,
       Clock clock,
       org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
     var devices = new DeviceAccessAuthority(store, sessions, tokens);
     return new IamGrpcDevices(
         devices,
         new DeviceAiAccessAuthority(
-            devices,
-            tokens,
-            authorization.getIfAvailable(
-                () ->
-                    request -> {
-                      throw new auriga.common.error.AurigaException(
-                          auriga.common.error.CommonErrors.UNAVAILABLE);
-                    }),
-            clock));
+                devices,
+                tokens,
+                authorization.getIfAvailable(
+                    () ->
+                        request -> {
+                          throw new auriga.common.error.AurigaException(
+                              auriga.common.error.CommonErrors.UNAVAILABLE);
+                        }),
+                clock)
+            .managedModels(managed));
   }
 
   @Bean
@@ -328,6 +339,62 @@ public class IamRuntimeConfiguration {
   @Bean
   IamAccounts iamAccounts(IamStore store) {
     return new IamAccounts(store);
+  }
+
+  @Bean
+  IamManagedDevices iamManagedDevices(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      Secrets secrets,
+      Clock clock,
+      org.springframework.beans.factory.ObjectProvider<auriga.workspace.api.ManagedInstanceBindings>
+          bindings,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    var managed =
+        new IamManagedDevices(
+            store,
+            sessions,
+            tokens,
+            secrets,
+            request -> bindings.getObject().get(request),
+            request -> authorization.getObject().getEffectivePermissions(request),
+            clock);
+    sessions.managedValidator(managed::validSession);
+    return managed;
+  }
+
+  @Bean
+  IamGrpcManagedDevices iamGrpcManagedDevices(
+      IamManagedDevices devices, IamGrpcSessions transportGuard) {
+    return new IamGrpcManagedDevices(devices);
+  }
+
+  @Bean(destroyMethod = "shutdownNow")
+  @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.remote.workspace.target")
+  io.grpc.ManagedChannel iamWorkspaceChannel(
+      Environment env, auriga.common.grpc.AurigaClientInterceptor interceptor) {
+    return auriga.common.grpc.GrpcChannels.openTls(
+        auriga.common.grpc.GrpcChannels.target(env, "workspace"),
+        Path.of(env.getRequiredProperty("auriga.iam.workspace-client-certificate-file")).toFile(),
+        Path.of(env.getRequiredProperty("auriga.iam.workspace-client-key-file")).toFile(),
+        Path.of(env.getRequiredProperty("auriga.iam.workspace-ca-file")).toFile(),
+        interceptor);
+  }
+
+  @Bean
+  @ConditionalOnExpression("!${auriga.platform.combined:false}")
+  @ConditionalOnProperty(name = "auriga.remote.workspace.target")
+  auriga.workspace.api.ManagedInstanceBindings remoteManagedInstanceBindings(
+      @org.springframework.beans.factory.annotation.Qualifier("iamWorkspaceChannel")
+          io.grpc.ManagedChannel channel) {
+    return request ->
+        auriga.common.grpc.GrpcErrors.call(
+            () ->
+                auriga.contracts.workspace.v1.ManagedInstanceBindingServiceGrpc.newBlockingStub(
+                        channel)
+                    .getManagedInstanceBinding(request));
   }
 
   @Bean
@@ -491,21 +558,25 @@ public class IamRuntimeConfiguration {
       TokenService tokens,
       Clock clock,
       Environment env,
+      IamManagedDevices managedDevices,
       org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
-    return new OAuthProvider(
-        store,
-        sessions,
-        tokens,
-        clock,
-        Binder.get(env)
-            .bind("auriga.iam.clients", Bindable.listOf(OAuthClient.class))
-            .orElse(List.of()),
-        authorization.getIfAvailable(
-            () ->
-                request -> {
-                  throw new auriga.common.error.AurigaException(
-                      auriga.common.error.CommonErrors.UNAVAILABLE);
-                }));
+    var oauth =
+        new OAuthProvider(
+            store,
+            sessions,
+            tokens,
+            clock,
+            Binder.get(env)
+                .bind("auriga.iam.clients", Bindable.listOf(OAuthClient.class))
+                .orElse(List.of()),
+            authorization.getIfAvailable(
+                () ->
+                    request -> {
+                      throw new auriga.common.error.AurigaException(
+                          auriga.common.error.CommonErrors.UNAVAILABLE);
+                    }));
+    oauth.managedDevices(managedDevices);
+    return oauth;
   }
 
   @Bean

@@ -41,7 +41,8 @@ func run(args []string, out, logs io.Writer) error {
 		return err
 	}
 
-	logger := slog.New(slog.NewJSONHandler(logs, nil)).With("service", "edge")
+	logger := newLogLogger(logs)
+	slog.SetDefault(logger)
 
 	cfg, err := loadConfigWithAccess(*configPath, *accessPath)
 	if err != nil {
@@ -252,7 +253,7 @@ func (s *betaSessionStore) Get(ctx context.Context, hash string) (*Session, erro
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("command failed", "error", err)
+		newLogLogger(os.Stderr).Error("command failed", "error", err)
 		os.Exit(1)
 	}
 }

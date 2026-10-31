@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/json"
+	"github.com/hansjone/auriga/infra/ai-gateway/internal/observability"
 	"io"
 	"mime"
 	"net/http"
@@ -67,6 +68,8 @@ func (r *Runtime) SubmitHandler() http.Handler {
 }
 
 func (h *submitHandler) ServeHTTP(w http.ResponseWriter, q *http.Request) {
+	q, finishTrace := observability.Begin(w, q)
+	defer finishTrace()
 	w.Header().Set("Cache-Control", "no-store")
 	if q.URL.Path != SubmitPath {
 		http.NotFound(w, q)

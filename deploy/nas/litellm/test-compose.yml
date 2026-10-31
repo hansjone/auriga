@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: auriga
+      POSTGRES_USER: auriga_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/bootstrap
+    secrets: [bootstrap, litellm_pg_password]
+    volumes:
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/03-litellm.sh:ro
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-U', 'auriga_bootstrap', '-d', 'auriga']
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  fake-upstream:
+    image: &litellm ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    entrypoint: ['python', '/test/fake-upstream.py']
+    volumes: ['./fake-upstream.py:/test/fake-upstream.py:ro']
+  litellm:
+    image: *litellm
+    cap_drop: [ALL]
+    group_add: ['10003', '999']
+    security_opt: ['no-new-privileges:true']
+    entrypoint: ['/bin/sh', '/etc/litellm/entrypoint.sh']
+    environment:
+      LITELLM_LOG: ERROR
+      STORE_MODEL_IN_DB: 'True'
+    secrets: [litellm_master, litellm_salt, litellm_pg_password]
+    volumes:
+      - ./test-config.yaml:/etc/litellm/config.yaml:ro
+      - ./entrypoint.sh:/etc/litellm/entrypoint.sh:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      fake-upstream: { condition: service_started }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=4)",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+  litellm-init:
+    image: *litellm
+    cap_drop: [ALL]
+    group_add: ['10003', '999', '10001']
+    security_opt: ['no-new-privileges:true']
+    profiles: [verify]
+    entrypoint: ['python', '/test/provision.py']
+    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    volumes:
+      - ./provision.py:/test/provision.py:ro
+  checker:
+    image: *litellm
+    profiles: [verify]
+    entrypoint: ['python', '/test/verify.py']
+    secrets: [litellm_master, litellm_team, litellm_pg_password]
+    volumes:
+      - ./verify.py:/test/verify.py:ro
+      - ./provision.py:/test/provision.py:ro
+secrets:
+  bootstrap: { file: '${AURIGA_RELAY_TEST_ROOT}/bootstrap' }
+  litellm_master: { file: '${AURIGA_RELAY_TEST_ROOT}/master' }
+  litellm_salt: { file: '${AURIGA_RELAY_TEST_ROOT}/salt' }
+  litellm_team: { file: '${AURIGA_RELAY_TEST_ROOT}/team' }
+  litellm_pg_password: { file: '${AURIGA_RELAY_TEST_ROOT}/pg_password' }

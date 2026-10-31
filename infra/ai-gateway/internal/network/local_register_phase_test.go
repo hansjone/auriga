@@ -355,6 +355,40 @@ func TestLocalRegisterPhaseDelayedPublication(t *testing.T) {
 	}
 }
 
+func TestLocalRegisterPhaseDelayedRPC(t *testing.T) {
+	f := &fakeMailboxRPC{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	unblock := sync.OnceFunc(func() { close(f.release) })
+	done := make(chan struct{})
+	t.Cleanup(func() { unblock(); <-done })
+	go func() {
+		defer close(done)
+		select {
+		case <-f.entered:
+		case <-f.release:
+			return
+		}
+		// Hold the actual READY RPC past the unrelated fixture's 100ms
+		// reconciliation deadline. No business retry is allowed to hide it.
+		timer := time.NewTimer(200 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-f.release:
+		}
+		unblock()
+	}()
+	run, _, _, _, cfg := localRegisterFixture(t, f)
+	if cfg.RequestTimeoutMillis != 100 {
+		t.Fatal("reconciliation deadline changed")
+	}
+	run.mailbox.workers.Wait()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) != 1 || f.calls[0] != "ready" {
+		t.Fatalf("READY was retried: %v", f.calls)
+	}
+}
+
 func TestLocalRegisterPhaseIncompletePublication(t *testing.T) {
 	f := &fakeMailboxRPC{}
 	run, nc, down, b, cfg := localRegisterFixture(t, f)

@@ -38,13 +38,13 @@ type tenantQuery struct {
 // round. Failed KICKs retain their revocation latch; query errors have a separate
 // bounded grace. Polling, IAM retries and KICK retries are jittered.
 func (r *IAMRedeemer) Reconcile(ctx context.Context, cfg ReconcileConfig, kick func(context.Context, Binding) error) error {
-	if cfg.Interval <= 0 || cfg.Interval > 500*time.Millisecond || cfg.RequestTimeout <= 0 || cfg.RequestTimeout > 250*time.Millisecond || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 || kick == nil || cfg.Snapshot == nil {
+	if cfg.Interval <= 0 || cfg.Interval > 5*time.Second || cfg.RequestTimeout <= 0 || cfg.RequestTimeout > 20*time.Second || cfg.MaxKickAttempts < 1 || cfg.MaxKickAttempts > 5 || kick == nil || cfg.Snapshot == nil {
 		return errors.New("network: invalid reconciliation configuration")
 	}
 	if cfg.FailureGrace == 0 {
 		cfg.FailureGrace = 1500 * time.Millisecond
 	}
-	if cfg.FailureGrace <= 0 || cfg.FailureGrace > 1500*time.Millisecond {
+	if cfg.FailureGrace <= 0 || cfg.FailureGrace > 60*time.Second {
 		return errors.New("network: invalid authority failure grace")
 	}
 	state := reconcileState{}
@@ -182,7 +182,7 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 				}
 			}
 		}
-		if !b.Revoked && (b.Failures >= 3 || !b.FailedSince.IsZero() && time.Since(b.FailedSince) >= grace) {
+		if !b.Revoked && (!b.FailedSince.IsZero() && time.Since(b.FailedSince) >= grace) {
 			b.Revoked = true
 			// Spread outage-driven closes; authoritative active=false bypasses this
 			// delay. New ticket redemption remains fail-closed throughout the grace.
@@ -200,7 +200,7 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 		}
 	}
 	sort.Slice(pending, func(i, j int) bool { return pending[i].Attempts < pending[j].Attempts })
-	kickCtx, stop := context.WithTimeout(ctx, kickRoundBudget)
+	kickCtx, stop := context.WithTimeout(ctx, max(kickRoundBudget, 2*cfg.RequestTimeout))
 	defer stop()
 	jobs := make(chan liveBinding)
 	var workers sync.WaitGroup

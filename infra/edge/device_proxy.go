@@ -72,6 +72,11 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 	// request: reject their presence just as the device runtime does.
 	for name := range r.Header {
 		n := strings.ToLower(name)
+		// Deployment proxies may supply their configured Origin to native
+		// submits. This does not admit browser cookies or other browser headers.
+		if n == "origin" && r.URL.Path == "/api/ai/v1/network/submit" && g.Cfg.bearerOriginAllowed(r) {
+			continue
+		}
 		// Node's native fetch automatically sends this single transport value,
 		// even with credentials omitted. It conveys no browser session identity.
 		if n == "sec-fetch-mode" {
@@ -96,6 +101,9 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 		return
 	}
 	target, transport := g.deviceURL, apiProxyTransport
+	if configured := g.APITransports[target]; configured != nil {
+		transport = configured
+	}
 	if r.URL.Path == "/api/ai/v1/network/submit" {
 		target = g.networkSubmitURL
 		transport = g.APITransports[target]
@@ -112,6 +120,7 @@ func (g *Gateway) proxyDevice(w http.ResponseWriter, r *http.Request, audience, 
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
 		stripUntrustedEntryHeaders(pr.Out.Header)
+		pr.Out.Header.Del("Origin")
 		pr.Out.Header.Del("X-Auriga-CSRF")
 		pr.Out.Header.Del("X-Auriga-CSRF-Bootstrap")
 		rewriteOutboundAPI(pr.Out, clientIP, token, rid, ensureTraceparent(r))

@@ -1,5 +1,6 @@
 import { SessionError } from './errors.js';
 import { performance } from 'node:perf_hooks';
+import { networkTiming } from '../timing.js';
 import { verifyEnvelopeWithRefresh } from '../trust/verifier.js';
 
 /** This authenticated refusal is only a retry hint, never an identity/epoch.
@@ -20,11 +21,16 @@ export async function readyRetryError(frame, options) {
   return true;
 }
 
-/** Resend the captured READY only; its caller still owns the original 5s timer.
+/** Resend the captured READY only; its caller still owns the original timer.
  * At most five total sends, 500ms apart after authenticated overload refusals.
  * @param {()=>Promise<void>} send @param {()=>void} current
  * @param {(error:unknown)=>void} fail @param {number} [timeoutMs] */
-export function createReadyRetry(send, current, fail, timeoutMs = 5000) {
+export function createReadyRetry(
+  send,
+  current,
+  fail,
+  timeoutMs = networkTiming.operationMs,
+) {
   const deadline = performance.now() + timeoutMs;
   let sends = 1,
     closed = false;

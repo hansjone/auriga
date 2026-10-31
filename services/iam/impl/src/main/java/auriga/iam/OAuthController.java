@@ -53,6 +53,16 @@ public class OAuthController {
   @PublicEndpoint
   public ResponseEntity<ObjectNode> token(
       @RequestParam Map<String, String> input, HttpServletRequest request) {
+    if (IamManagedDevices.GRANT.equals(input.get("grant_type"))) {
+      IamError.validate(
+          request.getParameterMap().values().stream().allMatch(values -> values.length == 1));
+      // Managed credentials have no browser-session projection. Preserve common 403/503
+      // so clients can distinguish proven revocation from a transient authority outage.
+      return response(
+          requests.call(
+              request,
+              () -> oauth.managedToken(credentials(input, request), requests.clientIp(request))));
+    }
     String[] resources = request.getParameterValues("resource");
     if (resources != null && resources.length != 1)
       return response(OAuthProvider.error("invalid_target"));

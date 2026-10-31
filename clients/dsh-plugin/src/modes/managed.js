@@ -1,8 +1,14 @@
 // @ts-nocheck
+import { MANAGED_MODEL_STATUS } from '../ai/installation.js';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createManagedNetwork } from '../network/managed-device.js';
+import { createConsentRoutes } from '../local/consent-routes.js';
+import { createMessagingRoutes } from '../local/messaging-routes.js';
 import {
   installHostAuthentication,
   validateBrowserOrigin,
+  browserFenceOk,
 } from '../managed/host-auth.js';
 import { createIdentityKeyCache } from '../managed/keys.js';
 import { createDoorLock, createReplayCache } from '../managed/door.js';
@@ -247,6 +253,7 @@ export async function createManaged(options = {}) {
   let disposeHostAuth;
   let disposeDoor;
   let disposeHttpGuard;
+  let network;
 
   return {
     mode: /** @type {const} */ ('managed'),
@@ -264,6 +271,15 @@ export async function createManaged(options = {}) {
     keyCache,
     panelKeyCache,
     workspaceRoot,
+    get networkStatus() {
+      return (
+        network?.status ?? {
+          available: false,
+          connected: false,
+          state: 'unconfigured',
+        }
+      );
+    },
     healthBody: () => buildHealthBody({ pluginVersion, ready: true }),
     /**
      * @param {object} ctx
@@ -290,6 +306,120 @@ export async function createManaged(options = {}) {
         }),
       });
       registerHealthRoute(ctx, { pluginVersion });
+
+      // Same public host services, provider and network lifecycle as connect mode.
+      // Profile storage is only durable partitioning; it is not an isolation claim.
+      if (env.AURIGA_DEVICE_CREDENTIAL_FILE) {
+        ctx.inject(['profileContext'], (profileCtx) => {
+          const directory = profileCtx.profileContext?.dir;
+          if (!directory)
+            throw new Error(
+              'managed network requires a host profile directory',
+            );
+          profileCtx.inject(
+            ['tools', 'sessions', 'sessionController'],
+            (networkCtx) => {
+              const owned = createManagedNetwork({
+                file: env.AURIGA_DEVICE_CREDENTIAL_FILE,
+                directory: join(directory, 'auriga-managed'),
+                tenantId,
+                ownerId,
+                instanceId,
+                ctx: networkCtx,
+                authorizeLocal: async (req) =>
+                  door.isAuthenticated(req) &&
+                  browserFenceOk(req, browserOrigin),
+              });
+              network = owned;
+              owned.start();
+              networkCtx.effect(
+                () => () => {
+                  if (network === owned) network = undefined;
+                  return owned.close();
+                },
+                'auriga-dsh: managed network lifetime',
+              );
+              networkCtx.inject(['aurigaNetwork'], (providerCtx) => {
+                const detach = owned.attach(providerCtx.aurigaNetwork);
+                providerCtx.effect(
+                  () => detach,
+                  'auriga-dsh: managed network provider',
+                );
+              });
+            },
+          );
+        });
+        const authorized = (req) =>
+          door.isAuthenticated(req) && browserFenceOk(req, browserOrigin);
+        const facade = {
+          resolve: authorized,
+          checkCsrf: (req) =>
+            authorized(req) && typeof req.headers.origin === 'string',
+          consentUI: (req) => network.consentUI(req),
+          messagingUI: (req) => network.messagingUI(req),
+        };
+        const consent = createConsentRoutes(facade),
+          messaging = createMessagingRoutes(facade);
+        ctx.effect(
+          () =>
+            ctx.webServer.register({
+              kind: 'prefix',
+              path: '/auriga/local-login',
+              handler(req, res) {
+                if (!authorized(req)) {
+                  res.writeHead(401, { 'cache-control': 'no-store' });
+                  res.end();
+                  return;
+                }
+                const path = (req.url ?? '').split('?')[0];
+                if (path.startsWith('/auriga/local-login/consent/'))
+                  return consent(req, res);
+                if (path.startsWith('/auriga/local-login/messaging/'))
+                  return messaging(req, res);
+                if (
+                  req.method === 'GET' &&
+                  path === '/auriga/local-login/status'
+                ) {
+                  res.writeHead(200, {
+                    'content-type': 'application/json',
+                    'cache-control': 'no-store',
+                  });
+                  res.end(
+                    JSON.stringify({
+                      authenticated: true,
+                      mode: 'managed',
+                      loggedIn: true,
+                      connected: network?.status?.connected === true,
+                      account: { subject: ownerId },
+                      models: MANAGED_MODEL_STATUS,
+                      network: network?.status ?? {
+                        connected: false,
+                        state: 'unavailable',
+                      },
+                    }),
+                  );
+                  return;
+                }
+                if (
+                  req.method === 'POST' &&
+                  path === '/auriga/local-login/logout' &&
+                  facade.checkCsrf(req)
+                ) {
+                  network?.logout();
+                  res.writeHead(200, {
+                    'content-type': 'application/json',
+                    'cache-control': 'no-store',
+                  });
+                  res.end(JSON.stringify({ ok: true }));
+                  return;
+                }
+                res.writeHead(404, { 'cache-control': 'no-store' });
+                res.end();
+              },
+            }),
+          'auriga-dsh: managed network controls',
+        );
+      }
 
       // Count browser transports via upgrade (same idea as oclaw hub-member).
       // We do not filter by identity here: the door already gates HTTP; raw
@@ -334,6 +464,7 @@ export async function createManaged(options = {}) {
       if (options.startHeartbeat !== false) heartbeat.start();
 
       return () => {
+        void network?.close();
         heartbeat.stop();
         disposeActivity?.();
         disposeDoor?.();
@@ -352,6 +483,7 @@ export async function createManaged(options = {}) {
       guardWorkspaceRegistry(registry, workspaceRoot),
     getManifest,
     close() {
+      void network?.close();
       heartbeat.stop();
       disposeActivity?.();
       disposeHostAuth?.();

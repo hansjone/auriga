@@ -376,6 +376,15 @@ public final class IamNetworkAuthority implements NetworkAuthority {
                   sql,
                   (rs, i) -> new NodeReference(rs.getString(1), rs.getString(2)),
                   args.toArray())) if (result.containsKey(key)) result.put(key, true);
+          for (var entry : result.entrySet()) {
+            if (!entry.getValue()) continue;
+            Node n = node(entry.getKey().node());
+            var device = store.get("device", n.device(), false);
+            if (device != null
+                && "managed".equals(device.path("deviceType").asString())
+                && devices.credential(TenantContext.require().toString(), n.account(), n.device())
+                    == null) entry.setValue(false);
+          }
           return result;
         });
   }

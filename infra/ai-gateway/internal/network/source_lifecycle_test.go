@@ -73,7 +73,7 @@ func TestSourceRPCDeadlinePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	client, err := NewMailboxClient(conn, 20*time.Millisecond)
+	client, err := NewMailboxClient(conn, 20*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestSourceRPCDeadlinePolicy(t *testing.T) {
 		serverCtx := sourceEntered(t, p)
 		deadline, ok := serverCtx.Deadline()
 		remaining := time.Until(deadline)
-		if !ok || remaining > sourceRequestTimeout || !short && remaining < 29*time.Second || short && remaining > 100*time.Millisecond {
+		if !ok || remaining > 20*time.Second || !short && remaining < 19*time.Second || short && remaining > 100*time.Millisecond {
 			t.Fatalf("incorrect source deadline: %v %s", ok, remaining)
 		}
 		if !short {
@@ -111,14 +111,18 @@ func TestSourceRPCDeadlinePolicy(t *testing.T) {
 		close(p.release)
 		<-p.returned
 	}
-	// Existing RPCs retain their configured short timeout.
+	// The same business budget applies to HEAD; an earlier parent still wins.
 	f.mu.Lock()
 	f.block = true
 	f.mu.Unlock()
 	start := time.Now()
-	_, ae := client.Call(context.Background(), liveBinding{}, "ready", nil)
+	_, ae := client.Call(func() context.Context {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		t.Cleanup(cancel)
+		return ctx
+	}(), liveBinding{}, "head", nil)
 	if ae == nil || ae.Code != "network.overloaded" || time.Since(start) > time.Second {
-		t.Fatal("legacy timeout changed")
+		t.Fatal("HEAD escaped the earlier parent deadline")
 	}
 }
 

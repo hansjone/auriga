@@ -1,0 +1,7 @@
+# Optional local-only upstream for verify-relay.mjs. No provider credentials.
+services:
+  fake-upstream:
+    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    entrypoint: ['python', '/test/fake-upstream.py']
+    volumes:
+      - ../nas/litellm/fake-upstream.py:/test/fake-upstream.py:ro

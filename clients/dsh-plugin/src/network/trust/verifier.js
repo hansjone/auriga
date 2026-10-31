@@ -1,3 +1,4 @@
+import { platformStarted } from '../clock.js';
 import { createHash, verify } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { SessionError } from '../session/errors.js';
@@ -88,7 +89,7 @@ export function verifyEnvelope(value, { trust, context: c, now = Date.now }) {
     ![issued, expiry, clock].every(Number.isFinite) ||
     expiry <= issued ||
     expiry - issued > 300000 ||
-    clock < issued - 60000 ||
+    !platformStarted(issued, clock) ||
     clock >= expiry ||
     issued < key.notBefore ||
     expiry > key.notAfter

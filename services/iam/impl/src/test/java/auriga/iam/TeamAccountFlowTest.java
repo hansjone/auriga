@@ -1064,6 +1064,7 @@ class TeamAccountFlowTest {
           SessionManager sessions = mock(SessionManager.class);
           TokenService tokens = mock(TokenService.class);
           when(sessions.response(any())).thenAnswer(i -> ((Supplier<?>) i.getArgument(0)).get());
+          when(sessions.userSessions(account.toString())).thenAnswer(i -> store.all("session"));
           when(tokens.issuer()).thenReturn("https://portal.example.com");
           var controller =
               new IamMeController(store, sessions, team, passkeys, null, clock, tokens);
@@ -1390,11 +1391,26 @@ class TeamAccountFlowTest {
         tenant,
         () -> {
           UUID account = registeredAccount();
+          String managedId = UUID.randomUUID().toString();
+          store.insert(
+              "session",
+              managedId,
+              Json.object(
+                  "kind",
+                  "managed_device",
+                  "accountId",
+                  account.toString(),
+                  "sessionId",
+                  managedId,
+                  "revoked",
+                  false),
+              clock.instant().plusSeconds(3600));
           var pending = passwordForFirstTotp();
           String secret = firstTotpSecret(pending);
           var done =
               confirmFirst(pending, Totp.code(secret, clock.instant().getEpochSecond() / 30));
           assertNotNull(done.session());
+          assertFalse(store.get("session", managedId, false).path("revoked").asBoolean());
           assertTrue(team.hasTotp(account));
           assertTrue(done.session().session().path("mfa").asBoolean());
         });

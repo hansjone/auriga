@@ -93,7 +93,7 @@ func TestCordisPatchIsLoaderPatchList(t *testing.T) {
 		t.Fatalf("inserts: %#v", rows[0])
 	}
 	plugin := inserts[0].(map[string]any)
-	if plugin["id"] != renderer.PluginRowID || plugin["name"] != "auriga-dsh/plugin" {
+	if plugin["id"] != renderer.PluginRowID || plugin["name"] != "auriga-dsh" {
 		t.Fatalf("plugin row: %#v", plugin)
 	}
 	pcfg := plugin["config"].(map[string]any)
@@ -141,6 +141,77 @@ func TestCordisPatchNativeRuntimeBindsLoopback(t *testing.T) {
 	}
 }
 
+func TestCordisPackageRootPreservesManagedConfigAndMcpTokens(t *testing.T) {
+	for _, tc := range []struct {
+		name, parent, scheme, host string
+		port                       int
+		runtime                    nodev1.RuntimeKind
+	}{
+		{"domain-docker", "i.example.com", "https", "inst-c1.i.example.com", 443, nodev1.RuntimeKind_RUNTIME_KIND_DOCKER},
+		{"ip-native", "", "http", "192.0.2.10", 8080, nodev1.RuntimeKind_RUNTIME_KIND_LINUX_PROCESS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := baseSpec()
+			spec.Runtime = tc.runtime
+			spec.Profile.Patches = []*nodev1.ConfigPatch{
+				{Path: "plugins.auriga-dsh.imBots", ValueJson: `"none"`},
+				{Path: "plugins.auriga-dsh.terminalSources", ValueJson: `"browser-only"`},
+			}
+			spec.Profile.McpServers = map[string]*nodev1.McpServer{
+				"instance": {Url: "https://ai.example.com/instance", TokenRef: nodev1.TokenRef_TOKEN_REF_INSTANCE_TOKEN},
+				"team":     {Url: "https://ai.example.com/mcp", TokenRef: nodev1.TokenRef_TOKEN_REF_AI_GATEWAY_TOKEN},
+			}
+			raw, err := renderCordis(t, spec, tc.parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rows []map[string]any
+			if err := yaml.Unmarshal([]byte(strings.ReplaceAll(raw, "!!js", "")), &rows); err != nil {
+				t.Fatal(err)
+			}
+			inserts := rows[0]["insert"].([]any)
+			if len(inserts) != 3 {
+				t.Fatalf("plugin/MCP insert order changed: %#v", inserts)
+			}
+			plugin := inserts[0].(map[string]any)
+			name, _ := plugin["name"].(string)
+			if plugin["id"] != renderer.PluginRowID || name != "auriga-dsh" || strings.Contains(name, "/") {
+				t.Fatalf("browser collector requires the package root Loader row: %#v", plugin)
+			}
+			inject := plugin["inject"].([]any)
+			if len(inject) != 2 || inject[0] != "webServer" || inject[1] != "connection" {
+				t.Fatalf("host injection changed: %#v", inject)
+			}
+			config := plugin["config"].(map[string]any)
+			if len(config) != 3 || config["imBots"] != "none" || config["terminalSources"] != "browser-only" {
+				t.Fatalf("managed config changed: %#v", config)
+			}
+			origin := config["browserOrigin"].(map[string]any)
+			if origin["scheme"] != tc.scheme || origin["host"] != tc.host || origin["port"] != tc.port {
+				t.Fatalf("domain/portal Origin changed: %#v", origin)
+			}
+			for i, server := range []string{"instance", "team"} {
+				mcp := inserts[i+1].(map[string]any)
+				cfg := mcp["config"].(map[string]any)
+				if mcp["id"] != "auriga-mcp-"+server || mcp["name"] != "@deepseek-ai/dsh-mcp-client" || cfg["serverName"] != server || cfg["transport"] != "streamable-http" || cfg["url"] != spec.Profile.McpServers[server].Url {
+					t.Fatalf("MCP row changed: %#v", mcp)
+				}
+				file := renderer.ContainerInstanceToken
+				if server == "team" {
+					file = renderer.ContainerAIGatewayToken
+				}
+				want := fmt.Sprintf("'Bearer ' + process.getBuiltinModule('node:fs').readFileSync(%q, 'utf8').trim()", file)
+				if cfg["headers"].(map[string]any)["Authorization"] != want {
+					t.Fatalf("token_ref/header changed: %#v", cfg["headers"])
+				}
+			}
+			if strings.Count(raw, "!!js") != 2 || strings.Contains(raw, "tok-secret") {
+				t.Fatal("token file expressions must remain renderer-owned and never inline secrets")
+			}
+		})
+	}
+}
+
 func TestCordisPatchRejectsReservedAndMalformed(t *testing.T) {
 	cases := []struct{ Path, ValueJson string }{
 		{Path: "plugins.webserver.host", ValueJson: `"0.0.0.0"`},
@@ -148,6 +219,8 @@ func TestCordisPatchRejectsReservedAndMalformed(t *testing.T) {
 		{Path: "plugins.web-runtime.trustedHosts", ValueJson: `["evil.example.com"]`},
 		{Path: "plugins.auriga-dsh.browserOrigin.host", ValueJson: `"evil.example.com"`},
 		{Path: "plugins.auriga-dsh.browserOrigin", ValueJson: `null`},
+		{Path: "plugins.llm-pi-ai.providers", ValueJson: `{}`},
+		{Path: "plugins.credentials.path", ValueJson: `"/untrusted/keys.json"`},
 		{Path: "plugins.auriga-dsh.trustedHosts", ValueJson: `["evil.example.com"]`},
 		{Path: "plugins.auriga-mcp-team.url", ValueJson: `"https://evil.example.com"`},
 		{Path: "server.host", ValueJson: `"0.0.0.0"`},

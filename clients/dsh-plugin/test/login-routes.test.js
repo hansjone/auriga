@@ -98,7 +98,32 @@ test('fallback diagnosis preserves TLS/platform/native categories without except
           code: 'ECONNREFUSED',
         }),
       }),
-      { category: 'network', code: 'ECONNREFUSED' },
+      { category: 'connection', code: 'ECONNREFUSED' },
+    ],
+    [
+      new TypeError('private SECRET', {
+        cause: Object.assign(new Error('private DNS name'), {
+          code: 'ENOTFOUND',
+        }),
+      }),
+      { category: 'dns', code: 'ENOTFOUND' },
+    ],
+    [
+      new TypeError('SECRET', {
+        cause: new AggregateError([
+          Object.assign(new Error('SECRET'), { code: 'ENOTFOUND' }),
+          Object.assign(new Error('SECRET'), { code: 'ECONNREFUSED' }),
+        ]),
+      }),
+      { category: 'dns', code: 'ENOTFOUND' },
+    ],
+    [
+      new TypeError('private SECRET', {
+        cause: Object.assign(new Error('private timeout target'), {
+          code: 'UND_ERR_CONNECT_TIMEOUT',
+        }),
+      }),
+      { category: 'timeout', code: 'UND_ERR_CONNECT_TIMEOUT' },
     ],
     [
       new PlatformError(403, 'common.forbidden'),
@@ -128,7 +153,10 @@ test('fallback diagnosis preserves TLS/platform/native categories without except
     });
     const res = await request(handler, '/login', { action: 'begin' });
     assert.equal(res.status, 503);
-    assert.deepEqual(JSON.parse(res.body), { code: 'common.unavailable' });
+    assert.deepEqual(JSON.parse(res.body), {
+      code: 'common.unavailable',
+      diagnostic: expected,
+    });
     assert.deepEqual(diagnoses, [{ operation: 'begin', ...expected }]);
     assert.doesNotMatch(
       JSON.stringify(diagnoses),
@@ -230,7 +258,7 @@ test('unconfigured host still serves login and recovery UI behind native admissi
   });
   assert.equal((await request(handler, '')).status, 200);
   assert.equal((await request(handler, '/assets/page.js')).status, 200);
-  assert.equal((await request(handler, '/status')).status, 404);
+  assert.equal((await request(handler, '/status')).status, 200);
   assert.equal(
     (await request(handler, '/login', { action: 'begin' })).status,
     403,

@@ -8,10 +8,8 @@ import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
 import { createConnectRuntime } from './local/runtime.js';
 import { savedPlatformConfig } from './local/platform.js';
-import {
-  installLocalAdmission,
-  installHttpResponseTracking,
-} from './local/host.js';
+import { installNativeLoginRPC } from './local/native-rpc.js';
+import { installLocalAdmission } from './local/host.js';
 import {
   createConnectRoutes,
   createUnconfiguredLoginRoutes,
@@ -20,6 +18,7 @@ import { join } from 'node:path';
 import { installSettings } from './settings/host.js';
 import { MANAGED_MODEL_STATUS } from './ai/installation.js';
 import { installNetworkDiagnosticSink } from './network/diagnostics.js';
+import { installObservability, logEvent } from './observability/index.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -30,22 +29,17 @@ export const inject = ['webServer', 'connection'];
  */
 export async function apply(ctx, config) {
   installNetworkDiagnosticSink(ctx);
+  installObservability(ctx);
   const mode = selectMode();
   let binding, profileOwner;
-  // Unknown preferences must never temporarily expose native DSH surfaces.
+  // Preferences select Auriga surfaces; DSH owns local admission independently.
   let configured = true;
   let admission;
-  const setConfigured = (next) => {
-    configured = next;
-    // Close the door before destroying old transports: even synchronous close
-    // listeners must reauthenticate before opening a new native Peer.
-    if (configured) admission?.closeStandaloneSockets();
-  };
   const settings = installSettings(
     ctx,
     config,
     mode === 'managed'
-      ? {}
+      ? { mode: 'managed' }
       : {
           activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
           nativeAuth: {
@@ -62,8 +56,7 @@ export async function apply(ctx, config) {
         'auriga-dsh: local UI requires native host authentication',
       );
     {
-      // The parent owns the closed door while native providers are pending or
-      // being unloaded. Only the injected child owns the runtime and tools.
+      // The parent keeps local owner admission alive while platform services load.
       const current = () => {
         if (!binding) return undefined;
         try {
@@ -79,25 +72,18 @@ export async function apply(ctx, config) {
         }
       };
       const gate = {
-        isConfigured: () => configured,
-        resolve: (req) => current()?.runtime.resolve(req) ?? null,
-        bindSocket: (req) => current()?.runtime.bindSocket(req) ?? false,
+        bindNativeRequest: (peer, req) =>
+          current()?.runtime.bindNativeRequest(peer, req) ?? null,
         status: (req) =>
           current()?.runtime.status(req) ?? {
             connected: false,
             connection: null,
           },
-        installHttpTracking: () =>
-          installHttpResponseTracking(
-            ctx,
-            (req, res) =>
-              !configured ||
-              (current()?.runtime.bindHttpResponse(req, res) ?? false),
-          ),
       };
       admission = installLocalAdmission(ctx.connection, gate, {
         protocol: ctx.webServer.protocol,
       });
+      installNativeLoginRPC(ctx, () => current()?.runtime);
       ctx.effect(
         () => () => admission?.dispose(),
         'auriga-dsh: persistent local door',
@@ -139,13 +125,13 @@ export async function apply(ctx, config) {
       ctx.inject(['profileContext'], async (profileCtx) => {
         const owner = {};
         profileOwner = owner;
-        setConfigured(true);
+        configured = true;
         binding = undefined;
         profileCtx.effect(
           () => () => {
             if (profileOwner !== owner) return;
             profileOwner = undefined;
-            setConfigured(true);
+            configured = true;
             binding = undefined;
           },
           'auriga-dsh: profile admission',
@@ -157,17 +143,17 @@ export async function apply(ctx, config) {
           );
         const loading = settings.getStore(profile.dir).then((store) => {
           if (profileOwner !== owner) return null;
-          setConfigured(!!store.snapshot().platformOrigin);
+          configured = !!store.snapshot().platformOrigin;
           const unwatchAdmission = store.subscribe(
             async (next) => {
-              if (profileOwner === owner) setConfigured(!!next.platformOrigin);
+              if (profileOwner === owner) configured = !!next.platformOrigin;
             },
             async (next) => {
               if (
                 profileOwner === owner &&
                 next.platformOrigin !== store.snapshot().platformOrigin
               )
-                setConfigured(true);
+                configured = true;
             },
           );
           profileCtx.effect(
@@ -296,7 +282,7 @@ export async function apply(ctx, config) {
               );
             });
             // Keep settings/retry ownership alive even when the platform is down.
-            // The parent login door stays closed and activeOrigin remains empty.
+            // Only platform status is unavailable when its runtime cannot load.
             await configure(store.snapshot().platformOrigin).catch(() => {});
           },
         );
@@ -310,7 +296,7 @@ export async function apply(ctx, config) {
     config: config ?? {},
     startHeartbeat: false,
   });
-  ctx.logger?.info?.(`[auriga-dsh] AI: ${MANAGED_MODEL_STATUS.state}`);
+  logEvent('INFO', 'AI installation', { state: MANAGED_MODEL_STATUS.state });
   let dispose;
   try {
     dispose = runtime.apply(ctx);
@@ -326,7 +312,5 @@ export async function apply(ctx, config) {
     },
     'auriga-dsh: dispose',
   );
-  ctx.logger?.info?.(
-    `[auriga-dsh] managed mode instance=${runtime.instanceId}`,
-  );
+  logEvent('INFO', 'Managed mode started', { instance_id: runtime.instanceId });
 }

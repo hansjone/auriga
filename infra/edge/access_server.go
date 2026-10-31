@@ -24,6 +24,25 @@ func (s *Server) runAccess(ctx context.Context) error {
 		role   string
 		config deployment.Listener
 	}{{"portal", listeners.Portal}, {"admin", listeners.Admin}, {"instanceControl", listeners.InstanceControl}}
+	if s.Cfg.ManagedIngress.Origin != "" {
+		entry, err := s.Cfg.managedEntry()
+		if err != nil {
+			return err
+		}
+		entries = append(entries, struct {
+			role   string
+			config deployment.Listener
+		}{"managed", deployment.Listener{Address: "0.0.0.0", Port: int32(entry.port), Tls: true}})
+	}
+	if s.Cfg.LiteLLMUI != nil {
+		if err := s.Cfg.validateLiteLLMUI(); err != nil {
+			return err
+		}
+		entries = append(entries, struct {
+			role   string
+			config deployment.Listener
+		}{"relayAdmin", s.Cfg.LiteLLMUI.Listener})
+	}
 	var sockets []net.Listener
 	var servers []*http.Server
 	defer func() {
@@ -42,12 +61,16 @@ func (s *Server) runAccess(ctx context.Context) error {
 	for _, entry := range entries {
 		var tlsConfig *tls.Config
 		if entry.config.Tls {
-			cert, err := tls.LoadX509KeyPair(s.Cfg.TLS.CertFile, s.Cfg.TLS.KeyFile)
+			certFile, keyFile := s.Cfg.TLS.CertFile, s.Cfg.TLS.KeyFile
+			if entry.role == "managed" {
+				certFile, keyFile = s.Cfg.ManagedIngress.CertFile, s.Cfg.ManagedIngress.KeyFile
+			}
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 			if err != nil {
 				return fmt.Errorf("listener TLS material: %w", err)
 			}
 			tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
-			if s.Cfg.Access.IngressKind() == "trusted_proxy" && entry.role != "instanceControl" {
+			if s.Cfg.Access.IngressKind() == "trusted_proxy" && entry.role != "instanceControl" && entry.role != "managed" {
 				if s.Cfg.ProxyTLS.IdentityURI == "" {
 					return fmt.Errorf("proxyTLS.identityUri is required")
 				}
@@ -69,6 +92,11 @@ func (s *Server) runAccess(ctx context.Context) error {
 		}
 		if entry.role == "instanceControl" && controlPolicy != nil {
 			socket = &controlIngressListener{Listener: socket, policy: controlPolicy}
+		}
+		if entry.role == "managed" {
+			policy := *controlPolicy
+			policy.port = int(entry.config.Port)
+			socket = &controlIngressListener{Listener: socket, policy: &policy}
 		}
 		if tlsConfig != nil {
 			socket = tls.NewListener(socket, tlsConfig)

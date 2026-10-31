@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { traceFetch } from '../observability/index.js';
 import {
   createHash,
   createPublicKey,
@@ -188,7 +189,7 @@ export async function fetchVerifiedManifest(opts) {
   const url = new URL('/panel/manifest.json', opts.platformUrl);
   let response;
   try {
-    response = await fetchImpl(url, {
+    response = await traceFetch(fetchImpl, url, {
       headers: {
         accept: 'application/json',
         'auriga-protocol': String(PROTOCOL_VERSION),

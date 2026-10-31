@@ -33,6 +33,7 @@ type Docker struct {
 	DataRoot      string
 	EdgeContainer string
 	PlatformHost  string
+	PortalHost    string
 
 	mu              sync.Mutex
 	endpoints       map[string]string
@@ -49,6 +50,8 @@ type DockerConfig struct {
 	// joins each isolated instance network with this platform DNS alias.
 	EdgeContainer string
 	PlatformHost  string
+	// Optional trusted HTTPS portal DNS alias for managed device traffic.
+	PortalHost string
 }
 
 // NewDocker dials the Engine API.
@@ -56,6 +59,11 @@ type DockerConfig struct {
 func NewDocker(cfg DockerConfig) (*Docker, error) {
 	if err := validateEdgeNetworkConfig(cfg.EdgeContainer, cfg.PlatformHost); err != nil {
 		return nil, err
+	}
+	if cfg.PortalHost != "" {
+		if err := validateEdgeNetworkConfig(cfg.EdgeContainer, cfg.PortalHost); err != nil {
+			return nil, err
+		}
 	}
 	host := cfg.Host
 	if host == "" {
@@ -68,6 +76,7 @@ func NewDocker(cfg DockerConfig) (*Docker, error) {
 	d := NewDockerWithClient(client, cfg.DataRoot)
 	d.Policy = normalizeDockerPolicy(cfg.Policy)
 	d.EdgeContainer, d.PlatformHost = cfg.EdgeContainer, cfg.PlatformHost
+	d.PortalHost = cfg.PortalHost
 	return d, nil
 }
 

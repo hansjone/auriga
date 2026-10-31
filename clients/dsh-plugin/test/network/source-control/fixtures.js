@@ -183,7 +183,7 @@ export async function setup(t, options = {}) {
     cache: { async load() {}, async commit() {} },
     config: signer.payload,
     realm: '2',
-    now: signer.now,
+    now: options.now ?? signer.now,
   });
   const ready = options.ready ?? {
     epoch: '3',
@@ -225,7 +225,7 @@ export async function setup(t, options = {}) {
     ready,
     signal: abort.signal,
     assertCurrent,
-    now: signer.now,
+    now: options.now ?? signer.now,
   });
   const control = createSourceControl({
     ledger,
@@ -237,7 +237,7 @@ export async function setup(t, options = {}) {
       return result;
     },
     assertCurrent,
-    now: signer.now,
+    now: options.now ?? signer.now,
   });
   t.after(async () => {
     control.close();

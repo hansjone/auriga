@@ -153,10 +153,27 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		role, _ := r.Context().Value(accessRoleKey{}).(string)
 		var origin deployment.Origin
 		switch role {
+		case "managed":
+			entry, err := g.Cfg.managedEntry()
+			if err != nil || len(r.Header.Values("Cookie")) != 0 || len(r.Header.Values("Origin")) != 0 && !strictOrigin(r, entry) {
+				fail(403, "common.forbidden")
+				return
+			}
+			if !managedPathAllowed(r) {
+				fail(404, "common.not_found")
+				return
+			}
+			origin = deployment.Origin{Scheme: entry.scheme, Host: entry.host, Port: int32(entry.port)}
 		case "portal":
 			origin = g.Cfg.Access.PortalOrigin()
 		case "admin":
 			origin = g.Cfg.Access.AdminOrigin()
+		case "relayAdmin":
+			if g.Cfg.LiteLLMUI == nil {
+				fail(403, "common.forbidden")
+				return
+			}
+			origin = g.Cfg.LiteLLMUI.Origin
 		case "instanceControl":
 			origin = g.Cfg.Access.InstanceControl().Origin
 		default:
@@ -167,7 +184,7 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		if r.TLS != nil {
 			scheme = "https"
 		}
-		if g.Cfg.Access.IngressKind() == "trusted_proxy" && role != "instanceControl" {
+		if g.Cfg.Access.IngressKind() == "trusted_proxy" && role != "instanceControl" && role != "managed" {
 			if !g.authenticatedProxy(r) {
 				fail(403, "common.forbidden")
 				return
@@ -194,14 +211,18 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 			fail(403, "common.forbidden")
 			return
 		}
+		r = r.WithContext(context.WithValue(r.Context(), linkOriginKey{}, g.Cfg.linkOrigin(r, scheme)))
 		stripUntrustedEntryHeaders(r.Header)
 		e := accessEntry{role: role, scheme: scheme, host: host, port: port}
+		if role == "managed" {
+			e.role = "portal"
+		}
 		r = r.WithContext(context.WithValue(r.Context(), accessEntryKey{}, e))
 		if role == "instanceControl" {
 			g.serveInstanceControl(w, r)
 			return
 		}
-		if role == "admin" && isUpgradeRequest(r) {
+		if (role == "admin" || role == "relayAdmin") && isUpgradeRequest(r) {
 			fail(403, "common.forbidden")
 			return
 		}
@@ -209,6 +230,11 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 		// Origin validation through an additional Bearer or Fetch Metadata header.
 		cookieWrite := isWriteMethod(r.Method) && hasAurigaCookie(r)
 		loginWrite := isWriteMethod(r.Method) && strings.HasPrefix(r.URL.Path, "/api/iam/v1/login/")
+		if role == "relayAdmin" && r.Method == http.MethodPost && r.URL.Path == "/ai/session" && g.liteLLMHandoffOrigin(r) {
+			// Only the single-use handoff consumes a POST from the admin origin.
+			// No Auriga API is served on this listener.
+			cookieWrite, loginWrite = false, false
+		}
 		// A registered provider's form callback is authenticated by IAM's
 		// protocol state/signature and only creates a short-lived resume.
 		if r.Method == "POST" && loginCallbackPath.MatchString(r.URL.Path) {
@@ -257,6 +283,11 @@ func (g *Gateway) authenticatedProxy(r *http.Request) bool {
 
 func (g *Gateway) serveInstanceControl(w http.ResponseWriter, r *http.Request) {
 	path, ok := sanitizeRequestPath(r)
+	// Signed panel files are public on every installation origin. This does not
+	// expose platform APIs or identity material through the control listener.
+	if ok && g.servePanelStatic(w, r, path) {
+		return
+	}
 	allowed := r.Method == "GET" && path == "/api/workspace/v1/instance/self" || r.Method == "POST" && path == "/api/workspace/v1/instance/heartbeat"
 	if !ok || !allowed {
 		writeProblem(w, problem(404, "common.not_found", "Not Found", "", requestID(r)))

@@ -21,9 +21,10 @@ import {
 import { useCursorList } from '../admin/useCursorList';
 import { useOrgActions, orgError } from '../admin/useOrgActions';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import { rolesApi, type Role } from '../admin/rolesApi';
 import '../admin/management.css';
 
-const { t } = useAdminI18n();
+const { t, state, locale } = useAdminI18n();
 const access = useOrgActions(
   'org.invitations.read',
   'org.invitations.write',
@@ -55,6 +56,69 @@ const list = useCursorList<Invitation>(
 );
 const { items, loading, error: listError, nextCursor, history } = list;
 const creating = ref(false);
+const memberType = ref<InvitationInput['memberType']>('member');
+const memberTypes: InvitationInput['memberType'][] = ['member', 'external'];
+const roles = ref<Role[]>([]);
+const roleIds = ref<string[]>([]);
+const rolesLoading = ref(false);
+const rolesReady = ref(false);
+const rolesError = ref('');
+let rolesVersion = 0;
+function roleName(role: Role) {
+  return (
+    (locale.value.startsWith('zh')
+      ? role.name.zh || role.name['zh-CN']
+      : role.name[locale.value]) ||
+    role.name.en ||
+    role.key
+  );
+}
+const roleOptions = computed(() =>
+  roles.value.map((role) => ({
+    value: role.id,
+    label: `${roleName(role)} · ${t(role.builtin ? 'roleBuiltin' : 'roleCustom')}`,
+    disabled: !role.permissions.every((p) =>
+      access.permissions.value.includes(p),
+    ),
+  })),
+);
+async function loadRoles() {
+  const version = ++rolesVersion;
+  rolesLoading.value = true;
+  rolesReady.value = false;
+  rolesError.value = '';
+  roleIds.value = [];
+  roles.value = [];
+  try {
+    if (!(await access.authorize())) return;
+    if (!access.permissions.value.includes('org.roles.read')) {
+      rolesError.value = t('invitationRolesReadRequired');
+      return;
+    }
+    const result = await rolesApi.list();
+    if (!access.isAlive() || version !== rolesVersion) return;
+    roles.value = result.items;
+    const member = roles.value.find((r) => r.key === 'member' && r.builtin);
+    if (
+      !member ||
+      !member.permissions.every((p) => access.permissions.value.includes(p))
+    ) {
+      rolesError.value = t('defaultMemberRoleUnavailable');
+      return;
+    }
+    roleIds.value = [member.id];
+    rolesReady.value = true;
+  } catch (e) {
+    if (access.isAlive() && version === rolesVersion) {
+      rolesError.value = `${t('optionsFailed')} ${orgError(e, t)}`;
+      if (isApiError(e) && (e.status === 401 || e.status === 403))
+        access.permissions.value = [];
+    }
+  } finally {
+    if (access.isAlive() && version === rolesVersion)
+      rolesLoading.value = false;
+  }
+}
 const email = ref('');
 const displayName = ref('');
 const code = ref('');
@@ -98,19 +162,30 @@ function newInvitation() {
   displayName.value = '';
   error.value = '';
   creating.value = true;
+  memberType.value = 'member';
+  void loadRoles();
 }
 function create() {
-  if (loading.value || locked.value) return;
+  if (loading.value || locked.value || rolesLoading.value || !rolesReady.value)
+    return;
+  if (
+    !memberTypes.includes(memberType.value) ||
+    roleIds.value.some(
+      (id) => !roleOptions.value.some((o) => o.value === id && !o.disabled),
+    )
+  ) {
+    error.value = t('forbidden');
+    return;
+  }
   const normalizedEmail = email.value.trim();
   if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
     error.value = t('invalidEmail');
     return;
   }
-  // Explicitly avoid inherited/default role or group grants. Providers remain unrestricted.
   const body: InvitationInput = {
-    memberType: 'member',
+    memberType: memberType.value,
     maxUses: 1,
-    roleIds: [],
+    roleIds: [...roleIds.value],
     groupIds: [],
     providerIds: [],
     ...(normalizedEmail ? { email: normalizedEmail } : {}),
@@ -119,8 +194,28 @@ function create() {
       : {}),
   };
   access.ask(
-    t('invitationConfirm', { email: normalizedEmail || t('anyEmail') }),
+    t('invitationConfirm', {
+      email: normalizedEmail || t('anyEmail'),
+      type: state(memberType.value),
+      roles:
+        roles.value
+          .filter((r) => roleIds.value.includes(r.id))
+          .map(roleName)
+          .join(', ') || t('noneSelected'),
+    }),
     async () => {
+      if (
+        !access.permissions.value.includes('org.roles.read') ||
+        body.roleIds?.some(
+          (id) =>
+            !roles.value
+              .find((r) => r.id === id)
+              ?.permissions.every((p) => access.permissions.value.includes(p)),
+        )
+      ) {
+        error.value = t('forbidden');
+        return;
+      }
       clearCode();
       const request = resultVersion;
       let result: Awaited<ReturnType<typeof orgAdminApi.createInvitation>>;
@@ -265,10 +360,36 @@ async function copyResult(kind: 'code' | 'url') {
       <h2>{{ t('newInvitation') }}</h2>
       <p>{{ t('invitationDefaults') }}</p>
       <ElForm
-        :disabled="locked || loading"
+        :disabled="locked || loading || rolesLoading"
         label-position="top"
         @submit.prevent="create"
       >
+        <ElFormItem :label="t('type')"
+          ><ElSelect
+            v-model="memberType"
+            :aria-label="t('type')"
+            :options="
+              memberTypes.map((value) => ({ value, label: state(value) }))
+            "
+        /></ElFormItem>
+        <ElFormItem :label="t('initialRoles')"
+          ><ElSelect
+            v-model="roleIds"
+            multiple
+            :aria-label="t('initialRoles')"
+            :placeholder="t('initialRoles')"
+            :options="roleOptions"
+            :no-data-text="t('empty')"
+            :disabled="!rolesReady"
+        /></ElFormItem>
+        <p v-if="rolesLoading" role="status">{{ t('loading') }}</p>
+        <p v-if="rolesError" role="alert" class="error">{{ rolesError }}</p>
+        <ElButton
+          v-if="rolesError"
+          :disabled="locked || rolesLoading"
+          @click="loadRoles"
+          >{{ t('reloadOptions') }}</ElButton
+        >
         <ElFormItem :label="t('email')"
           ><ElInput
             v-model="email"
@@ -282,9 +403,11 @@ async function copyResult(kind: 'code' | 'url') {
             :aria-label="t('displayName')"
             :placeholder="t('optional')"
         /></ElFormItem>
-        <ElButton native-type="submit" type="primary">{{
-          t('newInvitation')
-        }}</ElButton
+        <ElButton
+          native-type="submit"
+          type="primary"
+          :disabled="!rolesReady || rolesLoading"
+          >{{ t('newInvitation') }}</ElButton
         ><ElButton @click="creating = false">{{ t('cancel') }}</ElButton>
       </ElForm>
     </section>

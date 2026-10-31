@@ -37,6 +37,28 @@ dev profile 用于 seed，Compose 显式覆盖其 Servlet TLS、监听地址和�
 `/var/lib/auriga-m2-new-run`）。后者将宿主和容器的 agent 数据根保持同一路径，edge
 只读挂载相同位置；e2e 的 `AGENT_VOLUME` 也使用这个值。不要复用封存测试的数据目录。
 
+## WSL 的安装材料目录
+
+在 WSL 部署时，源码副本及其 `deploy/compose/var` 应位于 Linux 原生文件系统，
+不要直接在默认 `/mnt/c`、`/mnt/d` 等 Windows 挂载目录执行 prepare。
+这些挂载可能把文件与目录统一呈现为 `0777`，无法满足 IAM 安装目录 `0700`、
+秘密文件 `0600` 的校验；此时 prepare 会报 `invalid private IAM installation directory`。
+不要修改校验或手工重写封存材料。保留失败现场，在新的 Linux 目录重新生成安装。
+
+例如从已提交的工位导出源码，在 WSL 的新空目录展开，再按本页公开步骤准备：
+
+```bash
+mkdir -m 700 /tmp/auriga-cloud-ready-run
+git -C /mnt/d/path/to/auriga-worktree -c tar.umask=0022 archive HEAD | tar -x -C /tmp/auriga-cloud-ready-run
+cd /tmp/auriga-cloud-ready-run
+```
+
+`tar.umask=0022` 仅作用于这条命令，避免 Git archive 默认生成可被组写入的祖先目录；
+安装校验也拒绝这种目录。不要修改系统 umask 或放宽校验。
+该归档保留 Git 执行位，不带 Windows 的依赖目录或旧 `var`。生成材料后，
+后续所有 compose 操作继续使用这个 Linux 副本；浏览器测试也读取同一份材料。
+临时路径是本机测试示例，长期部署应选择持久的 Linux 目录并做好私密材料备份。
+
 ## 传入部署入口
 
 从 `deploy/compose` 调用公开入口，只传一份文件：
@@ -289,3 +311,5 @@ GOWORK=off go build ./...
 内控 alias/端口、三个 HTTPS upstream、专用证书 SAN/EKU/CA 与原节点身份保持。
 共享 socket、issuer 漂移、缺 HTTP 确认、浏览器/内部 alias 冲突和内控端口漂移均须拒绝。
 仓库根另跑 `node --test e2e/lib/*.test.mjs`，保留全部原断言。
+
+中转站的模型接入、外部 Key 签发与验收步骤见 [LiteLLM 部署与模型接入](relay-litellm.md)。

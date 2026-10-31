@@ -1,5 +1,7 @@
 # DSH 插件（auriga-dsh）
 
+成员安装见[安装指南](../user/install-plugin.zh.md)，打包与 tag 发布见[插件发行包](plugin-distribution.md)。桌面连接最低要求 DSH **0.2.1-rc.3** 的原生 admission；下文历史托管 rc.2 验收不能证明新桌面插件可在 rc.2 运行。
+
 包名 `auriga-dsh`（MIT），目录 `clients/dsh-plugin`。Node 22+，纯 ESM + JSDoc；类型来自 `contracts/identity/steps.schema.json`（`pnpm --filter auriga-dsh gen:steps`）。
 
 ## 模式
@@ -101,6 +103,7 @@ DSH 0.2.0-rc.2 还会通过 `connection.authorizeIndex` / `requestRejection` 检
 
 - Node：`GET /auriga/bootstrap`（经 DSH `connection.requestRejection`）返回已验签清单与同源 `panelBase=/panel/`。
 - 清单：JCS + Ed25519（`AURIGA_PANEL_KEYS_FILE` 或 `AURIGA_PANEL_KEYS`）；拒过期与版本回滚。
+- 公开部署的构建、独立签名钥、公钥下发与清单续签见 [面板部署](panel-deployment.md)。
 - 浏览器：`src/client.js` 挂 `sidebar.panellist` + `main`，SRI 加载 `<auriga-team-panel>`（ADR 0017）。
 
 ### SDK

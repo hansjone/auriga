@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { newTraceparent, logEvent } from '../observability/index.js';
 
 export const MAX_BODY = 1_048_576;
 
@@ -236,6 +237,9 @@ export function createOidcHttp(options = {}) {
       typeof target === 'string' ? new URL(target) : new URL(target.href);
     validateUrl(url, allowLocalHttp);
 
+    const parent = newTraceparent();
+    const trace = { trace_id: parent.slice(3, 35), method, path: url.pathname };
+    logEvent('INFO', 'HTTP identity request started', trace);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
@@ -248,6 +252,7 @@ export function createOidcHttp(options = {}) {
             ? { 'Content-Type': 'application/x-www-form-urlencoded' }
             : {}),
           ...headers,
+          traceparent: parent,
         },
         body: body ?? undefined,
         redirect: 'error',
@@ -279,6 +284,11 @@ export function createOidcHttp(options = {}) {
         }
         throw err;
       }
+      logEvent(
+        response.ok ? 'INFO' : 'WARN',
+        'HTTP identity response received',
+        { ...trace, http_status: response.status },
+      );
       const text = await readBodyLimited(
         /** @type {import('undici').Response} */ (response),
       );

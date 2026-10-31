@@ -9,10 +9,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/hansjone/auriga/infra/agent/runtimebundle"
 )
 
 // The approved fake executable uses this test binary as its HTTP client.
@@ -209,5 +212,73 @@ func TestRunORASKillsDescendantsAfterParentExit(t *testing.T) {
 	time.Sleep(2300 * time.Millisecond)
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("descendant survived group cleanup: %v", err)
+	}
+}
+
+func TestTransportPreservesBoundedRegistryContentLength(t *testing.T) {
+	for _, kind := range []string{"head-existing-blob", "get-existing-blob", "head-over-budget"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newFixture(t)
+			material, err := runtimebundle.Verify(f.opts.Stage.Verify)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := runtimebundle.StageLayout(f.opts.Stage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest, config, layers := material.Descriptors()
+			path := "/v2/auriga/dsh/blobs/" + config.Digest
+			want := int64(len(material.Config()))
+			f.mu.Lock()
+			f.custom = func(w http.ResponseWriter, r *http.Request) bool {
+				if r.Method != http.MethodHead || r.URL.Path != path {
+					return false
+				}
+				size := want
+				if kind == "head-over-budget" {
+					size = snapshot.TotalBytes + 1
+				}
+				w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+				w.WriteHeader(http.StatusOK)
+				return true
+			}
+			f.mu.Unlock()
+			approved := strings.SplitN(f.opts.Stage.Verify.Policy.AllowedImage, "/", 2)[0]
+			barrier, err := newTransportBarrier(context.Background(), approved, "auriga/dsh", "approved-tag", snapshot, manifest, config, layers)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer barrier.Close()
+			method := http.MethodHead
+			if kind == "get-existing-blob" {
+				method = http.MethodGet
+			}
+			req, err := http.NewRequest(method, "http://"+barrier.Address()+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = response.Body.Close() }()
+			if kind == "head-over-budget" {
+				if response.StatusCode != http.StatusBadGateway || !barrier.Blocked() {
+					t.Fatal("over-budget length accepted")
+				}
+				return
+			}
+			if response.StatusCode != http.StatusOK || response.ContentLength != want || barrier.Blocked() {
+				t.Fatalf("registry descriptor length lost: status=%d length=%d want=%d", response.StatusCode, response.ContentLength, want)
+			}
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if method == http.MethodHead && len(body) != 0 || method == http.MethodGet && int64(len(body)) != want {
+				t.Fatal("HEAD/GET body semantics changed")
+			}
+		})
 	}
 }
