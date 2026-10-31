@@ -67,6 +67,15 @@ try {
   const html = await response.text();
   assert.match(html, /LiteLLM/i);
   assert.equal(await page.evaluate(() => location.origin), fixture.ui);
+  if (fixture.live) {
+    stage = 'live-ui-ready';
+    // Receiving the SSR Loading shell and its first script is insufficient.
+    // A fresh browser has no LiteLLM token and must reach its actual login form.
+    await page.getByRole('button', { name: 'Login', exact: true }).waitFor();
+    await page.getByLabel('Username', { exact: true }).waitFor();
+    await page.getByLabel('Password', { exact: true }).waitFor();
+    assert.equal(new URL(page.url()).origin, fixture.ui);
+  }
   const cookies = await context.cookies(fixture.ui);
   assert.ok(
     cookies.some(
